@@ -866,7 +866,11 @@ class Provider:
 AutonaTournamentDataProvider.instance.provider = Provider()
 answer = AnalysisService.instance.Refresh()
 deadline = time.monotonic() + 60
-while AnalysisService.instance.Running() and time.monotonic() < deadline:
+# Waits for the end as a reader sees it, the published status: Running() goes
+# False when the job marks the fetch over, a moment before that job publishes
+# it, and a loaded machine can run this loop in that moment.
+while (AnalysisService.Progress()["status"] == "running"
+       and time.monotonic() < deadline):
     app.processEvents()
     time.sleep(0.005)
 

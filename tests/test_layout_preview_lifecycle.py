@@ -47,7 +47,15 @@ window.tshSocket = {connected: true,
 </script></body></html>"""
 
 
-def _waitUntil(predicate, timeout=10.0):
+# How long a page gets for what a test waits for. It only decides how long a
+# failing test takes: the wait ends as soon as the page has done it. Chromium
+# runs a hidden page's renderer at background priority, so on a machine busy
+# with other work (the parallel test runner, say) one load of this small page
+# took 5-12 s; 10 s here failed tests in which nothing was wrong.
+WAIT_SECS = 60.0
+
+
+def _waitUntil(predicate, timeout=WAIT_SECS):
     # A nested loop, not processEvents(): QWebEngine delivers its results
     # through the event loop, and nothing here runs inside a signal handler.
     deadline = time.monotonic() + timeout

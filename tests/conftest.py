@@ -19,6 +19,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import traceback
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,122 @@ SRC_ROOT = PROJECT_ROOT / "src"
 # whole suite against the GPL binding the app must never ship with.
 os.environ["QT_API"] = "pyside6"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+# ── The real installation is off limits ──────────────────────────────────
+#
+# The app's mutable paths are relative (./out, ./user_data, ./layout). The OS
+# resolves them when the write happens, and the export writer runs on a thread
+# of its own, so a test that is back in the project root while that writer is
+# busy rewrites the developer's files -- what OBS is reading -- and no test
+# fails. tests/test_api_v1_players.py did, on every run, until a snapshot in
+# tests/test_harness_isolation.py happened to catch it from another process.
+#
+# Python's audit hooks see each such write of this process when it is attempted,
+# on any thread. It is refused, so nothing is overwritten, and the test running
+# then fails. Only this process's writes are seen, so an app the developer has
+# open at the same time cannot trip it. Not seen: what a subprocess writes and
+# what Qt's C++ writes itself (QFile, QSettings).
+
+_REAL_TREES = tuple(os.path.normcase(str(PROJECT_ROOT / name)) + os.sep
+                    for name in ("out", "user_data", "layout"))
+
+# Audit event -> the indexes of its arguments that name a path it changes.
+# Opening is told apart by its mode, in _refuseRealWrites.
+_WRITE_EVENTS = {
+    "_winapi.CopyFile2": (1,),   # shutil.copy2 on Windows: no open event
+    "os.chmod": (0,),
+    "os.link": (1,),
+    "os.mkdir": (0,),
+    "os.remove": (0,),
+    "os.rename": (0, 1),
+    "os.rmdir": (0,),
+    "os.symlink": (1,),
+    "os.truncate": (0,),
+    "os.utime": (0,),
+}
+_OPEN_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+_realWrites = []
+
+
+class RealInstallationWrite(OSError):
+    """A write _refuseRealWrites refused. Not a PermissionError: on Windows
+    tempfile.mkstemp takes that for a name clash and tries again, for good."""
+
+
+def _inRealTree(path):
+    """`path` made absolute against the CWD now, if it is in a real tree."""
+    if isinstance(path, int):       # a file descriptor
+        return None
+    try:
+        absolute = os.path.normcase(os.path.abspath(os.fsdecode(path)))
+    except (TypeError, ValueError, OSError):
+        return None
+    return absolute if (absolute + os.sep).startswith(_REAL_TREES) else None
+
+
+def _refuseRealWrites(event, args):
+    """The audit hook: runs for every audited event of the process, so it
+    looks at the event's name first and keeps to the stdlib's plain calls."""
+    if event == "open":
+        path, mode, flags = args
+        if isinstance(mode, str):
+            if not set(mode) & set("wax+"):
+                return
+        elif not flags & _OPEN_WRITE_FLAGS:
+            return
+        paths = (path,)
+    elif event in _WRITE_EVENTS:
+        paths = [args[index] for index in _WRITE_EVENTS[event]]
+    else:
+        return
+    for path in paths:
+        real = _inRealTree(path)
+        # makedirs(exist_ok=True) asks for what is there: nothing changes.
+        if real is None or (event == "os.mkdir" and os.path.isdir(real)):
+            continue
+        thread = threading.current_thread().name
+        _realWrites.append(
+            (f"{event} {real} on {thread}, CWD {os.getcwd()}",
+             "".join(traceback.format_stack(limit=12))))
+        raise RealInstallationWrite(f"a test may not write {real}")
+
+
+sys.addaudithook(_refuseRealWrites)
+
+
+def _failOnRealWrites():
+    """Fail the running test if a write was refused since the last look. The
+    writer may be a thread an earlier test left running: the stack tells."""
+    writes = _realWrites[:]
+    if not writes:
+        return
+    del _realWrites[:len(writes)]
+    attempts = "\n".join(attempt for attempt, _stack in writes[:10])
+    pytest.fail(
+        f"{len(writes)} write(s) to the real installation were refused:\n"
+        f"{attempts}\nThe first one came from:\n{writes[0][1]}"
+        "Run the test in a throwaway directory, and wait for what writes "
+        "there before leaving it (see tests/test_harness_isolation.py).",
+        pytrace=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _noRealWritesInTheSession():
+    """What comes after the last test's teardown: the session's own teardown
+    and an export writer still running. Fails that test's teardown."""
+    yield
+    module = sys.modules.get("src.core.StateManager")
+    if module is not None:
+        module.StateManager.JoinExports(30)
+    _failOnRealWrites()
+
+
+@pytest.fixture(autouse=True)
+def _noRealWrites():
+    yield
+    _failOnRealWrites()
 
 
 @pytest.fixture(scope="session")

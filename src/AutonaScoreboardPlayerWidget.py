@@ -463,6 +463,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.btCloseDetails.clicked.connect(self.detailsDialog.accept)
         buttonRow.addWidget(self.btCloseDetails)
 
+        # Enter in a field must not press a button: QDialog auto-defaults the
+        # first button (clear_bt), so Enter used to wipe the whole card
+        # without confirmation. No dialog button is the Enter target.
+        for bt in (self.clear_bt, self.btApplyDetails, self.btCloseDetails):
+            bt.setAutoDefault(False)
+            bt.setDefault(False)
+
         # Strip the emptied rows out of the original grid. The seed row and
         # identity row still hold permanently-hidden data holders (seed,
         # seedLabel, birthday); those stay as layout-less hidden children.

@@ -33,6 +33,7 @@ import pytest
 
 from src.core import CountryCatalog as country_catalog_module
 from src.core.CountryCatalog import CountryCatalog
+from tests.test_country_catalog import countryDir, inCountryDir  # noqa: F401
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TABLE_PATH = PROJECT_ROOT / "assets" / "city_to_state.json"
@@ -284,11 +285,13 @@ def test_find_state_tolerates_a_missing_country_code():
 
 
 def test_the_table_is_read_with_the_countries_not_on_the_first_lookup(
-        monkeypatch):
+        inCountryDir, monkeypatch):  # noqa: F811
     """The first lookup can come from a player load, which resolves a
     region under StateManager.lock (PlayerService.ApplyData, ADR-005
     S3e-3): reading the table there held every other writer up. Load()
-    reads it up front, once -- a lookup after it touches no file."""
+    reads it up front, once -- a lookup after it touches no file.
+
+    In a directory of its own: Load() makes ./user_data/additional_flag."""
     catalog = CountryCatalog()
     assert catalog._cityToState is None
 
