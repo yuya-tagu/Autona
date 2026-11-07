@@ -18,6 +18,7 @@ tests/test_player_directory.py's.
 """
 import ast
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,8 +45,19 @@ SECRET_NAME = "Secret Real Name"
 
 
 @pytest.fixture
-def stateKept():
-    """A game load writes game.*: the shared state is put back afterwards."""
+def stateKept(tmp_path):
+    """A game load writes game.*: the shared state is put back afterwards.
+
+    The export writer resolves ./out against the CWD when it writes, and is
+    usually still writing when a test this short ends. recordedCatalogs' chdir
+    is undone (monkeypatch) before this teardown runs, so the CWD it waits in
+    has to be its own -- it used to be the project root, and every test here
+    rewrote the real out/game.
+    """
+    work = tmp_path / "run"
+    (work / "out").mkdir(parents=True)
+    previousDir = os.getcwd()
+    os.chdir(work)
     with SM.lock:
         state = deep_clone(SM.state)
         saved = deep_clone(SM.lastSavedState)
@@ -61,6 +73,7 @@ def stateKept():
             SM.lastSavedState = saved
             SM.revision = revision
             SM.changedKeys = changed
+        os.chdir(previousDir)
 
 
 @pytest.fixture

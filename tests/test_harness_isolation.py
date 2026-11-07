@@ -11,7 +11,12 @@ So this is not a test of a feature; it is the guard that makes every other
 widget test safe to run.
 """
 import os
+import shutil
+import tempfile
+import threading
 from pathlib import Path
+
+import pytest
 
 from tests import conftest
 
@@ -99,6 +104,102 @@ def test_exercising_the_app_leaves_the_real_out_and_user_data_untouched(autonaAp
     # Shipped trees are linked in read-only; layout/ is a real empty dir in
     # the runtime because Window.__init__ seeds layout/logo.png into it.
     assert _fileSnapshot(PROJECT_ROOT / "layout" / "logo.png") == logo
+
+
+@pytest.fixture
+def realTree(tmp_path, monkeypatch):
+    """A directory the guard in conftest takes for a real tree, with one file
+    in it. What was refused is taken back by the test: its own teardown would
+    fail on it otherwise."""
+    tree = tmp_path / "real"
+    tree.mkdir()
+    (tree / "kept.txt").write_text("before", encoding="utf-8")
+    monkeypatch.setattr(conftest, "_REAL_TREES",
+                        (os.path.normcase(str(tree)) + os.sep,))
+    yield tree
+    conftest._realWrites.clear()
+
+
+@pytest.mark.parametrize("write", [
+    lambda tree: open(tree / "kept.txt", "w", encoding="utf-8"),
+    lambda tree: open(tree / "kept.txt", "a", encoding="utf-8"),
+    lambda tree: open(tree / "kept.txt", "r+", encoding="utf-8"),
+    lambda tree: open(tree / "new.txt", "xb"),
+    lambda tree: os.open(tree / "new.txt", os.O_WRONLY | os.O_CREAT),
+    lambda tree: tempfile.mkstemp(dir=tree),
+    lambda tree: (tree / "kept.txt").write_text("after", encoding="utf-8"),
+    lambda tree: os.remove(tree / "kept.txt"),
+    lambda tree: os.rename(tree / "kept.txt", tree / "moved.txt"),
+    lambda tree: os.replace(tree / "kept.txt", tree.parent / "out.txt"),
+    lambda tree: os.mkdir(tree / "new"),
+    lambda tree: os.makedirs(tree / "new" / "deep"),
+    lambda tree: shutil.copyfile(tree / "kept.txt", tree / "copy.txt"),
+    lambda tree: shutil.copy(tree / "kept.txt", tree / "copy.txt"),
+    lambda tree: shutil.copy2(tree / "kept.txt", tree / "copy.txt"),
+    lambda tree: Path(tree / "kept.txt").touch(),
+    lambda tree: shutil.rmtree(tree),
+], ids=["open w", "open a", "open r+", "open x", "os.open", "mkstemp",
+        "write_text", "remove", "rename", "replace out", "mkdir", "makedirs",
+        "copyfile", "copy", "copy2", "touch", "rmtree"])
+def test_a_write_to_the_real_installation_is_refused(realTree, write):
+    with pytest.raises(conftest.RealInstallationWrite):
+        write(realTree)
+
+    assert sorted(p.name for p in realTree.iterdir()) == ["kept.txt"]
+    assert (realTree / "kept.txt").read_text(encoding="utf-8") == "before"
+    assert conftest._realWrites, "the refused write was not recorded"
+
+
+def test_a_relative_write_is_judged_by_the_cwd_it_resolves_against(
+        realTree, monkeypatch):
+    monkeypatch.chdir(realTree.parent)
+    with pytest.raises(conftest.RealInstallationWrite):
+        open("real/kept.txt", "w", encoding="utf-8")
+    assert conftest._realWrites
+
+    (realTree.parent / "elsewhere").mkdir()
+    monkeypatch.chdir(realTree.parent / "elsewhere")
+    conftest._realWrites.clear()
+    Path("real").mkdir()
+    Path("real/kept.txt").write_text("a directory of the same name",
+                                     encoding="utf-8")
+    assert conftest._realWrites == []
+
+
+def test_a_write_on_another_thread_is_refused_and_fails_the_running_test(
+        realTree):
+    """The export writer's case: nothing raises in the test itself."""
+    caught = []
+
+    def writer():
+        try:
+            open(realTree / "kept.txt", "w", encoding="utf-8")
+        except OSError as error:
+            caught.append(error)
+
+    thread = threading.Thread(target=writer, name="SomeWriter")
+    thread.start()
+    thread.join()
+
+    assert isinstance(caught[0], conftest.RealInstallationWrite)
+    with pytest.raises(pytest.fail.Exception, match="SomeWriter"):
+        conftest._failOnRealWrites()
+    conftest._failOnRealWrites()      # once: the next test does not fail too
+
+
+def test_reading_and_what_changes_nothing_pass_the_guard(realTree):
+    assert (realTree / "kept.txt").read_text(encoding="utf-8") == "before"
+    assert list(realTree.iterdir())
+    os.makedirs(realTree, exist_ok=True)      # what the app does at startup
+    os.close(os.open(realTree / "kept.txt", os.O_RDONLY))
+
+    assert conftest._realWrites == []
+
+
+def test_the_guard_watches_the_trees_the_app_writes():
+    trees = {os.path.normcase(str(PROJECT_ROOT / name)) + os.sep
+             for name in ("out", "user_data", "layout")}
+    assert set(conftest._REAL_TREES) == trees
 
 
 def test_the_persisted_state_store_is_not_the_real_one(autonaApp):
@@ -294,8 +395,6 @@ def test_a_tree_held_open_for_a_moment_is_still_removed(tmp_path):
 def test_a_tree_that_cannot_be_removed_fails_loudly(tmp_path):
     """Past the timeout remove_tree() raises, naming what is left, in the
     teardown of the test that installed the tree -- not in a later setup."""
-    import pytest
-
     tree = tmp_path / "games" / "tgame"
     tree.mkdir(parents=True)
     held = tree / "config.json"
@@ -312,8 +411,6 @@ def test_a_copy_that_fails_part_way_leaves_nothing_behind(tmp_path):
     """copy_trees() is all or nothing: a setup that fails does not leave the
     trees it had copied for the next test's setup to trip over (each later
     install of them would fail with FileExistsError)."""
-    import pytest
-
     source = tmp_path / "fixture"
     for name in ("game2", "tgame"):
         (source / name).mkdir(parents=True)

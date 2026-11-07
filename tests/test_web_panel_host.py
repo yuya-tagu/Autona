@@ -68,7 +68,14 @@ window.autonaPanelShell = {
 </script></body></html>"""
 
 
-def _waitUntil(predicate, timeout=10.0):
+# How long a page gets for what a test waits for. It only decides how long a
+# failing test takes: the wait ends as soon as the page has done it, and on a
+# machine busy with other work a page's load takes many times what it does
+# otherwise (see tests/test_layout_preview_lifecycle.py).
+WAIT_SECS = 60.0
+
+
+def _waitUntil(predicate, timeout=WAIT_SECS):
     # A nested loop, not processEvents(): QWebEngine delivers its results
     # through the event loop, and nothing here runs inside a signal handler.
     deadline = time.monotonic() + timeout
@@ -234,7 +241,7 @@ def _failedFirstLoad(buildHost, monkeypatch, refusedPort):
     rig.host.ShowPanel("shell-check")
     rig.reveal()
     attempts = 1 + WPL.LocalPageLoader.MAX_LOAD_RETRIES
-    assert _waitUntil(lambda: len(rig.loads) >= attempts, timeout=15.0)
+    assert _waitUntil(lambda: len(rig.loads) >= attempts)
     assert not _waitUntil(lambda: len(rig.loads) > attempts, timeout=0.5),         "the host retried on its own past the loader's retries"
     assert rig.loads == [False] * attempts
     assert not rig.host._loader.IsLoading()
@@ -581,7 +588,7 @@ def test_a_refused_load_is_retried_then_given_up(qapp, monkeypatch,
 
         loader.load("/web/shell-check")
 
-        assert _waitUntil(lambda: finished, timeout=15.0)
+        assert _waitUntil(lambda: finished)
         assert finished == [False]
         assert attempts == [False] * (1 + WPL.LocalPageLoader.MAX_LOAD_RETRIES)
         assert not loader.IsLoading()

@@ -42,7 +42,7 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 
 ## 動作確認の分担
 
-- **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が回す
+- **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が `python scripts/run_tests_parallel.py`（並列・約 3〜6 分、マシンの状態で変動。CI は直列のまま）で回す
 - **実機確認はメインセッションが PR の前に行う**（2026-11-07 オーナー承認）。サブエージェントはアプリを起動しない
   - **隔離データでだけ起動する**: tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`。
     開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動しない。

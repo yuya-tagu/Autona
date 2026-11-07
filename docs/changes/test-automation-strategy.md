@@ -481,8 +481,8 @@ autonaApp (session)
 | `bootstrap_core()` はプロセス内 1 回きり（再入ガード） | L2 は「1 プロセス = 1 ブート + 多数のテスト」。テスト間の独立性は function スコープの `resetState` fixture（`StateManager.Unset("score")` → `EnsureScoreboard` 再構築）で担保 |
 | グローバルホットキーを OS に登録すると実機と衝突 | `hotkeys.enabled=false` を合成 settings に。加えて `AutonaHotkeys.UiMounted` は L2 では呼ばない |
 | WebServer が既定ポート 5107 を掴む | L2 では WebServer を構築しない（L3 は `run()` を呼ばず `test_client()` のみ） |
-| 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる** |
-| pytest-xdist 並列化すると Qt が壊れる | 当面導入しない。3 分に収まる想定 |
+| 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる**。加えて `tests/conftest.py` の監査フック（`_refuseRealWrites`）が、本物の `out/` `user_data/` `layout/` への書き込みをスレッドを問わず拒否し、そのときのテストを落とす（見えるのはそのプロセスの Python からの書き込みだけ。別に起動中のアプリには反応しない） |
+| pytest-xdist 並列化すると Qt が壊れる | プロセス分割なら壊れない: `scripts/run_tests_parallel.py` が test ファイルを前回の実測時間（初回はサイズ）で 4 つ前後に分け、各々を普通の pytest プロセス（プロセスごとに bootstrap）で走らせる。同条件の比較で直列 876 秒 → 276〜280 秒（2026-11-07。マシンの状態で変動し、並列は約 3〜6 分）。CI は直列のまま（順序依存と分割の見落としの網）。pytest-xdist は依存追加になるので未導入（オーナー判断事項） |
 
 ~~`AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
 （agent-pitfalls #5）。**同一のテストを両クラスに `parametrize` で流す**ことで、
