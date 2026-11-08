@@ -57,7 +57,6 @@
         <translation>チーム名</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
         <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -77,13 +76,11 @@
         <translation>順位・プレイヤー情報</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Copy Preview to Clipboard</source>
         <translation>プレビューをクリップボードにコピー</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Save Preview as Image</source>
         <translation>プレビューを画像として保存</translation>
@@ -239,128 +236,6 @@
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
         <source>STOCKS/LIVES</source>
         <translation>ストック／ライフ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Video Title</source>
-        <translation>動画タイトル</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Title is auto-generated from tournament info, round and characters</source>
-        <translation>タイトルは大会情報・ラウンド・使用キャラから自動生成されます</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Copy Video Title</source>
-        <translation>動画タイトルをコピー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>General Settings</source>
-        <translation>サムネイル設定</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Thumbnail Design</source>
-        <translation>サムネイルのデザインを選択</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Background Image</source>
-        <translation>背景画像を選ぶ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Use default image</source>
-        <translation>デフォルトの画像を利用する</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Use tournament banner</source>
-        <translation>大会バナーを利用する</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Choose your own image</source>
-        <translation>自分で画像を選ぶ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Image...</source>
-        <translation>画像を選択...</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select items to display</source>
-        <translation>表示する項目を選択する</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Phase name?</source>
-        <translation>フェーズ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Teams names?</source>
-        <translation>チーム名</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Sponsors?</source>
-        <translation>所属タグ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Character Image Placement</source>
-        <translation>キャラクター画像配置設定</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Smooth scaling</source>
-        <translation>スムーススケーリング</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Flip P1 assets?</source>
-        <translation>プレイヤー1の画像を反転?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Flip P2 assets?</source>
-        <translation>プレイヤー2の画像を反転?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Zoom</source>
-        <translation>ズーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>%</source>
-        <translation>%</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Horizontal Align</source>
-        <translation>横に整列させる</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Vertical Align</source>
-        <translation>縦に整列させる</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Reset to Defaults</source>
-        <translation>デフォルトの設定にリセット</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate Thumbnail</source>
-        <translation>サムネイルを作成する</translation>
     </message>
 
 </context><context>
@@ -916,8 +791,6 @@
     <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="700" />
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="678" />
         <location filename="..\AutonaScoreboardWidget.py" line="1167" />
         <location filename="..\AutonaScoreboardWidget.py" line="1098" />
         <location filename="..\AutonaResultSettingsWidget.py" line="883" />
@@ -970,7 +843,6 @@
         <translation>配信チャンネル設定</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />
         <location filename="..\Autona.py" line="321" />
         <source>Thumbnail Settings</source>
         <translation>対戦動画サムネイル</translation>
@@ -1769,24 +1641,14 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>勝利ゲーム数</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="148" />
+        <location filename="..\core\ThumbnailService.py" line="90" />
         <source>Standard</source>
         <translation>標準</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="149" />
+        <location filename="..\core\ThumbnailService.py" line="90" />
         <source>Center Panel</source>
         <translation>中央パネル</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="456" />
-        <source>Nothing to copy.</source>
-        <translation>コピーする内容がありません。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="460" />
-        <source>Copied to clipboard.</source>
-        <translation>クリップボードにコピーしました。</translation>
     </message>
     <message>
         <location filename="..\AutonaTournamentDataProvider.py" line="135" />
@@ -1827,16 +1689,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaTournamentDataProvider.py" line="323" />
         <source>Start.gg との接続を解除します。よろしいですか？</source>
         <translation>Start.gg との接続を解除します。よろしいですか？</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="632" />
-        <source>Open Image</source>
-        <translation>画像を開く</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="634" />
-        <source>Image Files</source>
-        <translation>画像ファイル</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="1364" />
@@ -2372,13 +2224,11 @@ Choose a different combination or clear the conflicting assignment first.</sourc
 </context><context>
     <name>thumb_app</name>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="691" />
         <location filename="..\AutonaScoreboardWidget.py" line="1062" />
         <source>Autona - Thumbnail</source>
         <translation>Autona - サムネイル</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="693" />
         <location filename="..\AutonaScoreboardWidget.py" line="1068" />
         <source>The thumbnail has been generated here:</source>
         <translation>サムネイルはここに作成されました:</translation>

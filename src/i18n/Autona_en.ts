@@ -57,7 +57,6 @@
         <translation>Team Name</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
         <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -77,13 +76,11 @@
         <translation>Top 8 Players</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Copy Preview to Clipboard</source>
         <translation>Copy Preview to Clipboard</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Save Preview as Image</source>
         <translation>Save Preview as Image</translation>
@@ -238,128 +235,6 @@
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
         <source>STOCKS/LIVES</source>
         <translation>STOCKS/LIVES</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Video Title</source>
-        <translation>Video Title</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Title is auto-generated from tournament info, round and characters</source>
-        <translation>Title is auto-generated from tournament info, round and characters</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Copy Video Title</source>
-        <translation>Copy Video Title</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>General Settings</source>
-        <translation>General Settings</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Thumbnail Design</source>
-        <translation>Select Thumbnail Design</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Background Image</source>
-        <translation>Select Background Image</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Use default image</source>
-        <translation>Use default image</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Use tournament banner</source>
-        <translation>Use tournament banner</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Choose your own image</source>
-        <translation>Choose your own image</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Image...</source>
-        <translation>Select Image...</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select items to display</source>
-        <translation>Select items to display</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Phase name?</source>
-        <translation>Phase name?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Teams names?</source>
-        <translation>Teams names?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Sponsors?</source>
-        <translation>Sponsors?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Character Image Placement</source>
-        <translation>Character Image Placement</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Smooth scaling</source>
-        <translation>Smooth scaling</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Flip P1 assets?</source>
-        <translation>Flip P1 assets?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Flip P2 assets?</source>
-        <translation>Flip P2 assets?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Zoom</source>
-        <translation>Zoom</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>%</source>
-        <translation>%</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Horizontal Align</source>
-        <translation>Horizontal Align</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Vertical Align</source>
-        <translation>Vertical Align</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Reset to Defaults</source>
-        <translation>Reset to Defaults</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate Thumbnail</source>
-        <translation>Generate Thumbnail</translation>
     </message>
 
 </context><context>
@@ -915,8 +790,6 @@
     <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="700" />
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="678" />
         <location filename="..\AutonaScoreboardWidget.py" line="1167" />
         <location filename="..\AutonaScoreboardWidget.py" line="1098" />
         <location filename="..\AutonaResultSettingsWidget.py" line="883" />
@@ -969,7 +842,6 @@
         <translation>Stream Settings</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />
         <location filename="..\Autona.py" line="321" />
         <source>Thumbnail Settings</source>
         <translation>Thumbnail Settings</translation>
@@ -1767,24 +1639,14 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>GAMES WON</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="148" />
+        <location filename="..\core\ThumbnailService.py" line="90" />
         <source>Standard</source>
         <translation>Standard</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="149" />
+        <location filename="..\core\ThumbnailService.py" line="90" />
         <source>Center Panel</source>
         <translation>Center Panel</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="456" />
-        <source>Nothing to copy.</source>
-        <translation>Nothing to copy.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="460" />
-        <source>Copied to clipboard.</source>
-        <translation>Copied to clipboard.</translation>
     </message>
     <message>
         <location filename="..\AutonaTournamentDataProvider.py" line="135" />
@@ -1825,16 +1687,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaTournamentDataProvider.py" line="323" />
         <source>Start.gg との接続を解除します。よろしいですか？</source>
         <translation>Disconnect from Start.gg. Are you sure?</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="632" />
-        <source>Open Image</source>
-        <translation>Open Image</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="634" />
-        <source>Image Files</source>
-        <translation>Image Files</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="1364" />
@@ -2370,13 +2222,11 @@ Choose a different combination or clear the conflicting assignment first.</trans
 </context><context>
     <name>thumb_app</name>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="691" />
         <location filename="..\AutonaScoreboardWidget.py" line="1062" />
         <source>Autona - Thumbnail</source>
         <translation>Autona - Thumbnail</translation>
     </message>
     <message>
-        <location filename="..\AutonaThumbnailSettingsWidget.py" line="693" />
         <location filename="..\AutonaScoreboardWidget.py" line="1068" />
         <source>The thumbnail has been generated here:</source>
         <translation>The thumbnail has been generated here:</translation>

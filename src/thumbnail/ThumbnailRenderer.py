@@ -2,7 +2,7 @@ import os
 import json
 import time
 
-from qtpy.QtCore import QObject, QUrl, QEventLoop, QTimer, Signal, Qt
+from qtpy.QtCore import QObject, QUrl, QEventLoop, QTimer, Qt
 from qtpy.QtGui import QPixmap
 from qtpy.QtWidgets import QApplication, QWidget
 from qtpy.QtWebEngineWidgets import QWebEngineView
@@ -28,17 +28,15 @@ os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
 class _Ticket:
     """One render: what to draw and who wants it."""
-    __slots__ = ("payload", "templateId", "done", "announce", "started",
+    __slots__ = ("payload", "templateId", "done", "started",
                  "number", "ready", "painted", "frameDeadline", "begun",
                  "readyAt", "paintedAt", "paintDetails")
 
-    def __init__(self, payload, templateId, done, announce):
+    def __init__(self, payload, templateId, done):
         self.payload = payload
         self.templateId = templateId
         # done(pixmap, error): the image, or None and why.
         self.done = done
-        # Whether renderComplete is emitted for it.
-        self.announce = announce
         # Its script is running in the page; under this number.
         self.started = False
         self.number = 0
@@ -91,12 +89,12 @@ class ThumbnailRenderer(QObject):
       compared with anything, so drawing the same picture again costs no
       wait.
 
-    Three ways in, all on the GUI thread:
-    - render(): the panel's. Only the newest of these is drawn; the result
-      is the renderComplete signal.
-    - renderAsync(): core/ThumbnailService's. The result goes to its callback
-      and to nobody else (renderComplete would change the panel's preview).
-    - renderSync(): SCORE's. Waits in a nested event loop; renderComplete too.
+    Two ways in, both on the GUI thread:
+    - renderAsync(): core/ThumbnailService's. The result goes to its callback.
+    - renderSync(): SCORE's and the legacy route's. Waits in a nested event
+      loop.
+    The Qt panel's render() (only the newest of its renders drawn, the result
+    a renderComplete signal) went with the panel (ADR-005 S4p).
     """
 
     # Maps template id -> subdirectory under layout/ (each contains thumbnail.html).
@@ -177,8 +175,6 @@ class ThumbnailRenderer(QObject):
 })();"""
     PAINTED_TITLE = "RENDER_PAINTED "
 
-    renderComplete = Signal(QPixmap)
-
     _instance = None
 
     @classmethod
@@ -224,7 +220,6 @@ class ThumbnailRenderer(QObject):
         self._render_number = 0
         self._active = None            # The ticket being drawn
         self._waiting = []             # Tickets with a taker, in order
-        self._latest = None            # The newest render() while one runs
 
         self._watchdog = QTimer(self)
         self._watchdog.setSingleShot(True)
@@ -263,25 +258,15 @@ class ThumbnailRenderer(QObject):
         self._before_load = self._view.grab().toImage()
         self._view.load(url)
 
-    def _ticket(self, data, config, template, done, announce) -> _Ticket:
+    def _ticket(self, data, config, template, done) -> _Ticket:
         payload = {"data": data, "config": config, "template": template}
-        return _Ticket(payload, self._resolve_template_id(template), done,
-                       announce)
-
-    def render(self, data: dict, config: dict, template: dict):
-        """Start async render. Result emitted via renderComplete signal.
-
-        If called while a render is in progress, the new payload replaces
-        the queued one — only the latest data is rendered.
-        """
-        self._latest = self._ticket(data, config, template, None, True)
-        self._pump()
+        return _Ticket(payload, self._resolve_template_id(template), done)
 
     def renderAsync(self, data: dict, config: dict, template: dict, done):
         """Start a render whose result only `done(pixmap, error)` gets, later
         on this thread; `pixmap` is None when it failed (`error` says why).
         Never waits, and is never drawn over: one in progress ends first."""
-        self._waiting.append(self._ticket(data, config, template, done, False))
+        self._waiting.append(self._ticket(data, config, template, done))
         self._pump()
 
     def renderSync(self, data: dict, config: dict, template: dict) -> QPixmap:
@@ -298,7 +283,7 @@ class ThumbnailRenderer(QObject):
             outcome.append(pixmap)
             loop.quit()
 
-        self._waiting.append(self._ticket(data, config, template, done, True))
+        self._waiting.append(self._ticket(data, config, template, done))
         self._pump()
         if not outcome:
             loop.exec()
@@ -306,14 +291,9 @@ class ThumbnailRenderer(QObject):
 
     def _pump(self):
         """Start the next render, if none is in progress."""
-        if self._active is not None:
+        if self._active is not None or not self._waiting:
             return
-        if self._waiting:
-            ticket = self._waiting.pop(0)
-        elif self._latest is not None:
-            ticket, self._latest = self._latest, None
-        else:
-            return
+        ticket = self._waiting.pop(0)
         self._active = ticket
         ticket.begun = time.monotonic()
         self._watchdog.start(self.STAGE_TIMEOUT_MS)
@@ -483,11 +463,8 @@ class ThumbnailRenderer(QObject):
     def _finish(self, ticket, pixmap, error):
         self._active = None
         self._watchdog.stop()
-        if ticket.announce and pixmap is not None:
-            self.renderComplete.emit(pixmap)
-        if ticket.done is not None:
-            try:
-                ticket.done(pixmap, error)
-            except Exception:
-                logger.exception("A thumbnail render's taker failed")
+        try:
+            ticket.done(pixmap, error)
+        except Exception:
+            logger.exception("A thumbnail render's taker failed")
         self._pump()

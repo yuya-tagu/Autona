@@ -438,7 +438,7 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - 選手 DB なので `revision` は付かない。再読込の契機は Socket.IO の `playerdb` の push と `game`・`tournamentInfo.load` の変化。push の時点で参加者はもう読める（取得ジョブが `SetTopEntrants` の後に通知する）
 
 ### 5.12 `GET /api/v1/thumbnail`・`GET /api/v1/thumbnail/preview`（2026-11-07 追加・ADR-005 S4o）
-試合サムネイルのページが読むもの。`settings.json` の `thumbnail_config` を既定値で埋めて返す（**何も書かない**）。設定なので `revision` は付かない。
+試合サムネイルのページ（React の `/web/thumbnail`。ADR-005 S4p）が読むもの。`settings.json` の `thumbnail_config` を既定値で埋めて返す（**何も書かない**）。設定なので `revision` は付かない。
 
 ```json
 { "ok": true, "data": {
@@ -456,7 +456,7 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `settings.game` は保存されたゲームと今のゲーム。古い読みの残骸（`game.None`）は出さない（ファイルからも消さない）
 - `game` は `null`（未選択）か `{codename, name}`。`templates[].name` は翻訳済み
 - `canRender` はこのシェルで描けるか（ヘッドレスは `false`）
-- **`settings` の値は v1 の描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。パネルが保存できる値）
+- **`settings` の値は描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。旧 Qt パネルが保存できた値）。v1 の描画に加えて、SCORE の生成・X 投稿と legacy の `/scoreboard<N>-get-thumbnail-<png|jpg>` も同じ読みで描く（`ThumbnailService.RenderPayload`。ADR-005 S4p。それまでの SCORE / legacy は保存値をそのまま渡していた）。描画は `settings.json` を書かない（`background_source` の無い古い設定は、`GET` と同じく移行した値で描き、保存は次の `PATCH` / アップロードで行われる）
 - `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**で、生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
@@ -863,7 +863,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `POST /api/v1/thumbnail:reset`: `{"confirm": true}` 必須（無ければ `409 CONFIRMATION_REQUIRED`）。全ゲームの設定と取り込んだ背景を消して既定に戻す。応答 `data` は §5.12 の `settings`
 - `POST /api/v1/thumbnail:preview` / `:generate`: body なし。保存済みの設定で**ボード 1** の試合サムネイルを描く。`202`（`data: {"accepted": true, "operation": "thumbnail.preview" | "thumbnail.generate", "renderRevision": n}`）で、`running` は 202 の前に state に出る。
   進み具合と結果は state の `thumbnail.render = {status: running → done | error, path, error, revision}`（error は `no_game` / `no_player` / `payload_failed`（テンプレートや設定が読めない）/ `render_failed`（描けない・描画を始められない）/ `save_failed` / `cancelled`（終了中）のコードだけで、詳細はログ）。`renderRevision` はその要求を描く run の revision で、クライアントはこれで自分の結果を見分ける。
-  描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（予約の preview を兼ねる）。
+  描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（予約の preview を兼ねる。preview の依頼には generate の `renderRevision` を返す）。preview を兼ねた generate が試合なし（`no_game` / `no_player`）で終わったときは、続けて preview の run（次の revision）でプレースホルダを描く（ADR-005 S4p）。
   generate は `out/thumbnails/{P1}-vs-{P2}-{UTC}.png` と `.jpg` を保存し（30 世代）、`path` は PNG の相対パス（`out/thumbnails/...`。静的配信の URL パス）。preview は `path` を変えず、§5.12 の画像だけを更新する。生成の `done` はそこまでで、§5.12 の画像だけ書けなくても `done`（警告ログ）。試合が揃っていなければ（`out/program_state.json` が無い・壊れているときも）、preview はプレースホルダを描き、generate は `no_game` / `no_player` で error。
   オフスクリーンの描画はデスクトップだけなので、**ヘッドレスは `503 UNAVAILABLE`**（終了中も同じ `503`）
 

@@ -823,6 +823,30 @@ def test_the_player_list_item_opens_the_react_page():
     assert "playerBrowser" in WebAccess.WEB_PANELS
 
 
+def test_the_thumbnail_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateThumbnailPanel"))
+
+    # The React page is the only Thumbnail Settings panel (ADR-005 S4p).
+    assert calls == [("self._WebPanel", ["'thumbnail'"])]
+
+    # Still the lazy factory in Display, keyed by the React panel's name,
+    # with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateThumbnailPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'thumbnail.svg'"
+    assert "Thumbnail Settings" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'thumbnail'"
+    assert "thumbnail" in WebAccess.WEB_PANELS
+    # The battle format no longer reaches a thumbnail panel: the page shows
+    # the team-name toggle in every format.
+    source = _autonaSource()
+    assert "thumbnailSetting" not in source
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -868,8 +892,8 @@ def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
     panels (Stream S4e, Event S4g -- its key is the React page's name now
-    --, Top 8 S4i, Statistics S4k and the Player List S4n): no STATE_VERSION
-    bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
+    --, Top 8 S4i, Statistics S4k, the Player List S4n and Thumbnail S4p):
+    no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
@@ -1092,6 +1116,46 @@ def test_the_qt_stats_preview_panel_is_gone():
         back = [item["displayName"] for item in StatsOverlays.Overlays()
                 if f"<source>{item['displayName']}</source>" in text]
         assert back == [], path.name
+
+
+def test_the_qt_thumbnail_panel_is_gone():
+    # ADR-005 S4p: the React page is the only Thumbnail Settings panel. The
+    # widget and its .ui may not come back in src/: no import, no
+    # construction (comments recording where code came from still name it),
+    # and none of the translations only they used. SCORE no longer takes
+    # anything from it (decision 10: it imported the module with *).
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    name = "AutonaThumbnailSettingsWidget"
+    assert not (src / f"{name}.py").exists()
+    assert not (src / "layout" / "AutonaThumbnailSettings.ui").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in (f"import {name}", f"{name}(",
+                                f"{name}.instance", f"{name}.py",
+                                f"{name} import",
+                                "AutonaThumbnailSettings.ui"))]
+    assert left == []
+
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        back = [source for source in (
+                    "Copy Video Title", "Smooth scaling", "Nothing to copy.",
+                    "Copied to clipboard.", "Flip P1 assets?",
+                    "Flip P2 assets?", "Select Thumbnail Design")
+                if f"<source>{source}</source>" in text]
+        assert back == [], path.name
+
+    # The translations core, SCORE and the Result panel still use stay.
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        for source in ("Standard", "Center Panel", "Thumbnail Settings",
+                       "The thumbnail has been generated here:",
+                       "Copy Preview to Clipboard", "Save Preview as Image"):
+            assert f"<source>{source}</source>" in text, (path.name, source)
 
 
 # ── several React items, one host page (ADR-005 S4e) ────────────────────

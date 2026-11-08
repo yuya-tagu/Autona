@@ -250,7 +250,7 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 15. サムネイル・対戦動画生成
 
-[src/AutonaThumbnailSettingsWidget.py](../../src/AutonaThumbnailSettingsWidget.py)・[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)。
+サムネイル（Thumbnail Settings）ページ（React の [web/src/ThumbnailPage/](../../web/src/ThumbnailPage/)。`/web/thumbnail`、デスクトップでは共有ビューに表示。ADR-005 S4p で Qt 版から移行）・[src/core/ThumbnailService.py](../../src/core/ThumbnailService.py)（設定・動画タイトル・描画の順番。ADR-005 S4o）・[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)（オフスクリーンの描画。デスクトップだけ）。ブラウザからも同じページで設定でき、プレビューと作成はデスクトップアプリが描く（ヘッドレスでは設定だけ）。スコアボードの「サムネイル生成」・X 投稿もページの設定どおりに描く。
 
 - YouTube / Twitch 用サムネイルを自動生成
 - テーマ / アクセントカラー
@@ -264,10 +264,10 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 16. YouTube メタデータ生成
 
-[src/AutonaThumbnailSettingsWidget.py](../../src/AutonaThumbnailSettingsWidget.py) `_BuildVideoTitle()`。
+[src/core/ThumbnailService.py](../../src/core/ThumbnailService.py) の `BuildVideoTitle()`（ADR-005 S4o。表示はサムネイルページ）。
 
 - **動画タイトル自動生成** — 対戦情報からテンプレート適用
-- **動画タイトル Copy ボタン**（`btCopyVideoTitle`）— クリップボードにコピー
+- **動画タイトルのコピー** — サムネイルページの「コピー」でクリップボードへ（ページでの編集は保存しない）
 - サムネイル生成時に同時出力される
 
 ---

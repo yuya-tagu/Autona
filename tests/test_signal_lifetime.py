@@ -57,9 +57,8 @@ PROCESS_WIDE_SENDERS = (
 # connection can never outlive it:
 #
 # - Autona.py            -- Window, the QMainWindow itself.
-# - AutonaThumbnailSettingsWidget.py
-#                        -- Window.thumbnailSetting, one instance created by
-#                           Window.__init__ and never replaced.
+#
+# (The Qt thumbnail panel was the other one; it went in ADR-005 S4p.)
 #
 # Do not extend this list for a widget that can be destroyed. Convert the
 # lambda into a bound method instead; if it captured a value, put that value
@@ -73,8 +72,6 @@ ALLOWED_LAMBDA_CONNECTIONS = {
     ("Autona.py",
      "AutonaTournamentDataProvider.instance.signals.tournament_changed"),
     ("Autona.py", "AutonaGameAssetManager.instance.signals.onLoad"),
-    ("AutonaThumbnailSettingsWidget.py",
-     "AutonaGameAssetManager.instance.signals.onLoad"),
 }
 
 # The one Qt-side module allowed to subscribe to a core channel: the adapter

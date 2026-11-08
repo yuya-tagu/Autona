@@ -316,7 +316,7 @@ C++ 破棄時に自動切断されるが、lambda は receiver を持たない�
 `(team, delta)` を `HotkeyTeam1ScoreUp` 等の 4 メソッドに畳み、`onLoad` は
 `_onGameAssetsLoaded` に抽出（書き込むキー・呼び出し順は不変）。
 残る 4 箇所（`Autona.py` の Window 3 件、`AutonaApiV1.py` のモジュール変数 2 件、
-`AutonaThumbnailSettingsWidget.py` の `Window.thumbnailSetting` 1 件）は
+`AutonaThumbnailSettingsWidget.py` の `Window.thumbnailSetting` 1 件。この Qt パネルは ADR-005 S4p で削除し、許可リストからも外した）は
 **アプリ寿命と同じ receiver** なので対象外とし、テスト側の許可リストに理由付きで
 記録した。pin: `tests/test_signal_lifetime.py`（AST による静的検査 2 件 +
 破棄後の接続数が構築前のベースラインに戻ることの検証 + state 書き戻しなしの検証）。
