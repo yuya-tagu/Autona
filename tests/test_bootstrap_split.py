@@ -149,6 +149,10 @@ def test_bootstrap_core_steps_and_their_order():
         # the tournament name and game) before the shells' launch seed.
         "StreamService()",
         "StreamService.instance.Start()",
+        # The match thumbnail (ADR-005 S4o): after what it reads and the
+        # executor; it reads nothing here (it only removes what the last
+        # session left of its own files).
+        "ThumbnailService()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
@@ -189,6 +193,8 @@ def test_bootstrap_gui_steps_and_their_order():
         " = AutonaScoreboardManager.instance.OpenSetSelection",
         "AutonaWebOperations.renderThumbnail"
         " = AutonaScoreboardManager.instance.RenderThumbnail",
+        "AutonaWebOperations.startImageRender"
+        " = AutonaScoreboardManager.instance.StartImageRender",
         "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
@@ -447,7 +453,8 @@ report({
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename is not None,
     "shell_operations": [AutonaWebOperations.openSetSelection is not None,
-                         AutonaWebOperations.renderThumbnail is not None],
+                         AutonaWebOperations.renderThumbnail is not None,
+                         AutonaWebOperations.startImageRender is not None],
     "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -483,7 +490,7 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     # ADR-005 S3e-9), and no player DB model (QtGui).
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is False
-    assert result["shell_operations"] == [False, False]
+    assert result["shell_operations"] == [False, False, False]
     assert result["player_db_model"] is False
     # The core bad-word filter got AutonaLocaleHelper's locale and country
     # tables (ADR-005 S3e-1), and the player DB its db_updated relay.
@@ -574,7 +581,9 @@ report({
         AutonaWebOperations.openSetSelection
         == AutonaScoreboardManager.instance.OpenSetSelection,
         AutonaWebOperations.renderThumbnail
-        == AutonaScoreboardManager.instance.RenderThumbnail],
+        == AutonaScoreboardManager.instance.RenderThumbnail,
+        AutonaWebOperations.startImageRender
+        == AutonaScoreboardManager.instance.StartImageRender],
     "player_db_model": AutonaPlayerDB.modelEnabled,
     "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
@@ -595,7 +604,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["board_host"] == "DesktopBoardHost"
     assert result["board_host_manager"] is True
     assert result["game_loader"] is True
-    assert result["shell_operations"] == [True, True]
+    assert result["shell_operations"] == [True, True, True]
     assert result["player_db_model"] is True
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True

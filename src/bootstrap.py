@@ -328,6 +328,30 @@ def bootstrap_core():
             prune=PruneOutputFiles)
         StreamService.instance.Start()
 
+    # ORDER CONSTRAINT: the match thumbnail (ADR-005 S4o), after the settings
+    # and the state layer it reads and the executor its saves are jobs of.
+    # Nothing is read here; all it does on disk is remove the last session's
+    # preview and what a crash left of its temporary files, in directories
+    # that are its own. The shell's renderer is reached through the web
+    # operations when a run starts, where the desktop has registered it
+    # (bootstrap_gui()) and the headless shell has not (503). The deferral,
+    # the translations and the locale's names are read when used; the two
+    # last are Qt's, and the output pruning and whether the GUI thread is gone
+    # are Helpers functions core may not import, hence injected.
+    from qtpy.QtCore import QCoreApplication
+    from .core.ThumbnailService import ThumbnailService
+    if ThumbnailService.instance is None:
+        ThumbnailService.instance = ThumbnailService(
+            later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
+            render=AutonaWebOperations.start_image_render,
+            translate=QCoreApplication.translate,
+            locale=lambda: (AutonaLocaleHelper.programLocale,
+                            AutonaLocaleHelper.matchNames,
+                            AutonaLocaleHelper.phaseNames),
+            prune=PruneOutputFiles,
+            shuttingDown=lambda:
+                AutonaQtHelper.gui_unavailable_reason() is not None)
+
     # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
     # countries, regions and the city -> region lookup, ADR-005 S1c) has to
     # exist before its Qt adapter (bootstrap_gui()), whose LoadCountries()
@@ -489,10 +513,10 @@ def bootstrap_gui():
     # both above). The S2 operations run through the dock -- the board built
     # first and held for 反映, on the GUI thread, the field being typed in
     # committed, the crew board's own operations -- and a game is loaded
-    # through the adapter, so its Qt models follow. The two shell operations
-    # (the set selection window, the thumbnail) are the dock's too (ADR-005
-    # S3e-9). The defaults are the headless shell's (no board; no loader
-    # until it registers its own; no shell operation: 503).
+    # through the adapter, so its Qt models follow. The shell operations (the
+    # set selection window, the thumbnail, ADR-005 S3e-9; the image renderer,
+    # S4o) are the dock's too. The defaults are the headless shell's (no
+    # board; no loader until it registers its own; no shell operation: 503).
     # Before the web server exists (Window._StartWebServer), so no request
     # can reach the defaults on the desktop (ADR-005 S3c).
     from . import AutonaWebOperations
@@ -504,6 +528,8 @@ def bootstrap_gui():
         AutonaScoreboardManager.instance.OpenSetSelection)
     AutonaWebOperations.renderThumbnail = (
         AutonaScoreboardManager.instance.RenderThumbnail)
+    AutonaWebOperations.startImageRender = (
+        AutonaScoreboardManager.instance.StartImageRender)
 
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
     # per player), the wiring the headless shell makes too. On gameLoaded,

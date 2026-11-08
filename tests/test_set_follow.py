@@ -151,6 +151,7 @@ def _server(monkeypatch, headless):
     if headless:
         monkeypatch.setattr(WebOps, "openSetSelection", None)
         monkeypatch.setattr(WebOps, "renderThumbnail", None)
+        monkeypatch.setattr(WebOps, "startImageRender", None)
     monkeypatch.setattr(WebServer, "socketio", socketio)
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"

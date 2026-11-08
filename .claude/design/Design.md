@@ -216,6 +216,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-Img-3** | テンプレ追加時は `TEMPLATE_SUBDIRS`（Thumbnail）/ `LAYOUTS`（Result）への登録 + テンプレディレクトリ作成のみで完結する |
 | **R-Img-4** | レンダリング完了は HTML 側で `document.title = "RENDER_READY"` に変更してシグナル化 |
 | **R-Img-5** | Python から HTML への入力は `initThumbnail(payload)` / `initResult(payload)` の関数経由で受け渡す |
+| **R-Img-5b** | `ThumbnailRenderer` の描画は 1 度に 1 つ（チケット。ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は `render()`（パネル。最新の 1 つだけ）・`renderAsync()`（core。結果はコールバックだけ）・`renderSync()`（SCORE。入れ子のイベントループ）。段階ごとに 10 秒で失敗し、ページを読み直す（ADR-005 S4o） |
 | **R-Img-6** | 出力先は非 Preview 時 `./out/{種別}/`、Preview 時 `AutonaResolve("tmp/{種別}")/` |
 | **R-Img-7** | 出力ファイル名は `{識別子}-{YYYYMMDDTHHmmssZ}.{ext}`（Windows ファイル名安全、UTC、`:` を含めない）、識別子の特殊文字は除去する |
 | **R-Img-8** | クリエイティブ領域なので独自配色・独自レイアウトを許容（`--accent-color: #f0a500` など PyQt/React と異なる値を持ってよい） |
@@ -532,6 +533,20 @@ observer）と上位の参加者（provider が `StreamService.SetTopEntrants` �
 TypeScript 版 `web/src/StreamPage/titleRule.ts` を使い、両者は同じ表 `titleRule.cases.json` で照合する。
 ADR-005 S4e）。ページが開かれていなくても・ヘッドレスでも動く。
 
+**`thumbnail.*`（試合サムネイル。ADR-005 S4o）**
+
+```
+thumbnail
+└── render                         サムネイル描画の状態（起動のたびに idle へ戻る。revision は続く）
+    ├── status                     idle | running | done | error
+    ├── path                       最後に生成できた PNG（`out/thumbnails/*.png`。プレビューと error では前回のまま）
+    ├── error                      error の理由（`no_game` / `no_player` / `payload_failed` / `render_failed` / `save_failed` / `cancelled`）
+    └── revision                   run ごとに 1 増える（`POST /thumbnail:preview` / `:generate` の 202 の `renderRevision`）
+```
+
+書き手は core の `src/core/ThumbnailService.py` だけ。`stream.thumbnail` と同じ形で、SCORE の同期の生成と legacy の
+`get-thumbnail` は通らない（それらは今までどおり画像のパスを返す）。
+
 > **データ階層を混ぜないこと**: `tournamentInfo.*`（大会: 名前・日付・会場・大会アイコン/バナー）、
 > `stream.*`（配信: 配信先・配信タイトル・配信団体素材）、`score.{N}.*`（試合: 選手・スコア・
 > ラウンド）はそれぞれ別のライフサイクルを持つ。配信先は「大会ごとに変わるとは限らない配信
@@ -665,9 +680,10 @@ QCoreApplication の上で `bootstrap_core()` までを組み、大会データ�
 Qt モデルなし）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
 `wire_web_server`、Web 操作のボード周りの違いは `AutonaWebOperations.boardHost`（デスクトップは
 `DesktopBoardHost`、ヘッドレスは既定の `BoardHost`）が吸収する。ボードが無いので held にならず、
-書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作 2 本（セット選択ウィンドウを
-開く `open_sets`・サムネイル `get_thumbnail`。デスクトップは `bootstrap_gui()` が `AutonaWebOperations.openSetSelection` /
-`renderThumbnail` を登録する）だけで、ほかの Web 操作はすべて動く（ADR-005 S3e-9）。
+書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作（セット選択ウィンドウを
+開く `open_sets`・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
+`AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` を登録する）だけで、ほかの Web 操作は
+すべて動く（ADR-005 S3e-9・S4o）。
 
 #### 3.2.2 書き込み規約
 
@@ -778,7 +794,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（読み書き・シードは `src/core/ColorService.py`。Qt のカードは `src/AutonaFeatureColors.py`） |
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
-| `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等） |
+| `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等）。読み書きは `src/core/ThumbnailService.py`（ADR-005 S4o。読みは既定値を書かない）。v1 で取り込んだ背景は `user_data/thumbnail_background_<ハッシュ>.*` |
 | `result_config.*` | リザルト生成設定（layout, logo_path 等）。色は保持しない — `prepare_data()` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |

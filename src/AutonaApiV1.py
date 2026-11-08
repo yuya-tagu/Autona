@@ -27,7 +27,7 @@ import time
 import traceback
 from collections import OrderedDict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 from loguru import logger
 from werkzeug.exceptions import ClientDisconnected
 
@@ -42,6 +42,7 @@ from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import PlayerDirectory
 from .core import StreamService as streams
+from .core import ThumbnailService as thumbnails
 from .core import Top8Model as top8
 from .core import Top8Service
 from .core import TournamentMediaService as tournamentMedia
@@ -78,10 +79,9 @@ INTERNAL = "INTERNAL"                         # 500
 # uploads, the stream org's (ADR-005 S4e) and the tournament's (S4g)).
 PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"       # 413
 # An operation this shell cannot run (ADR-005 S3c): the server runs, the
-# operation needs what the shell does not have. Not retryable. No v1
-# operation raises it since ADR-005 S3e-7 (the only ones left are the
-# desktop's two shell operations, which v1 does not have); the mapping
-# stays, as the error code is part of the contract.
+# operation needs what the shell does not have. Not retryable. In v1, only
+# starting a match thumbnail's render does (ADR-005 S4o): the off-screen view
+# is the desktop's.
 UNAVAILABLE = "UNAVAILABLE"                   # 503
 
 
@@ -646,6 +646,31 @@ def get_stream_thumbnail_options():
     # The stream thumbnail generator's saved options (settings.json's
     # stream_thumbnail_options): {"source", "style", "overlayOrgIcon"}.
     return ok(data=WebOps.get_stream_thumbnail_options())
+
+
+@api_v1.route("/thumbnail")
+@api_handler
+def get_thumbnail():
+    # The match thumbnail's page (ADR-005 S4o): {"settings", "game": {codename,
+    # name} | null, "templates": [{id, name}], "videoTitle", "canRender"}.
+    # thumbnail_config with its defaults filled in; nothing is written.
+    # Settings, not state: no revision.
+    return ok(data=WebOps.describe_thumbnail())
+
+
+@api_v1.route("/thumbnail/preview")
+@api_handler
+def get_thumbnail_preview():
+    # The newest render as a PNG (POST /thumbnail:preview | :generate). A file
+    # of ./tmp, which the web server's static directories do not include. A
+    # client asks ?v=<thumbnail.render.revision>, which is not looked at: it
+    # only makes the URL new. Bytes, not an envelope; 404 NOT_FOUND until the
+    # first render.
+    image = WebOps.get_thumbnail_preview()
+    if image is None:
+        raise ApiError(NOT_FOUND, "no thumbnail preview has been drawn", 404)
+    return Response(image, mimetype="image/png",
+                    headers={"Cache-Control": "no-store"})
 
 
 @api_v1.route("/tournament")
@@ -1511,6 +1536,80 @@ def stream_thumbnail_options_update():
     return ok(data=options)
 
 
+# ── サムネイル (ADR-005 S4o) ──
+# core/ThumbnailService. thumbnail_config is settings, not state: no revision
+# on what only changes those.
+# Some switches and numbers per game: far more than any page sends. A longer
+# body is refused unparsed.
+_THUMBNAIL_SETTINGS_MAX_BODY = 64 * 1024
+
+
+@api_v1.route("/thumbnail", methods=["PATCH"])
+@write_op("thumbnail.update", max_body=_THUMBNAIL_SETTINGS_MAX_BODY)
+def thumbnail_update():
+    # Some of template_id, background_source, display_phase, use_team_names,
+    # use_sponsors and game: {<codename>: {flip_p1, flip_p2, smooth_scale,
+    # zoom, align: {horizontal, vertical}}}; all of them as saved come back.
+    # A codename is one of the game list's or the state's game. Not a path: a
+    # background comes in through POST /thumbnail/background.
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "at least one thumbnail setting is required",
+            400)
+    settings = WebOps.update_thumbnail_settings(body)
+    if settings is None:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "the settings are template_id ("
+            f"{' | '.join(thumbnails.TEMPLATE_IDS)}), background_source ("
+            f"{' | '.join(thumbnails.BACKGROUND_SOURCES)}), display_phase, "
+            "use_team_names and use_sponsors (true / false) and game: "
+            "{<codename, of a game in the list>: {flip_p1, flip_p2, "
+            "smooth_scale (true / false), "
+            f"zoom ({thumbnails.ZOOM_RANGE[0]}-{thumbnails.ZOOM_RANGE[1]}), "
+            "align: {horizontal, vertical} "
+            f"({thumbnails.ALIGN_RANGE[0]}-{thumbnails.ALIGN_RANGE[1]})}}}}",
+            400,
+        )
+    return ok(data=settings)
+
+
+@api_v1.route("/thumbnail:reset", methods=["POST"])
+@write_op("thumbnail.reset")
+def thumbnail_reset():
+    # Back to the defaults, for every game, the uploaded background included:
+    # the settings now come back. Destructive, so {"confirm": true}.
+    _require_confirm(_json_body())
+    WebOps.reset_thumbnail_settings()
+    return ok(data=WebOps.get_thumbnail_settings())
+
+
+@api_v1.route("/thumbnail/background", methods=["POST"])
+@write_op("thumbnail.background", log_keys_only=True,
+          max_body=_ORG_IMAGE_MAX_BODY)
+def thumbnail_background():
+    # {"image": <a data URL>}: saved under user_data/ and selected as the
+    # background (background_source "custom"); the settings now come back.
+    result = WebOps.import_thumbnail_background(
+        _org_image_bytes(_json_body()))
+    if result == thumbnails.INVALID_IMAGE:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "the image could not be read (a PNG, JPEG or BMP of up to "
+            f"{ImageImport.MAX_PIXELS} pixels)",
+            400,
+        )
+    if result == thumbnails.SAVE_FAILED:
+        raise ApiError(
+            INTERNAL,
+            "the image could not be saved (is another app holding the "
+            "file?)",
+            500,
+        )
+    return ok(data=WebOps.get_thumbnail_settings())
+
+
 # ── 大会情報 (ADR-005 S4g) ──
 # The Event page's: the five fields, the tournament's icon / banner. The set
 # / clear is with the heavy operations below; the colours are above
@@ -2065,4 +2164,32 @@ def stream_thumbnail_generate():
         raise ApiError(
             CONFLICT, "a stream thumbnail is being made already", 409)
     return ok(data={"accepted": True, "operation": "stream.thumbnail"},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/thumbnail:preview", methods=["POST"])
+@write_op("thumbnail.preview")
+def thumbnail_preview():
+    # Draw the preview image, with the saved settings, in the background
+    # (ThumbnailService.Preview; ADR-005 S4o). thumbnail.render says "running"
+    # and then "done" (GET /thumbnail/preview has it) or "error", with
+    # `renderRevision`, the revision of the run that does this: requests
+    # during a run are drawn together by the next one. The desktop's: 503
+    # UNAVAILABLE headless.
+    return ok(data={"accepted": True, "operation": "thumbnail.preview",
+                    "renderRevision": WebOps.preview_thumbnail()},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/thumbnail:generate", methods=["POST"])
+@write_op("thumbnail.generate")
+def thumbnail_generate():
+    # Draw and save a thumbnail (out/thumbnails, a PNG and a JPG) in the
+    # background: as above, and thumbnail.render's path is the PNG once it is
+    # "done". 409 CONFLICT while one is on its way.
+    revision = WebOps.generate_thumbnail()
+    if revision == thumbnails.BUSY:
+        raise ApiError(CONFLICT, "a thumbnail is being made already", 409)
+    return ok(data={"accepted": True, "operation": "thumbnail.generate",
+                    "renderRevision": revision},
               revision=current_revision(), status=202)

@@ -119,7 +119,8 @@ result = {
     "board_host": type(WebOps.boardHost).__name__,
     # The shell operations (ADR-005 S3e-9): the desktop's alone.
     "shell_operations": [WebOps.openSetSelection is not None,
-                         WebOps.renderThumbnail is not None],
+                         WebOps.renderThumbnail is not None,
+                         WebOps.startImageRender is not None],
     "desktop": [name for module, name in (
         ("src.AutonaGameAssetManager", "AutonaGameAssetManager"),
         ("src.AutonaScoreboardManager", "AutonaScoreboardManager"),
@@ -239,7 +240,7 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["selector"] is True
     assert result["loader"] is True
     assert result["board_host"] == "BoardHost"
-    assert result["shell_operations"] == [False, False]
+    assert result["shell_operations"] == [False, False, False]
     assert result["desktop"] == []
     assert all(result["seeded"].values()), result["seeded"]
 

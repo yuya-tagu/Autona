@@ -114,7 +114,7 @@
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
 | `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作 2 本だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）。v1 にはもう無い（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）が、コードは契約として残す。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）、v1 の試合サムネイルの描画（`POST /thumbnail:preview` / `:generate`。ADR-005 S4o。設定の読み書きと `GET /thumbnail/preview` は答える）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -228,6 +228,8 @@
 | `GET /api/v1/stats/overlays` | 統計情報表示設定の種類の表・選択中・Companion マクロのリクエスト（§5.10。2026-11-05 追加） | `get_stats_overlays`（`core/StatsOverlays`） | — |
 | `GET /api/v1/players` | 選手 DB の全件の行（§5.11。本名を含むので **LAN からはトークン必須**。2026-11-05 追加） | `get_players`（`core/PlayerDirectory.Registered`） | — |
 | `GET /api/v1/players/entrants` | 大会の参加者の行（§5.11。同上。2026-11-05 追加） | `get_player_entrants`（`core/PlayerDirectory.Entrants`） | — |
+| `GET /api/v1/thumbnail` | 試合サムネイルの設定・ゲーム・テンプレート・動画タイトル・描画できるか（§5.12。2026-11-07 追加） | `describe_thumbnail`（`core/ThumbnailService.Describe`） | — |
+| `GET /api/v1/thumbnail/preview` | 最新の描画の PNG（§5.12。2026-11-07 追加） | `get_thumbnail_preview`（`core/ThumbnailService.PreviewImage`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -434,6 +436,28 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
   **行の `""` は DB が空だという意味ではない**（解決できない地名・読めないカスタム国旗でも `""`）ので、**ページはこの 2 つを、操作者が変更したときだけ §6.26 に送る**（送らなければ DB の値が保たれる）
 - `key` が文字列でない行（タグの無い行）は出さない
 - 選手 DB なので `revision` は付かない。再読込の契機は Socket.IO の `playerdb` の push と `game`・`tournamentInfo.load` の変化。push の時点で参加者はもう読める（取得ジョブが `SetTopEntrants` の後に通知する）
+
+### 5.12 `GET /api/v1/thumbnail`・`GET /api/v1/thumbnail/preview`（2026-11-07 追加・ADR-005 S4o）
+試合サムネイルのページが読むもの。`settings.json` の `thumbnail_config` を既定値で埋めて返す（**何も書かない**）。設定なので `revision` は付かない。
+
+```json
+{ "ok": true, "data": {
+  "settings": { "template_id": "type_a", "background_source": "default", "background_name": "",
+    "display_phase": true, "use_team_names": true, "use_sponsors": true,
+    "game": { "ssbu": { "flip_p1": false, "flip_p2": true, "smooth_scale": true, "zoom": 100,
+      "align": { "horizontal": 50, "vertical": 40 } } } },
+  "game": { "codename": "ssbu", "name": "Super Smash Bros. Ultimate" },
+  "templates": [ { "id": "type_a", "name": "Standard" }, { "id": "type_b", "name": "Center Panel" } ],
+  "videoTitle": "大会名 Grand Final | P1(キャラ) vs P2(キャラ) | SSBU",
+  "canRender": true
+} }
+```
+- `settings.background_source` は `background_source` の無い古い設定でも読める値（パスから判定。書かない）。`background_name` はカスタム背景のファイル名だけ（パスは出さない。操作者のファイルの場所を LAN に出さないため）
+- `settings.game` は保存されたゲームと今のゲーム。古い読みの残骸（`game.None`）は出さない（ファイルからも消さない）
+- `game` は `null`（未選択）か `{codename, name}`。`templates[].name` は翻訳済み
+- `canRender` はこのシェルで描けるか（ヘッドレスは `false`）
+- **`settings` の値は v1 の描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。パネルが保存できる値）
+- `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**で、生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -731,6 +755,18 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 応答は `revision`。操作ログは `player.load`（キー名のみ）
 - エラー: `INVALID_ARGUMENT`（番号・`tag` が空でない文字列でない）、`NOT_FOUND`（タグが DB に無い / そのチームにそのスロットが無い。state のスロットで判定するので両シェル同じ）
 
+### 6.28 試合サムネイルの設定 `PATCH /api/v1/thumbnail`（2026-11-07 追加・ADR-005 S4o）
+- body（どれか。空は `400`）: `template_id`（`type_a` | `type_b`）、`background_source`（`default` | `banner` | `custom`）、`display_phase` / `use_team_names` / `use_sponsors`（真偽）、`game: { <codename>: { flip_p1, flip_p2, smooth_scale（真偽）, zoom（1〜1000 の整数）, align: { horizontal, vertical }（1〜100 の整数） } }`。送らなかった値は変わらない（`game` と `align` は入れ子でマージ）。body は 64 KiB まで（超えたら `413`）
+- `align` の `0` は受けない（テンプレートが既定の 50 / 40 として描くので、受けると送った値と絵が違う）
+- **パスは受けない**（`background_path` / `main_icon_path` は `400`。描画に任意のローカルファイルを読ませないため。背景は §6.29）。codename は**今のゲーム一覧にあるものと state のゲームだけ**で、形としても `.` `/` `\` 制御文字・空・`None`・129 文字以上を断る。一覧を読む前は state のゲームだけ受ける。一覧に無いゲームの保存値は §5.12 で読めるが書けない
+- 委譲: `update_thumbnail_settings` → `ThumbnailService.Update`（全部検証してから `settings.json` を 1 回だけ書く。1 つでも不正なら何も書かない。値が変わらなければ書かない）。応答 `data` は §5.12 の `settings`。state ではないので `revision` は付かない
+- エラー: `INVALID_ARGUMENT`（型・範囲・未知のキー・一覧に無いゲーム）、`PAYLOAD_TOO_LARGE`（`413`）
+
+### 6.29 試合サムネイルの背景 `POST /api/v1/thumbnail/background`（2026-11-07 追加・ADR-005 S4o）
+- body: `{ "image": <base64 の data URL> }`（§6.17 と同じ検査・同じ上限。超えたら `413`）。PNG / JPEG / BMP を長辺 1920 に縮小して `user_data/thumbnail_background_<内容のハッシュ>.*` に保存し、**`background_source` を `custom` にする**（アップロードだけで効く）。前に取り込んだファイルは消す（操作者の任意のパスのファイルは消さない）
+- 委譲: `import_thumbnail_background` → `ThumbnailService.ImportBackground`。応答 `data` は §5.12 の `settings`。操作ログはキー名のみ
+- エラー: `INVALID_ARGUMENT`（読めない画像）、`INTERNAL`（保存の失敗）。いずれも設定を変えない
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -753,6 +789,9 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
 | `POST /api/v1/analysis:refresh` | 実行中フラグ | `refresh_analysis`（`AnalysisService.Refresh`。2026-11-04 追加・ADR-005 S4k） | — |
 | `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
+| `POST /api/v1/thumbnail:reset` | confirm | `reset_thumbnail_settings`（`ThumbnailService.Reset`。2026-11-07 追加・ADR-005 S4o） | — |
+| `POST /api/v1/thumbnail:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_thumbnail`（`ThumbnailService.Preview`。2026-11-07 追加・ADR-005 S4o） | — |
+| `POST /api/v1/thumbnail:generate` | 実行中フラグ | `generate_thumbnail`（`ThumbnailService.Generate`。2026-11-07 追加・ADR-005 S4o） | — |
 
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
   非同期で、応答は受付時点の `revision`。大会が読み込まれていなければ **409 `NOT_READY`**（`no tournament loaded`）で、ボードに何も
@@ -821,6 +860,12 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   `202`（`data: {"accepted": true, "operation": "stream.thumbnail"}`）。実行中フラグは core（`StreamService`）の 1 つで、
   実行中は `409 CONFLICT`。進捗と結果は state の `stream.thumbnail = {status: running → done | error, path, error, revision}`
   （`path` は `out/stream/thumbnail_*.jpg` で、そのまま静的配信の URL パス。`revision` は受け付けるたびに 1 進む）
+- `POST /api/v1/thumbnail:reset`: `{"confirm": true}` 必須（無ければ `409 CONFIRMATION_REQUIRED`）。全ゲームの設定と取り込んだ背景を消して既定に戻す。応答 `data` は §5.12 の `settings`
+- `POST /api/v1/thumbnail:preview` / `:generate`: body なし。保存済みの設定で**ボード 1** の試合サムネイルを描く。`202`（`data: {"accepted": true, "operation": "thumbnail.preview" | "thumbnail.generate", "renderRevision": n}`）で、`running` は 202 の前に state に出る。
+  進み具合と結果は state の `thumbnail.render = {status: running → done | error, path, error, revision}`（error は `no_game` / `no_player` / `payload_failed`（テンプレートや設定が読めない）/ `render_failed`（描けない・描画を始められない）/ `save_failed` / `cancelled`（終了中）のコードだけで、詳細はログ）。`renderRevision` はその要求を描く run の revision で、クライアントはこれで自分の結果を見分ける。
+  描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（予約の preview を兼ねる）。
+  generate は `out/thumbnails/{P1}-vs-{P2}-{UTC}.png` と `.jpg` を保存し（30 世代）、`path` は PNG の相対パス（`out/thumbnails/...`。静的配信の URL パス）。preview は `path` を変えず、§5.12 の画像だけを更新する。生成の `done` はそこまでで、§5.12 の画像だけ書けなくても `done`（警告ログ）。試合が揃っていなければ（`out/program_state.json` が無い・壊れているときも）、preview はプレースホルダを描き、generate は `no_game` / `no_player` で error。
+  オフスクリーンの描画はデスクトップだけなので、**ヘッドレスは `503 UNAVAILABLE`**（終了中も同じ `503`）
 
 > **注**: 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は廃止。テーマはダーク固定（[Design.md §5.4](Design.md)）。
 
