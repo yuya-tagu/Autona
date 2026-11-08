@@ -55,7 +55,6 @@ _EXTRA_ROOTS = (
     schema.STREAM_ROOT,
     schema.LAYOUT_OPTIONS_ROOT,
     schema.COMMENTARY_ROOT,
-    schema.RESULT_PLAYERS_ROOT,
 )
 
 
@@ -1648,11 +1647,3 @@ def test_the_stream_setters_normalise_none_to_an_empty_string(actions):
     assert actions.SetStreamTitle("") is False
 
 
-def test_publishing_the_result_placements_writes_the_whole_root(actions):
-    players = {"1": {"rank": 1, "name": "Ada", "characters": []}}
-    revision = SM.revision
-
-    actions.PublishResultPlayers(players)
-
-    assert SM.Get("result_players") == players
-    assert SM.revision == revision + 1

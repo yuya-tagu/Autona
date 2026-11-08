@@ -455,11 +455,11 @@ def test_a_new_pages_first_picture_is_not_the_old_pages(renderer):
     assert renderer._before_load is None
 
 
-def test_a_render_on_the_same_page_is_not_compared(renderer):
-    """Nor waited on: the same picture again is the right picture."""
+def test_a_render_on_the_same_page_is_not_compared_with_the_one_before(
+        renderer):
+    """The same picture again is the right picture: only its own two grabs
+    have to agree."""
     renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    # However the machine is doing: slow frames have a test of their own.
-    renderer.SLOW_FRAMES_MS = LONG_TIMEOUT_MS
     _shown, grabs = _showing(renderer, RED)
     results = []
 
@@ -474,7 +474,7 @@ def test_a_render_on_the_same_page_is_not_compared(renderer):
 
     assert _waitUntil(lambda: len(results) == 2)
     assert results == [RED, RED]
-    assert grabs == [RED]
+    assert grabs == [RED, RED]
 
 
 def test_a_new_page_that_looks_like_the_old_one_is_taken_after_the_wait(
@@ -558,14 +558,32 @@ def test_slow_frames_look_again_only_after_as_long_as_they_took(renderer):
     assert results == [(GREEN, "")]
 
 
-def test_frames_at_their_usual_speed_on_the_same_page_are_one_grab(renderer):
+def test_frames_at_their_usual_speed_are_two_grabs_that_agree(renderer):
     _pastThePagesFirstPicture(renderer)
     _shown, grabs = _showing(renderer, RED)
 
     results = _renderSaying(renderer, RED, "painted frames=30")
 
     assert _waitUntil(lambda: results)
-    assert grabs == [RED]
+    assert results == [(RED, "")]
+    assert grabs == [RED, RED]
+
+
+def test_fast_frames_do_not_put_the_drawing_in_the_view(renderer):
+    """Two frames in 16 ms and the view still a frame from before the drawing,
+    its logo and characters missing: it was taken, two renders in twenty-one,
+    on an image new to the page after ten seconds idle."""
+    _pastThePagesFirstPicture(renderer)
+    shown, grabs = _showing(renderer, RED)
+
+    results = _renderSaying(renderer, GREEN, "painted frames=16")
+
+    assert _waitUntil(lambda: grabs)
+    shown[0] = GREEN
+    assert _waitUntil(lambda: results)
+    assert results == [(GREEN, "")]
+    assert grabs[-2:] == [GREEN, GREEN]
+    assert grabs[0] == RED
 
 
 def test_a_new_pages_first_picture_is_two_grabs_that_agree(renderer):
@@ -633,9 +651,9 @@ def test_a_page_that_never_settles_is_taken_after_the_wait(renderer):
 
 
 @pytest.mark.parametrize("frames, loaded, every", [
-    (30, False, 0),       # the usual render: nothing more than its grab
-    (100, False, 0),
-    (101, False, 101),    # slow: as far apart as its two frames took
+    (16, False, 50),      # however fast, the grabs are this far apart
+    (30, False, 50),
+    (100, False, 100),    # slow: as far apart as its two frames took
     (400, False, 400),
     (900, False, 500),    # two have to fit in the wait
     (None, False, 500),   # it did not say

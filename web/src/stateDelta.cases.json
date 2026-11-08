@@ -1,0 +1,719 @@
+[
+  {
+    "name": "the last of a list goes",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["A", "B"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "the last two go",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C", "D"],
+      ["A", "B"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 3], "action": "iterable_item_removed", "value": "D", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "the first goes",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["B", "C"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one in the middle goes",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["A", "C"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "all go",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      []
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "iterable_item_removed", "value": "A", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one comes at the end",
+    "key": "deltacases.value",
+    "states": [
+      ["A"],
+      ["A", "B"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "two come at the end",
+    "key": "deltacases.value",
+    "states": [
+      ["A"],
+      ["A", "B", "C"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_added", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one comes at the start",
+    "key": "deltacases.value",
+    "states": [
+      ["B"],
+      ["A", "B"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": "A", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one comes in the middle",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "C"],
+      ["A", "B", "C"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_added", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one comes at either end",
+    "key": "deltacases.value",
+    "states": [
+      [1, 2, 3, 4, 5, 6],
+      [0, 1, 2, 3, 4, 5, 6, 7]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": 0, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 3], "action": "values_changed", "value": 3, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 4], "action": "values_changed", "value": 4, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 5], "action": "values_changed", "value": 5, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 6], "action": "iterable_item_added", "value": 6, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 7], "action": "iterable_item_added", "value": 7, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one goes, one changes and one comes",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C", "D"],
+      ["B", "X", "D", "E"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "X", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "values_changed", "value": "D", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 3], "action": "values_changed", "value": "E", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one is replaced and the list is shorter",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["X", "Y"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": "X", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "Y", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a list in a list",
+    "key": "deltacases.value",
+    "states": [
+      [[1, 2, 3], [4]],
+      [[1, 2], [4]]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0, 2], "action": "iterable_item_removed", "value": 3, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "the last row goes",
+    "key": "deltacases.value",
+    "states": [
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}],
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "the first row goes",
+    "key": "deltacases.value",
+    "states": [
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}],
+      [{"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0, "name"], "action": "values_changed", "value": "A2", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "twitter"], "action": "values_changed", "value": "", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "character"], "action": "values_changed", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1, "name"], "action": "values_changed", "value": "A3", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1, "character"], "action": "values_changed", "value": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a row changes and the last goes",
+    "key": "deltacases.value",
+    "states": [
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}],
+      [{"name": "Z", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0, "name"], "action": "values_changed", "value": "Z", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a row comes at the start",
+    "key": "deltacases.value",
+    "states": [
+      [{"name": "A2", "twitter": "", "character": {}}],
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0, "name"], "action": "values_changed", "value": "A1", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "twitter"], "action": "values_changed", "value": "a1", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "character"], "action": "values_changed", "value": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a team is cleared",
+    "key": "deltacases.teams",
+    "states": [
+      {"1": {"rank": 1, "name": "Reds", "members": [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}]}, "2": {"rank": 2, "name": "Blues", "members": [{"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}]}},
+      {"1": {"rank": 1, "name": "", "members": []}, "2": {"rank": 2, "name": "", "members": []}}
+    ],
+    "delta": [
+      {"path": ["deltacases", "teams", "1", "name"], "action": "values_changed", "value": "", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "name"], "action": "values_changed", "value": "", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 0], "action": "iterable_item_removed", "value": {"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 1], "action": "iterable_item_removed", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 0], "action": "iterable_item_removed", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "teams change places, the shorter one first",
+    "key": "deltacases.teams",
+    "states": [
+      {"1": {"rank": 1, "name": "Reds", "members": [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}]}, "2": {"rank": 2, "name": "Blues", "members": [{"name": "A2", "twitter": "", "character": {}}]}},
+      {"1": {"rank": 1, "name": "Blues", "members": [{"name": "A2", "twitter": "", "character": {}}]}, "2": {"rank": 2, "name": "Reds", "members": [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}]}}
+    ],
+    "delta": [
+      {"path": ["deltacases", "teams", "1", "name"], "action": "values_changed", "value": "Blues", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 0, "name"], "action": "values_changed", "value": "A2", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 0, "twitter"], "action": "values_changed", "value": "", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 0, "character"], "action": "values_changed", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "name"], "action": "values_changed", "value": "Reds", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 0, "name"], "action": "values_changed", "value": "A1", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 0, "twitter"], "action": "values_changed", "value": "a1", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 0, "character"], "action": "values_changed", "value": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 1], "action": "iterable_item_added", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "2", "members", 2], "action": "iterable_item_added", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 1], "action": "iterable_item_removed", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "teams", "1", "members", 2], "action": "iterable_item_removed", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a player's last character goes",
+    "key": "deltacases.player",
+    "states": [
+      {"name": "A", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "characters": [{"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}]},
+      {"name": "A", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "characters": [{"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "player", "characters", 1], "action": "iterable_item_removed", "value": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a player's only character goes",
+    "key": "deltacases.player",
+    "states": [
+      {"name": "A", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "characters": [{"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}]},
+      {"name": "A", "character": {}, "characters": []}
+    ],
+    "delta": [
+      {"path": ["deltacases", "player", "character"], "action": "values_changed", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "player", "characters", 0], "action": "iterable_item_removed", "value": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a player's first character goes",
+    "key": "deltacases.player",
+    "states": [
+      {"name": "A", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, "characters": [{"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}, {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}, {"en_name": "Peach", "name": "Peach", "assets": {"full": {"asset": "x/peach.png"}}}]},
+      {"name": "A", "character": {}, "characters": [{}, {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}, {"en_name": "Peach", "name": "Peach", "assets": {"full": {"asset": "x/peach.png"}}}]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "player", "character"], "action": "values_changed", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "player", "characters", 0], "action": "values_changed", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "recent sets: one more at the head",
+    "key": "score.9.recent_sets.sets",
+    "states": [
+      [{"id": 1, "winner": "a", "score": [2, 0]}, {"id": 2, "winner": "b", "score": [1, 2]}],
+      [{"id": 3, "winner": "c", "score": [2, 1]}, {"id": 1, "winner": "a", "score": [2, 0]}, {"id": 2, "winner": "b", "score": [1, 2]}]
+    ],
+    "delta": [
+      {"path": ["score", "9", "recent_sets", "sets", 0, "id"], "action": "values_changed", "value": 3, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "winner"], "action": "values_changed", "value": "c", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "score", 1], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "id"], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "winner"], "action": "values_changed", "value": "a", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "score", 0], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "score", 1], "action": "values_changed", "value": 0, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 2], "action": "iterable_item_added", "value": {"id": 2, "winner": "b", "score": [1, 2]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "recent sets: one less at the head",
+    "key": "score.9.recent_sets.sets",
+    "states": [
+      [{"id": 1, "winner": "a", "score": [2, 0]}, {"id": 2, "winner": "b", "score": [1, 2]}, {"id": 3, "winner": "c", "score": [2, 1]}],
+      [{"id": 2, "winner": "b", "score": [1, 2]}, {"id": 3, "winner": "c", "score": [2, 1]}]
+    ],
+    "delta": [
+      {"path": ["score", "9", "recent_sets", "sets", 0, "id"], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "winner"], "action": "values_changed", "value": "b", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "score", 0], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "score", 1], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "id"], "action": "values_changed", "value": 3, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "winner"], "action": "values_changed", "value": "c", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "score", 0], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1, "score", 1], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 2], "action": "iterable_item_removed", "value": {"id": 3, "winner": "c", "score": [2, 1]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "recent sets: only one left",
+    "key": "score.9.recent_sets.sets",
+    "states": [
+      [{"id": 1, "winner": "a", "score": [2, 0]}, {"id": 2, "winner": "b", "score": [1, 2]}, {"id": 3, "winner": "c", "score": [2, 1]}],
+      [{"id": 2, "winner": "b", "score": [1, 2]}]
+    ],
+    "delta": [
+      {"path": ["score", "9", "recent_sets", "sets", 0, "id"], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "winner"], "action": "values_changed", "value": "b", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "score", 0], "action": "values_changed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 0, "score", 1], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1], "action": "iterable_item_removed", "value": {"id": 2, "winner": "b", "score": [1, 2]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 2], "action": "iterable_item_removed", "value": {"id": 3, "winner": "c", "score": [2, 1]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "recent sets: none left",
+    "key": "score.9.recent_sets.sets",
+    "states": [
+      [{"id": 1, "winner": "a", "score": [2, 0]}, {"id": 2, "winner": "b", "score": [1, 2]}],
+      []
+    ],
+    "delta": [
+      {"path": ["score", "9", "recent_sets", "sets", 0], "action": "iterable_item_removed", "value": {"id": 1, "winner": "a", "score": [2, 0]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["score", "9", "recent_sets", "sets", 1], "action": "iterable_item_removed", "value": {"id": 2, "winner": "b", "score": [1, 2]}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with one element in its list",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": [5]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y", 0], "action": "iterable_item_added", "value": 5, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "and with other new keys",
+    "key": "deltacases.value",
+    "states": [
+      {"p": 1, "q": 2, "r": 3},
+      {"p": 1, "q": 2, "r": 3, "w": 1, "y": [5], "z": "v"}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "w"], "action": "dictionary_item_added", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "y", 0], "action": "iterable_item_added", "value": 5, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "z"], "action": "iterable_item_added", "value": "v", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with one row in its list",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": [{"k": 1}]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y", 0], "action": "iterable_item_added", "value": {"k": 1}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with a one-key value",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": {"z": {"w": 1}}}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y", "z"], "action": "dictionary_item_added", "value": {"w": 1}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with an empty list",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": []}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y"], "action": "dictionary_item_added", "value": [], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with a longer list",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": [1, 2]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y"], "action": "dictionary_item_added", "value": [1, 2], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a new key with an empty value",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": {}}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y"], "action": "dictionary_item_added", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a key goes",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1, "y": 2},
+      {"q": 1}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y"], "action": "dictionary_item_removed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a key with a list goes",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1, "y": [1, 2]},
+      {"q": 1}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y"], "action": "dictionary_item_removed", "value": [1, 2], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a numbered key goes",
+    "key": "deltacases.value",
+    "states": [
+      {"1": {"p": 1}, "2": {"p": 2}},
+      {"1": {"p": 1}}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "2"], "action": "dictionary_item_removed", "value": {"p": 2}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a number becomes the same text",
+    "key": "deltacases.value",
+    "states": [
+      1,
+      "1"
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": "1", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "<class 'int'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a text becomes the same number",
+    "key": "deltacases.value",
+    "states": [
+      "1",
+      1
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "zero becomes false",
+    "key": "deltacases.value",
+    "states": [
+      0,
+      false
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": false, "old_value": "unknown___", "type": "<class 'bool'>", "old_type": "<class 'int'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "one becomes true",
+    "key": "deltacases.value",
+    "states": [
+      1,
+      true
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": true, "old_value": "unknown___", "type": "<class 'bool'>", "old_type": "<class 'int'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "an empty text becomes an empty value",
+    "key": "deltacases.value",
+    "states": [
+      "",
+      {}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "an empty text becomes an empty list",
+    "key": "deltacases.value",
+    "states": [
+      "",
+      []
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": [], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "an empty value becomes an empty list",
+    "key": "deltacases.value",
+    "states": [
+      {},
+      []
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": [], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "<class 'dict'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "an empty list becomes an empty value",
+    "key": "deltacases.value",
+    "states": [
+      [],
+      {}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": {}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "<class 'list'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a text becomes a value",
+    "key": "deltacases.value",
+    "states": [
+      "x",
+      {"a": 1}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": {"a": 1}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a list becomes a value",
+    "key": "deltacases.value",
+    "states": [
+      [1],
+      {"a": 1}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": {"a": 1}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "<class 'list'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "a value becomes a list",
+    "key": "deltacases.value",
+    "states": [
+      {"a": 1},
+      [1]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": [1], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "<class 'dict'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "an element's type changes",
+    "key": "deltacases.value",
+    "states": [
+      [1, "x"],
+      [1, 2]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "type_changes", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: the first goes, then the new second",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["B", "C"],
+      ["B"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "values_changed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "values_changed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: the last goes, then the new last",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["A", "B"],
+      ["A"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: goes, then others come in its place",
+    "key": "deltacases.value",
+    "states": [
+      ["A", "B", "C"],
+      ["A"],
+      ["A", "X", "Y"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": "X", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_added", "value": "Y", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: comes, then goes",
+    "key": "deltacases.value",
+    "states": [
+      ["A"],
+      ["A", "B", "C"],
+      ["A"]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_added", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": "B", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": "C", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: rows go, one comes, then one changes",
+    "key": "deltacases.value",
+    "states": [
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A2", "twitter": "", "character": {}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}],
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}],
+      [{"name": "A1", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}],
+      [{"name": "Z", "twitter": "a1", "character": {"en_name": "Mario", "name": "Mario", "assets": {"full": {"asset": "x/mario.png"}}}}, {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_removed", "value": {"name": "A2", "twitter": "", "character": {}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 2], "action": "iterable_item_removed", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 1], "action": "iterable_item_added", "value": {"name": "A3", "twitter": "", "character": {"en_name": "Luigi", "name": "Luigi", "assets": {"full": {"asset": "x/luigi.png"}}}}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "name"], "action": "values_changed", "value": "Z", "old_value": "unknown___", "type": "<class 'str'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: a row comes, then changes",
+    "key": "deltacases.value",
+    "states": [
+      [],
+      [{"n": 1}],
+      [{"n": 2}]
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", 0], "action": "iterable_item_added", "value": {"n": 1}, "old_value": "unknown___", "type": "<class 'dict'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0, "n"], "action": "values_changed", "value": 2, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: empty text, list, element, none",
+    "key": "deltacases.value",
+    "states": [
+      "",
+      [],
+      [1],
+      []
+    ],
+    "delta": [
+      {"path": ["deltacases", "value"], "action": "type_changes", "value": [], "old_value": "unknown___", "type": "<class 'list'>", "old_type": "<class 'str'>", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0], "action": "iterable_item_added", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", 0], "action": "iterable_item_removed", "value": 1, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  },
+  {
+    "name": "joined: a new key's list grows and shrinks",
+    "key": "deltacases.value",
+    "states": [
+      {"q": 1},
+      {"q": 1, "y": [5]},
+      {"q": 1, "y": [5, 6, 7]},
+      {"q": 1, "y": [5]}
+    ],
+    "delta": [
+      {"path": ["deltacases", "value", "y", 0], "action": "iterable_item_added", "value": 5, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "y", 1], "action": "iterable_item_added", "value": 6, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "y", 2], "action": "iterable_item_added", "value": 7, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "y", 1], "action": "iterable_item_removed", "value": 6, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null},
+      {"path": ["deltacases", "value", "y", 2], "action": "iterable_item_removed", "value": 7, "old_value": "unknown___", "type": "<class 'int'>", "old_type": "unknown___", "new_path": null, "t1_from_index": null, "t1_to_index": null, "t2_from_index": null, "t2_to_index": null}
+    ]
+  }
+]

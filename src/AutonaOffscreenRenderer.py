@@ -64,9 +64,9 @@ class _Ticket:
         self.frameDeadline = None
         # What the page said its two frames took; None: it did not say.
         self.framesMs = None
-        # How far apart the grabs that have to agree are (ms; 0: one grab is
-        # the picture; None: not decided yet), until when they may disagree,
-        # and the one before the newest.
+        # How far apart the grabs that have to agree are (ms; None: not
+        # decided yet), until when they may disagree, and the one before the
+        # newest.
         self.settleEvery = None
         self.settleDeadline = None
         self.lastFrame = None
@@ -110,19 +110,18 @@ class AutonaOffscreenRenderer(QObject):
       so a page that says it for another render is not believed.
     - On a page just loaded, a grab that is still what the view showed
       before the load is the old page's: it is taken again until it is not,
-      for at most FRESH_FRAME_WAIT_MS. A render on the same page is never
-      compared with anything, so drawing the same picture again costs no
-      wait. What the view showed is taken after the view was given the new
+      for at most FRESH_FRAME_WAIT_MS. A render on the same page is not
+      compared with what came before it: the same picture again is the right
+      picture. What the view showed is taken after the view was given the new
       page's size: pictures of different sizes never compare equal, and the
       wait would be cut short by nothing but the size.
-    - Having begun two frames does not put them in the view. With a slow
-      compositor (the screen locked: a frame every 170-200 ms against 16) a
-      grab can still be a frame from before the drawing, and it is unlike the
-      page before, so nothing above stops it. So a render whose frames were
-      slow (over SLOW_FRAMES_MS, or the page did not say: _settle_every), and
-      the first on a page just loaded, which is the only time the view changes
-      size, is taken once two grabs in a row agree, for at most SETTLE_WAIT_MS.
-      A render on the same page with frames at their usual speed is one grab.
+    - Having begun two frames does not put them in the view, however fast they
+      were: a grab can still be a frame from before the drawing, and it is
+      unlike the page before, so nothing above stops it. It was taken with a
+      slow compositor (the screen locked: a frame every 170-200 ms against 16)
+      one render in thirty, and with frames at 16 ms after a while idle, on an
+      image new to the page, two in twenty-one. So every render is taken once
+      two grabs in a row agree, for at most SETTLE_WAIT_MS (_settle_every).
 
     A subclass gives the class attributes below and _resolve_template_id, and
     a way in that calls _submit(), all on the GUI thread.
@@ -153,10 +152,8 @@ class AutonaOffscreenRenderer(QObject):
     # how often it is looked at meanwhile (_finalize_render).
     FRESH_FRAME_WAIT_MS = 1000
     FRESH_FRAME_POLL_MS = 30
-    # Frames slower than this (30 ms is usual) may not have reached the view:
-    # how long grabs may go on disagreeing, and how close two may be
+    # How long grabs may go on disagreeing, and how close two may be
     # (_settle_every).
-    SLOW_FRAMES_MS = 100
     SETTLE_WAIT_MS = 1000
     SETTLE_POLL_MS = 50
     # Run in the page once it said RENDER_READY, with the render's number:
@@ -432,7 +429,6 @@ class AutonaOffscreenRenderer(QObject):
             return  # It timed out meanwhile.
 
         if ticket.settleEvery is None:
-            # Here: the step below forgets that the page is new.
             ticket.settleEvery = self._settle_every(ticket)
 
         pixmap = self._view.grab()
@@ -452,7 +448,7 @@ class AutonaOffscreenRenderer(QObject):
                     "before it; taking the picture as it is")
             self._before_load = None
 
-        if ticket.settleEvery and not self._settled(ticket, pixmap.toImage()):
+        if not self._settled(ticket, pixmap.toImage()):
             return
 
         width, height = self._size(ticket.templateId)
@@ -466,15 +462,12 @@ class AutonaOffscreenRenderer(QObject):
         self._finish(ticket, pixmap, "")
 
     def _settle_every(self, ticket):
-        """How far apart (ms) the grabs that have to agree are; 0: the first
-        is the picture. As far apart as the page's two frames took, when that
-        is more than SETTLE_POLL_MS: at 170-200 ms a frame, grabs closer than
-        that see one unfinished frame twice and agree. Not known (the page did
-        not say), half of SETTLE_WAIT_MS, so that two fit in it."""
+        """How far apart (ms) the grabs that have to agree are. As far apart
+        as the page's two frames took, when that is more than SETTLE_POLL_MS:
+        at 170-200 ms a frame, grabs closer than that see one unfinished frame
+        twice and agree. Not known (the page did not say), half of
+        SETTLE_WAIT_MS, so that two fit in it."""
         frames = ticket.framesMs
-        if self._before_load is None and frames is not None \
-                and frames <= self.SLOW_FRAMES_MS:
-            return 0
         longest = self.SETTLE_WAIT_MS // 2
         if frames is None:
             return longest

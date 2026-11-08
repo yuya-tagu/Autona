@@ -283,7 +283,9 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["qt"] == {"gui_application": False, "widgets": 0}
     imported = set(result["src_modules"])
     assert "src.headless" in imported and "src.AutonaWebServer" in imported
-    widgetModules = _widget_modules()
+    # ui_layout defines no widget (ADR-005 S4r took its last one) but is only
+    # there to build them.
+    widgetModules = _widget_modules() | {"src.ui_layout"}
     assert imported.isdisjoint(widgetModules), sorted(
         imported & widgetModules)
 
@@ -321,7 +323,7 @@ def _widget_modules():
     # The derivation finds what is known to be a widget's module.
     assert {"src.Autona", "src.AutonaScoreboardWidget",
             "src.AutonaScoreboardPlayerWidget", "src.AutonaSelectSetWindow",
-            "src.AutonaCrewBattleWidget", "src.ui_layout"} <= modules, modules
+            "src.AutonaCrewBattleWidget"} <= modules, modules
     return modules
 
 

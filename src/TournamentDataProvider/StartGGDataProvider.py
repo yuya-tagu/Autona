@@ -2307,60 +2307,54 @@ class StartGGDataProvider(TournamentDataProvider):
         return (playerData)
 
     def GetStandings(self, playerNumber, progress_callback=None,
-                     cancel_event=None, strict=False):
+                     cancel_event=None):
         """The event's first `playerNumber` standings. A request that failed
         (start.gg did not answer, answered no event, or answered something
-        that could not be read): None -- or, when `strict`, it raises
-        (LookupError for no answer), how the result's import tells it from an
-        event with no standings yet, which is []."""
-        try:
-            data = self.QueryRequests(
-                "https://www.start.gg/api/-/gql",
-                type=requests.post,
-                jsonParams={
-                    "operationName": "TournamentStandingsQuery",
-                    "variables": {
-                        "playerNumber": playerNumber,
-                        "eventSlug": self.url.split("start.gg/")[1]
-                    },
-                    "query": StartGGDataProvider.TournamentStandingsQuery
-                }
+        that could not be read) raises (LookupError for no answer), how the
+        result's import tells it from an event with no standings yet, which
+        is []."""
+        data = self.QueryRequests(
+            "https://www.start.gg/api/-/gql",
+            type=requests.post,
+            jsonParams={
+                "operationName": "TournamentStandingsQuery",
+                "variables": {
+                    "playerNumber": playerNumber,
+                    "eventSlug": self.url.split("start.gg/")[1]
+                },
+                "query": StartGGDataProvider.TournamentStandingsQuery
+            }
 
-            )
+        )
 
-            # QueryRequests answers {} once its retries are spent (or the
-            # app is stopping); an unknown slug answers a null event.
-            if strict and not isinstance(
-                    deep_get(data, "data.event", None), dict):
-                raise LookupError(
-                    "start.gg answered no event to TournamentStandingsQuery")
+        # QueryRequests answers {} once its retries are spent (or the app is
+        # stopping); an unknown slug answers a null event.
+        if not isinstance(deep_get(data, "data.event", None), dict):
+            raise LookupError(
+                "start.gg answered no event to TournamentStandingsQuery")
 
-            standings = deep_get(data, "data.event.standings.nodes", []) or []
+        standings = deep_get(data, "data.event.standings.nodes", []) or []
 
-            teams = []
+        teams = []
 
-            for standing in standings:
-                team = {}
+        for standing in standings:
+            team = {}
 
-                team["placement"] = deep_get(standing, "placement", None)
+            team["placement"] = deep_get(standing, "placement", None)
 
-                participants = deep_get(standing, "entrant.participants")
+            participants = deep_get(standing, "entrant.participants")
 
-                if len(participants) > 1:
-                    team["name"] = deep_get(standing, "entrant.name")
+            if len(participants) > 1:
+                team["name"] = deep_get(standing, "entrant.name")
 
-                team["players"] = []
+            team["players"] = []
 
-                for entrant in participants:
-                    team["players"].append(StartGGDataProvider.ProcessEntrantData(
-                        entrant, deep_get(standing, "entrant.paginatedSets.nodes")))
+            for entrant in participants:
+                team["players"].append(StartGGDataProvider.ProcessEntrantData(
+                    entrant, deep_get(standing, "entrant.paginatedSets.nodes")))
 
-                teams.append(team)
-            return (teams)
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            if strict:
-                raise
+            teams.append(team)
+        return teams
 
 
 def _QueryRequests(url, type, headers, jsonParams, params, timeout):

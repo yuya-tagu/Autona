@@ -211,9 +211,9 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 
 | ルール | 内容 |
 |------|------|
-| **R-Img-1** | レンダラーは Singleton（`ThumbnailRenderer.instance()`, `ResultPageRenderer.instance()`。パネルの `ResultRenderer.instance()` は S4r で消える）として実装 |
+| **R-Img-1** | レンダラーは Singleton（`ThumbnailRenderer.instance()`, `ResultPageRenderer.instance()`）として実装 |
 | **R-Img-2** | テンプレ選択は **プレビュー側**（プレビュー画像の直上）にコンボボックスを置く（#29 で確定済み） |
-| **R-Img-3** | テンプレ追加時は `TEMPLATE_SUBDIRS`（Thumbnail）/ `LAYOUT_SUBDIRS` ほか（Result。`core/ResultService.py`。S4r までパネルの `ResultRenderer.LAYOUTS` にも）への登録 + テンプレディレクトリ作成のみで完結する |
+| **R-Img-3** | テンプレ追加時は `TEMPLATE_SUBDIRS`（Thumbnail）/ `LAYOUT_SUBDIRS` ほか（Result。`core/ResultService.py`）への登録 + テンプレディレクトリ作成のみで完結する |
 | **R-Img-4** | レンダリング完了は HTML 側で `document.title = "RENDER_READY"` に変更してシグナル化 |
 | **R-Img-5** | Python から HTML への入力は `initThumbnail(payload)` / `initResult(payload)` の関数経由で受け渡す |
 | **R-Img-5b** | 描画の土台は `src/AutonaOffscreenRenderer.py`（ADR-005 S4q で `ThumbnailRenderer` から切り出した。`ThumbnailRenderer` と `result/ResultPageRenderer` がサブクラスで、ビューはそれぞれ別）。描画は 1 度に 1 つ（チケット。ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は `renderAsync()`（core。結果はコールバックだけ）と、サムネイルだけの `renderSync()`（SCORE・legacy。入れ子のイベントループ）。段階ごとに 10 秒で失敗し、ページを読み直す（ADR-005 S4o） |
@@ -486,8 +486,8 @@ tournamentInfo
 大会アイコン / バナーのファイル（`./layout/logo.png` は長辺 512、`./user_data/tournament_banner.png`
 は長辺 1920 の PNG）と `logoVersion` / `bannerVersion` / `media` の書き手は
 `core/TournamentMediaService.py`（取り込み・取得のジョブ・既定に戻す。ADR-005 S4f）。画像の検証・縮小・
-原子的な書き込みは配信団体素材と共通の `core/ImageImport.py`。`bannerVersion` が変わると Qt のアダプタが
-`media_updated` を出す（サムネイル / リザルトのプレビューが受ける）。大会の設定・解除（`TOURNAMENT_URL`）は
+原子的な書き込みは配信団体素材と共通の `core/ImageImport.py`。`bannerVersion` は state なので、React のページ（サムネイル /
+リザルトのプレビュー）はそれを見て描き直す。大会の設定・解除（`TOURNAMENT_URL`）は
 どの入口からでも `core/TournamentService.py` を通り、解除はゲーム選択も忘れる。`url` / `load` の書き手も
 `TournamentService`（設定 / 解除の受け付け時に、要求したスレッドで publish する。`POST` / `DELETE /api/v1/tournament` の
 202 はその後。起動時のシードは `StateSchema.SeedPanelState()`）。
@@ -547,7 +547,7 @@ thumbnail
 書き手は core の `src/core/ThumbnailService.py` だけ。`stream.thumbnail` と同じ形で、SCORE の同期の生成と legacy の
 `get-thumbnail` は通らない（それらは今までどおり画像のパスを返す）。
 
-**`result_players` / `result_teams` / `result_render` / `result_standings`（大会リザルト。ADR-005 S4q）**
+**`result_players` / `result_teams` / `result_render` / `result_standings` / `result_layout`（大会リザルト。ADR-005 S4q / S4r）**
 
 ```
 result_players
@@ -568,12 +568,15 @@ result_standings                   standings の取り込みの状態
 ├── status                         idle | running | done | error
 ├── error                          fetch_failed / no_standings / changed / import_failed
 └── revision                       取り込みごとに 1 増える（`POST /result:loadStandings` の 202 の `standingsRevision`）
+result_layout                      今のレイアウトの写し（文字列。正本は settings.json の result_config.layout。選ばれるか対戦形式に追従するまで ""）
 ```
 
 行の正本は state で、`state.json` に残る（「すべてクリア」= `POST /result:clear` まで消えない）。書き手は core の
-`src/core/ResultService.py` と、**S4r までは** Qt パネルの `AutonaActions.PublishResultPlayers`（パネルは state から復元せず、
-団体の行も `result_players` に書く。読み手は `members` を持つ行を単独の行として読まない）。`result_render` と
+`src/core/ResultService.py` だけ（ADR-005 S4r で Qt パネルと `AutonaActions.PublishResultPlayers` を削除した）。パネルが
+`result_players` に残した団体の行（`members` を持つ行）は、起動のたびの `StateSchema.SeedPanelState()` が消す。`result_render` と
 `result_standings` は起動のたびに idle へ戻る（revision は続く）。行はシードしない（無い行は既定値で読む）。
+`result_layout` はページがレイアウトの変化を知るための写しで、起動のたびに `""` へ戻り、`ResultService.SetLayout` /
+`FollowBattleFormat` が書く（サイドバーの対戦形式の切り替えはページの操作ではなく、レイアウトが保存されていなければ設定にも書かれない）。
 保存された別のゲームのキャラ（再起動をまたいでゲームが変わった場合など）は state に残り、`ResultService` の読みで無いものとして
 扱う（描かない・スコアボードからの補完が効く・ページにも空で返す）。ゲームの切り替えで消す `ForgetCharacters` は今までどおり。
 
@@ -720,7 +723,7 @@ Qt モデルなし）・Web サーバーを動かす。デスクトップと共�
 | ルール | 内容 |
 |------|------|
 | **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず Web 操作経由**（`AutonaWebOperations`。ADR-005 S3c。ボード依存の `WebServerActions` は S3e-9 で削除）。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も Web 操作経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md) の「Step 5 完了時点の書き手台帳」）。`src/core` 外に残る書き手は `AutonaTournamentDataProvider`（`provider_videogame`）の 1 つだけで、Qt ウィジェットではない provider 層（`game.*` は 2026-10-23 の ADR-005 S1a で `src/core/GameAssetCatalog.py` へ移動）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
-| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル / リザルト順位（第 5 弾。同じ弾の実況スロットは ADR-005 S3e-2 で `core/CommentaryService` へ移った。下記）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（鏡映）を 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOf`）**（ADR-005 S2e。`best_of` の 6 キーとステージ行を 1 保存サイクルで書く。行はボードが登録したトラッカーに操作の中で作り直させ、BEST OF のスピンボックスと行は state を描画する。旧実装はスピンボックス主導だった）、**人数・キャラ数（`SetRoster` / ゲームのロードの `ApplyGameRoster`）**（ADR-005 S3e-6。選手スロットとキャラ枠の増減・1 人になるときのチーム名のクリアを 1 保存サイクルで書く。ボードは held サイクルの中でカードを state のスロットに合わせて作り / 退役させ、破棄はイベントループに戻ってから行う。旧実装は 2 つのスピンボックス（`playerNumber` / `charNumber`）とカードが書き、ヘッドレスでは変えられなかった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**。行数は S2e から `AutonaActions.SetBestOf` が決め、ウィジェットはサービスの `rowsVersion` を見てボタンを作り直す）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードの操作（ストック・出場中のメンバー・人数・スワップ・リセット・クリア・`best_of`。チーム合計がメンバーストックの派生値なので Actions に載せず、ADR-005 S3e-2 からはボードの入力欄も Web も `CrewBattleService` の同じ操作を呼ぶ）/ **実況の 12 スロット**（`commentary.*`。ADR-005 S3e-2 から書き手は `core/CommentaryService` で、パネルの入力欄も Web の `set_commentary_data` / `load_commentator_from_tag` も同じ関数を呼び、パネルは state を描画するだけ）/ **選手スロットの読込・クリア・DB 保存**（`score.{n}.team.{t}.player.{m}.*`。ADR-005 S3e-3 から `core/PlayerService` の `ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決まで）/ `ClearSlot` / `SavePlayerToDB` で、セットの entrants・Web の選手編集・タグからの読込・補完の選択・カードのクリアボタンが同じ操作を呼び、カードは state を描画するだけ）/ **スコア欄への数値の手入力**（スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。 |
+| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル（第 5 弾。同じ弾のリザルト順位は ADR-005 S4r で `core/ResultService` へ、実況スロットは ADR-005 S3e-2 で `core/CommentaryService` へ移った。下記）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（鏡映）を 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOf`）**（ADR-005 S2e。`best_of` の 6 キーとステージ行を 1 保存サイクルで書く。行はボードが登録したトラッカーに操作の中で作り直させ、BEST OF のスピンボックスと行は state を描画する。旧実装はスピンボックス主導だった）、**人数・キャラ数（`SetRoster` / ゲームのロードの `ApplyGameRoster`）**（ADR-005 S3e-6。選手スロットとキャラ枠の増減・1 人になるときのチーム名のクリアを 1 保存サイクルで書く。ボードは held サイクルの中でカードを state のスロットに合わせて作り / 退役させ、破棄はイベントループに戻ってから行う。旧実装は 2 つのスピンボックス（`playerNumber` / `charNumber`）とカードが書き、ヘッドレスでは変えられなかった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**。行数は S2e から `AutonaActions.SetBestOf` が決め、ウィジェットはサービスの `rowsVersion` を見てボタンを作り直す）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードの操作（ストック・出場中のメンバー・人数・スワップ・リセット・クリア・`best_of`。チーム合計がメンバーストックの派生値なので Actions に載せず、ADR-005 S3e-2 からはボードの入力欄も Web も `CrewBattleService` の同じ操作を呼ぶ）/ **実況の 12 スロット**（`commentary.*`。ADR-005 S3e-2 から書き手は `core/CommentaryService` で、パネルの入力欄も Web の `set_commentary_data` / `load_commentator_from_tag` も同じ関数を呼び、パネルは state を描画するだけ）/ **選手スロットの読込・クリア・DB 保存**（`score.{n}.team.{t}.player.{m}.*`。ADR-005 S3e-3 から `core/PlayerService` の `ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決まで）/ `ClearSlot` / `SavePlayerToDB` で、セットの entrants・Web の選手編集・タグからの読込・補完の選択・カードのクリアボタンが同じ操作を呼び、カードは state を描画するだけ）/ **スコア欄への数値の手入力**（スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -731,6 +734,7 @@ Qt モデルなし）・Web サーバーを動かす。デスクトップと共�
 |------|------|
 | **R-Sync-5** | StateManager は変更ごとに **`revision`**（単調増加の整数）を付与する |
 | **R-Sync-6** | `program_state_update` イベントには `{ revision, first_revision, delta }` を含める。サーバーの delta coalescing は複数の `state_updated` emit（= 複数 revision）を 1 メッセージへ結合するため、payload は連続区間 `[first_revision, revision]` を表す。`first_revision` 欠落時（旧 payload）はクライアントが `revision` 単一と見なす。同一 revision 内で複数 chunk に分けて送る必要がある場合は `{ revision, chunk_index, chunk_total, delta }` の形式で chunk 順序を保証する |
+| **R-Sync-6a** | `delta` の行は受信順に 1 行ずつ適用できる（結合された revision の区切りはメッセージに無い）。リストは位置ごとに比べるので、行は各位置の値と末尾の増減だけで、型の変更も値を省かない（`SaveState` のオプションと `web/src/stateDelta.cases.json`。詳細は `.claude/rules/state-and-webserver.md`） |
 | **R-Sync-7** | `program_state` イベント（full snapshot）には `{ revision, state }` を含める |
 | **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
@@ -825,7 +829,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
 | `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等）。読み書きは `src/core/ThumbnailService.py`（ADR-005 S4o。読みは既定値を書かない）。v1 で取り込んだ背景は `user_data/thumbnail_background_<ハッシュ>.*` |
-| `result_config.*` | リザルト生成設定（layout, logo_path 等）。`layout` は `core/ResultService.py` が読み書きする（`PATCH /api/v1/result`。パネルのコンボはこれを読まない: S4r で 1 つになる）。`main_icon_path` / `background_path` は読むだけで、クライアントからは書けない。色は保持しない — `prepare_data()`（パネル）と `ResultService` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
+| `result_config.*` | リザルト生成設定（layout, logo_path 等）。`layout` は `core/ResultService.py` が読み書きする（`PATCH /api/v1/result`）。`main_icon_path` / `background_path` は読むだけで、クライアントからは書けない。色は保持しない — `ResultService` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
 | `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消（仕様・ロックの詳細は `docs/changes/layout-custom-unification.md` §7） |
@@ -874,7 +878,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | 1 | `WebPanels`（共有ホスト。ナビの文言は `Tournament Info`、ナビのキーは `event`） | React の `EventPage`（`/web/event`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4g）。Qt 版（`AutonaTournamentInfoWidget` と `.ui`）は S4g で削除済み | 大会の設定・再取得・解除（確認つき）と状態の表示、大会名・イベント名・場所・参加人数・開催日の編集、ゲームの選択、大会カラー、大会アイコン / バナー（取り込み・大会から取得・既定に戻す）。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・日付）、アイコン / バナーは `src/core/TournamentMediaService.py`、大会の設定・解除は `src/core/TournamentService.py`（ADR-005 S4f）、カラーは `src/core/ColorService.py` で、ページは `/api/v1`（`tournament*`・`colors/tournament`・`game`）を呼んで state を描画するだけ | `tournamentInfo.*`（core 経由） | `tournamentInfo.*`（URL と状態の `url` / `load` を含む）、`game`、`GET /api/v1/games`（`game` の変化とページの再表示で読み直す） | ✓（最初に表示） |
 | 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `WebPanels`（共有ホスト。ナビの文言は `Thumbnail Settings`、ナビのキーは `thumbnail`） | React の `ThumbnailPage`（`/web/thumbnail`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4p）。Qt 版（`AutonaThumbnailSettingsWidget` と `.ui`）は S4p で削除済み | テンプレート・背景（既定 / 大会バナー / アップロードした画像）・表示する項目・今のゲームのキャラ画像の配置・機能別カラー・既定に戻す（確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび）、サムネイルの作成（`out/thumbnails/`）と作成した画像のコピー、動画タイトル。**処理の正本は `src/core/ThumbnailService.py`**（ADR-005 S4o）で、ページは `/api/v1/thumbnail*`・`colors/thumbnail` を呼んで `thumbnail.render` を描画するだけ。SCORE の生成・X 投稿と legacy の get-thumbnail も同じ `RenderPayload()`（読み済みの設定）で描く | `thumbnail_config.*`（settings.json。core 経由） | `thumbnail.render`、ボード 1 の `score.1.*`、`tournamentInfo.*`、`game`、`colors.thumbnail.*`、`GET /api/v1/thumbnail` | ✓ |
-| 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers`。同じ機能の core と v1（`core/ResultService.py`、`/api/v1/result*`）は ADR-005 S4q で並んだが、パネルはまだ通らない（S4r で React のページに置き換える） | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
+| 3 | `WebPanels`（共有ホスト。ナビの文言は `Result Settings`、ナビのキーは `result`） | React の `ResultPage`（`/web/result`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4r）。Qt 版（`AutonaResultSettingsWidget` と `.ui`、`result/main_generate_result.py`、`result/ResultRenderer.py`）は S4r で削除済み | レイアウト選択（対戦形式に追従）、単独の行（順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ・スコアボードから補完の表示）と団体の行（順位・チーム名・メンバー 5 人）の編集、並べ替え（上下ボタン + ドラッグ）、大会結果の読み込み（確認つき）、すべてクリア（今の種類だけ・確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび。サンプルの表示つき）、作成（`out/results/`）と作成した画像のコピー、1 クリックの X 投稿（作成 + クリップボード + 既定のブラウザで投稿画面）、選手を DB に保存、機能別カラー。**処理の正本は `src/core/ResultService.py`**（ADR-005 S4q）で、ページは `/api/v1/result*`・`colors/result` を呼んで state を描画するだけ | `result_players` / `result_teams`、`result_config.layout`（settings.json）（core 経由） | `GET /api/v1/result`・`GET /api/v1/result/post`、`result_render`、`result_standings`、`result_layout`、`score.*`（補完）、`tournamentInfo.*`、`game`、`colors.result.*` | ✓ |
 | 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
@@ -1170,28 +1174,16 @@ layout/result_team_split/     ← team_split（1位2位を縦並びで左に大�
 layout/result_{x}/            ← 新規追加
 ```
 
-##### `ResultRenderer.LAYOUTS` の規約
+##### レイアウトの表の規約
 
-```python
-LAYOUTS = {
-    "horizontal":     ("result",              1920, 1080),
-    "horizontal_16":  ("result_top16",        1920, 1080),
-    "vertical":       ("result_vertical",      960, 1080),
-    "vertical_geki":  ("result_vertical_geki", 960, 1080),
-    "team":           ("result_team",         1920, 1080),
-    "team_split":     ("result_team_split",   1920, 1080),
-    # 新規追加例: "vertical_custom": ("result_vertical_custom", 960, 1080),
-}
-DEFAULT_LAYOUT = "horizontal"
-```
-
-レイアウト名は `AutonaResultSettingsWidget` の layoutCombo の currentData に対応する（§7.3）。
-core と v1 は同じ表を `core/ResultService.py` の `LAYOUT_SUBDIRS` / `LAYOUT_SIZES` / `LAYOUT_NAMES` に持つ（core は Qt のレンダラーを import できないため。ADR-005 S4q）。**S4r までレイアウトの追加は両方に登録する**。S4r で `ResultRenderer` が消えて 1 つになる。
+表の正本は `core/ResultService.py` の `LAYOUT_SUBDIRS`（id → `layout/` のフォルダ）/ `LAYOUT_SIZES`（幅 × 高さ）/ `LAYOUT_NAMES`（`.ts` の訳の source）で、
+枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。レンダラー（`result/ResultPageRenderer.py`）はこの表を読む（ADR-005 S4r で表は 1 つになった）。
+ページの選択肢は `GET /api/v1/result` の `layouts` を描く（§7.3）。
 
 ##### team レイアウト（チーム / Crewbattle）
 
 - 横向き Top-8 グリッド（`result/result.css`）を土台に、各順位枠を「チームカード」として描画する。`result/result.js` の `placeTeams()` が `payload.layout === "team"` のとき呼ばれ、枠ごとにチームのメンバー（2-5 人）のメインファイターを横並びに配置し、各ファイターの右下に選手名を反時計回り 90°回転（下→上読み）で重ね、枠下にチーム名プレートを置く。選手名は全角 5-10 文字を縦長に収める想定で、ファイター下部に暗いフェードを敷いて視認性を確保する。styling は `result_team/result.css`（base を `@import` してチーム枠を上書き）。
-- データは `result_teams[N]` に `members: [{ name, twitter, character }, ...]` を持つ（行の `name` はチーム名。ADR-005 S4q で `result_players` から分けた）。`PATCH /api/v1/result/teams/{n}` で手入力でき、Start.gg のチーム standings からの自動取得にも対応する（ロスター全員 + mains）。**S4r までは** `AutonaResultSettingsWidget` の Teams グループ（順位 × 最大5メンバー）が従来どおり `result_players[N]` に書く（パネル自身の描画はそれを使う）。
+- データは `result_teams[N]` に `members: [{ name, twitter, character }, ...]` を持つ（行の `name` はチーム名。ADR-005 S4q で `result_players` から分けた）。`PATCH /api/v1/result/teams/{n}` で手入力でき、Start.gg のチーム standings からの自動取得にも対応する（ロスター全員 + mains）。React のページ（`/web/result`）では団体の行（順位・チーム名・最大 5 メンバー）がこれを編集する（S4r）。
 - 旧 team レイアウト（チーム名 + ロスター文字列のみのテキストプレート）はファイター版に置き換え済み。
 - `team_split` は `team` のバリアント。`result_team_split/result.css` が `result_team/result.css` を `@import` して **グリッド配置のみ** 差し替える（1位2位を左カラムの縦並び、3-8位を右カラムの縦並び）。メンバー横並び・回転名・下部フェード等の演出は `team` から継承。レンダラーは `placeTeams()` を共有（`layout` が `team` で始まれば team系扱い）。
 
@@ -1243,8 +1235,8 @@ async function initResult({ data, config, layout }) {
 | Thumbnail final | `./out/thumbnails/` | `{tag1}-vs-{tag2}-{YYYYMMDDTHHmmssZ}.png` |
 | Thumbnail final | 同上 | `{tag1}-vs-{tag2}-{YYYYMMDDTHHmmssZ}_title.txt` / `_desc.txt`（YouTube メタデータ。**現状は常時生成**。将来は `thumbnail_config.generate_metadata = true` の設定で制御する。設定化は §8 の移行タスクで対応） |
 | Thumbnail preview | `AutonaResolve("tmp/thumbnail")` | `preview.png`（v1 の `:preview` / `:generate` が毎回上書き。`GET /api/v1/thumbnail/preview` が配信。Qt 版の `template.png` は S4p で無くなった） |
-| Result final | `./out/results/` | `{tournament}-top{n}-{YYYY-MM-DD-HH-MM-SS}.png`（UTC。v1 は大会名が空のとき `result-top{n}-...`。パネルは `-top{n}-...` のまま） |
-| Result preview | `AutonaResolve("tmp/result")` | `result_preview.png`（v1 の `:preview` / `:generate` が毎回上書き。`GET /api/v1/result/preview` が配信）と `preview.png`（パネルが毎回上書き。S4r で無くなる） |
+| Result final | `./out/results/` | `{tournament}-top{n}-{YYYY-MM-DD-HH-MM-SS}.png`（UTC。大会名が空のときは `result-top{n}-...`） |
+| Result preview | `AutonaResolve("tmp/result")` | `result_preview.png`（v1 の `:preview` / `:generate` が毎回上書き。`GET /api/v1/result/preview` が配信） |
 
 特殊文字（`<>:"/\|?* ` 等）は識別子から除去する（R-Img-7）。
 
@@ -1685,12 +1677,12 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/result/ResultRenderer.py` の `LAYOUTS` | `"vertical_top32": ("result_vertical_top32", 960, 1080)` を追加 |
+| 1 | `src/core/ResultService.py` の `LAYOUT_SUBDIRS` / `LAYOUT_SIZES` / `LAYOUT_NAMES` | `"vertical_top32"` を追加（`result_vertical_top32`・960 × 1080・表示名） |
 | 2 | `layout/result_vertical_top32/result.html` | 新規 HTML（`async function initResult(payload)` 実装） |
 | 3 | `layout/result_vertical_top32/result.css` | 新規 CSS |
 | 4 | `layout/result_vertical_top32/result.js` | 新規 JS（CSS-only テンプレなら省略可） |
-| 5 | `src/AutonaResultSettingsWidget.py` の `layoutCombo` | `addItem("Vertical TOP32", "vertical_top32")` を追加 |
-| 6 | `_max_players_for_layout()` | TOP32 → 32 人の対応行を追加 |
+| 5 | `src/core/ResultService.py` の `SlotsFor()` と `SLOT_COUNTS` | TOP32 → 32 行の対応を追加（行の数はページも `layouts[].slots` で追う） |
+| 6 | `src/i18n/Autona_*.ts`（手動 + `compile_translations.ps1`）と `web/src/i18n/locales/{en,ja}.json` の `result_layout_<id>` | 表示名（ページの文言が無ければ `layouts[].name`） |
 
 #### 触らない
 
@@ -1887,7 +1879,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |----|------|------|--------|------|
 | **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
 | **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `AutonaCommentaryWidget.py`（当時。S4c で削除） | ✅ 完了（M1a）→ 2026-07 リワークでスロット固定 12 名化により概念ごと消滅 |
-| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
+| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`（ADR-005 S4r で削除）, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
 | **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, `out/program_state.json` への埋め込み | ✅ 完了（M1b） |
 | **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/redux/tshState.ts`, `web/src/ScoreboardPage/websocketInit.ts` | ✅ 完了（M1b） |
 | **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` | ✅ 完了（M1a） |

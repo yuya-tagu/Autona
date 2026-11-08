@@ -358,7 +358,8 @@ def StaticPath(filename):
 # "top8" is the Top 8 display settings (S4i); "stats" is 統計情報, the
 # tournament's match list included (S4k);
 # "statsPreview" is 統計情報表示設定 (S4l);
-# "playerBrowser" is 選手リスト (S4n); "thumbnail" is サムネイル (S4p).
+# "playerBrowser" is 選手リスト (S4n); "thumbnail" is サムネイル (S4p);
+# "result" is 大会リザルト (S4r).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -369,6 +370,7 @@ WEB_PANELS = frozenset({
     "statsPreview",
     "playerBrowser",
     "thumbnail",
+    "result",
 })
 
 

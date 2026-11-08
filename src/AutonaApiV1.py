@@ -2288,6 +2288,30 @@ def _result_pick(value, name):
     return value["en_name"], skin, game
 
 
+def _result_places(value, count, name):
+    # The places to change, by number from "1", of what stays otherwise.
+    if not value or set(value) - {str(n) for n in range(1, count + 1)}:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"{name} must name places from 1 to {count}", 400)
+    return value
+
+
+def _result_member(member):
+    # The keys it names: as a list's element the others are empty, as a place's
+    # they stay as they are.
+    if not isinstance(member, dict) \
+            or set(member) - set(_RESULT_MEMBER_FIELDS):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"a member must be an object of "
+            f"{', '.join(_RESULT_MEMBER_FIELDS)}", 400)
+    return {
+        field: _result_pick(value, "a member's character")
+        if field == "character" else _result_text(value, field)
+        for field, value in member.items()}
+
+
 def _result_refused(refused):
     # What UpdatePlayer / UpdateTeam refused: nothing was written.
     if refused is None:
@@ -2343,8 +2367,9 @@ def result_update():
 def result_player_update(slot):
     # Some of {"rank": int, "name", "sponsor", "twitter": str ("" empties it),
     # "characters": up to three of {"en_name", "skin", "game"} or null for an
-    # empty one, replacing them all}: one row of the singles' layouts, in one
-    # save cycle (ResultService.UpdatePlayer). The values are built by core
+    # empty one, replacing them all, or {"1".."3": the same}, changing those
+    # places only}: one row of the singles' layouts, in one save cycle
+    # (ResultService.UpdatePlayer). The values are built by core
     # from the catalog. Nothing is written when anything is refused: 400 for a
     # bad field or a character the catalog does not have, 409 CONFLICT for one
     # whose "game" is not the game loaded.
@@ -2355,6 +2380,11 @@ def result_player_update(slot):
     for key, value in body.items():
         if key == "rank":
             fields[key] = _result_rank(value)
+        elif key == "characters" and isinstance(value, dict):
+            fields[key] = {
+                place: _result_pick(pick, "a character")
+                for place, pick in _result_places(
+                    value, results.MAX_CHARACTERS, key).items()}
         elif key == "characters":
             if not isinstance(value, list) \
                     or len(value) > results.MAX_CHARACTERS:
@@ -2374,7 +2404,8 @@ def result_player_update(slot):
 def result_team_update(slot):
     # Some of {"rank": int, "name": str, "members": up to five of {"name",
     # "twitter": str, "character": {"en_name", "skin", "game"} or null},
-    # replacing them all}: one row of the team layouts, in one save cycle
+    # replacing them all, or {"1".."5": some of those keys}, changing those keys
+    # of those places only}: one row of the team layouts, in one save cycle
     # (ResultService.UpdateTeam). Refused as PATCH /result/players/<n> is.
     slot = _result_slot(slot, results.TEAMS)
     body = _json_body()
@@ -2385,6 +2416,11 @@ def result_team_update(slot):
             fields[key] = _result_rank(value)
         elif key == "name":
             fields[key] = _result_text(value, key)
+        elif isinstance(value, dict):
+            fields[key] = {
+                place: _result_member(member)
+                for place, member in _result_places(
+                    value, results.MAX_MEMBERS, key).items()}
         else:
             if not isinstance(value, list) \
                     or len(value) > results.MAX_MEMBERS:
@@ -2392,22 +2428,7 @@ def result_team_update(slot):
                     INVALID_ARGUMENT,
                     f"members must be a list of up to {results.MAX_MEMBERS}",
                     400)
-            members = []
-            for member in value:
-                if not isinstance(member, dict) \
-                        or set(member) - set(_RESULT_MEMBER_FIELDS):
-                    raise ApiError(
-                        INVALID_ARGUMENT,
-                        f"a member must be an object of "
-                        f"{', '.join(_RESULT_MEMBER_FIELDS)}", 400)
-                members.append({
-                    "name": _result_text(member.get("name", ""), "name"),
-                    "twitter": _result_text(member.get("twitter", ""),
-                                            "twitter"),
-                    "character": _result_pick(member.get("character"),
-                                              "a member's character"),
-                })
-            fields[key] = members
+            fields[key] = [_result_member(member) for member in value]
     _result_refused(WebOps.update_result_team(slot, fields))
     return ok(revision=current_revision())
 

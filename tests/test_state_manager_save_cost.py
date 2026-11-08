@@ -162,7 +162,8 @@ def test_a_save_cycle_builds_the_delta_once(monkeypatch):
     assert len(built) == 1, "the delta rows were built more than once"
     assert len(payloads) == 1
     # The payload still carries exactly the rows of that one Delta.
-    assert payloads[0]["delta"] == real(built[0]).to_flat_dicts()
+    assert payloads[0]["delta"] == real(
+        built[0], always_include_values=True).to_flat_dicts()
     assert "once" in str(payloads[0]["delta"])
 
 

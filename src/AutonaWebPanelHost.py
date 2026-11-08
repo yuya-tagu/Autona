@@ -51,10 +51,11 @@ The right-click menu offers editing only (ContextActions): the view is a
 panel, not a browser, so Chromium's back / reload / view-source entries are
 not on it (S4b). Page script may write the clipboard (S4e: the Stream
 page's thumbnail copy), so the view shows this server's pages only: the
-page refuses to navigate itself anywhere else (_PanelPage), and a panel
-links outside with target="_blank" only (a new window, which the view does
-not make). The Window builds the host from the factory of the first
-React panel opened and calls ShowPanel() on every reveal of a React
+page refuses to navigate itself anywhere else (_PanelPage). A panel links
+outside by a new window (target="_blank", window.open from a click): the view
+makes none, and hands an http(s) one to the default browser, the X post's
+composer among them (S4r). The Window builds the host from the factory of the
+first React panel opened and calls ShowPanel() on every reveal of a React
 panel's sidebar item; WebPanelPages keeps the items' pages straight (S4e:
 several items, one host page).
 
@@ -67,7 +68,7 @@ import logging
 from urllib.parse import quote, urlencode
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtGui import QColor
+from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
@@ -124,6 +125,11 @@ _HOST_NAVIGATIONS = (
     QWebEnginePage.NavigationType.NavigationTypeReload,
 )
 
+# What a new window of a panel's may be opened with: the web. Never file: or a
+# scheme an installed application registered, which would have a page of the
+# network's start whatever it names.
+_OUTSIDE_SCHEMES = ("http", "https")
+
 
 class _PanelPage(QWebEnginePage):
     """The shared view's page: it stays on this server's pages.
@@ -131,11 +137,14 @@ class _PanelPage(QWebEnginePage):
     The invariant the clipboard rests on (S4e): page script may write the
     clipboard (JavascriptCanAccessClipboard), so the view must never show
     a page that is not this server's. The panels keep to it -- an outside
-    link opens a new window (target="_blank"), which the view does not
-    make -- and this enforces it: a navigation the page starts itself (a
-    link, a form, script, a redirect) of the main frame is refused unless it
-    stays on the page's own origin (that of the URL the host loaded). The
-    host's own loads go through.
+    link opens a new window, which the view does not make -- and this enforces
+    it: a navigation the page starts itself (a link, a form, script, a
+    redirect) of the main frame is refused unless it stays on the page's own
+    origin (that of the URL the host loaded). The host's own loads go through.
+
+    A new window goes to the default browser instead, when it is the web's
+    (S4r). Script without the operator's click does not get here
+    (JavascriptCanOpenWindows, _EnsureView).
 
     Qt reports a refused navigation as a failed load (loadFinished(False))
     although the document stays: ``refusedLast`` tells the host so, until
@@ -144,6 +153,23 @@ class _PanelPage(QWebEnginePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.refusedLast = False
+        self.newWindowRequested.connect(self._OpenOutside)
+
+    def _OpenOutside(self, request):
+        # Not opened in the view: nothing calls request.openIn(), and the
+        # view's createWindow() makes no page. Only for a click: a page of the
+        # panels asks in one, and the operating system's browser is not to be
+        # started by a script alone. The host only in the log: the query of the
+        # post on X is the operator's text.
+        url = request.requestedUrl()
+        if not (url.isValid() and url.scheme() in _OUTSIDE_SCHEMES):
+            logger.warning("The web panel view refused to open %s",
+                           url.toDisplayString())
+        elif not request.isUserInitiated():
+            logger.warning("The web panel view refused a window no click "
+                           "asked for, of %s", url.host())
+        elif not QDesktopServices.openUrl(url):
+            logger.warning("The system could not open a link of %s", url.host())
 
     def acceptNavigationRequest(self, url, navigationType, isMainFrame):
         if not isMainFrame:
@@ -326,6 +352,18 @@ class AutonaWebPanelHost(QWidget):
         # ever shows this server's own pages (_PanelPage).
         self.view.settings().setAttribute(
             QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
+        # On by default: script could then ask for new windows by itself, and
+        # each would be a page of the default browser's (_PanelPage). From a
+        # click it still may (measured on PySide6 6.11: window.open in a click
+        # reaches newWindowRequested with this off, without a click it does
+        # not), which is all a panel does.
+        self.view.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
+        # From a click Qt would otherwise hand a link of a scheme it does not
+        # know (ms-calculator:) to the operating system by itself, a frame's
+        # without asking _PanelPage.
+        self.view.settings().setUnknownUrlSchemePolicy(
+            QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
         self._layout.addWidget(self.view)
         self._loader = LocalPageLoader(self.view, self)
         self._loader.finished.connect(self._OnLoadFinished)

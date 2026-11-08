@@ -110,9 +110,9 @@ interface CharacterList {
 // `reload`. The page's first read failing fails the page (`failed`, the
 // argument); a later read failing is told (S4i review M2) when it leaves
 // the state's game without a list -- the game changed -- and is silent
-// when the list it has is for this game.
-function useCharacters(codename: string, loads: number,
-                       failed: () => void): CharacterList {
+// when the list it has is for this game. Shared with the Result page (S4r).
+export function useCharacters(codename: string, loads: number,
+                              failed: () => void): CharacterList {
     const [read, setRead] = React.useState<{codename: string;
                                             list: Characters} | null>(null);
     // The game the last read failed for, while no list for it is read.

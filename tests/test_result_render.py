@@ -292,9 +292,10 @@ def test_the_shell_hands_on_a_failed_result(renderer, monkeypatch):
     from src.AutonaScoreboardManager import AutonaScoreboardManager
 
     monkeypatch.setattr(ResultPageRenderer, "_instance", renderer)
-    renderer.STAGE_TIMEOUT_MS = 500
     answers = []
     assert _render(renderer, "horizontal")[1] == ""
+    # After the page's load, which on a busy machine takes longer than this.
+    renderer.STAGE_TIMEOUT_MS = 500
 
     AutonaScoreboardManager.instance.StartImageRender(
         "result", ({}, {"hang": True}, "horizontal"),
@@ -546,13 +547,3 @@ def test_a_generate_through_the_route_saves_a_png(service, client, autonaApp):
     assert Image.open(png).format == "PNG"
     assert Image.open(png).size == (1920, 1080)
     assert not png.with_suffix(".jpg").exists()
-    # And the panel's file is not this one's.
-    assert results.PREVIEW_PATH != "./tmp/result/preview.png"
-
-
-def test_the_panels_renderer_is_its_own_until_it_goes(autonaApp):
-    # Until S4r the Qt panel renders with result/ResultRenderer.
-    source = (PROJECT_ROOT / "src" / "result" / "ResultRenderer.py") \
-        .read_text(encoding="utf-8")
-
-    assert "AutonaOffscreenRenderer" not in source

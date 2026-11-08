@@ -26,9 +26,10 @@ operations below (`ClearTeamRoster` / `TrimTeamRoster`; the count itself,
 subtree's own writer, `core/PlayerService.py`. The final instalment added the
 operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
 `SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
-core/CommentaryService.py by ADR-005 S3e-2) /
-`PublishResultPlayers` -- which is what took the last `StateManager.Set` out
-of a Qt widget (the ledger of what remains is in
+core/CommentaryService.py by ADR-005 S3e-2) / `PublishResultPlayers` (gone with
+the Qt panel, ADR-005 S4r: core/ResultService.py writes the rows) -- which is
+what took the last `StateManager.Set` out of a Qt widget (the ledger of what
+remains is in
 docs/changes/headless-core-redesign.md). ADR-005 S2c then moved the swap
 (`SwapTeams` / `SwapPlayers`): since S2a the player cards render their slot
 from the state, so a swap exchanges the slots here instead of copying field
@@ -1320,27 +1321,6 @@ class AutonaActions:
         """
         return self._SetIfChanged(
             f"{schema.STREAM_ROOT}.{schema.STREAM_TITLE_KEY}", title or "")
-
-    # ── whole-subtree publishes (result rosters) ──────────────────────────
-    #
-    # The RESULT panel holds its data in Qt inputs and republishes the whole
-    # subtree on every edit, which is the shape of the operation rather than
-    # an accident: an overlay reads one dict of slots, and a partial write
-    # would leave it rendering a mix of two edits. What moved here is the key
-    # and the fact that the write happens at all; assembling the dict stays
-    # with the panel, because the values come out of combos whose rows are Qt
-    # models (the line the player card drew too, until ADR-005 S1d moved its
-    # values into PlayerService; the panel follows with S4). The caster
-    # line-up had the same operation until ADR-005 S3e-2, when its writes
-    # moved to core/CommentaryService.py.
-
-    def PublishResultPlayers(self, players):
-        """Publish the RESULT panel's placement list (`result_players.*`).
-
-        One key for both layouts: the panel writes either the singles entries
-        or the team entries, whichever its current layout uses.
-        """
-        StateManager.Set(schema.RESULT_PLAYERS_ROOT, players)
 
     # ── 反映 (deferred publication) ───────────────────────────────────────
 

@@ -131,11 +131,14 @@ function skinIcon(entry: CharacterEntry | undefined, row: number): string | null
     return assetUrl(assets?.["base_files/icon"]?.asset);
 }
 
-function StateText({label, value, send, width}: {
+export function StateText({label, value, send, width, readOnly}: {
     label: string;
     value: string;
     send: (value: string) => unknown;
     width?: number;
+    // Not disabled: a focused field that is disabled never hears it lost the
+    // focus (Chrome), and useStateField would go on taking it as focused.
+    readOnly?: boolean;
 }) {
     // The controls are for fields with suggestions.
     const {pick, replace, ...field} = useStateField(value, send);
@@ -144,6 +147,7 @@ function StateText({label, value, send, width}: {
             size="small"
             label={label}
             {...field}
+            slotProps={{htmlInput: {readOnly}}}
             sx={width ? {width, flexShrink: 0} : {flex: 1, minWidth: 0}}
         />
     );
@@ -247,19 +251,23 @@ const filterCharacters = createFilterOptions<CharacterEntry>({
     stringify: (entry) => `${text(entry.name)} ${text(entry.en_name)}`,
 });
 
-function CharacterFields({value, characters, send}: {
-    // The state's characters["1"].
-    value: unknown;
+// A character and its colour, as one choice: shared with the Result page,
+// whose rows are told their picks by the server (S4r).
+export function CharacterSelects({pick, characters, send, characterLabel,
+                                  colorLabel, readOnly}: {
+    // What the state has.
+    pick: CharacterPick;
     // GET /api/v1/characters for the state's game; null while it is read
     // (the selects are disabled: no pick on the previous game's list).
     characters: Characters | null;
     send: (pick: CharacterPick) => unknown;
+    characterLabel?: string;
+    colorLabel?: string;
+    readOnly?: boolean;
 }) {
     const options = React.useMemo(
         () => Object.values(characters ?? {}), [characters]);
-    const stateKey = React.useMemo(
-        () => (characters ? pickKey(characterPick(value, characters)) : ""),
-        [value, characters]);
+    const stateKey = characters ? pickKey(pick) : "";
     const sendKey = React.useCallback(
         (key: string) => send(readKey(key)), [send]);
     const [shownKey, choose] = useStateChoice(stateKey, sendKey);
@@ -275,6 +283,7 @@ function CharacterFields({value, characters, send}: {
                 size="small"
                 sx={{flex: 1, minWidth: 0}}
                 disabled={loading}
+                readOnly={readOnly}
                 options={options}
                 filterOptions={filterCharacters}
                 getOptionLabel={(option) => text(option.name)
@@ -305,14 +314,17 @@ function CharacterFields({value, characters, send}: {
                     );
                 }}
                 renderInput={(params) => (
-                    <TextField {...params} label={i18n.t("top8_character")}/>
+                    <TextField {...params}
+                               label={characterLabel
+                                   ?? i18n.t("top8_character")}/>
                 )}
             />
             <TextField
                 select
                 size="small"
-                label={i18n.t("top8_color")}
+                label={colorLabel ?? i18n.t("top8_color")}
                 disabled={loading || !entry || skins.length === 0}
+                slotProps={{select: {inputProps: {readOnly}}}}
                 value={entry && row >= 0 && row < skins.length ? String(row) : ""}
                 onChange={(event) => {
                     if (enName !== null) {
@@ -337,6 +349,18 @@ function CharacterFields({value, characters, send}: {
             </TextField>
         </Stack>
     );
+}
+
+function CharacterFields({value, characters, send}: {
+    // The state's characters["1"].
+    value: unknown;
+    characters: Characters | null;
+    send: (pick: CharacterPick) => unknown;
+}) {
+    const pick = React.useMemo(
+        () => (characters ? characterPick(value, characters) : NO_PICK),
+        [value, characters]);
+    return <CharacterSelects pick={pick} characters={characters} send={send}/>;
 }
 
 function PlayerCard({slot, player, countries, characters, game, send}: {

@@ -463,7 +463,7 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**で、生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
 
 ### 5.13 `GET /api/v1/result`・`GET /api/v1/result/post`・`GET /api/v1/result/preview`（2026-11-09 追加・ADR-005 S4q）
-大会リザルトのページ（React の `/web/result`。S4r で作る）が読むもの。**何も書かない**。
+大会リザルトのページ（React の `/web/result`。ADR-005 S4r）が読むもの。**何も書かない**。
 
 ```json
 { "ok": true, "revision": 42, "data": {
@@ -797,18 +797,18 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`（読めない画像）、`INTERNAL`（保存の失敗）。いずれも設定を変えない
 
 ### 6.30 大会リザルトのレイアウト `PATCH /api/v1/result`（2026-11-09 追加・ADR-005 S4q）
-- body: `{ "layout": "horizontal" | "horizontal_16" | "vertical" | "vertical_geki" | "team" | "team_split" }`。`settings.json` の `result_config.layout` に保存する。応答 `data` は `{ "layout": ... }`
+- body: `{ "layout": "horizontal" | "horizontal_16" | "vertical" | "vertical_geki" | "team" | "team_split" }`。`settings.json` の `result_config.layout` に保存する。応答 `data` は `{ "layout": ... }`。state の `result_layout` が同じ値の写しで（S4r。対戦形式への追従でも変わる）、起動のたびに `""` へ戻る
 - **パスは受けない**（`main_icon_path` / `background_path` は未知のキーとして `400`。描画に任意のローカルファイルを読ませないため）。背景はサムネイルの設定に従う（§5.12・§6.29）
 - エラー: `INVALID_ARGUMENT`（未知のキー・空の body・未知のレイアウト）。body は 64 KiB まで（超えたら `413`。§6.31〜§6.34 と §7 の `result` も同じ）
 
 ### 6.31 大会リザルトの単独の行 `PATCH /api/v1/result/players/{n}`（2026-11-09 追加・ADR-005 S4q）
-- `n` は 1〜16。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name` / `sponsor` / `twitter`（文字列。前後の空白は落とす。`""` で空にする）、`characters`（最大 3 要素で全体を置き換える。各要素は `{ "en_name": str, "skin": int（0 以上。省略は 0）, "game": str（省略可）}` か `null`（空。**位置を保つ**: `[A, null, B]` は 3 番目の欄に B を置く））
+- `n` は 1〜16。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name` / `sponsor` / `twitter`（文字列。前後の空白は落とす。`""` で空にする）、`characters`（最大 3 要素で全体を置き換える。各要素は `{ "en_name": str, "skin": int（0 以上。省略は 0）, "game": str（省略可）}` か `null`（空。**位置を保つ**: `[A, null, B]` は 3 番目の欄に B を置く）。または変える位置だけのオブジェクト `{ "1".."3": 同じ形 }`（S4r。**名指さなかった欄は保存値のまま**で、別のゲームのキャラも残る）。リストは今のゲームで読めない欄も空で置き換える）
 - 値は識別子で受け、core がカタログから組む（1 つのスナップショットで全部を解決してから書く）。**1 行で 1 保存サイクル**で、ほかの行に触らない（LAN の 2 端末の編集が競合しない）
 - 委譲: `update_result_player` → `ResultService.UpdatePlayer`。応答は受付時点の `revision`。操作ログはキー名のみ
 - エラー: `INVALID_ARGUMENT`（範囲外の `n`・未知のキー・型・今のゲームに無いキャラ / スキン）、`409 CONFLICT`（`game` が今のゲームでない。別のゲームで選んだキャラを書かない）。いずれも何も書かない
 
 ### 6.32 大会リザルトの団体の行 `PATCH /api/v1/result/teams/{n}`（2026-11-09 追加・ADR-005 S4q）
-- `n` は 1〜8。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name`（文字列）、`members`（最大 5 要素で全体を置き換える。各要素は `{ "name": str, "twitter": str, "character": {§6.31 の形} | null }`。どのキーも省略可。空のメンバーも位置を保つ）
+- `n` は 1〜8。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name`（文字列）、`members`（最大 5 要素で全体を置き換える。各要素は `{ "name": str, "twitter": str, "character": {§6.31 の形} | null }`。どのキーも省略可。空のメンバーも位置を保つ。または変える位置だけのオブジェクト `{ "1".."5": 同じ形 }`（S4r。**名指したキーだけ**を変え、ほかのキー・ほかのメンバーは保存値のまま。末尾の完全に空のメンバーは落とす））
 - 委譲: `update_result_team` → `ResultService.UpdateTeam`。保存サイクル・応答・操作ログ・エラーは §6.31 と同じ
 
 ### 6.33 大会リザルトの並べ替え `POST /api/v1/result:reorder`（2026-11-09 追加・ADR-005 S4q）

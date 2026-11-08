@@ -79,3 +79,28 @@ export function copyImage(url: string): Promise<void> {
             [new ClipboardItem({"image/png": png})]);
     }, IMAGE_COPY_TIMEOUT_MS);
 }
+
+// How long an image still to be drawn may take to reach the clipboard: the
+// render, behind whatever is being drawn already, and the copy.
+export const MADE_IMAGE_COPY_TIMEOUT_MS = 30000;
+
+// Put the image that `url` will name on the clipboard, once there is one
+// (canCopyImage() first). The clipboard is asked here, before this returns and
+// not a microtask later, as copyImage does: the caller goes on to open another
+// window, and the clipboard is given to a page that has the focus. Past the
+// deadline the image is refused, so that the write fails and does not come late
+// over what the operator copied since.
+export function copyImageOnceMade(url: Promise<string>): Promise<void> {
+    let writing: Promise<void>;
+    try {
+        const png = withDeadline(() => url.then(pngOf),
+                                 MADE_IMAGE_COPY_TIMEOUT_MS);
+        // Its failure is the write's; not an unhandled one besides.
+        png.catch(() => undefined);
+        writing = navigator.clipboard.write(
+            [new ClipboardItem({"image/png": png})]);
+    } catch (error) {
+        return Promise.reject(error);
+    }
+    return withDeadline(() => writing, MADE_IMAGE_COPY_TIMEOUT_MS);
+}

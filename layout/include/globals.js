@@ -953,11 +953,14 @@ function applyDelta(data, delta) {
   /** @type {DeltaOpType} */ const deltaOp = delta.action;
   const newValue = delta.value;
   const lastPiece = pathPieces[pathPieces.length-1];
+  // The same rules as web/src/stateDelta.js, which explains them; both are
+  // checked against web/src/stateDelta.cases.json.
+  const listMayBeMissing = deltaOp === 'iterable_item_added' && typeof lastPiece === 'number';
 
   let currentData = data;
   for (let i = 0; i < pathPieces.length-1; i += 1) {
     if (!currentData.hasOwnProperty(pathPieces[i])) {
-      currentData[pathPieces[i]] = {};
+      currentData[pathPieces[i]] = listMayBeMissing && i === pathPieces.length-2 ? [] : {};
     }
 
     currentData = currentData[pathPieces[i]];
@@ -968,6 +971,12 @@ function applyDelta(data, delta) {
       delete currentData[lastPiece];
     } else {
       console.warn(`Couldn't find data to delete for path: ${pathPieces}`);
+    }
+  } else if (deltaOp === 'iterable_item_removed') {
+    if (Array.isArray(currentData)) {
+      currentData.length = Math.min(currentData.length, lastPiece);
+    } else {
+      console.warn(`Couldn't find a list to shorten for path: ${pathPieces}`);
     }
   } else {
     currentData[lastPiece] = newValue;

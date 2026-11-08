@@ -21,8 +21,6 @@ without the panel, and nothing headless. Pinned here:
   the same tournament not dropping it (L11); its failures -- a lookup
   start.gg did not answer told from a tournament with no media, with the
   real provider (L1) --, the shutdown and a tournament replaced meanwhile;
-- ``media_updated``, from a banner the job wrote on its own thread (T4),
-  and not for the first version the adapter sees (L5);
 - the launch seed of the new keys.
 
 Each test runs a service of its own in a directory of its own; the state
@@ -30,7 +28,6 @@ and the settings are handed back untouched.
 """
 import os
 import threading
-import time
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -536,66 +533,6 @@ def test_the_real_provider_tells_a_failed_lookup_from_no_media(
     assert _media() == {"status": media.ERROR, "error": error,
                         "revision": 1}
     assert provider.GetBannerURL() is None
-
-
-def test_a_banner_fetched_on_the_job_thread_reaches_media_updated(
-        env, monkeypatch):
-    """T4: the job writes the banner on a thread of its own; the bridge
-    hands the change to the GUI thread, where the provider adapter emits
-    media_updated (what the thumbnail / result previews redraw on)."""
-    from qtpy.QtCore import QCoreApplication
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-
-    adapter = AutonaTournamentDataProvider.instance
-    monkeypatch.setattr(adapter, "_bannerVersion", 0)
-    SM.Set(BANNER_VERSION, 0)                       # no change: no signal
-    QCoreApplication.processEvents()
-    announced = []
-
-    def receiver():
-        announced.append(threading.current_thread())
-    adapter.signals.media_updated.connect(receiver)
-    try:
-        provider = env.loaded["provider"] = _Provider(icon=None)
-        _serve(monkeypatch, {provider.banner: _image_bytes((64, 32))})
-        assert env.service.FetchMedia() == media.STARTED
-        assert TaskExecutor.instance.drain(WAIT)
-        assert _media()["status"] == media.DONE
-        deadline = time.monotonic() + WAIT
-        while not announced and time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-    finally:
-        adapter.signals.media_updated.disconnect(receiver)
-    assert announced == [threading.main_thread()]
-
-
-def test_the_first_banner_version_the_adapter_sees_is_no_change(
-        env, monkeypatch):
-    """S4f review L5: on the first launch after S4f the state has no
-    bannerVersion until the seed publishes it; that is the baseline, not a
-    change to announce."""
-    from qtpy.QtCore import QCoreApplication
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-
-    adapter = AutonaTournamentDataProvider.instance
-    monkeypatch.setattr(adapter, "_bannerVersion", None)
-    QCoreApplication.processEvents()
-    announced = []
-
-    def receiver():
-        announced.append(True)
-    adapter.signals.media_updated.connect(receiver)
-    try:
-        SM.Set(BANNER_VERSION, 1234)        # the seed's: the baseline
-        QCoreApplication.processEvents()
-        assert announced == [] and adapter._bannerVersion == 1234
-        SM.Set(BANNER_VERSION, 5678)        # a change
-        deadline = time.monotonic() + WAIT
-        while not announced and time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-        assert announced == [True]
-    finally:
-        adapter.signals.media_updated.disconnect(receiver)
 
 
 def test_a_job_the_shutdown_cancels_does_not_stay_running(env, executor):

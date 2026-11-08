@@ -1,7 +1,7 @@
 """The tournament result's core (core/ResultService.py, ADR-005 S4q).
 
-Moved from the Qt panel and src/result/main_generate_result.py: the payload, the
-values the panel built of its inputs, the player DB's records, the post's text
+Moved from the old Qt panel and src/result/main_generate_result.py: the payload,
+the values the panel built of its inputs, the player DB's records, the post's text
 and the output's name, replayed against what the old code answered
 (tests/fixtures/result/golden.json). New: the rows are written by identifiers
 one at a time, the standings' import and a render in the background, whose
@@ -16,6 +16,7 @@ import copy
 import datetime
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -134,8 +135,8 @@ class _Provider:
         self.asked = []
 
     def GetStandings(self, playerNumber, progress_callback=None,
-                     cancel_event=None, strict=False):
-        self.asked.append((playerNumber, strict))
+                     cancel_event=None):
+        self.asked.append(playerNumber)
         if self.raises is not None:
             raise self.raises
         return self.answer
@@ -668,17 +669,42 @@ def test_the_two_kinds_of_rows_do_not_touch_each_other(env):
     assert SM.Get("result_teams.1.name") == ""
 
 
-def test_a_team_row_the_panel_wrote_is_not_a_player(env):
-    # Until S4r the panel writes a team layout's rows to result_players.
+def test_a_team_row_the_panel_left_is_swept_at_startup(env):
+    # The Qt panel, until S4r, wrote a team layout's rows to result_players:
+    # StateMigrations' v1 -> v2 moved what it found, a state saved at version 2
+    # may hold more. Not a player's: the seed removes them, the players stay.
     SM.state = {"result_players": {
         "1": {"rank": 1, "name": "Reds", "sponsor": "", "members": [
-            {"name": "A1", "character": {}}]}}}
+            {"name": "A1", "character": {}}]},
+        "2": {"rank": 2, "name": "Alpha", "sponsor": ""}}}
 
-    assert env.service.BuildPayload(layout="horizontal")[0]["players"][0]["name"] \
-        == ""
+    schema.SeedPanelState()
+
+    assert list(SM.Get("result_players")) == ["2"]
+    assert results.HasData("horizontal")
+
+
+def test_a_root_of_only_team_rows_goes_with_them(env):
+    SM.state = {"result_players": {
+        "1": {"rank": 1, "name": "Reds", "sponsor": "", "members": []}}}
+
+    schema.SeedPanelState()
+
+    assert SM.Get("result_players") is None
     assert not results.HasInput(results.PLAYERS)
     assert not results.HasData("horizontal")
     assert env.service.Describe()["players"][0]["name"] == ""
+
+
+def test_the_sweep_leaves_a_state_without_rows_and_the_rows_alone(env):
+    SM.state = {}
+    schema.SeedPanelState()
+    assert SM.Get("result_players") is None
+
+    _named("Alpha", "Beta")
+    before = copy.deepcopy(SM.Get("result_players"))
+    schema.SeedPanelState()
+    assert SM.Get("result_players") == before
 
 
 def test_reorder_moves_the_rows_and_ranks_them(env):
@@ -1027,6 +1053,198 @@ def test_it_is_not_saved_in_the_database(env):
     assert env.database.given[0]["players"] == [{"gamerTag": "Alpha"}]
 
 
+def _savedCharacters(values):
+    """A player's fields as UpdatePlayer leaves them: `characters` starts with
+    the first when that is not empty."""
+    SM.Set("result_players.1", dict(
+        results.DefaultPlayer(1), name="Alpha", character=values[0],
+        characters=values if values[0] else values[1:]))
+
+
+def test_an_unread_first_character_keeps_the_others_in_their_places(env):
+    """`characters` starts with the first. Read as empty, the two were no
+    longer the same, and the first place came twice: the others were a place
+    late, and the last one fell off."""
+    link = _inGame("tgame", "Link")
+    pikachu = _inGame("tgame", "Pikachu")
+    _savedCharacters([_inGame("other"), link, pikachu])
+
+    assert env.service.Describe()["players"][0]["characters"] == [
+        None, {"en_name": "Link", "skin": 0}, {"en_name": "Pikachu", "skin": 0}]
+    env.service.SaveToDb()
+    assert env.database.given[0]["players"][0]["mains"] == {
+        "tgame": [["Link", 0, ""], ["Pikachu", 0, ""]]}
+    player = env.service.BuildPayload()[0]["players"][0]
+    assert player["character"] == {}
+    assert player["characters"] == [link, pikachu]
+
+
+def test_an_unread_first_character_keeps_the_gap_after_it(env):
+    pikachu = _inGame("tgame", "Pikachu")
+    _savedCharacters([_inGame("other"), {}, pikachu])
+
+    assert env.service.Describe()["players"][0]["characters"] == [
+        None, None, {"en_name": "Pikachu", "skin": 0}]
+
+
+def test_a_row_with_only_the_last_character_read_has_input(env):
+    """It fell off with the others: the row asked no confirmation to be
+    overwritten, and was not drawn with its character."""
+    _savedCharacters([_inGame("other"), {}, _inGame("tgame", "Pikachu")])
+    SM.Set("result_players.1.name", "")
+
+    assert results.HasInput(results.PLAYERS)
+
+
+def test_an_unread_character_anywhere_else_keeps_its_place_empty(env):
+    link = _inGame("tgame", "Link")
+    pikachu = _inGame("tgame", "Pikachu")
+    _savedCharacters([link, _inGame("other"), pikachu])
+
+    assert env.service.Describe()["players"][0]["characters"] == [
+        {"en_name": "Link", "skin": 0}, None,
+        {"en_name": "Pikachu", "skin": 0}]
+    # The same character twice is two places, and not an unread first.
+    _savedCharacters([link, link])
+    assert env.service.Describe()["players"][0]["characters"] == [
+        {"en_name": "Link", "skin": 0}, {"en_name": "Link", "skin": 0}, None]
+
+
+def test_the_same_unread_character_twice_is_two_empty_places(env):
+    other = _inGame("other")
+    link = _inGame("tgame", "Link")
+    _savedCharacters([other, other, link])
+
+    assert env.service.Describe()["players"][0]["characters"] == [
+        None, None, {"en_name": "Link", "skin": 0}]
+
+
+def test_a_write_of_one_place_leaves_another_games_character_there(env):
+    """The page shows it as empty and wrote every field back: the character
+    of the game it was saved with was gone on going back to it (S4q B3)."""
+    value = _inGame("other")
+    _savedRow(value)
+
+    results.UpdatePlayer(1, {"characters": {"2": ("Link", 0, "tgame")}})
+
+    row = SM.Get("result_players.1")
+    assert row["character"] == value
+    assert [item.get("en_name") for item in row["characters"]] \
+        == ["Mario", "Link"]
+    assert row["characters"][0] == value
+
+
+def test_a_write_of_the_first_place_leaves_the_others(env):
+    value = _inGame("other", "Link")
+    SM.Set("result_players.1", dict(
+        results.DefaultPlayer(1), name="Alpha", character=_inGame("tgame"),
+        characters=[_inGame("tgame"), value]))
+
+    results.UpdatePlayer(1, {"characters": {"1": None}})
+
+    row = SM.Get("result_players.1")
+    assert row["character"] == {}
+    assert row["characters"] == [value]
+    assert env.service.Describe()["players"][0]["characters"] \
+        == [None, None, None]
+
+
+def test_emptying_the_last_place_shortens_the_list(env):
+    results.UpdatePlayer(1, {"characters": [("Mario", 0, None),
+                                            ("Link", 0, None)]})
+
+    results.UpdatePlayer(1, {"characters": {"2": None}})
+
+    row = SM.Get("result_players.1")
+    assert row["character"]["en_name"] == "Mario"
+    assert [item["en_name"] for item in row["characters"]] == ["Mario"]
+
+
+def test_a_refused_place_writes_nothing(env):
+    value = _inGame("other")
+    _savedRow(value)
+    before = copy.deepcopy(SM.Get("result_players"))
+
+    refused = results.UpdatePlayer(1, {
+        "name": "Changed", "characters": {"2": ("Mario", 0, "another")}})
+
+    assert refused is not None
+    assert SM.Get("result_players") == before
+
+
+def test_a_members_name_leaves_the_other_members_characters(env):
+    """Their characters were the game's before a switch: written back with the
+    new codename, they read as the new game's. Only what was edited goes."""
+    stale = _inGame("other")
+    SM.Set("result_teams.1", dict(results.DefaultTeam(1), name="Reds", members=[
+        {"name": "A1", "twitter": "@a1", "character": stale},
+        {"name": "B1", "twitter": "", "character": stale}]))
+
+    results.UpdateTeam(1, {"members": {"2": {"name": " B2 "}}})
+
+    assert SM.Get("result_teams.1.members") == [
+        {"name": "A1", "twitter": "@a1", "character": stale},
+        {"name": "B2", "twitter": "", "character": stale}]
+
+
+def test_a_member_named_past_the_end_makes_room(env):
+    results.UpdateTeam(1, {"members": {"3": {"character": ("Link", 0, None)}}})
+
+    members = SM.Get("result_teams.1.members")
+    assert [member["name"] for member in members] == ["", "", ""]
+    assert members[0] == {"name": "", "twitter": "", "character": {}}
+    assert members[2]["character"]["en_name"] == "Link"
+
+
+def test_the_empty_members_at_the_end_go(env):
+    results.UpdateTeam(1, {"members": [
+        {"name": "A1"}, {"name": "B1"}, {"name": "C1"}]})
+
+    results.UpdateTeam(1, {"members": {"3": {"name": ""}}})
+    assert [m["name"] for m in SM.Get("result_teams.1.members")] == ["A1", "B1"]
+
+    results.UpdateTeam(1, {"members": {"1": {"name": ""}}})
+    assert [m["name"] for m in SM.Get("result_teams.1.members")] == ["", "B1"]
+
+
+def test_a_member_with_only_another_games_character_stays(env):
+    stale = _inGame("other")
+    SM.Set("result_teams.1", dict(results.DefaultTeam(1), members=[
+        {"name": "A1", "twitter": "", "character": {}},
+        {"name": "", "twitter": "", "character": stale}]))
+
+    results.UpdateTeam(1, {"members": {"1": {"name": "A2"}}})
+
+    assert SM.Get("result_teams.1.members")[1]["character"] == stale
+
+
+def test_a_refused_member_writes_nothing(env):
+    results.UpdateTeam(1, {"name": "Reds", "members": [{"name": "A1"}]})
+    before = copy.deepcopy(SM.Get("result_teams"))
+
+    refused = results.UpdateTeam(1, {"name": "Blues", "members": {
+        "1": {"name": "A2"}, "2": {"character": ("Mario", 0, "another")}}})
+
+    assert refused is not None
+    assert SM.Get("result_teams") == before
+
+
+def test_the_web_ui_limits_are_the_cores():
+    """web/src/ResultPage/Cards.tsx cannot import from Python and no build step
+    ties them: a field it offers past the limit fails its write."""
+    source = (Path(__file__).parent.parent / "web" / "src" / "ResultPage"
+              / "Cards.tsx").read_text(encoding="utf-8")
+
+    def constant(name):
+        match = re.search(rf"export const {name}\b[^=]*= ([^;]+);", source)
+        assert match, f"could not parse {name} out of Cards.tsx"
+        return json.loads(match.group(1))
+
+    assert constant("MAX_CHARACTERS") == results.MAX_CHARACTERS
+    assert constant("MAX_MEMBERS") == results.MAX_MEMBERS
+    assert tuple(constant("RANK_RANGE")) == results.RANK_RANGE
+
+
 def test_a_write_of_another_field_leaves_it_where_it_is(env):
     value = _inGame("other")
     _savedRow(value)
@@ -1181,6 +1399,37 @@ def test_the_layout_follows_the_battle_format_as_the_panels_did(
     env.service.FollowBattleFormat(fmt)
 
     assert env.service.Layout() == after
+    # Told to a page that is open: a change in the sidebar is none of its doing.
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == after
+
+
+def test_the_layout_in_the_state_is_the_one_chosen(env):
+    assert env.service.SetLayout("vertical")
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == "vertical"
+    assert not env.service.SetLayout("nope")
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == "vertical"
+
+
+def test_a_format_that_only_changes_the_unsaved_layout_is_told_too(
+        env, monkeypatch):
+    # No layout saved: Layout() answers from the format, nothing is written.
+    SettingsManager.settings.pop(results.CONFIG_SETTING, None)
+    monkeypatch.setattr(ResultService, "_BattleFormat",
+                        staticmethod(lambda: "team"))
+
+    env.service.FollowBattleFormat("team")
+
+    assert results.CONFIG_SETTING not in SettingsManager.settings
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == results.DEFAULT_TEAM_LAYOUT
+
+
+def test_the_seed_empties_the_layouts_echo(env):
+    env.service.SetLayout("vertical")
+
+    schema.SeedPanelState()
+
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == ""
+    assert env.service.Layout() == "vertical"
 
 
 # ── the configuration of a render ────────────────────────────────────────
@@ -1464,7 +1713,7 @@ def test_the_import_fills_the_rows(env):
     assert env.refreshed == [True]
     env.fetcher.run()
 
-    assert env.fetcher.provider.asked == [(8, True)]
+    assert env.fetcher.provider.asked == [8]
     assert env.standings() == {"status": results.DONE, "error": "",
                                "revision": revision}
     rows = SM.Get("result_players")
@@ -1489,7 +1738,7 @@ def test_the_import_of_sixteen(env):
     env.service.LoadStandings()
     env.fetcher.run()
 
-    assert env.fetcher.provider.asked == [(16, True)]
+    assert env.fetcher.provider.asked == [16]
 
 
 def test_the_import_of_teams(env):
@@ -1903,9 +2152,8 @@ _ENTRANT = {"participants": [{"player": {"id": 1, "gamerTag": "Alpha",
 ])
 def test_the_real_provider_tells_a_failed_fetch_from_no_standings(
         env, monkeypatch, answer, status, error, rows):
-    """StartGGDataProvider.GetStandings swallowed a failure and answered None
-    or [], so an offline PC read as "the event has no standings". Strict, it
-    raises; the panel's way in (not strict) answers as it did."""
+    """StartGGDataProvider.GetStandings used to swallow a failure and answer
+    None or [], so an offline PC read as "the event has no standings"."""
     from src.TournamentDataProvider.StartGGDataProvider import (
         StartGGDataProvider)
 
@@ -1922,7 +2170,3 @@ def test_the_real_provider_tells_a_failed_fetch_from_no_standings(
     assert env.standings()["status"] == status
     assert env.standings()["error"] == error
     assert SM.Get("result_players.1.name") == (rows or "Kept")
-    assert isinstance(provider.GetStandings(8, None, None), (list, type(None)))
-    assert provider.GetStandings(playerNumber=8, progress_callback=None,
-                                 cancel_event=None) \
-        == provider.GetStandings(8)
