@@ -164,6 +164,13 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/stream/org', 'api_v1.stream_org_reset', 'DELETE,OPTIONS'),
     ('/api/v1/stream/org/<kind>', 'api_v1.stream_org_import', 'OPTIONS,PUT'),
     ('/api/v1/stream/thumbnail', 'api_v1.stream_thumbnail_generate', 'OPTIONS,POST'),
+    ('/api/v1/thumbnail', 'api_v1.get_thumbnail', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/thumbnail', 'api_v1.thumbnail_update', 'OPTIONS,PATCH'),
+    ('/api/v1/thumbnail/background', 'api_v1.thumbnail_background', 'OPTIONS,POST'),
+    ('/api/v1/thumbnail/preview', 'api_v1.get_thumbnail_preview', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/thumbnail:generate', 'api_v1.thumbnail_generate', 'OPTIONS,POST'),
+    ('/api/v1/thumbnail:preview', 'api_v1.thumbnail_preview', 'OPTIONS,POST'),
+    ('/api/v1/thumbnail:reset', 'api_v1.thumbnail_reset', 'OPTIONS,POST'),
     ('/api/v1/stream/thumbnail/options', 'api_v1.get_stream_thumbnail_options', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stream/thumbnail/options', 'api_v1.stream_thumbnail_options_update', 'OPTIONS,PUT'),
     ('/api/v1/tournament', 'api_v1.get_tournament', 'GET,HEAD,OPTIONS'),
@@ -497,8 +504,9 @@ def test_the_classification_follows_the_rules():
     # (S4g: v1 37 of 55), the Top 8 page's 4 writes and 1 read (S4i: v1
     # 41 of 60) and the Statistics page's 1 write and 1 read (S4k: v1 42 of
     # 62), the Stats Display Settings page's 1 write and 1 read (S4l: v1 43
-    # of 64) and the player list's 3 writes and 2 reads of the player DB
-    # (S4m: v1 46 of 69). A change here is a change of the policy.
+    # of 64), the player list's 3 writes and 2 reads of the player DB
+    # (S4m: v1 46 of 69) and the match thumbnail's 5 writes and 2 reads
+    # (S4o: v1 51 of 76). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -506,8 +514,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 46
-    assert len(EXPECTED_API_V1_ROUTES) == 69
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 51
+    assert len(EXPECTED_API_V1_ROUTES) == 76
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

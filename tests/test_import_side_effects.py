@@ -267,6 +267,7 @@ assert (set_follow._polls, set_follow._stations, set_follow._lookups,
 assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
 assert web_operations.openSetSelection is None,     "import registered a shell operation (the set selection window)"
 assert web_operations.renderThumbnail is None,     "import registered a shell operation (the thumbnail)"
+assert web_operations.startImageRender is None,     "import registered a shell operation (the image renderer)"
 assert not player_db.modelEnabled, "import switched the player DB model on"
 assert player_db._attachedTo is None, \
     "import attached the player DB relay"

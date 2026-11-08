@@ -1411,10 +1411,11 @@ def _logRecords():
 
 def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         autonaApp, ownExecutor):
-    """The board host's operation, an unbuilt board's build, the two shell
+    """The board host's operation, an unbuilt board's build, the shell
     operations: once the GUI thread will not run them, the request is
     answered as unavailable (503) and logged at INFO -- not a 500 with an
     ERROR traceback (ADR-005 S3f-4 review)."""
+    from src import AutonaWebOperations as WebOps
     from src.AutonaWebOperations import NotAvailable, SHUTTING_DOWN_MESSAGE
 
     web = autonaApp.web()
@@ -1425,6 +1426,8 @@ def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         "an unbuilt board": lambda: web.get_swap(2),
         "the set selection": lambda: web.open_sets(1),
         "the thumbnail": lambda: web.get_thumbnail(1, "png"),
+        "an image render": lambda: WebOps.start_image_render(
+            "thumbnail", ({}, {}, {}), lambda *_: None),
     }
     records, stop = _logRecords()
     try:

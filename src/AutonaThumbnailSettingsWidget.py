@@ -10,6 +10,7 @@ import json
 
 from .thumbnail import main_generate_thumbnail as thumbnail
 from .core.StateManager import StateManager
+from .core.ThumbnailService import ThumbnailService
 from .StateManagerBridge import StateManagerBridge
 from .core.SettingsManager import *
 from .AutonaGameAssetManager import *
@@ -128,7 +129,7 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # destructive so it stands apart from the neutral preview/save row.
         L.tag_button(self.setDefaultsButton, L.BUTTON_DANGER)
         self.setDefaultsButton.clicked.connect(lambda: [
-            SettingsManager.Unset("thumbnail_config"),
+            ThumbnailService.instance.Reset(),
             self.updateFromSettings(),
             self.GeneratePreview()
         ])
@@ -360,90 +361,8 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
     # ── Video title (YouTube) ──────────────────────────────────────
 
-    # Fallback map from smashgg game id → English abbreviation, used when
-    # the per-game config.json does not provide one (e.g. games not
-    # installed under user_data/games/).
-    _GAME_ABBREVIATION_FALLBACK = {
-        1386: "SSBU",   # Super Smash Bros. Ultimate
-        43868: "SF6",   # Street Fighter 6
-    }
-
     def _BuildVideoTitle(self, scoreboard_id: int = 1) -> str:
-        tournament = StateManager.Get(
-            "tournamentInfo.tournamentName", "") or ""
-        round_en = StateManager.Get(
-            f"score.{scoreboard_id}.match_en", "") or ""
-        game = StateManager.Get("game", {}) or {}
-        game_abbrev = game.get("abbreviation")
-        if not game_abbrev:
-            try:
-                game_abbrev = self._GAME_ABBREVIATION_FALLBACK.get(
-                    int(game.get("smashgg_id")))
-            except (TypeError, ValueError):
-                game_abbrev = None
-        game_abbrev = game_abbrev or ""
-
-        side1 = self._PlayerWithCharacter(scoreboard_id, team=1)
-        side2 = self._PlayerWithCharacter(scoreboard_id, team=2)
-
-        # Build, stripping segments that resolved to empty so we don't emit
-        # stray separators like "|  vs  |".
-        parts_left = " ".join(p for p in (tournament, round_en) if p)
-        if side1 or side2:
-            vs_part = f"{side1} vs {side2}".strip()
-        else:
-            vs_part = ""
-        segments = [s for s in (parts_left, vs_part, game_abbrev) if s]
-        return " | ".join(segments)
-
-    @classmethod
-    def _PlayerWithCharacter(cls, scoreboard_id: int, team: int) -> str:
-        """Return `"{player_name}({character_name})"` for team {team}'s
-        first player. Drops the parenthesised character when no main
-        character is set, and returns an empty string when the player
-        itself is not set either."""
-        player = cls._PlayerDisplayName(scoreboard_id, team)
-        character = cls._MainCharacterName(scoreboard_id, team)
-        if player and character:
-            return f"{player}({character})"
-        return player or character
-
-    @staticmethod
-    def _PlayerDisplayName(scoreboard_id: int, team: int) -> str:
-        """Return team {team}'s first player's display name ("prefix |
-        gamerTag" when a sponsor prefix exists, else just gamerTag).
-        Empty string if no player data is set yet."""
-        base = f"score.{scoreboard_id}.team.{team}.player.1"
-        merged = StateManager.Get(f"{base}.mergedName", "") or ""
-        if merged:
-            # Strip the "[L]" losers-bracket indicator sometimes appended
-            # by the scoreboard so titles stay clean.
-            return merged.replace(" [L]", "")
-        return StateManager.Get(f"{base}.gamerTag", "") or ""
-
-    @staticmethod
-    def _MainCharacterName(scoreboard_id: int, team: int) -> str:
-        """Return the first (primary) character's name for team {team}'s
-        first player, or empty string. Looks at the scoreboard's current
-        `character` dict first, then falls back to the player's saved
-        `mains`. The dict is keyed by **integer** slot numbers (1, 2, ...)
-        because AutonaBasePlayerWidget stores them that way, so
-        StateManager's dot-path lookup can't reach them directly — we
-        fetch the whole dict and pick the smallest key."""
-        base = f"score.{scoreboard_id}.team.{team}.player.1"
-        for subkey in ("character", "mains"):
-            chars = StateManager.Get(f"{base}.{subkey}")
-            if not isinstance(chars, dict) or not chars:
-                continue
-            try:
-                first_key = sorted(chars.keys(), key=lambda k: int(k))[0]
-            except (TypeError, ValueError):
-                first_key = next(iter(chars))
-            entry = chars.get(first_key) or {}
-            name = entry.get("name") or ""
-            if name:
-                return name
-        return ""
+        return ThumbnailService.instance.VideoTitle(scoreboard_id)
 
     def _onTournamentDataUpdated(self, _data):
         self._RefreshVideoTitle()
@@ -565,20 +484,7 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
     # ── Background image source (default / banner / custom) ────────────
 
     def _migrateBackgroundSource(self):
-        """One-time migration from the legacy single `background_path` model
-        to the explicit `background_source` selector. Runs until the key
-        exists, so it is a no-op on every subsequent call."""
-        if SettingsManager.Get("thumbnail_config.background_source") is not None:
-            return
-        legacy = SettingsManager.Get("thumbnail_config.background_path") or ""
-        if legacy in (thumbnail.BANNER_PATH, thumbnail.DEFAULT_BANNER_PATH):
-            # Was pointing at the tournament banner — free the custom slot.
-            SettingsManager.Set("thumbnail_config.background_source", "banner")
-            SettingsManager.Set("thumbnail_config.background_path", "")
-        elif legacy:
-            SettingsManager.Set("thumbnail_config.background_source", "custom")
-        else:
-            SettingsManager.Set("thumbnail_config.background_source", "default")
+        ThumbnailService.instance.MigrateBackgroundSource()
 
     def _updateBackgroundControls(self):
         """Reflect the persisted background_source into the radio group and the

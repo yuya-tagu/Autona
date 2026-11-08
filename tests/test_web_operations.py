@@ -941,6 +941,7 @@ def server(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(WebOps, "openSetSelection", None)
     monkeypatch.setattr(WebOps, "renderThumbnail", None)
+    monkeypatch.setattr(WebOps, "startImageRender", None)
     monkeypatch.setattr(WebServer, "_lan_hosts", ())
     monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
 
@@ -1450,11 +1451,18 @@ def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
         monkeypatch):
     monkeypatch.setattr(WebOps, "openSetSelection", None)
     monkeypatch.setattr(WebOps, "renderThumbnail", None)
+    monkeypatch.setattr(WebOps, "startImageRender", None)
 
     with pytest.raises(NotAvailable):
         WebOps.open_sets("1")
     with pytest.raises(NotAvailable):
         WebOps.get_thumbnail("1", "png")
+    with pytest.raises(NotAvailable):
+        WebOps.start_image_render("thumbnail", ({}, {}, {}), lambda *_: None)
+    with pytest.raises(NotAvailable):
+        WebOps.preview_thumbnail()
+    with pytest.raises(NotAvailable):
+        WebOps.generate_thumbnail()
 
     calls = []
     monkeypatch.setattr(WebOps, "openSetSelection",
@@ -1478,6 +1486,7 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
     manager = AutonaScoreboardManager.instance
     assert WebOps.openSetSelection == manager.OpenSetSelection
     assert WebOps.renderThumbnail == manager.RenderThumbnail
+    assert WebOps.startImageRender == manager.StartImageRender
     board = autonaApp.board(1)
     window = board.selectSetWindow
     calls = []
@@ -1633,15 +1642,19 @@ def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
 #   for those, ws_on_error, is swapped for a recorder) but the one
 #   _EVENT_RAISES lists, and what it emits back: its own name, but for
 #   _EVENT_REPLIES;
-# - the two shell operations are the only ones refused (503, the
-#   UNAVAILABLE ack).
+# - the shell operations are the only ones refused (503, the UNAVAILABLE
+#   ack).
 #
 # What is not pinned: a 200's body (a legacy route answers its errors as
 # 200 strings: "ERROR" for a tag the player DB does not have, ...). The
 # 500s are the desktop's too
 # (test_what_answers_500_headless_answers_500_on_the_desktop).
 
-SHELL_ENDPOINTS = {"open_sets", "get_thumbnail"}
+BOARD_SHELL_ENDPOINTS = {"open_sets", "get_thumbnail"}
+# The match thumbnail's two renders (ADR-005 S4o). Not its other five routes:
+# the settings and the preview's file are core's, in both shells.
+SHELL_ENDPOINTS = BOARD_SHELL_ENDPOINTS | {
+    "api_v1.thumbnail_preview", "api_v1.thumbnail_generate"}
 SHELL_EVENTS = {"open_set"}
 
 # A value for each URL argument of the rules; the board ones are walked.
@@ -1697,6 +1710,8 @@ _BODIES = {
     "api_v1.stream_channel_update": {"name": "Walk",
                                      "url": "https://example.invalid/walk"},
     "api_v1.stream_thumbnail_options_update": {"style": "center"},
+    "api_v1.thumbnail_update": {"display_phase": False},
+    "api_v1.thumbnail_reset": {"confirm": True},
     # Not the tournament name: TournamentInfoService keeps the last one it
     # followed in memory (the 表示大会名 rule), which putting the state
     # back would not undo.
@@ -1711,8 +1726,10 @@ _BODIES = {
 # and what.
 _NOT_200 = {
     # The shell operations (ADR-005 S3e-9).
-    **{(endpoint, board): 503 for endpoint in SHELL_ENDPOINTS
+    **{(endpoint, board): 503 for endpoint in BOARD_SHELL_ENDPOINTS
        for board in (1, 2, 3)},
+    ("api_v1.thumbnail_preview", None): 503,
+    ("api_v1.thumbnail_generate", None): 503,
     # What the crew board does not have -- set loading, player slots,
     # statistics: core's ValueError, the legacy routes' 500; /api/v1's
     # 400 INVALID_ARGUMENT (every board operation of its but the crew's).
@@ -1754,6 +1771,9 @@ _NOT_200 = {
     # (tests/test_api_v1_stream.py, tests/test_api_v1_tournament.py).
     ("api_v1.stream_org_import", None): 400,
     ("api_v1.tournament_media_import", None): 400,
+    ("api_v1.thumbnail_background", None): 400,
+    # No render has drawn a preview (none can, headless).
+    ("api_v1.get_thumbnail_preview", None): 404,
     # The test runtime's layout/ is empty: no commentary design to show or
     # to pick (the catalog was read).
     ("api_v1.get_selected_layout", None): 404,

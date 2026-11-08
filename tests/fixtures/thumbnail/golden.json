@@ -1,0 +1,4580 @@
+{
+ "payloads": {
+  "type_a_default": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_a",
+    "background_source": "default",
+    "background_path": null,
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "type_a_banner": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_a",
+    "background_source": "banner",
+    "background_path": "./user_data/tournament_banner.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "type_a_custom": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_a",
+    "background_source": "custom",
+    "background_path": "./user_data/custom background.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "type_b_default": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_b",
+    "background_source": "default",
+    "background_path": null,
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture B",
+    "default_background": "./assets/thumbnail_base/b.png",
+    "template_id": "type_b"
+   }
+  },
+  "type_b_banner": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_b",
+    "background_source": "banner",
+    "background_path": "./user_data/tournament_banner.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture B",
+    "default_background": "./assets/thumbnail_base/b.png",
+    "template_id": "type_b"
+   }
+  },
+  "type_b_custom": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_b",
+    "background_source": "custom",
+    "background_path": "./user_data/custom background.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture B",
+    "default_background": "./assets/thumbnail_base/b.png",
+    "template_id": "type_b"
+   }
+  },
+  "banner_source_without_the_banner_file": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "background_source": "banner",
+    "background_path": "./assets/thumbnail_base/default_banner.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "custom_source_without_a_file": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "background_source": "custom",
+    "background_path": null,
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "legacy_config_with_a_path": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "background_path": "./user_data/custom background.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "legacy_config_with_the_banner_path": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "background_path": "./user_data/tournament_banner.png",
+    "scoreboardNumber": 1,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "legacy_config_without_a_path": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "display_phase": true,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "no_settings": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "an_empty_config": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "an_unknown_template": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_z",
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "display_phase_on": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "display_phase": true,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "display_phase_off": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "display_phase": false,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "use_team_names_on": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "use_team_names": true,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "use_team_names_off": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "use_team_names": false,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "use_sponsors_on": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "use_sponsors": true,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "use_sponsors_off": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "use_sponsors": false,
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "game_settings": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "main_icon_path": "./layout/logo.png",
+    "game": {
+     "tgame": {
+      "flip_p1": true,
+      "flip_p2": false,
+      "smooth_scale": false,
+      "zoom": 150,
+      "align": {
+       "horizontal": 10,
+       "vertical": 90
+      }
+     },
+     "None": {
+      "zoom": 100
+     }
+    },
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "colors": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "template_id": "type_b",
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#111111",
+    "accent_color": "#222222"
+   },
+   "template": {
+    "name": "Fixture B",
+    "default_background": "./assets/thumbnail_base/b.png",
+    "template_id": "type_b"
+   }
+  },
+  "the_second_board": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 2,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "final_from_the_file": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "final_from_the_file_when_a_player_is_missing": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "final_from_the_file_without_a_game": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "final_without_a_game": {
+   "raises": "Please select a game first"
+  },
+  "final_without_the_first_player": {
+   "raises": "Player 1 tag missing"
+  },
+  "final_without_the_second_player": {
+   "raises": "Player 2 tag missing"
+  },
+  "final_without_a_file": {
+   "raises": "[Errno 2] No such file or directory: './out/program_state.json'"
+  },
+  "final_with_a_broken_file": {
+   "raises": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  "preview_with_players": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_from_the_file": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 1386
+    },
+    "tournamentInfo": {
+     "tournamentName": "Big Cup",
+     "eventName": "Singles"
+    },
+    "score": {
+     "1": {
+      "best_of": 5,
+      "match": "Grand Final",
+      "phase": "Top 8",
+      "team": {
+       "1": {
+        "teamName": "Red",
+        "score": 2,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Alpha",
+          "team": "SPN",
+          "mergedName": "SPN | Alpha",
+          "mergedOnlyName": "SPN | Alpha",
+          "country": {},
+          "state": {},
+          "character": {
+           "1": {
+            "name": "Mario",
+            "codename": "mario",
+            "skin": 2,
+            "assets": {
+             "full": "./user_data/games/tgame/mario_2.png"
+            }
+           }
+          }
+         }
+        }
+       },
+       "2": {
+        "teamName": "Blue",
+        "score": 1,
+        "losers": true,
+        "player": {
+         "1": {
+          "name": "Bravo",
+          "team": "",
+          "mergedName": "Bravo",
+          "mergedOnlyName": "Bravo",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     },
+     "2": {
+      "best_of": 5,
+      "match": "Round 1",
+      "phase": "",
+      "team": {
+       "1": {
+        "teamName": "Team C",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Charlie",
+          "team": "",
+          "mergedName": "Charlie",
+          "mergedOnlyName": "Charlie",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Delta",
+          "team": "",
+          "mergedName": "Delta",
+          "mergedOnlyName": "Delta",
+          "country": {},
+          "state": {}
+         }
+        }
+       },
+       "2": {
+        "teamName": "Team E",
+        "score": 0,
+        "losers": false,
+        "player": {
+         "1": {
+          "name": "Echo",
+          "team": "",
+          "mergedName": "Echo",
+          "mergedOnlyName": "Echo",
+          "country": {},
+          "state": {}
+         },
+         "2": {
+          "name": "Foxtrot",
+          "team": "",
+          "mergedName": "Foxtrot",
+          "mergedOnlyName": "Foxtrot",
+          "country": {},
+          "state": {}
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_without_a_game_or_assets": {
+   "data": {
+    "game": {
+     "codename": "test",
+     "name": "Test",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "",
+      "phase": "",
+      "pool": "",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {},
+          "country": {},
+          "mergedName": "",
+          "name": "",
+          "state": {},
+          "team": ""
+         }
+        },
+        "score": 0,
+        "teamName": ""
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {},
+          "country": {},
+          "mergedName": "",
+          "name": "",
+          "state": {},
+          "team": ""
+         }
+        },
+        "score": 0,
+        "teamName": ""
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_with_no_characters": {
+   "data": {
+    "game": {
+     "codename": "test",
+     "name": "Test",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "",
+      "phase": "",
+      "pool": "",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {},
+          "country": {},
+          "mergedName": "",
+          "name": "",
+          "state": {},
+          "team": ""
+         }
+        },
+        "score": 0,
+        "teamName": ""
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {},
+          "country": {},
+          "mergedName": "",
+          "name": "",
+          "state": {},
+          "team": ""
+         }
+        },
+        "score": 0,
+        "teamName": ""
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/full_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/full_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/full_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/full_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_portrait": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/portrait_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/portrait_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/portrait_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/portrait_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_icon": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/icon_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/icon_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/icon_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/icon_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_no_asset": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": null
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": null
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": null
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": null
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_asset_pack": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/costume_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/costume_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/costume_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/costume_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "game": {
+     "tgame": {
+      "asset_pack": "costume"
+     }
+    },
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_exact_locale": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/full_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/full_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/full_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/full_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_base_locale": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/full_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/full_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/full_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/full_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  },
+  "preview_placeholder_other_board": {
+   "data": {
+    "game": {
+     "codename": "tgame",
+     "name": "Test Game",
+     "smashgg_id": 0
+    },
+    "tournamentInfo": {
+     "tournamentName": "Sample Tournament"
+    },
+    "score": {
+     "1": {
+      "best_of": 3,
+      "match": "Winners Final",
+      "phase": "Group A",
+      "team": {
+       "1": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/pikachu/full_1.png"
+            },
+            "codename": "pikachu",
+            "name": "Pikachu",
+            "skin": "0"
+           },
+           "2": {
+            "assets": {
+             "full": "./games/mario/full_0.png"
+            },
+            "codename": "mario",
+            "name": "Mario",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Pikachu",
+          "name": "Pikachu",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team A"
+       },
+       "2": {
+        "losers": false,
+        "player": {
+         "1": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/kirby/full_0.png"
+            },
+            "codename": "kirby",
+            "name": "Kirby",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Kirby",
+          "name": "Kirby",
+          "state": {},
+          "team": "TGAME"
+         },
+         "2": {
+          "character": {
+           "1": {
+            "assets": {
+             "full": "./games/link/full_2.png"
+            },
+            "codename": "link",
+            "name": "Link",
+            "skin": "0"
+           }
+          },
+          "country": {},
+          "mergedName": "TGAME | Link",
+          "name": "Link",
+          "state": {},
+          "team": "TGAME"
+         }
+        },
+        "score": 0,
+        "teamName": "Team B"
+       }
+      }
+     }
+    }
+   },
+   "config": {
+    "scoreboardNumber": 2,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500"
+   },
+   "template": {
+    "name": "Fixture A",
+    "default_background": "./assets/thumbnail_base/a.png",
+    "template_id": "type_a"
+   }
+  }
+ },
+ "titles": {
+  "everything": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link) | SSBU",
+  "the_abbreviation_table": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link) | SF6",
+  "an_id_given_as_a_string": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link) | SSBU",
+  "an_unknown_game": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link)",
+  "a_broken_game_id": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link)",
+  "no_game": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link)",
+  "the_losers_mark_goes": "Big Cup Grand Final | SPN | Alpha vs Bravo(Link) | SSBU",
+  "a_tag_without_a_merged_name": "Big Cup Grand Final | Alpha vs Bravo | SSBU",
+  "only_a_character": "Big Cup Grand Final | Mario vs Link | SSBU",
+  "the_mains_when_no_character": "Big Cup Grand Final | Alpha(Kirby) vs Bravo | SSBU",
+  "the_lowest_slot_number": "Big Cup Grand Final | Alpha(Mario) vs Bravo | SSBU",
+  "slots_that_are_not_numbers": "Big Cup Grand Final | Alpha(Link) vs Bravo | SSBU",
+  "one_side_only": "Big Cup Grand Final | SPN | Alpha(Mario) vs | SSBU",
+  "the_other_side_only": "Big Cup Grand Final | vs Bravo(Link) | SSBU",
+  "no_players": "Big Cup Grand Final | SSBU",
+  "no_round": "Big Cup | SPN | Alpha(Mario) vs Bravo(Link) | SSBU",
+  "no_tournament": "Grand Final | SPN | Alpha(Mario) vs Bravo(Link) | SSBU",
+  "only_the_round": "Round 1",
+  "only_the_game": "SSBU",
+  "nothing": "",
+  "another_board": "Big Cup Grand Final | SPN | Alpha(Mario) vs Bravo(Link) | SSBU"
+ }
+}

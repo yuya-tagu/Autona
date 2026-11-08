@@ -127,9 +127,8 @@ SAVE_FAILED = ImageImport.SAVE_FAILED
 
 # Tournament-scoped assets, owned by the EVENT tab (the banner's file is
 # core/TournamentMediaService's since S4f) -- read here only as thumbnail
-# material. (The match thumbnail keeps its own copy of the pair; sharing
-# them is that panel's migration's business.)
-DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
+# material, as by the match thumbnail (core/ThumbnailService.py).
+DEFAULT_BANNER_PATH = schema.DEFAULT_BANNER_PATH
 BANNER_PATH = schema.TOURNAMENT_BANNER_PATH
 BANNER_TIMEOUT_SECS = 20
 BANNER_HEADERS = ImageImport.DOWNLOAD_HEADERS

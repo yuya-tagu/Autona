@@ -337,6 +337,7 @@ def wire(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(WebOps, "openSetSelection", None)
     monkeypatch.setattr(WebOps, "renderThumbnail", None)
+    monkeypatch.setattr(WebOps, "startImageRender", None)
     monkeypatch.setattr(WebServer, "_lan_hosts", ())
     monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
 

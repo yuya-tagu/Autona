@@ -5709,6 +5709,11 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - **スコアボードの選手カードが従来どおり**（詳細ダイアログ・クリア・キャラの行のレイアウトと増減・名前補完。カードの分岐を大きく消した）
   - スコアボードの Web UI の選手ダイアログで、国の入った選手の国を選び直せる（候補が開く）
   - 再レビューの修正のうち jsdom で確かめられないもの: 途中のキャラ欄を Backspace で空にして別のキャラを打つ、空行を飛ばして選んだときに focus が飛ばない、国を選んだ直後に Tab で地域欄へ移れる
+- **メインセッションの実機確認（2026-11-07、隔離データの `python main.py`）**
+  - 確認できた: 起動・サイドバー・共有ビュー（大会情報・選手一覧）。選手一覧の新規登録・編集・削除、国の選択と直後の Tab での地域欄への移動、キャラ名を打っただけの保存、途中のキャラ欄を消して別のキャラを打つ、Esc で閉じない。選手カードの名前入力・スコア +1・反映、詳細ダイアログ（キャラ候補・カラー欄・Close）、未反映の入力を残したページ切替
+  - 見つけて直した: 編集ダイアログのスキン画像のはみ出し（#263）。詳細ダイアログの Enter でカードの全項目が消える（`323b3e63` からの既存の不具合。#264）
+  - 未確認（リリース前にオーナーへ）: IME、実際の start.gg の参加者の読み込みと P1 / P2 へのセット、OBS、カスタム国旗、スコアボードの Web UI の国の選び直し、空行を飛ばして選んだときの focus
+  - ログ: `write() before start_response` の Traceback は、この文書に既知のノイズとして記録したもの（ブラウザが WebSocket を閉じたときの werkzeug の AssertionError）と同じメッセージ。発生の経路は特定済み: `simple_websocket.Server` が `start_response` を呼ばずにハンドシェイクし、engineio が空の応答を返すので、接続が閉じるたびに werkzeug の `serving.py` が `write(b"")` で AssertionError を出す（2026-07 のログのスタックとライブラリのソースから判断。実機では再現していない）。パネルのコードとは無関係で、操作に影響しない。スコア +1 のときの `all stages are completed` の警告は、BEST OF が 0 のためと推定（未確認）
 - **受け入れた点（直さない）**
   - `PlayerService.BoardNumber` / `TeamNumber` / `TeamLosersKey` / `Announce` の `None` の経路は、`score.*` 以外のパスへの防御的なパースとして残した（`"elsewhere.1"` のテストが覆う）
   - 既存キーへの上書きは確認を出さない。Qt 版と同じ（`git show 012b7c09:src/AutonaPlayerBrowserWidget.py` の保存に確認は無く、`QMessageBox` は削除だけ）
@@ -5722,3 +5727,103 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - mains が 100 件を超える、または改行や 257 文字以上の値を持つ DB 行の保存は、サーバーに断られてスナックバーで止まる
   - DB の記録が送信値に勝つ場面がある（`PlayerService.py:761-764`。`update_player` は `loadFromDB=True` で、記録 → 送信値の順に当て、空の送信値は何も書かないので、スコアボードの Web UI で空にした欄に DB の値が残る）
   - 空欄を飛ばした行の再マウントで focus が飛ぶ件は、行に ID を持たせて再マウントしなくなったので解消した（jsdom で同じ input のままなのを pin。実機確認の項目は残す）
+
+### S4 サムネイルの React 化 — 設計（2026-11-07・メイン決定。論点はオーナー確認済み）
+
+**範囲**: サイドバー Display の「サムネイル」（`src/AutonaThumbnailSettingsWidget.py` 731 行）。**core と v1（S4o）→ React 化と Qt 版の削除（S4p）の 2 段**。Result は Thumbnail のあとに別途設計する（`result_players` の core 化が重く、Thumbnail で作る描画の土台を使うため）。
+
+**棚卸しの要点**
+- 描画はオフスクリーン `QWebEngineView` の `grab()`。別プロセスは無く、`main_generate_thumbnail.py` は GUI プロセス内のモジュール。テンプレートはペイロードを注入されるまで描かないので、Commentary のような URL の iframe プレビューはできない
+- 設定は `settings.json` の `thumbnail_config`。`background_path` は絶対パス。`GetSetting` は読むだけで既定値を書き、`game.None` のような残骸を作る
+- パネル以外の入口: SCORE の「サムネイル生成」と X 投稿、legacy の `GET /scoreboard<N>-get-thumbnail-<png|jpg>`。`AutonaScoreboardWidget.py` は `from .AutonaThumbnailSettingsWidget import *` している
+- ボードは固定で 1（パネルのプレビュー・コピー・保存・動画タイトル）
+
+**決定**
+1. **描画はオフスクリーン WebEngine のまま**（本書の方針。`thumbnail.html` の契約を変えない）。デスクトップ専用で、ヘッドレスは今の legacy ルートと同じく `503 UNAVAILABLE`。シェル操作は既存の `renderThumbnail` の枠の中で扱い、新しい操作の種類を増やす場合は、Result でも使う 1 本にまとめて理由をこの節に残す（デスクトップにしか無い描画は、規約の言う「シェル操作」そのもの）
+2. **同期描画をやめる**: パネルの経路は GUI スレッドでイベントループを入れ子にしない（pitfalls #9）。非同期で開始し、完了を state の `thumbnail.render = {status, path, error, revision}` で publish する（`stream.thumbnail` と同じ形。起動時に idle へシードするので保存データの移行は不要）。実行中の要求は `BUSY`（409）。新しい要求が来たら最後の 1 件にまとめる。legacy ルートと SCORE の同期経路は契約を変えない
+3. **プレビューは実描画の PNG**: クライアント側 300ms の debounce で要求し、`GET /api/v1/thumbnail/preview?v=<revision>` で配信する（`tmp/` を静的配信の許可リストに入れない）。Qt 版と同じくパネルを表示しているあいだだけ描く
+4. **core に `src/core/ThumbnailService.py`**: `thumbnail_config` の副作用のない読み・検証つきの書き・既定に戻す・`_migrateBackgroundSource` 相当、動画タイトル（ゲーム略称の表を含む）、ペイロードの組み立て、ファイル名と 30 世代の剪定。**ペイロードは移す前の実装の出力を golden に録って一致を pin する**。バナー定数の統合もここで行う（S4d / S4f の約束）
+5. **保存形式は変えない**: `thumbnail_config` の形はそのまま。読みが既定値を書かなくなるだけ。残骸は読み飛ばし、消さない
+6. **カスタム背景はアップロードで取り込む**: Web はパスを取れないので `POST /api/v1/thumbnail/background`（既存の `imageUpload.ts`）で `user_data/` へコピーし、そのパスを `background_path` に入れる。既存の絶対パスは読めるあいだ有効で、ページはファイル名だけ出す（Qt 版の選択ダイアログは無くなる。LAN の端末からも選べるようになる）
+7. **既定に戻すに確認ダイアログを付ける**（全ゲームの設定を消すのに Qt 版は確認なし。Top 8 / Stream の Web 版に合わせる）
+8. **完了の通知**: `QMessageBox` はスナックバーと `role="status"` へ。保存先のパスを出す
+9. **画像コピー**: `canCopyImage` がある（secure context）ときだけ出す。LAN の http では「画像を開く / 保存」（Stream の前例）。コピーは生成の完了を待つとユーザー操作が切れるので、生成済みの画像を対象にする
+10. **SCORE との切り離しを先に行う**: `import *` をやめ、ボードの生成と X 投稿は Qt のまま `main_generate_thumbnail` の薄いラッパー経由にする。Board パネルの移行まで残す
+11. **v1（S4o で追加のみ）**: `GET /api/v1/thumbnail`（設定・テンプレート一覧・動画タイトル・描画できるか）、`PATCH /api/v1/thumbnail`、`POST /api/v1/thumbnail:reset`、`POST /api/v1/thumbnail/background`、`POST /api/v1/thumbnail:preview`（202）、`POST /api/v1/thumbnail:generate`（202）、`GET /api/v1/thumbnail/preview`。権限は WRITE
+
+**外部契約**: `out/thumbnails/` のファイル名・形式（png + jpg）・世代数、`layout/thumbnail*/` の注入の契約、legacy の get-thumbnail ルート、`colors.thumbnail.*` はすべて不変。
+
+**論点（機能を削るのでオーナー確認。2026-11-07 回答済み）**
+1. **「スムーズ」のチェック（`smooth_scale`）** → **ページに出さない（オーナー承認）**。保存はされるが `layout/` にも描画側にも読み手が無く、押しても何も変わらない（2026-11-07 grep）。設定値は消さない
+2. **動画タイトルの手入力** → 推奨: **残す**。今どおり保存はせず、自動生成値と同じか空なら上書きする
+
+**リスク**: S4o は追加のみで「通常」。S4p は Qt 版の削除と SCORE の切り離しを含むが保存形式は変えないので「通常」（実機確認を条件に自己マージ）。S4p の前に実機でプレビュー・生成・保存を確認する。
+
+**見積り**: S4o は中（core 1 ファイル + v1 7 本 + golden + 描画の非同期経路）。S4p は中（React ページ 1 枚 + Qt 版と `.ui` の削除）。
+
+#### S4o サムネイルの core 化（2026-11-07）
+
+試合サムネイルの設定・動画タイトル・ペイロード・背景・出力を core に移し、バックグラウンドの描画と v1 を足した。Qt のパネルと SCORE は残し、表示結果は変えていない（v1 が増えただけで単独でリリースできる）。S4p はこの上に React のページを作って Qt 版を消す。
+
+- **完了内容**
+  - core: `src/core/ThumbnailService.py`（Qt 非依存。`bootstrap_core()` が生成）。`Settings()`（読みは書かない）/ `Update()`（全部検証してから 1 回だけ書く）/ `Reset()` / `MigrateBackgroundSource()` / `Describe()` / `VideoTitle()` / `BuildPayload()` / `ImportBackground()` / `Preview()` / `Generate()` / `PreviewImage()`、モジュール関数 `OutputStem` / `ResolveBackgroundPath` / `BuildVideoTitle`
+  - state: `thumbnail.render = {status, path, error, revision}`（`StateSchema` の `KEY_CATALOG` に追加。`SeedPanelState` が起動時に idle へ戻し、revision は続く。ルートが増えただけなので `STATE_VERSION` と移行は不要）。バナーの定数は `StateSchema.DEFAULT_BANNER_PATH` / `TOURNAMENT_BANNER_PATH` の 1 組に統合した（`StreamService` はこれを読む）
+  - 描画: `src/thumbnail/ThumbnailRenderer.py` をチケットで直列にした（下の判断 1）。`renderAsync(data, config, template, done)` を追加し、`render` / `renderSync` は同じ列に載せた
+  - シェル: `AutonaScoreboardManager.StartImageRender(kind, payload, done)` と `AutonaWebOperations.startImageRender`（`bootstrap_gui()` が登録。ヘッドレスは未登録で `503`）
+  - v1（追加だけ）: `GET /thumbnail`・`GET /thumbnail/preview`（`READ`）、`PATCH /thumbnail`・`POST /thumbnail:reset`（confirm）・`POST /thumbnail/background`・`POST /thumbnail:preview`・`POST /thumbnail:generate`（`WRITE`）
+  - Qt 側: `main_generate_thumbnail.py` は core の薄いラッパーになった（`prepare_data` / `save_result` / `generate`。SCORE と legacy の入口はそのまま）。パネルは動画タイトル・`_migrateBackgroundSource`・既定に戻すを core に差し替えた。`AutonaScoreboardWidget.py` の `import *` は S4p（決定 10 はページと一緒に行う）
+- **外部契約**: v1 のルートが 7 本増え（`external-control-api.md` §5.12・§6.28・§6.29・§7）、state のルート `thumbnail` が `program_state.json` に増え、その出力として `out/thumbnail/render/{status,path,error,revision}.txt` が増えただけ（テキスト出力は state の全キーに付く既存の動作）。`out/thumbnails/` のファイル名・png + jpg・30 世代、`thumbnail.html` の注入の契約（`initThumbnail(payload)` と `RENDER_READY`）、legacy の get-thumbnail ルート（mimetype 含む）、`thumbnail_config` の形はどれも不変
+- **テスト**: `tests/test_thumbnail_service.py`（golden の再生と設定・背景・タイトル・レーン・失敗の経路・ファイル名と世代・シード・`translate` の注入・プレビューだけ速い PNG を頼み、生成は既定のエンコードのまま（判断 23）・エンコードと書き出しの時間の debug ログ）、`tests/test_api_v1_thumbnail.py`（7 本の契約・`400` / `404` / `409` / `413` / `503`・拒否時に書かない・アクセス規則・`tmp/` を配信しない・legacy の mimetype）、`tests/test_thumbnail_render.py`（実物の `QWebEngineView` を offscreen で: プレビュー中の同期描画が自分の絵を取る・ハングとタイムアウトからの復帰・読み込み中のタイムアウトが読み込みを打ち切らない・置き換えられた読み込みの完了を取り違えない・読み込みの失敗から次の要求で復帰する・開始できない描画が 1 回だけ終わる・遅れた `RENDER_READY` を取り違えない・撮る時機（判断 22: `RENDER_READY` だけでは撮らない・番号違いと `RENDER_READY` の前の `RENDER_PAINTED` を取らない・rAF が止まっても上限で撮る・前の描画の上限が次の描画を終わらせない・直前の描画がデコードした画像をデコードし直さない（新しい画像と失敗した画像はデコードする。ログに内訳が出る）・読み込んだばかりのページの最初の絵が読み込み前の絵なら撮り直す・同じページでは比べない・同じ絵のページは上限で撮る。画素ではなく順序を pin する）・文字列の注入（U+2028/2029・孤立サロゲート・`</script>`）・実物の `layout/thumbnail*/thumbnail.html` に注入して最後まで走る（画素は見ない）。ルートから描画・ジョブ・ファイルまでの通し。エンコーダ: 既定は `QPixmap.save()` と同じバイト列、速い PNG は同じ画素の PNG で zlib レベル 1（判断 23））、`tests/fixtures/thumbnail/`（`record_golden.py` は基準 `f2cda760` の `git archive` から録る。`scenarios.py` が世界、`golden.json` が録画: テンプレ 2 種 × 背景 3 種 / 選手あり・なし / チーム名・スポンサー・フェーズの on/off / 反転・ズーム / ゲーム未選択 / プレースホルダ）。ルート台帳は v1 51 of 76
+- **オーナー実機確認**: `python main.py` で (1) SCORE の「サムネイル生成」と X 投稿・Qt パネルのプレビュー / 保存 / コピーが従来どおり (2) v1 の `:preview` → `GET /thumbnail/preview`・`:generate` → `out/thumbnails/` に実際の絵が出る（**offscreen の `grab()` はウィジェットの背景しか写さず、ページの画素はテストで確かめられない**）(3) プレビュー中に SCORE で生成しても正しい試合の画像になる (4) カスタム背景のアップロードが次の描画に出る (5) テンプレートを交互に切り替えた直後の `:preview` が毎回切り替え後の絵になる（判断 22。ログに `did not say it painted` / `still looks like the one before it` の警告が出ないこと、同じテンプレートでのプレビューが遅くなっていないこと。遅いときは `Thumbnail render complete:` の行の内訳を見る） (6) 選手名あり + 既定の背景での `:preview` → `done` が 0.4 秒前後になり、プレビューの絵が以前と同じに見える（判断 23。標準出力の `Thumbnail preview: encoded in ...` の行でエンコードと書き出しの時間を見る）
+- **メインセッションの実機確認（2026-11-07〜08・隔離データの `python main.py`）**
+  - 確認済み: (2) v1 の preview / generate（`out/thumbnails` に PNG・JPG、`image/png`）・legacy の `-png` / `-jpg`（プレビューと競合させても正しい絵）(4) アップロード背景が次の描画に出る (5) テンプレート交互切り替え 76 + 30 回で古い絵 0・`late` / `fresh-wait` / タイムアウトの警告 0 (6) 同じテンプレートの `:preview` → `done`: 選手あり + 既定の背景 0.91〜1.03 s → 0.28〜0.33 s、選手なし 0.23〜0.25 s、単色背景 0.22〜0.27 s。実測のエンコードは fast PNG で 47〜94 ms、書き出し 0〜16 ms。generate は fast なし（PNG 813 ms + JPG 15 ms）。`` `${x}` `` を含むタグは文字として描かれる。PATCH `align: 0` は 400
+  - (1) Qt パネル: 開いたとき・チェックの切り替えでプレビューが再描画される。「プレビューを画像として保存」で `out/thumbnails` に 1920x1080 の正しい絵が出る（SCORE の X 投稿と同じ同期の `thumbnail.generate` 経路）
+  - 未確認: SCORE の「Xに投稿する」（ユーザーのブラウザで x.com を開くため押していない。サムネイルの部分は上の保存と同じ関数）・「プレビューをクリップボードにコピー」（ユーザーのクリップボードを上書きするため。生成は保存と同じ関数）・(3) は legacy の競合で代替
+- **レビュー対象の判断**（設計の文面からの差分を含む）
+  1. **`renderSync` の疑いは本物だった**: `_rendering` を見ずに `_start_render` し、`_queued_payload` を捨てるので、実行中の描画の `RENDER_READY` で同期の呼び出しが前の絵を受け取っていた。ページの完了の合図は title 1 つなので、対症療法（フラグの確認）ではなく描画をチケットで 1 度に 1 つにした。同期の呼び出しは前の描画の終わりも待つ。段階（ロード・スクリプト）ごとに 10 秒で失敗するのは `renderSync` の今までの上限をそのまま全部の入口に広げたもので（パネルの `render()` は上限が無く、ハングすると以後のプレビューが止まっていた）、**スクリプトを流した描画がタイムアウトしたらページを読み直す**（遅れた `RENDER_READY` が次の描画を終わらせないように）。読み込みを待っていただけの描画は失敗するだけで、読み込みは続ける（打ち切ると 10 秒を超える環境ではページが永久に届かない）。読み込みが失敗していれば次の要求が読み直す。同期の失敗は今までどおり空の `QPixmap`
+  2. **シェル操作を 1 本足した（`startImageRender(kind, payload, done)`）**: 決定 1 の要請どおり、理由をここに残す。既存の `renderThumbnail` は「描いて、待って、パスを返す」で、GUI スレッドで入れ子のイベントループを回すので新しい経路に使えない（決定 2）。オフスクリーンの描画はデスクトップにしか無く、規約の「シェル操作」そのもの。`kind` を取るのは Result でも同じ 1 本を使うため（違いは core 側で、シェルはビューだけを持つ）。開始だけを同期で渡し、完了は待たない。絵は `QPixmap` のまま持ち出さず `QImage` にして、符号化はジョブで行う（1920x1080 の PNG で GUI を止めない）
+  3. **プレビュー中の generate は 409 にせず予約する**（設計の「実行中は BUSY」からの差分）。操作者の「生成」がプレビューの都合で失敗するのは不自然なため。`BUSY` は generate が実行中か予約済みのときだけ。予約の generate は予約の preview を兼ねる（同じ絵でプレビューの画像も更新する）。実行中の preview は「最後の 1 件」にまとめる（ペイロードは run の開始時に組む）
+  4. **202 に `renderRevision` を返す**（設計に無い）。予約された run が前の run の結果と見分けられないと、クライアントは自分の結果を待てない
+  5. **権限**: 設計の「権限は WRITE」は書き込みと解釈し、GET 2 本は台帳の規則どおり `READ`
+  6. **既定値の食い違いを見つけた**: `thumbnail.js` は `use_team_names` / `flip_p2` が無ければ `false`、パネルは `true`（開いたときに書く）。golden と SCORE を変えないため `BuildPayload` は生のままにし、**v1 の描画だけ** `_AsRead` を通す（`GET` の値 = 描いた絵。判断 14）。パネルを一度も開いていない環境で SCORE の絵と v1 の絵が違うことがある（S4p でパネルが無くなると、SCORE は常に `false` 側になる。**S4p で SCORE にも同じ既定を入れるか判断する**）
+  7. **モックデータの翻訳**: core は Qt を import しないので `translate` と `locale` を注入する。golden は恒等翻訳・固定の seed・固定のロケールで録り、実際の注入が同じ context / text を `QCoreApplication.translate` に渡すことは別のテストで確かめる
+  8. **カスタム背景は内容のハッシュ入りのファイル名**（テンプレートにキャッシュバスターが無く、同じパスの置換が反映されない）。**アップロードだけで `background_source` を `custom` にする**（設計に無い。手順を 2 回にしない）。前の取り込みは消す。`Reset` も取り込んだファイルを消す（パネルの既定に戻すも core を通るので同じ）。任意のパスの元ファイルは消さない
+  9. **`PATCH` はパスを受けない**（任意のローカルファイルを描画に読ませない）。`smooth_scale` は受ける（論点 1 はページの話で、設定は消さない）。未知のキーは全拒否で、1 つでも不正なら何も書かない
+  10. **文字列の注入を直した**: `_start_render` は JSON をテンプレートリテラルに入れていて、`` ` `` と `\` しか逃がしていなかった。タグに `${...}` があるとスクリプトとして実行される（テストを書いて発見。ReferenceError で描画が止まった。start.gg の名前も入る経路）。JSON 文字列を JS の文字列リテラルにして渡す形に変えた（ページに渡る値は同じ。ほかの文字列は golden の範囲外で、往復をテストで確かめた）
+  11. **legacy との意図した差**: `ForgetSelection` の後（キャラは残るが codename が無い）のプレースホルダは `AttributeError` だったのを空のテンプレートにした（golden の範囲外。テストあり）。テンプレートの JSON は `encoding="utf-8"` で開く（実ファイルは ASCII で同じ）
+  12. **プレビューの実体は `./tmp/thumbnail/preview.png`**（パネルの `template.png` とは別で、互いに邪魔しない）。`GET` はバイト列で返し、ファイルを開いたままにしない（Windows の `os.replace` を妨げない）
+  13. `Preview` / `Generate` の開始で `MigrateBackgroundSource()` を呼ぶ（パネルを開かなくても `background_path` だけの古い設定を正しく読む）。保存形式は `background_source` が増えるだけで、パネルが開いたときに書いていたものと同じ
+  14. **`GET` の値 = 描いた絵**（レビュー指摘）: テンプレートは `gameConfig.align?.horizontal || 50` / `vertical || 40` と読むので、保存値の `0` は既定で描かれる（type_a / type_b とも）。ほかにも `use_team_names: 0` は `false`、`zoom: 150.0` は 150 に読み、`Settings()` は既定に読んでいた。テンプレートは変えないので、`Settings()` の読み（`_ReadToggle` / `_ReadGame`）を v1 の描画にも通す（`_AsRead`。`asset_pack` など読みの対象外のキーと、描かないゲームの値はそのまま）。**`align: 0` の `PATCH` は `400`**（範囲を 1〜100 にした）: 受け入れると `GET` が返す値も絵も送った値と違い、クライアントが「0 に設定した」と思う状態が残る。パネルの spin box は 0 を保存できるが、その値は既定（50 / 40）として読む。golden（`BuildPayload`）と SCORE の絵は変えない。テンプレートの既定と `DEFAULT_GAME_SETTINGS` の一致はテストで pin した
+  15. **`PATCH` の codename は今のゲーム一覧にあるものと state のゲームだけ**（レビュー指摘）: `settings.json` の項目はリセットまで残るので、誤った名前を永久に保存させない。一覧を読む前（`ScanGames` の前）やカタログが無いときは **state のゲームだけ受ける**: その間ページに出せるゲームはそれだけ（`GET` の `game`）で、それ以外は保証できないので断る（一覧が読めれば通る）。一覧から消えたゲームの保存値は読めるし消さない（戻ってくることがある）が、書けない。body の上限は 64 KiB
+  16. **`thumbnail.render.error` はコードだけ**（レビュー指摘。今までは例外の文言をそのまま流していて、操作者のパスが全クライアントに届いた）: `no_game` / `no_player` / `payload_failed` / `render_failed` / `save_failed` / `cancelled`。詳細はログ。`out/program_state.json` が無い・壊れているときの generate も `no_game` / `no_player`（state から判定）で、`ThumbnailDataMissing` の文言は元の例外のまま（golden と SCORE のメッセージボックスは同じ）
+  17. **終了中だけ `cancelled`**（レビュー指摘）: `render` の例外を一律 `cancelled` にしていたのをやめた。シェルが `shuttingDown`（`gui_unavailable_reason`。`run_sync` があきらめる理由と同じ）を注入し、それ以外は `render_failed`。例外はそのまま呼び出し元へ（終了中は `503`）
+  18. **run は 1 回だけ終わる**（レビュー指摘）: レンダラーは開始できない描画（注入に失敗するペイロードなど）を例外で返さず、受け手に 1 回だけ失敗を伝える（例外とウォッチドッグの両方で終わっていた）。`ThumbnailService` も `done` と `render` の例外のどちらか先の 1 回だけを受け、`_Ended` は実行中の revision だけを受ける
+  19. **古い読み込みの完了を取らない**（レビュー指摘。旧実装からの競合で、直列化の前提）: `loadFinished` はどの読み込みかを言わないので、URL のクエリに読み込みの番号を入れ（`?load=N`。テンプレートは読まない）、それを伝える `loadingChanged` で照合する
+  20. **generate の後のプレビューの書き込み失敗は `done`**（レビュー指摘）: `out/thumbnails/` に保存できていれば頼まれたことはできている。警告ログだけで、`GET /thumbnail/preview` は前の画像のまま。プレビュー自体の失敗は今までどおり `save_failed`
+  21. **起動時に前回の `tmp/thumbnail/preview.png` を消す**（レビュー指摘。ヘッドレスとクラッシュは `tmp/` を残す）。`RemoveLeftovers` の呼び出しの隣で行う（`ImageImport.RemoveLeftovers` 自体は一時ファイルだけを消す共用の関数なので変えない）。`thumbnail.render` は idle に戻るので、前回の絵だけ残らない
+  22. **`RENDER_READY` では撮らない**（実機確認で発見。2026-11-08）: テンプレートを切り替えた直後の `:preview` が、16 回に 1 回、切り替え前のテンプレートの絵で `done` になった（`:generate` も同じ経路なので `out/thumbnails/` に誤った絵が残りうる）。原因は旧実装からある（HEAD も同じ）: `RENDER_READY` から固定 100 ms（`SETTLE_MS`）後に `grab()` していて、新しい文書の合成済みフレームが Qt に届いたことを何も確かめていなかった。文書をまたぐ読み込みの直後、Chromium は新しい文書の最初のフレームが出るまで前の文書のフレームを出し続けることがある（paint holding）。切り替えのときだけ起き、古い絵がそのまま写ったこととも合う。手元（windows プラットフォームの小さなページで 12 回）では再現していない。**待ち時間を延ばすのではなく、撮る条件を 2 つにした**
+      - **A（すべての描画）**: `RENDER_READY` の後、レンダラーのスクリプト（`PAINT_SCRIPT`。テンプレートは外部契約なので変えない）がページで `document.fonts.ready` → `<img>` と CSS 背景画像の `decode()` → `requestAnimationFrame` 2 回を待ち、`RENDER_PAINTED <描画の番号> painted` を title に出す。2 回目の rAF が始まった時点で、絵を含む 1 回目のフレームは送られている。番号は描画ごとに振るので、前の描画のスクリプトが遅れて出した title は取らない（`RENDER_READY` の前に来たものも取らない）。rAF が止まるページ（隠れたビュー）に備えて、上限 `PAINT_WAIT_MS` = 1 秒を **Qt 側のタイマー**で計る（ページのタイマーも一緒に止められうるため）。上限で撮ったときは警告ログ（`did not say it painted (late)`）。撮るのは title のシグナルの外（`singleShot(0)`）
+      - **C（読み込んだばかりのページの最初の 1 枚だけ）**: `_load_template` が読み込みの直前にビューを `grab()` しておき、最初の絵がそれと同じ画素なら `FRESH_FRAME_POLL_MS` = 30 ms ごとに撮り直す（上限 `FRESH_FRAME_WAIT_MS` = 1 秒。上限で撮ったときは警告ログ `still looks like the one before it`）。同じページでの 2 枚目以降は比べないので、同じ絵の描き直しは待たない。A だけでは、合成側が前の文書の面を出し続ける場合を捉えられないため
+      - **採らなかった案**: (B) Qt のフレームのシグナル（`QQuickWindow.frameSwapped`）は、`QWebEngineView.focusProxy()` が非公開の `QQuickWidget` 派生で、PySide6 では `QWidget` としてしか包まれず（キャストも拒否される）届かない。`SETTLE_MS` を延ばす案は原因に当たらず、遅いマシンでは同じことが起きる。C だけにする案は同じテンプレートでの古いフレームを捉えられない
+      - **待ち時間**: 同じテンプレートでの描き直しは固定 100 ms → 2 フレーム前後（offscreen の実測で fonts + decode + rAF 2 回が 31〜47 ms）で、むしろ短くなる見込み。切り替えでは読み込みの前の `grab()` 1 回が増え、古い絵が出ている間だけ撮り直す。`renderSync`（SCORE）と legacy も同じ列なので同じく直る。入れ子のイベントループは増やしていない（`renderSync` の既存の 1 つだけ）。すべての待ちはチケットの 10 秒のウォッチドッグの中
+      - **Result にも同じ形がある**: `src/result/ResultRenderer.py`（`loadFinished` / `titleChanged` → `grab()`）。この修正の範囲外で直していない。Result の移行で同じ待ち方を共用する（Result の設計の前提として持ち越す）
+      - **実機で出た遅さ（2026-11-08 追記）**: 実機確認で古い絵は切り替え直後 76 回中 0 回になった（`late` / `still looks like` の警告も 0）。一方で、同じテンプレートでの `:preview` → `done` が、選手名あり + 既定の背景で 1.20〜1.36 秒になった（選手名あり + カスタム背景（1920x1080 の単色）は 0.28〜0.38 秒、選手名なしのモック + 既定の背景は 0.25〜0.33 秒。上限の警告は出ていない）。offscreen では再現しない: 出荷テンプレート・実物の既定背景（1672x941 の PNG、2.7 MB）・合成したキャラ画像（1800x1800 → 描画ごとに WebP の data: URL に縮小される）で、`PAINT_SCRIPT` は 3 条件とも 30〜60 ms（画像のデコード待ちは 4〜40 ms）。重いのは実機（GPU の経路）でだけ動く段で、**原因は確定していない**。3 条件の差（選手名あり + 既定の背景だけが遅い）も説明できていない
+      - **対処 1（有力な候補への手当て）**: 同じ文書で直前の描画がデコードした画像は、もうデコードを頼まない（ページの `window.__thumbnailDecoded`。直前の描画の分だけ持つ。キャラは描画ごとに作る data: URL なので、全部持つと増え続ける）。テンプレートは毎回同じ背景・同じキャラを描き直すので、2 回目以降はデコードを頼み直すだけになる。新しい画像とデコードに失敗した画像は毎回頼む。`complete` は判定に使わない（読み込み済みはデコード済みではない。大きな画像はデコード前だと最初のフレームに出ないことがあり、古い絵や欠けた絵に戻る）。offscreen では、キャラなし + 既定の背景の画像待ちが毎回約 40 ms から 4 ms になった。テンプレートを切り替えた後の最初の描画は従来どおり全部をデコードする（既定の背景は offscreen で 169 ms）
+      - **対処 2（原因を確定するため）**: 描画ごとに内訳を 1 行 INFO で出す。`Thumbnail render complete: <合計> ms (page <READY まで>, painted <READY → RENDER_PAINTED> [fonts=<ms> images=<ms>/<デコードした数> frames=<ms>], taken <PAINTED → 撮影>)`。`images` が大きければ対処 1 の場所。`frames`（rAF 2 回）が大きければ GPU の描画そのものに時間がかかっている。その場合は待つのが正しく、修正前の 100 ms は描き終わる前のフレームを撮っていたことになる（同じデータの描き直しでは同じ絵なので気づけない）。そうなったらテンプレートの重さ（背景のフィルタ・描画ごとのキャラの縮小）を見直すかどうかの判断になる
+  23. **v1 プレビューの PNG だけ圧縮を下げる**（実機の再計測で判明。2026-11-08）: 同じテンプレートでの `:preview` → `done` が、選手名あり + 既定の背景で 0.91〜1.03 秒、選手名なし + 既定の背景で 0.24〜0.27 秒、選手名あり + アップロードした単色の背景で 0.22〜0.25 秒（各 5 回）。どの条件でも `Thumbnail render complete` は 171〜203 ms で、差の約 750 ms はレンダラーの外だった
+      - **測定（単体。WebEngine なし）**: 既定の背景を 1920x1080 に描いた `QImage`（キャラと名前の代わりに図形と文字を重ねたものも）を `_EncodeImage` で 7 回ずつ。PNG の既定（zlib レベル 6）が中央値 610〜910 ms・3.1〜3.3 MB。品質 85（レベル 1）が 130〜160 ms（別の回で 110〜220 ms。マシンの揺れ）・3.0〜3.4 MB。品質 90（レベル 0、無圧縮）は 50〜70 ms だが 6.2〜8.3 MB。JPEG は 28 ms・0.3 MB。`tmp/thumbnail/preview.png` の書き出し（`ImageImport.WriteFile`。fsync なし）は 4〜6 ms。**支配的なのはエンコードで、書き出しではない**。単色の背景が速いのは、同じ画素が続く画像では deflate がほとんど仕事をしないため
+      - **対処**: レンダラーが渡す `encode(format, fast=False)` に `fast` を足し、`ThumbnailService._Save` はプレビューのときだけ `encode("PNG", fast=True)` を頼む。シェル（`AutonaScoreboardManager._ImageEncoder`）が `fast` を PNG の品質 85 に読み替える（Qt は品質を `(100 - quality) * 9 / 91` で zlib のレベルにする。85 はレベル 1）。可逆の PNG のままなので画素は同じで、`GET /api/v1/thumbnail/preview` の `image/png` も変わらない。core は Qt の品質の意味を持たない（速い PNG を頼むだけ）。見込みは選手名あり + 既定の背景で約 0.95 秒 → 0.35〜0.4 秒（エンコードが約 0.7 秒 → 約 0.15 秒）
+      - **変えないもの**: `:generate` が書く `out/thumbnails/` の PNG / JPG と、生成が一緒に書くプレビューの絵は既定のエンコードのまま（`QPixmap.save()` と同じバイト列。テストで pin）。legacy の `/scoreboard*-get-thumbnail-{png,jpg}` と SCORE の同期生成は `main_generate_thumbnail.save_result`（`QPixmap.save`）の別経路で、触っていない。golden（payload とタイトル）は描画の前なので関係しない
+      - **採らなかった案**: レベル 0（品質 90 以上）はさらに 80 ms 前後速いが、2.5 倍のバイト数を Web UI（LAN の別端末からも見る）へ送ることになる。プレビューだけ JPEG にする案は、ルートの Content-Type（`image/png`）が変わるので採らない。別のエンコーダ（PIL など）は依存とスレッドの扱いが増える
+      - **計測のログ**: `_Save` が描画の後の時間を debug で 1 行出す。`Thumbnail <preview|generate>: encoded in <ms> ms (PNG[ fast] <bytes> bytes in <ms> ms[, JPG <bytes> bytes in <ms> ms]), written in <ms> ms`。開発時（`python main.py`）は標準出力に出る（`logs/autona.log` は INFO なので出ない）
+- **受け入れた点（直さない）**
+  - v1 の描画はボード 1 固定（設計どおり。SCORE は自分のボード）
+  - 実行中のタイムアウトはページの読み直しの間、次の描画を待たせる（ハング自体が異常なので）
+  - 読み込みが終わりも失敗もしないまま止まると、以後の描画はタイムアウトし続ける（ローカルファイルなので現実には起きない。打ち切りをやめたことの裏返し）
+  - `thumbnail.render` は SCORE の同期生成と legacy を映さない（それらは今までどおり呼び出し元に返す）
+  - 終了中に始まった描画の結果は保存しない（`cancelled`）
+  - 未反映の入力が `READ` の `GET` で読める（`include_pending`。`GET /thumbnail/preview` と `out/thumbnails/` の絵も同じ）。v1 の GET は READ という台帳の規則に沿う
+  - v1 の `:reset` の後に SCORE の絵が変わることと、既定値の食い違い（判断 6）。S4p で SCORE にも同じ既定を入れて解消する
+  - 一時ファイル名が長いタグで失敗しうること、注入する文字列が大きくなること、最初の v1 描画で WebEngine の構築に 1 回止まること
+  - 翻訳の抽出（`QApplication.translate` の直書きが core に無くなった件）は、`lupdate` が無い現状では影響しない。S4p で再確認する
+  - パネルのファイル選択で別の背景に変えた後も、取り込んだファイルが残る。S4p でパネルが消えるので直さない

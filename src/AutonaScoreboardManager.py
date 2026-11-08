@@ -15,6 +15,35 @@ from .core.Actions import AutonaActions
 from . import ui_constants as UI
 
 
+# The preview's PNG (ADR-005 S4o judgment 23). Qt maps a PNG quality to the
+# zlib level as (100 - quality) * 9 / 91, so 85 is level 1: lossless like
+# every PNG, about five times faster than the default level (6) on a busy
+# 1920x1080 picture, for a few percent more bytes. 90 and up is level 0,
+# faster again but two and a half times the bytes.
+PREVIEW_PNG_QUALITY = 85
+
+
+def _EncodeImage(image, file_format, quality=-1):
+    """A QImage's bytes as "PNG" or "JPG", the encoders QPixmap.save() uses
+    (`quality` as QImage.save() takes it; -1 is its default); b"" when it
+    failed. Not bound to the GUI thread, unlike a QPixmap."""
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not image.save(buffer, file_format, quality):
+        return b""
+    return bytes(buffer.data())
+
+
+def _ImageEncoder(image):
+    """A render's `encode(format, fast=False)`: what QPixmap.save() writes,
+    or with `fast` the preview's PNG (PREVIEW_PNG_QUALITY). `fast` changes
+    only a PNG: a JPG is the same either way."""
+    def encode(file_format, fast=False):
+        quality = PREVIEW_PNG_QUALITY if fast and file_format == "PNG" else -1
+        return _EncodeImage(image, file_format, quality)
+    return encode
+
+
 class AutonaScoreboardManager(QDockWidget):
     instance: "AutonaScoreboardManager" = None
 
@@ -189,8 +218,9 @@ class AutonaScoreboardManager(QDockWidget):
 
     # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
     # What only the desktop's windows answer. bootstrap_gui() registers them
-    # as AutonaWebOperations.openSetSelection / renderThumbnail; the headless
-    # shell has neither, and the web layer answers them 503. On the GUI
+    # as AutonaWebOperations.openSetSelection / renderThumbnail /
+    # startImageRender; the headless shell has none, and the web layer
+    # answers them 503. On the GUI
     # thread, where the boards and their windows live (an unbuilt board is
     # built there first); the request waits for the answer. Moved unchanged
     # from the web server's former actions class, apart from the window
@@ -229,3 +259,28 @@ class AutonaScoreboardManager(QDockWidget):
                 thumbnailPath = thumbnailPath.replace(".png", ".jpg")
             return os.path.abspath(thumbnailPath)
         return None
+
+    @gui_thread_sync
+    def StartImageRender(self, kind, payload, done):
+        """Start drawing an image off-screen, on the GUI thread, and return:
+        the wait for the GUI thread ends here, not at the image. `kind` says
+        which renderer ("thumbnail"; Result's is to come, the same way);
+        `done(encode, error)` comes on the GUI thread, once, with
+        `encode(format, fast=False)` -> the image's bytes (callable from any
+        thread: a QImage, not the QPixmap; `fast`: _ImageEncoder), or None
+        when it failed (`error`)."""
+        if kind != "thumbnail":
+            raise ValueError(f"unknown kind of image: {kind}")
+        # Built by the first render, not at startup: the off-screen view and
+        # its page load cost seconds most launches do not need.
+        from .thumbnail.ThumbnailRenderer import ThumbnailRenderer
+
+        def finished(pixmap, error):
+            if pixmap is None:
+                done(None, error)
+                return
+            done(_ImageEncoder(pixmap.toImage()), "")
+
+        data, config, template = payload
+        ThumbnailRenderer.instance().renderAsync(
+            data, config, template, finished)

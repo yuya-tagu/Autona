@@ -68,13 +68,18 @@ These kinds live here:
 - the player list's (ADR-005 S4m): core's PlayerDirectory -- its rows, and a
   record saved or deleted -- in both shells, on the calling thread (no board,
   no slot: the database's write waits for nothing under a lock).
+- the match thumbnail's (ADR-005 S4o): core's ThumbnailService -- its
+  settings, their defaults, the uploaded background, the preview's file -- in
+  both shells, on the calling thread. Starting a render (`preview_thumbnail`
+  / `generate_thumbnail`) needs the shell's image renderer, below.
 - the shell operations (ADR-005 S3e-9): opening a board's set selection
-  window and rendering its thumbnail. Not core's: one opens a window, the
-  other renders with the board's WebEngine, so they need the desktop's
+  window, rendering its thumbnail (the legacy route, synchronously) and
+  starting an image's render off-screen (S4o). Not core's: one opens a
+  window, the others draw with a WebEngine view, so they need the desktop's
   QApplication and widgets. The desktop registers its scoreboard dock's
-  (`openSetSelection` / `renderThumbnail`, bootstrap_gui(); run on its GUI
-  thread), the headless shell registers none, and they raise NotAvailable:
-  503. No other operation needs a shell.
+  (`openSetSelection` / `renderThumbnail` / `startImageRender`,
+  bootstrap_gui(); run on its GUI thread), the headless shell registers none,
+  and they raise NotAvailable: 503. No other operation needs a shell.
 
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
@@ -107,6 +112,7 @@ from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
 from .core.StreamService import StreamService
+from .core.ThumbnailService import ThumbnailService
 from .core.TournamentInfoService import TournamentInfoService
 from .core.TournamentMediaService import TournamentMediaService
 from .core.TournamentService import TournamentService
@@ -352,6 +358,12 @@ openSetSelection = None
 # Render board `scoreboard`'s thumbnail: (scoreboard, file_format) -> the
 # image's absolute path, or None when it failed.
 renderThumbnail = None
+# Start drawing an image off-screen and return, without waiting for it:
+# (kind, payload, done). One operation for every generated image -- the match
+# thumbnail now (core/ThumbnailService), Result next, by `kind` -- rather than
+# one per image: what differs between them is core's, and the shell only has
+# the view. `done(encode, error)` comes later on the GUI thread. ADR-005 S4o.
+startImageRender = None
 
 
 def _board(scoreboard):
@@ -716,6 +728,61 @@ def set_stream_thumbnail_options(changes):
 
 def generate_stream_thumbnail():
     return StreamService.instance.GenerateThumbnail()
+
+
+# ── the match thumbnail (ADR-005 S4o) ────────────────────────────────────
+
+def describe_thumbnail():
+    """The settings, the game they are for, the templates, the video title
+    and whether this shell can draw (canRender)."""
+    return dict(ThumbnailService.instance.Describe(),
+                canRender=startImageRender is not None)
+
+
+def get_thumbnail_settings():
+    return ThumbnailService.instance.Settings()
+
+
+def update_thumbnail_settings(changes):
+    return ThumbnailService.instance.Update(changes)
+
+
+def reset_thumbnail_settings():
+    ThumbnailService.instance.Reset()
+
+
+def import_thumbnail_background(data):
+    return ThumbnailService.instance.ImportBackground(data)
+
+
+def preview_thumbnail():
+    """Draw the preview image in the background: the revision of the run that
+    will. Only a shell with a renderer can (NotAvailable: 503)."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return ThumbnailService.instance.Preview()
+
+
+def generate_thumbnail():
+    """Draw and save a thumbnail in the background: the revision of the run
+    that will, or BUSY. Only a shell with a renderer can (NotAvailable: 503)."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return ThumbnailService.instance.Generate()
+
+
+def get_thumbnail_preview():
+    """The preview image's bytes (a PNG); None while there is none."""
+    return ThumbnailService.instance.PreviewImage()
+
+
+def start_image_render(kind, payload, done):
+    """Hand an image to the shell's renderer (core/ThumbnailService's
+    `render`). Waits for the GUI thread to take it, not for the image."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return _on_gui_thread(lambda: startImageRender(kind, payload, done),
+                          "the image render")
 
 
 # ── the tournament ───────────────────────────────────────────────────────

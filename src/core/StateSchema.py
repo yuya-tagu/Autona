@@ -472,6 +472,10 @@ TOURNAMENT_LOGO_VERSION_KEY = "logoVersion"
 # is seeded at launch by SeedPanelState() below.
 TOURNAMENT_BANNER_PATH = "./user_data/tournament_banner.png"
 TOURNAMENT_BANNER_VERSION_KEY = "bannerVersion"
+# What stands in for a tournament banner when none was saved: the bundled
+# image the Event page and the two thumbnail generators fall back to (the
+# stream thumbnail's and the match thumbnail's, ADR-005 S4o).
+DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 # The tournament media fetch's last run (ADR-005 S4f), one dict written whole
 # by core/TournamentMediaService.py, shaped like stream.thumbnail: status
 # idle | running | done | error, the error of a failed run (a code, see that
@@ -607,6 +611,44 @@ def ReadAnalysis() -> dict:
     return read
 
 
+# The match thumbnail's newest render (ADR-005 S4o), one dict written whole by
+# core/ThumbnailService.py, shaped like stream.thumbnail: status idle | running
+# | done | error, `path` the last thumbnail saved (out/thumbnails/*.png, what a
+# preview does not change), the error of a failed run (a code, see that module,
+# or the exception's text) and a revision that every run advances, which the
+# preview image's URL carries.
+THUMBNAIL_RENDER_KEY = "render"
+THUMBNAIL_KEYS = (
+    f"{THUMBNAIL_RENDER_KEY}.status",
+    f"{THUMBNAIL_RENDER_KEY}.path",
+    f"{THUMBNAIL_RENDER_KEY}.error",
+    f"{THUMBNAIL_RENDER_KEY}.revision",
+)
+
+
+def DefaultThumbnailRender(revision=0) -> dict:
+    """`thumbnail.render` with no run in progress or held, at `revision` (a
+    fresh dict on every call)."""
+    return {"status": "idle", "path": "", "error": "", "revision": revision}
+
+
+def ReadThumbnailRender() -> dict:
+    """`thumbnail.render` as published, a fresh dict: anything missing or
+    malformed read as idle's (no path, no error, revision 0)."""
+    value = StateManager.Get(f"{THUMBNAIL_ROOT}.{THUMBNAIL_RENDER_KEY}", None)
+    if not isinstance(value, dict):
+        value = {}
+    read = DefaultThumbnailRender()
+    for key in ("status", "path", "error"):
+        if isinstance(value.get(key), str):
+            read[key] = value[key]
+    revision = value.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool) \
+            and revision >= 0:
+        read["revision"] = revision
+    return read
+
+
 # colors.{feature}.* -- only features the operator explicitly set are present,
 # which is what makes the layouts' colors.{feature} -> tournamentInfo fallback
 # work. The feature list itself is owned by core/ColorService.FEATURES, which
@@ -634,6 +676,7 @@ LAYOUT_OPTIONS_ROOT = "layout_options"
 RESULT_PLAYERS_ROOT = "result_players"
 PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
 ANALYSIS_ROOT = "analysis"
+THUMBNAIL_ROOT = "thumbnail"
 
 KEY_CATALOG = {
     SCORE_ROOT: SCORE_SHARED_KEYS + tuple(
@@ -656,6 +699,7 @@ KEY_CATALOG = {
     TOURNAMENT_INFO_ROOT: TOURNAMENT_INFO_KEYS,
     STREAM_ROOT: STREAM_KEYS,
     ANALYSIS_ROOT: ANALYSIS_KEYS,
+    THUMBNAIL_ROOT: THUMBNAIL_KEYS,
     COLORS_ROOT: tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
     DISPLAY_OPTIONS_ROOT: DISPLAY_OPTION_KEYS,
     # Roots whose shape is owned elsewhere and not enumerated here:
@@ -920,6 +964,13 @@ def SeedPanelState():
     # the previous session's revision, which the next fetch goes on from.
     StateManager.SetIfChanged(
         ANALYSIS_ROOT, DefaultAnalysis(ReadAnalysis()["revision"]))
+
+    # The match thumbnail's render (ADR-005 S4o), the same way: a run does not
+    # outlive the process, nor is the previous launch's result shown again;
+    # the revision goes on, so a preview image URL is never reused.
+    StateManager.SetIfChanged(
+        f"{THUMBNAIL_ROOT}.{THUMBNAIL_RENDER_KEY}",
+        DefaultThumbnailRender(ReadThumbnailRender()["revision"]))
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)
