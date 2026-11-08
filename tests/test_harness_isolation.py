@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+import src.core.StateManager as state_manager
 from tests import conftest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -242,25 +243,27 @@ def test_the_working_directory_is_restored_afterwards():
     assert Path(os.getcwd()).resolve() == Path(conftest._ORIGINAL_CWD).resolve()
 
 
-def test_image_downloads_finish_before_the_directory_is_restored(autonaApp):
+def test_image_downloads_finish_before_the_directory_is_restored(autonaApp,
+                                                                  monkeypatch):
     """The other thread that writes ./out, and the one settle() used to miss.
 
-    A state value that is an http .png/.jpg URL (avatars, character art) makes
+    A state value that is an https .png/.jpg URL of an image host (avatars) makes
     StateManager.CreateFilesDict spawn a daemon thread that downloads it to
     "./out/<path>.png". That path is relative, so the OS resolves it against
     whatever the CWD is *when the write happens* -- not when the thread
     started. A download still in flight when the harness chdir'd back would
     therefore land its image in the developer's real ./out.
 
-    The URL points at a closed port on loopback: nothing leaves the machine,
-    the request fails immediately, and what is under test is that settle()
-    waited for the thread at all -- so the assertion checks a download was
-    really started before checking it finished.
+    The URL points at a closed port on loopback, made an image host for the
+    test: nothing leaves the machine, the request fails immediately, and what
+    is under test is that settle() waited for the thread at all -- so the
+    assertion checks a download was really started before checking it finished.
     """
+    monkeypatch.setattr(state_manager, "EXPORT_IMAGE_HOSTS", {"127.0.0.1:1"})
     projectOut = _snapshot(PROJECT_ROOT / "out")
 
     autonaApp.state.Set("harness_download_probe.image",
-                        "http://127.0.0.1:1/avatar.png")
+                        "https://127.0.0.1:1/avatar.png")
     autonaApp.settle()
 
     threads = list(autonaApp.state._download_threads)
@@ -274,16 +277,17 @@ def test_image_downloads_finish_before_the_directory_is_restored(autonaApp):
     assert _snapshot(PROJECT_ROOT / "out") == projectOut
 
 
-def test_finished_image_downloads_are_not_kept_forever(autonaApp):
+def test_finished_image_downloads_are_not_kept_forever(autonaApp, monkeypatch):
     """The tracking list must not grow for the length of a stream.
 
     Every avatar and every character-art URL of every set loaded in a session
     goes through it, so a list that only ever appends is a slow leak in the
     app itself, not just in the tests.
     """
+    monkeypatch.setattr(state_manager, "EXPORT_IMAGE_HOSTS", {"127.0.0.1:1"})
     for i in range(4):
         autonaApp.state.Set(f"harness_download_probe.image_{i}",
-                            f"http://127.0.0.1:1/{i}.png")
+                            f"https://127.0.0.1:1/{i}.png")
         autonaApp.settle()
 
     assert len(autonaApp.state._download_threads) <= 1

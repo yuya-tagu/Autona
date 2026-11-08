@@ -1,5 +1,6 @@
 import contextlib
 import os
+import re
 import sys
 
 import orjson
@@ -27,9 +28,37 @@ from .DictHelper import deep_get, deep_set, deep_unset, deep_clone
 from .Observable import ObserverChannel
 from .SettingsManager import SettingsManager
 from .StatePersistence import StatePersistence
+from .WebAccess import StaticPath
 
 # Sentinel telling "key absent" apart from a stored None.
 _MISSING = object()
+
+# What the ./out export makes of a string in the state (StateManager._ExportKind).
+# Most of them are text a client typed (a player's name, a Top 8 row, a
+# start.gg gamerTag), so that what looks like a path or a URL is not taken at its
+# word: copied, ./user_data/settings.json would be served from ./out with the web
+# server's token in it, and any URL would have this process fetch it.
+#
+# A local file is copied when it is an image in a place the web server serves
+# anyway (WebAccess.StaticPath, which also refuses `..`, absolute paths, drive
+# letters and streams), so that the copy can show nobody anything new. Those are
+# every root the app itself publishes: ./assets (the flags, the icons, the default
+# banner), ./user_data/{games,additional_flag,player_avatar,team_logo,sponsor_logo},
+# ./user_data/tournament_banner.png and ./layout (the logo, the stream org's).
+EXPORT_IMAGE_EXTENSIONS = frozenset(
+    ("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico"))
+# A URL is downloaded only from where a player's avatar comes from: start.gg's
+# image host, and its old name, which a player database may still hold. https,
+# that host exactly (no user, no port), a .png or a .jpg. Anything else is text.
+EXPORT_IMAGE_HOSTS = frozenset(("images.start.gg", "images.smash.gg"))
+EXPORT_DOWNLOAD_EXTENSIONS = ("png", "jpg")
+# Not in a URL to fetch: urlparse and requests do not read them alike, so that a
+# host checked here need not be the host asked (https://evil\@images.start.gg/).
+_EXPORT_URL_REFUSED = re.compile(r"[\s\\\x00-\x1f\x7f]")
+
+_EXPORT_TEXT = "text"
+_EXPORT_FILE = "file"
+_EXPORT_DOWNLOAD = "download"
 
 # The direct-overwrite fallback below is warned about only once per session:
 # whatever keeps the file locked usually keeps doing so, and this runs on
@@ -1050,6 +1079,34 @@ class StateManager:
         """
         return urlparse(value).path.rsplit(".", 1)[-1].lower()
 
+    def _ExportKind(value):
+        """What the export makes of a leaf of the state: a copy of a local
+        image (_EXPORT_FILE), a download (_EXPORT_DOWNLOAD) or, for everything
+        else, its text. See EXPORT_IMAGE_EXTENSIONS and EXPORT_IMAGE_HOSTS. The
+        one answer CreateFilesDict and RemoveFilesDict go by, so what was
+        written is what gets removed, and the extension either of them adds to
+        a path never holds a separator."""
+        if type(value) != str:
+            return _EXPORT_TEXT
+        if value.startswith("./"):
+            if StaticPath(value) is not None \
+                    and value.rsplit(".", 1)[-1].lower() \
+                    in EXPORT_IMAGE_EXTENSIONS:
+                return _EXPORT_FILE
+            return _EXPORT_TEXT
+        if _EXPORT_URL_REFUSED.search(value):
+            return _EXPORT_TEXT
+        try:
+            url = urlparse(value)
+        except ValueError:
+            # "https://[": a text a client typed.
+            return _EXPORT_TEXT
+        if url.scheme == "https" and url.netloc.lower() in EXPORT_IMAGE_HOSTS \
+                and StateManager._FileExtension(value) \
+                in EXPORT_DOWNLOAD_EXTENSIONS:
+            return _EXPORT_DOWNLOAD
+        return _EXPORT_TEXT
+
     def CreateFilesDict(path, di):
         pathdirs = "/".join(path.split("/")[0:-1])
 
@@ -1062,7 +1119,8 @@ class StateManager:
                     path+"/"+str(k).replace("/", "_"), i)
         else:
             # logger.info("try to add: ", path)
-            if type(di) == str and di.startswith("./"):
+            kind = StateManager._ExportKind(di)
+            if kind == _EXPORT_FILE:
                 if os.path.exists(f"./out/{path}" + "." + di.rsplit(".", 1)[-1]):
                     try:
                         os.remove(f"./out/{path}" + "." +
@@ -1076,7 +1134,7 @@ class StateManager:
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1])
                     except Exception as e:
                         logger.error(traceback.format_exc())
-            elif type(di) == str and di.startswith("http") and StateManager._FileExtension(di) in ("png", "jpg"):
+            elif kind == _EXPORT_DOWNLOAD:
                 imageExtension = StateManager._FileExtension(di)
                 downloadTarget = f"./out/{path}.{imageExtension}"
                 try:
@@ -1138,9 +1196,10 @@ class StateManager:
                 StateManager.RemoveFilesDict(
                     path+"/"+str(k).replace("/", "_"), i)
         else:
-            if type(di) == str and (di.startswith("./") or di.startswith("http")):
+            kind = StateManager._ExportKind(di)
+            if kind != _EXPORT_TEXT:
                 try:
-                    if di.startswith("http"):
+                    if kind == _EXPORT_DOWNLOAD:
                         # The same derivation CreateFilesDict named the
                         # download with -- and a downloaded .jpg is stored
                         # converted, so what exists on disk is the .png twin.
