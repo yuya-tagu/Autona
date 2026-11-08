@@ -433,6 +433,154 @@ def test_run_with_provider_starts_nothing_without_a_provider_or_after_the_shutdo
     assert ran == []
 
 
+# ── the tournament's data again, and the game it names ───────────────────
+
+URL_OF_THE_DATA = "https://www.start.gg/tournament/t/event/e"
+
+
+def _dataProvider(fetch, videogame=7):
+    return SimpleNamespace(url=URL_OF_THE_DATA, videogame=videogame,
+                           GetTournamentData=fetch)
+
+
+@pytest.fixture
+def selections(adapter, monkeypatch):
+    """What the adapter asked of the shell's selector: (game, done) each."""
+    asked = []
+    monkeypatch.setattr(
+        adapter, "selectGameFromStartGGId",
+        lambda gameid, done=None: asked.append((gameid, done)))
+    return asked
+
+
+def test_the_refresh_is_over_once_the_game_it_names_is_loaded(
+        adapter, selections):
+    """ResultService.LoadStandings fetches the standings after it: a load is
+    the loader's, and ends later than the data that asked for it."""
+    answers = []
+    undo = _connect(adapter.signals.tournament_data_updated, answers, "data")
+    dones = []
+    try:
+        adapter.provider = _dataProvider(
+            lambda **_kwargs: {"tournamentName": "T", "_videogame": 7})
+
+        assert adapter.RefreshTournamentData(
+            lambda: dones.append((len(answers), _onMain()))) is True
+
+        assert TaskExecutor.instance.drain(WAIT)
+        _pump(lambda: selections and selections[-1][1] is not None)
+
+        # The data is in and the game is being loaded: not over yet.
+        assert [answer[1][0]["tournamentName"] for answer in answers] == ["T"]
+        assert dones == []
+        gameid, gameLoaded = selections[-1]
+        assert gameid == 7
+
+        # The loader ends the attempt on a thread of its own.
+        thread = threading.Thread(target=gameLoaded)
+        thread.start()
+        thread.join(WAIT)
+        _pump(lambda: dones)
+
+        assert dones == [(1, True)]
+    finally:
+        undo()
+
+
+@pytest.mark.parametrize("fetch", [
+    lambda **_kwargs: {},          # an answer that says nothing
+    lambda **_kwargs: 1 / 0,
+])
+def test_a_refresh_whose_data_did_not_come_goes_on_to_the_game(
+        adapter, selections, fetch):
+    answers = []
+    undo = _connect(adapter.signals.tournament_data_updated, answers, "data")
+    dones = []
+    try:
+        adapter.provider = _dataProvider(fetch)
+
+        assert adapter.RefreshTournamentData(lambda: dones.append(1)) is True
+        assert TaskExecutor.instance.drain(WAIT)
+        _pump(lambda: selections)
+
+        # Nothing written over the tournament's name.
+        assert answers == []
+        assert [gameid for gameid, _done in selections] == [7]
+        selections[0][1]()
+        _pump(lambda: dones)
+        assert dones == [1]
+    finally:
+        undo()
+
+
+def test_a_refresh_with_no_game_named_is_over_with_the_data(adapter, selections):
+    dones = []
+    adapter.provider = _dataProvider(lambda **_kwargs: {"tournamentName": "T"},
+                                     videogame=None)
+
+    assert adapter.RefreshTournamentData(
+        lambda: dones.append(_onMain())) is True
+    assert TaskExecutor.instance.drain(WAIT)
+    _pump(lambda: dones)
+
+    assert dones == [True]
+    assert selections == []
+
+
+def test_a_refresh_of_a_tournament_replaced_meanwhile_is_over_having_done_nothing(
+        adapter, selections):
+    answers = []
+    undo = _connect(adapter.signals.tournament_data_updated, answers, "data")
+    dones = []
+    other = _dataProvider(lambda **_kwargs: {})
+
+    def fetch(**_kwargs):
+        adapter.provider = other
+        return {"tournamentName": "Old", "_videogame": 7}
+
+    try:
+        adapter.provider = _dataProvider(fetch)
+
+        assert adapter.RefreshTournamentData(lambda: dones.append(1)) is True
+        assert TaskExecutor.instance.drain(WAIT)
+        _pump(lambda: dones)
+
+        assert answers == []
+        assert selections == []
+        assert dones == [1]
+    finally:
+        undo()
+
+
+def test_a_selector_that_raises_does_not_leave_the_refresh_unfinished(
+        adapter, monkeypatch):
+    def boom(_gameid, done=None):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(adapter, "selectGameFromStartGGId", boom)
+    dones = []
+    adapter.provider = _dataProvider(lambda **_kwargs: {"tournamentName": "T"})
+
+    assert adapter.RefreshTournamentData(lambda: dones.append(1)) is True
+    assert TaskExecutor.instance.drain(WAIT)
+    _pump(lambda: dones)
+
+    assert dones == [1]
+
+
+def test_a_refresh_starts_nothing_without_a_provider_or_after_the_shutdown(
+        adapter, executor):
+    dones = []
+    assert adapter.RefreshTournamentData(lambda: dones.append(1)) is False
+
+    fetched = []
+    adapter.provider = _dataProvider(lambda **_kwargs: fetched.append(1))
+    executor().shutdown(WAIT)
+
+    assert adapter.RefreshTournamentData(lambda: dones.append(1)) is False
+    assert fetched == [] and dones == []
+
+
 # ── the Start.gg provider ────────────────────────────────────────────────
 
 

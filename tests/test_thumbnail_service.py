@@ -693,6 +693,41 @@ def test_a_write_saves_the_move_of_an_old_config(env, legacy, moved):
     assert env.config() == {**moved, "display_phase": False}
 
 
+@pytest.mark.parametrize("saved", [
+    {},
+    {"background_source": "banner"},                     # no background_path
+    {"background_source": "banner", "background_path": ""},
+    {"background_source": "banner", "background_path": 7},
+    {"background_source": "default", "background_path": "C:/x.png"},
+    {"background_source": "custom", "background_path": "C:/x.png"},
+    {"background_source": "custom"},
+    {"background_source": "custom", "background_path": ""},
+    {"background_source": "custom", "background_path": 7},
+    {"background_source": "unheard of", "background_path": "C:/x.png"},
+    {"background_path": "C:/x.png"},                     # before the selector
+    {"background_path": "./user_data/tournament_banner.png"},
+    {"background_path": 7},
+])
+def test_the_background_the_result_follows_is_the_one_a_render_draws(
+        match, saved):
+    """The result's picture says it has the thumbnail's background (ADR-005 S4q,
+    decision 15). It read background_path before resolving it: a banner saved
+    without one was the template's default."""
+    SettingsManager.settings = {"thumbnail_config": copy.deepcopy(saved)}
+
+    _data, config, _template = match.service.RenderPayload()
+
+    assert thumbnails.EffectiveBackgroundPath() == config["background_path"]
+
+
+def test_a_banner_saved_without_a_path_is_the_banner(match):
+    SettingsManager.settings = {"thumbnail_config": {
+        "background_source": "banner"}}
+
+    assert thumbnails.EffectiveBackgroundPath() in (
+        thumbnails.BANNER_PATH, thumbnails.DEFAULT_BANNER_PATH)
+
+
 # ── the custom background ────────────────────────────────────────────────
 
 def test_an_uploaded_background_is_saved_and_selected(env):

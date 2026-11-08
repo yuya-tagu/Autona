@@ -25,32 +25,10 @@ panel) and it also answers in the headless shell:
   itself is the shell's: an off-screen WebEngine view only the desktop has
   (``render``, injected; headless, AutonaWebOperations refuses first, 503).
 
-The render lane, one run at a time:
-
-- A request while nothing runs starts a run: ``thumbnail.render`` says
-  "running" before the request returns.
-- A preview during a run is kept for afterwards, the last one standing for all
-  of them: the payload is built when a run starts, so it draws the newest
-  settings anyway. A generate during a preview is kept the same way (a save
-  does not fail because a preview was on its way), and stands in for a kept
-  preview: it draws the same picture and updates the preview's file too. One
-  that finds no match to save (NO_GAME / NO_PLAYER) is followed by the preview
-  it stood in for, which draws a placeholder.
-- A generate while one runs or is kept: BUSY (nothing changes).
-- Every run gets the next revision, which Preview / Generate answer whether it
-  starts now or is kept: a client knows which ``thumbnail.render`` is its own.
-
-A run: the payload on the requester's thread (it reads files and the state,
-as the old Qt panel did on its thread, and waits for nobody); the render on the GUI
-thread, started by ``render`` and never waited for -- no nested event loop on
-this path (agent-pitfalls #9); the encoding and the files in a job of the task
-executor, so that a PNG of 1920x1080 does not stall the GUI thread. The result
-is published from whichever thread ended the run, and only then the next run
-is queued with ``later`` (the GUI executor's: a job's thread may not wait for
-the GUI thread).
-
-The lock order is StateManager.lock -> the lane's lock: the lane's lock only
-guards the lane's own fields, and neither is held across a render or a job.
+The render lane is core/RenderLane's, shared with the tournament result
+(ADR-005 S4q), where the rules of a run are. A kept generate that finds no
+match to save (NO_GAME / NO_PLAYER) is followed by the preview it stood in
+for, which draws a placeholder.
 
 ``ThumbnailService.instance`` is built by ``bootstrap_core()``; the deferral,
 the shell's renderer, the translations, the locale's names and the output
@@ -65,7 +43,6 @@ import os
 import random
 import re
 import threading
-import time
 from pathlib import Path
 
 from loguru import logger
@@ -75,10 +52,12 @@ from . import StateSchema as schema
 from .ColorService import FEATURE_THUMBNAIL, GetFeatureColors
 from .DictHelper import deep_get
 from .GameAssetCatalog import GameAssetCatalog
+from .RenderLane import (  # noqa: F401  (re-exported: this module's names)
+    BUSY, CANCELLED, DONE, ERROR, GENERATE, IDLE, PAYLOAD_FAILED, PREVIEW,
+    RENDER_FAILED, RUNNING, RenderDataMissing, RenderLane)
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StreamService import GameAbbreviation
-from .TaskExecutor import TaskExecutor
 
 CONFIG_SETTING = "thumbnail_config"
 RENDER_PATH = f"{schema.THUMBNAIL_ROOT}.{schema.THUMBNAIL_RENDER_KEY}"
@@ -169,37 +148,19 @@ OUTPUT_KEEP = 30
 # directories, and does not become one.
 PREVIEW_PATH = "./tmp/thumbnail/preview.png"
 
-# ── the render ───────────────────────────────────────────────────────────
+# ── the render ───────────────────────────────────────────────────────
 
-# What a run does.
-PREVIEW = "preview"
-GENERATE = "generate"
-# What the shell is asked to draw (Result will be its second kind).
+# What the shell is asked to draw.
 RENDER_KIND = "thumbnail"
-# thumbnail.render's status.
-IDLE = "idle"
-RUNNING = "running"
-DONE = "done"
-ERROR = "error"
-# thumbnail.render's error: one of these and SAVE_FAILED, never an exception's
-# text (a path of the operator's has no place in what every client is sent;
-# the log has the rest).
+# thumbnail.render's error: RenderLane's, SAVE_FAILED, and what this module
+# finds missing.
 NO_GAME = "no_game"             # no game is selected
 NO_PLAYER = "no_player"         # a side of the match has no player
-PAYLOAD_FAILED = "payload_failed"  # the template or the settings would not read
-RENDER_FAILED = "render_failed"  # the renderer gave no image, or did not start
-CANCELLED = "cancelled"         # stopped by the shutdown
-# What Preview / Generate answer instead of a revision.
-BUSY = "busy"
 
 
-class ThumbnailDataMissing(Exception):
+class ThumbnailDataMissing(RenderDataMissing):
     """There is no match to draw a final thumbnail of. Its text is for a
     person (the SCORE panel's message box), its `code` for thumbnail.render."""
-
-    def __init__(self, code, message):
-        super().__init__(message)
-        self.code = code
 
 
 # ── pure helpers ─────────────────────────────────────────────────────────
@@ -237,6 +198,22 @@ def ResolveBackgroundPath(config):
     if source == BACKGROUND_DEFAULT:
         return None
     return config.get("background_path") or None
+
+
+def EffectiveBackgroundPath():
+    """The image the saved settings draw a thumbnail's background with, as
+    every render reads them (RenderPayload: a config from before the source
+    selector moved to it, a malformed one read as none); None: the template's
+    default. What the tournament result's background follows (ADR-005 S4q,
+    decision 15). Writes nothing."""
+    config = _WithBackgroundSource(_StoredConfig())
+    # The resolved path, as _AsRead looks at it: a banner saved without a
+    # background_path is the banner.
+    path = ResolveBackgroundPath(config)
+    if config.get("background_source") not in BACKGROUND_SOURCES \
+            or not isinstance(path, str):
+        return None
+    return path
 
 
 def ResolveTemplateId(settings):
@@ -389,16 +366,6 @@ def _AsRead(config, data):
     return config
 
 
-def _ExecutorStopping():
-    executor = TaskExecutor.instance
-    return executor is not None and executor.stopping.is_set()
-
-
-def _Ms(seconds):
-    """A duration in whole milliseconds, for the logs."""
-    return round(seconds * 1000)
-
-
 # ── the video title ──────────────────────────────────────────────────────
 
 def _PlayerDisplayName(board, team):
@@ -457,65 +424,37 @@ def BuildVideoTitle(board=1) -> str:
 
 # ── the service ──────────────────────────────────────────────────────────
 
-class ThumbnailService:
+class ThumbnailService(RenderLane):
     """See the module docstring. One per process: the render lane is its
     own."""
 
     instance: "ThumbnailService" = None
 
+    LOG_NAME = "Thumbnail"
+    RENDER_KIND = RENDER_KIND
+    RENDER_PATH = RENDER_PATH
+    OUTPUT_DIRECTORY = OUTPUT_DIRECTORY
+    OUTPUT_PATTERNS = OUTPUT_PATTERNS
+    OUTPUT_KEEP = OUTPUT_KEEP
+    ALSO_JPG = True
+    PREVIEW_PATH = PREVIEW_PATH
+    LEFTOVERS = (f"{BACKGROUND_DIRECTORY}/{BACKGROUND_PREFIX}*.png",)
+    MISSING_CODES = (NO_GAME, NO_PLAYER)
+
     def __init__(self, later, render=None, translate=None, locale=None,
                  prune=None, shuttingDown=None):
-        """`later(fn)` runs `fn` on the main thread once its event loop is
-        back (never right away). `render(kind, payload, done)` starts drawing
-        `payload` -- (data, config, template) -- and returns; `done(encode,
-        error)` comes later, once, on the main thread, with `encode(format,
-        fast=False)` -> the image's bytes, "PNG" or "JPG", callable from any
-        thread (None when it failed: `error`); `fast` asks for a PNG that is
-        quicker to make (still lossless, compressed less), the preview's.
-        `translate(context, text)` and `locale()` ->
-        (program locale, match names, phase names) are what a placeholder's
-        words come from. `prune(directory, patterns, keep, protect=)` drops
-        the oldest thumbnails (None: none are dropped). `shuttingDown()` says
-        whether a render that could not start was stopped by the shutdown
-        (None: whether the task executor is stopping)."""
-        self._later = later
-        self._render = render
+        """`later`, `render`, `prune` and `shuttingDown` as RenderLane takes
+        them; `render` is given (data, config, template). `translate(context,
+        text)` and `locale()` -> (program locale, match names, phase names) are
+        what a placeholder's words come from."""
         self._translate = translate or (lambda _context, text: text)
         self._locale = locale or (lambda: ("en", {}, {}))
-        self._prune = prune
-        self._shuttingDown = shuttingDown or _ExecutorStopping
-
-        # The lane: what runs (PREVIEW / GENERATE / None), the revision of the
-        # run that has not ended yet (None once its end is on its way), what
-        # was kept for after it and the last revision handed out. And whether
-        # the kept generate / the running one stands in for a preview asked
-        # for (answered with its revision), which is drawn after all when it
-        # finds no match to save (_Ended).
-        self._laneLock = threading.Lock()
-        self._running = None
-        self._runRevision = None
-        self._next = None
-        self._revision = 0
-        self._nextHasPreview = False
-        self._runHasPreview = False
 
         # The uploaded background: one import or reset at a time, so the
         # setting and the file on disk belong together.
         self._backgroundLock = threading.Lock()
 
-        # What a crash left of the temporary files (ImageImport.WriteFile).
-        # Their names vary, hence the wildcards: only ours are in these
-        # directories under those names.
-        ImageImport.RemoveLeftovers(
-            PREVIEW_PATH,
-            f"{OUTPUT_DIRECTORY}/*.png",
-            f"{BACKGROUND_DIRECTORY}/{BACKGROUND_PREFIX}*.png")
-        # And the last session's preview (at PREVIEW_PATH).
-        try:
-            Path(PREVIEW_PATH).unlink(missing_ok=True)
-        except OSError:
-            logger.opt(exception=True).warning(
-                "Thumbnail: the last preview could not be removed")
+        super().__init__(later, render, prune, shuttingDown)
 
     # ── the settings ─────────────────────────────────────────────────────
 
@@ -880,258 +819,15 @@ class ThumbnailService:
             "teamName": "",
         }
 
-    # ── the render ───────────────────────────────────────────────────────
+    # ── the render (RenderLane) ──────────────────────────────────────────
 
-    def Preview(self):
-        """Draw the preview image (PREVIEW_PATH) in the background: the
-        revision of the run that will. The newest settings are drawn, however
-        many of these came in during a run."""
-        return self._Request(PREVIEW)
+    def _ReadRender(self):
+        return schema.ReadThumbnailRender()
 
-    def Generate(self):
-        """Draw and save a thumbnail in the background (out/thumbnails, a PNG
-        and a JPG), which also updates the preview image: the revision of the
-        run that will. BUSY (nothing changes) while one is on its way."""
-        return self._Request(GENERATE)
+    def _RunPayload(self, kind):
+        return self.RenderPayload(
+            preview=kind == PREVIEW, games=GameAssetCatalog.instance,
+            board=RENDER_BOARD)
 
-    def PreviewImage(self):
-        """The preview image's bytes (a PNG); None while there is none. Read
-        at once rather than streamed from the file: a slow client must not
-        keep a render from replacing it (Windows)."""
-        try:
-            with open(PREVIEW_PATH, "rb") as file:
-                return file.read()
-        except OSError:
-            return None
-
-    def _Request(self, kind):
-        last = schema.ReadThumbnailRender()["revision"]
-        with self._laneLock:
-            self._revision = max(self._revision, last)
-            if kind == GENERATE and GENERATE in (self._running, self._next):
-                return BUSY
-            if self._running is not None:
-                # A preview and a generate kept together are the generate.
-                if PREVIEW in (kind, self._next) \
-                        and GENERATE in (kind, self._next):
-                    self._nextHasPreview = True
-                if self._next != GENERATE:
-                    self._next = kind
-                return self._revision + 1
-            self._running = kind
-            self._revision += 1
-            revision = self._revision
-            self._runRevision = revision
-            self._runHasPreview = False
-        self._Start(kind, revision)
-        return revision
-
-    def _Start(self, kind, revision):
-        """Begin a run the lane has given `revision`. What only the shell's
-        `render` raises goes on to the caller, after the run was ended: the
-        request's answer (the app is shutting down, 503)."""
-        with StateManager.lock:
-            self._Publish(RUNNING, schema.ReadThumbnailRender()["path"], "",
-                          revision)
-        try:
-            payload = self.RenderPayload(
-                preview=kind == PREVIEW, games=GameAssetCatalog.instance,
-                board=RENDER_BOARD)
-            data = payload[0]
-        except ThumbnailDataMissing as missing:
-            self._Ended(kind, revision, (ERROR, missing.code))
-            return
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Thumbnail: the payload could not be built")
-            self._Ended(kind, revision, (ERROR, PAYLOAD_FAILED))
-            return
-
-        # Taken once, by whichever comes first of the renderer's answer and
-        # its raising: the other one is not the run's end too. (`render` and
-        # `done` may be on different threads.)
-        answer = threading.Lock()
-
-        def done(encode, error):
-            if answer.acquire(blocking=False):
-                self._Rendered(kind, revision, data, encode, error)
-            else:
-                logger.warning("Thumbnail: a render answered twice")
-
-        try:
-            self._render(RENDER_KIND, payload, done)
-        except BaseException:
-            if answer.acquire(blocking=False):
-                self._Ended(kind, revision, (ERROR, self._NotStarted()))
-            raise
-
-    def _NotStarted(self):
-        """Why a run that could not start ended."""
-        return CANCELLED if self._shuttingDown() else RENDER_FAILED
-
-    def _Rendered(self, kind, revision, data, encode, error):
-        """The renderer is done (on the main thread): the encoding and the
-        files are a job's."""
-        if encode is None:
-            logger.error(f"Thumbnail: the render failed: {error}")
-            self._Ended(kind, revision, (ERROR, RENDER_FAILED))
-            return
-        try:
-            executor = TaskExecutor.instance
-            future = executor.submit(
-                self._Save, kind, data, encode, executor.stopping,
-                task_name="thumbnail save",
-                then=lambda result: self._Ended(kind, revision, result),
-                on_error=lambda failure: self._SaveFailed(
-                    kind, revision, failure))
-        except Exception as failure:
-            self._SaveFailed(kind, revision, failure)
-            return
-        # A job the shutdown cancels (queued then, or submitted after it) runs
-        # neither `then` nor `on_error`, only its done callbacks -- right away
-        # when it is cancelled already.
-        future.add_done_callback(
-            lambda finished: finished.cancelled() and self._Ended(
-                kind, revision, (ERROR, CANCELLED)))
-
-    def _SaveFailed(self, kind, revision, failure):
-        logger.opt(exception=failure).error(
-            "Thumbnail: the render could not be saved")
-        self._Ended(kind, revision, (ERROR, SAVE_FAILED))
-
-    def _Save(self, kind, data, encode, stopping):
-        """The job: (DONE, the saved thumbnail's path, None for a preview) or
-        (ERROR, why). Gives up (CANCELLED) once `stopping` (the executor's) is
-        set, before it writes anything."""
-        if stopping.is_set():
-            return ERROR, CANCELLED
-        # A preview asks for the fast PNG: a busy picture's PNG at the default
-        # compression took most of a preview's time (ADR-005 S4o judgment
-        # 23). A generated thumbnail -- out/thumbnails and the preview file it
-        # also writes -- keeps the default encodings.
-        fast = kind == PREVIEW
-        began = time.monotonic()
-        try:
-            png = encode("PNG", fast=fast)
-            pngDone = time.monotonic()
-            jpg = encode("JPG") if kind == GENERATE else None
-        except Exception:
-            logger.opt(exception=True).error(
-                "Thumbnail: the image could not be encoded")
-            return ERROR, RENDER_FAILED
-        encoded = time.monotonic()
-        if not png or (kind == GENERATE and not jpg):
-            return ERROR, RENDER_FAILED
-        if stopping.is_set():
-            return ERROR, CANCELLED
-        saved = None
-        writing = 0.0
-        if kind == GENERATE:
-            stem = OutputStem(data, RENDER_BOARD)
-            target = Path(OUTPUT_DIRECTORY) / f"{stem}.png"
-            writeBegan = time.monotonic()
-            try:
-                ImageImport.WriteFile(target, png)
-                ImageImport.WriteFile(
-                    Path(OUTPUT_DIRECTORY) / f"{stem}.jpg", jpg)
-            except OSError:
-                logger.opt(exception=True).error(
-                    "Thumbnail: the image could not be saved")
-                return ERROR, SAVE_FAILED
-            writing += time.monotonic() - writeBegan
-            logger.info(f"Thumbnail saved as {target} and its .jpg")
-            if self._prune is not None:
-                self._prune(OUTPUT_DIRECTORY, OUTPUT_PATTERNS, OUTPUT_KEEP,
-                            protect=target)
-            # Relative to the app directory, "/" separated.
-            saved = target.as_posix()
-        writeBegan = time.monotonic()
-        try:
-            ImageImport.WriteFile(PREVIEW_PATH, png)
-        except OSError:
-            if kind == PREVIEW:
-                logger.opt(exception=True).error(
-                    "Thumbnail: the image could not be saved")
-                return ERROR, SAVE_FAILED
-            # The thumbnail is saved, which is what was asked for.
-            logger.opt(exception=True).warning(
-                "Thumbnail: the preview image could not be updated")
-        writing += time.monotonic() - writeBegan
-        jpgPart = (f", JPG {len(jpg)} bytes in {_Ms(encoded - pngDone)} ms"
-                   if jpg is not None else "")
-        logger.debug(
-            f"Thumbnail {kind}: encoded in {_Ms(encoded - began)} ms "
-            f"(PNG{' fast' if fast else ''} {len(png)} bytes in "
-            f"{_Ms(pngDone - began)} ms{jpgPart}), written in "
-            f"{_Ms(writing)} ms")
-        return DONE, saved
-
-    def _Publish(self, status, path, error, revision):
-        # One Set of the whole dict: a reader never sees half a result.
-        StateManager.Set(RENDER_PATH, {
-            "status": status, "path": path, "error": error,
-            "revision": revision})
-
-    def _Ended(self, kind, revision, result):
-        """Publish a run's `result` -- (DONE, saved path or None) or (ERROR,
-        error) -- then let what was kept run. From whichever thread ended it;
-        only the first end of a run counts, as a second one would publish over
-        the next run and let two run at once."""
-        with self._laneLock:
-            if revision != self._runRevision:
-                logger.warning(f"Thumbnail: render {revision} ended again")
-                return
-            self._runRevision = None
-            hadPreview = self._runHasPreview
-        status, value = result
-        # A generate that stood in for a preview and found no match to save:
-        # the preview is drawn after all (a placeholder), or it would be lost
-        # with the generate's payload (S4p review).
-        previewOwed = hadPreview and status == ERROR \
-            and value in (NO_GAME, NO_PLAYER)
-        try:
-            with StateManager.lock:
-                last = schema.ReadThumbnailRender()
-                if status == DONE:
-                    # A preview leaves the path: the last thumbnail saved.
-                    self._Publish(DONE, last["path"] if value is None
-                                  else value, "", revision)
-                else:
-                    self._Publish(ERROR, last["path"], value, revision)
-        finally:
-            # After the publish: a run started in between would otherwise see
-            # its "running" overwritten by this result.
-            with self._laneLock:
-                following, self._next = self._next, None
-                self._runHasPreview, self._nextHasPreview = \
-                    self._nextHasPreview, False
-                previewOwed = following is None and previewOwed
-                if previewOwed:
-                    following = PREVIEW
-                self._running = following
-                if following is not None:
-                    self._revision += 1
-                    followingRevision = self._revision
-                    self._runRevision = followingRevision
-            if previewOwed:
-                logger.info("Thumbnail: no match to save; drawing the preview "
-                            "the generate stood in for")
-            if following is not None:
-                self._QueueRun(following, followingRevision)
-
-    def _QueueRun(self, kind, revision):
-        try:
-            self._later(lambda: self._RunKept(kind, revision))
-        except Exception:
-            # No deferral to be had (no event loop): the run is over.
-            logger.opt(exception=True).warning(
-                "Thumbnail: the next render could not be queued")
-            self._Ended(kind, revision, (ERROR, self._NotStarted()))
-
-    def _RunKept(self, kind, revision):
-        try:
-            self._Start(kind, revision)
-        except Exception:
-            # Nobody to answer to: _Start has ended the run.
-            logger.opt(exception=True).warning(
-                "Thumbnail: the next render could not be started")
+    def _OutputStem(self, data):
+        return OutputStem(data, RENDER_BOARD)

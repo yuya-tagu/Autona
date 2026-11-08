@@ -189,8 +189,74 @@ def test_the_v1_step_is_frozen():
         schema.STALE_KEYS)
 
 
+# ── v1 -> v2: the team rows move out of result_players (ADR-005 S4q) ──────
+
+def _teamRow(rank, name=""):
+    return {"rank": rank, "name": name, "sponsor": "", "members": [
+        {"name": f"M{rank}", "character": {"assets": {}}}]}
+
+
+def _singleRow(rank, name=""):
+    return {"rank": rank, "name": name, "sponsor": "", "twitter": "",
+            "character": {}, "characters": []}
+
+
+def test_v1_to_v2_moves_the_team_rows():
+    rows = {str(rank): _teamRow(rank, f"Team{rank}") for rank in range(1, 17)}
+
+    state = migrations.Migrate({"result_players": rows, "other": 1}, 1)
+
+    # Every layout of a team shows eight: a ninth could not be reached.
+    assert list(state["result_teams"]) == [str(rank) for rank in range(1, 9)]
+    assert state["result_teams"]["3"] == _teamRow(3, "Team3")
+    # Nothing was left behind, so nothing is left.
+    assert "result_players" not in state
+    assert state["other"] == 1
+
+
+def test_v1_to_v2_leaves_the_singles_rows():
+    singles = {"1": _singleRow(1, "Alpha"), "2": _singleRow(2)}
+    state = {"result_players": copy.deepcopy(singles)}
+
+    assert migrations.Migrate(state, 1) == {"result_players": singles}
+
+
+def test_v1_to_v2_separates_a_mixed_table():
+    state = migrations.Migrate({"result_players": {
+        "1": _teamRow(1, "Reds"), "2": _singleRow(2, "Alpha")}}, 1)
+
+    assert state == {"result_players": {"2": _singleRow(2, "Alpha")},
+                     "result_teams": {"1": _teamRow(1, "Reds")}}
+
+
+def test_v1_to_v2_does_not_write_over_result_teams():
+    # What is there is newer than what the panel left beside it.
+    kept = {"1": _teamRow(1, "Kept")}
+    state = migrations.Migrate({"result_players": {"1": _teamRow(1, "Old")},
+                                "result_teams": copy.deepcopy(kept)}, 1)
+
+    assert state == {"result_teams": kept}
+
+
+def test_v1_to_v2_is_idempotent():
+    once = migrations.Migrate({"result_players": {
+        "1": _teamRow(1, "Reds"), "2": _singleRow(2, "Alpha")}}, 1)
+
+    assert migrations.Migrate(copy.deepcopy(once), 1) == once
+
+
+@pytest.mark.parametrize("state", [
+    {},
+    {"result_players": None},
+    {"result_players": "garbage"},
+    {"result_players": {"1": None, "2": "garbage"}},
+])
+def test_v1_to_v2_accepts_garbage_where_it_looks(state):
+    assert migrations.Migrate(copy.deepcopy(state), 1) == state
+
+
 def test_every_version_below_the_current_one_has_a_step():
-    assert migrations.CURRENT_VERSION == 1
+    assert migrations.CURRENT_VERSION == 2
     assert sorted(migrations._STEPS) == list(
         range(migrations.CURRENT_VERSION))
 
@@ -201,7 +267,7 @@ def test_a_current_state_comes_back_untouched():
     assert state == {"bracket": {"kept": "a v1 state is not migrated again"}}
 
 
-@pytest.mark.parametrize("version", [-1, 2, 99])
+@pytest.mark.parametrize("version", [-1, 3, 99])
 def test_a_version_out_of_range_is_refused(version):
     with pytest.raises(ValueError):
         migrations.Migrate({}, version)
@@ -292,7 +358,7 @@ def test_the_first_launch_after_the_update_migrates_program_state(files):
          if k not in ("timestamp", "revision")}, 0)
     # Written right away: from now on it is the store, whatever happens to
     # ./out. The export file itself is not touched.
-    assert _read_store(files.store) == {"state_version": 1, "state": state}
+    assert _read_store(files.store) == {"state_version": 2, "state": state}
     assert files.legacy.read_bytes() == legacy
     assert StatePersistence.Path() == str(files.store)
 
@@ -330,7 +396,7 @@ def test_a_corrupt_store_is_set_aside_and_program_state_migrated(
     backups = _backups(files, "state.json.corrupt-*.bak")
     assert len(backups) == 1
     assert backups[0].read_bytes() == body, "the corrupt store was not kept"
-    assert _read_store(files.store) == {"state_version": 1, "state": state}
+    assert _read_store(files.store) == {"state_version": 2, "state": state}
     assert any("unusable" in m for m in _levels(logged, "WARNING"))
 
 
@@ -369,17 +435,17 @@ def test_corrupt_backups_never_overwrite_each_other(files, monkeypatch):
 
 
 def test_a_store_from_a_newer_build_is_set_aside(files, logged):
-    newer = orjson.dumps({"state_version": 2, "state": {"shape": "v2"}})
+    newer = orjson.dumps({"state_version": 3, "state": {"shape": "v3"}})
     files.store.write_bytes(newer)
     files.legacy.write_bytes(orjson.dumps({"kept": "legacy"}))
 
     state, found = _load(files)
 
     assert (state, found) == ({"kept": "legacy"}, True)
-    backups = _backups(files, "state.json.v2.*.bak")
+    backups = _backups(files, "state.json.v3.*.bak")
     assert len(backups) == 1
     assert backups[0].read_bytes() == newer
-    assert _read_store(files.store) == {"state_version": 1,
+    assert _read_store(files.store) == {"state_version": 2,
                                         "state": {"kept": "legacy"}}
     assert any("newer Autona" in m for m in _levels(logged, "WARNING"))
 
@@ -395,23 +461,23 @@ def test_newer_backups_never_overwrite_each_other(files, monkeypatch):
 
     monkeypatch.setattr(persistence, "datetime",
                         SimpleNamespace(datetime=_Clock))
-    bodies = [orjson.dumps({"state_version": 2, "state": {"n": n}})
+    bodies = [orjson.dumps({"state_version": 3, "state": {"n": n}})
               for n in (1, 2)]
     for body in bodies:
         files.store.write_bytes(body)
         _load(files)
 
-    backups = _backups(files, "state.json.v2.*.bak")
+    backups = _backups(files, "state.json.v3.*.bak")
     assert [p.name for p in backups] == [
-        "state.json.v2.20261025-120000-2.bak",
-        "state.json.v2.20261025-120000.bak",
+        "state.json.v3.20261025-120000-2.bak",
+        "state.json.v3.20261025-120000.bak",
     ]
     assert sorted(p.read_bytes() for p in backups) == sorted(bodies)
 
 
 def test_a_newer_store_that_cannot_be_set_aside_is_never_overwritten(
         files, logged, monkeypatch):
-    newer = orjson.dumps({"state_version": 2, "state": {"shape": "v2"}})
+    newer = orjson.dumps({"state_version": 3, "state": {"shape": "v3"}})
     files.store.write_bytes(newer)
     files.legacy.write_bytes(orjson.dumps({"kept": "legacy"}))
     monkeypatch.setattr(StatePersistence, "_SetAside",
@@ -466,7 +532,7 @@ def test_a_program_state_newer_than_the_store_wins(files, logged):
     assert found is True
     assert state == {"tournamentInfo": {"tournamentName": "Last seconds"}}
     # Rewritten right away, so the next launch has it even if ./out goes.
-    assert _read_store(files.store) == {"state_version": 1, "state": state}
+    assert _read_store(files.store) == {"state_version": 2, "state": state}
     assert StatePersistence.Path() == str(files.store)
     assert any("is newer than" in m for m in _levels(logged, "INFO"))
 
@@ -715,7 +781,7 @@ def test_the_writer_waits_for_the_state_to_be_quiet(store, writes,
     assert [snapshot for _t, snapshot in writes] == [{"value": 4}], (
         "a burst of changes was not written once, with the newest snapshot")
     assert writes[0][0] - lastChange >= 0.3 * 0.9, "written before the delay"
-    assert _read_store(store) == {"state_version": 1, "state": {"value": 4}}
+    assert _read_store(store) == {"state_version": 2, "state": {"value": 4}}
 
 
 def test_a_steady_stream_of_changes_cannot_postpone_the_write(
@@ -746,7 +812,7 @@ def test_flush_writes_without_waiting_out_the_delay(store, monkeypatch):
     assert StatePersistence.Flush(30)
 
     assert time.monotonic() - started < 10
-    assert _read_store(store) == {"state_version": 1,
+    assert _read_store(store) == {"state_version": 2,
                                   "state": {"flushed": True}}
 
 
@@ -755,7 +821,7 @@ def test_the_store_never_carries_the_export_stamps(store):
     StatePersistence.Schedule(snapshot)
     assert StatePersistence.Flush(30)
 
-    assert _read_store(store) == {"state_version": 1,
+    assert _read_store(store) == {"state_version": 2,
                                   "state": {"kept": "yes"}}
     # The published snapshot is shared with lastSavedState: never mutated.
     assert snapshot == {"timestamp": 1.0, "revision": 3, "kept": "yes"}
@@ -957,7 +1023,7 @@ def test_every_published_save_cycle_reaches_the_store(work_dir, store):
     assert StatePersistence.Flush(30)
 
     document = _read_store(store)
-    assert document["state_version"] == 1
+    assert document["state_version"] == 2
     assert document["state"][ROOT] == {"value": "published"}
     assert "timestamp" not in document["state"]
     assert "revision" not in document["state"]
@@ -1063,7 +1129,7 @@ def test_a_launch_from_a_pre_s3b_install(tmp_path):
                 "player_editor"):
         assert key not in report["keys"], key
         assert key not in report["full_state_keys"], key
-    assert report["store"]["state_version"] == 1
+    assert report["store"]["state_version"] == 2
     assert sorted(report["store"]["state"]) == report["keys"]
     # program_state.json keeps its contract: stamped, same place.
     exported = report["exported"]
@@ -1114,7 +1180,7 @@ def test_the_last_state_reaches_the_store_when_the_process_exits(tmp_path):
     assert report["pending"] is True
     assert elapsed < 60, "the exit waited out the write delay"
     store = orjson.loads((tmp_path / "user_data" / "state.json").read_bytes())
-    assert store == {"state_version": 1, "state": {"probe": {"value": 5}}}
+    assert store == {"state_version": 2, "state": {"probe": {"value": 5}}}
 
 
 _CRASH_SCRIPT = r"""

@@ -41,7 +41,7 @@ Import side effects: none (agent-pitfalls #1).
 """
 from . import CommentaryModel
 
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
 
 # ── v0 -> v1 ──────────────────────────────────────────────────────────────
 #
@@ -90,9 +90,44 @@ def _v0_to_v1(state):
     return state
 
 
+# ── v1 -> v2 ──────────────────────────────────────────────────────────────
+#
+# The tournament result's rows (ADR-005 S4q). The Qt panel wrote the singles'
+# and the teams' to one key, whichever its layout used; the teams' have their
+# own now, so a switch of layout leaves the other's alone. A row of the teams'
+# is one with `members`, which the singles' never had.
+
+_V2_SINGLES_ROOT = "result_players"
+_V2_TEAMS_ROOT = "result_teams"
+# The panel had sixteen rows of a team, of which no layout showed more than
+# eight.
+_V2_TEAM_SLOTS = tuple(str(slot) for slot in range(1, 9))
+
+
+def _v1_to_v2(state):
+    rows = state.get(_V2_SINGLES_ROOT)
+    if not isinstance(rows, dict):
+        return state
+    teams = {slot: row for slot, row in rows.items()
+             if isinstance(row, dict) and "members" in row}
+    if not teams:
+        return state
+    # What is there already is newer than what the panel left beside it (a
+    # state of this version, read back from out/program_state.json).
+    if not state.get(_V2_TEAMS_ROOT):
+        state[_V2_TEAMS_ROOT] = {slot: teams[slot] for slot in _V2_TEAM_SLOTS
+                                 if slot in teams}
+    for slot in teams:
+        del rows[slot]
+    if not rows:
+        del state[_V2_SINGLES_ROOT]
+    return state
+
+
 # from-version -> the step that produces from-version + 1.
 _STEPS = {
     0: _v0_to_v1,
+    1: _v1_to_v2,
 }
 
 

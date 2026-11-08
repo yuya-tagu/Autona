@@ -163,6 +163,18 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/stream/channels/<int:index>', 'api_v1.stream_channel_update', 'OPTIONS,PUT'),
     ('/api/v1/stream/org', 'api_v1.stream_org_reset', 'DELETE,OPTIONS'),
     ('/api/v1/stream/org/<kind>', 'api_v1.stream_org_import', 'OPTIONS,PUT'),
+    ('/api/v1/result', 'api_v1.get_result', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/result', 'api_v1.result_update', 'OPTIONS,PATCH'),
+    ('/api/v1/result/players/<int:slot>', 'api_v1.result_player_update', 'OPTIONS,PATCH'),
+    ('/api/v1/result/post', 'api_v1.get_result_post', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/result/preview', 'api_v1.get_result_preview', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/result/teams/<int:slot>', 'api_v1.result_team_update', 'OPTIONS,PATCH'),
+    ('/api/v1/result:clear', 'api_v1.result_clear', 'OPTIONS,POST'),
+    ('/api/v1/result:generate', 'api_v1.result_generate', 'OPTIONS,POST'),
+    ('/api/v1/result:loadStandings', 'api_v1.result_load_standings', 'OPTIONS,POST'),
+    ('/api/v1/result:preview', 'api_v1.result_preview', 'OPTIONS,POST'),
+    ('/api/v1/result:reorder', 'api_v1.result_reorder', 'OPTIONS,POST'),
+    ('/api/v1/result:saveToDb', 'api_v1.result_save_to_db', 'OPTIONS,POST'),
     ('/api/v1/stream/thumbnail', 'api_v1.stream_thumbnail_generate', 'OPTIONS,POST'),
     ('/api/v1/thumbnail', 'api_v1.get_thumbnail', 'GET,HEAD,OPTIONS'),
     ('/api/v1/thumbnail', 'api_v1.thumbnail_update', 'OPTIONS,PATCH'),
@@ -476,8 +488,10 @@ def test_the_classification_follows_the_rules():
     access = WebAccess.ROUTE_ACCESS
     # /api/v1: the method says it (spec: GET reads, POST / PATCH operate),
     # but for the player database's rows, real names in them, which are
-    # PLAYERDB as /playerdb is (ADR-005 S4m).
-    playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants"}
+    # PLAYERDB as /playerdb is (ADR-005 S4m), and the result's X post, whose
+    # handles come from there (S4q).
+    playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
+                      "api_v1.get_result_post"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -505,8 +519,10 @@ def test_the_classification_follows_the_rules():
     # 41 of 60) and the Statistics page's 1 write and 1 read (S4k: v1 42 of
     # 62), the Stats Display Settings page's 1 write and 1 read (S4l: v1 43
     # of 64), the player list's 3 writes and 2 reads of the player DB
-    # (S4m: v1 46 of 69) and the match thumbnail's 5 writes and 2 reads
-    # (S4o: v1 51 of 76). A change here is a change of the policy.
+    # (S4m: v1 46 of 69), the match thumbnail's 5 writes and 2 reads (S4o: v1
+    # 51 of 76) and the tournament result's 9 writes, 2 reads and the X post's
+    # text, guarded like the player DB its handles come from (S4q: v1 60 of 88).
+    # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -514,8 +530,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 51
-    assert len(EXPECTED_API_V1_ROUTES) == 76
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 60
+    assert len(EXPECTED_API_V1_ROUTES) == 88
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

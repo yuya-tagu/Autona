@@ -264,16 +264,20 @@ class AutonaScoreboardManager(QDockWidget):
     def StartImageRender(self, kind, payload, done):
         """Start drawing an image off-screen, on the GUI thread, and return:
         the wait for the GUI thread ends here, not at the image. `kind` says
-        which renderer ("thumbnail"; Result's is to come, the same way);
+        which renderer ("thumbnail" or "result": payload is its (data, config,
+        template) or (data, config, layout), each with a view of its own);
         `done(encode, error)` comes on the GUI thread, once, with
         `encode(format, fast=False)` -> the image's bytes (callable from any
         thread: a QImage, not the QPixmap; `fast`: _ImageEncoder), or None
         when it failed (`error`)."""
-        if kind != "thumbnail":
+        if kind not in ("thumbnail", "result"):
             raise ValueError(f"unknown kind of image: {kind}")
         # Built by the first render, not at startup: the off-screen view and
         # its page load cost seconds most launches do not need.
-        from .thumbnail.ThumbnailRenderer import ThumbnailRenderer
+        if kind == "thumbnail":
+            from .thumbnail.ThumbnailRenderer import ThumbnailRenderer as Renderer
+        else:
+            from .result.ResultPageRenderer import ResultPageRenderer as Renderer
 
         def finished(pixmap, error):
             if pixmap is None:
@@ -282,5 +286,4 @@ class AutonaScoreboardManager(QDockWidget):
             done(_ImageEncoder(pixmap.toImage()), "")
 
         data, config, template = payload
-        ThumbnailRenderer.instance().renderAsync(
-            data, config, template, finished)
+        Renderer.instance().renderAsync(data, config, template, finished)

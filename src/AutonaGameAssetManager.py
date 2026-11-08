@@ -261,10 +261,12 @@ class AutonaGameAssetManager(QObject):
 
     # ── game load ───────────────────────────────────────────────────────
 
-    def SetGameFromStartGGId(self, gameid):
+    def SetGameFromStartGGId(self, gameid, done=None):
+        """`done()` as LoadGameByCodename has it: at once for a game that is
+        not one of ours, which asks the loader nothing."""
         codename = self.catalog.GameFromStartGGId(gameid)
-        if codename:
-            self.LoadGameByCodename(codename)
+        if codename or done is not None:
+            self.LoadGameByCodename(codename or "", done=done)
 
     def LoadGameAssets(self, game: int = 0, async_mode=True, mods_active=False, mods_reload_mode=False):
         """Load the game at 1-based position `game` in the scan.

@@ -39,6 +39,7 @@ from qtpy.QtWebEngineCore import QWebEngineLoadingInfo
 from loguru import logger
 
 from src import AutonaWebOperations as WebOps
+from src.AutonaOffscreenRenderer import _Ticket
 from src.core import ThumbnailService as thumbnails
 from src.core.DictHelper import deep_clone
 from src.core.SettingsManager import SettingsManager
@@ -321,7 +322,8 @@ def test_ready_alone_does_not_take_the_picture(renderer):
     _setTitle(renderer, f"RENDER_PAINTED {number} painted")
     assert _waitUntil(lambda: results)
     assert results == [(GREEN, "")]
-    assert len(grabs) == 1
+    # The page's first picture: two grabs that agree.
+    assert len(grabs) == 2
 
 
 def test_a_painted_title_before_ready_is_not_believed(renderer):
@@ -456,6 +458,8 @@ def test_a_new_pages_first_picture_is_not_the_old_pages(renderer):
 def test_a_render_on_the_same_page_is_not_compared(renderer):
     """Nor waited on: the same picture again is the right picture."""
     renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    # However the machine is doing: slow frames have a test of their own.
+    renderer.SLOW_FRAMES_MS = LONG_TIMEOUT_MS
     _shown, grabs = _showing(renderer, RED)
     results = []
 
@@ -489,6 +493,177 @@ def test_a_new_page_that_looks_like_the_old_one_is_taken_after_the_wait(
     assert results == [(RED, "")]
     assert len(grabs) > 2
     assert any("still looks like the one before" in line for line in logged)
+
+
+# ── a picture that has not reached the view ──────────────────────────────
+
+def _renderSaying(renderer, color, details):
+    """A render whose page says it painted with `details`, once it said it is
+    ready. The list of what its taker got, its pictures' colors."""
+    renderer.PAINT_WAIT_MS = LONG_TIMEOUT_MS
+    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
+    results = []
+    renderer.renderAsync({}, {"color": color}, _template(),
+                         lambda p, e: results.append((p and _color(p), e)))
+    assert _waitUntil(lambda: renderer._active.ready)
+    number = renderer._active.number
+    assert _waitUntil(
+        lambda: _evaluate(renderer, "window.paintNumber || 0") == number)
+    renderer._page.runJavaScript(
+        f"document.title = {json.dumps(f'RENDER_PAINTED {number} ' + details)}")
+    return results
+
+
+def _pastThePagesFirstPicture(renderer):
+    results = []
+    renderer.renderAsync({}, {"color": RED}, _template(),
+                         lambda _p, _e: results.append(True))
+    assert _waitUntil(lambda: results)
+    assert renderer._before_load is None
+
+
+def test_slow_frames_are_not_taken_until_two_grabs_agree(renderer):
+    """The screen locked, the page had begun its two frames and the view still
+    showed one from before the drawing, unlike the page before it (names and
+    background missing): it was taken, one render in thirty. The stand-in
+    colors: what the view shows as the render ends."""
+    _pastThePagesFirstPicture(renderer)
+    shown, grabs = _showing(renderer, RED)
+
+    results = _renderSaying(renderer, GREEN, "painted frames=500")
+
+    assert _waitUntil(lambda: grabs)
+    assert results == []
+
+    shown[0] = GREEN
+    assert _waitUntil(lambda: results)
+    assert results == [(GREEN, "")]
+    assert grabs == [RED, GREEN, GREEN]
+
+
+def test_slow_frames_look_again_only_after_as_long_as_they_took(renderer):
+    """Closer than a frame takes to arrive, two grabs see the same unfinished
+    frame and agree."""
+    _pastThePagesFirstPicture(renderer)
+    shown, grabs = _showing(renderer, RED)
+
+    results = _renderSaying(renderer, GREEN, "painted frames=500")
+
+    assert _waitUntil(lambda: grabs)
+    _waitUntil(lambda: False, timeout=0.15)
+    assert grabs == [RED]
+    assert results == []
+    shown[0] = GREEN
+    assert _waitUntil(lambda: results)
+    assert results == [(GREEN, "")]
+
+
+def test_frames_at_their_usual_speed_on_the_same_page_are_one_grab(renderer):
+    _pastThePagesFirstPicture(renderer)
+    _shown, grabs = _showing(renderer, RED)
+
+    results = _renderSaying(renderer, RED, "painted frames=30")
+
+    assert _waitUntil(lambda: results)
+    assert grabs == [RED]
+
+
+def test_a_new_pages_first_picture_is_two_grabs_that_agree(renderer):
+    """Whatever the speed of its frames: the view also changes size here."""
+    shown, grabs = _showing(renderer, RED)
+    renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    renderer.PAINT_WAIT_MS = LONG_TIMEOUT_MS
+    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
+    results = []
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((_color(p), e)))
+    assert grabs == [RED]  # What the view showed before the load.
+    assert _waitUntil(lambda: renderer._page_loaded and renderer._active.ready)
+    number = renderer._active.number
+    assert _waitUntil(
+        lambda: _evaluate(renderer, "window.paintNumber || 0") == number)
+
+    shown[0] = GREEN
+    _setTitle(renderer, f"RENDER_PAINTED {number} painted frames=30")
+
+    assert _waitUntil(lambda: results)
+    assert results == [(GREEN, "")]
+    assert grabs == [RED, GREEN, GREEN]
+    assert renderer._before_load is None
+
+
+def test_a_page_that_did_not_say_how_long_is_two_grabs_that_agree(renderer):
+    _pastThePagesFirstPicture(renderer)
+    renderer.PAINT_WAIT_MS = 100
+    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
+    _shown, grabs = _showing(renderer, RED)
+    results = []
+
+    renderer.renderAsync({}, {"color": RED}, _template(),
+                         lambda p, e: results.append((_color(p), e)))
+
+    assert _waitUntil(lambda: results)
+    assert results == [(RED, "")]
+    assert grabs == [RED, RED]
+
+
+def test_a_page_that_never_settles_is_taken_after_the_wait(renderer):
+    _pastThePagesFirstPicture(renderer)
+    renderer.SETTLE_WAIT_MS = 400
+    colors = iter(f"#0000{level:02x}" for level in range(1, 200))
+    made = []
+
+    def grab():
+        made.append(next(colors))
+        pixmap = QPixmap(1920, 1080)
+        pixmap.fill(QColor(made[-1]))
+        return pixmap
+
+    renderer._view.grab = grab
+    logged, sink = _warnings()
+    try:
+        results = _renderSaying(renderer, GREEN, "painted frames=30000")
+        assert _waitUntil(lambda: results)
+    finally:
+        logger.remove(sink)
+
+    assert results == [(made[-1], "")]
+    assert len(made) > 2
+    assert any("still changing" in line for line in logged)
+
+
+@pytest.mark.parametrize("frames, loaded, every", [
+    (30, False, 0),       # the usual render: nothing more than its grab
+    (100, False, 0),
+    (101, False, 101),    # slow: as far apart as its two frames took
+    (400, False, 400),
+    (900, False, 500),    # two have to fit in the wait
+    (None, False, 500),   # it did not say
+    (30, True, 50),       # a page just loaded
+    (400, True, 400),
+    (None, True, 500),
+])
+def test_how_far_apart_the_grabs_are(renderer, frames, loaded, every):
+    ticket = _Ticket({}, "type_a", None)
+    ticket.framesMs = frames
+    renderer._before_load = QImage(1, 1, QImage.Format.Format_ARGB32) \
+        if loaded else None
+
+    assert renderer._settle_every(ticket) == every
+
+
+def test_a_render_that_timed_out_while_settling_is_not_taken(renderer):
+    _pastThePagesFirstPicture(renderer)
+    _shown, grabs = _showing(renderer, RED)
+
+    results = _renderSaying(renderer, GREEN, "painted frames=500")
+    assert _waitUntil(lambda: grabs)
+    renderer._on_timeout()
+    del grabs[:]  # The next load's picture of what the view showed before it.
+
+    _waitUntil(lambda: False, timeout=0.7)
+    assert grabs == []
+    assert results == [(None, "the render timed out")]
 
 
 # ── the pages as shipped ─────────────────────────────────────────────────

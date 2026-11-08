@@ -352,6 +352,28 @@ def bootstrap_core():
             shuttingDown=lambda:
                 AutonaQtHelper.gui_unavailable_reason() is not None)
 
+    # ORDER CONSTRAINT: the tournament result (ADR-005 S4q), the same way and
+    # after the thumbnail, whose background it follows when it draws (read
+    # then, not here). Its standings' import reaches the tournament through
+    # the provider's jobs, so it is built after the provider, which it asks
+    # when the import runs. The catalog's game switch reaches its
+    # ForgetCharacters through the module, not this instance.
+    from .core.ResultService import ResultService
+    if ResultService.instance is None:
+        ResultService.instance = ResultService(
+            later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
+            render=AutonaWebOperations.start_image_render,
+            translate=QCoreApplication.translate,
+            locale=lambda: AutonaLocaleHelper.programLocale,
+            prune=PruneOutputFiles,
+            shuttingDown=lambda:
+                AutonaQtHelper.gui_unavailable_reason() is not None,
+            fetcher=AutonaTournamentDataProvider.instance.RunWithProvider,
+            refreshTournament=(
+                AutonaTournamentDataProvider.instance.RefreshTournamentData),
+            currentProvider=lambda:
+                AutonaTournamentDataProvider.instance.provider)
+
     # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
     # countries, regions and the city -> region lookup, ADR-005 S1c) has to
     # exist before its Qt adapter (bootstrap_gui()), whose LoadCountries()
