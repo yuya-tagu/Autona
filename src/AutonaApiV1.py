@@ -585,7 +585,7 @@ def get_countries():
 @api_v1.route("/layouts")
 @api_handler
 def get_layouts():
-    # The layout catalog the Board tab, the Commentary / Top 8 pages and the Designer
+    # The layout catalog the Board / Commentary / Top 8 pages and the Designer
     # list from (src/core/LayoutCatalog.py). Not state, so no revision and
     # no web-operation hop: the catalog is already the single reader.
     # ?kind= takes one kind, a comma-separated list, or a repeated parameter.
@@ -631,6 +631,17 @@ def get_selected_layout(kind):
     if entry is None:
         raise ApiError(NOT_FOUND, f"no {kind} layout is installed", 404)
     return ok(data=entry)
+
+
+@api_v1.route("/layouts/selected/board/obs-path")
+@api_handler
+def get_board_files():
+    # The local files the Board page tells OBS to read (ADR-005 S4s):
+    # {"designId": <the selected design, null without one>, "design": <its file,
+    # null without one>, "winnerPopup": <the popup's>}. Absolute paths, which
+    # name the operator's account: apart from GET /layouts, and guarded like the
+    # player DB. Not state: no revision.
+    return ok(data=WebOps.get_board_files())
 
 
 @api_v1.route("/stream/channels")
@@ -1287,6 +1298,38 @@ def select_layout(kind):
         raise ApiError(
             INVALID_ARGUMENT, f"unknown {kind} layout: {layoutId}", 400)
     return ok(data=entry)
+
+
+@api_v1.route("/layouts/selected/board:reveal", methods=["POST"])
+@write_op("layout.board.reveal")
+def reveal_board_file():
+    # {"target": "design" | "winnerPopup"}, and for "design" {"designId": the
+    # design the client shows}: shows that file in this PC's file manager
+    # (ADR-005 S4s). The path is the catalog's: a client names a target, never a
+    # path. WebAccess.THIS_PC: a window is not to be opened on the streaming PC's
+    # screen from another computer, token or not. 404 when the file is not there,
+    # 409 when another design is selected by now: not the file the operator saw.
+    body = _json_body()
+    target = body.get("target")
+    if not isinstance(target, str) or target not in LayoutCatalog.BOARD_FILES:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"target must be one of: {', '.join(LayoutCatalog.BOARD_FILES)}",
+            400,
+        )
+    designId = None
+    if target == LayoutCatalog.BOARD_FILE_DESIGN:
+        designId = body.get("designId")
+        if not isinstance(designId, str) or not designId:
+            raise ApiError(INVALID_ARGUMENT,
+                           "designId must name the design shown", 400)
+    try:
+        shown = WebOps.reveal_board_file(target, designId)
+    except LayoutCatalog.SelectionChanged:
+        raise ApiError(CONFLICT, "another design is selected by now", 409)
+    if not shown:
+        raise ApiError(NOT_FOUND, f"no {target} file to show", 404)
+    return ok()
 
 
 @api_v1.route("/stats/overlays")

@@ -294,7 +294,7 @@ def _widget_modules():
     """The src modules that define a QWidget subclass, by AST: a class
     whose base is one of PySide6.QtWidgets' widget classes, or (closed
     over) a src class that is one. A base is matched by its last name
-    (`QDialog`, `QtWidgets.QDialog`, `AutonaBoardWidget`)."""
+    (`QDialog`, `QtWidgets.QDialog`, `AutonaBasePlayerWidget`)."""
     from PySide6 import QtWidgets
     widgets = {name for name in dir(QtWidgets)
                if isinstance(getattr(QtWidgets, name), type)

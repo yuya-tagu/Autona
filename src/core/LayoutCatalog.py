@@ -34,7 +34,7 @@ show the same name (a copied ``scoreboard_simple - コピー`` next to
 web server URL. ``format`` / ``game`` are None when a built-in layout does not
 declare them.
 
-This is the single source the Board tab, the Commentary / Top 8 pages, the Designer's
+This is the single source the Board / Commentary / Top 8 pages, the Designer's
 "open" list (AutonaDesignerService.list_projects) and ``GET /api/v1/layouts``
 read; none of them keeps its own folder scan or display-name table any more.
 
@@ -45,8 +45,9 @@ working directory unless a root is passed.
 
 import json
 import os
+import subprocess
+import sys
 from collections import Counter
-from typing import NamedTuple
 
 from loguru import logger
 
@@ -66,13 +67,13 @@ KIND_TOP8 = "top8"
 KINDS = (KIND_SCOREBOARD, KIND_DESIGNER, KIND_COMMENTARY, KIND_TOP8)
 
 # What a Designer project without meta.format / meta.game shows. Matches the
-# Board tab's former fixed text for every custom design.
+# Board panel's former fixed text for every custom design.
 DESIGNER_DEFAULT_FORMAT = "1v1"
 DESIGNER_DEFAULT_GAME = "カスタム"
 
 # Put in front of a Designer project's name in the catalog, so a project is
 # never mistaken for (or confused by name with) a built-in layout. The Board
-# tab labelled custom designs this way before the catalog existed.
+# panel labelled custom designs this way before the catalog existed.
 DESIGNER_NAME_PREFIX = "Custom: "
 
 # Folders under layout/ that are never a design themselves. custom/ holds the
@@ -96,41 +97,49 @@ _LEGACY_PREFIXES = (
 )
 
 
-# The design a panel shows and hands to OBS, per kind that has one here:
-# the settings.json key it is kept under and the layout picked when none is
-# kept (or the kept one is gone). The Commentary page's (ADR-005 S4b) and the
-# Top 8's (S4h, under the key its Qt panel always kept; the Top 8 page's
-# since S4i). The Board panel keeps its own until it moves to the Web UI.
+# The Board page's selection (ADR-005 S4s): the name of a selection, not a
+# catalog kind (KINDS). It lists two of those.
+SELECTION_BOARD = "board"
+
+# The design a panel shows and hands to OBS, per selection: the settings.json
+# key it is kept under, the layout picked when none is kept (or the kept one is
+# gone) and the catalog kinds it lists. The Commentary page's (ADR-005 S4b), the
+# Top 8's (S4h, under the key its Qt panel always kept; the Top 8 page's since
+# S4i) and the Board's (S4s, likewise): the built-in scoreboards, then the
+# Designer projects.
 SELECTION_SETTINGS = {
-    KIND_COMMENTARY: ("commentary.selected_design", "commentators"),
-    KIND_TOP8: ("top8.selected_design", "bracket_top8"),
+    KIND_COMMENTARY: ("commentary.selected_design", "commentators",
+                      (KIND_COMMENTARY,)),
+    KIND_TOP8: ("top8.selected_design", "bracket_top8", (KIND_TOP8,)),
+    SELECTION_BOARD: ("board.selected_design", "scoreboard_crewbattle",
+                      (KIND_SCOREBOARD, KIND_DESIGNER)),
 }
 
+# The winner popup: a separate OBS source beside the Board's design, in a folder
+# of its own that no selection lists.
+WINNER_POPUP_DIR = "winner_popup"
 
-class Catalog(NamedTuple):
-    layouts: list
-    # Absolute directories whose change can add, remove or rename an entry
-    # (layout/, layout/custom/ and each project folder below it). Only
-    # existing ones are listed.
-    watchDirs: list
+# The Board's OBS sources, by what a client asks for: the selected design and
+# the winner popup. A client names one of these, never a path.
+BOARD_FILE_DESIGN = "design"
+BOARD_FILE_WINNER_POPUP = "winnerPopup"
+BOARD_FILES = (BOARD_FILE_DESIGN, BOARD_FILE_WINNER_POPUP)
 
 
-def Discover(root=None):
-    """Return the full catalog: built-in layouts (folder-name order), then
-    Designer projects (case-insensitive slug order), plus the watch dirs."""
-    base = _Base(root)
-    layouts = _BuiltinLayouts(base)
-    layouts.extend(_DesignerLayouts(base))
-    return Catalog(_Disambiguate(layouts), WatchDirs(root))
+class SelectionChanged(Exception):
+    """A request about the design it shows, which is not the selected one any
+    more: another client chose meanwhile."""
 
 
 def Layouts(kinds=None, root=None):
-    """Catalog entries whose kind is in ``kinds`` (all when None/empty).
+    """Catalog entries whose kind is in ``kinds`` (all when None/empty):
+    built-in layouts (folder-name order), then Designer projects
+    (case-insensitive slug order).
 
     Designer projects are only read when ``designer`` is asked for, so the
     panels that list one built-in kind never parse project.json files.
     Names are made unique per kind, so filtering first gives the same names
-    as Discover().
+    as listing them all.
     """
     wanted = set(kinds or KINDS)
     base = _Base(root)
@@ -142,16 +151,16 @@ def Layouts(kinds=None, root=None):
 
 
 def SelectedLayout(kind, root=None):
-    """The catalog entry selected for ``kind`` (a SELECTION_SETTINGS kind),
-    or None when the kind lists no layout at all.
+    """The catalog entry selected for ``kind`` (a SELECTION_SETTINGS name),
+    or None when it lists no layout at all.
 
     The kept id when the catalog still lists it, else the kind's default,
     else the first entry -- the design combos' rule. What
     is kept is not rewritten by a fallback: the operator's choice comes back
     when its folder does.
     """
-    key, default = SELECTION_SETTINGS[kind]
-    layouts = Layouts([kind], root)
+    key, default, kinds = SELECTION_SETTINGS[kind]
+    layouts = Layouts(kinds, root)
     byId = {entry["id"]: entry for entry in layouts}
     kept = SettingsManager.Get(key, default)
     if isinstance(kept, str) and kept in byId:
@@ -163,15 +172,66 @@ def SelectedLayout(kind, root=None):
 
 def SelectLayout(kind, layoutId, root=None):
     """Keep ``layoutId`` as the selected layout of ``kind`` (a
-    SELECTION_SETTINGS kind) and return its entry; None, keeping nothing,
-    when the catalog does not list it for that kind. The settings.json key
-    and its value (a layout id) are the ones the panels always kept."""
-    key, _default = SELECTION_SETTINGS[kind]
-    entry = next((entry for entry in Layouts([kind], root)
+    SELECTION_SETTINGS name) and return its entry; None, keeping nothing,
+    when the catalog does not list it for that selection. The settings.json
+    key and its value (a layout id) are the ones the panels always kept."""
+    key, _default, kinds = SELECTION_SETTINGS[kind]
+    entry = next((entry for entry in Layouts(kinds, root)
                   if entry["id"] == layoutId), None)
-    if entry is not None:
+    # A pick of what is shown may be of a fallback (kept: another design, or
+    # none) or of what is kept already; only the former has anything to write.
+    if entry is not None and SettingsManager.Get(key) != layoutId:
         SettingsManager.Set(key, layoutId)
     return entry
+
+
+def BoardFiles(root=None):
+    """The local files the Board's OBS sources point at, as absolute paths:
+    ``{"designId": <the selected design, None without one>, BOARD_FILE_DESIGN:
+    <its file, None without one>, BOARD_FILE_WINNER_POPUP: <the popup's>}``. Not
+    part of an entry: an absolute path names the operator's account, and the
+    catalog is readable by anyone who reaches the port. The id says whose path
+    it is: the selection may have moved since a client read it."""
+    base = _Base(root)
+    design = SelectedLayout(SELECTION_BOARD, root)
+    return {
+        "designId": design["id"] if design else None,
+        BOARD_FILE_DESIGN:
+            _EntryPath(base, design["id"], design["entry"]) if design else None,
+        BOARD_FILE_WINNER_POPUP:
+            _EntryPath(base, WINNER_POPUP_DIR, DEFAULT_ENTRY),
+    }
+
+
+def RevealBoardFile(target, designId=None, root=None):
+    """Show one of the Board's OBS files (a BOARD_FILES name) in this PC's file
+    manager. For BOARD_FILE_DESIGN, ``designId`` is the design the operator is
+    looking at: SelectionChanged, starting nothing, when another is selected by
+    now. False when there is no such file, which is logged; a file manager that
+    cannot be started raises OSError. The path is the catalog's: a client names
+    a target, never a path."""
+    base = _Base(root)
+    files = BoardFiles(root)
+    if target == BOARD_FILE_DESIGN and files["designId"] != designId:
+        raise SelectionChanged(target)
+    path = files[target]
+    if path is None or not os.path.isfile(path):
+        shown = os.path.relpath(path, base) if path else "no design"
+        logger.warning(f"LayoutCatalog: no {target} file to show ({shown})")
+        return False
+    if sys.platform.startswith("win"):
+        # NTFS refuses a double quote in a name, so isfile() has not found one
+        # with it; if one ever gets here it could close the quotes below.
+        if '"' in path:
+            logger.warning(f"LayoutCatalog: not showing the {target} file: "
+                           f"{os.path.relpath(path, base)}")
+            return False
+        _ExplorerSelect(path)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", path])
+    else:
+        subprocess.Popen(["xdg-open", os.path.dirname(path)])
+    return True
 
 
 def CustomLayouts(customRoot):
@@ -183,8 +243,8 @@ def CustomLayouts(customRoot):
     file, the ``_legacy/`` rollback copy inside a project -- is not listed.
 
     ``displayName`` here is the project's own name (or its slug), which is
-    what the Designer's "open" list shows. The catalog (Discover / Layouts)
-    lists the same entry as ``"Custom: " + name``, made unique per kind.
+    what the Designer's "open" list shows. The catalog (Layouts) lists the
+    same entry as ``"Custom: " + name``, made unique per kind.
     """
     try:
         if not os.path.isdir(customRoot):
@@ -220,30 +280,26 @@ def CustomLayouts(customRoot):
     return layouts
 
 
-def WatchDirs(root=None):
-    """The directories to watch for catalog changes (see Catalog.watchDirs).
-
-    Cheap on purpose (directory listing only, no file reads): the Board tab
-    calls it on every change notification to start watching a project
-    folder the moment it is created, before its files are written.
-    """
-    base = _Base(root)
-    customBase = os.path.join(base, CUSTOM_DIRNAME)
-    dirs = [path for path in (base, customBase) if os.path.isdir(path)]
-    if customBase in dirs:
-        try:
-            for slug in sorted(os.listdir(customBase), key=str.casefold):
-                directory = os.path.join(customBase, slug)
-                if os.path.isdir(directory):
-                    dirs.append(directory)
-        except OSError as e:
-            logger.warning(f"LayoutCatalog: cannot list {customBase}: {e}")
-    return dirs
-
-
 # ── internals ────────────────────────────────────────────────────────────
 def _Base(root):
     return os.path.abspath(root or LAYOUT_ROOT)
+
+
+def _ExplorerSelect(path):
+    # Explorer parses its own command line and splits it at commas, so the path
+    # is always in quotes, which subprocess's list form adds only for a space.
+    # So a string (still no shell), and explorer's own full path: by name
+    # Windows looks in the working directory before system32. Its exit code is
+    # not asked: it is non-zero even on success.
+    windows = os.environ.get("WINDIR")
+    if not windows:
+        raise OSError("WINDIR is not set")
+    explorer = os.path.join(windows, "explorer.exe")
+    subprocess.Popen(f'"{explorer}" /select,"{path}"')
+
+
+def _EntryPath(base, layoutId, entry):
+    return os.path.normpath(os.path.join(base, *layoutId.split("/"), entry))
 
 
 def _IsLink(path):
@@ -263,8 +319,8 @@ def _DesignerLayouts(base):
 def _Disambiguate(layouts):
     """Suffix every display name shared within one kind with the entry id.
 
-    Per kind because each kind is its own pulldown (Board lists scoreboard
-    and designer together, but every designer name carries the prefix):
+    Per kind because each kind is its own pulldown (the Board page lists
+    scoreboard and designer together, but every designer name carries the prefix):
     the shipped commentators/ and bracket_top8/ are both "標準" and never
     appear in the same list, so neither is renamed.
     """

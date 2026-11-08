@@ -283,13 +283,6 @@
         <translation>所属タグ</translation>
     </message>
 </context><context>
-    <name>LayoutOptions</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="17" />
-        <source>Layout Options</source>
-        <translation>レイアウトオプション</translation>
-    </message>
-</context><context>
     <name>Settings</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="13" />
@@ -836,7 +829,6 @@
         <translation>トーナメント表</translation>
     </message>
     <message>
-        <location filename="..\AutonaBoardWidget.py" line="148" />
         <location filename="..\Autona.py" line="293" />
         <source>Board</source>
         <translation>スコアボード設定</translation>
@@ -1619,204 +1611,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>ベータ</translation>
     </message>
     <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="55" />
-        <source>Update</source>
-        <translation>アップデート</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="59" />
-        <source>Delete</source>
-        <translation>削除</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>サンプル大会</translation>
-    </message>
-</context><context>
-    <name>layout_options</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="143" />
-        <source>Chip Options</source>
-        <translation>チップ設定</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="240" />
-        <source>Bracket Options</source>
-        <translation>トーナメント表設定</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="254" />
-        <source>Versus Options</source>
-        <translation>対戦画面設定</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_character</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="151" />
-        <source>Display Player Avatar</source>
-        <translation>プレイヤーアバターを表示</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="158" />
-        <source>Display Player Character</source>
-        <translation>プレイヤーキャラクターを表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_country_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="165" />
-        <source>Display Player Country Flag</source>
-        <translation>プレイヤーの国旗を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_line_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="234" />
-        <source>Color for Bracket Lines</source>
-        <translation>トーナメント線の色</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="179" />
-        <source>Primary Color for Player Score</source>
-        <translation>プレイヤースコアのメインカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_color_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="186" />
-        <source>Make Score Color a Linear Gradient</source>
-        <translation>スコアの色を線形グラデーションにする</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="193" />
-        <source>Background Gradient Direction for Score</source>
-        <translation>スコア背景のグラデーション方向</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="200" />
-        <source>Secondary Color for Player Score</source>
-        <translation>プレイヤースコアのサブカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="206" />
-        <source>Primary Color for Player Sponsor</source>
-        <translation>所属タグのメインカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_color_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="213" />
-        <source>Make Sponsor Color a Linear Gradient</source>
-        <translation>所属タグの色を線形グラデーションにする</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="220" />
-        <source>Background Gradient Direction for Sponsor</source>
-        <translation>所属タグ背景のグラデーション方向</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="227" />
-        <source>Secondary Color for Player Sponsor</source>
-        <translation>所属タグのサブカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_state_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="172" />
-        <source>Display Player State Flag</source>
-        <translation>プレイヤーの地域旗を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="116" />
-        <source>Primary Color for Chips</source>
-        <translation>チップのメインカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="123" />
-        <source>Make Chips Background Color a Linear Gradient</source>
-        <translation>チップ背景の色を線形グラデーションにする</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="137" />
-        <source>Background Gradient Direction for Chips</source>
-        <translation>チップ背景のグラデーション方向</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="130" />
-        <source>Secondary Color for Chips</source>
-        <translation>チップのサブカラー</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_country_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="95" />
-        <source>Display Player Country Flag</source>
-        <translation>プレイヤーの国旗を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_seed_display</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="81" />
-        <source>Display Player Seed Number</source>
-        <translation>プレイヤーのシード番号を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_social_media</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="88" />
-        <source>Display Player Social Media</source>
-        <translation>プレイヤーの SNS を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_state_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="102" />
-        <source>Display Player State Flag</source>
-        <translation>プレイヤーの地域旗を表示</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_text_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="109" />
-        <source>Text Color for Chips</source>
-        <translation>チップの文字色</translation>
-    </message>
-</context><context>
-    <name>layout_options.preset_name</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="44" />
-        <source>Preset Name</source>
-        <translation>プリセット名</translation>
-    </message>
-</context><context>
-    <name>layout_options.versus_team1_sponsor_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="248" />
-        <source>Color for Team 1 Sponsor Color</source>
-        <translation>チーム1 所属タグの色</translation>
     </message>
 </context><context>
     <name>notes</name>
@@ -1910,7 +1709,6 @@ OBS のブラウザソースと Web UI は動作しません。
     <name>settings</name>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="35" />
-        <location filename="..\LayoutOptions\LayoutOptionsWidget.py" line="31" />
         <source>Default</source>
         <translation>デフォルト</translation>
     </message>

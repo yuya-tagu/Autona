@@ -1,10 +1,8 @@
 """Page plumbing shared by the embedded web views (ADR-005 S4a).
 
-Two kinds of embedded QWebEngineView load pages from the app's own web
-server and live for the whole process: the overlay previews
-(AutonaLayoutPreview) and the React panel host (AutonaWebPanelHost). What
-they have in common lives here, extracted from AutonaLayoutPreview so that
-neither keeps its own copy:
+The embedded QWebEngineView that loads pages from the app's own web server
+and lives for the whole process: the React panel host (AutonaWebPanelHost).
+Extracted from the Qt overlay previews, which it outlived (ADR-005 S4s):
 
 * the web server readiness gate (MarkWebServerReady): a load issued before
   the server is up is parked and replayed once it is, and what waits for

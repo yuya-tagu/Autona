@@ -115,8 +115,7 @@ paths:
 
 `src/core/Actions.py`（headless core Step 3）。**移行済みの操作は
 `AutonaActions.instance` 以外が書かない**。インスタンスは `bootstrap_core()` が作る。
-永続側のストア 2 つ（`src/core/SettingsManager.py` / `src/core/LayoutOptionsManager.py`）も
-core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（import 副作用ゼロ）。
+永続側のストア（`src/core/SettingsManager.py`）も core にあり、`bootstrap_core()` が `Initialize()` を呼ぶ（import 副作用ゼロ）。
 
 - 移行済み: `AdjustScore` / `ResetScore` / `SetScore`（board 1,2 のみ。`SetScore` は /api/v1 `score:set` 用・
   状態側チーム指定）/ `SetTeamColor` /
@@ -125,8 +124,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   `match_en` を空にする。S-17）/ `SetTeamName` / `SetTeamLosers` /
   `SetBestOf` / **第 2 弾で追加**: `ClearTeamRoster` /
   `TrimTeamRoster`（チームの選手スロット数。スロットの中身は `PlayerService`）/
-  **第 5 弾で追加**: `SetLayoutOption`（`LayoutOptionsManager` + `layout_options.*` の
-  両面ミラー）/ `SetStreamUrl` / `SetStreamTitle`（パネルが組んだ dict をサブツリーごと publish していた `PublishCommentary` は
+  **第 5 弾で追加**: `SetStreamUrl` / `SetStreamTitle`（`SetLayoutOption` は呼び手も読み手も無く、ADR-005 S4s で `LayoutOptionsManager` ごと削除。パネルが組んだ dict をサブツリーごと publish していた `PublishCommentary` は
   ADR-005 S3e-2、`PublishResultPlayers` は S4r で削除し、書き込みは `core/CommentaryService.py` と `core/ResultService.py` へ移った）/
   **ADR-005 S2c で追加**: `SwapTeams`（board 1,2。選手スロット・スコア・LOSERS・チーム名・
   ロゴ・ゲームトラッカーの勝敗（鏡映）を 1 保存サイクルで入れ替え、`score.{n}.teamsSwapped` を
@@ -386,13 +384,13 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 - 新しいエンドポイントの操作は core に置き、ルートからは `AutonaWebOperations` 経由で呼ぶ
   - 例外: **読み取り専用のカタログ系エンドポイントは Actions を経由しない**
     （ADR-001 2026-10-22 Addendum）。`GET /api/v1/layouts` はルートから Qt 非依存の
-    `src/core/LayoutCatalog.py` を直接呼ぶ。state を読み書きせず、パネル（Board）と
-    ページ（Commentary / Top 8）が読むのと同じ関数を呼ぶこと自体が一本化なので、Web 操作に
+    `src/core/LayoutCatalog.py` を直接呼ぶ。state を読み書きせず、
+    ページ（Board / Commentary / Top 8）が読むのと同じ関数を呼ぶこと自体が一本化なので、Web 操作に
     中継メソッドを足しても経路が増えるだけになる。state を書く操作はこの例外に入らない
 - **公開面の判定は `src/core/WebAccess.py` が正本**（ADR-005 S3a）。サーバー側は `before_request`（`_guard_http_request`）と
   Socket.IO の `ws_on()` 登録（書き込みイベントを `_ws_guard` で包む）から問い合わせるだけ
-  - **新しいルート / Socket.IO イベントは `ROUTE_ACCESS` / `EVENT_ACCESS` に分類を足す**（READ / WRITE / PLAYERDB / DESIGNER / STATIC）。
-    台帳テスト（`tests/test_webserver_routes.py`）が「全 endpoint・全イベントが分類済み」と分類規則（v1 の GET = READ、それ以外 = WRITE 等。例外は選手 DB の行を返す `GET /players`・`GET /players/entrants` で PLAYERDB。ADR-005 S4m）を pin する。
+  - **新しいルート / Socket.IO イベントは `ROUTE_ACCESS` / `EVENT_ACCESS` に分類を足す**（READ / WRITE / PLAYERDB / THIS_PC / DESIGNER / STATIC）。
+    台帳テスト（`tests/test_webserver_routes.py`）が「全 endpoint・全イベントが分類済み」と分類規則（v1 の GET = READ、それ以外 = WRITE 等。例外は選手 DB の行を返す `GET /players`・`GET /players/entrants` で PLAYERDB（ADR-005 S4m）、絶対パスを返す `GET /layouts/selected/board/obs-path` で PLAYERDB、この PC のウィンドウを開く `POST /layouts/selected/board:reveal` で THIS_PC（S4s））を pin する。
     分類のない名前は WRITE 扱い（開かない側に倒れる）。GET でも状態を変える legacy ルートは WRITE（効果で分類する）
   - Socket.IO のハンドラは `socketio.on` ではなく `ws_on` で登録する（`socketio.on` で直接登録すると判定を素通りする）
   - WRITE / PLAYERDB: この PC（ループバックか、この PC の LAN IP。`GetLocalIPs()` を初回に引いて保持）からはトークン不要、
@@ -402,6 +400,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     `Host` がこのサーバーの名前と待ち受けポート（DNS rebinding 対策）、`Sec-Fetch-Site` が無いか `same-origin` / `none`、
     `Origin` が無いか自分のオリジン（`null` は不可）。
     拒否は v1 のエラーエンベロープ（401 `UNAUTHENTICATED` / 403 `FORBIDDEN`。Socket.IO はイベントの ack）
+  - THIS_PC: 上のトークンなしの判定を通った要求（`GRANT_AMBIENT`）だけを通す。ほかは**トークンがあっても** 403 `FORBIDDEN`（`WebAccess.THIS_PC_ONLY`。`_guard_http_request`）。配信 PC の画面にウィンドウを開く操作のためで（ADR-005 S4s。「エクスプローラで開く」）、シェル操作にはせず core に置く。OS の操作を足すなら、クライアントからパスを受けず、シェルを通さない（`shell=True` にしない）。実行ファイルは名前で探させない。Explorer は自前で引数を読みカンマで区切るので、`LayoutCatalog._ExplorerSelect` は list 形でなく引用符つきの文字列で渡す
   - トークンは `WebAccess.Token()` が初回に読み（無ければ発行）、以後メモリに持つ。変えるのは `RegenerateToken()` だけ。
     settings.json を読めなかった（`SettingsManager.loadFailed`）・値が壊れているときは発行せず `""`（LAN の書き込みは全部拒否）
   - Socket.IO は接続を全部受け入れて state を配る（OBS の file:// オーバーレイのため）。書き込み可かどうかは接続時（handshake の
@@ -417,6 +416,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   クリップボードの書き込みを許しているため（`JavascriptCanAccessClipboard`。配信サムネの画像コピー）
   - React のパネルに外部へのリンクを置くなら `target="_blank"` にし、同じフレームで外へ遷移させない。ビューは新しいウィンドウを
     作らず、クリックからの（`isUserInitiated`）`http` / `https` の要求は既定のブラウザに渡す（`_PanelPage._OpenOutside`。ADR-005 S4r。X の投稿画面）。ほかは開かない。
+    例外は Designer: クリックからの、ページと同じオリジンの `/web?view=designer` ちょうど（`_IsDesignerUrl`。パス・クエリ・フラグメント・userinfo まで見る）だけ、既定のブラウザへ渡さずホストが `AutonaDesignerWindow` を開く（ADR-005 S4s。トークンの発行と破棄は Qt 側のままで、ページにトークンを渡さない）。
     クリックなしのスクリプトは `JavascriptCanOpenWindows=False` で届かず、Qt が知らないスキームを OS に渡す経路は
     `DisallowUnknownUrlSchemes` で閉じている（シェル操作は増やしていない。`tests/test_web_panel_host.py` が pin）
   - 担保: `_PanelPage.acceptNavigationRequest` が、ページ自身が始めた別オリジンへのメインフレームの遷移（リンク・フォーム・

@@ -312,6 +312,19 @@ test("the design is the selected one, previewed and given to OBS", async () => {
             /\/layout\/custom\/top8\/index\.html$/));
 });
 
+test("choosing the design shown saves it: it may be a fallback", async () => {
+    // A pick of the value it holds is nothing to the select.
+    await renderPage();
+
+    const select = screen.getByRole("combobox", {name: i18n.t("top8_design")});
+    fireEvent.mouseDown(select);
+    fireEvent.click(screen.getByRole("option", {name: "Top 8"}));
+    await settle();
+
+    expect(writes("PUT", "/api/v1/layouts/selected/top8"))
+        .toEqual([{id: "bracket_top8"}]);
+});
+
 test("a list that cannot be read shows the reload button", async () => {
     failing["/api/v1/layouts"] = [400, "INVALID_ARGUMENT"];
     render(

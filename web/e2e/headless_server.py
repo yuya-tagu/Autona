@@ -9,10 +9,13 @@ developer's user_data/, out/, logs/ and running Autona are never touched.
 
 On top of that working directory the E2E needs what the browser loads: the
 built Web UI (web/build) and the overlays it opens (layout/OVERLAY, the
-commentators overlay of the Commentary panel, ADR-005 S4b, and the Top 8
-bracket of the Top 8 panel, S4i, with the shared layout/include and the two
+commentators overlay of the Commentary panel, ADR-005 S4b, the Top 8
+bracket of the Top 8 panel, S4i, and the Board panel's default design, winner
+popup and picture, S4s, with the shared layout/include and the two
 layout-level files they read). They are linked or
-copied in read-only; nothing in the headless shell writes to them.
+copied in read-only; nothing in the headless shell writes to them. A Designer
+project is written into the working directory (the repository has none), with
+the runtime every project loads linked in.
 
 Protocol with the caller, one line each on stdout:
 
@@ -40,6 +43,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.AutonaDesignerService import AutonaDesignerService  # noqa: E402
 from tests.conftest import _LINKED_TREES, _link_tree  # noqa: E402
 from tests.test_bootstrap_split import _free_port, _runtime  # noqa: E402
 from tests.test_headless_smoke import (  # noqa: E402
@@ -51,11 +55,23 @@ OVERLAY = "scoreboard_simple"
 COMMENTARY_OVERLAY = "commentators"
 # The Top 8 panel's overlay (ADR-005 S4i; likewise).
 TOP8_OVERLAY = "bracket_top8"
+# The Board panel's default design and its winner popup (ADR-005 S4s).
+BOARD_OVERLAYS = ["scoreboard_crewbattle", "winner_popup"]
 # Linked (directory junctions), on top of _runtime()'s own links.
 EXTRA_LINKS = ["web/build", "layout/include", f"layout/{OVERLAY}",
-               f"layout/{COMMENTARY_OVERLAY}", f"layout/{TOP8_OVERLAY}"]
-# Copied: files cannot be junctioned. The overlays read both.
-EXTRA_FILES = ["layout/main.css", "layout/settings.json"]
+               f"layout/{COMMENTARY_OVERLAY}", f"layout/{TOP8_OVERLAY}",
+               *(f"layout/{overlay}" for overlay in BOARD_OVERLAYS),
+               str(AutonaDesignerService.RUNTIME_ROOT.as_posix())]
+# Copied: files cannot be junctioned. The overlays read the first two; the third
+# is the picture behind the Board panel's preview.
+EXTRA_FILES = ["layout/main.css", "layout/settings.json",
+               "layout/videoframe_1659973.png"]
+# The Board panel's Designer project: the runtime colours its root from this.
+DESIGNER_PROJECT = "e2e_design"
+DESIGNER_PROJECT_JSON = {
+    "schemaVersion": 3, "id": DESIGNER_PROJECT, "name": "E2E",
+    "canvas": {"width": 1920, "height": 1080, "backgroundColor": "#123456"},
+    "assets": [], "layers": []}
 
 
 def _say(kind, payload=""):
@@ -112,6 +128,15 @@ def _remove(directory, links):
     shutil.rmtree(directory, ignore_errors=True)
 
 
+def _write_designer_project(cwd):
+    project = cwd / AutonaDesignerService.ROOT / DESIGNER_PROJECT
+    project.mkdir(parents=True)
+    (project / "index.html").write_text(
+        AutonaDesignerService.STUB_INDEX_HTML, encoding="utf-8")
+    (project / "project.json").write_text(
+        json.dumps(DESIGNER_PROJECT_JSON), encoding="utf-8")
+
+
 def serve(console_copy=None):
     if not (PROJECT_ROOT / "web" / "build" / "index.html").is_file():
         _say("FAILED", "web/build/index.html is missing: run `npm run build`"
@@ -131,6 +156,7 @@ def serve(console_copy=None):
                     _link_tree(link, PROJECT_ROOT / relative)
                 for relative in EXTRA_FILES:
                     shutil.copyfile(PROJECT_ROOT / relative, cwd / relative)
+                _write_designer_project(cwd)
                 port = _free_port()
                 (cwd / "user_data" / "settings.json").write_text(json.dumps({
                     "general": {"webserver_port": port,

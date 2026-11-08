@@ -14,7 +14,6 @@ this catalog, so what is pinned here is what every one of them shows:
   (``designer_runtime/``, ``include/``, ``icons/``, ``custom/*/_legacy/``);
 - one unreadable file (locked, broken, absurdly nested) costing only its own
   entry;
-- the watch directories the Board tab hands to its QFileSystemWatcher;
 - and, against the shipped ``layout/`` tree, that the display names and the
   format / game moved into ``settings.json`` are character-for-character the
   ones the panels used to carry as constants.
@@ -88,9 +87,7 @@ def test_builtin_layouts_and_designer_projects_share_one_shape(layoutRoot):
         "schemaVersion": 3, "name": "決勝",
         "meta": {"format": "2v2", "game": "スト6"}, "layers": []})
 
-    catalog = LayoutCatalog.Discover(layoutRoot)
-
-    assert catalog.layouts == [
+    assert LayoutCatalog.Layouts(root=layoutRoot) == [
         {"id": "commentators", "kind": "commentary", "displayName": "標準",
          "format": None, "game": None, "entry": "index.html"},
         {"id": "scoreboard_simple", "kind": "scoreboard",
@@ -112,7 +109,7 @@ def test_builtin_layouts_come_first_in_folder_order_then_projects(layoutRoot):
     for slug in ("beta", "Alpha", "gamma"):
         project(layoutRoot, slug, {"name": slug})
 
-    assert ids(LayoutCatalog.Discover(layoutRoot).layouts) == [
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == [
         "scoreboard_Universal", "scoreboard_crewbattle", "scoreboard_simple",
         "custom/Alpha", "custom/beta", "custom/gamma",
     ]
@@ -122,13 +119,11 @@ def test_nothing_is_read_at_import_and_the_default_root_is_resolved_late(
         layoutRoot, monkeypatch):
     builtin(layoutRoot, "scoreboard_simple", {"kind": "scoreboard"})
     monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(layoutRoot))
-    assert ids(LayoutCatalog.Discover().layouts) == ["scoreboard_simple"]
+    assert ids(LayoutCatalog.Layouts()) == ["scoreboard_simple"]
 
 
 def test_a_missing_layout_root_is_an_empty_catalog(tmp_path):
-    catalog = LayoutCatalog.Discover(tmp_path / "nope")
-    assert catalog.layouts == []
-    assert catalog.watchDirs == []
+    assert LayoutCatalog.Layouts(root=tmp_path / "nope") == []
 
 
 # ── defaults ─────────────────────────────────────────────────────────────
@@ -226,7 +221,7 @@ def test_names_shared_within_a_kind_all_get_their_id(layoutRoot):
     # A project named like a built-in: the prefix already tells them apart.
     project(layoutRoot, "c", {"name": "Team"})
 
-    layouts = LayoutCatalog.Discover(layoutRoot).layouts
+    layouts = LayoutCatalog.Layouts(root=layoutRoot)
     assert {e["id"]: e["displayName"] for e in layouts} == {
         "scoreboard_simple": "Simple (scoreboard_simple)",
         "scoreboard_simple - コピー": "Simple (scoreboard_simple - コピー)",
@@ -252,7 +247,7 @@ def test_a_kind_filtered_list_disambiguates_like_the_full_catalog(layoutRoot):
     project(layoutRoot, "a", {"name": "決勝"})
     project(layoutRoot, "b", {"name": "決勝"})
 
-    full = LayoutCatalog.Discover(layoutRoot).layouts
+    full = LayoutCatalog.Layouts(root=layoutRoot)
     for kinds in ([KIND_COMMENTARY], [KIND_TOP8], [KIND_DESIGNER],
                   [KIND_SCOREBOARD, KIND_DESIGNER]):
         assert LayoutCatalog.Layouts(kinds, root=layoutRoot) == [
@@ -264,14 +259,12 @@ def test_a_name_that_stops_being_shared_goes_back_to_plain(layoutRoot):
         "kind": "commentary", "displayName": "標準"})
     dark = builtin(layoutRoot, "commentators_dark", {
         "kind": "commentary", "displayName": "標準"})
-    assert [e["displayName"] for e in LayoutCatalog.Discover(
-        layoutRoot).layouts] == ["標準 (commentators)", "標準 (commentators_dark)"]
+    assert [e["displayName"] for e in LayoutCatalog.Layouts(root=layoutRoot)] == ["標準 (commentators)", "標準 (commentators_dark)"]
 
     (dark / "settings.json").write_text(json.dumps(
         {"autona": {"kind": "commentary", "displayName": "Dark"}}),
         encoding="utf-8")
-    assert [e["displayName"] for e in LayoutCatalog.Discover(
-        layoutRoot).layouts] == ["標準", "Dark"]
+    assert [e["displayName"] for e in LayoutCatalog.Layouts(root=layoutRoot)] == ["標準", "Dark"]
 
 
 def test_a_builtin_block_with_only_a_kind_keeps_the_folder_derived_name(
@@ -281,7 +274,7 @@ def test_a_builtin_block_with_only_a_kind_keeps_the_folder_derived_name(
     builtin(layoutRoot, "lower_third", {"kind": "scoreboard"})
 
     assert {e["id"]: (e["displayName"], e["format"], e["game"])
-            for e in LayoutCatalog.Discover(layoutRoot).layouts} == {
+            for e in LayoutCatalog.Layouts(root=layoutRoot)} == {
         "commentators": ("標準", None, None),
         "lower_third": ("Lower Third", None, None),
         "scoreboard_big_one": ("Big One", None, None),
@@ -303,7 +296,7 @@ def test_folders_without_a_block_keep_the_old_folder_name_convention(
     builtin(layoutRoot, "h2h_record", settings={"assets": {"default": {}}})
 
     assert {e["id"]: (e["kind"], e["displayName"])
-            for e in LayoutCatalog.Discover(layoutRoot).layouts} == {
+            for e in LayoutCatalog.Layouts(root=layoutRoot)} == {
         "bracket_top8": (KIND_TOP8, "標準"),
         "bracket_top8_neon": (KIND_TOP8, "Neon"),
         "commentators_dark-gold": (KIND_COMMENTARY, "Dark Gold"),
@@ -324,7 +317,7 @@ def test_a_broken_block_is_ignored_and_the_folder_falls_back(
     builtin(layoutRoot, "lower_third", block)
 
     assert {e["id"]: (e["kind"], e["displayName"])
-            for e in LayoutCatalog.Discover(layoutRoot).layouts} == {
+            for e in LayoutCatalog.Layouts(root=layoutRoot)} == {
         "scoreboard_x": (KIND_SCOREBOARD, "X"),
     }
 
@@ -332,7 +325,7 @@ def test_a_broken_block_is_ignored_and_the_folder_falls_back(
 def test_an_unreadable_settings_file_falls_back_too(layoutRoot):
     directory = builtin(layoutRoot, "scoreboard_x")
     (directory / "settings.json").write_text("{not json", encoding="utf-8")
-    assert ids(LayoutCatalog.Discover(layoutRoot).layouts) == ["scoreboard_x"]
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == ["scoreboard_x"]
 
 
 # ── one bad file costs one entry ─────────────────────────────────────────
@@ -356,7 +349,7 @@ def test_a_nested_to_death_project_is_skipped_alone(
     project(layoutRoot, "deep", raw='{"name": ' + _TOO_DEEP + "}")
     project(layoutRoot, "fine", {"name": "Fine"})
 
-    assert ids(LayoutCatalog.Discover(layoutRoot).layouts) == ["custom/fine"]
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == ["custom/fine"]
     # The Designer's open list goes through the same reader.
     assert ids(LayoutCatalog.CustomLayouts(layoutRoot / "custom")) == [
         "custom/fine"]
@@ -373,7 +366,7 @@ def test_a_nested_to_death_settings_file_falls_back_to_the_folder_name(
         "kind": "scoreboard", "displayName": "Y"})
 
     assert {e["id"]: e["displayName"]
-            for e in LayoutCatalog.Discover(layoutRoot).layouts} == {
+            for e in LayoutCatalog.Layouts(root=layoutRoot)} == {
         "scoreboard_x": "X", "scoreboard_y": "Y"}
     assert any("RecursionError" in line and "scoreboard_x" in line
                for line in loggedWarnings)
@@ -391,7 +384,7 @@ def test_any_error_reading_one_file_skips_only_that_file(
         return realLoad(f, *args, **kwargs)
 
     monkeypatch.setattr(LayoutCatalog.json, "load", load)
-    assert ids(LayoutCatalog.Discover(layoutRoot).layouts) == ["custom/fine"]
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == ["custom/fine"]
     assert any("something nobody planned for" in line
                for line in loggedWarnings)
 
@@ -400,7 +393,7 @@ def test_any_error_reading_one_file_skips_only_that_file(
 def test_a_block_can_name_another_entry_file(layoutRoot):
     builtin(layoutRoot, "scoreboard_alt",
             {"kind": "scoreboard", "entry": "board.html"}, entry="board.html")
-    [entry] = LayoutCatalog.Discover(layoutRoot).layouts
+    [entry] = LayoutCatalog.Layouts(root=layoutRoot)
     assert entry["entry"] == "board.html"
 
 
@@ -408,13 +401,13 @@ def test_a_builtin_without_its_entry_file_is_not_listed(layoutRoot):
     builtin(layoutRoot, "scoreboard_wip", {"kind": "scoreboard"}, entry=None)
     builtin(layoutRoot, "scoreboard_alt",
             {"kind": "scoreboard", "entry": "board.html"})  # has index.html
-    assert LayoutCatalog.Discover(layoutRoot).layouts == []
+    assert LayoutCatalog.Layouts(root=layoutRoot) == []
 
 
 def test_an_entry_outside_the_folder_is_refused(layoutRoot):
     builtin(layoutRoot, "scoreboard_x",
             {"kind": "scoreboard", "entry": "../winner_popup/index.html"})
-    [entry] = LayoutCatalog.Discover(layoutRoot).layouts
+    [entry] = LayoutCatalog.Layouts(root=layoutRoot)
     assert entry["entry"] == "index.html"
 
 
@@ -444,7 +437,7 @@ def test_layouts_filters_by_kind(mixedTree, kinds, expected):
 
 
 def test_layouts_is_discover_filtered(mixedTree):
-    full = LayoutCatalog.Discover(mixedTree).layouts
+    full = LayoutCatalog.Layouts(root=mixedTree)
     assert LayoutCatalog.Layouts(root=mixedTree) == full
     for kind in LayoutCatalog.KINDS:
         assert LayoutCatalog.Layouts([kind], root=mixedTree) == [
@@ -468,7 +461,7 @@ def test_reserved_folders_are_never_designs(layoutRoot):
         builtin(layoutRoot, name, {"kind": "scoreboard"})
     (layoutRoot / "designer_runtime" / "runtime.js").write_text(
         "/* runtime */", encoding="utf-8")
-    assert LayoutCatalog.Discover(layoutRoot).layouts == []
+    assert LayoutCatalog.Layouts(root=layoutRoot) == []
 
 
 def test_legacy_rollback_copies_and_incomplete_projects_are_skipped(
@@ -484,7 +477,7 @@ def test_legacy_rollback_copies_and_incomplete_projects_are_skipped(
     project(layoutRoot, "a-list", raw="[1, 2]")
     (layoutRoot / "custom" / "notes.txt").write_text("x", encoding="utf-8")
 
-    assert ids(LayoutCatalog.Discover(layoutRoot).layouts) == ["custom/done"]
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == ["custom/done"]
 
 
 def test_a_linked_project_is_skipped(layoutRoot, tmp_path):
@@ -502,7 +495,7 @@ def test_a_linked_project_is_skipped(layoutRoot, tmp_path):
     _link_tree(link, target)
     try:
         assert os.path.isdir(link)  # the link itself resolves
-        assert LayoutCatalog.Discover(layoutRoot).layouts == []
+        assert LayoutCatalog.Layouts(root=layoutRoot) == []
         assert LayoutCatalog.CustomLayouts(layoutRoot / "custom") == []
     finally:
         # A junction is a directory entry (rmdir); a symlink is unlinked.
@@ -512,26 +505,6 @@ def test_a_linked_project_is_skipped(layoutRoot, tmp_path):
         else:
             os.rmdir(link)
     assert (target / "project.json").is_file()
-
-
-# ── watch directories ────────────────────────────────────────────────────
-def test_watch_dirs_are_the_roots_and_every_project_folder(layoutRoot):
-    builtin(layoutRoot, "scoreboard_simple", {"kind": "scoreboard"})
-    done = project(layoutRoot, "done", {"name": "Done"})
-    (done / "_legacy").mkdir()
-    # A folder the Designer has only just created: no files yet, but its
-    # writes must already reach the watcher.
-    (layoutRoot / "custom" / "being-saved").mkdir()
-
-    expected = [str(layoutRoot), str(layoutRoot / "custom"),
-                str(layoutRoot / "custom" / "being-saved"), str(done)]
-    assert LayoutCatalog.WatchDirs(layoutRoot) == expected
-    assert LayoutCatalog.Discover(layoutRoot).watchDirs == expected
-    assert all(os.path.isabs(path) for path in expected)
-
-
-def test_watch_dirs_without_a_custom_folder(layoutRoot):
-    assert LayoutCatalog.WatchDirs(layoutRoot) == [str(layoutRoot)]
 
 
 # ── consumers that must agree with the catalog ───────────────────────────
@@ -587,7 +560,7 @@ def test_the_shipped_layouts_keep_their_display_strings():
     # the shipped value itself is pinned exactly by the settings.json test
     # below.
     layouts = {entry["id"]: entry for entry in
-               LayoutCatalog.Discover(PROJECT_ROOT / "layout").layouts}
+               LayoutCatalog.Layouts(root=PROJECT_ROOT / "layout")}
     for name, (kind, display_name, fmt, game) in SHIPPED_BUILTINS.items():
         assert name in layouts, f"{name} is not in the catalog"
         entry = layouts[name]

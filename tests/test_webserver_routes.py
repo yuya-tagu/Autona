@@ -130,6 +130,8 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/layouts', 'api_v1.get_layouts', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/<kind>', 'api_v1.get_selected_layout', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/<kind>', 'api_v1.select_layout', 'OPTIONS,PUT'),
+    ('/api/v1/layouts/selected/board/obs-path', 'api_v1.get_board_files', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/layouts/selected/board:reveal', 'api_v1.reveal_board_file', 'OPTIONS,POST'),
     ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players', 'api_v1.get_players', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players', 'api_v1.player_save', 'OPTIONS,PUT'),
@@ -488,15 +490,21 @@ def test_the_classification_follows_the_rules():
     access = WebAccess.ROUTE_ACCESS
     # /api/v1: the method says it (spec: GET reads, POST / PATCH operate),
     # but for the player database's rows, real names in them, which are
-    # PLAYERDB as /playerdb is (ADR-005 S4m), and the result's X post, whose
-    # handles come from there (S4q).
+    # PLAYERDB as /playerdb is (ADR-005 S4m), the result's X post, whose
+    # handles come from there (S4q), the Board's file paths, which name the
+    # operator's account (S4s), and its "show in Explorer", which opens a window
+    # on this PC and is for this PC alone (S4s).
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
-                      "api_v1.get_result_post"}
+                      "api_v1.get_result_post", "api_v1.get_board_files"}
+    thisPc = {"api_v1.reveal_board_file"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
             expected = WebAccess.PLAYERDB
+        if endpoint in thisPc:
+            expected = WebAccess.THIS_PC
         assert access[endpoint] == expected, endpoint
+    assert WebAccess.THIS_PC in WebAccess.GUARDED
     # A legacy route that takes a body changes something.
     for _rule, endpoint, methods in EXPECTED_ROUTES:
         if "POST" in methods.split(",") and not endpoint.startswith("designer_"):
@@ -521,7 +529,9 @@ def test_the_classification_follows_the_rules():
     # of 64), the player list's 3 writes and 2 reads of the player DB
     # (S4m: v1 46 of 69), the match thumbnail's 5 writes and 2 reads (S4o: v1
     # 51 of 76) and the tournament result's 9 writes, 2 reads and the X post's
-    # text, guarded like the player DB its handles come from (S4q: v1 60 of 88).
+    # text, guarded like the player DB its handles come from (S4q: v1 60 of 88),
+    # and the Board's file paths and its "show in Explorer", neither of them a
+    # plain read or write (S4s: v1 60 of 90).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -531,7 +541,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 60
-    assert len(EXPECTED_API_V1_ROUTES) == 88
+    assert len(EXPECTED_API_V1_ROUTES) == 90
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

@@ -39,7 +39,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Setup | 大会情報（EVENT）: Start.gg 取込・大会カラー | `AutonaTournamentInfoWidget` / `core/TournamentInfoService` | `tournamentInfo.*` |
 | Setup | 配信設定: 配信先・タイトル生成・YouTube サムネ | `AutonaStreamSettingsWidget` | `stream.*` / `out/stream/` |
 | Scoreboard | スコアボード入力: board1 1v1 / board2 チーム / board3 クルー。スコア・Bo・phase/pool/match・スワップ・リセット・セット選択・ステーション・反映（held）・X intent | `AutonaScoreboardWidget`(2,306) / `AutonaScoreboardPlayerWidget`(1,185) / `AutonaCrewBattleWidget` / core 各サービス | `score.{n}.*` |
-| Scoreboard | BOARD: デザイン選択・ライブプレビュー・機能別カラー・Designer 起動 | `AutonaBoardWidget` / `AutonaLayoutPreview` / `AutonaDesignerService` | — |
+| Scoreboard | BOARD: デザイン選択・ライブプレビュー・機能別カラー・Designer 起動・OBS 用のパス | React `BoardPage`（`/web/board`。S4s で Qt 版を削除）/ `core/LayoutCatalog` / `AutonaDesignerService` / `AutonaDesignerWindow` | — |
 | Display | サムネイル（動画サムネ 2 テンプレ） | React `ThumbnailPage`（`/web/thumbnail`。S4p で Qt 版を削除）/ `core/ThumbnailService` / `thumbnail/ThumbnailRenderer`（オフスクリーン WebEngine） | `out/thumbnails/` |
 | Display | リザルト画像（6 レイアウト）・コピー・保存・X | React `ResultPage`（`/web/result`。S4r で Qt 版を削除）/ `core/ResultService` / `result/ResultPageRenderer`（オフスクリーン WebEngine） | `out/results/` |
 | Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | React `Top8Page`（`/web/top8`。S4i で Qt 版を削除）/ `core/Top8Model` / `core/Top8Service` | `top8.*` |
@@ -51,7 +51,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | 共通 | グローバルホットキー 9 本（Win32 `RegisterHotKey`） | `AutonaHotkeys` | — |
 | Web | リモート操作 UI（`/web`）・Designer（1920×1080 レイヤーエディタ、Figma 取込） | `web/src/ScoreboardPage` / `ScoreboardDesigner` | `layout/custom/{slug}/` |
 
-> 区分 Display の Qt パネルは S4r で無くなった（5 つとも React のページ）。
+> 区分 Display の Qt パネルは S4r で無くなった（5 つとも React のページ）。区分 Scoreboard に残る Qt は SCORE（Crew 含む）だけ（BOARD は S4s で React のページ）。
 
 > `docs/product/features.md` は陳腐化している（BlueSky・コントローラー検出・QDockWidget 自由配置など存在しない機能の記載、実況 8 枠→実際 12 枠、BOARD / Designer / Figma / 統計表示設定の記載漏れ）。
 
@@ -6090,3 +6090,90 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
 - **オーナー実機確認**（`python main.py`）
   - `.claude/manual-test-checklist.md` の「大会リザルト」。特に、6 レイアウトの絵と 960 幅の収まり、対戦形式の追従、X 投稿の既定のブラウザと貼り付け、実大会の取り込み
   - サムネイルと配信設定の回帰（共有部品の切り出し）: プレビュー・作成・コピー、`RangeField`、表示に戻るたびの描き直し
+
+### S4 Board の React 化 — 設計（2026-11-09）
+
+棚卸しの結果、ナビに残る Qt は Board と SCORE（Crew 含む）の 2 つ。文書の順番どおり Board を先に移す。規模は Qt 約 940 行で、部品は Commentary / Top 8 の `DesignPane` と `FeatureColorCard` がある。1 PR（S4s）で core の追加・ページ・Qt 版の削除まで行う。リスク区分は通常（state スキーマに触れない）。
+
+**決定**
+
+1. **選択は `LayoutCatalog` の表に足す**: `SELECTION_SETTINGS` に種類 `board`（`board.selected_design`、既定 `scoreboard_crewbattle`。キーと値は Qt 版のまま）。一覧は `scoreboard` と `designer` の 2 種類を合わせる。走査で見つからないときは表示だけ既定に倒し、保存値を書き換えない（既存の `SelectedLayout` の規則。Qt 版と同じ）。`PUT /layouts/selected/board`・`GET /layouts/selected/board` は既存のルートに乗せる
+2. **プレビューは OBS と同じページの iframe**（`DesignPane` の形）。背景は Qt 版と同じ `layout/videoframe_1659973.png`。**クリックは通さない**（`pointer-events: none`。Qt 版の `_glass` と同じ）
+3. **勝者ポップアップの重ね表示**: 非表示 / WINNER / CHAMPION を選ぶと `layout/winner_popup/index.html#preview=<mode>` を上に重ねる。ページのローカルで、保存しない・state に出ない・デザインを替えても保つ
+4. **色**: `FeatureColorCard`（feature `board`）。未設定なら大会カラーを継承するのは今と同じ
+5. **OBS のパス**: Board の OBS ソースは「ローカルファイル」が手順なので、Commentary の URL ではなくパスを出す。絶対パスはユーザー名を含むので `GET /layouts` には入れず、`GET /api/v1/layouts/selected/board/obs-path` を分ける（`{design, winnerPopup}`。分類は `PLAYERDB` = この PC かトークン付きだけ）。コピーはページの `writeText`、使えない `http` の LAN では選択できる欄
+6. **「エクスプローラで開く」は残す。シェル操作は増やさない**: Qt を使わない操作なので core に置く（`POST /api/v1/layouts/selected/board:reveal`、`{"target": "design" | "winnerPopup"}`）。**パスはカタログから解決し、クライアントからパスを受けない**。この PC からの要求だけ（LAN はトークンがあっても 403。配信 PC でウィンドウを開かせない）。ヘッドレスでも動く
+7. **Designer は共有ビューの新しいウィンドウの要求で開く**: ページは `/web?view=designer` を `window.open` する。ホストの `_OpenOutside` が、同じオリジンのこの URL でユーザー操作のものだけ、既定のブラウザへ渡さず `AutonaDesignerWindow` を開く（トークンの発行と破棄は今のまま Qt 側。ページにトークンを渡さない。シェル操作を増やさない）。別のブラウザで開いた場合は既存の「デスクトップアプリから開いてください」が出る。文言の BOARD タブは今も正しい。Designer のウィンドウ自体は S-final まで残す
+8. **一覧の更新**: `QFileSystemWatcher` の代わりに、表示に戻ったとき・ウィンドウにフォーカスが戻ったとき（Designer で保存して閉じた後）に `GET /layouts` を読み直す。Commentary / Top 8 の更新方法に前例があればそれに合わせる。選択中のデザインが変わらない再読込では iframe を読み直さない。Designer で同じデザインを保存したときは読み直しの手段が要るので、プレビューに「再読み込み」ボタンを置く
+9. **メタ情報**: 対戦形式・ゲームは `GET /layouts` の値（無ければ「—」）。自由入力なのでテキストとして描く
+10. **削除**: `AutonaBoardWidget.py`、`AutonaLayoutPreview.py`（ほかに使い手が無いことを確かめて）、`AutonaFeatureColors.py`・`AutonaColorButton.py`（同じ）。`LayoutOptions/` が死にコードなら一緒に消す。Qt の翻訳。ナビは `self._WebPanel("board")`、`WEB_PANELS` に追加。ナビの順序とキーは変えないので `STATE_VERSION` は据え置き
+11. **テスト**: v1 の契約（board の選択・保存値を書き換えないこと・obs-path の分類・reveal の LAN 拒否と未知の target）、ホスト（Designer の URL だけ `AutonaDesignerWindow`、ほかは既定のブラウザ・ユーザー操作なしは開かない）、jest、e2e
+
+**オーナー確認（機能削除）**: プレビューの「クリップボードにコピー」「画像として保存」。iframe の絵は Web から取れない。Commentary（2026-10-31）と Top 8（2026-11-04）で廃止を承認済みの同じ機能で、Board でも廃止を推奨する。確認が取れるまで S4s はマージしない
+
+#### S4s スコアボード設定の React 化と Qt 版の削除（2026-11-09）
+
+サイドバー Scoreboard の「BOARD」を React の `/web/board`（`web/src/BoardPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaBoardWidget.py`・`src/AutonaLayoutPreview.py`・`src/AutonaFeatureColors.py`・`src/LayoutOptions/`）を削除した。**これでナビに残る Qt は SCORE（Crew 含む）だけ**。プレビューの「クリップボードにコピー」「画像として保存」は推奨どおり廃止して実装した。**オーナー確認が取れるまでマージしない**（設計節のとおり）。
+
+- **完了内容**
+  - 選択（決定 1）: `core/LayoutCatalog.SELECTION_SETTINGS` を `(キー, 既定, 一覧の種類)` の 3 要素にして `board`（`SELECTION_BOARD`。`board.selected_design`、既定 `scoreboard_crewbattle`、`(scoreboard, designer)`）を足した。**`board` は選択の名前で、カタログの種類（`KINDS`）には足していない**: `GET /layouts?kind=` は `scoreboard,designer` で引き、`?kind=board` は今までどおり `400`。`GET|PUT /layouts/selected/board` は既存のルートにそのまま乗る。保存値を書き換えないフォールバックも `SelectedLayout` のまま
+  - OBS のパス（決定 5）: `LayoutCatalog.BoardFiles()` と `GET /layouts/selected/board/obs-path`（`{designId, design, winnerPopup}`。デザインが無ければ `designId` と `design` は `null`）。分類は `PLAYERDB`
+  - エクスプローラ（決定 6）: `LayoutCatalog.RevealBoardFile()` と `POST /layouts/selected/board:reveal`（`write_op("layout.board.reveal")`）。`target` は `BOARD_FILES` の名前だけ受け、パスはカタログから解決する。`design` のときは表示中の `designId` も受け、今の選択と違えば `409`（`SelectionChanged`）。起動は Windows `"%WINDIR%\explorer.exe" /select,"path"`（シェルなしの文字列）、macOS `["open", "-R", path]`、他 `["xdg-open", dirname]`（Qt 版の分岐のまま）。未知の target と `designId` なしは `400`、ファイルが無ければ `404` + 相対パスのログ、起動の失敗は `500`
+  - アクセス: `WebAccess.THIS_PC` を足した（下の差分 1）。`_guard_http_request` が `GRANT_AMBIENT` 以外を `THIS_PC_ONLY`（`403`）に置き換え、ログには元の理由を残す
+  - ホスト（決定 7）: `_IsDesignerUrl(url, pageUrl)` がオリジン・パス `/web`・クエリちょうど `view=designer`・フラグメントなし・userinfo なしを見て、クリック（`isUserInitiated`）のものだけ `_PanelPage.designerRequested` を出す。`AutonaWebPanelHost._OpenDesigner` は `QTimer.singleShot(0)` で Chromium の呼び出しの外へ出てから、親 = メインウィンドウで `AutonaDesignerWindow` を作るか前面に出す（Qt 版の `_openDesigner` と同じ。閉じると自分を破棄してトークンも破棄される）。ほかの URL は今までどおり既定のブラウザ。シェル操作は増やしていない
+  - ページ: 左の列に Designer（`window.open("/web?view=designer", "_blank", "noopener")`）・`FeatureColorCard`（feature `board`）・OBS の手順とパス（コピーと「エクスプローラで開く」、選択できる読み取り専用の欄）。右の列に `DesignPane`（デザイン選択・対戦形式 / ゲーム・勝者ポップアップ・再読み込み・プレビュー）
+  - プレビュー（決定 2・3）: `DesignPane` に任意の props（`controls` / `background` / `overlay` / `reloadKey` / `fit`）を足した。Commentary / Top 8 の表示は変えていない。背景は `layout/videoframe_1659973.png`、`pointer-events: none`。`fit` で幅と高さの小さい方に合わせる（Qt 版の規則。md 未満は幅）。勝者ポップアップは iframe を重ねて `#preview=<mode>` を渡す。**WINNER / CHAMPION の切り替えは同じ文書のままフラグメントだけ変える**（`layout/winner_popup/index.js` の `hashchange` が描き直す。ページ側のローカル状態で、保存しない・state に出ない・デザインを替えても保つ）
+  - 一覧の更新（決定 8）: Commentary / Top 8 はマウント時に 1 回読むだけで前例が無かったので、`useDocumentVisibility`（S4p）の `reveals` と window の `focus`（750 ms のデバウンス。Qt 版の値）と「再読み込み」で読み直す形を Board に足した（Designer を閉じると window にフォーカスが戻る）。**2 ページには足していない**（範囲外）。iframe の key はデザインの id なので、同じデザインなら読み直さない。「再読み込み」は一覧・選択・パスを読み直し、フレームも読み直す（Designer で同じデザインを上書きしたとき、focus が届かないとき）
+  - パスの読み: 選択の読みが終わるたびに、その後で読む（並走させない）。答えの `designId` が表示中のデザインと同じときだけパスを見せ、違えば選択を読み直す
+  - シェル: `WEB_PANELS` に `board`、`Window._CreateBoardPanel` は `self._WebPanel("board")` を返すだけ。ナビの順序とキーは変えないので `STATE_VERSION` は 22 のまま
+  - 文言: `board_*` を React の i18n（en / ja）へ
+  - 削除: 上の Qt 版と `tests/test_board_widget.py`・`tests/test_settings_panels.py`・`tests/test_layout_preview_lifecycle.py`。`LayoutCatalog.Catalog` / `Discover` / `WatchDirs`（下の差分 3）。`core/LayoutOptionsManager.py` と `AutonaActions.SetLayoutOption`（下の差分 5）
+  - 翻訳: 削除したファイルだけが参照していた訳と空の context を削除（`.ts` を手動編集して `scripts/compile_translations.ps1` で `.qm` を再生成。en / ja とも 405 件・未完了 0）
+- **設計からの差分**
+  1. **アクセスの分類を 1 つ足した（`THIS_PC`）**: 決定 6 の「この PC からの要求だけ」は既存の判定（`GRANT_AMBIENT`）を使うが、既存の分類に「トークンで開かない」ものが無い。LAN の拒否は**トークンの有無によらず `403`** にした。`401` はトークンを付ければ通ると読めるため。台帳テストの分類規則に足した
+  2. **`AutonaColorButton.py` は残した**: 決定 10 は「ほかに使い手が無ければ」で、CrewBattle と Settings が使っている
+  3. **`LayoutCatalog.Catalog` / `Discover` / `WatchDirs` を消した（決定 10 に無い）**: 使い手は Board のプレビューの監視だけで、孤児になった。`tests/test_layout_catalog.py` は `Discover(...).layouts` を `Layouts(root=...)` に書き換え、監視の節を削除した。`KINDS` と `GET /layouts` は不変
+  4. **勝者ポップアップの説明は tooltip でなく `helperText`（`board_popup_note`）**: 「OBS には影響しない」は読まれてほしい説明で、タッチでも見える
+  5. **`SetLayoutOption` と `core/LayoutOptionsManager.py` を消した（実装の指示では残す想定だった）**: 呼び手はテストだけ。`layout_options.*` の読み手は `layout/` にも `web/src/` にも無い（`git log -S` では過去の版にだけある）。書いていた `LayoutOptions/` パネルは S4s より前から構築されていない。state のルート名 `layout_options`（`KEY_CATALOG`）は残した: 古い `state.json` に残っていても害が無く、`RETIRED_ROOTS` に足すと凍結した `StateMigrations` に移行 step が要り、state スキーマの変更になるため。`.gitignore` と `StaticPath` の拒否のテストの `user_data/layout_options.json` も残した（既存の環境にファイルが残る）
+- **レビュー対象の判断**
+  1. **書き込みと重なった読みの選択は採らない**: どちらが先に始まっても（読みの開始時に書き込み中か、読みの間に書き込みがあれば）、一覧だけ採って `selected` を捨てる（古い選択に戻らない。S4r の修正 4 と同じ形）。答えは書き込みの応答が持っている
+  2. **読み直しの失敗は表示を残す**: エラーの画面は初回の失敗だけ。フォーカスのたびに読むので、一時的な失敗でページを消さない
+  3. **Qt パネルの遅延構築の経路に実際の使い手がいなくなった**: ナビの遅延の項目はすべて `_WebPanel` になった（SCORE は起動時に建つ）。`_lazyPanels` は React の項目も通るので残し、Qt のページを差し替える分岐のテストは架空のパネル（`tests/test_web_panel_host.py` の `lazyQt`）で続ける。消すかは SCORE の移行のときに判断する
+  4. **プレビューのテストの移し先**: オーバーレイの表示は jest / e2e へ、最小化での凍結・「遅延より前に戻ったら破棄しない」・「load が終わったら凍結し直す」（`ScheduleFreeze`）は共有ビューのテストへ移した（`tests/test_layout_preview_lifecycle.py` が守っていた規則で、`HiddenPageLifecycle` は共有ビューが使い続ける）
+  5. **表示中のデザインの選び直しは毎回送る**: ページは保存値を知らない（`GET /layouts/selected/*` は表示するエントリだけを返す）ので「保存値と違えば」の判定は core の `SelectLayout` に置いた。API に保存値を足すより小さく、3 ページとも同じ規則になる
+- **検収の修正**（番号はレビューの指摘の番号。7 は 6 と一緒に、13・14 は 1 つで直した）
+  - 実機: **勝者ポップアップの「非表示」が空欄に見える**（メインが `displayEmpty` を追加）。jest と e2e で pin
+  - 1. **表示中のフォールバックを選び直しても保存されない**（Qt 版からの退行）: MUI の Select は値が変わらないと `onChange` を出さないので、表示中の項目のクリックで `onSelect` を呼ぶ。`DesignPane` の規則なので Commentary / Top 8 にも効く。`SelectLayout` は保存値と同じなら書かない
+  - 2. **Designer を閉じた後の更新が focus 頼み**: 「再読み込み」（`board_reload`。「プレビューを再読み込み」から変更）が一覧・選択・パスも読み直す。デザインが無いときも押せる
+  - 3. **書き込み中に始まった読みが古い選択を採りうる**: 上の判断 1
+  - 4. **obs-path の読みが失敗すると回復しない**: 選択の読みの後で読むので、表示復帰・focus・再読み込みで読み直す。同じデザインの `entry` の変化にも追従する
+  - 5. **表示中のパスと reveal の対象がずれる**: 応答に `designId` を足して照合し、reveal に `designId` を付けて `409` にした（core と v1 と API 文書）。`409` はスナックバー（`board_reveal_changed`）と読み直し
+  - 6・7. **カンマを含みスペースを含まないパスで explorer の引数が壊れる / 名前での起動**: `_ExplorerSelect` が `%WINDIR%\explorer.exe` の絶対パスを、パスを常に引用符で囲んだ文字列で起動する（旧版の形）。NTFS は `"` を含む名前を作れないことをテストで確かめ、万一入っていれば `404`
+  - 8. **reveal の連打**: 実行中は 2 つの「エクスプローラで開く」を押せなくする。サーバーの回数制限は足していない
+  - 12. **プレビューが高さに収まらない**: `fit`（上のプレビューの節）。e2e で短く横長のウィンドウを pin
+  - 13・14. **focus のたびの走査 / 保存途中の読み**: focus の読み直しに 750 ms のデバウンス。一時的に一覧から消えて代わりが出ても、保存値は書き換わらず次の読みで戻る
+  - 15. `AutonaApiInfoWindow` に 2 ルートを足した
+  - 16. 拒否のログに元の理由を残す（`this_pc_only (foreign_host)`。トークンで通るはずだったものは `(token)`）。応答は今のまま
+  - 17. `ScheduleFreeze` の pin を `tests/test_web_panel_host.py` へ。**旧テストの形（隠れた状態で load する）は呼び出しを消しても通る**（Qt の推奨状態の変化でも凍結する）ので、load 中に推奨状態が落ち着く順序を作るテストにした（呼び出しを消すと落ちることを確かめた）
+  - 19. reveal に `X-Forwarded-For`・rebind した `Host`・`Origin: null`・`Sec-Fetch-Site: cross-site` を、トークンの有無それぞれで足した
+  - 20. e2e に Designer プロジェクトの iframe を足した（`headless_server.py` は `layout/designer_runtime` のリンク 1 本と、スタブと `project.json` を書く 8 行）。ランタイムが `project.json` を読んで枠の色を塗り、エラーが出ないことまで見る
+  - 21. 無いパネルのコメントは、該当のコードごと消えた（上の差分 5）。`src/Autona.py` の `self.layoutOptions.UiMounted()` のコメント行も消した
+- **直さず記録する点**（番号はレビューの指摘の番号）
+  - 9. **レイアウトのスクリプトが、クリップボードを許した共有ビューの中で走る**: Board は `layout/` に置かれた任意のスコアボードと Designer プロジェクトを sandbox なしの同一オリジン iframe で表示する（Commentary / Top 8 と同形）。S4e の「このサーバーのページ」には入るが、外部から入手したレイアウトも `JavascriptCanAccessClipboard` が有効なページの中で動く。旧 Qt プレビューは別のビューでこの設定が無かったので、**Board で増えたのはクリップボードの読み書きだけ**（v1 への ambient の書き込みはオーバーレイから元々できる）。クリック直後の activation が同一オリジンの iframe に伝わって `window.open` で既定のブラウザを開ける可能性は未検証。**SCORE の移行後の見直し項目**（iframe の sandbox か、プレビューを別のビューに分けるか）
+  - 10. **勝者ポップアップの切り替えで履歴が積まれる**: 旧版は `location.replace` で残さなかった。ブラウザで開くと戻るボタンが WINNER / CHAMPION の切り替えを遡る。デスクトップに戻るボタンは無く実害なし
+  - 11. **「再読み込み」が組み込みレイアウトの編集を拾えないことがある**: `layout/custom/` と `layout/designer_runtime/` は `no-store` だが、ほかは `max_age=86400`。組み込みのフォルダを手で編集した場合だけで、ボタンの主な目的の Designer のデザインは問題ない
+  - 18. **オーバーレイの iframe は表示に戻っても全量を要求しない**: 旧版は本体と重ねたフレームの両方に `program_state` を要求した。今はシェルの refresh だけで、iframe の中の `globals.js` は revision の欠番の検知と再接続で追いつくので実害は考えにくい。Commentary / Top 8 も同じ
+  - 22. **組み込みのレイアウトだけシンボリックリンク / junction を除外していない**: Designer 側は `_IsLink` で除外し、組み込み側は `isdir` が辿る。`/select` と `open -R` はファイルを選ぶだけで実行せず、ローカルで junction を置ける者に限られるので脅威にならない。e2e も junction に依存している。一貫性の指摘のみ
+- **受け入れた点（直さない）**
+  - `explorer` の終了コードは見ない（成功でも 0 以外を返す）。起動できてファイルがあれば成功と言う
+  - フォルダの変化はページが戻ったとき（か「再読み込み」）にしか見えない。`QFileSystemWatcher` の代わりで、決定 8 のとおり
+  - 表示に戻るのと focus が同時に来ると 2 回読む（`reveals` はすぐ、focus は 750 ms 後）。カタログの読みが 2 回増えるだけ
+  - `ui_layout.apply_section_title` / `LEFT_PANE_WIDTH`、`UI.secondary_label_style` は今回で未使用になったが、汎用の部品なので残した
+- **検証**
+  - `python scripts/run_tests_parallel.py`（4687 通過・2 スキップ、RESULT: OK）、`npm run build`（通過）、`npm test -- --watchAll=false`（34 スイート・985 通過）、`npm run test:e2e`（66 通過）
+  - 新規: `tests/test_api_v1_board.py`（62 件: 選択・保存値を書き換えないこと・obs-path の分類・reveal の LAN 拒否 / この PC の経路 / 未知の target / 古い designId・引用符とカンマ・起動の形）、`web/src/BoardPage/BoardPage.test.js`（49 件）、`web/e2e/board.spec.ts`（12 件: 実サーバーの保存・パス・重ね表示が同じ文書のまま切り替わること・背景・Designer プロジェクト・高さへの収まり・Designer の案内のページ・色）。`tests/test_web_panel_host.py`（Designer の URL の判定・クリックのみ・前面に出す・ほかは既定のブラウザ・凍結し直し・ナビの pin）、`tests/test_webserver_routes.py`（分類の台帳）
+  - 指摘 3・5・8・1 と 17 の pin は、直した行を戻すと落ちることを確かめた
+  - 一時の Playwright のスクリーンショットで、iframe が透過して背景の絵が見え、WINNER のポップアップが重なることを目視で確かめた（`color-scheme` の問題なし）
+- **オーナー実機確認**（`python main.py`）
+  - `.claude/manual-test-checklist.md` の「スコアボード設定（Board）」。特に、Designer のウィンドウ（開く・前面・閉じた後の一覧の更新。QtWebEngine で window の `focus` が届くか）、`explorer /select,"..."` の空白とカンマを含むパス、背景と勝者ポップアップの重ね表示、OBS のパスのコピーと貼り付け、色の反映
+  - 機能削除の確認: プレビューの「クリップボードにコピー」「画像として保存」の廃止

@@ -24,8 +24,9 @@ field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
 operations below (`ClearTeamRoster` / `TrimTeamRoster`; the count itself,
 `SetRoster`, since ADR-005 S3e-6) alongside the player
 subtree's own writer, `core/PlayerService.py`. The final instalment added the
-operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
-`SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
+operations of the panels that are not a scoreboard at all -- `SetLayoutOption`
+(gone with its panel and its store, ADR-005 S4s: nothing called it, and no
+overlay read what it wrote), `SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
 core/CommentaryService.py by ADR-005 S3e-2) / `PublishResultPlayers` (gone with
 the Qt panel, ADR-005 S4r: core/ResultService.py writes the rows) -- which is
 what took the last `StateManager.Set` out of a Qt widget (the ledger of what
@@ -86,7 +87,6 @@ from . import StateSchema as schema
 from .DictHelper import deep_clone
 from .GameTrackerService import GameTrackerService
 from .GameAssetCatalog import GameAssetCatalog
-from .LayoutOptionsManager import LayoutOptionsManager
 from .PlayerService import (
     DEFAULT_CHARACTERS_PER_PLAYER, CharacterSlot, DefaultPlayersPerTeam,
     PlayerService, RepublishTeamMergedNames)
@@ -1276,30 +1276,6 @@ class AutonaActions:
         # One key, so no SaveBlock -- see AdjustScore.
         StateManager.Set(path, value)
         return True
-
-    # ── layout options (per-overlay settings) ─────────────────────────────
-
-    def SetLayoutOption(self, base, setting, value):
-        """Persist and republish one OBS layout's option.
-
-        The same two-sided mirror as SetDisplayOption above, over a different
-        pair of files: `LayoutOptionsManager` (./user_data/layout_options.json)
-        is what the LAYOUT panel re-reads when it rebuilds its controls, and
-        `layout_options.{base}.{setting}` is what the overlay renders from.
-        `base` and `setting` come from the layout's own options definition,
-        not from a Qt objectName, so there is no catalog of them here --
-        KEY_CATALOG records the root as open-ended for that reason.
-
-        Not guarded by _SetIfChanged: building the LAYOUT panel assigns every
-        control its stored value, and those assignments emit, which is how a
-        layout's options reach the state at all on a fresh install. A guard
-        would keep the settings file and the state from agreeing after a
-        manual edit of program_state.json.
-        """
-        path = f"{base}.{setting}"
-        LayoutOptionsManager.Set(path, value)
-        # One state key, so no SaveBlock -- see AdjustScore.
-        StateManager.Set(f"{schema.LAYOUT_OPTIONS_ROOT}.{path}", value)
 
     # ── stream (配信設定) ─────────────────────────────────────────────────
 

@@ -69,15 +69,6 @@ def bootstrap_core():
     from .core.SettingsManager import SettingsManager
     SettingsManager.Initialize()
 
-    # The other on-disk settings file: the per-layout options an OBS overlay
-    # exposes. Same shape as SettingsManager and no dependency of its own; it
-    # only has to be loaded before the LAYOUT panel builds its option widgets
-    # (they read their current values through Get()) and before
-    # AutonaActions.SetLayoutOption writes through it. Its load used to run at
-    # import time (headless core Step 5, instalment 5).
-    from .core.LayoutOptionsManager import LayoutOptionsManager
-    LayoutOptionsManager.Initialize()
-
     # Static asset data with no dependency on anything constructed here:
     # LocaleHelper reads the shipped language tables (src/i18n/mapping.json
     # and assets/data_countries.json), BadWordFilter the ngword lists. They

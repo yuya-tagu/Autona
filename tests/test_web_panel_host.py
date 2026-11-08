@@ -14,15 +14,15 @@ for every panel moved to React. What has to hold:
 * it opens ``/web/<panel>?desktop=1&lng=<Qt language>`` once the web server
   is up, and showing another panel navigates the page's router instead of
   reloading the view;
-* off screen it is frozen / discarded like the overlay previews (the same
-  AutonaWebPageLifecycle parts), and on reveal it asks for the full state
+* off screen it is frozen / discarded (AutonaWebPageLifecycle), and on reveal
+  it asks for the full state
   and shows the panel chosen meanwhile -- after a thaw and after the reload
   of a discarded page alike;
 * a load that failed for good does not leave the view blank for the rest
   of the process: the next ShowPanel() or reveal loads the page again.
 
 These drive a real QWebEngineView (offscreen) against a throwaway local
-HTTP server, like tests/test_layout_preview_lifecycle.py. The served page
+HTTP server, because the behaviour under test is Qt's. The served page
 stands in for the Web UI's panel shell (``window.autonaPanelShell``,
 web/src/PanelShell/hostApi.ts): it records the navigations and full-state
 requests the host makes, and navigates the way the shell does
@@ -42,7 +42,7 @@ from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer
 from qtpy.QtTest import QTest
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QDialog, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from src import AutonaWebPageLifecycle as WPL
 from src import AutonaWebPanelHost as HostModule
@@ -75,7 +75,8 @@ window.autonaPanelShell = {
 # How long a page gets for what a test waits for. It only decides how long a
 # failing test takes: the wait ends as soon as the page has done it, and on a
 # machine busy with other work a page's load takes many times what it does
-# otherwise (see tests/test_layout_preview_lifecycle.py).
+# otherwise: Chromium runs a hidden page's renderer at background priority, and
+# under the parallel test runner one load of this small page took 5-12 s.
 WAIT_SECS = 60.0
 
 
@@ -166,8 +167,8 @@ class _Rig:
 
     def js(self, expr):
         # Only on an Active page: a frozen one answers after it thaws. The
-        # value is round-tripped through JSON (see the preview tests: PySide6
-        # hands null, arrays and objects back as '').
+        # value is round-tripped through JSON: PySide6 hands null, arrays and
+        # objects back as ''.
         box = []
         self.page.runJavaScript(
             "(function(){try{var v=(" + expr + ");"
@@ -333,6 +334,18 @@ def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
 
 # ── a new window goes to the default browser (ADR-005 S4r) ──────────────
 
+# What a page of this server's asks from, to _OpenOutside called on its own.
+PAGE_URL = "http://127.0.0.1:5107/web/board?desktop=1&lng=ja"
+DESIGNER_URL = "http://127.0.0.1:5107/web?view=designer"
+
+
+def _pageAsking():
+    page = SimpleNamespace(url=lambda: QUrl(PAGE_URL), designer=[])
+    page.designerRequested = SimpleNamespace(
+        emit=lambda: page.designer.append(True))
+    return page
+
+
 def _handedOutside(monkeypatch):
     # What the host gives the operating system: a spy, so no browser opens.
     opened = []
@@ -446,8 +459,8 @@ def test_only_http_and_https_are_handed_outside(monkeypatch, url, handed):
     opened = _handedOutside(monkeypatch)
 
     HostModule._PanelPage._OpenOutside(
-        None, SimpleNamespace(requestedUrl=lambda: QUrl(url),
-                              isUserInitiated=lambda: True))
+        _pageAsking(), SimpleNamespace(requestedUrl=lambda: QUrl(url),
+                                       isUserInitiated=lambda: True))
 
     assert opened == ([url] if handed else [])
 
@@ -459,7 +472,7 @@ def test_a_window_no_click_asked_for_is_not_handed_outside(monkeypatch, caplog):
 
     with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
         HostModule._PanelPage._OpenOutside(
-            None, SimpleNamespace(
+            _pageAsking(), SimpleNamespace(
                 requestedUrl=lambda: QUrl("https://example.test/a?text=secret"),
                 isUserInitiated=lambda: False))
 
@@ -477,13 +490,150 @@ def test_a_link_the_system_does_not_open_is_logged_without_its_text(
 
     with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
         HostModule._PanelPage._OpenOutside(
-            None, SimpleNamespace(
+            _pageAsking(), SimpleNamespace(
                 requestedUrl=lambda: QUrl("https://example.test/a?text=secret"),
                 isUserInitiated=lambda: True))
 
     assert "could not open" in caplog.text
     assert "example.test" in caplog.text
     assert "secret" not in caplog.text
+
+
+# ── the Board page's Designer (ADR-005 S4s) ─────────────────────────────
+
+def _designers(monkeypatch):
+    # Stands in for AutonaDesignerWindow, whose real page and token are not what
+    # this is about: built, its parent, how many times it was brought forward.
+    built = []
+
+    class Window(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            self.fronted = 0
+            built.append(self)
+
+        def activateWindow(self):
+            self.fronted += 1
+            super().activateWindow()
+
+    monkeypatch.setattr(HostModule, "AutonaDesignerWindow", Window)
+    return built
+
+
+def test_a_click_on_the_designer_url_opens_its_window_on_the_main_window(
+        buildHost, monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    built = _designers(monkeypatch)
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+
+    _clickOpening(rig, "/web?view=designer")
+
+    assert _waitUntil(lambda: built), "the Designer's window did not open"
+    assert built[0].parent() is rig.window
+    assert built[0].isVisible()
+    assert built[0].fronted == 1
+    # Not the default browser's, and the view stayed on its page.
+    assert opened == []
+    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.js("window.__loadId") == document
+    assert len(rig.loads) == 1
+
+
+def test_a_designer_window_already_open_is_brought_to_the_front(
+        buildHost, monkeypatch):
+    _handedOutside(monkeypatch)
+    built = _designers(monkeypatch)
+    rig = _shown(buildHost)
+
+    _clickOpening(rig, "/web?view=designer")
+    assert _waitUntil(lambda: built)
+    _clickOpening(rig, "/web?view=designer")
+
+    assert _waitUntil(lambda: built[0].fronted == 2)
+    assert len(built) == 1
+
+
+def test_a_closed_designer_window_is_built_anew(buildHost, monkeypatch):
+    built = _designers(monkeypatch)
+    rig = buildHost()
+    rig.host._OpenDesigner()
+    first = built[0]
+
+    first.close()
+    # At loop level 0 DeferredDelete is only delivered on request (see
+    # conftest's _dropBoard): WA_DeleteOnClose's deleteLater.
+    QCoreApplication.sendPostedEvents(first, QEvent.Type.DeferredDelete)
+    assert _waitUntil(lambda: rig.host._designerWindow is None)
+
+    rig.host._OpenDesigner()
+
+    assert len(built) == 2
+    assert rig.host._designerWindow is built[1]
+
+
+def test_script_alone_opens_no_designer(buildHost, monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    built = _designers(monkeypatch)
+    rig = _shown(buildHost)
+
+    rig.js("void window.open('/web?view=designer', '_blank', 'noopener')")
+    _clickOpening(rig, "https://example.test/clicked")
+
+    assert _waitUntil(lambda: opened)
+    assert opened == ["https://example.test/clicked"]
+    assert built == []
+
+
+def test_the_designer_url_opens_the_host_only(monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    page = _pageAsking()
+
+    HostModule._PanelPage._OpenOutside(
+        page, SimpleNamespace(requestedUrl=lambda: QUrl(DESIGNER_URL),
+                              isUserInitiated=lambda: True))
+
+    assert page.designer == [True]
+    assert opened == []
+
+
+def test_the_designer_url_without_a_click_opens_nothing(monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    page = _pageAsking()
+
+    HostModule._PanelPage._OpenOutside(
+        page, SimpleNamespace(requestedUrl=lambda: QUrl(DESIGNER_URL),
+                              isUserInitiated=lambda: False))
+
+    assert page.designer == []
+    assert opened == []
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost:5107/web?view=designer",          # another host name
+    "http://192.168.0.2:5107/web?view=designer",        # another computer
+    "http://127.0.0.1:5108/web?view=designer",          # another port
+    "https://127.0.0.1:5107/web?view=designer",         # another scheme
+    "http://127.0.0.1:5107/web/?view=designer",         # another path
+    "http://127.0.0.1:5107/web/board?view=designer",
+    "http://127.0.0.1:5107/web",                        # another query
+    "http://127.0.0.1:5107/web?view=designer&desktop=1",
+    "http://127.0.0.1:5107/web?view=designer&token=x",
+    "http://127.0.0.1:5107/web?view=Designer",
+    "http://127.0.0.1:5107/web?view=designer#x",        # a fragment
+    "http://me@127.0.0.1:5107/web?view=designer",       # a user
+])
+def test_only_the_designers_exact_url_is_kept_from_the_browser(monkeypatch, url):
+    opened = _handedOutside(monkeypatch)
+    page = _pageAsking()
+
+    HostModule._PanelPage._OpenOutside(
+        page, SimpleNamespace(requestedUrl=lambda: QUrl(url),
+                              isUserInitiated=lambda: True))
+
+    assert page.designer == []
+    assert opened == [url]
 
 
 def test_the_view_asks_the_system_for_nothing_by_itself(buildHost):
@@ -660,6 +810,60 @@ def test_a_hidden_host_is_frozen_and_asks_for_the_full_state_on_reveal(
     # Thawed, not reloaded.
     assert rig.js("window.__loadId") == document
     assert rig.loads == [True]
+
+
+def test_minimizing_the_window_freezes_the_host(buildHost):
+    # The view still claims to be visible; only the page knows better. That is
+    # why the lifecycle keys off the page's own visibility.
+    rig = _shown(buildHost)
+
+    rig.window.showMinimized()
+    assert rig.host.view.isVisible()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+
+    rig.window.showNormal()
+    assert rig.state() == ACTIVE
+    assert _waitUntil(lambda: rig.js("window.__refreshes") > 0)
+
+
+def test_a_host_shown_again_before_the_delay_is_not_discarded(buildHost):
+    rig = _shown(buildHost, discardAfterMs=800)
+    document = rig.js("window.__loadId")
+
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.reveal()
+
+    # Well past the delay, still the same document.
+    assert not _waitUntil(lambda: rig.state() != ACTIVE, timeout=1.6)
+    assert rig.js("window.__loadId") == document
+
+
+def test_a_load_that_ends_while_hidden_freezes_the_page_again(buildHost):
+    # Qt's recommended state settles while the load holds the freeze back, so
+    # nothing else would ask again: the page would stay Active on no screen.
+    # _OnLoadFinished asks (HiddenPageLifecycle.ScheduleFreeze).
+    rig = _shown(buildHost)
+    loading = [True]
+    rig.host._lifecycle._busy = lambda: loading[0]
+    rig.hide()
+    assert not _waitUntil(lambda: rig.state() == FROZEN, timeout=0.5)
+
+    loading[0] = False
+    rig.host._OnLoadFinished(True)
+
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+
+
+def test_a_load_on_a_hidden_host_shows_its_page_and_freezes_again(buildHost):
+    rig = _shown(buildHost)
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+
+    rig.host._loader.load(PanelPath("second"))
+
+    assert _waitUntil(lambda: rig.path()[0] == "/web/second")
+    assert _waitUntil(lambda: rig.state() == FROZEN)
 
 
 def test_a_panel_chosen_while_frozen_is_shown_on_reveal(buildHost):
@@ -1015,6 +1219,26 @@ def test_the_thumbnail_item_opens_the_react_page():
     assert "thumbnailSetting" not in source
 
 
+def test_the_board_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateBoardPanel"))
+
+    # The React page is the only Board panel (ADR-005 S4s).
+    assert calls == [("self._WebPanel", ["'board'"])]
+
+    # Still the lazy factory after the scoreboard, keyed by the React panel's
+    # name, with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateBoardPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'board.svg'"
+    assert "Board" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'board'"
+    assert "board" in WebAccess.WEB_PANELS
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -1060,8 +1284,8 @@ def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
     panels (Stream S4e, Event S4g -- its key is the React page's name now
-    --, Top 8 S4i, Statistics S4k, the Player List S4n and Thumbnail S4p):
-    no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
+    --, Top 8 S4i, Statistics S4k, the Player List S4n, Thumbnail S4p and Board
+    S4s): no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
@@ -1362,6 +1586,52 @@ def test_the_qt_result_panel_is_gone():
             assert f"<source>{source}</source>" in text, (path.name, source)
 
 
+def test_the_qt_board_panel_is_gone():
+    # ADR-005 S4s: the React page is the only Board panel. Its widget, its
+    # preview, the colour cards only it still had and the option panels nothing
+    # built may not come back in src/, nor the translations only they used, nor
+    # the options' store and action (nothing called them, no overlay read them).
+    # The colour button stays: the crew board and the settings use it.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    for gone in ("AutonaBoardWidget.py", "AutonaLayoutPreview.py",
+                 "AutonaFeatureColors.py", "LayoutOptions",
+                 "core/LayoutOptionsManager.py"):
+        assert not (src / gone).exists(), gone
+    for kept in ("AutonaColorButton.py", "AutonaDesignerWindow.py",
+                 "AutonaWebPageLifecycle.py"):
+        assert (src / kept).exists(), kept
+    words = ("import AutonaBoardWidget", "AutonaBoardWidget(",
+             "AutonaLayoutPreview(", "import AutonaLayoutPreview",
+             "AutonaFeatureColors import", "MakeFeatureColorCard",
+             "LayoutOptions.", "LayoutOptionsManager", "def SetLayoutOption",
+             "QFileSystemWatcher")
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8") for word in words)]
+    assert left == []
+
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        for name in ("AutonaBoardWidget", "AutonaLayoutPreview",
+                     "AutonaFeatureColors", "LayoutOptions"):
+            assert name not in text, (path.name, name)
+        assert "<name>layout_options" not in text, path.name
+        # The sidebar's label is the Window's.
+        assert "<source>Board</source>" in text, path.name
+
+
+def test_the_layout_catalog_has_no_watcher_to_serve():
+    # The page reads the list again when it is back (decision 8). Nothing in core
+    # lists directories for a QFileSystemWatcher any more.
+    from src.core import LayoutCatalog
+
+    assert not hasattr(LayoutCatalog, "WatchDirs")
+    assert not hasattr(LayoutCatalog, "Discover")
+
+
 # ── several React items, one host page (ADR-005 S4e) ────────────────────
 
 def test_a_react_item_shows_its_own_page_until_the_host_is_built():
@@ -1399,17 +1669,17 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "board")
+        WebPanelPages().Add(1, "scoreboard")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
     _BuildUi builds it, with a few sidebar items: five React ones and two
-    Qt ones (the eager scoreboard, the lazy Board -- the lazy Top 8 until it
-    became a React page, ADR-005 S4i, the lazy Statistics until S4k, the lazy
-    Result Settings until S4r), in the real order (Qt items between them). Off
-    screen, so the host builds no view; what it was asked to show is its _panel."""
+    Qt ones (the eager scoreboard and a made-up lazy one: the sidebar's last,
+    Board, became a React page in ADR-005 S4s, and the factories' path for a Qt
+    panel is still there), in the real order (Qt items between them). Off screen,
+    so the host builds no view; what it was asked to show is its _panel."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
                "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
@@ -1455,15 +1725,15 @@ class _WindowRig:
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
         # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
-        # commentary, ..., stats. (Board is after the scoreboard in the
-        # sidebar; last here so the indexes below stay one per kind of item.)
+        # commentary, ..., stats. (The lazy Qt item is last here so the indexes
+        # below stay one per kind of item.)
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
                           (QLabel("scoreboard"), None),
                           (w._CreateTop8Panel, "top8"),
                           (w._CreateCommentaryPanel, "commentary"),
                           (w._CreateStatsPanel, "stats"),
-                          (qtPanel("board"), "board")):
+                          (qtPanel("lazyQt"), "lazyQt")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
                 w._lazyPanels[index] = (page, key)
@@ -1487,7 +1757,7 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, BOARD = range(7)
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT = range(7)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -1534,8 +1804,8 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert host._panel == "stats"
     assert w.stack.widget(STATS) is rig.placeholders[STATS]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(BOARD) == BOARD
-    assert rig.built == ["board"]
+    assert rig.choose(LAZY_QT) == LAZY_QT
+    assert rig.built == ["lazyQt"]
     assert w.dockWidgets == []
 
 

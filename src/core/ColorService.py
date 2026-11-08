@@ -23,13 +23,13 @@ fields and the display-name rules, and never touches these two. The ledger in
 docs/changes/headless-core-redesign.md records that split.
 
 Where this came from (headless core Step 5, instalment 5): all of the above
-lived in ``src/AutonaFeatureColors.py``, next to the Qt cards that drive it.
+lived in ``src/AutonaFeatureColors.py``, next to the Qt cards that drove it.
 Step 2 moved the launch seed of every *other* key family into
 ``StateSchema`` but deliberately left ``SeedColorState`` behind, because
 splitting a key family's seed from its reader and writer puts two owners on
-one subtree. Moving the family whole is what that note was waiting for; the
-cards stay in ``AutonaFeatureColors``, which now re-exports these names so its
-importers are unaffected.
+one subtree. Moving the family whole is what that note was waiting for. The
+cards went with the last Qt panel that had one (ADR-005 S4s): the Web UI's
+FeatureColorCard is the one left.
 
 Import side effects: none (agent-pitfalls #1). Every read and write happens
 inside a call. Qt-free, like everything under ``src/core``.

@@ -15,8 +15,8 @@ import {useStateChoice} from "../PanelShell/useStateChoice";
 import {copyText} from "../PanelShell/clipboard";
 
 // The Commentary page's cards below the casters (ADR-005 S4b): the
-// feature's own colours (src/AutonaFeatureColors.py's card) and how to add
-// the overlay to OBS (the Qt panel's group).
+// feature's own colours and how to add the overlay to OBS (the Qt panel's
+// group).
 
 // A catalog entry (GET /api/v1/layouts, core/LayoutCatalog.py).
 export interface LayoutEntry {
@@ -24,6 +24,10 @@ export interface LayoutEntry {
     kind: string;
     displayName: string;
     entry: string;
+    // Free text of the layout's metadata, null when it declares none. The
+    // Board page shows them.
+    format?: string | null;
+    game?: string | null;
     // What a select picks it by, when `id` (the folder) is not unique: the
     // Stats page's last_sets / tournament_history have a player 1 and a
     // player 2 entry in one folder (S4l). `id` otherwise.

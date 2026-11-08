@@ -72,7 +72,8 @@ _ENDPOINTS = [
     ("GET", "/commentary", "Commentary state", None, False, False, False),
     ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
     ("GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
-    ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8)", None, False, False, False),
+    ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8|board)", None, False, False, False),
+    ("GET", "/layouts/selected/board/obs-path", "The Board's OBS files, as absolute paths (a token from another computer)", None, False, False, False),
     ("GET", "/commentary/options", "Commentary role / icon candidates", None, False, False, False),
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
@@ -89,6 +90,7 @@ _ENDPOINTS = [
     ("POST", "/commentary/reorder", "Reorder casters (slot order)", {"order": ["2", "1", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]}, False, True, False),
     ("POST", "/commentary/{slot}/player", "Fill a caster from a player DB entry", {"gamerTag": "Player", "prefix": "TM", "twitter": "player_x"}, False, True, False),
     ("PUT", "/layouts/selected/{kind}", "Select a panel's layout", {"id": "commentators"}, False, True, False),
+    ("POST", "/layouts/selected/board:reveal", "Show a Board OBS file in Explorer (this PC only; a design no longer selected is 409)", {"target": "design", "designId": "scoreboard_simple"}, False, True, False),
     ("PATCH", "/colors/{feature}", "Set a feature's colors", {"theme": "#112233", "accent": "#445566"}, False, True, False),
     # ── Destructive (confirm required) ──
     ("POST", "/scoreboards/{n}:clear", "Clear board (confirm required)", {"confirm": True}, True, True, True),
