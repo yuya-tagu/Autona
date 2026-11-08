@@ -35,8 +35,12 @@ from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaHotkeys import AutonaHotkeys
 
+from loguru import logger
+
+from .AutonaGameAssetManager import AutonaGameAssetManager
+# SCORE's thumbnail button and X post render synchronously through the thin
+# wrapper; the settings page is the React one (ADR-005 S4p decision 10).
 from .thumbnail import main_generate_thumbnail as thumbnail
-from .AutonaThumbnailSettingsWidget import *
 
 
 class AutonaScoreboardWidgetSignals(QObject):

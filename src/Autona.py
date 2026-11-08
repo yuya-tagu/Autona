@@ -251,8 +251,8 @@ class Window(QMainWindow):
     #      scoreboard (input) and board (design) panels.
     # v22: Stats Display Settings panel added to
     #      the Display category, after Commentary.
-    #      (Tournament Info became a React page in ADR-005 S4g, in the same
-    #      place: no bump.)
+    #      (Tournament Info became a React page in ADR-005 S4g, and Thumbnail
+    #      Settings in S4p, each in the same place: no bump.)
     STATE_VERSION = 22
     signals = WindowSignals()
 
@@ -366,11 +366,11 @@ class Window(QMainWindow):
         # -> core-shown gap for UI most launches never open.
         self.dockWidgets = []
 
-        # Filled by _CreateThumbnailPanel / _CreateResultPanel. Declared here
-        # because SetBattleFormat reaches for both on every format switch and
-        # has to skip whichever panel has not been revealed yet; the factory
-        # then catches that panel up to the current format as it builds.
-        self.thumbnailSetting = None
+        # Filled by _CreateResultPanel. Declared here because SetBattleFormat
+        # reaches for it on every format switch and has to skip it while it
+        # has not been revealed yet; the factory then catches the panel up to
+        # the current format as it builds. (The Qt thumbnail panel was the
+        # other one; the React page needs no format, ADR-005 S4p.)
         self.resultSetting = None
 
         # EVENT — lazy since headless core Step 4b: see _CreateEventPanel. It
@@ -396,8 +396,8 @@ class Window(QMainWindow):
         # after EVENT (it absorbs EVENT's color pickers). Lazy: see
         # _CreateBoardPanel.
         #
-        # THUMBNAIL / RESULT — lazy as well: see _CreateThumbnailPanel /
-        # _CreateResultPanel.
+        # THUMBNAIL / RESULT — lazy as well: see _CreateThumbnailPanel (the
+        # React page since ADR-005 S4p) / _CreateResultPanel.
 
         splash.set_message(splash_msgs[0], progress=0.40)
 
@@ -756,9 +756,9 @@ class Window(QMainWindow):
         # Step 4e — the other boards are built the first time they are needed)
         # and apply that format so the board + result layout match. The
         # "Rules" menu switches between them at runtime.
-        # The Result / Thumbnail panels used to be told the format here; they
-        # are lazy now, so each factory applies the current format itself
-        # (startup Step 4b-3).
+        # The Result panel used to be told the format here; it is lazy now,
+        # so its factory applies the current format itself (startup Step
+        # 4b-3).
         battleFormat = self._resolveBattleFormat()
         AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
@@ -1019,19 +1019,8 @@ class Window(QMainWindow):
         return self._WebPanel("stream")
 
     def _CreateThumbnailPanel(self):
-        from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
-        # Held so the battle-format switch can hide the team-name toggle in 1v1.
-        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
-        thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
-        thumbnailSetting.setObjectName("Thumbnail Settings")
-        thumbnailSetting.setWindowTitle(
-            QApplication.translate("app", "Thumbnail Settings"))
-        # Catch up on the format switches that happened while this panel did
-        # not exist — SetBattleFormat skips an unbuilt panel. Cheap here: the
-        # thumbnail's SetBattleFormat only toggles the team-name checkbox's
-        # visibility, it does not touch the preview.
-        thumbnailSetting.SetBattleFormat(self._resolveBattleFormat())
-        return thumbnailSetting
+        # ADR-005 S4p: the React page in the shared web view.
+        return self._WebPanel("thumbnail")
 
     def _CreateResultPanel(self):
         from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
@@ -1042,8 +1031,9 @@ class Window(QMainWindow):
         resultSetting.setObjectName("Result Settings")
         resultSetting.setWindowTitle(
             QApplication.translate("app", "Result Settings"))
-        # Same catch-up as the thumbnail panel, but the order matters here.
-        # SetBattleFormat moves layoutCombo, which fires _onLayoutChanged ->
+        # Catch up on the format switches that happened while this panel did
+        # not exist (SetBattleFormat skips an unbuilt panel), and the order
+        # matters here. SetBattleFormat moves layoutCombo, which fires _onLayoutChanged ->
         # GeneratePreview(True). Doing it now — inside the factory, i.e.
         # before _EnsurePanelAt puts the panel on the stack and Qt shows it —
         # means the panel's renderer is still unbuilt (showEvent builds it),
@@ -1555,8 +1545,6 @@ class Window(QMainWindow):
         AutonaScoreboardManager.instance.SetBattleFormat(fmt)
         if getattr(self, "resultSetting", None) is not None:
             self.resultSetting.SetBattleFormat(fmt)
-        if getattr(self, "thumbnailSetting", None) is not None:
-            self.thumbnailSetting.SetBattleFormat(fmt)
         # Keep the sidebar segment in sync when the format is changed
         # programmatically (setChecked does not re-emit the click signal).
         if getattr(self, "sidebar", None) is not None:

@@ -157,18 +157,6 @@ def test_a_sync_render_during_another_gets_its_own_frame(renderer):
     assert _color(pixmap) == GREEN
 
 
-def test_a_sync_render_during_a_panel_render_gets_its_own_frame(renderer):
-    announced = []
-    renderer.renderComplete.connect(lambda p: announced.append(_color(p)))
-    renderer.render({}, {"color": RED, "delay": 200}, _template())
-
-    pixmap = renderer.renderSync({}, {"color": GREEN, "delay": 800},
-                                 _template())
-
-    assert _color(pixmap) == GREEN
-    assert announced == [RED, GREEN]
-
-
 def test_an_async_render_during_a_sync_one_waits_for_it(renderer):
     results = []
 
@@ -185,18 +173,6 @@ def test_an_async_render_during_a_sync_one_waits_for_it(renderer):
     assert results == [BLUE]
 
 
-def test_the_panels_renders_stand_in_for_each_other(renderer):
-    announced = []
-    renderer.renderComplete.connect(lambda p: announced.append(_color(p)))
-
-    renderer.render({}, {"color": RED, "delay": 300}, _template())
-    renderer.render({}, {"color": GREEN}, _template())
-    renderer.render({}, {"color": BLUE}, _template())
-
-    assert _waitUntil(lambda: len(announced) == 2)
-    assert announced == [RED, BLUE]
-
-
 def test_renders_with_a_taker_all_run_in_order(renderer):
     results = []
 
@@ -209,18 +185,11 @@ def test_renders_with_a_taker_all_run_in_order(renderer):
     assert results == [RED, GREEN, BLUE]
 
 
-def test_an_async_render_is_not_announced(renderer):
-    # It would change the Qt panel's preview.
-    announced = []
-    renderer.renderComplete.connect(announced.append)
-    results = []
-
-    renderer.renderAsync({}, {"color": GREEN}, _template(),
-                         lambda p, e: results.append((_color(p), e)))
-
-    assert _waitUntil(lambda: results)
-    assert results == [(GREEN, "")]
-    assert announced == []
+def test_the_qt_panels_way_in_is_gone():
+    # ADR-005 S4p: render() and its renderComplete signal were the Qt panel's
+    # only, and went with it. A render has a taker, always.
+    assert not hasattr(ThumbnailRenderer, "render")
+    assert not hasattr(ThumbnailRenderer, "renderComplete")
 
 
 def test_a_different_template_loads_its_page_first(renderer):

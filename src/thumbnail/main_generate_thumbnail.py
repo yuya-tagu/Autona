@@ -2,7 +2,10 @@
 # and keep their contracts: SCORE's button (and its X post) and the legacy
 # GET /scoreboard<N>-get-thumbnail-<png|jpg>. The settings, the payload, the
 # names and the generations are core/ThumbnailService's (ADR-005 S4o); what is
-# left here is the renderer's QPixmap.
+# left here is the renderer's QPixmap. Both draw the settings as the React page
+# shows them (RenderPayload, S4p). `isPreview` was the Qt panel's, gone in S4p:
+# nothing passes True any more, and the signatures stay what SCORE, the legacy
+# route and tests/live call until the Board panel moves.
 
 from pathlib import Path
 
@@ -27,9 +30,11 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     Raises on error for non-preview mode.
 
     `settingsManager` is the one SettingsManager, which the service reads.
+    The settings are given as they read (what the page shows), like the v1
+    renders' (ADR-005 S4p).
     """
     games = gameAssetManager.instance.catalog if gameAssetManager else None
-    return service.ThumbnailService.instance.BuildPayload(
+    return service.ThumbnailService.instance.RenderPayload(
         preview=isPreview, games=games, board=scoreboardNumber)
 
 
@@ -58,10 +63,8 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
 
 
 def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboardNumber=1):
-    """Generate a thumbnail synchronously (for final generation).
-
-    For preview, use prepare_data() + ThumbnailRenderer.render() directly.
-    """
+    """Generate a thumbnail synchronously (SCORE's button and the legacy
+    route). A preview in the background is core/ThumbnailService's."""
     from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
 
     data, config, template_data = prepare_data(

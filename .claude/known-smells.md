@@ -166,7 +166,11 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 
 ---
 
-## S-06: AutonaThumbnailSettingsWidget.__init__ + updateFromSettings [P3/D2/S2] 🟢 縮小（優先度低下）
+## S-06: AutonaThumbnailSettingsWidget.__init__ + updateFromSettings [P3/D2/S2] ✅ 解消（2026-11-08 削除済み）
+
+> **2026-11-08（ADR-005 S4p）**: Qt のサムネイル設定パネル（`AutonaThumbnailSettingsWidget` と
+> `AutonaThumbnailSettings.ui`）を削除し、React の `/web/thumbnail` に置き換えた。設定・動画タイトル・
+> ペイロードは core の `ThumbnailService`（S4o）にある。以下は当時の記録。
 
 **根拠**: python-hotspots.md「God __init__」
 
@@ -186,7 +190,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 
 **2026-06-24 検証（解消済）**: サムネイル生成が **WebEngine ベースの `ThumbnailRenderer`（`src/thumbnail/ThumbnailRenderer.py` の `render` / `renderSync`）に移行**したため、旧 PIL ベースの `paste_image_matrix` / `paste_characters` は削除済み。`main_generate_thumbnail.py` はファイル 759行相当 → **312行**、トップレベル関数 17個 → **6個**（createFalseData, remove_special_chars, _resolve_template_id, prepare_data, save_result, generate）に縮小。本項目は対応不要。
 
-**影響範囲**: （対応済み）`thumbnail/` 配下、`AutonaThumbnailSettingsWidget.py`
+**影響範囲**: （対応済み）`thumbnail/` 配下（`AutonaThumbnailSettingsWidget.py` は S4p で削除。`main_generate_thumbnail.py` は S4o から core の `ThumbnailService` の薄いラッパーで、`ThumbnailRenderer` の入口は `renderAsync` / `renderSync` の 2 つ）
 
 ---
 
@@ -419,7 +423,7 @@ objectName → 明示的なキー名マッピング＋`program_state.json` の�
 | S-02 | ScoreboardWidget __init__ | 単一ファイル内。動作確認は手動。884行に肥大化 | 🔴 未着手 |
 | S-04 | GameAssetManager 内部クラス | `_LoadGameAssetsCore`/`_ResolveTargetGame` 抽出。colors型/SaveBlock/finally の diverge 解消。S1a（2026-10-23）で両メソッドは `core/GameAssetCatalog` に移った | ✅ 解消（2026-06-27） |
 | S-13 | AutonaWebServer Blueprint 分割 | 91ルート。stage_strike は除外 | 🔴 未着手 |
-| ~~S-06~~ | ~~ThumbnailSettings 分割~~ | 縮小済みで優先度低下 | 🟢 縮小 |
+| ~~S-06~~ | ~~ThumbnailSettings 分割~~ | 縮小済みで優先度低下 → ADR-005 S4p で Qt 版ごと削除 | ✅ 解消（2026-11-08） |
 | ~~S-07~~ | ~~thumbnail 巨大関数~~ | WebEngine 移行で解消 | ✅ 解消 |
 | S-12 | commentary 欠番 | — | ✅ M1a |
 

@@ -1,16 +1,16 @@
 """The match thumbnail (サムネイル, ADR-005 S4o).
 
-Everything about a match thumbnail that needs no Qt, so that it does not
-depend on the Qt panel (src/AutonaThumbnailSettingsWidget.py, on its way out)
-and also answers in the headless shell:
+Everything about a match thumbnail that needs no Qt, so that the settings
+page is a React one (web/src/ThumbnailPage, ADR-005 S4p, which removed the Qt
+panel) and it also answers in the headless shell:
 
 - **the settings** (settings.json ``thumbnail_config``; the shape is
   unchanged): ``Settings()`` reads them with their defaults filled in and
-  writes nothing -- the panel's GetSetting wrote every default it read, which
-  left remains like ``game.None``. Those are skipped here, not removed. A
-  render of this module's is given what they read as, whatever the template
-  would make of the saved value. ``Update()`` checks everything before it
-  writes anything, ``Reset()`` goes back to the defaults;
+  writes nothing -- the Qt panel's GetSetting wrote every default it read,
+  which left remains like ``game.None``. Those are skipped here, not removed.
+  Every render is given what they read as (``RenderPayload``), whatever the
+  template would make of the saved value. ``Update()`` checks everything
+  before it writes anything, ``Reset()`` goes back to the defaults;
 - **the video title** (``VideoTitle``) and **the payload** ``thumbnail.html``
   is given (``BuildPayload``), both moved here unchanged:
   tests/test_thumbnail_service.py replays what the old code answered
@@ -33,13 +33,15 @@ The render lane, one run at a time:
   of them: the payload is built when a run starts, so it draws the newest
   settings anyway. A generate during a preview is kept the same way (a save
   does not fail because a preview was on its way), and stands in for a kept
-  preview: it draws the same picture and updates the preview's file too.
+  preview: it draws the same picture and updates the preview's file too. One
+  that finds no match to save (NO_GAME / NO_PLAYER) is followed by the preview
+  it stood in for, which draws a placeholder.
 - A generate while one runs or is kept: BUSY (nothing changes).
 - Every run gets the next revision, which Preview / Generate answer whether it
   starts now or is kept: a client knows which ``thumbnail.render`` is its own.
 
 A run: the payload on the requester's thread (it reads files and the state,
-as the panel did on its thread, and waits for nobody); the render on the GUI
+as the old Qt panel did on its thread, and waits for nobody); the render on the GUI
 thread, started by ``render`` and never waited for -- no nested event loop on
 this path (agent-pitfalls #9); the encoding and the files in a job of the task
 executor, so that a PNG of 1920x1080 does not stall the GUI thread. The result
@@ -111,11 +113,11 @@ SAVE_FAILED = ImageImport.SAVE_FAILED
 
 # ── the settings ─────────────────────────────────────────────────────────
 
-# What a missing setting means. They are the panel's, which is what an
+# What a missing setting means. They are the old Qt panel's, which is what an
 # operator has been looking at (and what it saved once opened), and not all of
 # them are thumbnail.js's own: without a saved value it reads use_team_names
-# and flip_p2 as false. A render of this module's is given the settings as
-# they read (_AsRead): what GET says is what gets drawn.
+# and flip_p2 as false. Every render is given the settings as they read
+# (_AsRead, through RenderPayload): what GET says is what gets drawn.
 DEFAULT_TOGGLES = {
     "display_phase": True,
     "use_team_names": True,
@@ -128,10 +130,11 @@ DEFAULT_GAME_SETTINGS = {
     "zoom": 100,
     "align": {"horizontal": 50, "vertical": 40},
 }
-# The panel's spin boxes (AutonaThumbnailSettings.ui), but for 0, which they
-# take as an alignment: thumbnail.js reads it as "no value" (`|| 50`, `|| 40`)
-# and draws the default, and the templates are not changed. So it is not taken,
-# and a saved 0 reads as that default, which is what it draws.
+# The old Qt panel's spin boxes (the page's number fields take the same), but
+# for 0, which they took as an alignment: thumbnail.js reads it as "no value"
+# (`|| 50`, `|| 40`) and draws the default, and the templates are not changed.
+# So it is not taken, and a saved 0 reads as that default, which is what it
+# draws.
 ZOOM_RANGE = (1, 1000)
 ALIGN_RANGE = (1, 100)
 # A game's settings are saved under its codename, a dot path segment, which
@@ -140,16 +143,16 @@ ALIGN_RANGE = (1, 100)
 # to be a game there is (_KnownCodenames).
 CODENAME_MAX_LENGTH = 128
 _CODENAME_REFUSED = re.compile(r"[./\\\x00-\x1f\x7f]")
-# What the panel's GetSetting saved while no game was selected.
+# What the old Qt panel's GetSetting saved while no game was selected.
 _NO_GAME_CODENAME = "None"
 
 # ── the data ─────────────────────────────────────────────────────────────
 
 # What a final thumbnail falls back to when the state has no complete match.
 PROGRAM_STATE_FILE = "./out/program_state.json"
-# ADR-005 S4 design: a render of this module's draws board 1, as the panel's
-# preview, copy and save did. SCORE's button still draws its own board
-# (BuildPayload's `board`, through src/thumbnail/main_generate_thumbnail.py).
+# ADR-005 S4 design: a render of this module's draws board 1, as the old Qt
+# panel's preview, copy and save did. SCORE's button still draws its own board
+# (RenderPayload's `board`, through src/thumbnail/main_generate_thumbnail.py).
 RENDER_BOARD = 1
 
 # ── the output ───────────────────────────────────────────────────────────
@@ -157,10 +160,11 @@ RENDER_BOARD = 1
 OUTPUT_DIRECTORY = "./out/thumbnails"
 OUTPUT_PATTERNS = ("*.png", "*.jpg")
 OUTPUT_KEEP = 30
-# Not the panel's tmp/thumbnail/template.png: the panel's and this module's
-# renders do not overwrite each other's preview. Removed with the rest of
-# ./tmp when the desktop app exits, and at construction: the headless shell and
-# a crash leave it, and a new session has not drawn anything yet. Served by
+# Not tmp/thumbnail/template.png, which the old Qt panel's synchronous preview
+# wrote (main_generate_thumbnail's isPreview, unused since S4p). Removed with
+# the rest of ./tmp when the desktop app exits, and at construction: the
+# headless shell and a crash leave it, and a new session has not drawn
+# anything yet. Served by
 # GET /api/v1/thumbnail/preview: ./tmp is not one of the web server's static
 # directories, and does not become one.
 PREVIEW_PATH = "./tmp/thumbnail/preview.png"
@@ -365,8 +369,9 @@ def _AsRead(config, data):
     it for what thumbnail.js looks at: what GET says is what gets drawn. The
     template reads a missing or malformed value otherwise (`use_team_names: 0`
     as false, `zoom: 150.0` as 150, a missing flip_p2 as false) and is not
-    changed. SCORE's payload does not go through here: its picture stays what
-    it was (S4p)."""
+    changed. Every render goes through here (RenderPayload): the v1 runs, and
+    since ADR-005 S4p SCORE's button and the legacy route too, whose settings
+    are the React page's now."""
     for key in DEFAULT_TOGGLES:
         config[key] = _ReadToggle(config, key)
     if config.get("background_source") not in BACKGROUND_SOURCES \
@@ -482,12 +487,17 @@ class ThumbnailService:
 
         # The lane: what runs (PREVIEW / GENERATE / None), the revision of the
         # run that has not ended yet (None once its end is on its way), what
-        # was kept for after it and the last revision handed out.
+        # was kept for after it and the last revision handed out. And whether
+        # the kept generate / the running one stands in for a preview asked
+        # for (answered with its revision), which is drawn after all when it
+        # finds no match to save (_Ended).
         self._laneLock = threading.Lock()
         self._running = None
         self._runRevision = None
         self._next = None
         self._revision = 0
+        self._nextHasPreview = False
+        self._runHasPreview = False
 
         # The uploaded background: one import or reset at a time, so the
         # setting and the file on disk belong together.
@@ -513,7 +523,7 @@ class ThumbnailService:
         """The settings with their defaults filled in. Writes nothing:
         `background_source` is what a config from before the selector moves
         to, the path is not told (a name to show is), and `game` has every
-        saved game plus the one in the state. A saved game the panel's reads
+        saved game plus the one in the state. A saved game the old Qt panel's reads
         left behind (`game.None`) is skipped, not removed."""
         config = _WithBackgroundSource(_StoredConfig())
         source = config.get("background_source")
@@ -566,16 +576,6 @@ class ThumbnailService:
         with self._backgroundLock:
             SettingsManager.Unset(CONFIG_SETTING)
             self._RemoveUploadedBackgrounds()
-
-    def MigrateBackgroundSource(self):
-        """Move a config from before the source selector to it, once: a no-op
-        when the selector is there."""
-        with SettingsManager.lock:
-            stored = _StoredConfig()
-            if stored.get("background_source") is not None:
-                return
-            SettingsManager.Set(
-                CONFIG_SETTING, _WithBackgroundSource(copy.deepcopy(stored)))
 
     def Templates(self) -> list:
         return [{"id": templateId,
@@ -673,8 +673,11 @@ class ThumbnailService:
         thumbnail without a complete match raises ThumbnailDataMissing; a
         preview draws a placeholder, from `games` (a GameAssetCatalog; None:
         no characters)."""
-        settings = _StoredConfig()
+        return self._Payload(_StoredConfig(), preview, games, board)
 
+    def _Payload(self, settings, preview, games, board):
+        """BuildPayload's, from `settings`: a copy of the config (never the
+        live one), which the payload's config shares its games with."""
         templateId = ResolveTemplateId(settings)
         with open(f"{TEMPLATE_DIRECTORY}/{templateId}.json", "rt",
                   encoding="utf-8") as file:
@@ -723,6 +726,24 @@ class ThumbnailService:
         config["theme_color"], config["accent_color"] = GetFeatureColors(
             FEATURE_THUMBNAIL)
         return data, config, template
+
+    def RenderPayload(self, preview=False, games=None, board=1):
+        """What a render is given: BuildPayload's payload with the settings as
+        Settings() reads them (_AsRead), a config from before the background
+        selector moved to it (what GET says it is). The v1 runs and the two
+        synchronous ways in (SCORE's button and its X post, the legacy GET
+        /scoreboard<N>-get-thumbnail-*) all draw this, so the page's values
+        are the picture at every entry (ADR-005 S4p; until then the Qt panel
+        saved every default it read, and SCORE drew the raw config). Raises
+        what BuildPayload raises.
+
+        Writes nothing: the move is made on the copy drawn. settings.json gets
+        it from the next change that writes it (Update, the upload), so a
+        render never fails, or blocks on the file, over a setting nobody
+        changed (S4p review)."""
+        settings = _WithBackgroundSource(_StoredConfig())
+        data, config, template = self._Payload(settings, preview, games, board)
+        return data, _AsRead(config, data), template
 
     @staticmethod
     def _HasFirstPlayer(data, board, team):
@@ -890,6 +911,10 @@ class ThumbnailService:
             if kind == GENERATE and GENERATE in (self._running, self._next):
                 return BUSY
             if self._running is not None:
+                # A preview and a generate kept together are the generate.
+                if PREVIEW in (kind, self._next) \
+                        and GENERATE in (kind, self._next):
+                    self._nextHasPreview = True
                 if self._next != GENERATE:
                     self._next = kind
                 return self._revision + 1
@@ -897,6 +922,7 @@ class ThumbnailService:
             self._revision += 1
             revision = self._revision
             self._runRevision = revision
+            self._runHasPreview = False
         self._Start(kind, revision)
         return revision
 
@@ -908,11 +934,10 @@ class ThumbnailService:
             self._Publish(RUNNING, schema.ReadThumbnailRender()["path"], "",
                           revision)
         try:
-            self.MigrateBackgroundSource()
-            data, config, template = self.BuildPayload(
+            payload = self.RenderPayload(
                 preview=kind == PREVIEW, games=GameAssetCatalog.instance,
                 board=RENDER_BOARD)
-            payload = (data, _AsRead(config, data), template)
+            data = payload[0]
         except ThumbnailDataMissing as missing:
             self._Ended(kind, revision, (ERROR, missing.code))
             return
@@ -1057,8 +1082,14 @@ class ThumbnailService:
                 logger.warning(f"Thumbnail: render {revision} ended again")
                 return
             self._runRevision = None
+            hadPreview = self._runHasPreview
+        status, value = result
+        # A generate that stood in for a preview and found no match to save:
+        # the preview is drawn after all (a placeholder), or it would be lost
+        # with the generate's payload (S4p review).
+        previewOwed = hadPreview and status == ERROR \
+            and value in (NO_GAME, NO_PLAYER)
         try:
-            status, value = result
             with StateManager.lock:
                 last = schema.ReadThumbnailRender()
                 if status == DONE:
@@ -1072,11 +1103,19 @@ class ThumbnailService:
             # its "running" overwritten by this result.
             with self._laneLock:
                 following, self._next = self._next, None
+                self._runHasPreview, self._nextHasPreview = \
+                    self._nextHasPreview, False
+                previewOwed = following is None and previewOwed
+                if previewOwed:
+                    following = PREVIEW
                 self._running = following
                 if following is not None:
                     self._revision += 1
                     followingRevision = self._revision
                     self._runRevision = followingRevision
+            if previewOwed:
+                logger.info("Thumbnail: no match to save; drawing the preview "
+                            "the generate stood in for")
             if following is not None:
                 self._QueueRun(following, followingRevision)
 

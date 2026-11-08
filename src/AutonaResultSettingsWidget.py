@@ -29,7 +29,7 @@ class AutonaResultSettingsWidgetSignals(QObject):
 
 class ResultPreviewWidget(QWidget):
     """Preview widget that scales pixmap while keeping aspect ratio.
-    Matches the PreviewWidget in AutonaThumbnailSettingsWidget.
+    (It matched the Qt thumbnail panel's PreviewWidget, gone in ADR-005 S4p.)
     """
 
     def __init__(self):
@@ -406,8 +406,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         # --- Preview ---
         previewContainer = self.settings.findChild(QWidget, "resultPreview")
         previewContainer.layout().setContentsMargins(0, 0, 0, 0)
-        # Frame the preview slot so the empty state stays visible. Mirrors
-        # the thumbnailPreview treatment in AutonaThumbnailSettingsWidget.
+        # Frame the preview slot so the empty state stays visible (as the Qt
+        # thumbnail panel framed its own, before ADR-005 S4p).
         _p = UI.palette()
         previewContainer.setStyleSheet(
             f"QWidget#resultPreview {{"

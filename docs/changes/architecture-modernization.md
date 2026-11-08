@@ -40,7 +40,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Setup | 配信設定: 配信先・タイトル生成・YouTube サムネ | `AutonaStreamSettingsWidget` | `stream.*` / `out/stream/` |
 | Scoreboard | スコアボード入力: board1 1v1 / board2 チーム / board3 クルー。スコア・Bo・phase/pool/match・スワップ・リセット・セット選択・ステーション・反映（held）・X intent | `AutonaScoreboardWidget`(2,306) / `AutonaScoreboardPlayerWidget`(1,185) / `AutonaCrewBattleWidget` / core 各サービス | `score.{n}.*` |
 | Scoreboard | BOARD: デザイン選択・ライブプレビュー・機能別カラー・Designer 起動 | `AutonaBoardWidget` / `AutonaLayoutPreview` / `AutonaDesignerService` | — |
-| Display | サムネイル（動画サムネ 2 テンプレ） | `AutonaThumbnailSettingsWidget` / `thumbnail/ThumbnailRenderer`（オフスクリーン WebEngine） | `out/thumbnails/` |
+| Display | サムネイル（動画サムネ 2 テンプレ） | React `ThumbnailPage`（`/web/thumbnail`。S4p で Qt 版を削除）/ `core/ThumbnailService` / `thumbnail/ThumbnailRenderer`（オフスクリーン WebEngine） | `out/thumbnails/` |
 | Display | リザルト画像（6 レイアウト）・コピー・保存・X | `AutonaResultSettingsWidget`(1,330) / `result/ResultRenderer` | `out/results/` |
 | Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | `AutonaTop8Widget` / `AutonaTop8Model` / `core/Top8Service` | `top8.*` |
 | Display | 実況・解説（12 枠・表示最大 4） | React `CommentaryPage`（`/web/commentary`。S4c で Qt 版を削除）/ `core/CommentaryService` / `core/CommentaryModel` | `commentary.*` |
@@ -5766,12 +5766,12 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
 試合サムネイルの設定・動画タイトル・ペイロード・背景・出力を core に移し、バックグラウンドの描画と v1 を足した。Qt のパネルと SCORE は残し、表示結果は変えていない（v1 が増えただけで単独でリリースできる）。S4p はこの上に React のページを作って Qt 版を消す。
 
 - **完了内容**
-  - core: `src/core/ThumbnailService.py`（Qt 非依存。`bootstrap_core()` が生成）。`Settings()`（読みは書かない）/ `Update()`（全部検証してから 1 回だけ書く）/ `Reset()` / `MigrateBackgroundSource()` / `Describe()` / `VideoTitle()` / `BuildPayload()` / `ImportBackground()` / `Preview()` / `Generate()` / `PreviewImage()`、モジュール関数 `OutputStem` / `ResolveBackgroundPath` / `BuildVideoTitle`
+  - core: `src/core/ThumbnailService.py`（Qt 非依存。`bootstrap_core()` が生成）。`Settings()`（読みは書かない）/ `Update()`（全部検証してから 1 回だけ書く）/ `Reset()` / `MigrateBackgroundSource()`（S4p のレビューで削除。S4p 判断 2）/ `Describe()` / `VideoTitle()` / `BuildPayload()` / `ImportBackground()` / `Preview()` / `Generate()` / `PreviewImage()`、モジュール関数 `OutputStem` / `ResolveBackgroundPath` / `BuildVideoTitle`
   - state: `thumbnail.render = {status, path, error, revision}`（`StateSchema` の `KEY_CATALOG` に追加。`SeedPanelState` が起動時に idle へ戻し、revision は続く。ルートが増えただけなので `STATE_VERSION` と移行は不要）。バナーの定数は `StateSchema.DEFAULT_BANNER_PATH` / `TOURNAMENT_BANNER_PATH` の 1 組に統合した（`StreamService` はこれを読む）
   - 描画: `src/thumbnail/ThumbnailRenderer.py` をチケットで直列にした（下の判断 1）。`renderAsync(data, config, template, done)` を追加し、`render` / `renderSync` は同じ列に載せた
   - シェル: `AutonaScoreboardManager.StartImageRender(kind, payload, done)` と `AutonaWebOperations.startImageRender`（`bootstrap_gui()` が登録。ヘッドレスは未登録で `503`）
   - v1（追加だけ）: `GET /thumbnail`・`GET /thumbnail/preview`（`READ`）、`PATCH /thumbnail`・`POST /thumbnail:reset`（confirm）・`POST /thumbnail/background`・`POST /thumbnail:preview`・`POST /thumbnail:generate`（`WRITE`）
-  - Qt 側: `main_generate_thumbnail.py` は core の薄いラッパーになった（`prepare_data` / `save_result` / `generate`。SCORE と legacy の入口はそのまま）。パネルは動画タイトル・`_migrateBackgroundSource`・既定に戻すを core に差し替えた。`AutonaScoreboardWidget.py` の `import *` は S4p（決定 10 はページと一緒に行う）
+  - Qt 側: `main_generate_thumbnail.py` は core の薄いラッパーになった（`prepare_data` / `save_result` / `generate`。SCORE と legacy の入口はそのまま）。パネルは動画タイトル・`_migrateBackgroundSource`・既定に戻すを core に差し替えた。`AutonaScoreboardWidget.py` の `import *` は S4p（決定 10 はページと一緒に行う。S4p で実施）
 - **外部契約**: v1 のルートが 7 本増え（`external-control-api.md` §5.12・§6.28・§6.29・§7）、state のルート `thumbnail` が `program_state.json` に増え、その出力として `out/thumbnail/render/{status,path,error,revision}.txt` が増えただけ（テキスト出力は state の全キーに付く既存の動作）。`out/thumbnails/` のファイル名・png + jpg・30 世代、`thumbnail.html` の注入の契約（`initThumbnail(payload)` と `RENDER_READY`）、legacy の get-thumbnail ルート（mimetype 含む）、`thumbnail_config` の形はどれも不変
 - **テスト**: `tests/test_thumbnail_service.py`（golden の再生と設定・背景・タイトル・レーン・失敗の経路・ファイル名と世代・シード・`translate` の注入・プレビューだけ速い PNG を頼み、生成は既定のエンコードのまま（判断 23）・エンコードと書き出しの時間の debug ログ）、`tests/test_api_v1_thumbnail.py`（7 本の契約・`400` / `404` / `409` / `413` / `503`・拒否時に書かない・アクセス規則・`tmp/` を配信しない・legacy の mimetype）、`tests/test_thumbnail_render.py`（実物の `QWebEngineView` を offscreen で: プレビュー中の同期描画が自分の絵を取る・ハングとタイムアウトからの復帰・読み込み中のタイムアウトが読み込みを打ち切らない・置き換えられた読み込みの完了を取り違えない・読み込みの失敗から次の要求で復帰する・開始できない描画が 1 回だけ終わる・遅れた `RENDER_READY` を取り違えない・撮る時機（判断 22: `RENDER_READY` だけでは撮らない・番号違いと `RENDER_READY` の前の `RENDER_PAINTED` を取らない・rAF が止まっても上限で撮る・前の描画の上限が次の描画を終わらせない・直前の描画がデコードした画像をデコードし直さない（新しい画像と失敗した画像はデコードする。ログに内訳が出る）・読み込んだばかりのページの最初の絵が読み込み前の絵なら撮り直す・同じページでは比べない・同じ絵のページは上限で撮る。画素ではなく順序を pin する）・文字列の注入（U+2028/2029・孤立サロゲート・`</script>`）・実物の `layout/thumbnail*/thumbnail.html` に注入して最後まで走る（画素は見ない）。ルートから描画・ジョブ・ファイルまでの通し。エンコーダ: 既定は `QPixmap.save()` と同じバイト列、速い PNG は同じ画素の PNG で zlib レベル 1（判断 23））、`tests/fixtures/thumbnail/`（`record_golden.py` は基準 `f2cda760` の `git archive` から録る。`scenarios.py` が世界、`golden.json` が録画: テンプレ 2 種 × 背景 3 種 / 選手あり・なし / チーム名・スポンサー・フェーズの on/off / 反転・ズーム / ゲーム未選択 / プレースホルダ）。ルート台帳は v1 51 of 76
 - **オーナー実機確認**: `python main.py` で (1) SCORE の「サムネイル生成」と X 投稿・Qt パネルのプレビュー / 保存 / コピーが従来どおり (2) v1 の `:preview` → `GET /thumbnail/preview`・`:generate` → `out/thumbnails/` に実際の絵が出る（**offscreen の `grab()` はウィジェットの背景しか写さず、ページの画素はテストで確かめられない**）(3) プレビュー中に SCORE で生成しても正しい試合の画像になる (4) カスタム背景のアップロードが次の描画に出る (5) テンプレートを交互に切り替えた直後の `:preview` が毎回切り替え後の絵になる（判断 22。ログに `did not say it painted` / `still looks like the one before it` の警告が出ないこと、同じテンプレートでのプレビューが遅くなっていないこと。遅いときは `Thumbnail render complete:` の行の内訳を見る） (6) 選手名あり + 既定の背景での `:preview` → `done` が 0.4 秒前後になり、プレビューの絵が以前と同じに見える（判断 23。標準出力の `Thumbnail preview: encoded in ...` の行でエンコードと書き出しの時間を見る）
@@ -5792,7 +5792,7 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   10. **文字列の注入を直した**: `_start_render` は JSON をテンプレートリテラルに入れていて、`` ` `` と `\` しか逃がしていなかった。タグに `${...}` があるとスクリプトとして実行される（テストを書いて発見。ReferenceError で描画が止まった。start.gg の名前も入る経路）。JSON 文字列を JS の文字列リテラルにして渡す形に変えた（ページに渡る値は同じ。ほかの文字列は golden の範囲外で、往復をテストで確かめた）
   11. **legacy との意図した差**: `ForgetSelection` の後（キャラは残るが codename が無い）のプレースホルダは `AttributeError` だったのを空のテンプレートにした（golden の範囲外。テストあり）。テンプレートの JSON は `encoding="utf-8"` で開く（実ファイルは ASCII で同じ）
   12. **プレビューの実体は `./tmp/thumbnail/preview.png`**（パネルの `template.png` とは別で、互いに邪魔しない）。`GET` はバイト列で返し、ファイルを開いたままにしない（Windows の `os.replace` を妨げない）
-  13. `Preview` / `Generate` の開始で `MigrateBackgroundSource()` を呼ぶ（パネルを開かなくても `background_path` だけの古い設定を正しく読む）。保存形式は `background_source` が増えるだけで、パネルが開いたときに書いていたものと同じ
+  13. `Preview` / `Generate` の開始で `MigrateBackgroundSource()` を呼ぶ（パネルを開かなくても `background_path` だけの古い設定を正しく読む）。保存形式は `background_source` が増えるだけで、パネルが開いたときに書いていたものと同じ（**S4p のレビューで変更**: 描画は `settings.json` を書かず、移行は描くコピーにだけ当てる。S4p 判断 2）
   14. **`GET` の値 = 描いた絵**（レビュー指摘）: テンプレートは `gameConfig.align?.horizontal || 50` / `vertical || 40` と読むので、保存値の `0` は既定で描かれる（type_a / type_b とも）。ほかにも `use_team_names: 0` は `false`、`zoom: 150.0` は 150 に読み、`Settings()` は既定に読んでいた。テンプレートは変えないので、`Settings()` の読み（`_ReadToggle` / `_ReadGame`）を v1 の描画にも通す（`_AsRead`。`asset_pack` など読みの対象外のキーと、描かないゲームの値はそのまま）。**`align: 0` の `PATCH` は `400`**（範囲を 1〜100 にした）: 受け入れると `GET` が返す値も絵も送った値と違い、クライアントが「0 に設定した」と思う状態が残る。パネルの spin box は 0 を保存できるが、その値は既定（50 / 40）として読む。golden（`BuildPayload`）と SCORE の絵は変えない。テンプレートの既定と `DEFAULT_GAME_SETTINGS` の一致はテストで pin した
   15. **`PATCH` の codename は今のゲーム一覧にあるものと state のゲームだけ**（レビュー指摘）: `settings.json` の項目はリセットまで残るので、誤った名前を永久に保存させない。一覧を読む前（`ScanGames` の前）やカタログが無いときは **state のゲームだけ受ける**: その間ページに出せるゲームはそれだけ（`GET` の `game`）で、それ以外は保証できないので断る（一覧が読めれば通る）。一覧から消えたゲームの保存値は読めるし消さない（戻ってくることがある）が、書けない。body の上限は 64 KiB
   16. **`thumbnail.render.error` はコードだけ**（レビュー指摘。今までは例外の文言をそのまま流していて、操作者のパスが全クライアントに届いた）: `no_game` / `no_player` / `payload_failed` / `render_failed` / `save_failed` / `cancelled`。詳細はログ。`out/program_state.json` が無い・壊れているときの generate も `no_game` / `no_player`（state から判定）で、`ThumbnailDataMissing` の文言は元の例外のまま（golden と SCORE のメッセージボックスは同じ）
@@ -5823,7 +5823,61 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `thumbnail.render` は SCORE の同期生成と legacy を映さない（それらは今までどおり呼び出し元に返す）
   - 終了中に始まった描画の結果は保存しない（`cancelled`）
   - 未反映の入力が `READ` の `GET` で読める（`include_pending`。`GET /thumbnail/preview` と `out/thumbnails/` の絵も同じ）。v1 の GET は READ という台帳の規則に沿う
-  - v1 の `:reset` の後に SCORE の絵が変わることと、既定値の食い違い（判断 6）。S4p で SCORE にも同じ既定を入れて解消する
+  - v1 の `:reset` の後に SCORE の絵が変わることと、既定値の食い違い（判断 6）。S4p で SCORE にも同じ既定を入れて解消する（S4p 判断 2 で解消）
   - 一時ファイル名が長いタグで失敗しうること、注入する文字列が大きくなること、最初の v1 描画で WebEngine の構築に 1 回止まること
-  - 翻訳の抽出（`QApplication.translate` の直書きが core に無くなった件）は、`lupdate` が無い現状では影響しない。S4p で再確認する
+  - 翻訳の抽出（`QApplication.translate` の直書きが core に無くなった件）は、`lupdate` が無い現状では影響しない。S4p で再確認する（S4p 判断 9）
   - パネルのファイル選択で別の背景に変えた後も、取り込んだファイルが残る。S4p でパネルが消えるので直さない
+
+#### S4p サムネイルの React 化と Qt 版の削除（2026-11-08）
+
+サイドバー Display の「サムネイル」を React の `/web/thumbnail`（`web/src/ThumbnailPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaThumbnailSettingsWidget.py` と `src/layout/AutonaThumbnailSettings.ui`）は削除した。SCORE の「サムネイル生成」と X 投稿・legacy の get-thumbnail は Qt の同期経路のまま残し、描く設定をページと揃えた。サイドバーの並びと `STATE_VERSION`（22）は変えていない。
+
+- **完了内容**
+  - ページ: 左の列に「デザイン」（テンプレート・背景の 3 択・アップロード）、「表示する項目」（フェーズ・チーム名・所属タグ）、「キャラクター画像の配置」（今のゲームの反転 2 つ・ズーム・横位置・縦位置）、「サムネイルの色」（既存の `FeatureColorCard`）、既定に戻す。右の列に「プレビュー」（実描画の PNG・作成・コピー / 開く）と「動画タイトル」。文言は i18n（`thumbnail_*` を en / ja に追加）
+  - プレビュー: 変更の 300 ms 後（`PREVIEW_DEBOUNCE_MS`）に `POST :preview` → 答えの `renderRevision` で `thumbnail.render` がその run を終えるのを待ち、`GET /thumbnail/preview?v=<revision>` を出す。きっかけは表示時・設定の書き込み（PATCH / アップロード / リセット）の答え・ボード 1 の試合のうち絵と動画タイトルが読むもの（判断 12）・サムネイルの色。**ページが表示されている間だけ**（`document.visibilityState`。共有ビューの前に Qt のパネルが出ている間・ブラウザの裏のタブでは頼まない）。**表示に戻るたびに、変化の有無にかかわらず describe と preview を 1 回ずつ**（判断 10。初回の表示と重なれば 1 回）。preview の POST は設定の書き込みと同じ直列の列に載せ、書いた後の設定で描かせる。`503` は describe し直してその `canRender` に従う（判断 15）。`GET` の `canRender: false`（ヘッドレス）はページに「描画できない」と出してプレビューと作成を止める
+  - 作成: `POST :generate`。`409 BUSY` は「作成中」の案内（失敗扱いしない）、`503` は上と同じ。完了はスナックバーと `role="status"` の行に保存先のパス（失敗はエラーコードの文言）。POST の答えを待つ間と背景のアップロード中は押せない（判断 14）
+  - 画像のコピー: `canCopyImage` があるときだけ「画像をコピー」。対象は**作成した画像**（`thumbnail.render.path`。パスの各段を encode して `out/` の静的配信から取る）。作る前は押せない。LAN の http では「画像を開く / 保存」のリンク。デスクトップのビューでコピーできないときは理由を出してボタンを無効にする（Stream の前例）
+  - 動画タイトル: `GET` の `videoTitle` を出してコピーできる。編集は保存しない。新しい自動の値は、欄が前回の自動の値のままか空のときだけ上書きする（Qt 版と同じ）。空のまま欄を離れると自動の値に戻す
+  - 既定に戻す: 確認ダイアログの後に `POST :reset {confirm: true}`
+  - シェル: `WEB_PANELS` に `thumbnail`、`Window._CreateThumbnailPanel` は `self._WebPanel("thumbnail")` を返すだけ。`thumbnailSetting` 属性と `SetBattleFormat` の分岐を削除
+  - SCORE の切り離し（決定 10）: `AutonaScoreboardWidget.py` の `from .AutonaThumbnailSettingsWidget import *` をやめ、使っていた名前（`thumbnail` = `main_generate_thumbnail`、`AutonaGameAssetManager`、`logger`）を明示の import にした
+  - 削除: Qt 版と `.ui`、専用の訳 28 件（`.ts` を手動編集して `scripts/compile_translations.ps1` で `.qm` を再生成。en / ja とも 455 件・未完了 0）。共有の訳 7 件は Qt 版の参照元だけを外した。テンプレート名「Standard」「Center Panel」は core（`ThumbnailService.TEMPLATE_NAMES`。注入の `translate` が "app" で引く）が使うので、参照元を `..\core\ThumbnailService.py` にした
+  - レンダラー: パネル専用の入口 `ThumbnailRenderer.render()` と `renderComplete` シグナル・`_latest`・`announce` を削除した（下の判断 1）
+- **レビュー対象の判断**
+  1. **`ThumbnailRenderer.render()` を消した**: 呼び手はパネルだけで、残すと「最後の 1 件にまとめる」ロジックと文書が死んだまま残る。残る入口は `renderAsync`（core の v1）と `renderSync`（SCORE・legacy）の 2 つ。シェル操作 `renderThumbnail` と `AutonaScoreboardManager.RenderThumbnail` は legacy の get-thumbnail が使うので残した
+  2. **SCORE と legacy の同期経路も、読み済みの設定で描く**（S4o 判断 6 の解消）: `ThumbnailService.RenderPayload()`（`background_source` の移行 → `BuildPayload` と同じ組み立て → `_AsRead`）を足し、v1 の `_Start` と `main_generate_thumbnail.prepare_data` の両方がこれを呼ぶ。どの入口でもページに出る値 = 描いた絵になる。**golden（`BuildPayload` の生の出力）は変えずに残し**、同期経路が読み済みの値を使うことは別のテストで pin した（`test_scores_sync_way_draws_what_get_says_too` ほか）。理由: golden は移す前の実装との一致の証拠で、既定の適用は「描き方」ではなく「設定の読み」の変更だから、層を分けて pin する方が何が変わったかを示せる
+     - **描画は `settings.json` を書かない**（レビュー #3）: Qt 版が構築時に保存していた `background_source` の移行は、描くコピーにだけ当てる（`_WithBackgroundSource(_StoredConfig())` を内部の `_Payload` に渡す。`BuildPayload` は `_StoredConfig()` をそのまま渡すので golden は同じ）。保存への移行は書き込みの入口（`Update` = `PATCH` とページの操作、アップロード）が今までどおり行う。初版は描画のたびに `MigrateBackgroundSource()`（書き込み）を呼んでいて、`settings.json` に書けないと SCORE / legacy / v1 の描画が止まり、描画の経路にファイルの書き込みとロックが入っていた。`MigrateBackgroundSource()` は呼び手が無くなったので削除。`SaveSettings` が失敗しても SCORE の同期経路と v1 の run が描くことを pin した
+     - 絵が変わる環境: パネルを一度も開かず `use_team_names` / `flip_p2` が保存されていない（今まで SCORE は `false`、これからは既定の `true`）、`align` が 0 などテンプレートが既定に読む値（絵は同じ）、壊れた値。パネルを開いたことのある環境は、開いたときに既定が書かれているので変わらない。**判断 2 の意図どおりなので直さず、次のリリースノートで案内する**（レビュー #4）
+  3. **`main_generate_thumbnail` の `isPreview` 引数は残す**: S4p の後は使われないが、SCORE / legacy の入口の形で、`tests/live` と golden の録画スクリプトも呼ぶ。Board パネルの移行で入口ごと見直す
+  4. **チーム名のチェックは常に出す**（Qt 版は 1v1 で隠していた）: ページはバトル形式を追わない。v1 の描画はボード 1 固定（S4o の設計どおり）なので、プレビューには効かない。「チーム戦・クルー戦で、チーム名が入っているときに使われます」の注記を付けた
+  5. **「自分で選んだ画像」を、画像が無いまま選ぶとファイル選択が開く**（何も送らない）。アップロードが `custom` を選ぶ（S4o 判断 8）ので、画像の無い `custom` を保存しない。画像があれば普通に切り替える
+  6. **「プレビューを画像として保存」は「サムネイルを作成」に統合した**: Qt 版の保存は SCORE の X 投稿と同じ `thumbnail.generate`（`out/thumbnails/`）で、作成と同じ結果だった。コピーの対象も作成した画像にした（決定 9。コピーの時点で描くとユーザー操作が切れる）
+  7. **数値の欄**: **Enter か欄を離れたときに確定して送る**（レビュー #6。初版は `useStateField` の打鍵ごとの debounce で、「150」と打つ途中の「15」も保存とプレビューになった）。そのとき空なら黙って元に戻し、範囲外（ズーム 1〜1000、位置 1〜100。v1 の範囲）はスナックバーで断って送らず、保存値に戻す。入力中は範囲外を赤で示すだけ。フォーカス中は保存値で上書きしない。IME の変換中の Enter は確定に使わない。欄の下に範囲を出す
+  8. **「スムーズ」は出さない**（論点 1・オーナー承認）。`smooth_scale` の保存値は消さず、`PATCH` も今までどおり受ける
+  9. **翻訳の抽出**（S4o の持ち越し）: `lupdate` が無いので `.ts` は手動。core の `translate("app", ...)` で引くテンプレート名だけが core の参照元になる。エラー・完了の文言はページの i18n で、Qt の訳は使わない
+  10. **表示に戻るたびに描く**（実機確認で発見した不具合とレビュー #2。2026-11-09）: 症状は「ページを表示 → Qt のスコアボード入力に切り替え → v1 `PATCH /scoreboards/1/teams/2/players/1` → 戻る」で、動画タイトルは更新されるのに `POST :preview` が出ず、プレビューが古いまま。**原因**: 初版は隠れている間の Redux（公開済みの state）の変化を `stale` で覚え、表示に戻ったときにそれがあれば描いていた。デスクトップはボード 1 を hold していて、v1 / SCORE の編集は「反映」まで未反映（pending）なので Socket.IO にも Redux にも届かない。一方 core の `BuildPayload` と動画タイトルは `include_pending` で未反映の編集を読む。そのため表示時に必ず走る describe でタイトルだけが変わり、プレビューは「変化なし」と判断されていた。加えて、隠れる → 表示が 1 回の React の更新にまとめられると（凍結中のページが解凍時に両方を流す）表示の遷移自体を見落としていた。jsdom で順序を変えて再現した（隠れる → state 変更 → 表示 / 表示 → state 変更 / 公開されない編集 / 1 回の更新での隠れる + 表示）。**修正**: 公開済みの state では判断できないので、Qt 版の `showEvent` と同じく表示に戻るたびに describe と preview を 1 回ずつ頼む。遷移は `visibilitychange` のリスナーで数える（React の描画を介さない）。読み込み前の表示は初回の描画に、debounce 中の表示はその preview にまとまる
+  11. **generate が預かった preview を失わない**（レビュー #1）: 予約の generate は予約の preview を兼ね、preview の依頼には generate の revision を返す（S4o 判断 3）。その generate が試合なし（`ThumbnailDataMissing` → `no_game` / `no_player`）で payload の段で終わると、preview も描かれずに消えていた（preview ならプレースホルダを描く）。core のレーンで「この run は preview の依頼を兼ねている」（`_nextHasPreview` → `_runHasPreview`）を持ち、兼ねた generate が `no_game` / `no_player` で終わったら、次の run として preview を 1 回走らせる（次の revision。ページは generate のエラーの後に preview の run を見て画像を更新する）。描画・保存の失敗では描き直さない（preview も同じ絵で失敗する）。ページ側で preview を出し直す案は採らなかった: 兼ねたことを知っているのは core だけで、他のクライアント（v1 の利用者）も同じ目に遭う
+  12. **プレビューのきっかけは絵と動画タイトルが読むものだけ**（レビュー #7）: 初版の signature はボード 1 の team 全体（スコア・選手の国なども含む）と best_of・`display_options` 全体・`tournamentInfo` 全体を含み、スコアの操作のたびに描き直していた。`thumbnail.js`（type_a / type_b）が payload の `data` から読むもの（`game.codename`、`score.1` の phase / pool / match、各チームの teamName と選手の name / team / character、`tournamentInfo` の tournamentName / name / startAt、`display_options.show_sponsor`）、背景のバナーのファイル（`tournamentInfo.bannerVersion`）、`BuildVideoTitle` が読むもの（`tournamentInfo.name`、`score.1.match_en`、ゲームの abbreviation / smashgg_id、各チームの選手 1 の mergedName（`[L]` を除く）/ gamerTag / character / mains）だけにした。根拠のキーはコードのコメントに書いた
+  13. **ゲームが変わったときの describe は新しいゲームの設定を取り込む**（レビュー #5）: describe の答えは、読み始めてから設定の書き込みが始まっていれば設定を捨てる（書き込みの答えを古い値で戻さない）。ゲームが変わった describe でそれをすると、新しいゲームの `settings.game[codename]` が無いまま既定値の欄を出していた。新しいゲームの項目はページがまだ書いていない（カードは前のゲームを出していた）ので、設定全体を捨てるときもそれだけは取り込む
+  14. **「作成」の二重送信と古い背景を防ぐ**（レビュー #8）: generate の POST の答えを待つ間（`generating` はまだ無い）と背景のアップロード中は押せない。同じフレームの 2 回目のクリックも ref で落とす
+  15. **`503` で `canRender` を自分で false にしない**（レビュー #9）: デスクトップでも終了中は `503` になりうる。describe し直して、その `canRender` に従う（ヘッドレスなら false で「描画できない」）
+- **テスト**
+  - `web/src/ThumbnailPage/ThumbnailPage.test.js`（36 件）: 300 ms の debounce とまとめ・revision を待って画像の src を変える・プレビューの失敗・試合と色の変化で描き直す（統計のキー・スコア・国・他の表示オプション・URL では描かず、`show_sponsor`・`match_en`・`bannerVersion`・キャラでは描く）・隠れている間は描かず、表示に戻るたびに describe と preview（公開されない編集・順序 2 通り・1 回の更新での隠れる + 表示・読み込み中 / debounce 中の表示は 1 回）・アンマウント後に何も頼まない・ヘッドレス（`canRender: false`）と `503`（describe し直す / 描けるシェルでは何も止めない）・作成の完了 / 失敗 / 終わりを飛び越えた場合 2 通り / `409` / 答え待ちとアップロード中は押せない・コピー（secure・パスの encode・http のリンク・デスクトップで無効）・リセットの確認・数値は Enter / 離れたときに送る・範囲外はそのとき断る・空は送らない・ゲームが変わった describe と書き込みの競合・アップロードのファイル名・画像の無い「自分で選んだ画像」・動画タイトルの規則
+  - `web/e2e/thumbnail.spec.ts`（4 件。ヘッドレスに対して）: 6 つの領域とタイトル・ヘッドレスの案内と作成の無効・`:preview` を頼まない、ページの選択が API の設定になり再読込で残る、アップロードで `custom` とファイル名、リセットは確認の後だけ
+  - `tests/test_thumbnail_service.py`: legacy の `prepare_data` = `RenderPayload`、`BuildPayload` は生のまま、SCORE の同期経路が `GET` と同じ値で描く（保存値 4 通り。何も保存していなければ既定）、古い背景は移行して描くが保存しない（6 通り）・書き込みで移行が保存される・`SaveSettings` が失敗しても SCORE の同期経路と v1 の run が描く、preview を兼ねた generate が試合なしで終わると preview を描く（順序 2 通り）・兼ねていなければ描かない・描画の失敗では描き直さない
+  - `tests/test_thumbnail_render.py`: パネルの入口（`render` / `renderComplete`）が無い。パネル専用の 3 件を削除
+  - `tests/test_web_panel_host.py`: サムネイルの項目が React のページを開く・Qt 版と専用の訳が `src/` に無い（Result が使う「Copy Preview to Clipboard」等と core の訳は残る）
+  - `tests/test_signal_lifetime.py`: Qt 版の `onLoad` 接続の許可を削除
+- **docs**: `.claude/design/Design.md`（パネル表・テンプレート追加の手順）、`.claude/known-smells.md`（S-06・S-07）、`.claude/manual-test-checklist.md`（サムネイル節）、`.claude/design/external-control-api.md`（ページが消費者・同期経路の読み）、`docs/product/features.md`、`docs/changes/test-automation-strategy.md`、この台帳の冒頭の表
+- **オーナー実機確認**（`python main.py`）: 手動チェックリストの「サムネイル」の全項目。特に次の点
+  - サイドバーのサムネイルで React のページが出て、プレビューが描かれる。チェック・テンプレート・背景を変えると 0.3 秒ほど後に描き直される。ズーム・位置は Enter か欄を離れたときに保存・描き直し（打っている途中では描かない）
+  - Qt のパネル（SCORE など）に切り替えている間はプレビューを描かず（`Thumbnail render complete:` のログが出ない）、戻ると描き直す。**隠れている間に v1 でボード 1 の選手名を変えて（反映前）戻ると、タイトルとプレビューの両方に出る**（判断 10）。何も変えずに戻っても 1 回描く
+  - スコアだけを変えてもプレビューは描き直さない（判断 12）
+  - 背景のアップロードが次のプレビューに出る。作成でスナックバーと保存先のパスが出て、`out/thumbnails/` に PNG / JPG ができる。デスクトップのビューで「画像をコピー」が使え、貼り付けた絵が作成した画像
+  - 既定に戻すは確認の後だけ
+  - **SCORE の「サムネイル生成」と X 投稿・legacy の `-png` / `-jpg` がページの設定どおりに描く**（判断 2。パネルを一度も開いていない設定では、チーム名と P2 の反転が既定の on で描かれる）
+  - チーム戦の SCORE でチーム名のチェックの on / off が SCORE の生成に効く
+- **メインセッションの実機確認（2026-11-08〜09・隔離データの `python main.py`）**
+  - 確認済み: React のページとプレビュー・「スムーズ」が無い・テンプレート切り替え・連続 4 回の変更がプレビュー 1 回にまとまる・作成でスナックバーとパス・既定に戻す（キャンセルで不変、確定で既定）・SCORE 表示中の描画 0 回・隠れている間の v1 の選手名変更が戻るとタイトルとプレビューの両方に出る（最初の実機確認で見つけて判断 10 で修正。修正後に再確認）・ズームは打鍵中に書き込みも描画もせず Enter で 1 回、1001 は断って値を戻す
+  - legacy の `-png` とページのプレビューの差は画素値で最大 1（判断 10〜15 の修正前の版で比較。修正後の同期経路はテストで pin）
+  - 未確認: 実機のファイル選択からの背景アップロード（e2e の `setInputFiles` と S4o の v1 で確認）・「画像をコピー」の貼り付け（ボタンが有効になるところまで。ユーザーのクリップボードを上書きするため）・SCORE の「Xに投稿する」（ユーザーのブラウザで x.com が開くため）・チーム戦のチーム名の on / off・スコアだけの変更で描き直さない（jest で pin）

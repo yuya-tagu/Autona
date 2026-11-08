@@ -661,24 +661,36 @@ def test_reset_goes_back_to_the_defaults_for_every_game(env):
     ({"background_source": "default", "background_path": "C:/x.png"},
      {"background_source": "default", "background_path": "C:/x.png"}),
 ])
-def test_the_migration_is_what_the_panel_did(env, legacy, moved):
-    SettingsManager.settings = {"thumbnail_config": legacy}
-
-    env.service.MigrateBackgroundSource()
-
-    assert env.config() == moved
-
-
-def test_the_migration_runs_once(env, monkeypatch):
-    SettingsManager.settings = {"thumbnail_config": {
-        "background_source": "banner"}}
+def test_an_old_config_is_drawn_moved_and_left_as_saved(
+        match, legacy, moved, monkeypatch):
+    # The move the Qt panel made when it was built (and saved), made on the
+    # copy drawn only (S4p review): a write saves it (the next test).
+    SettingsManager.settings = {"thumbnail_config": copy.deepcopy(legacy)}
     writes = []
     monkeypatch.setattr(SettingsManager, "SaveSettings",
                         lambda: writes.append(1))
 
-    env.service.MigrateBackgroundSource()
+    _data, config, _template = match.service.RenderPayload()
 
+    assert config["background_source"] == moved["background_source"]
+    assert config["background_path"] \
+        == thumbnails.ResolveBackgroundPath(moved)
+    assert match.config() == legacy
     assert writes == []
+
+
+@pytest.mark.parametrize("legacy, moved", [
+    ({"background_path": "./user_data/tournament_banner.png"},
+     {"background_path": "", "background_source": "banner"}),
+    ({"background_path": "C:/x.png"},
+     {"background_path": "C:/x.png", "background_source": "custom"}),
+])
+def test_a_write_saves_the_move_of_an_old_config(env, legacy, moved):
+    SettingsManager.settings = {"thumbnail_config": copy.deepcopy(legacy)}
+
+    env.service.Update({"display_phase": False})
+
+    assert env.config() == {**moved, "display_phase": False}
 
 
 # ── the custom background ────────────────────────────────────────────────
@@ -975,7 +987,7 @@ def test_the_legacy_entry_point_goes_through_the_service(env):
     SM.state = copy.deepcopy(PLAYERS)
 
     assert legacy.prepare_data(settings, scoreboardNumber=2) \
-        == env.service.BuildPayload(board=2)
+        == env.service.RenderPayload(board=2)
     with pytest.raises(thumbnails.ThumbnailDataMissing):
         SM.state = {}
         (env.dir / "out" / "program_state.json").write_text("{}")
@@ -1156,6 +1168,82 @@ def test_a_kept_generate_stands_in_for_a_kept_preview(match, executor):
     assert match.render()["path"].startswith("out/thumbnails/")
 
 
+def _no_players(env, monkeypatch):
+    """A game and no players, in the state and the exported file: a
+    generate has no match to save, a preview draws a placeholder."""
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    monkeypatch.setattr(GameAssetCatalog, "instance", _Catalog(world.GAMES))
+    program = {"game": {"codename": "tgame"}}
+    SM.state = copy.deepcopy(program)
+    (env.dir / "out" / "program_state.json").write_text(json.dumps(program))
+
+
+@pytest.mark.parametrize("kept", [("generate", "preview"),
+                                  ("preview", "generate")])
+def test_a_generate_with_no_match_still_draws_the_preview_it_stood_in_for(
+        env, executor, monkeypatch, kept):
+    # S4p review: the preview asked for was answered with the generate's
+    # revision; it is not lost with the generate's missing match.
+    _no_players(env, monkeypatch)
+    assert env.service.Preview() == 1
+    for kind in kept:
+        assert getattr(env.service, kind.capitalize())() == 2
+
+    env.renderer.answer()
+    executor.drain(WAIT)
+    env.queued.pop(0)()  # the generate: no match, nothing drawn
+
+    assert env.renderer.asked == []
+    assert len(env.queued) == 1
+    assert env.render() == {"status": "error", "path": "",
+                            "error": thumbnails.NO_PLAYER, "revision": 2}
+
+    env.queued.pop(0)()  # the preview
+
+    assert env.render() == {"status": "running", "path": "", "error": "",
+                            "revision": 3}
+    data, _config, _template = env.renderer.asked[0].payload
+    assert data["score"]["1"]["match"] == "Winners Final"  # a placeholder
+    env.renderer.answer(b"placeholder")
+    executor.drain(WAIT)
+    assert env.render()["status"] == "done"
+    assert env.service.PreviewImage() == b"placeholder.PNG"
+    assert env.queued == []
+
+
+def test_a_generate_that_stood_in_for_no_preview_is_not_followed_by_one(
+        env, executor, monkeypatch):
+    _no_players(env, monkeypatch)
+    assert env.service.Preview() == 1
+    assert env.service.Generate() == 2
+
+    env.renderer.answer()
+    executor.drain(WAIT)
+    env.queued.pop(0)()
+
+    assert env.render()["error"] == thumbnails.NO_PLAYER
+    assert env.queued == [] and env.renderer.asked == []
+    assert env.service._running is None
+
+
+def test_a_generate_that_stood_in_for_a_preview_and_failed_to_draw_is_not_redrawn(
+        match, executor):
+    # The preview would draw the same picture: only a missing match, which a
+    # preview draws as a placeholder, is drawn again.
+    assert match.service.Preview() == 1
+    assert match.service.Generate() == 2
+    assert match.service.Preview() == 2
+    match.renderer.answer()
+    executor.drain(WAIT)
+    assert match.run_queued() == 1
+
+    match.renderer.fail()
+
+    assert match.render()["error"] == thumbnails.RENDER_FAILED
+    assert match.queued == []
+    assert match.service._running is None
+
+
 def test_what_is_drawn_has_what_the_settings_say_of_a_missing_value(
         match, executor):
     # thumbnail.js reads these two as false when they are not saved; GET says
@@ -1168,8 +1256,8 @@ def test_what_is_drawn_has_what_the_settings_say_of_a_missing_value(
     assert config["game"]["tgame"]["zoom"] == 100
     assert config["game"]["tgame"]["align"] == {"horizontal": 50,
                                                 "vertical": 40}
-    # Nothing of it was saved but what a config moves to the selector.
-    assert set(match.config()) == {"background_source"}
+    # Nothing of it was saved (a render writes no setting).
+    assert match.config() is None
 
 
 def test_what_is_saved_is_what_is_drawn(match, executor):
@@ -1254,8 +1342,9 @@ def test_what_is_saved_is_not_changed_by_what_is_drawn(match, executor):
     assert match.config() == saved
 
 
-def test_scores_payload_is_not_read_for_it(match):
-    # Only a render of this module's: SCORE's picture stays what it was (S4p).
+def test_the_payload_itself_stays_raw(match):
+    # BuildPayload is what the golden pins (the old code's output); the read
+    # is RenderPayload's, on top of it.
     SettingsManager.settings = {"thumbnail_config": {
         "use_team_names": 0,
         "game": {"tgame": {"zoom": 150.0, "align": {"horizontal": 0}}}}}
@@ -1265,6 +1354,91 @@ def test_scores_payload_is_not_read_for_it(match):
     assert config["use_team_names"] == 0
     assert config["game"]["tgame"] == {"zoom": 150.0,
                                        "align": {"horizontal": 0}}
+
+
+@pytest.mark.parametrize("saved", [
+    {},
+    {"use_team_names": 0, "display_phase": 0, "use_sponsors": "no"},
+    {"use_team_names": False, "template_id": "type_b",
+     "game": {"tgame": {"flip_p2": False, "zoom": 150}}},
+    {"game": {"tgame": {"zoom": 150.0, "flip_p1": 1,
+                        "align": {"horizontal": 0, "vertical": 900}}}},
+])
+def test_scores_sync_way_draws_what_get_says_too(match, saved):
+    """ADR-005 S4p (S4o judgment 6, carried over): SCORE's button, its X post
+    and the legacy route render synchronously through main_generate_thumbnail
+    and are given the settings as read, as the v1 runs are, so the value on
+    the page is the picture at every entry. With nothing saved that is the
+    page's defaults (team names on, P2 flipped, 100 %, 50 / 40), not what
+    thumbnail.js makes of a missing value; a saved value is drawn as saved."""
+    from src.thumbnail import main_generate_thumbnail as legacy
+
+    SettingsManager.settings = {"thumbnail_config": copy.deepcopy(saved)}
+    settings = match.service.Settings()
+
+    _data, config, template = legacy.prepare_data(SettingsManager)
+
+    assert template["template_id"] == settings["template_id"]
+    for key in thumbnails.DEFAULT_TOGGLES:
+        assert config[key] is settings[key], key
+    drawn = config["game"]["tgame"]
+    for key, value in settings["game"]["tgame"].items():
+        assert drawn[key] == value and type(drawn[key]) is type(value), key
+    if not saved:
+        assert config["use_team_names"] is True
+        assert drawn["flip_p2"] is True
+        assert (drawn["zoom"], drawn["align"]) \
+            == (100, {"horizontal": 50, "vertical": 40})
+
+
+def test_scores_sync_way_moves_an_old_background_to_the_selector(match):
+    # What GET says of a config from before the selector is what SCORE draws:
+    # the move the Qt panel made when it was built is the render's now, on
+    # what it draws (settings.json is not written).
+    SettingsManager.settings = {"thumbnail_config": {
+        "background_path": "C:/x.png"}}
+    from src.thumbnail import main_generate_thumbnail as legacy
+
+    _data, config, _template = legacy.prepare_data(SettingsManager)
+
+    assert match.service.Settings()["background_source"] == "custom"
+    assert config["background_source"] == "custom"
+    assert config["background_path"] == "C:/x.png"
+    assert match.config() == {"background_path": "C:/x.png"}
+
+
+def _unsaveable(monkeypatch):
+    def refuse():
+        raise OSError("settings.json is locked")
+    monkeypatch.setattr(SettingsManager, "SaveSettings", refuse)
+
+
+def test_scores_sync_way_draws_though_the_settings_cannot_be_saved(
+        match, monkeypatch):
+    # SCORE's button, its X post and the legacy route (S4p review): a render
+    # writes no setting, so a settings.json that cannot be written does not
+    # stop one -- an old config included, which the render once saved.
+    from src.thumbnail import main_generate_thumbnail as legacy
+    SettingsManager.settings = {"thumbnail_config": {
+        "background_path": "C:/x.png"}}
+    _unsaveable(monkeypatch)
+
+    _data, config, template = legacy.prepare_data(SettingsManager)
+
+    assert config["background_path"] == "C:/x.png"
+    assert template["template_id"] == "type_a"
+
+
+def test_a_run_draws_though_the_settings_cannot_be_saved(
+        match, executor, monkeypatch):
+    SettingsManager.settings = {"thumbnail_config": {
+        "background_path": "C:/x.png"}}
+    _unsaveable(monkeypatch)
+
+    assert match.service.Preview() == 1
+
+    assert match.render()["status"] == "running"
+    assert match.renderer.asked[0].payload[1]["background_path"] == "C:/x.png"
 
 
 def test_a_preview_without_a_match_draws_a_placeholder(env, executor,
