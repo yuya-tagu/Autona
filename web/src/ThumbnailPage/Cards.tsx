@@ -138,7 +138,7 @@ export function generatedUrl(render: ThumbnailRender): string {
     return `${BASE_URL}/${path}?v=${render.revision}`;
 }
 
-function CardFrame({title, children}: {
+export function CardFrame({title, children}: {
     title: string;
     children: React.ReactNode;
 }) {
@@ -156,7 +156,7 @@ function CardFrame({title, children}: {
     );
 }
 
-function Note({children}: {children: React.ReactNode}) {
+export function Note({children}: {children: React.ReactNode}) {
     return (
         <Typography variant="body2" color="text.secondary">
             {children}
@@ -331,12 +331,19 @@ export function parseRange(text: string, min: number, max: number): number | nul
 // a number on its way ("15" of "150"; S4p review). Out of the range it is
 // refused then, aloud, and the field shows the saved value again; emptied,
 // it just shows it again. While the field has focus, the saved value does
-// not overwrite what is typed.
-function RangeField({label, value, range, send}: {
+// not overwrite what is typed. A percentage with its range under it, unless
+// told otherwise (the Result page's ranks). With a `step`, the arrow keys go up
+// and down by it, as a spin box's do, and it is sent as typing is.
+export function RangeField({label, value, range, send, percent = true,
+                            width = 150, step, readOnly}: {
     label: string;
     value: number;
     range: [number, number];
     send: (value: number) => Promise<unknown>;
+    percent?: boolean;
+    width?: number;
+    step?: number;
+    readOnly?: boolean;
 }) {
     const [min, max] = range;
     const [text, setText] = React.useState(String(value));
@@ -388,11 +395,13 @@ function RangeField({label, value, range, send}: {
             size="small"
             label={label}
             error={invalid}
-            helperText={i18n.t("thumbnail_range", {min, max})}
+            helperText={percent ? i18n.t("thumbnail_range", {min, max})
+                : undefined}
             slotProps={{
-                htmlInput: {inputMode: "numeric"},
-                input: {endAdornment:
-                    <InputAdornment position="end">%</InputAdornment>},
+                htmlInput: {inputMode: "numeric", readOnly},
+                input: percent ? {endAdornment:
+                    <InputAdornment position="end">%</InputAdornment>}
+                    : undefined,
             }}
             value={text}
             onChange={(event) => {
@@ -414,9 +423,17 @@ function RangeField({label, value, range, send}: {
                 // Not while an IME composes: its Enter confirms the text.
                 if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                     confirm();
+                } else if (step && !readOnly
+                           && (event.key === "ArrowUp"
+                               || event.key === "ArrowDown")) {
+                    event.preventDefault();
+                    const from = parseRange(text, min, max) ?? saved.current;
+                    const change = event.key === "ArrowUp" ? step : -step;
+                    setText(String(Math.min(max, Math.max(min, from + change))));
+                    edited.current = true;
                 }
             }}
-            sx={{width: 150}}
+            sx={{width, flexShrink: 0}}
         />
     );
 }
@@ -616,8 +633,8 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
                 {/* The generated thumbnail (out/thumbnails), not the preview.
                     An image reaches the clipboard from a secure context only
                     (this PC); a page from another computer over http offers
-                    it to open or save instead. The desktop's view opens no
-                    new window, so a link would do nothing there (S4e). */}
+                    it to open or save instead (a new window of the desktop's
+                    view opens in the default browser: AutonaWebPanelHost). */}
                 {canCopyImage() ? (
                     <Button variant="outlined" disabled={!made || generating}
                             onClick={copy}>

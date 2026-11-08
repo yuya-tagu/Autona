@@ -237,6 +237,20 @@ def test_a_player_is_written_with_the_values_core_builds(desktop, client):
                                        {"en_name": "Link", "skin": 0}]
 
 
+def test_a_player_can_name_the_places_it_changes(desktop, client):
+    _ok(client.patch("/api/v1/result/players/1", json={
+        "characters": [{"en_name": "Mario"}, None, {"en_name": "Link"}]}))
+
+    _ok(client.patch("/api/v1/result/players/1", json={
+        "characters": {"2": {"en_name": "Link", "skin": 1, "game": "tgame"}}}))
+    _ok(client.patch("/api/v1/result/players/1", json={
+        "characters": {"3": None}}))
+
+    assert _ok(client.get("/api/v1/result"))["data"]["players"][0][
+        "characters"] == [{"en_name": "Mario", "skin": 0},
+                          {"en_name": "Link", "skin": 1}, None]
+
+
 def test_the_last_slot_can_be_written(desktop, client):
     _ok(client.patch("/api/v1/result/players/16", json={"name": "Alpha"}))
 
@@ -260,6 +274,12 @@ def test_the_last_slot_can_be_written(desktop, client):
     (1, {"rank": True}),
     (1, {"rank": 1.5}),
     (1, {"characters": {"en_name": "Mario"}}),
+    (1, {"characters": {}}),
+    (1, {"characters": {"0": None}}),
+    (1, {"characters": {"4": None}}),
+    (1, {"characters": {"1": "Mario"}}),
+    (1, {"characters": {"1": {"en_name": "Nobody"}}}),
+    (1, {"characters": {"1": {"en_name": "Mario", "skin": 99}}}),
     (1, {"characters": [None, None, None, None]}),
     (1, {"characters": ["Mario"]}),
     (1, {"characters": [{"skin": 0}]}),
@@ -327,6 +347,21 @@ def test_a_team_is_written(desktop, client):
         {"name": "", "twitter": "", "character": {}}]
 
 
+def test_a_team_can_name_the_keys_of_the_places_it_changes(desktop, client):
+    _ok(client.patch("/api/v1/result/teams/1", json={"members": [
+        {"name": "A1", "character": {"en_name": "Link"}}, {"name": "B1"}]}))
+
+    _ok(client.patch("/api/v1/result/teams/1", json={"members": {
+        "1": {"twitter": "@a1"},
+        "3": {"character": {"en_name": "Mario", "game": "tgame"}}}}))
+
+    members = SM.Get("result_teams.1.members")
+    assert [member["name"] for member in members] == ["A1", "B1", ""]
+    assert members[0]["twitter"] == "@a1"
+    assert members[0]["character"]["en_name"] == "Link"
+    assert members[2]["character"]["en_name"] == "Mario"
+
+
 @pytest.mark.parametrize("slot, body", [
     (0, {"name": "x"}),
     (9, {"name": "x"}),
@@ -336,6 +371,12 @@ def test_a_team_is_written(desktop, client):
     (1, {"name": 1}),
     (1, {"rank": 0}),
     (1, {"members": {}}),
+    (1, {"members": {"0": {}}}),
+    (1, {"members": {"6": {}}}),
+    (1, {"members": {"1": "A1"}}),
+    (1, {"members": {"1": {"unknown": 1}}}),
+    (1, {"members": {"1": {"name": 1}}}),
+    (1, {"members": {"1": {"character": {"en_name": "Nobody"}}}}),
     (1, {"members": [{}] * 6}),
     (1, {"members": ["A1"]}),
     (1, {"members": [{"unknown": 1}]}),
@@ -362,6 +403,13 @@ def test_a_members_character_of_another_game_is_a_conflict(desktop, client):
 
     response = client.patch("/api/v1/result/teams/1", json={"members": [
         {"character": {"en_name": "Mario", "game": "other"}}]})
+
+    _assertRejected(response, "CONFLICT", 409)
+    assert _rows() == before
+
+    response = client.patch("/api/v1/result/teams/1", json={"members": {
+        "1": {"name": "Changed",
+              "character": {"en_name": "Mario", "game": "other"}}}})
 
     _assertRejected(response, "CONFLICT", 409)
     assert _rows() == before

@@ -27,9 +27,8 @@ A tournament is told by its URL (``provider.url``): a provider rebuilt for
 the URL loaded already (a forced reload) is the same tournament, so a fetch
 running for it goes on.
 
-The Qt side keeps the previews and the ``media_updated`` signal, which the
-provider adapter emits when ``bannerVersion`` moves (the thumbnail / result
-previews listen to it, unchanged).
+The pages that draw the banner follow ``bannerVersion`` in the state (the
+thumbnail's and the result's previews).
 
 ``TournamentMediaService.instance`` is built by ``bootstrap_core()``; the
 loaded tournament's provider is injected there (``currentProvider``),

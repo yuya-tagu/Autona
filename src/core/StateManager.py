@@ -598,10 +598,22 @@ class StateManager:
                     include_paths=StateManager._includePaths(
                         StateManager.changedKeys),
                     verbose_level=2, # Necessary to see values of added items.
+                    # A list is compared place by place, so its rows are about
+                    # its tail and can be applied one by one. A client has to:
+                    # the web server joins the rows of several revisions in a
+                    # message with no mark between them. Left to difflib, a
+                    # list of plain values can come as an insertion in its
+                    # middle, or as rows about the list as a whole, whose
+                    # places only mean something within their own revision.
+                    zip_ordered_iterables=True,
                 )
                 # Computed once: the size check and the payload are the same
                 # rows (this used to build the Delta twice).
-                delta = Delta(diff).to_flat_dicts()
+                # always_include_values: on its own, Delta leaves the new value
+                # out of a type change it thinks a client can derive by
+                # converting the old one ("" -> {}, {} -> [], 1 -> "1"), and
+                # the row says "unknown___" in its place.
+                delta = Delta(diff, always_include_values=True).to_flat_dicts()
                 if len(delta) > 100:
                     StateManager._bumpRevision()
                     StateManager.observers.state_big_change.notify()

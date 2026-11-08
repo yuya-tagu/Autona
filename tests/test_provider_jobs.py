@@ -138,9 +138,6 @@ FETCHES = {
     "stations": (
         "GetStations", [{"id": 3}],
         [("stations", ([{"id": 3}],))]),
-    "standings": (
-        "GetStandings", [{"placement": 1}],
-        [("standings", ([{"placement": 1}],))]),
     "set list": (
         "GetMatches", SETS,
         [("progress", ({"progress": 1, "totalPages": 2, "sets": []},)),
@@ -164,11 +161,6 @@ def _start(adapter, kind, answers):
     elif kind == "stations":
         undo = [_connect(signals.get_stations_finished, answers, "stations")]
         adapter.LoadStations()
-    elif kind == "standings":
-        undo = []
-        adapter.GetStandings(1, SimpleNamespace(
-            emit=lambda data: answers.append(
-                ("standings", (data,), _onMain()))))
     else:
         undo = [_connect(signals.sets_data_updated, answers, "progress"),
                 _connect(signals.get_sets_finished, answers, "finished")]

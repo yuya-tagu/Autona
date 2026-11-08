@@ -274,13 +274,17 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 17. 結果画面生成
 
-[src/AutonaResultSettingsWidget.py](../../src/AutonaResultSettingsWidget.py)・[src/result/ResultRenderer.py](../../src/result/ResultRenderer.py)。
+React の [web/src/ResultPage/](../../web/src/ResultPage/)（`/web/result`）・[src/core/ResultService.py](../../src/core/ResultService.py)・[src/result/ResultPageRenderer.py](../../src/result/ResultPageRenderer.py)。
 
-- 試合結果画面の自動生成
-- プレビューはレイアウト選択・選手編集で自動再描画（手動更新ボタンなし）
-- **Copy to Clipboard** — 画像をクリップボードにコピー
-- **Save Result Image** — PNG ファイルとして保存
-- 勝者ハイライト / スコア / ラウンド情報
+- 大会リザルト画像の作成（6 レイアウト: 横 TOP8 / 横 TOP16 / 縦 2 種 / 団体 2 種。`out/results/` に PNG・30 世代）
+- 単独は順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ、団体はチーム名とメンバー 5 人。入力は再起動後も残り、「すべてクリア」で今の種類だけ消す
+- キャラ欄が空の選手は、スコアボードに同名の選手がいればそのキャラで描く（ページの行に「スコアボードから補完」と出る）
+- 上下ボタン（キーボード可）とドラッグで並べ替え。順位は上から振り直す
+- **大会結果を読み込む** — Start.gg の standings を取り込む（入力があれば確認。失敗と「まだ結果が無い」を区別して出す）
+- プレビューはレイアウト・行・大会情報・色の変更で自動再描画（表示中だけ。背景はサムネイルの設定に従う）。何も入力が無いときは「サンプル」と表示
+- **作成** — 画像を保存して保存先を出す。**画像をコピー** は作成した画像（この PC のページだけ。LAN の http では「開く / 保存」）
+- **X に投稿** — 1 クリックで作成・クリップボードへのコピー・投稿画面（デスクトップは既定のブラウザ）。投稿画面に貼り付ける
+- **選手を DB に保存** — 入力した選手を選手リストへ（作成と投稿のときも新しい選手は自動で追加）
 
 ---
 

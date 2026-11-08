@@ -212,7 +212,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 **根拠**: state-keys.md「要注意事項 #3」
 
 **現状（解消済・2026-06-24 再確認）**:
-`StateManager.GetFullState()`（194-207行）がロック取得 + `deep_clone` して `{'state': ..., 'delta_index': ...}` を返す。`AutonaWebServerActions.program_state` / `src/result/main_generate_result.py` / `src/thumbnail/main_generate_thumbnail.py` はすべてこの API 経由に置き換え済み。
+`StateManager.GetFullState()`（194-207行）がロック取得 + `deep_clone` して `{'state': ..., 'delta_index': ...}` を返す。`AutonaWebServerActions.program_state` / `src/result/main_generate_result.py`（ADR-005 S4r で削除）/ `src/thumbnail/main_generate_thumbnail.py` はすべてこの API 経由に置き換え済み。
 
 **影響範囲**: `AutonaWebServerActions.py`, `StateManager.py`, `src/result/`, `src/thumbnail/`
 

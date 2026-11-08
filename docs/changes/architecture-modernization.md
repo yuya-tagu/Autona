@@ -41,8 +41,8 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Scoreboard | スコアボード入力: board1 1v1 / board2 チーム / board3 クルー。スコア・Bo・phase/pool/match・スワップ・リセット・セット選択・ステーション・反映（held）・X intent | `AutonaScoreboardWidget`(2,306) / `AutonaScoreboardPlayerWidget`(1,185) / `AutonaCrewBattleWidget` / core 各サービス | `score.{n}.*` |
 | Scoreboard | BOARD: デザイン選択・ライブプレビュー・機能別カラー・Designer 起動 | `AutonaBoardWidget` / `AutonaLayoutPreview` / `AutonaDesignerService` | — |
 | Display | サムネイル（動画サムネ 2 テンプレ） | React `ThumbnailPage`（`/web/thumbnail`。S4p で Qt 版を削除）/ `core/ThumbnailService` / `thumbnail/ThumbnailRenderer`（オフスクリーン WebEngine） | `out/thumbnails/` |
-| Display | リザルト画像（6 レイアウト）・コピー・保存・X | `AutonaResultSettingsWidget`(1,330) / `result/ResultRenderer` | `out/results/` |
-| Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | `AutonaTop8Widget` / `AutonaTop8Model` / `core/Top8Service` | `top8.*` |
+| Display | リザルト画像（6 レイアウト）・コピー・保存・X | React `ResultPage`（`/web/result`。S4r で Qt 版を削除）/ `core/ResultService` / `result/ResultPageRenderer`（オフスクリーン WebEngine） | `out/results/` |
+| Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | React `Top8Page`（`/web/top8`。S4i で Qt 版を削除）/ `core/Top8Model` / `core/Top8Service` | `top8.*` |
 | Display | 実況・解説（12 枠・表示最大 4） | React `CommentaryPage`（`/web/commentary`。S4c で Qt 版を削除）/ `core/CommentaryService` / `core/CommentaryModel` | `commentary.*` |
 | Display | 統計表示設定（統計オーバーレイ 7 種） | React `StatsPreviewPage`（`/web/statsPreview`。S4l で Qt 版を削除）/ `core/StatsOverlays` | `colors.stats` |
 | Data | 統計（H2H / Last Sets / History / Analysis） | `AutonaStatsWidget` / `AutonaAnalysisWidget` / `core/StatsService` | `score.{n}.*_sets` |
@@ -50,6 +50,8 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | 共通 | Settings（General / Language / Hotkeys）・ゲームアセット追加・API/Companion/OBS ガイド・アップデータ・アラート | `Settings/` / `AutonaGameAssetGuideWindow` / `AutonaUpdater`(899) | — |
 | 共通 | グローバルホットキー 9 本（Win32 `RegisterHotKey`） | `AutonaHotkeys` | — |
 | Web | リモート操作 UI（`/web`）・Designer（1920×1080 レイヤーエディタ、Figma 取込） | `web/src/ScoreboardPage` / `ScoreboardDesigner` | `layout/custom/{slug}/` |
+
+> 区分 Display の Qt パネルは S4r で無くなった（5 つとも React のページ）。
 
 > `docs/product/features.md` は陳腐化している（BlueSky・コントローラー検出・QDockWidget 自由配置など存在しない機能の記載、実況 8 枠→実際 12 枠、BOARD / Designer / Figma / 統計表示設定の記載漏れ）。
 
@@ -5982,8 +5984,9 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - 翻訳の抽出: レイアウトの名前は `translate("app", ...)` で引く（`lupdate` が無いので `.ts` は手動。パネルと同じ文字列なので今は訳がある。S4r で参照元を直す）
 - **レビューと実機確認の修正**（B の番号はレビューの指摘の番号）
   - **A. データを描く前の途中のフレームが撮られる**（メインの実機確認で発見。S4q の回帰ではなく、#266 時点の main でも同じ率で再現）: 画面ロック中はコンポジタが遅く、2 rAF が済んでも絵がビューの surface に届いていない。テンプレートの交互切替 60 回に 1〜3 回、名前も背景も無い絵が撮られた（そのログはいつも `painted 360〜400 [frames=340〜400]`。普段は frames=30）。比較が「読み込み前の絵と違うか」だけなので、途中のフレームも正しい絵として通っていた。`:generate` でも同じ絵が保存されるので、配信 PC の画面が消えているときに起こりうる
-    - 修正: `AutonaOffscreenRenderer` は、frames が `SLOW_FRAMES_MS`（100 ms）を超えた描画・frames を言わなかった描画（late / failed）・読み込み直後の描画（サイズの変更は読み込みを伴うのでここに入る）で、**連続する grab が一致するまで待ってから撮る**（上限 `SETTLE_WAIT_MS` = 1 秒。達したら warning を出して撮る）。同じページの普段の描画は grab 1 回のままで追加コストなし
-    - **指示の「間隔 50 ms 程度」からの差分**: 50 ms を下限に、そのページの 2 フレームにかかった実測（frames）に間隔を揃えた。フレームが 170〜200 ms の間を 50 ms で見ると、同じ途中のフレームを 2 回見て一致と誤るため。frames を言わなかった描画は 500 ms（`SETTLE_WAIT_MS // 2`）、読み込み直後で frames が普通なら 50 ms
+    - 修正: `AutonaOffscreenRenderer` は、**どの描画も連続する grab が一致するまで待ってから撮る**（上限 `SETTLE_WAIT_MS` = 1 秒。達したら warning を出して撮る）
+    - **当初の判断の訂正（S4r の検収）**: S4q では、frames が `SLOW_FRAMES_MS`（100 ms）を超えた描画・frames を言わなかった描画・読み込み直後の描画だけを比べ、同じページの普段の描画は grab 1 回にしていた（追加コストなし）。frames が速くてもビューの中身がそのフレームまで進んでいるとは限らず、誤りだった: 隔離アプリの v1 で未使用のキャラ画像を使って `:preview` を 2 回撮って比べると、10 秒おきで 21 回に 2 回、1 枚目が途中のフレームになった（ログは `frames=16` で grab 1 回。キャラもロゴも欠け、差分の bbox は毎回同じ。3 秒おきでは 36 回に 0 回）。`SLOW_FRAMES_MS` を削除した。普段の描画は grab 1 回ぶん（50 ms 以上）遅くなる。サムネイルも同じ
+    - **指示の「間隔 50 ms 程度」からの差分**: 50 ms を下限に、そのページの 2 フレームにかかった実測（frames）に間隔を揃えた。フレームが 170〜200 ms の間を 50 ms で見ると、同じ途中のフレームを 2 回見て一致と誤るため。frames を言わなかった描画は 500 ms（`SETTLE_WAIT_MS // 2`）、frames が普通なら 50 ms
     - 常に動くページは、新しいページの最初の絵で最大 1 秒かかって警告が出る。同梱の thumbnail / result のページにアニメーションは無い（カスタムテンプレートだけの話）
     - **レビュー #4（サイズが変わるレイアウト切替）もこれで塞がる**: リサイズ直後の `before_load` は比較として弱いが、読み込み直後の描画は連続する grab の一致を要するので、古いページの絵が 1 枚混ざっても通らない（`test_the_old_frame_at_the_new_size_is_not_taken_for_the_new_pages`）。**残余**: frames が普通（間隔 50 ms）のときに古いページの絵が 50 ms 以上安定して出続けると通りうる。offscreen の `grab()` は画素を写さず順序でしか pin できないので、1920↔960 の交互切替を実機で確かめる。出たら読み込み直後の間隔の下限を上げる（1 行）
   - **B1. 文字列欄がパスとして export 層に解釈される**（既存の穴。S4q と別のコミットに分けられる）: `StateManager.CreateFilesDict` は `./` で始まる文字列を `out/` にコピーし、`http...png` をダウンロードしていた。`PATCH /result/players/1 {"name":"./user_data/settings.json"}` で設定ファイル（`general.webserver_token` を含む）が静的配信の `out/` に出ることをレビュアーが確認した。Top 8・選手名・start.gg の gamerTag も同じ経路なので、ルートではなく export 層で直した（`_ExportKind`。`CreateFilesDict` と `RemoveFilesDict` が同じ判定を使う）
@@ -6012,3 +6015,78 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - Result パネル: プレビュー・作成・standings の読込・投稿文・形式の切り替えが従来どおり
   - v1: `POST /result:preview` → `GET /result/preview` と `:generate` → `out/results/` に 6 レイアウトの実際の絵が出る（960 幅を含む。**offscreen の `grab()` はページの画素を写さない**）
   - バナーの差し替え後の v1 の背景、実大会の `:loadStandings`（失敗と空の区別）、ヘッドレスの `503`、団体の行を持つ古い `state.json` の移行
+
+#### S4r 大会リザルトの React 化と Qt 版の削除（2026-11-09）
+
+サイドバー Display の「大会リザルト」を React の `/web/result`（`web/src/ResultPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaResultSettingsWidget.py` と `src/layout/AutonaResultSettings.ui`、`src/result/main_generate_result.py`、`src/result/ResultRenderer.py`）を削除した。**これで Display の Qt パネルは無くなった**。S4q の core と v1 の上に載せたので、ページが足すのは操作の依頼と state の描画だけ。
+
+- **完了内容**
+  - ページ: 左の列に「レイアウト」（選択・大会結果の読み込み・すべてクリア）、順位の行（単独: 順位・所属タグ・名前・X ハンドル・キャラとカラー × 3 / 団体: 順位・チーム名・メンバー 5 人）、「選手を DB に保存」、機能別カラー（`FeatureColorCard`）。右の列にプレビューと作成・コピー・X 投稿
+  - 読み: 行はいつも `GET /api/v1/result`（別のゲームのキャラを無いものとして読み、スコアボードの補完を `fromScoreboard` で返す、core の読み）。書いたあとと、state の行・スコアボード・ゲーム・`result_layout` が変わったときに読み直す（100 ms にまとめ、1 度に 1 つ）。**書き込みと重なった読みは、どちらが先に始まっても捨てる**（古い行に戻さない。書き込みの答えがまた読む）。文字の欄だけは他のページと同じく state を表示する（`RowText`。下の検収の修正 3）
+  - 書くのは編集した欄だけ。単独のキャラと団体のメンバーは位置で名指す（`{"characters": {"2": ...}}` / `{"members": {"3": {"name": ...}}}`。下の検収の修正 6・7）
+  - 並べ替え（決定 20）: 行ごとの上下ボタン（キーボード可。フォーカスは動いた先の行のボタンへ移り、端なら戻る向きへ）と、`CommentaryPage` と同じグリップのドラッグ。`POST :reorder` は**位置で**言う（読みが追いついていなくても崩れない）
+  - 取り込み: `POST :loadStandings`。`409 CONFIRMATION_REQUIRED` は確認ダイアログ → `{"confirm": true}`、`NOT_READY` はカードに案内、`CONFLICT` はスナックバー。進み具合と結果は `result_standings`（自分の revision だけ「読み込みました」/ 4 つの失敗の文言をカードの `role="status"` に）
+  - すべてクリア: 確認に今の種類を書く（`:clear` は kind ごとで、もう一方は残る）
+  - プレビュー: サムネイルと同じ手順（変更の 300 ms 後 → `POST :preview` → 答えの revision を `result_render` が終えるのを待つ → `GET /result/preview?v=`）。**表示中だけ描き、表示に戻るたびに 1 回描く**（背景はサムネイルの設定で settings.json にあり、state からは分からない）。描き直しのきっかけは絵に出るものだけ（行・補完・大会情報・ゲーム・レイアウト・色。X ハンドルは投稿文の読み直しだけ）。欄の `aspect-ratio` をレイアウトの幅 / 高さにし、`max-height: 60vh` + `object-fit: contain` で 960 幅も収める。行が空なら「サンプル」のチップと案内（決定 13）
+  - 作成: `POST :generate`。完了はスナックバーと `role="status"` に保存先、`400` はページの案内、`409` は「作成中」、`503` は describe し直す（S4p と同じ）。答えを待つ間の 2 回目は送らない
+  - コピー: `canCopyImage` のときだけ。作成のあとで絵の元が変わっていなければ作成した画像、変わっていればクリックの中で作り直してコピーする（下の検収の修正 1）。無いときは「開く / 保存」のリンク（作成した画像のまま）
+  - **X 投稿（決定 11）**: 投稿文は `GET /result/post` で持っておき、クリックの中で同期に (a) `:generate` の依頼 (b) `navigator.clipboard.write([new ClipboardItem({"image/png": 完了を待って取る Promise})])`（`copyImageOnceMade`）(c) `window.open(intent URL, "_blank", "noopener")`。順序は (b) が先で、ジェスチャとフォーカスがあるうちに頼む（`withDeadline` を通すと 1 マイクロタスク遅れるので、`write` は先に呼んで答えの待ちだけ期限を付ける）。LAN の http はコピーせず、投稿画面を開いて保存先を出す
+  - ホスト: `_PanelPage` が `newWindowRequested` を受けて、クリックからの（`isUserInitiated`）`http` / `https` だけを `QDesktopServices.openUrl` に渡す。ほかは警告を出して開かない。`openUrl` が失敗すればログに出す（投稿文が入るのでホスト名だけ）。ビューに新しいページは作らない。シェル操作は増やしていない
+  - シェル: `WEB_PANELS` に `result`、`Window._CreateResultPanel` は `self._WebPanel("result")` を返すだけ。`SetBattleFormat` は `ResultService.instance.FollowBattleFormat` だけ
+  - 共有部品の切り出し: `PanelShell/useDocumentVisibility.ts`（ThumbnailPage から）、`Top8Page/Cards` の `CharacterSelects`（描画だけ）・`StateText`、`ThumbnailPage/Cards` の `CardFrame` / `Note` / `RangeField`（`percent` と `width`）、`CommentaryPage` の `DropLine` / `dropIndex`、`PanelShell/clipboard` の `copyImageOnceMade`
+  - 削除: 上の Qt 版 4 ファイル、`AutonaActions.PublishResultPlayers`、`ui_layout.DragCardList` / `DragGrip` と `tests/test_drag_card_list.py`、`AutonaTournamentDataProvider` の `media_updated` / `_OnStateForMedia` / `GetStandings`（接続先と呼び手はパネルだけ）、provider の `GetStandings` の `strict`（呼び手が core だけになり、常に例外にする）。レイアウトの表は `ResultService.LAYOUT_*` の 1 つになった
+  - 翻訳: 専用の訳 20 件を削除（`.ts` を手動編集して `scripts/compile_translations.ps1` で `.qm` を再生成。en / ja とも 435 件・未完了 0）。レイアウトの名前 6 件と `Sample Tournament` は参照元を `core/ResultService.py` へ直し、共有の 4 件（`Warning` / `Result Settings` / `Player Name` / `Sponsor`）はパネルの参照元だけを外した
+  - **S4q の持ち越しの解消**: パネルが `result_players` に残した団体の行（`members` を持つ行）を `SeedPanelState` が起動のたびに消す（行が無くなれば root も）。書き手が居なくなったので `_StoredRows` の `members` の除外は外した。パネルとの衝突・`prepare_data` の二重化・表の 2 か所・翻訳の参照元も、削除で解消した
+- **設計からの差分**
+  - **state のルートを 1 つ足した（`result_layout`。決定 14 に無い）**: レイアウトは settings.json だけで state に無く、ページを開いたままサイドバーの対戦形式を押してもページに何も届かない（保存が無ければ設定にも書かれない）。Socket.IO で届けるため、写しを state に出した。`SetLayout` と `FollowBattleFormat` が書き、`SeedPanelState` が `""` に戻す。追加だけなので `STATE_VERSION` / `CURRENT_VERSION` は不変。`program_state.json`・Socket.IO に増え、`out/result_layout.txt` もできる。別のクライアントの変更にも追従する。**git-workflow の「state スキーマ」に当たるので、区分は設計の「通常」でなく「高」になりうる**
+  - **団体のメンバーに X ハンドルの欄を足した**: 指示は「チーム名・メンバー」。名前だけ直せる形だと古いハンドルが投稿文に残る
+- **レビュー対象の判断**
+  1. **`sample` のとき、作成は押せて X も押せる**: 作成は `400` を受けて案内、X は何も作らず何も開かず案内。押せなくすると「なぜ押せないか」を別に言うことになる。`sample` の判定は読み済みの describe で、書き込みや読みの途中なら判定せずに開いて作成に進み、`400` が同じ案内に落ちる（下の検収の修正 10）
+  2. **ページはデスクトップの分岐を持たない**: サムネイル / 配信設定は「デスクトップでコピーできないならリンクを出さない」分岐を持つが（新しいウィンドウが何もしなかった頃の S4e の判断）、今はリンクが既定のブラウザへ渡るので Result には足さない。2 ページの挙動は変えていない（コメントだけ実態に合わせた）
+  3. **投稿文はクリックの時点で読み済みのもの**: 同期で開くので待てない。文字を打った直後のクリックでは、その編集が入らないことがある（`leaveField` は送るが、読み直しは間に合わない）。debounce の範囲の話で、投稿画面で直せる
+  4. **`DisallowUnknownUrlSchemes` を足した**: `newWindowRequested` は `window.open` の経路しか塞がず、Qt は既定でクリックからの未知のスキームを OS に渡す（`acceptNavigationRequest` はサブフレームを通している）。「LAN のページから任意のアプリを起動させない」ため。使っているページは無い
+  5. **`JavascriptCanOpenWindows=False`**: クリックの `window.open` は届き（PySide6 6.11 の実 `QWebEngineView` で実測。`isUserInitiated=True`）、クリックなしのスクリプトは届かない。テストは `QTest.mouseClick(view.focusProxy(), ...)` で本物のジェスチャを起こす
+  6. **`media_updated` と `GetStandings` の `strict` を消した**: どちらも指示の「使われなくなった経路」。`TournamentMediaService` の `bannerVersion` は state のままで、ページはそれを見る
+  7. **`_EncodeImage` は `AutonaScoreboardManager.py` のまま**: 使うのは `StartImageRender` だけで、動かす理由が無い（`tests/test_thumbnail_render.py` が同じ場所を読む）
+  8. **`record_golden.py` は残した**: 基準コミットの `git archive` から読むので、Qt 版を消しても録り直せる
+  9. **起動のたびの掃除で、移行ではない**（`.claude/rules/state-and-webserver.md` の方針）: v2 の `state.json` は同じ版なので移行 step では消せない。`StateMigrations` は凍結のまま
+- **受け入れた点（直さない）**
+  - 投稿画面を開いた後の生成の失敗はスナックバーと status で伝えるだけ（開いたタブは閉じられない）
+  - 行の数ぶんのカードを出すので 16 行はページが長い。上下ボタンがキーボードと長距離の移動を担う。ドラッグは Chromium の自動スクロールに任せる
+  - 同じパスのバナーの差し替えは S4q 判断 12 のまま
+  - **layout のスクリプトがクリック経由で任意の `http` / `https` を既定のブラウザに開ける**（レビュー #14）。`_OpenOutside` はクリックかどうかしか見ず、フレームも見ない（実況ページの iframe の `layout/` もユーザー活性化を受ければ通る）。派生として `http://127.0.0.1:<port>/` の GET で状態を変える legacy ルートも開ける。layout は運用者が入れるもので信頼境界の内側。v1 に揃えて legacy を閉じるのはこの範囲の外
+  - `AutonaLayoutPreview` に `setUnknownUrlSchemePolicy` は足さない（レビュー #16）: ビューの上の透明なガラス板（`_glass`）が全クリックを吸うので、ページにクリックの経路が無い
+  - `result_layout` は起動のたびに `""`（レビュー #18）: 正本は settings.json で、state の写しは変更の通知。起動の時点で描く画面は GET を読む
+  - **手で選んだレイアウトは起動で対戦形式へ戻らない**（レビュー #27）: Team 形式のまま `horizontal` を選んで再起動すると新版は `horizontal` のまま。旧版はパネルの構築時に `team` へ戻していたが、決定 14 でレイアウトを保存する帰結。対戦形式を切り替えれば追従する。`.claude/manual-test-checklist.md` に書いた
+  - 状態が変わるたびに行全体を文字列にするセレクタ（レビュー #24）: 実測なしで触らない
+- **検収の修正**（番号はレビューの指摘の番号。A は実機で再現した描画のバグで、S4q の節を訂正した）
+  - 1. **コピーが古い画像を貼らせる**: 作成の後に入力が変わっていたら、クリックの中で作り直してコピーする（X と同じ `copyImageOnceMade`。旧版がクリックの入力から作っていたのと同じ結果）。「変わっていない」は、作成を頼んだ時点からの絵に効く書き込みの数（`writeRows` と色。X ハンドルだけの書き込みは数えない）と、作成を頼んだ時点の state の絵の元（`pictureSignature`。下の再レビューの修正 3）の両方が今と同じこと。背景は settings.json、ボードの未反映は state に無いので、表示に戻ったら忘れる（`reveals`）。ページを開き直した後も作り直す
+  - 2. **期限の後で遅れて書く**: `ClipboardItem` に渡す Promise そのものに期限を付けた。期限で reject すれば `write` が失敗し、操作者がその間にコピーしたものを上書きしない
+  - 3. **GET 経由のエコーが 1 秒を超えると打ちかけが消える**: `useStateField` は変えず（他のページに影響する）、文字の欄の値を GET の行でなく state から取る（`RowText`。state に行が無い間だけ GET の値）。エコーが他のページと同じ経路になる
+  - 4. **書き込み中に始まった読み**: 始まった時点で書き込みが実行中なら捨てる
+  - 5・20. **並べ替え直後・取り込み中の編集**: 並べ替えの答えと読み直しまで（`settling`）と取り込み中は、行の文字・順位・キャラを止める。`disabled` でなく **`readOnly`**（フォーカス中に `disabled` にすると Chrome は blur を出さず、`useStateField` の `focused` が残る）。上下ボタンとグリップは位置で言うので並べ替え中は止めず、取り込み中だけ止める。「すべてクリア」も取り込み中は押せない。楽観的に写しを並べ替える案は、行が書き手ごとにずれるので採らなかった
+  - 6・7. **全置換が別のゲームのキャラを壊す**: v1 に位置で名指す形を足した（`characters: {"1".."3": ...}` / `members: {"1".."5": {name?, twitter?, character?}}`。リストの全置換は残す）。名指さなかった枠は保存値のまま（別のゲームのキャラも残る）。Top 8 の「変えていない欄は送らない」と同じ考え方。古いキャラに新しい codename を付けて送る経路もこれで無くなった。末尾の空のメンバーを落とす処理はサーバーへ移した
+  - 8・9. **投稿文の読み**: 一番新しい読みの答えだけを採る。`getWithRetry`（3 回）。読めなければ X を押せないままにして理由と読み直しのボタンを出す（`postState: "failed"`。古い文を投稿させない）
+  - 10. **入力直後の X が何もしない**: 判定を `leaveField` の後にし、書き込み中・読み待ちなら判定せずに開く（`rowsKnown`）。作れなければ `400` の案内が出る
+  - 11. **答えと再描画の隙間**: `generatingRef` を描画で代入せず、答えの中で同期に立てる
+  - 12・13. **409 の案内が上書きされる / 別パネルへ移るとコピーされない**: 作成の結果を一本の経路にした。`startGenerate` が答えの revision の結末を store から待つ（`endOfRun`。ページの effect でなくモジュールの関数なので、ページが消えても続く。パネルの切り替えはルーターで、文書は残る）。作成の失敗は作成が伝えるのでコピーの失敗文を重ねない。最後に保存したパスは開いたときと別のクライアントの作成でも status に出す（`render.path` に追従）
+  - 14（一部）・15・17. `isUserInitiated` を見る。`openUrl` の失敗をログに出す。実物の `<a target="_blank">` のクリックをテストした
+  - 19. 読み込み中に届いた state の変化を捨てない（読み込み後に比べる）。21. `noData` と status は絵の元の変化とクリアで消す。22. キャラ以外の `400` は別の文言（`result_row_refused`）。23. サンプルのときは言語の変更で描き直す。25. TS の定数と core の一致を pin（`test_the_web_ui_limits_are_the_cores`）。28. 順位の ↑↓（`RangeField` の `step`。旧版のスピンボックスの代わり。ホイールは足していない）
+  - 26. **グリップ**: `role="button"` を外して `aria-hidden` にした（`title` は残す）。前例の `CommentaryPage/CasterCard.tsx` は `role="button"` で tabIndex なしだが、Result は上下ボタンがキーボードの経路なのでフォーカスの止まり先を増やさない
+- **再レビューの修正**（1 は全ページに効く）
+  - 1. **クライアントが delta のリストの行を処理していない**: `web/src/stateDelta.js` は `dictionary_item_removed` 以外をすべて「最後のキーへ値を代入」していた。`[A,B,C]→[A,B]` は消えた要素を書き戻すので、クライアントは 3 要素のまま。Result では末尾のメンバーの名前を消すと欄に戻り（e2e で再現）、クリア後も欄に残り、単独の末尾のキャラを消してもプレビューと投稿文が読み直されなかった（シグネチャが変わらない）。全ページの共通の経路で、`score.N.recent_sets.sets` も同じ（React の統計ページ）
+    - **出る行の一覧**（`SaveState` の呼び方で実物を確かめた。`web/src/stateDelta.cases.json` の 56 件）: `values_changed` / `dictionary_item_added` / `dictionary_item_removed` は正しかった。未処理: `iterable_item_removed`。誤り: `iterable_item_added`（値のリストの先頭・途中への挿入でも位置への代入で、上書きになる）、`iterable_items_inserted` / `deleted` / `replaced` / `equal`（値のリストで difflib が勝ち 2 変更以上のとき。`path` がリスト自身なのでリストが断片に置き換わる）、`type_changes`（`""→{}` / `""→[]` / `{}→[]` / `[]→{}` / `1→"1"` / `0→False` のように型の変換で作れる変更は値が省かれ、`unknown___` という文字が値として入る）、新しいキーの 1 要素のリスト（`iterable_item_added` の `[キー, 0]` で届き、親を `{}` で作るので `{"0": ...}` になる。DeepDiff が同じ変更の後続の新しいキーの action も `iterable_item_added` に書き換える）。`set_item_*` / `attribute_*` / `repetition_change` / `iterable_items_*_at_indexes` / `iterable_item_moved` は JSON の木と今のオプションでは出ない。`None` との間の変更は行に出ない（`exclude_types`。上流からの仕様で変えていない）
+    - **指示（大きい順に消す）と違う直し方にした**: サーバーが複数 revision の行を区切りなしで 1 メッセージに結合する（`on_program_state_update`）ので、クライアントは行をまとめて並べ替えられない（`[A,B,C]→[B,C]→[B]` の `[0]`, `[1]` と、1 revision の `[A,B,C]→[C]` の `[0]`, `[1]` が区別できない）。そこで**行を 1 つずつ適用できる形にサーバー側で揃えた**: `DeepDiff(zip_ordered_iterables=True)` でリストを常に位置ごとに比べる（dict のリストは元からこの比べ方。消えるのは末尾だけで、途中の挿入や `iterable_items_*` が出ない）、`Delta(always_include_values=True)` で値を省かせない。クライアントの `iterable_item_removed` は「その位置の前でリストを終える」（`length = min(length, index)`。順序によらない）。新しいキーの 1 要素のリストは親を `[]` で作る
+    - **外部への影響**: 行の形は同じ。値のリストの変更の行だけが変わる（先頭を消すと各位置の `values_changed` と末尾の `iterable_item_removed` になる）。`out/` のテキストは位置が新しい値と揃う。行が増えるのは長い値のリストの先頭が変わるときだけで、`len(delta) > 100` の判定に効くのは 100 要素を超える値のリストだけ（dict のリストは元から同じ比べ方）
+    - **オーバーレイも同じ規則に揃えた**: `layout/include/globals.js` に同じ処理の別実装があり、`iterable_item_removed` を処理していなかった（`layout/recent_sets` は人数の少ない答えで古い行が残る。以前からの欠陥）。同じ分岐を足し、`stateDelta.test.js` が同じ cases で両方を検査する。プレーンなスクリプトで import できないので写しのまま
+    - pin: `web/src/stateDelta.cases.json` を `tests/test_state_delta_cases.py`（行が `StateManager` の publish の実物と一致する・未処理の action と値の省略が無い・1 revision で増減するのは末尾だけ）と `web/src/stateDelta.test.js`（行を適用すると最後の state になる。immer の draft でも）が読む。e2e は `result.spec.ts` の Socket.IO の経路
+  - 2. **別のゲームのキャラが 1 枠目だと読みが 1 枠ずれる**: `character` と `characters[0]` が両方 `{}` になり「先頭の重複を外す」判定が効かず、`[X, A]` が `[空, 空, A]` に読めて 3 枠目が落ちていた（`_Mains` と `_RowHasInput` も）。`_AsRead` が読み替えの前に判定して、空に読んだ先頭をリストからも外す
+  - 3. **run の途中の別クライアントの書き込みが「絵と同じ」扱いになる**: `madeFrom` のシグネチャを作成を頼んだ時点で取る。自分の書き込みのエコーが依頼の後に届いたときも作り直す側に倒れる（入力の直後に作成すると、次のコピーは 1 回作り直す）
+  - 4. **凍結から戻ると、画像ができていても失敗と言う**: Qt のパネルへ移ると `HiddenPageLifecycle` がページを凍結し、戻ったときに期限のタイマーが Socket.IO のメッセージより先に発火して store がまだ古いことがある。`endOfRun` は期限で失敗と言う前に `GET /api/v1/result` の `render` を読む（読めなければ失敗）。`clipboard.ts` は変えていない
+    - **制限（直さない）**: 依頼から 30 秒を過ぎて戻ったときは、画像ができていてもコピーされない。期限を過ぎた画像を断るのは検収の修正 2 の決定（操作者がその間にコピーしたものを上書きしない）で、凍結中はそもそも JavaScript が止まっている。保存は成功と出て、スナックバーの最後は「コピーできませんでした」（`copyOnceMade` が「保存しました」の後にも出す。作成中にクリップボードが断ったときも同じ）。もう一度コピーを押せば作り直さずにコピーされる。30 秒以内に戻れば、戻ったときにコピーされる。React のパネル同士の移動は同じ文書のままで凍結しない
+- **検証**
+  - `python scripts/run_tests_parallel.py`（4623 通過・2 スキップ、RESULT: OK）、`npm run build`（通過）、`npm test -- --watchAll=false`（33 スイート・878 通過）、`npm run test:e2e`（54 通過）
+  - 新規: `web/src/ResultPage/ResultPage.test.js`（109 件: 読みと書きの競合・debounce・revision・BUSY・確認・並べ替えとフォーカス・補完の表示・X の順序（クリックの中で clipboard → composer）・コピー不可・コピーの作り直し・サンプル・トークン・ページが消えた後のコピー）、`web/e2e/result.spec.ts`（10 件: 実サーバーの保存・`result_layout` の追従・キーボードとドラッグの並べ替え・クリア・960 幅の形・開いたページの Socket.IO の追従）、`tests/test_web_panel_host.py`（新しいウィンドウ・スキーム・Qt 版の不在）、`tests/test_result_service.py`（`result_layout`・掃除）。`tests/test_headless.py` は、`ui_layout` が widget を定義しなくなったので（最後の `DragCardList` / `DragGrip` を消した）、ヘッドレスが読み込まないことを名指しで pin する形にした
+- **オーナー実機確認**（`python main.py`）
+  - `.claude/manual-test-checklist.md` の「大会リザルト」。特に、6 レイアウトの絵と 960 幅の収まり、対戦形式の追従、X 投稿の既定のブラウザと貼り付け、実大会の取り込み
+  - サムネイルと配信設定の回帰（共有部品の切り出し）: プレビュー・作成・コピー、`RangeField`、表示に戻るたびの描き直し

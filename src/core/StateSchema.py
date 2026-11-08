@@ -730,6 +730,7 @@ RESULT_PLAYERS_ROOT = "result_players"
 RESULT_TEAMS_ROOT = "result_teams"
 RESULT_RENDER_ROOT = "result_render"
 RESULT_STANDINGS_ROOT = "result_standings"
+RESULT_LAYOUT_ROOT = "result_layout"
 PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
 ANALYSIS_ROOT = "analysis"
 THUMBNAIL_ROOT = "thumbnail"
@@ -771,6 +772,8 @@ KEY_CATALOG = {
     RESULT_TEAMS_ROOT: (),
     RESULT_RENDER_ROOT: RESULT_RENDER_KEYS,
     RESULT_STANDINGS_ROOT: RESULT_STANDINGS_KEYS,
+    # A string: the layout in effect, the settings' (core/ResultService.py).
+    RESULT_LAYOUT_ROOT: (),
 }
 
 # Key families whose final segment comes from a Qt objectName at runtime
@@ -1041,6 +1044,22 @@ def SeedPanelState():
     StateManager.SetIfChanged(
         RESULT_STANDINGS_ROOT,
         DefaultResultStandings(ReadResultStandings()["revision"]))
+    # The layout's echo says nothing until it is chosen or followed (the
+    # layout itself is settings.json's: GET /api/v1/result reads it).
+    StateManager.SetIfChanged(RESULT_LAYOUT_ROOT, "")
+    # A row with `members` in result_players is a team layout's, as the Qt
+    # panel wrote it until ADR-005 S4r removed the panel. StateMigrations' v1 ->
+    # v2 moved the ones it found, once; a state saved at version 2 may hold
+    # more. Not a player's, nor anything the page can show.
+    rows = StateManager.Get(RESULT_PLAYERS_ROOT, None)
+    if isinstance(rows, dict):
+        teams = [slot for slot, row in rows.items()
+                 if isinstance(row, dict) and "members" in row]
+        if teams and len(teams) == len(rows):
+            StateManager.Unset(RESULT_PLAYERS_ROOT)
+        else:
+            for slot in teams:
+                StateManager.Unset(f"{RESULT_PLAYERS_ROOT}.{slot}")
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)

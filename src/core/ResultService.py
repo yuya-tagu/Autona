@@ -1,8 +1,8 @@
 """The tournament result (大会リザルト, ADR-005 S4q).
 
 Everything about a result image that needs no Qt, so that it also answers in
-the headless shell and its page can be a React one (ADR-005 S4r, which removes
-the Qt panel and src/result/main_generate_result.py):
+the headless shell and its page is a React one (web/src/ResultPage, ADR-005
+S4r, which removed the Qt panel and src/result/main_generate_result.py):
 
 - **the rows**, which are the state: a player's in ``result_players`` (sixteen
   of them), a team's in ``result_teams`` (eight), so that a switch of layout
@@ -15,10 +15,10 @@ the Qt panel and src/result/main_generate_result.py):
   row -- and the value is built here (``Top8Service.CharacterValue``, the player
   cards' shape), against one snapshot of the catalog, all of a row's or none.
   ``Top8Service.CharacterPick`` reads a value back, and the shapes the Qt panel
-  wrote too;
+  wrote too (a saved state may hold them);
 - **the payload** the templates are given (``BuildPayload``), moved here from
-  main_generate_result.prepare_data: tests/test_result_service.py replays what
-  the old code answered (tests/fixtures/result/golden.json). A player without
+  the old main_generate_result.prepare_data: tests/test_result_service.py
+  replays what it answered (tests/fixtures/result/golden.json). A player without
   a character is drawn with the character the scoreboard has for the same name:
   looked up when drawing, never written;
 - **the sample**, drawn by a preview while no row has a name. It is always the
@@ -28,17 +28,14 @@ the Qt panel and src/result/main_generate_result.py):
   thumbnail's. The output is out/results' PNG, with the old names and 30
   generations. A generate without data is refused (``NO_DATA``);
 - **the layout**, in settings.json (``result_config.layout``), which follows the
-  battle format as the panel's did (``FollowBattleFormat``);
+  battle format (``FollowBattleFormat``). The state's ``result_layout`` says
+  which one is in effect once it was chosen or followed, for a page to see the
+  change: the sidebar's format is not a page's doing, and a layout not saved
+  changes with the format without being written;
 - **the standings' import** (``LoadStandings``), a job on the provider's worker
   whose progress is the state's ``result_standings``;
 - **the X post's text** (``PostText``), in the order of the ranks, and **the
   player database** (``SaveToDb``; a generate does it too, a preview never).
-
-While the Qt panel lives (until S4r) it goes on writing its whole table to
-``result_players``, a team layout's too, from fields it never fills from the
-state; its own rendering does not come here. What it wrote is read if it can
-be: the rows of a team layout (they have ``members``) are not a player's, and
-are left out of everything here.
 
 The lock order is StateManager.lock -> the lane's lock -> the import's lock.
 PlayerDB is called with no lock held: its change relay reaches the main thread.
@@ -118,7 +115,6 @@ PLAYER_SLOTS = tuple(str(slot) for slot in range(1, SLOT_COUNTS[PLAYERS] + 1))
 TEAM_SLOTS = tuple(str(slot) for slot in range(1, SLOT_COUNTS[TEAMS] + 1))
 MAX_CHARACTERS = 3
 MAX_MEMBERS = 5
-# The panel's spin box.
 RANK_RANGE = (1, 999)
 PLAYER_TEXT_FIELDS = ("name", "sponsor", "twitter")
 
@@ -134,10 +130,9 @@ Refusal = namedtuple("Refusal", ("code", "pick"))
 OUTPUT_DIRECTORY = "./out/results"
 OUTPUT_PATTERNS = ("*.png", "*.jpg")
 OUTPUT_KEEP = 30
-# Not tmp/result/preview.png, which the Qt panel writes until S4r. Removed with
-# the rest of ./tmp when the desktop app exits, and at construction. Served by
-# GET /api/v1/result/preview: ./tmp is not one of the web server's static
-# directories, and does not become one.
+# Removed with the rest of ./tmp when the desktop app exits, and at construction.
+# Served by GET /api/v1/result/preview: ./tmp is not one of the web server's
+# static directories, and does not become one.
 PREVIEW_PATH = "./tmp/result/result_preview.png"
 DEFAULT_ICON_PATH = "./layout/logo.png"
 # How the file is named when the tournament has no name.
@@ -219,15 +214,13 @@ def _StoredConfig():
 
 def _StoredRows(kind) -> dict:
     """The kind's rows as the state has them, by slot: the live dicts, not to
-    be written to. A row the Qt panel wrote for a team layout has `members`
-    and is not a player's. What a write of a row starts from: its characters
-    stay, whatever game they are of."""
+    be written to. What a write of a row starts from: its characters stay,
+    whatever game they are of."""
     rows = StateManager.Get(ROOTS[kind])
     if not isinstance(rows, dict):
         return {}
     return {str(slot): row for slot, row in rows.items()
-            if isinstance(row, dict)
-            and not (kind == PLAYERS and "members" in row)}
+            if isinstance(row, dict)}
 
 
 def _LoadedSnapshot():
@@ -278,11 +271,18 @@ def _AsRead(kind, row, snapshot) -> dict:
     """`row` with its characters as they are read (_Kept). A copy, sharing what
     it did not change with the state."""
     if kind == PLAYERS:
+        first = row.get("character")
         others = row.get("characters")
-        return dict(
-            row, character=_Kept(row.get("character"), snapshot),
-            characters=[_Kept(value, snapshot) for value in others]
-            if isinstance(others, list) else others)
+        if not isinstance(others, list):
+            return dict(row, character=_Kept(first, snapshot))
+        read = _Kept(first, snapshot)
+        # `characters` starts with the first unless that is empty, and
+        # _PlayerCharacters goes by that. A first read as empty is an empty
+        # first: it goes from the list too, or it holds two places.
+        if first and not read and others and others[0] == first:
+            others = others[1:]
+        return dict(row, character=read,
+                    characters=[_Kept(value, snapshot) for value in others])
     members = row.get("members")
     if not isinstance(members, list):
         return dict(row)
@@ -489,8 +489,8 @@ def _PickValue(pick, catalog, snapshot):
 
 def _SetRow(kind, slot, row):
     root = ROOTS[kind]
-    # One write of the row, so one save cycle. A root the Qt panel never wrote
-    # is made by it.
+    # One write of the row, so one save cycle. A root nothing wrote yet is made
+    # by it.
     StateManager.SetIfChanged(f"{root}.{slot}", row)
 
 
@@ -511,6 +511,27 @@ def _Clean(text) -> str:
     return text.strip() if isinstance(text, str) else ""
 
 
+def _ChangedMember(member, change, catalog, snapshot):
+    """`member` with what `change` names, as (the new member, None); (None, the
+    Refusal) for a character refused. The keys it does not name stay."""
+    changed = dict(member)
+    for field in ("name", "twitter"):
+        if field in change:
+            changed[field] = _Clean(change[field])
+    if "character" in change:
+        value = {}
+        if change["character"]:
+            value, refused = _PickValue(change["character"], catalog, snapshot)
+            if refused is not None:
+                return None, refused
+        changed["character"] = value
+    return changed, None
+
+
+def _EmptyMember() -> dict:
+    return {"name": "", "twitter": "", "character": {}}
+
+
 # ── the rows' writes ─────────────────────────────────────────────────────
 
 def UpdatePlayer(slot, fields, games=None):
@@ -519,7 +540,10 @@ def UpdatePlayer(slot, fields, games=None):
     ``name`` / ``sponsor`` / ``twitter`` (str, stored trimmed); ``characters``
     (up to MAX_CHARACTERS of (en_name, skin row, codename) or None for an empty
     one, which keeps its place; the codename is the game whose list it was
-    picked on, None not to check it; the whole list is replaced).
+    picked on, None not to check it; the whole list is replaced. Or a dict of
+    the places to change, "1" being the first, of the same: the others stay as
+    they are stored, a character of another game too (_Kept), as a page that
+    changes one field has no business writing the fields it was not shown).
 
     Under the state lock, every pick is resolved first, against one
     ``GameAssetCatalog.Current()``, and the values written are the ones
@@ -537,15 +561,21 @@ def UpdatePlayer(slot, fields, games=None):
         if "characters" in fields:
             catalog = _Catalog(games)
             snapshot = catalog.Current() if catalog is not None else None
-            values = []
-            for pick in fields["characters"]:
-                if not pick:
-                    values.append({})
-                    continue
-                value, refused = _PickValue(pick, catalog, snapshot)
-                if refused is not None:
-                    return refused
-                values.append(value)
+            picks = fields["characters"]
+            if isinstance(picks, dict):
+                values = _PlayerCharacters(row)
+                values += [{} for _ in range(MAX_CHARACTERS - len(values))]
+                places = {int(place) - 1: pick for place, pick in picks.items()}
+            else:
+                values = [{} for _ in picks]
+                places = dict(enumerate(picks))
+            for index, pick in places.items():
+                value = {}
+                if pick:
+                    value, refused = _PickValue(pick, catalog, snapshot)
+                    if refused is not None:
+                        return refused
+                values[index] = value
             while values and not values[-1]:
                 values.pop()
             row["character"] = values[0] if values else {}
@@ -567,7 +597,9 @@ def UpdateTeam(slot, fields, games=None):
     ``name`` (str, stored trimmed); ``members`` (up to MAX_MEMBERS of {"name",
     "twitter": str, "character": (en_name, skin row, codename) or None}: the
     whole list is replaced, an empty member keeping its place, as a page's rows
-    do). Picks as in UpdatePlayer; a Refusal, or None."""
+    do. Or a dict of the places to change, "1" being the first, of the keys to
+    change: what it does not name stays as it is stored, and the empty members
+    at the end go). Picks as in UpdatePlayer; a Refusal, or None."""
     slot = str(slot)
     if slot not in TEAM_SLOTS:
         logger.warning(f"Result: ignoring team {slot}")
@@ -577,17 +609,28 @@ def UpdateTeam(slot, fields, games=None):
         if "members" in fields:
             catalog = _Catalog(games)
             snapshot = catalog.Current() if catalog is not None else None
-            members = []
-            for member in fields["members"]:
-                pick = member.get("character")
-                value = {}
-                if pick:
-                    value, refused = _PickValue(pick, catalog, snapshot)
+            changes = fields["members"]
+            if isinstance(changes, dict):
+                members = _Members(row)
+                for place, change in changes.items():
+                    index = int(place) - 1
+                    members += [_EmptyMember()
+                                for _ in range(index + 1 - len(members))]
+                    members[index], refused = _ChangedMember(
+                        members[index], change, catalog, snapshot)
                     if refused is not None:
                         return refused
-                members.append({"name": _Clean(member.get("name")),
-                                "twitter": _Clean(member.get("twitter")),
-                                "character": value})
+                while members and not (_MemberHasInput(members[-1])
+                                       or members[-1].get("twitter")):
+                    members.pop()
+            else:
+                members = []
+                for change in changes:
+                    member, refused = _ChangedMember(
+                        _EmptyMember(), change, catalog, snapshot)
+                    if refused is not None:
+                        return refused
+                    members.append(member)
             row["members"] = members
         if "name" in fields:
             row["name"] = _Clean(fields["name"])
@@ -836,6 +879,7 @@ class ResultService(RenderLane):
             if config.get("layout") != layout:
                 config["layout"] = layout
                 SettingsManager.Set(CONFIG_SETTING, config)
+        self._PublishLayout()
         return True
 
     def FollowBattleFormat(self, fmt):
@@ -848,6 +892,12 @@ class ResultService(RenderLane):
                 self.SetLayout(DEFAULT_TEAM_LAYOUT)
         elif team:
             self.SetLayout(DEFAULT_LAYOUT)
+        # Whether or not that wrote anything: without a saved layout the format
+        # chose it (Layout()), and the format is already the new one here.
+        self._PublishLayout()
+
+    def _PublishLayout(self):
+        StateManager.SetIfChanged(schema.RESULT_LAYOUT_ROOT, self.Layout())
 
     # ── what a page shows ────────────────────────────────────────────────
 
@@ -1323,7 +1373,7 @@ class ResultService(RenderLane):
     def _RunImport(self, provider, kind, count, codename, revision):
         """The job, on the provider's worker."""
         try:
-            standings = provider.GetStandings(count, None, None, strict=True)
+            standings = provider.GetStandings(count, None, None)
         except Exception:
             logger.opt(exception=True).warning(
                 "Result: the standings could not be fetched")

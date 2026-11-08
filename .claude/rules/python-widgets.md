@@ -115,7 +115,7 @@ publish する。ヘッドレスは同じものを core の `PlayerService.SeedE
     値は `Top8Service` が選手カードと同じ組み立てで作り、state → 選択の逆引きは `Top8Service.CharacterPick`）。
     パネルは S4i で React のページ（`/web/top8`）になり、Qt 版は削除済み（ページの逆引きは同じ表で検査する
     `web/src/Top8Page/characterPick.ts`）。
-    リザルトのパネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
+    大会リザルトも S4r で React のページ（`/web/result`）になり、`ResultService` に識別子（en_name + スキンの行 + 選んだゲーム）で渡す。
     実況パネルは Web 版（React）だけになり（S4c）、アイコンの識別子（stem）を `CommentaryService.SetField` に渡す。
     新しく同じ形を書かない
 - `src/core` 外で state を書いてよいのは `AutonaTournamentDataProvider`

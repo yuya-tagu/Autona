@@ -651,7 +651,7 @@ test("a page that cannot copy an image offers it to open or save", async () => {
 });
 
 test("the desktop's view that cannot copy an image says so, with no link", async () => {
-    // The view opens no new window: a link would do nothing (S4e review).
+    // There the copy is shown off, with why, and no link (S4e review).
     setSecure(false);
     setStream({thumbnail: DONE});
     await renderPage({desktop: true});

@@ -4,9 +4,6 @@ core/ResultService's way to a picture: how, and in what order, is
 AutonaOffscreenRenderer's. What is the result's own is that a layout says the
 size of its picture (960 wide for the vertical ones), and which page draws it
 (layout/<subdir>/result.html, whose initResult gets {data, config, layout}).
-
-result/ResultRenderer stays beside it until the Qt panel, its only user, goes
-(ADR-005 S4r).
 """
 from qtpy.QtCore import Qt
 
@@ -20,9 +17,9 @@ class ResultPageRenderer(AutonaOffscreenRenderer):
     DEFAULT_TEMPLATE_ID = DEFAULT_LAYOUT
     PAGE_FILE = "result.html"
     INIT_FUNCTION = "initResult"
-    # As result/ResultRenderer has it. It only matters for a picture of
-    # another shape, which the view having been given the size does not make;
-    # the thumbnail's IgnoreAspectRatio is that renderer's, as it always was.
+    # It only matters for a picture of another shape, which the view having
+    # been given the size does not make; the thumbnail's IgnoreAspectRatio is
+    # that renderer's, as it always was.
     ASPECT_MODE = Qt.AspectRatioMode.KeepAspectRatio
     # The first render says which layout it wants: loading the default first
     # would load a page only to replace it.

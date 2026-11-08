@@ -71,26 +71,6 @@
         <translation>所属タグ</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Top 8 Players</source>
-        <translation>順位・プレイヤー情報</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Copy Preview to Clipboard</source>
-        <translation>プレビューをクリップボードにコピー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Save Preview as Image</source>
-        <translation>プレビューを画像として保存</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Post Result to X</source>
-        <translation>リザルトをXに投稿する</translation>
-    </message>
-    <message>
         <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>PLAYER</source>
         <translation>プレイヤー情報</translation>
@@ -793,8 +773,6 @@
         <location filename="..\AutonaUpdater.py" line="104" />
         <location filename="..\AutonaScoreboardWidget.py" line="1167" />
         <location filename="..\AutonaScoreboardWidget.py" line="1098" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="883" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="857" />
         <location filename="..\Autona.py" line="579" />
         <location filename="..\Autona.py" line="170" />
         <source>Warning</source>
@@ -848,7 +826,6 @@
         <translation>対戦動画サムネイル</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="86" />
         <location filename="..\Autona.py" line="332" />
         <source>Result Settings</source>
         <translation>大会リザルト</translation>
@@ -879,26 +856,6 @@
         <location filename="..\Autona.py" line="102" />
         <source>Player List</source>
         <translation>選手一覧</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="352" />
-        <source>Save player characters</source>
-        <translation>選手のキャラクターを保存</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="360" />
-        <source>Saves player data so you can easily reuse it in future results.</source>
-        <translation>選手データを保存し、次回以降のリザルト作成でもかんたんに呼び出すことができます</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="820" />
-        <source>There are no players to save.</source>
-        <translation>保存できる選手がいません。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="828" />
-        <source>Saved {0} player(s) to the local database.</source>
-        <translation>{0} 人の選手をローカルDBに保存しました。</translation>
     </message>
     <message>
         <location filename="..\AutonaNotesWidget.py" line="34" />
@@ -1190,107 +1147,43 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="234" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="207" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="122" />
         <source>Player Name</source>
         <translation>プレイヤー名</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="233" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="126" />
         <source>Sponsor</source>
         <translation>所属タグ</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="178" />
-        <source>Top 8 Teams</source>
-        <translation>トップ8チーム</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="193" />
-        <source>Team Name</source>
-        <translation>チーム名</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="242" />
-        <source>Load top 8 from StartGG</source>
-        <translation>StartGG からトップ8を読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="0" />
-        <source>Load tournament results</source>
-        <translation>大会結果を読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="249" />
-        <source>Load tournament info</source>
-        <translation>大会情報を読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="258" />
-        <source>Select Result Layout</source>
-        <translation>リザルトのデザインを選択</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="267" />
+        <location filename="..\core\ResultService.py" line="94" />
         <source>Horizontal (1920x1080)</source>
         <translation>横向き (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="269" />
+        <location filename="..\core\ResultService.py" line="95" />
         <source>Horizontal TOP16 (1920x1080)</source>
         <translation>横向き TOP16 (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="271" />
+        <location filename="..\core\ResultService.py" line="96" />
         <source>Vertical (960x1080)</source>
         <translation>縦向き (960x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="273" />
+        <location filename="..\core\ResultService.py" line="97" />
         <source>Vertical Dark Gold 激 (960x1080)</source>
         <translation>縦向き Dark Gold 激 (960x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="275" />
+        <location filename="..\core\ResultService.py" line="98" />
         <source>Team / Crew (1920x1080)</source>
         <translation>チーム / クルー (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="277" />
+        <location filename="..\core\ResultService.py" line="99" />
         <source>Team / Crew 縦並び (1920x1080)</source>
         <translation>Team / Crew 縦並び (1920x1080)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
-        <source>Main character</source>
-        <translation>メインキャラクター</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
-        <source>Sub character</source>
-        <translation>サブキャラクター</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="574" />
-        <source>Loading...</source>
-        <translation>読み込み中...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="792" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="583" />
-        <source>Load top {0} from StartGG</source>
-        <translation>StartGG から TOP{0} を読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="872" />
-        <source>Autona - Result</source>
-        <translation>Autona - リザルト</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="874" />
-        <source>The result image has been saved here:</source>
-        <translation>リザルト画像をここに保存しました:</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
@@ -1738,8 +1631,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
-        <location filename="..\result\main_generate_result.py" line="176" />
-        <location filename="..\result\main_generate_result.py" line="123" />
+        <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>サンプル大会</translation>
     </message>

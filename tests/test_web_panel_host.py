@@ -30,18 +30,22 @@ requests the host makes, and navigates the way the shell does
 the Web UI's own tests and by Playwright (web/e2e/panel-shell.spec.ts).
 """
 import json
+import logging
 import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
+from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer, QUrl
+from qtpy.QtTest import QTest
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from src import AutonaWebPageLifecycle as WPL
+from src import AutonaWebPanelHost as HostModule
 from src.AutonaWebPanelHost import AutonaWebPanelHost, PanelPath, WebPanelPages
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
@@ -325,6 +329,170 @@ def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
     assert rig.requests[-1] == "/web/second?desktop=1&lng=ja"
     assert rig.js("window.__loadId") != document
     assert not rig.host.view.page().refusedLast
+
+
+# ── a new window goes to the default browser (ADR-005 S4r) ──────────────
+
+def _handedOutside(monkeypatch):
+    # What the host gives the operating system: a spy, so no browser opens.
+    opened = []
+    monkeypatch.setattr(
+        HostModule, "QDesktopServices",
+        SimpleNamespace(openUrl=lambda url: not opened.append(
+            bytes(url.toEncoded()).decode())))
+    return opened
+
+
+def _clickView(rig):
+    # A real click on the view, the only thing a new window answers to. One sent
+    # before the page's first frame is lost, so until the page has seen one.
+    def clicked():
+        QTest.mouseClick(rig.host.view.focusProxy(), Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.NoModifier, QPoint(50, 50))
+        return _waitUntil(lambda: rig.js("window.__clicks") > 0, timeout=0.5)
+    assert _waitUntil(clicked), "the page saw no click"
+
+
+def _clickOpening(rig, url):
+    rig.js("window.__clicks = 0, window.addEventListener('click', function () {"
+           " window.__clicks += 1; window.open("
+           + json.dumps(url) + ", '_blank', 'noopener'); }, {once: true}), 0")
+    _clickView(rig)
+
+
+def test_a_click_gives_a_web_link_to_the_default_browser(buildHost, monkeypatch):
+    # The post on X (decision 11): the intent URL, in the operator's browser
+    # where they are signed in. The view itself goes nowhere.
+    opened = _handedOutside(monkeypatch)
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    url = "https://example.test/post?text=a%20b"
+
+    _clickOpening(rig, url)
+
+    assert _waitUntil(lambda: opened)
+    assert opened == [url]
+    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.js("window.__loadId") == document
+    assert len(rig.loads) == 1
+
+
+def test_a_click_on_a_real_link_goes_to_the_default_browser(buildHost, monkeypatch):
+    # What the page's "open the image" is, on a computer that cannot copy it.
+    opened = _handedOutside(monkeypatch)
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    url = "https://example.test/out/results/a.png?v=2"
+
+    rig.js("(function () { var link = document.createElement('a'); link.href = "
+           + json.dumps(url) + "; link.target = '_blank';"
+           " link.rel = 'noopener noreferrer'; link.textContent = 'open';"
+           " link.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;"
+           "display:block'; document.body.appendChild(link);"
+           " window.__clicks = 0; link.addEventListener('click', function () {"
+           " window.__clicks += 1; }, {once: true}); return 0; })()")
+    _clickView(rig)
+
+    assert _waitUntil(lambda: opened)
+    assert opened == [url]
+    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.js("window.__loadId") == document
+    assert len(rig.loads) == 1
+
+
+def test_script_alone_opens_nothing(buildHost, monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    rig = _shown(buildHost)
+
+    rig.js("void window.open('https://example.test/no-click', '_blank',"
+           " 'noopener')")
+    rig.js("void window.open('https://example.test/no-click-either')")
+    # The click after them says they have had their chance.
+    _clickOpening(rig, "https://example.test/clicked")
+
+    assert _waitUntil(lambda: opened)
+    assert opened == ["https://example.test/clicked"]
+
+
+@pytest.mark.parametrize("url", [
+    "file:///c:/windows/system32/calc.exe", "ms-calculator:",
+])
+def test_a_click_opens_no_other_scheme(buildHost, monkeypatch, url):
+    # A page on the LAN starts no application here. A spy on the page's own
+    # route, as Chromium may not even ask for these.
+    opened = _handedOutside(monkeypatch)
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+
+    _clickOpening(rig, url)
+    _clickOpening(rig, "https://example.test/clicked")
+
+    assert _waitUntil(lambda: opened)
+    assert opened == ["https://example.test/clicked"]
+    assert rig.js("window.__loadId") == document
+
+
+@pytest.mark.parametrize("url, handed", [
+    ("https://example.test/a", True),
+    ("http://192.168.0.2/a", True),
+    ("file:///c:/windows/system32/calc.exe", False),
+    ("ms-calculator:", False),
+    ("javascript:alert(1)", False),
+    ("data:text/html,x", False),
+    ("", False),
+])
+def test_only_http_and_https_are_handed_outside(monkeypatch, url, handed):
+    # The rule itself, whatever reaches it.
+    opened = _handedOutside(monkeypatch)
+
+    HostModule._PanelPage._OpenOutside(
+        None, SimpleNamespace(requestedUrl=lambda: QUrl(url),
+                              isUserInitiated=lambda: True))
+
+    assert opened == ([url] if handed else [])
+
+
+def test_a_window_no_click_asked_for_is_not_handed_outside(monkeypatch, caplog):
+    # A layout's script can open what it likes in a click of its own; without
+    # one, whatever got past the view's settings stops here.
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        HostModule._PanelPage._OpenOutside(
+            None, SimpleNamespace(
+                requestedUrl=lambda: QUrl("https://example.test/a?text=secret"),
+                isUserInitiated=lambda: False))
+
+    assert opened == []
+    assert "example.test" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_a_link_the_system_does_not_open_is_logged_without_its_text(
+        monkeypatch, caplog):
+    # The operator sees no browser come up: the log is where it says why. The
+    # query of the post on X is theirs, and not for the log.
+    monkeypatch.setattr(HostModule, "QDesktopServices",
+                        SimpleNamespace(openUrl=lambda url: False))
+
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        HostModule._PanelPage._OpenOutside(
+            None, SimpleNamespace(
+                requestedUrl=lambda: QUrl("https://example.test/a?text=secret"),
+                isUserInitiated=lambda: True))
+
+    assert "could not open" in caplog.text
+    assert "example.test" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_the_view_asks_the_system_for_nothing_by_itself(buildHost):
+    settings = _shown(buildHost).host.view.settings()
+
+    assert not settings.testAttribute(
+        QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows)
+    assert settings.unknownUrlSchemePolicy() == (
+        QWebEngineSettings.UnknownUrlSchemePolicy.DisallowUnknownUrlSchemes)
 
 
 def test_a_host_shown_without_a_panel_builds_nothing(buildHost):
@@ -1149,12 +1317,48 @@ def test_the_qt_thumbnail_panel_is_gone():
                 if f"<source>{source}</source>" in text]
         assert back == [], path.name
 
-    # The translations core, SCORE and the Result panel still use stay.
+    # The translations core and SCORE still use stay.
     for path in (src / "i18n").glob("*.ts"):
         text = path.read_text(encoding="utf-8")
         for source in ("Standard", "Center Panel", "Thumbnail Settings",
-                       "The thumbnail has been generated here:",
-                       "Copy Preview to Clipboard", "Save Preview as Image"):
+                       "The thumbnail has been generated here:"):
+            assert f"<source>{source}</source>" in text, (path.name, source)
+
+
+def test_the_qt_result_panel_is_gone():
+    # ADR-005 S4r: the React page is the only Result panel. Its widget, its .ui,
+    # its renderer and its generator may not come back in src/, nor the
+    # translations only they used. The layouts' names are core's now.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    for gone in ("AutonaResultSettingsWidget.py",
+                 "layout/AutonaResultSettings.ui",
+                 "result/main_generate_result.py",
+                 "result/ResultRenderer.py"):
+        assert not (src / gone).exists(), gone
+    words = ("import AutonaResultSettingsWidget", "AutonaResultSettingsWidget(",
+             "AutonaResultSettingsWidget.py", "AutonaResultSettings.ui",
+             "import main_generate_result", "main_generate_result.py",
+             "import ResultRenderer", "ResultRenderer(", "DragCardList(")
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if path.name != "ResultService.py"
+            and any(word in path.read_text(encoding="utf-8")
+                    for word in words)]
+    assert left == []
+
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        back = [source for source in (
+                    "Post Result to X", "Select Result Layout",
+                    "Copy Preview to Clipboard", "Save Preview as Image",
+                    "Save player characters", "Autona - Result")
+                if f"<source>{source}</source>" in text]
+        assert back == [], path.name
+        for source in ("Horizontal (1920x1080)", "Sample Tournament",
+                       "Result Settings"):
             assert f"<source>{source}</source>" in text, (path.name, source)
 
 
@@ -1195,17 +1399,17 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "result")
+        WebPanelPages().Add(1, "board")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
     _BuildUi builds it, with a few sidebar items: five React ones and two
-    Qt ones (the eager scoreboard, the lazy Result Settings -- the lazy Top 8
-    until it became a React page, ADR-005 S4i, then the lazy Statistics
-    until S4k), in the real order (Qt items between them). Off screen, so the host builds no view; what
-    it was asked to show is its _panel."""
+    Qt ones (the eager scoreboard, the lazy Board -- the lazy Top 8 until it
+    became a React page, ADR-005 S4i, the lazy Statistics until S4k, the lazy
+    Result Settings until S4r), in the real order (Qt items between them). Off
+    screen, so the host builds no view; what it was asked to show is its _panel."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
                "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
@@ -1250,8 +1454,8 @@ class _WindowRig:
         w._webPanelHost = None
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
-        # As _BuildUi: event, stream, scoreboard (eager), ..., result, top8,
-        # commentary, ..., stats. (Result is after the scoreboard in the
+        # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
+        # commentary, ..., stats. (Board is after the scoreboard in the
         # sidebar; last here so the indexes below stay one per kind of item.)
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
@@ -1259,7 +1463,7 @@ class _WindowRig:
                           (w._CreateTop8Panel, "top8"),
                           (w._CreateCommentaryPanel, "commentary"),
                           (w._CreateStatsPanel, "stats"),
-                          (qtPanel("result"), "result")):
+                          (qtPanel("board"), "board")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
                 w._lazyPanels[index] = (page, key)
@@ -1283,7 +1487,7 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, RESULT = range(7)
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, BOARD = range(7)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -1330,8 +1534,8 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert host._panel == "stats"
     assert w.stack.widget(STATS) is rig.placeholders[STATS]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(RESULT) == RESULT
-    assert rig.built == ["result"]
+    assert rig.choose(BOARD) == BOARD
+    assert rig.built == ["board"]
     assert w.dockWidgets == []
 
 

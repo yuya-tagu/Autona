@@ -16,6 +16,12 @@
  * It's worth mentioning that we depend on using the **Delta** portion of python's DeepDiff library.
  * using the deltas makes it specify every changed scalar rather than grouping things into
  * objects that get added, which complicates things dramatically when trying to batch updates.
+ *
+ * Every row is applied on its own: the server joins the rows of several revisions in one message,
+ * with no mark of where one ends, so nothing can be sorted or grouped here. What makes that
+ * possible is on the python side (StateManager.SaveState, pinned with this file by
+ * stateDelta.cases.json): a list is compared place by place, so the rows of one are about the
+ * values at their places and about its tail.
  */
 
 /**
@@ -29,11 +35,15 @@ export function applyDelta(data, delta) {
     /** @type {DeltaOpType} */ const deltaOp = delta.action;
     const newValue = delta.value;
     const lastPiece = pathPieces[pathPieces.length-1];
+    // A new key holding a list of one element is sent as that element: what is
+    // missing then is the list. Not every row of this action names a place: the
+    // other new keys of the same change are given the action too.
+    const listMayBeMissing = deltaOp === 'iterable_item_added' && typeof lastPiece === 'number';
 
     let currentData = data;
     for (let i = 0; i < pathPieces.length-1; i += 1) {
         if (!currentData.hasOwnProperty(pathPieces[i])) {
-            currentData[pathPieces[i]] = {};
+            currentData[pathPieces[i]] = listMayBeMissing && i === pathPieces.length-2 ? [] : {};
         }
 
         currentData = currentData[pathPieces[i]];
@@ -44,6 +54,15 @@ export function applyDelta(data, delta) {
             delete currentData[lastPiece];
         } else {
             console.warn(`Couldn't find data to delete for path: ${pathPieces}`);
+        }
+    } else if (deltaOp === 'iterable_item_removed') {
+        // Only the tail of a list goes, and this row names a place in it: the
+        // list ends before that place. Not a removal at the index: the rows of
+        // a revision name places in the list as it was, lowest first.
+        if (Array.isArray(currentData)) {
+            currentData.length = Math.min(currentData.length, lastPiece);
+        } else {
+            console.warn(`Couldn't find a list to shorten for path: ${pathPieces}`);
         }
     } else {
         currentData[lastPiece] = newValue;

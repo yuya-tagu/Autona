@@ -458,8 +458,8 @@ export function ThumbnailCard({options, thumbnail, setOption, generate}: {
             {/* An image reaches the clipboard from a secure context only
                 (this PC); a page from another computer over http offers
                 the image to open or save instead (S4 論点 1). The desktop's
-                view opens no new window, so a link would do nothing there:
-                the copy is shown off, with why (S4e review). */}
+                view has no link to give: there the copy is shown off, with
+                why (S4e review). */}
             {canCopyImage() ? (
                 <Box>
                     <Button variant="outlined" disabled={!made || running}

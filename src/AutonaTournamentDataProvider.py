@@ -21,14 +21,12 @@ import time
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from .core import StateSchema as schema
 from .core.AnalysisService import AnalysisService
 from .core.StateManager import StateManager
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
 from .core import TournamentService as tournament_service
 from .core.TournamentService import TournamentService
-from .StateManagerBridge import StateManagerBridge
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers import AutonaQtHelper
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
@@ -37,10 +35,6 @@ from .TournamentDataProvider.StartGGDataProvider import (
     ResolveEventUrl as ResolveStartGGEventUrl)
 from .Helpers.AutonaVersionHelper import get_supported_providers
 from loguru import logger
-
-
-_BANNER_VERSION_PATH = (f"{schema.TOURNAMENT_INFO_ROOT}."
-                        f"{schema.TOURNAMENT_BANNER_VERSION_KEY}")
 
 
 def _NoProgress(*args):
@@ -91,7 +85,6 @@ class AutonaTournamentDataProviderSignals(QObject):
     stream_queue_loaded = Signal(dict)
     sets_data_updated = Signal(dict)
     tournament_url_update = Signal(str)
-    media_updated = Signal()
 
 
 class AutonaTournamentDataProvider(QObject):
@@ -103,18 +96,6 @@ class AutonaTournamentDataProvider(QObject):
         self.signals: AutonaTournamentDataProviderSignals = AutonaTournamentDataProviderSignals()
 
         self.signals.game_changed.connect(self.GameChanged)
-
-        # media_updated (the thumbnail / result previews' cue) follows the
-        # tournament banner's version, whoever changed the file (core/
-        # TournamentMediaService.py, ADR-005 S4f). Through the bridge, which
-        # drops these connections with this object. None until a version is
-        # seen: the first one (the launch seed's, on the first launch after
-        # S4f) is the baseline, not a change.
-        self._bannerVersion = StateManager.Get(_BANNER_VERSION_PATH, None)
-        StateManagerBridge.instance.state_updated.connect(
-            self._OnStateForMedia)
-        StateManagerBridge.instance.state_big_change.connect(
-            self._OnStateForMedia)
 
         # How a start.gg videogame id becomes the loaded game. Registered by
         # the shell (bootstrap_gui() points it at the game asset adapter,
@@ -263,18 +244,6 @@ class AutonaTournamentDataProvider(QObject):
         if provider is None:
             return None
         return provider.GetBannerURL()
-
-    def _OnStateForMedia(self, *_payload):
-        # Through the bridge: on the GUI thread, and inside StateManager.lock
-        # when the write was made there (agent-pitfalls #17). Reads one key;
-        # the previews' work is deferred to the event loop, out of the lock.
-        version = StateManager.Get(_BANNER_VERSION_PATH, None)
-        if version is None or version == self._bannerVersion:
-            return
-        first = self._bannerVersion is None
-        self._bannerVersion = version
-        if not first:
-            QTimer.singleShot(0, self, self.signals.media_updated.emit)
 
     def SetStartggEventSlug(self, mainWindow):
         """The tournament URL dialog (the sidebar's "Set tournament"),
@@ -574,12 +543,6 @@ class AutonaTournamentDataProvider(QObject):
         self._Fetch("recent sets", self.provider.GetRecentSets,
                     id1=id1, id2=id2, callback=callback,
                     requestTime=time.time_ns(), videogame=videogame)
-
-    def GetStandings(self, playerNumber, callback):
-        if self.provider is None:
-            return
-        self._Fetch("standings", self.provider.GetStandings, callback.emit,
-                    playerNumber=playerNumber)
 
     @staticmethod
     def _ProviderPlayerId(playerId):

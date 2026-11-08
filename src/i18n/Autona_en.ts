@@ -71,26 +71,6 @@
         <translation>SPONSORS?</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Top 8 Players</source>
-        <translation>Top 8 Players</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Copy Preview to Clipboard</source>
-        <translation>Copy Preview to Clipboard</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Save Preview as Image</source>
-        <translation>Save Preview as Image</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Post Result to X</source>
-        <translation>Post Result to X</translation>
-    </message>
-    <message>
         <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>PLAYER</source>
         <translation>PLAYER</translation>
@@ -792,8 +772,6 @@
         <location filename="..\AutonaUpdater.py" line="104" />
         <location filename="..\AutonaScoreboardWidget.py" line="1167" />
         <location filename="..\AutonaScoreboardWidget.py" line="1098" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="883" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="857" />
         <location filename="..\Autona.py" line="579" />
         <location filename="..\Autona.py" line="170" />
         <source>Warning</source>
@@ -847,7 +825,6 @@
         <translation>Thumbnail Settings</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="86" />
         <location filename="..\Autona.py" line="332" />
         <source>Result Settings</source>
         <translation>Result Settings</translation>
@@ -878,26 +855,6 @@
         <location filename="..\Autona.py" line="102" />
         <source>Player List</source>
         <translation>Player List</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="352" />
-        <source>Save player characters</source>
-        <translation>Save player characters</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="360" />
-        <source>Saves player data so you can easily reuse it in future results.</source>
-        <translation>Saves player data so you can easily reuse it in future results.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="820" />
-        <source>There are no players to save.</source>
-        <translation>There are no players to save.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="828" />
-        <source>Saved {0} player(s) to the local database.</source>
-        <translation>Saved {0} player(s) to the local database.</translation>
     </message>
     <message>
         <location filename="..\AutonaNotesWidget.py" line="34" />
@@ -1188,107 +1145,43 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="234" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="207" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="122" />
         <source>Player Name</source>
         <translation>Player Name</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="233" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="126" />
         <source>Sponsor</source>
         <translation>Sponsor</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="178" />
-        <source>Top 8 Teams</source>
-        <translation>Top 8 Teams</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="193" />
-        <source>Team Name</source>
-        <translation>Team Name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="242" />
-        <source>Load top 8 from StartGG</source>
-        <translation>Load top 8 from StartGG</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="0" />
-        <source>Load tournament results</source>
-        <translation>Load tournament results</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="249" />
-        <source>Load tournament info</source>
-        <translation>Load tournament info</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="258" />
-        <source>Select Result Layout</source>
-        <translation>Select Result Layout</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="267" />
+        <location filename="..\core\ResultService.py" line="94" />
         <source>Horizontal (1920x1080)</source>
         <translation>Horizontal (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="269" />
+        <location filename="..\core\ResultService.py" line="95" />
         <source>Horizontal TOP16 (1920x1080)</source>
         <translation>Horizontal TOP16 (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="271" />
+        <location filename="..\core\ResultService.py" line="96" />
         <source>Vertical (960x1080)</source>
         <translation>Vertical (960x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="273" />
+        <location filename="..\core\ResultService.py" line="97" />
         <source>Vertical Dark Gold 激 (960x1080)</source>
         <translation>Vertical Dark Gold 激 (960x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="275" />
+        <location filename="..\core\ResultService.py" line="98" />
         <source>Team / Crew (1920x1080)</source>
         <translation>Team / Crew (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="277" />
+        <location filename="..\core\ResultService.py" line="99" />
         <source>Team / Crew 縦並び (1920x1080)</source>
         <translation>Team / Crew vertical (1920x1080)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
-        <source>Main character</source>
-        <translation>Main character</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
-        <source>Sub character</source>
-        <translation>Sub character</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="574" />
-        <source>Loading...</source>
-        <translation>Loading...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="792" />
-        <location filename="..\AutonaResultSettingsWidget.py" line="583" />
-        <source>Load top {0} from StartGG</source>
-        <translation>Load top {0} from StartGG</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="872" />
-        <source>Autona - Result</source>
-        <translation>Autona - Result</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaResultSettingsWidget.py" line="874" />
-        <source>The result image has been saved here:</source>
-        <translation>The result image has been saved here:</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
@@ -1736,8 +1629,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
-        <location filename="..\result\main_generate_result.py" line="176" />
-        <location filename="..\result\main_generate_result.py" line="123" />
+        <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>Sample Tournament</translation>
     </message>

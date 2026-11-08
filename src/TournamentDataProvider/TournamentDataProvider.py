@@ -61,5 +61,5 @@ class TournamentDataProvider(QObject):
         pass
 
     def GetStandings(self, playerNumber, progress_callback=None,
-                     cancel_event=None, strict=False):
+                     cancel_event=None):
         pass

@@ -75,7 +75,7 @@ function useCommentaryState() {
     return {commentary, colors, players: playerList};
 }
 
-function DropLine() {
+export function DropLine() {
     return <Box sx={{height: 2, bgcolor: "primary.main", borderRadius: 1}}/>;
 }
 
@@ -336,7 +336,8 @@ function CommentaryContent() {
 
 // Where a card dropped on card `index` goes: before it in its upper half,
 // after it in the lower (the Qt list's midpoint rule).
-function dropIndex(index: number, event: React.DragEvent<HTMLElement>): number {
+export function dropIndex(index: number,
+                          event: React.DragEvent<HTMLElement>): number {
     const box = event.currentTarget.getBoundingClientRect();
     return event.clientY < box.top + box.height / 2 ? index : index + 1;
 }
