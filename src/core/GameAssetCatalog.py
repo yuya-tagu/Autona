@@ -45,7 +45,8 @@ Locking rules
   the Qt adapter's `onLoad` signal is the notification). What a switch to
   another game invalidates elsewhere in the state is called directly by
   `SelectGame`, outside the writer lock and inside its save block: the
-  Top 8 players' characters (`Top8Service.ForgetCharacters`).
+  Top 8 players' and the result's characters (`Top8Service` /
+  `ResultService.ForgetCharacters`).
 
 Construction is side-effect free; bootstrap_core() calls `ResetGameState()`
 to publish the empty `game` state, and the Qt adapter drives `ScanGames()`.
@@ -746,10 +747,11 @@ class GameAssetCatalog:
         writer lock (see the module docstring).
 
         A load that replaces one game with a different one also empties the
-        Top 8 players' characters (``Top8Service.ForgetCharacters``), in the
-        same save cycle. Not on the first load of a session -- `game` is
-        empty then (``ResetGameState``) and the saved Top 8 keeps its
-        characters -- nor on a reload of the same game.
+        Top 8 players' and the result's characters
+        (``Top8Service`` / ``ResultService.ForgetCharacters``), in the same
+        save cycle. Not on the first load of a session -- `game` is empty
+        then (``ResetGameState``) and what was saved keeps its characters --
+        nor on a reload of the same game.
         """
         with StateManager.SaveBlock():
             with self._lock:
@@ -776,10 +778,10 @@ class GameAssetCatalog:
             if snapshot.replaced:
                 # Outside the writer lock (only the catalog's own work runs
                 # under it), inside the save block: one cycle with the
-                # switch. Imported here because Top8Service imports this
-                # module.
-                from . import Top8Service
+                # switch. Imported here because they import this module.
+                from . import ResultService, Top8Service
                 Top8Service.ForgetCharacters()
+                ResultService.ForgetCharacters()
             return snapshot
 
     def _Publish(self, snapshot):

@@ -377,6 +377,52 @@ class AutonaTournamentDataProvider(QObject):
             lambda tournamentData: self._onTournamentDataResult(
                 tournamentData, initialLoading, provider))
 
+    def RefreshTournamentData(self, done):
+        """The tournament's data asked for again and applied, as
+        GetTournamentData does, and then the game it names seen loaded (a load
+        is the loader's job, and ends later): `done()`, on the GUI thread, once
+        that is over however it went -- the data could not be fetched, the
+        tournament was replaced meanwhile, the game is not one of ours -- so
+        that what comes next reads the game of this tournament
+        (ResultService.LoadStandings, ADR-005 S4q review). Once the app is
+        quitting it may not come.
+
+        True if it was started; False, calling nothing, when no tournament is
+        loaded or the executor has shut down."""
+        provider = self.provider
+        if provider is None:
+            return False
+
+        def fetch(**kwargs):
+            # Not left to the executor: `then` is not called after a raise.
+            try:
+                return provider.GetTournamentData(**kwargs)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "The tournament's data could not be fetched again")
+                return None
+
+        def gameLoaded():
+            # On whichever thread ended the attempt (LoadGameByCodename).
+            _OnGuiThread(done)
+
+        def applied(tournamentData):
+            try:
+                if tournamentData:
+                    self._onTournamentDataResult(tournamentData, False,
+                                                 provider)
+                if provider is self.provider and provider.videogame \
+                        and self.selectGameFromStartGGId is not None:
+                    self.selectGameFromStartGGId(provider.videogame,
+                                                 done=gameLoaded)
+                    return
+            except Exception:
+                logger.exception("The tournament's data could not be applied")
+            done()
+
+        future = self._Fetch("tournament data", fetch, applied)
+        return not future.cancelled()
+
     def _onTournamentDataResult(self, tournamentData, initialLoading,
                                 provider):
         """The tournament data `provider` answered, on the main thread.

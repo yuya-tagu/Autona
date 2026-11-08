@@ -85,7 +85,8 @@ publish する。ヘッドレスは同じものを core の `PlayerService.SeedE
 - **`StateManager.Set` / `Unset` を Qt ウィジェットから呼ばない**。書き込みは
   `src/core/Actions.py` の `AutonaActions` か、core のドメインサービス
   （`PlayerService` / `SetLoadService` / `SetFollowService` / `CrewBattleService` / `TournamentInfoService` /
-  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService` / `CommentaryService`）を通す。
+  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService` / `CommentaryService` /
+  `ThumbnailService` / `ResultService`）を通す。
   サブツリーのシード・破棄は `src/core/StateSchema.py`
 - ウィジェットの役割は「操作を依頼する」「state を読んで描画する」の 2 つだけ。
   **ウィジェット同士で値をコピーして操作を実現しない**（ADR-005 S2c で選手カードの `SwapWith` を削除し、

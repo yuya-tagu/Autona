@@ -649,6 +649,59 @@ def ReadThumbnailRender() -> dict:
     return read
 
 
+# The tournament result's render and its standings import (ADR-005 S4q;
+# core/ResultService.py). Roots of their own, whose names cannot be taken for
+# out/results or out/result_players. `result_render` is shaped like
+# thumbnail.render. `result_standings`: status idle | running | done | error,
+# the error of a failed import (a code, see that module) and a revision that
+# every import advances.
+RESULT_RENDER_KEYS = ("status", "path", "error", "revision")
+RESULT_STANDINGS_KEYS = ("status", "error", "revision")
+
+
+def DefaultResultRender(revision=0) -> dict:
+    """`result_render` with no run in progress, at `revision` (a fresh dict on
+    every call)."""
+    return {"status": "idle", "path": "", "error": "", "revision": revision}
+
+
+def _Revision(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        and value >= 0 else 0
+
+
+def ReadResultRender() -> dict:
+    """`result_render` as published, a fresh dict: anything missing or
+    malformed read as idle's (no path, no error, revision 0)."""
+    value = StateManager.Get(RESULT_RENDER_ROOT, None)
+    if not isinstance(value, dict):
+        value = {}
+    read = DefaultResultRender(_Revision(value.get("revision")))
+    for key in ("status", "path", "error"):
+        if isinstance(value.get(key), str):
+            read[key] = value[key]
+    return read
+
+
+def DefaultResultStandings(revision=0) -> dict:
+    """`result_standings` with no import in progress, at `revision` (a fresh
+    dict on every call)."""
+    return {"status": "idle", "error": "", "revision": revision}
+
+
+def ReadResultStandings() -> dict:
+    """`result_standings` as published, a fresh dict: anything missing or
+    malformed read as idle's (no error, revision 0)."""
+    value = StateManager.Get(RESULT_STANDINGS_ROOT, None)
+    if not isinstance(value, dict):
+        value = {}
+    read = DefaultResultStandings(_Revision(value.get("revision")))
+    for key in ("status", "error"):
+        if isinstance(value.get(key), str):
+            read[key] = value[key]
+    return read
+
+
 # colors.{feature}.* -- only features the operator explicitly set are present,
 # which is what makes the layouts' colors.{feature} -> tournamentInfo fallback
 # work. The feature list itself is owned by core/ColorService.FEATURES, which
@@ -674,6 +727,9 @@ COLORS_ROOT = "colors"
 DISPLAY_OPTIONS_ROOT = "display_options"
 LAYOUT_OPTIONS_ROOT = "layout_options"
 RESULT_PLAYERS_ROOT = "result_players"
+RESULT_TEAMS_ROOT = "result_teams"
+RESULT_RENDER_ROOT = "result_render"
+RESULT_STANDINGS_ROOT = "result_standings"
 PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
 ANALYSIS_ROOT = "analysis"
 THUMBNAIL_ROOT = "thumbnail"
@@ -709,7 +765,12 @@ KEY_CATALOG = {
     PROVIDER_VIDEOGAME_ROOT: (),
     "streamQueue": (),
     "currentStream": (),
+    # The rows of the tournament result (core/ResultService.py), written by
+    # slot.
     RESULT_PLAYERS_ROOT: (),
+    RESULT_TEAMS_ROOT: (),
+    RESULT_RENDER_ROOT: RESULT_RENDER_KEYS,
+    RESULT_STANDINGS_ROOT: RESULT_STANDINGS_KEYS,
 }
 
 # Key families whose final segment comes from a Qt objectName at runtime
@@ -971,6 +1032,15 @@ def SeedPanelState():
     StateManager.SetIfChanged(
         f"{THUMBNAIL_ROOT}.{THUMBNAIL_RENDER_KEY}",
         DefaultThumbnailRender(ReadThumbnailRender()["revision"]))
+
+    # The tournament result's render and standings import (ADR-005 S4q), the
+    # same way. The rows are not seeded: a row nobody wrote reads as an empty
+    # one, and they are what the operator typed, which stays (decision 5).
+    StateManager.SetIfChanged(
+        RESULT_RENDER_ROOT, DefaultResultRender(ReadResultRender()["revision"]))
+    StateManager.SetIfChanged(
+        RESULT_STANDINGS_ROOT,
+        DefaultResultStandings(ReadResultStandings()["revision"]))
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)

@@ -767,6 +767,32 @@ def test_an_empty_codename_is_skipped_at_once(goldenGames, autonaApp):
     assert not manager._loaderRunning
 
 
+def test_the_game_a_tournament_names_says_when_it_is_over(
+        goldenGames, autonaApp, monkeypatch):
+    """The standings' import waits for it (the provider's
+    RefreshTournamentData). A game that is not one of ours asks nothing of the
+    loader."""
+    manager = goldenGames
+    generation = manager._loadGeneration
+    done = []
+
+    manager.SetGameFromStartGGId("no such game", done=lambda: done.append(1))
+    assert done == [1]
+    assert manager._loadGeneration == generation
+
+    # Nobody to tell: not even that.
+    manager.SetGameFromStartGGId("no such game")
+    assert done == [1]
+    assert manager._loadGeneration == generation
+
+    monkeypatch.setattr(manager.catalog, "GameFromStartGGId",
+                        lambda _gameid: "tgame")
+    manager.SetGameFromStartGGId(7, done=lambda: done.append(2))
+    drain_tasks()
+    assert done == [1, 2]
+    assert manager.catalog.Current().codename == "tgame"
+
+
 # ── the shutdown: nothing written by a load that cannot finish ──────────
 
 
@@ -986,6 +1012,18 @@ def test_a_headless_sync_load_on_the_main_thread_is_refused(
     games.LoadGameByCodename("", async_mode=False, done=lambda: done.append(2))
     games.LoadGameByCodename("", done=lambda: done.append(3))
     assert done == [2, 3] and games._loadGeneration == 0
+
+
+def test_the_game_a_tournament_names_says_when_it_is_over_headless(
+        goldenGames, autonaApp, monkeypatch):
+    games = _headlessGames(monkeypatch)
+    done = []
+
+    games.SelectGameFromStartGGId("no such game", done=lambda: done.append(1))
+    games.SelectGameFromStartGGId("no such game")
+
+    assert done == [1] and games._loadGeneration == 0
+    assert not games._loaderRunning
 
 
 def test_a_headless_load_waiting_for_the_loader_does_not_run_once_stopping(

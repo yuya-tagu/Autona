@@ -5881,3 +5881,134 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - 確認済み: React のページとプレビュー・「スムーズ」が無い・テンプレート切り替え・連続 4 回の変更がプレビュー 1 回にまとまる・作成でスナックバーとパス・既定に戻す（キャンセルで不変、確定で既定）・SCORE 表示中の描画 0 回・隠れている間の v1 の選手名変更が戻るとタイトルとプレビューの両方に出る（最初の実機確認で見つけて判断 10 で修正。修正後に再確認）・ズームは打鍵中に書き込みも描画もせず Enter で 1 回、1001 は断って値を戻す
   - legacy の `-png` とページのプレビューの差は画素値で最大 1（判断 10〜15 の修正前の版で比較。修正後の同期経路はテストで pin）
   - 未確認: 実機のファイル選択からの背景アップロード（e2e の `setInputFiles` と S4o の v1 で確認）・「画像をコピー」の貼り付け（ボタンが有効になるところまで。ユーザーのクリップボードを上書きするため）・SCORE の「Xに投稿する」（ユーザーのブラウザで x.com が開くため）・チーム戦のチーム名の on / off・スコアだけの変更で描き直さない（jest で pin）
+
+### S4 大会リザルトの React 化 — 設計（2026-11-09・メイン決定。論点はオーナー確認済み）
+
+**範囲**: サイドバー Display の「大会リザルト」（`src/AutonaResultSettingsWidget.py`）。**core と v1（S4q）→ React 化と Qt 版の削除（S4r）の 2 段**。これで Display の Qt パネルは無くなる。
+
+**棚卸しの要点**
+- `result_players` はパネルから描画への片道。パネルは state から復元せず、初回表示で空の 16 行で上書きする。単独と団体が同じキーを奪い合い、今は Qt の入力欄が両方を持つので壊れていない
+- 読み手は描画と投稿文だけ（同梱の OBS レイアウトは読まない）。書き手は `AutonaActions.PublishResultPlayers` の 1 つで、サブツリー全体の無条件 `Set`
+- 同期描画の呼び手はパネルの 3 ボタンだけで、SCORE や legacy の入口が無い。v1 ルートも無い
+- S4o でサムネイルから除いた問題（直列化なし・`${}` の注入・`RENDER_READY` 直後の `grab` で古い絵・入れ子のイベントループ・タイムアウト無し・GUI スレッドの PNG 符号化）が `ResultRenderer` にすべて残っている
+- テストは実質 6 件で、ペイロード・ファイル名・投稿文・standings のパースに無い
+
+**決定**
+1. **描画はサムネイルと土台を共有する**: `ThumbnailRenderer` のチケット・`PAINT_SCRIPT`・撮り直しを基底クラスに切り出し、Result はそのサブクラス（可変サイズ・`result.html`・`initResult`）。**ビューは kind ごとに別**（サイズが違い、前の絵との比較が壊れるため。比較はリサイズの後で撮る）。`startImageRender` の `kind` に `"result"` を足す（S4o 判断 2 の予定どおり。シェル操作は増やさない）。`layout/result*/` の注入の契約は変えない
+2. **レーンも共有する**: `ThumbnailService` の描画レーン（preview / generate の予約・兼用・試合不足からの描き直し・符号化と書き出し）を共通の部品に切り出して、`ResultService` が同じものを使う。複製しない（S4o・S4p の修正を二重に持たないため）。サムネイルの golden とテストで回帰を見る
+3. **同期経路を残さない**: `main_generate_result.py` と `ResultRenderer.py` は S4r で削除する。呼び手がパネルだけなので、サムネイルと違い同期経路を残す理由が無い
+4. **core に `src/core/ResultService.py`**: 入力の読み書き・値の組み立て・並べ替え・クリア・standings の取り込み・ペイロード・ファイル名と剪定・投稿文・DB への保存。**ペイロードは移す前の実装の出力を golden に録って pin する**（テストがほぼ無いので、これが唯一の回帰の証拠になる。基準コミットの `git archive` から録る。サムネイルと同じ方法）
+5. **state を正本にする（オーナー承認: 入力を残す）**: 入力は `state.json` に残り、再起動やクラッシュで消えない。**「すべてクリア」を足す**（確認ダイアログ付き）。パネルが初回表示で空にする動きは S4r で無くなる
+6. **単独と団体のキーを分ける**: 単独は `result_players`（形も `out/result_players/**` もそのまま）、団体は新しい `result_teams`。切り替えで片方が消えない。団体の行が `result_players` にある古い `state.json` は `StateMigrations` で移す。`result_players` の団体の形を読む自作レイアウトがあれば変わるが、同梱には無い。枠は単独 16、団体 8（9〜16 は到達不能なので作らない）
+7. **値の形を 1 つにする**: コンボの行 dict をやめ、識別子（en_name + カラーの行）で受けて core が組む（Top 8 の `CharacterValue` / `CharacterPick` と同じ。python-widgets.md の規約）。読み戻しは旧 3 形を読める。キャラ行だけの値は `assets` が無く今は描かれないが、統一すると描かれる（改善。S4q の節に記録する）
+8. **書き込みは行単位**: `PATCH` は 1 行で 1 保存サイクル。LAN の 2 端末の編集が競合しないようにする（Top 8 と同じ）。並べ替えとクリアと取り込みは 1 保存サイクルの一括操作
+9. **スコアボードからのキャラ補完は残す（オーナー判断）**: キャラ欄が空の選手は、スコアボードに同名の選手がいればそのキャラで描く。**描画のときに解決し、state には書かない**（入力欄に無い値を保存しない）。ページの行に「スコアボードから補完」と表示して、見えない値にしない
+10. **選手 DB への自動保存は残す（オーナー判断）**: 作成と X 投稿のときに `AddPlayers(overwrite=False)` で書く（プレビューでは書かない）。明示の「選手を DB に保存」も残す
+11. **X 投稿は 1 クリックを維持する（オーナー承認）**: クリックの中で同期に、(a) 生成の依頼 (b) `ClipboardItem` に PNG の Promise を渡してコピー（描画の完了を待ってもユーザー操作が切れない。S4 サムネイル決定 9 の制約の解決）(c) 投稿画面を開く。投稿文は `GET /result/post` で持っておき（S4q のレビューで describe から分けた。DB の X ハンドルを含むので `PLAYERDB`）、クリックの中で読む。共有ビューは新しいウィンドウを開けないので、**ホストの `QWebEnginePage` が `http(s)` の新しいウィンドウの要求を既定のブラウザに渡す**（サーバーの `webbrowser.open` は LAN の端末では別の PC で開くので使わない。シェル操作は増やさない。SCORE の Board 移行でも使う）。コピーできない環境（LAN の http）は投稿画面を開いて保存先のパスを出す
+12. **作成とコピーを 1 つにする**（サムネイルの S4p 判断 5 と同じ）: 今もコピーはファイルを作るので、機能は減らない。出力は `out/results/` の PNG のみ・ファイル名・30 世代をそのまま。大会名が空のときだけ `result-top8-...` にする（今は `-top8-...`）
+13. **プレビューと作成を一致させる**: 名前が 1 つも無いときだけプレビューはサンプルを描き、「サンプル」と表示する。**サンプルは固定**（今は `random` で再描画のたびに変わる）。データの無い作成は `400` で断る（今は空枠の画像が保存される）。団体はチーム名かメンバーのどちらかがあればデータありとする
+14. **レイアウトは `settings.json` の `result_config.layout` に保存する**（今は起動のたびに horizontal に戻る。残すのは 5 と同じ理由）。対戦形式への追従は今と同じ: Team / Crew で団体へ、1v1 で単独へ。`team_split` の手動選択は保つ。`result_config` のそのほかの未使用キーは渡さない
+15. **背景はサムネイルの設定に従う今の仕様を保つ**（Result 側に設定は足さない）。読みは `ThumbnailService` の読みを通す。ページに「背景はサムネイルの設定に従う」と書く。バナーの置換が反映されない件は S4q で確認し、必要ならテンプレートに渡す URL にキャッシュバスターを付ける
+16. **standings の取り込み**: `GetStandings` の失敗と空を区別する（`strict`）。**入力があるときは確認してから上書きする**（今は無確認）。大会未設定と失敗はページに出す。ゲームの切り替えとの競合は `Top8Service` の `fetcher` / `RunWithProvider` と同じ世代の確認で防ぐ
+17. **ゲームの切り替えでキャラを消す**: `Top8Service.ForgetCharacters` と同じ（今は入力欄だけ消えて、前のゲームのキャラで描かれ続ける。既存のバグ）
+18. **投稿文は順位の順にする**（今は枠の順で、順位を手で変えると上位が崩れる。既存のバグ）
+19. **v1（S4q で追加のみ）**: `GET` / `PATCH /api/v1/result`、`PATCH /api/v1/result/players/<n>`、`PATCH /api/v1/result/teams/<n>`、`POST /api/v1/result:reorder`、`POST /api/v1/result:clear`、`POST /api/v1/result:loadStandings`、`POST /api/v1/result:saveToDb`、`POST /api/v1/result:preview`（202）、`POST /api/v1/result:generate`（202）、`GET /api/v1/result/preview`。描画の状態は state の `result_render = {status, path, error, revision}`（`out/result_render/` に出る。`out/results` / `out/result_players` と紛れない名前にした）。ヘッドレスは編集と取り込みが動き、描画は `503`
+20. **ページ**: 並べ替えはキーボードでも操作できるボタンを必ず付け、ドラッグは `CommentaryPage` の前例に合わせる（依存を増やさない）。名前の補完（DB から）は足さない（別の機能。今の説明文の「かんたんに呼び出せる」は書き直す）。960 幅のレイアウトはプレビュー欄に収める
+
+**外部契約（不変）**: `out/results/*.png` の形式・世代（ファイル名は大会名が空のときだけ変わる）、`layout/result*/` の注入の契約、`colors.result.*`、`out/result_players/**` の単独の形。**変わるもの**: 単独の `character` の値の形（絵は同じ。`out/result_players/.../character/` のファイルは増減しうる）、団体が `result_teams` へ、`result_render` の追加、`state.json` に入力が残る。
+
+**論点（機能・挙動の変更なのでオーナー確認。2026-11-09 回答済み）**
+1. 入力を再起動後も残すか → **残す + すべてクリアを足す**
+2. スコアボードからのキャラ補完 → **残す**（ページに表示する）
+3. 作成・投稿のときの選手 DB への自動保存 → **残す**
+4. X 投稿 → **1 クリックを維持**
+
+**リスク**: S4q は state のルート追加と `StateMigrations`（保存データ）・`bootstrap.py` の生成手順を含むので「**高**」（オーナーが差分を確認してマージ）。レンダラーとレーンの切り出しでサムネイルに回帰の可能性があるので、実機でサムネイルも確認する。S4r は Qt 版の削除とホストの追加で「通常」（実機確認を条件に自己マージ。ただし 6 レイアウトの実機確認が前提）。
+
+**見積り**: S4q は大（core 1 ファイル + 共通部品 2 つ + v1 11 本 + golden + 移行）。S4r は大（16 行 + 団体 8 チームのページ・並べ替え・取り込み・X の経路・Qt 版と共有部品の削除）。
+
+#### S4q 大会リザルトの core 化（2026-11-09）
+
+大会リザルトの入力・値の組み立て・ペイロード・サンプル・ファイル名と世代・standings の取り込み・投稿文・選手 DB への保存を core に移し、バックグラウンドの描画と v1 12 本を足した。サムネイルのレンダラーと描画レーンは共通の部品に切り出して共有した（サムネイルの golden は無変更）。Qt のパネルは残し、パネルの入力・描画・保存の経路は変えていない（パネルの絵が変わるのは判断 13 の 1 点だけ）。S4r はこの上に React のページを作り、Qt 版・`main_generate_result.py`・`ResultRenderer.py` を消す。
+
+- **完了内容**
+  - core: `src/core/ResultService.py`（Qt 非依存。`bootstrap_core()` が `ThumbnailService` の後に生成）。行の書き込み `UpdatePlayer` / `UpdateTeam` / `Reorder` / `Clear` / `ImportStandings` / `ForgetCharacters`、`ResultService` の `Layout()` / `Layouts()` / `SetLayout()` / `FollowBattleFormat()` / `Describe()` / `BuildPayload()` / `Preview()` / `Generate()` / `PreviewImage()` / `SaveToDb()` / `PostText()` / `LoadStandings()`、モジュール関数 `OutputStem` / `RemoveSpecialChars`（既存の名前を保つためサムネイルとは別物のまま）
+  - レーン（決定 2）: `src/core/RenderLane.py`。`ThumbnailService` の preview / generate の予約・兼用・試合不足からの描き直し・符号化と書き出しを基底クラスに切り出した。`ThumbnailService` と `ResultService` がサブクラスで、`_ReadRender` / `_RunPayload` / `_OutputStem` と出力先の定数を与える。`ThumbnailService.EffectiveBackgroundPath()` を足した（背景の読みの共有。決定 15）
+  - 描画（決定 1）: `src/AutonaOffscreenRenderer.py`（チケット・`PAINT_SCRIPT`・撮り直し・タイムアウト）を `ThumbnailRenderer` から切り出した。`ThumbnailRenderer` はサブクラスで、`renderSync` と view の設定（`LocalContentCanAccess*`・透明背景）だけが残る。`src/result/ResultPageRenderer.py` はレイアウトごとのサイズ（1920 / 960）を返すサブクラス。ビューは別で、`_load_template` は**リサイズの後で**比較の絵を撮る
+  - シェル: `AutonaScoreboardManager.StartImageRender` の `kind` に `"result"`（シェル操作は増やしていない）
+  - state: `result_teams`（団体 8 行）・`result_render`（`out/result_render/` に出る）・`result_standings`（下の判断 1）を `StateSchema` の `KEY_CATALOG` に追加。`SeedPanelState` は後の 2 つを idle に戻す（revision は続く）。行はシードしない
+  - 移行: `StateMigrations.CURRENT_VERSION = 2`、`_v1_to_v2` が `result_players` の団体の行（`members` を持つ行。枠 1〜8）を `result_teams` へ移す。単独の行は残す。`result_teams` がすでにあれば上書きしない（`out/program_state.json` から読み直す経路）。空になった `result_players` は消す。冪等
+  - provider: `StartGGDataProvider.GetStandings(..., strict=False)`（`strict=True` は要求の失敗を例外に）。パネルの呼び方は strict なしで、答えは今までどおり
+  - 配線: `GameAssetCatalog.SelectGame` が `ResultService.ForgetCharacters()` も呼ぶ（決定 17）、`Window.SetBattleFormat` が `ResultService.instance.FollowBattleFormat(fmt)` を呼ぶ（決定 14）
+  - v1（追加だけ）: `GET /result`・`GET /result/preview`（`READ`）、`GET /result/post`（`PLAYERDB`）、`PATCH /result`・`PATCH /result/players/<n>`・`PATCH /result/teams/<n>`・`POST /result:reorder`・`:clear`（confirm）・`:loadStandings`・`:saveToDb`・`:preview`・`:generate`（`WRITE`）。全 write に `max_body` 64 KiB。`external-control-api.md` §5.13・§6.30〜§6.34・§7
+- **外部契約**: v1 が 12 本増え、state のルートが 3 つ増え（`program_state.json` と `out/result_teams/**`・`out/result_render/**`・`out/result_standings/**`）、`state.json` の版が 2 になった（古いビルドで開くと既存の仕組みで退避）。`layout/result*/` の注入の契約（`initResult({data, config, layout})` と `RENDER_READY`）、`colors.result.*`、`out/results/` の形式と 30 世代、パネルが書く `result_players` の形は不変。**移行した団体の行は `result_players` ではなく `result_teams` から読むことになる**（設計どおり。同梱のレイアウトは読まない。S4r まではパネルが `result_players` に書き続ける）。ファイル名が変わるのは大会名が空の v1 だけ
+- **golden**: `tests/fixtures/result/`（`record_golden.py` は基準 `bd5b9b97` の `git archive` から録る。`scenarios.py` が世界、`golden.json` が録画: payloads 68 件（レイアウト 6 種 × 単独・団体 / データあり・モック / スコアボードからの補完 / 色・背景）、inputs 7 件（パネルの値の形・スコアボードからの補完）、records 4 件（DB）、posts 7 件（投稿文）、names 6 件（ファイル名））。モックの `random` は録画時に固定した（`FixedDraws`。決定 13 の新しい固定サンプルと同じ引き）。**新旧の差は次の 7 件だけ**で、`tests/test_result_service.py` の `DIFFERENCES` に理由つきで持ち、「差があること」も assert する（差が消えたら行も消す）。今の答えは別のテストで pin した。サムネイルの golden は変えていない
+  1. `payloads.a_team_with_only_members`（決定 13）: メンバーだけのチームはデータあり。旧プレビューはその上にサンプルを描いていた
+  2. `payloads.result_config_other_keys`（決定 14）: `config` はテンプレートが読むキーだけ。`result_config` の未使用キーを渡さない
+  3. `payloads.result_config_empty_background`（決定 14）: 値は同じで、キーの順が `config` の固定の順に
+  4. `payloads.background_legacy_banner_path_without_the_file`（決定 15）: サムネイルの読みを通すので既定のバナー。旧は無いファイルを描いていた
+  5. `inputs.a_character_row_alone`（決定 7）: カラーのコンボが空のキャラは先頭のスキンで描かれる。旧はキャラ行だけで `assets` が無く、描かれなかった
+  6. `posts.ranks_by_hand`（決定 18）: 投稿文は順位の順。旧は枠の順
+  7. `names.no_tournament`（決定 12）: `result-top8-...`。旧は `-top8-...`
+- **テスト**: `tests/test_result_service.py`（260 件。golden の再生と差分・値の形と旧 3 形の読み戻し・1 行の書き込みと拒否時に書かない・並べ替え・クリア・取り込みの失敗と空の区別・世代の確認（ゲームと provider）・確認の要否・ゲーム切替でキャラを消す・補完を state に書かない・DB 保存はプレビューで書かない・投稿文の順序・ファイル名・固定サンプル・データ無しの作成・レイアウトの保存と追従・バナーのキャッシュバスター・起動のシード・`Window.SetBattleFormat` の呼び出しの AST pin・実 provider の `strict`）、`tests/test_api_v1_result.py`（119 件。12 本の契約・`400` / `404` / `409` / `413` / `503`・未知のキーの全拒否・拒否時に書かない・アクセス規則・`tmp/` を配信しない）、`tests/test_result_render.py`（39 件。実物の `QWebEngineView` を offscreen で: 6 レイアウトのサイズ・960 幅の撮り直しの順序・タイムアウトからの復帰・`StartImageRender` の `kind`・同梱の 6 ページに注入して最後まで走る（`${}` の注入を含む）・バナーの差し替え・ルートから描画・ファイルまでの通し）、`tests/test_state_persistence.py`（`_v1_to_v2`）、`tests/test_bootstrap_split.py`（生成の手順）、`tests/test_webserver_routes.py`（ルート台帳は v1 60 of 88）、`tests/test_web_operations.py`（ヘッドレスで全ルートを歩く台帳に 12 本。`:preview` / `:generate` がシェル操作の `503`）。サムネイルの golden と `tests/test_api_v1_thumbnail.py` は無変更で、`tests/test_thumbnail_service.py` は追加だけ（下の B2）。`tests/test_thumbnail_render.py` は下の途中のフレームの修正で既存の 2 件を変えて（ページの最初の絵の grab が 2 回になった 1 件と、普段の描画を見るテストの閾値）テストを足した
+- **レビュー対象の判断**（設計の文面からの差分を含む）
+  1. **`result_standings` を足した**（決定 19 に無い）: 取り込みの進み具合と結果の置き場所が要る。`result_render` に混ぜると描画の `error` と紛れ、S4j の `analysis`・S4f の `tournamentInfo.media` と同じ形にそろわない。error は `fetch_failed` / `no_standings` / `changed` / `import_failed`
+  2. **`LoadStandings` は revision を返す**（Top 8 の `STARTED` の形にしなかった）: `Preview` / `Generate` と同じく、クライアントが自分の結果を前の結果と見分けられるようにする（202 の `standingsRevision`）。running の公開は fetcher の後で、「state の revision が小さいときだけ」にした（ジョブが先に終わったらその結果を上書きしない）
+  3. **`:clear` は種類ごと**（`kind` が必須）: 「すべてクリア」（決定 5）は今のレイアウトの種類を消す。単独と団体は別の大会の表でありうるので、もう一方は消さない（決定 6 の分離の趣旨）。ページの文言は S4r で決める
+  4. **`:reorder` は並べた行だけ順位を振り直す**（旧パネルは全 16 行）: TOP 8 のレイアウトで並べ替えたときに 9〜16 位を崩さない
+  5. **団体のメンバーに `twitter` を持つ**（依頼の検討事項。旧は無し）: 旧パネルの `_standingsTwitter` はメモリ上の dict で再起動で消えていた。投稿文のハンドルを state に寄せるなら団体も同じ（決定 18 の実現に要る）。standings の取り込みが入れ、`SaveToDb` も DB に入れる（旧は単独のみ）。テンプレートは読まないので絵は変わらない
+  6. **DB 保存は generate の受理の時点**（決定 10 の「作成のとき」の解釈）: 描画の完了を待たない。失敗はログだけで画像は作る。旧パネルも描画の前に保存していた（`_saveResult` / `_postResultToX`）。`SaveToDb` は今のレイアウトの種類の全行（単独 16・団体 8。旧も入力欄の全行）
+  7. **`FollowBattleFormat` と `Window.SetBattleFormat` の 1 行**（決定 14 の「対戦形式への追従」の実現）: パネルが遅延構築でも追従するよう Window から呼ぶ。保存値が無いときの最初のレイアウトも対戦形式から決める
+  8. **`GetStandings` の `strict` の範囲**: `data.event` が dict でない（失敗の答え・存在しないイベント）と、処理中の例外を raise する。`standings` が無い / 空は `[]`（`no_standings`）。パネルは strict なしで今までどおり
+  9. **provider の差し替えも `changed`**（決定 16 はゲームの切り替えの競合だけ）: `currentProvider` を注入して、取得の間に大会が変わったら前の大会の順位を書かない
+  10. **投稿文は「先頭 N 枠」を順位順に並べる**: レイアウトの枠（8 / 16）の外の行は出さない。絵と投稿文が同じ人を出すため
+  11. **プレビューの実体は `tmp/result/result_preview.png`**（パネルの `tmp/result/preview.png` と別。S4o 判断 12 と同じ。互いに邪魔しない）。起動時に前回の分を消す
+  12. **バナーのキャッシュバスターを付けた**（決定 15 の「S4q で確認し、必要なら」）: 実物の `QWebEngineView` で確かめた。同じ文書で同じパスのファイルを差し替えると `naturalWidth` は 64 → 64（古いまま）で、`?v=2` を付けると 128 になる。バナーは `TournamentMediaService` が同じパスで置き換えるので必要。パスが `BANNER_PATH` で `tournamentInfo.bannerVersion` が正の整数なら `?v=<version>` を付ける。背景のパスだけで、golden（バージョンなし）は変わらない
+  13. **ゲーム切替の `ForgetCharacters` はパネルの絵にも効く**（S4q でパネルの見た目が変わる唯一の点）: 決定 17 の消去は `result_players` に効き、パネルの描画（`main_generate_result.prepare_data`）はそれを読むので、ゲームを切り替えた後は前のゲームのキャラを描かなくなる。入力欄（もう消えていた）と一致する方向で、既存のバグの解消なので受け入れた
+  14. **`PAINT_SCRIPT` の `window.__thumbnailDecoded` を `__renderDecoded` に改名**: 共有したので名前だけ変えた。テンプレートは読まない。ページごとの変数なのでサムネイルの動作は同じ
+  15. **`ASPECT_MODE` は `ResultRenderer` に合わせて `KeepAspectRatio`、サムネイルは `IgnoreAspectRatio` のまま**: ビューをレイアウトのサイズにしてから撮るので結果の絵は同じ形で、どちらでも画素は変わらない。切り出しでサムネイルの動作を変えないよう基底の既定は `IgnoreAspectRatio`。`LOAD_AT_START=False` は Result の最初の要求が自分のレイアウトを読むため（サムネイルは既定の読み込みのまま）。`LocalContentCanAccess*` と透明背景の設定も `ResultRenderer` に無かったので足していない
+  16. **`result_config` のパスは読むが、クライアントからは書けない**: `main_icon_path` / `background_path` は golden のとおり読む（パネルが書いていた環境の絵を変えない）。`PATCH` は `layout` だけを受ける（S4o 判断 9 と同じ）
+- **パネルとの衝突（S4r で解消する）**
+  - パネルは `PublishResultPlayers` で団体の行も `result_players` に書き続け、初回表示で `result_players` を空の 16 行で上書きし、`result_teams` を読まない
+  - そのため v1 の編集はパネルの入力欄に出ず、パネルの同期が v1 の `result_players` を上書きする。S4q の間、両方を同時に使わない。**パネルが出ている環境では v1 の単独の行はパネルの初回表示で消える**（決定 5 の「入力を残す」は S4r から。S4r でパネルが無くなる）
+  - 読み手（`ResultService`）は `members` を持つ行を単独の行として読まないので、団体の行が v1 の絵に混ざることはない
+  - v2 の `state.json` にパネルが残す団体の行の掃除は S4r で `SeedPanelState` に足す（移行 step は v1 → v2 の 1 回だけ走る）
+  - パネルのレイアウトはコンボのメモリだけで `result_config.layout` を読み書きしない。`main_generate_result` は `result_config` を `config` にコピーするが、テンプレートは `payload.layout` だけを読むので絵に影響しない
+  - `main_generate_result.prepare_data` はパネルの経路として残る（S4r で削除）
+- **受け入れた点（直さない）**
+  - サムネイルも同じパスのバナーの差し替えで古い絵が出うる（判断 12 の確認で分かった既存の挙動。golden と外部契約を変えるので S4q では直さない。次の小さな修正の候補）
+  - レイアウトの表が S4r まで 2 か所にある（`ResultRenderer.LAYOUTS` と `ResultService.LAYOUT_*`。core は Qt のレンダラーを import できない）
+  - 取り込みの `refreshTournament` はベストエフォート（旧パネルと同じ。失敗はログだけで standings は続ける。順序は下の B5）
+  - 翻訳の抽出: レイアウトの名前は `translate("app", ...)` で引く（`lupdate` が無いので `.ts` は手動。パネルと同じ文字列なので今は訳がある。S4r で参照元を直す）
+- **レビューと実機確認の修正**（B の番号はレビューの指摘の番号）
+  - **A. データを描く前の途中のフレームが撮られる**（メインの実機確認で発見。S4q の回帰ではなく、#266 時点の main でも同じ率で再現）: 画面ロック中はコンポジタが遅く、2 rAF が済んでも絵がビューの surface に届いていない。テンプレートの交互切替 60 回に 1〜3 回、名前も背景も無い絵が撮られた（そのログはいつも `painted 360〜400 [frames=340〜400]`。普段は frames=30）。比較が「読み込み前の絵と違うか」だけなので、途中のフレームも正しい絵として通っていた。`:generate` でも同じ絵が保存されるので、配信 PC の画面が消えているときに起こりうる
+    - 修正: `AutonaOffscreenRenderer` は、frames が `SLOW_FRAMES_MS`（100 ms）を超えた描画・frames を言わなかった描画（late / failed）・読み込み直後の描画（サイズの変更は読み込みを伴うのでここに入る）で、**連続する grab が一致するまで待ってから撮る**（上限 `SETTLE_WAIT_MS` = 1 秒。達したら warning を出して撮る）。同じページの普段の描画は grab 1 回のままで追加コストなし
+    - **指示の「間隔 50 ms 程度」からの差分**: 50 ms を下限に、そのページの 2 フレームにかかった実測（frames）に間隔を揃えた。フレームが 170〜200 ms の間を 50 ms で見ると、同じ途中のフレームを 2 回見て一致と誤るため。frames を言わなかった描画は 500 ms（`SETTLE_WAIT_MS // 2`）、読み込み直後で frames が普通なら 50 ms
+    - 常に動くページは、新しいページの最初の絵で最大 1 秒かかって警告が出る。同梱の thumbnail / result のページにアニメーションは無い（カスタムテンプレートだけの話）
+    - **レビュー #4（サイズが変わるレイアウト切替）もこれで塞がる**: リサイズ直後の `before_load` は比較として弱いが、読み込み直後の描画は連続する grab の一致を要するので、古いページの絵が 1 枚混ざっても通らない（`test_the_old_frame_at_the_new_size_is_not_taken_for_the_new_pages`）。**残余**: frames が普通（間隔 50 ms）のときに古いページの絵が 50 ms 以上安定して出続けると通りうる。offscreen の `grab()` は画素を写さず順序でしか pin できないので、1920↔960 の交互切替を実機で確かめる。出たら読み込み直後の間隔の下限を上げる（1 行）
+  - **B1. 文字列欄がパスとして export 層に解釈される**（既存の穴。S4q と別のコミットに分けられる）: `StateManager.CreateFilesDict` は `./` で始まる文字列を `out/` にコピーし、`http...png` をダウンロードしていた。`PATCH /result/players/1 {"name":"./user_data/settings.json"}` で設定ファイル（`general.webserver_token` を含む）が静的配信の `out/` に出ることをレビュアーが確認した。Top 8・選手名・start.gg の gamerTag も同じ経路なので、ルートではなく export 層で直した（`_ExportKind`。`CreateFilesDict` と `RemoveFilesDict` が同じ判定を使う）
+    - `./` のコピーは「`WebAccess.StaticPath` が許す」かつ「画像の拡張子」だけ。**すでに Web サーバーが配っているものだけなので、コピーで新たに読めるものは増えない**。`..`・絶対パス・バックスラッシュ・`:` は `StaticPath` が拒否する。使われ方の一覧を別に持たない（配信の許可リストが正本）
+    - ダウンロードは `https` + ホストが `images.start.gg` / `images.smash.gg`（start.gg の旧名。古い DB の値のため）+ 拡張子 png / jpg + user / port なし + 空白・バックスラッシュ・制御文字なし（`https://evil\@images.start.gg/` のように `urlparse` と urllib3 で解釈が割れる形を塞ぐ）。実データ（state と選手 DB）の URL は `https://images.start.gg/*.{jpg,png}`（`online_avatar`）と、文字として出す `https://www.start.gg/...`（`url`）だけだった
+    - 許可外はただの文字で `.txt` に出す。**挙動の変化**: 許可外の `./foo` は「何も出ない」→ `.txt`、許可外のホストのアバターは `.png` → `.txt`（選手 DB を手で編集して他の CDN を書いた環境は `out/` に画像が出なくなる）。画像でない URL の削除で `.txt` が残っていた既存のバグも直った
+    - 固定: `tests/test_state_manager_image_export.py`（91 件。同梱の絵のパスがコピーされること・パス 28 形と URL 23 形が文字になること・start.gg のホストの 5 形を取りに行くこと・削除が外へ出ないこと）。`tests/test_harness_isolation.py` はテスト用のホストを `EXPORT_IMAGE_HOSTS` に差して従来の検査を保った
+    - 未監査: state の**キー**に `..` が入る経路（v1 の書き込みはキーを許可リストで受ける）、`requests.get` のリダイレクトの追従（許可ホストが別のホストへ返す場合）、前のバージョンが `out/` に残したファイル
+  - **B2**: `EffectiveBackgroundPath` が `background_path` キーの無い banner 設定で既定の画像を描き、サムネイルの読みと食い違っていた。`ResolveBackgroundPath` で先に解決して `_AsRead` と同じ読みに揃えた（`RenderPayload` と一致することをテストで固定）
+  - **B3. 再起動をまたいでゲームが変わると前のキャラを描き続ける**: 読みの段（`_Rows`。`Describe`・`BuildPayload`・`HasData`・`HasInput`・`PostText`・DB の組み立て）で無いものとして扱う。state は消さない（書きの元は `_StoredRows`）。**指示の「値の `game` と比べる」からの差分**: 値に `game` キーは無く、足すと `BuildCharacterValue` の形が変わって `CharacterPick` の等値比較と golden が壊れ、保存済みの state とパネルの値にも効かない。そこで絵のパス `GAMES_DIR/<codename>/` の持ち主で判定する（`GAMES_DIR` の外の絵は判定しない。絵が無ければゲームの一覧にあるか）。ゲーム未読込のときは `GAMES_DIR` の絵を描かない
+  - **B5. 取り込み自身の `refreshTournament` が取り込みを `changed` にする**: `refreshTournament(done)` にして、大会情報の取得 → ゲームの読み込み → standings の取得の順に連鎖する（待たない: job レーンから job を submit すると `NestedSubmitError` で、ゲームの読み込みは loader のジョブ。held の通知の中で待たない規則にも合う）。`codename` は `refreshed()` の後で読む。`AutonaTournamentDataProvider.RefreshTournamentData` を足し、selector（`SetGameFromStartGGId` / `SelectGameFromStartGGId`）に任意の `done` を足した。取り込みの前に大会情報の取得とゲームの読み込みのぶん時間が増える
+  - **B6**: `characters` の中間の `null` は位置を保つ（state は欄の並びで、空は `{}`、末尾の空は持たない）。テンプレートへのペイロードからは空を除くので golden は無変更
+  - **B7**: `GET /result`（READ）に DB の X ハンドルを出さない。`postText` を外し、`GET /result/post`（`PLAYERDB`）を足した。決定 11 の文面を直した
+  - **B8**: `_EndImport` を try/finally にした（`result_standings` が `running` のまま残らない）。`ImportStandings` の内部例外は `import_failed` で、`fetch_failed` と区別する
+  - **B9**: `BUSY` を確認より先に判定する。`StateManager.lock` → 取り込みの lock の順で、判定と `_importing = True` を 1 つの区間にした
+  - **B10**: `BuildPayload` のサンプルの組み立てをロックの外へ出した
+  - **B12 / B13**: 体裁（`StateSchema.py` の `_Revision`、`StatePersistence.py` の `_NewerLegacy`）、`.claude/rules/state-and-webserver.md` のルート定数、`python-widgets.md` のサービスの列挙
+  - **#11（`AutonaOffscreenRenderer.py` の環境変数）は現状維持**: `ThumbnailRenderer` から移しただけで、`tests/test_import_side_effects.py` が通る
+- **オーナー実機確認**（`python main.py`。S4q は保存データの移行を含むので区分は「高」）
+  - **画面ロック中のテンプレートの交互切替**で途中のフレームが撮られないこと（ログに `the page is still changing` が出続けないこと）、普段の切替の遅延が増えていないこと
+  - **1920 / 960 のレイアウトの交互切替**で前のレイアウトの絵が撮られないこと（上の A の残余）
+  - `out/` の画像が従来どおり出ること（国旗・キャラ・バナー・配信団体の素材・start.gg のアバター）
+  - 実大会の `:loadStandings` で、ゲームが違う状態からも `changed` にならないこと
+  - 再起動をまたいでゲームを変えたときに、前のゲームのキャラを描かないこと（state には残る）
+  - サムネイルの回帰: ページのプレビューと作成、テンプレートの切り替え直後のプレビュー、SCORE の「サムネイル生成」、legacy の `-png` / `-jpg`、ログに `did not say it painted` / `still looks like the one before it` が出ない
+  - Result パネル: プレビュー・作成・standings の読込・投稿文・形式の切り替えが従来どおり
+  - v1: `POST /result:preview` → `GET /result/preview` と `:generate` → `out/results/` に 6 レイアウトの実際の絵が出る（960 幅を含む。**offscreen の `grab()` はページの画素を写さない**）
+  - バナーの差し替え後の v1 の背景、実大会の `:loadStandings`（失敗と空の区別）、ヘッドレスの `503`、団体の行を持つ古い `state.json` の移行

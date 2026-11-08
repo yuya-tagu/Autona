@@ -153,6 +153,9 @@ def test_bootstrap_core_steps_and_their_order():
         # executor; it reads nothing here (it only removes what the last
         # session left of its own files).
         "ThumbnailService()",
+        # The tournament result (ADR-005 S4q): the same, and the provider is
+        # there for its standings' import.
+        "ResultService()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]

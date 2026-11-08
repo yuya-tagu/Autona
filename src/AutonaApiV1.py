@@ -41,6 +41,7 @@ from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import PlayerDirectory
+from .core import ResultService as results
 from .core import StreamService as streams
 from .core import ThumbnailService as thumbnails
 from .core import Top8Model as top8
@@ -669,6 +670,44 @@ def get_thumbnail_preview():
     image = WebOps.get_thumbnail_preview()
     if image is None:
         raise ApiError(NOT_FOUND, "no thumbnail preview has been drawn", 404)
+    return Response(image, mimetype="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@api_v1.route("/result")
+@api_handler
+def get_result():
+    # The tournament result's page (ADR-005 S4q): {"layout", "layouts": [{id,
+    # name, width, height, slots, team}], "players": sixteen rows {slot, rank,
+    # name, sponsor, twitter, characters: three of {en_name, skin} | null,
+    # fromScoreboard: the name of the character drawn for a row without one |
+    # null}, "teams": eight rows {slot, rank, name, members: [{name, twitter,
+    # character, fromScoreboard}]}, "sample": whether a preview now draws the
+    # sample, "game", "render", "standings", "canRender"}. Nothing is written.
+    return ok(data=WebOps.describe_result(), revision=current_revision())
+
+
+@api_v1.route("/result/post")
+@api_handler
+def get_result_post():
+    # The X post's text, {"text"}. Guarded like the player DB, which its handles
+    # come from (PLAYERDB), and not part of GET /result, which anyone on the
+    # network may read. A page holds it and reads it in the click that opens the
+    # X window: a browser opens one only while handling a click. Nothing is
+    # written.
+    return ok(data={"text": WebOps.get_result_post()},
+              revision=current_revision())
+
+
+@api_v1.route("/result/preview")
+@api_handler
+def get_result_preview():
+    # The newest render as a PNG, as GET /thumbnail/preview: a client asks
+    # ?v=<result_render.revision>. Bytes, not an envelope; 404 NOT_FOUND until
+    # the first render.
+    image = WebOps.get_result_preview()
+    if image is None:
+        raise ApiError(NOT_FOUND, "no result preview has been drawn", 404)
     return Response(image, mimetype="image/png",
                     headers={"Cache-Control": "no-store"})
 
@@ -2191,5 +2230,292 @@ def thumbnail_generate():
     if revision == thumbnails.BUSY:
         raise ApiError(CONFLICT, "a thumbnail is being made already", 409)
     return ok(data={"accepted": True, "operation": "thumbnail.generate",
+                    "renderRevision": revision},
+              revision=current_revision(), status=202)
+
+
+# ── The tournament result (ADR-005 S4q): core/ResultService ──
+# Every body is a small JSON object: far more than a page's row would ever be,
+# and far less than the state and settings.json should be asked to hold.
+_RESULT_MAX_BODY = 64 * 1024
+_RESULT_KINDS = (results.PLAYERS, results.TEAMS)
+_RESULT_PLAYER_FIELDS = ("rank", *results.PLAYER_TEXT_FIELDS, "characters")
+_RESULT_TEAM_FIELDS = ("rank", "name", "members")
+_RESULT_MEMBER_FIELDS = ("name", "twitter", "character")
+_RESULT_PICK_SHAPE = ('{"en_name": str, "skin": int, "game": str} or null')
+
+
+def _result_slot(slot, kind):
+    count = results.SLOT_COUNTS[kind]
+    if not 1 <= slot <= count:
+        raise ApiError(INVALID_ARGUMENT, f"slot must be 1..{count}", 400)
+    return str(slot)
+
+
+def _result_rank(value):
+    low, high = results.RANK_RANGE
+    if not _is_index(value) or not low <= value <= high:
+        raise ApiError(
+            INVALID_ARGUMENT, f"rank must be an integer from {low} to {high}",
+            400)
+    return value
+
+
+def _result_text(value, name):
+    if not isinstance(value, str):
+        raise ApiError(INVALID_ARGUMENT, f"{name} must be a string", 400)
+    return value
+
+
+def _result_pick(value, name):
+    # A character as a page picks it: (en_name, skin row, the game it was
+    # picked on | None), or None for an empty one.
+    if value is None:
+        return None
+    if (not isinstance(value, dict)
+            or set(value) - {"en_name", "skin", "game"}
+            or not isinstance(value.get("en_name"), str)
+            or not value["en_name"]):
+        raise ApiError(
+            INVALID_ARGUMENT, f"{name} must be {_RESULT_PICK_SHAPE}", 400)
+    skin = value.get("skin", 0)
+    if not _is_index(skin) or skin < 0:
+        raise ApiError(
+            INVALID_ARGUMENT, f"{name}.skin must be an integer from 0", 400)
+    game = value.get("game")
+    if game is not None and not isinstance(game, str):
+        raise ApiError(INVALID_ARGUMENT, f"{name}.game must be a string", 400)
+    return value["en_name"], skin, game
+
+
+def _result_refused(refused):
+    # What UpdatePlayer / UpdateTeam refused: nothing was written.
+    if refused is None:
+        return
+    en_name, skin, game = refused.pick
+    if refused.code == results.UNKNOWN_SKIN:
+        raise ApiError(INVALID_ARGUMENT, f"no skin {skin} for {en_name}", 400)
+    if refused.code == results.OTHER_GAME:
+        raise ApiError(
+            CONFLICT,
+            f"{en_name} was picked for the game {game!r}, not the loaded one",
+            409)
+    raise ApiError(
+        INVALID_ARGUMENT, f"no character {en_name} in the loaded game", 400)
+
+
+def _result_fields(body, allowed):
+    unknown = sorted(k for k in body if k not in allowed)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown field: {', '.join(unknown)}", 400)
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, f"one of {', '.join(allowed)} is required", 400)
+
+
+def _result_kind(body):
+    kind = body.get("kind")
+    if kind not in _RESULT_KINDS:
+        raise ApiError(
+            INVALID_ARGUMENT, f"kind must be {' | '.join(_RESULT_KINDS)}", 400)
+    return kind
+
+
+@api_v1.route("/result", methods=["PATCH"])
+@write_op("result.update", max_body=_RESULT_MAX_BODY)
+def result_update():
+    # {"layout": one of GET /result's}: the layout, in settings.json. The
+    # paths of result_config are not taken: a path would have the render read
+    # any local file. Answers the layout.
+    body = _json_body()
+    _result_fields(body, ("layout",))
+    if not WebOps.set_result_layout(body["layout"]):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"layout must be {' | '.join(results.LAYOUT_SUBDIRS)}", 400)
+    return ok(data={"layout": WebOps.get_result_layout()},
+              revision=current_revision())
+
+
+@api_v1.route("/result/players/<int:slot>", methods=["PATCH"])
+@write_op("result.player", log_keys_only=True, max_body=_RESULT_MAX_BODY)
+def result_player_update(slot):
+    # Some of {"rank": int, "name", "sponsor", "twitter": str ("" empties it),
+    # "characters": up to three of {"en_name", "skin", "game"} or null for an
+    # empty one, replacing them all}: one row of the singles' layouts, in one
+    # save cycle (ResultService.UpdatePlayer). The values are built by core
+    # from the catalog. Nothing is written when anything is refused: 400 for a
+    # bad field or a character the catalog does not have, 409 CONFLICT for one
+    # whose "game" is not the game loaded.
+    slot = _result_slot(slot, results.PLAYERS)
+    body = _json_body()
+    _result_fields(body, _RESULT_PLAYER_FIELDS)
+    fields = {}
+    for key, value in body.items():
+        if key == "rank":
+            fields[key] = _result_rank(value)
+        elif key == "characters":
+            if not isinstance(value, list) \
+                    or len(value) > results.MAX_CHARACTERS:
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    f"characters must be a list of up to "
+                    f"{results.MAX_CHARACTERS}", 400)
+            fields[key] = [_result_pick(pick, "a character") for pick in value]
+        else:
+            fields[key] = _result_text(value, key)
+    _result_refused(WebOps.update_result_player(slot, fields))
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/result/teams/<int:slot>", methods=["PATCH"])
+@write_op("result.team", log_keys_only=True, max_body=_RESULT_MAX_BODY)
+def result_team_update(slot):
+    # Some of {"rank": int, "name": str, "members": up to five of {"name",
+    # "twitter": str, "character": {"en_name", "skin", "game"} or null},
+    # replacing them all}: one row of the team layouts, in one save cycle
+    # (ResultService.UpdateTeam). Refused as PATCH /result/players/<n> is.
+    slot = _result_slot(slot, results.TEAMS)
+    body = _json_body()
+    _result_fields(body, _RESULT_TEAM_FIELDS)
+    fields = {}
+    for key, value in body.items():
+        if key == "rank":
+            fields[key] = _result_rank(value)
+        elif key == "name":
+            fields[key] = _result_text(value, key)
+        else:
+            if not isinstance(value, list) \
+                    or len(value) > results.MAX_MEMBERS:
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    f"members must be a list of up to {results.MAX_MEMBERS}",
+                    400)
+            members = []
+            for member in value:
+                if not isinstance(member, dict) \
+                        or set(member) - set(_RESULT_MEMBER_FIELDS):
+                    raise ApiError(
+                        INVALID_ARGUMENT,
+                        f"a member must be an object of "
+                        f"{', '.join(_RESULT_MEMBER_FIELDS)}", 400)
+                members.append({
+                    "name": _result_text(member.get("name", ""), "name"),
+                    "twitter": _result_text(member.get("twitter", ""),
+                                            "twitter"),
+                    "character": _result_pick(member.get("character"),
+                                              "a member's character"),
+                })
+            fields[key] = members
+    _result_refused(WebOps.update_result_team(slot, fields))
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/result:reorder", methods=["POST"])
+@write_op("result.reorder", max_body=_RESULT_MAX_BODY)
+def result_reorder():
+    # {"kind": "players" | "teams", "order": the slots of the rows, in their
+    # new order, each of 1..its length once}: those rows put in that order and
+    # ranked 1.. (a drag on the page), in one save cycle. The rows after them
+    # are left alone.
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in ("kind", "order"))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown field: {', '.join(unknown)}", 400)
+    kind = _result_kind(body)
+    order = body.get("order")
+    if not isinstance(order, list) or not all(_is_index(o) for o in order) \
+            or not WebOps.reorder_result(kind, order):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "order must hold each of 1..its length once, up to "
+            f"{results.SLOT_COUNTS[kind]}", 400)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/result:clear", methods=["POST"])
+@write_op("result.clear", max_body=_RESULT_MAX_BODY)
+def result_clear():
+    # {"kind": "players" | "teams", "confirm": true}: every row of that kind
+    # emptied, in one save cycle. The other kind's stay.
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in ("kind", "confirm"))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown field: {', '.join(unknown)}", 400)
+    kind = _result_kind(body)
+    _require_confirm(body)
+    WebOps.clear_result(kind)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/result:loadStandings", methods=["POST"])
+@write_op("result.loadStandings", max_body=_RESULT_MAX_BODY)
+def result_load_standings():
+    # Put the event's standings in the current layout's rows, by a job in the
+    # background (ResultService.LoadStandings), in either shell:
+    # result_standings says "running" before this answers, then "done" or
+    # "error" ("fetch_failed": start.gg did not answer; "no_standings": it
+    # answered, the event has none yet; "changed": the game or the tournament
+    # was switched meanwhile) with `standingsRevision`, nothing written unless
+    # "done". {"confirm": true} is required when the rows hold something it
+    # would overwrite. 409 NOT_READY without a tournament; 409 CONFLICT while
+    # one is on its way.
+    body = _json_body()
+    unknown = sorted(k for k in body if k != "confirm")
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown field: {', '.join(unknown)}", 400)
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    revision = WebOps.load_result_standings(_truthy(body.get("confirm")))
+    if revision == results.NEEDS_CONFIRMATION:
+        raise ApiError(
+            CONFIRMATION_REQUIRED, "this operation requires confirm:true", 409)
+    if revision == results.BUSY:
+        raise ApiError(CONFLICT, "the standings are being loaded already", 409)
+    if revision == results.NO_TOURNAMENT:
+        # Cleared between the check above and the start.
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    return ok(data={"accepted": True, "operation": "result.loadStandings",
+                    "standingsRevision": revision},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/result:saveToDb", methods=["POST"])
+@write_op("result.saveToDb", max_body=_RESULT_MAX_BODY)
+def result_save_to_db():
+    # The current layout's rows merged into the player database: what a player
+    # has there and the rows do not stay. Answers {"saved": how many}.
+    return ok(data={"saved": WebOps.save_result_to_db()})
+
+
+@api_v1.route("/result:preview", methods=["POST"])
+@write_op("result.preview", max_body=_RESULT_MAX_BODY)
+def result_preview():
+    # Draw the preview image in the background (ResultService.Preview), the
+    # sample while no row has anything to draw. As POST /thumbnail:preview:
+    # result_render says how it goes, with `renderRevision`. 503 UNAVAILABLE
+    # headless.
+    return ok(data={"accepted": True, "operation": "result.preview",
+                    "renderRevision": WebOps.preview_result()},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/result:generate", methods=["POST"])
+@write_op("result.generate", max_body=_RESULT_MAX_BODY)
+def result_generate():
+    # Draw and save the result (out/results, a PNG) in the background, and put
+    # the rows' players in the player database: as above, and
+    # result_render's path is the PNG once it is "done". 400 INVALID_ARGUMENT
+    # with nothing to draw, 409 CONFLICT while one is on its way.
+    revision = WebOps.generate_result()
+    if revision == results.NO_DATA:
+        raise ApiError(INVALID_ARGUMENT, "no row has anything to draw", 400)
+    if revision == results.BUSY:
+        raise ApiError(CONFLICT, "a result is being made already", 409)
+    return ok(data={"accepted": True, "operation": "result.generate",
                     "renderRevision": revision},
               revision=current_revision(), status=202)

@@ -1463,6 +1463,10 @@ def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
         WebOps.preview_thumbnail()
     with pytest.raises(NotAvailable):
         WebOps.generate_thumbnail()
+    with pytest.raises(NotAvailable):
+        WebOps.preview_result()
+    with pytest.raises(NotAvailable):
+        WebOps.generate_result()
 
     calls = []
     monkeypatch.setattr(WebOps, "openSetSelection",
@@ -1653,8 +1657,10 @@ def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
 BOARD_SHELL_ENDPOINTS = {"open_sets", "get_thumbnail"}
 # The match thumbnail's two renders (ADR-005 S4o). Not its other five routes:
 # the settings and the preview's file are core's, in both shells.
+# The tournament result's two (ADR-005 S4q), and not its other ten, likewise.
 SHELL_ENDPOINTS = BOARD_SHELL_ENDPOINTS | {
-    "api_v1.thumbnail_preview", "api_v1.thumbnail_generate"}
+    "api_v1.thumbnail_preview", "api_v1.thumbnail_generate",
+    "api_v1.result_preview", "api_v1.result_generate"}
 SHELL_EVENTS = {"open_set"}
 
 # A value for each URL argument of the rules; the board ones are walked.
@@ -1712,6 +1718,11 @@ _BODIES = {
     "api_v1.stream_thumbnail_options_update": {"style": "center"},
     "api_v1.thumbnail_update": {"display_phase": False},
     "api_v1.thumbnail_reset": {"confirm": True},
+    "api_v1.result_update": {"layout": "vertical"},
+    "api_v1.result_player_update": {"name": "Walk"},
+    "api_v1.result_team_update": {"name": "Walk"},
+    "api_v1.result_reorder": {"kind": "players", "order": [2, 1]},
+    "api_v1.result_clear": {"kind": "players", "confirm": True},
     # Not the tournament name: TournamentInfoService keeps the last one it
     # followed in memory (the 表示大会名 rule), which putting the state
     # back would not undo.
@@ -1730,6 +1741,8 @@ _NOT_200 = {
        for board in (1, 2, 3)},
     ("api_v1.thumbnail_preview", None): 503,
     ("api_v1.thumbnail_generate", None): 503,
+    ("api_v1.result_preview", None): 503,
+    ("api_v1.result_generate", None): 503,
     # What the crew board does not have -- set loading, player slots,
     # statistics: core's ValueError, the legacy routes' 500; /api/v1's
     # 400 INVALID_ARGUMENT (every board operation of its but the crew's).
@@ -1774,6 +1787,9 @@ _NOT_200 = {
     ("api_v1.thumbnail_background", None): 400,
     # No render has drawn a preview (none can, headless).
     ("api_v1.get_thumbnail_preview", None): 404,
+    ("api_v1.get_result_preview", None): 404,
+    # No tournament is loaded in this walk.
+    ("api_v1.result_load_standings", None): 409,
     # The test runtime's layout/ is empty: no commentary design to show or
     # to pick (the catalog was read).
     ("api_v1.get_selected_layout", None): 404,

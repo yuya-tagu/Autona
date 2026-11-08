@@ -283,7 +283,8 @@ class StatePersistence:
 
     @staticmethod
     def _NewerLegacy(legacyPath, storeMtime, statePath):
-        """program_state.json's state, at v1, when it is newer than the store.
+        """program_state.json's state, migrated, when it is newer than the
+        store.
 
         None when it is not newer, missing, or unusable -- the store is then
         kept as it is.

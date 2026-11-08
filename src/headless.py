@@ -239,11 +239,13 @@ class HeadlessGames:
 
     # ── loading ──────────────────────────────────────────────────────────
 
-    def SelectGameFromStartGGId(self, gameid):
-        """The provider's selector: a start.gg videogame id -> the game."""
+    def SelectGameFromStartGGId(self, gameid, done=None):
+        """The provider's selector: a start.gg videogame id -> the game.
+        `done()` as LoadGameByCodename has it: at once for a game that is not
+        one of ours, which asks the loader nothing."""
         codename = self.catalog.GameFromStartGGId(gameid)
-        if codename:
-            self.LoadGameByCodename(codename)
+        if codename or done is not None:
+            self.LoadGameByCodename(codename or "", done=done)
 
     def LoadGameByCodename(self, codename, async_mode=True, mods_active=False,
                            mods_reload_mode=False, done=None):

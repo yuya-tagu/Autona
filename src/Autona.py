@@ -196,6 +196,7 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .core.PlayerDB import PlayerDB
+from .core.ResultService import ResultService
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
@@ -1543,6 +1544,8 @@ class Window(QMainWindow):
         SettingsManager.Set("scoreboard.battle_format", fmt)
         SettingsManager.Set("scoreboard.team_mode", fmt == "team")
         AutonaScoreboardManager.instance.SetBattleFormat(fmt)
+        # The layout the result's v1 draws follows it, as the panel's does.
+        ResultService.instance.FollowBattleFormat(fmt)
         if getattr(self, "resultSetting", None) is not None:
             self.resultSetting.SetBattleFormat(fmt)
         # Keep the sidebar segment in sync when the format is changed

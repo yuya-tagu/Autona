@@ -42,7 +42,7 @@
 ### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
 - バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
 - **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
-  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）は書き込みと同じ扱い（`PLAYERDB` 区分）。
+  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）は書き込みと同じ扱い（`PLAYERDB` 区分）。
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
@@ -230,6 +230,9 @@
 | `GET /api/v1/players/entrants` | 大会の参加者の行（§5.11。同上。2026-11-05 追加） | `get_player_entrants`（`core/PlayerDirectory.Entrants`） | — |
 | `GET /api/v1/thumbnail` | 試合サムネイルの設定・ゲーム・テンプレート・動画タイトル・描画できるか（§5.12。2026-11-07 追加） | `describe_thumbnail`（`core/ThumbnailService.Describe`） | — |
 | `GET /api/v1/thumbnail/preview` | 最新の描画の PNG（§5.12。2026-11-07 追加） | `get_thumbnail_preview`（`core/ThumbnailService.PreviewImage`） | — |
+| `GET /api/v1/result` | 大会リザルトのレイアウト・行・描画と取り込みの状態（§5.13。2026-11-09 追加） | `describe_result`（`core/ResultService.Describe`） | — |
+| `GET /api/v1/result/post` | X の投稿文（§5.13。DB の X ハンドルを含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_result_post`（`core/ResultService.PostText`） | — |
+| `GET /api/v1/result/preview` | 最新の描画の PNG（§5.13。2026-11-09 追加） | `get_result_preview`（`core/ResultService.PreviewImage`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -458,6 +461,32 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `canRender` はこのシェルで描けるか（ヘッドレスは `false`）
 - **`settings` の値は描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。旧 Qt パネルが保存できた値）。v1 の描画に加えて、SCORE の生成・X 投稿と legacy の `/scoreboard<N>-get-thumbnail-<png|jpg>` も同じ読みで描く（`ThumbnailService.RenderPayload`。ADR-005 S4p。それまでの SCORE / legacy は保存値をそのまま渡していた）。描画は `settings.json` を書かない（`background_source` の無い古い設定は、`GET` と同じく移行した値で描き、保存は次の `PATCH` / アップロードで行われる）
 - `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**で、生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
+
+### 5.13 `GET /api/v1/result`・`GET /api/v1/result/post`・`GET /api/v1/result/preview`（2026-11-09 追加・ADR-005 S4q）
+大会リザルトのページ（React の `/web/result`。S4r で作る）が読むもの。**何も書かない**。
+
+```json
+{ "ok": true, "revision": 42, "data": {
+  "layout": "horizontal",
+  "layouts": [ { "id": "horizontal", "name": "Horizontal (1920x1080)", "width": 1920, "height": 1080, "slots": 8, "team": false } ],
+  "players": [ { "slot": 1, "rank": 1, "name": "Alpha", "sponsor": "SPN", "twitter": "alpha",
+    "characters": [ { "en_name": "Mario", "skin": 2 }, null, null ], "fromScoreboard": null } ],
+  "teams": [ { "slot": 1, "rank": 1, "name": "Reds",
+    "members": [ { "name": "Alpha", "twitter": "", "character": null, "fromScoreboard": "Mario" } ] } ],
+  "sample": false,
+  "game": { "codename": "ssbu", "name": "Super Smash Bros. Ultimate" },
+  "render": { "status": "idle", "path": "", "error": "", "revision": 0 },
+  "standings": { "status": "idle", "error": "", "revision": 0 },
+  "canRender": true
+} }
+```
+- `layout` は `settings.json` の `result_config.layout`。保存値が無いときは今の対戦形式から決める（Team / Crew は `team`、ほかは `horizontal`）。対戦形式を選ぶと追従する（`team_split` や `vertical` の手動選択は保つ）
+- `players` は常に 16 行、`teams` は常に 8 行。`characters` は常に 3 要素で、`null` は空。読めない値・今のゲームのものでない値も `null`。**保存された別のゲームのキャラ**（再起動をまたいでゲームが変わった場合など）は state に残るが、読みでは無いものとして扱う（`null`・描かない・`fromScoreboard` の補完が効く・`sample` と `:loadStandings` の確認の判定でも入力に数えない）。絵のパスが `user_data/games/<codename>/` の下にあればそのゲームの値と見なし、絵が無ければ今のゲームの一覧にあるかで決める。ゲームが未選択のときは、その下の絵を持つ値を描かない
+- `fromScoreboard`: キャラ欄が空の選手に、スコアボードの同名の選手のキャラを描くとき、そのキャラの名前（描画のときに解決し、state には書かない）。無ければ `null`
+- `sample`: 今プレビューすると固定のサンプルを描くか（今のレイアウトの枠に描くものが無い）。このとき `:generate` は `400`
+- `GET /result/post`: `{"text": "大会名\n..."}`。X の投稿文で、**順位の順**に上位 4 行まで（描くものがある行だけ）。X のハンドルは行の `twitter`、無ければ選手 DB から引くので、**`PLAYERDB` 区分**（LAN の他端末はトークン必須。`GET /result` は READ で、DB の値を出さない）。ページはこれを持っておいて X 投稿のクリックの中で読む
+- `game` は `null`（未選択）か `{codename, name}`。`canRender` はこのシェルで描けるか（ヘッドレスは `false`）
+- `GET /result/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**（`:preview` と `:generate`）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<result_render.revision>` で URL を変える（値は見ない）
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -767,6 +796,28 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 委譲: `import_thumbnail_background` → `ThumbnailService.ImportBackground`。応答 `data` は §5.12 の `settings`。操作ログはキー名のみ
 - エラー: `INVALID_ARGUMENT`（読めない画像）、`INTERNAL`（保存の失敗）。いずれも設定を変えない
 
+### 6.30 大会リザルトのレイアウト `PATCH /api/v1/result`（2026-11-09 追加・ADR-005 S4q）
+- body: `{ "layout": "horizontal" | "horizontal_16" | "vertical" | "vertical_geki" | "team" | "team_split" }`。`settings.json` の `result_config.layout` に保存する。応答 `data` は `{ "layout": ... }`
+- **パスは受けない**（`main_icon_path` / `background_path` は未知のキーとして `400`。描画に任意のローカルファイルを読ませないため）。背景はサムネイルの設定に従う（§5.12・§6.29）
+- エラー: `INVALID_ARGUMENT`（未知のキー・空の body・未知のレイアウト）。body は 64 KiB まで（超えたら `413`。§6.31〜§6.34 と §7 の `result` も同じ）
+
+### 6.31 大会リザルトの単独の行 `PATCH /api/v1/result/players/{n}`（2026-11-09 追加・ADR-005 S4q）
+- `n` は 1〜16。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name` / `sponsor` / `twitter`（文字列。前後の空白は落とす。`""` で空にする）、`characters`（最大 3 要素で全体を置き換える。各要素は `{ "en_name": str, "skin": int（0 以上。省略は 0）, "game": str（省略可）}` か `null`（空。**位置を保つ**: `[A, null, B]` は 3 番目の欄に B を置く））
+- 値は識別子で受け、core がカタログから組む（1 つのスナップショットで全部を解決してから書く）。**1 行で 1 保存サイクル**で、ほかの行に触らない（LAN の 2 端末の編集が競合しない）
+- 委譲: `update_result_player` → `ResultService.UpdatePlayer`。応答は受付時点の `revision`。操作ログはキー名のみ
+- エラー: `INVALID_ARGUMENT`（範囲外の `n`・未知のキー・型・今のゲームに無いキャラ / スキン）、`409 CONFLICT`（`game` が今のゲームでない。別のゲームで選んだキャラを書かない）。いずれも何も書かない
+
+### 6.32 大会リザルトの団体の行 `PATCH /api/v1/result/teams/{n}`（2026-11-09 追加・ADR-005 S4q）
+- `n` は 1〜8。body（どれか。空は `400`）: `rank`（1〜999 の整数）、`name`（文字列）、`members`（最大 5 要素で全体を置き換える。各要素は `{ "name": str, "twitter": str, "character": {§6.31 の形} | null }`。どのキーも省略可。空のメンバーも位置を保つ）
+- 委譲: `update_result_team` → `ResultService.UpdateTeam`。保存サイクル・応答・操作ログ・エラーは §6.31 と同じ
+
+### 6.33 大会リザルトの並べ替え `POST /api/v1/result:reorder`（2026-11-09 追加・ADR-005 S4q）
+- body: `{ "kind": "players" | "teams", "order": [2, 1, 3] }`。`order` は `1..長さ` を 1 回ずつ含む枠の番号（`kind` の枠数まで）で、先頭の `len(order)` 枠にその順で行を入れ、順位を 1 から振り直す。**それより後の行は変えない**（TOP 8 のレイアウトの並べ替えで 9〜16 位を崩さない）。1 保存サイクル
+- 委譲: `reorder_result` → `ResultService` の `Reorder`。エラー: `INVALID_ARGUMENT`（未知のキー・`kind`・`order` の形）。何も書かない
+
+### 6.34 大会リザルトの選手を DB へ `POST /api/v1/result:saveToDb`（2026-11-09 追加・ADR-005 S4q）
+- body なし。今のレイアウトの種類の全行の選手を選手 DB に追記する（`overwrite=False`: 国・本名・ほかのゲームの mains は残る）。応答 `data` は `{ "saved": 人数 }`。選手 DB なので `revision` は付かない
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -792,6 +843,10 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/thumbnail:reset` | confirm | `reset_thumbnail_settings`（`ThumbnailService.Reset`。2026-11-07 追加・ADR-005 S4o） | — |
 | `POST /api/v1/thumbnail:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_thumbnail`（`ThumbnailService.Preview`。2026-11-07 追加・ADR-005 S4o） | — |
 | `POST /api/v1/thumbnail:generate` | 実行中フラグ | `generate_thumbnail`（`ThumbnailService.Generate`。2026-11-07 追加・ADR-005 S4o） | — |
+| `POST /api/v1/result:clear` | confirm | `clear_result`（`ResultService` の `Clear`。2026-11-09 追加・ADR-005 S4q） | — |
+| `POST /api/v1/result:loadStandings` | 入力があれば confirm・実行中フラグ | `load_result_standings`（`ResultService.LoadStandings`。2026-11-09 追加・ADR-005 S4q） | — |
+| `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
+| `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
 
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
   非同期で、応答は受付時点の `revision`。大会が読み込まれていなければ **409 `NOT_READY`**（`no tournament loaded`）で、ボードに何も
@@ -866,6 +921,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（予約の preview を兼ねる。preview の依頼には generate の `renderRevision` を返す）。preview を兼ねた generate が試合なし（`no_game` / `no_player`）で終わったときは、続けて preview の run（次の revision）でプレースホルダを描く（ADR-005 S4p）。
   generate は `out/thumbnails/{P1}-vs-{P2}-{UTC}.png` と `.jpg` を保存し（30 世代）、`path` は PNG の相対パス（`out/thumbnails/...`。静的配信の URL パス）。preview は `path` を変えず、§5.12 の画像だけを更新する。生成の `done` はそこまでで、§5.12 の画像だけ書けなくても `done`（警告ログ）。試合が揃っていなければ（`out/program_state.json` が無い・壊れているときも）、preview はプレースホルダを描き、generate は `no_game` / `no_player` で error。
   オフスクリーンの描画はデスクトップだけなので、**ヘッドレスは `503 UNAVAILABLE`**（終了中も同じ `503`）
+- `POST /api/v1/result:clear`: `{"kind": "players" | "teams", "confirm": true}`（`confirm` が無ければ `409 CONFIRMATION_REQUIRED`）。その種類の全行を空にする。もう一方の種類は残る。1 保存サイクル
+- `POST /api/v1/result:loadStandings`: body は空か `{"confirm": true}`。**大会情報を取り直し、それが指すゲームの読み込みが済んでから**、今のレイアウトの枠数ぶんの standings を start.gg から取り、そのレイアウトの種類の行に入れる（取り直しの失敗はログだけで standings へ進む）。provider のワーカーのジョブで、`202`（`data: {"accepted": true, "operation": "result.loadStandings", "standingsRevision": n}`）。`running` は 202 の前に state に出る（ジョブが先に終わっていればその結果が残る）。
+  進み具合と結果は state の `result_standings = {status: running → done | error, error, revision}`。error は `fetch_failed`（start.gg が答えない・読めない答え）/ `no_standings`（答えたが standings が無い）/ `changed`（standings の取得の間にゲームが変わった、または取り直しか取得の間に大会が差し替わった。取り込み自身の取り直しによるゲームの切り替えでは出ない）/ `import_failed`（答えは来たが行に入れられなかった）で、`done` 以外は行を書かない。
+  **実行中は `409 CONFLICT`**（キューしない。確認より先に判定するので、`confirm` の有無に関わらずこれが返る）。**行に入力があるときは `confirm` が要る**（無ければ `409 CONFIRMATION_REQUIRED`）。大会が読み込まれていなければ `409 NOT_READY`。これらは何も変えない。どちらの起動形態でも動く
+- `POST /api/v1/result:preview` / `:generate`: body なし。今のレイアウトで大会リザルトを描く。`202`（`data: {"accepted": true, "operation": "result.preview" | "result.generate", "renderRevision": n}`）で、`running` は 202 の前に state に出る。進み具合と結果は state の `result_render = {status: running → done | error, path, error, revision}`。レーンの規則（1 度に 1 つ・preview のまとめ・generate の予約・`renderRevision` の意味・error のコード）は `:thumbnail` と同じで、`no_game` / `no_player` は無く、予約の間にデータが無くなった generate の `no_data` がある。
+  generate は `out/results/{大会名}-top{8|16}-{UTC}.png` を保存し（30 世代。PNG のみ）、`path` はその相対パス。大会名が空なら `result-top{8|16}-{UTC}.png`。**受理の時点で行の選手を選手 DB に追記する**（§6.34 と同じ。失敗はログだけで画像は作る）。preview は DB を書かない。
+  **データの無い generate は `400 INVALID_ARGUMENT`**、実行中か予約済みの generate があるときは `409 CONFLICT`。preview はデータが無ければ固定のサンプルを描く（§5.13 の `sample`）。背景はサムネイルの設定（`background_source`）に従う。ヘッドレスと終了中は `503 UNAVAILABLE`
 
 > **注**: 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は廃止。テーマはダーク固定（[Design.md §5.4](Design.md)）。
 

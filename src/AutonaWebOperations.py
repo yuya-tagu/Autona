@@ -110,6 +110,8 @@ from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
+from .core import ResultService as results
+from .core.ResultService import ResultService
 from .core.StatsService import StatsService
 from .core.StreamService import StreamService
 from .core.ThumbnailService import ThumbnailService
@@ -360,8 +362,9 @@ openSetSelection = None
 renderThumbnail = None
 # Start drawing an image off-screen and return, without waiting for it:
 # (kind, payload, done). One operation for every generated image -- the match
-# thumbnail now (core/ThumbnailService), Result next, by `kind` -- rather than
-# one per image: what differs between them is core's, and the shell only has
+# thumbnail (core/ThumbnailService) and the result (core/ResultService), by
+# `kind` -- rather than one per image: what differs between them is core's, and
+# the shell only has
 # the view. `done(encode, error)` comes later on the GUI thread. ADR-005 S4o.
 startImageRender = None
 
@@ -776,9 +779,77 @@ def get_thumbnail_preview():
     return ThumbnailService.instance.PreviewImage()
 
 
+# ── the tournament result (ADR-005 S4q) ──────────────────────────────────
+
+def describe_result():
+    """What the page shows (ResultService.Describe) and whether this shell can
+    draw (canRender)."""
+    return dict(ResultService.instance.Describe(),
+                canRender=startImageRender is not None)
+
+
+def get_result_post():
+    return ResultService.instance.PostText()
+
+
+def get_result_layout():
+    return ResultService.instance.Layout()
+
+
+def set_result_layout(layout):
+    return ResultService.instance.SetLayout(layout)
+
+
+def update_result_player(slot, fields):
+    return results.UpdatePlayer(slot, fields)
+
+
+def update_result_team(slot, fields):
+    return results.UpdateTeam(slot, fields)
+
+
+def reorder_result(kind, order):
+    return results.Reorder(kind, order)
+
+
+def clear_result(kind):
+    return results.Clear(kind)
+
+
+def load_result_standings(confirmed):
+    return ResultService.instance.LoadStandings(confirmed)
+
+
+def save_result_to_db():
+    return ResultService.instance.SaveToDb()
+
+
+def preview_result():
+    """Draw the preview image in the background: the revision of the run that
+    will. Only a shell with a renderer can (NotAvailable: 503)."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return ResultService.instance.Preview()
+
+
+def generate_result():
+    """Draw and save the result in the background: the revision of the run
+    that will, BUSY or NO_DATA. Only a shell with a renderer can (NotAvailable:
+    503)."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return ResultService.instance.Generate()
+
+
+def get_result_preview():
+    """The preview image's bytes (a PNG); None while there is none."""
+    return ResultService.instance.PreviewImage()
+
+
 def start_image_render(kind, payload, done):
-    """Hand an image to the shell's renderer (core/ThumbnailService's
-    `render`). Waits for the GUI thread to take it, not for the image."""
+    """Hand an image to the shell's renderer (`render` of core's
+    ThumbnailService and ResultService). Waits for the GUI thread to take it,
+    not for the image."""
     if startImageRender is None:
         raise NotAvailable()
     return _on_gui_thread(lambda: startImageRender(kind, payload, done),
