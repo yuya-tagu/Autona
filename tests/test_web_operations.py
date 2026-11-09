@@ -91,13 +91,12 @@ def _view(app, n):
 
 
 def _goHeadless(app, monkeypatch):
-    """No board built and the headless host: what main.py --headless runs.
-    The skeleton is the one the headless shell seeds (StateSchema)."""
-    from src.core import StateSchema as schema
+    """No board built and the headless host: what main.py --headless runs,
+    on the boards it seeds (src/headless._SeedBoards)."""
+    from src import headless
     app.dropAllBoards()
     with _state().SaveBlock():
-        for number in (1, 2, 3):
-            schema.SeedBoard(number)
+        headless._SeedBoards()
     app.settle()
     monkeypatch.setattr(WebOps, "boardHost", BoardHost())
 
@@ -153,7 +152,7 @@ def test_both_hosts_write_the_same_state(autonaApp, monkeypatch, name):
     # sets the roster (ADR-005 S3e-6), and a roster that goes to one player
     # from any other count empties the team names.
     try:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
         _prepare(BOARD)
         autonaApp.settle()
         operation(BOARD)
@@ -181,17 +180,6 @@ _PLAYER = {"gamerTag": "ALPHA", "prefix": "SP", "name": "Real Alpha",
            "twitter": "alphatw", "custom_textbox": "note", "id": 7,
            "seed": 2, "city": "Osaka", "country_code": "JP",
            "state_code": "13"}
-
-
-def _goHeadlessWithSlots(app, monkeypatch):
-    """_goHeadless plus the player slots the headless shell seeds for boards
-    1/2 (src/headless._SeedBoards: PlayerService.SeedEmptyRoster)."""
-    from src.core.PlayerService import SeedEmptyRoster
-    _goHeadless(app, monkeypatch)
-    with _state().SaveBlock():
-        for number in (1, 2):
-            SeedEmptyRoster(number)
-    app.settle()
 
 
 def _dropHeadlessBoards(app):
@@ -284,7 +272,7 @@ def test_both_hosts_load_the_same_player(autonaApp, monkeypatch, playerDB,
 
     # Headless: the seeded slots, the load published at once.
     try:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
         _state().Set(f"score.{n}.match_en", "Winners Final")
         autonaApp.settle()
         operation(n)
@@ -325,7 +313,7 @@ def test_both_hosts_save_the_player_to_the_database(autonaApp, monkeypatch,
     playerDB.saved.clear()
 
     try:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
         assert WebOps.update_player(1, 1, 1, dict(data)) is True
         assert WebOps.set_team_data(1, "2", "1", dict(data)) == "OK"
         autonaApp.settle()
@@ -395,7 +383,7 @@ def test_the_database_save_is_made_outside_the_board_host(
     if host == "desktop":
         autonaApp.board(1)
     else:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
     boardHost = WebOps.boardHost
     hostRun = boardHost.Run
     running = []
@@ -456,7 +444,7 @@ def test_two_saves_of_one_player_arriving_out_of_order_keep_the_newer(
     edits of one player can write in the other order (the first request's
     thread scheduled last). The record is numbered as the host reads the
     slot, and the older one is dropped (S3e-4 review)."""
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     save = WebOps._save_record
     held = []
     monkeypatch.setattr(WebOps, "_save_record", held.append)
@@ -527,7 +515,7 @@ def test_a_save_from_a_request_thread_finishes(
     if host == "desktop":
         autonaApp.board(1)
     else:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
         monkeypatch.setattr(AutonaPlayerDB, "modelEnabled", False)
     boardHost = WebOps.boardHost
     seen = []
@@ -576,7 +564,7 @@ def test_a_web_load_asks_for_the_statistics(autonaApp, monkeypatch,
     if host == "desktop":
         autonaApp.board(1)
     else:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
     try:
         with StatsTriggers(1) as triggers:
             assert WebOps.update_player(1, 2, 1, dict(_PLAYER)) is True
@@ -640,7 +628,7 @@ def test_a_slot_the_state_does_not_have_is_not_written(
     if host == "desktop":
         autonaApp.board(1)
     else:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
     try:
         before = json.loads(json.dumps(autonaApp.get("score.1")))
         for team, player in ((1, 2), (1, 0), (3, 1), (0, 1)):
@@ -779,7 +767,7 @@ def test_both_hosts_write_the_same_roster(autonaApp, monkeypatch, name):
         == [len(roster["1"]["player"] or {}), len(roster["2"]["player"] or {})]
 
     try:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
         _prepareRoster(BOARD)
         autonaApp.settle()
         operation(BOARD)
@@ -802,7 +790,7 @@ def test_an_emptied_board_gives_its_next_players_the_characters_it_keeps(
     if host == "desktop":
         autonaApp.board(BOARD)
     else:
-        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _goHeadless(autonaApp, monkeypatch)
     try:
         def counts():
             autonaApp.settle()
@@ -1051,7 +1039,7 @@ def test_the_roster_routes_answer_headless(server, autonaApp, monkeypatch):
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     try:
         for path in ("/scoreboard1-set?players=2",
                      "/scoreboard2-set?characters=2"):
@@ -1098,9 +1086,6 @@ ANSWERED_ROUTES = [
 
 
 def test_the_crew_and_caster_routes_answer_headless(server, headless):
-    from src.core.CrewBattleService import CrewBattleService
-    CrewBattleService(3).SeedDefaults()
-    headless.settle()
     app, _ = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
@@ -1130,7 +1115,7 @@ def test_the_crew_and_caster_routes_answer_headless(server, headless):
 
 
 def _headlessPlayers(autonaApp, monkeypatch, playerDB):
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
 
 
@@ -1237,7 +1222,7 @@ def test_headless_asks_for_the_statistics_a_swap_and_a_clear_call_for(
     from tests.fixtures.stats.spies import FakeFetcher
     fetcher = FakeFetcher()
     monkeypatch.setattr(StatsService, "fetcher", fetcher)
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     videogame = autonaApp.get("provider_videogame")
     _state().Set("provider_videogame", {"id": 1386, "name": "G"})
     try:
@@ -1300,7 +1285,7 @@ def test_the_stats_routes_answer_headless(server, autonaApp, monkeypatch,
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     try:
         _twoPlayers()
         autonaApp.settle()
@@ -1372,7 +1357,7 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
     app, _ = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    _goHeadless(autonaApp, monkeypatch)
     adapter = AutonaTournamentDataProvider.instance
     try:
         # The players first, with no tournament loaded: nothing is fetched.
@@ -1865,7 +1850,6 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
     from src.AutonaTournamentDataProvider import (
         AutonaTournamentDataProvider)
     from src.core.CountryCatalog import CountryCatalog
-    from src.core.CrewBattleService import CrewBattleService
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
@@ -1914,9 +1898,7 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
     # there.
     logo = Path(os.path.abspath("layout")) / "logo.png"
     hadLogo = logo.exists()
-    _goHeadlessWithSlots(autonaApp, monkeypatch)
-    CrewBattleService(3).SeedDefaults()
-    autonaApp.settle()
+    _goHeadless(autonaApp, monkeypatch)
     answers = []
     events = {}
     try:

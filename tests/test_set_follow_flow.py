@@ -403,8 +403,8 @@ def recordedLocale(autonaApp):
 @pytest.fixture
 def settings(monkeypatch):
     """The settings a set load reads, as the test sets them (nothing is
-    written to the harness's file): polling off as the board leaves it
-    (it forces general.disable_autoupdate on), overwriting on, the
+    written to the harness's file): polling off as the desktop leaves it
+    (SetFollowService.TurnOffPolling), overwriting on, the
     streamer's channel."""
     from src.core.SettingsManager import SettingsManager
 

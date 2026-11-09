@@ -13,8 +13,8 @@ Two kinds of check live here:
   have no reason to press.
 - **Behaviour of the seeds.** ``SeedBoard`` is called from two places that
   used to carry their own copy, so what it does on a *second* call is now
-  load-bearing: the lazily-built board reseeds over the manager's
-  placeholder.
+  load-bearing: a lazily-built board's seed (AutonaActions.SeedFreshBoard)
+  goes over the manager's placeholder.
 
 StateManager writes ./out relative to the CWD, so everything runs inside a
 temp directory, and each test restores the shared state it touched -- this
@@ -492,8 +492,8 @@ def test_seed_board_writes_the_skeleton_boards_1_and_2_share(number):
 
 @pytest.mark.parametrize("number", [3, "3"])
 def test_seed_board_gives_the_crew_board_only_its_root(number):
-    # Board 3 is AutonaCrewBattleWidget: no set history, no station queue.
-    # The rest of its subtree comes from its own _writeInitialState().
+    # Board 3 is the crew board: no set history, no station queue. The rest
+    # of its subtree is CrewBattleService.SeedDefaults()'s.
     schema.SeedBoard(number)
     assert SM.Get("score.3") == {}
 
@@ -652,7 +652,7 @@ def test_seed_panel_state_fills_the_slot_fixed_subtrees(_blank_settings):
 
 
 def test_seed_panel_state_fills_missing_display_options(_blank_settings):
-    # The only other writer is a 1v1 / team board's constructor, so an
+    # The only other writer is a 1v1 / team board's seed, so an
     # operator whose saved format is the crew board (score.3 -- no eye menu)
     # would otherwise have no display_options in the state at all, and the
     # Web UI / OBS overlays would render every field regardless of settings.

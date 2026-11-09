@@ -107,8 +107,8 @@ def test_a_fresh_crew_board_seeds_its_whole_subtree(autonaApp):
     """The OBS crew overlay reads every one of these unconditionally.
 
     SeedBoard(3) writes only the subtree root (unlike boards 1/2 it has no
-    set history and no station queue); everything below is the board's own
-    launch write.
+    set history and no station queue); everything below is its launch write
+    (CrewBattleService.SeedDefaults, from AutonaActions.SeedFreshBoard).
     """
     autonaApp.board(BOARD)
     autonaApp.settle()

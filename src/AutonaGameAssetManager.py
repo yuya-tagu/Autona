@@ -532,7 +532,7 @@ class AutonaGameAssetManager(QObject):
         # cycle, so the state -- and state.json -- holds one game (ADR-005
         # S3f-4 reviews). The roster the load asks for (gameLoaded ->
         # bootstrap.wire_game_roster: the previous game's picks emptied),
-        # committed as each board's onLoad handler commits it, then the
+        # committed as an announced load commits it, then the
         # pick persisted (onLoad's _PersistSelectedGame). Core's operations,
         # callable from any thread -- not through the board host, which
         # hands its work to the GUI thread (the loader's thread would wait
@@ -567,6 +567,11 @@ class AutonaGameAssetManager(QObject):
                 raise
             self.signals.gameLoaded.emit(snapshot)
             self.signals.onLoad.emit()
+            # Last: it takes what those slots wrote with it (ADR-005 S4t;
+            # each board's onLoad handler did this, ahead of the cards built
+            # after the board). Queued for the cycle closed below.
+            from .core.Actions import AutonaActions
+            AutonaActions.instance.CommitGameLoad()
         finally:
             cycle.Release()
 

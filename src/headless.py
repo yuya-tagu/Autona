@@ -583,23 +583,18 @@ def _ConfigureLogging():
 def _SeedBoards():
     """The boards as the desktop's freshly built ones publish them.
 
-    The score subtree reset (the scoreboard dock's construction) and every
-    board's skeleton come first, as on the desktop. Then what a built board's
-    widgets add to it (ADR-005 S3d): the player slots its empty cards
-    publish -- the score overlays draw nothing until team 1 has one -- and
-    the crew board's launch write. The desktop builds a board only when it
-    is shown; this shell builds none and serves all three, so all three get
-    the seed. tests/test_headless_seed.py pins it against desktop boards.
+    The score subtree reset (the scoreboard dock's construction) comes first,
+    as on the desktop, then each board's launch write, the one the desktop
+    runs as it builds a board (AutonaActions.SeedFreshBoard, ADR-005 S4t).
+    The desktop builds a board only when it is shown; this shell builds none
+    and serves all three, so all three get it. tests/test_headless_seed.py
+    pins it against desktop boards.
     """
     from .core import StateSchema as schema
-    from .core.CrewBattleService import CrewBattleService
-    from .core.PlayerService import SeedEmptyRoster
+    from .core.Actions import AutonaActions
     schema.ResetScoreRoot()
-    for number in (1, 2, 3):
-        schema.SeedBoard(number)
-    for number in (1, 2):
-        SeedEmptyRoster(number)
-    CrewBattleService(3).SeedDefaults()
+    for number in (1, 2, AutonaActions.CREW_BOARD):
+        AutonaActions.instance.SeedFreshBoard(number)
 
 
 def _SeedState():

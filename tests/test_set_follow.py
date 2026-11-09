@@ -124,15 +124,11 @@ def _tick(board):
 
 def _goHeadless(app, monkeypatch):
     """No board built and the headless host: what main.py --headless runs,
-    with the player slots it seeds for boards 1/2."""
-    from src.core import StateSchema as schema
-    from src.core.PlayerService import SeedEmptyRoster
+    with the boards it seeds."""
+    from src import headless
     app.dropAllBoards()
     with _state().SaveBlock():
-        for number in (1, 2, 3):
-            schema.SeedBoard(number)
-        for number in (1, 2):
-            SeedEmptyRoster(number)
+        headless._SeedBoards()
     app.settle()
     host = BoardHost()
     monkeypatch.setattr(WebOps, "boardHost", host)
@@ -217,6 +213,42 @@ def _onWorker(fn):
     if "error" in box:
         raise box["error"]
     return box.get("value")
+
+
+def test_a_point_from_another_thread_is_not_followed_twice_by_a_set(
+        autonaApp, headless, settings):
+    """ApplySetPayload reads the score it follows from under the lock, so a
+    +1 on another thread waits for it. With nothing in the way, the +1 lands
+    between the read and the set's score: its row stays, and the set's follow
+    adds its whole move from the score it read on top. Three rows for a score
+    of 2."""
+    from src.core.Actions import AutonaActions
+    from src.core.SetFollowService import SetFollowService
+
+    settings["general.disable_individual_game_tracker"] = False
+    actions = AutonaActions.instance
+    actions.SetBestOf(1, 5)
+    tracker = actions.GameTracker(1)
+    realScores = tracker.Scores
+    other = threading.Thread(
+        target=lambda: actions.AdjustScore(1, 1, 1), daemon=True)
+
+    def scores():
+        value = realScores()
+        if other.ident is None:
+            other.start()
+            other.join(0.3)
+        return value
+
+    with patch.object(tracker, "Scores", side_effect=scores):
+        SetFollowService(1).ApplySetPayload(
+            {"bestOf": 5, "team1score": 2, "team2score": 0, "entrants": []})
+        other.join(5)
+    autonaApp.settle()
+
+    assert not other.is_alive()
+    assert autonaApp.get("score.1.team.1.score") == 3
+    assert tracker.WonStages(0) == [0, 1, 2]
 
 
 # ── the headless shell loads, follows and applies ───────────────────────
@@ -1087,6 +1119,46 @@ def test_an_update_answering_after_the_set_was_loaded_again_is_dropped(
     board.StopAutonaUpdate(clear_variables=True)
 
 
+def test_a_loaded_set_moves_the_rows_with_no_board_at_all(
+        autonaApp, headless, settings):
+    """The tracker on, on the headless shell: the rows are core's, and the
+    score reaches them as a +1 does (ADR-005 S4t; a board's held cycle did it,
+    so a shell with no board had no rows). On the rows the set's length
+    leaves, by the net move from the score the set found -- a re-read set
+    with the same score moves nothing, its recorded games stay."""
+    from src.core.Actions import AutonaActions
+    from src.core.SetFollowService import SetFollowService
+
+    settings["general.disable_individual_game_tracker"] = False
+    tracker = AutonaActions.instance.GameTracker(1)
+    service = SetFollowService(1)
+
+    service.ApplySetPayload({"bestOf": 5, "team1score": 2, "team2score": 1,
+                             "entrants": []})
+    autonaApp.settle()
+    assert tracker.StageCount() == 5
+    assert tracker.WonStages(0) == [0, 1]
+    assert tracker.WonStages(1) == [2]
+
+    tracker.SetStageResult(0, 2)        # reorder by hand: T2, T1, T2 ...
+    tracker.SetStageResult(1, 1)
+    tracker.SetStageResult(2, 1)
+    tracker.PublishStageResults()
+    service.ApplySetPayload({"reset_score": True, "team1score": 2,
+                             "team2score": 1, "entrants": []})
+    autonaApp.settle()
+    assert tracker.WonStages(0) == [1, 2], (
+        "the reset inside the set read as a clear, and re-awarding reordered "
+        "the rows")
+    assert tracker.WonStages(1) == [0]
+
+    service.ApplySetPayload({"team1score": 3, "team2score": 0,
+                             "entrants": []})
+    autonaApp.settle()
+    assert tracker.WonStages(0) == [1, 2, 3]
+    assert tracker.WonStages(1) == []
+
+
 def test_answers_apply_on_the_headless_host(autonaApp, headless,
                                             monkeypatch):
     """A fetched set is applied where the headless shell runs its board
@@ -1204,8 +1276,7 @@ bootstrap_core()
 
 from src import AutonaWebOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from src.core import StateSchema as schema
-from src.core.PlayerService import SeedEmptyRoster
+from src.core.Actions import AutonaActions
 from src.core.SetFollowService import SetFollowService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
@@ -1234,8 +1305,7 @@ SettingsManager.Get = staticmethod(lambda key, default=None: (
 AutonaTournamentDataProvider.instance.provider = Provider()
 with StateManager.SaveBlock():
     for number in (1, 2, 3):
-        schema.SeedBoard(number)
-    SeedEmptyRoster(1)
+        AutonaActions.instance.SeedFreshBoard(number)
 SetFollowService.POLL_MS = 100
 
 answer = AutonaWebOperations.load_set(1, "1001")

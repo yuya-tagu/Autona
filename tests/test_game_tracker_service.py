@@ -286,18 +286,18 @@ def test_the_score_the_rows_add_up_to_is_published(tracker):
     assert SM.Get(f"{PREFIX}.team.2.score") == 1
 
 
-def test_publishing_the_stage_score_is_one_cycle_and_flags_itself(tracker):
-    """Both properties the board depends on, in one place.
-
-    The board reconciles its spinboxes from the same notification this
-    write produces, and would read it as an operator +1 -- awarding another
-    stage for it -- unless `writingScore` says whose write it is.
+def test_publishing_the_stage_score_is_one_cycle_and_moves_no_row(tracker):
+    """The score the rows add up to is not a move for them to follow: one
+    click on a game would also win the next one. The board's held handler
+    used to read this write as an operator +1, and `writingScore` told it
+    otherwise; nothing but the operations follows now (FollowScores,
+    ADR-005 S4t).
     """
     tracker.SetStageResult(0, TEAM_1)
     seen = []
 
     def record(payload):
-        seen.append(tracker.writingScore)
+        seen.append(payload)
 
     SM.observers.state_updated.subscribe(record)
     try:
@@ -305,10 +305,9 @@ def test_publishing_the_stage_score_is_one_cycle_and_flags_itself(tracker):
     finally:
         SM.observers.state_updated.unsubscribe(record)
 
-    assert seen == [True], (
-        "the two team scores must publish in one cycle, with the tracker "
-        "identifying itself as the author for the whole of it")
-    assert tracker.writingScore is False, "the flag was left set"
+    assert len(seen) == 1, "the two team scores must publish in one cycle"
+    assert tracker.WonStages(0) == [0]
+    assert _winners(tracker)[1:] == [UNREPORTED] * 4
 
 
 def test_update_score_publishes_and_then_moves_the_rows(tracker):

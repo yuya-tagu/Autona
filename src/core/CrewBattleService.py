@@ -618,10 +618,9 @@ class CrewBattleService:
             for color in cls.DEFAULT_COLORS]
 
     def SeedDefaults(self) -> list:
-        """The launch write of a freshly built crew board, without the
-        widget: ``SeedBoardState`` with the rows it is built with
-        (``DefaultTeams``), the default member count and no best of. For a
-        shell that builds no crew widget (the headless one, ADR-005 S3d);
-        tests/test_headless_seed.py pins it against a desktop board."""
+        """The launch write of a new crew board: ``SeedBoardState`` with the
+        default rows (``DefaultTeams``), the default member count and no best
+        of. Both shells (AutonaActions.SeedFreshBoard, ADR-005 S4t; the board
+        only renders it now)."""
         return self.SeedBoardState(
             self.DefaultTeams(), self.DEFAULT_MEMBER_NUM, 0)

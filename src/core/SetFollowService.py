@@ -162,6 +162,16 @@ class SetFollowService:
         web operation to stop it."""
         return not SettingsManager.Get("general.disable_autoupdate", True)
 
+    @staticmethod
+    def TurnOffPolling():
+        """What the desktop does each time it builds a 1v1 / team board
+        (AutonaScoreboardManager.EnsureScoreboard; the board's constructor
+        until ADR-005 S4t): polling left the board's UI, so a stale setting
+        from an older session must not keep it running. Not part of the
+        shared launch write (AutonaActions.SeedFreshBoard): on the headless
+        shell the setting is the operator's (Polling)."""
+        SettingsManager.Set("general.disable_autoupdate", True)
+
     @classmethod
     def _Next(cls):
         with cls._lock:
@@ -548,11 +558,20 @@ class SetFollowService:
         record = None
         with StateManager.SaveBlock():
             service.ApplyMatchInfo(data)
-            service.ApplyScores(data)
+            # The game rows follow the net move of the score, on the rows
+            # the set's length leaves (GameTrackerService.FollowScores). The
+            # lock is for a +1 from another thread: its own follow would be
+            # counted a second time here.
+            actions = AutonaActions.instance
+            tracker = actions.GameTracker(board)
+            with StateManager.lock:
+                scores = tracker.Scores()
+                service.ApplyScores(data)
 
-            bestOf = service.BestOfFromSetData(data)
-            if bestOf is not None:
-                AutonaActions.instance.SetBestOf(board, bestOf)
+                bestOf = service.BestOfFromSetData(data)
+                if bestOf is not None:
+                    actions.SetBestOf(board, bestOf)
+                tracker.FollowScores(scores)
 
             # The flag and its team's " [L]" names (ADR-005 S2b). The
             # stream URL is the operator's (the dropdown): not written.

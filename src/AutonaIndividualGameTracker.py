@@ -27,8 +27,8 @@ from qtpy.QtWidgets import *
 from qtpy.QtGui import *
 
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .core.GameTrackerService import (
-    GameTrackerService, TEAM_1, TEAM_2, TIE, UNREPORTED)
+from .core.Actions import AutonaActions
+from .core.GameTrackerService import TEAM_1, TEAM_2, TIE, UNREPORTED
 from .Helpers.AutonaQtHelper import assert_gui_thread
 from .Helpers.AutonaVersionHelper import add_beta_label
 from .core.StateManager import StateManager
@@ -59,7 +59,8 @@ class AutonaIndividualGameTracker(QWidget):
         label_font.setBold(True)
         label.setFont(label_font)
         self.scoreboard_number = scoreboard_number
-        self.service = GameTrackerService(scoreboard_number)
+        # Core's, with or without this board (ADR-005 S4t).
+        self.service = AutonaActions.instance.GameTracker(scoreboard_number)
         self._layout.addWidget(label)
         self.setLayout(self._layout)
         self.stage_widget_list = []
@@ -67,15 +68,6 @@ class AutonaIndividualGameTracker(QWidget):
         # The service's rowsVersion the rows were last built for; None until
         # the first RenderStageRows(), which always builds.
         self._renderedRowsVersion = None
-
-    @property
-    def writingScore(self) -> bool:
-        """True while the tracker is itself the author of the team score.
-
-        Read by AutonaScoreboardWidget._SyncScoreDisplays; the reasoning is
-        on GameTrackerService.writingScore, which owns the flag now.
-        """
-        return self.service.writingScore
 
     # ── the rows ─────────────────────────────────────────────────────────
 
@@ -173,10 +165,10 @@ class AutonaIndividualGameTracker(QWidget):
 
         The asset manager replaces its models on every game load and keeps
         the previous generation alive for one more load only
-        (agent-pitfalls #13). The board normally rebuilds the rows on the
-        same onLoad (AutonaActions.RepublishBestOf resets them, and
-        RenderStageRows rebuilds the buttons from the held cycle), but a row
-        that survived it would be left bound to a model that the next load
+        (agent-pitfalls #13). The rows are rebuilt on the same load
+        (AutonaActions.RepublishBestOfs resets them on gameLoaded, and
+        RenderStageRows rebuilds the buttons in the board's handler), but a
+        row that survived it would be left bound to a model that the next load
         deletes. Signals are blocked: this is not a stage selection, and
         must not write score.{n}.stages.*.
 
@@ -224,8 +216,7 @@ class AutonaIndividualGameTracker(QWidget):
         (AutonaActions.SetBestOf -> GameTrackerService.SetStageCount, ADR-005
         S2e); this used to be the method that did both, from the BEST OF
         spinbox's valueChanged. Called by the board on every held cycle,
-        before the score is followed onto the rows, so the buttons a
-        transition is rendered on are the ones it was made for.
+        before it redraws the buttons (RenderStageResults).
 
         Rebuilt when core rebuilt the rows -- also to the same number, which
         is what a game load does: the stage combos start over with the new
@@ -280,25 +271,17 @@ class AutonaIndividualGameTracker(QWidget):
         self._SyncStageButtons()
 
     @assert_gui_thread
-    def SyncStagesToScore(self, team, old_value, new_value):
-        """Award / clear as many stage rows as the score moved by.
-
-        Called by the board when the score was written by somebody else
-        (AutonaActions: the +1 buttons, the hotkeys, the Web UI, the API).
-        """
-        self.service.SyncStagesToScore(team, old_value, new_value)
-        self._SyncStageButtons()
-
-    @assert_gui_thread
     def StageResultsChanged(self):
         team_1_score, team_2_score = self.service.PublishStageResults()
-        # Emitted after the flag inside the service is cleared: this is the
-        # board's cue to update the spinboxes for the ordinary, non-held case.
+        # The board's cue to update the spinboxes for the ordinary, non-held
+        # case.
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
     def RenderStageResults(self):
         """Redraw the buttons from the recorded results, for a write that
-        did not come through here -- a swap mirrors the rows in core
-        (AutonaActions.SwapTeams, ADR-005 S2c). Writes nothing."""
+        did not come through here: the board calls it on every held cycle
+        (_SyncScoreDisplays), since core moves the rows with the score
+        (GameTrackerService.FollowScores) and mirrors them with a swap
+        (AutonaActions.SwapTeams). Writes nothing."""
         self._SyncStageButtons()

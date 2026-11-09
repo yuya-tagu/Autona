@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtCore import QCoreApplication, QEvent, QSignalBlocker
 from qtpy.QtWidgets import (
     QCheckBox, QComboBox, QLineEdit, QPushButton, QWidget)
 from shiboken6 import Shiboken
@@ -323,36 +323,245 @@ def test_a_game_load_starts_the_rows_over_at_the_same_length(autonaApp):
         _stageButton(board, game=1, team=1).click()
         autonaApp.settle()
         rows = tracker.stage_order_list_widget
-
-        board._onGameAssetsLoaded()
+        autonaApp.state.CommitHeld("score.1")
         autonaApp.settle()
+
+        autonaApp.publishGameLoad()
 
     assert tracker.stage_order_list_widget is not rows
     assert len(tracker.stage_widget_list) == 3
     assert _wonGames(autonaApp, 1) == []
     assert not _stageButton(board, game=1, team=1).isChecked()
+    # All of it published, so the 反映 button is not left lit. The commit
+    # used to swallow the held notification that renders the rows, so a real
+    # load left the first button checked on an empty row (ADR-005 S4t): the
+    # board's onLoad handler renders them now.
+    assert autonaApp.state.HasPendingChanges("score.1") is False
+    assert autonaApp.state.GetCommitted("score.1.stages.1.t1_win") is False
 
 
-def test_a_dropped_board_unregisters_its_game_rows(autonaApp):
-    """The registration ends with the board: a set length set afterwards is
-    the six keys alone, as on any board that is not built."""
+def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
+    """The commit comes after every onLoad slot: a player card's
+    ReloadCharacters writes what its rows pick as it rebinds them. Committed
+    ahead of them, the 反映 button stays lit after a load nobody edited
+    (a held write after the commit raises the flag and nothing lowers it)."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.core.Actions import AutonaActions
+
+    autonaApp.board(1)
+
+    def write():
+        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+
+    signals = AutonaGameAssetManager.instance.signals
+    signals.onLoad.connect(write)
+    try:
+        autonaApp.publishGameLoad()
+    finally:
+        signals.onLoad.disconnect(write)
+
+    assert autonaApp.state.HasPendingChanges("score.1") is False
+    assert autonaApp.state.GetCommitted(
+        "score.1.team.1.teamName") == "written on onLoad"
+
+
+@contextlib.contextmanager
+def _writtenDuringTheLoad(write):
+    """`write` while a game load's save cycle is open, after the wiring's
+    roster and ahead of the boards' handlers: where a writer on another thread
+    lands while the load decodes its assets."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+
+    def slot(_snapshot):
+        write()
+
+    signal = AutonaGameAssetManager.instance.signals.gameLoaded
+    signal.connect(slot)
+    try:
+        yield
+    finally:
+        signal.disconnect(slot)
+
+
+def test_a_game_load_shows_what_was_written_during_it(autonaApp):
+    """The commit closing the load takes the held cycle with it, so nothing
+    else tells the board about a score or a set's fields that arrived in the
+    load's save cycle. They go out with the commit; the board shows them too."""
+    from src.core import StateSchema as schema
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    actions = AutonaActions.instance
+
+    def write():
+        actions.SetScore(1, 1, 3)
+        actions.SetBestOf(1, 5)
+        actions.SetMatchField(1, schema.MATCH_KEY, "Grand Final")
+        actions.SetTeamLosers(1, 2, True)
+        actions.SetTeamName(1, 2, "Late")
+
+    with _writtenDuringTheLoad(write):
+        autonaApp.publishGameLoad()
+
+    assert autonaApp.state.GetCommitted("score.1.team.1.score") == 3
+    assert board.scoreDisplay1.value() == 3
+    assert board.bestOfSpin.value() == 5
+    assert board.matchCombo.currentText() == "Grand Final"
+    assert board.team2column.findChild(
+        QCheckBox, schema.TEAM_LOSERS_KEY).isChecked()
+    assert board.team2column.findChild(
+        QLineEdit, schema.TEAM_NAME_KEY).text() == "Late"
+
+
+def test_a_game_load_leaves_a_field_being_edited_alone(autonaApp):
+    """The load's render keeps the rule of every other (_SyncSetFields,
+    _SyncBestOf). The fields show the state once the operator has left them."""
+    from src.core import StateSchema as schema
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    actions = AutonaActions.instance
+    name = board.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
+    match = board.matchCombo.lineEdit()
+    for edit in (name, match):
+        with QSignalBlocker(edit):
+            edit.setText("typing")
+
+    def write():
+        actions.SetBestOf(1, 5)
+        actions.SetMatchField(1, schema.MATCH_KEY, "Grand Final")
+        actions.SetTeamName(1, 2, "Late")
+
+    with _writtenDuringTheLoad(write), \
+            patch.object(name, "hasFocus", return_value=True), \
+            patch.object(match, "hasFocus", return_value=True), \
+            patch.object(board.bestOfSpin, "hasFocus", return_value=True):
+        autonaApp.publishGameLoad()
+
+        assert name.text() == "typing"
+        assert match.text() == "typing"
+        assert board.bestOfSpin.value() == 0
+
+    board._onHeldStateUpdated(board.statePrefix)
+
+    assert name.text() == "Late"
+    assert match.text() == "Grand Final"
+    assert board.bestOfSpin.value() == 5
+
+
+def test_a_boards_game_load_handler_writes_nothing(autonaApp):
+    """What a load writes is the shared wiring's and the commit's; the board
+    only shows it, its new cards included."""
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    actions = AutonaActions.instance
+    state = autonaApp.state
+
+    with state.SaveBlock():
+        actions.SetRoster(1, 2, None)
+        actions.SetBestOf(1, 3)
+        actions.SetScore(1, 1, 2)
+        with patch.object(state, "Set") as written, \
+                patch.object(state, "Unset") as unset:
+            board._onGameAssetsLoaded()
+
+    written.assert_not_called()
+    unset.assert_not_called()
+    assert len(board.team1playerWidgets) == 2
+    assert board.bestOfSpin.value() == 3
+    assert board.scoreDisplay1.value() == 2
+
+
+def test_a_board_shows_what_was_written_while_it_was_being_built(autonaApp):
+    """A writer on another thread does not wait for a board being built, and
+    ahead of the hold its write makes no held notification. So the build ends
+    with a render, one that writes nothing: nothing is pending behind 反映."""
+    from src.core import StateSchema as schema
+    from src.core.Actions import AutonaActions
+
+    hold = schema.HoldBoard
+
+    def holdAfterAWrite(number):
+        actions = AutonaActions.instance
+        actions.SetScore(number, 1, 3)
+        actions.SetBestOf(number, 5)
+        actions.SetMatchField(number, schema.MATCH_KEY, "Grand Final")
+        hold(number)
+
+    with patch.object(schema, "HoldBoard", side_effect=holdAfterAWrite):
+        board = autonaApp.board(1)
+
+    assert board.scoreDisplay1.value() == 3
+    assert board.bestOfSpin.value() == 5
+    assert board.matchCombo.currentText() == "Grand Final"
+    assert autonaApp.state.HasPendingChanges("score.1") is False
+
+
+def test_a_game_load_leaves_a_board_that_is_not_built_as_it_is(autonaApp):
+    """A board with no widget is not held, and has no set length to start
+    over: the skeleton stays what it is, live and published, and the commit
+    (AutonaActions.CommitGameLoad names both boards) finds nothing on it."""
+    autonaApp.dropAllBoards()
+    board = autonaApp.board(1)
+    autonaApp.state.Set("score.2", {})
+    autonaApp.settle()
+
+    try:
+        autonaApp.publishGameLoad()
+
+        assert autonaApp.get("score.2") == {}
+        assert autonaApp.state.GetCommitted("score.2") == {}
+        assert autonaApp.state.HasPendingChanges("score.2") is False
+        assert board.bestOfSpin.value() == 0
+    finally:
+        autonaApp.state.Unset("score.2")
+        autonaApp.settle()
+
+
+@pytest.mark.parametrize("number, turnsOff", [(1, True), (2, True), (3, False)])
+def test_building_a_board_turns_the_polling_off(autonaApp, number, turnsOff):
+    """The desktop's alone (SetFollowService.TurnOffPolling): polling left
+    the board's UI, so a stale setting must not keep it running. Not in the
+    seed the headless shell shares, whose polling is the operator's
+    (tests/test_actions.py, tests/test_headless_seed.py)."""
+    written = []
+    realSet = SettingsManager.Set
+
+    def spy(key, value):
+        written.append(key)
+        return realSet(key, value)
+
+    with patch.object(SettingsManager, "Set", side_effect=spy):
+        autonaApp.board(number)
+
+    assert ("general.disable_autoupdate" in written) is turnsOff
+
+
+def test_a_dropped_board_leaves_its_game_rows_to_core(autonaApp):
+    """The board renders core's tracker and does not own it (ADR-005 S4t;
+    it used to register its own for as long as it existed): the rows go on
+    without a widget, and a board built later renders the same one."""
     from src.core.Actions import AutonaActions
 
     actions = AutonaActions.instance
+    tracker = actions.GameTracker(1)
     board = autonaApp.board(1)
-    assert actions._gameTrackers.get(1) is board.individualGameTracker.service
+    assert board.individualGameTracker.service is tracker
     del board
 
     autonaApp._dropBoard(1)
 
-    assert 1 not in actions._gameTrackers
     try:
         with patch.object(SettingsManager, "Get",
                           side_effect=_trackerEnabled):
             actions.SetBestOf(1, 5)
+            actions.AdjustScore(1, 1, 1)
         autonaApp.settle()
         assert autonaApp.get("score.1.best_of") == 5
-        assert autonaApp.get("score.1.stages") is None
+        assert len(autonaApp.get("score.1.stages")) == 5
+        assert _wonGames(autonaApp, 1) == [1]
+        assert actions.GameTracker(1) is tracker
     finally:
         autonaApp.state.Unset("score.1")
         autonaApp.settle()
@@ -422,8 +631,7 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
         autonaApp.settle()
         assert autonaApp.get("score.1.first_to_text") == "First to 4"
 
-        board._onGameAssetsLoaded()
-        autonaApp.settle()
+        autonaApp.publishGameLoad()
 
     assert StateManager.HasPendingChanges("score.1") is False
     assert StateManager.GetCommitted("score.1.best_of_text") == "Best of 7"
@@ -1461,16 +1669,15 @@ def test_building_a_board_republishes_every_display_option(autonaApp):
 # The tracker ships disabled, so every test above runs with no stage rows at
 # all -- which is exactly the configuration in which the score's two writers
 # (AutonaActions and the tracker's own stage tally) cannot collide. With it on
-# they both write score.{n}.team.{t}.score, and the notification from one is
-# indistinguishable from an operator action to the other unless the tracker
-# says which writes are its own (AutonaIndividualGameTracker.writingScore).
+# they both write score.{n}.team.{t}.score. Since ADR-005 S4t the operations
+# move the rows themselves (GameTrackerService.FollowScores), and the board
+# only renders what the state holds, so one writer's write can no longer be
+# read as an operator action by the other.
 #
-# Note on save cycles: an operation here produces TWO held_state_updated
-# notifications, not the one the tracker-off tests assert. The first is the
-# score write; the second is the stage row the tracker sets in response, which
-# is a second (held) save cycle. That is the accepted cost of the tracker
-# being on -- nothing is published either way until 反映 -- and it is asserted
-# below so a change in the count is noticed rather than discovered.
+# Note on save cycles: a score operation is one held_state_updated here, as
+# with the tracker off: the score and the rows it moved go together. (It was
+# two until ADR-005 S4t, the row a second cycle from the board's handler.) A
+# stage click is still two, see below.
 
 
 @pytest.fixture
@@ -1493,10 +1700,11 @@ def test_a_stage_click_awards_exactly_the_game_that_was_clicked(
     """Regression: one click used to win the next game as well.
 
     StageResultsChanged writes the score it summed from the rows, and that
-    write notifies synchronously -- reaching _SyncScoreDisplays while the
-    spinbox still holds the old value. Read as an ordinary 0 -> 1 transition
+    write notifies synchronously -- it reached _SyncScoreDisplays while the
+    spinbox still held the old value. Read as an ordinary 0 -> 1 transition
     it called SyncStagesToScore, which awarded the first *empty* stage: game
-    2, on top of the game 1 the operator actually clicked.
+    2, on top of the game 1 the operator actually clicked. Only the
+    operations that move the score follow it now (ADR-005 S4t).
     """
     _stageButton(trackedBoard, game=1, team=1).click()
     autonaApp.settle()
@@ -1585,12 +1793,11 @@ def test_a_score_button_with_the_tracker_on_marks_one_stage(
 
     assert _score(autonaApp, 1) == 1
     assert _wonGames(autonaApp, 1) == [1]
-    # Score write, then the stage row written in response -- see the section
-    # note above. The tracker-off path is one cycle
-    # (test_a_score_change_is_exactly_one_save_cycle).
-    assert seen == ["score.1", "score.1"], (
+    # The score and the row, as with the tracker off
+    # (test_a_score_change_is_exactly_one_save_cycle): see the section note.
+    assert seen == ["score.1"], (
         f"a +1 with the tracker on produced {len(seen)} save cycles "
-        "instead of 2")
+        "instead of 1")
 
 
 def test_a_score_reset_with_the_tracker_on_clears_every_stage(
@@ -1611,9 +1818,10 @@ def test_a_score_reset_with_the_tracker_on_clears_every_stage(
 
 def test_a_score_moving_several_games_is_followed_in_one_cycle(
         autonaApp, trackedBoard):
-    """Three recorded games cleared by one reset: the score, then every row
-    of both teams in one more cycle -- not one cycle a row (ADR-005 S2e).
-    The same follow serves a +2, a loaded set's score and the clears."""
+    """Three recorded games cleared by one reset: the score and every row
+    of both teams in one cycle -- it was one cycle a row until ADR-005 S2e,
+    and one more for the rows until S4t. The same follow serves a +2, a
+    loaded set's score and the clears."""
     trackedBoard.CommandScoreChange(0, 2)
     trackedBoard.CommandScoreChange(1, 1)
     autonaApp.settle()
@@ -1626,9 +1834,9 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
         unsubscribe()
 
     assert _wonGames(autonaApp, 1) == [] and _wonGames(autonaApp, 2) == []
-    assert seen == ["score.1", "score.1"], (
+    assert seen == ["score.1"], (
         f"a reset of three recorded games produced {len(seen)} save cycles "
-        "instead of 2")
+        "instead of 1")
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
@@ -1638,7 +1846,7 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
         unsubscribe()
 
     assert _wonGames(autonaApp, 1) == [1, 2]
-    assert seen == ["score.1", "score.1"]
+    assert seen == ["score.1"]
 
 
 # ── lifecycle ────────────────────────────────────────────────────────────
@@ -1747,9 +1955,8 @@ def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
     """Echo-loop check: rendering the set must not write any of it back.
 
     Tracker OFF, which is the shipped default and what `autonaApp.board(1)`
-    gives. With it on, a loaded score also drives the stage rows
-    (_SyncScoreDisplays -> SyncStagesToScore), and those writes are held too
-    -- so more than one cycle is correct there, exactly as it is for a +1.
+    gives. With it on, the rows a loaded score moves are in the same cycle
+    (tests/test_player_card_render.py, S4T_BEST_OF_CHANGES).
     """
     board = autonaApp.board(1)
     autonaApp.settle()
@@ -1866,7 +2073,8 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
     """A set's score awards games the same way a +1 does.
 
     SetLoadService writes team.{t}.score and *nothing under stages*; the
-    rows follow through _SyncScoreDisplays -> SyncStagesToScore. The row
+    rows follow in the operation around it (SetFollowService.ApplySetPayload
+    -> GameTrackerService.FollowScores). The row
     count must be untouched by a set load: only
     GameTrackerService.SetStageCount() keeps it equal to the widget's
     stage_widget_list, so a writer that grew `stages` on its own would leave

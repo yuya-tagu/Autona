@@ -171,7 +171,8 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
     between the brackets. Pinning the handler as a real method keeps the
     `with StateManager.SaveBlock():` the only way to write it -- in core
     since ADR-005 S2e, where the six keys and the stage rows are written
-    (AutonaActions.SetBestOf / RepublishBestOf); the spinbox's handler only
+    (AutonaActions.SetBestOf / RepublishBestOf / RepublishBestOfs); the
+    spinbox's handler only
     asks for the change.
     """
     import inspect
@@ -186,9 +187,11 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
                          inspect.getsource(function).splitlines()
                          if not line.lstrip().startswith("#"))
 
-    for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf):
+    for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf,
+                     AutonaActions.RepublishBestOfs):
         assert "with StateManager.SaveBlock():" in code(function), function
     for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf,
+                     AutonaActions.RepublishBestOfs,
                      AutonaActions._PublishBestOf,
                      AutonaScoreboardWidget._onBestOfChanged):
         assert "BlockSaving()" not in code(function), function

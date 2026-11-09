@@ -25,8 +25,7 @@ from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
-from .core.PlayerService import (
-    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam)
+from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.StatsService import StatsService
@@ -67,12 +66,6 @@ class AutonaScoreboardWidget(QWidget):
         # empty until 反映 was pressed).
         self.statePrefix = f"score.{self.scoreboardNumber}"
 
-        # Re-entrancy guard for _SyncScoreDisplays (agent-pitfalls #9). The
-        # sync is driven by a state notification and can itself cause writes
-        # (the individual game tracker clears/sets stage rows), which produce
-        # another notification. Set before anything can notify us.
-        self._syncingScore = False
-
         # The player cards render their slots from the state (ADR-005 S2a):
         # one pass, queued by the first held save cycle of an event-loop turn
         # (_SchedulePlayerRender), with a re-entrancy guard on the pass itself.
@@ -87,12 +80,6 @@ class AutonaScoreboardWidget(QWidget):
         self._retiredCards = []
         self._shownPlayerCount = None
 
-        # The last `score.{n}.teamsSwapped` a held cycle showed this board.
-        # Which way round the sides are is the state's (ADR-005 S2c:
-        # AutonaActions.SwapTeams toggles it, from the button, the hotkey or
-        # the Web UI alike); this copy is only how _onHeldStateUpdated tells
-        # that a cycle was a swap (_NoticeSwap).
-        self._seenTeamsSwapped = False
         # The teams whose name field _SyncSetFields had to leave alone
         # because the operator was in it: rendered from the state once the
         # focus has left it (_OnTeamNameFocusChanged). And, by team, what
@@ -114,9 +101,10 @@ class AutonaScoreboardWidget(QWidget):
         # _SyncSetFields / _SyncScoreDisplays.
         self.setLoad = SetLoadService(self.scoreboardNumber)
 
-        # Same skeleton AutonaScoreboardManager writes for the boards that are
-        # not built yet, from the same place (headless core Step 2).
-        schema.SeedBoard(self.scoreboardNumber)
+        # The board's launch write is core's and is already in the state
+        # (AutonaActions.SeedFreshBoard, run by AutonaScoreboardManager before
+        # this, ADR-005 S4t): nothing below writes while the board is built,
+        # and the widgets' initial values are the seed's -- empty.
 
         self.signals = AutonaScoreboardWidgetSignals()
         self.signals.NewSetSelected.connect(self.NewSetSelected)
@@ -274,14 +262,6 @@ class AutonaScoreboardWidget(QWidget):
             if option.key == "show_sponsor":
                 self._sponsorAction = action
 
-        # Mirror every display option into StateManager so remote clients
-        # (React Web UI, OBS) can render the same field visibility. Before
-        # this existed only show_sponsor was mirrored; the other toggles were
-        # session-local Qt visibility. The loop itself is the schema's now
-        # (headless core Step 5) -- it read this widget's own copy of the
-        # option list, which is exactly the drift StateSchema exists to end.
-        schema.PublishDisplayOptions()
-
         self.playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team1playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team2playerWidgets: List[AutonaScoreboardPlayerWidget] = []
@@ -326,11 +306,6 @@ class AutonaScoreboardWidget(QWidget):
         self.btSelectSet.setEnabled(False)
         loadSetRow.addWidget(self.btSelectSet)
         self.btSelectSet.clicked.connect(self.signals.SetSelection.emit)
-
-        # Auto-update (5-second polling) feature has been removed from the
-        # UI. Force-disable the setting so any stale True value from an
-        # older session doesn't silently keep the timer running.
-        SettingsManager.Set("general.disable_autoupdate", True)
 
         # --- Bottom options (settings, timer) below team columns ---
         bottomOptions = QWidget()
@@ -423,11 +398,10 @@ class AutonaScoreboardWidget(QWidget):
         colorGroup1.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
         # Team color is no longer edited inline (the SCORE-tab swatch was
-        # removed). It is configured via Edit → Settings → General and applied
-        # here at build time. colorGroup1 stays as an (empty) layout spacer that
-        # keeps the 1P/TEAM label centered (see _applyScoreboardMode).
-        DEFAULT_TEAM1_COLOR = SettingsManager.Get("general.team_1_default_color", "#fe3636")
-        self.CommandTeamColor(0, DEFAULT_TEAM1_COLOR)
+        # removed). It is configured via Edit → Settings → General and written
+        # with the board's launch state (AutonaActions.SeedFreshBoard).
+        # colorGroup1 stays as an (empty) layout spacer that keeps the 1P/TEAM
+        # label centered (see _applyScoreboardMode).
 
         team1HeaderRow = self.team1column.findChild(QHBoxLayout, "horizontalLayout_2")
         team1HeaderRow.layout().insertWidget(0, colorGroup1)
@@ -455,8 +429,6 @@ class AutonaScoreboardWidget(QWidget):
             self.team2column, 0, 1, Qt.AlignmentFlag.AlignTop)
 
         # See team-1 note above: swatch removed, color comes from Settings.
-        DEFAULT_TEAM2_COLOR = SettingsManager.Get("general.team_2_default_color", "#2e89ff")
-        self.CommandTeamColor(1, DEFAULT_TEAM2_COLOR)
 
         team2HeaderRow = self.team2column.findChild(QHBoxLayout, "horizontalLayout_2")
         team2HeaderRow.layout().insertWidget(0, colorGroup2)
@@ -467,18 +439,9 @@ class AutonaScoreboardWidget(QWidget):
         QApplication.instance().focusChanged.connect(
             self._OnTeamNameFocusChanged)
 
-        # The restored state (user_data/state.json) can carry a roster from
-        # a session that ran with more players per team; drop both before
-        # the first player widget is built, so the slots that come back are
-        # the ones this board actually has.
-        for team in (1, 2):
-            AutonaActions.instance.ClearTeamRoster(self.scoreboardNumber, team)
-        # The first roster: one player a team, the default characters (the
-        # game's players per team follows once the board is built:
-        # SetDefaultsFromAssets). Its cards now -- nothing is held yet, so
-        # no held cycle would build them.
-        AutonaActions.instance.SetRoster(
-            self.scoreboardNumber, 1, DEFAULT_CHARACTERS_PER_PLAYER)
+        # The cards of the seeded roster (AutonaActions.SeedFreshBoard): the
+        # game's players per team and the default characters. Now, since
+        # nothing is held yet, so no held cycle would build them.
         self._FollowRoster()
 
         self._applyScoreboardMode(self.singlePlayer)
@@ -488,7 +451,8 @@ class AutonaScoreboardWidget(QWidget):
         # from the list, editingFinished for something typed into the
         # editable line edit. Which key each combo writes comes from
         # StateSchema now rather than from its own objectName -- see
-        # _WireTeamColumn for the whole story.
+        # _WireTeamColumn for the whole story. Their empty start is in the
+        # seed.
         for field in schema.SCORE_MATCH_FIELDS:
             combo = self.scoreColumn.findChild(QComboBox, field)
             if combo is None:
@@ -507,24 +471,11 @@ class AutonaScoreboardWidget(QWidget):
                 lambda _index, field=field, element=combo:
                     AutonaActions.instance.SetMatchField(
                         self.scoreboardNumber, field, element.currentText()))
-            combo.lineEdit().editingFinished.emit()
             combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add stage order widget
         self.individualGameTracker = AutonaIndividualGameTracker(self.scoreboardNumber)
         self.individualGameTracker.signals.stageResultsUpdate.connect(self.StageResultsToScore)
-        # The set length resizes the rows in core (AutonaActions.SetBestOf,
-        # ADR-005 S2e), through the tracker's service registered here for as
-        # long as this board exists. Undone from the board's own `destroyed`:
-        # the tracker sits in the score column, which can outlive the board,
-        # and the lambda holds the number and the service, not the board.
-        trackerService = self.individualGameTracker.service
-        AutonaActions.instance.RegisterGameTracker(
-            self.scoreboardNumber, trackerService)
-        self.destroyed.connect(
-            lambda _obj=None, number=self.scoreboardNumber,
-            service=trackerService:
-                AutonaActions.instance.UnregisterGameTracker(number, service))
 
         # Score bar: phase/match/bestof extracted from .ui, placed above columns
         self.scoreBar = QWidget()
@@ -726,14 +677,11 @@ class AutonaScoreboardWidget(QWidget):
 
         # The spinbox asks for the change and renders the state
         # (_SyncBestOf); the range is the operation's, so the two cannot
-        # drift apart. The construction's 0 is core's too: the seeded
-        # subtree has no best_of, so this writes the six keys and the empty
-        # rows, as the emitted valueChanged(0) did.
+        # drift apart. The construction's 0 is in the seed.
         self.bestOfSpin.setRange(
             AutonaActions.BEST_OF_MIN, AutonaActions.BEST_OF_MAX)
         self.bestOfSpin.valueChanged.connect(self._onBestOfChanged)
         self.bestOfSpin.editingFinished.connect(self._OnBestOfEditingFinished)
-        AutonaActions.instance.SetBestOf(self.scoreboardNumber, 0)
         self._SyncBestOf()
 
         self.scoreDisplay1.valueChanged.connect(
@@ -741,14 +689,12 @@ class AutonaScoreboardWidget(QWidget):
                 self.individualGameTracker.UpdateScore(0, value)
             ]
         )
-        self.scoreDisplay1.valueChanged.emit(0)
 
         self.scoreDisplay2.valueChanged.connect(
             lambda value: [
                 self.individualGameTracker.UpdateScore(1, value)
             ]
         )
-        self.scoreDisplay2.valueChanged.emit(0)
 
         # (The team-name -> crest connection used to be made here, after the
         # generic objectName loops above had already seeded the names. It is
@@ -813,9 +759,9 @@ class AutonaScoreboardWidget(QWidget):
         self._syncDisplayTournamentNameEdit()
 
         # From here on, edits to this board's subtree are held back from the
-        # broadcast/export pipeline until 反映 commits them. Everything Set
-        # during construction above was published normally, so the committed
-        # baseline matches the widgets' initial values.
+        # broadcast/export pipeline until 反映 commits them. The launch write
+        # ahead of this was published normally, so the committed baseline
+        # matches the widgets' initial values.
         schema.HoldBoard(self.scoreboardNumber)
         StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
@@ -826,6 +772,11 @@ class AutonaScoreboardWidget(QWidget):
         # pending behind 反映.
         StateManagerBridge.instance.held_state_updated.connect(
             self._onHeldStateUpdated)
+        # A writer on another thread does not wait for a board being built:
+        # what it wrote after the seed and ahead of the hold made no held
+        # notification, and the widgets rendered what they found as they were
+        # built. Shown once, as the notification would have. Writes nothing.
+        self._onHeldStateUpdated(self.statePrefix)
 
     @staticmethod
     def _styleTeamCard(column):
@@ -870,23 +821,22 @@ class AutonaScoreboardWidget(QWidget):
         the " [L]" suffix); since ADR-005 S2b that is part of
         `AutonaActions.SetTeamLosers`, so the box has a single handler.
 
-        The initial emit seeds the two keys, as it always did: a board starts
-        with an empty name and an unchecked losers box, and the overlays read
-        both from launch.
+        A board starts with an empty name and an unchecked losers box, and
+        the overlays read both from launch: the seed writes them
+        (AutonaActions.SeedFreshBoard). Their first emit did until ADR-005
+        S4t.
         """
         name = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
         if name is not None:
             name.editingFinished.connect(
                 lambda team=team, edit=name:
                     self._OnTeamNameFinished(team, edit))
-            name.editingFinished.emit()
 
         losers = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
         if losers is not None:
             losers.toggled.connect(
                 lambda state, team=team: AutonaActions.instance.SetTeamLosers(
                     self.scoreboardNumber, team, state))
-            losers.toggled.emit(False)
 
         if name is None or losers is None:
             logger.error(
@@ -958,25 +908,25 @@ class AutonaScoreboardWidget(QWidget):
                 + urllib.parse.urlencode({"token": token}))
 
     def _onGameAssetsLoaded(self):
-        # AutonaGameAssetManager.signals.onLoad handler.
+        # AutonaGameAssetManager.signals.onLoad handler. Renders the load;
+        # what it writes is core's, on the shared wiring connected ahead of
+        # this (bootstrap.wire_game_roster: AutonaActions.ApplyGameRoster and
+        # RepublishBestOfs) and last of all on the adapter's
+        # (AutonaActions.CommitGameLoad). The commit takes the held cycle
+        # that would have shown all this along with it, and whatever else
+        # was written while the load's save cycle was open (a score, a set's
+        # fields, from the Web), so it is all shown here. The order is the
+        # held cycle's (_onHeldStateUpdated).
         # First, while nothing below can have raised: the asset manager
         # replaced its models, so no stage row may stay on the retired one.
         self.individualGameTracker.RebindStageModel()
-        # The game's roster was set by the shared wiring, connected ahead of
-        # this (bootstrap.wire_game_roster -> AutonaActions.ApplyGameRoster;
-        # it was SetDefaultsFromAssets, here, until ADR-005 S3e-6). The
-        # cards follow it now: the CommitHeld below takes the held cycle
-        # that would have built them along with it.
         self._FollowRoster()
         self._SchedulePlayerRender()
-        # The set length again, rows included (they recorded games of the
-        # previous game's stages): what re-emitting the spinbox's
-        # valueChanged did, now core's. The rows are rebuilt from its held
-        # cycle.
-        AutonaActions.instance.RepublishBestOf(self.scoreboardNumber)
-        # A game (re)load rewrites characters/defaults wholesale; publish the
-        # fresh baseline instead of leaving it pending behind the 反映 button.
-        StateManager.CommitHeld(self.statePrefix)
+        self._SyncSetFields()
+        # The rows started over (they recorded games of the previous game's
+        # stages), their number unchanged: built again for the new game.
+        self._SyncBestOf()
+        self._SyncScoreDisplays()
 
     def _onBestOfChanged(self, value):
         """bestOfSpin.valueChanged handler: the operator set the length.
@@ -1031,16 +981,11 @@ class AutonaScoreboardWidget(QWidget):
             # The cards the roster has (ADR-005 S3e-6), before anything
             # below looks for one. Built now, destroyed later.
             self._FollowRoster()
-            swapped = self._NoticeSwap()
             self._SyncSetFields()
-            # Before the score: a cycle that resized the rows (a set load's
-            # best of with its score) has its transition followed onto the
-            # new ones, as when the spinbox rebuilt them inside the write.
+            # Before the score: the buttons it redraws are the rows a cycle
+            # that resized them (a set load's best of with its score) left.
             self._SyncBestOf()
-            # A swap exchanged the scores and mirrored the game rows in the
-            # same cycle (AutonaActions.SwapTeams): the rows already show the
-            # new scores, so the tracker is not told about the transition.
-            self._SyncScoreDisplays(followStages=not swapped)
+            self._SyncScoreDisplays()
 
     def _SchedulePlayerRender(self):
         """Have every player card show its slot, once control is back in
@@ -1200,76 +1145,42 @@ class AutonaScoreboardWidget(QWidget):
             self._heldBackBestOf = None
         self.individualGameTracker.RenderStageRows()
 
-    def _SyncScoreDisplays(self, followStages=True):
-        """Bring the two score spinboxes in line with the state.
+    def _SyncScoreDisplays(self):
+        """Render the score: the two spinboxes and the game rows' buttons.
+        Writes nothing.
 
         The state is the source of truth for the score since Step 3: an
         adjustment made through AutonaActions -- from the +1 button, a
         hotkey, the Web UI or the API -- lands in `score.{n}.team.{t}.score`
-        and arrives here as a notification.
+        and arrives here as a notification. The spinbox is updated inside a
+        QSignalBlocker, so valueChanged (which still writes the score for the
+        one path that drives the spinbox directly -- a number typed into it)
+        cannot fire and write the value straight back.
 
-        Two things make this safe to run on every held notification:
-
-        - the spinbox is updated inside a QSignalBlocker, so valueChanged
-          (which still writes the score for the one path that drives the
-          spinbox directly -- a number typed into it) cannot fire and write
-          the value straight back;
-        - the individual game tracker is then told about the transition
-          explicitly, with the *old* spinbox value, because that is what it
-          needs to decide which stage rows to award or clear. It is the one
-          thing in here that can write state, hence the re-entrancy guard.
-
-        The one transition the tracker must NOT be told about is the one it
-        produced itself. A stage button click sums the rows and publishes the
-        result, and that write lands here with the spinbox still on the old
-        value -- indistinguishable from an external +1 unless the tracker says
-        so, which is what `writingScore` is for. Without it a single click on
-        "game 1: T1" also awarded game 2.
-
-        Nor is it told about a swap's (`followStages=False`, ADR-005 S2c):
-        the swap mirrored the rows along with the scores, and following the
-        exchanged scores re-awarded games on top of the mirror -- T2 T1 T1
-        (2-1) came out as T1 T2 T1.
-
-        The rows a cycle moves, for both teams, are one save cycle (ADR-005
-        S2e): a score cleared with three games recorded used to follow in
-        three, a row at a time. Nothing is written when nothing follows, so
-        the block costs no cycle then.
+        The rows have followed the score by now, in the operation that moved
+        it (GameTrackerService.FollowScores, ADR-005 S4t), or moved with it
+        (a swap mirrors them, and a swap of a level score moves no number):
+        this used to be where they followed, from the old value on the
+        spinbox, with the tracker's own writes and the swap told apart.
         """
-        if self._syncingScore:
-            return
-        self._syncingScore = True
-        try:
-            tracker = self.individualGameTracker
-            with StateManager.SaveBlock():
-                for team, display in ((1, self.scoreDisplay1),
-                                      (2, self.scoreDisplay2)):
-                    value = StateManager.Get(
-                        f"{self.statePrefix}.team.{team}.score", None)
-                    if not isinstance(value, int) or isinstance(value, bool):
-                        # Nothing renders a non-numeric score, so the spinbox
-                        # is left alone -- but a writer that put one there is
-                        # a bug worth a breadcrumb rather than a silent skip.
-                        if value is not None:
-                            logger.warning(
-                                f"{self.statePrefix}.team.{team}.score is "
-                                f"{value!r}, not an int; leaving the display "
-                                f"at {display.value()}")
-                        continue
-                    previous = display.value()
-                    if previous == value:
-                        continue
-                    with QSignalBlocker(display):
-                        display.setValue(value)
-                    if tracker.writingScore or not followStages:
-                        continue
-                    # setValue clamps to the spinbox range, so read back what
-                    # it actually took rather than assuming the state value
-                    # fit.
-                    tracker.SyncStagesToScore(
-                        team - 1, previous, display.value())
-        finally:
-            self._syncingScore = False
+        for team, display in ((1, self.scoreDisplay1),
+                              (2, self.scoreDisplay2)):
+            value = StateManager.Get(
+                f"{self.statePrefix}.team.{team}.score", None)
+            if not isinstance(value, int) or isinstance(value, bool):
+                # Nothing renders a non-numeric score, so the spinbox is left
+                # alone -- but a writer that put one there is a bug worth a
+                # breadcrumb rather than a silent skip.
+                if value is not None:
+                    logger.warning(
+                        f"{self.statePrefix}.team.{team}.score is "
+                        f"{value!r}, not an int; leaving the display "
+                        f"at {display.value()}")
+                continue
+            if display.value() != value:
+                with QSignalBlocker(display):
+                    display.setValue(value)
+        self.individualGameTracker.RenderStageResults()
 
     def _SyncDisplayOptions(self):
         """Mirror display_options.* into this board's Qt carriers.
@@ -1580,9 +1491,8 @@ class AutonaScoreboardWidget(QWidget):
         Display only, since the review of headless core Step 4a. Both keys
         are already written -- GameTrackerService.PublishStageResults() does
         it in one save cycle before this signal is emitted -- so re-Setting
-        them here bought nothing and cost two more save cycles per click,
-        outside the writingScore guard at that (six per click before Step 4a,
-        four after, two now; pinned by
+        them here bought nothing and cost two more save cycles per click
+        (six per click before Step 4a, four after, two now; pinned by
         test_a_stage_click_is_exactly_two_save_cycles).
 
         The spinboxes are still set here rather than left to
@@ -1626,9 +1536,13 @@ class AutonaScoreboardWidget(QWidget):
                 if not singlePlayer:
                     teamLabel.setText(
                         QApplication.translate("app", "TEAM {0}").format(side))
+            # Built with more than one player a team (a game's players per
+            # team), the singles board shows the team names as well: what the
+            # cards' chrome says (_FollowCards), which ran before this.
             teamName = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
             if teamName is not None:
-                teamName.setVisible(not singlePlayer)
+                teamName.setVisible(
+                    not singlePlayer or len(self.team1playerWidgets) > 1)
 
             groupBox = column.findChild(QGroupBox, "groupBox")
             if groupBox is not None:
@@ -1648,11 +1562,6 @@ class AutonaScoreboardWidget(QWidget):
         if getattr(self, "_bottomOptions", None) is not None:
             self._bottomOptions.setVisible(not singlePlayer)
         if singlePlayer:
-            # The singles roster: one player a team (AutonaActions.SetRoster;
-            # the board is built with one, so this changes nothing there).
-            AutonaActions.instance.SetRoster(
-                self.scoreboardNumber, 1, self.charNumber.value())
-            self._FollowRoster()
             self._placeLosersOnOwnRow()
 
     def _placeLosersOnOwnRow(self):
@@ -1941,7 +1850,7 @@ class AutonaScoreboardWidget(QWidget):
 
     def _FollowRoster(self):
         """_SyncPlayerCards, from a caller that goes on whatever happens
-        here (a CommitHeld after it, the rest of the held cycle): a sync
+        here (the rest of the load's render or of the held cycle): a sync
         that raises is logged, and the next one tries again."""
         try:
             self._SyncPlayerCards()
@@ -2167,27 +2076,6 @@ class AutonaScoreboardWidget(QWidget):
         self.CommitFocusedEdit()
         AutonaActions.instance.SwapPlayers(
             self.scoreboardNumber, team, index + 1, other + 1)
-
-    def _NoticeSwap(self):
-        """From the held cycle: was it a swap (the flag flipped)? Then show
-        the mirrored game results. True for a swap. (The statistics a swap
-        asks for are the operation's since ADR-005 S3e-5.)
-
-        Read from the state rather than told by the swap, because the swap
-        has three entry points (this board's button, the hotkey, the Web UI)
-        and only the first one goes through the board.
-
-        The game results need saying: the tracker's buttons are redrawn when
-        the score moves (_SyncScoreDisplays), and a swap of a level score
-        mirrors the rows without moving it.
-        """
-        swapped = bool(StateManager.Get(
-            f"{self.statePrefix}.teamsSwapped", False))
-        if swapped == self._seenTeamsSwapped:
-            return False
-        self._seenTeamsSwapped = swapped
-        self.individualGameTracker.RenderStageResults()
-        return True
 
     def ResetScore(self):
         # One operation, one save cycle: driving the two spinboxes in turn
@@ -2424,19 +2312,5 @@ class AutonaScoreboardWidget(QWidget):
         # own (PlayerService.Announce, ADR-005 S3e-5).
         if cleared:
             card.DiscardTypedText(notEditing=True)
-
-    def SetDefaultsFromAssets(self):
-        # The game's default players-per-team; characters-per-player is
-        # forced back to its default (3) regardless of game asset config.
-        # Both come from core, where the headless shell's launch seed reads
-        # them too (PlayerService.SeedEmptyRoster, ADR-005 S3d). A game load
-        # writes them for every built board (AutonaActions.ApplyGameRoster,
-        # bootstrap.wire_game_roster, ADR-005 S3e-6); this is the board's
-        # own way in, and the cards follow at once -- the caller's CommitHeld
-        # may take the held cycle that would have shown them.
-        AutonaActions.instance.SetRoster(
-            self.scoreboardNumber, DefaultPlayersPerTeam(),
-            DEFAULT_CHARACTERS_PER_PLAYER)
-        self._FollowRoster()
 
     pass

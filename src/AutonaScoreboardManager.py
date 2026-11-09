@@ -12,6 +12,7 @@ from .Helpers.AutonaQtHelper import (
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
+from .core.SetFollowService import SetFollowService
 from . import ui_constants as UI
 
 
@@ -122,6 +123,15 @@ class AutonaScoreboardManager(QDockWidget):
                 logger.info(
                     f"Scoreboard Manager - Creating scoreboard {number} "
                     f"({self.BOARD_LABELS[number]})")
+                # Core's launch write first (ADR-005 S4t): the widgets are
+                # built on it and render it, and write nothing as they are.
+                # It reads the loaded game's players per team, so a board
+                # built after the load has them too.
+                AutonaActions.instance.SeedFreshBoard(number)
+                if number in AutonaActions.SCORE_BOARDS:
+                    # The desktop's alone, both: see SeedFreshBoard.
+                    schema.PublishDisplayOptions()
+                    SetFollowService.TurnOffPolling()
                 if number == 1:
                     board = AutonaScoreboardWidget(
                         scoreboardNumber=1, singlePlayer=True)
@@ -136,16 +146,6 @@ class AutonaScoreboardManager(QDockWidget):
                 self.widget.layout().addWidget(board)
                 self.scoreboards[number] = board
                 board.setVisible(False)
-                # A board built after the initial game load missed
-                # AutonaGameAssetManager's onLoad broadcast, which is what
-                # applies the game defaults (players per team / characters per
-                # player). Character models are read when the player widgets
-                # are built, so only these board-level defaults need catching
-                # up. Commit them like the onLoad handler does so the fresh
-                # baseline is not left waiting behind the 反映 button.
-                if hasattr(board, "SetDefaultsFromAssets"):
-                    board.SetDefaultsFromAssets()
-                    StateManager.CommitHeld(board.statePrefix)
         finally:
             self._ensuring.discard(number)
         return board
@@ -158,9 +158,9 @@ class AutonaScoreboardManager(QDockWidget):
         # score.{N} subtree is seeded here so nothing reads a missing key in
         # the meantime. Idempotent: already-built boards are left alone and
         # re-seeding an unbuilt one rewrites the same empty skeleton.
-        # StateSchema.SeedBoard is the same function the board's own __init__
-        # calls, so the placeholder and the built board can no longer drift
-        # apart (headless core Step 2).
+        # StateSchema.SeedBoard is the function a built board's launch write
+        # starts from (AutonaActions.SeedFreshBoard), so the placeholder and
+        # the built board can no longer drift apart (headless core Step 2).
         number = self.FORMAT_BOARDS.get(fmt, 1)
         with StateManager.SaveBlock():
             for other in self.BOARD_NUMBERS:

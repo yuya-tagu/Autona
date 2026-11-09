@@ -71,12 +71,6 @@ class AutonaCrewBattleWidget(QWidget):
         # kept outside the state, and it is the board's, not the instance's).
         self.crew = CrewBattleService(self.scoreboardNumber)
 
-        # Board 3's skeleton is just the subtree root; the rest is the
-        # launch write below. Seeded through the shared schema helper so
-        # this and AutonaScoreboardManager's placeholder stay identical
-        # (headless core Step 2).
-        schema.SeedBoard(self.scoreboardNumber)
-
         # Per-team widget registries (index 0 = team 1, 1 = team 2).
         self.teamNameEdits: list[QLineEdit] = []
         self.colorButtons: list[AutonaColorButton] = []
@@ -98,10 +92,10 @@ class AutonaCrewBattleWidget(QWidget):
         self._buildUi()
         self._building = False
 
-        # The launch write: the board as freshly built rows show it, which
-        # is the defaults (CrewBattleService.SeedDefaults -- the headless
-        # shell writes the same, tests/test_headless_seed.py).
-        self.crew.SeedDefaults()
+        # The launch write is core's and is already in the state
+        # (AutonaActions.SeedFreshBoard, run by AutonaScoreboardManager before
+        # this, ADR-005 S4t; the headless shell writes the same): the rows
+        # show it.
         self._RenderFromState()
 
         # A flat delta renders its key path as a Python list, so str(delta)

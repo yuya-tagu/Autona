@@ -574,6 +574,25 @@ class _AutonaHarness:
         self._gameInstalled = True
         return manager
 
+    def publishGameLoad(self):
+        """The GUI thread's end of a game load, on the game loaded now:
+        AutonaGameAssetManager._Publish, with no loader thread. The models
+        rebuilt, gameLoaded (the shared wiring's roster and set length), onLoad
+        (every slot connected to it, in its real place), the commit and the
+        save cycle closed. Every live board and card reacts, as in the app.
+        """
+        from src.AutonaGameAssetManager import (AutonaGameAssetManager,
+                                                _SaveCycle)
+        from src.core.GameAssetCatalog import GameAssetCatalog
+
+        cycle = _SaveCycle()
+        cycle.Open()
+        decodes = []
+        AutonaGameAssetManager.instance._Publish(
+            GameAssetCatalog.instance.Current(), cycle, decodes)
+        deliver_decodes(decodes)
+        self.settle()
+
     def _restoreAssets(self):
         """Uninstall HARNESS_GAME and go back to the no-game models.
 

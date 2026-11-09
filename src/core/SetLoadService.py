@@ -36,8 +36,9 @@ count is resized by ``GameTrackerService.SetStageCount()`` alone, reached
 from ``AutonaActions.SetBestOf`` (see ``StageCount()``), and a set load that
 grew the rows on its own would leave rows nothing renders. A loaded score
 reaches the stages the same way a +1 does: this class writes
-``team.{t}.score`` and the board's ``_SyncScoreDisplays`` hands the
-transition to ``GameTrackerService.SyncStagesToScore``.
+``team.{t}.score`` and the operation around it
+(``SetFollowService.ApplySetPayload``) hands the transition to
+``GameTrackerService.FollowScores``, in the same block (ADR-005 S4t).
 
 Import side effects: none (agent-pitfalls #1). An instance is bound to one
 board and holds nothing of its own (the set loaded last is class-level, by
@@ -232,8 +233,9 @@ class SetLoadService:
 
         `reset_score` zeroes both first, exactly as the old code did by
         driving the spinboxes to 0 -- but the zero and the value that
-        follows it now land in the same save cycle, so the board sees one
-        transition instead of two. That matters for the individual game
+        follows it now land in the same save cycle, so the rows follow one
+        transition instead of two (the caller's FollowScores). That matters
+        for the individual game
         tracker: the old "clear then re-award" pass rebuilt the stage rows
         from scratch, which reordered them whenever a set had interleaved
         wins (T2, T1, T1 came back as T1, T1, T2). The rows are left alone
