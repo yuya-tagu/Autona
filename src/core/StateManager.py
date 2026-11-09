@@ -152,9 +152,18 @@ class StateManagerObservers:
     Argument shapes:
       state_big_change   ()             -- wholesale reload, redraw everything
       state_updated      (payload dict) -- {'revision', 'delta_index', 'delta'}
-      held_dirty_changed (prefix, bool) -- held subtree gained its first
-                                           pending change (True) / committed
-                                           (False)
+      held_dirty_changed (prefix, bool) -- a cue that HasPendingChanges(prefix)
+                                           has changed: the first pending key
+                                           (True) / the commit drained them
+                                           (False). Told after the change, but
+                                           Set tells its True outside the lock,
+                                           so the order can differ from the
+                                           state's: a subscriber does not trust
+                                           the payload and reads the current
+                                           value. After a publish that failed
+                                           (SaveState raised), the False waits
+                                           for the next SaveState; another 反映
+                                           retries it
       held_state_updated (prefix)       -- coalesced per save cycle: live but
                                            unpublished data under a held
                                            prefix changed, so widgets that
@@ -196,6 +205,9 @@ class StateManager:
     heldExempt = {}
     _commitPrefixes = set()   # prefixes queued to flush on the next SaveState
     _heldTouched = set()      # prefixes with held writes not yet notified
+    # Prefixes whose pending keys a SaveState drained, not yet told
+    # (held_dirty_changed False: _notifyHeldCommitted).
+    _heldCommitted = set()
     # Monotonically increasing counter incremented on every state mutation
     # broadcast (delta or big change). Clients use it to detect dropped or
     # out-of-order events and request a full snapshot when discontinuous
@@ -468,6 +480,17 @@ class StateManager:
             StateManager.observers.held_state_updated.notify(prefix)
 
     @staticmethod
+    def _notifyHeldCommitted():
+        """Tell the drained prefixes that nothing is pending any more. Caller
+        holds the lock. Not a prefix a handler of this same cycle has already
+        dirtied again: that write told True, and it is the last word."""
+        committed = list(StateManager._heldCommitted)
+        StateManager._heldCommitted.clear()
+        for prefix in committed:
+            if not StateManager.heldKeys.get(prefix):
+                StateManager.observers.held_dirty_changed.notify(prefix, False)
+
+    @staticmethod
     def _trackChangedKey(final_key: str):
         """Route a mutated key to the held buffer or the publish queue.
 
@@ -515,18 +538,30 @@ class StateManager:
         with StateManager.lock:
             return bool(StateManager.heldKeys.get(prefix))
 
+    def PeekPendingChanges(prefix: str) -> bool:
+        """HasPendingChanges without the lock, for a thread that must not stop
+        behind a save cycle holding it. One reference to heldKeys, so it can
+        be a moment old: only for a hint a later notification corrects, not
+        for deciding anything (the Web server's scoreboard_pending)."""
+        return bool(StateManager.heldKeys.get(prefix))
+
     def CommitHeld(prefix: str):
-        """Publish everything pending under a held prefix in one save cycle."""
+        """Publish everything pending under a held prefix in one save cycle.
+
+        Inside an open save block (any thread's: the count is process-wide)
+        the commit only queues, and the keys stay pending until the SaveState
+        that closes the block drains them. So held_dirty_changed(False) comes
+        from the drain, here too: told from here, ahead of it, a handler
+        asking HasPendingChanges read True and kept the 反映 button lit, and
+        a write after the commit in that block was drained with no False at
+        all (S4u: a game load that changed the roster)."""
         with StateManager.lock:
-            had_pending = bool(StateManager.heldKeys.get(prefix))
             StateManager._commitPrefixes.add(prefix)
             StateManager._heldTouched.discard(prefix)
             if StateManager.saveBlocked == 0:
                 StateManager.SaveState()
             # else: _commitPrefixes stays queued; the SaveState fired by the
             # enclosing ReleaseSaving() drains it.
-        if had_pending:
-            StateManager.observers.held_dirty_changed.notify(prefix, False)
 
     def SaveState():
         if StateManager.saveBlocked == 0:
@@ -535,8 +570,10 @@ class StateManager:
                 # this publish cycle. Anything held for a committing prefix
                 # at this moment is included (the user asked to apply).
                 for prefix in list(StateManager._commitPrefixes):
-                    StateManager.changedKeys.extend(
-                        StateManager.heldKeys.pop(prefix, []))
+                    keys = StateManager.heldKeys.pop(prefix, None)
+                    if keys:
+                        StateManager.changedKeys.extend(keys)
+                        StateManager._heldCommitted.add(prefix)
                 StateManager._commitPrefixes.clear()
 
                 if not StateManager.changedKeys:
@@ -570,6 +607,7 @@ class StateManager:
                     # the widgets rendering live (unpublished) values to
                     # refresh, and it is the entire point of these cycles.
                     StateManager._notifyHeldTouched()
+                    StateManager._notifyHeldCommitted()
                     return
 
                 # No wait for the previous export here. This used to join it,
@@ -687,6 +725,8 @@ class StateManager:
                 # Coalesced notification for held writes (one per prefix per
                 # save cycle, mirroring how SaveBlock coalesces deltas).
                 StateManager._notifyHeldTouched()
+                # Last: what was committed is published by now.
+                StateManager._notifyHeldCommitted()
 
     @staticmethod
     def _QueueExport(state_snap, old_snap, diff, revision):

@@ -16,6 +16,10 @@ import {ENTRANTS_MAX, isSendableDay, parseEntrants} from "./Cards";
 // and writes through /api/v1 (the tournament, its details, its colours,
 // its icon / banner).
 
+// CPU, not a wait (fake timers): up to 1.2 s a test in a whole `npm test`, the
+// same shape as the Commentary page's, which went past the default 5 s there.
+jest.setTimeout(20000);
+
 jest.mock("../websocketConnection", () => {
     const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};

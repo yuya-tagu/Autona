@@ -126,6 +126,7 @@ OPERATIONS = {
     "team losers": lambda n: WebOps.set_team_losers(n, 1, True),
     "score up": lambda n: WebOps.team_scoreup(n, 1),
     "scores": lambda n: WebOps.set_scores(n, 3, 0),
+    "reset all": lambda n: WebOps.reset_all(n),
 }
 
 
@@ -1655,7 +1656,8 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
                "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
-               "kind": "commentary", "feature": "commentary", "index": 99}
+               "kind": "commentary", "feature": "commentary", "index": 99,
+               "game": 1}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -1682,8 +1684,12 @@ _BODIES = {
     "api_v1.player_save": {"gamerTag": "Walk"},
     "api_v1.player_delete": {"key": "Nobody", "confirm": True},
     "api_v1.player_load": {"tag": "Nobody"},
+    "api_v1.player_clear": {"confirm": True},
+    "api_v1.player_swap": {"first": 1, "second": 2},
+    "api_v1.stage_update": {"winner": 1},
     "api_v1.display_options_update": {_DISPLAY_OPTION: True},
     "api_v1.clear": {"confirm": True},
+    "api_v1.reset_all": {"confirm": True},
     "api_v1.reset_players": {"confirm": True},
     "api_v1.reset_match": {"confirm": True},
     "api_v1.load_set": {"setId": 1},
@@ -1739,7 +1745,12 @@ _NOT_200 = {
         "score_adjust", "score_reset", "score_set", "team_color",
         "set_update", "player_update", "player_load", "swap_teams",
         "apply_changes", "stats_refresh", "clear", "reset_players",
-        "reset_match", "load_set", "pull_stream")},
+        "reset_match", "load_set", "pull_stream", "player_clear",
+        "player_swap", "stage_update", "reset_all")},
+    # A team of one player has no second slot to exchange it with.
+    ("api_v1.player_swap", 1): 404, ("api_v1.player_swap", 2): 404,
+    # The tracker is off here: the set has no game rows.
+    ("api_v1.stage_update", 1): 409, ("api_v1.stage_update", 2): 409,
     # No tournament loaded: the legacy set lookup raises (its provider is
     # None -- the desktop's too), /api/v1 answers 409 NOT_READY.
     ("get_match", None): 500,

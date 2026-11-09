@@ -446,6 +446,61 @@ def apply_changes(scoreboard):
     return "OK"
 
 
+# What update_stage refuses. The route says what each one means.
+STAGE_NO_ROWS = "no_rows"
+STAGE_NO_SUCH_GAME = "no_such_game"
+STAGE_UNKNOWN = "unknown_stage"
+
+
+def update_stage(scoreboard, game, fields):
+    """One game row of board 1/2 (`game`: 1-based, the state's key). Some of
+    `winner` (GameTrackerService's UNREPORTED / TIE / TEAM_1 / TEAM_2: already
+    validated) and `stage` (a stage's en_name, GameAssetCatalog.StageRow; None
+    empties it, as the combo's blank row), in one save cycle: None, or the
+    refusal, with nothing written.
+
+    A result moves the team scores to what the rows add up to, as a click on
+    the tracker's buttons does (PublishStageResults); it takes two cycles
+    there, and one here. Pure state, like set_scores: the board follows from
+    the held cycle, and the rows are the state's whatever the tracker's
+    setting says now (it only decides how many SetBestOf makes). The same
+    value again is not a write: on a held board it would light 反映 for
+    nothing, and a result would sum the score over a +1 made since.
+
+    The stage is resolved under the lock, against one snapshot, as
+    Top8Service.UpdatePlayer resolves its picks: a game load swaps the
+    snapshot and only then starts the rows over (RepublishBestOfs, under this
+    lock), so a stage read off one game is never written to the rows of the
+    next.
+    """
+    boardHost.Prepare(scoreboard)
+    board = _board(scoreboard)
+    tracker = AutonaActions.instance.GameTracker(board)
+    row = f"score.{board}.stages.{game}"
+    with StateManager.lock:
+        count = tracker.StageCount()
+        if count == 0:
+            return STAGE_NO_ROWS
+        if game > count:
+            return STAGE_NO_SUCH_GAME
+        asset = None
+        if fields.get("stage") is not None:
+            catalog = GameAssetCatalog.instance
+            asset = catalog.StageRow(fields["stage"],
+                                     snapshot=catalog.Current())
+            if asset is None:
+                return STAGE_UNKNOWN
+        with StateManager.SaveBlock():
+            if "stage" in fields and fields["stage"] != StateManager.Get(
+                    f"{row}.en_name"):
+                tracker.SetStageAsset(game - 1, asset or {})
+            if ("winner" in fields
+                    and fields["winner"] != tracker.GameWinner(game - 1)):
+                tracker.SetStageResult(game - 1, fields["winner"])
+                tracker.PublishStageResults()
+    return None
+
+
 # ── readers ──────────────────────────────────────────────────────────────
 # The game asset readers read the Qt-free catalog (ADR-005 S1b), each
 # payload from one reference the catalog takes once, so a load or rescan
@@ -472,6 +527,10 @@ def get_characters():
 
 def get_variants():
     return GameAssetCatalog.instance.VariantsPayload()
+
+
+def get_stages():
+    return GameAssetCatalog.instance.StagesPayload()
 
 
 def get_comms():
@@ -924,12 +983,14 @@ def get_tournament():
 
 
 def update_tournament_info(fields):
-    """Write some of the five fields (v1 field name -> value, already
-    validated: the three texts, numEntrants, startAtDate) in one save
-    cycle, through TournamentInfoService. The lock before the save block,
-    as update_stream takes it (agent-pitfalls #17). False, with nothing
+    """Write some of the six fields (v1 field name -> value, already
+    validated: the three texts, numEntrants, startAtDate, and the 表示大会名)
+    in one save cycle, through TournamentInfoService. The lock before the save
+    block, as update_stream takes it (agent-pitfalls #17). False, with nothing
     written, when the day cannot be made a time on this PC
-    (TournamentInfoService.SetDate): checked first."""
+    (TournamentInfoService.SetDate): checked first. The 表示大会名 goes last,
+    whatever the request's order: a tournament name in the same request may
+    carry over into it (FollowDisplayName), and what was asked for wins."""
     service = TournamentInfoService.instance
     with StateManager.lock:
         day = fields.get(schema.TOURNAMENT_START_AT_DATE_KEY)
@@ -943,6 +1004,9 @@ def update_tournament_info(fields):
                     service.SetNumberField(field, value)
                 elif field == schema.TOURNAMENT_START_AT_DATE_KEY:
                     service.SetDate(schema.TOURNAMENT_START_AT_KEY, value)
+            if schema.TOURNAMENT_DISPLAY_NAME_KEY in fields:
+                service.SetDisplayName(
+                    fields[schema.TOURNAMENT_DISPLAY_NAME_KEY])
     return True
 
 
@@ -1313,17 +1377,21 @@ def swap_teams(scoreboard):
     return host.Run(run)
 
 
+def _swap_flag(board):
+    """Whether board `board` (1/2/3) is swapped, live: core's on all three."""
+    if board == CREW_BOARD:
+        return bool(CrewBattleService(CREW_BOARD).teamsSwapped)
+    return bool(StateManager.Get(f"score.{board}.teamsSwapped", False))
+
+
 def get_swap(scoreboard):
     # The live flag: a swap is reported as soon as it is made, before 反映
     # publishes it. The board is prepared first, as the route always did.
     host = boardHost
     host.Prepare(scoreboard)
     board = _board(scoreboard)
-    if board in AutonaActions.SCORE_BOARDS:
-        return str(bool(StateManager.Get(
-            f"score.{board}.teamsSwapped", False)))
-    if board == CREW_BOARD:
-        return str(CrewBattleService(CREW_BOARD).teamsSwapped)
+    if board in AutonaActions.SCORE_BOARDS or board == CREW_BOARD:
+        return str(_swap_flag(board))
     return str(host.Widget(scoreboard).teamsSwapped)
 
 
@@ -1336,6 +1404,26 @@ def get_scoreboard(scoreboard):
     # leak to remote clients ahead of the delta stream.
     boardHost.Prepare(scoreboard)
     return StateManager.GetCommitted(f'score.{_board(scoreboard)}')
+
+
+def get_pending(scoreboard):
+    """What board `scoreboard` (1/2/3) holds back, for a client drawing its
+    form from the live values (the SCORE page, ADR-005 S4u): (held, dirty,
+    the live subtree, the swap flag, the revision), all from one hold of the
+    lock. Whether it is held is the shell's: the desktop's boards 1/2 are, the
+    crew board and every headless board are not, and those have nothing
+    pending. get_scoreboard stays the published view; the route answering this
+    one is guarded, not READ. Built first, like get_scoreboard (never with the
+    lock held: on the desktop that waits for the GUI thread)."""
+    boardHost.Prepare(scoreboard)
+    board = _board(scoreboard)
+    prefix = f"score.{board}"
+    with StateManager.lock:
+        return (prefix in StateManager.heldPrefixes,
+                StateManager.HasPendingChanges(prefix),
+                copy.deepcopy(StateManager.Get(prefix)),
+                _swap_flag(board),
+                StateManager.revision)
 
 
 def reset_scores(scoreboard):
@@ -1438,6 +1526,34 @@ def clear_all(scoreboard):
         _reset_match(host, scoreboard)
         _reset_counts(host, scoreboard)
         _clear_players(host, scoreboard)
+        return "OK"
+
+    return host.Run(run)
+
+
+def reset_all(scoreboard):
+    """すべての入力値をリセット on board 1/2 (AutonaActions.ClearBoard): the
+    players, the score, the match bar, the team names with their crests and
+    the best of, in one save cycle; the counts stay. Not clear_all, which
+    resets the counts and keeps the team names (ADR-005 S2 decision 3). What
+    the desktop's button adds around it, through the host: the field being
+    typed in finishes first, so the clear takes its text; the cards drop what
+    was typed into their combos; and the set loaded last is forgotten, so
+    loading it again loads it."""
+    host = boardHost
+
+    def run():
+        board = _board(scoreboard)
+        host.Prepare(scoreboard)
+        with StateManager.SaveBlock():
+            host.CommitEdit(scoreboard)
+            AutonaActions.instance.ClearBoard(board)
+            for team in (1, 2):
+                roster = StateManager.Get(
+                    f"score.{board}.team.{team}.player")
+                for slot in (roster if isinstance(roster, dict) else ()):
+                    host.PlayerLoaded(board, team, int(slot), True)
+            SetLoadService(board).lastSetSelected = None
         return "OK"
 
     return host.Run(run)
@@ -1657,6 +1773,53 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
         _load_player(host, board, team_, player_, playerData, True, True,
                      no_mains)
         return "OK"
+
+    return host.Run(run)
+
+
+def clear_player(scoreboard, team, player):
+    """Empty one player slot of state team `team` on board 1/2, as the card's
+    clear button does (PlayerService.ClearSlot, statistics included). False
+    when the team has no such slot. The field being typed in finishes first,
+    so the clear takes its text; the card then drops what was typed into its
+    combos, as after any load that clears."""
+    host = boardHost
+
+    def run():
+        board = _board(scoreboard)
+        host.Prepare(scoreboard)
+        host.CommitEdit(scoreboard)
+        path = _player_path(board, team, player)
+        if path is None:
+            return False
+        with StateManager.SaveBlock():
+            try:
+                PlayerService(path).ClearSlot()
+            finally:
+                host.PlayerLoaded(board, team, player, True)
+        return True
+
+    return host.Run(run)
+
+
+def swap_players(scoreboard, team, first, second):
+    """Exchange two player slots of state team `team` on board 1/2, as a
+    card's move up / down does (AutonaActions.SwapPlayers). False when the
+    team lacks either: SwapPlayers would move the slot it has into the gap.
+    The field being typed in finishes first, so its text moves with the slot.
+    """
+    host = boardHost
+
+    def run():
+        board = _board(scoreboard)
+        host.Prepare(scoreboard)
+        host.CommitEdit(scoreboard)
+        with StateManager.lock:
+            if (_player_path(board, team, first) is None
+                    or _player_path(board, team, second) is None):
+                return False
+            AutonaActions.instance.SwapPlayers(board, team, first, second)
+        return True
 
     return host.Run(run)
 

@@ -138,21 +138,27 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/players/entrants', 'api_v1.get_player_entrants', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players:delete', 'api_v1.player_delete', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>/pending', 'api_v1.get_scoreboard_pending', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/set', 'api_v1.set_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/stages/<int:game>', 'api_v1.stage_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/stats:refresh', 'api_v1.stats_refresh', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/color', 'api_v1.team_color', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>', 'api_v1.player_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:clear', 'api_v1.player_clear', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load', 'api_v1.player_load', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players:swap', 'api_v1.player_swap', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/score:adjust', 'api_v1.score_adjust', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:apply', 'api_v1.apply_changes', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:clear', 'api_v1.clear', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:load-set', 'api_v1.load_set', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:pull-stream', 'api_v1.pull_stream', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:reset-all', 'api_v1.reset_all', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:reset-match', 'api_v1.reset_match', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:reset-players', 'api_v1.reset_players', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:swap-teams', 'api_v1.swap_teams', 'OPTIONS,POST'),
+    ('/api/v1/stages', 'api_v1.get_stages', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
@@ -492,10 +498,12 @@ def test_the_classification_follows_the_rules():
     # but for the player database's rows, real names in them, which are
     # PLAYERDB as /playerdb is (ADR-005 S4m), the result's X post, whose
     # handles come from there (S4q), the Board's file paths, which name the
-    # operator's account (S4s), and its "show in Explorer", which opens a window
-    # on this PC and is for this PC alone (S4s).
+    # operator's account (S4s), a board's values not published yet (S4u), and
+    # the Board's "show in Explorer", which opens a window on this PC and is
+    # for this PC alone (S4s).
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
-                      "api_v1.get_result_post", "api_v1.get_board_files"}
+                      "api_v1.get_result_post", "api_v1.get_board_files",
+                      "api_v1.get_scoreboard_pending"}
     thisPc = {"api_v1.reveal_board_file"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
@@ -531,7 +539,9 @@ def test_the_classification_follows_the_rules():
     # 51 of 76) and the tournament result's 9 writes, 2 reads and the X post's
     # text, guarded like the player DB its handles come from (S4q: v1 60 of 88),
     # and the Board's file paths and its "show in Explorer", neither of them a
-    # plain read or write (S4s: v1 60 of 90).
+    # plain read or write (S4s: v1 60 of 90), and the SCORE page's 4 writes, a
+    # read and the pending values, guarded for the unpublished edits they carry
+    # (S4u: v1 64 of 96).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -540,8 +550,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 60
-    assert len(EXPECTED_API_V1_ROUTES) == 90
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 64
+    assert len(EXPECTED_API_V1_ROUTES) == 96
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

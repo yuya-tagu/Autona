@@ -527,6 +527,7 @@ class _AutonaHarness:
             self.state.heldKeys.pop(prefix, None)
             self.state._commitPrefixes.discard(prefix)
             self.state._heldTouched.discard(prefix)
+            self.state._heldCommitted.discard(prefix)
         if board is None and not leftover:
             return
 

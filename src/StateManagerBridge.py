@@ -54,12 +54,13 @@ class StateManagerBridge(QObject):
 
     state_big_change = Signal()
     state_updated = Signal(dict)
-    # Deferred publication (Apply button). held_dirty_changed fires when a
-    # held subtree gains its first pending change (True) or is committed
-    # (False). held_state_updated fires (coalesced per save cycle) whenever
-    # live-but-unpublished data under a held prefix changes, so desktop
-    # widgets that render from the live state can refresh without waiting
-    # for the commit.
+    # Deferred publication (Apply button). held_dirty_changed is a cue that a
+    # held subtree gained its first pending change (True) or had them drained
+    # by a commit (False): a slot, which can be queued, does not trust the
+    # payload and reads StateManager.HasPendingChanges. held_state_updated
+    # fires (coalesced per save cycle) whenever live-but-unpublished data
+    # under a held prefix changes, so desktop widgets that render from the
+    # live state can refresh without waiting for the commit.
     held_dirty_changed = Signal(str, bool)
     held_state_updated = Signal(str)
 

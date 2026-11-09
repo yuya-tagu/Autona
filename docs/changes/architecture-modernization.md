@@ -6245,3 +6245,48 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - 新規起動の SCORE（1v1 / チーム / Crew）: 表示が今までどおり、既定のチーム色が出る、反映ボタンが点かない
   - ゲームのロード: 反映ボタンが消灯したまま
   - 1 チームの人数が 2 以上のゲームで、1v1 ボードのチーム名欄が今までどおり出る
+
+#### S4u held の v1 読み取りと v1 の追加（前半）（2026-11-09）
+
+上の順序の 3 と 4 の前半。**公開値（`GET /scoreboards/{n}`・`/state`・`program_state`・`out/`）の意味は変えていない**。React と `HoldBoard` の移動は後段で、Qt のパネルは残している。
+
+- **完了内容**
+  - **読み取り `GET /scoreboards/{n}/pending`** = `{held, dirty, board}`。`board` はライブ値で `GET /scoreboards/{n}` と同じ形（`swapped` 込み）。読みと `revision` は 1 回のロックの中。クルー・ヘッドレスは `false / false`
+  - **通知 `scoreboard_pending`** = `{board, dirty}`。Bridge の `held_state_updated` / `held_dirty_changed` → `WebServer.on_held_change`（`_delta_cond` の中で積むだけ）→ delta の flusher が送る。`dirty` は `StateManager.lock` を取らずに読む（`PeekPendingChanges`）
+  - **v1 の追加**（どれも core の既存の操作を呼ぶ）: `PATCH /scoreboards/{n}/stages/{game}`（`GameTrackerService`）・`GET /stages`（`GameAssetCatalog.StagesPayload`。`StageRow` と併せて新規）・`POST .../teams/{t}/players:swap`（`SwapPlayers`）・`POST .../teams/{t}/players/{p}:clear`（`ClearSlot`）・`POST /scoreboards/{n}:reset-all`（`ClearBoard`）・`PATCH /tournament/info` の `displayTournamentName`（`SetDisplayName`）
+  - 人数・キャラ数は `PATCH /scoreboards/{n}/set` の `players` / `characters` が既にあるので足していない（`tests/test_api_v1_score.py` が両シェルで確かめる）
+  - `ROUTE_ACCESS` に分類を足し、`AutonaApiInfoWindow`・`external-control-api.md`（§4・§5.15・§5.16・§6.19・§6.36・§6.37・§7）を更新した
+- **held の dirty 通知の不具合を直した（core）**: 人数の違うゲームのロードで反映ボタンが点いたままになり、`:apply` でも消えない（実機の報告。S4t の前から同じ）
+  - **原因**: `CommitHeld` は保存ブロックの中では `_commitPrefixes` に積むだけで、キーはブロックが閉じるまで未反映のまま。なのに `held_dirty_changed(False)` をその場で出していた。ボードのハンドラは `HasPendingChanges` を読むので真のままでボタンを消さず、後のドレインは何も通知しない。次の `:apply` は `had_pending` が偽で通知しない。同じ形がもう 2 つあった: commit の後に同じブロックで書くと True だけ出て False が出ない。別スレッドのブロックが開いている間の `:apply`（カウントはプロセス全体）
+  - **修正**: False は `SaveState` のドレインから出す（`_heldCommitted` に積み、`_notifyHeldTouched` の後で、**その時点でまだ未反映が無いプレフィックスにだけ**通知する）。`CommitHeld` からは `had_pending` と通知を消した。ウィジェットは変えていない。通知は合図で、`HasPendingChanges` の変化との厳密な一致は保証しない（`Set` の True は lock の外で出るので順序が前後しうる）。購読者は payload を信じず現在値を読む
+  - **変わること**: `CommitHeld` の False も lock の中（`SaveState` の中）で出る（pitfalls #17 の記述どおり）。ブロックの中の commit の False はブロックが閉じたときに出る。公開の失敗（`SaveState` の例外）の後は次の `SaveState` まで出ない（回帰ではない。もう一度の反映で再試行される）
+  - 修正前の core で新しいテストのうち 7 件が落ちることを確かめた（`tests/test_state_manager_held.py` の 5 件と、`tests/test_scoreboard_operations.py`・`tests/test_roster_flow.py` の実ロードの各 1 件。修正前の通知は `[(True, True), (False, True)]`）。実ロードの後の `scoreboard_pending` が `dirty: false` であることのテストは修正前の core でも通る（`dirty` を送信時に `HasPendingChanges` から読むため）。これは通知の側の pin で、core の修正の pin ではない
+- **判断**
+  1. **通知は値を運ばず、`dirty` は送信時に読む**: 値を別経路で流すと delta との整合が要る。読みが「最後の通知より後」であることだけで足りる。通知は変更の後に積まれるので、それより後に始めた GET は最後の変更を含む。`revision` は未反映の編集で進まないので順序の判定には使えない。送信時に読むので、窓の中で True → False となった場合は False の 1 通になる。読みは lock を取らない: flusher は全クライアントの delta を送るので保存サイクルの後ろで止めない。値を運ばない合図で、変われば次の通知が必ず来るので足りる
+  2. **delta と同じ flusher だが、間隔は別に持つ**: 別スレッドを足さない。delta の後に送るので、クライアントが通知で読み直す時点で同じ flush の delta は届いている。delta の外部契約（`_delta_last_flush_ts`・先頭 0 / 50 / 100 / 200 ms）は動かさない。**1 点だけ影響がある**: 通知の窓が開いている間に来た delta はその窓に合流する。先頭で出られたはずのものは最大 50 ms 遅れ、自分の debounce を待つはずだったものは早まる。通知が続くのは編集中で、届くのは操作者の操作の結果なので許容した
+  3. **`/pending` と通知は PLAYERDB 区分（信頼済み room）**: 指示は「認可は既存の規則に合わせる」。v1 の GET は READ が規則だが、反映前の編集は操作者がまだ公開していない値で本名を含みうる。CORS `*` の READ だと他のサイトのページから読め、`get_scoreboard` の「pending edits must not leak」にも反する。選手 DB の行と同じ例外にした（`test_the_classification_follows_the_rules` の許可集合に足した）
+  4. **`GET /stages` を足した（指示に無い）**: `stage` は識別子で書くので、候補を読む手段が無いと書けない。読み取りのみで READ
+  5. **`:reset-all` と `players/{p}:clear` は confirm 必須**: §7.2 の破壊的操作の規則に合わせた。`players:swap` は元に戻せるので不要
+  6. **ステージの書き込みは `host.Run` を通さず `Prepare` だけ**: 純粋な state の書き込みで、入力中の欄にもカードにも関わらない（`set_scores` と同じ）。ステージの解決は `StateManager.lock` の中で 1 つのスナップショットから行う（`Top8Service.UpdatePlayer` と同じ形）: ロードはスナップショットを差し替えてから lock の中で行を作り直すので、前のゲームのステージが新しいゲームの行に書かれない
+  7. **行の有無で判定し、設定を見ない**: 行を作るかを決めるのは `SetBestOf` のときの設定だけ。設定を見ると、OFF にしたあとに残っている行が読めるのに書けなくなる。行が無いのは `409 NOT_READY`（トラッカーが OFF か best of が未設定で、操作者の設定の問題）、番号が無いのは `404`
+  8. **同じ値は書かない**: 同じ値の再送で反映を点けない。`winner` の再送で `+1` の後のスコアを行の合計に戻さない
+  9. **Qt の行のコンボは v1 の `stage` に追従しない**（既知・直していない）: コンボは state から描画していない（ボタンだけ `_SyncStageButtons`）。Qt にはトラッカー ON でも行が出ない（S4t の実機確認）ので見えないまま、React で解消する
+  10. **`reset_all` の入力中の文字**: `host.PlayerLoaded(..., True)` は `DiscardTypedText(notEditing=True)` なので、操作者がいま打っているコンボの文字だけ、Qt のボタン（`DiscardTypedText()`）と違って残る。Web の操作は全部この形で、別の場所から押された操作が打ちかけを消さないため
+- **調査の結果**
+  - **`:load-set` は Qt の `auto_update="set"` と同じ追従をする**: どちらも `SetFollowService.LoadSet`（`LoadSet` の `data` の `auto_update` が `"set"`）。ボードの state・追従・ポーリングは一致（`tests/test_set_follow.py` の `test_a_v1_load_follows_the_set_as_the_set_window_does`）。違いは id の型だけ（窓は int、Web は str）で、`set_id` の型と、`LoadSet` が生の `!=` で比べるため**窓で読んだセットを Web から選び直す（またはその逆）と読み直しになる**（クリアしてスコア 0 から）。**そのままにする**: 実害は片方で読んだ同じセットをもう片方で選んだときだけで、セット選択が React に移ると（S4v 以降）int の入口が消える
+  - **v1 `teamName` はロゴを更新する**: `set_route` が名前の変化時に `PublishTeamLogo` を呼ぶ。差は 1 点、同じ名前の再送では引き直さない（Qt の `_OnTeamNameFinished` は無条件に引き直すので、あとから足したロゴファイルを拾う）。**そのままにして React のときに判断する**: legacy と共通の経路（`set_route`）で、外部の呼び手は同じ名前の再送で何も起きない形を見ている。テストで pin した
+- **jest の時間切れ（`CommentaryPage.test.js` の `a write that never answers...`）**
+  - **実時間は待っていない**: fake timers 済みで、10 秒の待ちは実測 0〜3 ms。遅いのは CPU で、マウント 270〜340 ms（12 カードの MUI）と、`getByRole` の `isInaccessible` → jsdom の `getComputedStyle`（要素 922・スタイルルール 543）。`getAllByRole("combobox")` が 555〜633 ms で、`hidden: true` なら 2〜3 ms。単独で 885 ms、全量の負荷で 5〜6 倍になって 5 秒を超えていた
+  - **修正**: ページのロケータ（`card` / `nameField` / `displayBox` / `renderPage`）に `hidden: true`（単独 885 → 460 ms。全量の実行でこのテストは 1965 ms、スイートのテスト時間の合計 52.0 → 24.5 s、最遅 4.0 → 2.0 s）。そのうえで理由付きの `jest.setTimeout(20000)`（`Top8Page.test.js` などと同じ）
+  - **同じ形の他のページ**: Board / PlayerBrowser / Stats / StatsPreview / Thumbnail / Top 8 / Result は既に上限を上げている。上げていなかった Stream（全量で最大 2.0 s）・Event（1.2 s）・`ScoreboardPage/v1Requests`（2.5 s）に同じ上限と理由を足した。どれも実時間の待ちは無い。Designer の 5 秒超のテストは同期関数で、jest の時間切れの対象にならない
+- **次の段への申し送り**
+  - v1 の後半: 配信台・追従・セット取得（S4v）、Crew の v1（S4w）。React の反映ボタンは `/pending` と `scoreboard_pending` を使う（接続の直後に 1 回読む。通知の後に始めた GET の答えを使う）
+  - `schema.HoldBoard` の起動時登録は React の反映ボタンと同時か後（決定 3）。`/pending` の `held` がそのまま反映ボタンの出し分けになる
+  - guard 付きの `GET /pending` が Qt ボードを構築するので、React の SCORE ページでは表示していない面も held になる。起動時の登録（`HoldBoard` の移動）で解消する
+  - クルーの `swapped` は state の外で、通知も delta も無い（S4w で扱う）
+  - ブロック内の commit の後の書き込みは、反映なしで公開される既存の窓（`StateManager.CommitHeld` の `_commitPrefixes`）
+- **テスト**
+  - 新規 `tests/test_api_v1_score.py`（`/pending` が公開値に混ざらないこと・形・認可、各ルートの正常と異常を両シェルで、Qt のコンボ・ボタンと state が一致すること、表示名、`teamName` のロゴ）
+  - `tests/test_webserver_delta_debounce.py`（通知の間隔・まとめ方・送信時の `dirty`・delta の後・delta の間隔を動かさない・lock の中から呼べる・停止時に送る）、`tests/test_web_access.py`（信頼済みの接続だけに届く）、`tests/test_bootstrap_split.py`（実サーバーの `__init__` の結線）、`tests/test_scoreboard_operations.py`（実ロードの後の通知の最後が `dirty: false`）、`tests/test_set_follow.py`（`:load-set` の追従）、`tests/test_web_operations.py`（`:reset-all` が両シェルで同じ state）
+  - レビュー対応で足した pin: 未構築のボードへの `GET /pending` と `PATCH stages`、held のボードの `players/{p}:clear` と `players:swap`、`teamsSwapped` のときの状態側のチーム、ステージの解決と行の書き込みの間にロードが入らないこと、ボードと `revision` が 1 回の読みであること、Flask スレッドからの書き込みの描画（ボタンと `scoreDisplay1/2`）、GUI スレッドの反映の False が lock の中でカードを作る経路（`test_no_thread_is_waited_on_inside_a_held_cycle`。元の手順はこの経路を踏んでいなかったので手順を足した）、カードの `toBeVisible`（`hidden: true` で消えた可視性の検査）。`_cycles` は `SaveState` 単位で数え、`_oneCycle` は 1 サイクルだけを通す
+- **検証**（レビュー対応後）: `python scripts/run_tests_parallel.py` 4883 passed / 2 skipped（RESULT: OK）／jest 全量 986 passed（34 suites）。`web/src` のコードは変えていないので `npm run build` と `npm run test:e2e` はレビュー対応の前の結果（通過・66 passed）のまま。実機確認はメインセッションが実施した（反映ボタン・通知・他オリジンの 403。レビュー対応の前）

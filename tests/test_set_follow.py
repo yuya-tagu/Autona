@@ -295,6 +295,55 @@ def test_load_set_works_headless(autonaApp, headless, provider):
                {"setId": 1}) == (400, "INVALID_ARGUMENT")
 
 
+def test_a_v1_load_follows_the_set_as_the_set_window_does(
+        autonaApp, desktop, settings, provider):
+    """ADR-005 S4u's check. v1's :load-set and the set window reach the same
+    load, auto_update "set": the same board and the same poll. What differs is
+    the id's type alone (the window hands an int, the web a str), and
+    SetFollowService compares them raw, as it always did: choosing in one the
+    set loaded by the other loads it again."""
+    from src.core.SetFollowService import SetFollowService
+
+    board, client, _ = desktop
+    settings["general.disable_autoupdate"] = False
+
+    def followed():
+        return (SetFollowService(1).Following(),
+                SetFollowService.fetcher._timers[1].isActive(),
+                autonaApp.get("score.1.auto_update"))
+
+    board.NewSetSelected({"id": 1001, "auto_update": "set"})
+    _drain(autonaApp)
+    assert followed() == (("set", None), True, "set")
+    byWindow = copy.deepcopy(autonaApp.get("score.1"))
+
+    board = autonaApp.board(1)   # what it followed goes with it
+    autonaApp.settle()
+    provider._fetched.clear()    # the fake answers a point more each fetch
+    assert SetFollowService(1).Following() is None
+    assert _v1(client, "/api/v1/scoreboards/1:load-set",
+               {"setId": 1001}) == (200, None)
+    _drain(autonaApp)
+    assert followed() == (("set", None), True, "set")
+    byRoute = copy.deepcopy(autonaApp.get("score.1"))
+
+    assert (byWindow.pop("set_id"), byRoute.pop("set_id")) == (1001, "1001")
+    assert byRoute == byWindow
+
+    # The same id, in the same type, again: nothing is fetched.
+    fetched = len(_calls(provider, "GetMatch"))
+    assert _v1(client, "/api/v1/scoreboards/1:load-set",
+               {"setId": 1001}) == (200, None)
+    _drain(autonaApp)
+    assert len(_calls(provider, "GetMatch")) == fetched
+
+    # The same set by the window's int: loaded again, cleared first.
+    board.NewSetSelected({"id": 1001, "auto_update": "set"})
+    _drain(autonaApp)
+    assert len(_calls(provider, "GetMatch")) == fetched + 1
+    assert autonaApp.get("score.1.set_id") == 1001
+
+
 def test_a_team_set_grows_the_headless_roster(autonaApp, headless):
     host, client, _ = headless
 

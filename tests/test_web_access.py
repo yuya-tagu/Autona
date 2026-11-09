@@ -1091,6 +1091,36 @@ def test_the_player_db_broadcast_reaches_only_trusted_connections(server):
     assert _names(with_token) == []
 
 
+def test_the_pending_notice_reaches_only_trusted_connections(server):
+    # The same rooms as the GET it tells them to read (ADR-005 S4u): a client
+    # that could not read it has no use for it, and when the board is edited
+    # is the operator's own.
+    from src.AutonaWebServer import WebServer
+
+    token = WebAccess.Token()
+    local = _ws(server)
+    with_token = _ws(server, LAN_PEER, auth={"token": token})
+    without = _ws(server, LAN_PEER)
+    foreign = _ws(server, headers={"Origin": "https://evil.example"})
+    for ws in (local, with_token, without, foreign):
+        ws.get_received()
+
+    # What the flusher runs: outside any request.
+    WebServer._send_held_notices({1})
+
+    for ws in (local, with_token):
+        assert [(packet["name"], packet["args"]) for packet in ws.get_received()] == [
+            ("scoreboard_pending", [{"board": 1, "dirty": False}])]
+    assert _names(without) == []
+    assert _names(foreign) == []
+
+    # After a regenerate, the old token's connections stop receiving it.
+    WebAccess.RegenerateToken()
+    WebServer._send_held_notices({1})
+    assert _names(local) == ["scoreboard_pending"]
+    assert _names(with_token) == []
+
+
 # ── The API settings window's token row ──────────────────────────────────
 
 
