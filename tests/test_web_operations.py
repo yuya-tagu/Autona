@@ -1693,6 +1693,7 @@ _BODIES = {
     "api_v1.reset_players": {"confirm": True},
     "api_v1.reset_match": {"confirm": True},
     "api_v1.load_set": {"setId": 1},
+    "api_v1.follow": {"type": "stream", "identifier": "Walk"},
     "api_v1.game_set": {"codename": "no_such_game"},
     "api_v1.commentary_update": {"name": "Cast"},
     "api_v1.commentary_reorder": {"order": [str(slot) for slot in
@@ -1746,7 +1747,8 @@ _NOT_200 = {
         "set_update", "player_update", "player_load", "swap_teams",
         "apply_changes", "stats_refresh", "clear", "reset_players",
         "reset_match", "load_set", "pull_stream", "player_clear",
-        "player_swap", "stage_update", "reset_all")},
+        "player_swap", "stage_update", "reset_all", "get_scoreboard_follow",
+        "follow", "stop_follow")},
     # A team of one player has no second slot to exchange it with.
     ("api_v1.player_swap", 1): 404, ("api_v1.player_swap", 2): 404,
     # The tracker is off here: the set has no game rows.
@@ -1757,6 +1759,10 @@ _NOT_200 = {
     ("api_v1.get_match", None): 409,
     ("api_v1.load_set", 1): 409, ("api_v1.load_set", 2): 409,
     ("api_v1.pull_stream", 1): 409, ("api_v1.pull_stream", 2): 409,
+    ("api_v1.follow", 1): 409, ("api_v1.follow", 2): 409,
+    ("api_v1.tournament_phases_refresh", None): 409,
+    ("api_v1.tournament_sets_refresh", None): 409,
+    ("api_v1.tournament_stations_refresh", None): 409,
     ("api_v1.bracket_refresh", None): 409,
     ("api_v1.tournament_media_fetch", None): 409,
     ("api_v1.analysis_refresh", None): 409,

@@ -31,7 +31,10 @@ recorded before the move). This file is what the golden cannot hold:
 - the board operations run where the shell runs them (the headless host's
   lock), and nothing waits for the GUI thread with the state's lock held;
 - the poll's clock runs under a bare QCoreApplication, and stops for good
-  when the app quits.
+  when the app quits;
+- v1's follow, stop and read (ADR-005 S4v) do what the station window and the
+  timer row's cancel button do, on both shells; the read answers from a thread
+  with no event dispatcher, where QTimer.remainingTime() crashes the process.
 
 The provider is faked at its own interface and its jobs run one at a time
 when the test says so (the golden's _FakeProvider and its `provider`
@@ -1358,6 +1361,10 @@ with StateManager.SaveBlock():
 SetFollowService.POLL_MS = 100
 
 answer = AutonaWebOperations.load_set(1, "1001")
+# v1's read, on a request thread (no event dispatcher), with the clock running.
+readByRequest = {}
+QTimer.singleShot(700, lambda: readByRequest.update(
+    on_worker(lambda: AutonaWebOperations.get_follow(1))))
 QTimer.singleShot(1500, app.quit)
 app.exec()
 # app.quit() emitted aboutToQuit: the clock stopped, and a poll asked for
@@ -1377,6 +1384,7 @@ report({
     "match": StateManager.Get("score.1.match"),
     "stoppedOnQuit": stoppedOnQuit,
     "stillStopped": stillStopped,
+    "readByRequest": readByRequest,
 })
 '''
 
@@ -1397,3 +1405,623 @@ def test_the_poll_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["match"].startswith("Round "), result
     assert result["stoppedOnQuit"] is True
     assert result["stillStopped"] is True
+    # On a thread with no event dispatcher: QTimer.remainingTime() crashes the
+    # process there (the probe's exit code above), and the seconds would be
+    # None if the clock's next tick was not kept.
+    assert result["readByRequest"] == {
+        "station": None,
+        "poll": {"mode": "set", "identifier": None, "secondsLeft": 0},
+        "pollingEnabled": True, "setId": "1001"}
+
+
+# ── following through v1 (ADR-005 S4v) ──────────────────────────────────
+
+# What GET /tournament/stations answers, whole: a page posts the row.
+_STATION_ROW = {"type": "station", "id": 77, "identifier": 4, "stream": ""}
+_STREAM_ROW = {"type": "stream", "id": 90, "identifier": STREAM, "stream": ""}
+
+
+def _follow(client, n=1):
+    response = client.get(f"/api/v1/scoreboards/{n}/follow")
+    assert response.status_code == 200, response.get_data(as_text=True)
+    return response.get_json()["data"]
+
+
+def _boardSnapshot(autonaApp):
+    """The board and what it follows, the clock's reading left out."""
+    from src.core.SetFollowService import SetFollowService
+
+    snapshot = SetFollowService(1).Snapshot()
+    if snapshot["poll"] is not None:
+        assert isinstance(snapshot["poll"].pop("secondsLeft"), int)
+    return copy.deepcopy(autonaApp.get("score.1")), snapshot
+
+
+@pytest.mark.parametrize("row, lookup, asked, setId, identifier", [
+    (_STATION_ROW, "GetStationMatchsId", [77], 3001, 4),
+    (_STREAM_ROW, "GetStreamMatchId", [STREAM], 2001, STREAM)])
+def test_a_v1_follow_does_what_the_station_window_does(
+        autonaApp, desktop, settings, provider, row, lookup, asked, setId,
+        identifier):
+    """The window's row and v1's reach the same FollowStation: the same
+    lookup, the same board, the same clock. A row of the list posted as it is
+    follows."""
+    from src.core.SetFollowService import SetFollowService
+
+    board, client, _ = desktop
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
+    provider.streams[STREAM] = _node(2001, (5, 6), state=1)
+
+    board.LoadStationSets(dict(row))
+    _drain(autonaApp)
+    byWindow = _boardSnapshot(autonaApp)
+    assert _calls(provider, lookup) == [asked]
+    assert byWindow[0]["set_id"] == setId
+    assert byWindow[1] == {
+        "station": {"type": row["type"], "id": row["id"],
+                    "identifier": identifier},
+        "poll": {"mode": row["type"], "identifier": identifier},
+        "pollingEnabled": True, "setId": str(setId)}
+
+    board = autonaApp.board(1)   # what it followed goes with it
+    autonaApp.settle()
+    provider._fetched.clear()    # the fake answers a point more each fetch
+    provider.calls.clear()
+    assert SetFollowService(1).Station() is None
+    assert _v1(client, "/api/v1/scoreboards/1:follow", row) == (200, None)
+    _drain(autonaApp)
+
+    assert _calls(provider, lookup) == [asked]
+    assert SetFollowService.fetcher._timers[1].isActive()
+    assert _boardSnapshot(autonaApp) == byWindow
+
+
+def test_a_v1_stop_does_what_the_cancel_button_does(
+        autonaApp, desktop, settings, provider):
+    from src.core.SetFollowService import SetFollowService
+
+    board, client, _ = desktop
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001)]
+
+    board.LoadStationSets(dict(_STATION_ROW))
+    _drain(autonaApp)
+    assert SetFollowService(1).Following() == ("station", 4)
+    board.timerCancelBt.click()
+    _drain(autonaApp)
+    byButton = _boardSnapshot(autonaApp)
+    assert byButton[1] == {"station": None, "poll": None,
+                           "pollingEnabled": True, "setId": None}
+
+    board = autonaApp.board(1)
+    autonaApp.settle()
+    provider._fetched.clear()
+    board.LoadStationSets(dict(_STATION_ROW))
+    _drain(autonaApp)
+    assert SetFollowService(1).Following() == ("station", 4)
+    assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+    _drain(autonaApp)
+
+    assert _boardSnapshot(autonaApp) == byButton
+    assert not SetFollowService.fetcher._timers[1].isActive()
+    before = len(provider.calls)
+    _tick(1)
+    _drain(autonaApp)
+    assert len(provider.calls) == before
+
+
+def test_a_station_is_followed_and_stopped_headless(
+        autonaApp, headless, settings, provider):
+    _, client, _ = headless
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001)]
+    assert _follow(client) == {"station": None, "poll": None,
+                               "pollingEnabled": True, "setId": None}
+
+    assert _v1(client, "/api/v1/scoreboards/1:follow",
+               _STATION_ROW) == (200, None)
+    _drain(autonaApp)
+
+    assert autonaApp.get("score.1.set_id") == 3001
+    assert autonaApp.get("score.1.auto_update") == "station"
+    read = _follow(client)
+    assert isinstance(read["poll"].pop("secondsLeft"), int)
+    assert read == {
+        "station": {"type": "station", "id": 77, "identifier": 4},
+        "poll": {"mode": "station", "identifier": 4},
+        "pollingEnabled": True, "setId": "3001"}
+
+    assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+    _drain(autonaApp)
+    assert _follow(client) == {"station": None, "poll": None,
+                               "pollingEnabled": True, "setId": None}
+
+
+def test_what_a_board_follows_comes_apart_in_three(
+        autonaApp, headless, settings, provider):
+    """The station stays with polling off (the desktop's default: a follow is
+    one lookup) and through a set loaded by hand; what is polled is the poll."""
+    _, client, _ = headless
+    provider.stations["77"] = [_node(3001)]
+    station = {"type": "station", "id": 77, "identifier": 4}
+
+    settings["general.disable_autoupdate"] = True
+    assert _v1(client, "/api/v1/scoreboards/1:follow",
+               _STATION_ROW) == (200, None)
+    _drain(autonaApp)
+    assert _follow(client) == {"station": station, "poll": None,
+                               "pollingEnabled": False, "setId": "3001"}
+    assert _calls(provider, "GetStationMatchsId") == [[77]]
+
+    settings["general.disable_autoupdate"] = False
+    assert _v1(client, "/api/v1/scoreboards/1:load-set",
+               {"setId": 1001}) == (200, None)
+    _drain(autonaApp)
+    read = _follow(client)
+    assert read["poll"].pop("secondsLeft") >= 0
+    assert read == {"station": station,
+                    "poll": {"mode": "set", "identifier": None},
+                    "pollingEnabled": True, "setId": "1001"}
+
+
+def test_the_seconds_left_run_down_and_a_tick_brings_them_back(
+        autonaApp, headless, settings, provider, monkeypatch):
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    monkeypatch.setattr(SetFollowService, "POLL_MS", 3600 * 1000)
+    settings["general.disable_autoupdate"] = False
+    client.get("/scoreboard1-load-set?set=1001")
+    _drain(autonaApp)
+    fetcher = SetFollowService.fetcher
+
+    def left():
+        return _follow(client)["poll"]["secondsLeft"]
+
+    assert 3590 <= left() <= 3600
+    fetcher._nextTicks[1] -= 1000       # a thousand seconds on
+    assert 2590 <= left() <= 2600
+    fetcher._nextTicks[1] -= 3000       # the tick is late: none left, not -400
+    assert left() == 0
+    _tick(1)
+    _drain(autonaApp)
+    assert 3590 <= left() <= 3600
+
+    assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+    autonaApp.settle()
+    assert fetcher.RemainingMs(1) is None
+    assert _follow(client)["poll"] is None
+
+
+def test_what_a_board_follows_changing_is_told(
+        autonaApp, headless, settings, provider):
+    """What the Socket.IO notice follows. A set's tick tells nothing: the
+    seconds running down are the reader's. A station's tick looks its set up
+    and starts the poll again, whose clock starts again: that is told."""
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001)]
+    heard = []
+    tell = heard.append
+    SetFollowService.changes.subscribe(tell)
+    try:
+        assert _v1(client, "/api/v1/scoreboards/2:follow",
+                   _STATION_ROW) == (200, None)
+        assert heard == [2]             # told on the follow, before the answer
+        _drain(autonaApp)
+        assert heard == [2, 2]          # and when its load starts the poll
+
+        heard.clear()
+        _tick(2)
+        _drain(autonaApp)
+        assert heard == [2]
+
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/2:stop-follow") == (200, None)
+        assert heard == [2]
+
+        # Nothing left to stop: nothing changed, nothing told.
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/2:stop-follow") == (200, None)
+        assert heard == []
+
+        assert _v1(client, "/api/v1/scoreboards/2:load-set",
+                   {"setId": 1001}) == (200, None)
+        _drain(autonaApp)
+        assert heard == [2]             # the load's poll
+
+        heard.clear()
+        _tick(2)
+        _drain(autonaApp)
+        assert heard == []
+    finally:
+        SetFollowService.changes.unsubscribe(tell)
+
+
+def test_a_follow_is_told_when_it_changes_what_a_reader_has(
+        autonaApp, headless, settings, provider):
+    """Polling off, so that no poll's notice is in the way. The station chosen
+    again looks its set up afresh: the set is forgotten with nothing written to
+    the board, which would have told it. With no set to forget, it changes
+    nothing."""
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    settings["general.disable_autoupdate"] = True
+    provider.stations["77"] = [_node(3001)]
+    heard = []
+
+    def tell(board):
+        heard.append((board, SetFollowService(board).Snapshot()["setId"]))
+
+    SetFollowService.changes.subscribe(tell)
+    try:
+        assert _v1(client, "/api/v1/scoreboards/1:follow",
+                   _STATION_ROW) == (200, None)
+        assert heard == [(1, None)]     # another station
+        _drain(autonaApp)
+        assert _follow(client)["setId"] == "3001"
+
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/1:follow",
+                   _STATION_ROW) == (200, None)
+        assert heard == [(1, None)]     # the same one, its set forgotten
+
+        provider.stations["77"] = []
+        _drain(autonaApp)
+        assert _follow(client)["setId"] is None
+
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/1:follow",
+                   _STATION_ROW) == (200, None)
+        _drain(autonaApp)
+        assert heard == []              # the same one, nothing to forget
+
+        assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+        assert heard == [(1, None)]     # a station, with no poll to stop
+    finally:
+        SetFollowService.changes.unsubscribe(tell)
+
+
+@pytest.mark.parametrize("failure", ["error", "no set"])
+def test_a_load_that_failed_is_told(
+        autonaApp, headless, settings, provider, monkeypatch, failure):
+    """`setId` goes back to null with no write to the board, whose own updates
+    tell every other change of it."""
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    settings["general.disable_autoupdate"] = True
+    _failOnce(provider, monkeypatch, 1001, failure)
+    assert _v1(client, "/api/v1/scoreboards/1:load-set",
+               {"setId": 1001}) == (200, None)
+    assert _follow(client)["setId"] == "1001"
+    heard = []
+
+    def tell(board):
+        heard.append((board, SetFollowService(board).Snapshot()["setId"]))
+
+    SetFollowService.changes.subscribe(tell)
+    try:
+        _drain(autonaApp)
+    finally:
+        SetFollowService.changes.unsubscribe(tell)
+
+    assert heard == [(1, None)]
+    assert _follow(client)["setId"] is None
+
+
+def test_a_follow_and_its_ticks_wait_for_the_apply(
+        autonaApp, desktop, settings, provider):
+    """The held board's point, and what a follow could most easily break: the
+    set a follow loads, and the one a tick moves it to, reach the operator's
+    board and nothing OBS reads until 反映. Looked at where they are published
+    (the committed view, the board's route, program_state, the deltas): the
+    live state moves whether or not the hold works."""
+    from src.core import StateSchema as schema
+    from src.core.StateManager import StateManager
+
+    _, client, _ = desktop
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001)]
+
+    def withoutStats(board):
+        # The statistics publish at once (HoldBoard's exempt keys).
+        return {key: value for key, value in copy.deepcopy(board).items()
+                if key not in schema.STATS_KEYS}
+
+    def published():
+        route = client.get("/api/v1/scoreboards/1").get_json()["data"]
+        return (withoutStats(StateManager.GetCommitted("score.1")),
+                withoutStats(route),
+                withoutStats(WebOps.program_state()["state"]["score"]["1"]))
+
+    rows = []
+
+    def told(payload):
+        rows.extend(
+            row for row in payload["delta"]
+            if [str(part) for part in row["path"][:2]] == ["score", "1"]
+            and str(row["path"][2]) not in schema.STATS_KEYS)
+
+    before = published()
+    StateManager.observers.state_updated.subscribe(told)
+    try:
+        assert _v1(client, "/api/v1/scoreboards/1:follow",
+                   _STATION_ROW) == (200, None)
+        _drain(autonaApp)
+        assert autonaApp.get("score.1.set_id") == 3001
+        assert StateManager.HasPendingChanges("score.1")
+        assert published() == before
+        assert rows == []
+
+        provider.stations["77"] = [_node(3002, (3, 4))]
+        _tick(1)
+        _drain(autonaApp)
+        assert autonaApp.get("score.1.set_id") == 3002
+        assert StateManager.HasPendingChanges("score.1")
+        assert published() == before
+        assert rows == []
+
+        assert _v1(client, "/api/v1/scoreboards/1:apply") == (200, None)
+        autonaApp.settle()
+        # What was held all along is what 反映 sends, here too.
+        assert not StateManager.HasPendingChanges("score.1")
+        assert StateManager.GetCommitted("score.1.set_id") == 3002
+        assert WebOps.program_state()["state"]["score"]["1"]["set_id"] == 3002
+        assert any(str(row["path"][2]) == "set_id" for row in rows), rows
+    finally:
+        StateManager.observers.state_updated.unsubscribe(told)
+
+
+def test_a_cancel_with_nothing_to_cancel_does_not_light_the_apply_button(
+        autonaApp, desktop, settings, provider):
+    """Under a held prefix an identical write is not a write (the shared
+    SetIfChanged rule): it marked the board dirty, with no difference between
+    what 反映 would send and what is out. A cancel that does change something
+    still waits for 反映."""
+    from src.core.SetFollowService import SetFollowService
+    from src.core.StateManager import StateManager
+
+    _, client, _ = desktop
+    heard = []
+    tell = heard.append
+    assert not StateManager.HasPendingChanges("score.1")
+    SetFollowService.changes.subscribe(tell)
+    try:
+        assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+        autonaApp.settle()
+        assert not StateManager.HasPendingChanges("score.1")
+        assert heard == []
+
+        settings["general.disable_autoupdate"] = False
+        assert _v1(client, "/api/v1/scoreboards/1:load-set",
+                   {"setId": 1001}) == (200, None)
+        _drain(autonaApp)
+        assert _v1(client, "/api/v1/scoreboards/1:apply") == (200, None)
+        autonaApp.settle()
+        assert not StateManager.HasPendingChanges("score.1")
+        assert str(StateManager.GetCommitted("score.1.set_id")) == "1001"
+
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+        autonaApp.settle()
+        assert heard == [1]
+        assert StateManager.HasPendingChanges("score.1")
+        assert autonaApp.get("score.1.set_id") is None
+        assert str(StateManager.GetCommitted("score.1.set_id")) == "1001"
+
+        assert _v1(client, "/api/v1/scoreboards/1:apply") == (200, None)
+        autonaApp.settle()
+        heard.clear()
+        assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)
+        autonaApp.settle()
+        assert not StateManager.HasPendingChanges("score.1")
+        assert heard == []
+    finally:
+        SetFollowService.changes.unsubscribe(tell)
+
+
+def test_a_poll_asked_for_on_a_request_thread_has_its_seconds_at_once(
+        autonaApp, headless, settings, provider):
+    """Headless, a load runs on the request's thread and the clock is the main
+    thread's: the notice goes out before the main thread can start the timer,
+    and a reader answering it read `secondsLeft: null`. (The main thread does
+    nothing here until the thread has been joined.)"""
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    settings["general.disable_autoupdate"] = False
+    fetcher = SetFollowService.fetcher
+    service = SetFollowService(1)
+    heard = []
+
+    def tell(board):
+        heard.append(SetFollowService(board).Snapshot()["poll"])
+
+    def onThread(fn):
+        errors = []
+
+        def run():
+            try:
+                fn()
+            except BaseException as error:  # handed back to the test
+                errors.append(error)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(10)
+        assert not thread.is_alive() and errors == []
+
+    SetFollowService.changes.subscribe(tell)
+    try:
+        onThread(lambda: WebOps.load_set(1, "1001"))
+    finally:
+        SetFollowService.changes.unsubscribe(tell)
+
+    timer = fetcher._timers.get(1)
+    assert timer is None or not timer.isActive()    # not started yet
+    assert len(heard) == 1
+    assert 0 <= heard[0].pop("secondsLeft") <= 5
+    assert heard == [{"mode": "set", "identifier": None}]
+    left = service.Snapshot()["poll"]["secondsLeft"]
+    assert isinstance(left, int) and 0 <= left <= 5
+
+    _drain(autonaApp)
+    assert fetcher._timers[1].isActive()
+    assert isinstance(service.Snapshot()["poll"]["secondsLeft"], int)
+
+    onThread(lambda: WebOps.stop_follow(1))
+    assert service.Snapshot()["poll"] is None
+    autonaApp.settle()
+    assert not fetcher._timers[1].isActive()
+    assert fetcher.RemainingMs(1) is None
+
+
+def test_reading_builds_no_board_and_a_follow_builds_it(
+        autonaApp, desktop, provider):
+    """As every board operation does (BoardHost.Prepare): a write to a board
+    not built is lost when it is. A read has nothing to lose."""
+    _, client, _ = desktop
+    provider.stations["77"] = [_node(3001)]
+
+    autonaApp._dropBoard(2)
+    assert _follow(client, 2)["station"] is None
+    assert autonaApp.manager.scoreboards.get(2) is None
+
+    assert _v1(client, "/api/v1/scoreboards/2:follow",
+               _STATION_ROW) == (200, None)
+    assert autonaApp.manager.scoreboards.get(2) is not None
+    _drain(autonaApp)
+    assert autonaApp.get("score.2.set_id") == 3001
+
+
+def test_stopping_builds_no_board_and_writes_nothing_to_one_not_built(
+        autonaApp, desktop, settings, provider):
+    """A load always builds its board, so one not built has nothing to stop.
+    Building it for this seeded it (losing what the state had) and turned the
+    polling setting off."""
+    from src.core.SettingsManager import SettingsManager
+    from src.core.StateManager import StateManager
+
+    _, client, _ = desktop
+    autonaApp._dropBoard(2)
+    # What a board not built yet can have: the saved state's, from the last run.
+    StateManager.Set("score.2.set_id", 1234)
+    autonaApp.settle()
+    before = copy.deepcopy(StateManager.Get("score.2"))
+    writes = []
+    settingsWritten = []
+    real = StateManager.Set
+
+    def recorded(key, value):
+        writes.append(key)
+        return real(key, value)
+
+    with patch.object(StateManager, "Set", recorded), \
+            patch.object(SettingsManager, "Set", lambda key, value:
+                         settingsWritten.append(key)):
+        assert _v1(client, "/api/v1/scoreboards/2:stop-follow") == (200, None)
+    autonaApp.settle()
+
+    assert autonaApp.manager.scoreboards.get(2) is None
+    assert writes == []
+    assert settingsWritten == []
+    assert StateManager.Get("score.2") == before
+
+
+def test_a_built_board_is_there_for_the_host_only_once_it_is(
+        autonaApp, desktop):
+    host = WebOps.current_board_host()
+    autonaApp._dropBoard(2)
+    assert host.Built(2) is False
+    host.Prepare(2)
+    assert host.Built(2) is True
+    assert BoardHost().Built(2) is True     # with no widget, always
+
+
+@pytest.mark.parametrize("body", [
+    {},
+    {"type": "set", "id": 77},
+    {"type": True, "id": 77},
+    {"type": ["station"], "id": 77},
+    {"id": 77},
+    {"type": "station"},
+    {"type": "station", "id": None},
+    {"type": "station", "id": True},
+    {"type": "station", "id": False},
+    {"type": "station", "id": 1.5},
+    {"type": "station", "id": ""},
+    {"type": "station", "id": 0},
+    {"type": "station", "id": -1},
+    {"type": "station", "id": [77]},
+    {"type": "station", "id": {"id": 77}},
+    {"type": "station", "id": 77, "identifier": True},
+    {"type": "station", "id": 77, "identifier": ""},
+    {"type": "station", "id": 77, "identifier": 1.5},
+    {"type": "stream"},
+    {"type": "stream", "identifier": None},
+    {"type": "stream", "identifier": 5},
+    {"type": "stream", "identifier": ""},
+    {"type": "stream", "identifier": True},
+    {"type": "stream", "identifier": STREAM, "id": True},
+])
+def test_what_a_follow_refuses(autonaApp, headless, provider, body):
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    assert _v1(client, "/api/v1/scoreboards/1:follow",
+               body) == (400, "INVALID_ARGUMENT")
+    _drain(autonaApp)
+    assert provider.calls == []
+    assert SetFollowService(1).Station() is None
+
+
+@pytest.mark.parametrize("method, path, body", [
+    ("get", "/api/v1/scoreboards/3/follow", None),
+    ("post", "/api/v1/scoreboards/3:follow", _STATION_ROW),
+    ("post", "/api/v1/scoreboards/3:stop-follow", {}),
+    ("get", "/api/v1/scoreboards/4/follow", None),
+    ("post", "/api/v1/scoreboards/0:follow", _STATION_ROW),
+    ("post", "/api/v1/scoreboards/4:stop-follow", {}),
+])
+def test_only_boards_1_and_2_follow(autonaApp, headless, provider, method,
+                                    path, body):
+    """The crew board loads no set; there is no other board."""
+    _, client, _ = headless
+    response = getattr(client, method)(path, json=body) \
+        if method == "post" else client.get(path)
+    assert response.status_code == 400, response.get_data(as_text=True)
+    assert response.get_json()["error"]["code"] == "INVALID_ARGUMENT"
+    _drain(autonaApp)
+    assert provider.calls == []
+
+
+def test_stopping_refuses_the_crew_board_by_itself(autonaApp, headless):
+    # The route refuses it first. Headless every board counts as built, so with
+    # no check of its own this would write the followed set on the crew board.
+    from src.core.StateManager import StateManager
+
+    before = copy.deepcopy(StateManager.Get("score.3"))
+    with pytest.raises(ValueError):
+        WebOps.stop_follow(3)
+    autonaApp.settle()
+    assert StateManager.Get("score.3") == before
+
+
+def test_with_no_tournament_nothing_is_followed(
+        autonaApp, headless, provider, monkeypatch):
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core.SetFollowService import SetFollowService
+
+    _, client, _ = headless
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        None)
+    assert _v1(client, "/api/v1/scoreboards/1:follow",
+               _STATION_ROW) == (409, "NOT_READY")
+    assert SetFollowService(1).Station() is None
+    # Stopping needs no tournament: the board may still follow the one unloaded.
+    assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)

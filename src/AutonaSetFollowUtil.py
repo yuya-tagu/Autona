@@ -24,7 +24,10 @@ What is left here is the transport, registered once by bootstrap_core() as
   to follow `SetFollowService.PollGeneration(board)` (`Poll`), on the main
   thread whichever thread asked; its tick is `SetFollowService(n).Tick()`.
   The app's `aboutToQuit` stops them all, for good: a tick or a fetch
-  answering while the app winds down starts nothing more;
+  answering while the app winds down starts nothing more. The time to the
+  next tick is kept next to them, for any thread (`RemainingMs`), from when a
+  poll is asked for: a request's thread tells of it before the main thread
+  starts its timer;
 - `followChanged(board)`: what the board follows changed, for the board's
   timer row (connected with a bound method, so it dies with the board).
 
@@ -32,6 +35,7 @@ QtCore only: the headless shell has it too, so headless set loads fetch and
 follow under its QCoreApplication.
 """
 import threading
+import time
 
 from qtpy.QtCore import QCoreApplication, QObject, QTimer, Qt, Signal, Slot
 from loguru import logger
@@ -86,6 +90,10 @@ class AutonaSetFollowUtil:
         # for}. Main thread only.
         self._timers = {}
         self._started = {}
+        # {board: time.monotonic() of its next tick}. Written where the clock
+        # is asked to follow (Poll) and on the main thread, read on any
+        # (RemainingMs).
+        self._nextTicks = {}
         self._quitting = False
         app = QCoreApplication.instance()
         if app is not None:
@@ -157,8 +165,14 @@ class AutonaSetFollowUtil:
         generation, stopped for none."""
         if in_gui_thread():
             self._FollowPoll(board)
-        else:
-            self.signals.onMain.emit(lambda: self._FollowPoll(board))
+            return
+        # Noted here: whoever is told of the poll next (a headless load runs
+        # on a request's thread) reads its time before the queued call runs.
+        # That call starts the timer, or clears this if the poll has gone.
+        if SetFollowService.PollGeneration(board) is not None \
+                and not self._quitting:
+            self._NoteNextTick(board)
+        self.signals.onMain.emit(lambda: self._FollowPoll(board))
 
     def _FollowPoll(self, board):
         generation = SetFollowService.PollGeneration(board)
@@ -167,15 +181,17 @@ class AutonaSetFollowUtil:
             if timer is not None:
                 timer.stop()
             self._started.pop(board, None)
+            self._nextTicks.pop(board, None)
             return
         if timer is None:
             timer = QTimer()
-            timer.timeout.connect(lambda: self._OnTick(board))
+            timer.timeout.connect(lambda: self._Ticked(board))
             self._timers[board] = timer
         if self._started.get(board) == generation and timer.isActive():
             return
         timer.start(SetFollowService.POLL_MS)
         self._started[board] = generation
+        self._NoteNextTick(board)
 
     def _StopClocks(self):
         # The app is quitting: no tick after this one.
@@ -183,6 +199,15 @@ class AutonaSetFollowUtil:
         for timer in self._timers.values():
             timer.stop()
         self._started.clear()
+        self._nextTicks.clear()
+
+    def _NoteNextTick(self, board):
+        self._nextTicks[board] = (
+            time.monotonic() + SetFollowService.POLL_MS / 1000)
+
+    def _Ticked(self, board):
+        self._NoteNextTick(board)
+        self._OnTick(board)
 
     @staticmethod
     def _OnTick(board):
@@ -192,10 +217,15 @@ class AutonaSetFollowUtil:
             logger.exception(f"score.{board}: polling the set failed")
 
     def RemainingMs(self, board):
-        timer = self._timers.get(board)
-        if timer is None or not timer.isActive():
+        """Milliseconds to the board's next tick, or None when it has no
+        clock running. Any thread: v1's read is a request thread's, and
+        QTimer.remainingTime() asks the calling thread's event dispatcher,
+        which crashes the process on a thread with none (measured, ADR-005
+        S4v)."""
+        nextTick = self._nextTicks.get(board)
+        if nextTick is None:
             return None
-        return timer.remainingTime()
+        return max(0, int((nextTick - time.monotonic()) * 1000))
 
     def FollowChanged(self, board):
         self.signals.followChanged.emit(int(board))

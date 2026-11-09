@@ -223,6 +223,15 @@ def bootstrap_core():
             later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
             roundNames=lambda: AutonaLocaleHelper.matchNames)
 
+    # ORDER CONSTRAINT: the set selection's lists (ADR-005 S4v), the same way:
+    # after the provider whose jobs fetch them, before anything can ask for a
+    # fetch or load a tournament (the provider's Load / UnloadTournament call
+    # its Forget).
+    from .core.SetSelectionService import SetSelectionService
+    if SetSelectionService.instance is None:
+        SetSelectionService.instance = SetSelectionService(
+            fetcher=AutonaTournamentDataProvider.instance.RunWithProvider)
+
     # ORDER CONSTRAINT: the statistics' fetcher (ADR-005 S3e-5) hands its
     # requests to the provider above and connects to its stream queue
     # signal, so it is built after it; and before anything that can ask for

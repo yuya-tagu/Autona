@@ -194,7 +194,7 @@
 
 ## 4. WebSocket 購読（既存を流用）
 
-- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 `scoreboard_pending` の 1 つだけ（§5.15。ADR-005 S4u。公開値の配信は変わらない）。
+- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 2 つだけ: `scoreboard_pending`（§5.15。ADR-005 S4u）と `scoreboard_follow`（§5.17。ADR-005 S4v）。公開値の配信は変わらない。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
   - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
@@ -210,6 +210,7 @@
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
 | `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 は `CrewBattleService` が持つフラグ（state には無い）。ADR-005 S3e-2 からヘッドレス起動でもボード 3 の `swapped` を返す（S3c〜S3e-1 のヘッドレスでは、クルーウィジェットが無いのでキーなしだった）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
 | `GET /api/v1/scoreboards/{n}/pending` | 反映前のライブ値・保留中か・未反映があるか（§5.15。反映前の編集を含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_pending` | — |
+| `GET /api/v1/scoreboards/{n}/follow` | そのボードが追従している配信台・配信と取り直しの時計（§5.17。2026-11-09 追加） | `get_follow`（`core/SetFollowService.Snapshot`） | — |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
@@ -228,6 +229,9 @@
 | `GET /api/v1/stream/channels` | 保存した配信チャンネル（§5.5。2026-10-31 追加） | `get_stream_channels`（`core/StreamService.Channels`） | — |
 | `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
 | `GET /api/v1/tournament` | 大会の URL と、設定 / 解除の進み具合（§5.7。2026-11-01 追加） | `get_tournament`（state の `tournamentInfo.url` / `load`。`core/TournamentService.Load`） | — |
+| `GET /api/v1/tournament/phases` | セット選択のフェーズの行（§5.18。2026-11-09 追加） | `get_tournament_phases`（`core/SetSelectionService.Result`） | — |
+| `GET /api/v1/tournament/sets` | セット選択のセットの行（§5.18。2026-11-09 追加。読みは取得しない。同期で取得する `GET /sets` とは別） | `get_tournament_sets`（同上） | — |
+| `GET /api/v1/tournament/stations` | 配信台と配信の行（§5.18。2026-11-09 追加） | `get_tournament_stations`（同上） | — |
 | `GET /api/v1/analysis` | この大会の試合一覧の行（§5.9。2026-11-04 追加） | `get_analysis`（`core/AnalysisService.Result`） | — |
 | `GET /api/v1/stats/overlays` | 統計情報表示設定の種類の表・選択中・Companion マクロのリクエスト（§5.10。2026-11-05 追加） | `get_stats_overlays`（`core/StatsOverlays`） | — |
 | `GET /api/v1/players` | 選手 DB の全件の行（§5.11。本名を含むので **LAN からはトークン必須**。2026-11-05 追加） | `get_players`（`core/PlayerDirectory.Registered`） | — |
@@ -533,6 +537,66 @@ Board のページが OBS の「ローカルファイル」に指定させるフ
 ### 5.16 `GET /api/v1/stages`（2026-11-09 追加・ADR-005 S4u）
 
 読み込み中のゲームのステージ。トラッカーの行のコンボと同じ順（空行を除く）の `[{ "text": "表示名", "en_name": "...", "codename": "...", "path": "...", ... }]`。`en_name` が `PATCH .../stages/{game}` に渡す識別子（§6.36）。`text` のほかは行の値をそのまま（キー順は Qt のモデルが出していた順。`core/GameAssetCatalog.StagesPayload`）。ゲームが無ければ `[]`。
+
+### 5.17 `GET /api/v1/scoreboards/{n}/follow`（2026-11-09 追加・ADR-005 S4v）
+
+そのボードが今何を追従しているか（Qt のスコアボードのタイマー行が出すもの）。`{n}` は 1 / 2（board 3 はセットを読まないので `400`）。読みではボードを構築しない（構築されていないボードは何も追従していない）。
+
+```json
+{ "ok": true, "revision": 12, "data": {
+  "station": { "type": "station", "id": 77, "identifier": 4 },
+  "poll": { "mode": "station", "identifier": 4, "secondsLeft": 3 },
+  "pollingEnabled": true,
+  "setId": "1001"
+} }
+```
+
+- `station`: 追従している配信台（`"station"`）か配信（`"stream"`）。無ければ `null`。**取り直しが止まっていても残る**（デスクトップの既定は `general.disable_autoupdate` が true で、追従は 1 回の照会になる）。手でセットを読んでも残る。**大会を変えても残る**（既存の動作で、`poll` も同じ。タイマー行も止まらない）。`:stop-follow` で消える
+- `poll`: 取り直しの時計が動いている間だけ。`mode` は `set` / `stream` / `station`（タイマー行のラベル）、`identifier` は配信台の番号か配信のチャンネル（`set` は `null`）、`secondsLeft` は次の取り直しまでの整数秒（タイマー行のカウントダウン）。取り直しは 5 秒ごと。止まっていれば `poll` は `null`
+- `pollingEnabled`: セットを読むと取り直しが始まるか
+- `setId`: 最後に読んだセット（文字列。無ければ `null`）。追従の読みで、未反映の編集の値ではない。**反映前の読み込みも見える**（読み始めた時点で変わる。出るのは id だけで、中身は `/pending` と反映の後の公開値）
+- READ（§2.2）。legacy `/scoreboard{n}-get-set` が同じものを READ で答えている。**state には入らない**（追従は state の外の core の持ち物で、`program_state.json` のキーを増やさない）
+
+**通知 `scoreboard_follow`（Socket.IO）**: `station` か `poll` が変わると `{ "board": 1 }` を送る。**値は運ばない**ので、通知のあとに始めた `GET .../follow` の答えを使う。接続の直後は通知が来ないので最初に 1 回読む。
+
+- `program_state_update` と同じ flusher が、同じ送信の delta の後に送る。開いている窓があればそれに合流し、無ければすぐ出る。1 回の送信に 1 ボード 1 通で、delta の間隔は動かさない
+- 送信先は全接続（読みが READ で、通知はボードの番号だけ）
+- `secondsLeft` が減るだけでは通知しない（クライアントが数える）。配信台・配信の追従は取り直しのたびに時計が張り直されるので、取り直しごとに通知が来る。`set` の取り直しでは来ない
+- 変わらなければ出さない: 止めるものが無い `:stop-follow`、同じ配信台の選び直しで忘れるセットも無いとき
+- `setId` の変化では基本的に出さない（ボード自身の書き込みの `program_state_update` / `scoreboard_pending` で分かる）。**ボードに書かずに `null` に戻るときだけ出す**: 読み込みの失敗（ボードは消えたままで、同じセットをもう一度読める）と、`:follow` の読み直しで前のセットを忘れたとき
+
+### 5.18 `GET /api/v1/tournament/phases`・`/sets`・`/stations`（2026-11-09 追加・ADR-005 S4v）
+
+Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧。core の `SetSelectionService` がメモリに持つ最新の結果で、行は state に入らない（§5.9 と同じ）。**読みは取得しない**（窓を開くだけではネットワークに行かない）。取得は §7.3 の `:refresh`。
+
+```json
+{ "ok": true, "revision": 12, "data": {
+  "status": "done",
+  "url": "https://www.start.gg/tournament/.../event/...",
+  "fetchedAt": 1794214800,
+  "query": { "phase": 11, "finished": false },
+  "rows": [
+    { "id": 1001, "stream": "channel", "station": "3", "phase": "Pools", "pool": "A",
+      "round": "Winners Final",
+      "p1": { "name": "ALPHA", "members": ["ALPHA"] },
+      "p2": { "name": "Team", "members": ["BRAVO", "CHARLIE"] } }
+  ]
+} }
+```
+
+- `phases` の行: `{ "id", "name", "groups": [{ "id", "name", "bracketType" }] }`。`stations` の行: `{ "type": "station" | "stream", "id", "identifier", "stream" }`（`identifier` は配信台の番号か配信のチャンネル。`stream` は配信台に紐付く配信で、無ければ `""`）。`query` は `sets` だけで、**正規化した値**を返す: `phase` はフェーズの行の id（`"11"` で頼んでも `11`）か `"all"`（フェーズが分からないときの `null` も `"all"`）
+- `status` は state の `set_selection.{phases|sets|stations}.status`（`idle` / `running` / `done` / `error`）のいま読んだ値。`status`・`url`・`fetchedAt`・`rows` は同じ時点の組（§5.9 と同じ 1 回の保持の中で読む）
+- 進み具合は state の `set_selection.{phases,sets,stations} = {status, error, done, total, failed, revision}` で WS に届く。`revision` は取得を受け付けるたび・止めるたび・大会を変えるたびに進む。読み直すのは `revision` / `status` が変わったときでよい
+  - `done` / `total` は `sets` のページ数（`total` 0 は「まだ分からない」= 窓の不定のバー）。`failed` は `done` の答えから欠けているもの（取れなかったページと読めなかったセットの数。窓は表示しないが、ページは出してよい）
+  - `error` は `fetch_failed` だけ。**行が空の `done` は「一覧に何も無い」、`error` は「取得の失敗」**（窓はどちらも空の表になる）
+- `rows` は最後に `done` で終わった取得の行（`error` は前の行を残す。`:cancel` の後も残る）。**今読み込んでいる大会の結果のときだけ**返す。それ以外は `url: ""`・`fetchedAt: null`・`rows: []`（`sets` は `query: null` も）
+- 大会を変えると全リストが次の revision の `idle` になる。`phases` / `stations` の行は捨てる（窓も読み込みのたび・開くたびに取り直す）。**`sets` の行は URL と組で残り、同じ大会を読み直すと戻る**（窓の、全ボード共有のキャッシュと同じ。`query` と `fetchedAt` も戻るので「フェーズとチェックボックスの復元」と「N件（HH:MM 取得）」が描ける）。枠は 1 つで、別の大会の取得が終わると入れ替わる
+- 行は決まったキーだけで、実名・SNS・キャラは含まない（だから READ。§2.2）。ゲームを変えても行は変わらない
+- ページが窓と同じ表示にするための規則（窓の処理はどれもクライアント側の仕事）:
+  - 列は Stream / Station / Phase / Pool / Match（`round`）/ Player 1 / Player 2。Player の文字は `p1.name`・`p2.name`。**`p1.members` が 2 人以上なら両方のチームに「 (A, B)」を足す**（判定は `p1` だけを見る。カッコは翻訳の punctuation）
+  - 「完了したペアのみ」は `p1.name` と `p2.name` がどちらも空でない行
+  - 検索は大文字小文字を無視した部分一致で、全列と `id`。列の並べ替えは文字列で
+  - 選択なしの OK / Enter は先頭の行を読む（行が無ければ何も読まない）。読むのは §7.1 の `:load-set`、走っている取得は `sets:cancel` で止める（窓は選択時に止める）
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -903,12 +967,18 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/scoreboards/{n}:load-set` | （confirm 推奨） | `load_set` | #38 |
 | `POST /api/v1/scoreboards/{n}:pull-stream` | （confirm 推奨） | `pull_stream_set` | #24 |
 | `POST /api/v1/scoreboards/{n}:pull-user` | （confirm 推奨） | `pull_user_set` | #25 |
+| `POST /api/v1/scoreboards/{n}:follow` | （confirm 推奨） | `follow_station`（`SetFollowService.FollowStation`。2026-11-09 追加・ADR-005 S4v） | — |
+| `POST /api/v1/scoreboards/{n}:stop-follow` | なし | `stop_follow`（`SetFollowService.StopFollowing(forget=True)`。2026-11-09 追加・ADR-005 S4v） | — |
 | `POST /api/v1/tournament` | 実行中フラグ | `set_tournament`（`TournamentService.SetTournament` / `ClearTournament`） | #44 |
 | `DELETE /api/v1/tournament` | なし（すぐ終わる。後から来た設定 / 解除が勝つ） | `clear_tournament`（`TournamentService.ClearTournament`。2026-11-01 追加・ADR-005 S4g） | — |
 | `POST /api/v1/tournament/media/fetch` | 実行中フラグ | `fetch_tournament_media`（`TournamentMediaService.FetchMedia`。2026-11-01 追加・ADR-005 S4g） | — |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
 | `POST /api/v1/analysis:refresh` | 実行中フラグ | `refresh_analysis`（`AnalysisService.Refresh`。2026-11-04 追加・ADR-005 S4k） | — |
+| `POST /api/v1/tournament/phases:refresh` | 実行中フラグ | `refresh_tournament_phases`（`SetSelectionService.RefreshPhases`。2026-11-09 追加・ADR-005 S4v） | — |
+| `POST /api/v1/tournament/stations:refresh` | 実行中フラグ | `refresh_tournament_stations`（`SetSelectionService.RefreshStations`。2026-11-09 追加・ADR-005 S4v） | — |
+| `POST /api/v1/tournament/sets:refresh` | 同じ要求の実行中フラグ（別の要求は置き換える） | `refresh_tournament_sets`（`SetSelectionService.RefreshSets`。2026-11-09 追加・ADR-005 S4v） | — |
+| `POST /api/v1/tournament/sets:cancel` | なし | `cancel_tournament_sets`（`SetSelectionService.CancelSets`。2026-11-09 追加・ADR-005 S4v） | — |
 | `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
 | `POST /api/v1/thumbnail:reset` | confirm | `reset_thumbnail_settings`（`ThumbnailService.Reset`。2026-11-07 追加・ADR-005 S4o） | — |
 | `POST /api/v1/thumbnail:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_thumbnail`（`ThumbnailService.Preview`。2026-11-07 追加・ADR-005 S4o） | — |
@@ -932,6 +1002,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   次の `:pull-stream`・同じセットの `:load-set` で読み直す。チャンネル未設定は
   **409 `NOT_READY`**（`twitch_username is not set`。legacy / Socket.IO は何もせず `OK`）。それまではボードのシグナルを出すだけで、
   何も接続されておらず何も起きなかった（ADR-005 S3e 論点 3）
+- `:follow`（ADR-005 S4v）: body は §5.18 の `stations` の行（`{ "type": "station", "id": 77, "identifier": 4 }` か `{ "type": "stream", "identifier": "channel" }`。ほかのキーは無視するので行をそのまま送れる）。配信台ウィンドウで行を選ぶのと同じ `SetFollowService.FollowStation`: その配信台 / 配信の今のセットを照会し、ボードが何を出していても読み直す。取得は provider のワーカーで非同期で、応答は受付時点の `revision`。ポーリングが有効ならそのあと取り直しが続く。何を追従しているかは §5.17
+  - 今のセットが無いときはボードをそのままにする。照会の失敗も同じ扱いで区別しない（窓も表示しない）。一覧とは照合しない（`:pull-stream` と同じく、言われたものを追従する）
+  - `{n}` は 1 / 2。デスクトップは未構築のボードを構築してから書く（`:load-set` と同じ）。held 対象
+  - エラー: `400 INVALID_ARGUMENT`（`type` が `station` / `stream` でない・`station` に `id` が無い・`stream` の `identifier` が空でない文字列でない・`id` / `identifier` が正の整数でも空でない文字列でもない（bool も不可）・board 3）、`409 NOT_READY`（`no tournament loaded`。何も書かない）
+- `:stop-follow`（ADR-005 S4v）: body なし。タイマー行のキャンセルボタンと同じ `StopFollowing(forget=True)`: 取り直しの時計を止め、配信台と追従中のセットを忘れる（同じセットをもう一度読める）。**ボードに出ている選手とスコアは残す**。大会が無くても答える（`200`）。board 3 は `400`
+  - 止めるものが無ければ何も書かない（書くのは変わるキーだけなので、反映ボタンを点けない。`scoreboard_follow` も出ない）。追従中のセットを忘れる書き込みは held 対象
+  - デスクトップの未構築のボードは**構築せず、何も書かずに `200`**（読み込みが必ず構築するので、未構築のボードに止める追従は無い。構築するとシードで state が消え、ポーリングの設定も切れる）
 
 ### 7.2 確認フラグ（C-2 / D7）
 - **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`）は body に **`"confirm": true` 必須（MUST）**。
@@ -983,6 +1060,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   failed, revision}`（error は `no_phases` / `fetch_failed`）で観測し、行は §5.9 で読む。実行中は `409 CONFLICT`（キューしない。
   実行中フラグは core の 1 つ）。大会が読み込まれていなければ `409 NOT_READY`（何も書かない）。旧 Qt パネルのボタンと同じ操作で、
   どちらの起動形態でも動く
+- `POST /api/v1/tournament/phases:refresh` / `/tournament/stations:refresh`（2026-11-09 追加・ADR-005 S4v）: body なし。読み込み中の大会のフェーズ / 配信台と配信を start.gg から取る（core の `SetSelectionService`。provider のワーカーのジョブ 1 本）。受付は `202`（`data: {"accepted": true, "operation": "tournament.phases.refresh" | "tournament.stations.refresh"}`）で、そのリストの次の revision の `running` は **202 の前に** state に出る。進み具合と結果は state の `set_selection.{phases|stations}`、行は §5.18。実行中は `409 CONFLICT`（キューしない）。大会を変えて止まった取得の要求がまだ答えず、そのリストのジョブが 2 本残っている間も `409 CONFLICT`。大会が読み込まれていなければ `409 NOT_READY`（何も書かない）
+- `POST /api/v1/tournament/sets:refresh`（2026-11-09 追加・ADR-005 S4v）: `{ "phase": 11 | "11" | "all" | null, "finished": false }`。セット選択の「最新の試合情報を取得」。`finished` は「完了したセットを表示」で、省略は false。受付は上と同じ `202`（`"operation": "tournament.sets.refresh"`）で、`done` / `total` にページが進む。窓と同じ条件で start.gg に頼む（`phase` のグループに絞る。`"all"` は全フェーズのグループ）
+  - **フェーズが分かっているとき**（§5.18 の `phases` に行があるとき）: `phase` が `null` か省略なら `400 INVALID_ARGUMENT`（窓の「フェーズを選択してください」。大きな大会で全ページを取らないため。全部なら `"all"`）。その大会に無い id は `404 NOT_FOUND`
+  - **フェーズが分からないとき**（未取得か、フェーズの無い大会）: 大会全体を取る。`null` と `"all"` は同じ要求で、id は `404 NOT_FOUND`
+  - **同じ `phase` / `finished` の取得が実行中なら `409 CONFLICT`**（`"11"` と `11` も同じ要求）。別の要求は走っている取得を止めて置き換える（窓のコンボとチェックボックスと同じ）。止めた取得の答えは捨てる。ただし止めた取得（置き換え・`:cancel`・大会の変更のどれでも）の要求がまだ答えず、ジョブが 2 本残っている間は、どの要求も `409 CONFLICT`（ジョブレーンは全ての大会の取得で共有）。大会が読み込まれていなければ `409 NOT_READY`
+  - `phase` が正の整数でも空でない文字列でもない（bool も不可）・`finished` が bool でないときは `400 INVALID_ARGUMENT`
+- `POST /api/v1/tournament/sets:cancel`（2026-11-09 追加・ADR-005 S4v）: body なし。走っている `sets` の取得を止める（窓がセットを選んだときと同じ）。`200` で `data: {"cancelled": bool}`（走っていたか）。止めたら `set_selection.sets` が次の revision の `idle` になり、行は残る。止めた取得の要求が答えるまでジョブは残り、`:refresh` の 2 本に数える
 - `POST /api/v1/stream/thumbnail`: body なし。保存済みのオプション（§5.6）で配信サムネを 1 枚作る `TaskExecutor` のジョブを積み、
   `202`（`data: {"accepted": true, "operation": "stream.thumbnail"}`）。実行中フラグは core（`StreamService`）の 1 つで、
   実行中は `409 CONFLICT`。進捗と結果は state の `stream.thumbnail = {status: running → done | error, path, error, revision}`

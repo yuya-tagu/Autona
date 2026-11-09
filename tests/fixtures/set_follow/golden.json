@@ -7415,11 +7415,6 @@
       "set",
       "score.1.set_id",
       "null"
-     ],
-     [
-      "set",
-      "score.1.station",
-      "null"
      ]
     ],
     "deltas": [],

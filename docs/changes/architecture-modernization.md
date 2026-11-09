@@ -6290,3 +6290,113 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `tests/test_webserver_delta_debounce.py`（通知の間隔・まとめ方・送信時の `dirty`・delta の後・delta の間隔を動かさない・lock の中から呼べる・停止時に送る）、`tests/test_web_access.py`（信頼済みの接続だけに届く）、`tests/test_bootstrap_split.py`（実サーバーの `__init__` の結線）、`tests/test_scoreboard_operations.py`（実ロードの後の通知の最後が `dirty: false`）、`tests/test_set_follow.py`（`:load-set` の追従）、`tests/test_web_operations.py`（`:reset-all` が両シェルで同じ state）
   - レビュー対応で足した pin: 未構築のボードへの `GET /pending` と `PATCH stages`、held のボードの `players/{p}:clear` と `players:swap`、`teamsSwapped` のときの状態側のチーム、ステージの解決と行の書き込みの間にロードが入らないこと、ボードと `revision` が 1 回の読みであること、Flask スレッドからの書き込みの描画（ボタンと `scoreDisplay1/2`）、GUI スレッドの反映の False が lock の中でカードを作る経路（`test_no_thread_is_waited_on_inside_a_held_cycle`。元の手順はこの経路を踏んでいなかったので手順を足した）、カードの `toBeVisible`（`hidden: true` で消えた可視性の検査）。`_cycles` は `SaveState` 単位で数え、`_oneCycle` は 1 サイクルだけを通す
 - **検証**（レビュー対応後）: `python scripts/run_tests_parallel.py` 4883 passed / 2 skipped（RESULT: OK）／jest 全量 986 passed（34 suites）。`web/src` のコードは変えていないので `npm run build` と `npm run test:e2e` はレビュー対応の前の結果（通過・66 passed）のまま。実機確認はメインセッションが実施した（反映ボタン・通知・他オリジンの 403。レビュー対応の前）
+
+#### S4v セット選択と追従の v1（2026-11-09）
+
+上の順序の 4 の後半（Crew は S4w）。React の SCORE ページが Qt のセット選択ウィンドウと配信台ウィンドウでできることをすべて v1 で行えるようにした。読みと操作は Qt の無い core にあり、ヘッドレスでも動く。**Qt のウィンドウは変えていない**。React のページはまだ無い。
+
+- **機能の洗い出しと v1 の対応**（コードで確認。機能は 1 つも無くしていない）
+
+  **セット選択ウィンドウ（`AutonaSelectSetWindow`）**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 列 | Stream / Station / Phase / Pool / Match / Player 1 / Player 2 + 隠し列の set id | `GET /tournament/sets` の行 `stream` / `station` / `phase` / `pool` / `round` / `p1` / `p2` / `id` |
+  | ダブルスの表記 | `entrants[0]` が 2 人以上のとき両チームに「 (A, B)」（カッコは翻訳の punctuation） | ページ。`p1.members` の人数で判定し、両方に足す（§5.18。比較テストあり） |
+  | 検索 | 大文字小文字を無視した部分一致で全列。隠し列の id にも当たる | ページ（`rows` に対して。`id` も対象） |
+  | 列の並べ替え | ヘッダのクリック。文字列。全ボード共有でプロセス終了まで記憶 | ページ（記憶の範囲はページが決める） |
+  | フェーズの選択 | 「Select a phase...」（取得しない）/「All phases」/ 各フェーズ。フェーズが無ければ行ごと隠し、取得ボタンは残る | `GET /tournament/phases`。`POST /tournament/sets:refresh` の `phase`（`null` は 400 / `"all"` / id）。無ければ `rows` が空で、`null` のまま大会全体を取る |
+  | フェーズの出所 | 大会の読み込みで 1 回、解除で空、窓を開いたとき空なら頼み直す | `POST /tournament/phases:refresh`（`status` が `idle` なら頼む）。大会の変更で捨てる |
+  | 同じフェーズの選び直し | `activated` で取り直す | もう一度 `:refresh`（実行中で同じ要求は 409） |
+  | 取得 | ボタンを押したとき。取得中は無効。**開くだけではネットワークに行かない** | `POST /tournament/sets:refresh`。`GET` は取得しない。無効にする判断は `status` |
+  | 完了したセットを表示 | クエリの一部（`getFinished`）。切り替えで取り直す | `:refresh` の `finished` |
+  | 完了したペアのみ | `p1_name` か `p2_name` が空の行を除く | ページ（`p1.name` / `p2.name`。比較テストあり） |
+  | キャッシュ | 全ボード共有・プロセス寿命・大会 URL に紐付き 1 枠（`{url, showFinished, phaseIndex, sets, fetchedAt}`） | サービスの `_results[SETS]`（1 枠・URL で照合）。`query` と `fetchedAt` が読める |
+  | 状態の文言 | 「{n}件（{HH:MM} 取得）」/「最新の試合情報を取得を押すと…」/「大会が選択されていません」/「Select a phase to load sets」 | ページ（`rows`・`fetchedAt`・`status`、409 `NOT_READY`、400） |
+  | 進み具合 | 最初のページまで不定 → 確定のバー「Fetching sets...(n/t)」。取得中も行は残る。別の open で取得中なら進み具合を残す | state の `set_selection.sets` の `done` / `total`（`total` 0 は不定）。行は終わるまで残る。state なので再接続しても読める |
+  | 既定の選択 | フェーズが 1 つなら既定で選ぶ。キャッシュがあればそのフェーズ | ページ（`rows.length === 1`、`query.phase`） |
+  | 取得の重複 | 新しい要求が前の取得を止める | 別の要求は置き換え（`MAX_SET_JOBS`）。同じ要求は 409 |
+  | 選択 | ダブルクリック / OK / Enter。**選択なしなら先頭の行**。空なら何も読まない。`auto_update="set"` | `POST /scoreboards/{n}:load-set`（既存。同じ追従は S4u で確認）とページ |
+  | 選択時に取得を止める | 走っている取得を止める | `POST /tournament/sets:cancel` |
+  | 配信台へ | 「Track sets from a stream or station」 | ページの遷移と `GET /tournament/stations` |
+  | 失敗の表示 | **なし**（全滅も一部失敗も窓では区別しない） | `error: "fetch_failed"`、`done` + `failed > 0`（v1 では区別できる。表示はページが決める） |
+  | 入口 | `btSelectSet`（大会なしで非表示）・legacy `open_sets`（シェル操作のまま）・モーダル | ページ（`tournamentInfo.url` の有無） |
+
+  **配信台ウィンドウ（`AutonaSelectStationWindow`）**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 列 | Type / Id / Stream / Identifier | `GET /tournament/stations` の行 `type` / `id` / `stream` / `identifier` |
+  | 検索・並べ替え | 全列の検索、ヘッダの並べ替え（記憶なし） | ページ |
+  | 取得 | 開くたびに空にして取り直す（キャッシュなし）。進み具合・空・失敗の表示なし | `POST /tournament/stations:refresh`、state の `set_selection.stations` |
+  | 大会なし | 無言で空 | 409 `NOT_READY` |
+  | 選択 | ダブルクリック / OK / Enter。選択なしは先頭の行。`FollowStation(行)` | `POST /scoreboards/{n}:follow`（行をそのまま送れる）とページ |
+
+  **スコアボードのタイマー行**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 追従のラベル | Auto update (Set) / (Stream [x]) / (Station [x]) | `GET /scoreboards/{n}/follow` の `poll.mode` / `poll.identifier`、通知 `scoreboard_follow` |
+  | 次の更新まで | 秒のカウントダウン | `poll.secondsLeft` |
+  | キャンセル | `StopFollowing(forget=True)` | `POST /scoreboards/{n}:stop-follow` |
+
+- **完了内容**
+  - **`core/SetSelectionService.py`（新規）**: 3 つのリスト（`phases` / `sets` / `stations`）の取得。進み具合は state の `set_selection.{kind}`（`AnalysisService` と同じ 6 キー。`KEY_CATALOG`・`SeedPanelState` で idle 戻し）、行はメモリ（URL と組）
+  - **provider の `strict`**: `GetMatches(strict=, failed_pages=)` と `GetStations(strict=)`。`strict` でないときの動作は変えていない（窓と `GET /sets` はこちら）
+  - **`SetFollowService`**: `Snapshot()` と、ボード番号を運ぶ `changes`（`ObserverChannel`）。**この 2 つで golden の書き込み・delta・provider 呼び出しは変わっていない**（golden が変わったのはレビューの修正 3 の 1 行だけ）
+  - **`AutonaSetFollowUtil.RemainingMs`** を `QTimer.remainingTime()` から `time.monotonic` の計算に変えた（判断 3）
+  - **v1**: `GET /scoreboards/{n}/follow`、`GET /tournament/phases`・`/sets`・`/stations`、`POST /scoreboards/{n}:follow`・`:stop-follow`、`POST /tournament/phases:refresh`・`/stations:refresh`・`/sets:refresh`・`/sets:cancel`。読み 4 本（READ）と書き 6 本（WRITE）で、v1 は 70 of 106。`AutonaApiInfoWindow`・`external-control-api.md`（§4・§5.17・§5.18・§7.1・§7.3）・`state-and-webserver.md` を更新した
+  - **通知 `scoreboard_follow`**: `{board}`。値を運ばない。`SetFollowService.changes` → `StateManagerBridge.follow_changed` → `WebServer.on_follow_change`（`_delta_cond` の中で積むだけ）→ delta の flusher が全接続へ。Bridge を通すのは `scoreboard_pending` と同じ届き方にするためで、Qt 側がチャンネルを直接購読しない規則（`tests/test_signal_lifetime.py`）にも沿う
+- **判断**
+  1. **追従の情報は state に入れない**: 指示の方向（`analysis` と同じ形）に対する例外。`tests/test_set_follow_flow.py` の golden が全ての `Set` / `Unset`・delta を照合しており、書くと壊れる（テストは緩めない）。`program_state.json` のキーも増え、`secondsLeft` は書くたびに delta が出る。だから読み取り `GET .../follow` + 値を運ばない通知（S4u の `scoreboard_pending` と同じ考え方）にした。`fetcher.FollowChanged` を増やさず core のチャンネルを足したのは Qt を変えないため。`setId` の変化はボード自身の書き込みの通知で分かるので通知しない（ボードに書かずに `null` に戻るときだけ通知する。レビューの修正 5）
+  2. **`GET .../follow` と 3 つの一覧は READ**: `/pending` が PLAYERDB になった理由（操作者が未公開の編集・実名）に当たらない。`setId` は legacy の `/scoreboard{n}-get-set` が既に READ で答えている。一覧の行はホワイトリストでタグとエントラント名だけ（start.gg が誰にでも見せるもの）で、実名・SNS・キャラは出ない（`SetRow` が parse の答えから拾わない。実 parse を通したテストで pin）。読みは取得しないので READ から start.gg へのトラフィックは増えない
+  3. **`QTimer.remainingTime()` は別スレッドから呼べない**: v1 の読みは Flask のスレッドから来る。小さなスクリプトで実測すると、メインスレッドでは値を返し、別スレッドではプロセスが落ちる（exit 139。Qt はそのスレッドのイベントディスパッチャを見る）。Qt のタイマー行も `SecondsLeft` を読むが、値の計算が変わるだけ（`_NoteNextTick` は `timer.start` と `timeout` で更新する）。pin は subprocess で（壊れるとテストのプロセスごと落ちるため）
+  4. **Qt のウィンドウは寄せなかった**: 動作を変えないことを優先。アダプタのフェーズ取得はプール候補（`_UpdatePoolCandidates`）も使い、窓のフェーズはシグナルで届く。両入口の一致は比較テストで確かめる: 窓の `_FetchSets` と `RefreshSets` の `GetMatches` の引数が同じ（All phases・特定のフェーズ・finished・フェーズなし）、窓の表の文字列と、行からページの規則で組んだ文字列が同じ（シングルス・ダブルス・片側が未定・`station` なし・完了したペア。配信台も）。ページは窓を消すまで同じ規則を持つことになる
+  5. **`sets` の行は URL 一致なら `Forget` の後も戻す**: 窓のキャッシュ（全ボード共有・プロセス寿命・大会 URL に紐付く）を無くさないため。`phases` / `stations` は窓も取り直すので捨てる。一覧の URL の照合は読みの側（`_get_selection_list`）
+  6. **ゲームの変更では捨てない**: 行にゲームに依存する値が無い（ホワイトリストで pin）
+  7. **実行中の扱い**: `phases` / `stations` は `BUSY`。`sets` は同じ要求は `BUSY`、別の要求は置き換え（窓の動作）。ただし止めた取得が答えるまでジョブは残るので、**何が止めたかによらず**、そのリストのジョブが `MAX_SET_JOBS`（2）本残っていたら `BUSY`（S3f-2 判断 7: ジョブレーン 4 本は全ての大会の取得で共有）。最初は走っている取得があるときだけ見ていて、`sets:cancel` を挟むと効かなかった（レビューの修正 1）
+  8. **フェーズ未選択は `PHASE_REQUIRED`（400）**: 窓の「Select a phase」と同じく、大きな大会で全ページを取らせない。`"all"` が明示の全部。フェーズが無い大会は窓もコンボを隠して全体を取るので、`null` で全体
+  9. **`:follow` は一覧と照合しない**: `:pull-stream` と同じ。id が古くても照会が空を返すだけでボードは動かない
+  10. **`:follow` は `_set_board`（`Prepare` でデスクトップは構築する）、`:stop-follow` と `GET .../follow` は構築しない**: 未構築のボードへの書き込みは構築時のシードで消える（S2c）。読みには失うものが無く、読み込みが必ず構築するので未構築のボードに止める追従も無い（`:stop-follow` は `BoardHost.Built` を見て何も書かずに 200。ヘッドレスは常に Built。最初は `:stop-follow` も構築していて、シードで state を消し `TurnOffPolling` も走った。レビューの修正 2）。board 3 は `require_board_12` で 400
+  11. **追従の照会の失敗と空は区別しない**: `StationSets` / `StreamSet` の fake は golden がシグネチャを固定していて、Qt にも表示が無い。ページから見ると「`station` はあるがセットが変わらない」になる（残るリスク）
+- **レビューと実機確認の修正**
+  1. **`MAX_SET_JOBS` が `sets:cancel` を挟むと効かない**: `_Start` が `_alive` を見るのは走っている取得があるときだけで、`refresh → cancel` を繰り返すとジョブレーンを埋められた。リストごとに、走っている取得の有無によらず見る。`Forget` を挟む繰り返しも同じように抑える（`phases` / `stations` も、大会の変更を挟めば 2 本まで）
+  2. **未構築ボードへの `:stop-follow` が構築してシードで消す**: 判断 10 のとおり
+  3. **何も追従していないときの `:stop-follow` が反映ボタンを点ける**（実機で再現: `dirty` が true、live と公開値に差が無い）: `ClearSetTracking` を `SetIfChanged` に。**golden の差分は `following` の "cancel again" の `writes` から `score.1.station` の `null` が消えたことだけ**（その前の web の load-set が書いた値がもう `null` で、`deltas` は元から空）。他のステップは変わっていない（"cancel" は 3 キーとも値が変わるので同じ）。`changes.notify` は `station` か `poll` が変わったときだけ（実機で 2 回目の `:stop-follow` にも `scoreboard_follow` が出ていた）。`_StartPoll` は世代が新しくなるたびに出す（`secondsLeft` が張り直されるので `poll` の変化として扱う）。`fetcher.FollowChanged` は変えていない
+  4. **`RefreshSets` が前の大会のグループ id で新しい大会を取りうる**: `_results[PHASES]` の読みと `_Start` の間に `Forget` が入ると、誤った `done` + 空になる。**照合ではなく、フェーズの解決と取得を current にするのを `_Start` の 1 回の lock の中で行う**（`plan`）。間が無いので「合わないとき」が無く、`Forget` は解決の前に来る（解決は変更後の答え）か、取得を捨てる（古い答えは publish されない）かのどちらか
+  5. **`_LoadFailed` で `setId` が通知なしに `null` へ変わる**: 通知する。同じ形の `_Follow` の読み直し（`reload=True` で前のセットを忘れる）も、忘れたセットがあれば通知する
+  6. **ヘッドレスの `poll` に `secondsLeft: null` が残りうる**: コードで確認して実在（別スレッドの `Poll` は `onMain` へ queued で、`_nextTicks` はメインスレッドが書くのに、`changes.notify` はその前に出る）。別スレッドの `Poll` がその場で次の tick の時刻を記録する
+  7. **同じ意味の要求が別の要求として扱われる**: `RefreshSets` で正規化し、`query` も正規化した値を返す（`"11"` は `11`、フェーズ不明の `null` は `"all"`）
+  8. **基底クラスの署名**: `TournamentDataProvider.GetMatches(strict=, failed_pages=)` / `GetStations(strict=)`
+  9. **テスト**: `:follow` と tick が反映まで公開値に出ないこと（`GetCommitted`・ボードのルート・`program_state`・delta。live は見ない）、`_Publish` の `revision is None`（ジョブが `_Announce` より先に終わる経路を決定的に）、フィクスチャの差し替えまで戻していた `monkeypatch.undo()` の解消、`test_an_answer_while_the_app_quits_is_dropped` の強化（前の行と進み具合が変わらないこと）
+  10. **文書**: `Design.md` の `set_selection` の節、§5.17 の追記（大会を変えても `station` / `poll` は残る・`setId` は反映前の読み込みも見える・取り直しは 5 秒ごと）、`AutonaApiInfoWindow` で `:stop-follow` と `sets:cancel` を「confirm 推奨」の節から外す
+- **直さないと決めたもの**（レビューで指摘があり、判断して残した）
+  - 壊れた JSON が `{}` として通る: v1 全体の既存動作
+  - `phases` / `stations` の取得が止められない間の 409: start.gg の要求に止める口が無い。読み手は待って読み直す
+  - 一覧だけで合計 4 本使えること（`sets` 2 本 + `phases` 1 本 + `stations` 1 本。大会の変更を挟むと各 2 本で 6 本まで）: ジョブレーンはキューするので失敗にはならない
+  - ページごとの公開の重さ: `analysis` と同じ形（1 ページ 1 回の `Set` で、dict を丸ごと書く）
+  - `out/set_selection/*` の追加: `analysis` と同じ扱い
+- **報告（直していない。既存の問題・候補）**
+  - **`GET /api/v1/sets/{setId}` は READ で実名と Twitter を返す**: `StartGGSetQuery.txt` が `user { name authorizations(types: [TWITTER]) location ... }` を取り、`_parse_participant_new_api` が `name` / `twitter` に入れ、`get_match` がそのまま返す（legacy と Socket.IO の `get_match` も同じ）。S4v の前から。PLAYERDB への変更は外部の呼び手に影響するので、ここでは変えていない。一覧の `SetRow` には出ない
+  - **`GET /sets` は同期で全ページを取り、parse の結果をそのまま返す**（`SetsQuery` は実名も SNS も取らないので露出の問題は無い。進み具合が無く、失敗と空を区別できない）。残している。ページは `GET /tournament/sets` を使う
+  - `AutonaSelectSetWindow._RenderSets` は parse 失敗の `{}` で `s["round_name"]` が `KeyError`（既存。v1 では `SetRow` が None を返し `failed` に数える）
+  - `GetMatches` は 1 ページ目が初回失敗してリトライで答えると残りのページを取らない（既存。`strict` は欠けとして数える。窓の動作は不変）
+  - `tests/test_startgg_parse.py` は単独で回すと収集で落ちる（`from ..core.StreamService import` のスタブが無い。HEAD から。全量では先に読まれたモジュールが解決する）
+  - 無くす候補として挙げるだけ（残している）: 選択なしの OK / Enter で先頭の行を読む動作（誤操作でボードが消える）
+- **次の段への申し送り**
+  - React の SCORE ページのセット選択は、`set_selection.*` の `revision` / `status` を見て `GET /tournament/*` を読み直す。接続の直後に `GET .../follow` を 1 回読み、`scoreboard_follow` の後に読み直す。ページの表示規則は `external-control-api.md` §5.18
+  - 窓を消すとき: 比較テスト（`tests/test_set_selection.py` の末尾）の窓の側を消す。`GetMatches` / `GetStations` の非 strict の呼び手は `GET /sets` と legacy が残る
+  - Crew の v1（S4w）、Widget 依存の除去（順序 5）はこの段に入れていない
+- **テスト**
+  - 新規 `tests/test_set_selection.py`: 一度に 1 取得と置き換え・`MAX_SET_JOBS`、フェーズの解決（未選択・`all`・未知・フェーズなし）、失敗と空の区別、一部失敗（`failed`）、ページの進み具合、`:cancel`、大会の変更で古い答えを捨てること、一覧の URL の照合、アダプタの `Forget`、`_Abandon`・`_Stopping`・publish の再試行、ロックの規律、行のホワイトリスト、ルート・分類・LAN のトークン、窓との一致（`GetMatches` の引数と、表の文字列をページの規則で組んだ文字列。配信台も）
+  - `tests/test_set_follow.py` の節「following through v1」: 窓との一致（station / stream、キャンセルボタン）、ヘッドレスの往復、`set` / `station` / `stream` の 3 要素の分離、秒数と tick、`changes` の通知、`:follow` と tick が反映まで公開値に出ないこと（`GetCommitted`・ルート・`program_state`・delta）、止めるものが無いときに反映ボタンを点けないこと、別スレッドの `Poll` の `secondsLeft`、構築の有無（`:follow` は構築する・`:stop-follow` と `GET` はしない）、拒否する入力 24 パターン（bool・0・負・小数・空・配列・型違い。一覧の行は `stream` を含めてそのまま送れる）、board 3 / 4 / 0 は 400、大会なしは 409。Flask のスレッドからの読みは subprocess で（`_CLOCK_SCRIPT` の `readByRequest`。`QTimer.remainingTime()` に戻すとプロセスが落ちる）
+  - `tests/test_startgg_parse.py`: `GetMatches` の strict（欠けの数え方を含む）、`GetStations` の strict、実 parse → `SetRow` に実名・SNS・地域が出ないこと
+  - `tests/test_webserver_delta_debounce.py`（`scoreboard_follow` のまとめ方・delta の後・lock の中から呼べる）、`tests/test_web_access.py`（読める接続に届く）、`tests/test_bootstrap_split.py`（実サーバーの `__init__` の結線）
+  - 台帳: `tests/test_webserver_routes.py`（10 本。WRITE 70 of 106）、`tests/test_web_operations.py`、`tests/test_import_side_effects.py`、`tests/test_state_schema.py`
+  - **pin が落ちることの確認**: 実装を 1 か所ずつ壊す約 85 件を回した。残ったのは `GetMatches` の `if strict:` を `if True:` にする 1 件だけで、これは等価（非 strict で 1 ページ目が無いと、例外が同じ関数の `except` で空の答えに戻る。違うのはログだけ）。この確認で flusher の実ループの送信順が未 pin と分かり（テストのドライバーだけが同じ順を通っていた）、`test_a_follow_notice_follows_the_deltas_from_the_flusher` を足した。レビューの修正の分は別に 26 通り壊して回した。残ったのは `stop_follow` 自身の board 3 の拒否（ルートが先に 400 にする）だけで、`test_stopping_refuses_the_crew_board_by_itself` を足した
+- **検証**: `python scripts/run_tests_parallel.py` 5062 passed / 2 skipped（RESULT: OK、exit 0）。変更に関わるファイルの直列実行も通した（15 ファイル 974 passed）。`web/` は変えていないので build と jest は回していない。直列の全量は未実施
+- **実機確認（メインセッション）**
+  - **修正の前に確認済み**（偽の provider で隔離アプリ。`requests` を start.gg の URL についてだけ差し替えるので `_QueryRequests` の再試行と parse はそのまま通る）: v1 の取得・進み具合・失敗と空と一部失敗・`:cancel`・置き換え・大会の変更・他オリジンの拒否、追従が反映まで公開値に出ないこと、tick での移動と照会の失敗でボードが残ること、Flask のスレッドからの `GET .../follow` で落ちないこと、Qt の窓（フェーズ・取得・完了セット・並べ替え・配信台・追従・タイマー行・キャンセル）
+  - **修正の後に確認すること（未実施）**: 何も追従していない `:stop-follow` で反映ボタンが点かず `scoreboard_follow` も出ないこと、未構築のボードへの `:stop-follow` がボードを作らないこと、`refresh → cancel` の繰り返しが 3 本目で 409 になること、`"11"` と `11`、`null` と `"all"` が同じ要求になること、ヘッドレスの `poll` の `secondsLeft`
+  - **本物の大会で確認済み**（`tests/live/test_startgg_live.py` T7、終了済みの 1 大会）: strict の一覧が plain と同じ id の集合（1 ページ・31 セット・欠けたページ 0）、フェーズのグループ id での絞り込み、全セットが `SetRow` を通りキーがホワイトリストのとおりで twitter・実名が行に出ないこと、`GetStations(strict=True)` がリスト（この大会は 0 件）で `StationRows` を通ること
+  - **未確認**: 本物の start.gg の複数ページ（この大会は 1 ページ）と、複数フェーズの絞り込み（この大会は 1 フェーズ・1 グループ。絞り込みで件数が減ることは確かめていない）、配信台が 1 件以上ある大会

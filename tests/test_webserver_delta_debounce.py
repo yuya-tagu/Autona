@@ -945,3 +945,160 @@ def test_a_notice_goes_out_with_the_state_lock_held(flusher, monkeypatch):
     assert _pendingOnly(flusher) == [
         (PENDING, {"board": 1, "dirty": False}),
         (PENDING, {"board": 1, "dirty": True})]
+
+
+# ── what a board follows' notice (ADR-005 S4v) ───────────────────────────
+# SetFollowService.changes of a board become one `scoreboard_follow` {board}:
+# no value (the client reads GET /scoreboards/{n}/follow), to everyone (that GET
+# is a READ), after the deltas of its flush, from the flusher.
+
+FOLLOW = "scoreboard_follow"
+
+
+@pytest.fixture
+def follows(monkeypatch, debounce):
+    monkeypatch.setattr(WebServer, "_follow_notices", set())
+    return debounce
+
+
+def _followedAt(debounce, ms, board=1):
+    debounce._fireUntil(_at(ms))
+    debounce.clock.now = _at(ms)
+    WebServer.on_follow_change(board)
+
+
+def test_a_follow_notice_goes_out_at_once_to_everyone(follows):
+    _followedAt(follows, 0)
+    follows._fireUntil(None)
+    assert follows.sent == [(0, FOLLOW, [{"board": 1}], {})]
+
+
+def test_a_flush_tells_each_board_once(follows):
+    _followedAt(follows, 0, 2)
+    WebServer.on_follow_change(1)
+    WebServer.on_follow_change(2)
+    follows._fireUntil(None)
+    assert follows.sent == [(0, FOLLOW, [{"board": 1}], {}),
+                            (0, FOLLOW, [{"board": 2}], {})]
+
+
+def test_a_follow_notice_goes_after_the_deltas_of_its_flush(follows):
+    follows.arrive(0, _changes(1))
+    follows.arrive(10, _changes(2))
+    _followedAt(follows, 20)
+    follows.arrive(30, _changes(3))
+    follows._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in follows.sent] == [
+        (0, "program_state_update"), (60, "program_state_update"), (60, FOLLOW)]
+    assert follows.sent[1][2] == [_payload(2, 3, _rows(2, 1) + _rows(3, 1))]
+
+
+def test_the_deltas_schedule_does_not_follow_a_follow_notice(follows):
+    _followedAt(follows, 0)
+    follows.arrive(10, _changes(1))
+    follows._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in follows.sent] == [
+        (0, FOLLOW), (10, "program_state_update")]
+
+
+def test_a_failed_follow_notice_takes_nothing_with_it(follows):
+    follows.fail = RuntimeError("the socket said no")
+    _followedAt(follows, 0, 1)
+    WebServer.on_follow_change(2)
+    follows._fireUntil(None)
+    follows.fail = None
+    _followedAt(follows, 100)
+    follows._fireUntil(None)
+    assert follows.sent == [(100, FOLLOW, [{"board": 1}], {})]
+
+
+def test_without_a_flusher_a_follow_notice_is_not_kept(follows, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    WebServer.on_follow_change(1)
+    assert WebServer._follow_notices == set()
+    assert follows.driver.due() is None
+
+
+def _followOnly(sends):
+    with sends.cond:
+        return [(event, payload) for _t, _at, event, payload in sends.sent
+                if event == FOLLOW]
+
+
+def test_the_flusher_sends_a_follow_notice_on_its_own_thread(flusher):
+    flusher.start()
+    thread = WebServer._delta_thread
+
+    WebServer.on_follow_change(1)
+
+    assert flusher.waitFor(1)
+    assert _followOnly(flusher) == [(FOLLOW, {"board": 1})]
+    assert flusher.threads() == [thread]
+    assert flusher.stop() is True
+
+
+def test_a_follow_notice_follows_the_deltas_from_the_flusher(
+        flusher, monkeypatch):
+    """The flusher's own take and send, not the test driver's: a page that
+    reads the board after the notice has the deltas of that flush by then."""
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    flusher.start()
+    WebServer.on_program_state_update(_changes(1))      # the leading edge
+    assert flusher.waitFor(1)
+    WebServer.on_program_state_update(_changes(2, 150))  # a 200 ms window
+    WebServer.on_follow_change(1)                        # in it
+    assert flusher.stop() is True
+
+    assert [event for _t, _at, event, _p in flusher.sent] == [
+        "program_state_update", "program_state_update", FOLLOW]
+
+
+def test_stop_sends_the_follow_notices_still_open(flusher, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    flusher.start()
+    WebServer.on_held_change("score.1")    # at once
+    assert flusher.waitFor(1)
+
+    WebServer.on_held_change("score.2")    # a 50 ms window, on a stopped clock
+    WebServer.on_follow_change(1)          # in it
+    assert flusher.stop() is True
+
+    assert _followOnly(flusher) == [(FOLLOW, {"board": 1})]
+
+    # After stop(): nothing is kept, and a new start() starts clean.
+    WebServer.on_follow_change(1)
+    assert WebServer._follow_notices == set()
+
+
+def test_a_new_start_starts_with_no_follow_notice(flusher, monkeypatch):
+    flusher.start()
+    assert flusher.stop() is True
+    monkeypatch.setattr(WebServer, "_follow_notices", {2})
+
+    flusher.start()
+    WebServer.on_held_change("score.1")
+    assert flusher.waitFor(1)
+    assert flusher.stop() is True
+    assert _followOnly(flusher) == []
+
+
+def test_a_follow_notice_goes_out_with_the_state_lock_held(flusher):
+    # agent-pitfalls #17: told where the board's operations run, which may hold
+    # StateManager.lock. Only queued there: it is the flusher that sends it.
+    from src.core.StateManager import StateManager
+
+    flusher.start()
+    arrived = []
+
+    def writer():
+        with StateManager.lock:
+            WebServer.on_follow_change(1)
+            arrived.append(flusher.waitFor(1, timeout=30))
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive()
+    assert arrived == [True]
+    assert flusher.stop() is True

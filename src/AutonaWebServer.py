@@ -928,6 +928,9 @@ class WebServer:
             WebServer.on_held_change)
         StateManagerBridge.instance.held_dirty_changed.connect(
             WebServer.on_held_change)
+        # And for what a board follows (S4v).
+        StateManagerBridge.instance.follow_changed.connect(
+            WebServer.on_follow_change)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
@@ -994,6 +997,9 @@ class WebServer:
     # the `scoreboard_pending` notices that flush sends (on_held_change).
     _held_notices = set()
     _held_notice_ts = 0.0        # _delta_clock() of the last notices sent
+    # The boards whose follow changed since the last flush: its
+    # `scoreboard_follow` notices (on_follow_change).
+    _follow_notices = set()
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -1027,10 +1033,12 @@ class WebServer:
             payload = WebServer._take_pending_deltas()
             after = WebServer._take_after_deltas()
             notices = WebServer._take_held_notices()
+            follows = WebServer._take_follow_notices()
         if payload is not None:
             WebServer._send_deltas(payload)
         WebServer._run_after_deltas(after)
         WebServer._send_held_notices(notices)
+        WebServer._send_follow_notices(follows)
 
     @staticmethod
     def _after_pending_deltas(fn):
@@ -1214,6 +1222,45 @@ class WebServer:
             except Exception:
                 logger.error(traceback.format_exc())
 
+    # ── What a board follows' notice (ADR-005 S4v) ───────────────────
+    # `scoreboard_follow` {board}: the station or the poll of a board changed
+    # (SetFollowService.changes); GET /api/v1/scoreboards/{n}/follow reads them.
+    # As the notice above: no value, so nothing to keep in step and nothing to
+    # reorder, sent by the one flusher after the batch's deltas. To everyone: the
+    # route is READ. Not debounced: an operator's action or a load starts it,
+    # one at a time, and a board's several in one flush are one notice.
+
+    @staticmethod
+    def on_follow_change(board):
+        """StateManagerBridge.follow_changed. Queues and notifies only: it can
+        be told where the board's operations run, possibly under
+        StateManager.lock (agent-pitfalls #17)."""
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
+            WebServer._follow_notices.add(int(board))
+            if WebServer._delta_due is None:
+                WebServer._delta_due = WebServer._delta_clock()
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _take_follow_notices():
+        """The boards to tell about in this flush. Called holding
+        _delta_cond."""
+        notices = WebServer._follow_notices
+        if notices:
+            WebServer._follow_notices = set()
+        return notices
+
+    @staticmethod
+    def _send_follow_notices(boards):
+        # Outside _delta_cond, like a send.
+        for board in sorted(boards):
+            try:
+                WebServer.ws_emit('scoreboard_follow', {'board': board})
+            except Exception:
+                logger.error(traceback.format_exc())
+
     @staticmethod
     def _run_delta_flusher(generation):
         """The flusher thread: send each batch when it is due, and the one
@@ -1250,10 +1297,12 @@ class WebServer:
                 payload = WebServer._take_pending_deltas()
                 after = WebServer._take_after_deltas()
                 notices = WebServer._take_held_notices()
+                follows = WebServer._take_follow_notices()
             if payload is not None:
                 WebServer._send_deltas(payload)
             WebServer._run_after_deltas(after)
             WebServer._send_held_notices(notices)
+            WebServer._send_follow_notices(follows)
             if not running:
                 return
 
@@ -1273,6 +1322,7 @@ class WebServer:
             WebServer._delta_pending_revision = -1
             WebServer._delta_pending_first_revision = -1
             WebServer._held_notices = set()
+            WebServer._follow_notices = set()
             WebServer._delta_due = (
                 WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()

@@ -29,10 +29,10 @@ class TournamentDataProvider(QObject):
     def GetMatch(self, setId, progress_callback=None, cancel_event=None):
         pass
 
-    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
+    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None, strict=False, failed_pages=None):
         pass
 
-    def GetStations(self, progress_callback=None, cancel_event=None):
+    def GetStations(self, progress_callback=None, cancel_event=None, strict=False):
         pass
 
     def GetStreamQueue(self, streamName=None, progress_callback=None, cancel_event=None):

@@ -132,6 +132,8 @@ def test_bootstrap_core_steps_and_their_order():
         # The match list (ADR-005 S4j): its fetch is the provider's jobs, as
         # the Top 8 import's; before anything can ask for one.
         "AnalysisService()",
+        # The set selection's lists (ADR-005 S4v), the same way.
+        "SetSelectionService()",
         "StatsService.fetcher = AutonaStatsUtil()",
         # The set follow (ADR-005 S3e-7): after the provider and the
         # statistics' stream queue relay; the board host is read when used.
@@ -392,6 +394,7 @@ from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.PlayerDB import PlayerDB
+from src.core.SetSelectionService import SetSelectionService
 from src.core.StateManager import StateManager
 from src.core.StreamService import StreamService
 from src.core.TaskExecutor import TaskExecutor
@@ -429,6 +432,7 @@ report({
         "TaskExecutor": TaskExecutor.instance is not None,
         "StreamService": StreamService.instance is not None,
         "AnalysisService": AnalysisService.instance is not None,
+        "SetSelectionService": SetSelectionService.instance is not None,
     },
     "stream_title": [title_before_loop, stream_title],
     "state_subscribers": state_subscribers(),
@@ -688,8 +692,11 @@ WebServer.ws_emit = staticmethod(
     lambda event, *args, **kwargs: notices.append([event, args[0]]))
 StateManagerBridge.instance.held_dirty_changed.emit("score.1", False)
 StateManagerBridge.instance.held_state_updated.emit("score.2")
+# What a board follows (ADR-005 S4v): core's channel, from __init__ too.
+from src.core.SetFollowService import SetFollowService
+SetFollowService.changes.notify(1)
 deadline = time.monotonic() + 10
-while len(notices) < 2 and time.monotonic() < deadline:
+while len(notices) < 3 and time.monotonic() < deadline:
     time.sleep(0.02)
 WebServer.ws_emit = real_emit
 
@@ -750,7 +757,8 @@ def test_web_server_thread_serves_stops_and_reports_a_failed_start(
     assert result["flusher_while_serving"] == ["AutonaWebServerDeltas"]
     assert result["notices"] == [
         ["scoreboard_pending", {"board": 1, "dirty": False}],
-        ["scoreboard_pending", {"board": 2, "dirty": False}]]
+        ["scoreboard_pending", {"board": 2, "dirty": False}],
+        ["scoreboard_follow", {"board": 1}]]
     # stop() joins the delta flusher too: no AutonaWebServer* thread is
     # left below (server_threads).
     assert result["stopped"] is True

@@ -108,6 +108,8 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
+from .core import SetSelectionService as selection
+from .core.SetSelectionService import SetSelectionService
 from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core import ResultService as results
@@ -207,6 +209,11 @@ class BoardHost:
     def Prepare(self, board):
         """Make board `board` ready to be written (desktop: build it)."""
 
+    def Built(self, board):
+        """Whether board `board` is there without Prepare: always, with no
+        widget to build."""
+        return True
+
     def Widget(self, board):
         """Board `board`'s widget, for the operations only it answers."""
         raise NotAvailable()
@@ -301,6 +308,9 @@ class DesktopBoardHost(BoardHost):
 
     def Prepare(self, board):
         self._Board(board)
+
+    def Built(self, board):
+        return self.manager.scoreboards.get(board) is not None
 
     def Widget(self, board):
         return self._Board(board)
@@ -1085,6 +1095,83 @@ def get_analysis():
     if not result["url"] or result["url"] != current:
         result = {"url": "", "rows": []}
     return {"status": status, "url": result["url"], "rows": result["rows"]}
+
+
+# ── the set selection's lists (ADR-005 S4v) ──────────────────────────────
+# core's SetSelectionService, in both shells, on the calling thread. Their
+# progress is the state's `set_selection`; the rows are only read here. Which
+# set is then loaded and which station followed is below ("set loading and
+# following").
+
+def refresh_tournament_phases():
+    """Start fetching the tournament's phases (selection.STARTED / BUSY /
+    NO_TOURNAMENT, also when the shell built no service). /api/v1 maps it to
+    202 / 409."""
+    service = SetSelectionService.instance
+    if service is None:
+        return selection.NO_TOURNAMENT
+    return service.RefreshPhases()
+
+
+def refresh_tournament_stations():
+    """Start fetching the tournament's stations and streams, likewise."""
+    service = SetSelectionService.instance
+    if service is None:
+        return selection.NO_TOURNAMENT
+    return service.RefreshStations()
+
+
+def refresh_tournament_sets(phase=None, finished=False):
+    """Start fetching the set list of `phase`: those, or PHASE_REQUIRED /
+    UNKNOWN_PHASE (SetSelectionService.RefreshSets)."""
+    service = SetSelectionService.instance
+    if service is None:
+        return selection.NO_TOURNAMENT
+    return service.RefreshSets(phase, finished)
+
+
+def cancel_tournament_sets():
+    """Stop the set list's fetch: whether one was running."""
+    service = SetSelectionService.instance
+    return service is not None and service.CancelSets()
+
+
+def _get_selection_list(kind):
+    """List `kind`'s status and rows -- the rows, with when they were fetched,
+    only when they are of the tournament loaded now. Read in one hold of
+    StateManager.lock, as get_analysis' are: the service changes its rows and
+    publishes their status in one hold of it."""
+    service = SetSelectionService.instance
+    with StateManager.lock:
+        result = service.Result(kind) if service is not None else None
+        provider = AutonaTournamentDataProvider.instance.GetProvider()
+        current = (getattr(provider, "url", None)
+                   if provider is not None else None)
+        status = SetSelectionService.Progress(kind)["status"]
+    if result is None or not result["url"] or result["url"] != current:
+        return {"status": status, "url": "", "fetchedAt": None, "rows": [],
+                "query": None}
+    return {"status": status, "url": result["url"],
+            "fetchedAt": result["fetchedAt"], "rows": result["rows"],
+            "query": result["query"]}
+
+
+def get_tournament_phases():
+    answer = _get_selection_list(selection.PHASES)
+    del answer["query"]
+    return answer
+
+
+def get_tournament_stations():
+    answer = _get_selection_list(selection.STATIONS)
+    del answer["query"]
+    return answer
+
+
+def get_tournament_sets():
+    """As the others, and the `query` the rows were asked for: the window's
+    cache brings back its phase and its checkbox with its rows."""
+    return _get_selection_list(selection.SETS)
 
 
 # ── Top 8 (ADR-005 S4i) ──────────────────────────────────────────────────
@@ -2064,6 +2151,41 @@ def pull_stream_set(scoreboard):
         return "OK"
 
     return host.Run(run)
+
+
+def get_follow(scoreboard):
+    """What board 1/2 follows (SetFollowService.Snapshot). On the calling
+    thread, and builds nothing: a board never built follows nothing."""
+    board = _board(scoreboard)
+    if board not in AutonaActions.SCORE_BOARDS:
+        raise ValueError(f"scoreboard {scoreboard} does not load sets")
+    return SetFollowService(board).Snapshot()
+
+
+def follow_station(scoreboard, station):
+    """Follow a station or a stream on board 1/2, as the station window does
+    (SetFollowService.FollowStation: its current set is looked up and loaded,
+    whatever the board shows). `station` is what a row of the list names:
+    {"type", "id", "identifier"}."""
+    host = boardHost
+    host.Run(lambda: _set_board(host, scoreboard).FollowStation(station))
+
+
+def stop_follow(scoreboard):
+    """The board's timer row's cancel button: stop polling, forget the station
+    and the followed set (SetFollowService.StopFollowing(forget=True)). A board
+    the desktop has not built follows nothing -- a load builds it -- and is not
+    built for this: building seeds it and turns the polling setting off."""
+    board = _board(scoreboard)
+    if board not in AutonaActions.SCORE_BOARDS:
+        raise ValueError(f"scoreboard {scoreboard} does not load sets")
+    host = boardHost
+
+    def run():
+        if host.Built(board):
+            SetFollowService(board).StopFollowing(forget=True)
+
+    host.Run(run)
 
 
 # ═══════════════════════════════════════════════════════════════════════

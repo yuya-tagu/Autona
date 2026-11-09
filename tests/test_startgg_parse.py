@@ -1357,6 +1357,81 @@ class TestParseSetsToRounds:
 
 
 # ===========================================================================
+# Tests: what the set selection takes from the provider
+# ===========================================================================
+
+class TestSetSelectionAnswers:
+    """What the set selection's lists (core's SetSelectionService, ADR-005 S4v)
+    take from the real provider: the strict stations, and the rows of what the
+    real parse answers."""
+
+    def _provider(self, answer):
+        provider = _make_provider()
+        provider.url = "https://www.start.gg/tournament/t/event/e"
+        provider.QueryRequests = answer
+        return provider
+
+    @pytest.mark.parametrize("answer", [
+        {}, {"data": {}}, {"data": None}, {"data": {"event": None}}])
+    def test_no_answer_on_the_stations_raises_when_strict(self, answer):
+        provider = self._provider(lambda *a, **kw: answer)
+        with pytest.raises(LookupError):
+            provider.GetStations(strict=True)
+        assert provider.GetStations() == []    # what the station window has
+
+    def test_what_a_stations_request_raised_is_raised_when_strict(self):
+        def fake(*a, **kw):
+            raise ConnectionError("probe")
+
+        provider = self._provider(fake)
+        with pytest.raises(ConnectionError):
+            provider.GetStations(strict=True)
+        assert provider.GetStations() == []
+
+    @pytest.mark.parametrize("event", [
+        {"stations": {"nodes": []}, "tournament": {"streamQueue": []}},
+        {"stations": None, "tournament": None}])
+    def test_an_event_with_no_stations_answers_empty_when_strict(self, event):
+        provider = self._provider(lambda *a, **kw: {"data": {"event": event}})
+        assert provider.GetStations(strict=True) == []
+
+    def test_the_rows_of_the_stations(self):
+        from src.core.SetSelectionService import StationRows
+
+        provider = self._provider(lambda *a, **kw: {"data": {"event": {
+            "stations": {"nodes": [
+                {"id": 77, "number": 4, "streamId": 5},
+                {"id": 78, "number": 5, "streamId": None}]},
+            "tournament": {"streamQueue": [
+                {"stream": {"id": 5, "streamName": "channel"}}]}}}})
+        answer = provider.GetStations(strict=True)
+        assert answer == provider.GetStations()
+        assert StationRows(answer) == [
+            {"type": "station", "id": 77, "identifier": 4, "stream": "channel"},
+            {"type": "station", "id": 78, "identifier": 5, "stream": ""},
+            {"type": "stream", "id": 5, "identifier": "channel", "stream": ""}]
+
+    def test_a_row_of_a_parsed_set_has_nothing_of_the_person(self):
+        """The parse puts the real name, the handle and the location in what
+        it answers; the list, a READ, is the bracket's public names."""
+        from src.core.SetSelectionService import SetRow
+
+        parsed = _make_provider().ParseMatchDataNewApi(_new_api_set_basic())
+        side = parsed["entrants"][0][0]
+        assert side["name"] == "Gavin" and side["twitter"] == "tweaborned"
+
+        row = SetRow(parsed)
+        assert row["id"] == 12345
+        assert row["round"] == parsed["round_name"]
+        assert row["phase"] == "Top 8" and row["pool"] == parsed["tournament_pool"]
+        assert row["stream"] == "btssmash" and row["station"] == "1"
+        assert row["p1"] == {"name": parsed["p1_name"], "members": ["Tweek"]}
+        text = json.dumps(row)
+        for private in ("Gavin", "tweaborned", "Hoboken", "He/Him", "tweek.png"):
+            assert private not in text
+
+
+# ===========================================================================
 # Tests: _split_gf_reset (pure, in-place grand-final reset split)
 # ===========================================================================
 
@@ -1482,6 +1557,95 @@ class TestGetMatchesPagination:
         provider = self._provider()
         provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
         assert provider.GetMatches() == []
+
+    # -- strict: the set selection's fetch tells them apart (ADR-005 S4v) ----
+
+    def test_strict_raises_when_the_first_page_never_answers(self):
+        provider = self._provider()
+        provider.QueryRequests = lambda *a, **kw: {}
+        with pytest.raises(LookupError):
+            provider.GetMatches(strict=True)
+        assert provider.GetMatches() == []    # what the set window has
+
+    def test_strict_raises_what_a_request_raised(self):
+        provider = self._provider()
+
+        def fake(*a, **kw):
+            raise ConnectionError("probe")
+
+        provider.QueryRequests = fake
+        with pytest.raises(ConnectionError):
+            provider.GetMatches(strict=True)
+        assert provider.GetMatches() == []
+
+    def test_strict_answers_an_event_with_no_sets(self):
+        provider = self._provider()
+        provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
+        missing = []
+        assert provider.GetMatches(
+            strict=True, failed_pages=missing.append) == []
+        assert missing == []
+
+    def test_strict_counts_the_pages_that_stayed_failed(self):
+        provider = self._provider()
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            if page in (2, 4):
+                return {}
+            return self._paged_response([page], 4)
+
+        provider.QueryRequests = fake
+        missing = []
+        result = provider.GetMatches(strict=True, failed_pages=missing.append)
+        assert [s["id"] for s in result] == [1, 3]
+        assert missing == [2]
+
+    def test_strict_counts_nothing_for_a_page_its_retry_brought_back(self):
+        provider = self._provider()
+        calls = []
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            calls.append(page)
+            if page == 2 and calls.count(2) == 1:
+                return {}
+            return self._paged_response([page], 2)
+
+        provider.QueryRequests = fake
+        missing = []
+        result = provider.GetMatches(strict=True, failed_pages=missing.append)
+        assert sorted(s["id"] for s in result) == [1, 2]
+        assert missing == []
+
+    def test_strict_counts_the_pages_a_late_first_page_did_not_ask_for(self):
+        """The first page answering only on its retry says how many there are
+        too late to ask for them: its sets are all there is, and the rest are
+        missing. The set window has the same list, and says nothing of it."""
+        provider = self._provider()
+
+        def fake(calls):
+            def answer(*a, **kw):
+                page = kw["jsonParams"]["variables"]["page"]
+                calls.append(page)
+                if len(calls) == 1:
+                    return {}
+                return self._paged_response([page], 3)
+            return answer
+
+        calls = []
+        provider.QueryRequests = fake(calls)
+        missing = []
+        result = provider.GetMatches(strict=True, failed_pages=missing.append)
+        assert [s["id"] for s in result] == [1]
+        assert missing == [2]
+        assert calls == [1, 1]
+
+        # Not strict: the same list.
+        calls = []
+        provider.QueryRequests = fake(calls)
+        assert [s["id"] for s in provider.GetMatches()] == [1]
+        assert calls == [1, 1]
 
     def test_the_pages_after_the_first_go_to_the_fan_out_lane(self):
         """Page 1 on the calling thread (it says how many there are), the

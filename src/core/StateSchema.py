@@ -611,6 +611,53 @@ def ReadAnalysis() -> dict:
     return read
 
 
+# ── set_selection (ADR-005 S4v) ──────────────────────────────────────────
+#
+# How each of the lists the set selection fetches is going, one dict per
+# list written whole by core/SetSelectionService.py: its status (idle /
+# running / done / error), the error's code, the pages done of the total (0
+# while their number is not known), what could not be fetched or read
+# (`failed`) and a revision that every fetch (and every drop) advances. The
+# rows stay in the service's memory, as the match list's do (see above).
+SET_SELECTION_KINDS = ("phases", "sets", "stations")
+SET_SELECTION_FETCH_KEYS = ANALYSIS_KEYS
+
+
+def DefaultSetSelectionFetch(revision=0) -> dict:
+    """One list's progress with no fetch in progress, at `revision` (a fresh
+    dict on every call)."""
+    return {"status": "idle", "error": "", "done": 0, "total": 0,
+            "failed": 0, "revision": revision}
+
+
+def ReadSetSelectionFetch(kind) -> dict:
+    """List `kind`'s progress as published, a fresh dict: anything missing or
+    malformed read as idle's (no error, nothing fetched, revision 0)."""
+    value = StateManager.Get(f"{SET_SELECTION_ROOT}.{kind}", None)
+    if not isinstance(value, dict):
+        value = {}
+    read = DefaultSetSelectionFetch()
+    status, error = value.get("status"), value.get("error")
+    if isinstance(status, str):
+        read["status"] = status
+    if isinstance(error, str):
+        read["error"] = error
+    for key in ("done", "total", "failed", "revision"):
+        number = value.get(key)
+        if isinstance(number, int) and not isinstance(number, bool) \
+                and number >= 0:
+            read[key] = number
+    return read
+
+
+def IdleSetSelection(advance=0) -> dict:
+    """All of `set_selection` with no fetch in progress, each list's revision
+    `advance` past the one published."""
+    return {kind: DefaultSetSelectionFetch(
+                ReadSetSelectionFetch(kind)["revision"] + advance)
+            for kind in SET_SELECTION_KINDS}
+
+
 # The match thumbnail's newest render (ADR-005 S4o), one dict written whole by
 # core/ThumbnailService.py, shaped like stream.thumbnail: status idle | running
 # | done | error, `path` the last thumbnail saved (out/thumbnails/*.png, what a
@@ -733,6 +780,7 @@ RESULT_STANDINGS_ROOT = "result_standings"
 RESULT_LAYOUT_ROOT = "result_layout"
 PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
 ANALYSIS_ROOT = "analysis"
+SET_SELECTION_ROOT = "set_selection"
 THUMBNAIL_ROOT = "thumbnail"
 
 KEY_CATALOG = {
@@ -756,6 +804,9 @@ KEY_CATALOG = {
     TOURNAMENT_INFO_ROOT: TOURNAMENT_INFO_KEYS,
     STREAM_ROOT: STREAM_KEYS,
     ANALYSIS_ROOT: ANALYSIS_KEYS,
+    SET_SELECTION_ROOT: tuple(
+        f"{kind}.{key}" for kind in SET_SELECTION_KINDS
+        for key in SET_SELECTION_FETCH_KEYS),
     THUMBNAIL_ROOT: THUMBNAIL_KEYS,
     COLORS_ROOT: tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
     DISPLAY_OPTIONS_ROOT: DISPLAY_OPTION_KEYS,
@@ -1029,6 +1080,9 @@ def SeedPanelState():
     # the previous session's revision, which the next fetch goes on from.
     StateManager.SetIfChanged(
         ANALYSIS_ROOT, DefaultAnalysis(ReadAnalysis()["revision"]))
+
+    # The set selection's lists (ADR-005 S4v), the same way.
+    StateManager.SetIfChanged(SET_SELECTION_ROOT, IdleSetSelection())
 
     # The match thumbnail's render (ADR-005 S4o), the same way: a run does not
     # outlive the process, nor is the previous launch's result shown again;
