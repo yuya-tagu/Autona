@@ -61,9 +61,12 @@ WRITE = "write"          # token from another computer; CSRF-checked
 PLAYERDB = "playerdb"    # the player DB: personal data, guarded like WRITE
 DESIGNER = "designer"    # /api/designer/*: Designer token / pairing code
 STATIC = "static"        # files: StaticPath()'s allowlist
+# Opens something on this PC's screen (the Board page's "show in Explorer"):
+# only this PC's own requests, the token does not open it (THIS_PC_ONLY).
+THIS_PC = "this_pc"
 
 # The classes Authorize() guards.
-GUARDED = frozenset({WRITE, PLAYERDB})
+GUARDED = frozenset({WRITE, PLAYERDB, THIS_PC})
 
 # Every Flask endpoint, by its endpoint name. tests/test_webserver_routes.py
 # checks that this table and the route ledger name the same endpoints, so a
@@ -146,6 +149,7 @@ ROUTE_ACCESS = {
     "api_v1.get_commentary": READ,
     "api_v1.get_country_states": READ,
     "api_v1.get_layouts": READ,
+    "api_v1.get_board_files": PLAYERDB,
     "api_v1.get_commentary_options": READ,
     "api_v1.get_selected_layout": READ,
     "api_v1.get_stream_channels": READ,
@@ -189,6 +193,7 @@ ROUTE_ACCESS = {
     "api_v1.commentary_reorder": WRITE,
     "api_v1.commentary_player": WRITE,
     "api_v1.select_layout": WRITE,
+    "api_v1.reveal_board_file": THIS_PC,
     "api_v1.colors_update": WRITE,
     "api_v1.stream_update": WRITE,
     "api_v1.stream_channel_add": WRITE,
@@ -359,7 +364,7 @@ def StaticPath(filename):
 # tournament's match list included (S4k);
 # "statsPreview" is 統計情報表示設定 (S4l);
 # "playerBrowser" is 選手リスト (S4n); "thumbnail" is サムネイル (S4p);
-# "result" is 大会リザルト (S4r).
+# "result" is 大会リザルト (S4r); "board" is スコアボード設定 (S4s).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -371,6 +376,7 @@ WEB_PANELS = frozenset({
     "playerBrowser",
     "thumbnail",
     "result",
+    "board",
 })
 
 
@@ -646,6 +652,12 @@ class Refusal(NamedTuple):
     message: str
     reason: str   # short, for the log
 
+
+# A THIS_PC route asked by anything but this PC's own request (GRANT_AMBIENT):
+# from another computer, with or without the token, which does not open it.
+THIS_PC_ONLY = Refusal(
+    403, FORBIDDEN, "this request is only taken from this computer",
+    "this_pc_only")
 
 # A Socket.IO connection let in with a token that has since been replaced.
 TOKEN_REPLACED = Refusal(

@@ -9,6 +9,7 @@ import StatsPreviewPage from "../StatsPreviewPage";
 import PlayerBrowserPage from "../PlayerBrowserPage";
 import ThumbnailPage from "../ThumbnailPage";
 import ResultPage from "../ResultPage";
+import BoardPage from "../BoardPage";
 
 // The React panels, by the name in their URL (/web/<panel>). Must name the
 // same panels as WEB_PANELS in src/core/WebAccess.py, which decides what the
@@ -18,7 +19,7 @@ import ResultPage from "../ResultPage";
 // 大会情報 (S4g); "top8" Top 8 表示設定 (S4i); "stats" 統計情報 and the
 // tournament's match list (S4k); "statsPreview" 統計情報表示設定 (S4l);
 // "playerBrowser" 選手リスト (S4n); "thumbnail" サムネイル (S4p); "result"
-// 大会リザルト (S4r).
+// 大会リザルト (S4r); "board" スコアボード設定 (S4s).
 export const PANELS: Record<string, React.ComponentType> = {
     "shell-check": ShellCheckPage,
     "commentary": CommentaryPage,
@@ -30,6 +31,7 @@ export const PANELS: Record<string, React.ComponentType> = {
     "playerBrowser": PlayerBrowserPage,
     "thumbnail": ThumbnailPage,
     "result": ResultPage,
+    "board": BoardPage,
 };
 
 export function panelPage(panel: string): React.ComponentType | undefined {

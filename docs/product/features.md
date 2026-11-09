@@ -504,11 +504,12 @@ Help & Settings メニュー。
 ## 31. Board・Designer・Figma 取込
 
 ### BOARD パネル
-[src/AutonaBoardWidget.py](../../src/AutonaBoardWidget.py)。
-- スコアボードのデザイン選択（`layout/` の組込み + Designer 製 `layout/custom/{slug}`）
-- ライブプレビュー（埋め込み WebEngine）
-- 機能別カラー（`AutonaFeatureColors`、feature `board`）
-- Designer 起動ボタン
+[web/src/BoardPage/](../../web/src/BoardPage/)（`/web/board`。ADR-005 S4s で React 化）。
+- スコアボードのデザイン選択（`layout/` の組込み + Designer 製 `layout/custom/{slug}`。一覧と選択は `core/LayoutCatalog`）
+- ライブプレビュー（OBS と同じページの iframe。ゲーム画面の絵の上に重ね、勝者ポップアップ WINNER / CHAMPION も重ねられる）
+- 機能別カラー（`FeatureColorCard`、feature `board`）
+- Designer 起動ボタン（デスクトップではホストが Designer のウィンドウを開く）
+- OBS に指定するファイルのパスのコピーと、エクスプローラで開く（この PC からのみ）
 
 ### Designer
 [web/src/ScoreboardDesigner/](../../web/src/ScoreboardDesigner/)・[src/AutonaDesignerWindow.py](../../src/AutonaDesignerWindow.py)・[src/AutonaDesignerService.py](../../src/AutonaDesignerService.py)。

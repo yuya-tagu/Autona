@@ -282,13 +282,6 @@
         <translation>Sponsor</translation>
     </message>
 </context><context>
-    <name>LayoutOptions</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="17" />
-        <source>Layout Options</source>
-        <translation>Layout Options</translation>
-    </message>
-</context><context>
     <name>Settings</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="13" />
@@ -835,7 +828,6 @@
         <translation>Bracket</translation>
     </message>
     <message>
-        <location filename="..\AutonaBoardWidget.py" line="148" />
         <location filename="..\Autona.py" line="293" />
         <source>Board</source>
         <translation>Board</translation>
@@ -1617,204 +1609,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>beta</translation>
     </message>
     <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="55" />
-        <source>Update</source>
-        <translation>Update</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="59" />
-        <source>Delete</source>
-        <translation>Delete</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>Sample Tournament</translation>
-    </message>
-</context><context>
-    <name>layout_options</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="143" />
-        <source>Chip Options</source>
-        <translation>Chip Options</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="240" />
-        <source>Bracket Options</source>
-        <translation>Bracket Options</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="254" />
-        <source>Versus Options</source>
-        <translation>Versus Options</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_character</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="151" />
-        <source>Display Player Avatar</source>
-        <translation>Display Player Avatar</translation>
-    </message>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="158" />
-        <source>Display Player Character</source>
-        <translation>Display Player Character</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_country_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="165" />
-        <source>Display Player Country Flag</source>
-        <translation>Display Player Country Flag</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_line_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="234" />
-        <source>Color for Bracket Lines</source>
-        <translation>Color for Bracket Lines</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="179" />
-        <source>Primary Color for Player Score</source>
-        <translation>Primary Color for Player Score</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_color_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="186" />
-        <source>Make Score Color a Linear Gradient</source>
-        <translation>Make Score Color a Linear Gradient</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="193" />
-        <source>Background Gradient Direction for Score</source>
-        <translation>Background Gradient Direction for Score</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_score_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="200" />
-        <source>Secondary Color for Player Score</source>
-        <translation>Secondary Color for Player Score</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="206" />
-        <source>Primary Color for Player Sponsor</source>
-        <translation>Primary Color for Player Sponsor</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_color_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="213" />
-        <source>Make Sponsor Color a Linear Gradient</source>
-        <translation>Make Sponsor Color a Linear Gradient</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="220" />
-        <source>Background Gradient Direction for Sponsor</source>
-        <translation>Background Gradient Direction for Sponsor</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_sponsor_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="227" />
-        <source>Secondary Color for Player Sponsor</source>
-        <translation>Secondary Color for Player Sponsor</translation>
-    </message>
-</context><context>
-    <name>layout_options.bracket_state_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="172" />
-        <source>Display Player State Flag</source>
-        <translation>Display Player State Flag</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="116" />
-        <source>Primary Color for Chips</source>
-        <translation>Primary Color for Chips</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_gradient</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="123" />
-        <source>Make Chips Background Color a Linear Gradient</source>
-        <translation>Make Chips Background Color a Linear Gradient</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_gradient_direction</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="137" />
-        <source>Background Gradient Direction for Chips</source>
-        <translation>Background Gradient Direction for Chips</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_bg_secondary_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="130" />
-        <source>Secondary Color for Chips</source>
-        <translation>Secondary Color for Chips</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_country_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="95" />
-        <source>Display Player Country Flag</source>
-        <translation>Display Player Country Flag</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_seed_display</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="81" />
-        <source>Display Player Seed Number</source>
-        <translation>Display Player Seed Number</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_social_media</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="88" />
-        <source>Display Player Social Media</source>
-        <translation>Display Player Social Media</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_state_flag</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="102" />
-        <source>Display Player State Flag</source>
-        <translation>Display Player State Flag</translation>
-    </message>
-</context><context>
-    <name>layout_options.chip_text_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="109" />
-        <source>Text Color for Chips</source>
-        <translation>Text Color for Chips</translation>
-    </message>
-</context><context>
-    <name>layout_options.preset_name</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="44" />
-        <source>Preset Name</source>
-        <translation>Preset Name</translation>
-    </message>
-</context><context>
-    <name>layout_options.versus_team1_sponsor_color</name>
-    <message>
-        <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="248" />
-        <source>Color for Team 1 Sponsor Color</source>
-        <translation>Color for Team 1 Sponsor Color</translation>
     </message>
 </context><context>
     <name>notes</name>
@@ -1908,7 +1707,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
     <name>settings</name>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="35" />
-        <location filename="..\LayoutOptions\LayoutOptionsWidget.py" line="31" />
         <source>Default</source>
         <translation>Default</translation>
     </message>

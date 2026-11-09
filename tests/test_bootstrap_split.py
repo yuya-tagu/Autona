@@ -114,7 +114,6 @@ def test_bootstrap_core_steps_and_their_order():
     # everything that can hand it work.
     assert _steps("bootstrap_core") == [
         "SettingsManager.Initialize()",
-        "LayoutOptionsManager.Initialize()",
         "AutonaLocaleHelper.Initialize()",
         "BadWordFilter()",
         "BadWordFilter.instance.Initialize()",

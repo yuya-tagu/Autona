@@ -26,12 +26,11 @@ paint, the loading spinner and the web server's start (_StartWebServer,
 which marks the server ready: STARTUP phase=webserver-ready is logged
 before the view is built). Nothing waits for a paint, so a window started
 minimized builds it too (S4g review L14). From then on it lives for the
-whole process and shares the overlay previews' plumbing
-(AutonaWebPageLifecycle): loads wait for the web server and retry a refused
-connection, and while the host is off screen the page is frozen, then
-discarded after DISCARD_AFTER_MS. On reveal the page asks the server for
-the full state again; a discarded page is reloaded by Qt and starts from
-the full state.
+whole process. Through AutonaWebPageLifecycle, loads wait for the web server
+and retry a refused connection, and while the host is off screen the page is
+frozen, then discarded after DISCARD_AFTER_MS. On reveal the page asks the
+server for the full state again; a discarded page is reloaded by Qt and
+starts from the full state.
 
 Discarding is Qt's call, and Qt withholds it from a page the operator has
 typed into (Chromium's form-interaction rule: a reload would lose the
@@ -54,25 +53,28 @@ page's thumbnail copy), so the view shows this server's pages only: the
 page refuses to navigate itself anywhere else (_PanelPage). A panel links
 outside by a new window (target="_blank", window.open from a click): the view
 makes none, and hands an http(s) one to the default browser, the X post's
-composer among them (S4r). The Window builds the host from the factory of the
-first React panel opened and calls ShowPanel() on every reveal of a React
-panel's sidebar item; WebPanelPages keeps the items' pages straight (S4e:
-several items, one host page).
+composer among them (S4r). The one new window the view keeps to itself is the
+Board page's Designer (S4s): this server's /web?view=designer, from a click,
+opens AutonaDesignerWindow, which holds the Designer's token. No token reaches
+the page and there is no shell operation for it. The Window builds the host from
+the factory of the first React panel opened and calls ShowPanel() on every
+reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
+straight (S4e: several items, one host page).
 
-Import-light (qtpy / core / AutonaWebPageLifecycle / AutonaLocaleHelper /
-ui_constants): importing it creates nothing.
+Importing it creates nothing.
 """
 
 import json
 import logging
 from urllib.parse import quote, urlencode
 
-from qtpy.QtCore import Qt, QTimer
+from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
+from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaWebPageLifecycle import (
     HiddenPageLifecycle, IsWebServerReady, LocalPageLoader,
     WhenWebServerReady)
@@ -119,6 +121,16 @@ def _Origin(url):
     return (url.scheme(), url.host(), url.port())
 
 
+def _IsDesignerUrl(url, pageUrl):
+    """Whether a new window asks for this server's Designer: exactly the URL the
+    Board page opens (web/src/BoardPage), on the origin of the page asking."""
+    return (_Origin(url) == _Origin(pageUrl)
+            and url.path() == "/web"
+            and url.query() == "view=designer"
+            and not url.hasFragment()
+            and not url.userInfo())
+
+
 # Loads the host makes itself (load(), the reload of a discarded page).
 _HOST_NAVIGATIONS = (
     QWebEnginePage.NavigationType.NavigationTypeTyped,
@@ -143,12 +155,15 @@ class _PanelPage(QWebEnginePage):
     origin (that of the URL the host loaded). The host's own loads go through.
 
     A new window goes to the default browser instead, when it is the web's
-    (S4r). Script without the operator's click does not get here
+    (S4r), but for the Designer's URL, which is the host's (designerRequested,
+    S4s). Script without the operator's click does not get here
     (JavascriptCanOpenWindows, _EnsureView).
 
     Qt reports a refused navigation as a failed load (loadFinished(False))
     although the document stays: ``refusedLast`` tells the host so, until
     the next main-frame navigation goes through."""
+
+    designerRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -168,6 +183,8 @@ class _PanelPage(QWebEnginePage):
         elif not request.isUserInitiated():
             logger.warning("The web panel view refused a window no click "
                            "asked for, of %s", url.host())
+        elif _IsDesignerUrl(url, self.url()):
+            self.designerRequested.emit()
         elif not QDesktopServices.openUrl(url):
             logger.warning("The system could not open a link of %s", url.host())
 
@@ -280,6 +297,8 @@ class AutonaWebPanelHost(QWidget):
         # Whether the view's last finished load succeeded: False until the
         # first one does, and after one that failed for good (_ReloadIfBlank).
         self._loaded = False
+        # The Designer's window while it is open (_OpenDesigner).
+        self._designerWindow = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
 
@@ -341,6 +360,7 @@ class AutonaWebPanelHost(QWidget):
     def _EnsureView(self):
         self.view = _PanelView(self)
         page = _PanelPage(self.view)
+        page.designerRequested.connect(self._QueueDesigner)
         self.view.setPage(page)
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.
@@ -375,6 +395,25 @@ class AutonaWebPanelHost(QWidget):
             parent=self)
         logger.debug("Built the web panel view (%s)", self._panel)
         self._loader.load(PanelPath(self._panel))
+
+    def _QueueDesigner(self):
+        # Not inside Chromium's new-window call: building the window starts a
+        # web view of its own.
+        QTimer.singleShot(0, self, self._OpenDesigner)
+
+    def _OpenDesigner(self):
+        # One window, brought to the front when it is open already. The main
+        # window's, as it lived under the Qt Board panel: closed with it. It
+        # deletes itself on close, revoking the Designer's token.
+        if self._designerWindow is None:
+            self._designerWindow = AutonaDesignerWindow(self.window())
+            self._designerWindow.destroyed.connect(self._OnDesignerDestroyed)
+        self._designerWindow.show()
+        self._designerWindow.raise_()
+        self._designerWindow.activateWindow()
+
+    def _OnDesignerDestroyed(self):
+        self._designerWindow = None
 
     def _Navigate(self):
         # Only into an Active, loaded page. A frozen page is thawed by Qt

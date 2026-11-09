@@ -218,12 +218,11 @@ set_follow = importlib.import_module(
 # The headless shell's assembly: its run() configures the logs and builds
 # everything; importing it must do neither.
 headless = importlib.import_module("src.headless")
-# The embedded web views (ADR-005 S4a): the page plumbing they share, the
-# overlay previews and the React panel host. Importing them builds no view,
+# The embedded web view (ADR-005 S4a): its page plumbing and the React panel
+# host. Importing them builds no view,
 # parks no load and leaves the web server readiness gate shut (only
 # Window._StartWebServer() opens it).
 page_lifecycle = importlib.import_module("src.AutonaWebPageLifecycle")
-importlib.import_module("src.AutonaLayoutPreview")
 importlib.import_module("src.AutonaWebPanelHost")
 # The Qt adapter for the state layer. Imported last on purpose: everything
 # above already pulled it in (every widget that listens to state does), so

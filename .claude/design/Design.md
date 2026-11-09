@@ -501,7 +501,7 @@ colors
     └── accentColor                ※同上（正本は SettingsManager.colors.{feature}.accent_color）
 ```
 
-- 各機能の設定パネルの「〜の色」カードで編集する（共通実装は `src/AutonaFeatureColors.py`）
+- 各機能のページの「〜の色」カードで編集する（共通実装は Web の `FeatureColorCard`（`web/src/CommentaryPage/SideCards.tsx`）と `src/core/ColorService.py`）
 - **明示設定がある feature のみ**が state に現れる（`Window._SeedPanelState()` → `SeedColorState()`）。
   未設定の feature はノードごと存在しないので、レイアウト JS 側の
   `colors.{feature}` → `tournamentInfo` フォールバックが自然に効く（§5.5.3）
@@ -632,6 +632,10 @@ strict で頼む（`StartGGDataProvider.GetTournamentPhases` / `GetAnalysisPhase
 
 ##### `notes` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
 
+> `layout_options` は書き手も読み手も無い（オーバーレイにも Web UI にも読み手が無く、ADR-005 S4s で
+> `SetLayoutOption` と `LayoutOptionsManager` を削除）。古い `state.json` に残っていれば残ったままで、
+> `KEY_CATALOG` の名前も消していない（移行 step を足すほどの実害が無いため）。
+>
 > 旧 `player_list.*`（PLAYERS 順位ロスター編集）は機能ごと廃止（layout/top_8 と共に削除、
 > Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。残留キー（`player_list` /
 > `player_editor`）は起動時に `Window._SeedPanelState()` が Unset する。
@@ -825,7 +829,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | プレフィックス | 用途 |
 |--------------|------|
 | `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等）。`theme_color` / `accent_color` は**大会共通カラー** |
-| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（読み書き・シードは `src/core/ColorService.py`。Qt のカードは `src/AutonaFeatureColors.py`） |
+| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（読み書き・シードは `src/core/ColorService.py`。カードは Web の `FeatureColorCard`） |
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
 | `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等）。読み書きは `src/core/ThumbnailService.py`（ADR-005 S4o。読みは既定値を書かない）。v1 で取り込んだ背景は `user_data/thumbnail_background_<ハッシュ>.*` |
@@ -833,7 +837,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
 | `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消（仕様・ロックの詳細は `docs/changes/layout-custom-unification.md` §7） |
-| `{board,commentary,top8}.selected_design` | パネルが選んでいるデザイン（レイアウトの id）。`commentary` と `top8` は `core/LayoutCatalog.SELECTION_SETTINGS`（`SelectedLayout` / `SelectLayout`。`GET|PUT /api/v1/layouts/selected/{kind}`。top8 は ADR-005 S4h から）、`board` は BOARD パネルが直接読み書きする |
+| `{board,commentary,top8}.selected_design` | ページが選んでいるデザイン（レイアウトの id）。正本は `core/LayoutCatalog.SELECTION_SETTINGS`（`SelectedLayout` / `SelectLayout`。`GET|PUT /api/v1/layouts/selected/{kind}`。top8 は ADR-005 S4h から、board は S4s から。board の一覧は `scoreboard` と `designer` を合わせたもの） |
 | `stream_channels` / `stream_thumbnail_options` | 配信設定（トップレベル）。チャンネル一覧 `[{name, url}]` と、配信サムネ生成のオプション `{source: banner\|org, style: center\|netflix, overlayOrgIcon: bool}`。読み書きは `src/core/StreamService.py`（後者は ADR-005 S4d で追加。前者に揃えてトップレベルに置いた） |
 | その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
 
@@ -965,7 +969,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1051,7 +1055,7 @@ layout/{用途}_{variant}/
 
 ##### アプリのデザイン一覧のメタデータ（`settings.json` の `autona` ブロック）
 
-BOARD タブと実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
+BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
 `src/core/LayoutCatalog.py`（Qt 非依存）の 1 つのカタログを読む。旧来型テンプレのメタデータは
 `settings.json` の `autona` ブロック（ページ側の `globals.js` は読まない）、Designer 製
 （`layout/custom/{slug}/`）は `project.json`。利用者向けの詳しい説明は `layout/README.md`

@@ -634,6 +634,14 @@ def select_layout(kind, layoutId):
     return LayoutCatalog.SelectLayout(kind, layoutId)
 
 
+def get_board_files():
+    return LayoutCatalog.BoardFiles()
+
+
+def reveal_board_file(target, designId=None):
+    return LayoutCatalog.RevealBoardFile(target, designId)
+
+
 def set_feature_colors(feature, colors):
     """Set one feature's theme / accent colours (ColorService kind ->
     "#rrggbb"), both in one save cycle when both come -- the Qt card's

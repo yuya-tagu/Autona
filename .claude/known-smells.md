@@ -381,8 +381,8 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 > **上表の運用ルールは今後も有効**: `.ui` の objectName は `findChild` の引数として
 > 使われ続けるため、変更時は schema 側の文字列も同時に直す（+ 保存データの
 > マイグレーションが前提）。`tournamentInfo.themeColor` / `accentColor` は
-> objectName 由来ではなく `AutonaFeatureColors._STATE_SUFFIX` の静的キーで、
-> 書き手も同モジュール（FeatureColors の core 移行は Step 5 の別弾）。
+> objectName 由来ではなく `core/ColorService._STATE_SUFFIX` の静的キーで、
+> 書き手も同モジュール（Qt のカード `AutonaFeatureColors` は ADR-005 S4s で削除）。
 
 > **AutonaBattleTeam.ui / AutonaTeamPlayer.ui について（2026-08-28）**: これらを読み込んでいた
 > `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget` はデッドコードとして削除された（S-01 参照）。

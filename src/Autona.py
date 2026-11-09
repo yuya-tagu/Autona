@@ -186,10 +186,8 @@ from .AutonaApiInfoWindow import AutonaApiInfoWindow
 from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
 from .AutonaObsGuideWindow import AutonaObsGuideWindow
 from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
-from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .AutonaBoardWidget import AutonaBoardWidget
 from .core.ColorService import SeedColorState
 from .AutonaSidebar import AutonaSidebar
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -360,12 +358,11 @@ class Window(QMainWindow):
         #
         # Only the Scoreboard is built here. Every other panel is constructed
         # the first time its page is revealed (see the _Create*Panel
-        # factories and _EnsurePanelAt): the preview panels
-        # (Board / Stats Display) each own a QWebEngineView (Top 8 did
-        # too until it became a React page, ADR-005 S4i), and the remaining
-        # five (Stream / Thumbnail / Result
-        # / Statistics / Player List) together added ~2.9s to the window-init
-        # -> core-shown gap for UI most launches never open.
+        # factories and _EnsurePanelAt): the preview panels each owned a
+        # QWebEngineView until they became React pages (ADR-005 S4), and the
+        # remaining five (Stream / Thumbnail / Result / Statistics / Player
+        # List) together added ~2.9s to the window-init -> core-shown gap for
+        # UI most launches never open.
         self.dockWidgets = []
 
         # EVENT — lazy since headless core Step 4b: see _CreateEventPanel. It
@@ -389,7 +386,7 @@ class Window(QMainWindow):
         #
         # BOARD — pick scoreboard design, tune colors, OBS setup. Placed right
         # after EVENT (it absorbs EVENT's color pickers). Lazy: see
-        # _CreateBoardPanel.
+        # _CreateBoardPanel (a React page since ADR-005 S4s).
         #
         # THUMBNAIL / RESULT — lazy as well: see _CreateThumbnailPanel /
         # _CreateResultPanel (React pages since ADR-005 S4p / S4r).
@@ -823,7 +820,6 @@ class Window(QMainWindow):
         # NOTE: the settings / guide dialogs used to be constructed above and
         # UiMounted() here. They are built on first open instead (Step 4a) —
         # see the Ensure*Window() accessors.
-        # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
         AutonaAlertNotification.instance.UiMounted()
@@ -933,12 +929,10 @@ class Window(QMainWindow):
         # listening anyway.
         wire_web_server(self.webserver, self.signals.GameChanged)
 
-        # Release the embedded views that fetch their pages from this server
-        # (the overlay previews of Board / Stats, and the React panel host,
-        # which shows the Top 8 page): a panel restored as the startup page issues
-        # its first load() before this point -- the React panel host does
-        # not even build its view before it, and builds it from the event
-        # loop after this returns (ADR-005 S4g review M4).
+        # Release the embedded view that fetches its pages from this server
+        # (the React panel host): it does not even build its view before this
+        # point, and builds it from the event loop after this returns (ADR-005
+        # S4g review M4).
         MarkWebServerReady()
 
         log_startup_phase("webserver-ready")
@@ -989,11 +983,8 @@ class Window(QMainWindow):
         return self._WebPanel("event")
 
     def _CreateBoardPanel(self):
-        board = AutonaBoardWidget()
-        board.setWindowIcon(QIcon(UI.icon_path('board.svg')))
-        board.setObjectName("Board")
-        board.setWindowTitle(QApplication.translate("app", "Board"))
-        return board
+        # ADR-005 S4s: the React page in the shared web view.
+        return self._WebPanel("board")
 
     def _CreateTop8Panel(self):
         # ADR-005 S4i: the React page in the shared web view.

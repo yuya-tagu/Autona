@@ -516,6 +516,21 @@ test("a design picked is saved and then previewed", async () => {
         "src", expect.stringMatching(/\/layout\/custom\/casters\/index\.html$/));
 });
 
+test("choosing the design shown saves it: it may be a fallback", async () => {
+    // A pick of the value it holds is nothing to the select.
+    await renderPage();
+
+    const select = screen.getByRole("combobox", {name: i18n.t("commentary_design")});
+    const shown = select.textContent;
+    fireEvent.mouseDown(select);
+    fireEvent.click(screen.getByRole("option", {name: shown}));
+    await settle();
+
+    expect(writes("PUT", "/api/v1/layouts/selected/commentary")).toEqual([
+        {id: "commentators"},
+    ]);
+});
+
 test("matching the tournament writes its colours to the commentary's", async () => {
     setState(lineup(), {
         tournamentInfo: {themeColor: "#112233", accentColor: "#445566"},

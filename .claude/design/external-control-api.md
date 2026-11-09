@@ -42,13 +42,14 @@
 ### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
 - バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
 - **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
-  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）は書き込みと同じ扱い（`PLAYERDB` 区分）。
+  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）と、ユーザー名を含む OBS 用のファイルのパス（`GET /layouts/selected/board/obs-path`。ADR-005 S4s）は書き込みと同じ扱い（`PLAYERDB` 区分）。
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
   - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
+- **この PC のウィンドウを開く操作はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35。ADR-005 S4s）。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -220,6 +221,7 @@
 | `GET /api/v1/countries` | 国の一覧（カスタム国旗を含む。§5.8。2026-11-04 追加） | `get_countries`（`core/CountryCatalog.CountriesPayload`） | — |
 | `GET /api/v1/layouts` | レイアウト一覧（§5.2。2026-10-22 追加） | なし（`core/LayoutCatalog.Layouts`） | — |
 | `GET /api/v1/layouts/selected/{kind}` | パネルが表示・OBS に渡しているデザイン（§5.3。2026-10-31 追加） | `get_selected_layout`（`core/LayoutCatalog.SelectedLayout`） | — |
+| `GET /api/v1/layouts/selected/board/obs-path` | OBS に指定するファイルの絶対パス（§5.14。ユーザー名を含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_board_files`（`core/LayoutCatalog.BoardFiles`） | — |
 | `GET /api/v1/commentary/options` | 実況の役割候補・アイコン・スロット・表示上限（§5.4。2026-10-31 追加） | `get_commentary_options`（`core/CommentaryModel` の定数） | — |
 | `GET /api/v1/stream/channels` | 保存した配信チャンネル（§5.5。2026-10-31 追加） | `get_stream_channels`（`core/StreamService.Channels`） | — |
 | `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
@@ -256,13 +258,13 @@
 
 ### 5.2 `GET /api/v1/layouts`（2026-10-22 追加）
 `layout/` 配下の配信用レイアウト（旧来型テンプレート + Designer で作った `layout/custom/{slug}/`）の一覧。
-Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**同じカタログ**（`src/core/LayoutCatalog.py`）を返す
+Board / Commentary / Top 8 のページと Designer の「開く」一覧が使う**同じカタログ**（`src/core/LayoutCatalog.py`）を返す
 （[../../docs/changes/layout-custom-unification.md](../../docs/changes/layout-custom-unification.md) Step 1）。
 
 - `?kind=` で絞り込む。値は `scoreboard` / `designer` / `commentary` / `top8`。カンマ区切り（`?kind=scoreboard,designer`）・
   パラメータの繰り返しのどちらでも複数指定できる。省略・空なら全件。未知の kind は `400 INVALID_ARGUMENT`
 - 状態ではないので `revision` は付かない。読み取りなので操作ログにも出ない（§2.7）
-- 並び順は旧来型（フォルダ名順）→ Designer プロジェクト（slug の大文字小文字無視順）。Board タブのプルダウンと同じ
+- 並び順は旧来型（フォルダ名順）→ Designer プロジェクト（slug の大文字小文字無視順）。Board のページのプルダウンと同じ
 
 ```json
 { "ok": true, "data": [
@@ -280,16 +282,17 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `displayName` の表記: Designer は `"Custom: " + name`。同じ `kind` の中で `displayName` が重複したエントリは、
   重複したもの全部が `"{displayName} ({id})"` になる（例: `"Simple (scoreboard_simple - コピー)"`）。重複が無ければそのまま。
   規約の正本は `layout/README.md`「レイアウトのメタデータ（`autona` ブロック）」
-- ファイルシステムの絶対パス（カタログ内部の監視ディレクトリ等）は返さない（D5: LAN 公開時もパスを出さない）
+- ファイルシステムの絶対パスは返さない（D5: LAN 公開時もパスを出さない）。OBS に指定するパスは §5.14 に分けた
 
 ### 5.3 `GET /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
 パネルが選んでいるデザイン（プレビューと OBS URL に使うもの）を、§5.2 と同じ形のエントリ 1 件で返す。
 
 - `kind` は選択を持つ種類だけ: 現在は `commentary`（`settings.json` の `commentary.selected_design`）と
-  `top8`（`top8.selected_design`。2026-11-04 追加・ADR-005 S4h。Top 8 のページ（S4i。それまでは Qt のパネル）も同じ関数で読み書きする）。
+  `top8`（`top8.selected_design`。2026-11-04 追加・ADR-005 S4h。Top 8 のページ（S4i。それまでは Qt のパネル）も同じ関数で読み書きする）と
+  `board`（`board.selected_design`。2026-11-09 追加・ADR-005 S4s。§5.2 の種類ではなく選択の名前で、一覧は `scoreboard` と `designer` を合わせたもの。`?kind=board` は `400`）。
   正本は `core/LayoutCatalog.SELECTION_SETTINGS`。それ以外は `400 INVALID_ARGUMENT`
-- 保存されている id がカタログに無い（削除された等）ときは、Qt パネルと同じ順で代わりを返す: 既定（`commentators` /
-  `bracket_top8`）→ 一覧の先頭。
+- 保存されている id がカタログに無い（削除された等）ときは、同じ順で代わりを返す: 既定（`commentators` /
+  `bracket_top8` / `scoreboard_crewbattle`）→ 一覧の先頭。
   保存値は書き換えない。その種類のレイアウトが 1 つも無ければ `404 NOT_FOUND`
 - 設定であって状態ではないので `revision` は付かない
 
@@ -488,6 +491,21 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `game` は `null`（未選択）か `{codename, name}`。`canRender` はこのシェルで描けるか（ヘッドレスは `false`）
 - `GET /result/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**（`:preview` と `:generate`）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<result_render.revision>` で URL を変える（値は見ない）
 
+### 5.14 `GET /api/v1/layouts/selected/board/obs-path`（2026-11-09 追加・ADR-005 S4s）
+Board のページが OBS の「ローカルファイル」に指定させるファイルの絶対パス。絶対パスはユーザー名を含むので §5.2 と分け、**`PLAYERDB` 区分**（LAN からはトークン必須）。
+
+```json
+{ "ok": true, "data": {
+  "designId": "scoreboard_crewbattle",
+  "design": "C:\\Autona\\layout\\scoreboard_crewbattle\\index.html",
+  "winnerPopup": "C:\\Autona\\layout\\winner_popup\\index.html"
+} }
+```
+- `designId`: 答えた時点で選択中のデザイン（§5.3 の `id`）。`design` はこのデザインのパスで、選択は読みの間に変わりうるので、クライアントは自分が表示しているデザインと照合する（違えば読み直す）
+- `design`: そのファイル。デザインが 1 つも無ければ `designId` とも `null`
+- `winnerPopup`: 勝者ポップアップのファイル。どの一覧にも載らない固定のフォルダ（`layout/winner_popup`）
+- OS の区切り文字のまま。設定であって状態ではないので `revision` は付かない
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5 および §7 の
@@ -646,7 +664,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.13 デザインの選択 `PUT /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
 - body: `{ "id": "commentators" }`（§5.2 の `id`。その `kind` の一覧にあるもの）
 - 委譲: `select_layout` → `core/LayoutCatalog.SelectLayout`。`settings.json` の既存キー（`commentary.selected_design` /
-  `top8.selected_design`）に書くだけで形式は不変
+  `top8.selected_design` / `board.selected_design`）に書くだけで形式は不変。すでに保存されている id なら書かない（表示中のデザインは代わりかもしれないので、Web UI はそれを選び直したときも送る）
 - 応答の `data` は選んだエントリ（§5.3 と同じ形）。設定なので `revision` は付かない
 - エラー: `INVALID_ARGUMENT`（`kind` が §5.3 以外・`id` が文字列でない / 一覧に無い）
 
@@ -817,6 +835,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 
 ### 6.34 大会リザルトの選手を DB へ `POST /api/v1/result:saveToDb`（2026-11-09 追加・ADR-005 S4q）
 - body なし。今のレイアウトの種類の全行の選手を選手 DB に追記する（`overwrite=False`: 国・本名・ほかのゲームの mains は残る）。応答 `data` は `{ "saved": 人数 }`。選手 DB なので `revision` は付かない
+
+### 6.35 エクスプローラで開く `POST /api/v1/layouts/selected/board:reveal`（2026-11-09 追加・ADR-005 S4s）
+- body: `{ "target": "design", "designId": "<表示しているデザインの id>" }` か `{ "target": "winnerPopup" }`。§5.14 のファイルを、この PC のファイルマネージャで選択した状態で開く。**パスはカタログから解決し、クライアントからパスを受けない**。シェルを通さない（Windows は `"%WINDIR%\explorer.exe" /select,"<path>"` を文字列で起動する。Explorer はカンマで区切るのでパスは常に引用符で囲み、名前で探さない。NTFS のファイル名に `"` は入らず、入っていれば `404` で断る）
+- **`THIS_PC` 区分（§2.2）**: この PC からの要求だけ。LAN はトークンがあっても `403 FORBIDDEN`（配信 PC の画面にウィンドウを開かせない）。ヘッドレスでも動く
+- 委譲: `reveal_board_file` → `core/LayoutCatalog.RevealBoardFile`。state に触れないので `revision` は付かない
+- エラー: `INVALID_ARGUMENT`（未知の `target`、`design` なのに `designId` が無い）、`CONFLICT` 409（`designId` が今の選択と違う: 操作者が見ていたファイルではない）、`NOT_FOUND`（ファイルが無い。デザインが無いときも。相対パスをログに残す）、`INTERNAL`（ファイルマネージャを起動できない）。どれも何も開かない
+- 拒否のログには、この PC の要求と認められなかった元の理由（`forwarded` / `foreign_host` / `foreign_origin` など。トークンで通るはずだったものは `token`）を残す。応答は 1 つ
 
 ---
 

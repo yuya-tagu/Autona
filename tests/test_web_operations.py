@@ -1794,6 +1794,8 @@ _NOT_200 = {
     # to pick (the catalog was read).
     ("api_v1.get_selected_layout", None): 404,
     ("api_v1.select_layout", None): 400,
+    # No target: nothing is shown (never a real file manager in this walk).
+    ("api_v1.reveal_board_file", None): 400,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the

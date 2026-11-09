@@ -760,8 +760,9 @@ KEY_CATALOG = {
     COLORS_ROOT: tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
     DISPLAY_OPTIONS_ROOT: DISPLAY_OPTION_KEYS,
     # Roots whose shape is owned elsewhere and not enumerated here:
-    # layout_options mirrors LayoutOptionsManager (per-layout, open-ended),
-    # the rest are provider payloads written wholesale.
+    # layout_options has had no writer since ADR-005 S4s and no overlay reads
+    # it: only a state.json of an old version holds it. The rest are provider
+    # payloads written wholesale.
     LAYOUT_OPTIONS_ROOT: (),
     PROVIDER_VIDEOGAME_ROOT: (),
     "streamQueue": (),

@@ -160,7 +160,6 @@ Autona/
 │   ├── ui_constants.py            # デザイントークン定義
 │   ├── Helpers/                   # ユーティリティモジュール
 │   ├── Settings/                  # 設定 UI
-│   ├── LayoutOptions/             # レイアウトオプション UI
 │   ├── TournamentDataProvider/    # データプロバイダー実装
 │   └── i18n/                      # 翻訳ファイル・生成スクリプト
 │

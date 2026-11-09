@@ -53,7 +53,6 @@ PREFIX = f"score.{BOARD}"
 
 _EXTRA_ROOTS = (
     schema.STREAM_ROOT,
-    schema.LAYOUT_OPTIONS_ROOT,
     schema.COMMENTARY_ROOT,
 )
 
@@ -1565,49 +1564,11 @@ def test_the_other_operations_are_callable_off_the_main_thread(
     assert SM.Get("display_options.show_seed") is False
 
 
-# ── layout options / stream / whole-subtree publishes (Step 5-5) ─────────
+# ── stream / whole-subtree publishes (Step 5-5) ─────────
 #
-# The four panels these belong to are lazily built and three of them own a
-# QWebEngineView, so none of them is in the widget harness. Before this
-# instalment their writes therefore had no coverage of any kind; the
-# operations are here now, and this is it.
-
-def test_set_layout_option_writes_both_halves_of_the_mirror(actions):
-    from src.core.LayoutOptionsManager import LayoutOptionsManager
-
-    stored = LayoutOptionsManager.settings
-    LayoutOptionsManager.settings = {}
-    try:
-        actions.SetLayoutOption("scoreboard", "show_flags", True)
-
-        # LayoutOptionsManager is what the LAYOUT panel reads back when it
-        # rebuilds its controls; StateManager is what the overlay renders.
-        assert LayoutOptionsManager.Get("scoreboard.show_flags") is True
-        assert SM.Get("layout_options.scoreboard.show_flags") is True
-    finally:
-        LayoutOptionsManager.settings = stored
-
-
-def test_set_layout_option_is_not_guarded(actions):
-    """Rewriting the same value has to reach both sides.
-
-    Building the LAYOUT panel assigns every control its stored value and
-    those assignments emit, which is how a layout's options reach the state
-    at all on a fresh install. A _SetIfChanged here would leave the settings
-    file and the state disagreeing after either one was edited by hand.
-    """
-    from src.core.LayoutOptionsManager import LayoutOptionsManager
-
-    stored = LayoutOptionsManager.settings
-    LayoutOptionsManager.settings = {}
-    try:
-        actions.SetLayoutOption("scoreboard", "font", "Inter")
-        SM.Unset("layout_options.scoreboard.font")
-        actions.SetLayoutOption("scoreboard", "font", "Inter")
-        assert SM.Get("layout_options.scoreboard.font") == "Inter"
-    finally:
-        LayoutOptionsManager.settings = stored
-
+# The panels these belong to were lazily built, so none of them was in the
+# widget harness. Before this instalment their writes therefore had no coverage
+# of any kind; the operations are here now, and this is it.
 
 def test_the_stream_setters_publish_once_and_skip_a_no_op(actions, spy):
     revision = SM.revision

@@ -1368,10 +1368,12 @@ class WebServer:
         )
 
     @staticmethod
-    def _log_refusal(key, what, refusal):
+    def _log_refusal(key, what, refusal, because=None):
         # The path only, never the query string: it may hold the token.
         message = (f"webserver: refused {what} from {request.remote_addr}: "
                    f"{refusal.reason}")
+        if because:
+            message += f" ({because})"
         if WebServer._refusals.First(key):
             logger.warning(message)
         else:
@@ -1397,20 +1399,27 @@ class WebServer:
     def _guard_http_request():
         """None to let the request through, else the refusal to send.
 
-        Only WRITE / PLAYERDB endpoints are checked. A preflight (OPTIONS)
-        passes: it carries no token and runs no handler. An unmatched URL
-        (endpoint None) is left to Flask's 404 / 405.
+        Only WRITE / PLAYERDB / THIS_PC endpoints are checked. A preflight
+        (OPTIONS) passes: it carries no token and runs no handler. An unmatched
+        URL (endpoint None) is left to Flask's 404 / 405.
         """
         if request.method == "OPTIONS" or request.endpoint is None:
             return None
-        if WebAccess.RouteAccess(request.endpoint) not in WebAccess.GUARDED:
+        access = WebAccess.RouteAccess(request.endpoint)
+        if access not in WebAccess.GUARDED:
             return None
-        _grant, refusal = WebServer._authorize()
+        grant, refusal = WebServer._authorize()
+        because = None
+        if access == WebAccess.THIS_PC and grant != WebAccess.GRANT_AMBIENT:
+            # One answer to all of them; the log keeps what kept this from being
+            # this PC's own request (or that a token let it past the rest).
+            because = refusal.reason if refusal else "token"
+            refusal = WebAccess.THIS_PC_ONLY
         if refusal is None:
             return None
         WebServer._log_refusal(
-            (request.endpoint, request.remote_addr, refusal.reason),
-            f"{request.method} {request.path}", refusal)
+            (request.endpoint, request.remote_addr, refusal.reason, because),
+            f"{request.method} {request.path}", refusal, because)
         response = jsonify(WebAccess.ErrorBody(refusal))
         response.status_code = refusal.status
         if refusal.status == 401:
