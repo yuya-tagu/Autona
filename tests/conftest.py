@@ -477,28 +477,27 @@ class _AutonaHarness:
 
         manager = self.manager
         board = manager.scoreboards.pop(number, None)
-        if board is None:
-            return
-        for attribute in ("scoreboard", "teamScoreboard", "crewScoreboard"):
-            if getattr(manager, attribute, None) is board:
-                setattr(manager, attribute, None)
-        board.setParent(None)
-        board.deleteLater()
-        # ...and actually destroy it. QApplication.processEvents() does NOT
-        # run deferred deletions: Qt only reaps a DeferredDelete event whose
-        # loop level is below the one being drained, and pytest never calls
-        # exec(), so the level stays 0 and every deleteLater() here would sit
-        # in the queue for the whole session. The C++ widget would stay alive
-        # with its lambda connections to the process-wide singletons
-        # (AutonaGameAssetManager.signals.onLoad, StateManagerBridge, ...)
-        # intact -- a lambda holds no weak reference to its receiver, so
-        # PySide6 cannot auto-disconnect it. Every dropped board would then
-        # keep answering signals and rewriting score.{n}, including after the
-        # CWD was restored, i.e. into the developer's real ./out.
-        # sendPostedEvents() with an explicit DeferredDelete type is the one
-        # call that reaps it at loop level 0; it is aimed at this board so
-        # nothing else in the session gets torn down as a side effect.
-        QCoreApplication.sendPostedEvents(board, QEvent.Type.DeferredDelete)
+        if board is not None:
+            for attribute in ("scoreboard", "teamScoreboard", "crewScoreboard"):
+                if getattr(manager, attribute, None) is board:
+                    setattr(manager, attribute, None)
+            board.setParent(None)
+            board.deleteLater()
+            # ...and actually destroy it. QApplication.processEvents() does NOT
+            # run deferred deletions: Qt only reaps a DeferredDelete event whose
+            # loop level is below the one being drained, and pytest never calls
+            # exec(), so the level stays 0 and every deleteLater() here would sit
+            # in the queue for the whole session. The C++ widget would stay alive
+            # with its lambda connections to the process-wide singletons
+            # (AutonaGameAssetManager.signals.onLoad, StateManagerBridge, ...)
+            # intact -- a lambda holds no weak reference to its receiver, so
+            # PySide6 cannot auto-disconnect it. Every dropped board would then
+            # keep answering signals and rewriting score.{n}, including after the
+            # CWD was restored, i.e. into the developer's real ./out.
+            # sendPostedEvents() with an explicit DeferredDelete type is the one
+            # call that reaps it at loop level 0; it is aimed at this board so
+            # nothing else in the session gets torn down as a side effect.
+            QCoreApplication.sendPostedEvents(board, QEvent.Type.DeferredDelete)
 
         # AutonaScoreboardWidget.__init__ registers its subtree as held (the
         # 反映 button). StateManager has no inverse, so the registration is
@@ -513,13 +512,23 @@ class _AutonaHarness:
         # the delta nor ./out -- leaving stale score/{n}/*.txt behind and a
         # stale score.{n} in lastSavedState. Held state is read under the lock
         # by SaveState, so take it here too.
+        #
+        # A prefix can be held with no board to drop: a module that drives
+        # StateManager on its own (tests/test_state_manager_held.py) leaves its
+        # registration and its published score.{n} behind. Clear those as well.
+        # A board built on them would have its seed held back, not published,
+        # since AutonaActions.SeedFreshBoard relies on running before the hold.
+        # An unbuilt board that nothing holds keeps its placeholder.
         prefix = f"score.{number}"
         with self.state.lock:
+            leftover = prefix in self.state.heldPrefixes
             self.state.heldPrefixes.discard(prefix)
             self.state.heldExempt.pop(prefix, None)
             self.state.heldKeys.pop(prefix, None)
             self.state._commitPrefixes.discard(prefix)
             self.state._heldTouched.discard(prefix)
+        if board is None and not leftover:
+            return
 
         self.state.Unset(prefix)
 
