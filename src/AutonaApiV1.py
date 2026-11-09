@@ -49,6 +49,7 @@ from .core import Top8Service
 from .core import TournamentMediaService as tournamentMedia
 from .core import TournamentService as tournaments
 from .core.GameAssetCatalog import GameAssetCatalog
+from .core.GameTrackerService import TEAM_1, TEAM_2, TIE, UNREPORTED
 from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
 # Importing these builds nothing (agent-pitfalls #1): their singletons
@@ -467,8 +468,7 @@ def health():
 @api_handler
 def get_scoreboard(n):
     validate_scoreboard(n)
-    board_state = WebOps.get_scoreboard(n)
-    data = dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
+    data = _board_data(WebOps.get_scoreboard(n))
     # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
     # committed view above; CrewBattleService's for board 3, in both shells
     # since ADR-005 S3e-2), read through the legacy operation so both routes
@@ -478,6 +478,29 @@ def get_scoreboard(n):
     except Exception:
         pass
     return ok(data=data, revision=current_revision())
+
+
+def _board_data(board_state):
+    return dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
+
+
+@api_v1.route("/scoreboards/<int:n>/pending")
+@api_handler
+def get_scoreboard_pending(n):
+    # {held, dirty, board}: what the SCORE page draws its form from (ADR-005
+    # S4u). `board` has the shape of GET /scoreboards/{n} and the live values,
+    # 反映 or not; that route, /state and program_state stay the published
+    # view (ADR-005 D4). `held`: this board holds its edits back, so they
+    # wait for :apply (the desktop's boards 1/2). `dirty`: some do now. The
+    # Socket.IO `scoreboard_pending` tells when to read this again. Guarded,
+    # not READ (WebAccess): edits the operator has not published are not for
+    # whoever can reach the port.
+    validate_scoreboard(n)
+    held, dirty, live, swapped, revision = WebOps.get_pending(n)
+    board = _board_data(live)
+    board["swapped"] = swapped
+    return ok(data={"held": held, "dirty": dirty, "board": board},
+              revision=revision)
 
 
 @api_v1.route("/games")
@@ -508,6 +531,15 @@ def get_characters():
 @api_handler
 def get_variants():
     return ok(data=WebOps.get_variants())
+
+
+@api_v1.route("/stages")
+@api_handler
+def get_stages():
+    # The stages the loaded game offers a game row, in the combo's order:
+    # [{"text", "en_name", ...}]. `en_name` is what PATCH .../stages/{game}
+    # takes (ADR-005 S4u).
+    return ok(data=WebOps.get_stages())
 
 
 @api_v1.route("/sets")
@@ -1060,6 +1092,101 @@ def player_load(n, t, p):
         raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
     if result != "OK":
         raise ApiError(NOT_FOUND, "no player with that tag", 404)
+    return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:clear", methods=["POST"])
+@write_op("player.clear")
+def player_clear(n, t, p):
+    # {"confirm": true}: empty the slot of state team `t`, as the card's clear
+    # button does (ADR-005 S4u). 404 when the team has no such slot.
+    require_board_12(n)
+    _validate_team(t)
+    if p < 1:
+        raise ApiError(INVALID_ARGUMENT, "player must be 1 or greater", 400)
+    _require_confirm(_json_body())
+    if not WebOps.clear_player(n, t, p):
+        raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
+    return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players:swap", methods=["POST"])
+@write_op("player.swap")
+def player_swap(n, t):
+    # {"first", "second"}: exchange two slots of state team `t`, as a card's
+    # move up / down does (ADR-005 S4u). Two different slots, both of which
+    # the team has (404 otherwise: nothing moves).
+    require_board_12(n)
+    _validate_team(t)
+    body = _json_body()
+    slots = [body.get("first"), body.get("second")]
+    if any(isinstance(slot, bool) or not isinstance(slot, int) or slot < 1
+           for slot in slots):
+        raise ApiError(
+            INVALID_ARGUMENT, "first and second must be 1 or greater", 400)
+    if slots[0] == slots[1]:
+        raise ApiError(
+            INVALID_ARGUMENT, "first and second must be different slots", 400)
+    if not WebOps.swap_players(n, t, slots[0], slots[1]):
+        raise ApiError(
+            NOT_FOUND, f"team {t} does not have both players", 404)
+    return ok(revision=current_revision())
+
+
+# PATCH .../stages/{game}'s `winner`: None (not played) is apart, a value of
+# its own. The state team, like every v1 team number.
+_STAGE_WINNERS = {1: TEAM_1, 2: TEAM_2, "tie": TIE}
+# What it answers for each of WebOps.update_stage's refusals.
+_STAGE_REFUSALS = {
+    WebOps.STAGE_NO_ROWS:
+        (NOT_READY, "the set has no game rows: the game tracker is off, or "
+                    "no best of is set", 409),
+    WebOps.STAGE_NO_SUCH_GAME:
+        (NOT_FOUND, "the set has no such game", 404),
+    WebOps.STAGE_UNKNOWN:
+        (INVALID_ARGUMENT, "unknown stage", 400),
+}
+
+
+@api_v1.route("/scoreboards/<int:n>/stages/<int:game>", methods=["PATCH"])
+@write_op("stage.update")
+def stage_update(n, game):
+    # Some of {"winner": 1, 2, "tie" or null (not played), "stage": an en_name
+    # from GET /stages, or null to empty it}: one game row (1-based, the
+    # state's key), in one save cycle (ADR-005 S4u). A winner moves the team
+    # scores to what the rows add up to, as the tracker's buttons do.
+    require_board_12(n)
+    if game < 1:
+        raise ApiError(INVALID_ARGUMENT, "game must be 1 or greater", 400)
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in ("winner", "stage"))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown stage field: {', '.join(unknown)}", 400)
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "one of winner, stage is required", 400)
+    fields = {}
+    if "winner" in body:
+        winner = body["winner"]
+        if winner is None:
+            fields["winner"] = UNREPORTED
+        elif (isinstance(winner, (int, str)) and not isinstance(winner, bool)
+                and winner in _STAGE_WINNERS):
+            fields["winner"] = _STAGE_WINNERS[winner]
+        else:
+            raise ApiError(
+                INVALID_ARGUMENT, 'winner must be 1, 2, "tie" or null', 400)
+    if "stage" in body:
+        if body["stage"] is not None and (
+                not isinstance(body["stage"], str) or not body["stage"]):
+            raise ApiError(
+                INVALID_ARGUMENT, "stage must be a stage's en_name or null", 400)
+        fields["stage"] = body["stage"]
+    refusal = WebOps.update_stage(n, game, fields)
+    if refusal is not None:
+        raise ApiError(*_STAGE_REFUSALS[refusal])
     return ok(revision=current_revision())
 
 
@@ -1708,15 +1835,19 @@ TOURNAMENT_ENTRANTS_MAX = 999999
 def tournament_info_update():
     # Some of {"tournamentName", "eventName", "address": str,
     # "numEntrants": 0..999999, "startAtDate": "YYYY-MM-DD" (2000-01-01 to
-    # 2999-12-31, ASCII digits)}: tournamentInfo.* through
-    # TournamentInfoService, in one save cycle. The date is published as
-    # tournamentInfo.startAt (the PC's short date, as before) and
-    # startAtDate; it cannot be emptied (the Qt tab's date edit could not
-    # either). A day this PC cannot make a time of is refused too, with
-    # nothing written (S4g review L4). A payload loaded later replaces
-    # them, as it did.
+    # 2999-12-31, ASCII digits), "displayTournamentName": str}:
+    # tournamentInfo.* through TournamentInfoService, in one save cycle. The
+    # date is published as tournamentInfo.startAt (the PC's short date, as
+    # before) and startAtDate; it cannot be emptied (the Qt tab's date edit
+    # could not either). A day this PC cannot make a time of is refused too,
+    # with nothing written (S4g review L4). A payload loaded later replaces
+    # them, as it did. displayTournamentName is the 表示大会名 of the SCORE
+    # panel (ADR-005 S4u; not an EVENT field, so not in TOURNAMENT_INPUT_KEYS).
+    # An edit of the tournament name carries into it only while it is empty or
+    # still the previous tournament name (FollowDisplayName); selecting a
+    # tournament again overwrites it whatever it is.
     body = _json_body()
-    fields = schema.TOURNAMENT_INPUT_KEYS
+    fields = schema.TOURNAMENT_INPUT_KEYS + (schema.TOURNAMENT_DISPLAY_NAME_KEY,)
     unknown = sorted(k for k in body if k not in fields)
     if unknown:
         raise ApiError(
@@ -1726,7 +1857,8 @@ def tournament_info_update():
         raise ApiError(
             INVALID_ARGUMENT, f"one of {', '.join(fields)} is required", 400)
     for key, value in body.items():
-        if key in schema.TOURNAMENT_TEXT_FIELDS:
+        if (key in schema.TOURNAMENT_TEXT_FIELDS
+                or key == schema.TOURNAMENT_DISPLAY_NAME_KEY):
             if not isinstance(value, str):
                 raise ApiError(
                     INVALID_ARGUMENT, f"{key} must be a string", 400)
@@ -1836,6 +1968,18 @@ def clear(n):
     require_board_12(n)
     _require_confirm(_json_body())
     WebOps.clear_all(n)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/scoreboards/<int:n>:reset-all", methods=["POST"])
+@write_op("reset-all")
+def reset_all(n):
+    # The desktop's すべての入力値をリセット (AutonaActions.ClearBoard, ADR-005
+    # S4u). Not :clear, which puts the counts back to one and keeps the team
+    # names: this empties the team names too and leaves the counts.
+    require_board_12(n)
+    _require_confirm(_json_body())
+    WebOps.reset_all(n)
     return ok(revision=current_revision())
 
 

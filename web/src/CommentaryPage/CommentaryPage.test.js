@@ -17,6 +17,13 @@ import CommentaryPage, {
 // useStateField's (focused field not overwritten, no send while an IME
 // composes); a fifth caster refused by the server puts the checkbox back.
 
+// The wait of a test here is fake timers, so nothing waits in real time. What
+// takes the time is CPU: the page is 12 cards of MUI fields (a mount is about
+// 300 ms in jsdom). Under 1 s to 4 s on an idle machine; a whole `npm test`
+// makes that 5-6 times longer, which went past the default 5 s (twice, the
+// test of a write that never answers).
+jest.setTimeout(20000);
+
 jest.mock("../websocketConnection", () => {
     const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
@@ -107,19 +114,31 @@ function renderBare() {
 async function renderPage() {
     renderBare();
     await settle();
-    await screen.findByRole("region", {name: i18n.t("commentary_slot", {slot: "1"})});
+    await screen.findByRole("region", {
+        name: i18n.t("commentary_slot", {slot: "1"}), hidden: true,
+    });
 }
 
+// `hidden: true`: these run many times a test, and without it each element
+// the query looks at is checked for being hidden, through jsdom's
+// getComputedStyle over the theme's rules (about 600 ms a query on this page's
+// 12 cards, 3 ms with it). Nothing on the page is hidden to find by mistake.
 function card(slot) {
-    return screen.getByRole("region", {name: i18n.t("commentary_slot", {slot})});
+    return screen.getByRole("region", {
+        name: i18n.t("commentary_slot", {slot}), hidden: true,
+    });
 }
 
 function nameField(slot) {
-    return within(card(slot)).getByRole("combobox", {name: i18n.t("commentary_name")});
+    return within(card(slot)).getByRole("combobox", {
+        name: i18n.t("commentary_name"), hidden: true,
+    });
 }
 
 function displayBox(slot) {
-    return within(card(slot)).getByRole("checkbox", {name: i18n.t("commentary_display")});
+    return within(card(slot)).getByRole("checkbox", {
+        name: i18n.t("commentary_display"), hidden: true,
+    });
 }
 
 beforeEach(() => {
@@ -181,6 +200,18 @@ test("the slots and the role suggestions come from the server", async () => {
 
     expect(screen.getByRole("option", {name: "実況"})).toBeInTheDocument();
     expect(screen.getByRole("option", {name: "解説"})).toBeInTheDocument();
+});
+
+test("the cards are on screen", async () => {
+    // The one test that looks: the locators here do not (`hidden: true`). The
+    // first and the last card, the box by its label (MUI's input has opacity 0).
+    await renderPage();
+
+    ["1", "12"].forEach((slot) => {
+        expect(card(slot)).toBeVisible();
+        expect(nameField(slot)).toBeVisible();
+        expect(displayBox(slot).closest("label")).toBeVisible();
+    });
 });
 
 test("the cards show the state as it changes", async () => {

@@ -445,6 +445,24 @@ class GameAssetCatalog:
             data[row.get("name")] = qvariantmap_copy(row)
         return data
 
+    def StagesPayload(self) -> list:
+        """The rows of the per-game tracker's stage combo, in its order
+        (sorted; modded ones only when mods are active), each with the text
+        it shows. `en_name` names one to StageRow (ADR-005 S4u)."""
+        return [{"text": text, **qvariantmap_copy(row)}
+                for text, row in self._current.stageRowsSorted]
+
+    def StageRow(self, en_name, snapshot=None):
+        """The stage combo row's data for `en_name` (a copy, in the key order
+        the combo's QVariantMap gave it: it goes into the state as it is), or
+        None when the combo has no such row (an unknown name, a modded stage
+        while mods are off, no game loaded). ADR-005 S4u."""
+        snap = snapshot if snapshot is not None else self._current
+        for _text, data in snap.stageRowsSorted:
+            if data.get("en_name") == en_name:
+                return qvariantmap_copy(data)
+        return None
+
     def Character(self, en_name):
         character = self._current.characters.get(en_name)
         return deep_clone(character) if character is not None else None

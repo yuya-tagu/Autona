@@ -14,6 +14,7 @@ import atexit
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -348,6 +349,7 @@ def _heldOnlyBoard():
         SM.heldKeys.pop(HELD_ONLY_PREFIX, None)
         SM._commitPrefixes.discard(HELD_ONLY_PREFIX)
         SM._heldTouched.discard(HELD_ONLY_PREFIX)
+        SM._heldCommitted.discard(HELD_ONLY_PREFIX)
     SM.Unset(HELD_ONLY_PREFIX)
 
 
@@ -381,6 +383,138 @@ def test_committing_a_clean_prefix_diffs_nothing(monkeypatch, _heldOnlyBoard):
 
     assert diffs.calls == []
     assert spy.deltas == []
+
+
+# ── held_dirty_changed follows HasPendingChanges (S4u) ───────────────────
+# The notification is a cue to read HasPendingChanges, told after what it is
+# about. A commit inside an open block only queues: the keys are
+# pending until the SaveState that closes the block drains them, so that is
+# where the False comes from. It used to be told from CommitHeld, ahead of
+# the drain, and only when keys were pending by then.
+
+
+class _DirtyTold:
+    """(payload, HasPendingChanges at that moment) of each notification."""
+
+    def __init__(self, prefix):
+        self.prefix = prefix
+        self.told = []
+
+    def _on(self, prefix, dirty):
+        if prefix == self.prefix:
+            self.told.append((dirty, SM.HasPendingChanges(prefix)))
+
+    def __enter__(self):
+        SM.observers.held_dirty_changed.subscribe(self._on)
+        return self
+
+    def __exit__(self, *exc):
+        SM.observers.held_dirty_changed.unsubscribe(self._on)
+
+
+def test_a_commit_outside_a_block_tells_false_once_it_is_drained(_heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+        SM.CommitHeld(_heldOnlyBoard)
+    assert dirty.told == [(True, True), (False, False)]
+
+
+def test_a_commit_of_nothing_tells_nothing(_heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.CommitHeld(_heldOnlyBoard)
+        with SM.SaveBlock():
+            SM.CommitHeld(_heldOnlyBoard)
+    assert dirty.told == []
+
+
+def test_a_commit_inside_a_block_tells_false_when_the_block_closes(
+        _heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        with SM.SaveBlock():
+            SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+            SM.CommitHeld(_heldOnlyBoard)
+            # Queued: still pending, and nothing said otherwise.
+            assert SM.HasPendingChanges(_heldOnlyBoard)
+            assert dirty.told == [(True, True)]
+    assert not SM.HasPendingChanges(_heldOnlyBoard)
+    assert dirty.told == [(True, True), (False, False)]
+    assert SM.GetCommitted(f"{_heldOnlyBoard}.phase") == "Pending"
+
+
+def test_a_write_after_the_commit_in_the_block_is_lowered_with_it(
+        _heldOnlyBoard):
+    """Nothing was pending when the commit was queued, so it had nothing to
+    tell then; the write raises the flag and the drain takes it along. It
+    used to stay raised."""
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        with SM.SaveBlock():
+            SM.CommitHeld(_heldOnlyBoard)
+            SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+    assert not SM.HasPendingChanges(_heldOnlyBoard)
+    assert dirty.told == [(True, True), (False, False)]
+    assert SM.GetCommitted(f"{_heldOnlyBoard}.phase") == "Pending"
+
+
+def test_a_commit_queued_on_another_threads_block_tells_when_that_closes(
+        _heldOnlyBoard):
+    """The save block is process-wide: a 反映 while another thread's block is
+    open only queues too."""
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+        SM.BlockSaving()
+        try:
+            worker = threading.Thread(
+                target=lambda: SM.CommitHeld(_heldOnlyBoard))
+            worker.start()
+            worker.join()
+            assert dirty.told == [(True, True)]
+        finally:
+            SM.ReleaseSaving()
+    assert dirty.told == [(True, True), (False, False)]
+
+
+def test_a_write_during_the_publish_keeps_the_flag_up(_heldOnlyBoard):
+    """A state_updated handler that writes under the prefix while the commit
+    publishes dirties it again before the False would go out: the flag
+    stays up, and the last thing told is True."""
+    def write(_payload):
+        SM.observers.state_updated.unsubscribe(write)
+        SM.Set(f"{_heldOnlyBoard}.match", "Written while publishing")
+
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+        SM.observers.state_updated.subscribe(write)
+        SM.CommitHeld(_heldOnlyBoard)
+    assert SM.HasPendingChanges(_heldOnlyBoard)
+    assert dirty.told == [(True, True), (True, True)]
+    SM.CommitHeld(_heldOnlyBoard)
+
+
+def test_the_peek_answers_what_the_flag_answers(_heldOnlyBoard):
+    assert SM.PeekPendingChanges(_heldOnlyBoard) is False
+    SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+    assert SM.PeekPendingChanges(_heldOnlyBoard) is True
+    SM.CommitHeld(_heldOnlyBoard)
+    assert SM.PeekPendingChanges(_heldOnlyBoard) is False
+
+
+def test_a_failed_publish_still_lowers_the_flag(monkeypatch, _heldOnlyBoard):
+    """The keys left heldKeys for changedKeys before the publish failed, so
+    nothing is pending any more: the next cycle says so."""
+    import src.core.StateManager as module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("the diff failed")
+
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+        with monkeypatch.context() as patched:
+            patched.setattr(module, "DeepDiff", boom)
+            with pytest.raises(RuntimeError):
+                SM.CommitHeld(_heldOnlyBoard)
+        assert not SM.HasPendingChanges(_heldOnlyBoard)
+        SM.SaveState()
+    assert dirty.told == [(True, True), (False, False)]
 
 
 def test_a_block_that_wrote_an_unheld_key_still_diffs_filtered(

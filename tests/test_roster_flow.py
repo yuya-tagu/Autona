@@ -811,6 +811,46 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
     assert not StateManager.HasPendingChanges("score.2")
 
 
+def test_a_load_that_changes_the_players_per_team_leaves_nothing_lit(
+        world, autonaApp):
+    """Seen on the real window (S4u): from a clean board, a game with another
+    players_per_team left the 反映 button lit, and 反映 did not put it out.
+
+    The roster's writes raise the flag inside the load's save cycle, and the
+    load's commit is only queued there: it lowered the flag while the keys
+    were still pending, so the board, asking HasPendingChanges, kept the
+    button on; the drain said nothing, and a later 反映 had nothing pending to
+    say anything about. Nothing is wrong with the state or out/ meanwhile."""
+    from src.StateManagerBridge import StateManagerBridge
+
+    if RECORD:
+        pytest.skip("not part of the recording")
+    board = autonaApp.board(2)
+    StateManager.CommitHeld("score.2")
+    autonaApp.settle()
+    assert not board.btApply.isEnabled()
+    told = []
+
+    def onDirty(prefix, dirty):
+        if prefix == "score.2":
+            told.append((dirty, StateManager.HasPendingChanges(prefix)))
+
+    bridge = StateManagerBridge.instance
+    bridge.held_dirty_changed.connect(onDirty)
+    try:
+        with _Lifecycle():
+            _loadGameThreaded(TEAM_GAME)
+            autonaApp.settle()
+    finally:
+        bridge.held_dirty_changed.disconnect(onDirty)
+
+    assert len(StateManager.Get("score.2.team.1.player")) == 2
+    assert not StateManager.HasPendingChanges("score.2")
+    assert told[0] == (True, True) and told[-1] == (False, False), told
+    assert not board.btApply.isEnabled(), (
+        "the 反映 button stayed lit with nothing pending")
+
+
 # ── ADR-005 S3e-6 review ─────────────────────────────────────────────────
 
 def _losers(board, team):
@@ -866,24 +906,33 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
     it waits on is the one that wants the lock. The roster's entry points
     -- a change under a caller's lock, the Web's, a threaded game load, a
     commit -- call none from inside a notification or with the lock held,
-    on any thread."""
+    on any thread.
+
+    That includes 反映 on the GUI thread with a roster change pending that
+    the board has not followed yet: the commit's False comes from the drain
+    (S4u), so under the lock and direct, and it is what builds the cards."""
     from src.Helpers import AutonaQtHelper
     web = autonaApp.web()
     board = autonaApp.board(2)
     executor = AutonaQtHelper.gui_executor
     runSync = executor.run_sync
+    follow = board._FollowRoster
     inside = threading.local()
     waits = []
+    builtOnTheFalse = []
 
     def _counted(channel):
         notify = channel.notify
 
         def _notify(*args):
+            lowered = args[-1:] == (False,)
             inside.depth = getattr(inside, "depth", 0) + 1
+            inside.lowered = getattr(inside, "lowered", 0) + lowered
             try:
                 notify(*args)
             finally:
                 inside.depth -= 1
+                inside.lowered -= lowered
         return _notify
 
     def _runSync(fn):
@@ -892,6 +941,21 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                       getattr(inside, "depth", 0)))
         return runSync(fn)
 
+    def _follow():
+        cards = len(board.team1playerWidgets)
+        follow()
+        if (len(board.team1playerWidgets) > cards
+                and getattr(inside, "lowered", 0)):
+            builtOnTheFalse.append(StateManager.lock._is_owned())
+
+    def _rosterFromAnotherThread(players):
+        # Its held cycle is queued for this thread, which is not back in the
+        # event loop before the commit.
+        worker = threading.Thread(
+            target=lambda: AutonaActions.instance.SetRoster(2, players))
+        worker.start()
+        worker.join()
+
     observers = StateManager.observers
     with patch.object(observers.held_state_updated, "notify",
                       _counted(observers.held_state_updated)), \
@@ -899,7 +963,8 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                          _counted(observers.held_dirty_changed)), \
             patch.object(observers.state_updated, "notify",
                          _counted(observers.state_updated)), \
-            patch.object(executor, "run_sync", _runSync), _Lifecycle():
+            patch.object(executor, "run_sync", _runSync), \
+            patch.object(board, "_FollowRoster", _follow), _Lifecycle():
         with StateManager.lock:
             AutonaActions.instance.SetRoster(2, 3, 2)
         assert len(board.team1playerWidgets) == 3
@@ -911,8 +976,23 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
         autonaApp.settle()
         StateManager.CommitHeld("score.2")
         autonaApp.settle()
+        assert not builtOnTheFalse, "the steps above were not to take this path"
+
+        players = len(board.team1playerWidgets)
+        _rosterFromAnotherThread(players + 1)
+        assert len(board.team1playerWidgets) == players
+        StateManager.CommitHeld("score.2")
+        assert len(board.team1playerWidgets) == players + 1
+        autonaApp.settle()
+
+        with StateManager.SaveBlock():
+            AutonaActions.instance.SetRoster(2, players + 2)
+            StateManager.CommitHeld("score.2")
+        assert len(board.team1playerWidgets) == players + 2
+        autonaApp.settle()
     assert waits, "no entry point waited on the GUI thread at all"
     assert not [wait for wait in waits if wait[1] or wait[2]], waits
+    assert builtOnTheFalse == [True, True], builtOnTheFalse
     _assertCardsFollow(board)
 
 

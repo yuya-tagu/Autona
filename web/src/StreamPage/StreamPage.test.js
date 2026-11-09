@@ -15,6 +15,10 @@ import {ChannelDialog} from "./Dialogs";
 // typed title beats an auto title that lands meanwhile, not another
 // writer's.
 
+// CPU, not a wait (fake timers): up to 2 s a test in a whole `npm test`, the
+// same shape as the Commentary page's, which went past the default 5 s there.
+jest.setTimeout(20000);
+
 jest.mock("../websocketConnection", () => {
     const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};

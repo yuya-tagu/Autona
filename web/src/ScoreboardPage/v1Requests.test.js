@@ -15,6 +15,10 @@ import Team from "./Team";
 // Losers tick lands on the side it was made on, swapped or not. These pin
 // the client half: what each control sends.
 
+// CPU, not a wait (waitFor polls a mocked request): up to 2.5 s a test in a
+// whole `npm test`, near what took the Commentary page's past the default 5 s.
+jest.setTimeout(20000);
+
 jest.mock("../api", () => ({
     apiPost: jest.fn(() => Promise.resolve("")),
     apiPatch: jest.fn(() => Promise.resolve("")),

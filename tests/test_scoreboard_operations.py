@@ -365,6 +365,113 @@ def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
         "score.1.team.1.teamName") == "written on onLoad"
 
 
+def test_a_game_load_that_wrote_the_board_leaves_the_apply_button_off(
+        autonaApp):
+    """The load's commit is queued inside its save cycle. The flag used to
+    be lowered right there, with the keys still pending, so the board asked
+    HasPendingChanges and kept the button lit; the drain that followed said
+    nothing, and 反映 had nothing pending to lower it with (S4u). The False
+    now comes from the drain: what the notifications last said is what
+    HasPendingChanges says."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    autonaApp.state.CommitHeld("score.1")
+    autonaApp.settle()
+    assert not board.btApply.isEnabled()
+    told = []
+
+    def onDirty(prefix, dirty):
+        if prefix == "score.1":
+            told.append((dirty, autonaApp.state.HasPendingChanges(prefix)))
+
+    def write():
+        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+
+    signals = AutonaGameAssetManager.instance.signals
+    channel = autonaApp.state.observers.held_dirty_changed
+    signals.onLoad.connect(write)
+    channel.subscribe(onDirty)
+    try:
+        autonaApp.publishGameLoad()
+    finally:
+        channel.unsubscribe(onDirty)
+        signals.onLoad.disconnect(write)
+
+    assert autonaApp.state.HasPendingChanges("score.1") is False
+    assert told == [(True, True), (False, False)], (
+        "each notification did not say what HasPendingChanges said")
+    assert not board.btApply.isEnabled(), (
+        "the 反映 button stayed lit with nothing pending")
+
+    # And a real edit still lights it and 反映 still lowers it.
+    AutonaActions.instance.SetTeamName(1, 1, "edited")
+    assert board.btApply.isEnabled()
+    AutonaActions.instance.ApplyChanges(1)
+    autonaApp.settle()
+    assert not board.btApply.isEnabled()
+
+
+def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
+        autonaApp, monkeypatch):
+    """The Socket.IO notice is on the same notifications (S4u): the load of
+    the test above, through the Bridge as WebServer.__init__ connects it. The
+    last thing a client hears is dirty: false, in whichever flushes the
+    notices fell."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.AutonaWebServer import WebServer
+    from src.core.Actions import AutonaActions
+    from src.StateManagerBridge import StateManagerBridge
+
+    board = autonaApp.board(1)
+    autonaApp.state.CommitHeld("score.1")
+    autonaApp.settle()
+    sent = []
+    monkeypatch.setattr(WebServer, "_held_notices", set())
+    monkeypatch.setattr(WebServer, "_delta_due", None)
+    monkeypatch.setattr(WebServer, "_delta_running", True)
+    monkeypatch.setattr(
+        WebServer, "ws_emit",
+        lambda event, *args, **kwargs: sent.append((event, args[0])))
+    bridge = StateManagerBridge.instance
+
+    def write():
+        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+
+    # A slot of this test's own: a server built earlier in the process has
+    # WebServer.on_held_change connected too, and disconnecting that function
+    # would not say whose connection goes.
+    def told(prefix, dirty=None):
+        WebServer.on_held_change(prefix, dirty)
+
+    signals = AutonaGameAssetManager.instance.signals
+    signals.onLoad.connect(write)
+    bridge.held_state_updated.connect(told)
+    bridge.held_dirty_changed.connect(told)
+    try:
+        autonaApp.publishGameLoad()
+        WebServer._flush_pending_deltas()
+        # This board's: any other held one the load rewrote has its own.
+        notices = [payload for event, payload in sent
+                   if event == "scoreboard_pending" and payload["board"] == 1]
+        assert notices and notices[-1] == {"board": 1, "dirty": False}
+
+        # An edit after it is told as one, and 反映 as the other.
+        del sent[:]
+        AutonaActions.instance.SetTeamName(1, 1, "edited")
+        WebServer._flush_pending_deltas()
+        assert sent[-1] == ("scoreboard_pending", {"board": 1, "dirty": True})
+        AutonaActions.instance.ApplyChanges(1)
+        WebServer._flush_pending_deltas()
+        assert sent[-1] == ("scoreboard_pending", {"board": 1, "dirty": False})
+    finally:
+        bridge.held_state_updated.disconnect(told)
+        bridge.held_dirty_changed.disconnect(told)
+        signals.onLoad.disconnect(write)
+    assert not board.btApply.isEnabled()
+
+
 @contextlib.contextmanager
 def _writtenDuringTheLoad(write):
     """`write` while a game load's save cycle is open, after the wiring's

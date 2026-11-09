@@ -141,7 +141,7 @@ paths:
   ボードに残るのは `AutonaScoreboardWidget._ClearingPlayers` の 2 つ: 入力中の欄の確定（`CommitFocusedEdit`。打ちかけの文字がクリアで消えるのは選手欄だけで、match / チーム名 / スコア欄の打ちかけは旧実装どおりフォーカスアウトで確定する。セット読込の前処理でもフォーカスが外れる）・
   追跡中セットを忘れる（同じセットの再読込が効くように）。id が変わったチームの統計の取り直しは操作の仕事
   （`ClearPlayers` → `StatsService.TeamsChanged`。ADR-005 S3e-5。それまではボードが出していた）。
-  Web の `clear_all` は `ClearBoard` ではなく、旧順序（`ResetMatch` → best_of → 人数・キャラ数 → 選手）で呼ぶ
+  Web の `clear_all` は `ClearBoard` ではなく（`ClearBoard` は v1 の `:reset-all` が呼ぶ。ADR-005 S4u）、旧順序（`ResetMatch` → best_of → 人数・キャラ数 → 選手）で呼ぶ
   （チーム名を残し、人数・キャラ数の変更が mains を決める順を保つ。ADR-005 S2 判断 3）
 - **スワップは state の入れ替え**（S2c）。旧実装は選手カード間の値コピー（`SwapWith`、削除済み）で、
   キャラのバリアントと mains を落とし、ゲームトラッカー ON で勝敗の並びを崩していた。
@@ -333,7 +333,7 @@ paths:
 |-----------|------|------|
 | `state_big_change` | なし | 全面リロード。全ウィジェットのフル再描画をトリガーするため頻繁に発行しない |
 | `state_updated` | payload dict（`revision` / `delta_index` / `delta`） | 差分のみ。WebSocket 経由で Web UI に配信される |
-| `held_dirty_changed` | (prefix, bool) | held サブツリーに未反映の変更が出た(True)／反映された(False) |
+| `held_dirty_changed` | (prefix, bool) | held サブツリーに未反映の変更が出た(True)／反映された(False)。**通知は合図で、購読者は payload を信じず現在値（`HasPendingChanges`）を読む**（`Set` の True は lock の外で出るので、state の変化と順序が前後しうる）。False は `SaveState` が流し切ったところで、まだ未反映が無いときに出る（`CommitHeld` の中では出さない。保存ブロックの中の commit は積むだけで、キーはブロックが閉じるまで未反映のまま。ADR-005 S4u）。だから `CommitHeld` の False も lock の中で出る（pitfalls #17）。公開の失敗（`SaveState` の例外）の後は、次の `SaveState` まで False が出ない（もう一度の反映で再試行される） |
 | `held_state_updated` | (prefix) | held 配下のライブ値が変わった（保存サイクル単位で合体） |
 
 購読側の使い分け:
@@ -372,6 +372,7 @@ paths:
   - `stop()` を `StateManager.lock` を持ったまま呼ばない（flusher の全量送信へのフォールバックが state を読むので、join が期限まで待つ）
   - 間隔（先頭 0・50 / 100 / 200 ms）と payload は外部契約。`tests/test_webserver_delta_debounce.py` が偽の時計（`WebServer._delta_clock`）で pin している
   - 例外は 1 つ: バッチの送信を待つもの（`_after_pending_deltas`。ゲームの切り替えの全量送信）があると、開いているバッチはすぐ送られる（窓を待たない。ADR-005 S3f-4）。`start()` のやり直しでも、待っていたものは捨てずに新しい flusher がすぐ走らせる
+- **未反映の値の通知 `scoreboard_pending`（`{board, dirty}`。値は運ばない）も同じ flusher が送る**（ADR-005 S4u）。`__init__` が Bridge の `held_state_updated` / `held_dirty_changed` を `on_held_change` に繋ぐ。これも `StateManager.lock` の中で走るので、`_delta_cond` の中で積むだけ。`dirty` は送信時に（`_delta_cond` の外で、`StateManager.lock` を取らずに`PeekPendingChanges` で）読む。flusher は全クライアントの delta を送るので保存サイクルの後ろで止まらない。値を運ばない合図で、変われば次の通知が必ず来るので lock なしで足りる。読み手は「最後の通知より後に始めた `GET /scoreboards/{n}/pending`」だけを信じればよい。1 窓に 1 ボード 1 通、同じ送信の delta の後。間隔は通知自身のもの（`_held_notice_ts`）で、delta の `_delta_last_flush_ts` は動かさない。ただし窓は共有で、通知の窓が開いている間に来た delta はその窓に合流する: 先頭で出られたものは最大 50 ms 遅れ、自分の debounce を待つはずだったものは早まる。送信先は `_ws_trusted_rooms()`（`GET .../pending` と同じ権限）
 - Flask アプリと SocketIO インスタンスは static 変数
 - ルートハンドラの行き先は **`src/AutonaWebOperations.py`（モジュール関数）の 1 つだけ**（ADR-005 S3c。S3e-9 で
   ボード依存の `WebServerActions` を削除して 1 本になった）。デスクトップとヘッドレスが同じ関数を通り、違いは
@@ -400,7 +401,7 @@ paths:
 - **公開面の判定は `src/core/WebAccess.py` が正本**（ADR-005 S3a）。サーバー側は `before_request`（`_guard_http_request`）と
   Socket.IO の `ws_on()` 登録（書き込みイベントを `_ws_guard` で包む）から問い合わせるだけ
   - **新しいルート / Socket.IO イベントは `ROUTE_ACCESS` / `EVENT_ACCESS` に分類を足す**（READ / WRITE / PLAYERDB / THIS_PC / DESIGNER / STATIC）。
-    台帳テスト（`tests/test_webserver_routes.py`）が「全 endpoint・全イベントが分類済み」と分類規則（v1 の GET = READ、それ以外 = WRITE 等。例外は選手 DB の行を返す `GET /players`・`GET /players/entrants` で PLAYERDB（ADR-005 S4m）、絶対パスを返す `GET /layouts/selected/board/obs-path` で PLAYERDB、この PC のウィンドウを開く `POST /layouts/selected/board:reveal` で THIS_PC（S4s））を pin する。
+    台帳テスト（`tests/test_webserver_routes.py`）が「全 endpoint・全イベントが分類済み」と分類規則（v1 の GET = READ、それ以外 = WRITE 等。例外は選手 DB の行を返す `GET /players`・`GET /players/entrants` で PLAYERDB（ADR-005 S4m）、未公開の編集を返す `GET /scoreboards/{n}/pending` で PLAYERDB（S4u）、絶対パスを返す `GET /layouts/selected/board/obs-path` で PLAYERDB、この PC のウィンドウを開く `POST /layouts/selected/board:reveal` で THIS_PC（S4s））を pin する。
     分類のない名前は WRITE 扱い（開かない側に倒れる）。GET でも状態を変える legacy ルートは WRITE（効果で分類する）
   - Socket.IO のハンドラは `socketio.on` ではなく `ws_on` で登録する（`socketio.on` で直接登録すると判定を素通りする）
   - WRITE / PLAYERDB: この PC（ループバックか、この PC の LAN IP。`GetLocalIPs()` を初回に引いて保持）からはトークン不要、

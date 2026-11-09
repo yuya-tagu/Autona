@@ -679,6 +679,20 @@ while time.monotonic() < deadline:
 flusher_while_serving = [t.name for t in threading.enumerate()
                          if t.name == "AutonaWebServerDeltas"]
 
+# What a board's pending values did reaches the clients through the Bridge
+# (ADR-005 S4u), both channels, from __init__.
+from src.StateManagerBridge import StateManagerBridge
+notices = []
+real_emit = WebServer.ws_emit
+WebServer.ws_emit = staticmethod(
+    lambda event, *args, **kwargs: notices.append([event, args[0]]))
+StateManagerBridge.instance.held_dirty_changed.emit("score.1", False)
+StateManagerBridge.instance.held_state_updated.emit("score.2")
+deadline = time.monotonic() + 10
+while len(notices) < 2 and time.monotonic() < deadline:
+    time.sleep(0.02)
+WebServer.ws_emit = real_emit
+
 started = time.monotonic()
 stopped = server.stop(10.0)
 stop_seconds = time.monotonic() - started
@@ -709,6 +723,7 @@ failing_thread_gone = failing.stop(5.0)
 report({
     "health": health,
     "flusher_while_serving": flusher_while_serving,
+    "notices": notices,
     "stopped": stopped,
     "stop_seconds": stop_seconds,
     "after_stop": after_stop,
@@ -733,6 +748,9 @@ def test_web_server_thread_serves_stops_and_reports_a_failed_start(
 
     assert result["health"] == [200, "ok"]
     assert result["flusher_while_serving"] == ["AutonaWebServerDeltas"]
+    assert result["notices"] == [
+        ["scoreboard_pending", {"board": 1, "dirty": False}],
+        ["scoreboard_pending", {"board": 2, "dirty": False}]]
     # stop() joins the delta flusher too: no AutonaWebServer* thread is
     # left below (server_threads).
     assert result["stopped"] is True

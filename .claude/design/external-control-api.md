@@ -42,7 +42,7 @@
 ### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
 - バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
 - **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
-  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）と、ユーザー名を含む OBS 用のファイルのパス（`GET /layouts/selected/board/obs-path`。ADR-005 S4s）は書き込みと同じ扱い（`PLAYERDB` 区分）。
+  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）と、ユーザー名を含む OBS 用のファイルのパス（`GET /layouts/selected/board/obs-path`。ADR-005 S4s）と、操作者がまだ公開していない編集（`GET /scoreboards/{n}/pending`。本名を含みうる。ADR-005 S4u）は書き込みと同じ扱い（`PLAYERDB` 区分）。
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
@@ -194,7 +194,7 @@
 
 ## 4. WebSocket 購読（既存を流用）
 
-- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。
+- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 `scoreboard_pending` の 1 つだけ（§5.15。ADR-005 S4u。公開値の配信は変わらない）。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
   - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
@@ -209,11 +209,13 @@
 | `GET /api/v1/state` | 全状態（フル） | `program_state` | #1 |
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
 | `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 は `CrewBattleService` が持つフラグ（state には無い）。ADR-005 S3e-2 からヘッドレス起動でもボード 3 の `swapped` を返す（S3c〜S3e-1 のヘッドレスでは、クルーウィジェットが無いのでキーなしだった）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
+| `GET /api/v1/scoreboards/{n}/pending` | 反映前のライブ値・保留中か・未反映があるか（§5.15。反映前の編集を含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_pending` | — |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
+| `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
@@ -506,9 +508,35 @@ Board のページが OBS の「ローカルファイル」に指定させるフ
 - `winnerPopup`: 勝者ポップアップのファイル。どの一覧にも載らない固定のフォルダ（`layout/winner_popup`）
 - OS の区切り文字のまま。設定であって状態ではないので `revision` は付かない
 
+### 5.15 `GET /api/v1/scoreboards/{n}/pending`（2026-11-09 追加・ADR-005 S4u）
+
+反映前の値を描くフォーム（これから作る React の SCORE ページ）のための読み取り。`{n}` は 1 / 2 / 3（それ以外は `400`）。**公開値には影響しない**: `GET /scoreboards/{n}`・`GET /state`・Socket.IO の `program_state` / `program_state_update`・`out/` の意味は変わらず、反映まで未反映の値を含まない（ADR-005 D4）。
+
+```json
+{ "ok": true, "revision": 12, "data": { "held": true, "dirty": true, "board": { "team": { "1": { "score": 3 } }, "swapped": false } } }
+```
+
+- `held`: このボードが編集を反映まで保留するか。デスクトップのボード 1 / 2 で `true`（未構築なら構築してから答える）。クルーボードとヘッドレスは `false`（書き込みは即時公開）
+- `dirty`: 未反映の変更があるか（`StateManager.HasPendingChanges`。反映ボタンの点灯と同じ値）。`held` が `false` なら常に `false`
+- `board`: ライブ値。形は `GET /scoreboards/{n}` と同じ（`swapped` 含む）。反映後は両者が一致する
+- `revision` と中身は 1 回のロックの中で読む。`revision` は公開済みのもの（`score:adjust` の応答と同じ）で、**未反映の編集では進まない**ので、未反映の値の新しさの判定には使えない。読み直しの合図は下の通知
+- **`PLAYERDB` 区分（§2.2）**: **LAN からはトークン必須**（`401 UNAUTHENTICATED`）。反映前の編集は操作者がまだ公開していない値で、本名を含みうる。READ（CORS `*`）だと他のサイトのページからも読める
+- 委譲: `get_pending`。デスクトップは未構築のボードを構築してから読む（`GET /scoreboards/{n}` と同じ。構築で held になる）
+
+**通知 `scoreboard_pending`（Socket.IO）**: 未反映の値か `dirty` が変わると `{ "board": 1, "dirty": true }` を送る。**値は運ばない**。クライアントは通知のあとに始めた `GET .../pending` の答えを使う（それだけで足りる: 通知は変更の後に積まれるので、最後の通知より後に始めた読みは最後の変更を含む。値の別経路が無いので突き合わせが要らない）。
+
+- `dirty` は**送信時**の値で、1 窓に 1 ボード 1 通にまとまる。先頭はすぐ、続く通知は 50 ms の窓（`program_state_update` と同じ flusher が、同じ送信の delta の後に送る。delta の間隔は通知で動かない。例外は、通知の窓が開いている間に届いた delta がその窓に合流する点で、先頭で出られたものは最大 50 ms 遅れ、自分の窓を待つはずだったものは早まる）
+- 送信先は `GET .../pending` を読める接続（信頼済みの room）だけ。OBS オーバーレイなどトークンなしの LAN の接続には届かない
+- 届くのはデスクトップのボード 1 / 2 の held サイクルからだけで、ヘッドレスでは出ない（`program_state_update` で足りる）。統計の除外キー（`STATS_KEYS`）は held 通知を出さず `program_state_update` で届く
+- 接続の直後は通知が来ないので、最初に 1 回 `GET .../pending` を読む
+
+### 5.16 `GET /api/v1/stages`（2026-11-09 追加・ADR-005 S4u）
+
+読み込み中のゲームのステージ。トラッカーの行のコンボと同じ順（空行を除く）の `[{ "text": "表示名", "en_name": "...", "codename": "...", "path": "...", ... }]`。`en_name` が `PATCH .../stages/{game}` に渡す識別子（§6.36）。`text` のほかは行の値をそのまま（キー順は Qt のモデルが出していた順。`core/GameAssetCatalog.StagesPayload`）。ゲームが無ければ `[]`。
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
-**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5 および §7 の
+**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37 および §7 の
 クリア/リセット/セット読込）は、デスクトップ UI の操作と同一の Qt 経路を通って
 `score.{n}` の held サブツリー（`StateManager.HoldSubtree`）に着地する。したがって
 **アプリのスコアボード入力機能には即座に映るが、layout（OBS オーバーレイ・WS デルタ・
@@ -718,6 +746,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 委譲: `update_tournament_info` → `TournamentInfoService.SetTextField` / `SetNumberField` / `SetDate`（1 つの保存サイクル）。
   開催日は `tournamentInfo.startAt`（PC の短い日付表記。今までどおり）と `startAtDate` に出る。日付は空にできない
 - 次に大会を読み込むと、大会の値で上書きされる（今までどおり）
+- `"displayTournamentName": "..."`（2026-11-09 追加・ADR-005 S4u）: SCORE パネルの表示大会名（`TournamentInfoService.SetDisplayName`）。`TOURNAMENT_INPUT_KEYS` ではない。`tournamentName` の変更は、現在値が空か直前の大会名と同じときだけ表示大会名に追従する（`FollowDisplayName`）ので、それ以外の値を書けば以後の `tournamentName` の変更では上書きされない。大会の選び直しでは上書きされる（`ApplyDisplayNameFromSelection`）。`tournamentName` と同時に送ると、body のキーの順によらず表示大会名の値が勝つ
 - エラー: `INVALID_ARGUMENT`（空 body・未知キー・型・範囲。この PC が時刻にできない日（`startAtDate` を
   その日の 0 時の unix 秒にできない）も 400 で、**ほかの欄も書かない**。S4g レビュー L4）
 
@@ -843,6 +872,20 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`（未知の `target`、`design` なのに `designId` が無い）、`CONFLICT` 409（`designId` が今の選択と違う: 操作者が見ていたファイルではない）、`NOT_FOUND`（ファイルが無い。デザインが無いときも。相対パスをログに残す）、`INTERNAL`（ファイルマネージャを起動できない）。どれも何も開かない
 - 拒否のログには、この PC の要求と認められなかった元の理由（`forwarded` / `foreign_host` / `foreign_origin` など。トークンで通るはずだったものは `token`）を残す。応答は 1 つ
 
+### 6.36 ゲームの行 `PATCH /api/v1/scoreboards/{n}/stages/{game}`（2026-11-09 追加・ADR-005 S4u）
+- `{n}` は 1 / 2。`{game}` は 1 始まり（state の `score.{n}.stages` のキー）
+- body: `{ "winner": 1 | 2 | "tie" | null, "stage": "<en_name>" | null }` の一部。`winner` の `null` は未報告、数字は**状態側のチーム**（ほかの v1 と同じ）。`stage` は §5.16 の `en_name`、`null` で空にする（コンボの空行と同じ）
+- 1 保存サイクルで書く。`winner` は行の合計をチームのスコアに書く（トラッカーのボタンと同じ `PublishStageResults`）。`stage` の値は Qt のコンボの `currentData()` とキー順まで同じ
+- 同じ値はもう一度書かない（反映ボタンを点けない。`winner` の再送で、そのあとの `+1` を行の合計で上書きしない）
+- held 対象（§6 冒頭の反映ゲート）。`revision` は最後に公開されたもの。ヘッドレスは即時公開
+- 判定は**行があるか**で、設定を見ない。トラッカーを OFF にしたあとに残っている行は書ける（行を作るかどうかを決めるのは `SetBestOf` のときの設定だけ）
+- エラー: `INVALID_ARGUMENT`（空 body・未知キー・型・`{game}` が 0・未知のステージ・board 3）、`NOT_READY` 409（行が 1 つも無い: トラッカーが OFF か best of が未設定。これは未知のステージより先に判定する）、`NOT_FOUND` 404（その番号の行が無い）。**断るときは何も書かない**
+
+### 6.37 選手の上下移動 `POST /api/v1/scoreboards/{n}/teams/{t}/players:swap`（2026-11-09 追加・ADR-005 S4u）
+- `{n}` は 1 / 2。`{t}` は状態側のチーム。body: `{ "first": 1, "second": 2 }`（1 以上の整数で別々の番号）
+- カードの上下移動と同じ（`AutonaActions.SwapPlayers`）。入力中の欄を確定してから、スロットをキー単位で入れ替える。統計も取り直す。held 対象
+- エラー: `INVALID_ARGUMENT`（型・範囲・同じ番号・board 3）、`NOT_FOUND` 404（チームにどちらかのスロットが無い。何も動かさない）
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -854,6 +897,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/scoreboards/{n}:clear` | confirm | `clear_all` | #33 |
 | `POST /api/v1/scoreboards/{n}:reset-players` | confirm | `reset_players` | #32 |
 | `POST /api/v1/scoreboards/{n}:reset-match` | confirm | `reset_match` | #31 |
+| `POST /api/v1/scoreboards/{n}:reset-all` | confirm | `reset_all`（`AutonaActions.ClearBoard`。2026-11-09 追加・ADR-005 S4u） | — |
+| `POST /api/v1/scoreboards/{n}/teams/{t}/players/{p}:clear` | confirm | `clear_player`（`PlayerService.ClearSlot`。2026-11-09 追加・ADR-005 S4u） | — |
 | `POST /api/v1/players:delete` | confirm | `delete_player`（`core/PlayerDirectory.Delete`。2026-11-05 追加・ADR-005 S4m） | — |
 | `POST /api/v1/scoreboards/{n}:load-set` | （confirm 推奨） | `load_set` | #38 |
 | `POST /api/v1/scoreboards/{n}:pull-stream` | （confirm 推奨） | `pull_stream_set` | #24 |
@@ -873,6 +918,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
 
+- `:reset-all`: デスクトップの「すべての入力値をリセット」と同じ（`AutonaActions.ClearBoard`。1 保存サイクル）。選手・スコア・match バー・チーム名とロゴ・best of を空にし、**人数・キャラ数は残す**。入力中の欄を先に確定し、最後に読んだセットを忘れる（同じセットを読み直せる）。**`:clear` とは別の動作**: `:clear` はチーム名を残し（人数が 1 人になるときを除く）、人数・キャラ数を既定に戻す。board 3 は `400`。held 対象
+- `players/{p}:clear`: カードのクリアボタンと同じ（`PlayerService.ClearSlot`。birthday・city・mains は残る）。`{t}` は状態側のチーム。入力中の欄を先に確定する。スロットが無ければ `404 NOT_FOUND`。board 3 は `400`。held 対象
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
   非同期で、応答は受付時点の `revision`。大会が読み込まれていなければ **409 `NOT_READY`**（`no tournament loaded`）で、ボードに何も
   書かない（legacy `load-set` / `pull-stream`・Socket.IO `load_set` / `pull_stream` は何もせず `OK`。それまでのデスクトップは選手と
@@ -887,7 +934,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   何も接続されておらず何も起きなかった（ADR-005 S3e 論点 3）
 
 ### 7.2 確認フラグ（C-2 / D7）
-- **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`・`POST /players:delete`）は body に **`"confirm": true` 必須（MUST）**。
+- **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`）は body に **`"confirm": true` 必須（MUST）**。
   無い/false なら **`409 CONFIRMATION_REQUIRED`**（状態は変更しない）。
 - `POST /players:delete`: body は `{ "key": "SP Alpha", "confirm": true }`（`key` は §5.11 の行の DB キー。タグだけでは一致しない）。文字列でない `key` は `INVALID_ARGUMENT`、DB に無い `key` は `404 NOT_FOUND`（保存も通知もしない）。選手 DB なので応答に `revision` は付かない。操作ログは `player.delete`（キー名のみ）
 - 「配信中」自動ブロックは**初回は設けない**（Autona に配信状態判定手段が無いため）。confirm のみで担保。

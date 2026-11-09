@@ -923,6 +923,11 @@ class WebServer:
             WebServer.on_program_state_update)
         StateManagerBridge.instance.state_big_change.connect(
             WebServer.ws_program_state)
+        # The same delivery for what the board's pending values did (S4u).
+        StateManagerBridge.instance.held_state_updated.connect(
+            WebServer.on_held_change)
+        StateManagerBridge.instance.held_dirty_changed.connect(
+            WebServer.on_held_change)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
@@ -985,6 +990,10 @@ class WebServer:
     # What waits for the open batch to go out (_after_pending_deltas): run
     # by the flusher right after it sends that batch, in arrival order.
     _delta_after = []
+    # The boards whose pending (未反映) values changed since the last flush:
+    # the `scoreboard_pending` notices that flush sends (on_held_change).
+    _held_notices = set()
+    _held_notice_ts = 0.0        # _delta_clock() of the last notices sent
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -1017,9 +1026,11 @@ class WebServer:
         with WebServer._delta_cond:
             payload = WebServer._take_pending_deltas()
             after = WebServer._take_after_deltas()
+            notices = WebServer._take_held_notices()
         if payload is not None:
             WebServer._send_deltas(payload)
         WebServer._run_after_deltas(after)
+        WebServer._send_held_notices(notices)
 
     @staticmethod
     def _after_pending_deltas(fn):
@@ -1134,6 +1145,75 @@ class WebServer:
                 WebServer._delta_due = now + interval
                 WebServer._delta_cond.notify_all()
 
+    # ── The pending values' notice (ADR-005 S4u) ─────────────────────
+    # `scoreboard_pending` {board, dirty} tells a client that a held board's
+    # live values changed; the values themselves are read back with GET
+    # /api/v1/scoreboards/{n}/pending. A notice carries no value, so there is
+    # no second stream of values to keep in step with that answer, and nothing
+    # to reorder: every write is told after it is made, so the answer to a GET
+    # started after the last notice has them all.
+    #
+    # One flusher, one socket order: the notices go out with the batch, after
+    # its deltas, and a burst of edits makes one notice per board per window.
+    # `dirty` is read when it is sent, as the board reads it on
+    # held_dirty_changed: a queued notification can be older than the state.
+    # The deltas' own schedule is not touched: a notice's quiet spell is its
+    # own, and a flush with notices only is not a flush of deltas
+    # (_delta_last_flush_ts). A notice's window is shared, though: a delta
+    # that arrives while one is open joins it, so it goes up to 50 ms later
+    # than its leading edge would have sent it, or earlier than its own
+    # debounce would have.
+
+    @staticmethod
+    def on_held_change(prefix, dirty=None):
+        """held_state_updated / held_dirty_changed of a board. Queues and
+        notifies only, like on_program_state_update: both are told inside a
+        held cycle, under StateManager.lock (agent-pitfalls #17)."""
+        parts = str(prefix).split(".")
+        if len(parts) != 2 or parts[0] != "score" or not parts[1].isdigit():
+            return
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
+            WebServer._held_notices.add(int(parts[1]))
+            if WebServer._delta_due is None:
+                now = WebServer._delta_clock()
+                quiet = (now - WebServer._held_notice_ts) >= 0.05
+                WebServer._delta_due = now if quiet else (
+                    now + WebServer._adaptive_debounce_sec(0))
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _take_held_notices():
+        """The boards to tell about in this flush. Called holding
+        _delta_cond."""
+        notices = WebServer._held_notices
+        if notices:
+            WebServer._held_notices = set()
+            WebServer._held_notice_ts = WebServer._delta_clock()
+        return notices
+
+    @staticmethod
+    def _send_held_notices(boards):
+        # Outside _delta_cond, like a send. To the connections that may read
+        # the pending values (the rooms of the player DB; the route is guarded
+        # the same way): a notice is of no use to any other.
+        #
+        # The flag is peeked, not read under StateManager.lock: this thread
+        # sends every client's deltas, and must not stop behind a save cycle.
+        # It can be a moment old and that is enough: `dirty` is a cue carrying
+        # no value, and whatever changes it is told again after the change, so
+        # the next notice has it. What a client draws comes from the GET.
+        for board in sorted(boards):
+            try:
+                WebServer.ws_emit(
+                    'scoreboard_pending',
+                    {'board': board,
+                     'dirty': StateManager.PeekPendingChanges(f"score.{board}")},
+                    to=WebServer._ws_trusted_rooms())
+            except Exception:
+                logger.error(traceback.format_exc())
+
     @staticmethod
     def _run_delta_flusher(generation):
         """The flusher thread: send each batch when it is due, and the one
@@ -1169,9 +1249,11 @@ class WebServer:
                 dueNow = False
                 payload = WebServer._take_pending_deltas()
                 after = WebServer._take_after_deltas()
+                notices = WebServer._take_held_notices()
             if payload is not None:
                 WebServer._send_deltas(payload)
             WebServer._run_after_deltas(after)
+            WebServer._send_held_notices(notices)
             if not running:
                 return
 
@@ -1190,6 +1272,7 @@ class WebServer:
             WebServer._delta_pending = []
             WebServer._delta_pending_revision = -1
             WebServer._delta_pending_first_revision = -1
+            WebServer._held_notices = set()
             WebServer._delta_due = (
                 WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()

@@ -711,3 +711,237 @@ def test_a_writer_holding_the_state_lock_never_waits_on_the_flusher(
     assert flusher.waitFor(2)
     assert flusher.payloads() == [_payload(1, 1, _rows(1, 1)),
                                   _payload(2, 2, _rows(2, 1))]
+
+
+# ── the pending values' notice (ADR-005 S4u) ─────────────────────────────
+# held_state_updated / held_dirty_changed of a board become one
+# `scoreboard_pending` {board, dirty}: no value (the client reads the guarded
+# GET), `dirty` read when it is sent, after the deltas of its flush, from the
+# flusher, on a schedule of its own.
+
+PENDING = "scoreboard_pending"
+
+
+@pytest.fixture
+def notices(monkeypatch, debounce):
+    monkeypatch.setattr(WebServer, "_held_notices", set())
+    monkeypatch.setattr(WebServer, "_held_notice_ts", 0.0)
+    monkeypatch.setattr(WebServer, "_ws_trusted_rooms",
+                        staticmethod(lambda: ["the trusted room"]))
+    from src.core.StateManager import StateManager
+    debounce.dirty = {}
+    monkeypatch.setattr(
+        StateManager, "PeekPendingChanges",
+        staticmethod(lambda prefix: debounce.dirty.get(prefix, False)))
+    return debounce
+
+
+def _toldAt(debounce, ms, prefix="score.1", *dirty):
+    debounce._fireUntil(_at(ms))
+    debounce.clock.now = _at(ms)
+    WebServer.on_held_change(prefix, *dirty)
+
+
+def _notice(ms, board, dirty):
+    return (ms, PENDING, [{"board": board, "dirty": dirty}],
+            {"to": ["the trusted room"]})
+
+
+def test_a_notice_after_a_quiet_spell_goes_out_at_once(notices):
+    _toldAt(notices, 0)
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(0, 1, False)]
+
+
+@pytest.mark.parametrize("told", [(), (True,), (False,)])
+def test_both_channels_say_the_same_thing(notices, told):
+    # held_state_updated(prefix) and held_dirty_changed(prefix, dirty): what
+    # the notice says is read when it is sent, not what the channel said.
+    notices.dirty["score.2"] = True
+    _toldAt(notices, 0, "score.2", *told)
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(0, 2, True)]
+
+
+def test_a_burst_is_one_notice_a_window(notices):
+    _toldAt(notices, 0)
+    _toldAt(notices, 10)
+    _toldAt(notices, 20)
+    _toldAt(notices, 30, "score.1", True)
+    _toldAt(notices, 59)
+    _toldAt(notices, 200)
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(0, 1, False), _notice(60, 1, False),
+                            _notice(200, 1, False)]
+
+
+def test_the_flag_is_the_one_when_it_is_sent(notices):
+    # The True of a load's first write, then the False of its commit, inside
+    # one window: the client is told once, and what is true by then.
+    _toldAt(notices, 0)
+    notices._fireUntil(_at(0))
+    notices.dirty["score.1"] = True
+    _toldAt(notices, 10, "score.1", True)
+    notices.dirty["score.1"] = False
+    _toldAt(notices, 20, "score.1", False)
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(0, 1, False), _notice(60, 1, False)]
+
+
+def test_each_board_has_its_notice(notices):
+    _toldAt(notices, 0, "score.2")
+    WebServer.on_held_change("score.1")
+    notices.dirty["score.1"] = True
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(0, 1, True), _notice(0, 2, False)]
+
+
+@pytest.mark.parametrize("prefix", [
+    "score", "score.", "score.x", "score.1.team", "top8.1", "commentary"])
+def test_only_a_board_is_told_about(notices, prefix):
+    WebServer.on_held_change(prefix)
+    WebServer.on_held_change(prefix, True)
+    assert WebServer._held_notices == set()
+    assert notices.driver.due() is None
+
+
+def test_a_notice_goes_after_the_deltas_of_its_flush(notices):
+    notices.arrive(0, _changes(1))
+    notices.arrive(10, _changes(2))
+    _toldAt(notices, 20)
+    notices.arrive(30, _changes(3))
+    notices._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in notices.sent] == [
+        (0, "program_state_update"), (60, "program_state_update"),
+        (60, PENDING)]
+    # The rows of the delta are the ones they would have been.
+    assert notices.sent[1][2] == [
+        _payload(2, 3, _rows(2, 1) + _rows(3, 1))]
+
+
+def test_the_deltas_schedule_does_not_follow_a_notice(notices):
+    # A flush of notices alone is no flush of deltas, so the delta right after
+    # one is on its own leading edge.
+    _toldAt(notices, 0)
+    notices.arrive(10, _changes(1))
+    notices._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in notices.sent] == [
+        (0, PENDING), (10, "program_state_update")]
+
+
+def test_a_notice_does_not_follow_the_deltas_schedule(notices):
+    notices.arrive(0, _changes(1))
+    _toldAt(notices, 10)
+    notices._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in notices.sent] == [
+        (0, "program_state_update"), (10, PENDING)]
+
+
+def test_a_delta_joins_a_notices_open_window(notices):
+    # The one thing the two schedules share (the batch): up to 50 ms on a
+    # delta that had a leading edge coming. Documented in the docs of S4u.
+    _toldAt(notices, 0)
+    _toldAt(notices, 10)
+    notices.arrive(20, _changes(1))
+    notices._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in notices.sent] == [
+        (0, PENDING), (60, "program_state_update"), (60, PENDING)]
+
+
+def test_a_delta_can_leave_ahead_of_its_own_window_with_a_notices(notices):
+    # The other side of it: on its own, this delta (20 ms after a flush) would
+    # wait until 70 ms. Documented in the docs of S4u too.
+    notices.arrive(0, _changes(1))
+    _toldAt(notices, 5)
+    _toldAt(notices, 10)
+    notices.arrive(20, _changes(2))
+    notices._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in notices.sent] == [
+        (0, "program_state_update"), (5, PENDING),
+        (60, "program_state_update"), (60, PENDING)]
+
+
+def test_a_failed_notice_takes_nothing_with_it(notices):
+    notices.fail = RuntimeError("the socket said no")
+    _toldAt(notices, 0, "score.1")
+    WebServer.on_held_change("score.2")
+    notices._fireUntil(None)
+    notices.fail = None
+    _toldAt(notices, 100)
+    notices._fireUntil(None)
+    assert notices.sent == [_notice(100, 1, False)]
+
+
+def test_without_a_flusher_a_notice_is_not_kept(notices, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    WebServer.on_held_change("score.1")
+    assert WebServer._held_notices == set()
+    assert notices.driver.due() is None
+
+
+def _pendingOnly(sends):
+    with sends.cond:
+        return [(event, payload) for _t, _at, event, payload in sends.sent
+                if event == PENDING]
+
+
+def test_the_flusher_sends_a_notice_on_its_own_thread(flusher):
+    flusher.start()
+    thread = WebServer._delta_thread
+
+    WebServer.on_held_change("score.1")
+
+    assert flusher.waitFor(1)
+    assert _pendingOnly(flusher) == [(PENDING, {"board": 1, "dirty": False})]
+    assert flusher.threads() == [thread]
+    assert flusher.stop() is True
+
+
+def test_stop_sends_the_notices_still_open(flusher, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    flusher.start()
+    WebServer.on_held_change("score.1")    # at once
+    assert flusher.waitFor(1)
+
+    WebServer.on_held_change("score.2")    # a 50 ms window, on a stopped clock
+    assert flusher.stop() is True
+
+    assert _pendingOnly(flusher) == [
+        (PENDING, {"board": 1, "dirty": False}),
+        (PENDING, {"board": 2, "dirty": False})]
+
+    # After stop(): nothing is kept, and a new start() starts clean.
+    WebServer.on_held_change("score.1")
+    assert WebServer._held_notices == set()
+
+
+def test_a_notice_goes_out_with_the_state_lock_held(flusher, monkeypatch):
+    # agent-pitfalls #17: both channels run under StateManager.lock when the
+    # write was on the GUI thread, and a save cycle can keep it a while. This
+    # flusher sends every client's deltas, so it peeks at the flag instead of
+    # stopping behind the lock: each notice arrives with the writer still
+    # holding it. (Reading under the lock, the first wait here runs out.)
+    from src.core.StateManager import StateManager
+
+    monkeypatch.setattr(StateManager, "heldKeys", {})
+    flusher.start()
+    arrived = []
+
+    def writer():
+        with StateManager.lock:
+            WebServer.on_held_change("score.1")
+            arrived.append(flusher.waitFor(1, timeout=30))
+            StateManager.heldKeys["score.1"] = ["a key"]
+            WebServer.on_held_change("score.1", True)
+            arrived.append(flusher.waitFor(2, timeout=30))
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    thread.join(90)
+    assert not thread.is_alive()
+
+    assert arrived == [True, True]
+    assert _pendingOnly(flusher) == [
+        (PENDING, {"board": 1, "dirty": False}),
+        (PENDING, {"board": 1, "dirty": True})]
