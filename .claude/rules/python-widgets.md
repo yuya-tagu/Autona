@@ -47,10 +47,9 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
 （`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` /
 `core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
-ボードの選手スロットは、デスクトップではボードの構築時に `AutonaActions.SetRoster` が書き（ADR-005 S3e-6。
-それまではボードのウィジェットが publish していた）、クルーボードの起動時の中身はボードのウィジェットが
-publish する。ヘッドレスは同じものを core の `PlayerService.SeedEmpty()` / `SeedEmptyRoster()` と
-`CrewBattleService.SeedDefaults()` でシードする（ADR-005 S3d。既定の人数・キャラ数は
+新しいボードの中身（選手スロット・既定色・スコア・`best_of`・クルーボードまで）は、両シェルとも
+`AutonaActions.SeedFreshBoard(board)` が書く（ADR-005 S4t。デスクトップは `EnsureScoreboard` がウィジェットの構築の前に、
+ヘッドレスは `_SeedBoards` が起動時に呼ぶ。それまではボードのウィジェットが publish していた。既定の人数・キャラ数は
 `PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本で、ボードもこれを読む）。
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
 `EnsureXxxPanel()` アクセサを足す。

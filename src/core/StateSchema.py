@@ -798,8 +798,8 @@ DYNAMIC_KEY_FAMILIES = ()
 def SeedBoard(number):
     """Write the empty skeleton of one board's ``score.{number}`` subtree.
 
-    Called from two places, which is the point: the board's own constructor
-    (so a built board starts from a known shape) and
+    Called from two places, which is the point: AutonaActions.SeedFreshBoard
+    (so a new board starts from a known shape) and
     AutonaScoreboardManager.CreateScoreboard for the boards that are *not*
     built at launch (so the Web UI and the OBS overlays read an empty board
     rather than "no such key"). Both used to carry their own copy of the
@@ -814,9 +814,8 @@ def SeedBoard(number):
     prefix = f"{SCORE_ROOT}.{number}"
     StateManager.Set(prefix, {})
     if str(number) == "3":
-        # Crew battle (AutonaCrewBattleWidget) has no set history and no
-        # station queue; the rest of its subtree is written by its own
-        # _writeInitialState().
+        # Crew battle has no set history and no station queue; the rest of
+        # its subtree is CrewBattleService.SeedDefaults()'s.
         return
     StateManager.Set(f"{prefix}.last_sets.1", {})
     StateManager.Set(f"{prefix}.last_sets.2", {})
@@ -832,8 +831,8 @@ def HoldBoard(number):
     until ``StateManager.CommitHeld`` (the 反映 button, ``ApplyChanges``);
     ``STATS_KEYS`` are fetched data, not edits, and publish at once.
 
-    Called by the board's constructor, after its ``SeedBoard()`` -- a
-    registration made first would hold back the skeleton itself. A board
+    Called by the board's constructor, after AutonaActions.SeedFreshBoard --
+    a registration made first would hold back the seed itself. A board
     that is not built is not held: nothing would ever apply its edits (the
     反映 button is on the board, and the Web UI has none), and the seed
     written when the board is built would wipe them. Holding the unbuilt
@@ -849,19 +848,20 @@ def HoldBoard(number):
 def PublishDisplayOptions():
     """Re-publish all eight display options from their persisted defaults.
 
-    Run when a 1v1 / team board is built, which is what the "SettingsManager
-    is the source of truth, StateManager is what the overlays render" mirror
-    rests on: whatever a previous session left in program_state.json is
-    brought back in line with the settings file the toggles actually persist
-    to. Unlike the missing-keys-only pass in ``SeedPanelState()`` this
-    rewrites every key, because that is what the board's constructor has
-    always done -- it used to spell the loop out inline, over its own copy of
-    the option list.
+    Run when the desktop builds a 1v1 / team board
+    (AutonaScoreboardManager.EnsureScoreboard), which is what the
+    "SettingsManager is the source of truth, StateManager is what the
+    overlays render" mirror rests on: whatever a previous session left in
+    program_state.json is brought back in line with the settings file the
+    toggles actually persist to. Unlike the missing-keys-only pass in
+    ``SeedPanelState()`` this rewrites every key, because that is what a new
+    board has always done -- its constructor used to spell the loop out
+    inline, over its own copy of the option list. Not on the headless shell,
+    which builds no board: it has only ever had the missing-keys pass, and
+    what it restored stays (AutonaActions.SeedFreshBoard).
 
-    Not a ``SaveBlock``: the caller owns the cycle
-    (``AutonaScoreboardManager.EnsureScoreboard`` already wraps the whole
-    construction in one), and ``display_options.*`` is not held, so an
-    unblocked call here would fire eight of them.
+    Not a ``SaveBlock``: the caller owns the cycle, and ``display_options.*``
+    is not held, so an unblocked call here would fire eight of them.
     """
     for key, default in DISPLAY_OPTION_DEFAULTS.items():
         path = f"{DISPLAY_OPTIONS_ROOT}.{key}"
@@ -943,13 +943,13 @@ def SeedPanelState():
         SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR))
 
     # display_options.*: the Web UI eye menu and the OBS overlays render
-    # field visibility from these keys, but the only writer is a 1v1 / team
-    # board's constructor -- so an operator whose saved format is the crew
+    # field visibility from these keys, but the only other writer is a 1v1 /
+    # team board's seed -- so an operator whose saved format is the crew
     # board (score.3, which has no eye menu) never gets them written at all.
     #
     # Missing keys only. SettingsManager is the persisted source of truth
     # here: every toggle writes SettingsManager *and* StateManager, and a
-    # board rewrites all eight from SettingsManager when it is built. Reading
+    # board rewrites all eight from SettingsManager when it is seeded. Reading
     # the same source keeps a headless seed identical to what a GUI launch
     # ends up with, and the guard keeps a restored program_state.json value
     # from being republished for the one save cycle before a board is built.

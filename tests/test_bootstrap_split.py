@@ -246,16 +246,21 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
                             "src/headless.py")}
     assert counts == {"src/bootstrap.py": 1, "src/Autona.py": 0,
                       "src/headless.py": 1}
-    # ...and no board applies the game's counts on its own any more: its
-    # onLoad handler follows the roster the wiring wrote.
+    # ...and no board writes on a game load any more: its onLoad handler
+    # follows the roster the wiring wrote and shows the state. These are all
+    # it calls (the rows' model, then the held cycle's renders), and
+    # test_a_boards_game_load_handler_writes_nothing runs it under a spy.
     board = (PROJECT_ROOT / "src" / "AutonaScoreboardWidget.py").read_text(
         encoding="utf-8")
     handler = next(
         node for node in ast.walk(ast.parse(board))
         if isinstance(node, ast.FunctionDef)
         and node.name == "_onGameAssetsLoaded")
-    assert "SetDefaultsFromAssets" not in ast.unparse(handler)
-    assert "SetRoster" not in ast.unparse(handler)
+    assert {node.func.attr for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)} == {
+                "RebindStageModel", "_FollowRoster", "_SchedulePlayerRender",
+                "_SyncSetFields", "_SyncBestOf", "_SyncScoreDisplays"}
 
 
 def _calls(path):

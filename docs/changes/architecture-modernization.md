@@ -6177,3 +6177,71 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
 - **オーナー実機確認**（`python main.py`）
   - `.claude/manual-test-checklist.md` の「スコアボード設定（Board）」。特に、Designer のウィンドウ（開く・前面・閉じた後の一覧の更新。QtWebEngine で window の `focus` が届くか）、`explorer /select,"..."` の空白とカンマを含むパス、背景と勝者ポップアップの重ね表示、OBS のパスのコピーと貼り付け、色の反映
   - 機能削除の確認: プレビューの「クリップボードにコピー」「画像として保存」の廃止
+
+### S4 SCORE の React 化 — 設計（2026-11-09）
+
+ナビに残る Qt は SCORE（Crew 含む）と Settings。SCORE は最大のパネルで、ボードのウィジェットが state のシード・トラッカーの所有・スコアから行への追従を持っているため、React のページを書く前に段階を分ける。
+
+**決定**
+
+1. **反映（held）は案 A: サーバー側の held を残し、所有者を core に移す**（オーナー決定、2026-11-09）。デスクトップは反映を押すまで OBS / `out/` に出さない。ヘッドレスは即時公開のまま（反映ボタンが無い）。外部 API の `:apply` と Ctrl+Shift+L を維持する。理由: 配信中の OBS に確定前の編集を出さない。外部 API の仕様を変えない
+2. **全体の順序**
+   1. ボードのライフサイクルの core 化（S4t）
+   2. トラッカーの独立（S4t）
+   3. held の v1 読み取り
+   4. v1 の追加（ステージ・選手の上下移動・スロットクリア・配信台・追従・セット取得・表示名・`ClearBoard`・Crew）
+   5. Widget 依存の除去
+   6. React のページ
+   7. Qt の削除
+3. **`schema.HoldBoard` の起動時登録は React の反映ボタンと同時か後にする**: 今はボードの `__init__` だけが登録する。S2 判断 7 の撤回（上の S2c、2026-10-23）と同じ理由で、Web に反映ボタンが無いまま起動時から held にすると、形式と食い違う面への書き込みがどこにも出ないまま残り、held が残り続ける間は保存サイクルごとに state 全量の複製も走る。S4t では動かさない
+4. **クルーのスワップのフラグ（`CrewBattleService._swapped`）は state の外のまま**（台帳として記録）。`program_state.json` のキーを増やさないため S3e-2 で state に入れなかったもの。S4t で動かす必要は無かった（`SeedDefaults` が消すのは今までどおり）。Crew の v1 を足すときに改めて判断する
+
+#### S4t ボードのライフサイクルとトラッカーを core へ（2026-11-09）
+
+上の順序の 1 と 2。**デスクトップの state・キー順・公開は変えていない**（下の比較）。Qt のパネルは残している。
+
+- **完了内容**
+  - **`AutonaActions.SeedFreshBoard(board)`**: 新しいボードの起動時の書き込みを 1 つの操作にした（1 保存サイクル、ボードの有無によらない）。1v1 / チームは `SeedBoard` → 既定のチーム色・空のチーム名・LOSERS → `SetRoster`（既定の人数・キャラ数。`players_per_team` が null / 数でないゲームは 1）→ match バー → `best_of` 0 → スコア 0、クルーは `SeedBoard` + `CrewBattleService.SeedDefaults()`。順序は置き換えた構築の順で、新しい `program_state.json` のキー順そのもの
+  - 呼び手は `AutonaScoreboardManager.EnsureScoreboard`（ウィジェットの構築の前）と `src/headless._SeedBoards`（1・2・3）。ウィジェットの `__init__` からシードの emit・`SetRoster`・`SetBestOf(0)`・既定色・`SeedBoard`・`PublishDisplayOptions`、クルーの `SeedBoard` / `SeedDefaults` を削除した。ボードは構築時に state を描画するだけで、`__init__` の末尾で held サイクルと同じ描画を 1 回行う（シードと `HoldBoard` の間に別スレッドが書いた値は held 通知にならない）。`PlayerService.SeedEmptyRoster` は呼び手が無くなったので削除
+  - **トラッカーは常時 core に**: `AutonaActions._gameTrackers` をボード 1 / 2 ごとに `__init__` で作り、`GameTracker(board)` で引く。`AutonaIndividualGameTracker.service` は同じ 1 個。`RegisterGameTracker` / `UnregisterGameTracker` を削除
+  - **スコア → 行の追従は操作の中**: `GameTrackerService.Scores()`（読む）と `FollowScores(before)`（差分を両チーム 1 サイクルで行へ。行が無ければ何も書かない）。`AdjustScore` / `ResetScore` / `SetScore` / `ClearScore` と `SetFollowService.ApplySetPayload` が、読みから書きまで `StateManager.lock` と 1 つの `SaveBlock` の中で呼ぶ。逆向きの `PublishStageResults`（行 → スコア）も集計から書き込みまで同じ lock の中（間に `+1` が入ると古い合計で上書きする）。中で動くのは state の読み書きだけで、`SaveBlock` は lock の外で閉じるので、held 通知の扱いは `+1` と同じ（agent-pitfalls #17）。セット読込は `SetBestOf` の後で、読込の前のスコアからの差（`reset_score` の 0 を挟んだ同じスコアなら行は動かない）。旧実装はボードの held ハンドラ（`_SyncScoreDisplays`。旧値はスピンボックス）で、入替を `_NoticeSwap` で、行の集計自身の書き込みを `writingScore` で見分けていた。これらと `_syncingScore` / `_seenTeamsSwapped` / `followStages` を削除した。`_SyncScoreDisplays` は描画だけ
+  - **ゲームのロード**: `AutonaActions.RepublishBestOfs()`（`best_of` のあるボードだけ。未構築ボードの skeleton は触らない）を `bootstrap.wire_game_roster` のロスターと同じ block に入れた。`CommitGameLoad()`（1v1 / チームの `ApplyChanges`）はアダプタの `_Publish` が `onLoad` の後に呼ぶ。`_onGameAssetsLoaded` は書かない（行のモデルの付け替え・カードの追従と、held サイクルと同じ `_SyncSetFields` / `_SyncBestOf` / `_SyncScoreDisplays`。判断 10）。`SetDefaultsFromAssets` を削除
+  - `general.disable_autoupdate` の強制は `SetFollowService.TurnOffPolling()` にして、`EnsureScoreboard` が 1v1 / チームの構築時に呼ぶ。`schema.PublishDisplayOptions()` も同じ場所で呼ぶ（判断 9）
+- **ヘッドレスの state の前後比較**（`headless.Assemble` を tmp の CWD で実行し、S4t の前後で `state` と `out/` の全量を JSON で比較した）
+  - **トラッカー OFF（既定）**: 起動時の state に **36 キー増える**（ボード 1 / 2 に 18 ずつ。ボード 3 は差なし）。消えるキー・値が変わるキーは無い。増えるのは `best_of` = 0・`best_of_short_text` = `BO0`・`best_of_text` = 空・`first_to` = 0・`first_to_short_text` = `FT0`・`first_to_text` = 空・`match` / `phase` / `pool` = 空・`stages` = `{}`・`team.1.color` = `#fe3636`・`team.2.color` = `#2e89ff`・`team.{t}.losers` = False・`team.{t}.score` = 0・`team.{t}.teamName` = 空
+  - `out/` は **34 ファイル増える**（ボードごとに 17。`stages` は空なのでファイルにならない）。消えるファイルは無い。ルートのキー順は変わらない。`program_state.json` の `score` はライブと一致する
+  - **トラッカー ON**: 上に加えて、`SetBestOf` で `stages.{n}.{t1_win,t2_win,tie}` と `out/score/{b}/stages/{n}/*.txt`（BO3 で 9 ファイル）ができ、`+1` が行に追従する。前はヘッドレスに行が無かった
+  - **`state.json` と `settings.json` が食い違う起動**（`state.json` の `display_options` が設定と逆で 1 キー欠け、設定に独自のチーム色）: `display_options`（ライブ・`program_state.json`）とルートのキー順は前後で同じ。違うのは `score.{1,2}.team.{t}.color` が無い → 設定の色、だけ（判断 9 の検収で実測）
+  - **見える変化**: `layout/scoreboard_simple` / `scoreboard_Universal` / `scoreboard_team` の `index.js` は `team.color` があれば `--p{side}-score-bg-color` に当てるので、ヘッドレスのオーバーレイがデスクトップと同じ既定のチーム色になる
+- **デスクトップの比較**（新規ボード・人数変更・全操作をトラッカー OFF / ON で、実際の `_Publish` を通したゲームのロードまで 53 場面。ライブと公開の両方の JSON をキー順ごと、dirty フラグ・スピンボックス・ボタン・チームカードの表示）: 1 点（下の判断 4）を除いて一致。`tests/test_player_card_render.py` の録画（6a6f04cc からの state・キー順・公開の digest）も `cycles` を除いて全ステップ一致
+- **判断**
+  1. **ヘッドレスのシードは全面的に一本化した（キーが増える）**: 形を保つ方法は、ヘッドレスだけ `SeedFreshBoard` の一部を飛ばすことになり、S4 の 4〜7 段（v1 と React が両シェルの同じ形を読む）でまた外すことになる。増えるのは「デスクトップなら最初からある」キーだけで、消える・値が変わるものは無い。S3d の判断 9（ヘッドレスのボードに色・名前・スコアが無いことを受け入れた）を解消する。`tests/test_headless_seed.py` はボード全体をキー順まで比較するようにした
+  2. **`disable_autoupdate` の強制はデスクトップだけ**: `docs/operations/runtime-operations.md` がヘッドレスの取り直しをこの設定で案内しているので、seed に入れると動作が変わる
+  3. **`CommitGameLoad` は結線に入れずアダプタの `_Publish` に置いた**: カードの `ReloadCharacters` が `onLoad` の中でコンボの行を書くので、`gameLoaded` の時点で commit すると held の書き込みが後に残り、反映ボタンが点いたまま消えない。ヘッドレスは held が無いので呼ばない。Qt のカードが消えたら結線へ移せる
+  4. **実ロードのボタンの再描画を直した（小さな修正）**: 旧実装は onLoad の中で `CommitHeld` が held 通知を捨てるので、実ロードの後、state の行はリセット済みなのにステージのボタンだけ押されたまま残っていた（録画の `_gameLoaded` はボタンを見ていなかった）。`_onGameAssetsLoaded` の `_SyncBestOf()` が行を作り直して描画するので消える（ボタンは下の実機確認のとおり画面に出ていないので、ウィジェットの状態の話）
+  5. **トラッカー ON の `+1` は held 2 サイクルから 1 サイクルになる**（スコアと行を同じ block で書くため）。公開されるものは同じ。行のボタンのクリック（行 → スコア）は 2 サイクルのまま
+  6. **`_SettleUnannounced` の経路（モデルの作り直しの失敗・終了中）は行を republish しない**: ロスターと `ApplyChanges` だけのまま（既存のコメントどおり）
+  7. **`STATE_VERSION` は上げない**: `Window.STATE_VERSION`（ナビ）は 22 のまま、`StateMigrations.CURRENT_VERSION` も据え置き。`score` は起動のたびに `ResetScoreRoot` で捨てて作り直すサブツリーで、デスクトップの形は不変、ヘッドレスは増えるだけ
+  8. **シングルスのチーム名欄は `_applyScoreboardMode` が人数を見る**（`not singlePlayer or 2 人以上`）。旧実装は 1 人で構築して欄を隠し、その後の `SetDefaultsFromAssets` が人数を増やすとカードの表示（`_FollowCards`）が欄を出し直していた。シードが人数を先に決めるので順序が逆になり、同じ見た目を描画で保った。`_applyScoreboardMode` の呼び手は構築時の 1 箇所だけなので、そこにあった `SetRoster(1)` はシードに置き換わるだけで動作は同じ
+  9. **`PublishDisplayOptions` はデスクトップのボード構築だけ**（`EnsureScoreboard`）: 全キーを設定から書き直すのはデスクトップの動作で、ヘッドレスは `SeedPanelState` が欠けたキーを埋めるだけだった。seed に入れるとヘッドレスの起動のたびに `state.json` の値が設定に戻るので、検収で seed から外した。デスクトップの順序と値は変わらない（シードと同じ `SaveBlock` の中で呼ぶ。上の比較で確認）
+  10. **ゲームのロードは `_onGameAssetsLoaded` が held サイクルと同じ描画をする**: commit（`CommitHeld`）が held 通知を捨てるので、ロードの保存サイクルの間に届いたスコアと set 欄を描画するものが他に無い。チーム名・match バー・BEST OF は入力中なら既存の規則どおり飛ばす。スコアの 2 つのスピンボックスはフォーカスを見ない（すべての held サイクルで同じ既存の規則。手入力は 1 打鍵ごとに state へ書くので、state と違うのは別の書き手が動いたときだけ）。**残る隙間**: ハンドラの描画の後で `CommitGameLoad` の前に別スレッドが書いた値（後続の `onLoad` スロットが動く間）は、公開はされるが Qt の表示は次のサイクルまで古い。state・公開・Web は正しいので塞がない。Qt のパネルと一緒に無くなる（順序 7）
+  11. **`players_per_team` は `SeedFreshBoard` が数に直す**: `SetRoster` の None は「変えない」なので、null / 数でないゲームの新しいボードにカードが 1 枚も無くなる（旧 `SeedEmptyRoster` の `_asInt(players, 1)` と同じ）。`ApplyGameRoster` は前からそのまま渡す（None なら人数を変えない）
+  12. **既定色の int は扱わない**: `SetTeamColor` は文字列だけ書く。旧 `CommandTeamColor` には int（色モデルの index）の枝があったが、設定の保存側（`SettingsWidget` の `color` 型 → `AutonaColorButton`）は `#rrggbb` の文字列しか保存しないので、`general.team_{t}_default_color` からは通らない。`settings.json` を手で int にした場合だけ、旧は色モデルを引き、今は無視して色を書かない
+- **次の段への申し送り**
+  - `schema.HoldBoard`（決定 3）・`TurnOffPolling`・`PublishDisplayOptions` はデスクトップのボード構築に残っている
+  - スコア欄の手入力（`GameTrackerService.UpdateScore`）だけがスピンボックスの `valueChanged` から書く。Widget 依存の除去（順序 5）で v1 の `score:set` と同じ経路へ
+- **テスト**
+  - 観察点を core へ移した: `tests/test_actions.py`（行の resize・同じ値で記録が残る・作り直し・トラッカーを切った場合。旧 `test_a_board_that_is_not_built_gets_the_keys_alone` は「ボードが無くても行がある」へ）、`tests/test_game_tracker_service.py`（`writingScore` の観察を「1 サイクルで行が動かない」へ）、`tests/test_scoreboard_operations.py`（`test_a_dropped_board_leaves_its_game_rows_to_core`。サイクル数の期待値）、`tests/test_player_card_render.py`（`S4T_*_CHANGES`: `cycles` だけ）
+  - 新規: `tests/test_actions.py` のウィジェットなしの追従（`+1`・`-1`・`score:set`・リセット・クリア・入替・行なし・数でないスコア・`RepublishBestOfs`・`CommitGameLoad`）、`tests/test_headless_seed.py`（ボード全体の照合・既定色と設定の色・1 サイクル・クルーのスワップが消えること・ポーリング設定に触らないこと）、`tests/test_scoreboard_operations.py`（実際の `_Publish` でのボタンのリセット・onLoad スロットの後の commit・ボード構築時の `TurnOffPolling`）、`tests/test_set_follow.py`（ボードなしのセット読込の差分の追従）。テストの部品に `autonaApp.publishGameLoad()` を足した
+  - 検収で追加（どれも対象の修正を一時的に外して落ちることを確かめた）: 別スレッドの割り込み（`tests/test_actions.py` の `AdjustScore`・`PublishStageResults`、`tests/test_set_follow.py` の `ApplySetPayload`。実際のスレッドを読みと書きの間で走らせる）、`tests/test_scoreboard_operations.py`（ロード中に届いた値の描画・入力中の欄を飛ばす・ハンドラが書かない・構築中に届いた値の描画）、`tests/test_roster_flow.py`（判断 8: 2 人ゲームの後に新しく建てたシングルスのチーム名欄）、`tests/test_headless_seed.py`（null / 数でない `players_per_team`、復元した `display_options` がヘッドレスで残りデスクトップで戻ること）、`tests/test_bootstrap_split.py`（`_onGameAssetsLoaded` が呼ぶものの全集合。常に真だった `SetDefaultsFromAssets` の検査を置き換えた）
+- **検証**
+  - 検収の修正の後: `python scripts/run_tests_parallel.py`（4732 通過・2 スキップ、RESULT: OK）、`npm run test:e2e`（66 通過。ヘッドレスの実プロセスで、シードが変わった形のまま）
+  - `npm run build`（通過）、`npm test -- --watchAll=false`（34 スイート・985 通過）は初回の結果。検収の修正は `web/` を変えていない
+  - `web/` の変更は `web/e2e/server.ts` の古いコメント 1 つだけ
+  - デスクトップとヘッドレスの前後比較（上の節）は使い捨てのスクリプトで、リポジトリに入れていない。同じ観察のうち残すものは `tests/test_headless_seed.py` と `tests/test_player_card_render.py` が pin する。検収の修正の後にも回し、結果は上のとおり（デスクトップは判断 4 の 1 点だけ、ヘッドレスはキーの追加だけでルートのキー順は同じ）
+- **実機確認**（`python main.py`）
+  - **確認した**（デスクトップの隔離データ）: トラッカー ON の保留・反映・`+1`・`-1`・`score:set`・入れ替え・リセットが、反映まで公開値と `out/` に出ない
+  - **分かったこと: トラッカーを有効にしても Qt の画面にステージの行が出ない**。`individualGameTracker` の載り先の `scoreColumn` が隠されたままで（`AutonaScoreboardWidget.py` の `scoreColumn.hide()`、`removeWidget(self.scoreColumn)`、`addWidget(self.individualGameTracker)`）、S4t の前から同じ形。既存テストは `stage_widget_list` を見ていて可視性を見ないので検知できなかった。**Qt 側は直さず、React のステージ操作で解消する**（順序 4・6）。可視性の pin は足していない（直さない表示を pin しない。Qt の行は順序 7 で消える）
+  - 新規起動の SCORE（1v1 / チーム / Crew）: 表示が今までどおり、既定のチーム色が出る、反映ボタンが点かない
+  - ゲームのロード: 反映ボタンが消灯したまま
+  - 1 チームの人数が 2 以上のゲームで、1v1 ボードのチーム名欄が今までどおり出る

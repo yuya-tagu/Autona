@@ -33,14 +33,19 @@ carries ``{}`` rather than None.
 More than one writer, still. ``score.{n}.team.{t}.score`` is written by
 ``AutonaActions`` (the +1 buttons, hotkeys, Web UI, API), by
 ``SetLoadService.ApplyScores`` (a loaded set, Step 4b) and by
-``PublishStageResults`` below, which sums the stage rows. They coordinate
-through the state, and the board tells them apart with ``writingScore`` --
-see that property. Collapsing them into one writer is Step 5.
+``PublishStageResults`` below, which sums the stage rows. Since ADR-005 S4t
+the rows follow the score in the operation that moved it, in its own block:
+a writer reads ``Scores()`` first and hands them to ``FollowScores()``. Until
+then the board did it from its held cycle (``_SyncScoreDisplays``, with the
+old value on its spinbox), which is why a board with no widget had no rows.
+The rows' own writes (``PublishStageResults``) and a swap, which mirrors the
+rows with the scores, do not follow.
 
-Import side effects: none (agent-pitfalls #1). One instance per board,
-created by that board's AutonaIndividualGameTracker and registered with
-AutonaActions by the board while it is built (ADR-005 S2e), so that a set
-length set from any entry point resizes the rows in the same cycle.
+Import side effects: none (agent-pitfalls #1). One instance per 1v1 / team
+board, built by AutonaActions and reached through ``GameTracker(board)``
+(ADR-005 S4t: the board's AutonaIndividualGameTracker used to build it and
+register it while the board existed), so that every shell has the rows and a
+set length set from any entry point resizes them in the same cycle.
 """
 from loguru import logger
 
@@ -59,9 +64,6 @@ class GameTrackerService:
 
     def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
-        # True while PublishStageResults is writing the team scores it summed
-        # from the rows. See the property below.
-        self._writingScore = False
         # Bumped by every SetStageCount(): how the widget tells that the rows
         # were rebuilt, which a same-sized rebuild (a game load) does not say
         # through the row count (ADR-005 S2e).
@@ -80,24 +82,6 @@ class GameTrackerService:
         """
         return self._rowsVersion
 
-    # ── the two-writer guard ─────────────────────────────────────────────
-
-    @property
-    def writingScore(self) -> bool:
-        """True while this tracker is itself the author of the team score.
-
-        The scoreboard reads this (through the widget) from its
-        held_state_updated handler. A score write notifies synchronously on
-        the same thread, so the board's _SyncScoreDisplays runs *inside*
-        PublishStageResults -- with the spinbox still holding the previous
-        value. Left to itself it would read that as a score transition and
-        call SyncStagesToScore, which awards a stage for it: one click on
-        "game 1: T1" would mark game 2 as won as well. While this is set the
-        board syncs its spinbox and stops there, because the stage rows are
-        already exactly what the operator clicked.
-        """
-        return self._writingScore
-
     # ── key paths ────────────────────────────────────────────────────────
 
     @property
@@ -115,11 +99,10 @@ class GameTrackerService:
 
         INVARIANT: this counts the state, and SetStageCount() is the single
         place that resizes it -- reached from AutonaActions.SetBestOf, which
-        rebuilds a built board's rows in the same cycle as the set length
-        (ADR-005 S2e). The widget renders `stage_widget_list` from it on the
-        board's held cycle (RenderStageRows), before the score is followed
-        onto the rows. Everything else here indexes rows the widget is
-        assumed to have a button for, so a writer that grows `stages` on its
+        rebuilds the rows in the same cycle as the set length (ADR-005 S2e).
+        The widget renders `stage_widget_list` from it on the board's held
+        cycle (RenderStageRows). Everything else here indexes rows the widget
+        is assumed to have a button for, so a writer that grows `stages` on its
         own (a set load flowing `stagesWon` in -- Step 4b) would leave rows
         nothing renders and clicks that address the wrong game. Such a path
         must go through SetStageCount().
@@ -312,31 +295,74 @@ class GameTrackerService:
         """Write the team scores the rows add up to; returns them.
 
         This is the stages -> score direction, i.e. the operator clicked a
-        game result and the set score follows.
-        """
-        team_1_score, team_2_score = self.SumStageResults()
+        game result and the set score follows. Nothing follows it back: the
+        rows are already exactly what the operator clicked (FollowScores is
+        for the writers that move the score on their own).
 
-        # The flag has to cover the SaveBlock's *exit* as well as its body:
-        # a held write only notifies when the block is released, so that is
-        # when the board's _SyncScoreDisplays runs (see the writingScore
-        # property). Cleared before the caller emits its Qt signal, which is
-        # the board's cue to update the spinboxes for the ordinary,
-        # non-held case.
-        self._writingScore = True
-        try:
-            with StateManager.SaveBlock():
+        The lock runs from the sum to the writes: a +1 on another thread,
+        with the row it follows onto, would otherwise fall between the two
+        and be written over with the older sum. Only state reads and writes
+        run inside, and the block closes outside it, so this holds the lock
+        no longer than a +1 does (agent-pitfalls #17).
+        """
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                team_1_score, team_2_score = self.SumStageResults()
                 StateManager.Set(f"{self.prefix}.team.1.score", team_1_score)
                 StateManager.Set(f"{self.prefix}.team.2.score", team_2_score)
-        finally:
-            self._writingScore = False
         return team_1_score, team_2_score
+
+    def Scores(self) -> tuple:
+        """(team 1, team 2) as the state holds them, None for a value that
+        is not a number. What a writer reads before it writes, for
+        FollowScores()."""
+        return tuple(self._Score(team) for team in (1, 2))
+
+    def _Score(self, team):
+        value = StateManager.Get(f"{self.prefix}.team.{team}.score", 0)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        return value
+
+    def FollowScores(self, before):
+        """Move the rows by what the team scores moved since `before`
+        (Scores()), both teams in one save cycle. Nothing is written when
+        nothing follows, so the block costs no cycle then.
+
+        For the writers that move the score on their own: AutonaActions'
+        score operations and a loaded set. Each calls it in its own block,
+        with the lock held from the read of `before` on, so that a +1 from
+        another thread is either in `before` or not started yet, and is
+        never followed twice. Never from a state notification: the rows would
+        be written a cycle later, in a shell that has a board to notify.
+
+        A loaded set follows after its set length (SetFollowService
+        .ApplySetPayload): the transition goes onto the rows that length
+        made, the net one from the score the set found.
+        """
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                for team, old in enumerate(before):
+                    new = self._Score(team + 1)
+                    if old is None or new is None:
+                        # Nothing writes one; a breadcrumb rather than a
+                        # transition made up from it.
+                        logger.warning(
+                            f"{self.prefix}.team.{team + 1}.score is not a "
+                            f"number ({old!r} -> {new!r}); the games do not "
+                            "follow it")
+                        continue
+                    self.SyncStagesToScore(team, old, new)
 
     def SyncStagesToScore(self, team, old_value, new_value):
         """Award / clear as many rows as the score moved by.
 
         The score -> stages direction. Writes only ``stages.*``; the team
-        score itself is the caller's business either way.
+        score itself is the caller's business either way. With no rows (the
+        tracker switched off, the best of unset) nothing follows.
         """
+        if old_value == new_value or not self.StageCount():
+            return
         logger.info(f"UpdateScore: old[{old_value}] new[{new_value}]")
 
         # Disable individual game tracker logic if ties were reported
@@ -368,9 +394,9 @@ class GameTrackerService:
         changes, and this writes the result. The paths that write the state
         first -- AutonaActions.AdjustScore / ResetScore and the clears
         (ADR-005 S2d), and a loaded set's
-        SetLoadService.ApplyScores -- instead call SyncStagesToScore() with
-        the transition, which is why the two halves are separate methods
-        (headless core Step 3; set loading joined them in Step 4b).
+        SetLoadService.ApplyScores -- instead call FollowScores() with what
+        they read before writing, which is why the two halves are separate
+        methods (headless core Step 3; set loading joined them in Step 4b).
 
         Read-modify-write under the lock, same as AutonaActions.AdjustScore:
         the score is written from the web/API threads through Actions, so a

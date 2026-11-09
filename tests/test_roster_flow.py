@@ -325,6 +325,24 @@ def test_a_game_load_applies_its_roster_default(world, autonaApp):
     _check("game load", steps.recorded + singles.recorded)
 
 
+def test_a_singles_board_built_after_a_team_game_shows_the_team_names(
+        world, autonaApp):
+    """The seed decides the players ahead of the board now, so no later card
+    build brings the names back: the board's mode looks at the count (ADR-005
+    S4t, judgment 8). One player a team, they stay hidden."""
+    loadGame(TEAM_GAME)
+    board = autonaApp.board(1)
+
+    assert len(board.team1playerWidgets) == 2
+    assert _teamNamesShown(board) == [True, True]
+
+    loadGame("tgame")
+    board = autonaApp.board(1)
+
+    assert len(board.team1playerWidgets) == 1
+    assert _teamNamesShown(board) == [False, False]
+
+
 def test_the_boards_are_built_with_the_recorded_rosters(world, autonaApp):
     """What a board publishes as it is built, and what it waits to publish
     (nothing: building a board leaves nothing behind 反映)."""
@@ -1357,7 +1375,7 @@ def test_a_board_card_that_fails_to_go_does_not_keep_the_others(
         world, autonaApp):
     """The defences around the cards' lifecycle: a retired card whose
     destruction raises leaves the others to be destroyed, and a card sync
-    that raises does not stop the CommitHeld a game load ends with."""
+    that raises does not stop the commit a game load ends with."""
     board = autonaApp.board(2)
     board.playerNumber.setValue(3)
     autonaApp.settle()
@@ -1386,8 +1404,11 @@ def test_a_board_card_that_fails_to_go_does_not_keep_the_others(
 
     board.playerNumber.setValue(2)
     assert StateManager.HasPendingChanges("score.2")
+    # The board's handler is one of the load's onLoad slots: what it raises
+    # is reported by the emit, and the commit that follows the slots
+    # (AutonaGameAssetManager._Publish) goes ahead.
     with patch.object(AutonaScoreboardWidget, "_SyncPlayerCards", _raise):
-        board._onGameAssetsLoaded()
+        autonaApp.publishGameLoad()
     assert not StateManager.HasPendingChanges("score.2"), (
-        "the load's CommitHeld did not run")
+        "the load's commit did not run")
     autonaApp.settle()

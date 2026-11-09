@@ -871,7 +871,7 @@ class _ApplyReplay:
         return f"{self.root}.team.{team}.player.{player}"
 
     def seed(self):
-        """The slots a fresh board's cards publish."""
+        """The slots a fresh board's seed writes."""
         with SM.SaveBlock():
             for path in self.paths:
                 self.service(path).SeedEmpty(3)

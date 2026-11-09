@@ -121,20 +121,19 @@ _NAME_FIELDS = (
     (schema.PLAYER_REAL_NAME_KEY, "name"),
 )
 
-# Character slots per player on a freshly built board, and on every board
-# after a game load, whatever the game says (AutonaActions.SetRoster from
-# AutonaScoreboardWidget.SetDefaultsFromAssets and ApplyGameRoster; it was
-# the board forcing its charNumber back to this, until ADR-005 S3e-6).
+# Character slots per player on a fresh board, and on every board after a game
+# load, whatever the game says (AutonaActions.SetRoster from SeedFreshBoard and
+# ApplyGameRoster; it was the board forcing its charNumber back to this, until
+# ADR-005 S3e-6).
 DEFAULT_CHARACTERS_PER_PLAYER = 3
 
 
 def DefaultPlayersPerTeam() -> int:
-    """Player cards per team on a freshly built 1v1 / team board.
+    """Player cards per team on a fresh 1v1 / team board.
 
     The loaded game's ``game.defaults.players_per_team``, 1 without one --
-    what AutonaActions.SetRoster gives a board right after it is built
-    (AutonaScoreboardWidget.SetDefaultsFromAssets), and every board on each
-    game load (AutonaActions.ApplyGameRoster, both shells).
+    what AutonaActions.SetRoster gives a new board (SeedFreshBoard), and every
+    board on each game load (ApplyGameRoster). Both shells.
     """
     if StateManager.Get("game.defaults"):
         return StateManager.Get("game.defaults.players_per_team", 1)
@@ -1104,12 +1103,10 @@ class PlayerService:
         two location combos (_WireInputs), then its character slots and
         mains once the board set the slot count -- every one of them empty,
         in that order. The line edits write nothing until an edit. This is
-        that write without the card, in one save cycle: for a shell that has
-        no player cards (the headless one, ADR-005 S3d: the overlays draw a
-        board only once its team 1 has a player slot), and since ADR-005
-        S3e-6 for every new slot of a roster (AutonaActions.SetRoster) --
-        a board card is built on a seeded slot and writes nothing as it is.
-        tests/test_headless_seed.py pins it against a desktop board.
+        that write without the card, in one save cycle: since ADR-005 S3e-6
+        for every new slot of a roster (AutonaActions.SetRoster), in both
+        shells -- a board card is built on a seeded slot and writes nothing
+        as it is. tests/test_headless_seed.py pins it against a desktop board.
         """
         with StateManager.SaveBlock():
             self.SetSeed(0)
@@ -1246,26 +1243,3 @@ def RepublishTeamMergedNames(board, team) -> list:
     return [slot for slot, _sponsor, _tag in names]
 
 
-def SeedEmptyRoster(board, players=None,
-                    characters=DEFAULT_CHARACTERS_PER_PLAYER) -> int:
-    """Seed both teams of a 1v1 / team board with empty player slots, as a
-    freshly built board gets them (AutonaActions.SetRoster); returns the
-    slots per team. One save cycle.
-
-    `players` defaults to DefaultPlayersPerTeam(), the count the desktop
-    gives a board it has just built. A launch seed (the headless shell's,
-    after ``StateSchema.ResetScoreRoot`` / ``SeedBoard``): never for a live
-    board, whose roster is AutonaActions.SetRoster's.
-    """
-    if players is None:
-        players = DefaultPlayersPerTeam()
-    players = PlayerService._asInt(players, 1)
-    with StateManager.SaveBlock():
-        # The order a roster grows in: team 1's, then team 2's, one index
-        # at a time (AutonaActions.SetRoster, as the board built its cards).
-        for slot in range(1, players + 1):
-            for team in (1, 2):
-                PlayerService(
-                    f"score.{board}.team.{team}.player.{slot}"
-                ).SeedEmpty(characters)
-    return players

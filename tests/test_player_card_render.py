@@ -404,13 +404,17 @@ def _withTracker(operation):
 
 
 def _gameLoaded(board):
-    """What a game load runs for the board: the roster the shared wiring
-    writes first (bootstrap.wire_game_roster -> ApplyGameRoster; it was the
-    board's handler's SetDefaultsFromAssets until ADR-005 S3e-6), then the
-    board's own onLoad handler. The cards' character models are not
-    reloaded here, as they were not before."""
-    AutonaActions.instance.ApplyGameRoster()
+    """What a game load runs for the board: what the shared wiring writes
+    first (bootstrap.wire_game_roster -> ApplyGameRoster; it was the board's
+    handler's until ADR-005 S3e-6, the set length until S4t), the board's own
+    onLoad handler, and the commit the asset adapter runs after every slot.
+    The cards' character models are not reloaded here, as they were not
+    before."""
+    actions = AutonaActions.instance
+    actions.ApplyGameRoster()
+    actions.RepublishBestOfs()
     board._onGameAssetsLoaded()
+    actions.CommitGameLoad()
 
 
 def _stageButton(board, game, team):
@@ -1000,6 +1004,50 @@ S3E6_PREPASS_CHANGES = {
 }
 
 
+# ADR-005 S4t: the game rows follow the score in the operation that moved it
+# (GameTrackerService.FollowScores), in its block. They were one cycle more,
+# from the board's held handler. So with the tracker on a score that moves a
+# row is one cycle less; the state, its key order and what 反映 publishes are
+# the recording's at every step, which is what says the follow is the same.
+S4T_SWAP_CHANGES = {
+    "a point with the tracker on": {"cycles": 1},
+}
+
+S4T_CLEAR_CHANGES = {
+    "clear the score": {"cycles": 1},
+    "score and losers again": {"cycles": 3},     # team 1's +1, team 2's +2
+    "reset match": {"cycles": 1},
+    "a set with a match bar, a score and losers": {"cycles": 1},
+    "web reset match": {"cycles": 2},
+    "refill everything": {"cycles": 9},
+    "web clear all": {"cycles": 4},
+    "two players, two characters, best of 5 and refill everything": {
+        "cycles": 14},
+}
+
+S4T_SINGLES_CLEAR_CHANGES = {
+    "clear the score": {"cycles": 1},
+    "score and losers again": {"cycles": 3},
+    "reset match": {"cycles": 1},
+    "a set with a match bar, a score and losers": {"cycles": 1},
+    "web reset match": {"cycles": 2},
+    "two characters, best of 5 and refill everything": {"cycles": 8},
+}
+
+S4T_PREPASS_CHANGES = {
+    "follow a set without keeping mains": {"cycles": 1},
+    "follow another set keeping mains": {"cycles": 1},
+}
+
+S4T_BEST_OF_CHANGES = {
+    "tracker on, reset the score": {"cycles": 1},
+    "a set with a score, tracker on": {"cycles": 1},
+    "a set with a best of, a round and a score": {"cycles": 1},
+    "web reset match, tracker on": {"cycles": 2},
+    "web clear all, tracker on": {"cycles": 4},
+}
+
+
 def _layered(*layers):
     """Per-step change dicts of successive migrations as one: a later
     migration's fields replace an earlier one's for the same step."""
@@ -1194,8 +1242,9 @@ def test_swap_operations_publish_the_recorded_state(
         f"{SWAP_GOLDEN_PATH} is missing: it is recorded on the pre-S2c tree "
         "(6a6f04cc) with AUTONA_RECORD_BOARD_OPERATIONS=1 -k swap_operations")
     recording = SWAP_GOLDEN["operations"]
-    golden = [_withChanges(_withChanges(entry, S2C_SWAP_CHANGES, recording),
-                           S3E6_SWAP_CHANGES, recording)
+    golden = [_withChanges(_withChanges(_withChanges(
+        entry, S2C_SWAP_CHANGES, recording), S3E6_SWAP_CHANGES, recording),
+        S4T_SWAP_CHANGES, recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
@@ -1273,7 +1322,7 @@ def test_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
                   "operations", "clear operations",
                   _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES,
-                           S3E6_CLEAR_CHANGES))
+                           S3E6_CLEAR_CHANGES, S4T_CLEAR_CHANGES))
 
 
 @pytest.fixture
@@ -1289,7 +1338,8 @@ def test_singles_clear_operations_publish_the_recorded_state(
                   _singlesClearSteps(singlesBoard, autonaApp),
                   "singles", "singles clear operations",
                   _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES,
-                           S3E6_SINGLES_CLEAR_CHANGES))
+                           S3E6_SINGLES_CLEAR_CHANGES,
+                           S4T_SINGLES_CLEAR_CHANGES))
 
 
 def test_set_load_prepass_clear_operations_publish_the_recorded_state(
@@ -1298,7 +1348,7 @@ def test_set_load_prepass_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _prepassSteps(board),
                   "prepass", "set load pre-pass",
                   _layered(S2D_PREPASS_CHANGES, S2E_PREPASS_CHANGES,
-                           S3E6_PREPASS_CHANGES))
+                           S3E6_PREPASS_CHANGES, S4T_PREPASS_CHANGES))
 
 
 # ── the best of (ADR-005 S2e) ────────────────────────────────────────────
@@ -1492,7 +1542,8 @@ def test_best_of_operations_publish_the_recorded_state(
     """Every way to set the best of on the team board."""
     _replayClears(autonaApp, board, _bestOfSteps(board, autonaApp, client),
                   "operations", "best of operations",
-                  _layered(S2E_CHANGES, S3E6_BEST_OF_CHANGES),
+                  _layered(S2E_CHANGES, S3E6_BEST_OF_CHANGES,
+                           S4T_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH, tree=BEST_OF_TREE,
                   selector="best_of_operations",
                   alsoCheck=_bestOfMismatches)
@@ -1504,7 +1555,8 @@ def test_singles_best_of_operations_publish_the_recorded_state(
     _replayClears(autonaApp, singlesBoard,
                   _bestOfSteps(singlesBoard, autonaApp, client),
                   "singles", "singles best of operations",
-                  _layered(S2E_SINGLES_CHANGES, S3E6_SINGLES_BEST_OF_CHANGES),
+                  _layered(S2E_SINGLES_CHANGES, S3E6_SINGLES_BEST_OF_CHANGES,
+                           S4T_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH,
                   tree=BEST_OF_TREE, selector="best_of_operations",
                   alsoCheck=_bestOfMismatches)

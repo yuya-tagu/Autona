@@ -29,9 +29,7 @@ export async function boardScores(request: APIRequestContext, board = 1) {
 
 // Board 1 at 0-0, through the API as a Stream Deck or Companion would.
 //
-// The headless shell seeds a board's player slots but not its scores (the
-// desktop's score spin boxes publish those), and the tests share one app,
-// so each starts from a known score.
+// The tests share one app, so each starts from a known score.
 export async function resetBoard(request: APIRequestContext, board = 1) {
     const response = await request.post(
         serverUrl(`/api/v1/scoreboards/${board}/score:set`),
