@@ -45,6 +45,12 @@ it):
 - ``StopFollowing(forget)``: the timer row's cancel button.
 - ``ApplySetPayload(data)``: the logic of ``ChangeSetData`` -- a payload
   (a fetched set, a POST /score) into the board's state in one save cycle.
+- ``Snapshot()``: what the board follows, for v1 (ADR-005 S4v), from any
+  thread. Not in the state: it is what the board's clock and lookups run on,
+  and the board's own writes are the golden's. ``changes`` tells that it
+  changed (another station, a poll started or stopped, a set forgotten with no
+  write to tell it): the web server's ``scoreboard_follow``, which carries
+  nothing but the board.
 
 Late answers. Request numbers decide whether an answer still applies, and
 each is checked where the board's operations run (the host, below), as the
@@ -88,7 +94,7 @@ it answers -- ``Match``'s ``onError(error)`` when it raised; ``Poll(board)``
 makes the board's clock follow
 ``PollGeneration(board)``; ``FollowChanged(board)`` tells the board what it
 follows changed; ``RemainingMs(board)`` is the time to the next
-tick, or None.
+tick, or None, from any thread.
 
 Import side effects: none (agent-pitfalls #1).
 """
@@ -97,6 +103,7 @@ import threading
 from loguru import logger
 
 from .Actions import AutonaActions
+from .Observable import ObserverChannel
 from .PlayerDB import PlayerDB
 from .PlayerService import PlayerService, SlotChange
 from .SetLoadService import SetLoadService
@@ -118,6 +125,15 @@ class SetFollowService:
     # None: nothing is fetched / the operation runs on the calling thread.
     fetcher = None
     boardHost = None
+
+    # (board): what Snapshot() answers about the station or the poll changed,
+    # or its set was forgotten with no write to the board to tell it (a load
+    # that failed, a station chosen afresh). A set the board writes is told by
+    # its own state. Only for a change: a cancel with nothing to cancel is
+    # silent. Told where the board's operations run, possibly with
+    # StateManager.lock held: a subscriber only takes note (agent-pitfalls
+    # #17).
+    changes = ObserverChannel("set_follow_changes")
 
     _lock = threading.RLock()
     # {board: {"data", "mode", "identifier", "generation"}}: what the poll
@@ -227,6 +243,28 @@ class SetFollowService:
     def Station(self):
         with SetFollowService._lock:
             return SetFollowService._stations.get(self.scoreboardNumber)
+
+    def Snapshot(self) -> dict:
+        """What the board follows, from any thread, three things that come
+        apart. `station`: the station / stream followed ({"type", "id",
+        "identifier"}), kept through a set loaded by hand and with polling off
+        (the desktop's default: a follow is then one lookup). `poll`: what is
+        polled ({"mode", "identifier", "secondsLeft"}), None while not.
+        `pollingEnabled`: whether a load starts polling. `setId`: the set
+        loaded last, as a string, or None."""
+        with SetFollowService._lock:
+            station = SetFollowService._stations.get(self.scoreboardNumber)
+            station = None if station is None else {
+                "type": station.get("type"), "id": station.get("id"),
+                "identifier": station.get("identifier")}
+        following = self.Following()
+        poll = None if following is None else {
+            "mode": following[0], "identifier": following[1],
+            "secondsLeft": self.SecondsLeft()}
+        setId = self.setLoad.lastSetSelected
+        return {"station": station, "poll": poll,
+                "pollingEnabled": self.Polling(),
+                "setId": None if setId is None else str(setId)}
 
     # ── loading a set (the board's NewSetSelected) ──────────────────────
 
@@ -349,6 +387,7 @@ class SetFollowService:
         if poll is not None and str(poll["data"].get("id")) == str(setId):
             with SetFollowService._lock:
                 poll["retry"] = True
+        SetFollowService.changes.notify(board)
 
     def _Superseded(self, request):
         """Whether a full load was started after fetch `request`."""
@@ -393,6 +432,7 @@ class SetFollowService:
         fetcher = self._Fetcher()
         fetcher.Poll(self.scoreboardNumber)
         fetcher.FollowChanged(self.scoreboardNumber)
+        SetFollowService.changes.notify(self.scoreboardNumber)
 
     def Tick(self):
         """The poll's 5 seconds are up: the set again (an update), the
@@ -436,15 +476,18 @@ class SetFollowService:
         def run():
             board = self.scoreboardNumber
             with SetFollowService._lock:
-                SetFollowService._polls.pop(board, None)
-                if forget:
-                    SetFollowService._stations.pop(board, None)
+                stopped = SetFollowService._polls.pop(board, None) is not None
+                if forget and SetFollowService._stations.pop(
+                        board, None) is not None:
+                    stopped = True
             self._Bump()
             fetcher = self._Fetcher()
             fetcher.Poll(board)
             fetcher.FollowChanged(board)
             if forget:
                 self.setLoad.ClearSetTracking()
+            if stopped:
+                SetFollowService.changes.notify(board)
 
         self._Host().Run(run)
 
@@ -486,11 +529,17 @@ class SetFollowService:
         set loaded last is forgotten. A pull keeps it: the board shows the
         channel's set already when it is that one (the auto-update switch
         turned on over a set loaded by hand), and is not cleared for it."""
+        changed = reload and self.setLoad.lastSetSelected is not None
         if reload:
             self.setLoad.lastSetSelected = None
         with SetFollowService._lock:
+            if SetFollowService._stations.get(
+                    self.scoreboardNumber) != station:
+                changed = True
             SetFollowService._stations[self.scoreboardNumber] = station
         self._Bump()
+        if changed:
+            SetFollowService.changes.notify(self.scoreboardNumber)
         self._Resolve()
 
     def _Resolve(self):

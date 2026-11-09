@@ -625,6 +625,34 @@ strict で頼む（`StartGGDataProvider.GetTournamentPhases` / `GetAnalysisPhase
 `GET /api/v1/analysis`（`{status, url, rows}`。今読み込んでいる大会の行だけ。ADR-005 S4k）で使う。統計情報ページの
 「この大会の試合一覧」タブが読み手。
 
+##### `set_selection` — セット選択の一覧の取得（ADR-005 S4v）
+
+```
+set_selection                      リストごとの進み具合（起動のたびに idle へ戻る）
+├── phases                         大会のフェーズ
+├── sets                           セットの一覧
+└── stations                       配信台と配信
+    （それぞれ 1 つの dict をまとめて書く）
+    ├── status                     idle | running | done | error
+    ├── error                      error の理由（`fetch_failed` のみ）。それ以外は ""
+    ├── done / total               取得し終えたページ / 全ページ（`sets` のみ。total 0 はまだ分からない）
+    ├── failed                     done の答えから欠けているもの（取れなかったページと読めなかったセットの数）
+    └── revision                   取得を受け付けるたび・止めるたび・大会を変えるたびに 1 増える（再起動でも戻らない）
+```
+
+書き手は core の `src/core/SetSelectionService.py` だけ。**行そのものは state に入れない**（`analysis` と同じ理由）:
+サービスのメモリに、取得した大会の URL と組で持ち、`SetSelectionService.Result(kind)` で読む。provider には strict で頼む
+（`GetTournamentPhases` / `GetMatches` / `GetStations` の `strict=True`）ので、`error` は取得の失敗、行が空の `done` は
+「一覧に何も無い」。行は表示文字列ではなく決まったキーだけの構造で、実名・SNS・キャラを含まない（`SetRow` ほかのホワイトリスト。
+「 (A, B)」などの文言は表示側）。大会を読み込み直す・解除すると、provider のアダプタが provider を差し替えた直後に
+`Forget()` を直接呼び、走っている取得を捨てて全リストを次の revision の idle にする。`phases` / `stations` の行は捨て、
+`sets` の行は URL と組で残す（同じ大会を読み直すと戻る。セット選択ウィンドウのキャッシュと同じ）。
+起動時のシード（`StateSchema.SeedPanelState()`）は idle で、revision は保存された値を引き継ぐ。
+外からは v1 の `POST /api/v1/tournament/{phases,stations,sets}:refresh`（取得の開始。202 / 実行中は 409 `CONFLICT` /
+大会なしは 409 `NOT_READY`）・`POST /api/v1/tournament/sets:cancel`・`GET /api/v1/tournament/{phases,sets,stations}` で使う
+（`.claude/design/external-control-api.md` §5.18・§7.3）。Qt のセット選択・配信台ウィンドウはこの state を読まず、
+provider のアダプタを通る。
+
 ##### `ui` — UI 表示用キャッシュ
 
 旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。

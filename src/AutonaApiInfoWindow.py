@@ -63,6 +63,7 @@ _ENDPOINTS = [
     ("GET", "/health", "Liveness / version / activeBoard", None, False, False, False),
     ("GET", "/scoreboards/{n}", "Scoreboard n state (incl. swapped)", None, False, False, False),
     ("GET", "/scoreboards/{n}/pending", "Scoreboard n live values, not applied yet: held, dirty, board (a token from another computer)", None, False, False, False),
+    ("GET", "/scoreboards/{n}/follow", "What scoreboard n follows: station, poll, pollingEnabled, setId", None, False, False, False),
     ("GET", "/games", "Game list", None, False, False, False),
     ("GET", "/games/current", "Current game", None, False, False, False),
     ("GET", "/match-names", "Match / phase name candidates", None, False, False, False),
@@ -71,6 +72,9 @@ _ENDPOINTS = [
     ("GET", "/stages", "Stage list", None, False, False, False),
     ("GET", "/sets?finished=true", "Set list (synchronous start.gg call)", None, False, False, False),
     ("GET", "/sets/{setId}", "Set detail (synchronous start.gg call)", None, False, False, False),
+    ("GET", "/tournament/phases", "The tournament's phases, as last fetched (never fetches)", None, False, False, False),
+    ("GET", "/tournament/sets", "The set list, as last fetched (never fetches)", None, False, False, False),
+    ("GET", "/tournament/stations", "Stations and streams, as last fetched (never fetches)", None, False, False, False),
     ("GET", "/commentary", "Commentary state", None, False, False, False),
     ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
     ("GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
@@ -97,6 +101,8 @@ _ENDPOINTS = [
     ("PUT", "/layouts/selected/{kind}", "Select a panel's layout", {"id": "commentators"}, False, True, False),
     ("POST", "/layouts/selected/board:reveal", "Show a Board OBS file in Explorer (this PC only; a design no longer selected is 409)", {"target": "design", "designId": "scoreboard_simple"}, False, True, False),
     ("PATCH", "/colors/{feature}", "Set a feature's colors", {"theme": "#112233", "accent": "#445566"}, False, True, False),
+    ("POST", "/scoreboards/{n}:stop-follow", "Stop following, forget the station and the followed set", None, False, True, False),
+    ("POST", "/tournament/sets:cancel", "Stop the set list's fetch (the rows stay)", None, False, True, False),
     # ── Destructive (confirm required) ──
     ("POST", "/scoreboards/{n}:clear", "Clear board (confirm required)", {"confirm": True}, True, True, True),
     ("POST", "/scoreboards/{n}:reset-all", "Reset every input, team names too, keeping the counts (confirm required)", {"confirm": True}, True, True, True),
@@ -106,10 +112,14 @@ _ENDPOINTS = [
     # ── Board overwrite (confirm recommended) ──
     ("POST", "/scoreboards/{n}:load-set", "Load a set onto the board", {"setId": "12345"}, False, True, False),
     ("POST", "/scoreboards/{n}:pull-stream", "Pull current stream set", None, False, True, False),
+    ("POST", "/scoreboards/{n}:follow", "Follow a station or stream: its current set is loaded", {"type": "stream", "identifier": "channel"}, False, True, False),
     # ── Heavy (202 accepted + in-progress flag) ──
     ("POST", "/tournament", "Load tournament (202, async)", {"url": "https://www.start.gg/tournament/.../event/..."}, False, True, False),
     ("POST", "/game", "Set game (202, async)", {"codename": "ssbu", "modsActive": False}, False, True, False),
     ("POST", "/bracket:refresh", "Refresh bracket (202, async)", None, False, True, False),
+    ("POST", "/tournament/phases:refresh", "Fetch the tournament's phases (202, async)", None, False, True, False),
+    ("POST", "/tournament/sets:refresh", "Fetch the set list of a phase (202, async; another query replaces the one running)", {"phase": "all", "finished": False}, False, True, False),
+    ("POST", "/tournament/stations:refresh", "Fetch the stations and streams (202, async)", None, False, True, False),
 ]
 
 # Error-code legend (spec §2.6 / AutonaApiV1.py). (code, http, desc).

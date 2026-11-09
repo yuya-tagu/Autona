@@ -44,6 +44,7 @@ actually trigger one.
 """
 from qtpy.QtCore import QObject, Signal
 
+from .core.SetFollowService import SetFollowService
 from .core.StateManager import StateManager
 
 
@@ -63,9 +64,13 @@ class StateManagerBridge(QObject):
     # live state can refresh without waiting for the commit.
     held_dirty_changed = Signal(str, bool)
     held_state_updated = Signal(str)
+    # What a board follows changed (core's SetFollowService.changes, ADR-005
+    # S4v): not a state notification, since that is not in the state, but the
+    # same conversion. Carries the board's number and no value.
+    follow_changed = Signal(int)
 
     def __init__(self, parent=None):
-        # A second bridge would subscribe the same four channels again and
+        # A second bridge would subscribe the same channels again and
         # every state notification would reach the widget layer twice --
         # doubled repaints, doubled WebSocket delta broadcasts, and no error
         # anywhere to point at the cause. Refusing construction turns that
@@ -87,6 +92,7 @@ class StateManagerBridge(QObject):
         observers.state_updated.subscribe(self._onStateUpdated)
         observers.held_dirty_changed.subscribe(self._onHeldDirtyChanged)
         observers.held_state_updated.subscribe(self._onHeldStateUpdated)
+        SetFollowService.changes.subscribe(self._onFollowChanged)
 
     # -- channel callbacks: re-emit, nothing else --------------------------
 
@@ -101,3 +107,6 @@ class StateManagerBridge(QObject):
 
     def _onHeldStateUpdated(self, prefix):
         self.held_state_updated.emit(prefix)
+
+    def _onFollowChanged(self, board):
+        self.follow_changed.emit(int(board))

@@ -42,6 +42,7 @@ from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import PlayerDirectory
 from .core import ResultService as results
+from .core import SetSelectionService as selection
 from .core import StreamService as streams
 from .core import ThumbnailService as thumbnails
 from .core import Top8Model as top8
@@ -503,6 +504,21 @@ def get_scoreboard_pending(n):
               revision=revision)
 
 
+@api_v1.route("/scoreboards/<int:n>/follow")
+@api_handler
+def get_scoreboard_follow(n):
+    # What the board follows (ADR-005 S4v; core's SetFollowService.Snapshot):
+    # {station, poll, pollingEnabled, setId}. `station` and `poll` come apart:
+    # with polling off (the desktop's default) a station followed has no poll,
+    # and a set loaded by hand keeps the station. Board 3 has no set loading:
+    # 400. Reading builds no board. The Socket.IO `scoreboard_follow` tells
+    # when station / poll change; `secondsLeft` runs down without one, and
+    # `setId` goes with the board's own writes (GET /scoreboards/{n}/pending's
+    # notice). READ, as the legacy /scoreboard{n}-get-set is.
+    require_board_12(n)
+    return ok(data=WebOps.get_follow(n), revision=current_revision())
+
+
 @api_v1.route("/games")
 @api_handler
 def get_games():
@@ -780,6 +796,40 @@ def get_analysis():
     # (hundreds to over a thousand), so the Statistics page reads them here
     # whenever analysis.revision / status changes.
     return ok(data=WebOps.get_analysis(), revision=current_revision())
+
+
+# The set selection's lists (ADR-005 S4v; core's SetSelectionService): what the
+# Qt set and station windows show. Reading never fetches, as opening a window
+# never does: `status` is the state's set_selection.{phases,sets,stations}.status
+# and `rows` the newest fetch's that made them, with the `url` of their
+# tournament and `fetchedAt` (unix seconds) -- none ("", null, []) unless that is
+# the tournament loaded now. An idle list is one to ask for (the POSTs below).
+# Tags and entrant names only, no real name, so READ like GET /sets; the wording
+# of a row -- " (A, B)" for doubles, the search, the order -- is the reader's.
+@api_v1.route("/tournament/phases")
+@api_handler
+def get_tournament_phases():
+    # rows: {id, name, groups: [{id, name, bracketType}]}.
+    return ok(data=WebOps.get_tournament_phases(),
+              revision=current_revision())
+
+
+@api_v1.route("/tournament/sets")
+@api_handler
+def get_tournament_sets():
+    # rows: {id, stream, station, phase, pool, round, p1, p2: {name, members}}.
+    # `query`: the {phase, finished} they were asked for, in one form: the
+    # phase row's id, or "all".
+    return ok(data=WebOps.get_tournament_sets(), revision=current_revision())
+
+
+@api_v1.route("/tournament/stations")
+@api_handler
+def get_tournament_stations():
+    # rows: {type: "station" | "stream", id, identifier, stream}: what
+    # POST /scoreboards/{n}:follow takes.
+    return ok(data=WebOps.get_tournament_stations(),
+              revision=current_revision())
 
 
 @api_v1.route("/players")
@@ -2051,6 +2101,57 @@ def pull_stream(n):
     return ok(revision=current_revision())
 
 
+def _is_follow_value(value):
+    # What start.gg names a station, a stream or a phase by: a positive number
+    # or a string. A bool is neither, though Python counts it as a number.
+    return (_is_index(value) and value > 0) or (
+        isinstance(value, str) and bool(value))
+
+
+@api_v1.route("/scoreboards/<int:n>:follow", methods=["POST"])
+@write_op("follow")
+def follow(n):
+    # A row of GET /tournament/stations: {"type": "station", "id", "identifier"
+    # (optional: what the board shows it as)} or {"type": "stream",
+    # "identifier": the channel, "id" (optional)}. As the station window's row
+    # (ADR-005 S4v; SetFollowService.FollowStation): its current set is looked
+    # up and loaded, whatever the board shows -- a set it has none of leaves the
+    # board as it is. It is not checked against the list: the board follows
+    # what it is told, as :pull-stream follows the setting's channel. With no
+    # tournament there is nothing to follow.
+    require_board_12(n)
+    body = _json_body()
+    kind = body.get("type")
+    if kind not in ("station", "stream"):
+        raise ApiError(
+            INVALID_ARGUMENT, 'type must be "station" or "stream"', 400)
+    stationId, identifier = body.get("id"), body.get("identifier")
+    if kind == "station" and stationId is None:
+        raise ApiError(INVALID_ARGUMENT, "a station needs its id", 400)
+    if kind == "stream" and not isinstance(identifier, str):
+        raise ApiError(
+            INVALID_ARGUMENT, "a stream needs its identifier, a string", 400)
+    for name, value in (("id", stationId), ("identifier", identifier)):
+        if value is not None and not _is_follow_value(value):
+            raise ApiError(INVALID_ARGUMENT,
+                           f"{name} must be a number or a string", 400)
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    WebOps.follow_station(
+        n, {"type": kind, "id": stationId, "identifier": identifier})
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/scoreboards/<int:n>:stop-follow", methods=["POST"])
+@write_op("stop-follow")
+def stop_follow(n):
+    # The board's timer row's cancel button (ADR-005 S4v): the poll stopped,
+    # the station and the followed set forgotten. What the board shows stays.
+    require_board_12(n)
+    WebOps.stop_follow(n)
+    return ok(revision=current_revision())
+
+
 # ── Heavy operations (202 + in-progress flag, spec §2.8 / §7.3) ──
 @api_v1.route("/tournament", methods=["POST"])
 @write_op("tournament.load")
@@ -2210,6 +2311,69 @@ def analysis_refresh():
         raise ApiError(NOT_READY, "no tournament loaded", 409)
     return ok(data={"accepted": True, "operation": "analysis.refresh"},
               revision=current_revision(), status=202)
+
+
+def _selection_answer(started, operation):
+    # What a set selection fetch answered (ADR-005 S4v), by jobs in the
+    # background: the list says "running" at the next revision before this
+    # answers, and "done" or "error" once it is over.
+    if started == selection.BUSY:
+        raise ApiError(CONFLICT, "this list is being fetched already", 409)
+    if started == selection.NO_TOURNAMENT:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    return ok(data={"accepted": True, "operation": operation},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/tournament/phases:refresh", methods=["POST"])
+@write_op("tournament.phases.refresh")
+def tournament_phases_refresh():
+    return _selection_answer(WebOps.refresh_tournament_phases(),
+                             "tournament.phases.refresh")
+
+
+@api_v1.route("/tournament/stations:refresh", methods=["POST"])
+@write_op("tournament.stations.refresh")
+def tournament_stations_refresh():
+    return _selection_answer(WebOps.refresh_tournament_stations(),
+                             "tournament.stations.refresh")
+
+
+@api_v1.route("/tournament/sets:refresh", methods=["POST"])
+@write_op("tournament.sets.refresh")
+def tournament_sets_refresh():
+    # {"phase": a phase's id | "all" | null (default), "finished": bool
+    # (default false)}. While the tournament's phases are known, null is 400
+    # (a phase must be chosen; "all" is there for every phase) and an id they
+    # do not have 404; with none known the whole event is fetched. The same
+    # query while it runs is 409; another one replaces it, as the set window's
+    # do (409 too while a stopped one's request is still out).
+    body = _json_body()
+    phase = body.get("phase")
+    if phase is not None and not _is_follow_value(phase):
+        raise ApiError(INVALID_ARGUMENT,
+                       'phase must be a phase\'s id, "all" or null', 400)
+    finished = body.get("finished", False)
+    if not isinstance(finished, bool):
+        raise ApiError(INVALID_ARGUMENT, "finished must be true or false", 400)
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    started = WebOps.refresh_tournament_sets(phase, finished)
+    if started == selection.PHASE_REQUIRED:
+        raise ApiError(
+            INVALID_ARGUMENT, 'choose a phase, or "all" for every one', 400)
+    if started == selection.UNKNOWN_PHASE:
+        raise ApiError(NOT_FOUND, "the tournament has no such phase", 404)
+    return _selection_answer(started, "tournament.sets.refresh")
+
+
+@api_v1.route("/tournament/sets:cancel", methods=["POST"])
+@write_op("tournament.sets.cancel")
+def tournament_sets_cancel():
+    # Stop the set list's fetch, as choosing a set in the window does: what it
+    # still answers is dropped, the rows stay. {"cancelled": whether one ran}.
+    return ok(data={"cancelled": WebOps.cancel_tournament_sets()},
+              revision=current_revision())
 
 
 # ── Top 8 (ADR-005 S4i) ──

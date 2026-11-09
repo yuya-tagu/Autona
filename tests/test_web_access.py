@@ -1121,6 +1121,25 @@ def test_the_pending_notice_reaches_only_trusted_connections(server):
     assert _names(with_token) == []
 
 
+def test_the_follow_notice_reaches_whoever_can_read_it(server):
+    # GET /scoreboards/{n}/follow is a READ (ADR-005 S4v), and the notice names
+    # no more than a board: like the state's deltas, with no room.
+    from src.AutonaWebServer import WebServer
+
+    local = _ws(server)
+    with_token = _ws(server, LAN_PEER, auth={"token": WebAccess.Token()})
+    without = _ws(server, LAN_PEER)
+    for ws in (local, with_token, without):
+        ws.get_received()
+
+    # What the flusher runs: outside any request.
+    WebServer._send_follow_notices({1})
+
+    for ws in (local, with_token, without):
+        assert [(packet["name"], packet["args"]) for packet in ws.get_received()] == [
+            ("scoreboard_follow", [{"board": 1}])]
+
+
 # ── The API settings window's token row ──────────────────────────────────
 
 

@@ -385,9 +385,9 @@ class SetLoadService:
         loaded last with it."""
         self.lastSetSelected = None
         with StateManager.SaveBlock():
-            StateManager.Set(f"{self.prefix}.auto_update", None)
-            StateManager.Set(f"{self.prefix}.set_id", None)
-            StateManager.Set(f"{self.prefix}.station", None)
+            self._SetIfChanged(f"{self.prefix}.auto_update", None)
+            self._SetIfChanged(f"{self.prefix}.set_id", None)
+            self._SetIfChanged(f"{self.prefix}.station", None)
 
     @staticmethod
     def IsStaleUpdate(data, lastSetSelected) -> bool:

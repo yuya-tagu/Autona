@@ -138,6 +138,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/players/entrants', 'api_v1.get_player_entrants', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players:delete', 'api_v1.player_delete', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>/follow', 'api_v1.get_scoreboard_follow', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/pending', 'api_v1.get_scoreboard_pending', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
@@ -152,11 +153,13 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/score:adjust', 'api_v1.score_adjust', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:apply', 'api_v1.apply_changes', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:clear', 'api_v1.clear', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:follow', 'api_v1.follow', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:load-set', 'api_v1.load_set', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:pull-stream', 'api_v1.pull_stream', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:reset-all', 'api_v1.reset_all', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:reset-match', 'api_v1.reset_match', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:reset-players', 'api_v1.reset_players', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:stop-follow', 'api_v1.stop_follow', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:swap-teams', 'api_v1.swap_teams', 'OPTIONS,POST'),
     ('/api/v1/stages', 'api_v1.get_stages', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
@@ -200,6 +203,13 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/tournament/media', 'api_v1.tournament_media_reset', 'DELETE,OPTIONS'),
     ('/api/v1/tournament/media/<kind>', 'api_v1.tournament_media_import', 'OPTIONS,PUT'),
     ('/api/v1/tournament/media/fetch', 'api_v1.tournament_media_fetch', 'OPTIONS,POST'),
+    ('/api/v1/tournament/phases', 'api_v1.get_tournament_phases', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/tournament/phases:refresh', 'api_v1.tournament_phases_refresh', 'OPTIONS,POST'),
+    ('/api/v1/tournament/sets', 'api_v1.get_tournament_sets', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/tournament/sets:cancel', 'api_v1.tournament_sets_cancel', 'OPTIONS,POST'),
+    ('/api/v1/tournament/sets:refresh', 'api_v1.tournament_sets_refresh', 'OPTIONS,POST'),
+    ('/api/v1/tournament/stations', 'api_v1.get_tournament_stations', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/tournament/stations:refresh', 'api_v1.tournament_stations_refresh', 'OPTIONS,POST'),
     ('/api/v1/top8', 'api_v1.top8_update', 'OPTIONS,PATCH'),
     ('/api/v1/top8/players/<int:slot>', 'api_v1.top8_player_update', 'OPTIONS,PATCH'),
     ('/api/v1/top8/scores', 'api_v1.top8_scores_apply', 'OPTIONS,POST'),
@@ -541,7 +551,9 @@ def test_the_classification_follows_the_rules():
     # and the Board's file paths and its "show in Explorer", neither of them a
     # plain read or write (S4s: v1 60 of 90), and the SCORE page's 4 writes, a
     # read and the pending values, guarded for the unpublished edits they carry
-    # (S4u: v1 64 of 96).
+    # (S4u: v1 64 of 96), and the set selection's 4 fetches and the follow's 2
+    # writes, with its 4 reads: tags and entrant names, as get_set already reads
+    # (S4v: v1 70 of 106).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -550,8 +562,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 64
-    assert len(EXPECTED_API_V1_ROUTES) == 96
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 70
+    assert len(EXPECTED_API_V1_ROUTES) == 106
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

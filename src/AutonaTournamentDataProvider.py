@@ -22,6 +22,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .core.AnalysisService import AnalysisService
+from .core.SetSelectionService import SetSelectionService
 from .core.StateManager import StateManager
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
@@ -165,6 +166,7 @@ class AutonaTournamentDataProvider(QObject):
         # one made after fetches from the new one (S4j review M2). The
         # panel used to drop it on tournament_changed.
         self._ForgetAnalysis()
+        self._ForgetSetSelection()
 
         self.GetTournamentData(initialLoading=initialLoading)
         self.GetTournamentPhases()
@@ -182,6 +184,7 @@ class AutonaTournamentDataProvider(QObject):
         self.provider = None
         # After the provider is gone, as LoadTournament does.
         self._ForgetAnalysis()
+        self._ForgetSetSelection()
         AutonaPlayerDB.ClearTournamentPlayers()
         self.signals.tournament_data_updated.emit({})
         self.signals.tournament_phases_updated.emit([])
@@ -235,6 +238,13 @@ class AutonaTournamentDataProvider(QObject):
         is replaced. GUI thread."""
         if AnalysisService.instance is not None:
             AnalysisService.instance.Forget()
+
+    @staticmethod
+    def _ForgetSetSelection():
+        """The set selection's lists the same way (SetSelectionService.Forget,
+        ADR-005 S4v). GUI thread."""
+        if SetSelectionService.instance is not None:
+            SetSelectionService.instance.Forget()
 
     def GetBannerURL(self):
         """The loaded tournament's banner URL; None with no tournament or

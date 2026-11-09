@@ -670,7 +670,17 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return {}
 
-    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
+    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None,
+                   strict=False, failed_pages=None):
+        """The event's sets. A request that fails drops its page's sets, and
+        with every page gone (or an error while reading) the answer is what
+        it has -- an empty list -- like an event with no sets.
+
+        `strict` (the set selection's fetch, ADR-005 S4v) tells them apart:
+        the first page failing or an error raises, and `failed_pages(n)` says
+        how many pages are missing from the answer -- those that still failed
+        after their retry, and those of a first page that only answered on
+        its retry: the other pages are not asked for then (below)."""
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
         executor = self._FanOut()
         status_token = AutonaStatusManager.push(
@@ -750,11 +760,26 @@ class StartGGDataProvider(TournamentDataProvider):
             # One sequential retry round for failed pages: a transient
             # throttle during the burst would otherwise silently drop their
             # sets (the old sequential loop had the same blind spot).
+            pagesKnown = totalPages
             for page in [p for p, nodes in pageNodes.items() if nodes is None]:
+                retried = fetchPage(page)
                 pageNodes[page] = deep_get(
-                    fetchPage(page), "data.event.sets.nodes", None)
+                    retried, "data.event.sets.nodes", None)
+                if page == 1:
+                    # The first page answering only now says how many there
+                    # are: too late for the fan-out above, so they are missing.
+                    pagesKnown = deep_get(
+                        retried, "data.event.sets.pageInfo.totalPages", 0) or 0
             stillFailed = sorted(
                 p for p, nodes in pageNodes.items() if nodes is None)
+            if strict:
+                if pageNodes.get(1) is None:
+                    raise LookupError(
+                        "start.gg answered no first page to EventMatchListQuery")
+                missing = len(stillFailed) + max(
+                    0, pagesKnown - len(pageNodes))
+                if missing and failed_pages is not None:
+                    failed_pages(missing)
             if stillFailed:
                 logger.error(
                     f"GetMatches: pages {stillFailed} of {totalPages} failed;"
@@ -777,12 +802,18 @@ class StartGGDataProvider(TournamentDataProvider):
                     final_data.append(self.ParseMatchDataNewApi(_set))
             return final_data
         except Exception as e:
+            if strict:
+                raise
             logger.error(traceback.format_exc())
             return final_data
         finally:
             AutonaStatusManager.pop(status_token)
 
-    def GetStations(self, progress_callback=None, cancel_event=None):
+    def GetStations(self, progress_callback=None, cancel_event=None,
+                    strict=False):
+        """The event's stations and its streams. A request that failed: []
+        -- or, when `strict`, it raises (LookupError for no answer), how the
+        set selection tells it from an event with neither (ADR-005 S4v)."""
         try:
             logger.info("Get stations")
 
@@ -801,6 +832,11 @@ class StartGGDataProvider(TournamentDataProvider):
                     "query": StartGGDataProvider.StationsQuery
                 }
             )
+            # QueryRequests answers {} once its retries are spent (or the
+            # app is stopping); an unknown slug answers a null event.
+            if strict and not isinstance(
+                    deep_get(data, "data.event", None), dict):
+                raise LookupError("start.gg answered no event to Stations")
 
             stations = deep_get(data, "data.event.stations.nodes", [])
             queues = deep_get(data, "data.event.tournament.streamQueue", [])
@@ -832,6 +868,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
             return (final_data)
         except Exception as e:
+            if strict:
+                raise
             logger.error(traceback.format_exc())
             return (final_data)
 

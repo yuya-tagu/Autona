@@ -151,6 +151,9 @@ tournament_service = importlib.import_module(
 # bootstrap_core(), never on import.
 analysis_service = importlib.import_module(
     "src.core.AnalysisService").AnalysisService
+# The set selection's lists (ADR-005 S4v), the same way.
+set_selection_service = importlib.import_module(
+    "src.core.SetSelectionService").SetSelectionService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -277,6 +280,7 @@ assert stream_service.instance is None, "import created StreamService.instance"
 assert tournament_media.instance is None,     "import created TournamentMediaService.instance"
 assert tournament_service.instance is None,     "import created TournamentService.instance"
 assert analysis_service.instance is None,     "import created AnalysisService.instance"
+assert set_selection_service.instance is None,     "import created SetSelectionService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

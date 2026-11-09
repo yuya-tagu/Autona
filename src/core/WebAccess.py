@@ -142,6 +142,14 @@ ROUTE_ACCESS = {
     # The live values, 反映 or not: edits not published yet (real names among
     # them) are not for whoever can reach the port (ADR-005 S4u).
     "api_v1.get_scoreboard_pending": PLAYERDB,
+    # Which station it follows and the set it loaded last, an id: the legacy
+    # get_set answers that as READ too (ADR-005 S4v).
+    "api_v1.get_scoreboard_follow": READ,
+    # What start.gg shows anyone: tags and entrant names, never a real name
+    # (SetSelectionService.SetRow).
+    "api_v1.get_tournament_phases": READ,
+    "api_v1.get_tournament_sets": READ,
+    "api_v1.get_tournament_stations": READ,
     "api_v1.get_games": READ,
     "api_v1.get_current_game": READ,
     "api_v1.get_match_names": READ,
@@ -194,6 +202,12 @@ ROUTE_ACCESS = {
     "api_v1.reset_match": WRITE,
     "api_v1.load_set": WRITE,
     "api_v1.pull_stream": WRITE,
+    "api_v1.follow": WRITE,
+    "api_v1.stop_follow": WRITE,
+    "api_v1.tournament_phases_refresh": WRITE,
+    "api_v1.tournament_sets_refresh": WRITE,
+    "api_v1.tournament_sets_cancel": WRITE,
+    "api_v1.tournament_stations_refresh": WRITE,
     "api_v1.tournament_load": WRITE,
     "api_v1.game_set": WRITE,
     "api_v1.bracket_refresh": WRITE,

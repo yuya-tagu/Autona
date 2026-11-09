@@ -596,3 +596,147 @@ def test_generate_renders_a_full_size_thumbnail(autonaApp, liveEvent,
     assert saved.is_relative_to(autonaApp.dir.resolve())
     with Image.open(saved) as image:
         assert (image.width, image.height) == (1920, 1080)
+
+
+# ── T7: the set selection's strict path (ADR-005 S4v) ────────────────────
+#
+# SetSelectionService asks the provider strictly and whitelists what comes
+# back into rows. These pin that path on real answers. Real names and handles
+# are in this data: nothing below puts a value in an assert message, only
+# counts, key names and set ids.
+
+_SET_ROW_KEYS = {"id", "stream", "station", "phase", "pool", "round", "p1", "p2"}
+_SIDE_KEYS = {"name", "members"}
+_PHASE_ROW_KEYS = {"id", "name", "groups"}
+_GROUP_ROW_KEYS = {"id", "name", "bracketType"}
+
+
+def _groupIds(phase):
+    return [group["id"] for group in phase["groups"]]
+
+
+def _strictSets(liveEvent, **kwargs):
+    missing = []
+    pages = []
+    rows = liveEvent.provider.GetMatches(
+        getFinished=True, strict=True, failed_pages=missing.append,
+        progress_callback=lambda done, total: pages.append(total), **kwargs)
+    return rows, missing, (max(pages) if pages else 0)
+
+
+def test_the_strict_set_list_is_the_plain_one(liveEvent):
+    rows, missing, pages = _strictSets(liveEvent)
+
+    assert missing == [], f"{sum(missing)} page(s) missing from the strict list"
+    assert pages >= 1
+    strictIds = {_set.get("id") for _set in rows}
+    plainIds = {_set.get("id") for _set in liveEvent.sets}
+    assert len(rows) == len(strictIds), "the strict list repeats a set id"
+    assert strictIds == plainIds, (
+        f"strict-only {len(strictIds - plainIds)},"
+        f" plain-only {len(plainIds - strictIds)} set id(s)")
+
+
+def test_a_phase_filter_narrows_the_strict_set_list(liveEvent):
+    from src.core.SetSelectionService import PhaseGroupIds, PhaseRows
+
+    phaseRows = PhaseRows(liveEvent.phases)
+    first = phaseRows[0]
+    groupIds = PhaseGroupIds(first)
+    assert groupIds, "the first phase has no group to filter by"
+
+    rows, missing, _pages = _strictSets(liveEvent, phaseGroupIds=groupIds)
+    plainIds = {_set.get("id") for _set in liveEvent.sets}
+    ids = {_set.get("id") for _set in rows}
+
+    assert missing == []
+    assert ids, "the first phase's groups gave no sets"
+    assert not (ids - plainIds), (
+        f"{len(ids - plainIds)} filtered set id(s) are not in the plain list")
+
+    # Every group of that phase: the rows name that phase, and only it.
+    phaseNames = {_set.get("tournament_phase") for _set in rows}
+    assert len(phaseNames) == 1, f"{len(phaseNames)} phase names in one phase"
+
+    # Sets of the other phases are not in the filtered list.
+    others = {_set.get("id") for _set in liveEvent.sets
+              if _set.get("tournament_phase") not in phaseNames}
+    assert not (ids & others), (
+        f"{len(ids & others)} set(s) of another phase came through")
+    if len(phaseRows) > 1:
+        assert len(ids) < len(plainIds)
+
+
+def _leaves(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _leaves(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _leaves(item)
+
+
+def test_the_set_rows_carry_only_the_whitelisted_fields(liveEvent):
+    from src.core.SetSelectionService import PhaseRows, SetRow
+
+    sets = liveEvent.sets
+    assert sets
+
+    unread = [_set.get("id") for _set in sets if SetRow(_set) is None]
+    assert not unread, f"{len(unread)} set(s) gave no row: {unread}"
+
+    wrongKeys, wrongSideKeys, leaked = [], [], []
+    for _set in sets:
+        row = SetRow(_set)
+        if set(row) != _SET_ROW_KEYS:
+            wrongKeys.append((_set.get("id"), sorted(set(row) ^ _SET_ROW_KEYS)))
+        for side in ("p1", "p2"):
+            if set(row[side]) != _SIDE_KEYS:
+                wrongSideKeys.append((_set.get("id"), side))
+
+        # What must not reach a row: handles and names that are not the tag.
+        # A value that is also part of a tag or a displayed name is not a
+        # leak (a handle equal to the tag is the tag).
+        shown = [str(_set.get(key) or "") for key in ("p1_name", "p2_name")]
+        shown += [p.get("gamerTag") or "" for team in _set.get("entrants") or []
+                  for p in team]
+        secrets = []
+        for team in _set.get("entrants") or []:
+            for player in team:
+                for key in ("twitter", "name"):
+                    value = player.get(key)
+                    if key == "name" and value == player.get("gamerTag"):
+                        continue
+                    if isinstance(value, str) and len(value) >= 2:
+                        secrets.append(value)
+        texts = list(_leaves(row))
+        for value in secrets:
+            if any(value in text for text in shown):
+                continue
+            if any(value in text for text in texts):
+                leaked.append(_set.get("id"))
+
+    assert not wrongKeys, f"{len(wrongKeys)} row(s) with other keys: {wrongKeys}"
+    assert not wrongSideKeys, (
+        f"{len(wrongSideKeys)} side(s) with other keys: {wrongSideKeys}")
+    assert not leaked, f"{len(leaked)} leak(s) in sets {sorted(set(leaked))}"
+
+    phaseRows = PhaseRows(liveEvent.phases)
+    assert phaseRows
+    assert all(set(row) == _PHASE_ROW_KEYS for row in phaseRows)
+    assert all(set(group) == _GROUP_ROW_KEYS
+               for row in phaseRows for group in row["groups"])
+
+
+def test_the_strict_station_list_is_a_list_of_rows(liveEvent):
+    from src.core.SetSelectionService import StationRows
+
+    stations = liveEvent.provider.GetStations(strict=True)
+    assert isinstance(stations, list)
+
+    rows = StationRows(stations)
+    assert len(rows) == len(stations)
+    assert all(set(row) == {"type", "id", "identifier", "stream"}
+               for row in rows)
