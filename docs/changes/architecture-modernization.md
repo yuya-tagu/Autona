@@ -6400,3 +6400,117 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - **修正の後に確認すること（未実施）**: 何も追従していない `:stop-follow` で反映ボタンが点かず `scoreboard_follow` も出ないこと、未構築のボードへの `:stop-follow` がボードを作らないこと、`refresh → cancel` の繰り返しが 3 本目で 409 になること、`"11"` と `11`、`null` と `"all"` が同じ要求になること、ヘッドレスの `poll` の `secondsLeft`
   - **本物の大会で確認済み**（`tests/live/test_startgg_live.py` T7、終了済みの 1 大会）: strict の一覧が plain と同じ id の集合（1 ページ・31 セット・欠けたページ 0）、フェーズのグループ id での絞り込み、全セットが `SetRow` を通りキーがホワイトリストのとおりで twitter・実名が行に出ないこと、`GetStations(strict=True)` がリスト（この大会は 0 件）で `StationRows` を通ること
   - **未確認**: 本物の start.gg の複数ページ（この大会は 1 ページ）と、複数フェーズの絞り込み（この大会は 1 フェーズ・1 グループ。絞り込みで件数が減ることは確かめていない）、配信台が 1 件以上ある大会
+
+#### S4w クルーボードの v1（2026-11-09）
+
+上の順序の 4 の Crew。React の SCORE ページが Qt のクルーボード（board 3）でできることをすべて v1 で行えるようにした。操作は Qt の無い core（`CrewBattleService`）を通るので、ヘッドレスでも同じ。Qt のウィジェットは残し、動作を変えていない（state を読んで描画するので v1 の操作に追従する。比較テストで確認）。`web/src`・`HoldBoard`・Widget 依存の除去はこの段に入れていない。
+
+- **機能の洗い出しと v1 の対応**（コードで確認。`.ui` は無く、`AutonaCrewBattleWidget._buildUi` がコードで組む。機能は 1 つも無くしていない）
+
+  **操作の行**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 人数（Members） | スピン 1〜9。両チーム共通。合計も計算し直す | `PATCH /scoreboards/3/set` `{players}`（整数 1〜9。範囲外は 400）。読みは `team.{t}.memberNum` |
+  | ストックのリセット（Reset Stocks） | 確認なし。全員を 3 に戻し、出場中を解除する。名前は残す | `POST /scoreboards/3/score:reset`（確認なし。ボタンと同じ） |
+  | X に投稿 | 足りない項目（チーム 1 / チーム 2 / ラウンド）をダイアログで示す。揃えば投稿の URL をブラウザで開く（文字だけ） | `GET /scoreboards/3/post` の `{text, missing}`（§5.19）。ダイアログと URL はページ |
+  | スワップ | 入力中の欄を確定してから（`CommitFocusedEdit`）。**色もクルーと一緒に移る**（board 1/2 と違う）。フラグを反転 | `POST /scoreboards/3:swap-teams`。フラグは `score.3.teamsSwapped`（state と delta。下の判断 1） |
+  | 表示大会名 | 1 行の入力欄 | 既存の `PATCH /tournament/info` の `displayTournamentName`（通る。変更なし。ボードが追従することをテストで確認） |
+
+  **Phase / Pool / Match**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 値 | 編集可能なコンボ。確定で書く | `PATCH /scoreboards/3/set` の `phase` / `pool` / `match`（文字列。空は消す） |
+  | 候補 | Phase は翻訳の phase 名（`{0}` の入るもの・`indicator`・空・重複を除く）、Pool は `group` の雛形 × A〜D、Match は `GetMatchNameCandidates` | `GET /match-names/candidates`（§5.20）。規則は `AutonaLocaleHelper` に移し、コンボも同じものを呼ぶ |
+
+  **チームの列**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | チーム名 | 入力欄（空の表示は「Team {n}」） | `PATCH /scoreboards/3/set` の `teamName` `{team, value}`（既存の v1 の形。legacy の `set_route` はクルーのチーム名を書かない。golden "set team name" で pin） |
+  | チーム色 | 左クリックでダイアログ、右クリックで既定（`#fe0000` / `#0071bc`） | `POST /scoreboards/3/teams/{t}/color`（`#rrggbb` に揃え、同じ色は書かない）。既定の値はページが送る |
+  | 出場中 | メンバーごとのラジオ。1 チーム 1 人。金色の強調。外すのは自分が印のときだけ。隠れた行のラジオは押せない | `PATCH .../members/{m}` の `active`（true / false。`SelectActiveMember` / `ReleaseActiveMember`）。`true` は表示中のメンバーだけ（レビューの修正 4） |
+  | メンバー名 | 入力欄（空の表示は「Member {m}」）。確定で書く | `PATCH .../members/{m}` の `name` |
+  | ストック | スピン 0〜99 | 直接の値は `PATCH .../members/{m}` の `stock`（範囲外は 400）、増減は `POST .../members/{m}/stock:adjust` の `delta`（0〜99 に丸める。ボタンの連打向け。`Idempotency-Key`） |
+  | 合計（Total） | 名前が入った表示中のメンバーのストックの合計 | 読みの `team.{t}.score`（core の派生値。書く口は無い） |
+  | 行の表示 | `memberNum` より後ろの行を隠す。値は残る（出場中の印も） | ページが `memberNum` で隠す。隠れた行への `name` / `stock` / `active: false` も通す（9 行とも state にある。人数を下げて残った印を外せる）。`active: true` は 400 |
+
+  **ボードの動作**
+
+  | 機能 | Qt の動作 | v1 での実現 |
+  |------|-----------|-------------|
+  | 描画 | delta と big change で `_RenderFromState` | delta（全キーが state にある）。読みは `GET /scoreboards/3` と `/pending`（`swapped` を含む） |
+  | 入力中の欄 | フォーカスのある欄は描画で上書きせず、離れたときに取り込む | ページの役目（`PanelShell/useStateField`）。v1 で書いても Qt の入力中の欄は上書きされない（テストあり） |
+  | `ChangeSetData` | UI なし。呼ぶのはテストだけ（Web は core の `ApplySetData` を直接呼ぶ） | `PATCH set`（厳しい形）。legacy の `set_route` が同じ結果になることを比較 |
+  | ホットキー Ctrl+Shift+S | board 3 では何もしない（`actions.SwapTeams(3)` が False を返す。既存） | ページはボタンで行う（下の報告） |
+  | ボードの切り替え | 「Rules」メニュー（このウィジェットの外） | `GET /health` の `activeBoard`（既存） |
+  | Qt にボタンのない操作 | `:clear` / `:reset-players` / `:reset-match` / `best_of` は legacy と Web だけ | `POST /scoreboards/3:clear`・`:reset-players`・`:reset-match`（confirm）、`PATCH set` の `bestOf`（整数 0〜99） |
+
+- **足したルートと開けたルート**（v1 は 72 of 110）
+
+  | ルート | 分類 | 内容 |
+  |--------|------|------|
+  | `PATCH /scoreboards/3/teams/{t}/members/{m}`（新規） | WRITE | `{name?, stock?, active?}`。1 回の lock と 1 保存サイクル。ログはキーだけ |
+  | `POST /scoreboards/3/teams/{t}/members/{m}/stock:adjust`（新規） | WRITE | `{delta}`。`Idempotency-Key`。`delta: 0` は構築せず何もしない |
+  | `GET /scoreboards/3/post`（新規） | READ | `{text, missing}`。構築しない。board 1/2 は 400 |
+  | `GET /match-names/candidates`（新規） | READ | `{phase, pool, match}`。ボードを取らない |
+  | `POST /scoreboards/3:swap-teams`（開けた） | 既存 | 構築する（まっさらなボードを変える） |
+  | `POST /scoreboards/3/score:reset`・`:reset-players`・`:reset-match`（開けた） | 既存 | 未構築なら何もせず 200 |
+  | `POST /scoreboards/3:clear`（開けた） | 既存 | confirm。構築する |
+  | `POST /scoreboards/3/teams/{t}/color`・`PATCH /scoreboards/3/set`（開けた） | 既存 | 下の判断 3・4 |
+
+  board 3 で 400 のまま: `score:adjust`・`score:set`・`stats:refresh`・`:apply`・選手のルート・`stages`・`:load-set`・`:pull-stream`・`:follow`・`:stop-follow`・`GET follow`・`:reset-all`（クルーに無いもの）。board 1/2 へのクルー専用ルートは 400、メンバー番号は 0 が 400・10 以上が 404。
+
+- **判断**
+  1. **スワップのフラグは `score.3.teamsSwapped`**: 推奨どおり。通知の経路を増やさず、値が delta で届く。`_swapped` はボードごとの値を core が持っていただけで、state に移す障害は無かった。**board 1/2 と同じくシードは書かない**（無ければ false）ので、シードの golden は変わらない。`KEY_CATALOG` は変更不要: `SCORE_BOARD_KEYS` が既に `teamsSwapped` を持ち、`{N}.teamsSwapped` が board 3 も覆う（テストで pin）。増えるのは最初のスワップの後の `program_state.json` の 1 キー・delta の 1 行・`out/` の 1 ファイル。起動時の `ResetScoreRoot` で消えるので移行は要らない。`layout/` と `web/src` は `teamsSwapped` を読まないのでオーバーレイは変わらない。state のフラグを読むもう 1 つの経路 `SetLoadService.DisplayTeam` は board 3 を通らない（`set_route` は先に分岐し、`load_player_from_tag` は断り、追従は 400）。SCORE の方針の 4（「Crew の v1 を足すときに改めて判断する」）と S4u の「クルーの `swapped` は state の外」の申し送りはこれで解決
+  2. **未構築のボード**: 書き込みは `Prepare` で構築してから（未構築への書き込みは構築時のシードで消える）。検証は `Prepare` の前で、拒否はボードを作らない。`score:reset`・`:reset-players`・`:reset-match` と `delta: 0` は、まっさらなボードに意味が無いので構築せず 200（`_crew_not_built`。board 1/2 の動作は変えない）。`:clear`・`:swap-teams` は構築する（まっさらなボードを変える）。既定と同じ値の書き込み（`{"players": 3}` など）は構築して何も書かない（書き込みの口は値を見る前に構築する。ボードを開くのと同じことなので残した）。`GET /scoreboards/3` の構築は既存の動作のまま
+  3. **`PATCH set` は board 3 だけ厳しくする**: 未知のキー・空の本文（壊れた JSON もこれで落ちる）・`losers`・`characters`・`teamName` の中の `team` / `value` 以外のキー（レビューの修正 5）は 400、`bestOf` と `players` は範囲外を丸めず 400。新しいページのための口で、書き間違いを丸めて黙って通す理由が無い。legacy の `set_route` は通らない（チーム名を書かず、値を丸める）。`crew_update_set` は 1 保存サイクル
+  4. **色は `#rrggbb` に揃え、同じ色は書かない**（lock の中で読んで比べる）: ボタンが保つ形に合わせ、`#FE0000` と `#fe0000` を同じ要求にする。board 1/2 の動作は変えていない（送られたまま。テストで pin）
+  5. **同じ値は書かない**: `_RepublishBoard` は変わらないボードを書かない（スワップ以外の全部）。`RenameMember` は同じ名前を書かない。ボタン（Reset Stocks）の連打も 1 サイクルになった。**Qt の動作の変更はこれだけ**で、見た目は同じ（書き込みが減るだけ）
+  6. **1 メンバーの更新は 1 回の lock と 1 サイクル**: `UpdateMember` は `name` / `stock` / `active` を `SaveBlock` + `StateManager.lock` の中で行う。別スレッドを待たない（Flask のスレッドから通すテストあり）
+  7. **X 投稿文の規則は core へ**: `PostText()` が `(text, missing)` を返し、ボタンとルートが同じものを呼ぶ。Qt のボタンは `missing` を翻訳したダイアログと `webbrowser.open` だけになった。`GET post` は READ: 中身は全部 `/state` で読める値で（テストで pin）、`/result/post` とは事情が違う
+  8. **コンボの候補も 1 か所**: `AutonaLocaleHelper.GetPhaseNameCandidates` / `GetPoolNameCandidates`。既存の `GET /match-names` は別の形の dict を返すので変えず、`/match-names/candidates` を足した
+  9. **`{t}` `{m}` の検証**: `t` は 1 か 2（400）、`m` は 0 が 400、10 以上が 404（`NOT_FOUND`）。`memberNum` より後ろは通す（`active: true` を除く。レビューの修正 4）。`-1` / `1.5` / `x` はルートに当たらず 404 か 405
+- **golden の差分**（`tests/fixtures/crew_operations/golden.json` の "swap" だけ。他のステップは 1 バイトも変わらない。`BOARD same but flag: True`、`OTHER {}` も同じ）
+  - `sets` に `["score.3.teamsSwapped", "true"]`
+  - `deltas` に `{"path": ["score", "3", "teamsSwapped"], "action": "dictionary_item_added", "value": true, ...}`
+  - `board` に `"teamsSwapped": true`
+- **報告（直していない。既存の問題・候補）**
+  - **`web/src/ScoreboardPage/MatchInfoBar.jsx` は `GET /match-names` の `data.phase` / `data.match`（dict）を MUI Autocomplete の `options` に渡している**: `useAutocomplete.js` がポップアップを開くときに `options.filter` を呼ぶので落ちるはず（コードを読んだだけ。動かしていない）。React のクルーのページで候補を出すときは `/match-names/candidates` を使う → 実機で再現し、レビューの修正 6 で直した
+  - legacy の `set_route` はクルーのチーム名を書かない（golden "set team name" が pin している既存の動作）
+  - `SetTeamColor` は board 1/2 で同じ色も書き、未構築の board 1/2 の `teams/{t}/color` は構築しない（既存。board 1/2 の動作は変えていない）
+  - `ClearMatchInfo` は `pool` をシードが書かないので、まっさらなクルーボードへの最初の `:reset-match` が `pool: ""` を 1 回書く（既存。未構築なら v1 は書かない）
+  - 壊れた JSON が `{}` として通るのは v1 全体の既存動作（クルーの書き込みは空の本文を拒否するので通らない）
+  - **`tests/test_headless_smoke.py` の `_wait_until_serving` は `OSError` しか受けない**: S4w の並列の 1 回目で、プロセスが起動を待つ間に `http.client.BadStatusLine: GET /api/v1/health HTTP/1.1` で落ちた。応答の 1 行目が送った要求そのものなので、まだ誰も待っていない空きポートへの接続の送信元ポートが宛先と同じになり、自分自身に繋がった（TCP の自己接続）と見ている。この PC で送信元を宛先と同じポートに固定すると、接続が成立して送った要求がそのまま読めることは確かめた。実際の失敗がこれだった証拠はこの 1 行だけで、失敗そのものは再現していない（推定）。プロセスが応答する前に落ちていて、S4w の変更は通らない。単体と 2 回目の全量は通った。`web/e2e/headless_server.py` も同じ関数を使う。範囲外なので直していない（`http.client.HTTPException` も受ければ塞がる）→ レビューの修正 7 で直した
+  - 無くす候補として挙げるだけ（残している）: ウィジェットの `ChangeSetData`（テストだけが呼ぶ入口）。Ctrl+Shift+S が board 3 で何もしないのは既存の動作で、残した（スワップできるようにするかは別の判断）
+- **次の段への申し送り**
+  - React のクルーのページ: `teamsSwapped` は delta で届く。一度もスワップしていないときはキーが無いので false と読む。`memberNum` で行を隠す。入力中の欄は `PanelShell/useStateField` で守る。右クリックの既定色はページが持つ（`DEFAULT_COLORS`）。X の投稿は `GET post` の `missing` が空のときだけ URL を開く。クルーは held でないので反映ボタンは要らない。`GET /scoreboards/3` と `/pending` はデスクトップで Qt のボードを構築する（既存）ので、形式がクルーでないときにページが読まないようにする
+  - ウィジェットを消すとき: `tests/test_api_v1_crew.py` の STEPS（入力欄の操作とルートの比較）の入力欄の側を消す。`ChangeSetData`・`crew_member_stock` / `crew_set_active`（legacy）の扱いを見直す
+- **テスト**
+  - 新規 `tests/test_api_v1_crew.py`: 入力欄を操作した結果とルートの結果の比較（デスクトップとヘッドレス、`Set` の並び・delta・エンコードした state が 1 ステップずつ同じで、Qt は書かずに追従）、ルートと golden の比較（両シェル）、1 サイクル、1 回の lock（`_CountedLock`）、別スレッドから、同じ要求を送り直しても `Set`・delta・revision が動かないこと、拒否する入力の表（bool・0・負・小数・空・配列・型違い・範囲外・未知のキー・存在しないメンバーとチーム）、確認、未構築のボード（書き込みは構築して残り、リセットと読みは構築しない）、権限（LAN のトークン・他オリジン・READ が開いていること・`/state` に無い値を返さないこと）、スワップのフラグ（state・delta・`/pending`・`get-swap`・`program_state.json`・カタログ・ボード）、メンバー名が操作ログに出ないこと、入力中の欄、表示大会名、X の投稿文（ボタンの URL とルートの比較、足りない項目のダイアログ）、候補（コンボの項目との比較）、`AutonaApiInfoWindow` の行がそのルートへ行き、例が通ること
+  - 本物のヘッドレスのプロセス: `tests/test_headless_smoke.py` にメンバーの更新・スワップ・`/state`・X 投稿文・候補の往復を足した（`LoadRoundNames` はシェルの仕事なので、候補が空でないことをここで確かめる）
+  - 更新: `tests/test_crew_operations.py`（`test_a_fresh_board_forgets_a_swap`）、`tests/test_headless_seed.py`（シードは書かない）、`tests/test_web_operations.py`（`_BODIES`・`_NOT_200`）、`tests/test_webserver_routes.py`（4 本）、`tests/test_objectname_keypath_contract.py`（コメント）、`tests/conftest.py`（`_swapped` の掃除を削除）
+  - **pin が落ちることの確認**: 実装を 1 か所ずつ壊す 56 通りを回し、全部落ちた。途中で残ったのは 1 件だけで、`UpdateMember` の番地の検査を消すもの。中の書き込みがそれぞれ検査するので等価と判断し、検査の方を消したが、**これは誤りだった**: `SelectActiveMember` は 0 以下を「誰も出場していない」と読むので、member 0 / 負への `active=True` が出場中の印を消す。テストが誰も出場していない状態でしか 0 を試していなかったので残った（印が無いところに「無し」を書いても変わらない）。レビューで指摘を受け、検査を戻して、誰かが出場中の状態で 0 と -5 を試すテストを足した（下のレビューの修正 1）。壊す箇所を挙げ直す中で pin の無いものが 2 つ見つかり、テストを足してから壊して確かめた: メンバー名が操作ログに出ないこと（`log_keys_only`）、X 投稿文の読みが 1 回の lock であること
+- **検証**: `python scripts/run_tests_parallel.py` 5396 passed / 2 skipped（RESULT: OK、exit 0。1 回目は上の報告の 1 件で落ち、smoke に往復を足した後の 2 回目がこれ）。変更に関わるファイルの直列実行: 14 ファイル 1120 passed / 1 skipped、smoke を足して順序を逆にして 15 ファイル 1121 passed / 1 skipped。`web/` は変えていないので build・jest・E2E は回していない。直列の全量は未実施
+- **実機確認（メインセッション）**: 2026-11-10 に実施（結果は下の「実機確認の結果」）。隔離データの `python main.py` でルートを叩き、Qt のクルーボードを見る
+  - 未構築: クルーを開く前に `score:reset`・`:reset-players`・`:reset-match`（confirm）・`GET .../post` を送り、200 でボードが作られないこと
+  - メンバー: `PATCH .../members/1` `{"name":"A","stock":2,"active":true}` で名前・ストック・金色のラジオ・Total が追従する。`stock:adjust` `{"delta":-100}` で 0 に止まる
+  - スワップ: `:swap-teams` で名前・色・ストック・印が左右で入れ替わる。`GET /scoreboards/3` の `swapped` と delta の `score.3.teamsSwapped`、`program_state.json` のキー。Qt のボタンでも同じ。再起動で消えること
+  - セット: `PATCH set` `{"phase","pool","match","bestOf","players","teamName"}` でコンボ・行数・チーム名が追従する。Reset Stocks のボタン
+  - 入力中: Qt の名前欄に打っている間（確定しない）に同じメンバーの `name` を書いても欄が上書きされない
+  - X: 足りないときのダイアログと `missing`、揃ったときにブラウザで開く文と `GET .../post` の `text`。コンボのプルダウンと `GET /match-names/candidates`
+  - OBS のクルーのレイアウト: スワップの後の見た目が今までと同じこと（キーが 1 つ増えるだけ）
+- **実機確認の結果（メインセッション、2026-11-10。隔離データのデスクトップ、レビューの修正の前のコード）**: 未構築への要求（リセット 3 本・`delta: 0`・`GET post`・拒否される書き込み）は 200 / 400 で board 3 は作られない。メンバー更新・`stock:adjust`（-100 で 0、`Idempotency-Key` の再送は 1 回だけ）・色・`PATCH set`・表示大会名・他オリジンの 403 は期待どおりで、Qt の画面も追従した。スワップは名前・色・ストック・印・合計が入れ替わり、`program_state.json` と `out/score/3/teamsSwapped.txt` に出て、同じデータで再起動すると消えた。Qt のスワップボタンで false に戻り、ストックリセットで全員 3・出場中が外れた。入力中の名前欄は v1 で上書きされず、離れると state の値になった（`HeldBackText` の規則どおり）。X ボタンのダイアログ「チーム2 プレイヤー名」は `missing: ["team2"]` と一致。Web のスコアボードページ（`/scoreboard`）でフェーズ欄をクリックするとページ全体が落ちる既存の不具合を再現した（下の修正 6）
+- **レビューの修正（2026-11-10。レビューは高・中なし、低 7 件。うち 5 件と、既存の不具合 2 件を直した）**
+  1. **`UpdateMember` の番地の検査を戻した**: 先頭で `_ValidMember` を見て、外れていれば何も書かずに False。`SelectActiveMember` は 0 以下を「誰も出場していない」と読むので、検査が無いと member 0 / 負への `active=True` が出場中の印を消していた（上の「pin が落ちることの確認」の誤り）。ルートは `m` が 0 以下を先に 400 にするので、v1 からは届かない（core の入口の問題）。テスト: 誰かが出場中の状態で member 0 と -5 に `active=True`（ほかの欄つきも）を渡し、何も書かず印が残ること（両シェル）
+  2. **X 投稿文の大会名は `str(value or "")`**: 数で入っていると文を組む `"\n".join` が TypeError になり、`GET post` が 500 だった（ボタンは例外を握っていた）。strip はしない（ボタンの旧実装と同じ）。テスト: 2024 と `"  Cup  "` で 200 と文
+  3. **候補の規則は壊れた用語で落ちない**: 利用者の `user_data/tournament_terms.json` は同梱の用語をキーごとに上書きする。雛形（`group` / `winners_top_n` / `losers_top_n` / `round`）が文字列でない・`.format` が埋められない（指示の IndexError / KeyError / ValueError に加えて、`{0.x}` の AttributeError と `{0[x]}` の TypeError も同じ扱いにした）・`phaseNames` / `matchNames` が dict でないときは、そのリストを `[]` にする（`AutonaLocaleHelper._FormatEach`）。match の文字列でない用語（`"winners_final": 5` など）は候補にしない: phase の規則と同じで、コンボの `findText` / `addItem` が TypeError になるため。テスト: 壊し方 18 通りで `GET /match-names/candidates` が 200 を返し、壊したリストだけが空で残りは変わらないこと、文字列でない用語が候補に無いこと、壊れた用語 3 通りでクルーのボードが建ち、コンボの項目が候補と一致すること。board 1/2 の Qt のコンボ（`AutonaScoreboardWidget` 707〜725 行の phase / pool）は指示どおり触っていない（消す予定。壊れた phase の用語ではそのボードの構築が今も落ちる。match のコンボは同じ関数なので落ちなくなった）
+  4. **`active: true` は表示中のメンバーだけ**: `m > memberNum` への `active: true` は 400 `INVALID_ARGUMENT`（Qt は後ろの行をラジオごと隠すので、Qt にできない状態）。`active: false` と `name` / `stock` は隠れた行にも通す（人数を下げると印が後ろの行に残るので、それを外せるように）。検査は `Prepare` の前で、拒否はボードを作らない。人数は `AutonaWebOperations.crew_member_count()`: 未構築のボードはシードの `DEFAULT_MEMBER_NUM`（3）、構築済みとヘッドレスは state。検査は書き込みの lock の外の読みだが、間に人数が下がっても「印を付けてから人数を下げた」のと同じ state になる（`SetMemberCount` は印に触れず、合計は印に依らないので 2 つの書き込みは可換）ので、lock の中で取り直さない。§6.38 を更新。テスト: 両シェルで 6・9 番への `active: true` の拒否（ほかの欄つきでも何も書かない）・5 番は通る・隠れた 9 番への name / stock は通る、残った印を `active: false` で外せて `true` では戻せない、未構築のボードはプレースホルダに 9 があってもシードの 3 で判定してボードを作らない
+  5. **board 3 の `PATCH set` の `teamName` の中の未知のキーは 400**（厳しい形の一貫性）。board 1/2 は変えていない（中のほかのキーを読まない。テストで pin）。§6.5 の board 3 の段落を更新
+  6. **Web のスコアボードページの落ちる不具合**（既存。実機で再現: フェーズ欄のクリックでコンソールに `Uncaught TypeError: F.filter is not a function`、ページ全体が真っ黒）: `web/src/ScoreboardPage/MatchInfoBar.jsx` は `GET /api/v1/match-names` の dict を Autocomplete の `options` に渡していた。`GET /api/v1/match-names/candidates` を読み、`phase` / `pool` / `match` の配列を渡す（`candidateLists()` が、配列でないものと文字列でない要素を落とす）。pool も候補を出す（それまで `options={[]}`）。`GET /match-names` の形は外部の呼び手のために変えていない。**ページが読むのは `/match-names/candidates`**（`external-control-api.md` の §5 の表と §5.20 に書いた）。board 1/2 の Qt のコンボとの照合: phase は「`{0}` を含まない用語を重複なしで」、pool は「`group` の雛形 × A〜D」、match は同じ `GetMatchNameCandidates` で、同じ規則。違いは 2 つ: Qt の phase は `indicator` を含むキーを除かない（同梱の用語には無く、利用者が足したときだけ差が出る）、Qt は大会を読み込んだときに実際のプール名と参加人数から出す 1 回戦（`Winners TOP300` など）を足す（ページには無い。要るなら SCORE の React 化で判断する）。jest（新規 `MatchInfoBar.test.js`）: 3 つの欄がそれぞれ候補の配列を出し、クリック（focus + mouseDown）でポップアップが開いても落ちないこと・`/match-names` を読まないこと、`candidateLists` が dict・文字列でない要素・答え無しを配列にすること。旧コードでは 5 件とも落ち、正規化を外すと実機と同じ `options.filter is not a function` で落ちることを確かめた
+  7. **`tests/test_headless_smoke.py` の `_wait_until_serving` は `http.client.HTTPException` も受ける**（上の報告の TCP の自己接続で、自分の要求を読み返す `BadStatusLine`）。`web/e2e/headless_server.py` はこの関数を import して使うので、直す場所は 1 か所。テスト: `BadStatusLine` → 接続の拒否 → 200 の順の答えで待ち続けて True
+  - そのままにしたもの: レビュー 6（候補の規則が Helper にある。ヘッドレスもこの Helper を使う）。入力中のストック欄が上書きされる既存の動作は今回は扱っていない
+  - **pin が落ちることの確認**: 修正ごとに 20 通り壊して回し、19 通りが落ちた。残ったのは `_FormatEach` の「文字列でなければ None」を外すもので、等価（JSON の値で `.format` を持つのは文字列だけで、それ以外は AttributeError になり、同じ `except` で None になる。判定は読み手のために残した）。Web は 2 通り（pool の候補を `[]` に戻す・正規化を外す）を壊して落ちることを確かめた
+  - **検証**: `tests/test_api_v1_crew.py` と smoke の新しい単体テストは 373 passed。関係する 11 ファイルの直列（crew API・smoke・crew の操作とボード・Web 操作・ルート台帳・v1・v1 score・ヘッドレスのシード・import の副作用・core の Qt 非依存）は 803 passed / 1 skipped（exit 0）。`python scripts/run_tests_parallel.py` は 1 回目が 1 件失敗（`tests/test_result_render.py::test_a_page_that_never_loads_fails_its_render_and_the_next_one_tries`。WebEngine のオフスクリーン描画の待ちで、同じ時刻に GPU の `Failed to make current` が出ていた。今回の変更は通らず、単体では 38 passed）、2 回目は 5435 passed / 2 skipped（RESULT: OK、exit 0）。`web/`: `npm run build` exit 0（警告は既存の `Header.jsx` の 1 件だけ）、`npm test -- --watchAll=false` 35 suites 991 passed（exit 0）、`npm run test:e2e` 66 passed（exit 0。スコアボードページの E2E は無い）。直列の全量は未実施（メインセッションが回す）
+  - **修正の後の実機確認（メインセッション、2026-11-10。隔離データのデスクトップ）**: `/scoreboard` の Phase / Pool / Match の欄をクリックするとプルダウンが出て、ページは落ちない（候補はフェーズ 12・プール 4（予選プール A〜D）・マッチ 43 で `GET /match-names/candidates` と同じ件数。コンソールのエラーなし）。未構築のボードへの `members/5` `{"active": true}` は 400 でボードを作らない。人数 5 で `members/5` に印を付け、人数を 3 に下げると印が残り、`{"active": true}` は 400、`{"active": false}` で外れる。board 3 の `teamName` の中の未知のキーは 400、board 1 は 200。大会情報の `tournamentName` に数を送ると v1 が 400 で断るので、修正 2 の経路は v1 からは通らない（テストで pin）。修正の前のコードのヘッドレス（隔離データの `--headless`）でも、v1 の操作はデスクトップと同じ結果だった（ヘッドレスはボードが起動時から作られているので、まっさらなクルーボードへの最初の `:reset-match` が `pool: ""` を 1 回書く。上の報告の既存の動作）

@@ -247,8 +247,8 @@ def test_a_new_board_starts_over_from_what_was_there(noBoards):
 
 
 def test_a_new_crew_board_forgets_the_swap(noBoards):
-    """Its flag is outside the state (CrewBattleService._swapped), and a
-    board's launch write is what clears it (left there, ADR-005 S4t)."""
+    """Its flag is score.3.teamsSwapped (ADR-005 S4w), and a new board does
+    not keep it: not written by the seed, as on boards 1/2."""
     from src.core.CrewBattleService import CrewBattleService
 
     AutonaActions.instance.SeedFreshBoard(3)
@@ -258,6 +258,7 @@ def test_a_new_crew_board_forgets_the_swap(noBoards):
     AutonaActions.instance.SeedFreshBoard(3)
 
     assert CrewBattleService(3).teamsSwapped is False
+    assert "teamsSwapped" not in StateManager.Get("score.3")
 
 
 @pytest.mark.parametrize("board", [0, 4, "x", None])

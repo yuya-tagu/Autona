@@ -531,6 +531,16 @@ def get_match_names():
     }
 
 
+def get_match_name_candidates():
+    # What the crew board's three editable combos offer, in their order
+    # (without their blank first row).
+    return {
+        "phase": AutonaLocaleHelper.GetPhaseNameCandidates(),
+        "pool": AutonaLocaleHelper.GetPoolNameCandidates(),
+        "match": AutonaLocaleHelper.GetMatchNameCandidates(),
+    }
+
+
 def get_characters():
     return GameAssetCatalog.instance.CharactersPayload()
 
@@ -1441,11 +1451,11 @@ def set_team_losers(scoreboard, team, value):
 
 def swap_teams(scoreboard):
     # A 1v1 / team board's swap is a state operation (AutonaActions.SwapTeams,
-    # ADR-005 S2c) and its flag is `score.{n}.teamsSwapped`; the crew board's
-    # is CrewBattleService.SwapTeams (S3e-2), its flag kept by core outside
-    # the state. Either way the board lets the field being typed in finish
-    # first, so the text travels with the swap as it did when the widget
-    # swapped its rows.
+    # ADR-005 S2c); the crew board's is CrewBattleService.SwapTeams (S3e-2).
+    # The flag is `score.{n}.teamsSwapped` on all three (the crew board's since
+    # S4w). Either way the board lets the field being typed in finish first,
+    # so the text travels with the swap as it did when the widget swapped its
+    # rows.
     host = boardHost
 
     def run():
@@ -1465,9 +1475,7 @@ def swap_teams(scoreboard):
 
 
 def _swap_flag(board):
-    """Whether board `board` (1/2/3) is swapped, live: core's on all three."""
-    if board == CREW_BOARD:
-        return bool(CrewBattleService(CREW_BOARD).teamsSwapped)
+    """Whether board `board` (1/2/3) is swapped, live."""
     return bool(StateManager.Get(f"score.{board}.teamsSwapped", False))
 
 
@@ -1680,6 +1688,77 @@ def crew_set_active(scoreboard, team, member):
         return "OK"
 
     return host.Run(run)
+
+
+# /api/v1's, with the numbers and values already checked by the route (ADR-005
+# S4w). The same values again write nothing.
+
+def crew_member_count():
+    """How many members the crew board shows: the state's count, or on a
+    board not built yet (the desktop's lazy board) the count building it will
+    give it, its seed's. Read without building anything."""
+    if not boardHost.Built(CREW_BOARD):
+        return CrewBattleService.DEFAULT_MEMBER_NUM
+    return CrewBattleService(CREW_BOARD).MemberNum()
+
+
+def crew_update_member(team, member, fields):
+    """Some of one member's `name` / `stock` / `active`, in one save cycle."""
+    host = boardHost
+
+    def run():
+        host.Prepare(CREW_BOARD)
+        CrewBattleService(CREW_BOARD).UpdateMember(team, member, **fields)
+
+    host.Run(run)
+
+
+def crew_update_set(fields):
+    """Some of the board's `phase` / `pool` / `match` (the operations its
+    combos call), `bestOf`, `players` and `teamName` ((team, name), its name
+    field's operation), in one save cycle. Not set_route: that is the legacy
+    reading of a set payload, which writes no team name on this board."""
+    host = boardHost
+
+    def run():
+        host.Prepare(CREW_BOARD)
+        crew = CrewBattleService(CREW_BOARD)
+        actions = AutonaActions.instance
+        with StateManager.SaveBlock():
+            for field in schema.SCORE_MATCH_FIELDS:
+                if field in fields:
+                    actions.SetMatchField(CREW_BOARD, field, fields[field])
+            if "bestOf" in fields:
+                crew.ApplyBestOf(fields["bestOf"])
+            if "players" in fields:
+                crew.SetMemberCount(fields["players"])
+            if "teamName" in fields:
+                actions.SetTeamName(CREW_BOARD, *fields["teamName"])
+
+    host.Run(run)
+
+
+def crew_team_color(team, color):
+    """One crew's colour, the operation its colour button calls. Unlike
+    `team_color`, the board is built first (an unbuilt board's seed would wipe
+    the write), and a colour it already has is not written."""
+    host = boardHost
+
+    def run():
+        host.Prepare(CREW_BOARD)
+        with StateManager.lock:
+            if StateManager.Get(
+                    f"score.{CREW_BOARD}.team.{team}.color") != color:
+                AutonaActions.instance.SetTeamColor(CREW_BOARD, team, color)
+
+    host.Run(run)
+
+
+def get_crew_post():
+    """The board's X post: {"text", "missing"} (CrewBattleService.PostText).
+    Reads the state, so no board is built for it."""
+    text, missing = CrewBattleService(CREW_BOARD).PostText()
+    return {"text": text, "missing": missing}
 
 
 # ── the player slots of boards 1/2 (ADR-005 S3e-4) ───────────────────────

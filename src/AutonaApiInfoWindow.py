@@ -46,7 +46,7 @@ _REQUEST_TIMEOUT = 25
 
 # Placeholder substitutions used when turning a template path into a concrete,
 # copy-pasteable curl / tester default.
-_PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{p}": "1", "{setId}": "12345",
+_PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{p}": "1", "{m}": "1", "{setId}": "12345",
                   "{code}": "JP", "{slot}": "1", "{kind}": "commentary",
                   "{feature}": "commentary"}
 
@@ -64,9 +64,11 @@ _ENDPOINTS = [
     ("GET", "/scoreboards/{n}", "Scoreboard n state (incl. swapped)", None, False, False, False),
     ("GET", "/scoreboards/{n}/pending", "Scoreboard n live values, not applied yet: held, dirty, board (a token from another computer)", None, False, False, False),
     ("GET", "/scoreboards/{n}/follow", "What scoreboard n follows: station, poll, pollingEnabled, setId", None, False, False, False),
+    ("GET", "/scoreboards/3/post", "The crew board's X post: text, and what is missing for it", None, False, False, False),
     ("GET", "/games", "Game list", None, False, False, False),
     ("GET", "/games/current", "Current game", None, False, False, False),
     ("GET", "/match-names", "Match / phase name candidates", None, False, False, False),
+    ("GET", "/match-names/candidates", "What the crew board's phase, pool and match combos offer", None, False, False, False),
     ("GET", "/characters", "Character list", None, False, False, False),
     ("GET", "/variants", "Variant list", None, False, False, False),
     ("GET", "/stages", "Stage list", None, False, False, False),
@@ -93,6 +95,8 @@ _ENDPOINTS = [
     ("PATCH", "/scoreboards/{n}/stages/1", "Update a game row (no rows is 409)", {"winner": 1}, False, True, False),
     ("PATCH", "/scoreboards/{n}/teams/{t}/players/{p}", "Update player fields (partial)", {"gamerTag": "Player", "twitter": "player_x"}, False, True, False),
     ("POST", "/scoreboards/{n}/teams/{t}/players:swap", "Exchange two players of a team", {"first": 1, "second": 2}, False, True, False),
+    ("PATCH", "/scoreboards/3/teams/{t}/members/{m}", "Update a crew member (partial): name, stock, active", {"name": "Player", "stock": 3, "active": True}, False, True, False),
+    ("POST", "/scoreboards/3/teams/{t}/members/{m}/stock:adjust", "Adjust a crew member's stock by delta", {"delta": -1}, False, True, False),
     ("PATCH", "/tournament/info", "Update tournament fields (partial)", {"displayTournamentName": "Tournament"}, False, True, False),
     ("PATCH", "/display-options", "Toggle display options (partial)", {"show_seed": False}, False, True, False),
     ("PATCH", "/commentary/{slot}", "Update caster fields (partial; a 5th shown is 409)", {"name": "Caster", "display": True}, False, True, False),

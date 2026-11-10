@@ -335,6 +335,7 @@ board3（crew）のみ、上記に加えてクルー名簿のキーを持つ。�
 
 ```
 score.3
+├── teamsSwapped                     W R  (bool。board1/2 と同じキー。スワップするまで無い)
 └── team.{1|2}
     ├── memberNum                    W R  (int。表示中のメンバー行数。両チーム共通)
     ├── activeMember                 W R  (str。出場中メンバーの 1 始まり index。"0" = 不在)
@@ -344,9 +345,11 @@ score.3
         └── stock                    W R  (int。残ストック)
 ```
 
-クルーのスワップのフラグ（legacy の `get-swap`・v1 の `swapped`）は state に無く、`CrewBattleService` が
-ボード番号ごとに持つ（`program_state.json` のキーを増やさないため。ADR-005 S3e-2）。ボードの操作は
-ボードの入力欄も Web も `CrewBattleService` を呼び、ボードは state を描画するだけ。
+クルーのスワップのフラグ（legacy の `get-swap`・v1 の `swapped`）は board1/2 と同じ `score.3.teamsSwapped`
+（ADR-005 S4w。React のページが delta で追従するため。それまでは state の外で、スワップに通知が無かった）。
+board1/2 と同じくシードは書かず、一度もスワップしていないボードにキーは無い（`false` と読む）。起動時の `ResetScoreRoot` で消える。
+ボードの操作はボードの入力欄も Web も `CrewBattleService` を呼び、ボードは state を描画するだけ。
+ページの操作は `/api/v1/scoreboards/3/...`（`external-control-api.md` §2.12）。
 
 ##### `game` — 選択中ゲーム情報
 

@@ -28,7 +28,7 @@
 
 ### 1.1 初回スコープ（D6）
 - 読み取り（§5）/ 安全操作（§6）/ 危険操作（§7・ガード必須）を**初回から一括提供**。
-- 初回除外: `open-set`（GUI ウィンドウ起動）/ X・Bluesky 投稿（外部送信・機密）/ 選手 DB 全量（個人情報）/ crew 系（board3 運用未確定）。
+- 初回除外: `open-set`（GUI ウィンドウ起動）/ X・Bluesky 投稿（外部送信・機密）/ 選手 DB 全量（個人情報）。crew 系（当時は board3 運用未確定）は ADR-005 S4w で追加した（§2.12・§6.38・§6.39）。
 
 ---
 
@@ -174,9 +174,11 @@
 - **`{n}` は API 層で `{1,2,3}` を検証し、範囲外は `400 INVALID_ARGUMENT`（MUST）**。
   `GetScoreboard(n)` は未知番号で `None` を返すのみで、既存 Action はその後 `None.signals` で
   AttributeError になるため、**API 層で事前検証する**（NOT_FOUND ではなく INVALID_ARGUMENT 扱い）。
-- **board 3（crew）は別クラス**。`score:adjust`（`CommandScoreChange`）等の board1/2 用操作は board3 に
-  通用しない。crew 専用操作（ストック増減・active 設定）は**初回スコープ外**（§1.1）。
-  → board1/2 用操作を board3 に投げた場合は `409 NOT_READY`（or `INVALID_ARGUMENT`）で**明示拒否**する（実装方針・§13）。
+- **board 3（crew）は別クラス**（書き手は `CrewBattleService`）。クルーボードでできることは ADR-005 S4w で v1 に揃った:
+  - 同じ意味のものは同じルート: `:swap-teams`（§6.3）・`score:reset`（§6.2）・`teams/{t}/color`（§6.4）・`PATCH set`（§6.5）・`:clear` / `:reset-players` / `:reset-match`（§7.1）・`PATCH /tournament/info` の `displayTournamentName`（§6.19）・読みの `GET /scoreboards/3` と `/pending`（§5）
+  - クルーだけのもの: メンバー（§6.38・§6.39）・X 投稿文（§5.19）。**board 1 / 2 に投げると `400 INVALID_ARGUMENT`**。コンボの候補（§5.20）はボードを取らない
+  - クルーに無いものは `400 INVALID_ARGUMENT` で**明示拒否**する: `score:adjust` / `score:set`（合計はストックから算出する。チームのスコアは無い）・`:apply`（held でない）・`stats:refresh`・選手のルート・`stages`・`:load-set` / `:pull-stream` / `:follow` / `:stop-follow` / `GET follow`・`:reset-all`
+  - **未構築のクルーボード**（デスクトップの遅延構築）: 書き込みは構築してから書く（未構築への書き込みは構築時のシードで消える）。`score:reset`・`:reset-players`・`:reset-match` と `stock:adjust` の `delta: 0` は、まっさらなボードに意味が無いので**構築せず何も書かずに `200`**。`GET /scoreboards/3/post`・`/match-names/candidates` も構築しない。`:clear`・`:swap-teams` は構築する（まっさらなボードを変える）。既存の `GET /scoreboards/3` と `/pending` は従来どおり構築する
 - **非表示ボードへの操作は配信に出ない**: OBS は表示中ボードのレイアウトを参照するため、裏ボードを
   操作しても画面は変わらない。誤対象を避けるため、`GET /api/v1/health`（§5.1）に**現在アクティブな
   ボード番号**を載せる（`activeBoard`）。
@@ -208,12 +210,14 @@
 |---------------|------------|--------------|-----------|
 | `GET /api/v1/state` | 全状態（フル） | `program_state` | #1 |
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
-| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 は `CrewBattleService` が持つフラグ（state には無い）。ADR-005 S3e-2 からヘッドレス起動でもボード 3 の `swapped` を返す（S3c〜S3e-1 のヘッドレスでは、クルーウィジェットが無いのでキーなしだった）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
+| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 も `score.3.teamsSwapped`（ADR-005 S4w。一度もスワップしていないボードにキーは無く、`swapped` は `false`。それまでは state の外のフラグ）。どちらの起動形態でもボード 3 の `swapped` を返す） | `get_scoreboard`(+`get_swap`) | #9/#22 |
 | `GET /api/v1/scoreboards/{n}/pending` | 反映前のライブ値・保留中か・未反映があるか（§5.15。反映前の編集を含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_pending` | — |
 | `GET /api/v1/scoreboards/{n}/follow` | そのボードが追従している配信台・配信と取り直しの時計（§5.17。2026-11-09 追加） | `get_follow`（`core/SetFollowService.Snapshot`） | — |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
-| `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
+| `GET /api/v1/match-names` | match/phase の用語（キーつき・テンプレートつきの dict。Web のページはコンボの候補にこれを使わない） | `get_match_names` | #17 |
+| `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。クルーボードと Web のスコアボードページが使う） | `get_match_name_candidates` | — |
+| `GET /api/v1/scoreboards/3/post` | クルーボードの X 投稿文（§5.19。2026-11-09 追加） | `get_crew_post`（`CrewBattleService.PostText`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
@@ -598,6 +602,30 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
   - 検索は大文字小文字を無視した部分一致で、全列と `id`。列の並べ替えは文字列で
   - 選択なしの OK / Enter は先頭の行を読む（行が無ければ何も読まない）。読むのは §7.1 の `:load-set`、走っている取得は `sets:cancel` で止める（窓は選択時に止める）
 
+### 5.19 `GET /api/v1/scoreboards/3/post`（2026-11-09 追加・ADR-005 S4w）
+
+クルーボードの「Xに投稿する」が組む文。`CrewBattleService.PostText` が正本で、ボードのボタンも同じものを呼ぶ。
+
+```json
+{ "ok": true, "revision": 12, "data": {
+  "text": "Cup\n[Pools] - WF\n\nAlpha (A1 / A2)\nvs\nB1",
+  "missing": []
+} }
+```
+
+- `missing`: ボタンが投稿を断る理由を `team1` / `team2` / `round` のこの順で。`team1` / `team2` は表示中（`memberNum` まで）で名前のあるメンバーがいないクルー、`round` は `phase` も `match` も空（空白だけも空）。**空のときだけ投稿できる**。ページはクリックの中でこれを読み、`missing` が空なら開く（`https://twitter.com/intent/tweet?text=` + URL エンコードした `text`）。翻訳した文言（Team 1 player name / Team 2 player name / Round name）はページの仕事
+- 文は `missing` があっても返す（名前のあるメンバーがいないクルーは「チーム名」か `???`）
+- 大会名は state の値を文字列にしたもの（数で入っていても答える）。前後の空白は落とさない（ボタンの旧実装と同じ。`phase` / `match` / チーム名 / メンバー名は落とす）
+- ボード 1 の投稿と違い、文だけ（サムネイルの画像は無い）
+- `{n}` は 3 だけ（ほかは `400`）。**READ**: 文に入るのは大会名・`phase`・`match`・チーム名・メンバー名で、どれも `GET /state` が誰にでも返す（選手 DB の X ハンドルを含む `GET /result/post` が PLAYERDB なのとの違い）。読みではボードを構築しない
+
+### 5.20 `GET /api/v1/match-names/candidates`（2026-11-09 追加・ADR-005 S4w）
+
+クルーボードの 3 つの編集可能コンボが出す候補: `{ "phase": [...], "pool": [...], "match": [...] }`。コンボと同じ順で、先頭の空行は含まない（コンボは候補にない文字も打てる）。`GET /match-names` は用語そのまま（キーつき・テンプレートつき）で、`match` のラダー（`Winners TOP24` など）はそこに無い。`AutonaLocaleHelper.Get{Phase,Pool,Match}NameCandidates` が正本で、ボードも同じものを使う。静的なデータで、READ。ボードを構築しない
+
+- **Web のスコアボードページ（`/scoreboard`。board 1 / 2 の `MatchInfoBar`）の Phase / Pool / Match もこれを読む**（2026-11-10）。それまでは `GET /match-names` の dict を Autocomplete の候補に渡しており、欄をクリックするとページ全体が落ちていた。`GET /match-names` の形は外部の呼び手のために変えていない。board 1 / 2 の Qt のコンボ（`AutonaScoreboardWidget`）も同じ規則で組む。違いは 2 つ: Qt の phase は `indicator` を含むキーを除かない（同梱の用語には無い。利用者の用語に足したときだけ差が出る）。大会を読み込んだときに足す実際のプール名と、参加人数から出す 1 回戦（`Winners TOP300` など）はこの候補に無い（Qt のコンボだけ）
+- **壊れた用語でも答える**: 利用者の用語ファイル（`user_data/tournament_terms.json`。同梱の用語をキーごとに上書きする）でリストが組めないときは、そのリストを `[]` にする（雛形（`group` / `winners_top_n` / `losers_top_n` / `round`）が文字列でない・`.format` で埋められない（`{1}`・`{x}`・`{0.x}`・`{0[x]}`・閉じない `{`）、`phase` / `match` の用語が dict でない）。文字列でない用語は候補にしない
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37 および §7 の
@@ -627,6 +655,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.2 スコアリセット `POST /api/v1/scoreboards/{n}/score:reset`
 - body: なし
 - 委譲: `reset_scores` = #30
+- board 3（ADR-005 S4w で開いた）: ボードの「Reset Stocks」と同じ `CrewBattleService.ResetStocks`。全メンバーを既定のストック（3）に戻し、出場中を無しにする。名前は残す。即時公開。同じことをもう一度送っても書かない。未構築のボードは構築せず何も書かない（§2.12）
 
 ### 6.3 チーム入替 `POST /api/v1/scoreboards/{n}:swap-teams`
 - body: なし
@@ -639,13 +668,14 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   入力中の欄があれば先に確定する（フォーカスを外して Qt に確定させる。打ちかけの文字はその選手と一緒に動く。旧実装と同じ）。
 - 未構築のボードは従来どおり構築してから入れ替える（未構築ボードは held 登録されていないので、構築前に入れ替えると
   即時公開されたうえ、構築時のシードで消える）。held 対象（反映待ち）。
-- 旧ルート `/scoreboard{n}-swap-teams` / Socket.IO `swap_teams` も同じ Action。ボード 3 は旧ルートでは `CrewBattleService.SwapTeams`
-  （ADR-005 S3e-2。それまではクルーウィジェット自身の入替。v1 は `require_board_12` で拒否）。
+- 旧ルート `/scoreboard{n}-swap-teams` / Socket.IO `swap_teams` も同じ Action。
+- board 3（v1 は ADR-005 S4w で開いた）: `CrewBattleService.SwapTeams`。チーム名・**チームカラー**（ボード 1 / 2 と違い、色はクルーと一緒に動く。ボードのスワップが常にそうしてきた）・全メンバーの名前・ストック・出場中を入れ替え、`score.3.teamsSwapped` を反転する。1 回の保存サイクルで即時公開（held でない）。入力中の欄を先に確定する。フラグはボード 1 / 2 と同じキーなので delta で届く。一度もスワップしていないボードにキーは無い（`false` と読む）。クリアやリセットでは戻らない
 
 ### 6.4 チームカラー `POST /api/v1/scoreboards/{n}/teams/{t}/color`
 - body: `{ "color": "#FF0000" }`（`#` 付き hex）
 - 委譲: `team_color` = #5
 - エラー: `INVALID_ARGUMENT`（色形式不正）
+- board 3（ADR-005 S4w で開いた）: 色ボタンと同じ `SetTeamColor`。ボードの色の持ち方 `#rrggbb` に揃えて書く（`#F0A` → `#ff00aa`。ボード 1 / 2 は送られた綴りのまま）。今の色と同じなら書かない。未構築のボードは構築してから書く。既定の色に戻す（ボタンの右クリック）は `#fe0000` / `#0071bc` を送る
 
 ### 6.5 セット情報設定 `PATCH /api/v1/scoreboards/{n}/set`
 - body（部分更新・与えたキーのみ反映）:
@@ -667,6 +697,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 空の `phase` / `match` は「指定なし」扱いで反映されない（`SetLoadService.ApplyMatchInfo`・旧ルートと同じ）。
   `pool` は空文字でクリアされる。
 - エラー: `INVALID_ARGUMENT`（型不正・team 範囲外・`teamName` が `{team,value}` でない／value が文字列でない）
+- **board 3（ADR-005 S4w で開いた）**: 受けるキーは `phase` / `pool` / `match`（文字列。**空文字でクリア**。コンボの確定と同じ `SetMatchField`）・`bestOf`（整数 0〜99）・`players`（整数 1〜9。`SetMemberCount`。両チームの `memberNum` と合計を書く）・`teamName`（`{team: 1|2, value: 文字列}`。名前欄と同じ `SetTeamName`）。全部を 1 保存サイクルで即時公開する。値はボードの入力欄が持てる範囲だけで、**丸めずに断る**（legacy の `set_route` は丸める）。`null`・bool・小数・文字列の数・未知のキー・`teamName` の中の `team` / `value` 以外のキー・`characters` / `losers`（クルーに無い）・空の body は `400` で、1 つでも不正なら何も書かない（ボードも構築しない）。同じ値は書かない。未構築のボードは構築してから書く。board 1 / 2 の `teamName` は中のほかのキーを読まない（従来どおり）
 
 ### 6.6 反映（保留編集の公開） `POST /api/v1/scoreboards/{n}:apply`（2026-07-12 追加）
 - body: なし
@@ -950,6 +981,25 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - カードの上下移動と同じ（`AutonaActions.SwapPlayers`）。入力中の欄を確定してから、スロットをキー単位で入れ替える。統計も取り直す。held 対象
 - エラー: `INVALID_ARGUMENT`（型・範囲・同じ番号・board 3）、`NOT_FOUND` 404（チームにどちらかのスロットが無い。何も動かさない）
 
+### 6.38 クルーのメンバー `PATCH /api/v1/scoreboards/3/teams/{t}/members/{m}`（2026-11-09 追加・ADR-005 S4w）
+- `{n}` は 3 だけ（board 1 / 2 は `400`）。`{t}` は状態側のチーム（1 / 2。列のチームで、スワップで動くのはクルーの方）。`{m}` は 1〜9。**`memberNum` より後ろのメンバーも `name` / `stock` / `active: false` は受ける**（9 行は常にあり、`memberNum` は表示と合計の範囲を決めるだけ。下げたあとも値が残るのは Qt と同じ）。**`active: true` は表示中（`memberNum` まで）のメンバーだけ**（Qt は後ろの行をラジオごと隠すので、そこを出場中にはできない）。人数を下げると印は後ろの行に残る（Qt も同じ）ので、`active: false` で外せる。未構築のボードは構築したときの人数（シードの 3）で判定する。判定は書き込みの前の読みで、間に人数が下がったときは「印を付けてから人数を下げた」のと同じ state になる（2 つの書き込みは可換）
+- body（部分更新。少なくとも 1 つ）:
+  ```json
+  { "name": "Player", "stock": 3, "active": true }
+  ```
+  - `name`: 文字列。空文字で空にする（そのメンバーのストックは合計から外れる）。`CrewBattleService.RenameMember`
+  - `stock`: 整数 0〜99（ボードのスピンボックスの範囲）。丸めずに断る。`SetMemberStock`
+  - `active`: `true` はこのメンバーが出場中（1 クルー 1 人なので前の人は外れる。`SelectActiveMember`）、`false` はこのメンバーが出場中でなくなる（**マークされているのが別の人なら何もしない**。`ReleaseActiveMember`。state に残るのは文字列で、出場中なしは `"0"`）
+- 全部を `StateManager.lock` の 1 回の保持と 1 保存サイクルで書く（`UpdateMember`。合計 `team.{t}.score` も同じサイクル）。即時公開（held でない）。同じ値は書かない
+- 未構築のボードは構築してから書く。値は操作ログにキーだけ記録する（選手の PATCH と同じ）
+- エラー: `400 INVALID_ARGUMENT`（board 1 / 2・`{n}` 範囲外・`{t}` 範囲外・`{m}` が 0・JSON オブジェクトでない body・空の body・未知のキー・`null`・bool の `stock`・範囲外・小数・文字列の数・`true` / `false` でない `active`・`memberNum` より後ろのメンバーへの `active: true`。1 つでも不正なら何も書かず、ボードも構築しない）、`404 NOT_FOUND`（`{m}` が 10 以上）
+
+### 6.39 クルーのストックの増減 `POST /api/v1/scoreboards/3/teams/{t}/members/{m}/stock:adjust`（2026-11-09 追加・ADR-005 S4w）
+- パスは §6.38 と同じ。body: `{ "delta": -1 }`（整数）。0〜99 に収める（legacy の `crew_member_stock` と同じ `AdjustMemberStock`。`200` で丸める: 相対の操作は「端で止まる」のが正しいので、§6.38 の絶対値と違って断らない）
+- 冪等: `Idempotency-Key` 対応（§2.9。`score:adjust` と同じ）
+- 変わらなければ書かない。`delta: 0` は何もせず `200` で、ボードも構築しない。それ以外の未構築のボードは構築してから書く
+- エラー: §6.38 と同じ番号の規則。`delta` が整数でない（bool・小数・文字列・`null`・無い）は `400`
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -988,6 +1038,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
 
+- **board 3 の `:clear` / `:reset-players` / `:reset-match`**（ADR-005 S4w で開いた。Qt のクルーボードにボタンは無く、legacy と同じ操作）: `:reset-match` は全メンバーを既定のストックに戻して出場中を無しにし（名前は残す）、`phase` / `pool` / `match` と `best_of` を空にする。`:reset-players` は全メンバーの行を空にする（名前も。チーム名・色・人数は残す。入力中の欄を先に確定する）。`:clear` は `:reset-match` + 人数 1 + `:reset-players`（チーム名・色は残る）。即時公開で、同じことをもう一度送っても書かない。スワップのフラグは戻らない。未構築のボードの扱いは §2.12
 - `:reset-all`: デスクトップの「すべての入力値をリセット」と同じ（`AutonaActions.ClearBoard`。1 保存サイクル）。選手・スコア・match バー・チーム名とロゴ・best of を空にし、**人数・キャラ数は残す**。入力中の欄を先に確定し、最後に読んだセットを忘れる（同じセットを読み直せる）。**`:clear` とは別の動作**: `:clear` はチーム名を残し（人数が 1 人になるときを除く）、人数・キャラ数を既定に戻す。board 3 は `400`。held 対象
 - `players/{p}:clear`: カードのクリアボタンと同じ（`PlayerService.ClearSlot`。birthday・city・mains は残る）。`{t}` は状態側のチーム。入力中の欄を先に確定する。スロットが無ければ `404 NOT_FOUND`。board 3 は `400`。held 対象
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
@@ -1163,7 +1214,7 @@ HTTP/1.1 409 Conflict
   - 破壊的操作は confirm 無しで状態が変わらない。
   - 重い操作が 202 で返り、完了が WS で観測でき、実行中の同種要求が 409 になる。
   - 操作ログに書き込み操作が INFO で出る／読み取りは出ない。
-  - 範囲外 `{n}`（0 や 4）が 400 になる。board3 に board1/2 用操作で拒否される。
+  - 範囲外 `{n}`（0 や 4）が 400 になる。board3 に board1/2 専用の操作（§2.12）で拒否される。
 
 ---
 
@@ -1225,7 +1276,7 @@ HTTP/1.1 409 Conflict
 | `GET /state` | `program_state` | ✕ | なし（`GetFullState`） | — |
 | `GET /health` | （新規） | — | `out` 未生成時の getmtime → ファイル無ガード | 内部で握り潰し |
 | `GET /scoreboards/{n}` | `get_scoreboard` | ✕ | n 不正→`GetScoreboard()`=None→`None.scoreboardNumber` で **AttributeError** | `INVALID_ARGUMENT`（n 事前検証） |
-| `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | ボードを構築してから、ボード 1/2 は `score.{n}.teamsSwapped` を読む（ADR-005 S2c〜）。n 不正→None→`None.teamsSwapped` | `INVALID_ARGUMENT` |
+| `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | ボードを構築してから `score.{n}.teamsSwapped` を読む（ADR-005 S2c〜。ボード 3 は S4w〜）。n 不正→None→`None.teamsSwapped` | `INVALID_ARGUMENT` |
 | `GET /games`他マスタ | `get_games`等 | ✕ | アセット未ロードで空。致命例外は低。ADR-005 S1b からゲームアセットカタログを直接読む（GUI スレッドを経由しない） | — |
 | `GET /sets` | `get_sets` | ✕ | provider null は **✓ガード済→[]**。ただし `provider.GetMatches()` は**同期 Start.gg 呼び**で例外/タイムアウト | `UPSTREAM_TIMEOUT`（要 try/except） |
 | `GET /sets/{id}` | `get_match` | ✕ | **provider null 未チェック→AttributeError**／`int(setId)` 失敗→ValueError／同期 Start.gg 呼び | `NOT_READY`/`INVALID_ARGUMENT`/`UPSTREAM_TIMEOUT` |

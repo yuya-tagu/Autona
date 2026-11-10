@@ -219,6 +219,48 @@ class AutonaLocaleHelper(QObject):
         except:
             logger.warning("Custom Tournament Terms were not found and/or loaded.")
 
+    # The candidate lists read the terms defensively: the user's
+    # user_data/tournament_terms.json overrides the shipped ones key by key,
+    # and a list is built while a board is constructed and answered by
+    # GET /api/v1/match-names/candidates. A list a term breaks is empty, not
+    # an exception.
+
+    def _FormatEach(template, values):
+        """`template` formatted with each of `values`, or None when it is not
+        a string or holds a field .format() cannot fill ("{1}", "{x}",
+        "{0:d}", "{0.x}", a lone "{")."""
+        if not isinstance(template, str):
+            return None
+        try:
+            return [template.format(value) for value in values]
+        except (IndexError, KeyError, ValueError, AttributeError, TypeError):
+            return None
+
+    def GetPhaseNameCandidates():
+        """The phase name candidates of the crew board's editable combo: the
+        terms in their order, less the templated ones (the "group" pool
+        template belongs to the pool combo)."""
+        names = AutonaLocaleHelper.phaseNames
+        if not isinstance(names, dict):
+            return []
+        candidates = []
+        for key, name in names.items():
+            if not name or not isinstance(name, str) or "{0}" in name \
+                    or "indicator" in str(key) or name in candidates:
+                continue
+            candidates.append(name)
+        return candidates
+
+    def GetPoolNameCandidates():
+        """The pool name candidates of the crew board's editable combo: the
+        "group" template for four pools."""
+        names = AutonaLocaleHelper.phaseNames
+        template = names.get("group", "") if isinstance(names, dict) else ""
+        if not isinstance(template, str) or "{0}" not in template:
+            return []
+        return AutonaLocaleHelper._FormatEach(
+            template, ("A", "B", "C", "D")) or []
+
     def GetMatchNameCandidates():
         """Ordered match (round) name candidates for the editable combos.
 
@@ -227,33 +269,45 @@ class AutonaLocaleHelper(QObject):
         grand finals, then generic round-robin rounds.
         """
         names = AutonaLocaleHelper.matchNames
+        if not isinstance(names, dict):
+            return []
+        winners_top = AutonaLocaleHelper._FormatEach(
+            names.get("winners_top_n", "Winners TOP{0}"),
+            AutonaLocaleHelper.WINNERS_TOP_TOTALS)
+        losers_top = AutonaLocaleHelper._FormatEach(
+            names.get("losers_top_n", "Losers TOP{0}"),
+            AutonaLocaleHelper.LOSERS_TOP_TOTALS)
+        round_template = names.get("round", "")
+        rounds = [] if isinstance(round_template, str) \
+            and "{0}" not in round_template \
+            else AutonaLocaleHelper._FormatEach(round_template, range(1, 6))
+        if winners_top is None or losers_top is None or rounds is None:
+            return []
         candidates = []
 
         def add(text):
-            if text and text not in candidates:
+            # A term that is not text is no candidate, as in the phase list:
+            # a combo cannot show it.
+            if text and isinstance(text, str) and text not in candidates:
                 candidates.append(text)
 
         for key in ("winners_final", "winners_semi_final",
                     "winners_quarter_final"):
             add(names.get(key))
-        winners_top = names.get("winners_top_n", "Winners TOP{0}")
-        for n in AutonaLocaleHelper.WINNERS_TOP_TOTALS:
-            add(winners_top.format(n))
+        for text in winners_top:
+            add(text)
 
         for key in ("losers_final", "losers_semi_final",
                     "losers_quarter_final", "losers_top8"):
             add(names.get(key))
-        losers_top = names.get("losers_top_n", "Losers TOP{0}")
-        for n in AutonaLocaleHelper.LOSERS_TOP_TOTALS:
-            add(losers_top.format(n))
+        for text in losers_top:
+            add(text)
 
         add(names.get("grand_final"))
         add(names.get("grand_final_reset"))
 
-        round_template = names.get("round", "")
-        if "{0}" in round_template:
-            for n in range(1, 6):
-                add(round_template.format(n))
+        for text in rounds:
+            add(text)
 
         return candidates
 

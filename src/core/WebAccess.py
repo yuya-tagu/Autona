@@ -145,6 +145,8 @@ ROUTE_ACCESS = {
     # Which station it follows and the set it loaded last, an id: the legacy
     # get_set answers that as READ too (ADR-005 S4v).
     "api_v1.get_scoreboard_follow": READ,
+    # The crew board's X post, from what /state answers anyone (ADR-005 S4w).
+    "api_v1.get_scoreboard_post": READ,
     # What start.gg shows anyone: tags and entrant names, never a real name
     # (SetSelectionService.SetRow).
     "api_v1.get_tournament_phases": READ,
@@ -153,6 +155,7 @@ ROUTE_ACCESS = {
     "api_v1.get_games": READ,
     "api_v1.get_current_game": READ,
     "api_v1.get_match_names": READ,
+    "api_v1.get_match_name_candidates": READ,
     "api_v1.get_characters": READ,
     "api_v1.get_variants": READ,
     "api_v1.get_stages": READ,
@@ -185,6 +188,8 @@ ROUTE_ACCESS = {
     "api_v1.player_load": WRITE,
     "api_v1.player_clear": WRITE,
     "api_v1.player_swap": WRITE,
+    "api_v1.crew_member_update": WRITE,
+    "api_v1.crew_member_stock_adjust": WRITE,
     "api_v1.stage_update": WRITE,
     "api_v1.score_adjust": WRITE,
     "api_v1.score_reset": WRITE,

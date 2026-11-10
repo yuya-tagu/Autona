@@ -1654,7 +1654,8 @@ SHELL_EVENTS = {"open_set"}
 # (a well-formed id).
 _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
-               "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
+               "p": 1, "m": 1, "code": "JP", "slug": "x",
+               "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
                "game": 1}
@@ -1686,6 +1687,8 @@ _BODIES = {
     "api_v1.player_load": {"tag": "Nobody"},
     "api_v1.player_clear": {"confirm": True},
     "api_v1.player_swap": {"first": 1, "second": 2},
+    "api_v1.crew_member_update": {"name": "Walk"},
+    "api_v1.crew_member_stock_adjust": {"delta": -1},
     "api_v1.stage_update": {"winner": 1},
     "api_v1.display_options_update": {_DISPLAY_OPTION: True},
     "api_v1.clear": {"confirm": True},
@@ -1737,18 +1740,22 @@ _NOT_200 = {
     ("api_v1.result_generate", None): 503,
     # What the crew board does not have -- set loading, player slots,
     # statistics: core's ValueError, the legacy routes' 500; /api/v1's
-    # 400 INVALID_ARGUMENT (every board operation of its but the crew's).
+    # 400 INVALID_ARGUMENT (ADR-005 S4w: what it has, board 1 / 2 have the
+    # same route for, is open to it; a score of its own is not, its total
+    # comes from the stocks).
     **{(endpoint, 3): 500 for endpoint in (
         "load_set", "pull_stream_set", "load_player_from_tag",
         "stats_recent_sets", "stats_upset_factor", "stats_last_sets",
         "stats_history_sets")},
     **{(f"api_v1.{name}", 3): 400 for name in (
-        "score_adjust", "score_reset", "score_set", "team_color",
-        "set_update", "player_update", "player_load", "swap_teams",
-        "apply_changes", "stats_refresh", "clear", "reset_players",
-        "reset_match", "load_set", "pull_stream", "player_clear",
-        "player_swap", "stage_update", "reset_all", "get_scoreboard_follow",
-        "follow", "stop_follow")},
+        "score_adjust", "score_set", "player_update", "player_load",
+        "apply_changes", "stats_refresh", "load_set", "pull_stream",
+        "player_clear", "player_swap", "stage_update", "reset_all",
+        "get_scoreboard_follow", "follow", "stop_follow")},
+    # ...and a member's routes, the other way round.
+    **{(f"api_v1.{name}", board): 400 for board in (1, 2) for name in (
+        "crew_member_update", "crew_member_stock_adjust",
+        "get_scoreboard_post")},
     # A team of one player has no second slot to exchange it with.
     ("api_v1.player_swap", 1): 404, ("api_v1.player_swap", 2): 404,
     # The tracker is off here: the set has no game rows.
