@@ -904,6 +904,93 @@ def test_a_late_end_of_a_replaced_load_is_not_taken_for_the_new_one(renderer):
     assert _color(results[0][0]) == GREEN
 
 
+def test_a_failed_load_the_next_render_took_over_is_tried_again(
+        renderer, autonaApp):
+    """A render that timed out leaves its page loading for the next one. When
+    that load then fails, the next one has not tried yet: waiting for its own
+    watchdog instead, it failed a whole timeout later, the page there all along
+    (tests/test_result_render.py's page that never loads, 3 CI runs in 30)."""
+    page = autonaApp.dir / "layout" / "thumbnail_type_b" / "thumbnail.html"
+    page.unlink()
+    results = []
+    loads = []
+    load = renderer._view.load
+    renderer._view.load = loads.append
+    renderer.STAGE_TIMEOUT_MS = 100
+
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    assert results == [(None, "the render timed out")]
+
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert len(loads) == 1
+
+    # The first render's load ends, and its page was not there.
+    load(loads[0])
+    assert _waitUntil(lambda: len(loads) == 2)
+
+    page.write_text(PAGE, encoding="utf-8")
+    load(loads[1])
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1][1] == ""
+    assert _color(results[1][0]) == GREEN
+
+
+def test_a_renders_own_failed_load_is_left_to_its_watchdog(renderer, autonaApp):
+    """Tried again at once, a page that is not there would be loaded over and
+    over until the timeout. The next render tries it
+    (test_the_next_render_loads_again_after_a_failed_load)."""
+    (autonaApp.dir / "layout" / "thumbnail_type_b" / "thumbnail.html").unlink()
+    results = []
+    loads = []
+    load = renderer._view.load
+    renderer._view.load = loads.append
+    statuses = []
+    renderer._page.loadingChanged.connect(
+        lambda info: statuses.append(info.status()))
+
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert len(loads) == 1
+    load(loads[0])
+
+    # Connected after the renderer: heard after it.
+    assert _waitUntil(lambda: QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus
+                      in statuses)
+    # Past where a try again would have begun (the next pass of the loop).
+    _waitUntil(lambda: len(loads) > 1, timeout=0.5)
+    assert len(loads) == 1
+    assert results == []
+    assert renderer._active is not None and renderer._watchdog.isActive()
+
+
+def test_a_page_is_looked_up_where_the_app_started(
+        renderer, autonaApp, tmp_path, monkeypatch):
+    """Not in the process's current directory, which nothing of the app's
+    changes and still was, for a moment, another (in test runs, near a first
+    WebEngine page): the page looked up then was the shipped one (in the
+    directory pytest started in) or none (in site-packages/PySide6)."""
+    elsewhere = tmp_path / "elsewhere"
+    other = elsewhere / "layout" / "thumbnail_type_b" / "thumbnail.html"
+    other.parent.mkdir(parents=True)
+    other.write_text(PAGE.replace('(config.color || "#808080")', f'"{BLUE}"'),
+                     encoding="utf-8")
+    monkeypatch.chdir(elsewhere)
+    results = []
+
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+
+    assert _waitUntil(lambda: results)
+    assert results[0][1] == ""
+    assert _color(results[0][0]) == GREEN
+    assert Path(renderer._view.url().toLocalFile()) \
+        == autonaApp.dir / "layout" / "thumbnail_type_b" / "thumbnail.html"
+
+
 # ── a render that cannot start ───────────────────────────────────────────
 
 class _NotJson:

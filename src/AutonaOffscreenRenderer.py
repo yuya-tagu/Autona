@@ -18,6 +18,8 @@ from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEngineLoadingInfo, QWebEnginePage
 from loguru import logger
 
+from .Helpers import AutonaDirHelper
+
 os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
 # What the page says its two frames took (PAINT_SCRIPT), in its RENDER_PAINTED.
@@ -44,7 +46,7 @@ class _RenderPage(QWebEnginePage):
 
 class _Ticket:
     """One render: what to draw and who wants it."""
-    __slots__ = ("payload", "templateId", "done", "started",
+    __slots__ = ("payload", "templateId", "done", "ownLoad", "started",
                  "number", "ready", "painted", "frameDeadline", "framesMs",
                  "settleEvery", "settleDeadline", "lastFrame", "begun",
                  "readyAt", "paintedAt", "paintDetails")
@@ -54,6 +56,9 @@ class _Ticket:
         self.templateId = templateId
         # done(pixmap, error): the image, or None and why.
         self.done = done
+        # Its page was loaded for it. A load on its way when it came was
+        # begun for another (at construction, or for a render that timed out).
+        self.ownLoad = False
         # Its script is running in the page; under this number.
         self.started = False
         self.number = 0
@@ -93,6 +98,12 @@ class AutonaOffscreenRenderer(QObject):
       ready to the next one. If its page was still loading the load goes on:
       cut off every time, a page that takes longer than that would never
       arrive, and the next render takes it from there.
+    - A load that fails is tried again by the render waiting for it, if that
+      render did not begin it: one that took over a load begun for another (at
+      construction, or for a render that timed out) would otherwise wait out
+      its whole timeout for a page that is not coming. A render's own load
+      that fails is not tried again (a page that is not there is not loaded
+      over and over): its timeout ends it, and the next render tries.
     - Whether a load ended is only believed of the newest one: the load
       number in its URL tells it from one it replaced, whose end may still be
       on its way.
@@ -282,8 +293,17 @@ class AutonaOffscreenRenderer(QObject):
         """Load (or reload) the HTML for the given template id."""
         subdir = self.TEMPLATE_SUBDIRS.get(
             template_id, self.TEMPLATE_SUBDIRS[self.DEFAULT_TEMPLATE_ID])
-        html_path = os.path.abspath(
-            os.path.join(os.getcwd(), "layout", subdir, self.PAGE_FILE))
+        # Under the directory the app started in (AutonaDirHelper's, read
+        # now: the tests point it at their runtime), not the process's current
+        # one, which nothing of ours changes and still was, for a moment,
+        # site-packages/PySide6 or the directory pytest started in (in test
+        # runs, near a first WebEngine page; what moves it is not known): the
+        # page looked up then was none, or the shipped one. Not
+        # AutonaResolve(): layout/ is not in the bundle, and resolve() would
+        # make the document's URL, which the page's relative references are
+        # read against, a link's target or a mapped drive's UNC path.
+        html_path = os.path.abspath(os.path.join(
+            AutonaDirHelper.current_dir, "layout", subdir, self.PAGE_FILE))
         url = QUrl.fromLocalFile(html_path)
         # The page does not read it: it tells this load from the one it
         # replaces, which may be the same page.
@@ -321,6 +341,7 @@ class AutonaOffscreenRenderer(QObject):
             if ticket.templateId != self._template_id or not (
                     self._page_loaded or self._load_query is not None):
                 # Another template's, or its load failed: this one tries again.
+                ticket.ownLoad = True
                 self._load_template(ticket.templateId)
             elif self._page_loaded:
                 self._start_render(ticket)
@@ -362,9 +383,17 @@ class AutonaOffscreenRenderer(QObject):
 
         self._load_query = None
         if status != QWebEngineLoadingInfo.LoadStatus.LoadSucceededStatus:
-            # The render waiting for it is the watchdog's to end, and the next
-            # one tries again (_pump).
             logger.error(f"Failed to load {self.LOG_NAME.lower()} HTML template")
+            ticket = self._active
+            if ticket is not None and not ticket.started \
+                    and not ticket.ownLoad:
+                # It came while the load was on its way, begun for another: it
+                # has not tried yet, and only its watchdog would end it, a
+                # whole timeout later. Out of the signal: a load grabs the view.
+                QTimer.singleShot(0, self, lambda: self._load_again(ticket))
+            # Otherwise the render waiting for it is the watchdog's to end (a
+            # page that is not there is not loaded over and over), and the
+            # next one tries again (_pump).
             return
 
         logger.info(
@@ -378,6 +407,17 @@ class AutonaOffscreenRenderer(QObject):
                 self._start_render(ticket)
             except Exception as error:
                 self._could_not_start(ticket, error)
+
+    def _load_again(self, ticket):
+        """The try of a render whose page was on its way when it came, begun
+        for another, and failed (_on_loading_changed)."""
+        if ticket is not self._active:
+            return  # Its watchdog ended it meanwhile.
+        ticket.ownLoad = True
+        try:
+            self._load_template(ticket.templateId)
+        except Exception as error:
+            self._could_not_start(ticket, error)
 
     def _on_title_changed(self, title: str):
         # The ticket stays active during the waits, so concurrent requests
