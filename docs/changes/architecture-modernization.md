@@ -6514,3 +6514,134 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - **pin が落ちることの確認**: 修正ごとに 20 通り壊して回し、19 通りが落ちた。残ったのは `_FormatEach` の「文字列でなければ None」を外すもので、等価（JSON の値で `.format` を持つのは文字列だけで、それ以外は AttributeError になり、同じ `except` で None になる。判定は読み手のために残した）。Web は 2 通り（pool の候補を `[]` に戻す・正規化を外す）を壊して落ちることを確かめた
   - **検証**: `tests/test_api_v1_crew.py` と smoke の新しい単体テストは 373 passed。関係する 11 ファイルの直列（crew API・smoke・crew の操作とボード・Web 操作・ルート台帳・v1・v1 score・ヘッドレスのシード・import の副作用・core の Qt 非依存）は 803 passed / 1 skipped（exit 0）。`python scripts/run_tests_parallel.py` は 1 回目が 1 件失敗（`tests/test_result_render.py::test_a_page_that_never_loads_fails_its_render_and_the_next_one_tries`。WebEngine のオフスクリーン描画の待ちで、同じ時刻に GPU の `Failed to make current` が出ていた。今回の変更は通らず、単体では 38 passed）、2 回目は 5435 passed / 2 skipped（RESULT: OK、exit 0）。`web/`: `npm run build` exit 0（警告は既存の `Header.jsx` の 1 件だけ）、`npm test -- --watchAll=false` 35 suites 991 passed（exit 0）、`npm run test:e2e` 66 passed（exit 0。スコアボードページの E2E は無い）。直列の全量は未実施（メインセッションが回す）
   - **修正の後の実機確認（メインセッション、2026-11-10。隔離データのデスクトップ）**: `/scoreboard` の Phase / Pool / Match の欄をクリックするとプルダウンが出て、ページは落ちない（候補はフェーズ 12・プール 4（予選プール A〜D）・マッチ 43 で `GET /match-names/candidates` と同じ件数。コンソールのエラーなし）。未構築のボードへの `members/5` `{"active": true}` は 400 でボードを作らない。人数 5 で `members/5` に印を付け、人数を 3 に下げると印が残り、`{"active": true}` は 400、`{"active": false}` で外れる。board 3 の `teamName` の中の未知のキーは 400、board 1 は 200。大会情報の `tournamentName` に数を送ると v1 が 400 で断るので、修正 2 の経路は v1 からは通らない（テストで pin）。修正の前のコードのヘッドレス（隔離データの `--headless`）でも、v1 の操作はデスクトップと同じ結果だった（ヘッドレスはボードが起動時から作られているので、まっさらなクルーボードへの最初の `:reset-match` が `pool: ""` を 1 回書く。上の報告の既存の動作）
+
+#### S4x Widget 依存の除去（前半）（2026-11-10）
+
+上の順序の 5 の前半。順序 7 で Qt のボード（`AutonaScoreboardWidget` / `AutonaCrewBattleWidget`）を消しても何も失われないように、ウィジェットにしか無かった処理を core へ移し、Qt は core を呼んで描画するだけにした。操作は Qt の無い core を通るので、ヘッドレスでも同じ。デスクトップの見た目は変えていない（操作の違いは下の「動作の違い」に全部挙げた）。機能は 1 つも無くしていない（無くす候補は「報告」に挙げるだけ）。この段に入れていないもの（後半 S4y）: ボードの初期化、`HoldBoard`、`DesktopBoardHost.Run` の GUI スレッド実行、`renderThumbnail` / `startImageRender`、ホットキー、ゲームの読み込みの結線、セット選択と配信台のウィンドウの結線、React の SCORE ページ、起動時の対戦形式の経路（`Window` が `AutonaScoreboardManager.SetBattleFormat` を直接呼ぶ。`src/Autona.py`）。
+
+- **完了内容**
+  1. **`host.Widget(...)` の分岐を消した**: `BoardHost.Widget` / `DesktopBoardHost.Widget` を削除した。使っていたのは `swap_teams`（`Widget(n).signals.SwapTeams.emit()`。このシグナルはボードに無い）・`get_swap`（`teamsSwapped`）・`reset_scores`（`ResetScore()`）・`_reset_match`（`ResetMatch()`）の 4 か所で、どれも board 1/2/3 以外でしか通らない分岐だった（デスクトップは `_Board` が board 4 以上で落ちて 500、ヘッドレスは `Widget` の NotAvailable で 503）。`_require_board()` を足し、board 1/2/3 以外は両シェルとも `Prepare` の前に NotAvailable（503）で断る（`swap_teams` / `get_swap` / `reset_scores` / `reset_match` / `clear_all`）
+  2. **ボードホストの処理を core と基底へ**
+     - 空のロスター（キャラのスロットが無いボード）が次の選手に渡すキャラ数: デスクトップはボードの隠しスピン `charNumber`、ヘッドレスはホストの dict で、記憶が 2 つあった（一方で頼んだ数がもう一方に無い）。core の `AutonaActions` に 1 つだけ持たせた（`SetPlayersPerTeam` / `SetCharactersPerPlayer` / `EmptyRosterCharacters`。`StateManager.lock` の中で読み書きする。state には出さない。今までも出ていない）。ボードの PLAYERS とキャラ数のスピン、Web の `set_route` の `players` / `characters`、セットの参加者数（`SetFollowService._SetRoster` を置き換えた）が同じものを呼ぶ。隠しスピンは core の値を表示するだけ（`_SyncRosterSpins`、シグナルを止めて）
+     - `ClearPlayers` は基底の 1 つ: `CommitEdit` → `AutonaActions.ClearPlayers` → スロットごとに `PlayerLoaded(..., True)`（カードのコンボに打って選ばなかった文字を落とす）→ 最後に読み込んだセットを忘れる。デスクトップのボードの `CommandClearAll` と同じ順。ヘッドレスでは `CommitEdit` / `PlayerLoaded` が何もしない
+     - `LastSet` は基底の 1 つ（`SetLoadService(n).lastSetSelected`）。デスクトップはボードを構築してウィジェットから読んでいた
+  3. **スコア欄の手入力は `AutonaActions.SetScore`**: `scoreDisplay1/2.valueChanged` が v1 の `score:set` と同じ操作を呼ぶ。`GameTrackerService.UpdateScore` と `AutonaIndividualGameTracker.UpdateScore` を削除した（S4t の申し送り「スコア欄の手入力だけがスピンボックスの `valueChanged` から書く」はこれで解消）。トラッカーの行の追従は `SetScore` の中の `FollowScores`（lock の中、同じ保存サイクル）。ログの名前は `SyncStagesToScore` に直した
+  4. **board 1/2 の X 投稿文は core**: `AutonaActions.PostText(board)` が `(text, missing)` を返す（1 回の lock で読む。`missing` はクルーと同じ `team1` / `team2` / `round`。board 1/2 以外は None）。文は旧 `PostToX` と 1 文字も変えていない（大会名、`[phase] - match`、各チームの名前のある選手をスロット順に @handle・キャラ・シード付きで、配信 URL）。ボタン（`PostToX`）に残したのは、`missing` を翻訳したダイアログ・サムネイルのクリップボード・ブラウザだけ。`GET /scoreboards/{n}/post` を board 1/2 にも開け（クルーは S4w から）、PLAYERDB にした（下の判断 4）
+  5. **対戦形式の切り替えは core**: `AutonaActions.SetBattleFormat(fmt)`。`scoreboard.battle_format` と旧 `team_mode` を書き、`battleFormatChanges`（`ObserverChannel`）で通知し、`ResultService.FollowBattleFormat` を呼ぶ。同じ形式は何も書かず通知もしない（False）。知らない形式は何か書く前に ValueError。bool は team / singles（ウィンドウの旧 `SetBattleFormat` と同じ）。デスクトップは通知を `StateManagerBridge.battle_format_changed` で受け、`Window._ShowBattleFormat` がボードを切り替えてサイドバーの表示を合わせる（`Window.SetBattleFormat` は削除し、サイドバーは `AutonaActions.instance.SetBattleFormat` を呼ぶ）。v1 は `GET /battle-format`（READ）と `PUT /battle-format`（WRITE）。デスクトップは `boardHost.Run` の中で切り替えるので、通知は GUI スレッドで届き、ボードは応答の前に表示される。ヘッドレスはウィンドウ無しで切り替わる
+  6. **Phase / Pool / Match の候補は core**: 新規 `src/core/MatchNameCandidates.py`。翻訳の候補（`AutonaLocaleHelper` の 3 リスト）に、board 1/2 だけ読み込んだ大会の名前（グループが 2 つ以上のフェーズの実際のプール名、参加者数の `Winners TOP{n}` / `Losers TOP{n}`）を前に足す。provider の 2 つのシグナル（`tournament_data_updated` / `tournament_phases_updated`）は `bootstrap_core()` で結線した（どの読み手より前）。ボードのコンボ（`_RenderMatchCandidates`。変わらないリストは触らない、シグナルを止める、文字とキャレットを保つ）・クルーのコンボ・`GET /match-names/candidates?board=` が同じ `Candidates(board)` を読む。Web の `MatchInfoBar.jsx` は `?board=` を付け、コンボを開くたびに取り直す（古い応答は捨てる）
+  7. **使われなくなったコードの削除**（呼び出し元が無いことを grep で確かめてから）: ボードの `ChangeSetData`・`CommandClearAll`・`ToggleAutonaUpdate`・`CommandTeamColor`・シグナル `CommandScoreChange` / `CommandTeamColor`（接続だけで emit が無い）・`EmptyRosterCharacters` / `KeepEmptyRosterCharacters`・`_UpdatePoolCandidates` / `_UpdateEntrantsMatchItem`、クルーの `ChangeSetData`、`SetFollowService._SetRoster` と `_CallerThread` の `EmptyRosterCharacters` / `KeepEmptyRosterCharacters`、ホストの `Widget` / `EmptyRosterCharacters` / `KeepEmptyRosterCharacters` とデスクトップの `ClearPlayers` / `LastSet`。テストだけが呼んでいた入口（`ChangeSetData` / `CommandClearAll`）は `tests/conftest.py` の `apply_set` / `clear_players`（core の同じ操作。`SetLoadService.ApplySetData` / ホストの `ClearPlayers`）に置き換えた（8 ファイル、機械的な置き換え）。メソッドの `CommandScoreChange`（+1 / -1 ボタンが使う）は残した
+
+- **足したルートと開けたルート**（v1 は 73 of 112）
+
+  | ルート | 分類 | 内容 |
+  |--------|------|------|
+  | `GET /battle-format`（新規） | READ | `{format, board}`。`format` は `singles` / `team` / `crew`（旧 `team_mode` だけの設定も読む）、`board` は health の `activeBoard` と同じ。設定なので revision なし |
+  | `PUT /battle-format`（新規） | WRITE | `{format}` → `{format, board, changed}` + revision。操作ログ `battle-format.set`。同じ形式は `changed: false` で何も書かない。`format` が無い・文字列でない・3 つ以外（`Team` などの大文字も）・本文が object でないときは 400 で、何も書かない |
+  | `GET /scoreboards/{n}/post`（board 1/2 に開けた） | READ → PLAYERDB | `{text, missing}`。構築も書き込みもしない。`{n}` が 1〜3 以外は 400 |
+  | `GET /match-names/candidates`（`?board=` を足した） | READ（変更なし） | `?board=1|2|3`。無しは翻訳の候補だけ（従来の答えと同じ）。`0` / `4` / `x` / 空 / `1.0` は 400 |
+
+- **判断**
+  1. **空のロスターのキャラ数は core の 1 つで、state に出さない**: 今まで state に無かった値で、出すとシードと golden が変わる。プロセスの間だけの記憶という性質も同じにした。隠しスピンは消さず、core の値を表示するだけにした（順序 7 でボードと一緒に消える）
+  2. **`ClearPlayers` / `LastSet` は基底に 1 つ**: 両シェルで違っていたのは `CommitEdit` と `PlayerLoaded` だけで、どちらもヘッドレスでは何もしないフック。基底に置けば手順が 1 つになる
+  3. **スコアの手入力は `SetScore`**: v1 の `score:set` と同じ経路にすると、1 保存サイクル、同じ値は書かない、範囲の丸めが同じになり、`score.{n}.team.{t}.score` の書き手が core の外から無くなる
+  4. **X 投稿のルートは PLAYERDB（クルーも）**: board 1/2 の文は 反映 の前の値（held）から組む（ボタンがずっとそうしていた）ので、`/pending` と同じ守り方にした。クルーには held が無いので S4w では READ だったが、`ROUTE_ACCESS` は 1 ルート 1 分類で、board によって変えられない。クルーも PLAYERDB に上げた（LAN の別 PC はトークンが要る。下の「動作の違い」）
+  5. **対戦形式の通知は Socket.IO に出さない**: ページが要るのはリザルトのレイアウトで、これは `result_layout` の delta で届く。形式そのものは `GET /battle-format` と health の `activeBoard` で読める
+  6. **対戦形式の順序は 設定 → 通知 → `FollowBattleFormat`**: 旧は 設定 → ボード → Follow → サイドバー。通知 1 本でボードとサイドバーを合わせるので、サイドバーの表示がレイアウトの追従より前に来るだけで、見た目は同じ
+  7. **候補はボードごとに core が持ち、state には出さない**: オーバーレイが見る値ではない。board 1/2 だけ大会の名前を足す（クルーは今までどおり翻訳だけ）。翻訳の候補は聞かれるたびに Helper から読む（Helper を core に注入する。core は Helper を import できない）
+  8. **`_EntrantRounds` の「雛形が文字列でなければ飛ばす」判定は残した**: 外しても結果は同じ（`5 .format` は AttributeError になり、同じ `except` で飛ばされる。違うのはログだけ）。読み手のための判定として残した（下の「pin が落ちることの確認」の #19）
+
+- **動作の違い**（golden に出るものは無い）
+  - board 4 以上への legacy の操作（スワップ・スワップの読み・スコアのリセット・試合のリセット・全消し）: デスクトップは 500 → 503（ヘッドレスと同じ）。拒否はボードを作らず、何も書かない
+  - `get_set`（最後に読み込んだセット）: デスクトップはボードを構築しなくなった。クルーボードは 500 → `"0"`（ヘッドレスと同じ）
+  - 空のボードで Web がキャラ数を変えると、隠しスピンの表示は次の held サイクルで追従する（見えないスピン。数そのものはすぐ core に入り、次の選手に渡る）
+  - スコアの手入力: スコアと行の書き込みが 1 保存サイクルになった（旧はスコアの `Set` と行の追従が別）。`Set` の並び・delta は v1 の `score:set` と同じ（テストで pin）。state と同じ値は書かない
+  - X 投稿: 大会名・ラウンド・配信 URL もサムネイルの後に読む（旧はサムネイルの前に読み、選手の部分だけ後に読んでいた。サムネイルを描いている間に変わった値の扱いだけが違う）。state の値が文字列でないとき、旧ボタンは例外でエラーのダイアログを出していた。今は文字列として読んで投稿する。`GET /scoreboards/3/post` は READ → PLAYERDB（LAN の別 PC からトークン無しでは 401）
+  - 対戦形式: 同じ形式を選び直しても何もしない（旧はボードの切り替えと `FollowBattleFormat` をやり直していたので、1v1 を選び直すと、手で選んだチーム用のリザルトのレイアウトが横並びに戻っていた。今は残る）。順序は上の判断 6。知らない形式は ValueError（旧は 1v1 に倒していた。サイドバーからは来ない値）
+  - board 1/2 のコンボの候補:
+    - 翻訳の候補に既にある大会の名前はその位置のまま（旧も同じ）。旧は `insertItem(1 + offset)` で差し込んでいたので、既にある名前を飛ばすと後ろの名前が先頭からずれた。今は大会の名前が先頭に詰めて並ぶ
+    - 大会が変わったとき、選んでいた前の大会の名前は欄の文字としてだけ残る（旧は項目としても残していた）
+    - 大会を読み込んだ後に建ったボードにも大会の名前が出る（旧は出なかった。直した）
+    - Phase の候補から `indicator` のキーを除く（クルーと同じ規則。同梱の用語には無い）
+    - 壊れた phase の用語（文字列でない値）でボードの構築が落ちなくなった（S4w の報告「壊れた phase の用語ではそのボードの構築が今も落ちる」は解消）
+  - Web の `MatchInfoBar`: 候補をページで覚えず、コンボを開くたびに取り直す（大会の読み込みに追従するため）
+
+- **golden の差分**: 無い。`tests/fixtures/**/golden*.json` は 1 バイトも変えていない（`tests/fixtures/player_apply/scenarios.py` は docstring だけ）
+
+- **報告（直していない。既存の問題・候補）**
+  - **React の `web/src/ScoreboardPage/CurrentSet.jsx` の `postToX` は自前で文を組んでいて、デスクトップと違う**: pool を phase に足す、@handle が無い、スロットを文字列の順に並べる（`"10"` が `"2"` より前）、反映 済みの state から組む、足りない項目を見ない。React の SCORE ページの段で `GET /scoreboards/{n}/post` に替える（この段では触っていない）
+  - 無くす候補として挙げるだけ（残している）: legacy の `crew_member_stock` / `crew_set_active`（S4w から）。ボードとクルーの `PostToX`（ダイアログ・クリップボード・ブラウザだけのウィジェットの仕事。順序 7 でページへ）。隠しスピン `charNumber`（S4n で PLAYERS タブが消えてから UI では操作できない。core の値を表示し、テストがボードのキャラ数の入力として使う）
+  - テストの docstring に `ChangeSetData` / `CommandClearAll` の名前が歴史として残っている（`tests/test_crew_board.py`・`tests/test_dict_helper.py`・`tests/test_player_widgets.py` など）。動作に関係しないので触っていない
+
+- **次の段への申し送り**
+  - React の SCORE ページ: X 投稿は `GET /scoreboards/{n}/post`（PLAYERDB）の `missing` が空のときだけ URL を開く（サムネイルのクリップボードはページに無い）。対戦形式は `PUT /battle-format` で、`changed` を見る。候補は `?board=` 付きで、開くたびに取り直す（`MatchInfoBar` と同じ）
+  - 起動時の対戦形式の経路（`Window` → `AutonaScoreboardManager.SetBattleFormat`）と、`DesktopBoardHost.Run` の GUI スレッド実行は S4y
+  - ウィジェットを消すとき: `tests/test_web_operations.py` の `ROSTER_SCRIPT`、`tests/test_score_typing.py`・`tests/test_scoreboard_post.py`・`tests/test_match_name_candidates.py` のボードの側（スピン・ボタン・コンボ）と `tests/test_battle_format.py` の `_showBoards` を消す。`tests/conftest.py` の `apply_set` / `clear_players` は core の操作なので残る
+
+- **テスト**
+  - 新規 `tests/test_battle_format.py`（33）: 読み（旧 `team_mode` を含む）、切り替え（両シェル、設定・通知・revision）、同じ形式は書かず通知しない、リザルトのレイアウトの追従、400 は何も書かない、デスクトップは通知でボードを表示する、別スレッドの要求でも通知は GUI スレッド（core の通知のスレッドを見る）、ヘッドレスはウィンドウ無し、READ / WRITE と LAN の 401
+  - 新規 `tests/test_scoreboard_post.py`（40）: 19bbdb56 の `PostToX` から Qt を除いた参照と core の文・`missing` の比較（両シェル、シナリオ別）、文字列でない値、1 回の lock、ルートと core の比較・held の値を読む・構築も書き込みもしない・board 1〜3 以外、ボタンの URL とルートの `text`、ダイアログとルートの `missing`、サムネイルの後に読む、サムネイルの失敗で投稿が止まらない
+  - 新規 `tests/test_score_typing.py`（7）: 入力欄に打った結果と v1 `score:set`（デスクトップ・ヘッドレス）の `Set` の並び・delta・state が同じ、トラッカーをオンにして 1 サイクル、同じ値は書かない、トラッカーにスコアの書き手が無い
+  - 新規 `tests/test_match_name_candidates.py`（30）: core の規則（大会の名前の位置・重複・壊れた用語・参加者数の無い payload）、ルートと core（ボード別、構築も書き込みもしない、ヘッドレス）、board 1/2 のコンボとルート（2 つの payload をそれぞれ単独でも）、大会の後に建ったボード、クルーのコンボ、選択の文字を保って書かない、変わらないリストは触らない
+  - 更新: `tests/test_web_operations.py`（両ホストの clear の比較、`ROSTER_SCRIPT` をボードの入力・Web・交互・ヘッドレスで回す、隠しスピンが core の値を表示する、`_BODIES` / `_NOT_200`、board 4 の 503）、`tests/test_scoreboard_operations.py`（最後のセットの読みは構築しない）、`tests/test_webserver_routes.py`（73 of 112、PLAYERDB の集合）、`tests/test_api_v1_crew.py`（API 窓の行の照合はクエリを外す。外さないと静的ファイルの catch-all に当たる）、`tests/test_bootstrap_split.py`、`tests/test_result_service.py`（切り替えがサービスに伝わる、`Window` に `SetBattleFormat` が無く `_BuildUi` で結線する）、`tests/test_game_tracker_service.py`、`tests/test_player_apply.py`、`tests/test_crew_board.py`、`tests/conftest.py`（`apply_set` / `clear_players`）と、それを使う 8 ファイルの機械的な置き換え。`web/src/ScoreboardPage/MatchInfoBar.test.js`（8。`?board=`、開くたびに取り直す、古い応答を捨てる）
+  - **pin が落ちることの確認**: 実装を 1 か所ずつ壊す 36 通り（Python）と 2 通り（Web）を回した。最初に残ったのは 4 件:
+    - #6 切り替えを `boardHost.Run` の外で行う: Bridge に繋いだ Python の関数は、別スレッドから emit されても main で走るので、受け手のスレッドでは見分けられなかった。core の `battleFormatChanges` を購読し、通知のスレッドが main であることを見るようにした
+    - #22 ボードが `tournament_data_updated` に繋がない: テストが 2 つの payload を続けて出していて、phases の方の再描画で全部が描き直されていた。payload をそれぞれ単独で出すステップを足した
+    - #34 隠しスピンが core の値でなく自分の値を表示する: 空のボードで Web が数を変えた後の held サイクルで、スピンが core の値を表示すること、その後にボードで前の値を頼み直すと効くことを見るテストを足した（`test_the_hidden_spinbox_shows_the_count_core_keeps`）
+    - #19 `_EntrantRounds` の文字列の判定を外す: 等価（上の判断 8）。残した
+    - Web の 2 通り（古い応答を捨てない・開いたときに取り直さない）はどちらも `MatchInfoBar.test.js` が落ちた
+- **検証**: `python scripts/run_tests_parallel.py` 5555 passed / 2 skipped（RESULT: OK、exit 0。1 回目は `tests/test_state_schema.py::test_eye_menu_labels_cover_every_display_option` が落ちた: X 投稿のダイアログの辞書を `labels` と名づけたため、目のメニューのラベルの辞書を名前で探すテストが 2 つ見つけた。`missingLabels` に直した後の 2 回目がこれ）。変更に関わる 20 ファイルの直列実行は 1445 passed（exit 0）。Web: `npm run build` exit 0（警告は既存の `Header.jsx` の 1 件だけ）、`npm test -- --watchAll=false` 35 suites / 994 passed（exit 0）、`npm run test:e2e` 66 passed（exit 0）。ブラウザのプレビューとアプリの起動はしていない（サブエージェントはアプリを起動しない）
+- **実機確認（メインセッション、2026-11-10）**: 隔離データの `python main.py`（デスクトップ）と `--headless`、start.gg の答えだけを差し替えた偽の provider（S4v と同じ）で確認した
+  - 対戦形式: v1 の `PUT /battle-format` とサイドバーのボタンのどちらでも、サイドバーの選択・表示されるボード・設定（`battle_format` と `team_mode`）・`GET /battle-format`・`/health` の `activeBoard`・`result_layout` が揃う。同じ形式は `changed: false`。手で選んだリザルトのレイアウト（1v1 の `vertical`、チームの `team_split`）は同じ形式の押し直しと team → crew の切り替えで残り、crew → 1v1 で `horizontal` に戻る。不正な値 6 通りは 400 で設定を変えない。ヘッドレスも同じ答え（ボードの表示が無いだけ）
+  - X 投稿（board 1）: 足りない項目のダイアログが `GET .../post` の `missing` と一致する（3 項目のとき・チーム 2 だけのとき）。文は反映前の値から組まれる（`[Pools] - Winners Final`・`Alpha @alpha_x`。公開値の phase / match は空で `dirty: true`）。揃った状態の X ボタンは押していない（既定のブラウザが開き、クリップボードを上書きするため）。LAN のトークン無しの 401 は実物で開いていない（テストのみ）
+  - スコア: トラッカーをオン、BO3 でスコア欄に 2 を打つと、スコア 2 と行の 1・2 ゲーム目がチーム 1 の勝ちになる（反映のサイクルの回数は見ていない。`tests/test_score_typing.py`）
+  - 候補: 大会の読み込みの後、v1・Qt のラウンドのコンボ・Web の `/scoreboard` の Match が同じ 44 件（先頭に `Winners TOP16`。`Losers TOP16` は用語のラダーの位置のまま）。board 3 と `board` なしは用語だけ。`?board=0|4|x|空|1.0` は 400
+  - ロスター: v1 の `PATCH set` で players 0 → characters 2 → players 2 が 2 人 × 2 キャラになり、Qt のカードも 2 枚ずつになる。v1 の `:reset-players` で、打ちかけの選手の欄（所属タグ）の文字も消える
+  - board 4: legacy の `-swap-teams` / `-get-swap` / `-reset-scores` / `-reset-match` / `-clear-all` が 503。ただし文言が `"not available in headless"`、`/scoreboard4-get` は 500 だった（下の修正の 3・4）
+
+##### S4x の修正（独立レビューと実機確認の 11 項目）（2026-11-10）
+
+独立レビューとメインの実機確認（隔離データの `python main.py`）で見つかった 11 項目を直した。上の記述のうち、ここで変わったものはこの節が正。
+
+- **直したこと**
+  1. **Web の選手のクリアで、リストを開いたコンボの文字が残っていた**: 基底の `ClearPlayers` の後始末を、スロットごとの `PlayerLoaded(..., True)` から新しいフック `DiscardTypedText(board)` に替えた。`PlayerLoaded` が使う `_CardLoaded` は `notEditing=True`（操作中のコンボに触らない。よそからの読み込みのための規則）なので、リストを開いたコンボ（フォーカスを持つ）の文字を落とさなかった。デスクトップは `AutonaScoreboardWidget.DiscardTypedText()` が全カードの `DiscardTypedText()`（`notEditing` 無し）を呼ぶ。ボードのクリアボタン（`_ClearingPlayers`）も同じメソッドを呼ぶ。順序は `CommitEdit` → `AutonaActions.ClearPlayers` → `DiscardTypedText` → 最後に読み込んだセットを忘れる。上の「完了内容」2 の「`CommandClearAll` と同じ順」はこれで本当になった（旧 `CommandClearAll` は全カードの文字を落としていた。S4x の初版は操作中のコンボだけを残していた）。ヘッドレスの `DiscardTypedText` は何もしない
+  2. **再描画の後に空の行を選んでも書かれなかった**: 編集できるコンボの `setCurrentText` は文字だけを替え、index は前のまま残る。新しい `AutonaQtHelper.ShowComboText(combo, text)` は `findText` でその文字の行を選び、リストに無い文字なら index を -1 にして文字だけを出す（書き込みはしない。呼び出し側がシグナルを止める）。使う所: board 1/2 の候補の再描画（`_RenderMatchCandidates`）、state からの描画（`_SyncSetFields`）、クルーのコンボ（`_RenderCombo`）。実際に壊れていたのは state からの描画の方だった: `.ui` のコンボは `placeholderText` を持つので、候補を入れ直した直後の index は -1 で、再描画だけでは空の行が「選ばれたまま」にはならない。Web やセットの読み込みが名前を書くと、`setCurrentText` は index を前の行に残したまま名前を出す。前の行が空の行（一度空の行を選んだ後）なら、空の行を選び直しても index が動かず何も書かなかった（前の行が別の名前なら、その名前を選び直しても同じ）。クルーのコンボはプレースホルダが無く index が 0（空の行）から始まるので、最初の書き込みからこうなっていた。候補の再描画は、名前の行が選ばれていない（-1）のを直しただけで、書き込みの取りこぼしは無かった（コメントとテストの docstring もこの事実に合わせた）
+  3. **board 1〜3 以外の 503 の文言**: `_require_board` は `"scoreboard {n} does not exist"`（`NO_SUCH_BOARD_MESSAGE`）で断る。シェルの操作が登録されていないときの文言（ヘッドレスの `"not available in headless"`）は変えていない
+  4. **board 4 の 500 を 503 に揃えた**: `/scoreboard4-get` は `Prepare` の前に `_require_board` を通す（デスクトップは 500、ヘッドレスは 200 で `null` だった）。同じく `Prepare` やボードの取得で落ちていた legacy / Socket.IO の入口に `_require_board` を足した: 統計（`_stats_board`。クルーボードの ValueError は今までどおり）、セットの読み込み・配信台の追従（`_set_board`）、タグからの選手の読み込み（`load_player_from_tag`）、セット選択のウィンドウ（`open_sets`）、サムネイル（`get_thumbnail`）、`POST /score`。200 を返していた入口（`team_color` など）は触っていない
+  5. **v1 の `phases:refresh` がプール名の候補に届いていなかった**: 候補はアダプタの `tournament_phases_updated` しか聞いていなかった。`SetSelectionService` の phases の取得が完了を publish した後に `MatchNameCandidates.FollowPhases(rows)` を呼ぶ（`_FollowCandidates`。`StateManager.lock` の中、サービスの lock の外。止めた取得・古い取得の答えは渡さない。行は `FollowPhases` が読む `groups[].name` を持っている）。大会を読み込んだときの名前は、アダプタの `LoadTournament` が自分でフェーズを取るので両シェルとも前から届いていた（実機で確認）。届かなかったのは v1 で取り直した結果だけ
+  6. **`?board=` の検査**: ちょうど `"1"` / `"2"` / `"3"` だけを受ける。`int()` は `" 1"` / `"+1"` / `"01"` / 全角の `"１"` も通していた
+  7. **`.claude/design/external-control-api.md` §5.21**: 末尾の「壊れた用語でも答える」の重複を消した。§5.20 に `?board=` の規則と `phases:refresh` の候補への反映を足した
+  8. **`.claude/rules/state-and-webserver.md`**: スコア欄は各スピンが自分のチームだけ `SetScore(board, t, value)` を呼ぶ、と直した。`ClearPlayers` の流れに `DiscardTypedText` を足した
+  9. **古いコメント**: 消した名前（`ChangeSetData` / `CommandClearAll` / `UpdateScore` / ボードの `Widget` など）を今あるもののように書いていたコメントを直した（`src/AutonaWebOperations.py`・`src/AutonaScoreboardManager.py`・`src/core/Actions.py` の `SetTeamColor`、テストの docstring とコメント 7 ファイル）。上の「報告」3 番目（docstring に歴史として残っている）は、今あるものとして読める所だけ直した
+  10. **テストの独立性**: ハーネスがボードを落とすときに、空のロスターのキャラ数の記憶（`AutonaActions._emptyCharacters`）も消す（`tests/conftest.py` の `_dropBoard`、`tests/test_web_operations.py` の `_dropHeadlessBoards`）。`autonaApp` の後片付けで候補の大会の名前も空に戻す（`FollowTournamentData({})` / `FollowPhases([])`）
+  11. **テストの穴**
+      - 本物の `Window` を通るテスト（`tests/test_battle_format.py` の `test_the_real_window_s_segment_and_board_follow_every_switch`）: `src/Autona.py` の import は起動そのもの（agent-pitfalls #1）なので、`tests/test_bootstrap_split.py` の `_probe` と同じく別プロセスで `Autona.Window()` を建てる。起動時（保存された team）、サイドバーのボタン、同じボタンの押し直し、v1 の `PUT /battle-format`（本物のルート表）、core の `SetBattleFormat` のそれぞれで、サイドバーで選ばれた形式・SCORE に見えているボード・建っているボード・設定・`ActiveBoard` を見る
+      - `tests/test_result_service.py` の AST 検査: `_BuildUi` の `.connect(...)` を `ast.unparse` で式として集め、`self.sidebar.formatSelected` の接続先が `AutonaActions.instance.SetBattleFormat` だけ、`StateManagerBridge.instance.battle_format_changed` の接続先が `self._ShowBattleFormat` だけであることを見る（改行や空白の違いは通り、接続先の違い・2 本目の接続は落ちる）
+
+- **判断**
+  1. **ボードの検査はシェルの登録の検査より先**: `open_sets` / `get_thumbnail` はどのシェルでも、存在しないボードを先に断る。ヘッドレスの board 4 は `"scoreboard 4 does not exist"`、board 1 は今までどおり `"not available in headless"`
+  2. **`Forget()` は候補の名前を消さない**: 大会の切り替え・解除では、アダプタ自身の payload（解除の空、読み込みの新しいフェーズ）が名前を置き換え、デスクトップのコンボも同じシグナルで読み直す。`Forget` で消すと、デスクトップのコンボだけが前の名前を出し続ける時間ができる。`_FollowCandidates` は `StateManager.lock` の中で呼ぶので、`Forget`（`StateManager.lock` を取る）はその後に来るか、取得を捨てて答えを渡させない
+  3. **`ShowComboText` は state からの描画にも使う**: 指摘は候補の再描画だったが、壊れていたのは state からの描画（上の 2）。3 か所とも同じ規則にした
+  4. **本物の Window のテストは別プロセスで、イベントループを回さない**: Qt の設定（`QSettings("taguyan", "Autona")`。ジオメトリとサイドバーのページ）は使い捨ての ini に替え（この PC のレジストリを読まない）、start.gg のキャラ表のダウンロードを止め、グローバルホットキーは設定で切る。Web サーバーはウィンドウの描画後にイベントループから建つので、ループを回さないこのテストでは建たない（ポートと LAN の答えは設定に入れてある）。終わりはウィンドウの `close()`（アプリの終了処理）とインタプリタの通常の終了。`os._exit()` はウィンドウが生きたまま Qt を下ろして 0xC0000005 で落ちた
+
+- **動作の違い**（上の「動作の違い」を更新する）
+  - board 1〜3 以外: 503 の文言が `"scoreboard {n} does not exist"` になった。上の「board 4 以上への legacy の操作」に加えて、`/scoreboard{n}-get`（デスクトップ 500・ヘッドレス 200 の `null` → 503）、統計・セットの読み込み・配信台の追従・タグからの選手の読み込み（デスクトップ 500 → 503）、セット選択のウィンドウとサムネイル（デスクトップ 500 → 503。ヘッドレスは `"not available in headless"` → `"scoreboard {n} does not exist"`）、`POST /score`（500 → 503）。Socket.IO で board 4 に ValueError を投げていたイベント（セットの読み込み・配信台の追従・統計・タグからの読み込み・`score`）は 503 の本文を ack で返す
+  - Web の選手のクリアとボードのクリアボタン: リストを開いたコンボ（操作中のコンボ）の文字も落とす
+  - board 1/2 とクルーのコンボ: 再描画と state からの描画の後、index は欄の文字の行に合う（リストに無い文字なら -1）。名前が書かれた後に空の行を選ぶと `""` が書かれる。`.ui` のコンボが最初に指す行は -1 から 0（空の行）になった（編集できるコンボなので見た目は同じ）
+  - v1 の `phases:refresh` の結果が `GET /match-names/candidates?board=1|2` と Web の Phase / Pool / Match のプール名に出る（デスクトップのコンボは次の描画まで変わらない。下の「残したもの」）
+  - `?board=`: `" 1"` / `"+1"` / `"01"` / 全角は 400 になった（今までは受けていた）
+  - **golden の差分**（上の「golden の差分: 無い」を訂正する）: `tests/fixtures/set_follow/golden.json` の 2 件だけ。`/scoreboard4-load-set?set=1001` と `POST /score` の board 4 が 500（HTML）→ 503（`{"code": "UNAVAILABLE", "message": "scoreboard 4 does not exist"}`）。再録して、変わったのがこの 2 件だけであることを差分で確かめた
+
+- **残したもの（直していない）**
+  - デスクトップのボードのコンボは、v1 の `phases:refresh` の結果を次の再描画（アダプタのシグナル）まで出さない。候補の変更を Qt に知らせる経路は無い（順序 7 でボードと一緒に消える）
+  - 編集できるコンボに打った文字を確定する前に、元と同じ行をリストから選ぶと何も書かない（index が動かないので `currentIndexChanged` が出ない）。根本は `activated` に繋ぐことだが、選択の書き込みの経路を全部替えることになるので、この修正では替えていない
+  - legacy の `team_color` は board 4 でも `score.4.team.{t}.color` を書いて 200 を返す（どのシェルにも無いボード）。S4x の範囲の外の既存の問題として、`SetTeamColor` の docstring に書いた
+
+- **テスト**
+  - 新規・更新: `tests/test_player_card_render.py`（リストを開いたコンボのクリア。ボードホストとボードのボタンの 2 通り）、`tests/test_match_name_candidates.py`（大会を読み込んで `Winners Final` を出した後に空の行を選ぶと `SetMatchField` に `""`、リストに無い名前は行を選ばない、空の行を選んだ後に別の所で書かれた名前はその行を選び、リストに無い名前は行を選ばず、どちらの後でも空の行の選択が `""` を書く（board 1/3）、`?board=` の拒否に `" 1"` / `"1 "` / `"+1"` / 全角 / `"01"` / `"-0"`）、`tests/test_set_selection.py`（v1 の `phases:refresh` がプール名の候補になる・lock の状態・空の答えで消える、失敗・捨てた取得は名前を出さない、大会の切り替えはアダプタに任せる）、`tests/test_web_operations.py`（board 4 の 503 と文言を legacy の全ルート・Socket.IO の全イベント・`POST /score` で両シェル、デスクトップのシェルの操作は board 3 が 500・board 4 が 503）、`tests/test_set_follow.py` と golden、`tests/test_battle_format.py`（本物の Window）、`tests/test_result_service.py`（AST を式で）、`tests/conftest.py`
+  - **pin が落ちることの確認**: 実装を壊して新しいテストが落ちることを見た。クリアの後始末を `PlayerLoaded(..., True)` に戻す（1）、`ShowComboText` を `setCurrentText` に戻す（2）、`_FollowCandidates` を呼ばない・古い答えでも呼ぶ（5）、`_ShowBattleFormat` がサイドバーを合わせない（11。v1 と core の切り替えでサイドバーが crew のまま）。AST 検査は、接続を 1 行に書き直しても通り、`battle_format_changed` に 2 本目の接続を足すと落ちた
+- **検証**: `python scripts/run_tests_parallel.py` 5571 passed / 2 skipped（RESULT: OK、exit 0）。関係する 26 ファイルの直列実行は 2 回に分けて 1367 passed / 1 skipped（`tests/test_crew_operations.py` の録画専用）と 322 passed（どちらも exit 0）。本物の Window のテストは単独で 5 回続けて通した（1 回 6〜7 秒）。並列の実行の後に、候補の再描画の docstring と `test_a_name_written_elsewhere_selects_its_row`（空の行を選んだ後の書き込みから始める形）を直し、`tests/test_match_name_candidates.py`（40 passed）と `tests/test_objectname_keypath_contract.py`・`tests/test_crew_board.py`・`tests/test_battle_format.py`（92 passed）を回し直した。web は触っていないので build / jest は回していない。アプリの起動はしていない（サブエージェントはアプリを起動しない。本物の Window のテストは使い捨てのディレクトリの別プロセスで、offscreen）
+- **実機確認（メインセッション、2026-11-10）**: 隔離データの `python main.py` と `--headless`、偽の provider のグループ名を用語に無い `E7` / `W9` に変えて確認した
+  - 選手のクリア: 「プレイヤー詳細」のファイターのコンボに `Zzq` と打ってリストを開いたまま、v1 の `:reset-players` を送ると、リストが開いたまま欄が空になる
+  - board 1 の Match のコンボ（大会を読み込んだ後）: 空の行を選び、v1 の `PATCH set` で `Winners Final` を書いた後、Qt でリストの空の行を選ぶと、未反映の値の `match` が `""` になる。クルーボードは最初に空の行を選ばずに同じ操作をして、`score.3.match` が `""` になる（リストを開いたとき `Winners Final` の行が選ばれている）
+  - `/scoreboard4-get` は両シェルとも 503 で `"scoreboard 4 does not exist"`
+  - プール名: 大会を読み込むと、`GET /match-names/candidates?board=1|2` と Web の `/scoreboard` の Pool の先頭に `予選プールE7` / `予選プールW9` が出る（board 3 と `board` なしは用語だけ）。v1 の `phases:refresh` の後も同じで、大会の解除で用語だけに戻る（ヘッドレスも同じ）。読み込みのときの名前は前から届いていた（上の 5）ので、v1 の取り直しの経路そのものは `tests/test_set_selection.py` が見る

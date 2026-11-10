@@ -765,8 +765,10 @@ def test_a_member_number_that_is_not_one_has_no_route(noBoard, client, text):
     assert _board(noBoard) is None
 
 
-@pytest.mark.parametrize("n", [0, 1, 2, 4])
-def test_the_x_post_is_the_crew_board_s(noBoard, client, n):
+@pytest.mark.parametrize("n", [0, 4])
+def test_the_x_post_is_a_board_s(noBoard, client, n):
+    # Boards 1/2 have one too since ADR-005 S4x
+    # (tests/test_scoreboard_post.py).
     _assertRejected(client.get(f"/api/v1/scoreboards/{n}/post"))
     assert noBoard.manager.scoreboards == {}
 
@@ -944,7 +946,8 @@ WRITES = [
     ("post", f"{URL}:reset-players", CONFIRM),
     ("post", f"{URL}:reset-match", CONFIRM),
 ]
-READS = [("get", f"{URL}/post"), ("get", "/api/v1/match-names/candidates")]
+READS = [("get", "/api/v1/match-names/candidates"),
+         ("get", f"/api/v1/match-names/candidates?board={BOARD}")]
 
 
 def _routeIds(routes):
@@ -995,11 +998,32 @@ def test_a_read_is_open_to_anyone_who_can_reach_the_port(
         "Origin": "https://evil.example"}).status_code == 200
 
 
+@pytest.mark.parametrize("n", [1, 2, BOARD])
+def test_the_x_post_needs_this_pc_or_the_token(
+        autonaApp, webApp, lanServer, n):
+    """Guarded as the pending values are (ADR-005 S4x): boards 1/2's post is
+    built from the live values, 反映 or not, as the button reads them -- a
+    real name typed in and not published yet among them. The crew board's
+    was READ in S4w; one route, one rule."""
+    url = f"/api/v1/scoreboards/{n}/post"
+    peer = webApp.test_client()
+    peer.environ_base["REMOTE_ADDR"] = LAN_PEER
+
+    refused = peer.get(url)
+    assert refused.status_code == 401
+    assert refused.get_json()["error"]["code"] == "UNAUTHENTICATED"
+
+    token = WebAccess.RegenerateToken()
+    assert peer.get(url, headers={"X-Autona-Token": token}).status_code == 200
+    assert webApp.test_client().get(url).status_code == 200
+
+
 def test_the_routes_are_classified_as_what_they_do():
     assert WebAccess.RouteAccess("api_v1.crew_member_update") == WebAccess.WRITE
     assert WebAccess.RouteAccess(
         "api_v1.crew_member_stock_adjust") == WebAccess.WRITE
-    assert WebAccess.RouteAccess("api_v1.get_scoreboard_post") == WebAccess.READ
+    assert WebAccess.RouteAccess(
+        "api_v1.get_scoreboard_post") == WebAccess.PLAYERDB
     assert WebAccess.RouteAccess(
         "api_v1.get_match_name_candidates") == WebAccess.READ
 
@@ -1024,7 +1048,9 @@ def test_a_member_s_name_stays_out_of_the_op_log(autonaApp, client, crewShell):
 
 def test_the_x_post_says_nothing_state_does_not(
         autonaApp, webApp, client, crewShell, lanServer):
-    """READ, because each word of it is in what /state answers anyone."""
+    """The crew board's values are never held: each word of its post is in
+    what /state answers (the route is guarded for boards 1/2's held values,
+    test_the_x_post_needs_this_pc_or_the_token)."""
     _sendOk(client, ("patch", _member(1, 1), {"name": "Public One"}))
     _sendOk(client, ("patch", _member(2, 1), {"name": "Public Two"}))
     _sendOk(client, ("patch", f"{URL}/set", {
@@ -1032,8 +1058,9 @@ def test_the_x_post_says_nothing_state_does_not(
         "teamName": {"team": 1, "value": "Public Crew"}}))
     peer = webApp.test_client()
     peer.environ_base["REMOTE_ADDR"] = LAN_PEER
+    token = {"X-Autona-Token": WebAccess.RegenerateToken()}
 
-    post = _ok(peer.get(f"{URL}/post"))["data"]
+    post = _ok(peer.get(f"{URL}/post", headers=token))["data"]
     state = _ok(peer.get("/api/v1/state"))["data"]["score"]["3"]
 
     assert set(post) == {"text", "missing"}
@@ -1535,21 +1562,27 @@ def test_the_api_window_lists_the_routes_and_each_goes_where_it_says(webApp):
     def endpoint(method, path):
         for token, value in _PATH_DEFAULTS.items():
             path = path.replace(token, value)
-        return routes.match(f"/api/v1{path}", method=method)[0]
+        # The query is not the route's: matched with it, a row lands on the
+        # static files' catch-all ('/<path:filename>').
+        return routes.match(f"/api/v1{path.split('?')[0]}", method=method)[0]
 
     listed = {endpoint(entry[0], entry[1]) for entry in _ENDPOINTS}
     assert {"api_v1.crew_member_update", "api_v1.crew_member_stock_adjust",
             "api_v1.get_scoreboard_post",
-            "api_v1.get_match_name_candidates"} <= listed
+            "api_v1.get_match_name_candidates",
+            # ADR-005 S4x.
+            "api_v1.get_battle_format", "api_v1.battle_format_set"} <= listed
 
 
 def test_the_api_window_s_examples_are_accepted(autonaApp, client):
     from src.AutonaApiInfoWindow import _ENDPOINTS, _PATH_DEFAULTS
 
     autonaApp.board(BOARD)
+    # The crew board's own rows (its X post is every board's since ADR-005
+    # S4x: "/scoreboards/{n}/post", read on board 1 by the walk above).
     examples = [entry for entry in _ENDPOINTS
                 if entry[1].startswith("/scoreboards/3/")]
-    assert len(examples) >= 3
+    assert len(examples) >= 2
     for method, path, _desc, body, *_rest in examples:
         for token, value in _PATH_DEFAULTS.items():
             path = path.replace(token, value)

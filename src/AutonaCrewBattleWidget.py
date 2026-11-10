@@ -15,8 +15,8 @@ from .core.Actions import AutonaActions
 from .core.CrewBattleService import CrewBattleService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
-from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .Helpers.AutonaQtHelper import HeldBackText
+from .core.MatchNameCandidates import MatchNameCandidates
+from .Helpers.AutonaQtHelper import HeldBackText, ShowComboText
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -193,25 +193,27 @@ class AutonaCrewBattleWidget(QWidget):
         # The OBS crew overlay shows these next to the tournament name.
         # field -> its combo, for the render.
         self._matchCombos = {}
+        # The lists core offers this board (MatchNameCandidates, ADR-005 S4x):
+        # the localized terms alone -- the tournament's pools and rounds are
+        # boards 1/2's -- as GET /api/v1/match-names/candidates?board=3.
+        candidates = MatchNameCandidates.instance.Candidates(
+            self.scoreboardNumber)
         phaseRow = QHBoxLayout()
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Phase")))
         self.phaseCombo = self._makePhaseCombo(
-            schema.PHASE_KEY,
-            candidates=AutonaLocaleHelper.GetPhaseNameCandidates())
+            schema.PHASE_KEY, candidates=candidates["phase"])
         phaseRow.addWidget(self.phaseCombo, 1)
         phaseRow.addSpacing(12)
         # Pool (phase group) is a separate state key (score.3.pool), same as
         # the 1v1/team boards. Candidates come from the "group" template.
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Pool")))
         self.poolCombo = self._makePhaseCombo(
-            schema.POOL_KEY,
-            candidates=AutonaLocaleHelper.GetPoolNameCandidates())
+            schema.POOL_KEY, candidates=candidates["pool"])
         phaseRow.addWidget(self.poolCombo, 1)
         phaseRow.addSpacing(12)
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Match")))
         self.matchCombo = self._makePhaseCombo(
-            schema.MATCH_KEY,
-            candidates=AutonaLocaleHelper.GetMatchNameCandidates())
+            schema.MATCH_KEY, candidates=candidates["match"])
         phaseRow.addWidget(self.matchCombo, 1)
         outer.addLayout(phaseRow)
 
@@ -313,8 +315,8 @@ class AutonaCrewBattleWidget(QWidget):
     def _makePhaseCombo(self, field: str, candidates: list) -> QComboBox:
         # Editable combo seeded with the localized phase/round terms (so the
         # user can pick a term or type a custom value). `candidates` is
-        # AutonaLocaleHelper's, as GET /api/v1/match-names/candidates answers
-        # them. `field` is one of StateSchema.SCORE_MATCH_FIELDS — the same three
+        # core's (MatchNameCandidates), as GET /api/v1/match-names/candidates
+        # answers them. `field` is one of StateSchema.SCORE_MATCH_FIELDS — the same three
         # keys the 1v1 / team boards' match bar writes, through the same
         # operation, so board 3 is not a second reading of what "phase" means.
         combo = QComboBox()
@@ -470,8 +472,10 @@ class AutonaCrewBattleWidget(QWidget):
         if self._Editing(combo):
             self._LeaveForFocus(combo, combo.currentText(), text)
             return
+        # The text's row selected, or none (ShowComboText): a pick of the
+        # row the index was left on wrote nothing (ADR-005 S4x review).
         with QSignalBlocker(combo), QSignalBlocker(combo.lineEdit()):
-            combo.setCurrentText(text)
+            ShowComboText(combo, text)
         self._heldBack.Shown(combo, text)
 
     def _onFocusChanged(self, old, new):
@@ -591,7 +595,10 @@ class AutonaCrewBattleWidget(QWidget):
             popup.hide()
         focus.clearFocus()
 
-    # ── Board operations (the buttons, and a set payload) ─────────────
+    # ── Board operations (the buttons) ────────────────────────────────
+    # (A set payload for this board -- POST /score, the Web's set fields --
+    # goes to CrewBattleService.ApplySetData directly; the board's own entry
+    # for it, ChangeSetData, which only tests drove, went in ADR-005 S4x.)
 
     def SwapTeams(self):
         self.CommitFocusedEdit()
@@ -600,17 +607,6 @@ class AutonaCrewBattleWidget(QWidget):
     def ResetScore(self):
         # Every member back to full stocks and nobody playing.
         self.crew.ResetStocks()
-
-    def ChangeSetData(self, data):
-        # A set payload for this board. The app's -- POST /score, the
-        # Web's set fields -- go to CrewBattleService directly (ADR-005
-        # S3e-2 / S3e-4 / S3e-7); this is the board's own entry, which the
-        # widget tests drive. Crew has no set-loading UI: the generic fields
-        # are persisted if present and the rest is ignored -- tolerant by
-        # design so generic callers don't crash board 3. The rules are
-        # CrewBattleService's, and they are deliberately NOT SetLoadService's
-        # (see that module's docstring).
-        self.crew.ApplySetData(data)
 
     # ── X (Twitter) post ───────────────────────────────────────────────
 

@@ -29,6 +29,7 @@ Pinned here:
 import copy
 import json
 import os
+import re
 import shutil
 import sys
 import threading
@@ -49,6 +50,14 @@ BOARD = 2   # the team board: every S2 field (team names included) applies
 
 UNAVAILABLE_BODY = {"ok": False, "error": {
     "code": "UNAVAILABLE", "message": "not available in headless"}}
+
+
+def _no_such_board(n):
+    """The 503 body for board `n`, which no shell has (_require_board names
+    the board since the ADR-005 S4x review; it said "not available in
+    headless", which was not why, on either host)."""
+    return {"ok": False, "error": {
+        "code": "UNAVAILABLE", "message": f"scoreboard {n} does not exist"}}
 
 
 def _state():
@@ -184,8 +193,13 @@ _PLAYER = {"gamerTag": "ALPHA", "prefix": "SP", "name": "Real Alpha",
 
 
 def _dropHeadlessBoards(app):
+    # With what core keeps of each board out of the state: the characters
+    # per player of an empty roster (ADR-005 S4x: the headless host's memory
+    # until then, which a new host started without).
+    from src.core.Actions import AutonaActions
     for number in (1, 2, 3):
         _state().Unset(f"score.{number}")
+        AutonaActions.instance._emptyCharacters.pop(number, None)
     app.settle()
 
 
@@ -715,7 +729,8 @@ ROSTER_OPERATIONS = {
                             WebOps.clear_all(n)),
     # A board with no player left keeps a characters per player for the
     # next ones, as its spinbox did: the one asked for meanwhile, else the
-    # one it had (BoardHost.EmptyRosterCharacters).
+    # one it had (AutonaActions.EmptyRosterCharacters; the hosts' until
+    # ADR-005 S4x).
     "no players, two characters, then two players": lambda n: (
         WebOps.set_route(n, players=0), WebOps.set_route(n, characters=2),
         WebOps.set_route(n, players=2)),
@@ -813,6 +828,176 @@ def test_an_emptied_board_gives_its_next_players_the_characters_it_keeps(
     finally:
         if host == "headless":
             _dropHeadlessBoards(autonaApp)
+
+
+# The board's two spinboxes ask the operations the Web's players /
+# characters ask (AutonaActions.SetPlayersPerTeam / SetCharactersPerPlayer,
+# ADR-005 S4x), and the characters a board with no player gives its next
+# ones are one memory, core's -- the desktop's was the board's hidden
+# spinbox and the headless host's its own dict, so a count asked for on one
+# was not the other's. (the board's input, the Web's)
+ROSTER_SCRIPT = [
+    (lambda b: b.playerNumber.setValue(0),
+     lambda n: WebOps.set_route(n, players=0)),
+    (lambda b: b.charNumber.setValue(2),
+     lambda n: WebOps.set_route(n, characters=2)),
+    (lambda b: b.playerNumber.setValue(2),
+     lambda n: WebOps.set_route(n, players=2)),
+    (lambda b: b.charNumber.setValue(4),
+     lambda n: WebOps.set_route(n, characters=4)),
+    (lambda b: b.playerNumber.setValue(0),
+     lambda n: WebOps.set_route(n, players=0)),
+    (lambda b: b.playerNumber.setValue(1),
+     lambda n: WebOps.set_route(n, players=1)),
+    (lambda b: b.playerNumber.setValue(0),
+     lambda n: WebOps.set_route(n, players=0)),
+    (lambda b: b.charNumber.setValue(1),
+     lambda n: WebOps.set_route(n, characters=1)),
+    (lambda b: b.playerNumber.setValue(3),
+     lambda n: WebOps.set_route(n, players=3)),
+]
+
+
+def _playRoster(app, pick):
+    """The script, each step through `pick(index)`'s input; the roster after
+    each."""
+    rosters = []
+    for index, (byBoard, byWeb) in enumerate(ROSTER_SCRIPT):
+        pick(index, byBoard, byWeb)
+        app.settle()
+        rosters.append(json.dumps(_roster(app, BOARD), ensure_ascii=False))
+    return rosters
+
+
+def test_the_spinboxes_and_the_web_keep_one_memory(autonaApp, monkeypatch):
+    def fresh():
+        board = autonaApp.board(BOARD)
+        _prepareRoster(BOARD)
+        autonaApp.settle()
+        return board
+
+    board = fresh()
+    byBoard = _playRoster(autonaApp, lambda _i, input_, _web: input_(board))
+    # The board shows the count it keeps on its hidden spinbox.
+    assert board.charNumber.value() == 1
+
+    board = fresh()
+    mixed = _playRoster(autonaApp, lambda i, input_, web: (
+        input_(board) if i % 2 else web(BOARD)))
+    assert mixed == byBoard
+
+    board = fresh()
+    mixed = _playRoster(autonaApp, lambda i, input_, web: (
+        web(BOARD) if i % 2 else input_(board)))
+    assert mixed == byBoard
+
+    try:
+        _goHeadless(autonaApp, monkeypatch)
+        _prepareRoster(BOARD)
+        autonaApp.settle()
+        headless = _playRoster(autonaApp, lambda _i, _input, web: web(BOARD))
+    finally:
+        _dropHeadlessBoards(autonaApp)
+    assert headless == byBoard
+    # Not a script of nothing: the counts the empty board kept reached the
+    # players that came after it.
+    assert [[len(slot["character"]) for slot in
+             json.loads(step)["teams"]["1"]["player"].values()]
+            for step in (byBoard[2], byBoard[5], byBoard[8])]         == [[2, 2], [4], [1, 1, 1]]
+
+
+def test_the_board_gives_its_players_a_count_the_web_asked_for(autonaApp):
+    """The count the Web asks for on a board with no player writes no
+    state, so the hidden spinbox shows it from the next held cycle; the
+    board's PLAYERS reads core's memory, not the spinbox."""
+    board = autonaApp.board(BOARD)
+    WebOps.set_route(BOARD, players=0)
+    WebOps.set_route(BOARD, characters=5)
+    autonaApp.settle()
+    assert board.playerNumber.value() == 0
+
+    board.playerNumber.setValue(2)
+    autonaApp.settle()
+    assert [len(autonaApp.get(f"score.{BOARD}.team.{team}.player.{slot}"
+                              ".character"))
+            for team in (1, 2) for slot in (1, 2)] == [5, 5, 5, 5]
+    assert board.charNumber.value() == 5
+
+
+def test_the_hidden_spinbox_shows_the_count_core_keeps(autonaApp):
+    """A board with no player shows core's count on its hidden spinbox from
+    the next held cycle. A spinbox left on its own last value would take
+    that value, asked for again, as no change: the count would stay the
+    Web's."""
+    from src.core.Actions import AutonaActions
+    board = autonaApp.board(BOARD)
+    WebOps.set_route(BOARD, players=1, characters=2)
+    WebOps.set_route(BOARD, players=0)
+    autonaApp.settle()
+    assert board.charNumber.value() == 2
+
+    WebOps.set_route(BOARD, characters=5)
+    AutonaActions.instance.SetTeamName(BOARD, 1, "Alpha")
+    autonaApp.settle()
+    assert board.charNumber.value() == 5
+
+    board.charNumber.setValue(2)
+    board.playerNumber.setValue(1)
+    autonaApp.settle()
+    assert [len(autonaApp.get(f"score.{BOARD}.team.{team}.player.1"
+                              ".character")) for team in (1, 2)] == [2, 2]
+
+
+# The board host's ClearPlayers is the same in both shells since ADR-005
+# S4x (the desktop's ran the board's CommandClearAll): the field being typed
+# in is finished first (CommitEdit), each slot's card drops its typed combo
+# text after (PlayerLoaded), and the set loaded last is forgotten. The
+# typed text is tests/test_player_card_render.py's
+# (test_a_tag_being_typed_is_cleared_with_the_rest).
+@pytest.mark.parametrize("no_mains", [False, True])
+def test_both_hosts_clear_the_players_to_the_same_state(
+        autonaApp, monkeypatch, no_mains):
+    from qtpy.QtWidgets import QLineEdit
+    from src.core.SetLoadService import SetLoadService
+    from tests.fixtures.write_recording import WriteRecorder
+
+    def fill():
+        WebOps.set_route(BOARD, players=2, characters=2)
+        for team in (1, 2):
+            for slot in (1, 2):
+                WebOps.update_player(BOARD, team, slot, {
+                    "gamerTag": f"T{team}P{slot}", "prefix": "SP",
+                    "twitter": "@x", "name": "Real"})
+        _state().Set(f"score.{BOARD}.team.1.player.1.city", "Shibuya")
+        SetLoadService(BOARD).lastSetSelected = "321"
+        autonaApp.settle()
+
+    board = autonaApp.board(BOARD)
+    _prepareRoster(BOARD)
+    fill()
+    with WriteRecorder() as onTheDesktop:
+        WebOps.boardHost.ClearPlayers(BOARD, no_mains)
+        autonaApp.settle()
+    desktop = json.dumps(autonaApp.get(f"score.{BOARD}"), ensure_ascii=False)
+    assert SetLoadService(BOARD).lastSetSelected is None
+    assert all(not card.findChild(QLineEdit, "name").text()
+               for card in board.playerWidgets)
+    assert onTheDesktop.sets
+
+    try:
+        _goHeadless(autonaApp, monkeypatch)
+        _prepareRoster(BOARD)
+        fill()
+        with WriteRecorder() as headlessRun:
+            WebOps.boardHost.ClearPlayers(BOARD, no_mains)
+            autonaApp.settle()
+        headless = json.dumps(autonaApp.get(f"score.{BOARD}"),
+                              ensure_ascii=False)
+        assert SetLoadService(BOARD).lastSetSelected is None
+    finally:
+        _dropHeadlessBoards(autonaApp)
+    assert headlessRun.sets == onTheDesktop.sets
+    assert headless == desktop
 
 
 def test_headless_answers_the_counts_without_a_board(headless):
@@ -965,11 +1150,12 @@ def test_a_socketio_event_acks_the_503_body(server):
     assert ws.get_received() == []
 
 
-# What a web operation itself refuses headless -- the board host's
-# NotAvailable, from host.Widget(): the same 503, as a route's answer and
-# as an event's ack. The board that only a widget could serve is one that
-# is neither 1/2 nor the crew board (no shell has one: the desktop answers
-# 500 for it); the player / character counts of boards 1/2 were it until
+# What a web operation itself refuses -- NotAvailable for a board that is
+# neither 1/2 nor the crew board, which no shell has: the same 503, as a
+# route's answer and as an event's ack. Raised by the operations themselves
+# since ADR-005 S4x (the board host's Widget(), which the desktop answered
+# with a 500, is gone: test_a_board_no_shell_has_is_refused_by_both_hosts
+# below); the player / character counts of boards 1/2 were refused too until
 # ADR-005 S3e-6 (core's now: test_the_roster_routes_answer_headless below).
 def test_a_legacy_route_a_web_operation_refuses_answers_503(
         server, monkeypatch):
@@ -981,7 +1167,7 @@ def test_a_legacy_route_a_web_operation_refuses_answers_503(
     response = client.get("/scoreboard4-swap-teams")
 
     assert response.status_code == 503
-    assert response.get_json() == UNAVAILABLE_BODY
+    assert response.get_json() == _no_such_board(4)
 
 
 def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
@@ -996,7 +1182,7 @@ def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
     ack = ws.emit("set", json.dumps({"scoreboardNumber": "4",
                                      "match": "Final"}), callback=True)
 
-    assert ack == UNAVAILABLE_BODY
+    assert ack == _no_such_board(4)
     assert ws.get_received() == []
 
 
@@ -1011,26 +1197,151 @@ def test_the_counts_of_a_board_without_any_answer_503(server, monkeypatch):
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
 
-    for path in ("/scoreboard4-set?players=2",
-                 "/scoreboard4-set?characters=2",
-                 "/scoreboard4-set?players=0&match=Final",
-                 "/scoreboard0-set?characters=1"):
+    for path, board in (("/scoreboard4-set?players=2", 4),
+                        ("/scoreboard4-set?characters=2", 4),
+                        ("/scoreboard4-set?players=0&match=Final", 4),
+                        ("/scoreboard0-set?characters=1", 0)):
         response = client.get(path)
         assert response.status_code == 503, path
-        assert response.get_json() == UNAVAILABLE_BODY, path
+        assert response.get_json() == _no_such_board(board), path
     ws = socketio.test_client(app, flask_test_client=client)
     ws.get_received()
     ack = ws.emit("set", json.dumps({"scoreboardNumber": "4",
                                      "players": 2}), callback=True)
-    assert ack == UNAVAILABLE_BODY
+    assert ack == _no_such_board(4)
     assert _state().Get("score.4") is None
     assert _state().Get("score.0") is None
 
-    host.KeepEmptyRosterCharacters(4, 2)
-    host.KeepEmptyRosterCharacters(3, 2)
-    assert host._emptyCharacters == {}
-    host.KeepEmptyRosterCharacters(2, 5)
-    assert host._emptyCharacters == {2: 5}
+    # The characters per player kept for a board with no character slot are
+    # core's since ADR-005 S4x, for boards 1/2 alone.
+    from src.core.Actions import AutonaActions
+    actions = AutonaActions.instance
+    before = dict(actions._emptyCharacters)
+    try:
+        assert actions.SetCharactersPerPlayer(4, 2) is False
+        assert actions.SetCharactersPerPlayer(3, 2) is False
+        assert actions.SetPlayersPerTeam(0, 0) is False
+        assert actions._emptyCharacters == before
+    finally:
+        actions._emptyCharacters.clear()
+        actions._emptyCharacters.update(before)
+
+
+# A board no shell has -- neither 1/2 nor the crew board -- is refused by the
+# operations themselves, before anything is built or written: the same 503
+# on both hosts (ADR-005 S4x). The desktop's host used to ask a board widget
+# it does not have for one (BoardHost.Widget), and answered 500. The board's
+# get, its statistics, its sets, a player from a tag and the shell's two
+# operations answered 500 on both hosts until the S4x review (get read the
+# None the board is; the rest raised as the crew board does), the shell's
+# two only on the desktop (the headless one does not register them).
+BOARDLESS_ROUTES = (
+    "/scoreboard4-swap-teams", "/scoreboard4-get-swap",
+    "/scoreboard4-reset-scores", "/scoreboard4-reset-match",
+    "/scoreboard4-reset-players", "/scoreboard4-clear-all",
+    "/scoreboard0-swap-teams", "/scoreboard0-reset-players",
+    "/scoreboard4-get", "/scoreboard4-stats-recent-sets",
+    "/scoreboard4-stats-upset-factor", "/scoreboard4-stats-last-sets-1",
+    "/scoreboard4-stats-history-sets-1", "/scoreboard4-load-set?set=1001",
+    "/scoreboard4-pull-stream",
+    "/scoreboard4-load-player-from-tag-1-1?tag=Nobody",
+    "/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png",
+    "/scoreboard0-get")
+BOARDLESS_OPERATIONS = {
+    "swap": WebOps.swap_teams, "get swap": WebOps.get_swap,
+    "reset scores": WebOps.reset_scores, "reset match": WebOps.reset_match,
+    "reset players": WebOps.reset_players, "clear all": WebOps.clear_all,
+    "get": WebOps.get_scoreboard,
+    "recent sets": WebOps.stats_recent_sets,
+    "upset factor": WebOps.stats_upset_factor,
+    "last sets": lambda board: WebOps.stats_last_sets(board, 1),
+    "history sets": lambda board: WebOps.stats_history_sets(board, 1),
+    "load set": lambda board: WebOps.load_set(board, "1001"),
+    "pull stream": WebOps.pull_stream_set,
+    "player from a tag": lambda board: WebOps.load_player_from_tag(
+        board, "Nobody", 1, 1),
+    "score": lambda board: WebOps.post_score(json.dumps(
+        {"scoreboard": board, "team1score": 1})),
+    "open set": WebOps.open_sets,
+    "thumbnail": lambda board: WebOps.get_thumbnail(board, "png"),
+}
+BOARDLESS_EVENTS = {
+    "swap_teams": {}, "load_set": {"set": "1001"}, "pull_stream": {},
+    "stats_recent_sets": {}, "stats_upset_factor": {},
+    "stats_last_sets": {"player": "1"}, "stats_history_sets": {"player": "1"},
+    "load_player_from_tag": {"tag": "Nobody", "team": "1", "player": "1"},
+    "open_set": {},
+}
+
+
+def _route_board(path):
+    return int(re.match(r"/scoreboard(\d+)-", path).group(1))
+
+
+@pytest.mark.parametrize("shell", ["desktop", "headless"])
+def test_a_board_no_shell_has_is_refused_by_both_hosts(
+        server, autonaApp, monkeypatch, shell):
+    from src.AutonaWebOperations import DesktopBoardHost
+    from tests.fixtures.write_recording import WriteRecorder
+
+    if shell == "headless":
+        monkeypatch.setattr(WebOps, "boardHost", BoardHost())
+    else:
+        assert isinstance(WebOps.boardHost, DesktopBoardHost)
+        # What bootstrap_gui() registers (the server fixture unregisters
+        # them): the board is refused before the shell is asked.
+        from src.AutonaScoreboardManager import AutonaScoreboardManager
+        manager = AutonaScoreboardManager.instance
+        monkeypatch.setattr(WebOps, "openSetSelection",
+                            manager.OpenSetSelection)
+        monkeypatch.setattr(WebOps, "renderThumbnail",
+                            manager.RenderThumbnail)
+    built = dict(autonaApp.manager.scoreboards)
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+
+    with WriteRecorder() as recorder:
+        for path in BOARDLESS_ROUTES:
+            response = client.get(path)
+            assert (response.status_code, response.get_json()) == (
+                503, _no_such_board(_route_board(path))), path
+        response = client.post("/score", json={"scoreboard": 4,
+                                               "team1score": 1})
+        assert (response.status_code, response.get_json()) == (
+            503, _no_such_board(4))
+        for name, operation in BOARDLESS_OPERATIONS.items():
+            with pytest.raises(NotAvailable, match="scoreboard 4 does not"):
+                operation(4)
+        ws = socketio.test_client(app, flask_test_client=client)
+        ws.get_received()
+        for event, message in BOARDLESS_EVENTS.items():
+            assert ws.emit(event, json.dumps(
+                dict(message, scoreboardNumber="4")),
+                callback=True) == _no_such_board(4), event
+        assert ws.emit("score", json.dumps({"scoreboard": 4}),
+                       callback=True) == _no_such_board(4)
+        assert ws.get_received() == []
+        autonaApp.settle()
+
+    assert recorder.sets == []
+    assert autonaApp.manager.scoreboards == built
+    assert _state().Get("score.4") is None
+    assert _state().Get("score.0") is None
+
+
+def test_no_board_host_has_a_widget_any_more():
+    # What the operations used to reach the board widgets through
+    # (ADR-005 S4x): gone from both hosts, with the memory of the characters
+    # per player of an empty board (core's) and the desktop's own clear and
+    # last set (the base's, the same in both shells).
+    from src.AutonaWebOperations import DesktopBoardHost
+    for name in ("Widget", "EmptyRosterCharacters",
+                 "KeepEmptyRosterCharacters"):
+        assert not hasattr(BoardHost, name), name
+        assert not hasattr(DesktopBoardHost, name), name
+    for name in ("ClearPlayers", "LastSet"):
+        assert name not in DesktopBoardHost.__dict__, name
 
 
 # What answered 503 until ADR-005 S3e-6 (the board host's NotAvailable):
@@ -1574,9 +1885,15 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     assert opened == ["prepare", "show"] * 2
     ws.disconnect()
 
-    for path in ("/scoreboard3-open-set", "/scoreboard3-get-thumbnail-png",
-                 "/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png"):
+    # The crew board has no set window nor thumbnail: the 500 it always
+    # answered. A board no shell has is refused before the shell is asked
+    # (the ADR-005 S4x review; the desktop's window answered 500 for it).
+    for path in ("/scoreboard3-open-set", "/scoreboard3-get-thumbnail-png"):
         assert client.get(path).status_code == 500, path
+    for path in ("/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png"):
+        response = client.get(path)
+        assert (response.status_code, response.get_json()) == (
+            503, _no_such_board(4)), path
     autonaApp.settle()
 
 
@@ -1726,6 +2043,9 @@ _BODIES = {
     "api_v1.top8_player_update": {"name": "Walk", "country": "JP"},
     "api_v1.top8_update": {"phaseLabel": "Walk"},
     "api_v1.top8_scores_apply": {"wsf1": [2, 0]},
+    # The format the walk starts with: an unchanged request, nothing
+    # written (the switch itself is tests/test_battle_format.py's).
+    "api_v1.battle_format_set": {"format": "singles"},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),
@@ -1752,10 +2072,10 @@ _NOT_200 = {
         "apply_changes", "stats_refresh", "load_set", "pull_stream",
         "player_clear", "player_swap", "stage_update", "reset_all",
         "get_scoreboard_follow", "follow", "stop_follow")},
-    # ...and a member's routes, the other way round.
+    # ...and a member's routes, the other way round (the X post is every
+    # board's since ADR-005 S4x).
     **{(f"api_v1.{name}", board): 400 for board in (1, 2) for name in (
-        "crew_member_update", "crew_member_stock_adjust",
-        "get_scoreboard_post")},
+        "crew_member_update", "crew_member_stock_adjust")},
     # A team of one player has no second slot to exchange it with.
     ("api_v1.player_swap", 1): 404, ("api_v1.player_swap", 2): 404,
     # The tracker is off here: the set has no game rows.

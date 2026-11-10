@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import apply_set
 from tests.live.conftest import EVENT_URL, live_only, runRestartProbe
 
 pytestmark = live_only
@@ -226,8 +227,9 @@ def test_an_offline_events_best_of_is_dropped_on_purpose(autonaApp, liveEvent):
     The legacy endpoint reports a bestOf for every set, but for an offline
     bracket that value is the ruleset default rather than what the players
     agreed to at the setup, so GetMatch discards it. The consequence worth
-    pinning is at the widget: ChangeSetData must then leave the operator's
-    current best_of alone instead of writing None over it.
+    pinning is at the widget: the set's apply (the board's ChangeSetData
+    until ADR-005 S4x) must then leave the operator's current best_of alone
+    instead of writing None over it.
     """
     match = liveEvent.match
     assert match.get("isOnline") is False, (
@@ -244,7 +246,7 @@ def test_an_offline_events_best_of_is_dropped_on_purpose(autonaApp, liveEvent):
 
     data = copy.deepcopy(match)
     data.update({"overwrite": True, "no_mains": False})
-    board.ChangeSetData(data)
+    apply_set(board, data)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == before

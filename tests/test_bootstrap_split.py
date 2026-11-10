@@ -140,6 +140,14 @@ def test_bootstrap_core_steps_and_their_order():
         "SetFollowService.fetcher = AutonaSetFollowUtil()",
         "SetFollowService.boardHost = AutonaWebOperations.current_board_host",
         "TournamentInfoService()",
+        # What the match bar's combos offer (ADR-005 S4x): fed by the
+        # provider's two payloads, connected ahead of every board's.
+        "MatchNameCandidates()",
+        "AutonaTournamentDataProvider.instance.signals.tournament_data_updated"
+        ".connect(MatchNameCandidates.instance.FollowTournamentData)",
+        "AutonaTournamentDataProvider.instance.signals"
+        ".tournament_phases_updated.connect("
+        "MatchNameCandidates.instance.FollowPhases)",
         # The tournament's icon / banner and its set / clear (ADR-005 S4f):
         # after the executor, the game asset catalog and the provider they
         # drive; before anything can set a tournament (the shells' restore).

@@ -642,21 +642,6 @@ class SetFollowService:
                 StatsService(board).RefreshQuietly(StatsService.UPSET_FACTOR)
         return record
 
-    def _SetRoster(self, host, players):
-        """The roster a set's entrants need, with the characters per player
-        the board shows: a board with no character slot takes its count from
-        the host (the board's spinbox), and one losing its last player keeps
-        the count it had for the next ones (AutonaWebOperations._set_players'
-        rule; the board passed its spinbox's value)."""
-        actions = AutonaActions.instance
-        board = self.scoreboardNumber
-        characters = actions.CharacterSlots(board)
-        if characters is None:
-            characters = host.EmptyRosterCharacters(board)
-        elif players <= 0:
-            host.KeepEmptyRosterCharacters(board, characters)
-        actions.SetRoster(board, players, characters)
-
     def _ApplyEntrants(self, host, data) -> bool:
         """Pour a set's two entrant rosters into the player slots.
 
@@ -670,8 +655,13 @@ class SetFollowService:
         stats = StatsService(self.scoreboardNumber)
         wasSingles = stats.IsSingles()
         # The slots the larger side needs; the board's cards follow once the
-        # save block is over -- the players load into the state's slots.
-        self._SetRoster(host, len(max(entrants, key=lambda x: len(x))))
+        # save block is over -- the players load into the state's slots. The
+        # operation of the board's PLAYERS spinbox and the Web's players
+        # (AutonaActions.SetPlayersPerTeam): a board with no character slot
+        # gives the new players the count core keeps for it (the host's /
+        # the board's spinbox's until ADR-005 S4x).
+        AutonaActions.instance.SetPlayersPerTeam(
+            self.scoreboardNumber, len(max(entrants, key=lambda x: len(x))))
         singlesChanged = stats.IsSingles() != wasSingles
         seedMoved = False
 
@@ -802,12 +792,6 @@ class _CallerThread:
     def ClearPlayers(self, board, no_mains=False):
         AutonaActions.instance.ClearPlayers(board, no_mains)
         SetLoadService(board).lastSetSelected = None
-
-    def EmptyRosterCharacters(self, board):
-        return None
-
-    def KeepEmptyRosterCharacters(self, board, count):
-        pass
 
     def PlayerLoaded(self, board, team, player, cleared):
         pass

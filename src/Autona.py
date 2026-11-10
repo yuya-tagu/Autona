@@ -194,8 +194,8 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .core.PlayerDB import PlayerDB
-from .core.ResultService import ResultService
 from .core.StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.TournamentInfoService import TournamentInfoService
@@ -588,11 +588,17 @@ class Window(QMainWindow):
 
         # ── Operations: battle format segment (1v1 / Team / Crew) ──
         # The sidebar header hosts the segmented control; choosing a format
-        # switches the SCORE board (1v1 / team / crew) and the matching RESULT
-        # layout. The choice is persisted and applied after the scoreboards
-        # are created (see CreateScoreboard call below).
+        # is core's switch (AutonaActions.SetBattleFormat, ADR-005 S4x: v1's
+        # PUT /battle-format is the same one): it persists the format and the
+        # RESULT layout follows. What the window shows for a format -- the
+        # SCORE board (1v1 / team / crew) and this segment -- follows the
+        # switch's notice (_ShowBattleFormat). The persisted format is applied
+        # after the scoreboards are created (see CreateScoreboard call below).
         self.sidebar.setFormat(self._resolveBattleFormat())
-        self.sidebar.formatSelected.connect(self.SetBattleFormat)
+        self.sidebar.formatSelected.connect(
+            AutonaActions.instance.SetBattleFormat)
+        StateManagerBridge.instance.battle_format_changed.connect(
+            self._ShowBattleFormat)
 
         # ── Operations: tournament dropdown (Start.gg actions) ──
         # Hosted on the sidebar's "tournament" button (top of the header).
@@ -1495,23 +1501,16 @@ class Window(QMainWindow):
         # which the hotkeys used to miss (headless core Step 3).
         return AutonaActions.instance.ResolveBattleFormat()
 
-    def SetBattleFormat(self, fmt):
-        # Persist + apply the battle format chosen from the "Rules" menu.
-        # Switches the SCORE tab between board 1 (1v1), board 2 (team) and
-        # board 3 (crew), and the RESULT tab to the matching standings layout.
-        # Accepts a bool for backward compatibility with older callers.
-        if isinstance(fmt, bool):
-            fmt = "team" if fmt else "singles"
-        if fmt not in ("singles", "team", "crew"):
-            fmt = "singles"
-        # battle_format is the source of truth; mirror the legacy team_mode
-        # bool so rolling back to an older build still restores 1v1/team.
-        SettingsManager.Set("scoreboard.battle_format", fmt)
-        SettingsManager.Set("scoreboard.team_mode", fmt == "team")
+    def _ShowBattleFormat(self, fmt):
+        # What the window shows for a battle format just switched to
+        # (StateManagerBridge.battle_format_changed): the SCORE tab's board 1
+        # (1v1), 2 (team) or 3 (crew) -- built first if it is not -- and the
+        # sidebar segment, kept in sync when the switch came from elsewhere
+        # (setChecked does not re-emit the click signal). The switch itself
+        # -- the settings and the RESULT layout -- is core's
+        # (AutonaActions.SetBattleFormat, ADR-005 S4x); this was the window's
+        # SetBattleFormat, which did all of it.
         AutonaScoreboardManager.instance.SetBattleFormat(fmt)
-        ResultService.instance.FollowBattleFormat(fmt)
-        # Keep the sidebar segment in sync when the format is changed
-        # programmatically (setChecked does not re-emit the click signal).
         if getattr(self, "sidebar", None) is not None:
             self.sidebar.setFormat(fmt)
 

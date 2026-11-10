@@ -6,9 +6,6 @@ import {apiGetJson, apiPatch} from "../api";
 import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 
-// Fetched once per page load; the candidates are static locale data.
-let candidatesCache = null;
-
 /**
  * The three lists of GET /api/v1/match-names/candidates as Autocomplete
  * takes its `options`: arrays of strings, whatever the answer holds. Not
@@ -25,34 +22,44 @@ export function candidateLists(data) {
 
 /**
  * Match metadata bar, mirroring the desktop scoreBar row above the team
- * columns: editable Phase / Pool / Match (with the locale candidates the
- * desktop's combos offer, from GET /api/v1/match-names/candidates) and Best
- * Of. Every field submits on commit — there is no separate submit button
- * (desktop editingFinished parity).
+ * columns: editable Phase / Pool / Match (with the candidates the desktop's
+ * combos offer for this board, from GET /api/v1/match-names/candidates
+ * ?board=N) and Best Of. Every field submits on commit — there is no
+ * separate submit button (desktop editingFinished parity).
  */
 export default function MatchInfoBar({scoreboardNumber, phase, pool, match, bestOf, action}) {
     const [localPhase, setLocalPhase] = React.useState(phase ?? "");
     const [localPool, setLocalPool] = React.useState(pool ?? "");
     const [localMatch, setLocalMatch] = React.useState(match ?? "");
     const [candidates, setCandidates] = React.useState(() => candidateLists(null));
+    // The latest ask for the candidates: a reply to an earlier one is dropped.
+    const latestAsk = React.useRef(0);
     const {run} = useApiAction();
 
     React.useEffect(() => { setLocalPhase(phase ?? ""); }, [phase]);
     React.useEffect(() => { setLocalPool(pool ?? ""); }, [pool]);
     React.useEffect(() => { setLocalMatch(match ?? ""); }, [match]);
 
-    React.useEffect(() => {
-        if (candidatesCache) {
-            setCandidates(candidatesCache);
-            return;
-        }
-        apiGetJson('/api/v1/match-names/candidates')
+    // Boards 1/2 offer the loaded tournament's pools and entrant rounds
+    // besides the terms (core's lists, ADR-005 S4x), so the lists are not
+    // kept for the page: they are asked for again whenever a combo opens,
+    // and a tournament loaded meanwhile is in them.
+    const loadCandidates = React.useCallback(() => {
+        const ask = ++latestAsk.current;
+        apiGetJson(`/api/v1/match-names/candidates?board=${scoreboardNumber}`)
             .then(({data}) => {
-                candidatesCache = candidateLists(data);
-                setCandidates(candidatesCache);
+                if (ask === latestAsk.current) {
+                    setCandidates(candidateLists(data));
+                }
             })
             .catch(console.error); // candidates are a nicety; fail quietly
-    }, []);
+    }, [scoreboardNumber]);
+
+    React.useEffect(() => {
+        loadCandidates();
+        // Another board, or gone: what is still on its way is not this one's.
+        return () => { latestAsk.current += 1; };
+    }, [loadCandidates]);
 
     // PATCH /api/v1/scoreboards/{n}/set: a partial update, only the keys sent
     // are applied.
@@ -100,6 +107,7 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
                 options={candidates.phase}
                 inputValue={localPhase}
                 onInputChange={(e, v) => setLocalPhase(v ?? "")}
+                onOpen={loadCandidates}
                 onChange={(e, v) => submitPhase(v)}
                 onBlur={() => submitPhase(localPhase)}
                 sx={comboSx}
@@ -111,6 +119,7 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
                 options={candidates.pool}
                 inputValue={localPool}
                 onInputChange={(e, v) => setLocalPool(v ?? "")}
+                onOpen={loadCandidates}
                 onChange={(e, v) => submitPool(v)}
                 onBlur={() => submitPool(localPool)}
                 sx={comboSx}
@@ -122,6 +131,7 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
                 options={candidates.match}
                 inputValue={localMatch}
                 onInputChange={(e, v) => setLocalMatch(v ?? "")}
+                onOpen={loadCandidates}
                 onChange={(e, v) => submitMatch(v)}
                 onBlur={() => submitMatch(localMatch)}
                 sx={comboSx}

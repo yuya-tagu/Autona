@@ -172,7 +172,8 @@ class TestSetGetUnsetCycle:
         deep_set(state, "score.1.team.1.score", 2)
         deep_set(state, "score.1.team.2.score", 1)
 
-        # Clear player (AutonaScoreboardWidget.CommandClearAll)
+        # Clear player (once AutonaScoreboardWidget.CommandClearAll's; the
+        # board host's ClearPlayers since ADR-005 S4x)
         deep_unset(state, "score.1.team.1.player")
         assert deep_get(state, "score.1.team.1.player") is None
         # Score should remain

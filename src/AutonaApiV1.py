@@ -494,6 +494,36 @@ def health():
     return ok(data=data, revision=StateManager.revision)
 
 
+@api_v1.route("/battle-format")
+@api_handler
+def get_battle_format():
+    # {"format": "singles" | "team" | "crew", "board": 1 | 2 | 3}: the format
+    # in force and the board it shows, health's activeBoard (ADR-005 S4x).
+    # A setting, not the state: no revision.
+    return ok(data=WebOps.get_battle_format())
+
+
+@api_v1.route("/battle-format", methods=["PUT"])
+@write_op("battle-format.set")
+def battle_format_set():
+    # {"format": "singles" | "team" | "crew"}: the sidebar's switch
+    # (AutonaActions.SetBattleFormat, ADR-005 S4x). The desktop shows the
+    # format's board (built if it is not) before this answers; the result's
+    # layout follows. `changed`: false for the format in force, which writes
+    # nothing. The revision covers what the switch wrote to the state (the
+    # result's layout, a board built).
+    fmt = _json_body().get("format")
+    if not isinstance(fmt, str) or fmt not in AutonaActions.FORMAT_BOARDS:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"format must be one of: {', '.join(AutonaActions.FORMAT_BOARDS)}",
+            400)
+    changed = WebOps.set_battle_format(fmt)
+    data = WebOps.get_battle_format()
+    data["changed"] = bool(changed)
+    return ok(data=data, revision=current_revision())
+
+
 @api_v1.route("/scoreboards/<int:n>")
 @api_handler
 def get_scoreboard(n):
@@ -550,14 +580,16 @@ def get_scoreboard_follow(n):
 @api_v1.route("/scoreboards/<int:n>/post")
 @api_handler
 def get_scoreboard_post(n):
-    # The crew board's X post, as its button builds it (ADR-005 S4w):
-    # {"text", "missing"}, `missing` naming what the button refuses to post
-    # without ("team1", "team2", "round"; empty when it can). A page reads this
-    # in the click that opens the X window, as GET /result/post. Boards 1/2
-    # have their own post (a thumbnail goes with it), not this. Only what
-    # /state already answers anyone, so READ; reading builds no board.
-    require_crew_board(n)
-    return ok(data=WebOps.get_crew_post(), revision=current_revision())
+    # A board's X post, as its button builds it (the crew board's since
+    # ADR-005 S4w, boards 1/2's since S4x): {"text", "missing"}, `missing`
+    # naming what the button refuses to post without ("team1", "team2",
+    # "round"; empty when it can). A page reads this in the click that opens
+    # the X window, as GET /result/post. Boards 1/2's button also copies the
+    # match thumbnail to the clipboard: not this route's. From the live
+    # values, 反映 or not, as the button reads them: guarded as
+    # /pending is (PLAYERDB, S4x). Reading builds no board.
+    validate_scoreboard(n)
+    return ok(data=WebOps.get_board_post(n), revision=current_revision())
 
 
 @api_v1.route("/games")
@@ -581,11 +613,21 @@ def get_match_names():
 @api_v1.route("/match-names/candidates")
 @api_handler
 def get_match_name_candidates():
-    # What the crew board's editable combos offer: {"phase", "pool", "match"},
-    # lists in their order (ADR-005 S4w). /match-names is the terms as they
-    # are, by key and with their templates: the ladder of round names is not
-    # in it.
-    return ok(data=WebOps.get_match_name_candidates())
+    # What a board's editable combos offer: {"phase", "pool", "match"}, lists
+    # in their order (ADR-005 S4w). `?board=1|2|3` (S4x): boards 1/2 add the
+    # loaded tournament's pools and entrant rounds ahead of the terms, as
+    # their combos do; the crew board and no board are the terms alone.
+    # /match-names is the terms as they are, by key and with their
+    # templates: the ladder of round names is not in it.
+    # Exactly "1", "2" or "3": int() takes " 1", "+1" and a full-width "１"
+    # as well (ADR-005 S4x review).
+    board = request.args.get("board")
+    if board is not None:
+        if board not in ("1", "2", "3"):
+            raise ApiError(
+                INVALID_ARGUMENT, "scoreboard must be 1, 2 or 3", 400)
+        board = validate_scoreboard(int(board))
+    return ok(data=WebOps.get_match_name_candidates(board))
 
 
 @api_v1.route("/characters")

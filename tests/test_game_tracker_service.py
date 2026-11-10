@@ -310,16 +310,21 @@ def test_publishing_the_stage_score_is_one_cycle_and_moves_no_row(tracker):
     assert _winners(tracker)[1:] == [UNREPORTED] * 4
 
 
-def test_update_score_publishes_and_then_moves_the_rows(tracker):
-    """The spinbox-driven path: set loading, ClearScore, SwapTeams."""
-    tracker.UpdateScore(0, 2)
+def test_a_score_written_and_followed_moves_the_rows(tracker):
+    """What every writer that moves the score does (AutonaActions' score
+    operations -- a number typed into the score display among them since
+    ADR-005 S4x, which used to write through this service's own UpdateScore
+    -- and a loaded set): read Scores(), write, FollowScores(before)."""
+    before = tracker.Scores()
+    SM.Set(f"{PREFIX}.team.1.score", 2)
+    tracker.FollowScores(before)
 
-    assert SM.Get(f"{PREFIX}.team.1.score") == 2
     assert tracker.WonStages(0) == [0, 1]
 
-    tracker.UpdateScore(0, 1)
+    before = tracker.Scores()
+    SM.Set(f"{PREFIX}.team.1.score", 1)
+    tracker.FollowScores(before)
 
-    assert SM.Get(f"{PREFIX}.team.1.score") == 1
     assert tracker.WonStages(0) == [0]
 
 

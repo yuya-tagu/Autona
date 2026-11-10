@@ -36,8 +36,10 @@ Steps (`op`):
 - ``update`` -- /api/v1's player PATCH: the board's ApplyPlayerData(team,
                 player, data) when recorded, AutonaWebOperations
                 .update_player since ADR-005 S3e-4
-- ``setdata``-- the board's ChangeSetData(payload) (a set's entrants, the
-                legacy update-team route)
+- ``setdata``-- the board's ChangeSetData(payload) when recorded (a set's
+                entrants, the legacy update-team route), core's
+                SetFollowService.ApplySetPayload since ADR-005 S4x removed
+                it (tests/conftest.py's apply_set)
 - ``swap``   -- the board's SwapTeams()
 
 `slot` is [team, player] on the board. Scenarios with `core: False` use a

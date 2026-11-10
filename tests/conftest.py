@@ -357,6 +357,42 @@ def tournamentLoaded():
         yield
 
 
+def _boardNumber(board):
+    return board if isinstance(board, int) else board.scoreboardNumber
+
+
+def apply_set(board, data):
+    """Apply set payload `data` to `board` (a board widget or its number) as
+    the app applies one: boards 1/2 through core's
+    SetFollowService.ApplySetPayload, one save cycle, the record a
+    one-player payload's `savePlayerToDb` asks for saved once the cycle is
+    over (SaveRecord); the crew board through CrewBattleService.ApplySetData.
+    What the boards' own ChangeSetData did, which no caller in the app had
+    (the fetched sets, POST /score and the Web's set fields go to core) and
+    ADR-005 S4x removed."""
+    from src.core.Actions import AutonaActions
+    from src.core.CrewBattleService import CrewBattleService
+    from src.core.SetFollowService import SaveRecord, SetFollowService
+
+    number = _boardNumber(board)
+    if number == AutonaActions.CREW_BOARD:
+        CrewBattleService(number).ApplySetData(data)
+    else:
+        SaveRecord(SetFollowService(number).ApplySetPayload(data))
+
+
+def clear_players(board, no_mains=False):
+    """Empty every player of board `board` (1/2; a board widget or its
+    number) as the app does: the board host's ClearPlayers -- the field being
+    typed in finished first, the cards' typed combo text dropped after, the
+    set loaded last forgotten. The board's own CommandClearAll until ADR-005
+    S4x moved it to the host (the Web's reset_players / clear_all were its
+    only callers)."""
+    from src import AutonaWebOperations as WebOps
+
+    WebOps.boardHost.ClearPlayers(_boardNumber(board), no_mains)
+
+
 # ── Widget-level harness (L2) ────────────────────────────────────────────
 #
 # Everything below builds a real, bootstrapped Autona -- the same singletons
@@ -465,6 +501,12 @@ class _AutonaHarness:
         # ADR-005 S3e-7 (they were the board's, and went with it).
         from src.core.SetFollowService import SetFollowService
         SetFollowService.ForgetBoard(number)
+        # So are the characters per player a board with no character slot
+        # gives its next players (ADR-005 S4x: the board's hidden spinbox and
+        # the headless host's memory until then, both of which a new board or
+        # host started from the default).
+        from src.core.Actions import AutonaActions
+        AutonaActions.instance._emptyCharacters.pop(number, None)
 
         manager = self.manager
         board = manager.scoreboards.pop(number, None)
@@ -783,12 +825,21 @@ def autonaApp(_autonaRuntime):
       installation may be touched;
     - the boards, because a live scoreboard stays connected to
       StateManagerBridge and would keep reacting to writes made by test
-      modules that never asked for a widget.
+      modules that never asked for a widget. With them go core's memories
+      of each board (_dropBoard: the set it loaded, the characters per
+      player of an empty roster) and the tournament's names the match bar
+      offers (MatchNameCandidates, ADR-005 S4x: they were the boards' until
+      then, and went with them), so no test inherits another's.
     """
     os.chdir(_autonaRuntime.dir)
     try:
         yield _autonaRuntime
     finally:
         _autonaRuntime.dropAllBoards()
+        from src.core.MatchNameCandidates import MatchNameCandidates
+        if MatchNameCandidates.instance is not None:
+            # What the provider's unload hands it (UnloadTournament).
+            MatchNameCandidates.instance.FollowTournamentData({})
+            MatchNameCandidates.instance.FollowPhases([])
         _autonaRuntime.settle()
         os.chdir(_ORIGINAL_CWD)

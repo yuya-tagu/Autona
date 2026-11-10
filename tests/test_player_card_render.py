@@ -71,7 +71,7 @@ from src.core.PlayerDB import PlayerDB
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
-from tests.conftest import tournamentLoaded
+from tests.conftest import apply_set, clear_players, tournamentLoaded
 # The S1d world: the fixture games under the recording's locale. Imported so
 # both recordings are made in exactly the same one.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
@@ -339,8 +339,8 @@ def _steps(board):
         ("pick a character", lambda: board.team2playerWidgets[1]
          .character_elements[0][1].setCurrentIndex(5)),
         ("reset match", board.ResetMatch),
-        ("clear players", board.CommandClearAll),
-        ("load a set", lambda: board.ChangeSetData({
+        ("clear players", lambda: clear_players(board)),
+        ("load a set", lambda: apply_set(board, {
             "round_name": "Winners Final", "team1score": 1,
             "team2score": 0, "overwrite": True,
             "entrants": [
@@ -360,13 +360,13 @@ def _steps(board):
         ("grow the roster on a losers team",
          lambda: board.playerNumber.setValue(3)),
         ("back to one player", lambda: board.playerNumber.setValue(1)),
-        ("load a losers set that grows the roster", lambda: board.ChangeSetData({
+        ("load a losers set that grows the roster", lambda: apply_set(board, {
             "team1losers": False, "team2losers": True, "overwrite": True,
             "entrants": [
                 [{"gamerTag": "L1"}, {"gamerTag": "L2", "prefix": "LP"}],
                 [{"gamerTag": "W1", "prefix": "WP"}, {"gamerTag": "W2"}]]})),
         ("swap teams with a losers side", board.SwapTeams),
-        ("load the losers flags while swapped", lambda: board.ChangeSetData({
+        ("load the losers flags while swapped", lambda: apply_set(board, {
             "team1losers": True, "team2losers": False})),
     ]
 
@@ -484,7 +484,7 @@ def _everything(board, teamNames=True):
     if teamNames:
         _teamName(board, 1, "Alpha")
         _teamName(board, 2, "Bravo")
-    board.ChangeSetData(dict(_SET_MATCH_BAR))
+    apply_set(board, dict(_SET_MATCH_BAR))
     board.CommandScoreChange(0, 1)
     board.CommandScoreChange(1, 2)
     _losers(board, 2).setChecked(True)
@@ -504,7 +504,7 @@ def _clearSteps(board, app):
         ("fill both teams", lambda: _fillBoth(board)),
         ("team names", lambda: (_teamName(board, 1, "Alpha"),
                                 _teamName(board, 2, "Bravo"))),
-        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
         # T2, T1, T1: 2-1 on the rows and on the score.
         ("stage results", lambda: (_stageButton(board, 1, 2).click(),
                                    _stageButton(board, 2, 1).click(),
@@ -516,7 +516,7 @@ def _clearSteps(board, app):
             _losers(board, 1).setChecked(True))),
         ("reset match", board.ResetMatch),
         ("a set with a match bar, a score and losers",
-         lambda: board.ChangeSetData(dict(
+         lambda: apply_set(board, dict(
              _SET_MATCH_BAR, team1score=2, team2score=1, team1losers=True))),
         ("web reset match", lambda: actions.reset_match(BOARD)),
         ("tracker on, best of 3",
@@ -537,14 +537,14 @@ def _clearSteps(board, app):
         ("swap teams back", board.SwapTeams),
         ("web empty match", lambda: actions.set_route(BOARD, match="")),
         ("clear players keeping mains",
-         lambda: board.CommandClearAll(no_mains=True)),
+         lambda: clear_players(board, no_mains=True)),
         ("fill both teams again", lambda: _fillBoth(board)),
         ("one character", lambda: board.charNumber.setValue(1)),
         ("clear players keeping mains with one character",
-         lambda: board.CommandClearAll(no_mains=True)),
+         lambda: clear_players(board, no_mains=True)),
         ("two characters and refill", lambda: (
             board.charNumber.setValue(2), _fillBoth(board))),
-        ("clear players", board.CommandClearAll),
+        ("clear players", lambda: clear_players(board)),
         ("refill", lambda: _fillBoth(board)),
         ("web reset players", lambda: actions.reset_players(BOARD)),
         ("refill everything", lambda: _everything(board)),
@@ -591,7 +591,7 @@ def _singlesClearSteps(board, app):
         ("tracker on, best of 5",
          lambda: _withTracker(lambda: board.bestOfSpin.setValue(5))),
         ("fill both players", lambda: _fillBoth(board)),
-        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
         ("stage results", lambda: _stageResults(board)),
         ("losers", lambda: _losers(board, 2).setChecked(True)),
         ("clear the score", board.ClearScore),
@@ -600,18 +600,18 @@ def _singlesClearSteps(board, app):
             _losers(board, 1).setChecked(True))),
         ("reset match", board.ResetMatch),
         ("a set with a match bar, a score and losers",
-         lambda: board.ChangeSetData(dict(
+         lambda: apply_set(board, dict(
              _SET_MATCH_BAR, team1score=2, team2score=1, team1losers=True))),
         ("web reset match", lambda: actions.reset_match(number)),
         ("clear players keeping mains",
-         lambda: board.CommandClearAll(no_mains=True)),
+         lambda: clear_players(board, no_mains=True)),
         ("fill both players again", lambda: _fillBoth(board)),
         ("one character", lambda: board.charNumber.setValue(1)),
         ("clear players keeping mains with one character",
-         lambda: board.CommandClearAll(no_mains=True)),
+         lambda: clear_players(board, no_mains=True)),
         ("two characters and refill", lambda: (
             board.charNumber.setValue(2), _fillBoth(board))),
-        ("clear players", board.CommandClearAll),
+        ("clear players", lambda: clear_players(board)),
         ("refill", lambda: _fillBoth(board)),
         ("web reset players", lambda: actions.reset_players(number)),
         ("refill everything",
@@ -642,7 +642,7 @@ def _prepassSteps(board):
         ("fill both teams", lambda: _fillBoth(board)),
         ("team names", lambda: (_teamName(board, 1, "Alpha"),
                                 _teamName(board, 2, "Bravo"))),
-        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
         ("stage results", lambda: _stageResults(board)),
         ("losers", lambda: _losers(board, 2).setChecked(True)),
         ("follow a set without keeping mains",
@@ -1455,13 +1455,13 @@ def _bestOfSteps(board, app, client):
         ("a point on a full set", lambda: board.CommandScoreChange(0, 1)),
         ("tracker on, reset the score", tracked(board.ResetScore)),
         ("tracker on, best of 5 again", tracked(spin(5))),
-        ("a set with a score, tracker on", tracked(lambda: board.ChangeSetData(
+        ("a set with a score, tracker on", tracked(lambda: apply_set(board,
             {"team1score": 2, "team2score": 1}))),
         ("web best of 7, tracker on", tracked(web(bestOf=7))),
         ("stage results after the web", lambda: _stageResults(board)),
         ("web same best of, tracker on", tracked(web(bestOf="7"))),
         ("web best of 0 is not carried", tracked(web(bestOf=0))),
-        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
         ("web best of 3 blanks the English round",
          tracked(web(bestOf="3"))),
         ("web best of over the maximum, tracker off", web(bestOf=150)),
@@ -1472,13 +1472,13 @@ def _bestOfSteps(board, app, client):
         ("v1 best of 0 is not carried", tracked(v1({"bestOf": 0}))),
         ("stage results before a set", lambda: _stageResults(board)),
         ("a set with a best of, a round and a score",
-         tracked(lambda: board.ChangeSetData({
+         tracked(lambda: apply_set(board, {
              "bestOf": 5, "round_name": "Losers Final",
              "team1score": 1, "team2score": 2}))),
         ("stage results after the set", lambda: _stageResults(board)),
-        ("a set with the same best of", tracked(lambda: board.ChangeSetData(
+        ("a set with the same best of", tracked(lambda: apply_set(board,
             {"bestOf": 5, "round_name": "Losers Final"}))),
-        ("a set with best of 0", tracked(lambda: board.ChangeSetData(
+        ("a set with best of 0", tracked(lambda: apply_set(board,
             {"bestOf": 0, "round_name": "Losers Final"}))),
         ("game load, tracker on", tracked(lambda: _gameLoaded(board))),
         ("stage results after the game load",
@@ -2570,7 +2570,7 @@ def test_a_tag_being_typed_with_its_candidates_open_travels_too(
 
 def _clearFrom(entry, board, app):
     if entry == "players":
-        board.CommandClearAll()
+        clear_players(board)
     elif entry == "reset all inputs":
         _confirmed(board.ResetAllInputs)
     elif entry == "web reset players":
@@ -2958,7 +2958,7 @@ def test_a_clear_takes_text_typed_into_a_combo_with_it(
     _typeInto(character, "Typed Hero")
 
     if clear == "the board's":
-        board.CommandClearAll()
+        clear_players(board)
     else:
         card.Clear()
     autonaApp.settle()
@@ -2982,7 +2982,7 @@ _LOADED_E1 = {"gamerTag": "E1", "mains": {"tgame": [["Mario", 0]]}}
 
 def _loadClearing(board, how):
     if how == "a set's entrants":
-        board.ChangeSetData({"overwrite": True, "entrants": [
+        apply_set(board, {"overwrite": True, "entrants": [
             [dict(_LOADED_E1)], [{"gamerTag": "E2"}]]})
     else:
         with patch.object(PlayerDB.instance, "GetPlayerFromTag",
@@ -3064,6 +3064,46 @@ def test_a_load_leaves_the_combo_being_typed_in_alone(board, autonaApp):
         assert character.currentText() == ""
 
 
+@pytest.mark.parametrize("clear", ["the board host's", "the board's"])
+def test_a_clear_takes_the_text_of_a_combo_whose_list_is_open(
+        board, autonaApp, clear):
+    """Unlike a load from elsewhere, the players' clear is the operator's
+    own operation on the board: every combo drops its typed text, the one
+    whose list is open included. CommitFocusedEdit closes a completer's
+    popup, not a combo's own list, so that combo still counts as being
+    edited (_Editing) when the clear's discard comes. The board host's
+    clear (the Web's reset_players / clear_all) discarded only the combos
+    not being edited after S4x moved it off the board (PlayerLoaded's
+    notEditing=True); the board's own clear (すべての入力値をリセット) and
+    the host's before S4x discarded every one (ADR-005 S4x review)."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    character = card.character_elements[1][1]
+
+    with _inDetails(board, card, autonaApp):
+        _typeInto(character, "Typed Hero")
+        character.showPopup()
+        autonaApp.settle()
+        try:
+            assert character.view().isVisible()
+            assert card._Editing(character)
+            if clear == "the board host's":
+                clear_players(board)
+            else:
+                with StateManager.SaveBlock():
+                    board._ClearingPlayers(
+                        lambda: AutonaActions.instance.ClearPlayers(
+                            board.scoreboardNumber, False))
+            autonaApp.settle()
+            assert character.currentText() == ""
+        finally:
+            character.hidePopup()
+            autonaApp.settle()
+    assert character.currentText() == ""
+    assert _cardMismatches(board) == {}
+
+
 # The note publishes every keystroke (textChanged), and a render leaves it
 # alone while the operator is in it. Until the S3e-3 review it published
 # whatever text it then held as soon as it changed at all, so a change that
@@ -3139,18 +3179,18 @@ def test_a_set_between_singles_and_teams_recalculates_the_upset_factor(
     assert singles > 0
     upset = f"{PREFIX}.upset_factor"
 
-    board.ChangeSetData(_seededSet(before))
+    apply_set(board, _seededSet(before))
     autonaApp.settle()
     assert autonaApp.get(upset) == (singles if before == 1 else 0)
 
     with _StatsTriggers(board) as triggers:
-        board.ChangeSetData(_seededSet(after))
+        apply_set(board, _seededSet(after))
         autonaApp.settle()
     assert triggers.counts["UpsetFactorCalculation"] == 1
     assert autonaApp.get(upset) == (singles if after == 1 else 0)
 
     # The same set again: nothing to recalculate.
     with _StatsTriggers(board) as triggers:
-        board.ChangeSetData(_seededSet(after))
+        apply_set(board, _seededSet(after))
         autonaApp.settle()
     assert triggers.counts["UpsetFactorCalculation"] == 0

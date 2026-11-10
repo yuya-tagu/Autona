@@ -29,6 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.conftest import apply_set
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 LIVE_ENV_VAR = "AUTONA_LIVE_TESTS"
@@ -185,8 +187,9 @@ def realSetOnBoard(autonaApp, liveEvent):
 
     Mirrors AutonaTournamentDataProvider.GetMatch's result handler: the
     provider result is a plain dict, and the handler stamps overwrite/no_mains
-    onto it before it reaches the widget. Without `overwrite` ChangeSetData
-    only applies the mains, and the entrant names never land.
+    onto it before it reaches the widget. Without `overwrite` the set's
+    apply (SetLoadService.ApplySetData; the boards' ChangeSetData until
+    ADR-005 S4x) only applies the mains, and the entrant names never land.
 
     The data is deep-copied per test because SetData writes back into the
     dict it is handed (censored tags), and the fetch is shared module-wide.
@@ -203,7 +206,7 @@ def realSetOnBoard(autonaApp, liveEvent):
     board = autonaApp.board(1)
     data = copy.deepcopy(liveEvent.match)
     data.update({"overwrite": True, "no_mains": False})
-    board.ChangeSetData(data)
+    apply_set(board, data)
     autonaApp.settle()
     return SimpleNamespace(board=board, data=data)
 
