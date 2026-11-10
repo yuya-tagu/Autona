@@ -43,15 +43,14 @@ made the set length the state's (`SetBestOf`): it was the BEST OF spinbox's,
 whose valueChanged published it and rebuilt the game tracker's rows, and
 every other entry point drove that spinbox. What is still outside:
 
-- **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
-  below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
-  writers live inside core now -- this class (`SetScore` / `AdjustScore` /
+- **The other writers of the score.** `AdjustScore` / `ResetScore`
+  below are not the *only* writers of `score.{n}.team.{t}.score`. Three
+  writers live inside core -- this class (`SetScore` / `AdjustScore` /
   `ResetScore`, `SwapTeams` since S2c and the clears since S2d), the stage
-  tally in `GameTrackerService.UpdateScore` / `PublishStageResults`, and a
-  loaded set's `SetLoadService.ApplyScores` (Step 4b) -- plus the one
-  path that has not moved: a number typed into the score display, whose
-  valueChanged runs the tracker's `UpdateScore`. So the *implementation* is
-  core in every case; what is still outside is that entry point.
+  tally in `GameTrackerService.PublishStageResults`, and a loaded set's
+  `SetLoadService.ApplyScores` (Step 4b). A number typed into the score
+  display is `SetScore` since ADR-005 S4x, as v1's score:set is (it was the
+  tracker's own `UpdateScore` until then), so no entry point is outside.
   The game rows follow the score in the operation that moved it
   (`GameTrackerService.FollowScores`, ADR-005 S4t), and a board only renders
   the result (`AutonaScoreboardWidget._SyncScoreDisplays`): the follow used
@@ -92,6 +91,7 @@ from .CrewBattleService import CrewBattleService
 from .DictHelper import deep_clone
 from .GameTrackerService import GameTrackerService
 from .GameAssetCatalog import GameAssetCatalog
+from .Observable import ObserverChannel
 from .PlayerService import (
     DEFAULT_CHARACTERS_PER_PLAYER, CharacterSlot, DefaultPlayersPerTeam,
     PlayerService, RepublishTeamMergedNames)
@@ -209,8 +209,23 @@ class AutonaActions:
         # shell it is and whether or not a widget renders them (ADR-005 S4t).
         self._gameTrackers = {
             board: GameTrackerService(board) for board in self.SCORE_BOARDS}
+        # {board: count}: the characters per player a 1v1 / team board with
+        # no character slot gives the players it gets next -- asked for while
+        # it had none, else what it had when it lost its last player
+        # (SetPlayersPerTeam / SetCharactersPerPlayer). Not in the state, as
+        # it never was. Guarded by StateManager.lock.
+        self._emptyCharacters = {}
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    # ── the battle format ────────────────────────────────────────────────
+
+    # The battle format was switched (SetBattleFormat): (fmt). Notified on the
+    # thread that switched it, after the settings are written and before the
+    # result's layout follows -- the order the window's switch had. The
+    # desktop shows the format's board and the sidebar segment for it
+    # (StateManagerBridge.battle_format_changed -> Window); headless, nobody
+    # listens. Class-level, as SetFollowService.changes: the bridge
+    # subscribes once for the process.
+    battleFormatChanges = ObserverChannel("battle_format_changes")
 
     def ResolveBattleFormat(self) -> str:
         """The persisted battle format: "singles", "team" or "crew".
@@ -248,6 +263,46 @@ class AutonaActions:
         the same answer /api/v1/health reports as `activeBoard`.
         """
         return self.FORMAT_BOARDS.get(self.ResolveBattleFormat(), 1)
+
+    def SetBattleFormat(self, fmt) -> bool:
+        """Switch the battle format: "singles" (board 1), "team" (board 2) or
+        "crew" (board 3); a bool is team / singles, as the window's switch
+        took one. True if it switched; False for the format already in force
+        (ResolveBattleFormat), which writes and notifies nothing. Raises
+        ValueError for anything else, before anything is written.
+
+        Persists `scoreboard.battle_format` (the source of truth) and mirrors
+        the legacy `scoreboard.team_mode` bool, so rolling back to an older
+        build still restores 1v1 / team. Then tells the shell
+        (battleFormatChanges: the desktop shows the format's board -- built
+        first if it is not -- and the sidebar segment), and the result's
+        layout follows (ResultService.FollowBattleFormat), in that order.
+
+        The window's SetBattleFormat until ADR-005 S4x, which the sidebar
+        drove; the sidebar and v1's PUT /battle-format call this now, so the
+        switch works headless too. Re-choosing the format in force switched
+        the board again and re-ran the result's layout rule there; it is a
+        no-op now (the board already is the one shown, and the layout rule
+        ran when that format was chosen).
+        """
+        if isinstance(fmt, bool):
+            fmt = "team" if fmt else "singles"
+        # isinstance first: `in` on a mapping hashes its argument.
+        if not isinstance(fmt, str) or fmt not in self.FORMAT_BOARDS:
+            raise ValueError(f"unknown battle format: {fmt!r}")
+        if fmt == self.ResolveBattleFormat():
+            return False
+        SettingsManager.Set("scoreboard.battle_format", fmt)
+        SettingsManager.Set("scoreboard.team_mode", fmt == "team")
+        logger.info(f"Battle format: {fmt}")
+        self.battleFormatChanges.notify(fmt)
+        # Imported here: ResultService imports this module.
+        from .ResultService import ResultService
+        if ResultService.instance is not None:
+            ResultService.instance.FollowBattleFormat(fmt)
+        return True
+
+    # ── helpers ──────────────────────────────────────────────────────────
 
     def _clampScore(self, value: int) -> int:
         return max(self.SCORE_MIN, min(self.SCORE_MAX, value))
@@ -466,14 +521,17 @@ class AutonaActions:
         A falsy color is ignored rather than written, matching what the
         widget command did: the color is used by overlays as a fill, and
         clearing it would render a transparent team strip nobody asked for.
-        Resolving a game's preset color index to a hex string stays on the Qt
-        side -- that lookup reads AutonaGameAssetManager's color model.
+        The color arrives as the hex string: nothing resolves a game's
+        preset color index into one any more.
 
         `board` is not validated (unlike `AdjustScore` / `ResetScore`'s
         `SCORE_BOARDS` check): this, `SetTeamName` and `SetMatchField` are
-        the entry points a crew (board 3) uses too, so an out-of-range board
-        would have to mean a caller bug rather than "not this board's turn",
-        and every caller is a widget that already knows which board it is.
+        the entry points a crew (board 3) uses too. The callers are the crew
+        board's color button, a fresh board's seed (SeedFreshBoard), v1's
+        crew team color and the Web's legacy team_color (route and event).
+        The last passes on whatever board it is given, and writes the color
+        of a board no shell has (known, and answered "OK" as it always was;
+        the ADR-005 S4x review left it).
         """
         board = self._asInt(board, 0)
         team = self._asInt(team, 0)
@@ -919,9 +977,8 @@ class AutonaActions:
         gap, or teams of different sizes, included: a request for the
         characters is not one for the players). `characters` None keeps the
         character slots of the first slot there is (the default, 3, on a
-        board with none -- the entry points that know better pass it: the
-        board's spinbox, the Web's remembered value,
-        BoardHost.EmptyRosterCharacters). Both are clamped to the ranges the
+        board with none -- SetPlayersPerTeam passes the count it keeps for
+        such a board, EmptyRosterCharacters). Both are clamped to the ranges the
         board's spinboxes had. What it writes is what the board's cards
         wrote:
 
@@ -1014,6 +1071,61 @@ class AutonaActions:
                             f"score.{board}.team.{team}.logo", None)
         return True
 
+    def SetPlayersPerTeam(self, board, players) -> bool:
+        """`players` player slots a team on board `board` (SetRoster), with
+        the characters per player the board keeps for a roster with none: a
+        board with no character slot left gives its next players the count
+        it kept (EmptyRosterCharacters) rather than SetRoster's default, and
+        one that loses its last player keeps the count it had there. As the
+        board's two spinboxes had it: players=0, then characters=2, then
+        players=2 is two players a team with two characters each. True if it
+        applied (boards 1/2).
+
+        The players-per-team of every entry point: the board's spinbox, the
+        Web's set_route, a set's entrants (SetFollowService). The count kept
+        was the board's hidden spinbox on the desktop and the board host's
+        headless until ADR-005 S4x; it is one memory, in both shells, now.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            return False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                current = self.CharacterSlots(board)
+                characters = None
+                if current is None:
+                    characters = self.EmptyRosterCharacters(board)
+                elif players is not None and self._asInt(players, 1) <= 0:
+                    self._KeepEmptyRosterCharacters(board, current)
+                return self.SetRoster(board, players, characters)
+
+    def SetCharactersPerPlayer(self, board, characters) -> bool:
+        """The character slots of every player of board `board` (SetRoster),
+        or -- on a board with none -- the count its next players get
+        (SetPlayersPerTeam), as the board's spinbox kept it. True if it
+        applied (boards 1/2)."""
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            return False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                if self.CharacterSlots(board) is None:
+                    self._KeepEmptyRosterCharacters(board, characters)
+                return self.SetRoster(board, characters=characters)
+
+    def EmptyRosterCharacters(self, board) -> int:
+        """The characters per player the next players of board `board` get
+        while it has no character slot: the count it kept, else the default
+        (DEFAULT_CHARACTERS_PER_PLAYER)."""
+        return self._emptyCharacters.get(
+            self._asInt(board, 0), DEFAULT_CHARACTERS_PER_PLAYER)
+
+    def _KeepEmptyRosterCharacters(self, board, count):
+        # Clamped as SetRoster clamps a count (the spinbox's range).
+        self._emptyCharacters[board] = max(0, min(
+            self._asInt(count, DEFAULT_CHARACTERS_PER_PLAYER),
+            self.MAX_CHARACTERS_PER_PLAYER))
+
     def ApplyGameRoster(self, replaced=None) -> list:
         """A game was loaded: every 1v1 / team board that has a roster goes
         to the game's players-per-team (`game.defaults`) and the default
@@ -1081,8 +1193,8 @@ class AutonaActions:
     def CharacterSlots(self, board):
         """The character slots each player of board `board` has -- the
         count SetRoster keeps when it is not given one -- or None on a board
-        with none, where SetRoster falls back to the default and an entry
-        point may know better (BoardHost.EmptyRosterCharacters)."""
+        with none, where SetRoster falls back to the default and
+        SetPlayersPerTeam passes the count it keeps (EmptyRosterCharacters)."""
         board = self._asInt(board, 0)
         return self._FirstCharacterSlots(
             {team: self._Roster(board, team) for team in (1, 2)})
@@ -1220,6 +1332,103 @@ class AutonaActions:
             if StateManager.Get(f"{prefix}.match_en", None) is not None:
                 written |= self._SetIfChanged(f"{prefix}.match_en", "")
         return written
+
+    # ── the X post (ADR-005 S4x) ──────────────────────────────────────────
+
+    def PostText(self, board):
+        """Board `board`'s (1/2) X post: (its text, what is missing for it),
+        read under one hold of the lock -- or None for any other board (the
+        crew board's is CrewBattleService.PostText). `missing` is a list of
+        CrewBattleService's POST_MISSING_* in this order: a team with no named
+        player in its slots, no phase and no round. The board's button
+        refuses to post while it has any, and says which.
+
+        The live values, 反映 or not, as the button always read them (on the
+        desktop the board's edits wait behind 反映). What the board's PostToX
+        built until ADR-005 S4x, word for word: the tournament name, "[phase]
+        - round", each team's named players in slot order with their @handle,
+        their characters and their seed, and the stream URL. A value the
+        state holds as something else than text is read as its text (the
+        button raised on it).
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            return None
+
+        def text(value):
+            return "" if value is None else str(value)
+
+        def ordered(keys):
+            return sorted(keys, key=lambda key: int(key)
+                          if str(key).isdigit() else 0)
+
+        with StateManager.lock:
+            # Not stripped, as the post always took them; the round's
+            # presence is judged on the stripped text.
+            tournament = text(StateManager.Get(
+                f"{schema.TOURNAMENT_INFO_ROOT}."
+                f"{schema.TOURNAMENT_NAME_KEY}") or "")
+            phase = text(StateManager.Get(f"score.{board}.phase") or "")
+            match = text(StateManager.Get(f"score.{board}.match") or "")
+            streamUrl = text(StateManager.Get("stream.url") or "")
+            teams = {}
+            for team in (1, 2):
+                roster = StateManager.Get(f"score.{board}.team.{team}.player")
+                entries = []
+                for key in ordered(roster if isinstance(roster, dict) else ()):
+                    slot = roster.get(key)
+                    if not isinstance(slot, dict):
+                        continue
+                    name = text(slot.get(schema.PLAYER_TAG_KEY) or "").strip()
+                    if not name:
+                        continue
+                    picks = slot.get("character")
+                    picks = picks if isinstance(picks, dict) else {}
+                    characters = []
+                    for pick in ordered(picks):
+                        value = picks[pick]
+                        characterName = text(value.get("name", "")) \
+                            if isinstance(value, dict) else ""
+                        if characterName:
+                            characters.append(characterName)
+                    twitter = text(
+                        slot.get(schema.PLAYER_TWITTER_KEY) or "").strip()
+                    seed = slot.get(schema.PLAYER_SEED_KEY)
+                    entry = name
+                    if twitter:
+                        # Normalized to an @handle so the post mentions it.
+                        handle = twitter.lstrip("@").strip()
+                        if handle:
+                            entry += f" @{handle}"
+                    if characters:
+                        entry += f"({'/'.join(characters)})"
+                    if seed:
+                        entry += f" [Seed:{seed}]"
+                    entries.append(entry)
+                teams[team] = entries
+
+        missing = []
+        if not teams[1]:
+            missing.append(CrewBattleService.POST_MISSING_TEAM_1)
+        if not teams[2]:
+            missing.append(CrewBattleService.POST_MISSING_TEAM_2)
+        if not (phase.strip() or match.strip()):
+            missing.append(CrewBattleService.POST_MISSING_ROUND)
+
+        roundLine = f"[{phase}]" if phase else ""
+        if match:
+            roundLine = f"{roundLine} - {match}" if roundLine else match
+
+        parts = []
+        if tournament:
+            parts.append(tournament)
+        if roundLine:
+            parts.append(roundLine)
+        parts.extend(["", " / ".join(teams[1]) or "???", "vs",
+                      " / ".join(teams[2]) or "???", ""])
+        if streamUrl:
+            parts.append(f"\U0001f534STREAM: {streamUrl}")
+        return "\n".join(parts), missing
 
     # ── best of ──────────────────────────────────────────────────────────
 

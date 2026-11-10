@@ -731,9 +731,10 @@ def _liveCounts():
 def _loadSet(player, index, country="JP", state="13"):
     """The player-side shape of a set load.
 
-    The board clears every player first (CommandClearAll -> Clear(), which
-    empties the country combo and rebuilds the regions for "no country") and
-    then hands each one its new data, which rebuilds them again for the real
+    The board cleared every player first (its CommandClearAll -> Clear(),
+    which empties the country combo and rebuilds the regions for "no
+    country"; core's clear since, and the method gone in ADR-005 S4x) and
+    then handed each one its new data, which rebuilds them again for the real
     country. That empty-then-refill pair is what stranded a model: going
     straight from one country to another does not, so a test that only
     switches countries passes against the bug.

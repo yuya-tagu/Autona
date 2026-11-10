@@ -51,6 +51,7 @@ from unittest.mock import patch
 import pytest
 from qtpy.QtWidgets import QLineEdit, QMessageBox, QSpinBox
 
+from tests.conftest import apply_set, clear_players
 from tests.fixtures.write_recording import encode, encodeDelta
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "stats" / "golden.json"
@@ -445,17 +446,17 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
     two = board.team2playerWidgets[0]
 
     with _Recorder(autonaApp, startgg) as rec:
-        rec.step("load set A", lambda: board.ChangeSetData(_set(
+        rec.step("load set A", lambda: apply_set(board, _set(
             [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)])))
         rec.step("answer set A", lambda: startgg.answer(autonaApp))
-        rec.step("load set B", lambda: board.ChangeSetData(_set(
+        rec.step("load set B", lambda: apply_set(board, _set(
             [_entrant("CCC", 33, 2)], [_entrant("DDD", 44, 9)],
             bracket="SINGLE_ELIMINATION")))
-        rec.step("load set C", lambda: board.ChangeSetData(_set(
+        rec.step("load set C", lambda: apply_set(board, _set(
             [_entrant("EEE", 55, 3)], [_entrant("FFF", 66, 4)])))
         rec.step("answer set C", lambda: startgg.answer(
             autonaApp, lambda f: f["step"] == "load set C"))
-        rec.step("same set again", lambda: board.ChangeSetData(_set(
+        rec.step("same set again", lambda: apply_set(board, _set(
             [_entrant("EEE", 55, 3)], [_entrant("FFF", 66, 4)])))
         rec.step("card tag edit", lambda: _editTag(one, "ZZZ"))
         rec.step("card pick", lambda: one.SetData(
@@ -497,19 +498,19 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
         rec.step("v1 refresh crew board", lambda: _v1(
             http, rec, "/api/v1/scoreboards/3/stats:refresh"))
         rec.step("answer routes", lambda: startgg.answer(autonaApp))
-        rec.step("board clear", board.CommandClearAll)
-        rec.step("load set D", lambda: board.ChangeSetData(_set(
+        rec.step("board clear", lambda: clear_players(board))
+        rec.step("load set D", lambda: apply_set(board, _set(
             [_entrant("KKK", 13, 2)], [_entrant("LLL", 14, 6)])))
         rec.step("web reset players", lambda: WebOps.reset_players(1))
-        rec.step("load set E", lambda: board.ChangeSetData(_set(
+        rec.step("load set E", lambda: apply_set(board, _set(
             [_entrant("MMM", 15, 2)], [_entrant("NNN", 16, 6)])))
         rec.step("web clear all", lambda: WebOps.clear_all(1))
-        rec.step("load set F", lambda: board.ChangeSetData(_set(
+        rec.step("load set F", lambda: apply_set(board, _set(
             [_entrant("OOO", 17, 2)], [_entrant("PPP", 18, 6)])))
         with patch.object(QMessageBox, "question",
                           return_value=QMessageBox.StandardButton.Yes):
             rec.step("reset all inputs", board.ResetAllInputs)
-        rec.step("load set G", lambda: board.ChangeSetData(_set(
+        rec.step("load set G", lambda: apply_set(board, _set(
             [_entrant("QQQ", 19, 2)], [_entrant("RRR", 20, 6)])))
         rec.step("answer the rest", lambda: startgg.answer(
             autonaApp, lambda f: f["step"] == "load set G"))
@@ -522,7 +523,7 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
             http, rec, "/scoreboard1-stats-recent-sets"))
         rec.step("v1 refresh, no tournament", lambda: _v1(
             http, rec, "/api/v1/scoreboards/1/stats:refresh"))
-        rec.step("load set H, no tournament", lambda: board.ChangeSetData(
+        rec.step("load set H, no tournament", lambda: apply_set(board,
             _set([_entrant("SSS", 21, 2)], [_entrant("TTT", 23, 6)])))
 
         recorded = {"steps": rec.steps, "boards": rec.boards(1)}
@@ -538,7 +539,7 @@ def test_a_team_board(autonaApp, startgg, http):
     autonaApp.settle()
 
     with _Recorder(autonaApp, startgg) as rec:
-        rec.step("load a 2v2 set", lambda: board.ChangeSetData(_set(
+        rec.step("load a 2v2 set", lambda: apply_set(board, _set(
             [_entrant("A1", 31, 1), _entrant("A2", 32, 1)],
             [_entrant("B1", 41, 4), _entrant("B2", 42, 4)])))
         rec.step("move a player down", lambda: board._MovePlayer(
@@ -546,15 +547,15 @@ def test_a_team_board(autonaApp, startgg, http):
         rec.step("move it back up", lambda: board._MovePlayer(
             board.team1playerWidgets[1], -1))
         rec.step("web swap", lambda: WebOps.swap_teams(2))
-        rec.step("board clear", board.CommandClearAll)
-        rec.step("load a 1v1 set", lambda: board.ChangeSetData(_set(
+        rec.step("board clear", lambda: clear_players(board))
+        rec.step("load a 1v1 set", lambda: apply_set(board, _set(
             [_entrant("S1", 51, 1)], [_entrant("S2", 52, 8)])))
         rec.step("answer", lambda: startgg.answer(autonaApp))
-        rec.step("load a 2v2 set again", lambda: board.ChangeSetData(_set(
+        rec.step("load a 2v2 set again", lambda: apply_set(board, _set(
             [_entrant("A1", 31, 1), _entrant("A2", 32, 1)],
             [_entrant("B1", 41, 4), _entrant("B2", 42, 4)])))
         rec.step("load the same 2v2 roster without seeds",
-                 lambda: board.ChangeSetData(_set(
+                 lambda: apply_set(board, _set(
                      [{"gamerTag": "A1", "id": [31, 310]},
                       {"gamerTag": "A2", "id": [32, 320]}],
                      [{"gamerTag": "B1", "id": [41, 410]},

@@ -52,6 +52,7 @@ from src.core.PlayerDB import PlayerDB
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
+from tests.conftest import apply_set
 # The S1d world: the fixture games under the slot recording's locale.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
 from tests.fixtures.player_slots.recording import digest, encode
@@ -222,7 +223,7 @@ def _run(world, step):
                                     step["player"],
                                     copy.deepcopy(step["data"]))
     if op == "setdata":
-        return board.ChangeSetData(copy.deepcopy(step["payload"]))
+        return apply_set(board, copy.deepcopy(step["payload"]))
     if op == "swap":
         return board.SwapTeams()
     raise AssertionError(f"unknown op {op!r}")
@@ -407,12 +408,13 @@ def test_a_cards_load_and_clear_only_ask_the_core():
 def test_the_board_loads_players_through_the_core():
     methods = _methods("AutonaScoreboardWidget.py", "AutonaScoreboardWidget")
     # A set's entrants and a one-player payload are core's since ADR-005
-    # S3e-7 (SetFollowService): the board's ChangeSetData hands it over. The
+    # S3e-7 (SetFollowService.ApplySetPayload), and the board has no set
+    # entry of its own since S4x (its ChangeSetData only handed over). The
     # tag lookup is the Web's (AutonaWebOperations.load_player_from_tag).
     assert not {"_ApplyEntrants", "_ApplySinglePlayerData", "_WritePlayerSlot",
                 "LoadPlayerFromTag", "_ApplyPlayer",
                 "_PlayerSlotPath"} & set(methods)
-    assert "ApplySetPayload" in _attributeCalls(methods["ChangeSetData"])
+    assert "ChangeSetData" not in methods
     follow = _methods("core/SetFollowService.py", "SetFollowService")
     for name in ("_ApplyEntrants", "_ApplySinglePlayer"):
         calls = _attributeCalls(follow[name])

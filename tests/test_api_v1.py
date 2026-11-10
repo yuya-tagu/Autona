@@ -179,8 +179,9 @@ def test_score_set_does_not_carry_the_set_payload_side_effects(
 
     general.disable_scoreupdate is a provider setting (do not take scores
     from start.gg) -- on the legacy route it made a typed score zero both
-    teams. And ChangeSetData writes match_en unconditionally, so every
-    legacy score tap blanked the English round text.
+    teams. And a set's apply (the boards' ChangeSetData until ADR-005 S4x)
+    writes match_en unconditionally, so every legacy score tap blanked the
+    English round text.
     """
     autonaApp.board(1)
     autonaApp.state.Set("score.1.match_en", "Winners Final")

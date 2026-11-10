@@ -883,7 +883,8 @@ class ResultService(RenderLane):
         return True
 
     def FollowBattleFormat(self, fmt):
-        """The layout for a battle format just chosen (Window.SetBattleFormat):
+        """The layout for a battle format just chosen (AutonaActions
+        .SetBattleFormat, ADR-005 S4x; the window's switch until then):
         Team and Crew are drawn on a team layout, 1v1 on one of the singles'.
         A layout that fits stays: a team_split or a vertical picked by hand."""
         team = IsTeamLayout(self.Layout())

@@ -28,8 +28,9 @@ from qtpy.QtWidgets import (
 from shiboken6 import Shiboken
 
 from src.core.SettingsManager import SettingsManager
-from tests.conftest import tournamentLoaded
+from tests.conftest import apply_set, clear_players, tournamentLoaded
 from tests.fixtures.stats.spies import StatsTriggers
+from tests.fixtures.write_recording import WriteRecorder
 
 # The individual game tracker ships disabled, so the stage rows it rebuilds on
 # every best-of change are not built at all by default. Patching the lookup
@@ -722,7 +723,7 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
         board = autonaApp.board(1)
         monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
 
-        board.ChangeSetData({
+        apply_set(board, {
             "bestOf": 5, "team1losers": True, "overwrite": True,
             "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
         autonaApp.settle()
@@ -752,7 +753,7 @@ def test_a_set_with_a_best_of_that_is_not_a_number_still_loads(autonaApp):
     board.bestOfSpin.setValue(3)
     autonaApp.settle()
 
-    board.ChangeSetData({
+    apply_set(board, {
         "bestOf": "five", "team1losers": True, "overwrite": True,
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
     autonaApp.settle()
@@ -1081,13 +1082,15 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
 def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
     """Setup guard for the reset test below, kept separate deliberately.
 
-    If ChangeSetData ever stops writing score.3.best_of, the reset test's own
+    If the crew's set data (CrewBattleService.ApplySetData; the board's
+    ChangeSetData until ADR-005 S4x) ever stops writing score.3.best_of, the
+    reset test's own
     precondition would silently disappear and it would keep passing on a
     never-written key. Pinned separately instead.
     """
     board = autonaApp.board(3)
 
-    board.ChangeSetData({"bestOf": 5})
+    apply_set(board, {"bestOf": 5})
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 5
@@ -1095,7 +1098,7 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
 
 def test_crew_board_seeds_best_of_at_construction(autonaApp):
     # Overlays read score.3.best_of unconditionally, so the key must exist
-    # from the start rather than only after the first ChangeSetData.
+    # from the start rather than only after the first set data.
     autonaApp.board(3)
     autonaApp.settle()
 
@@ -1107,7 +1110,7 @@ def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
     # ChangeSetData wrote, so overlays kept rendering the old BO.
     board = autonaApp.board(3)
 
-    board.ChangeSetData({"bestOf": 5})
+    apply_set(board, {"bestOf": 5})
     autonaApp.settle()
 
     autonaApp.web().reset_match(3)
@@ -1119,7 +1122,7 @@ def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
 def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
     board = autonaApp.board(3)
 
-    board.ChangeSetData({"bestOf": 5})
+    apply_set(board, {"bestOf": 5})
     autonaApp.settle()
 
     autonaApp.web().clear_all(3)
@@ -1601,7 +1604,7 @@ _RESETS = {
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_a_reset_clears_the_match_bar(autonaApp, boardNumber, reset):
     board = autonaApp.board(boardNumber)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
     assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
 
@@ -1639,7 +1642,7 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
     leaves the match bar as the previous set had it.
     """
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
 
     board.NewSetSelected({"id": "1001", "auto_update": "set"})
@@ -1661,7 +1664,7 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
 def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
                                                              tournament):
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
 
     board.NewSetSelected({"id": "1002", "auto_update": "set"})
@@ -1685,10 +1688,11 @@ def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
 def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
         autonaApp):
     # The half of ClearScore that does work, driven through the rewired
-    # widgets: the spinboxes still reach GameTrackerService.UpdateScore and
-    # the checkboxes still reach AutonaActions.SetTeamLosers.
+    # widgets: the spinboxes reach AutonaActions.SetScore (ADR-005 S4x;
+    # GameTrackerService.UpdateScore until then) and the checkboxes still
+    # reach AutonaActions.SetTeamLosers.
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
     assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (2, 1)
     assert autonaApp.get("score.1.team.2.losers") is True
@@ -2033,7 +2037,7 @@ _SET = {
 
 def test_a_loaded_set_reaches_the_state(autonaApp):
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
 
     assert autonaApp.get("score.1.match") == "Winners Final"
@@ -2048,7 +2052,7 @@ def test_a_loaded_set_reaches_the_state(autonaApp):
 def test_the_board_renders_a_loaded_set(autonaApp):
     """The widgets follow the state now instead of being poked into it."""
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
 
     assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
@@ -2070,7 +2074,7 @@ def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.ChangeSetData(dict(_SET))
+        apply_set(board, dict(_SET))
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -2085,12 +2089,12 @@ def test_reloading_the_same_set_publishes_nothing(autonaApp):
     from src.core.StateManager import StateManager
 
     board = autonaApp.board(1)
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     StateManager.CommitHeld("score.1")
     autonaApp.settle()
     assert StateManager.HasPendingChanges("score.1") is False
 
-    board.ChangeSetData(dict(_SET))
+    apply_set(board, dict(_SET))
     autonaApp.settle()
 
     assert StateManager.HasPendingChanges("score.1") is False, (
@@ -2106,7 +2110,7 @@ def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
 
     # Two players a side: the team-name half of a set only applies to a
     # multi-player entrant, as it always has.
-    board.ChangeSetData(dict(
+    apply_set(board, dict(
         _SET,
         entrants=[[{"gamerTag": "A"}, {"gamerTag": "B"}],
                   [{"gamerTag": "C"}, {"gamerTag": "D"}]],
@@ -2126,7 +2130,7 @@ def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
 
 def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
     board = autonaApp.board(2)
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "A"}, {"gamerTag": "B"}],
                      [{"gamerTag": "C"}, {"gamerTag": "D"}]],
         "p1_name": "Alpha", "p2_name": "Bravo", "overwrite": True,
@@ -2165,7 +2169,7 @@ def test_a_stale_async_refresh_is_dropped(autonaApp):
     """An in-flight fetch answering after the operator moved on."""
     board = autonaApp.board(1)
     board.setLoad.lastSetSelected = "999"
-    board.ChangeSetData({"round_name": "Winners Final"})
+    apply_set(board, {"round_name": "Winners Final"})
     autonaApp.settle()
 
     board.setFollow.UpdateSetData({"id": "111",
@@ -2188,7 +2192,7 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
     rows nothing renders (see StageCount()).
     """
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        trackedBoard.ChangeSetData({"team1score": 2, "team2score": 1})
+        apply_set(trackedBoard, {"team1score": 2, "team2score": 1})
         autonaApp.settle()
 
     assert _wonGames(autonaApp, 1) == [1, 2]
@@ -2244,7 +2248,7 @@ def test_a_reset_set_load_does_not_reshuffle_recorded_games(
         assert _wonGames(autonaApp, 1) == [2, 3]
         assert _wonGames(autonaApp, 2) == [1]
 
-        trackedBoard.ChangeSetData(
+        apply_set(trackedBoard,
             {"reset_score": True, "team1score": 2, "team2score": 1})
         autonaApp.settle()
 
@@ -2264,7 +2268,7 @@ def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
     "losers" while the exported name did not.
     """
     board = autonaApp.board(1)
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": False, "team2losers": True, "overwrite": True,
     })
@@ -2285,7 +2289,7 @@ def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
     board.SwapTeams()
     autonaApp.settle()
 
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": True, "team2losers": False, "overwrite": True,
     })
@@ -2304,7 +2308,7 @@ def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
     lose their suffix through its `toggled` -- AutonaActions.SetTeamLosers,
     the same core half a set load uses (SetLoadService.ApplyLosers)."""
     board = autonaApp.board(1)
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team2losers": True, "overwrite": True,
     })
@@ -2325,7 +2329,7 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     and the flag goes with it, so nothing is re-derived. The checkboxes
     render the result."""
     board = autonaApp.board(1)
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": False, "team2losers": True, "overwrite": True,
     })
@@ -2352,14 +2356,16 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
 # fetched once, and the Web builds the board first.
 
 _CLEARS = {
-    "CommandClearAll": lambda app, board, n: board.CommandClearAll(),
+    # The board host's clear (the board's CommandClearAll until ADR-005
+    # S4x): what reset_players runs, without the Web around it.
+    "ClearPlayers": lambda app, board, n: clear_players(board),
     "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
     "reset_players": lambda app, board, n: app.web().reset_players(n),
     "clear_all": lambda app, board, n: app.web().clear_all(n),
 }
 
 
-@pytest.mark.parametrize("clear", ["CommandClearAll", "ResetAllInputs"])
+@pytest.mark.parametrize("clear", ["ClearPlayers", "ResetAllInputs"])
 def test_a_clear_is_one_save_cycle_and_the_cards_show_it(autonaApp, clear):
     board = autonaApp.board(2)
     _setPlayerName(board, 1, "LEFT")
@@ -2467,7 +2473,6 @@ _WEB_CLEARS = {
     "reset_match": lambda actions: actions.reset_match(2),
     "reset_players": lambda actions: actions.reset_players(2),
     "clear_all": lambda actions: actions.clear_all(2),
-    "get_set": lambda actions: actions.get_set(2),
     "set_route": lambda actions: actions.set_route(2, match="Grand Final"),
 }
 
@@ -2484,7 +2489,7 @@ def test_a_web_clear_builds_the_board_first(autonaApp, route):
     autonaApp.settle()
     actions = autonaApp.web()
     try:
-        answer = _WEB_CLEARS[route](actions)
+        _WEB_CLEARS[route](actions)
         autonaApp.settle()
 
         board = autonaApp.manager.scoreboards.get(2)
@@ -2509,8 +2514,6 @@ def test_a_web_clear_builds_the_board_first(autonaApp, route):
         if route == "clear_all":
             assert len(state["team"]["1"]["player"]) == 1
             assert board.playerNumber.value() == 1
-        if route == "get_set":
-            assert answer == "0"
         if route == "set_route":
             assert autonaApp.get("score.2.match") == "Grand Final"
             assert StateManager.HasPendingChanges("score.2") is True
@@ -2520,6 +2523,32 @@ def test_a_web_clear_builds_the_board_first(autonaApp, route):
     finally:
         autonaApp.dropAllBoards()
         StateManager.Unset("score.2")
+        autonaApp.settle()
+
+
+def test_reading_the_set_loaded_last_builds_nothing(autonaApp):
+    """get_set reads what core keeps by board (SetLoadService, ADR-005
+    S3e-7), in both shells since ADR-005 S4x: the desktop's built the board
+    first, for a value no board holds."""
+    from src.core.SetLoadService import SetLoadService
+    from src.core.StateManager import StateManager
+
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score.2")
+    autonaApp.settle()
+    actions = autonaApp.web()
+    try:
+        with WriteRecorder() as recorder:
+            assert actions.get_set(2) == "0"
+            SetLoadService(2).lastSetSelected = "777"
+            assert actions.get_set(2) == "777"
+            # The crew board loads no set.
+            assert actions.get_set(3) == "0"
+            autonaApp.settle()
+        assert recorder.sets == []
+        assert autonaApp.manager.scoreboards == {}
+    finally:
+        SetLoadService(2).lastSetSelected = None
         autonaApp.settle()
 
 
@@ -2574,7 +2603,7 @@ def test_a_clear_keeps_the_city(autonaApp):
     card.player.SetText("name", "SOMEONE")
     autonaApp.settle()
 
-    board.CommandClearAll()
+    clear_players(board)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.player.1.name") == ""
@@ -2705,7 +2734,7 @@ def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
     autonaApp.settle()
     assert len(board.team1playerWidgets) == 1
 
-    board.ChangeSetData({
+    apply_set(board, {
         "entrants": [[{"gamerTag": "A1"}, {"gamerTag": "A2"}],
                      [{"gamerTag": "B1"}, {"gamerTag": "B2"}]],
         "team1losers": True, "team2losers": False, "overwrite": True,

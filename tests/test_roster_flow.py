@@ -50,7 +50,7 @@ from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.StateManager import StateManager
-from tests.conftest import copy_trees, drain_tasks, remove_tree
+from tests.conftest import apply_set, copy_trees, drain_tasks, remove_tree
 from tests.fixtures.write_recording import encode, encodeDelta
 # The S1d world: the fixture games (with real characters, skins and
 # variants) under the recording's locale.
@@ -263,15 +263,15 @@ def test_the_team_board_publishes_the_recorded_rosters(world, autonaApp):
     steps.run("web players and characters", lambda: web.set_route(
         2, players=2, characters=3, match="Final"))
     steps.run("swap back", board.SwapTeams)
-    steps.run("load a 2v2 set", lambda: board.ChangeSetData(_set(
+    steps.run("load a 2v2 set", lambda: apply_set(board, _set(
         [_entrant("A1", "Mario"), _entrant("A2", "Luigi", "Peach")],
         [_entrant("B1", "Bowser"), _entrant("B2")],
         p1_name="TEAM A", p2_name="TEAM B")))
-    steps.run("load a 3v3 set", lambda: board.ChangeSetData(_set(
+    steps.run("load a 3v3 set", lambda: apply_set(board, _set(
         [_entrant("C1"), _entrant("C2"), _entrant("C3", "Zelda")],
         [_entrant("D1"), _entrant("D2", "Mario"), _entrant("D3")],
         p1_name="TEAM C", p2_name="TEAM D")))
-    steps.run("load a 1v1 set", lambda: board.ChangeSetData(_set(
+    steps.run("load a 1v1 set", lambda: apply_set(board, _set(
         [_entrant("E1", "Luigi")], [_entrant("F1")])))
     steps.run("players 2 again", lambda: board.playerNumber.setValue(2))
     steps.run("web clear all", lambda: web.clear_all(2))
@@ -489,14 +489,14 @@ def _rosterSteps(board, web):
         ("web players 1", lambda: web.set_route(2, players=1)),
         ("web players and characters", lambda: web.set_route(
             2, players=2, characters=3)),
-        ("load a 3v3 set", lambda: board.ChangeSetData(_set(
+        ("load a 3v3 set", lambda: apply_set(board, _set(
             [_entrant("C1"), _entrant("C2"), _entrant("C3", "Zelda")],
             [_entrant("D1"), _entrant("D2", "Mario"), _entrant("D3")]))),
         ("swap the 3v3", board.SwapTeams),
-        ("load a 2v2 set", lambda: board.ChangeSetData(_set(
+        ("load a 2v2 set", lambda: apply_set(board, _set(
             [_entrant("A1", "Mario"), _entrant("A2", "Luigi", "Peach")],
             [_entrant("B1", "Bowser"), _entrant("B2")]))),
-        ("load a 1v1 set", lambda: board.ChangeSetData(_set(
+        ("load a 1v1 set", lambda: apply_set(board, _set(
             [_entrant("E1", "Luigi")], [_entrant("F1")]))),
         ("load a two-player game", lambda: loadGame(TEAM_GAME)),
         ("players 4", lambda: board.playerNumber.setValue(4)),
@@ -582,7 +582,7 @@ def test_a_board_card_writes_nothing_as_it_is_built(world, autonaApp):
                 lambda: board.playerNumber.setValue(3),
                 lambda: board.charNumber.setValue(4),
                 lambda: web.set_route(2, players=4, characters=2),
-                lambda: board.ChangeSetData(_set(
+                lambda: apply_set(board, _set(
                     *[[_entrant(f"T{t}P{i}") for i in range(1, 6)]
                       for t in (1, 2)])),
                 lambda: loadGame(TEAM_GAME),

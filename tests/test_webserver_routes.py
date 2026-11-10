@@ -111,6 +111,8 @@ EXPECTED_ROUTES = [
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
+    ('/api/v1/battle-format', 'api_v1.get_battle_format', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/battle-format', 'api_v1.battle_format_set', 'OPTIONS,PUT'),
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
     ('/api/v1/characters', 'api_v1.get_characters', 'GET,HEAD,OPTIONS'),
     ('/api/v1/colors/<feature>', 'api_v1.colors_update', 'OPTIONS,PATCH'),
@@ -514,10 +516,12 @@ def test_the_classification_follows_the_rules():
     # handles come from there (S4q), the Board's file paths, which name the
     # operator's account (S4s), a board's values not published yet (S4u), and
     # the Board's "show in Explorer", which opens a window on this PC and is
-    # for this PC alone (S4s).
+    # for this PC alone (S4s), and a board's X post, made from those values as
+    # its button makes it (S4x).
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
                       "api_v1.get_result_post", "api_v1.get_board_files",
-                      "api_v1.get_scoreboard_pending"}
+                      "api_v1.get_scoreboard_pending",
+                      "api_v1.get_scoreboard_post"}
     thisPc = {"api_v1.reveal_board_file"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
@@ -558,7 +562,9 @@ def test_the_classification_follows_the_rules():
     # (S4u: v1 64 of 96), and the set selection's 4 fetches and the follow's 2
     # writes, with its 4 reads: tags and entrant names, as get_set already reads
     # (S4v: v1 70 of 106), and a crew member's 2 writes, the crew board's X post
-    # and what its combos offer (S4w: v1 72 of 110).
+    # and what its combos offer (S4w: v1 72 of 110), and the battle format's
+    # switch and read, with the X post guarded now that boards 1/2 answer it
+    # from their unpublished values (S4x: v1 73 of 112).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -567,8 +573,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 72
-    assert len(EXPECTED_API_V1_ROUTES) == 110
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 73
+    assert len(EXPECTED_API_V1_ROUTES) == 112
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

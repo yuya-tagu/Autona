@@ -8,7 +8,7 @@ web actions do not crash on it rather than to describe what it does.
 
 That gap is why the crew half of ``ChangeSetData`` was deliberately left out
 of headless core Step 4b: its normalisation rules differ from boards 1 and 2
-in four places (see the ``ChangeSetData`` section below) and a "harmless"
+in four places (see the set data section below) and a "harmless"
 unification would have been a silent behaviour change nobody could have
 detected. These tests were written against the pre-migration widget so the
 crew rules were pinned *first* and the move is provably behaviour preserving.
@@ -27,6 +27,7 @@ import pytest
 
 from src.AutonaCrewBattleWidget import (
     DEFAULT_COLORS, DEFAULT_MEMBER_NUM, DEFAULT_STOCK, MAX_MEMBERS)
+from tests.conftest import apply_set
 
 BOARD = 3
 PREFIX = f"score.{BOARD}"
@@ -134,7 +135,8 @@ def test_a_fresh_crew_board_has_no_pool_key(autonaApp):
     """Asymmetry, pinned rather than fixed.
 
     The launch write seeds `phase` and `match` but not `pool`, even though
-    the board has all three combos and `ChangeSetData` can write all three.
+    the board has all three combos and a set's data
+    (CrewBattleService.ApplySetData) can write all three.
     Boards 1/2 do not seed any of them either (their combos publish on the
     first edit), so nothing depends on the missing key today -- but a
     migration that quietly adds it would change what a fresh
@@ -480,7 +482,9 @@ def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
     assert _get(autonaApp, "match_en") is None
 
 
-# ── ChangeSetData: the crew rules, which are NOT the board 1/2 rules ─────
+# ── set data: the crew rules, which are NOT the board 1/2 rules ──────────
+# (CrewBattleService.ApplySetData; the board's ChangeSetData until ADR-005
+# S4x.)
 #
 # Four documented differences from SetLoadService.ApplyMatchInfo, all pinned
 # below because Step 4b explicitly deferred unifying them:
@@ -496,11 +500,11 @@ def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
 def test_an_empty_round_name_clears_the_crew_match(autonaApp):
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData({"round_name": "Winners Final"})
+    apply_set(board, {"round_name": "Winners Final"})
     autonaApp.settle()
     assert _get(autonaApp, "match") == "Winners Final"
 
-    board.ChangeSetData({"round_name": ""})
+    apply_set(board, {"round_name": ""})
     autonaApp.settle()
 
     # Boards 1/2 would keep "Winners Final" here (SetLoadService tests an
@@ -511,9 +515,9 @@ def test_an_empty_round_name_clears_the_crew_match(autonaApp):
 def test_an_empty_phase_clears_the_crew_phase(autonaApp):
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData({"tournament_phase": "Pools"})
+    apply_set(board, {"tournament_phase": "Pools"})
     autonaApp.settle()
-    board.ChangeSetData({"tournament_phase": ""})
+    apply_set(board, {"tournament_phase": ""})
     autonaApp.settle()
 
     assert _get(autonaApp, "phase") == ""
@@ -522,9 +526,9 @@ def test_an_empty_phase_clears_the_crew_phase(autonaApp):
 def test_a_missing_pool_key_leaves_the_crew_pool_alone(autonaApp):
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData({"tournament_pool": "A"})
+    apply_set(board, {"tournament_pool": "A"})
     autonaApp.settle()
-    board.ChangeSetData({"tournament_phase": "Pools"})
+    apply_set(board, {"tournament_phase": "Pools"})
     autonaApp.settle()
 
     assert _get(autonaApp, "pool") == "A"
@@ -539,7 +543,7 @@ def test_the_crew_board_never_writes_match_en(autonaApp):
     """
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData(
+    apply_set(board,
         {"round_name": "Winners Final", "round_name_en": "Winners Final"})
     autonaApp.settle()
 
@@ -549,9 +553,9 @@ def test_the_crew_board_never_writes_match_en(autonaApp):
 def test_a_zero_best_of_reaches_the_crew_board(autonaApp):
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData({"bestOf": 5})
+    apply_set(board, {"bestOf": 5})
     autonaApp.settle()
-    board.ChangeSetData({"bestOf": 0})
+    apply_set(board, {"bestOf": 0})
     autonaApp.settle()
 
     assert _get(autonaApp, "best_of") == 0
@@ -561,12 +565,13 @@ def test_the_crew_best_of_publishes_only_the_raw_key(autonaApp):
     """No best_of_text / first_to* on board 3 -- deliberately.
 
     The localized long forms are formatted from AutonaLocaleHelper's round
-    name tables, which the crew board must not depend on: its ChangeSetData
-    is the tolerant path generic web callers land on.
+    name tables, which the crew board must not depend on: its set data
+    (CrewBattleService.ApplySetData) is the tolerant path generic web
+    callers land on.
     """
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData({"bestOf": 5})
+    apply_set(board, {"bestOf": 5})
     autonaApp.settle()
 
     assert _get(autonaApp, "best_of") == 5
@@ -579,8 +584,8 @@ def test_the_crew_best_of_publishes_only_the_raw_key(autonaApp):
 def test_a_non_dict_set_payload_is_ignored(autonaApp):
     board = autonaApp.board(BOARD)
 
-    board.ChangeSetData(None)
-    board.ChangeSetData("nonsense")
+    apply_set(board, None)
+    apply_set(board, "nonsense")
     autonaApp.settle()
 
     assert _get(autonaApp, "match") == ""
@@ -599,8 +604,8 @@ def test_a_set_payload_with_nothing_crew_understands_changes_nothing(
     autonaApp.settle()
 
     revision = StateManager.revision
-    board.ChangeSetData({"team": 1, "player": 1, "data": {"gamerTag": "X"}})
-    board.ChangeSetData({"team1score": 2, "team2score": 1})
+    apply_set(board, {"team": 1, "player": 1, "data": {"gamerTag": "X"}})
+    apply_set(board, {"team1score": 2, "team2score": 1})
     autonaApp.settle()
 
     assert StateManager.revision == revision
@@ -741,7 +746,7 @@ def test_a_change_set_data_call_is_exactly_one_publish(autonaApp):
 
     cost = _revisionCost(
         autonaApp,
-        lambda: board.ChangeSetData(
+        lambda: apply_set(board,
             {"round_name": "WF", "tournament_phase": "Top 8",
              "tournament_pool": "A", "bestOf": 5}))
 
@@ -789,7 +794,7 @@ def test_one_set_field_writes_one_key(autonaApp, field, payloadKey):
     autonaApp.settle()
 
     with _SetSpy() as spy:
-        board.ChangeSetData({payloadKey: "value"})
+        apply_set(board, {payloadKey: "value"})
         autonaApp.settle()
 
     assert spy.keys == [_key(field)]

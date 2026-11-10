@@ -279,6 +279,31 @@ def bootstrap_core():
         TournamentInfoService.instance = TournamentInfoService(
             formatEventDate=AutonaLocaleHelper.FormatExportDate)
 
+    # ORDER CONSTRAINT: the names the match bar's combos offer (ADR-005
+    # S4x), fed by the provider's tournament data and phases. Connected here,
+    # after the provider and ahead of every reader: a board's combos re-read
+    # it on the same two signals (connected when the board is built, after
+    # this function), and on the main thread, where the provider emits both,
+    # a direct connection runs in the order it was made -- so the board reads
+    # what this kept from the same payload. GET /match-names/candidates reads
+    # it in both shells. The localized lists and the round terms are
+    # AutonaLocaleHelper's, read when asked (the locale is the shell's, after
+    # this function).
+    from .core.MatchNameCandidates import MatchNameCandidates
+    if MatchNameCandidates.instance is None:
+        MatchNameCandidates.instance = MatchNameCandidates(
+            generic=lambda: {
+                "phase": AutonaLocaleHelper.GetPhaseNameCandidates(),
+                "pool": AutonaLocaleHelper.GetPoolNameCandidates(),
+                "match": AutonaLocaleHelper.GetMatchNameCandidates()},
+            matchNames=lambda: AutonaLocaleHelper.matchNames)
+        AutonaTournamentDataProvider.instance.signals \
+            .tournament_data_updated.connect(
+                MatchNameCandidates.instance.FollowTournamentData)
+        AutonaTournamentDataProvider.instance.signals \
+            .tournament_phases_updated.connect(
+                MatchNameCandidates.instance.FollowPhases)
+
     # ORDER CONSTRAINT: the tournament's icon / banner (ADR-005 S4f) and the
     # tournament's set / clear after what they reach -- the task executor
     # (the fetch and the admin URL's resolution are its jobs), the game

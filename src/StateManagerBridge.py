@@ -44,6 +44,7 @@ actually trigger one.
 """
 from qtpy.QtCore import QObject, Signal
 
+from .core.Actions import AutonaActions
 from .core.SetFollowService import SetFollowService
 from .core.StateManager import StateManager
 
@@ -68,6 +69,12 @@ class StateManagerBridge(QObject):
     # S4v): not a state notification, since that is not in the state, but the
     # same conversion. Carries the board's number and no value.
     follow_changed = Signal(int)
+    # The battle format was switched (core's AutonaActions.battleFormatChanges,
+    # ADR-005 S4x): a setting, not the state, converted the same way. Carries
+    # the format ("singles" / "team" / "crew"). Emitted on the switching
+    # thread: the window's slot runs at once on the GUI thread (the sidebar,
+    # v1 through the desktop board host's Run) and is queued from any other.
+    battle_format_changed = Signal(str)
 
     def __init__(self, parent=None):
         # A second bridge would subscribe the same channels again and
@@ -93,6 +100,7 @@ class StateManagerBridge(QObject):
         observers.held_dirty_changed.subscribe(self._onHeldDirtyChanged)
         observers.held_state_updated.subscribe(self._onHeldStateUpdated)
         SetFollowService.changes.subscribe(self._onFollowChanged)
+        AutonaActions.battleFormatChanges.subscribe(self._onBattleFormatChanged)
 
     # -- channel callbacks: re-emit, nothing else --------------------------
 
@@ -110,3 +118,6 @@ class StateManagerBridge(QObject):
 
     def _onFollowChanged(self, board):
         self.follow_changed.emit(int(board))
+
+    def _onBattleFormatChanged(self, fmt):
+        self.battle_format_changed.emit(str(fmt))

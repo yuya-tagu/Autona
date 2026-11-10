@@ -490,8 +490,12 @@ def test_post_score_works_headless(autonaApp, headless, playerDB):
                                  "round_name": "Crew Final"}))
     assert _acks(ws, "score") == [["OK"]]
     assert autonaApp.get("score.3.match") == "Crew Final"
-    assert client.post("/score", data=json.dumps(
-        {"scoreboard": "4"})).status_code == 500
+    # A board no shell has: 503 since the ADR-005 S4x review (500 until
+    # then, raised as the crew board's sets are).
+    response = client.post("/score", data=json.dumps({"scoreboard": "4"}))
+    assert (response.status_code, response.get_json()["error"]) == (
+        503, {"code": "UNAVAILABLE",
+              "message": "scoreboard 4 does not exist"})
 
 
 # ── pull_stream (ADR-005 S3e 論点 3) ─────────────────────────────────────

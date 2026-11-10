@@ -2112,20 +2112,48 @@ def test_the_launch_seed_does_not_invent_rows(env):
 
 # ── who calls it ─────────────────────────────────────────────────────────
 
-def test_the_window_tells_the_service_of_a_battle_format():
+def test_the_battle_format_switch_tells_the_service(env):
+    # Core's switch since ADR-005 S4x (the window's SetBattleFormat until
+    # then): the sidebar and v1's PUT /battle-format, either shell.
+    env.service.SetLayout("horizontal")
+
+    assert AutonaActions.instance.SetBattleFormat("team")
+
+    assert env.service.Layout() == "team"
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == "team"
+
+
+def test_the_window_leaves_the_layout_to_the_switch():
     # src/Autona.py is the app's start: read, not imported (agent-pitfalls #1).
-    tree = ast.parse((Path(results.__file__).parents[1] / "Autona.py")
-                     .read_text(encoding="utf-8"))
+    source = (Path(results.__file__).parents[1] / "Autona.py") \
+        .read_text(encoding="utf-8")
+    tree = ast.parse(source)
     window = next(node for node in tree.body
                   if isinstance(node, ast.ClassDef) and node.name == "Window")
-    method = next(node for node in window.body
-                  if isinstance(node, ast.FunctionDef)
-                  and node.name == "SetBattleFormat")
+    methods = {node.name: ast.get_source_segment(source, node)
+               for node in window.body if isinstance(node, ast.FunctionDef)}
 
-    assert "ResultService.instance.FollowBattleFormat(fmt)" \
-        in ast.get_source_segment(
-            (Path(results.__file__).parents[1] / "Autona.py")
-            .read_text(encoding="utf-8"), method)
+    assert "SetBattleFormat" not in methods
+    assert "FollowBattleFormat" not in "".join(methods.values())
+
+    # What _BuildUi connects the two signals to, compared as expressions
+    # (ast.unparse), not as text: the layout of the call is free, the
+    # signal and the slot are not, and neither signal has another slot.
+    buildUi = next(node for node in window.body
+                   if isinstance(node, ast.FunctionDef)
+                   and node.name == "_BuildUi")
+    slots = {}
+    for call in ast.walk(buildUi):
+        if (isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "connect"):
+            slots.setdefault(ast.unparse(call.func.value), []).append(
+                [ast.unparse(arg) for arg in call.args]
+                + [ast.unparse(keyword) for keyword in call.keywords])
+    assert slots["self.sidebar.formatSelected"] == [
+        ["AutonaActions.instance.SetBattleFormat"]]
+    assert slots["StateManagerBridge.instance.battle_format_changed"] == [
+        ["self._ShowBattleFormat"]]
 
 
 # ── the real provider ────────────────────────────────────────────────────

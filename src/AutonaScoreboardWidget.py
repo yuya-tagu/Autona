@@ -9,8 +9,7 @@ from typing import List
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
-from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .Helpers.AutonaQtHelper import HeldBackText
+from .Helpers.AutonaQtHelper import HeldBackText, ShowComboText
 
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -25,8 +24,10 @@ from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
+from .core.CrewBattleService import CrewBattleService
+from .core.MatchNameCandidates import MatchNameCandidates
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER
-from .core.SetFollowService import SaveRecord, SetFollowService
+from .core.SetFollowService import SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.StatsService import StatsService
 from .core.TournamentInfoService import TournamentInfoService
@@ -47,8 +48,6 @@ class AutonaScoreboardWidgetSignals(QObject):
     SetSelection = Signal()
     StationSelection = Signal()
     StationSelected = Signal(object)
-    CommandScoreChange = Signal(int, int)
-    CommandTeamColor = Signal(int, str)
 
 
 class AutonaScoreboardWidget(QWidget):
@@ -127,9 +126,6 @@ class AutonaScoreboardWidget(QWidget):
         # not, and nothing ever disconnects it -- the destroyed board would
         # keep answering hotkeys and rewriting score.{n} (the "ghost board").
         AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
-
-        self.signals.CommandScoreChange.connect(self.CommandScoreChange)
-        self.signals.CommandTeamColor.connect(self.CommandTeamColor)
 
         # (The statistics are core's since ADR-005 S3e-5: StatsService,
         # asked for by the operations that change a player -- this board
@@ -330,10 +326,12 @@ class AutonaScoreboardWidget(QWidget):
         # spinboxes ask for a change and show the count (_SyncRosterSpins,
         # signals blocked); they were the counts until then, and every
         # other entry point drove them. Characters-per-player is not
-        # user-facing (the PLAYERS tab that drove it went); the hidden
-        # spinbox keeps the count for a board that has no player slot left,
-        # whose next players get it, as its value always did. Default:
-        # core's DEFAULT_CHARACTERS_PER_PLAYER (the headless seed's too).
+        # user-facing (the PLAYERS tab that drove it went). The count a
+        # board with no player slot left gives its next players is core's
+        # (AutonaActions.EmptyRosterCharacters, ADR-005 S4x), shared with
+        # the Web and headless; this hidden spinbox kept it until then and
+        # shows it now. Default: core's DEFAULT_CHARACTERS_PER_PLAYER (the
+        # headless seed's too).
         self.charNumber = QSpinBox(self)
         self.charNumber.setMaximum(AutonaActions.MAX_CHARACTERS_PER_PLAYER)
         self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
@@ -684,59 +682,36 @@ class AutonaScoreboardWidget(QWidget):
         self.bestOfSpin.editingFinished.connect(self._OnBestOfEditingFinished)
         self._SyncBestOf()
 
+        # A number typed into a score display: the operation v1's score:set
+        # calls (AutonaActions.SetScore, ADR-005 S4x) -- one save cycle with
+        # the game rows following, nothing written for the score the state
+        # has. The left display is state team 1 (a swap exchanges the state).
+        # It went through the tracker's own UpdateScore until then.
         self.scoreDisplay1.valueChanged.connect(
-            lambda value: [
-                self.individualGameTracker.UpdateScore(0, value)
-            ]
-        )
-
+            lambda value: AutonaActions.instance.SetScore(
+                self.scoreboardNumber, 1, value))
         self.scoreDisplay2.valueChanged.connect(
-            lambda value: [
-                self.individualGameTracker.UpdateScore(1, value)
-            ]
-        )
+            lambda value: AutonaActions.instance.SetScore(
+                self.scoreboardNumber, 2, value))
 
         # (The team-name -> crest connection used to be made here, after the
         # generic objectName loops above had already seeded the names. It is
         # part of _WireTeamColumn now, so both halves of "the operator named
         # a team" are wired in one place -- see that method.)
 
-        # Add default and user tournament phase title files. Templated
-        # entries (the "group" pool template, "予選プール{0}") belong to the
-        # pool combo now that the pool is a separate state key.
-        self.phaseCombo.addItem("")
-
-        for key in AutonaLocaleHelper.phaseNames.keys():
-            phaseString = AutonaLocaleHelper.phaseNames[key]
-
-            if "{0}" in phaseString:
-                continue
-            if self.phaseCombo.findText(phaseString) < 0:
-                self.phaseCombo.addItem(phaseString)
-
-        # Generic pool candidates from the "group" template; the real pool
-        # names of the loaded tournament are prepended on
-        # tournament_phases_updated (see _UpdatePoolCandidates).
-        self.poolCombo.addItem("")
-        groupTemplate = AutonaLocaleHelper.phaseNames.get("group", "")
-        if "{0}" in groupTemplate:
-            for letter in ["A", "B", "C", "D"]:
-                if self.poolCombo.findText(groupTemplate.format(letter)) < 0:
-                    self.poolCombo.addItem(groupTemplate.format(letter))
-        AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.connect(
-            self._UpdatePoolCandidates)
-
-        self.matchCombo.addItem("")
-
-        for matchString in AutonaLocaleHelper.GetMatchNameCandidates():
-            if self.matchCombo.findText(matchString) < 0:
-                self.matchCombo.addItem(matchString)
-
-        # The real first rounds (e.g. "Winners TOP300") depend on the entrant
-        # count, so they are inserted when a tournament loads.
-        self._entrantsMatchItems = []
-        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            self._UpdateEntrantsMatchItem)
+        # What the phase / pool / round combos offer is core's
+        # (MatchNameCandidates, ADR-005 S4x; GET /api/v1/match-names/
+        # candidates?board=N answers the same lists): the localized terms,
+        # with the loaded tournament's pools and entrant rounds ("Winners
+        # TOP300") ahead of them. Core keeps the tournament's part from the
+        # provider's two payloads, connected before this board's (bootstrap_
+        # core()), so on the same signals the combos read what it kept. A
+        # board built after the tournament loaded offers its names too.
+        self._RenderMatchCandidates()
+        signals = AutonaTournamentDataProvider.instance.signals
+        signals.tournament_phases_updated.connect(
+            self._OnTournamentCandidates)
+        signals.tournament_data_updated.connect(self._OnTournamentCandidates)
 
         # Bound method, not a lambda: the asset manager outlives every board
         # (see the AutonaHotkeys block in __init__ for the full reasoning).
@@ -1074,12 +1049,14 @@ class AutonaScoreboardWidget(QWidget):
                 continue
             # Both objects: currentIndexChanged is the combo's, while
             # editingFinished belongs to the line edit, and each of them is
-            # connected to the same write.
+            # connected to the same write. The value's row is selected, or
+            # none (ShowComboText): a pick of the row the index was left on
+            # wrote nothing (ADR-005 S4x review).
             with QSignalBlocker(combo):
                 if edit is not None:
                     edit.blockSignals(True)
                 try:
-                    combo.setCurrentText(value)
+                    ShowComboText(combo, value)
                 finally:
                     if edit is not None:
                         edit.blockSignals(False)
@@ -1153,9 +1130,9 @@ class AutonaScoreboardWidget(QWidget):
         adjustment made through AutonaActions -- from the +1 button, a
         hotkey, the Web UI or the API -- lands in `score.{n}.team.{t}.score`
         and arrives here as a notification. The spinbox is updated inside a
-        QSignalBlocker, so valueChanged (which still writes the score for the
-        one path that drives the spinbox directly -- a number typed into it)
-        cannot fire and write the value straight back.
+        QSignalBlocker, so valueChanged (which asks AutonaActions.SetScore
+        for a number typed into it) cannot fire and write the value straight
+        back.
 
         The rows have followed the score by now, in the operation that moved
         it (GameTrackerService.FollowScores, ADR-005 S4t), or moved with it
@@ -1286,69 +1263,50 @@ class AutonaScoreboardWidget(QWidget):
                 self._SchedulePlayerRender()
                 self._FollowRoster()
 
-    def _UpdateEntrantsMatchItem(self, data):
-        """Keep the 'Winners TOP{entrants}' / 'Losers TOP{entrants}' candidates
-        (the real first-round headcount, e.g. TOP300 — both bracket sides open
-        with the full field alive) at the top of the match combo, replacing
-        those from the previously loaded tournament."""
-        if not isinstance(data, dict):
-            return
-        # An empty dict means "tournament cleared" -> drop the old candidates.
-        numEntrants = data.get("numEntrants") or 0
-        newItems = [
-            AutonaLocaleHelper.matchNames.get(key, fallback).format(numEntrants)
-            for key, fallback in (("winners_top_n", "Winners TOP{0}"),
-                                  ("losers_top_n", "Losers TOP{0}"))
-        ] if numEntrants > 0 else []
-        oldItems = self._entrantsMatchItems
-        if oldItems == newItems:
-            return
-        self.matchCombo.blockSignals(True)
-        try:
-            for oldItem in oldItems:
-                index = self.matchCombo.findText(oldItem)
-                # Keep the entry the operator currently has selected.
-                if index >= 0 and self.matchCombo.currentText() != oldItem:
-                    self.matchCombo.removeItem(index)
-            self._entrantsMatchItems = []
-            for offset, newItem in enumerate(newItems):
-                if self.matchCombo.findText(newItem) < 0:
-                    self.matchCombo.insertItem(1 + offset, newItem)
-                    self._entrantsMatchItems.append(newItem)
-        finally:
-            self.matchCombo.blockSignals(False)
+    def _OnTournamentCandidates(self, _payload):
+        # tournament_data_updated / tournament_phases_updated: core has kept
+        # the payload by now (connected first, bootstrap_core()).
+        self._RenderMatchCandidates()
 
-    def _UpdatePoolCandidates(self, phases):
-        """Prepend the loaded tournament's real pool names to the pool combo
-        (after the leading empty item), replacing those from the previously
-        loaded tournament. Generic template candidates (予選プールA-D) stay."""
-        newItems = []
-        for phase in (phases or []):
-            groups = phase.get("groups") or []
-            # Single-group phases have no meaningful pool name.
-            if len(groups) < 2:
+    def _RenderMatchCandidates(self):
+        """Give the phase / pool / round combos the lists core offers for
+        this board (MatchNameCandidates.Candidates), each after a blank row.
+        Writes nothing: both the combo's and its line edit's signals are
+        blocked, and the text the combo shows -- the operator's own, or a
+        name the tournament no longer offers -- stays, with the caret, and
+        with its row selected again when the new list has it, no row when
+        it has not (ShowComboText, ADR-005 S4x review: the index follows the
+        text after every render, so that a pick is compared against the row
+        shown). A combo whose list has not changed is left alone.
+
+        Until ADR-005 S4x the board kept the tournament's names itself
+        (_UpdatePoolCandidates / _UpdateEntrantsMatchItem), inserting and
+        removing them around the terms, and kept a name of the previous
+        tournament in the list while it was the one selected; now the list is
+        core's, and that name stays as the combo's text only."""
+        candidates = MatchNameCandidates.instance.Candidates(
+            self.scoreboardNumber)
+        for combo, kind in ((self.phaseCombo, "phase"),
+                            (self.poolCombo, "pool"),
+                            (self.matchCombo, "match")):
+            items = [""] + candidates[kind]
+            if [combo.itemText(i) for i in range(combo.count())] == items:
                 continue
-            for group in groups:
-                name = group.get("name") or ""
-                if name and name not in newItems:
-                    newItems.append(name)
-        oldItems = getattr(self, "_tournamentPoolItems", [])
-        if oldItems == newItems:
-            return
-        self.poolCombo.blockSignals(True)
-        try:
-            for item in oldItems:
-                index = self.poolCombo.findText(item)
-                # Keep the entry the operator currently has selected.
-                if index >= 0 and self.poolCombo.currentText() != item:
-                    self.poolCombo.removeItem(index)
-            self._tournamentPoolItems = []
-            for offset, item in enumerate(newItems):
-                if self.poolCombo.findText(item) < 0:
-                    self.poolCombo.insertItem(1 + offset, item)
-                    self._tournamentPoolItems.append(item)
-        finally:
-            self.poolCombo.blockSignals(False)
+            edit = combo.lineEdit()
+            text = combo.currentText()
+            cursor = edit.cursorPosition() if edit is not None else None
+            with QSignalBlocker(combo):
+                if edit is not None:
+                    edit.blockSignals(True)
+                try:
+                    combo.clear()
+                    combo.addItems(items)
+                    ShowComboText(combo, text)
+                    if edit is not None:
+                        edit.setCursorPosition(cursor)
+                finally:
+                    if edit is not None:
+                        edit.blockSignals(False)
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Re-home the construction-time rows into the single scoreboard
@@ -1643,39 +1601,33 @@ class AutonaScoreboardWidget(QWidget):
                 raise e
     
     def PostToX(self):
+        # The post's text and what it misses are core's (AutonaActions.PostText,
+        # ADR-005 S4x: GET /api/v1/scoreboards/{n}/post answers the same);
+        # what stays here is the desktop's part: the dialog naming what is
+        # empty, the thumbnail copied to the clipboard and the browser.
         try:
             n = self.scoreboardNumber
 
-            tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
-            phase = StateManager.Get(f"score.{n}.phase", "") or ""
-            match = StateManager.Get(f"score.{n}.match", "") or ""
-            stream_url = StateManager.Get("stream.url", "") or ""
-
-            # Validate required fields: player names (both teams) and round name.
-            def _team_has_name(team_n):
-                team_state = StateManager.Get(f"score.{n}.team.{team_n}.player") or {}
-                for k in team_state.keys():
-                    name = (StateManager.Get(f"score.{n}.team.{team_n}.player.{k}.name") or "").strip()
-                    if name:
-                        return True
-                return False
-
-            missing = []
-            if not _team_has_name(1):
-                missing.append(QApplication.translate("app", "Team 1 player name"))
-            if not _team_has_name(2):
-                missing.append(QApplication.translate("app", "Team 2 player name"))
-            if not (phase.strip() or match.strip()):
-                missing.append(QApplication.translate("app", "Round name"))
-
+            _text, missing = AutonaActions.instance.PostText(n)
             if missing:
+                # Not `labels`: tests/test_state_schema.py finds the eye
+                # menu's labels by that name.
+                missingLabels = {
+                    CrewBattleService.POST_MISSING_TEAM_1:
+                        QApplication.translate("app", "Team 1 player name"),
+                    CrewBattleService.POST_MISSING_TEAM_2:
+                        QApplication.translate("app", "Team 2 player name"),
+                    CrewBattleService.POST_MISSING_ROUND:
+                        QApplication.translate("app", "Round name"),
+                }
                 msgBox = QMessageBox()
                 msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
                 msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
                 msgBox.setText(QApplication.translate(
                     "app",
                     "Cannot post to X: the following fields are empty."))
-                msgBox.setInformativeText("\n".join(f"- {m}" for m in missing))
+                msgBox.setInformativeText(
+                    "\n".join(f"- {missingLabels[m]}" for m in missing))
                 msgBox.setIcon(QMessageBox.Warning)
                 msgBox.exec()
                 return
@@ -1695,57 +1647,9 @@ class AutonaScoreboardWidget(QWidget):
                 logger.exception("PostToX: thumbnail generation failed")
                 thumbnail_error = str(e)
 
-            def get_team_line(team_n):
-                players = []
-                team_state = StateManager.Get(f"score.{n}.team.{team_n}.player") or {}
-                for k in sorted(team_state.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
-                    name = (StateManager.Get(f"score.{n}.team.{team_n}.player.{k}.name") or "").strip()
-                    if not name:
-                        continue
-                    seed = StateManager.Get(f"score.{n}.team.{team_n}.player.{k}.seed")
-                    chars = StateManager.Get(f"score.{n}.team.{team_n}.player.{k}.character") or {}
-                    char_names = []
-                    for ck in sorted(chars.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
-                        char_name = chars[ck].get("name", "")
-                        if not char_name:
-                            continue
-                        char_names.append(char_name)
-                    twitter = (StateManager.Get(
-                        f"score.{n}.team.{team_n}.player.{k}.twitter") or "").strip()
-                    entry = name
-                    if twitter:
-                        # Normalize to an @handle so the tweet auto-mentions.
-                        handle = twitter.lstrip("@").strip()
-                        if handle:
-                            entry += f" @{handle}"
-                    if char_names:
-                        entry += f"({'/'.join(char_names)})"
-                    if seed:
-                        entry += f" [Seed:{seed}]"
-                    players.append(entry)
-                return " / ".join(players) if players else "???"
-
-            round_line = f"[{phase}]" if phase else ""
-            if match:
-                if round_line:
-                    round_line += f" - {match}"
-                else:
-                    round_line = match
-
-            parts = []
-            if tournament_name:
-                parts.append(tournament_name)
-            if round_line:
-                parts.append(round_line)
-            parts.append("")
-            parts.append(get_team_line(1))
-            parts.append("vs")
-            parts.append(get_team_line(2))
-            parts.append("")
-            if stream_url:
-                parts.append(f"\U0001f534STREAM: {stream_url}")
-
-            text = "\n".join(parts)
+            # Read again after the thumbnail, as the text always was: the
+            # render can take a while, and the post is of the values then.
+            text, _missing = AutonaActions.instance.PostText(n)
             url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(text)
             webbrowser.open(url)
 
@@ -1807,18 +1711,21 @@ class AutonaScoreboardWidget(QWidget):
 
     def SetCharacterNumber(self, value):
         """charNumber.valueChanged: the characters per player
-        (AutonaActions.SetRoster). The cards follow from the held cycle."""
-        AutonaActions.instance.SetRoster(
-            self.scoreboardNumber, characters=value)
+        (AutonaActions.SetCharactersPerPlayer -- on a board with no
+        character slot, the count its next players get). The cards follow
+        from the held cycle."""
+        AutonaActions.instance.SetCharactersPerPlayer(
+            self.scoreboardNumber, value)
 
     def SetPlayersPerTeam(self, number):
         """playerNumber.valueChanged, the operator's PLAYERS per team: the
-        roster in one save cycle (AutonaActions.SetRoster). New players get
-        the characters per player charNumber shows -- the count of a board
-        with no player left, too, as its value always was. The cards follow
-        from the held cycle (_SyncPlayerCards)."""
-        AutonaActions.instance.SetRoster(
-            self.scoreboardNumber, number, self.charNumber.value())
+        roster in one save cycle (AutonaActions.SetPlayersPerTeam, the
+        operation of the Web's players too). New players on a board with no
+        character slot left get the count core keeps for it -- the one the
+        board had when its last player went, or one asked for since -- as
+        charNumber's value was until ADR-005 S4x. The cards follow from the
+        held cycle (_SyncPlayerCards)."""
+        AutonaActions.instance.SetPlayersPerTeam(self.scoreboardNumber, number)
 
     # ── the player cards follow the roster (ADR-005 S3e-6) ────────────────
     #
@@ -1857,20 +1764,6 @@ class AutonaScoreboardWidget(QWidget):
         except Exception:
             logger.exception(
                 f"{self.statePrefix}: following the roster failed")
-
-    def EmptyRosterCharacters(self) -> int:
-        """The characters per player the next players get on a board with
-        no character slot left: what charNumber shows, as the spinbox's
-        value always was (BoardHost.EmptyRosterCharacters)."""
-        return self.charNumber.value()
-
-    def KeepEmptyRosterCharacters(self, value):
-        """A characters per player asked for while the board has no
-        character slot (the Web's): shown, and given to the players it gets
-        next (SetPlayersPerTeam, EmptyRosterCharacters). Signals blocked:
-        there is nothing to write."""
-        with QSignalBlocker(self.charNumber):
-            self.charNumber.setValue(int(value))
 
     def _SyncPlayerCards(self):
         """Build and retire player cards until each team has one per slot of
@@ -1997,7 +1890,9 @@ class AutonaScoreboardWidget(QWidget):
 
     def _SyncRosterSpins(self):
         """Show the counts on the two spinboxes, signals blocked. A board
-        with no player slot keeps the characters per player it showed."""
+        with no player slot shows the characters per player core keeps for
+        its next players (AutonaActions.EmptyRosterCharacters; this hidden
+        spinbox was that memory until ADR-005 S4x)."""
         players = len(self.team1playerWidgets)
         if self.playerNumber.value() != players:
             with QSignalBlocker(self.playerNumber):
@@ -2008,7 +1903,10 @@ class AutonaScoreboardWidget(QWidget):
             if isinstance(picks, dict):
                 characters = len(picks)
                 break
-        if characters is not None and self.charNumber.value() != characters:
+        if characters is None:
+            characters = AutonaActions.instance.EmptyRosterCharacters(
+                self.scoreboardNumber)
+        if self.charNumber.value() != characters:
             with QSignalBlocker(self.charNumber):
                 self.charNumber.setValue(characters)
 
@@ -2081,11 +1979,6 @@ class AutonaScoreboardWidget(QWidget):
         # One operation, one save cycle: driving the two spinboxes in turn
         # (as this used to) made a reset two separate export cycles.
         AutonaActions.instance.ResetScore(self.scoreboardNumber)
-
-    def ToggleAutonaUpdate(self, checked):
-        SettingsManager.Set("general.disable_autoupdate", not checked)
-        if not checked:
-            self.StopAutonaUpdate(clear_variables=True)
 
     @staticmethod
     def _sectionTitleStyle() -> str:
@@ -2172,24 +2065,11 @@ class AutonaScoreboardWidget(QWidget):
     # Change <team>(0, 1) score by <change>(+X, -X)
     def CommandScoreChange(self, team: int, change: int):
         # Kept as the widget-side name for the operation (the +1 / -1 buttons
-        # and the CommandScoreChange signal use it), but the write is
-        # AutonaActions': the spinbox follows through _SyncScoreDisplays.
+        # use it), but the write is AutonaActions': the spinbox follows
+        # through _SyncScoreDisplays.
         # `team` is 0-based here and 1-based in the state, hence the +1.
         AutonaActions.instance.AdjustScore(
             self.scoreboardNumber, team + 1, change)
-
-    def CommandClearAll(self, no_mains=False):
-        """Empty every player of the board (AutonaActions.ClearPlayers).
-
-        The clear is core's since ADR-005 S2d -- one save cycle, where each
-        card used to empty its own fields (a cycle per card) -- and the
-        cards show the emptied slots from the held cycle. What stays here
-        is the board's part of it, for every entry point (the set load's
-        pre-pass, the Web's reset_players / clear_all; ResetAllInputs does
-        the same around ClearBoard): see _ClearingPlayers.
-        """
-        self._ClearingPlayers(lambda: AutonaActions.instance.ClearPlayers(
-            self.scoreboardNumber, no_mains))
 
     def _ClearingPlayers(self, clear):
         """Run `clear` (a core operation that empties the players) with what
@@ -2216,9 +2096,19 @@ class AutonaScoreboardWidget(QWidget):
         """
         self.CommitFocusedEdit()
         clear()
+        self.DiscardTypedText()
+        self.setLoad.lastSetSelected = None
+
+    def DiscardTypedText(self):
+        """Every card drops the text typed into its combos and never picked,
+        the combo whose list is open included (a combo keeps its typed text
+        through CommitFocusedEdit, which closes a completer popup but not a
+        combo's own list). What a players' clear does after the clear: this
+        board's (_ClearingPlayers) and the board host's (ClearPlayers, the
+        Web's). A load from elsewhere leaves the combo being typed in alone
+        instead (_CardLoaded)."""
         for card in self.playerWidgets:
             card.DiscardTypedText()
-        self.setLoad.lastSetSelected = None
 
     def ClearScore(self):
         """Zero both scores and both losers flags -- and nothing else
@@ -2248,46 +2138,6 @@ class AutonaScoreboardWidget(QWidget):
         ClearScore.
         """
         AutonaActions.instance.ResetMatch(self.scoreboardNumber)
-
-    def CommandTeamColor(self, team: int, color, force_opponent=False):
-        # Resolving a game's preset color *index* to a hex string stays here:
-        # it reads AutonaGameAssetManager's color model, which is Qt. What is
-        # written, and where, is AutonaActions' business (headless core
-        # Step 3) -- this method only produces the value.
-        if not color:
-            return
-        value = None
-        if type(color) is str:
-            value = color
-        if type(color) is int and color > 0:
-            value = AutonaGameAssetManager.instance.colorModel.item(color).data(Qt.ItemDataRole.UserRole)
-            if force_opponent:
-                value = value.get("force_opponent")
-            else:
-                value = value.get("value")
-            if value:
-                value = "#" + value
-
-        AutonaActions.instance.SetTeamColor(
-            self.scoreboardNumber, team + 1, value)
-
-
-    def ChangeSetData(self, data):
-        """Apply a set payload to this board: core's
-        SetFollowService.ApplySetPayload since ADR-005 S3e-7 -- the match
-        information, the scores, the set length, the losers flags, the
-        roster and the players of the entrants (or one player), the bracket
-        type and the upset factor they call for, in one save cycle. The
-        widgets follow the state (_SyncSetFields / _SyncScoreDisplays / the
-        cards). A one-player payload's `savePlayerToDb` reaches the player
-        database here, once the save cycle is over.
-
-        Does not check which set the payload is for
-        (SetFollowService.UpdateSetData does). The app's payloads -- a
-        fetched set, POST /score -- go to core directly; this is the
-        board's own entry, which the widget tests drive.
-        """
-        SaveRecord(self.setFollow.ApplySetPayload(data))
 
     def PlayerLoaded(self, team, player, cleared):
         """A player was loaded into slot `player` of state team `team` (the

@@ -257,19 +257,6 @@ class AutonaIndividualGameTracker(QWidget):
         self._layout.addWidget(self.stage_order_list_widget)
         self._SyncStageButtons()
 
-    @Slot(int, int)
-    @assert_gui_thread
-    def UpdateScore(self, team, new_value):
-        """Responds to the score being modified in a non-per-game context.
-
-        The score spinbox's valueChanged handler. Only a number typed into
-        the score display drives the spinbox now (the clears write the state
-        since ADR-005 S2d); this publishes the result and moves the rows to
-        match.
-        """
-        self.service.UpdateScore(team, new_value)
-        self._SyncStageButtons()
-
     @assert_gui_thread
     def StageResultsChanged(self):
         team_1_score, team_2_score = self.service.PublishStageResults()

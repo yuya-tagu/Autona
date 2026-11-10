@@ -58,6 +58,13 @@ window's cache comes back when the same tournament is loaded again.
 A game change drops nothing: no row holds anything of the game (a row is
 whitelisted: `SetRow`). The characters a set's parse looks up are not in it.
 
+The phases a fetch answers are the match bar's pool names too
+(MatchNameCandidates.FollowPhases, with the end published: `_FollowCandidates`,
+ADR-005 S4x review). A stopped or late answer is not. ``Forget()`` leaves
+the names alone: the provider adapter's own payloads replace them -- the empty
+ones of an unload, the new tournament's phases of a load -- in step with the
+desktop's combos, which read them again on those signals.
+
 Lock order: ``StateManager.lock``, then this service's own, held only around
 its own fields; the state is written, a fetch made and the fetcher called with
 it released. Rows are never changed once made, so ``Result`` hands them over
@@ -74,6 +81,7 @@ import time
 from loguru import logger
 
 from . import StateSchema as schema
+from .MatchNameCandidates import MatchNameCandidates
 from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor
 
@@ -361,9 +369,12 @@ class SetSelectionService:
                 if not self._Current(fetch) or fetch.revision is None:
                     return
                 value = fetch.Snapshot()
-                if fetch.over and fetch.status == DONE:
+                ended = fetch.over and fetch.status == DONE
+                if ended:
                     self._results[fetch.kind] = fetch
             self._Set(fetch.kind, value)
+            if ended and fetch.kind == PHASES:
+                _FollowCandidates(fetch.rows)
 
     def _Progress(self, fetch, done, total):
         """The pages of a fetch so far. A count of no pages is not known yet:
@@ -502,6 +513,32 @@ class SetSelectionService:
                 fetch.url = url if isinstance(url, str) else ""
                 fetch.fetchedAt = int(time.time())
         self._Publish(fetch)
+
+
+def _FollowCandidates(rows):
+    """The phases a fetch answered are the match bar's pool names too
+    (MatchNameCandidates.FollowPhases, ADR-005 S4x review): until then only
+    the provider adapter's own fetch (tournament_phases_updated) reached
+    them, so GET /match-names/candidates and the Web's combos missed what
+    v1's phases:refresh fetched. The rows keep what FollowPhases reads
+    (`groups[].name`).
+
+    Called with the end of the current fetch published, inside
+    StateManager.lock and outside the service's: a tournament change
+    (Forget takes StateManager.lock) comes after it -- and the adapter's
+    empty list after that -- or has dropped the fetch, whose answer then
+    comes here no more. The candidates' lock guards their own fields only.
+    The desktop's combos are not told: they read the lists again on the
+    adapter's two signals, as they did (the set window's phase fetch, a
+    tournament load)."""
+    candidates = MatchNameCandidates.instance
+    if candidates is None:
+        return
+    try:
+        candidates.FollowPhases(rows)
+    except Exception:
+        logger.exception("Set selection: the match bar's pool names were "
+                         "not updated")
 
 
 def _FetchPhases(fetch, provider):

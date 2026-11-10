@@ -42,7 +42,7 @@
 ### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
 - バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
 - **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
-  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）と、ユーザー名を含む OBS 用のファイルのパス（`GET /layouts/selected/board/obs-path`。ADR-005 S4s）と、操作者がまだ公開していない編集（`GET /scoreboards/{n}/pending`。本名を含みうる。ADR-005 S4u）は書き込みと同じ扱い（`PLAYERDB` 区分）。
+  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）と、DB の X ハンドルを含む大会リザルトの投稿文（`GET /result/post`。ADR-005 S4q）と、ユーザー名を含む OBS 用のファイルのパス（`GET /layouts/selected/board/obs-path`。ADR-005 S4s）と、操作者がまだ公開していない編集（`GET /scoreboards/{n}/pending`。本名を含みうる。ADR-005 S4u）と、ボードの X 投稿文（`GET /scoreboards/{n}/post`。反映前の値と選手の X ハンドルを含む。ADR-005 S4x）は書き込みと同じ扱い（`PLAYERDB` 区分）。
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
@@ -176,13 +176,14 @@
   AttributeError になるため、**API 層で事前検証する**（NOT_FOUND ではなく INVALID_ARGUMENT 扱い）。
 - **board 3（crew）は別クラス**（書き手は `CrewBattleService`）。クルーボードでできることは ADR-005 S4w で v1 に揃った:
   - 同じ意味のものは同じルート: `:swap-teams`（§6.3）・`score:reset`（§6.2）・`teams/{t}/color`（§6.4）・`PATCH set`（§6.5）・`:clear` / `:reset-players` / `:reset-match`（§7.1）・`PATCH /tournament/info` の `displayTournamentName`（§6.19）・読みの `GET /scoreboards/3` と `/pending`（§5）
-  - クルーだけのもの: メンバー（§6.38・§6.39）・X 投稿文（§5.19）。**board 1 / 2 に投げると `400 INVALID_ARGUMENT`**。コンボの候補（§5.20）はボードを取らない
+  - クルーだけのもの: メンバー（§6.38・§6.39）。**board 1 / 2 に投げると `400 INVALID_ARGUMENT`**。X 投稿文（§5.19）は ADR-005 S4x からボード 1 / 2 にもある。コンボの候補（§5.20）は `?board=` を取る（省略できる）
   - クルーに無いものは `400 INVALID_ARGUMENT` で**明示拒否**する: `score:adjust` / `score:set`（合計はストックから算出する。チームのスコアは無い）・`:apply`（held でない）・`stats:refresh`・選手のルート・`stages`・`:load-set` / `:pull-stream` / `:follow` / `:stop-follow` / `GET follow`・`:reset-all`
-  - **未構築のクルーボード**（デスクトップの遅延構築）: 書き込みは構築してから書く（未構築への書き込みは構築時のシードで消える）。`score:reset`・`:reset-players`・`:reset-match` と `stock:adjust` の `delta: 0` は、まっさらなボードに意味が無いので**構築せず何も書かずに `200`**。`GET /scoreboards/3/post`・`/match-names/candidates` も構築しない。`:clear`・`:swap-teams` は構築する（まっさらなボードを変える）。既存の `GET /scoreboards/3` と `/pending` は従来どおり構築する
+  - **未構築のクルーボード**（デスクトップの遅延構築）: 書き込みは構築してから書く（未構築への書き込みは構築時のシードで消える）。`score:reset`・`:reset-players`・`:reset-match` と `stock:adjust` の `delta: 0` は、まっさらなボードに意味が無いので**構築せず何も書かずに `200`**。`GET /scoreboards/{n}/post`・`/match-names/candidates` も構築しない。`:clear`・`:swap-teams` は構築する（まっさらなボードを変える）。既存の `GET /scoreboards/3` と `/pending` は従来どおり構築する
 - **非表示ボードへの操作は配信に出ない**: OBS は表示中ボードのレイアウトを参照するため、裏ボードを
   操作しても画面は変わらない。誤対象を避けるため、`GET /api/v1/health`（§5.1）に**現在アクティブな
-  ボード番号**を載せる（`activeBoard`）。
-- 初回は **board 1（1v1）を主対象**として運用想定（board 2 も同操作で動くが、表示切替はメニュー操作前提）。
+  ボード番号**を載せる（`activeBoard`）。対戦形式そのものは `GET /api/v1/battle-format`（§5.21）で読み、
+  `PUT /api/v1/battle-format`（§6.40）で切り替える（ADR-005 S4x。それまではデスクトップのサイドバーの操作だけ）。
+- 初回は **board 1（1v1）を主対象**として運用想定（board 2 も同操作で動く）。
 
 ---
 
@@ -216,8 +217,9 @@
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase の用語（キーつき・テンプレートつきの dict。Web のページはコンボの候補にこれを使わない） | `get_match_names` | #17 |
-| `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。クルーボードと Web のスコアボードページが使う） | `get_match_name_candidates` | — |
-| `GET /api/v1/scoreboards/3/post` | クルーボードの X 投稿文（§5.19。2026-11-09 追加） | `get_crew_post`（`CrewBattleService.PostText`） | — |
+| `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。`?board=` は 2026-11-10。ボードのコンボと Web のスコアボードページが使う） | `get_match_name_candidates`（`core/MatchNameCandidates.Candidates`） | — |
+| `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
+| `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
@@ -262,7 +264,7 @@
   "outLastWriteUnix": 1718000000
 } }
 ```
-- `activeBoard`: 現在表示中のボード番号（1/2/3）。外部コントローラが「表示中ボードを操作」する判断材料（§2.12）。取得方法は `TBD`（`SetBattleFormat` の現在値をどこから読むか）。
+- `activeBoard`: 現在表示中のボード番号（1/2/3）。外部コントローラが「表示中ボードを操作」する判断材料（§2.12）。`AutonaActions.ActiveBoard()`（`ResolveBattleFormat` の写像。§14.1）で、`GET /battle-format`（§5.21）の `board` と同じ値。
 - `outLastWriteUnix`: `out/` 配信ファイルの最終更新時刻（OBS 出力健全性の指標）。取得方法は `TBD`。
 - `tournamentLoaded`: provider 有無。
 
@@ -602,9 +604,9 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
   - 検索は大文字小文字を無視した部分一致で、全列と `id`。列の並べ替えは文字列で
   - 選択なしの OK / Enter は先頭の行を読む（行が無ければ何も読まない）。読むのは §7.1 の `:load-set`、走っている取得は `sets:cancel` で止める（窓は選択時に止める）
 
-### 5.19 `GET /api/v1/scoreboards/3/post`（2026-11-09 追加・ADR-005 S4w）
+### 5.19 `GET /api/v1/scoreboards/{n}/post`（2026-11-09 追加・ADR-005 S4w。ボード 1 / 2 は 2026-11-10・S4x）
 
-クルーボードの「Xに投稿する」が組む文。`CrewBattleService.PostText` が正本で、ボードのボタンも同じものを呼ぶ。
+ボードの「Xに投稿する」が組む文。ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText` が正本で、ボードのボタンも同じものを呼ぶ（ボタンは URL もこの `text` から作る）。
 
 ```json
 { "ok": true, "revision": 12, "data": {
@@ -613,18 +615,29 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 } }
 ```
 
-- `missing`: ボタンが投稿を断る理由を `team1` / `team2` / `round` のこの順で。`team1` / `team2` は表示中（`memberNum` まで）で名前のあるメンバーがいないクルー、`round` は `phase` も `match` も空（空白だけも空）。**空のときだけ投稿できる**。ページはクリックの中でこれを読み、`missing` が空なら開く（`https://twitter.com/intent/tweet?text=` + URL エンコードした `text`）。翻訳した文言（Team 1 player name / Team 2 player name / Round name）はページの仕事
-- 文は `missing` があっても返す（名前のあるメンバーがいないクルーは「チーム名」か `???`）
-- 大会名は state の値を文字列にしたもの（数で入っていても答える）。前後の空白は落とさない（ボタンの旧実装と同じ。`phase` / `match` / チーム名 / メンバー名は落とす）
-- ボード 1 の投稿と違い、文だけ（サムネイルの画像は無い）
-- `{n}` は 3 だけ（ほかは `400`）。**READ**: 文に入るのは大会名・`phase`・`match`・チーム名・メンバー名で、どれも `GET /state` が誰にでも返す（選手 DB の X ハンドルを含む `GET /result/post` が PLAYERDB なのとの違い）。読みではボードを構築しない
+- `missing`: ボタンが投稿を断る理由を `team1` / `team2` / `round` のこの順で。`round` は `phase` も `match` も空（空白だけも空）。**空のときだけ投稿できる**。ページはクリックの中でこれを読み、`missing` が空なら開く（`https://twitter.com/intent/tweet?text=` + URL エンコードした `text`）。翻訳した文言（Team 1 player name / Team 2 player name / Round name）はページの仕事
+  - ボード 1 / 2 の `team1` / `team2`: そのチームのスロットに、タグ（`name`。空白だけは空）のある選手がいない
+  - ボード 3 の `team1` / `team2`: 表示中（`memberNum` まで）で名前のあるメンバーがいないクルー
+- 文は `missing` があっても返す（いないチームは `???`。ボード 3 は「チーム名」か `???`）
+- ボード 1 / 2 の文（ボタンの旧 `PostToX` と同じ）: 大会名・`[phase] - match`（片方だけならその片方）・空行・チーム 1 の選手・`vs`・チーム 2 の選手・空行・配信 URL（`stream.url` があれば `🔴STREAM: <url>`）。選手はタグのあるスロットを番号順に ` / ` でつなぎ、1 人は `タグ`・` @ハンドル`（`twitter` の `@` を外して付け直す）・`(キャラ/キャラ)`（`character` の `name` を番号順）・` [Seed:N]`（seed が 0 / 空でなければ）の順
+- 大会名は state の値を文字列にしたもの（数で入っていても答える）。前後の空白は、どれもボタンの旧実装と同じ: 大会名は落とさない。ボード 1 / 2 は `phase` / `match` も落とさず（`round` の判定だけ落として見る）、タグとハンドルは落とす。ボード 3 は `phase` / `match` / チーム名 / メンバー名を落とす。ボード 1 / 2 は文字列でない値も文字列にして読む（旧ボタンは例外のダイアログで止まっていた）
+- ボード 1 / 2 のボタンは投稿の前に試合サムネイルをクリップボードにコピーする。画像はこのルートに無い（文だけ）。ボード 3 には画像が無い
+- **反映前の値**（ボタンが読んでいたもの。デスクトップのボード 1 / 2 は編集が反映を待つ）。だから `GET /scoreboards/{n}/pending` と同じ **`PLAYERDB` 区分**（LAN の他端末はトークン必須。§2.2）。ボード 3 の文は S4w では READ だったが、同じルートを区分で分けないので S4x から同じ扱い
+- `{n}` は 1 / 2 / 3（ほかは `400`）。読みではボードを構築せず、何も書かない
 
-### 5.20 `GET /api/v1/match-names/candidates`（2026-11-09 追加・ADR-005 S4w）
+### 5.20 `GET /api/v1/match-names/candidates`（2026-11-09 追加・ADR-005 S4w。`?board=` は 2026-11-10・S4x）
 
-クルーボードの 3 つの編集可能コンボが出す候補: `{ "phase": [...], "pool": [...], "match": [...] }`。コンボと同じ順で、先頭の空行は含まない（コンボは候補にない文字も打てる）。`GET /match-names` は用語そのまま（キーつき・テンプレートつき）で、`match` のラダー（`Winners TOP24` など）はそこに無い。`AutonaLocaleHelper.Get{Phase,Pool,Match}NameCandidates` が正本で、ボードも同じものを使う。静的なデータで、READ。ボードを構築しない
+ボード `?board=N`（1 / 2 / 3）の 3 つの編集可能コンボが出す候補: `{ "phase": [...], "pool": [...], "match": [...] }`。コンボと同じ順で、先頭の空行は含まない（コンボは候補にない文字も打てる）。`core/MatchNameCandidates.Candidates(board)` が正本で、ボードのコンボ（1 / 2 / 3 とも）も同じものを読む。READ。ボードを構築せず、何も書かない。`board` がちょうど `1` / `2` / `3` でなければ `400`（` 1`・`+1`・`01`・全角の `１` も。2026-11-10 の S4x レビューまでは `int()` が通すものを受けていた）
 
-- **Web のスコアボードページ（`/scoreboard`。board 1 / 2 の `MatchInfoBar`）の Phase / Pool / Match もこれを読む**（2026-11-10）。それまでは `GET /match-names` の dict を Autocomplete の候補に渡しており、欄をクリックするとページ全体が落ちていた。`GET /match-names` の形は外部の呼び手のために変えていない。board 1 / 2 の Qt のコンボ（`AutonaScoreboardWidget`）も同じ規則で組む。違いは 2 つ: Qt の phase は `indicator` を含むキーを除かない（同梱の用語には無い。利用者の用語に足したときだけ差が出る）。大会を読み込んだときに足す実際のプール名と、参加人数から出す 1 回戦（`Winners TOP300` など）はこの候補に無い（Qt のコンボだけ）
+- 用語の候補は `AutonaLocaleHelper.Get{Phase,Pool,Match}NameCandidates`（phase の用語・`group` の雛形の 4 プール・ラウンド名のラダー）。`GET /match-names` は用語そのまま（キーつき・テンプレートつき）で、`match` のラダー（`Winners TOP24` など）はそこに無い
+- **ボード 1 / 2 は読み込んだ大会の名前を前に足す**: 複数グループのフェーズの実際のプール名（出てきた順・重複なし。グループが 1 つのフェーズは足さない）を `pool` の前に、参加人数の 1 回戦（`Winners TOP{n}` / `Losers TOP{n}`。用語 `winners_top_n` / `losers_top_n`。組めない雛形はその 1 つを足さない）を `match` の前に。用語がすでに出している名前は足さず、用語の位置のまま。大会を解除すると消える。provider の 2 つの通知（`tournament_data_updated` / `tournament_phases_updated`）を `bootstrap_core()` が core に渡すので、ヘッドレスでも同じ。§5.18 の `POST /tournament/phases:refresh` が取ったフェーズも、取得が `done` で終わったときにプール名になる（S4x レビュー。止めた取得・遅れた答え・失敗は渡さない。デスクトップのコンボはそれを知らされず、provider の通知で読み直すまで前のリストのまま）。ボード 3 と `board` なしは用語だけ
+- **Web のスコアボードページ（`/scoreboard`。board 1 / 2 の `MatchInfoBar`）の Phase / Pool / Match もこれを読む**（2026-11-10）。`?board=` 付きで、コンボを開くたびに読み直す（大会を読み込んだ後に開けば大会の名前が出る。遅れて届いた古い答えは捨てる）。それまでは `GET /match-names` の dict を Autocomplete の候補に渡しており、欄をクリックするとページ全体が落ちていた。`GET /match-names` の形は外部の呼び手のために変えていない
+- S4x より前の board 1 / 2 の Qt のコンボとの違い（いまは同じリストを描くだけ）: phase は `indicator` を含むキーを除く（同梱の用語には無い）。大会の名前は大会を読み込んだ後に構築したボードにも出る（旧: 構築済みのボードだけが通知で足していた）。前の大会の名前を選んでいた欄は、その名前を文字として残す（旧: 項目として残した）
 - **壊れた用語でも答える**: 利用者の用語ファイル（`user_data/tournament_terms.json`。同梱の用語をキーごとに上書きする）でリストが組めないときは、そのリストを `[]` にする（雛形（`group` / `winners_top_n` / `losers_top_n` / `round`）が文字列でない・`.format` で埋められない（`{1}`・`{x}`・`{0.x}`・`{0[x]}`・閉じない `{`）、`phase` / `match` の用語が dict でない）。文字列でない用語は候補にしない
+
+### 5.21 `GET /api/v1/battle-format`（2026-11-10 追加・ADR-005 S4x）
+
+いまの対戦形式と、それが表示するボード: `{ "format": "singles" | "team" | "crew", "board": 1 | 2 | 3 }`。`AutonaActions.ResolveBattleFormat`（`scoreboard.battle_format`。無ければ旧 `scoreboard.team_mode`）が正本で、`board` は `GET /health` の `activeBoard` と同じ。設定なので `revision` は付かない。READ。切り替えは §6.40
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -999,6 +1012,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 冪等: `Idempotency-Key` 対応（§2.9。`score:adjust` と同じ）
 - 変わらなければ書かない。`delta: 0` は何もせず `200` で、ボードも構築しない。それ以外の未構築のボードは構築してから書く
 - エラー: §6.38 と同じ番号の規則。`delta` が整数でない（bool・小数・文字列・`null`・無い）は `400`
+
+### 6.40 対戦形式の切り替え `PUT /api/v1/battle-format`（2026-11-10 追加・ADR-005 S4x）
+- body: `{ "format": "singles" | "team" | "crew" }`。デスクトップのサイドバーの切り替えと同じ操作（`AutonaActions.SetBattleFormat`）
+- 返り値: `{ "format", "board", "changed" }`（§5.21 の形 + `changed`）と `revision`。**いまの形式と同じなら `changed: false` で何も書かない**（設定も state も・通知も。旧ルートは無く、サイドバーの同じ形式の選び直しも S4x から何もしない）
+- 切り替えたとき: `scoreboard.battle_format` と旧 `scoreboard.team_mode`（チームなら true）を書き、シェルに知らせ（デスクトップはその形式のボードを、未構築なら構築して表示し、サイドバーの選択を合わせる。応答はその後）、大会リザルトのレイアウトが追従する（チームとクルーは団体のレイアウト、1v1 は単独のレイアウト。合っているレイアウトは手で選んだものを残す。`ResultService.FollowBattleFormat`。`result_layout` が state に出る）。ヘッドレスは表示するボードが無いので、設定とリザルトのレイアウトだけ
+- 形式は設定で、Socket.IO の通知は増やさない（読み手は `GET /battle-format` か `GET /health` の `activeBoard`）
+- エラー: `400 INVALID_ARGUMENT`（`format` が無い・文字列でない・3 つのどれでもない・JSON オブジェクトでない body。何も書かない）
 
 ---
 

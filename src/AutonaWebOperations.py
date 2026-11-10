@@ -105,13 +105,14 @@ from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
 from .core.DictHelper import qvariantmap_copy
 from .core.GameAssetCatalog import GameAssetCatalog
+from .core.MatchNameCandidates import MatchNameCandidates
 from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core import SetSelectionService as selection
 from .core.SetSelectionService import SetSelectionService
 from .core.PlayerDB import PlayerDB
-from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
+from .core.PlayerService import PlayerService
 from .core import ResultService as results
 from .core.ResultService import ResultService
 from .core.StatsService import StatsService
@@ -131,6 +132,9 @@ NOT_AVAILABLE_MESSAGE = "not available in headless"
 # What an operation that needed the GUI thread answers once that thread will
 # not run it any more (the app is shutting down; ADR-005 S3f-4 review).
 SHUTTING_DOWN_MESSAGE = "the app is shutting down"
+# What an operation on a board no shell has (neither 1/2 nor the crew board)
+# answers, in both shells (`_require_board`, ADR-005 S4x review).
+NO_SUCH_BOARD_MESSAGE = "scoreboard {board} does not exist"
 
 
 class NotAvailable(Exception):
@@ -172,7 +176,8 @@ class BoardHost:
     shell, and the default until a shell registers another).
 
     The operation runs on the calling thread; nothing is built, so the write
-    is not held. What only a widget can do raises NotAvailable.
+    is not held. A board no shell has (neither 1/2 nor the crew board) is
+    refused by the operations themselves (NotAvailable), in both shells.
     """
 
     def __init__(self):
@@ -195,11 +200,6 @@ class BoardHost:
         # whose change relay runs on the main thread (`_save_record`,
         # ADR-005 S3e-4 review).
         self._lock = threading.RLock()
-        # The characters per player a board with no character slot gives
-        # the players it gets next ({board: count}): what the Web asked for
-        # while it had none, else what it had when it lost its last player
-        # (EmptyRosterCharacters).
-        self._emptyCharacters = {}
 
     def Run(self, op):
         """Run `op()` where this shell runs board operations."""
@@ -214,41 +214,34 @@ class BoardHost:
         widget to build."""
         return True
 
-    def Widget(self, board):
-        """Board `board`'s widget, for the operations only it answers."""
-        raise NotAvailable()
-
     def CommitEdit(self, board):
         """Finish the field being typed in on board `board`."""
 
+    def DiscardTypedText(self, board):
+        """Drop, on every card of board `board`, the text typed into its
+        combos and never picked (after a players' clear)."""
+
     def ClearPlayers(self, board, no_mains=False):
-        """Empty every player slot of board `board`, and forget the set it
-        loaded last -- loading it again loads it again, as the desktop's
-        board clear does (ADR-005 S3e-7: a set loads here too)."""
-        if AutonaActions._asInt(board, 0) not in AutonaActions.SCORE_BOARDS:
-            raise NotAvailable()
+        """Empty every player slot of board `board` (1/2), and forget the set
+        it loaded last -- loading it again loads it again (ADR-005 S3e-7: a
+        set loads here too). The same in both shells since ADR-005 S4x (the
+        desktop's ran the board's CommandClearAll), in its order: the field
+        being typed in is finished first, so the clear takes a card's typed
+        text with it (CommitEdit), and after the clear every card drops the
+        text typed into its combos and never picked -- the combo whose list
+        is open included, unlike after a load from elsewhere: the clear is
+        the operator's operation on the board (DiscardTypedText). Both are
+        nothing with no board. The statistics are the operation's
+        (AutonaActions.ClearPlayers, ADR-005 S3e-5). Any other board is
+        refused before anything is built or written."""
+        number = _require_board(board)
+        if number not in AutonaActions.SCORE_BOARDS:
+            # The crew board's members are CrewBattleService.ClearCrew's.
+            raise NotAvailable(f"scoreboard {number} has no player slots")
+        self.CommitEdit(board)
         AutonaActions.instance.ClearPlayers(board, no_mains)
-        SetLoadService(_board(board)).lastSetSelected = None
-
-    def EmptyRosterCharacters(self, board):
-        """The characters per player the next players of board `board` get
-        while it has no character slot (SetRoster would give them the
-        default). The desktop's is the board's spinbox; with no board, what
-        KeepEmptyRosterCharacters kept, else the default."""
-        return self._emptyCharacters.get(
-            _board(board), DEFAULT_CHARACTERS_PER_PLAYER)
-
-    def KeepEmptyRosterCharacters(self, board, count):
-        """Remember `count` as board `board`'s characters per player for
-        the players it gets next: asked for while it has no character slot,
-        or what it had when its last player went -- what the board's
-        spinbox kept, the desktop's in both cases. Boards 1/2 only: no
-        other board has a roster to give it to."""
-        if _board(board) not in AutonaActions.SCORE_BOARDS:
-            return
-        self._emptyCharacters[_board(board)] = max(0, min(
-            AutonaActions._asInt(count, DEFAULT_CHARACTERS_PER_PLAYER),
-            AutonaActions.MAX_CHARACTERS_PER_PLAYER))
+        self.DiscardTypedText(board)
+        SetLoadService(number).lastSetSelected = None
 
     def ResetCounts(self, board):
         """Back to one player per team and one character per player.
@@ -263,7 +256,9 @@ class BoardHost:
     def LastSet(self, board):
         """The provider id of the set board `board` loaded last, or None.
         Kept by SetLoadService, by board (ADR-005 S3e-7: it was the board's
-        and there was none here); only boards 1/2 load sets."""
+        and there was none here); only boards 1/2 load sets. The same in
+        both shells since ADR-005 S4x: the desktop's read it from the built
+        board (building it first) and raised for the crew board."""
         if _board(board) not in AutonaActions.SCORE_BOARDS:
             return None
         return SetLoadService(_board(board)).lastSetSelected
@@ -312,29 +307,11 @@ class DesktopBoardHost(BoardHost):
     def Built(self, board):
         return self.manager.scoreboards.get(board) is not None
 
-    def Widget(self, board):
-        return self._Board(board)
-
-    def EmptyRosterCharacters(self, board):
-        return self._Board(board).EmptyRosterCharacters()
-
-    def KeepEmptyRosterCharacters(self, board, count):
-        self._Board(board).KeepEmptyRosterCharacters(count)
-
     def CommitEdit(self, board):
         self._Board(board).CommitFocusedEdit()
 
-    def ClearPlayers(self, board, no_mains=False):
-        # The board's clear: AutonaActions.ClearPlayers plus what the board
-        # owns around it (the field being typed in, the set loaded last).
-        # The statistics are the operation's (StatsService.TeamsChanged,
-        # ADR-005 S3e-5). Boards 1/2: the crew board's clear is core's
-        # (`_clear_players`).
-        self._Board(board).CommandClearAll(no_mains)
-
-    def LastSet(self, board):
-        # The crew board has no SetLoadService, and raises as it did.
-        return self._Board(board).setLoad.lastSetSelected
+    def DiscardTypedText(self, board):
+        self._Board(board).DiscardTypedText()
 
     def PlayerLoaded(self, board, team, player, cleared):
         # After a load that cleared, the slot's card drops the text typed
@@ -389,6 +366,20 @@ CREW_BOARD = 3
 
 def _is_crew(scoreboard):
     return _board(scoreboard) == CREW_BOARD
+
+
+def _require_board(scoreboard):
+    """Board `scoreboard`'s number -- or, for one that is neither 1/2 nor the
+    crew board, NotAvailable (503), raised before anything is built or
+    written: no shell has such a board. The same in both shells since
+    ADR-005 S4x; the desktop's host used to ask a board widget it does not
+    have (500), the headless one refused it from the same call. The message
+    names the board, not the shell (NOT_AVAILABLE_MESSAGE is a shell
+    operation's: the desktop has no such board either)."""
+    board = _board(scoreboard)
+    if board not in AutonaActions.SCORE_BOARDS and board != CREW_BOARD:
+        raise NotAvailable(NO_SUCH_BOARD_MESSAGE.format(board=scoreboard))
+    return board
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -531,14 +522,12 @@ def get_match_names():
     }
 
 
-def get_match_name_candidates():
-    # What the crew board's three editable combos offer, in their order
-    # (without their blank first row).
-    return {
-        "phase": AutonaLocaleHelper.GetPhaseNameCandidates(),
-        "pool": AutonaLocaleHelper.GetPoolNameCandidates(),
-        "match": AutonaLocaleHelper.GetMatchNameCandidates(),
-    }
+def get_match_name_candidates(board=None):
+    # What board `board`'s three editable combos offer, in their order
+    # (without their blank first row): on boards 1/2 the loaded tournament's
+    # pools and entrant rounds too, on the crew board -- and with no board --
+    # the terms alone (core's MatchNameCandidates, ADR-005 S4x).
+    return MatchNameCandidates.instance.Candidates(board)
 
 
 def get_characters():
@@ -1265,6 +1254,28 @@ def load_game(codename, mods_active=False, done=None):
         mods_reload_mode=True, done=done)
 
 
+# ── the battle format (ADR-005 S4x) ──────────────────────────────────────
+
+def get_battle_format():
+    """{"format", "board"}: the battle format in force ("singles" / "team" /
+    "crew", AutonaActions.ResolveBattleFormat -- the legacy team_mode
+    fallback included) and the board it shows (ActiveBoard, /api/v1/health's
+    activeBoard). A setting: read on the calling thread."""
+    actions = AutonaActions.instance
+    fmt = actions.ResolveBattleFormat()
+    return {"format": fmt, "board": AutonaActions.FORMAT_BOARDS[fmt]}
+
+
+def set_battle_format(fmt):
+    """Switch the battle format (AutonaActions.SetBattleFormat, the sidebar's
+    operation): True if it switched, False for the format in force (nothing
+    written, nothing notified). ValueError for an unknown format, before
+    anything is written. Run where the board operations run: on the desktop
+    that is the GUI thread, so the notice reaches the window there and the
+    format's board is built (and shown) before this returns."""
+    return boardHost.Run(lambda: AutonaActions.instance.SetBattleFormat(fmt))
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # The S2 operations (see the module docstring)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1297,9 +1308,7 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
             # refused before anything is written, as it was when the counts
             # were the board's widgets (503, legacy / Socket.IO / v1 alike)
             # -- not answered OK having changed nothing.
-            if not crew and _board(scoreboard) \
-                    not in AutonaActions.SCORE_BOARDS:
-                raise NotAvailable()
+            _require_board(scoreboard)
             host.Prepare(scoreboard)
 
         # best-of=<Best Of Amount>
@@ -1362,31 +1371,22 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
 
 
 def _set_players(host, scoreboard, players):
-    """set_route's players on board 1/2, with the characters per player the
-    board's spinbox gave them: a board with no character slot left takes
-    its count from the host (EmptyRosterCharacters) rather than the
-    default, and one that loses its last player keeps the count it had
-    there for the next ones. As the two spinboxes did: players=0, then
-    characters=2, then players=2 is two players a team with two characters
-    each."""
-    actions = AutonaActions.instance
-    current = actions.CharacterSlots(scoreboard)
-    characters = None
-    if current is None:
-        characters = host.EmptyRosterCharacters(scoreboard)
-    elif players <= 0:
-        host.KeepEmptyRosterCharacters(scoreboard, current)
-    actions.SetRoster(scoreboard, players=players, characters=characters)
+    """set_route's players on board 1/2: the operation of the board's
+    PLAYERS spinbox (AutonaActions.SetPlayersPerTeam), with the characters
+    per player core keeps for a board with no character slot left. Players=0,
+    then characters=2, then players=2 is two players a team with two
+    characters each. The count kept was the board host's (headless) and the
+    board's hidden spinbox (desktop) until ADR-005 S4x: one memory now, in
+    both shells."""
+    AutonaActions.instance.SetPlayersPerTeam(scoreboard, players)
 
 
 def _set_characters(host, scoreboard, count):
     """set_route's characters on board 1/2: the character slots of every
     player, or -- on a board with none -- the count its next players get
-    (KeepEmptyRosterCharacters), as the spinbox kept it."""
-    actions = AutonaActions.instance
-    if actions.CharacterSlots(scoreboard) is None:
-        host.KeepEmptyRosterCharacters(scoreboard, count)
-    actions.SetRoster(scoreboard, characters=count)
+    (AutonaActions.SetCharactersPerPlayer, the board's spinbox's
+    operation)."""
+    AutonaActions.instance.SetCharactersPerPlayer(scoreboard, count)
 
 
 def _apply_set_fields(host, scoreboard, payload):
@@ -1406,9 +1406,7 @@ def _apply_set_fields(host, scoreboard, payload):
     refused it the same way, and the desktop failed on the board it does
     not have (500).
     """
-    board = _board(scoreboard)
-    if board not in AutonaActions.SCORE_BOARDS and board != CREW_BOARD:
-        raise NotAvailable()
+    board = _require_board(scoreboard)
     host.Prepare(scoreboard)
     if board == CREW_BOARD:
         CrewBattleService(CREW_BOARD).ApplySetData(payload)
@@ -1455,20 +1453,17 @@ def swap_teams(scoreboard):
     # The flag is `score.{n}.teamsSwapped` on all three (the crew board's since
     # S4w). Either way the board lets the field being typed in finish first,
     # so the text travels with the swap as it did when the widget swapped its
-    # rows.
+    # rows. Any other board: NotAvailable (`_require_board`).
     host = boardHost
 
     def run():
-        board = _board(scoreboard)
-        if board in AutonaActions.SCORE_BOARDS or board == CREW_BOARD:
-            host.Prepare(scoreboard)
-            host.CommitEdit(scoreboard)
-            if board == CREW_BOARD:
-                CrewBattleService(CREW_BOARD).SwapTeams()
-            else:
-                AutonaActions.instance.SwapTeams(scoreboard)
+        board = _require_board(scoreboard)
+        host.Prepare(scoreboard)
+        host.CommitEdit(scoreboard)
+        if board == CREW_BOARD:
+            CrewBattleService(CREW_BOARD).SwapTeams()
         else:
-            host.Widget(scoreboard).signals.SwapTeams.emit()
+            AutonaActions.instance.SwapTeams(scoreboard)
         return "OK"
 
     return host.Run(run)
@@ -1482,12 +1477,10 @@ def _swap_flag(board):
 def get_swap(scoreboard):
     # The live flag: a swap is reported as soon as it is made, before 反映
     # publishes it. The board is prepared first, as the route always did.
-    host = boardHost
-    host.Prepare(scoreboard)
-    board = _board(scoreboard)
-    if board in AutonaActions.SCORE_BOARDS or board == CREW_BOARD:
-        return str(_swap_flag(board))
-    return str(host.Widget(scoreboard).teamsSwapped)
+    # Any other board: NotAvailable, before anything is built.
+    board = _require_board(scoreboard)
+    boardHost.Prepare(scoreboard)
+    return str(_swap_flag(board))
 
 
 def get_scoreboard(scoreboard):
@@ -1496,7 +1489,10 @@ def get_scoreboard(scoreboard):
     # initial subtree, and an unbuilt board's is only the skeleton
     # (StateSchema.SeedBoard). Headless, the skeleton is the board.
     # Committed view: pending (not yet 反映-applied) desktop edits must not
-    # leak to remote clients ahead of the delta stream.
+    # leak to remote clients ahead of the delta stream. A board no shell
+    # has is refused first (503, ADR-005 S4x review): the desktop built
+    # nothing for it and the route answered 500 for the None it read.
+    _require_board(scoreboard)
     boardHost.Prepare(scoreboard)
     return StateManager.GetCommitted(f'score.{_board(scoreboard)}')
 
@@ -1523,29 +1519,30 @@ def get_pending(scoreboard):
 
 def reset_scores(scoreboard):
     # Boards 1/2 go through Actions; a crew board's "reset score" restores
-    # every member's stocks (CrewBattleService.ResetStocks, S3e-2).
+    # every member's stocks (CrewBattleService.ResetStocks, S3e-2). Any other
+    # board: NotAvailable (`_require_board`).
     host = boardHost
 
     def run():
-        if AutonaActions.instance.ResetScore(scoreboard):
+        board = _require_board(scoreboard)
+        if board != CREW_BOARD:
+            AutonaActions.instance.ResetScore(scoreboard)
             return "OK"
-        if _is_crew(scoreboard):
-            host.Prepare(scoreboard)
-            CrewBattleService(CREW_BOARD).ResetStocks()
-            return "OK"
-        host.Widget(scoreboard).ResetScore()
+        host.Prepare(scoreboard)
+        CrewBattleService(CREW_BOARD).ResetStocks()
         return "OK"
 
     return host.Run(run)
 
 
-def _reset_match(host, scoreboard):
+def _reset_match(scoreboard):
     # The operator's reset (scores + losers flags + round name / phase /
     # pool, ADR-005 S2d), not the set-load pre-pass ClearScore, which keeps
     # the match bar (S-17); then the best of, in a cycle of its own as the
     # spinbox's was. The crew board (3) answers False to the core operation:
     # its reset is full stocks and nobody playing plus the same match bar,
-    # in one cycle, then its raw best of (S3e-2).
+    # in one cycle, then its raw best of (S3e-2). The callers refused any
+    # other board first (`_require_board`).
     if AutonaActions.instance.ResetMatch(scoreboard):
         AutonaActions.instance.SetBestOf(scoreboard, 0)
         return
@@ -1556,16 +1553,16 @@ def _reset_match(host, scoreboard):
             AutonaActions.instance.ClearMatchInfo(scoreboard)
         crew.ApplyBestOf(0)
         return
-    host.Widget(scoreboard).ResetMatch()
+    _require_board(scoreboard)
 
 
 def _clear_players(host, scoreboard):
     # Every member row of the crew board emptied (core's, S3e-2); a 1v1 /
-    # team board's players through its host (the board owns what goes
-    # around the clear on the desktop). The field being typed in finishes
-    # first, as boards 1/2's clear finishes it (CommandClearAll): the clear
-    # then takes the typed text with it, instead of leaving it in the field
-    # to be written once the operator leaves it.
+    # team board's players through its host (BoardHost.ClearPlayers, which
+    # refuses any other board). The field being typed in finishes first, as
+    # boards 1/2's clear finishes it: the clear then takes the typed text
+    # with it, instead of leaving it in the field to be written once the
+    # operator leaves it.
     if _is_crew(scoreboard):
         host.Prepare(scoreboard)
         host.CommitEdit(scoreboard)
@@ -1587,8 +1584,9 @@ def reset_match(scoreboard):
     host = boardHost
 
     def run():
+        _require_board(scoreboard)
         host.Prepare(scoreboard)
-        _reset_match(host, scoreboard)
+        _reset_match(scoreboard)
         return "OK"
 
     return host.Run(run)
@@ -1615,10 +1613,11 @@ def clear_all(scoreboard):
     host = boardHost
 
     def run():
+        _require_board(scoreboard)
         host.Prepare(scoreboard)
         if _is_crew(scoreboard):
             host.CommitEdit(scoreboard)
-        _reset_match(host, scoreboard)
+        _reset_match(scoreboard)
         _reset_counts(host, scoreboard)
         _clear_players(host, scoreboard)
         return "OK"
@@ -1754,10 +1753,16 @@ def crew_team_color(team, color):
     host.Run(run)
 
 
-def get_crew_post():
-    """The board's X post: {"text", "missing"} (CrewBattleService.PostText).
-    Reads the state, so no board is built for it."""
-    text, missing = CrewBattleService(CREW_BOARD).PostText()
+def get_board_post(scoreboard):
+    """Board `scoreboard`'s X post as its button builds it: {"text",
+    "missing"} -- the crew board's CrewBattleService.PostText (ADR-005 S4w),
+    boards 1/2's AutonaActions.PostText (S4x; the button adds the thumbnail
+    on the clipboard). Reads the state, so no board is built for it. The
+    route validated the board (1..3)."""
+    if _is_crew(scoreboard):
+        text, missing = CrewBattleService(CREW_BOARD).PostText()
+    else:
+        text, missing = AutonaActions.instance.PostText(scoreboard)
     return {"text": text, "missing": missing}
 
 
@@ -1871,9 +1876,7 @@ def set_team_data(scoreboard, team, player, data):
                      f"player {player} not written: {e}")
 
     def run():
-        board = _board(scoreboard)
-        if board not in AutonaActions.SCORE_BOARDS and board != CREW_BOARD:
-            raise NotAvailable()
+        board = _require_board(scoreboard)
         record = None
         # Built before the save block opens: the build is what holds the
         # board for 反映 (S2c 判断 7).
@@ -1912,12 +1915,16 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
     `teamsSwapped`). As the route always did, numbers that are not numbers
     raise before the lookup, a slot the board does not have raises after a
     tag that was found (the legacy route's 500), and only boards 1/2 have
-    slots -- the crew board raised too (it has no player cards).
+    slots -- the crew board raised too (it has no player cards). A board no
+    shell has is refused before the lookup (NotAvailable: 503, since the
+    ADR-005 S4x review; it raised as the crew board does).
     """
     host = boardHost
 
     def run():
-        board = _board(scoreboard)
+        # A board no shell has: 503 (ADR-005 S4x review); the crew board
+        # raises, as it always did.
+        board = _require_board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             raise ValueError(f"scoreboard {scoreboard} has no player slots")
         host.Prepare(scoreboard)
@@ -1997,13 +2004,17 @@ def swap_players(scoreboard, team, first, second):
 # state later (the provider's worker), which is all the routes ever waited
 # for. "OK" whatever there was to fetch -- a fetch that raised included
 # (logged: StatsService.RefreshQuietly), as when the routes only emitted
-# the board's signals. Only boards 1/2 have statistics:
-# another board raises (ValueError: the legacy route's 500, as its missing
-# stats util did), without being built; a board number that is not a
-# number raises too.
+# the board's signals. Only boards 1/2 have statistics: the crew board
+# raises (ValueError: the legacy route's 500, as its missing stats util
+# did), without being built; a board no shell has is refused (NotAvailable:
+# 503, since the ADR-005 S4x review); a board number that is not a number
+# raises.
 
 def _stats_board(host, scoreboard):
     board = int(scoreboard)
+    # A board no shell has: 503, as every board operation (ADR-005 S4x
+    # review). The crew board raises below (500), as it always did.
+    _require_board(board)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} has no statistics")
     host.Prepare(board)
@@ -2112,11 +2123,14 @@ def get_set(scoreboard):
 # board's own set window does. The set is fetched, and followed, from the
 # provider's worker and the shell's clock; what they answer lands in the
 # state later, which is all the routes ever waited for. Only boards 1/2
-# load sets: another board raises (ValueError: the legacy route's 500, as
-# the board's missing signal did) without being built.
+# load sets: the crew board raises (ValueError: the legacy route's 500, as
+# the board's missing signal did) without being built, and a board no shell
+# has is refused (NotAvailable: 503, since the ADR-005 S4x review).
 
 def _set_board(host, scoreboard):
-    board = _board(scoreboard)
+    # A board no shell has: 503, as every board operation (ADR-005 S4x
+    # review). The crew board raises below (500), as it always did.
+    board = _require_board(scoreboard)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} does not load sets")
     host.Prepare(board)
@@ -2277,7 +2291,10 @@ def stop_follow(scoreboard):
 # neither operation.
 
 def open_sets(scoreboard):
-    """Open board `scoreboard`'s set selection window: "OK"."""
+    """Open board `scoreboard`'s set selection window: "OK". A board no
+    shell has is refused first, whatever the shell registered (503,
+    ADR-005 S4x review: the desktop's window answered 500)."""
+    _require_board(scoreboard)
     if openSetSelection is None:
         raise NotAvailable()
     return _on_gui_thread(lambda: openSetSelection(scoreboard),
@@ -2286,7 +2303,9 @@ def open_sets(scoreboard):
 
 def get_thumbnail(scoreboard, file_format):
     """Render board `scoreboard`'s thumbnail as `file_format` ("png" /
-    "jpg"): the image's absolute path, or None when it failed."""
+    "jpg"): the image's absolute path, or None when it failed. A board no
+    shell has is refused first, as by open_sets."""
+    _require_board(scoreboard)
     if renderThumbnail is None:
         raise NotAvailable()
     return _on_gui_thread(lambda: renderThumbnail(scoreboard, file_format),

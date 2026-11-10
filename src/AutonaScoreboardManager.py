@@ -191,8 +191,8 @@ class AutonaScoreboardManager(QDockWidget):
         # host (AutonaWebOperations.DesktopBoardHost), the shell operations
         # below, the desktop panels — gets a board. Construction is
         # GUI-thread only, so calls arriving on the Flask thread (the board
-        # host's Prepare / Widget outside its Run: get_swap, get_scoreboard)
-        # are marshalled to it (gui_thread_sync). Once the app is shutting
+        # host's Prepare outside its Run: get_swap, get_scoreboard) are
+        # marshalled to it (gui_thread_sync). Once the app is shutting
         # down that marshal gives up (GuiMarshalAborted): not a failure to
         # build, so it is raised on for the caller to answer (the board host
         # answers 503), logged at INFO here (ADR-005 S3f-4 review).

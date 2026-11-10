@@ -138,6 +138,9 @@ ROUTE_ACCESS = {
     # ── /api/v1 (GET = READ, POST / PATCH / PUT / DELETE = WRITE) ──
     "api_v1.state": READ,
     "api_v1.health": READ,
+    # The format in force, as health's activeBoard; the switch (ADR-005 S4x).
+    "api_v1.get_battle_format": READ,
+    "api_v1.battle_format_set": WRITE,
     "api_v1.get_scoreboard": READ,
     # The live values, 反映 or not: edits not published yet (real names among
     # them) are not for whoever can reach the port (ADR-005 S4u).
@@ -145,8 +148,11 @@ ROUTE_ACCESS = {
     # Which station it follows and the set it loaded last, an id: the legacy
     # get_set answers that as READ too (ADR-005 S4v).
     "api_v1.get_scoreboard_follow": READ,
-    # The crew board's X post, from what /state answers anyone (ADR-005 S4w).
-    "api_v1.get_scoreboard_post": READ,
+    # A board's X post (the crew board's since ADR-005 S4w, boards 1/2 since
+    # S4x), as its button builds it: from the live values, 反映 or not, as
+    # the button reads them -- guarded as the pending values are (S4x; it was
+    # READ for the crew board, whose values are never held).
+    "api_v1.get_scoreboard_post": PLAYERDB,
     # What start.gg shows anyone: tags and entrant names, never a real name
     # (SetSelectionService.SetRow).
     "api_v1.get_tournament_phases": READ,

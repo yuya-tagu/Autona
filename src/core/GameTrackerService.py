@@ -363,7 +363,7 @@ class GameTrackerService:
         """
         if old_value == new_value or not self.StageCount():
             return
-        logger.info(f"UpdateScore: old[{old_value}] new[{new_value}]")
+        logger.info(f"SyncStagesToScore: old[{old_value}] new[{new_value}]")
 
         # Disable individual game tracker logic if ties were reported
         game_data = StateManager.Get(f"{self.prefix}.stages")
@@ -385,27 +385,3 @@ class GameTrackerService:
             else:
                 self.DecrementScore(team, counter)
                 counter -= 1
-
-    def UpdateScore(self, team, new_value):
-        """Publish a score set from outside, and follow it with the stages.
-
-        Still the entry point for the one path that drives the score
-        spinbox directly (a number typed into it): the widget
-        changes, and this writes the result. The paths that write the state
-        first -- AutonaActions.AdjustScore / ResetScore and the clears
-        (ADR-005 S2d), and a loaded set's
-        SetLoadService.ApplyScores -- instead call FollowScores() with what
-        they read before writing, which is why the two halves are separate
-        methods (headless core Step 3; set loading joined them in Step 4b).
-
-        Read-modify-write under the lock, same as AutonaActions.AdjustScore:
-        the score is written from the web/API threads through Actions, so a
-        concurrent write between the Get and the Set here would be read back
-        as this tracker's own transition and desynchronise the stages.
-        """
-        key = f"{self.prefix}.team.{team + 1}.score"
-        with StateManager.lock:
-            old_value = StateManager.Get(key, 0)
-            StateManager.Set(key, new_value)
-
-        self.SyncStagesToScore(team, old_value, new_value)

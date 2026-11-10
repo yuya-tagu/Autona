@@ -794,6 +794,102 @@ def test_the_adapter_forgets_on_every_load_and_unload(service, autonaApp):
         autonaApp.settle()
 
 
+# ── the match bar's pool names (ADR-005 S4x review) ──────────────────────
+# The phases a fetch answers are MatchNameCandidates' too: v1's
+# phases:refresh reached the set list alone, the adapter's own fetch
+# (tournament_phases_updated) being the one source of the pool names.
+
+POOL_PHASES = [{"id": 21, "name": "Round 1", "groups": [
+    {"id": 201, "name": "R1 Pool 7", "bracketType": "DOUBLE_ELIMINATION"},
+    {"id": 202, "name": "R1 Pool 8", "bracketType": "DOUBLE_ELIMINATION"}]}]
+POOL_NAMES = ["R1 Pool 7", "R1 Pool 8"]
+
+
+def _pools():
+    from src.core.MatchNameCandidates import MatchNameCandidates
+    return MatchNameCandidates.instance.Candidates(1)["pool"]
+
+
+def test_the_phases_fetched_are_the_match_bar_s_pool_names(
+        client, service, autonaApp, monkeypatch):
+    from src.core.MatchNameCandidates import MatchNameCandidates
+    candidates = MatchNameCandidates.instance
+    follow = candidates.FollowPhases
+    held = []
+
+    def spy(phases):
+        # With the end published, inside StateManager.lock (a tournament
+        # change cannot come between) and outside the service's.
+        held.append((StateManager.lock._is_owned(), service._lock._is_owned()))
+        follow(phases)
+
+    monkeypatch.setattr(candidates, "FollowPhases", spy)
+    terms = _pools()
+    provider = FakeTournament(phases=POOL_PHASES)
+    _load(service, provider)
+    _post(client, "/api/v1/tournament/phases:refresh")
+    _drain(autonaApp)
+    assert _pools() == POOL_NAMES + terms
+    response = client.get("/api/v1/match-names/candidates?board=1")
+    assert response.status_code == 200
+    assert response.get_json()["data"]["pool"] == POOL_NAMES + terms
+    assert held == [(True, False)]
+
+    # An event with no phases has no pools: the names go.
+    provider.answers[PHASES] = [[]]
+    _fetched(service, autonaApp, provider)
+    assert _pools() == terms
+    assert held == [(True, False)] * 2
+
+
+def test_a_failed_or_dropped_phase_fetch_names_no_pool(service, autonaApp):
+    from src.core.MatchNameCandidates import MatchNameCandidates
+    terms = _pools()
+    provider = FakeTournament(phases=POOL_PHASES)
+    _load(service, provider)
+    _fetched(service, autonaApp, provider)
+
+    # Failed: the names of the last fetch that did not fail stay.
+    provider.failing.add(PHASES)
+    assert service.RefreshPhases() == STARTED
+    _drain(autonaApp)
+    assert _progress(PHASES)["status"] == "error"
+    assert _pools() == POOL_NAMES + terms
+
+    # Dropped by a tournament change: its late answer names nothing. (The
+    # adapter's unload emptied the names, as it does after Forget.)
+    MatchNameCandidates.instance.FollowPhases([])
+    provider.failing.clear()
+    release = threading.Event()
+    provider.gates[PHASES] = [None, None, release]
+    assert service.RefreshPhases() == STARTED
+    provider.waitAsked(PHASES, 3)
+    _load(service, FakeTournament(url=OTHER_URL, phases=[]))
+    release.set()
+    _drain(autonaApp)
+    assert _pools() == terms
+
+
+def test_a_tournament_change_leaves_the_names_to_the_adapter(
+        service, autonaApp):
+    """Forget does not empty them: the adapter's own payloads replace them
+    right after it -- the empty ones of an unload, the new tournament's
+    phases of a load (which the adapter fetches non-strictly: a failure is
+    an empty list) -- and the desktop's combos read them again on exactly
+    those, so both stay in step."""
+    terms = _pools()
+    provider = FakeTournament(phases=POOL_PHASES)
+    _load(service, provider)
+    _fetched(service, autonaApp, provider)
+    service.Forget()
+    assert _pools() == POOL_NAMES + terms
+
+    # What UnloadTournament emits after its Forget.
+    AutonaTournamentDataProvider.instance.signals \
+        .tournament_phases_updated.emit([])
+    assert _pools() == terms
+
+
 def test_no_tournament_starts_nothing_and_publishes_nothing(
         service, autonaApp):
     _load(service, None)
