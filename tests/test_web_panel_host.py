@@ -636,6 +636,171 @@ def test_only_the_designers_exact_url_is_kept_from_the_browser(monkeypatch, url)
     assert opened == [url]
 
 
+# ── the SCORE page's "ブラウザ版を開く" (ADR-005 S4aa) ───────────────────
+
+# A made-up token: looked for in the URL handed outside, and not in the log.
+FAKE_TOKEN = "Made_Up_Token_For_The_Test_0123"
+
+
+def _webServerSettings(monkeypatch, *, lan, token=FAKE_TOKEN,
+                       host="192.168.0.5", listening=None):
+    # What the URL is built from at the click: the port and LAN access (what
+    # the server listens on, the settings while none runs), this PC's LAN
+    # address, and the token.
+    from src.AutonaWebServer import WebServer
+    from src.Helpers import AutonaNetworkHelper
+
+    settings = {"general.webserver_port": 5107,
+                "general.webserver_listen_lan": lan}
+    monkeypatch.setattr(HostModule.SettingsManager, "Get",
+                        lambda key, default=None: settings.get(key, default))
+    monkeypatch.setattr(HostModule, "GetLocalIP", lambda: host)
+    # The Qt board's address (GetWebServerHost) too.
+    monkeypatch.setattr(AutonaNetworkHelper, "GetLocalIP", lambda: host)
+    monkeypatch.setattr(WebServer, "_listening", listening)
+    monkeypatch.setattr(HostModule.WebAccess, "Token", lambda: token)
+
+
+def _askedFor(path, clicked=True, page=None):
+    HostModule._PanelPage._OpenOutside(
+        page or _pageAsking(), SimpleNamespace(
+            requestedUrl=lambda: QUrl("http://127.0.0.1:5107" + path),
+            isUserInitiated=lambda: clicked))
+
+
+@pytest.mark.parametrize("path, lan, token, host, handed", [
+    # LAN access off: no token, which a page on this PC does not need.
+    ("/scoreboard", False, FAKE_TOKEN, "127.0.0.1",
+     "http://127.0.0.1:5107/scoreboard"),
+    ("/team", False, FAKE_TOKEN, "127.0.0.1", "http://127.0.0.1:5107/team"),
+    # LAN access on: the address other devices reach, with the token, so the
+    # same URL works copied to one of them.
+    ("/scoreboard", True, FAKE_TOKEN, "192.168.0.5",
+     f"http://192.168.0.5:5107/scoreboard?token={FAKE_TOKEN}"),
+    ("/team", True, FAKE_TOKEN, "192.168.0.5",
+     f"http://192.168.0.5:5107/team?token={FAKE_TOKEN}"),
+    # No usable token: none to carry.
+    ("/scoreboard", True, "", "192.168.0.5",
+     "http://192.168.0.5:5107/scoreboard"),
+])
+def test_the_browser_scoreboard_is_built_by_the_host_at_the_click(
+        monkeypatch, path, lan, token, host, handed):
+    opened = _handedOutside(monkeypatch)
+    _webServerSettings(monkeypatch, lan=lan, token=token, host=host)
+    page = _pageAsking()
+
+    _askedFor(path, page=page)
+
+    assert opened == [handed]
+    assert page.designer == []
+
+
+@pytest.mark.parametrize("lan, token", [
+    (False, FAKE_TOKEN), (True, FAKE_TOKEN), (True, ""), (False, ""),
+])
+@pytest.mark.parametrize("listening", [False, True])
+def test_the_browser_scoreboard_is_the_url_the_qt_boards_button_opens(
+        monkeypatch, lan, token, listening):
+    # With the server listening as the settings say (or none running), the
+    # same URL as the Qt board's button, its address read as the board does
+    # when it is built.
+    from src.AutonaScoreboardWidget import AutonaScoreboardWidget
+    from src.Helpers.AutonaNetworkHelper import GetWebServerHost
+
+    _webServerSettings(
+        monkeypatch, lan=lan, token=token,
+        listening=("0.0.0.0" if lan else "127.0.0.1", 5107, lan)
+        if listening else None)
+    for path in ("/scoreboard", "/team"):
+        board = SimpleNamespace(
+            webScoreboardUrl=f"http://{GetWebServerHost()}:5107{path}")
+        assert HostModule.BrowserScoreboardUrl(path) == \
+            AutonaScoreboardWidget._WebScoreboardOpenUrl(board)
+
+
+@pytest.mark.parametrize("lan, listening, handed", [
+    # LAN access turned on in the settings, the server not restarted yet:
+    # still this PC's address, without the token.
+    (True, ("127.0.0.1", 5107, False), "http://127.0.0.1:5107/team"),
+    # Turned off, not restarted: still the LAN address and the token.
+    (False, ("0.0.0.0", 5107, True),
+     f"http://192.168.0.5:5107/team?token={FAKE_TOKEN}"),
+    # The port changed in the settings: the one listened on.
+    (False, ("127.0.0.1", 5108, False), "http://127.0.0.1:5108/team"),
+])
+def test_the_browser_scoreboard_is_where_the_server_really_listens(
+        monkeypatch, lan, listening, handed):
+    _webServerSettings(monkeypatch, lan=lan, listening=listening)
+
+    assert HostModule.BrowserScoreboardUrl("/team") == handed
+
+
+def test_the_browser_scoreboard_without_a_click_opens_nothing(monkeypatch):
+    opened = _handedOutside(monkeypatch)
+    _webServerSettings(monkeypatch, lan=True)
+
+    _askedFor("/scoreboard", clicked=False)
+    _askedFor("/team", clicked=False)
+
+    assert opened == []
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:5107/scoreboard?token=x",         # a query of its own
+    "http://127.0.0.1:5107/scoreboard?board=1",
+    "http://127.0.0.1:5107/scoreboard#x",               # a fragment
+    "http://me@127.0.0.1:5107/team",                    # a user
+    "http://127.0.0.1:5107/scoreboard/",                # another path
+    "http://127.0.0.1:5107/Scoreboard",
+    "http://127.0.0.1:5107/web/scoreboard",
+    "http://localhost:5107/scoreboard",                 # another host name
+    "http://192.168.0.2:5107/team",                     # another computer
+    "http://127.0.0.1:5108/team",                       # another port
+    "https://127.0.0.1:5107/team",                      # another scheme
+])
+def test_only_the_browser_scoreboards_exact_url_gets_the_token(
+        monkeypatch, url):
+    # Anything else is the web's link, handed on as it was asked for: the
+    # token goes to no other URL, and nothing of the page's own is carried.
+    opened = _handedOutside(monkeypatch)
+    _webServerSettings(monkeypatch, lan=True)
+
+    HostModule._PanelPage._OpenOutside(
+        _pageAsking(), SimpleNamespace(requestedUrl=lambda: QUrl(url),
+                                       isUserInitiated=lambda: True))
+
+    assert opened == [url]
+    assert FAKE_TOKEN not in opened[0]
+
+
+def test_a_browser_scoreboard_the_system_does_not_open_is_logged_without_the_token(
+        monkeypatch, caplog):
+    monkeypatch.setattr(HostModule, "QDesktopServices",
+                        SimpleNamespace(openUrl=lambda url: False))
+    _webServerSettings(monkeypatch, lan=True)
+
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        _askedFor("/scoreboard")
+
+    assert "could not open" in caplog.text
+    assert "192.168.0.5" in caplog.text
+    assert FAKE_TOKEN not in caplog.text
+
+
+def test_the_score_page_asks_for_the_browser_scoreboard_bare():
+    # The token is the host's to add (above): the page opens the bare paths,
+    # and the page the host loads carries none.
+    import re
+    from tests.conftest import PROJECT_ROOT
+
+    source = (PROJECT_ROOT / "web" / "src" / "ScorePage"
+              / "index.tsx").read_text(encoding="utf-8")
+    asked = set(re.findall(r'"(/(?:scoreboard|team)[^"]*)"', source))
+    assert asked == set(HostModule._BROWSER_SCOREBOARD_PATHS)
+    assert "token=" not in source
+    assert "token" not in PanelPath("scoreboard")
+
+
 def test_the_view_asks_the_system_for_nothing_by_itself(buildHost):
     settings = _shown(buildHost).host.view.settings()
 
@@ -1219,6 +1384,101 @@ def test_the_thumbnail_item_opens_the_react_page():
     assert "thumbnailSetting" not in source
 
 
+def test_the_scoreboard_item_opens_the_react_page_unless_switched_back():
+    import ast
+    factory = _windowMethod("_CreateScoreboardPanel")
+    body = [node for node in factory.body
+            if not (isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant))]
+
+    # The React page (ADR-005 S4aa), the Qt panel -- the dock holding the
+    # boards -- only on the way back, settled on the item's first choice.
+    assert [ast.unparse(node) for node in body] == [
+        "if 'scoreboard' not in self._qtPanels:\n"
+        "    return self._WebPanel('scoreboard')",
+        "return self.scoreboard"]
+
+    # A lazy factory where the eager dock was, keyed by the React panel's
+    # name, with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateScoreboardPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'scoreboard.svg'"
+    assert "Scoreboard" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'scoreboard'"
+    assert "scoreboard" in WebAccess.WEB_PANELS
+    assert HostModule.QT_FALLBACK_SETTINGS == {
+        "scoreboard": "general.qt_scoreboard_panel"}
+    # The dock is no eager page, nor a dock of the window's until it is
+    # the item's page (_EnsurePanelAt keeps it then).
+    assert "self.dockWidgets.append(self.scoreboard)" not in _autonaSource()
+    assert not [node for node in ast.walk(build)
+                if isinstance(node, ast.Tuple) and node.elts
+                and ast.unparse(node.elts[0]) == "self.scoreboard"]
+
+
+def test_a_way_back_item_waits_for_its_first_choice():
+    import ast
+    build = _windowMethod("_BuildUi")
+    # Registered apart from the React items: not shown on the host's page
+    # before its setting is read.
+    branch = next(node for node in ast.walk(build) if isinstance(node, ast.If)
+                  and ast.unparse(node.test) == "key in QT_FALLBACK_SETTINGS")
+    assert [ast.unparse(node) for node in branch.body] == [
+        "self._wayBackItems[index] = key"]
+    assert [ast.unparse(node.test) for node in branch.orelse] == [
+        "WebAccess.IsWebPanel(key)"]
+    # Settled before the page is chosen.
+    choose = _windowMethod("_OnNavSelected")
+    body = [node for node in choose.body
+            if not (isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant))]
+    assert ast.unparse(body[0]) == "self._SettleWayBack(nav)"
+    settle = _calls(_windowMethod("_SettleWayBack"))
+    assert ("UsesQtPanel", ["key"]) in settle
+    assert ("self._webPanelPages.Add", ["nav", "key"]) in settle
+
+
+@pytest.mark.parametrize("stored, qt", [
+    (None, False), (False, False), (True, True), ("true", False), (1, False),
+])
+def test_the_qt_scoreboard_is_shown_only_when_switched_back(
+        monkeypatch, stored, qt):
+    # A stale `general.qt_commentary_panel` (S4c) is never read.
+    settings = {"general.qt_commentary_panel": True}
+    if stored is not None:
+        settings["general.qt_scoreboard_panel"] = stored
+    monkeypatch.setattr(HostModule.SettingsManager, "Get",
+                        lambda key, default=None: settings.get(key, default))
+
+    assert HostModule.UsesQtPanel("scoreboard") is qt
+    # A React panel without a Qt version has nothing to go back to.
+    assert HostModule.UsesQtPanel("commentary") is False
+    assert HostModule.UsesQtPanel("shell-check") is False
+
+
+def test_every_fallback_is_a_react_panel_the_settings_window_offers():
+    import ast
+    from tests.conftest import PROJECT_ROOT
+
+    assert set(HostModule.QT_FALLBACK_SETTINGS) <= WebAccess.WEB_PANELS
+    source = (PROJECT_ROOT / "src" / "Settings"
+              / "AutonaSettingsWindow.py").read_text(encoding="utf-8")
+    offered = {node.elts[1].value: node.elts[3] for node in
+               ast.walk(ast.parse(source))
+               if isinstance(node, ast.Tuple) and len(node.elts) == 4
+               and isinstance(node.elts[1], ast.Constant)
+               and isinstance(node.elts[2], ast.Constant)
+               and node.elts[2].value == "checkbox"}
+    for key in HostModule.QT_FALLBACK_SETTINGS.values():
+        section, name = key.split(".", 1)
+        assert section == "general" and name in offered, key
+        # Off by default: the React page.
+        assert ast.unparse(offered[name]) == "False", key
+
+
 def test_the_board_item_opens_the_react_page():
     import ast
     calls = _calls(_windowMethod("_CreateBoardPanel"))
@@ -1284,15 +1544,16 @@ def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
     panels (Stream S4e, Event S4g -- its key is the React page's name now
-    --, Top 8 S4i, Statistics S4k, the Player List S4n, Thumbnail S4p and Board
-    S4s): no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
+    --, Top 8 S4i, Statistics S4k, the Player List S4n, Thumbnail S4p, Board
+    S4s and SCORE S4aa -- its key is the React page's name now): no
+    STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
             if isinstance(node, ast.Tuple) and len(node.elts) == 4
             and ast.unparse(node.elts[1]).endswith(".svg'")]
     assert keys == [
-        "'event'", "'stream'", "None", "'board'", "'thumbnail'",
+        "'event'", "'stream'", "'scoreboard'", "'board'", "'thumbnail'",
         "'result'", "'top8'", "'commentary'", "'statsPreview'", "'stats'",
         "'playerBrowser'"]
     version = next(node for node in ast.walk(ast.parse(
@@ -1363,6 +1624,7 @@ def test_the_qt_commentary_panel_and_its_switch_are_gone():
     # ADR-005 S4c: the React page is the only Commentary panel. Neither the
     # widget nor the `general.qt_commentary_panel` way back (a stale key in
     # a user's settings.json is simply never read) may come back in src/.
+    # (The way-back mechanism itself is SCORE's now, S4aa.)
     from tests.conftest import PROJECT_ROOT
 
     src = PROJECT_ROOT / "src"
@@ -1371,9 +1633,9 @@ def test_the_qt_commentary_panel_and_its_switch_are_gone():
             for path in src.rglob("*.py")
             if any(word in path.read_text(encoding="utf-8")
                    for word in ("AutonaCommentaryWidget",
-                                "qt_commentary_panel", "UsesQtPanel",
-                                "QT_FALLBACK_SETTINGS"))]
+                                "qt_commentary_panel"))]
     assert left == []
+    assert "commentary" not in HostModule.QT_FALLBACK_SETTINGS
 
 
 def test_the_qt_event_panel_is_gone():
@@ -1669,25 +1931,27 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "scoreboard")
+        WebPanelPages().Add(1, "lazyQt")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
-    _BuildUi builds it, with a few sidebar items: five React ones and two
-    Qt ones (the eager scoreboard and a made-up lazy one: the sidebar's last,
-    Board, became a React page in ADR-005 S4s, and the factories' path for a Qt
-    panel is still there), in the real order (Qt items between them). Off screen,
-    so the host builds no view; what it was asked to show is its _panel."""
+    _BuildUi builds it, with a few sidebar items: five React ones, SCORE --
+    a React item with a way back to its Qt panel (ADR-005 S4aa) -- and a
+    made-up lazy Qt one (the sidebar has no Qt item left since S4aa, and the
+    factories' path for a Qt panel is still there), in the real order. Off
+    screen, so the host builds no view; what it was asked to show is its
+    _panel. ``qtSetting`` stands in for the operator's way-back setting
+    (UsesQtPanel, pinned on its own), ``reads`` counts its reads."""
 
-    METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
-               "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
-               "_CreateEventPanel", "_CreateStreamPanel",
-               "_CreateTop8Panel", "_CreateCommentaryPanel",
-               "_CreateStatsPanel")
+    METHODS = ("_OnNavSelected", "_SettleWayBack", "_OnStackPageChanged",
+               "_EnsurePanelAt", "_WebPanel", "_AdoptWebPanelHost",
+               "_PreparePanel", "_CreateEventPanel", "_CreateStreamPanel",
+               "_CreateScoreboardPanel", "_CreateTop8Panel",
+               "_CreateCommentaryPanel", "_CreateStatsPanel")
 
-    def __init__(self):
+    def __init__(self, qtScoreboard=False):
         import ast
 
         from loguru import logger
@@ -1702,9 +1966,17 @@ class _WindowRig:
             self.METHODS)
         window.body.append(ast.parse(
             "def _ApplyTabBarPolicy(self, panel):\n    pass\n").body[0])
+        self.qtSetting = {"scoreboard": qtScoreboard}
+        self.reads = []
+
+        def usesQtPanel(panel):
+            self.reads.append(panel)
+            return self.qtSetting.get(panel, False)
+
         namespace = {"QDockWidget": QDockWidget, "QSizePolicy": QSizePolicy,
                      "QWidget": QWidget, "logger": logger,
-                     "AutonaWebPanelHost": AutonaWebPanelHost}
+                     "AutonaWebPanelHost": AutonaWebPanelHost,
+                     "UsesQtPanel": usesQtPanel}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
@@ -1723,25 +1995,29 @@ class _WindowRig:
         w._panelIndexes = {}
         w._webPanelHost = None
         w._webPanelPages = WebPanelPages()
+        w._wayBackItems = {}
+        w._qtPanels = set()
         w._buildingPanel = False
-        # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
-        # commentary, ..., stats. (The lazy Qt item is last here so the indexes
-        # below stay one per kind of item.)
+        # The Qt SCORE panel: the dock holding the boards, made at startup and
+        # on no page until the way back makes it the item's.
+        w.scoreboard = QDockWidget("Scoreboard")
+        # As _BuildUi: event, stream, scoreboard, ..., top8, commentary, ...,
+        # stats. (The lazy Qt item is last here so the indexes below stay one
+        # per kind of item.)
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
-                          (QLabel("scoreboard"), None),
+                          (w._CreateScoreboardPanel, "scoreboard"),
                           (w._CreateTop8Panel, "top8"),
                           (w._CreateCommentaryPanel, "commentary"),
                           (w._CreateStatsPanel, "stats"),
                           (qtPanel("lazyQt"), "lazyQt")):
-            if callable(page):
-                index = w.stack.addWidget(QWidget())
-                w._lazyPanels[index] = (page, key)
-                w._panelIndexes[key] = index
-                if WebAccess.IsWebPanel(key):
-                    w._webPanelPages.Add(index, key)
-            else:
-                w.stack.addWidget(page)
+            index = w.stack.addWidget(QWidget())
+            w._lazyPanels[index] = (page, key)
+            w._panelIndexes[key] = index
+            if key in HostModule.QT_FALLBACK_SETTINGS:
+                w._wayBackItems[index] = key
+            elif WebAccess.IsWebPanel(key):
+                w._webPanelPages.Add(index, key)
         w.stack.currentChanged.connect(w._OnStackPageChanged)
         self.placeholders = [w.stack.widget(index)
                              for index in range(w.stack.count())]
@@ -1784,13 +2060,18 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert w.stack.widget(COMMENTARY) is rig.placeholders[COMMENTARY]
 
     # Away and back: each React item brings its own panel back.
-    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.choose(LAZY_QT) == LAZY_QT
     assert rig.choose(STREAM) == STREAM
     assert host._panel == "stream"
-    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.choose(LAZY_QT) == LAZY_QT
     assert rig.choose(COMMENTARY) == STREAM
     assert host._panel == "commentary"
     assert w._webPanelHost is host and rig.hosts() == [STREAM]
+    # The SCORE page too (S4aa), its placeholder never built.
+    assert rig.choose(SCOREBOARD) == STREAM
+    assert host._panel == "scoreboard"
+    assert w.stack.widget(SCOREBOARD) is rig.placeholders[SCOREBOARD]
+    assert SCOREBOARD not in w._lazyPanels
     # The Event page too (S4g): the same page, its own panel.
     assert rig.choose(EVENT) == STREAM
     assert host._panel == "event"
@@ -1803,10 +2084,11 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert rig.choose(STATS) == STREAM
     assert host._panel == "stats"
     assert w.stack.widget(STATS) is rig.placeholders[STATS]
-    # The Qt items were built as before, the eager one never.
+    # The Qt item was built once, and the SCORE dock is on no page.
     assert rig.choose(LAZY_QT) == LAZY_QT
     assert rig.built == ["lazyQt"]
     assert w.dockWidgets == []
+    assert w.stack.indexOf(w.scoreboard) == -1
 
 
 def test_the_host_is_built_where_the_first_react_item_is_opened(qapp):
@@ -1884,3 +2166,172 @@ def test_a_host_that_fails_to_be_built_is_built_by_the_next_react_item(qapp):
     assert rig.choose(STREAM) == COMMENTARY
     assert w._webPanelHost._panel == "stream"
     assert rig.hosts() == [COMMENTARY]
+
+
+# ── SCORE's way back to the Qt panel (ADR-005 S4aa) ─────────────────────
+
+def test_the_scoreboard_item_opened_first_builds_the_host_on_its_page(qapp):
+    rig = _WindowRig()
+    w = rig.window
+
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.hosts() == [SCOREBOARD]
+    assert w._webPanelHost._panel == "scoreboard"
+    assert STREAM not in w._lazyPanels
+    # The other React items show it from then on, and SCORE its panel again.
+    assert rig.choose(STREAM) == SCOREBOARD
+    assert w._webPanelHost._panel == "stream"
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w._webPanelHost._panel == "scoreboard"
+    # The setting was read once, on the first choice.
+    assert rig.reads == ["scoreboard"]
+    assert w.dockWidgets == [] and w._qtPanels == set()
+
+
+def test_the_scoreboard_item_waits_for_its_first_choice_to_join_the_host(
+        qapp):
+    # A host built on another item does not take SCORE's placeholder with it
+    # (its setting is not read yet): the first choice does.
+    rig = _WindowRig()
+    w = rig.window
+    rig.choose(STREAM)
+    assert SCOREBOARD in w._lazyPanels
+    assert rig.reads == []
+
+    assert rig.choose(SCOREBOARD) == STREAM
+    assert w._webPanelHost._panel == "scoreboard"
+    assert SCOREBOARD not in w._lazyPanels
+    assert w.stack.widget(SCOREBOARD) is rig.placeholders[SCOREBOARD]
+    assert rig.hosts() == [STREAM]
+
+
+def test_switched_back_the_scoreboard_item_shows_the_qt_dock(qapp):
+    rig = _WindowRig(qtScoreboard=True)
+    w = rig.window
+    rig.choose(STREAM)
+    host = w._webPanelHost
+
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w.stack.widget(SCOREBOARD) is w.scoreboard
+    # Kept as a dock of the window's, as the eager one was.
+    assert w.dockWidgets == [w.scoreboard]
+    assert host._panel == "stream"
+    # Away and back: the same dock, built once; the React items still share
+    # the one host.
+    assert rig.choose(COMMENTARY) == STREAM
+    assert host._panel == "commentary"
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w.dockWidgets == [w.scoreboard]
+    assert rig.hosts() == [STREAM]
+    assert rig.reads == ["scoreboard"]
+
+
+def test_switched_back_before_any_host_the_next_react_item_builds_it(qapp):
+    rig = _WindowRig(qtScoreboard=True)
+    w = rig.window
+
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w.stack.widget(SCOREBOARD) is w.scoreboard
+    assert w._webPanelHost is None
+
+    assert rig.choose(TOP8) == TOP8
+    assert rig.hosts() == [TOP8]
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w.stack.widget(SCOREBOARD) is w.scoreboard
+
+
+def _windowWithTheScoreboardDock(rig):
+    """A main window holding ``rig``'s stack, with the rig's SCORE dock made
+    by _BuildUi's own block (read out of src/Autona.py: from the dock's
+    assignment to the splash's next message) -- on the window, as there."""
+    import ast
+
+    from qtpy.QtGui import QIcon
+    from qtpy.QtWidgets import QApplication, QMainWindow
+
+    from src import ui_constants as UI
+
+    body = _windowMethod("_BuildUi").body
+    start = next(i for i, node in enumerate(body) if ast.unparse(node)
+                 == "self.scoreboard = AutonaScoreboardManager.instance")
+    end = next(i for i in range(start, len(body))
+               if ast.unparse(body[i]).startswith("splash.set_message("))
+    window = QMainWindow()
+    window.setCentralWidget(rig.window.stack)
+    exec(compile(ast.fix_missing_locations(ast.Module(
+        body=body[start:end], type_ignores=[])), "src/Autona.py", "exec"),
+        {"self": window, "QIcon": QIcon, "UI": UI,
+         "QApplication": QApplication,
+         "AutonaScoreboardManager": SimpleNamespace(
+             instance=rig.window.scoreboard)})
+    assert window.scoreboard is rig.window.scoreboard
+    return window
+
+
+def test_the_scoreboard_dock_goes_with_the_window_and_is_not_shown_by_it(qapp):
+    # Review B: on the React page the dock is on no page; it used to stay a
+    # top-level until exit. The window's child now, destroyed with it as the
+    # eager page was, and never shown with it.
+    from qtpy.QtWidgets import QApplication
+    from shiboken6 import Shiboken
+
+    # (No item chosen: the host would build its view once shown. That the
+    # React item leaves the dock off the stack is pinned above.)
+    rig = _WindowRig()
+    w = rig.window
+    window = _windowWithTheScoreboardDock(rig)
+    dock = w.scoreboard
+    window.show()
+    QApplication.processEvents()
+
+    assert dock.parent() is window
+    assert dock.isHidden() and not dock.isVisible()
+    # No page and no dock of the window's.
+    assert w.stack.indexOf(dock) == -1
+    assert w.dockWidgets == []
+    assert window.dockWidgetArea(dock) == Qt.DockWidgetArea.NoDockWidgetArea
+    assert dock not in QApplication.topLevelWidgets()
+
+    Shiboken.delete(window)
+    assert not Shiboken.isValid(dock)
+
+
+def test_switched_back_the_windows_scoreboard_dock_is_shown_on_the_stack(qapp):
+    from qtpy.QtWidgets import QApplication
+    from shiboken6 import Shiboken
+
+    rig = _WindowRig(qtScoreboard=True)
+    w = rig.window
+    window = _windowWithTheScoreboardDock(rig)
+    window.show()
+    QApplication.processEvents()
+
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    QApplication.processEvents()
+    assert w.stack.currentWidget() is w.scoreboard
+    assert w.scoreboard.isVisible()
+    assert w.dockWidgets == [w.scoreboard]
+    Shiboken.delete(window)
+
+
+def test_the_way_back_is_read_once_per_run(qapp):
+    # S4b decision 11: a change takes effect on the next start (the setting
+    # says so). Switching it after the first choice changes nothing now.
+    rig = _WindowRig()
+    w = rig.window
+    rig.choose(SCOREBOARD)
+
+    rig.qtSetting["scoreboard"] = True
+    assert rig.choose(STREAM) == SCOREBOARD
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert w._webPanelHost._panel == "scoreboard"
+    assert w.stack.indexOf(w.scoreboard) == -1
+    assert rig.reads == ["scoreboard"]
+
+    rig = _WindowRig(qtScoreboard=True)
+    rig.choose(SCOREBOARD)
+    rig.qtSetting["scoreboard"] = False
+    rig.choose(STREAM)
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.window.stack.widget(SCOREBOARD) is rig.window.scoreboard
+    assert rig.window._webPanelHost._panel == "stream"

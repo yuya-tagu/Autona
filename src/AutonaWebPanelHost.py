@@ -56,10 +56,16 @@ makes none, and hands an http(s) one to the default browser, the X post's
 composer among them (S4r). The one new window the view keeps to itself is the
 Board page's Designer (S4s): this server's /web?view=designer, from a click,
 opens AutonaDesignerWindow, which holds the Designer's token. No token reaches
-the page and there is no shell operation for it. The Window builds the host from
-the factory of the first React panel opened and calls ShowPanel() on every
+the page and there is no shell operation for it. The SCORE page's "ブラウザ版を
+開く" (S4aa) is the other: this server's /scoreboard or /team, from a click,
+goes to the default browser as the Qt board's button opens it -- the address
+other devices reach and, with LAN access on, the token -- built here at the
+click, so the token does not reach the page either. The Window builds the host
+from the factory of the first React panel opened and calls ShowPanel() on every
 reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
-straight (S4e: several items, one host page).
+straight (S4e: several items, one host page). A React panel may still be shown
+in its Qt version by one setting while that version is kept
+(QT_FALLBACK_SETTINGS, read when the item is first chosen; S4b, S4aa).
 
 Importing it creates nothing.
 """
@@ -68,7 +74,7 @@ import json
 import logging
 from urllib.parse import quote, urlencode
 
-from qtpy.QtCore import Qt, QTimer, Signal
+from qtpy.QtCore import Qt, QTimer, QUrl, Signal
 from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
@@ -79,7 +85,9 @@ from .AutonaWebPageLifecycle import (
     HiddenPageLifecycle, IsWebServerReady, LocalPageLoader,
     WhenWebServerReady)
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .Helpers.AutonaNetworkHelper import GetLocalIP
 from .core import WebAccess
+from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from . import ui_constants as UI
 
 logger = logging.getLogger(__name__)
@@ -92,6 +100,23 @@ _NAVIGATE_JS = (
 _REQUEST_FULL_STATE_JS = (
     "(function(){var s=window.autonaPanelShell;"
     "if(s){s.refresh();}})()")
+
+
+# The way back to a React panel's Qt version while that version is kept
+# (ADR-005 S4b for Commentary until S4c; S4aa for SCORE until S4ac removes
+# the Qt boards): React panel -> the boolean general setting that shows the
+# Qt panel instead. Off by default.
+QT_FALLBACK_SETTINGS = {
+    "scoreboard": "general.qt_scoreboard_panel",
+}
+
+
+def UsesQtPanel(panel):
+    """Whether the desktop shows ``panel``'s Qt version instead of the React
+    page (the operator's QT_FALLBACK_SETTINGS switch). False for a panel
+    without one, and for anything stored but True."""
+    key = QT_FALLBACK_SETTINGS.get(panel)
+    return bool(key and SettingsManager.Get(key, False) is True)
 
 
 def PanelPath(panel):
@@ -131,6 +156,51 @@ def _IsDesignerUrl(url, pageUrl):
             and not url.userInfo())
 
 
+# The browser version of the scoreboards the SCORE page opens (S4aa): the
+# paths the Qt boards' "ブラウザ版を開く" opens (board 2 "team", board 1
+# "scoreboard"; AutonaScoreboardWidget).
+_BROWSER_SCOREBOARD_PATHS = ("/scoreboard", "/team")
+
+
+def _IsBrowserScoreboardUrl(url, pageUrl):
+    """Whether a new window asks for this server's browser scoreboard: exactly
+    the URL the SCORE page opens (web/src/ScorePage), on the origin of the page
+    asking -- no query, so nothing of the page's own is carried along."""
+    return (_Origin(url) == _Origin(pageUrl)
+            and url.path() in _BROWSER_SCOREBOARD_PATHS
+            and not url.hasQuery()
+            and not url.hasFragment()
+            and not url.userInfo())
+
+
+def BrowserScoreboardUrl(path):
+    """The URL the Qt board's "ブラウザ版を開く" opens for ``path``
+    ("/scoreboard" or "/team"; AutonaScoreboardWidget.webScoreboardUrl and
+    _WebScoreboardOpenUrl), read at the click: the address the web server is
+    reached at (the LAN address with LAN access on), and the access token only
+    with LAN access on, so the same URL works when copied to another device
+    (the page takes it off the address bar: web/src/autonaToken.ts). With LAN
+    access off it has none: a page on this PC needs none.
+
+    The port and LAN access are what the server really listens on
+    (WebServer.Listening(); a change in the settings takes effect at its next
+    start), the settings only while none runs -- as the Stats Display Settings
+    page's Companion URL (AutonaWebOperations.get_stats_overlays). The Qt
+    board's button reads the settings when the board is built."""
+    from .AutonaWebServer import WebServer
+    bound = WebServer.Listening()
+    if bound is None:
+        bound = (SettingsManager.Get("general.webserver_port",
+                                     DEFAULT_WEBSERVER_PORT),
+                 SettingsManager.Get("general.webserver_listen_lan", False))
+    port, lan = bound
+    url = f"http://{GetLocalIP() if lan else '127.0.0.1'}:{port}{path}"
+    token = WebAccess.Token()
+    if not token or not lan:
+        return url
+    return f"{url}?" + urlencode({"token": token})
+
+
 # Loads the host makes itself (load(), the reload of a discarded page).
 _HOST_NAVIGATIONS = (
     QWebEnginePage.NavigationType.NavigationTypeTyped,
@@ -156,8 +226,10 @@ class _PanelPage(QWebEnginePage):
 
     A new window goes to the default browser instead, when it is the web's
     (S4r), but for the Designer's URL, which is the host's (designerRequested,
-    S4s). Script without the operator's click does not get here
-    (JavascriptCanOpenWindows, _EnsureView).
+    S4s), and the browser scoreboard's, which goes to the default browser as
+    the Qt board's button opens it (BrowserScoreboardUrl, S4aa). Script
+    without the operator's click does not get here (JavascriptCanOpenWindows,
+    _EnsureView).
 
     Qt reports a refused navigation as a failed load (loadFinished(False))
     although the document stays: ``refusedLast`` tells the host so, until
@@ -185,6 +257,13 @@ class _PanelPage(QWebEnginePage):
                            "asked for, of %s", url.host())
         elif _IsDesignerUrl(url, self.url()):
             self.designerRequested.emit()
+        elif _IsBrowserScoreboardUrl(url, self.url()):
+            # Rebuilt here, not the page's: the token is never the page's.
+            # The host only in the log (the URL may carry the token).
+            outside = QUrl(BrowserScoreboardUrl(url.path()))
+            if not QDesktopServices.openUrl(outside):
+                logger.warning("The system could not open a link of %s",
+                               outside.host())
         elif not QDesktopServices.openUrl(url):
             logger.warning("The system could not open a link of %s", url.host())
 

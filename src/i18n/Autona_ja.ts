@@ -1790,6 +1790,13 @@ OBS のブラウザソースと Web UI は動作しません。
         <translation>個別ゲームトラッカーを無効化（再起動後に反映）</translation>
     </message>
 </context><context>
+    <name>settings.qt_scoreboard_panel</name>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="115" />
+        <source>Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)</source>
+        <translation>スコアボード入力パネルを従来版（Qt）で表示する（パネルを開いた後の変更は再起動後に反映）</translation>
+    </message>
+</context><context>
     <name>settings.disable_overwrite</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="90" />

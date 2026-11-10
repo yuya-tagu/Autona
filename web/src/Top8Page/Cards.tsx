@@ -174,13 +174,16 @@ function Flag({asset}: {asset: unknown}) {
     ) : null;
 }
 
-function CountryField({code, countries, send}: {
+// Shared with the SCORE page's player details (S4aa), which names it its own
+// way (`label`).
+export function CountryField({code, countries, send, label}: {
     // The state's country code ("" none).
     code: string;
     // GET /api/v1/countries; null while the country data is not loaded
     // (NOT_READY): the field is disabled, showing the state's code.
     countries: CountryEntry[] | null;
     send: (code: string) => unknown;
+    label?: string;
 }) {
     const [shown, choose] = useStateChoice(code, send);
     // First row wins, as core's (CountryCatalog.CountryByCode).
@@ -221,7 +224,7 @@ function CountryField({code, countries, send}: {
             renderInput={({InputProps, ...params}) => (
                 <TextField
                     {...params}
-                    label={i18n.t("top8_country")}
+                    label={label ?? i18n.t("top8_country")}
                     // The chosen country's flag ahead of its name.
                     slotProps={{input: {
                         ...InputProps,
