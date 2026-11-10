@@ -67,6 +67,35 @@ def _in_work_dir():
 PREFIX = "score.1"
 
 
+def _drop_held(prefix):
+    # Forget a held registration and everything it left behind, then remove
+    # the subtree so no pending/published value survives.
+    with SM.lock:
+        SM.heldPrefixes.discard(prefix)
+        SM.heldKeys.pop(prefix, None)
+        SM.heldExempt.pop(prefix, None)
+        SM._commitPrefixes.discard(prefix)
+        SM._heldTouched.discard(prefix)
+        SM._heldCommitted.discard(prefix)
+    SM.Unset(prefix)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _release_module_held_prefixes():
+    # StateManager is process-global and tests in this file build on each
+    # other's state, so cleanup is per module, not per test. Without it the
+    # held registrations (and the unpublished edits left under them) leak
+    # into later modules, e.g. a stale dirty flag on score.2.
+    yield
+    os.chdir(_WORK_DIR)     # Unset() exports to ./out (same reason as _in_work_dir)
+    try:
+        for prefix in (PREFIX, EX_PREFIX):
+            _drop_held(prefix)
+        _join_export()
+    finally:
+        os.chdir(_ORIGINAL_CWD)
+
+
 class _Spy:
     # Subscribes to the core channels directly (headless core Step 1): no
     # Qt involved, which is the point -- the state layer's notifications are
@@ -345,13 +374,7 @@ def _heldOnlyBoard():
     SM.HoldSubtree(HELD_ONLY_PREFIX)
     _join_export()
     yield HELD_ONLY_PREFIX
-    with SM.lock:
-        SM.heldPrefixes.discard(HELD_ONLY_PREFIX)
-        SM.heldKeys.pop(HELD_ONLY_PREFIX, None)
-        SM._commitPrefixes.discard(HELD_ONLY_PREFIX)
-        SM._heldTouched.discard(HELD_ONLY_PREFIX)
-        SM._heldCommitted.discard(HELD_ONLY_PREFIX)
-    SM.Unset(HELD_ONLY_PREFIX)
+    _drop_held(HELD_ONLY_PREFIX)
 
 
 def test_a_held_only_save_block_never_diffs(monkeypatch, _heldOnlyBoard):
