@@ -720,8 +720,11 @@ StateManagerBridge.instance.held_state_updated.emit("score.2")
 # What a board follows (ADR-005 S4v): core's channel, from __init__ too.
 from src.core.SetFollowService import SetFollowService
 SetFollowService.changes.notify(1)
+# The battle format (ADR-005 S4z): core's channel, from __init__ too.
+from src.core.Actions import AutonaActions
+AutonaActions.battleFormatChanges.notify("team")
 deadline = time.monotonic() + 10
-while len(notices) < 3 and time.monotonic() < deadline:
+while len(notices) < 4 and time.monotonic() < deadline:
     time.sleep(0.02)
 WebServer.ws_emit = real_emit
 
@@ -783,7 +786,8 @@ def test_web_server_thread_serves_stops_and_reports_a_failed_start(
     assert result["notices"] == [
         ["scoreboard_pending", {"board": 1, "dirty": False}],
         ["scoreboard_pending", {"board": 2, "dirty": False}],
-        ["scoreboard_follow", {"board": 1}]]
+        ["scoreboard_follow", {"board": 1}],
+        ["battle_format", {}]]
     # stop() joins the delta flusher too: no AutonaWebServer* thread is
     # left below (server_threads).
     assert result["stopped"] is True

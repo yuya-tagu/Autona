@@ -1102,3 +1102,146 @@ def test_a_follow_notice_goes_out_with_the_state_lock_held(flusher):
     assert not thread.is_alive()
     assert arrived == [True]
     assert flusher.stop() is True
+
+
+# ── the battle format's notice (ADR-005 S4z) ─────────────────────────────
+# AutonaActions.battleFormatChanges becomes one `battle_format` {}: no value
+# (the client reads GET /battle-format), to everyone (that GET is a READ),
+# after the deltas and the other notices of its flush, from the flusher.
+
+FORMAT = "battle_format"
+
+
+@pytest.fixture
+def formats(monkeypatch, debounce):
+    monkeypatch.setattr(WebServer, "_follow_notices", set())
+    monkeypatch.setattr(WebServer, "_battle_format_notice", False)
+    return debounce
+
+
+def _switchedAt(debounce, ms, fmt="team"):
+    debounce._fireUntil(_at(ms))
+    debounce.clock.now = _at(ms)
+    WebServer.on_battle_format_change(fmt)
+
+
+def test_a_battle_format_notice_goes_out_at_once_to_everyone(formats):
+    _switchedAt(formats, 0)
+    formats._fireUntil(None)
+    assert formats.sent == [(0, FORMAT, [{}], {})]
+
+
+def test_a_flush_tells_the_format_once(formats):
+    _switchedAt(formats, 0, "team")
+    WebServer.on_battle_format_change("crew")
+    WebServer.on_battle_format_change("singles")
+    formats._fireUntil(None)
+    assert formats.sent == [(0, FORMAT, [{}], {})]
+
+
+def test_a_battle_format_notice_goes_after_the_deltas_and_the_follow(formats):
+    formats.arrive(0, _changes(1))
+    formats.arrive(10, _changes(2))
+    _switchedAt(formats, 20)
+    WebServer.on_follow_change(1)
+    formats.arrive(30, _changes(3))
+    formats._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in formats.sent] == [
+        (0, "program_state_update"), (60, "program_state_update"),
+        (60, FOLLOW), (60, FORMAT)]
+
+
+def test_the_deltas_schedule_does_not_follow_a_format_notice(formats):
+    _switchedAt(formats, 0)
+    formats.arrive(10, _changes(1))
+    formats._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in formats.sent] == [
+        (0, FORMAT), (10, "program_state_update")]
+
+
+def test_a_failed_format_notice_takes_nothing_with_it(formats):
+    formats.fail = RuntimeError("the socket said no")
+    _switchedAt(formats, 0)
+    formats._fireUntil(None)
+    formats.fail = None
+    # Not sent again: the next one is the next switch's.
+    formats._fireUntil(None)
+    assert formats.sent == []
+    _switchedAt(formats, 100)
+    formats._fireUntil(None)
+    assert formats.sent == [(100, FORMAT, [{}], {})]
+
+
+def test_without_a_flusher_a_format_notice_is_not_kept(formats, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    WebServer.on_battle_format_change("team")
+    assert WebServer._battle_format_notice is False
+    assert formats.driver.due() is None
+
+
+def _formatOnly(sends):
+    with sends.cond:
+        return [(event, payload) for _t, _at, event, payload in sends.sent
+                if event == FORMAT]
+
+
+def test_the_flusher_sends_a_format_notice_on_its_own_thread(flusher):
+    flusher.start()
+    thread = WebServer._delta_thread
+
+    WebServer.on_battle_format_change("team")
+
+    assert flusher.waitFor(1)
+    assert _formatOnly(flusher) == [(FORMAT, {})]
+    assert flusher.threads() == [thread]
+    assert flusher.stop() is True
+
+
+def test_a_format_notice_follows_the_deltas_from_the_flusher(
+        flusher, monkeypatch):
+    """The flusher's own take and send: a page that reads the format after
+    the notice has the deltas of that flush by then."""
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    flusher.start()
+    WebServer.on_program_state_update(_changes(1))      # the leading edge
+    assert flusher.waitFor(1)
+    WebServer.on_program_state_update(_changes(2, 150))  # a 200 ms window
+    WebServer.on_battle_format_change("crew")            # in it
+    assert flusher.stop() is True
+
+    assert [event for _t, _at, event, _p in flusher.sent] == [
+        "program_state_update", "program_state_update", FORMAT]
+
+
+def test_a_new_start_starts_with_no_format_notice(flusher, monkeypatch):
+    flusher.start()
+    assert flusher.stop() is True
+    monkeypatch.setattr(WebServer, "_battle_format_notice", True)
+
+    flusher.start()
+    WebServer.on_held_change("score.1")
+    assert flusher.waitFor(1)
+    assert flusher.stop() is True
+    assert _formatOnly(flusher) == []
+
+
+def test_a_format_notice_is_queued_with_the_state_lock_held(flusher):
+    # agent-pitfalls #17: a switch may be told under StateManager.lock (a
+    # board operation's thread). Only queued there: the flusher sends it.
+    from src.core.StateManager import StateManager
+
+    flusher.start()
+    arrived = []
+
+    def writer():
+        with StateManager.lock:
+            WebServer.on_battle_format_change("team")
+            arrived.append(flusher.waitFor(1, timeout=30))
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive()
+    assert arrived == [True]
+    assert flusher.stop() is True

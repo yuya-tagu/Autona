@@ -870,10 +870,31 @@ class ThumbnailService(RenderLane):
     def _ReadRender(self):
         return schema.ReadThumbnailRender()
 
+    def Generate(self, board=RENDER_BOARD):
+        """RenderLane.Generate, of board `board` (1 / 2; ADR-005 S4z, v1's
+        POST /thumbnail:generate's `board`). A preview draws RENDER_BOARD:
+        the previews kept are drawn together, and the preview is the
+        thumbnail page's. A generate of RENDER_BOARD updates the preview
+        image too and stands in for a kept preview, as before; one of
+        another board does neither (_GenerateDrawsPreview), so that no
+        preview is answered with another board's picture."""
+        return super().Generate(board)
+
+    def _GenerateDrawsPreview(self, target):
+        # The preview is RENDER_BOARD's (None: RenderLane's own default).
+        return target is None or target == RENDER_BOARD
+
+    def _RenderBoard(self, kind):
+        """The board a run of `kind` draws."""
+        if kind == GENERATE:
+            return self._GenerateTarget() or RENDER_BOARD
+        return RENDER_BOARD
+
     def _RunPayload(self, kind):
         return self.RenderPayload(
             preview=kind == PREVIEW, games=GameAssetCatalog.instance,
-            board=RENDER_BOARD)
+            board=self._RenderBoard(kind))
 
     def _OutputStem(self, data):
-        return OutputStem(data, RENDER_BOARD)
+        # Only a generate saves an image (RenderLane._Save).
+        return OutputStem(data, self._RenderBoard(GENERATE))

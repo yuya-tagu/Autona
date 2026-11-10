@@ -1301,6 +1301,178 @@ def test_a_kept_generate_stands_in_for_a_kept_preview(match, executor):
     assert match.render()["path"].startswith("out/thumbnails/")
 
 
+# ── a generate of board 2 (ADR-005 S4z) ──────────────────────────────────
+# v1's POST /thumbnail:generate takes a `board`: the run draws that board's
+# match and names the files after it. A preview draws board 1, whatever.
+
+def _drawnBoard(asked):
+    return asked.payload[1]["scoreboardNumber"]
+
+
+def _saved(env):
+    return [path.stem for path in
+            sorted((env.dir / "out" / "thumbnails").glob("*.png"))]
+
+
+def test_a_generate_of_board_2_draws_and_names_board_2(match, executor):
+    assert match.service.Generate(2) == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 2
+    match.renderer.answer()
+    executor.drain(WAIT)
+
+    [stem] = _saved(match)
+    assert stem.startswith("Charlie-vs-Echo-2")
+    assert match.render()["path"] == f"out/thumbnails/{stem}.png"
+    # The preview image is board 1's: a generate of board 2 does not write it
+    # (S4z review).
+    assert match.service.PreviewImage() is None
+
+    # The next one without a board is board 1 again.
+    assert match.service.Generate() == 2
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+
+
+def test_a_kept_generate_of_board_2_draws_board_2_after_the_preview(
+        match, executor):
+    assert match.service.Preview() == 1
+    assert match.service.Generate(2) == 2
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+    match.renderer.answer()
+    executor.drain(WAIT)
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 2
+    match.renderer.answer()
+    executor.drain(WAIT)
+    [stem] = _saved(match)
+    assert stem.startswith("Charlie-vs-Echo-2")
+
+
+def test_a_preview_after_a_generate_of_board_2_draws_board_1(match, executor):
+    assert match.service.Generate(2) == 1
+    assert match.service.Preview() == 2
+    match.renderer.answer()
+    executor.drain(WAIT)
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+
+
+def test_a_busy_generate_does_not_change_the_board_of_the_one_on_its_way(
+        match, executor):
+    assert match.service.Generate(1) == 1
+    assert match.service.Generate(2) == thumbnails.BUSY
+    match.renderer.answer()
+    executor.drain(WAIT)
+
+    [stem] = _saved(match)
+    assert stem.startswith("Alpha-vs-Bravo-2")
+
+
+def test_a_generate_of_board_2_leaves_the_preview_image_as_it_was(
+        match, executor):
+    assert match.service.Preview() == 1
+    match.renderer.answer(b"board one")
+    executor.drain(WAIT)
+    assert match.service.PreviewImage() == b"board one.PNG"
+
+    assert match.service.Generate(2) == 2
+    match.renderer.answer(b"board two")
+    executor.drain(WAIT)
+
+    [stem] = _saved(match)
+    assert (match.dir / "out" / "thumbnails" / f"{stem}.png").read_bytes() \
+        == b"board two.PNG"
+    assert match.render() == {"status": "done", "error": "", "revision": 2,
+                              "path": f"out/thumbnails/{stem}.png"}
+    assert match.service.PreviewImage() == b"board one.PNG"
+    assert match.queued == []
+
+
+@pytest.mark.parametrize("board", [(), (1,)], ids=["no board", "board 1"])
+def test_a_kept_generate_of_board_1_stands_in_for_the_preview(
+        match, executor, board):
+    # The lane's rule, unchanged for board 1 (with v1's `board: 1` too): the
+    # kept generate draws the picture the kept preview would have, writes
+    # the preview and answers it; nothing is drawn after it.
+    assert match.service.Preview() == 1
+    assert match.service.Preview() == 2
+    assert match.service.Generate(*board) == 2
+    assert match.service.Preview() == 2
+    match.renderer.answer(b"first")
+    executor.drain(WAIT)
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+    match.renderer.answer(b"board one")
+    executor.drain(WAIT)
+    assert match.queued == [] and match.renderer.asked == []
+    assert match.render()["revision"] == 2
+    assert match.service.PreviewImage() == b"board one.PNG"
+
+
+def test_a_kept_preview_is_drawn_after_a_generate_of_board_2_as_board_1(
+        match, executor):
+    # S4z review: a generate of board 2 does not stand in for a kept preview
+    # -- no preview is answered with another board's picture. The preview
+    # (answered 2, before the generate came) is drawn after the generate,
+    # as board 1, under the next revision: as a preview owed after a
+    # stand-in that found no match is.
+    assert match.service.Preview() == 1
+    assert match.service.Preview() == 2
+    assert match.service.Generate(2) == 2
+    match.renderer.answer(b"first")
+    executor.drain(WAIT)
+    assert match.service.PreviewImage() == b"first.PNG"
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 2
+    match.renderer.answer(b"board two")
+    executor.drain(WAIT)
+    [stem] = _saved(match)
+    assert stem.startswith("Charlie-vs-Echo-2")
+    assert match.render() == {"status": "done", "error": "", "revision": 2,
+                              "path": f"out/thumbnails/{stem}.png"}
+    # What GET /thumbnail/preview reads: still board 1's.
+    assert match.service.PreviewImage() == b"first.PNG"
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+    assert match.render()["status"] == "running"
+    assert match.render()["revision"] == 3
+    match.renderer.answer(b"board one")
+    executor.drain(WAIT)
+    assert match.render() == {"status": "done", "error": "", "revision": 3,
+                              "path": f"out/thumbnails/{stem}.png"}
+    assert match.service.PreviewImage() == b"board one.PNG"
+    assert match.queued == [] and match.renderer.asked == []
+
+
+def test_a_preview_asked_after_a_kept_generate_of_board_2_is_drawn_after_it(
+        match, executor):
+    assert match.service.Preview() == 1
+    assert match.service.Generate(2) == 2
+    # The revision of the run that draws it: the one after the generate's.
+    assert match.service.Preview() == 3
+    assert match.service.Preview() == 3
+    match.renderer.answer(b"first")
+    executor.drain(WAIT)
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 2
+    match.renderer.answer(b"board two")
+    executor.drain(WAIT)
+    assert match.service.PreviewImage() == b"first.PNG"
+
+    assert match.run_queued() == 1
+    assert _drawnBoard(match.renderer.asked[0]) == 1
+    match.renderer.answer(b"board one")
+    executor.drain(WAIT)
+    assert match.render()["revision"] == 3
+    assert match.service.PreviewImage() == b"board one.PNG"
+    assert match.queued == [] and match.renderer.asked == []
+
+
 def _no_players(env, monkeypatch):
     """A game and no players, in the state and the exported file: a
     generate has no match to save, a preview draws a placeholder."""
@@ -1311,16 +1483,19 @@ def _no_players(env, monkeypatch):
     (env.dir / "out" / "program_state.json").write_text(json.dumps(program))
 
 
+@pytest.mark.parametrize("board", [(), (1,)], ids=["no board", "board 1"])
 @pytest.mark.parametrize("kept", [("generate", "preview"),
                                   ("preview", "generate")])
 def test_a_generate_with_no_match_still_draws_the_preview_it_stood_in_for(
-        env, executor, monkeypatch, kept):
+        env, executor, monkeypatch, kept, board):
     # S4p review: the preview asked for was answered with the generate's
-    # revision; it is not lost with the generate's missing match.
+    # revision; it is not lost with the generate's missing match. Board 1
+    # with v1's `board: 1` too (S4z review), and the preview is board 1's.
     _no_players(env, monkeypatch)
     assert env.service.Preview() == 1
     for kind in kept:
-        assert getattr(env.service, kind.capitalize())() == 2
+        args = board if kind == "generate" else ()
+        assert getattr(env.service, kind.capitalize())(*args) == 2
 
     env.renderer.answer()
     executor.drain(WAIT)
@@ -1335,11 +1510,41 @@ def test_a_generate_with_no_match_still_draws_the_preview_it_stood_in_for(
 
     assert env.render() == {"status": "running", "path": "", "error": "",
                             "revision": 3}
+    assert _drawnBoard(env.renderer.asked[0]) == 1
     data, _config, _template = env.renderer.asked[0].payload
     assert data["score"]["1"]["match"] == "Winners Final"  # a placeholder
     env.renderer.answer(b"placeholder")
     executor.drain(WAIT)
     assert env.render()["status"] == "done"
+    assert env.service.PreviewImage() == b"placeholder.PNG"
+    assert env.queued == []
+
+
+@pytest.mark.parametrize("kept, answers", [
+    (("generate", "preview"), (2, 3)), (("preview", "generate"), (2, 2))])
+def test_a_generate_of_board_2_with_no_match_is_followed_by_the_kept_preview(
+        env, executor, monkeypatch, kept, answers):
+    # Not a stand-in (S4z review): the preview kept beside it is drawn after
+    # it whatever it ends with, as board 1.
+    _no_players(env, monkeypatch)
+    assert env.service.Preview() == 1
+    for kind, answer in zip(kept, answers):
+        args = (2,) if kind == "generate" else ()
+        assert getattr(env.service, kind.capitalize())(*args) == answer
+
+    env.renderer.answer()
+    executor.drain(WAIT)
+    env.queued.pop(0)()  # the generate: no match, nothing drawn
+
+    assert env.renderer.asked == []
+    assert env.render()["error"] == thumbnails.NO_PLAYER
+    assert env.render()["revision"] == 2
+
+    env.queued.pop(0)()  # the preview
+    assert env.render()["revision"] == 3
+    assert _drawnBoard(env.renderer.asked[0]) == 1
+    env.renderer.answer(b"placeholder")
+    executor.drain(WAIT)
     assert env.service.PreviewImage() == b"placeholder.PNG"
     assert env.queued == []
 

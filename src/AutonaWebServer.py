@@ -931,6 +931,9 @@ class WebServer:
         # And for what a board follows (S4v).
         StateManagerBridge.instance.follow_changed.connect(
             WebServer.on_follow_change)
+        # And for the battle format (ADR-005 S4z).
+        StateManagerBridge.instance.battle_format_changed.connect(
+            WebServer.on_battle_format_change)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
@@ -1000,6 +1003,9 @@ class WebServer:
     # The boards whose follow changed since the last flush: its
     # `scoreboard_follow` notices (on_follow_change).
     _follow_notices = set()
+    # Whether the battle format changed since the last flush: its
+    # `battle_format` notice (on_battle_format_change).
+    _battle_format_notice = False
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -1034,11 +1040,13 @@ class WebServer:
             after = WebServer._take_after_deltas()
             notices = WebServer._take_held_notices()
             follows = WebServer._take_follow_notices()
+            battleFormat = WebServer._take_battle_format_notice()
         if payload is not None:
             WebServer._send_deltas(payload)
         WebServer._run_after_deltas(after)
         WebServer._send_held_notices(notices)
         WebServer._send_follow_notices(follows)
+        WebServer._send_battle_format_notice(battleFormat)
 
     @staticmethod
     def _after_pending_deltas(fn):
@@ -1261,6 +1269,48 @@ class WebServer:
             except Exception:
                 logger.error(traceback.format_exc())
 
+    # ── The battle format's notice (ADR-005 S4z) ─────────────────────
+    # `battle_format` {}: the battle format changed (AutonaActions
+    # .SetBattleFormat's battleFormatChanges, which a switch to the format in
+    # force does not notify); GET /api/v1/battle-format reads it. As the
+    # follow's notice: no value, sent by the one flusher after the batch's
+    # deltas and the other notices, to everyone (the route is READ), not
+    # debounced, several in one flush are one notice. S4x decided against a
+    # notice ("the format is a setting"); the React SCORE page shows the
+    # format's board and has to follow a switch made elsewhere (the sidebar,
+    # another client, a hotkey), so S4z adds this one.
+
+    @staticmethod
+    def on_battle_format_change(_fmt=None):
+        """StateManagerBridge.battle_format_changed. Queues and notifies
+        only, like on_follow_change: a switch is told on whichever thread
+        made it."""
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
+            WebServer._battle_format_notice = True
+            if WebServer._delta_due is None:
+                WebServer._delta_due = WebServer._delta_clock()
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _take_battle_format_notice():
+        """Whether to tell about the format in this flush. Called holding
+        _delta_cond."""
+        notice = WebServer._battle_format_notice
+        WebServer._battle_format_notice = False
+        return notice
+
+    @staticmethod
+    def _send_battle_format_notice(notice):
+        # Outside _delta_cond, like a send.
+        if not notice:
+            return
+        try:
+            WebServer.ws_emit('battle_format', {})
+        except Exception:
+            logger.error(traceback.format_exc())
+
     @staticmethod
     def _run_delta_flusher(generation):
         """The flusher thread: send each batch when it is due, and the one
@@ -1298,11 +1348,13 @@ class WebServer:
                 after = WebServer._take_after_deltas()
                 notices = WebServer._take_held_notices()
                 follows = WebServer._take_follow_notices()
+                battleFormat = WebServer._take_battle_format_notice()
             if payload is not None:
                 WebServer._send_deltas(payload)
             WebServer._run_after_deltas(after)
             WebServer._send_held_notices(notices)
             WebServer._send_follow_notices(follows)
+            WebServer._send_battle_format_notice(battleFormat)
             if not running:
                 return
 
@@ -1323,6 +1375,7 @@ class WebServer:
             WebServer._delta_pending_first_revision = -1
             WebServer._held_notices = set()
             WebServer._follow_notices = set()
+            WebServer._battle_format_notice = False
             WebServer._delta_due = (
                 WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()

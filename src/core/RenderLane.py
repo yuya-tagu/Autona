@@ -17,6 +17,12 @@ The lane, one run at a time:
   preview: it draws the same picture and updates the preview's file too. One
   that finds nothing to save (RenderDataMissing, with one of MISSING_CODES) is
   followed by the preview it stood in for, which draws a placeholder.
+  Unless the service says the generate draws another picture than the
+  preview's (``_GenerateDrawsPreview``: ThumbnailService's board 2, ADR-005
+  S4z): that one neither stands in for a preview nor writes the preview's
+  file, and a preview kept with it is drawn after it, under the next revision
+  (the one asked before the generate came is answered by that later run, as
+  a preview owed after a stand-in is).
 - A generate while one runs or is kept: BUSY (nothing changes).
 - Every run gets the next revision, which Preview / Generate answer whether it
   starts now or is kept: a client knows which published result is its own.
@@ -136,6 +142,15 @@ class RenderLane:
         self._revision = 0
         self._nextHasPreview = False
         self._runHasPreview = False
+        # What the generate kept or running draws (Generate's `target`, the
+        # service's own: ThumbnailService's board, ADR-005 S4z). One field
+        # is enough: a second generate is BUSY until the first has ended,
+        # which is after its payload and its file name were made.
+        self._generateTarget = None
+        # A preview to draw after the kept generate, which does not draw the
+        # preview's picture (_GenerateDrawsPreview). Set only while a
+        # generate is kept: when that one starts, this is what is kept next.
+        self._previewAfter = False
 
         # What a crash left of the temporary files (ImageImport.WriteFile).
         # Their names vary, hence the wildcards: only ours are in these
@@ -166,6 +181,12 @@ class RenderLane:
         """The name of a saved image, without its extension."""
         raise NotImplementedError
 
+    def _GenerateDrawsPreview(self, target) -> bool:
+        """Whether a generate of `target` draws the preview's picture: if so
+        it stands in for a kept preview and writes the preview's file too.
+        Called under the lane's lock (it must not take it)."""
+        return True
+
     # ── the requests ─────────────────────────────────────────────────────
 
     def Preview(self):
@@ -174,11 +195,18 @@ class RenderLane:
         many of these came in during a run."""
         return self._Request(PREVIEW)
 
-    def Generate(self):
+    def Generate(self, target=None):
         """Draw and save an image in the background, which also updates the
-        preview image: the revision of the run that will. BUSY (nothing
-        changes) while one is on its way."""
-        return self._Request(GENERATE)
+        preview image (unless _GenerateDrawsPreview says otherwise): the
+        revision of the run that will. BUSY (nothing changes) while one is on
+        its way. `target` is the service's to read when the run is made
+        (_GenerateTarget): what this generate draws."""
+        return self._Request(GENERATE, target)
+
+    def _GenerateTarget(self):
+        """The `target` of the generate kept or running (None for none)."""
+        with self._laneLock:
+            return self._generateTarget
 
     def PreviewImage(self):
         """The preview image's bytes (a PNG); None while there is none. Read
@@ -192,17 +220,28 @@ class RenderLane:
 
     # ── the lane ─────────────────────────────────────────────────────────
 
-    def _Request(self, kind):
+    def _Request(self, kind, target=None):
         last = self._ReadRender()["revision"]
         with self._laneLock:
             self._revision = max(self._revision, last)
             if kind == GENERATE and GENERATE in (self._running, self._next):
                 return BUSY
+            if kind == GENERATE:
+                self._generateTarget = target
             if self._running is not None:
-                # A preview and a generate kept together are the generate.
                 if PREVIEW in (kind, self._next) \
                         and GENERATE in (kind, self._next):
-                    self._nextHasPreview = True
+                    if self._GenerateDrawsPreview(self._generateTarget):
+                        # A preview and a generate kept together are the
+                        # generate.
+                        self._nextHasPreview = True
+                    else:
+                        # Two runs: the generate, then the preview.
+                        self._previewAfter = True
+                        self._next = GENERATE
+                        if kind == PREVIEW:
+                            return self._revision + 2
+                        return self._revision + 1
                 if self._next != GENERATE:
                     self._next = kind
                 return self._revision + 1
@@ -333,18 +372,23 @@ class RenderLane:
                             self.OUTPUT_KEEP, protect=target)
             # Relative to the app directory, "/" separated.
             saved = target.as_posix()
-        writeBegan = time.monotonic()
-        try:
-            ImageImport.WriteFile(self.PREVIEW_PATH, png)
-        except OSError:
-            if kind == PREVIEW:
-                logger.opt(exception=True).error(
-                    f"{self.LOG_NAME}: the image could not be saved")
-                return ERROR, SAVE_FAILED
-            # The image is saved, which is what was asked for.
-            logger.opt(exception=True).warning(
-                f"{self.LOG_NAME}: the preview image could not be updated")
-        writing += time.monotonic() - writeBegan
+        # The generate running is the one whose target this is: another is
+        # BUSY until this one has ended.
+        if kind == PREVIEW \
+                or self._GenerateDrawsPreview(self._GenerateTarget()):
+            writeBegan = time.monotonic()
+            try:
+                ImageImport.WriteFile(self.PREVIEW_PATH, png)
+            except OSError:
+                if kind == PREVIEW:
+                    logger.opt(exception=True).error(
+                        f"{self.LOG_NAME}: the image could not be saved")
+                    return ERROR, SAVE_FAILED
+                # The image is saved, which is what was asked for.
+                logger.opt(exception=True).warning(
+                    f"{self.LOG_NAME}: the preview image could not be "
+                    "updated")
+            writing += time.monotonic() - writeBegan
         jpgPart = (f", JPG {len(jpg)} bytes in {_Ms(encoded - pngDone)} ms"
                    if jpg is not None else "")
         logger.debug(
@@ -392,6 +436,11 @@ class RenderLane:
             # its "running" overwritten by this result.
             with self._laneLock:
                 following, self._next = self._next, None
+                if self._previewAfter:
+                    # The kept generate starts: the preview after it is
+                    # what is kept now.
+                    self._next = PREVIEW
+                    self._previewAfter = False
                 self._runHasPreview, self._nextHasPreview = \
                     self._nextHasPreview, False
                 previewOwed = following is None and previewOwed

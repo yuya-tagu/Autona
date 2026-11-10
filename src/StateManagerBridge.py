@@ -74,6 +74,7 @@ class StateManagerBridge(QObject):
     # the format ("singles" / "team" / "crew"). Emitted on the switching
     # thread: the window's slot runs at once on the GUI thread (the sidebar,
     # v1 through the desktop board host's Run) and is queued from any other.
+    # The web server's (`battle_format` to its clients, ADR-005 S4z) too.
     battle_format_changed = Signal(str)
 
     def __init__(self, parent=None):

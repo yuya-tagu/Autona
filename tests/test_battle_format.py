@@ -391,6 +391,56 @@ def test_headless_switches_without_a_window(autonaApp, client, settings,
         autonaApp.settle()
 
 
+# ── the web server's notice (ADR-005 S4z) ────────────────────────────────
+
+@pytest.fixture
+def notices(monkeypatch):
+    """The `battle_format` notices the web server sends, the bridge's
+    signal connected to it the way WebServer() connects it (the harness
+    builds no web server), the flusher driven without its thread. Yields a
+    call that flushes and returns what was sent since the last one."""
+    from src.AutonaWebServer import WebServer
+    from tests.test_webserver_delta_debounce import FORMAT, _Debounce
+    monkeypatch.setattr(WebServer, "_held_notices", set())
+    monkeypatch.setattr(WebServer, "_follow_notices", set())
+    monkeypatch.setattr(WebServer, "_battle_format_notice", False)
+    debounce = _Debounce(monkeypatch)
+    bridge = StateManagerBridge.instance
+    bridge.battle_format_changed.connect(WebServer.on_battle_format_change)
+
+    def sent():
+        debounce._fireUntil(None)
+        found = [(event, args) for _ms, event, args, _kw in debounce.sent
+                 if event == FORMAT]
+        debounce.sent.clear()
+        return found
+
+    try:
+        yield sent
+    finally:
+        bridge.battle_format_changed.disconnect(
+            WebServer.on_battle_format_change)
+
+
+def test_a_switch_is_one_notice_and_no_switch_is_none(
+        autonaApp, client, shell, notices, told):
+    _put(client, "team")
+    autonaApp.settle()
+    assert notices() == [("battle_format", [{}])]
+
+    # The format in force: nothing to tell.
+    assert _put(client, "team")["data"]["changed"] is False
+    autonaApp.settle()
+    assert notices() == []
+
+    _put(client, "crew")
+    _put(client, "singles")
+    autonaApp.settle()
+    # Two switches before a flush: one notice (the page reads the format).
+    assert notices() == [("battle_format", [{}])]
+    assert told == ["team", "crew", "singles"]
+
+
 # ── who may ──────────────────────────────────────────────────────────────
 
 def test_the_read_is_open_and_the_switch_needs_this_pc_or_the_token(

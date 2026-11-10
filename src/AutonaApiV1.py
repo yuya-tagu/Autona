@@ -41,6 +41,7 @@ from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import PlayerDirectory
+from .core import PlayerService
 from .core import ResultService as results
 from .core import SetSelectionService as selection
 from .core import StreamService as streams
@@ -1163,6 +1164,37 @@ def set_update(n):
     return ok(revision=current_revision())
 
 
+@api_v1.route("/scoreboards/<int:n>/match", methods=["PATCH"])
+@write_op("match.update")
+def match_update(n):
+    # Some of {"phase", "pool", "match": str ("" empties it), "bestOf": an
+    # integer 0..99 (0 included)}: board 1/2's match bar as its own inputs
+    # write it (AutonaActions.SetMatchField / SetBestOf; ADR-005 S4z), in one
+    # save cycle. Not PATCH set, which reads them as a set's payload does
+    # (SetLoadService.ApplyMatchInfo: a blank phase or match is "not
+    # carried", bestOf 0 too, and match_en is emptied): match_en is not
+    # touched here. Checked as the crew board's PATCH set is: an empty body,
+    # an unknown key or a value of another type is 400, nothing written. On
+    # the desktop the board is held: the revision is the last published one.
+    require_board_12(n)
+    body = _json_body()
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "nothing to set", 400)
+    fields = {}
+    for key, value in body.items():
+        if key in schema.SCORE_MATCH_FIELDS:
+            if not isinstance(value, str):
+                raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+            fields[key] = value
+        elif key == "bestOf":
+            fields[key] = _crew_int(body, key, 0, AutonaActions.BEST_OF_MAX)
+        else:
+            raise ApiError(
+                INVALID_ARGUMENT, f"the match bar has no field {key}", 400)
+    WebOps.update_match(n, fields)
+    return ok(revision=current_revision())
+
+
 @api_v1.route("/scoreboards/<int:n>/score:set", methods=["POST"])
 @write_op("score.set")
 def score_set(n):
@@ -1266,29 +1298,207 @@ def player_update(n, t, p):
     return ok(revision=current_revision())
 
 
-@api_v1.route(
-    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load", methods=["POST"])
-@write_op("player.load", log_keys_only=True)
-def player_load(n, t, p):
-    # {"tag"}: load the local database's player of that gamer tag (ignoring
-    # case; no sponsor) into the slot, clearing it first (ADR-005 S4m; the
-    # legacy -load-player-from-tag- route's operation, and the player list's
-    # "set to P1 / P2"). Unlike PATCH players, `t` is the set's team: after
-    # a swap team 1 lands on state team 2, as the legacy route's. An unknown
-    # tag or a slot the team does not have: 404, with no tag in the message.
+# The card's fields PATCH .../fields takes (ADR-005 S4z): v1's names (those
+# of PATCH players and GET /players) -> the slot's keys.
+_PLAYER_FIELD_KEYS = {
+    "prefix": schema.PLAYER_SPONSOR_KEY,
+    "gamerTag": schema.PLAYER_TAG_KEY,
+    "name": schema.PLAYER_REAL_NAME_KEY,
+    "twitter": schema.PLAYER_TWITTER_KEY,
+    "custom_textbox": schema.PLAYER_NOTE_KEY,
+}
+_PLAYER_LOCATION_FIELDS = ("country_code", "state_code")
+
+
+def _player_slot(n, t, p):
+    """A board 1/2 player slot's address, checked (400)."""
     require_board_12(n)
     _validate_team(t)
     if p < 1:
         raise ApiError(INVALID_ARGUMENT, "player must be 1 or greater", 400)
-    tag = _json_body().get("tag")
-    if not isinstance(tag, str) or not tag:
-        raise ApiError(INVALID_ARGUMENT, "tag must be a non-empty string", 400)
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>/fields",
+    methods=["PATCH"])
+@write_op("player.fields", log_keys_only=True)
+def player_fields_update(n, t, p):
+    # Some of {"prefix", "gamerTag", "name" (the real name), "twitter",
+    # "custom_textbox": str ("" empties it; the note's line breaks are "\n"),
+    # "country_code": a code of GET /countries ("" empties it), "state_code":
+    # a region of that country -- the one sent, else the one the slot shows
+    # ("" empties it)}: the slot of state team `t` as the desktop card's
+    # inputs write it (PlayerService.Edit; ADR-005 S4z), in one save cycle.
+    # Not PATCH players, which loads what it is sent (a blank field is not
+    # carried, the local database is merged in, a new name empties the
+    # city): here a field is what it is sent as, and a sponsor or tag that
+    # changed re-derives the display name and the images (the online avatar
+    # kept) and empties the id, as the card does -- the city and the seed
+    # stay. Nothing is written when a field is refused: 400 for an unknown
+    # key, a value that is not a string, a text that breaks PUT /players'
+    # rule (_player_text_rule: a line break outside the note, a length; not
+    # trimmed here -- the card does not trim), a country or a region the
+    # country data does not have; 409 NOT_READY for a country or a region
+    # before the country data is loaded; 404 for a slot the team does not
+    # have. On the desktop the board is held: the revision is the last
+    # published one.
+    _player_slot(n, t, p)
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "one of "
+            f"{', '.join((*_PLAYER_FIELD_KEYS, *_PLAYER_LOCATION_FIELDS))} "
+            "is required", 400)
+    texts = {}
+    location = {}
+    for key, value in body.items():
+        if key not in _PLAYER_FIELD_KEYS and key not in _PLAYER_LOCATION_FIELDS:
+            raise ApiError(
+                INVALID_ARGUMENT, f"unknown player field: {key}", 400)
+        if not isinstance(value, str):
+            raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+        if key in _PLAYER_FIELD_KEYS:
+            _player_text_rule(key, value)
+            texts[_PLAYER_FIELD_KEYS[key]] = value
+        else:
+            location[key] = value
+    if any(location.values()) and not CountryCatalog.instance.IsLoaded():
+        raise ApiError(NOT_READY, "country data is not loaded yet", 409)
     try:
-        result = WebOps.load_player_from_tag(n, tag, t, p)
+        refused = WebOps.update_player_fields(
+            n, t, p, texts,
+            location.get("country_code", PlayerService.NOT_SENT),
+            location.get("state_code", PlayerService.NOT_SENT))
+    except WebOps.NoSuchSlot:
+        raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
+    # No value in the messages: the route logs keys only (player data), as
+    # PUT /players' messages carry none.
+    if refused == PlayerService.UNKNOWN_COUNTRY:
+        raise ApiError(INVALID_ARGUMENT, "unknown country_code", 400)
+    if refused == PlayerService.UNKNOWN_REGION:
+        raise ApiError(
+            INVALID_ARGUMENT, "state_code is not a region of the country", 400)
+    return ok(revision=current_revision())
+
+
+_PLAYER_CHARACTER_FIELDS = ("en_name", "skin", "variant", "game")
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>/characters/<int:row>",
+    methods=["PATCH"])
+@write_op("player.character")
+def player_character_update(n, t, p, row):
+    # Some of {"en_name": a character of GET /characters ("" empties the
+    # row), "skin": its row in GET /characters' skins (an integer from 0;
+    # any for a character without skins), "variant": a variant of GET
+    # /variants ("" or null: none), "game": the codename of the game whose
+    # list it was picked on (optional)}: character row `row` (1-based) of the
+    # slot of state team `t`, as the desktop card's three combos pick it
+    # (PlayerService.EditCharacter; ADR-005 S4z). Another character takes
+    # its first skin (none without skins) unless a skin is sent; the variant
+    # stays unless one is sent. Nothing is written when a field is refused:
+    # 400 for an unknown key, a value of another type, a character, a skin
+    # or a variant the loaded game does not have; 404 for a slot the team
+    # does not have, or a row the slot does not have; 409 CONFLICT for a
+    # "game" that is not the game loaded (a list from before a switch). On
+    # the desktop the board is held: the revision is the last published one.
+    _player_slot(n, t, p)
+    if row < 1:
+        raise ApiError(INVALID_ARGUMENT, "row must be 1 or greater", 400)
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in _PLAYER_CHARACTER_FIELDS)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown character field: {', '.join(unknown)}",
+            400)
+    if not set(body) & set(_PLAYER_CHARACTER_FIELDS[:3]):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"one of {', '.join(_PLAYER_CHARACTER_FIELDS[:3])} is required",
+            400)
+    picks = {}
+    if "en_name" in body:
+        if not isinstance(body["en_name"], str):
+            raise ApiError(INVALID_ARGUMENT, "en_name must be a string", 400)
+        picks["character"] = body["en_name"]
+    if "skin" in body:
+        if not _is_index(body["skin"]) or body["skin"] < 0:
+            raise ApiError(
+                INVALID_ARGUMENT, "skin must be an integer from 0", 400)
+        picks["skin"] = body["skin"]
+    if "variant" in body:
+        if body["variant"] is not None and not isinstance(body["variant"], str):
+            raise ApiError(
+                INVALID_ARGUMENT, "variant must be a string or null", 400)
+        picks["variant"] = body["variant"]
+    game = body.get("game")
+    if "game" in body and not isinstance(game, str):
+        raise ApiError(INVALID_ARGUMENT, "game must be a string", 400)
+    try:
+        refused = WebOps.update_player_character(
+            n, t, p, row, game=game, **picks)
+    except WebOps.NoSuchSlot:
+        raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
+    if refused == PlayerService.NO_SUCH_ROW:
+        raise ApiError(
+            NOT_FOUND, f"player {p} has no character row {row}", 404)
+    if refused == PlayerService.UNKNOWN_CHARACTER:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"no character {body['en_name']} in the loaded game", 400)
+    if refused == PlayerService.UNKNOWN_SKIN:
+        raise ApiError(INVALID_ARGUMENT, f"no skin {body['skin']} for that "
+                       "character", 400)
+    if refused == PlayerService.UNKNOWN_VARIANT:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"no variant {body['variant']} in the loaded game", 400)
+    if refused == PlayerService.OTHER_GAME:
+        raise ApiError(
+            CONFLICT,
+            f"the character was picked for the game {game!r}, not the "
+            "loaded one", 409)
+    return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load", methods=["POST"])
+@write_op("player.load", log_keys_only=True)
+def player_load(n, t, p):
+    # {"tag"} or {"key"}: load a player of the local database into the slot,
+    # clearing it first (ADR-005 S4m; the legacy -load-player-from-tag-
+    # route's operation, and the player list's "set to P1 / P2"). `tag` is a
+    # gamer tag (ignoring case; no sponsor): the first record that has it.
+    # `key` is a record's own key (GET /players' `key`: the sponsor and the
+    # tag, PlayerDB.PlayerTag), matched exactly: that record (ADR-005 S4z),
+    # whatever `tag` says besides. Unlike PATCH players, `t` is the set's
+    # team: after a swap team 1 lands on state team 2, as the legacy
+    # route's. An unknown tag or key, or a slot the team does not have: 404,
+    # with no tag in the message.
+    _player_slot(n, t, p)
+    body = _json_body()
+    if "key" in body:
+        key = body["key"]
+        if not isinstance(key, str) or not key:
+            raise ApiError(
+                INVALID_ARGUMENT, "key must be a non-empty string", 400)
+        load, missing = (lambda: WebOps.load_player_from_key(n, key, t, p),
+                         "no player with that key")
+    else:
+        tag = body.get("tag")
+        if not isinstance(tag, str) or not tag:
+            raise ApiError(
+                INVALID_ARGUMENT, "tag must be a non-empty string", 400)
+        load, missing = (lambda: WebOps.load_player_from_tag(n, tag, t, p),
+                         "no player with that tag")
+    try:
+        result = load()
     except WebOps.NoSuchSlot:
         raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
     if result != "OK":
-        raise ApiError(NOT_FOUND, "no player with that tag", 404)
+        raise ApiError(NOT_FOUND, missing, 404)
     return ok(revision=current_revision())
 
 
@@ -1493,29 +1703,40 @@ _PLAYER_SAVE_REFUSALS = {
                    "saved", 409),
 }
 
-# PUT /players' texts. Far over any real value: they keep what a client sends
-# out of the file and of every row that reads it, not a name out of the file.
+# A player's texts (PUT /players, PATCH .../fields). Far over any real value:
+# they keep what a client sends out of the file and of every row that reads
+# it, not a name out of the file.
 _PLAYER_LINE_MAX = 256
 _PLAYER_NOTE_MAX = 4096
 
 
-def _player_save_text(key, value):
-    """A text of PUT /players as it is saved. The note has lines. The others
-    are one line, trimmed: a space pasted around a tag would be another
-    database key. No value in the messages: a refused one can be a person's."""
+def _player_text_rule(key, value):
+    """400 for a player's text that breaks the rule PUT /players and PATCH
+    .../fields share (ADR-005 S4z review): the note (custom_textbox) has
+    lines; the others are one line -- no line break anywhere -- and each is
+    at most its length. No value in the messages: a refused one can be a
+    person's."""
     if key == "custom_textbox":
         if len(value) > _PLAYER_NOTE_MAX:
             raise ApiError(
                 INVALID_ARGUMENT,
                 f"{key} must be at most {_PLAYER_NOTE_MAX} characters", 400)
-        return value
-    value = value.strip()
-    if len(value.splitlines()) > 1:
+        return
+    if "".join(value.splitlines()) != value:
         raise ApiError(INVALID_ARGUMENT, f"{key} must be one line", 400)
     if len(value) > _PLAYER_LINE_MAX:
         raise ApiError(
             INVALID_ARGUMENT,
             f"{key} must be at most {_PLAYER_LINE_MAX} characters", 400)
+
+
+def _player_save_text(key, value):
+    """A text of PUT /players as it is saved: a one-line text is trimmed (a
+    space pasted around a tag would be another database key), then held to
+    _player_text_rule."""
+    if key != "custom_textbox":
+        value = value.strip()
+    _player_text_rule(key, value)
     return value
 
 
@@ -2810,8 +3031,18 @@ def thumbnail_preview():
 def thumbnail_generate():
     # Draw and save a thumbnail (out/thumbnails, a PNG and a JPG) in the
     # background: as above, and thumbnail.render's path is the PNG once it is
-    # "done". 409 CONFLICT while one is on its way.
-    revision = WebOps.generate_thumbnail()
+    # "done". 409 CONFLICT while one is on its way. {"board": 1 or 2} draws
+    # that board's match (ADR-005 S4z; 1 without it, as before). The rest of
+    # the body is not read, as it never was. A generate updates the preview
+    # image too -- of its board, which is what a kept preview it stands in
+    # for shows (ThumbnailService.Generate). Read leniently: a body that is
+    # no JSON object was ignored before, and still is (_json_body would
+    # refuse it).
+    data = request.get_json(force=True, silent=True)
+    board = data.get("board", 1) if isinstance(data, dict) else 1
+    if not _is_index(board) or board not in (1, 2):
+        raise ApiError(INVALID_ARGUMENT, "board must be 1 or 2", 400)
+    revision = WebOps.generate_thumbnail(board)
     if revision == thumbnails.BUSY:
         raise ApiError(CONFLICT, "a thumbnail is being made already", 409)
     return ok(data={"accepted": True, "operation": "thumbnail.generate",
