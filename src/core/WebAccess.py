@@ -184,6 +184,9 @@ ROUTE_ACCESS = {
     "api_v1.get_tournament": READ,
     "api_v1.get_analysis": READ,
     "api_v1.get_stats_overlays": READ,
+    # The settings page's (ADR-005 S4ae): an allow-list that names neither
+    # the access token nor the pairing code (core's AppSettings / HotkeyRules).
+    "api_v1.get_settings": READ,
     "api_v1.get_countries": READ,
     # The local player database, real names included: as /playerdb, not READ
     # (ADR-005 S4m).
@@ -262,6 +265,16 @@ ROUTE_ACCESS = {
     "api_v1.tournament_media_fetch": WRITE,
     "api_v1.analysis_refresh": WRITE,
     "api_v1.select_stats_overlay": WRITE,
+    # The settings page's saves (ADR-005 S4ae). The general switches and the
+    # default colours are an operator's, as the other pages' writes. The
+    # port, LAN access, the languages and the hotkeys are this PC's: they
+    # decide who can reach the server, what the program shows, and which
+    # keys it takes from every other app on this PC -- not for another
+    # computer to change, token or not.
+    "api_v1.settings_general_update": WRITE,
+    "api_v1.settings_network_update": THIS_PC,
+    "api_v1.settings_language_update": THIS_PC,
+    "api_v1.settings_hotkeys_update": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

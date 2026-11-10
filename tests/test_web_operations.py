@@ -2348,6 +2348,14 @@ _BODIES = {
     # The format the walk starts with: an unchanged request, nothing
     # written (the switch itself is tests/test_battle_format.py's).
     "api_v1.battle_format_set": {"format": "singles"},
+    # The settings page (ADR-005 S4ae): into the walk's copy of the
+    # settings (never saved). The hotkeys' asks for no change, so nothing is
+    # re-registered with the OS (tests/test_api_v1_settings.py does that
+    # with a stub).
+    "api_v1.settings_general_update": {"profanity_filter": True},
+    "api_v1.settings_network_update": {"port": 5107},
+    "api_v1.settings_language_update": {"program": "default"},
+    "api_v1.settings_hotkeys_update": {"keys": {}},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),

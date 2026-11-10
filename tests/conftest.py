@@ -786,12 +786,23 @@ def _autonaRuntime(qapp, tmp_path_factory):
 
         # NOTE ON HOTKEYS: Win32 RegisterHotKey grabs a combination
         # system-wide, so nothing here may register one on the developer's
-        # machine. Nothing does: AutonaHotkeys.instance exists after
-        # bootstrap, but registration happens in UiMounted(), which only
-        # Window.__init__ calls and this layer never builds a Window. It is
-        # deliberately NOT forced off through SettingsManager either --
-        # SettingsManager is process-global, and pinning hotkeys.* here would
-        # silently change what tests/test_hotkeys_*.py observe.
+        # machine. AutonaHotkeys.instance exists after bootstrap; UiMounted()
+        # (which only Window.__init__ calls, and this layer never builds a
+        # Window) does not run, but since ADR-005 S4ae a save through the
+        # settings page (core's HotkeyRules.Update -- a v1 PATCH in a test)
+        # reaches ReloadHotkeys through StateManagerBridge.hotkeys_changed
+        # and would register. So the session's object is held in the
+        # settings window's own guard: while a capture is suspended,
+        # SetupHotkeys() loads the keys and registers nothing (and installs
+        # no native filter). A test of the registration builds its own
+        # AutonaHotkeys over a stubbed user32 (tests/test_hotkeys_*.py), or
+        # lifts the guard with monkeypatch over one
+        # (tests/test_api_v1_settings.py). It is deliberately NOT forced off
+        # through SettingsManager -- SettingsManager is process-global, and
+        # pinning hotkeys.* here would silently change what
+        # tests/test_hotkeys_*.py observe.
+        from src.AutonaHotkeys import AutonaHotkeys
+        AutonaHotkeys.instance.SuspendCapture()
 
         yield _AutonaHarness(directory)
     finally:

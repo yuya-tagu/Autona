@@ -60,6 +60,10 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
   - ゲームは `settings.json` の `SELECTED_GAME_CODENAME`（最後に選んだゲーム）から、起動時のスキャンのあとで
     ロードし直す。大会 URL（`TOURNAMENT_URL`）も読み直す
   - ゲームの追加や大会 URL の設定は、先にデスクトップ版で済ませておくか、`/web` / API から行う
+- 設定は `/api/v1/settings`（読み）と `PATCH /api/v1/settings/{general,network,language,hotkeys}` でも変えられる（ADR-005 S4ae）。
+  ポート・LAN 公開・言語・ホットキーは**この PC からの要求だけ**（LAN からはトークンがあっても 403）。ポート・LAN 公開・言語は再起動で効く
+  （`GET` の `restartPending`）。ヘッドレスにはホットキーが無いので、ホットキーの保存は次にデスクトップ版を起動したときに効く（`hotkeys.applied: false`）。
+  `settings.json` を読めなかった起動では何も保存しない（409 `NOT_READY`。GET の最上位 `loadFailed`）
 - **確認ダイアログは出ない**。設定値で決まり、ログに出るだけ
   - LAN 公開: `general.webserver_listen_lan`（未設定ならこの PC のみ。ログに案内が出る）
   - ポート: `general.webserver_port`。他のプロセスが使っていればログに warning（PID 付き）。
@@ -144,6 +148,7 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
 > - 渡し方: `X-Autona-Token: <token>` ヘッダ / `Authorization: Bearer <token>` / URL 末尾の `?token=<token>`
 >   （URL にすでに `?` があるときは `&token=<token>`）のいずれか
 > - **読み取りはトークン不要のまま**。同一 LAN に到達できる端末は state（選手名・スコア等）を読める
+> - `GET /api/v1/settings` はトークン不要の読み取りだが、トークンは返さない（許可リスト）
 > - HTTP で配信するファイルは許可リストのみ（`layout/`・`assets/`・`web/build/`・`out/`・`user_data/` の画像フォルダ・
 >   `user_data/tournament_banner.png`）。`settings.json`・`local_players.json` などは 404
 

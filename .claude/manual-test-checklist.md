@@ -202,6 +202,21 @@ Web 版だけ（サイドバー Scoreboard の「BOARD」= 共有ビューの `/
 - [ ] Settings でホットキー設定を変更できる
 - [ ] 設定したホットキーが機能する（スコアアップ等）
 
+### 設定ウィンドウ（S4ae: core と v1。見た目は不変）
+- [ ] ホットキー: 別のアクションと同じキーを記録すると、エラーで元に戻る（文言は「…already assigned…」）
+- [ ] ホットキー: 保存していない既定値とも重複を見る。新規インストール（隔離データ）で `load_set` に `Ctrl+Shift+S` を記録すると、`swap_teams` の既定と重複で断られる
+- [ ] ホットキー: 別の綴りの同じキーも重複。v1 の PATCH で `load_set` に `Shift+Ctrl+S`（`swap_teams` の既定 `Ctrl+Shift+S` と並び違い）→ 409 `CONFLICT`
+- [ ] ホットキー: `Ctrl+S` を記録すると OS の警告、`F5` で OBS の警告。文言が S4ae より前と同じ。保存される。`Ctrl+Escape` も OS の警告
+- [ ] ホットキー: 保存したキーで実際にアクションが動く。「ホットキーを有効にする」を外すと、そのキーが他のアプリに届く
+- [ ] 手で壊した settings.json で起動する（`hotkeys` の値に `null` / 数値 / list、`hotkeys` 自体を list / 文字列 / `null`）: 落ちずに起動し、ホットキーは既定で登録される。設定ウィンドウを開いて重複の記録もできる
+- [ ] ポート: 設定ウィンドウのスピンは 65535 まで（70000 などの保存値は 65535 と表示され、触らなければ書き戻さない）
+- [ ] v1: `curl -X PATCH http://127.0.0.1:<port>/api/v1/settings/hotkeys -H "Content-Type: application/json" -d "{\"keys\":{\"load_set\":\"Ctrl+Alt+O\"}}"` の後、`Ctrl+Alt+O` でセット選択が開き、`Ctrl+Shift+O` は他のアプリに戻る
+- [ ] v1: `{"enabled": false}` で全部のホットキーが外れ、`{"enabled": true}` で戻る
+- [ ] v1: 修飾キーなしの 1 キー（`{"keys":{"load_set":"A"}}`）は保存でき、応答の `warnings` に `no_modifier`。F キーでは出ない
+- [ ] v1: `PATCH /api/v1/settings/network` でポートを変えて（再起動しない）、Designer を開くと今のポートで開く。`GET /api/v1/settings` の `network.restartPending` が true
+- [ ] LAN の端末から: `PATCH /settings/network`・`/language`・`/hotkeys` はトークン付きでも 403、`/settings/general` はトークン付きで 200
+- [ ] `GET /api/v1/settings` の応答にアクセストークンが含まれない（最上位に `loadFailed` がある）
+
 ## トーナメントデータ
 
 - [ ] Start.gg URL を入力してトーナメントデータを取得できる

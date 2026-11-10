@@ -45,6 +45,7 @@ actually trigger one.
 from qtpy.QtCore import QObject, Signal
 
 from .core.Actions import AutonaActions
+from .core import HotkeyRules
 from .core.SetFollowService import SetFollowService
 from .core.StateManager import StateManager
 
@@ -76,6 +77,13 @@ class StateManagerBridge(QObject):
     # v1 through the desktop board host's Run) and is queued from any other.
     # The web server's (`battle_format` to its clients, ADR-005 S4z) too.
     battle_format_changed = Signal(str)
+    # The saved hotkeys changed through the settings page (core's
+    # HotkeyRules.changes, ADR-005 S4ae): settings, converted the same way,
+    # with no value. Emitted on the saving thread (a request thread); the
+    # desktop's AutonaHotkeys.ReloadHotkeys is connected by bootstrap_gui()
+    # and, the hotkeys object living on the GUI thread, queued there --
+    # where RegisterHotKey has to run. The headless shell connects nothing.
+    hotkeys_changed = Signal()
 
     def __init__(self, parent=None):
         # A second bridge would subscribe the same channels again and
@@ -102,6 +110,7 @@ class StateManagerBridge(QObject):
         observers.held_state_updated.subscribe(self._onHeldStateUpdated)
         SetFollowService.changes.subscribe(self._onFollowChanged)
         AutonaActions.battleFormatChanges.subscribe(self._onBattleFormatChanged)
+        HotkeyRules.changes.subscribe(self._onHotkeysChanged)
 
     # -- channel callbacks: re-emit, nothing else --------------------------
 
@@ -122,3 +131,6 @@ class StateManagerBridge(QObject):
 
     def _onBattleFormatChanged(self, fmt):
         self.battle_format_changed.emit(str(fmt))
+
+    def _onHotkeysChanged(self):
+        self.hotkeys_changed.emit()

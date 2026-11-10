@@ -103,6 +103,8 @@ from .core import Top8Service
 from .core import StatsOverlays
 from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
+from .core.AppSettings import AppSettings
+from .core import HotkeyRules
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
 from .core.DictHelper import qvariantmap_copy
@@ -768,6 +770,37 @@ def get_stats_overlays():
 
 def select_stats_overlay(key):
     return StatsOverlays.Select(key)
+
+
+# ── 設定 (ADR-005 S4ae) ──────────────────────────────────────────────────
+# The settings page's: core's AppSettings (the general switches and colours,
+# the web server's port and LAN access, the languages) and HotkeyRules, in
+# both shells, on the calling thread (settings.json, no board). A hotkey
+# save re-registers through StateManagerBridge.hotkeys_changed where a shell
+# registers them (the desktop's, bootstrap_gui()). The v1 routes answer the
+# refusals; these apply.
+
+def get_settings():
+    """{"general", "network", "language", "hotkeys"}: an allow-list
+    (AppSettings.Describe + HotkeyRules.Describe), never the access token."""
+    return dict(AppSettings.instance.Describe(),
+                hotkeys=HotkeyRules.Describe())
+
+
+def update_general_settings(fields):
+    return AppSettings.instance.UpdateGeneral(fields)
+
+
+def update_network_settings(fields):
+    return AppSettings.instance.UpdateNetwork(fields)
+
+
+def update_language_settings(fields):
+    return AppSettings.instance.UpdateLanguage(fields)
+
+
+def update_hotkey_settings(enabled=None, keys=None):
+    return HotkeyRules.Update(enabled=enabled, keys=keys)
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

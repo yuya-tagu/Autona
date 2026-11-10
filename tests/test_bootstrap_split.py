@@ -89,8 +89,10 @@ def _steps(function_name):
                     f"{_dotted(target)} = "
                     f"{_dotted(statement.value.func)}({args})")
             else:
+                # A constant (a flag) is shown as written.
                 steps.append(
-                    f"{_dotted(target)} = {_dotted(statement.value)}")
+                    f"{_dotted(target)} = "
+                    f"{_dotted(statement.value) or ast.unparse(statement.value)}")
         elif (isinstance(statement, ast.Expr)
                 and isinstance(statement.value, ast.Call)):
             name = _dotted(statement.value.func)
@@ -166,6 +168,10 @@ def test_bootstrap_core_steps_and_their_order():
         # there for its standings' import.
         "ResultService()",
         "CountryCatalog()",
+        # The settings page's settings (ADR-005 S4ae): they take what this
+        # run starts with, before either shell reads it (the locale, the web
+        # server).
+        "AppSettings()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
 
@@ -186,6 +192,12 @@ def test_bootstrap_gui_steps_and_their_order():
         "bootstrap_core()",
         "AutonaHotkeys()",
         "AutonaHotkeys.ConnectActions()",
+        # A save through the settings page re-registers the hotkeys, on the
+        # GUI thread (ADR-005 S4ae; connected once, by its own flag); this
+        # shell registers them (`applied`).
+        "AutonaHotkeys.ConnectReload("
+        "StateManagerBridge.instance.hotkeys_changed)",
+        "HotkeyRules.applied = True",
         "AutonaGameAssetManager()",
         "AutonaTournamentDataProvider.instance.selectGameFromStartGGId"
         " = AutonaGameAssetManager.instance.SetGameFromStartGGId",
@@ -401,6 +413,8 @@ from src.Helpers.AutonaQtHelper import in_gui_thread
 from src.StateManagerBridge import StateManagerBridge
 from src.core.Actions import AutonaActions
 from src.core.AnalysisService import AnalysisService
+from src.core.AppSettings import AppSettings
+from src.core import HotkeyRules
 from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
@@ -444,6 +458,7 @@ report({
         "StreamService": StreamService.instance is not None,
         "AnalysisService": AnalysisService.instance is not None,
         "SetSelectionService": SetSelectionService.instance is not None,
+        "AppSettings": AppSettings.instance is not None,
     },
     "stream_title": [title_before_loop, stream_title],
     "state_subscribers": state_subscribers(),
@@ -469,6 +484,8 @@ report({
         "AutonaScoreboardManager":
             AutonaScoreboardManager.instance is not None,
         "AutonaShellOperations": AutonaShellOperations.instance is not None,
+        # No shell registers hotkeys with the OS here (ADR-005 S4ae).
+        "hotkeys_applied": HotkeyRules.applied,
     },
     "selector_registered":
         AutonaTournamentDataProvider.instance.selectGameFromStartGGId
@@ -559,6 +576,7 @@ from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
+from src.core import HotkeyRules
 from src.core.Actions import AutonaActions
 
 provider = AutonaTournamentDataProvider.instance
@@ -594,6 +612,7 @@ report({
     "score_after": StateManager.Get("score"),
     "hotkeys": AutonaHotkeys.instance is not None,
     "actions_connected": AutonaHotkeys._actions_connected,
+    "hotkeys_applied": HotkeyRules.applied,
     "country_helper": AutonaCountryHelper.instance is not None,
     "scoreboard": AutonaScoreboardManager.instance is not None,
     "slot_order": order,
@@ -633,6 +652,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["score_before"] is True
     assert result["score_after"] in (None, {})
     assert result["hotkeys"] and result["actions_connected"]
+    assert result["hotkeys_applied"] is True
     assert result["country_helper"] and result["scoreboard"]
     assert result["slot_order"] == ["provider:1386", "restore"]
     assert result["board_host"] == "DesktopBoardHost"

@@ -25,6 +25,8 @@ if sys.platform != "win32":
     pytest.skip("Windows-only global hotkeys", allow_module_level=True)
 
 from src import AutonaHotkeys as _mod
+# The modifiers are core's since ADR-005 S4ae, with the parser.
+from src.core import HotkeyRules
 
 
 @pytest.fixture
@@ -104,7 +106,8 @@ def test_resume_uses_keys_loaded_while_suspended(hotkeys, user32):
     # F5 = 0x74, with Ctrl|Shift|NOREPEAT modifiers.
     _, _, modifiers, vk = user32.RegisterHotKey.call_args[0]
     assert vk == 0x74
-    assert modifiers == (_mod.MOD_CONTROL | _mod.MOD_SHIFT | _mod.MOD_NOREPEAT)
+    assert modifiers == (HotkeyRules.MOD_CONTROL | HotkeyRules.MOD_SHIFT
+                         | HotkeyRules.MOD_NOREPEAT)
 
 
 def test_double_suspend_is_idempotent(hotkeys, user32):

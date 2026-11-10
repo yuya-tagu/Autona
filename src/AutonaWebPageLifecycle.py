@@ -87,8 +87,18 @@ def WhenWebServerReady(callback):
 
 def LocalUrl(path):
     """The URL of ``path`` (``/...``, query included) on the local web
-    server, at the port configured now."""
-    port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+    server: at the port it really listens on (WebServer.Listening()), the
+    configured one only while none runs. The settings page saves a new port
+    for the next start (ADR-005 S4ae); a page loaded before then is still
+    on this one. The server is imported here, when asked: importing this
+    module pulls nothing in."""
+    from .AutonaWebServer import WebServer
+    bound = WebServer.Listening()
+    if bound is not None:
+        port = bound[0]
+    else:
+        port = SettingsManager.Get("general.webserver_port",
+                                   DEFAULT_WEBSERVER_PORT)
     return f"http://127.0.0.1:{port}{path}"
 
 

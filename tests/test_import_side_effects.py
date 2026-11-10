@@ -154,6 +154,11 @@ analysis_service = importlib.import_module(
 # The set selection's lists (ADR-005 S4v), the same way.
 set_selection_service = importlib.import_module(
     "src.core.SetSelectionService").SetSelectionService
+# The settings page's settings and the hotkeys' rules (ADR-005 S4ae): the
+# settings are read when the one instance is built (bootstrap_core()), and
+# no shell is marked as registering hotkeys on import.
+app_settings = importlib.import_module("src.core.AppSettings").AppSettings
+hotkey_rules = importlib.import_module("src.core.HotkeyRules")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -288,6 +293,10 @@ assert tournament_media.instance is None,     "import created TournamentMediaSer
 assert tournament_service.instance is None,     "import created TournamentService.instance"
 assert analysis_service.instance is None,     "import created AnalysisService.instance"
 assert set_selection_service.instance is None,     "import created SetSelectionService.instance"
+assert app_settings.instance is None, "import created AppSettings.instance"
+assert hotkey_rules.applied is False, "import marked the hotkeys applied"
+assert hotkey_rules.changes.subscriber_count() == 0, \
+    "import subscribed to the hotkeys' changes"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

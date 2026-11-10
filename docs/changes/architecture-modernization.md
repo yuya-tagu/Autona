@@ -7373,3 +7373,133 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - デスクトップ（修正前のビルド）: EVENT から legacy の `/scoreboard1-open-set` → SCORE に替わってページのダイアログが開く／1v1 の `/scoreboard2-open-set` → `OK` でログに `nothing opened`、画面は EVENT のまま／最小化から open-set → 元に戻って SCORE とダイアログ（curl からの依頼なのでフォアグラウンドは取れない。リスク 1 のとおり）
   - ヘッドレス + ブラウザ（修正後）: 表が 0 件でもヘッダが横 1 行（7 列とも高さ 36px・`nowrap`）。幅 560px では `TableContainer` の中が横にスクロールし、ページは横にはみ出さない
   - 未確認: 本物のホットキー Ctrl+Shift+O（画面がロックされていて Autona を前面に出せなかった）、チームの形式でボード 2、配信台を開いた状態からの依頼、退路の Qt モード、OBS / Companion が前面のときの前面化。S4ac の前の実機ゲート（IME と一緒）で見る
+
+### S4 Settings の React 化 — 設計（2026-11-11・論点はオーナー確認済み）
+
+**範囲**: メニューの「設定」で開く Qt の設定ウィンドウ（`src/Settings/AutonaSettingsWindow.py` と `SettingsWidget.py`）。非モーダルの QDialog で、タブは一般・言語・ホットキーの 3 つ、全部で 20 項目。**core と v1（S4ae）→ React のページと Qt 版の削除（S4af）の 2 段で、退路は無い**（オーナー決定 5）。
+
+**棚卸し**（行番号は 1b3908bc 時点）
+
+| タブ | 項目 | settings.json のキー | 窓の既定 | 読み手の既定 | 効くタイミング | v1 の区分 |
+|---|---|---|---|---|---|---|
+| 一般 | Web サーバーのポート | `general.webserver_port` | 5107（スピンは 1〜99999） | `DEFAULT_WEBSERVER_PORT` | 次の起動 | THIS_PC |
+| 一般 | LAN の他の端末からのアクセス | `general.webserver_listen_lan` | False | False / None（None は「未決定」で、デスクトップが起動時に聞く） | 次の起動 | THIS_PC |
+| 一般 | 不適切語フィルタ | `general.profanity_filter` | True | True（`BadWordFilter`） | すぐ | WRITE |
+| 一般 | セットの自動更新を無効 | `general.disable_autoupdate` | **False** | **True**（`SetFollowService.Polling`）。デスクトップは毎回のボード構築で True に戻す（`TurnOffPolling`） | すぐ | WRITE |
+| 一般 | スコアの自動更新を無効 | `general.disable_scoreupdate` | False | False（`SetLoadService`） | すぐ | WRITE |
+| 一般 | ファイル出力を無効 | `general.disable_export` | False | False（`StateManager`） | すぐ | WRITE |
+| 一般 | 選手 DB を上書きしない | `general.disable_overwrite` | False | False（`PlayerDB` / `SetFollowService`） | **すぐ**（文言は「再起動後」） | WRITE |
+| 一般 | ゲームトラッカーを無効（BETA） | `general.disable_individual_game_tracker` | True | True（`GameTrackerService`） | 次の起動（文言どおり） | WRITE |
+| 一般 | Qt 版の SCORE パネル | `general.qt_scoreboard_panel` | False | — | 初回表示まで | **v1 に入れない**（S4ac で消える） |
+| 一般 | チーム 1 / 2 の既定色 | `general.team_{1,2}_default_color` | #fe3636 / #2e89ff | `AutonaActions.DEFAULT_TEAM_COLORS` と同じ | 次のボード構築 | WRITE |
+| 言語 | プログラム / ゲームアセット / 大会用語 | `program_language` / `game_asset_language` / `fg_term_language` | "default" | None（`LoadLocale` は None と "" を "default" とみなす） | 次の起動（Qt は変えるとアプリを閉じる） | THIS_PC |
+| ホットキー | ホットキーを有効にする | `hotkeys.hotkeys_enabled` | True | True（`AutonaHotkeys`。False 以外はオン） | すぐ（Win32 の登録を外す / 戻す） | THIS_PC |
+| ホットキー | 9 個のアクション | `hotkeys.<action>` | `AutonaHotkeys.keys` | 同じ | すぐ（`ReloadHotkeys`） | THIS_PC |
+
+- 書き込みは `SettingsWidget` が `SettingsManager.Set` を直接呼ぶ（core を通らない。同じ値でも書き、スピンは打鍵ごとに保存）。値を読むのは初回に開いたときだけ
+- `SettingsManager.loadFailed` のときに書くと、`settings.json` が `{}` + 1 キーで上書きされ、アクセストークンも消えうる（`WebAccess._LoadToken` は同じ理由で発行を止めている）
+- ホットキーの記録（`QKeySequenceEdit`）は `PgUp`・`Del`・`Esc`・記号を作れるが、parser は読めず、黙って登録しない
+- `AutonaWebPageLifecycle.LocalUrl` と `AutonaDesignerWindow` は設定のポートを読む: ポートを変えた直後の再読み込みが、まだ待ち受けていないポートへ行く
+
+**決定**
+
+1. **置き場所**: メニューの「設定」から共有ビューに `/web/settings` を出す（S4af）
+2. **区分**: ネットワーク（ポート・LAN）・言語・ホットキーは **THIS_PC**（LAN からはトークンがあっても 403）。一般の運用項目と既定色は **WRITE**。**GET は READ で、返すキーは許可リスト**（トークン・ペアリングコード・その他のキーは返さない）。トークンの表示・再発行はこの移行で扱わない。共有ビューのレイアウトの iframe の sandbox は S4af（web）で扱う
+3. **言語を変えてもアプリを閉じない**。「再起動すると反映」の案内だけを出す（S4af）。S4ae は GET に `restartPending` を出す
+4. **ホットキーは組み立て式**（Ctrl / Alt / Shift + キーの選択。S4af）。S4ae は GET に語彙を返し、PATCH は parser が読めないキーを 400 で断る
+5. **退路なしの 2 段**（S4ae → S4af）
+6. **core に表を 1 つずつ**: `src/core/AppSettings.py`（一般・ネットワーク・言語の名前 → キー・既定・型）と `src/core/HotkeyRules.py`（ホットキーの既定・parser・旧 validator・語彙・読み書き）。既定値は表を正本にし、読み手の既定と一致することをテストで固定する（`disable_autoupdate` は実際の動作の True を正本にする）
+7. **書き込みは全部を検証してから 1 回**（`SettingsManager.SetMany`）。同じ値は書かない。`loadFailed` のときは書かない（409 `NOT_READY`）
+8. **ホットキーの再登録は GUI スレッドで**: core の `HotkeyRules.changes` → Bridge の `hotkeys_changed` → GUI スレッドにいる `AutonaHotkeys` の bound method（queued）。`RegisterHotKey` は呼んだスレッドのメッセージキューに付くため。`@gui_thread_sync` は足さない。ヘッドレスには `AutonaHotkeys` が無いので `applied: false`（保存は通る）
+9. **ページの URL は実際の待ち受けポート**: `LocalUrl` と Designer は `WebServer.Listening()` を読み、サーバーが無いときだけ設定値（`BrowserScoreboardUrl` の前例）
+
+**S4af の範囲**: React の `/web/settings`（一般・ネットワーク・言語・ホットキーの 4 区画）、メニューの「設定」を共有ビューへ、`AutonaSettingsWindow.py` / `SettingsWidget.py` と Qt の翻訳の削除、言語の変更で閉じない（案内だけ）、ホットキーの組み立て式の編集、共有ビューの iframe の sandbox、下の「S4af で直す」
+
+**地雷**
+- `settings.json` の保存形式（キーと値の型）は変えない。`listen_lan` の None（未決定）は、ほかの保存で bool にしない
+- `HotkeyRules.changes` の受け手は Bridge だけ（core の observer を Qt 側が直接購読しない: `tests/test_signal_lifetime.py`）。通知は `SettingsManager.lock` の外で出す
+- テストのセッションでは、ホットキーの保存が Bridge → `ReloadHotkeys` に届く。`tests/conftest.py` がセッションの `AutonaHotkeys` を `SuspendCapture` で OS から離しているので、登録を確かめるテストは user32 のスタブの上でだけそれを外す
+- JSON のオブジェクトのキーは Flask がソートする（`hotkeys.keys` のアクションの順は保たれない）。ページは自分のラベル表の順で並べる
+
+#### S4ae Settings の core と v1（2026-11-11）
+
+設定ウィンドウの 3 タブ（一般・言語・ホットキー）を core の表と v1 に載せた。**Qt の設定ウィンドウの見た目は変えていない**（validator の import 先が core に変わり、警告の文言はコードから同じ文に組み立てる）。動作の違いは「動作の違い」の節の 4 点だけ（レビューで直した結果）。リスク区分は**高**（保存形式は不変で追加が中心だが、LAN への公開とホットキーの登録を変えるルートを開き、`conftest.py` のハーネスにも触れるため）。
+
+- **完了内容**
+  - `src/core/AppSettings.py`（新規）: 表 `SETTINGS`（一般 8・ネットワーク 2・言語 3。`Setting(group, name, key, default, kind)`）。`Describe()` は許可リストだけを返す。`UpdateGeneral` / `UpdateNetwork` / `UpdateLanguage` は全部を検証してから `SetMany` で 1 回だけ書き、同じ値（型も比べる）は書かない。`loadFailed` のときは `NOT_READY` で書かない。言語の一覧と待ち受けは callable で注入する（`bootstrap_core()` が `AutonaLocaleHelper.languages` と `WebServer.Listening` を渡す。後者はそのとき import する）。起動時の値（ネットワーク・言語）は生成時に控え、`restartPending` に使う
+  - `src/core/HotkeyRules.py`（新規）: `AutonaHotkeys` の既定（`DEFAULT_KEYS`）・Win32 の定数・`VK_MAP`・parser（`ParseShortcut`。旧 `_parse_shortcut` のまま）と、`Helpers/AutonaHotkeyValidator.py` の関数（`NormalizeShortcut` / `FindDuplicates` / `CollisionSummary` / `WarningFor`）を移した。**転送だけの互換層は残していない**（validator は削除）。警告は日本語の文ではなくコード（`os_reserved` / `obs_likely` / `no_modifier`）。語彙（`Vocabulary`・`Canonical`）、`Describe` / `Update`、変更のチャンネル `changes`（core の `ObserverChannel`）、このシェルが登録するかの `applied`
+  - `SettingsManager.SetMany(pairs)`: 1 回の lock の保持で全部を書き、保存は 1 回。空なら何もしない。`deep_set` か `SaveSettings` が例外のときは、メモリを元に戻してから再送出する（無かったキーと、そのとき作った空の親は消す）
+  - v1（追加だけ）: `GET /settings`（READ。最上位に `loadFailed`）、`PATCH /settings/general`（WRITE）、`PATCH /settings/network`・`/language`・`/hotkeys`（THIS_PC）。応答に `revision` は付けない（設定）。操作ログはキーと値（`write_op` の既定。トークンを運ぶルートではない）
+  - 再登録の経路: `HotkeyRules.changes` → `StateManagerBridge.hotkeys_changed`（新しいシグナル。引数なし）→ `AutonaHotkeys.instance.ReloadHotkeys`（`bootstrap_gui()` が `ConnectActions()` の後で `AutonaHotkeys.ConnectReload(StateManagerBridge.instance.hotkeys_changed)` を呼び、その後に `HotkeyRules.applied = True` にする。繋いだかは専用フラグ `AutonaHotkeys._reload_connected` で見て、2 回目は何もしない）。オブジェクトは GUI スレッドにいるので、Flask のスレッドからの保存は GUI スレッドへ queued になる
+  - `AutonaHotkeys` は core から既定（`dict(HotkeyRules.DEFAULT_KEYS)` のコピー）と parser を import する。モジュールに残るのは `WM_HOTKEY` と `user32` だけ。`LoadUserHotkeys` と Qt の窓は、保存値と既定の合成を `HotkeyRules.CurrentKeys()` 1 か所から取る
+  - `SettingsWidget` は core の関数を呼び、警告の文は `_HotkeyWarningText(shortcut, code)` が旧 validator と同じ文に組み立てる（`no_modifier` のような文言を持たないコードは None で、窓には出ない）。重複は `HotkeyRules.Conflicts`、ポートの上限は `AppSettings.PORT_RANGE`（65535）
+  - `LocalUrl` は `WebServer.Listening()` のポートを使い、サーバーが無いときだけ設定値。`AutonaDesignerWindow` は `LocalUrl("/web")` を使う
+  - `AutonaApiInfoWindow` の一覧に 5 ルートを足した（説明は英語のまま。新しい行が未翻訳なのは前例どおり）
+  - `WebAccess.ROUTE_ACCESS` に 5 本。ルート台帳の分類規則の例外（`thisPc`）に 3 本
+- **判断と理由**
+  1. **名前**: 一般は `settings.json` の名前のまま（`/display-options`・`/thumbnail` の前例）、ネットワークと言語は API の camelCase（`port` / `listenLan` / `program` / `gameAsset` / `fgTerm`）
+  2. **空の body は 4 本とも 400**（前例）。ホットキーの `{"keys": {}}` は何も保存しない 200
+  3. **各 PATCH は GET のその区画を返す**。ホットキーは `warnings` を足す
+  4. **重複は「同じキーか」で判定する**（`Conflicts` / `FindDuplicates`）。`ParseShortcut` の結果（修飾キー, VK）で比べ、読めない値どうしだけ正規化した文字列で比べる。比較のときだけ Qt の綴り（`Esc` / `Del` / `Ins` / `PgUp` / `PgDown`）を同じキーとして読む（parser は広げていないので登録は不変）。`Return` = `Enter`、並び順は無関係（`A+Ctrl` と `Ctrl+A` は重複）。Qt の窓も同じ `Conflicts` を通す。判定の対象は要求したアクションを含む組だけ（Qt の窓と同じ）。`enabled` だけの保存は、前から残っている重複で止めない。要求したアクションが重複の組に入っていれば、値が今と同じでも 409（適用後の集合に重複が残るため）
+  5. **`valid` は登録の真実を言う**: Canonical ではなく parser で判定する。Qt の記録が作った `Esc` / `Del` / `Ins` / `PgUp` / `PgDown` は parser が読まない既存のバグで、`valid: false` として見えるようになった。**parser は広げていない**（登録の挙動を変えない。S4af の組み立て式は語彙の綴りを作る）
+  6. **修飾キーの無い 1 キー（例 `A`）は今も保存できる**（parser も窓も許していた）が、警告コード `no_modifier` を返す（F キーは除外。優先順は `os_reserved` → `obs_likely` → `no_modifier`。**拒否しない**: リードの判断）。v1 の `warnings` と GET の `warning` に出る。Qt の窓は文言を持たないので出ない。Shift+文字は修飾キー付きなので出ない（大文字の入力を奪う点は S4af の持ち越し）
+  6b. **OS 予約・OBS の警告も（修飾キー, VK）で引く**: `Ctrl+Escape`・`Ctrl+Shift+Escape` が `os_reserved` になった（旧 validator は綴りで引いていた）。読めない値は綴りで引く
+  6c. **文字列でない保存値**（`null`・数値・list、`hotkeys` 自体が list / 文字列 / `null`）でも登録が落ちない。GET の `value` は null
+  7. **`applied` は core のモジュールのフラグ**（`bootstrap_gui()` が立てる）。ヘッドレスは false
+  8. **`listen_lan`**: GET は保存が無い・None のとき null。PATCH は bool だけ（null は 400）。None に False を送ると書く（未決定を「オフ」に決める。デスクトップは次の起動で聞かなくなる）
+  9. **`restartPending`**: ネットワークは、サーバーが待ち受けていればその値と、無ければ起動時の値と比べる（LAN は `bool()` で比べる。デスクトップの初回の確認ダイアログが保存した値で誤って立たないように）。言語は正規化した値を起動時の値と比べる
+  10. **`disable_autoupdate` の既定は表では True**（読み手の動作）。Qt の窓は保存が無いと False と表示する。既知の違いで、S4af で消える
+  11. **ポートは 1〜65535 の int**（bool・文字列・小数は 400）。保存値が範囲外（窓は 99999 まで許していた）なら GET は表示だけする
+  12. **ホットキーの保存は `Canonical` の綴り**（`Ctrl+Alt+Shift+Key` の順）。同じショートカットの別の綴りは、今の値を parser が読めるなら書き直さない
+- **動作の違い**
+  - Qt の設定ウィンドウ（レビューで直した 4 点。それ以外の警告の文・重複のエラー・保存の挙動は同じ。pin は下）: (1) 重複判定が保存していない既定値も見る（新規インストールで `load_set` に `Ctrl+Shift+S` → `swap_teams` の既定と重複して断られる。旧版は保存済みのキーとしか比べなかった）、(2) 別の綴りの同じキーも重複（`A+Ctrl` と `Ctrl+A`、`Return` と `Enter`、`Esc` と `Escape`）、(3) ポートの上限が 65535（保存値 70000 は 65535 と表示されるだけで書き戻さない）、(4) `Ctrl+Escape` 系が OS の警告になる
+  - Designer のウィンドウとページの URL（`LocalUrl`）: ポートを保存して再起動する前に開くと、旧版は保存したポート（まだ待ち受けていない）へ、新版は今待ち受けているポートへ行く
+  - ホットキーの保存がどこから来ても（v1）、デスクトップは即座に登録し直す
+- **残置とリスク**
+  - ポートを設定から読む箇所が残る（範囲外）: `AutonaApiInfoWindow` / `AutonaObsGuideWindow` / `AutonaIntegrationGuideWindow`、`AutonaScoreboardWidget`（Qt 版の SCORE のブラウザ版 URL）、`Helpers/AutonaNetworkHelper`。保存後・再起動前に、まだ待ち受けていないポートを表示する。S4af 以降で `Listening()` に寄せる
+  - `general.qt_scoreboard_panel` は v1 に入れていない（S4ac で消える）
+  - **何も書かなかったとき**（今と同じ値だけの要求。内部の `written` は false）も `warnings` は返る（仕様）
+  - **同じ値を書かない判定は今も綴りで比べる**: 保存済みの `Ctrl+Return` に `Ctrl+Enter` を送ると書き直す。登録は同じなので無害。残置
+  - **1 キー版の `SettingsManager.Set` / `Unset` は保存の失敗で戻さない**（範囲外。`SetMany` だけ戻す）
+  - **Shift+文字の警告**は出ない（修飾キー付き。大文字の入力を奪う。S4af で扱う）
+  - 「待ち受け中ならその値」のフォールバックが 3 か所に重複（`AutonaWebPanelHost` / `AutonaWebOperations` / `AutonaWebPageLifecycle.LocalUrl`）。上の読み手と合わせて 1 ヘルパーへ寄せる（S4af）
+  - 初回起動の bind 失敗で `restartPending` が立つ（どのみち再起動が要るので許容）
+  - Qt の窓は web からの保存後も古い表示のまま（S4af で消える）
+  - 同一オリジンのレイアウトの JS が `THIS_PC` を通れる（既存の `THIS_PC` と同じ脅威モデル。S4af の iframe の sandbox で一部緩和。OBS のブラウザソースは対象外）
+  - Qt の窓の「再起動で反映」の文言（`disable_overwrite`・`disable_individual_game_tracker` は即時）を S4af で合わせる
+  - **S4af で直す**（Qt の `.ts` は触っていない）:
+    - `disable_overwrite` の文言「再起動後に反映」→ すぐ効く
+    - `disable_autoupdate` の既定（窓 False / 読み手 True）
+    - Qt の記録の綴り（`Esc` / `Del` / `PgUp` など）は parser が読めない。組み立て式にすれば作られない。保存済みの値は GET の `valid: false` でページが知らせる
+    - ゲームトラッカーの BETA 表示（`assets/versions.json`）は GET に入れていない。ページで出すかを S4af で決める
+    - 上のポートの読み手
+- **pin**
+  - `tests/test_hotkey_rules.py`（141 件）: 旧 `_parse_shortcut` の写しと、語彙・Qt の綴り・記号・大文字小文字・並び・壊れた文字列の 3,363 通りで同じ答え。定数と既定（順序も）。旧 validator の写しと `NormalizeShortcut` / `FindDuplicates` が同じ。警告のコードと、Qt の窓の文が旧 validator と同じ。validator が無いこと。語彙は全部登録できること。`Canonical`。`Describe` の `valid: false`。`Update` の全部か無しか・409 の相手・入れ替え・同じ値・別の綴り・`loadFailed`・警告・通知は lock の外で 1 回。重複は（修飾キー, VK）で比べる（`Return` = `Enter`・`Esc` = `Escape`・並び順は無関係。読めない値どうしは正規化した文字列）、OS / OBS の警告を（修飾キー, VK）で引く（`Ctrl+Escape` / `Ctrl+Shift+Escape`）、`no_modifier`（F キーは除外・優先順）、文字列でない保存値と `hotkeys` 自体が壊れていても `CurrentKeys()` / `Describe` / `Update` が落ちない。旧 validator との一致テストからは `{"Ctrl+A", "A+Ctrl"}` を外し、新しい重複のテストへ移した
+  - `tests/test_app_settings.py`（80 件）: 許可リスト（トークン・ペアリングコード・`qt_scoreboard_panel` ほかが出ない）。既定。**src の `SettingsManager.Get("<key>", 既定)` を AST で全部拾い、表の既定と一致**（窓は除く）、`DEFAULT_TEAM_COLORS`、ホットキーの既定。全部か無しか・同じ値・型の違う保存値・ポートの範囲と bool・`listen_lan` の None を保つ・`loadFailed`・`restartPending`（起動時 / 待ち受け）。`PORT_RANGE`（65535）と、保存値が範囲外でも GET は表示するだけで書き戻さない
+  - `tests/test_api_v1_settings.py`（97 件）: 各区画の答え。READ（LAN からトークンなしで読め、トークンとペアリングコードを含まない）。WRITE（LAN はトークン必須、外部のページはトークンで通る）。THIS_PC（LAN・トークン付き・外部のページ・`X-Forwarded-For`・rebind した Host・`Origin: null`・cross-site を、3 ルート × トークンの有無で 403。ログに元の理由）。400 の 32 通り・409 の重複・`loadFailed` の 409。デスクトップとヘッドレスで同じ答え（`applied` だけ違う）。**Flask のスレッドからの保存で `RegisterHotKey`（スタブ）が GUI スレッドで呼ばれる**。オフで全部外れる。何も保存しない・断られた保存は登録しない。`LocalUrl`。ハーネスの保護。各 GET の最上位 `loadFailed`。`no_modifier` が v1 の `warnings` に出る・何も書かなかったときも `warnings` が返る。`SetMany` の保存失敗で元に戻る（無かったキーと作った空の親は消える）
+  - 更新: `tests/test_webserver_routes.py`（台帳 5 本・`thisPc` 3 本・件数）、`tests/test_web_operations.py`（`_BODIES` 4 本: デスクトップ / ヘッドレスのルートの歩行）、`tests/test_bootstrap_split.py`（`AppSettings()` と結線の手順、core の段では `applied` が立たない）、`tests/test_import_side_effects.py`（2 モジュール）、`tests/test_hotkeys_suspend.py`（定数の import 先）、`tests/test_headless.py`（実のヘッドレスで GET の `applied: false`・待ち受け・ホットキーの保存）、`tests/conftest.py`（セッションの `AutonaHotkeys` を `SuspendCapture` で OS から離す）
+  - 新しいテストは実装を 1 か所ずつ壊して落ちることを確かめた（26 通り。すべてで狙ったテストが落ちた）。最初の一巡で素通りした 2 通り（読めない値の綴りでの警告と、F キーの除外）はテストを足した。なお、`DirectConnection` で繋ぐ・core のチャンネルを直接購読する壊し方も落ちる
+- **レビューで直したもの**（独立レビュー 2026-11-11）
+  - `SettingsManager.SetMany`: `deep_set` か `SaveSettings` が例外のとき、メモリを元に戻してから再送出（無かったキーと、そのとき作った空の親は消す）
+  - 重複を「同じキーか」で判定（`Conflicts` / `FindDuplicates`。（修飾キー, VK）。Qt の綴り・`Return`・並び順を同じキーとして読む。登録は不変）。Qt の窓も同じ `Conflicts` を通す
+  - OS 予約・OBS の警告を（修飾キー, VK）で引く（`Ctrl+Escape`・`Ctrl+Shift+Escape` が `os_reserved` になった）
+  - 警告コード `no_modifier` を追加（拒否しない）
+  - 文字列でない保存値でも登録が落ちない。合成は `HotkeyRules.CurrentKeys()` 1 か所（`AutonaHotkeys.LoadUserHotkeys` と Qt の窓が使う）
+  - Qt の窓の重複判定が保存していない既定値も見る（新規インストールで `load_set` に `Ctrl+Shift+S` → `swap_teams` の既定と重複）
+  - `GET /api/v1/settings` の最上位に `loadFailed`
+  - 再登録の結線ガードを専用フラグに（`AutonaHotkeys._reload_connected` / `ConnectReload(signal)`）
+  - Qt の窓のポートの上限 65535（`AppSettings.PORT_RANGE`）
+- **メインに見てほしい操作**（`python main.py` の隔離データ）
+  - Qt の設定ウィンドウ: ホットキーの重複のエラー、`Ctrl+S` などの OS の警告と `F5` の OBS の警告の文が今までどおり、ホットキーの保存とオン / オフがすぐ効く（実際にキーを押して）
+  - v1 の PATCH でホットキーを変え（`curl -X PATCH http://127.0.0.1:<port>/api/v1/settings/hotkeys -d '{"keys":{"load_set":"Ctrl+Alt+O"}}'`）、そのキーで動き、旧キーが他のアプリに戻る。`{"enabled": false}` で全部外れる
+  - ポートを v1 で変えて（再起動しない）Designer を開く: 今のポートで開く。GET の `restartPending: true`
+  - LAN の端末から THIS_PC の 3 本が 403、`/settings/general` はトークン付きで 200
+- **検証**（最後のソースの編集の後）: 関連 13 ファイルを直列で 732 passed、`run_tests_parallel` で 6236 passed / 4 skipped（worktree で実行）
+- **メインの実機確認**（隔離データのデスクトップ。2026-11-11。画面ロック中のため、窓の操作はメッセージの投函とウィンドウのキャプチャで行った）
+  - `settings.json` の `hotkeys` に `"load_set": null, "reset_scores": 5` を入れて起動 → 落ちない。ログは `Could not parse hotkey` が 2 行と `Global hotkeys registered: 7 keys`
+  - `GET /api/v1/settings`: 最上位は `general` / `hotkeys` / `language` / `loadFailed`（false）/ `network`。トークン・ペアリングなどの語は含まない。壊した 2 つは `valid: false`・`value: null`
+  - `PATCH /settings/hotkeys`: `load_set` = `Ctrl+Shift+S`（swap_teams の既定）→ 409／`Ctrl+Shift+O` → 200 で `Global hotkeys registered: 8 keys`（GUI スレッドで登録し直し）／swap_teams = `Ctrl+Return` の後に team1_score_down = `Ctrl+Enter` → 409／`Ctrl+Escape` → 200 で `os_reserved`／`{"keys":{}}` → 200
+  - `PATCH /settings/general` の `{}` → 400、`/settings/network` の port 70000 → 400、port +1 → `restartPending: true`、戻すと false（`listening.port` は待ち受け中の値のまま）
+  - `PATCH /settings/language` の `en-US` → `restartPending: true` でアプリは閉じない、`default` に戻すと false
+  - Qt の設定窓: 一般・ホットキーのタブが開く（ポートは待ち受け中の値）。**手で数値を入れた項目（`reset_scores: 5`）は記録欄に読めない記号が出る**（`QKeySequence(5)`。落ちない。以前は起動で落ちていたので出なかった。窓は S4af で消えるので残置）
+  - 未確認: キーを押して記録する操作（重複のダイアログ・新規インストールの既定との重複）、ポート欄の上限 65535、Designer の URL、LAN からの 403（いずれも pytest で pin。キー入力を投函で流せないため）

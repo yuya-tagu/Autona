@@ -145,6 +145,29 @@ with urllib.request.urlopen(
         f"http://127.0.0.1:{port}/api/v1/health", timeout=5) as response:
     result["health"] = response.status
 
+# The settings page's (ADR-005 S4ae): no hotkeys object here, so the page is
+# told they are not applied; a save still reaches settings.json, as this
+# PC's own request (THIS_PC). The server's binding is what it listens on.
+def v1(method, path, body=None):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1{path}", method=method,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return response.status, json.loads(response.read())
+
+status, body = v1("GET", "/settings")
+result["settings"] = {
+    "status": status,
+    "applied": body["data"]["hotkeys"]["applied"],
+    "listening": body["data"]["network"]["listening"],
+    "restartPending": body["data"]["network"]["restartPending"],
+}
+status, body = v1("PATCH", "/settings/hotkeys",
+                  {"keys": {"load_set": "alt+ctrl+o"}})
+result["settings"]["hotkey_save"] = status
+result["settings"]["saved"] = SettingsManager.Get("hotkeys.load_set")
+
 # Every later scan re-applies the provider's game through the selector;
 # the last pick is restored on the first scan only.
 order = []
@@ -233,7 +256,8 @@ report(result)
 
 
 def test_the_headless_shell_assembles_and_runs(tmp_path):
-    result = _probe(tmp_path, _ASSEMBLY_SCRIPT, str(_free_port()))
+    port = _free_port()
+    result = _probe(tmp_path, _ASSEMBLY_SCRIPT, str(port))
 
     assert result["app_type"] == "QCoreApplication"
     # The registrations (S3c-1 review: the selector's must not go missing).
@@ -252,6 +276,12 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["player_db_model"] is False
 
     assert result["health"] == 200
+    # The settings page (ADR-005 S4ae): the headless shell registers no
+    # hotkeys and says so; the save is kept for the desktop.
+    assert result["settings"] == {
+        "status": 200, "applied": False,
+        "listening": {"port": port, "lan": False}, "restartPending": False,
+        "hotkey_save": 200, "saved": "Ctrl+Alt+O"}
     # A rescan re-applies the provider's game, and only that.
     assert result["rescan_order"] == ["probe_game"]
 
