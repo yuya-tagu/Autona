@@ -34,6 +34,8 @@ from werkzeug.exceptions import ClientDisconnected
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import AnalysisService as analysis
+from .core import AppSettings
+from .core import HotkeyRules
 from .core import StateSchema as schema
 from .core import ColorService
 from .core import ImageImport
@@ -945,6 +947,23 @@ def get_player_entrants():
     # alone, `key` null. [] with no tournament. `game` and PLAYERDB, as
     # /players.
     return ok(data=WebOps.get_player_entrants())
+
+
+@api_v1.route("/settings")
+@api_handler
+def get_settings():
+    # The settings page's (ADR-005 S4ae): {"general": the switches and the
+    # default colours by their settings.json names, "network": {port,
+    # listenLan (null: not decided yet), listening: {port, lan} | null,
+    # restartPending}, "language": {program, gameAsset, fgTerm, choices:
+    # [{code, name, englishName}], restartPending}, "hotkeys": {enabled, keys:
+    # {action: {value, default, valid, warning}}, vocabulary: {modifiers,
+    # keys}, applied}, "loadFailed": settings.json could not be read (the
+    # values are the defaults, and every save answers 409 NOT_READY)}. An
+    # allow-list (core's AppSettings / HotkeyRules):
+    # never the access token, nor anything else settings.json holds, so READ.
+    # Settings, not state: no revision.
+    return ok(data=WebOps.get_settings())
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1978,6 +1997,97 @@ def select_stats_overlay():
     if item is None:
         raise ApiError(INVALID_ARGUMENT, "key must be a listed overlay", 400)
     return ok(data=item)
+
+
+# ── 設定 (ADR-005 S4ae) ──
+# The settings page's saves: core's AppSettings / HotkeyRules validate every
+# field first and write once (nothing when nothing changes, nothing at all
+# when settings.json could not be read: 409 NOT_READY). Each answers its
+# section of GET /settings as it now is. Settings, not state: no revision.
+# general is WRITE; network, language and hotkeys THIS_PC (WebAccess).
+
+def _settings_refused(refusal):
+    """The ApiError for a refusal of AppSettings / HotkeyRules."""
+    if refusal.code == AppSettings.NOT_READY:
+        raise ApiError(
+            NOT_READY, "settings.json could not be read: nothing was saved",
+            409)
+    if refusal.code == HotkeyRules.CONFLICT:
+        raise ApiError(
+            CONFLICT,
+            f"{refusal.name}: the shortcut is already assigned to: "
+            f"{refusal.detail}", 409)
+    message = (f"{refusal.name} {refusal.detail}" if refusal.name
+               else refusal.detail)
+    raise ApiError(INVALID_ARGUMENT, message, 400)
+
+
+@api_v1.route("/settings/general", methods=["PATCH"])
+@write_op("settings.general")
+def settings_general_update():
+    # Some of profanity_filter, disable_autoupdate, disable_scoreupdate,
+    # disable_export, disable_overwrite, disable_individual_game_tracker
+    # (true / false) and team_1_default_color, team_2_default_color (#rgb /
+    # #rrggbb, saved as #rrggbb).
+    refusal, _written = WebOps.update_general_settings(_json_body())
+    if refusal is not None:
+        _settings_refused(refusal)
+    return ok(data=WebOps.get_settings()["general"])
+
+
+@api_v1.route("/settings/network", methods=["PATCH"])
+@write_op("settings.network")
+def settings_network_update():
+    # Some of {"port": 1..65535, "listenLan": true / false}: applied by a
+    # restart (restartPending says whether one is still to come).
+    refusal, _written = WebOps.update_network_settings(_json_body())
+    if refusal is not None:
+        _settings_refused(refusal)
+    return ok(data=WebOps.get_settings()["network"])
+
+
+@api_v1.route("/settings/language", methods=["PATCH"])
+@write_op("settings.language")
+def settings_language_update():
+    # Some of {"program", "gameAsset", "fgTerm"}: "default" or a code of
+    # `choices`. Applied by a restart; the program keeps running.
+    refusal, _written = WebOps.update_language_settings(_json_body())
+    if refusal is not None:
+        _settings_refused(refusal)
+    return ok(data=WebOps.get_settings()["language"])
+
+
+@api_v1.route("/settings/hotkeys", methods=["PATCH"])
+@write_op("settings.hotkeys")
+def settings_hotkeys_update():
+    # Some of {"enabled": true / false, "keys": {<action>: <shortcut>}}: a
+    # shortcut is Ctrl / Alt / Shift and one key of the vocabulary (saved as
+    # "Ctrl+Alt+Shift+Key"), "" for none. A shortcut another action has
+    # (after this request) is 409 CONFLICT naming it, and nothing is saved.
+    # One that clashes with an OS / OBS binding is saved, and named in
+    # data.warnings ([{action, code: "os_reserved" | "obs_likely"}]).
+    body = _json_body()
+    unknown = sorted(key for key in body if key not in ("enabled", "keys"))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown hotkey setting: {', '.join(unknown)} (enabled, keys)",
+            400)
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "at least one of enabled, keys is required",
+            400)
+    # null is not "leave it": core reads None as not sent.
+    if "enabled" in body and not isinstance(body["enabled"], bool):
+        raise ApiError(INVALID_ARGUMENT, "enabled must be true or false", 400)
+    if "keys" in body and not isinstance(body["keys"], dict):
+        raise ApiError(
+            INVALID_ARGUMENT, "keys must be an object of shortcuts", 400)
+    refusal, warnings, _written = WebOps.update_hotkey_settings(
+        enabled=body.get("enabled"), keys=body.get("keys"))
+    if refusal is not None:
+        _settings_refused(refusal)
+    return ok(data=dict(WebOps.get_settings()["hotkeys"], warnings=warnings))
 
 
 @api_v1.route("/colors/<feature>", methods=["PATCH"])

@@ -2,13 +2,28 @@ from qtpy.QtWidgets import *
 from ..AutonaColorButton import AutonaColorButton
 from ..core.SettingsManager import SettingsManager
 from ..AutonaHotkeys import AutonaHotkeys
-from ..Helpers.AutonaHotkeyValidator import (
-    collision_summary,
-    find_app_duplicates,
-    normalize_shortcut,
-    os_warning_for,
-)
+from ..core import HotkeyRules
 import textwrap
+
+
+def _HotkeyWarningText(shortcut, code):
+    """The dialog text for a HotkeyRules.WarningFor code (Design.md §6.4.2 /
+    §8 T-17). The rules are core's since ADR-005 S4ae; the text stays this
+    window's, as it was. None (no dialog) for any other code: this window
+    has no words for WARNING_NO_MODIFIER, and goes in S4af."""
+    if code == HotkeyRules.WARNING_OS_RESERVED:
+        return (
+            f"'{shortcut}' は OS や一般的なアプリ "
+            "(コピー・保存・ウィンドウ操作など) で広く予約されています。"
+            "他アプリにフォーカスがあると Autona に届きません。"
+        )
+    if code == HotkeyRules.WARNING_OBS_LIKELY:
+        return (
+            f"'{shortcut}' は OBS Studio で録画開始 / シーン切替などに "
+            "割り当てられがちです。配信中の意図しない動作を避けるため、"
+            "OBS 側のホットキー設定と重複しないか確認してください。"
+        )
+    return None
 
 
 class HotkeyCaptureEdit(QKeySequenceEdit):
@@ -93,8 +108,11 @@ class SettingsWidget(QWidget):
             )
         elif type == "spinbox":
             settingWidget = QSpinBox()
+            # The only spinbox is the web server's port: 1-65535, core's
+            # AppSettings.PORT_RANGE (99999 let a port no server can listen
+            # on be saved).
             settingWidget.setMinimum(1)
-            settingWidget.setMaximum(99999)
+            settingWidget.setMaximum(65535)
             settingWidget.setValue(SettingsManager.Get(
                 self._key(setting), defaultValue))
             settingWidget.valueChanged.connect(
@@ -193,21 +211,19 @@ class SettingsWidget(QWidget):
 
             # No-op: identical to last accepted value (suppresses the
             # echo when we revert via setKeySequence below).
-            if normalize_shortcut(new_str) == normalize_shortcut(previous):
+            if (HotkeyRules.NormalizeShortcut(new_str)
+                    == HotkeyRules.NormalizeShortcut(previous)):
                 return
 
             # Build a hypothetical hotkey set with the new value applied
             # so duplicate detection sees the user's intent, not the
-            # already-persisted value.
-            current = dict(SettingsManager.Get(self.settingsBase, {}) or {})
+            # already-persisted value. Core's merge over the defaults (an
+            # action never saved still takes its default's key) and core's
+            # check, the settings page's: the same key however spelled
+            # (ADR-005 S4ae).
+            current = HotkeyRules.CurrentKeys()
             current[setting] = new_str
-            duplicates = find_app_duplicates(current)
-
-            collision_actions = None
-            for canon, actions in duplicates.items():
-                if canon == normalize_shortcut(new_str) and setting in actions:
-                    collision_actions = [a for a in actions if a != setting]
-                    break
+            collision_actions = HotkeyRules.Conflicts(current, setting)
 
             if collision_actions:
                 QMessageBox.critical(
@@ -221,7 +237,8 @@ class SettingsWidget(QWidget):
                         "conflicting assignment first."
                     ).format(
                         shortcut=new_str,
-                        others=collision_summary(collision_actions),
+                        others=HotkeyRules.CollisionSummary(
+                            collision_actions),
                     ),
                 )
                 # Revert UI without re-triggering the handler.
@@ -232,7 +249,8 @@ class SettingsWidget(QWidget):
                     settingWidget.blockSignals(False)
                 return
 
-            warning = os_warning_for(new_str)
+            warning = _HotkeyWarningText(
+                new_str, HotkeyRules.WarningFor(new_str))
             if warning:
                 QMessageBox.warning(
                     settingWidget,

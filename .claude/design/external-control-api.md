@@ -49,7 +49,7 @@
   - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
-- **この PC のウィンドウを開く操作はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35。ADR-005 S4s）。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
+- **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -220,6 +220,7 @@
 | `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。`?board=` は 2026-11-10。ボードのコンボと Web のスコアボードページが使う） | `get_match_name_candidates`（`core/MatchNameCandidates.Candidates`） | — |
 | `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
 | `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加。変わると Socket.IO の `battle_format` が出る: S4z） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
+| `GET /api/v1/settings` | 設定ウィンドウの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
@@ -648,6 +649,46 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 - `program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow` の後に送る。`scoreboard_follow` と同じく自分の間隔は持たない（開いている窓があれば合流し、無ければすぐ出る）。1 回の送信の間に何度切り替わっても 1 通で、delta の間隔は動かさない
 - 送信先は全接続（読みが READ で、通知は値を運ばない）
 
+### 5.22 `GET /api/v1/settings`（2026-11-11 追加・ADR-005 S4ae）
+
+設定ウィンドウの設定（一般・ネットワーク・言語）とホットキー。**返すキーは許可リスト**（`core/AppSettings.SETTINGS` と `core/HotkeyRules.DEFAULT_KEYS`）で、アクセストークン・ペアリングコード・その他の settings.json のキーは返さない。だから READ。設定なので `revision` は付かない。最上位に `loadFailed`（`settings.json` を読めなかった起動か）が付く
+
+```json
+{
+  "loadFailed": false,
+  "general": {
+    "profanity_filter": true, "disable_autoupdate": true,
+    "disable_scoreupdate": false, "disable_export": false,
+    "disable_overwrite": false, "disable_individual_game_tracker": true,
+    "team_1_default_color": "#fe3636", "team_2_default_color": "#2e89ff"
+  },
+  "network": {
+    "port": 5107, "listenLan": null,
+    "listening": {"port": 5107, "lan": false},
+    "restartPending": false
+  },
+  "language": {
+    "program": "default", "gameAsset": "default", "fgTerm": "default",
+    "choices": [{"code": "ja-JP", "name": "日本語", "englishName": "Japanese"}],
+    "restartPending": false
+  },
+  "hotkeys": {
+    "enabled": true,
+    "keys": {"load_set": {"value": "Ctrl+Shift+O", "default": "Ctrl+Shift+O",
+                          "valid": true, "warning": null}},
+    "vocabulary": {"modifiers": ["Ctrl", "Alt", "Shift"],
+                   "keys": ["A", "...", "Right"]},
+    "applied": true
+  }
+}
+```
+
+- `general`: settings.json の名前のまま。保存が無い・型が違うときは既定（読み手の既定と同じ。`disable_autoupdate` は true）
+- `network.port`: 保存値。範囲外の保存値（旧ウィンドウは 99999 まで許した）もそのまま返す。`listenLan`: 保存値。**null は未決定**（デスクトップが次の起動で聞く。サーバーはこの PC だけで待ち受ける）。`listening`: サーバーが実際に待ち受けているポートと LAN（無ければ null）。`restartPending`: 保存値が `listening`（無ければ起動時の値）と違う。LAN は null を false として比べる
+- `language`: `"default"` か `choices` の `code`。`restartPending`: 起動時の値と違う（言語は再起動で効く）
+- `hotkeys.keys`: 全アクション。`value` は保存値（無ければ既定。文字列でない保存値は null）、`valid` は登録が読めるか（`""` = ショートカットなしは true。旧ウィンドウの記録が作った `Esc` / `PgUp` などは false で、登録されていない）、`warning` は `os_reserved` / `obs_likely` / `no_modifier`（修飾キーなしの 1 キー。F1〜F24 は除く。Shift+文字は修飾キー付きなので出ない）/ null（優先順は os_reserved → obs_likely → no_modifier。警告は（修飾キー, VK）で引くので `Ctrl+Escape` も `os_reserved`）。文字列でない保存値でも落ちない。**オブジェクトのキーの順は保たれない**（JSON はソートされる）ので、表示順はクライアントが決める
+- `hotkeys.vocabulary`: PATCH が受けるショートカットの部品（Ctrl / Alt / Shift と、キー 1 つ）。`applied`: このシェルが OS に登録するか（デスクトップ true、ヘッドレス false）
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37・§6.41〜6.43 および §7 の
@@ -1065,6 +1106,35 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 同じ値は書かない。1 保存サイクル。held（§6 冒頭）・ヘッドレスはすぐ公開。デスクトップの未構築のボードは、断る要求・同じ値の要求でも構築する（§6.41 と同じ）
 - 応答は `revision`。操作ログは `match.update`
 - エラー: `400 INVALID_ARGUMENT`（`n` が 1 / 2 以外・空の body・未知のキー（`match_en` も）・文字列でない値・整数でないか範囲外の `bestOf`。何も書かない）
+
+### 6.44 一般の設定 `PATCH /api/v1/settings/general`（2026-11-11 追加・ADR-005 S4ae）
+- body: §5.22 の `general` のキーのうち 1 つ以上（部分更新）。真偽の項目は `true` / `false` だけ、色は `#rgb` / `#rrggbb`（`#rrggbb` の小文字で保存）
+- **全キーを先に検証**し、1 つでも不正（未知のキー・型の違い）なら何も保存しない。今と同じ値は書かない。`general.qt_scoreboard_panel` は受けない
+- 応答: `data` は §5.22 の `general`（保存後）。`revision` は付かない
+- WRITE（LAN はトークン必須）。ヘッドレスでも動く
+- エラー: `INVALID_ARGUMENT`（空の body・未知のキー・型）、`NOT_READY` 409（`settings.json` を読めなかった起動。何も保存しない: 書くと読めなかったファイルを置き換え、トークンも失う）
+
+### 6.45 待ち受けの設定 `PATCH /api/v1/settings/network`（2026-11-11 追加・ADR-005 S4ae）
+- body: `{ "port": 1..65535, "listenLan": true | false }` のどちらか 1 つ以上。`port` は整数（真偽・文字列・小数は不可）、`listenLan` は真偽（null は不可。未決定に戻す手段は無い）
+- **再起動で効く**。応答の `data`（§5.22 の `network`）の `restartPending` で分かる。`port` だけの保存は未決定の `listenLan`（null）を保つ
+- **`THIS_PC` 区分（§2.2）**: LAN はトークンがあっても `403 FORBIDDEN`
+- エラー: `INVALID_ARGUMENT`、`NOT_READY` 409（§6.44 と同じ）
+
+### 6.46 言語の設定 `PATCH /api/v1/settings/language`（2026-11-11 追加・ADR-005 S4ae）
+- body: `{ "program", "gameAsset", "fgTerm" }` のうち 1 つ以上。値は `"default"` か §5.22 の `choices` の `code`
+- **再起動で効く**（アプリは閉じない）。応答の `data` は §5.22 の `language`
+- **`THIS_PC` 区分（§2.2）**
+- エラー: `INVALID_ARGUMENT`、`NOT_READY` 409
+
+### 6.47 ホットキーの設定 `PATCH /api/v1/settings/hotkeys`（2026-11-11 追加・ADR-005 S4ae）
+- body: `{ "enabled": true | false, "keys": { "<action>": "<shortcut>" } }` のどちらか 1 つ以上（`{"keys": {}}` は何も保存しない）。ショートカットは Ctrl / Alt / Shift（各 1 回まで）と §5.22 の語彙のキー 1 つを `+` でつないだもの（大文字小文字・並び・空白は問わない。`Ctrl+Alt+Shift+Key` の順で保存）。修飾キーなしの 1 キー（F キーを除く）も保存できるが `no_modifier` の警告が付く（拒否しない）。`""` はショートカットなし
+- **全部を先に検証**し、1 つでも不正なら何も保存しない。今と同じショートカットは書かない
+- **保存の後の集合で、要求したアクションのショートカットが別のアクションと同じキーなら `409 CONFLICT`**（メッセージに相手のアクション）。「同じキー」は（修飾キー, VK）で比べる（`Return` = `Enter`、`Esc` = `Escape`、並び順は無関係: `A+Ctrl` と `Ctrl+A` は重複。読めない値どうしは正規化した文字列で比べる）。保存していない既定値とも比べる。何も保存しない。1 つの要求で 2 つのアクションの入れ替えはできる
+- OS / OBS と重なりがちなショートカットは保存し、`data.warnings`（`[{action, code: "os_reserved" | "obs_likely" | "no_modifier"}]`）で知らせる。**何も書かなかったとき**（今と同じ値だけの要求）も `warnings` は返る
+- 応答: `data` は §5.22 の `hotkeys` + `warnings`
+- デスクトップは保存のあと、すぐ登録し直す（GUI スレッドで。`enabled: false` で全部外れる）。ヘッドレスは保存だけ（`applied: false`）
+- **`THIS_PC` 区分（§2.2）**
+- エラー: `INVALID_ARGUMENT`（未知のトップのキー・空・型・未知のアクション・語彙に無いキー・修飾キーの重複・キーが無い / 2 つ）、`CONFLICT` 409、`NOT_READY` 409
 
 ---
 

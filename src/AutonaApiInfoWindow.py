@@ -84,6 +84,7 @@ _ENDPOINTS = [
     ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8|board)", None, False, False, False),
     ("GET", "/layouts/selected/board/obs-path", "The Board's OBS files, as absolute paths (a token from another computer)", None, False, False, False),
     ("GET", "/commentary/options", "Commentary role / icon candidates", None, False, False, False),
+    ("GET", "/settings", "Settings: general, network, language, hotkeys (never the access token)", None, False, False, False),
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
     ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),
@@ -111,6 +112,10 @@ _ENDPOINTS = [
     ("PUT", "/layouts/selected/{kind}", "Select a panel's layout", {"id": "commentators"}, False, True, False),
     ("POST", "/layouts/selected/board:reveal", "Show a Board OBS file in Explorer (this PC only; a design no longer selected is 409)", {"target": "design", "designId": "scoreboard_simple"}, False, True, False),
     ("PATCH", "/colors/{feature}", "Set a feature's colors", {"theme": "#112233", "accent": "#445566"}, False, True, False),
+    ("PATCH", "/settings/general", "Update general settings (partial)", {"profanity_filter": True}, False, True, False),
+    ("PATCH", "/settings/network", "Set the web server's port / LAN access (this PC only; applied by a restart)", {"port": 5107}, False, True, False),
+    ("PATCH", "/settings/language", "Set the languages (this PC only; applied by a restart)", {"program": "default"}, False, True, False),
+    ("PATCH", "/settings/hotkeys", "Set hotkeys (this PC only; a shortcut another action has is 409)", {"keys": {"load_set": "Ctrl+Shift+O"}}, False, True, False),
     ("POST", "/scoreboards/{n}:stop-follow", "Stop following, forget the station and the followed set", None, False, True, False),
     ("POST", "/tournament/sets:cancel", "Stop the set list's fetch (the rows stay)", None, False, True, False),
     # ── Destructive (confirm required) ──

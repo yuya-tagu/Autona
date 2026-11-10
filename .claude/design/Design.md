@@ -846,7 +846,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | カテゴリ | 正本 | キャッシュ可能な経路 |
 |---------|-----|------------------|
 | ユーザー設定全般 | `SettingsManager` (`./user_data/settings.json`) | StateManager に展開してよい（`tournamentInfo.themeColor` / `colors.{feature}.themeColor` 等） |
-| ホットキー有効値 | `AutonaHotkeys.LoadUserHotkeys()` の結果（デフォルト + 上書きをマージ） | — |
+| ホットキー有効値 | `AutonaHotkeys.LoadUserHotkeys()` の結果（`core/HotkeyRules.DEFAULT_KEYS` + 上書きをマージ。合成は `HotkeyRules.CurrentKeys()`） | — |
 | トーナメント URL（最後に開いた） | `SettingsManager.Get("TOURNAMENT_URL")` | メモリキャッシュ可 |
 | ウィンドウ状態 | QSettings | — |
 
@@ -854,7 +854,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 ##### ホットキー
 ```
-有効なホットキー = AutonaHotkeys.keys（デフォルト） |> deep_clone |> update(SettingsManager.Get("hotkeys"))
+有効なホットキー = HotkeyRules.DEFAULT_KEYS（デフォルト。AutonaHotkeys.keys はそのコピー） |> deep_clone |> update(SettingsManager.Get("hotkeys"))
 ```
 
 ##### OBS layout 設定
@@ -1609,8 +1609,8 @@ const themeColor = fc.themeColor || ti.themeColor;
 #### 6.3.2 ショートカット文字列
 
 - 形式: `Ctrl+Shift+{key}`（推奨）/ `Alt+{key}` / `{key}` 単体（避ける）
-- キー名は Qt の標準名に従う（`F1`〜`F12`、`A`〜`Z`、`0`〜`9`、`Enter`、`Space` 等）
-- 変換は `AutonaHotkeys._parse_shortcut()` が行う
+- キー名は `HotkeyRules.KEYS` の綴り（`F1`〜`F12`、`A`〜`Z`、`0`〜`9`、`Enter`、`Escape`、`Space`、`PageUp` 等）
+- 変換は `core/HotkeyRules.ParseShortcut()` が行う（ADR-005 S4ae で移動。中身は同じ）。Qt の記録が作る `Esc` / `Del` / `Ins` / `PgUp` / `PgDown` は読めない（登録されない。v1 の GET では `valid: false`）。v1 の PATCH が受けるのは語彙（`HotkeyRules.Vocabulary()`）の綴りだけ。重複の判定は同じキーかで行う（（修飾キー, VK）で比べ、`Return` = `Enter`・並び順は無関係。`HotkeyRules.Conflicts`）
 
 ### 6.4 衝突回避ガイドライン
 
@@ -1661,7 +1661,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | ステップ | 内容 |
 |---------|------|
 | 1 | `AutonaHotkeysSignals` に Signal 追加 |
-| 2 | `AutonaHotkeys.keys` 辞書にデフォルト追加 |
+| 2 | `core/HotkeyRules.DEFAULT_KEYS` にデフォルト追加（`AutonaHotkeys.keys` はそのコピー。表示順もこの順。設定ウィンドウの `key_names` と、S4af 以降は React の設定ページのラベル表にも足す） |
 | 3 | 受け取り側 Widget で `AutonaHotkeys.signals.{action_key}.connect(self.{handler})` |
 | 4 | 設定ダイアログのアクション一覧に追加（i18n 表示名込み） |
 | 5 | §6.2 の表に追加（本書を更新） |
@@ -1949,7 +1949,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
 | **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | 試合一覧は core の `AnalysisService`（ADR-005 S4j）と React のページ（S4k）に移り、Qt 版は削除。golden（`tests/fixtures/analysis_rows/golden.json`）・`tests/test_analysis_rows.py` / `test_analysis_service.py` / `test_api_v1_analysis.py`・jest の `analysisRows.test.js` が回帰を pin | ✅ 完了（ADR-005 S4j / S4k） |
 | **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し、`Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出す | ✅ 完了（M3） |
+| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し（ADR-005 S4ae で `src/core/HotkeyRules.py` へ移し、validator は削除。警告はコード `os_reserved` / `obs_likely` / `no_modifier` になり、窓の文は `SettingsWidget._HotkeyWarningText` が同じ文に組み立てる）、`Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出す | ✅ 完了（M3） |
 
 ### 8.3 優先度: 低（長期的な構造改善）
 

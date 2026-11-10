@@ -170,6 +170,12 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>:reset-players', 'api_v1.reset_players', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:stop-follow', 'api_v1.stop_follow', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:swap-teams', 'api_v1.swap_teams', 'OPTIONS,POST'),
+    # The settings page (ADR-005 S4ae).
+    ('/api/v1/settings', 'api_v1.get_settings', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/settings/general', 'api_v1.settings_general_update', 'OPTIONS,PATCH'),
+    ('/api/v1/settings/hotkeys', 'api_v1.settings_hotkeys_update', 'OPTIONS,PATCH'),
+    ('/api/v1/settings/language', 'api_v1.settings_language_update', 'OPTIONS,PATCH'),
+    ('/api/v1/settings/network', 'api_v1.settings_network_update', 'OPTIONS,PATCH'),
     ('/api/v1/stages', 'api_v1.get_stages', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
@@ -520,12 +526,17 @@ def test_the_classification_follows_the_rules():
     # operator's account (S4s), a board's values not published yet (S4u), and
     # the Board's "show in Explorer", which opens a window on this PC and is
     # for this PC alone (S4s), and a board's X post, made from those values as
-    # its button makes it (S4x).
+    # its button makes it (S4x), and the settings page's port / LAN access,
+    # languages and hotkeys, which are this PC's to change (S4ae; its general
+    # switches are a plain write).
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
                       "api_v1.get_result_post", "api_v1.get_board_files",
                       "api_v1.get_scoreboard_pending",
                       "api_v1.get_scoreboard_post"}
-    thisPc = {"api_v1.reveal_board_file"}
+    thisPc = {"api_v1.reveal_board_file",
+              "api_v1.settings_network_update",
+              "api_v1.settings_language_update",
+              "api_v1.settings_hotkeys_update"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -568,7 +579,9 @@ def test_the_classification_follows_the_rules():
     # and what its combos offer (S4w: v1 72 of 110), and the battle format's
     # switch and read, with the X post guarded now that boards 1/2 answer it
     # from their unpublished values (S4x: v1 73 of 112), and the SCORE page's
-    # field, character row and match bar writes (S4z: v1 76 of 115).
+    # field, character row and match bar writes (S4z: v1 76 of 115), and the
+    # settings page's read, its general write and its three this-PC writes
+    # (S4ae: v1 77 of 120).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -577,8 +590,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 115
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 77
+    assert len(EXPECTED_API_V1_ROUTES) == 120
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

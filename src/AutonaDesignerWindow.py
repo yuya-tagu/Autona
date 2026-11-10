@@ -5,7 +5,7 @@ from qtpy.QtWidgets import QDialog, QVBoxLayout
 from qtpy.QtWebEngineWidgets import QWebEngineView
 
 from .AutonaDesignerService import AutonaDesignerService
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .AutonaWebPageLifecycle import LocalUrl
 
 
 class AutonaDesignerWindow(QDialog):
@@ -26,8 +26,10 @@ class AutonaDesignerWindow(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.webView)
 
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
-        url = QUrl(f"http://127.0.0.1:{port}/web")
+        # At the port the server really listens on (LocalUrl): a port saved
+        # for the next start must not send the Designer to a closed one
+        # (ADR-005 S4ae).
+        url = QUrl(LocalUrl("/web"))
         query = QUrlQuery()
         query.addQueryItem("view", "designer")
         query.addQueryItem("desktop", "1")

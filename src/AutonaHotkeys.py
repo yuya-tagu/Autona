@@ -7,57 +7,15 @@ from loguru import logger
 
 from .core.SettingsManager import SettingsManager
 from .core.Actions import AutonaActions
+from .core import HotkeyRules
 from .core import Top8Service
-from .core.DictHelper import deep_clone
 
-# Win32 constants
-MOD_ALT = 0x0001
-MOD_CONTROL = 0x0002
-MOD_SHIFT = 0x0004
-MOD_NOREPEAT = 0x4000
+# Win32 constant of the message the native filter answers. The modifiers,
+# the key codes, the defaults and the parser are core's (HotkeyRules,
+# ADR-005 S4ae): the settings page validates against what this registers.
 WM_HOTKEY = 0x0312
 
-# Virtual key codes for special keys
-_VK_MAP = {
-    "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
-    "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
-    "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
-    "tab": 0x09, "return": 0x0D, "enter": 0x0D,
-    "escape": 0x1B, "space": 0x20, "backspace": 0x08,
-    "delete": 0x2E, "insert": 0x2D,
-    "home": 0x24, "end": 0x23,
-    "pageup": 0x21, "pagedown": 0x22,
-    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
-}
-
 user32 = ctypes.windll.user32
-
-
-def _parse_shortcut(shortcut_str):
-    """Parse 'Ctrl+F1' style string into (modifiers, vk) tuple."""
-    parts = shortcut_str.lower().split("+")
-    modifiers = MOD_NOREPEAT
-    vk = 0
-
-    for part in parts:
-        part = part.strip()
-        if part == "ctrl":
-            modifiers |= MOD_CONTROL
-        elif part == "alt":
-            modifiers |= MOD_ALT
-        elif part == "shift":
-            modifiers |= MOD_SHIFT
-        elif part in _VK_MAP:
-            vk = _VK_MAP[part]
-        elif len(part) == 1 and part.isalnum():
-            vk = ord(part.upper())
-        else:
-            logger.warning(f"Unknown key in shortcut: {part}")
-            return None
-
-    if vk == 0:
-        return None
-    return (modifiers, vk)
 
 
 class _HotkeyFilter(QAbstractNativeEventFilter):
@@ -93,22 +51,10 @@ class AutonaHotkeys(QObject):
     signals = AutonaHotkeysSignals()
     parent: QWidget = None
 
-    # Use Ctrl+Shift+ prefix to avoid globally swallowing common app
-    # shortcuts (Ctrl+S=Save, Ctrl+O=Open, Ctrl+P=Print, Ctrl+R=Reload).
-    # Score buttons use top-row digits 1..4 — F-keys are reserved on many
-    # keyboards for OS / OBS hotkeys and operators prefer to keep them
-    # free for streaming software.
-    keys = {
-        "load_set": "Ctrl+Shift+O",
-        "team1_score_up": "Ctrl+Shift+1",
-        "team1_score_down": "Ctrl+Shift+2",
-        "team2_score_up": "Ctrl+Shift+3",
-        "team2_score_down": "Ctrl+Shift+4",
-        "reset_scores": "Ctrl+Shift+R",
-        "swap_teams": "Ctrl+Shift+S",
-        "refresh_phase_group": "Ctrl+Shift+P",
-        "apply_changes": "Ctrl+Shift+L",
-    }
+    # The defaults (core's HotkeyRules.DEFAULT_KEYS, where the reason for
+    # each is). A copy: LoadUserHotkeys clones it, and nothing may change
+    # core's table through it.
+    keys = dict(HotkeyRules.DEFAULT_KEYS)
 
     loaded_keys = {}
 
@@ -118,6 +64,26 @@ class AutonaHotkeys(QObject):
     # tests build extra AutonaHotkeys objects, and a per-instance connection
     # would have every one of them answering the same key press).
     _actions_connected = False
+
+    # True once ConnectReload() has connected the settings page's saves to
+    # ReloadHotkeys. Class-level like _actions_connected, for the same
+    # reason: bootstrap_gui() can run more than once in a process, and a
+    # second connection would re-register every hotkey twice per save.
+    _reload_connected = False
+
+    @classmethod
+    def ConnectReload(cls, signal):
+        """Re-register the hotkeys on `signal`: the bridge's
+        hotkeys_changed, i.e. a save through the settings page (core's
+        HotkeyRules.Update, on a request thread). Connected to the
+        instance's bound method: the object lives on the GUI thread, so Qt
+        queues the call there -- RegisterHotKey binds a hotkey to the
+        calling thread's message queue (ADR-005 S4ae). Idempotent; needs
+        the instance."""
+        if cls._reload_connected:
+            return
+        cls._reload_connected = True
+        signal.connect(cls.instance.ReloadHotkeys)
 
     @classmethod
     def ConnectActions(cls):
@@ -323,6 +289,13 @@ class AutonaHotkeys(QObject):
         self.SetupHotkeys()
 
     def ReloadHotkeys(self):
+        """Read the saved shortcuts again and register them. The settings
+        window calls it after a save; a save through the settings page
+        (core's HotkeyRules.Update, on a request thread) reaches it through
+        StateManagerBridge.hotkeys_changed, connected by bootstrap_gui():
+        this object lives on the GUI thread, so Qt queues the call there --
+        RegisterHotKey binds a hotkey to the calling thread's message
+        queue, the one the native filter reads (ADR-005 S4ae)."""
         self.LoadUserHotkeys()
         self.SetupHotkeys()
 
@@ -400,7 +373,7 @@ class AutonaHotkeys(QObject):
             QApplication.instance().installNativeEventFilter(self._filter)
 
         for action_key, shortcut_str in self.loaded_keys.items():
-            parsed = _parse_shortcut(shortcut_str)
+            parsed = HotkeyRules.ParseShortcut(shortcut_str)
             if parsed is None:
                 logger.warning(
                     f"Could not parse hotkey: {shortcut_str} for {action_key}")
@@ -438,8 +411,11 @@ class AutonaHotkeys(QObject):
             getattr(self.signals, k).emit()
 
     def LoadUserHotkeys(self):
-        user_keys = SettingsManager.Get("hotkeys", {})
-        self.loaded_keys = deep_clone(self.keys)
-        self.loaded_keys.update(
-            (k, v) for k, v in user_keys.items() if k in self.keys)
+        # Core's merge of the saved shortcuts over the defaults, the one the
+        # settings page and the settings window check against. A saved value
+        # that is not a string, or a subtree that is not an object (a
+        # hand-edited settings.json), no longer raises here, inside
+        # UiMounted: SetupHotkeys skips the value as unreadable and
+        # registers the others (ADR-005 S4ae).
+        self.loaded_keys = HotkeyRules.CurrentKeys()
         logger.info("User hotkeys loaded")

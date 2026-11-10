@@ -415,6 +415,25 @@ def bootstrap_core():
             locales=lambda: (AutonaLocaleHelper.programLocale,
                              AutonaLocaleHelper.exportLocale))
 
+    # ORDER CONSTRAINT: the settings page's settings (ADR-005 S4ae) take
+    # what this run starts with -- the web server's port and LAN access, the
+    # languages -- when built, to tell a saved change a restart is still to
+    # apply. So after SettingsManager.Initialize() and before either shell
+    # reads them: the locale (LoadLocale) and the web server are the
+    # shell's, after this function returns. The language list (the locale
+    # table loaded above) and what the server is bound with are read when
+    # asked; the server is imported then, not here.
+    from .core.AppSettings import AppSettings
+
+    def listening():
+        from .AutonaWebServer import WebServer
+        return WebServer.Listening()
+
+    if AppSettings.instance is None:
+        AppSettings.instance = AppSettings(
+            languages=lambda: AutonaLocaleHelper.languages,
+            listening=listening)
+
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
     # are switched to the stub + shared layout/designer_runtime/ before
     # anything can serve or list them -- the web server and the BOARD
@@ -466,6 +485,17 @@ def bootstrap_gui():
     # Idempotent, and deliberately outside the `instance is None` guard so a
     # re-bootstrap re-checks it rather than depending on which branch ran.
     AutonaHotkeys.ConnectActions()
+    # A save through the settings page (core's HotkeyRules.Update, on a
+    # request thread) re-registers the hotkeys: the bridge turns core's
+    # channel into hotkeys_changed, and the hotkeys object lives on the GUI
+    # thread, so the call is queued there -- RegisterHotKey binds to the
+    # calling thread's message queue (ADR-005 S4ae). Idempotent like
+    # ConnectActions (its own flag). `applied` tells the page that this
+    # shell registers them at all (the headless shell does not).
+    from .StateManagerBridge import StateManagerBridge
+    from .core import HotkeyRules
+    AutonaHotkeys.ConnectReload(StateManagerBridge.instance.hotkeys_changed)
+    HotkeyRules.applied = True
 
     # ORDER CONSTRAINT: the Qt adapter wraps the game asset catalog
     # (bootstrap_core()). It only builds the (empty) Qt models here.

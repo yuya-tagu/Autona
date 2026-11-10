@@ -12,6 +12,9 @@ from .DictHelper import *
 # Keep in sync with web/src/env.js (dev fallback).
 DEFAULT_WEBSERVER_PORT = 5107
 
+# SetMany's mark for "the key was not there" (a value may be None).
+_ABSENT = object()
+
 
 class SettingsManager:
     settings = {}
@@ -81,6 +84,63 @@ class SettingsManager:
         with SettingsManager.lock:
             deep_set(SettingsManager.settings, key, value)
             SettingsManager.SaveSettings()
+
+    def SetMany(pairs):
+        """Set each (key, value) of `pairs` and save once, under one hold of
+        the lock: a reader sees all of them or none, and settings.json is
+        written one time (the settings page's saves, ADR-005 S4ae). An empty
+        `pairs` writes and saves nothing.
+
+        When a set or the save raises, the settings in memory are put back
+        as they were before the call (what was not there is removed again)
+        and the error is raised: memory never holds what settings.json does
+        not, which a reader would show and the next Set() would write
+        silently."""
+        pairs = list(pairs)
+        if not pairs:
+            return
+        with SettingsManager.lock:
+            undo = []
+            try:
+                for key, value in pairs:
+                    undo.append(SettingsManager._Previous(key))
+                    deep_set(SettingsManager.settings, key, value)
+                SettingsManager.SaveSettings()
+            except BaseException:
+                # Newest first: a later pair may have replaced the parent of
+                # an earlier one's key.
+                for path, previous in reversed(undo):
+                    SettingsManager._PutBack(path, previous)
+                raise
+
+    def _Previous(key):
+        """(path, previous) to put `key` back with after deep_set: the key
+        and its value when it is there; else the shallowest part of it that
+        is missing (deep_set creates it) and _ABSENT; (None, None) when an
+        ancestor is not a dict (deep_set raises before changing anything)."""
+        parts = key.split(".")
+        node = SettingsManager.settings
+        for depth, part in enumerate(parts):
+            if not isinstance(node, dict):
+                return None, None
+            if part not in node:
+                return ".".join(parts[:depth + 1]), _ABSENT
+            if depth == len(parts) - 1:
+                return key, node[part]
+            node = node[part]
+        return None, None
+
+    def _PutBack(path, previous):
+        if path is None:
+            return
+        if previous is not _ABSENT:
+            deep_set(SettingsManager.settings, path, previous)
+            return
+        parent, _, leaf = path.rpartition(".")
+        node = (deep_get(SettingsManager.settings, parent) if parent
+                else SettingsManager.settings)
+        if isinstance(node, dict):
+            node.pop(leaf, None)
 
     def Unset(key: str):
         with SettingsManager.lock:
