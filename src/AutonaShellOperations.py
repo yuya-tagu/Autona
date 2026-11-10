@@ -16,7 +16,13 @@ Also here:
   (they were each board's): the board's "Load set" button, the load_set
   hotkey (AutonaHotkeys, the active board's) and the legacy open-set route
   open them. The windows load what they pick through core
-  (SetFollowService.LoadSet / FollowStation), not through a board;
+  (SetFollowService.LoadSet / FollowStation), not through a board.
+  While SCORE is the React page (ADR-005 S4aa; not the way back to the Qt
+  panel) the hotkey and the legacy route open the page's set selection
+  dialog instead (ADR-005 S4ab-2): the main window is brought to the front
+  on SCORE and its shared view asked to (Window.OpenScoreSets). The page
+  shows the board of the battle format only, so a board other than that
+  one opens nothing then;
 - **a board's thumbnail drawn now** (DrawThumbnail): core's
   ThumbnailService.DrawBoard with the renderer's synchronous draw, for the
   legacy route and SCORE's X post.
@@ -144,11 +150,59 @@ class AutonaShellOperations:
         return window
 
     def ShowSetSelection(self, board):
+        """Open board `board`'s (1/2) set selection: the SCORE page's dialog
+        while SCORE is the React page (_OpenedOnPage), else the Qt window --
+        the way back to the Qt panel, and before the main window is there.
+        (The load_set hotkey and the Qt board's button; the legacy route is
+        OpenSetSelection.)"""
+        number = _SetBoard(board)
+        if not self._OpenedOnPage(number):
+            self._ShowSetWindow(number)
+
+    def _ShowSetWindow(self, board):
         """Open board `board`'s (1/2) set selection window. It restores the
         cached set list; fetching is the operator's call from inside it."""
         window = self.SetWindow(board)
         window.PrepareForDisplay()
         window.show()
+
+    def _OpensOnPage(self):
+        """Whether the set selection is the SCORE page's dialog: the main
+        window is there and SCORE is not (nor is to be, on its first choice)
+        the Qt panel (Window.ScoreSetsOnPage)."""
+        return self._parent is not None and self._parent.ScoreSetsOnPage()
+
+    def _OpenedOnPage(self, board):
+        """Whether the set selection is the SCORE page's (_OpensOnPage) --
+        then asked of it (_OpenOnPage) -- rather than the Qt window's. What
+        either raises is logged, not raised, and counts as the page's: nothing
+        else opens, and neither the hotkey's handler nor the legacy route's
+        answer fails on it (as an open of the window that failed)."""
+        try:
+            if not self._OpensOnPage():
+                return False
+            self._OpenOnPage(board)
+        except Exception:
+            logger.opt(exception=True).error(
+                f"Shell operations - The set selection of scoreboard {board} "
+                "did not open")
+        return True
+
+    def _OpenOnPage(self, board):
+        """Have the main window show SCORE and its page open board `board`'s
+        set selection dialog (Window.OpenScoreSets): only for the board of
+        the battle format, the one the page shows. Another one -- the legacy
+        /scoreboard2-open-set in 1v1 -- opens nothing and is logged (the
+        owner's call, 2026-11-11): the page would not show it, and switching
+        the format is not the route's to do."""
+        active = AutonaActions.instance.ActiveBoard()
+        if board != active:
+            logger.info(
+                f"Shell operations - The set selection of scoreboard {board} "
+                f"was asked for while SCORE shows scoreboard {active}: "
+                "nothing opened")
+            return
+        self._parent.OpenScoreSets(board)
 
     def ShowStationSelection(self, board):
         """Open board `board`'s (1/2) station window (the set window's "Track
@@ -177,25 +231,39 @@ class AutonaShellOperations:
 
     @gui_thread_sync
     def OpenSetSelection(self, number):
-        """Open board `number`'s set selection window: "OK". The crew board
-        has none and raises (the legacy route's 500, as before).
+        """Open board `number`'s set selection: "OK". The crew board has none
+        and raises (the legacy route's 500, as before).
 
-        The board is made ready first, through the board host (an unbuilt
-        board is built, as this route always did): what the window loads
-        goes to a board that is held for its 反映 button, and is not wiped by
-        the board's build later. The windows of the board's button and of
-        the hotkey are a built board's already.
+        While SCORE is the React page (ADR-005 S4ab-2), the page's dialog:
+        the main window is brought to the front on SCORE and its page opens
+        it (_OpenedOnPage). No board is made ready for it -- what the dialog
+        loads goes through /api/v1's :load-set, whose board host does that --
+        and a board other than the format's (the one the page shows) opens
+        nothing and is logged.
 
-        Opening the window itself never fails the request: until S3e-9 it
-        was queued from the request's thread, so what it raised was only
-        reported and the answer was "OK". It still is: logged here."""
+        Else -- the way back to the Qt panel -- the Qt window, the board made
+        ready first, through the board host (an unbuilt board is built, as
+        this route always did): what the window loads goes to a board that is
+        held for its 反映 button, and is not wiped by the board's build later.
+        The windows of the board's button and of the hotkey are a built
+        board's already.
+
+        Opening it never fails the request: until S3e-9 the window was
+        queued from the request's thread, so what it raised was only
+        reported and the answer was "OK". It still is, the page's way too:
+        logged here. So is a board the page does not show: "OK" as well, as
+        an open that the legacy route's callers (Companion's buttons) cannot
+        tell apart from one that opened -- they never could: the answer never
+        said whether a window came up."""
         board = _SetBoard(number)
+        if self._OpenedOnPage(board):
+            return "OK"
         # Imported here: the web layer is not this module's to pull in when
         # it is imported (the board widget imports this module).
         from . import AutonaWebOperations
         AutonaWebOperations.boardHost.Prepare(board)
         try:
-            self.ShowSetSelection(board)
+            self._ShowSetWindow(board)
         except Exception:
             logger.opt(exception=True).error(
                 f"Shell operations - The set selection of scoreboard "

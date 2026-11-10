@@ -221,7 +221,12 @@ function ListTable<T>({label, columns, shown, sort, onSort, selected,
                             const direction = active && sort?.descending
                                 ? "desc" : "asc";
                             return (
+                                // On one line: with no rows to widen the
+                                // columns, a Japanese header broke at every
+                                // character (seen on the desktop, S4ab-2).
+                                // The container scrolls sideways instead.
                                 <TableCell key={column}
+                                           sx={{whiteSpace: "nowrap"}}
                                            sortDirection={active ? direction
                                                : false}>
                                     {/* Named outright: the browser's tree

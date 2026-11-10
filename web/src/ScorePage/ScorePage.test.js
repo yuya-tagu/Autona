@@ -9,6 +9,7 @@ import {
     websocketInfoSlice,
 } from "../redux/autonaState";
 import {PanelShellContext} from "../PanelShell/context";
+import {openScoreSets} from "../PanelShell/hostApi";
 import {LOAD_ATTEMPTS, LOAD_RETRY_MS} from "../PanelShell/requests";
 import {STATE_FIELD_DEBOUNCE_MS} from "../PanelShell/useStateField";
 import {
@@ -1515,6 +1516,22 @@ test("大会の試合を選ぶ opens the page's dialog: the lists read, nothing 
                                          {n: SET_ROWS.length, at: "09:05"}));
 });
 
+test("with no rows the headers stay on one line", async () => {
+    // Seen on the desktop (S4ab-2): an empty table's Japanese headers broke
+    // at every character, stacked down the column.
+    server.sets = listOf([], FETCHED);
+    await selectionPage();
+    const dialog = await openSets();
+
+    expect(cellsOf(dialog)).toEqual([]);
+    const headers = within(dialog).getAllByRole("columnheader");
+    // The five and the two players' (as above).
+    expect(headers).toHaveLength(7);
+    for (const header of headers) {
+        expect(window.getComputedStyle(header).whiteSpace).toBe("nowrap");
+    }
+});
+
 test("the phases are asked for when there are none to read; with none the combo hides",
      async () => {
     server.phases = listOf([], {status: "idle", url: ""});
@@ -2215,6 +2232,158 @@ test("大会の試合を選ぶ: on boards 1/2 with a tournament, in a browser as
     await notify("battle_format");
     expect(screen.queryByRole("button", {name: i18n.t("score_open_sets")}))
         .toBeNull();
+});
+
+// ── the desktop's Ctrl+Shift+O and legacy open-set (S4ab-2) ─────────────
+
+function setsDialog() {
+    return screen.queryByRole("dialog", {name: i18n.t("score_sets_title")});
+}
+
+async function askForSets(board) {
+    await act(async () => {
+        openScoreSets(board);
+    });
+    await settle();
+    await settle();
+}
+
+test("the desktop's request opens that board's set selection, after reading the format",
+     async () => {
+    selectionState();
+    await renderPage(true);
+    const formatReads = reads("/api/v1/battle-format");
+    expect(setsDialog()).toBeNull();
+
+    await askForSets(1);
+
+    expect(setsDialog()).toBeInTheDocument();
+    expect(reads("/api/v1/battle-format")).toBe(formatReads + 1);
+    // Nothing is written: it only opens the dialog.
+    expect(requests().filter((call) => call.method !== "GET")).toEqual([]);
+
+    // Settled once: closed, a later notice opens nothing.
+    await closeDialog(setsDialog());
+    await notify("battle_format");
+    await settle(1000);
+    expect(setsDialog()).toBeNull();
+});
+
+test("the desktop's request made before the page is drawn opens once it is",
+     async () => {
+    selectionState();
+    // The view loads the page after asking (the host delivers when it can).
+    openScoreSets(1);
+    const firstRead = holdNext("/api/v1/battle-format");
+    await renderPage(true);
+    // Still loading: nothing yet.
+    expect(setsDialog()).toBeNull();
+
+    await firstRead.answer({format: "singles", board: 1});
+    await settle();
+    await settle();
+
+    expect(setsDialog()).toBeInTheDocument();
+    await closeDialog(setsDialog());
+    await notify("battle_format");
+    await settle(1000);
+    expect(setsDialog()).toBeNull();
+});
+
+test("the desktop's request on a page that could not be read is dropped", async () => {
+    selectionState();
+    server.formatFailures = 1000;
+    openScoreSets(1);
+    await renderPage(true);
+    // (The read on mount is dropped for the one the request makes.)
+    for (let attempt = 1; attempt < LOAD_ATTEMPTS * 2; attempt++) {
+        await settle(LOAD_RETRY_MS * attempt);
+    }
+    expect(screen.getByText(i18n.t("score_load_failed"))).toBeInTheDocument();
+
+    // Read again by hand later: the page, not the dialog.
+    server.formatFailures = 0;
+    fireEvent.click(button("score_reload"));
+    await settle();
+    await settle();
+    expect(button("score_open_sets")).toBeInTheDocument();
+    expect(setsDialog()).toBeNull();
+});
+
+test("the desktop's request names the board of the format read after it",
+     async () => {
+    selectionState();
+    await renderPage(true);
+
+    // Board 2 asked while board 1 is shown (the shell checked the format
+    // before a switch the page has not heard of yet): read again, board 2.
+    server.format = {format: "team", board: 2};
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await askForSets(2);
+    const dialog = setsDialog();
+    expect(dialog).toBeInTheDocument();
+    // Board 2's dialog: it loads to board 2.
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(loads(2)).toEqual([{setId: 1001}]);
+});
+
+test("the desktop's request for another board than the format's opens nothing",
+     async () => {
+    selectionState();
+    await renderPage(true);
+    const formatReads = reads("/api/v1/battle-format");
+
+    await askForSets(2);
+
+    // Settled on the format read after the request (it is board 1's still),
+    // not on the one the page had.
+    expect(reads("/api/v1/battle-format")).toBe(formatReads + 1);
+    expect(setsDialog()).toBeNull();
+    // The page is shown, the board of the format (1) with its button.
+    expect(button("score_open_sets")).toBeInTheDocument();
+    // Not opened later by a notice either.
+    await notify("battle_format");
+    expect(setsDialog()).toBeNull();
+});
+
+test("the desktop's request without a tournament (or on the crew board) opens nothing",
+     async () => {
+    await renderPage(true);
+    let formatReads = reads("/api/v1/battle-format");
+
+    await askForSets(1);
+    // Settled, on the format read after the request.
+    expect(reads("/api/v1/battle-format")).toBe(formatReads + 1);
+    expect(setsDialog()).toBeNull();
+    // Not when the tournament comes later either: the request was settled.
+    selectionState();
+    await settle();
+    expect(button("score_open_sets")).toBeInTheDocument();
+    expect(setsDialog()).toBeNull();
+
+    server.format = {format: "crew", board: 3};
+    await notify("battle_format");
+    formatReads = reads("/api/v1/battle-format");
+    await askForSets(3);
+    expect(reads("/api/v1/battle-format")).toBe(formatReads + 1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("the desktop's request closes the station dialog for the set selection",
+     async () => {
+    selectionState();
+    await renderPage(true);
+    await openStations();
+
+    await askForSets(1);
+    await settle(1000);
+
+    // Hidden ones too: a modal opened over another hides it from the
+    // accessibility tree, and it would still be open.
+    expect(screen.queryByRole("dialog", {name: i18n.t("score_stations_title"),
+                                         hidden: true})).toBeNull();
+    expect(setsDialog()).toBeInTheDocument();
 });
 
 test("a set selection write refused for want of the token is told once", async () => {

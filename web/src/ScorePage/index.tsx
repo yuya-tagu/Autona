@@ -26,6 +26,7 @@ import socketConnection from "../websocketConnection";
 import {AutonaPlayerDbEntry} from "../backendDataTypes";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
 import {usePanelShell} from "../PanelShell/context";
+import {registerScoreSetsReceiver} from "../PanelShell/hostApi";
 import {
     MADE_IMAGE_COPY_TIMEOUT_MS,
     canCopyImage,
@@ -90,6 +91,11 @@ import {
 //   timer row of a board following a set / stream / station: GET
 //   /scoreboards/{n}/follow, read again on each `scoreboard_follow` for it
 //   and after a reconnect, its seconds counted down by the page.
+// - the desktop's Ctrl+Shift+O and the legacy open-set route (S4ab-2): the
+//   desktop's view hands the page a board (hostApi's openScoreSets), and
+//   the page opens that board's set selection as its button does -- once it
+//   shows the board of a format read after the request, if that is the
+//   board, with a tournament. Else nothing opens (the page is shown).
 //
 // Every edit goes as the Qt board's inputs make it: a field as a field
 // (PATCH .../fields, the country and the region as codes), a pick as an
@@ -336,6 +342,13 @@ function ScoreContent() {
     const [confirmingReset, setConfirmingReset] = React.useState(false);
     const [setsOpen, setSetsOpen] = React.useState(false);
     const [stationsOpen, setStationsOpen] = React.useState(false);
+    // The desktop asked for board `board`'s set selection (S4ab-2) when
+    // `after` reads of the format had ended: settled by a later one.
+    const [askedSets, setAskedSets] = React.useState<{board: number;
+                                                      after: number} | null>(null);
+    // How many reads of the format have ended (answered or failed).
+    const [formatReads, setFormatReads] = React.useState(0);
+    const formatReadsRef = React.useRef(0);
     // What board `board` follows, as read at `at` (Date.now()).
     const [follow, setFollow] = React.useState<{board: number;
                                                 poll: Poll | null;
@@ -400,11 +413,16 @@ function ScoreContent() {
 
     const formatRef = React.useRef(format);
     formatRef.current = format;
+    const formatReadEnded = React.useCallback(() => {
+        formatReadsRef.current += 1;
+        setFormatReads(formatReadsRef.current);
+    }, []);
     const readFormat = useNoticedRead<BattleFormat>(
         "/api/v1/battle-format",
         (data) => {
             setLoadFailed(false);
             setFormat({format: text(data.format), board: count(data.board, 1)});
+            formatReadEnded();
         },
         (error) => {
             console.error(error);
@@ -413,7 +431,16 @@ function ScoreContent() {
             } else {
                 showSnackbar(i18n.t("score_format_failed"), "error");
             }
+            formatReadEnded();
         });
+
+    // The desktop's request for a board's set selection: settled once a
+    // read of the format started after it has ended (the format may have
+    // just been switched: the request names the board of the new one).
+    React.useEffect(() => registerScoreSetsReceiver((asked) => {
+        setAskedSets({board: asked, after: formatReadsRef.current});
+        readFormat();
+    }), [readFormat]);
 
     const board = format?.board ?? 0;
     const boardRef = React.useRef(board);
@@ -541,6 +568,48 @@ function ScoreContent() {
     const pendingFailed = pendingError?.board === board && !pendingError.token;
     const pendingNeverRead = pendingFailed && pending?.board !== board;
     const boardPath = `/api/v1/scoreboards/${board}`;
+    // 大会の試合を選ぶ is offered (below): boards 1/2 with a tournament.
+    const setsOffered = held12 && text(tournament?.url) !== "";
+    // The board is drawn (none of the returns below that wait or fail).
+    const shown = format !== null && pendingSettled && !initializing
+        && !loadFailed && !pendingNeverRead;
+
+    // The desktop's request (S4ab-2), once the board of a format read after
+    // it is drawn: the dialog of that board where the button is offered;
+    // another board's (the format switched since), or one without the
+    // button, opens nothing -- the page is shown, as asked.
+    React.useEffect(() => {
+        if (askedSets === null || formatReads <= askedSets.after) {
+            return;
+        }
+        if (loadFailed || pendingNeverRead) {
+            // The board could not be read: not kept for a reload by hand,
+            // maybe long after.
+            setAskedSets(null);
+            console.info(`The set selection of board ${askedSets.board} was `
+                         + "asked for; the page could not be read");
+            return;
+        }
+        if (!shown) {
+            return;
+        }
+        setAskedSets(null);
+        if (askedSets.board !== board) {
+            console.info(`The set selection of board ${askedSets.board} was `
+                         + `asked for; board ${board} is shown`);
+            return;
+        }
+        if (!setsOffered) {
+            console.info(`The set selection of board ${board} was asked for; `
+                         + "it has none to offer (no tournament)");
+            return;
+        }
+        // One dialog at a time, as from the button (the station dialog's
+        // modal hides it).
+        setStationsOpen(false);
+        setSetsOpen(true);
+    }, [askedSets, shown, formatReads, board, setsOffered, loadFailed,
+        pendingNeverRead]);
 
     // ── the X post's text, read ahead ──
 
@@ -1091,7 +1160,7 @@ function ScoreContent() {
                             />
                             {/* In the page (S4ab): wherever it is open, not
                                 only in the desktop's shared view. */}
-                            {board !== 3 && text(tournament?.url) && (
+                            {setsOffered && (
                                 <Box>
                                     <Button variant="outlined" size="small"
                                             onClick={() => setSetsOpen(true)}>

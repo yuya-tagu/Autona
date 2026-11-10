@@ -12,7 +12,10 @@ The page is the Web UI's ``/web/<panel>`` on the app's own web server
 a browser needs) and ``lng=`` the Qt UI language. It is opened from this
 PC, so it writes without the LAN token, like any of this server's own pages
 here; there is no privileged channel (no QWebChannel) -- the page uses the
-same API as a browser.
+same API as a browser. Besides navigating and the full state, the host asks
+a page for one thing through the panel shell: SCORE's set selection dialog,
+for the load_set hotkey and the legacy open-set route (OpenScoreSets,
+ADR-005 S4ab-2). It writes nothing; the page opens it as its own button.
 
 Built lazily: constructing the host costs a plain QWidget; the view is
 created the first time the host is on screen with a panel to show, once
@@ -100,6 +103,19 @@ _NAVIGATE_JS = (
 _REQUEST_FULL_STATE_JS = (
     "(function(){var s=window.autonaPanelShell;"
     "if(s){s.refresh();}})()")
+# SCORE's set selection dialog for a board (ADR-005 S4ab-2): "taken" once a
+# panel shell had it (it keeps it for the page until the page takes it), ""
+# where there is none to take it -- no document yet, or a Web UI built before
+# the call existed.
+_OPEN_SCORE_SETS_JS = (
+    "(function(b){var s=window.autonaPanelShell;"
+    "if(s&&s.openScoreSets){s.openScoreSets(b);return 'taken';}"
+    "return '';})(%s)")
+_SCORE_SETS_TAKEN = "taken"
+
+# The React panel whose set selection the desktop opens from outside the page
+# (the load_set hotkey, the legacy open-set route).
+SCORE_PANEL = "scoreboard"
 
 
 # The way back to a React panel's Qt version while that version is kept
@@ -378,8 +394,66 @@ class AutonaWebPanelHost(QWidget):
         self._loaded = False
         # The Designer's window while it is open (_OpenDesigner).
         self._designerWindow = None
+        # SCORE's set selection asked for and not yet taken by a panel shell
+        # (OpenScoreSets): (request number, board), or None. And the number of
+        # the one run into the view's document whose answer has not come back
+        # (_DeliverScoreSets), or None.
+        self._scoreSets = None
+        self._scoreSetsAsked = 0
+        self._scoreSetsRunning = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
+
+    def OpenScoreSets(self, board):
+        """Have the SCORE page open board ``board``'s set selection dialog
+        (ADR-005 S4ab-2: the load_set hotkey and the legacy open-set route,
+        through Window.OpenScoreSets, which shows SCORE first).
+
+        Handed to the page's panel shell (``window.autonaPanelShell.
+        openScoreSets``, web/src/PanelShell/hostApi.ts) as a navigation is:
+        now, into an Active, loaded page, or else when the view's first load,
+        a thaw or Qt's reload of a discarded page lets it (_Navigate), after
+        the navigation to SCORE. Held until a panel shell answers that it has
+        it (a script run into a document going away is lost): run once into
+        a document, and again only after an answer that it was not taken (a
+        Web UI built before the call) or into the next document (a load). A
+        newer request replaces it; another panel shown before it got there
+        forgets it (ShowPanel), and so does a load that failed (_OnLoadFinished):
+        the dialog is not opened later, out of the blue. Not a Socket.IO
+        notice: only this PC's view is to open it, not every client's page.
+        """
+        if self._panel != SCORE_PANEL:
+            logger.warning("The set selection was asked of the web panel "
+                           "view while it shows %s", self._panel)
+            return
+        self._scoreSetsAsked += 1
+        self._scoreSets = (self._scoreSetsAsked, board)
+        self._DeliverScoreSets(self._ScriptablePage())
+
+    def _DeliverScoreSets(self, page):
+        # Into `page` (an Active, loaded page, or None: not now), once SCORE is
+        # the panel it shows.
+        if (page is None or self._scoreSets is None
+                or self._panel != SCORE_PANEL):
+            return
+        asked, board = self._scoreSets
+        if self._scoreSetsRunning == asked:
+            # Run into this document already; its answer decides (a reveal or
+            # a click on SCORE before it comes would hand it over twice).
+            return
+        self._scoreSetsRunning = asked
+        page.runJavaScript(
+            _OPEN_SCORE_SETS_JS % json.dumps(board), 0,
+            lambda result, asked=asked: self._ScoreSetsTaken(asked, result))
+
+    def _ScoreSetsTaken(self, asked, result):
+        # The answer to request `asked`: no longer running, and taken by a
+        # panel shell (unless a newer request came since, which stays).
+        if self._scoreSetsRunning == asked:
+            self._scoreSetsRunning = None
+        if (result == _SCORE_SETS_TAKEN and self._scoreSets is not None
+                and self._scoreSets[0] == asked):
+            self._scoreSets = None
 
     def ShowPanel(self, panel):
         """Show React panel ``panel`` (a WebAccess.WEB_PANELS name).
@@ -394,6 +468,10 @@ class AutonaWebPanelHost(QWidget):
         if not WebAccess.IsWebPanel(panel):
             raise ValueError(f"not a React panel: {panel!r}")
         self._panel = panel
+        if panel != SCORE_PANEL:
+            # The operator went elsewhere before SCORE's set selection got
+            # to the page: not to be opened later (OpenScoreSets).
+            self._scoreSets = None
         if self.view is None:
             self._ScheduleView()
             return
@@ -494,19 +572,29 @@ class AutonaWebPanelHost(QWidget):
     def _OnDesignerDestroyed(self):
         self._designerWindow = None
 
-    def _Navigate(self):
-        # Only into an Active, loaded page. A frozen page is thawed by Qt
-        # when shown and caught up in _OnActive; a discarded one is
-        # reloaded by Qt and caught up in _OnLoadFinished; a load in flight
-        # is caught up when it finishes. The page skips a navigation to the
-        # panel it already shows.
+    def _ScriptablePage(self):
+        # The view's page when script can be run into it -- an Active, loaded
+        # page -- else None. A frozen page is thawed by Qt when shown and
+        # caught up in _OnActive; a discarded one is reloaded by Qt and caught
+        # up in _OnLoadFinished; a load in flight is caught up when it
+        # finishes.
         if self.view is None or self._loader.IsLoading():
-            return
+            return None
         page = self.view.page()
         if (page.lifecycleState() != QWebEnginePage.LifecycleState.Active
                 or self.view.url().isEmpty()):
+            return None
+        return page
+
+    def _Navigate(self):
+        # Only into an Active, loaded page (_ScriptablePage). The page skips a
+        # navigation to the panel it already shows. SCORE's set selection
+        # asked for meanwhile follows the navigation (OpenScoreSets).
+        page = self._ScriptablePage()
+        if page is None:
             return
         page.runJavaScript(_NAVIGATE_JS % json.dumps(self._panel))
+        self._DeliverScoreSets(page)
 
     def _ReloadIfBlank(self):
         # The last load failed for good (the loader gave up, or Qt's reload
@@ -528,13 +616,24 @@ class AutonaWebPanelHost(QWidget):
             # document is still there, loaded (not to be reloaded).
             return
         # Ours, or Qt's reload of a discarded page: that document may show
-        # a panel other than the one asked for since.
+        # a panel other than the one asked for since. A new document: what
+        # was run into the last one is not waited for (its answer may never
+        # come).
         self._loaded = ok
+        self._scoreSetsRunning = None
         if ok:
             self._Navigate()
         else:
             logger.warning("The web panel view failed to load (%s)",
                            self._panel)
+            if self._scoreSets is not None:
+                # Not handed to a later load that succeeds for another
+                # reason (a reveal, another panel's click): the operator did
+                # not ask for the dialog then (OpenScoreSets).
+                logger.warning("The set selection of scoreboard %s asked "
+                               "for is dropped: the view failed to load",
+                               self._scoreSets[1])
+                self._scoreSets = None
         self._lifecycle.ScheduleFreeze()
 
     def _OnActive(self):

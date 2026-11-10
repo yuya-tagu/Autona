@@ -997,6 +997,97 @@ def test_the_load_set_hotkey_opens_the_active_boards_window_only(
     assert opened == [1, 2]
 
 
+@pytest.mark.parametrize("onPage", [True, False], ids=["page", "qt"])
+def test_the_load_set_hotkey_opens_the_score_pages_dialog_or_the_qt_window(
+        autonaApp, monkeypatch, onPage):
+    """ADR-005 S4ab-2: while SCORE is the React page, Ctrl+Shift+O has the
+    main window show SCORE and its page open the active board's dialog
+    (Window.OpenScoreSets), and opens no Qt window; on the way back to the
+    Qt panel (general.qt_scoreboard_panel), the Qt window as before. The
+    main window is stood in for (src/Autona.py cannot be imported)."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
+    from types import SimpleNamespace
+
+    from src.core.Actions import AutonaActions
+
+    shell = AutonaShellOperations.instance
+    autonaApp.board(1)
+    autonaApp.board(2)
+    opened = []
+    for number in (1, 2):
+        window = shell.SetWindow(number)
+        monkeypatch.setattr(window, "PrepareForDisplay",
+                            lambda number=number: opened.append(("prepare", number)))
+        monkeypatch.setattr(window, "show",
+                            lambda number=number: opened.append(("show", number)))
+    asked = []
+    monkeypatch.setattr(shell, "_parent", SimpleNamespace(
+        ScoreSetsOnPage=lambda: onPage, OpenScoreSets=asked.append))
+
+    AutonaHotkeys.signals.load_set.emit()
+    autonaApp.settle()
+    with patch.object(AutonaActions.instance, "ActiveBoard", return_value=2):
+        AutonaHotkeys.signals.load_set.emit()
+        autonaApp.settle()
+
+    if onPage:
+        assert asked == [1, 2]
+        assert opened == []
+    else:
+        assert asked == []
+        assert opened == [("prepare", 1), ("show", 1),
+                          ("prepare", 2), ("show", 2)]
+
+
+@pytest.mark.parametrize("failing", ["OpenScoreSets", "ScoreSetsOnPage"])
+def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
+        autonaApp, monkeypatch, failing):
+    """What the page's way raises (asking the main window, or asking it
+    which way it is) is logged, not raised out of the hotkey's handler (to
+    sys.excepthook, PySide6's for a slot), and opens the Qt window no more
+    than a request that went through."""
+    import sys
+    from types import SimpleNamespace
+
+    from loguru import logger
+
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    shell = AutonaShellOperations.instance
+    autonaApp.board(1)
+    opened = []
+    window = shell.SetWindow(1)
+    monkeypatch.setattr(window, "PrepareForDisplay",
+                        lambda: opened.append("prepare"))
+    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
+
+    def fail(*args):
+        raise RuntimeError("the window failed")
+
+    main = SimpleNamespace(ScoreSetsOnPage=lambda: True,
+                           OpenScoreSets=lambda board: None)
+    setattr(main, failing, fail)
+    monkeypatch.setattr(shell, "_parent", main)
+    hooked = []
+    monkeypatch.setattr(sys, "excepthook",
+                        lambda kind, error, trace: hooked.append(error))
+    logged = []
+    sink = logger.add(lambda message: logged.append(message.record),
+                      level="ERROR")
+    try:
+        AutonaHotkeys.signals.load_set.emit()
+        autonaApp.settle()
+    finally:
+        logger.remove(sink)
+
+    assert hooked == []
+    assert [str(record["exception"].value) for record in logged
+            if record["exception"] is not None] == ["the window failed"]
+    assert opened == []
+
+
 @pytest.mark.parametrize("active", [3, 1], ids=["crew", "unbuilt"])
 def test_the_load_set_hotkey_does_nothing_without_a_set_window(
         autonaApp, monkeypatch, active):

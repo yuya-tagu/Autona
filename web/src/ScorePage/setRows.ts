@@ -144,9 +144,9 @@ export function sortShown<T>(shown: Shown<T>[], sort: Sort | null): Shown<T>[] {
 }
 
 // Whether OK / Enter with no row selected takes the first row shown, as both
-// windows' LoadSelectedSet does. Kept for now: the owner's question 3 (S4ac)
-// asks whether to drop it (it overwrites the board by mistake), and this is
-// the one place that answer changes.
+// windows' LoadSelectedSet does. Kept by the owner's call (2026-11-11,
+// question 3): on boards 1/2 what it loads waits for 反映, so a mistaken
+// pick does not reach the stream. This is the one place to change it.
 export const TAKE_FIRST_ROW_WHEN_NONE_SELECTED = true;
 
 // The row OK / Enter takes: the one selected (if it is shown), else -- see

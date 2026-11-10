@@ -276,8 +276,11 @@ paths:
   未構築でも効く。未構築ボードは held でないので、入れ替えると即時公開され、構築時のシードで消える）。
   `swap_teams` の未構築判定と入力中の欄の確定はボードホスト（`boardHost.Built` / `CommitEdit`）に聞き、ボードの
   ウィジェットを引かない（ADR-005 S4y）。パネル操作の `load_set` も S4y から `ConnectActions()` が結線し、アクティブ
-  ボード（1 / 2）のセット選択ウィンドウをシェルのアダプタ `AutonaShellOperations.ShowSetSelection` で開く（クルー形式・
-  未構築なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた）。
+  ボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations.ShowSetSelection` で開く（クルー形式・
+  未構築なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた）。SCORE が React の
+  ページのとき（ADR-005 S4ab-2）はメインウィンドウを前に出して SCORE に切り替え、ページのダイアログを開く（`Window.OpenScoreSets`
+  → 共有ビューの `autonaPanelShell.openScoreSets`）。退路の Qt モード（`general.qt_scoreboard_panel`）では Qt のウィンドウ。
+  ページへの経路の例外はログだけで、ホットキーのハンドラに漏らさない。
   ボードに残るホットキーは無い（`refresh_phase_group` は ADR-005 S3e-8 から
   `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた）
 - **未構築ボードは held 登録しない**（held 登録は `AutonaActions.EnsureBoard(panel=True)` の `StateSchema.HoldBoard`
@@ -430,8 +433,11 @@ paths:
     スコアボード dock から移した。セット選択 / 配信台のウィンドウもこれが持つ）の `OpenSetSelection` / `RenderThumbnail` /
     `StartImageRender`（GUI スレッドで同期実行。`StartImageRender` は開始までで、描画の完了は待たない）を登録し、
     ヘッドレスは何も登録しない。`RenderThumbnail` はボードを構築しない（`ThumbnailService.DrawBoard` に同期の
-    描き手 `DrawThumbnailNow` を渡す。X 投稿のクリップボードの画像も同じ入口）。`OpenSetSelection` は窓から読み込む
-    セットが後のシードで消えないよう、ボードホストの `Prepare` で未構築のボードを先に作る。未登録なら
+    描き手 `DrawThumbnailNow` を渡す。X 投稿のクリップボードの画像も同じ入口）。`OpenSetSelection` は、SCORE が
+    React のページのとき（ADR-005 S4ab-2）はホットキーと同じくページのダイアログを開き、`Prepare` を呼ばない（ダイアログからの
+    読み込みは v1 の `:load-set` で、そのボードホストが準備する）。`n` が形式のボードと違う（1v1 での `/scoreboard2-open-set`）ときは
+    何も開かずログだけ。答えはどちらも `"OK"`（ページへの経路の例外もログだけで `"OK"`）。退路の Qt モードでは Qt のウィンドウで、
+    窓から読み込むセットが後のシードで消えないよう、ボードホストの `Prepare` で未構築のボードを先に作る。未登録なら
     `NotAvailable` → **503 `UNAVAILABLE`（`not available in headless`）**。legacy は errorhandler、Socket.IO は ack
     （`_ws_unavailable`）が同じ形で返し、v1 は `POST /thumbnail:preview` / `:generate`（ADR-005 S4o）と `POST /result:preview` / `:generate`（S4q）がこれを返す。
     ヘッドレスで 503 を返すのはこれらだけで、ほかのルート・イベントはすべて答える（`tests/test_web_operations.py` の

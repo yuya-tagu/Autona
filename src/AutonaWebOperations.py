@@ -72,12 +72,14 @@ These kinds live here:
   settings, their defaults, the uploaded background, the preview's file -- in
   both shells, on the calling thread. Starting a render (`preview_thumbnail`
   / `generate_thumbnail`) needs the shell's image renderer, below.
-- the shell operations (ADR-005 S3e-9): opening a board's set selection
-  window, rendering its thumbnail (the legacy route, synchronously) and
-  starting an image's render off-screen (S4o). Not core's: one opens a
-  window, the others draw with a WebEngine view, so they need the desktop's
-  QApplication and widgets. The desktop registers its scoreboard dock's
-  (`openSetSelection` / `renderThumbnail` / `startImageRender`,
+- the shell operations (ADR-005 S3e-9): opening a board's set selection (the
+  SCORE page's dialog in the desktop's window while SCORE is the React page,
+  else the Qt window; S4ab-2), rendering its thumbnail (the legacy route,
+  synchronously) and starting an image's render off-screen (S4o). Not core's:
+  one opens something in the desktop's window, the others draw with a
+  WebEngine view, so they need the desktop's QApplication and widgets. The
+  desktop registers its shell adapter's (AutonaShellOperations:
+  `openSetSelection` / `renderThumbnail` / `startImageRender`,
   bootstrap_gui(); run on its GUI thread), the headless shell registers none,
   and they raise NotAvailable: 503. No other operation needs a shell.
 
@@ -2398,9 +2400,13 @@ def stop_follow(scoreboard):
 # neither operation.
 
 def open_sets(scoreboard):
-    """Open board `scoreboard`'s set selection window: "OK". A board no
-    shell has is refused first, whatever the shell registered (503,
-    ADR-005 S4x review: the desktop's window answered 500)."""
+    """Open board `scoreboard`'s set selection: "OK". The SCORE page's
+    dialog while SCORE is the React page -- the desktop's window brought to
+    the front on SCORE, nothing opened for a board other than the format's
+    -- else the Qt window (AutonaShellOperations.OpenSetSelection; ADR-005
+    S4ab-2). A board no shell has is refused first, whatever the shell
+    registered (503, ADR-005 S4x review: the desktop's window answered
+    500)."""
     _require_board(scoreboard)
     if openSetSelection is None:
         raise NotAvailable()
