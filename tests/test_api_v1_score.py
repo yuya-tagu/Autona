@@ -35,6 +35,7 @@ from src.core.SetLoadService import SetLoadService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from src.core.TournamentInfoService import TournamentInfoService
+from tests.fixtures.write_recording import WriteRecorder
 from tests.test_api_v1 import (  # noqa: F401
     _assertRejected, _requestOnWorkerThread, client, webApp)
 from tests.test_game_asset_manager_models import (  # noqa: F401
@@ -85,6 +86,25 @@ def desktopBoards(autonaApp):
     autonaApp.board(1)
     autonaApp.board(2)
     return autonaApp
+
+
+@pytest.fixture
+def launchedBoards(autonaApp):
+    """The desktop as it launches (ADR-005 S4ac-1): every board made in core
+    by AutonaActions.MakeBoards with `panel` -- boards 1 / 2 held, the crew
+    board not -- and no widget built. The window builds the shown board's
+    next (CreateScoreboard); a test that wants them builds them. The other
+    fixtures start from boards core does not have (the harness drops them
+    between tests), which a launch only leaves when it failed. The boards
+    and the score subtree go after the test."""
+    autonaApp.dropAllBoards()
+    assert AutonaActions.instance.MakeBoards(panel=True) is True
+    autonaApp.settle()
+    assert autonaApp.manager.scoreboards == {}
+    yield autonaApp
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score")
+    autonaApp.settle()
 
 
 @pytest.fixture
@@ -298,6 +318,134 @@ def test_the_pending_values_need_this_pc_or_the_token(
     published = peer.get("/api/v1/scoreboards/1")
     assert published.status_code == 200
     assert "NOT-PUBLISHED-YET" not in published.get_data(as_text=True)
+
+
+# ── the boards a launch made (ADR-005 S4ac-1) ────────────────────────────
+# Every board is made in core at launch and boards 1 / 2 are held; the window
+# builds the shown board's widgets only. What the page and the API write to a
+# board the window does not show waits for 反映 like any edit, and neither
+# that nor a read builds its widgets.
+
+def _live(n):
+    return copy.deepcopy(StateManager.Get(f"score.{n}"))
+
+
+def _publishedState(n):
+    with StateManager.lock:
+        return copy.deepcopy(
+            StateManager.lastSavedState.get("score", {}).get(str(n)))
+
+
+def _held(board):
+    """A board without the keys exempt from the hold (StateSchema.STATS_KEYS):
+    the swap recalculates `upset_factor`, published at once as on a shown
+    board."""
+    return {key: value for key, value in board.items()
+            if key not in schema.STATS_KEYS}
+
+
+def _singlesWindow(app):
+    """The launch in 1v1: the window builds board 1's widgets only."""
+    assert app.manager.CreateScoreboard("singles") is True
+    app.settle()
+    assert list(app.manager.scoreboards) == [1]
+
+
+UNSHOWN_WRITES = {
+    "score:adjust": ("/api/v1/scoreboards/2/teams/1/score:adjust",
+                     {"delta": 2}),
+    "score:set": ("/api/v1/scoreboards/2/score:set", {"team1": 3, "team2": 1}),
+    "color": ("/api/v1/scoreboards/2/teams/2/color", {"color": "#123456"}),
+    "swap-teams": ("/api/v1/scoreboards/2:swap-teams", None),
+}
+
+
+@pytest.mark.parametrize("write", list(UNSHOWN_WRITES))
+def test_a_write_to_the_board_the_window_does_not_show_waits_for_apply(
+        launchedBoards, client, write):
+    """Until S4ac-1 a write there built the board -- its seed, its hold and
+    its widgets -- first. It is held from launch now: out of everything
+    published until :apply, and no widget is built for it."""
+    app = launchedBoards
+    _singlesWindow(app)
+    before = _publishedState(2)
+    assert before == _live(2)
+
+    path, body = UNSHOWN_WRITES[write]
+    _ok(client.post(path, json=body))
+    app.settle()
+
+    assert _pending(client, 2)["dirty"] is True
+    assert _held(_live(2)) != _held(before)
+    assert _held(_publishedState(2)) == _held(before)
+    assert list(app.manager.scoreboards) == [1]
+
+    _apply(client, 2)
+    app.settle()
+
+    assert StateManager.HasPendingChanges("score.2") is False
+    assert _publishedState(2) == _live(2)
+    assert _held(_live(2)) != _held(before)
+    assert list(app.manager.scoreboards) == [1]
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_stop_follow_on_a_launched_board_writes_nothing(
+        launchedBoards, client, n):
+    """The board follows nothing: the cancel has nothing to change, shown
+    board or not, and builds nothing (it skipped a board the desktop had
+    not built until S4ac-1)."""
+    app = launchedBoards
+    _singlesWindow(app)
+    revision = StateManager.revision
+
+    with WriteRecorder() as recorder:
+        _ok(client.post(f"/api/v1/scoreboards/{n}:stop-follow"))
+        app.settle()
+
+    assert recorder.sets == []
+    assert StateManager.revision == revision
+    assert StateManager.HasPendingChanges(f"score.{n}") is False
+    assert list(app.manager.scoreboards) == [1]
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_reading_a_board_the_window_does_not_show_builds_nothing(
+        launchedBoards, client, n):
+    app = launchedBoards
+    _singlesWindow(app)
+
+    assert _pending(client, n) == {"held": n != 3, "dirty": False,
+                                   "board": _published(client, n)}
+    swap = client.get(f"/scoreboard{n}-get-swap")
+    assert (swap.status_code, swap.get_data(as_text=True)) == (200, "False")
+
+    assert list(app.manager.scoreboards) == [1]
+
+
+def test_a_board_built_after_the_writes_draws_them(launchedBoards, client):
+    """The way back to the Qt panel: board 2's widgets are built by the
+    switch to its format, after the writes made to it. They draw the state
+    as it is then, the pending edits with 反映 lit, and write nothing."""
+    app = launchedBoards
+    _singlesWindow(app)
+    _ok(client.post("/api/v1/scoreboards/2/score:set",
+                    json={"team1": 3, "team2": 1}))
+    _ok(client.patch("/api/v1/scoreboards/2/set",
+                     json={"teamName": {"team": 1, "value": "Kept"}}))
+    app.settle()
+    held = copy.deepcopy(StateManager.heldKeys.get("score.2"))
+    assert held
+
+    app.manager.SetBattleFormat("team")
+    app.settle()
+
+    board = app.manager.scoreboards[2]
+    assert (board.scoreDisplay1.value(), board.scoreDisplay2.value()) == (3, 1)
+    assert board.team1column.findChild(
+        QLineEdit, schema.TEAM_NAME_KEY).text() == "Kept"
+    assert board.btApply.isEnabled() is True
+    assert StateManager.heldKeys.get("score.2") == held
 
 
 # ── game rows ────────────────────────────────────────────────────────────

@@ -7503,3 +7503,127 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - `PATCH /settings/language` の `en-US` → `restartPending: true` でアプリは閉じない、`default` に戻すと false
   - Qt の設定窓: 一般・ホットキーのタブが開く（ポートは待ち受け中の値）。**手で数値を入れた項目（`reset_scores: 5`）は記録欄に読めない記号が出る**（`QKeySequence(5)`。落ちない。以前は起動で落ちていたので出なかった。窓は S4af で消えるので残置）
   - 未確認: キーを押して記録する操作（重複のダイアログ・新規インストールの既定との重複）、ポート欄の上限 65535、Designer の URL、LAN からの 403（いずれも pytest で pin。キー入力を投函で流せないため）
+
+### S4ac の設計（2026-11-11）
+
+順序 6 の S4ac（Qt の SCORE の削除と `HoldBoard` の起動時登録）を、次の段に分ける（2026-11-11 Plan の調査・main 70d905e2 時点）。どの段も 1 PR。
+
+| 段 | 内容 | 区分 | worktree |
+|----|------|------|----------|
+| S4ac-1 | **起動時の held 登録**（Qt 版と退路は残す）: `AutonaActions.MakeBoards`、`bootstrap_gui()` で `panel=True`、`CreateScoreboard` のスケルトンの上書きを外す | 高 | 不可 |
+| S4ac-2 | テストのハーネスをウィジェットから外す（`tests/` だけ。`autonaApp.ready(n)` など）+ ページの F3（`web/`。`loadFailed` を形式と キャラの 2 つに分ける） | 通常 | 不可（F3 が web） |
+| S4ac-3 | Qt の SCORE・退路（`general.qt_scoreboard_panel`）・Qt の窓・隠しの部品の削除（IME ゲートの後に merge） | 高 | 不可 |
+| S4ac-4 | ステージの core / v1 の削除（下のオーナー論点の承認が前提） | 高 | 不可 |
+| 独立 B | `main_generate_thumbnail` の `isPreview` の削除（**PR #281 で済み**） | 通常 | 可 |
+| （PR #281） | オフスクリーン描画が、引き継いだ読み込みの失敗で取り残される不具合の修正 | 通常 | — |
+| （PR #281） | `tests/test_state_manager_held.py` が後続のモジュールに held の登録と未反映を残す分離漏れの修正 | 通常 | — |
+
+**リード判断（メイン、2026-11-11）**
+
+1. **ヘッドレスは held にしない**: 反映ボタンが無く、API の書き込みが反映待ちになるため（`_SeedBoards` は `MakeBoards()`。挙動は変えない）
+2. **起動時の形の変化を受け入れる**: デスクトップの起動で `score.2` / `score.3`（形式が 1v1 のとき）が `SeedFreshBoard` の完全な形になる（ヘッドレスと同じ）。`TurnOffPolling` / `PublishDisplayOptions` が毎回の起動で走る（クルー形式でも）。見せていないボード 1 / 2 への書き込みも held になる
+3. 使われなくなった Qt のモデル（`GameAssetManager` / `PlayerDB` / `CountryHelper.countryModel`）の片付けは S4ad の後の別の段。agent-pitfalls #13 はそれまで残す
+4. `general.qt_scoreboard_panel` の古いキーは移行せず無視する（S4c の前例）。ブラウザ版の `/scoreboard` / `/team` は S4ac の後に決める
+5. `STATE_VERSION`（Window）は 22 のまま
+
+**オーナー論点**
+
+1. **ステージの core / v1 を消すか**（2026-11-11 に質問中）: 順序 6 の論点 1 でステージの行を React に出さないと決めた後に残る `GameTrackerService`・`GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`・`PublishStageResults` / `SwapStageResults` / `FollowScores` のステージの部分・設定 `disable_individual_game_tracker`。消すなら S4ac-4（golden 8 ファイルから `score.{n}.stages` の `{}` が消えるだけ。`ResetScoreRoot` されるので移行は要らない）
+
+#### S4ac-1 起動時の held 登録（2026-11-11）
+
+上の S4ac の段の 1 つ目。デスクトップのボード 1 / 2 の held（反映ボタンを押すまで OBS に出さない。2026-11-09 オーナー決定で必要）の登録を、Qt のボードの構築（`EnsureScoreboard` → `EnsureBoard(panel=True)`）から**デスクトップの起動時**へ移した。S4ac-3 で Qt の SCORE を消す前に、held の登録がウィジェットに依存しないようにするため。**Qt 版の SCORE と退路は残している**。リスク区分は**高**（held・起動時のシード・`bootstrap.py` の生成順・テストのハーネスに触れるため）。
+
+- **完了内容**
+  1. `AutonaActions.MakeBoards(panel=False)`（`src/core/Actions.py`）: 1 つの `SaveBlock` で `ResetBoards()` → `BOARDS` の各ボードに `EnsureBoard(n, panel)`。クルー（3）は `panel` でも held しない（`EnsureBoard` の既存の挙動）
+  2. `src/headless._SeedBoards` は `MakeBoards()` を呼ぶだけ（挙動は不変）
+  3. `src/bootstrap.py`: `AutonaScoreboardManager.__init__` の `ResetBoards` を外し、マネージャの生成の直後に `AutonaActions.instance.MakeBoards(panel=True)`。`bootstrap_core()` の後、Window（`_SeedPanelState`・`CreateScoreboard`・`_StartWebServer`）より前。ORDER CONSTRAINT のコメントを書き直した
+  4. **`AutonaScoreboardManager.CreateScoreboard` の `schema.SeedBoard(other)` のループを削除**（見せないボードのプレースホルダ。残すと、`Autona.py` の `CreateScoreboard` が起動時に作ったボード 2 / 3（1v1 なら）をスケルトンで上書きする）。`EnsureScoreboard(number)` だけ残した。`EnsureScoreboard` の `EnsureBoard` の呼び出しも残した（作成済みなら何もしない。テストのハーネスが忘れさせたボードを作り直す）
+  5. `EnsureScoreboard` がウィジェットの構築の失敗で `ForgetBoard` を呼ぶのは、**その呼び出しがボードを作ったときだけ**にした（下の判断 1）
+  6. `DesktopBoardHost` のコードは最初の版では変えなかった（`Built` のコメントだけ: 起動時から常に真。検収レビュー A で `Prepare` などを変えた: 下の検収レビューの対応）。docstring / コメント: `Actions.py`（モジュール・`EnsureBoard`・`ForgetBoard`・`ResetBoards`・`SeedFreshBoard`・`ApplyGameRoster`・`RepublishBestOfs`）、`StateSchema.py`（`SeedBoard`・`HoldBoard`・`PublishDisplayOptions`・`ResetScoreRoot`）、`headless.py`（`_SeedBoards`）、`SetFollowService.py`（`Polling`・`TurnOffPolling`: 「ボードの構築のたび」→「起動のたび」）、`AppSettings.py` の同じ一文、`AutonaScoreboardManager.py`（使わなくなった `StateSchema` の import を削除）
+  7. テストのハーネス（`tests/conftest.py`）: `bootstrap_gui()` の直後のボードを `autonaApp.launch` に記録してから、3 ボードを落として `score` を消す（下の判断 2）
+- **判断と理由**
+  1. **起動時に作ったボードは、ウィジェットの構築に失敗しても忘れない**（計画に無い追加）: 旧来の `ForgetBoard` は「同じ呼び出しで作ったボード」を元に戻すもので、作った直後なので失うものが無かった。S4ac-1 からボードは起動時に作られ、ウィジェットが建つ前に v1（React のページ）で書かれうる。無条件に忘れると hold が外れて保留中の値が公開され、次の構築がシードし直してその後の書き込みを消す。作ったまま held のまま残せば、React のページはウィジェット無しで描けて反映できる（Qt の退路ではウィジェットが無いまま。次の構築でもう一度建てようとする）
+  2. **ハーネスは起動時のボードを記録して落とす**: 落とさないと、セッションで最初に走るテストだけが held のボード 1 / 2 で始まり、並列の実行で分担が変わるたびに結果が揺れうる。各テストの開始状態を S4ac-1 の前と同じ（ボード無し・held 無し・`score` 無し = 各テストの後片付けの後と同じ）にした。起動時の形は記録（`autonaApp.launch`）と、実際の `bootstrap_gui()` を走らせるサブプロセス（`test_bootstrap_split`）と実際の Window（`test_battle_format`）で検査する。ウィジェットから外すのは S4ac-2
+  3. `MakeBoards` は 1 つの保存サイクル（ヘッドレスの `_SeedState` の中では、その外側のサイクルにまとまる）。ボード 1 / 2 の hold は各ボードのシードの後なので、シードはそのサイクルで公開される（`EnsureBoard` を入れ子にした形と同じ）。`ResetScoreRoot` の `score` の Unset は hold より前なので保留されない
+  4. 2 回呼ぶ経路は無い（起動 1 回だけ）。**2 回目は警告して何もしない**（検収レビュー E）: 作成済みのボードが 1 つでもあれば warning を出し、何も書かずに False。呼び出しの回数ではなくボードで決めるので、ハーネスがボードを落とした後（テストの間）はもう一度作れる。ガードの無い 2 回目は held のボードのシードを保留にしていた（最初の版はそれを docstring に書くだけだった）
+- **検収レビューの対応**（独立レビューの指摘。同じ PR）
+  - A. 作成済みのボードには、読み取り・準備でウィジェットを建てない: `DesktopBoardHost.Prepare(n)` は `Built(n)` なら何もせず、core に無いボード（起動時の作成の失敗・ハーネスが落としたボード）だけを `_Board` で作り直す。`CommitEdit` / `DiscardTypedText` / `PlayerLoaded` はウィジェットが無ければ何もしない。`get_swap` / `get_scoreboard` / `get_pending` も建てない。`BoardHost.ClearPlayers`（ボード 1 / 2 の `reset_players` とセット読込のクリア）は先頭で `Prepare` する（`Prepare` を呼ばず、core に無いボードの作成を `CommitEdit` の構築に頼っていた経路。ほかの書き込みの経路は先に `Prepare` を呼んでいる）。ウィジェットが無いと壊れる経路は無かった（ボードのウィジェットは構築時に state を描き、held の未反映なら反映ボタンを点ける）
+  - B. `AutonaActions.ClearMatchInfo` は match バーの各欄を、state にキーがあるときだけ空にする（`match_en` と同じ規則）。ボード 1 / 2 は全欄がシードされているので結果は不変（`board_operations` の golden・`key_order.json` は不変）。まっさらなクルーボードのリセット 3 本は何も書かない（revision が進まない）
+  - D. `SetFollowService.TurnOffPolling` は `SettingsManager.loadFailed` のとき書かない（ログ 1 行）。読めなかった settings.json をこのキー 1 つの内容で上書きしないため（`MakeBoards(panel=True)` が起動のたびに呼ぶようになった）。SettingsManager 全体の `loadFailed` の書き込みは扱っていない
+  - E. `MakeBoards` の 2 回目は警告して何もしない（判断 4）
+  - F. 実際の Window の起動時のボードの検査（`tests/test_battle_format.py`）に未反映なしを足した
+- **動作の違い**（リード判断 2 のとおり。golden はクルーのリセット 2 件だけ変わる: 下の golden）
+  - デスクトップの起動直後の `score.1` / `score.2` / `score.3` が 3 つとも完全な形（ヘッドレスと同じ）。それまでは形式のボードだけが完全で、残りは `SeedBoard` のスケルトン（ボード 3 は `{}`）だった。OBS のオーバーレイ・`program_state.json`・Socket.IO の最初の全量が、見せていないボードのチーム色・空の選手枠・`best_of` 0・クルーの 9 行を持つ
+  - ボード 1 / 2 は起動時から held。見せていないボードへの v1 / legacy の書き込み（`score:adjust` など）・スワップのホットキーも反映待ちになり、React の SCORE ページの反映（もう一方のボードの未反映も出す。順序 6 の判断 1）で出る。それまでは見せていないボードは held でなく即時公開だった（その値は、そのボードを構築したときのシードで消えた）
+  - ゲームのロードの人数とキャラ数（`ApplyGameRoster`）と `best_of` の書き直しが、見せていないボードにも当たり、`CommitGameLoad` が両方を反映する（それまではスケルトンのボードを飛ばし、後の構築のシードでその時のゲームの人数になった）
+  - `TurnOffPolling` と `PublishDisplayOptions` は起動のたびに走る（クルー形式でも。下の残置のとおりボード 1 / 2 で 2 回ずつ）。それまではボード 1 / 2 の最初の構築のたび（クルー形式の起動では走らず、1v1 → チームの切り替えでもう一度走った）。設定ウィンドウで自動更新をオンにした後の形式の切り替えで、オフに戻らなくなった
+  - デスクトップのボードホストの `Built` が起動時から常に真（ヘッドレスと同じ）: ウィジェットの無いクルーボードへのリセット 3 本（`_crew_not_built`）と `:stop-follow` が、何もしない分岐ではなく操作を通るようになった。起動時のボードには変える値が無いので、どれも書き込みは無く答えも同じ（200）。ただしこれは検収レビューの B の後の話で、最初の版では `:reset-match` / `:clear` の `ClearMatchInfo` がクルーボードに無い `pool` を `""` で足していた（B で解消）。`stock:adjust` の `delta: 0` はもともとルートの `if delta != 0` で止まり、`_crew_not_built` を通らない（違いは無い）。`crew_member_count`（`active: true` の検査）は state の人数を読む（シードと同じ 3）
+  - 形式のボードのウィジェットの構築（`CreateScoreboard` / 形式の切り替え）はシードも held の登録もしない。ウィジェットは起動時からの state（held の未反映を含む）を描く
+  - 見せていないボードへの v1 / legacy の読み書きは、そのボードのウィジェットを建てない（検収レビュー A）。それまでは `Prepare` が建てていた。ボードホストの `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` はウィジェットが無ければ何もしない（確定する欄も捨てる文字も無い）
+  - React の SCORE ページは、初回の表示・ボードの切り替え・再接続で、表示していないボード 1 / 2 の未反映（`GET /api/v1/scoreboards/{n}/pending`）も読む（`web/` の同じ PR の別作業。S4ac-1 から見せていないボードの未反映が普通に起きるため）
+  - スワップ / セット選択のホットキーの対象はアクティブなボード = 形式のボードで、これは今も起動時に Qt のウィジェットが建つ。`Built` の判定で止まる場面は、ボードの作成が失敗したときだけになった
+- **残置とリスク**
+  - `.claude/design/external-control-api.md` の「未構築のボード」の記述（§2.12 のクルーボード・§6 の `GET /scoreboards/{n}` / `pending`・スワップ・チーム色・`:stop-follow` など）は残している。検収レビューの A・B の後は外から見える答え（200・書き込み無し・held）が記述と同じで、違うのは中の手順（構築する / しない）だけのため。ボードの構築という概念が消える S4ac-3 でまとめて直す。外から見える違いが残った §7.1 のクルーの `:reset-match` の `pool`（足さなくなった）だけ直した
+  - **#2 見せていないボードの未反映が残る間の複製**: held のボードに未反映があると、`SaveState` は保存サイクルごとに state 全体を `deep_clone`（msgpack の往復）して未反映を戻した公開用の state を作る。S4ac-1 から、見せていないボード 1 / 2 への v1 の書き込みの未反映が反映まで残りうる。実測（開発データの `out/program_state.json`。msgpack 32 KB）で 1 回約 0.27 ms。差分のあるサイクルは元から複製するので、増えるのは差分の無いサイクルの分だけ。受け入れる: 表示中のボードの未反映でも元から同じことが起き、React のページからいつでも反映できるため。改善案（dirty なボードの subtree だけを複製する）は別の段の候補
+  - **#4 退路の Qt モード**（`general.qt_scoreboard_panel`）では、見せていないボードへの外部の書き込みは、形式の切り替え（ウィジェットが state から描く）か `:apply` まで画面にも OBS にも出ない（Qt の反映ボタンは表示中のボードのものだけ）。S4ac-3 で退路ごと消える
+  - **#11 ゲームのロードは両ボードの未反映を公開する**（上の動作の違いの `CommitGameLoad`）: 見せていないボードに v1 で書いて反映前の値も、ロードで OBS に出る。表示中のボードでも元から同じ（ロードはキャラと既定を書き直す基準点で、反映を伴う）
+  - Qt のボードのウィジェットのコメント（`AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の「`AutonaScoreboardManager` が先に `EnsureBoard` を呼んだ」）は直していない（S4ac-3 でファイルごと消える）
+  - `MakeBoards(panel=True)` は `TurnOffPolling` を 2 回（ボード 1 と 2）、`PublishDisplayOptions` を 2 回走らせる（`EnsureBoard` を 3 回呼ぶ形のまま。設定ファイルの書き込みが起動時に 2 回）。害は無い
+  - 起動時のボードは、その時点で復元されている `game.defaults` の人数で作る（それまでの形式のボードと同じ。見せていないボードは、それまでは構築した時点のゲームの人数だった）。ゲームのロードが `ApplyGameRoster` で揃える
+  - **未確認**: 実際のホットキー（スワップ・Ctrl+Shift+O。確認の間、画面がロックされていたため）と、OBS を前面にしたときの見え方。設定の自動更新が再起動で戻ること（`tests/test_headless_seed.py` が pin）
+- **pin**
+  - `tests/test_headless_seed.py`（+4 関数・+5 件。既存の 3 つ（`_desktopThenHeadless`・`Built` のテスト・呼び出し元の AST）を更新）:
+    - 起動時のボード（ハーネスが記録した `bootstrap_gui()` の直後）: 3 つとも作成済み・held は `score.1` / `score.2` だけ・未反映なし・公開した値 = ライブの値で、3 ボードとも完全な形
+    - `MakeBoards(panel=True)` と `MakeBoards()` が、3 ボードとも値とキー順で一致・どちらも 1 保存サイクル。`panel` だけが 1 / 2 を held にし、表示トグルを設定から書き直し、`general.disable_autoupdate` を書く
+    - `CreateScoreboard` が作成済みのボードをシードし直さない（ボード 2 のチーム名（held の未反映のまま）・ボード 3 のチーム名が残る。建つのはボード 1 のウィジェットだけ）
+    - 起動時に作ったボードは、ウィジェットの構築が失敗しても作成済み・held・未反映のまま。次の構築で書いた値が残り、反映ボタンが点く（ボード 1 / 2）
+    - `Prepare` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` は作成済みのボードにウィジェットを建てず、書いた値を消さない（既存のテストに追記。検収レビュー A で「ウィジェットだけを建てる」から変えた）
+    - `MakeBoards` の 2 回目（`panel` の有無）とボードが 1 つでも作成済みのときは False で何も書かない。ボードを落とした後はもう一度作れる（検収レビュー E）
+    - settings.json を読めなかったとき、`TurnOffPolling` と `MakeBoards(panel=True)` は設定を書かない（ボードは作る。検収レビュー D）
+    - 呼び出し元（AST）: `MakeBoards` は `bootstrap_gui` と `_SeedBoards` だけ、`ResetBoards` は `MakeBoards` だけ、`SeedBoard` は `SeedFreshBoard` だけ
+    - `_desktopThenHeadless` のデスクトップ側を「`MakeBoards(panel=True)` → 3 ボードのウィジェットを建てる」に変えた（デスクトップの起動の形。それまではボードを 1 つずつ構築していた）
+  - `tests/test_bootstrap_split.py`: 手順のリストに `AutonaActions.instance.MakeBoards()`（`AutonaScoreboardManager()` の直後）。実際の `bootstrap_gui()` のサブプロセスで、前回の `score`（`yesterday`・ボード 4）が消え、3 ボードが完全な形で公開され、held は `score.1` / `score.2`、未反映なし、`BoardEnsured` は 3 つとも真
+  - `tests/test_battle_format.py`: 実際の Window（チーム形式）のサブプロセスで、起動直後に 3 ボードが作成済み・`score.1` / `score.2` が held・3 ボードとも選手枠とチーム色がある（`CreateScoreboard` が見せないボードを上書きしていない）
+  - `tests/conftest.py`: `autonaApp.boardsNow()`（作成済み・held・未反映・ライブと公開の `score` を 1 回の lock で）と `autonaApp.launch`
+  - 検収レビュー C: 本番と同じ起動状態（`MakeBoards(panel=True)` の後・ウィジェット無し）のフィクスチャ `launchedBoards`（`tests/test_api_v1_score.py`）と、それを使う pin
+    - 1v1 で見せていないボード 2 への v1 の `score:adjust` / `score:set` / `teams/{t}/color` / `:swap-teams` が未反映になり、公開値は変わらず（held の対象外のアップセット係数を除く）、`:apply` で公開される。ウィジェットはボード 1 だけ
+    - `:stop-follow`（ボード 1 / 2）が何も書かない（Set 無し・revision 不変・未反映なし）
+    - 見せていないボード（2 / 3）の `GET .../pending` と legacy の swap の読みでウィジェットが建たない
+    - 書いた後に形式を切り替えて建てたボード 2 のウィジェットが、その値（スコア・チーム名）を描き、反映ボタンが点く（退路の Qt モードの形式の切り替え）
+    - `tests/test_api_v1_crew.py`: まっさらなクルーボードのリセット 3 本は何も書かない（Set 無し・revision 不変・`pool` を足さない）。何もしない操作がボードを作らない / ウィジェットを建てないテスト 2 つを、ボードが無い状態と本番の起動状態の両方で回す（フィクスチャ `unbuiltBoards`）
+  - `tests/test_battle_format.py`: 実際の Window の起動直後と 3 つの形式のボードを建てた後に、未反映が無い（検収レビュー F）
+- **pin が落ちることの確認**（実装を 1 か所ずつ壊して `test_headless_seed` / `test_bootstrap_split` / `test_battle_format` ほかを回し、毎回バイト単位で戻した）
+  1. `CreateScoreboard` に `SeedBoard` のループを戻す → `test_the_window_s_first_board_does_not_seed_the_made_boards_again`・呼び出し元の AST・実際の Window（`test_battle_format`）の 3 件
+  2. `bootstrap_gui()` を `MakeBoards(panel=False)` に → 起動時のボードの記録・`bootstrap_gui()` のサブプロセス・実際の Window の 3 件
+  3. `bootstrap_gui()` の `MakeBoards` を `ResetBoards` に戻す（S4ac-1 の前の形）→ 上の 3 件 + 手順のリスト + 呼び出し元の AST の 5 件
+  4. `EnsureScoreboard` の `ForgetBoard` を無条件に → 構築の失敗のテスト（ボード 1 / 2）の 2 件
+  5. `MakeBoards` の外側の `SaveBlock` を外す → `MakeBoards(panel=True)` と `MakeBoards()` の比較（デスクトップ側が 1 保存サイクルでなくなる）の 1 件
+  6. `MakeBoards` の `ResetBoards` を外す → 呼び出し元の AST・`bootstrap_gui()` のサブプロセス（前回の `score` が残る）の 2 件
+  7. ヘッドレスを `MakeBoards(panel=True)` に → 既存のヘッドレスのテスト 3 件（held 無し・ポーリングの設定・表示トグル）
+  - 参考: ハーネスの起動時のボードの破棄（判断 2）を外しても、`test_harness_isolation` / `test_scoreboard_operations` / `test_headless_seed` / `test_web_operations` は通った（どのテストも自分のボードを作り直すため）。破棄は開始状態を揃えるための防御で、これを pin するテストは無い
+- **検収レビューの pin が落ちることの確認**（1 か所ずつ壊して回し、毎回 md5 で戻したことを確かめた）
+  1. `DesktopBoardHost.Prepare` をウィジェットの無いボードに建てる形に戻す → 見せていないボードへの書き込み 4 件・読み 2 件・ボードホストのテスト・クルーの何もしないリセット（本番の起動状態）3 件の 10 件
+  2. `CommitEdit` がウィジェットの無いボードに建てる → ボードホストのテスト・`:swap-teams`・クルーの `:reset-players` の 3 件
+  3. `ClearMatchInfo` をレビューの前の形（match バーの欄は無条件・`match_en` だけキーがあるとき）に戻す → crew の golden（v1 のルートと操作、デスクトップ / ヘッドレス）8 件・まっさらなクルーボードのリセット 2 件の 10 件
+  4. `TurnOffPolling` の `loadFailed` の検査を外す → 読めなかった設定のテストの 1 件
+  5. `MakeBoards` のガードを外す → 2 回目のテスト 2 件
+  6. ボード 1 / 2 のウィジェットの構築で held のキーを書く → 実際の Window の起動時の未反映の検査（F）の 1 件
+  - A の後、`BoardHost.ClearPlayers` が `Prepare` を呼ばず、core に無いボード 2 への `reset_players` がボードを作らなくなった（それまではデスクトップの `CommitEdit` が建てていた）。`test_scoreboard_operations.py::test_a_web_clear_builds_the_board_first[reset_players]` が落ちて見つかり、`ClearPlayers` の先頭で `Prepare` するようにした
+- **検証**: `pytest tests/test_headless_seed.py tests/test_bootstrap_split.py tests/test_battle_format.py` 99 passed。直列で `test_harness_isolation` / `test_headless` / `test_scoreboard_operations` / `test_web_operations` / `test_api_v1_score` / `test_roster_flow` / `test_crew_operations` / `test_state_manager_held` / `test_signal_lifetime` / `test_import_side_effects` 548 passed・1 skipped。`python scripts/run_tests_parallel.py` 6278 passed・0 failed・2 skipped（4 workers）。直列の全量は未実施（メインが push 前に回す）。検収レビューの対応の後: 関係する 25 ファイルの直列（headless_seed・v1 score / score_fields / crew・battle_format・bootstrap_split・web_operations・scoreboard_operations・set_follow / set_follow_flow・crew_operations / crew_board・roster_flow・harness_isolation・headless・hotkeys 2 つ・player_card_render・state_manager_held・signal_lifetime・import_side_effects・core_qt_free・objectname_keypath_contract・score_typing・webserver_routes）1507 passed・1 skipped、`python scripts/run_tests_parallel.py` 6297 passed・0 failed・2 skipped（4 workers）
+- **golden**: 最初の版は差分なし。検収レビューの B で `tests/fixtures/crew_operations/golden.json` の 2 件（`reset match` / `clear all`）から、クルーボードに無い `score.3.pool` への `""` の書き込み（Set 1 つ・delta の行 1 つ・後のボードの `pool` キー）を手で外した（S3e-2 の前の木で録った golden なので録り直せない。ほかの項目は不変）。`board_operations` の golden と `key_order.json` は不変
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  1. 1v1 / チーム / クルーの各形式で起動し、`out/program_state.json` の `score.1` / `score.2` / `score.3` が 3 つとも完全（チーム色・選手枠・`best_of`・クルーの 9 行）
+  2. React の SCORE でボード 1 を編集 → 反映ボタンが点き、押すまで OBS（`program_state.json`）は変わらない。チーム形式も同じ（held）。クルーはすぐ出る
+  3. 1v1 形式のまま、v1 でボード 2 に書く（`POST /api/v1/scoreboards/2/score:adjust` など）→ OBS には出ず、SCORE ページのもう一方のボードの未反映に出て、そこから反映できる
+  4. 退路（設定の Qt 版の SCORE パネル）を ON にして起動 → Qt のボードが今までどおり動く（反映ボタン・形式の切り替え・セット選択）
+  5. 形式の切り替え（サイドバー）で、切り替えた先のボードに起動後に v1 で書いた値が残っている（シードし直されない）
+  6. 設定ウィンドウで「セットの自動更新を無効」を外し、形式を切り替えても外れたまま（それまではボードの構築で戻った）。再起動すると戻る
+- **メインの実機確認**（2026-11-11。隔離データの `python main.py`、偽の start.gg。検収レビューの対応の前後で 2 回）
+  1. 1v1 / チーム / クルーの各形式で起動: `score.1` / `score.2` / `score.3` が 3 つとも完全な形で出力され（チーム色・選手枠・クルーの 9 行）、held はボード 1 / 2 だけ、未反映なし、ログにエラーなし
+  2. React の SCORE ページ（チーム形式・ボード 2）: +1 で反映ボタンが点き、公開値は変わらない。反映で公開される
+  3. 1v1 形式で、v1 でボード 2 に `score:adjust` → 公開されず未反映。対応の後は、そのあと新しく開いた SCORE ページに「チーム のスコアボードに未反映の入力があります」が出て、その反映ボタンで公開され、表示が消えた。`:apply` でも公開される
+  4. 退路（Qt 版の SCORE パネル ON・1v1）: v1 でボード 1 / 2 に書く → Qt のボード 1 が未反映を描き、反映ボタンが点く。Qt の反映ボタンでボード 1 だけが公開される。チーム形式に切り替えると、Qt のボード 2 がウィジェットの無い間に書いた値を描き、反映ボタンが点く。legacy の `/scoreboard2-open-set` で Qt のセット選択の窓が開き、取得 → フェーズ → 行 → OK でボード 2 に未反映として読み込まれ（公開値は不変）、窓が閉じた。ログにエラーなし
+  5. ボード 1 に未反映を残したまま 1v1 → チームに切り替えても、ボード 1 の未反映とボード 2 の値が残る
+  6. 自動更新をオンにして（`PATCH /api/v1/settings/general`）形式を切り替えても、オンのまま
+  7. 対応の後、起動直後のクルーボードへの `:reset-match`（`confirm: true`）は何も書かない（revision 不変・`pool` を足さない）

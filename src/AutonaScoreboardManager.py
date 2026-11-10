@@ -8,7 +8,6 @@ from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .Helpers.AutonaQtHelper import (
     GuiMarshalAborted, gui_thread_sync, in_gui_thread)
 from .core.StateManager import StateManager
-from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from . import ui_constants as UI
 
@@ -35,13 +34,10 @@ class AutonaScoreboardManager(QDockWidget):
     def __init__(self, *args):
         super().__init__(*args)
 
-        # Wipe any residual score.* keys from an older multi-scoreboard
-        # state.json so we start from a clean single-scoreboard layout, and
-        # forget which boards core has made (ADR-005 S4y: no board is made
-        # yet in this launch). Core's (AutonaActions.ResetBoards, which runs
-        # StateSchema.ResetScoreRoot) -- `score` is a schema name, and this
-        # class is a QDockWidget.
-        AutonaActions.instance.ResetBoards()
+        # The score subtree's reset and the boards themselves are core's,
+        # made at launch right after this dock (AutonaActions.MakeBoards,
+        # bootstrap_gui(); ADR-005 S4ac-1). This constructor reset the
+        # subtree until then.
 
         logger.info("Scoreboard Manager - Initializing")
 
@@ -97,16 +93,16 @@ class AutonaScoreboardManager(QDockWidget):
                 logger.info(
                     f"Scoreboard Manager - Creating scoreboard {number} "
                     f"({self.BOARD_LABELS[number]})")
-                # Core makes the board first (ADR-005 S4y): its launch write
-                # (SeedFreshBoard, S4t), and -- the desktop's, `panel` -- the
-                # display options, polling turned off and the hold, in one
-                # cycle with the build as before. The widgets are built on it
-                # and render it, and write nothing as they are. It reads the
-                # loaded game's players per team, so a board built after the
-                # load has them too. Core makes a board once a launch; this
-                # is the desktop's only caller, so a board core has made is
-                # one whose widget is built.
-                AutonaActions.instance.EnsureBoard(number, panel=True)
+                # Core made the board at launch (AutonaActions.MakeBoards,
+                # ADR-005 S4ac-1): its launch write and -- the desktop's,
+                # `panel` -- the display options, polling turned off and the
+                # hold. The widgets are built on it and render it, and write
+                # nothing as they are. EnsureBoard does nothing then; it
+                # makes the board here only when core does not have it (its
+                # launch failed, and the board host's Prepare asked; a test's
+                # harness drops a board between tests), in one cycle with the
+                # build, as every build did until S4ac-1.
+                made = AutonaActions.instance.EnsureBoard(number, panel=True)
                 try:
                     if number == 1:
                         board = AutonaScoreboardWidget(
@@ -123,34 +119,35 @@ class AutonaScoreboardManager(QDockWidget):
                     self.scoreboards[number] = board
                     board.setVisible(False)
                 except BaseException:
-                    # No widget to render the board core made: core forgets
-                    # it (not ready, its hold released), or Built() would say
-                    # it is there -- the swap and load-set hotkeys would act
-                    # on it -- and the next build would skip its launch write.
+                    # No widget to render the board core made just now: core
+                    # forgets it (not ready, its hold released), or Built()
+                    # would say it is there -- the swap and load-set hotkeys
+                    # would act on it -- and the next build would skip its
+                    # launch write. Not a board made before (at launch): it
+                    # stays made and held, for the page that renders it
+                    # without widgets, and the next build would otherwise
+                    # seed it again over what was written to it since.
                     self.scoreboards.pop(number, None)
-                    AutonaActions.instance.ForgetBoard(number)
+                    if made:
+                        AutonaActions.instance.ForgetBoard(number)
                     raise
         finally:
             self._ensuring.discard(number)
         return board
 
     def CreateScoreboard(self, fmt: str = None) -> bool:
-        # Startup path: build only the board the persisted battle format
-        # actually shows (startup Step 4e). The other boards are built on
-        # demand — by SetBattleFormat() when the operator switches format, or
-        # by GetScoreboard() when a web/API call addresses them — and their
-        # score.{N} subtree is seeded here so nothing reads a missing key in
-        # the meantime. Idempotent: already-built boards are left alone and
-        # re-seeding an unbuilt one rewrites the same empty skeleton.
-        # StateSchema.SeedBoard is the function a built board's launch write
-        # starts from (AutonaActions.SeedFreshBoard), so the placeholder and
-        # the built board can no longer drift apart (headless core Step 2).
+        # Startup path: build only the widgets of the board the persisted
+        # battle format actually shows (startup Step 4e). The other boards'
+        # widgets are built on demand — by SetBattleFormat() when the
+        # operator switches format, or by GetScoreboard() when a web/API call
+        # addresses them. Every board is already in the state, whole: core
+        # made all three at launch (AutonaActions.MakeBoards, ADR-005
+        # S4ac-1). Until then this seeded the others' skeleton
+        # (StateSchema.SeedBoard) as a placeholder; now that would replace
+        # boards already made -- what was written to them since, and their
+        # launch write.
         number = self.FORMAT_BOARDS.get(fmt, 1)
-        with StateManager.SaveBlock():
-            for other in self.BOARD_NUMBERS:
-                if other != number and other not in self.scoreboards:
-                    schema.SeedBoard(other)
-            self.EnsureScoreboard(number)
+        self.EnsureScoreboard(number)
         return True
 
     def SetBattleFormat(self, fmt: str):
@@ -171,10 +168,12 @@ class AutonaScoreboardManager(QDockWidget):
             return scoreboard
 
         # Not built yet (only the active format's board is built at startup).
-        # Build it here so every caller — the web operations' desktop board
-        # host (AutonaWebOperations.DesktopBoardHost), the desktop panels —
-        # gets a board (the shell operations no longer need one: ADR-005
-        # S4y, AutonaShellOperations). Construction is
+        # Built here for the web operations' desktop board host
+        # (AutonaWebOperations.DesktopBoardHost), whose Prepare asks for it
+        # only for a board core does not have since ADR-005 S4ac-1 (every
+        # board is made at launch; a made board's widgets are built by the
+        # window and by a format switch). The shell operations no longer
+        # need one (ADR-005 S4y, AutonaShellOperations). Construction is
         # GUI-thread only, so calls arriving on the Flask thread (the board
         # host's Prepare outside its Run: get_swap, get_scoreboard) are
         # marshalled to it (gui_thread_sync). Once the app is shutting

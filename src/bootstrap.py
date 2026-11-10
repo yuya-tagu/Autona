@@ -573,18 +573,31 @@ def bootstrap_gui():
     # main.py builds the QApplication before `from src import Autona`, and
     # Autona.py keeps a fallback for PyInstaller's dependency-analysis
     # subprocess, which imports modules without main.py. Both run before
-    # bootstrap_gui().
-    # It also wipes the `score` subtree in __init__ and forgets the boards
-    # core made (AutonaActions.ResetBoards, ADR-005 S4y), so it must come
-    # after StateManager.Initialize() and AutonaActions (bootstrap_core()).
-    # Still before the Window, i.e. before the first score.* seed
-    # (Window._SeedPanelState / CreateScoreboard): moving it behind the
-    # Designer migration (which writes no state) changes nothing the state
-    # sees. The boards themselves are not built here: CreateScoreboard() is
-    # called later, from the window.
+    # bootstrap_gui(). It writes no state (the score subtree's reset was its
+    # constructor's until ADR-005 S4ac-1: MakeBoards below).
     from .AutonaScoreboardManager import AutonaScoreboardManager
     if AutonaScoreboardManager.instance is None:
         AutonaScoreboardManager.instance = AutonaScoreboardManager()
+
+    # ORDER CONSTRAINT: the desktop's boards, all three, made at launch in
+    # core (ADR-005 S4ac-1): the restored `score` subtree dropped, each
+    # board's launch write, and -- `panel` -- boards 1 / 2 put behind their
+    # 反映 button (the display options brought back to the settings and the
+    # polling turned off, as a board's first build did). Before S4ac-1 the
+    # hold came with a board's widgets, so a board the window never showed
+    # was not held; the React SCORE page shows any board without widgets.
+    # After bootstrap_core() (StateManager.Initialize() -- the restored state
+    # it drops -- the settings it reads, AutonaActions) and after the dock,
+    # whose constructor reset the subtree until then. Before the Window: its
+    # _SeedPanelState (one save cycle of its own, which reads no board),
+    # its CreateScoreboard (which builds the shown board's widgets on the
+    # board made here, and seeds nothing), and the web server
+    # (Window._StartWebServer), so no request reaches a board that is not
+    # made or not yet held. Before the board host is registered below,
+    # which reads nothing at this point. The headless shell makes the same
+    # boards without `panel` (src/headless._SeedBoards).
+    from .core.Actions import AutonaActions
+    AutonaActions.instance.MakeBoards(panel=True)
 
     # The desktop's shell operations and the set selection / station windows
     # (ADR-005 S4y; the scoreboard dock's and its boards' until then, so

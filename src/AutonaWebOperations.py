@@ -16,12 +16,13 @@ These kinds live here:
 - the operations ADR-005 S2 moved into core (swap, the clears, the set
   fields, losers, the team name, reset score, and the readers get_swap /
   get_set / get_scoreboard). They call core in both shells too; what the
-  desktop adds around that call is its board: it builds the board first (an
-  unbuilt board is not held, so the write would be published at once and
-  then wiped by the seed the build writes), runs on the GUI thread (a player
-  card still commits a typed name in two writes there; see
-  DesktopBoardHost.Run), lets
-  the field being typed in finish first. The player / character counts of
+  desktop adds around that call is its board: it runs on the GUI thread (a
+  player card still commits a typed name in two writes there; see
+  DesktopBoardHost.Run) and lets the field being typed in finish first, when
+  the board's widgets are built. The board itself is core's, made and held
+  at launch (ADR-005 S4ac-1); until then the desktop built a board first,
+  because an unbuilt one was not held and the seed of its build wiped the
+  write. The player / character counts of
   boards 1/2 are core's too since S3e-6 (AutonaActions.SetRoster; they were
   the board's spinboxes, and a shell without the board refused them).
 
@@ -34,7 +35,7 @@ These kinds live here:
   its swap / resets / clears / set fields) and the caster line-up's
   (ADR-005 S3e-2): core's CrewBattleService and CommentaryService, in both
   shells. The crew ones go through the board host like the S2 ones (the
-  desktop builds the board first and runs them on its GUI thread); the
+  desktop runs them on its GUI thread); the
   line-up has no board and is written on the calling thread. The board and
   the Commentary page render what was written.
 - 配信設定's (ADR-005 S4e): core's StreamService -- the channels, the stream
@@ -212,7 +213,8 @@ class BoardHost:
             return op()
 
     def Prepare(self, board):
-        """Make board `board` ready to be written (desktop: build it)."""
+        """Make board `board` ready to be written or read (desktop: make it
+        again if core does not have it; ADR-005 S4ac-1)."""
 
     def Built(self, board):
         """Whether board `board` is there without Prepare: always, with no
@@ -237,13 +239,16 @@ class BoardHost:
         text typed into its combos and never picked -- the combo whose list
         is open included, unlike after a load from elsewhere: the clear is
         the operator's operation on the board (DiscardTypedText). Both are
-        nothing with no board. The statistics are the operation's
+        nothing with no widget. Prepared first, as every board operation: a
+        board core does not have is made (the desktop's CommitEdit built it
+        until the ADR-005 S4ac-1 review). The statistics are the operation's
         (AutonaActions.ClearPlayers, ADR-005 S3e-5). Any other board is
         refused before anything is built or written."""
         number = _require_board(board)
         if number not in AutonaActions.SCORE_BOARDS:
             # The crew board's members are CrewBattleService.ClearCrew's.
             raise NotAvailable(f"scoreboard {number} has no player slots")
+        self.Prepare(board)
         self.CommitEdit(board)
         AutonaActions.instance.ClearPlayers(board, no_mains)
         self.DiscardTypedText(board)
@@ -287,9 +292,10 @@ class DesktopBoardHost(BoardHost):
         self.manager = manager
 
     def _Board(self, board):
-        # On the GUI thread, the build itself (it raises if it fails, as
-        # the operations' EnsureScoreboard did); elsewhere GetScoreboard,
-        # which marshals the build there.
+        # Prepare's, for a board core does not have: on the GUI thread, the
+        # build itself (it raises if it fails, as the operations'
+        # EnsureScoreboard did); elsewhere GetScoreboard, which marshals the
+        # build there.
         if in_gui_thread():
             return self.manager.EnsureScoreboard(board)
         return _on_gui_thread(lambda: self.manager.GetScoreboard(board),
@@ -308,30 +314,47 @@ class DesktopBoardHost(BoardHost):
         return _on_gui_thread(gui_thread_sync(op), "a board operation")
 
     def Prepare(self, board):
-        # Whether the board is ready is core's (Built, ADR-005 S4y); what
-        # stays the shell's is drawing it -- the widgets, built with it
-        # (EnsureScoreboard makes the board in core first). Off the GUI
-        # thread a ready board is not marshalled for.
-        if not self.Built(board) \
-                or self.manager.scoreboards.get(_board(board)) is None:
+        # Whether the board is ready is core's (Built, ADR-005 S4y), and core
+        # makes every board at launch (AutonaActions.MakeBoards, S4ac-1): a
+        # made board needs nothing here, and its widgets are not built for a
+        # write or a read -- the window builds the shown board's, and a
+        # format switch the next one's, which render the state as it is then
+        # (pending edits included). Only a board core does not have (its
+        # launch failed; a test's harness dropped it) is made again, with its
+        # widgets (EnsureScoreboard makes it in core first). Until S4ac-1
+        # this built the widgets of any board that had none.
+        if not self.Built(board):
             self._Board(board)
 
     def Built(self, board):
-        # Core's flag (AutonaActions.EnsureBoard, ADR-005 S4y; the desktop
-        # makes a board in core only as it builds it, so this is still "the
-        # board is built"). It was the dock's registry until then.
+        # Core's flag (AutonaActions.EnsureBoard, ADR-005 S4y). It was the
+        # dock's registry until then. Since S4ac-1 core makes every board at
+        # launch (AutonaActions.MakeBoards), so this answers True with or
+        # without the board's widgets, as on the headless shell.
         return AutonaActions.instance.BoardEnsured(board)
 
+    def _Widget(self, board):
+        # The board's widgets if they are built, else None: nothing is built
+        # for what follows an operation (ADR-005 S4ac-1). With no widget there
+        # is no field being typed in, and no card to tidy up.
+        return self.manager.scoreboards.get(_board(board))
+
     def CommitEdit(self, board):
-        self._Board(board).CommitFocusedEdit()
+        widget = self._Widget(board)
+        if widget is not None:
+            widget.CommitFocusedEdit()
 
     def DiscardTypedText(self, board):
-        self._Board(board).DiscardTypedText()
+        widget = self._Widget(board)
+        if widget is not None:
+            widget.DiscardTypedText()
 
     def PlayerLoaded(self, board, team, player, cleared):
         # After a load that cleared, the slot's card drops the text typed
         # into its combos (AutonaScoreboardWidget._CardLoaded).
-        self._Board(board).PlayerLoaded(team, player, cleared)
+        widget = self._Widget(board)
+        if widget is not None:
+            widget.PlayerLoaded(team, player, cleared)
 
 
 # ── Registrations (filled in by the shell) ───────────────────────────────
@@ -1347,9 +1370,10 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # The counts are core's in both shells: boards 1/2's roster
         # (AutonaActions.SetRoster, ADR-005 S3e-6 -- the board's two
         # spinboxes until then, so a shell with no board refused them), the
-        # crew board's member count (S3e-2). The desktop's board is built
-        # first, as before, so the change is held for 反映 rather than
-        # published and then wiped by the seed the build writes.
+        # crew board's member count (S3e-2). The board is prepared first (on
+        # the desktop: made again only if core does not have it, ADR-005
+        # S4ac-1; built until then, so the change was held for 反映 and not
+        # wiped by the seed of a later build).
         crew = _is_crew(scoreboard)
         if players is not None or characters is not None:
             # Boards 1/2 and the crew board have counts; any other is
@@ -1524,18 +1548,21 @@ def _swap_flag(board):
 
 def get_swap(scoreboard):
     # The live flag: a swap is reported as soon as it is made, before 反映
-    # publishes it. The board is prepared first, as the route always did.
-    # Any other board: NotAvailable, before anything is built.
+    # publishes it. The board is prepared first, as the route always did (a
+    # made board's widgets are not built for it: ADR-005 S4ac-1). Any other
+    # board: NotAvailable, before anything is built.
     board = _require_board(scoreboard)
     boardHost.Prepare(scoreboard)
     return str(_swap_flag(board))
 
 
 def get_scoreboard(scoreboard):
-    # The desktop still builds a board that is not built yet, although the
-    # answer is read from the state: building is what writes a board's full
-    # initial subtree, and an unbuilt board's is only the skeleton
-    # (StateSchema.SeedBoard). Headless, the skeleton is the board.
+    # Read from the state. The board is prepared first: core made every
+    # board at launch, whole, in both shells (AutonaActions.MakeBoards,
+    # ADR-005 S4ac-1), so on the desktop this makes again only a board core
+    # does not have, and builds no widget for a made one. Until S4ac-1 the
+    # desktop built the board here: building wrote its full initial subtree,
+    # and an unbuilt board's was only the skeleton (StateSchema.SeedBoard).
     # Committed view: pending (not yet 反映-applied) desktop edits must not
     # leak to remote clients ahead of the delta stream. A board no shell
     # has is refused first (503, ADR-005 S4x review): the desktop built
@@ -1552,8 +1579,10 @@ def get_pending(scoreboard):
     lock. Whether it is held is the shell's: the desktop's boards 1/2 are, the
     crew board and every headless board are not, and those have nothing
     pending. get_scoreboard stays the published view; the route answering this
-    one is guarded, not READ. Built first, like get_scoreboard (never with the
-    lock held: on the desktop that waits for the GUI thread)."""
+    one is guarded, not READ. Prepared first, like get_scoreboard: no widget
+    is built for a made board (ADR-005 S4ac-1), and a board core does not
+    have is made again -- never with the lock held: on the desktop that waits
+    for the GUI thread."""
     boardHost.Prepare(scoreboard)
     board = _board(scoreboard)
     prefix = f"score.{board}"
@@ -1703,11 +1732,10 @@ def reset_all(scoreboard):
 
 # ── the crew board's members (ADR-005 S3e-2) ─────────────────────────────
 # Core's (CrewBattleService), run where the board operations run: on the
-# desktop the board is built first and the write made on the GUI thread,
-# as the board's own inputs make theirs. Another board has no members, and
-# answers "OK" having done nothing, as it always did (after being built,
-# on the desktop, as asking for it always did -- and without reading the
-# numbers). `team` and `member` are 1-based; on the crew board a number
+# desktop the write is made on the GUI thread, as the board's own inputs
+# make theirs (the board prepared first; ADR-005 S4ac-1). Another board has
+# no members, and answers "OK" having done nothing, as it always did
+# (without reading the numbers). `team` and `member` are 1-based; on the crew board a number
 # that is not one raises (ValueError), as the board's signal did.
 
 def crew_member_stock(scoreboard, team, member, change):
@@ -1742,8 +1770,9 @@ def crew_set_active(scoreboard, team, member):
 
 def crew_member_count():
     """How many members the crew board shows: the state's count, or on a
-    board not built yet (the desktop's lazy board) the count building it will
-    give it, its seed's. Read without building anything."""
+    board core does not have (its launch failed; every board is made at
+    launch since ADR-005 S4ac-1) the count making it will give it, its
+    seed's. Read without building anything."""
     if not boardHost.Built(CREW_BOARD):
         return CrewBattleService.DEFAULT_MEMBER_NUM
     return CrewBattleService(CREW_BOARD).MemberNum()
@@ -1787,8 +1816,9 @@ def crew_update_set(fields):
 
 def crew_team_color(team, color):
     """One crew's colour, the operation its colour button calls. Unlike
-    `team_color`, the board is built first (an unbuilt board's seed would wipe
-    the write), and a colour it already has is not written."""
+    `team_color`, the board is prepared first (made again if core does not
+    have it; until ADR-005 S4ac-1 built, as an unbuilt board's seed wiped the
+    write), and a colour it already has is not written."""
     host = boardHost
 
     def run():
@@ -1816,11 +1846,12 @@ def get_board_post(scoreboard):
 
 # ── the player slots of boards 1/2 (ADR-005 S3e-4) ───────────────────────
 # Core's (PlayerService.ApplyData, S3e-3), run where the board operations
-# run: on the desktop the board is built first and the load made on the GUI
-# thread, which is also where the board's cards are (the host's
-# PlayerLoaded). A slot is one the *state* has -- each card of a built
-# board publishes its own, and the headless shell seeds them (S3d) -- so the
-# range is checked the same way in both shells. The board's cards follow
+# run: on the desktop the load is made on the GUI thread, which is also
+# where the board's cards are when its widgets are built (the host's
+# PlayerLoaded). A slot is one the *state* has -- core seeds them as it
+# makes the board (AutonaActions.SeedFreshBoard), at launch in both shells
+# since ADR-005 S4ac-1 -- so the range is checked the same way in both
+# shells. The board's cards follow
 # the load from the held cycle, like any write they did not make (S2a).
 
 def _player_path(board, team, player):
@@ -1855,8 +1886,8 @@ def update_player(scoreboard, team, player, data):
     blanks match_en). `team` is the state team (no swap flip).
 
     True when applied; False when the state team has no such slot (the
-    route's 404) -- checked after the board is built, since building it is
-    what writes its slots. An exception from the write propagates (500).
+    route's 404) -- checked after the board host's Prepare, since making a
+    board core does not have is what writes its slots. An exception from the write propagates (500).
     One save cycle, `savePlayerToDb`'s state write included; its database
     write follows, outside the host (_save_record).
     """
@@ -1885,10 +1916,10 @@ def update_player(scoreboard, team, player, data):
 
 def _edit_slot(scoreboard, team, player, edit):
     """`edit(service)` on the PlayerService of slot `player` of state team
-    `team` on board 1/2, where the board operations run, the board built
-    first (an unbuilt board's seed would wipe the write); what it returns.
-    NoSuchSlot when the state team has no such slot, checked after the
-    build, since building it is what writes its slots."""
+    `team` on board 1/2, where the board operations run, the board prepared
+    first (made again if core does not have it; ADR-005 S4ac-1); what it
+    returns. NoSuchSlot when the state team has no such slot, checked after
+    the preparation, since making a board is what writes its slots."""
     host = boardHost
 
     def run():
@@ -2140,8 +2171,9 @@ def swap_players(scoreboard, team, first, second):
 
 
 # ── the statistics of boards 1/2 (ADR-005 S3e-5) ─────────────────────────
-# Core's (StatsService), run where the board operations run: the desktop
-# builds the board first, as asking its stats util for them always did.
+# Core's (StatsService), run where the board operations run: prepared
+# first (a board core does not have is made), as the desktop built the
+# board when asking its stats util for them did until ADR-005 S4ac-1.
 # A statistic is fetched or recalculated now; a fetch answers into the
 # state later (the provider's worker), which is all the routes ever waited
 # for. "OK" whatever there was to fetch -- a fetch that raised included
@@ -2261,8 +2293,8 @@ def get_set(scoreboard):
 
 # ── set loading and following (ADR-005 S3e-7) ────────────────────────────
 # Core's (SetFollowService), run where the board operations run: the
-# desktop builds the board first and runs them on its GUI thread, as the
-# board's own set window does. The set is fetched, and followed, from the
+# desktop runs them on its GUI thread, as the board's own set window does
+# (a board core does not have is made first; ADR-005 S4ac-1). The set is fetched, and followed, from the
 # provider's worker and the shell's clock; what they answer lands in the
 # state later, which is all the routes ever waited for. Only boards 1/2
 # load sets: the crew board raises (ValueError: the legacy route's 500, as
@@ -2408,9 +2440,13 @@ def follow_station(scoreboard, station):
 
 def stop_follow(scoreboard):
     """The board's timer row's cancel button: stop polling, forget the station
-    and the followed set (SetFollowService.StopFollowing(forget=True)). A board
-    the desktop has not built follows nothing -- a load builds it -- and is not
-    built for this: building seeds it and turns the polling setting off."""
+    and the followed set (SetFollowService.StopFollowing(forget=True)), on a
+    board that follows nothing writing nothing (its writes are SetIfChanged).
+    A board core does not have (its launch failed; every board is made at
+    launch since ADR-005 S4ac-1, the desktop's as it was built until then)
+    follows nothing -- a load makes it -- and is not made for this: making it
+    seeds it and turns the polling setting off. Nothing is built for it
+    either."""
     board = _board(scoreboard)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} does not load sets")

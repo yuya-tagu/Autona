@@ -294,6 +294,30 @@ def shown():
 
 steps = [["launch", shown()]]
 
+# The boards core made at launch (ADR-005 S4ac-1), as the window left them:
+# its CreateScoreboard built the shown board's widgets, and wrote nothing
+# over the two it does not show. Nothing pending either: neither the widgets'
+# build (and the renders it queued, run here) nor the window's
+# _SeedPanelState wrote to a held board, which would light its 反映 button.
+from src.core.StateManager import StateManager
+app.processEvents()
+
+def pending():
+    return [StateManager.HasPendingChanges(f"score.{n}") for n in (1, 2, 3)]
+
+with StateManager.lock:
+    score = StateManager.Get("score") or {}
+    steps.append(["launch boards", {
+        "made": [AutonaActions.instance.BoardEnsured(n) for n in (1, 2, 3)],
+        "held": sorted(p for p in StateManager.heldPrefixes
+                       if p.startswith("score.")),
+        "whole": [bool(score.get(n, {}).get("team", {}).get("1", {})
+                       .get("player")) for n in ("1", "2", "3")],
+        "colours": [bool(score.get(n, {}).get("team", {}).get("1", {})
+                         .get("color")) for n in ("1", "2", "3")],
+        "pending": pending(),
+    }])
+
 # The sidebar's own segment: a click is core's switch, and the window shows
 # the board from its notice.
 segment["crew"].click()
@@ -318,6 +342,11 @@ steps.append(["v1 singles", dict(shown(), status=answer.status_code)])
 AutonaActions.instance.SetBattleFormat("team")
 steps.append(["core team", shown()])
 
+# Every board's widgets are built by now, the others' by the switches: none
+# of those builds wrote to its held board either.
+app.processEvents()
+steps.append(["pending after the builds", pending()])
+
 report(steps)
 # The app's own way out: the window's close is the shutdown (it saves Qt's
 # settings to the file above), then the interpreter's exit joins what still
@@ -333,6 +362,13 @@ def test_the_real_window_s_segment_and_board_follow_every_switch(tmp_path):
     # The launch builds and shows the persisted format's board only.
     assert steps["launch"] == {"segment": ["team"], "shown": [2],
                                "built": [2], "format": "team", "active": 2}
+    # ...on boards core made at launch, all three, whole, 1 / 2 held
+    # (ADR-005 S4ac-1). The window wrote no skeleton over the two it does
+    # not show (CreateScoreboard did until then).
+    assert steps["launch boards"] == {
+        "made": [True, True, True], "held": ["score.1", "score.2"],
+        "whole": [True, True, True], "colours": [True, True, True],
+        "pending": [False, False, False]}
     assert steps["segment crew"] == {"segment": ["crew"], "shown": [3],
                                      "built": [2, 3], "format": "crew",
                                      "active": 3}
@@ -343,6 +379,7 @@ def test_the_real_window_s_segment_and_board_follow_every_switch(tmp_path):
     assert steps["core team"] == {"segment": ["team"], "shown": [2],
                                   "built": [1, 2, 3], "format": "team",
                                   "active": 2}
+    assert steps["pending after the builds"] == [False, False, False]
 
 
 def test_the_notice_reaches_the_gui_thread_from_a_request_thread(

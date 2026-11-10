@@ -71,7 +71,7 @@ A fresh board's launch write is here too (`SeedFreshBoard`, ADR-005 S4t): the
 board's widgets used to write it as they were built. So is making a board
 ready to be used (`EnsureBoard`, S4y: the launch write, and on the desktop the
 反映 hold the board widget's constructor registered), which is what a board
-host's Built() answers.
+host's Built() answers -- every board at launch since S4ac-1 (`MakeBoards`).
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -373,19 +373,20 @@ class AutonaActions:
         cycle. True if this call did it; False when the board was ready
         already, or there is no such board (nothing is written then).
 
-        The desktop calls it with `panel` when it first uses a board, ahead
-        of the board's widgets, which only render what it wrote
-        (AutonaScoreboardManager.EnsureScoreboard); the headless shell for
-        all three at launch, without (src/headless._SeedBoards): it holds
-        nothing (it has no 反映 button), and the polling setting and the
-        display options it restored are the operator's. Until ADR-005 S4y
-        the desktop's three were its board build's and the hold the board
-        widget's constructor's, after the seed, in this order: the save cycle
-        and what it publishes are the same. A writer on another thread
-        between the seed and the hold is published, not held; one while the
-        widgets are built is held now (it was published until S4y, when the
-        hold came last), and the widgets render what they find when built
-        (AutonaScoreboardWidget).
+        Both shells make all three at launch, before anything else writes a
+        board (MakeBoards, ADR-005 S4ac-1): the desktop with `panel`
+        (bootstrap_gui()), the headless shell without
+        (src/headless._SeedBoards): it holds nothing (it has no 反映 button),
+        and the polling setting and the display options it restored are the
+        operator's. The desktop's widgets are built later, and only render
+        what they find (AutonaScoreboardWidget); their build still calls
+        this (AutonaScoreboardManager.EnsureScoreboard), which does nothing
+        for a board made at launch. Until S4ac-1 the desktop made a board as
+        it first built its widgets; until ADR-005 S4y the three were the
+        board build's and the hold the board widget's constructor's, after
+        the seed, in this order: the save cycle and what it publishes are
+        the same. A writer on another thread between the seed and the hold
+        is published, not held.
 
         What a board host's Built() answers (BoardEnsured): the desktop's
         widgets are drawn after this, by the shell. Board 3 (crew) is never
@@ -393,8 +394,9 @@ class AutonaActions:
         are its display options rewritten nor the polling turned off, as
         its build never did.
 
-        Called where the shell builds a board (the desktop's GUI thread, the
-        headless launch). The board counts as ready once it is: at the end of
+        Called where the shell makes its boards (both launches, and the
+        desktop's widget build: the GUI thread). The board counts as ready
+        once it is: at the end of
         the save cycle's writes, under the lock that registers its hold, so
         a reader sees it ready and held together or neither. A second call
         while one is making it returns False at once, as for a ready board.
@@ -443,10 +445,12 @@ class AutonaActions:
         next EnsureBoard writes the launch state again.
 
         Called by EnsureBoard when it raised, and by the desktop when the
-        board's widgets could not be built after it
+        board's widgets could not be built right after the call that made it
         (AutonaScoreboardManager.EnsureScoreboard): a board made in core
         with no widget would answer Built() with nothing to render it, and
-        the swap / load-set hotkeys would act on it."""
+        the swap / load-set hotkeys would act on it. Not for a board made
+        before (at launch since ADR-005 S4ac-1): forgotten, the next build
+        would seed it again over what was written to it since."""
         board = self._asInt(board, 0)
         with StateManager.lock:
             self._ensuredBoards.discard(board)
@@ -462,22 +466,53 @@ class AutonaActions:
     def ResetBoards(self):
         """Drop the whole `score` subtree (StateSchema.ResetScoreRoot): no
         board is ready after it. Once per launch, before any board is
-        ensured -- the desktop's scoreboard dock's construction, the headless
-        shell's seed -- so a program_state.json from an older build cannot
-        leave boards behind. Nothing may call it after that: a board's
-        widgets would be left rendering a subtree that is no longer there,
-        and its hold would stay."""
+        ensured -- the start of MakeBoards, in both shells (ADR-005 S4ac-1;
+        the desktop's scoreboard dock's construction until then) -- so a
+        program_state.json from an older build cannot leave boards behind.
+        Nothing may call it after that: a board's widgets would be left
+        rendering a subtree that is no longer there, and its hold would
+        stay."""
         with StateManager.lock:
             self._ensuredBoards.clear()
         schema.ResetScoreRoot()
+
+    def MakeBoards(self, panel=False):
+        """Make every board a shell has (BOARDS), in one save cycle: the
+        `score` subtree dropped first (ResetBoards), then each board made
+        (EnsureBoard, with `panel`). Once per launch, before anything else
+        writes a board, in both shells (ADR-005 S4ac-1): the desktop with
+        `panel` (bootstrap_gui()), so boards 1 / 2 are behind their 反映
+        button from launch -- whichever board the window shows, and with or
+        without widgets -- and the headless shell without
+        (src/headless._SeedBoards). The crew board (3) is never held, with
+        or without `panel` (EnsureBoard). True if it made them.
+
+        Once: while any board is made (BoardEnsured), it logs a warning and
+        writes nothing, False. A second launch write would drop what was
+        written to the boards since, and on a board already held its seed
+        would be held back (ResetBoards does not release a hold). Decided by
+        the boards, not by a call count, so it runs again once they are
+        forgotten (a test's harness drops them between tests)."""
+        made = [board for board in self.BOARDS if self.BoardEnsured(board)]
+        if made:
+            logger.warning(
+                f"Actions - MakeBoards ignored: boards {made} are made "
+                "already (once a launch)")
+            return False
+        with StateManager.SaveBlock():
+            self.ResetBoards()
+            for board in self.BOARDS:
+                self.EnsureBoard(board, panel)
+        return True
 
     def SeedFreshBoard(self, board) -> bool:
         """Write board `board`'s launch state, in one save cycle: the skeleton
         and everything a fresh board publishes. True if it applied.
 
-        One function for both shells (ADR-005 S4t), run by EnsureBoard (S4y):
-        the desktop's when it first uses a board, ahead of the widgets, which
-        then only render it; the headless shell's for all three at launch.
+        One function for both shells (ADR-005 S4t), run by EnsureBoard (S4y)
+        for all three at launch (MakeBoards, S4ac-1; the desktop's when it
+        first built a board's widgets until then): the desktop's widgets
+        only render it.
         The board's widgets used to write most of this as they were built, by
         emitting their own signals, so the headless shell seeded only the
         player slots and a headless board had no colours, names, score or set
@@ -1269,8 +1304,9 @@ class AutonaActions:
         S3e-6, and what the headless shell did not do at all. Both shells run
         it on a game load, through
         the same wiring (bootstrap.wire_game_roster). A board without a
-        roster -- one the desktop has not built -- has nothing to follow:
-        it gets the game's count when it is seeded.
+        roster -- one not made yet (every board is made at launch since
+        ADR-005 S4ac-1; the desktop made a board as it built it until then)
+        -- has nothing to follow: it gets the game's count when it is seeded.
         """
         forget = bool(replaced)
         applied = []
@@ -1438,9 +1474,15 @@ class AutonaActions:
 
         `match_en` goes with it: it is the English form of the same round
         name (the YouTube title reads it), and leaving it would put the
-        previous set's round into the next title. Only where a set load has
-        written one, though -- board 3 never carries the key
-        (CrewBattleService does not publish it), and a reset must not add it.
+        previous set's round into the next title.
+
+        Each field only where the board has the key: a reset blanks what is
+        there and adds nothing. Board 3 never carries `match_en`
+        (CrewBattleService does not publish it), nor `pool` until something
+        writes one (its seed does not: CrewBattleService.SeedDefaults), so a
+        reset of a fresh crew board writes nothing (ADR-005 S4ac-1 review: it
+        wrote `pool` = "" until then, which made the v1 resets of a fresh
+        crew board a write). Boards 1 / 2 have every field from their seed.
 
         One save cycle for all of it, and nothing written for a field that is
         already blank (see `_SetIfChanged`).
@@ -1448,10 +1490,10 @@ class AutonaActions:
         prefix = f"score.{self._asInt(board, 0)}"
         written = False
         with StateManager.SaveBlock():
-            for field in schema.SCORE_MATCH_FIELDS:
-                written |= self._SetIfChanged(f"{prefix}.{field}", "")
-            if StateManager.Get(f"{prefix}.match_en", None) is not None:
-                written |= self._SetIfChanged(f"{prefix}.match_en", "")
+            for field in (*schema.SCORE_MATCH_FIELDS, "match_en"):
+                key = f"{prefix}.{field}"
+                if StateManager.Get(key, None) is not None:
+                    written |= self._SetIfChanged(key, "")
         return written
 
     # ── the X post (ADR-005 S4x) ──────────────────────────────────────────
@@ -1627,8 +1669,9 @@ class AutonaActions:
         length, in one save cycle; returns those boards. Both shells run it
         with the load's roster (bootstrap.wire_game_roster); until ADR-005
         S4t it was each built board's onLoad handler, so the headless shell
-        did without it. A board the desktop has not built has none, and gets
-        one when it is built (`SeedFreshBoard`)."""
+        did without it. A board not made yet has none, and gets one when it
+        is made (`SeedFreshBoard`; every board at launch since ADR-005
+        S4ac-1)."""
         applied = []
         with StateManager.SaveBlock():
             for board in self.SCORE_BOARDS:
