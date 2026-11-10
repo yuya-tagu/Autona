@@ -207,7 +207,8 @@ from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaShellOperations import AutonaShellOperations
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
-from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
+from .AutonaWebPanelHost import (
+    AutonaWebPanelHost, QT_FALLBACK_SETTINGS, UsesQtPanel, WebPanelPages)
 from .core import WebAccess
 # autopep8: on
 
@@ -394,10 +395,22 @@ class Window(QMainWindow):
 
         splash.set_message(splash_msgs[0], progress=0.40)
 
+        # SCORE: the React page in the shared web view since ADR-005 S4aa,
+        # its sidebar item a lazy factory (_CreateScoreboardPanel). The dock
+        # is made all the same: it holds the boards, built from startup as
+        # before (CreateScoreboard / SetBattleFormat below, and on demand),
+        # and is the item's page only on the way back to the Qt panel --
+        # inserted then, and kept as a dock (_EnsurePanelAt).
         self.scoreboard = AutonaScoreboardManager.instance
+        # The window's child, so it goes with the window as it did when it was
+        # an eager page; hidden, or it would show over the window with it
+        # (it is no page and no dock of the window's: neither in dockWidgets
+        # nor in a dock area). The way back puts it on the stack, which
+        # shows it.
+        self.scoreboard.setParent(self)
+        self.scoreboard.hide()
         self.scoreboard.setWindowIcon(QIcon(UI.icon_path('scoreboard.svg')))
         self.scoreboard.setObjectName("Scoreboard")
-        self.dockWidgets.append(self.scoreboard)
         AutonaScoreboardManager.instance.setWindowTitle(
             QApplication.translate("app", "Scoreboard"))
         splash.set_message(splash_msgs[1], progress=0.55)
@@ -449,8 +462,8 @@ class Window(QMainWindow):
                  QApplication.translate("app", "Stream Settings"), "stream"),
             ]),
             (QApplication.translate("app", "ScoreboardCategory"), [
-                (self.scoreboard, 'scoreboard.svg',
-                 QApplication.translate("app", "Scoreboard"), None),
+                (self._CreateScoreboardPanel, 'scoreboard.svg',
+                 QApplication.translate("app", "Scoreboard"), "scoreboard"),
                 (self._CreateBoardPanel, 'board.svg',
                  QApplication.translate("app", "Board"), "board"),
             ]),
@@ -531,6 +544,11 @@ class Window(QMainWindow):
         # item shows (_OnStackPageChanged tells the host on every reveal).
         self._webPanelHost = None
         self._webPanelPages = WebPanelPages()
+        # React items that can still show their Qt panel (QT_FALLBACK_SETTINGS;
+        # ADR-005 S4aa): nav index -> panel, until the item is first chosen
+        # and the setting read (_SettleWayBack). The panels shown in Qt then.
+        self._wayBackItems = {}
+        self._qtPanels = set()
         self._buildingPanel = False  # suppresses currentChanged during a swap
         for categoryTitle, panels in self._navSections:
             if categoryTitle:
@@ -540,7 +558,9 @@ class Window(QMainWindow):
                     index = self.stack.addWidget(QWidget())
                     self._lazyPanels[index] = (page, key)
                     self._panelIndexes[key] = index
-                    if WebAccess.IsWebPanel(key):
+                    if key in QT_FALLBACK_SETTINGS:
+                        self._wayBackItems[index] = key
+                    elif WebAccess.IsWebPanel(key):
                         self._webPanelPages.Add(index, key)
                 else:
                     index = self.stack.addWidget(page)
@@ -993,6 +1013,16 @@ class Window(QMainWindow):
         # ADR-005 S4g: the React page in the shared web view.
         return self._WebPanel("event")
 
+    def _CreateScoreboardPanel(self):
+        # ADR-005 S4aa: the React page in the shared web view, unless the
+        # operator switched back to the Qt panel (general.qt_scoreboard_panel,
+        # read on the item's first choice: _SettleWayBack). The boards are
+        # the dock's either way, built from startup (S4ac removes the way
+        # back with the Qt boards).
+        if "scoreboard" not in self._qtPanels:
+            return self._WebPanel("scoreboard")
+        return self.scoreboard
+
     def _CreateBoardPanel(self):
         # ADR-005 S4s: the React page in the shared web view.
         return self._WebPanel("board")
@@ -1094,11 +1124,30 @@ class Window(QMainWindow):
         another leaves the stack where it is, and currentChanged only fires
         when the index moves, so the page change is handled here then.
         """
+        self._SettleWayBack(nav)
         index = self._webPanelPages.StackIndex(nav)
         if self.stack.currentIndex() == index:
             self._OnStackPageChanged(index)
         else:
             self.stack.setCurrentIndex(index)
+
+    def _SettleWayBack(self, nav):
+        """On the first choice of a React item that has a Qt version
+        (QT_FALLBACK_SETTINGS; ADR-005 S4aa), read the operator's setting
+        then (S4b decision 11: when the panel is first opened, so a change
+        takes effect on the next start): the Qt panel is the item's own
+        lazy page (its factory returns it), or the item joins the other
+        React items -- showing the shared view's page from here on, its
+        own placeholder never built once the view exists."""
+        key = self._wayBackItems.pop(nav, None)
+        if key is None:
+            return
+        if UsesQtPanel(key):
+            self._qtPanels.add(key)
+            return
+        self._webPanelPages.Add(nav, key)
+        if self._webPanelHost is not None:
+            self._lazyPanels.pop(nav, None)
 
     def _OnStackPageChanged(self, index):
         # Covers both a sidebar choice (_OnNavSelected -> setCurrentIndex,

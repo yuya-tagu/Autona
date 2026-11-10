@@ -1788,6 +1788,13 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <translation>Disables the individual game tracker (takes effect on next restart)</translation>
     </message>
 </context><context>
+    <name>settings.qt_scoreboard_panel</name>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="115" />
+        <source>Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)</source>
+        <translation>Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)</translation>
+    </message>
+</context><context>
     <name>settings.disable_overwrite</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="90" />

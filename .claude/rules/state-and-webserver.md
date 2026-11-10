@@ -475,6 +475,7 @@ paths:
   - React のパネルに外部へのリンクを置くなら `target="_blank"` にし、同じフレームで外へ遷移させない。ビューは新しいウィンドウを
     作らず、クリックからの（`isUserInitiated`）`http` / `https` の要求は既定のブラウザに渡す（`_PanelPage._OpenOutside`。ADR-005 S4r。X の投稿画面）。ほかは開かない。
     例外は Designer: クリックからの、ページと同じオリジンの `/web?view=designer` ちょうど（`_IsDesignerUrl`。パス・クエリ・フラグメント・userinfo まで見る）だけ、既定のブラウザへ渡さずホストが `AutonaDesignerWindow` を開く（ADR-005 S4s。トークンの発行と破棄は Qt 側のままで、ページにトークンを渡さない）。
+    もう 1 つは SCORE ページの「ブラウザ版を開く」: クリックからの、ページと同じオリジンの `/scoreboard` / `/team` ちょうど（`_IsBrowserScoreboardUrl`。クエリ・フラグメント・userinfo が無いこと）だけ、ホストがクリックの時点で URL を組み直して既定のブラウザへ渡す（`BrowserScoreboardUrl`。Qt のボードのボタンと同じ形: Web サーバーに届くアドレスと、LAN 接続でトークンがあるときだけ `?token=`。ポートと LAN 接続は `WebServer.Listening()` = 実際に待ち受けている値で、サーバーが無いときだけ設定。ADR-005 S4aa）。ページはトークンを持たず、ログにはホストだけを出す。
     クリックなしのスクリプトは `JavascriptCanOpenWindows=False` で届かず、Qt が知らないスキームを OS に渡す経路は
     `DisallowUnknownUrlSchemes` で閉じている（シェル操作は増やしていない。`tests/test_web_panel_host.py` が pin）
   - 担保: `_PanelPage.acceptNavigationRequest` が、ページ自身が始めた別オリジンへのメインフレームの遷移（リンク・フォーム・
