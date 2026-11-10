@@ -66,10 +66,11 @@ def _apply(client, n=1):
 
 @pytest.fixture(params=["desktop", "headless"])
 def shell(request, autonaApp, monkeypatch):
-    """Boards 1 and 2 on the host each shell runs them on."""
+    """Boards 1 and 2 on the host each shell runs them on: on the desktop
+    made in core as its launch makes them, with no widget (ADR-005 S4ac-2)."""
     if request.param == "desktop":
-        autonaApp.board(1)
-        autonaApp.board(2)
+        autonaApp.ready(1)
+        autonaApp.ready(2)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -83,8 +84,8 @@ def shell(request, autonaApp, monkeypatch):
 
 @pytest.fixture
 def desktopBoards(autonaApp):
-    autonaApp.board(1)
-    autonaApp.board(2)
+    autonaApp.ready(1)
+    autonaApp.ready(2)
     return autonaApp
 
 
@@ -95,16 +96,11 @@ def launchedBoards(autonaApp):
     board not -- and no widget built. The window builds the shown board's
     next (CreateScoreboard); a test that wants them builds them. The other
     fixtures start from boards core does not have (the harness drops them
-    between tests), which a launch only leaves when it failed. The boards
-    and the score subtree go after the test."""
-    autonaApp.dropAllBoards()
-    assert AutonaActions.instance.MakeBoards(panel=True) is True
-    autonaApp.settle()
+    between tests), which a launch only leaves when it failed. The harness's
+    readyAll() (ADR-005 S4ac-2); the boards go after the test."""
+    autonaApp.readyAll()
     assert autonaApp.manager.scoreboards == {}
-    yield autonaApp
-    autonaApp.dropAllBoards()
-    StateManager.Unset("score")
-    autonaApp.settle()
+    return autonaApp
 
 
 @pytest.fixture
@@ -264,7 +260,7 @@ def test_a_board_not_built_yet_is_built_and_held_by_the_read(autonaApp, client):
 
 
 def test_the_crew_board_is_never_held(autonaApp, client):
-    autonaApp.board(3)
+    autonaApp.ready(3)
     assert _pending(client, 3) == {"held": False, "dirty": False,
                                    "board": _published(client, 3)}
 
@@ -346,6 +342,7 @@ def _held(board):
 
 def _singlesWindow(app):
     """The launch in 1v1: the window builds board 1's widgets only."""
+    app.allowWidgets()
     assert app.manager.CreateScoreboard("singles") is True
     app.settle()
     assert list(app.manager.scoreboards) == [1]
@@ -931,7 +928,7 @@ def test_with_the_teams_swapped_a_slot_is_the_states_team(autonaApp, client,
 ])
 def test_on_a_held_board_a_slot_waits_for_the_apply(autonaApp, client, url,
                                                     body, after):
-    autonaApp.board(2)
+    autonaApp.ready(2)
     _ok(client.patch("/api/v1/scoreboards/2/set", json={"players": 2}))
     for slot, tag in ((1, "A1"), (2, "A2")):
         _ok(client.patch(f"/api/v1/scoreboards/2/teams/1/players/{slot}",
@@ -1067,7 +1064,7 @@ def test_reset_all_leaves_what_the_desktops_button_leaves(autonaApp, client):
 
 
 def test_reset_all_on_a_held_board_waits_for_the_apply(autonaApp, client):
-    autonaApp.board(2)
+    autonaApp.ready(2)
     _filledBoard(client, autonaApp)
     _apply(client, 2)
     autonaApp.settle()

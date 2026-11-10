@@ -381,6 +381,18 @@ def apply_set(board, data):
         SaveRecord(SetFollowService(number).ApplySetPayload(data))
 
 
+def load_player(board, team, data, slot=1):
+    """Load player `data` into slot `slot` of state team `team` on board
+    `board` (1/2; a board widget or its number), without the player DB:
+    what the slot's card writes for SetData(data, dontLoadFromDB=True),
+    which runs core's PlayerService.ApplyData and renders (ADR-005 S3e-3).
+    For a test whose board has no widget (ADR-005 S4ac-2)."""
+    from src.core.PlayerService import PlayerService
+
+    path = f"score.{_boardNumber(board)}.team.{team}.player.{slot}"
+    return PlayerService(path).ApplyData(data, loadFromDB=False)
+
+
 def clear_players(board, no_mains=False):
     """Empty every player of board `board` (1/2; a board widget or its
     number) as the app does: the board host's ClearPlayers -- the field being
@@ -461,6 +473,15 @@ class _AutonaHarness:
         # True while HARNESS_GAME is installed and loaded (loadCharacters);
         # dropAllBoards() uninstalls it.
         self._gameInstalled = False
+        # Per test (autonaApp): whether it made boards with ready() /
+        # readyAll(), and whether it asked for board widgets (board(),
+        # allowWidgets()). A test that did the first and not the second
+        # must end with no board widget (_failOnBoardWidgets); the widgets
+        # such a test dropped on the way are kept here, so a drop before the
+        # end (a later ready(), a fixture's teardown) does not hide them.
+        self._readied = False
+        self._askedForWidgets = False
+        self._unaskedWidgets = set()
 
     # -- state ------------------------------------------------------------
 
@@ -496,7 +517,136 @@ class _AutonaHarness:
                     StateManager.lastSavedState.get("score")),
             }
 
+    # -- boards (core) ----------------------------------------------------
+
+    def ready(self, number=1):
+        """Board `number` (1 = 1v1, 2 = team, 3 = crew) made afresh in core,
+        as the desktop makes it at launch, with no widget built: its launch
+        write, and for boards 1 / 2 the display options, the polling off and
+        the 反映 hold (AutonaActions.EnsureBoard with `panel`; the crew board
+        is never held). The number.
+
+        For a test that needs the board and checks the state, a route or
+        core -- not a widget (ADR-005 S4ac-2). Made afresh for the reason
+        board() builds afresh. Only this board, while the desktop has all
+        three from launch (readyAll()): an operation on a board core does not
+        have builds that board with its widgets (DesktopBoardHost.Prepare),
+        which a test that readied boards may not do (_failOnBoardWidgets).
+        """
+        from src.core.Actions import AutonaActions
+
+        self._readied = True
+        self._loadCountries()
+        self._dropBoard(number)
+        assert AutonaActions.instance.EnsureBoard(number, panel=True), \
+            f"board {number} was not made"
+        self.settle()
+        return number
+
+    def readyAll(self):
+        """Every board made afresh in core as the desktop's launch makes them
+        (AutonaActions.MakeBoards with `panel`, bootstrap_gui(); ADR-005
+        S4ac-1): one save cycle, the `score` subtree dropped first, boards 1
+        / 2 held, the crew board not. No widget built (see ready())."""
+        from src.core.Actions import AutonaActions
+
+        self._readied = True
+        self._loadCountries()
+        self._dropBoards()
+        assert AutonaActions.instance.MakeBoards(panel=True) is True
+        self.settle()
+
+    def _loadCountries(self):
+        """The country data, which the window loads at launch before any
+        board is used (Window.__init__: AutonaCountryHelper.init) and the
+        harness, which builds no window, left to the first player card built
+        (its fallback). With no card, a board readied here loads it the
+        same way, so a player load resolves its country and region as on a
+        board with widgets. Kept loaded: a card built later would load it
+        anyway."""
+        from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+        from src.core.CountryCatalog import CountryCatalog
+        if not CountryCatalog.instance.IsLoaded():
+            AutonaCountryHelper.LoadCountries()
+
+    def _dropBoardInCore(self, number, hadWidget=False):
+        """Core's half of dropping board `number`: what core keeps of it
+        forgotten, its 反映 hold cleared, and its `score.{n}` subtree unset
+        when it was made, held or drawn (`hadWidget`)."""
+        from src.core.Actions import AutonaActions
+        from src.core.SetFollowService import SetFollowService
+
+        # The set the board loaded and what it follows are core's since
+        # ADR-005 S3e-7 (they were the board's, and went with it).
+        SetFollowService.ForgetBoard(number)
+        # So are the characters per player a board with no character slot
+        # gives its next players (ADR-005 S4x: the board's hidden spinbox and
+        # the headless host's memory until then, both of which a new board or
+        # host started from the default).
+        AutonaActions.instance._emptyCharacters.pop(number, None)
+        # And whether the board is made (ADR-005 S4y: AutonaActions.
+        # EnsureBoard, which ready() and a widget build run and which seeds
+        # the board only the first time). Forgotten, so the next one seeds it
+        # afresh. Not ForgetBoard: its release would publish what is pending
+        # (below).
+        with self.state.lock:
+            made = number in AutonaActions.instance._ensuredBoards
+            AutonaActions.instance._ensuredBoards.discard(number)
+
+        # Making a 1v1 / team board with `panel` registers its subtree as
+        # held (the 反映 button; AutonaActions.EnsureBoard since ADR-005 S4y,
+        # the widget's __init__ until then). Its inverse, StateManager.
+        # ReleaseSubtree, would publish what is pending; a test's leftovers
+        # are thrown away instead, so the registration is cleared here
+        # directly -- leaving it behind would make every later write under
+        # score.{n} invisible to a test that never made a board, and would
+        # hand tests/test_state_manager_held.py a pre-registered prefix.
+        #
+        # This has to happen BEFORE the Unset below. While the prefix is still
+        # held, the Unset's changed keys are buffered into heldKeys[prefix] and
+        # then thrown away with it, so the board's removal would reach neither
+        # the delta nor ./out -- leaving stale score/{n}/*.txt behind and a
+        # stale score.{n} in lastSavedState. Held state is read under the lock
+        # by SaveState, so take it here too.
+        #
+        # A prefix can be held with no board to drop: a module that drives
+        # StateManager on its own (tests/test_state_manager_held.py) leaves its
+        # registration and its published score.{n} behind. Clear those as well.
+        # A board made on them would have its seed held back, not published,
+        # since AutonaActions.SeedFreshBoard relies on running before the hold.
+        # A board that was not made, held or drawn keeps what a test wrote
+        # there (a score hotkey with no board writes score.1 on its own).
+        prefix = f"score.{number}"
+        with self.state.lock:
+            leftover = prefix in self.state.heldPrefixes
+            self.state.heldPrefixes.discard(prefix)
+            self.state.heldExempt.pop(prefix, None)
+            self.state.heldKeys.pop(prefix, None)
+            self.state._commitPrefixes.discard(prefix)
+            self.state._heldTouched.discard(prefix)
+            self.state._heldCommitted.discard(prefix)
+        if not (made or leftover or hadWidget):
+            return
+
+        self.state.Unset(prefix)
+
+        self.settle()
+
+    def _dropBoards(self):
+        from src.core.Actions import AutonaActions
+        for number in AutonaActions.BOARDS:
+            self._dropBoard(number)
+
+    def _dropBoard(self, number):
+        # The widgets first (ADR-005 S4ac-3 removes this line with them): the
+        # subtree they draw is unset after they are gone.
+        hadWidget = self._dropBoardWidget(number)
+        self._dropBoardInCore(number, hadWidget)
+
     # -- widgets ----------------------------------------------------------
+    #
+    # Everything in this section is the Qt SCORE's (the board widgets), and
+    # goes with them in ADR-005 S4ac-3.
 
     @property
     def manager(self):
@@ -509,96 +659,64 @@ class _AutonaHarness:
         Rebuilt per call rather than reset, so no test can be handed a board
         carrying another test's inputs -- and so a reset path being broken
         (which is exactly what several of these tests check) cannot silently
-        become the thing that isolates them.
+        become the thing that isolates them. For a test of the widgets; one
+        that only needs the board readies it (ready()).
         """
+        self._askedForWidgets = True
         self._dropBoard(number)
         board = self.manager.EnsureScoreboard(number)
         assert board is not None, f"scoreboard {number} failed to build"
         self.settle()
         return board
 
-    def _dropBoard(self, number):
-        from qtpy.QtCore import QCoreApplication, QEvent
+    def allowWidgets(self):
+        """This test builds board widgets on purpose on the boards it
+        readied -- as the window builds the shown board's
+        (CreateScoreboard) or a format switch the next one's -- and is not
+        failed for them (_failOnBoardWidgets)."""
+        self._askedForWidgets = True
 
-        # The set the board loaded and what it follows are core's since
-        # ADR-005 S3e-7 (they were the board's, and went with it).
-        from src.core.SetFollowService import SetFollowService
-        SetFollowService.ForgetBoard(number)
-        # So are the characters per player a board with no character slot
-        # gives its next players (ADR-005 S4x: the board's hidden spinbox and
-        # the headless host's memory until then, both of which a new board or
-        # host started from the default).
-        from src.core.Actions import AutonaActions
-        AutonaActions.instance._emptyCharacters.pop(number, None)
-        # And whether the board is made (ADR-005 S4y: AutonaActions.
-        # EnsureBoard, which a new widget's build runs and which seeds the
-        # board only the first time). Forgotten, so the next build seeds it
-        # afresh, as when the widget was the board. Unconditionally: a module
-        # can make a board without a widget (the headless seed).
-        with self.state.lock:
-            AutonaActions.instance._ensuredBoards.discard(number)
+    def _dropBoardWidget(self, number):
+        """Destroy board `number`'s widgets, if built; whether they were."""
+        from qtpy.QtCore import QCoreApplication, QEvent
 
         manager = self.manager
         board = manager.scoreboards.pop(number, None)
-        if board is not None:
-            for attribute in ("scoreboard", "teamScoreboard", "crewScoreboard"):
-                if getattr(manager, attribute, None) is board:
-                    setattr(manager, attribute, None)
-            board.setParent(None)
-            board.deleteLater()
-            # ...and actually destroy it. QApplication.processEvents() does NOT
-            # run deferred deletions: Qt only reaps a DeferredDelete event whose
-            # loop level is below the one being drained, and pytest never calls
-            # exec(), so the level stays 0 and every deleteLater() here would sit
-            # in the queue for the whole session. The C++ widget would stay alive
-            # with its lambda connections to the process-wide singletons
-            # (AutonaGameAssetManager.signals.onLoad, StateManagerBridge, ...)
-            # intact -- a lambda holds no weak reference to its receiver, so
-            # PySide6 cannot auto-disconnect it. Every dropped board would then
-            # keep answering signals and rewriting score.{n}, including after the
-            # CWD was restored, i.e. into the developer's real ./out.
-            # sendPostedEvents() with an explicit DeferredDelete type is the one
-            # call that reaps it at loop level 0; it is aimed at this board so
-            # nothing else in the session gets torn down as a side effect.
-            QCoreApplication.sendPostedEvents(board, QEvent.Type.DeferredDelete)
+        if board is None:
+            return False
+        if self._readied and not self._askedForWidgets:
+            self._unaskedWidgets.add(number)
+        for attribute in ("scoreboard", "teamScoreboard", "crewScoreboard"):
+            if getattr(manager, attribute, None) is board:
+                setattr(manager, attribute, None)
+        board.setParent(None)
+        board.deleteLater()
+        # ...and actually destroy it. QApplication.processEvents() does NOT
+        # run deferred deletions: Qt only reaps a DeferredDelete event whose
+        # loop level is below the one being drained, and pytest never calls
+        # exec(), so the level stays 0 and every deleteLater() here would sit
+        # in the queue for the whole session. The C++ widget would stay alive
+        # with its lambda connections to the process-wide singletons
+        # (AutonaGameAssetManager.signals.onLoad, StateManagerBridge, ...)
+        # intact -- a lambda holds no weak reference to its receiver, so
+        # PySide6 cannot auto-disconnect it. Every dropped board would then
+        # keep answering signals and rewriting score.{n}, including after the
+        # CWD was restored, i.e. into the developer's real ./out.
+        # sendPostedEvents() with an explicit DeferredDelete type is the one
+        # call that reaps it at loop level 0; it is aimed at this board so
+        # nothing else in the session gets torn down as a side effect.
+        QCoreApplication.sendPostedEvents(board, QEvent.Type.DeferredDelete)
+        return True
 
-        # Building a 1v1 / team board registers its subtree as held (the 反映
-        # button; AutonaActions.EnsureBoard since ADR-005 S4y, the widget's
-        # __init__ until then). Its inverse, StateManager.ReleaseSubtree, would
-        # publish what is pending; a test's leftovers are thrown away instead, so
-        # the registration is cleared here directly -- leaving it behind would make every later
-        # write under score.{n} invisible to a test that never built a board,
-        # and would hand tests/test_state_manager_held.py a pre-registered
-        # prefix.
-        #
-        # This has to happen BEFORE the Unset below. While the prefix is still
-        # held, the Unset's changed keys are buffered into heldKeys[prefix] and
-        # then thrown away with it, so the board's removal would reach neither
-        # the delta nor ./out -- leaving stale score/{n}/*.txt behind and a
-        # stale score.{n} in lastSavedState. Held state is read under the lock
-        # by SaveState, so take it here too.
-        #
-        # A prefix can be held with no board to drop: a module that drives
-        # StateManager on its own (tests/test_state_manager_held.py) leaves its
-        # registration and its published score.{n} behind. Clear those as well.
-        # A board built on them would have its seed held back, not published,
-        # since AutonaActions.SeedFreshBoard relies on running before the hold.
-        # An unbuilt board that nothing holds keeps its placeholder.
-        prefix = f"score.{number}"
-        with self.state.lock:
-            leftover = prefix in self.state.heldPrefixes
-            self.state.heldPrefixes.discard(prefix)
-            self.state.heldExempt.pop(prefix, None)
-            self.state.heldKeys.pop(prefix, None)
-            self.state._commitPrefixes.discard(prefix)
-            self.state._heldTouched.discard(prefix)
-            self.state._heldCommitted.discard(prefix)
-        if board is None and not leftover:
-            return
-
-        self.state.Unset(prefix)
-
-        self.settle()
+    def _failOnBoardWidgets(self):
+        """A test that made its boards in core (ready() / readyAll()) and
+        asked for no widget must end with none built: the operations it
+        drives may not build one either (DesktopBoardHost.Prepare does, for
+        a board core does not have). The boards' numbers that have or had
+        widgets, or an empty list."""
+        if not self._readied or self._askedForWidgets:
+            return []
+        return sorted(set(self.manager.scoreboards) | self._unaskedWidgets)
 
     def loadCharacters(self, names=("Mario", "Luigi", "Peach"), skins=3):
         """Install and load a small synthetic game, HARNESS_GAME.
@@ -694,8 +812,9 @@ class _AutonaHarness:
         self._gameInstalled = False
 
     def dropAllBoards(self):
-        for number in self.manager.BOARD_NUMBERS:
-            self._dropBoard(number)
+        """Every board dropped (their widgets and what core keeps of them),
+        and HARNESS_GAME uninstalled."""
+        self._dropBoards()
         self._restoreAssets()
 
     # -- web layer --------------------------------------------------------
@@ -836,8 +955,9 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # subtree -- what each test's teardown leaves (dropAllBoards), and
         # what the bootstrap left before S4ac-1. Left in place, the launch's
         # boards would meet only whichever test a session happens to run
-        # first. A test makes the boards it needs (board(n) builds a board's
-        # widgets, which makes the board afresh; S4ac-2 revisits that).
+        # first. A test makes the boards it needs: in core (ready(n), or all
+        # three as the launch does, readyAll(); ADR-005 S4ac-2), or with
+        # their widgets for a test of those (board(n)).
         harness.dropAllBoards()
         from src.core.StateManager import StateManager
         StateManager.Unset("score")
@@ -885,12 +1005,19 @@ def autonaApp(_autonaRuntime):
     - the boards, because a live scoreboard stays connected to
       StateManagerBridge and would keep reacting to writes made by test
       modules that never asked for a widget. With them go core's memories
-      of each board (_dropBoard: the set it loaded, the characters per
-      player of an empty roster) and the tournament's names the match bar
-      offers (MatchNameCandidates, ADR-005 S4x: they were the boards' until
-      then, and went with them), so no test inherits another's.
+      of each board (_dropBoardInCore: whether it is made, its hold, its
+      subtree, the set it loaded, the characters per player of an empty
+      roster) and the tournament's names the match bar offers
+      (MatchNameCandidates, ADR-005 S4x: they were the boards' until then,
+      and went with them), so no test inherits another's.
+
+    A test that made its boards in core (ready() / readyAll()) and asked for
+    no widget fails here if one was built all the same (ADR-005 S4ac-2).
     """
     os.chdir(_autonaRuntime.dir)
+    _autonaRuntime._readied = False
+    _autonaRuntime._askedForWidgets = False
+    _autonaRuntime._unaskedWidgets = set()
     try:
         yield _autonaRuntime
     finally:
@@ -902,3 +1029,13 @@ def autonaApp(_autonaRuntime):
             MatchNameCandidates.instance.FollowPhases([])
         _autonaRuntime.settle()
         os.chdir(_ORIGINAL_CWD)
+    # The Qt SCORE's (ADR-005 S4ac-3 removes it with the widgets). After the
+    # clean-up, so nothing it raises can skip that: the widgets
+    # dropAllBoards() destroyed are still counted (_unaskedWidgets).
+    widgets = _autonaRuntime._failOnBoardWidgets()
+    if widgets:
+        pytest.fail(
+            f"the test made its boards in core (ready / readyAll) and asked "
+            f"for no widget, but board widgets {widgets} were built (a board "
+            "operation on a board core did not have: DesktopBoardHost."
+            "Prepare). Ready that board too, or readyAll().", pytrace=False)

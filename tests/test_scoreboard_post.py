@@ -177,11 +177,11 @@ def bare(autonaApp, monkeypatch, world):
 
 @pytest.fixture(params=["desktop", "headless"])
 def shell(request, autonaApp, monkeypatch, world):
-    """Boards 1 and 2 on the host each shell runs them on: built (held) on
-    the desktop, seeded headless."""
+    """Boards 1 and 2 on the host each shell runs them on: made (held, no
+    widget; ADR-005 S4ac-2) on the desktop, seeded headless."""
     if request.param == "desktop":
-        autonaApp.board(1)
-        autonaApp.board(2)
+        autonaApp.ready(1)
+        autonaApp.ready(2)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -321,7 +321,7 @@ def test_the_route_reads_the_values_not_published_yet(
         autonaApp, client, world):
     """On the desktop a board's edits wait behind 反映: the post has them,
     as the button had -- what /state does not answer (why it is guarded)."""
-    autonaApp.board(1)
+    autonaApp.ready(1)
     _fill(autonaApp, 1)
     AutonaActions.instance.ApplyChanges(1)
     autonaApp.settle()

@@ -77,9 +77,10 @@ def _board(app):
 
 @pytest.fixture(params=["desktop", "headless"])
 def crewShell(request, autonaApp, monkeypatch):
-    """The crew board on the host each shell runs it on."""
+    """The crew board on the host each shell runs it on: on the desktop
+    made in core as its launch makes it, with no widget (ADR-005 S4ac-2)."""
     if request.param == "desktop":
-        autonaApp.board(BOARD)
+        autonaApp.ready(BOARD)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -351,7 +352,7 @@ def test_a_colour_is_kept_as_the_board_keeps_it(autonaApp, client, crewShell):
 
 def test_boards_1_and_2_keep_their_colour_as_sent(autonaApp, client):
     # Not this step's to change. What is the crew's stays the crew's.
-    autonaApp.board(1)
+    autonaApp.ready(1)
     _ok(client.post("/api/v1/scoreboards/1/teams/1/color",
                     json={"color": "#ABCDEF"}))
     autonaApp.settle()
@@ -708,7 +709,7 @@ def test_boards_1_and_2_still_read_only_what_they_know_of_a_team_name(
         autonaApp, client):
     # The strict reading is the crew board's; boards 1/2 keep theirs, which
     # does not look at what else the object holds.
-    autonaApp.board(2)
+    autonaApp.ready(2)
     _ok(client.patch("/api/v1/scoreboards/2/set", json={
         "teamName": {"team": 1, "value": "Alpha", "extra": 1}}))
     autonaApp.settle()
@@ -836,6 +837,9 @@ def test_a_marker_a_lowered_count_left_behind_can_be_taken_off(
     """Lowering the count leaves the marker where it is, as Qt does, on a
     row no longer shown: `active: false` takes it off there, and
     `active: true` does not put it back."""
+    if crewShell == "desktop":
+        # Its widgets are checked below (they go in ADR-005 S4ac-3).
+        autonaApp.board(BOARD)
     for route in (("patch", f"{URL}/set", {"players": 5}),
                   ("patch", _member(1, 5), {"active": True}),
                   ("patch", f"{URL}/set", {"players": 3})):
@@ -927,7 +931,7 @@ def test_a_fresh_board_really_has_nothing_to_reset(noBoard, client):
     only the fields the board has (AutonaActions.ClearMatchInfo), and no
     seed writes a crew board's pool; it wrote one (pool = "") until the
     S4ac-1 review."""
-    noBoard.board(BOARD)
+    noBoard.ready(BOARD)
     fresh = json.loads(encode(noBoard.get("score.3")))
     assert "pool" not in fresh
     revision = StateManager.revision
@@ -1150,7 +1154,7 @@ def test_the_swap_flag_is_what_the_board_reads(autonaApp, client):
 
 def test_the_swap_flag_is_one_more_key_of_the_program_state(
         autonaApp, client):
-    autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
     path = autonaApp.dir / "out" / "program_state.json"
     assert "teamsSwapped" not in json.loads(
@@ -1602,7 +1606,7 @@ def test_the_api_window_lists_the_routes_and_each_goes_where_it_says(webApp):
 def test_the_api_window_s_examples_are_accepted(autonaApp, client):
     from src.AutonaApiInfoWindow import _ENDPOINTS, _PATH_DEFAULTS
 
-    autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     # The crew board's own rows (its X post is every board's since ADR-005
     # S4x: "/scoreboards/{n}/post", read on board 1 by the walk above).
     examples = [entry for entry in _ENDPOINTS

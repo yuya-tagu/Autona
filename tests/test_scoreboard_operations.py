@@ -10,7 +10,10 @@ had a test.
 Nothing is stubbed: `autonaApp.board(n)` is the production
 AutonaScoreboardWidget / AutonaCrewBattleWidget, and `autonaApp.web()`
 is the web operations module the HTTP routes delegate to
-(src/AutonaWebOperations.py).
+(src/AutonaWebOperations.py). A test that drives no widget and reads no
+widget makes its board in core instead (`autonaApp.ready(n)`, as the
+desktop makes it at launch; ADR-005 S4ac-2), with what a widget's button
+runs called directly where it only sets the scene.
 
 The assertions read StateManager rather than the widgets, because
 StateManager is what OBS overlays and the Web UI actually consume -- a
@@ -28,7 +31,8 @@ from qtpy.QtWidgets import (
 from shiboken6 import Shiboken
 
 from src.core.SettingsManager import SettingsManager
-from tests.conftest import apply_set, clear_players, tournamentLoaded
+from tests.conftest import (apply_set, clear_players, load_player,
+                            tournamentLoaded)
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.fixtures.write_recording import WriteRecorder
 
@@ -50,7 +54,12 @@ def _score(app, team, board=1):
 
 
 def _setPlayerName(board, team, name):
-    """Seed a player tag the way a loaded set does."""
+    """Seed a player tag the way a loaded set does: through the slot's card
+    on a board's widgets, or what the card runs (load_player) on a board
+    number (a board readied with no widget, ADR-005 S4ac-2)."""
+    if isinstance(board, int):
+        load_player(board, team, {"gamerTag": name})
+        return
     widgets = board.team1playerWidgets if team == 1 else board.team2playerWidgets
     widgets[0].SetData({"gamerTag": name}, dontLoadFromDB=True)
 
@@ -349,7 +358,7 @@ def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
 
     def write():
         AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
@@ -641,7 +650,7 @@ def test_building_a_board_turns_the_polling_off(autonaApp, number, turnsOff):
         return realSet(key, value)
 
     with patch.object(SettingsManager, "Set", side_effect=spy):
-        autonaApp.board(number)
+        autonaApp.ready(number)
 
     assert ("general.disable_autoupdate" in written) is turnsOff
 
@@ -900,10 +909,10 @@ def test_the_swap_hotkey_swaps_the_active_board_only(autonaApp):
     from src.AutonaHotkeys import AutonaHotkeys
     from src.core.Actions import AutonaActions
 
-    one = autonaApp.board(1)
-    autonaApp.board(2)
-    _setPlayerName(one, 1, "LEFT")
-    _setPlayerName(one, 2, "RIGHT")
+    autonaApp.ready(1)
+    autonaApp.ready(2)
+    _setPlayerName(1, 1, "LEFT")
+    _setPlayerName(1, 2, "RIGHT")
     autonaApp.settle()
     assert AutonaActions.instance.ActiveBoard() == 1
 
@@ -951,7 +960,7 @@ def test_the_swap_hotkey_asks_the_board_host_not_the_widget(
     from src.AutonaHotkeys import AutonaHotkeys
     from src.core.Actions import AutonaActions
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
     host = WebOps.boardHost
     calls = []
     monkeypatch.setattr(host, "CommitEdit", lambda n: calls.append(n))
@@ -980,8 +989,8 @@ def test_the_load_set_hotkey_opens_the_active_boards_window_only(
     from src.AutonaShellOperations import AutonaShellOperations
     from src.core.Actions import AutonaActions
 
-    autonaApp.board(1)
-    autonaApp.board(2)
+    autonaApp.ready(1)
+    autonaApp.ready(2)
     assert AutonaActions.instance.ActiveBoard() == 1
     opened = []
     monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
@@ -1012,8 +1021,8 @@ def test_the_load_set_hotkey_opens_the_score_pages_dialog_or_the_qt_window(
     from src.core.Actions import AutonaActions
 
     shell = AutonaShellOperations.instance
-    autonaApp.board(1)
-    autonaApp.board(2)
+    autonaApp.ready(1)
+    autonaApp.ready(2)
     opened = []
     for number in (1, 2):
         window = shell.SetWindow(number)
@@ -1056,7 +1065,7 @@ def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
     from src.AutonaShellOperations import AutonaShellOperations
 
     shell = AutonaShellOperations.instance
-    autonaApp.board(1)
+    autonaApp.ready(1)
     opened = []
     window = shell.SetWindow(1)
     monkeypatch.setattr(window, "PrepareForDisplay",
@@ -1100,7 +1109,7 @@ def test_the_load_set_hotkey_does_nothing_without_a_set_window(
 
     autonaApp.dropAllBoards()
     if active == 3:
-        autonaApp.board(1)
+        autonaApp.ready(1)
     opened = []
     monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
                         lambda n: opened.append(n))
@@ -1162,9 +1171,9 @@ def test_each_board_has_its_own_set_and_station_window(
 def test_a_web_swap_is_done_when_it_answers(autonaApp):
     """The legacy route used to queue a signal into the board and answer
     "OK" before anything had moved; get_swap read the board's attribute."""
-    board = autonaApp.board(1)
-    _setPlayerName(board, 1, "LEFT")
-    _setPlayerName(board, 2, "RIGHT")
+    autonaApp.ready(1)
+    _setPlayerName(1, 1, "LEFT")
+    _setPlayerName(1, 2, "RIGHT")
     autonaApp.settle()
     actions = autonaApp.web()
 
@@ -1256,11 +1265,14 @@ def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
 
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_reset_match_clears_score_and_best_of(autonaApp, boardNumber):
-    board = autonaApp.board(boardNumber)
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(boardNumber)
     actions = autonaApp.web()
 
-    board.CommandScoreChange(0, 2)
-    board.bestOfSpin.setValue(5)
+    # What the board's +1 button and BEST OF spinbox run.
+    AutonaActions.instance.AdjustScore(boardNumber, 1, 2)
+    AutonaActions.instance.SetBestOf(boardNumber, 5)
     autonaApp.settle()
 
     actions.reset_match(boardNumber)
@@ -1275,13 +1287,16 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
     # "Did not raise" would also pass on a reset_match that did nothing: for
     # crew, the reset means every member back to full stocks and nobody
     # active (CrewBattleService.ResetStocks since ADR-005 S3e-2).
-    from src.AutonaCrewBattleWidget import DEFAULT_STOCK
+    from src.core.CrewBattleService import CrewBattleService
 
-    board = autonaApp.board(3)
+    DEFAULT_STOCK = CrewBattleService.DEFAULT_STOCK
+    autonaApp.ready(3)
+    # What the board's stock spinboxes and active buttons run (its `crew`).
+    crew = CrewBattleService(3)
 
-    board.crew.AdjustMemberStock(1, 1, -2)
-    board.crew.AdjustMemberStock(2, 2, -1)
-    board.crew.SelectActiveMember(1, 1)
+    crew.AdjustMemberStock(1, 1, -2)
+    crew.AdjustMemberStock(2, 2, -1)
+    crew.SelectActiveMember(1, 1)
     autonaApp.settle()
     assert autonaApp.get("score.3.team.1.player.1.stock") == DEFAULT_STOCK - 2
     assert autonaApp.get("score.3.team.2.player.2.stock") == DEFAULT_STOCK - 1
@@ -1291,7 +1306,8 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
     autonaApp.settle()
 
     for team in (1, 2):
-        for member in range(1, len(board.memberRows[team - 1]) + 1):
+        # Every member row the board has (MAX_MEMBERS, the hidden ones too).
+        for member in range(1, CrewBattleService.MAX_MEMBERS + 1):
             assert autonaApp.get(
                 f"score.3.team.{team}.player.{member}.stock") == DEFAULT_STOCK
         assert autonaApp.get(f"score.3.team.{team}.activeMember") == "0"
@@ -1306,9 +1322,9 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
     precondition would silently disappear and it would keep passing on a
     never-written key. Pinned separately instead.
     """
-    board = autonaApp.board(3)
+    autonaApp.ready(3)
 
-    apply_set(board, {"bestOf": 5})
+    apply_set(3, {"bestOf": 5})
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 5
@@ -1317,7 +1333,7 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
 def test_crew_board_seeds_best_of_at_construction(autonaApp):
     # Overlays read score.3.best_of unconditionally, so the key must exist
     # from the start rather than only after the first set data.
-    autonaApp.board(3)
+    autonaApp.ready(3)
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 0
@@ -1326,9 +1342,9 @@ def test_crew_board_seeds_best_of_at_construction(autonaApp):
 def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
     # BUG-4 regression: reset_match used to leave score.3.best_of at the value
     # ChangeSetData wrote, so overlays kept rendering the old BO.
-    board = autonaApp.board(3)
+    autonaApp.ready(3)
 
-    apply_set(board, {"bestOf": 5})
+    apply_set(3, {"bestOf": 5})
     autonaApp.settle()
 
     autonaApp.web().reset_match(3)
@@ -1338,9 +1354,9 @@ def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
 
 
 def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
-    board = autonaApp.board(3)
+    autonaApp.ready(3)
 
-    apply_set(board, {"bestOf": 5})
+    apply_set(3, {"bestOf": 5})
     autonaApp.settle()
 
     autonaApp.web().clear_all(3)
@@ -1351,12 +1367,15 @@ def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
 
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_clear_all_resets_scores_best_of_and_players(autonaApp, boardNumber):
-    board = autonaApp.board(boardNumber)
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(boardNumber)
     actions = autonaApp.web()
 
-    board.CommandScoreChange(0, 2)
-    board.bestOfSpin.setValue(5)
-    _setPlayerName(board, 1, "GONE")
+    # What the board's +1 button and BEST OF spinbox run.
+    AutonaActions.instance.AdjustScore(boardNumber, 1, 2)
+    AutonaActions.instance.SetBestOf(boardNumber, 5)
+    _setPlayerName(boardNumber, 1, "GONE")
     autonaApp.settle()
 
     actions.clear_all(boardNumber)
@@ -1369,11 +1388,13 @@ def test_clear_all_resets_scores_best_of_and_players(autonaApp, boardNumber):
 
 
 def test_reset_scores_action_leaves_players_alone(autonaApp):
-    board = autonaApp.board(1)
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
     actions = autonaApp.web()
 
-    board.CommandScoreChange(0, 2)
-    _setPlayerName(board, 1, "KEEP ME")
+    AutonaActions.instance.AdjustScore(1, 1, 2)   # the board's +1 button
+    _setPlayerName(1, 1, "KEEP ME")
     autonaApp.settle()
 
     actions.reset_scores(1)
@@ -1384,7 +1405,7 @@ def test_reset_scores_action_leaves_players_alone(autonaApp):
 
 
 def test_score_up_action_matches_the_widget(autonaApp):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     actions = autonaApp.web()
 
     actions.team_scoreup(1, 1)
@@ -1402,7 +1423,7 @@ def test_score_up_action_matches_the_widget(autonaApp):
 
 
 def test_team_color_action_reaches_the_state(autonaApp):
-    autonaApp.board(1)
+    autonaApp.ready(1)
 
     autonaApp.web().team_color(1, 2, "#123456")
     autonaApp.settle()
@@ -1588,7 +1609,7 @@ def test_a_remote_display_option_reaches_a_built_board(autonaApp):
 
 
 def test_an_unknown_display_option_is_still_rejected(autonaApp):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     result = autonaApp.web().set_display_option(
         {"option": "show_nothing", "value": True})
 
@@ -1984,7 +2005,7 @@ def test_building_a_board_republishes_every_display_option(autonaApp):
     stored = StateManager.Get("display_options")
     try:
         StateManager.Unset("display_options")
-        autonaApp.board(1)
+        autonaApp.ready(1)
         autonaApp.settle()
 
         assert set(StateManager.Get("display_options") or {}) == set(
@@ -2255,8 +2276,8 @@ _SET = {
 
 
 def test_a_loaded_set_reaches_the_state(autonaApp):
-    board = autonaApp.board(1)
-    apply_set(board, dict(_SET))
+    autonaApp.ready(1)
+    apply_set(1, dict(_SET))
     autonaApp.settle()
 
     assert autonaApp.get("score.1.match") == "Winners Final"
@@ -2307,13 +2328,13 @@ def test_reloading_the_same_set_publishes_nothing(autonaApp):
     """The second load is all no-ops, so it must not mark the board dirty."""
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(1)
-    apply_set(board, dict(_SET))
+    autonaApp.ready(1)
+    apply_set(1, dict(_SET))
     StateManager.CommitHeld("score.1")
     autonaApp.settle()
     assert StateManager.HasPendingChanges("score.1") is False
 
-    apply_set(board, dict(_SET))
+    apply_set(1, dict(_SET))
     autonaApp.settle()
 
     assert StateManager.HasPendingChanges("score.1") is False, (
@@ -2322,14 +2343,16 @@ def test_reloading_the_same_set_publishes_nothing(autonaApp):
 
 
 def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
-    board = autonaApp.board(2)
-    board.SwapTeams()
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(2)
+    AutonaActions.instance.SwapTeams(2)   # what the board's SWAP runs
     autonaApp.settle()
     assert autonaApp.get("score.2.teamsSwapped") is True
 
     # Two players a side: the team-name half of a set only applies to a
     # multi-player entrant, as it always has.
-    apply_set(board, dict(
+    apply_set(2, dict(
         _SET,
         entrants=[[{"gamerTag": "A"}, {"gamerTag": "B"}],
                   [{"gamerTag": "C"}, {"gamerTag": "D"}]],
@@ -2362,36 +2385,47 @@ def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
 
 
 def test_following_a_set_records_which_set_it_is(autonaApp, tournament):
-    board = autonaApp.board(1)
-    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
+    from src.core.SetFollowService import SetFollowService
+    from src.core.SetLoadService import SetLoadService
+
+    # The board's `setFollow` / `setLoad` are these, by board number.
+    autonaApp.ready(1)
+    SetFollowService(1).LoadSet({"id": "999", "auto_update": "set"})
     autonaApp.settle()
 
     assert autonaApp.get("score.1.set_id") == "999"
     assert autonaApp.get("score.1.auto_update") == "set"
-    assert board.setLoad.lastSetSelected == "999"
+    assert SetLoadService(1).lastSetSelected == "999"
 
 
 def test_cancelling_the_follow_forgets_the_set(autonaApp, tournament):
-    board = autonaApp.board(1)
-    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
+    from src.core.SetFollowService import SetFollowService
+    from src.core.SetLoadService import SetLoadService
+
+    autonaApp.ready(1)
+    SetFollowService(1).LoadSet({"id": "999", "auto_update": "set"})
     autonaApp.settle()
 
-    board.StopAutonaUpdate(clear_variables=True)
+    # What the board's cancel button runs (StopAutonaUpdate).
+    SetFollowService(1).StopFollowing(forget=True)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.set_id") is None
     assert autonaApp.get("score.1.auto_update") is None
-    assert board.setLoad.lastSetSelected is None
+    assert SetLoadService(1).lastSetSelected is None
 
 
 def test_a_stale_async_refresh_is_dropped(autonaApp):
     """An in-flight fetch answering after the operator moved on."""
-    board = autonaApp.board(1)
-    board.setLoad.lastSetSelected = "999"
-    apply_set(board, {"round_name": "Winners Final"})
+    from src.core.SetFollowService import SetFollowService
+    from src.core.SetLoadService import SetLoadService
+
+    autonaApp.ready(1)
+    SetLoadService(1).lastSetSelected = "999"
+    apply_set(1, {"round_name": "Winners Final"})
     autonaApp.settle()
 
-    board.setFollow.UpdateSetData({"id": "111",
+    SetFollowService(1).UpdateSetData({"id": "111",
                                    "round_name": "Losers Round 1",
                                    "entrants": []})
     autonaApp.settle()
@@ -2504,11 +2538,13 @@ def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
 
 
 def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
-    board = autonaApp.board(1)
-    board.SwapTeams()
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
+    AutonaActions.instance.SwapTeams(1)   # what the board's SWAP runs
     autonaApp.settle()
 
-    apply_set(board, {
+    apply_set(1, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": True, "team2losers": False, "overwrite": True,
     })
@@ -2816,13 +2852,16 @@ def test_a_clear_keeps_the_city(autonaApp):
     """Known gap, recorded rather than fixed (ADR-005 S2 decision 5): no
     player card's Clear() ever emptied the city, so the clear does not
     either. A player loaded from start.gg leaves theirs behind."""
-    board = autonaApp.board(1)
-    card = board.team1playerWidgets[0]
-    card.player.SetCity("Shibuya")
-    card.player.SetText("name", "SOMEONE")
+    from src.core.PlayerService import PlayerService
+
+    autonaApp.ready(1)
+    # The slot's card's `player`.
+    player = PlayerService("score.1.team.1.player.1")
+    player.SetCity("Shibuya")
+    player.SetText("name", "SOMEONE")
     autonaApp.settle()
 
-    clear_players(board)
+    clear_players(1)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.player.1.name") == ""

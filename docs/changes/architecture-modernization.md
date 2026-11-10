@@ -7627,3 +7627,73 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   5. ボード 1 に未反映を残したまま 1v1 → チームに切り替えても、ボード 1 の未反映とボード 2 の値が残る
   6. 自動更新をオンにして（`PATCH /api/v1/settings/general`）形式を切り替えても、オンのまま
   7. 対応の後、起動直後のクルーボードへの `:reset-match`（`confirm: true`）は何も書かない（revision 不変・`pool` を足さない）
+
+#### S4ac-2 テストのハーネスをウィジェットから外す（2026-11-11）
+
+S4ac-3（Qt の SCORE とボードのウィジェットの削除）の前に、ボードが要るだけでウィジェットを操作も検査もしないテストを、デスクトップの起動と同じ core のボード（S4ac-1）で回すようにした。S4ac-3 で消えるのが「ウィジェットのテスト」と「ハーネスのウィジェットの半分」だけになる。`src/` は変えていない。
+
+- **完了内容**
+  - ハーネス `autonaApp`（`tests/conftest.py`）
+    - `ready(n)`: ボード n を core で作り直す（`AutonaActions.EnsureBoard(n, panel=True)`: 起動時の書き込み、ボード 1 / 2 は表示オプション・ポーリングの停止・held。ウィジェットは建てない）。`readyAll()`: 3 つとも起動と同じ形で作り直す（`MakeBoards(panel=True)`、1 保存サイクル）。`test_api_v1_score.py` の `launchedBoards`（S4ac-1 の検収レビュー C）は `readyAll()` を呼ぶだけになり、`test_api_v1_crew.py` の `unbuiltBoards` はそれと `noBoard` を選ぶまま
+    - ボードの破棄を core の半分 `_dropBoardInCore`（`SetFollowService.ForgetBoard`・`_emptyCharacters`・`_ensuredBoards`・held の登録の解除 → `Unset`）とウィジェットの半分 `_dropBoardWidget`（`sendPostedEvents(DeferredDelete)` までの破棄）に分けた。`_dropBoard` は「ウィジェット → core」の順で両方を呼ぶ（Qt の破棄の順は変えていない）。全ボードの破棄は `AutonaActions.BOARDS` を回す。ウィジェットの半分（`manager`・`board()`・`allowWidgets()`・`_dropBoardWidget`・`_failOnBoardWidgets`）は 1 つの節に寄せ、S4ac-3 で節ごとと `_dropBoard` の 1 行を消せばよい形にした
+    - `ready()` / `readyAll()` は国のデータを読む（`_loadCountries`）
+    - teardown の検査（`_failOnBoardWidgets`）: `ready()` / `readyAll()` でボードを作り、`board()` も `allowWidgets()` も呼んでいないテストが、ボードのウィジェットを 1 つでも建てたら（途中で破棄したものも含む）テストを落とす。core に無いボードへの操作は `DesktopBoardHost.Prepare` でウィジェットを建てるので、移したテストがその経路を踏んでいないことをこれで確かめる
+    - `allowWidgets()`: ready したボードに、窓の構築（`CreateScoreboard`）や形式の切り替えのようにわざとウィジェットを建てるテストが呼ぶ
+    - モジュール関数 `load_player(board, team, data, slot=1)`: カードの `SetData` と同じ core の読込（`PlayerService(path).ApplyData(data, loadFromDB=False)`）
+  - テストの移行（「移した」は HEAD ではボードのウィジェットを建て、今は建てないテスト関数の数。パラメータ化の展開は数えない）
+
+    | ファイル | 移した | 残した |
+    |---|---|---|
+    | `test_api_v1_score.py` | 26 | 11 |
+    | `test_api_v1_crew.py` | 30 | 11 |
+    | `test_api_v1.py` | 24 | 1 |
+    | `test_api_v1_players.py` | 18 | 0 |
+    | `test_api_v1_score_fields.py`（`shell` のデスクトップ側。ファイルは無変更） | 19 | 3 |
+    | `test_web_operations.py` | 15 | 6 |
+    | `test_scoreboard_operations.py` | 29 | 76 |
+    | `test_crew_board.py` | 17 | 28 |
+    | `test_set_follow.py` | 21 | 3 |
+    | `test_stats_util.py` | 7 | 1 |
+    | `test_roster_flow.py` | 3 | 16 |
+    | `test_scoreboard_post.py`（`shell` のデスクトップ側を含む） | 2 | 5 |
+    | `test_harness_isolation.py` | 1 | 2（ほかに 2 本を core / ウィジェットの両方でパラメータ化、2 本を新設） |
+    | `test_headless_seed.py` / `test_score_typing.py` / `test_save_block_symmetry.py` | 1 / 1 / 1 | 2 / 2 / 5 |
+    | 計 | 215 | 172 |
+
+- **判断と理由**
+  1. 移す基準: (A) ウィジェットを建てているだけで、操作も検査も state / v1 / core → 移す。(B) ウィジェットのメソッドを場面づくりにだけ使い、それが呼ぶ core が 1 対 1 で決まっている → その core を直接呼んで移す（カードの `SetData` → `load_player`、`CommandScoreChange(t, d)` → `AdjustScore(n, t + 1, d)`、best_of のスピンボックス → `SetBestOf`、ウィジェットの `SwapTeams` → `AutonaActions.SwapTeams`、`board.setFollow` / `setLoad` → `SetFollowService(n)` / `SetLoadService(n)`、取り消しボタン（`StopAutonaUpdate` / `timerCancelBt`）→ `StopFollowing(forget=...)`、`board.crew` → `CrewBattleService(3)`、クルーの名前欄 → `SetMemberName`、`card.player` → `PlayerService(path)`）。(C) ウィジェットの操作が試験の対象・ウィジェットを読む・描画が書き戻さないこと（エコーループ）の検査・ウィジェットのあるボードで録る golden → 移さない。検査（assert / `pytest.raises`）の数と期待値は変えていない（検収レビューが HEAD と関数ごとに AST で突き合わせた）。読む先だけを替えたもの: `board.setLoad.lastSetSelected` → `SetLoadService(n).lastSetSelected`、`board.crew` → `CrewBattleService(3)`、クルーの行のループの上限 `len(board.memberRows[...])` → `CrewBattleService.MAX_MEMBERS`、`DEFAULT_STOCK` の import 元（どれも同じ値）
+  2. 国のデータ: 本番は起動時に読む（`Window.__init__` の `AutonaCountryHelper.init`、ヘッドレスは `CountryCatalog.Load`）。窓を建てないハーネスは最初のカードの構築のフォールバックに頼っていて、カードの無いボードでは DB 保存の Web 操作が `KeyError: 'country_code'` で落ちた。`ready()` で同じ関数を呼んで読む（読んだら残す。後で建てたカードも同じものを読む）
+  3. core の破棄が `score.{n}` を消す条件に「core で作ったボード（`_ensuredBoards`）」を足した。それまでは「ウィジェットがあった / held の登録が残っていた」だけで、held でもウィジェットも無いクルーボード（`ready(3)`）が前のテストの `score.3` を持ち越した。作っていない・held でもないボードには、テストが書いたもの（ボード無しのスコアのホットキーなど）を残す（それまでどおり）
+  4. teardown の検査は `manager.scoreboards` だけを見ると、フィクスチャの後始末や後の `ready()` が先にウィジェットを破棄して隠す。`_dropBoardWidget` が破棄のときに記録する（`_unaskedWidgets`）。これを足した後の並列の全量で、ボード 2 を core から消してから `:follow` / `Prepare` がウィジェットを建てることを試す `test_set_follow.py` の 2 本（`test_reading_builds_no_board_and_a_follow_builds_it`・`test_a_built_board_is_there_for_the_host_only_once_it_is`）が teardown で落ちて見つかり、`allowWidgets()` を足して残した側に数えた
+  5. フィクスチャを ready にした: `test_api_v1_score.py` の `shell`（デスクトップ側）・`desktopBoards`、`test_api_v1_crew.py` の `crewShell`、`test_scoreboard_post.py` の `shell`、`test_set_follow.py` の `desktop`（`(1, client, ws)` を返す）。`shell` を import する `test_api_v1_score_fields.py` は、ファイルを変えずにデスクトップ側の 19 本が移った
+  6. 迷ったもの
+     - 移した: `test_scoreboard_operations.py::test_reloading_the_same_set_publishes_nothing`（同じセットの再読込が何も公開しないのは core の性質。描画が書き戻さないことは `test_a_set_load_is_exactly_one_save_cycle` がウィジェットのまま見る）。`test_roster_flow.py` の `test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game`・`test_a_load_whose_models_fail_keeps_one_game`（見ているのはゲームの読込の 1 回性で、ウィジェットはデスクトップのボードを用意するためだけ）。`test_set_follow.py` の `test_a_station_lookup_after_the_cancel_button_is_dropped`・`test_a_station_set_answering_after_the_cancel_is_dropped`（取り消しボタンを `StopFollowing` に置き換えた。ボタンと `:stop-follow` が同じことをするのは `test_a_v1_stop_does_what_the_cancel_button_does` がウィジェットのまま見る）
+     - 残した: `test_a_reset_clears_the_match_bar`・`test_the_same_set_loads_again_after_a_clear`（リセットのパラメータがボタンと action の混在で、ボタンの側がウィジェットを読む）。`test_reset_score_zeroes_scores_and_keeps_players`・`test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags`・`test_clearing_the_score_still_clears_the_losers_names`・`test_swapping_teams_carries_the_losers_names_across`（ボタンが試験の対象で、チェックボックスも読む。core の側は `test_reset_scores_action_leaves_players_alone` ほかが見る）。`test_crew_board.py::test_the_crew_board_writes_no_key_outside_its_own_subtree`（ウィジェットの構築が書かないことも含めて見ている）
+- **移さなかったテスト**（S4ac-3 で消すか書き直す対象。`autonaApp.board(` と `allowWidgets(` の grep で全部が出る）
+  - `test_api_v1_score.py`: 見せているボードのウィジェットを `allowWidgets()` で建てる起動状態の 4 本（`test_a_write_to_the_board_the_window_does_not_show_waits_for_apply`・`test_stop_follow_on_a_launched_board_writes_nothing`・`test_reading_a_board_the_window_does_not_show_builds_nothing`・`test_a_board_built_after_the_writes_draws_them`）と、ウィジェットとの比較・描画の 7 本（`test_a_stage_writes_what_the_rows_combo_writes`・`test_the_board_draws_a_result_written_here`・`test_the_same_value_again_is_not_a_write`・`test_a_slot_clear_takes_the_field_being_typed_in`・`test_the_cards_follow_a_swap`・`test_reset_all_leaves_what_the_desktops_button_leaves`・`test_the_display_name_reaches_the_state_and_the_panel`）
+  - `test_api_v1_crew.py`: ボードの入力欄・ボタン・コンボとの比較と描画（`test_the_routes_write_what_the_board_s_inputs_write`・`test_a_marker_a_lowered_count_left_behind_can_be_taken_off`・`test_the_swap_flag_is_what_the_board_reads`・`test_a_name_being_typed_in_is_left_alone`・`test_a_swap_takes_what_is_being_typed_with_the_crew`・`test_the_display_name_field_follows_the_route_it_shares`・`test_the_button_posts_what_the_route_answers`・`test_the_button_says_what_is_missing`・`test_the_candidates_are_what_the_combos_offer`・`test_the_crew_board_builds_on_broken_terms`・`test_the_board_s_reset_button_twice_costs_one_cycle`）
+  - `test_api_v1.py`: `test_set_patch_players_and_losers_together_match_legacy_query`（legacy のクエリをウィジェットで流した結果との比較）
+  - `test_api_v1_score_fields.py`: カード・キャラの行・match バーとの比較 3 本
+  - `test_web_operations.py`: 2 つのホストの比較とスピンボックス・Qt の窓（`test_both_hosts_write_the_same_roster`・`test_the_spinboxes_and_the_web_keep_one_memory`・`test_the_board_gives_its_players_a_count_the_web_asked_for`・`test_the_hidden_spinbox_shows_the_count_core_keeps`・`test_both_hosts_clear_the_players_to_the_same_state`・`test_switched_back_the_legacy_open_set_opens_the_qt_window`）
+  - `test_scoreboard_operations.py`（76）: スコアのボタン・best_of のスピンボックスとステージの行、ゲームの読込とボードの行・反映ボタン、入れ替え / リセット / クリアのボタンとカード・チェックボックスの描画、入力欄（チーム名・match バー・losers・選手タグ・国コンボ・表示の大会名・スポンサー）からの書き込み、ウィジェット操作の 1 保存サイクルの検査、ステージのクリック、セットの描画・閉じる・詳細ダイアログ・セットのボタン
+  - `test_crew_board.py`（28）: 名前欄・人数・色・アクティブ・入れ替え・リセット・match バー・表示の大会名の入力からの書き込みと、その 1 publish の検査
+  - `test_roster_flow.py`（16）: カードの構築・破棄（縮小・編集中の退役・コンボのリスト・失敗）、カードのあるボードで録る golden（記録したロスター・ゲームの読込）、held サイクルの中のカードの構築
+  - `test_set_follow.py`: `test_a_v1_stop_does_what_the_cancel_button_does` と、判断 4 の 2 本
+  - `test_stats_util.py`: `test_one_fetcher_serves_every_board`。`test_scoreboard_post.py`: ボタンの 5 本。`test_harness_isolation.py`: `test_exercising_the_app_leaves_the_real_out_and_user_data_untouched`・`test_dropped_boards_stop_reacting_to_global_signals`（破棄したウィジェットの接続）。`test_headless_seed.py`: カードの 1 本と、建てたボードに反映するものが無い 1 本。`test_score_typing.py`: 打鍵の 2 本。`test_save_block_symmetry.py`: ウィジェットの best_of ハンドラの 5 本
+  - 触っていないファイル（すべてウィジェットのテストか、建てたウィジェットで録る golden）: `test_set_follow_flow`（golden のレコーダが建てたウィジェットを使う）・`test_stats_flow`（golden。`Prepare` がボード 2 を建てることにも依存）・`test_crew_operations`・`test_match_name_candidates`・`test_country_helper_model`・`test_country_helper_flags`・`test_signal_lifetime`・`test_player_widgets`・`test_player_card_render`・`test_wrapper_lifetime`・`test_player_slot_publish`・`test_player_apply`・`test_game_asset_manager_models`
+- **pin**（`tests/test_harness_isolation.py`）
+  - `test_a_readied_board_is_made_as_at_launch_with_no_widget`: `ready(1..3)` と `readyAll()` の後、3 つとも作られ・held はボード 1 / 2・未反映なし・ウィジェットなし
+  - `test_a_widget_built_on_readied_boards_is_reported`: ready したテストでウィジェットを建てると検査に出て、後の `ready()` が破棄しても消えず、`allowWidgets()` で消える
+  - `test_dropping_a_board_removes_its_exported_files`・`test_dropping_a_board_leaves_no_held_registration` を core / ウィジェットの両方で回す
+- **壊して落ちることの確認**（1 か所ずつ壊して回し、毎回 md5 で戻したことを確かめた）
+  1. `ready()` がウィジェットを建てる（`EnsureBoard` を `manager.EnsureScoreboard` に）→ 変えた 16 ファイルで、移したテストを含む 431 件（パラメータ化の展開込み。16 ファイル全部に出る）が teardown の検査（「ウィジェットを頼んでいないのに建てた」）で落ち、ハーネスの pin 2 本が失敗
+  2. `_dropBoardInCore` の held の登録の解除（`heldPrefixes.discard`）を外す → `test_harness_isolation.py` の 4 件（破棄の 2 本 × core / ウィジェット）
+- **残置とリスク**（検収レビューの指摘から、受け入れたもの）
+  1. 移したテストの一部は、ウィジェットがあったから捕まえられていた不具合を見なくなった: `test_web_operations.py` の `test_both_hosts_write_the_same_state` / `test_both_hosts_load_the_same_player`（デスクトップ側の描画の書き戻しが headless との差分に出ていた）、`test_score_typing.py::test_the_score_the_state_has_writes_nothing`（`WriteRecorder` が描画の書き戻しも拾っていた）、`test_set_follow.py::test_no_thread_waits_for_the_gui_with_the_state_lock`（ウィジェットの held ハンドラが lock の中で `run_sync` するのを検出できた）、`test_reloading_the_same_set_publishes_nothing`。残る網は `test_roster_flow.py::test_no_thread_is_waited_on_inside_a_held_cycle`（`board(2)` のまま）・`test_a_set_load_is_exactly_one_save_cycle` と判断 1 (C) のエコーループの検査。穴が意味を持つのは Qt の退路で出荷する間だけで、退路と描画は S4ac-3 で消える
+  2. 名前が古いまま: `test_set_follow.py` の `test_a_station_lookup_after_the_cancel_button_is_dropped`・`test_a_station_set_answering_after_the_cancel_is_dropped`（中身は `StopFollowing`）、`test_scoreboard_operations.py` の `test_score_up_action_matches_the_widget`・`test_building_a_board_turns_the_polling_off`・`test_building_a_board_republishes_every_display_option`・`test_crew_board_seeds_best_of_at_construction`（構築時の書き込みは `EnsureBoard(panel)` の仕事）。ボタンの結線は `test_a_v1_stop_does_what_the_cancel_button_does` と `test_set_follow_flow.py` がウィジェットのまま見る。S4ac-3 で名前を直す
+  3. `allowWidgets()` / `board()` の免除はテスト単位で、ボード単位ではない（ボード 2 をわざと建てるテストで、ボード 1 / 3 に意図しないウィジェットが建っても検出しない）。今の用途では実害なし
+  4. `test_api_v1_score.py` の `launchedBoards` は、開始時に HARNESS_GAME を戻さず（`readyAll()` は `_dropBoards()` だけ）、終了時の `StateManager.Unset("score")` も無くなった（後のテストには空の `score` が残る）。`ready(n)` のテストも以前から同じものを残していて、新しい漏れではない
+  5. 検収レビューの指摘で、teardown の検査（`_failOnBoardWidgets`）を後始末（`dropAllBoards`・`MatchNameCandidates`・CWD の復元）の後へ動かした。後始末が破棄したウィジェットも `_unaskedWidgets` に残るので、検出は変わらない
+- **golden**: `tests/fixtures/**` は差分なし
+- **検証**: 変えた 16 ファイルをファイルごとに直列で回して全部緑（`test_harness_isolation.py` 38 passed ほか）。`python scripts/run_tests_parallel.py` は 6301 passed・0 failed・2 skipped・2 errors（判断 4 の 2 本。直した後、`test_set_follow.py` 116 passed）。直した後の直列の全量 `python -m pytest -q -ra -p no:cacheprovider` 6301 passed・0 failed・25 skipped（768 秒）
+- **F3（web、同じ PR）**: SCORE ページの読み込みの失敗を `formatFailed` / `charactersFailed` に分けた（表示に使う `loadFailed` は 2 つの or の派生値）。`readFormat` の成功が、キャラ一覧の読みが失敗したままでも失敗の表示を消し、キャラ一覧が無いままページが使える状態に見える取り違えがあったため。`readFormat` の成功は `formatFailed` だけ、キャラの失敗は `charactersFailed` だけを立て、「読み直す」は両方を消して両方を読み直す。同じ `useCharacters(fail)` の形を使う ResultPage / Top8Page は、失敗を消すのが「読み直す」だけで別の読みの成功が消す経路が無いため、取り違えは無く変更なし。pin は `ScorePage.test.js` の 1 本（形式の読みが成功してもキャラの失敗の表示が残り、「読み直す」で両方を読み直す）

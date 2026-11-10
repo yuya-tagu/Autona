@@ -573,19 +573,24 @@ def test_a_key_that_is_no_string_is_rejected(client, db, key):
 
 # ── POST .../players/{p}:load ────────────────────────────────────────────
 
+def _swap():
+    # What board 1's SWAP runs (its SwapTeams).
+    from src.core.Actions import AutonaActions
+    AutonaActions.instance.SwapTeams(1)
+
+
 @pytest.fixture
 def board(autonaApp, webApp, tmp_path, monkeypatch):  # noqa: F811
-    """A freshly built board 1 on the harness (its game and countries), and
-    a database of the test's own with one player."""
-    built = autonaApp.board(1)
-    autonaApp.settle()
+    """Board 1 made afresh on the harness (its game and countries), with no
+    widget (ADR-005 S4ac-2), and a database of the test's own with one
+    player."""
+    autonaApp.ready(1)
     database = PlayerDB(path=str(tmp_path / "local_players.json"),
                         legacyCsvPath=str(tmp_path / "local_players.csv"))
     database.database["SP Alpha"] = {
         "prefix": "SP", "gamerTag": "Alpha", "name": "Real", "mains": "{}"}
     monkeypatch.setattr(PlayerDB, "instance", database)
-    return SimpleNamespace(app=autonaApp, widget=built,
-                           client=webApp.test_client())
+    return SimpleNamespace(app=autonaApp, client=webApp.test_client())
 
 
 def test_a_load_writes_the_slot(board):
@@ -603,7 +608,7 @@ def test_a_load_names_the_sets_team_so_a_swap_flips_it(board):
     """The legacy route's rule, and the Qt list's "set to P1": after a swap
     the set's team 1 is on state team 2. PATCH players names the state team;
     this is the one v1 team parameter that does not (spec §6.27)."""
-    board.widget.SwapTeams()
+    _swap()
     board.app.settle()
 
     _ok(board.client.post(
@@ -720,7 +725,7 @@ def test_a_key_that_is_no_string_is_400_even_with_a_tag(board, key):
 
 
 def test_a_key_names_the_sets_team_too(board):
-    board.widget.SwapTeams()
+    _swap()
     board.app.settle()
 
     _ok(board.client.post(

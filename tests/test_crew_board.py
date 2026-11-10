@@ -19,7 +19,8 @@ widget path and the board's rendering of the state.
 
 The assertions read StateManager rather than the widgets, for the same
 reason the scoreboard suite does: StateManager is what the OBS crew overlay
-and the Web UI consume.
+and the Web UI consume. A test that types into no widget and reads none
+makes the board in core (`autonaApp.ready(3)`, ADR-005 S4ac-2).
 """
 from unittest.mock import patch
 
@@ -49,10 +50,23 @@ def _row(board, side, member):
 
 
 def _nameMember(board, side, member, name):
-    """Type a member name the way an operator does (edit + focus out)."""
+    """Type a member name the way an operator does (edit + focus out) on the
+    board's widgets, or, on a board number (a board readied with no widget,
+    ADR-005 S4ac-2), what the name field runs: the board's `crew`'s
+    SetMemberName."""
+    if isinstance(board, int):
+        _crew().SetMemberName(side + 1, member, name)
+        return
     edit = _row(board, side, member)["name"]
     edit.setText(name)
     edit.editingFinished.emit()
+
+
+def _crew():
+    """What the board's inputs call (its `crew`), with no widget: the
+    service works from the state, so one per call is the same one."""
+    from src.core.CrewBattleService import CrewBattleService
+    return CrewBattleService(BOARD)
 
 
 def _typeTeamName(board, side, name):
@@ -111,7 +125,7 @@ def test_a_fresh_crew_board_seeds_its_whole_subtree(autonaApp):
     set history and no station queue); everything below is its launch write
     (CrewBattleService.SeedDefaults, from AutonaActions.SeedFreshBoard).
     """
-    autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     assert _get(autonaApp, "phase") == ""
@@ -142,7 +156,7 @@ def test_a_fresh_crew_board_has_no_pool_key(autonaApp):
     migration that quietly adds it would change what a fresh
     program_state.json contains.
     """
-    autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     assert _get(autonaApp, "pool") is None
@@ -217,10 +231,10 @@ def test_clearing_a_member_name_takes_its_stocks_off_the_total(autonaApp):
 
 
 def test_a_stock_change_reaches_the_state_and_the_total(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
-    board.crew.AdjustMemberStock(1, 1, -1)
+    _nameMember(BOARD, 0, 1, "Alpha")
+    _crew().AdjustMemberStock(1, 1, -1)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "stock") == DEFAULT_STOCK - 1
@@ -228,11 +242,11 @@ def test_a_stock_change_reaches_the_state_and_the_total(autonaApp):
 
 
 def test_an_out_of_range_stock_command_is_ignored(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
     # Reachable from the legacy REST route; must not raise.
-    assert board.crew.AdjustMemberStock(3, 1, -1) is False
-    assert board.crew.AdjustMemberStock(1, MAX_MEMBERS + 1, -1) is False
+    assert _crew().AdjustMemberStock(3, 1, -1) is False
+    assert _crew().AdjustMemberStock(1, MAX_MEMBERS + 1, -1) is False
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "stock") == DEFAULT_STOCK
@@ -247,8 +261,8 @@ def test_a_remote_team_score_command_does_not_crash_or_alter_the_total(
     stocks, so the same web action must reach the crew board without raising
     and without disturbing the total the roster produces.
     """
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
+    autonaApp.ready(BOARD)
+    _nameMember(BOARD, 0, 1, "Alpha")
     autonaApp.settle()
 
     autonaApp.web().team_scoreup(BOARD, "1")
@@ -318,9 +332,9 @@ def test_a_remote_colour_change_reaches_the_crew_board(autonaApp):
 # ── the active member marker ─────────────────────────────────────────────
 
 def test_the_active_member_is_published_as_a_string(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    board.crew.SelectActiveMember(1, 2)
+    _crew().SelectActiveMember(1, 2)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "activeMember") == "2"
@@ -338,21 +352,21 @@ def test_only_one_member_of_a_team_can_be_active(autonaApp):
 
 
 def test_clearing_the_active_member_publishes_zero(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    board.crew.SelectActiveMember(1, 1)
+    _crew().SelectActiveMember(1, 1)
     autonaApp.settle()
-    board.crew.SelectActiveMember(1, 0)
+    _crew().SelectActiveMember(1, 0)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "activeMember") == "0"
 
 
 def test_the_two_teams_keep_separate_active_members(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    board.crew.SelectActiveMember(1, 1)
-    board.crew.SelectActiveMember(2, 2)
+    _crew().SelectActiveMember(1, 1)
+    _crew().SelectActiveMember(2, 2)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "activeMember") == "1"
@@ -426,14 +440,14 @@ def test_reset_score_restores_stocks_but_keeps_the_crew(autonaApp):
 
 
 def test_clear_all_wipes_the_crew(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
-    board.crew.AdjustMemberStock(1, 1, -2)
-    board.crew.SelectActiveMember(1, 1)
+    _nameMember(BOARD, 0, 1, "Alpha")
+    _crew().AdjustMemberStock(1, 1, -2)
+    _crew().SelectActiveMember(1, 1)
     autonaApp.settle()
 
-    board.crew.ClearCrew()
+    _crew().ClearCrew()
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "name") == ""
@@ -498,13 +512,13 @@ def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
 # payload carrying bestOf=0 clears the crew board's set length.
 
 def test_an_empty_round_name_clears_the_crew_match(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, {"round_name": "Winners Final"})
+    apply_set(BOARD, {"round_name": "Winners Final"})
     autonaApp.settle()
     assert _get(autonaApp, "match") == "Winners Final"
 
-    apply_set(board, {"round_name": ""})
+    apply_set(BOARD, {"round_name": ""})
     autonaApp.settle()
 
     # Boards 1/2 would keep "Winners Final" here (SetLoadService tests an
@@ -513,22 +527,22 @@ def test_an_empty_round_name_clears_the_crew_match(autonaApp):
 
 
 def test_an_empty_phase_clears_the_crew_phase(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, {"tournament_phase": "Pools"})
+    apply_set(BOARD, {"tournament_phase": "Pools"})
     autonaApp.settle()
-    apply_set(board, {"tournament_phase": ""})
+    apply_set(BOARD, {"tournament_phase": ""})
     autonaApp.settle()
 
     assert _get(autonaApp, "phase") == ""
 
 
 def test_a_missing_pool_key_leaves_the_crew_pool_alone(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, {"tournament_pool": "A"})
+    apply_set(BOARD, {"tournament_pool": "A"})
     autonaApp.settle()
-    apply_set(board, {"tournament_phase": "Pools"})
+    apply_set(BOARD, {"tournament_phase": "Pools"})
     autonaApp.settle()
 
     assert _get(autonaApp, "pool") == "A"
@@ -541,9 +555,9 @@ def test_the_crew_board_never_writes_match_en(autonaApp):
     generator reads it); folding the two paths together would add the key to
     board 3.
     """
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board,
+    apply_set(BOARD,
         {"round_name": "Winners Final", "round_name_en": "Winners Final"})
     autonaApp.settle()
 
@@ -551,11 +565,11 @@ def test_the_crew_board_never_writes_match_en(autonaApp):
 
 
 def test_a_zero_best_of_reaches_the_crew_board(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, {"bestOf": 5})
+    apply_set(BOARD, {"bestOf": 5})
     autonaApp.settle()
-    apply_set(board, {"bestOf": 0})
+    apply_set(BOARD, {"bestOf": 0})
     autonaApp.settle()
 
     assert _get(autonaApp, "best_of") == 0
@@ -569,9 +583,9 @@ def test_the_crew_best_of_publishes_only_the_raw_key(autonaApp):
     (CrewBattleService.ApplySetData) is the tolerant path generic web
     callers land on.
     """
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, {"bestOf": 5})
+    apply_set(BOARD, {"bestOf": 5})
     autonaApp.settle()
 
     assert _get(autonaApp, "best_of") == 5
@@ -582,10 +596,10 @@ def test_the_crew_best_of_publishes_only_the_raw_key(autonaApp):
 
 
 def test_a_non_dict_set_payload_is_ignored(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    apply_set(board, None)
-    apply_set(board, "nonsense")
+    apply_set(BOARD, None)
+    apply_set(BOARD, "nonsense")
     autonaApp.settle()
 
     assert _get(autonaApp, "match") == ""
@@ -600,12 +614,12 @@ def test_a_set_payload_with_nothing_crew_understands_changes_nothing(
     """
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     revision = StateManager.revision
-    apply_set(board, {"team": 1, "player": 1, "data": {"gamerTag": "X"}})
-    apply_set(board, {"team1score": 2, "team2score": 1})
+    apply_set(BOARD, {"team": 1, "player": 1, "data": {"gamerTag": "X"}})
+    apply_set(BOARD, {"team1score": 2, "team2score": 1})
     autonaApp.settle()
 
     assert StateManager.revision == revision

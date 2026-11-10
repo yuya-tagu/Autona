@@ -143,8 +143,9 @@ OPERATIONS = {
 def test_both_hosts_write_the_same_state(autonaApp, monkeypatch, name):
     operation = OPERATIONS[name]
 
-    # The desktop: the board built (held), the operation on the GUI thread.
-    autonaApp.board(BOARD)
+    # The desktop: the board made as at launch (held; no widget), the
+    # operation on the GUI thread.
+    autonaApp.ready(BOARD)
     _prepare(BOARD)
     autonaApp.settle()
     # 反映 first, so what is pending afterwards is the operation's.
@@ -276,8 +277,9 @@ def test_both_hosts_load_the_same_player(autonaApp, monkeypatch, playerDB,
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
     n = 1
 
-    # The desktop: the board built (held), the load on the GUI thread.
-    autonaApp.board(n)
+    # The desktop: the board made as at launch (held; no widget), the load
+    # on the GUI thread.
+    autonaApp.ready(n)
     _state().Set(f"score.{n}.match_en", "Winners Final")
     autonaApp.settle()
     operation(n)
@@ -320,7 +322,7 @@ def test_both_hosts_load_the_same_player(autonaApp, monkeypatch, playerDB,
 def test_both_hosts_save_the_player_to_the_database(autonaApp, monkeypatch,
                                                     playerDB):
     data = dict(_PLAYER, savePlayerToDb=True)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     assert WebOps.update_player(1, 1, 1, dict(data)) is True
     assert WebOps.set_team_data(1, "2", "1", dict(data)) == "OK"
     autonaApp.settle()
@@ -340,7 +342,7 @@ def test_both_hosts_save_the_player_to_the_database(autonaApp, monkeypatch,
              for p in saved] for saved in desktop] \
         == [[("SP", "ALPHA", "Real Alpha", "JP")]] * 2
     # Without the flag nothing is saved.
-    autonaApp.board(1)
+    autonaApp.ready(1)
     playerDB.saved.clear()
     WebOps.update_player(1, 1, 1, dict(_PLAYER))
     WebOps.set_team_data(1, "1", "1", dict(_PLAYER, savePlayerToDb=False))
@@ -396,7 +398,7 @@ def test_the_database_save_is_made_outside_the_board_host(
     comes after the host has run the load, with neither the host's lock
     nor the state's held, and the slot already holding what is saved."""
     if host == "desktop":
-        autonaApp.board(1)
+        autonaApp.ready(1)
     else:
         _goHeadless(autonaApp, monkeypatch)
     boardHost = WebOps.boardHost
@@ -528,7 +530,7 @@ def test_a_save_from_a_request_thread_finishes(
     from src.Helpers.AutonaQtHelper import gui_thread_sync
 
     if host == "desktop":
-        autonaApp.board(1)
+        autonaApp.ready(1)
     else:
         _goHeadless(autonaApp, monkeypatch)
         monkeypatch.setattr(AutonaPlayerDB, "modelEnabled", False)
@@ -577,7 +579,7 @@ def test_a_web_load_asks_for_the_statistics(autonaApp, monkeypatch,
     nothing did."""
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
     if host == "desktop":
-        autonaApp.board(1)
+        autonaApp.ready(1)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -616,7 +618,7 @@ def test_a_load_names_the_state_team_or_the_set_team(autonaApp, playerDB):
     column the Web UI shows -- and the tag lookup the set's team, as each
     always did."""
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     WebOps.swap_teams(1)
     autonaApp.settle()
 
@@ -641,7 +643,7 @@ def test_a_slot_the_state_does_not_have_is_not_written(
     is no slot either (it used to wrap around to the last card)."""
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
     if host == "desktop":
-        autonaApp.board(1)
+        autonaApp.ready(1)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -804,7 +806,7 @@ def test_an_emptied_board_gives_its_next_players_the_characters_it_keeps(
     went, when nothing was asked for since -- as the two spinboxes had it.
     SetRoster alone would give them the default (3)."""
     if host == "desktop":
-        autonaApp.board(BOARD)
+        autonaApp.ready(BOARD)
     else:
         _goHeadless(autonaApp, monkeypatch)
     try:
@@ -1789,7 +1791,7 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
     assert WebOps.openSetSelection == shell.OpenSetSelection
     assert WebOps.renderThumbnail == shell.RenderThumbnail
     assert WebOps.startImageRender == shell.StartImageRender
-    autonaApp.board(1)
+    autonaApp.ready(1)
     window = shell.SetWindow(1)
     calls = []
     monkeypatch.setattr(window, "PrepareForDisplay",
@@ -1846,7 +1848,7 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    autonaApp.board(1)
+    autonaApp.ready(1)
     window = shell.SetWindow(1)
     opened = []
     monkeypatch.setattr(window, "PrepareForDisplay",
@@ -2017,7 +2019,7 @@ def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
     from src.AutonaShellOperations import AutonaShellOperations
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.board(1)
+    autonaApp.ready(1)
 
     def fail():
         raise RuntimeError("the window failed")
@@ -2085,7 +2087,7 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     from src.core.Actions import AutonaActions
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp._dropBoard(2)
     opened = _setWindowsWatched(shell, monkeypatch)
     main = _MainWindow(onPage=True)
@@ -2150,7 +2152,7 @@ def test_on_the_score_page_the_open_set_from_a_request_thread_is_the_guis(
     from src.AutonaShellOperations import AutonaShellOperations
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     main = _MainWindow(onPage=True)
     monkeypatch.setattr(shell, "_parent", main)
     answers = []
@@ -2179,7 +2181,7 @@ def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
     from src.AutonaShellOperations import AutonaShellOperations
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     opened = _setWindowsWatched(shell, monkeypatch)
     main = _MainWindow(onPage=True)
 

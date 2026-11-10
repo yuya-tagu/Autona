@@ -326,7 +326,11 @@ function ScoreContent() {
         [playerDb]);
 
     const [format, setFormat] = React.useState<BattleFormat | null>(null);
-    const [loadFailed, setLoadFailed] = React.useState(false);
+    // The two reads that fail the page, kept apart: the success of one must
+    // not clear the other's failure (S4ac-2 F3).
+    const [formatFailed, setFormatFailed] = React.useState(false);
+    const [charactersFailed, setCharactersFailed] = React.useState(false);
+    const loadFailed = formatFailed || charactersFailed;
     // Bumped by the reload button: reads the character list again.
     const [loads, setLoads] = React.useState(0);
     const [pending, setPending] = React.useState<Pending | null>(null);
@@ -359,7 +363,7 @@ function ScoreContent() {
     const toldToken = React.useRef(false);
     const mounted = React.useRef(true);
     const serial = useSerialRequests();
-    const fail = React.useCallback(() => setLoadFailed(true), []);
+    const fail = React.useCallback(() => setCharactersFailed(true), []);
     const characters = useCharacters(codename, loads, fail);
     // The post's text, read ahead: the composer opens in the click.
     const postText = React.useRef("");
@@ -420,14 +424,14 @@ function ScoreContent() {
     const readFormat = useNoticedRead<BattleFormat>(
         "/api/v1/battle-format",
         (data) => {
-            setLoadFailed(false);
+            setFormatFailed(false);
             setFormat({format: text(data.format), board: count(data.board, 1)});
             formatReadEnded();
         },
         (error) => {
             console.error(error);
             if (formatRef.current === null) {
-                setLoadFailed(true);
+                setFormatFailed(true);
             } else {
                 showSnackbar(i18n.t("score_format_failed"), "error");
             }
@@ -1004,7 +1008,8 @@ function ScoreContent() {
     // ── the page ──
 
     const reload = React.useCallback(() => {
-        setLoadFailed(false);
+        setFormatFailed(false);
+        setCharactersFailed(false);
         setLoads((value) => value + 1);
         readFormat();
     }, [readFormat]);

@@ -52,7 +52,7 @@ def _seed(app, board, team, value):
 
 def test_upset_factor_route_calculates_for_the_board(autonaApp):
     """Pre-fix this raised AttributeError before touching any state."""
-    autonaApp.board(1)
+    autonaApp.ready(1)
     _seed(autonaApp, 1, 1, 1)
     _seed(autonaApp, 1, 2, 5)
 
@@ -64,7 +64,7 @@ def test_upset_factor_route_calculates_for_the_board(autonaApp):
 
 
 def test_upset_factor_route_resets_when_a_seed_is_missing(autonaApp):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     _seed(autonaApp, 1, 1, 1)
     _seed(autonaApp, 1, 2, 5)
     WebOps.stats_upset_factor("1")
@@ -88,7 +88,7 @@ def test_recent_sets_route_settles_without_a_tournament(autonaApp):
     provider is None until a tournament URL is set, and the route is
     reachable (overlay refresh button, external API) at any time.
     """
-    autonaApp.board(1)
+    autonaApp.ready(1)
 
     assert WebOps.stats_recent_sets("1") == "OK"
     autonaApp.settle()
@@ -101,7 +101,7 @@ def test_recent_sets_route_settles_without_a_tournament(autonaApp):
 @pytest.mark.parametrize("board", ["1", "2"])
 def test_stats_routes_address_the_requested_board(autonaApp, board):
     """The `scoreboard` argument used to be accepted and then ignored."""
-    autonaApp.board(int(board))
+    autonaApp.ready(int(board))
     other = "2" if board == "1" else "1"
     autonaApp.state.Unset(f"score.{other}.recent_sets")
 
@@ -248,7 +248,7 @@ def test_a_route_answers_ok_when_a_fetch_raises(autonaApp, monkeypatch):
 
     fetcher = Raising()
     monkeypatch.setattr(StatsService, "fetcher", fetcher)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.Set("score.1.team.1.player.1.id", [1, 10])
     autonaApp.state.Set("score.1.team.2.player.1.id", [2, 20])
 
@@ -342,7 +342,7 @@ def _lastSetsAsked(pending, team):
 def test_a_late_answer_does_not_land_on_the_next_player(autonaApp, startgg):
     """The operator puts A in, then B, before A's sets arrive: A's answer
     is dropped, B's is written -- whichever arrives first."""
-    autonaApp.board(1)
+    autonaApp.ready(1)
     assert WebOps.update_player(1, 2, 1, {
         "gamerTag": "OPP", "id": [3, 30]}) is True
     assert WebOps.update_player(1, 1, 1, {
@@ -371,7 +371,7 @@ def test_an_answer_after_a_swap_is_for_the_side_it_was_asked_for(
     """A's sets asked for on team 1, then a swap moves A to team 2 (and
     asks again for both sides): the answer asked before the swap does not
     land on team 1, now someone else's."""
-    autonaApp.board(1)
+    autonaApp.ready(1)
     assert WebOps.update_player(1, 1, 1, {
         "gamerTag": "A", "id": [1, 10]}) is True
     assert WebOps.update_player(1, 2, 1, {

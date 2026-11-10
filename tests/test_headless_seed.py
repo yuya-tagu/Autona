@@ -204,15 +204,16 @@ def test_the_headless_seed_keeps_the_display_options_it_restored(
 
 def test_a_desktop_board_brings_the_display_options_back_to_the_settings(
         noBoards, displayOptions):
-    """The desktop's board build does rewrite them, all eight. The crew board,
-    which has no eye menu, does not."""
+    """The desktop's making of a board (EnsureBoard with `panel`) does
+    rewrite them, all eight. The crew board, which has no eye menu, does
+    not."""
     against = {f"display_options.{key}": not value
                for key, value in displayOptions.items()}
 
     with _settingsWith(against):
-        noBoards.board(3)
+        noBoards.ready(3)
         assert StateManager.Get("display_options") == displayOptions
-        noBoards.board(1)
+        noBoards.ready(1)
 
     assert StateManager.Get("display_options") == {
         key: not value for key, value in displayOptions.items()}
