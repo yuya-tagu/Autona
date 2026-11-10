@@ -5,15 +5,15 @@
 # /scoreboard<N>-get-thumbnail-<png|jpg> reach through AutonaShellOperations,
 # not through a board). What is left here is the entry tests/live and the
 # golden recorders call. Every way draws the settings as the React page shows
-# them (RenderPayload, S4p). `isPreview` was the Qt panel's, gone in S4p:
-# nothing passes True any more (a removal candidate, with save_result).
+# them (RenderPayload, S4p). The synchronous preview (generate / save_result's
+# `isPreview`, tmp/thumbnail/template.png) is gone; prepare_data's `isPreview`
+# is RenderPayload's placeholder preview, which the golden recorder still draws.
 
 from pathlib import Path
 
 from loguru import logger
 
 from src.core import ThumbnailService as service
-from src.Helpers.AutonaDirHelper import AutonaResolve
 from src.Helpers.AutonaOutputRetention import PruneOutputFiles
 
 SUPPORTED_TEMPLATE_IDS = service.TEMPLATE_IDS
@@ -39,62 +39,32 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
         preview=isPreview, games=games, board=scoreboardNumber)
 
 
-def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
+def save_result(pixmap, data, settings, scoreboardNumber=1):
     """Save rendered pixmap to disk. Returns output file path."""
-    out_path = service.OUTPUT_DIRECTORY if not isPreview else AutonaResolve("tmp/thumbnail")
+    out_path = service.OUTPUT_DIRECTORY
     Path(out_path).mkdir(parents=True, exist_ok=True)
 
-    if not isPreview:
-        thumbnail_filename = service.OutputStem(data, scoreboardNumber)
+    thumbnail_filename = service.OutputStem(data, scoreboardNumber)
 
-        pixmap.save(f"{out_path}/{thumbnail_filename}.png")
-        pixmap.save(f"{out_path}/{thumbnail_filename}.jpg")
-        logger.info(
-            f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
-        # Keep disk usage bounded; the file just written is protected
-        PruneOutputFiles(out_path, service.OUTPUT_PATTERNS, service.OUTPUT_KEEP,
-                         protect=f"{out_path}/{thumbnail_filename}.png")
-        return f"{out_path}/{thumbnail_filename}.png"
-    else:
-        thumbnail_filename = "template"
-        pixmap.save(f"{out_path}/{thumbnail_filename}.png")
-        logger.info(
-            f"Thumbnail preview saved as {out_path}/{thumbnail_filename}.png")
-        return f"{out_path}/{thumbnail_filename}.png"
+    pixmap.save(f"{out_path}/{thumbnail_filename}.png")
+    pixmap.save(f"{out_path}/{thumbnail_filename}.jpg")
+    logger.info(
+        f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
+    # Keep disk usage bounded; the file just written is protected
+    PruneOutputFiles(out_path, service.OUTPUT_PATTERNS, service.OUTPUT_KEEP,
+                     protect=f"{out_path}/{thumbnail_filename}.png")
+    return f"{out_path}/{thumbnail_filename}.png"
 
 
-def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboardNumber=1):
+def generate(settingsManager, gameAssetManager=None, scoreboardNumber=1):
     """Generate a thumbnail synchronously. A preview in the background is
     core/ThumbnailService's.
 
     The thumbnail itself is core's ThumbnailService.DrawBoard with the
     desktop's synchronous draw (ADR-005 S4y): the one way SCORE's X post
     and the legacy route take (AutonaShellOperations.DrawThumbnail), so this
-    writes the same files. `isPreview` (unused since S4p) still draws to
-    tmp/thumbnail/template.png here."""
-    if not isPreview:
-        from src.AutonaShellOperations import DrawThumbnailNow
-        games = gameAssetManager.instance.catalog if gameAssetManager else None
-        return service.ThumbnailService.instance.DrawBoard(
-            scoreboardNumber, DrawThumbnailNow, games=games)
-
-    from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
-
-    data, config, template_data = prepare_data(
-        settingsManager, isPreview, gameAssetManager, scoreboardNumber)
-
-    renderer = ThumbnailRenderer.instance()
-    pixmap = renderer.renderSync(
-        data=data,
-        config=config,
-        template=template_data,
-    )
-
-    if pixmap.isNull():
-        logger.error("Thumbnail rendering produced an empty image")
-        if isPreview:
-            return None
-        raise Exception("Thumbnail rendering failed")
-
-    settings = settingsManager.Get("thumbnail_config") or {}
-    return save_result(pixmap, data, settings, scoreboardNumber, isPreview)
+    writes the same files."""
+    from src.AutonaShellOperations import DrawThumbnailNow
+    games = gameAssetManager.instance.catalog if gameAssetManager else None
+    return service.ThumbnailService.instance.DrawBoard(
+        scoreboardNumber, DrawThumbnailNow, games=games)

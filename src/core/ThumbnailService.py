@@ -143,7 +143,7 @@ OUTPUT_DIRECTORY = "./out/thumbnails"
 OUTPUT_PATTERNS = ("*.png", "*.jpg")
 OUTPUT_KEEP = 30
 # Not tmp/thumbnail/template.png, which the old Qt panel's synchronous preview
-# wrote (main_generate_thumbnail's isPreview, unused since S4p). Removed with
+# wrote (main_generate_thumbnail's synchronous preview, removed in S4ac). Removed with
 # the rest of ./tmp when the desktop app exits, and at construction: the
 # headless shell and a crash leave it, and a new session has not drawn
 # anything yet. Served by
