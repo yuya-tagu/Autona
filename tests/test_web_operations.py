@@ -2040,6 +2040,197 @@ def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
     assert reported == ["the window failed"]
 
 
+# ── on the SCORE page, its dialog (ADR-005 S4ab-2) ───────────────────────
+#
+# While SCORE is the React page, the legacy open-set opens the page's set
+# selection dialog (Window.OpenScoreSets: the window brought to the front on
+# SCORE, its view asked) instead of the Qt window -- for the board of the
+# format only (the page shows no other; the owner's call, 2026-11-11). The
+# answer is the "OK" of before either way.
+
+class _MainWindow:
+    """What the shell asks of the main window (src/Autona.py's Window, which
+    cannot be imported: agent-pitfalls #1). ``onPage``: SCORE is the React
+    page, not the way back to the Qt panel."""
+
+    def __init__(self, onPage):
+        from src.Helpers.AutonaQtHelper import in_gui_thread
+        self.onPage = onPage
+        self.asked = []
+        self._inGui = in_gui_thread
+
+    def ScoreSetsOnPage(self):
+        return self.onPage
+
+    def OpenScoreSets(self, board):
+        self.asked.append((board, self._inGui()))
+
+
+def _setWindowsWatched(shell, monkeypatch):
+    # Boards 1 and 2's Qt windows (made before the main window stands in).
+    opened = []
+    for board in (1, 2):
+        window = shell.SetWindow(board)
+        monkeypatch.setattr(window, "PrepareForDisplay",
+                            lambda board=board: opened.append(("prepare", board)))
+        monkeypatch.setattr(window, "show",
+                            lambda board=board: opened.append(("show", board)))
+    return opened
+
+
+def test_on_the_score_page_the_legacy_open_set_asks_the_page(
+        server, autonaApp, monkeypatch):
+    from loguru import logger
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core.Actions import AutonaActions
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp.board(1)
+    autonaApp._dropBoard(2)
+    opened = _setWindowsWatched(shell, monkeypatch)
+    main = _MainWindow(onPage=True)
+    monkeypatch.setattr(shell, "_parent", main)
+    prepared = []
+    monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
+    assert AutonaActions.instance.ActiveBoard() == 1
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+
+    response = client.get("/scoreboard1-open-set")
+
+    assert (response.status_code, response.get_data(as_text=True)) == (
+        200, "OK")
+    assert main.asked == [(1, True)]
+    # No Qt window, and no board made ready for it: what the dialog loads
+    # goes through /api/v1's :load-set, which does that.
+    assert opened == [] and prepared == []
+
+    ws = socketio.test_client(app, flask_test_client=client)
+    ws.get_received()
+    ws.emit("open_set", json.dumps({"scoreboardNumber": "1"}), callback=True)
+    assert [(item["name"], item["args"]) for item in ws.get_received()] == [
+        ("open_set", ["OK"])]
+    assert main.asked == [(1, True)] * 2
+    ws.disconnect()
+
+    # Board 2 while SCORE shows board 1 (1v1): nothing opened -- logged --
+    # and the answer of before.
+    logged = []
+    sink = logger.add(lambda message: logged.append(message.record["message"]),
+                      level="INFO")
+    try:
+        response = client.get("/scoreboard2-open-set")
+    finally:
+        logger.remove(sink)
+    assert (response.status_code, response.get_data(as_text=True)) == (
+        200, "OK")
+    assert main.asked == [(1, True)] * 2
+    assert opened == [] and prepared == []
+    assert 2 not in autonaApp.manager.scoreboards
+    assert any("scoreboard 2" in message and "nothing opened" in message
+               for message in logged), logged
+
+    # Its own board on the team format: opened.
+    with pytest.MonkeyPatch.context() as active:
+        active.setattr(AutonaActions.instance, "ActiveBoard", lambda: 2)
+        assert client.get("/scoreboard2-open-set").get_data(as_text=True) == "OK"
+    assert main.asked == [(1, True)] * 2 + [(2, True)]
+
+    # The crew board has no set selection: the 500 it always answered.
+    assert client.get("/scoreboard3-open-set").status_code == 500
+    assert main.asked == [(1, True)] * 2 + [(2, True)]
+    autonaApp.settle()
+
+
+def test_on_the_score_page_the_open_set_from_a_request_thread_is_the_guis(
+        autonaApp, monkeypatch):
+    # The route's thread waits while the GUI thread asks the window (the
+    # shell operation's @gui_thread_sync, as for the Qt window).
+    from src.AutonaShellOperations import AutonaShellOperations
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp.board(1)
+    main = _MainWindow(onPage=True)
+    monkeypatch.setattr(shell, "_parent", main)
+    answers = []
+
+    worker = threading.Thread(
+        target=lambda: answers.append((WebOps.open_sets("1"), len(main.asked))))
+    worker.start()
+    deadline = time.monotonic() + 10
+    while worker.is_alive() and time.monotonic() < deadline:
+        autonaApp.settle()
+        time.sleep(0.01)
+    worker.join(1)
+
+    assert not worker.is_alive()
+    assert answers == [("OK", 1)]
+    assert main.asked == [(1, True)]
+
+
+@pytest.mark.parametrize("failing", ["OpenScoreSets", "ScoreSetsOnPage"])
+def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
+        autonaApp, monkeypatch, failing):
+    # What the page's way raises -- asking the window, or asking it which way
+    # it is -- is logged, reported once, and not the request's: "OK", as the
+    # Qt window's failure above. Nothing else opens instead.
+    from loguru import logger
+    from src.AutonaShellOperations import AutonaShellOperations
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp.board(1)
+    opened = _setWindowsWatched(shell, monkeypatch)
+    main = _MainWindow(onPage=True)
+
+    def fail(*args):
+        raise RuntimeError("the window failed")
+
+    monkeypatch.setattr(main, failing, fail)
+    monkeypatch.setattr(shell, "_parent", main)
+    prepared = []
+    monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
+    hooked = []
+    monkeypatch.setattr(sys, "excepthook",
+                        lambda kind, error, trace: hooked.append(error))
+    logged = []
+    sink = logger.add(lambda message: logged.append(message.record),
+                      level="ERROR")
+    try:
+        assert WebOps.open_sets("1") == "OK"
+    finally:
+        logger.remove(sink)
+
+    reported = [str(error) for error in hooked] + [
+        str(record["exception"].value) for record in logged
+        if record["exception"] is not None]
+    assert reported == ["the window failed"]
+    assert opened == [] and prepared == []
+
+
+def test_switched_back_the_legacy_open_set_opens_the_qt_window(
+        autonaApp, monkeypatch):
+    # The way back to the Qt panel (general.qt_scoreboard_panel): the Qt
+    # window as before -- another board's too, made ready first.
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core.Actions import AutonaActions
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp.board(1)
+    autonaApp._dropBoard(2)
+    opened = _setWindowsWatched(shell, monkeypatch)
+    main = _MainWindow(onPage=False)
+    monkeypatch.setattr(shell, "_parent", main)
+    assert AutonaActions.instance.ActiveBoard() == 1
+
+    assert WebOps.open_sets("1") == "OK"
+    assert WebOps.open_sets("2") == "OK"
+
+    assert opened == [("prepare", 1), ("show", 1), ("prepare", 2), ("show", 2)]
+    assert main.asked == []
+    assert AutonaActions.instance.BoardEnsured(2)
+
+
 # ── every route and event answers headless (ADR-005 S3e-9) ───────────────
 #
 # §4.4's completion condition, walked off the route table rather than

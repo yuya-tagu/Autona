@@ -6,7 +6,13 @@ import i18n from "../i18n/config";
 import {autonaStore} from "../redux/store";
 import PanelShell from "./index";
 import {BrowserOnly, usePanelShell} from "./context";
-import {installPanelShellApi, navigateToPanel, requestFullState} from "./hostApi";
+import {
+    installPanelShellApi,
+    navigateToPanel,
+    openScoreSets,
+    registerScoreSetsReceiver,
+    requestFullState,
+} from "./hostApi";
 import socketConnection from "../websocketConnection";
 
 // The shell every React panel runs in (ADR-005 S4a): `desktop=1` and `lng`
@@ -186,6 +192,78 @@ test("refresh asks the server for the full state when connected", () => {
     requestFullState();
     expect(socket.emit).toHaveBeenCalledWith("program_state", {});
     socket.connected = false;
+});
+
+// openScoreSets (S4ab-2): the SCORE page's receiver, a request held while
+// there is none.
+
+// Takes a request left held, so that none reaches the next test.
+function dropHeldScoreSets() {
+    registerScoreSetsReceiver(() => undefined)();
+}
+
+test("openScoreSets reaches the SCORE page's receiver", () => {
+    installPanelShellApi();
+    const receiver = jest.fn();
+    const unregister = registerScoreSetsReceiver(receiver);
+
+    window.autonaPanelShell.openScoreSets(2);
+
+    expect(receiver.mock.calls).toEqual([[2]]);
+    unregister();
+});
+
+test("openScoreSets with no receiver is held, handed to the next one once", () => {
+    openScoreSets(1);
+    // The newest only.
+    openScoreSets(2);
+    const first = jest.fn();
+    const unregisterFirst = registerScoreSetsReceiver(first);
+    expect(first.mock.calls).toEqual([[2]]);
+    unregisterFirst();
+
+    const second = jest.fn();
+    const unregisterSecond = registerScoreSetsReceiver(second);
+    expect(second).not.toHaveBeenCalled();
+    unregisterSecond();
+});
+
+test("a held openScoreSets goes when the view moves to another panel", () => {
+    window.history.replaceState(null, "", "/web/first?desktop=1");
+    openScoreSets(1);
+    // To SCORE itself: kept.
+    navigateToPanel("scoreboard");
+    navigateToPanel("first");
+    const receiver = jest.fn();
+    const unregister = registerScoreSetsReceiver(receiver);
+    expect(receiver).not.toHaveBeenCalled();
+    unregister();
+
+    openScoreSets(2);
+    navigateToPanel("scoreboard");
+    const later = jest.fn();
+    const unregisterLater = registerScoreSetsReceiver(later);
+    expect(later.mock.calls).toEqual([[2]]);
+    unregisterLater();
+    dropHeldScoreSets();
+});
+
+test("an unregistered receiver hears nothing; an old unregister keeps the newer one", () => {
+    const old = jest.fn();
+    const unregisterOld = registerScoreSetsReceiver(old);
+    const newer = jest.fn();
+    const unregisterNewer = registerScoreSetsReceiver(newer);
+    // The old page's cleanup after the new one mounted.
+    unregisterOld();
+
+    openScoreSets(1);
+    expect(newer.mock.calls).toEqual([[1]]);
+    expect(old).not.toHaveBeenCalled();
+
+    unregisterNewer();
+    openScoreSets(2);
+    expect(newer.mock.calls).toEqual([[1]]);
+    dropHeldScoreSets();
 });
 
 test("usePanelShell outside a shell is a browser page", () => {

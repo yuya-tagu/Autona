@@ -1149,6 +1149,57 @@ class Window(QMainWindow):
         if self._webPanelHost is not None:
             self._lazyPanels.pop(nav, None)
 
+    # ── SCORE's set selection asked for from outside (ADR-005 S4ab-2) ────
+    # The load_set hotkey and the legacy open-set route (AutonaShellOperations)
+    # open the SCORE page's dialog rather than the Qt window, while SCORE is
+    # the React page.
+
+    def ScoreSetsOnPage(self):
+        """Whether SCORE's set selection is its React page's dialog: SCORE is
+        not the Qt panel, nor is to be on its first choice. The way-back
+        setting is only looked at here, not settled (_SettleWayBack): it still
+        takes effect when the item is first opened, as its text says."""
+        if "scoreboard" in self._qtPanels:
+            return False
+        nav = self._panelIndexes["scoreboard"]
+        return not (nav in self._wayBackItems and UsesQtPanel("scoreboard"))
+
+    def OpenScoreSets(self, board):
+        """Bring the window to the front on SCORE and have its page open board
+        `board`'s set selection dialog: what a click on the SCORE item does,
+        then the request to the shared view, which hands it to the page once
+        it can (AutonaWebPanelHost.OpenScoreSets: after the view's build, a
+        load or a thaw). The page opens it as its own button does -- on the
+        board it shows, with a tournament -- and else just shows itself.
+        Only while ScoreSetsOnPage(). Nothing once the window is closing: a
+        request then would show it again and build the host being torn down."""
+        if self._shuttingDown:
+            logger.info("The set selection was asked for while the window "
+                        "closes: nothing opened")
+            return
+        self._BringToFront()
+        nav = self._panelIndexes["scoreboard"]
+        self.sidebar.setCurrentIndex(nav)
+        self._OnNavSelected(nav)
+        host = self._webPanelHost
+        if host is None:
+            # Its build failed (logged by _EnsurePanelAt): no page to ask.
+            return
+        host.OpenScoreSets(board)
+
+    def _BringToFront(self):
+        """Show the window in front of the others, restored if it was
+        minimized and kept maximized if it was (QWidget.setWindowState's own
+        recipe). Windows may still refuse a process that has not had the
+        last input the foreground (an outside request), and flash its
+        taskbar button instead."""
+        self.setWindowState(
+            (self.windowState() & ~Qt.WindowState.WindowMinimized)
+            | Qt.WindowState.WindowActive)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def _OnStackPageChanged(self, index):
         # Covers both a sidebar choice (_OnNavSelected -> setCurrentIndex,
         # or called from there when the page stays) and a programmatic

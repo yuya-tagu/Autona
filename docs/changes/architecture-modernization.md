@@ -6846,7 +6846,7 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `DrawBoard` が書いたファイルを剪定から守らない / JPG を書かずに黙る / 書く前に剪定する
 - **検証**: `python scripts/run_tests_parallel.py` 5620 passed / 2 skipped（RESULT: OK、exit 0。S4y の初版の 5605 から、足した 15 本ぶん増えた）。関係する 26 ファイルの直列実行は 2 回に分けて 601 passed（11 ファイル）と 939 passed（15 ファイル）（いずれも exit 0）。その後に直したテスト（再入の検査の書き方・`noBoards` の docstring）を含む `tests/test_headless_seed.py`・`tests/test_state_manager_held.py`・`tests/test_thumbnail_service.py` を回し直して 364 passed（exit 0）。`noBoards` の後始末は、使い捨ての probe（`tests/` に一時的に置いて回し、消した）で直す前と後を比べた（上の 5）。web は触っていないので build / jest / e2e は回していない。アプリの起動はしていない
 
-#### 順序 6（SCORE の React 化）の設計（2026-11-10・メイン決定。論点はオーナー確認待ち）
+#### 順序 6（SCORE の React 化）の設計（2026-11-10・メイン決定。論点は 2026-11-11 オーナー回答済み）
 
 S4y で、ボードのウィジェットにしか無い処理は無くなった（選手カードの 2 回の書き込みと入力中の欄の確定を除く）。棚卸し（Qt の SCORE 8 ファイル 5,845 行 + .ui 3 つ 793 行、SCORE の Qt を参照するテスト 37 ファイル）の結果から、残りの順序 6・7 を次の段に分ける。前例（S4a / S4b / S4c: v1 → React 化と退路 → 実機ゲート → Qt の削除）に合わせ、各段を 1 PR・単独でリリースできる大きさにする。
 
@@ -6858,7 +6858,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 | S4aa | **React の SCORE ページ（1v1 / Team / Crew）と退路の設定**: 選手カード（`useStateField`・名前の補完は Commentary の `NameField` の型）・詳細ダイアログ（反映・クリア・バリアント）・上下移動・チーム・試合の情報・スコア・反映ボタン・表示大会名・X 投稿・クルー。セット選択は当面 legacy の open-set で Qt の窓を開く。サイドバーの SCORE を共有ビューへ切り替え、設定 1 つで Qt に戻せる。Qt のマネージャと隠れたボードは残す（held の登録・`Prepare` は今のまま） | jest・build・pytest・e2e、メインの実機確認（隔離データ） |
 | S4ab | **React のセット選択・配信台・追従の行**（S4v の v1）。Ctrl+Shift+O と legacy の open-set はページのダイアログを開く（下の論点 2） | 同上 |
 | ゲート | メインの実機ゲート（IME・補完・反映・形式の切り替え・配信台の追従）。入力のフックは S4b の IME ゲートを通ったものと同じ | メインの判断 |
-| S4ac | **Qt の SCORE の削除**と **`HoldBoard` の起動時登録**（`ResetBoards` の後、ボード 1 / 2 に `EnsureBoard(panel=True)`、3 に `EnsureBoard`）。`DesktopBoardHost` の `Prepare` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` を基底の動作に。objectName とキーの契約からウィジェットの側を外す（キーの定数は `StateSchema` に残る）。廃止の候補（論点 3）はオーナーの確認の後 | pytest 全量（37 ファイルの整理を含む）・実機確認 |
+| S4ac | **Qt の SCORE の削除**と **`HoldBoard` の起動時登録**（`ResetBoards` の後、ボード 1 / 2 に `EnsureBoard(panel=True)`、3 に `EnsureBoard`）。`DesktopBoardHost` の `Prepare` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` を基底の動作に。objectName とキーの契約からウィジェットの側を外す（キーの定数は `StateSchema` に残る）。論点 3 の隠しの部品も消す（先頭の行を読む動作は残す。2026-11-11 回答）。ステージの機能を消すかもここで判断する（論点 1） | pytest 全量（37 ファイルの整理を含む）・実機確認 |
 | S4ad | **順序 7 の残り**: `DesktopBoardHost.Run` の GUI スレッド実行と `Prepare` の marshal を同時に外す（S4y の申し送り）。`CommitGameLoad` の順序の制約を lock の下へ | golden とスレッドのテスト |
 
 **v1 の追加（S4z）**
@@ -6883,8 +6883,11 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 **論点（オーナー確認）**
 
 1. **トラッカーのステージの行**（ゲームごとのステージと勝者。Qt では `scoreColumn.hide()` で一度も出ていなかった）を React のページで出すか → 推奨: ステージのあるゲームで出す
+   - **回答（2026-11-11 オーナー）: 出さない**。この段では何もしない。core / v1 に残っているステージの機能（`GameTrackerService`・`GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`・`PublishStageResults`。棚卸しは S4ab-2 の節）を消すかは S4ac で判断する
 2. **Ctrl+Shift+O と legacy の open-set**: 別の窓ではなく、メインウィンドウを前に出して SCORE に切り替え、ページのダイアログを開く形でよいか → 推奨: はい（S4ab）
+   - **回答（2026-11-11 オーナー）: はい**。legacy の `n` が今の形式のボードと違うとき（1v1 での `/scoreboard2-open-set` など）は何もせずログだけ。ヘッドレスは今のまま（シェル操作が無いので 503）。S4ab-2 で実装した
 3. **S4ac で消す候補**: セット選択で行を選ばずに OK / Enter を押すと先頭の行を読む動作（誤操作でボードが上書きされる）・ボードの隠しボタン `thumbnailBtn` と `GenerateThumbnail`・`main_generate_thumbnail` の `isPreview` の経路・ウィジェットの `PostToX`・隠しスピン `charNumber`（いずれも Qt のボードと一緒に消える内部の部品。`ChangeSetData` は S4x で削除済み） → 推奨: 消す。legacy の `crew_member_stock` / `crew_set_active` は外部契約なので残す
+   - **回答（2026-11-11 オーナー）**: 隠しの部品（`thumbnailBtn` / `GenerateThumbnail` / `main_generate_thumbnail` の `isPreview` の経路 / ウィジェットの `PostToX` / 隠しスピン `charNumber`）は S4ac で消す。**行を選ばずに OK / Enter で先頭の行を読む動作は 2026-11-11 オーナー決定で残す（ボード 1 / 2 は反映待ちに入るため）**。`TAKE_FIRST_ROW_WHEN_NONE_SELECTED` は `true` のまま
 
 #### S4z v1 の追加（SCORE の React 化の前段）（2026-11-10）
 
@@ -7132,7 +7135,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
      - 行の文字列: `setCells`（配信 / ステーション / フェーズ / プール名 / ラウンド / プレイヤー1 / プレイヤー2。ダブルスは `p1.members` が 2 人以上のとき両方の側に「 (A, B)」。窓の `entrants[0]` の判定と同じ）・`stationCells`（種別 / ID / 配信 / 識別子）・`isCompletePair`（両方の側に名前）。文字列でも数でもない値は空として描く（防御。core の行は揃っているので今の v1 では差が出ない）
      - 検索 `filterShown`: 表示する列とセットの id（窓の隠し列）に、大文字小文字を無視した部分一致。打った文字のまま（前後の空白も含む。窓と同じ）
      - 並べ替え `nextSort` / `sortShown`: ヘッダを押すまで読んだ順。押すと Qt と同じ大文字小文字を区別するコード単位の比較（"B" が "a" より前、"10" が "2" より前）、同じ値は読んだ順。同じヘッダをもう一度押すと逆順
-     - **選択なしの OK / Enter**: 定数 `TAKE_FIRST_ROW_WHEN_NONE_SELECTED`（`true` = 窓の `LoadSelectedSet` と同じく先頭の行）と `chosenRow`。2 つのダイアログの OK・Enter はすべてここを通る（論点 3 の回答で変えるのはこの定数 1 つ）
+     - **選択なしの OK / Enter**: 定数 `TAKE_FIRST_ROW_WHEN_NONE_SELECTED`（`true` = 窓の `LoadSelectedSet` と同じく先頭の行）と `chosenRow`。2 つのダイアログの OK・Enter はすべてここを通る（変えるならこの定数 1 つ。論点 3 のこの動作は 2026-11-11 オーナー決定で残す（ボード 1 / 2 は反映待ちに入るため））
      - フェーズのコンボ: `defaultPhase`（前に取得した行の `query.phase`、無ければ 1 フェーズの大会のそのフェーズ、無ければ「フェーズを選択...」。窓の `_PreferredPhaseIndex`）・`phaseQuery`（送る `phase`: フェーズの id / `"all"`。フェーズが無ければ `null` = 大会全体。「フェーズを選択...」は `undefined` = 送らない）
      - 進み具合 `progressOf`（`total` 0 は不定）と状態の行 `statusLine`（取得中の「セットを取得中...(n/m)」→ ページの案内（大会なし・フェーズを選ぶ）→ 取得の失敗 →「N件（HH:MM 取得）」と取れなかった数 → 取得を促す文、の順）
   2. **`web/src/ScorePage/setRows.cases.json`**（新規）: provider の set / station・core の行（`SetRow` / `StationRows`）・窓が出す列の文字列・完了したペアの表。セット 12 件（シングルス・ダブルス・3 人チーム・片側未定・両側未定・`station` なし・数の `station`・日本語など）と配信台 4 件（`identifier` / `stream` が `None` の行は、窓の列を `windowCells` に別に持つ: 窓は `str(None)` で「None」と書き、ページは空にする）。jest（`setRows.test.js`）と pytest（`tests/test_set_selection.py`）の両方が読む（Top 8 の `characterPick.cases.json` の前例）
@@ -7157,7 +7160,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 
 - **判断と理由**
   1. **規則を `setRows.ts` に分け、表を共有する**: 窓と同じ文字列になることを、S4v の比較テスト（Python の窓・v1 の行）と同じケースで pin するため（依頼）。窓を通した列の比較は pytest にしか書けないので、表を真ん中に置いた
-  2. **選択なしの OK / Enter は Qt と同じく先頭の行**（論点 3 の回答待ち）。判定は `chosenRow` の 1 か所で、定数を `false` にすれば 2 つのダイアログとも「何も読まない」になる
+  2. **選択なしの OK / Enter は Qt と同じく先頭の行**（2026-11-11 オーナー決定で残す（ボード 1 / 2 は反映待ちに入るため））。判定は `chosenRow` の 1 か所で、定数を `false` にすれば 2 つのダイアログとも「何も読まない」になる
   3. **`sets:cancel` は取得が走っているときだけ**: 窓の `CancelSetLoad` は走っていなければ何もしないので結果は同じ。書き込みの列と WRITE の往復を無駄に使わない
   4. **フェーズの頼み直しは `idle` と `error`**: 窓は「開いたとき空なら頼み直す」。v1 では取得し終わって 0 件（フェーズの無い大会）の `done` が読めるので頼み直さない（無駄な取得を省く。下の「動作の違い」）。**取得はフェーズが分かってから**（レビューの修正）: 窓はフェーズが届く前に押すと大会全体を取る（`self.phases` が空なら `phaseGroupIds=None`）。大きな大会の全体の取得はフェーズの選択が避けるためのものなので、ページは分かるまで待たせる
   5. **ダイアログの状態はページの寿命の間**: 窓はボードごとに 1 つで、閉じても隠すだけ（検索・チェックボックスは窓ごと、並べ替え `_sortState` とキャッシュ `_cache` はクラスの持ち物で全ボード共有）。ページは 1 度に 1 ボードしか見せないのでダイアログを 1 つにし、マウントしたままにして開き直しても覚える（ページを離れると忘れる）。配信台の検索と並べ替え、セット選択の検索と「完了済みの組み合わせを表示」は窓と同じくボードごとに覚える（レビューの修正。最初は配信台は開くたびに戻し、セット選択はボード 1 / 2 で共有していた）。セット選択の並べ替えは窓の `_sortState` と同じく全ボード共有。「完了したセットを表示する」は開くたびに取得した一覧の `query` から戻す（窓も共有のキャッシュから戻す）
@@ -7166,9 +7169,9 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   8. **追従の行は `poll` があればいつも出す**（大会の有無・デスクトップかによらない）: 窓のタイマー行も追従しているボードに出る。デスクトップは自動更新が既定オフ（`pollingEnabled`）なので、ふだんは出ない
   9. **ボードが変わったらダイアログを閉じる**: 開いたときのボードと違うボードに読み込まない
   10. **失敗の表示は Qt に無いが足した**（依頼のとおり。下の「Qt に無いもので足したもの」）。一覧の読み込みの失敗の案内と再読み込みは S4aa の形（`score_reload`）に揃えた
-  11. **Ctrl+Shift+O と legacy の open-set は変えない**（論点 2 の回答待ち）。外からダイアログを開く入口は設計だけ（下）
+  11. **Ctrl+Shift+O と legacy の open-set は変えない**（この段の時点では論点 2 の回答待ち。2026-11-11 に「はい」の回答があり、S4ab-2 で下の設計どおり実装した）。外からダイアログを開く入口はこの段では設計だけ（下）
 
-- **外からダイアログを開く入口の設計**（論点 2 で「はい」のときの段。実装していない）
+- **外からダイアログを開く入口の設計**（論点 2 で「はい」のときの段。この段では実装していない。S4ab-2 で実装）
   - デスクトップの共有ビューには既に `window.autonaPanelShell`（`web/src/PanelShell/hostApi.ts`。ホストが `runJavaScript` で `navigate(panel)` / `refresh()` を呼ぶ）がある。ここに「SCORE のセット選択を開く」を 1 つ足す（例 `openScoreSets()`）。PanelShell は SCORE ページがマウント時に登録した受け口へ渡す（`registerRouterNavigate` と同じ形）。ページはそれで `setsOpen` を立てるだけ
   - シェル側: `load_set` ホットキーと `openSetSelection`（legacy `/scoreboard{n}-open-set` のシェル操作）が、メインウィンドウを前に出してサイドバーを SCORE にし、共有ビューにその JS を流す（読み込み中なら `navigate` と同じく読み込みの後）。退路の Qt モードでは今の Qt の窓のまま
   - Socket.IO の通知にはしない: 全端末（LAN のブラウザ・ヘッドレスのブラウザ）でダイアログが開いてしまう。開くのは配信 PC の画面だけでよい
@@ -7189,9 +7192,9 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 
 - **入れなかったもの（論点）**
   - **A. Qt にあってページに無いもの**（どちらも依頼の範囲外で、退路の Qt では残る。勝手に落とした機能は無い）
-    1. トラッカーのステージの行（オーナー論点 1。Qt でも `scoreColumn.hide()` で出ていない）
-    2. Ctrl+Shift+O と legacy の open-set からページのダイアログを開くこと（オーナー論点 2。今は Qt の窓。設計は上）
-  - **B. 論点 3（S4ac）の回答で変えるもの**: 選択なしの OK / Enter で先頭の行を読む動作（この段は Qt と同じ。変えるのは `TAKE_FIRST_ROW_WHEN_NONE_SELECTED` だけ）
+    1. トラッカーのステージの行（オーナー論点 1。Qt でも `scoreColumn.hide()` で出ていない。2026-11-11 の回答で出さないことに決まった）
+    2. Ctrl+Shift+O と legacy の open-set からページのダイアログを開くこと（オーナー論点 2。この段では Qt の窓。2026-11-11 の回答「はい」を受けて S4ab-2 で実装）
+  - **B. 論点 3（S4ac）**: 選択なしの OK / Enter で先頭の行を読む動作（Qt と同じ）は 2026-11-11 オーナー決定で残す（ボード 1 / 2 は反映待ちに入るため）。`TAKE_FIRST_ROW_WHEN_NONE_SELECTED` は `true` のまま
 
 - **Qt に無いもので足したもの**
   1. 取得の失敗の表示: 状態の行に「取得できませんでした」（`error`）と、取れなかった数「（N 件を取得できませんでした）」（`done` + `failed > 0`。取れなかったページと読めなかったセットの合計）。配信台は取得の失敗のアラート。フェーズの取得の失敗はアラートと「再読み込み」（`phases:refresh` を頼み直す）。窓はどれも区別しない（S4v の表）
@@ -7204,7 +7207,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 - **残置とリスク**
   1. **トークンの無い端末の配信台は空のまま**: `stations:refresh` が 401 で断られると、その開きの取得の終わりが来ないので表を出さない（案内は 1 回出る。`:follow` も同じく断られるので、出しても選べない）
   2. **`poll` があって `secondsLeft` が `null` の間は、約 1 秒ごとに `GET .../follow` を読み直す**: 0 を過ぎた後の読み直しは「1 回の読みにつき 1 回」で、`null` は 0 として数えるため（表示は前の数を残す）。core は追従中に `null` をほぼ返さない（次の tick の時刻をその場で記録する。S4v）ので、出るのは tick が遅れた一瞬だけのはず。READ の軽い読みで、取り直しの時計が戻れば止まる
-  3. **Qt の窓（Ctrl+Shift+O・退路の Qt SCORE）とページのダイアログは一覧を共有しない**: 窓はアダプタと窓自身の `_cache` を、ページは core の `SetSelectionService` を使うので、片方で取得した一覧はもう片方に出ず、同じ大会を 2 回取得しうる（窓の取得は `set_selection.*` の進み具合にも出ない）。両方で取得しても互いを止めない（取り消しの仕組みが別: アダプタの `_setLoadCancel` と core の `_fetches`）。**オーナー論点 2 の判断材料**（上の「動作の違い」）。論点 2 で入口が切り替わるまで残る
+  3. **Qt の窓（Ctrl+Shift+O・退路の Qt SCORE）とページのダイアログは一覧を共有しない**: 窓はアダプタと窓自身の `_cache` を、ページは core の `SetSelectionService` を使うので、片方で取得した一覧はもう片方に出ず、同じ大会を 2 回取得しうる（窓の取得は `set_selection.*` の進み具合にも出ない）。両方で取得しても互いを止めない（取り消しの仕組みが別: アダプタの `_setLoadCancel` と core の `_fetches`）。**オーナー論点 2 の判断材料**（上の「動作の違い」）。S4ab-2 で Ctrl+Shift+O と legacy の open-set がページのダイアログに切り替わったので、React モードでは入口が 1 つ（ページ）になった。退路の Qt モードでは S4ac まで残る
   4. 一覧を読むのは開いている間だけ（閉じている間に別の端末で取得が終わっても、開いたときに読むので古い行は出ない）
   5. e2e には偽の provider が無いので、ダイアログを開く流れ（409 の文言を含む）は jest だけで pin している（e2e は大会が無いときにボタンと追従の行が無いことだけ）
 
@@ -7251,3 +7254,122 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   7. IME: セット選択のフィルターで日本語の変換・確定（Enter で行を読まない。フィルターの Enter は表に届かない）。配信台のフィルターでは変換を確定する Enter で追従しない（確定した後の Enter は OK と同じで、選んだ行か先頭の行を追従する）
   8. **レビューの修正**: 大会を読み込んで最初に開いた直後（フェーズを取得している間）は「最新の試合情報を取得」が押せず、「完了したセットを表示する」を切り替えても取得しない。フェーズが届くと押せる。配信台でフィルターと並べ替えをしてから形式を切り替え、戻って開くと残っている（もう一方の形式のボードのダイアログは別）。セットの表の「配信」のヘッダのボタンに名前がある（アクセシビリティツリー）
   9. Ctrl+Shift+O の Qt の窓で取得した一覧はページのダイアログに出ない（逆も。オーナー論点 2 の材料）
+
+#### S4ab-2 Ctrl+Shift+O と legacy の open-set をページのダイアログへ（2026-11-11）
+
+上の順序 6 の論点 2 への 2026-11-11 のオーナー回答（はい。legacy の `n` が形式のボードと違うときはログだけ。ヘッドレスは 503 のまま）を受けて、S4ab の「外からダイアログを開く入口の設計」を実装した。**React モード**（SCORE が React のページ。退路の設定 `general.qt_scoreboard_panel` が無効か、SCORE が React で決まった後）では、Ctrl+Shift+O（`load_set` ホットキー）と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）が、メインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く。退路の Qt モードは今までどおり Qt の窓。**v1 のルート・シェル操作・`@gui_thread_sync` は足していない**（既存のシェル操作 `OpenSetSelection` の中身を変えた）。何も書かない（ダイアログを開くだけ）。論点 1（ステージの行）はこの段では何もしない。論点 3 は先頭の行を読む動作を残し、文言だけ直した（`setRows.ts` の注釈・S4ab の節）。
+
+- **実装**
+  1. **`src/AutonaShellOperations.py`**: `ShowSetSelection(board)`（ホットキーと Qt のボードのボタン）と `OpenSetSelection(number)`（legacy のシェル操作）が、`_OpensOnPage()`（親 = メインウィンドウがあり、`Window.ScoreSetsOnPage()` が真）ならページへ、偽なら今までの Qt の窓（本体は `_ShowSetWindow` に分けた）。ページへの経路 `_OpenOnPage(board)` は `AutonaActions.ActiveBoard()` と違うボードならログ（`... was asked for while SCORE shows scoreboard N: nothing opened`）だけで戻り、同じなら `Window.OpenScoreSets(board)`。`OpenSetSelection` はページへの経路ではボードホストの `Prepare` を呼ばない。答えはどちらも `"OK"`（例外もログだけで `"OK"`。今までどおり）。親が無い間（`UiMounted` の前・テストのハーネス）は Qt の窓
+  2. **`src/Autona.py`**（Window）: `ScoreSetsOnPage()` は、SCORE が Qt のパネルに決まっていれば偽、まだ決まっていなければ退路の設定を**覗くだけ**（`UsesQtPanel`。`_SettleWayBack` で決めない: 設定はその項目を初めて開いたときに効く、の約束を変えない）。`OpenScoreSets(board)` は `_BringToFront()` → `sidebar.setCurrentIndex(nav)`（ハイライト。`navSelected` は出ない）→ `_OnNavSelected(nav)`（サイドバーのクリックと同じ経路。退路の確定・ホストの構築 / `ShowPanel("scoreboard")`）→ ホストの `OpenScoreSets(board)`（ホストの構築に失敗していれば何もしない）。`_BringToFront()` は `setWindowState((windowState() & ~WindowMinimized) | WindowActive)` → `show()` / `raise_()` / `activateWindow()`（最小化から戻し、最大化は保つ。Designer の窓の前出しと同じ 3 つに、最小化の解除を足した）
+  3. **`src/AutonaWebPanelHost.py`**: `OpenScoreSets(board)` は、表示中のパネルが `scoreboard` でなければ警告して何もしない。依頼を番号つきで 1 つ持ち（新しい依頼が置き換える）、スクリプトを流せるページ（`_ScriptablePage()`。`_Navigate` の条件をそのまま切り出した: ビューがあり、読み込み中でなく、Active で、URL が空でない）なら今すぐ、そうでなければ `_Navigate`（ビューの最初の読み込み・凍結からの復帰・破棄からの再読み込み・`ShowPanel`）が navigate の**後に**流す（`_DeliverScoreSets`）。流すスクリプトは `window.autonaPanelShell.openScoreSets(board)` を呼んで `"taken"` を返し、パネル シェルにその関数が無ければ `""`。`runJavaScript` の答えが `"taken"` で、番号が今の依頼のときだけ依頼を消す（答えが来るまで・`""` の間は持ち続け、次の `_Navigate` で流し直す。1 つの文書には答えが来るまで 1 回だけ流す: 下の「S4ab-2 の修正」F2）。`ShowPanel` で別のパネルにしたら依頼を捨てる。読み込みが失敗しても捨てる（同 F1）
+  4. **`web/src/PanelShell/hostApi.ts`**: `window.autonaPanelShell.openScoreSets(board)` を足した。受け口は SCORE ページがマウント時に `registerScoreSetsReceiver` で登録する（`registerRouterNavigate` と同じ形。返り値の解除は自分が今の受け口のときだけ外す）。受け口が無い間（ページの読み込み中・ルーターがまだ SCORE でない）の依頼は 1 つだけ（最新）持ち、登録のときに 1 回だけ渡す。`navigate` で SCORE 以外へ移ったら捨てる
+  5. **`web/src/ScorePage/index.tsx`**: 受け口は依頼を `{board, after: 形式の読みが終わった回数}` として持ち、形式を読み直す（`readFormat`。`useNoticedRead` なので読み中なら今の読みの答えを捨てて読み直す）。**依頼の後に始めた形式の読みが終わり**、ページがボードを描いた（形式あり・`pending` 決着・redux 初期化済み・読み込みの失敗でない = `shown`）ところで 1 回だけ決着させる: 依頼のボードが描いたボードと違えば何もしない、「大会の試合を選ぶ」が出ない（ボード 1 / 2 で大会がある、の `setsOffered` が偽）なら何もしない（どちらもページを見せるだけ。`console.info`）、それ以外は配信台のダイアログを閉じてセット選択のダイアログを開く。読み直しの後にページが読み込みの失敗（`loadFailed` / `pendingNeverRead`）で止まったら、開かずに捨てる（後で手で読み直したときに開かない）。ボタンの条件も同じ `setsOffered` にした（中身は前と同じ）
+  6. `web/src/ScorePage/setRows.ts`: `TAKE_FIRST_ROW_WHEN_NONE_SELECTED` の注釈を「2026-11-11 オーナー決定で残す（ボード 1 / 2 は反映待ちに入るため）」に（値は `true` のまま）
+
+- **判断と理由**
+  1. **入口は `autonaPanelShell` に 1 つ**（S4ab の設計どおり）。Socket.IO の通知にしない: 全端末（LAN のブラウザ・ヘッドレスのブラウザ）でダイアログが開いてしまう。開くのはこの PC の共有ビューだけでよい
+  2. **ホストは受け取りの答えまで依頼を持つ**: ページの文書が無い（初めて開く・破棄からの再読み込み）・凍結中・古い Web UI のビルド（関数が無い）のどれでも落とさず、流せるようになった時点で 1 回届けるため。届けるのは既存の追いつきの場所（`_Navigate`。navigate の後）だけで、新しいタイミングを作っていない。同じ文書には答えが来るまで流し直さない（修正 F2）。次の文書には流し直すので 2 回届くことはあるが、ダイアログを開くだけなので害が無い。番号は、遅れた `"taken"` が新しい依頼を消さないため
+  3. **別のパネルを先に開いたら捨てる**（ホストの `ShowPanel` と hostApi の `navigate` の両方）: 古い依頼を後で（SCORE に戻ったときに）突然開かないため（依頼の条件）。同じ理由で、ホストの読み込みが失敗したときも捨てる（修正 F1）
+  4. **ページは依頼の後に形式を読み直してから決着させる**: シェルは依頼の時点の `ActiveBoard()` で確かめるが、ページは形式の切り替え（`battle_format` の通知）をまだ聞いていないことがある。「通知は合図、読みはその後に始めたものだけを信じる」の S4aa の型に合わせた。依頼 1 回につき `GET /battle-format` が 1 回増える（READ の軽い読み）
+  5. **条件はボタンと同じ（ボード 1 / 2・大会あり）。満たさないときは開かずにページを見せるだけ**（依頼の推奨）。Qt の窓は大会が無くても開いて「大会が選択されていません」を出していた（下の「動作の違い」）
+  6. **`n` の不一致はシェルで止める**（オーナー回答）: 何もしない依頼で操作者の画面（前面・サイドバー）を動かさないため、前に出す前に戻る。legacy の答えは成功と同じ `"OK"`: 今のコードでも答えは「窓が開いたか」を言っていない（例外でも `"OK"`。S3e-9 までは窓を待たずに返していた）ので、Companion などの呼び手が区別できるものは元から無い。外部契約（status と body）を変えないために揃えた。ページも依頼のボードと描いたボードを比べる（シェルの確認と形式の切り替えの間の競合のため）
+  7. **ページへの経路では `Prepare` しない**: ダイアログからの読み込みは v1 の `:load-set`（ボードホストの `Run` の中で未構築のボードを作る）を通るので、開くだけでボードを作って held にする理由が無い。開くだけで反映待ちのボードを増やさない
+  8. **モードの判定は設定を覗くだけ**（`ScoreSetsOnPage`）: 退路を決める（`_SettleWayBack`）のは SCORE を実際に開く `_OnNavSelected` の仕事のまま。Qt モードでは窓を開くだけで SCORE を開かないので、ここで決めると「初めて開いたときに効く」が崩れる
+  9. **シェル操作・`@gui_thread_sync` を足さない**（依頼）: `OpenSetSelection` は元から GUI スレッドで同期に走るシェル操作で、中身だけを変えた。ホットキーは元から GUI スレッド。待つのはリクエストのスレッドだけで、GUI スレッドは何も待たない（pitfalls #17 に触れない）
+  10. **前面化はそれ以上の手を打たない**: Windows はフォアグラウンドを持たないプロセスの `activateWindow` をタスクバーの点滅に変えることがある（外部の Companion からの依頼）。`AttachThreadInput` などの回避は入れていない（新しい仕組みになるため）。止められても、SCORE への切り替えとダイアログはウィンドウの中で済んでいる。実機で見る
+  11. **AutonaHotkeys は変えていない**（他の作業との衝突を避ける依頼の対象）: `_onLoadSet` の判定（アクティブボードが 1 / 2 で構築済みのときだけ `ShowSetSelection`）はそのまま使える。その docstring の「window を開く」は古くなった（S4ac で Qt の窓と一緒に直す）
+
+- **動作の違い**
+  - React モードの Ctrl+Shift+O と legacy の open-set が、別の Qt の窓ではなく、**メインウィンドウを前に出して（最小化からも戻す）サイドバーを SCORE に切り替え**、ページのダイアログを開く。操作者が見ていたパネルは SCORE に替わる
+  - **大会が無いとき**: Qt の窓は開いて「大会が選択されていません」を出していた。ページはダイアログを開かず、SCORE を見せるだけ（ボタンも出ない）
+  - **`n` が形式のボードと違うとき**（1v1 での `/scoreboard2-open-set` など）: Qt の窓はボード 2 の窓を開き、ボード 2 を先に構築していた（held になる）。React モードは何も開かず、ボードも作らない（ログだけ。答えは `"OK"`）。チームの形式なら `/scoreboard2-open-set` で開く
+  - **ボードを作らない**: React モードの legacy の open-set は未構築のボードを構築しない（読み込みは v1 の `:load-set` が準備する）。デスクトップは形式のボードを起動時に建てるので、ふだんは差が出ない
+  - **一覧が 1 つになった**: React モードではどの入口もページのダイアログ（core の `SetSelectionService`）なので、S4ab の「Qt の窓とページのダイアログは一覧を共有しない」は退路の Qt モードだけの話になった
+  - 配信台のダイアログを開いているときの依頼は、配信台を閉じてセット選択を開く（ボタンからは配信台のモーダルの下で押せない）
+  - 依頼のたびにページが `GET /battle-format` を 1 回読む
+  - 変わらないもの: クルーの形式・未構築のアクティブボードでは Ctrl+Shift+O は何もしない（ホットキーの判定はそのまま）。`/scoreboard3-open-set` は 500、ヘッドレスは 503。退路の Qt モードは Qt の窓（前面化・切り替えはしない）。golden（`tests/fixtures/**`）は変えていない
+
+- **ステージの機能の棚卸し**（論点 1 の回答「出さない」を受けて。消すかは S4ac の判断）
+  - core: `src/core/GameTrackerService.py`（`AutonaActions.GameTracker(board)` がボード 1 / 2 に 1 個ずつ持つ）。`score.{n}.stages.*` の記録（`SetStageResult` / `SetStageAsset`）・行数（`SetStageCount` / `ResolveStageCount`。`AutonaActions.SetBestOf` と `RepublishBestOf` が呼ぶ）・集計してスコアへ（`PublishStageResults`）・スコアから行へ（`Scores` + `FollowScores`。+1 / 手入力 / セット読込が呼ぶ）・入替の鏡映（`SwapStageResults`。`AutonaActions.SwapTeams`）・`SumStageResults` / `WonStages` / `FirstEmptyStage` / `SyncStagesToScore`
+  - v1: `GET /api/v1/stages`（`AutonaApiV1.py`。ゲームのステージの一覧。§5.16）・`PATCH /api/v1/scoreboards/{n}/stages/{game}`（1 ゲームの勝者・ステージ。§6.36。S4u）。legacy の Web 操作にも `PublishStageResults` を呼ぶ経路がある（`AutonaWebOperations` の 470 行付近）
+  - Qt: `AutonaIndividualGameTracker`（ステージの行のボタン。`scoreColumn.hide()` で一度も出ていなかった）・`AutonaGameAssetManager.UpdateStageModel` / `LoadStageImage`（ステージのモデル）
+  - **注意**: 行の記録とスコアの追従は、行を出していなくても best_of とスコアの書き込みのたびに core で走っている（`stages` の行数は best_of で決まり、トラッカーが OFF なら追従しない）。消すなら state の `score.{n}.stages`（`program_state.json` と golden に出ている外部の形）と、オーバーレイが読んでいるかを先に確かめる
+
+- **残置とリスク**
+  1. **Windows のフォアグラウンドの制限**: 外部（Companion）からの legacy の open-set では、ウィンドウが前に出ずタスクバーが点滅するだけのことがある。ホットキーで前に出るかも、グローバルフックの扱い次第で実機を見るまで分からない（判断 10）
+  2. `AutonaHotkeys._onLoadSet` の docstring が古い（判断 11）。動作には関係しない
+  3. 古い Web UI のビルド（`openScoreSets` の無い `web/build`）を載せた exe では、ホストが依頼を持ったまま reveal のたびに流し直し、何も開かない（別のパネルを開けば捨てる）。ふつうのビルドでは起きない
+  4. ページの文書が流した直後に消えて `"taken"` が届かなかったときは、次の文書にもう一度届く（ダイアログが開くだけ）
+  5. 依頼の後の形式の読み直しが失敗し、前の形式が分かっているときは、前の形式のボードで決着する（失敗はページの既存のスナックバーで出る）
+  6. 退路の Qt モードの Qt の窓とページのダイアログは、S4ac まで一覧を共有しない（S4ab のリスク 3）
+  7. ページの受け口は SCORE のページが 1 つだけマウントされている前提（共有ビューは 1 枚）。ブラウザで開いた SCORE には誰も依頼を流さない
+
+- **pin**
+  - pytest `tests/test_web_panel_host.py`（+15）: 偽のページの `autonaPanelShell` に `openScoreSets`（そのときのパスを記録）を足し、`buildHost` の `WEB_PANELS` に `scoreboard` を足した。ホスト（実の WebEngine）: 表示中のページに届き、受け取った後は reveal・SCORE のクリックで流し直さない／別のパネルから SCORE へ navigate した後に届く（同じ文書）／ビューの構築の前の依頼は最初の読み込みの後に届く（要求は 1 回）／凍結中の依頼は復帰で届き、新しい依頼が置き換える／破棄中の依頼は再読み込みした文書に届く／別のパネルを先に開くと捨て、SCORE に戻っても届かない／SCORE 以外を表示中の依頼は受けない／関数の無いページでは受け取りまで持ち続け、関数ができた後の reveal で届く。Window（`_WindowRig` に `ScoreSetsOnPage` / `OpenScoreSets` を足した）: 前面化 → サイドバー → ホストへの依頼の順で、ホストは SCORE を表示中／ホストが無ければ SCORE のページに構築してから依頼／ホストの構築に失敗したら依頼しない（例外も出さない）／`ScoreSetsOnPage` は未決なら設定を覗くだけで決めない、決まった後は設定が変わっても決まったまま。`_BringToFront`（実の QMainWindow、3 通り）: 最小化・最大化してから最小化・後ろ、から戻り、最大化は保つ
+  - pytest `tests/test_web_operations.py`（+3）: React モードの legacy の open-set（route と Socket.IO）がページに依頼し、Qt の窓を開かず `Prepare` しない／1v1 の `/scoreboard2-open-set` は `"OK"` で何もせずログを出し、ボード 2 は未構築のまま／チームの形式なら開く／`/scoreboard3-open-set` は 500／リクエストのスレッドからでも GUI スレッドで依頼し、答えの前に済む／退路の Qt モードは Qt の窓（不一致のボードも、構築してから）
+  - pytest `tests/test_scoreboard_operations.py`（+2）: Ctrl+Shift+O が React モードではページに依頼して Qt の窓を開かず、Qt モードでは Qt の窓（アクティブボードの 1 / 2 とも）
+  - jest `web/src/PanelShell/PanelShell.test.js`（+4）: `openScoreSets` が受け口に届く／受け口が無い間は最新の 1 つを持ち、次の登録に 1 回だけ渡す／SCORE 以外への `navigate` で捨て、SCORE への `navigate` では持ち続ける／解除した受け口には届かず、古いページの解除は新しい受け口を外さない
+  - jest `web/src/ScorePage/ScorePage.test.js`（+7）: 依頼で形式を読み直してからそのボードのダイアログが開き、何も書かず、1 回で決着する／ページの読み込み前の依頼は描いた後に開く（1 回）／依頼の後に読んだ形式のボード（切り替え直後）で開き、そのボードに読み込む／形式と違うボードの依頼は開かない／大会が無い・クルーでは開かず、後で大会が来ても開かない／配信台のダイアログを閉じて開く／読み込みに失敗したページの依頼は捨て、手で読み直しても開かない
+  - e2e `web/e2e/score.spec.ts`（+1。隔離ヘッドレス）: 別のパネルを開いたページで、ホストが流すのと同じ手順（`navigate("scoreboard")` → `openScoreSets(1)`）にビルド済みのパネル シェルが `"taken"` を答え、SCORE が出て、ページが依頼を決着させる（大会が無いのでダイアログは開かない）
+  - **pin が落ちることの確認**（1 か所ずつ壊して、壊したファイルは毎回元のバイトに戻した。sha1 で確認）: Python 11 通り（ホットキーがいつも Qt の窓・legacy がいつも Qt の窓・不一致の確認なし・ページの経路でも `Prepare`・`ShowPanel` が依頼を捨てない・`_Navigate` が流さない・ページの答えを見ずに消す・SCORE 以外でも受ける・`ScoreSetsOnPage` が決まった Qt を見ない・`OpenScoreSets` が SCORE を開かない・`_BringToFront` が最小化を解かない）と Web 8 通り（hostApi が持たない（hostApi のテストとページのテストの両方で落ちることを確認）・別のパネルでも捨てない・2 回渡す・ページが別のボードでも開く・大会が無くても開く・依頼の後の読みを待たない・配信台を閉じない・読み込みに失敗した依頼を持ち続ける）はすべてテストが落ちた。配信台を閉じない壊し方は最初テストが通った（後から開いたモーダルが前のダイアログをアクセシビリティツリーから隠すため）ので、隠れたものも数える問い合わせ（`hidden: true`）に直して落ちることを確かめた
+  - 既存の pin: ルート台帳（`tests/test_webserver_routes.py`）・`WEB_PANELS`（`tests/test_web_access.py`）・`test_the_desktop_shell_operations_*`（ハーネスは親が無いので Qt の窓の経路）は変えずに通る
+
+- **検証**（最後のソースの編集の後に、直列で）
+  - `npm run build`: exit 0（警告は既存の `Header.jsx` だけ）
+  - `CI=true npm test -- --watchAll=false`: exit 0。37 suites / 1104 passed
+  - `npm run test:e2e`: exit 0。77 passed（e2e の新しいテストを足した後に回し直した数。足す前は 76 passed）
+  - `python -m pytest -q`（関連 20 ファイル: `test_web_panel_host` / `test_scoreboard_operations` / `test_web_operations` / `test_set_selection` / `test_select_set_cache` / `test_set_follow` / `test_set_follow_flow` / `test_web_access` / `test_webserver_routes` / `test_bootstrap_split` / `test_import_side_effects` / `test_signal_lifetime` / `test_headless_seed` / `test_headless` / `test_core_qt_free` / `test_objectname_keypath_contract` / `test_hotkeys_enabled` / `test_hotkeys_suspend` / `test_api_v1_score` / `test_api_v1_tournament`）: exit 0。1207 passed（5 分 12 秒）
+  - e2e の新しいテストが落ちることの確認: hostApi の登録のときの受け渡しだけを外してビルドし（ビルドは通る）、そのテストだけを回すとページが依頼を受け取らずにタイムアウトで落ちた。元のバイトに戻して（`cmp` で一致）ビルドし直し、同じテストが通ることを確かめた（`web/build` は戻したソースのビルド）
+  - pytest 全量は回していない（verify の担当）
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`。大会は start.gg の実 URL。手順は `.claude/manual-test-checklist.md` の「スコアボード入力（SCORE。Web 版）」の S4ab-2 の項目）
+  1. 大会を読み込んだ 1v1 で、EVENT などを開いた状態から Ctrl+Shift+O → ウィンドウが前に出て SCORE に替わり、「セットを選ぶ」のダイアログが開く（Qt の窓は開かない）。チームの形式ではボード 2。クルーでは何も起きない
+  2. ウィンドウを最小化して Ctrl+Shift+O → 元の大きさ（最大化していたら最大化）で前に出てダイアログ。OBS を前面にして押したときに前に出るか（点滅だけなら報告）
+  3. 起動直後に SCORE を一度も開かずに Ctrl+Shift+O → SCORE のページが建ってからダイアログ。SCORE を開いてしばらく別のパネルにいた後（凍結・破棄の後）でも開く
+  4. 大会が無いときは SCORE に替わるだけ。配信台のダイアログを開いた状態で押すと、配信台が閉じてセット選択
+  5. ブラウザから `http://127.0.0.1:5107/scoreboard1-open-set`（1v1）→ `OK` で 1 と同じ。`/scoreboard2-open-set`（1v1）→ `OK` で何も開かず、ログに `nothing opened`。Companion のボタンから押したときに前に出るか
+  6. 退路の Qt モード（「従来版（Qt）で表示する」ON で再起動）: Ctrl+Shift+O と open-set は今までどおり Qt の窓（前面化・切り替えなし）
+
+##### S4ab-2 の修正（独立レビューと実機確認）（2026-11-11）
+
+独立レビューとメインの実機確認で見つかった項目を直した。上の記述のうち、ここで変わったものはこの節が正（上の実装 3・判断 2 / 3 は、この節に合わせて書き直してある）。
+
+- **直したこと**
+  - **R1（実機）セット選択の表が空のとき、ヘッダが 1 文字ずつ縦に折り返していた**: `web/src/ScorePage/SetSelection.tsx` の `ListTable` のヘッダセルに `whiteSpace: "nowrap"`。行が無いと列の幅を広げるものが無く、日本語の見出しが文字ごとに折り返していた。広すぎれば表（`TableContainer`）が横にスクロールする。`ListTable` は配信台の表と共通なので、そちらも同じ
+  - **F1（中）読み込みに失敗したホストが依頼を持ち続けていた**: `AutonaWebPanelHost._OnLoadFinished` で、拒否した遷移（`refusedLast`。文書は残っている）でない失敗なら依頼を捨ててログに出す（`... asked for is dropped: the view failed to load`）。後で別の理由（reveal・ほかの項目のクリック）で読み込みが成功しても、頼んでいないダイアログは開かない。操作者がもう一度押せば、その押下の `_OnNavSelected` → `ShowPanel` が読み直しを始め、新しい依頼はその読み込みの後に届く
+  - **F2（低・任意）答えが戻る前に同じ文書へ 2 回流れうる**: 示された「`ShowPanel` の前に依頼を取り出して入れ替える」形ではなく、**流した依頼の番号（`_scoreSetsRunning`）を持ち、答えが来るまで同じ文書には流さない**形にした。答えが `"taken"` 以外（古いビルドの `""`）なら番号を外して次の `_Navigate` で流し直す。新しい文書（`_OnLoadFinished`）でも外す（前の文書の答えは来ないことがある）。理由: 答えの前に流し直す経路は `Window.OpenScoreSets` の `ShowPanel` だけでなく、reveal（`_OnActive`）と SCORE のクリックにもある。`ShowPanel` の前で入れ替えるだけではそちらが残るが、ホストの 1 か所なら全経路を止められる
+  - **F4（低）`OpenSetSelection` の `_OpensOnPage()` が try の外だった**: ページへの経路を `AutonaShellOperations._OpenedOnPage(board)` にまとめ、`_OpensOnPage()` と `_OpenOnPage()` の両方を try の中に入れた。例外はログ（`... did not open`）に出すだけで、ページの経路として扱う（何も開かない）。legacy は `"OK"` を返す。Qt の窓の経路の `Prepare` は今までどおり try の外（失敗は 500。S4ab-2 の前と同じ）
+  - **F7e のため、ホットキー（`ShowSetSelection`）のページへの経路も同じ `_OpenedOnPage` を通す**: 例外を `AutonaHotkeys._onLoadSet`（Qt のスロットなので `sys.excepthook`）に漏らさない。Qt の窓の経路の例外の扱いは変えていない
+  - **F5（低）終了処理中の `Window.OpenScoreSets`**: `_shuttingDown`（`closeEvent` が立てる）なら、何もせずログに出すだけ。ウィンドウを前に出し直したり、壊している途中のホストを建てたりしない
+  - **F6 docs**:
+    - `.claude/rules/state-and-webserver.md` の 2 か所（ホットキーの `load_set` の段落と、シェル操作 `OpenSetSelection` の段落）: React モードでは `Prepare` しない・ページのダイアログを開く・`n` の不一致はログだけ
+    - `AutonaShellOperations.OpenSetSelection` の docstring
+    - `AutonaWebOperations` のモジュール docstring（シェル操作の項）と `open_sets` の docstring
+    - `AutonaHotkeys._onLoadSet` の docstring は触っていない（S4ae が別の worktree で同じファイルを変えている。S4ac で直す）
+  - 実機確認チェックリストに 2 項目を足した: 「0 件でもヘッダが 1 行」と「閉じた後に SCORE に戻っても 2 回目は開かない」
+  - 見送り: F3（`readFormat` の成功で characters の読み込み失敗フラグが消える）は S4ac で扱う
+- **テスト**（足したもの・強めたもの）
+  - jest `ScorePage.test.js`（+1）: `with no rows the headers stay on one line`（行 0 件でダイアログを開き、7 つのヘッダセルすべての計算済みスタイルが `white-space: nowrap`）
+  - jest `ScorePage.test.js`（2 本を強めた。F7c）: `the desktop's request for another board than the format's opens nothing` と `the desktop's request without a tournament (or on the crew board) opens nothing` が、依頼ごとに `GET /battle-format` が 1 回増えたこと（依頼の後に読み直してから決着したこと）も見る
+  - pytest `tests/test_web_panel_host.py`（+4）
+    - `test_the_score_sets_are_run_into_a_document_once_until_answered`（F2）
+    - `test_a_late_answer_to_an_older_request_leaves_the_newer_one`（F7a）: 依頼 1 の後にページの関数を消して依頼 2 を出す（答えは `""`）。遅れて届く依頼 1 の `"taken"` は依頼 2 を消さず、関数を戻した後の reveal で依頼 2 が届く
+    - `test_the_score_sets_are_dropped_when_the_view_fails_to_load`（F1 / F7b）: SCORE を初めて開くときに依頼し、読み込みが失敗 → 捨ててログ。次のクリックで読み込みが成功しても届かない。`_failedFirstLoad` に `panel` と `scoreSets` の引数を足した（既定は前と同じ）
+    - `test_the_set_selection_asked_for_while_the_window_closes_does_nothing`（F5）。`_WindowRig` に `_shuttingDown = False` を足した
+  - pytest `tests/test_web_operations.py`（+2。parametrize）: `test_on_the_score_page_an_open_set_that_raises_still_answers_ok[OpenScoreSets|ScoreSetsOnPage]`（F4 / F7e）: `"OK"` が返り、例外の報告は 1 回だけで、Qt の窓も `Prepare` も無い
+  - pytest `tests/test_scoreboard_operations.py`（+2。parametrize）: `test_the_load_set_hotkey_on_the_score_page_does_not_raise[OpenScoreSets|ScoreSetsOnPage]`（F7e）: `sys.excepthook` に届かず、ログに 1 回出て、Qt の窓は開かない
+- **pin が落ちることの確認**（1 か所ずつ壊し、毎回 `cmp` で元のバイトに戻した）
+  - R1: ヘッダセルの `whiteSpace` を外す → 新しいテストが落ちた（`""`）
+  - F7c: 受け口の `readFormat()` を外す → 強めた 2 本が落ちた（読みの回数）
+  - F1: 読み込みの失敗で捨てない → F1 のテストが落ちた
+  - F2: 流した番号を見ない → F2 のテストが落ちた（2 回届いた）
+  - F7a: 答えの番号を見ない → F7a のテストが落ちた
+  - F5: `_shuttingDown` を見ない → F5 のテストが落ちた
+  - F4: `_OpensOnPage()` を try の外へ戻す → `ScoreSetsOnPage` の 2 本（legacy・ホットキー）が落ち、`OpenScoreSets` の 2 本は通った
+  - F7e: 例外を捕まえない（except を `ZeroDivisionError` に） → 4 本とも落ちた
+- **検証**（最後のソースの編集の後に、直列で）: `npm run build` exit 0（警告は既存の `Header.jsx` だけ）／`CI=true npm test -- --watchAll=false` exit 0、37 suites / 1105 passed／`npm run test:e2e` exit 0、77 passed／`python -m pytest tests/test_web_panel_host.py tests/test_web_operations.py tests/test_scoreboard_operations.py tests/test_set_selection.py -q -p no:cacheprovider` exit 0、491 passed。pytest 全量は回していない（verify の担当）。アプリの起動はしていない
+- **メインの実機確認**（隔離データ。2026-11-11）
+  - デスクトップ（修正前のビルド）: EVENT から legacy の `/scoreboard1-open-set` → SCORE に替わってページのダイアログが開く／1v1 の `/scoreboard2-open-set` → `OK` でログに `nothing opened`、画面は EVENT のまま／最小化から open-set → 元に戻って SCORE とダイアログ（curl からの依頼なのでフォアグラウンドは取れない。リスク 1 のとおり）
+  - ヘッドレス + ブラウザ（修正後）: 表が 0 件でもヘッダが横 1 行（7 列とも高さ 36px・`nowrap`）。幅 560px では `TableContainer` の中が横にスクロールし、ページは横にはみ出さない
+  - 未確認: 本物のホットキー Ctrl+Shift+O（画面がロックされていて Autona を前面に出せなかった）、チームの形式でボード 2、配信台を開いた状態からの依頼、退路の Qt モード、OBS / Companion が前面のときの前面化。S4ac の前の実機ゲート（IME と一緒）で見る

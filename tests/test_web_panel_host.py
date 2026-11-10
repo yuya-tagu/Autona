@@ -24,8 +24,9 @@ for every panel moved to React. What has to hold:
 These drive a real QWebEngineView (offscreen) against a throwaway local
 HTTP server, because the behaviour under test is Qt's. The served page
 stands in for the Web UI's panel shell (``window.autonaPanelShell``,
-web/src/PanelShell/hostApi.ts): it records the navigations and full-state
-requests the host makes, and navigates the way the shell does
+web/src/PanelShell/hostApi.ts): it records the navigations, full-state
+requests and SCORE set selections (S4ab-2, with the path the page was on
+then) the host makes, and navigates the way the shell does
 (``history.replaceState``, keeping the query). The real shell is covered by
 the Web UI's own tests and by Playwright (web/e2e/panel-shell.spec.ts).
 """
@@ -60,6 +61,7 @@ PAGE = b"""<!doctype html><html><body><script>
 window.__loadId = Math.random();
 window.__navigations = [];
 window.__refreshes = 0;
+window.__scoreSets = [];
 window.autonaPanelShell = {
   navigate: function (p) {
     var target = '/web/' + encodeURIComponent(p);
@@ -67,7 +69,10 @@ window.autonaPanelShell = {
     window.__navigations.push(p);
     history.replaceState(null, '', target + location.search);
   },
-  refresh: function () { window.__refreshes += 1; }
+  refresh: function () { window.__refreshes += 1; },
+  openScoreSets: function (b) {
+    window.__scoreSets.push(b + '@' + location.pathname);
+  }
 };
 </script></body></html>"""
 
@@ -190,7 +195,8 @@ def buildHost(qapp, panelServer, monkeypatch):
     requests.clear()
     # The gate is open, the port lookup is answered without the settings
     # file (rig.usePort() points it elsewhere), the Qt language is
-    # Japanese, and there is a second panel to switch to.
+    # Japanese, and there is a second panel to switch to -- and SCORE, whose
+    # set selection the host hands to its page (S4ab-2).
     monkeypatch.setattr(WPL, "_webServerReady", True)
     monkeypatch.setattr(WPL, "_pendingLoaders", [])
     monkeypatch.setattr(WPL, "_readyCallbacks", [])
@@ -203,7 +209,7 @@ def buildHost(qapp, panelServer, monkeypatch):
                                    else realGet(key, default)))
     monkeypatch.setattr(AutonaLocaleHelper, "programLocale", "ja")
     monkeypatch.setattr(WebAccess, "WEB_PANELS",
-                        frozenset({"shell-check", "second"}))
+                        frozenset({"shell-check", "second", "scoreboard"}))
     rigs = []
 
     def build(discardAfterMs=60_000):
@@ -237,13 +243,17 @@ def refusedPort():
     sock.close()
 
 
-def _failedFirstLoad(buildHost, monkeypatch, refusedPort):
+def _failedFirstLoad(buildHost, monkeypatch, refusedPort, panel="shell-check",
+                     scoreSets=None):
     # The host is shown while nothing listens on the port: the loader's
-    # retries are used up and the view is left on an error page.
+    # retries are used up and the view is left on an error page. `scoreSets`:
+    # SCORE's set selection asked for before the view is built.
     monkeypatch.setattr(WPL.LocalPageLoader, "LOAD_RETRY_MS", 50)
     rig = buildHost()
     rig.usePort(refusedPort)
-    rig.host.ShowPanel("shell-check")
+    rig.host.ShowPanel(panel)
+    if scoreSets is not None:
+        rig.host.OpenScoreSets(scoreSets)
     rig.reveal()
     attempts = 1 + WPL.LocalPageLoader.MAX_LOAD_RETRIES
     assert _waitUntil(lambda: len(rig.loads) >= attempts)
@@ -1063,6 +1073,220 @@ def test_a_discarded_host_reloads_on_reveal_with_the_panel_chosen_meanwhile(
     assert rig.js("window.__loadId") != document
     assert rig.js("window.__navigations.join()") == "second"
     assert rig.path()[1] == "desktop=1&lng=ja"
+
+
+# ── SCORE's set selection from the hotkey / legacy route (ADR-005 S4ab-2) ─
+#
+# Window.OpenScoreSets shows SCORE (ShowPanel) and then asks the host, which
+# hands the request to the page's panel shell after the navigation, when the
+# page can take script -- now, or after the view's first load, a thaw, the
+# reload of a discarded page -- and holds it until a panel shell has it.
+
+def _scoreShown(buildHost, **kwargs):
+    rig = buildHost(**kwargs)
+    rig.host.ShowPanel("scoreboard")
+    rig.reveal()
+    rig.waitLoaded()
+    return rig
+
+
+def _scoreSets(rig):
+    return rig.js("window.__scoreSets.join()")
+
+
+def _taken(rig):
+    return _waitUntil(lambda: rig.host._scoreSets is None)
+
+
+def test_the_score_sets_reach_the_page_shown_once(buildHost):
+    rig = _scoreShown(buildHost)
+
+    rig.host.OpenScoreSets(2)
+
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert _taken(rig)
+    # Taken: not handed again by a later reveal or a click on SCORE.
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.reveal()
+    rig.host.ShowPanel("scoreboard")
+    assert _waitUntil(lambda: rig.js("window.__refreshes") > 0)
+    assert not _waitUntil(lambda: _scoreSets(rig) != "2@/web/scoreboard",
+                          timeout=0.5)
+
+
+def test_the_score_sets_follow_the_navigation_to_score(buildHost):
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+
+    rig.host.ShowPanel("scoreboard")
+    rig.host.OpenScoreSets(1)
+
+    # On SCORE when the page has it: the same document, navigated first.
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
+    assert rig.js("window.__navigations.join()") == "scoreboard"
+    assert rig.js("window.__loadId") == document
+    assert _taken(rig)
+
+
+def test_the_score_sets_asked_before_the_view_is_built_reach_its_first_load(
+        buildHost):
+    # SCORE opened for the first time by the hotkey: the view is built, the
+    # page loaded, then handed the request.
+    rig = buildHost()
+    rig.host.ShowPanel("scoreboard")
+    rig.host.OpenScoreSets(1)
+    assert rig.host.view is None
+    assert rig.host._scoreSets is not None
+
+    rig.reveal()
+    rig.waitLoaded()
+
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
+    assert rig.requests == ["/web/scoreboard?desktop=1&lng=ja"]
+    assert _taken(rig)
+
+
+def test_the_score_sets_asked_while_frozen_reach_the_page_on_reveal(buildHost):
+    rig = _scoreShown(buildHost)
+    document = rig.js("window.__loadId")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+
+    rig.host.OpenScoreSets(1)
+    # A newer one replaces it.
+    rig.host.OpenScoreSets(2)
+    assert rig.host._scoreSets is not None
+    rig.reveal()
+
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert rig.js("window.__loadId") == document
+    assert _taken(rig)
+
+
+def test_the_score_sets_asked_while_discarded_reach_the_reloaded_page(
+        buildHost):
+    rig = _scoreShown(buildHost, discardAfterMs=200)
+    document = rig.js("window.__loadId")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == DISCARDED)
+
+    rig.host.OpenScoreSets(2)
+    rig.reveal()
+
+    rig.waitLoaded(count=2)
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert rig.js("window.__loadId") != document
+    assert _taken(rig)
+
+
+def test_the_score_sets_are_forgotten_when_another_panel_is_shown_first(
+        buildHost):
+    # The operator went elsewhere before the page could have it: not opened
+    # later, out of the blue, when SCORE is shown again.
+    rig = _scoreShown(buildHost)
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.host.OpenScoreSets(1)
+
+    rig.host.ShowPanel("second")
+    assert rig.host._scoreSets is None
+    rig.host.ShowPanel("scoreboard")
+    rig.reveal()
+
+    assert _waitUntil(lambda: rig.js("window.__refreshes") > 0)
+    assert not _waitUntil(lambda: _scoreSets(rig) != "", timeout=0.5)
+
+
+def test_the_score_sets_are_not_asked_of_another_panel(buildHost):
+    rig = _shown(buildHost)
+
+    rig.host.OpenScoreSets(1)
+
+    assert rig.host._scoreSets is None
+    assert not _waitUntil(lambda: _scoreSets(rig) != "", timeout=0.5)
+    assert rig.path()[0] == "/web/shell-check"
+
+
+def test_the_score_sets_wait_for_a_page_that_can_take_them(buildHost):
+    # A Web UI built before the call existed: held (each reveal tries again)
+    # until a panel shell has it.
+    rig = _scoreShown(buildHost)
+    rig.js("void (window.__open = window.autonaPanelShell.openScoreSets,"
+           " delete window.autonaPanelShell.openScoreSets)")
+
+    rig.host.OpenScoreSets(1)
+    assert not _waitUntil(lambda: rig.host._scoreSets is None, timeout=0.5)
+
+    rig.js("void (window.autonaPanelShell.openScoreSets = window.__open)")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.reveal()
+
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
+    assert _taken(rig)
+
+
+def test_the_score_sets_are_run_into_a_document_once_until_answered(buildHost):
+    # A click on SCORE (or a reveal) before the page's answer is back: not
+    # handed over a second time.
+    rig = _scoreShown(buildHost)
+
+    rig.host.OpenScoreSets(1)
+    rig.host.ShowPanel("scoreboard")
+    rig.host.ShowPanel("scoreboard")
+
+    assert _taken(rig)
+    assert _scoreSets(rig) == "1@/web/scoreboard"
+
+
+def test_a_late_answer_to_an_older_request_leaves_the_newer_one(buildHost):
+    # Request 1 is run; before its "taken" is back, request 2 is run into a
+    # page that cannot take it (its answer is ""). Request 1's answer does not
+    # drop request 2, which reaches the page once it can.
+    rig = _scoreShown(buildHost)
+
+    rig.host.OpenScoreSets(1)
+    # In order after request 1's script, before request 2's.
+    rig.page.runJavaScript(
+        "void (window.__open = window.autonaPanelShell.openScoreSets,"
+        " delete window.autonaPanelShell.openScoreSets)")
+    rig.host.OpenScoreSets(2)
+
+    # Both answers back: request 2's ("") clears what was running.
+    assert _waitUntil(lambda: rig.host._scoreSetsRunning is None)
+    assert _scoreSets(rig) == "1@/web/scoreboard"
+    assert rig.host._scoreSets is not None
+    assert rig.host._scoreSets[1] == 2
+
+    rig.js("void (window.autonaPanelShell.openScoreSets = window.__open)")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.reveal()
+
+    assert _waitUntil(
+        lambda: _scoreSets(rig) == "1@/web/scoreboard,2@/web/scoreboard")
+    assert _taken(rig)
+
+
+def test_the_score_sets_are_dropped_when_the_view_fails_to_load(
+        buildHost, monkeypatch, refusedPort, caplog):
+    # Asked for on SCORE's first opening while the server does not answer:
+    # the load fails for good. A later load that succeeds -- the operator's
+    # next click on an item -- does not open the dialog out of the blue.
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        rig = _failedFirstLoad(buildHost, monkeypatch, refusedPort,
+                               panel="scoreboard", scoreSets=1)
+    failures = len(rig.loads)
+    assert rig.host._scoreSets is None
+    assert "dropped: the view failed to load" in caplog.text
+
+    rig.host.ShowPanel("scoreboard")
+
+    rig.waitLoaded(count=failures + 1)
+    assert rig.requests == ["/web/scoreboard?desktop=1&lng=ja"]
+    assert rig.path()[0] == "/web/scoreboard"
+    assert not _waitUntil(lambda: _scoreSets(rig) != "", timeout=0.5)
 
 
 def test_a_failed_load_is_loaded_again_on_the_next_panel_shown(
@@ -1949,7 +2173,8 @@ class _WindowRig:
                "_EnsurePanelAt", "_WebPanel", "_AdoptWebPanelHost",
                "_PreparePanel", "_CreateEventPanel", "_CreateStreamPanel",
                "_CreateScoreboardPanel", "_CreateTop8Panel",
-               "_CreateCommentaryPanel", "_CreateStatsPanel")
+               "_CreateCommentaryPanel", "_CreateStatsPanel",
+               "ScoreSetsOnPage", "OpenScoreSets")
 
     def __init__(self, qtScoreboard=False):
         import ast
@@ -1998,6 +2223,7 @@ class _WindowRig:
         w._wayBackItems = {}
         w._qtPanels = set()
         w._buildingPanel = False
+        w._shuttingDown = False
         # The Qt SCORE panel: the dock holding the boards, made at startup and
         # on no page until the way back makes it the item's.
         w.scoreboard = QDockWidget("Scoreboard")
@@ -2335,3 +2561,149 @@ def test_the_way_back_is_read_once_per_run(qapp):
     assert rig.choose(SCOREBOARD) == SCOREBOARD
     assert rig.window.stack.widget(SCOREBOARD) is rig.window.scoreboard
     assert rig.window._webPanelHost._panel == "stream"
+
+
+# ── SCORE's set selection asked for from outside (ADR-005 S4ab-2) ───────
+
+def _askingScoreSets(rig, monkeypatch):
+    """What OpenScoreSets does, in order: the window brought to the front,
+    the sidebar's item, the host asked (with the panel it shows then)."""
+    order = []
+    w = rig.window
+    w._BringToFront = lambda: order.append("front")
+    w.sidebar = SimpleNamespace(
+        setCurrentIndex=lambda nav: order.append(("sidebar", nav)))
+    monkeypatch.setattr(
+        AutonaWebPanelHost, "OpenScoreSets",
+        lambda host, board: order.append(("asked", host._panel, board)))
+    return order
+
+
+def test_the_set_selection_asked_for_shows_score_and_asks_its_page(
+        qapp, monkeypatch):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingScoreSets(rig, monkeypatch)
+    rig.choose(STREAM)
+
+    assert w.ScoreSetsOnPage()
+    w.OpenScoreSets(2)
+
+    # As a click on SCORE (the same host page, told SCORE), then the host.
+    assert order == ["front", ("sidebar", SCOREBOARD),
+                     ("asked", "scoreboard", 2)]
+    assert w.stack.currentIndex() == STREAM
+    assert rig.hosts() == [STREAM]
+    assert SCOREBOARD not in w._lazyPanels
+
+
+def test_the_set_selection_asked_for_first_builds_the_host_on_score(
+        qapp, monkeypatch):
+    # The hotkey before any React item was opened (EVENT restored on a Qt
+    # item): the host is built on SCORE's page, then asked.
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingScoreSets(rig, monkeypatch)
+    rig.choose(LAZY_QT)
+
+    w.OpenScoreSets(1)
+
+    assert order == ["front", ("sidebar", SCOREBOARD),
+                     ("asked", "scoreboard", 1)]
+    assert w.stack.currentIndex() == SCOREBOARD
+    assert rig.hosts() == [SCOREBOARD]
+
+
+def test_the_set_selection_asked_for_without_a_host_asks_nothing(
+        qapp, monkeypatch):
+    # The host failed to be built (logged by _EnsurePanelAt): no page to ask,
+    # and nothing raised to the hotkey or the route.
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingScoreSets(rig, monkeypatch)
+
+    def failing(panel):
+        raise RuntimeError("injected")
+
+    w._PreparePanel = failing
+
+    w.OpenScoreSets(1)
+
+    assert order == ["front", ("sidebar", SCOREBOARD)]
+    assert w._webPanelHost is None
+
+
+def test_the_set_selection_asked_for_while_the_window_closes_does_nothing(
+        qapp, monkeypatch):
+    # closeEvent has begun the teardown: not shown again, no host built for
+    # the request.
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingScoreSets(rig, monkeypatch)
+    rig.choose(LAZY_QT)
+    w._shuttingDown = True
+
+    w.OpenScoreSets(1)
+
+    assert order == []
+    assert w.stack.currentIndex() == LAZY_QT
+    assert rig.hosts() == []
+
+
+def test_the_set_selection_is_the_pages_unless_score_is_the_qt_panel(qapp):
+    # Not chosen yet: the setting looked at, not settled (it still takes
+    # effect on the item's first choice).
+    rig = _WindowRig()
+    w = rig.window
+    assert w.ScoreSetsOnPage() is True
+    assert SCOREBOARD in w._wayBackItems and w._qtPanels == set()
+    assert rig.hosts() == []
+    rig = _WindowRig(qtScoreboard=True)
+    w = rig.window
+    assert w.ScoreSetsOnPage() is False
+    assert SCOREBOARD in w._wayBackItems and w._qtPanels == set()
+
+    # Chosen: what was settled, whatever the setting says since.
+    rig.choose(SCOREBOARD)
+    rig.qtSetting["scoreboard"] = False
+    assert w.ScoreSetsOnPage() is False
+    rig = _WindowRig()
+    rig.choose(SCOREBOARD)
+    rig.qtSetting["scoreboard"] = True
+    assert rig.window.ScoreSetsOnPage() is True
+
+
+@pytest.mark.parametrize("state", ["minimized", "maximized-then-minimized",
+                                   "behind"])
+def test_bringing_the_window_to_the_front_restores_it(qapp, state):
+    import ast
+
+    from qtpy.QtWidgets import QMainWindow
+
+    method = _windowMethod("_BringToFront")
+    cls = ast.parse("class Front(QMainWindow):\n    pass\n").body[0]
+    cls.body = [method]
+    namespace = {"QMainWindow": QMainWindow, "Qt": Qt}
+    exec(compile(ast.fix_missing_locations(ast.Module(
+        body=[cls], type_ignores=[])), "src/Autona.py", "exec"), namespace)
+    window = namespace["Front"]()
+    try:
+        window.show()
+        if state == "minimized":
+            window.showMinimized()
+        elif state == "maximized-then-minimized":
+            window.showMaximized()
+            window.setWindowState(window.windowState()
+                                  | Qt.WindowState.WindowMinimized)
+        assert _waitUntil(lambda: window.isVisible(), timeout=5)
+        assert window.isMinimized() is (state != "behind")
+
+        window._BringToFront()
+
+        assert not window.isMinimized()
+        assert window.isVisible()
+        assert window.isMaximized() is (state == "maximized-then-minimized")
+    finally:
+        window.close()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)

@@ -7,7 +7,8 @@ import {keepLocal, serverUrl} from "./server";
 // the overlay follows), and follows a format switched elsewhere (the
 // `battle_format` notice). Checked through text, the DOM and the API. The set
 // selection (S4ab) needs a tournament, which the e2e app cannot load: only its
-// absence is checked here (the rest is ScorePage.test.js's).
+// absence is checked here, and that the desktop's request for it (S4ab-2)
+// reaches the built page (the rest is ScorePage.test.js's).
 
 let pageErrors: string[] = [];
 
@@ -215,6 +216,33 @@ test("with no tournament there is no set selection and no timer row", async ({pa
     await expect(page.getByRole("button", {name: "Choose a match of the tournament"}))
         .toHaveCount(0);
     await expect(page.getByTestId("score-follow")).toHaveCount(0);
+});
+
+test("the desktop's view asking for the set selection shows SCORE, no dialog without a tournament",
+     async ({page}) => {
+    // What src/AutonaWebPanelHost.py runs for Ctrl+Shift+O and the legacy
+    // open-set (S4ab-2) when the view was on another panel: navigate, then
+    // the request, answered "taken" by the built bundle's panel shell.
+    await page.goto(serverUrl("/web/shell-check?desktop=1&lng=en"));
+    await expect(page.getByRole("heading", {name: "Panel shell check"})).toBeVisible();
+    const settled = page.waitForEvent("console", (message) =>
+        message.text().includes("set selection of board 1 was asked for"));
+
+    const answer = await page.evaluate(() => {
+        const shell = (window as any).autonaPanelShell;
+        shell.navigate("scoreboard");
+        if (shell && shell.openScoreSets) {
+            shell.openScoreSets(1);
+            return "taken";
+        }
+        return "";
+    });
+
+    expect(answer).toBe("taken");
+    await expect(page.getByRole("combobox", {name: "1P player name"})).toBeVisible();
+    // The page settled it -- no tournament, so nothing to open.
+    expect((await settled).text()).toContain("no tournament");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("as the desktop's view opens it: in its language", async ({page}) => {
