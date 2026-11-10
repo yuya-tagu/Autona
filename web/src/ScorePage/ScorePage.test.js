@@ -433,6 +433,33 @@ test("a first load that fails says so, and the reload reads it again", async () 
     expect(tagField(1)).toBeInTheDocument();
 });
 
+test("a failed character list stays said when the format is read again; the reload reads both", async () => {
+    refuse["/api/v1/characters"] = {status: 500};
+    await renderPage();
+    for (let attempt = 1; attempt < LOAD_ATTEMPTS; attempt++) {
+        await settle(LOAD_RETRY_MS * attempt);
+    }
+    expect(screen.getByText(i18n.t("score_load_failed"))).toBeInTheDocument();
+
+    // The format is read again and answers: the characters' failure stays.
+    await notify("battle_format");
+    expect(screen.getByText(i18n.t("score_load_failed"))).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", {name: i18n.t("score_player_name", {team: 1})}))
+        .toBeNull();
+
+    // The reload reads both; both answering clears the failure.
+    delete refuse["/api/v1/characters"];
+    const formats = reads("/api/v1/battle-format");
+    const characters = reads("/api/v1/characters");
+    fireEvent.click(button("score_reload"));
+    await settle();
+    await settle();
+    expect(reads("/api/v1/battle-format")).toBe(formats + 1);
+    expect(reads("/api/v1/characters")).toBe(characters + 1);
+    expect(screen.queryByText(i18n.t("score_load_failed"))).toBeNull();
+    expect(tagField(1)).toBeInTheDocument();
+});
+
 test("a load that fails once is tried again", async () => {
     server.formatFailures = 1;
     await renderPage();

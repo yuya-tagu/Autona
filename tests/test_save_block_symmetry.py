@@ -144,7 +144,7 @@ def test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked(
     from src.core.Actions import AutonaActions
     from src.core.GameTrackerService import GameTrackerService
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
     state = autonaApp.state
     try:
         with patch.object(GameTrackerService, "SetStageCount",

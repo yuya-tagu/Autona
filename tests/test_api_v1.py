@@ -43,6 +43,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.SettingsManager import SettingsManager
+from tests.conftest import load_player
 # goldenGames / onLoadCount are fixtures: the S1a fixture games installed
 # into the harness, and the count of onLoad emissions.
 from tests.test_game_asset_manager_models import (
@@ -73,16 +74,23 @@ def client(autonaApp, webApp):
     return webApp.test_client()
 
 
+def _actions():
+    from src.core.Actions import AutonaActions
+    return AutonaActions.instance
+
+
 def _boardState(app, n):
     return copy.deepcopy(app.get(f"score.{n}"))
 
 
 def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
-                       ignore=()):
+                       ignore=(), widgets=False):
     """Run `legacy` and `v1` on two fresh copies of board `n`; compare.
 
     `legacy` / `v1` issue the request(s) and return the last response;
-    `prepare(board)` puts the board into the state both start from.
+    `prepare(board)` puts the board into the state both start from: the
+    board's number, made in core with no widget (ADR-005 S4ac-2), or with
+    `widgets` the board's widgets (a test that checks them after).
     `changes` asserts the request actually moved the board, so two no-ops
     cannot pass as "the same result". `ignore` names top-level keys of
     score.{n} left out of the comparison (a documented legacy side effect
@@ -90,7 +98,7 @@ def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
     """
     results = []
     for run, isV1 in ((legacy, False), (v1, True)):
-        board = app.board(n)
+        board = app.board(n) if widgets else app.ready(n)
         if prepare is not None:
             prepare(board)
         app.settle()
@@ -112,9 +120,10 @@ def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
     return v1State
 
 
-def _scoreTwoOne(board):
-    board.CommandScoreChange(0, 2)
-    board.CommandScoreChange(1, 1)
+def _scoreTwoOne(n):
+    # What the board's +1 buttons run (its CommandScoreChange).
+    _actions().AdjustScore(n, 1, 2)
+    _actions().AdjustScore(n, 2, 1)
 
 
 def _assertRejected(response, code="INVALID_ARGUMENT", status=400):
@@ -154,9 +163,10 @@ def test_score_set_writes_the_state_teams_on_a_swapped_board(
     a tap on the left score wrote the right one. score:set names state
     teams, like score:adjust.
     """
-    board = autonaApp.board(n)
-    board.CommandScoreChange(0, 3)   # team 1 = 3, team 2 = 0
-    board.SwapTeams()                # now team 1 = 0, team 2 = 3
+    autonaApp.ready(n)
+    # What the board's +1 button and SWAP run.
+    _actions().AdjustScore(n, 1, 3)   # team 1 = 3, team 2 = 0
+    _actions().SwapTeams(n)           # now team 1 = 0, team 2 = 3
     autonaApp.settle()
     assert autonaApp.get(f"score.{n}.team.1.score") == 0
     assert autonaApp.get(f"score.{n}.team.2.score") == 3
@@ -183,7 +193,7 @@ def test_score_set_does_not_carry_the_set_payload_side_effects(
     writes match_en unconditionally, so every legacy score tap blanked the
     English round text.
     """
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.Set("score.1.match_en", "Winners Final")
     autonaApp.settle()
 
@@ -204,7 +214,7 @@ def test_score_set_does_not_carry_the_set_payload_side_effects(
 
 
 def test_score_set_clamps_and_leaves_an_unchanged_board_clean(autonaApp, client):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.CommitHeld("score.1")
     autonaApp.settle()
 
@@ -230,7 +240,7 @@ def test_score_set_clamps_and_leaves_an_unchanged_board_clean(autonaApp, client)
 ])
 def test_score_set_rejects_bad_input_without_writing(
         autonaApp, client, path, body):
-    autonaApp.board(1)
+    autonaApp.ready(1)
 
     _assertRejected(client.post(path, json=body))
     autonaApp.settle()
@@ -280,7 +290,8 @@ def test_player_patch_addresses_the_state_team_on_a_swapped_board(
             "/scoreboard1-update-team-1-1", json={"gamerTag": "Alpha"}),
         v1=lambda: client.patch(
             "/api/v1/scoreboards/1/teams/1/players/1", json={"gamerTag": "Alpha"}),
-        prepare=lambda board: board.SwapTeams(),
+        # What the board's SWAP runs.
+        prepare=lambda n: _actions().SwapTeams(n),
         ignore=("match_en",),
     )
     assert state["team"]["1"]["player"]["1"]["name"] == "Alpha"
@@ -299,7 +310,7 @@ def test_set_patch_losers_still_blanks_the_english_round_text(
     """
     from src.core.StateManager import StateManager
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.Set("score.1.match_en", "Winners Final")
     autonaApp.settle()
 
@@ -353,7 +364,7 @@ def test_player_patch_with_a_new_country_and_no_region_leaves_none(
     # (web/src/ScoreboardPage/Player.jsx): the region goes with the country it
     # was of, and the DB's record of the player does not bring it back.
     from src.core.PlayerDB import PlayerDB
-    autonaApp.board(1)
+    autonaApp.ready(1)
     player = "score.1.team.1.player.1"
     record = {"gamerTag": "Alpha", "country_code": "JP", "state_code": "13"}
 
@@ -379,7 +390,7 @@ def test_player_patch_with_no_country_says_nothing_of_it(autonaApp, client):
     # goes back to the state's country when its field is emptied and left, on
     # account of this (web/src/ScoreboardPage/Player.jsx).
     from src.core.PlayerDB import PlayerDB
-    autonaApp.board(1)
+    autonaApp.ready(1)
     player = "score.1.team.1.player.1"
 
     def send(**location):
@@ -402,7 +413,7 @@ def test_player_patch_keeps_the_english_round_text(autonaApp, client):
     route applies only the player half (AutonaWebOperations.update_player
     since ADR-005 S3e-4; the board's ApplyPlayerData before).
     """
-    autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.Set("score.1.match_en", "Winners Final")
     autonaApp.settle()
 
@@ -421,8 +432,9 @@ def test_player_patch_answers_404_for_a_slot_the_team_does_not_have(
     cards, which publish exactly those): a player beyond it is 404, with
     nothing written -- the set payload's match_en included, which only the
     legacy route carries."""
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(2)
+    autonaApp.ready(2)
+    # What the board's PLAYERS spinbox runs.
+    _actions().SetPlayersPerTeam(2, 2)
     autonaApp.state.Set("score.2.match_en", "Winners Final")
     autonaApp.settle()
     before = _boardState(autonaApp, 2)
@@ -468,7 +480,7 @@ def test_the_legacy_player_routes_answer_as_before(autonaApp, client):
     provided"."""
     from src.core.PlayerDB import PlayerDB
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
     assert client.post("/scoreboard1-update-team-1-1",
                        json={"gamerTag": "Alpha"}).get_data(
         as_text=True) == "OK"
@@ -504,7 +516,7 @@ def test_the_legacy_player_routes_answer_as_before(autonaApp, client):
 ])
 def test_player_patch_rejects_bad_input_without_writing(
         autonaApp, client, path, body):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     before = _boardState(autonaApp, 1)
 
     _assertRejected(client.patch(path, json=body))
@@ -516,7 +528,7 @@ def test_player_patch_rejects_bad_input_without_writing(
 def test_player_patch_keeps_personal_data_out_of_the_op_log(autonaApp, client):
     from loguru import logger
 
-    autonaApp.board(1)
+    autonaApp.ready(1)
     lines = []
     sink = logger.add(lambda message: lines.append(str(message)), level="INFO")
     try:
@@ -538,7 +550,7 @@ def test_player_patch_keeps_personal_data_out_of_the_op_log(autonaApp, client):
 
 def test_display_options_patch_matches_legacy_display_option(
         autonaApp, client):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     results = []
     for request in (
         lambda: client.post("/display-option", data=json.dumps(
@@ -558,7 +570,7 @@ def test_display_options_patch_matches_legacy_display_option(
 
 def test_display_options_patch_rejects_an_unknown_key_without_applying_any(
         autonaApp, client):
-    autonaApp.board(1)
+    autonaApp.ready(1)
     with _restoredDisplayOption("show_seed"):
         before = autonaApp.get("display_options.show_seed")
 
@@ -624,6 +636,8 @@ def test_set_patch_players_and_losers_together_match_legacy_query(
         v1=lambda: client.patch("/api/v1/scoreboards/2/set", json={
             "players": 3, "losers": {"team": 1, "value": True}}),
         prepare=prepare,
+        # The board's widgets are checked below (they go in ADR-005 S4ac-3).
+        widgets=True,
     )
 
     for team in ("1", "2"):
@@ -660,10 +674,11 @@ def test_losers_lands_on_the_state_team_on_a_swapped_board(
     the flag and the " [L]" suffix on that team's player names both land on
     team t.
     """
-    board = autonaApp.board(n)
-    _setPlayerName(board, 1, "AAA")
-    _setPlayerName(board, 2, "BBB")
-    board.SwapTeams()
+    autonaApp.ready(n)
+    # What the cards' SetData and the board's SWAP run.
+    load_player(n, 1, {"gamerTag": "AAA"})
+    load_player(n, 2, {"gamerTag": "BBB"})
+    _actions().SwapTeams(n)
     autonaApp.settle()
     names = {t: autonaApp.get(f"score.{n}.team.{t}.player.1.name")
              for t in (1, 2)}
@@ -686,8 +701,8 @@ def test_losers_lands_on_the_state_team_on_a_swapped_board(
 def test_team_name_lands_on_the_state_team_on_a_swapped_board(
         autonaApp, client):
     # set_route already wrote the literal column; nothing to correct.
-    board = autonaApp.board(2)
-    board.SwapTeams()
+    autonaApp.ready(2)
+    _actions().SwapTeams(2)   # what the board's SWAP runs
     autonaApp.settle()
 
     response = client.patch("/api/v1/scoreboards/2/set", json={
@@ -705,7 +720,7 @@ def test_team_name_lands_on_the_state_team_on_a_swapped_board(
     {"teamName": {"team": 1, "value": 5}},
 ])
 def test_set_patch_rejects_a_bad_team_name(autonaApp, client, body):
-    autonaApp.board(2)
+    autonaApp.ready(2)
 
     _assertRejected(client.patch("/api/v1/scoreboards/2/set", json=body))
 
@@ -1056,7 +1071,7 @@ def _requestOnWorkerThread(requests):
 def test_set_patch_with_nested_gui_sync_does_not_deadlock_off_thread(
         autonaApp, client):
     """losers + teamName from a worker thread: set_update nests gui_thread_sync."""
-    autonaApp.board(2)
+    autonaApp.ready(2)
     autonaApp.settle()
 
     response, = _requestOnWorkerThread(lambda: [client.patch(

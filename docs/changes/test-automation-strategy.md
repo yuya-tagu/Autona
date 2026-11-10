@@ -478,11 +478,23 @@ autonaApp (session)
 
 | 制約 | 対処 |
 |------|------|
-| `bootstrap_core()` はプロセス内 1 回きり（再入ガード） | L2 は「1 プロセス = 1 ブート + 多数のテスト」。テスト間の独立性は function スコープの `resetState` fixture（`StateManager.Unset("score")` → `EnsureScoreboard` 再構築）で担保 |
+| `bootstrap_core()` はプロセス内 1 回きり（再入ガード） | L2 は「1 プロセス = 1 ブート + 多数のテスト」。テスト間の独立性は、テストが使うボードをテストごとに作り直すことで担保する（2026-11-11 ADR-005 S4ac-2 で更新。下の「ボードの用意」を参照） |
 | グローバルホットキーを OS に登録すると実機と衝突 | `hotkeys.enabled=false` を合成 settings に。加えて `AutonaHotkeys.UiMounted` は L2 では呼ばない |
 | WebServer が既定ポート 5107 を掴む | L2 では WebServer を構築しない（L3 は `run()` を呼ばず `test_client()` のみ） |
 | 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる**。加えて `tests/conftest.py` の監査フック（`_refuseRealWrites`）が、本物の `out/` `user_data/` `layout/` への書き込みをスレッドを問わず拒否し、そのときのテストを落とす（見えるのはそのプロセスの Python からの書き込みだけ。別に起動中のアプリには反応しない） |
 | pytest-xdist 並列化すると Qt が壊れる | プロセス分割なら壊れない: `scripts/run_tests_parallel.py` が test ファイルを前回の実測時間（初回はサイズ）で 4 つ前後に分け、各々を普通の pytest プロセス（プロセスごとに bootstrap）で走らせる。同条件の比較で直列 876 秒 → 276〜280 秒（2026-11-07。マシンの状態で変動し、並列は約 3〜6 分）。CI は直列のまま（順序依存と分割の見落としの網）。pytest-xdist は依存追加になるので未導入（オーナー判断事項） |
+
+**ボードの用意（2026-11-11 ADR-005 S4ac-2）**: `autonaApp` のボードは 2 通りで作る。
+
+| 呼び方 | 作るもの | 使うテスト |
+|------|------|------|
+| `autonaApp.ready(n)` / `readyAll()` | core のボードだけ（`AutonaActions.EnsureBoard(n, panel=True)` / `MakeBoards(panel=True)`。デスクトップの起動と同じ書き込み・held）。国のデータも読む | ボードが要るが、state / v1 / core だけを操作し検査するテスト（既定はこちら） |
+| `autonaApp.board(n)` | ウィジェットごと（`AutonaScoreboardManager.EnsureScoreboard`） | ウィジェットの操作・描画・エコーループを試すテスト（S4ac-3 で消すか書き直す） |
+
+- ready したテストは、`board()` か `allowWidgets()` を呼ばない限り、ボードのウィジェットを 1 つも建ててはいけない。teardown（`_failOnBoardWidgets`）が途中で破棄したものも含めて見て、建てていたらテストを落とす。core に無いボードへの操作は `DesktopBoardHost.Prepare` でウィジェットを建てるので、使うボードは全部 ready する
+- 窓の構築（`CreateScoreboard`）や形式の切り替えのように、ready したボードにわざとウィジェットを建てるテストは `allowWidgets()` を先に呼ぶ
+- カードの `SetData` と同じ選手の読込は `tests/conftest.py` の `load_player(board, team, data)`（core の `PlayerService.ApplyData`）
+- ボードの破棄は core の半分（`_dropBoardInCore`）とウィジェットの半分（`_dropBoardWidget`）に分かれていて、`_dropBoard` が「ウィジェット → core」の順で両方を呼ぶ。ウィジェットの半分は conftest の 1 つの節にまとめてある
 
 ~~`AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
 （agent-pitfalls #5）。**同一のテストを両クラスに `parametrize` で流す**ことで、
@@ -521,7 +533,7 @@ L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `boo
   **実績**: Python 212 件 / 28 秒 → **248 件 + xfail 1 / 22 秒**（第三者レビュー反映後）。
   ハーネス実装で判明した設計上の注意点:
   - board 破棄は `deleteLater()` だけでは足りない（§3「ハーネス実装上の地雷」参照）
-  - `_dropBoard()` は **held 登録の解除を `Unset` より先に**行う。逆順だと Unset の
+  - `_dropBoard()`（2026-11-11 からは core の半分 `_dropBoardInCore`）は **held 登録の解除を `Unset` より先に**行う。逆順だと Unset の
     変更キーが held バッファに積まれてそのまま破棄され、削除が delta にも `./out` にも
     出ない（`tests/test_harness_isolation.py` の
     `test_dropping_a_board_removes_its_exported_files` が pin）

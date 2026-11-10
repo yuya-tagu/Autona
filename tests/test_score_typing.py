@@ -120,7 +120,7 @@ def test_the_score_the_state_has_writes_nothing(autonaApp, n):
     """The display's valueChanged fires for a value the state already has
     when its render races the operator's typing; re-asserting it would light
     反映 for an edit nobody made."""
-    autonaApp.board(n)
+    autonaApp.ready(n)
     AutonaActions.instance.SetScore(n, 1, 2)
     AutonaActions.instance.ApplyChanges(n)
     autonaApp.settle()

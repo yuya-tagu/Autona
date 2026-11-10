@@ -1239,7 +1239,7 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
     actions = AutonaActions.instance
     assert StateManager.Get("game.codename") == "tgame"
     if shell == "desktop":
-        autonaApp.board(2)  # built: its writes are held until committed
+        autonaApp.ready(2)  # made: its writes are held until committed
     actions.SetRoster(2, 1, 3)
     _fillPicks()
     actions.ApplyChanges(2)
@@ -1311,7 +1311,7 @@ def test_a_load_whose_models_fail_keeps_one_game(world, autonaApp,
     actions = AutonaActions.instance
     assert StateManager.Get("game.codename") == "tgame"
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") != TEAM_GAME
-    autonaApp.board(2)  # built: its writes are held until committed
+    autonaApp.ready(2)  # made: its writes are held until committed
     actions.SetRoster(2, 1, 3)
     _fillPicks()
     actions.ApplyChanges(2)
@@ -1428,7 +1428,7 @@ def test_the_same_roster_writes_nothing(world, autonaApp):
     with None -- writes nothing, counted as the board counts its cards
     (AutonaActions.RosterCount)."""
     actions = AutonaActions.instance
-    autonaApp.board(2)
+    autonaApp.ready(2)
     actions.SetRoster(2, 2, 4)
     autonaApp.settle()
     StateManager.CommitHeld("score.2")
