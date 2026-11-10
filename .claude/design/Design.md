@@ -548,7 +548,10 @@ thumbnail
 ```
 
 書き手は core の `src/core/ThumbnailService.py` だけ。`stream.thumbnail` と同じ形で、SCORE の同期の生成と legacy の
-`get-thumbnail` は通らない（それらは今までどおり画像のパスを返す）。
+`get-thumbnail` は通らない（どちらも state を書かず、legacy は今までどおり画像のバイトを返す。内部では保存した PNG のパスを
+`send_file` に渡す）。その 2 つ（と X 投稿のクリップボードの画像）は
+ADR-005 S4y から `ThumbnailService.DrawBoard(board, draw)` を同期で呼ぶ（描き手はデスクトップのオフスクリーンの
+`AutonaShellOperations.DrawThumbnailNow`。ボードのウィジェットを通らず、legacy はボードを構築しない）。
 
 **`result_players` / `result_teams` / `result_render` / `result_standings` / `result_layout`（大会リザルト。ADR-005 S4q / S4r）**
 
@@ -750,7 +753,8 @@ Qt モデルなし）・Web サーバーを動かす。デスクトップと共�
 `DesktopBoardHost`、ヘッドレスは既定の `BoardHost`）が吸収する。ボードが無いので held にならず、
 書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作（セット選択ウィンドウを
 開く `open_sets`・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
-`AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` を登録する）だけで、ほかの Web 操作は
+`AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` に、シェルのアダプタ
+`AutonaShellOperations`（S4y でスコアボード dock から移した）の同名の操作を登録する）だけで、ほかの Web 操作は
 すべて動く（ADR-005 S3e-9・S4o）。
 
 #### 3.2.2 書き込み規約
@@ -915,7 +919,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | 2 | `WebPanels`（共有ホスト。ナビの文言は `Thumbnail Settings`、ナビのキーは `thumbnail`） | React の `ThumbnailPage`（`/web/thumbnail`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4p）。Qt 版（`AutonaThumbnailSettingsWidget` と `.ui`）は S4p で削除済み | テンプレート・背景（既定 / 大会バナー / アップロードした画像）・表示する項目・今のゲームのキャラ画像の配置・機能別カラー・既定に戻す（確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび）、サムネイルの作成（`out/thumbnails/`）と作成した画像のコピー、動画タイトル。**処理の正本は `src/core/ThumbnailService.py`**（ADR-005 S4o）で、ページは `/api/v1/thumbnail*`・`colors/thumbnail` を呼んで `thumbnail.render` を描画するだけ。SCORE の生成・X 投稿と legacy の get-thumbnail も同じ `RenderPayload()`（読み済みの設定）で描く | `thumbnail_config.*`（settings.json。core 経由） | `thumbnail.render`、ボード 1 の `score.1.*`、`tournamentInfo.*`、`game`、`colors.thumbnail.*`、`GET /api/v1/thumbnail` | ✓ |
 | 3 | `WebPanels`（共有ホスト。ナビの文言は `Result Settings`、ナビのキーは `result`） | React の `ResultPage`（`/web/result`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4r）。Qt 版（`AutonaResultSettingsWidget` と `.ui`、`result/main_generate_result.py`、`result/ResultRenderer.py`）は S4r で削除済み | レイアウト選択（対戦形式に追従）、単独の行（順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ・スコアボードから補完の表示）と団体の行（順位・チーム名・メンバー 5 人）の編集、並べ替え（上下ボタン + ドラッグ）、大会結果の読み込み（確認つき）、すべてクリア（今の種類だけ・確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび。サンプルの表示つき）、作成（`out/results/`）と作成した画像のコピー、1 クリックの X 投稿（作成 + クリップボード + 既定のブラウザで投稿画面）、選手を DB に保存、機能別カラー。**処理の正本は `src/core/ResultService.py`**（ADR-005 S4q）で、ページは `/api/v1/result*`・`colors/result` を呼んで state を描画するだけ | `result_players` / `result_teams`、`result_config.layout`（settings.json）（core 経由） | `GET /api/v1/result`・`GET /api/v1/result/post`、`result_render`、`result_standings`、`result_layout`、`score.*`（補完）、`tournamentInfo.*`、`game`、`colors.result.*` | ✓ |
 | 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
-| 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
+| 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget`（セット選択 / 配信台のウィンドウはシェルのアダプタ `AutonaShellOperations` の持ち物。ADR-005 S4y） | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `WebPanels`（共有ホスト。ナビの文言は `Statistics`、ナビのキーは `stats`） | React の `StatsPage`（`/web/stats`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4k）。Qt 版（`AutonaStatsWidget` と、そのサブタブの `AutonaAnalysisWidget`）は S4k で削除済み | ボード 1 の統計の取得（`POST /api/v1/scoreboards/1/stats:refresh`）と、アップセット係数・対戦カードの 1 行、4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧。下記 §4.1.0）。統計の書き手は core の `StatsService`、試合一覧は core の `AnalysisService`（ADR-005 S4j）で、ページは state を描画するだけ（read-only） | （なし。取得の依頼だけ） | `score.1.{recent_sets,last_sets,history_sets,upset_factor}`、反映済みの選手名、`analysis.*`、`GET /api/v1/analysis` | ✓ |
 | 7.5 | `WebPanels`（共有ホスト。ナビの文言は `Stats Display Settings`、ナビのキーは `statsPreview`） | React の `StatsPreviewPage`（`/web/statsPreview`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4l）。Qt 版（`AutonaStatsPreviewWidget`）は S4l で削除済み | 統計オーバーレイ 7 種（`core/StatsOverlays` の固定表。`last_sets` / `tournament_history` は player1 / player2 の 2 項目）から 1 つを選び、プレビュー（オーバーレイ自体の縮小表示）・OBS 用 URL・機能別カラー（`stats`）・Companion マクロ（`stats:refresh` のメソッド・パス・URL）を出す。選択は `settings.json` の `stats_preview.selected_type`（`GET /api/v1/stats/overlays` / `PUT .../selected`）。state を書くのは色カード（`PATCH /api/v1/colors/stats`）だけ | `colors.stats.*` | `colors.stats.*`, `tournamentInfo.*` | ✓ |
@@ -980,6 +984,8 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
   Qt 依存で core に置けない `SeedColorState()` だけがここに残る。board スケルトンは
   `SeedBoard()` を `AutonaScoreboardManager.CreateScoreboard()` が未構築のボードに呼び、新しいボードの中身は
   `AutonaActions.SeedFreshBoard()` が両シェルで書く（デスクトップは `EnsureScoreboard` がウィジェットの構築の前に。ADR-005 S4t）。
+  ボードを作る入口は `AutonaActions.EnsureBoard()`（S4y。シード・デスクトップだけの表示トグルの書き直し・取り直しの停止・
+  反映ボタンの held 登録を 1 回だけ。ヘッドレスは `_SeedBoards` が `panel` なしで呼ぶ）
   グローバルシグナルへの接続も Window 側に置く
 - 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「パネル登録」
 
@@ -1566,13 +1572,13 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` はボード）だけがウィジェット側に接続を持つ（`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択ウィンドウをシェルのアダプタ `AutonaShellOperations` で開く。クルー形式・未構築なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
 
 ### 6.2 デフォルトホットキー一覧
 
 | アクションキー | デフォルト | Signal | 動作 | 受け手 |
 |--------------|-----------|--------|------|-------|
-| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | 次のセットを読み込み | ボード |
+| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | アクティブボードのセット選択ウィンドウを開く | シェル（`AutonaShellOperations`。S4y） |
 | `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 | Actions |
 | `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 | Actions |
 | `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 | Actions |

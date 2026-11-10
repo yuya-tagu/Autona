@@ -62,13 +62,21 @@ paths:
   ボードの有無によらず動く）。1v1 / チームは `SeedBoard` → 既定のチーム色・空のチーム名・
   LOSERS → `SetRoster`（`DefaultPlayersPerTeam()` 人分。null / 数でないなら 1。足りないスロットを `PlayerService.SeedEmpty()` で埋める）→
   match バー → `best_of` 0 → スコア 0 を 1 サイクルで書き、クルーは `SeedBoard` + `CrewBattleService.SeedDefaults()`。
-  **呼ぶのは両シェルで同じ**: デスクトップは `AutonaScoreboardManager.EnsureScoreboard` がウィジェットの構築の前に
-  （カードは何も書かずにスロットに従う）、ヘッドレスは `src/headless._SeedBoards()` が起動時に全ボードを。
+  **呼ぶのは両シェルで同じで、入口は `AutonaActions.EnsureBoard(board, panel=False)`**（ADR-005 S4y。ボードを 1 回だけ
+  作る。2 回目と作っている最中の呼び出しは何もせず False。作ったかは `BoardEnsured(board)`（保存サイクルの書き込みの最後に、
+  hold と同じ lock の保持の中で立つ）、忘れるのは `ResetBoards()`（`ResetScoreRoot` もここだけが呼ぶ）。作れなかった・
+  描けなかったボードは `ForgetBoard(board)` がフラグを下ろして hold を外す（`StateManager.ReleaseSubtree`。保留中の値は公開する。
+  `EnsureBoard` の例外と、デスクトップのウィジェットの構築の失敗）。`SeedFreshBoard` / `HoldBoard` / `ResetScoreRoot` /
+  `ReleaseBoard` の呼び出し元は `tests/test_headless_seed.py` が AST で pin）:
+  デスクトップは `AutonaScoreboardManager.EnsureScoreboard` がウィジェットの構築の前に `panel=True` で
+  （カードは何も書かずにスロットに従う）、ヘッドレスは `src/headless._SeedBoards()` が起動時に全ボードを `panel` なしで。
   `tests/test_headless_seed.py` がボード 1 / 2 / 3 の全体をデスクトップと照合する。
-  デスクトップにだけ残る仕事は 3 つ: `schema.HoldBoard`（ボードの `__init__`。React の反映ボタンと同時か後に移す）と、
-  1v1 / チームの構築時の `SetFollowService.TurnOffPolling()`（`general.disable_autoupdate` の強制。ヘッドレスの
-  取り直しの既定を変えないので seed に入れない）と `schema.PublishDisplayOptions()`（全キーを設定から書き直す。
-  ヘッドレスは `SeedPanelState` が欠けたキーを埋めるだけで、復元した値を変えないので seed に入れない）
+  `panel=True`（デスクトップ）だけがする仕事は 3 つで、1 つの保存サイクルの中でシードの後に行う: 1v1 / チームの
+  `schema.PublishDisplayOptions()`（全キーを設定から書き直す。ヘッドレスは `SeedPanelState` が欠けたキーを埋めるだけで、
+  復元した値を変えない）と `SetFollowService.TurnOffPolling()`（`general.disable_autoupdate` の強制。ヘッドレスの
+  取り直しの既定を変えない）と、最後に `schema.HoldBoard`（反映ボタン。シードより先に登録するとシードが公開されない。
+  S4y まではボードの `__init__` がウィジェットの構築の後に登録していた。起動時登録に移すのは React の反映ボタンと同時か後）。
+  デスクトップのボードホストの `Built` はこのフラグを読む（ウィジェットの構築はシェルの描画の仕事のまま）
 - `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は基本的に**列挙のみ**（マイグレーション層の
   アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
   ベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を確認する**）
@@ -266,9 +274,14 @@ paths:
   `swap_teams` も S2c からここ（旧: 構築済みの全ボードに接続しており、形式切替後は両ボードが入れ替わった）。
   ただし `swap_teams` だけは、アクティブボードが未構築なら何もしない（旧実装どおり。スコアのホットキーは
   未構築でも効く。未構築ボードは held でないので、入れ替えると即時公開され、構築時のシードで消える）。
-  ボードに残るのはパネル操作の `load_set` だけ（`refresh_phase_group` は ADR-005 S3e-8 から
+  `swap_teams` の未構築判定と入力中の欄の確定はボードホスト（`boardHost.Built` / `CommitEdit`）に聞き、ボードの
+  ウィジェットを引かない（ADR-005 S4y）。パネル操作の `load_set` も S4y から `ConnectActions()` が結線し、アクティブ
+  ボード（1 / 2）のセット選択ウィンドウをシェルのアダプタ `AutonaShellOperations.ShowSetSelection` で開く（クルー形式・
+  未構築なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた）。
+  ボードに残るホットキーは無い（`refresh_phase_group` は ADR-005 S3e-8 から
   `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた）
-- **未構築ボードは held 登録しない**（held 登録はボードの `__init__` の `StateSchema.HoldBoard` だけ）。
+- **未構築ボードは held 登録しない**（held 登録は `AutonaActions.EnsureBoard(panel=True)` の `StateSchema.HoldBoard`
+  だけ。S4y まではボードの `__init__`）。
   未構築ボードへの core 直結の書き込み（`score:adjust` / `score:set` / `score:reset` / チームカラー）は即時公開される。
   起動時から held にする案（ADR-005 S2 判断 7）は S2c で撤回した: Web UI には反映ボタンが無く、デスクトップの反映は
   表示中のボードだけなので、形式と食い違う面への書き込みがどこにも出ないまま、構築時の `SeedBoard` で消える。
@@ -304,7 +317,7 @@ paths:
 | `src/core/StreamService.py` | `StreamService.instance`（`bootstrap_core()` が生成して `Start()`。バナー URL の照会・`later`（GUI executor の `later`）・出力の剪定は注入） | 配信設定のすべて（ADR-005 S4d）: 配信タイトルの自動生成（大会名・ゲーム略称は **state の observer** で見る＝下の例外。上位の参加者は provider が `SetTopEntrants` で渡す。生成したタイトルは毎回 `stream.titleAuto` に publish し、`stream.title` は `TitleIsAuto`（前回の自動値か空）のときだけ上書きする。クライアントの欄の打ちかけを送るかは `TypedTitleWins`。パネルが無くても・ヘッドレスでも動く）・チャンネル CRUD（`stream_channels`）・団体素材の取り込みとリセット（PIL で縮小・`stream.org*Version`）・配信サムネ生成（`TaskExecutor` のジョブ 1 本、実行中の要求は `BUSY`、結果は `stream.thumbnail`）・生成オプション（`stream_thumbnail_options`）。配信設定ページ（React の `StreamPage`、`/api/v1/stream*`。ADR-005 S4e で Qt 版を削除）は操作を依頼し、state を描画するだけ |
 | `src/core/ResultService.py` | `ResultService.instance`（`bootstrap_core()` が `ThumbnailService` の後に生成。`later`・描画の開始 `render`・翻訳・ロケール・出力の剪定・`shuttingDown`・取得の `fetcher`（provider の `RunWithProvider`）・大会情報の取り直し `refreshTournament`（`RefreshTournamentData`）・今の provider の引き方 `currentProvider` は注入） | 大会リザルトのすべて（ADR-005 S4q）: 行の読み書き（単独 16 行の `result_players`・団体 8 行の `result_teams`。`state.json` に残る。**読みは `_Rows`**（保存された別のゲームのキャラを無いものとして読む。state は消さない。判定は絵のパスの `GAMES_DIR/<codename>/`）、**書きの元は `_StoredRows`**）。`UpdatePlayer` / `UpdateTeam` は 1 行 1 保存サイクルで、キャラは識別子（en_name + スキンの行 + 選んだゲーム）で受けて 1 つのスナップショットで全部を解決してから書く（`Refusal` のときは何も書かない）。`characters` / `members` はリストなら全置換、dict なら名指した位置（`"1"` から）・キーだけを変える（ページはこちら。別のゲームのキャラを読めないまま書き戻さない）。`Reorder` / `Clear` / `ImportStandings` は 1 保存サイクル、`ForgetCharacters()` は `SelectGame` が直接呼ぶ。ペイロード `BuildPayload()`（`tests/fixtures/result/golden.json` と一致。差分は `tests/test_result_service.py` の `DIFFERENCES`）: キャラ欄が空の選手はスコアボードの同名の選手のキャラで描く（描画のときに解決し、state に書かない）・名前が無ければプレビューだけ固定のサンプル・背景はサムネイルの読み（`ThumbnailService.EffectiveBackgroundPath`。バナーは同じパスで置き換わるので `?v=<bannerVersion>` を付ける）。レイアウトは `settings.json` の `result_config.layout`（`SetLayout` / `FollowBattleFormat`。後者は `AutonaActions.SetBattleFormat` が呼ぶ（ADR-005 S4x。それまでは `Window.SetBattleFormat`）。今のレイアウトの写しを state の `result_layout` に出す: 対戦形式の切り替えはページの操作ではなく、保存が無ければ設定にも書かれないので、ページはここで知る。S4r）。描画は `core/RenderLane.py`（結果は `result_render`。データの無い `Generate` は `NO_DATA`。`Generate` の受理時に `SaveToDb()`。プレビューは DB を書かない）。standings の取り込み `LoadStandings(confirmed)`（実行中の判定 → 確認の判定の順。**`refreshTournament(done)` が大会情報の取得とゲームの読み込みを連鎖で済ませてから** provider のワーカーのジョブで取る。待たない: job レーンからの submit は `NestedSubmitError`。入力があれば確認を求める。結果は `result_standings`。provider の `GetStandings` は失敗を例外にするので、失敗と空を区別できる。取得の間にゲームか provider が変わったら書かずに `changed`。行に入れられなければ `import_failed`）。投稿文 `PostText()` は順位の順で、DB の X ハンドルを含むので `GET /result/post`（`PLAYERDB`）だけが返す。**ロック順は `StateManager.lock` → レーンの lock → 取り込みの lock。`PlayerDB` はロックを持たずに呼ぶ**。ページは React の `ResultPage`（`/web/result`。S4r）で、操作を依頼して state を描画するだけ。旧 Qt パネルが `result_players` に残した団体の行は `SeedPanelState` が起動のたびに消す |
 | `src/core/RenderLane.py` | なし（`ThumbnailService` / `ResultService` の基底クラス。ADR-005 S4q で `ThumbnailService` から切り出した） | オフスクリーン描画の予約と結果: `Preview()` / `Generate()` / `PreviewImage()`。規則は下の `ThumbnailService` の「描画のレーン」のとおり。サブクラスが `_ReadRender` / `_RunPayload` / `_OutputStem` と出力先の定数を与える |
-| `src/core/ThumbnailService.py` | `ThumbnailService.instance`（`bootstrap_core()` が生成。`later`（GUI executor の `later`）・描画の開始 `render`（`AutonaWebOperations.start_image_render`）・翻訳・ロケールの名前・出力の剪定・終了中か `shuttingDown`（`gui_unavailable_reason`）は注入） | 試合サムネイルのすべて（ADR-005 S4o）: `thumbnail_config` の副作用のない読み `Settings()`（既定値を書かない。残骸の `game.None` は読み飛ばして消さない）・全部を検証してから 1 回だけ書く `Update()`（未知のキー・パス・範囲外・一覧に無いゲームは全拒否。`background_path` / `main_icon_path` は受けない。v1 の描画には `Settings()` と同じ読みを通す: `GET` の値 = 描いた絵）・`Reset()`・動画タイトル `VideoTitle()`・ペイロード `BuildPayload()`（生の出力。`tests/fixtures/thumbnail/golden.json` と一致）と、描画に渡す `RenderPayload()`（背景の移行（描くコピーにだけ当て、`settings.json` は書かない）+ `BuildPayload` + 読み済みの設定。v1 の run と `main_generate_thumbnail.prepare_data` = SCORE の生成・X 投稿・legacy の get-thumbnail が同じものを描く。ADR-005 S4p）・カスタム背景の取り込み `ImportBackground()`（`user_data/thumbnail_background_<内容のハッシュ>.*`。テンプレートにキャッシュバスターが無いので同じパスで置き換えない）・ファイル名と 30 世代。**描画のレーン**（ADR-005 S4q から本体は `core/RenderLane.py`）: `Preview()` / `Generate()`。1 度に 1 つで、実行中の preview は最後の 1 件にまとめ、generate は 1 件だけ予約でき（予約の preview を兼ねる。兼ねた generate が試合なしで終わったら preview を続けて描く）、それ以上は `BUSY`。ペイロードは呼び出し元のスレッド、描画は GUI スレッド（`render` で開始するだけで待たない。イベントループを入れ子にしない）、符号化とファイルは `TaskExecutor` のジョブ。結果は `thumbnail.render = {status, path, error, revision}`（`error` はコードだけ。次の run は `later` で GUI スレッドから。run の終わりは 1 回だけ受ける）。ロック順は `StateManager.lock` → レーンの lock。レンダラーの土台 `src/AutonaOffscreenRenderer.py`（ADR-005 S4q で `src/thumbnail/ThumbnailRenderer.py` から切り出した。`src/result/ResultPageRenderer.py` も同じサブクラス）は描画を 1 度に 1 つにする（チケット）ので、SCORE の同期経路（`renderSync`）と同時に走っても互いの絵を取らない。読み込みの完了は `loadingChanged` の URL の番号（`?load=N`）で照合し、古い読み込みの完了を取らない。絵は `RENDER_READY` では撮らず、レンダラーのスクリプトが描画の番号付きで出す `RENDER_PAINTED`（フォント・画像の decode・rAF 2 回の後。上限は Qt 側で 1 秒。同じ文書で直前の描画がデコードした画像は頼み直さない）を待って撮る。内訳は描画ごとに `Thumbnail render complete:` の INFO 行に出る。読み込んだばかりのページの最初の 1 枚は、読み込み前のビューと同じ画素の間は撮り直す（上限 1 秒。S4o 判断 22）。プレビューの PNG だけ圧縮を下げて速くエンコードする（`encode("PNG", fast=True)` → zlib レベル 1。可逆で `image/png` のまま）。`out/thumbnails/` と legacy は既定のエンコードのまま（判断 23） |
+| `src/core/ThumbnailService.py` | `ThumbnailService.instance`（`bootstrap_core()` が生成。`later`（GUI executor の `later`）・描画の開始 `render`（`AutonaWebOperations.start_image_render`）・翻訳・ロケールの名前・出力の剪定・終了中か `shuttingDown`（`gui_unavailable_reason`）は注入） | 試合サムネイルのすべて（ADR-005 S4o）: `thumbnail_config` の副作用のない読み `Settings()`（既定値を書かない。残骸の `game.None` は読み飛ばして消さない）・全部を検証してから 1 回だけ書く `Update()`（未知のキー・パス・範囲外・一覧に無いゲームは全拒否。`background_path` / `main_icon_path` は受けない。v1 の描画には `Settings()` と同じ読みを通す: `GET` の値 = 描いた絵）・`Reset()`・動画タイトル `VideoTitle()`・ペイロード `BuildPayload()`（生の出力。`tests/fixtures/thumbnail/golden.json` と一致）と、描画に渡す `RenderPayload()`（背景の移行（描くコピーにだけ当て、`settings.json` は書かない）+ `BuildPayload` + 読み済みの設定。v1 の run と、同期で描く `DrawBoard`（SCORE の X 投稿・legacy の get-thumbnail。ADR-005 S4y）が同じ `RenderPayload` を描く。ADR-005 S4p）・カスタム背景の取り込み `ImportBackground()`（`user_data/thumbnail_background_<内容のハッシュ>.*`。テンプレートにキャッシュバスターが無いので同じパスで置き換えない）・ファイル名と 30 世代。**描画のレーン**（ADR-005 S4q から本体は `core/RenderLane.py`）: `Preview()` / `Generate()`。1 度に 1 つで、実行中の preview は最後の 1 件にまとめ、generate は 1 件だけ予約でき（予約の preview を兼ねる。兼ねた generate が試合なしで終わったら preview を続けて描く）、それ以上は `BUSY`。ペイロードは呼び出し元のスレッド、描画は GUI スレッド（`render` で開始するだけで待たない。イベントループを入れ子にしない）、符号化とファイルは `TaskExecutor` のジョブ。結果は `thumbnail.render = {status, path, error, revision}`（`error` はコードだけ。次の run は `later` で GUI スレッドから。run の終わりは 1 回だけ受ける）。ロック順は `StateManager.lock` → レーンの lock。レンダラーの土台 `src/AutonaOffscreenRenderer.py`（ADR-005 S4q で `src/thumbnail/ThumbnailRenderer.py` から切り出した。`src/result/ResultPageRenderer.py` も同じサブクラス）は描画を 1 度に 1 つにする（チケット）ので、SCORE の同期経路（`renderSync`）と同時に走っても互いの絵を取らない。読み込みの完了は `loadingChanged` の URL の番号（`?load=N`）で照合し、古い読み込みの完了を取らない。絵は `RENDER_READY` では撮らず、レンダラーのスクリプトが描画の番号付きで出す `RENDER_PAINTED`（フォント・画像の decode・rAF 2 回の後。上限は Qt 側で 1 秒。同じ文書で直前の描画がデコードした画像は頼み直さない）を待って撮る。内訳は描画ごとに `Thumbnail render complete:` の INFO 行に出る。読み込んだばかりのページの最初の 1 枚は、読み込み前のビューと同じ画素の間は撮り直す（上限 1 秒。S4o 判断 22）。プレビューの PNG だけ圧縮を下げて速くエンコードする（`encode("PNG", fast=True)` → zlib レベル 1。可逆で `image/png` のまま）。`out/thumbnails/` と legacy は既定のエンコードのまま（判断 23） |
 
 **選手リストの行と記録は `src/core/PlayerDirectory.py`**（なし。モジュール関数。ADR-005 S4m）: `Registered()` / `Entrants()` が選手 DB を `{game, players}` / `{game, entrants}` にする（行の mains のゲームの codename を同じスナップショットから添える。今のゲームの mains を防御的に読み、文字列の mains・壊れた要素・タグの無い行で落ちない。`country_code` / `state_code` は `Save` が受け取る値に読み替える）。`Save(fields)` は `PrepareSaveToDB` と同じ記録を組み（state は書かない。`tests/test_player_directory.py` が golden で照合）、`SaveRecordToDB` で保存する（順序の番号は `PlayerService.NextSaveSequence()` で共有）。**編集していない値を壊さない**: `mains` と `country_code` / `state_code` はキーが無ければ DB の値のまま（カタログに照らさない）、`mains` は `game` が今の codename と一致するときだけ受け、選手が今のゲームで既に持っている要素（同じキャラ・スキン・バリアント）は検証しない。文字列の mains の他のゲーム分は `SaveRecordToDB`（`PlayerDB.KeepStoredMains`）が守るので、カードの `savePlayerToDb` も同じ。`Delete(key)` は存在検査つき。読むのは `PlayerDB.lock` の中（生の dict なので）、保存はロックなしで呼ぶ。**番号（`_saveLock`）は `PlayerDB.lock` を取る前に取る**（順序は `_saveLock` → `PlayerDB.lock`）。選手の値をログに出さない（ログの sink は全部 `diagnose=False`。loguru の既定は traceback にローカル変数の値を書く。`tests/test_api_v1_players.py` が pin）。
 
@@ -407,8 +420,12 @@ paths:
     カタログ直のローダー）
   - **シェル操作** `openSetSelection` / `renderThumbnail` / `startImageRender`（セット選択ウィンドウを開く `open_sets`・
     サムネイル `get_thumbnail`・オフスクリーンの画像の描画の開始。デスクトップのウィンドウだけが答える操作）。デスクトップは
-    `bootstrap_gui()` がスコアボード dock の `OpenSetSelection` / `RenderThumbnail` / `StartImageRender`（GUI スレッドで
-    同期実行。`StartImageRender` は開始までで、描画の完了は待たない）を登録し、ヘッドレスは何も登録しない。未登録なら
+    `bootstrap_gui()` がシェルのアダプタ `AutonaShellOperations`（`src/AutonaShellOperations.py`。ADR-005 S4y で
+    スコアボード dock から移した。セット選択 / 配信台のウィンドウもこれが持つ）の `OpenSetSelection` / `RenderThumbnail` /
+    `StartImageRender`（GUI スレッドで同期実行。`StartImageRender` は開始までで、描画の完了は待たない）を登録し、
+    ヘッドレスは何も登録しない。`RenderThumbnail` はボードを構築しない（`ThumbnailService.DrawBoard` に同期の
+    描き手 `DrawThumbnailNow` を渡す。X 投稿のクリップボードの画像も同じ入口）。`OpenSetSelection` は窓から読み込む
+    セットが後のシードで消えないよう、ボードホストの `Prepare` で未構築のボードを先に作る。未登録なら
     `NotAvailable` → **503 `UNAVAILABLE`（`not available in headless`）**。legacy は errorhandler、Socket.IO は ack
     （`_ws_unavailable`）が同じ形で返し、v1 は `POST /thumbnail:preview` / `:generate`（ADR-005 S4o）と `POST /result:preview` / `:generate`（S4q）がこれを返す。
     ヘッドレスで 503 を返すのはこれらだけで、ほかのルート・イベントはすべて答える（`tests/test_web_operations.py` の

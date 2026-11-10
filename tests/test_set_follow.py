@@ -315,7 +315,7 @@ def test_a_v1_load_follows_the_set_as_the_set_window_does(
                 SetFollowService.fetcher._timers[1].isActive(),
                 autonaApp.get("score.1.auto_update"))
 
-    board.NewSetSelected({"id": 1001, "auto_update": "set"})
+    board.setFollow.LoadSet({"id": 1001, "auto_update": "set"})
     _drain(autonaApp)
     assert followed() == (("set", None), True, "set")
     byWindow = copy.deepcopy(autonaApp.get("score.1"))
@@ -341,7 +341,7 @@ def test_a_v1_load_follows_the_set_as_the_set_window_does(
     assert len(_calls(provider, "GetMatch")) == fetched
 
     # The same set by the window's int: loaded again, cleared first.
-    board.NewSetSelected({"id": 1001, "auto_update": "set"})
+    board.setFollow.LoadSet({"id": 1001, "auto_update": "set"})
     _drain(autonaApp)
     assert len(_calls(provider, "GetMatch")) == fetched + 1
     assert autonaApp.get("score.1.set_id") == 1001
@@ -762,7 +762,7 @@ def test_a_pull_while_following_a_station_follows_the_stream(
     settings["general.disable_autoupdate"] = False
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.streams[STREAM] = _node(streamSet, (5, 6), state=1)
-    board.signals.StationSelected.emit(dict(_STATION))
+    board.setFollow.FollowStation(dict(_STATION))
     _drain(autonaApp)
     assert autonaApp.get("score.1.team.1.player.1.name") == "FOXTROT"
     # The station's next set is up: what its lookup would load.
@@ -1008,8 +1008,8 @@ def test_a_station_lookup_after_a_set_loaded_by_hand_is_dropped(
     board, _, _ = desktop
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
 
-    board.signals.StationSelected.emit(dict(_STATION))
-    board.NewSetSelected({"id": 1002, "auto_update": "set"})
+    board.setFollow.FollowStation(dict(_STATION))
+    board.setFollow.LoadSet({"id": 1002, "auto_update": "set"})
     _drain(autonaApp)
 
     assert _calls(provider, "GetStationMatchsId") == [[77]]
@@ -1023,7 +1023,7 @@ def test_a_station_lookup_after_the_cancel_button_is_dropped(
     board, _, _ = desktop
     provider.stations["77"] = [_node(3001)]
 
-    board.signals.StationSelected.emit(dict(_STATION))
+    board.setFollow.FollowStation(dict(_STATION))
     board.timerCancelBt.click()
     _drain(autonaApp)
 
@@ -1051,7 +1051,7 @@ def test_following_a_station_fetches_its_current_set_only(
     sink = logger.add(lambda message: failed.append(str(message)),
                       level="ERROR")
     try:
-        board.signals.StationSelected.emit(dict(_STATION))
+        board.setFollow.FollowStation(dict(_STATION))
         _drain(autonaApp)
         provider.stations["77"] = [_node(3001), _node(1003)]
         _tick(1)
@@ -1082,11 +1082,11 @@ def test_a_station_set_answering_after_the_cancel_is_dropped(
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.stations["78"] = [_node(1001), _node(1003)]
 
-    board.signals.StationSelected.emit(dict(_STATION))
+    board.setFollow.FollowStation(dict(_STATION))
     _drain(autonaApp)
     assert autonaApp.get("score.1.set_id") == 3001
 
-    board.signals.StationSelected.emit(
+    board.setFollow.FollowStation(
         dict(_STATION, id=78, identifier="5"))
     for _ in range(3):
         autonaApp.settle()
@@ -1150,7 +1150,7 @@ def test_an_update_answering_after_the_set_was_loaded_again_is_dropped(
 
     board, client, _ = desktop
     settings["general.disable_autoupdate"] = False
-    board.NewSetSelected({"id": 1001, "auto_update": "set"})
+    board.setFollow.LoadSet({"id": 1001, "auto_update": "set"})
     _drain(autonaApp)
 
     # What lands: the update is dropped where it is checked, in the host.
@@ -1164,7 +1164,7 @@ def test_an_update_answering_after_the_set_was_loaded_again_is_dropped(
     with patch.object(SetFollowService, "ApplySetPayload", spy):
         _tick(1)                                  # an update, in flight
         client.get("/scoreboard1-reset-players")
-        board.NewSetSelected({"id": 1001, "auto_update": "set"})
+        board.setFollow.LoadSet({"id": 1001, "auto_update": "set"})
         _drain(autonaApp)
 
     assert _calls(provider, "GetMatch") == [[1001], [1001], [1001]]
@@ -1457,7 +1457,7 @@ def test_a_v1_follow_does_what_the_station_window_does(
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.streams[STREAM] = _node(2001, (5, 6), state=1)
 
-    board.LoadStationSets(dict(row))
+    board.setFollow.FollowStation(dict(row))
     _drain(autonaApp)
     byWindow = _boardSnapshot(autonaApp)
     assert _calls(provider, lookup) == [asked]
@@ -1489,7 +1489,7 @@ def test_a_v1_stop_does_what_the_cancel_button_does(
     settings["general.disable_autoupdate"] = False
     provider.stations["77"] = [_node(3001)]
 
-    board.LoadStationSets(dict(_STATION_ROW))
+    board.setFollow.FollowStation(dict(_STATION_ROW))
     _drain(autonaApp)
     assert SetFollowService(1).Following() == ("station", 4)
     board.timerCancelBt.click()
@@ -1501,7 +1501,7 @@ def test_a_v1_stop_does_what_the_cancel_button_does(
     board = autonaApp.board(1)
     autonaApp.settle()
     provider._fetched.clear()
-    board.LoadStationSets(dict(_STATION_ROW))
+    board.setFollow.FollowStation(dict(_STATION_ROW))
     _drain(autonaApp)
     assert SetFollowService(1).Following() == ("station", 4)
     assert _v1(client, "/api/v1/scoreboards/1:stop-follow") == (200, None)

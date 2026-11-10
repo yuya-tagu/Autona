@@ -356,8 +356,12 @@ def test_a_board_that_is_not_there_has_no_post(autonaApp, client, n):
 
 # ── the button ───────────────────────────────────────────────────────────
 
-def _click(board, monkeypatch, thumbnail=lambda **kwargs: None):
-    monkeypatch.setattr(board, "GenerateThumbnail", thumbnail)
+def _click(board, monkeypatch, thumbnail=lambda board: None):
+    # The X post's thumbnail is the shell's (AutonaShellOperations.
+    # DrawThumbnail, ADR-005 S4y): `thumbnail(board)` stands in for it.
+    from src.AutonaShellOperations import AutonaShellOperations
+    monkeypatch.setattr(AutonaShellOperations.instance, "DrawThumbnail",
+                        thumbnail)
     shown = []
     with patch("webbrowser.open") as opened, \
             patch.object(QMessageBox, "exec",
@@ -401,7 +405,7 @@ def test_the_button_says_what_the_route_says_is_missing(
     rendered = []
 
     opened, shown = _click(board, monkeypatch,
-                           thumbnail=lambda **kwargs: rendered.append(1))
+                           thumbnail=lambda board: rendered.append(board))
 
     opened.assert_not_called()
     assert rendered == []
@@ -422,7 +426,7 @@ def test_the_button_posts_the_values_after_the_thumbnail(
     board = autonaApp.board(1)
     _fill(autonaApp, 1)
 
-    def thumbnail(**kwargs):
+    def thumbnail(board):
         AutonaActions.instance.SetMatchField(1, "match", "DURING THE RENDER")
         return None
 
@@ -431,12 +435,30 @@ def test_the_button_posts_the_values_after_the_thumbnail(
     assert "DURING THE RENDER" in _posted(opened)
 
 
+@pytest.mark.parametrize("n", [1, 2])
+def test_the_button_draws_its_own_boards_thumbnail(
+        autonaApp, world, monkeypatch, n):
+    """Through the shell (ADR-005 S4y: core's ThumbnailService.DrawBoard),
+    for the button's board, once -- not through the board's
+    GenerateThumbnail."""
+    board = autonaApp.board(n)
+    _fill(autonaApp, n)
+    asked = []
+
+    opened, shown = _click(board, monkeypatch,
+                           thumbnail=lambda number: asked.append(number))
+
+    assert asked == [n]
+    assert shown == []
+    opened.assert_called_once()
+
+
 def test_a_thumbnail_that_fails_does_not_stop_the_post(
         autonaApp, world, monkeypatch):
     board = autonaApp.board(1)
     _fill(autonaApp, 1)
 
-    def thumbnail(**kwargs):
+    def thumbnail(board):
         raise RuntimeError("no render")
 
     opened, shown = _click(board, monkeypatch, thumbnail=thumbnail)

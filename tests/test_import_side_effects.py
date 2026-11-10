@@ -202,6 +202,11 @@ country_helper = importlib.import_module(
 # singleton while merely being imported.
 scoreboard_manager = importlib.import_module(
     "src.AutonaScoreboardManager").AutonaScoreboardManager
+# The desktop's shell operations and set windows (ADR-005 S4y; the dock's and
+# its boards' until then). bootstrap_gui() builds the one instance, and the
+# windows wait for the main window (UiMounted).
+shell_operations = importlib.import_module(
+    "src.AutonaShellOperations").AutonaShellOperations
 # WebServer additionally pulls in AutonaWebOperations / AutonaApiV1 /
 # AutonaDesignerService. None of those may build anything at module level
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
@@ -258,6 +263,8 @@ assert country_helper.instance is None, \
     "import created AutonaCountryHelper.instance"
 assert scoreboard_manager.instance is None, \
     "import created AutonaScoreboardManager.instance"
+assert shell_operations.instance is None, \
+    "import created AutonaShellOperations.instance"
 assert bridge.instance is None, "import created StateManagerBridge.instance"
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"

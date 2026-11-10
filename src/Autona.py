@@ -204,6 +204,7 @@ from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
+from .AutonaShellOperations import AutonaShellOperations
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
 from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
@@ -755,6 +756,10 @@ class Window(QMainWindow):
         # and apply that format so the board matches. The "Rules" menu switches
         # between them at runtime. The result's layout follows a format as it
         # is chosen (SetBattleFormat), and a page reads the layout.
+        # The set selection windows first (ADR-005 S4y: the shell's, parented
+        # to this window; the board shown at startup built its own here until
+        # then), so that they follow the tournament from the start.
+        AutonaShellOperations.instance.UiMounted(self)
         battleFormat = self._resolveBattleFormat()
         AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)

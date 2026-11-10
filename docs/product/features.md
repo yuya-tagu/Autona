@@ -346,7 +346,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 | Ctrl+Shift+1〜4 | 1: チーム 1 +1 / 2: チーム 1 −1 / 3: チーム 2 +1 / 4: チーム 2 −1 |
 | Ctrl+Shift+R | リセット |
 | Ctrl+Shift+S | スワップ |
-| Ctrl+Shift+O | セット読込 |
+| Ctrl+Shift+O | アクティブボード（1v1 / チーム）のセット選択ウィンドウを開く。クルーでは何もしない |
 | Ctrl+Shift+P | フェーズグループ更新 |
 | Ctrl+Shift+L | 反映（apply changes） |
 

@@ -1,11 +1,12 @@
-# The Qt side of a match thumbnail, for the two ways that render synchronously
-# and keep their contracts: SCORE's button (and its X post) and the legacy
-# GET /scoreboard<N>-get-thumbnail-<png|jpg>. The settings, the payload, the
-# names and the generations are core/ThumbnailService's (ADR-005 S4o); what is
-# left here is the renderer's QPixmap. Both draw the settings as the React page
-# shows them (RenderPayload, S4p). `isPreview` was the Qt panel's, gone in S4p:
-# nothing passes True any more, and the signatures stay what SCORE, the legacy
-# route and tests/live call until the Board panel moves.
+# The Qt side of a match thumbnail, drawn synchronously. The settings, the
+# payload, the names and the generations are core/ThumbnailService's (ADR-005
+# S4o), and since S4y so is the synchronous thumbnail itself
+# (ThumbnailService.DrawBoard, which SCORE's X post and the legacy GET
+# /scoreboard<N>-get-thumbnail-<png|jpg> reach through AutonaShellOperations,
+# not through a board). What is left here is the entry tests/live and the
+# golden recorders call. Every way draws the settings as the React page shows
+# them (RenderPayload, S4p). `isPreview` was the Qt panel's, gone in S4p:
+# nothing passes True any more (a removal candidate, with save_result).
 
 from pathlib import Path
 
@@ -63,8 +64,20 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
 
 
 def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboardNumber=1):
-    """Generate a thumbnail synchronously (SCORE's button and the legacy
-    route). A preview in the background is core/ThumbnailService's."""
+    """Generate a thumbnail synchronously. A preview in the background is
+    core/ThumbnailService's.
+
+    The thumbnail itself is core's ThumbnailService.DrawBoard with the
+    desktop's synchronous draw (ADR-005 S4y): the one way SCORE's X post
+    and the legacy route take (AutonaShellOperations.DrawThumbnail), so this
+    writes the same files. `isPreview` (unused since S4p) still draws to
+    tmp/thumbnail/template.png here."""
+    if not isPreview:
+        from src.AutonaShellOperations import DrawThumbnailNow
+        games = gameAssetManager.instance.catalog if gameAssetManager else None
+        return service.ThumbnailService.instance.DrawBoard(
+            scoreboardNumber, DrawThumbnailNow, games=games)
+
     from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
 
     data, config, template_data = prepare_data(

@@ -538,7 +538,8 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 プールをクリアしない**。`ResetAllInputs` の docstring はかつて「phase/round もクリアする」と
 主張していたが、実態と合っていなかった（今回コメントのみ実態に修正）。
 
-**直さない理由**: `ClearScore` は `NewSetSelected` が新しいセットを読み込む直前にも呼ばれる。
+**直さない理由**: `ClearScore` は新しいセットを読み込む直前にも呼ばれる（当時はボードの `NewSetSelected`。
+ADR-005 S3e-7 から `SetFollowService.LoadSet` が `AutonaActions.ClearScore` を呼び、S4y でボードの `NewSetSelected` は削除した）。
 `SetLoadService.ApplyMatchInfo` は round_name を持たないペイロードに対してラウンド名を意図的に
 そのまま残す設計なので、ここでクリアするようにすると **`round_name` の無いセットを読み込むたびに
 配信中のラウンド名が消える**副作用が生じる。「リセットボタン／全クリアではクリアしてほしいが、
@@ -552,7 +553,8 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 **解消**: 2 つの意図を名前で分けた。
 
 - `AutonaScoreboardWidget.ClearScore` = スコアと LOSERS だけを消す（セット読込前処理。
-  `NewSetSelected` だけが直接呼ぶ）。中身の無かった `scoreColumn` combo ループは削除
+  当時は `NewSetSelected` だけが直接呼んでいた。今のセット読込の前処理は `SetFollowService.LoadSet` が呼ぶ
+  core の `AutonaActions.ClearScore`）。中身の無かった `scoreColumn` combo ループは削除
 - `AutonaScoreboardWidget.ResetMatch` = `ClearScore` + match バー（1 SaveBlock）。
   match バーは `AutonaActions.ClearMatchInfo(board)`（core）が `phase`/`pool`/`match` を空にし、
   `match_en`（同じラウンド名の英語版。YouTube タイトルが読む）もキーがある board なら空にする。

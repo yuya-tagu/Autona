@@ -1029,6 +1029,104 @@ def test_the_legacy_entry_point_goes_through_the_service(env):
         legacy.prepare_data(settings)
 
 
+# ── drawn at once: DrawBoard (ADR-005 S4y) ───────────────────────────────
+# SCORE's X post and the desktop's legacy get-thumbnail draw synchronously
+# through the shell (AutonaShellOperations.DrawThumbnailNow is `draw`); the
+# files are this service's. The shell's half is tests/test_thumbnail_render.py.
+
+def _drawn(_payload):
+    return lambda file_format, fast=False: b"drawn." + file_format.encode()
+
+
+def test_a_board_drawn_at_once_is_saved_as_png_and_jpg(match):
+    asked = []
+
+    def draw(payload):
+        asked.append(payload)
+        return _drawn(payload)
+
+    path = match.service.DrawBoard(1, draw)
+
+    name = Path(path).name
+    assert path == f"./out/thumbnails/{name}"
+    assert name.startswith("Alpha-vs-Bravo-")
+    directory = match.dir / "out" / "thumbnails"
+    assert (directory / name).read_bytes() == b"drawn.PNG"
+    assert (directory / name).with_suffix(".jpg").read_bytes() == b"drawn.JPG"
+    assert len(asked) == 1
+    # Not a run of the lane: thumbnail.render is not written.
+    assert match.render() is None
+
+
+@pytest.mark.parametrize("failing", ["png", "jpg"])
+def test_a_board_drawn_at_once_that_cannot_be_saved_raises(
+        match, monkeypatch, failing):
+    """OSError to the caller (the legacy route's 500, the X post's message):
+    QPixmap.save() said nothing and the path was returned until S4y. A .png
+    written before its .jpg failed stays where it is, and nothing is
+    pruned."""
+    write = ImageImport.WriteFile
+
+    def fail(path, data):
+        if str(path).endswith(f".{failing}"):
+            raise OSError("disk full")
+        write(path, data)
+
+    pruned = []
+    monkeypatch.setattr(ImageImport, "WriteFile", fail)
+    monkeypatch.setattr(match.service, "_prune",
+                        lambda *args, **kwargs: pruned.append(args))
+
+    with pytest.raises(OSError):
+        match.service.DrawBoard(1, _drawn)
+
+    left = sorted(path.suffix
+                  for path in (match.dir / "out").glob("thumbnails/*"))
+    assert left == ([".png"] if failing == "jpg" else [])
+    assert pruned == []
+
+
+def test_a_board_drawn_at_once_keeps_thirty_and_never_the_one_it_saved(match):
+    """The file just written is protected: thirty newer ones (a clock that
+    went back) do not push it out, older ones go."""
+    import time
+
+    directory = match.dir / "out" / "thumbnails"
+    directory.mkdir(parents=True)
+    later = time.time() + 3600
+    for index in range(30):
+        for extension in ("png", "jpg"):
+            path = directory / f"newer-{index:02}.{extension}"
+            path.write_bytes(b"x")
+            os.utime(path, (later + index, later + index))
+    old = directory / "old.png"
+    old.write_bytes(b"x")
+    os.utime(old, (1000, 1000))
+
+    saved = Path(match.service.DrawBoard(1, _drawn)).stem
+
+    stems = {path.stem for path in directory.glob("*.png")}
+    assert saved in stems and (directory / f"{saved}.jpg").exists()
+    assert len(stems) == 31 and "old" not in stems
+
+
+def test_a_board_drawn_at_once_with_nothing_drawn_writes_nothing(match):
+    def refuse(_payload):
+        raise RuntimeError("the page did not load")
+
+    with pytest.raises(RuntimeError):
+        match.service.DrawBoard(1, refuse)
+    with pytest.raises(RuntimeError):
+        match.service.DrawBoard(
+            1, lambda _payload: lambda file_format, fast=False: b"")
+    SM.state = {}
+    (match.dir / "out" / "program_state.json").write_text("{}")
+    with pytest.raises(thumbnails.ThumbnailDataMissing):
+        match.service.DrawBoard(1, refuse)
+
+    assert list((match.dir / "out").glob("thumbnails/*")) == []
+
+
 # ── the state's key ──────────────────────────────────────────────────────
 
 def test_the_render_key_is_in_the_catalog():

@@ -68,7 +68,10 @@ board's tracker (`GameTracker`), and the board only renders the result. The
 notification writes nothing.)
 
 A fresh board's launch write is here too (`SeedFreshBoard`, ADR-005 S4t): the
-board's widgets used to write it as they were built.
+board's widgets used to write it as they were built. So is making a board
+ready to be used (`EnsureBoard`, S4y: the launch write, and on the desktop the
+反映 hold the board widget's constructor registered), which is what a board
+host's Built() answers.
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -169,6 +172,8 @@ class AutonaActions:
     # logged and ignored it, and so does this layer.
     SCORE_BOARDS = (1, 2)
     CREW_BOARD = 3
+    # Every board a shell has (EnsureBoard).
+    BOARDS = SCORE_BOARDS + (CREW_BOARD,)
 
     # A fresh board's team colours when the settings name none
     # (general.team_{t}_default_color; the settings window's defaults).
@@ -215,6 +220,14 @@ class AutonaActions:
         # (SetPlayersPerTeam / SetCharactersPerPlayer). Not in the state, as
         # it never was. Guarded by StateManager.lock.
         self._emptyCharacters = {}
+        # The boards EnsureBoard made ready (their launch write, and on the
+        # desktop the 反映 hold): what a board host's Built() answers. Not in
+        # the state. Guarded by StateManager.lock.
+        self._ensuredBoards = set()
+        # The boards an EnsureBoard is making right now (not ready yet): a
+        # second call returns at once instead of making them again. Guarded
+        # by StateManager.lock.
+        self._makingBoards = set()
 
     # ── the battle format ────────────────────────────────────────────────
 
@@ -347,34 +360,141 @@ class AutonaActions:
                     "using the English default")
         return self.DEFAULT_MATCH_TEXTS[key].format(number)
 
-    # ── a fresh board ────────────────────────────────────────────────────
+    # ── a board's life ───────────────────────────────────────────────────
+
+    def EnsureBoard(self, board, panel=False) -> bool:
+        """Make board `board` (1/2/3) ready to be used, once: its launch
+        write (SeedFreshBoard), and with `panel` what the desktop's SCORE
+        panel adds to a 1v1 / team board -- the display options brought
+        back to the settings (StateSchema.PublishDisplayOptions), the
+        polling turned off (SetFollowService.TurnOffPolling) and, last, the
+        board put behind its 反映 button (StateSchema.HoldBoard). One save
+        cycle. True if this call did it; False when the board was ready
+        already, or there is no such board (nothing is written then).
+
+        The desktop calls it with `panel` when it first uses a board, ahead
+        of the board's widgets, which only render what it wrote
+        (AutonaScoreboardManager.EnsureScoreboard); the headless shell for
+        all three at launch, without (src/headless._SeedBoards): it holds
+        nothing (it has no 反映 button), and the polling setting and the
+        display options it restored are the operator's. Until ADR-005 S4y
+        the desktop's three were its board build's and the hold the board
+        widget's constructor's, after the seed, in this order: the save cycle
+        and what it publishes are the same. A writer on another thread
+        between the seed and the hold is published, not held; one while the
+        widgets are built is held now (it was published until S4y, when the
+        hold came last), and the widgets render what they find when built
+        (AutonaScoreboardWidget).
+
+        What a board host's Built() answers (BoardEnsured): the desktop's
+        widgets are drawn after this, by the shell. Board 3 (crew) is never
+        held, with or without `panel` (it publishes as it goes); neither
+        are its display options rewritten nor the polling turned off, as
+        its build never did.
+
+        Called where the shell builds a board (the desktop's GUI thread, the
+        headless launch). The board counts as ready once it is: at the end of
+        the save cycle's writes, under the lock that registers its hold, so
+        a reader sees it ready and held together or neither. A second call
+        while one is making it returns False at once, as for a ready board.
+        When this raised the board is not ready and not held (ForgetBoard):
+        the next call makes it again from its launch write.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.BOARDS:
+            logger.debug(f"EnsureBoard: no board {board}")
+            return False
+        with StateManager.lock:
+            if board in self._ensuredBoards or board in self._makingBoards:
+                return False
+            self._makingBoards.add(board)
+        try:
+            with StateManager.SaveBlock():
+                self.SeedFreshBoard(board)
+                held = panel and board in self.SCORE_BOARDS
+                if held:
+                    schema.PublishDisplayOptions()
+                    # Imported here: SetFollowService imports this module.
+                    from .SetFollowService import SetFollowService
+                    SetFollowService.TurnOffPolling()
+                with StateManager.lock:
+                    if held:
+                        # Last: a hold registered first would hold back the
+                        # seed.
+                        schema.HoldBoard(board)
+                    self._ensuredBoards.add(board)
+        except BaseException:
+            # Raised by a write, or by the publish closing the block after
+            # the hold was in: neither half may stay.
+            self.ForgetBoard(board)
+            raise
+        finally:
+            with StateManager.lock:
+                self._makingBoards.discard(board)
+        return True
+
+    def ForgetBoard(self, board):
+        """Undo EnsureBoard for a board that could not be made or drawn: it
+        is no longer ready (BoardEnsured, a board host's Built()), and a
+        1v1 / team board leaves its 反映 hold (StateSchema.ReleaseBoard),
+        what was pending published -- a hold with no board to apply it would
+        keep its edits from the outputs. The state is left as it is; the
+        next EnsureBoard writes the launch state again.
+
+        Called by EnsureBoard when it raised, and by the desktop when the
+        board's widgets could not be built after it
+        (AutonaScoreboardManager.EnsureScoreboard): a board made in core
+        with no widget would answer Built() with nothing to render it, and
+        the swap / load-set hotkeys would act on it."""
+        board = self._asInt(board, 0)
+        with StateManager.lock:
+            self._ensuredBoards.discard(board)
+            if board in self.SCORE_BOARDS:
+                schema.ReleaseBoard(board)
+
+    def BoardEnsured(self, board) -> bool:
+        """Whether EnsureBoard has made board `board` ready."""
+        board = self._asInt(board, 0)
+        with StateManager.lock:
+            return board in self._ensuredBoards
+
+    def ResetBoards(self):
+        """Drop the whole `score` subtree (StateSchema.ResetScoreRoot): no
+        board is ready after it. Once per launch, before any board is
+        ensured -- the desktop's scoreboard dock's construction, the headless
+        shell's seed -- so a program_state.json from an older build cannot
+        leave boards behind. Nothing may call it after that: a board's
+        widgets would be left rendering a subtree that is no longer there,
+        and its hold would stay."""
+        with StateManager.lock:
+            self._ensuredBoards.clear()
+        schema.ResetScoreRoot()
 
     def SeedFreshBoard(self, board) -> bool:
         """Write board `board`'s launch state, in one save cycle: the skeleton
         and everything a fresh board publishes. True if it applied.
 
-        One function for both shells (ADR-005 S4t): the desktop runs it when
-        it builds a board, ahead of the widgets, which then only render it
-        (AutonaScoreboardManager.EnsureScoreboard); the headless shell runs
-        it for all three at launch (src/headless._SeedBoards). The board's
-        widgets used to write most of this as they were built, by emitting
-        their own signals, so the headless shell seeded only the player slots
-        and a headless board had no colours, names, score or set length.
-        tests/test_headless_seed.py pins the two against each other, whole.
+        One function for both shells (ADR-005 S4t), run by EnsureBoard (S4y):
+        the desktop's when it first uses a board, ahead of the widgets, which
+        then only render it; the headless shell's for all three at launch.
+        The board's widgets used to write most of this as they were built, by
+        emitting their own signals, so the headless shell seeded only the
+        player slots and a headless board had no colours, names, score or set
+        length. tests/test_headless_seed.py pins the two against each other,
+        whole.
 
         The order is that of the construction it replaced: it is the key
         order of a fresh program_state.json. `SeedBoard` replaces the
         subtree, so nothing of what it held is left to clear (a roster, a
         crest), and it must not run on a live board.
 
-        The hold (`StateSchema.HoldBoard`) is not here: it is the desktop's,
-        for a built board, and registered by the board once this is written.
-        Neither is the desktop's polling off
-        (SetFollowService.TurnOffPolling), which is the headless shell's to
-        leave alone, nor its rewrite of the display options from the settings
-        (StateSchema.PublishDisplayOptions): the headless shell keeps what it
-        restored and fills in what is missing (StateSchema.SeedPanelState),
-        and its own launches never rewrote them.
+        The hold (`StateSchema.HoldBoard`) is not here, nor the desktop's
+        polling off (SetFollowService.TurnOffPolling), which is the headless
+        shell's to leave alone, nor its rewrite of the display options from
+        the settings (StateSchema.PublishDisplayOptions): the headless shell
+        keeps what it restored and fills in what is missing
+        (StateSchema.SeedPanelState), and its own launches never rewrote
+        them. All three are EnsureBoard's `panel`.
         """
         board = self._asInt(board, 0)
         if board == self.CREW_BOARD:

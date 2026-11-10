@@ -575,7 +575,7 @@ def _follow(board, setId, noMains):
     with a tournament loaded that answers nothing (a set loads only then);
     the follow timers stopped at once so that none fires later."""
     with tournamentLoaded():
-        board.NewSetSelected({"id": setId, "auto_update": "set",
+        board.setFollow.LoadSet({"id": setId, "auto_update": "set",
                               "no_mains": noMains})
     board.StopAutonaUpdate()
 

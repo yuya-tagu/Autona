@@ -6645,3 +6645,203 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - board 1 の Match のコンボ（大会を読み込んだ後）: 空の行を選び、v1 の `PATCH set` で `Winners Final` を書いた後、Qt でリストの空の行を選ぶと、未反映の値の `match` が `""` になる。クルーボードは最初に空の行を選ばずに同じ操作をして、`score.3.match` が `""` になる（リストを開いたとき `Winners Final` の行が選ばれている）
   - `/scoreboard4-get` は両シェルとも 503 で `"scoreboard 4 does not exist"`
   - プール名: 大会を読み込むと、`GET /match-names/candidates?board=1|2` と Web の `/scoreboard` の Pool の先頭に `予選プールE7` / `予選プールW9` が出る（board 3 と `board` なしは用語だけ）。v1 の `phases:refresh` の後も同じで、大会の解除で用語だけに戻る（ヘッドレスも同じ）。読み込みのときの名前は前から届いていた（上の 5）ので、v1 の取り直しの経路そのものは `tests/test_set_selection.py` が見る
+
+#### S4y Widget 依存の除去（後半）（2026-11-10）
+
+上の順序の 5 の後半。ボードの**ライフサイクルと周りの結線**をボードのウィジェットから外した。ボードを作ること（シード・反映待ち・取り直しの停止・表示トグルの書き直し）は core の 1 操作になり、セット選択 / 配信台のウィンドウ・同期のサムネイル・シェル操作の登録・`load_set` ホットキーは、ボードでなくデスクトップのアダプタ `AutonaShellOperations` が持つ。Qt の見た目は変えていない（操作の違いは下の「動作の違い」に全部挙げた）。機能は 1 つも無くしていない（無くす候補は「報告」に挙げるだけ）。`DesktopBoardHost.Run` の GUI スレッド実行は依頼どおり動かしていない（順序 7）。
+
+- **完了内容**
+  1. **ボードを作る操作を core に 1 つ: `AutonaActions.EnsureBoard(board, panel=False) -> bool`**
+     - 1 つの保存サイクルで、`SeedFreshBoard` → （`panel` かつボード 1 / 2 のとき）`schema.PublishDisplayOptions()` → `SetFollowService.TurnOffPolling()` → 最後に `schema.HoldBoard(board)`。順番は S4x までのデスクトップの構築（`EnsureScoreboard` の 3 つ → ボードの `__init__` の hold）と同じ。hold を最後に置くのは、先に登録するとシードが公開されないため
+     - 各ボードを起動ごとに 1 回だけ作る。作ったかどうかのフラグは `AutonaActions._ensuredBoards`（`StateManager.lock` の中で読み書きする。state には出さない）。2 回目と、無いボード（`0` / `4` / `"x"` / `None`）は何も書かずに False。フラグは保存サイクルの書き込みの最後に、hold の登録と同じ `StateManager.lock` の保持の中で立てる（読み手には「作られていて hold されている」か「どちらでもない」かのどちらかに見える）。作っている間は別の印 `_makingBoards` を立て、その間に戻ってきた呼び出しはすぐ False。例外のときは `ForgetBoard` でフラグと hold の両方を戻してから投げ直す（下の「修正」。レビュー前はフラグを呼び出しの最初に立て、例外ではフラグだけを下ろしていた）
+     - 足した読み手と後始末: `BoardEnsured(board)`、`ForgetBoard(board)`（フラグを下ろし、ボード 1 / 2 の hold を `schema.ReleaseBoard` → `StateManager.ReleaseSubtree` で外す。下の「修正」）、`ResetBoards()`（フラグを全部下ろして `schema.ResetScoreRoot()`）、クラス属性 `BOARDS`（= `SCORE_BOARDS + (CREW_BOARD,)`）
+     - 呼び手:
+       - デスクトップ: `AutonaScoreboardManager.EnsureScoreboard` が `EnsureBoard(n, panel=True)` を呼んでからウィジェットを建てる（外側の `SaveBlock` と `_ensuring` の再入ガードは今までどおり）。マネージャの `__init__` の `ResetScoreRoot` は `ResetBoards()` にした
+       - ヘッドレス: `src/headless._SeedBoards()` が `ResetBoards()` の後、`BOARDS` の 3 枚に `panel` なしで呼ぶ（held 登録なし・`TurnOffPolling` なし・`PublishDisplayOptions` なし。S4t からの現状のまま）
+     - ボードの `__init__` の `schema.HoldBoard` は削除した
+     - `HoldBoard` / `SeedFreshBoard` / `ResetScoreRoot` を `src/` で呼ぶのは `Actions.EnsureBoard` / `Actions.ResetBoards` だけになった（AST で pin）
+     - `DesktopBoardHost.Built` は `AutonaActions.instance.BoardEnsured(board)` を読む（dock の `scoreboards` ではなく）。デスクトップが core にボードを作るのはウィジェットを建てるときだけなので、意味は「建っている」のまま。`Prepare` は、作られていないとき**か**ウィジェットが無いときに建てる（ウィジェットの構築はシェルの描画の仕事として残る）
+  2. **同期のサムネイルが core の 1 つの入口を通る: `ThumbnailService.DrawBoard(board, draw, games=None)`**
+     - 中身: `RenderPayload(preview=False, board=board)` → `draw(payload)` が返す `encode(format, fast=False)` で PNG と JPG を作る（空なら RuntimeError） → `OutputStem` の名前で `out/thumbnails/` に `ImageImport.WriteFile` で書く → `_prune` で 30 世代 → PNG の相対パス（`out/thumbnails/{stem}.png`）を返す
+     - 描き手はデスクトップの `AutonaShellOperations.DrawThumbnailNow(payload)`（`ThumbnailRenderer.renderSync`。空の画像なら例外）。ヘッドレスに描き手は無く、legacy は今どおり 503（シェル操作は増やしていない）
+     - `AutonaShellOperations.DrawThumbnail(board)` を 3 か所が呼ぶ: legacy の `get_thumbnail`（`RenderThumbnail`）、X 投稿のクリップボード（`PostToX`）、ボードの隠しボタン（`GenerateThumbnail`）。どれもボードのウィジェットを通らない
+     - `main_generate_thumbnail.generate()`（`isPreview` でないとき）も `DrawBoard` に委ねる。呼ぶのは `tests/live` と golden の記録だけ
+  3. **シェル操作の登録元をデスクトップのアダプタに: 新規 `src/AutonaShellOperations.py`**
+     - `bootstrap_gui()` がマネージャの直後に `AutonaShellOperations.instance` を作り、`AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` にその `OpenSetSelection` / `RenderThumbnail` / `StartImageRender`（`@gui_thread_sync`）を登録する
+     - `StartImageRender`・`_EncodeImage`・`_ImageEncoder`・`PREVIEW_PNG_QUALITY` は dock から中身を変えずに移した
+     - セット選択 / 配信台のウィンドウもアダプタが持つ:
+       - ボード 1 / 2 に 1 つずつで、作るのは 1 回だけ（`SetWindow(board)` / `StationWindow(board)`。`ShowSetSelection` / `ShowStationSelection` が開く）
+       - Window が `_BuildUi` で最初のボードを建てる前に `UiMounted(self)` を呼び、親を渡す。ここでボード 1 / 2 のセット選択ウィンドウを作る（大会のフェーズを最初から受けるため）
+       - ハーネスは Window を建てないので、ウィンドウは親なしで、使うときに作られる
+     - `OpenSetSelection(number)` の順: ボード 1 / 2 以外は ValueError（legacy は 500。今までどおり） → `boardHost.Prepare(board)`（未構築なら作って建てる。今までは dock の `GetScoreboard` が建てていた） → ウィンドウを開く（失敗はログに残して `"OK"`）
+     - `RenderThumbnail(number, format)`: ボード 1 / 2 以外は ValueError（500）。描画の失敗はログに残して投げ直す（500。今までどおり）
+  4. **ホットキー**
+     - ボードに繋いでいたものを洗い出した。ボードのウィジェットに繋いでいたのは `load_set` だけ（ボードの `__init__` が自分の `LoadSetClicked` に繋いでいた）。`swap_teams` はホットキーの関数が dock の `scoreboards` とボードの `CommitFocusedEdit` を直接見ていた
+     - `load_set`: `ConnectActions()` / `DisconnectActions()` が `_onLoadSet` を繋ぎ・外す。アクティブボード（`ActiveBoard()`）が 1 / 2 で、構築済み（`boardHost.Built`）なら `AutonaShellOperations.ShowSetSelection(number)`。クルー形式・未構築・アダプタが無いときは何もしない（下の判断 3）
+     - `swap_teams`: 未構築の判定は `boardHost.Built(number)`、入力中の欄の確定は `boardHost.CommitEdit(number)`
+     - ホットキーは GUI スレッドで発火する（`RegisterHotKey(None, ...)` の `WM_HOTKEY` を native event filter が受ける）ので、関数の中でウィンドウを開いてよい
+  5. **`CommitGameLoad` の結線: コードは変えていない**
+     - `AutonaActions.CommitGameLoad` は `SCORE_BOARDS` の `ApplyChanges` で、アダプタの `_Publish` が `gameLoaded` → `onLoad` の後に呼ぶ。ボードのウィジェットへの依存は無かった
+     - カードが `onLoad` の中で書く（`ReloadCharacters`）ので、`onLoad` の後に commit する順序の制約は残る。カードが無くなる順序 7 で見直す
+  6. **セット選択 / 配信台のウィンドウが core を直接呼ぶ**
+     - `AutonaSelectSetWindow(parent, board, openStationSelection=None)`: 選んだセットは `SetFollowService(board).LoadSet(set)`（今までどおり `QTimer.singleShot(0)` で表のシグナルの外に出す。pitfalls #9）。配信台ボタンはウィンドウを閉じて、渡された関数（アダプタの `ShowStationSelection(board)`）を呼ぶ
+     - `AutonaSelectStationWindow(parent, board)`: 選んだステーション / 配信は `SetFollowService(board).FollowStation(station)`
+     - ボードから消したもの:
+       - `AutonaScoreboardWidgetSignals`（`NewSetSelected` / `SetSelection` / `StationSelection` / `StationSelected`）とその接続
+       - `NewSetSelected` / `LoadSetClicked` / `LoadStationSets` / `LoadStationSetClicked`
+       - `selectSetWindow` / `selectStationWindow` と、`load_set` の接続
+     - ボードの「大会の試合を選ぶ」ボタン（`btSelectSet`）は `AutonaShellOperations.instance.ShowSetSelection(self.scoreboardNumber)` を呼ぶ
+     - テストがボードのシグナル / メソッドで呼んでいたセット読み込みと追従（`board.NewSetSelected(` / `board.signals.NewSetSelected.emit(` / `board.signals.StationSelected.emit(` / `board.LoadStationSets(`）は、同じ core の操作（`board.setFollow.LoadSet(` / `FollowStation(`）に機械的に置き換えた（4 ファイル 27 か所）
+
+- **判断**
+  1. **`EnsureBoard` は 1 つの操作で、`panel` で分ける**: ヘッドレスとの違いは「反映ボタンが無い・取り直しの設定と復元した表示トグルはオペレータのもの」の 3 つだけ。別の操作に分けると、シードの後の順番が 2 か所に書かれる。フラグはデスクトップでは「建っている」と同じ意味になる（呼び手が `EnsureScoreboard` だけ）ので、ボードホストの `Built` をこれに替えても答えは変わらない
+  2. **hold の登録はシードの直後、同じ保存サイクルの中**: 依頼の「タイミングと順序は今と同じ」のとおり、起動時ではなくボードを最初に使うときのまま。違いはウィジェットの構築の前になったことだけ。ウィジェットは構築中に何も書かない（S4t）ので、公開されるものも反映待ちも変わらない（`test_a_built_desktop_board_has_nothing_to_apply` と golden で確かめた）
+  3. **`load_set` はアクティブボードだけ**: 旧は構築済みの 1v1 / チームのボードがそれぞれ自分のウィンドウを開いていた。両方が建っていると 1 回押すと 2 つのウィンドウが重なって開き（見えないボードの分も）、クルー形式でも建っている 1v1 / チームのボードのウィンドウが開いた。ボードを経由しないなら、どのボードかを決める必要がある。スコア・反映・スワップのホットキーと同じ「アクティブボードの 1 面だけ」にそろえた。未構築なら何もしないのはスワップと同じ（未構築のボードに読み込んだセットは、後の構築のシードで消える）。**メインの判断で採用。旧の挙動（構築済みの全ボード）へは 1 行で戻せる**（`AutonaHotkeys._onLoadSet` の対象を `ActiveBoard()` から構築済みの `SCORE_BOARDS` に替える）
+  4. **legacy のサムネイルはボードを建てない**: サムネイルは state を読むだけで、ボードのウィジェットは要らない。建てると、シード（未構築のボードに書かれていた値が消える）・反映待ちの登録・取り直しの強制オフという副作用が起きていた
+  5. **`OpenSetSelection` はボードを先に作る**: ウィンドウはボードから外れたが、ウィンドウから読み込むセットは held のボードに入るべきもので、未構築のまま読み込むと後の構築のシードで消える。今までの「open-set でボードが建つ」をそのまま残した
+  6. **ウィンドウの親は Window、作るのは起動時**: 旧の親はボードのウィジェットだった。ボードは実行中に壊されないので、寿命は変わらない。位置も変わらない: どちらのウィンドウも `__init__` で自分を `QApplication.primaryScreen().availableGeometry().center()` へ `move()` する（`WA_Moved` が立つので、Qt は親の上への中央寄せをしない）ので、親が何でもプライマリ画面の中央に出る（実機確認で確かめた。下）。起動時に 2 つとも作るのは、旧はそのボードが建ったときに作られ、それより前に出た大会のフェーズを取りこぼしていたため。配信台のウィンドウは開くたびに `LoadStations()` するので、使うときに作る
+  7. **ファイルの書き出しはエンコーダ + `WriteFile`**: 旧の同期のサムネイルは `QPixmap.save()` で書いていた。`_ImageEncoder` は `QPixmap.save` と同じバイトを返し（S4o の `test_thumbnail_render.py` が pin）、`WriteFile` はアトミックな書き込み。プレビュー / 生成（`StartImageRender`）と同じ経路にそろえた
+
+- **動作の違い**
+  - **`load_set` ホットキー（Ctrl+Shift+O）**: アクティブボード（1 / 2）のウィンドウだけを開く。旧は構築済みの 1v1 / チームの全ボードのウィンドウを開いていた（両方が建っていると 2 つ重なる。クルー形式でも開く）。今はクルー形式とアクティブボードが未構築のときは何も開かない（旧は、アクティブボードが未構築でももう一方が建っていればそちらを開いた）
+  - **legacy の `scoreboard<n>-get-thumbnail-png|jpg`**:
+    - ボード 1 / 2 を構築しなくなった。シード（未構築のボードに書かれていた値が消える）・反映待ちの登録・`general.disable_autoupdate` の強制オンが起きない。描くのは state の値（未構築なら、未構築のまま書かれた値）
+    - ボード 3 は 500 のままで、クルーボードを建てなくなった（旧は建ててから AttributeError で 500）
+  - **legacy の open-set のボード 3**: 500 のままで、クルーボードを建てなくなった（旧は建ててから AttributeError で 500）
+  - **held の登録の時点**: ウィジェットの構築の前（旧は構築の最後）。同じ保存サイクルの中で、公開されるもの・反映待ちは変わらない。違うのは、別スレッドの書き込みがウィジェットの構築中に来たときに反映待ちになること（旧は公開されていた。構築は GUI スレッドで、ボードホストの書き込みも GUI スレッドに並ぶので、実際に割り込むのは core 直結の書き込みだけ）
+  - **セット選択ウィンドウ**: ボード 1 / 2 の 2 つとも起動時に作られる（旧は建ったボードの分だけ。起動時に作るウィンドウは、1v1 / チームではセット選択 1 + 配信台 1 → セット選択 2（配信台は初めて開くときに作る）、クルー形式では 0 → 2）。両方が大会のフェーズを受ける。セットの取得の答えは、取得を始めたウィンドウだけが受ける（今までどおり `_fetchPending`）。親は Window（旧はボードのウィジェット）
+  - **同期のサムネイルのファイル**: `QPixmap.save()` ではなく、エンコーダ（同じバイト）+ `ImageImport.WriteFile`（一時ファイルから置き換える）で書く
+  - **同期のサムネイルの書き込みの失敗**: 旧の `QPixmap.save()` は失敗しても例外を出さず（False を返すだけで、見ていなかった）、パスを返していた。今は `WriteFile` の OSError がそのまま上がる: legacy の get-thumbnail は 500、SCORE の X 投稿は X を開いた後に「サムネイルの生成に失敗したので画像をクリップボードにコピーしていない」のモーダルを出す（旧は、ファイルが書けなくてもパスが返り、読み込んだ画像が空ならクリップボードに何も入れず、何も言わなかった）。PNG を書いた後に JPG が失敗したときは、PNG は消さずに残り、30 世代の剪定は走らない（次に成功した描画の剪定で古い順に数えられる）。`tests/test_thumbnail_service.py` が pin
+  - **ログ**:
+    - 同期のサムネイルの成功は `Thumbnail saved as ./out/thumbnails/<stem>.png and ./out/thumbnails/<stem>.jpg`（旧は `Thumbnail successfully saved as ...`）
+    - legacy のサムネイルの失敗は `Shell operations - The thumbnail of scoreboard N failed`（旧は `GenerateThumbnail failed`）
+    - X 投稿のサムネイルの失敗は `PostToX: thumbnail generation failed` の 1 行（旧はその前に `GenerateThumbnail failed` も出ていた）
+    - open-set の失敗は `Shell operations - The set selection of scoreboard N did not open`（旧は `Scoreboard Manager - ...`）
+  - **golden の差分**: 無い。`tests/fixtures/**` は 1 バイトも変えていない
+
+- **報告（直していない。既存の問題・候補）**
+  - 無くす候補として挙げるだけ（残している）:
+    - ボードの隠しボタン `thumbnailBtn` と `GenerateThumbnail`（UI から押せない。ダイアログを出すだけで、中身は `DrawThumbnail`）
+    - `main_generate_thumbnail.generate` の `isPreview` の経路と `save_result` / `prepare_data`（呼ぶのはテストと golden の記録だけ）
+    - ボードの `PostToX`（S4x の報告のとおり。順序 7 でページへ）
+  - **既存の問題（触っていない）**: `AutonaSelectStationWindow.SetStations` は provider の `get_stations_finished` の slot で、中で `QApplication.processEvents()` を呼ぶ（pitfalls #9）。毎回新しいモデルを `setSourceModel` する（#13 の retire なし）。S4y で動かしたのはウィンドウの持ち主とセット / 配信の読み込みの呼び先だけで、この 2 つは今までどおり
+  - （レビューで直した）ウィジェットの構築が例外で落ちたとき、core のフラグと hold が残っていた。下の「修正」2 で、`EnsureScoreboard` が `ForgetBoard` を呼ぶようにした。構築が落ちる既知の経路は無い
+
+- **次の段への申し送り**
+  - React の SCORE ページ: ボードを作るのは `EnsureBoard`。v1 のボードの読み書きは今までどおりボードホストの `Prepare` を通る。ページがボードのウィジェットなしでボードを使うようになったら、デスクトップは `panel=True` を Window の描画と切り離して呼べる（ウィジェットを建てない `Prepare`）。そのときは `DesktopBoardHost.Built` の意味が「作った」に変わるので、`Prepare` の「ウィジェットが無ければ建てる」を外す
+  - 順序 7（Qt のボードの削除）: ボードのウィジェットを消しても、ボードの初期化・反映待ち・サムネイル・ウィンドウ・ホットキー・シェル操作は残る（`AutonaShellOperations` と core）。消すときに見直すもの:
+    - `DesktopBoardHost.Run` の GUI スレッド実行と `Prepare` の marshal（同時に外す）
+    - スワップのホットキーの `host.CommitEdit(number)` は、まだボードのウィジェットに触る（`DesktopBoardHost.CommitEdit` → `_Board` → `manager.EnsureScoreboard(n).CommitFocusedEdit()`）。S4y で外したのは「建っているか」の判定だけ。ウィジェットを消すときは、入力中の欄の確定もホストから外す
+    - `CommitGameLoad` の順序の制約（カードが無くなれば `onLoad` の前でもよい）
+    - 起動時の対戦形式の経路（`Window._BuildUi` → `CreateScoreboard` / `SetBattleFormat`）
+    - `tests/conftest.py` の `_dropBoard` が下ろす `_ensuredBoards`
+    - `EnsureScoreboard` の、ウィジェットの構築の失敗で `ForgetBoard` を呼ぶ except（ウィジェットが無くなれば要らない）
+  - `schema.HoldBoard` の起動時登録（決定 3）: `EnsureBoard(panel=True)` を起動時に全ボードへ呼べばよい。React の反映ボタンと同時か後
+
+- **テスト**
+  - `tests/test_headless_seed.py`（+17）:
+    - 1 回だけ作り、2 回目は書かない（3 ボード）
+    - `panel` はシードを公開した後に hold し、反映待ちは無く、取り直しをオフにする（1 保存サイクル）
+    - 建てたデスクトップのボードに反映待ちが無い
+    - ヘッドレスは取り直しを変えない
+    - クルーは `panel` でも hold しない
+    - 無いボード（4 通り）は書かない
+    - 失敗したらフラグが残らず、`saveBlocked` が戻る
+    - `ResetBoards` がフラグを忘れる
+    - ヘッドレスの 3 ボードは作られ hold されない
+    - `DesktopBoardHost.Built` は core のフラグで、`Prepare` が作って建てる
+    - AST: `HoldBoard` / `SeedFreshBoard` / `ResetScoreRoot` の呼び手は `Actions.EnsureBoard` / `ResetBoards` だけ
+  - `tests/test_web_operations.py`:
+    - 新規 3: 未構築のボードの open-set はボードを先に作る、legacy のサムネイルはボードを建てない（ファイルはエンコーダのバイト・作られず hold されず取り直しも変わらない・描いたのは board 2）、Window が最初のボードの前に `UiMounted(self)` を呼ぶ（AST）
+    - 更新: シェル操作の GUI スレッドの検査・ルートの検査・ウィンドウが開けない検査をアダプタに替えた
+  - `tests/test_thumbnail_render.py`:
+    - 新規 1: ボードが 1 つも無いまま `DrawThumbnail(1)` が 1920x1080 の PNG / JPEG を描き、ボードを建てず `thumbnail.render` に触らない
+    - 更新: エンコーダと `StartImageRender` の参照をアダプタに替えた。`tests/test_result_render.py` も同じ
+  - `tests/test_scoreboard_post.py`: 新規 2。X 投稿のボタンが自分のボードのサムネイルを頼む（board 1 / 2）。`_click` のサムネイルの差し替えをアダプタの `DrawThumbnail` に替えた
+  - `tests/test_select_set_cache.py`: 新規 3。選んだセットはウィンドウのボード（2）で core の `LoadSet` に渡る（表のシグナルの後）、配信台ボタンはシェルに渡す、選んだステーションはウィンドウのボード（2）で `FollowStation` に渡る。窓の作り方を `(parent, board)` にした
+  - `tests/test_scoreboard_operations.py`: 新規 8。
+    - スワップのホットキーはボードホストに聞く
+    - `load_set` はアクティブボードのウィンドウだけを開く
+    - クルー形式・未構築では開かない（2）
+    - ボードの「大会の試合を選ぶ」は自分のボードのウィンドウ（2）
+    - ボード 1 / 2 にそれぞれのセット / 配信台のウィンドウがあり、配信台ボタンは自分のボードの配信台を開く（2）
+  - 更新:
+    - `tests/test_bootstrap_split.py`: 手順に `AutonaShellOperations()`、登録の検査をアダプタに。ハーネスの GUI の段でウィンドウが 0 個・ボードが 1 つも作られていない
+    - `tests/test_import_side_effects.py`: `src.AutonaShellOperations` の import は副作用ゼロで `instance` は None
+    - `tests/test_signal_lifetime.py`: 接続数の見本をホットキーの `load_set` から provider のシグナルに替えた。ボードはもう `load_set` に繋がない
+    - `tests/conftest.py`: `_dropBoard` が core のフラグも下ろす
+    - `tests/test_set_selection.py`: 窓の作り方
+    - `tests/test_set_follow.py` / `tests/test_set_follow_flow.py` / `tests/test_scoreboard_operations.py` / `tests/test_player_card_render.py`: セット読み込みと追従の機械的な置き換え
+  - **pin が落ちることの確認**: 実装を 1 か所ずつ壊す 23 通りを回し、23 通りとも新しいテストが落ちた（壊したファイルはバイト単位で戻し、`git diff --stat` が前後で同じことを確かめた）:
+    - `EnsureBoard` が hold しない / シードの前に hold する / `panel` を見ない / 失敗でフラグを下ろさない / 2 回目も作る
+    - `ResetBoards` がフラグを下ろさない
+    - `Built` が dock を見る
+    - `OpenSetSelection` が `Prepare` しない
+    - サムネイルがボードを建てる / board 1 を描く
+    - セット / 配信台のウィンドウが board 1 に読み込む
+    - 配信台ボタンが何もしない
+    - `load_set` が構築済みの全ボードを開く / 未構築でも開く
+    - スワップが未構築でも入れ替える
+    - X 投稿が board 1 を描く
+    - `bootstrap_gui()` がアダプタを作らない
+    - Window が `UiMounted` を呼ばない
+    - デスクトップが `panel` なしで作る / ヘッドレスが `panel` 付きで作る
+    - ボードのボタンが board 1 を開く
+    - 配信台のウィンドウが board 1 を開く
+
+- **検証**: `python scripts/run_tests_parallel.py` 5605 passed / 2 skipped（RESULT: OK、exit 0。S4x の 5571 から、足した 34 本ぶん増えた）。関係する 28 ファイルの直列実行は 3 回に分けて 508 passed（9 ファイル）、1285 passed / 1 skipped（18 ファイル。skip は `tests/test_crew_operations.py` の録画専用）、`tests/test_headless_seed.py` 40 passed（いずれも exit 0）。その後に足したテスト（建てたボードに反映待ちが無い・`UiMounted` の AST・ボードのボタンとアダプタのウィンドウ）を含む `tests/test_headless_seed.py`・`tests/test_web_operations.py`・`tests/test_scoreboard_operations.py`・`tests/test_state_schema.py` を回し直して 297 passed（exit 0）。並列の実行の 7 warnings は、残りの 81 ファイルを直列で回して（3765 passed / 1 skipped、exit 0）出どころを見た: どれも `src/AutonaPlayerDB.py` の `QSortFilterProxyModel.invalidateFilter()` の DeprecationWarning（`tests/test_player_db.py`・`tests/test_provider_jobs.py`。S4y で触っていない既存のもの）。web は触っていないので build / jest / e2e は回していない。アプリの起動はしていない（サブエージェントはアプリを起動しない。本物の Window のテストは使い捨てのディレクトリの別プロセスで、offscreen）
+
+- **実機確認（メインセッション、2026-11-10）**: 隔離データで
+  - デスクトップ（`python main.py`）:
+    - セット選択ウィンドウ: フェーズ（すべてのフェーズ / Pools / Top 8）が入っていて、プライマリ画面の中央に出た。セット 90101 を選ぶとボード 1 が反映待ちになり、公開値は変わらなかった
+    - 配信台のウィンドウが開き、ステーション 78 をボード 1 だけが追従した（ボード 2 は null）
+    - Ctrl+Shift+O（`WM_HOTKEY` 経由）: 1v1 でウィンドウ 1 つ。legacy の open-set でボード 2 を建てた後も 1 つ。`PUT /battle-format` でチームにした後も 1 つ。クルーでは開かない
+    - サムネイル（自動更新オフの状態で）:
+      - legacy の `scoreboard1-get-thumbnail-png` / `-jpg` は 200 で画像のバイトが返り、`out/thumbnails` にファイルができた
+      - `scoreboard2-*` は 500（ボード 2 は未構築で選手のタグが無い。旧も 500）、`scoreboard3-*` は 500
+      - ログに `Creating scoreboard 2` / `3` は出ず、`disable_autoupdate` は False のまま
+    - 未構築のボード 2 への legacy `scoreboard2-open-set`: 200 で `Creating scoreboard 2 (team)`、フェーズの入ったウィンドウが開いた。セット 90103 が反映待ち（`dirty: true, held: true`）に入り、`disable_autoupdate` は True になった（今までどおり）
+    - v1 の `POST /thumbnail:preview` / `:generate` と `POST /result:preview` は、どれも done まで進んだ
+    - ログに S4y 由来の ERROR は無い（ステーション 78 の null のセットのパースエラーは偽データのもので、既存）
+  - ヘッドレス（`python main.py --headless`）: legacy のサムネイル・open-set と v1 の `thumbnail:preview` は 503。ボード 1〜3 がシードされ、ボード 1 / 2 の未反映は `held: false`。`disable_autoupdate` は触られない
+  - 未確認: X 投稿のクリップボード（ブラウザが開く操作のため）
+
+##### S4y の修正（独立レビューと実機確認の 8 項目）（2026-11-10）
+
+独立レビューとメインの実機確認（上）で見つかった 8 項目を直した。上の記述のうち、ここで変わったものはこの節が正（上の「完了内容」1・判断 3 / 6・動作の違い・報告・申し送りは、この節に合わせて書き直してある）。
+
+- **直したこと**
+  1. **【中】ウィジェットの構築中の held の書き込みで、反映ボタンが点かなかった**
+     - 原因: `held_dirty_changed(True)` は clean → pending に変わる書き込みのときに 1 回だけ、その場で出る。ウィジェットの構築中（`EnsureBoard` が hold を登録した後、ボードが Bridge に繋ぐ前）に別スレッドの core 直結の書き込みが来ると、その True を誰も受けない。`btApply` は無効で作られ、次の True は commit の後まで来ないので、反映待ちがあるのにボタンが消えたままになる。S4y で hold をウィジェットの構築の前に移したことで開いた窓（旧は構築の最後に登録していたので、その書き込みは公開されていた）
+     - 直し方: `AutonaScoreboardWidget.__init__` で 2 つのシグナルに繋いだ後、`_onHeldStateUpdated` の初回呼び出しの隣で `btApply` を `StateManager.HasPendingChanges(prefix)` に合わせる（書かない）
+     - クルーボード: 反映ボタンが無く hold もされない（`HoldBoard` は 1v1 / チームだけ）ので、同じ形は無い。選手カードの詳細ダイアログの反映ボタンは常に有効で、状態を持たない
+  2. **【低】ウィジェットの構築の例外で、core のフラグと hold が残っていた**
+     - `EnsureScoreboard` がウィジェットの構築〜登録を try で囲み、失敗したら `scoreboards` から外して `AutonaActions.ForgetBoard(n)` を呼び、投げ直す
+     - 新しい `AutonaActions.ForgetBoard(board)`: フラグを下ろし、ボード 1 / 2 は `StateSchema.ReleaseBoard(n)` → 新しい `StateManager.ReleaseSubtree(prefix)`（`HoldSubtree` の逆）で hold を外す。`StateManager.lock` の中で行う
+     - `ReleaseSubtree` は保留中のキーを**捨てずに公開する**（`CommitHeld` と同じ: `changedKeys` に移して `held_dirty_changed(False)` はその流し込みで出す。保存ブロックの中ならブロックの終わりに）。判断: hold の無いボードの書き込みは即時公開が規則で、値はもう state に入っている。捨てると live と公開がずれたまま残る（後の書き込みの差分で、関係ない値まで遅れて出る）。登録されていない prefix には何もしない
+     - これで「スワップ / `load_set` のホットキーが、描くもののないボードに効く」「次の構築がシードを飛ばす」の 2 つが無くなった
+  3. **【低】`EnsureBoard` の except が hold を残していた**: except は `ForgetBoard` を呼ぶ。hold の登録の中の例外でも、保存ブロックを閉じる公開の中の例外（フラグと hold が済んだ後）でも、両方が戻る
+  4. **【低】フラグがシードの前に立っていた**: 完了フラグは保存サイクルの書き込みの最後に、hold の登録と同じ `StateManager.lock` の保持の中で立てる（読み手には「作られていて hold されている」か「どちらでもない」かのどちらか）。再入は別の印 `_makingBoards`（作っている間だけ。`finally` で下ろす）で断る
+  5. **【低】`noBoards`（`tests/test_headless_seed.py`）の後始末が `score` を消すだけだった**: `Unset("score")` の前に `dropAllBoards()`（テストが建てたボードのウィジェット・core のフラグ・hold を先に戻し、ボードが載ったままの subtree を消さない）。次のテストに残ることは前も無かった（`autonaApp` の後始末が最後に `dropAllBoards()` する）: 建てたボードの後に別のファイルのテストで「ウィジェット・フラグ・hold が無い」ことを見る使い捨ての probe は、直す前も後も通った。順序だけの修正で、pin するテストは足していない
+  6. 上の「動作の違い」に、同期のサムネイルの書き込みの失敗（OSError → legacy は 500・X 投稿はモーダル・JPG が失敗したら PNG が残り剪定しない）とログの文言を足した。`DrawBoard` のテストを足した（下）
+  7. 申し送り（順序 7）に、スワップのホットキーの `CommitEdit` がまだウィジェットに触ることを足した
+  8. docs のずれ:
+     - 判断 6 の理由（ウィンドウは自分でプライマリ画面の中央へ動く）
+     - `.claude/rules/state-and-webserver.md` の `ThumbnailService` の行: 同じものを描くのは `prepare_data` ではなく `DrawBoard`（同じ `RenderPayload`）。`EnsureBoard` の段落に `ForgetBoard` とフラグの時点
+     - `.claude/known-smells.md`（S-17 の「直さない理由」と「解消」）: セット読込の前処理は `SetFollowService.LoadSet` → `AutonaActions.ClearScore`
+     - `docs/product/features.md` のホットキー表: Ctrl+Shift+O は「アクティブボード（1v1 / チーム）のセット選択ウィンドウを開く。クルーでは何もしない」
+     - legacy の `scoreboard<n>-get-thumbnail-png|jpg` が返すのは画像のバイト（`send_file`）で、パスではない（`.claude/design/Design.md`。「画像のパスが返り」と書いていた実機確認の頼みは、結果に置き換えた）
+     - 判断 3: メインの判断で採用（上）
+- **テスト**（足したもの）:
+  - `tests/test_headless_seed.py`（+7）: 構築中の書き込みで反映ボタンが点き、次の編集でも点いたまま、反映で消える（1 / 2）／ウィジェットの構築が落ちたボードは忘れられる: フラグも hold も無く、保留していた値は公開され、スワップと `load_set` のホットキーは何もせず、次の構築はシードし直して hold する（1 / 2）／hold の後に落ちた `EnsureBoard`（hold の登録の中・ブロックを閉じる公開の中）はフラグも hold も残さず、やり直せる（2）／シードの間は作られておらず hold もされず、戻ってきた呼び出しは何もしない。hold の時点でもまだ作られていない／AST: `ReleaseBoard` の呼び手は `Actions.ForgetBoard`、`ReleaseSubtree` の呼び手は `StateSchema.ReleaseBoard` だけ（既存のテストに足した）
+  - `tests/test_state_manager_held.py`（+3）: release は保留していた値を公開して False を言い、その後の書き込みはすぐ公開される／ブロックの中の release はブロックの終わりに公開する／保留が無ければ何も言わず、2 回目は何もしない
+  - `tests/test_thumbnail_service.py`（+5）: `DrawBoard` は PNG と JPG を保存してパスを返し、`thumbnail.render` に触らない／書けなければ OSError で、JPG の失敗なら PNG は残り、剪定しない（PNG / JPG）／書いたファイルは 30 世代の剪定から守られ、古いものは消える／描けなかった・空の絵・試合が無いときは何も書かない
+- **pin が落ちることの確認**: 直した箇所を 1 か所ずつ壊す 14 通りを回し、14 通りとも新しいテストが落ちた（S4y と同じ手順。壊したファイルはバイト単位で戻した）:
+  - 反映ボタンを接続の後に読まない
+  - マネージャがウィジェットの構築の失敗で `ForgetBoard` を呼ばない
+  - `ForgetBoard` が hold を外さない / フラグを下ろさない
+  - `ReleaseSubtree` が保留を捨てる / prefix を hold したまま / False を言わない
+  - `EnsureBoard` の except がフラグだけを下ろす
+  - フラグをシードの前に立てる / 作っている間の印が無い / フラグを hold の前に立てる
+  - `DrawBoard` が書いたファイルを剪定から守らない / JPG を書かずに黙る / 書く前に剪定する
+- **検証**: `python scripts/run_tests_parallel.py` 5620 passed / 2 skipped（RESULT: OK、exit 0。S4y の初版の 5605 から、足した 15 本ぶん増えた）。関係する 26 ファイルの直列実行は 2 回に分けて 601 passed（11 ファイル）と 939 passed（15 ファイル）（いずれも exit 0）。その後に直したテスト（再入の検査の書き方・`noBoards` の docstring）を含む `tests/test_headless_seed.py`・`tests/test_state_manager_held.py`・`tests/test_thumbnail_service.py` を回し直して 364 passed（exit 0）。`noBoards` の後始末は、使い捨ての probe（`tests/` に一時的に置いて回し、消した）で直す前と後を比べた（上の 5）。web は触っていないので build / jest / e2e は回していない。アプリの起動はしていない

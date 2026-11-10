@@ -176,11 +176,12 @@ def test_bootstrap_gui_steps_and_their_order():
     # PlayerDB wirings follow the adapter they connect to (the model switched
     # on before the first SetupModel), and the hotkeys are routed to
     # AutonaActions right after they exist. The web operations' desktop
-    # registrations (the board host, the game loader, and the two shell
-    # operations -- ADR-005 S3e-9) come after the dock and the adapter they
-    # point at, and the game load's roster last: ahead of every board and
-    # its cards, run through the board host registered just above (ADR-005
-    # S3e-6).
+    # registrations (the board host, the game loader, and the shell
+    # operations -- ADR-005 S3e-9) come after the dock, the shell operations
+    # (AutonaShellOperations: the dock's until ADR-005 S4y) and the adapter
+    # they point at, and the game load's roster last: ahead of every board
+    # and its cards, run through the board host registered just above
+    # (ADR-005 S3e-6).
     assert _steps("bootstrap_gui") == [
         "bootstrap_core()",
         "AutonaHotkeys()",
@@ -197,16 +198,17 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaUpdater()",
         "AutonaCountryHelper()",
         "AutonaScoreboardManager()",
+        "AutonaShellOperations()",
         "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost("
         "AutonaScoreboardManager.instance)",
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
         "AutonaWebOperations.openSetSelection"
-        " = AutonaScoreboardManager.instance.OpenSetSelection",
+        " = AutonaShellOperations.instance.OpenSetSelection",
         "AutonaWebOperations.renderThumbnail"
-        " = AutonaScoreboardManager.instance.RenderThumbnail",
+        " = AutonaShellOperations.instance.RenderThumbnail",
         "AutonaWebOperations.startImageRender"
-        " = AutonaScoreboardManager.instance.StartImageRender",
+        " = AutonaShellOperations.instance.StartImageRender",
         "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
@@ -391,6 +393,7 @@ from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaScoreboardManager import AutonaScoreboardManager
+from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.AutonaUpdater import AutonaUpdater
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
@@ -465,6 +468,7 @@ report({
         "AutonaCountryHelper": AutonaCountryHelper.instance is not None,
         "AutonaScoreboardManager":
             AutonaScoreboardManager.instance is not None,
+        "AutonaShellOperations": AutonaShellOperations.instance is not None,
     },
     "selector_registered":
         AutonaTournamentDataProvider.instance.selectGameFromStartGGId
@@ -551,9 +555,11 @@ from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaScoreboardManager import AutonaScoreboardManager
+from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
+from src.core.Actions import AutonaActions
 
 provider = AutonaTournamentDataProvider.instance
 adapter = AutonaGameAssetManager.instance
@@ -596,13 +602,22 @@ report({
         is AutonaScoreboardManager.instance,
     "game_loader": AutonaWebOperations.loadGameByCodename
         == adapter.LoadGameByCodename,
+    # The desktop's shell operations are AutonaShellOperations' (ADR-005 S4y:
+    # the dock's until then), and it builds no window before the main
+    # window hands itself over (UiMounted).
     "shell_operations": [
         AutonaWebOperations.openSetSelection
-        == AutonaScoreboardManager.instance.OpenSetSelection,
+        == AutonaShellOperations.instance.OpenSetSelection,
         AutonaWebOperations.renderThumbnail
-        == AutonaScoreboardManager.instance.RenderThumbnail,
+        == AutonaShellOperations.instance.RenderThumbnail,
         AutonaWebOperations.startImageRender
-        == AutonaScoreboardManager.instance.StartImageRender],
+        == AutonaShellOperations.instance.StartImageRender],
+    "shell_windows": [len(AutonaShellOperations.instance._setWindows),
+                      len(AutonaShellOperations.instance._stationWindows)],
+    # No board is made by the bootstrap: the window's CreateScoreboard makes
+    # the one it shows (AutonaActions.EnsureBoard, ADR-005 S4y).
+    "boards_ensured": [AutonaActions.instance.BoardEnsured(n)
+                       for n in (1, 2, 3)],
     "player_db_model": AutonaPlayerDB.modelEnabled,
     "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
@@ -624,6 +639,8 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["board_host_manager"] is True
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True, True]
+    assert result["shell_windows"] == [0, 0]
+    assert result["boards_ensured"] == [False, False, False]
     assert result["player_db_model"] is True
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True

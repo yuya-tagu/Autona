@@ -7,10 +7,17 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from src.core.SetFollowService import SetFollowService
 from src import ui_constants as UI
 
 
 class AutonaSelectSetWindow(QDialog):
+    """Board `board`'s (1/2) set selection window. One per board, owned by
+    AutonaShellOperations since ADR-005 S4y (each board built its own until
+    then): the set picked is loaded through core (SetFollowService.LoadSet),
+    and the station button calls `openStationSelection` -- not the board's
+    signals."""
+
     # Hidden column carrying the raw set dict (UserRole); keep in sync with
     # the appendRow order in _RenderSets.
     DATA_COLUMN = 7
@@ -25,8 +32,14 @@ class AutonaSelectSetWindow(QDialog):
     # (column, Qt.SortOrder) of the sets table, likewise remembered until exit.
     _sortState = None
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget, board,
+                 openStationSelection=None) -> None:
         super().__init__(parent)
+
+        self.board = board
+        # The station button: closes this window and calls it (None: the
+        # button only closes it).
+        self._openStationSelectionFor = openStationSelection
 
         self.setWindowTitle(
             QApplication.translate("app", "Select a set"))
@@ -438,16 +451,18 @@ class AutonaSelectSetWindow(QDialog):
         if setId:
             setId["auto_update"] = "set"
             # Defer past the double-click signal delivery: the set-load
-            # cascade (NewSetSelected: the board's focused field finished,
-            # the core clear of the players and the score, then each
-            # entrant's core load (PlayerService.ApplyData, ADR-005 S3e-3)
-            # and the cards rendering the slots, their region lists rebuilt
-            # for a new country) is too heavy to run re-entrantly inside the
-            # table view's signal emission (agent-pitfalls #9; 2026-07-12
-            # crash, which was a setModel() swap back then).
-            scoreboard = self.parent()
+            # cascade (SetFollowService.LoadSet: the core clear of the
+            # players and the score, then each entrant's core load
+            # (PlayerService.ApplyData, ADR-005 S3e-3) and the cards
+            # rendering the slots, their region lists rebuilt for a new
+            # country) is too heavy to run re-entrantly inside the table
+            # view's signal emission (agent-pitfalls #9; 2026-07-12 crash,
+            # which was a setModel() swap back then). Core's directly since
+            # ADR-005 S4y (through the board's NewSetSelected signal until
+            # then): it runs in the board host, as the web's load_set.
+            board = self.board
             QTimer.singleShot(
-                0, lambda: scoreboard.signals.NewSetSelected.emit(setId))
+                0, lambda: SetFollowService(board).LoadSet(setId))
 
         # A set list still loading is no longer wanted: stop it and drop
         # its answers (ADR-005 S3f-2; it was the adapter's last set loading
@@ -461,4 +476,5 @@ class AutonaSelectSetWindow(QDialog):
 
     def _openStationSelection(self):
         self.close()
-        self.parent().signals.StationSelection.emit()
+        if self._openStationSelectionFor is not None:
+            self._openStationSelectionFor()

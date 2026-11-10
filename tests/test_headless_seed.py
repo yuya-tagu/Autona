@@ -2,7 +2,10 @@
 
 A new board's launch write is one core operation, AutonaActions.SeedFreshBoard:
 the desktop runs it as it builds a board, ahead of the widgets, and the headless
-shell for all three at launch (src/headless._SeedBoards).
+shell for all three at launch (src/headless._SeedBoards). Since ADR-005 S4y both
+run it through AutonaActions.EnsureBoard, which makes a board once and -- the
+desktop's, `panel` -- also rewrites the display options, turns polling off and
+puts a 1v1 / team board behind its 反映 button (pinned at the end).
 
 What is compared is what each side *published* (the state Socket.IO and
 out/program_state.json carry), values and key order both: the order is what
@@ -152,9 +155,12 @@ def _settingsWith(values):
 @pytest.fixture
 def noBoards(autonaApp):
     """No board built and none held: what SeedFreshBoard writes is published
-    at once, and the score subtree goes after the test."""
+    at once, and the score subtree goes after the test -- the boards the test
+    made first (their widgets, core's flag, their holds), so no subtree is
+    dropped from under a board still on it."""
     autonaApp.dropAllBoards()
     yield autonaApp
+    autonaApp.dropAllBoards()
     StateManager.Unset("score")
     autonaApp.settle()
 
@@ -309,3 +315,326 @@ def test_a_roster_takes_an_explicit_count(autonaApp):
                               "character", "mains"]
         assert slot["character"] == slot["mains"] == {
             1: {"name": "", "assets": {}, "skin": -1, "variant": {}}}
+
+
+# ── making a board: AutonaActions.EnsureBoard (ADR-005 S4y) ──────────────
+
+import ast
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+
+
+def _held(board):
+    with StateManager.lock:
+        return f"score.{board}" in StateManager.heldPrefixes
+
+
+@pytest.mark.parametrize("board", [1, 2, 3])
+def test_a_board_is_made_once(noBoards, board):
+    actions = AutonaActions.instance
+    assert actions.BoardEnsured(board) is False
+
+    assert actions.EnsureBoard(board) is True
+    assert actions.BoardEnsured(board) is True
+    StateManager.Set(f"score.{board}.team.1.teamName", "kept")
+
+    assert actions.EnsureBoard(board) is False
+    assert actions.EnsureBoard(board, panel=True) is False
+    assert StateManager.Get(f"score.{board}.team.1.teamName") == "kept"
+    assert not _held(board)
+
+
+@pytest.mark.parametrize("board", [1, 2])
+def test_the_desktops_board_is_held_after_its_seed(noBoards, board):
+    """`panel`: one save cycle that publishes the seed (the hold comes last,
+    or it would hold the seed back) and leaves the board behind 反映."""
+    seen = []
+    StateManager.observers.state_updated.subscribe(seen.append)
+    try:
+        assert AutonaActions.instance.EnsureBoard(board, panel=True) is True
+    finally:
+        StateManager.observers.state_updated.unsubscribe(seen.append)
+
+    assert len(seen) == 1
+    assert _held(board)
+    assert _published(board)["team"]["1"]["color"]
+    assert StateManager.HasPendingChanges(f"score.{board}") is False
+    assert SettingsManager.Get("general.disable_autoupdate") is True
+
+
+@pytest.mark.parametrize("board", [1, 2])
+def test_a_built_desktop_board_has_nothing_to_apply(noBoards, board):
+    """The hold is registered before the widgets are built since S4y (at the
+    end of their build until then): what they write while built would be
+    held -- 反映 lit on a board nobody edited. They write nothing."""
+    noBoards.board(board)
+
+    assert _held(board)
+    assert StateManager.HasPendingChanges(f"score.{board}") is False
+    with StateManager.lock:
+        assert not StateManager.heldKeys.get(f"score.{board}")
+
+
+def test_the_desktops_board_turns_polling_off_and_the_headless_does_not(
+        noBoards):
+    written = []
+    realSet = SettingsManager.Set
+
+    def spy(key, value):
+        written.append((key, value))
+        return realSet(key, value)
+
+    with patch.object(SettingsManager, "Set", side_effect=spy):
+        AutonaActions.instance.EnsureBoard(1)
+        AutonaActions.instance.EnsureBoard(3, panel=True)
+        assert written == []
+        AutonaActions.instance.EnsureBoard(2, panel=True)
+    assert written == [("general.disable_autoupdate", True)]
+    # The crew board is never held, with or without `panel`.
+    assert not _held(3) and not _held(1) and _held(2)
+
+
+@pytest.mark.parametrize("board", [0, 4, "x", None])
+def test_there_is_no_such_board_to_make(noBoards, board):
+    assert AutonaActions.instance.EnsureBoard(board, panel=True) is False
+    assert AutonaActions.instance.BoardEnsured(board) is False
+    assert StateManager.Get("score", None) in (None, {})
+
+
+def test_a_board_that_failed_to_be_made_is_not_made(noBoards):
+    actions = AutonaActions.instance
+    with patch.object(actions, "SeedFreshBoard",
+                      side_effect=RuntimeError("no seed")):
+        with pytest.raises(RuntimeError):
+            actions.EnsureBoard(1, panel=True)
+    assert actions.BoardEnsured(1) is False
+    assert not _held(1)
+    assert StateManager.saveBlocked == 0
+
+    assert actions.EnsureBoard(1) is True
+
+
+def _failingAfterTheHold(where):
+    """A patch that has EnsureBoard raise once the 反映 hold is in: in the
+    registration itself, or in the publish that closes its save cycle."""
+    if where == "hold":
+        realHold = schema.HoldBoard
+
+        def hold(number):
+            realHold(number)
+            raise RuntimeError("after the hold")
+        return patch.object(schema, "HoldBoard", side_effect=hold)
+    realSave = StateManager.SaveState
+    calls = []
+
+    def save():
+        calls.append(None)
+        if len(calls) == 1:
+            raise RuntimeError("the publish failed")
+        return realSave()
+    return patch.object(StateManager, "SaveState", side_effect=save)
+
+
+@pytest.mark.parametrize("where", ["hold", "publish"])
+def test_a_board_that_failed_after_its_hold_is_neither_made_nor_held(
+        noBoards, where):
+    """Neither half stays (AutonaActions.ForgetBoard). Until the S4y review
+    only the flag was dropped: the board stayed held with nothing to apply
+    it, and the next attempt's seed was held back with its edits."""
+    actions = AutonaActions.instance
+    with _failingAfterTheHold(where), pytest.raises(RuntimeError):
+        actions.EnsureBoard(1, panel=True)
+
+    assert actions.BoardEnsured(1) is False
+    assert not _held(1)
+    assert StateManager.saveBlocked == 0
+    StateManager.SaveState()  # what the failed publish left queued
+
+    assert actions.EnsureBoard(1, panel=True) is True
+    assert _held(1)
+    assert _published(1)["team"]["1"]["color"]
+    assert StateManager.HasPendingChanges("score.1") is False
+
+
+def test_a_board_is_made_once_its_launch_write_is_in(noBoards):
+    """Ready (BoardEnsured, a board host's Built) only at the end of the save
+    cycle's writes, with its hold: a reader during the seed finds it neither
+    ready nor held. A call that comes back in meanwhile is told no at once
+    and makes nothing. It counted as ready from the start of the call until
+    the S4y review."""
+    actions = AutonaActions.instance
+    realSeed = actions.SeedFreshBoard
+    realHold = schema.HoldBoard
+    seen = []
+
+    def seed(board):
+        if not seen:
+            seen.append(None)  # the call coming back in below seeds as is
+            seen[0] = ("seed", actions.BoardEnsured(board), _held(board),
+                       actions.EnsureBoard(board, panel=True))
+        return realSeed(board)
+
+    def hold(board):
+        seen.append(("hold", actions.BoardEnsured(board)))
+        realHold(board)
+
+    with patch.object(actions, "SeedFreshBoard", side_effect=seed), \
+            patch.object(schema, "HoldBoard", side_effect=hold):
+        assert actions.EnsureBoard(1, panel=True) is True
+
+    assert seen == [("seed", False, False, False), ("hold", False)]
+    assert actions.BoardEnsured(1) is True and _held(1)
+
+
+@pytest.mark.parametrize("board", [1, 2])
+def test_a_write_while_the_board_is_built_lights_its_apply_button(
+        noBoards, board):
+    """A writer on another thread does not wait for the widgets: a held write
+    while they are built tells held_dirty_changed True before the board is
+    connected to it, and only once (on the clean -> pending turn). The board
+    reads it as it is built, so 反映 is lit for it and stays lit for the next
+    edit; until the S4y review it stayed off until a commit."""
+    from src.AutonaScoreboardWidget import AutonaScoreboardWidget
+
+    realInit = AutonaScoreboardWidget.__init__
+
+    def building(self, *args, **kwargs):
+        StateManager.Set(f"score.{board}.team.1.score", 3)
+        realInit(self, *args, **kwargs)
+
+    with patch.object(AutonaScoreboardWidget, "__init__", building):
+        widget = noBoards.manager.EnsureScoreboard(board)
+    noBoards.settle()
+
+    assert StateManager.HasPendingChanges(f"score.{board}") is True
+    assert widget.btApply.isEnabled() is True
+    AutonaActions.instance.AdjustScore(board, 1, 1)
+    noBoards.settle()
+    assert widget.btApply.isEnabled() is True
+
+    widget.btApply.click()
+    noBoards.settle()
+    assert StateManager.HasPendingChanges(f"score.{board}") is False
+    assert widget.btApply.isEnabled() is False
+    assert _published(board)["team"]["1"]["score"] == 4
+
+
+@pytest.mark.parametrize("board", [1, 2])
+def test_a_board_whose_widgets_failed_to_build_is_forgotten(
+        noBoards, monkeypatch, board):
+    """EnsureScoreboard makes the board in core, then builds its widgets.
+    When they raise, core forgets it (AutonaActions.ForgetBoard): not ready
+    and its hold released, what it held published. Until the S4y review it
+    stayed made and held: Built() said it was there with nothing to render
+    it, the swap and load-set hotkeys acted on it, and the next build
+    skipped its launch write."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    def failing(*args, **kwargs):
+        StateManager.Set(f"score.{board}.team.1.score", 3)
+        raise RuntimeError("no widgets")
+
+    actions = AutonaActions.instance
+    with patch("src.AutonaScoreboardManager.AutonaScoreboardWidget",
+               side_effect=failing), pytest.raises(RuntimeError):
+        noBoards.manager.EnsureScoreboard(board)
+    noBoards.settle()
+
+    assert actions.BoardEnsured(board) is False
+    assert not _held(board)
+    assert noBoards.manager.scoreboards.get(board) is None
+    assert StateManager.saveBlocked == 0
+    assert StateManager.HasPendingChanges(f"score.{board}") is False
+    assert _published(board)["team"]["1"]["score"] == 3
+
+    opened = []
+    monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
+                        lambda n: opened.append(n))
+    with patch.object(actions, "ActiveBoard", return_value=board), \
+            patch.object(actions, "SwapTeams") as swap:
+        AutonaHotkeys.signals.swap_teams.emit()
+        AutonaHotkeys.signals.load_set.emit()
+        noBoards.settle()
+    swap.assert_not_called()
+    assert opened == []
+
+    widget = noBoards.manager.EnsureScoreboard(board)
+    noBoards.settle()
+    assert widget is not None and actions.BoardEnsured(board) is True
+    assert _held(board)
+    assert _published(board)["team"]["1"]["score"] == 0
+    assert widget.btApply.isEnabled() is False
+
+
+def test_resetting_the_boards_forgets_them(noBoards):
+    actions = AutonaActions.instance
+    actions.EnsureBoard(1)
+    actions.EnsureBoard(3)
+
+    actions.ResetBoards()
+
+    assert [actions.BoardEnsured(n) for n in (1, 2, 3)] == [False] * 3
+    assert StateManager.Get("score", None) in (None, {})
+
+
+def test_the_headless_boards_are_made_and_not_held(noBoards):
+    with StateManager.SaveBlock():
+        headless._SeedBoards()
+    noBoards.settle()
+
+    assert [AutonaActions.instance.BoardEnsured(n) for n in (1, 2, 3)] \
+        == [True] * 3
+    assert not any(_held(n) for n in (1, 2, 3))
+
+
+def test_the_desktop_board_host_asks_core_whether_a_board_is_built(
+        noBoards):
+    """DesktopBoardHost.Built is core's flag; Prepare makes an unbuilt board
+    -- in core first (seeded, held), then its widgets."""
+    from src import AutonaWebOperations as WebOps
+
+    host = WebOps.boardHost
+    assert isinstance(host, WebOps.DesktopBoardHost)
+    assert host.Built(1) is False
+
+    host.Prepare(1)
+
+    assert host.Built(1) is True
+    assert noBoards.manager.scoreboards.get(1) is not None
+    assert _held(1)
+    with patch.object(AutonaActions.instance, "BoardEnsured",
+                      return_value=False):
+        assert host.Built(1) is False
+
+
+def _callers(name):
+    """(file, function) of every call to `name` in src/."""
+    found = set()
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef,
+                                         ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(function):
+                if isinstance(node, ast.Call) and (
+                        getattr(node.func, "attr", None) == name
+                        or getattr(node.func, "id", None) == name):
+                    found.add((path.relative_to(SRC).as_posix(),
+                               function.name))
+    return found
+
+
+def test_only_core_holds_a_board_or_drops_the_score_root():
+    """The hold and the score root's reset are core's board life (ADR-005
+    S4y): the board widget's constructor held its board, the dock's reset
+    the root and the headless shell's too, until then."""
+    assert _callers("HoldBoard") == {("core/Actions.py", "EnsureBoard")}
+    assert _callers("ResetScoreRoot") == {("core/Actions.py", "ResetBoards")}
+    assert _callers("SeedFreshBoard") == {("core/Actions.py", "EnsureBoard")}
+    # And the hold's release, for a board that failed (the review of S4y).
+    assert _callers("ReleaseBoard") == {("core/Actions.py", "ForgetBoard")}
+    assert _callers("ReleaseSubtree") == {
+        ("core/StateSchema.py", "ReleaseBoard")}

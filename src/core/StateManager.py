@@ -534,6 +534,29 @@ class StateManager:
             else:
                 StateManager.heldExempt.pop(prefix, None)
 
+    def ReleaseSubtree(prefix: str):
+        """Undo HoldSubtree: `prefix` publishes as it is written again, and
+        what was pending under it is published now, as CommitHeld would
+        (held_dirty_changed False when it is drained). Inside an open save
+        block the publish waits for the block, like any write. A prefix that
+        is not held is left alone.
+
+        For a board whose shell could not draw it (AutonaActions.ForgetBoard):
+        a hold nothing can apply would keep its edits from the outputs."""
+        with StateManager.lock:
+            if prefix not in StateManager.heldPrefixes:
+                return
+            StateManager.heldPrefixes.discard(prefix)
+            StateManager.heldExempt.pop(prefix, None)
+            StateManager._commitPrefixes.discard(prefix)
+            StateManager._heldTouched.discard(prefix)
+            keys = StateManager.heldKeys.pop(prefix, None)
+            if keys:
+                StateManager.changedKeys.extend(keys)
+                StateManager._heldCommitted.add(prefix)
+                if StateManager.saveBlocked == 0:
+                    StateManager.SaveState()
+
     def HasPendingChanges(prefix: str) -> bool:
         with StateManager.lock:
             return bool(StateManager.heldKeys.get(prefix))

@@ -971,8 +971,8 @@ def service(autonaApp, pages, tmp_path, monkeypatch):
     """The session's service and shell registration, with a renderer of the
     test's own (the singleton would outlive its stand-in page), the saved
     state and the output kept out of each other's way."""
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
-    assert WebOps.startImageRender == AutonaScoreboardManager.instance\
+    from src.AutonaShellOperations import AutonaShellOperations
+    assert WebOps.startImageRender == AutonaShellOperations.instance\
         .StartImageRender
 
     made = ThumbnailRenderer()
@@ -1086,10 +1086,35 @@ def test_the_legacy_way_is_not_disturbed_by_the_new_one(service, client):
     assert SM.Get(thumbnails.RENDER_PATH)["status"] == "done"
 
 
+def test_the_shells_synchronous_thumbnail_draws_a_board_with_none_built(
+        service, autonaApp):
+    """ADR-005 S4y: the legacy route's and the X post's thumbnail is core's
+    ThumbnailService.DrawBoard with the desktop's synchronous draw
+    (AutonaShellOperations.DrawThumbnail), the real renderer: a PNG and a
+    JPG at broadcast size, with no board widget built or asked."""
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    autonaApp.dropAllBoards()
+    _match()
+    published = copy.deepcopy(SM.Get(thumbnails.RENDER_PATH))
+
+    path = AutonaShellOperations.instance.DrawThumbnail(1)
+
+    assert path.startswith("./out/thumbnails/Alpha-vs-Bravo-")
+    assert Image.open(path).format == "PNG"
+    assert Image.open(path).size == (1920, 1080)
+    jpg = Path(path).with_suffix(".jpg")
+    assert Image.open(jpg).format == "JPEG"
+    assert Image.open(jpg).size == (1920, 1080)
+    assert autonaApp.manager.scoreboards == {}
+    # Not a run of the lane: nothing published.
+    assert SM.Get(thumbnails.RENDER_PATH) == published
+
+
 def test_the_encoder_gives_what_a_pixmap_saves(autonaApp, tmp_path):
     """The image a job encodes is byte for byte the file QPixmap.save()
     wrote: the legacy path's files and the new path's do not differ."""
-    from src.AutonaScoreboardManager import _EncodeImage, _ImageEncoder
+    from src.AutonaShellOperations import _EncodeImage, _ImageEncoder
 
     pixmap = QPixmap(64, 36)
     pixmap.fill(QColor(10, 200, 30))
@@ -1123,7 +1148,7 @@ def test_the_preview_png_is_the_same_picture_compressed_less(autonaApp):
     """ADR-005 S4o judgment 23: `fast` is the preview's PNG -- a PNG still
     (the preview route answers image/png), the same pixels, at zlib level 1
     instead of the default 6. A JPG is the same either way."""
-    from src.AutonaScoreboardManager import _EncodeImage, _ImageEncoder
+    from src.AutonaShellOperations import _EncodeImage, _ImageEncoder
 
     image = QImage(320, 180, QImage.Format.Format_RGB32)
     image.fill(QColor("white"))
@@ -1150,15 +1175,15 @@ def test_the_preview_png_is_the_same_picture_compressed_less(autonaApp):
 
 
 def test_the_shell_refuses_a_kind_it_does_not_know(autonaApp):
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    from src.AutonaShellOperations import AutonaShellOperations
 
     with pytest.raises(ValueError):
-        AutonaScoreboardManager.instance.StartImageRender(
+        AutonaShellOperations.instance.StartImageRender(
             "poster", ({}, {}, {}), lambda *_: None)
 
 
 def test_the_shell_hands_on_a_failed_render(pages, monkeypatch):
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    from src.AutonaShellOperations import AutonaShellOperations
 
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = 500
@@ -1166,7 +1191,7 @@ def test_the_shell_hands_on_a_failed_render(pages, monkeypatch):
     answers = []
     try:
         assert _waitUntil(lambda: made._page_loaded)
-        AutonaScoreboardManager.instance.StartImageRender(
+        AutonaShellOperations.instance.StartImageRender(
             "thumbnail", ({}, {"hang": True}, _template()),
             lambda encode, error: answers.append((encode, error)))
         assert _waitUntil(lambda: answers)

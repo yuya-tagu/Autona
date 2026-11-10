@@ -243,18 +243,21 @@ def _connectionCounts():
     QObject.receivers() wants the old SIGNAL()-encoded signature -- a "2"
     prefix in front of the normalised signal name.
 
-    `load_set` rather than `team1_score_up`: the score hotkeys are wired
-    to AutonaActions once for the process now (headless core Step 3), and
-    the swap joined them in ADR-005 S2c, so building a board no longer
-    changes their receiver count. `load_set` is the one hotkey a board still
-    owns, and it is a board-owned connection that is what this measures.
+    The tournament provider's `tournament_changed` rather than a hotkey:
+    every hotkey is wired once for the process now -- the score ones to
+    AutonaActions (headless core Step 3), the swap in ADR-005 S2c, and
+    `load_set`, the last one a board owned, in S4y (the set window is the
+    shell's) -- so building a board no longer changes their receiver count.
+    The board connects its bound UpdateBottomButtons to the provider's, and
+    it is a board-owned connection that is what this measures.
     """
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 
     return (
         AutonaGameAssetManager.instance.signals.receivers("2onLoad()"),
-        AutonaHotkeys.signals.receivers("2load_set()"),
+        AutonaTournamentDataProvider.instance.signals.receivers(
+            "2tournament_changed()"),
     )
 
 
@@ -308,8 +311,8 @@ def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
     AutonaGameAssetManager.instance.signals.onLoad.emit()
     # No hotkey: the score, reset, 反映 and swap ones write score.{n}
     # through AutonaActions whether or not a board exists (Step 3, ADR-005
-    # S2c), which would say nothing about a ghost here, and the one a board
-    # still owns (load_set) opens a window rather than writing.
+    # S2c), which would say nothing about a ghost here, and load_set opens
+    # the shell's window rather than writing (no board owns it since S4y).
     autonaApp.settle()
 
     assert autonaApp.get(prefix) is None, (

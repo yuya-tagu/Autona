@@ -941,6 +941,133 @@ def test_the_swap_hotkey_does_nothing_with_no_board_built(autonaApp):
         autonaApp.settle()
 
 
+def test_the_swap_hotkey_asks_the_board_host_not_the_widget(
+        autonaApp, monkeypatch):
+    """ADR-005 S4y: whether the active board is built is core's flag (the
+    board host's Built), and the field being typed in is finished through
+    the host's CommitEdit -- the hotkey no longer reaches into the dock's
+    widgets."""
+    from src import AutonaWebOperations as WebOps
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.core.Actions import AutonaActions
+
+    autonaApp.board(1)
+    host = WebOps.boardHost
+    calls = []
+    monkeypatch.setattr(host, "CommitEdit", lambda n: calls.append(n))
+    with patch.object(AutonaActions.instance, "SwapTeams",
+                      side_effect=lambda n: calls.append(("swap", n))):
+        AutonaHotkeys.signals.swap_teams.emit()
+        autonaApp.settle()
+        assert calls == [1, ("swap", 1)]
+
+        # Core's flag gone (the board made afresh next time): ignored.
+        calls.clear()
+        with patch.object(AutonaActions.instance, "BoardEnsured",
+                          return_value=False):
+            AutonaHotkeys.signals.swap_teams.emit()
+            autonaApp.settle()
+        assert calls == []
+
+
+def test_the_load_set_hotkey_opens_the_active_boards_window_only(
+        autonaApp, monkeypatch):
+    """ADR-005 S4y: routed once for the process (AutonaHotkeys._onLoadSet)
+    to the shell's window of the active board. Each built 1v1 / team board
+    connected it to itself until then, so with both built one press opened
+    both windows, the hidden board's too."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core.Actions import AutonaActions
+
+    autonaApp.board(1)
+    autonaApp.board(2)
+    assert AutonaActions.instance.ActiveBoard() == 1
+    opened = []
+    monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
+                        lambda n: opened.append(n))
+
+    AutonaHotkeys.signals.load_set.emit()
+    autonaApp.settle()
+    assert opened == [1]
+
+    with patch.object(AutonaActions.instance, "ActiveBoard", return_value=2):
+        AutonaHotkeys.signals.load_set.emit()
+        autonaApp.settle()
+    assert opened == [1, 2]
+
+
+@pytest.mark.parametrize("active", [3, 1], ids=["crew", "unbuilt"])
+def test_the_load_set_hotkey_does_nothing_without_a_set_window(
+        autonaApp, monkeypatch, active):
+    """The crew board has no set window; an unbuilt board gets none either
+    (as the swap: a set loaded onto it would be wiped by the seed that
+    builds it). Each built board answered for itself until ADR-005 S4y."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core.Actions import AutonaActions
+
+    autonaApp.dropAllBoards()
+    if active == 3:
+        autonaApp.board(1)
+    opened = []
+    monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
+                        lambda n: opened.append(n))
+
+    with patch.object(AutonaActions.instance, "ActiveBoard",
+                      return_value=active):
+        AutonaHotkeys.signals.load_set.emit()
+        autonaApp.settle()
+
+    assert opened == []
+    if active == 1:
+        # Not built for it either.
+        assert autonaApp.manager.scoreboards.get(1) is None
+
+
+@pytest.mark.parametrize("number", [1, 2])
+def test_the_set_button_opens_its_boards_window_through_the_shell(
+        autonaApp, monkeypatch, number):
+    """The board's 大会の試合を選ぶ button asks the shell (AutonaShellOperations,
+    ADR-005 S4y) for its own board's window; the board owned the window
+    until then."""
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    board = autonaApp.board(number)
+    opened = []
+    monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
+                        lambda n: opened.append(n))
+    board.btSelectSet.setEnabled(True)  # enabled once a tournament is read
+
+    board.btSelectSet.click()
+
+    assert opened == [number]
+
+
+@pytest.mark.parametrize("number", [1, 2])
+def test_each_board_has_its_own_set_and_station_window(
+        autonaApp, monkeypatch, number):
+    """One set window and one station window per board 1/2, made once: a
+    window loads onto its own board, and its station button opens its own
+    board's station window."""
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    shell = AutonaShellOperations.instance
+    window = shell.SetWindow(number)
+    assert shell.SetWindow(number) is window
+    assert window.board == number
+    assert shell.StationWindow(number).board == number
+    assert shell.StationWindow(number) is shell.StationWindow(number)
+    assert shell.SetWindow(3 - number) is not window
+    stations = []
+    monkeypatch.setattr(shell, "ShowStationSelection",
+                        lambda n: stations.append(n))
+
+    window.btTrackStation.click()
+
+    assert stations == [number]
+
+
 def test_a_web_swap_is_done_when_it_answers(autonaApp):
     """The legacy route used to queue a signal into the board and answer
     "OK" before anything had moved; get_swap read the board's attribute."""
@@ -1580,7 +1707,8 @@ def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
 # すべての入力値をリセット button, and the web operations' reset_match /
 # clear_all, which every legacy route, Socket.IO event and /api/v1
 # :reset-match / :clear delegates to -- blank round name / phase / pool.
-# The clear NewSetSelected runs before a new set arrives must not:
+# The clear a set load (SetFollowService.LoadSet) runs before a new set
+# arrives must not:
 # SetLoadService.ApplyMatchInfo keeps the round for a payload that carries
 # none, so a reset-style clear there would blank the round mid-stream.
 
@@ -1636,7 +1764,7 @@ def tournament():
 
 def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
                                                            tournament):
-    """The set-load pre-pass (NewSetSelected -> ClearScore) is not a reset.
+    """The set-load pre-pass (SetFollowService.LoadSet -> ClearScore) is not a reset.
 
     A payload carrying no round_name / tournament_phase / tournament_pool
     leaves the match bar as the previous set had it.
@@ -1645,7 +1773,7 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
     apply_set(board, dict(_SET))
     autonaApp.settle()
 
-    board.NewSetSelected({"id": "1001", "auto_update": "set"})
+    board.setFollow.LoadSet({"id": "1001", "auto_update": "set"})
     autonaApp.settle()
     # The pre-pass alone must not have touched it either.
     assert autonaApp.get("score.1.match") == "Winners Final"
@@ -1667,7 +1795,7 @@ def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
     apply_set(board, dict(_SET))
     autonaApp.settle()
 
-    board.NewSetSelected({"id": "1002", "auto_update": "set"})
+    board.setFollow.LoadSet({"id": "1002", "auto_update": "set"})
     autonaApp.settle()
     board.setFollow.UpdateSetData({
         "id": "1002",
@@ -1995,7 +2123,7 @@ def test_close_while_following_stops_the_poll_and_the_countdown(
     monkeypatch.setattr(SettingsManager, "Get", lambda key, default=None: (
         False if key == "general.disable_autoupdate"
         else realGet(key, default)))
-    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
     autonaApp.settle()
     timer = SetFollowService.fetcher._timers[1]
     assert timer.isActive()
@@ -2144,7 +2272,7 @@ def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
 
 def test_following_a_set_records_which_set_it_is(autonaApp, tournament):
     board = autonaApp.board(1)
-    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
     autonaApp.settle()
 
     assert autonaApp.get("score.1.set_id") == "999"
@@ -2154,7 +2282,7 @@ def test_following_a_set_records_which_set_it_is(autonaApp, tournament):
 
 def test_cancelling_the_follow_forgets_the_set(autonaApp, tournament):
     board = autonaApp.board(1)
-    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
     autonaApp.settle()
 
     board.StopAutonaUpdate(clear_variables=True)
@@ -2442,7 +2570,7 @@ def test_a_clear_refetches_the_stats_once(autonaApp, clear, ids, fetches):
 @pytest.mark.parametrize("clear", sorted(_CLEARS))
 def test_the_same_set_loads_again_after_a_clear(autonaApp, clear,
                                                 tournament):
-    """NewSetSelected skips the set the board already follows; a clear
+    """A set load skips the set the board already follows; a clear
     forgets it (it lives in SetLoadService now, not in the state). The
     fetch is the set follow's (SetFollowService.fetcher, ADR-005 S3e-7)."""
     from src.core.SetFollowService import SetFollowService
@@ -2451,8 +2579,8 @@ def test_the_same_set_loads_again_after_a_clear(autonaApp, clear,
     actions = autonaApp.web()
     with patch.object(SetFollowService.fetcher, "Match") as fetched:
         try:
-            board.NewSetSelected({"id": "999", "auto_update": "set"})
-            board.NewSetSelected({"id": "999", "auto_update": "set"})
+            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
+            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
             autonaApp.settle()
             assert fetched.call_count == 1
             assert actions.get_set(1) == "999"
@@ -2461,7 +2589,7 @@ def test_the_same_set_loads_again_after_a_clear(autonaApp, clear,
             autonaApp.settle()
             assert actions.get_set(1) == "0"
 
-            board.NewSetSelected({"id": "999", "auto_update": "set"})
+            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
             autonaApp.settle()
             assert fetched.call_count == 2
         finally:

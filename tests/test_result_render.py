@@ -272,12 +272,12 @@ def test_a_page_that_never_loads_fails_its_render_and_the_next_one_tries(pages):
 # ── the shell ────────────────────────────────────────────────────────────
 
 def test_the_shell_draws_a_result_on_the_results_renderer(renderer, monkeypatch):
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    from src.AutonaShellOperations import AutonaShellOperations
 
     monkeypatch.setattr(ResultPageRenderer, "_instance", renderer)
     answers = []
 
-    AutonaScoreboardManager.instance.StartImageRender(
+    AutonaShellOperations.instance.StartImageRender(
         "result", ({}, {"color": GREEN}, "vertical"),
         lambda encode, error: answers.append((encode, error)))
 
@@ -289,7 +289,7 @@ def test_the_shell_draws_a_result_on_the_results_renderer(renderer, monkeypatch)
 
 
 def test_the_shell_hands_on_a_failed_result(renderer, monkeypatch):
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    from src.AutonaShellOperations import AutonaShellOperations
 
     monkeypatch.setattr(ResultPageRenderer, "_instance", renderer)
     answers = []
@@ -297,7 +297,7 @@ def test_the_shell_hands_on_a_failed_result(renderer, monkeypatch):
     # After the page's load, which on a busy machine takes longer than this.
     renderer.STAGE_TIMEOUT_MS = 500
 
-    AutonaScoreboardManager.instance.StartImageRender(
+    AutonaShellOperations.instance.StartImageRender(
         "result", ({}, {"hang": True}, "horizontal"),
         lambda encode, error: answers.append((encode, error)))
 
@@ -461,8 +461,8 @@ def service(autonaApp, pages, monkeypatch):
     """The session's service and shell registration, with a renderer of the
     test's own (the singleton would outlive its stand-in page), the saved state
     and the output kept out of each other's way."""
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
-    assert WebOps.startImageRender == AutonaScoreboardManager.instance\
+    from src.AutonaShellOperations import AutonaShellOperations
+    assert WebOps.startImageRender == AutonaShellOperations.instance\
         .StartImageRender
 
     made = ResultPageRenderer()

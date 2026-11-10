@@ -23,7 +23,10 @@ panel) and it also answers in the headless shell:
 - **a render of the thumbnail in the background** (``Preview`` / ``Generate``),
   whose progress and result are the state's ``thumbnail.render``. The drawing
   itself is the shell's: an off-screen WebEngine view only the desktop has
-  (``render``, injected; headless, AutonaWebOperations refuses first, 503).
+  (``render``, injected; headless, AutonaWebOperations refuses first, 503);
+- **a board's thumbnail drawn now** (``DrawBoard``, ADR-005 S4y): the
+  synchronous way the desktop's legacy route and SCORE's X post wait on, with
+  the shell's drawer given by the caller.
 
 The render lane is core/RenderLane's, shared with the tournament result
 (ADR-005 S4q), where the rules of a run are. A kept generate that finds no
@@ -130,8 +133,8 @@ _NO_GAME_CODENAME = "None"
 # What a final thumbnail falls back to when the state has no complete match.
 PROGRAM_STATE_FILE = "./out/program_state.json"
 # ADR-005 S4 design: a render of this module's draws board 1, as the old Qt
-# panel's preview, copy and save did. SCORE's button still draws its own board
-# (RenderPayload's `board`, through src/thumbnail/main_generate_thumbnail.py).
+# panel's preview, copy and save did. SCORE's X post and the legacy route still
+# draw their own board (DrawBoard's `board`, ADR-005 S4y).
 RENDER_BOARD = 1
 
 # ── the output ───────────────────────────────────────────────────────────
@@ -683,6 +686,49 @@ class ThumbnailService(RenderLane):
         settings = _WithBackgroundSource(_StoredConfig())
         data, config, template = self._Payload(settings, preview, games, board)
         return data, _AsRead(config, data), template
+
+    # ── a board's thumbnail, drawn now ───────────────────────────────────
+
+    def DrawBoard(self, board, draw, games=None):
+        """Board `board`'s match thumbnail, drawn now and saved: the PNG's
+        path, "./out/thumbnails/<stem>.png", with its .jpg beside it.
+
+        The synchronous way in (ADR-005 S4y), for what an operator waits on:
+        the desktop's legacy GET /scoreboard<N>-get-thumbnail-<png|jpg> and
+        SCORE's X post (AutonaShellOperations.DrawThumbnail), and
+        main_generate_thumbnail.generate. Until then each went through the
+        board's widget (its GenerateThumbnail), building the board first.
+        `draw(payload)` is the shell's: it draws (data, config, template) at
+        once and returns `encode(format, fast=False)`, as a render's `done`
+        gets it, or raises when it drew nothing. Headless there is none, and
+        the route answers 503 before this is reached. `games`: as
+        RenderPayload takes it.
+
+        Draws RenderPayload (the settings as they read) for `board`; the
+        files are what QPixmap.save() wrote (the encoder's default
+        encodings), the oldest past OUTPUT_KEEP pruned. Not a run of the
+        lane: it neither waits for one nor publishes thumbnail.render, as
+        the synchronous render never did. Raises ThumbnailDataMissing when
+        there is no match to draw (in the state nor in program_state.json)
+        and what `draw` raises, before anything is written, and OSError when
+        a file could not be written."""
+        payload = self.RenderPayload(preview=False, games=games, board=board)
+        encode = draw(payload)
+        png = encode("PNG")
+        jpg = encode("JPG")
+        if not png or not jpg:
+            raise RuntimeError("Thumbnail rendering failed")
+        stem = OutputStem(payload[0], board)
+        target = Path(OUTPUT_DIRECTORY) / f"{stem}.png"
+        ImageImport.WriteFile(target, png)
+        ImageImport.WriteFile(target.with_suffix(".jpg"), jpg)
+        logger.info(f"Thumbnail saved as {OUTPUT_DIRECTORY}/{stem}.png "
+                    f"and {OUTPUT_DIRECTORY}/{stem}.jpg")
+        if self._prune is not None:
+            # The file just written is protected.
+            self._prune(OUTPUT_DIRECTORY, OUTPUT_PATTERNS, OUTPUT_KEEP,
+                        protect=f"{OUTPUT_DIRECTORY}/{stem}.png")
+        return f"{OUTPUT_DIRECTORY}/{stem}.png"
 
     @staticmethod
     def _HasFirstPlayer(data, board, team):

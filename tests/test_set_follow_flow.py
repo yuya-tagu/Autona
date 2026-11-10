@@ -630,7 +630,7 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
     stream = {"type": "stream", "id": 5, "identifier": STREAM}
 
     with _Recorder(autonaApp, provider, saves, lambda: dict(built)) as rec:
-        rec.step("set window: 1001", lambda: board.signals.NewSetSelected.emit(
+        rec.step("set window: 1001", lambda: board.setFollow.LoadSet(
             {"id": 1001, "p1_name": "ALPHA", "p2_name": "BRAVO",
              "auto_update": "set"}))
         rec.step("tick", lambda: _tick(board))
@@ -639,7 +639,7 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
             rec, client, "/scoreboard1-reset-players"))
         rec.step("tick after the clear", lambda: _tick(board))
         rec.step("station window: station 4",
-                 lambda: board.signals.StationSelected.emit(
+                 lambda: board.setFollow.FollowStation(
                      copy.deepcopy(station)))
         rec.step("tick on the station", lambda: _tick(board))
         rec.step("web clear-all while following the station", lambda: _get(
@@ -657,11 +657,11 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
             _tick(board)
         rec.step("the station empties", emptied)
         rec.step("stream window: the channel",
-                 lambda: board.signals.StationSelected.emit(
+                 lambda: board.setFollow.FollowStation(
                      copy.deepcopy(stream)))
         rec.step("tick on the stream", lambda: _tick(board))
         rec.step("set window while following the stream",
-                 lambda: board.signals.NewSetSelected.emit(
+                 lambda: board.setFollow.LoadSet(
                      {"id": 1002, "auto_update": "set"}))
         rec.step("tick on the set", lambda: _tick(board))
         rec.step("cancel", lambda: board.timerCancelBt.click())
