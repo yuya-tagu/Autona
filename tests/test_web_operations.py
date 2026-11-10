@@ -1290,12 +1290,12 @@ def test_a_board_no_shell_has_is_refused_by_both_hosts(
         assert isinstance(WebOps.boardHost, DesktopBoardHost)
         # What bootstrap_gui() registers (the server fixture unregisters
         # them): the board is refused before the shell is asked.
-        from src.AutonaScoreboardManager import AutonaScoreboardManager
-        manager = AutonaScoreboardManager.instance
+        from src.AutonaShellOperations import AutonaShellOperations
+        shell = AutonaShellOperations.instance
         monkeypatch.setattr(WebOps, "openSetSelection",
-                            manager.OpenSetSelection)
+                            shell.OpenSetSelection)
         monkeypatch.setattr(WebOps, "renderThumbnail",
-                            manager.RenderThumbnail)
+                            shell.RenderThumbnail)
     built = dict(autonaApp.manager.scoreboards)
     app, socketio = server
     client = app.test_client()
@@ -1777,19 +1777,20 @@ def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
 
 def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
                                                             monkeypatch):
-    """What bootstrap_gui() registered: the scoreboard dock's, run on the
-    GUI thread while the request's thread waits for the answer -- the
-    window opened before "OK" (it used to be queued for later: the
-    request's thread emitted the board's signal), the thumbnail's absolute
-    path (its .jpg sibling for "jpg"), None when none was made."""
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    """What bootstrap_gui() registered: AutonaShellOperations' (ADR-005 S4y;
+    the scoreboard dock's until then), run on the GUI thread while the
+    request's thread waits for the answer -- the window opened before "OK"
+    (it used to be queued for later: the request's thread emitted the
+    board's signal), the thumbnail's absolute path (its .jpg sibling for
+    "jpg"), None when none was made."""
+    from src.AutonaShellOperations import AutonaShellOperations
     from src.Helpers.AutonaQtHelper import in_gui_thread
-    manager = AutonaScoreboardManager.instance
-    assert WebOps.openSetSelection == manager.OpenSetSelection
-    assert WebOps.renderThumbnail == manager.RenderThumbnail
-    assert WebOps.startImageRender == manager.StartImageRender
-    board = autonaApp.board(1)
-    window = board.selectSetWindow
+    shell = AutonaShellOperations.instance
+    assert WebOps.openSetSelection == shell.OpenSetSelection
+    assert WebOps.renderThumbnail == shell.RenderThumbnail
+    assert WebOps.startImageRender == shell.StartImageRender
+    autonaApp.board(1)
+    window = shell.SetWindow(1)
     calls = []
     monkeypatch.setattr(window, "PrepareForDisplay",
                         lambda: calls.append(("prepare", in_gui_thread())))
@@ -1797,12 +1798,11 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
                         lambda: calls.append(("show", in_gui_thread())))
     thumbnail = os.path.join("out", "thumbnails", "board.png")
 
-    def generate(quiet_mode=False, disable_msgbox=False):
-        calls.append(("thumbnail", in_gui_thread(), quiet_mode,
-                      disable_msgbox))
+    def generate(board):
+        calls.append(("thumbnail", in_gui_thread(), board))
         return thumbnail
 
-    monkeypatch.setattr(board, "GenerateThumbnail", generate)
+    monkeypatch.setattr(shell, "DrawThumbnail", generate)
 
     answers = []
 
@@ -1825,10 +1825,10 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
         "OK", 2, os.path.abspath(thumbnail),
         os.path.abspath(os.path.join("out", "thumbnails", "board.jpg"))]
     assert calls == [("prepare", True), ("show", True),
-                     ("thumbnail", True, True, True),
-                     ("thumbnail", True, True, True)]
+                     ("thumbnail", True, 1),
+                     ("thumbnail", True, 1)]
 
-    monkeypatch.setattr(board, "GenerateThumbnail", lambda **kwargs: None)
+    monkeypatch.setattr(shell, "DrawThumbnail", lambda board: None)
     assert WebOps.get_thumbnail("1", "png") is None
 
 
@@ -1839,15 +1839,15 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
 # was.
 def test_the_desktop_shell_operations_answer_through_the_routes(
         server, autonaApp, monkeypatch, tmp_path):
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
-    manager = AutonaScoreboardManager.instance
-    monkeypatch.setattr(WebOps, "openSetSelection", manager.OpenSetSelection)
-    monkeypatch.setattr(WebOps, "renderThumbnail", manager.RenderThumbnail)
+    from src.AutonaShellOperations import AutonaShellOperations
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    monkeypatch.setattr(WebOps, "renderThumbnail", shell.RenderThumbnail)
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    board = autonaApp.board(1)
-    window = board.selectSetWindow
+    autonaApp.board(1)
+    window = shell.SetWindow(1)
     opened = []
     monkeypatch.setattr(window, "PrepareForDisplay",
                         lambda: opened.append("prepare"))
@@ -1857,9 +1857,7 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     png.write_bytes(b"\x89PNG\r\n\x1a\n-the-png")
     jpg = png.with_suffix(".jpg")
     jpg.write_bytes(b"\xff\xd8\xff-the-jpg")
-    monkeypatch.setattr(board, "GenerateThumbnail",
-                        lambda quiet_mode=False, disable_msgbox=False:
-                        str(png))
+    monkeypatch.setattr(shell, "DrawThumbnail", lambda board: str(png))
 
     response = client.get("/scoreboard1-open-set")
     assert (response.status_code, response.get_data(as_text=True)) == (
@@ -1886,10 +1884,13 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     ws.disconnect()
 
     # The crew board has no set window nor thumbnail: the 500 it always
-    # answered. A board no shell has is refused before the shell is asked
-    # (the ADR-005 S4x review; the desktop's window answered 500 for it).
+    # answered -- and it is not built for that any more (ADR-005 S4y: the
+    # dock built it first). A board no shell has is refused before the
+    # shell is asked (the ADR-005 S4x review; the desktop's window answered
+    # 500 for it).
     for path in ("/scoreboard3-open-set", "/scoreboard3-get-thumbnail-png"):
         assert client.get(path).status_code == 500, path
+    assert 3 not in autonaApp.manager.scoreboards
     for path in ("/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png"):
         response = client.get(path)
         assert (response.status_code, response.get_json()) == (
@@ -1897,24 +1898,131 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     autonaApp.settle()
 
 
+def test_the_set_selection_of_an_unbuilt_board_builds_it_first(
+        autonaApp, monkeypatch):
+    """The legacy open-set route makes its board ready before the window
+    opens, as it always did (ADR-005 S4y moved the window off the board, not
+    this): what the window loads goes to a board held for its 反映 button,
+    not to one whose build would wipe it."""
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core.Actions import AutonaActions
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp._dropBoard(2)
+    window = shell.SetWindow(2)
+    opened = []
+    monkeypatch.setattr(window, "PrepareForDisplay",
+                        lambda: opened.append(
+                            (2 in autonaApp.manager.scoreboards, "prepare")))
+    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
+
+    assert WebOps.open_sets("2") == "OK"
+
+    assert opened == [(True, "prepare"), "show"]
+    assert AutonaActions.instance.BoardEnsured(2)
+    assert "score.2" in autonaApp.state.heldPrefixes
+
+
+
+def test_the_window_hands_itself_to_the_shell_before_its_first_board():
+    """The set selection windows are the shell's (AutonaShellOperations,
+    ADR-005 S4y), parented to the main window: the Window hands itself over
+    (UiMounted) before it builds the board it shows, which built its own
+    windows until then. src/Autona.py is the app's start: read, not
+    imported (agent-pitfalls #1)."""
+    import ast
+
+    source = (Path(WebOps.__file__).parent / "Autona.py").read_text(
+        encoding="utf-8")
+    window = next(node for node in ast.parse(source).body
+                  if isinstance(node, ast.ClassDef) and node.name == "Window")
+    buildUi = next(node for node in window.body
+                   if isinstance(node, ast.FunctionDef)
+                   and node.name == "_BuildUi")
+    calls = [(ast.unparse(node), node.lineno) for node in ast.walk(buildUi)
+             if isinstance(node, ast.Call)]
+    mounted = [line for text, line in calls
+               if text == "AutonaShellOperations.instance.UiMounted(self)"]
+    built = [line for text, line in calls if text
+             == "AutonaScoreboardManager.instance.CreateScoreboard("
+                "battleFormat)"]
+    assert len(mounted) == 1 and len(built) == 1
+    assert mounted[0] < built[0]
+
+
+def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
+    """The legacy thumbnail is core's ThumbnailService.DrawBoard with the
+    desktop's synchronous draw (ADR-005 S4y): it reads the state, so an
+    unbuilt board is drawn as it is and stays unbuilt -- the dock built it
+    first, seeding it (a board made by the thumbnail lost what was written
+    to it unbuilt) and turning polling off. The files are the encoder's
+    (what QPixmap.save() writes); the renderer is stood in for."""
+    import src.AutonaShellOperations as shellModule
+    from qtpy.QtGui import QColor, QImage
+    from src.core.Actions import AutonaActions
+    from src.core.SettingsManager import SettingsManager
+
+    autonaApp._dropBoard(2)
+    polling = SettingsManager.Get("general.disable_autoupdate", True)
+    game = copy.deepcopy(_state().Get("game"))
+    SettingsManager.Set("general.disable_autoupdate", False)
+    with _state().SaveBlock():
+        _state().Set("game", {"codename": "tgame", "name": "T"})
+        _state().Set("score.2.team.1.player.1.name", "Alpha")
+        _state().Set("score.2.team.2.player.1.name", "Bravo")
+    autonaApp.settle()
+    image = QImage(64, 36, QImage.Format.Format_RGB32)
+    image.fill(QColor(10, 200, 30))
+    drawn = []
+
+    def draw(payload):
+        drawn.append(payload[1]["scoreboardNumber"])
+        return shellModule._ImageEncoder(image)
+
+    monkeypatch.setattr(shellModule, "DrawThumbnailNow", draw)
+    output = autonaApp.dir / "out" / "thumbnails"
+    try:
+        path = WebOps.get_thumbnail("2", "png")
+        jpg = WebOps.get_thumbnail("2", "jpg")
+
+        assert drawn == [2, 2]
+        assert Path(path).name.startswith("Alpha-vs-Bravo-")
+        assert Path(path).read_bytes() == shellModule._EncodeImage(
+            image, "PNG")
+        assert Path(jpg).read_bytes() == shellModule._EncodeImage(
+            image, "JPG")
+        assert 2 not in autonaApp.manager.scoreboards
+        assert not AutonaActions.instance.BoardEnsured(2)
+        assert "score.2" not in autonaApp.state.heldPrefixes
+        assert SettingsManager.Get("general.disable_autoupdate") is False
+    finally:
+        SettingsManager.Set("general.disable_autoupdate", polling)
+        shutil.rmtree(output, ignore_errors=True)
+        with _state().SaveBlock():
+            _state().Unset("score.2")
+            if game is None:
+                _state().Unset("game")
+            else:
+                _state().Set("game", game)
+        autonaApp.settle()
+
+
 # Opening the window never failed the request: it was queued until S3e-9
 # (the request's thread emitted the board's signal), so what it raised was
-# reported and the answer was "OK" -- still. PySide6 hands a slot's
-# exception to sys.excepthook (the app logs it as uncaught) rather than
-# raising it into emit(); OpenSetSelection logs one a binding would raise
-# there. Either way it is reported once.
+# reported and the answer was "OK" -- still. OpenSetSelection logs it; it is
+# reported once.
 def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
         autonaApp, monkeypatch):
     from loguru import logger
-    from src.AutonaScoreboardManager import AutonaScoreboardManager
-    monkeypatch.setattr(WebOps, "openSetSelection",
-                        AutonaScoreboardManager.instance.OpenSetSelection)
-    board = autonaApp.board(1)
+    from src.AutonaShellOperations import AutonaShellOperations
+    shell = AutonaShellOperations.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
+    autonaApp.board(1)
 
     def fail():
         raise RuntimeError("the window failed")
 
-    monkeypatch.setattr(board.selectSetWindow, "PrepareForDisplay", fail)
+    monkeypatch.setattr(shell.SetWindow(1), "PrepareForDisplay", fail)
     hooked = []
     monkeypatch.setattr(sys, "excepthook",
                         lambda kind, error, trace: hooked.append(error))

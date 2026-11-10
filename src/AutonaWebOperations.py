@@ -211,7 +211,8 @@ class BoardHost:
 
     def Built(self, board):
         """Whether board `board` is there without Prepare: always, with no
-        widget to build."""
+        widget to build (the headless shell makes all three at launch:
+        AutonaActions.EnsureBoard, src/headless._SeedBoards)."""
         return True
 
     def CommitEdit(self, board):
@@ -302,10 +303,19 @@ class DesktopBoardHost(BoardHost):
         return _on_gui_thread(gui_thread_sync(op), "a board operation")
 
     def Prepare(self, board):
-        self._Board(board)
+        # Whether the board is ready is core's (Built, ADR-005 S4y); what
+        # stays the shell's is drawing it -- the widgets, built with it
+        # (EnsureScoreboard makes the board in core first). Off the GUI
+        # thread a ready board is not marshalled for.
+        if not self.Built(board) \
+                or self.manager.scoreboards.get(_board(board)) is None:
+            self._Board(board)
 
     def Built(self, board):
-        return self.manager.scoreboards.get(board) is not None
+        # Core's flag (AutonaActions.EnsureBoard, ADR-005 S4y; the desktop
+        # makes a board in core only as it builds it, so this is still "the
+        # board is built"). It was the dock's registry until then.
+        return AutonaActions.instance.BoardEnsured(board)
 
     def CommitEdit(self, board):
         self._Board(board).CommitFocusedEdit()
@@ -340,12 +350,13 @@ def current_board_host():
 loadGameByCodename = None
 
 # The shell operations (ADR-005 S3e-9; see open_sets / get_thumbnail): the
-# desktop registers its scoreboard dock's (bootstrap_gui()), the headless
-# shell none. None: the operation answers NotAvailable (503).
+# desktop registers its AutonaShellOperations' (bootstrap_gui(); the
+# scoreboard dock's until ADR-005 S4y), the headless shell none. None: the
+# operation answers NotAvailable (503).
 # Open board `scoreboard`'s set selection window: (scoreboard) -> "OK".
 openSetSelection = None
 # Render board `scoreboard`'s thumbnail: (scoreboard, file_format) -> the
-# image's absolute path, or None when it failed.
+# image's absolute path, or None when none was made (a failed render raises).
 renderThumbnail = None
 # Start drawing an image off-screen and return, without waiting for it:
 # (kind, payload, done). One operation for every generated image -- the match

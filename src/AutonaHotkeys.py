@@ -141,8 +141,12 @@ class AutonaHotkeys(QObject):
         with no panel at all (it used to be the window's, which built the Qt
         Top 8 panel to ask it; a React page since ADR-005 S4i).
 
-        Not moved: `load_set` opens the board's set-selection window -- a
-        panel command, so it stays with the board that owns the window.
+        `load_set` joined them in ADR-005 S4y: it opens the active board's
+        set-selection window, which is the shell's (AutonaShellOperations)
+        instead of the board's. Each built 1v1 / team board connected it to
+        itself until then, so it opened every built board's window -- a
+        hidden one's too, stacked -- and none in crew format if neither had
+        been built.
 
         Not applicable to board 3: a crew battle's team score is the sum of
         its members' remaining stocks, so there is no team-level score to
@@ -150,6 +154,7 @@ class AutonaHotkeys(QObject):
         reset aimed at it, which is what these hotkeys do while the operator
         is in crew format. The swap hotkey is ignored there too: the crew
         board never listened to it (its SWAP button and the Web UI swap it).
+        So is `load_set`: the crew board has no set window.
 
         Idempotent -- the guard matters because bootstrap_gui() can run more
         than once in a process (the test harness bootstraps its own runtime,
@@ -167,6 +172,7 @@ class AutonaHotkeys(QObject):
         cls.signals.apply_changes.connect(cls._onApplyChanges)
         cls.signals.swap_teams.connect(cls._onSwapTeams)
         cls.signals.refresh_phase_group.connect(cls._onRefreshTop8)
+        cls.signals.load_set.connect(cls._onLoadSet)
         logger.debug("Hotkeys routed to AutonaActions")
 
     @classmethod
@@ -191,6 +197,7 @@ class AutonaHotkeys(QObject):
         cls.signals.apply_changes.disconnect(cls._onApplyChanges)
         cls.signals.swap_teams.disconnect(cls._onSwapTeams)
         cls.signals.refresh_phase_group.disconnect(cls._onRefreshTop8)
+        cls.signals.load_set.disconnect(cls._onLoadSet)
 
     # The slots are plain functions rather than bound methods on purpose:
     # `signals` outlives any instance, and these targets are meant to live as
@@ -244,12 +251,13 @@ class AutonaHotkeys(QObject):
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
             return
         number = actions.ActiveBoard()
-        # Imported here, not at module level: the board module imports
-        # this one.
-        from .AutonaScoreboardManager import AutonaScoreboardManager
-        manager = AutonaScoreboardManager.instance
-        board = None if manager is None else manager.scoreboards.get(number)
-        if board is None:
+        # Through the board host, not the board's widget (ADR-005 S4y):
+        # whether the board is built is core's flag (DesktopBoardHost.Built),
+        # and finishing the field is the host's CommitEdit. Imported here, as
+        # the web layer is not this module's to pull in when it is imported.
+        from . import AutonaWebOperations
+        host = AutonaWebOperations.boardHost
+        if not host.Built(number):
             # As before the swap moved to core: the hotkey was connected by
             # each built board to itself, so an unbuilt one never swapped.
             # (An unbuilt board is not held: a swap there would publish at
@@ -261,8 +269,39 @@ class AutonaHotkeys(QObject):
             # the SWAP button does (AutonaScoreboardWidget.
             # CommitFocusedEdit): the typed text belongs to the player who
             # is about to move.
-            board.CommitFocusedEdit()
+            host.CommitEdit(number)
         actions.SwapTeams(number)
+
+    @staticmethod
+    def _onLoadSet():
+        """Open the active board's set selection window (the shell's,
+        AutonaShellOperations; ADR-005 S4y). Ignored in crew format (no set
+        window) and while the active board is not built (as the swap: each
+        built board answered for itself until then, and a set loaded onto an
+        unbuilt board would be wiped by the seed that builds it)."""
+        actions = AutonaActions.instance
+        if actions is None:
+            logger.warning("Hotkey ignored: AutonaActions is not built yet")
+            return
+        number = actions.ActiveBoard()
+        if number not in AutonaActions.SCORE_BOARDS:
+            logger.debug(f"Load set hotkey ignored: board {number} has no "
+                         "set window")
+            return
+        # Imported here: both import widgets and the web layer, which are
+        # not this module's to pull in when it is imported.
+        from . import AutonaWebOperations
+        from .AutonaShellOperations import AutonaShellOperations
+        if not AutonaWebOperations.boardHost.Built(number):
+            logger.debug(
+                f"Load set hotkey ignored: board {number} is not built")
+            return
+        shell = AutonaShellOperations.instance
+        if shell is None:
+            logger.warning("Hotkey ignored: the shell operations are not "
+                           "built yet")
+            return
+        shell.ShowSetSelection(number)
 
     @staticmethod
     def _onRefreshTop8():

@@ -93,9 +93,9 @@ class AutonaCrewBattleWidget(QWidget):
         self._building = False
 
         # The launch write is core's and is already in the state
-        # (AutonaActions.SeedFreshBoard, run by AutonaScoreboardManager before
-        # this, ADR-005 S4t; the headless shell writes the same): the rows
-        # show it.
+        # (AutonaActions.SeedFreshBoard, ADR-005 S4t, through EnsureBoard,
+        # S4y: run by AutonaScoreboardManager before this; the headless shell
+        # writes the same): the rows show it.
         self._RenderFromState()
 
         # A flat delta renders its key path as a Python list, so str(delta)

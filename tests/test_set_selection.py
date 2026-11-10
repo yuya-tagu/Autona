@@ -1323,7 +1323,7 @@ def setWindow(service, autonaApp):
     AutonaSelectSetWindow._cache = None
     AutonaSelectSetWindow._sortState = None
     parent = QWidget()
-    window = AutonaSelectSetWindow(parent)
+    window = AutonaSelectSetWindow(parent, 1)
     try:
         yield window
     finally:
@@ -1457,7 +1457,7 @@ def test_the_station_window_shows_what_the_rows_say(service, autonaApp):
     provider = FakeTournament()
     _load(service, provider)
     parent = QWidget()
-    window = AutonaSelectStationWindow(parent)
+    window = AutonaSelectStationWindow(parent, 1)
     try:
         window.LoadStations()
         _drain(autonaApp)

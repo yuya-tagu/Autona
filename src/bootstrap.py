@@ -544,39 +544,51 @@ def bootstrap_gui():
     # Autona.py keeps a fallback for PyInstaller's dependency-analysis
     # subprocess, which imports modules without main.py. Both run before
     # bootstrap_gui().
-    # It also wipes the `score` subtree in __init__ (StateSchema
-    # .ResetScoreRoot), so it must come after StateManager.Initialize()
-    # (bootstrap_core()). Still before the Window, i.e. before the first
-    # score.* seed (Window._SeedPanelState / CreateScoreboard): moving it
-    # behind the Designer migration (which writes no state) changes nothing
-    # the state sees. The boards themselves are not built here:
-    # CreateScoreboard() is called later, from the window.
+    # It also wipes the `score` subtree in __init__ and forgets the boards
+    # core made (AutonaActions.ResetBoards, ADR-005 S4y), so it must come
+    # after StateManager.Initialize() and AutonaActions (bootstrap_core()).
+    # Still before the Window, i.e. before the first score.* seed
+    # (Window._SeedPanelState / CreateScoreboard): moving it behind the
+    # Designer migration (which writes no state) changes nothing the state
+    # sees. The boards themselves are not built here: CreateScoreboard() is
+    # called later, from the window.
     from .AutonaScoreboardManager import AutonaScoreboardManager
     if AutonaScoreboardManager.instance is None:
         AutonaScoreboardManager.instance = AutonaScoreboardManager()
 
+    # The desktop's shell operations and the set selection / station windows
+    # (ADR-005 S4y; the scoreboard dock's and its boards' until then, so
+    # they outlive the dock). Builds no window: their parent is the main
+    # window, which hands itself over in UiMounted. Needs the QApplication
+    # (the windows are QDialogs) and the provider adapter the windows connect
+    # to when built (bootstrap_core()).
+    from .AutonaShellOperations import AutonaShellOperations
+    if AutonaShellOperations.instance is None:
+        AutonaShellOperations.instance = AutonaShellOperations()
+
     # ORDER CONSTRAINT: the web operations' desktop registrations, after the
-    # two objects they point at (the scoreboard dock and the asset adapter,
-    # both above). The S2 operations run through the dock -- the board built
-    # first and held for 反映, on the GUI thread, the field being typed in
-    # committed, the crew board's own operations -- and a game is loaded
-    # through the adapter, so its Qt models follow. The shell operations (the
-    # set selection window, the thumbnail, ADR-005 S3e-9; the image renderer,
-    # S4o) are the dock's too. The defaults are the headless shell's (no
-    # board; no loader until it registers its own; no shell operation: 503).
-    # Before the web server exists (Window._StartWebServer), so no request
-    # can reach the defaults on the desktop (ADR-005 S3c).
+    # objects they point at (the scoreboard dock, the shell operations and
+    # the asset adapter, all above). The S2 operations run through the dock
+    # -- the board built first and held for 反映, on the GUI thread, the
+    # field being typed in committed, the crew board's own operations -- and
+    # a game is loaded through the adapter, so its Qt models follow. The
+    # shell operations (the set selection window, the thumbnail, ADR-005
+    # S3e-9; the image renderer, S4o) are AutonaShellOperations' (the dock's
+    # until S4y). The defaults are the headless shell's (no board; no loader
+    # until it registers its own; no shell operation: 503). Before the web
+    # server exists (Window._StartWebServer), so no request can reach the
+    # defaults on the desktop (ADR-005 S3c).
     from . import AutonaWebOperations
     AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost(
         AutonaScoreboardManager.instance)
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
     AutonaWebOperations.openSetSelection = (
-        AutonaScoreboardManager.instance.OpenSetSelection)
+        AutonaShellOperations.instance.OpenSetSelection)
     AutonaWebOperations.renderThumbnail = (
-        AutonaScoreboardManager.instance.RenderThumbnail)
+        AutonaShellOperations.instance.RenderThumbnail)
     AutonaWebOperations.startImageRender = (
-        AutonaScoreboardManager.instance.StartImageRender)
+        AutonaShellOperations.instance.StartImageRender)
 
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
     # per player), the wiring the headless shell makes too. On gameLoaded,

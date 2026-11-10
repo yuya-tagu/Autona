@@ -4,11 +4,19 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from src.core.SetFollowService import SetFollowService
 
 
 class AutonaSelectStationWindow(QDialog):
-    def __init__(self, parent: QWidget) -> None:
+    """Board `board`'s (1/2) station window, owned by AutonaShellOperations
+    since ADR-005 S4y (each board built its own until then): the station or
+    stream picked is followed through core (SetFollowService.FollowStation),
+    not the board's signal."""
+
+    def __init__(self, parent: QWidget, board) -> None:
         super().__init__(parent)
+
+        self.board = board
 
         self.setWindowTitle(
             QApplication.translate("app", "Select a station"))
@@ -119,4 +127,4 @@ class AutonaSelectStationWindow(QDialog):
         self.close()
 
         if station:
-            self.parent().signals.StationSelected.emit(station)
+            SetFollowService(self.board).FollowStation(station)

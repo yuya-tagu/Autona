@@ -13,9 +13,8 @@ from .Helpers.AutonaQtHelper import HeldBackText, ShowComboText
 
 from . import ui_constants as UI
 from . import ui_layout as L
-from .AutonaSelectSetWindow import AutonaSelectSetWindow
-from .AutonaSelectStationWindow import AutonaSelectStationWindow
 from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
+from .AutonaShellOperations import AutonaShellOperations
 
 from .AutonaScoreboardPlayerWidget import (
     AutonaScoreboardPlayerWidget, _releaseLayoutItemWrappers)
@@ -33,21 +32,13 @@ from .core.StatsService import StatsService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaHotkeys import AutonaHotkeys
 
 from loguru import logger
 
 from .AutonaGameAssetManager import AutonaGameAssetManager
-# SCORE's thumbnail button and X post render synchronously through the thin
-# wrapper; the settings page is the React one (ADR-005 S4p decision 10).
-from .thumbnail import main_generate_thumbnail as thumbnail
-
-
-class AutonaScoreboardWidgetSignals(QObject):
-    NewSetSelected = Signal(object)
-    SetSelection = Signal()
-    StationSelection = Signal()
-    StationSelected = Signal(object)
+# SCORE's thumbnail (the X post's) is drawn synchronously by the shell's
+# AutonaShellOperations.DrawThumbnail (core's ThumbnailService.DrawBoard,
+# ADR-005 S4y); the settings page is the React one (S4p decision 10).
 
 
 class AutonaScoreboardWidget(QWidget):
@@ -58,8 +49,9 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreboardNumber = scoreboardNumber
         self.singlePlayer = singlePlayer
         # StateManager subtree owned by this board. Publication of the whole
-        # subtree is deferred (HoldSubtree at the end of __init__): edits stay
-        # local until the 反映 button commits them. StateSchema.STATS_KEYS are
+        # subtree is deferred (StateSchema.HoldBoard, which core's
+        # AutonaActions.EnsureBoard has run before this since ADR-005 S4y):
+        # edits stay local until the 反映 button commits them. StateSchema.STATS_KEYS are
         # exempt — they are fetched derived data, not operator edits, so they
         # publish immediately (stats overlays / preview would otherwise stay
         # empty until 反映 was pressed).
@@ -100,32 +92,19 @@ class AutonaScoreboardWidget(QWidget):
         # _SyncSetFields / _SyncScoreDisplays.
         self.setLoad = SetLoadService(self.scoreboardNumber)
 
-        # The board's launch write is core's and is already in the state
-        # (AutonaActions.SeedFreshBoard, run by AutonaScoreboardManager before
-        # this, ADR-005 S4t): nothing below writes while the board is built,
-        # and the widgets' initial values are the seed's -- empty.
+        # The board is core's and is already in the state, held
+        # (AutonaActions.EnsureBoard, run by AutonaScoreboardManager before
+        # this: the launch write of ADR-005 S4t and, since S4y, the hold):
+        # nothing below writes while the board is built, and the widgets'
+        # initial values are the seed's -- empty.
 
-        self.signals = AutonaScoreboardWidgetSignals()
-        self.signals.NewSetSelected.connect(self.NewSetSelected)
-        self.signals.SetSelection.connect(self.LoadSetClicked)
-        self.signals.StationSelected.connect(self.LoadStationSets)
-        self.signals.StationSelection.connect(self.LoadStationSetClicked)
-
-        # Only the hotkey that drives a *panel* (the set-selection window) is
-        # still connected here. The score / reset / 反映 hotkeys were moved
-        # to AutonaHotkeys -> AutonaActions (headless core Step 3), and the
-        # swap joined them in ADR-005 S2c: connected per board, they answered
-        # from every board that happened to be built -- both of them after a
-        # singles/team switch, and none at all when the saved format was
-        # crew.
-        #
-        # Bound methods, never lambdas: AutonaHotkeys.signals is a class-level
-        # object that lives for the whole process, while a board is destroyed
-        # on every battle-format switch. A bound method tells Qt who the
-        # receiver is, so the connection dies with the board; a lambda does
-        # not, and nothing ever disconnects it -- the destroyed board would
-        # keep answering hotkeys and rewriting score.{n} (the "ghost board").
-        AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
+        # (No hotkey is connected here since ADR-005 S4y: the load_set
+        # hotkey opens the active board's set window through AutonaHotkeys
+        # and AutonaShellOperations, the windows load through core
+        # (SetFollowService), and this board's signals for them are gone.
+        # The score / reset / 反映 / swap hotkeys left in headless core Step 3
+        # and ADR-005 S2c: connected per board, they answered from every
+        # board that happened to be built.)
 
         # (The statistics are core's since ADR-005 S3e-5: StatsService,
         # asked for by the operations that change a player -- this board
@@ -301,7 +280,9 @@ class AutonaScoreboardWidget(QWidget):
         self.btSelectSet.setIcon(QIcon(UI.icon_path("list.svg")))
         self.btSelectSet.setEnabled(False)
         loadSetRow.addWidget(self.btSelectSet)
-        self.btSelectSet.clicked.connect(self.signals.SetSelection.emit)
+        # The board's set window is the shell's since ADR-005 S4y (this
+        # board built it and opened it through its own signal until then).
+        self.btSelectSet.clicked.connect(self._OpenSetSelection)
 
         # --- Bottom options (settings, timer) below team columns ---
         bottomOptions = QWidget()
@@ -351,9 +332,6 @@ class AutonaScoreboardWidget(QWidget):
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateBottomButtons)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
-
-        self.selectSetWindow = AutonaSelectSetWindow(self)
-        self.selectStationWindow = AutonaSelectStationWindow(self)
 
         self.timerLayout = QWidget()
         self.timerLayout.setLayout(QHBoxLayout())
@@ -713,8 +691,10 @@ class AutonaScoreboardWidget(QWidget):
             self._OnTournamentCandidates)
         signals.tournament_data_updated.connect(self._OnTournamentCandidates)
 
-        # Bound method, not a lambda: the asset manager outlives every board
-        # (see the AutonaHotkeys block in __init__ for the full reasoning).
+        # Bound method, not a lambda: the asset manager outlives every board.
+        # A bound method tells Qt who the receiver is, so the connection dies
+        # with the board; a lambda does not, and nothing ever disconnects it
+        # -- a destroyed board would keep answering (the "ghost board").
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._onGameAssetsLoaded)
 
@@ -733,11 +713,12 @@ class AutonaScoreboardWidget(QWidget):
         self._updateTournamentInfoLine()
         self._syncDisplayTournamentNameEdit()
 
-        # From here on, edits to this board's subtree are held back from the
-        # broadcast/export pipeline until 反映 commits them. The launch write
-        # ahead of this was published normally, so the committed baseline
-        # matches the widgets' initial values.
-        schema.HoldBoard(self.scoreboardNumber)
+        # Edits to this board's subtree are held back from the
+        # broadcast/export pipeline until 反映 commits them: core registered
+        # the hold before this board was built, right after the launch write
+        # (AutonaActions.EnsureBoard, ADR-005 S4y; this constructor did it
+        # last until then). The launch write was published normally, so the
+        # committed baseline matches the widgets' initial values.
         StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
         # The score is written by AutonaActions now, not by these spinboxes
@@ -748,10 +729,17 @@ class AutonaScoreboardWidget(QWidget):
         StateManagerBridge.instance.held_state_updated.connect(
             self._onHeldStateUpdated)
         # A writer on another thread does not wait for a board being built:
-        # what it wrote after the seed and ahead of the hold made no held
-        # notification, and the widgets rendered what they found as they were
-        # built. Shown once, as the notification would have. Writes nothing.
+        # what it wrote while the widgets were built made a held
+        # notification nothing here was connected to yet, and the widgets
+        # rendered what they found as they were built. Shown once, as the
+        # notification would have. Writes nothing.
         self._onHeldStateUpdated(self.statePrefix)
+        # The same for 反映: a write in that window told held_dirty_changed
+        # True before the connect above (it is told once, on the clean ->
+        # pending turn), so the button would stay off until a commit while
+        # an edit is pending.
+        self.btApply.setEnabled(
+            StateManager.HasPendingChanges(self.statePrefix))
 
     @staticmethod
     def _styleTeamCard(column):
@@ -1574,8 +1562,10 @@ class AutonaScoreboardWidget(QWidget):
             msgBox.setWindowTitle(QApplication.translate(
                 "thumb_app", "Autona - Thumbnail"))
         try:
-            thumbnailPath = thumbnail.generate(
-                settingsManager=SettingsManager, scoreboardNumber=self.scoreboardNumber)
+            # The shell's synchronous draw of core's ThumbnailService.DrawBoard
+            # (ADR-005 S4y), the one the legacy route and the X post take.
+            thumbnailPath = AutonaShellOperations.instance.DrawThumbnail(
+                self.scoreboardNumber)
             if not disable_msgbox:
                 msgBox.setText(QApplication.translate(
                     "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath)
@@ -1635,10 +1625,12 @@ class AutonaScoreboardWidget(QWidget):
             # Generate thumbnail and copy to clipboard (best-effort: a
             # thumbnail failure must not block the post itself, so this is
             # isolated in its own try/except and the failure is surfaced
-            # via a modal after the post completes).
+            # via a modal after the post completes). Drawn by the shell
+            # (core's ThumbnailService.DrawBoard, ADR-005 S4y), not by this
+            # board's GenerateThumbnail.
             thumbnail_error = None
             try:
-                thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
+                thumbnailPath = AutonaShellOperations.instance.DrawThumbnail(n)
                 if thumbnailPath:
                     image = QImage(thumbnailPath)
                     if not image.isNull():
@@ -1999,13 +1991,6 @@ class AutonaScoreboardWidget(QWidget):
         # the section title label + separator, not a card frame.
         return f"QFrame#{object_name} {{ background: transparent; border: none; }}"
 
-    def NewSetSelected(self, data):
-        """A set to show: the set window's (its `auto_update` is "set").
-        Core's since ADR-005 S3e-7 (SetFollowService.LoadSet: the clears,
-        the set recorded as followed, the fetch, the poll); the timer row
-        follows what it starts (_OnFollowChanged)."""
-        self.setFollow.LoadSet(data)
-
     def StopAutonaUpdate(self, clear_variables=False):
         """Stop polling; the cancel button (`clear_variables`) also forgets
         the station and the followed set (SetFollowService.StopFollowing)."""
@@ -2046,20 +2031,14 @@ class AutonaScoreboardWidget(QWidget):
         if seconds is not None:
             self.timerTime.setText(str(seconds))
 
-    def LoadSetClicked(self):
-        # Restores the cached set list; fetching is the operator's call from
-        # inside the window.
-        self.selectSetWindow.PrepareForDisplay()
-        self.selectSetWindow.show()
-
-    def LoadStationSets(self, station):
-        """The station window's station or stream: followed by core
-        (SetFollowService.FollowStation), which loads its current set."""
-        self.setFollow.FollowStation(station)
-
-    def LoadStationSetClicked(self):
-        self.selectStationWindow.LoadStations()
-        self.selectStationWindow.show()
+    def _OpenSetSelection(self):
+        """The "Load set" button: this board's set window, the shell's
+        (AutonaShellOperations, ADR-005 S4y). It restores the cached set
+        list; fetching is the operator's call from inside the window. What
+        the window loads -- a set (SetFollowService.LoadSet) or a station to
+        follow (FollowStation) -- is core's, and the timer row follows what
+        it starts (_OnFollowChanged)."""
+        AutonaShellOperations.instance.ShowSetSelection(self.scoreboardNumber)
 
     # Used for score change commands
     # Change <team>(0, 1) score by <change>(+X, -X)

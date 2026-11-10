@@ -507,6 +507,13 @@ class _AutonaHarness:
         # host started from the default).
         from src.core.Actions import AutonaActions
         AutonaActions.instance._emptyCharacters.pop(number, None)
+        # And whether the board is made (ADR-005 S4y: AutonaActions.
+        # EnsureBoard, which a new widget's build runs and which seeds the
+        # board only the first time). Forgotten, so the next build seeds it
+        # afresh, as when the widget was the board. Unconditionally: a module
+        # can make a board without a widget (the headless seed).
+        with self.state.lock:
+            AutonaActions.instance._ensuredBoards.discard(number)
 
         manager = self.manager
         board = manager.scoreboards.pop(number, None)
@@ -532,9 +539,11 @@ class _AutonaHarness:
             # nothing else in the session gets torn down as a side effect.
             QCoreApplication.sendPostedEvents(board, QEvent.Type.DeferredDelete)
 
-        # AutonaScoreboardWidget.__init__ registers its subtree as held (the
-        # 反映 button). StateManager has no inverse, so the registration is
-        # cleared here directly -- leaving it behind would make every later
+        # Building a 1v1 / team board registers its subtree as held (the 反映
+        # button; AutonaActions.EnsureBoard since ADR-005 S4y, the widget's
+        # __init__ until then). Its inverse, StateManager.ReleaseSubtree, would
+        # publish what is pending; a test's leftovers are thrown away instead, so
+        # the registration is cleared here directly -- leaving it behind would make every later
         # write under score.{n} invisible to a test that never built a board,
         # and would hand tests/test_state_manager_held.py a pre-registered
         # prefix.

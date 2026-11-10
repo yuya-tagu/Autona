@@ -51,6 +51,11 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
 `AutonaActions.SeedFreshBoard(board)` が書く（ADR-005 S4t。デスクトップは `EnsureScoreboard` がウィジェットの構築の前に、
 ヘッドレスは `_SeedBoards` が起動時に呼ぶ。それまではボードのウィジェットが publish していた。既定の人数・キャラ数は
 `PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本で、ボードもこれを読む）。
+ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, panel)`（1 回だけ作る。デスクトップの `panel=True`
+は表示トグルの書き直し・取り直しの停止・反映ボタンの held 登録もここで行う）で、ボードのウィジェットは state を
+書かず held 登録もしない。セット選択 / 配信台のウィンドウ・サムネイルの同期描画・`load_set` ホットキーはボードの
+ウィジェットではなくシェルのアダプタ `src/AutonaShellOperations.py`（`bootstrap_gui()` が作り、Window が
+`UiMounted` で親を渡す）が持つ。
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
 `EnsureXxxPanel()` アクセサを足す。
 

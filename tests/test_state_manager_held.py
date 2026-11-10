@@ -1,5 +1,6 @@
 """
-Tests for StateManager deferred publication (HoldSubtree / CommitHeld).
+Tests for StateManager deferred publication (HoldSubtree / CommitHeld /
+ReleaseSubtree).
 
 Held subtree semantics (the 反映 button feature):
 - Writes under a held prefix land in the live state immediately (Get()),
@@ -496,6 +497,55 @@ def test_the_peek_answers_what_the_flag_answers(_heldOnlyBoard):
     assert SM.PeekPendingChanges(_heldOnlyBoard) is True
     SM.CommitHeld(_heldOnlyBoard)
     assert SM.PeekPendingChanges(_heldOnlyBoard) is False
+
+
+# ── ReleaseSubtree: the hold undone (ADR-005 S4y review) ─────────────────
+# For a board whose making or drawing failed (AutonaActions.ForgetBoard):
+# nothing would ever apply its hold.
+
+
+def _lastPublished(key):
+    from src.core.DictHelper import deep_get
+    with SM.lock:
+        return deep_get(SM.lastSavedState, key)
+
+
+def test_a_release_publishes_what_was_pending_and_then_every_write(
+        _heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+        assert _lastPublished(f"{_heldOnlyBoard}.phase") is None
+        SM.ReleaseSubtree(_heldOnlyBoard)
+    assert dirty.told == [(True, True), (False, False)]
+    assert _lastPublished(f"{_heldOnlyBoard}.phase") == "Pending"
+    with SM.lock:
+        assert _heldOnlyBoard not in SM.heldPrefixes
+
+    SM.Set(f"{_heldOnlyBoard}.match", "Published as written")
+    assert _lastPublished(f"{_heldOnlyBoard}.match") == "Published as written"
+    assert not SM.HasPendingChanges(_heldOnlyBoard)
+
+
+def test_a_release_inside_a_block_publishes_when_the_block_closes(
+        _heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        with SM.SaveBlock():
+            SM.Set(f"{_heldOnlyBoard}.phase", "Pending")
+            SM.ReleaseSubtree(_heldOnlyBoard)
+            assert _lastPublished(f"{_heldOnlyBoard}.phase") is None
+            assert dirty.told == [(True, True)]
+    assert _lastPublished(f"{_heldOnlyBoard}.phase") == "Pending"
+    assert dirty.told == [(True, True), (False, False)]
+
+
+def test_a_release_with_nothing_pending_tells_nothing(_heldOnlyBoard):
+    with _DirtyTold(_heldOnlyBoard) as dirty:
+        SM.ReleaseSubtree(_heldOnlyBoard)
+        # Not held any more: a second release leaves it alone.
+        SM.ReleaseSubtree(_heldOnlyBoard)
+    assert dirty.told == []
+    with SM.lock:
+        assert _heldOnlyBoard not in SM.heldPrefixes
 
 
 def test_a_failed_publish_still_lowers_the_flag(monkeypatch, _heldOnlyBoard):

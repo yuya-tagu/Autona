@@ -1,5 +1,3 @@
-import os
-
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -12,37 +10,12 @@ from .Helpers.AutonaQtHelper import (
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
-from .core.SetFollowService import SetFollowService
 from . import ui_constants as UI
 
 
-# The preview's PNG (ADR-005 S4o judgment 23). Qt maps a PNG quality to the
-# zlib level as (100 - quality) * 9 / 91, so 85 is level 1: lossless like
-# every PNG, about five times faster than the default level (6) on a busy
-# 1920x1080 picture, for a few percent more bytes. 90 and up is level 0,
-# faster again but two and a half times the bytes.
-PREVIEW_PNG_QUALITY = 85
-
-
-def _EncodeImage(image, file_format, quality=-1):
-    """A QImage's bytes as "PNG" or "JPG", the encoders QPixmap.save() uses
-    (`quality` as QImage.save() takes it; -1 is its default); b"" when it
-    failed. Not bound to the GUI thread, unlike a QPixmap."""
-    buffer = QBuffer()
-    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    if not image.save(buffer, file_format, quality):
-        return b""
-    return bytes(buffer.data())
-
-
-def _ImageEncoder(image):
-    """A render's `encode(format, fast=False)`: what QPixmap.save() writes,
-    or with `fast` the preview's PNG (PREVIEW_PNG_QUALITY). `fast` changes
-    only a PNG: a JPG is the same either way."""
-    def encode(file_format, fast=False):
-        quality = PREVIEW_PNG_QUALITY if fast and file_format == "PNG" else -1
-        return _EncodeImage(image, file_format, quality)
-    return encode
+# The web layer's shell operations (the set selection window, the legacy
+# thumbnail, the off-screen renders) and the image encoders were this dock's
+# until ADR-005 S4y: src/AutonaShellOperations.py.
 
 
 class AutonaScoreboardManager(QDockWidget):
@@ -63,11 +36,12 @@ class AutonaScoreboardManager(QDockWidget):
         super().__init__(*args)
 
         # Wipe any residual score.* keys from an older multi-scoreboard
-        # state.json so we start from a clean single-scoreboard layout.
-        # The subtree lifecycle op lives with SeedBoard() in the schema
-        # (headless core Step 5) -- `score` is a schema name, and this class
-        # is a QDockWidget.
-        schema.ResetScoreRoot()
+        # state.json so we start from a clean single-scoreboard layout, and
+        # forget which boards core has made (ADR-005 S4y: no board is made
+        # yet in this launch). Core's (AutonaActions.ResetBoards, which runs
+        # StateSchema.ResetScoreRoot) -- `score` is a schema name, and this
+        # class is a QDockWidget.
+        AutonaActions.instance.ResetBoards()
 
         logger.info("Scoreboard Manager - Initializing")
 
@@ -123,29 +97,39 @@ class AutonaScoreboardManager(QDockWidget):
                 logger.info(
                     f"Scoreboard Manager - Creating scoreboard {number} "
                     f"({self.BOARD_LABELS[number]})")
-                # Core's launch write first (ADR-005 S4t): the widgets are
-                # built on it and render it, and write nothing as they are.
-                # It reads the loaded game's players per team, so a board
-                # built after the load has them too.
-                AutonaActions.instance.SeedFreshBoard(number)
-                if number in AutonaActions.SCORE_BOARDS:
-                    # The desktop's alone, both: see SeedFreshBoard.
-                    schema.PublishDisplayOptions()
-                    SetFollowService.TurnOffPolling()
-                if number == 1:
-                    board = AutonaScoreboardWidget(
-                        scoreboardNumber=1, singlePlayer=True)
-                    self.scoreboard = board
-                elif number == 2:
-                    board = AutonaScoreboardWidget(
-                        scoreboardNumber=2, singlePlayer=False)
-                    self.teamScoreboard = board
-                else:
-                    board = AutonaCrewBattleWidget(scoreboardNumber=3)
-                    self.crewScoreboard = board
-                self.widget.layout().addWidget(board)
-                self.scoreboards[number] = board
-                board.setVisible(False)
+                # Core makes the board first (ADR-005 S4y): its launch write
+                # (SeedFreshBoard, S4t), and -- the desktop's, `panel` -- the
+                # display options, polling turned off and the hold, in one
+                # cycle with the build as before. The widgets are built on it
+                # and render it, and write nothing as they are. It reads the
+                # loaded game's players per team, so a board built after the
+                # load has them too. Core makes a board once a launch; this
+                # is the desktop's only caller, so a board core has made is
+                # one whose widget is built.
+                AutonaActions.instance.EnsureBoard(number, panel=True)
+                try:
+                    if number == 1:
+                        board = AutonaScoreboardWidget(
+                            scoreboardNumber=1, singlePlayer=True)
+                        self.scoreboard = board
+                    elif number == 2:
+                        board = AutonaScoreboardWidget(
+                            scoreboardNumber=2, singlePlayer=False)
+                        self.teamScoreboard = board
+                    else:
+                        board = AutonaCrewBattleWidget(scoreboardNumber=3)
+                        self.crewScoreboard = board
+                    self.widget.layout().addWidget(board)
+                    self.scoreboards[number] = board
+                    board.setVisible(False)
+                except BaseException:
+                    # No widget to render the board core made: core forgets
+                    # it (not ready, its hold released), or Built() would say
+                    # it is there -- the swap and load-set hotkeys would act
+                    # on it -- and the next build would skip its launch write.
+                    self.scoreboards.pop(number, None)
+                    AutonaActions.instance.ForgetBoard(number)
+                    raise
         finally:
             self._ensuring.discard(number)
         return board
@@ -188,8 +172,9 @@ class AutonaScoreboardManager(QDockWidget):
 
         # Not built yet (only the active format's board is built at startup).
         # Build it here so every caller — the web operations' desktop board
-        # host (AutonaWebOperations.DesktopBoardHost), the shell operations
-        # below, the desktop panels — gets a board. Construction is
+        # host (AutonaWebOperations.DesktopBoardHost), the desktop panels —
+        # gets a board (the shell operations no longer need one: ADR-005
+        # S4y, AutonaShellOperations). Construction is
         # GUI-thread only, so calls arriving on the Flask thread (the board
         # host's Prepare outside its Run: get_swap, get_scoreboard) are
         # marshalled to it (gui_thread_sync). Once the app is shutting
@@ -215,75 +200,3 @@ class AutonaScoreboardManager(QDockWidget):
             logger.error(
                 f"Scoreboard Manager - Scoreboard {number} not available")
         return scoreboard
-
-    # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
-    # What only the desktop's windows answer. bootstrap_gui() registers them
-    # as AutonaWebOperations.openSetSelection / renderThumbnail /
-    # startImageRender; the headless shell has none, and the web layer
-    # answers them 503. On the GUI
-    # thread, where the boards and their windows live (an unbuilt board is
-    # built there first); the request waits for the answer. Moved unchanged
-    # from the web server's former actions class, apart from the window
-    # being opened on the GUI thread itself instead of through a signal
-    # queued from the request's thread (what opening it raises is still
-    # only logged: OpenSetSelection).
-
-    @gui_thread_sync
-    def OpenSetSelection(self, number):
-        """Open board `number`'s set selection window: "OK". Another board
-        than 1/2 has none and raises (the legacy route's 500, as before).
-
-        Opening the window itself never fails the request: until S3e-9 it
-        was queued from the request's thread, so what it raised was only
-        reported and the answer was "OK". It still is. PySide6 hands a
-        slot's exception to sys.excepthook (logged as uncaught) instead of
-        raising it into emit(); one a binding raises here is logged."""
-        selection = self.GetScoreboard(number).signals.SetSelection
-        try:
-            selection.emit()
-        except Exception:
-            logger.opt(exception=True).error(
-                f"Scoreboard Manager - The set selection of scoreboard "
-                f"{number} did not open")
-        return "OK"
-
-    @gui_thread_sync
-    def RenderThumbnail(self, number, file_format):
-        """Render board `number`'s thumbnail (quietly: no message box): the
-        image's absolute path -- its .jpg sibling for "jpg" -- or None when
-        it failed."""
-        thumbnailPath = self.GetScoreboard(number).GenerateThumbnail(
-            quiet_mode=True, disable_msgbox=True)
-        if thumbnailPath:
-            if file_format == "jpg":
-                thumbnailPath = thumbnailPath.replace(".png", ".jpg")
-            return os.path.abspath(thumbnailPath)
-        return None
-
-    @gui_thread_sync
-    def StartImageRender(self, kind, payload, done):
-        """Start drawing an image off-screen, on the GUI thread, and return:
-        the wait for the GUI thread ends here, not at the image. `kind` says
-        which renderer ("thumbnail" or "result": payload is its (data, config,
-        template) or (data, config, layout), each with a view of its own);
-        `done(encode, error)` comes on the GUI thread, once, with
-        `encode(format, fast=False)` -> the image's bytes (callable from any
-        thread: a QImage, not the QPixmap; `fast`: _ImageEncoder), or None
-        when it failed (`error`)."""
-        if kind not in ("thumbnail", "result"):
-            raise ValueError(f"unknown kind of image: {kind}")
-        # Built by the first render, not at startup: the off-screen view and
-        # its page load cost seconds most launches do not need.
-        if kind == "thumbnail":
-            from .thumbnail.ThumbnailRenderer import ThumbnailRenderer as Renderer
-        else:
-            from .result.ResultPageRenderer import ResultPageRenderer as Renderer
-
-        def finished(pixmap, error):
-            if pixmap is None:
-                done(None, error)
-                return
-            done(_ImageEncoder(pixmap.toImage()), "")
-
-        data, config, template = payload
-        Renderer.instance().renderAsync(data, config, template, finished)

@@ -180,12 +180,13 @@ class SetFollowService:
 
     @staticmethod
     def TurnOffPolling():
-        """What the desktop does each time it builds a 1v1 / team board
-        (AutonaScoreboardManager.EnsureScoreboard; the board's constructor
-        until ADR-005 S4t): polling left the board's UI, so a stale setting
-        from an older session must not keep it running. Not part of the
-        shared launch write (AutonaActions.SeedFreshBoard): on the headless
-        shell the setting is the operator's (Polling)."""
+        """What the desktop does each time it first uses a 1v1 / team board
+        (AutonaActions.EnsureBoard with `panel`, ADR-005 S4y; the board build
+        until then, and the board's constructor until S4t): polling left the
+        board's UI, so a stale setting from an older session must not keep it
+        running. Not part of the shared launch write
+        (AutonaActions.SeedFreshBoard): on the headless shell the setting is
+        the operator's (Polling)."""
         SettingsManager.Set("general.disable_autoupdate", True)
 
     @classmethod

@@ -584,17 +584,19 @@ def _SeedBoards():
     """The boards as the desktop's freshly built ones publish them.
 
     The score subtree reset (the scoreboard dock's construction) comes first,
-    as on the desktop, then each board's launch write, the one the desktop
-    runs as it builds a board (AutonaActions.SeedFreshBoard, ADR-005 S4t).
-    The desktop builds a board only when it is shown; this shell builds none
-    and serves all three, so all three get it. tests/test_headless_seed.py
+    as on the desktop (AutonaActions.ResetBoards), then each board made by
+    the op the desktop runs as it builds a board (AutonaActions.EnsureBoard,
+    ADR-005 S4y: the launch write of S4t). Without `panel`: this shell has no
+    反映 button, so nothing is held, and the polling setting and the display
+    options stay the operator's (the desktop's alone, as before). The desktop
+    makes a board only when it is first shown; this shell builds none and
+    serves all three, so all three are made now. tests/test_headless_seed.py
     pins it against desktop boards.
     """
-    from .core import StateSchema as schema
     from .core.Actions import AutonaActions
-    schema.ResetScoreRoot()
-    for number in (1, 2, AutonaActions.CREW_BOARD):
-        AutonaActions.instance.SeedFreshBoard(number)
+    AutonaActions.instance.ResetBoards()
+    for number in AutonaActions.BOARDS:
+        AutonaActions.instance.EnsureBoard(number)
 
 
 def _SeedState():

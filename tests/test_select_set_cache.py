@@ -5,21 +5,23 @@ event's sets takes seconds, so opening the window must never start a fetch by
 itself: it restores the rows (and the sort) of the last fetch and leaves
 refreshing to the "最新の試合情報を取得" button.
 
-The cache deliberately lives on the class, not the instance -- every
-scoreboard (1v1 / team / crew) builds its own window, and all of them show
-the same event. It is process-local: closing Autona starts clean.
+The cache deliberately lives on the class, not the instance -- boards 1 and
+2 each have their own window (the shell's, AutonaShellOperations, since
+ADR-005 S4y; each board built its own until then), and both show the same
+event. It is process-local: closing Autona starts clean.
 
 AutonaTournamentDataProvider.instance is stubbed; the tests assert the
 window's fetch *decisions* and what it renders, never Start.gg behaviour.
 """
 import pytest
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QCoreApplication, Qt
 from qtpy.QtWidgets import QWidget
 
 from src.AutonaTournamentDataProvider import (
     AutonaTournamentDataProvider, AutonaTournamentDataProviderSignals)
 from src.AutonaSelectSetWindow import AutonaSelectSetWindow
+from src.core.SetFollowService import SetFollowService
 
 TOURNAMENT_URL = "https://start.gg/tournament/t/event/e"
 
@@ -83,7 +85,7 @@ def provider():
 
 @pytest.fixture
 def makeWindow(qapp, provider):
-    """Builds windows as the scoreboard does (parented, never shown). The
+    """Builds windows as the shell does (parented, never shown). The
     parents are kept alive for the test: dropping one takes its child's C++
     objects with it."""
     parents = []
@@ -91,7 +93,7 @@ def makeWindow(qapp, provider):
     def build():
         parent = QWidget()
         parents.append(parent)
-        return AutonaSelectSetWindow(parent)
+        return AutonaSelectSetWindow(parent, 1)
 
     yield build
 
@@ -232,3 +234,57 @@ def test_picking_a_set_cancels_the_list_still_loading(window, provider):
 
     assert provider.cancelSetLoadCalls == 1
     assert window.btFetchSets.isEnabled()
+
+
+# ── what a pick does: core, not a board (ADR-005 S4y) ────────────────────
+# The windows are the shell's (AutonaShellOperations), one per board 1/2,
+# and load what is picked through core -- they emitted their parent board's
+# signals until then.
+
+def test_picking_a_set_loads_it_through_core_for_the_windows_board(
+        qapp, provider, monkeypatch):
+    loaded = []
+    monkeypatch.setattr(
+        SetFollowService, "LoadSet",
+        lambda self, data: loaded.append((self.scoreboardNumber, data)))
+    parent = QWidget()
+    window = AutonaSelectSetWindow(parent, 2)
+    window.PrepareForDisplay()
+    window.btFetchSets.click()
+    provider.FinishFetch([_set(5, "A", "B")])
+
+    window.LoadSelectedSet()
+    # Deferred past the table's signal (agent-pitfalls #9).
+    assert loaded == []
+    QCoreApplication.processEvents()
+
+    assert [(board, data["id"], data["auto_update"])
+            for board, data in loaded] == [(2, 5, "set")]
+
+
+def test_the_station_button_hands_over_to_the_shell(qapp, provider):
+    opened = []
+    parent = QWidget()
+    window = AutonaSelectSetWindow(parent, 1, lambda: opened.append(1))
+
+    window.btTrackStation.click()
+
+    assert opened == [1]
+
+
+def test_picking_a_station_follows_it_through_core(qapp, provider,
+                                                   monkeypatch):
+    from src.AutonaSelectStationWindow import AutonaSelectStationWindow
+    followed = []
+    monkeypatch.setattr(
+        SetFollowService, "FollowStation",
+        lambda self, station: followed.append((self.scoreboardNumber,
+                                               station)))
+    parent = QWidget()
+    window = AutonaSelectStationWindow(parent, 2)
+    station = {"type": "station", "id": 7, "identifier": "3", "stream": ""}
+    window.SetStations([station])
+
+    window.LoadSelectedSet()
+
+    assert followed == [(2, station)]

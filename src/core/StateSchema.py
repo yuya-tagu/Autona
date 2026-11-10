@@ -882,13 +882,17 @@ def HoldBoard(number):
     until ``StateManager.CommitHeld`` (the 反映 button, ``ApplyChanges``);
     ``STATS_KEYS`` are fetched data, not edits, and publish at once.
 
-    Called by the board's constructor, after AutonaActions.SeedFreshBoard --
-    a registration made first would hold back the seed itself. A board
-    that is not built is not held: nothing would ever apply its edits (the
-    反映 button is on the board, and the Web UI has none), and the seed
-    written when the board is built would wipe them. Holding the unbuilt
-    board from startup was ADR-005 S2 decision 7, withdrawn in S2c for that
-    reason; the routes that edit a board widget-side build it first.
+    Called by AutonaActions.EnsureBoard (with `panel`: the desktop's first
+    use of a board), after AutonaActions.SeedFreshBoard -- a registration
+    made first would hold back the seed itself. The board's constructor
+    registered it until ADR-005 S4y, in the same save cycle but after the
+    widgets were built (they write nothing as they are, ADR-005 S4t, so the
+    earlier point holds back nothing more). A board that is not ensured is
+    not held: nothing would ever apply its edits (the 反映 button is on the
+    board, and the Web UI has none), and the seed written when the board is
+    ensured would wipe them. Holding the unbuilt board from startup was
+    ADR-005 S2 decision 7, withdrawn in S2c for that reason; the routes that
+    edit a board widget-side build it first.
 
     Idempotent (``HoldSubtree`` keeps a set). Board 3 (crew) is not held:
     the crew board publishes as it goes.
@@ -896,11 +900,22 @@ def HoldBoard(number):
     StateManager.HoldSubtree(f"{SCORE_ROOT}.{number}", exempt=STATS_KEYS)
 
 
+def ReleaseBoard(number):
+    """Take a board's ``score.{number}`` out from behind the 反映 gate
+    (``StateManager.ReleaseSubtree``): what was pending is published, and
+    edits publish as they go again. For a board whose making or drawing
+    failed (AutonaActions.ForgetBoard), which no 反映 button would ever
+    apply. A board that is not held is left alone.
+    """
+    StateManager.ReleaseSubtree(f"{SCORE_ROOT}.{number}")
+
+
 def PublishDisplayOptions():
     """Re-publish all eight display options from their persisted defaults.
 
-    Run when the desktop builds a 1v1 / team board
-    (AutonaScoreboardManager.EnsureScoreboard), which is what the
+    Run when the desktop first uses a 1v1 / team board
+    (AutonaActions.EnsureBoard with `panel`, from
+    AutonaScoreboardManager.EnsureScoreboard), which is what the
     "SettingsManager is the source of truth, StateManager is what the
     overlays render" mirror rests on: whatever a previous session left in
     program_state.json is brought back in line with the settings file the
@@ -922,8 +937,9 @@ def PublishDisplayOptions():
 def ResetScoreRoot():
     """Drop the whole ``score`` subtree.
 
-    Run once per launch, from ``AutonaScoreboardManager.__init__`` -- i.e.
-    before any board is built -- so a program_state.json written by an older
+    Run once per launch, through ``AutonaActions.ResetBoards`` (from
+    ``AutonaScoreboardManager.__init__`` and the headless shell's seed) --
+    i.e. before any board is built -- so a program_state.json written by an older
     multi-scoreboard build cannot leave boards behind that no widget owns.
     It is a subtree lifecycle operation like ``SeedBoard()`` above and lives
     next to it for the same reason: ``score`` is a schema name, and the
