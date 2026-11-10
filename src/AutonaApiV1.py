@@ -49,6 +49,7 @@ from .core import Top8Model as top8
 from .core import Top8Service
 from .core import TournamentMediaService as tournamentMedia
 from .core import TournamentService as tournaments
+from .core.CrewBattleService import CrewBattleService
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.GameTrackerService import TEAM_1, TEAM_2, TIE, UNREPORTED
 from .core.TournamentInfoService import TournamentInfoService
@@ -134,20 +135,48 @@ def validate_scoreboard(n):
 
 
 def require_board_12(n):
-    """Write ops: only board 1 (1v1) and 2 (team) are in scope.
-
-    Board 3 (crew) is a different widget class with different controls and is
-    out of initial scope (spec §1.1 / §2.12); board1/2-only operations are
-    explicitly rejected on it rather than crashing.
+    """Board 1 (1v1) and 2 (team) only: what a crew board has no such thing
+    for (player cards, set loading, statistics, a score of its own: spec
+    §2.12). Rejected on board 3 rather than crashing.
     """
     validate_scoreboard(n)
-    if n == 3:
+    if n == WebOps.CREW_BOARD:
         raise ApiError(
             INVALID_ARGUMENT,
             "crew board (3) does not support this operation",
             400,
         )
     return n
+
+
+def require_crew_board(n):
+    """Board 3 only: a roster of members with stocks (ADR-005 S4w). Boards
+    1/2 have none, and are rejected as board 3 is from their operations."""
+    validate_scoreboard(n)
+    if n != WebOps.CREW_BOARD:
+        raise ApiError(
+            INVALID_ARGUMENT, "only the crew board (3) has this operation", 400)
+    return n
+
+
+def _crew_member(n, t, m):
+    """A member's address: the crew board, team 1 or 2, member 1..MAX_MEMBERS.
+    All nine rows exist whatever the member count is, which only decides how
+    many are shown and counted; past them there is no such member."""
+    require_crew_board(n)
+    _validate_team(t)
+    if m < 1:
+        raise ApiError(INVALID_ARGUMENT, "member must be 1 or greater", 400)
+    if m > CrewBattleService.MAX_MEMBERS:
+        raise ApiError(NOT_FOUND, f"team {t} has no member {m}", 404)
+
+
+def _crew_not_built(n):
+    """Whether `n` is the crew board and it is not built yet (the desktop's
+    lazy board; never headless). Its state is only the skeleton, and a board
+    built now would be built fresh: a reset has nothing to do, and no reason
+    to build it."""
+    return n == WebOps.CREW_BOARD and not WebOps.boardHost.Built(n)
 
 
 def _validate_team(t):
@@ -470,9 +499,8 @@ def health():
 def get_scoreboard(n):
     validate_scoreboard(n)
     data = _board_data(WebOps.get_scoreboard(n))
-    # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
-    # committed view above; CrewBattleService's for board 3, in both shells
-    # since ADR-005 S3e-2), read through the legacy operation so both routes
+    # The live swap flag (score.{n}.teamsSwapped -- on boards 1/2, not the
+    # committed view above), read through the legacy operation so both routes
     # answer the same. Tolerate a board that cannot answer.
     try:
         data["swapped"] = WebOps.get_swap(n) == "True"
@@ -519,6 +547,19 @@ def get_scoreboard_follow(n):
     return ok(data=WebOps.get_follow(n), revision=current_revision())
 
 
+@api_v1.route("/scoreboards/<int:n>/post")
+@api_handler
+def get_scoreboard_post(n):
+    # The crew board's X post, as its button builds it (ADR-005 S4w):
+    # {"text", "missing"}, `missing` naming what the button refuses to post
+    # without ("team1", "team2", "round"; empty when it can). A page reads this
+    # in the click that opens the X window, as GET /result/post. Boards 1/2
+    # have their own post (a thumbnail goes with it), not this. Only what
+    # /state already answers anyone, so READ; reading builds no board.
+    require_crew_board(n)
+    return ok(data=WebOps.get_crew_post(), revision=current_revision())
+
+
 @api_v1.route("/games")
 @api_handler
 def get_games():
@@ -535,6 +576,16 @@ def get_current_game():
 @api_handler
 def get_match_names():
     return ok(data=WebOps.get_match_names())
+
+
+@api_v1.route("/match-names/candidates")
+@api_handler
+def get_match_name_candidates():
+    # What the crew board's editable combos offer: {"phase", "pool", "match"},
+    # lists in their order (ADR-005 S4w). /match-names is the terms as they
+    # are, by key and with their templates: the ladder of round names is not
+    # in it.
+    return ok(data=WebOps.get_match_name_candidates())
 
 
 @api_v1.route("/characters")
@@ -898,13 +949,14 @@ def score_adjust(n, t):
 @api_v1.route("/scoreboards/<int:n>/score:reset", methods=["POST"])
 @write_op("score.reset")
 def score_reset(n):
-    require_board_12(n)
-    # Boards 1/2 only (require_board_12), so this is AutonaActions.ResetScore:
-    # a held write, applied synchronously but not published. The revision
-    # below is therefore the last published one and does not move until 反映
-    # -- same as score:adjust above, not the "accurate after the GUI hop"
-    # case the crew path would have been.
-    WebOps.reset_scores(n)
+    validate_scoreboard(n)
+    # Boards 1/2: AutonaActions.ResetScore, a held write, applied synchronously
+    # but not published. The revision below is therefore the last published one
+    # and does not move until 反映 -- same as score:adjust above. Board 3: every
+    # member back to full stocks and nobody playing (the board's Reset Stocks,
+    # CrewBattleService.ResetStocks), published at once.
+    if not _crew_not_built(n):
+        WebOps.reset_scores(n)
     return ok(revision=current_revision())
 
 
@@ -925,7 +977,9 @@ def stats_refresh(n):
 @api_v1.route("/scoreboards/<int:n>:swap-teams", methods=["POST"])
 @write_op("swap-teams")
 def swap_teams(n):
-    require_board_12(n)
+    # All three boards. On board 3 the crews' colours cross over with them
+    # (CrewBattleService.SwapTeams, the board's own swap): spec §6.3.
+    validate_scoreboard(n)
     WebOps.swap_teams(n)
     return ok(revision=current_revision())
 
@@ -941,21 +995,72 @@ def apply_changes(n):
 @api_v1.route("/scoreboards/<int:n>/teams/<int:t>/color", methods=["POST"])
 @write_op("team.color")
 def team_color(n, t):
-    require_board_12(n)
+    validate_scoreboard(n)
     _validate_team(t)
     body = _json_body()
     color = body.get("color")
     if not isinstance(color, str) or not _COLOR_RE.match(color):
         raise ApiError(INVALID_ARGUMENT, "color must be a hex string like #FF0000", 400)
-    WebOps.team_color(n, t, color)
+    if n == WebOps.CREW_BOARD:
+        # As the crew's colour button keeps it, whichever way it was spelled.
+        WebOps.crew_team_color(t, _color_rrggbb(color))
+    else:
+        WebOps.team_color(n, t, color)
     return ok(revision=current_revision())
+
+
+def _crew_int(body, name, low, high):
+    value = body[name]
+    if not _is_index(value) or not low <= value <= high:
+        raise ApiError(INVALID_ARGUMENT,
+                       f"{name} must be an integer from {low} to {high}", 400)
+    return value
+
+
+def _crew_set_fields(body):
+    """PATCH set's body on the crew board, checked before anything is written:
+    a value the board's own inputs could not hold is refused, not rounded, and
+    `characters` / `losers` (what this board does not have) are refused, not
+    ignored -- answering OK for them would say something was done."""
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "nothing to set", 400)
+    fields = {}
+    for key, value in body.items():
+        if key in schema.SCORE_MATCH_FIELDS:
+            if not isinstance(value, str):
+                raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+            fields[key] = value
+        elif key == "bestOf":
+            fields[key] = _crew_int(
+                body, key, 0, CrewBattleService.BEST_OF_MAX)
+        elif key == "players":
+            fields[key] = _crew_int(
+                body, key, 1, CrewBattleService.MAX_MEMBERS)
+        elif key == "teamName":
+            team = value.get("team") if isinstance(value, dict) else None
+            name = value.get("value") if isinstance(value, dict) else None
+            # Nothing else in it either, as in the body itself.
+            if not _is_index(team) or team not in (1, 2) \
+                    or not isinstance(name, str) \
+                    or set(value) - {"team", "value"}:
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    "teamName must be {team: 1 or 2, value: a string}", 400)
+            fields[key] = (team, name)
+        else:
+            raise ApiError(
+                INVALID_ARGUMENT, f"the crew board has no field {key}", 400)
+    return fields
 
 
 @api_v1.route("/scoreboards/<int:n>/set", methods=["PATCH"])
 @write_op("set.update")
 def set_update(n):
-    require_board_12(n)
+    validate_scoreboard(n)
     body = _json_body()
+    if n == WebOps.CREW_BOARD:
+        WebOps.crew_update_set(_crew_set_fields(body))
+        return ok(revision=current_revision())
     kwargs = {}
     if "bestOf" in body:
         kwargs["bestOf"] = _require_int(body["bestOf"], "bestOf")
@@ -1182,6 +1287,86 @@ def player_swap(n, t):
     if not WebOps.swap_players(n, t, slots[0], slots[1]):
         raise ApiError(
             NOT_FOUND, f"team {t} does not have both players", 404)
+    return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/members/<int:m>", methods=["PATCH"])
+@write_op("crew.member.update", log_keys_only=True)
+def crew_member_update(n, t, m):
+    # Some of {"name": a string ("" empties the slot), "stock": 0..99 (the
+    # board's spinbox), "active": true (this member, one the board shows, is
+    # playing, in place of whoever was) or false (this member no longer is:
+    # a member the state has moved on from leaves the marker where it is)},
+    # in one save cycle: the
+    # crew board's member row (ADR-005 S4w). The state team, as every v1 team
+    # number; a swap moves the crews, not the columns. A name is logged by key
+    # only, as the player PATCH's are.
+    _crew_member(n, t, m)
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "one of name, stock, active is required", 400)
+    fields = {}
+    for key, value in body.items():
+        if key == "name":
+            if not isinstance(value, str):
+                raise ApiError(INVALID_ARGUMENT, "name must be a string", 400)
+        elif key == "stock":
+            value = _crew_int(body, key, 0, CrewBattleService.STOCK_MAX)
+        elif key == "active":
+            if not isinstance(value, bool):
+                raise ApiError(
+                    INVALID_ARGUMENT, "active must be true or false", 400)
+        else:
+            raise ApiError(
+                INVALID_ARGUMENT, f"unknown member field: {key}", 400)
+        fields[key] = value
+    # Only a member the board shows can be marked as playing: Qt hides the
+    # rows past the count, radio button and all. The rest (a name, a stock,
+    # `active: false` for a marker a lowered count left behind) goes to any
+    # row. Read before the write, not under its lock: a count lowered in
+    # between leaves what marking first and lowering after leaves (the two
+    # writes commute), as Qt can.
+    if fields.get("active") is True:
+        shown = WebOps.crew_member_count()
+        if m > shown:
+            raise ApiError(
+                INVALID_ARGUMENT,
+                f"member {m} is not shown (the crew has {shown}): only a "
+                "shown member can be playing", 400)
+    WebOps.crew_update_member(t, m, fields)
+    return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/members/<int:m>/stock:adjust",
+    methods=["POST"])
+@write_op("crew.member.stock")
+def crew_member_stock_adjust(n, t, m):
+    # {"delta"}: take stocks from / give them to one member, kept to 0..99
+    # (ADR-005 S4w). A relative operation, so an Idempotency-Key is applied
+    # once, as score:adjust's (spec §2.9). 0 changes nothing, and builds nothing.
+    _crew_member(n, t, m)
+    body = _json_body()
+    delta = body.get("delta")
+    if not _is_index(delta):
+        raise ApiError(INVALID_ARGUMENT, "delta must be an integer", 400)
+
+    def apply():
+        if delta != 0:
+            WebOps.crew_member_stock(n, t, m, delta)
+
+    key = request.headers.get("Idempotency-Key")
+    if key:
+        if _idem.claim(key):
+            try:
+                apply()
+            except Exception:
+                _idem.release(key)
+                raise
+    else:
+        apply()
     return ok(revision=current_revision())
 
 
@@ -2015,7 +2200,10 @@ def _require_confirm(body):
 @api_v1.route("/scoreboards/<int:n>:clear", methods=["POST"])
 @write_op("clear")
 def clear(n):
-    require_board_12(n)
+    # Board 3: the reset of :reset-match, one member a crew, every row emptied
+    # (the crews' names and colours stay). Not a reset _crew_not_built skips:
+    # one member a crew is not what a fresh board has.
+    validate_scoreboard(n)
     _require_confirm(_json_body())
     WebOps.clear_all(n)
     return ok(revision=current_revision())
@@ -2036,18 +2224,22 @@ def reset_all(n):
 @api_v1.route("/scoreboards/<int:n>:reset-players", methods=["POST"])
 @write_op("reset-players")
 def reset_players(n):
-    require_board_12(n)
+    # Board 3: every member row emptied, the count stays (ClearCrew).
+    validate_scoreboard(n)
     _require_confirm(_json_body())
-    WebOps.reset_players(n)
+    if not _crew_not_built(n):
+        WebOps.reset_players(n)
     return ok(revision=current_revision())
 
 
 @api_v1.route("/scoreboards/<int:n>:reset-match", methods=["POST"])
 @write_op("reset-match")
 def reset_match(n):
-    require_board_12(n)
+    # Board 3: full stocks and nobody playing, the match bar and the best of.
+    validate_scoreboard(n)
     _require_confirm(_json_body())
-    WebOps.reset_match(n)
+    if not _crew_not_built(n):
+        WebOps.reset_match(n)
     return ok(revision=current_revision())
 
 

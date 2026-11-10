@@ -67,8 +67,8 @@ class AutonaCrewBattleWidget(QWidget):
         # core Step 5, instalment 4; the operations read the board from the
         # state since ADR-005 S3e-2). The service is per board, like
         # AutonaScoreboardWidget's SetLoadService; the Web makes its own for
-        # the same board, which is the same thing (only the swap flag is
-        # kept outside the state, and it is the board's, not the instance's).
+        # the same board, which is the same thing (it keeps nothing outside
+        # the state).
         self.crew = CrewBattleService(self.scoreboardNumber)
 
         # Per-team widget registries (index 0 = team 1, 1 = team 2).
@@ -119,8 +119,8 @@ class AutonaCrewBattleWidget(QWidget):
 
     @property
     def teamsSwapped(self) -> bool:
-        """Whether the crews are shown swapped (core's, see
-        CrewBattleService._swapped)."""
+        """Whether the crews are shown swapped (score.3.teamsSwapped, see
+        CrewBattleService.teamsSwapped)."""
         return self.crew.teamsSwapped
 
     # ── UI construction ────────────────────────────────────────────────
@@ -196,19 +196,16 @@ class AutonaCrewBattleWidget(QWidget):
         phaseRow = QHBoxLayout()
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Phase")))
         self.phaseCombo = self._makePhaseCombo(
-            schema.PHASE_KEY, AutonaLocaleHelper.phaseNames)
+            schema.PHASE_KEY,
+            candidates=AutonaLocaleHelper.GetPhaseNameCandidates())
         phaseRow.addWidget(self.phaseCombo, 1)
         phaseRow.addSpacing(12)
         # Pool (phase group) is a separate state key (score.3.pool), same as
-        # the 1v1/team boards. Candidates come from the "group" template
-        # (_makePhaseCombo skips templated entries in the names dict).
+        # the 1v1/team boards. Candidates come from the "group" template.
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Pool")))
-        groupTemplate = AutonaLocaleHelper.phaseNames.get("group", "")
-        poolCandidates = ([groupTemplate.format(letter)
-                           for letter in ["A", "B", "C", "D"]]
-                          if "{0}" in groupTemplate else [])
         self.poolCombo = self._makePhaseCombo(
-            schema.POOL_KEY, candidates=poolCandidates)
+            schema.POOL_KEY,
+            candidates=AutonaLocaleHelper.GetPoolNameCandidates())
         phaseRow.addWidget(self.poolCombo, 1)
         phaseRow.addSpacing(12)
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Match")))
@@ -313,24 +310,18 @@ class AutonaCrewBattleWidget(QWidget):
 
         return group
 
-    def _makePhaseCombo(self, field: str, names: dict = None,
-                        candidates: list = None) -> QComboBox:
+    def _makePhaseCombo(self, field: str, candidates: list) -> QComboBox:
         # Editable combo seeded with the localized phase/round terms (so the
-        # user can pick a term or type a custom value). Pass a prebuilt
-        # `candidates` list (match names) or a `names` dict (phase names).
-        # `field` is one of StateSchema.SCORE_MATCH_FIELDS — the same three
+        # user can pick a term or type a custom value). `candidates` is
+        # AutonaLocaleHelper's, as GET /api/v1/match-names/candidates answers
+        # them. `field` is one of StateSchema.SCORE_MATCH_FIELDS — the same three
         # keys the 1v1 / team boards' match bar writes, through the same
         # operation, so board 3 is not a second reading of what "phase" means.
         combo = QComboBox()
         combo.setEditable(True)
         combo.setMinimumWidth(110)
         combo.addItem("")
-        for val in (candidates or []):
-            if combo.findText(val) < 0:
-                combo.addItem(val)
-        for key, val in (names or {}).items():
-            if not isinstance(val, str) or "{0}" in val or "indicator" in str(key):
-                continue
+        for val in candidates:
             if combo.findText(val) < 0:
                 combo.addItem(val)
         combo.setCurrentText("")
@@ -623,77 +614,34 @@ class AutonaCrewBattleWidget(QWidget):
 
     # ── X (Twitter) post ───────────────────────────────────────────────
 
-    def _teamMemberNames(self, team_n: int) -> list[str]:
-        # Named members within the team's visible roster (memberNum), in order.
-        member_num = int(
-            StateManager.Get(
-                self._key("team", team_n, schema.CREW_MEMBER_NUM_KEY))
-            or MAX_MEMBERS)
-        names = []
-        for m in range(1, member_num + 1):
-            name = (StateManager.Get(
-                self._key("team", team_n, "player", m,
-                          schema.PLAYER_TAG_KEY)) or "").strip()
-            if name:
-                names.append(name)
-        return names
-
     def PostToX(self):
-        # Mirror AutonaScoreboardWidget.PostToX: build a tweet body from the
-        # current crew state and open X's web intent. Text-only — crew has no
-        # thumbnail generator, so (unlike board 1) no image is copied first.
+        # Mirror AutonaScoreboardWidget.PostToX: the tweet body comes from the
+        # crew state (core's, as GET /api/v1/scoreboards/3/post answers it)
+        # and opens X's web intent. Both teams need a member name and a round
+        # name is set, or the operator is told what is empty.
         try:
-            tournament_name = StateManager.Get(
-                "tournamentInfo.tournamentName", "") or ""
-            phase = (StateManager.Get(
-                self._key(schema.PHASE_KEY)) or "").strip()
-            match = (StateManager.Get(
-                self._key(schema.MATCH_KEY)) or "").strip()
-
-            # Validate: both teams need a member name and a round name is set.
-            missing = []
-            if not self._teamMemberNames(1):
-                missing.append(QApplication.translate("app", "Team 1 player name"))
-            if not self._teamMemberNames(2):
-                missing.append(QApplication.translate("app", "Team 2 player name"))
-            if not (phase or match):
-                missing.append(QApplication.translate("app", "Round name"))
+            text, missing = self.crew.PostText()
             if missing:
+                labels = {
+                    CrewBattleService.POST_MISSING_TEAM_1:
+                        QApplication.translate("app", "Team 1 player name"),
+                    CrewBattleService.POST_MISSING_TEAM_2:
+                        QApplication.translate("app", "Team 2 player name"),
+                    CrewBattleService.POST_MISSING_ROUND:
+                        QApplication.translate("app", "Round name"),
+                }
                 msgBox = QMessageBox()
                 msgBox.setWindowIcon(QIcon(UI.icon_path("icon.png")))
                 msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
                 msgBox.setText(QApplication.translate(
                     "app",
                     "Cannot post to X: the following fields are empty."))
-                msgBox.setInformativeText("\n".join(f"- {m}" for m in missing))
+                msgBox.setInformativeText(
+                    "\n".join(f"- {labels[m]}" for m in missing))
                 msgBox.setIcon(QMessageBox.Warning)
                 msgBox.exec()
                 return
 
-            def team_line(team_n):
-                team_name = (StateManager.Get(
-                    self._key("team", team_n,
-                              schema.TEAM_NAME_KEY)) or "").strip()
-                member_str = " / ".join(self._teamMemberNames(team_n))
-                if team_name and member_str:
-                    return f"{team_name} ({member_str})"
-                return team_name or member_str or "???"
-
-            round_line = f"[{phase}]" if phase else ""
-            if match:
-                round_line = f"{round_line} - {match}" if round_line else match
-
-            parts = []
-            if tournament_name:
-                parts.append(tournament_name)
-            if round_line:
-                parts.append(round_line)
-            parts.append("")
-            parts.append(team_line(1))
-            parts.append("vs")
-            parts.append(team_line(2))
-
-            text = "\n".join(parts)
             url = "https://twitter.com/intent/tweet?text=" + \
                 urllib.parse.quote(text)
             webbrowser.open(url)

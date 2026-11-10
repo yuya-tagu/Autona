@@ -133,6 +133,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/layouts/selected/board/obs-path', 'api_v1.get_board_files', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/board:reveal', 'api_v1.reveal_board_file', 'OPTIONS,POST'),
     ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/match-names/candidates', 'api_v1.get_match_name_candidates', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players', 'api_v1.get_players', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players', 'api_v1.player_save', 'OPTIONS,PUT'),
     ('/api/v1/players/entrants', 'api_v1.get_player_entrants', 'GET,HEAD,OPTIONS'),
@@ -140,12 +141,15 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/follow', 'api_v1.get_scoreboard_follow', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/pending', 'api_v1.get_scoreboard_pending', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>/post', 'api_v1.get_scoreboard_post', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/set', 'api_v1.set_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/stages/<int:game>', 'api_v1.stage_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/stats:refresh', 'api_v1.stats_refresh', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/color', 'api_v1.team_color', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/members/<int:m>', 'api_v1.crew_member_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/members/<int:m>/stock:adjust', 'api_v1.crew_member_stock_adjust', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>', 'api_v1.player_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:clear', 'api_v1.player_clear', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load', 'api_v1.player_load', 'OPTIONS,POST'),
@@ -553,7 +557,8 @@ def test_the_classification_follows_the_rules():
     # read and the pending values, guarded for the unpublished edits they carry
     # (S4u: v1 64 of 96), and the set selection's 4 fetches and the follow's 2
     # writes, with its 4 reads: tags and entrant names, as get_set already reads
-    # (S4v: v1 70 of 106).
+    # (S4v: v1 70 of 106), and a crew member's 2 writes, the crew board's X post
+    # and what its combos offer (S4w: v1 72 of 110).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -562,8 +567,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 70
-    assert len(EXPECTED_API_V1_ROUTES) == 106
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 72
+    assert len(EXPECTED_API_V1_ROUTES) == 110
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

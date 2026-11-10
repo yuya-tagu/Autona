@@ -266,8 +266,8 @@ def test_the_crew_board_does_not_write_the_state_directly():
     board 3 shares with the others, and TournamentInfoService for 表示大会名),
     and this is what stops the thirty-first from being written here.
 
-    Reads are deliberately not covered: PostToX builds its tweet body out of
-    the state, and _SyncTeamColors renders the team colour.
+    Reads are deliberately not covered: _SyncTeamColors renders the team
+    colour.
     """
     calls = _state_write_calls("src/AutonaCrewBattleWidget.py")
     assert calls == [], (

@@ -7,19 +7,34 @@ import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 
 // Fetched once per page load; the candidates are static locale data.
-let matchNamesCache = null;
+let candidatesCache = null;
+
+/**
+ * The three lists of GET /api/v1/match-names/candidates as Autocomplete
+ * takes its `options`: arrays of strings, whatever the answer holds. Not
+ * GET /api/v1/match-names: that is the terms by key (objects), and an
+ * Autocomplete handed an object throws when its popup opens, taking the
+ * whole page down.
+ */
+export function candidateLists(data) {
+    const list = (value) => (Array.isArray(value)
+        ? value.filter((name) => typeof name === "string")
+        : []);
+    return {phase: list(data?.phase), pool: list(data?.pool), match: list(data?.match)};
+}
 
 /**
  * Match metadata bar, mirroring the desktop scoreBar row above the team
- * columns: editable Phase / Match (with locale candidates from
- * GET /api/v1/match-names) and Best Of. Every field submits on commit — there
- * is no separate submit button (desktop editingFinished parity).
+ * columns: editable Phase / Pool / Match (with the locale candidates the
+ * desktop's combos offer, from GET /api/v1/match-names/candidates) and Best
+ * Of. Every field submits on commit — there is no separate submit button
+ * (desktop editingFinished parity).
  */
 export default function MatchInfoBar({scoreboardNumber, phase, pool, match, bestOf, action}) {
     const [localPhase, setLocalPhase] = React.useState(phase ?? "");
     const [localPool, setLocalPool] = React.useState(pool ?? "");
     const [localMatch, setLocalMatch] = React.useState(match ?? "");
-    const [candidates, setCandidates] = React.useState({phase: [], match: []});
+    const [candidates, setCandidates] = React.useState(() => candidateLists(null));
     const {run} = useApiAction();
 
     React.useEffect(() => { setLocalPhase(phase ?? ""); }, [phase]);
@@ -27,17 +42,14 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
     React.useEffect(() => { setLocalMatch(match ?? ""); }, [match]);
 
     React.useEffect(() => {
-        if (matchNamesCache) {
-            setCandidates(matchNamesCache);
+        if (candidatesCache) {
+            setCandidates(candidatesCache);
             return;
         }
-        apiGetJson('/api/v1/match-names')
+        apiGetJson('/api/v1/match-names/candidates')
             .then(({data}) => {
-                matchNamesCache = {
-                    phase: data?.phase ?? [],
-                    match: data?.match ?? [],
-                };
-                setCandidates(matchNamesCache);
+                candidatesCache = candidateLists(data);
+                setCandidates(candidatesCache);
             })
             .catch(console.error); // candidates are a nicety; fail quietly
     }, []);
@@ -96,7 +108,7 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
             <Autocomplete
                 freeSolo
                 size="small"
-                options={[]}
+                options={candidates.pool}
                 inputValue={localPool}
                 onInputChange={(e, v) => setLocalPool(v ?? "")}
                 onChange={(e, v) => submitPool(v)}

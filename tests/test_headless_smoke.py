@@ -5,6 +5,7 @@ directory on a free port (ADR-005 S3c; the first of S3d's smoke checks):
 
 - it serves: /api/v1/health, the state over Socket.IO, a core write
   (score:adjust) reaching the state and the Socket.IO delta stream;
+- the crew board's routes, on the board it seeds (ADR-005 S4w);
 - the two shell operations, the desktop's alone (ADR-005 S3e-9: the set
   selection window and the thumbnail), answer 503 UNAVAILABLE; the Top 8
   import, core's, is refused only for want of a tournament;
@@ -22,6 +23,7 @@ activated by it. The process is stopped by its PID only, whatever happens.
 _launch() and _wait_until_serving() also start the headless app for the
 Playwright E2E (web/e2e/headless_server.py, ADR-005 S3d).
 """
+import http.client
 import json
 import os
 import signal
@@ -84,7 +86,12 @@ def _wait_until_serving(process, port, timeout=90):
         try:
             if _request(port, "/api/v1/health")[0] == 200:
                 return True
-        except OSError:
+        # HTTPException: before anything listens, a connection to a free port
+        # can be made to itself (TCP's simultaneous open, when the ephemeral
+        # source port it is given is the port itself), and reads back its
+        # own request as the answer (BadStatusLine: "GET /api/v1/health
+        # HTTP/1.1"). Not serving yet, as a refused connection is.
+        except (OSError, http.client.HTTPException):
             pass
         time.sleep(0.25)
     return False
@@ -162,6 +169,28 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
             status, body = _request(port, "/api/v1/state")
             assert body["data"]["score"]["1"]["team"]["1"]["score"] == 2
 
+            # The crew board's routes need no board either (ADR-005 S4w), and
+            # the combos' candidates are there without the combos.
+            status, body = _request(
+                port, "/api/v1/scoreboards/3/teams/1/members/1", "PATCH",
+                {"name": "Crew One", "stock": 2, "active": True})
+            assert (status, body["ok"]) == (200, True), body
+            status, body = _request(
+                port, "/api/v1/scoreboards/3:swap-teams", "POST", {})
+            assert (status, body["ok"]) == (200, True), body
+            status, body = _request(port, "/api/v1/state")
+            crew = body["data"]["score"]["3"]
+            assert crew["teamsSwapped"] is True
+            assert crew["team"]["2"]["player"]["1"]["name"] == "Crew One"
+            assert crew["team"]["2"]["player"]["1"]["stock"] == 2
+            assert crew["team"]["2"]["activeMember"] == "1"
+            assert crew["team"]["2"]["score"] == 2
+            status, body = _request(port, "/api/v1/scoreboards/3/post")
+            assert "Crew One" in body["data"]["text"]
+            status, body = _request(port, "/api/v1/match-names/candidates")
+            assert all(body["data"][field] for field in (
+                "phase", "pool", "match")), body
+
             # The Top 8 import is core's (ADR-005 S3e-8): headless it is
             # refused only for want of a tournament.
             status, body = _request(port, "/api/v1/bracket:refresh", "POST",
@@ -228,3 +257,26 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
         exported = json.loads((cwd / "out" / "program_state.json").read_text(
             encoding="utf-8"))
         assert exported["score"]["1"]["team"]["1"]["score"] == 3
+
+
+def test_waiting_reads_a_connection_answered_by_itself_as_not_serving(
+        monkeypatch):
+    """What a connection made to itself reads back -- its own request, so no
+    status line -- is not the server yet: the wait goes on, as it does for
+    a refused connection (the E2E's start-up waits the same way)."""
+    answers = [http.client.BadStatusLine("GET /api/v1/health HTTP/1.1"),
+               ConnectionRefusedError(), (200, {"ok": True})]
+
+    def request(port, path, **_kwargs):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    class Running:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(sys.modules[__name__], "_request", request)
+    assert _wait_until_serving(Running(), port=1, timeout=30) is True
+    assert answers == []

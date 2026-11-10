@@ -53,8 +53,9 @@ What each publishes is the widget path's, recorded before the move
 (tests/fixtures/crew_operations/golden.json).
 
 Import side effects: none (agent-pitfalls #1). The service is cheap and
-stateless but for the swap flag (``teamsSwapped``, kept per board on the
-class), so the board's widget keeps one and the Web makes one per call.
+keeps nothing of its own -- the swap flag is ``score.{n}.teamsSwapped``, as on
+boards 1/2 (ADR-005 S4w) -- so the board's widget keeps one and the Web makes
+one per call.
 """
 from typing import NamedTuple
 
@@ -100,15 +101,11 @@ class CrewBattleService:
     STOCK_MAX = 99
     BEST_OF_MAX = 99
     TEAMS = (1, 2)
-
-    # Board number -> whether its two crews are shown swapped. Not a state
-    # key: score.3 has never carried one (boards 1/2's `teamsSwapped` is
-    # theirs since S2c), and adding it would change what program_state.json
-    # holds. The board's widget used to keep it; the Web reads it
-    # (`get_swap`, v1's `swapped`) with or without a widget now, so it lives
-    # here, per board rather than per instance. Written under
-    # StateManager.lock (SwapTeams), cleared by the launch write.
-    _swapped = {}
+    # What PostText can find missing for the X post: a crew with no named
+    # member in its roster, and a board with no phase and no round.
+    POST_MISSING_TEAM_1 = "team1"
+    POST_MISSING_TEAM_2 = "team2"
+    POST_MISSING_ROUND = "round"
 
     def __init__(self, scoreboardNumber=3):
         self.scoreboardNumber = scoreboardNumber
@@ -254,6 +251,57 @@ class CrewBattleService:
                 self.SetMemberNum(value)
         return True
 
+    def RenameMember(self, team, member, name) -> bool:
+        """One member's name as the operator typed it. True if it changed.
+
+        ``SetMemberName`` with what the board's name field checks before it
+        calls it: a team other than 1/2 or a member outside 1..MAX_MEMBERS is
+        ignored, and the name the member already has writes nothing. An
+        empty name clears the slot, which takes its stocks off the total.
+        """
+        address = self._ValidMember(team, member)
+        if address is None:
+            logger.debug(f"Crew: ignoring member {member} of team {team}")
+            return False
+        team, member = address
+        text = "" if name is None else str(name)
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                current = StateManager.Get(
+                    self._memberKey(team, member, schema.PLAYER_TAG_KEY), "")
+                if text == ("" if current is None else str(current)):
+                    return False
+                self.SetMemberName(team, member, text)
+        return True
+
+    def UpdateMember(self, team, member, name=None, stock=None,
+                     active=None) -> bool:
+        """Some of one member's fields -- `name`, `stock`, `active` (True:
+        this member is playing; False: this member no longer is) -- in one
+        save cycle, and read and written under one hold of the lock. None
+        leaves a field alone. True if anything changed: the same values again
+        write nothing, and a team other than 1/2 or a member outside
+        1..MAX_MEMBERS is ignored as a whole.
+
+        Checked here, not left to the writes below: ``SelectActiveMember``
+        reads 0 (or less) as "nobody", so `active=True` for member 0 or -5
+        would take the marker off whoever is playing."""
+        if self._ValidMember(team, member) is None:
+            logger.debug(f"Crew: ignoring member {member} of team {team}")
+            return False
+        written = False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                if name is not None:
+                    written |= self.RenameMember(team, member, name)
+                if stock is not None:
+                    written |= self.SetMemberStock(team, member, stock)
+                if active is True:
+                    written |= self.SelectActiveMember(team, member)
+                elif active is False:
+                    written |= self.ReleaseActiveMember(team, member)
+        return written
+
     # ── reading the board back ───────────────────────────────────────────
 
     def MemberNum(self) -> int:
@@ -304,6 +352,73 @@ class CrewBattleService:
                     stock=stocks[member - 1],
                     active=member == active)
                 for member in range(1, self.MAX_MEMBERS + 1)))
+
+    # ── the X post ───────────────────────────────────────────────────────
+
+    def _PostMemberNames(self, team) -> list:
+        # The named members within the crew's roster, in order. A crew with
+        # no count looks at every row (what the board's post always did).
+        memberNum = self._asInt(
+            StateManager.Get(
+                self._teamKey(team, schema.CREW_MEMBER_NUM_KEY)), 0)
+        names = []
+        for member in range(1, (memberNum or self.MAX_MEMBERS) + 1):
+            name = StateManager.Get(
+                self._memberKey(team, member, schema.PLAYER_TAG_KEY))
+            name = str(name or "").strip()
+            if name:
+                names.append(name)
+        return names
+
+    def PostText(self) -> tuple:
+        """The board's X post: (its text, what is missing for it), read
+        under one hold of the lock. `missing` is a list of the POST_MISSING_*
+        in this order; the board's button refuses to post while it has any,
+        and says which. Text only: unlike board 1, a crew has no thumbnail to
+        copy first."""
+        def clean(key):
+            value = StateManager.Get(key)
+            return str(value or "").strip()
+
+        with StateManager.lock:
+            # Text, whatever the state holds (a name typed as a number comes
+            # back as one), and not stripped: what the board's post always
+            # took.
+            tournament = str(StateManager.Get(
+                f"{schema.TOURNAMENT_INFO_ROOT}."
+                f"{schema.TOURNAMENT_NAME_KEY}") or "")
+            phase = clean(f"{self.prefix}.{schema.PHASE_KEY}")
+            match = clean(f"{self.prefix}.{schema.MATCH_KEY}")
+            members = {team: self._PostMemberNames(team)
+                       for team in self.TEAMS}
+            teamNames = {team: clean(self._teamKey(team, schema.TEAM_NAME_KEY))
+                         for team in self.TEAMS}
+
+        missing = []
+        if not members[1]:
+            missing.append(self.POST_MISSING_TEAM_1)
+        if not members[2]:
+            missing.append(self.POST_MISSING_TEAM_2)
+        if not (phase or match):
+            missing.append(self.POST_MISSING_ROUND)
+
+        def teamLine(team):
+            roster = " / ".join(members[team])
+            if teamNames[team] and roster:
+                return f"{teamNames[team]} ({roster})"
+            return teamNames[team] or roster or "???"
+
+        roundLine = f"[{phase}]" if phase else ""
+        if match:
+            roundLine = f"{roundLine} - {match}" if roundLine else match
+
+        parts = []
+        if tournament:
+            parts.append(tournament)
+        if roundLine:
+            parts.append(roundLine)
+        parts.extend(["", teamLine(1), "vs", teamLine(2)])
+        return "\n".join(parts), missing
 
     # ── a member's stocks, the active member ─────────────────────────────
 
@@ -530,18 +645,28 @@ class CrewBattleService:
                     for index, crew in enumerate(teams, start=1)]
 
     @property
+    def _swapKey(self) -> str:
+        return f"{self.prefix}.teamsSwapped"
+
+    @property
     def teamsSwapped(self) -> bool:
-        """Whether this board's crews are shown swapped (see `_swapped`)."""
-        return self._swapped.get(self.scoreboardNumber, False)
+        """Whether this board's crews are shown swapped: the same key as
+        boards 1/2 (ADR-005 S4w), so a client sees it change in the delta. No
+        fresh board has it (SeedBoard empties the subtree): absent is False."""
+        return bool(StateManager.Get(self._swapKey, False))
 
     def _RepublishBoard(self, change) -> list:
         """Read both crews, hand each to `change(team, crew)` and publish
         what comes back as the whole board, in one save cycle -- the bulk
-        operations below. Returns the two totals."""
+        operations below. Returns the two totals. A board `change` leaves as
+        it is writes nothing: a reset sent twice costs no save cycle."""
         with StateManager.SaveBlock():
             with StateManager.lock:
-                teams = [change(team, self.ReadTeam(team))
-                         for team in self.TEAMS]
+                current = [self.ReadTeam(team) for team in self.TEAMS]
+                teams = [change(team, crew)
+                         for team, crew in zip(self.TEAMS, current)]
+                if teams == current:
+                    return [self.TeamTotal(team) for team in self.TEAMS]
                 return self.PublishBoard(teams, self.MemberNum())
 
     def SwapTeams(self) -> list:
@@ -557,7 +682,7 @@ class CrewBattleService:
             with StateManager.lock:
                 first, second = (self.ReadTeam(team) for team in self.TEAMS)
                 totals = self.PublishBoard([second, first], self.MemberNum())
-                self._swapped[self.scoreboardNumber] = not self.teamsSwapped
+                StateManager.Set(self._swapKey, not self.teamsSwapped)
         return totals
 
     @classmethod
@@ -599,9 +724,6 @@ class CrewBattleService:
         """
         with StateManager.SaveBlock():
             with StateManager.lock:
-                # A fresh board is not swapped (the flag is not in the state
-                # this write rebuilds, see `_swapped`).
-                self._swapped.pop(self.scoreboardNumber, None)
                 StateManager.Set(f"{self.prefix}.{schema.PHASE_KEY}", "")
                 StateManager.Set(f"{self.prefix}.{schema.MATCH_KEY}", "")
                 self.SetBestOf(bestOf)

@@ -221,16 +221,19 @@ def test_the_crew_routes_answer_headless(headless):
     assert WebOps.get_swap(3) == "True"   # a clear does not unswap
 
 
-def test_the_harness_forgets_a_swap_made_without_a_board(headless):
-    """The crew board's swap flag is core's, not the state's
-    (CrewBattleService._swapped): the harness drops it with the board,
-    built or not (tests/conftest.py), so a test that swapped board 3
-    headless does not hand the next test a swapped board."""
+def test_a_fresh_board_forgets_a_swap(headless):
+    """The swap flag is the state's (score.3.teamsSwapped, ADR-005 S4w), so
+    what takes the board's state takes it: nothing is left to forget on the
+    side, and the seed does not write it (absent is not swapped, as on boards
+    1/2)."""
+    from src.core.Actions import AutonaActions
     from src.core.CrewBattleService import CrewBattleService
     assert WebOps.swap_teams(3) == "OK"
     assert CrewBattleService(BOARD).teamsSwapped is True
-    headless.dropAllBoards()
+    assert headless.get("score.3.teamsSwapped") is True
+    AutonaActions.instance.SeedFreshBoard(BOARD)
     assert CrewBattleService(BOARD).teamsSwapped is False
+    assert headless.get("score.3.teamsSwapped") is None
 
 
 # ── the board follows the state ──────────────────────────────────────────
