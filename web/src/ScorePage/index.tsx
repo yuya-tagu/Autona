@@ -22,8 +22,6 @@ import {
     apiPatch,
     apiPost,
 } from "../api";
-import {BASE_URL} from "../env";
-import {withToken} from "../autonaToken";
 import socketConnection from "../websocketConnection";
 import {AutonaPlayerDbEntry} from "../backendDataTypes";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
@@ -35,7 +33,6 @@ import {
 } from "../PanelShell/clipboard";
 import {
     WRITE_OPTIONS,
-    WRITE_TIMEOUT_MS,
     getWithRetry,
     useSerialRequests,
 } from "../PanelShell/requests";
@@ -63,6 +60,14 @@ import {
     numbered,
     text,
 } from "./Cards";
+import {
+    FollowRow,
+    Poll,
+    SetDialog,
+    StationDialog,
+    readPoll,
+    useSecondsLeft,
+} from "./SetSelection";
 
 // The SCORE page (スコアボード入力, ADR-005 S4aa), /web/scoreboard: the board
 // of the battle format in force, as the Qt SCORE panel shows it -- the match
@@ -80,6 +85,11 @@ import {
 //   offers to apply them.
 // - any other board (the crew board, every headless board): the published
 //   state the page follows (the redux store's deltas), as every page does.
+// - boards 1/2's set selection (S4ab, SetSelection.tsx): 大会の試合を選ぶ
+//   opens the page's dialogs (the Qt set and station windows), and the
+//   timer row of a board following a set / stream / station: GET
+//   /scoreboards/{n}/follow, read again on each `scoreboard_follow` for it
+//   and after a reconnect, its seconds counted down by the page.
 //
 // Every edit goes as the Qt board's inputs make it: a field as a field
 // (PATCH .../fields, the country and the region as codes), a pick as an
@@ -324,6 +334,12 @@ function ScoreContent() {
     const [postState, setPostState] = React.useState<PostState>("loading");
     const [missing, setMissing] = React.useState<string[] | null>(null);
     const [confirmingReset, setConfirmingReset] = React.useState(false);
+    const [setsOpen, setSetsOpen] = React.useState(false);
+    const [stationsOpen, setStationsOpen] = React.useState(false);
+    // What board `board` follows, as read at `at` (Date.now()).
+    const [follow, setFollow] = React.useState<{board: number;
+                                                poll: Poll | null;
+                                                at: number} | null>(null);
 
     // A refusal for want of the access token is told once: every write
     // after it is refused too.
@@ -428,6 +444,15 @@ function ScoreContent() {
             setPendingError({board: n, token});
         });
 
+    // ── what board 1/2 follows (the Qt board's timer row) ──
+
+    const readFollow = useNoticedRead<unknown>(
+        held12 ? `/api/v1/scoreboards/${board}/follow` : null,
+        (data) => setFollow({board: boardRef.current, poll: readPoll(data),
+                             at: Date.now()}),
+        // The row stays as last read (READ: no token is asked for).
+        (error) => console.error(error));
+
     React.useEffect(() => {
         const socket = socketConnection.instance();
         const onFormat = () => readFormat();
@@ -440,13 +465,20 @@ function ScoreContent() {
                 setDirtyByBoard((known) => ({...known, [n]: Boolean(notice.dirty)}));
             }
         };
+        const onFollow = (message: unknown) => {
+            if (Number(fields(message).board) === boardRef.current) {
+                readFollow();
+            }
+        };
         socket.on("battle_format", onFormat);
         socket.on("scoreboard_pending", onPending);
+        socket.on("scoreboard_follow", onFollow);
         return () => {
             socket.off("battle_format", onFormat);
             socket.off("scoreboard_pending", onPending);
+            socket.off("scoreboard_follow", onFollow);
         };
-    }, [readFormat, readPending]);
+    }, [readFormat, readPending, readFollow]);
 
     // Back from a lost connection: what was told meanwhile is not known.
     const lastStatus = React.useRef(status);
@@ -456,8 +488,19 @@ function ScoreContent() {
         if (status === "connected" && was !== "connected") {
             readFormat();
             readPending();
+            readFollow();
         }
-    }, [status, readFormat, readPending]);
+    }, [status, readFormat, readPending, readFollow]);
+
+    const followPoll = held12 && follow?.board === board ? follow.poll : null;
+    const followSeconds = useSecondsLeft(followPoll, follow?.at ?? 0,
+                                         readFollow);
+
+    // Another board shown: its own windows (the Qt ones are each board's).
+    React.useEffect(() => {
+        setSetsOpen(false);
+        setStationsOpen(false);
+    }, [board]);
 
     // ── the match bar's candidates ──
 
@@ -755,23 +798,12 @@ function ScoreContent() {
                           WRITE_OPTIONS));
     }, [boardPath, run]);
 
-    // The Qt board's 大会の試合を選ぶ: the desktop's set selection window
-    // (the legacy route; no v1 has it, the React selection being S4ab's).
-    const openSets = React.useCallback(() => {
-        const n = boardRef.current;
-        run(async () => {
-            const response = await fetch(`${BASE_URL}/scoreboard${n}-open-set`, {
-                signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
-                headers: withToken(),
-            });
-            if (!response.ok) {
-                throw Object.assign(new Error(`open-set: HTTP ${response.status}`),
-                                    {status: response.status});
-            }
-            return response.text();
-        }, (status) => (status === 503 ? i18n.t("score_open_sets_unavailable")
-            : i18n.t("request_failed")));
-    }, [run]);
+    // The timer row's cancel: the board stops following (the Qt row's
+    // StopFollowing(forget=True)); the row goes with the read after it.
+    const stopFollow = React.useCallback(() => {
+        write(() => apiPost(`${boardPath}:stop-follow`, {}, WRITE_OPTIONS),
+              undefined, false).then(readFollow, () => undefined);
+    }, [boardPath, write, readFollow]);
 
     // ── the X post ──
 
@@ -873,30 +905,62 @@ function ScoreContent() {
         readPending();
     }, [readPending]);
 
+    // The set and station dialogs, after the page in every return below: they
+    // stay mounted through the loading ones (another board shown reads its
+    // values first), so what was set in them stays, as in the Qt windows
+    // (hidden, not destroyed). Open on boards 1/2 only.
+    const dialogs = (
+        <>
+            <SetDialog
+                open={setsOpen && held12}
+                board={board}
+                write={write}
+                onClose={() => setSetsOpen(false)}
+                onTrack={() => {
+                    setSetsOpen(false);
+                    setStationsOpen(true);
+                }}
+            />
+            <StationDialog
+                open={stationsOpen && held12}
+                board={board}
+                write={write}
+                onClose={() => setStationsOpen(false)}
+            />
+        </>
+    );
+
     if (loadFailed || pendingNeverRead) {
         return (
-            <Box component="main" sx={{p: 3}}>
-                <Alert
-                    severity="error"
-                    action={
-                        <Button color="inherit" size="small"
-                                onClick={loadFailed ? reload : reloadPending}>
-                            {i18n.t("score_reload")}
-                        </Button>
-                    }
-                >
-                    {i18n.t("score_load_failed")}
-                </Alert>
-            </Box>
+            <>
+                <Box component="main" sx={{p: 3}}>
+                    <Alert
+                        severity="error"
+                        action={
+                            <Button color="inherit" size="small"
+                                    onClick={loadFailed ? reload
+                                        : reloadPending}>
+                                {i18n.t("score_reload")}
+                            </Button>
+                        }
+                    >
+                        {i18n.t("score_load_failed")}
+                    </Alert>
+                </Box>
+                {dialogs}
+            </>
         );
     }
     if (!format || !pendingSettled || initializing) {
         return (
-            <Box component="main" sx={{p: 3, display: "flex", gap: 1,
-                                       alignItems: "center"}}>
-                <CircularProgress size={20}/>
-                <Typography>{i18n.t("score_loading")}</Typography>
-            </Box>
+            <>
+                <Box component="main" sx={{p: 3, display: "flex", gap: 1,
+                                           alignItems: "center"}}>
+                    <CircularProgress size={20}/>
+                    <Typography>{i18n.t("score_loading")}</Typography>
+                </Box>
+                {dialogs}
+            </>
         );
     }
 
@@ -932,7 +996,7 @@ function ScoreContent() {
             />
         ));
 
-    return (
+    const page = (
         <Box component="main" sx={{p: 2, bgcolor: "background.default",
                                    minHeight: "100vh"}}>
             <Stack spacing={2}>
@@ -1025,13 +1089,22 @@ function ScoreContent() {
                                 value={text(tournament?.displayTournamentName)}
                                 send={sendDisplayName}
                             />
-                            {desktop && board !== 3 && text(tournament?.url) && (
+                            {/* In the page (S4ab): wherever it is open, not
+                                only in the desktop's shared view. */}
+                            {board !== 3 && text(tournament?.url) && (
                                 <Box>
                                     <Button variant="outlined" size="small"
-                                            onClick={openSets}>
+                                            onClick={() => setSetsOpen(true)}>
                                         {i18n.t("score_open_sets")}
                                     </Button>
                                 </Box>
+                            )}
+                            {/* The Qt board's timer row: shown while the board
+                                follows, with or without a tournament. */}
+                            {followPoll && (
+                                <FollowRow poll={followPoll}
+                                           seconds={followSeconds}
+                                           onCancel={stopFollow}/>
                             )}
                             <Stack direction={{xs: "column", sm: "row"}} spacing={1}>
                                 <MatchField
@@ -1194,6 +1267,12 @@ function ScoreContent() {
                 onClose={() => setConfirmingReset(false)}
             />
         </Box>
+    );
+    return (
+        <>
+            {page}
+            {dialogs}
+        </>
     );
 }
 

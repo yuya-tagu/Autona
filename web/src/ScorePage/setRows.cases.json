@@ -1,0 +1,1280 @@
+{
+ "about": "The SCORE page's set selection (ADR-005 S4ab): what the Qt set and station windows show for a set or a station, one table for both -- core's rows (SetSelectionService.SetRow / StationRows, GET /api/v1/tournament/sets and /stations) and the windows' tables (tests/test_set_selection.py), and the page's setCells / stationCells / isCompletePair (web/src/ScorePage/setRows.ts, its jest test). `set` / `station`: what the provider answers; `row`: v1's row of it; `cells`: the window's columns (Stream, Station, Phase, Pool, Match, Player 1, Player 2 / Type, Id, Stream, Identifier); `complete`: kept by \"Show complete pairs\"; `windowCells`: what the window shows where it differs from the page (`cells`) -- the station window's str(None), which the page does not copy. Change a case here and all of them have to agree.",
+ "sets": [
+  {
+   "why": "singles",
+   "set": {
+    "id": 1001,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1001,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA"
+     ]
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "ALPHA",
+    "BRAVO"
+   ],
+   "complete": true
+  },
+  {
+   "why": "a stream, no station, no pool",
+   "set": {
+    "id": 1002,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "channel",
+    "station": null,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1002,
+    "stream": "channel",
+    "station": "",
+    "phase": "Pools",
+    "pool": "",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA"
+     ]
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO"
+     ]
+    }
+   },
+   "cells": [
+    "channel",
+    "",
+    "Pools",
+    "",
+    "Winners Final",
+    "ALPHA",
+    "BRAVO"
+   ],
+   "complete": true
+  },
+  {
+   "why": "station 0 is a station",
+   "set": {
+    "id": 1003,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 0,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1003,
+    "stream": "",
+    "station": "0",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA"
+     ]
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "0",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "ALPHA",
+    "BRAVO"
+   ],
+   "complete": true
+  },
+  {
+   "why": "a station given as text",
+   "set": {
+    "id": 1004,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": "A",
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1004,
+    "stream": "",
+    "station": "A",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA"
+     ]
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "A",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "ALPHA",
+    "BRAVO"
+   ],
+   "complete": true
+  },
+  {
+   "why": "doubles: both teams get their members",
+   "set": {
+    "id": 1005,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Grand Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "ALICE",
+       "name": "real name of ALICE",
+       "twitter": "handle_of_ALICE",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "BOB",
+       "name": "real name of BOB",
+       "twitter": "handle_of_BOB",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1005,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Grand Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA",
+      "ALICE"
+     ]
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO",
+      "BOB"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Grand Final",
+    "ALPHA (ALPHA, ALICE)",
+    "BRAVO (BRAVO, BOB)"
+   ],
+   "complete": true
+  },
+  {
+   "why": "doubles under a team name",
+   "set": {
+    "id": 1006,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "Team A",
+    "p2_name": "Team B",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "A1",
+       "name": "real name of A1",
+       "twitter": "handle_of_A1",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "A2",
+       "name": "real name of A2",
+       "twitter": "handle_of_A2",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "B1",
+       "name": "real name of B1",
+       "twitter": "handle_of_B1",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "B2",
+       "name": "real name of B2",
+       "twitter": "handle_of_B2",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1006,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "Team A",
+     "members": [
+      "A1",
+      "A2"
+     ]
+    },
+    "p2": {
+     "name": "Team B",
+     "members": [
+      "B1",
+      "B2"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "Team A (A1, A2)",
+    "Team B (B1, B2)"
+   ],
+   "complete": true
+  },
+  {
+   "why": "doubles with the other side unknown: an empty pair of brackets",
+   "set": {
+    "id": 1007,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "ALICE",
+       "name": "real name of ALICE",
+       "twitter": "handle_of_ALICE",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     []
+    ]
+   },
+   "row": {
+    "id": 1007,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA",
+      "ALICE"
+     ]
+    },
+    "p2": {
+     "name": "",
+     "members": []
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "ALPHA (ALPHA, ALICE)",
+    " ()"
+   ],
+   "complete": false
+  },
+  {
+   "why": "the first side unknown: the rule looks at the first side only",
+   "set": {
+    "id": 1008,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "",
+    "p2_name": "BRAVO",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [],
+     [
+      {
+       "gamerTag": "BRAVO",
+       "name": "real name of BRAVO",
+       "twitter": "handle_of_BRAVO",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "BOB",
+       "name": "real name of BOB",
+       "twitter": "handle_of_BOB",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1008,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "",
+     "members": []
+    },
+    "p2": {
+     "name": "BRAVO",
+     "members": [
+      "BRAVO",
+      "BOB"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "",
+    "BRAVO"
+   ],
+   "complete": false
+  },
+  {
+   "why": "nobody yet",
+   "set": {
+    "id": 1009,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "",
+    "p2_name": "",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [],
+     []
+    ]
+   },
+   "row": {
+    "id": 1009,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "",
+     "members": []
+    },
+    "p2": {
+     "name": "",
+     "members": []
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "",
+    ""
+   ],
+   "complete": false
+  },
+  {
+   "why": "one side unknown, singles",
+   "set": {
+    "id": 1010,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "ALPHA",
+    "p2_name": "",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "ALPHA",
+       "name": "real name of ALPHA",
+       "twitter": "handle_of_ALPHA",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     []
+    ]
+   },
+   "row": {
+    "id": 1010,
+    "stream": "",
+    "station": "3",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Winners Final",
+    "p1": {
+     "name": "ALPHA",
+     "members": [
+      "ALPHA"
+     ]
+    },
+    "p2": {
+     "name": "",
+     "members": []
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "Pools",
+    "Pool A",
+    "Winners Final",
+    "ALPHA",
+    ""
+   ],
+   "complete": false
+  },
+  {
+   "why": "names in Japanese",
+   "set": {
+    "id": 1011,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "勝者側決勝",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "予選",
+    "tournament_pool": "プールA",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "アルファ",
+    "p2_name": "ブラボー",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 3,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "アルファ",
+       "name": "real name of アルファ",
+       "twitter": "handle_of_アルファ",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "ブラボー",
+       "name": "real name of ブラボー",
+       "twitter": "handle_of_ブラボー",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1011,
+    "stream": "",
+    "station": "3",
+    "phase": "予選",
+    "pool": "プールA",
+    "round": "勝者側決勝",
+    "p1": {
+     "name": "アルファ",
+     "members": [
+      "アルファ"
+     ]
+    },
+    "p2": {
+     "name": "ブラボー",
+     "members": [
+      "ブラボー"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "3",
+    "予選",
+    "プールA",
+    "勝者側決勝",
+    "アルファ",
+    "ブラボー"
+   ],
+   "complete": true
+  },
+  {
+   "why": "a team of three: every member in the brackets",
+   "set": {
+    "id": 1012,
+    "team1score": 0,
+    "team2score": 0,
+    "round_name": "Grand Final",
+    "round_name_en": "Grand Final",
+    "tournament_phase": "Pools",
+    "tournament_pool": "Pool A",
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "p1_name": "Crew A",
+    "p2_name": "Crew B",
+    "p1_seed": 1,
+    "p2_seed": 2,
+    "stream": "",
+    "station": 4,
+    "isOnline": false,
+    "isPools": true,
+    "round": 3,
+    "entrants": [
+     [
+      {
+       "gamerTag": "C1",
+       "name": "real name of C1",
+       "twitter": "handle_of_C1",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "C2",
+       "name": "real name of C2",
+       "twitter": "handle_of_C2",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "C3",
+       "name": "real name of C3",
+       "twitter": "handle_of_C3",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ],
+     [
+      {
+       "gamerTag": "D1",
+       "name": "real name of D1",
+       "twitter": "handle_of_D1",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "D2",
+       "name": "real name of D2",
+       "twitter": "handle_of_D2",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      },
+      {
+       "gamerTag": "D3",
+       "name": "real name of D3",
+       "twitter": "handle_of_D3",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ]
+        ]
+       },
+       "id": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   },
+   "row": {
+    "id": 1012,
+    "stream": "",
+    "station": "4",
+    "phase": "Pools",
+    "pool": "Pool A",
+    "round": "Grand Final",
+    "p1": {
+     "name": "Crew A",
+     "members": [
+      "C1",
+      "C2",
+      "C3"
+     ]
+    },
+    "p2": {
+     "name": "Crew B",
+     "members": [
+      "D1",
+      "D2",
+      "D3"
+     ]
+    }
+   },
+   "cells": [
+    "",
+    "4",
+    "Pools",
+    "Pool A",
+    "Grand Final",
+    "Crew A (C1, C2, C3)",
+    "Crew B (D1, D2, D3)"
+   ],
+   "complete": true
+  }
+ ],
+ "stations": [
+  {
+   "why": "a station with a stream",
+   "station": {
+    "id": 77,
+    "identifier": 4,
+    "type": "station",
+    "stream": "channel"
+   },
+   "row": {
+    "type": "station",
+    "id": 77,
+    "identifier": 4,
+    "stream": "channel"
+   },
+   "cells": [
+    "station",
+    "77",
+    "channel",
+    "4"
+   ]
+  },
+  {
+   "why": "a station with no stream",
+   "station": {
+    "id": 78,
+    "identifier": 5,
+    "type": "station",
+    "stream": ""
+   },
+   "row": {
+    "type": "station",
+    "id": 78,
+    "identifier": 5,
+    "stream": ""
+   },
+   "cells": [
+    "station",
+    "78",
+    "",
+    "5"
+   ]
+  },
+  {
+   "why": "a stream (no stream key)",
+   "station": {
+    "id": 90,
+    "identifier": "channel",
+    "type": "stream"
+   },
+   "row": {
+    "type": "stream",
+    "id": 90,
+    "identifier": "channel",
+    "stream": ""
+   },
+   "cells": [
+    "stream",
+    "90",
+    "",
+    "channel"
+   ]
+  },
+  {
+   "why": "no stream and no identifier (None): the window writes str(None), the page nothing",
+   "station": {
+    "id": 91,
+    "identifier": null,
+    "type": "station",
+    "stream": null
+   },
+   "row": {
+    "type": "station",
+    "id": 91,
+    "identifier": null,
+    "stream": ""
+   },
+   "cells": [
+    "station",
+    "91",
+    "",
+    ""
+   ],
+   "windowCells": [
+    "station",
+    "91",
+    "None",
+    "None"
+   ]
+  }
+ ]
+}
