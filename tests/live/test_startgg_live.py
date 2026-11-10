@@ -528,7 +528,7 @@ def _prepare(scoreboardNumber=1):
     from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import prepare_data
 
-    return prepare_data(SettingsManager, isPreview=False,
+    return prepare_data(SettingsManager,
                         gameAssetManager=AutonaGameAssetManager,
                         scoreboardNumber=scoreboardNumber)
 
@@ -564,7 +564,7 @@ def test_save_result_writes_both_image_formats(autonaApp, liveEvent,
 
     saved = Path(save_result(
         pixmap, data, SettingsManager.Get("thumbnail_config") or {},
-        scoreboardNumber=1, isPreview=False)).resolve()
+        scoreboardNumber=1)).resolve()
 
     assert saved.is_relative_to(autonaApp.dir.resolve()), (
         f"the thumbnail escaped the runtime directory: {saved}")
@@ -591,7 +591,7 @@ def test_generate_renders_a_full_size_thumbnail(autonaApp, liveEvent,
     from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import generate
 
-    saved = Path(generate(SettingsManager, isPreview=False,
+    saved = Path(generate(SettingsManager,
                           gameAssetManager=AutonaGameAssetManager,
                           scoreboardNumber=1)).resolve()
 

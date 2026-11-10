@@ -1029,6 +1029,17 @@ def test_the_legacy_entry_point_goes_through_the_service(env):
         legacy.prepare_data(settings)
 
 
+def test_the_synchronous_preview_is_gone():
+    # ADR-005 S4ac: nothing drew the Qt panel's tmp/thumbnail/template.png
+    # after S4p; the preview is core's (Preview / PreviewImage).
+    import inspect
+    from src.thumbnail import main_generate_thumbnail as legacy
+
+    for function in (legacy.generate, legacy.save_result):
+        assert "isPreview" not in inspect.signature(function).parameters
+    assert "AutonaResolve" not in inspect.getsource(legacy)
+
+
 # ── drawn at once: DrawBoard (ADR-005 S4y) ───────────────────────────────
 # SCORE's X post and the desktop's legacy get-thumbnail draw synchronously
 # through the shell (AutonaShellOperations.DrawThumbnailNow is `draw`); the
