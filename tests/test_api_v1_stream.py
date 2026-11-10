@@ -178,6 +178,32 @@ def test_a_bad_channel_is_rejected_without_saving(env, client, body):
     assert SettingsManager.settings == saved
 
 
+def test_a_change_is_not_ready_while_settings_json_cannot_be_opened(
+        env, client, monkeypatch):
+    # The launch could not read settings.json and it still cannot be opened
+    # (a directory here): a change decided from the empty stand-in would
+    # replace what it holds. StreamService raises SettingsUnreadable;
+    # write_op answers 409 NOT_READY, as for the settings page's saves.
+    from src.core import SettingsManager as settingsModule
+
+    path = env.dir / "user_data" / "settings.json"
+    path.mkdir()
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    channel = {"name": "Main", "url": "https://a.invalid/live"}
+    for response in (
+            client.post("/api/v1/stream/channels", json=channel),
+            client.put("/api/v1/stream/channels/0", json=channel),
+            client.delete("/api/v1/stream/channels/0"),
+            client.put("/api/v1/stream/thumbnail/options",
+                       json={"style": "netflix"})):
+        _assertRejected(response, "NOT_READY", 409)
+
+    assert SettingsManager.settings == {}
+    assert path.is_dir()
+
+
 # ── PUT /stream/org/<kind>, DELETE /stream/org ──────────────────────────
 
 @pytest.mark.parametrize("kind, fmt, mime, version", [

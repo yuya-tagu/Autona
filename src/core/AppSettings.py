@@ -12,9 +12,11 @@ key and default, and the page's read and write of them:
   whether a restart is still to apply what is saved (network, language).
 - UpdateGeneral / UpdateNetwork / UpdateLanguage: validate every field
   first, then write once (SettingsManager.SetMany); nothing when nothing
-  changes; nothing at all when settings.json could not be read
-  (SettingsManager.loadFailed: what it holds is unknown, and writing would
-  replace it).
+  changes. When the launch could not read settings.json
+  (SettingsManager.loadFailed), it is read again first and the changes are
+  decided against what it holds (SettingsManager.PrepareWrite: adopted, or a
+  corrupt one moved aside); nothing at all is written while it still cannot
+  be opened (NOT_READY).
 
 The defaults here are the readers' (tests/test_app_settings.py pins that
 every reader passes the same one). The settings window keeps its own until
@@ -25,12 +27,14 @@ Hotkeys are core's HotkeyRules. Qt-free; what is the shell's comes in as a
 callable (the language list, what the web server listens on). Importing
 this module reads and writes nothing (agent-pitfalls #1).
 """
+import os
 import re
 from collections import namedtuple
 
 from loguru import logger
 
-from .SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
+from .SettingsManager import (DEFAULT_WEBSERVER_PORT, SettingsManager,
+                              SettingsUnreadable)
 
 GENERAL = "general"
 NETWORK = "network"
@@ -193,11 +197,17 @@ class AppSettings:
         """{"general": {...}, "network": {port, listenLan, listening: {port,
         lan} | null, restartPending}, "language": {program, gameAsset,
         fgTerm, choices: [{code, name, englishName}], restartPending},
-        "loadFailed"}. Only what SETTINGS lists, and whether settings.json
-        could not be read (SettingsManager.loadFailed: the values shown are
-        the defaults, and every save is refused)."""
+        "loadFailed", "movedAside"}. Only what SETTINGS lists, and whether
+        settings.json could not be read (SettingsManager.loadFailed: the
+        values shown are the defaults; a save reads it again first, and is
+        refused while it still cannot be opened). False again once a write
+        has read it again or moved a corrupt one aside. `movedAside`: the
+        file name (not the path) a corrupt settings.json was moved aside to
+        in this run, at launch or at a write; null when none was."""
         with SettingsManager.lock:
             loadFailed = bool(SettingsManager.loadFailed)
+            movedAside = (os.path.basename(SettingsManager.movedAside)
+                          if SettingsManager.movedAside else None)
             general = {setting.name: self._Shown(setting)
                        for setting in Group(GENERAL)}
             network = {setting.name: self._Shown(setting)
@@ -217,7 +227,7 @@ class AppSettings:
         language["choices"] = self._Choices()
         language["restartPending"] = languagePending
         return {"general": general, "network": network, "language": language,
-                "loadFailed": loadFailed}
+                "loadFailed": loadFailed, "movedAside": movedAside}
 
     # -- writing ----------------------------------------------------------
 
@@ -271,7 +281,12 @@ class AppSettings:
         if refusal is not None:
             return refusal, False
         with SettingsManager.lock:
-            if SettingsManager.loadFailed:
+            # A launch that could not read settings.json reads it again
+            # first: the comparisons below are with what it holds, not with
+            # the defaults that stood in for it.
+            try:
+                SettingsManager.PrepareWrite()
+            except SettingsUnreadable:
                 return Refusal(NOT_READY, None,
                                "settings.json could not be read"), False
             pairs = []

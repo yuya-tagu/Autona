@@ -52,7 +52,7 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, SettingsUnreadable
 
 
 # ── Access classes ──────────────────────────────────────────────────────
@@ -483,8 +483,13 @@ _tokenLock = threading.Lock()
 # The token in use, once read from settings.json or issued; "" when there is
 # none to use (see _LoadToken). Kept in memory so that settings.json being
 # unreadable or edited later never changes it behind the user's back: only
-# RegenerateToken() does.
+# RegenerateToken() does. Not kept while the launch could not read
+# settings.json (None: asked again), since a later write reads it again
+# (SettingsManager.loadFailed turns False) and the token is then known.
 _token = None
+# Whether the "token unknown" warning was logged (Token() asks again on
+# every request while settings.json is unread).
+_unknownWarned = False
 # Bumped by every issue. A Socket.IO connection that proved itself with the
 # token remembers the generation, so a regenerated token cuts it off at its
 # next event instead of at its next reconnect (GrantStillValid).
@@ -498,20 +503,38 @@ def Token():
     "" when there is no usable token -- settings.json could not be read, or
     holds a malformed one. Nothing is issued then (the user's devices hold
     the real one); with no token every guarded LAN request is refused until
-    RegenerateToken() (API Settings) issues one.
+    RegenerateToken() (API Settings) issues one -- for a malformed one. For
+    an unread one regenerating does not help while the file still cannot be
+    opened (nothing is issued that could not be saved). While settings.json
+    is unread (SettingsManager.loadFailed) nothing is kept: once a write has
+    read it again, the next call reads the token in it -- or issues one,
+    when the write moved a corrupt file aside.
     """
     global _token
     with _tokenLock:
-        if _token is None:
-            _token = _LoadToken()
-        return _token
+        if _token is not None:
+            return _token
+        token = _LoadToken()
+        _token = token
+        return "" if token is None else token
 
 
 def RegenerateToken():
-    """Replace the token; the old one stops working at once."""
+    """Replace the token; the old one stops working at once.
+
+    While settings.json could not be read at launch and still cannot be
+    opened, nothing is issued (it could not be saved, and the next launch
+    would read the old one): the token in use is returned unchanged, and a
+    warning logged."""
     global _token
     with _tokenLock:
-        _token = _IssueToken()
+        try:
+            _token = _IssueToken()
+        except SettingsUnreadable as error:
+            logger.warning(
+                f"webserver: no new access token was issued: {error}")
+            token = _token
+            return "" if token is None else token
         token = _token
     logger.info("webserver: issued a new access token")
     return token
@@ -522,17 +545,24 @@ def TokenGeneration():
 
 
 def _LoadToken():
-    # Caller holds _tokenLock.
-    if SettingsManager.loadFailed:
-        # settings.json is there but could not be read: it looks empty, but
-        # the token in it is the one the user's devices hold. Issuing (and
-        # saving) one now would replace it -- and the whole file with it.
-        logger.warning(
-            "webserver: settings.json could not be read, so the access token "
-            "is unknown; requests that need it are refused until it is "
-            "regenerated in API Settings or Autona is restarted")
-        return ""
-    token = SettingsManager.Get(TOKEN_SETTING)
+    # Caller holds _tokenLock. None: unknown for now (not to be kept).
+    global _unknownWarned
+    with SettingsManager.lock:
+        if SettingsManager.loadFailed:
+            # settings.json is there but could not be read: it looks empty,
+            # but the token in it is the one the user's devices hold.
+            # Issuing one now would replace it (SettingsManager would read
+            # the file again first, but this decision was made without it).
+            if not _unknownWarned:
+                _unknownWarned = True
+                logger.warning(
+                    "webserver: settings.json could not be read, so the "
+                    "access token is unknown; requests that need it are "
+                    "refused until a save can read settings.json again or "
+                    "Autona is restarted (regenerating the token in API "
+                    "Settings needs it readable too)")
+            return None
+        token = SettingsManager.Get(TOKEN_SETTING)
     if token is None:
         logger.info("webserver: issuing the access token (first launch)")
         return _IssueToken()
@@ -546,10 +576,11 @@ def _LoadToken():
 
 
 def _IssueToken():
-    # Caller holds _tokenLock.
+    # Caller holds _tokenLock. SetMany, not Set: a token that could not be
+    # saved is not issued (SettingsUnreadable), never kept in memory only.
     global _tokenGeneration
     token = secrets.token_urlsafe(24)
-    SettingsManager.Set(TOKEN_SETTING, token)
+    SettingsManager.SetMany([(TOKEN_SETTING, token)])
     _tokenGeneration += 1
     return token
 

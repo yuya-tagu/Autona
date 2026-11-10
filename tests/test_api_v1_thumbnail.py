@@ -234,6 +234,33 @@ def test_a_bad_background_is_rejected_without_writing(desktop, client, body):
         == []
 
 
+# ── settings.json unread at launch ──────────────────────────────────────
+
+def test_a_change_is_not_ready_while_settings_json_cannot_be_opened(
+        desktop, client, monkeypatch):
+    # The launch could not read settings.json and it still cannot be opened:
+    # the config decided from the empty stand-in would replace the saved
+    # one. ThumbnailService raises SettingsUnreadable before anything is
+    # changed (the background is not even taken in); write_op answers 409
+    # NOT_READY.
+    from tests.test_thumbnail_service import _unreadSettings
+
+    path = _unreadSettings(monkeypatch, desktop)
+
+    for response in (
+            client.patch("/api/v1/thumbnail", json={"template_id": "type_b"}),
+            client.post("/api/v1/thumbnail:reset", json={"confirm": True}),
+            client.post("/api/v1/thumbnail/background",
+                        json={"image": _data_url()})):
+        _assertRejected(response, "NOT_READY", 409)
+
+    assert SettingsManager.settings == {}
+    assert SettingsManager.loadFailed is True
+    assert path.is_dir()
+    assert list((desktop.dir / "user_data").glob("thumbnail_background_*")) \
+        == []
+
+
 def test_a_background_that_cannot_be_saved_is_an_internal_error(
         desktop, client, monkeypatch):
     monkeypatch.setattr(WebOps, "import_thumbnail_background",

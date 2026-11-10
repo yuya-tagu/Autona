@@ -283,28 +283,112 @@ def test_the_token_is_kept_in_memory(settings):
     assert WebAccess.TokenGeneration() == generation
 
 
-def test_an_unreadable_settings_file_issues_nothing(settings, monkeypatch):
-    # LoadSettings() could not read settings.json: it looks empty, but the
-    # token in it is the one the user's devices hold.
+def _unreadSettings(monkeypatch, path, content=None):
+    """A launch that could not read settings.json, at `path`: `content`
+    (bytes) in it, or a directory (cannot be opened: an OSError other than
+    "not found"). Each save recorded."""
+    from src.core import SettingsManager as settingsModule
+
+    if content is None:
+        path.mkdir()
+    else:
+        path.write_bytes(content)
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
     monkeypatch.setattr(SettingsManager, "loadFailed", True)
-    writes = []
-    monkeypatch.setattr(SettingsManager, "Set",
-                        lambda key, value: writes.append(key))
+    monkeypatch.setattr(WebAccess, "_unknownWarned", False)
+    saved = []
+    monkeypatch.setattr(SettingsManager, "SaveSettings",
+                        lambda: saved.append(json.loads(json.dumps(
+                            SettingsManager.settings))))
+    return saved
+
+
+def test_an_unreadable_settings_file_issues_nothing(settings, monkeypatch,
+                                                    tmp_path):
+    # LoadSettings() could not read settings.json: it looks empty, but the
+    # token in it is the one the user's devices hold. Asking for the token
+    # reads nothing again (that is a write's) and writes nothing.
+    saved = _unreadSettings(monkeypatch, tmp_path / "settings.json",
+                            b'{"general": {"webserver_token": "kept-token-0123'
+                            b'456789ab"}}')
     generation = WebAccess.TokenGeneration()
-    assert WebAccess.Token() == ""
-    assert WebAccess.Token() == ""
-    assert writes == []
+    messages = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        assert WebAccess.Token() == ""
+        assert WebAccess.Token() == ""
+    finally:
+        logger.remove(sink)
+    assert saved == []
+    assert SettingsManager.loadFailed is True
     assert WebAccess.TokenGeneration() == generation
     assert not WebAccess.TokenMatches(["", "anything-at-all-123456"])
+    # Asked on every request: said once.
+    assert sum("access token is unknown" in m for m in messages) == 1
+
+
+def test_the_token_is_known_once_a_write_has_read_settings_json_again(
+        settings, monkeypatch, tmp_path):
+    # The launch's failure was passing: the first write (any setting) reads
+    # the file again, and the token in it -- the one the devices hold -- is
+    # the token from then on. Not kept as "" from before.
+    kept = "kept-token-0123456789ab"
+    path = tmp_path / "settings.json"
+    _unreadSettings(monkeypatch, path, json.dumps(
+        {"general": {"webserver_token": kept}}).encode())
+    generation = WebAccess.TokenGeneration()
+    assert WebAccess.Token() == ""
+
+    SettingsManager.Set("general.profanity_filter", False)
+
+    assert WebAccess.Token() == kept
+    assert WebAccess.TokenMatches([kept])
+    assert WebAccess.TokenGeneration() == generation
+
+
+def test_a_new_token_is_issued_once_a_write_moved_a_corrupt_file_aside(
+        settings, monkeypatch, tmp_path):
+    # The token in a corrupt file is lost with the rest of it (kept in the
+    # .bak): the devices need a new one, issued and saved as at a first
+    # launch.
+    saved = _unreadSettings(monkeypatch, tmp_path / "settings.json",
+                            b'{"general": {"webserver_tok')
+    generation = WebAccess.TokenGeneration()
+    assert WebAccess.Token() == ""
+
+    SettingsManager.Set("general.profanity_filter", False)
+    token = WebAccess.Token()
+
+    assert len(token) == 32
+    assert saved[-1]["general"]["webserver_token"] == token
+    assert WebAccess.TokenGeneration() == generation + 1
+    assert list(tmp_path.glob("settings.json.unreadable-*.bak"))
+
+
+def test_no_token_is_regenerated_over_a_file_that_cannot_be_opened(
+        settings, monkeypatch, tmp_path):
+    # It could not be saved, and the next launch would read the old one: the
+    # devices given it would be refused then.
+    saved = _unreadSettings(monkeypatch, tmp_path / "settings.json")
+    generation = WebAccess.TokenGeneration()
+
+    assert WebAccess.RegenerateToken() == ""
+
+    assert saved == [] and SettingsManager.settings == {}
+    assert WebAccess.TokenGeneration() == generation
+    assert WebAccess.Token() == ""
 
 
 def test_without_a_usable_token_lan_writes_are_refused_until_regenerated(
-        server, monkeypatch):
-    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+        server, monkeypatch, tmp_path):
+    # A corrupt settings.json: regenerating is the first write, which moves
+    # it aside and saves the new token.
+    _unreadSettings(monkeypatch, tmp_path / "settings.json", b"{broken")
     client = _client(server, LAN_PEER)
     assert client.post(V1_WRITE, headers={"X-Autona-Token": ""}).status_code == 401
     assert _client(server).post(V1_WRITE).status_code == 200   # this PC: as before
     token = WebAccess.RegenerateToken()
+    assert token
     assert client.post(V1_WRITE, headers={"X-Autona-Token": token}).status_code == 200
 
 
@@ -1240,13 +1324,17 @@ def test_open_in_browser_carries_the_token_only_with_lan_access(
 
 
 def test_open_in_browser_without_a_usable_token_carries_none(
-        qapp, settings, monkeypatch):
+        qapp, settings, monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     from src.AutonaScoreboardWidget import AutonaScoreboardWidget
 
-    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    # A private settings.json that still cannot be opened: with loadFailed
+    # the next write reads the file again, which must never be the real
+    # user_data/ one.
+    saved = _unreadSettings(monkeypatch, tmp_path / "settings.json")
     settings.settings = {"general": {"webserver_listen_lan": True}}
     board = SimpleNamespace(webScoreboardUrl="http://192.168.1.5:5107/scoreboard")
     assert AutonaScoreboardWidget._WebScoreboardOpenUrl(board) == (
         "http://192.168.1.5:5107/scoreboard")
+    assert saved == []

@@ -10,7 +10,9 @@ Pinned:
   SettingsManager.Get of those keys in src, the settings window excepted:
   it keeps its own until S4af);
 - an update validates everything first and writes once, nothing when
-  nothing changes, nothing at all while settings.json could not be read;
+  nothing changes; when the launch could not read settings.json, against
+  the file read again (or after moving a corrupt one aside), and nothing at
+  all while it still cannot be opened;
 - the port is an int 1-65535 (a bool is not), and one saved out of range is
   shown as it is; an undecided LAN access (None) is kept by any other save;
 - restartPending: what is saved against what is in effect.
@@ -24,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from src.core import AppSettings as module
+from src.core import SettingsManager as settingsModule
 from src.core.AppSettings import AppSettings
 from src.core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 
@@ -83,8 +86,10 @@ def test_the_read_is_the_allow_list_and_nothing_else(saves):
 
     described = _make().Describe()
 
-    assert set(described) == {"general", "network", "language", "loadFailed"}
+    assert set(described) == {"general", "network", "language", "loadFailed",
+                              "movedAside"}
     assert described["loadFailed"] is False
+    assert described["movedAside"] is None
     assert list(described["general"]) == GENERAL_NAMES
     assert set(described["network"]) == {
         "port", "listenLan", "listening", "restartPending"}
@@ -419,11 +424,15 @@ def test_a_language_saved_as_none_is_the_default_already(saves):
     ("UpdateNetwork", {"listenLan": True}),
     ("UpdateLanguage", {"program": "ja"}),
 ])
-def test_nothing_is_written_while_settings_json_could_not_be_read(
-        saves, monkeypatch, update, fields):
+def test_nothing_is_written_while_settings_json_cannot_be_opened(
+        saves, monkeypatch, tmp_path, update, fields):
     # Writing would replace the unread file with this one key (and lose the
-    # access token with the rest).
+    # access token with the rest). It is read again first, and still cannot
+    # be opened (a directory: an OSError other than "not found").
     settings = _make()
+    unopenable = tmp_path / "settings.json"
+    unopenable.mkdir()
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(unopenable))
     monkeypatch.setattr(SettingsManager, "loadFailed", True)
 
     refusal, written = getattr(settings, update)(fields)
@@ -434,6 +443,53 @@ def test_nothing_is_written_while_settings_json_could_not_be_read(
     # The read still answers, and says why nothing can be saved.
     assert settings.Describe()["general"]["profanity_filter"] is True
     assert settings.Describe()["loadFailed"] is True
+
+
+def test_a_launch_that_could_not_read_compares_with_the_file_read_again(
+        saves, monkeypatch, tmp_path):
+    # The launch's failure was passing (the file held by another program):
+    # the save reads settings.json again, and decides what changes against
+    # it. Against the defaults that stood in, 5107 would be "the same" and
+    # the user's 6000 would stay.
+    stored = {"general": {"webserver_port": 6000,
+                          "webserver_token": SECRET_TOKEN},
+              "designer": {"figma_pairing_code": SECRET_PAIRING}}
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    settings = _make()
+    assert settings.Describe()["network"]["port"] == DEFAULT_WEBSERVER_PORT
+
+    assert settings.UpdateNetwork({"port": DEFAULT_WEBSERVER_PORT}) == (
+        None, True)
+
+    stored["general"]["webserver_port"] = DEFAULT_WEBSERVER_PORT
+    assert saves == [stored]
+    described = settings.Describe()
+    assert described["loadFailed"] is False
+    assert described["network"]["port"] == DEFAULT_WEBSERVER_PORT
+
+
+def test_a_corrupt_file_is_moved_aside_and_the_save_goes_through(
+        saves, monkeypatch, tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_bytes(b'{"general": {"webserver_po')
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    settings = _make()
+
+    assert settings.UpdateGeneral({"profanity_filter": False}) == (None, True)
+
+    backups = list(tmp_path.glob("settings.json.unreadable-*.bak"))
+    assert [backup.read_bytes() for backup in backups] == [
+        b'{"general": {"webserver_po']
+    assert saves[-1] == {"general": {"profanity_filter": False}}
+    described = settings.Describe()
+    assert described["loadFailed"] is False
+    # The file name only: the read is READ, and the path would show where
+    # Autona is installed.
+    assert described["movedAside"] == backups[0].name
 
 
 def _failingSave(monkeypatch):

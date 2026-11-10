@@ -7398,6 +7398,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 
 - 書き込みは `SettingsWidget` が `SettingsManager.Set` を直接呼ぶ（core を通らない。同じ値でも書き、スピンは打鍵ごとに保存）。値を読むのは初回に開いたときだけ
 - `SettingsManager.loadFailed` のときに書くと、`settings.json` が `{}` + 1 キーで上書きされ、アクセストークンも消えうる（`WebAccess._LoadToken` は同じ理由で発行を止めている）
+  - 2026-11-11 の節「settings.json を読めなかったときの書き込み」で SettingsManager に一元化した
 - ホットキーの記録（`QKeySequenceEdit`）は `PgUp`・`Del`・`Esc`・記号を作れるが、parser は読めず、黙って登録しない
 - `AutonaWebPageLifecycle.LocalUrl` と `AutonaDesignerWindow` は設定のポートを読む: ポートを変えた直後の再読み込みが、まだ待ち受けていないポートへ行く
 
@@ -7551,6 +7552,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - A. 作成済みのボードには、読み取り・準備でウィジェットを建てない: `DesktopBoardHost.Prepare(n)` は `Built(n)` なら何もせず、core に無いボード（起動時の作成の失敗・ハーネスが落としたボード）だけを `_Board` で作り直す。`CommitEdit` / `DiscardTypedText` / `PlayerLoaded` はウィジェットが無ければ何もしない。`get_swap` / `get_scoreboard` / `get_pending` も建てない。`BoardHost.ClearPlayers`（ボード 1 / 2 の `reset_players` とセット読込のクリア）は先頭で `Prepare` する（`Prepare` を呼ばず、core に無いボードの作成を `CommitEdit` の構築に頼っていた経路。ほかの書き込みの経路は先に `Prepare` を呼んでいる）。ウィジェットが無いと壊れる経路は無かった（ボードのウィジェットは構築時に state を描き、held の未反映なら反映ボタンを点ける）
   - B. `AutonaActions.ClearMatchInfo` は match バーの各欄を、state にキーがあるときだけ空にする（`match_en` と同じ規則）。ボード 1 / 2 は全欄がシードされているので結果は不変（`board_operations` の golden・`key_order.json` は不変）。まっさらなクルーボードのリセット 3 本は何も書かない（revision が進まない）
   - D. `SetFollowService.TurnOffPolling` は `SettingsManager.loadFailed` のとき書かない（ログ 1 行）。読めなかった settings.json をこのキー 1 つの内容で上書きしないため（`MakeBoards(panel=True)` が起動のたびに呼ぶようになった）。SettingsManager 全体の `loadFailed` の書き込みは扱っていない
+    - 2026-11-11 の節「settings.json を読めなかったときの書き込み」で SettingsManager に一元化した（この検査は外した）
   - E. `MakeBoards` の 2 回目は警告して何もしない（判断 4）
   - F. 実際の Window の起動時のボードの検査（`tests/test_battle_format.py`）に未反映なしを足した
 - **動作の違い**（リード判断 2 のとおり。golden はクルーのリセット 2 件だけ変わる: 下の golden）
@@ -7697,3 +7699,120 @@ S4ac-3（Qt の SCORE とボードのウィジェットの削除）の前に、�
 - **golden**: `tests/fixtures/**` は差分なし
 - **検証**: 変えた 16 ファイルをファイルごとに直列で回して全部緑（`test_harness_isolation.py` 38 passed ほか）。`python scripts/run_tests_parallel.py` は 6301 passed・0 failed・2 skipped・2 errors（判断 4 の 2 本。直した後、`test_set_follow.py` 116 passed）。直した後の直列の全量 `python -m pytest -q -ra -p no:cacheprovider` 6301 passed・0 failed・25 skipped（768 秒）
 - **F3（web、同じ PR）**: SCORE ページの読み込みの失敗を `formatFailed` / `charactersFailed` に分けた（表示に使う `loadFailed` は 2 つの or の派生値）。`readFormat` の成功が、キャラ一覧の読みが失敗したままでも失敗の表示を消し、キャラ一覧が無いままページが使える状態に見える取り違えがあったため。`readFormat` の成功は `formatFailed` だけ、キャラの失敗は `charactersFailed` だけを立て、「読み直す」は両方を消して両方を読み直す。同じ `useCharacters(fail)` の形を使う ResultPage / Top8Page は、失敗を消すのが「読み直す」だけで別の読みの成功が消す経路が無いため、取り違えは無く変更なし。pin は `ScorePage.test.js` の 1 本（形式の読みが成功してもキャラの失敗の表示が残り、「読み直す」で両方を読み直す）
+
+#### settings.json を読めなかったときの書き込み（2026-11-11）
+
+`SettingsManager.LoadSettings` は `user_data/settings.json` を開けない・壊れていると `settings = {}`・`loadFailed = True` にする。その後の最初の `Set` / `SetMany` / `Unset` が `{}` + そのキーで settings.json を丸ごと上書きし、ポート・LAN・ホットキー・言語・アクセストークンが戻せない形で消えていた。避けていたのは呼び手ごと（`AppSettings` / `HotkeyRules` の 409・`TurnOffPolling` の検査・`WebAccess` の発行の停止）で、Qt の設定ウィンドウほかの `Set` は避けていなかった。リードの決定で SettingsManager に一元化した。
+
+- **完了内容**
+  - `src/core/SettingsManager.py`
+    - `_Settle()`: `loadFailed` の間の最初の書き込みの直前に settings.json を読み直す。JSON のオブジェクトなら採用（`settings` を置き換え）、消えていればそのまま、読めたが壊れている（JSON でない・オブジェクトでない）なら `os.replace` で `settings.json.unreadable-<YYYYmmdd-HHMMSS>.bak` に退避して warning（退避先つき）。どれも `loadFailed = False`。開けない（`FileNotFoundError` 以外の `OSError`）・退避できないときは `SettingsUnreadable` で何も変えない（`loadFailed` は True のまま。次の書き込みがまた試す）
+    - `_BackupPath()`: 同名があれば `-2`・`-3`…（`StatePersistence._BackupPath` と同じ形）
+    - `SettingsUnreadable(OSError)`（新規）: `SetMany` と `PrepareWrite` が送出する
+    - `Set` / `Unset`: 読み直し → まだ開けなければ warning（キー名だけ。値はトークンでありうるので出さない）を出し、メモリもファイルも変えずに戻る（Qt の呼び手が例外を想定していない）
+    - `SetMany`: 読み直し → まだ開けなければ `SettingsUnreadable`（何も変えない。「メモリにファイルに無い値を持たない」の約束のまま）
+    - `PrepareWrite()`（新規）: 保存済みの値と比べて書くものを決める呼び手が、比べる前に同じ lock の中で呼ぶ。退避したときは settings.json（`{}`）をすぐ書く（呼び手が何も書かなくてもファイルが残る）
+    - `LoadSettings`: JSON のオブジェクトでない中身（`[]`・`null`・文字列）も読めなかった扱いにした（それまでは list / None を `settings` にして `loadFailed = False` で、後の `Get` / `Set` が落ちた）。失敗を warning に出す。~~起動時には退避しない（リードの方針 4: 最初の書き込みまでは何も失われない）~~ → 追加 2 で撤回（`Initialize` が起動時に読み直して退避する）
+    - パスを定数 `SETTINGS_PATH` にした（同じ文字列が 3 か所。テストが tmp に向ける）
+  - `src/core/AppSettings.py` / `src/core/HotkeyRules.py`: `loadFailed` の検査を `PrepareWrite()` に置き換えた（`SettingsUnreadable` → `NOT_READY`）。比べるのは読み直した中身
+  - `src/core/SetFollowService.py`: `TurnOffPolling` の `loadFailed` の検査を外した
+  - `src/core/WebAccess.py`: 読めなかった間はトークンを持たない（`_LoadToken` が None を返し、`Token()` は `""` を返すが `_token` に入れない）。warning は 1 回（`_unknownWarned`）。`_IssueToken` は `SetMany`（保存できないトークンを発行しない）、`RegenerateToken` は `SettingsUnreadable` なら warning を出して今のトークンを返す
+  - `src/AutonaApiV1.py`: コメントだけ（409 の条件）
+- **判断と理由**
+  1. `AppSettings` / `HotkeyRules` は `SetMany` の例外を待たず、比べる前に `PrepareWrite()`: どちらも保存済みの値と比べて書くもの（`pairs`）と衝突を決める。読み直す前の既定と比べると、ファイルに 6000 があるのに既定の 5107 への変更を「同じ値」として捨て、ホットキーの衝突を見落とす。409 への写し方（Refusal → `_settings_refused`）は変えていない。GET の `loadFailed` は残した（ページの案内）
+  2. `TurnOffPolling` の検査は外した: 守っていたもの（読めなかったファイルをこのキー 1 つで上書きしない）は SettingsManager が守る。~~外すと、デスクトップの起動のたびの最初の書き込みとして読み直しが起動直後（`bootstrap_gui()` の `MakeBoards`）に走り、起動時の失敗が一時的なら Web サーバー・ホットキーの登録より前に設定が戻る~~（**誤り**。独立レビューの指摘 1: `MakeBoards` は `AutonaHotkeys` の生成（`LoadUserHotkeys`）と `AppSettings` の生成（`_launch`）より後なので、そこで採用してもホットキーの登録と言語の `restartPending` は既定のまま。追加 2 で読み直しを `Initialize` に移した）
+  3. `WebAccess`: 採用されれば元のトークン、退避されれば新しいトークンが要る。「読めなかった間の `""`」をキャッシュしないことで、次の `Token()` がどちらも正しく決める（採用 → ファイルのトークン、退避 → 初回起動と同じく発行して保存）。`Token()` 自身は読み直さない（読み直しは書き込みの直前だけ。トークンの照会は読み取り）
+  4. `SettingsUnreadable` は `OSError` のサブクラス: 書き込みを止めたのはファイルシステムで、既存の `except OSError`（保存の失敗）と同じ扱いになる
+  5. 起動後に消えたファイル（`FileNotFoundError`）には書く: 失うものが無い
+  6. ホットキー: 読み直しで保存値が既定から変わっても `changes` は出さない（書いたときだけ）。登録の追従は残置 2
+- **動作の違い**（利用者から見えるもの）
+  - 一時的に読めなかった起動: デスクトップは起動直後に読み直して設定が戻る（それまでは既定で動き、最初の保存でファイルが消えた）。ヘッドレスは最初の保存のとき（→ 追加 2 で両シェルとも `Initialize` の中で読み直す）
+  - 壊れた settings.json: 最初の書き込み（デスクトップは起動直後）で `user_data/settings.json.unreadable-<日時>.bak` に退避され、既定から始まる。ログに warning（退避先）。それまでは最初の保存で中身が消えた（→ 追加 2 で両シェルとも起動時に退避）
+  - 開けないままの settings.json: どの保存もファイルに書かない（Qt の設定ウィンドウの変更も保存されず warning。v1 の設定の保存は 409 のまま）。それまでは Qt 側・ほかの `Set` が `{}` + 1 キーで上書きしていた（→ 追加 2 で `Set` / `Unset` はその起動の間だけ効き、読めたら戻す）
+  - API 設定の「再発行」は、開けないままの間は発行しない（今のトークンのまま。warning）
+  - `GET /api/v1/settings` の `loadFailed` は、読み直し・退避の後 false に戻る。v1 の設定の保存は、読めるようになっていれば 409 にならない
+- **残置とリスク**（初版の 3 つのうち 1 と 3 は下の「追加」で塞いだ。2 は受け入れ（追加 2 で起こる場面が狭まり、記述を直した）、4 は追加 2 で解消。5 以降は追加 2 の独立レビューから）
+  1. ~~読んでから書く呼び手が、読み直す前の既定から組んだ値でそのキーを上書きする~~ → 追加 A で解消
+  2. 読み直して採用しても、起動時に読んだ値を持ち続ける読み手は追従しない: ロケール・Web サーバーのポートと LAN（`AppSettings` の起動時の値も既定のままなので `restartPending` が真になりうる。再起動で正しくなる）・ホットキーの登録（次のホットキーの保存で全キーを読み直す。ウィンドウのマウント（`UiMounted`）より前に採用されていれば、マウントが読み直す: 追加 2）・表示中のボード（起動時の対戦形式で決まる。採用したファイルの形式が違うと、`ActiveBoard()` を読むスコアのホットキーの対象と表示がずれる）・大会 URL とゲームの復元。~~デスクトップで起動直後に採用されたときは、これらより前なので起きない~~（誤り。起動直後の `TurnOffPolling` は `AutonaHotkeys` と `AppSettings` の生成より後。独立レビューの指摘 1）。**受け入れ**（リードの判断。追加 2 で読み直しを `Initialize` に移したので、起こるのは起動時に 1 秒弱読み直してもまだ開けず、起動後に読めるようになったときだけ。再起動で戻る）
+  3. ~~BOM 付きの UTF-8 が壊れた扱いで退避される~~ → 追加 B で解消
+  4. ~~起動時に開けず後で採用したときは、起動直後の `TurnOffPolling`（`disable_autoupdate` を True に）の書き込みは失われ、採用したファイルの値が使われる（メインの実機確認 2 で見た。ファイルが False なら、その起動はセットの自動更新がオンのまま）~~ → 追加 2 で解消（開けない間の `Set` はメモリに持って記録し、採用したファイルの上に戻す）
+  5. AST の pin の抜け（独立レビューの指摘 6）: `try: PrepareWrite()` / `except SettingsUnreadable: pass` の後に書く退行・lock の中から別モジュールの書き手を呼ぶ形・lock の外で読んだ値から書くかを決める形は拾わない。今それに当たる実装は無い（追加 2 の洗い出し）。LAN の確認だけは個別に pin した。**受け入れ**
+  6. まだ開けない間、`UpdateChannel` / `DeleteChannel` の存在しない index は 404 でなく 409（独立レビューの指摘 9。`PrepareWrite` が index の検査より先。一覧自体が不明なので 409 が正しい答え）。**受け入れ**
+  7. `ImportBackground` の画像の書き込み（長辺 1920 の PNG）が settings の lock の中に入った（独立レビューの指摘 11）。その間ほかのスレッドの `SettingsManager.Get` が待つ（state の lock は取らないのでデッドロックではなく遅延だけ）。選べない背景の画像を残さないための順序。**受け入れ**
+  8. 読み取りの要求でも退避が走る（独立レビューの指摘 12）: `GET /api/designer/pairing` と Figma 取込の照合は `PrepareWrite` を通る（コードが無ければ発行するため）。追加 2 で壊れたファイルは起動時に退避されるので、起こるのは起動時に開けず、その後に壊れた中身で読めるようになったときだけ。**受け入れ**
+- **追加（同日。リードの指示で残置 1・3 を塞いだ）**
+  - **A. 読んで変えて書く呼び手は、lock の先頭で `PrepareWrite()`**。規則: `with SettingsManager.lock:` の中で settings を書く（直接、または同じモジュールの書く関数を通して）ブロックは、最初の文で `SettingsManager.PrepareWrite()` を呼ぶ（`SettingsUnreadable` を断りに変える `try` の最初の文でもよい）。~~lock の外の書き込みは自分のキー 1 つしか決めないので、`Set` 自身の読み直しで足りる（`LayoutCatalog.SelectLayout`・`AutonaActions.SetBattleFormat` など）~~ → 追加 2 で 2 種類に分けて書き直した（書く値を操作が決めるなら `Set` だけでよい。書く値か書くかどうかを読んだ値から決めるなら lock の中で `PrepareWrite` するか、`loadFailed` の間は書かない）
+    - `src/core/StreamService.py`: `AddChannel` / `UpdateChannel` / `DeleteChannel` / `SetThumbnailOptions`（まだ開けなければ `SettingsUnreadable` を送出し何も変えない）。`ResetOrgAssets` の「source が org なら banner に戻す」も、保存値で決めるよう lock の中で `PrepareWrite` してから判定する（それまでは lock の外で読み、空の代わりは banner と読むので、保存の org が残って画像だけ消えた）。まだ開けなければ warning で source を残す（画像の削除は済んでいる。この起動の生成は既定の banner で動く）
+    - `src/core/ThumbnailService.py`: `Update` / `ImportBackground`（`PrepareWrite` の後に画像を書く: 選べない背景の画像を残さない。画像の書き込みが settings の lock の中に入った）/ `Reset`（`Unset` の前に `PrepareWrite`: まだ開けないのに `Unset` が黙って何もせず、アップロード済みの背景だけ消して保存の config が消えたファイルを指す、を防ぐ。読んで書く呼び手ではないが同じ形の穴なので一緒に塞いだ）
+    - `src/core/ResultService.py`: `SetLayout`。`FollowBattleFormat` は保存のレイアウトで決めるよう先に `PrepareWrite`（lock は取らない: 後の publish が state の lock を取り、その順は state → settings）。まだ開けなければ warning でレイアウトを変えない（`AutonaActions.SetBattleFormat` の最後なので例外を出さない）
+    - `src/AutonaDesignerService.py`: `_current_pairing_code` が settings の lock の中で `PrepareWrite` → 読む → 無い / 壊れていれば発行。発行（`_issue_pairing_code`）は `SetMany`（保存できないコードを発行しない）。まだ開けなければコードは不明で発行しない: `pairing_code` / `regenerate_pairing_code` は `SettingsUnreadable`、`check_import_pairing` は `"unavailable"`（失敗回数に数えない: 正しいコードがロックされないように）。それまでは空の代わりを見て発行し、採用したファイルのプラグインのコードを置き換えていた（開けない間は呼ぶたびに別のコード）
+    - `src/AutonaWebServer.py`: `GET /api/designer/pairing`・`POST .../regenerate`・`POST /api/designer/imports` はまだ開けなければ 409（`{"error", "reason": "pairing_unavailable"}`。Designer のダイアログとプラグインは既存の `error` の表示で案内する）
+    - `src/AutonaApiV1.py`: `write_op` が `SettingsUnreadable` を 409 `NOT_READY`（`settings.json could not be read: nothing was saved`）に写す（`NotAvailable` → 503 と同じ置き方）。配信チャンネル・配信サムネのオプション・試合サムネイルの設定 / リセット / 背景・リザルトのレイアウトが対象（`external-control-api.md` §3）。設定ページの保存は従来どおり Refusal から同じ 409
+    - 判断: 呼び手ごとの写し方は「core はまだ開けなければ `SettingsUnreadable` を送出して何も変えない（`SetMany` と同じ約束）、ほかの仕事の途中で呼ぶ操作（`ResetOrgAssets` の source（画像の削除の後。入口は v1 の `DELETE /stream/org` だけ）・`FollowBattleFormat`（形式の切り替えの最後））は送出せず捕まえて warning」にした（初版の「v1 の外の呼び手」は不正確だった: 独立レビューの指摘 13）。戻り値で返すと、`AddChannel` の None（400）・`UpdateChannel` の False（404）など既存の意味と区別できないため
+  - **B. BOM**: `LoadSettings` と `_Settle` の読み直しが、先頭の UTF-8 BOM（`EF BB BF`）を外してから `orjson.loads` する（`_WithoutBom`）。BOM 付きの正しいファイルは採用され退避されない。保存は今どおり BOM なし（orjson）。BOM の後が壊れていれば従来どおり退避（.bak は BOM ごと元のバイト列）
+  - **pin（追加）**
+    - `tests/test_settings_manager_load_failed.py`: **AST で規則 A を pin**（`test_a_block_that_writes_under_the_settings_lock_prepares_first`。`src/` の全モジュール（SettingsManager を除く）の `with SettingsManager.lock:` のうち書くもの（直接の `Set` / `SetMany` / `Unset` か、同じモジュールの書く関数（推移的）の呼び出しを含む）は、最初の文（か `try` の最初の文）が `SettingsManager.PrepareWrite()`。上の 12 か所（AppSettings / HotkeyRules を含む）を見つけていること（空振りしない）も確かめる）。BOM: 起動で読める・読み直しで採用して退避しない（保存は BOM なし）・BOM の後が壊れていれば退避（+3）
+    - `tests/test_stream_service.py`: 採用したファイルのチャンネルの後に足す（ほかのキーも残る）・org のリセットが保存の source を読む・まだ開けなければ 4 操作が `SettingsUnreadable` でリセットは例外なし（+3）
+    - `tests/test_thumbnail_service.py`: 採用したファイルの config に足す（テンプレート・ゲームの設定が残る）・まだ開けなければ `Update` / `ImportBackground` / `Reset` が送出し、画像を書かず既存の背景を消さない（+2）
+    - `tests/test_result_service.py`: 採用したファイルの config のレイアウトだけを変える・形式の追従が保存の team_split を残す・まだ開けなければ `SetLayout` は送出し `FollowBattleFormat` は送出しない（+3）
+    - `tests/test_designer_service.py`: 採用したファイルのペアリングコードを使う（ファイルを書き換えない）・まだ開けなければ表示 / 再生成は送出、取込の照合は `unavailable` で数えない、3 ルートとも 409 `pairing_unavailable`（+2）
+    - `tests/test_api_v1_stream.py`: まだ開けなければチャンネル 3 ルート・オプションが 409 `NOT_READY`（+1）
+  - **壊して確認（追加）**（1 か所ずつ壊して上の追加テストを回し、毎回バイト単位で戻した。18 か所すべて落ちた）: lock の中の `PrepareWrite` を外す 10 か所（`AddChannel` / `UpdateChannel` / `DeleteChannel` / `SetThumbnailOptions` / `ResetOrgAssets` / `Thumbnail.Update` / `Reset` / `ImportBackground` / `Result.SetLayout` / `_current_pairing_code`。どれも AST の pin と振る舞いのテストの両方が落ちる）・`FollowBattleFormat` の `PrepareWrite` を外す（振る舞い 1）・`FollowBattleFormat` が送出を漏らす（1）・ペアリングの発行を `Set` に戻す（1）・取込の照合が送出を漏らす（1）・ペアリングのルートが送出を漏らす（500。1）・`write_op` が写さない（1）・`LoadSettings` / `_Settle` の BOM の除去を外す（各 1）
+- **pin**
+  - `tests/test_settings_manager_load_failed.py`（新規。12 関数・38 件）: 起動は退避しない（壊れた中身 6 種）／起動で読めたら読み直さない／一時的な失敗（初回の `open` だけ `PermissionError`）を最初の書き込みが読み直して採用（`Set` / `SetMany` / `Unset`）／壊れた中身を退避し、.bak が元のバイト列と一致・settings.json は書き込みだけ・`loadFailed` False・warning に退避先（6 種 × 3 つの書き手）／`PrepareWrite` は退避の後に `{}` を書く／退避名が既存の .bak を上書きしない（日時を固定し、既存の 2 つの後の `-3`・`-4`）／開けない（settings.json をディレクトリにして `OSError`）とき `Set` / `Unset` は何も変えず warning、`SetMany` / `PrepareWrite` は `SettingsUnreadable`（`OSError`）／空の `SetMany` は試さない／次の書き込みがまた試す／起動後に消えたファイルには書く／退避できない壊れたファイルには書かない
+  - `tests/test_app_settings.py`: 開けないと書かない（既存を改名し、開けないファイルで再現）・読み直した中身と比べる（+1。既定と比べると落ちる）・壊れたファイルを退避して保存（+1）
+  - `tests/test_hotkey_rules.py`: 開けないと書かない（改名）・読み直した保存値で衝突を判定（+1）・読み直した中身の上に保存（+1）
+  - `tests/test_api_v1_settings.py`: 開けないと 409（改名・5 ルート）・読めれば 200 で中身の上に保存し `loadFailed` false（+1）
+  - `tests/test_headless_seed.py`: 開けないと `TurnOffPolling` は書かずボードは作る（改名）・読めれば読み直してその上に書く（+1。ボード 1 / 2 で 2 回）
+  - `tests/test_web_access.py`: 読めない間は発行せず warning は 1 回（書き直し）・書き込みが読み直した後は元のトークン（+1）・退避の後は新しいトークンを発行して保存（+1）・開けない間は再発行しない（+1）・壊れたファイルなら再発行（退避）で LAN が通る（書き直し）
+  - どのテストも `SETTINGS_PATH` を tmp に向ける（読み直しが実ファイルを読むようになったので、開発者の `user_data/settings.json` とハーネスの settings.json に触れないため）
+- **壊して確認**（1 か所ずつ壊して、上の 5 ファイル（`test_settings_manager_load_failed` / `test_app_settings` / `test_hotkey_rules` / `test_web_access` / `test_api_v1_settings`）と `test_headless_seed` の 2 本を回し、毎回バイト単位で戻した）
+  1. 採用を外す（読めた中身も壊れた扱い）→ 10 件（一時的な失敗 3・次の書き込み・AppSettings・HotkeyRules 2・WebAccess・v1・headless_seed）
+  2. 退避を外す → 23 件
+  3. `Set` / `Unset` が `SettingsUnreadable` を漏らす → 5 件
+  4. 退避名の重なりの検査を外す → 1 件
+  5. `TurnOffPolling` に `loadFailed` の検査を戻す → 1 件（headless_seed の読み直し）
+  6. `WebAccess` が読めなかった間の `""` を持つ → 2 件
+  7. `AppSettings` が `PrepareWrite` を呼ばない → 8 件（開けない 4・v1 3・読み直した中身と比べる 1）
+  8. `HotkeyRules` が `PrepareWrite` を呼ばない → 4 件
+  9. `RegenerateToken` が `SettingsUnreadable` を漏らす → 1 件
+  10. `_IssueToken` を `Set` に戻す → 1 件
+  11. `LoadSettings` がオブジェクトでない中身を受ける → 12 件
+  12. トークンの warning を毎回出す → 1 件
+  13. `PrepareWrite` が退避の後に書かない → 1 件
+- **検証**: 直列で `test_settings_manager_load_failed` / `test_settings_manager_threadsafe` / `test_app_settings` / `test_hotkey_rules` / `test_web_access` 540 passed、`test_api_v1_settings` / `test_headless_seed` / `test_set_follow` / `test_import_side_effects` / `test_core_qt_free` / `test_bootstrap_split` / `test_default_webserver_port` 291 passed。`python scripts/run_tests_parallel.py` 6348 passed・0 failed・2 skipped（4 workers）。アプリ本体は起動していない（実機確認はメイン）
+  - 追加の後: 直列で `test_settings_manager_load_failed` / `test_settings_manager_threadsafe` / `test_app_settings` / `test_hotkey_rules` / `test_web_access` / `test_designer_service` / `test_import_side_effects` / `test_core_qt_free` 808 passed、`test_stream_service` / `test_thumbnail_service` / `test_result_service` / `test_api_v1_stream` / `test_api_v1_thumbnail` / `test_api_v1_result` / `test_api_v1_settings` / `test_headless_seed` / `test_bootstrap_split` / `test_webserver_routes` 1095 passed。`python scripts/run_tests_parallel.py` 6363 passed・0 failed・2 skipped（+15）
+- **メインの実機確認**（2026-11-11。隔離データの `python main.py`。追加 2 の後のコードで全部やり直した。どれも ERROR なし）
+  1. 壊れた settings.json（JSON として読めない）で起動: 起動時（`Initialize`）に `settings.json.unreadable-<日時>.bak` へ退避され、.bak は元のバイト列と一致。初回起動と同じ LAN 接続の確認が出た（閉じて「いいえ」）。settings.json は `disable_autoupdate`・LAN の答え・新しいトークンだけ。`GET /api/v1/settings` は `loadFailed` false・`movedAside` に .bak のファイル名
+  2. 別プロセスがバイト範囲ロックで掴み続ける settings.json で起動（読みが `Permission denied`。起動時の再試行でも読めない）: LAN 接続の確認は出ない。`loadFailed` true・`movedAside` null。`PUT /api/v1/battle-format`（team）は 200 で、その起動の間だけ効いた（`GET` で team・ボード 2）。`PATCH /api/v1/settings/general` は 409 `NOT_READY`。ロックを外して同じ PATCH → 200、`loadFailed` false。ファイルは元の中身（ポート・ゲーム）の上に、ロック中の変更（`battle_format` team・`disable_autoupdate` true）と PATCH の 1 項目が乗った（ログ「put back 3 change(s)」）。トークンの warning は 1 回
+  3. 起動時の読みが失敗した直後にロックを外す（起動の再試行の間に読めるようにする）: 同じ秒のうちに採用され、ファイルのポートで待ち受け、LAN 接続の確認は出ない。`loadFailed` false・.bak なし
+  4. BOM 付きの settings.json で起動: 読めて（隔離のポートで待ち受け）、.bak は作られず、保存は BOM なし
+- **追加 2（同日。独立レビューを受けて。リードの指示）**
+  - **1. 起動時の読み直しを値の読み手より前へ（リードの方針 4 を撤回）**: `SettingsManager.Initialize()` が `LoadSettings` の失敗の後にその場で `_SettleAtLaunch()`（`PrepareWrite` と同じ分岐）を回す。開けない（`SettingsUnreadable`）ときだけ 0.1 / 0.3 / 0.6 秒おきに読み直す（`LAUNCH_RETRY_WAITS`。合計 1 秒弱）。パースの失敗は最初の読み直しで退避するので待たない。読めれば採用、壊れていれば退避して既定（`{}`）を書く、それでも開けなければ `loadFailed` のまま起動（warning）。両シェルとも起動時に退避する
+    - 撤回の理由: 方針 4 は「最初の書き込みまでは何も失われない」だったが、.bak は元のバイト列のままなので起動時の退避でも何も失わない。逆に退避を書き込みまで待つと、その間に起動時の読み手（`AutonaHotkeys.LoadUserHotkeys`・`AppSettings._launch`・ロケール・Web サーバーのポート・対戦形式・大会 URL とゲームの復元）が既定を固め、採用・退避しても追従しない（判断 2 の誤り。指摘 1）。起動時に正すほうが、その後に読むものがすべて正しい
+    - 判断 2・残置 2 の「起動直後に採用されたときは起きない」は誤りだった（上で直した）。起動時にまだ開けず後で採用したときのホットキー・言語の `restartPending`・ロケールの不一致は受け入れ（リードの判断）
+    - `AutonaHotkeys.UiMounted` が登録の前に `LoadUserHotkeys` を読み直す（安く足せる分: 生成とマウントの間の書き込み（`TurnOffPolling`）で採用されたときを拾う）
+  - **2. まだ開けない間の `Set` / `Unset` はメモリだけを変えて記録する**（それまではメモリも変えず warning だけで、利用者の操作がその起動の中でも効かなかった。指摘 2）: warning は「この起動の間だけ有効、保存していない」。記録（`_unsaved`）は `(key, value)` の列で、`Unset` は `_ABSENT`。同じキーとその下の記録は後の変更が置き換える（長い起動でもキーの数で頭打ち）。後の書き込みの読み直しで採用したら、採用した中身の上に記録を順に戻して保存する（`_PutUnsavedBack`。戻せない形（途中がオブジェクトでない手編集）は warning で飛ばす）。退避・ファイルが消えた分岐ではメモリがもう持っているので記録を捨てる（保存はする）。`SetMany` / `PrepareWrite`（v1 の 409・読んで変える呼び手）は厳格なまま送出する
+    - `_Settle` の戻り値を「すぐ保存するか」（退避した・記録を戻した・消えたファイルに記録があった）にした。`PrepareWrite` はそれで保存する（呼び手が何も書かなくても戻した変更が残る）
+    - `Unset` は無いキーなら保存しない・途中の空の親を作らない（`_Apply`。`deep_unset` は親を作っていた）。下の 3 の `ColorService` のため
+  - **3. 「読んだ値から書くか・何を書くかを決める」呼び手の洗い出し**（`src/` の `SettingsManager.Set` / `Unset` / `SetMany` の呼び出し 35 か所。SettingsManager 自身を除く）
+    - `src/Autona.py` の初回起動の LAN の確認（`Get(...) is None` → 聞いて `Set`）: 空の代わりの「未決定」で聞き、答えが（2 で）記録されて採用したファイルの答えを置き換える → **`loadFailed` の間は聞かない・書かない**（その起動はこの PC だけで待ち受け、次の起動で聞く）
+    - `ColorService._ClearFeatureColor`（`Get(...) is not None` → `Unset`）: 空の代わりには上書きが無いので消さず、採用したファイルの機能別カラーが「全部に反映」の後も残る（上書きではなく消し漏れ）→ **呼び手の確認を外し、`Unset` 自身が今の中身で決める**（無ければ保存しない。開けない間は記録され、読めたら消す）
+    - `AutonaActions.SetBattleFormat`（今の形式と同じなら書かない早期 return）・`LayoutCatalog.SelectLayout`（`Get(key) != layoutId` のときだけ書く）: 書く値は操作が決め、書かなかった値はファイルの値を上書きしない → 変更なし（表示とのずれは残置 2）
+    - `AutonaUpdater` の掃除の印（`Get(key) == version` なら掃除しない）: 空の代わりでは掃除をもう一度走らせて今の版を書く（値は操作が決める。掃除は冪等で、更新中・差分ダウンロード中は走らない）→ 変更なし
+    - ほか（`TurnOffPolling`・`StatsOverlays.Select`・`SetDisplayOption`・ゲームの選択の保存（デスクトップ / ヘッドレス）・`TournamentService` の URL・`TournamentInfoService` の失敗時の URL の消去・更新のスキップ版・色の設定・Qt の設定ウィンドウの 1 キーずつの保存）は値を操作が決める → 変更なし。`PrepareWrite` の 12 か所と `WebAccess`（発行は `SetMany`、読めない間はトークンを決めない）は済み
+    - 規則の書き方を 2 種類に分けた（`.claude/rules/state-and-webserver.md` と上の追加 A）: 書く値を操作が決めるなら `Set` だけでよい。書く値か書くかどうかを読んだ値から決めるなら lock の中で `PrepareWrite`、または `loadFailed` の間は書かない
+  - **4.** `PrepareWrite` が退避（または記録の戻し）の後の保存に失敗したら `SettingsUnreadable`（素の `OSError` だと v1 は 500、`AppSettings` は断れずに例外になっていた。指摘 4）。読んだ中身はメモリに残り、次の書き込みが保存する
+  - **5. 退避先の通知**: `SettingsManager.movedAside`（退避先のパス）を持ち、`GET /api/v1/settings` の最上位 `movedAside` にファイル名だけを返す（パスはインストール先を LAN の読み手に見せるので返さない。退避していなければ null。`external-control-api.md` §5.22）。S4af の設定ページが案内に使う。**デスクトップの通知は足さなかった**: 既存の通知の `AutonaAlertNotification` はモーダル（`QDialog.exec()`）、フッターの `AutonaStatusManager` は実行中の仕事の表示（push / pop。次の取得で上書きされ、時間で消える仕組みが無い）で、どちらも「起動時に 1 回の非モーダルの通知」に当たらない。ログの warning（退避先つき）と v1 だけ
+  - **7.** `tests/test_web_access.py` の `test_open_in_browser_without_a_usable_token_carries_none` の `SETTINGS_PATH` を tmp（開けないファイル）に向けた
+  - **10 / 13.** `WebAccess` の `Token()` の docstring と「トークン不明」の warning を直した（開けない間は再発行も効かない）。`AutonaApiInfoWindow` の再発行が開けない間に黙って戻るのは、`RegenerateToken` の warning があるのでそのまま（UI は S4af 以降）。`state-and-webserver.md` の「v1 の外の呼び手」を「ほかの仕事の途中で呼ぶ操作」に直した
+  - **6 / 9 / 11 / 12** は残置 5〜8 に 1 行ずつ（受け入れ）
+  - **pin（追加 2）**
+    - `tests/test_settings_manager_load_failed.py`（73 件）: 起動で壊れたファイルを待たずに退避（6 種。.bak は元のバイト列・settings.json は `{}`・`movedAside`）／掴まれたファイルを 0.1・0.3 秒待って採用し書かない／1 秒弱（0.1・0.3・0.6）待って既定で起動・warning／読めた起動は待たない／開けない間の `Set` / `Unset` はメモリだけを変えて記録（書き直し）／記録を採用したファイルの上に戻す（4 つの書き手のどれでも。`PrepareWrite` は自分が何も書かなくても保存）／戻す順（同じキーを何度も・親と子の両方の順・子だけならファイルの兄弟が残る。9 件）／記録はキーの数で頭打ち／退避・消えたファイルでは記録を捨ててメモリを保存／戻せない形は飛ばして warning／`Unset` は無いキーなら保存しない／`PrepareWrite` が読んだ中身を保存できなければ `SettingsUnreadable`（退避・戻しの 2 件）／`SetMany` の保存の失敗は採用したファイルに戻す（空の代わりではなく）／LAN の確認の条件に `loadFailed`（AST。`src/Autona.py` は import できないため）。退避できない壊れたファイルでも `Set` はメモリに持つ（書き直し）
+    - `tests/test_color_service.py`: 開けない間の大会カラーが、読めたファイルの機能別カラーを消す（+1）
+    - `tests/test_app_settings.py` / `tests/test_api_v1_settings.py`: `movedAside` の有無とファイル名（キーの集合・退避の後。v1 +1）・マウントが保存済みのホットキーを登録する（+1）
+    - `tests/test_api_v1_thumbnail.py`: まだ開けなければ `PATCH /thumbnail`・`:reset`・`/background` が 409 `NOT_READY`（背景の画像も書かない。+1）。`tests/test_api_v1_result.py`: `PATCH /result` が 409（+1）
+    - `tests/test_headless_seed.py`: 開けない間の `TurnOffPolling` はメモリに持って記録する（書き直し）
+    - `tests/conftest.py`: autouse の `_freshSettingsRecord` が記録と退避先をテストごとに空にする（クラスの持ち物なので、あるテストが残した記録が次のテストのファイルの上に戻らないように。`_freshStatistics` と同じ形）
+  - **壊して確認（追加 2）**（1 か所ずつ壊して `test_settings_manager_load_failed` / `test_color_service` / `test_app_settings` / `test_api_v1_settings` の全件と `test_headless_seed` / `test_api_v1_thumbnail` / `test_api_v1_result` の該当分を回し、毎回バイト単位で戻した。21 か所すべて落ちた。括弧は落ちた件数）: 起動の読み直しを外す（8）・待たない（2）・壊れたファイルでも待つ（8）・記録を戻さない（16）・記録を間引かない（2）・親の記録まで消す（3）・逆順に戻す（1）・退避で記録を捨てない（1）・消えたファイルで保存しない（1）・開けない間にメモリを変えない（7）・記録しない（21）・`PrepareWrite` が保存の失敗を写さない（2）・戻したのに保存しない（13）・無いキーの `Unset` が保存する（1）・`movedAside` を持たない（9）・v1 がパスを返す（2）・LAN の確認の条件を戻す（1）・`ColorService` の確認を戻す（1）・マウントが読み直さない（1）・戻せない形で例外を漏らす（1）・`SetMany` の失敗を空の代わりに戻す（1）
+  - **検証（追加 2）**: 直列で `test_settings_manager_load_failed` / `test_settings_manager_threadsafe` / `test_app_settings` / `test_hotkey_rules` / `test_web_access` / `test_designer_service` / `test_color_service` / `test_import_side_effects` / `test_core_qt_free` 851 passed、`test_stream_service` / `test_thumbnail_service` / `test_result_service` / `test_api_v1_stream` / `test_api_v1_thumbnail` / `test_api_v1_result` / `test_api_v1_settings` / `test_headless_seed` / `test_bootstrap_split` / `test_webserver_routes` / `test_hotkeys_enabled` / `test_hotkeys_suspend` / `test_set_follow_flow` 1115 passed。`python scripts/run_tests_parallel.py` 6399 passed・0 failed・2 skipped（+36）。アプリ本体は起動していない（実機確認はメイン）

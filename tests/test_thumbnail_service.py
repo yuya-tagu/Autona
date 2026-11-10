@@ -29,7 +29,7 @@ from src.core import StateSchema as schema
 from src.core import ThumbnailService as thumbnails
 from src.core.DictHelper import deep_clone
 from src.core.GameAssetCatalog import GameAssetCatalog
-from src.core.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager, SettingsUnreadable
 from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.core.ThumbnailService import ThumbnailService
@@ -859,6 +859,65 @@ def test_a_preview_that_cannot_be_removed_does_not_stop_the_launch(
     monkeypatch.setattr(Path, "unlink", fail)
 
     ThumbnailService(later=env.queued.append)
+
+
+# ── settings.json unread at launch (2026-11-11) ──────────────────────────
+# The config is merged into what is saved: decided from the launch's empty
+# stand-in, the first change would replace what settings.json holds once
+# SettingsManager read it again (SettingsManager.PrepareWrite).
+
+SAVED_CONFIG = {"template_id": "type_b", "background_source": "default",
+                "game": {"ssbu": {"zoom": 150, "flip_p1": True}}}
+
+
+def _unreadSettings(monkeypatch, env, saved=None):
+    """A launch that could not read settings.json: `saved` in it now, or a
+    directory (still cannot be opened)."""
+    from src.core import SettingsManager as settingsModule
+
+    path = env.dir / "user_data" / "settings.json"
+    if saved is None:
+        path.mkdir()
+    else:
+        path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    SettingsManager.settings = {}   # env restores the harness's
+    return path
+
+
+def test_an_update_after_an_unread_launch_keeps_the_saved_config(
+        env, monkeypatch):
+    path = _unreadSettings(monkeypatch, env, {
+        "general": {"webserver_port": 6000},
+        "thumbnail_config": copy.deepcopy(SAVED_CONFIG)})
+
+    env.service.Update({"display_phase": False})
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "general": {"webserver_port": 6000},
+        "thumbnail_config": {**SAVED_CONFIG, "display_phase": False}}
+
+
+def test_the_thumbnail_settings_change_nothing_while_unopenable(
+        env, monkeypatch):
+    path = _unreadSettings(monkeypatch, env)
+    uploaded = env.dir / "user_data" / "thumbnail_background_0123.png"
+    _write_image(uploaded)
+
+    with pytest.raises(SettingsUnreadable):
+        env.service.Update({"display_phase": False})
+    with pytest.raises(SettingsUnreadable):
+        env.service.ImportBackground(_image_bytes(color=(9, 9, 9)))
+    with pytest.raises(SettingsUnreadable):
+        env.service.Reset()
+
+    assert SettingsManager.settings == {}
+    assert path.is_dir()
+    # No image written for a background that could not be selected, and the
+    # uploaded one the saved config may point at is kept.
+    assert sorted(p.name for p in (env.dir / "user_data").glob(
+        "thumbnail_background_*")) == [uploaded.name]
 
 
 # ── the output's names and generations (an external contract) ────────────

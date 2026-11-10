@@ -26,6 +26,7 @@ import threading
 import pytest
 
 from src.core import HotkeyRules
+from src.core import SettingsManager as settingsModule
 from src.core.SettingsManager import SettingsManager
 
 # ── the reference: the old code, copied as it was at 551c8b8b ────────────
@@ -804,10 +805,14 @@ def test_a_save_that_fails_leaves_the_settings_as_they_were(
     assert HotkeyRules.Describe()["keys"]["load_set"]["value"] == "Ctrl+Shift+O"
 
 
-def test_nothing_is_written_while_settings_json_could_not_be_read(
-        settings, announced, monkeypatch):
+def test_nothing_is_written_while_settings_json_cannot_be_opened(
+        settings, announced, monkeypatch, tmp_path):
     # Writing would replace the unread file with this one key (and lose the
-    # access token with the rest).
+    # access token with the rest). It is read again first, and still cannot
+    # be opened (a directory: an OSError other than "not found").
+    unopenable = tmp_path / "settings.json"
+    unopenable.mkdir()
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(unopenable))
     monkeypatch.setattr(SettingsManager, "loadFailed", True)
 
     refusal, warnings, written = HotkeyRules.Update(
@@ -817,6 +822,46 @@ def test_nothing_is_written_while_settings_json_could_not_be_read(
     assert (warnings, written) == ([], False)
     assert SettingsManager.settings == {}
     assert settings == [] and announced == []
+
+
+def test_a_launch_that_could_not_read_checks_against_the_file_read_again(
+        settings, announced, monkeypatch, tmp_path):
+    # The launch's failure was passing: the save reads settings.json again,
+    # and the conflict is with the shortcut saved there, not with the
+    # defaults that stood in for it.
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"hotkeys": {"swap_teams": "Ctrl+Alt+P"},
+                                "general": {"webserver_port": 6000}}),
+                    encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    refusal, _, written = HotkeyRules.Update(keys={"load_set": "Ctrl+Alt+P"})
+
+    assert refusal.code == HotkeyRules.CONFLICT
+    assert refusal.name == "load_set"
+    assert written is False
+    assert SettingsManager.loadFailed is False
+    assert settings == [] and announced == []
+    assert _described("swap_teams")["value"] == "Ctrl+Alt+P"
+
+
+def test_a_save_after_the_file_was_read_again_keeps_the_rest_of_it(
+        settings, announced, monkeypatch, tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"hotkeys": {"swap_teams": "Ctrl+Alt+P"},
+                                "general": {"webserver_port": 6000}}),
+                    encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    refusal, _, written = HotkeyRules.Update(keys={"load_set": "Ctrl+Alt+O"})
+
+    assert (refusal, written) == (None, True)
+    assert json.loads(settings[-1]) == {
+        "hotkeys": {"swap_teams": "Ctrl+Alt+P", "load_set": "Ctrl+Alt+O"},
+        "general": {"webserver_port": 6000}}
+    assert len(announced) == 1
 
 
 def test_the_announcement_comes_after_the_lock_is_released(settings):

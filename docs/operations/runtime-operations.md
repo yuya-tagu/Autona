@@ -63,7 +63,12 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
 - 設定は `/api/v1/settings`（読み）と `PATCH /api/v1/settings/{general,network,language,hotkeys}` でも変えられる（ADR-005 S4ae）。
   ポート・LAN 公開・言語・ホットキーは**この PC からの要求だけ**（LAN からはトークンがあっても 403）。ポート・LAN 公開・言語は再起動で効く
   （`GET` の `restartPending`）。ヘッドレスにはホットキーが無いので、ホットキーの保存は次にデスクトップ版を起動したときに効く（`hotkeys.applied: false`）。
-  `settings.json` を読めなかった起動では何も保存しない（409 `NOT_READY`。GET の最上位 `loadFailed`）
+  `settings.json` を読めなかった起動では、起動時にその場で読み直す（開けなければ 1 秒弱待って読み直す。読めればその中身で起動、壊れていれば
+  `user_data/settings.json.unreadable-<日時>.bak` に退避して既定で起動。ログに warning で退避先が出る。GET の最上位 `movedAside` に退避先のファイル名）。
+  それでもまだ開けなければ既定で起動し、保存のたびに読み直す（読めれば中身の上に保存）。まだ開けない間は、設定 API・配信チャンネル・
+  サムネイル / リザルトの設定・Figma のペアリングコードは何も保存しない（409 `NOT_READY`。GET の最上位 `loadFailed`）。デスクトップの設定ウィンドウなど
+  ほかの変更はその起動の間だけ効き（保存しない。ログに warning）、読めるようになった最初の保存でファイルの中身の上に戻して保存する。
+  初回起動の LAN 接続の確認も出さない（その起動はこの PC だけで待ち受け、次の起動で聞く）。BOM 付き UTF-8 で保存した settings.json（古いメモ帳）も読める
 - **確認ダイアログは出ない**。設定値で決まり、ログに出るだけ
   - LAN 公開: `general.webserver_listen_lan`（未設定ならこの PC のみ。ログに案内が出る）
   - ポート: `general.webserver_port`。他のプロセスが使っていればログに warning（PID 付き）。
@@ -144,7 +149,7 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
 >
 > - トークンは初回起動時に `user_data/settings.json` の `general.webserver_token` に生成される。
 >   **ヘルプ＆設定 → API設定 → リファレンス・テスターを開く** で表示・コピー・再発行する
->   （settings.json を読めなかった起動では作り直さず、LAN からの書き込みを拒否する。再起動か再発行で直る）
+>   （settings.json を読めなかった起動では作り直さず、LAN からの書き込みを拒否する。ファイルが読めるようになれば（次の保存か再起動）直る。読めない間は再発行もできない）
 > - 渡し方: `X-Autona-Token: <token>` ヘッダ / `Authorization: Bearer <token>` / URL 末尾の `?token=<token>`
 >   （URL にすでに `?` があるときは `&token=<token>`）のいずれか
 > - **読み取りはトークン不要のまま**。同一 LAN に到達できる端末は state（選手名・スコア等）を読める

@@ -65,7 +65,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 from . import ImageImport
 from . import StateSchema as schema
 from .Actions import AutonaActions
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, SettingsUnreadable
 from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor
 
@@ -526,6 +526,12 @@ class StreamService:
         that is not a dict is skipped (and not counted by the indexes)."""
         return [_Channel(channel) for channel in _SavedChannels()]
 
+    # The channels and the thumbnail options are read, changed and saved
+    # whole, so each change settles settings.json first
+    # (SettingsManager.PrepareWrite: read again when the launch could not).
+    # Raises SettingsUnreadable, nothing changed, while it still cannot be
+    # opened (v1: 409 NOT_READY).
+
     def AddChannel(self, name, url):
         """Save a channel at the end; its index, or None when the name or
         the URL is empty (nothing saved)."""
@@ -533,6 +539,7 @@ class StreamService:
         if fields is None:
             return None
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             channels = _SavedChannels()
             channels.append({"name": fields[0], "url": fields[1]})
             SettingsManager.Set(CHANNELS_SETTING, channels)
@@ -547,6 +554,7 @@ class StreamService:
         if fields is None:
             return False
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             channels = _SavedChannels()
             if not isinstance(index, int) or not 0 <= index < len(channels):
                 return False
@@ -564,6 +572,7 @@ class StreamService:
         """Remove channel `index`; False when there is no such channel. A
         destination that was its URL is cleared (``stream.url``)."""
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             channels = _SavedChannels()
             if not isinstance(index, int) or not 0 <= index < len(channels):
                 return False
@@ -621,8 +630,19 @@ class StreamService:
                         logger.opt(exception=True).error(
                             f"Stream: {path} could not be removed")
                     schema.PublishAssetVersion(versionKey, path)
-            if self.ThumbnailOptions()["source"] == "org":
-                self.SetThumbnailOptions({"source": "banner"})
+            # Decided from what is saved, not from the launch's empty
+            # stand-in (which reads "banner"): settled first. The files are
+            # gone either way; while settings.json cannot be opened the
+            # source is left as saved, and logged.
+            with SettingsManager.lock:
+                try:
+                    SettingsManager.PrepareWrite()
+                except SettingsUnreadable as error:
+                    logger.warning(
+                        f"Stream: the thumbnail source was not reset: {error}")
+                else:
+                    if self.ThumbnailOptions()["source"] == "org":
+                        self.SetThumbnailOptions({"source": "banner"})
 
     # ── the stream thumbnail ─────────────────────────────────────────────
 
@@ -641,6 +661,7 @@ class StreamService:
             logger.warning(f"Stream: refusing the thumbnail options {changes}")
             return None
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             options = self.ThumbnailOptions()
             options.update(changes)
             if SettingsManager.Get(THUMBNAIL_OPTIONS_SETTING) != options:

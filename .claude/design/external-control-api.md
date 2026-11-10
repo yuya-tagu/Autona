@@ -192,6 +192,7 @@
 - 大会/試合に依存する読み取り（`/sets`・`/sets/{id}`）は provider 不在時、`data` を空（`[]`/`null`）で返す（既存挙動準拠）。
 - provider 必須の操作（`bracket:refresh` 等）は provider 不在時 **`409 NOT_READY`**。
 - スコア操作・set 情報設定は大会未ロードでも現在の盤面状態に作用する（試合未選択をエラーにしない）。
+- **settings.json に保存してある値を読んで変える操作**は、起動時に `settings.json` を読めず、**保存の時点でもまだ開けない**とき **`409 NOT_READY`**（`settings.json could not be read: nothing was saved`。何も変えない。2026-11-11）: 配信チャンネルの追加・変更・削除（`POST` / `PUT` / `DELETE /stream/channels`）・配信サムネのオプション（`PUT /stream/thumbnail/options`）・試合サムネイルの設定（`PATCH /thumbnail`・`POST /thumbnail:reset`・`POST /thumbnail/background`）・大会リザルトのレイアウト（`PATCH /result`）と、設定ページの保存（§6.44〜6.47）。core が `SettingsUnreadable` を送出し、`write_op` が写す。読めなかった起動でも保存の前に読み直すので、今度は読めればその中身の上に変える（壊れていれば退避してから既定の上に）
 
 ---
 
@@ -651,11 +652,12 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
 ### 5.22 `GET /api/v1/settings`（2026-11-11 追加・ADR-005 S4ae）
 
-設定ウィンドウの設定（一般・ネットワーク・言語）とホットキー。**返すキーは許可リスト**（`core/AppSettings.SETTINGS` と `core/HotkeyRules.DEFAULT_KEYS`）で、アクセストークン・ペアリングコード・その他の settings.json のキーは返さない。だから READ。設定なので `revision` は付かない。最上位に `loadFailed`（`settings.json` を読めなかった起動か）が付く
+設定ウィンドウの設定（一般・ネットワーク・言語）とホットキー。**返すキーは許可リスト**（`core/AppSettings.SETTINGS` と `core/HotkeyRules.DEFAULT_KEYS`）で、アクセストークン・ペアリングコード・その他の settings.json のキーは返さない。だから READ。設定なので `revision` は付かない。最上位に `loadFailed`（`settings.json` を読めなかった起動か。起動時に 1 秒弱読み直してもまだ開けなかったときだけ真で、値は既定を返す。どこかの保存がファイルを読み直す・壊れたファイルを退避すると false に戻る: §6.44）と `movedAside`（壊れた `settings.json` をこの起動で退避した先のファイル名。`settings.json.unreadable-<日時>.bak`。パスは返さない。退避していなければ `null`。起動時の退避も保存のときの退避も。設定ページの案内用）が付く
 
 ```json
 {
   "loadFailed": false,
+  "movedAside": null,
   "general": {
     "profanity_filter": true, "disable_autoupdate": true,
     "disable_scoreupdate": false, "disable_export": false,
@@ -1112,7 +1114,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - **全キーを先に検証**し、1 つでも不正（未知のキー・型の違い）なら何も保存しない。今と同じ値は書かない。`general.qt_scoreboard_panel` は受けない
 - 応答: `data` は §5.22 の `general`（保存後）。`revision` は付かない
 - WRITE（LAN はトークン必須）。ヘッドレスでも動く
-- エラー: `INVALID_ARGUMENT`（空の body・未知のキー・型）、`NOT_READY` 409（`settings.json` を読めなかった起動。何も保存しない: 書くと読めなかったファイルを置き換え、トークンも失う）
+- エラー: `INVALID_ARGUMENT`（空の body・未知のキー・型）、`NOT_READY` 409（`settings.json` を読めなかった起動で、**保存の時点でもまだ開けない**とき。何も保存しない: 書くと読めなかったファイルを置き換え、トークンも失う）
+  - 読めなかった起動でも、保存の前に `settings.json` を読み直す（2026-11-11。`SettingsManager.PrepareWrite`）。今度は読めればその中身の上に保存し（同じ値かどうかもその中身と比べる）、中身が壊れていれば `settings.json.unreadable-<日時>.bak` に退避してから既定の上に保存する。どちらも 200 で、以後 `GET` の `loadFailed` は false。壊れたファイルはふつう起動時に退避されるので（`GET` の `movedAside`）、ここに来るのは起動時にまだ開けなかったときだけ
 
 ### 6.45 待ち受けの設定 `PATCH /api/v1/settings/network`（2026-11-11 追加・ADR-005 S4ae）
 - body: `{ "port": 1..65535, "listenLan": true | false }` のどちらか 1 つ以上。`port` は整数（真偽・文字列・小数は不可）、`listenLan` は真偽（null は不可。未決定に戻す手段は無い）

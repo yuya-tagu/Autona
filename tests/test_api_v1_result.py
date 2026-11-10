@@ -215,6 +215,24 @@ def test_a_bad_layout_is_refused(desktop, client, body):
     assert SettingsManager.settings == settings
 
 
+def test_the_layout_is_not_ready_while_settings_json_cannot_be_opened(
+        desktop, client, monkeypatch):
+    # The launch could not read settings.json and it still cannot be opened:
+    # result_config decided from the empty stand-in would replace the saved
+    # one. ResultService raises SettingsUnreadable; write_op answers 409
+    # NOT_READY.
+    from tests.test_result_service import _unreadSettings
+
+    path = _unreadSettings(monkeypatch, desktop)
+
+    _assertRejected(client.patch("/api/v1/result", json={"layout": "vertical"}),
+                    "NOT_READY", 409)
+
+    assert SettingsManager.settings == {}
+    assert SettingsManager.loadFailed is True
+    assert path.is_dir()
+
+
 # ── PATCH /result/players/<n> ────────────────────────────────────────────
 
 def test_a_player_is_written_with_the_values_core_builds(desktop, client):

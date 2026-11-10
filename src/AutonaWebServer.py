@@ -23,7 +23,8 @@ from loguru import logger
 from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from . import AutonaWebOperations as WebOps
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import (
+    SettingsManager, SettingsUnreadable, DEFAULT_WEBSERVER_PORT)
 from .core import WebAccess
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
@@ -728,19 +729,28 @@ def _build_web_app():
 
     # The Figma plugin's pairing code (AutonaDesignerService.
     # check_import_pairing). Shown and replaced only through the Designer
-    # window's token, and never cached: it is a secret.
+    # window's token, and never cached: it is a secret. 409 while
+    # settings.json could not be read at launch and still cannot be opened:
+    # the code is unknown, and none is issued (SettingsUnreadable).
     @app.get('/api/designer/pairing')
     def designer_pairing_code():
         WebServer._authorize_designer_request()
-        response = jsonify({"code": AutonaDesignerService.pairing_code()})
+        try:
+            code = AutonaDesignerService.pairing_code()
+        except SettingsUnreadable:
+            return WebServer._pairing_unknown()
+        response = jsonify({"code": code})
         response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.post('/api/designer/pairing/regenerate')
     def designer_regenerate_pairing_code():
         WebServer._authorize_designer_request()
-        response = jsonify(
-            {"code": AutonaDesignerService.regenerate_pairing_code()})
+        try:
+            code = AutonaDesignerService.regenerate_pairing_code()
+        except SettingsUnreadable:
+            return WebServer._pairing_unknown()
+        response = jsonify({"code": code})
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1670,12 +1680,25 @@ class WebServer:
         if not AutonaDesignerService.is_authorized(token, request.remote_addr):
             abort(403, "Desktop Designer authorization required")
 
+    # The pairing code while settings.json could not be read at launch and
+    # still cannot be opened (SettingsUnreadable): unknown, none issued.
+    _PAIRING_UNKNOWN_MESSAGE = (
+        "設定ファイル（user_data/settings.json）を読み込めないため、"
+        "ペアリングコードを確認できません。ほかのアプリがファイルを開いて"
+        "いないか確認してください。")
+
+    @staticmethod
+    def _pairing_unknown():
+        return jsonify({"error": WebServer._PAIRING_UNKNOWN_MESSAGE,
+                        "reason": "pairing_unavailable"}), 409
+
     @staticmethod
     def _authorize_designer_import_request():
         """None if the Figma import may go ahead, else the refusal to return.
 
         403: not this computer, or not a page the plugin runs in. 401: no
         or a wrong pairing code. 429: locked after repeated wrong codes.
+        409: the pairing code is unknown (settings.json cannot be opened).
         A preflight carries no code, so it stops after the Origin check.
         Returned, not raised: see the comment on the import route.
         """
@@ -1706,6 +1729,8 @@ class WebServer:
                 "error": "ペアリングコードがありません。",
                 "reason": "pairing_required",
             }), 401
+        if status == "unavailable":
+            return WebServer._pairing_unknown()
         if status != "ok":
             return jsonify({
                 "error": "ペアリングコードが正しくありません。",

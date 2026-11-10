@@ -39,7 +39,7 @@ from src.core import StateSchema as schema
 from src.core import StreamService as stream
 from src.core.Actions import AutonaActions
 from src.core.DictHelper import deep_clone
-from src.core.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager, SettingsUnreadable
 from src.core.StateManager import StateManager as SM
 from src.core.StreamService import StreamService
 from src.core.TaskExecutor import TaskExecutor
@@ -784,4 +784,77 @@ def test_the_thumbnail_starts_idle_at_every_launch(env):
     with SM.SaveBlock():
         schema.SeedPanelState()
     assert env.thumbnail() == schema.DefaultStreamThumbnail()
+
+
+# ── settings.json unread at launch (2026-11-11) ──────────────────────────
+# The channels and the options are read, changed and saved whole: decided
+# from the launch's empty stand-in, the first change would replace what
+# settings.json holds once SettingsManager read it again
+# (SettingsManager.PrepareWrite).
+
+SAVED_CHANNEL = {"name": "Main", "url": "https://www.twitch.tv/main"}
+SAVED_OTHERS = {
+    "general": {"webserver_port": 6000},
+    "stream_thumbnail_options": {"source": "org", "style": "netflix",
+                                 "overlayOrgIcon": True},
+}
+
+
+def _unreadSettings(monkeypatch, env, saved=None):
+    """A launch that could not read settings.json: `saved` in it now, or a
+    directory (still cannot be opened)."""
+    from src.core import SettingsManager as settingsModule
+
+    path = env.dir / "user_data" / "settings.json"
+    if saved is None:
+        path.mkdir()
+    else:
+        path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    SettingsManager.settings = {}   # env restores the harness's
+    return path
+
+
+def test_a_channel_added_after_an_unread_launch_keeps_the_saved_ones(
+        env, monkeypatch):
+    path = _unreadSettings(
+        monkeypatch, env, {**SAVED_OTHERS, "stream_channels": [SAVED_CHANNEL]})
+
+    assert env.service.AddChannel("Sub", "https://www.twitch.tv/sub") == 1
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        **SAVED_OTHERS, "stream_channels": [
+            SAVED_CHANNEL, {"name": "Sub", "url": "https://www.twitch.tv/sub"}]}
+
+
+def test_the_org_reset_after_an_unread_launch_reads_the_saved_source(
+        env, monkeypatch):
+    # The stand-in reads "banner": the saved "org" would have stayed, with
+    # its image gone.
+    path = _unreadSettings(monkeypatch, env, SAVED_OTHERS)
+
+    env.service.ResetOrgAssets()
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        **SAVED_OTHERS, "stream_thumbnail_options": {
+            "source": "banner", "style": "netflix", "overlayOrgIcon": True}}
+
+
+def test_nothing_changes_while_settings_json_cannot_be_opened(
+        env, monkeypatch):
+    path = _unreadSettings(monkeypatch, env)
+
+    for change in (
+            lambda: env.service.AddChannel("Sub", "https://www.twitch.tv/s"),
+            lambda: env.service.UpdateChannel(0, "Sub", "https://x.tv/s"),
+            lambda: env.service.DeleteChannel(0),
+            lambda: env.service.SetThumbnailOptions({"style": "netflix"})):
+        with pytest.raises(SettingsUnreadable):
+            change()
+    env.service.ResetOrgAssets()   # the files go; the source is left
+
+    assert SettingsManager.settings == {}
+    assert SettingsManager.loadFailed is True
+    assert path.is_dir()
 
