@@ -17,6 +17,7 @@ import {
 } from "../PanelShell/clipboard";
 import socketConnection from "../websocketConnection";
 import table from "../Top8Page/characterPick.cases.json";
+import setCases from "./setRows.cases.json";
 import ScorePage, {POST_READ_DEBOUNCE_MS, runOutcome} from "./index";
 import {loadBody} from "./Cards";
 
@@ -51,6 +52,30 @@ jest.mock("../PanelShell/clipboard", () => ({
 }));
 
 const BOARD = "/api/v1/scoreboards";
+const CUP = "https://www.start.gg/tournament/cup/event/singles";
+const PHASES = [{id: 11, name: "Pools"}, {id: 12, name: "Top 8"}];
+// When the rows were fetched: 09:05 local.
+const FETCHED_AT = new Date(2026, 10, 10, 9, 5).getTime() / 1000;
+
+// set_selection.{phases,sets,stations} in the state.
+function fetchState(status = "idle", rest = {}) {
+    return {status, error: "", done: 0, total: 0, failed: 0, revision: 1, ...rest};
+}
+
+function selection(lists = {}) {
+    return {phases: fetchState("done"), sets: fetchState(), stations: fetchState(),
+            ...lists};
+}
+
+// GET /tournament/{phases,sets,stations}.
+function listOf(rows, {status = "done", url = CUP, query = null} = {}) {
+    return {status, url, fetchedAt: url ? FETCHED_AT : null, rows,
+            query: url ? query : null};
+}
+
+function noFollow() {
+    return {station: null, poll: null, pollingEnabled: false, setId: null};
+}
 
 function slot(fields = {}) {
     return {
@@ -148,6 +173,7 @@ function setState(rest = {}) {
                                  displayTournamentName: "", url: ""},
                 game: {codename: "tgame"},
                 stream: {url: ""},
+                set_selection: selection(),
                 ...rest,
             },
             revision,
@@ -238,7 +264,10 @@ beforeEach(() => {
         formatFailures: 0,
         // GET /api/v1/state.
         state: {},
-        openSetStatus: 200,
+        phases: listOf(PHASES),
+        sets: listOf([], {status: "idle", url: ""}),
+        stations: listOf([], {status: "idle", url: ""}),
+        follow: {1: noFollow(), 2: noFollow()},
     };
     if (typeof AbortSignal.timeout !== "function") {
         AbortSignal.timeout = () => undefined;
@@ -279,6 +308,14 @@ beforeEach(() => {
             if (post) {
                 return answer(200, {ok: true, data: server.post[post[1]]});
             }
+            const follow = path.match(/^\/api\/v1\/scoreboards\/(\d)\/follow$/);
+            if (follow) {
+                return answer(200, {ok: true, data: server.follow[follow[1]]});
+            }
+            const list = path.match(/^\/api\/v1\/tournament\/(phases|sets|stations)$/);
+            if (list) {
+                return answer(200, {ok: true, data: server[list[1]]});
+            }
             const published = path.match(/^\/api\/v1\/scoreboards\/(\d)$/);
             if (published) {
                 return answer(200, {ok: true, data: {
@@ -286,9 +323,6 @@ beforeEach(() => {
             }
             if (path === "/api/v1/state") {
                 return answer(200, {ok: true, data: server.state});
-            }
-            if (/^\/scoreboard\d-open-set$/.test(path)) {
-                return answer(server.openSetStatus, "OK");
             }
             if (path === "/api/v1/match-names/candidates") {
                 return answer(200, {ok: true, data: {
@@ -1381,35 +1415,801 @@ test("ブラウザ版を開く opens the team version on the team board, none on
         .toBeNull();
 });
 
+
+// ── the set selection (S4ab) ─────────────────────────────────────────────
+
 const TOURNAMENT = {tournamentName: "Cup", eventName: "", displayTournamentName: "",
-                    url: "https://www.start.gg/tournament/cup/event/singles"};
+                    url: CUP};
+const SET_ROWS = setCases.sets.map((item) => item.row);
+const STATION_ROWS = setCases.stations.map((item) => item.row);
+const SET_CELLS = setCases.sets.map((item) => item.cells);
+// What GET /tournament/sets has after a fetch of phase 12.
+const FETCHED = {query: {phase: 12, finished: false}};
 
-test("大会の試合を選ぶ opens the desktop's set window through the legacy route",
+function selectionState(lists = {}) {
+    setState({tournamentInfo: TOURNAMENT, set_selection: selection(lists)});
+}
+
+async function selectionPage(lists = {}) {
+    selectionState(lists);
+    await renderPage();
+}
+
+async function openSets() {
+    fireEvent.click(button("score_open_sets"));
+    await settle();
+    await settle();
+    return screen.getByRole("dialog", {name: i18n.t("score_sets_title")});
+}
+
+async function openStations() {
+    const sets = await openSets();
+    fireEvent.click(within(sets).getByRole("button",
+                                           {name: i18n.t("score_sets_track")}));
+    await settle(1000);
+    await settle();
+    return screen.getByRole("dialog", {name: i18n.t("score_stations_title")});
+}
+
+async function closeDialog(dialog) {
+    fireEvent.click(within(dialog).getByRole("button",
+                                             {name: i18n.t("score_sets_close")}));
+    await settle(1000);
+}
+
+function tableRows(dialog) {
+    return within(within(dialog).getByRole("table")).getAllByRole("row").slice(1);
+}
+
+function cellsOf(dialog) {
+    return tableRows(dialog).map((row) =>
+        within(row).getAllByRole("cell").map((cell) => cell.textContent));
+}
+
+function rowWith(dialog, text) {
+    return tableRows(dialog).find((row) => within(row).getAllByRole("cell")
+        .some((cell) => cell.textContent === text));
+}
+
+function statusOf(dialog) {
+    return within(dialog).getByRole("status").textContent;
+}
+
+function inDialog(dialog, role, key, options) {
+    return within(dialog).getByRole(role, {name: i18n.t(key, options)});
+}
+
+async function pickPhase(dialog, name) {
+    fireEvent.mouseDown(within(dialog).getByRole("combobox"));
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    fireEvent.click(options.find((option) => option.textContent === name));
+    await settle(1000);
+    await settle();
+    return options.map((option) => option.textContent);
+}
+
+const refreshes = () => writes("POST", "/api/v1/tournament/sets:refresh");
+const loads = (n = 1) => writes("POST", `${BOARD}/${n}:load-set`);
+
+test("大会の試合を選ぶ opens the page's dialog: the lists read, nothing fetched",
      async () => {
-    setState({tournamentInfo: TOURNAMENT});
-    server.format = {format: "team", board: 2};
-    await renderPage(true);
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    const dialog = await openSets();
 
-    fireEvent.click(button("score_open_sets"));
-    await settle();
-    await settle();
-    expect(reads("/scoreboard2-open-set")).toBe(1);
-
-    // The headless app has no window to open.
-    server.openSetStatus = 503;
-    fireEvent.click(button("score_open_sets"));
-    expect(await screen.findByText(i18n.t("score_open_sets_unavailable")))
-        .toBeInTheDocument();
+    expect(reads("/api/v1/tournament/phases")).toBe(1);
+    expect(reads("/api/v1/tournament/sets")).toBe(1);
+    // Opening goes to start.gg for nothing (the phases are there), and to
+    // the desktop's window no more.
+    expect(requests().filter((call) => call.method !== "GET")).toEqual([]);
+    expect(reads("/scoreboard1-open-set")).toBe(0);
+    // The window's columns, doubles and all (the shared table).
+    expect(within(dialog).getAllByRole("columnheader").map((cell) => cell.textContent))
+        .toEqual(["score_sets_col_stream", "score_sets_col_station",
+                  "score_sets_col_phase", "score_sets_col_pool",
+                  "score_sets_col_match"].map((key) => i18n.t(key))
+            .concat([i18n.t("score_sets_col_player", {n: 1}),
+                     i18n.t("score_sets_col_player", {n: 2})]));
+    expect(cellsOf(dialog)).toEqual(SET_CELLS);
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_count",
+                                         {n: SET_ROWS.length, at: "09:05"}));
 });
 
-test("大会の試合を選ぶ shows with a tournament, on the desktop's boards 1/2 only",
+test("the phases are asked for when there are none to read; with none the combo hides",
+     async () => {
+    server.phases = listOf([], {status: "idle", url: ""});
+    await selectionPage({phases: fetchState("idle")});
+    let dialog = await openSets();
+
+    expect(writes("POST", "/api/v1/tournament/phases:refresh")).toEqual([{}]);
+    expect(refreshes()).toEqual([]);
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_idle"));
+    // Not known yet: an empty list is not "no phases" (a fetch would ask for
+    // the whole event), so nothing is fetched -- the button, 完了 neither.
+    const fetch = inDialog(dialog, "button", "score_sets_fetch");
+    const finished = inDialog(dialog, "checkbox", "score_sets_finished");
+    expect(fetch).toBeDisabled();
+    fireEvent.click(finished);
+    fireEvent.click(finished);
+    await settle();
+    expect(refreshes()).toEqual([]);
+
+    // Read again once their fetch ends, not while it runs.
+    selectionState({phases: fetchState("running", {revision: 2})});
+    await settle();
+    await settle();
+    expect(reads("/api/v1/tournament/phases")).toBe(1);
+    expect(fetch).toBeDisabled();
+    // An event with no phases: fetched whole, as the window does.
+    server.phases = listOf([]);
+    selectionState({phases: fetchState("done", {revision: 2})});
+    await settle();
+    await settle();
+    expect(reads("/api/v1/tournament/phases")).toBe(2);
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+    expect(fetch).toBeEnabled();
+    fireEvent.click(fetch);
+    await settle();
+    await settle();
+    expect(refreshes()).toEqual([{phase: null, finished: false}]);
+
+    // Fetched again: the empty list read before is not this fetch's.
+    selectionState({phases: fetchState("running", {revision: 3})});
+    await settle();
+    expect(fetch).toBeDisabled();
+    const phasesRead = holdNext("/api/v1/tournament/phases");
+    selectionState({phases: fetchState("done", {revision: 3})});
+    await settle();
+    expect(fetch).toBeDisabled();
+    fireEvent.click(finished);
+    await settle();
+    expect(refreshes()).toHaveLength(1);
+    fireEvent.click(finished);
+    await phasesRead.answer(listOf(PHASES));
+    await settle();
+    expect(within(dialog).getByRole("combobox"))
+        .toHaveTextContent(i18n.t("score_sets_phase_none"));
+    expect(fetch).toBeEnabled();
+
+    // Opened again with them there: not asked for again.
+    await closeDialog(dialog);
+    dialog = await openSets();
+    expect(writes("POST", "/api/v1/tournament/phases:refresh")).toHaveLength(1);
+    // Their fetch failed: asked for again (the window's empty list), and
+    // said, with a way to ask again, while it is so.
+    await closeDialog(dialog);
+    selectionState({phases: fetchState("error", {revision: 4, error: "fetch_failed"})});
+    dialog = await openSets();
+    expect(writes("POST", "/api/v1/tournament/phases:refresh")).toHaveLength(2);
+    expect(within(dialog).getByText(i18n.t("score_sets_phases_failed")))
+        .toBeInTheDocument();
+    expect(inDialog(dialog, "button", "score_sets_fetch")).toBeDisabled();
+    fireEvent.click(inDialog(dialog, "button", "score_reload"));
+    await settle();
+    expect(writes("POST", "/api/v1/tournament/phases:refresh")).toHaveLength(3);
+});
+
+test("phases that cannot be read are said, with a reload; nothing fetched meanwhile",
+     async () => {
+    refuse["/api/v1/tournament/phases"] = {status: 400};
+    await selectionPage();
+    const dialog = await openSets();
+    expect(within(dialog).getByText(i18n.t("score_sets_phases_read_failed")))
+        .toBeInTheDocument();
+    expect(inDialog(dialog, "button", "score_sets_fetch")).toBeDisabled();
+
+    delete refuse["/api/v1/tournament/phases"];
+    fireEvent.click(inDialog(dialog, "button", "score_reload"));
+    await settle();
+    await settle();
+    expect(within(dialog).queryByText(i18n.t("score_sets_phases_read_failed")))
+        .toBeNull();
+    expect(within(dialog).getByRole("combobox")).toBeInTheDocument();
+    expect(inDialog(dialog, "button", "score_sets_fetch")).toBeEnabled();
+});
+
+test("a phase picked fetches its sets, the same one again too; the placeholder none",
+     async () => {
+    await selectionPage();
+    const dialog = await openSets();
+    expect(within(dialog).getByRole("combobox"))
+        .toHaveTextContent(i18n.t("score_sets_phase_none"));
+
+    expect(await pickPhase(dialog, "Top 8")).toEqual([
+        i18n.t("score_sets_phase_none"), i18n.t("score_sets_phase_all"),
+        "Pools", "Top 8"]);
+    expect(refreshes()).toEqual([{phase: 12, finished: false}]);
+    await pickPhase(dialog, "Top 8");
+    await pickPhase(dialog, i18n.t("score_sets_phase_all"));
+    expect(refreshes()).toEqual([{phase: 12, finished: false},
+                                 {phase: 12, finished: false},
+                                 {phase: "all", finished: false}]);
+
+    // The placeholder fetches nothing, and the button then asks for a phase.
+    await pickPhase(dialog, i18n.t("score_sets_phase_none"));
+    fireEvent.click(inDialog(dialog, "button", "score_sets_fetch"));
+    await settle();
+    expect(refreshes()).toHaveLength(3);
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_choose_phase"));
+});
+
+test("the phase shown first: the only one, else the one the rows were fetched with",
+     async () => {
+    server.phases = listOf([PHASES[0]]);
+    await selectionPage();
+    let dialog = await openSets();
+    expect(within(dialog).getByRole("combobox")).toHaveTextContent("Pools");
+    fireEvent.click(inDialog(dialog, "button", "score_sets_fetch"));
+    await settle();
+    await settle();
+    expect(refreshes()).toEqual([{phase: 11, finished: false}]);
+    await closeDialog(dialog);
+
+    // Rows of the whole event with its completed sets: their query comes
+    // back with them (the window's cache).
+    server.phases = listOf(PHASES);
+    server.sets = listOf(SET_ROWS, {query: {phase: "all", finished: true}});
+    dialog = await openSets();
+    expect(within(dialog).getByRole("combobox"))
+        .toHaveTextContent(i18n.t("score_sets_phase_all"));
+    expect(inDialog(dialog, "checkbox", "score_sets_finished")).toBeChecked();
+});
+
+test("fetching: the button waits for the answer and the fetch; 完了 fetches again, complete pairs filter",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage({sets: fetchState("done", {revision: 3})});
+    const dialog = await openSets();
+    const fetch = inDialog(dialog, "button", "score_sets_fetch");
+
+    const held = holdNext("/api/v1/tournament/sets:refresh");
+    fireEvent.click(fetch);
+    await settle();
+    expect(fetch).toBeDisabled();
+    await held.answer({revision: 4});
+    await settle();
+    expect(fetch).toBeEnabled();
+    expect(refreshes()).toEqual([{phase: 12, finished: false}]);
+
+    // The fetch running: the button off, the rows there.
+    selectionState({sets: fetchState("running", {revision: 4})});
+    await settle();
+    expect(fetch).toBeDisabled();
+    expect(cellsOf(dialog)).toEqual(SET_CELLS);
+    selectionState({sets: fetchState("done", {revision: 4})});
+    await settle();
+    await settle();
+    expect(fetch).toBeEnabled();
+
+    fireEvent.click(inDialog(dialog, "checkbox", "score_sets_finished"));
+    await settle();
+    await settle();
+    expect(refreshes()).toEqual([{phase: 12, finished: false},
+                                 {phase: 12, finished: true}]);
+
+    // The page's filter: nothing asked.
+    fireEvent.click(inDialog(dialog, "checkbox", "score_sets_complete_pairs"));
+    await settle();
+    expect(cellsOf(dialog)).toEqual(setCases.sets.filter((item) => item.complete)
+        .map((item) => item.cells));
+    expect(refreshes()).toHaveLength(2);
+});
+
+test("the progress and the status: busy, then the pages; what failed and no tournament",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    const dialog = await openSets();
+    expect(within(dialog).queryByRole("progressbar")).toBeNull();
+
+    selectionState({sets: fetchState("running", {revision: 2})});
+    await settle();
+    expect(within(dialog).getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_fetching"));
+    expect(cellsOf(dialog)).toEqual(SET_CELLS);
+
+    selectionState({sets: fetchState("running", {revision: 2, done: 2, total: 8})});
+    await settle();
+    expect(within(dialog).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_fetching_pages",
+                                         {done: 2, total: 8}));
+
+    selectionState({sets: fetchState("done", {revision: 2, done: 8, total: 8,
+                                              failed: 1})});
+    await settle();
+    await settle();
+    expect(within(dialog).queryByRole("progressbar")).toBeNull();
+    expect(statusOf(dialog)).toBe(
+        `${i18n.t("score_sets_count", {n: SET_ROWS.length, at: "09:05"})} `
+        + i18n.t("score_sets_failed_pages", {n: 1}));
+
+    selectionState({sets: fetchState("error", {revision: 3, error: "fetch_failed"})});
+    await settle();
+    await settle();
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_failed"));
+
+    refuse["/api/v1/tournament/sets:refresh"] = {status: 409, code: "NOT_READY"};
+    fireEvent.click(inDialog(dialog, "button", "score_sets_fetch"));
+    await settle();
+    await settle();
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_no_tournament"));
+});
+
+test("a list that cannot be read is said, with a reload", async () => {
+    refuse["/api/v1/tournament/sets"] = {status: 400};
+    await selectionPage();
+    const dialog = await openSets();
+    expect(within(dialog).getByText(i18n.t("score_sets_read_failed")))
+        .toBeInTheDocument();
+
+    delete refuse["/api/v1/tournament/sets"];
+    server.sets = listOf(SET_ROWS, FETCHED);
+    fireEvent.click(inDialog(dialog, "button", "score_reload"));
+    await settle();
+    await settle();
+    expect(within(dialog).queryByText(i18n.t("score_sets_read_failed"))).toBeNull();
+    expect(cellsOf(dialog)).toEqual(SET_CELLS);
+});
+
+test("a phase core no longer knows (400 / 404) reads the phases again and asks for one",
+     async () => {
+    await selectionPage();
+    const dialog = await openSets();
+    expect(reads("/api/v1/tournament/phases")).toBe(1);
+
+    refuse["/api/v1/tournament/sets:refresh"] = {status: 400, code: "PHASE_REQUIRED"};
+    await pickPhase(dialog, "Top 8");
+    await settle();
+    expect(refreshes()).toEqual([{phase: 12, finished: false}]);
+    expect(reads("/api/v1/tournament/phases")).toBe(2);
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_choose_phase"));
+
+    refuse["/api/v1/tournament/sets:refresh"] = {status: 404, code: "NOT_FOUND"};
+    await pickPhase(dialog, "Pools");
+    await settle();
+    expect(refreshes()).toEqual([{phase: 12, finished: false},
+                                 {phase: 11, finished: false}]);
+    expect(reads("/api/v1/tournament/phases")).toBe(3);
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_choose_phase"));
+
+    // Another refusal says only that it failed.
+    refuse["/api/v1/tournament/sets:refresh"] = {status: 500};
+    await pickPhase(dialog, "Pools");
+    await settle();
+    expect(reads("/api/v1/tournament/phases")).toBe(3);
+    expect(statusOf(dialog)).toBe(i18n.t("request_failed"));
+});
+
+test("every header's sort button is named by its column", async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    const sets = await openSets();
+    const labels = (dialog) => within(dialog).getAllByRole("columnheader")
+        .map((cell) => within(cell).getByRole("button").getAttribute("aria-label"));
+    expect(labels(sets)).toEqual(within(sets).getAllByRole("columnheader")
+        .map((cell) => cell.textContent));
+    // The first one too (the browser left it nameless).
+    expect(labels(sets)[0]).toBe(i18n.t("score_sets_col_stream"));
+
+    fireEvent.click(inDialog(sets, "button", "score_sets_track"));
+    await settle(1000);
+    const stations = screen.getByRole("dialog", {name: i18n.t("score_stations_title")});
+    expect(labels(stations)).toEqual(["score_stations_col_type", "score_stations_col_id",
+                                     "score_stations_col_stream",
+                                     "score_stations_col_identifier"]
+        .map((key) => i18n.t(key)));
+});
+
+test("another board shown closes the dialogs (each board has its own)", async () => {
+    await selectionPage();
+    await openSets();
+    server.format = {format: "team", board: 2};
+    await notify("battle_format");
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await openStations();
+    server.format = {format: "singles", board: 1};
+    await notify("battle_format");
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("the search reaches the hidden id; a header sorts, kept from one opening to the next",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    let dialog = await openSets();
+    const search = inDialog(dialog, "searchbox", "score_sets_filter");
+
+    fireEvent.change(search, {target: {value: "1006"}});
+    expect(cellsOf(dialog)).toEqual([SET_CELLS[5]]);
+    fireEvent.change(search, {target: {value: "alice"}});
+    expect(cellsOf(dialog)).toEqual([SET_CELLS[4], SET_CELLS[6]]);
+    fireEvent.change(search, {target: {value: ""}});
+
+    const player1 = () => cellsOf(dialog).map((cells) => cells[5]);
+    // Qt's order is the code units' (Array.prototype.sort's).
+    const ascending = SET_CELLS.map((cells) => cells[5]).sort();
+    fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
+    expect(player1()).toEqual(ascending);
+    fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
+    expect(player1()).toEqual([...ascending].reverse());
+
+    await closeDialog(dialog);
+    dialog = await openSets();
+    expect(player1()).toEqual([...ascending].reverse());
+    expect(within(dialog).getByRole("columnheader", {
+        name: i18n.t("score_sets_col_player", {n: 1})}))
+        .toHaveAttribute("aria-sort", "descending");
+
+    // Enter on a focused header is the header's (it sorts), not the table's:
+    // no row is loaded.
+    fireEvent.keyDown(inDialog(dialog, "button", "score_sets_col_phase"),
+                      {key: "Enter"});
+    await settle(1000);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(loads()).toEqual([]);
+});
+
+test("the set dialog's search and complete pairs are each board's, its order every board's",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    let dialog = await openSets();
+    const player1 = () => cellsOf(dialog).map((cells) => cells[5]);
+    const pairs = () => inDialog(dialog, "checkbox", "score_sets_complete_pairs");
+    const search = () => inDialog(dialog, "searchbox", "score_sets_filter");
+    fireEvent.change(search(), {target: {value: "a"}});
+    fireEvent.click(pairs());
+    fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
+    fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
+    const board1 = player1();
+    expect(board1.length).toBeLessThan(SET_ROWS.length);
+    await closeDialog(dialog);
+
+    // Board 2's window: nothing typed, no box ticked; the order the same.
+    server.format = {format: "team", board: 2};
+    await notify("battle_format");
+    dialog = await openSets();
+    expect(search()).toHaveValue("");
+    expect(pairs()).not.toBeChecked();
+    expect(player1()).toEqual(SET_CELLS.map((cells) => cells[5]).sort().reverse());
+    fireEvent.change(search(), {target: {value: "bravo"}});
+    await closeDialog(dialog);
+
+    // Board 1's again: as it was left.
+    server.format = {format: "singles", board: 1};
+    await notify("battle_format");
+    dialog = await openSets();
+    expect(search()).toHaveValue("a");
+    expect(pairs()).toBeChecked();
+    expect(player1()).toEqual(board1);
+});
+
+test("a row is loaded by a double click, OK or Enter, stopping the fetch that runs",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage({sets: fetchState("running", {revision: 2})});
+    let dialog = await openSets();
+
+    fireEvent.doubleClick(rowWith(dialog, "Team A (A1, A2)"));
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The fetch is stopped first.
+    expect(requests().filter((call) => call.method === "POST")).toEqual([
+        {method: "POST", path: "/api/v1/tournament/sets:cancel", body: {}},
+        {method: "POST", path: `${BOARD}/1:load-set`, body: {setId: 1006}}]);
+
+    // None running: nothing to stop.
+    selectionState({sets: fetchState("done", {revision: 2})});
+    await settle();
+    dialog = await openSets();
+    fireEvent.click(rowWith(dialog, "BRAVO (BRAVO, BOB)"));
+    expect(rowWith(dialog, "BRAVO (BRAVO, BOB)"))
+        .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(loads()).toEqual([{setId: 1006}, {setId: 1005}]);
+
+    dialog = await openSets();
+    fireEvent.click(rowWith(dialog, "アルファ"));
+    fireEvent.keyDown(within(dialog).getByRole("table"), {key: "Enter"});
+    await settle(1000);
+    expect(loads()).toEqual([{setId: 1006}, {setId: 1005}, {setId: 1011}]);
+    expect(writes("POST", "/api/v1/tournament/sets:cancel")).toHaveLength(1);
+});
+
+test("OK / Enter with no row selected load the first row shown, as the windows do",
+     async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    await selectionPage();
+    let dialog = await openSets();
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(loads()).toEqual([{setId: 1001}]);
+
+    dialog = await openSets();
+    fireEvent.change(inDialog(dialog, "searchbox", "score_sets_filter"),
+                     {target: {value: "alice"}});
+    fireEvent.keyDown(within(dialog).getByRole("table"), {key: "Enter"});
+    await settle(1000);
+    expect(loads()).toEqual([{setId: 1001}, {setId: 1005}]);
+
+    // Nothing shown: the dialog closes, nothing is loaded. (The search is
+    // still there: the window kept it too.)
+    dialog = await openSets();
+    const search = inDialog(dialog, "searchbox", "score_sets_filter");
+    expect(search).toHaveValue("alice");
+    fireEvent.change(search, {target: {value: "nobody plays here"}});
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(loads()).toHaveLength(2);
+});
+
+test("the station dialog: fetched at each opening, a row followed as it is", async () => {
+    await selectionPage();
+    let dialog = await openStations();
+    expect(screen.queryByRole("dialog", {name: i18n.t("score_sets_title")})).toBeNull();
+    expect(writes("POST", "/api/v1/tournament/stations:refresh")).toEqual([{}]);
+    expect(reads("/api/v1/tournament/stations")).toBe(0);
+    expect(cellsOf(dialog)).toEqual([]);
+
+    // Its fetch runs, then ends: its rows.
+    server.stations = listOf(STATION_ROWS);
+    selectionState({stations: fetchState("running", {revision: 2})});
+    await settle();
+    expect(within(dialog).getByRole("progressbar")).toBeInTheDocument();
+    expect(reads("/api/v1/tournament/stations")).toBe(0);
+    selectionState({stations: fetchState("done", {revision: 2})});
+    await settle();
+    await settle();
+    expect(reads("/api/v1/tournament/stations")).toBe(1);
+    expect(within(dialog).getAllByRole("columnheader").map((cell) => cell.textContent))
+        .toEqual(["score_stations_col_type", "score_stations_col_id",
+                  "score_stations_col_stream", "score_stations_col_identifier"]
+            .map((key) => i18n.t(key)));
+    expect(cellsOf(dialog)).toEqual(setCases.stations.map((item) => item.cells));
+
+    const search = inDialog(dialog, "searchbox", "score_sets_filter");
+    fireEvent.change(search, {target: {value: "CHAN"}});
+    expect(cellsOf(dialog).map((cells) => cells[1])).toEqual(["77", "90"]);
+    fireEvent.change(search, {target: {value: ""}});
+    fireEvent.click(inDialog(dialog, "button", "score_stations_col_identifier"));
+    fireEvent.click(inDialog(dialog, "button", "score_stations_col_identifier"));
+    // A missing identifier is blank (the window writes "None": not copied).
+    expect(cellsOf(dialog).map((cells) => cells[3]))
+        .toEqual(["channel", "5", "4", ""]);
+
+    fireEvent.doubleClick(rowWith(dialog, "90"));
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(writes("POST", `${BOARD}/1:follow`)).toEqual([STATION_ROWS[2]]);
+
+    // Opened again: emptied and fetched again; the order stays (the window
+    // is hidden, not destroyed).
+    dialog = await openStations();
+    expect(writes("POST", "/api/v1/tournament/stations:refresh")).toHaveLength(2);
+    expect(cellsOf(dialog)).toEqual([]);
+    selectionState({stations: fetchState("done", {revision: 3})});
+    await settle();
+    await settle();
+    expect(cellsOf(dialog).map((cells) => cells[1])).toEqual(["90", "78", "77", "91"]);
+    // None selected: the first row shown, as the window.
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(writes("POST", `${BOARD}/1:follow`))
+        .toEqual([STATION_ROWS[2], STATION_ROWS[2]]);
+});
+
+test("the station dialog keeps each board's search and order; Enter in the search is OK",
+     async () => {
+    server.stations = listOf(STATION_ROWS);
+    await selectionPage();
+    let dialog = await openStations();
+    selectionState({stations: fetchState("done", {revision: 2})});
+    await settle();
+    await settle();
+    fireEvent.change(inDialog(dialog, "searchbox", "score_sets_filter"),
+                     {target: {value: "CHAN"}});
+    fireEvent.click(inDialog(dialog, "button", "score_stations_col_identifier"));
+    fireEvent.click(inDialog(dialog, "button", "score_stations_col_identifier"));
+    expect(cellsOf(dialog).map((cells) => cells[1])).toEqual(["90", "77"]);
+    await closeDialog(dialog);
+
+    // Board 2's window is another: nothing typed, the order as read.
+    server.format = {format: "team", board: 2};
+    await notify("battle_format");
+    dialog = await openStations();
+    selectionState({stations: fetchState("done", {revision: 3})});
+    await settle();
+    await settle();
+    expect(inDialog(dialog, "searchbox", "score_sets_filter")).toHaveValue("");
+    expect(cellsOf(dialog)).toEqual(setCases.stations.map((item) => item.cells));
+    fireEvent.change(inDialog(dialog, "searchbox", "score_sets_filter"),
+                     {target: {value: "78"}});
+    await closeDialog(dialog);
+
+    // Board 1's again: as it was left.
+    server.format = {format: "singles", board: 1};
+    await notify("battle_format");
+    dialog = await openStations();
+    selectionState({stations: fetchState("done", {revision: 4})});
+    await settle();
+    await settle();
+    const search = inDialog(dialog, "searchbox", "score_sets_filter");
+    expect(search).toHaveValue("CHAN");
+    expect(cellsOf(dialog).map((cells) => cells[1])).toEqual(["90", "77"]);
+    expect(within(dialog).getByRole("columnheader", {
+        name: i18n.t("score_stations_col_identifier")}))
+        .toHaveAttribute("aria-sort", "descending");
+
+    // The Enter that ends an IME conversion is the IME's.
+    fireEvent.keyDown(search, {key: "Enter", keyCode: 229, which: 229});
+    fireEvent.keyDown(search, {key: "Enter", isComposing: true});
+    await settle(1000);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(writes("POST", `${BOARD}/1:follow`)).toEqual([]);
+    // Enter is OK: the row selected, else the first shown (chosenRow).
+    fireEvent.click(rowWith(dialog, "77"));
+    fireEvent.keyDown(search, {key: "Enter"});
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    dialog = await openStations();
+    selectionState({stations: fetchState("done", {revision: 5})});
+    await settle();
+    await settle();
+    fireEvent.keyDown(inDialog(dialog, "searchbox", "score_sets_filter"),
+                      {key: "Enter"});
+    await settle(1000);
+    expect(writes("POST", `${BOARD}/1:follow`))
+        .toEqual([STATION_ROWS[0], STATION_ROWS[2]]);
+});
+
+test("the station dialog says its fetch failed, and a list it cannot read with a reload",
+     async () => {
+    await selectionPage();
+    let dialog = await openStations();
+    selectionState({stations: fetchState("error", {revision: 2, error: "fetch_failed"})});
+    await settle();
+    await settle();
+    expect(within(dialog).getByText(i18n.t("score_stations_failed")))
+        .toBeInTheDocument();
+    await closeDialog(dialog);
+
+    refuse["/api/v1/tournament/stations"] = {status: 400};
+    dialog = await openStations();
+    expect(within(dialog).queryByText(i18n.t("score_stations_failed"))).toBeNull();
+    selectionState({stations: fetchState("done", {revision: 3})});
+    await settle();
+    await settle();
+    expect(within(dialog).getByText(i18n.t("score_sets_read_failed")))
+        .toBeInTheDocument();
+
+    delete refuse["/api/v1/tournament/stations"];
+    server.stations = listOf(STATION_ROWS);
+    fireEvent.click(inDialog(dialog, "button", "score_reload"));
+    await settle();
+    await settle();
+    expect(within(dialog).queryByText(i18n.t("score_sets_read_failed"))).toBeNull();
+    expect(cellsOf(dialog)).toEqual(setCases.stations.map((item) => item.cells));
+});
+
+test("the station dialog says there is no tournament, as a follow refused for it",
+     async () => {
+    refuse["/api/v1/tournament/stations:refresh"] = {status: 409, code: "NOT_READY"};
+    await selectionPage();
+    const dialog = await openStations();
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_no_tournament"));
+
+    server.stations = listOf(STATION_ROWS);
+    selectionState({stations: fetchState("done", {revision: 2})});
+    await settle();
+    await settle();
+    refuse[`${BOARD}/1:follow`] = {status: 409, code: "NOT_READY"};
+    fireEvent.doubleClick(rowWith(dialog, "77"));
+    await settle(1000);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(i18n.t("score_sets_no_tournament"))).toBeInTheDocument();
+});
+
+test("the timer row: what the board follows, its seconds counted down, read again",
+     async () => {
+    server.follow[1] = {station: null, setId: "1001", pollingEnabled: true,
+                        poll: {mode: "set", identifier: "1001", secondsLeft: 4}};
+    // No tournament: the row is the board's, as the Qt one.
+    await renderPage();
+    const row = () => screen.getByTestId("score-follow");
+    const seconds = () => within(row()).getByLabelText(i18n.t("score_follow_seconds"));
+    const followReads = () => reads(`${BOARD}/1/follow`);
+
+    expect(followReads()).toBe(1);
+    expect(row()).toHaveTextContent(i18n.t("score_follow_set"));
+    expect(seconds().textContent).toBe("4");
+    await settle(1000);
+    expect(seconds().textContent).toBe("3");
+    await settle(3000);
+    expect(seconds().textContent).toBe("0");
+    expect(followReads()).toBe(1);
+    // Past it the tick has come (a set's tells nothing): read again.
+    await settle(1000);
+    await settle();
+    expect(followReads()).toBe(2);
+    expect(seconds().textContent).toBe("4");
+
+    // Another board's notice is not this one's.
+    await notify("scoreboard_follow", {board: 2});
+    expect(followReads()).toBe(2);
+    server.follow[1].poll = {mode: "stream", identifier: "channel", secondsLeft: 2};
+    await notify("scoreboard_follow", {board: 1});
+    expect(followReads()).toBe(3);
+    expect(row()).toHaveTextContent(i18n.t("score_follow_stream", {id: "channel"}));
+    expect(seconds().textContent).toBe("2");
+    server.follow[1].poll = {mode: "station", identifier: 4, secondsLeft: 3};
+    await notify("scoreboard_follow", {board: 1});
+    expect(row()).toHaveTextContent(i18n.t("score_follow_station", {id: "4"}));
+    expect(seconds().textContent).toBe("3");
+
+    // The next tick not known (null): the number shown stays, as the Qt
+    // row's text does; a second on, it is read again.
+    await settle(1000);
+    expect(seconds().textContent).toBe("2");
+    server.follow[1].poll = {mode: "station", identifier: 4, secondsLeft: null};
+    await notify("scoreboard_follow", {board: 1});
+    expect(followReads()).toBe(5);
+    expect(seconds().textContent).toBe("2");
+    server.follow[1].poll = {mode: "station", identifier: 4, secondsLeft: 5};
+    await settle(1000);
+    await settle();
+    expect(followReads()).toBe(6);
+    expect(seconds().textContent).toBe("5");
+
+    // Back from a lost connection: read again.
+    act(() => {
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
+    });
+    act(() => {
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("connected"));
+    });
+    await settle();
+    await settle();
+    expect(followReads()).toBe(7);
+
+    // Cancelled: :stop-follow, and the row goes with the read after it.
+    server.follow[1] = noFollow();
+    fireEvent.click(button("score_follow_cancel"));
+    await settle();
+    await settle();
+    expect(writes("POST", `${BOARD}/1:stop-follow`)).toEqual([{}]);
+    expect(screen.queryByTestId("score-follow")).toBeNull();
+});
+
+test("no timer row on the crew board", async () => {
+    server.format = {format: "crew", board: 3};
+    await renderPage();
+    expect(reads(`${BOARD}/3/follow`)).toBe(0);
+    expect(screen.queryByTestId("score-follow")).toBeNull();
+});
+
+test("大会の試合を選ぶ: on boards 1/2 with a tournament, in a browser as well",
      async () => {
     // No tournament: as the Qt button (hidden).
-    await renderPage(true);
+    await renderPage(false);
     expect(screen.queryByRole("button", {name: i18n.t("score_open_sets")}))
         .toBeNull();
-    setState({tournamentInfo: TOURNAMENT});
+    selectionState();
     expect(button("score_open_sets")).toBeInTheDocument();
+
+    // The team board's: loads to board 2.
+    server.format = {format: "team", board: 2};
+    await notify("battle_format");
+    server.sets = listOf(SET_ROWS, FETCHED);
+    const dialog = await openSets();
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(loads(2)).toEqual([{setId: 1001}]);
 
     server.format = {format: "crew", board: 3};
     await notify("battle_format");
@@ -1417,9 +2217,27 @@ test("大会の試合を選ぶ shows with a tournament, on the desktop's boards 
         .toBeNull();
 });
 
-test("in a browser there is no 大会の試合を選ぶ", async () => {
-    setState({tournamentInfo: TOURNAMENT});
-    await renderPage(false);
-    expect(screen.queryByRole("button", {name: i18n.t("score_open_sets")}))
-        .toBeNull();
+test("a set selection write refused for want of the token is told once", async () => {
+    server.sets = listOf(SET_ROWS, FETCHED);
+    refuse["/api/v1/tournament/sets:refresh"] = {status: 401, code: "UNAUTHENTICATED"};
+    refuse[`${BOARD}/1:load-set`] = {status: 401, code: "UNAUTHENTICATED"};
+    await selectionPage();
+    const dialog = await openSets();
+
+    fireEvent.click(inDialog(dialog, "button", "score_sets_fetch"));
+    expect(await screen.findAllByText(i18n.t("stream_token_required")))
+        .toHaveLength(1);
+    // The status has nothing to add.
+    expect(statusOf(dialog)).toBe(i18n.t("score_sets_count",
+                                         {n: SET_ROWS.length, at: "09:05"}));
+
+    // A click closes the first snackbar (click-away); the next refusal
+    // opens none again.
+    fireEvent.click(rowWith(dialog, "Team A (A1, A2)"));
+    await settle(1000);
+    expect(screen.queryByText(i18n.t("stream_token_required"))).toBeNull();
+    fireEvent.click(inDialog(dialog, "button", "score_sets_ok"));
+    await settle(1000);
+    expect(loads()).toEqual([{setId: 1006}]);
+    expect(screen.queryByText(i18n.t("stream_token_required"))).toBeNull();
 });

@@ -5,7 +5,9 @@ import {keepLocal, serverUrl} from "./server";
 // shows the board of the battle format in force, writes a card's field through
 // PATCH .../fields (the headless boards are not held: published at once, so
 // the overlay follows), and follows a format switched elsewhere (the
-// `battle_format` notice). Checked through text, the DOM and the API.
+// `battle_format` notice). Checked through text, the DOM and the API. The set
+// selection (S4ab) needs a tournament, which the e2e app cannot load: only its
+// absence is checked here (the rest is ScorePage.test.js's).
 
 let pageErrors: string[] = [];
 
@@ -197,6 +199,22 @@ test("a team of three keeps two columns, its cards stacked in its own", async ({
     } finally {
         await setPlayers(request, before);
     }
+});
+
+// ── the set selection (S4ab) ──
+// The e2e app has no tournament (no start.gg to load one from): the page
+// offers no set selection, and the board follows nothing.
+
+test("with no tournament there is no set selection and no timer row", async ({page, request}) => {
+    const follow = await request.get(serverUrl("/api/v1/scoreboards/1/follow"));
+    expect(follow.ok()).toBe(true);
+    expect((await follow.json()).data?.poll).toBeNull();
+
+    await page.goto(serverUrl("/web/scoreboard"));
+    await expect(page.getByRole("combobox", {name: "1P player name"})).toBeVisible();
+    await expect(page.getByRole("button", {name: "Choose a match of the tournament"}))
+        .toHaveCount(0);
+    await expect(page.getByTestId("score-follow")).toHaveCount(0);
 });
 
 test("as the desktop's view opens it: in its language", async ({page}) => {

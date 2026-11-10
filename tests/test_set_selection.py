@@ -16,6 +16,7 @@ does with a chosen set or station is tests/test_set_follow.py's.
 import inspect
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -1470,6 +1471,78 @@ def test_the_station_window_shows_what_the_rows_say(service, autonaApp):
         assert [[row["type"], str(row["id"]), row["stream"],
                  str(row["identifier"])]
                 for row in service.Result(STATIONS)["rows"]] == table
+    finally:
+        window.deleteLater()
+        parent.deleteLater()
+        autonaApp.settle()
+
+
+# One table for core, the windows and the SCORE page (web/src/ScorePage/
+# setRows.ts, whose jest test reads the same file; ADR-005 S4ab): for each
+# set / station the provider answers, the row v1 makes of it and what the
+# window shows -- which is what the page shows of that row.
+PAGE_CASES = json.loads(
+    (Path(__file__).resolve().parent.parent / "web" / "src" / "ScorePage"
+     / "setRows.cases.json").read_text(encoding="utf-8"))
+
+
+def test_the_page_s_table_has_core_s_rows():
+    for case in PAGE_CASES["sets"]:
+        assert selection.SetRow(case["set"]) == case["row"], case["why"]
+    assert selection.StationRows(
+        [case["station"] for case in PAGE_CASES["stations"]]) == [
+        case["row"] for case in PAGE_CASES["stations"]]
+
+
+def test_the_page_s_table_is_what_the_set_window_shows(
+        service, autonaApp, setWindow):
+    """The table's cells are the window's columns, its ids the hidden column
+    the search reaches, its complete pairs what "Show complete pairs" keeps;
+    and v1 answers its rows for the same fetch."""
+    cases = PAGE_CASES["sets"]
+    provider = FakeTournament(phases=[], sets=[case["set"] for case in cases])
+    _load(service, provider)
+    setWindow._onPhasesUpdated([])
+    setWindow._FetchSets()
+    _drain(autonaApp)
+
+    assert _table(setWindow) == [case["cells"] for case in cases]
+    assert [setWindow.model.item(r, setWindow.DATA_COLUMN).text()
+            for r in range(setWindow.model.rowCount())] == [
+        str(case["row"]["id"]) for case in cases]
+    setWindow.showCompletePairs.setChecked(True)
+    setWindow._RenderSets(setWindow._CachedSets())
+    assert _table(setWindow) == [
+        case["cells"] for case in cases if case["complete"]]
+
+    assert service.RefreshSets(None, False) == STARTED
+    _drain(autonaApp)
+    assert service.Result(SETS)["rows"] == [case["row"] for case in cases]
+
+
+def test_the_page_s_table_is_what_the_station_window_shows(service, autonaApp):
+    from qtpy.QtWidgets import QWidget
+    from src.AutonaSelectStationWindow import AutonaSelectStationWindow
+
+    cases = PAGE_CASES["stations"]
+    provider = FakeTournament(stations=[case["station"] for case in cases])
+    _load(service, provider)
+    parent = QWidget()
+    window = AutonaSelectStationWindow(parent, 1)
+    try:
+        window.LoadStations()
+        _drain(autonaApp)
+        model = window.proxyModel.sourceModel()
+        # `windowCells`: where the window differs from the page -- its
+        # str(None), which the page does not copy (it shows nothing).
+        assert [[model.item(r, c).text() for c in range(4)]
+                for r in range(model.rowCount())] == [
+            case.get("windowCells", case["cells"]) for case in cases]
+        assert any("windowCells" in case for case in cases)
+
+        _fetched(service, autonaApp, provider, STATIONS)
+        assert service.Result(STATIONS)["rows"] == [
+            case["row"] for case in cases]
     finally:
         window.deleteLater()
         parent.deleteLater()
