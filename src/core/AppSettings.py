@@ -52,8 +52,8 @@ SETTINGS = (
     Setting(GENERAL, "profanity_filter", "general.profanity_filter",
             True, BOOL),
     # Read as on when nothing is saved (SetFollowService.Polling); the
-    # desktop saves it on at every board build (SetFollowService.
-    # TurnOffPolling).
+    # desktop saves it on at every launch (SetFollowService.
+    # TurnOffPolling; at every board build until ADR-005 S4ac-1).
     Setting(GENERAL, "disable_autoupdate", "general.disable_autoupdate",
             True, BOOL),
     Setting(GENERAL, "disable_scoreupdate", "general.disable_scoreupdate",

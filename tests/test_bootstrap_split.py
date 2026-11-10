@@ -16,7 +16,8 @@ bootstrap_gui() adds the desktop's Qt adapters on top. These tests pin:
   asset adapter -- its slot on onLoadAssets running before the adapter's
   own startup restore, on a real emit -- registers the desktop's board host
   and game loader for the web operations, switches the player DB model on,
-  and still drops the persisted `score` subtree;
+  still drops the persisted `score` subtree, and makes the three boards in
+  its place, boards 1 / 2 held (ADR-005 S4ac-1);
 - that the wiring both shells make (bootstrap.wire_tournament_data /
   wire_web_server) is what the window and src/headless.py both call, and
   that neither makes those connections itself;
@@ -210,6 +211,10 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaUpdater()",
         "AutonaCountryHelper()",
         "AutonaScoreboardManager()",
+        # The desktop's boards, made at launch in core and boards 1 / 2 held
+        # (ADR-005 S4ac-1; `panel=True` is pinned by the probe below): after
+        # bootstrap_core() and the dock, before the Window.
+        "AutonaActions.instance.MakeBoards()",
         "AutonaShellOperations()",
         "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost("
         "AutonaScoreboardManager.instance)",
@@ -559,7 +564,8 @@ bootstrap_core()
 
 from src.core.StateManager import StateManager
 # A score subtree left over from the previous run, as LoadState() restores
-# it: bootstrap_gui() (AutonaScoreboardManager) must still drop it.
+# it: bootstrap_gui() must still drop it (AutonaActions.MakeBoards, ADR-005
+# S4ac-1; the scoreboard dock's constructor until then).
 StateManager.Set("score.1.team.1.player.1.name", "yesterday")
 StateManager.Set("score.4.team.1.teamName", "stale board")
 before = StateManager.Get("score")
@@ -581,6 +587,16 @@ from src.core.Actions import AutonaActions
 
 provider = AutonaTournamentDataProvider.instance
 adapter = AutonaGameAssetManager.instance
+
+# The boards as the bootstrap left them, before anything below writes.
+with StateManager.lock:
+    launch_boards = {
+        "score_after": StateManager.Get("score"),
+        "published": StateManager.lastSavedState.get("score"),
+        "held": sorted(StateManager.heldPrefixes),
+        "pending": [StateManager.HasPendingChanges(f"score.{n}")
+                    for n in (1, 2, 3)],
+    }
 
 # The provider re-applies its game on every scan (onLoadAssets), through
 # the selector the shell registered -- and it does so before the adapter's
@@ -609,7 +625,7 @@ provider.provider = None
 
 report({
     "score_before": before is not None,
-    "score_after": StateManager.Get("score"),
+    **launch_boards,
     "hotkeys": AutonaHotkeys.instance is not None,
     "actions_connected": AutonaHotkeys._actions_connected,
     "hotkeys_applied": HotkeyRules.applied,
@@ -633,8 +649,9 @@ report({
         == AutonaShellOperations.instance.StartImageRender],
     "shell_windows": [len(AutonaShellOperations.instance._setWindows),
                       len(AutonaShellOperations.instance._stationWindows)],
-    # No board is made by the bootstrap: the window's CreateScoreboard makes
-    # the one it shows (AutonaActions.EnsureBoard, ADR-005 S4y).
+    # Every board is made by the bootstrap (AutonaActions.MakeBoards, ADR-005
+    # S4ac-1). None was until then: the window's CreateScoreboard made the
+    # one it showed (AutonaActions.EnsureBoard, ADR-005 S4y).
     "boards_ensured": [AutonaActions.instance.BoardEnsured(n)
                        for n in (1, 2, 3)],
     "player_db_model": AutonaPlayerDB.modelEnabled,
@@ -650,7 +667,19 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     result = _probe(tmp_path, _GUI_SCRIPT)
 
     assert result["score_before"] is True
-    assert result["score_after"] in (None, {})
+    # The restored subtree is gone, the stale board with it, and the three
+    # boards are made in its place (ADR-005 S4ac-1): published as written,
+    # boards 1 / 2 behind their 反映 button, nothing pending.
+    score = result["score_after"]
+    assert set(score) == {"1", "2", "3"}
+    assert "yesterday" not in json.dumps(score)
+    assert score["1"]["team"]["1"]["color"] and score["2"]["team"]["1"]["color"]
+    assert set(score["3"]["team"]["1"]["player"]) == {
+        str(member) for member in range(1, 10)}
+    assert result["published"] == score
+    assert [p for p in result["held"] if p.startswith("score.")] == [
+        "score.1", "score.2"]
+    assert result["pending"] == [False, False, False]
     assert result["hotkeys"] and result["actions_connected"]
     assert result["hotkeys_applied"] is True
     assert result["country_helper"] and result["scoreboard"]
@@ -660,7 +689,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True, True]
     assert result["shell_windows"] == [0, 0]
-    assert result["boards_ensured"] == [False, False, False]
+    assert result["boards_ensured"] == [True, True, True]
     assert result["player_db_model"] is True
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True

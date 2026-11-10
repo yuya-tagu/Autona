@@ -480,12 +480,51 @@ function ScoreContent() {
         // The row stays as last read (READ: no token is asked for).
         (error) => console.error(error));
 
+    // ── the boards not shown (only dirty: their values are not drawn) ──
+
+    // How many `scoreboard_pending` notices of board 1 / 2 have come: a read
+    // of the other board is believed only if none came since it started (the
+    // notice is the newer word; it carries the dirty flag itself).
+    const noticed = React.useRef<Record<number, number>>({1: 0, 2: 0});
+    // A notice does not tell of what was waiting before the page was open (or
+    // while it was disconnected): read it when a board is shown and on return.
+    const readOthers = React.useCallback(() => {
+        const shown = boardRef.current;
+        if (shown < 1) {
+            return;
+        }
+        [1, 2].filter((n) => n !== shown).forEach((n) => {
+            const started = noticed.current[n];
+            const live = () => mounted.current && boardRef.current === shown
+                && noticed.current[n] === started;
+            getWithRetry<Envelope<PendingAnswer>>(
+                `/api/v1/scoreboards/${n}/pending`, live).then((body) => {
+                if (live()) {
+                    setDirtyByBoard((known) => ({
+                        ...known,
+                        [n]: Boolean(body.data.held && body.data.dirty)}));
+                }
+            }, (error) => {
+                // Nothing is told: the token is the shown board's to ask for.
+                if (live()) {
+                    console.error(error);
+                }
+            });
+        });
+    }, []);
+    React.useEffect(() => {
+        readOthers();
+    }, [board, readOthers]);
+
     React.useEffect(() => {
         const socket = socketConnection.instance();
         const onFormat = () => readFormat();
         const onPending = (message: unknown) => {
             const notice = fields(message);
             const n = Number(notice.board);
+            if (n === 1 || n === 2) {
+                noticed.current[n] += 1;
+            }
             if (n === boardRef.current) {
                 readPending();
             } else if (n === 1 || n === 2) {
@@ -516,8 +555,9 @@ function ScoreContent() {
             readFormat();
             readPending();
             readFollow();
+            readOthers();
         }
-    }, [status, readFormat, readPending, readFollow]);
+    }, [status, readFormat, readPending, readFollow, readOthers]);
 
     const followPoll = held12 && follow?.board === board ? follow.poll : null;
     const followSeconds = useSecondsLeft(followPoll, follow?.at ?? 0,

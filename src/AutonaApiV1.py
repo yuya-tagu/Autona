@@ -175,10 +175,12 @@ def _crew_member(n, t, m):
 
 
 def _crew_not_built(n):
-    """Whether `n` is the crew board and it is not built yet (the desktop's
-    lazy board; never headless). Its state is only the skeleton, and a board
-    built now would be built fresh: a reset has nothing to do, and no reason
-    to build it."""
+    """Whether `n` is the crew board and core does not have it: its launch
+    failed (every board is made at launch in both shells since ADR-005
+    S4ac-1; until then this was the desktop's lazy board). A board made now
+    would be made fresh: a reset has nothing to do, and no reason to make
+    it. A made board's resets run, and on a fresh one write nothing
+    (AutonaActions.ClearMatchInfo blanks only the fields it has)."""
     return n == WebOps.CREW_BOARD and not WebOps.boardHost.Built(n)
 
 

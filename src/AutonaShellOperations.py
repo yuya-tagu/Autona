@@ -242,11 +242,13 @@ class AutonaShellOperations:
         nothing and is logged.
 
         Else -- the way back to the Qt panel -- the Qt window, the board made
-        ready first, through the board host (an unbuilt board is built, as
-        this route always did): what the window loads goes to a board that is
-        held for its 反映 button, and is not wiped by the board's build later.
-        The windows of the board's button and of the hotkey are a built
-        board's already.
+        ready first, through the board host (a board core does not have is
+        made again; every board is made and held at launch since ADR-005
+        S4ac-1, and until then an unbuilt one was built here): what the
+        window loads goes to a board that is held for its 反映 button. A
+        board whose widgets are not built shows it once a format switch
+        builds them, from the state. The windows of the board's button and
+        of the hotkey are a built board's already.
 
         Opening it never fails the request: until S3e-9 the window was
         queued from the request's thread, so what it raised was only

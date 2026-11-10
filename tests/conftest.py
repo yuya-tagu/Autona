@@ -473,6 +473,29 @@ class _AutonaHarness:
         from src.core.StateManager import StateManager
         return StateManager.Get(keypath, default)
 
+    def boardsNow(self):
+        """The boards' life as core and the state have it now, under one
+        hold of the state lock: which boards are made (BoardEnsured), the
+        held `score.*` prefixes, which of the three have edits pending, and
+        the `score` subtree live and as published. Copies."""
+        import copy
+        from src.core.Actions import AutonaActions
+        from src.core.StateManager import StateManager
+        with StateManager.lock:
+            return {
+                "made": [AutonaActions.instance.BoardEnsured(number)
+                         for number in (1, 2, 3)],
+                "held": sorted(prefix for prefix in StateManager.heldPrefixes
+                               if prefix.startswith("score.")),
+                "pending": [StateManager.HasPendingChanges(f"score.{number}")
+                            for number in (1, 2, 3)],
+                "heldKeys": {prefix: list(keys) for prefix, keys
+                             in StateManager.heldKeys.items() if keys},
+                "live": copy.deepcopy(StateManager.state.get("score")),
+                "published": copy.deepcopy(
+                    StateManager.lastSavedState.get("score")),
+            }
+
     # -- widgets ----------------------------------------------------------
 
     @property
@@ -766,6 +789,11 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # widgets (boards, panels), which need the Qt adapters.
         bootstrap_core()
         bootstrap_gui()
+        harness = _AutonaHarness(directory)
+        # The boards bootstrap_gui() made (AutonaActions.MakeBoards, ADR-005
+        # S4ac-1: all three, boards 1 / 2 held), as it left them, for
+        # tests/test_headless_seed.py. They are dropped below.
+        harness.launch = harness.boardsNow()
         # Normally done by src/Autona.py at import time. The @gui_thread_sync
         # operations (the desktop board host, the shell operations) and the
         # game load job's model marshal raise without it, and that module is
@@ -804,7 +832,18 @@ def _autonaRuntime(qapp, tmp_path_factory):
         from src.AutonaHotkeys import AutonaHotkeys
         AutonaHotkeys.instance.SuspendCapture()
 
-        yield _AutonaHarness(directory)
+        # Every test starts with no board made, none held and no `score`
+        # subtree -- what each test's teardown leaves (dropAllBoards), and
+        # what the bootstrap left before S4ac-1. Left in place, the launch's
+        # boards would meet only whichever test a session happens to run
+        # first. A test makes the boards it needs (board(n) builds a board's
+        # widgets, which makes the board afresh; S4ac-2 revisits that).
+        harness.dropAllBoards()
+        from src.core.StateManager import StateManager
+        StateManager.Unset("score")
+        harness.settle()
+
+        yield harness
     finally:
         # Belt and braces: every autonaApp teardown already settles, but the
         # CWD must not be restored while an image download is still resolving

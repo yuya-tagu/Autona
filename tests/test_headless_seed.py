@@ -1,11 +1,13 @@
 """The headless shell's boards are the desktop's freshly built ones (ADR-005 S4t).
 
-A new board's launch write is one core operation, AutonaActions.SeedFreshBoard:
-the desktop runs it as it builds a board, ahead of the widgets, and the headless
-shell for all three at launch (src/headless._SeedBoards). Since ADR-005 S4y both
-run it through AutonaActions.EnsureBoard, which makes a board once and -- the
-desktop's, `panel` -- also rewrites the display options, turns polling off and
-puts a 1v1 / team board behind its 反映 button (pinned at the end).
+A new board's launch write is one core operation, AutonaActions.SeedFreshBoard.
+Since ADR-005 S4y both shells run it through AutonaActions.EnsureBoard, which
+makes a board once and -- the desktop's, `panel` -- also rewrites the display
+options, turns polling off and puts a 1v1 / team board behind its 反映 button
+(pinned at the end). Since S4ac-1 both make all three at launch through
+AutonaActions.MakeBoards: the desktop with `panel` (bootstrap_gui(), ahead of
+any widget), the headless shell without (src/headless._SeedBoards). The
+desktop made a board only as it built its widgets until then.
 
 What is compared is what each side *published* (the state Socket.IO and
 out/program_state.json carry), values and key order both: the order is what
@@ -26,6 +28,7 @@ from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
+from tests.fixtures.write_recording import WriteRecorder
 
 
 def _published(number):
@@ -63,8 +66,13 @@ def gameDefaults(autonaApp):
 
 def _desktopThenHeadless(autonaApp):
     autonaApp.dropAllBoards()
+    # The desktop's launch (bootstrap_gui(), ADR-005 S4ac-1), then every
+    # board's widgets built on what it made -- the window builds the shown
+    # one, the others as they are first needed -- which write nothing.
+    AutonaActions.instance.MakeBoards(panel=True)
     for number in (1, 2, 3):
-        autonaApp.board(number)
+        assert autonaApp.manager.EnsureScoreboard(number) is not None
+    autonaApp.settle()
     desktop = {number: _published(number) for number in (1, 2, 3)}
     # Dropping a board unsets its subtree and its 反映 hold, so what the
     # seed writes below is published at once, as in the headless shell.
@@ -591,8 +599,14 @@ def test_the_headless_boards_are_made_and_not_held(noBoards):
 
 def test_the_desktop_board_host_asks_core_whether_a_board_is_built(
         noBoards):
-    """DesktopBoardHost.Built is core's flag; Prepare makes an unbuilt board
-    -- in core first (seeded, held), then its widgets."""
+    """DesktopBoardHost.Built is core's flag: true from launch since S4ac-1
+    (MakeBoards), widgets or not. A board core does not have (here: the
+    harness dropped it; in the app, a launch that failed) Prepare makes --
+    in core first (seeded, held), then its widgets. A made board it leaves
+    alone: no widget built, nothing seeded (it built the widgets of any
+    board that had none until the S4ac-1 review), and the host's work after
+    an operation -- the field being typed in, the cards after a load -- has
+    nothing to do with no widget, and builds none either."""
     from src import AutonaWebOperations as WebOps
 
     host = WebOps.boardHost
@@ -607,6 +621,226 @@ def test_the_desktop_board_host_asks_core_whether_a_board_is_built(
     with patch.object(AutonaActions.instance, "BoardEnsured",
                       return_value=False):
         assert host.Built(1) is False
+
+    noBoards.dropAllBoards()
+    AutonaActions.instance.MakeBoards(panel=True)
+    AutonaActions.instance.SetTeamName(2, 1, "kept")
+    assert host.Built(2) is True
+    assert noBoards.manager.scoreboards.get(2) is None
+
+    def everything():
+        host.Prepare(2)
+        host.CommitEdit(2)
+        host.DiscardTypedText(2)
+        host.PlayerLoaded(2, 1, 1, True)
+    host.Run(everything)
+    noBoards.settle()
+
+    assert noBoards.manager.scoreboards.get(2) is None
+    assert StateManager.Get("score.2.team.1.teamName") == "kept"
+    assert StateManager.HasPendingChanges("score.2") is True
+
+
+# ── the desktop's launch: AutonaActions.MakeBoards (ADR-005 S4ac-1) ──────
+
+
+def test_the_desktop_launch_makes_every_board_and_holds_1_and_2(autonaApp):
+    """What bootstrap_gui() left, recorded by the harness before it dropped
+    the boards (tests/conftest.py): all three made, boards 1 / 2 behind
+    their 反映 button and the crew board not, nothing pending -- their launch
+    write is what was published, whole. Until S4ac-1 the bootstrap only
+    reset the score subtree, and a board was made and held as the window
+    built its widgets."""
+    launch = autonaApp.launch
+
+    assert launch["made"] == [True, True, True]
+    assert launch["held"] == ["score.1", "score.2"]
+    assert launch["pending"] == [False, False, False]
+    assert launch["heldKeys"] == {}
+    assert _same(launch["published"], launch["live"])
+    published = launch["published"]
+    assert set(published) == {"1", "2", "3"}
+    for number in ("1", "2"):
+        for team in ("1", "2"):
+            assert published[number]["team"][team]["color"]
+            assert list(published[number]["team"][team]["player"]) == ["1"]
+        assert published[number]["best_of"] == 0
+    assert set(published["3"]["team"]["1"]["player"]) == {
+        str(member) for member in range(1, 10)}
+
+
+def test_the_desktop_and_headless_launches_make_the_same_boards(
+        noBoards, displayOptions):
+    """MakeBoards with `panel` (the desktop) and without (the headless shell)
+    write the same boards, values and key order, in one save cycle each.
+    What only `panel` does: boards 1 / 2 held, the display options brought
+    back to the settings, the polling turned off."""
+    against = {f"display_options.{key}": not value
+               for key, value in displayOptions.items()}
+    written = []
+    realSet = SettingsManager.Set
+
+    def spy(key, value):
+        written.append((key, value))
+        return realSet(key, value)
+
+    def launch(panel):
+        del written[:]
+        seen = []
+        StateManager.observers.state_updated.subscribe(seen.append)
+        try:
+            with _settingsWith(against), \
+                    patch.object(SettingsManager, "Set", side_effect=spy):
+                AutonaActions.instance.MakeBoards(panel=panel)
+        finally:
+            StateManager.observers.state_updated.unsubscribe(seen.append)
+        noBoards.settle()
+        return {
+            "cycles": len(seen),
+            "boards": {number: _published(number) for number in (1, 2, 3)},
+            "made": [AutonaActions.instance.BoardEnsured(number)
+                     for number in (1, 2, 3)],
+            "held": [_held(number) for number in (1, 2, 3)],
+            "pending": [StateManager.HasPendingChanges(f"score.{number}")
+                        for number in (1, 2, 3)],
+            "options": copy.deepcopy(StateManager.Get("display_options")),
+            "written": set(written),
+        }
+
+    desktop = launch(True)
+    # Dropping the boards releases their holds, so the second launch's seed
+    # is published at once, as in a launch of its own.
+    noBoards.dropAllBoards()
+    StateManager.Set("display_options", copy.deepcopy(displayOptions))
+    noBoards.settle()
+    headless = launch(False)
+
+    for number in (1, 2, 3):
+        assert desktop["boards"][number]["team"]["1"]["player"]
+        assert _same(desktop["boards"][number], headless["boards"][number]), \
+            number
+    assert desktop["cycles"] == headless["cycles"] == 1
+    assert desktop["made"] == headless["made"] == [True, True, True]
+    assert desktop["held"] == [True, True, False]
+    assert headless["held"] == [False, False, False]
+    assert desktop["pending"] == headless["pending"] == [False] * 3
+    assert desktop["options"] == {
+        key: not value for key, value in displayOptions.items()}
+    assert headless["options"] == displayOptions
+    assert desktop["written"] == {("general.disable_autoupdate", True)}
+    assert headless["written"] == set()
+
+
+@pytest.mark.parametrize("panel", [True, False])
+def test_the_boards_are_made_once(noBoards, panel):
+    """A second MakeBoards while any board is made warns and writes nothing
+    (ADR-005 S4ac-1 review): it would drop what was written since, and hold
+    back the seed of a held board. Decided by the boards: once they are
+    forgotten (the harness's drop), it makes them again."""
+    actions = AutonaActions.instance
+    assert actions.MakeBoards(panel=panel) is True
+    actions.SetTeamName(2, 1, "kept")
+    noBoards.settle()
+    pending = StateManager.HasPendingChanges("score.2")
+
+    with WriteRecorder() as recorder:
+        assert actions.MakeBoards(panel=panel) is False
+        noBoards.settle()
+
+    assert recorder.sets == []
+    assert StateManager.Get("score.2.team.1.teamName") == "kept"
+    assert StateManager.HasPendingChanges("score.2") is pending is panel
+
+    # One board made is enough to refuse.
+    noBoards.dropAllBoards()
+    actions.EnsureBoard(3)
+    with WriteRecorder() as recorder:
+        assert actions.MakeBoards(panel=panel) is False
+    assert recorder.sets == []
+    assert [actions.BoardEnsured(n) for n in (1, 2, 3)] == [False, False, True]
+
+    noBoards.dropAllBoards()
+    assert actions.MakeBoards(panel=panel) is True
+    assert [actions.BoardEnsured(n) for n in (1, 2, 3)] == [True] * 3
+    assert StateManager.Get("score.2.team.1.teamName") == ""
+
+
+def test_polling_is_not_turned_off_over_settings_it_could_not_read(
+        noBoards, monkeypatch):
+    """settings.json could not be read (SettingsManager.loadFailed): the
+    desktop's launch writes nothing there (SetFollowService.TurnOffPolling),
+    as the settings window's saves write nothing. A save would replace the
+    unread file with this one key. The boards are made and held as ever."""
+    from src.core.SetFollowService import SetFollowService
+
+    saved = []
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    monkeypatch.setattr(SettingsManager, "SaveSettings",
+                        lambda: saved.append(None))
+    monkeypatch.setattr(SettingsManager, "settings", {})
+
+    SetFollowService.TurnOffPolling()
+    assert AutonaActions.instance.MakeBoards(panel=True) is True
+
+    assert saved == []
+    assert SettingsManager.settings == {}
+    assert [_held(n) for n in (1, 2, 3)] == [True, True, False]
+    # What it would have written is what an unread key reads as.
+    assert SetFollowService.Polling() is False
+
+
+def test_the_window_s_first_board_does_not_seed_the_made_boards_again(
+        noBoards):
+    """CreateScoreboard builds the shown board's widgets only. It wrote the
+    skeleton (StateSchema.SeedBoard) over the other boards until S4ac-1, as a
+    placeholder for boards not made yet; on boards made at launch that would
+    drop what was written to them since, and their launch write."""
+    actions = AutonaActions.instance
+    actions.MakeBoards(panel=True)
+    actions.SetTeamName(2, 1, "team kept")
+    actions.SetTeamName(3, 1, "crew kept")
+    noBoards.settle()
+
+    assert noBoards.manager.CreateScoreboard("singles") is True
+    noBoards.settle()
+
+    assert list(noBoards.manager.scoreboards) == [1]
+    assert StateManager.Get("score.2.team.1.teamName") == "team kept"
+    assert StateManager.Get("score.2.team.1.color")
+    assert StateManager.HasPendingChanges("score.2") is True
+    assert StateManager.Get("score.3.team.1.teamName") == "crew kept"
+    assert _published(3)["team"]["1"]["teamName"] == "crew kept"
+    assert [actions.BoardEnsured(n) for n in (1, 2, 3)] == [True] * 3
+
+
+@pytest.mark.parametrize("board", [1, 2])
+def test_a_made_board_whose_widgets_failed_to_build_stays_made(
+        noBoards, board):
+    """Only the call that made the board forgets it when the widgets fail
+    (test_a_board_whose_widgets_failed_to_build_is_forgotten). A board made
+    at launch stays made and held, its edits pending: forgotten, the next
+    build would seed it again over them."""
+    actions = AutonaActions.instance
+    actions.MakeBoards(panel=True)
+    actions.SetTeamName(board, 1, "kept")
+    noBoards.settle()
+
+    with patch("src.AutonaScoreboardManager.AutonaScoreboardWidget",
+               side_effect=RuntimeError("no widgets")), \
+            pytest.raises(RuntimeError):
+        noBoards.manager.EnsureScoreboard(board)
+    noBoards.settle()
+
+    assert actions.BoardEnsured(board) is True
+    assert _held(board)
+    assert noBoards.manager.scoreboards.get(board) is None
+    assert StateManager.HasPendingChanges(f"score.{board}") is True
+
+    widget = noBoards.manager.EnsureScoreboard(board)
+    noBoards.settle()
+    assert widget is not None
+    assert StateManager.Get(f"score.{board}.team.1.teamName") == "kept"
+    assert widget.btApply.isEnabled() is True
 
 
 def _callers(name):
@@ -634,6 +868,13 @@ def test_only_core_holds_a_board_or_drops_the_score_root():
     assert _callers("HoldBoard") == {("core/Actions.py", "EnsureBoard")}
     assert _callers("ResetScoreRoot") == {("core/Actions.py", "ResetBoards")}
     assert _callers("SeedFreshBoard") == {("core/Actions.py", "EnsureBoard")}
+    # Every board at launch, in both shells (ADR-005 S4ac-1): the score
+    # root's reset only there, and the skeleton only as a new board's start
+    # (CreateScoreboard wrote it over the boards it did not show until then).
+    assert _callers("MakeBoards") == {("bootstrap.py", "bootstrap_gui"),
+                                      ("headless.py", "_SeedBoards")}
+    assert _callers("ResetBoards") == {("core/Actions.py", "MakeBoards")}
+    assert _callers("SeedBoard") == {("core/Actions.py", "SeedFreshBoard")}
     # And the hold's release, for a board that failed (the review of S4y).
     assert _callers("ReleaseBoard") == {("core/Actions.py", "ForgetBoard")}
     assert _callers("ReleaseSubtree") == {

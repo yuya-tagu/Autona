@@ -224,10 +224,11 @@ class AutonaHotkeys(QObject):
         from . import AutonaWebOperations
         host = AutonaWebOperations.boardHost
         if not host.Built(number):
-            # As before the swap moved to core: the hotkey was connected by
-            # each built board to itself, so an unbuilt one never swapped.
-            # (An unbuilt board is not held: a swap there would publish at
-            # once and be wiped by the seed that builds it.)
+            # A board core does not have: its launch failed (every board is
+            # made, and boards 1 / 2 held, at launch since ADR-005 S4ac-1).
+            # Until then the desktop made a board as it built its widgets,
+            # and an unbuilt one was not held: a swap there would have been
+            # published at once and wiped by the seed that built it.
             logger.debug(f"Swap hotkey ignored: board {number} is not built")
             return
         if number in AutonaActions.SCORE_BOARDS:
@@ -242,9 +243,10 @@ class AutonaHotkeys(QObject):
     def _onLoadSet():
         """Open the active board's set selection window (the shell's,
         AutonaShellOperations; ADR-005 S4y). Ignored in crew format (no set
-        window) and while the active board is not built (as the swap: each
-        built board answered for itself until then, and a set loaded onto an
-        unbuilt board would be wiped by the seed that builds it)."""
+        window) and while core does not have the active board (as the swap:
+        its launch failed -- every board is made at launch since ADR-005
+        S4ac-1; until then a set loaded onto an unbuilt board was wiped by
+        the seed that built it)."""
         actions = AutonaActions.instance
         if actions is None:
             logger.warning("Hotkey ignored: AutonaActions is not built yet")

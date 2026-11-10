@@ -35,7 +35,8 @@ from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from tests.fixtures.write_recording import WriteRecorder, encode
 from tests.test_api_v1 import (  # noqa: F401
     _assertRejected, _requestOnWorkerThread, client, webApp)
-from tests.test_api_v1_score import _cycles, _ok, lanServer  # noqa: F401
+from tests.test_api_v1_score import (  # noqa: F401
+    _cycles, _ok, lanServer, launchedBoards)
 from tests.test_crew_board import _typeCombo
 from tests.test_crew_operations import (
     _focus, _fromState, _golden, _nameMember, _onScreen, _row, _setUpDesktop,
@@ -96,10 +97,22 @@ def _dropHeadlessBoards(app):
 
 @pytest.fixture
 def noBoard(autonaApp):
-    """The desktop with no board built: the lazy board, not asked for yet."""
+    """The desktop with no board in core and no widget: what a launch leaves
+    when it failed (every board is made at launch since ADR-005 S4ac-1; this
+    was the lazy board, not asked for yet, until then)."""
     autonaApp.dropAllBoards()
     assert _board(autonaApp) is None
     return autonaApp
+
+
+@pytest.fixture(params=["not made", "launched"])
+def unbuiltBoards(request):
+    """The boards with no widget: core does not have them (`noBoard`), or
+    made at launch (`launchedBoards`: every launch, ADR-005 S4ac-1)."""
+    fixture = "noBoard" if request.param == "not made" else "launchedBoards"
+    app = request.getfixturevalue(fixture)
+    assert _board(app) is None
+    return app
 
 
 # ── the board's inputs, the route on the desktop, the route headless ─────
@@ -894,43 +907,55 @@ def test_a_write_builds_the_board_first_and_stays(
     ("get", "/api/v1/match-names/candidates"),
 ], ids=lambda route: route[1].split("/api/v1")[1])
 def test_what_means_nothing_to_a_fresh_board_does_not_build_it(
-        noBoard, client, route):
+        unbuiltBoards, client, route):
+    """Nothing written (the revision stays) and no widget built: skipped on
+    a board core does not have (_crew_not_built), run on one made at launch
+    -- which has nothing to reset (the next test)."""
+    revision = StateManager.revision
     with WriteRecorder() as recorder:
         _sendOk(client, route)
-        noBoard.settle()
+        unbuiltBoards.settle()
     assert recorder.sets == []
-    assert _board(noBoard) is None
+    assert StateManager.revision == revision
+    assert _board(unbuiltBoards) is None
 
 
 def test_a_fresh_board_really_has_nothing_to_reset(noBoard, client):
-    """What the skipped resets rest on: the same resets on the board once it
-    is built change nothing, but for the one match field no seed writes, which
-    the reset blanks (a key for "", as a board's first reset always did: no
-    pool either way)."""
+    """What the skipped resets rest on, and what a made board's resets do
+    (ADR-005 S4ac-1: the crew board is made at launch): the same resets on a
+    fresh board change nothing and write nothing. The match reset blanks
+    only the fields the board has (AutonaActions.ClearMatchInfo), and no
+    seed writes a crew board's pool; it wrote one (pool = "") until the
+    S4ac-1 review."""
     noBoard.board(BOARD)
-    fresh = noBoard.get("score.3")
-    fresh = json.loads(encode(fresh))
+    fresh = json.loads(encode(noBoard.get("score.3")))
+    assert "pool" not in fresh
+    revision = StateManager.revision
     with WriteRecorder() as recorder:
         for route in (("post", f"{URL}/score:reset"),
                       ("post", f"{URL}:reset-players", CONFIRM),
                       ("post", f"{URL}:reset-match", CONFIRM)):
             _sendOk(client, route)
         noBoard.settle()
-    assert recorder.sets == [["score.3.pool", '""']]
-    assert json.loads(encode(noBoard.get("score.3"))) == {**fresh, "pool": ""}
+    assert recorder.sets == []
+    assert StateManager.revision == revision
+    assert json.loads(encode(noBoard.get("score.3"))) == fresh
 
 
-def test_a_reset_of_a_1v1_board_still_runs_unbuilt(noBoard, client):
-    # What boards 1/2 did: not the crew board's to skip for them.
+def test_a_reset_of_a_1v1_board_still_runs_unbuilt(unbuiltBoards, client):
+    # What boards 1/2 did: not the crew board's to skip for them. With no
+    # widget, on a board core does not have or one made at launch (held:
+    # the live value is what is read here).
     _ok(client.post("/api/v1/scoreboards/1/score:set",
                     json={"team1": 2, "team2": 1}))
-    noBoard.settle()
-    assert noBoard.get("score.1.team.1.score") == 2
+    unbuiltBoards.settle()
+    assert unbuiltBoards.get("score.1.team.1.score") == 2
     _ok(client.post("/api/v1/scoreboards/1/score:reset"))
-    noBoard.settle()
-    assert noBoard.get("score.1.team.1.score") == 0
+    unbuiltBoards.settle()
+    assert unbuiltBoards.get("score.1.team.1.score") == 0
+    assert unbuiltBoards.manager.scoreboards.get(1) is None
     StateManager.Unset("score.1")
-    noBoard.settle()
+    unbuiltBoards.settle()
 
 
 # ── who may ──────────────────────────────────────────────────────────────

@@ -386,7 +386,8 @@ test("the format's board is shown, and another format's after its notice", async
     await notify("battle_format");
 
     expect(reads("/api/v1/battle-format")).toBe(2);
-    expect(reads(`${BOARD}/2/pending`)).toBe(1);
+    // Once as the other board at the start (dirty only), once as the shown.
+    expect(reads(`${BOARD}/2/pending`)).toBe(2);
     expect(screen.getByRole("textbox", {name: i18n.t("score_players_per_team")}))
         .toHaveValue("2");
     expect(screen.getAllByRole("textbox", {name: i18n.t("score_team_name")})[0])
@@ -485,7 +486,8 @@ test("a read of the board shown before a format switch is not drawn", async () =
     await settle();
     // Board 1's values are not drawn as board 2's.
     expect(screen.queryByDisplayValue("Board 1")).toBeNull();
-    expect(reads(`${BOARD}/2/pending`)).toBe(1);
+    // The start's read of it as the other board, and the shown one's.
+    expect(reads(`${BOARD}/2/pending`)).toBe(2);
 
     await next.answer({held: true, dirty: false, board: named("Board 2")});
     await settle();
@@ -591,11 +593,12 @@ test("the other board's edits waiting are told, and can be applied", async () =>
     expect(screen.queryByText(i18n.t("score_other_dirty", {
         board: i18n.t("score_board_name_2")}))).toBeNull();
 
+    // Read once when the page opened (dirty only), not again on a notice.
+    expect(reads(`${BOARD}/2/pending`)).toBe(1);
     await notify("scoreboard_pending", {board: 2, dirty: true});
     const notice = screen.getByText(i18n.t("score_other_dirty", {
         board: i18n.t("score_board_name_2")}));
-    // Not the shown board's: its values are not read for it.
-    expect(reads(`${BOARD}/2/pending`)).toBe(0);
+    expect(reads(`${BOARD}/2/pending`)).toBe(1);
     fireEvent.click(within(notice.closest("[role=alert]"))
         .getByRole("button", {name: i18n.t("score_apply")}));
     await settle();
@@ -604,6 +607,63 @@ test("the other board's edits waiting are told, and can be applied", async () =>
     await notify("scoreboard_pending", {board: 2, dirty: false});
     expect(screen.queryByText(i18n.t("score_other_dirty", {
         board: i18n.t("score_board_name_2")}))).toBeNull();
+});
+
+const OTHER_DIRTY_2 = () => i18n.t("score_other_dirty", {
+    board: i18n.t("score_board_name_2")});
+
+test("edits waiting on the other board before the page opened are told", async () => {
+    server.pending[2] = {held: true, dirty: true, board: board()};
+    await renderPage();
+
+    const notice = screen.getByText(OTHER_DIRTY_2());
+    fireEvent.click(within(notice.closest("[role=alert]"))
+        .getByRole("button", {name: i18n.t("score_apply")}));
+    await settle();
+    expect(writes("POST", `${BOARD}/2:apply`)).toEqual([{}]);
+});
+
+test("a read of the other board that a notice overtook is not believed", async () => {
+    server.pending[2] = {held: true, dirty: true, board: board()};
+    const late = holdNext(`${BOARD}/2/pending`);
+    await renderPage();
+    expect(screen.queryByText(OTHER_DIRTY_2())).toBeNull();
+
+    await notify("scoreboard_pending", {board: 2, dirty: false});
+    await late.answer({held: true, dirty: true, board: board()});
+    await settle();
+    await settle();
+    expect(screen.queryByText(OTHER_DIRTY_2())).toBeNull();
+});
+
+test("a reconnect reads the other board again", async () => {
+    await renderPage();
+    expect(reads(`${BOARD}/2/pending`)).toBe(1);
+    server.pending[2].dirty = true;
+    act(() => {
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
+    });
+    act(() => {
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("connected"));
+    });
+    await settle();
+    await settle();
+
+    expect(reads(`${BOARD}/2/pending`)).toBe(2);
+    expect(screen.getByText(OTHER_DIRTY_2())).toBeInTheDocument();
+});
+
+test("the crew board reads boards 1 and 2, and tells only the held ones", async () => {
+    server.format = {format: "crew", board: 3};
+    server.pending[1] = {held: true, dirty: true, board: board()};
+    server.pending[2] = {held: false, dirty: true, board: board()};
+    await renderPage();
+
+    expect(reads(`${BOARD}/1/pending`)).toBe(1);
+    expect(reads(`${BOARD}/2/pending`)).toBe(1);
+    expect(screen.getByText(i18n.t("score_other_dirty", {
+        board: i18n.t("score_board_name_1")}))).toBeInTheDocument();
+    expect(screen.queryByText(OTHER_DIRTY_2())).toBeNull();
 });
 
 test("a page without the token draws the published values and says so once", async () => {
@@ -670,9 +730,9 @@ test("on the crew board, boards 1 and 2's edits waiting are told and applied", a
 
     const notices = [1, 2].map((n) => screen.getByText(i18n.t(
         "score_other_dirty", {board: i18n.t(`score_board_name_${n}`)})));
-    // Told by their notices: a board not built is not read.
-    expect(reads(`${BOARD}/1/pending`)).toBe(0);
-    expect(reads(`${BOARD}/2/pending`)).toBe(0);
+    // Read once at the start (dirty only), not again on the notices.
+    expect(reads(`${BOARD}/1/pending`)).toBe(1);
+    expect(reads(`${BOARD}/2/pending`)).toBe(1);
     notices.forEach((notice) => fireEvent.click(within(
         notice.closest("[role=alert]")).getByRole(
         "button", {name: i18n.t("score_apply")})));

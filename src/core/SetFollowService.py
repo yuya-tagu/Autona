@@ -171,23 +171,37 @@ class SetFollowService:
     @staticmethod
     def Polling() -> bool:
         """Whether a load starts polling: `general.disable_autoupdate` off.
-        The desktop's board turns the setting on whenever it is built (its
-        own toggle left the UI), and the settings window's "Disable
+        The desktop turns the setting on at every launch (TurnOffPolling;
+        a board's toggle left the UI), and the settings window's "Disable
         automatic set updating" checkbox turns it off again until the next
-        build. A shell that never wrote the key does not poll: there is no
-        web operation to stop it."""
+        launch (the next board build until ADR-005 S4ac-1). A shell that
+        never wrote the key does not poll: there is no web operation to stop
+        it."""
         return not SettingsManager.Get("general.disable_autoupdate", True)
 
     @staticmethod
     def TurnOffPolling():
-        """What the desktop does each time it first uses a 1v1 / team board
-        (AutonaActions.EnsureBoard with `panel`, ADR-005 S4y; the board build
-        until then, and the board's constructor until S4t): polling left the
-        board's UI, so a stale setting from an older session must not keep it
-        running. Not part of the shared launch write
+        """What the desktop does as it makes a 1v1 / team board
+        (AutonaActions.EnsureBoard with `panel`, ADR-005 S4y), i.e. at
+        launch since S4ac-1 (AutonaActions.MakeBoards; as it first built a
+        board's widgets until then, and the board's constructor until S4t):
+        polling left the board's UI, so a stale setting from an older
+        session must not keep it running. Not part of the shared launch write
         (AutonaActions.SeedFreshBoard): on the headless shell the setting is
-        the operator's (Polling)."""
-        SettingsManager.Set("general.disable_autoupdate", True)
+        the operator's (Polling).
+
+        Nothing is written while settings.json could not be read
+        (SettingsManager.loadFailed), as the settings window's saves
+        (AppSettings, HotkeyRules) write nothing then: what the file holds is
+        unknown, and a save would replace it with this one key. Polling then
+        reads the key as on (Polling), which is what this would write."""
+        with SettingsManager.lock:
+            if SettingsManager.loadFailed:
+                logger.warning(
+                    "Set follow - polling not turned off in the settings: "
+                    "settings.json could not be read")
+                return
+            SettingsManager.Set("general.disable_autoupdate", True)
 
     @classmethod
     def _Next(cls):

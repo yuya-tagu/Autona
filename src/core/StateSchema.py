@@ -849,18 +849,19 @@ DYNAMIC_KEY_FAMILIES = ()
 def SeedBoard(number):
     """Write the empty skeleton of one board's ``score.{number}`` subtree.
 
-    Called from two places, which is the point: AutonaActions.SeedFreshBoard
-    (so a new board starts from a known shape) and
-    AutonaScoreboardManager.CreateScoreboard for the boards that are *not*
+    Called from one place: AutonaActions.SeedFreshBoard, so a new board
+    starts from a known shape. AutonaScoreboardManager.CreateScoreboard also
+    called it until ADR-005 S4ac-1, as a placeholder for the boards not
     built at launch (so the Web UI and the OBS overlays read an empty board
-    rather than "no such key"). Both used to carry their own copy of the
+    rather than "no such key"); every board is made, whole, at launch now
+    (AutonaActions.MakeBoards). The two used to carry their own copy of the
     list and they had already drifted -- the manager knew board 3 seeds only
     its root, the boards did not know about each other at all.
 
     Not "fill in what is missing": ``Set(prefix, {})`` replaces the subtree,
-    so calling this again resets the board to the skeleton. That is what the
-    lazy build relies on -- a board built later reseeds over the manager's
-    placeholder -- and it is why nothing may call it on a live board.
+    so calling this again resets the board to the skeleton. That is why
+    nothing may call it on a live board -- the manager's placeholder, once
+    the boards were made at launch, would have replaced two of them.
     """
     prefix = f"{SCORE_ROOT}.{number}"
     StateManager.Set(prefix, {})
@@ -882,17 +883,19 @@ def HoldBoard(number):
     until ``StateManager.CommitHeld`` (the 反映 button, ``ApplyChanges``);
     ``STATS_KEYS`` are fetched data, not edits, and publish at once.
 
-    Called by AutonaActions.EnsureBoard (with `panel`: the desktop's first
-    use of a board), after AutonaActions.SeedFreshBoard -- a registration
-    made first would hold back the seed itself. The board's constructor
-    registered it until ADR-005 S4y, in the same save cycle but after the
-    widgets were built (they write nothing as they are, ADR-005 S4t, so the
-    earlier point holds back nothing more). A board that is not ensured is
-    not held: nothing would ever apply its edits (the 反映 button is on the
-    board, and the Web UI has none), and the seed written when the board is
-    ensured would wipe them. Holding the unbuilt board from startup was
-    ADR-005 S2 decision 7, withdrawn in S2c for that reason; the routes that
-    edit a board widget-side build it first.
+    Called by AutonaActions.EnsureBoard (with `panel`: the desktop, which
+    makes every board at launch since ADR-005 S4ac-1 -- MakeBoards), after
+    AutonaActions.SeedFreshBoard -- a registration made first would hold
+    back the seed itself. The board's constructor registered it until
+    ADR-005 S4y, in the same save cycle but after the widgets were built
+    (they write nothing as they are, ADR-005 S4t, so the earlier point holds
+    back nothing more), and until S4ac-1 the desktop made a board only as it
+    built its widgets. A board that is not ensured is not held: the seed
+    written when the board is ensured would wipe its edits. Holding every
+    board from startup was ADR-005 S2 decision 7, withdrawn in S2c because
+    nothing applied a board the window did not show (the 反映 button was on
+    the board, and the Web UI had none); it came back in S4ac-1, once the
+    React SCORE page applies any board (順序 6 decision 2).
 
     Idempotent (``HoldSubtree`` keeps a set). Board 3 (crew) is not held:
     the crew board publishes as it goes.
@@ -913,9 +916,10 @@ def ReleaseBoard(number):
 def PublishDisplayOptions():
     """Re-publish all eight display options from their persisted defaults.
 
-    Run when the desktop first uses a 1v1 / team board
-    (AutonaActions.EnsureBoard with `panel`, from
-    AutonaScoreboardManager.EnsureScoreboard), which is what the
+    Run when the desktop makes a 1v1 / team board -- at launch since
+    ADR-005 S4ac-1 (AutonaActions.EnsureBoard with `panel`, from
+    AutonaActions.MakeBoards; the board's first widget build,
+    AutonaScoreboardManager.EnsureScoreboard, until then), which is what the
     "SettingsManager is the source of truth, StateManager is what the
     overlays render" mirror rests on: whatever a previous session left in
     program_state.json is brought back in line with the settings file the
@@ -937,9 +941,10 @@ def PublishDisplayOptions():
 def ResetScoreRoot():
     """Drop the whole ``score`` subtree.
 
-    Run once per launch, through ``AutonaActions.ResetBoards`` (from
-    ``AutonaScoreboardManager.__init__`` and the headless shell's seed) --
-    i.e. before any board is built -- so a program_state.json written by an older
+    Run once per launch, through ``AutonaActions.ResetBoards`` (the start of
+    ``AutonaActions.MakeBoards``, in both shells since ADR-005 S4ac-1; from
+    ``AutonaScoreboardManager.__init__`` on the desktop until then) --
+    i.e. before any board is made -- so a program_state.json written by an older
     multi-scoreboard build cannot leave boards behind that no widget owns.
     It is a subtree lifecycle operation like ``SeedBoard()`` above and lives
     next to it for the same reason: ``score`` is a schema name, and the
@@ -1010,16 +1015,19 @@ def SeedPanelState():
         SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR))
 
     # display_options.*: the Web UI eye menu and the OBS overlays render
-    # field visibility from these keys, but the only other writer is a 1v1 /
-    # team board's seed -- so an operator whose saved format is the crew
-    # board (score.3, which has no eye menu) never gets them written at all.
+    # field visibility from these keys. The only other writer is the
+    # desktop's making of boards 1 / 2 (AutonaActions.EnsureBoard with
+    # `panel` -> PublishDisplayOptions), which rewrites all eight from
+    # SettingsManager at every launch since ADR-005 S4ac-1 (MakeBoards, in
+    # bootstrap_gui(), before the window calls this) -- in crew format too;
+    # until then it was a 1v1 / team board's build, so a launch in crew
+    # format never wrote them. The headless shell never rewrites them.
     #
     # Missing keys only. SettingsManager is the persisted source of truth
-    # here: every toggle writes SettingsManager *and* StateManager, and a
-    # board rewrites all eight from SettingsManager when it is seeded. Reading
+    # here: every toggle writes SettingsManager *and* StateManager. Reading
     # the same source keeps a headless seed identical to what a GUI launch
-    # ends up with, and the guard keeps a restored program_state.json value
-    # from being republished for the one save cycle before a board is built.
+    # ends up with, and the guard leaves alone what is there: on the desktop
+    # what MakeBoards just wrote, headless a restored value (the operator's).
     for key, default in DISPLAY_OPTION_DEFAULTS.items():
         path = f"{DISPLAY_OPTIONS_ROOT}.{key}"
         if StateManager.Get(path, None) is None:
