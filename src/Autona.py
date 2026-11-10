@@ -918,7 +918,14 @@ class Window(QMainWindow):
         # One-time migration prompt: the bind default changed from 0.0.0.0 to
         # 127.0.0.1, which would silently break LAN OBS setups
         # (docs/operations/runtime-operations.md). Ask once, persist the answer.
-        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
+        # Not while settings.json could not be read (even after the launch's
+        # retries): "not decided yet" is then the stand-in's, and the answer
+        # -- in effect for the run, put back over the file when it can be
+        # read -- would replace the one it holds. That run listens on this PC
+        # only (the default) and writes nothing; the next launch asks.
+        if (not SettingsManager.loadFailed
+                and SettingsManager.Get(
+                    "general.webserver_listen_lan", None) is None):
             allow = QMessageBox.question(
                 self,
                 QApplication.translate("portguard", "LAN access"),

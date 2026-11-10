@@ -167,6 +167,37 @@ def test_a_tournament_color_clears_the_overrides_of_that_kind_only():
         "#dddddd", "#bbbbbb")
 
 
+def test_a_tournament_color_clears_the_overrides_of_a_settings_json_unread(
+        monkeypatch, tmp_path):
+    """The launch could not read settings.json and it still cannot be
+    opened. The clears are not decided against the empty stand-in (which
+    holds no override, so nothing would be cleared): SettingsManager keeps
+    them for the run, with the colour, and puts them back over the file once
+    a write reads it -- the override it holds does not survive the "apply
+    everywhere"."""
+    import json
+
+    from src.core import SettingsManager as settingsModule
+
+    path = tmp_path / "settings.json"
+    path.mkdir()
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    colors.SetTournamentColor(colors.KIND_THEME, "#dddddd")
+
+    path.rmdir()
+    path.write_text(json.dumps({
+        "general": {"webserver_port": 6000},
+        "colors": {"board": {"theme_color": "#aaaaaa",
+                             "accent_color": "#bbbbbb"}}}), encoding="utf-8")
+    SettingsManager.PrepareWrite()
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "general": {"webserver_port": 6000, "theme_color": "#dddddd"},
+        "colors": {"board": {"accent_color": "#bbbbbb"}}}
+
+
 def test_a_tournament_color_is_one_save_cycle():
     """The write plus up to six clears, published together.
 

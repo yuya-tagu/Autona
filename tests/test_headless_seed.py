@@ -766,27 +766,69 @@ def test_the_boards_are_made_once(noBoards, panel):
     assert StateManager.Get("score.2.team.1.teamName") == ""
 
 
-def test_polling_is_not_turned_off_over_settings_it_could_not_read(
-        noBoards, monkeypatch):
-    """settings.json could not be read (SettingsManager.loadFailed): the
-    desktop's launch writes nothing there (SetFollowService.TurnOffPolling),
-    as the settings window's saves write nothing. A save would replace the
-    unread file with this one key. The boards are made and held as ever."""
-    from src.core.SetFollowService import SetFollowService
+def _unreadSettings(monkeypatch, path):
+    """A launch that could not read settings.json (`path`, never the
+    harness's own): the defaults stand in, each save recorded."""
+    from src.core import SettingsManager as settingsModule
 
     saved = []
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
     monkeypatch.setattr(SettingsManager, "loadFailed", True)
     monkeypatch.setattr(SettingsManager, "SaveSettings",
-                        lambda: saved.append(None))
+                        lambda: saved.append(copy.deepcopy(
+                            SettingsManager.settings)))
     monkeypatch.setattr(SettingsManager, "settings", {})
+    return saved
+
+
+def test_polling_is_turned_off_for_the_run_over_settings_it_cannot_open(
+        noBoards, monkeypatch, tmp_path):
+    """settings.json could not be read at launch and still cannot be opened
+    (a directory: an OSError other than "not found"): the desktop's launch
+    write (SetFollowService.TurnOffPolling) saves nothing -- a save would
+    replace the unread file with this one key. SettingsManager makes it in
+    memory only, for the run, and keeps it to put back over the file once a
+    write can read it. The boards are made and held as ever."""
+    from src.core.SetFollowService import SetFollowService
+
+    unopenable = tmp_path / "settings.json"
+    unopenable.mkdir()
+    saved = _unreadSettings(monkeypatch, unopenable)
 
     SetFollowService.TurnOffPolling()
     assert AutonaActions.instance.MakeBoards(panel=True) is True
 
     assert saved == []
-    assert SettingsManager.settings == {}
+    assert SettingsManager.settings == {"general": {"disable_autoupdate": True}}
+    assert SettingsManager._unsaved == [("general.disable_autoupdate", True)]
+    assert SettingsManager.loadFailed is True
     assert [_held(n) for n in (1, 2, 3)] == [True, True, False]
-    # What it would have written is what an unread key reads as.
+    assert SetFollowService.Polling() is False
+
+
+def test_the_launch_write_reads_settings_json_again_and_keeps_it(
+        noBoards, monkeypatch, tmp_path):
+    """The launch's read failed only for a moment (a file held by an
+    antivirus or sync tool): TurnOffPolling, the desktop's first write of a
+    launch, reads settings.json again and saves its key over what it holds
+    -- the port, the token and the rest are back for the rest of the
+    launch."""
+    from src.core.SetFollowService import SetFollowService
+
+    stored = {"general": {"webserver_port": 6000,
+                          "webserver_token": "kept-token-0123456789ab",
+                          "disable_autoupdate": False}}
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    saved = _unreadSettings(monkeypatch, path)
+
+    assert AutonaActions.instance.MakeBoards(panel=True) is True
+
+    stored["general"]["disable_autoupdate"] = True
+    # Once per board 1 / 2 (each EnsureBoard with `panel`).
+    assert saved == [stored, stored]
+    assert SettingsManager.loadFailed is False
+    assert SettingsManager.Get("general.webserver_port") == 6000
     assert SetFollowService.Polling() is False
 
 

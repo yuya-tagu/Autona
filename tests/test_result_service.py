@@ -33,7 +33,7 @@ from src.core.GameAssetCatalog import (
     GAMES_DIR, GameAssetCatalog, GameAssetSnapshot)
 from src.core.PlayerDB import PlayerDB
 from src.core.ResultService import ResultService
-from src.core.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager, SettingsUnreadable
 from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.Helpers.AutonaOutputRetention import PruneOutputFiles
@@ -1381,6 +1381,62 @@ def test_saving_the_layout_keeps_the_rest_of_the_config(env):
 
     assert SettingsManager.settings[results.CONFIG_SETTING] == {
         "main_icon_path": "./layout/own_logo.png", "layout": "vertical"}
+
+
+# settings.json unread at launch (2026-11-11): the layout is set in the
+# config as saved, and followed from the saved layout -- not from the
+# launch's empty stand-in (SettingsManager.PrepareWrite).
+
+def _unreadSettings(monkeypatch, env, saved=None):
+    """A launch that could not read settings.json: `saved` in it now, or a
+    directory (still cannot be opened)."""
+    from src.core import SettingsManager as settingsModule
+
+    path = env.dir / "user_data" / "settings.json"
+    if saved is None:
+        path.mkdir()
+    else:
+        path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    SettingsManager.settings = {}   # env restores the harness's
+    return path
+
+
+def test_the_layout_saved_after_an_unread_launch_keeps_the_config(
+        env, monkeypatch):
+    saved = {"general": {"webserver_port": 6000}, results.CONFIG_SETTING: {
+        "main_icon_path": "./layout/own_logo.png", "layout": "team_split"}}
+    path = _unreadSettings(monkeypatch, env, saved)
+
+    env.service.SetLayout("vertical")
+
+    saved[results.CONFIG_SETTING]["layout"] = "vertical"
+    assert json.loads(path.read_text(encoding="utf-8")) == saved
+
+
+def test_the_layout_follows_the_format_from_the_saved_one(env, monkeypatch):
+    # The stand-in has no layout, so it reads the format's (horizontal): a
+    # team_split picked by hand would have been replaced by "team".
+    saved = {results.CONFIG_SETTING: {"layout": "team_split"}}
+    path = _unreadSettings(monkeypatch, env, saved)
+
+    env.service.FollowBattleFormat("team")
+
+    assert env.service.Layout() == "team_split"
+    assert json.loads(path.read_text(encoding="utf-8")) == saved
+
+
+def test_the_layout_changes_nothing_while_unopenable(env, monkeypatch):
+    path = _unreadSettings(monkeypatch, env)
+
+    with pytest.raises(SettingsUnreadable):
+        env.service.SetLayout("vertical")
+    # Logged, not raised: AutonaActions.SetBattleFormat calls it last.
+    env.service.FollowBattleFormat("team")
+
+    assert SettingsManager.settings == {}
+    assert path.is_dir()
 
 
 @pytest.mark.parametrize("saved, fmt, after", [

@@ -33,7 +33,7 @@ from typing import Any
 from loguru import logger
 
 from .core import LayoutCatalog
-from .core.SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager, SettingsUnreadable
 
 
 class DesignerProjectError(ValueError):
@@ -206,13 +206,19 @@ class AutonaDesignerService:
         Kept in settings.json so the plugin stays paired across restarts.
         Issued on first use, and again if the stored one is not a code this
         method could have issued (a hand-edited settings.json).
+
+        While settings.json could not be read at launch and still cannot be
+        opened, the code is unknown and none is issued (it could not be
+        saved, and the plugin holds the one in the file): SettingsUnreadable.
         """
         with cls._pairing_lock:
             return cls._current_pairing_code()
 
     @classmethod
     def regenerate_pairing_code(cls) -> str:
-        """Replace the pairing code; the old one stops working at once."""
+        """Replace the pairing code; the old one stops working at once.
+        SettingsUnreadable, nothing issued, while settings.json could not be
+        read at launch and still cannot be opened."""
         with cls._pairing_lock:
             code = cls._issue_pairing_code()
         logger.info("designer: issued a new Figma pairing code")
@@ -224,9 +230,11 @@ class AutonaDesignerService:
 
         Returns ``(status, retry_after_seconds)``, status being one of
         ``"ok"``, ``"missing"`` (no code sent: not counted as a failure, the
-        plugin was just never paired), ``"invalid"`` (a wrong code: counted)
-        or ``"locked"`` (too many wrong codes in a row; nothing is compared
-        until the lock expires, so a right code is refused too). Neither
+        plugin was just never paired), ``"invalid"`` (a wrong code: counted),
+        ``"locked"`` (too many wrong codes in a row; nothing is compared
+        until the lock expires, so a right code is refused too) or
+        ``"unavailable"`` (settings.json could not be read at launch and
+        still cannot be opened, so the code is unknown: not counted). Neither
         code is ever logged, only the failure count.
         """
         with cls._pairing_lock:
@@ -235,7 +243,14 @@ class AutonaDesignerService:
                 return "locked", max(1, math.ceil(cls._pairing_locked_until - now))
             if not isinstance(supplied, str) or not supplied.strip():
                 return "missing", 0
-            expected = cls._normalize_pairing_code(cls._current_pairing_code())
+            try:
+                current = cls._current_pairing_code()
+            except SettingsUnreadable as error:
+                logger.warning(
+                    "designer: refused a Figma import: the pairing code is "
+                    "unknown ({})", error)
+                return "unavailable", 0
+            expected = cls._normalize_pairing_code(current)
             given = ("" if len(supplied) > cls.PAIRING_MAX_INPUT
                      else cls._normalize_pairing_code(supplied))
             # Bytes: compare_digest refuses non-ASCII str, and the header is
@@ -264,27 +279,34 @@ class AutonaDesignerService:
 
     @classmethod
     def _current_pairing_code(cls) -> str:
-        # Caller holds _pairing_lock.
-        code = SettingsManager.Get(cls.PAIRING_SETTING)
-        if isinstance(code, str) and cls._is_pairing_code(code):
-            return code
-        if code is not None:
-            logger.warning(
-                "designer: the stored Figma pairing code is malformed; "
-                "issuing a new one")
-        return cls._issue_pairing_code()
+        # Caller holds _pairing_lock. Whether to issue one is decided from
+        # what settings.json holds, not from the empty stand-in of a launch
+        # that could not read it (PrepareWrite reads it again first;
+        # SettingsUnreadable while it still cannot be opened).
+        with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
+            code = SettingsManager.Get(cls.PAIRING_SETTING)
+            if isinstance(code, str) and cls._is_pairing_code(code):
+                return code
+            if code is not None:
+                logger.warning(
+                    "designer: the stored Figma pairing code is malformed; "
+                    "issuing a new one")
+            return cls._issue_pairing_code()
 
     @classmethod
     def _issue_pairing_code(cls) -> str:
         # Caller holds _pairing_lock. A new secret makes earlier wrong
-        # guesses irrelevant, so it also lifts the lockout.
+        # guesses irrelevant, so it also lifts the lockout. SetMany, not
+        # Set: a code that could not be saved is not issued
+        # (SettingsUnreadable), never one that only this run would know.
         length = cls.PAIRING_GROUPS * cls.PAIRING_GROUP_LENGTH
         raw = "".join(
             secrets.choice(cls.PAIRING_ALPHABET) for _ in range(length))
         code = "-".join(
             raw[i:i + cls.PAIRING_GROUP_LENGTH]
             for i in range(0, length, cls.PAIRING_GROUP_LENGTH))
-        SettingsManager.Set(cls.PAIRING_SETTING, code)
+        SettingsManager.SetMany([(cls.PAIRING_SETTING, code)])
         cls._pairing_failures = 0
         cls._pairing_locked_until = 0.0
         return code

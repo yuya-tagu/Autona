@@ -39,7 +39,7 @@ from collections import namedtuple
 from loguru import logger
 
 from .Observable import ObserverChannel
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, SettingsUnreadable
 
 # Win32 RegisterHotKey modifiers (winuser.h).
 MOD_ALT = 0x0001
@@ -403,7 +403,9 @@ def Update(enabled=None, keys=None):
     none), all or nothing. Returns (refusal, warnings, written):
 
     - refusal: None, or a Refusal -- NOT_READY when settings.json could not
-      be read (nothing it holds is known), INVALID for a value that is not
+      be read at launch and still cannot be opened (nothing it holds is
+      known; when it can be now, it is read again first:
+      SettingsManager.PrepareWrite), INVALID for a value that is not
       one (`name` the field), CONFLICT when a shortcut would be another
       action's too (`name` the action asked for, `detail` the others).
     - warnings: [{"action", "code"}] for the shortcuts asked for that clash
@@ -438,7 +440,12 @@ def Update(enabled=None, keys=None):
         asked[action] = canonical
 
     with SettingsManager.lock:
-        if SettingsManager.loadFailed:
+        # A launch that could not read settings.json reads it again first:
+        # the conflicts and the comparisons below are with the shortcuts it
+        # holds, not with the defaults that stood in for them.
+        try:
+            SettingsManager.PrepareWrite()
+        except SettingsUnreadable:
             return (Refusal(NOT_READY, None,
                             "settings.json could not be read"), [], False)
         current = CurrentKeys()

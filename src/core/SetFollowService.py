@@ -190,18 +190,12 @@ class SetFollowService:
         (AutonaActions.SeedFreshBoard): on the headless shell the setting is
         the operator's (Polling).
 
-        Nothing is written while settings.json could not be read
-        (SettingsManager.loadFailed), as the settings window's saves
-        (AppSettings, HotkeyRules) write nothing then: what the file holds is
-        unknown, and a save would replace it with this one key. Polling then
-        reads the key as on (Polling), which is what this would write."""
-        with SettingsManager.lock:
-            if SettingsManager.loadFailed:
-                logger.warning(
-                    "Set follow - polling not turned off in the settings: "
-                    "settings.json could not be read")
-                return
-            SettingsManager.Set("general.disable_autoupdate", True)
+        When the launch could not read settings.json, this is its first
+        write: SettingsManager reads the file again first (adopted, or a
+        corrupt one moved aside) and writes nothing while it still cannot be
+        opened -- Polling then reads the key as on, which is what this would
+        write. It used to skip the write itself (ADR-005 S4ac-1, review D)."""
+        SettingsManager.Set("general.disable_autoupdate", True)
 
     @classmethod
     def _Next(cls):

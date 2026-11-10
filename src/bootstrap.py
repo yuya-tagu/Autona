@@ -65,7 +65,10 @@ def bootstrap_core():
     # it, and the widgets built later read ports, languages and layout
     # options. Loading it late would make every one of those silently fall
     # back to its default. It also creates ./user_data, which later steps
-    # write into.
+    # write into. A settings.json it cannot read is read again here, before
+    # any of them (one held by another program is waited for about a
+    # second; a corrupt one is moved aside), so they start from what it
+    # holds.
     from .core.SettingsManager import SettingsManager
     SettingsManager.Initialize()
 

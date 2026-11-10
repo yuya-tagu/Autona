@@ -11,7 +11,8 @@ Through Flask's test client against the real route tables. Pinned besides
 the answers: who may call which (THIS_PC refuses another computer and a
 foreign page, token or not; WRITE takes the token; READ needs none), the
 same answers from the desktop and the headless shell, nothing written while
-settings.json could not be read, and the hotkeys re-registered on the GUI
+settings.json still cannot be opened (read again first when the launch could
+not read it), and the hotkeys re-registered on the GUI
 thread when the save comes from a request thread (RegisterHotKey binds a
 hotkey to the calling thread's message queue). The Windows API is a stub:
 no hotkey is ever registered.
@@ -27,6 +28,7 @@ import pytest
 
 from src.AutonaWebServer import WebServer
 from src.core import HotkeyRules, WebAccess
+from src.core import SettingsManager as settingsModule
 from src.core.AppSettings import AppSettings
 from src.core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from tests.test_api_v1 import _assertRejected, client, webApp  # noqa: F401
@@ -150,8 +152,9 @@ def test_the_read_answers_every_section(client, saves):
     data = _ok(client.get(SETTINGS))
 
     assert set(data) == {"general", "network", "language", "hotkeys",
-                         "loadFailed"}
+                         "loadFailed", "movedAside"}
     assert data["loadFailed"] is False
+    assert data["movedAside"] is None
     assert data["general"]["profanity_filter"] is True
     assert data["general"]["disable_autoupdate"] is True
     assert data["network"] == {"port": DEFAULT_WEBSERVER_PORT,
@@ -183,8 +186,9 @@ def test_the_read_needs_no_token_and_never_carries_one(webApp, autonaApp, saves,
     assert PAIRING not in text
     assert "webserver_token" not in text
     assert set(data) == {"general", "network", "language", "hotkeys",
-                         "loadFailed"}
+                         "loadFailed", "movedAside"}
     assert data["loadFailed"] is False
+    assert data["movedAside"] is None
 
 
 def test_the_read_shows_what_the_server_is_bound_with(client, saves,
@@ -345,10 +349,15 @@ def test_a_request_that_is_not_one_is_400_and_saves_nothing(client, saves,
     *THIS_PC_CHANGES,
     (HOTKEYS, {"enabled": False}),
 ])
-def test_nothing_is_saved_while_settings_json_could_not_be_read(
-        client, saves, monkeypatch, path, body):
+def test_nothing_is_saved_while_settings_json_cannot_be_opened(
+        client, saves, monkeypatch, tmp_path, path, body):
     # A write would replace the unread file with this one key -- and drop
-    # the access token with the rest.
+    # the access token with the rest. The save reads it again first, and it
+    # still cannot be opened (a directory: an OSError other than "not
+    # found").
+    unopenable = tmp_path / "settings.json"
+    unopenable.mkdir()
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(unopenable))
     monkeypatch.setattr(SettingsManager, "loadFailed", True)
     before = copy.deepcopy(SettingsManager.settings)
 
@@ -358,6 +367,45 @@ def test_nothing_is_saved_while_settings_json_could_not_be_read(
     assert SettingsManager.settings == before
     # The read still answers, and tells the page why nothing saves.
     assert _ok(client.get(SETTINGS))["loadFailed"] is True
+
+
+def test_a_save_reads_settings_json_again_when_the_launch_could_not(
+        client, saves, monkeypatch, tmp_path):
+    # The launch's failure was passing: no 409, the file read again is kept
+    # with the change over it, and the page's loadFailed goes false.
+    stored = {"general": {"webserver_token": "kept-token-0123456789ab",
+                          "profanity_filter": True},
+              "program_language": "ja"}
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    data = _ok(client.patch(GENERAL, json={"profanity_filter": False}))
+
+    assert data["profanity_filter"] is False
+    stored["general"]["profanity_filter"] = False
+    assert saves == [stored]
+    read = _ok(client.get(SETTINGS))
+    assert read["loadFailed"] is False
+    assert read["movedAside"] is None
+
+
+def test_the_read_names_where_a_corrupt_settings_json_was_moved(
+        client, saves, monkeypatch, tmp_path):
+    # For the settings page (S4af) to tell the user: the backup's file name,
+    # not its path (which would show the install folder to a LAN reader).
+    path = tmp_path / "settings.json"
+    path.write_bytes(b'{"general": {"webserver_po')
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+
+    _ok(client.patch(GENERAL, json={"profanity_filter": False}))
+
+    [backup] = tmp_path.glob("settings.json.unreadable-*.bak")
+    read = _ok(client.get(SETTINGS))
+    assert read["loadFailed"] is False
+    assert read["movedAside"] == backup.name
 
 
 def test_a_save_is_op_logged_with_its_values_and_never_the_token(
@@ -665,6 +713,26 @@ def test_a_saved_value_that_is_not_a_shortcut_does_not_stop_the_others(
     registry.clear()
     hotkeys.ReloadHotkeys()
     assert set(hotkeys._registered_ids.values()) == registered
+
+
+def test_mounting_registers_what_is_saved_by_then(autonaApp, saves, registry):
+    # When the launch could not read settings.json, a write between the
+    # construction (bootstrap_gui()) and the window's mount -- the desktop's
+    # TurnOffPolling -- may have read it: the mount registers what it holds,
+    # not the defaults the construction saw.
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.core.HotkeyRules import MOD_ALT, MOD_CONTROL, MOD_NOREPEAT
+
+    SettingsManager.settings.pop("hotkeys", None)
+    hotkeys = AutonaHotkeys()
+    assert hotkeys.loaded_keys["load_set"] == "Ctrl+Shift+O"
+    SettingsManager.settings["hotkeys"] = {"load_set": "Ctrl+Alt+O"}
+
+    hotkeys.UiMounted(None)
+
+    assert hotkeys.loaded_keys["load_set"] == "Ctrl+Alt+O"
+    assert (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, ord("O")) in [
+        (modifiers, vk) for _, modifiers, vk in registry]
 
 
 def test_the_reload_is_connected_once_whatever_applied_says(autonaApp,

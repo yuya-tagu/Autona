@@ -495,7 +495,11 @@ class ThumbnailService(RenderLane):
         """Change some of the settings and save them; all of them as saved
         (Settings()), or None when a key or a value is not one of theirs, or a
         game is not one there is (nothing is saved, not even what was valid).
-        settings.json is written once, and only when something changed."""
+        settings.json is written once, and only when something changed.
+        The config is merged into what is saved, so settings.json is settled
+        first (SettingsManager.PrepareWrite): SettingsUnreadable, nothing
+        saved, while it could not be read at launch and still cannot be
+        opened."""
         if not isinstance(changes, dict) or not all(
                 key in _CHECKS and _CHECKS[key](value)
                 for key, value in changes.items()) \
@@ -505,6 +509,7 @@ class ThumbnailService(RenderLane):
                            f"{sorted(map(str, changes)) if isinstance(changes, dict) else type(changes).__name__}")
             return None
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             stored = _StoredConfig()
             config = _WithBackgroundSource(copy.deepcopy(stored))
             _MergeChanges(config, changes)
@@ -514,9 +519,14 @@ class ThumbnailService(RenderLane):
 
     def Reset(self):
         """Back to the defaults, for every game (the setting is removed).
-        An uploaded background goes with it."""
+        An uploaded background goes with it -- only once the setting is:
+        SettingsUnreadable, nothing removed, while settings.json could not
+        be read at launch and still cannot be opened (Unset alone would
+        skip it, and the saved config would point at a removed file)."""
         with self._backgroundLock:
-            SettingsManager.Unset(CONFIG_SETTING)
+            with SettingsManager.lock:
+                SettingsManager.PrepareWrite()
+                SettingsManager.Unset(CONFIG_SETTING)
             self._RemoveUploadedBackgrounds()
 
     def Templates(self) -> list:
@@ -569,7 +579,9 @@ class ThumbnailService(RenderLane):
         (``background_path`` and ``background_source``), the previously
         uploaded one removed; IMPORTED. INVALID_IMAGE when `data` is not such
         an image, SAVE_FAILED when the file could not be written (nothing
-        changes in either case)."""
+        changes in either case). SettingsUnreadable, nothing written, while
+        settings.json could not be read at launch and still cannot be opened
+        (the config is merged into what is saved: PrepareWrite)."""
         encoded = ImageImport.EncodePng(
             data, BACKGROUND_LONGEST_SIDE, label="Thumbnail: the background")
         if encoded is None:
@@ -577,13 +589,16 @@ class ThumbnailService(RenderLane):
         digest = hashlib.sha256(encoded).hexdigest()[:16]
         path = f"{BACKGROUND_DIRECTORY}/{BACKGROUND_PREFIX}{digest}.png"
         with self._backgroundLock:
-            try:
-                ImageImport.WriteFile(path, encoded)
-            except OSError:
-                logger.opt(exception=True).error(
-                    "Thumbnail: the background could not be saved")
-                return SAVE_FAILED
+            # Settled before the image is written: one that could not be
+            # selected is not left behind.
             with SettingsManager.lock:
+                SettingsManager.PrepareWrite()
+                try:
+                    ImageImport.WriteFile(path, encoded)
+                except OSError:
+                    logger.opt(exception=True).error(
+                        "Thumbnail: the background could not be saved")
+                    return SAVE_FAILED
                 config = _StoredConfig()
                 config["background_source"] = BACKGROUND_CUSTOM
                 config["background_path"] = path

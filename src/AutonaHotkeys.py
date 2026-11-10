@@ -288,6 +288,10 @@ class AutonaHotkeys(QObject):
 
     def UiMounted(self, parent):
         self.parent = parent
+        # Read again, not the keys of the construction: when the launch
+        # could not read settings.json, a write since (the desktop's
+        # TurnOffPolling, in bootstrap_gui()) may have read it.
+        self.LoadUserHotkeys()
         self.SetupHotkeys()
 
     def ReloadHotkeys(self):

@@ -57,6 +57,7 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .core.GameTrackerService import TEAM_1, TEAM_2, TIE, UNREPORTED
 from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
+from .core.SettingsManager import SettingsUnreadable
 # Importing these builds nothing (agent-pitfalls #1): their singletons
 # (`.instance`) are created by src/bootstrap.py and read per request.
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -357,6 +358,17 @@ def write_op(operation, log_keys_only=False, max_body=None):
                     f"op={operation} params={params} -> 503 {UNAVAILABLE}"
                 )
                 return err(UNAVAILABLE, e.message, 503)
+            except SettingsUnreadable:
+                # A core operation that changes what settings.json holds
+                # (PrepareWrite / SetMany) while it could not be read at
+                # launch and still cannot be opened: nothing was changed.
+                _oplog.info(
+                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"op={operation} params={params} -> 409 {NOT_READY}"
+                )
+                return err(NOT_READY,
+                           "settings.json could not be read: nothing was "
+                           "saved", 409)
             except Exception:
                 logger.error(traceback.format_exc())
                 _oplog.info(
@@ -960,8 +972,12 @@ def get_settings():
     # restartPending}, "language": {program, gameAsset, fgTerm, choices:
     # [{code, name, englishName}], restartPending}, "hotkeys": {enabled, keys:
     # {action: {value, default, valid, warning}}, vocabulary: {modifiers,
-    # keys}, applied}, "loadFailed": settings.json could not be read (the
-    # values are the defaults, and every save answers 409 NOT_READY)}. An
+    # keys}, applied}, "loadFailed": settings.json could not be read at
+    # launch (the values are the defaults; a save reads it again first, and
+    # answers 409 NOT_READY while it still cannot be opened; false again once
+    # a save has read it again or moved a corrupt one aside), "movedAside":
+    # the file name (not the path) a corrupt settings.json was moved aside to
+    # in this run, at launch or at a save, else null}. An
     # allow-list (core's AppSettings / HotkeyRules):
     # never the access token, nor anything else settings.json holds, so READ.
     # Settings, not state: no revision.
@@ -2004,7 +2020,8 @@ def select_stats_overlay():
 # ── 設定 (ADR-005 S4ae) ──
 # The settings page's saves: core's AppSettings / HotkeyRules validate every
 # field first and write once (nothing when nothing changes, nothing at all
-# when settings.json could not be read: 409 NOT_READY). Each answers its
+# when settings.json could not be read at launch and still cannot be opened:
+# 409 NOT_READY; SettingsManager.PrepareWrite). Each answers its
 # section of GET /settings as it now is. Settings, not state: no revision.
 # general is WRITE; network, language and hotkeys THIS_PC (WebAccess).
 

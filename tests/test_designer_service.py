@@ -15,7 +15,7 @@ from loguru import logger
 
 from src.AutonaDesignerService import (
     AutonaDesignerService, DesignerProjectError)
-from src.core.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager, SettingsUnreadable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _REAL_SAVE_SETTINGS = SettingsManager.SaveSettings
@@ -1215,6 +1215,71 @@ def test_regenerating_the_pairing_code_invalidates_the_old_one(
     assert SettingsManager.Get(designer_service.PAIRING_SETTING) == new
     assert designer_service.check_import_pairing(old)[0] == "invalid"
     assert designer_service.check_import_pairing(new) == ("ok", 0)
+
+
+# settings.json unread at launch (2026-11-11): the launch's empty stand-in
+# has no code, so one was issued over the code the plugin holds once
+# SettingsManager read the file again.
+
+SAVED_PAIRING = "ABCD-EFGH-JKMN"
+
+
+def _unreadSettings(monkeypatch, path, saved=None):
+    """A launch that could not read settings.json at `path`: `saved` in it
+    now, or a directory (still cannot be opened)."""
+    from src.core import SettingsManager as settingsModule
+
+    if saved is None:
+        path.mkdir()
+    else:
+        path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(settingsModule, "SETTINGS_PATH", str(path))
+    monkeypatch.setattr(SettingsManager, "loadFailed", True)
+    monkeypatch.setattr(SettingsManager, "SaveSettings", _REAL_SAVE_SETTINGS)
+    return path
+
+
+def test_the_saved_pairing_code_is_kept_after_an_unread_launch(
+        designer_service, tmp_path, monkeypatch):
+    saved = {"general": {"webserver_port": 6000},
+             "designer": {"figma_pairing_code": SAVED_PAIRING}}
+    path = _unreadSettings(monkeypatch, tmp_path / "settings.json", saved)
+
+    assert designer_service.pairing_code() == SAVED_PAIRING
+
+    assert json.loads(path.read_text(encoding="utf-8")) == saved
+    assert designer_service.check_import_pairing(SAVED_PAIRING) == ("ok", 0)
+
+
+def test_no_pairing_code_is_issued_while_settings_json_cannot_be_opened(
+        designer_service, import_client, tmp_path, monkeypatch):
+    path = _unreadSettings(monkeypatch, tmp_path / "settings.json")
+
+    with pytest.raises(SettingsUnreadable):
+        designer_service.pairing_code()
+    with pytest.raises(SettingsUnreadable):
+        designer_service.regenerate_pairing_code()
+    # The plugin's import: refused, and not counted as a wrong code (the
+    # right one would be locked out).
+    for _ in range(designer_service.PAIRING_MAX_FAILURES + 1):
+        assert designer_service.check_import_pairing(SAVED_PAIRING) == (
+            "unavailable", 0)
+    assert designer_service._pairing_failures == 0
+
+    designer = {"X-Autona-Designer-Token": designer_service.issue_token()}
+    for answer in (
+            import_client.get("/api/designer/pairing", headers=designer),
+            import_client.post("/api/designer/pairing/regenerate",
+                               headers=designer),
+            import_client.post(
+                "/api/designer/imports", json=_import_payload(),
+                headers={"Origin": "null",
+                         "X-Autona-Pairing": SAVED_PAIRING})):
+        assert answer.status_code == 409
+        assert answer.get_json()["reason"] == "pairing_unavailable"
+    assert import_client.emitted == []
+    assert SettingsManager.settings == {}
+    assert path.is_dir()
 
 
 @pytest.mark.parametrize("stored", [

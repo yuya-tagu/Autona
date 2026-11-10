@@ -64,7 +64,7 @@ from .PlayerDB import PlayerDB
 from .RenderLane import (  # noqa: F401  (re-exported: this module's names)
     BUSY, CANCELLED, DONE, ERROR, GENERATE, IDLE, PAYLOAD_FAILED, PREVIEW,
     RENDER_FAILED, RUNNING, SAVE_FAILED, RenderDataMissing, RenderLane)
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, SettingsUnreadable
 from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor
 
@@ -870,11 +870,16 @@ class ResultService(RenderLane):
                 for layout in LAYOUT_SUBDIRS]
 
     def SetLayout(self, layout) -> bool:
-        """Save the layout. False, saving nothing, when it is not one."""
+        """Save the layout. False, saving nothing, when it is not one.
+        The layout is set in the config as saved, so settings.json is
+        settled first (SettingsManager.PrepareWrite): SettingsUnreadable,
+        nothing saved, while it could not be read at launch and still cannot
+        be opened."""
         if not isinstance(layout, str) or layout not in LAYOUT_SUBDIRS:
             logger.warning(f"Result: refusing the layout {layout!r}")
             return False
         with SettingsManager.lock:
+            SettingsManager.PrepareWrite()
             config = _StoredConfig()
             if config.get("layout") != layout:
                 config["layout"] = layout
@@ -886,13 +891,24 @@ class ResultService(RenderLane):
         """The layout for a battle format just chosen (AutonaActions
         .SetBattleFormat, ADR-005 S4x; the window's switch until then):
         Team and Crew are drawn on a team layout, 1v1 on one of the singles'.
-        A layout that fits stays: a team_split or a vertical picked by hand."""
-        team = IsTeamLayout(self.Layout())
-        if fmt in TEAM_FORMATS:
-            if not team:
-                self.SetLayout(DEFAULT_TEAM_LAYOUT)
-        elif team:
-            self.SetLayout(DEFAULT_LAYOUT)
+        A layout that fits stays: a team_split or a vertical picked by hand.
+        While settings.json could not be read at launch and still cannot be
+        opened, the layout is left as it is (logged)."""
+        try:
+            # Decided from the saved layout, not from the launch's empty
+            # stand-in: settled first. Not under the settings lock: the
+            # publish below takes the state's, which is taken before it.
+            SettingsManager.PrepareWrite()
+            team = IsTeamLayout(self.Layout())
+            if fmt in TEAM_FORMATS:
+                if not team:
+                    self.SetLayout(DEFAULT_TEAM_LAYOUT)
+            elif team:
+                self.SetLayout(DEFAULT_LAYOUT)
+        except SettingsUnreadable as error:
+            logger.warning(
+                f"Result: the layout did not follow the battle format: "
+                f"{error}")
         # Whether or not that wrote anything: without a saved layout the format
         # chose it (Layout()), and the format is already the new one here.
         self._PublishLayout()

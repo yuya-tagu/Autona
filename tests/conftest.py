@@ -320,6 +320,30 @@ def _freshStatistics():
 
 
 @pytest.fixture(autouse=True)
+def _freshSettingsRecord():
+    """Every test starts with nothing SettingsManager keeps about a
+    settings.json it could not read: the changes made in memory only while
+    it could not be opened (put back over the file when a later write reads
+    it) and where a corrupt one was moved aside are process-wide. A test
+    that left a change recorded -- a Set while `loadFailed`, which it
+    monkeypatched -- would have it put back over the next test's file. A
+    run that never imported the module has nothing to forget."""
+    module = sys.modules.get("src.core.SettingsManager")
+    if module is None:
+        yield
+        return
+    SettingsManager = module.SettingsManager
+
+    def reset():
+        SettingsManager._unsaved = []
+        SettingsManager.movedAside = None
+
+    reset()
+    yield
+    reset()
+
+
+@pytest.fixture(autouse=True)
 def _freshSetFollow():
     """Every test starts with no set loaded, followed or polled on any
     board: what the set follow keeps (SetFollowService, ADR-005 S3e-7) and

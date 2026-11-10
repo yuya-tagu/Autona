@@ -116,17 +116,18 @@ def SetTournamentColor(kind: str, color: str):
 def _ClearFeatureColor(feature: str, kind: str):
     """Drop one stored feature override if it exists.
 
-    Both Unset helpers create the intermediate dicts on their way down
-    (deep_unset in core/DictHelper.py), and SettingsManager.Unset rewrites
-    settings.json on every call, so the existence guards are what keep an
-    untouched feature from collecting empty ``colors.{feature}`` nodes and
-    what keeps a single color pick from triggering six pointless file
-    writes. The StateManager guard additionally avoids queueing a changed key
-    for a path that was never published (same reason as in _SeedPanelState).
+    SettingsManager.Unset saves nothing, and makes no empty
+    ``colors.{feature}`` node, when the key is not there, so an untouched
+    feature costs no file write. It decides that against what settings.json
+    holds: no guard here reads the empty stand-in a launch that could not
+    read the file leaves (it would skip the removal, and the override would
+    survive once the file is read again; while it cannot be opened the
+    removal is kept and put back over it). StateManager.Unset creates the
+    intermediate dicts on its way down (deep_unset in core/DictHelper.py),
+    so its existence guard stays; it also avoids queueing a changed key for
+    a path that was never published (same reason as in _SeedPanelState).
     """
-    settingsPath = f"colors.{feature}.{_SETTINGS_SUFFIX[kind]}"
-    if SettingsManager.Get(settingsPath, None) is not None:
-        SettingsManager.Unset(settingsPath)
+    SettingsManager.Unset(f"colors.{feature}.{_SETTINGS_SUFFIX[kind]}")
     statePath = FeatureColorKey(feature, kind)
     if StateManager.Get(statePath, None) is not None:
         StateManager.Unset(statePath)
