@@ -293,6 +293,72 @@ def test_a_generate_is_accepted_and_a_second_refused(desktop, executor, client):
     assert SM.Get("thumbnail.render.revision") == 1
 
 
+@pytest.mark.parametrize("body, board", [
+    ({}, 1), ({"board": 1}, 1), ({"board": 2}, 2),
+    # The rest of the body is not read, as before ADR-005 S4z.
+    ({"board": 2, "preview": True}, 2), ({"anything": "else"}, 1)])
+def test_a_generate_draws_the_board_it_is_sent(
+        desktop, executor, client, body, board):
+    SM.state = copy.deepcopy(PLAYERS)
+
+    _ok(client.post("/api/v1/thumbnail:generate", json=body), status=202)
+
+    [asked] = desktop.renderer.asked
+    assert asked.payload[1]["scoreboardNumber"] == board
+    desktop.renderer.answer()
+    executor.drain(WAIT)
+    left = {1: "Alpha", 2: "Charlie"}[board]
+    assert SM.Get("thumbnail.render.path").startswith(
+        f"out/thumbnails/{left}-vs-")
+
+
+@pytest.mark.parametrize("data", [
+    b"[1, 2]", b'"board"', b"not json at all", b""])
+def test_a_generate_with_a_body_that_is_no_object_is_board_1_as_before(
+        desktop, executor, client, data):
+    SM.state = copy.deepcopy(PLAYERS)
+
+    _ok(client.post("/api/v1/thumbnail:generate", data=data,
+                    content_type="application/json"), status=202)
+
+    assert desktop.renderer.asked[0].payload[1]["scoreboardNumber"] == 1
+
+
+@pytest.mark.parametrize("board", [0, 3, "2", 2.0, True, None, [2]])
+def test_a_board_that_is_not_1_or_2_is_400_and_draws_nothing(
+        desktop, executor, client, board):
+    SM.state = copy.deepcopy(PLAYERS)
+
+    _assertRejected(client.post("/api/v1/thumbnail:generate",
+                                json={"board": board}))
+
+    assert desktop.renderer.asked == []
+    assert SM.Get("thumbnail.render") is None
+
+
+def test_a_generate_of_board_2_while_one_runs_is_409(desktop, executor, client):
+    SM.state = copy.deepcopy(PLAYERS)
+    _ok(client.post("/api/v1/thumbnail:generate", json={}), status=202)
+
+    _assertRejected(client.post("/api/v1/thumbnail:generate",
+                                json={"board": 2}), "CONFLICT", 409)
+
+    desktop.renderer.answer()
+    executor.drain(WAIT)
+    # The one on its way kept its board.
+    assert SM.Get("thumbnail.render.path").startswith("out/thumbnails/Alpha-")
+
+
+def test_headless_answers_a_board_as_it_answers_none(headless, executor,
+                                                     client):
+    _assertRejected(client.post("/api/v1/thumbnail:generate",
+                                json={"board": 2}), "UNAVAILABLE", 503)
+    # The board is checked first: a bad one is 400 there too.
+    _assertRejected(client.post("/api/v1/thumbnail:generate",
+                                json={"board": 3}))
+    assert headless.renderer.asked == []
+
+
 @pytest.mark.parametrize("route", ["preview", "generate"])
 def test_the_renders_are_the_desktops(headless, executor, client, route):
     response = client.post(f"/api/v1/thumbnail:{route}", json={})
@@ -357,6 +423,41 @@ def test_the_preview_is_the_newest_render_as_a_png(desktop, executor, client):
 
     assert client.get("/api/v1/thumbnail/preview?v=2").get_data() \
         == b"second.PNG"
+
+
+def test_the_preview_stays_board_1_through_a_generate_of_board_2(
+        desktop, executor, client):
+    # S4z review: no preview is answered with another board's picture. A
+    # preview kept when a generate of board 2 comes is drawn after it, as
+    # board 1, under the next revision.
+    SM.state = copy.deepcopy(PLAYERS)
+    client.post("/api/v1/thumbnail:preview", json={})
+    kept = _ok(client.post("/api/v1/thumbnail:preview", json={}), status=202)
+    generate = _ok(client.post("/api/v1/thumbnail:generate",
+                               json={"board": 2}), status=202)
+    assert kept["data"]["renderRevision"] == 2
+    assert generate["data"]["renderRevision"] == 2
+    desktop.renderer.answer(b"first")
+    executor.drain(WAIT)
+
+    assert desktop.run_queued() == 1
+    assert desktop.renderer.asked[0].payload[1]["scoreboardNumber"] == 2
+    desktop.renderer.answer(b"board two")
+    executor.drain(WAIT)
+    assert SM.Get("thumbnail.render.revision") == 2
+    assert SM.Get("thumbnail.render.path").startswith(
+        "out/thumbnails/Charlie-vs-")
+    assert client.get("/api/v1/thumbnail/preview?v=2").get_data() \
+        == b"first.PNG"
+
+    assert desktop.run_queued() == 1
+    assert desktop.renderer.asked[0].payload[1]["scoreboardNumber"] == 1
+    desktop.renderer.answer(b"board one")
+    executor.drain(WAIT)
+    assert SM.Get("thumbnail.render.revision") == 3
+    assert SM.Get("thumbnail.render.status") == "done"
+    assert client.get("/api/v1/thumbnail/preview?v=3").get_data() \
+        == b"board one.PNG"
 
 
 def test_tmp_is_not_served_as_a_file(desktop, executor, client):

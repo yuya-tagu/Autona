@@ -235,9 +235,10 @@ class AutonaActions:
     # thread that switched it, after the settings are written and before the
     # result's layout follows -- the order the window's switch had. The
     # desktop shows the format's board and the sidebar segment for it
-    # (StateManagerBridge.battle_format_changed -> Window); headless, nobody
-    # listens. Class-level, as SetFollowService.changes: the bridge
-    # subscribes once for the process.
+    # (StateManagerBridge.battle_format_changed -> Window), and in both shells
+    # the web server tells its clients (`battle_format`, ADR-005 S4z).
+    # Class-level, as SetFollowService.changes: the bridge subscribes once
+    # for the process.
     battleFormatChanges = ObserverChannel("battle_format_changes")
 
     def ResolveBattleFormat(self) -> str:

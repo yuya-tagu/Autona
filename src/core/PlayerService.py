@@ -83,6 +83,20 @@ from .StateManager import StateManager
 # here now so the two sides cannot end up with different sentinels.
 KEEP_ONLINE_AVATAR = object()
 
+# What a request to Edit / EditCharacter did not send: that field stays as
+# it is (ADR-005 S4z). Not None, which there means "none".
+NOT_SENT = object()
+
+# What Edit / EditCharacter refuse, writing nothing (ADR-005 S4z; v1's
+# routes say what each one is answered with).
+UNKNOWN_COUNTRY = "unknown_country"
+UNKNOWN_REGION = "unknown_region"
+NO_SUCH_ROW = "no_such_row"
+UNKNOWN_CHARACTER = "unknown_character"
+UNKNOWN_SKIN = "unknown_skin"
+UNKNOWN_VARIANT = "unknown_variant"
+OTHER_GAME = "other_game"
+
 # Operator-supplied local avatars, matched by the player's sponsor + tag.
 # Relative to the process CWD like every other mutable path (./out,
 # ./user_data) -- see SetLoadService.TEAM_LOGO_DIR.
@@ -565,6 +579,234 @@ class PlayerService:
         that used to wipe avatars that were meant to stay.
         """
         StateManager.Set(self.Key("online_avatar"), value)
+
+    # ── the card's fields, from a request (ADR-005 S4z) ──────────────────
+    #
+    # What the card's inputs write when the operator finishes them, for the
+    # fields of one request and in one save cycle: v1's PATCH .../fields and
+    # .../characters/{row}, which the React SCORE page edits a slot with. Not
+    # ApplyData, which is a load (a blank value is "not carried", the local
+    # database is merged in, a new name empties the city): here a field is
+    # what it is sent as, "" included, as the card's are.
+
+    def Edit(self, texts, country=NOT_SENT, region=NOT_SENT):
+        """Some of the card's fields, as finishing them on the card writes
+        them. One save cycle. Returns None, or -- having written nothing --
+        UNKNOWN_COUNTRY / UNKNOWN_REGION.
+
+        - `texts` maps fields of ``PLAYER_TEXT_KEYS`` to their text, each
+          written when the slot does not hold that text already (the card's
+          rule, _OnTextChanged: a field the slot has never had is written,
+          "" too). The note's line breaks are "\\n", as the note box hands
+          them over -- the text as shown, not the database's escaped form.
+        - `country` / `region` are codes, "" or None for none, NOT_SENT to
+          leave it. A country is one of the country combo's rows (a custom
+          flag's included); a region one of that country's -- the country
+          sent, else the one the slot shows. Another country empties the
+          region (a pick publishes the blank region first, then the country),
+          unless a region of it is sent too. The same country or region as
+          shown writes nothing (a combo picked on its own row emits nothing).
+        - a sponsor or a tag that changed does what the card's NameChanged
+          does: the display name and the images re-derived (the online
+          avatar kept: LIVE-BUG-1), the id emptied and the statistics asked
+          for when that changed it (Announce, outside the lock). The city
+          and the seed stay, as on the card. No bad-word filter, no
+          database: the operator's text is the operator's.
+
+        The lock is taken inside the save block and released before the
+        statistics are asked for (a fetch is started there), as ApplyData's.
+        And ApplyData's guarantee when a step raises half-way (S4z review):
+        for what was written, the id is emptied and the display name and the
+        images re-derived from what the slot holds, and the statistics are
+        asked for; an error there is logged rather than raised over the
+        step's own. A sponsor or a tag is never left beside the previous
+        player's id.
+        """
+        for field in texts:
+            if field not in schema.PLAYER_TEXT_KEYS:
+                raise ValueError(f"not a text field of a player: {field!r}")
+        catalog = self._CountryCatalog()
+        identity = None
+        failed = False
+        with StateManager.SaveBlock():
+            try:
+                with StateManager.lock:
+                    slot = self._Slot()
+                    shownValue = slot.get(schema.PLAYER_COUNTRY_KEY)
+                    shown = (shownValue.get("code") or None) \
+                        if isinstance(shownValue, dict) else None
+                    regionValue = slot.get(schema.PLAYER_STATE_KEY)
+                    shownRegion = (regionValue.get("code") or None) \
+                        if isinstance(regionValue, dict) else None
+
+                    # Resolved before anything is written: a stray code never
+                    # empties what is on air.
+                    target = shown
+                    if country is not NOT_SENT:
+                        if country and catalog.CountryByCode(country) is None:
+                            return UNKNOWN_COUNTRY
+                        target = country or None
+                    targetRegion = shownRegion if target == shown else None
+                    if region is not NOT_SENT:
+                        if region:
+                            # The codes only (StateCodes): no flag looked up
+                            # on disk under the lock. A region's code is its
+                            # key.
+                            rows = catalog.StateCodes(target) \
+                                if target else None
+                            if not rows or region not in rows:
+                                return UNKNOWN_REGION
+                        targetRegion = region or None
+
+                    identity = self.Identity()
+                    before = (self._Text(schema.PLAYER_SPONSOR_KEY),
+                              self._Text(schema.PLAYER_TAG_KEY))
+                    try:
+                        for field in schema.PLAYER_TEXT_KEYS:
+                            if field not in texts:
+                                continue
+                            value = "" if texts[field] is None \
+                                else str(texts[field])
+                            if field == schema.PLAYER_NOTE_KEY:
+                                value = _LINE_BREAKS.sub("\n", value)
+                            if StateManager.Get(self.Key(field)) != value:
+                                self.SetText(field, value)
+
+                        if target != shown:
+                            # The region rows are rebuilt for the new country
+                            # first, which publishes the blank region
+                            # (LoadStates).
+                            self.SetRegion(None, None)
+                            shownRegion = None
+                            self.SetCountry(target)
+                        if targetRegion != shownRegion:
+                            self.SetRegion(target, targetRegion)
+                    except BaseException:
+                        failed = True
+                        raise
+                    finally:
+                        # Also when a step raised: for what was written.
+                        after = (self._Text(schema.PLAYER_SPONSOR_KEY),
+                                 self._Text(schema.PLAYER_TAG_KEY))
+                        if after != before:
+                            # The card's order (NameChanged): the name, the
+                            # images, the id -- which is emptied even when
+                            # the name or the images raised.
+                            published = False
+                            try:
+                                self.PublishMergedName(*after)
+                                self.PublishImages(*after)
+                                published = True
+                            finally:
+                                try:
+                                    self.SetPlayerId(None)
+                                except Exception as e:
+                                    if published and not failed:
+                                        raise
+                                    # The first exception is what propagates.
+                                    logger.opt(exception=e).error(
+                                        f"{self.path}: the previous player's "
+                                        f"id was not emptied after a failed "
+                                        f"edit")
+            except BaseException:
+                failed = True
+                raise
+            finally:
+                if identity is not None:
+                    try:
+                        self.Announce(self.ChangeSince(identity))
+                    except Exception as e:
+                        if not failed:
+                            raise
+                        # As emptying the id above.
+                        logger.opt(exception=e).error(
+                            f"{self.path}: the statistics were not asked for "
+                            f"after a failed edit")
+        return None
+
+    def EditCharacter(self, row, character=NOT_SENT, skin=NOT_SENT,
+                      variant=NOT_SENT, game=None):
+        """One character row of the card, as picking on its three combos
+        writes it: `character` an en_name ("" or None: the blank row),
+        `skin` the skin combo's row, `variant` an en_name ("" or None: none);
+        NOT_SENT leaves that combo as it is. `game`: the codename of the game
+        whose list the pick was made on, None not to check it. Returns None,
+        or -- having written nothing -- NO_SUCH_ROW (`row` is not one of the
+        slot's rows, 1-based), UNKNOWN_CHARACTER / UNKNOWN_SKIN /
+        UNKNOWN_VARIANT (not in the loaded game), OTHER_GAME (`game` is not
+        the game loaded: a list from before a switch).
+
+        - another character takes its first skin, or none for a character
+          without skins (the skin combo's new rows: LoadSkinOptions), unless
+          a skin is sent; the variant stays unless one is sent.
+        - a skin that is not one of the character's rows is refused; for a
+          character without skins (or the blank row) any skin sent is none,
+          as the Top 8's (Top8Service.UpdatePlayer).
+        - the rows are published together (PublishCharacterSlots), the other
+          rows as the slot holds them, and only when that changes the slot
+          (a combo picked on its own row emits nothing).
+
+        Under the state lock, against one GameAssetCatalog snapshot (as
+        Top8Service.UpdatePlayer): the rows are resolved from one game. A
+        pick that lands while a switch to another game is on its way is
+        emptied with every other slot's characters by the roster step that
+        follows the load (AutonaActions.ApplyGameRoster with `replaced`), as
+        a pick on the card would be.
+        """
+        games = self._GameCatalog()
+        with StateManager.lock:
+            snap = games.Current()
+            if game is not None and (snap.codename or "") != game:
+                return OTHER_GAME
+            existing = StateManager.Get(self.Key("character"))
+            # The rows are the slot's: none when it has no character slots
+            # (a roster of 0 characters), whatever _CharacterSlots would
+            # make up for a load (S4z review).
+            rows = len(existing) if isinstance(existing, dict) else 0
+            if not 1 <= row <= rows:
+                return NO_SUCH_ROW
+            slots = self._CharacterSlots(existing, snap)
+            current = slots[row - 1]
+
+            name, text = current.character, current.text
+            changed = False
+            if character is not NOT_SENT:
+                if character:
+                    picked = games.CharacterRow(character, snapshot=snap)
+                    if picked is None:
+                        return UNKNOWN_CHARACTER
+                    name, text = character, picked.get("name") or ""
+                else:
+                    name, text = None, ""
+                changed = name != current.character
+            skins = len(snap.skinRows.get(name, ())) if name else 0
+            if skin is not NOT_SENT:
+                if skins:
+                    if not 0 <= skin < skins:
+                        return UNKNOWN_SKIN
+                    number = skin
+                else:
+                    number = -1
+            elif changed:
+                number = 0 if skins else -1
+            else:
+                number = current.skin
+            picks = current.variant
+            if variant is not NOT_SENT:
+                if variant and games.VariantRow(variant, snap) is None:
+                    return UNKNOWN_VARIANT
+                picks = variant or None
+
+            slots[row - 1] = CharacterSlot(name, number, picks, text)
+            characters = {index + 1: self.CharacterValue(pick, snap)
+                          for index, pick in enumerate(slots)}
+            held = {}
+            if isinstance(existing, dict):
+                held = {self._asInt(key, key): value
+                        for key, value in existing.items()}
+            if characters != held:
+                self.PublishCharacterSlots(slots, snapshot=snap)
+        return None
 
     # ── what the slot holds ──────────────────────────────────────────────
 

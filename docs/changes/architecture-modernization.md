@@ -6845,3 +6845,150 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - フラグをシードの前に立てる / 作っている間の印が無い / フラグを hold の前に立てる
   - `DrawBoard` が書いたファイルを剪定から守らない / JPG を書かずに黙る / 書く前に剪定する
 - **検証**: `python scripts/run_tests_parallel.py` 5620 passed / 2 skipped（RESULT: OK、exit 0。S4y の初版の 5605 から、足した 15 本ぶん増えた）。関係する 26 ファイルの直列実行は 2 回に分けて 601 passed（11 ファイル）と 939 passed（15 ファイル）（いずれも exit 0）。その後に直したテスト（再入の検査の書き方・`noBoards` の docstring）を含む `tests/test_headless_seed.py`・`tests/test_state_manager_held.py`・`tests/test_thumbnail_service.py` を回し直して 364 passed（exit 0）。`noBoards` の後始末は、使い捨ての probe（`tests/` に一時的に置いて回し、消した）で直す前と後を比べた（上の 5）。web は触っていないので build / jest / e2e は回していない。アプリの起動はしていない
+
+#### 順序 6（SCORE の React 化）の設計（2026-11-10・メイン決定。論点はオーナー確認待ち）
+
+S4y で、ボードのウィジェットにしか無い処理は無くなった（選手カードの 2 回の書き込みと入力中の欄の確定を除く）。棚卸し（Qt の SCORE 8 ファイル 5,845 行 + .ui 3 つ 793 行、SCORE の Qt を参照するテスト 37 ファイル）の結果から、残りの順序 6・7 を次の段に分ける。前例（S4a / S4b / S4c: v1 → React 化と退路 → 実機ゲート → Qt の削除）に合わせ、各段を 1 PR・単独でリリースできる大きさにする。
+
+**段**
+
+| 段 | 内容 | 完了条件 |
+|----|------|---------|
+| S4z | **v1 の追加（UI は変えない）**: 下の G1〜G6。既存のルートは変えない | pytest 全量・golden 不変・ヘッドレスでも同じ答え |
+| S4aa | **React の SCORE ページ（1v1 / Team / Crew）と退路の設定**: 選手カード（`useStateField`・名前の補完は Commentary の `NameField` の型）・詳細ダイアログ（反映・クリア・バリアント）・上下移動・チーム・試合の情報・スコア・反映ボタン・表示大会名・X 投稿・クルー。セット選択は当面 legacy の open-set で Qt の窓を開く。サイドバーの SCORE を共有ビューへ切り替え、設定 1 つで Qt に戻せる。Qt のマネージャと隠れたボードは残す（held の登録・`Prepare` は今のまま） | jest・build・pytest・e2e、メインの実機確認（隔離データ） |
+| S4ab | **React のセット選択・配信台・追従の行**（S4v の v1）。Ctrl+Shift+O と legacy の open-set はページのダイアログを開く（下の論点 2） | 同上 |
+| ゲート | メインの実機ゲート（IME・補完・反映・形式の切り替え・配信台の追従）。入力のフックは S4b の IME ゲートを通ったものと同じ | メインの判断 |
+| S4ac | **Qt の SCORE の削除**と **`HoldBoard` の起動時登録**（`ResetBoards` の後、ボード 1 / 2 に `EnsureBoard(panel=True)`、3 に `EnsureBoard`）。`DesktopBoardHost` の `Prepare` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` を基底の動作に。objectName とキーの契約からウィジェットの側を外す（キーの定数は `StateSchema` に残る）。廃止の候補（論点 3）はオーナーの確認の後 | pytest 全量（37 ファイルの整理を含む）・実機確認 |
+| S4ad | **順序 7 の残り**: `DesktopBoardHost.Run` の GUI スレッド実行と `Prepare` の marshal を同時に外す（S4y の申し送り）。`CommitGameLoad` の順序の制約を lock の下へ | golden とスレッドのテスト |
+
+**v1 の追加（S4z）**
+
+- **G1 選手の欄ごとの書き込み**（新規。例 `PATCH /scoreboards/{n}/teams/{t}/players/{p}/fields`）: 今の `PATCH .../players/{p}` は空を「変更なし」と扱い、`gamerTag` で DB とマージし、全欄を送る形で、1 欄ずつ送る React のフックに向かない。新しいルートは prefix / gamerTag / name / twitter / custom_textbox（`""` で空にできる）と country_code / state_code（`""` で消す）を受け、所属かタグが変わったらカードの `NameChanged` と同じ組（`PublishMergedName`・`PublishImages`・`SetPlayerId(None, announce=True)`）を 1 保存サイクルで行う。DB のマージも保存もしない。今の PATCH は変えない（外部契約）。カードが GUI スレッドで 2 回に分けて書く理由（`DesktopBoardHost.Run` を GUI スレッドに置く理由の 1 つ）が core に入る
+- **G2 キャラの行ごとの書き込み**（新規。`{en_name, skin, variant}` → `PublishCharacterSlots`）: mains 全体の PATCH は `ApplyData` を通り、検閲・画像の組み直し・統計の取り直しまで走る
+- **G3 `:load` に PlayerDB のキー**（足すだけ）: 同じタグで所属違いがあると、タグだけでは曖昧
+- **G4 ボード 1 / 2 の試合欄**（新規。例 `PATCH /scoreboards/{n}/match`）: `PATCH set` のセット形の書き方は `""` で phase / match を消せず、どれを書いても `match_en` を空にし、bestOf 0 を無視する。`AutonaActions.SetMatchField` と `SetBestOf` に直接つなぎ、規則はクルーの厳しい PATCH に揃える
+- **G5 `POST /thumbnail:generate` に `board`**（1 / 2。足すだけ）: X 投稿の画像。非同期のレーンと `thumbnail.render` をそのまま使う（S4o / S4r の前例）。同期で PNG を返す legacy のルートは新しいページから呼ばない
+- **G6 形式の変更の通知**（Socket.IO、値を運ばない）: `battleFormatChanges` → Bridge → WebServer。S4x の「通知は増やさない」を見直す（ページが形式に追従する手段が他に無い。ブラウザ版にも届く）
+
+**判断**
+
+1. **held はページが `scoreboard_pending` の通知を合図に `GET /scoreboards/{n}/pending` を読み直して描く**（held でないボード・ヘッドレスは redux の delta）。反映ボタンは `dirty` のときだけ押せ、押すとフォーカス中の欄を送ってから `:apply`。もう一方のボードの未反映も出し、そこから反映できる。`/pending` を読むのは形式で見せているボードだけ（未構築のボードを読むと構築され held になる。起動時登録の S4ac まで）
+2. **`HoldBoard` の起動時登録は S4ac（Qt の削除）で入れる**: S4aa / S4ab の間は Qt のボードが残り、退路の Qt モードでは見せていない面が反映ボタンの無いまま held になる（S2c で撤回した懸念）。S4ac ではウィジェットが `EnsureScoreboard` を呼ばなくなるので誰かが呼ぶ必要があり、起動時に全部呼べば `Built` は常に真（ヘッドレスと同じ）で `Prepare` の marshal も要らなくなる（S4ad の準備）。SCORE の設計の決定 3「React の反映ボタンと同時か後」に合う。起動時の `program_state.json` の初期の形が変わるかは S4ac で golden を見る
+3. **X 投稿は S4r の型**: `GET .../post` を先に読み、`missing` があればダイアログ。押したらすぐ投稿画面を開き、画像は G5 で描いてできたらクリップボードへ（`copyImageOnceMade`）。クルーは画像なし
+4. **既定は React、Qt は退路**（S4b の前例）。退路の設定は S4ac で消す。配信中に使うパネルなので、ゲートを通るまでリリースしない
+5. **ブラウザで開くボタン**: `_OpenOutside` に、自分のサーバーのスコアボードの URL で LAN が有効ならトークンを付ける特例を足す（`_IsDesignerUrl` の前例）。トークンはページに渡さない
+6. **グローバルなホットキー（Ctrl+Shift+S / R / L）は入力中の欄を確定しない**: ページを通らないため。Ctrl+Shift+L は Qt でも確定しないので同じ。スワップでその欄が書き換われば、フックは打ちかけを捨てる（安全側）。シェルからページへ「確定して」と頼む特権経路は作らない
+7. **既存のブラウザ版（`/scoreboard`・`/team`）は S4ac まで触らない**。寄せるかは S4ac の後にオーナーに聞く（ブラウザ版だけにある機能が消えるため）
+
+**論点（オーナー確認）**
+
+1. **トラッカーのステージの行**（ゲームごとのステージと勝者。Qt では `scoreColumn.hide()` で一度も出ていなかった）を React のページで出すか → 推奨: ステージのあるゲームで出す
+2. **Ctrl+Shift+O と legacy の open-set**: 別の窓ではなく、メインウィンドウを前に出して SCORE に切り替え、ページのダイアログを開く形でよいか → 推奨: はい（S4ab）
+3. **S4ac で消す候補**: セット選択で行を選ばずに OK / Enter を押すと先頭の行を読む動作（誤操作でボードが上書きされる）・ボードの隠しボタン `thumbnailBtn` と `GenerateThumbnail`・`main_generate_thumbnail` の `isPreview` の経路・ウィジェットの `PostToX`・隠しスピン `charNumber`（いずれも Qt のボードと一緒に消える内部の部品。`ChangeSetData` は S4x で削除済み） → 推奨: 消す。legacy の `crew_member_stock` / `crew_set_active` は外部契約なので残す
+
+#### S4z v1 の追加（SCORE の React 化の前段）（2026-11-10）
+
+上の順序 6 の設計の S4z。React の SCORE ページが要る書き込みと通知を `/api/v1` に足した（G1〜G6）。**UI は変えていない**（Qt の SCORE の見た目・操作はそのまま）。既存のルートの形・意味は変えず、足しただけ（`:load` の `key` と `:generate` の `board` は、送らなければ今までどおり）。
+
+- **完了内容**
+  1. **G1 選手の欄 `PATCH /api/v1/scoreboards/{n}/teams/{t}/players/{p}/fields`**（WRITE。操作ログ `player.fields`、キー名だけ）
+     - `AutonaApiV1.player_fields_update` → `AutonaWebOperations.update_player_fields` → `PlayerService.Edit(texts, country, region)`（新規）
+     - body は `gamerTag` / `prefix` / `name`（本名）/ `twitter` / `custom_textbox` / `country_code` / `state_code` の 1 つ以上。値は文字列だけで、`""` はその欄を空にする
+     - 書き込みはカードの入力欄と同じ: 文字の欄は今と違うものだけ・別の国は地域を空にしてから国・スポンサーかタグが変わったら `PublishMergedName` → `PublishImages`（`online_avatar` は残す）→ `SetPlayerId(None)`、`Announce(ChangeSince(前の (id, seed)))` で統計を依頼（id が変わったときだけ依頼になる）。1 回の lock と 1 保存サイクル（`ApplyData` と同じ形: 保存ブロックの中で lock を取り、統計の依頼は lock の外・ブロックの中。例外時の後始末もレビュー後の修正 5 で `ApplyData` と同じにした）
+     - 断る（何も書かない）: 未知の国 `UNKNOWN_COUNTRY` / その国の地域でない `UNKNOWN_REGION`（400）、国データが未読込で空でない国か地域 → 409 `NOT_READY`、スロットが無い → 404
+  2. **G2 キャラの行 `PATCH .../players/{p}/characters/{row}`**（WRITE。`player.character`）
+     - `player_character_update` → `update_player_character` → `PlayerService.EditCharacter(row, character, skin, variant, game)`（新規）
+     - `StateManager.lock` の中で `GameAssetCatalog.Current()` を 1 回読み、今のキャラ枠を組んで 1 行だけ替え、今の値と違うときだけ `PublishCharacterSlots(slots, snapshot=snap)`
+     - 断る: `NO_SUCH_ROW`（404。行は state のキャラ枠の数まで: レビュー後の修正 1）・`UNKNOWN_CHARACTER` / `UNKNOWN_SKIN` / `UNKNOWN_VARIANT`（400）・`OTHER_GAME`（409 `CONFLICT`）
+  3. **G3 `POST .../players/{p}:load` に `key`**: `load_player_from_key`（`PlayerDB.Get(key)`。完全一致）。タグの経路と同じ本体を `_load_player_record` に切り出し、引き方だけを渡す
+  4. **G4 match バー `PATCH /api/v1/scoreboards/{n}/match`**（WRITE。`match.update`）: `match_update` → `update_match` → 1 保存サイクルで `AutonaActions.SetMatchField`（送った `phase` / `pool` / `match`）と `SetBestOf`
+  5. **G5 `POST /thumbnail:generate` に `board`**（1 / 2。省略・JSON オブジェクトでない body は 1）: `generate_thumbnail(board)` → `ThumbnailService.Generate(board)` → `RenderLane.Generate(target)`。レーンは受け付けた generate の対象を `_generateTarget` に持ち（`_laneLock` の中。`BUSY` では変えない）、`ThumbnailService._RenderBoard(kind)` が generate ならその対象、preview なら `RENDER_BOARD`（1）を描き、ファイル名（`_OutputStem`）も同じボードから作る
+  6. **G6 Socket.IO の `battle_format`**（`{}`。値は運ばない）: `WebServer.__init__` が Bridge の `battle_format_changed` を `on_battle_format_change` に繋ぐ（Bridge はもともと `AutonaActions.battleFormatChanges` を変換していた）。`_delta_cond` の中で積んで notify するだけで、flusher が `_take_battle_format_notice` / `_send_battle_format_notice` で、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow` の後に全接続へ送る。`_start_delta_flusher` で忘れる
+  7. 分類と一覧: `WebAccess` に `api_v1.player_fields_update` / `player_character_update` / `match_update` を WRITE で足した（v1 の GET 以外 = WRITE の規則どおり）。ルートの台帳（`tests/test_webserver_routes.py`）は v1 76 / 全 115。`AutonaApiInfoWindow` の一覧に 4 行（3 ルートと `:load` の `key`）
+
+- **判断**
+  1. **G1 の `""` は欄を空にする・DB と悪語フィルタは通さない**: カードの入力欄と同じ（運用者が打った文字）。§6.8 の `PATCH .../players/{p}`（空は「変更なし」・DB とマージ）は読込の操作なので、別のルートにした。外部契約なので §6.8 は変えない
+  2. **G1 の別の選手の判定は（スポンサー, タグ）の組**: カードの `NameChanged` は `sponsor + " " + tag` の文字列で比べる（下の「報告」）。core では組で比べた。city・seed・`online_avatar` は残す（カードの手入力と同じ。LIVE-BUG-1）
+  3. **G1 の国と地域は全部を解決してから書く**: 知らないコードが 1 つでもあれば何も書かない（オンエア中の値を誤ったコードで消さない）。地域は送った国の（送らなければ今の国の）地域。別の国だけなら地域は空（コンボで国を選んだのと同じ順: 空の地域 → 国）。国データの未読込は `PUT /players`（§6.26）と同じ 409 `NOT_READY`。空にするだけなら待たない
+  4. **G1 / G2 は今と同じなら何も書かない**: `PlayerService` は「同値なら書かない」を採らない例外だが（カードは変わったウィジェットからしか呼ばない）、ルートは同じ値を送られうるので、書く前に比べる。同じ値で反映ボタンを点けない
+  5. **G2 のスキンはカードと Top 8 に合わせた**: キャラを変えてスキンを送らなければ最初のスキン（カード）。スキンの無いキャラは送っても `-1`（Top 8）。バリアントは送らなければ今のまま（カード。キャラを変えても）。ゲームの不一致は 409 `CONFLICT`、ゲーム未読込のキャラは 400（どちらも Top 8 §6.22 の前例）。キャラの行は 1 キー（`character`）なので保存ブロックは要らず、lock の中で 1 回 publish する（Top 8 の形: lock が外）
+  6. **G3 の `key` は完全一致で、`tag` より優先**: 同じタグの選手が何人いても選んだ 1 人を読むため。`key` が壊れていれば `tag` があっても 400（黙ってタグで別の選手を読まない）。`{t}` はタグと同じくセット側のチーム（§6 の例外のまま）
+  7. **G4 はコンボの操作として読む**: `""` は 3 つとも空・`match_en` に触れない・`bestOf` 0 も書く。`PATCH set`（セットのペイロード）と違うことを §6.43 に書いた。検査はクルーの PATCH と同じ厳しさ（未知のキー・型は 400）
+  8. **G5 は generate だけに `board`**: preview はサムネイルのページの絵（ボード 1）で、実行中の preview は 1 件にまとまるので、ボードごとの preview にはまとめ方の規則が要る。SCORE の X 投稿が要るのは generate だけ。JSON オブジェクトでない body をボード 1 として読むのは、今まで body を見ていなかったため（壊れた body を 400 にすると既存の呼び手が変わる）。`board` の検査は 503（ヘッドレス）より先
+  9. **G6 は全接続に `{}`・まとめる・窓を待たない**: `scoreboard_follow` と同じ形（読み `GET /battle-format` が READ）。いまの形式への切り替えは `SetBattleFormat` が知らせないので出ない。ヘッドレスでも出る。S4x の「形式は設定なので通知は増やさない」を見直した: React の SCORE ページは形式のボードを出すので、サイドバー・ほかのクライアント・v1 での切り替えに追従する手段が要る
+
+- **動作の違い**
+  - 新しいルート 3 本と Socket.IO の `battle_format`。知らないイベントを無視するクライアント（OBS のオーバーレイ・既存の Web UI）には影響しない
+  - `:load`: `key` があればそれで読む。`key` の無い body は今までどおり（タグ・同じエラーの文言）
+  - `:generate`: `board: 2` でボード 2 を描いて、ボード 2 の選手の名前で保存する。省略・オブジェクトでない body はボード 1（今までどおり）。**ボード 2 の generate はプレビュー画像（`GET /thumbnail/preview`）を書かず、予約の preview を兼ねない**（レビュー後の修正 2。最初の実装は書いていた。下の論点 1）
+  - サイドバーでの形式の切り替えでも `battle_format` が出る（v1 だけでなく）
+  - Qt の SCORE の見た目・操作は変わらない（カードもボードも触っていない）
+  - **golden の差分**: 無い。`tests/fixtures/**` は 1 バイトも変えていない（`git status tests/fixtures` が空）
+
+- **報告（直していない。既存の問題）**
+  1. **カードの `NameChanged` は `sponsor + " " + tag` の連結で比べる**（`AutonaScoreboardPlayerWidget.NameChanged`）: 境目が空白をまたいで動く編集（スポンサー `A B` + タグ `C` → スポンサー `A` + タグ `B C`）を同じ名前と見て、id を残す。G1 は組で比べるので、この編集では id を空にする（カードと食い違うのはこの場合だけ）。カードは S4ac で消えるので触っていない
+  2. **`tests/test_web_operations.py::test_the_database_save_is_made_outside_the_board_host[headless]` は単独・先頭で回すと `KeyError: 'country_code'` で落ちる**: HEAD（ef8daa87）の `git archive` でも同じに落ちる既存の順序依存（desktop の変種が先に走ると通る。ファイル全体・全量では通る）。S4z では触っていない
+
+- **次の段（S4aa）への申し送り**
+  - 選手カードの欄: 確定ごとに `PATCH .../fields` に 1 欄（`""` で空）。国・地域はコード（`GET /countries`・`/countries/{code}/states`）。名前の補完で選んだ行は `:load` に `key`（`GET /players` / `/players/entrants` の行の `key`）。**`/players/entrants` の行は DB に無い選手だと `key: null`**: key が null の行は `tag` で読む（`{"tag": 行の tag}`）。補完の候補を選ばずに打ったタグは `fields` の `gamerTag`
+  - `fields` の文字は `PUT /players` と同じ規則（1 行の欄は改行なし・256 文字まで、メモは 4096 文字まで）で、破れば 400。ページの入力欄も同じ上限にしておく（前後の空白は削らずに送る。サーバーも削らない）
+  - キャラ行: `PATCH .../characters/{row}`。`game` には一覧を読んだときの `game.codename` を添える（409 なら一覧を読み直す）。スキンの一覧は `GET /characters` の `skins`
+  - match バー: `PATCH /match`（候補は `GET /match-names/candidates?board=`）。`PATCH set` は使わない（`""` が運ばれず `match_en` を消す）
+  - X 投稿: `GET .../post` → `POST /thumbnail:generate {"board": n}` → `thumbnail.render` の `renderRevision` が自分のものになったら画像をクリップボードへ（S4r の `copyImageOnceMade`）
+  - 形式: `battle_format` の後に `GET /battle-format` を読み、形式のボードを出す。接続の直後に 1 回読む
+  - G1 に無い欄: `seed` / `birthday`（`PLAYER_INPUT_KEYS` にある）。ページの詳細ダイアログで編集するなら、`fields` を広げるか別のルートが要る（依頼の G1 の欄に無かったので足していない）
+  - held の扱いは上の判断 1（`scoreboard_pending` → `GET .../pending`）。新しいルートはどれも held のボードでは反映まで出ない（テストで確認済み）
+
+- **テスト**
+  - `tests/test_api_v1_score_fields.py`（新規。27 関数・161 件。desktop / headless の `shell` で同じ答え）:
+    - G1: **カードの操作との照合**（タグ・スポンサー・空にする・本名・X・メモ・国 JP・地域 13・US・国なし・同じタグの 11 手を、Qt のカードで打って選んだ書き込み・delta・スロットと、デスクトップの route・ヘッドレスの route を比べる。最後の手は 3 つとも何も書かない）・名前の変更は avatar / city / seed を残し id を空にする・名前でない欄は id を残す・1 保存サイクル・地域は今の国の地域・held は `:apply` まで出ない・同じ値は何も書かない・400（型・未知のキー・`null`）・国データに無い国 / 地域は 400 で何も書かない・国データの未読込は 409・スロットの番号（400 / 404）
+    - G2: **カードのコンボとの照合**（Mario → 3 番目のスキン（別のキャラの Dr. Mario）→ バリアント → Luigi（最初のスキン・バリアントは残る）→ バリアントなし → 2 行目に Peach → そのスキン → 3 行目にスキンの無い NoArt → 1 行目を空 → 同じキャラの 10 手。delta・big change・行の値を比べる。カードは 1 回の選択で行を 2 回書くので書き込みの列は比べない）・1 保存サイクルで他の行はそのまま・スキンの無いキャラは -1・同じ選択は何も書かない・held・400 / 404 / 409・ゲーム未読込・core の断りの定数
+    - G4: **実際の match バーの操作との照合**（ボード 1 / 2。レビュー後の修正 3 で、最初の「`SetMatchField` / `SetBestOf` を直接呼んだもの」との照合から置き換えた。`""` で空・bestOf 0・同じ値は何も書かない・`match_en` に触れない）・`PATCH set` は同じ body を別に読む・1 保存サイクル・held・400・ボード 3 / 4 / 0
+  - `tests/test_api_v1_players.py`（+8）: `key` が名指しの記録を読む・`tag` より優先・完全一致で未知は 404・記録でない行は 404・文字列でない `key` は `tag` があっても 400・セット側のチーム・スロットが無いと 404・ヘッドレスも同じ
+  - `tests/test_api_v1_thumbnail.py`（+5）: body の `board` を描く（body の形ごと）・オブジェクトでない body はボード 1・1 / 2 でない `board` は 400 で何も描かない・実行中のボード 2 の generate は 409 で走っている方はボード 1 のまま・ヘッドレスは `board` があっても 503（壊れた `board` は 400）
+  - `tests/test_thumbnail_service.py`（+5）: ボード 2 の generate がボード 2 を描いて名付け、次の既定は 1・preview の後に予約したボード 2 の generate・ボード 2 の generate の後の preview はボード 1・`BUSY` は対象を変えない・~~予約の preview を兼ねたボード 2 の generate がボード 2 の画像を書く~~（レビュー後の修正 2 で仕様を変え、テストを置き換えた。下の「レビュー後の修正のテスト」）
+  - `tests/test_webserver_delta_debounce.py`（+10）: すぐ全接続へ・1 回の送信に 1 通・delta と追従の後・delta の間隔を動かさない・送信の失敗が他を巻き込まない・flusher が無ければ持たない・flusher 自身のスレッドで送る・flusher の delta の後・新しい start は前の通知を持たない・state の lock を持ったまま積める
+  - `tests/test_battle_format.py`（+1）: v1 の切り替え 1 回で 1 通・同じ形式で 0 通・送信の前の 2 回の切り替えで 1 通（desktop / headless）
+  - `tests/test_web_access.py`（+1）: `battle_format` は読める接続すべてに届く
+  - `tests/test_bootstrap_split.py`（更新）: 実際のヘッドレスのプロセスで、形式の切り替えが通知の 4 通目 `["battle_format", {}]` として届く
+  - `tests/test_webserver_routes.py` / `tests/test_web_operations.py`（更新）: ルートの台帳に 3 行（v1 76 / 全 115）、ヘッドレスで答える全ルートの歩きに新しいルートの body、ボード 3 の 400 の一覧に 3 本
+  - **pin が落ちることの確認**: 実装を 1 か所ずつ壊す 19 通りを回し、19 通りとも新しいテストが落ちた（id を残す・国の前に地域を空にしない・同じ文字を書き直す・欄の書き込みを保存ブロックの外へ・別のキャラでスキンを残す・同じキャラの行を書き直す・スキンの無いキャラに送ったスキンを入れる・国データの検査を外す・bestOf 0 を運ばない・`match_en` を空にする・match を保存ブロックの外へ・`tag` を `key` より優先・`key` をタグとして引く・描くボードを 1 に固定・generate の対象を持たない・`board` の検査を外す・通知を送らない・通知を積まない・通知を繋がない）。壊したファイルは毎回元のバイトに戻した
+
+- **検証**: `python scripts/run_tests_parallel.py` 5832 passed / 2 skipped（RESULT: OK、exit 0。S4y の修正後の 5620 から +212）。関連 31 ファイルの直列の `python -m pytest`（`test_api_v1*.py` の 8 本・`test_battle_format`・`test_bootstrap_split`・`test_core_qt_free`・`test_headless_seed`・`test_import_side_effects`・`test_objectname_keypath_contract`・`test_player_*` の 5 本・`test_result_service`・`test_roster_flow`・`test_score_typing`・`test_scoreboard_operations`・`test_signal_lifetime`・`test_state_schema`・`test_thumbnail_service`・`test_thumbnail_render`・`test_web_access`・`test_web_operations`・`test_webserver_delta_debounce`・`test_webserver_routes`）2733 passed（exit 0）。その後に直した 2 か所（`fields` の 400 の文言から国・地域のコードを外した: 選手のデータを運ぶルートは値をログにもエラーにも出さない §2.7。`EditCharacter` の docstring のゲームの切り替えの説明）は `test_api_v1_score_fields.py` と `test_player_service.py` を直列で回して 256 passed、全量はその後に回したもの。`git status tests/fixtures` は空。`web/` は触っていないので npm は回していない。アプリ本体（`main.py` / exe / `--headless`）は起動していない（テストの中のヘッドレスのサブプロセスだけ）
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`。この PC からの curl かブラウザの devtools で v1 を叩く）
+  1. 1v1 のボード 1 の P1 に選手を読み、`PATCH /api/v1/scoreboards/1/teams/1/players/1/fields` に `{"gamerTag": "NEWTAG"}` → Qt のカードのタグと表示名が変わり、反映ボタンが点き、OBS（`program_state.json`）は反映まで変わらない。統計が取り直される（id が空になる）。顔写真（オンラインのアバター）は残る
+  2. 同じスロットに `{"country_code": "JP", "state_code": "13"}` → カードの国・地域のコンボが日本・東京になる。続けて `{"country_code": "US"}` → 地域が空になる。`{"country_code": "ZZ"}` は 400 で何も変わらない
+  3. `PATCH .../players/1/characters/1` に `{"en_name": "<読み込み中のゲームのキャラ>"}` → カードのキャラ行のコンボが追従し、スキンが最初になる。`{"skin": 2}`・`{"variant": "<バリアント>"}` も同じ
+  4. `PATCH /api/v1/scoreboards/1/match` に `{"phase": "Top 8", "match": "Winners Final", "bestOf": 5}` → match バーの 3 つのコンボと BEST OF・ステージの行数が追従する。`{"match": ""}` で空になる
+  5. チーム形式で両チームに選手を入れて `POST /api/v1/thumbnail:generate` に `{"board": 2}` → `out/thumbnails/` にボード 2 の選手の名前のファイルができる（レビュー後の修正 2 の前の確認。修正後はサムネイルのページのプレビューがボード 1 の絵のまま）
+  6. ブラウザの devtools（Socket.IO のフレーム）を開いたまま、サイドバーで形式を切り替える → `battle_format` が 1 通。同じ形式を選び直すと来ない
+  7. 同じタグで所属違いの 2 人を DB に置き、`:load` に `{"key": "<所属> <タグ>"}` → 指定した方が入る
+  8. Qt の SCORE の手入力（タグ・国・キャラ・match バー・BEST OF）がこれまでどおり動く（S4z はカードもボードも触っていない）
+
+- **論点**
+  1. ~~ボード 2 の generate がサムネイルのページのプレビュー画像を書き換える~~ → **決定（メイン、2026-11-10）: 分ける**。ボード 2 の generate はプレビュー画像を書かず、予約の preview を兼ねない（予約があれば generate の後に続けてボード 1 の preview を描く）。理由: どの経路でも preview の依頼に別のボードの絵で答えない（S4aa はプレビューをボード 1 として扱う）。ボード 1 の generate の兼用・プレビュー画像を書く動作は今のまま。実装は下の「レビュー後の修正」2
+
+- **レビュー後の修正（2026-11-10。独立レビューと実機確認の結果）**
+  1. **G2: キャラ枠が 0 のスロットにキャラの行が 3 つできた**（medium）: `EditCharacter` が `_CharacterSlots`（キャラ枠の無いスロットに読込用の既定 3 枠を作る）で行の数を数えていた。キャラ数 0（`SetCharactersPerPlayer(1, 0)`）のスロットに `PATCH .../characters/1` が 200 で行を 3 つ作った。→ 行の有無を state のキャラ枠の数（`character` が dict ならその長さ、それ以外は 0）で判定し、無い行は `NO_SUCH_ROW`（404。何も書かない）。`_CharacterSlots` は読込（`ApplyData` の mains 等）が既定の枠を要るので変えていない
+  2. **G5: ボード 2 の generate とプレビューを分けた**（medium。論点 1 の決定）: `RenderLane._GenerateDrawsPreview(target)` を足した（既定 True。`ThumbnailService` は `RENDER_BOARD` / None だけ True）。描かない generate は、予約の preview と合わせない（`_nextHasPreview` を立てない）。代わりに `_previewAfter` を立て、generate が走り出すときに `_next = PREVIEW` にする（generate の後にボード 1 の preview の run）。generate より先に予約した preview の依頼に返した revision は generate の run の番号になるので、その preview は次の revision が答える（兼ねた generate が試合なしで終わったときの `previewOwed` と同じ流れ）。generate を予約した後の preview の依頼には generate の revision + 1 を返す。`_Save` は描かない generate では `PREVIEW_PATH` を書かない（`_GenerateTarget()` は走っている generate のもの: 次の generate は終わるまで BUSY）。`ResultService` はフックを持たないので変わらない
+  3. **G4 のテストがトートロジーだった**（low-medium）: 照合の相手が `update_match` と同じ `SetMatchField` / `SetBestOf` の呼び出しだった。→ 実際の match バーを操作する: 文字は `setEditText` → `lineEdit().editingFinished`、リストの行は `setCurrentIndex`（`currentIndexChanged`。ボードは 2 つとも繋いでいる: `AutonaScoreboardWidget` の match バーの結線）、BEST OF は `bestOfSpin.setValue`（`valueChanged` → `_onBestOfChanged`）。バー / デスクトップの route / ヘッドレスの route の 3 通りを照合する
+  4. **G1: 1 行の欄に改行・長すぎる値が通った**（low）: → `gamerTag` / `prefix` / `name` / `twitter` は `PUT /players`（§6.26）と同じ規則（改行なし・256 文字まで）、`custom_textbox` は改行を許して 4096 文字まで。規則は `_player_text_rule` に 1 つにして `PUT /players`（`_player_save_text` = 前後を削ってから同じ規則）と `fields` が呼ぶ。改行の判定は「`splitlines()` をつないだものが元と同じ」にした（削らない `fields` で末尾の改行も捕まえる。削った後の `PUT` では前の `len(splitlines()) > 1` と同じ答え）。`fields` は削らない（カードの入力欄が削らない）。メッセージに値は入れない
+  5. **G1: `Edit` に例外時の後始末が無かった**（low）: → `ApplyData` の try/finally と同じ保証。書き込みの途中で例外が出ても、書いたぶんについてスポンサー / タグが変わっていれば合成名・画像を作り直して id を空にし（カードの順: 名前 → 画像 → id。id は名前や画像が例外でも finally で空にする）、保存ブロックの中・lock の外で `Announce(ChangeSince(前の (id, seed)))`。後始末の中の例外は、先の例外があればログだけ（先の例外を上書きしない）
+  6. **docs**: `state-and-webserver.md` の `PlayerService` の行に `Edit` / `EditCharacter`、「`PlayerService` はこの規則を採らない」に例外の例外（2 つは書く前に比べる）。`external-control-api.md` §6.41〜6.43 に「デスクトップの未構築のボードは、断る要求・同じ値の要求でも構築する」（`Prepare` が検査より前。`PATCH players` の前例。挙動は変えていない）、§6.41 に文字の規則、§6.42 にキャラ枠 0、§5.12 / §7.3 にボード 2 の generate とプレビュー、Design.md のサムネイルの段落
+  - **レビュー後の修正のテスト**（+43 件）
+    - `tests/test_api_v1_score_fields.py`（+5 関数・+34 件。どれも desktop / headless）: キャラ数 0 のスロットはどの行も 404 で何も書かない（core の `NO_SUCH_ROW` も）・`Edit` の途中で `PublishMergedName` / `PublishImages` / `SetCountry` が例外 → タグは書かれ id は空・統計を 1 回依頼・（名前が出せたときは）表示名は書いたタグのもの・1 行の欄の改行（`\n` / 末尾の `\n` / `\r` / `\r\n` / ` `）と 257 文字・メモの 4097 文字は 400 で何も書かない・メモは改行を含めて 4096 文字まで通り、前後の空白は削らない・断りのメッセージに値が入らない。match バーの照合を実際のバーの操作に置き換えた（件数は同じ）
+    - `tests/test_thumbnail_service.py`（+8 件）: 「予約の preview を兼ねたボード 2 の generate がボード 2 の画像を書く」を削除し（仕様の変更。弱めたのではない）、ボード 2 の generate はプレビュー画像を変えない・ボード 1 の generate（`board` なし / `board: 1`）は今までどおり兼ねて画像を書き、後に何も描かない・予約の preview + ボード 2 の generate → generate（revision 2、画像はボード 1 のまま）の後にボード 1 の preview（revision 3）・ボード 2 の generate を予約した後の preview は revision 3 で、generate の後にボード 1・試合なしの兼ねた generate の後の preview に `board: 1` の変種を足し、描くボードが 1 であることを確かめる（`Generate()` の変種は S4p からあった）・試合なしのボード 2 の generate の後も予約の preview がボード 1 で描かれる。`test_a_generate_of_board_2_draws_and_names_board_2` の「プレビュー画像はボード 2 の絵」は「プレビュー画像は無いまま」に変えた
+    - `tests/test_api_v1_thumbnail.py`（+1）: ルートを通して、予約の preview + `{"board": 2}` の generate → `GET /thumbnail/preview` は generate の後もボード 1 の絵で、revision 3 でボード 1 の新しい絵になる
+    - **pin が落ちることの確認**: 直した箇所を 1 か所ずつ壊す 19 通りを回し、19 通りとも新しいテストが落ちた（行の数を読込の既定から数える・どのボードもプレビューを描く・`board: 1` を兼ねない・generate がいつもプレビュー画像を書く・予約の preview をボード 2 の generate に合わせる・後の preview を予約に移さない・後の preview に generate の revision を返す・ボード 1 の兼ねた generate の試合なしの後に preview を描かない・match バーの `editingFinished` / `currentIndexChanged` を繋がない・BEST OF を書かない・route の bestOf 0 を運ばない / `match_en` を空にする・`fields` に文字の規則を当てない・末尾の改行を通す・メモを 1 行に縛る・名前が出せたときだけ id を空にする・失敗した手順の後に作り直さない・失敗した編集の後に統計を依頼しない）。壊したファイルは毎回元のバイトに戻した
+  - **検証**: 関連 35 ファイルの直列の `python -m pytest`（`test_api_v1*.py` の 9 本（board / crew / players / result / score / score_fields / thumbnail / top8 と `test_api_v1.py`）・`test_player_*` の 7 本・`test_result_render` / `test_result_service`・`test_thumbnail_render` / `test_thumbnail_service`・`test_battle_format`・`test_bootstrap_split`・`test_core_qt_free`・`test_headless_seed`・`test_import_side_effects`・`test_objectname_keypath_contract`・`test_roster_flow`・`test_score_typing`・`test_scoreboard_operations`・`test_signal_lifetime`・`test_state_schema`・`test_web_access`・`test_web_operations`・`test_webserver_delta_debounce`・`test_webserver_routes`）3049 passed（exit 0）。`python scripts/run_tests_parallel.py` 5875 passed / 2 skipped（RESULT: OK、exit 0。最初の S4z の 5832 から +43）。`git status tests/fixtures` は空（golden 不変）。`web/` は触っていない。アプリ本体は起動していない
+
+- **直さないもの（レビューの指摘。理由つき）**
+  1. **キャラの行のエラーのメッセージがキャラ・スキン・バリアント・ゲームの名前を含む**: 選手のデータではない（ゲームのカタログの名前）。Top 8 §6.22 の前例と同じ。§6.42 に書いた
+  2. **`battle_format` が、切り替えの `result_layout` / ボードのシードの delta より前の送信で出ることがある**: 読み手は通知を受けて `GET /battle-format` を読むので、delta の順に依存しない。害が無い
+  3. **`WebServer()` を作り直すと `battle_format_changed` への接続が積み上がる**: `follow_changed` と同じ前例。積んだフラグは bool なので、何度通知されても 1 通にまとまる。害が無い
+
+- **実機確認（メイン、2026-11-10。隔離データの `python main.py` と `--headless`）**: 上の 1〜7 は OK。8（Qt の手入力）は未確認で、テストの照合（G1 / G2 のカード・修正 3 の match バー）に任せた
+  - デスクトップ: G1〜G4 は held で `:apply` で公開され、Qt のカード・国 / 地域・match バーが追従する。サイドバーの形式の切り替えで `battle_format` 1 通、同じ形式の選び直しで 0 通。v1 の `PUT /battle-format` も同じ。チーム形式の `generate {"board":2}` でボード 2 のファイル名・ボード 2 の絵（修正 2 の前の確認）。`:load` の `key` で同じタグ・所属違いの 2 人を選び分けられる
+  - ヘッドレス: すぐ公開・generate は 503・`battle_format` が出る
+  - **注意（既存の挙動。S4z は変えていない）**: ヘッドレスはセットの 5 秒の取り直しが有効のまま（`TurnOffPolling` はデスクトップだけ）。読み込んだセットを追従している間は、`PATCH match` で書いた `match` を取り直しが上書きする。`:stop-follow` の後は残る

@@ -1140,6 +1140,26 @@ def test_the_follow_notice_reaches_whoever_can_read_it(server):
             ("scoreboard_follow", [{"board": 1}])]
 
 
+def test_the_battle_format_notice_reaches_whoever_can_read_it(server):
+    # GET /battle-format is a READ (ADR-005 S4x), and the notice carries
+    # nothing (S4z): with no room, as the follow's.
+    from src.AutonaWebServer import WebServer
+
+    local = _ws(server)
+    with_token = _ws(server, LAN_PEER, auth={"token": WebAccess.Token()})
+    without = _ws(server, LAN_PEER)
+    for ws in (local, with_token, without):
+        ws.get_received()
+
+    # What the flusher runs: outside any request.
+    WebServer._send_battle_format_notice(True)
+    WebServer._send_battle_format_notice(False)
+
+    for ws in (local, with_token, without):
+        assert [(packet["name"], packet["args"]) for packet in ws.get_received()] == [
+            ("battle_format", [{}])]
+
+
 # ── The API settings window's token row ──────────────────────────────────
 
 

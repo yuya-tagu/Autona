@@ -112,7 +112,7 @@ from .core.SetLoadService import SetLoadService
 from .core import SetSelectionService as selection
 from .core.SetSelectionService import SetSelectionService
 from .core.PlayerDB import PlayerDB
-from .core.PlayerService import PlayerService
+from .core.PlayerService import NOT_SENT, PlayerService
 from .core import ResultService as results
 from .core.ResultService import ResultService
 from .core.StatsService import StatsService
@@ -153,9 +153,10 @@ class NotAvailable(Exception):
 
 
 class NoSuchSlot(IndexError):
-    """The board has no such player slot (load_player_from_tag). An
-    IndexError, as the legacy route's 500 has always been; /api/v1 tells it
-    from an IndexError out of the load itself and answers 404."""
+    """The board has no such player slot (load_player_from_tag /
+    load_player_from_key, and the field and character writes of ADR-005
+    S4z). An IndexError, as the legacy route's 500 has always been; /api/v1
+    tells it from an IndexError out of the load itself and answers 404."""
 
 
 def _on_gui_thread(call, what):
@@ -853,12 +854,13 @@ def preview_thumbnail():
     return ThumbnailService.instance.Preview()
 
 
-def generate_thumbnail():
-    """Draw and save a thumbnail in the background: the revision of the run
-    that will, or BUSY. Only a shell with a renderer can (NotAvailable: 503)."""
+def generate_thumbnail(board=1):
+    """Draw and save board `board`'s (1 / 2) thumbnail in the background: the
+    revision of the run that will, or BUSY. Only a shell with a renderer can
+    (NotAvailable: 503)."""
     if startImageRender is None:
         raise NotAvailable()
-    return ThumbnailService.instance.Generate()
+    return ThumbnailService.instance.Generate(board)
 
 
 def get_thumbnail_preview():
@@ -1846,6 +1848,79 @@ def update_player(scoreboard, team, player, data):
     return applied
 
 
+def _edit_slot(scoreboard, team, player, edit):
+    """`edit(service)` on the PlayerService of slot `player` of state team
+    `team` on board 1/2, where the board operations run, the board built
+    first (an unbuilt board's seed would wipe the write); what it returns.
+    NoSuchSlot when the state team has no such slot, checked after the
+    build, since building it is what writes its slots."""
+    host = boardHost
+
+    def run():
+        board = _require_board(scoreboard)
+        if board not in AutonaActions.SCORE_BOARDS:
+            raise NotAvailable(f"scoreboard {scoreboard} has no player slots")
+        host.Prepare(scoreboard)
+        path = _player_path(board, int(team), int(player))
+        if path is None:
+            raise NoSuchSlot(
+                f"scoreboard {board} team {team} has no player {player}")
+        return edit(PlayerService(path))
+
+    return host.Run(run)
+
+
+def update_player_fields(scoreboard, team, player, texts,
+                         country=NOT_SENT, region=NOT_SENT):
+    """/api/v1's PATCH .../teams/{t}/players/{p}/fields (ADR-005 S4z): some
+    of the card's fields, written as the card writes them
+    (PlayerService.Edit: `texts` by state key, the country / region codes,
+    NOT_SENT for one not sent). `team` is the state team. None, or Edit's
+    refusal (nothing written). One save cycle, held on the desktop: no load,
+    no database."""
+    return _edit_slot(scoreboard, team, player,
+                      lambda service: service.Edit(texts, country, region))
+
+
+def update_player_character(scoreboard, team, player, row,
+                            character=NOT_SENT, skin=NOT_SENT,
+                            variant=NOT_SENT, game=None):
+    """/api/v1's PATCH .../players/{p}/characters/{row} (ADR-005 S4z): one
+    character row, picked as on the card (PlayerService.EditCharacter).
+    `team` is the state team. None, or EditCharacter's refusal (nothing
+    written)."""
+    return _edit_slot(
+        scoreboard, team, player,
+        lambda service: service.EditCharacter(
+            row, character, skin, variant, game))
+
+
+def update_match(scoreboard, fields):
+    """/api/v1's PATCH /scoreboards/{n}/match (ADR-005 S4z): some of board
+    1/2's `phase` / `pool` / `match` (the operation the match bar's combos
+    call: AutonaActions.SetMatchField, "" empties) and `bestOf` (its BEST OF
+    spinbox's: SetBestOf), in one save cycle, held on the desktop. Not
+    set_route: that is a set payload's reading (SetLoadService
+    .ApplyMatchInfo), which empties `match_en` and reads a blank phase or
+    round as "not carried"."""
+    host = boardHost
+
+    def run():
+        board = _require_board(scoreboard)
+        if board not in AutonaActions.SCORE_BOARDS:
+            raise NotAvailable(f"scoreboard {scoreboard} has no match bar")
+        host.Prepare(scoreboard)
+        actions = AutonaActions.instance
+        with StateManager.SaveBlock():
+            for field in schema.SCORE_MATCH_FIELDS:
+                if field in fields:
+                    actions.SetMatchField(board, field, fields[field])
+            if "bestOf" in fields:
+                actions.SetBestOf(board, fields["bestOf"])
+
+    host.Run(run)
+
+
 def _save_record(prepared):
     """The player database half of `savePlayerToDb` (PlayerService
     .SaveRecordToDB) for the record a load prepared (None: none). Out of
@@ -1930,6 +2005,27 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
     shell has is refused before the lookup (NotAvailable: 503, since the
     ADR-005 S4x review; it raised as the crew board does).
     """
+    return _load_player_record(
+        scoreboard, lambda db: db.GetPlayerFromTag(str(tag)), team, player,
+        no_mains)
+
+
+def load_player_from_key(scoreboard, key, team, player, no_mains=False):
+    """load_player_from_tag, of the record stored under `key` -- the local
+    player DB's own key, sponsor and tag (PlayerDB.PlayerTag), matched
+    exactly (ADR-005 S4z: v1's `:load` with a `key`). "ERROR" when the DB
+    has no record under it (or what it has there is no record). `team` is
+    the set's team, and the rest is the same, as load_player_from_tag's."""
+    def lookup(db):
+        record = db.Get(str(key))
+        return record if isinstance(record, dict) else None
+
+    return _load_player_record(scoreboard, lookup, team, player, no_mains)
+
+
+def _load_player_record(scoreboard, lookup, team, player, no_mains):
+    """load_player_from_tag / load_player_from_key: `lookup(db)` is the
+    record (the live dict, or None), called under the DB's lock."""
     host = boardHost
 
     def run():
@@ -1944,7 +2040,7 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
         # under, as the load is not.
         db = PlayerDB.instance
         with db.lock:
-            playerData = copy.deepcopy(db.GetPlayerFromTag(str(tag)))
+            playerData = copy.deepcopy(lookup(db))
         if not playerData:
             return "ERROR"
         path = None

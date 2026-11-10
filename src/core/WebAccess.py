@@ -206,6 +206,11 @@ ROUTE_ACCESS = {
     "api_v1.set_update": WRITE,
     "api_v1.score_set": WRITE,
     "api_v1.player_update": WRITE,
+    # The card's own inputs and the match bar's, one request each (ADR-005
+    # S4z): writes of the board, as PATCH players / set.
+    "api_v1.player_fields_update": WRITE,
+    "api_v1.player_character_update": WRITE,
+    "api_v1.match_update": WRITE,
     "api_v1.display_options_update": WRITE,
     "api_v1.clear": WRITE,
     "api_v1.reset_all": WRITE,

@@ -640,6 +640,124 @@ def test_the_legacy_route_still_answers_500_for_that_slot(board):
     assert response.status_code == 500
 
 
+# ── ... and by the record's key (ADR-005 S4z) ────────────────────────────
+
+def _twoAlphas(board):
+    """Two records with the gamer tag "Alpha": a tag finds the first, a key
+    the one it names."""
+    database = PlayerDB.instance
+    database.database["Alpha"] = {"prefix": "", "gamerTag": "Alpha",
+                                  "name": "Untagged", "mains": "{}"}
+    database.database["Other Bravo"] = {"prefix": "Other",
+                                        "gamerTag": "Bravo",
+                                        "name": "Real Bravo", "mains": "{}"}
+    return database
+
+
+def test_a_key_loads_the_record_it_names(board):
+    _twoAlphas(board)
+
+    body = _ok(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"key": "Alpha"}))
+    board.app.settle()
+
+    assert body["revision"] == SM.revision
+    assert board.app.get("score.1.team.1.player.1.name") == "Alpha"
+    assert board.app.get("score.1.team.1.player.1.team") in ("", None)
+    assert board.app.get("score.1.team.1.player.1.real_name") == "Untagged"
+
+    # The tag finds the first record with that tag, as it always did.
+    _ok(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"tag": "alpha"}))
+    board.app.settle()
+    assert board.app.get("score.1.team.1.player.1.team") == "SP"
+
+
+def test_a_key_wins_over_a_tag(board):
+    _twoAlphas(board)
+
+    _ok(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"key": "Other Bravo", "tag": "alpha"}))
+    board.app.settle()
+
+    assert board.app.get("score.1.team.1.player.1.name") == "Bravo"
+    assert board.app.get("score.1.team.1.player.1.team") == "Other"
+
+
+@pytest.mark.parametrize("key", ["sp alpha", "Alpha ", "SP", "Nobody"])
+def test_a_key_is_matched_exactly_and_an_unknown_one_is_404(board, key):
+    before = json.dumps(board.app.get("score.1"), sort_keys=True, default=str)
+
+    response = board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load", json={"key": key})
+    _assertRejected(response, "NOT_FOUND", 404)
+    assert response.get_json()["error"]["message"] == \
+        "no player with that key"
+    board.app.settle()
+
+    assert json.dumps(board.app.get("score.1"), sort_keys=True,
+                      default=str) == before
+
+
+def test_a_key_that_names_no_record_is_404(board):
+    PlayerDB.instance.database["Broken"] = ["not", "a", "record"]
+
+    _assertRejected(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"key": "Broken"}), "NOT_FOUND", 404)
+
+
+@pytest.mark.parametrize("key", [None, "", 5, ["SP Alpha"], {"k": 1}])
+def test_a_key_that_is_no_string_is_400_even_with_a_tag(board, key):
+    _assertRejected(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"key": key, "tag": "alpha"}))
+    board.app.settle()
+    assert board.app.get("score.1.team.1.player.1.name") in ("", None)
+
+
+def test_a_key_names_the_sets_team_too(board):
+    board.widget.SwapTeams()
+    board.app.settle()
+
+    _ok(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/1:load",
+        json={"key": "SP Alpha"}))
+    board.app.settle()
+
+    assert board.app.get("score.1.team.2.player.1.name") == "Alpha"
+    assert board.app.get("score.1.team.1.player.1.name") in ("", None)
+
+
+def test_a_key_for_a_slot_the_team_does_not_have_is_404(board):
+    _assertRejected(board.client.post(
+        "/api/v1/scoreboards/1/teams/1/players/9:load",
+        json={"key": "SP Alpha"}), "NOT_FOUND", 404)
+
+
+def test_a_key_answers_the_same_headless(board, monkeypatch):
+    from tests.test_web_operations import _dropHeadlessBoards, _goHeadless
+
+    _goHeadless(board.app, monkeypatch)
+    try:
+        _ok(board.client.post(
+            "/api/v1/scoreboards/1/teams/1/players/1:load",
+            json={"key": "SP Alpha"}))
+        assert board.app.get("score.1.team.1.player.1.name") == "Alpha"
+        assert board.app.get("score.1.team.1.player.1.team") == "SP"
+        _assertRejected(board.client.post(
+            "/api/v1/scoreboards/1/teams/1/players/1:load",
+            json={"key": "sp alpha"}), "NOT_FOUND", 404)
+        _assertRejected(board.client.post(
+            "/api/v1/scoreboards/3/teams/1/players/1:load",
+            json={"key": "SP Alpha"}))
+    finally:
+        _dropHeadlessBoards(board.app)
+
+
 def test_the_legacy_route_answers_as_it_did_for_the_rest(board):
     found = board.client.get("/scoreboard1-load-player-from-tag-1-1?tag=alpha")
     assert (found.status_code, found.get_data(as_text=True)) == (200, "OK")

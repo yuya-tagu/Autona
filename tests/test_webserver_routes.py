@@ -142,6 +142,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/players:delete', 'api_v1.player_delete', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/follow', 'api_v1.get_scoreboard_follow', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>/match', 'api_v1.match_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/pending', 'api_v1.get_scoreboard_pending', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/post', 'api_v1.get_scoreboard_post', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
@@ -153,6 +154,8 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/members/<int:m>', 'api_v1.crew_member_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/members/<int:m>/stock:adjust', 'api_v1.crew_member_stock_adjust', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>', 'api_v1.player_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>/characters/<int:row>', 'api_v1.player_character_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>/fields', 'api_v1.player_fields_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:clear', 'api_v1.player_clear', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load', 'api_v1.player_load', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players:swap', 'api_v1.player_swap', 'OPTIONS,POST'),
@@ -564,7 +567,8 @@ def test_the_classification_follows_the_rules():
     # (S4v: v1 70 of 106), and a crew member's 2 writes, the crew board's X post
     # and what its combos offer (S4w: v1 72 of 110), and the battle format's
     # switch and read, with the X post guarded now that boards 1/2 answer it
-    # from their unpublished values (S4x: v1 73 of 112).
+    # from their unpublished values (S4x: v1 73 of 112), and the SCORE page's
+    # field, character row and match bar writes (S4z: v1 76 of 115).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -573,8 +577,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 73
-    assert len(EXPECTED_API_V1_ROUTES) == 112
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
+    assert len(EXPECTED_API_V1_ROUTES) == 115
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

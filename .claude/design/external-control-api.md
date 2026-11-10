@@ -123,7 +123,7 @@
   メソッド・パス・主要パラメータ・結果（ok/error code）。
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
 - ⚠️ トークンは全端末で 1 つを共有するため、操作主体は **IP 粒度まで**（D5 の帰結。S3a 以降も同じ）。トークンはログに出さない（拒否のログもパスのみで、クエリ文字列を含めない）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
-  - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）・`PUT /players`（§6.26）・`POST .../players/{p}:load`（§6.27）・`POST /players:delete`（§7.2）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。エラーの `message` にも値を入れない。
+  - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）・`PATCH .../players/{p}/fields`（§6.41。ADR-005 S4z）・`PUT /players`（§6.26）・`POST .../players/{p}:load`（§6.27）・`POST /players:delete`（§7.2）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。エラーの `message` にも値を入れない。
 
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
@@ -197,7 +197,7 @@
 
 ## 4. WebSocket 購読（既存を流用）
 
-- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 2 つだけ: `scoreboard_pending`（§5.15。ADR-005 S4u）と `scoreboard_follow`（§5.17。ADR-005 S4v）。公開値の配信は変わらない。
+- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 3 つだけ: `scoreboard_pending`（§5.15。ADR-005 S4u）と `scoreboard_follow`（§5.17。ADR-005 S4v）と `battle_format`（§5.21。ADR-005 S4z）。公開値の配信は変わらない。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
   - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
@@ -219,7 +219,7 @@
 | `GET /api/v1/match-names` | match/phase の用語（キーつき・テンプレートつきの dict。Web のページはコンボの候補にこれを使わない） | `get_match_names` | #17 |
 | `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。`?board=` は 2026-11-10。ボードのコンボと Web のスコアボードページが使う） | `get_match_name_candidates`（`core/MatchNameCandidates.Candidates`） | — |
 | `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
-| `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
+| `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加。変わると Socket.IO の `battle_format` が出る: S4z） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
@@ -475,7 +475,7 @@ Board / Commentary / Top 8 のページと Designer の「開く」一覧が使�
 - `game` は `null`（未選択）か `{codename, name}`。`templates[].name` は翻訳済み
 - `canRender` はこのシェルで描けるか（ヘッドレスは `false`）
 - **`settings` の値は描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。旧 Qt パネルが保存できた値）。v1 の描画に加えて、SCORE の生成・X 投稿と legacy の `/scoreboard<N>-get-thumbnail-<png|jpg>` も同じ読みで描く（`ThumbnailService.RenderPayload`。ADR-005 S4p。それまでの SCORE / legacy は保存値をそのまま渡していた）。描画は `settings.json` を書かない（`background_source` の無い古い設定は、`GET` と同じく移行した値で描き、保存は次の `PATCH` / アップロードで行われる）
-- `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了した描画**で、生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
+- `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了したボード 1 の描画**で、ボード 1 の生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。**ボード 2 の生成はこの画像を書かない**（2026-11-10・ADR-005 S4z レビュー。プレビューはボード 1 の絵で、どの経路でも別のボードの絵で答えない。§7.3）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
 
 ### 5.13 `GET /api/v1/result`・`GET /api/v1/result/post`・`GET /api/v1/result/preview`（2026-11-09 追加・ADR-005 S4q）
 大会リザルトのページ（React の `/web/result`。ADR-005 S4r）が読むもの。**何も書かない**。
@@ -639,9 +639,16 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
 いまの対戦形式と、それが表示するボード: `{ "format": "singles" | "team" | "crew", "board": 1 | 2 | 3 }`。`AutonaActions.ResolveBattleFormat`（`scoreboard.battle_format`。無ければ旧 `scoreboard.team_mode`）が正本で、`board` は `GET /health` の `activeBoard` と同じ。設定なので `revision` は付かない。READ。切り替えは §6.40
 
+**通知 `battle_format`（Socket.IO。2026-11-10 追加・ADR-005 S4z）**: 形式が変わると `{}` を送る。**値は運ばない**ので、通知のあとに始めた `GET /battle-format` の答えを使う。接続の直後は通知が来ないので最初に 1 回読む。
+
+- どこで切り替えても出る: デスクトップのサイドバー・v1 の `PUT /battle-format`・ほかのクライアント。ヘッドレスでも出る（`AutonaActions.battleFormatChanges` → Bridge の `battle_format_changed` → `WebServer.on_battle_format_change`）
+- **いまの形式への切り替え（`changed: false`）では出ない**（`SetBattleFormat` が何も知らせない）
+- `program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow` の後に送る。`scoreboard_follow` と同じく自分の間隔は持たない（開いている窓があれば合流し、無ければすぐ出る）。1 回の送信の間に何度切り替わっても 1 通で、delta の間隔は動かさない
+- 送信先は全接続（読みが READ で、通知は値を運ばない）
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
-**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37 および §7 の
+**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37・§6.41〜6.43 および §7 の
 クリア/リセット/セット読込）は、デスクトップ UI の操作と同一の Qt 経路を通って
 `score.{n}` の held サブツリー（`StateManager.HoldSubtree`）に着地する。したがって
 **アプリのスコアボード入力機能には即座に映るが、layout（OBS オーバーレイ・WS デルタ・
@@ -933,11 +940,12 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`（型・未知のキー・タグなし・改行・長さ・`mains` に `game` が無い・カタログに無い国 / 地域、新しく足す要素のキャラ / スキン / バリアント）、`CONFLICT`（上記の `game` / この選手のもっと新しい保存が先に済んだ）、`NOT_READY`（空でない国か地域を送ったのに国データが未読込。送らない保存は待たない）。いずれも何も保存しない
 
 ### 6.27 タグから選手を読み込む `POST /api/v1/scoreboards/{n}/teams/{t}/players/{p}:load`（2026-11-05 追加・ADR-005 S4m）
-- パス: `n`=1|2（board 3 は `INVALID_ARGUMENT`）、`t`=1|2、`p`=1〜。body: `{ "tag": "Alpha" }`（gamerTag。スポンサーなし・大文字小文字を無視。最初の行）
+- パス: `n`=1|2（board 3 は `INVALID_ARGUMENT`）、`t`=1|2、`p`=1〜。body: `{ "tag": "Alpha" }`（gamerTag。スポンサーなし・大文字小文字を無視。最初の行）か `{ "key": "SP Alpha" }`
+- **`key`**（2026-11-10 追加・ADR-005 S4z）: 選手 DB のキー（スポンサー + タグ。§5.11 の行の `key`。大会の参加者の行も同じ DB にある）で**完全一致**で読む。同じタグの選手が何人いても、選んだ 1 人を読める（`tag` は最初の行）。`key` があれば `tag` は見ない（`key` が空・文字列でなければ、`tag` があっても `400`）
 - 委譲: `load_player_from_tag`（legacy `load-player-from-tag` と同じ操作。`PlayerService.ApplyData`。スロットを空にしてから読む）。ボード 1 / 2 の他の書き込みと同じく held
 - **`{t}` はセット側のチーム**で、スワップ時は反対の state のチームに入る（§6 冒頭の規約の例外）
 - 応答は `revision`。操作ログは `player.load`（キー名のみ）
-- エラー: `INVALID_ARGUMENT`（番号・`tag` が空でない文字列でない）、`NOT_FOUND`（タグが DB に無い / そのチームにそのスロットが無い。state のスロットで判定するので両シェル同じ）
+- エラー: `INVALID_ARGUMENT`（番号・`tag` / `key` が空でない文字列でない）、`NOT_FOUND`（タグかキーが DB に無い（`no player with that tag` / `no player with that key`）/ そのチームにそのスロットが無い。state のスロットで判定するので両シェル同じ）
 
 ### 6.28 試合サムネイルの設定 `PATCH /api/v1/thumbnail`（2026-11-07 追加・ADR-005 S4o）
 - body（どれか。空は `400`）: `template_id`（`type_a` | `type_b`）、`background_source`（`default` | `banner` | `custom`）、`display_phase` / `use_team_names` / `use_sponsors`（真偽）、`game: { <codename>: { flip_p1, flip_p2, smooth_scale（真偽）, zoom（1〜1000 の整数）, align: { horizontal, vertical }（1〜100 の整数） } }`。送らなかった値は変わらない（`game` と `align` は入れ子でマージ）。body は 64 KiB まで（超えたら `413`）
@@ -1017,8 +1025,44 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - body: `{ "format": "singles" | "team" | "crew" }`。デスクトップのサイドバーの切り替えと同じ操作（`AutonaActions.SetBattleFormat`）
 - 返り値: `{ "format", "board", "changed" }`（§5.21 の形 + `changed`）と `revision`。**いまの形式と同じなら `changed: false` で何も書かない**（設定も state も・通知も。旧ルートは無く、サイドバーの同じ形式の選び直しも S4x から何もしない）
 - 切り替えたとき: `scoreboard.battle_format` と旧 `scoreboard.team_mode`（チームなら true）を書き、シェルに知らせ（デスクトップはその形式のボードを、未構築なら構築して表示し、サイドバーの選択を合わせる。応答はその後）、大会リザルトのレイアウトが追従する（チームとクルーは団体のレイアウト、1v1 は単独のレイアウト。合っているレイアウトは手で選んだものを残す。`ResultService.FollowBattleFormat`。`result_layout` が state に出る）。ヘッドレスは表示するボードが無いので、設定とリザルトのレイアウトだけ
-- 形式は設定で、Socket.IO の通知は増やさない（読み手は `GET /battle-format` か `GET /health` の `activeBoard`）
+- 切り替えたときは Socket.IO の `battle_format`（`{}`）が全接続に出る（§5.21。ADR-005 S4z。S4x は「形式は設定なので通知は増やさない」としていたが、React の SCORE ページが他所での切り替えに追従するために足した）。読み手は通知の後に `GET /battle-format` か `GET /health` の `activeBoard` を読む
 - エラー: `400 INVALID_ARGUMENT`（`format` が無い・文字列でない・3 つのどれでもない・JSON オブジェクトでない body。何も書かない）
+
+### 6.41 選手の欄 `PATCH /api/v1/scoreboards/{n}/teams/{t}/players/{p}/fields`（2026-11-10 追加・ADR-005 S4z）
+- デスクトップの選手カードの入力欄（タグ・スポンサー・本名・X・メモ・国・地域）に打った / 選んだのと同じ書き込み（`PlayerService.Edit`）。SCORE ページの欄の編集用。**§6.8 は選手データの読込**（DB の記録とのマージ・悪語フィルタ・空値は「変更なし」）で、こちらとは別
+- パス: `n`=1|2、`t`=1|2（状態側のチーム）、`p`=1〜（state のスロット）
+- body（1 つ以上。送ったキーだけを書く）: `{ "gamerTag": "Alpha", "prefix": "TM", "name": "本名", "twitter": "alpha_x", "custom_textbox": "1 行目\n2 行目", "country_code": "JP", "state_code": "13" }`
+  - 値は文字列だけ（`null` は `400`）。**`""` はその欄を空にする**（§6.8 と違う）。`name` は本名（state の `real_name`）、`prefix` はスポンサー（`team`）、`gamerTag` はタグ（`name`）。メモの改行は `\n`
+  - 文字の規則は §6.26 `PUT /players` と同じ（実装も同じ 1 つ: `_player_text_rule`。2026-11-10・S4z レビュー）: `gamerTag` / `prefix` / `name` / `twitter` は 1 行（改行（`\r` / `\n` / `\u2028` など）がどこにもない）で 256 文字まで、`custom_textbox` は改行を含めてよく 4096 文字まで。破れば `400`（メッセージに値は入れない）。**`PUT /players` と違い前後の空白は削らない**（カードの入力欄も削らないので、末尾の改行も 1 行の欄なら `400`）
+  - `country_code`: 国のコード（カスタム国旗も。§5.8 の `code`）。`state_code`: 送った国の（送らなければ今の国の）地域のコード（`GET /countries/{code}/states` のキー）
+- 書き込みはカードの入力欄と同じ:
+  - 文字の欄は今の値と違うものだけを書く。**同じ値を送っても何も書かない**（反映ボタンを点けない）
+  - スポンサーかタグが変わったら、表示名（`mergedName` / `mergedOnlyName`。LOSERS の ` [L]` 込み）と画像（スポンサーロゴ・アバター）を作り直し、`id` を空にする（統計が取り直される）。`online_avatar`・`city`・`seed` は残る（カードの手入力と同じ。LIVE-BUG-1）。比べるのは（スポンサー, タグ）の組
+  - 今と違う国は、地域を空にしてから国を書く（コンボで選んだのと同じ順）。国と一緒にその国の地域を送ればその地域になる。別の国だけを送れば地域は空になる。同じ国・同じ地域は何も書かない
+  - 悪語フィルタも選手 DB も通さない（運用者が打った文字）。1 回の lock と 1 保存サイクル
+- held（§6 冒頭）。デスクトップは未構築のボードを先に構築する（**断る要求・同じ値の要求でも**構築する。構築は値の検査より前に走る。`PATCH players`（§6.8）と同じ前例。構築で held 登録される）。ヘッドレスはすぐ公開
+- 応答は `revision`。操作ログは `player.fields`（キー名だけ。§2.7）
+- エラー（いずれも何も書かない）: `400 INVALID_ARGUMENT`（番号・空の body・未知のキー・文字列でない値・文字の規則（改行・長さ）を破る値・国データに無い国・その国の地域でない地域（国の無いスロットの地域も））、`404 NOT_FOUND`（そのチームにそのスロットが無い）、`409 NOT_READY`（空でない国か地域を送ったのに国データが未読込。空にするだけ・国を送らない書き込みは待たない）
+
+### 6.42 選手のキャラの行 `PATCH /api/v1/scoreboards/{n}/teams/{t}/players/{p}/characters/{row}`（2026-11-10 追加・ADR-005 S4z）
+- カードのキャラ行の 3 つのコンボ（キャラ・スキン・バリアント）で選んだのと同じ書き込み（`PlayerService.EditCharacter`）
+- パス: §6.41 と同じ。`row`=1〜（そのスロットのキャラ行。state のキャラ枠の数まで。**キャラ枠が 0 のスロット（キャラ数 0 の設定）には行が無く、どの `row` も `404`**。2026-11-10・S4z レビュー）
+- body（`en_name` / `skin` / `variant` の 1 つ以上）: `{ "en_name": "Mario", "skin": 0, "variant": "EX", "game": "ssbu" }`
+  - `en_name`: キャラの en_name（`GET /characters`）。`""` はキャラなし（ゲームが無くても書ける）
+  - `skin`: スキンの行（0 から）。**送らずにキャラを変えると最初のスキン**（カードと同じ）。スキンの無いキャラは、送っても無し（`-1`。Top 8 と同じ）
+  - `variant`: バリアントの en_name（`GET /variants`）。`""` / `null` は無し。**送らなければ今のバリアントのまま**（キャラを変えても。カードと同じ）
+  - `game`: 選んだリストのゲームの codename（省略可）。読み込み中のゲームと違えば `409 CONFLICT`（リストを読んだ後にゲームが変わった。§6.22 と同じ）
+- 今と同じ行なら何も書かない。違えば行の値を作り直して書く（他の行はそのまま）。解決は 1 回の lock の中で、ゲームの 1 つのスナップショットから
+- held / ヘッドレス / 応答は §6.41 と同じ（デスクトップの未構築のボードは、断る要求・同じ値の要求でも構築する）。操作ログは `player.character`。エラーのメッセージはキャラ・スキン・バリアント・ゲームの名前を含むことがある（選手のデータではない。Top 8 §6.22 と同じ）
+- エラー（いずれも何も書かない）: `400 INVALID_ARGUMENT`（番号・`row` < 1・未知のキー・型（`skin` は 0 以上の整数）・3 つのどれも無い・ゲームに無いキャラ / スキン / バリアント・ゲーム未読込でキャラを指定）、`404 NOT_FOUND`（そのスロット・その行が無い）、`409 CONFLICT`（`game` が読み込み中のゲームと違う）
+
+### 6.43 match バー `PATCH /api/v1/scoreboards/{n}/match`（2026-11-10 追加・ADR-005 S4z）
+- ボード 1 / 2 の match バー（フェーズ・プール・ラウンドの 3 つのコンボと BEST OF）を操作したのと同じ書き込み（`AutonaActions.SetMatchField` / `SetBestOf`）
+- body（1 つ以上）: `{ "phase": "Top 8", "pool": "A1", "match": "Winners Final", "bestOf": 5 }`。文字列は `""` で空にする。`bestOf` は 0〜99 の整数で、0 も書く
+- **§6.5 `PATCH set` との違い**: `set` はセットのペイロードとして読む（`phase` / `match` の `""` は運ばない・`pool` の `""` は空にする・`match_en` を空にする・`bestOf` の 0 は運ばない）。こちらはコンボの操作なので、**`""` は 3 つとも空にし、`match_en` に触れず、`bestOf` の 0 も書く**
+- 同じ値は書かない。1 保存サイクル。held（§6 冒頭）・ヘッドレスはすぐ公開。デスクトップの未構築のボードは、断る要求・同じ値の要求でも構築する（§6.41 と同じ）
+- 応答は `revision`。操作ログは `match.update`
+- エラー: `400 INVALID_ARGUMENT`（`n` が 1 / 2 以外・空の body・未知のキー（`match_en` も）・文字列でない値・整数でないか範囲外の `bestOf`。何も書かない）
 
 ---
 
@@ -1052,7 +1096,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
 | `POST /api/v1/thumbnail:reset` | confirm | `reset_thumbnail_settings`（`ThumbnailService.Reset`。2026-11-07 追加・ADR-005 S4o） | — |
 | `POST /api/v1/thumbnail:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_thumbnail`（`ThumbnailService.Preview`。2026-11-07 追加・ADR-005 S4o） | — |
-| `POST /api/v1/thumbnail:generate` | 実行中フラグ | `generate_thumbnail`（`ThumbnailService.Generate`。2026-11-07 追加・ADR-005 S4o） | — |
+| `POST /api/v1/thumbnail:generate` | 実行中フラグ | `generate_thumbnail`（`ThumbnailService.Generate`。2026-11-07 追加・ADR-005 S4o。body の `board` は 2026-11-10・S4z） | — |
 | `POST /api/v1/result:clear` | confirm | `clear_result`（`ResultService` の `Clear`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:loadStandings` | 入力があれば confirm・実行中フラグ | `load_result_standings`（`ResultService.LoadStandings`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
@@ -1143,10 +1187,11 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   実行中は `409 CONFLICT`。進捗と結果は state の `stream.thumbnail = {status: running → done | error, path, error, revision}`
   （`path` は `out/stream/thumbnail_*.jpg` で、そのまま静的配信の URL パス。`revision` は受け付けるたびに 1 進む）
 - `POST /api/v1/thumbnail:reset`: `{"confirm": true}` 必須（無ければ `409 CONFIRMATION_REQUIRED`）。全ゲームの設定と取り込んだ背景を消して既定に戻す。応答 `data` は §5.12 の `settings`
-- `POST /api/v1/thumbnail:preview` / `:generate`: body なし。保存済みの設定で**ボード 1** の試合サムネイルを描く。`202`（`data: {"accepted": true, "operation": "thumbnail.preview" | "thumbnail.generate", "renderRevision": n}`）で、`running` は 202 の前に state に出る。
+- `POST /api/v1/thumbnail:preview` / `:generate`: 保存済みの設定で試合サムネイルを描く。preview は body なしで**ボード 1**（サムネイルのページの絵）。generate は body の `board`（`1` / `2`。省略・JSON オブジェクトでない body はボード 1 で、それまでの呼び方のまま。2026-11-10 追加・ADR-005 S4z）のボードを描き、そのボードの選手の名前でファイルを保存する。`board` が 1 / 2 でない（整数でない・bool も）ときは `400 INVALID_ARGUMENT`（何も描かない。ヘッドレスでも 503 より先）。`202`（`data: {"accepted": true, "operation": "thumbnail.preview" | "thumbnail.generate", "renderRevision": n}`）で、`running` は 202 の前に state に出る。
   進み具合と結果は state の `thumbnail.render = {status: running → done | error, path, error, revision}`（error は `no_game` / `no_player` / `payload_failed`（テンプレートや設定が読めない）/ `render_failed`（描けない・描画を始められない）/ `save_failed` / `cancelled`（終了中）のコードだけで、詳細はログ）。`renderRevision` はその要求を描く run の revision で、クライアントはこれで自分の結果を見分ける。
-  描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（予約の preview を兼ねる。preview の依頼には generate の `renderRevision` を返す）。preview を兼ねた generate が試合なし（`no_game` / `no_player`）で終わったときは、続けて preview の run（次の revision）でプレースホルダを描く（ADR-005 S4p）。
-  generate は `out/thumbnails/{P1}-vs-{P2}-{UTC}.png` と `.jpg` を保存し（30 世代）、`path` は PNG の相対パス（`out/thumbnails/...`。静的配信の URL パス）。preview は `path` を変えず、§5.12 の画像だけを更新する。生成の `done` はそこまでで、§5.12 の画像だけ書けなくても `done`（警告ログ）。試合が揃っていなければ（`out/program_state.json` が無い・壊れているときも）、preview はプレースホルダを描き、generate は `no_game` / `no_player` で error。
+  描画は 1 度に 1 つ。**実行中の preview は次の 1 回にまとめる**（ペイロードは run の開始時に組むので最新の設定が出る）。**実行中の generate か予約済みの generate があるときの generate は `409 CONFLICT`**、プレビュー中の generate は次の run に予約する（ボード 1 の generate は予約の preview を兼ねる。preview の依頼には generate の `renderRevision` を返す）。preview を兼ねた generate が試合なし（`no_game` / `no_player`）で終わったときは、続けて preview の run（次の revision）でプレースホルダを描く（ADR-005 S4p）。
+  **ボード 2 の generate は preview を兼ねない**（2026-11-10・ADR-005 S4z レビュー。どの経路でも preview の依頼に別のボードの絵で答えない）: 予約の preview があれば、generate の run の後に続けてボード 1 の preview の run（generate の次の revision）を描く。generate より先に予約した preview の依頼に返した `renderRevision` は generate の run の番号になるので、その preview は次の revision の run が答える（preview を兼ねた generate が試合なしで終わったときと同じ流れ）。ボード 2 の generate を予約した後の preview の依頼には、その後の run の revision（generate の revision + 1）を返す。
+  generate は `out/thumbnails/{P1}-vs-{P2}-{UTC}.png` と `.jpg` を保存し（30 世代）、`path` は PNG の相対パス（`out/thumbnails/...`。静的配信の URL パス）。preview は `path` を変えず、§5.12 の画像だけを更新する。ボード 1 の generate も §5.12 の画像を書く。**ボード 2 の generate は §5.12 の画像を書かない**（ボード 1 の絵のまま）。生成の `done` はそこまでで、§5.12 の画像だけ書けなくても `done`（警告ログ）。試合が揃っていなければ（`out/program_state.json` が無い・壊れているときも）、preview はプレースホルダを描き、generate は `no_game` / `no_player` で error。
   オフスクリーンの描画はデスクトップだけなので、**ヘッドレスは `503 UNAVAILABLE`**（終了中も同じ `503`）
 - `POST /api/v1/result:clear`: `{"kind": "players" | "teams", "confirm": true}`（`confirm` が無ければ `409 CONFIRMATION_REQUIRED`）。その種類の全行を空にする。もう一方の種類は残る。1 保存サイクル
 - `POST /api/v1/result:loadStandings`: body は空か `{"confirm": true}`。**大会情報を取り直し、それが指すゲームの読み込みが済んでから**、今のレイアウトの枠数ぶんの standings を start.gg から取り、そのレイアウトの種類の行に入れる（取り直しの失敗はログだけで standings へ進む）。provider のワーカーのジョブで、`202`（`data: {"accepted": true, "operation": "result.loadStandings", "standingsRevision": n}`）。`running` は 202 の前に state に出る（ジョブが先に終わっていればその結果が残る）。

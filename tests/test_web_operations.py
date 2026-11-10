@@ -2083,7 +2083,7 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
-               "game": 1}
+               "game": 1, "row": 1}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2107,6 +2107,9 @@ _BODIES = {
     "api_v1.team_color": {"color": "#ff0000"},
     "api_v1.set_update": {"match": "Final"},
     "api_v1.player_update": {"gamerTag": "ALPHA"},
+    "api_v1.player_fields_update": {"twitter": "walk"},
+    "api_v1.player_character_update": {"en_name": ""},
+    "api_v1.match_update": {"match": "Final"},
     "api_v1.player_save": {"gamerTag": "Walk"},
     "api_v1.player_delete": {"key": "Nobody", "confirm": True},
     "api_v1.player_load": {"tag": "Nobody"},
@@ -2179,7 +2182,10 @@ _NOT_200 = {
         "score_adjust", "score_set", "player_update", "player_load",
         "apply_changes", "stats_refresh", "load_set", "pull_stream",
         "player_clear", "player_swap", "stage_update", "reset_all",
-        "get_scoreboard_follow", "follow", "stop_follow")},
+        "get_scoreboard_follow", "follow", "stop_follow",
+        # ADR-005 S4z.
+        "player_fields_update", "player_character_update",
+        "match_update")},
     # ...and a member's routes, the other way round (the X post is every
     # board's since ADR-005 S4x).
     **{(f"api_v1.{name}", board): 400 for board in (1, 2) for name in (
