@@ -28,7 +28,7 @@
 |---------|--------|--------|-------|------|
 | `agents/impl.md` | opus | xhigh | 全部 | 設計判断を含む変更（Qt ライフサイクル・スレッド・生成順・state スキーマ・自動更新）・Qt クラッシュ/原因不明バグの調査 |
 | `agents/patch.md` | sonnet | medium | Read/Edit/Write/Bash/Glob/Grep | 設計が決まっている変更（規模問わず） |
-| `agents/verify.md` | sonnet | low | Bash/Read/Grep/Glob | pytest 全量 / Web UI build・test（CI と同内容）。修正しない・起動しない |
+| `agents/verify.md` | haiku | low | Bash/Read/Grep/Glob | pytest 全量 / Web UI build・test（CI と同内容）。修正しない・起動しない |
 | `agents/review.md` | opus | high | Read/Grep/Glob/Bash | 差分レビュー（読み取り専用） |
 
 - **コード探索は組み込みの Explore に任せる**（読み取り専用・CLAUDE.md を読み込まないので安い）。
