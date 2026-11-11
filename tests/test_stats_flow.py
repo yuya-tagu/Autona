@@ -26,6 +26,13 @@ the step is the page's request, v1's stats:refresh. Its fetches, writes
 and deltas are compared with the recording as they are; its route answer
 is the one thing it adds (_ADDED_RESPONSES).
 
+The recording's steps on the Qt board and its player cards (they went in
+ADR-005 S4ac-3) call what those ran: the tag field's edit its PlayerService
+calls (conftest.edit_tag), a card's pick and clear its PlayerService's
+ApplyData / ClearSlot, the seed spinbox SetSeed(announce=True), the board's
+SWAP / move / すべての入力値をリセット AutonaActions.SwapTeams / SwapPlayers and v1's
+:reset-all. Their fetches, writes and deltas are the recording's.
+
 Record (on the pre-S3e-5 tree only):
 
     AUTONA_RECORD_STATS=1 python -m pytest tests/test_stats_flow.py
@@ -49,9 +56,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from qtpy.QtWidgets import QLineEdit, QMessageBox, QSpinBox
 
-from tests.conftest import apply_set, clear_players
+from tests.conftest import apply_set, clear_players, edit_tag, load_player
 from tests.fixtures.write_recording import encode, encodeDelta
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "stats" / "golden.json"
@@ -410,10 +416,9 @@ def _set(left, right, bracket="DOUBLE_ELIMINATION"):
             "entrants": [left, right]}
 
 
-def _editTag(card, text):
-    edit = card.findChild(QLineEdit, "name")
-    edit.setText(text)
-    edit.editingFinished.emit()
+def _player(path):
+    from src.core.PlayerService import PlayerService
+    return PlayerService(path)
 
 
 def _statsPageRefresh(http, recorder):
@@ -438,12 +443,13 @@ def _streamQueue(tag):
 def test_a_singles_board(autonaApp, startgg, playerDB, http):
     from src import AutonaWebOperations as WebOps
 
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     autonaApp.settle()
     playerDB["SP ALPHA"] = {"gamerTag": "ALPHA", "prefix": "SP",
                            "id": [70, 700], "seed": 2}
-    one = board.team1playerWidgets[0]
-    two = board.team2playerWidgets[0]
+    # The two cards the recording drove: the first player of each team.
+    one = "score.1.team.1.player.1"
+    two = "score.1.team.2.player.1"
 
     with _Recorder(autonaApp, startgg) as rec:
         rec.step("load set A", lambda: apply_set(board, _set(
@@ -458,14 +464,14 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
             autonaApp, lambda f: f["step"] == "load set C"))
         rec.step("same set again", lambda: apply_set(board, _set(
             [_entrant("EEE", 55, 3)], [_entrant("FFF", 66, 4)])))
-        rec.step("card tag edit", lambda: _editTag(one, "ZZZ"))
-        rec.step("card pick", lambda: one.SetData(
-            _entrant("GGG", 77, 6), dontLoadFromDB=True))
-        rec.step("card clear", two.Clear)
+        rec.step("card tag edit", lambda: edit_tag(one, "ZZZ"))
+        rec.step("card pick", lambda: load_player(
+            board, 1, _entrant("GGG", 77, 6)))
+        rec.step("card clear", lambda: _player(two).ClearSlot())
         rec.step("card seed spinbox",
-                 lambda: one.findChild(QSpinBox, "seed").setValue(12))
-        rec.step("card pick again", lambda: two.SetData(
-            _entrant("HHH", 88, 1), dontLoadFromDB=True))
+                 lambda: _player(one).SetSeed(12, announce=True))
+        rec.step("card pick again", lambda: load_player(
+            board, 2, _entrant("HHH", 88, 1)))
         rec.step("answer all", lambda: startgg.answer(autonaApp))
         rec.step("stats panel refresh", lambda: _statsPageRefresh(http, rec))
         rec.step("web update player (another)", lambda: WebOps.update_player(
@@ -478,7 +484,9 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
                  lambda: WebOps.load_player_from_tag(1, "alpha", 2, 1))
         rec.step("answer web", lambda: startgg.answer(autonaApp))
         rec.step("web swap", lambda: WebOps.swap_teams(1))
-        rec.step("board swap", board.SwapTeams)
+        rec.step("board swap", lambda: __import__(
+            "src.core.Actions", fromlist=["AutonaActions"])
+            .AutonaActions.instance.SwapTeams(board))
         rec.step("hotkey-style swap", lambda: __import__(
             "src.core.Actions", fromlist=["AutonaActions"])
             .AutonaActions.instance.SwapTeams(1))
@@ -507,9 +515,7 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
         rec.step("web clear all", lambda: WebOps.clear_all(1))
         rec.step("load set F", lambda: apply_set(board, _set(
             [_entrant("OOO", 17, 2)], [_entrant("PPP", 18, 6)])))
-        with patch.object(QMessageBox, "question",
-                          return_value=QMessageBox.StandardButton.Yes):
-            rec.step("reset all inputs", board.ResetAllInputs)
+        rec.step("reset all inputs", lambda: WebOps.reset_all(board))
         rec.step("load set G", lambda: apply_set(board, _set(
             [_entrant("QQQ", 19, 2)], [_entrant("RRR", 20, 6)])))
         rec.step("answer the rest", lambda: startgg.answer(
@@ -534,18 +540,21 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
 def test_a_team_board(autonaApp, startgg, http):
     from src import AutonaWebOperations as WebOps
 
-    autonaApp.board(1)
-    board = autonaApp.board(2)
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
+    board = autonaApp.ready(2)
     autonaApp.settle()
 
     with _Recorder(autonaApp, startgg) as rec:
         rec.step("load a 2v2 set", lambda: apply_set(board, _set(
             [_entrant("A1", 31, 1), _entrant("A2", 32, 1)],
             [_entrant("B1", 41, 4), _entrant("B2", 42, 4)])))
-        rec.step("move a player down", lambda: board._MovePlayer(
-            board.team1playerWidgets[0], 1))
-        rec.step("move it back up", lambda: board._MovePlayer(
-            board.team1playerWidgets[1], -1))
+        # A card's move down / up (the Qt board's, until ADR-005 S4ac-3).
+        rec.step("move a player down", lambda: AutonaActions.instance
+                 .SwapPlayers(board, 1, 1, 2))
+        rec.step("move it back up", lambda: AutonaActions.instance
+                 .SwapPlayers(board, 1, 2, 1))
         rec.step("web swap", lambda: WebOps.swap_teams(2))
         rec.step("board clear", lambda: clear_players(board))
         rec.step("load a 1v1 set", lambda: apply_set(board, _set(
@@ -577,21 +586,32 @@ def test_a_team_board(autonaApp, startgg, http):
     _check("team", recorded)
 
 
-def test_routes_reach_a_board_that_is_not_built(autonaApp, startgg, http):
-    """The legacy routes and v1 build board 2 first, as they always did."""
-    autonaApp.board(1)
+def test_routes_reach_a_board_just_made(autonaApp, startgg, http):
+    """The legacy routes on board 2 made a moment before, as the launch makes
+    it (AutonaActions.EnsureBoard with `panel`).
+
+    Recorded when the route made board 2 itself (the desktop host's Prepare
+    built a board core did not have); since ADR-005 S4ac-3 the launch makes
+    every board and nothing makes one again, so the first step makes it the
+    way the launch does and then asks the route -- the board's seed and the
+    route's writes, as recorded."""
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
     autonaApp.settle()
+    assert not AutonaActions.instance.BoardEnsured(2)
+
+    def makeAndAsk():
+        assert AutonaActions.instance.EnsureBoard(2, panel=True)
+        _legacy(http, rec, "/scoreboard2-stats-recent-sets")
 
     with _Recorder(autonaApp, startgg) as rec:
-        rec.step("legacy recent on board 2", lambda: _legacy(
-            http, rec, "/scoreboard2-stats-recent-sets"))
+        rec.step("legacy recent on board 2", makeAndAsk)
         rec.step("legacy last 1 on board 2", lambda: _legacy(
             http, rec, "/scoreboard2-stats-last-sets-1"))
         recorded = {"steps": [dict(s, deltas=[d for d in s["deltas"]
                                               if d != "BIG"])
                               for s in rec.steps],
                     "boards": rec.boards(2)}
-        built = 2 in autonaApp.manager.scoreboards
 
-    assert built
     _check("unbuilt board", recorded)

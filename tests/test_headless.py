@@ -123,7 +123,6 @@ result = {
                          WebOps.startImageRender is not None],
     "desktop": [name for module, name in (
         ("src.AutonaGameAssetManager", "AutonaGameAssetManager"),
-        ("src.AutonaScoreboardManager", "AutonaScoreboardManager"),
         ("src.AutonaHotkeys", "AutonaHotkeys"),
         ("src.Helpers.AutonaCountryHelper", "AutonaCountryHelper"))
         if built(module, name)],
@@ -324,7 +323,7 @@ def _widget_modules():
     """The src modules that define a QWidget subclass, by AST: a class
     whose base is one of PySide6.QtWidgets' widget classes, or (closed
     over) a src class that is one. A base is matched by its last name
-    (`QDialog`, `QtWidgets.QDialog`, `AutonaBasePlayerWidget`)."""
+    (`QDialog`, `QtWidgets.QDialog`, `AutonaColorButton`)."""
     from PySide6 import QtWidgets
     widgets = {name for name in dir(QtWidgets)
                if isinstance(getattr(QtWidgets, name), type)
@@ -351,9 +350,8 @@ def _widget_modules():
         widgets |= {name for _, name in more}
     modules = {module for module, _ in found}
     # The derivation finds what is known to be a widget's module.
-    assert {"src.Autona", "src.AutonaScoreboardWidget",
-            "src.AutonaScoreboardPlayerWidget", "src.AutonaSelectSetWindow",
-            "src.AutonaCrewBattleWidget"} <= modules, modules
+    assert {"src.Autona", "src.AutonaApiInfoWindow", "src.AutonaColorButton",
+            "src.AutonaDesignerWindow"} <= modules, modules
     return modules
 
 

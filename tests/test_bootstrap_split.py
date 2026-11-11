@@ -184,11 +184,12 @@ def test_bootstrap_gui_steps_and_their_order():
     # on before the first SetupModel), and the hotkeys are routed to
     # AutonaActions right after they exist. The web operations' desktop
     # registrations (the board host, the game loader, and the shell
-    # operations -- ADR-005 S3e-9) come after the dock, the shell operations
-    # (AutonaShellOperations: the dock's until ADR-005 S4y) and the adapter
-    # they point at, and the game load's roster last: ahead of every board
-    # and its cards, run through the board host registered just above
-    # (ADR-005 S3e-6).
+    # operations -- ADR-005 S3e-9) come after the boards, the shell
+    # operations (AutonaShellOperations: the scoreboard dock's until ADR-005
+    # S4y) and the adapter they point at, and the game load's roster last,
+    # run through the board host registered just above (ADR-005 S3e-6). The
+    # dock (AutonaScoreboardManager) was built before the boards until
+    # ADR-005 S4ac-3, which removed the Qt SCORE.
     assert _steps("bootstrap_gui") == [
         "bootstrap_core()",
         "AutonaHotkeys()",
@@ -210,14 +211,12 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaAlertNotification()",
         "AutonaUpdater()",
         "AutonaCountryHelper()",
-        "AutonaScoreboardManager()",
         # The desktop's boards, made at launch in core and boards 1 / 2 held
         # (ADR-005 S4ac-1; `panel=True` is pinned by the probe below): after
-        # bootstrap_core() and the dock, before the Window.
+        # bootstrap_core(), before the Window.
         "AutonaActions.instance.MakeBoards()",
         "AutonaShellOperations()",
-        "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost("
-        "AutonaScoreboardManager.instance)",
+        "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost()",
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
         "AutonaWebOperations.openSetSelection"
@@ -258,10 +257,11 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
     characters per player) is AutonaActions.ApplyGameRoster, run through
     the shell's board host. It was each built board's onLoad handler until
     ADR-005 S3e-6, so the headless shell's boards never followed a load.
-    One function makes the connection: bootstrap_gui() for the desktop --
-    ahead of the boards, whose cards and handler follow it on the same
-    onLoad (the order: test_bootstrap_gui_steps_and_their_order) -- and the
-    headless shell for its loader. The window does not make it again."""
+    One function makes the connection: bootstrap_gui() for the desktop
+    (the order: test_bootstrap_gui_steps_and_their_order) and the headless
+    shell for its loader. The window does not make it again. (The Qt boards'
+    onLoad handler only showed the state from S3e-6 and went with them in
+    ADR-005 S4ac-3.)"""
     assert _steps("wire_game_roster") == ["game_loaded.connect(apply)"]
     tree = ast.parse((PROJECT_ROOT / "src" / "bootstrap.py").read_text(
         encoding="utf-8"))
@@ -275,21 +275,6 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
                             "src/headless.py")}
     assert counts == {"src/bootstrap.py": 1, "src/Autona.py": 0,
                       "src/headless.py": 1}
-    # ...and no board writes on a game load any more: its onLoad handler
-    # follows the roster the wiring wrote and shows the state. These are all
-    # it calls (the rows' model, then the held cycle's renders), and
-    # test_a_boards_game_load_handler_writes_nothing runs it under a spy.
-    board = (PROJECT_ROOT / "src" / "AutonaScoreboardWidget.py").read_text(
-        encoding="utf-8")
-    handler = next(
-        node for node in ast.walk(ast.parse(board))
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_onGameAssetsLoaded")
-    assert {node.func.attr for node in ast.walk(handler)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)} == {
-                "RebindStageModel", "_FollowRoster", "_SchedulePlayerRender",
-                "_SyncSetFields", "_SyncBestOf", "_SyncScoreDisplays"}
 
 
 def _calls(path):
@@ -409,7 +394,6 @@ from src.AutonaAlertNotification import AutonaAlertNotification
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaPlayerDB import AutonaPlayerDB
-from src.AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.AutonaUpdater import AutonaUpdater
@@ -486,8 +470,6 @@ report({
             AutonaAlertNotification.instance is not None,
         "AutonaUpdater": AutonaUpdater.instance is not None,
         "AutonaCountryHelper": AutonaCountryHelper.instance is not None,
-        "AutonaScoreboardManager":
-            AutonaScoreboardManager.instance is not None,
         "AutonaShellOperations": AutonaShellOperations.instance is not None,
         # No shell registers hotkeys with the OS here (ADR-005 S4ae).
         "hotkeys_applied": HotkeyRules.applied,
@@ -577,7 +559,6 @@ from src import AutonaWebOperations
 from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
-from src.AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
@@ -630,16 +611,13 @@ report({
     "actions_connected": AutonaHotkeys._actions_connected,
     "hotkeys_applied": HotkeyRules.applied,
     "country_helper": AutonaCountryHelper.instance is not None,
-    "scoreboard": AutonaScoreboardManager.instance is not None,
     "slot_order": order,
     "board_host": type(AutonaWebOperations.boardHost).__name__,
-    "board_host_manager": AutonaWebOperations.boardHost.manager
-        is AutonaScoreboardManager.instance,
     "game_loader": AutonaWebOperations.loadGameByCodename
         == adapter.LoadGameByCodename,
     # The desktop's shell operations are AutonaShellOperations' (ADR-005 S4y:
-    # the dock's until then), and it builds no window before the main
-    # window hands itself over (UiMounted).
+    # the dock's until then). It holds no window since ADR-005 S4ac-3 (the
+    # Qt set selection / station windows went with the Qt SCORE).
     "shell_operations": [
         AutonaWebOperations.openSetSelection
         == AutonaShellOperations.instance.OpenSetSelection,
@@ -647,8 +625,6 @@ report({
         == AutonaShellOperations.instance.RenderThumbnail,
         AutonaWebOperations.startImageRender
         == AutonaShellOperations.instance.StartImageRender],
-    "shell_windows": [len(AutonaShellOperations.instance._setWindows),
-                      len(AutonaShellOperations.instance._stationWindows)],
     # Every board is made by the bootstrap (AutonaActions.MakeBoards, ADR-005
     # S4ac-1). None was until then: the window's CreateScoreboard made the
     # one it showed (AutonaActions.EnsureBoard, ADR-005 S4y).
@@ -682,13 +658,11 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["pending"] == [False, False, False]
     assert result["hotkeys"] and result["actions_connected"]
     assert result["hotkeys_applied"] is True
-    assert result["country_helper"] and result["scoreboard"]
+    assert result["country_helper"]
     assert result["slot_order"] == ["provider:1386", "restore"]
     assert result["board_host"] == "DesktopBoardHost"
-    assert result["board_host_manager"] is True
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True, True]
-    assert result["shell_windows"] == [0, 0]
     assert result["boards_ensured"] == [True, True, True]
     assert result["player_db_model"] is True
     assert result["state_subscribers"] == STATE_SUBSCRIBERS

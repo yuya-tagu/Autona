@@ -1,22 +1,21 @@
 """Boards 1/2's X post (ADR-005 S4x).
 
 The 1v1 / team board's "Post to X" button built its text in the widget
-(PostToX). The text and what it is missing are core's now
-(AutonaActions.PostText); the button only adds the desktop's part -- the
-dialog naming what is empty, the thumbnail on the clipboard, the browser --
-and ``GET /api/v1/scoreboards/{n}/post`` answers the same for boards 1/2 (the
-crew board's since S4w), guarded as PLAYERDB: the text is of the live
-values, 反映 or not, as the button always read them.
+(PostToX). The text and what it is missing are core's since S4x
+(AutonaActions.PostText), and ``GET /api/v1/scoreboards/{n}/post`` answers
+the same for boards 1/2 (the crew board's since S4w), guarded as PLAYERDB:
+the text is of the live values, 反映 or not, as the button always read them.
+The Qt button -- the dialog naming what is empty, the thumbnail on the
+clipboard, the browser -- went with the Qt board in S4ac-3; the SCORE page
+reads the route.
 
 The reference below is PostToX's text and checks at 19bbdb56, Qt taken
 out; core has to build the same text from the same state on both shells.
 """
 import copy
-import urllib.parse
 from unittest.mock import patch
 
 import pytest
-from qtpy.QtWidgets import QApplication, QMessageBox
 
 from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
@@ -346,7 +345,8 @@ def test_the_route_builds_no_board_and_writes_nothing(
             _ok(client.get(f"/api/v1/scoreboards/{n}/post"))
         autonaApp.settle()
     assert recorder.sets == []
-    assert autonaApp.manager.scoreboards == {}
+    assert [n for n in (1, 2, 3)
+            if AutonaActions.instance.BoardEnsured(n)] == []
 
 
 @pytest.mark.parametrize("n", [0, 4, 99])
@@ -354,116 +354,32 @@ def test_a_board_that_is_not_there_has_no_post(autonaApp, client, n):
     _assertRejected(client.get(f"/api/v1/scoreboards/{n}/post"))
 
 
-# ── the button ───────────────────────────────────────────────────────────
-
-def _click(board, monkeypatch, thumbnail=lambda board: None):
-    # The X post's thumbnail is the shell's (AutonaShellOperations.
-    # DrawThumbnail, ADR-005 S4y): `thumbnail(board)` stands in for it.
-    from src.AutonaShellOperations import AutonaShellOperations
-    monkeypatch.setattr(AutonaShellOperations.instance, "DrawThumbnail",
-                        thumbnail)
-    shown = []
-    with patch("webbrowser.open") as opened, \
-            patch.object(QMessageBox, "exec",
-                         lambda box: shown.append(
-                             (box.text(), box.informativeText()))):
-        board.xpostBtn.click()
-    return opened, shown
-
-
-def _posted(opened):
-    opened.assert_called_once()
-    url = opened.call_args[0][0]
-    assert url.startswith(INTENT)
-    return urllib.parse.unquote(url[len(INTENT):])
-
+# ── what the Qt button posted (until ADR-005 S4ac-3) ──────────────────────
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_the_button_posts_what_the_route_answers(
-        autonaApp, client, world, monkeypatch, n):
-    board = autonaApp.board(n)
+def test_the_route_answers_what_the_button_posted(
+        autonaApp, client, world, n):
+    # The names the button's test posted (a "&" and Japanese, the text the
+    # intent URL quoted): the route has PostToX's text for them.
+    autonaApp.ready(n)
     StateManager.Set(STREAM_KEY, "https://twitch.tv/cup")
     _fill(autonaApp, n, names=("A 1&", "日本語"))
 
-    opened, shown = _click(board, monkeypatch)
-
-    assert shown == []
     route = _ok(client.get(f"/api/v1/scoreboards/{n}/post"))["data"]
     assert route["missing"] == []
-    assert _posted(opened) == route["text"]
-    assert opened.call_args[0][0] == INTENT + urllib.parse.quote(route["text"])
-    assert _posted(opened) == _referencePost(n)[0]
+    assert route["text"] == AutonaActions.instance.PostText(n)[0]
+    assert route["text"] == _referencePost(n)[0]
 
 
 @pytest.mark.parametrize("fill", [
     dict(names=("  ", "B1")), dict(names=("", ""), phase="", match=""),
     dict(phase="  ", match="  ")], ids=["team 1", "everything", "round"])
-def test_the_button_says_what_the_route_says_is_missing(
-        autonaApp, client, world, monkeypatch, fill):
-    board = autonaApp.board(1)
+def test_the_route_says_what_the_button_refused_without(
+        autonaApp, client, world, fill):
+    # What the button named in its dialog: PostToX's checks, in its order.
+    autonaApp.ready(1)
     _fill(autonaApp, 1, **fill)
-    rendered = []
 
-    opened, shown = _click(board, monkeypatch,
-                           thumbnail=lambda board: rendered.append(board))
-
-    opened.assert_not_called()
-    assert rendered == []
     missing = _ok(client.get("/api/v1/scoreboards/1/post"))["data"]["missing"]
     assert missing
-    translate = QApplication.translate
-    assert shown == [(
-        translate("app", "Cannot post to X: the following fields are empty."),
-        "\n".join(f"- {translate('app', LABELS[item])}" for item in missing))]
     assert [LABELS[item] for item in missing] == _referencePost(1)[1]
-
-
-def test_the_button_posts_the_values_after_the_thumbnail(
-        autonaApp, world, monkeypatch):
-    """Read again once the thumbnail is drawn: the players' part always was,
-    the tournament, round and stream lines too since S4x (the button read
-    them before it)."""
-    board = autonaApp.board(1)
-    _fill(autonaApp, 1)
-
-    def thumbnail(board):
-        AutonaActions.instance.SetMatchField(1, "match", "DURING THE RENDER")
-        return None
-
-    opened, _shown = _click(board, monkeypatch, thumbnail=thumbnail)
-    autonaApp.settle()
-    assert "DURING THE RENDER" in _posted(opened)
-
-
-@pytest.mark.parametrize("n", [1, 2])
-def test_the_button_draws_its_own_boards_thumbnail(
-        autonaApp, world, monkeypatch, n):
-    """Through the shell (ADR-005 S4y: core's ThumbnailService.DrawBoard),
-    for the button's board, once -- not through the board's
-    GenerateThumbnail."""
-    board = autonaApp.board(n)
-    _fill(autonaApp, n)
-    asked = []
-
-    opened, shown = _click(board, monkeypatch,
-                           thumbnail=lambda number: asked.append(number))
-
-    assert asked == [n]
-    assert shown == []
-    opened.assert_called_once()
-
-
-def test_a_thumbnail_that_fails_does_not_stop_the_post(
-        autonaApp, world, monkeypatch):
-    board = autonaApp.board(1)
-    _fill(autonaApp, 1)
-
-    def thumbnail(board):
-        raise RuntimeError("no render")
-
-    opened, shown = _click(board, monkeypatch, thumbnail=thumbnail)
-    assert _posted(opened) == AutonaActions.instance.PostText(1)[0]
-    assert shown == [(QApplication.translate(
-        "app",
-        "Thumbnail generation failed, so no image was copied to the "
-        "clipboard."), "no render")]

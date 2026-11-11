@@ -712,7 +712,7 @@ def get_commentary():
 @api_handler
 def get_country_states(code):
     # Country data is keyed by upper-case ISO code ("JP"). It is loaded while
-    # the window is built (or by the first player widget), so before that
+    # the window is built (headless: as it starts), so before that
     # every code would read as unknown -- answer NOT_READY rather than a
     # misleading 404.
     if not CountryCatalog.instance.IsLoaded():

@@ -67,11 +67,11 @@ cp dist/Autona/Autona.exe ./Autona.exe
 - `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
 - `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。
 
-**遅延構築**: 起動時に無条件で作るのは Scoreboard（アクティブな battle_format の 1 面）のみ。他パネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。Tournament Info も headless core Step 4b で遅延構築に移行したが、**サイドバーの既定 index 0 = EVENT** なので、そこを最後に開いていた／新規インストールでは結局起動時に建つ。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
+**遅延構築**: サイドバーのパネルはすべて共有ビュー（`AutonaWebPanelHost`）の React のページで、設定/ガイドウィンドウと同じく初回アクセス時にファクトリで構築する（`_Create*Panel` / `Ensure*Window`）。SCORE も ADR-005 S4ac-3 で Qt 版を削除してこの形になった。ボードの state は core が起動時に 3 つとも作る（`AutonaActions.MakeBoards`、`bootstrap_gui()`）。**サイドバーの既定 index 0 = EVENT** なので、そこを最後に開いていた／新規インストールでは共有ビューが起動時に建つ。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
 
 ## ハーネス挙動の注意
 
-Edit/Write 後に出る「No preview server is running...（ブラウザプレビュー）」通知は、Claude_Preview MCP がファイル種別を問わず一律に出すもの。**ブラウザプレビュー検証が必要なのは Web UI 編集時のみ**（`web/src/**/*.{tsx,ts,css}`・`web/public/**` → `preview_start` → `<verification_workflow>`）。Python 本体・`.ui`・翻訳・ビルド設定・ドキュメント等の編集時は無視してよい。ユーザーの明示指示があればそれに従う。
+Edit/Write 後に出る「No preview server is running...（ブラウザプレビュー）」通知は、Claude_Preview MCP がファイル種別を問わず一律に出すもの。**ブラウザプレビュー検証が必要なのは Web UI 編集時のみ**（`web/src/**/*.{tsx,ts,css}`・`web/public/**` → `preview_start` → `<verification_workflow>`）。Python 本体・翻訳・ビルド設定・ドキュメント等の編集時は無視してよい。ユーザーの明示指示があればそれに従う。
 
 ## Git ルール（要点）
 

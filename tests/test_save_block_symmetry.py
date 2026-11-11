@@ -16,7 +16,9 @@ handler takes the entire output layer down with it.
 
 These tests therefore assert two things after a handler blows up: that the
 counter is back to zero, and that a later write really does reach ./out.
-Only the second one is the user-visible contract; the first says why.
+Only the second one is the user-visible contract; the first says why. The
+change is AutonaActions.SetBestOf, what the Qt board's BEST OF spinbox ran
+until ADR-005 S4ac-3 (and what the Web and /api/v1 run).
 """
 import ast
 from pathlib import Path
@@ -38,6 +40,11 @@ def _probeFile(app):
     return app.dir / "out" / f"{PROBE_KEY}.txt"
 
 
+def _setBestOf(board, value):
+    from src.core.Actions import AutonaActions
+    AutonaActions.instance.SetBestOf(board, value)
+
+
 def _breakBestOfFormatting(monkeypatch):
     """Break the best_of texts the way BUG-3's trigger did.
 
@@ -57,9 +64,9 @@ def _breakBestOfFormatting(monkeypatch):
 # ── the happy path ───────────────────────────────────────────────────────
 
 def test_best_of_change_leaves_saving_unblocked(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.bestOfSpin.setValue(5)
+    _setBestOf(board, 5)
     autonaApp.settle()
 
     assert autonaApp.state.saveBlocked == 0
@@ -69,14 +76,14 @@ def test_best_of_change_leaves_saving_unblocked(autonaApp):
 
 def test_a_failing_best_of_handler_leaves_saving_unblocked(
         autonaApp, monkeypatch):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     _breakBestOfFormatting(monkeypatch)
 
-    # PySide6 reported the exception this raised inside the slot and carried
-    # on, so setValue() returned normally and the traceback went to stderr --
-    # which is precisely why the leaked counter was invisible in production.
-    # Core falls back to the English texts since ADR-005 S2e.
-    board.bestOfSpin.setValue(5)
+    # PySide6 reported the exception this raised inside the spinbox's slot
+    # and carried on, so setValue() returned normally and the traceback went
+    # to stderr -- which is precisely why the leaked counter was invisible in
+    # production. Core falls back to the English texts since ADR-005 S2e.
+    _setBestOf(board, 5)
     autonaApp.settle()
 
     assert autonaApp.state.saveBlocked == 0, (
@@ -87,7 +94,7 @@ def test_a_failing_best_of_handler_leaves_saving_unblocked(
 def test_state_still_exports_after_a_failing_best_of_handler(
         autonaApp, monkeypatch):
     """The contract the counter assertion above stands in for."""
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     state = autonaApp.state
 
     try:
@@ -99,7 +106,7 @@ def test_state_still_exports_after_a_failing_best_of_handler(
         assert exported.read_text(encoding="utf-8") == "before"
 
         _breakBestOfFormatting(monkeypatch)
-        board.bestOfSpin.setValue(5)
+        _setBestOf(board, 5)
         autonaApp.settle()
 
         # Business as usual afterwards: the next write reaches the overlay.
@@ -115,16 +122,16 @@ def test_state_still_exports_after_a_failing_best_of_handler(
         autonaApp.settle()
 
 
-def test_the_widget_survives_a_failing_best_of_handler(autonaApp, monkeypatch):
-    """...and the next, successful, change publishes normally."""
-    board = autonaApp.board(1)
+def test_the_next_best_of_after_a_broken_locale_publishes_normally(
+        autonaApp, monkeypatch):
+    board = autonaApp.ready(1)
 
     with monkeypatch.context() as broken:
         _breakBestOfFormatting(broken)
-        board.bestOfSpin.setValue(5)
+        _setBestOf(board, 5)
         autonaApp.settle()
 
-    board.bestOfSpin.setValue(3)
+    _setBestOf(board, 3)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == 3
@@ -171,13 +178,11 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
     between the brackets. Pinning the handler as a real method keeps the
     `with StateManager.SaveBlock():` the only way to write it -- in core
     since ADR-005 S2e, where the six keys and the stage rows are written
-    (AutonaActions.SetBestOf / RepublishBestOf / RepublishBestOfs); the
-    spinbox's handler only
-    asks for the change.
+    (AutonaActions.SetBestOf / RepublishBestOf / RepublishBestOfs; the Qt
+    spinbox's handler only asked for the change, and went in S4ac-3).
     """
     import inspect
 
-    from src.AutonaScoreboardWidget import AutonaScoreboardWidget
     from src.core.Actions import AutonaActions
 
     def code(function):
@@ -192,18 +197,17 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
         assert "with StateManager.SaveBlock():" in code(function), function
     for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf,
                      AutonaActions.RepublishBestOfs,
-                     AutonaActions._PublishBestOf,
-                     AutonaScoreboardWidget._onBestOfChanged):
+                     AutonaActions._PublishBestOf):
         assert "BlockSaving()" not in code(function), function
         assert "ReleaseSaving()" not in code(function), function
 
 
 @pytest.mark.parametrize("boardNumber", [1, 2])
-def test_best_of_handler_is_shared_by_both_scoreboards(autonaApp, boardNumber):
-    """1v1 and team are the same class here; assert it rather than assume."""
-    board = autonaApp.board(boardNumber)
+def test_best_of_reaches_both_scoreboards(autonaApp, boardNumber):
+    """1v1 and team are the same operation; assert it rather than assume."""
+    board = autonaApp.ready(boardNumber)
 
-    board.bestOfSpin.setValue(7)
+    _setBestOf(board, 7)
     autonaApp.settle()
 
     assert autonaApp.get(f"score.{boardNumber}.best_of") == 7

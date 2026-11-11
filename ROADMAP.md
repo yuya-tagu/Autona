@@ -85,7 +85,7 @@
 
 #### 3-2-3. ステーション管理の拡張
 
-[src/AutonaSelectStationWindow.py](src/AutonaSelectStationWindow.py) が既にあるが、UI 弱い。
+SCORE ページの配信台のダイアログ（`web/src/ScorePage/SetSelection.tsx`。Qt の `AutonaSelectStationWindow` は ADR-005 S4ac-3 で削除）が既にあるが、UI 弱い。
 
 - **ステーション × ストリーム マッピング UI** — Station 1 → Stream A、Station 2 → Stream B
 - **複数ステーション進行を俯瞰するパネル** — 全配信ストリームのスコアと待機セットをリアルタイム一覧

@@ -95,7 +95,7 @@ scripts/gen_release.ps1
                        │
 ┌──────────────────────▼───────────────────────────────┐
 │             Window (QMainWindow)                     │
-│     ドックウィジェット群のオーケストレーション            │
+│     サイドバーと各ページ（共有ビュー）の切り替え       │
 └──┬───────────┬───────────┬───────────┬───────────────┘
    │           │           │           │
    ▼           ▼           ▼           ▼
@@ -106,13 +106,13 @@ scripts/gen_release.ps1
 └──┬───┘ └────┬─────┘ └───┬────┘ └──────┬───────┘
    │          │            │             │
    │    ┌─────▼────────────▼─────┐       │
-   │    │   Dock Widgets         │       │
-   │    │ ・Scoreboard (×N)      │       │
+   │    │ Web panels (React)     │       │
+   │    │ ・Scoreboard           │       │
    │    │ ・Commentary           │       │
    │    │ ・PlayerBrowser        │       │
    │    │ ・Top8                 │       │
    │    │ ・Stats                │       │
-   │    │ ・ThumbnailSettings    │       │
+   │    │ ・Thumbnail            │       │
    │    └────────────────────────┘       │
    │                                     │
    ▼                                     ▼
@@ -149,9 +149,6 @@ Autona/
 │   ├── Autona.py                  # メインウィンドウ (QMainWindow)
 │   ├── StateManager.py            # グローバル状態管理
 │   ├── SettingsManager.py         # ユーザー設定
-│   ├── AutonaScoreboardManager.py    # スコアボード管理
-│   ├── AutonaScoreboardWidget.py     # スコアボード UI
-│   ├── AutonaScoreboardPlayerWidget.py  # 選手情報ウィジェット
 │   ├── AutonaTournamentDataProvider.py  # トーナメントデータ取得
 │   ├── AutonaGameAssetManager.py     # ゲームアセット管理
 │   ├── AutonaPlayerDB.py             # ローカル選手データベース

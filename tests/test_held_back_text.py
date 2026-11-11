@@ -1,11 +1,12 @@
 """HeldBackText, the rule the player cards, the crew board, the commentary
-panel and the board 1/2 team name share for a field a render had to leave
+panel and the board 1/2 team name shared for a field a render had to leave
 alone (src/Helpers/AutonaQtHelper.py, ADR-005 S3e-2).
 
 The rule itself, without a widget or a QApplication: the keys are plain
-strings, as the callers' fields are only keys to it. The widgets' tests
-(test_player_card_render.py, test_crew_operations.py,
-test_commentary_service.py) pin the same cases through real focus.
+strings, as the callers' fields are only keys to it. Its callers were the Qt
+widgets, and the last of them went with the Qt SCORE in ADR-005 S4ac-3 (the
+commentary panel in S4c); the class has no caller left and stays until the
+Qt cleanup removes it.
 """
 from src.Helpers.AutonaQtHelper import HeldBackText
 

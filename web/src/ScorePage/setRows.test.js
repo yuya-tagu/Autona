@@ -20,9 +20,9 @@ import {
 } from "./setRows";
 
 // The SCORE page's set selection rules (ADR-005 S4ab): the rows as the Qt
-// windows show them -- setRows.cases.json, which tests/test_set_selection.py
-// checks against core's rows and the windows' tables -- and what the windows
-// do with them.
+// windows showed them -- setRows.cases.json, which tests/test_set_selection.py
+// checks against core's rows (and against the windows' tables until ADR-005
+// S4ac-3 removed them) -- and what the windows did with them.
 
 const SET_ROWS = cases.sets.map((item) => item.row);
 const STATION_ROWS = cases.stations.map((item) => item.row);

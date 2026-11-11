@@ -22,6 +22,7 @@ import pytest
 
 from src import AutonaWebOperations as WebOps
 from src.AutonaStatsUtil import AutonaStatsUtil
+from src.core.Actions import AutonaActions
 from src.core.StatsService import StatsService
 
 
@@ -34,14 +35,13 @@ def test_stats_util_exposes_no_class_level_instance():
 
 
 def test_one_fetcher_serves_every_board(autonaApp):
-    """No board owns a stats util any more (ADR-005 S3e-5): the statistics
-    are core's, and bootstrap_core() registers the one fetcher."""
-    board1 = autonaApp.board(1)
-    board2 = autonaApp.board(2)
+    """No board owns a stats util any more (ADR-005 S3e-5; the boards'
+    widgets went in S4ac-3): the statistics are core's, and bootstrap_core()
+    registers the one fetcher."""
+    autonaApp.ready(1)
+    autonaApp.ready(2)
 
     assert isinstance(StatsService.fetcher, AutonaStatsUtil)
-    assert not hasattr(board1, "stats")
-    assert not hasattr(board2, "stats")
 
 
 # ── upset factor ─────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ def test_the_crew_board_has_no_statistics(autonaApp, call):
         call()
     autonaApp.settle()
 
-    assert autonaApp.manager.scoreboards.get(3) is None
+    assert not AutonaActions.instance.BoardEnsured(3)
     assert autonaApp.get("score.3") == before
 
 
@@ -140,7 +140,7 @@ def test_the_refresh_of_the_crew_board_is_an_error_string(autonaApp):
 
     assert WebOps.refresh_stats(3) == \
         "ERROR: scoreboard 3 does not support stats"
-    assert autonaApp.manager.scoreboards.get(3) is None
+    assert not AutonaActions.instance.BoardEnsured(3)
 
 
 # ── the socket.io wrappers call these with the right arity ───────────────

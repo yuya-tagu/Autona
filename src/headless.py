@@ -7,17 +7,18 @@ and so does every operation that is core's (scores, 反映, colours, display
 options, swap, the clears, best of, the match bar, team names, losers, the
 tournament, the game). With no board, nothing is held: a write is published
 at once -- there is no 反映 button to wait for. Every web operation runs here
-but the desktop's two shell operations -- the set selection window and the
-thumbnail, which this shell does not register -- and those answer 503 "not
-available in headless" (src/AutonaWebOperations.py, ADR-005 S3e-9).
+but the desktop's shell operations -- the set selection (the SCORE page's
+dialog) and the thumbnail, which this shell does not register -- and those
+answer 503 "not available in headless" (src/AutonaWebOperations.py, ADR-005
+S3e-9).
 
 What the window does at startup and this shell does too, in its own words:
 
 - the per-run locale and the round names;
 - the score subtree reset, the three boards as freshly built desktop boards
   publish them (skeleton, the empty player cards' slots, the crew board's
-  launch write) and the panel seeds, in one save cycle (the window's
-  ScoreboardManager / CreateScoreboard / the board widgets / _SeedPanelState);
+  launch write) and the panel seeds, in one save cycle (the desktop's
+  AutonaActions.MakeBoards and the window's _SeedPanelState);
 - the country catalog, loaded directly (the window loads it through its Qt
   adapter);
 - the tournament provider's wiring (bootstrap.wire_tournament_data, the

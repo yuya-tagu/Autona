@@ -17,9 +17,11 @@ Two stages (ADR-005 S3c):
   The headless shell (main.py --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
   hotkeys, the game asset / country models, the player DB model wiring, the
-  alert and updater objects and the scoreboard dock, and the registrations
-  that make the web operations run through that dock. src/Autona.py runs
-  both, in that order, before the Window is built.
+  alert and updater objects, the boards made and held at launch, the shell
+  operations, and the registrations that make the web operations run on the
+  GUI thread (the scoreboard dock, through which they ran, went with the Qt
+  SCORE in ADR-005 S4ac-3). src/Autona.py runs both, in that order, before
+  the Window is built.
 
 Below them, the wiring both shells make once their own pieces exist
 (wire_tournament_data / wire_web_server): the window and src/headless.py
@@ -454,8 +456,8 @@ def bootstrap_gui():
     """Create the desktop shell's Qt adapters on top of bootstrap_core().
 
     Called from src/Autona.py right after bootstrap_core(), before the
-    Window is built. Needs a QApplication (the scoreboard dock is a
-    QWidget). Safe to call more than once; only the first call does work.
+    Window is built. Needs a QApplication (the asset and player models are
+    QtGui's). Safe to call more than once; only the first call does work.
 
     Every step here used to sit inside bootstrap_core(), interleaved with
     the core steps. Moving them behind it changes the construction order only
@@ -565,22 +567,11 @@ def bootstrap_gui():
     # pulled in (in practice through StartGGDataProvider, i.e. earlier than
     # the Autona.py import that nominally owned it); the constructor depends
     # on nothing, so pinning it here is behaviour preserving and matches the
-    # old nominal import order (CountryHelper before ScoreboardManager).
+    # old nominal import order (CountryHelper before ScoreboardManager, which
+    # went with the Qt SCORE in ADR-005 S4ac-3).
     from .Helpers.AutonaCountryHelper import AutonaCountryHelper
     if AutonaCountryHelper.instance is None:
         AutonaCountryHelper.instance = AutonaCountryHelper()
-
-    # ORDER CONSTRAINT: AutonaScoreboardManager is a QDockWidget, so a
-    # QApplication must already exist -- constructing a QWidget without one
-    # aborts the process at the C++ level. That holds at every entry point:
-    # main.py builds the QApplication before `from src import Autona`, and
-    # Autona.py keeps a fallback for PyInstaller's dependency-analysis
-    # subprocess, which imports modules without main.py. Both run before
-    # bootstrap_gui(). It writes no state (the score subtree's reset was its
-    # constructor's until ADR-005 S4ac-1: MakeBoards below).
-    from .AutonaScoreboardManager import AutonaScoreboardManager
-    if AutonaScoreboardManager.instance is None:
-        AutonaScoreboardManager.instance = AutonaScoreboardManager()
 
     # ORDER CONSTRAINT: the desktop's boards, all three, made at launch in
     # core (ADR-005 S4ac-1): the restored `score` subtree dropped, each
@@ -588,45 +579,43 @@ def bootstrap_gui():
     # 反映 button (the display options brought back to the settings and the
     # polling turned off, as a board's first build did). Before S4ac-1 the
     # hold came with a board's widgets, so a board the window never showed
-    # was not held; the React SCORE page shows any board without widgets.
-    # After bootstrap_core() (StateManager.Initialize() -- the restored state
-    # it drops -- the settings it reads, AutonaActions) and after the dock,
-    # whose constructor reset the subtree until then. Before the Window: its
-    # _SeedPanelState (one save cycle of its own, which reads no board),
-    # its CreateScoreboard (which builds the shown board's widgets on the
-    # board made here, and seeds nothing), and the web server
-    # (Window._StartWebServer), so no request reaches a board that is not
-    # made or not yet held. Before the board host is registered below,
-    # which reads nothing at this point. The headless shell makes the same
-    # boards without `panel` (src/headless._SeedBoards).
+    # was not held; the React SCORE page shows any board without widgets,
+    # and is the only SCORE since ADR-005 S4ac-3 (the Qt boards and their
+    # dock, AutonaScoreboardManager, which was built right before this, are
+    # gone). After bootstrap_core() (StateManager.Initialize() -- the
+    # restored state it drops -- the settings it reads, AutonaActions).
+    # Before the Window: its _SeedPanelState (one save cycle of its own,
+    # which reads no board) and the web server (Window._StartWebServer), so
+    # no request reaches a board that is not made or not yet held. Before
+    # the board host is registered below, which reads nothing at this
+    # point. The headless shell makes the same boards without `panel`
+    # (src/headless._SeedBoards).
     from .core.Actions import AutonaActions
     AutonaActions.instance.MakeBoards(panel=True)
 
-    # The desktop's shell operations and the set selection / station windows
-    # (ADR-005 S4y; the scoreboard dock's and its boards' until then, so
-    # they outlive the dock). Builds no window: their parent is the main
-    # window, which hands itself over in UiMounted. Needs the QApplication
-    # (the windows are QDialogs) and the provider adapter the windows connect
-    # to when built (bootstrap_core()).
+    # The desktop's shell operations (ADR-005 S4y; the scoreboard dock's and
+    # its boards' until then). Builds nothing: what opens the SCORE page's
+    # set selection is the main window, which hands itself over in
+    # UiMounted. (It held the Qt set selection / station windows until
+    # ADR-005 S4ac-3.)
     from .AutonaShellOperations import AutonaShellOperations
     if AutonaShellOperations.instance is None:
         AutonaShellOperations.instance = AutonaShellOperations()
 
     # ORDER CONSTRAINT: the web operations' desktop registrations, after the
-    # objects they point at (the scoreboard dock, the shell operations and
-    # the asset adapter, all above). The S2 operations run through the dock
-    # -- the board built first and held for 反映, on the GUI thread, the
-    # field being typed in committed, the crew board's own operations -- and
-    # a game is loaded through the adapter, so its Qt models follow. The
-    # shell operations (the set selection window, the thumbnail, ADR-005
-    # S3e-9; the image renderer, S4o) are AutonaShellOperations' (the dock's
-    # until S4y). The defaults are the headless shell's (no board; no loader
+    # objects they point at (the shell operations and the asset adapter,
+    # both above). The S2 operations run on the GUI thread
+    # (DesktopBoardHost.Run; until ADR-005 S4ac-3 the host also built and
+    # committed through the scoreboard dock's widgets), and a game is loaded
+    # through the adapter, so its Qt models follow. The shell operations
+    # (the set selection, the thumbnail, ADR-005 S3e-9; the image renderer,
+    # S4o) are AutonaShellOperations' (the dock's until S4y). The defaults
+    # are the headless shell's (operations on the calling thread; no loader
     # until it registers its own; no shell operation: 503). Before the web
     # server exists (Window._StartWebServer), so no request can reach the
     # defaults on the desktop (ADR-005 S3c).
     from . import AutonaWebOperations
-    AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost(
-        AutonaScoreboardManager.instance)
+    AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost()
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
     AutonaWebOperations.openSetSelection = (
@@ -639,12 +628,11 @@ def bootstrap_gui():
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
     # per player), the wiring the headless shell makes too. On gameLoaded,
     # which the adapter emits just before onLoad, so it runs ahead of every
-    # player card's ReloadCharacters -- which blanks the card's picks for
-    # the new game, and first takes the character slots this wrote -- and
-    # of every board's _onGameAssetsLoaded, which renders what this wrote.
-    # The adapter commits it once the slots have run
-    # (AutonaActions.CommitGameLoad, ADR-005 S4t). The board host it runs
-    # through is registered just above.
+    # slot on onLoad (the player cards' ReloadCharacters and the boards'
+    # _onGameAssetsLoaded were among them until ADR-005 S4ac-3). The adapter
+    # commits it once the slots have run (AutonaActions.CommitGameLoad,
+    # ADR-005 S4t; moving the commit into the wiring is S4ad's). The board
+    # host it runs through is registered just above.
     wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)
 
     logger.debug("bootstrap_gui complete")
@@ -712,7 +700,8 @@ def wire_game_roster(game_loaded):
 
     Run where the shell runs board operations (AutonaWebOperations
     .boardHost): on the desktop that is its GUI thread, where the board's
-    cards make their own writes; headless, one operation at a time. Until
+    cards made their own writes until ADR-005 S4ac-3; headless, one
+    operation at a time. Until
     ADR-005 S3e-6 it was each built board's onLoad handler, so the headless
     shell's boards never followed a game load. bootstrap_gui() makes it for
     the desktop (ahead of the

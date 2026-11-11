@@ -16,7 +16,6 @@ a = Analysis(
 #       ('../src/i18n/round_names/*.json', 'src/i18n/round_names'),
         ('../src/i18n/*.json', 'src/i18n'),
         ('../src/i18n/*.qm', 'src/i18n'),
-        ('../src/layout/*', 'src/layout'),
 #       ('../web/build/*', 'web/build'),
         ('../src/TournamentDataProvider/*.txt', 'src/TournamentDataProvider')
     ],

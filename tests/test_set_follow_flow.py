@@ -19,7 +19,10 @@ For every step of a scenario the recording holds
 - the route / event answers;
 - the local player database's writes;
 - what the board shows: the auto-update row (shown, its label) and
-  whether 反映 has something to publish;
+  whether 反映 has something to publish. The board widgets went in ADR-005
+  S4ac-3: the row's "shown" is compared with what core polls
+  (SetFollowService.Following(), what the row showed), its label no longer,
+  and what the board's buttons and windows ran is called directly;
 
 and, after the scenario, each board's subtree (its key order included) and
 the stream queue. "State key order and deltas, statistics requests, 反映
@@ -183,16 +186,13 @@ class _FakeProvider:
 # ── driving the follow timer ────────────────────────────────────────────
 
 def _followTimer(board):
-    """The board's 5-second follow timer, or None. Pre-S3e-7 it was the
-    board's own `autoUpdateTimer`; since then it is the set follow's clock
-    (AutonaSetFollowUtil), one per board."""
-    timer = getattr(board, "autoUpdateTimer", None)
-    if timer is not None:
-        return timer
+    """Board `board`'s 5-second follow timer, or None. Pre-S3e-7 it was the
+    board widget's own `autoUpdateTimer`; since then it is the set follow's
+    clock (AutonaSetFollowUtil), one per board."""
     from src.core.SetFollowService import SetFollowService
     fetcher = SetFollowService.fetcher
     timers = getattr(fetcher, "_timers", None) or {}
-    return timers.get(getattr(board, "scoreboardNumber", None))
+    return timers.get(board)
 
 
 def _tick(board):
@@ -213,6 +213,7 @@ def _holdTimer(board):
 class _Recorder:
 
     def __init__(self, app, fake, saves, boards):
+        # `boards`: the numbers of the boards the scenario has.
         self.app = app
         self.fake = fake
         self.saves = saves
@@ -280,6 +281,7 @@ class _Recorder:
                 break
 
     def step(self, label, action):
+        from src.core.SetFollowService import SetFollowService
         from src.core.StateManager import StateManager
 
         callsBefore = len(self.fake.calls)
@@ -288,12 +290,11 @@ class _Recorder:
         action()
         self.drain()
         ui = {}
-        for number, board in self.boards().items():
-            _holdTimer(board)
-            row = getattr(board, "timerLayout", None)
-            ui[str(number)] = None if row is None else {
-                "follow": not row.isHidden(),
-                "label": board.labelAutonaUpdate.text()}
+        for number in self.boards:
+            _holdTimer(number)
+            # The crew board had no auto-update row.
+            ui[str(number)] = None if number == 3 else {
+                "follow": SetFollowService(number).Following() is not None}
         self.steps.append({
             "step": label,
             "calls": self.fake.calls[callsBefore:],
@@ -303,7 +304,7 @@ class _Recorder:
             "db": self.saves[savesBefore:],
             "ui": ui,
             "pending": {str(n): StateManager.HasPendingChanges(f"score.{n}")
-                        for n in self.boards()},
+                        for n in self.boards},
         })
 
     def result(self):
@@ -322,6 +323,13 @@ class _Recorder:
 FIELDS = ("calls", "writes", "deltas", "responses", "db", "ui", "pending")
 
 
+def _followRow(ui):
+    """The auto-update rows as compared since ADR-005 S4ac-3: shown or not
+    (the label was the widget's)."""
+    return {number: None if row is None else {"follow": row["follow"]}
+            for number, row in ui.items()}
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -338,6 +346,8 @@ def _check(name, recorded):
     actualSteps = recorded["steps"]
     assert [s["step"] for s in actualSteps] == \
         [s["step"] for s in expectedSteps]
+    expectedSteps = [dict(step, ui=_followRow(step["ui"]))
+                     for step in expectedSteps]
     differ = [f"{expected['step']!r}: {field}"
               for expected, actual in zip(expectedSteps, actualSteps)
               for field in FIELDS if actual[field] != expected[field]]
@@ -345,7 +355,7 @@ def _check(name, recorded):
         expected, actual = next(
             (expected, actual)
             for expected, actual in zip(expectedSteps, actualSteps)
-            if expected != actual)
+            if any(actual[field] != expected[field] for field in FIELDS))
         pytest.fail(f"{name}: differs at\n  " + "\n  ".join(differ)
                     + f"\nfirst step recorded: {json.dumps(expected)[:4000]}"
                     + f"\nfirst step now: {json.dumps(actual)[:4000]}")
@@ -468,7 +478,7 @@ def provider(autonaApp, monkeypatch):
     try:
         yield fake
     finally:
-        for board in list(autonaApp.manager.scoreboards.values()):
+        for board in (1, 2, 3):
             timer = _followTimer(board)
             if timer is not None:
                 timer.stop()
@@ -559,13 +569,11 @@ def test_loading_sets_from_the_web(autonaApp, settings, provider, playerDB,
     board, and the boards that have no set to load."""
     client, ws = web
     players, saves = playerDB
-    autonaApp.board(1)
-    autonaApp.board(2)
-    autonaApp.board(3)
+    for number in (1, 2, 3):
+        autonaApp.ready(number)
     autonaApp.settle()
-    built = autonaApp.manager.scoreboards
 
-    with _Recorder(autonaApp, provider, saves, lambda: dict(built)) as rec:
+    with _Recorder(autonaApp, provider, saves, (1, 2, 3)) as rec:
         rec.step("legacy load-set 1001", lambda: _get(
             rec, client, "/scoreboard1-load-set?set=1001"))
         rec.step("the same set again (Socket.IO)", lambda: _event(
@@ -620,17 +628,21 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
     client, ws = web
     _, saves = playerDB
     settings["general.disable_autoupdate"] = False
-    board = autonaApp.board(1)
+    from src.core.SetFollowService import SetFollowService
+    board = autonaApp.ready(1)
+    follow = SetFollowService(board)
     autonaApp.settle()
-    built = autonaApp.manager.scoreboards
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.streams[STREAM] = _node(2001, (5, 6), state=1)
     station = {"type": "station", "id": 77, "identifier": "4",
                "stream": ""}
     stream = {"type": "stream", "id": 5, "identifier": STREAM}
 
-    with _Recorder(autonaApp, provider, saves, lambda: dict(built)) as rec:
-        rec.step("set window: 1001", lambda: board.setFollow.LoadSet(
+    # What the board's set and station windows and its cancel button ran
+    # (they went in ADR-005 S4ac-3): its set follow's LoadSet /
+    # FollowStation / StopFollowing(forget=True).
+    with _Recorder(autonaApp, provider, saves, (1,)) as rec:
+        rec.step("set window: 1001", lambda: follow.LoadSet(
             {"id": 1001, "p1_name": "ALPHA", "p2_name": "BRAVO",
              "auto_update": "set"}))
         rec.step("tick", lambda: _tick(board))
@@ -639,7 +651,7 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
             rec, client, "/scoreboard1-reset-players"))
         rec.step("tick after the clear", lambda: _tick(board))
         rec.step("station window: station 4",
-                 lambda: board.setFollow.FollowStation(
+                 lambda: follow.FollowStation(
                      copy.deepcopy(station)))
         rec.step("tick on the station", lambda: _tick(board))
         rec.step("web clear-all while following the station", lambda: _get(
@@ -657,20 +669,20 @@ def test_following_a_set_a_station_and_a_stream(autonaApp, settings,
             _tick(board)
         rec.step("the station empties", emptied)
         rec.step("stream window: the channel",
-                 lambda: board.setFollow.FollowStation(
+                 lambda: follow.FollowStation(
                      copy.deepcopy(stream)))
         rec.step("tick on the stream", lambda: _tick(board))
         rec.step("set window while following the stream",
-                 lambda: board.setFollow.LoadSet(
+                 lambda: follow.LoadSet(
                      {"id": 1002, "auto_update": "set"}))
         rec.step("tick on the set", lambda: _tick(board))
-        rec.step("cancel", lambda: board.timerCancelBt.click())
+        rec.step("cancel", lambda: follow.StopFollowing(forget=True))
         rec.step("tick after cancelling", lambda: _tick(board))
         rec.step("get-set", lambda: _get(rec, client, "/scoreboard1-get-set"))
         rec.step("web load-set while polling", lambda: _get(
             rec, client, "/scoreboard1-load-set?set=1003"))
         rec.step("tick on the web's set", lambda: _tick(board))
-        rec.step("cancel again", lambda: board.timerCancelBt.click())
+        rec.step("cancel again", lambda: follow.StopFollowing(forget=True))
     _check("following", rec.result())
 
 
@@ -680,16 +692,14 @@ def test_post_score(autonaApp, settings, provider, playerDB, web):
     type, the team and crew boards, and what each answers."""
     client, ws = web
     _, saves = playerDB
-    autonaApp.board(1)
-    autonaApp.board(2)
-    autonaApp.board(3)
+    for number in (1, 2, 3):
+        autonaApp.ready(number)
     autonaApp.settle()
-    built = autonaApp.manager.scoreboards
 
     def score(body):
         return json.dumps(body)
 
-    with _Recorder(autonaApp, provider, saves, lambda: dict(built)) as rec:
+    with _Recorder(autonaApp, provider, saves, (1, 2, 3)) as rec:
         rec.step("entrants", lambda: _post(rec, client, "/score", score({
             "team1score": 2, "round_name": "Winners Final",
             "overwrite": True, "bestOf": 5, "tournament_phase": "Top 8",

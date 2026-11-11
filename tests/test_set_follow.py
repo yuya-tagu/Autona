@@ -1031,12 +1031,14 @@ def test_a_station_lookup_after_a_set_loaded_by_hand_is_dropped(
     assert autonaApp.get("score.1.team.1.player.1.name") == "CHARLIE"
 
 
-def test_a_station_lookup_after_the_cancel_button_is_dropped(
+def test_a_station_lookup_after_a_stop_is_dropped(
         autonaApp, desktop, provider):
     provider.stations["77"] = [_node(3001)]
 
     _setFollow().FollowStation(dict(_STATION))
-    _setFollow().StopFollowing(forget=True)   # the cancel button
+    # A stop: v1's :stop-follow (the Qt cancel button's, until ADR-005
+    # S4ac-3).
+    _setFollow().StopFollowing(forget=True)
     _drain(autonaApp)
 
     assert _calls(provider, "GetMatch") == []
@@ -1084,11 +1086,11 @@ def test_following_a_station_fetches_its_current_set_only(
     _setFollow().StopFollowing(forget=True)
 
 
-def test_a_station_set_answering_after_the_cancel_is_dropped(
+def test_a_station_set_answering_after_a_stop_is_dropped(
         autonaApp, desktop, provider):
     """Another station's lookup answers -- its set cleared the board and
-    is asked for -- then the operator cancels before the set answers: the
-    set is dropped, and nothing is followed."""
+    is asked for -- then the operator stops following before the set
+    answers: the set is dropped, and nothing is followed."""
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.stations["78"] = [_node(1001), _node(1003)]
 
@@ -1103,7 +1105,7 @@ def test_a_station_set_answering_after_the_cancel_is_dropped(
     assert _jobs().run_next()            # station 78's lookup
     for _ in range(3):
         autonaApp.settle()
-    _setFollow().StopFollowing(forget=True)   # the cancel button
+    _setFollow().StopFollowing(forget=True)   # a stop (v1's :stop-follow)
     _drain(autonaApp)
 
     assert _calls(provider, "GetMatch") == [[3001], [1001]]
@@ -1496,20 +1498,22 @@ def test_a_v1_stop_does_what_the_cancel_button_does(
     from src.core.SetFollowService import SetFollowService
 
     _, client, _ = desktop
-    board = autonaApp.board(1)   # its cancel button is what v1 is held to
+    # What the Qt board's cancel button ran (it went in ADR-005 S4ac-3) is
+    # what v1 is held to: SetFollowService.StopFollowing(forget=True).
+    autonaApp.ready(1)
     settings["general.disable_autoupdate"] = False
     provider.stations["77"] = [_node(3001)]
 
     _setFollow().FollowStation(dict(_STATION_ROW))
     _drain(autonaApp)
     assert SetFollowService(1).Following() == ("station", 4)
-    board.timerCancelBt.click()
+    SetFollowService(1).StopFollowing(forget=True)
     _drain(autonaApp)
     byButton = _boardSnapshot(autonaApp)
     assert byButton[1] == {"station": None, "poll": None,
                            "pollingEnabled": True, "setId": None}
 
-    board = autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.settle()
     provider._fetched.clear()
     _setFollow().FollowStation(dict(_STATION_ROW))
@@ -1896,70 +1900,34 @@ def test_a_poll_asked_for_on_a_request_thread_has_its_seconds_at_once(
     assert fetcher.RemainingMs(1) is None
 
 
-def test_reading_builds_no_board_and_a_follow_builds_it(
-        autonaApp, desktop, provider):
-    """As every board operation does (BoardHost.Prepare): a write to a board
-    not built is lost when it is. A read has nothing to lose."""
-    _, client, _ = desktop
-    provider.stations["77"] = [_node(3001)]
-    # The follow builds board 2's widgets on purpose: the desktop host's
-    # Prepare for a board core does not have is what this checks.
-    autonaApp.allowWidgets()
+def test_reading_builds_no_board(autonaApp, desktop, provider):
+    """A read has nothing to lose, and makes no board. (A follow made board
+    2 again, with its widgets, when core did not have it -- the desktop
+    host's Prepare -- until ADR-005 S4ac-3: core makes every board at
+    launch, and nothing makes one again.)"""
+    from src.core.Actions import AutonaActions
 
+    _, client, _ = desktop
     autonaApp._dropBoard(2)
     assert _follow(client, 2)["station"] is None
-    assert autonaApp.manager.scoreboards.get(2) is None
-
-    assert _v1(client, "/api/v1/scoreboards/2:follow",
-               _STATION_ROW) == (200, None)
-    assert autonaApp.manager.scoreboards.get(2) is not None
-    _drain(autonaApp)
-    assert autonaApp.get("score.2.set_id") == 3001
-
-
-def test_stopping_builds_no_board_and_writes_nothing_to_one_not_built(
-        autonaApp, desktop, settings, provider):
-    """A load always builds its board, so one not built has nothing to stop.
-    Building it for this seeded it (losing what the state had) and turned the
-    polling setting off."""
-    from src.core.SettingsManager import SettingsManager
-    from src.core.StateManager import StateManager
-
-    _, client, _ = desktop
-    autonaApp._dropBoard(2)
-    # What a board not built yet can have: the saved state's, from the last run.
-    StateManager.Set("score.2.set_id", 1234)
-    autonaApp.settle()
-    before = copy.deepcopy(StateManager.Get("score.2"))
-    writes = []
-    settingsWritten = []
-    real = StateManager.Set
-
-    def recorded(key, value):
-        writes.append(key)
-        return real(key, value)
-
-    with patch.object(StateManager, "Set", recorded), \
-            patch.object(SettingsManager, "Set", lambda key, value:
-                         settingsWritten.append(key)):
-        assert _v1(client, "/api/v1/scoreboards/2:stop-follow") == (200, None)
-    autonaApp.settle()
-
-    assert autonaApp.manager.scoreboards.get(2) is None
-    assert writes == []
-    assert settingsWritten == []
-    assert StateManager.Get("score.2") == before
+    assert not AutonaActions.instance.BoardEnsured(2)
 
 
 def test_a_built_board_is_there_for_the_host_only_once_it_is(
         autonaApp, desktop):
+    """Every board is there for both hosts, and Prepare makes none (ADR-005
+    S4ac-3): core makes the three at launch. Until then the desktop's host
+    read core's flag and Prepare made a board core did not have again, with
+    its widgets -- which only a test's harness could bring about."""
+    from src.core.Actions import AutonaActions
+
     host = WebOps.current_board_host()
-    autonaApp.allowWidgets()    # Prepare builds the widgets: what is checked
     autonaApp._dropBoard(2)
-    assert host.Built(2) is False
-    host.Prepare(2)
     assert host.Built(2) is True
-    assert BoardHost().Built(2) is True     # with no widget, always
+    host.Prepare(2)
+    assert not AutonaActions.instance.BoardEnsured(2)
+    assert autonaApp.get("score.2") is None
+    assert BoardHost().Built(2) is True
 
 
 @pytest.mark.parametrize("body", [

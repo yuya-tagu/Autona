@@ -1,13 +1,13 @@
 """The lists a set is chosen from: the tournament's phases, its sets, its
 stations and streams (ADR-005 S4v).
 
-What the Qt set selection and station windows show (AutonaSelectSetWindow,
+What the Qt set selection and station windows showed (AutonaSelectSetWindow,
 AutonaSelectStationWindow), for a shell with no window and for the SCORE page:
 the windows' fetches lived in the provider's adapter, answered through its Qt
 signals and could not tell a failed request from an empty answer. Which set is
 loaded, and which station followed, is SetFollowService's whichever list it was
-chosen from: this only fetches and keeps the lists. The windows stay as they
-are, on the adapter (they go when the page replaces them).
+chosen from: this only fetches and keeps the lists. The windows went with the
+Qt SCORE (ADR-005 S4ac-3); the adapter's fetches they used are still there.
 
 Each list is fetched when asked, never by itself (opening the window never
 hits the network; the page reads, and asks when there is nothing to read):

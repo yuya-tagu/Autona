@@ -154,7 +154,8 @@ class TestSetGetUnsetCycle:
 
     def test_full_cycle(self):
         state = {}
-        # Initialize scoreboard (AutonaScoreboardWidget.__init__)
+        # Initialize scoreboard (AutonaScoreboardWidget.__init__ once; core's
+        # AutonaActions.SeedFreshBoard since ADR-005 S4t)
         deep_set(state, "score.1", {})
         deep_set(state, "score.1.last_sets.1", {})
         deep_set(state, "score.1.last_sets.2", {})

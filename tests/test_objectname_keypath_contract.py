@@ -7,48 +7,44 @@ existing user ``program_state.json`` files -- and there is **no** StateManager
 migration layer (``STATE_VERSION`` only covers the Qt dock layout, not the
 state schema).
 
-This test freezes that contract as a snapshot. If it fails, an objectName was
-renamed/removed: add a StateManager migration (or restore the name) BEFORE
-updating the snapshot below.
+This test froze that contract as a snapshot of the ``.ui`` files. If it
+fails, a key was renamed/removed: add a StateMigrations step (or restore the
+name) BEFORE updating the snapshot below.
 
 Headless core Step 5 converted the *derivation* widget by widget, and is
 done: for the SCORE panel, the player card and the EVENT tab alike, the key
-names are ``src/core/StateSchema.py`` constants now and each widget looks its
-inputs up by them, instead of reading them back off whatever it found. (The
-EVENT tab itself went in ADR-005 S4g -- the React Event page writes the same
-keys through /api/v1 -- and with it its .ui and its pins here.) That
-does not retire this file -- the .ui names and the schema names still have to
-be the same strings, or an existing ``program_state.json`` stops matching and
-``findChild`` stops resolving -- so the sections below pin exactly that
-agreement, plus the absence of the old derivation.
+names are ``src/core/StateSchema.py`` constants now and each widget looked
+its inputs up by them, instead of reading them back off whatever it found.
+The widgets themselves are gone -- the EVENT tab in ADR-005 S4g, the SCORE
+board, its player cards and their ``.ui`` files with the Qt SCORE in S4ac-3;
+the React pages write the same keys through /api/v1 -- so there is no
+``.ui`` left to agree with. What stays is the snapshot: the names an existing
+``state.json`` / ``program_state.json`` is keyed by, which the schema
+constants must still spell (below), and the ledger of who may write the
+state.
 
-Beyond that agreement the test stays runtime-free: it parses the ``.ui`` XML
-and reads source text. The one import it does make (inside the test, not at
-collection) is ``src.core.StateSchema``, which is Qt-free and side-effect-free
-by construction -- ``tests/test_core_qt_free.py`` and
-``tests/test_import_side_effects.py`` pin both. ``src`` itself is still never
-imported wholesale (agent-pitfalls #1). See ``.claude/known-smells.md`` S-14
-and ``.claude/rules/python-widgets.md``.
+The test stays runtime-free: it reads source text. The one import it does
+make (inside the tests, not at collection) is ``src.core.StateSchema``, which
+is Qt-free and side-effect-free by construction --
+``tests/test_core_qt_free.py`` and ``tests/test_import_side_effects.py`` pin
+both. ``src`` itself is still never imported wholesale (agent-pitfalls #1).
+See ``.claude/known-smells.md`` S-14 and ``.claude/rules/python-widgets.md``.
 """
 import ast
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAYOUT = PROJECT_ROOT / "src" / "layout"
 
-# Widget classes whose objectName is read back into a StateManager keypath
-# (the code iterates them via findChildren / findChild).
-INPUT_WIDGET_CLASSES = {
-    "QLineEdit", "QCheckBox", "QComboBox", "QDateEdit", "QSpinBox",
-    "QPlainTextEdit", "QTextEdit", "QDoubleSpinBox", "QTimeEdit",
-    "QDateTimeEdit",
-}
-
-# Frozen contract: .ui file -> the set of input-widget objectNames whose value
-# is persisted under a StateManager keypath (or used as a findChild key).
-# Adding a name here is safe (a new key); removing/renaming one is a
-# compatibility break that needs a migration first.
+# Frozen contract: the .ui file the names came from -> the input-widget
+# objectNames whose value was persisted under a StateManager keypath (or used
+# as a findChild key). The files went with the Qt SCORE in ADR-005 S4ac-3;
+# the snapshot stays, frozen as the files last had it, because the persisted
+# keys are still these strings. Removing/renaming one is a compatibility
+# break that needs a StateMigrations step first.
+#
+# Not every name is a key: score_left / score_right were the score
+# spinboxes' names (the key is team.{T}.score), and best_of is the key the
+# best-of spinbox wrote.
 EXPECTED = {
     "AutonaScoreboardTeam.ui": {"teamName", "losers"},
     "AutonaScoreboardScore.ui": {
@@ -72,100 +68,45 @@ EXPECTED = {
 }
 
 
-def _object_names(ui_path):
-    tree = ET.parse(ui_path)
-    names = set()
-    for widget in tree.iter("widget"):
-        if widget.get("class") in INPUT_WIDGET_CLASSES:
-            name = widget.get("name")
-            # Qt auto-names a QSpinBox's internal QLineEdit; never a real key.
-            if name and name != "qt_spinbox_lineedit":
-                names.add(name)
-    return names
-
-
-def test_keypath_objectnames_unchanged():
-    for filename, expected in EXPECTED.items():
-        ui_path = LAYOUT / filename
-        assert ui_path.exists(), f"{filename} no longer exists under src/layout/"
-        actual = _object_names(ui_path)
-        assert actual == expected, (
-            f"\n{filename}: input-widget objectName set changed.\n"
-            f"  added   (new keys, OK if intended): {sorted(actual - expected)}\n"
-            f"  removed (BREAKS program_state.json compat): "
-            f"{sorted(expected - actual)}\n"
-            "Update EXPECTED only after confirming a StateManager migration "
-            "covers any rename/removal. See known-smells S-14."
-        )
-
-
 # ── The scoreboard's static keypaths (headless core Step 5) ──────────────
 #
 # The two families AutonaScoreboardWidget used to derive at runtime --
 # score.{N}.{combo.objectName()} and score.{N}.team.{T}.{widget.objectName()}
-# -- are StateSchema constants now. Two things have to hold for that to be a
-# migration-free change, and both are checked here.
+# -- are StateSchema constants now, and must still spell the frozen names.
 
 
-def test_the_scoreboard_schema_names_are_the_ui_objectnames():
-    """The strings on both sides of the (now explicit) binding must match.
-
-    The schema names are what gets written to the state, so they have to stay
-    equal to what an existing program_state.json is keyed by -- i.e. the .ui
-    objectNames. They are *also* what findChild() is given, so a disagreement
-    would additionally leave the widget unwired and the key never written.
-    Frozen in EXPECTED above as well, which is what makes a rename fail
-    loudly on both counts.
+def test_the_scoreboard_schema_names_are_the_frozen_objectnames():
+    """The schema names are what gets written to the state, so they have to
+    stay equal to what an existing state.json is keyed by -- the frozen
+    objectNames. The .ui side of this agreement went with the Qt SCORE in
+    ADR-005 S4ac-3; the snapshot is what a rename fails against now.
     """
     from src.core import StateSchema as schema
 
-    scoreNames = _object_names(LAYOUT / "AutonaScoreboardScore.ui")
-    assert set(schema.SCORE_MATCH_FIELDS) <= scoreNames, (
-        "StateSchema.SCORE_MATCH_FIELDS names a widget "
-        "AutonaScoreboardScore.ui does not have")
+    assert set(schema.SCORE_MATCH_FIELDS) == {"phase", "pool", "match"}
     assert set(schema.SCORE_MATCH_FIELDS) <= EXPECTED[
         "AutonaScoreboardScore.ui"]
 
-    teamNames = _object_names(LAYOUT / "AutonaScoreboardTeam.ui")
-    assert set(schema.SCORE_TEAM_INPUT_KEYS) <= teamNames, (
-        "StateSchema.SCORE_TEAM_INPUT_KEYS names a widget "
-        "AutonaScoreboardTeam.ui does not have")
-    assert set(schema.SCORE_TEAM_INPUT_KEYS) <= EXPECTED[
+    assert set(schema.SCORE_TEAM_INPUT_KEYS) == EXPECTED[
         "AutonaScoreboardTeam.ui"]
 
 
-def _object_name_calls(relative_path):
-    """Every ``<something>.objectName()`` call in a source file."""
-    tree = ast.parse((PROJECT_ROOT / relative_path).read_text(encoding="utf-8"))
-    return [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "objectName"
-    ]
-
-
-def test_the_player_schema_names_are_the_ui_objectnames():
+def test_the_player_schema_names_are_the_frozen_objectnames():
     """The player card's half of the same agreement (Step 5, instalment 2).
 
-    Every operator-editable field of AutonaScoreboardPlayer.ui is a
-    StateSchema constant now, used both as the state key and as the
-    findChild argument. The note box is the one input built in code rather
-    than in the .ui, so it is checked against PROGRAMMATIC_TOKENS below
-    instead.
+    Every operator-editable field of the card is a StateSchema constant,
+    the state key it wrote: the .ui's fields, frozen above, and the note box,
+    the one input the card built in code (``custom_textbox``; the eye menu's
+    "show_additional" toggle found it by that name). The card and its .ui
+    went with the Qt SCORE in ADR-005 S4ac-3.
     """
     from src.core import StateSchema as schema
 
-    playerNames = _object_names(LAYOUT / "AutonaScoreboardPlayer.ui")
     fromUi = set(schema.PLAYER_INPUT_KEYS) - {schema.PLAYER_NOTE_KEY}
-    assert fromUi <= playerNames, (
-        "StateSchema.PLAYER_INPUT_KEYS names a widget "
-        f"AutonaScoreboardPlayer.ui does not have: "
-        f"{sorted(fromUi - playerNames)}")
-    assert fromUi <= EXPECTED["AutonaScoreboardPlayer.ui"]
-    # The note box's objectName is assigned in code; both spellings have to
-    # be the same string or the eye menu's "show_additional" toggle stops
-    # finding the widget its key belongs to.
+    assert fromUi == EXPECTED["AutonaScoreboardPlayer.ui"], (
+        "StateSchema.PLAYER_INPUT_KEYS no longer spells the frozen names: "
+        f"added {sorted(fromUi - EXPECTED['AutonaScoreboardPlayer.ui'])}, "
+        f"removed {sorted(EXPECTED['AutonaScoreboardPlayer.ui'] - fromUi)}")
     assert schema.PLAYER_NOTE_KEY == "custom_textbox"
 
 
@@ -199,36 +140,14 @@ def _state_write_calls(relative_path):
 # test_the_qt_event_panel_is_gone keeps it from coming back, and
 # tests/test_api_v1_tournament.py pins the field names the React page
 # sends.
-
-
-PLAYER_WIDGET_SOURCES = [
-    "src/AutonaScoreboardPlayerWidget.py",
-    "src/AutonaBasePlayerWidget.py",
-]
-
-
-def test_the_player_widgets_do_not_write_the_state_directly():
-    """The completion condition for this instalment, as a tripwire.
-
-    A player widget that writes StateManager itself is, in this codebase,
-    always a keypath built from `self.path` plus something -- and the
-    "something" was an objectName every time. Checking for the write rather
-    than for `objectName()` is what makes this readable: the widgets still
-    call objectName() legitimately (Clear's field filter, the character
-    combos' width rules -- and, until ADR-005 S2c made the swap a state
-    operation, SwapWith's widget-to-widget copy), so an objectName ban would
-    need an allowlist that grows until it means nothing.
-
-    SaveBlock / BlockSaving / ReleaseSaving are deliberately not covered:
-    they coalesce cycles, they do not name keys.
-    """
-    for relative in PLAYER_WIDGET_SOURCES:
-        calls = _state_write_calls(relative)
-        assert calls == [], (
-            f"{relative} writes StateManager directly again (line(s) "
-            f"{sorted(node.lineno for node in calls)}). The player subtree "
-            "is core/PlayerService.py's -- add a method there and call it "
-            "through self.player instead of reverting this test.")
+#
+# The SCORE board's, its player cards' and the crew board's own tripwires
+# (no direct state write, no objectName() keypath, the note box's
+# programmatic name) went with them in ADR-005 S4ac-3;
+# tests/test_web_panel_host.py's
+# test_the_qt_scoreboard_panel_and_its_switch_are_gone keeps them from
+# coming back, and the ledger below keeps any Qt widget from writing the
+# state.
 
 
 # The EVENT tab's own writer tripwire went with the Qt panel (ADR-005
@@ -237,94 +156,13 @@ def test_the_player_widgets_do_not_write_the_state_directly():
 # keys). The ledger below still keeps any Qt widget from writing it.
 
 
-def test_the_scoreboard_does_not_write_the_state_directly():
-    """The scoreboard's own writer tripwire, matching the player one.
-
-    score.* keypaths are StateSchema constants now (see _WireTeamColumn), but
-    nothing pinned that AutonaScoreboardWidget itself never calls
-    StateManager.Set/Unset with a hand-built keypath -- it measures zero
-    today, same as the player widgets (and the EVENT tab did, until it
-    went in ADR-005 S4g), so it gets the same ratchet instead of staying an
-    unenforced assumption.
-    """
-    calls = _state_write_calls("src/AutonaScoreboardWidget.py")
-    assert calls == [], (
-        "AutonaScoreboardWidget writes StateManager directly (line(s) "
-        f"{sorted(node.lineno for node in calls)}). score.* keypaths come "
-        "from StateSchema constants -- route the write through the "
-        "appropriate service instead of reverting this test.")
-
-
-def test_the_crew_board_does_not_write_the_state_directly():
-    """The crew board's completion condition, as the same ratchet.
-
-    Board 3 never derived a key from an objectName -- its rows are built in
-    code and carry none -- so what it had instead was thirty hand-built
-    keypath literals spread across a launch seed, seven signal handlers, a
-    tolerant set-data path and a full-board flush. They are
-    core/CrewBattleService.py's now (plus AutonaActions for the three keys
-    board 3 shares with the others, and TournamentInfoService for 表示大会名),
-    and this is what stops the thirty-first from being written here.
-
-    Reads are deliberately not covered: _SyncTeamColors renders the team
-    colour.
-    """
-    calls = _state_write_calls("src/AutonaCrewBattleWidget.py")
-    assert calls == [], (
-        "AutonaCrewBattleWidget writes StateManager directly (line(s) "
-        f"{sorted(node.lineno for node in calls)}). score.3 belongs to "
-        "core/CrewBattleService.py -- add a method there and call it through "
-        "self.crew instead of reverting this test.")
-
-
-def test_the_scoreboard_no_longer_derives_keypaths_from_objectname():
-    """The `findChildren` + objectName() loops must not come back.
-
-    That pattern is what made the .ui file the state schema: a key existed
-    because a designer named a widget, no catalog could be trusted, and a
-    rename was a silent data-compatibility break rather than a failing test.
-    Read as a syntax tree so the docstrings that *describe* the old pattern
-    do not count as the pattern.
-    """
-    calls = _object_name_calls("src/AutonaScoreboardWidget.py")
-    assert calls == [], (
-        "AutonaScoreboardWidget calls objectName() again (line(s) "
-        f"{sorted(node.lineno for node in calls)}). Key path segments come "
-        "from StateSchema now -- see _WireTeamColumn. If the new call builds "
-        "a StateManager key path, replace it with a StateSchema constant "
-        "instead of reverting this test; if it is a legitimate non-keypath "
-        "use (logging, etc.), add it to an allowlist here instead of "
-        "deleting the assertion.")
-
-
-# objectNames assigned programmatically (not in .ui) that also feed keypaths.
-PROGRAMMATIC_TOKENS = {
-    # AutonaNotesWidget removed (NOTES tab deleted) — no notes keypaths remain.
-    "src/AutonaScoreboardPlayerWidget.py": [
-        'self.custom_textbox.setObjectName("custom_textbox")',
-    ],
-}
-
-
-def test_programmatic_keypath_names_present():
-    for rel, tokens in PROGRAMMATIC_TOKENS.items():
-        text = (PROJECT_ROOT / rel).read_text(encoding="utf-8")
-        for token in tokens:
-            assert token in text, (
-                f"{rel}: keypath token `{token}` is gone. A programmatic "
-                "objectName/keypath changed -- add a migration first (S-14)."
-            )
-
-
 # There used to be a `test_qt_spinbox_fallback_present` here, guarding the
 # "a QSpinBox's internal QLineEdit reports objectName 'qt_spinbox_lineedit',
 # so fall back to the parent's" branch that every findChildren(QLineEdit)
-# keypath loop needed. It was checked in AutonaScoreboardPlayerWidget until
-# the player instalment and in the EVENT tab's widget until this one; no
-# such loop exists anywhere now, so there is no fallback left to guard. The
-# `..._no_longer_derives_keypaths_from_objectname` test above is what
-# replaced it, and it fails if a loop comes back -- with or without the
-# fallback (the EVENT tab's twin went with the Qt panel, ADR-005 S4g).
+# keypath loop needed; then a `..._no_longer_derives_keypaths_from_objectname`
+# test on the SCORE board, which replaced it. No such loop exists anywhere,
+# and the board went with the Qt SCORE in ADR-005 S4ac-3 (the EVENT tab's
+# twin with the Qt panel, S4g).
 
 
 # ── The write ledger (headless core Step 5, completion condition) ────────
@@ -395,8 +233,9 @@ def test_no_qt_widget_writes_the_state():
     Detection limit: the base-class check only matches a class whose *own*
     base name starts with "Q" (e.g. `class Foo(QWidget)`). A class that
     inherits from a non-Qt intermediate that itself derives from a Qt
-    widget (e.g. `AutonaBasePlayerWidget` subclasses) is not walked back to
-    its Qt ancestor and slips through this test undetected. That gap is
+    widget (as the player card did, through `AutonaBasePlayerWidget`, until
+    ADR-005 S4ac-3) is not walked back to its Qt ancestor and slips through
+    this test undetected. That gap is
     covered by the other layer instead: the ledger test above pins the
     *complete* set of writer files outside core, so an indirect-subclass
     offender still fails there even if it passes here.

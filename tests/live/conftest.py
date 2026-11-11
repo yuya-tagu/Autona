@@ -203,7 +203,7 @@ def realSetOnBoard(autonaApp, liveEvent):
     # what is under test here is which state keys the real payload fills.
     autonaApp.loadCharacters()
 
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     data = copy.deepcopy(liveEvent.match)
     data.update({"overwrite": True, "no_mains": False})
     apply_set(board, data)
@@ -215,8 +215,9 @@ def realSetOnBoard(autonaApp, liveEvent):
 def committedBoard(autonaApp):
     """Publish board 1's held subtree so ./out reflects it.
 
-    AutonaScoreboardWidget.__init__ registers HoldSubtree("score.{n}"), so
-    every write under it is buffered until the operator presses 反映.
+    The desktop holds board 1 from launch (AutonaActions.EnsureBoard with
+    `panel`, HoldSubtree("score.{n}"); the harness's ready() does the same),
+    so every write under it is buffered until the operator presses 反映.
     Anything asserting on exported files has to commit first, exactly like
     the button does.
     """

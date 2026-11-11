@@ -118,9 +118,10 @@ def test_setting_the_stage_count_again_clears_the_previous_set(tracker):
 
 
 def test_every_rebuild_moves_the_rows_version():
-    """Also to the same count: the widget rebuilds its buttons from this
-    (AutonaIndividualGameTracker.RenderStageRows, ADR-005 S2e), and a game
-    load resets the rows without changing their number."""
+    """Also to the same count: a renderer rebuilds its buttons from this
+    (the Qt board's AutonaIndividualGameTracker.RenderStageRows, ADR-005
+    S2e, until S4ac-3 removed it), and a game load resets the rows without
+    changing their number."""
     service = GameTrackerService(BOARD)
     assert service.rowsVersion == 0
 

@@ -84,13 +84,12 @@ def _boardState(app, n):
 
 
 def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
-                       ignore=(), widgets=False):
+                       ignore=()):
     """Run `legacy` and `v1` on two fresh copies of board `n`; compare.
 
     `legacy` / `v1` issue the request(s) and return the last response;
     `prepare(board)` puts the board into the state both start from: the
-    board's number, made in core with no widget (ADR-005 S4ac-2), or with
-    `widgets` the board's widgets (a test that checks them after).
+    board's number, made in core (ADR-005 S4ac-2).
     `changes` asserts the request actually moved the board, so two no-ops
     cannot pass as "the same result". `ignore` names top-level keys of
     score.{n} left out of the comparison (a documented legacy side effect
@@ -98,7 +97,7 @@ def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
     """
     results = []
     for run, isV1 in ((legacy, False), (v1, True)):
-        board = app.board(n) if widgets else app.ready(n)
+        board = app.ready(n)
         if prepare is not None:
             prepare(board)
         app.settle()
@@ -338,22 +337,22 @@ def test_set_patch_losers_still_blanks_the_english_round_text(
     assert autonaApp.get("score.1.match_en") == ""
 
 
-def test_set_patch_losers_on_a_board_not_built_yet_still_waits_for_apply(
+def test_set_patch_losers_on_a_launched_board_waits_for_apply(
         autonaApp, client):
     """The old route built the board first (set_route -> GetScoreboard), and
-    the build is what holds score.{n} for 反映. v1's losers still builds it,
-    so the flag is pending rather than published at once."""
+    the build is what held score.{n} for 反映. The board is made and held at
+    launch since ADR-005 S4ac-1 (until S4ac-3 v1's losers still built one
+    core did not have), so the flag is pending rather than published at
+    once."""
     from src.core.StateManager import StateManager
 
-    autonaApp._dropBoard(2)
-    assert 2 not in autonaApp.manager.scoreboards
+    autonaApp.ready(2)
 
     response = client.patch("/api/v1/scoreboards/2/set", json={
         "losers": {"team": 1, "value": True}})
     assert response.status_code == 200
     autonaApp.settle()
 
-    assert 2 in autonaApp.manager.scoreboards
     assert autonaApp.get("score.2.team.1.losers") is True
     assert StateManager.HasPendingChanges("score.2") is True
 
@@ -453,25 +452,21 @@ def test_player_patch_answers_404_for_a_slot_the_team_does_not_have(
     assert autonaApp.get("score.2.team.2.player.2.name") == "Second"
 
 
-def test_player_patch_on_a_board_not_built_yet_waits_for_apply(
+def test_player_patch_on_a_launched_board_waits_for_apply(
         autonaApp, client):
-    """As every board operation (ADR-005 S2c 判断 7): the board is built
-    first -- which is what writes its slots -- so the edit is held for 反映
-    rather than published at once and wiped by the build's seed."""
-    autonaApp._dropBoard(1)
-    assert 1 not in autonaApp.manager.scoreboards
+    """As every board operation (ADR-005 S2c 判断 7): the board is made --
+    which is what writes its slots -- and held at launch (ADR-005 S4ac-1),
+    so the edit is held for 反映 rather than published at once. Until S4ac-3
+    the route built a board core did not have first, with its cards."""
+    autonaApp.ready(1)
 
     response = client.patch("/api/v1/scoreboards/1/teams/2/players/1",
                             json={"gamerTag": "Later"})
     assert response.status_code == 200, response.get_json()
     autonaApp.settle()
 
-    assert 1 in autonaApp.manager.scoreboards
     assert autonaApp.get("score.1.team.2.player.1.name") == "Later"
     assert autonaApp.state.HasPendingChanges("score.1") is True
-    card = autonaApp.manager.scoreboards[1].team2playerWidgets[0]
-    from qtpy.QtWidgets import QLineEdit
-    assert card.findChild(QLineEdit, "name").text() == "Later"
 
 
 def test_the_legacy_player_routes_answer_as_before(autonaApp, client):
@@ -623,8 +618,6 @@ def test_set_patch_players_and_losers_together_match_legacy_query(
     for the flag (ADR-005 S2b). The flag's rebuild of the team's names
     therefore sees the new slots on both routes, and leaves the same state.
     """
-    from qtpy.QtWidgets import QCheckBox, QLineEdit
-
     def prepare(board):
         _setPlayerName(board, 1, "AAA")
         _setPlayerName(board, 2, "BBB")
@@ -636,8 +629,6 @@ def test_set_patch_players_and_losers_together_match_legacy_query(
         v1=lambda: client.patch("/api/v1/scoreboards/2/set", json={
             "players": 3, "losers": {"team": 1, "value": True}}),
         prepare=prepare,
-        # The board's widgets are checked below (they go in ADR-005 S4ac-3).
-        widgets=True,
     )
 
     for team in ("1", "2"):
@@ -647,17 +638,6 @@ def test_set_patch_players_and_losers_together_match_legacy_query(
     assert state["team"]["1"]["player"]["1"]["mergedName"] == "AAA [L]"
     assert state["team"]["1"]["player"]["1"]["mergedOnlyName"] == "AAA [L]"
     assert state["team"]["2"]["player"]["1"]["mergedName"] == "BBB"
-
-    # The board shows what the state holds.
-    board = autonaApp.manager.scoreboards[2]
-    assert board.team1column.findChild(QCheckBox, "losers").isChecked()
-    assert not board.team2column.findChild(QCheckBox, "losers").isChecked()
-    for team, cards in (("1", board.team1playerWidgets),
-                        ("2", board.team2playerWidgets)):
-        assert len(cards) == 3
-        for slot, card in enumerate(cards, start=1):
-            assert card.findChild(QLineEdit, "name").text() == \
-                (state["team"][team]["player"][str(slot)].get("name") or "")
 
 
 @pytest.mark.parametrize("n", [1, 2])

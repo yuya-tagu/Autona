@@ -26,7 +26,7 @@ globs:
 - `bootstrap_gui()` — デスクトップの Qt アダプタ（ホットキー・ゲームアセット／国モデル・PlayerDB のモデル結線・Alert / Updater・スコアボード dock）。先頭で `bootstrap_core()` を呼ぶ。`src/Autona.py` が両方をこの順で呼ぶ。テストハーネス（`tests/conftest.py`）も両方呼ぶ
 
 - 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある。各段の手順（生成・結線・`Initialize()`・Designer の移行）とその順は `tests/test_bootstrap_split.py` が AST で、`onLoadAssets` のスロット順（provider → アダプタの `_RestoreSelectedGame`）は実際の emit で pin している
-- **絶対に守る**: `GameAssetCatalog`（core）を生成して `ResetGameState()` してから、それを包む `AutonaGameAssetManager`（`bootstrap_gui()`）を作る（ADR-005 S1a）。`AutonaTournamentDataProvider` はもうアダプタに connect しない: ゲーム選択のフック `selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider` の結線はシェル側（`bootstrap_gui()`）が行う。`AutonaScoreboardManager`、その直後のボードの作成 `AutonaActions.MakeBoards(panel=True)`（ADR-005 S4ac-1: `ResetBoards` → `ResetScoreRoot` と、3 ボードの `EnsureBoard`。ボード 1 / 2 は起動時から held。それまでは `ResetBoards` がマネージャの `__init__` にあり、ボードはウィジェットの構築で作っていた）とシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y）は `bootstrap_gui()` の最後で、Window より前（`Window._SeedPanelState` / `CreateScoreboard` / Web サーバーより前）。`MakeBoards` は起動 1 回だけ（作成済みのボードがあれば 2 回目は警告して何も書かずに False。ガードが無ければ held のボードのシードが保留される）。`CreateScoreboard` に `SeedBoard` を戻さない（作ったボードをスケルトンで上書きする）
+- **絶対に守る**: `GameAssetCatalog`（core）を生成して `ResetGameState()` してから、それを包む `AutonaGameAssetManager`（`bootstrap_gui()`）を作る（ADR-005 S1a）。`AutonaTournamentDataProvider` はもうアダプタに connect しない: ゲーム選択のフック `selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider` の結線はシェル側（`bootstrap_gui()`）が行う。ボードの作成 `AutonaActions.MakeBoards(panel=True)`（ADR-005 S4ac-1: `ResetBoards` → `ResetScoreRoot` と、3 ボードの `EnsureBoard`。ボード 1 / 2 は起動時から held。それまでは `ResetBoards` が Qt のスコアボードのマネージャの `__init__` にあり、ボードはウィジェットの構築で作っていた）とシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y）は `bootstrap_gui()` の最後で、Window より前（`Window._SeedPanelState` / Web サーバーより前）。`MakeBoards` は起動 1 回だけ（作成済みのボードがあれば 2 回目は警告して何も書かずに False。ガードが無ければ held のボードのシードが保留される）。生きているボードに `SeedBoard` を呼ばない（作ったボードをスケルトンで上書きする。S4ac-1 まではボードのウィジェットの構築 `CreateScoreboard` が呼んでいた。Qt の SCORE とマネージャ `AutonaScoreboardManager` は S4ac-3 で削除）
 - 新しいシングルトンは、QCoreApplication で作れて全シェルが使うなら `bootstrap_core()`、QtGui / QtWidgets が要るかデスクトップだけが使うなら `bootstrap_gui()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
 - Web 操作のシェルごとの違いは `AutonaWebOperations` への登録だけ（ADR-005 S3c / S3e-9）: デスクトップは `bootstrap_gui()` がボードホスト（`DesktopBoardHost`）・`loadGameByCodename`・シェル操作 3 本（`openSetSelection` / `renderThumbnail` / `startImageRender`）を登録し、ヘッドレスは `src/headless.py` がローダーだけを登録する。`WebServer` に操作を渡す経路は無い（`WebServerActions` は S3e-9 で削除）。シェル操作を増やさず、新しい Web 操作は core に置く（`startImageRender` は ADR-005 S4o で足した唯一の例外で、理由は `architecture-modernization.md` の S4o 節。オフスクリーンの描画はデスクトップにしか無く、Result も同じ 1 本を使う）。シェル操作を除き `@gui_thread_sync` を新しく足さない（残っているものの分類は `docs/changes/architecture-modernization.md` の S3e-9 節）
 
@@ -51,17 +51,15 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 | `score.{N}.team.{T}.player.{M}.*` | `PLAYER_INPUT_KEYS` | `core/PlayerService.py` |
 | `tournamentInfo.*`（大会情報の入力欄。Qt の EVENT タブは ADR-005 S4g で React 化） | `TOURNAMENT_{TEXT,NUMBER,DATE}_FIELDS` | `core/TournamentInfoService.py` |
 
-- `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる。
-  **静的化後も同じ**（schema の文字列と objectName が一致していなければ
-  `findChild` が解決できず、キーも一致しない）。加えて eye メニューの表示トグルも
-  同じ名前で widget を引く
-- 新しいウィジェットを追加する際は、キーを `StateSchema` に定義してから
-  objectName をそれに合わせる（逆をやらない）。**`findChildren` ループで
-  objectName からキーを組む書き方に戻さない**
+- **ADR-005 S4ac-3 で `src/layout/`（最後の `.ui`）と Qt の SCORE を削除し、このパターンの対象のウィジェットは残っていない**。
+  schema の文字列は保存データ（`user_data/state.json`）のキーなので変えない（変えるなら `StateMigrations` に移行 step）
+- 新しい入力欄（React のページ）のキーは `StateSchema` に定義してから使う（逆をやらない）。
+  **`findChildren` ループで objectName からキーを組む書き方に戻さない**
 - pin: `StateSchema.DYNAMIC_KEY_FAMILIES` は**空**でなければならない
   （`tests/test_state_schema.py`）。`tests/test_objectname_keypath_contract.py` が
-  「schema 名 ⊆ .ui objectName」「該当ウィジェットに `objectName()` 呼び出しが無い」
-  「該当ウィジェットが `StateManager.Set/Unset` を直接呼ばない」を AST で pin する
+  schema 名と当時の .ui の objectName の凍結した写し `EXPECTED` の一致を pin する
+  （.ui の解析と「該当ウィジェットに `objectName()` 呼び出しが無い」「該当ウィジェットが
+  `StateManager.Set/Unset` を直接呼ばない」の AST の pin は、対象が消えたので S4ac-3 で外した）
 - **2026-09-03（Step 5 完了）: ウィジェットは `StateManager.Set/Unset` を呼ばない。**
   `src/core` 外で呼んでよいのは `AutonaTournamentDataProvider` の 1 ファイルだけで
   （`game.*` は 2026-10-23 の ADR-005 S1a で `core/GameAssetCatalog.py` へ移った）、
@@ -71,12 +69,13 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
   新しい書き込みは `AutonaActions` か core のドメインサービスに足す
   （台帳は `docs/changes/headless-core-redesign.md`）
 
-## 5. （解消済み）AutonaTeamPlayerWidget は削除済み
+## 5. （解消済み・退役）選手ウィジェットは無い
 
 「選手ウィジェットが 2 実装あり、片方を直したらもう片方も直す」規約だったが、
-**`AutonaTeamPlayerWidget` は 2026-08-28（Headless Core 再設計 Step 0）にデッドコードとして削除**。
-現在の選手ウィジェットは `AutonaScoreboardPlayerWidget` のみで（board 1/2/3 いずれもこれを使う）、
-共通処理は `AutonaBasePlayerWidget` にある。
+**`AutonaTeamPlayerWidget` は 2026-08-28（Headless Core 再設計 Step 0）にデッドコードとして削除**し、
+残った `AutonaScoreboardPlayerWidget` / `AutonaBasePlayerWidget` も **2026-11-11（ADR-005 S4ac-3）に
+Qt の SCORE ごと削除**した。選手の画面は React の SCORE ページ（`web/src/ScorePage/`）、書き込みは
+`core/PlayerService.py` だけ。この項は番号を保つために残している。
 
 ## 6. SaveBlock の対称性
 
@@ -85,34 +84,35 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 - `with StateManager.SaveBlock():` を使うのが安全
 - try/finally で囲む既存パターンもあるが、例外時に ReleaseSaving を漏らすリスクがある
 
-## 7. 選手カードの `self.path` は `score.{N}.team.{T}.player.{M}` だけ（2026-11-05 ADR-005 S4n で更新）
+## 7. 選手スロットの path は `score.{N}.team.{T}.player.{M}` だけ（2026-11-11 ADR-005 S4ac-3 で更新）
 
-`AutonaScoreboardPlayerWidget.path` の構築元はスコアボード（`AutonaScoreboardWidget._AddCard`）の 1 つだけで、
-形は `score.{N}.team.{T}.player.{M}`。
+`PlayerService` を束縛する path は `score.{N}.team.{T}.player.{M}` だけ（Web の操作・セット読込・
+`AutonaActions.ClearPlayers`・`RepublishTeamMergedNames` が組む）。S4ac-3 までは Qt の選手カード
+（`AutonaScoreboardPlayerWidget.path`。構築元はスコアボードの `AutonaScoreboardWidget._AddCard` の 1 つだけ）も
+同じ形で、カードは S4ac-3 で Qt の SCORE ごと削除した。
 
 旧記述の `commentary.{N}` / `{base}.slot.{I}.player.{M}` / `player_editor.1` は**もう存在しない**
 （実況者パネルは React 版のみで選手ウィジェットを持たず、選手リスト（PLAYERS ロスター）は廃止済み。
 Qt の選手一覧と、カードを `player_editor.1` に貼って流用した編集ダイアログは S4n で削除。編集の下書きは
 React ページのローカルにあり、state には出ない）。`player_editor` は、古い `state.json` の掃除のために
 `RETIRED_ROOTS` に残っている。
-構築元の数と形は `tests/test_player_widgets.py` の
-`test_the_player_widget_is_only_built_on_a_board_slot` が pin している。
+構築元の数と形を pin していた `tests/test_player_widgets.py` は、カードと一緒に削除した
+（選手の読込の pin は `tests/test_player_load.py` へ移した）。
 
-- 別の形のパスを足すなら、`PlayerService.BoardNumber()`・詳細ダイアログの反映ボタン・カードの
-  `_MayWrite`（state にスロットがあること）を見直す。カードは `score.*` 以外を想定していない
+- 別の形のパスを足すなら、`PlayerService.BoardNumber()`・v1 の選手ルートのスロットの存在検査を見直す。
+  `score.*` 以外は想定していない
 - 書き込みは `self.player`（`src/core/PlayerService.py`、path に束縛された
   1 インスタンス）が唯一の経路。ボード番号が要る処理は `PlayerService.BoardNumber()`
-  を使う（`score.*` 以外のパスには `None` を返す。防御的なパースで、カードからは来ない）
-- **選手の読込・クリアも core**（ADR-005 S3e-3）: カードの `SetData` / `Clear` は
-  `self.player.ApplyData` / `ClearSlot` を呼んで描画するだけ。ボードと Web の操作はカードの
-  `SetData` を経由しない
-- **選手 DB への保存はカードに無い**: Web の `savePlayerToDb` は `PlayerService` の
+  を使う（`score.*` 以外のパスには `None` を返す。防御的なパース）
+- **選手の読込・クリアも core**（ADR-005 S3e-3）: `PlayerService.ApplyData` / `ClearSlot`
+  （S4ac-3 まではカードの `SetData` / `Clear` もこれを呼んで描画するだけだった）
+- **選手 DB への保存**: Web の `savePlayerToDb` は `PlayerService` の
   `PrepareSaveToDB` + `SaveRecordToDB`（**ウィジェットではなく state から**組む）、選手一覧ページの
   保存・削除は `core/PlayerDirectory`（v1 `PUT /players` / `POST /players:delete`。ADR-005 S4m）
 - 統計の依頼は core（ADR-005 S3e-5）: `PlayerService.Announce(SlotChange)` が
   ボードのスロット（`score.*`）でだけ `StatsService.PlayerChanged` を呼ぶ（読込・クリアは
-  自分の保存ブロックの中で、カードの手入力は `SetSeed` / `SetPlayerId` の `announce=True`）。
-  カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
+  自分の保存ブロックの中で。v1 の `Edit` も同じ。`SetSeed` / `SetPlayerId` の `announce=True` は Qt のカードの手入力のためのもので、
+  S4ac-3 からアプリに呼び手は無い。テストの `edit_tag` が録画の再生に使う）。カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
   削除済み。`SlotChange` は操作の前後の state の（id, seed）の比較
 
 ## 8. Autona.exe はプロジェクト直下
@@ -195,23 +195,23 @@ access violation を起こす（2026-07-11 起動クラッシュ:
   付き）やシグナル連鎖の深部での差し替えは保証外のため、退避パターンを常用する
 
 **そもそもモデルを差し替えない方が安全（2026-08-21 更新）**: retire パターンは
-AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates` は
+AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates`（S4ac-3 で削除）は
 国変更のたびに新しい `QStandardItemModel` を張り替えており、**捨てたモデルが
 解放されず蓄積**していた（セット読込 1 回につき選手 1 人あたりモデル 1 個・
 `QStandardItem` 約 106 個。実測 300 反映で約 +100MB）。
-現在は state コンボを **in-place refill に移行済み**（`_EnsureStateModel()` で
+対策は state コンボの **in-place refill**（`_EnsureStateModel()` で
 生涯 1 回だけ `setModel`、以後は `clear()` + `appendRow()` で行を入れ替え。
-`_retiredStateModel` は廃止）。同じ形の「1 モデルを使い回す」実装は
-`AutonaSelectSetWindow` にもある。
+`_retiredStateModel` は廃止）だった。選手ウィジェットと、同じ形の「1 モデルを使い回す」実装の
+`AutonaSelectSetWindow` は ADR-005 S4ac-3 で Qt の SCORE ごと削除した。今も残る実例は
+`AutonaCountryHelper.countryModel`（#15）。
 
 - 保持機構は未特定（素の `QComboBox` 単体では旧モデルは解放される）。
   一般則として「コンボは渡された全モデルを保持する」と書かないこと。
   実アプリ構成でのみ再現する事象として扱い、**差し替えないことで機構に依存せず
   回避する**のが正解
-- pin: `tests/test_player_widgets.py`
-  （`test_reloading_states_does_not_accumulate_models` ほか。
-  リークする操作列は「ブランク国を経由する再構築」= `Clear()` → `SetData`。
-  国 A → 国 B の直接切替では再現しないので、テストは実セット読込の形で書く）
+- pin だった `tests/test_player_widgets.py`（`test_reloading_states_does_not_accumulate_models` ほか）は
+  対象と一緒に削除した。リークした操作列は「ブランク国を経由する再構築」= `Clear()` → `SetData` で、
+  国 A → 国 B の直接切替では再現しなかった。同じ形のコンボを Qt に書くことがあれば、テストは実際の読込の形で書く
 
 ## 13b. `QStandardItem.appendRows()` は追加した item の wrapper を解放しない（2026-08-21 実測）
 
@@ -225,7 +225,8 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 - 危険: `invisibleRootItem().appendRows(rows)`（6 回リフィルで +318 item）
 - ライブモデルへ 1 行ずつ追加するとビュー／コンプリータへの通知が行数ぶん出る。
   `with QSignalBlocker(combo):` で囲み、最後に必要なシグナルだけ 1 回 emit して
-  旧 `setModel` 相当の発火に揃える（実装例: `LoadStates`）
+  旧 `setModel` 相当の発火に揃える（実装例だった `LoadStates` は S4ac-3 で削除。
+  `AutonaCountryHelper` の国モデルの再充填も `appendRow` のループ）
 
 ## 14. QLayoutItem 系は PySide6 の追跡外 — 破棄前に `Shiboken.invalidate()` する（2026-08-03 フルスイートAV根治で確定）
 
@@ -234,15 +235,15 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 - `QLayout.itemAt()` / `spacerItem()` が返す wrapper はレイアウトの Shiboken 子として保持される（参照を捨てても同じ wrapper が返る）。「一時変数だから大丈夫」は成り立たない
 - 残った登録は地雷: 同アドレスに次の C++ オブジェクトが確保されると、そのコンストラクタ内で Qt が仮想 `metaObject()` を呼ぶ（Shiboken 登録前）ため古い wrapper が引き当てられ、`PySide::SignalManager::retrieveMetaObject` が NULL 参照して**無関係な場所で access violation**（実例: `QCompleter` 構築中。クラッシュ箇所は実行ごとに移動する）
 - item が破棄される操作: ウィジェットの re-home（別レイアウトへ addWidget）/ レイアウト破棄 / `QLayout.removeWidget()`（内部で `delete takeAt(i)`）
-- 対処: 破棄の前に対象レイアウト配下の item wrapper を `Shiboken.invalidate(item)` で無効化する。実装例は `AutonaScoreboardPlayerWidget._releaseLayoutItemWrappers`。サブレイアウトは QObject なので invalidate せず再帰
+- 対処: 破棄の前に対象レイアウト配下の item wrapper を `Shiboken.invalidate(item)` で無効化する。実装例だった `AutonaScoreboardPlayerWidget._releaseLayoutItemWrappers` は ADR-005 S4ac-3 で Qt の SCORE ごと削除した（git 履歴の f71a3b90 以前を参照）。サブレイアウトは QObject なので invalidate せず再帰
 - 禁止パターン: `takeAt(i)` → `deleteLater()`（takeAt/removeItem は所有権を Python へ移し、deleteLater はそれを Qt に戻す → Qt が Shiboken 無断で解放）。`removeItem()` だけにして PySide に解放させる
 - サブレイアウト探索は `itemAt()` 走査でなく `findChildren(QLayout, Qt.FindChildOption.FindDirectChildrenOnly)` / `indexOf()` を使う（走査が通りすがりに QWidgetItem を wrap してしまう）
-- pin: `tests/test_wrapper_lifetime.py`
+- pin だった `tests/test_wrapper_lifetime.py` は実装例と一緒に削除した（規則自体は Qt の UI 一般に残る。レイアウトの item を破棄する Qt のコードを新しく書くなら pin も書く）
 
 ## 15. `QCompleter(model)` はモデルへの Python 参照を保持しない（PySide6 6.11 実測）
 
 - コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
-- 関連（2026-10-23 ADR-005 S1c で解消）: 共有 `AutonaCountryHelper.countryModel` は初回ロードで 1 個作ったきり差し替えない（再ロードは同じモデルを `clear()` + `appendRow` で入れ替える）。かつて #13 規約の唯一の例外だった「retire 世代なしの差し替え」はもう無い。選手ウィジェットのコンプリータも `QCompleter()` + `setModel()` に揃えた（`AutonaBasePlayerWidget._WireCountryState`）。再ロードは `clear()` の直前に `countriesAboutToReload` が出るので、国コンボの index を state に流す消費者はそこで経路を止め、`countriesUpdated` で選び直す（Top 8・選手カードが実例。止めないと再ロードで国が `{}` に publish される）
+- 関連（2026-10-23 ADR-005 S1c で解消）: 共有 `AutonaCountryHelper.countryModel` は初回ロードで 1 個作ったきり差し替えない（再ロードは同じモデルを `clear()` + `appendRow` で入れ替える）。かつて #13 規約の唯一の例外だった「retire 世代なしの差し替え」はもう無い。選手ウィジェットのコンプリータも `QCompleter()` + `setModel()` に揃えていた（`AutonaBasePlayerWidget._WireCountryState`。S4ac-3 で削除）。再ロードは `clear()` の直前に `countriesAboutToReload` が出るので、国コンボの index を state に流す消費者はそこで経路を止め、`countriesUpdated` で選び直す（Top 8・選手カードが実例だった。止めないと再ロードで国が `{}` に publish される。どちらも React になり、S4ac-3 から国モデルの消費者は無い。Qt の整理で消す）
 
 ## 16. StateManager の observer から GameAssetCatalog の writer を呼ばない（ADR-005 S1a）
 
@@ -252,5 +253,5 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 
 - `held_state_updated` / `held_dirty_changed` / `state_updated` は `StateManager.lock` の中で出る（`SaveState` の中。lock を持った呼び出し側の中で書いたときはその中）。GUI スレッドで書いた変更なら、Bridge 経由のウィジェットのハンドラも direct に、lock を持ったまま走る
 - だからハンドラの中で別スレッドを待たない: `gui_thread_sync` / `run_sync` / `QDialog.exec()` / `processEvents()` をしない。待たれたスレッドが lock を取りに来ていればデッドロックになる（`exec` / `processEvents` は再入も起こす: #9）
-- カードの構築（`AutonaScoreboardWidget._SyncPlayerCards`）は lock の中で行い、それを許容している。同じ held サイクルの後続ハンドラが、カードがあることを前提にしているため。held の通知を lock の外へ出す案は採らなかった: ハンドラ全体が lock の中で走ることが暗黙の原子性になっていて（例: ステージボタンの `PublishStageResults` の held ハンドラの途中に Flask スレッドの `score:adjust` が割り込まない）、外へ出すとその競合が入るため
-- pin: `tests/test_roster_flow.py` の `test_no_thread_is_waited_on_inside_a_held_cycle`
+- Qt のカードの構築（`AutonaScoreboardWidget._SyncPlayerCards`）は lock の中で行い、それを許容していた（同じ held サイクルの後続ハンドラが、カードがあることを前提にしていたため。S4ac-3 で Qt の SCORE ごと削除）。held の通知を lock の外へ出す案は採らなかった: ハンドラ全体が lock の中で走ることが暗黙の原子性になっていて（例: ステージボタンの `PublishStageResults` の held ハンドラの途中に Flask スレッドの `score:adjust` が割り込まない）、外へ出すとその競合が入るため
+- pin: `tests/test_roster_flow.py` の `test_no_thread_is_waited_on_inside_a_held_cycle`（S4ac-3 から core の held サイクルだけを見る）

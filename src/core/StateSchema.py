@@ -2,7 +2,8 @@
 
 Until now the answer to "what is in the state?" lived in whichever widget
 happened to write a key first: the held-subtree exemption list was a class
-attribute of ``AutonaScoreboardWidget``, the display-option key set was
+attribute of ``AutonaScoreboardWidget`` (the Qt board, removed in ADR-005
+S4ac-3), the display-option key set was
 spelled out twice (once as that widget's ``elements``, once in the web
 server's actions class), and the launch seeds were split
 between two widget constructors and their manager. This module is the single
@@ -23,11 +24,12 @@ One thing it deliberately is *not*:
 
 Step 5 finished the conversion of the dynamic keypaths widget by widget:
 the SCORE panel's board-level and team-card inputs (``SCORE_MATCH_FIELDS`` /
-``SCORE_TEAM_INPUT_KEYS``, read by ``AutonaActions`` and by
-``AutonaScoreboardWidget``), the player card (``PLAYER_INPUT_KEYS``, read by
-``PlayerService`` and by ``AutonaScoreboardPlayerWidget``) and the EVENT tab
-(the ``TOURNAMENT_*_FIELDS``, read by ``TournamentInfoService`` and, until
-the tab became the React Event page in ADR-005 S4g, by its Qt widget).
+``SCORE_TEAM_INPUT_KEYS``, read by ``AutonaActions``), the player card
+(``PLAYER_INPUT_KEYS``, read by ``PlayerService``) and the EVENT tab (the
+``TOURNAMENT_*_FIELDS``, read by ``TournamentInfoService``). Their Qt
+widgets read them too -- the EVENT tab's until it became the React Event
+page in ADR-005 S4g, the board's and the player card's until the Qt SCORE
+went in S4ac-3.
 ``DYNAMIC_KEY_FAMILIES`` below -- the checklist that inventory shrank
 against -- is empty as a result (known-smells S-14).
 
@@ -74,10 +76,10 @@ class DisplayOption(NamedTuple):
     and ``StateManager.display_options.{key}`` is what the Web UI and the OBS
     overlays render from.
 
-    ``fields`` are player-widget ``objectName`` values whose Qt visibility
-    follows the toggle. Only ``show_sponsor`` still uses them on the desktop
-    (the details dialog shows every field); the rest are carried so the
-    lookup stays available to the team columns.
+    ``fields`` are the player card's field names each toggle hid. Nothing
+    reads them since ADR-005 S4ac-3: the Qt board's eye menu looked its
+    widgets up by them (only ``show_sponsor`` by then), and the React SCORE
+    page hides its fields by ``key``.
     """
     key: str
     fields: tuple
@@ -166,9 +168,9 @@ STALE_KEYS = (
 # the state ("1", not 1) -- agent-pitfalls #3.
 
 # No BOARD/TEAM index tuples here on purpose: the board list already exists
-# as AutonaScoreboardManager.BOARD_NUMBERS (ints, used to iterate boards) and
-# a second, string-typed spelling of the same thing is the drift this module
-# is supposed to end. The ranges are in the placeholder note above.
+# as AutonaActions.BOARDS (ints, used to iterate boards) and a second,
+# string-typed spelling of the same thing is the drift this module is
+# supposed to end. The ranges are in the placeholder note above.
 #
 # Slot-fixed indices, owned by the Qt-free models that also normalise them.
 # Referenced rather than copied: two spellings of "there are 12 commentary
@@ -183,57 +185,55 @@ TOP8_MATCH_IDS = tuple(top8.MATCH_IDS)
 # objectNames -- `score.{N}.{combo.objectName()}` for the match bar and
 # `score.{N}.team.{T}.{widget.objectName()}` for the team cards (S-14). Since
 # headless core Step 5 the names live here: AutonaActions writes them, and
-# AutonaScoreboardWidget looks its widgets up *by* them instead of reading
-# them back off the widgets.
+# the Qt board (AutonaScoreboardWidget, until ADR-005 S4ac-3) looked its
+# widgets up *by* them instead of reading them back off the widgets.
 #
 # The strings are unchanged on purpose. The persisted state holds keys named
-# after the old objectNames, so renaming one here (or in the .ui) without a
-# StateMigrations step is the same compatibility break it always was --
-# tests/test_objectname_keypath_contract.py now pins that the
-# two spellings agree.
+# after the old objectNames, so renaming one here without a StateMigrations
+# step is the same compatibility break it always was --
+# tests/test_objectname_keypath_contract.py keeps the saved names as a
+# frozen snapshot (EXPECTED).
 
-# The match bar's three editable combos (src/layout/AutonaScoreboardScore.ui
-# on boards 1 and 2; the crew board builds its own three in code and writes
-# the same keys). Named individually (not just indexed into the tuple) for
-# the same reason as TEAM_NAME_KEY / TEAM_LOSERS_KEY below:
-# AutonaScoreboardWidget looks its widgets up *by* these constants
-# (findChild), not by SCORE_MATCH_FIELDS[i].
+# The match bar's three editable fields (in the .ui of boards 1 and 2 and
+# built in code on the crew board until ADR-005 S4ac-3; /api/v1's PATCH set
+# and the SCORE page now). Named individually (not just indexed into the
+# tuple) for the same reason as TEAM_NAME_KEY / TEAM_LOSERS_KEY below: the
+# writers name the one they write.
 PHASE_KEY = "phase"
 POOL_KEY = "pool"
 MATCH_KEY = "match"
 SCORE_MATCH_FIELDS = (PHASE_KEY, POOL_KEY, MATCH_KEY)
 
-# The team card's two operator-editable inputs
-# (src/layout/AutonaScoreboardTeam.ui). Both are also findChild lookup keys.
+# The team card's two operator-editable inputs (the Qt team card's .ui
+# until ADR-005 S4ac-3, where they were also findChild lookup keys).
 TEAM_NAME_KEY = "teamName"
 TEAM_LOSERS_KEY = "losers"
 SCORE_TEAM_INPUT_KEYS = (TEAM_NAME_KEY, TEAM_LOSERS_KEY)
 
-# The player card's operator-editable inputs
-# (src/layout/AutonaScoreboardPlayer.ui, plus the note box built in code).
-# These were the last family generated from Qt objectNames at runtime: one
-# `findChildren(QLineEdit)` loop wrote `{path}.{element.objectName()}` and a
-# matching `findChildren(QComboBox)` loop did the same for the two location
-# combos. `AutonaScoreboardPlayerWidget` looks the widgets up *by* these
-# constants now and `PlayerService` writes them; the strings are unchanged,
-# so an existing out/program_state.json still matches
-# (tests/test_objectname_keypath_contract.py pins both spellings).
+# The player card's operator-editable inputs (the Qt card's .ui, plus the
+# note box built in code, until ADR-005 S4ac-3; /api/v1's player fields and
+# the SCORE page now). These were the last family generated from Qt
+# objectNames at runtime: one `findChildren(QLineEdit)` loop wrote
+# `{path}.{element.objectName()}` and a matching `findChildren(QComboBox)`
+# loop did the same for the two location combos. `PlayerService` writes
+# them; the strings are unchanged, so an existing saved state still matches
+# (tests/test_objectname_keypath_contract.py keeps them as a frozen
+# snapshot).
 #
-# NOTE: the same names double as the eye-menu's field ids
-# (DisplayOption.fields above) -- `team`, `name`, `twitter`, `real_name`,
-# `country`, `state` and `custom_textbox` all appear there as findChild keys
-# for visibility toggling. One more reason a rename is never local.
+# NOTE: the same names double as the field ids in DisplayOption.fields
+# above -- `team`, `name`, `twitter`, `real_name`, `country`, `state` and
+# `custom_textbox`.
 PLAYER_SPONSOR_KEY = "team"
 PLAYER_TAG_KEY = "name"
 PLAYER_REAL_NAME_KEY = "real_name"
 PLAYER_TWITTER_KEY = "twitter"
-PLAYER_NOTE_KEY = "custom_textbox"     # QPlainTextEdit, created in code
-PLAYER_SEED_KEY = "seed"               # QSpinBox (hidden; badge renders it)
-PLAYER_BIRTHDAY_KEY = "birthday"       # QCheckBox (hidden; nothing reads it)
+PLAYER_NOTE_KEY = "custom_textbox"     # the note (a QPlainTextEdit on the Qt card)
+PLAYER_SEED_KEY = "seed"
+PLAYER_BIRTHDAY_KEY = "birthday"       # nothing reads it
 PLAYER_COUNTRY_KEY = "country"
 PLAYER_STATE_KEY = "state"
 
-# The four QLineEdits carrying a key, in .ui order.
+# The four one-line text fields, in the Qt card's .ui order.
 PLAYER_LINE_EDIT_KEYS = (
     PLAYER_SPONSOR_KEY,
     PLAYER_TAG_KEY,
@@ -317,7 +317,7 @@ SCORE_PLAYER_KEYS = (
     "sponsor_logos.{I}",
 )
 
-# score.3 only. The crew board (AutonaCrewBattleWidget) writes the team and
+# score.3 only. The crew board (CrewBattleService) writes the team and
 # player keys above, plus a roster on top of them: `memberNum` is how many
 # member rows are visible, `activeMember` the 1-based index of the member
 # currently playing ("0" = nobody, and it is published as a *string*), and
@@ -328,9 +328,8 @@ SCORE_PLAYER_KEYS = (
 # same reason the families above are: the crew board built these key paths
 # from string literals spelled out at each of its write sites, which is the
 # half-converted state Step 5 exists to end. Unlike the other families they
-# were never derived from a Qt objectName -- the crew rows are built in code
-# and have no objectName at all -- so there is nothing here for
-# tests/test_objectname_keypath_contract.py to cross-check against a .ui.
+# were never derived from a Qt objectName -- the Qt crew rows were built in
+# code and had no objectName at all.
 CREW_MEMBER_NUM_KEY = "memberNum"
 CREW_ACTIVE_MEMBER_KEY = "activeMember"
 CREW_STOCK_KEY = "stock"
@@ -346,7 +345,7 @@ SCORE_CREW_PLAYER_KEYS = (
 
 # Board-independent, written from the loaded set and read by AutonaStatsUtil
 # for the upset-factor math. Not under score.{N} -- and wiped together with
-# the rest of `score` by AutonaScoreboardManager.__init__.
+# the rest of `score` by ResetScoreRoot (once per launch).
 SCORE_SHARED_KEYS = ("bracket_type",)
 
 GAME_KEYS = (
@@ -830,7 +829,7 @@ KEY_CATALOG = {
 
 # Key families whose final segment comes from a Qt objectName at runtime
 # instead of from this catalog (known-smells S-14). This was the Step 5
-# inventory and it is **empty**: AutonaScoreboardWidget's two families (the
+# inventory and it is **empty**: the Qt board's two families (the
 # team card and the match bar) came off when they became
 # SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, the player card's followed as
 # PLAYER_INPUT_KEYS, and the EVENT tab's -- the last one -- as the
@@ -850,7 +849,8 @@ def SeedBoard(number):
     """Write the empty skeleton of one board's ``score.{number}`` subtree.
 
     Called from one place: AutonaActions.SeedFreshBoard, so a new board
-    starts from a known shape. AutonaScoreboardManager.CreateScoreboard also
+    starts from a known shape. The Qt boards' dock (removed in ADR-005
+    S4ac-3), AutonaScoreboardManager.CreateScoreboard, also
     called it until ADR-005 S4ac-1, as a placeholder for the boards not
     built at launch (so the Web UI and the OBS overlays read an empty board
     rather than "no such key"); every board is made, whole, at launch now
@@ -918,8 +918,9 @@ def PublishDisplayOptions():
 
     Run when the desktop makes a 1v1 / team board -- at launch since
     ADR-005 S4ac-1 (AutonaActions.EnsureBoard with `panel`, from
-    AutonaActions.MakeBoards; the board's first widget build,
-    AutonaScoreboardManager.EnsureScoreboard, until then), which is what the
+    AutonaActions.MakeBoards; the Qt board's first widget build,
+    AutonaScoreboardManager.EnsureScoreboard, until then -- the Qt boards
+    went in S4ac-3), which is what the
     "SettingsManager is the source of truth, StateManager is what the
     overlays render" mirror rests on: whatever a previous session left in
     program_state.json is brought back in line with the settings file the
@@ -943,7 +944,8 @@ def ResetScoreRoot():
 
     Run once per launch, through ``AutonaActions.ResetBoards`` (the start of
     ``AutonaActions.MakeBoards``, in both shells since ADR-005 S4ac-1; from
-    ``AutonaScoreboardManager.__init__`` on the desktop until then) --
+    ``AutonaScoreboardManager.__init__`` on the desktop until then; the Qt
+    boards went in S4ac-3) --
     i.e. before any board is made -- so a program_state.json written by an older
     multi-scoreboard build cannot leave boards behind that no widget owns.
     It is a subtree lifecycle operation like ``SeedBoard()`` above and lives

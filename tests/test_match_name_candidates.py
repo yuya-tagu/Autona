@@ -6,12 +6,12 @@ _UpdateEntrantsMatchItem, on the provider's two signals): the real pool
 names of its phases with several groups, and "Winners TOP{n}" / "Losers
 TOP{n}" for its entrant count. A board built after the tournament loaded
 never had them, and nothing outside the desktop could ask. Core keeps them
-now (MatchNameCandidates, fed by the provider in bootstrap_core()), the
-boards' combos show its lists, and ``GET /api/v1/match-names/candidates
-?board=N`` answers the same lists in the same order.
+now (MatchNameCandidates, fed by the provider in bootstrap_core()), and
+``GET /api/v1/match-names/candidates?board=N`` answers its lists. (The Qt
+boards' combos showed the same lists until ADR-005 S4ac-3; their tests
+went with them.)
 """
 import pytest
-from qtpy.QtWidgets import QComboBox
 
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.core.MatchNameCandidates import MatchNameCandidates
@@ -67,13 +67,6 @@ def _rounds(entrants):
     terms = AutonaLocaleHelper.matchNames
     return [terms.get("winners_top_n", "Winners TOP{0}").format(entrants),
             terms.get("losers_top_n", "Losers TOP{0}").format(entrants)]
-
-
-def _offered(board):
-    combos = {"phase": board.phaseCombo, "pool": board.poolCombo,
-              "match": board.matchCombo}
-    return {kind: [combo.itemText(row) for row in range(combo.count())]
-            for kind, combo in combos.items()}
 
 
 def _asked(client, board=None):
@@ -178,6 +171,8 @@ def test_a_board_that_is_not_one_is_refused(autonaApp, client, board):
 
 def test_the_route_builds_no_board_and_writes_nothing(autonaApp, client,
                                                       tournament):
+    from src.core.Actions import AutonaActions
+
     autonaApp.dropAllBoards()
     tournament()
     with WriteRecorder() as recorder:
@@ -185,7 +180,8 @@ def test_the_route_builds_no_board_and_writes_nothing(autonaApp, client,
             _asked(client, board)
         autonaApp.settle()
     assert recorder.sets == []
-    assert autonaApp.manager.scoreboards == {}
+    assert not any(AutonaActions.instance.BoardEnsured(number)
+                   for number in AutonaActions.BOARDS)
 
 
 def test_headless_answers_the_tournament_s_names(autonaApp, client,
@@ -199,195 +195,59 @@ def test_headless_answers_the_tournament_s_names(autonaApp, client,
         _dropHeadlessBoards(autonaApp)
 
 
-# ── the combos ───────────────────────────────────────────────────────────
+# ── following the provider ───────────────────────────────────────────────
 
-@pytest.mark.parametrize("n", [1, 2])
-def test_the_combos_offer_what_the_route_answers(autonaApp, client,
-                                                 tournament, n):
-    board = autonaApp.board(n)
-    asked = _asked(client, n)
-    assert _offered(board) == {kind: [""] + names
-                               for kind, names in asked.items()}
-
+def test_the_route_follows_each_payload(autonaApp, client, tournament):
+    """Both payloads, then each on its own (a refetch of one of them)."""
     tournament()
-    asked = _asked(client, n)
-    assert asked["pool"][:len(POOLS)] == POOLS
-    assert _offered(board) == {kind: [""] + names
-                               for kind, names in asked.items()}
+    assert _asked(client, 1)["pool"][:len(POOLS)] == POOLS
 
     tournament(entrants=37, phases=[])
-    asked = _asked(client, n)
+    asked = _asked(client, 1)
     assert asked["match"][:2] == _rounds(37)
-    assert _offered(board) == {kind: [""] + names
-                               for kind, names in asked.items()}
+    assert asked["pool"] == _generic()["pool"]
 
-    # Each payload on its own is followed too (a refetch of one of them).
     _signals().tournament_data_updated.emit({"numEntrants": 41})
     autonaApp.settle()
-    asked = _asked(client, n)
-    assert asked["match"][:2] == _rounds(41)
-    assert _offered(board) == {kind: [""] + names
-                               for kind, names in asked.items()}
+    assert _asked(client, 1)["match"][:2] == _rounds(41)
     _signals().tournament_phases_updated.emit(PHASES)
     autonaApp.settle()
-    asked = _asked(client, n)
+    asked = _asked(client, 2)
     assert asked["pool"][:len(POOLS)] == POOLS
-    assert _offered(board) == {kind: [""] + names
-                               for kind, names in asked.items()}
+    assert asked["match"][:2] == _rounds(41)
 
 
-def test_a_board_built_after_the_tournament_offers_its_names(
+def test_a_board_made_after_the_tournament_is_offered_its_names(
         autonaApp, client, tournament):
-    """The board missed the provider's signals: it reads core's lists."""
+    """The lists are core's, not a board's: a board made after the
+    provider's signals (the Qt board built late missed them until S4x) is
+    answered the tournament's names."""
     autonaApp.dropAllBoards()
     tournament()
-    board = autonaApp.board(1)
-    offered = _offered(board)
-    assert offered["pool"][1:1 + len(POOLS)] == POOLS
-    assert offered["match"][1:3] == _rounds(300)
-    assert offered == {kind: [""] + names
-                       for kind, names in _asked(client, 1).items()}
-
-
-def test_the_crew_board_offers_what_the_route_answers_for_it(
-        autonaApp, client, tournament):
-    tournament()
-    board = autonaApp.board(3)
-    offered = {field: [combo.itemText(row) for row in range(combo.count())]
-               for field, combo in board._matchCombos.items()}
-    assert offered == {kind: [""] + names
-                       for kind, names in _asked(client, 3).items()}
+    autonaApp.ready(1)
+    asked = _asked(client, 1)
+    assert asked["pool"][:len(POOLS)] == POOLS
+    assert asked["match"][:2] == _rounds(300)
 
 
 def test_new_lists_keep_the_text_and_write_nothing(autonaApp, tournament):
-    """A tournament loading under the operator's selection: the combo's
-    text stays -- a name of the previous tournament included, as text
-    only -- and nothing is written."""
-    board = autonaApp.board(1)
+    """A tournament loading under the operator's names: the state keeps
+    them -- a name of the previous tournament included -- and nothing is
+    written."""
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
     tournament()
-    board.poolCombo.setCurrentIndex(board.poolCombo.findText("A2"))
-    board.matchCombo.setEditText("typed by hand")
+    AutonaActions.instance.SetMatchField(1, "pool", "A2")
+    AutonaActions.instance.SetMatchField(1, "match", "typed by hand")
     autonaApp.settle()
-    assert autonaApp.get("score.1.pool") == "A2"
 
     with WriteRecorder() as recorder:
         tournament(entrants=12, phases=[
             {"groups": [{"name": "C1"}, {"name": "C2"}]}])
     assert recorder.sets == []
-    assert board.poolCombo.currentText() == "A2"
-    assert board.poolCombo.findText("A2") < 0
-    assert board.matchCombo.currentText() == "typed by hand"
-    assert board.poolCombo.itemText(1) == "C1"
+    assert autonaApp.get("score.1.pool") == "A2"
+    assert autonaApp.get("score.1.match") == "typed by hand"
+    assert "A2" not in MatchNameCandidates.instance.Candidates(1)["pool"]
+    assert MatchNameCandidates.instance.Candidates(1)["pool"][0] == "C1"
 
-
-@pytest.fixture
-def picks(autonaApp, monkeypatch):
-    """Every SetMatchField the combos call, as (board, field, value); the
-    operation still runs."""
-    from src.core.Actions import AutonaActions
-    actions = AutonaActions.instance
-    original = actions.SetMatchField
-    calls = []
-
-    def spy(board, field, value):
-        calls.append((board, field, value))
-        return original(board, field, value)
-
-    monkeypatch.setattr(actions, "SetMatchField", spy)
-    return calls
-
-
-def _winnersFinal(combo):
-    name = "Winners Final"
-    assert combo.findText(name) > 0, "the round terms have no Winners Final"
-    return name
-
-
-def test_the_blank_row_picked_after_new_lists_is_written(
-        autonaApp, tournament, picks):
-    """The refill of a tournament's lists left no row selected under the
-    name shown (the combos have a placeholder text, so the refill's index
-    is -1). The name keeps its row now, as after any render (ADR-005 S4x
-    review), and the blank row picked over it is written."""
-    board = autonaApp.board(1)
-    combo = board.matchCombo
-    name = _winnersFinal(combo)
-    combo.setCurrentIndex(combo.findText(name))
-    autonaApp.settle()
-    assert autonaApp.get("score.1.match") == name
-
-    with WriteRecorder() as recorder:
-        tournament()
-    assert recorder.sets == []
-    assert _offered(board)["match"][1:3] == _rounds(300)
-    assert (combo.currentText(), combo.currentIndex()) == (
-        name, combo.findText(name))
-
-    del picks[:]
-    combo.setCurrentIndex(0)
-    autonaApp.settle()
-    assert picks == [(1, "match", "")]
-    assert autonaApp.get("score.1.match") == ""
-
-
-def test_a_name_the_new_lists_lack_selects_no_row(autonaApp, tournament,
-                                                  picks):
-    """A name the new lists do not have stays as the text alone, with no
-    row selected: any pick is an index change, the blank row's included."""
-    board = autonaApp.board(1)
-    tournament()
-    combo = board.poolCombo
-    combo.setCurrentIndex(combo.findText("A2"))
-    autonaApp.settle()
-    tournament(entrants=12, phases=[
-        {"groups": [{"name": "C1"}, {"name": "C2"}]}])
-    assert (combo.currentText(), combo.currentIndex()) == ("A2", -1)
-
-    del picks[:]
-    combo.setCurrentIndex(0)
-    autonaApp.settle()
-    assert picks == [(1, "pool", "")]
-    assert autonaApp.get("score.1.pool") == ""
-
-
-@pytest.mark.parametrize("n", [1, 3])
-def test_a_name_written_elsewhere_selects_its_row(autonaApp, picks, n):
-    """A name the state brings (the Web, a set load): the board rendered it
-    as the line edit's text over the row the index was on -- the blank row
-    once picked, or where the crew board's combos start -- and picking that
-    row again wrote nothing (ADR-005 S4x review). The index follows the
-    text now: the name's row, or no row for a name the list lacks."""
-    from src.core.Actions import AutonaActions
-    board = autonaApp.board(n)
-    combo = board.matchCombo
-    name = _winnersFinal(combo)
-    combo.setCurrentIndex(0)
-    autonaApp.settle()
-    assert combo.currentIndex() == 0
-
-    for written, row in ((name, combo.findText(name)),
-                         ("Typed elsewhere", -1)):
-        AutonaActions.instance.SetMatchField(n, "match", written)
-        autonaApp.settle()
-        assert (combo.currentText(), combo.currentIndex()) == (written, row)
-
-        del picks[:]
-        combo.setCurrentIndex(0)
-        autonaApp.settle()
-        assert picks == [(n, "match", "")]
-        assert autonaApp.get(f"score.{n}.match") == ""
-
-
-def test_an_unchanged_list_leaves_the_combo_alone(autonaApp, tournament):
-    board = autonaApp.board(1)
-    tournament()
-    combo = board.poolCombo
-    combo.setEditText("half")
-    combo.lineEdit().setCursorPosition(2)
-    cleared = []
-    combo.model().modelReset.connect(lambda: cleared.append(1))
-    combo.model().rowsRemoved.connect(lambda *args: cleared.append(1))
-    tournament()
-    assert cleared == []
-    assert combo.currentText() == "half"
-    assert isinstance(combo, QComboBox)

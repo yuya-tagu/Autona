@@ -1,14 +1,14 @@
-"""The widget harness must never touch the real installation.
+"""The app harness must never touch the real installation.
 
-`autonaApp` boots the actual app: it builds real scoreboards, writes real
-state and lets StateManager's export thread write real files. All of that
+`autonaApp` boots the actual app: it makes real boards, writes real state
+and lets StateManager's export thread write real files. All of that
 resolves against the process CWD, so the harness runs inside a throwaway
 directory. If that ever slipped, a test run would overwrite the developer's
 `out/` (what OBS is reading) or `user_data/settings.json` (their API token,
 hotkeys, ports) -- silently, and while they were streaming.
 
 So this is not a test of a feature; it is the guard that makes every other
-widget test safe to run.
+harness test safe to run.
 """
 import os
 import shutil
@@ -82,22 +82,24 @@ def test_state_writes_land_in_the_runtime_directory(autonaApp):
 
 def test_exercising_the_app_leaves_the_real_out_and_user_data_untouched(autonaApp):
     """The one that would actually have caught a mistake."""
+    from src.core.Actions import AutonaActions
+    from tests.conftest import load_player
+
     projectOut = _snapshot(PROJECT_ROOT / "out")
     projectUserData = _snapshot(PROJECT_ROOT / "user_data")
     settings = _fileSnapshot(PROJECT_ROOT / "user_data" / "settings.json")
     programState = _fileSnapshot(PROJECT_ROOT / "out" / "program_state.json")
     logo = _fileSnapshot(PROJECT_ROOT / "layout" / "logo.png")
 
-    # Everything a widget test does, and then some: build all three boards,
-    # move scores, edit a player, force export cycles.
-    for number in (1, 2, 3):
-        autonaApp.board(number)
-    board = autonaApp.board(1)
-    board.CommandScoreChange(0, 2)
-    board.bestOfSpin.setValue(3)
-    board.team1playerWidgets[0].SetData(
-        {"gamerTag": "ISOLATION"}, dontLoadFromDB=True)
-    board.SwapTeams()
+    # Everything a board test does, and then some: make all three boards,
+    # move scores, load a player, force export cycles.
+    autonaApp.readyAll()
+    actions = AutonaActions.instance
+    actions.AdjustScore(1, 1, 2)
+    actions.SetBestOf(1, 3)
+    load_player(1, 1, {"gamerTag": "ISOLATION"})
+    actions.SwapTeams(1)
+    actions.ApplyChanges(1)
     autonaApp.settle()
 
     assert _snapshot(PROJECT_ROOT / "out") == projectOut
@@ -235,7 +237,7 @@ def test_the_persisted_state_store_is_not_the_real_one(autonaApp):
 
 
 def test_the_working_directory_is_restored_afterwards():
-    # No autonaApp fixture here: by the time this runs, any earlier widget
+    # No autonaApp fixture here: by the time this runs, any earlier harness
     # test must have put the CWD back.
     #
     # Compared against the directory pytest was launched from, not the
@@ -299,24 +301,20 @@ def test_finished_image_downloads_are_not_kept_forever(autonaApp, monkeypatch):
 
 
 def test_dropped_boards_stop_reacting_to_global_signals(autonaApp):
-    """A dropped board must be dead in C++, not merely unreferenced.
+    """A dropped board must not be written by what follows a game load.
 
-    Every board wires lambdas into the process-wide singletons
-    (AutonaGameAssetManager.signals.onLoad and friends). A lambda holds no
-    weak reference to its receiver, so PySide6 cannot auto-disconnect it --
-    only destroying the C++ object does. Without that, a board dropped at the
-    end of one test would still answer the next test's emit and rewrite
-    score.{n}: invisible state in tests that never built a widget, and writes
-    into the developer's real ./out once the CWD is restored.
-
-    A RuntimeError from a lambda whose receiver is already gone is fine and
-    expected here; the state staying clean is the contract.
+    The game load's wiring (AutonaActions.ApplyGameRoster on the asset
+    manager's onLoad, bootstrap.wire_game_roster) writes the boards core has
+    made; a board dropped at the end of one test must not answer the next
+    test's emit and rewrite score.{n}: invisible state in tests that never
+    made a board, and writes into the developer's real ./out once the CWD is
+    restored. (The Qt boards wired lambdas of their own into the same
+    signal until ADR-005 S4ac-3, which only destroying the C++ object
+    disconnected.)
     """
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
-    autonaApp.board(1)
-    autonaApp.board(2)
-    autonaApp.board(3)
+    autonaApp.readyAll()
     autonaApp.dropAllBoards()
 
     AutonaGameAssetManager.instance.signals.onLoad.emit()
@@ -327,20 +325,10 @@ def test_dropped_boards_stop_reacting_to_global_signals(autonaApp):
             f"a dropped board {number} is still writing state")
 
 
-def _makeBoard(app, how, number=1):
-    """Board `number` made the two ways the harness makes one: in core with
-    no widget (ready(), ADR-005 S4ac-2) or with its widgets (board())."""
-    if how == "core":
-        app.ready(number)
-    else:
-        app.board(number)
-
-
-@pytest.mark.parametrize("how", ["core", "widgets"])
-def test_dropping_a_board_removes_its_exported_files(autonaApp, how):
+def test_dropping_a_board_removes_its_exported_files(autonaApp):
     """The drop has to reach ./out, not vanish into the held buffer.
 
-    _dropBoardInCore() clears the held registration *before* it unsets the
+    _dropBoard() clears the held registration *before* it unsets the
     subtree. In the other order the Unset's changed keys are buffered into
     heldKeys["score.1"] and then discarded along with it, so the removal
     reaches neither the delta nor the export: out/score/1/**.txt keeps the
@@ -348,8 +336,8 @@ def test_dropping_a_board_removes_its_exported_files(autonaApp, how):
     """
     from src.core.Actions import AutonaActions
 
-    _makeBoard(autonaApp, how)
-    AutonaActions.instance.AdjustScore(1, 1, 1)   # the board's +1 button
+    autonaApp.ready(1)
+    AutonaActions.instance.AdjustScore(1, 1, 1)   # the +1
     autonaApp.settle()
 
     exported = autonaApp.dir / "out" / "score" / "1" / "team" / "1" / "score.txt"
@@ -362,20 +350,19 @@ def test_dropping_a_board_removes_its_exported_files(autonaApp, how):
     assert autonaApp.state.lastSavedState.get("score", {}).get("1") is None
 
 
-@pytest.mark.parametrize("how", ["core", "widgets"])
-def test_dropping_a_board_leaves_no_held_registration(autonaApp, how):
+def test_dropping_a_board_leaves_no_held_registration(autonaApp):
     """The harness's held cleanup must keep up with StateManager.
 
     Making a 1v1 / team board with `panel` registers score.{n} as held
     (AutonaActions.EnsureBoard -> StateSchema.HoldBoard; the widget's
     __init__ until ADR-005 S4y), and its inverse would publish what is
-    pending, so conftest._dropBoardInCore() clears the registry fields by
-    hand. That list is a copy of StateManager's internals: if a new held-
-    related field appears (or one is renamed), the cleanup silently stops
-    being complete and tests/test_state_manager_held.py starts depending on
+    pending, so conftest._dropBoard() clears the registry fields by hand.
+    That list is a copy of StateManager's internals: if a new held-related
+    field appears (or one is renamed), the cleanup silently stops being
+    complete and tests/test_state_manager_held.py starts depending on
     execution order. This asserts the visible half of that contract.
     """
-    _makeBoard(autonaApp, how)
+    autonaApp.ready(1)
     autonaApp.dropAllBoards()
 
     state = autonaApp.state
@@ -387,44 +374,20 @@ def test_dropping_a_board_leaves_no_held_registration(autonaApp, how):
     assert [p for p in state._heldTouched if p.startswith("score.")] == []
 
 
-def test_a_readied_board_is_made_as_at_launch_with_no_widget(autonaApp):
+def test_a_readied_board_is_made_as_at_launch(autonaApp):
     """ready(n) / readyAll() make the boards in core as the desktop's launch
     does (AutonaActions.EnsureBoard / MakeBoards with `panel`): made, boards
-    1 / 2 held, the crew board not, nothing pending -- and build no widget
-    (ADR-005 S4ac-2)."""
+    1 / 2 held, the crew board not, nothing pending (ADR-005 S4ac-2)."""
     for number in (1, 2, 3):
         autonaApp.ready(number)
     now = autonaApp.boardsNow()
     assert now["made"] == [True, True, True]
     assert now["held"] == ["score.1", "score.2"]
     assert now["pending"] == [False, False, False]
-    assert autonaApp.manager.scoreboards == {}
 
     autonaApp.readyAll()
     assert autonaApp.boardsNow()["made"] == [True, True, True]
     assert autonaApp.boardsNow()["held"] == ["score.1", "score.2"]
-    assert autonaApp.manager.scoreboards == {}
-
-
-def test_a_widget_built_on_readied_boards_is_reported(autonaApp):
-    """A test that readied its boards and asked for no widget fails if one
-    was built (the autonaApp teardown, _failOnBoardWidgets): what a board
-    operation on a board core does not have would do (DesktopBoardHost.
-    Prepare). allowWidgets() is the test saying it builds them on purpose."""
-    autonaApp.ready(1)
-    assert autonaApp._failOnBoardWidgets() == []
-
-    autonaApp.manager.EnsureScoreboard(2)   # what Prepare builds
-    autonaApp.settle()
-    assert autonaApp._failOnBoardWidgets() == [2]
-    # Dropped before the end (a later ready(), a fixture's teardown), it is
-    # still reported.
-    autonaApp.ready(2)
-    assert autonaApp.manager.scoreboards == {}
-    assert autonaApp._failOnBoardWidgets() == [2]
-
-    autonaApp.allowWidgets()
-    assert autonaApp._failOnBoardWidgets() == []
 
 
 def test_a_tree_held_open_for_a_moment_is_still_removed(tmp_path):

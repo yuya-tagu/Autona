@@ -6,7 +6,7 @@ This test pins down what has already been migrated: importing
 SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
 AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider / AutonaAlertNotification
-/ AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager /
+/ AutonaUpdater / AutonaCountryHelper / AutonaShellOperations /
 AutonaWebServer must not build a QApplication, must not create any of those
 singleton instances, must not load any data file, and must not touch the
 filesystem below the current working directory (./out, ./user_data/games,
@@ -201,15 +201,11 @@ alerts = importlib.import_module(
 updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
 country_helper = importlib.import_module(
     "src.Helpers.AutonaCountryHelper").AutonaCountryHelper
-# ScoreboardManager drags in the whole scoreboard widget tree
-# (AutonaScoreboardWidget / AutonaCrewBattleWidget and ~16 further modules),
-# which is precisely the point: none of them may build a widget or a
-# singleton while merely being imported.
-scoreboard_manager = importlib.import_module(
-    "src.AutonaScoreboardManager").AutonaScoreboardManager
-# The desktop's shell operations and set windows (ADR-005 S4y; the dock's and
-# its boards' until then). bootstrap_gui() builds the one instance, and the
-# windows wait for the main window (UiMounted).
+# (AutonaScoreboardManager stood here, dragging in the whole Qt scoreboard
+# widget tree; it went with the Qt SCORE in ADR-005 S4ac-3.)
+# The desktop's shell operations (ADR-005 S4y; the dock's and its boards'
+# until then, and the Qt set windows' until S4ac-3). bootstrap_gui() builds
+# the one instance, and it waits for the main window (UiMounted).
 shell_operations = importlib.import_module(
     "src.AutonaShellOperations").AutonaShellOperations
 # WebServer additionally pulls in AutonaWebOperations / AutonaApiV1 /
@@ -266,8 +262,6 @@ assert alerts.instance is None, \
 assert updater.instance is None, "import created AutonaUpdater.instance"
 assert country_helper.instance is None, \
     "import created AutonaCountryHelper.instance"
-assert scoreboard_manager.instance is None, \
-    "import created AutonaScoreboardManager.instance"
 assert shell_operations.instance is None, \
     "import created AutonaShellOperations.instance"
 assert bridge.instance is None, "import created StateManagerBridge.instance"
@@ -466,10 +460,8 @@ assert country_catalog.instance.BasicCountryInfo("JP").get("en_name")     == "Ja
 assert os.path.isdir("./user_data/additional_flag"),     "CountryCatalog.Load() did not create ./user_data/additional_flag"
 
 # No positive control for AutonaCountryHelper (its __init__ is empty; the real
-# work is LoadCountries(), driven from init(), and it builds Qt items) and none
-# for AutonaScoreboardManager either: it is a QDockWidget, and constructing a
-# QWidget without a QApplication aborts the interpreter, which would take this
-# whole subprocess down. The import-time assertions above are the contract.
+# work is LoadCountries(), driven from init(), and it builds Qt items). The
+# import-time assertions above are the contract.
 
 print("OK")
 '''

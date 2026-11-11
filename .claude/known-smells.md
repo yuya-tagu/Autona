@@ -26,6 +26,9 @@
 > 重複していた対の片方が消えたため、この smell は**完全に消滅**（以下は経緯の記録）。
 > 選手ウィジェットは `AutonaScoreboardPlayerWidget` 1 実装のみ（board 1/2/3 いずれもこれを使う）。
 > agent-pitfalls #5 も同日に「解消済み」へ更新。
+>
+> **2026-11-11（ADR-005 S4ac-3）**: 残った `AutonaScoreboardPlayerWidget` / `AutonaBasePlayerWidget` も
+> Qt の SCORE ごと削除した（選手の画面は React の SCORE ページ、書き込みは `core/PlayerService`）。
 
 **根拠**: python-hotspots.md「コード重複」セクション
 
@@ -48,7 +51,10 @@
 
 ---
 
-## S-02: God __init__ — AutonaScoreboardWidget [P2/D2/S2] 🔴 未着手（肥大化）
+## S-02: God __init__ — AutonaScoreboardWidget [P2/D2/S2] ✅ 対象ごと削除（2026-11-11）
+
+> **2026-11-11（ADR-005 S4ac-3）**: `AutonaScoreboardWidget`（とスコアボードの Qt の UI 一式）を削除した。
+> SCORE は React の `web/src/ScorePage/` だけ。分割は行わずに解消（以下は経緯の記録）。
 
 **根拠**: python-hotspots.md「God __init__」セクション
 
@@ -223,7 +229,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 **根拠**: singleton-init-order.md「暗黙の初期化順序リスク #2」
 
 **2026-06-24 検証**: `.instance =` パターンは記述の 8個 → **11クラス**に増えていた。
-- モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`
+- モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`（ADR-005 S4ac-3 で削除）, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`
 - `__init__` 内で `self` 代入（遅延割り当ての一種）: `AutonaAnalysisWidget`（S4k で削除）, `AutonaBracketWidget`
 
 **2026-07-30 解消確認**: 起動アーキテクチャ再設計 Step 3（`docs/changes/startup-architecture-redesign.md`）で
@@ -293,9 +299,10 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 ## S-14: Qt objectName 依存の動的 StateManager キー [P2/D3/S3] ✅ 解消（2026-09-02, Headless Core Step 5）
 
 > **現状（結論を先に）**: 動的キー族は 4 族すべて静的化され、`StateSchema.DYNAMIC_KEY_FAMILIES`
-> は空。**ただし `.ui` の objectName ↔ キー名の一致は今も要件**（`findChild` の引数として
-> 使われ、かつ保存済み state のキーそのもの）なので、下の「保護対象」表と
-> 運用ルールは有効なまま。以下は経緯の記録。
+> は空。**2026-11-11（ADR-005 S4ac-3）で最後の `.ui`（`src/layout/AutonaScoreboard{Team,Score,Player}.ui`）を
+> Qt の SCORE ごと削除し、objectName と結び付いたキーは無くなった**。キー名は保存済み state のキーそのものなので、
+> 下の「保護対象」表のキーと運用ルール（変えるなら移行 step）は有効なまま。`tests/test_objectname_keypath_contract.py` は
+> `EXPECTED`（当時の objectName の凍結した写し）と `StateSchema` の定数の一致を pin する（.ui の解析は外した）。以下は経緯の記録。
 >
 > **2026-10-25（ADR-005 S3b）: スキーマ版の不在も解消**。state の正本は
 > `user_data/state.json`（`{"state_version": N, "state": {...}}`）になり、移行層は
@@ -320,15 +327,15 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 | .ui | objectName | キーパス例 |
 |-----|-----------|-----------|
-| AutonaScoreboardTeam.ui | teamName, losers | `score.{N}.team.{T}.{name}` |
+| AutonaScoreboardTeam.ui | teamName, losers | `score.{N}.team.{T}.{name}`（.ui ごと削除済み（2026-11-11 ADR-005 S4ac-3）。キーは不変・`EXPECTED` に凍結） |
 | AutonaBattleTeam.ui | teamName, separateSponsors | .ui ごと削除済み（2026-08-28） |
-| AutonaScoreboardScore.ui | phase, match, best_of, score_left, score_right | `score.{N}.{name}`（best_of 等）/ findChild キー |
-| AutonaScoreboardPlayer.ui | team, name, seed, real_name, twitter, birthday, country, state | `score.{N}.team.{T}.player.{M}.{name}` |
+| AutonaScoreboardScore.ui | phase, match, best_of, score_left, score_right | `score.{N}.{name}`（best_of 等）（.ui ごと削除済み（2026-11-11 ADR-005 S4ac-3）。キーは不変・`EXPECTED` に凍結） |
+| AutonaScoreboardPlayer.ui | team, name, seed, real_name, twitter, birthday, country, state | `score.{N}.team.{T}.player.{M}.{name}`（.ui ごと削除済み（2026-11-11 ADR-005 S4ac-3）。キーは不変・`EXPECTED` に凍結） |
 | AutonaTeamPlayer.ui | team, name, country, state, twitter, activePlayer, dead, dynamicSpinner | .ui ごと削除済み（2026-08-28） |
 | AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | .ui ごと削除済み（2026-11-01 ADR-005 S4g。React の大会情報ページ）。キー `tournamentInfo.{tournamentName,eventName,address,numEntrants,startAt}` は不変で、書き手は `core/TournamentInfoService` |
 | （プログラム的） | notes_widget_{N}, custom_textbox | `notes.{name}.{title\|contents}` / `{self.path}.custom_textbox` |
 
-**運用ルール**: 上表の objectName を変更/削除する場合は、**先に `src/core/StateMigrations.py` に移行 step を足して `CURRENT_VERSION` を上げ**（旧キー → 新キー。出荷した step は凍結）、`StateSchema` の定数・`.ui`・`tests/test_objectname_keypath_contract.py` の `EXPECTED` を同時に更新する（2026-10-25 S3b で移行層ができた。それまでは「マイグレーション層を追加してから」だった）。
+**運用ルール**: 上表のキーを変更/削除する場合は、**先に `src/core/StateMigrations.py` に移行 step を足して `CURRENT_VERSION` を上げ**（旧キー → 新キー。出荷した step は凍結）、`StateSchema` の定数と `tests/test_objectname_keypath_contract.py` の `EXPECTED` を同時に更新する（`.ui` は 2026-11-11 に無くなった）（2026-10-25 S3b で移行層ができた。それまでは「マイグレーション層を追加してから」だった）。
 
 > **2026-09-01（Headless Core Step 5 第 1 弾）**: `AutonaScoreboardWidget` の 2 族
 > （`AutonaScoreboardTeam.ui` の teamName/losers、`AutonaScoreboardScore.ui` の
@@ -380,7 +387,10 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 >
 > **上表の運用ルールは今後も有効**: `.ui` の objectName は `findChild` の引数として
 > 使われ続けるため、変更時は schema 側の文字列も同時に直す（+ 保存データの
-> マイグレーションが前提）。`tournamentInfo.themeColor` / `accentColor` は
+> マイグレーションが前提）。（2026-11-11 ADR-005 S4ac-3: `.ui` と `findChild` は無くなり、
+> 有効なのはキー名と移行 step の部分。契約テストは .ui の解析・選手 / スコアボード / クルーの
+> ウィジェットの AST の pin を外し、`EXPECTED` の凍結した写しと schema の一致・core 外の書き手の台帳・
+> 「Qt ウィジェットは state を書かない」を残した）`tournamentInfo.themeColor` / `accentColor` は
 > objectName 由来ではなく `core/ColorService._STATE_SUFFIX` の静的キーで、
 > 書き手も同モジュール（Qt のカード `AutonaFeatureColors` は ADR-005 S4s で削除）。
 
@@ -508,13 +518,13 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
   QStandardItem/`QIcon(path)` 構築のみ GUI 側で実行し `countriesUpdated.emit()`。
 
 **実装前確認で判明した障害（S3 たる所以・2026-06-29）**:
-1. **同期フォールバックとの二重ビルド**: `AutonaBasePlayerWidget.LoadCountries`（[src/AutonaBasePlayerWidget.py](src/AutonaBasePlayerWidget.py)）
+1. **同期フォールバックとの二重ビルド**（2026-11-11 ADR-005 S4ac-3 で `AutonaBasePlayerWidget` ごと削除。この障害は消えた）: `AutonaBasePlayerWidget.LoadCountries`（`src/AutonaBasePlayerWidget.py`）
    が「`countryModel` が None なら自前で同期 `AutonaCountryHelper.LoadCountries()` を実行」する。非同期化すると起動時に
    選手ウィジェットが先行した場合 GUI スレッドで二重ビルドが起きる。回避には同期フォールバックの無効化が必要。
 2. **コストが症状ではない**: 一回限り・上限ありの起動コスト（Country は slim JSON で軽量）。
 
-**影響範囲**: `src/Helpers/AutonaCountryHelper.py`,
-`src/AutonaBasePlayerWidget.py`（同期フォールバック調整）, 選手ウィジェット（再バインド）
+**影響範囲**: `src/Helpers/AutonaCountryHelper.py`（`src/AutonaBasePlayerWidget.py` と選手ウィジェットは S4ac-3 で削除。
+国モデルの消費者は今は無く、Qt の整理で国モデルごと消える見込み）
 
 **リスク**: モデル非同期化で「構築完了までモデルが空」の時間窓が生じる。一回限り・非症状コストに対し
 回帰リスクが見合わないため、PR #82 では見送り（PdM 判断）。将来やるなら上記障害 1 の解消込みで。
@@ -567,6 +577,8 @@ ADR-005 S3e-7 から `SetFollowService.LoadSet` が `AutonaActions.ClearScore` �
   `/api/v1 score:reset` = `AutonaActions.ResetScore`）は対象外のまま（match バーは残る）
 - ADR-005 S2d（2026-10-23）から、2 つの実体は `AutonaActions.ClearScore` / `ResetMatch`（core）。
   ボードの同名メソッドと Web の `reset_match` / `clear_all` はそれを呼ぶ（分け方は上と同じ）
+- 2026-11-11（ADR-005 S4ac-3）: Qt のボード（`AutonaScoreboardWidget` / `AutonaCrewBattleWidget`）は削除した。
+  すべての入力値をリセットは v1 の `:reset-all`（`AutonaActions.ClearBoard`）
 
 **回帰テスト**: `tests/test_scoreboard_operations.py::test_a_reset_clears_the_match_bar`（board 1/2 ×
 3 経路）/ `::test_a_set_without_a_round_name_keeps_the_previous_one` /

@@ -1,11 +1,12 @@
 // The SCORE page's set selection (ADR-005 S4ab): the rows of GET
 // /api/v1/tournament/sets and /stations as the Qt set and station windows
-// show them (AutonaSelectSetWindow / AutonaSelectStationWindow), and what the
-// windows do with them -- the search, the order, the row OK / Enter takes.
+// showed them (AutonaSelectSetWindow / AutonaSelectStationWindow, removed in
+// ADR-005 S4ac-3), and what the windows did with them -- the search, the
+// order, the row OK / Enter takes.
 // The rows carry no wording (external-control-api.md §5.18): the doubles'
 // " (A, B)" and the filters are the page's. setRows.cases.json holds what the
-// windows show for core's rows (tests/test_set_selection.py checks the same
-// file against core and the windows).
+// windows showed for core's rows (tests/test_set_selection.py checks the same
+// file against core; against the windows too until S4ac-3).
 
 export interface SetSide {
     name?: unknown;

@@ -10,11 +10,12 @@ without one.
 
 Since headless core Step 4a it is the other way round, matching what Step 3
 did to the score: **the state is the record, the buttons render it**. Every
-method here reads ``score.{n}.stages.*`` and writes it back; the widget
-(``src/AutonaIndividualGameTracker.py``) builds the rows, turns a click into
-one call, and re-reads the state to set its buttons afterwards. Setting a
-QPushButton's checked state emits ``toggled``, never ``clicked``, so that
-refresh cannot echo back into another call.
+method here reads ``score.{n}.stages.*`` and writes it back; the Qt widget
+(``src/AutonaIndividualGameTracker.py``, removed with the Qt SCORE in
+ADR-005 S4ac-3) built the rows, turned a click into one call, and re-read
+the state to set its buttons afterwards. Setting a QPushButton's checked
+state emits ``toggled``, never ``clicked``, so that refresh could not echo
+back into another call. /api/v1's stage routes call the same methods.
 
 Row shape. ``score.{n}.stages`` is keyed "1".."N" (strings -- agent-pitfalls
 #3) and each row is a dict carrying the three result flags:
@@ -43,8 +44,8 @@ rows with the scores, do not follow.
 
 Import side effects: none (agent-pitfalls #1). One instance per 1v1 / team
 board, built by AutonaActions and reached through ``GameTracker(board)``
-(ADR-005 S4t: the board's AutonaIndividualGameTracker used to build it and
-register it while the board existed), so that every shell has the rows and a
+(ADR-005 S4t: the Qt board's AutonaIndividualGameTracker used to build it
+and register it while the board existed), so that every shell has the rows and a
 set length set from any entry point resizes them in the same cycle.
 """
 from loguru import logger
@@ -73,12 +74,12 @@ class GameTrackerService:
     def rowsVersion(self) -> int:
         """How many times SetStageCount() has rebuilt the rows.
 
-        The widget (AutonaIndividualGameTracker.RenderStageRows) rebuilds
-        its buttons when this moved since it last did: the rows are fresh
-        then even when their number is not -- a game load resets them to the
-        same set length, and its stage combos must start over with the new
-        game's stages, as they did when the spinbox's re-emitted valueChanged
-        rebuilt them.
+        The Qt widget (AutonaIndividualGameTracker.RenderStageRows, until
+        ADR-005 S4ac-3) rebuilt its buttons when this moved since it last
+        did: the rows are fresh then even when their number is not -- a game
+        load resets them to the same set length, and its stage combos had to
+        start over with the new game's stages, as they did when the
+        spinbox's re-emitted valueChanged rebuilt them.
         """
         return self._rowsVersion
 

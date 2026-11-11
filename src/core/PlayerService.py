@@ -79,8 +79,9 @@ from .StateManager import StateManager
 # Sentinel for PublishImages(onlineAvatar=...): "leave the key alone". It
 # cannot be None, because None is meaningful there ("this player has no
 # online avatar, clear the previous one"). Lived on
-# AutonaBasePlayerWidget as _KEEP_ONLINE_AVATAR; the widget imports it from
-# here now so the two sides cannot end up with different sentinels.
+# AutonaBasePlayerWidget as _KEEP_ONLINE_AVATAR (the Qt card's base, removed
+# in ADR-005 S4ac-3), which imported it from here so the two sides could not
+# end up with different sentinels.
 KEEP_ONLINE_AVATAR = object()
 
 # What a request to Edit / EditCharacter did not send: that field stays as
@@ -368,9 +369,10 @@ class PlayerService:
     def SetText(self, field, value) -> bool:
         """Set one free-text field. False when `field` is not one of them.
 
-        ``StateSchema.PLAYER_TEXT_KEYS`` -- the four QLineEdits of
-        AutonaScoreboardPlayer.ui plus the note box built in code. The old
-        loop accepted whatever objectName it found, which is how the editable
+        ``StateSchema.PLAYER_TEXT_KEYS`` -- the four one-line fields and the
+        note (the Qt card's QLineEdits and note box until ADR-005 S4ac-3).
+        The old Qt loop accepted whatever objectName it found, which is how
+        the editable
         country/state combos' *internal* line edits (objectName "") ended up
         connected too: finishing an edit in either of them wrote a key with
         an empty final segment under the player. Rejecting an unknown field
@@ -407,9 +409,9 @@ class PlayerService:
     # ── the location ─────────────────────────────────────────────────────
     #
     # Written even when it is the same value: a set load empties the country
-    # and puts it back, and the empty publish in between is what
-    # tests/test_player_widgets counts to know the region combo's in-place
-    # refill still emits exactly one index change.
+    # and puts it back, and the empty publish in between is in the recordings
+    # (tests/test_player_apply.py). The Qt card's region combo was counted by
+    # it until ADR-005 S4ac-3 removed the card.
 
     def CountryValue(self, code) -> dict:
         """What `country` holds for the country (or custom flag) `code`

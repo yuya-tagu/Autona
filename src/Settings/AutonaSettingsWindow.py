@@ -105,19 +105,6 @@ class AutonaSettingsWindow(QDialog):
             True
         ))
 
-        # The way back to the Qt Scoreboard panel while its React page is new
-        # (ADR-005 S4aa; S4ac removes it with the Qt boards). Read when the
-        # panel is first opened in a run (AutonaWebPanelHost.UsesQtPanel):
-        # before that, a change takes effect at once.
-        generalSettings.append((
-            QApplication.translate(
-                "settings.qt_scoreboard_panel",
-                "Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)"),
-            "qt_scoreboard_panel",
-            "checkbox",
-            False
-        ))
-
         generalSettings.append((
             QApplication.translate(
                 "settings.team_1_default_color", "Default Color of Team 1"),

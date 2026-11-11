@@ -165,8 +165,8 @@ def test_a_missing_member_count_means_an_empty_crew(crew):
     """TeamTotal is called on whatever the state holds, including nothing.
 
     A board that has not been seeded (the placeholder
-    AutonaScoreboardManager writes for an unbuilt board 3) must produce 0
-    rather than raise.
+    AutonaScoreboardManager wrote for an unbuilt board 3, before core made
+    every board at launch) must produce 0 rather than raise.
     """
     assert crew.TeamTotal(1) == 0
 

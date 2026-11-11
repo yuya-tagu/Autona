@@ -19,9 +19,12 @@ to `StateManagerBridge.instance` instead and let Qt disconnect them; the
 channels themselves are for core and other Qt-free code. That is the third
 structural check below.
 
-Tests below: two structural ones that keep new lambdas and new direct
-subscriptions out, and behavioural ones that show a dropped board really
-does go quiet on its own.
+Tests below: the structural ones that keep new lambdas and new direct
+subscriptions out, and the score hotkeys wired once in core. (The
+behavioural ones that dropped a Qt board and showed it went quiet on its own
+went with the Qt boards in ADR-005 S4ac-3: no widget a page shows is torn
+down while the app runs any more, but a window or a dialog still can be,
+and the structural checks keep covering every Qt-side module.)
 """
 import ast
 from pathlib import Path
@@ -37,7 +40,6 @@ CORE_DIR = SRC_ROOT / "core"
 PROCESS_WIDE_SENDERS = (
     "AutonaGameAssetManager.instance.signals",
     "AutonaTournamentDataProvider.instance.signals",
-    "AutonaScoreboardManager.instance.signals",
     "AutonaAlertNotification.instance.signals",
     "AutonaHotkeys.signals",
     "AutonaPlayerDB.signals",
@@ -210,12 +212,13 @@ def test_the_score_hotkeys_no_longer_belong_to_a_board(autonaApp):
     AutonaScoreboardWidget -- which made "what does Ctrl+Shift+1 do" depend
     on which boards happened to exist. Since headless core Step 3 they go
     AutonaHotkeys -> AutonaActions -> StateManager, so this drives the
-    signals themselves and checks the board follows.
+    signals themselves and checks the state follows. (The board's score
+    display followed it too until ADR-005 S4ac-3.)
     """
     from src.AutonaHotkeys import AutonaHotkeys
     from src.core.Actions import AutonaActions
 
-    board = autonaApp.board(1)
+    autonaApp.ready(1)
     # The hotkeys act on the board the saved battle format shows; the
     # harness never writes one, so it is the default. Asserted rather than
     # assumed, so a stray SettingsManager write elsewhere in the session
@@ -232,89 +235,3 @@ def test_the_score_hotkeys_no_longer_belong_to_a_board(autonaApp):
         signal.emit()
         autonaApp.settle()
         assert autonaApp.get(f"score.1.team.{team}.score") == score
-        # The board is a display now: its spinbox follows the state.
-        display = board.scoreDisplay1 if team == "1" else board.scoreDisplay2
-        assert display.value() == score
-
-
-def _connectionCounts():
-    """How many slots the two singletons the board listens to still hold.
-
-    QObject.receivers() wants the old SIGNAL()-encoded signature -- a "2"
-    prefix in front of the normalised signal name.
-
-    The tournament provider's `tournament_changed` rather than a hotkey:
-    every hotkey is wired once for the process now -- the score ones to
-    AutonaActions (headless core Step 3), the swap in ADR-005 S2c, and
-    `load_set`, the last one a board owned, in S4y (the set window is the
-    shell's) -- so building a board no longer changes their receiver count.
-    The board connects its bound UpdateBottomButtons to the provider's, and
-    it is a board-owned connection that is what this measures.
-    """
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-
-    return (
-        AutonaGameAssetManager.instance.signals.receivers("2onLoad()"),
-        AutonaTournamentDataProvider.instance.signals.receivers(
-            "2tournament_changed()"),
-    )
-
-
-def test_a_destroyed_board_disconnects_from_the_process_wide_signals(autonaApp):
-    """The ghost-board regression, measured on the connections themselves.
-
-    Note what is *not* asserted: that the board object becomes garbage. It
-    does not, and cannot -- the board wires dozens of its own child widgets
-    to lambdas that close over `self`, and that cycle runs through Qt's C++
-    connection storage, which Python's gc cannot traverse. The wrapper stays
-    reachable no matter what.
-
-    That is fine, because it is not what causes the ghost. A board dies by
-    having its C++ object destroyed (deleteLater on a battle-format switch),
-    and at that moment Qt drops every connection whose receiver it can
-    identify -- which is every bound method, and no lambda. So the property
-    that matters is the one measured here: after the destruction the
-    singletons hold exactly as many slots as before the board existed.
-    """
-    autonaApp.dropAllBoards()
-    autonaApp.settle()
-    baseline = _connectionCounts()
-
-    board = autonaApp.board(1)
-    live = _connectionCounts()
-    assert live[0] > baseline[0] and live[1] > baseline[1], (
-        "the board was expected to subscribe to both singletons")
-
-    del board
-    autonaApp.dropAllBoards()  # deleteLater + forced DeferredDelete
-    autonaApp.settle()
-
-    assert _connectionCounts() == baseline, (
-        "a destroyed board is still subscribed to a process-wide signal: "
-        "the connection was made with a lambda, which Qt cannot attribute "
-        "to a receiver and therefore never disconnects")
-
-
-def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
-    """The user-visible half of the same bug: the ghost rewrites ./out."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-
-    board = autonaApp.board(1)
-    prefix = board.statePrefix
-    del board
-
-    autonaApp.dropAllBoards()
-    autonaApp.settle()
-    assert autonaApp.get(prefix) is None
-
-    AutonaGameAssetManager.instance.signals.onLoad.emit()
-    # No hotkey: the score, reset, 反映 and swap ones write score.{n}
-    # through AutonaActions whether or not a board exists (Step 3, ADR-005
-    # S2c), which would say nothing about a ghost here, and load_set opens
-    # the shell's window rather than writing (no board owns it since S4y).
-    autonaApp.settle()
-
-    assert autonaApp.get(prefix) is None, (
-        "a destroyed board rewrote its state subtree: its connections to the "
-        "process-wide singletons were never disconnected")

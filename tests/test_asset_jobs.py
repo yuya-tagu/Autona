@@ -1449,19 +1449,20 @@ def _logRecords():
 
 def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         autonaApp, ownExecutor):
-    """The board host's operation, an unbuilt board's build, the shell
-    operations: once the GUI thread will not run them, the request is
-    answered as unavailable (503) and logged at INFO -- not a 500 with an
-    ERROR traceback (ADR-005 S3f-4 review)."""
+    """The board host's operation, the shell operations: once the GUI
+    thread will not run them, the request is answered as unavailable (503)
+    and logged at INFO -- not a 500 with an ERROR traceback (ADR-005 S3f-4
+    review). (An unbuilt board's build was one too: the desktop built a
+    board core did not have on its GUI thread until ADR-005 S4ac-3, which
+    removed the Qt SCORE; nothing is built for a read since, in either
+    shell.)"""
     from src import AutonaWebOperations as WebOps
     from src.AutonaWebOperations import NotAvailable, SHUTTING_DOWN_MESSAGE
 
     web = autonaApp.web()
-    autonaApp.dropAllBoards()   # board 2 would be built on demand below
     ownExecutor.shutdown(WAIT)
     calls = {
         "a board operation": lambda: web.swap_teams(1),
-        "an unbuilt board": lambda: web.get_swap(2),
         "the set selection": lambda: web.open_sets(1),
         "the thumbnail": lambda: web.get_thumbnail(1, "png"),
         "an image render": lambda: WebOps.start_image_render(
@@ -1483,7 +1484,6 @@ def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         == []
     assert any("not run" in r["message"] for r in records
                if r["level"].name == "INFO")
-    assert 2 not in autonaApp.manager.scoreboards
 
 
 # ── the start.gg character download ──────────────────────────────────────

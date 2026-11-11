@@ -26,18 +26,18 @@ Web は 21 passed のまま変化なし。
 `AutonaDictHelper` / `StateManager`（held・exempt セマンティクス）/ Start.gg パース /
 `AutonaTop8Model` / `AutonaCommentaryModel` / `AutonaRemoteZip` / 更新系契約（apply_update・差分更新）/
 ホットキー（suspend・enabled）/ `AutonaDesignerService` / デザイントークン /
-import 副作用 / objectName キーパス契約 / WebServer ルート台帳 / GuiExecutor / SelectSetWindow キャッシュ。
+import 副作用 / objectName キーパス契約 / WebServer ルート台帳 / GuiExecutor / SelectSetWindow キャッシュ（S4ac-3 で窓ごと削除）。
 
 ### カバーされていない領域（＝バグ密集地帯）
 
 | モジュール | 行数 | テスト |
 |-----------|------|--------|
-| `AutonaScoreboardWidget` | 1962 | ゼロ |
+| `AutonaScoreboardWidget` | 1962 | ゼロ（2026-11-11 ADR-005 S4ac-3 で削除） |
 | `AutonaGameAssetManager` | 1501 | ゼロ |
-| `AutonaScoreboardPlayerWidget` | 983 | ゼロ |
+| `AutonaScoreboardPlayerWidget` | 983 | ゼロ（2026-11-11 ADR-005 S4ac-3 で削除） |
 | ~~`AutonaTeamPlayerWidget`~~ | ~~637~~ | 2026-08-28 削除（デッドコード） |
 | `AutonaApiV1` | 733 | ゼロ（26 ルート） |
-| `AutonaCrewBattleWidget` | 657 | ゼロ |
+| `AutonaCrewBattleWidget` | 657 | ゼロ（2026-11-11 ADR-005 S4ac-3 で削除） |
 | `AutonaTournamentInfoWidget` | 610 | ゼロ |
 | `AutonaWebServerActions` | 587 | ルート名の台帳のみ・挙動は未検証 |
 | Web `ScoreboardPage` / `redux` | 21 ファイル | ゼロ |
@@ -66,7 +66,9 @@ import 副作用 / objectName キーパス契約 / WebServer ルート台帳 / G
 「中核 UI は自動テストできない」という前提が、この戦略の唯一のリスクだった。**検証して否定された。**
 
 使い捨て cwd（`assets` / `layout` / `src/layout` / `src/i18n` / `src/TournamentDataProvider` を
-ディレクトリジャンクション、`user_data` は合成）+ `QT_QPA_PLATFORM=offscreen` で:
+ディレクトリジャンクション、`user_data` は合成）+ `QT_QPA_PLATFORM=offscreen` で
+（2026-08 の検証。`src/layout` と下の `EnsureScoreboard` は 2026-11-11 ADR-005 S4ac-3 で Qt の SCORE ごと削除し、
+今のジャンクションは `assets` / `src/i18n` / `src/TournamentDataProvider`）:
 
 | 操作 | 所要時間 | 結果 |
 |------|---------|------|
@@ -286,7 +288,8 @@ access violation でプロセスごと落ちていた問題は根治した。
 （選手ウィジェットの再構築 = players_per_team 変更・フォーマット切替・
 ゲーム切替のたびに stale 登録が蓄積する）。
 
-検証: フルスイート 6 回連続グリーン。pin: `tests/test_wrapper_lifetime.py`。
+検証: フルスイート 6 回連続グリーン。pin: `tests/test_wrapper_lifetime.py`（2026-11-11 ADR-005 S4ac-3 で
+`AutonaScoreboardPlayerWidget` と一緒に削除。規則は agent-pitfalls #14 に残る）。
 
 #### ハーネス実装上の地雷: `sendPostedEvents` は対象を絞る
 
@@ -311,7 +314,7 @@ C++ 破棄時に自動切断されるが、lambda は receiver を持たない�
 **対応（2026-08-02）**: `src/` 全体を AST で監査し、プロセス寿命のシグナル
 （`AutonaGameAssetManager` / `AutonaTournamentDataProvider` / `AutonaHotkeys` /
 `AutonaPlayerDB` / `StateManager` の各 signals）への lambda 接続 9 箇所を洗い出した。
-うち破棄されうる receiver は `AutonaScoreboardWidget` の 5 箇所のみで、
+うち破棄されうる receiver は `AutonaScoreboardWidget`（S4ac-3 で削除）の 5 箇所のみで、
 すべて bound method に置き換えた — スコアホットキー 4 本は捕捉していた
 `(team, delta)` を `HotkeyTeam1ScoreUp` 等の 4 メソッドに畳み、`onLoad` は
 `_onGameAssetsLoaded` に抽出（書き込むキー・呼び出し順は不変）。
@@ -337,7 +340,8 @@ C++ 破棄時に自動切断されるが、lambda は receiver を持たない�
 > BUG-7 は「修正」ではなく**消滅**という形でクローズ。
 > `xfail(strict=True)` マーカーと `_AutonaHarness.teamPlayerWidget()` も同時に撤去し、
 > `tests/test_player_widgets.py` は実装 1 本（`AutonaScoreboardPlayerWidget`）に対する
-> 非 parametrize なテストになった。以下は経緯の記録。
+> 非 parametrize なテストになった（それも 2026-11-11 ADR-005 S4ac-3 でカードと一緒に削除し、
+> 選手の読込の検査は core を呼ぶ `tests/test_player_load.py` へ移した）。以下は経緯の記録。
 
 旧 API の単一キャラ形式 `mains: ["Mario", skin]` を渡すと、
 `AutonaTeamPlayerWidget.SetData` は `for element in self.character_elements:`
@@ -468,7 +472,7 @@ Windows 専用・Python の依存（`dependencies/requirements.txt` + pytest）�
 ```
 autonaApp (session)
 ├── 使い捨て cwd を作成（tmp_path_factory）
-│   ├── assets / layout / src/layout / src/i18n / src/TournamentDataProvider を junction
+│   ├── assets / src/i18n / src/TournamentDataProvider を junction（layout は空の実ディレクトリ。src/layout は ADR-005 S4ac-3 で削除）
 │   └── user_data を合成（settings.json で hotkeys.enabled=false、合成ゲーム 1 本）
 ├── QApplication(offscreen) を 1 個
 └── bootstrap_core() を 1 回
@@ -484,17 +488,16 @@ autonaApp (session)
 | 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる**。加えて `tests/conftest.py` の監査フック（`_refuseRealWrites`）が、本物の `out/` `user_data/` `layout/` への書き込みをスレッドを問わず拒否し、そのときのテストを落とす（見えるのはそのプロセスの Python からの書き込みだけ。別に起動中のアプリには反応しない） |
 | pytest-xdist 並列化すると Qt が壊れる | プロセス分割なら壊れない: `scripts/run_tests_parallel.py` が test ファイルを前回の実測時間（初回はサイズ）で 4 つ前後に分け、各々を普通の pytest プロセス（プロセスごとに bootstrap）で走らせる。同条件の比較で直列 876 秒 → 276〜280 秒（2026-11-07。マシンの状態で変動し、並列は約 3〜6 分）。CI は直列のまま（順序依存と分割の見落としの網）。pytest-xdist は依存追加になるので未導入（オーナー判断事項） |
 
-**ボードの用意（2026-11-11 ADR-005 S4ac-2）**: `autonaApp` のボードは 2 通りで作る。
+**ボードの用意（2026-11-11 ADR-005 S4ac-2 / S4ac-3）**: `autonaApp` のボードは core のボードだけ。
 
 | 呼び方 | 作るもの | 使うテスト |
 |------|------|------|
-| `autonaApp.ready(n)` / `readyAll()` | core のボードだけ（`AutonaActions.EnsureBoard(n, panel=True)` / `MakeBoards(panel=True)`。デスクトップの起動と同じ書き込み・held）。国のデータも読む | ボードが要るが、state / v1 / core だけを操作し検査するテスト（既定はこちら） |
-| `autonaApp.board(n)` | ウィジェットごと（`AutonaScoreboardManager.EnsureScoreboard`） | ウィジェットの操作・描画・エコーループを試すテスト（S4ac-3 で消すか書き直す） |
+| `autonaApp.ready(n)` / `readyAll()` | core のボード（ボード `n` を落として `AutonaActions.EnsureBoard(n, panel=True)` / `MakeBoards(panel=True)` で作り直す。デスクトップの起動と同じ書き込み・held）。国のデータも読む | ボードが要るテストすべて（state / v1 / core を操作し検査する） |
 
-- ready したテストは、`board()` か `allowWidgets()` を呼ばない限り、ボードのウィジェットを 1 つも建ててはいけない。teardown（`_failOnBoardWidgets`）が途中で破棄したものも含めて見て、建てていたらテストを落とす。core に無いボードへの操作は `DesktopBoardHost.Prepare` でウィジェットを建てるので、使うボードは全部 ready する
-- 窓の構築（`CreateScoreboard`）や形式の切り替えのように、ready したボードにわざとウィジェットを建てるテストは `allowWidgets()` を先に呼ぶ
-- カードの `SetData` と同じ選手の読込は `tests/conftest.py` の `load_player(board, team, data)`（core の `PlayerService.ApplyData`）
-- ボードの破棄は core の半分（`_dropBoardInCore`）とウィジェットの半分（`_dropBoardWidget`）に分かれていて、`_dropBoard` が「ウィジェット → core」の順で両方を呼ぶ。ウィジェットの半分は conftest の 1 つの節にまとめてある
+- ボードのウィジェット（`autonaApp.board(n)` = `AutonaScoreboardManager.EnsureScoreboard`）・`manager`・`allowWidgets()`・teardown の `_failOnBoardWidgets`・ボードの破棄のウィジェットの半分（`_dropBoardWidget`）は、S4ac-3 で Qt の SCORE と一緒に削除した。ボードの破棄は `_dropBoard`（core の半分だけ）
+- 使うボードは全部 ready する（テストが前のテストのボードを読まないように）。`dropAllBoards()` はボードを全部落とし、`boardsNow()` は今の 3 ボードの state を返す
+- 選手の読込は `tests/conftest.py` の `load_player(board, team, data, slot=1)`（core の `PlayerService.ApplyData`。DB とのマージなし = Qt のカードの `SetData` と同じ）、セットの読込は `apply_set(board, data)`、Qt のカードのタグ欄の手入力は `edit_tag(path, text)`（カードと同じ保存サイクルの順で `PlayerService` を呼ぶ。録画の再生用）
+- ウィジェットのテストの書き直しの台帳は `docs/changes/architecture-modernization.md` の S4ac-3 の節（golden の録画は今も旧チェックアウトの Qt のボードで録ったもので、テストは core の操作で同じ録画と照合する）
 
 ~~`AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
 （agent-pitfalls #5）。**同一のテストを両クラスに `parametrize` で流す**ことで、
@@ -506,7 +509,9 @@ autonaApp (session)
 選手ウィジェットは `AutonaScoreboardPlayerWidget` 1 本になり、
 `tests/test_player_widgets.py` は非 parametrize な単一実装テストになった。
 どのボードがどのクラスを作るかの pin
-（`test_the_team_board_uses_the_scoreboard_player_widget`）は残してある。
+（`test_the_team_board_uses_the_scoreboard_player_widget`）は残してあった。
+**2026-11-11 ADR-005 S4ac-3**: 選手ウィジェットごと削除し、`tests/test_player_widgets.py` も削除した
+（core の性質のテストは `tests/test_player_load.py` へ書き直した）。
 
 ### L4 の設計
 
@@ -539,7 +544,8 @@ L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `boo
     `test_dropping_a_board_removes_its_exported_files` が pin）
   - `bootstrap_core()` はプロセス内 1 回きり（再入ガード）なので board は**テストごとに再構築**する。
     リセット経路そのものがテスト対象なので、リセットで独立性を担保すると循環する
-  - `AutonaScoreboardWidget.__init__` は `HoldSubtree("score.{N}")` を登録する。
+  - `AutonaScoreboardWidget.__init__` は `HoldSubtree("score.{N}")` を登録する（ADR-005 S4y からは
+    `AutonaActions.EnsureBoard(panel=True)`。ウィジェットは S4ac-3 で削除）。
     StateManager に解除 API がないため、board 破棄時に harness 側で登録を掃除している
     （放置すると `test_state_manager_held.py` が実行順に依存して落ちる）
   - harness は `SettingsManager` を**書き換えない**。プロセス共有のため
@@ -553,7 +559,7 @@ L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `boo
   + 前提のダウンローダ待機機構（§3）
 
   **実績**: Python 248 件 + xfail 1 → **297 件 + xfail 2 / 44 秒**。
-  `tests/test_player_widgets.py`（40 件、うち 1 件は BUG-7 の xfail）+
+  `tests/test_player_widgets.py`（40 件、うち 1 件は BUG-7 の xfail。2026-11-11 S4ac-3 で削除）+
   `tests/test_harness_isolation.py` にダウンローダのガード 2 件。
   検出: BUG-7（旧 mains ループの取り残し）/
   `AutonaTeamPlayerWidget` が現在どこからも生成されない実態 /

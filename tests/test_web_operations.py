@@ -771,7 +771,7 @@ def _roster(app, n):
 def test_both_hosts_write_the_same_roster(autonaApp, monkeypatch, name):
     operation = ROSTER_OPERATIONS[name]
 
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     _prepareRoster(BOARD)
     autonaApp.settle()
     WebOps.apply_changes(BOARD)
@@ -779,10 +779,6 @@ def test_both_hosts_write_the_same_roster(autonaApp, monkeypatch, name):
     operation(BOARD)
     autonaApp.settle()
     desktop = json.dumps(_roster(autonaApp, BOARD), ensure_ascii=False)
-    # The board's cards follow the slots.
-    roster = _roster(autonaApp, BOARD)["teams"]
-    assert [len(board.team1playerWidgets), len(board.team2playerWidgets)] \
-        == [len(roster["1"]["player"] or {}), len(roster["2"]["player"] or {})]
 
     try:
         _goHeadless(autonaApp, monkeypatch)
@@ -832,31 +828,33 @@ def test_an_emptied_board_gives_its_next_players_the_characters_it_keeps(
             _dropHeadlessBoards(autonaApp)
 
 
-# The board's two spinboxes ask the operations the Web's players /
+def _askPlayers(number):
+    from src.core.Actions import AutonaActions
+    return lambda n: AutonaActions.instance.SetPlayersPerTeam(n, number)
+
+
+def _askCharacters(number):
+    from src.core.Actions import AutonaActions
+    return lambda n: AutonaActions.instance.SetCharactersPerPlayer(n, number)
+
+
+# The board's two spinboxes asked the operations the Web's players /
 # characters ask (AutonaActions.SetPlayersPerTeam / SetCharactersPerPlayer,
 # ADR-005 S4x), and the characters a board with no player gives its next
 # ones are one memory, core's -- the desktop's was the board's hidden
 # spinbox and the headless host's its own dict, so a count asked for on one
-# was not the other's. (the board's input, the Web's)
+# was not the other's. The spinboxes went in ADR-005 S4ac-3; the first of
+# each pair is what they ran. (the board's input, the Web's)
 ROSTER_SCRIPT = [
-    (lambda b: b.playerNumber.setValue(0),
-     lambda n: WebOps.set_route(n, players=0)),
-    (lambda b: b.charNumber.setValue(2),
-     lambda n: WebOps.set_route(n, characters=2)),
-    (lambda b: b.playerNumber.setValue(2),
-     lambda n: WebOps.set_route(n, players=2)),
-    (lambda b: b.charNumber.setValue(4),
-     lambda n: WebOps.set_route(n, characters=4)),
-    (lambda b: b.playerNumber.setValue(0),
-     lambda n: WebOps.set_route(n, players=0)),
-    (lambda b: b.playerNumber.setValue(1),
-     lambda n: WebOps.set_route(n, players=1)),
-    (lambda b: b.playerNumber.setValue(0),
-     lambda n: WebOps.set_route(n, players=0)),
-    (lambda b: b.charNumber.setValue(1),
-     lambda n: WebOps.set_route(n, characters=1)),
-    (lambda b: b.playerNumber.setValue(3),
-     lambda n: WebOps.set_route(n, players=3)),
+    (_askPlayers(0), lambda n: WebOps.set_route(n, players=0)),
+    (_askCharacters(2), lambda n: WebOps.set_route(n, characters=2)),
+    (_askPlayers(2), lambda n: WebOps.set_route(n, players=2)),
+    (_askCharacters(4), lambda n: WebOps.set_route(n, characters=4)),
+    (_askPlayers(0), lambda n: WebOps.set_route(n, players=0)),
+    (_askPlayers(1), lambda n: WebOps.set_route(n, players=1)),
+    (_askPlayers(0), lambda n: WebOps.set_route(n, players=0)),
+    (_askCharacters(1), lambda n: WebOps.set_route(n, characters=1)),
+    (_askPlayers(3), lambda n: WebOps.set_route(n, players=3)),
 ]
 
 
@@ -873,24 +871,21 @@ def _playRoster(app, pick):
 
 def test_the_spinboxes_and_the_web_keep_one_memory(autonaApp, monkeypatch):
     def fresh():
-        board = autonaApp.board(BOARD)
+        autonaApp.ready(BOARD)
         _prepareRoster(BOARD)
         autonaApp.settle()
-        return board
 
-    board = fresh()
-    byBoard = _playRoster(autonaApp, lambda _i, input_, _web: input_(board))
-    # The board shows the count it keeps on its hidden spinbox.
-    assert board.charNumber.value() == 1
+    fresh()
+    byBoard = _playRoster(autonaApp, lambda _i, input_, _web: input_(BOARD))
 
-    board = fresh()
+    fresh()
     mixed = _playRoster(autonaApp, lambda i, input_, web: (
-        input_(board) if i % 2 else web(BOARD)))
+        input_(BOARD) if i % 2 else web(BOARD)))
     assert mixed == byBoard
 
-    board = fresh()
+    fresh()
     mixed = _playRoster(autonaApp, lambda i, input_, web: (
-        web(BOARD) if i % 2 else input_(board)))
+        web(BOARD) if i % 2 else input_(BOARD)))
     assert mixed == byBoard
 
     try:
@@ -910,41 +905,36 @@ def test_the_spinboxes_and_the_web_keep_one_memory(autonaApp, monkeypatch):
 
 def test_the_board_gives_its_players_a_count_the_web_asked_for(autonaApp):
     """The count the Web asks for on a board with no player writes no
-    state, so the hidden spinbox shows it from the next held cycle; the
-    board's PLAYERS reads core's memory, not the spinbox."""
-    board = autonaApp.board(BOARD)
+    state; the board's PLAYERS (what its spinbox ran until ADR-005 S4ac-3)
+    reads core's memory."""
+    autonaApp.ready(BOARD)
     WebOps.set_route(BOARD, players=0)
     WebOps.set_route(BOARD, characters=5)
     autonaApp.settle()
-    assert board.playerNumber.value() == 0
 
-    board.playerNumber.setValue(2)
+    _askPlayers(2)(BOARD)
     autonaApp.settle()
     assert [len(autonaApp.get(f"score.{BOARD}.team.{team}.player.{slot}"
                               ".character"))
             for team in (1, 2) for slot in (1, 2)] == [5, 5, 5, 5]
-    assert board.charNumber.value() == 5
 
 
 def test_the_hidden_spinbox_shows_the_count_core_keeps(autonaApp):
-    """A board with no player shows core's count on its hidden spinbox from
-    the next held cycle. A spinbox left on its own last value would take
-    that value, asked for again, as no change: the count would stay the
-    Web's."""
+    """A count asked for again after the Web asked for another is a change:
+    the board's hidden spinbox showed core's count so that it was (it went
+    in ADR-005 S4ac-3, with what it ran: SetCharactersPerPlayer)."""
     from src.core.Actions import AutonaActions
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     WebOps.set_route(BOARD, players=1, characters=2)
     WebOps.set_route(BOARD, players=0)
     autonaApp.settle()
-    assert board.charNumber.value() == 2
 
     WebOps.set_route(BOARD, characters=5)
     AutonaActions.instance.SetTeamName(BOARD, 1, "Alpha")
     autonaApp.settle()
-    assert board.charNumber.value() == 5
 
-    board.charNumber.setValue(2)
-    board.playerNumber.setValue(1)
+    _askCharacters(2)(BOARD)
+    _askPlayers(1)(BOARD)
     autonaApp.settle()
     assert [len(autonaApp.get(f"score.{BOARD}.team.{team}.player.1"
                               ".character")) for team in (1, 2)] == [2, 2]
@@ -953,13 +943,12 @@ def test_the_hidden_spinbox_shows_the_count_core_keeps(autonaApp):
 # The board host's ClearPlayers is the same in both shells since ADR-005
 # S4x (the desktop's ran the board's CommandClearAll): the field being typed
 # in is finished first (CommitEdit), each slot's card drops its typed combo
-# text after (PlayerLoaded), and the set loaded last is forgotten. The
-# typed text is tests/test_player_card_render.py's
-# (test_a_tag_being_typed_is_cleared_with_the_rest).
+# text after (PlayerLoaded), and the set loaded last is forgotten. (The
+# cards, their typed text and its test went with the Qt SCORE in ADR-005
+# S4ac-3: the desktop's hooks do nothing now.)
 @pytest.mark.parametrize("no_mains", [False, True])
 def test_both_hosts_clear_the_players_to_the_same_state(
         autonaApp, monkeypatch, no_mains):
-    from qtpy.QtWidgets import QLineEdit
     from src.core.SetLoadService import SetLoadService
     from tests.fixtures.write_recording import WriteRecorder
 
@@ -974,7 +963,7 @@ def test_both_hosts_clear_the_players_to_the_same_state(
         SetLoadService(BOARD).lastSetSelected = "321"
         autonaApp.settle()
 
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     _prepareRoster(BOARD)
     fill()
     with WriteRecorder() as onTheDesktop:
@@ -982,8 +971,6 @@ def test_both_hosts_clear_the_players_to_the_same_state(
         autonaApp.settle()
     desktop = json.dumps(autonaApp.get(f"score.{BOARD}"), ensure_ascii=False)
     assert SetLoadService(BOARD).lastSetSelected is None
-    assert all(not card.findChild(QLineEdit, "name").text()
-               for card in board.playerWidgets)
     assert onTheDesktop.sets
 
     try:
@@ -1298,7 +1285,7 @@ def test_a_board_no_shell_has_is_refused_by_both_hosts(
                             shell.OpenSetSelection)
         monkeypatch.setattr(WebOps, "renderThumbnail",
                             shell.RenderThumbnail)
-    built = dict(autonaApp.manager.scoreboards)
+    made = autonaApp.boardsNow()["made"]
     app, socketio = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
@@ -1327,7 +1314,7 @@ def test_a_board_no_shell_has_is_refused_by_both_hosts(
         autonaApp.settle()
 
     assert recorder.sets == []
-    assert autonaApp.manager.scoreboards == built
+    assert autonaApp.boardsNow()["made"] == made
     assert _state().Get("score.4") is None
     assert _state().Get("score.0") is None
 
@@ -1740,11 +1727,12 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
 
 # ── the shell operations (ADR-005 S3e-9) ────────────────────────────────
 #
-# Opening a board's set selection window and rendering its thumbnail are
-# the desktop's windows' work: the desktop registers its scoreboard dock's
-# (bootstrap_gui()), the headless shell nothing, and the operation answers
-# NotAvailable (503). They were the web server's actions class until then,
-# handed in by the desktop window and None headless.
+# Opening a board's set selection and rendering its thumbnail are the
+# desktop's windows' work: the desktop registers its shell operations'
+# (bootstrap_gui(); the scoreboard dock's until ADR-005 S4y), the headless
+# shell nothing, and the operation answers NotAvailable (503). They were the
+# web server's actions class until then, handed in by the desktop window and
+# None headless.
 
 def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
         monkeypatch):
@@ -1781,10 +1769,11 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
                                                             monkeypatch):
     """What bootstrap_gui() registered: AutonaShellOperations' (ADR-005 S4y;
     the scoreboard dock's until then), run on the GUI thread while the
-    request's thread waits for the answer -- the window opened before "OK"
-    (it used to be queued for later: the request's thread emitted the
-    board's signal), the thumbnail's absolute path (its .jpg sibling for
-    "jpg"), None when none was made."""
+    request's thread waits for the answer -- the SCORE page asked to open
+    its set selection before "OK" (it used to be queued for later: the
+    request's thread emitted the board's signal; the Qt window it opened
+    went in ADR-005 S4ac-3), the thumbnail's absolute path (its .jpg sibling
+    for "jpg"), None when none was made."""
     from src.AutonaShellOperations import AutonaShellOperations
     from src.Helpers.AutonaQtHelper import in_gui_thread
     shell = AutonaShellOperations.instance
@@ -1792,12 +1781,9 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
     assert WebOps.renderThumbnail == shell.RenderThumbnail
     assert WebOps.startImageRender == shell.StartImageRender
     autonaApp.ready(1)
-    window = shell.SetWindow(1)
+    main = _MainWindow()
+    monkeypatch.setattr(shell, "_parent", main)
     calls = []
-    monkeypatch.setattr(window, "PrepareForDisplay",
-                        lambda: calls.append(("prepare", in_gui_thread())))
-    monkeypatch.setattr(window, "show",
-                        lambda: calls.append(("show", in_gui_thread())))
     thumbnail = os.path.join("out", "thumbnails", "board.png")
 
     def generate(board):
@@ -1810,7 +1796,7 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
 
     def request():
         answers.append(WebOps.open_sets("1"))
-        answers.append(len(calls))   # opened before the answer
+        answers.append(len(main.asked))   # opened before the answer
         answers.append(WebOps.get_thumbnail("1", "png"))
         answers.append(WebOps.get_thumbnail("1", "jpg"))
 
@@ -1824,10 +1810,10 @@ def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
 
     assert not worker.is_alive()
     assert answers == [
-        "OK", 2, os.path.abspath(thumbnail),
+        "OK", 1, os.path.abspath(thumbnail),
         os.path.abspath(os.path.join("out", "thumbnails", "board.jpg"))]
-    assert calls == [("prepare", True), ("show", True),
-                     ("thumbnail", True, 1),
+    assert main.asked == [(1, True)]
+    assert calls == [("thumbnail", True, 1),
                      ("thumbnail", True, 1)]
 
     monkeypatch.setattr(shell, "DrawThumbnail", lambda board: None)
@@ -1849,11 +1835,8 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
     autonaApp.ready(1)
-    window = shell.SetWindow(1)
-    opened = []
-    monkeypatch.setattr(window, "PrepareForDisplay",
-                        lambda: opened.append("prepare"))
-    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
+    main = _MainWindow()
+    monkeypatch.setattr(shell, "_parent", main)
     png = tmp_path / "thumbnails" / "board.png"
     png.parent.mkdir()
     png.write_bytes(b"\x89PNG\r\n\x1a\n-the-png")
@@ -1864,7 +1847,7 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     response = client.get("/scoreboard1-open-set")
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
-    assert opened == ["prepare", "show"]
+    assert main.asked == [(1, True)]
 
     for fileFormat, image in (("png", png), ("jpg", jpg)):
         response = client.get(f"/scoreboard1-get-thumbnail-{fileFormat}")
@@ -1882,17 +1865,18 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     assert ack != UNAVAILABLE_BODY
     assert [(item["name"], item["args"]) for item in ws.get_received()] == [
         ("open_set", ["OK"])]
-    assert opened == ["prepare", "show"] * 2
+    assert main.asked == [(1, True)] * 2
     ws.disconnect()
 
     # The crew board has no set window nor thumbnail: the 500 it always
-    # answered -- and it is not built for that any more (ADR-005 S4y: the
-    # dock built it first). A board no shell has is refused before the
-    # shell is asked (the ADR-005 S4x review; the desktop's window answered
-    # 500 for it).
+    # answered -- and it is not made for that (ADR-005 S4y: the dock built
+    # it first). A board no shell has is refused before the shell is asked
+    # (the ADR-005 S4x review; the desktop's window answered 500 for it).
+    from src.core.Actions import AutonaActions
     for path in ("/scoreboard3-open-set", "/scoreboard3-get-thumbnail-png"):
         assert client.get(path).status_code == 500, path
-    assert 3 not in autonaApp.manager.scoreboards
+    assert not AutonaActions.instance.BoardEnsured(3)
+    assert main.asked == [(1, True)] * 2
     for path in ("/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png"):
         response = client.get(path)
         assert (response.status_code, response.get_json()) == (
@@ -1900,38 +1884,14 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
     autonaApp.settle()
 
 
-def test_the_set_selection_of_an_unbuilt_board_builds_it_first(
-        autonaApp, monkeypatch):
-    """The legacy open-set route makes its board ready before the window
-    opens, as it always did (ADR-005 S4y moved the window off the board, not
-    this): what the window loads goes to a board held for its 反映 button,
-    not to one whose build would wipe it."""
-    from src.AutonaShellOperations import AutonaShellOperations
-    from src.core.Actions import AutonaActions
-    shell = AutonaShellOperations.instance
-    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp._dropBoard(2)
-    window = shell.SetWindow(2)
-    opened = []
-    monkeypatch.setattr(window, "PrepareForDisplay",
-                        lambda: opened.append(
-                            (2 in autonaApp.manager.scoreboards, "prepare")))
-    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
-
-    assert WebOps.open_sets("2") == "OK"
-
-    assert opened == [(True, "prepare"), "show"]
-    assert AutonaActions.instance.BoardEnsured(2)
-    assert "score.2" in autonaApp.state.heldPrefixes
-
-
-
-def test_the_window_hands_itself_to_the_shell_before_its_first_board():
-    """The set selection windows are the shell's (AutonaShellOperations,
-    ADR-005 S4y), parented to the main window: the Window hands itself over
-    (UiMounted) before it builds the board it shows, which built its own
-    windows until then. src/Autona.py is the app's start: read, not
-    imported (agent-pitfalls #1)."""
+def test_the_window_hands_itself_to_the_shell():
+    """What opens the SCORE page's set selection is the shell's
+    (AutonaShellOperations, ADR-005 S4y), through the main window: the
+    Window hands itself over (UiMounted) once, as it builds. Until ADR-005
+    S4ac-3 it did so before it built the board widgets it showed (pinned
+    here then), when the Qt set windows parented to it were built there.
+    src/Autona.py is the app's start: read, not imported (agent-pitfalls
+    #1)."""
     import ast
 
     source = (Path(WebOps.__file__).parent / "Autona.py").read_text(
@@ -1941,15 +1901,10 @@ def test_the_window_hands_itself_to_the_shell_before_its_first_board():
     buildUi = next(node for node in window.body
                    if isinstance(node, ast.FunctionDef)
                    and node.name == "_BuildUi")
-    calls = [(ast.unparse(node), node.lineno) for node in ast.walk(buildUi)
+    calls = [ast.unparse(node) for node in ast.walk(buildUi)
              if isinstance(node, ast.Call)]
-    mounted = [line for text, line in calls
-               if text == "AutonaShellOperations.instance.UiMounted(self)"]
-    built = [line for text, line in calls if text
-             == "AutonaScoreboardManager.instance.CreateScoreboard("
-                "battleFormat)"]
-    assert len(mounted) == 1 and len(built) == 1
-    assert mounted[0] < built[0]
+    assert calls.count(
+        "AutonaShellOperations.instance.UiMounted(self)") == 1
 
 
 def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
@@ -1993,7 +1948,6 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
             image, "PNG")
         assert Path(jpg).read_bytes() == shellModule._EncodeImage(
             image, "JPG")
-        assert 2 not in autonaApp.manager.scoreboards
         assert not AutonaActions.instance.BoardEnsured(2)
         assert "score.2" not in autonaApp.state.heldPrefixes
         assert SettingsManager.Get("general.disable_autoupdate") is False
@@ -2009,75 +1963,26 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
         autonaApp.settle()
 
 
-# Opening the window never failed the request: it was queued until S3e-9
-# (the request's thread emitted the board's signal), so what it raised was
-# reported and the answer was "OK" -- still. OpenSetSelection logs it; it is
-# reported once.
-def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
-        autonaApp, monkeypatch):
-    from loguru import logger
-    from src.AutonaShellOperations import AutonaShellOperations
-    shell = AutonaShellOperations.instance
-    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.ready(1)
-
-    def fail():
-        raise RuntimeError("the window failed")
-
-    monkeypatch.setattr(shell.SetWindow(1), "PrepareForDisplay", fail)
-    hooked = []
-    monkeypatch.setattr(sys, "excepthook",
-                        lambda kind, error, trace: hooked.append(error))
-    logged = []
-    sink = logger.add(lambda message: logged.append(message.record),
-                      level="ERROR")
-    try:
-        assert WebOps.open_sets("1") == "OK"
-    finally:
-        logger.remove(sink)
-
-    reported = [str(error) for error in hooked] + [
-        str(record["exception"].value) for record in logged
-        if record["exception"] is not None]
-    assert reported == ["the window failed"]
-
-
 # ── on the SCORE page, its dialog (ADR-005 S4ab-2) ───────────────────────
 #
-# While SCORE is the React page, the legacy open-set opens the page's set
-# selection dialog (Window.OpenScoreSets: the window brought to the front on
-# SCORE, its view asked) instead of the Qt window -- for the board of the
-# format only (the page shows no other; the owner's call, 2026-11-11). The
-# answer is the "OK" of before either way.
+# The legacy open-set opens the SCORE page's set selection dialog
+# (Window.OpenScoreSets: the window brought to the front on SCORE, its view
+# asked) -- for the board of the format only (the page shows no other; the
+# owner's call, 2026-11-11). The answer is the "OK" of before. The Qt
+# window it opened instead on the way back to the Qt panel went in ADR-005
+# S4ac-3.
 
 class _MainWindow:
     """What the shell asks of the main window (src/Autona.py's Window, which
-    cannot be imported: agent-pitfalls #1). ``onPage``: SCORE is the React
-    page, not the way back to the Qt panel."""
+    cannot be imported: agent-pitfalls #1)."""
 
-    def __init__(self, onPage):
+    def __init__(self):
         from src.Helpers.AutonaQtHelper import in_gui_thread
-        self.onPage = onPage
         self.asked = []
         self._inGui = in_gui_thread
 
-    def ScoreSetsOnPage(self):
-        return self.onPage
-
     def OpenScoreSets(self, board):
         self.asked.append((board, self._inGui()))
-
-
-def _setWindowsWatched(shell, monkeypatch):
-    # Boards 1 and 2's Qt windows (made before the main window stands in).
-    opened = []
-    for board in (1, 2):
-        window = shell.SetWindow(board)
-        monkeypatch.setattr(window, "PrepareForDisplay",
-                            lambda board=board: opened.append(("prepare", board)))
-        monkeypatch.setattr(window, "show",
-                            lambda board=board: opened.append(("show", board)))
-    return opened
 
 
 def test_on_the_score_page_the_legacy_open_set_asks_the_page(
@@ -2089,8 +1994,7 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
     autonaApp.ready(1)
     autonaApp._dropBoard(2)
-    opened = _setWindowsWatched(shell, monkeypatch)
-    main = _MainWindow(onPage=True)
+    main = _MainWindow()
     monkeypatch.setattr(shell, "_parent", main)
     prepared = []
     monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
@@ -2104,9 +2008,9 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
     assert main.asked == [(1, True)]
-    # No Qt window, and no board made ready for it: what the dialog loads
-    # goes through /api/v1's :load-set, which does that.
-    assert opened == [] and prepared == []
+    # No board made ready for it: what the dialog loads goes through
+    # /api/v1's :load-set.
+    assert prepared == []
 
     ws = socketio.test_client(app, flask_test_client=client)
     ws.get_received()
@@ -2128,8 +2032,8 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
     assert main.asked == [(1, True)] * 2
-    assert opened == [] and prepared == []
-    assert 2 not in autonaApp.manager.scoreboards
+    assert prepared == []
+    assert not AutonaActions.instance.BoardEnsured(2)
     assert any("scoreboard 2" in message and "nothing opened" in message
                for message in logged), logged
 
@@ -2153,7 +2057,7 @@ def test_on_the_score_page_the_open_set_from_a_request_thread_is_the_guis(
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
     autonaApp.ready(1)
-    main = _MainWindow(onPage=True)
+    main = _MainWindow()
     monkeypatch.setattr(shell, "_parent", main)
     answers = []
 
@@ -2171,24 +2075,25 @@ def test_on_the_score_page_the_open_set_from_a_request_thread_is_the_guis(
     assert main.asked == [(1, True)]
 
 
-@pytest.mark.parametrize("failing", ["OpenScoreSets", "ScoreSetsOnPage"])
 def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
-        autonaApp, monkeypatch, failing):
-    # What the page's way raises -- asking the window, or asking it which way
-    # it is -- is logged, reported once, and not the request's: "OK", as the
-    # Qt window's failure above. Nothing else opens instead.
+        autonaApp, monkeypatch):
+    # Opening never failed the request: it was queued until S3e-9 (the
+    # request's thread emitted the board's signal), so what it raised was
+    # reported and the answer was "OK" -- still. What asking the window
+    # raises is logged, reported once, and not the request's. (Asking it
+    # which way SCORE was, and the Qt window's own failure, were checked here
+    # too until ADR-005 S4ac-3 removed the way back.)
     from loguru import logger
     from src.AutonaShellOperations import AutonaShellOperations
     shell = AutonaShellOperations.instance
     monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
     autonaApp.ready(1)
-    opened = _setWindowsWatched(shell, monkeypatch)
-    main = _MainWindow(onPage=True)
+    main = _MainWindow()
 
     def fail(*args):
         raise RuntimeError("the window failed")
 
-    monkeypatch.setattr(main, failing, fail)
+    monkeypatch.setattr(main, "OpenScoreSets", fail)
     monkeypatch.setattr(shell, "_parent", main)
     prepared = []
     monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
@@ -2207,30 +2112,7 @@ def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
         str(record["exception"].value) for record in logged
         if record["exception"] is not None]
     assert reported == ["the window failed"]
-    assert opened == [] and prepared == []
-
-
-def test_switched_back_the_legacy_open_set_opens_the_qt_window(
-        autonaApp, monkeypatch):
-    # The way back to the Qt panel (general.qt_scoreboard_panel): the Qt
-    # window as before -- another board's too, made ready first.
-    from src.AutonaShellOperations import AutonaShellOperations
-    from src.core.Actions import AutonaActions
-    shell = AutonaShellOperations.instance
-    monkeypatch.setattr(WebOps, "openSetSelection", shell.OpenSetSelection)
-    autonaApp.board(1)
-    autonaApp._dropBoard(2)
-    opened = _setWindowsWatched(shell, monkeypatch)
-    main = _MainWindow(onPage=False)
-    monkeypatch.setattr(shell, "_parent", main)
-    assert AutonaActions.instance.ActiveBoard() == 1
-
-    assert WebOps.open_sets("1") == "OK"
-    assert WebOps.open_sets("2") == "OK"
-
-    assert opened == [("prepare", 1), ("show", 1), ("prepare", 2), ("show", 2)]
-    assert main.asked == []
-    assert AutonaActions.instance.BoardEnsured(2)
+    assert prepared == []
 
 
 # ── every route and event answers headless (ADR-005 S3e-9) ───────────────

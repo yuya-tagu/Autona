@@ -280,7 +280,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 ##### `score.{N}` — スコアボード
 
 `{N}` は `"1"` / `"2"` / `"3"`。board1=1v1、board2=team、board3=crew battle。
-board3 は `AutonaCrewBattleWidget` であり、board1/2 用の通常スコア操作とは一部 API が異なる。
+board3 はクルーバトル（`core/CrewBattleService`）であり、board1/2 用の通常スコア操作とは一部 API が異なる（Qt のクルーボード `AutonaCrewBattleWidget` は ADR-005 S4ac-3 で削除）。
 
 ```
 score.{N}
@@ -381,7 +381,7 @@ Start.gg からの取り込み（大会の最後の phase のダブルエリミ�
 国とキャラは**識別子で受け取り core が値を組む**（ADR-005 S4h）: `SetPlayerCountry(slot, code)` /
 `SetPlayerCharacter(slot, en_name, skin)`。ページの選手の書き込みは `UpdatePlayer(slot, fields)` で、1 リクエストの
 欄を `StateManager.lock` の中でゲームのカタログの 1 つの snapshot と国の 1 回の参照で解決し、1 つでも断れば何も書かない
-（キャラに付いた `game` が読み込み中のゲームの codename と違うときも。S4i）。値は選手カードと同じ組み立て（`PlayerService.BuildCountryValue` /
+（キャラに付いた `game` が読み込み中のゲームの codename と違うときも。S4i）。値はボードの選手スロットと同じ組み立て（`PlayerService.BuildCountryValue` /
 `BuildCharacterValue`）。Start.gg の取り込みのキャラは、従来どおりキャラの config のコピーに、パネルの値に
 しかないキー（`assets` ほか）を後ろに足したもの（`ImportedCharacterValue`。既存のキーと値は変えない）。
 state の値からパネルが示す選択への逆引きは `Top8Service.CharacterPick`（codename を優先。S4h より前の
@@ -400,7 +400,7 @@ top8
 │   │                                       emoji / 座標。カスタム国旗も code で。パネルの値は選手
 │   │                                       カードの country と同じ形・キー順。取り込みは
 │   │                                       CountryCatalog.BasicCountryInfo の順)
-│   └── characters.1                 W R   (パネルの選択: 選手カードのキャラ 1 枠と同じ形 name /
+│   └── characters.1                 W R   (パネルの選択: ボードの選手スロットのキャラ 1 枠と同じ形 name /
 │                                           en_name / display_name / codename / modded / assets /
 │                                           skin（スキンの行）/ variant（常に {}）。取り込み: キャラの
 │                                           config のコピー（export_name / smashgg_name / locale /
@@ -657,15 +657,15 @@ set_selection                      リストごとの進み具合（起動のた
 「一覧に何も無い」。行は表示文字列ではなく決まったキーだけの構造で、実名・SNS・キャラを含まない（`SetRow` ほかのホワイトリスト。
 「 (A, B)」などの文言は表示側）。大会を読み込み直す・解除すると、provider のアダプタが provider を差し替えた直後に
 `Forget()` を直接呼び、走っている取得を捨てて全リストを次の revision の idle にする。`phases` / `stations` の行は捨て、
-`sets` の行は URL と組で残す（同じ大会を読み直すと戻る。セット選択ウィンドウのキャッシュと同じ）。
+`sets` の行は URL と組で残す（同じ大会を読み直すと戻る。ADR-005 S4ac-3 で削除した Qt のセット選択ウィンドウのキャッシュと同じ）。
 起動時のシード（`StateSchema.SeedPanelState()`）は idle で、revision は保存された値を引き継ぐ。
 外からは v1 の `POST /api/v1/tournament/{phases,stations,sets}:refresh`（取得の開始。202 / 実行中は 409 `CONFLICT` /
 大会なしは 409 `NOT_READY`）・`POST /api/v1/tournament/sets:cancel`・`GET /api/v1/tournament/{phases,sets,stations}` で使う
-（`.claude/design/external-control-api.md` §5.18・§7.3）。Qt のセット選択・配信台ウィンドウはこの state を読まず、
-provider のアダプタと窓自身のキャッシュを通る（一覧は共有しない: 窓で取得した一覧はダイアログに出ず、逆も出ない）。React の SCORE ページのセット選択・配信台のダイアログ（ADR-005 S4ab。`web/src/ScorePage/SetSelection.tsx`）は
+（`.claude/design/external-control-api.md` §5.18・§7.3）。Qt のセット選択・配信台ウィンドウ（この state を読まず、
+provider のアダプタと窓自身のキャッシュを通っていた）は ADR-005 S4ac-3 で削除した。React の SCORE ページのセット選択・配信台のダイアログ（ADR-005 S4ab。`web/src/ScorePage/SetSelection.tsx`）は
 この state を読む: 進み具合（`done` / `total`。total 0 は不定のバー）と状態の文言を描き、リストの `revision` / `status` が
 変わったとき（running へ変わったときを除く）とダイアログを開いたときに GET を読み直す。行の文字列の規則（ダブルス・完了したペア）は
-`web/src/ScorePage/setRows.ts` で、`setRows.cases.json` を jest と `tests/test_set_selection.py`（core と 2 つの窓）が読む。
+`web/src/ScorePage/setRows.ts` で、`setRows.cases.json` を jest と `tests/test_set_selection.py`（core。2 つの窓との照合は S4ac-3 で窓ごと削除）が読む。
 
 ##### `ui` — UI 表示用キャッシュ
 
@@ -758,9 +758,10 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（`GameAssetCatalog` 直。
 Qt モデルなし）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
 `wire_web_server`、Web 操作のボード周りの違いは `AutonaWebOperations.boardHost`（デスクトップは
-`DesktopBoardHost`、ヘッドレスは既定の `BoardHost`）が吸収する。ボードが無いので held にならず、
+`DesktopBoardHost`（ADR-005 S4ac-3 から操作を GUI スレッドで走らせる `Run` だけ）、ヘッドレスは既定の `BoardHost`）が吸収する。
+ボードは held にならず（`MakeBoards` を `panel` なしで呼ぶ。S4ac-1）、
 書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作（セット選択を
-開く `open_sets`（React の SCORE ではページのダイアログ、退路では Qt の窓。S4ab-2）・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
+開く `open_sets`（SCORE のページのダイアログ。S4ab-2。Qt の窓は S4ac-3 で削除）・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
 `AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` に、シェルのアダプタ
 `AutonaShellOperations`（S4y でスコアボード dock から移した）の同名の操作を登録する）だけで、ほかの Web 操作は
 すべて動く（ADR-005 S3e-9・S4o）。
@@ -770,7 +771,7 @@ Qt モデルなし）・Web サーバーを動かす。デスクトップと共�
 | ルール | 内容 |
 |------|------|
 | **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず Web 操作経由**（`AutonaWebOperations`。ADR-005 S3c。ボード依存の `WebServerActions` は S3e-9 で削除）。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も Web 操作経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md) の「Step 5 完了時点の書き手台帳」）。`src/core` 外に残る書き手は `AutonaTournamentDataProvider`（`provider_videogame`）の 1 つだけで、Qt ウィジェットではない provider 層（`game.*` は 2026-10-23 の ADR-005 S1a で `src/core/GameAssetCatalog.py` へ移動）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
-| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル（第 5 弾。同じ弾のリザルト順位は ADR-005 S4r で `core/ResultService` へ、実況スロットは ADR-005 S3e-2 で `core/CommentaryService` へ移った。下記）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（鏡映）を 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOfs`）**（ADR-005 S2e。`best_of` の 6 キーとステージ行を 1 保存サイクルで書く。行は `AutonaActions` が持つボードごとのトラッカー（ADR-005 S4t で常時）に操作の中で作り直させ、BEST OF のスピンボックスと行は state を描画する。旧実装はスピンボックス主導だった）、**人数・キャラ数（`SetRoster` / ゲームのロードの `ApplyGameRoster`）**（ADR-005 S3e-6。選手スロットとキャラ枠の増減・1 人になるときのチーム名のクリアを 1 保存サイクルで書く。ボードは held サイクルの中でカードを state のスロットに合わせて作り / 退役させ、破棄はイベントループに戻ってから行う。旧実装は 2 つのスピンボックス（`playerNumber` / `charNumber`）とカードが書き、ヘッドレスでは変えられなかった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**。行数は S2e から `AutonaActions.SetBestOf` が決め、ウィジェットはサービスの `rowsVersion` を見てボタンを作り直す）。トラッカーはボードの有無によらず `AutonaActions.GameTracker(board)` にあり、スコア → 行の追従はスコアを書いた操作が core で行う（`Scores()` + `FollowScores()`。ADR-005 S4t。`writingScore` のガードは不要になり削除した）。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードの操作（ストック・出場中のメンバー・人数・スワップ・リセット・クリア・`best_of`。チーム合計がメンバーストックの派生値なので Actions に載せず、ADR-005 S3e-2 からはボードの入力欄も Web も `CrewBattleService` の同じ操作を呼ぶ）/ **実況の 12 スロット**（`commentary.*`。ADR-005 S3e-2 から書き手は `core/CommentaryService` で、パネルの入力欄も Web の `set_commentary_data` / `load_commentator_from_tag` も同じ関数を呼び、パネルは state を描画するだけ）/ **選手スロットの読込・クリア・DB 保存**（`score.{n}.team.{t}.player.{m}.*`。ADR-005 S3e-3 から `core/PlayerService` の `ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決まで）/ `ClearSlot` / `SavePlayerToDB` で、セットの entrants・Web の選手編集・タグからの読込・補完の選択・カードのクリアボタンが同じ操作を呼び、カードは state を描画するだけ。React の SCORE ページの欄の編集のために、カードの入力欄（文字の欄・国・地域）とキャラ行の 3 コンボと同じ書き込みを 1 回の lock と 1 保存サイクルで組む `Edit` / `EditCharacter` もある（v1 の `PATCH .../players/{p}/fields` / `.../characters/{row}`。ADR-005 S4z。Qt のカードはまだ欄ごとの操作を呼ぶ。同じ match バーの v1 は `PATCH /scoreboards/{n}/match` で、`SetMatchField` / `SetBestOf` を呼ぶ）/ **スコア欄への数値の手入力**（スピンボックスの `valueChanged` が v1 の `score:set` と同じ `AutonaActions.SetScore` を呼ぶ。ADR-005 S4x。それまでは `GameTrackerService.UpdateScore` を呼んでいた（削除済み）。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合う。行の追従はスコアを書いた操作が行い（上記）、ステージ集計（`PublishStageResults`）は追従を呼ばないので、1 クリックで次のゲームまで勝ちになることは無い（ADR-005 S4t）。 |
+| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル（第 5 弾。同じ弾のリザルト順位は ADR-005 S4r で `core/ResultService` へ、実況スロットは ADR-005 S3e-2 で `core/CommentaryService` へ移った。下記）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（鏡映）を 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOfs`）**（ADR-005 S2e。`best_of` の 6 キーとステージ行を 1 保存サイクルで書く。行は `AutonaActions` が持つボードごとのトラッカー（ADR-005 S4t で常時）に操作の中で作り直させ、BEST OF のスピンボックスと行は state を描画していた（ADR-005 S4ac-3 で Qt の SCORE ごと削除）。旧実装はスピンボックス主導だった）、**人数・キャラ数（`SetRoster` / ゲームのロードの `ApplyGameRoster`）**（ADR-005 S3e-6。選手スロットとキャラ枠の増減・1 人になるときのチーム名のクリアを 1 保存サイクルで書く。旧実装は Qt のボードの 2 つのスピンボックス（`playerNumber` / `charNumber`）とカードが書き、ヘッドレスでは変えられなかった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、REST v1（React の SCORE ページ）・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。Qt の SCORE（state 通知を受けて表示だけを更新していたボードのウィジェット）は ADR-005 S4ac-3 で削除した。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持つ（行数は S2e から `AutonaActions.SetBestOf` が決める。行のボタンを描いていた Qt の `AutonaIndividualGameTracker` は ADR-005 S4ac-3 で Qt の SCORE ごと削除し、React の SCORE ページには行を出さない。記録と v1 の `stages` は残る）。トラッカーはボードの有無によらず `AutonaActions.GameTracker(board)` にあり、スコア → 行の追従はスコアを書いた操作が core で行う（`Scores()` + `FollowScores()`。ADR-005 S4t。`writingScore` のガードは不要になり削除した）。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードの操作（ストック・出場中のメンバー・人数・スワップ・リセット・クリア・`best_of`。チーム合計がメンバーストックの派生値なので Actions に載せず、ADR-005 S3e-2 から Web は `CrewBattleService` の操作を呼ぶ。Qt のクルーボードの入力欄も同じ操作を呼んでいた（S4ac-3 で削除））/ **実況の 12 スロット**（`commentary.*`。ADR-005 S3e-2 から書き手は `core/CommentaryService` で、パネルの入力欄も Web の `set_commentary_data` / `load_commentator_from_tag` も同じ関数を呼び、パネルは state を描画するだけ）/ **選手スロットの読込・クリア・DB 保存**（`score.{n}.team.{t}.player.{m}.*`。ADR-005 S3e-3 から `core/PlayerService` の `ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決まで）/ `ClearSlot` / `SavePlayerToDB` で、セットの entrants・Web の選手編集・タグからの読込・補完の選択・クリアが同じ操作を呼ぶ。React の SCORE ページの欄の編集のために、選手の欄（文字の欄・国・地域）とキャラ行の 3 コンボの書き込みを 1 回の lock と 1 保存サイクルで組む `Edit` / `EditCharacter` もある（v1 の `PATCH .../players/{p}/fields` / `.../characters/{row}`。ADR-005 S4z。欄ごとの操作を呼んでいた Qt のカードは S4ac-3 で削除。同じ match バーの v1 は `PATCH /scoreboards/{n}/match` で、`SetMatchField` / `SetBestOf` を呼ぶ）/ **スコア欄への数値の手入力**（v1 の `score:set` = `AutonaActions.SetScore`。ADR-005 S4x。Qt のスピンボックスの `valueChanged` も同じ操作を呼んでいた（S4ac-3 で削除）。それまでは `GameTrackerService.UpdateScore` を呼んでいた（削除済み）。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合う。行の追従はスコアを書いた操作が行い（上記）、ステージ集計（`PublishStageResults`）は追従を呼ばないので、1 クリックで次のゲームまで勝ちになることは無い（ADR-005 S4t）。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -910,8 +911,8 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 `Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 22`）が以下のパネルを管理する。
 
-**構築タイミング**: 起動時に構築されるのは `Scoreboard`（アクティブな `battle_format` の
-board 1 面のみ。ADR-005 S4aa からは退路のときだけサイドバーのページで、React モードではページに載らない）だけで、**残りのパネルは初回表示時にファクトリで構築**される
+**構築タイミング**: **パネルはすべて初回表示時にファクトリで構築**される（どれも共有ビューの React のページ）。
+ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format` の board 1 面。S4aa からは退路のときだけサイドバーのページ）を起動時に建てていた。ボード（state）は core が起動時に 3 つとも作る（下記・S4ac-1）
 （起動再設計 Step 4b + headless core Step 4b。§4.1.1）。`Tournament Info` も
 2026-08-31 に遅延構築へ移行した — `tournamentInfo.*` の書き手が
 `src/core/TournamentInfoService.py`（`bootstrap_core()` 生成）になり、パネル不在でも
@@ -928,7 +929,7 @@ board 1 面のみ。ADR-005 S4aa からは退路のときだけサイドバー�
 | 2 | `WebPanels`（共有ホスト。ナビの文言は `Thumbnail Settings`、ナビのキーは `thumbnail`） | React の `ThumbnailPage`（`/web/thumbnail`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4p）。Qt 版（`AutonaThumbnailSettingsWidget` と `.ui`）は S4p で削除済み | テンプレート・背景（既定 / 大会バナー / アップロードした画像）・表示する項目・今のゲームのキャラ画像の配置・機能別カラー・既定に戻す（確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび）、サムネイルの作成（`out/thumbnails/`）と作成した画像のコピー、動画タイトル。**処理の正本は `src/core/ThumbnailService.py`**（ADR-005 S4o）で、ページは `/api/v1/thumbnail*`・`colors/thumbnail` を呼んで `thumbnail.render` を描画するだけ。SCORE の生成・X 投稿と legacy の get-thumbnail も同じ `RenderPayload()`（読み済みの設定）で描く | `thumbnail_config.*`（settings.json。core 経由） | `thumbnail.render`、ボード 1 の `score.1.*`、`tournamentInfo.*`、`game`、`colors.thumbnail.*`、`GET /api/v1/thumbnail` | ✓ |
 | 3 | `WebPanels`（共有ホスト。ナビの文言は `Result Settings`、ナビのキーは `result`） | React の `ResultPage`（`/web/result`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4r）。Qt 版（`AutonaResultSettingsWidget` と `.ui`、`result/main_generate_result.py`、`result/ResultRenderer.py`）は S4r で削除済み | レイアウト選択（対戦形式に追従）、単独の行（順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ・スコアボードから補完の表示）と団体の行（順位・チーム名・メンバー 5 人）の編集、並べ替え（上下ボタン + ドラッグ）、大会結果の読み込み（確認つき）、すべてクリア（今の種類だけ・確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび。サンプルの表示つき）、作成（`out/results/`）と作成した画像のコピー、1 クリックの X 投稿（作成 + クリップボード + 既定のブラウザで投稿画面）、選手を DB に保存、機能別カラー。**処理の正本は `src/core/ResultService.py`**（ADR-005 S4q）で、ページは `/api/v1/result*`・`colors/result` を呼んで state を描画するだけ | `result_players` / `result_teams`、`result_config.layout`（settings.json）（core 経由） | `GET /api/v1/result`・`GET /api/v1/result/post`、`result_render`、`result_standings`、`result_layout`、`score.*`（補完）、`tournamentInfo.*`、`game`、`colors.result.*` | ✓ |
 | 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
-| 5 | `WebPanels`（共有ホスト。ナビの文言は `Scoreboard`、ナビのキーは `scoreboard`）。退路では `Scoreboard` | React の `ScorePage`（`/web/scoreboard`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4aa）。**退路**: 設定 `general.qt_scoreboard_panel`（一般タブのチェックボックス。既定オフ。項目を初めて開くときに読む = `Window._SettleWayBack`）が `true` のときだけ、Qt の `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の dock をこの項目のページにする（S4ac で Qt 版ごと削除予定）。ボードは 3 つとも core が起動時に作り、ボード 1 / 2 を held にする（`bootstrap_gui()` の `AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまでは held の登録が Qt のボードの構築にあり、見せていない面は held でなかった）。dock と形式のボードのウィジェットはどちらのモードでも起動時に建つ（退路の Qt モードのため。React モードでは dock はどのページにも載らず、Window の子として隠れている）。セット選択 / 配信台のウィンドウはシェルのアダプタ `AutonaShellOperations` の持ち物（ADR-005 S4y） | 形式のボード（board1=1v1、board2=team、board3=crew）のスコア入力・選手編集（欄・詳細・キャラ行・補完の読込・上下移動）・match バー・反映（held のボード）・X 投稿・ブラウザ版を開く。ボード 1 / 2 は大会があれば「大会の試合を選ぶ」でページのセット選択のダイアログ（フェーズ・取得・完了したセット / ペア・検索・並べ替え・進み具合。行を選ぶと `:load-set`）と、そこから配信台のダイアログ（`:follow`）を開き、追従中はタイマー行（自動更新のラベル・次の更新までの秒・キャンセル `:stop-follow`）を出す（ADR-005 S4ab。デスクトップに限らない）。**Ctrl+Shift+O と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）も、React モードではこのダイアログを開く**（ADR-005 S4ab-2）: シェルのアダプタ `AutonaShellOperations` が `Window.OpenScoreSets` を呼び、メインウィンドウを前に出して（最小化からも戻す）サイドバーを SCORE にし、共有ビューに `window.autonaPanelShell.openScoreSets(board)` を流す（ビューの構築・読み込み・凍結からの復帰の後に届け、パネル シェルが受け取るまで保留。1 つの文書には答えが来るまで 1 回だけ流す。先に別のパネルを開いたら・読み込みが失敗したら捨てる。終了処理中は何もしない）。ページは依頼の後に読んだ形式のボードを描いてから、そのボードで「大会の試合を選ぶ」が出る条件（ボード 1 / 2・大会あり）のときだけ開き、ほかはページを見せるだけ。legacy の `n` が形式のボードと違うとき（1v1 での `/scoreboard2-open-set`）は何もせずログだけで、答えは今までどおり `OK`。退路の Qt モードでは今までどおり Qt の窓。何も書かない。ページは `/api/v1`（`scoreboards/{n}/*`・`battle-format`・`match-names/candidates`・`tournament/info`・`tournament/{phases,sets,stations}`・`display-options`・`thumbnail:generate`）を呼び、held のボードは `GET .../pending`、ほかは state を描画するだけ | `score.{N}.*`（core 経由） | `score.{N}.*`、`GET .../pending`（held のボード）、`GET .../post`、`GET .../follow`（`scoreboard_follow` で読み直す）、`set_selection.*`、`tournamentInfo.*`、`display_options.*`、`game.*` | ✓ |
+| 5 | `WebPanels`（共有ホスト。ナビの文言は `Scoreboard`、ナビのキーは `scoreboard`） | React の `ScorePage`（`/web/scoreboard`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4aa）。ボードは 3 つとも core が起動時に作り、ボード 1 / 2 を held にする（`bootstrap_gui()` の `AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまでは held の登録が Qt のボードの構築にあり、見せていない面は held でなかった）。Qt 版（`AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の dock）と退路の設定 `general.qt_scoreboard_panel`・Qt のセット選択 / 配信台のウィンドウは ADR-005 S4ac-3 で削除した（古い `settings.json` に残ったキーは読まない） | 形式のボード（board1=1v1、board2=team、board3=crew）のスコア入力・選手編集（欄・詳細・キャラ行・補完の読込・上下移動）・match バー・反映（held のボード）・X 投稿・ブラウザ版を開く。ボード 1 / 2 は大会があれば「大会の試合を選ぶ」でページのセット選択のダイアログ（フェーズ・取得・完了したセット / ペア・検索・並べ替え・進み具合。行を選ぶと `:load-set`）と、そこから配信台のダイアログ（`:follow`）を開き、追従中はタイマー行（自動更新のラベル・次の更新までの秒・キャンセル `:stop-follow`）を出す（ADR-005 S4ab。デスクトップに限らない）。**Ctrl+Shift+O と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）も、このダイアログを開く**（ADR-005 S4ab-2）: シェルのアダプタ `AutonaShellOperations` が `Window.OpenScoreSets` を呼び、メインウィンドウを前に出して（最小化からも戻す）サイドバーを SCORE にし、共有ビューに `window.autonaPanelShell.openScoreSets(board)` を流す（ビューの構築・読み込み・凍結からの復帰の後に届け、パネル シェルが受け取るまで保留。1 つの文書には答えが来るまで 1 回だけ流す。先に別のパネルを開いたら・読み込みが失敗したら捨てる。終了処理中は何もしない）。ページは依頼の後に読んだ形式のボードを描いてから、そのボードで「大会の試合を選ぶ」が出る条件（ボード 1 / 2・大会あり）のときだけ開き、ほかはページを見せるだけ。legacy の `n` が形式のボードと違うとき（1v1 での `/scoreboard2-open-set`）は何もせずログだけで、答えは今までどおり `OK`。メインウィンドウができる前の依頼もログだけで何も開かない（S4ac-3 までは Qt の窓を開いていた）。何も書かない。ページは `/api/v1`（`scoreboards/{n}/*`・`battle-format`・`match-names/candidates`・`tournament/info`・`tournament/{phases,sets,stations}`・`display-options`・`thumbnail:generate`）を呼び、held のボードは `GET .../pending`、ほかは state を描画するだけ | `score.{N}.*`（core 経由） | `score.{N}.*`、`GET .../pending`（held のボード）、`GET .../post`、`GET .../follow`（`scoreboard_follow` で読み直す）、`set_selection.*`、`tournamentInfo.*`、`display_options.*`、`game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `WebPanels`（共有ホスト。ナビの文言は `Statistics`、ナビのキーは `stats`） | React の `StatsPage`（`/web/stats`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4k）。Qt 版（`AutonaStatsWidget` と、そのサブタブの `AutonaAnalysisWidget`）は S4k で削除済み | ボード 1 の統計の取得（`POST /api/v1/scoreboards/1/stats:refresh`）と、アップセット係数・対戦カードの 1 行、4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧。下記 §4.1.0）。統計の書き手は core の `StatsService`、試合一覧は core の `AnalysisService`（ADR-005 S4j）で、ページは state を描画するだけ（read-only） | （なし。取得の依頼だけ） | `score.1.{recent_sets,last_sets,history_sets,upset_factor}`、反映済みの選手名、`analysis.*`、`GET /api/v1/analysis` | ✓ |
 | 7.5 | `WebPanels`（共有ホスト。ナビの文言は `Stats Display Settings`、ナビのキーは `statsPreview`） | React の `StatsPreviewPage`（`/web/statsPreview`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4l）。Qt 版（`AutonaStatsPreviewWidget`）は S4l で削除済み | 統計オーバーレイ 7 種（`core/StatsOverlays` の固定表。`last_sets` / `tournament_history` は player1 / player2 の 2 項目）から 1 つを選び、プレビュー（オーバーレイ自体の縮小表示）・OBS 用 URL・機能別カラー（`stats`）・Companion マクロ（`stats:refresh` のメソッド・パス・URL）を出す。選択は `settings.json` の `stats_preview.selected_type`（`GET /api/v1/stats/overlays` / `PUT .../selected`）。state を書くのは色カード（`PATCH /api/v1/colors/stats`）だけ | `colors.stats.*` | `colors.stats.*`, `tournamentInfo.*` | ✓ |
@@ -936,13 +937,8 @@ board 1 面のみ。ADR-005 S4aa からは退路のときだけサイドバー�
 
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。旧 `ANLYSE`（`AutonaAnalysisWidget`）は `Statistics` パネルのサブタブだったが、ADR-005 S4k で React の統計情報ページの 4 つ目のタブ「この大会の試合一覧」になり、Qt 版は削除済み。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
-> スコアボードの人数と「1選手あたりのキャラ数」は state が正本（スロット数とスロットの `character` の数。`AutonaActions.SetRoster`、ADR-005 S3e-6）。ボードの 2 つのスピンボックスは変更を依頼し、state を表示するだけ（キャラ数の初期値 3）。人数 0 のボードは次の選手のキャラ数を覚えておく（デスクトップは `charNumber`、ヘッドレスはボードホスト）。ゲームのロードが別のゲームへの切り替えなら、全スロットのキャラと mains を空にする（起動時の復元・同じゲームの再ロードでは空にしない。Top 8 と同じ規則）。シングルスのボードの LOSERS チェックボックスは、選手カードの下の専用の行に置く（カードと一緒に消えないように）。
-> **スコアボードの選手行はコンパクト表示（2026-07、Web UI パリティ）**: Web `Player.jsx`（狭幅）と同配置 — スポンサー欄・プレイヤー名欄を**縦積み全幅**、その下に左寄せの「>>詳細」リンク（共通 QSS `QPushButton#linkButton` で細身表示）。本名・Twitter・国/地域・キャラクター・追加情報・シード表示・クリアは選手ごとのモーダルダイアログ（`AutonaScoreboardPlayerWidget._buildCompactDetailsUI`）に移設。ダイアログは同一ウィジェットインスタンスの再親化なので objectName キーパスは不変。選手 DB の編集は React の選手一覧（`/web/playerBrowser`、ADR-005 S4n）で行う。
-> **目アイコン（フィールド表示トグル）はデスクトップから撤去（2026-07）**: 詳細ダイアログは**常時全項目表示**。`display_options.show_*` は Web UI / OBS オーバーレイ描画用の配信設定として存続し、非表示の QAction 群（`_eyeActions`）が `SetDisplayOption`（POST /display-option）と SettingsManager/StateManager 永続化を引き続き担う。デスクトップ側の表示連動が残るのは show_sponsor（インラインのスポンサー欄、「スポンサー名をスコアボードに表示しない」チェックボックス）のみ。「各プレイヤーの使用キャラクター数」スピンボックスも UI から撤去（`charNumber` は非表示のまま存続し、state のキャラ数を表示する。人数が 0 のボードでは新しい選手のキャラ数を決める。既定 3）。
-> **スコア操作 UI（2026-07、Web `ScorePanel.jsx` パリティ）**: チームカードの下に全幅のスコアパネルカード（`scorePanelCard`）を置き、上から「+1｜+1」「スコア表示｜スコア表示（ゴールド・モノスペース、`QSpinBox[scoreDisplay="true"]` の共通 QSS）」「-1｜-1」「スコアリセット（全幅・通常色）」「⇄ チーム入れ替え（全幅）」を縦積み。スコア表示は矢印なし（±ボタンがインクリメント役）。
-> **セクション構成（2026-07）**: 旧 topSectionFrame（Start.gg ロード行を収めた下段セクション）は廃止し、スコアボードは単一セクション。行順は「タイトル行 → Start.gg ロード行（auto-update タイマー含む） → フェーズ/ラウンド/BEST OF → スポンサー非表示チェック → 区切り線 → 共有グリッド（下記） → 下段設定（チームモードのみ）」。「すべての入力値をリセット」は Web の全クリア相当（選手・スコア・フェーズ/プール/ラウンド・BEST OF・チーム名。確認ダイアログあり、danger スタイル）。match バーを消すのはリセット系（すべての入力値をリセット / 全クリア / マッチリセット = `ResetMatch`）だけで、セット読込の前処理（`ClearScore`）は消さない（S-17）。
-> **共有 2 列グリッド（`AutonaScoreboardWidget.columns`、2026-07）**: チームカード・スコアパネル・アクション行は**単一の QGridLayout**（列 stretch 1:1）に載せる。行0 = 1P カード｜2P カード、行1 = スコアパネル（2 列スパン）、行2 = 反映｜すべての入力値をリセット。**行ごとに独立した HBox を使わないこと** — 各行が自コンテンツから別々の「中央」を計算して縦軸がずれるのが過去の不揃いの根本原因（プローブ実測でグリッド共有はカード等幅・行間の軸一致を保証）。**スコア操作専用のサイズ/タイポグラフィは全廃**（旧 `SCORE_PANEL_CTRL_H` / `score_btn_style` / `score_display_style` トークンは削除済み）: 全コントロールはグローバル QSS の標準サイズ。スコア表示スピンボックスのみ「中央揃え・矢印なし」（±ボタンがインクリメント役のため）。
-> **チームカード（2026-07、Web `Team.jsx` パリティ）**: 各チーム列は Paper 風カード（共通 QSS `QWidget#teamCard` / `QFrame#scorePanelCard`、`_styleTeamCard`）。ヘッダー行は敗者側チェックボックス（右）。シングルボードでは 1P/2P ラベルは**表示しない** — 列の識別はプレイヤー名欄のプレースホルダー「{0}Pプレイヤー名」（teamNumber ベース）が担う。チームボードのみ「TEAM N」ラベル＋チーム名欄を表示。詳細リンクの文言は「>>詳細」。
+> スコアボードの人数と「1選手あたりのキャラ数」は state が正本（スロット数とスロットの `character` の数。`AutonaActions.SetRoster`、ADR-005 S3e-6）。SCORE ページの人数・キャラ数の欄は v1 で変更を依頼し、state を表示するだけ（キャラ数の初期値 3）。人数 0 のボードは次の選手のキャラ数を覚えておく（core の `AutonaActions`。ADR-005 S4x から両シェルで 1 つ。Qt のボードの隠しスピン `charNumber` は S4ac-3 で削除）。ゲームのロードが別のゲームへの切り替えなら、全スロットのキャラと mains を空にする（起動時の復元・同じゲームの再ロードでは空にしない。Top 8 と同じ規則）。
+> **Qt のスコアボードの UI の注記（選手行のコンパクト表示・目アイコン・スコア操作 UI・セクション構成・共有 2 列グリッド・チームカード。2026-07 の Web UI パリティ）は、Qt の SCORE ごと ADR-005 S4ac-3 で削除した**。画面は React の `web/src/ScorePage/` が正本。`display_options.show_*` は Web UI / OBS オーバーレイ描画用の配信設定として存続する（書き手は `SetDisplayOption`）。
 
 ##### 4.1.0 統計情報ページのタブ（`web/src/StatsPage/`。ADR-005 S4k）
 
@@ -996,7 +992,7 @@ board 1 面のみ。ADR-005 S4aa からは退路のときだけサイドバー�
   **両シェルとも起動時に 3 つとも作る**（`AutonaActions.MakeBoards()`。ADR-005 S4ac-1: `ResetBoards` → 各ボードの
   `EnsureBoard` を 1 サイクルで。デスクトップは `bootstrap_gui()` が `panel=True` で Window より前に、ヘッドレスは
   `_SeedBoards` が `panel` なしで）。それまではデスクトップがボードのウィジェットの構築でボードを作り、
-  `CreateScoreboard()` が見せないボードにスケルトンを置いていた（今は形式のボードのウィジェットを建てるだけ）
+  `CreateScoreboard()` が見せないボードにスケルトンを置いていた（Qt のボードのウィジェットと `CreateScoreboard()` は S4ac-3 で削除）
   グローバルシグナルへの接続も Window 側に置く
 - 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「パネル登録」
 
@@ -1018,7 +1014,7 @@ board 1 面のみ。ADR-005 S4aa からは退路のときだけサイドバー�
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。退路の設定がある項目は、初めて開くまで共有ビューに加わらない）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1583,13 +1579,13 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations` で開く。React の SCORE ではメインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く（ADR-005 S4ab-2）。退路の Qt モードでは Qt のセット選択ウィンドウ。クルー形式・未構築なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations` で開く。メインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く（ADR-005 S4ab-2。Qt のセット選択ウィンドウは S4ac-3 で削除）。クルー形式・メインウィンドウができる前なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。ボードは S4ac-1 から起動時に 3 つとも作られる） |
 
 ### 6.2 デフォルトホットキー一覧
 
 | アクションキー | デフォルト | Signal | 動作 | 受け手 |
 |--------------|-----------|--------|------|-------|
-| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | アクティブボードのセット選択を開く（React の SCORE: ウィンドウを前に出して SCORE のページのダイアログ。S4ab-2。退路の Qt: Qt のウィンドウ） | シェル（`AutonaShellOperations`。S4y） |
+| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | アクティブボードのセット選択を開く（ウィンドウを前に出して SCORE のページのダイアログ。S4ab-2。Qt のウィンドウは S4ac-3 で削除） | シェル（`AutonaShellOperations`。S4y） |
 | `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 | Actions |
 | `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 | Actions |
 | `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 | Actions |
@@ -1697,7 +1693,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 - React Web UI（Socket.IO で `tshGames` slice に自動配信される）
 - StateManager のキー定義（動的）
-- PyQt の AutonaScoreboardWidget（`game.codename` で動的に切り替わる）
+- React の SCORE ページ（`game.*` で動的に切り替わる。Qt の `AutonaScoreboardWidget` は ADR-005 S4ac-3 で削除）
 
 ### 7.2 新 OBS スコアボードレイアウトの追加
 
@@ -1765,23 +1761,25 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 ### 7.5 新パネルの追加
 
-例: 試合タイマー `AutonaMatchTimerWidget` を追加する。
+例: 試合タイマーのページ `matchTimer` を追加する。パネルは共有ビュー（`AutonaWebPanelHost`）の React のページとして足す
+（新規の Qt パネルは ADR-005 で凍結。最後の Qt パネルだった SCORE は ADR-005 S4ac-3 で削除した）。
 
 #### 触るファイル（必須）
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/AutonaMatchTimerWidget.py` | 新ウィジェットクラス（`QDockWidget` 継承、`__init__` で `setWindowTitle()` 必須） |
-| 2 | `src/layout/AutonaMatchTimer.ui` | UI 定義（必要に応じて） |
-| 3 | `src/Autona.py` | import 追加、`_navSections` への登録（eager ならインスタンス生成 + `setObjectName` + `dockWidgets` 追加、重いパネルなら `_CreateXxxPanel` ファクトリ）、`STATE_VERSION` インクリメント |
+| 1 | `web/src/MatchTimerPage/`（新規）と `web/src/PanelShell/registry.tsx` | ページのコンポーネントと、共有ビューのページ名への登録 |
+| 2 | `src/core/WebAccess.py` の `WEB_PANELS` | ページ名 `"matchTimer"` を足す（共有ビューが開いてよいページの許可リスト） |
+| 3 | `src/Autona.py` | `_CreateMatchTimerPanel` ファクトリ（`return self._WebPanel("matchTimer")`）と `_navSections` への登録、`STATE_VERSION` インクリメント |
 | 4 | `Design.md` §4.1 の表 | パネル一覧に追加 |
 
 #### 触るファイル（任意）
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 5 | `src/ui_constants.py` | ウィジェット固有のスタイル関数追加（必要時） |
-| 6 | `src/StateManager.py` | キー初期化（必要時。動的キーなら不要） |
+| 5 | `web/src/i18n/locales/{en,ja}.json` | ページの文言 |
+| 6 | core のサービスと v1 のルート（`src/AutonaApiV1.py`・`src/core/WebAccess.py` の `ROUTE_ACCESS`） | ページが state を書くとき（書き込みは core に置き、ページは v1 で依頼する） |
+| 7 | `src/core/StateSchema.py` | キーのシード（`SeedPanelState()`）と `KEY_CATALOG`（state を持つとき） |
 
 #### 注意
 

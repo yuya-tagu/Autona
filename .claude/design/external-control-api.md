@@ -115,7 +115,7 @@
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
 | `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）、v1 の試合サムネイルの描画（`POST /thumbnail:preview` / `:generate`。ADR-005 S4o。設定の読み書きと `GET /thumbnail/preview` は答える）。message は `not available in headless`。デスクトップでこれらに答えるのはシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y でスコアボード dock から移した）: legacy のサムネイルはボードを構築しない（`ThumbnailService.DrawBoard` を同期で呼ぶ。未構築のボードを state のまま描き、シード・反映待ち・取り直しの停止を起こさない。クルーボードは 500 のまま、ボード 3 も構築しなくなった）。セット選択ウィンドウを開く操作は、未構築のボードを先に構築する（窓から読み込んだセットが後の構築のシードで消えないように）。**ADR-005 S4ab-2 から、SCORE が React のページのとき（既定。退路の設定 `general.qt_scoreboard_panel` が無効）は Qt の窓ではなくページのセット選択のダイアログを開く**: メインウィンドウを前に出して（最小化からも戻す。外部からの依頼では Windows がタスクバーの点滅で止めることがある）SCORE に切り替え、ページはボード 1 / 2 で大会があるときだけダイアログを開く（無ければページを見せるだけ）。ボードは構築しない（ダイアログからの読み込みは v1 の `:load-set` が準備する）。`n` が今の形式のボードでないとき（1v1 での `/scoreboard2-open-set` など）は何も開かずログだけ。どちらでも答えは今までどおり 200 `OK`（Socket.IO は `open_set` に `OK`）で、ダイアログが開いたかは答えに出ない（窓のころから出なかった）。クルーボード（`/scoreboard3-open-set`）は 500 のまま。退路の Qt モードは今までどおり Qt の窓（未構築のボードを先に構築する）。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）、v1 の試合サムネイルの描画（`POST /thumbnail:preview` / `:generate`。ADR-005 S4o。設定の読み書きと `GET /thumbnail/preview` は答える）。message は `not available in headless`。デスクトップでこれらに答えるのはシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y でスコアボード dock から移した）: legacy のサムネイルはボードを構築しない（`ThumbnailService.DrawBoard` を同期で呼ぶ。未構築のボードを state のまま描き、シード・反映待ち・取り直しの停止を起こさない。クルーボードは 500 のまま、ボード 3 も構築しなくなった）。**ADR-005 S4ab-2 から、セット選択を開く操作は Qt の窓ではなくページのセット選択のダイアログを開く**（Qt の窓と退路の設定 `general.qt_scoreboard_panel` は S4ac-3 で削除。それまでの退路の Qt モードでは窓を開き、未構築のボードを先に構築していた）: メインウィンドウを前に出して（最小化からも戻す。外部からの依頼では Windows がタスクバーの点滅で止めることがある）SCORE に切り替え、ページはボード 1 / 2 で大会があるときだけダイアログを開く（無ければページを見せるだけ）。ボードは構築しない（ダイアログからの読み込みは v1 の `:load-set` が準備する）。`n` が今の形式のボードでないとき（1v1 での `/scoreboard2-open-set` など）は何も開かずログだけ。どちらでも答えは今までどおり 200 `OK`（Socket.IO は `open_set` に `OK`）で、ダイアログが開いたかは答えに出ない（窓のころから出なかった）。クルーボード（`/scoreboard3-open-set`）は 500 のまま。メインウィンドウができる前の依頼は何も開かずログだけ（S4ac-3。それまでは Qt の窓を開いた）。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -161,15 +161,17 @@
   明示ロックは無く「到着順・最後勝ち」。本 API は割り込みを特別扱いしない（重い操作の多重起動だけ §2.8 で弾く）。
 
 ### 2.12 scoreboardNumber（パスパラメータ `{n}`）の規約
-コード確認（[AutonaScoreboardManager.py:41-87](../../src/AutonaScoreboardManager.py)）に基づく。
+コード確認（`AutonaActions.MakeBoards` / `EnsureBoard`）に基づく。
 
-- **有効値は `1`/`2`/`3` のみ**。3 ボードは同一 SCORE ドックに常時生成され、**表示は 1 つだけ切替**される。
+- **有効値は `1`/`2`/`3` のみ**。3 ボードは起動時に core が作り（`AutonaActions.MakeBoards`。ADR-005 S4ac-1）、SCORE ページは形式（`scoreboard.battle_format`）のボードを 1 つだけ描く。
 
-  | n | 種類 | クラス | 状態キー |
+  | n | 種類 | 書き手 | 状態キー |
   |---|------|--------|---------|
-  | 1 | 1v1（シングルス・既定表示） | `AutonaScoreboardWidget` | `score.1` |
-  | 2 | チーム | `AutonaScoreboardWidget` | `score.2` |
-  | 3 | クルーバトル | `AutonaCrewBattleWidget`（**別クラス**） | `score.3` |
+  | 1 | 1v1（シングルス・既定表示） | `AutonaActions` / `PlayerService` ほか | `score.1` |
+  | 2 | チーム | `AutonaActions` / `PlayerService` ほか | `score.2` |
+  | 3 | クルーバトル | `CrewBattleService`（**別の操作**） | `score.3` |
+
+- **ボードの構築（2026-11-11・ADR-005 S4ac-3）**: Qt のボードのウィジェット（`AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget`）は削除した。ボードは S4ac-1 から起動時に 3 つとも core にあるので、**デスクトップにも「未構築のボード」は無い**。本書の「未構築のボードを構築してから書く / 答える」「構築しない」「入力中の欄を先に確定する（フォーカスを外して Qt に確定させる）」は、それまでのデスクトップの遅延構築と Qt の欄の確定についての記述で、S4ac-3 からはどれも何もしない（`DesktopBoardHost` は操作を GUI スレッドで走らせる `Run` だけ。`Prepare` / `CommitEdit` は既定の `BoardHost` のまま）。断り方・書く値・held の扱いは変わらない
 
 - **`{n}` は API 層で `{1,2,3}` を検証し、範囲外は `400 INVALID_ARGUMENT`（MUST）**。
   `GetScoreboard(n)` は未知番号で `None` を返すのみで、既存 Action はその後 `None.signals` で
@@ -548,7 +550,7 @@ Board のページが OBS の「ローカルファイル」に指定させるフ
 
 ### 5.17 `GET /api/v1/scoreboards/{n}/follow`（2026-11-09 追加・ADR-005 S4v）
 
-そのボードが今何を追従しているか（Qt のスコアボードのタイマー行が出すもの）。`{n}` は 1 / 2（board 3 はセットを読まないので `400`）。読みではボードを構築しない（構築されていないボードは何も追従していない）。
+そのボードが今何を追従しているか（SCORE ページのタイマー行が出すもの。S4ac-3 までは Qt のスコアボードのタイマー行も）。`{n}` は 1 / 2（board 3 はセットを読まないので `400`）。読みではボードを構築しない（構築されていないボードは何も追従していない）。
 
 ```json
 { "ok": true, "revision": 12, "data": {
@@ -796,7 +798,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - `mains` はゲーム codename → `[en_name, skin, ""]` 配列のオブジェクト。`savePlayerToDb: true` で選手 DB にも保存。
   - 空ボディ `{}` は何もしない（200）。
 - 委譲: `AutonaWebOperations.update_player` → `PlayerService.ApplyData(data, loadFromDB=True, clear=False)`
-  （ADR-005 S3e-4。旧ルートの選手書き込みの部分だけ。S3e-3 までは `AutonaScoreboardWidget.ApplyPlayerData`）= #11。
+  （ADR-005 S3e-4。旧ルートの選手書き込みの部分だけ。S3e-3 までは Qt のボードの `ApplyPlayerData`）= #11。
   `t` は**状態側のチーム**。旧ルートと違い `match_en` を空にしない（セットのペイロードの `ApplyMatchInfo` を通らないため）。
   それ以外の結果は旧ルートと同じ。デスクトップ・ヘッドレスのどちらでも動く（同じ state になる）。
 - **別の選手の名前にした部分更新は id と city を空にする**（ADR-005 S3e-4）: 書き込み後のスポンサー + タグの組が書き込み前と
@@ -1069,7 +1071,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.40 対戦形式の切り替え `PUT /api/v1/battle-format`（2026-11-10 追加・ADR-005 S4x）
 - body: `{ "format": "singles" | "team" | "crew" }`。デスクトップのサイドバーの切り替えと同じ操作（`AutonaActions.SetBattleFormat`）
 - 返り値: `{ "format", "board", "changed" }`（§5.21 の形 + `changed`）と `revision`。**いまの形式と同じなら `changed: false` で何も書かない**（設定も state も・通知も。旧ルートは無く、サイドバーの同じ形式の選び直しも S4x から何もしない）
-- 切り替えたとき: `scoreboard.battle_format` と旧 `scoreboard.team_mode`（チームなら true）を書き、シェルに知らせ（デスクトップはその形式のボードを、未構築なら構築して表示し、サイドバーの選択を合わせる。応答はその後）、大会リザルトのレイアウトが追従する（チームとクルーは団体のレイアウト、1v1 は単独のレイアウト。合っているレイアウトは手で選んだものを残す。`ResultService.FollowBattleFormat`。`result_layout` が state に出る）。ヘッドレスは表示するボードが無いので、設定とリザルトのレイアウトだけ
+- 切り替えたとき: `scoreboard.battle_format` と旧 `scoreboard.team_mode`（チームなら true）を書き、シェルに知らせ（デスクトップはサイドバーの選択を合わせる。SCORE ページは `battle_format` の通知で形式のボードを描き直す。S4ac-3 までは Qt のボードを未構築なら構築して表示していた。応答はその後）、大会リザルトのレイアウトが追従する（チームとクルーは団体のレイアウト、1v1 は単独のレイアウト。合っているレイアウトは手で選んだものを残す。`ResultService.FollowBattleFormat`。`result_layout` が state に出る）。ヘッドレスは表示するボードが無いので、設定とリザルトのレイアウトだけ
 - 切り替えたときは Socket.IO の `battle_format`（`{}`）が全接続に出る（§5.21。ADR-005 S4z。S4x は「形式は設定なので通知は増やさない」としていたが、React の SCORE ページが他所での切り替えに追従するために足した）。読み手は通知の後に `GET /battle-format` か `GET /health` の `activeBoard` を読む
 - エラー: `400 INVALID_ARGUMENT`（`format` が無い・文字列でない・3 つのどれでもない・JSON オブジェクトでない body。何も書かない）
 
@@ -1111,7 +1113,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 
 ### 6.44 一般の設定 `PATCH /api/v1/settings/general`（2026-11-11 追加・ADR-005 S4ae）
 - body: §5.22 の `general` のキーのうち 1 つ以上（部分更新）。真偽の項目は `true` / `false` だけ、色は `#rgb` / `#rrggbb`（`#rrggbb` の小文字で保存）
-- **全キーを先に検証**し、1 つでも不正（未知のキー・型の違い）なら何も保存しない。今と同じ値は書かない。`general.qt_scoreboard_panel` は受けない
+- **全キーを先に検証**し、1 つでも不正（未知のキー・型の違い）なら何も保存しない。今と同じ値は書かない。`qt_scoreboard_panel`（S4ac-3 で Qt の SCORE ごと削除した退路の設定）は未知のキーとして断る
 - 応答: `data` は §5.22 の `general`（保存後）。`revision` は付かない
 - WRITE（LAN はトークン必須）。ヘッドレスでも動く
 - エラー: `INVALID_ARGUMENT`（空の body・未知のキー・型）、`NOT_READY` 409（`settings.json` を読めなかった起動で、**保存の時点でもまだ開けない**とき。何も保存しない: 書くと読めなかったファイルを置き換え、トークンも失う）
@@ -1177,7 +1179,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
 
-- **board 3 の `:clear` / `:reset-players` / `:reset-match`**（ADR-005 S4w で開いた。Qt のクルーボードにボタンは無く、legacy と同じ操作）: `:reset-match` は全メンバーを既定のストックに戻して出場中を無しにし（名前は残す）、`phase` / `pool` / `match` と `best_of` を空にする（match バーの欄はボードにあるものだけ。クルーボードのシードに `pool` は無く、`PATCH set` で書くまで足さない。ADR-005 S4ac-1 の検収レビュー。それまでは `pool: ""` を足していた）。`:reset-players` は全メンバーの行を空にする（名前も。チーム名・色・人数は残す。入力中の欄を先に確定する）。`:clear` は `:reset-match` + 人数 1 + `:reset-players`（チーム名・色は残る）。即時公開で、同じことをもう一度送っても書かない。スワップのフラグは戻らない。未構築のボードの扱いは §2.12
+- **board 3 の `:clear` / `:reset-players` / `:reset-match`**（ADR-005 S4w で開いた。Qt のクルーボード（S4ac-3 で削除）にボタンは無く、legacy と同じ操作）: `:reset-match` は全メンバーを既定のストックに戻して出場中を無しにし（名前は残す）、`phase` / `pool` / `match` と `best_of` を空にする（match バーの欄はボードにあるものだけ。クルーボードのシードに `pool` は無く、`PATCH set` で書くまで足さない。ADR-005 S4ac-1 の検収レビュー。それまでは `pool: ""` を足していた）。`:reset-players` は全メンバーの行を空にする（名前も。チーム名・色・人数は残す。入力中の欄を先に確定する）。`:clear` は `:reset-match` + 人数 1 + `:reset-players`（チーム名・色は残る）。即時公開で、同じことをもう一度送っても書かない。スワップのフラグは戻らない。未構築のボードの扱いは §2.12
 - `:reset-all`: デスクトップの「すべての入力値をリセット」と同じ（`AutonaActions.ClearBoard`。1 保存サイクル）。選手・スコア・match バー・チーム名とロゴ・best of を空にし、**人数・キャラ数は残す**。入力中の欄を先に確定し、最後に読んだセットを忘れる（同じセットを読み直せる）。**`:clear` とは別の動作**: `:clear` はチーム名を残し（人数が 1 人になるときを除く）、人数・キャラ数を既定に戻す。board 3 は `400`。held 対象
 - `players/{p}:clear`: カードのクリアボタンと同じ（`PlayerService.ClearSlot`。birthday・city・mains は残る）。`{t}` は状態側のチーム。入力中の欄を先に確定する。スロットが無ければ `404 NOT_FOUND`。board 3 は `400`。held 対象
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
@@ -1396,7 +1398,7 @@ HTTP/1.1 409 Conflict
 | 項目 | 確定した取得経路 | 出典 |
 |------|-----------------|------|
 | `revision` | `StateManager.revision`（単調増加カウンタ、`_bumpRevision()` で +1）。読み取りは `GetFullState()` が `{'state','revision','delta_index'}` を返す。`GET /api/v1/state` はこれをそのまま使う | [StateManager.py:34,183-202](../../src/StateManager.py) |
-| `activeBoard` | **`SettingsManager.Get("scoreboard.battle_format", "singles")`** を `{"singles":1,"team":2,"crew":3}` で写像。これが表示中ボードの真実源 | [Autona.py:952,968](../../src/Autona.py) / [AutonaScoreboardManager.py:69-75](../../src/AutonaScoreboardManager.py) |
+| `activeBoard` | **`SettingsManager.Get("scoreboard.battle_format", "singles")`** を `{"singles":1,"team":2,"crew":3}` で写像。これが表示中ボードの真実源 | `AutonaActions.ActiveBoard` / `ResolveBattleFormat`（[core/Actions.py](../../src/core/Actions.py)） |
 | `outLastWriteUnix` | `os.path.getmtime("./out/program_state.json")`（SaveState が積んだ job を export writer が書く。書き込み待ちが溜まった場合は最新スナップショットだけを 1 回書く）。または同ファイル内の `timestamp`/`revision` フィールド | [StateManager.py:104-109](../../src/StateManager.py) |
 
 ### 14.1a revision のタイミング（重要）

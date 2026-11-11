@@ -1,11 +1,13 @@
-"""A score typed into a 1v1 / team board's display (ADR-005 S4x).
+"""A score typed for a 1v1 / team board (ADR-005 S4x).
 
-The two score spinboxes wrote through the game tracker's own UpdateScore
-(GameTrackerService), a second writer of score.{n}.team.{t}.score beside
-core's. They call the operation v1's ``score:set`` calls now
-(AutonaActions.SetScore): one save cycle with the game rows following, and
-nothing written for the score the state already has. So the display typed
-in, the route on the desktop and the route headless write the same.
+The Qt board's two score spinboxes wrote through the game tracker's own
+UpdateScore (GameTrackerService), a second writer of
+score.{n}.team.{t}.score beside core's. They called the operation v1's
+``score:set`` calls from S4x (AutonaActions.SetScore): one save cycle with
+the game rows following, and nothing written for the score the state
+already has. The spinboxes went with the Qt board in S4ac-3; what they
+called, the route on the desktop and the route headless still write the
+same.
 """
 import pytest
 
@@ -28,10 +30,6 @@ def trackerOn(monkeypatch):
         lambda key, default=None:
             False if key == "general.disable_individual_game_tracker"
             else realGet(key, default)))
-
-
-def _display(board, team):
-    return board.scoreDisplay1 if team == 1 else board.scoreDisplay2
 
 
 # (what it is, the team typed in, the number typed, both teams' scores --
@@ -69,12 +67,13 @@ def _play(app, n, act):
 
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_typing_writes_what_score_set_writes(
+def test_set_score_writes_what_score_set_writes(
         autonaApp, client, monkeypatch, trackerOn, n):
-    board = autonaApp.board(n)
+    # What the Qt board's score display called on a number typed (S4x).
+    autonaApp.ready(n)
     typed = _play(autonaApp, n,
                   lambda team, value, _scores:
-                      _display(board, team).setValue(value))
+                      AutonaActions.instance.SetScore(n, team, value))
     # Every step wrote the score, and the rows followed it.
     assert [label for label, recorded, _state in typed
             if not recorded["sets"]] == []
@@ -86,7 +85,7 @@ def test_typing_writes_what_score_set_writes(
         _ok(client.post(f"/api/v1/scoreboards/{n}/score:set",
                         json={"team1": scores[0], "team2": scores[1]}))
 
-    autonaApp.board(n)
+    autonaApp.ready(n)
     assert _play(autonaApp, n, throughTheRoute) == typed
 
     with monkeypatch.context() as headless:
@@ -98,14 +97,14 @@ def test_typing_writes_what_score_set_writes(
 
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_typing_is_one_save_cycle_with_the_rows(autonaApp, trackerOn, n):
-    board = autonaApp.board(n)
+def test_set_score_is_one_save_cycle_with_the_rows(autonaApp, trackerOn, n):
+    autonaApp.ready(n)
     _setUp(n)
     autonaApp.settle()
     cycles = []
     StateManager.observers.held_state_updated.subscribe(cycles.append)
     try:
-        board.scoreDisplay1.setValue(3)
+        AutonaActions.instance.SetScore(n, 1, 3)
         autonaApp.settle()
     finally:
         StateManager.observers.held_state_updated.unsubscribe(cycles.append)
@@ -117,9 +116,9 @@ def test_typing_is_one_save_cycle_with_the_rows(autonaApp, trackerOn, n):
 
 @pytest.mark.parametrize("n", [1, 2])
 def test_the_score_the_state_has_writes_nothing(autonaApp, n):
-    """The display's valueChanged fires for a value the state already has
-    when its render races the operator's typing; re-asserting it would light
-    反映 for an edit nobody made."""
+    """A score the state already has (the Qt display's valueChanged fired
+    for one when its render raced the operator's typing; a page can send
+    one too): re-asserting it would light 反映 for an edit nobody made."""
     autonaApp.ready(n)
     AutonaActions.instance.SetScore(n, 1, 2)
     AutonaActions.instance.ApplyChanges(n)
