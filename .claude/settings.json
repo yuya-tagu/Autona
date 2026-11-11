@@ -1,5 +1,6 @@
 {
   "autoCompactWindow": 400000,
+  "fastMode": true,
   "permissions": {
     "allow": [
       "Bash(find:*)",

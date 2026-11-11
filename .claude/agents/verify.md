@@ -1,7 +1,7 @@
 ---
 name: verify
 description: 静的検証（pytest 全量 / Web UI の build・test）を実行して結果を整理する。push 前のフル検証や、変更後にテストがどこまで通るかを確認したいときに使う。修正はしない。
-model: sonnet
+model: haiku
 effort: low
 omitClaudeMd: true
 tools: Bash, Read, Grep, Glob

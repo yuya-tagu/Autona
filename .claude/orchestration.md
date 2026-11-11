@@ -18,10 +18,11 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 | コード探索・横断検索・複数ファイル読み | 組み込み **Explore**（結論だけ受け取る） |
 | 設計が決まっている変更（規模・ファイル数は問わない） | **patch**（Sonnet） |
 | 設計判断を含む変更 / Qt ライフサイクル・スレッド境界・`bootstrap.py` 生成順・state スキーマ・自動更新に触れる変更 / 原因不明のバグ・Qt クラッシュ調査 | **impl**（Opus） |
-| フル検証（pytest 全量・Web UI build/test） | **verify**（Sonnet） |
+| フル検証（pytest 全量・Web UI build/test） | **verify**（Haiku） |
 | 差分レビュー・成果物の検収・PR 前セルフレビュー | **review**（Opus） |
 | 難航案件の第三者レビュー・判断が割れた差分のセカンドオピニオン・アーキテクチャ評価 | Agent 呼び出しで `model: "fable"` を上書き（review か general-purpose） |
 
+- **Haiku で足りる作業は Haiku に寄せる**: 判断を伴わない実行・集計（verify）と探索（Explore）は Haiku。コードを書く patch は agent-pitfalls を踏まえる必要があるので Sonnet のまま
 - **振り分けは「設計が決まっているか」で決める（規模では決めない）**。設計確定済みなら大量の機械的変更でも patch
 - 設計を詰める段階（方針・境界・移行順序）はメインが行い、決まった設計を patch / impl に渡す
 - 委譲の brief には「目的・読むべきファイル・完了条件・触ってはいけないファイル（他作業の未コミット変更）」を必ず書く
@@ -59,7 +60,7 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 
 ## モデル運用
 
-- **メインは Opus**。Fable はメインや通常の委譲先には使わず、上表の第三者レビュー用途に限る
+- **メインは Opus（常に fast mode）**。`.claude/settings.json` の `"fastMode": true` で既定オンにしている（Sonnet / Haiku は fast mode 非対応で影響なし。サブエージェントの impl / review（opus）へ fast mode が伝播するかは公式に未記載）。Fable はメインや通常の委譲先には使わず、上表の第三者レビュー用途に限る
 - サブエージェントのモデル・effort は各 frontmatter が正本。格上げ・格下げは Agent 呼び出しの
   `model` / `effort` 上書きで行ってよい
 - effort はモデル世代ごとに意味が変わる。モデル更新時は値を持ち越さず、impl の所要時間と検収 NG 率で較正する
