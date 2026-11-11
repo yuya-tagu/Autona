@@ -1,6 +1,7 @@
 """Set loading: turning a provider payload into one board's state.
 
-``AutonaScoreboardWidget.ChangeSetData`` was the single largest write in the
+``AutonaScoreboardWidget.ChangeSetData`` (the Qt board, removed in ADR-005
+S4ac-3) was the single largest write in the
 app that had no reason to be Qt: 140 lines deciding what a loaded set means
 -- which round name to show, whose score goes on which side, whether an
 empty pool clears the previous one -- expressed entirely as widget
@@ -11,16 +12,17 @@ spinboxes so their ``valueChanged`` would write the score. The state was the
 
 Since headless core Step 4b it is the other way round, matching what Step 3
 did to the score and Step 4a to the stage rows: **this class decides and
-writes, the board renders what it finds in the state**
-(``AutonaScoreboardWidget._SyncSetFields`` / ``_SyncScoreDisplays``). That
+writes, the board renders what it finds in the state** (the Qt board's
+``_SyncSetFields`` / ``_SyncScoreDisplays`` until S4ac-3; the SCORE page
+now). That
 is what makes "an empty tournament_pool clears the pool but a phase-only web
 edit does not touch it" a rule with a test instead of a comment above a
 combo.
 
 What deliberately did NOT move (and why):
 
-- **Player data.** A player slot is ``core/PlayerService.py``'s: the board
-  loads each entrant with ``PlayerService.ApplyData`` (ADR-005 S3e-3; it was
+- **Player data.** A player slot is ``core/PlayerService.py``'s: each
+  entrant is loaded with ``PlayerService.ApplyData`` (ADR-005 S3e-3; it was
   ``AutonaScoreboardPlayerWidget.SetData``, which resolved the country,
   region, character, skin and variant against Qt models), the database
   merge, the bad-word filter and the catalogs included. What is here is the
@@ -330,10 +332,11 @@ class SetLoadService:
     def ApplyTeamName(self, setTeam, name):
         """Set one team's name and re-resolve the crest that goes with it.
 
-        The crest lookup used to hang off the QLineEdit's ``editingFinished``
-        (``AutonaScoreboardWidget.ExportTeamLogo``), so a name written any
-        other way silently kept the previous team's logo. Writing them
-        together is what makes the pair a single operation.
+        The crest lookup used to hang off the Qt board's QLineEdit's
+        ``editingFinished`` (``AutonaScoreboardWidget.ExportTeamLogo``, gone
+        with the Qt SCORE in ADR-005 S4ac-3), so a name written any other way
+        silently kept the previous team's logo. Writing them together is
+        what makes the pair a single operation.
         """
         team = self.DisplayTeam(setTeam)
         self._SetIfChanged(self._teamKey(team, "teamName"), name or "")

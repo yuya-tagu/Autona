@@ -55,8 +55,8 @@ import {
 
 // The SCORE page's set selection (ADR-005 S4ab): what the Qt set selection
 // window (AutonaSelectSetWindow), its station window
-// (AutonaSelectStationWindow) and the board's timer row do, through S4v's
-// v1. The lists are core's (SetSelectionService): read with GET
+// (AutonaSelectStationWindow) and the board's timer row did until ADR-005
+// S4ac-3 removed them, through S4v's v1. The lists are core's (SetSelectionService): read with GET
 // /tournament/{phases,sets,stations} -- reading never fetches, as opening a
 // window never did -- when a dialog opens and whenever their progress in the
 // state (set_selection.*) changes, and fetched only when asked (the windows'

@@ -11,7 +11,8 @@ harness's synthetic `user_data` never had it either (`tests/conftest.py`'s
 every harness run that built a board, and any test asserting on the
 `country_code` SetData path was one accident away from an unguarded
 `AutonaCountryHelper.countryModel.rowCount()` call on a `None` model
-(AutonaScoreboardPlayerWidget.SetData).
+(AutonaScoreboardPlayerWidget.SetData; the load is core's
+PlayerService.ApplyData since ADR-005 S3e-3, and the card went in S4ac-3).
 
 The fix isolates the custom-flag block in its own try/except and guarantees
 the directory with `os.makedirs(..., exist_ok=True)` first (the same pattern
@@ -22,6 +23,7 @@ import shutil
 
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.core.CountryCatalog import CountryCatalog
+from tests.conftest import load_player
 
 ADDITIONAL_FLAG_DIR = "./user_data/additional_flag"
 
@@ -69,23 +71,24 @@ def test_standard_flag_lookup_works_without_additional_flag_dir(autonaApp):
     assert info.get("code") == "JP"
 
 
-# ── the L2 path this unblocks: country_code through a real player widget ──
+# ── the L2 path this unblocks: country_code through a player load ────────
 
 def test_set_data_with_country_code_publishes_the_country(autonaApp):
     """Previously untestable in the harness (test-automation-strategy.md
     §3): country_code through SetData reads AutonaCountryHelper.countryModel,
     which BUG-2 left None for the whole session once the first board build
-    hit the missing-directory exception."""
+    hit the missing-directory exception. The card's SetData ran core's
+    PlayerService.ApplyData (ADR-005 S3e-3), which this loads through (the
+    card went in S4ac-3)."""
     _removeAdditionalFlagDir()
 
-    board = autonaApp.board(1)
-    player = board.team1playerWidgets[0]
+    board = autonaApp.ready(1)
+    path = f"score.{board}.team.1.player.1"
 
-    player.SetData({"gamerTag": "TAG", "country_code": "JP"},
-                    dontLoadFromDB=True)
+    load_player(board, 1, {"gamerTag": "TAG", "country_code": "JP"})
     autonaApp.settle()
 
-    published = autonaApp.get(f"{player.path}.country")
+    published = autonaApp.get(f"{path}.country")
     assert published is not None, "country_code did not reach state at all"
     assert published.get("code") == "JP"
     assert published.get("en_name") == "Japan"

@@ -7,7 +7,8 @@ the members who are *named and visible*. Which member is currently playing
 is a third piece of state (``activeMember``), and both teams share one
 member count.
 
-All of that lived in ``AutonaCrewBattleWidget`` as the widget tree itself:
+All of that lived in ``AutonaCrewBattleWidget`` (the Qt crew board, removed
+in ADR-005 S4ac-3) as the widget tree itself:
 ``_teamTotal`` summed QSpinBox values behind QLineEdits with text in them,
 and ``_flushAllState`` copied the whole board out of the widgets whenever a
 bulk operation (swap / reset / clear) had finished poking them. The state
@@ -45,10 +46,11 @@ rather than taking the widget's rows: a stock change, the active member,
 the member count, the swap / reset / clear and a set payload are each one
 call here (``AdjustMemberStock`` / ``SelectActiveMember`` /
 ``SetMemberCount`` / ``SwapTeams`` / ``ResetStocks`` / ``ClearCrew`` /
-``ApplySetData``), from the board's inputs and from the Web alike, and the
-widget renders the state (``AutonaCrewBattleWidget._RenderFromState``). That
-is what lets the headless shell run them with no widget, and what keeps a
-widget that has not shown a change yet from writing its older rows back.
+``ApplySetData``), from the Web (the SCORE page, /api/v1) as from the Qt
+board's inputs before, and what shows the board renders the state (the Qt
+board's ``_RenderFromState`` until S4ac-3). That is what lets the headless
+shell run them with no widget, and what kept a widget that had not shown a
+change yet from writing its older rows back.
 What each publishes is the widget path's, recorded before the move
 (tests/fixtures/crew_operations/golden.json).
 

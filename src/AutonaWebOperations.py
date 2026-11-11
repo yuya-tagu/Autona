@@ -16,21 +16,20 @@ These kinds live here:
 - the operations ADR-005 S2 moved into core (swap, the clears, the set
   fields, losers, the team name, reset score, and the readers get_swap /
   get_set / get_scoreboard). They call core in both shells too; what the
-  desktop adds around that call is its board: it runs on the GUI thread (a
-  player card still commits a typed name in two writes there; see
-  DesktopBoardHost.Run) and lets the field being typed in finish first, when
-  the board's widgets are built. The board itself is core's, made and held
-  at launch (ADR-005 S4ac-1); until then the desktop built a board first,
-  because an unbuilt one was not held and the seed of its build wiped the
-  write. The player / character counts of
+  desktop adds around that call is its GUI thread, where it runs them (see
+  DesktopBoardHost.Run). Until ADR-005 S4ac-3 removed the Qt SCORE it also
+  let the field being typed in on a board's widgets finish first. The board
+  itself is core's, made at launch in both shells, and held on the desktop
+  (ADR-005 S4ac-1); until then the desktop built a board first, because an
+  unbuilt one was not held and the seed of its build wiped the write. The
+  player / character counts of
   boards 1/2 are core's too since S3e-6 (AutonaActions.SetRoster; they were
   the board's spinboxes, and a shell without the board refused them).
 
   That difference is one object the shell registers, `boardHost`: the
   headless default (`BoardHost`) runs the operation on the calling thread,
-  one at a time, with no board -- the write is published at once, which is
-  right there: there is no 反映 button -- and raises `NotAvailable` for
-  what only a widget can do. bootstrap_gui() registers `DesktopBoardHost`.
+  one at a time -- the write is published at once, which is right there:
+  there is no 反映 button. bootstrap_gui() registers `DesktopBoardHost`.
 - the crew board's operations (its members' stocks and active member, and
   its swap / resets / clears / set fields) and the caster line-up's
   (ADR-005 S3e-2): core's CrewBattleService and CommentaryService, in both
@@ -74,8 +73,8 @@ These kinds live here:
   both shells, on the calling thread. Starting a render (`preview_thumbnail`
   / `generate_thumbnail`) needs the shell's image renderer, below.
 - the shell operations (ADR-005 S3e-9): opening a board's set selection (the
-  SCORE page's dialog in the desktop's window while SCORE is the React page,
-  else the Qt window; S4ab-2), rendering its thumbnail (the legacy route,
+  SCORE page's dialog in the desktop's window; S4ab-2 -- the Qt window on
+  the way back to the Qt panel until S4ac-3), rendering its thumbnail (the legacy route,
   synchronously) and starting an image's render off-screen (S4o). Not core's:
   one opens something in the desktop's window, the others draw with a
   WebEngine view, so they need the desktop's QApplication and widgets. The
@@ -130,7 +129,7 @@ from .core import StateSchema as schema
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import (
-    GuiMarshalAborted, gui_thread_sync, in_gui_thread)
+    GuiMarshalAborted, gui_thread_sync)
 
 
 NOT_AVAILABLE_MESSAGE = "not available in headless"
@@ -178,12 +177,15 @@ def _on_gui_thread(call, what):
 
 
 class BoardHost:
-    """Where the S2 operations run when there is no board (the headless
-    shell, and the default until a shell registers another).
+    """Where the S2 operations run: the headless shell's, the default until
+    a shell registers another, and all of the desktop's but Run since
+    ADR-005 S4ac-3 (DesktopBoardHost).
 
-    The operation runs on the calling thread; nothing is built, so the write
-    is not held. A board no shell has (neither 1/2 nor the crew board) is
-    refused by the operations themselves (NotAvailable), in both shells.
+    The operation runs on the calling thread; nothing is built. A board no
+    shell has (neither 1/2 nor the crew board) is refused by the operations
+    themselves (NotAvailable), in both shells. The hooks below that do
+    nothing (Prepare, CommitEdit, DiscardTypedText, PlayerLoaded) were the
+    desktop's board widgets' until S4ac-3, and go in S4ad.
     """
 
     def __init__(self):
@@ -213,21 +215,26 @@ class BoardHost:
             return op()
 
     def Prepare(self, board):
-        """Make board `board` ready to be written or read (desktop: make it
-        again if core does not have it; ADR-005 S4ac-1)."""
+        """Make board `board` ready to be written or read: nothing, as both
+        shells make all three at launch (AutonaActions.MakeBoards). The
+        desktop made a board core did not have again, with its widgets,
+        until ADR-005 S4ac-3."""
 
     def Built(self, board):
-        """Whether board `board` is there without Prepare: always, with no
-        widget to build (the headless shell makes all three at launch:
-        AutonaActions.EnsureBoard, src/headless._SeedBoards)."""
+        """Whether board `board` is there without Prepare: always, as both
+        shells make all three at launch (AutonaActions.MakeBoards:
+        bootstrap_gui(), src/headless._SeedBoards). The desktop read core's
+        flag (AutonaActions.BoardEnsured) until ADR-005 S4ac-3."""
         return True
 
     def CommitEdit(self, board):
-        """Finish the field being typed in on board `board`."""
+        """Finish the field being typed in on board `board`: nothing, with
+        no board widget (the desktop's, until ADR-005 S4ac-3)."""
 
     def DiscardTypedText(self, board):
         """Drop, on every card of board `board`, the text typed into its
-        combos and never picked (after a players' clear)."""
+        combos and never picked (after a players' clear): nothing, with no
+        card (the desktop's, until ADR-005 S4ac-3)."""
 
     def ClearPlayers(self, board, no_mains=False):
         """Empty every player slot of board `board` (1/2), and forget the set
@@ -239,11 +246,10 @@ class BoardHost:
         text typed into its combos and never picked -- the combo whose list
         is open included, unlike after a load from elsewhere: the clear is
         the operator's operation on the board (DiscardTypedText). Both are
-        nothing with no widget. Prepared first, as every board operation: a
-        board core does not have is made (the desktop's CommitEdit built it
-        until the ADR-005 S4ac-1 review). The statistics are the operation's
-        (AutonaActions.ClearPlayers, ADR-005 S3e-5). Any other board is
-        refused before anything is built or written."""
+        nothing with no widget -- in both shells since ADR-005 S4ac-3, which
+        removed the Qt SCORE. Prepared first, as every board operation. The
+        statistics are the operation's (AutonaActions.ClearPlayers, ADR-005
+        S3e-5). Any other board is refused before anything is written."""
         number = _require_board(board)
         if number not in AutonaActions.SCORE_BOARDS:
             # The crew board's members are CrewBattleService.ClearCrew's.
@@ -277,84 +283,37 @@ class BoardHost:
     def PlayerLoaded(self, board, team, player, cleared):
         """A player was loaded into slot `player` of state team `team` on
         board `board` (1/2); `cleared`: whether the load cleared the slot
-        first. Called inside the load's save block. With no board there is
-        no card to tidy up. (The statistics the load calls for are its own
+        first. Called inside the load's save block. With no card there is
+        nothing to tidy up (the desktop's cards dropped their typed combo
+        text here until ADR-005 S4ac-3). (The statistics the load calls for are its own
         -- PlayerService.Announce, ADR-005 S3e-5 -- in both shells.)
         """
 
 
 class DesktopBoardHost(BoardHost):
-    """The desktop's board around an S2 operation. Registered by
-    bootstrap_gui() with the scoreboard dock (AutonaScoreboardManager)."""
+    """The desktop's board host: the operations on its GUI thread.
+    Registered by bootstrap_gui().
 
-    def __init__(self, manager):
-        super().__init__()
-        self.manager = manager
-
-    def _Board(self, board):
-        # Prepare's, for a board core does not have: on the GUI thread, the
-        # build itself (it raises if it fails, as the operations'
-        # EnsureScoreboard did); elsewhere GetScoreboard, which marshals the
-        # build there.
-        if in_gui_thread():
-            return self.manager.EnsureScoreboard(board)
-        return _on_gui_thread(lambda: self.manager.GetScoreboard(board),
-                              f"building board {board}")
+    Only Run is the desktop's own since ADR-005 S4ac-3, which removed the Qt
+    SCORE: the rest is the headless host's (BoardHost). Core makes every
+    board at launch (AutonaActions.MakeBoards, bootstrap_gui(); S4ac-1), so
+    there is nothing to prepare -- until S4ac-3 Prepare made a board core did
+    not have again, with its widgets (AutonaScoreboardManager), which only a
+    test's harness could bring about -- and nothing is built: no field being
+    typed in to finish, no card to tidy up. The hooks left empty that way
+    (Prepare, CommitEdit, DiscardTypedText, PlayerLoaded) go in S4ad, with
+    Run's GUI thread."""
 
     def Run(self, op):
         # On the GUI thread, not under the headless host's lock (reviewed in
-        # ADR-005 S3e-4, kept): a card still commits a typed sponsor / tag
-        # in two writes on that thread -- the field (_OnTextChanged), then
-        # the display name, images and id (NameChanged) -- and a swap, a
-        # clear or a load landing between the two from another thread
-        # leaves the display name on the wrong slot. Queued on the GUI
-        # thread, an operation runs between two events, never inside one.
-        # The board's own part of an operation (building it, the field
-        # being typed in, the cards after a load) is GUI work besides.
+        # ADR-005 S3e-4, kept): a card committed a typed sponsor / tag in
+        # two writes on that thread -- the field, then the display name,
+        # images and id -- and a swap, a clear or a load landing between the
+        # two from another thread left the display name on the wrong slot.
+        # Queued on the GUI thread, an operation runs between two events,
+        # never inside one. The cards went with the Qt SCORE (ADR-005
+        # S4ac-3); taking the operations off the GUI thread is S4ad's.
         return _on_gui_thread(gui_thread_sync(op), "a board operation")
-
-    def Prepare(self, board):
-        # Whether the board is ready is core's (Built, ADR-005 S4y), and core
-        # makes every board at launch (AutonaActions.MakeBoards, S4ac-1): a
-        # made board needs nothing here, and its widgets are not built for a
-        # write or a read -- the window builds the shown board's, and a
-        # format switch the next one's, which render the state as it is then
-        # (pending edits included). Only a board core does not have (its
-        # launch failed; a test's harness dropped it) is made again, with its
-        # widgets (EnsureScoreboard makes it in core first). Until S4ac-1
-        # this built the widgets of any board that had none.
-        if not self.Built(board):
-            self._Board(board)
-
-    def Built(self, board):
-        # Core's flag (AutonaActions.EnsureBoard, ADR-005 S4y). It was the
-        # dock's registry until then. Since S4ac-1 core makes every board at
-        # launch (AutonaActions.MakeBoards), so this answers True with or
-        # without the board's widgets, as on the headless shell.
-        return AutonaActions.instance.BoardEnsured(board)
-
-    def _Widget(self, board):
-        # The board's widgets if they are built, else None: nothing is built
-        # for what follows an operation (ADR-005 S4ac-1). With no widget there
-        # is no field being typed in, and no card to tidy up.
-        return self.manager.scoreboards.get(_board(board))
-
-    def CommitEdit(self, board):
-        widget = self._Widget(board)
-        if widget is not None:
-            widget.CommitFocusedEdit()
-
-    def DiscardTypedText(self, board):
-        widget = self._Widget(board)
-        if widget is not None:
-            widget.DiscardTypedText()
-
-    def PlayerLoaded(self, board, team, player, cleared):
-        # After a load that cleared, the slot's card drops the text typed
-        # into its combos (AutonaScoreboardWidget._CardLoaded).
-        widget = self._Widget(board)
-        if widget is not None:
-            widget.PlayerLoaded(team, player, cleared)
 
 
 # ── Registrations (filled in by the shell) ───────────────────────────────
@@ -381,7 +340,8 @@ loadGameByCodename = None
 # desktop registers its AutonaShellOperations' (bootstrap_gui(); the
 # scoreboard dock's until ADR-005 S4y), the headless shell none. None: the
 # operation answers NotAvailable (503).
-# Open board `scoreboard`'s set selection window: (scoreboard) -> "OK".
+# Open board `scoreboard`'s set selection (the SCORE page's dialog):
+# (scoreboard) -> "OK".
 openSetSelection = None
 # Render board `scoreboard`'s thumbnail: (scoreboard, file_format) -> the
 # image's absolute path, or None when none was made (a failed render raises).
@@ -1443,8 +1403,9 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
 
 
 def _set_players(host, scoreboard, players):
-    """set_route's players on board 1/2: the operation of the board's
-    PLAYERS spinbox (AutonaActions.SetPlayersPerTeam), with the characters
+    """set_route's players on board 1/2: the operation of the SCORE page's
+    players field (AutonaActions.SetPlayersPerTeam; the Qt board's PLAYERS
+    spinbox's until ADR-005 S4ac-3), with the characters
     per player core keeps for a board with no character slot left. Players=0,
     then characters=2, then players=2 is two players a team with two
     characters each. The count kept was the board host's (headless) and the
@@ -1456,8 +1417,8 @@ def _set_players(host, scoreboard, players):
 def _set_characters(host, scoreboard, count):
     """set_route's characters on board 1/2: the character slots of every
     player, or -- on a board with none -- the count its next players get
-    (AutonaActions.SetCharactersPerPlayer, the board's spinbox's
-    operation)."""
+    (AutonaActions.SetCharactersPerPlayer, the SCORE page's characters
+    field's operation; the Qt board's spinbox's until ADR-005 S4ac-3)."""
     AutonaActions.instance.SetCharactersPerPlayer(scoreboard, count)
 
 
@@ -1548,9 +1509,9 @@ def _swap_flag(board):
 
 def get_swap(scoreboard):
     # The live flag: a swap is reported as soon as it is made, before 反映
-    # publishes it. The board is prepared first, as the route always did (a
-    # made board's widgets are not built for it: ADR-005 S4ac-1). Any other
-    # board: NotAvailable, before anything is built.
+    # publishes it. The board is prepared first, as the route always did
+    # (nothing to do: every board is made at launch, ADR-005 S4ac-1). Any
+    # other board: NotAvailable, before anything is read.
     board = _require_board(scoreboard)
     boardHost.Prepare(scoreboard)
     return str(_swap_flag(board))
@@ -1559,8 +1520,8 @@ def get_swap(scoreboard):
 def get_scoreboard(scoreboard):
     # Read from the state. The board is prepared first: core made every
     # board at launch, whole, in both shells (AutonaActions.MakeBoards,
-    # ADR-005 S4ac-1), so on the desktop this makes again only a board core
-    # does not have, and builds no widget for a made one. Until S4ac-1 the
+    # ADR-005 S4ac-1), so there is nothing to do (until ADR-005 S4ac-3 the
+    # desktop made again a board core did not have). Until S4ac-1 the
     # desktop built the board here: building wrote its full initial subtree,
     # and an unbuilt board's was only the skeleton (StateSchema.SeedBoard).
     # Committed view: pending (not yet 反映-applied) desktop edits must not
@@ -1579,10 +1540,9 @@ def get_pending(scoreboard):
     lock. Whether it is held is the shell's: the desktop's boards 1/2 are, the
     crew board and every headless board are not, and those have nothing
     pending. get_scoreboard stays the published view; the route answering this
-    one is guarded, not READ. Prepared first, like get_scoreboard: no widget
-    is built for a made board (ADR-005 S4ac-1), and a board core does not
-    have is made again -- never with the lock held: on the desktop that waits
-    for the GUI thread."""
+    one is guarded, not READ. Prepared first, like get_scoreboard -- never
+    with the lock held: the desktop's Prepare waited for the GUI thread when
+    it could build (until ADR-005 S4ac-3)."""
     boardHost.Prepare(scoreboard)
     board = _board(scoreboard)
     prefix = f"score.{board}"
@@ -1846,13 +1806,12 @@ def get_board_post(scoreboard):
 
 # ── the player slots of boards 1/2 (ADR-005 S3e-4) ───────────────────────
 # Core's (PlayerService.ApplyData, S3e-3), run where the board operations
-# run: on the desktop the load is made on the GUI thread, which is also
-# where the board's cards are when its widgets are built (the host's
-# PlayerLoaded). A slot is one the *state* has -- core seeds them as it
-# makes the board (AutonaActions.SeedFreshBoard), at launch in both shells
-# since ADR-005 S4ac-1 -- so the range is checked the same way in both
-# shells. The board's cards follow
-# the load from the held cycle, like any write they did not make (S2a).
+# run: on the desktop the load is made on the GUI thread (where the board's
+# cards were, until ADR-005 S4ac-3: the host's PlayerLoaded). A slot is one
+# the *state* has -- core seeds them as it makes the board
+# (AutonaActions.SeedFreshBoard), at launch in both shells since ADR-005
+# S4ac-1 -- so the range is checked the same way in both shells. The SCORE
+# page draws the load from the state, like any write.
 
 def _player_path(board, team, player):
     """The path of player `player` of state team `team` on board `board`

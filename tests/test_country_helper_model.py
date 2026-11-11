@@ -9,39 +9,30 @@ AutonaCountryHelper before the move by record_golden.py next to it):
   selectable), under three locale pairs and with custom flags installed --
   and that a reload refills that one model instead of swapping in a new
   one (agent-pitfalls #13 / #15);
-- what that reload does to the model's consumer, the player cards (the
-  TOP 8 panel was the other until ADR-005 S4i made it a React page, which
-  reads GET /api/v1/countries): nothing is written and the combos keep
-  showing the state; that a card's country wiring is done once
-  (countriesUpdated no longer stacks connections); and the fallback for a
-  card built before the first load;
-- the region combo LoadStates fills, for every country -- and that filling
-  it no longer writes the flag `asset` into the catalog's table;
 - the Web reader get_states: the recorded payload byte for byte, the same
-  whatever the desktop has shown, no @gui_thread_sync, and answered on a
-  worker thread while the GUI thread is not spinning its event loop.
+  whatever a player loaded has written, no @gui_thread_sync, and answered on
+  a worker thread while the GUI thread is not spinning its event loop.
+
+The model's consumers went with them: the player cards (ADR-005 S4ac-3;
+their reload, wiring and fallback tests, and the region combo their
+LoadStates filled -- the recording's `comboDigests` / `comboJPHead`, which
+nothing reads any more) and the TOP 8 panel (S4i, a React page reading
+GET /api/v1/countries).
 """
 import ast
 import hashlib
 import json
 import threading
-from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from qtpy.QtCore import SIGNAL, QObject, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QComboBox
 
-from src.AutonaBasePlayerWidget import AutonaBasePlayerWidget
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from src.core import StateSchema as schema
 from src.core.CountryCatalog import CountryCatalog
-from src.core.DictHelper import deep_clone
-from src.core.PlayerService import PlayerService
-from src.core.StateManager import StateManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = json.loads(
@@ -91,29 +82,6 @@ def countries(autonaApp):
             (flags / name).unlink(missing_ok=True)
         AutonaLocaleHelper.programLocale, AutonaLocaleHelper.exportLocale = saved
         AutonaCountryHelper.LoadCountries()
-
-
-class _RegionCombo(QObject):
-    """Just enough of a player widget to run the real LoadStates: the
-    recording drove the old one through the same two combos."""
-    _EnsureStateModel = AutonaBasePlayerWidget._EnsureStateModel
-    _FillStateRows = AutonaBasePlayerWidget._FillStateRows
-    LoadStates = AutonaBasePlayerWidget.LoadStates
-
-    def __init__(self):
-        super().__init__()
-        self.country = QComboBox()
-        self.country.setModel(AutonaCountryHelper.countryModel)
-        self.state = QComboBox()
-
-    def _w(self, name, klass=None):
-        return {schema.PLAYER_COUNTRY_KEY: self.country,
-                schema.PLAYER_STATE_KEY: self.state}[name]
-
-    def show(self, row):
-        self.country.setCurrentIndex(row)
-        self.LoadStates(row)
-        return self.country.currentData(Qt.ItemDataRole.UserRole)["code"]
 
 
 # ── the country model ────────────────────────────────────────────────────
@@ -166,253 +134,26 @@ def test_a_reload_refills_the_one_model(countries):
     assert updates == [1]
 
 
-# ── the model's consumers: reload, wiring, fallback ──────────────────────
-
-def _row(model, code):
-    for row in range(model.rowCount()):
-        data = model.index(row, 0).data(Qt.ItemDataRole.UserRole)
-        if isinstance(data, dict) and data.get("code") == code:
-            return row
-    raise AssertionError(f"no row for {code!r}")
-
-
-def _code(combo):
-    data = combo.currentData(Qt.ItemDataRole.UserRole)
-    return data.get("code") if isinstance(data, dict) else None
-
-
-def test_a_reload_leaves_a_player_card_and_its_state_alone(
+def test_a_player_loaded_with_a_country_changes_no_payload(
         countries, autonaApp):
-    """A reload under a live player card: nothing is published
-    (each index change used to reach the location publish, blanking the
-    country and the region), and the card still shows what the state holds."""
-    countries("en")
-    player = autonaApp.board(1).team1playerWidgets[0]
-    player.SetData({"gamerTag": "TAG", "country_code": "JP",
-                    "state_code": "13"}, dontLoadFromDB=True)
-    autonaApp.settle()
-    country = player._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    state = player._w(schema.PLAYER_STATE_KEY, QComboBox)
-    before = {key: deep_clone(autonaApp.get(f"{player.path}.{key}"))
-              for key in schema.PLAYER_LOCATION_KEYS}
-    assert before[schema.PLAYER_COUNTRY_KEY]["code"] == "JP"
-    assert before[schema.PLAYER_STATE_KEY]["original_code"] == "13"
+    """What the Web is sent for a country does not depend on whether a
+    player with it has been loaded (it used to depend on whether the
+    desktop had shown it: the old LoadStates wrote into the table). The
+    load is what the Qt card's SetData ran until ADR-005 S4ac-3."""
+    from tests.conftest import load_player
 
-    with patch.object(player.player, "SetCountry",
-                      wraps=player.player.SetCountry) as setCountry, \
-            patch.object(player.player, "SetRegion",
-                         wraps=player.player.SetRegion) as setRegion:
-        countries("ja")
-        autonaApp.settle()
-
-        assert setCountry.call_count == 0
-        assert setRegion.call_count == 0
-        assert {key: autonaApp.get(f"{player.path}.{key}")
-                for key in schema.PLAYER_LOCATION_KEYS} == before
-        assert _code(country) == "JP"
-        assert state.currentData(
-            Qt.ItemDataRole.UserRole)["original_code"] == "13"
-        assert not country.signalsBlocked()
-
-        # Released: the next real choice goes through as before.
-        country.setCurrentIndex(_row(country.model(), "US"))
-        autonaApp.settle()
-
-    assert autonaApp.get(
-        f"{player.path}.{schema.PLAYER_COUNTRY_KEY}")["code"] == "US"
-    # The region (blank), then the country.
-    assert setRegion.call_count == 1
-    assert setCountry.call_count == 1
-
-
-def test_country_updates_do_not_stack_connections(autonaApp):
-    """countriesUpdated was connected to the method that did the wiring,
-    so every emit added one more LoadStates connection (and a completer).
-    The wiring runs once; an emit only (re)attaches the model."""
-    player = autonaApp.board(1).team1playerWidgets[0]
-    country = player._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    signals = AutonaCountryHelper.signals
-
-    def wiring():
-        return (country.receivers(SIGNAL("currentIndexChanged(int)")),
-                signals.receivers(SIGNAL("countriesUpdated()")),
-                signals.receivers(SIGNAL("countriesAboutToReload()")),
-                country.completer())
-
-    before = wiring()
-    for _ in range(3):
-        signals.countriesUpdated.emit()
-
-    assert wiring() == before
-    assert country.model() is AutonaCountryHelper.countryModel
-    assert country.completer().model() is AutonaCountryHelper.countryModel
-
-
-def test_a_second_reload_notice_does_not_leave_the_card_silenced(autonaApp):
-    """Two notices before the countriesUpdated that ends them (the fallback
-    tests' fixture below does exactly that). Recording the second one would
-    capture the combo as already blocked, and finishing the reload would
-    then leave it blocked: the card would stop publishing its country."""
-    player = autonaApp.board(1).team1playerWidgets[0]
-    player.SetData({"gamerTag": "TAG", "country_code": "JP"},
-                   dontLoadFromDB=True)
-    autonaApp.settle()
-    country = player._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    signals = AutonaCountryHelper.signals
-
-    signals.countriesAboutToReload.emit()
-    signals.countriesAboutToReload.emit()
-    signals.countriesUpdated.emit()
-
-    assert not country.signalsBlocked()
-    assert _code(country) == "JP"
-    country.setCurrentIndex(_row(country.model(), "US"))
-    autonaApp.settle()
-    assert autonaApp.get(
-        f"{player.path}.{schema.PLAYER_COUNTRY_KEY}")["code"] == "US"
-
-
-@contextmanager
-def _card_off_the_board(autonaApp, catalogLoads=True):
-    """A player card on a slot of no board (the fixture below has board 1 up),
-    reaped afterwards the way conftest._dropBoard reaps a board's cards. With
-    catalogLoads=False it is built while the country load fails."""
-    from qtpy.QtCore import QCoreApplication, QEvent
-
-    from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-
-    path = "score.9.team.1.player.1"
-    PlayerService(path).SeedEmpty(1)
-    if catalogLoads:
-        card = AutonaScoreboardPlayerWidget(index=1, teamNumber=1, path=path)
-    else:
-        with patch.object(CountryCatalog.instance, "Load",
-                          return_value=False):
-            card = AutonaScoreboardPlayerWidget(
-                index=1, teamNumber=1, path=path)
-    try:
-        yield card
-    finally:
-        card.setParent(None)
-        card.deleteLater()
-        QCoreApplication.sendPostedEvents(card, QEvent.Type.DeferredDelete)
-        StateManager.Unset("score.9")
-        autonaApp.settle()
-
-
-@pytest.fixture
-def no_country_model(autonaApp):
-    """Start with no shared model, as before the window's first load --
-    with a live board up whose card shows a country, which must not notice.
-
-    Both ends of the swap are announced to the model's consumers as a
-    reload: countriesAboutToReload here, and the countriesUpdated that the
-    test's first load (or the restore below) emits. The live cards then
-    re-attach to whichever model is current without publishing. Without
-    it, the test's first load would make every live card publish a blank
-    country and region, and the restore would leave them on the test's
-    model, dropped right after.
-    """
-    live = autonaApp.board(1).team1playerWidgets[0]
-    live.SetData({"gamerTag": "LIVE", "country_code": "JP",
-                  "state_code": "13"}, dontLoadFromDB=True)
-    autonaApp.settle()
-    before = deep_clone(StateManager.Get(schema.SCORE_ROOT))
-    signals = AutonaCountryHelper.signals
-    saved = AutonaCountryHelper.countryModel
-    signals.countriesAboutToReload.emit()
-    AutonaCountryHelper.countryModel = None
-    try:
-        yield
-    finally:
-        AutonaCountryHelper.countryModel = saved
-        signals.countriesAboutToReload.emit()
-        signals.countriesUpdated.emit()
-        autonaApp.settle()
-
-    country = live._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    assert country.model() is saved
-    assert _code(country) == "JP" and not country.signalsBlocked()
-    assert StateManager.Get(schema.SCORE_ROOT) == before
-
-
-def _assert_card_works(autonaApp, card):
-    model = AutonaCountryHelper.countryModel
-    country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    state = card._w(schema.PLAYER_STATE_KEY, QComboBox)
-    assert country.model() is model
-    assert country.completer().model() is model
-    country.setCurrentIndex(_row(model, "JP"))
-    autonaApp.settle()
-    assert autonaApp.get(
-        f"{card.path}.{schema.PLAYER_COUNTRY_KEY}")["code"] == "JP"
-    assert state.count() == 1 + len(CountryCatalog.instance.States("JP"))
-
-
-def test_a_card_built_before_the_first_load_loads_the_countries(
-        autonaApp, no_country_model):
-    """The fallback in LoadCountries: a card that finds no model asks the
-    helper for one and attaches it."""
-    with _card_off_the_board(autonaApp) as card:
-        assert AutonaCountryHelper.countryModel is not None
-        assert AutonaCountryHelper.countryModel.rowCount() > 1
-        _assert_card_works(autonaApp, card)
-
-
-def test_a_card_built_while_the_load_fails_attaches_the_later_one(
-        autonaApp, no_country_model):
-    """When that load fails too, the card is left without a model, and the
-    countriesUpdated connection attaches the model the next successful
-    load creates."""
-    with _card_off_the_board(autonaApp, catalogLoads=False) as card:
-        country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-        assert AutonaCountryHelper.countryModel is None
-        assert country.count() == 0
-
-        AutonaCountryHelper.LoadCountries()  # the load that lands later
-
-        _assert_card_works(autonaApp, card)
-
-
-# ── LoadStates ───────────────────────────────────────────────────────────
-
-def test_load_states_fills_the_recorded_rows_and_writes_nothing_back(
-        countries):
-    """Every country's region combo is what the old LoadStates built. The
-    old one also wrote each region's `asset` into the shared table on the
-    way; the catalog's table must come out of it untouched."""
-    golden = GOLDEN["states"]
-    catalog = countries("en")
-    table = digest(catalog.Current().countries)
-    regions = _RegionCombo()
-
-    combos = {}
-    for row in range(1, 1 + len(GOLDEN["scenarios"]["en"]["codes"])):
-        code = regions.show(row)
-        combos[code] = digest(_rows(regions.state.model()))
-
-    assert combos == golden["comboDigests"]
-    regions.show(GOLDEN["scenarios"]["en"]["codes"].index("JP") + 1)
-    assert _rows(regions.state.model())[:3] == golden["comboJPHead"]
-    assert digest(catalog.Current().countries) == table
-    assert GOLDEN["scenarios"]["en"]["countriesDigest"] == table
-
-
-def test_a_player_widget_showing_a_country_changes_no_payload(
-        countries, autonaApp):
-    """Through a real player card: what the Web is sent for a country does
-    not depend on whether the desktop has shown it (it used to)."""
     catalog = countries("en")
     actions = autonaApp.web()
     before = json.dumps(actions.get_states("JP"))
     table = digest(catalog.Current().countries)
 
-    player = autonaApp.board(1).team1playerWidgets[0]
-    player.SetData({"gamerTag": "TAG", "country_code": "JP",
-                    "state_code": "13"}, dontLoadFromDB=True)
+    board = autonaApp.ready(1)
+    load_player(board, 1, {"gamerTag": "TAG", "country_code": "JP",
+                           "state_code": "13"})
     autonaApp.settle()
 
-    assert autonaApp.get(f"{player.path}.state") == catalog.State("JP", "13")
+    assert autonaApp.get("score.1.team.1.player.1.state") \
+        == catalog.State("JP", "13")
     assert json.dumps(actions.get_states("JP")) == before
     assert digest(catalog.Current().countries) == table
 

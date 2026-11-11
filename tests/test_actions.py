@@ -232,8 +232,9 @@ def test_active_board_honours_the_legacy_team_mode_flag(actions):
 
 
 def test_the_format_board_table_cannot_be_edited_through_an_alias(actions):
-    # AutonaScoreboardManager.FORMAT_BOARDS is this same object, so a plain
-    # dict here would be a shared mutable with two owners.
+    # AutonaScoreboardManager.FORMAT_BOARDS was this same object (until the
+    # Qt SCORE went in ADR-005 S4ac-3), so a plain dict here was a shared
+    # mutable with two owners; it stays read-only for whoever reads it.
     with pytest.raises(TypeError):
         actions.FORMAT_BOARDS["singles"] = 99
 
@@ -251,7 +252,8 @@ def test_adjust_score_writes_the_board_key(actions, heldBoard):
 
 def test_adjust_score_clamps_to_the_spinbox_range(actions, heldBoard):
     # The QSpinBox range used to be the only guard; the operation carries it
-    # now, and AutonaScoreboardWidget applies the same bounds to the spinbox.
+    # now (the Qt board applied the same bounds to its spinbox until ADR-005
+    # S4ac-3 removed it).
     assert actions.AdjustScore(BOARD, 1, -1) == 0
     assert SM.Get(f"{PREFIX}.team.1.score") == 0
 
@@ -1340,8 +1342,9 @@ def test_a_board_with_no_widget_has_its_rows_all_the_same(heldBoard,
 
 
 def test_a_board_keeps_its_one_tracker(actions):
-    """Whatever is built and dropped around it: a built board's widget
-    renders this one (AutonaIndividualGameTracker.service)."""
+    """Whatever is built and dropped around it: the one tracker of a board
+    (a built Qt board's widget rendered it until ADR-005 S4ac-3:
+    AutonaIndividualGameTracker.service)."""
     assert actions.GameTracker(1) is actions.GameTracker("1")
     assert actions.GameTracker(1) is not actions.GameTracker(2)
     assert actions.GameTracker(2).scoreboardNumber == 2

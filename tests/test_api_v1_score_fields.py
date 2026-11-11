@@ -7,22 +7,24 @@ with, added to /api/v1 with the Qt panel still there:
 - ``PATCH .../teams/{t}/players/{p}/characters/{row}``  one character row
 - ``PATCH /api/v1/scoreboards/{n}/match``               the match bar
 
-Each writes what the desktop's own input writes (the card's line edits and
-combos, the match bar's combos and BEST OF), checked against the card itself
-where there is one, in one save cycle, held on the desktop until 反映 and
-published at once headless. A refused field writes nothing.
+Each writes what the desktop's own input wrote (the Qt card's line edits and
+combos, the match bar's combos and BEST OF -- checked against them until
+they went with the Qt SCORE in ADR-005 S4ac-3; the card's against a
+recording of it since), in one save cycle, held on the desktop until 反映
+and published at once headless. A refused field writes nothing.
 """
 import copy
 import json
+from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QLineEdit
 
 from src.core import PlayerService as players
 from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
+from src.core.MatchNameCandidates import MatchNameCandidates
 from src.core.PlayerService import PlayerService
 from src.core.StateManager import StateManager
 from tests.fixtures.write_recording import WriteRecorder, encode
@@ -63,6 +65,24 @@ def _slot(path=SLOT):
         return copy.deepcopy(StateManager.Get(path))
 
 
+# What the Qt card wrote, step by step (FIELD_STEPS / CHARACTER_STEPS done on
+# its line edits, note box and combos), recorded on the last tree that had it
+# (f71a3b90, just before ADR-005 S4ac-3), where these routes' runs equalled
+# it: every write in order with its value's bytes (so its key order), the
+# deltas published at 反映, and the slot afterwards.
+CARD_RECORDING = (Path(__file__).parent / "fixtures" / "score_fields"
+                  / "golden.json")
+
+
+def _onTheCard(name):
+    return json.loads(CARD_RECORDING.read_text(encoding="utf-8"))[name]
+
+
+def _asRecorded(played):
+    """A run as the recording holds it (its tuples as JSON lists)."""
+    return json.loads(json.dumps(played))
+
+
 @pytest.fixture
 def countries(autonaApp):
     """The country data, loaded the way the first card built loads it (the
@@ -83,112 +103,58 @@ def _load_start(app, n=1):
     app.settle()
 
 
-# ── the card, as the operator uses it ────────────────────────────────────
+# ── the card's inputs, as the operator used them ─────────────────────────
 
-def _card(app, n=1, team=1, slot=1):
-    board = app.board(n)
-    cards = board.team1playerWidgets if team == 1 else board.team2playerWidgets
-    return cards[slot - 1]
-
-
-def _finish(field):
-    def act(card):
-        def typed(text):
-            edit = card._w(field, QLineEdit)
-            edit.setText(text)
-            edit.editingFinished.emit()
-        return typed
-    return act
-
-
-def _rowWith(combo, key, value):
-    """The combo's first row whose data has `key` == `value` (None: the
-    first row whose data names none)."""
-    for index in range(combo.count()):
-        data = combo.itemData(index)
-        found = data.get(key) if isinstance(data, dict) else None
-        if (found or None) == value:
-            return index
-    raise AssertionError(f"no row with {key} {value!r}")
-
-
-def _pick(combo, key, value):
-    combo.setCurrentIndex(_rowWith(combo, key, value))
-
-
-def _pickCountry(card, code):
-    from qtpy.QtWidgets import QComboBox
-    _pick(card._w(schema.PLAYER_COUNTRY_KEY, QComboBox), "code", code)
-
-
-def _pickRegion(card, code):
-    from qtpy.QtWidgets import QComboBox
-    _pick(card._w(schema.PLAYER_STATE_KEY, QComboBox), "code", code)
-
-
-# (what it is, what the operator does on the card, what the route is sent)
+# (what it is, what the route is sent): what the operator did on the Qt card
+# (its line edits, the note, the country and region combos) step by step,
+# which these requests wrote the same as until ADR-005 S4ac-3.
 FIELD_STEPS = [
-    ("the tag", lambda card: _finish(schema.PLAYER_TAG_KEY)(card)("ALPHA2"),
-     {"gamerTag": "ALPHA2"}),
-    ("the sponsor",
-     lambda card: _finish(schema.PLAYER_SPONSOR_KEY)(card)("NEW"),
-     {"prefix": "NEW"}),
-    ("the sponsor emptied",
-     lambda card: _finish(schema.PLAYER_SPONSOR_KEY)(card)(""),
-     {"prefix": ""}),
-    ("the real name",
-     lambda card: _finish(schema.PLAYER_REAL_NAME_KEY)(card)("Someone"),
-     {"name": "Someone"}),
-    ("the twitter",
-     lambda card: _finish(schema.PLAYER_TWITTER_KEY)(card)("tw2"),
-     {"twitter": "tw2"}),
-    ("the note", lambda card: card.custom_textbox.setPlainText("one\ntwo"),
-     {"custom_textbox": "one\ntwo"}),
-    ("a country", lambda card: _pickCountry(card, "JP"),
-     {"country_code": "JP"}),
-    ("a region", lambda card: _pickRegion(card, "13"), {"state_code": "13"}),
-    ("another country", lambda card: _pickCountry(card, "US"),
-     {"country_code": "US"}),
-    ("no country", lambda card: _pickCountry(card, None),
-     {"country_code": ""}),
-    ("the same tag again",
-     lambda card: _finish(schema.PLAYER_TAG_KEY)(card)("ALPHA2"),
-     {"gamerTag": "ALPHA2"}),
+    ("the tag", {"gamerTag": "ALPHA2"}),
+    ("the sponsor", {"prefix": "NEW"}),
+    ("the sponsor emptied", {"prefix": ""}),
+    ("the real name", {"name": "Someone"}),
+    ("the twitter", {"twitter": "tw2"}),
+    ("the note", {"custom_textbox": "one\ntwo"}),
+    ("a country", {"country_code": "JP"}),
+    ("a region", {"state_code": "13"}),
+    ("another country", {"country_code": "US"}),
+    ("no country", {"country_code": ""}),
+    ("the same tag again", {"gamerTag": "ALPHA2"}),
 ]
 
 
-def _play(app, steps, act):
-    """Each step through `act`, then 反映: what it wrote, what was published
-    and the slot afterwards."""
+def _play(app, client):
+    """Each step through the route, then 反映: what it wrote, what was
+    published and the slot afterwards."""
     _load_start(app)
     played = []
-    for label, onCard, body in steps:
+    for label, body in FIELD_STEPS:
         with WriteRecorder() as recorder:
-            act(onCard, body)
+            _ok(_fields(client, body))
             AutonaActions.instance.ApplyChanges(1)
             app.settle()
         played.append((label, recorder.Result(), encode(_slot())))
     return played
 
 
-def test_the_fields_write_what_the_card_writes(
+def test_the_fields_write_what_the_qt_card_wrote(
         autonaApp, client, countries, monkeypatch):
-    card = _card(autonaApp)
-    onCard = _play(autonaApp, FIELD_STEPS, lambda step, _body: step(card))
+    # Against the Qt card itself until ADR-005 S4ac-3, against its
+    # recording since.
+    onCard = _onTheCard("fields")
+    assert [label for label, _recorded, _slot_ in onCard] \
+        == [label for label, _body in FIELD_STEPS]
     # Every step but the last wrote something; the last nothing.
     assert [label for label, recorded, _slot_ in onCard
             if not recorded["sets"]] == ["the same tag again"]
 
-    def throughTheRoute(_step, body):
-        _ok(_fields(client, body))
-
-    autonaApp.board(1)
-    assert _play(autonaApp, FIELD_STEPS, throughTheRoute) == onCard
+    autonaApp.ready(1)
+    assert _asRecorded(_play(autonaApp, client)) == onCard
 
     with monkeypatch.context() as headless:
         _goHeadless(autonaApp, headless)
         try:
-            assert _play(autonaApp, FIELD_STEPS, throughTheRoute) == onCard
+            assert _asRecorded(_play(autonaApp, client)) == onCard
         finally:
             _dropHeadlessBoards(autonaApp)
 
@@ -420,81 +386,60 @@ def test_a_slot_that_is_not_there_is_refused(
 
 # ── a character row ──────────────────────────────────────────────────────
 
-def _characterCombos(card, row):
-    _element, character, color, variant = card.character_elements[row - 1]
-    return character, color, variant
-
-
-def _pickCharacter(row, enName):
-    return lambda card: _pick(_characterCombos(card, row)[0], "en_name",
-                              enName)
-
-
-def _pickSkin(row, skin):
-    return lambda card: _characterCombos(card, row)[1].setCurrentIndex(skin)
-
-
-def _pickVariant(row, enName):
-    return lambda card: _pick(_characterCombos(card, row)[2], "en_name",
-                              enName)
-
-
-# (what it is, the pick on the card, (the row, what the route is sent))
+# (what it is, (the row, what the route is sent)): the picks the operator
+# made on the Qt card's character, skin and variant combos, which these
+# requests wrote the same as until ADR-005 S4ac-3.
 CHARACTER_STEPS = [
-    ("Mario on row 1", _pickCharacter(1, "Mario"), (1, {"en_name": "Mario"})),
-    ("its third skin, another character", _pickSkin(1, 2), (1, {"skin": 2})),
-    ("a variant", _pickVariant(1, "EX"), (1, {"variant": "EX"})),
-    ("Luigi: the first skin, the variant kept", _pickCharacter(1, "Luigi"),
-     (1, {"en_name": "Luigi"})),
-    ("no variant", _pickVariant(1, None), (1, {"variant": ""})),
-    ("Peach on row 2", _pickCharacter(2, "Peach"), (2, {"en_name": "Peach"})),
-    ("its second skin", _pickSkin(2, 1), (2, {"skin": 1})),
-    ("a character without skins", _pickCharacter(3, "NoArt"),
-     (3, {"en_name": "NoArt"})),
-    ("row 1 emptied", _pickCharacter(1, None), (1, {"en_name": ""})),
-    ("the same character again", _pickCharacter(2, "Peach"),
-     (2, {"en_name": "Peach"})),
+    ("Mario on row 1", (1, {"en_name": "Mario"})),
+    ("its third skin, another character", (1, {"skin": 2})),
+    ("a variant", (1, {"variant": "EX"})),
+    ("Luigi: the first skin, the variant kept", (1, {"en_name": "Luigi"})),
+    ("no variant", (1, {"variant": ""})),
+    ("Peach on row 2", (2, {"en_name": "Peach"})),
+    ("its second skin", (2, {"skin": 1})),
+    ("a character without skins", (3, {"en_name": "NoArt"})),
+    ("row 1 emptied", (1, {"en_name": ""})),
+    ("the same character again", (2, {"en_name": "Peach"})),
 ]
 
 
-def _playCharacters(app, act):
+def _playCharacters(app, client):
     _load_start(app)
     played = []
-    for label, onCard, request in CHARACTER_STEPS:
+    for label, (row, body) in CHARACTER_STEPS:
         with WriteRecorder() as recorder:
-            act(onCard, request)
+            _ok(_character(client, body, row=row))
             AutonaActions.instance.ApplyChanges(1)
             app.settle()
-        # Not the writes: a pick on the card writes the rows twice (its skin
-        # combo's new rows, then the pick), the same value both times.
+        # Not the writes: a pick on the Qt card wrote the rows twice (its
+        # skin combo's new rows, then the pick), the same value both times.
         played.append((label, recorder.deltas, recorder.bigChanges,
                        encode(_slot()["character"])))
     return played
 
 
-def test_a_character_row_writes_what_the_card_s_combos_write(
+def test_a_character_row_writes_what_the_qt_card_s_combos_wrote(
         autonaApp, client, goldenGames, monkeypatch):
+    # Against the Qt card's combos until ADR-005 S4ac-3, against their
+    # recording since.
+    onCard = _onTheCard("characters")
+    assert [label for label, _deltas, _big, _rows in onCard] \
+        == [label for label, _step in CHARACTER_STEPS]
+    assert [label for label, deltas, _big, _rows in onCard if not deltas] \
+        == ["the same character again"]
+
     _load(goldenGames, "tgame")
     autonaApp.settle()
     snap = GameAssetCatalog.instance.Current()
     assert len(snap.skinRows.get("NoArt", ())) == 0
     assert len(snap.skinRows.get("Mario", ())) == 3
-    card = _card(autonaApp)
-    onCard = _playCharacters(autonaApp, lambda step, _request: step(card))
-    assert [label for label, deltas, _big, _rows in onCard if not deltas] \
-        == ["the same character again"]
-
-    def throughTheRoute(_step, request):
-        row, body = request
-        _ok(_character(client, body, row=row))
-
-    autonaApp.board(1)
-    assert _playCharacters(autonaApp, throughTheRoute) == onCard
+    autonaApp.ready(1)
+    assert _asRecorded(_playCharacters(autonaApp, client)) == onCard
 
     with monkeypatch.context() as headless:
         _goHeadless(autonaApp, headless)
         try:
-            assert _playCharacters(autonaApp, throughTheRoute) == onCard
+            assert _asRecorded(_playCharacters(autonaApp, client)) == onCard
         finally:
             _dropHeadlessBoards(autonaApp)
 
@@ -682,58 +627,22 @@ def test_an_edit_that_raises_half_way_leaves_no_previous_id(
 
 # ── the match bar ────────────────────────────────────────────────────────
 
-def _barCombo(bar, field):
-    combo = {"phase": bar.phaseCombo, "pool": bar.poolCombo,
-             "match": bar.matchCombo}[field]
-    # The combo the board wired for this key (findChild by the schema name).
-    assert combo.objectName() == field
-    return combo
-
-
-def _typeInto(field, text):
-    """Typed into the combo's line edit and finished (editingFinished)."""
-    def act(bar):
-        combo = _barCombo(bar, field)
-        combo.setEditText(text)
-        combo.lineEdit().editingFinished.emit()
-    return act
-
-
-def _pickListed(field, text):
-    """A row of the combo's list picked (currentIndexChanged)."""
-    def act(bar):
-        combo = _barCombo(bar, field)
-        index = combo.findText(text)
-        assert index >= 0 and index != combo.currentIndex()
-        combo.setCurrentIndex(index)
-    return act
-
-
-def _spinBestOf(value):
-    """The BEST OF spinbox set (valueChanged -> _onBestOfChanged)."""
-    return lambda bar: bar.bestOfSpin.setValue(value)
-
-
 def _matchSteps(listed):
-    """(what the operator does on the bar, what the route is sent): the bar's
-    two signals of a combo and its spinbox. `listed` is a term of the match
-    combo's list."""
+    """What the route is sent: what the operator did on the Qt bar (its
+    combos' editingFinished and currentIndexChanged, its BEST OF spinbox),
+    which these requests wrote the same as until ADR-005 S4ac-3. `listed`
+    is a term of the match combo's list."""
     return [
-        ([_typeInto("phase", "Top 8"), _typeInto("pool", "A1"),
-          _pickListed("match", listed), _spinBestOf(5)],
-         {"phase": "Top 8", "pool": "A1", "match": listed, "bestOf": 5}),
-        ([_typeInto("phase", "")], {"phase": ""}),
-        ([_typeInto("pool", ""), _pickListed("match", "")],
-         {"match": "", "pool": ""}),
-        ([_spinBestOf(0)], {"bestOf": 0}),
-        ([_typeInto("match", "Grand Final"), _spinBestOf(3)],
-         {"bestOf": 3, "match": "Grand Final"}),
-        ([_typeInto("match", "Grand Final"), _spinBestOf(3)],
-         {"bestOf": 3, "match": "Grand Final"}),
+        {"phase": "Top 8", "pool": "A1", "match": listed, "bestOf": 5},
+        {"phase": ""},
+        {"match": "", "pool": ""},
+        {"bestOf": 0},
+        {"bestOf": 3, "match": "Grand Final"},
+        {"bestOf": 3, "match": "Grand Final"},
     ]
 
 
-def _playMatch(app, act, n, steps):
+def _playMatch(app, client, n, steps):
     played = []
     AutonaActions.instance.SetMatchField(n, "phase", "")
     AutonaActions.instance.SetMatchField(n, "pool", "")
@@ -742,9 +651,9 @@ def _playMatch(app, act, n, steps):
     StateManager.Set(f"score.{n}.match_en", "Kept English")
     AutonaActions.instance.ApplyChanges(n)
     app.settle()
-    for onBar, body in steps:
+    for body in steps:
         with WriteRecorder() as recorder:
-            act(onBar, body)
+            _ok(_match(client, body, n))
             AutonaActions.instance.ApplyChanges(n)
             app.settle()
         board = _slot(f"score.{n}")
@@ -755,39 +664,30 @@ def _playMatch(app, act, n, steps):
 
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_the_match_bar_writes_what_its_inputs_write(
+def test_the_match_bar_writes_the_same_on_both_shells(
         autonaApp, client, monkeypatch, n):
-    # The real bar (S4z review): its combos' editingFinished and
-    # currentIndexChanged, and the BEST OF spinbox, against the route on
-    # the desktop and headless.
-    bar = autonaApp.board(n)
-    match = _barCombo(bar, "match")
-    assert match.count() > 1, "the match combo offers no term"
-    steps = _matchSteps(match.itemText(1))
+    # Against the real Qt bar until ADR-005 S4ac-3 (S4z review; the
+    # desktop's run equalled it, step by step).
+    autonaApp.ready(n)
+    terms = MatchNameCandidates.instance.Candidates(n)["match"]
+    assert terms, "the match combo offers no term"
+    steps = _matchSteps(terms[0])
 
-    def onTheBar(ops, _body):
-        for op in ops:
-            op(bar)
-
-    inputs = _playMatch(autonaApp, onTheBar, n, steps)
+    desktop = _playMatch(autonaApp, client, n, steps)
     # match_en is never touched; "" empties; 0 is a set length.
-    assert json.loads(inputs[0][1])["match"] == match.itemText(1)
-    assert json.loads(inputs[1][1])["phase"] == ""
-    assert json.loads(inputs[2][1])["match"] == ""
-    assert json.loads(inputs[3][1])["best_of"] == 0
-    assert {json.loads(state)["match_en"] for _rec, state in inputs}         == {"Kept English"}
-    assert all(recorded["sets"] for recorded, _state in inputs[:-1])
-    assert inputs[-1][0]["sets"] == []
-
-    def throughTheRoute(_ops, body):
-        _ok(_match(client, body, n))
-
-    assert _playMatch(autonaApp, throughTheRoute, n, steps) == inputs
+    assert json.loads(desktop[0][1])["match"] == terms[0]
+    assert json.loads(desktop[1][1])["phase"] == ""
+    assert json.loads(desktop[2][1])["match"] == ""
+    assert json.loads(desktop[3][1])["best_of"] == 0
+    assert {json.loads(state)["match_en"] for _rec, state in desktop} \
+        == {"Kept English"}
+    assert all(recorded["sets"] for recorded, _state in desktop[:-1])
+    assert desktop[-1][0]["sets"] == []
 
     with monkeypatch.context() as headless:
         _goHeadless(autonaApp, headless)
         try:
-            assert _playMatch(autonaApp, throughTheRoute, n, steps) == inputs
+            assert _playMatch(autonaApp, client, n, steps) == desktop
         finally:
             _dropHeadlessBoards(autonaApp)
 

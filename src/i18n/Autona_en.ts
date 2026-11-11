@@ -51,16 +51,12 @@
 </context><context>
     <name>Form</name>
     <message>
-        <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
         <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
         <source>Team Name</source>
         <translation>Team Name</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
         <source>Form</source>
         <translation>Form</translation>
@@ -71,120 +67,29 @@
         <translation>SPONSORS?</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
-        <source>PLAYER</source>
-        <translation>PLAYER</translation>
-    </message>
-    <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>Sponsor</source>
         <translation>Sponsor</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>GamerTag</source>
         <translation>GamerTag</translation>
     </message>
     <message>
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
-        <source>SEED</source>
-        <translation>SEED</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
-        <source>Real Name</source>
-        <translation>Real Name</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
-        <source>Twitter</source>
-        <translation>Twitter</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
-        <source>Birthday?</source>
-        <translation>Birthday?</translation>
-    </message>
-    <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>Country</source>
         <translation>Country</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>Region</source>
         <translation>Region</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>CHARACTERS</source>
         <translation>CHARACTERS</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>SCORE</source>
-        <translation>SCORE</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>PHASE</source>
-        <translation>PHASE</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>POOL</source>
-        <translation>POOL</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>Pool A1, etc</source>
-        <translation>Pool A1, etc</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>Pool A, Bracket, Top 8, etc</source>
-        <translation>Pool A, Bracket, Top 8, etc</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>MATCH</source>
-        <translation>MATCH</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>Winners Final, Winners TOP24, etc</source>
-        <translation>Winners Final, Winners TOP24, etc</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>BEST OF</source>
-        <translation>BEST OF</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>RESET SCORE</source>
-        <translation>RESET SCORE</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>SWAP TEAMS</source>
-        <translation>SWAP TEAMS</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
-        <source>TEAM</source>
-        <translation>TEAM</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
-        <source>LOSERS</source>
-        <translation>LOSERS</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
@@ -216,7 +121,6 @@
         <source>STOCKS/LIVES</source>
         <translation>STOCKS/LIVES</translation>
     </message>
-
 </context><context>
     <name>GroupBox</name>
     <message>
@@ -763,8 +667,6 @@
     <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
-        <location filename="..\AutonaScoreboardWidget.py" line="1167" />
-        <location filename="..\AutonaScoreboardWidget.py" line="1098" />
         <location filename="..\Autona.py" line="579" />
         <location filename="..\Autona.py" line="170" />
         <source>Warning</source>
@@ -990,11 +892,6 @@
         <translation>Remind later</translation>
     </message>
     <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="286" />
-        <source>大会が選択されていません</source>
-        <translation>No tournament selected</translation>
-    </message>
-    <message>
         <location filename="..\AutonaBracketView.py" line="407" />
         <source>トーナメント情報が未取得です。
 フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。
@@ -1018,132 +915,20 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Update bracket info</translation>
     </message>
     <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="238" />
-        <source>Real Name</source>
-        <translation>Real Name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="237" />
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="90" />
-        <source>Twitter</source>
-        <translation>Twitter</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="235" />
-        <source>Seed</source>
-        <translation>Seed</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="239" />
-        <source>Location</source>
-        <translation>Location</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="236" />
-        <source>Characters</source>
-        <translation>Characters</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="240" />
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="147" />
-        <source>Additional information</source>
-        <translation />
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="106" />
-        <source>Members</source>
-        <translation>Members</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="658" />
-        <location filename="..\AutonaCrewBattleWidget.py" line="118" />
-        <source>Swap Teams</source>
-        <translation>Swap Teams</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="122" />
-        <source>Reset Stocks</source>
-        <translation>Reset Stocks</translation>
-    </message>
-    <message>
         <location filename="..\AutonaTeamBattleWidget.py" line="129" />
-        <location filename="..\AutonaSelectSetWindow.py" line="120" />
-        <location filename="..\AutonaCrewBattleWidget.py" line="132" />
         <source>Phase</source>
         <translation>Phase</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleWidget.py" line="139" />
-        <location filename="..\AutonaSelectSetWindow.py" line="121" />
-        <location filename="..\AutonaCrewBattleWidget.py" line="137" />
         <source>Match</source>
         <translation>Match</translation>
     </message>
     <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1003" />
-        <location filename="..\AutonaScoreboardWidget.py" line="503" />
-        <location filename="..\AutonaScoreboardWidget.py" line="440" />
-        <location filename="..\AutonaCrewBattleWidget.py" line="156" />
-        <source>TEAM {0}</source>
-        <translation>TEAM {0}</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="149" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="122" />
-        <location filename="..\AutonaCrewBattleWidget.py" line="164" />
         <source>Team {0}</source>
         <translation>Team {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="172" />
-        <source>Team Color</source>
-        <translation>Team Color</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="197" />
-        <source>Currently playing</source>
-        <translation>Currently playing</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="205" />
-        <source>Member {0}</source>
-        <translation>Member {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaCrewBattleWidget.py" line="227" />
-        <source>Total</source>
-        <translation>Total</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaIndividualGameTracker.py" line="27" />
-        <source>Individual game data</source>
-        <translation>Individual game data</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaIndividualGameTracker.py" line="57" />
-        <source>Game {0}</source>
-        <translation>Game {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaIndividualGameTracker.py" line="74" />
-        <location filename="..\AutonaIndividualGameTracker.py" line="69" />
-        <source>T{0}</source>
-        <translation>T{0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaIndividualGameTracker.py" line="79" />
-        <source>Tie</source>
-        <translation>Tie</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="234" />
-        <source>Player Name</source>
-        <translation>Player Name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="233" />
-        <source>Sponsor</source>
-        <translation>Sponsor</translation>
     </message>
     <message>
         <location filename="..\core\ResultService.py" line="94" />
@@ -1177,285 +962,8 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="221" />
         <source>Clear</source>
         <translation>Clear</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="124" />
-        <location filename="..\AutonaSelectSetWindow.py" line="122" />
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="346" />
-        <source>Player {0}</source>
-        <translation>Player {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="185" />
-        <source>Generate Thumbnail</source>
-        <translation>Generate Thumbnail</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="197" />
-        <source>Xに投稿する</source>
-        <translation>Post to X</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="533" />
-        <source>反映</source>
-        <translation>Apply</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="535" />
-        <source>入力内容を配信画面に反映する</source>
-        <translation>Apply the entered data to the stream output</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="642" />
-        <source>すべての入力値をリセット</source>
-        <translation>Reset all inputs</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="797" />
-        <source>スコアボードの内容を全てクリアしますか？</source>
-        <translation>Clear all scoreboard data?</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="383" />
-        <source>&gt;&gt;詳細</source>
-        <translation>&gt;&gt;Details</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="393" />
-        <source>{0}Pプレイヤー名</source>
-        <translation>{0}P Player Name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="404" />
-        <source>プレイヤー詳細</source>
-        <translation>Player details</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="527" />
-        <source>ファイター</source>
-        <translation>Fighter</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="545" />
-        <source>カラー</source>
-        <translation>Color</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="291" />
-        <source>配信先</source>
-        <translation>Stream destination</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="311" />
-        <source>配信先を追加する</source>
-        <translation>Add stream destination</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1332" />
-        <location filename="..\AutonaScoreboardWidget.py" line="329" />
-        <source>Load set</source>
-        <translation>Load set</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="401" />
-        <source>Players per team</source>
-        <translation>Players per team</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1580" />
-        <location filename="..\AutonaScoreboardWidget.py" line="423" />
-        <source>Auto update</source>
-        <translation>Auto update</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="641" />
-        <source>Swap 1P and 2P</source>
-        <translation>Swap 1P and 2P</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="713" />
-        <source>Score Reset</source>
-        <translation>Score Reset</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="721" />
-        <source>Reset Score</source>
-        <translation>Reset Score</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="900" />
-        <source>対戦情報</source>
-        <translation>Match info</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="932" />
-        <source>スコアボード</source>
-        <translation>Scoreboard</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="944" />
-        <source>所属タグをスコアボードに表示しない</source>
-        <translation>Hide sponsor name on scoreboard</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1000" />
-        <source>{0}P</source>
-        <translation>{0}P</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1157" />
-        <source>Autona - Bluesky</source>
-        <translation>Autona - Bluesky</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1163" />
-        <source>The post has successfully been sent to account {0}</source>
-        <translation>The post has successfully been sent to account {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1196" />
-        <source>Team 1 player name</source>
-        <translation>Team 1 player name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1198" />
-        <source>Team 2 player name</source>
-        <translation>Team 2 player name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1200" />
-        <source>Round name</source>
-        <translation>Round name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1205" />
-        <source>Post to X</source>
-        <translation>Post to X</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1206" />
-        <source>Cannot post to X: the following fields are empty.</source>
-        <translation>Cannot post to X: the following fields are empty.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1307" />
-        <source>Thumbnail generation failed, so no image was copied to the clipboard.</source>
-        <translation>Thumbnail generation failed, so no image was copied to the clipboard.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1318" />
-        <source>Failed to post to X.</source>
-        <translation>Failed to post to X.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1328" />
-        <source>Load set from {0}</source>
-        <translation>Load set from {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1567" />
-        <source>Auto update (Set)</source>
-        <translation>Auto update (Set)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1571" />
-        <source>Auto update (Stream [{0}])</source>
-        <translation>Auto update (Stream [{0}])</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1575" />
-        <source>Auto update (Station [{0}])</source>
-        <translation>Auto update (Station [{0}])</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="15" />
-        <source>Select a set</source>
-        <translation>Select a set</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Pool</source>
-        <translation>Pool</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a phase...</source>
-        <translation>Select a phase...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>All pools</source>
-        <translation>All pools</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>All phases</source>
-        <translation>All phases</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a phase to load sets</source>
-        <translation>Select a phase to load sets</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="29" />
-        <location filename="..\AutonaSelectSetWindow.py" line="30" />
-        <source>Filter...</source>
-        <translation>Filter...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="37" />
-        <source>Show completed sets</source>
-        <translation>Show completed sets</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="41" />
-        <source>Show complete pairs</source>
-        <translation>Show complete pairs</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="73" />
-        <source>Track sets from a stream or station</source>
-        <translation>Track sets from a stream or station</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="104" />
-        <source>Fetching sets...</source>
-        <translation>Fetching sets...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="84" />
-        <location filename="..\AutonaSelectSetWindow.py" line="118" />
-        <source>Stream</source>
-        <translation>Stream</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="119" />
-        <source>Station</source>
-        <translation>Station</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="14" />
-        <source>Select a station</source>
-        <translation>Select a station</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="82" />
-        <source>Type</source>
-        <translation>Type</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="83" />
-        <source>Id</source>
-        <translation>Id</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaSelectStationWindow.py" line="85" />
-        <source>Identifier</source>
-        <translation>Identifier</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="0" />
@@ -1692,13 +1200,11 @@ Change the port under Settings → General → Webserver Port and restart Autona
 </context><context>
     <name>punctuation</name>
     <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="147" />
         <location filename="..\Autona.py" line="865" />
         <source>(</source>
         <translation>(</translation>
     </message>
     <message>
-        <location filename="..\AutonaSelectSetWindow.py" line="148" />
         <location filename="..\Autona.py" line="865" />
         <source>)</source>
         <translation>)</translation>
@@ -1786,13 +1292,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
         <source>Disables the individual game tracker (takes effect on next restart)</source>
         <translation>Disables the individual game tracker (takes effect on next restart)</translation>
-    </message>
-</context><context>
-    <name>settings.qt_scoreboard_panel</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="115" />
-        <source>Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)</source>
-        <translation>Show the Scoreboard panel in its previous (Qt) version (once the panel has been opened, takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>
@@ -1918,16 +1417,6 @@ Choose a different combination or clear the conflicting assignment first.</trans
     </message>
 </context><context>
     <name>thumb_app</name>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1062" />
-        <source>Autona - Thumbnail</source>
-        <translation>Autona - Thumbnail</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1068" />
-        <source>The thumbnail has been generated here:</source>
-        <translation>The thumbnail has been generated here:</translation>
-    </message>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="221" />
         <source>Please select a game first</source>

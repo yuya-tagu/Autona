@@ -452,29 +452,6 @@ def test_window_seed_panel_state_runs_both_seeds_in_one_save_block():
         "the per-feature color seed dropped out of the launch")
 
 
-def test_eye_menu_labels_cover_every_display_option():
-    """The labels are the one half of the eye menu Qt still owns.
-
-    AutonaScoreboardWidget iterates schema.DISPLAY_OPTIONS and looks each
-    label up by key, falling back to the raw key rather than raising -- which
-    is right for the board but would ship "show_real_name" as a menu string
-    if the two lists drifted. This is the check that fallback relies on.
-    """
-    source = (PROJECT_ROOT / "src" / "AutonaScoreboardWidget.py").read_text(
-        encoding="utf-8")
-    literals = [
-        node.value for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
-        and any(isinstance(target, ast.Name) and target.id == "labels"
-                for target in node.targets)
-    ]
-    assert len(literals) == 1, (
-        "expected exactly one `labels = {...}` in AutonaScoreboardWidget")
-    keys = [key.value for key in literals[0].keys]
-    assert len(keys) == len(set(keys)), f"duplicate label keys: {keys}"
-    assert set(keys) == set(schema.DISPLAY_OPTION_KEYS)
-
-
 # ── SeedBoard ────────────────────────────────────────────────────────────
 
 _BOARD_SKELETON = {

@@ -7,7 +7,8 @@ charNumber): building the board, the singles mode, a game load (its
 ``clear_all`` all drove them, and the player cards they built and tore down
 published the slots. Since S3e-6 the count is the state's -- the slots
 themselves, one operation (``AutonaActions.SetRoster``) for every entry
-point -- and the board builds and removes cards to follow it.
+point -- and the board built and removed cards to follow it, until
+ADR-005 S4ac-3 removed the Qt board.
 
 What the desktop publishes is pinned against a recording made on the last
 tree where the spinboxes were the source of truth (7169efd5), through the
@@ -19,7 +20,10 @@ public entry points only, so the same drivers replay it. For every step:
   them),
 - the cards: how many each team has, their character rows, the tag they
   show, whether their "Player N" title shows; the two spinboxes; whether
-  the team-name fields show,
+  the team-name fields show (recorded, and no longer compared: the board
+  widgets went in ADR-005 S4ac-3, and what the board's inputs ran is called
+  directly -- the state, the pending edits and what 反映 published are
+  compared as before),
 - what a Web route answered.
 
 The save cycles a step took are not part of it: a count change used to be
@@ -33,20 +37,11 @@ Record (on the pre-S3e-6 tree only):
 import json
 import os
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtWidgets import (QApplication, QCheckBox, QGroupBox,
-                            QHBoxLayout, QLabel, QLayout, QLineEdit,
-                            QMessageBox, QWidget)
-from shiboken6 import Shiboken
 
-from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-from src.AutonaScoreboardWidget import AutonaScoreboardWidget
-from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.StateManager import StateManager
@@ -93,34 +88,19 @@ class _Published:
         return False
 
 
-def _cards(board):
-    result = {}
-    for team, cards in ((1, board.team1playerWidgets),
-                        (2, board.team2playerWidgets)):
-        result[str(team)] = [
-            [len(card.character_elements),
-             card.findChild(QLineEdit, "name").text(),
-             not card.findChild(QLabel, "title").isHidden()]
-            for card in cards]
-    return result
+# What the recording has of the board widgets (ADR-005 S4ac-3 removed
+# them): not compared.
+WIDGET_FIELDS = ("cards", "spin", "teamNamesShown")
 
 
-def _teamNamesShown(board):
-    return [not column.findChild(QLineEdit, "teamName").isHidden()
-            for column in (board.team1column, board.team2column)]
-
-
-def snapshot(app, board, number):
-    """The board as it stands: state, pending edits and the widgets."""
+def snapshot(app, number):
+    """The board as it stands: state and pending edits."""
     prefix = f"score.{number}"
     with StateManager.lock:
         state = _normalise(encode(StateManager.Get(prefix)), app)
     return {
         "state": state,
         "dirty": StateManager.HasPendingChanges(prefix),
-        "cards": _cards(board),
-        "spin": [board.playerNumber.value(), board.charNumber.value()],
-        "teamNamesShown": _teamNamesShown(board),
     }
 
 
@@ -132,17 +112,13 @@ class Steps:
         self.number = number
         self.recorded = []
 
-    @property
-    def board(self):
-        return self.app.manager.scoreboards[self.number]
-
     def run(self, label, action, commit=True):
         response = action()
         self.app.settle()
         entry = {"step": label}
         if isinstance(response, (str, bool)):
             entry["response"] = response
-        entry.update(snapshot(self.app, self.board, self.number))
+        entry.update(snapshot(self.app, self.number))
         if commit:
             with _Published() as published:
                 StateManager.CommitHeld(f"score.{self.number}")
@@ -172,8 +148,8 @@ def _check(name, recorded):
     golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
     assert [s["step"] for s in recorded] == [s["step"] for s in golden]
     for actual, expected in zip(recorded, golden):
-        differ = [field for field in expected
-                  if actual.get(field) != expected[field]]
+        differ = [field for field in expected if field not in WIDGET_FIELDS
+                  and actual.get(field) != expected[field]]
         assert not differ, (
             f"{name}: {actual['step']!r} differs in {differ}\n"
             f"recorded: {json.dumps(expected)[:4000]}\n"
@@ -235,58 +211,87 @@ def _set(*teams, **extra):
                 **extra)
 
 
+# What the 1v1 / team board's inputs ran, until ADR-005 S4ac-3 removed them
+# -- answering nothing, as an input does.
+
+def _players(number, players):
+    """The PLAYERS spinbox (AutonaActions.SetPlayersPerTeam)."""
+    return lambda: AutonaActions.instance.SetPlayersPerTeam(
+        number, players) and None
+
+
+def _characters(number, characters):
+    """The hidden characters spinbox (AutonaActions.SetCharactersPerPlayer)."""
+    return lambda: AutonaActions.instance.SetCharactersPerPlayer(
+        number, characters) and None
+
+
+def _swap(number):
+    """The SWAP button (AutonaActions.SwapTeams)."""
+    return lambda: AutonaActions.instance.SwapTeams(number) and None
+
+
+def _move(number, team, slot, step):
+    """A card's move up (-1) / down (+1) (AutonaActions.SwapPlayers)."""
+    return lambda: AutonaActions.instance.SwapPlayers(
+        number, team, slot, slot + step) and None
+
+
+def _resetAll(number):
+    """すべての入力値をリセット, answered Yes: the Web's reset_all is the
+    same operation (AutonaActions.ClearBoard, the set loaded last
+    forgotten)."""
+    from src import AutonaWebOperations as WebOps
+    return lambda: WebOps.reset_all(number) and None
+
+
 # ── scenarios ────────────────────────────────────────────────────────────
 
 def test_the_team_board_publishes_the_recorded_rosters(world, autonaApp):
     web = autonaApp.web()
     steps = Steps(autonaApp, 2)
-    autonaApp.board(2)
+    autonaApp.ready(2)
     steps.record("built")
-    board = steps.board
 
-    steps.run("players 2", lambda: board.playerNumber.setValue(2))
+    steps.run("players 2", _players(2, 2))
     steps.run("fill", lambda: (
         web.update_player(2, 1, 1, dict(PLAYER_A)),
         web.update_player(2, 2, 2, dict(PLAYER_B))))
     steps.run("team names", lambda: (
         web.set_route(2, team=1, teamName="Alpha"),
         web.set_route(2, team=2, teamName="Bravo")))
-    steps.run("characters 2", lambda: board.charNumber.setValue(2))
-    steps.run("characters 4", lambda: board.charNumber.setValue(4))
-    steps.run("players 3", lambda: board.playerNumber.setValue(3))
-    steps.run("swap", board.SwapTeams)
-    steps.run("move a player down", lambda: board._MovePlayer(
-        board.team1playerWidgets[0], 1))
-    steps.run("players 1", lambda: board.playerNumber.setValue(1))
+    steps.run("characters 2", _characters(2, 2))
+    steps.run("characters 4", _characters(2, 4))
+    steps.run("players 3", _players(2, 3))
+    steps.run("swap", _swap(2))
+    steps.run("move a player down", _move(2, 1, 1, 1))
+    steps.run("players 1", _players(2, 1))
     steps.run("web players 3", lambda: web.set_route(2, players=3))
     steps.run("web characters 1", lambda: web.set_route(2, characters=1))
     steps.run("web players and characters", lambda: web.set_route(
         2, players=2, characters=3, match="Final"))
-    steps.run("swap back", board.SwapTeams)
-    steps.run("load a 2v2 set", lambda: apply_set(board, _set(
+    steps.run("swap back", _swap(2))
+    steps.run("load a 2v2 set", lambda: apply_set(2, _set(
         [_entrant("A1", "Mario"), _entrant("A2", "Luigi", "Peach")],
         [_entrant("B1", "Bowser"), _entrant("B2")],
         p1_name="TEAM A", p2_name="TEAM B")))
-    steps.run("load a 3v3 set", lambda: apply_set(board, _set(
+    steps.run("load a 3v3 set", lambda: apply_set(2, _set(
         [_entrant("C1"), _entrant("C2"), _entrant("C3", "Zelda")],
         [_entrant("D1"), _entrant("D2", "Mario"), _entrant("D3")],
         p1_name="TEAM C", p2_name="TEAM D")))
-    steps.run("load a 1v1 set", lambda: apply_set(board, _set(
+    steps.run("load a 1v1 set", lambda: apply_set(2, _set(
         [_entrant("E1", "Luigi")], [_entrant("F1")])))
-    steps.run("players 2 again", lambda: board.playerNumber.setValue(2))
+    steps.run("players 2 again", _players(2, 2))
     steps.run("web clear all", lambda: web.clear_all(2))
-    steps.run("players 0", lambda: board.playerNumber.setValue(0))
-    steps.run("players 2 from none", lambda: board.playerNumber.setValue(2))
+    steps.run("players 0", _players(2, 0))
+    steps.run("players 2 from none", _players(2, 2))
     steps.run("web characters 0", lambda: web.set_route(2, characters=0))
-    steps.run("players 3 without characters",
-              lambda: board.playerNumber.setValue(3))
-    steps.run("characters 3 again", lambda: board.charNumber.setValue(3))
+    steps.run("players 3 without characters", _players(2, 3))
+    steps.run("characters 3 again", _characters(2, 3))
     steps.run("fill again", lambda: (
         web.update_player(2, 1, 2, dict(PLAYER_A)),
         web.update_player(2, 2, 3, dict(PLAYER_B))))
-    with patch.object(QMessageBox, "question",
-                      return_value=QMessageBox.StandardButton.Yes):
-        steps.run("reset all inputs", board.ResetAllInputs)
+    steps.run("reset all inputs", _resetAll(2))
     steps.run("web players 1", lambda: web.set_route(2, players=1))
 
     _check("team board", steps.recorded)
@@ -295,18 +300,17 @@ def test_the_team_board_publishes_the_recorded_rosters(world, autonaApp):
 def test_a_game_load_applies_its_roster_default(world, autonaApp):
     web = autonaApp.web()
     steps = Steps(autonaApp, 2)
-    autonaApp.board(2)
+    autonaApp.ready(2)
     steps.record("built")
-    board = steps.board
 
     steps.run("fill", lambda: web.update_player(2, 1, 1, dict(PLAYER_A)))
-    steps.run("characters 2", lambda: board.charNumber.setValue(2))
+    steps.run("characters 2", _characters(2, 2))
     steps.run("load a two-player game", lambda: loadGame(TEAM_GAME),
               commit=False)
     steps.run("team names", lambda: (
         web.set_route(2, team=1, teamName="Alpha"),
         web.set_route(2, team=2, teamName="Bravo")))
-    steps.run("players 3", lambda: board.playerNumber.setValue(3))
+    steps.run("players 3", _players(2, 3))
     steps.run("reload the two-player game", lambda: loadGame(TEAM_GAME),
               commit=False)
     steps.run("load a one-player game", lambda: loadGame("tgame"),
@@ -315,7 +319,7 @@ def test_a_game_load_applies_its_roster_default(world, autonaApp):
               commit=False)
 
     singles = Steps(autonaApp, 1)
-    autonaApp.board(1)
+    autonaApp.ready(1)
     singles.record("singles board built after the load")
     singles.run("singles web players 3", lambda: web.set_route(1, players=3))
     singles.run("singles web clear all", lambda: web.clear_all(1))
@@ -327,20 +331,20 @@ def test_a_game_load_applies_its_roster_default(world, autonaApp):
 
 def test_a_singles_board_built_after_a_team_game_shows_the_team_names(
         world, autonaApp):
-    """The seed decides the players ahead of the board now, so no later card
-    build brings the names back: the board's mode looks at the count (ADR-005
-    S4t, judgment 8). One player a team, they stay hidden."""
-    loadGame(TEAM_GAME)
-    board = autonaApp.board(1)
+    """The seed decides the players ahead of the board (ADR-005 S4t,
+    judgment 8): a singles board made after a team game has its two players
+    a team, and one after a one-player game one. (The Qt board showed its
+    team names from that count, checked here until ADR-005 S4ac-3.)"""
+    def players(team):
+        return len(autonaApp.get(f"score.1.team.{team}.player"))
 
-    assert len(board.team1playerWidgets) == 2
-    assert _teamNamesShown(board) == [True, True]
+    loadGame(TEAM_GAME)
+    autonaApp.ready(1)
+    assert [players(1), players(2)] == [2, 2]
 
     loadGame("tgame")
-    board = autonaApp.board(1)
-
-    assert len(board.team1playerWidgets) == 1
-    assert _teamNamesShown(board) == [False, False]
+    autonaApp.ready(1)
+    assert [players(1), players(2)] == [1, 1]
 
 
 def test_the_boards_are_built_with_the_recorded_rosters(world, autonaApp):
@@ -348,346 +352,92 @@ def test_the_boards_are_built_with_the_recorded_rosters(world, autonaApp):
     (nothing: building a board leaves nothing behind 反映)."""
     recorded = []
     for number in (1, 2):
-        autonaApp.board(number)
-        board = autonaApp.manager.scoreboards[number]
+        autonaApp.ready(number)
         recorded.append(dict({"step": f"board {number}"},
-                             **snapshot(autonaApp, board, number)))
+                             **snapshot(autonaApp, number)))
     loadGame(TEAM_GAME)
     autonaApp.settle()
     for number in (1, 2):
-        autonaApp.board(number)
-        board = autonaApp.manager.scoreboards[number]
+        autonaApp.ready(number)
         recorded.append(dict({"step": f"board {number}, a two-player game"},
-                             **snapshot(autonaApp, board, number)))
+                             **snapshot(autonaApp, number)))
 
     _check("built", recorded)
 
 
-# ── the cards' lifecycle ─────────────────────────────────────────────────
+# ── the roster through every entry point ──────────────────────────────
 #
-# The board builds a card per slot and retires the card of a slot that is
-# gone, in the held cycle, and destroys what it retired from the event loop
-# (AutonaScoreboardWidget._SyncPlayerCards / _DestroyRetiredCards); a card
-# takes its character rows off the same way (_SetCharacterRows /
-# _DestroyRemovedRows). What can go wrong is what went wrong elsewhere:
-# a retired card answering an edit finished after its slot went (a ghost
-# slot written back into the state), something torn down inside the
-# notification that noticed the change, and QLayoutItem wrappers left
-# registered for items Qt frees (agent-pitfalls #14).
+# Until ADR-005 S4ac-3 the board built a card per slot and retired the card
+# of a slot that was gone, and these tests drove the cards' lifecycle (a
+# retired card writing its slot back, a teardown inside the notification
+# that noticed the change, QLayoutItem wrappers left registered:
+# agent-pitfalls #14). What is left of them is the state's half: the roster
+# the entry points leave.
 
-class _Lifecycle:
-    """The cards the board retires and the character rows the cards take
-    off, kept to poke and to reap (pytest never runs the event loop that
-    would reap a deleteLater())."""
-
-    def __init__(self):
-        self.retired = []
-        self.rows = []
-
-    def __enter__(self):
-        lifecycle = self
-        retire = AutonaScoreboardPlayerWidget.Retire
-        destroyRows = AutonaScoreboardPlayerWidget._DestroyRemovedRows
-
-        def _retire(card):
-            lifecycle.retired.append(card)
-            retire(card)
-
-        def _destroyRows(card):
-            lifecycle.rows.extend(card._removedRows)
-            destroyRows(card)
-
-        self._patches = [
-            patch.object(AutonaScoreboardPlayerWidget, "Retire", _retire),
-            patch.object(AutonaScoreboardPlayerWidget, "_DestroyRemovedRows",
-                         _destroyRows)]
-        for patcher in self._patches:
-            patcher.start()
-        return self
-
-    def __exit__(self, *exc):
-        for patcher in reversed(self._patches):
-            patcher.stop()
-        self.reap()
-        return False
-
-    def reap(self):
-        """Run the deletions the board and the cards asked for."""
-        for widget in self.retired + self.rows:
-            if Shiboken.isValid(widget):
-                QCoreApplication.sendPostedEvents(
-                    widget, QEvent.Type.DeferredDelete)
-
-
-class _Pick:
-    """A name-completer row, as a queued pick hands it over."""
-
-    def data(self, role):
-        return {"gamerTag": "GHOST", "prefix": "GHOST"}
-
-
-def _poke(card):
-    """Every edit a card could still finish once its slot is gone: the two
-    name fields (a focus-out finishes them), a queued completer pick, a
-    character combo settling."""
-    for key in (schema.PLAYER_TAG_KEY, schema.PLAYER_SPONSOR_KEY):
-        field = card.findChild(QLineEdit, key)
-        field.setText("GHOST")
-        field.editingFinished.emit()
-    card._OnCompleterPick(_Pick())
-    card.CharactersChanged()
-    card.Clear()
-
-
-def _boardState(number=2):
-    with StateManager.lock:
-        return encode(StateManager.Get(f"score.{number}"))
-
-
-def _assertCardsFollow(board, number=2):
-    """One live card per slot, at its slot's path, with one row per
-    character slot; nothing retired left on the board; the counts shown."""
-    prefix = f"score.{number}"
-    teams = ((1, board.team1playerWidgets), (2, board.team2playerWidgets))
-    for team, cards in teams:
-        roster = StateManager.Get(f"{prefix}.team.{team}.player") or {}
+def _assertRosterWhole(number=2):
+    """Every team's slots numbered 1..n, without a gap or a ghost slot."""
+    for team in (1, 2):
+        roster = StateManager.Get(f"score.{number}.team.{team}.player") or {}
         assert sorted(roster, key=int) == [
             str(i) for i in range(1, len(roster) + 1)], (
             f"team {team}: the roster has a gap or a ghost slot: "
             f"{sorted(roster)}")
-        assert len(cards) == len(roster), f"team {team}"
-        for index, card in enumerate(cards, 1):
-            assert card.path == f"{prefix}.team.{team}.player.{index}"
-            assert not card._deleted and not card.isHidden(), card.path
-            picks = StateManager.Get(f"{card.path}.character")
-            assert len(card.character_elements) == len(picks), card.path
-            assert not any(row[0].isHidden()
-                           for row in card.character_elements), card.path
-            assert card.character_container.layout().count() \
-                == len(picks), f"{card.path}: a row left in the layout"
-    live = board.team1playerWidgets + board.team2playerWidgets
-    assert sorted(map(id, board.playerWidgets)) == sorted(map(id, live))
-    assert {id(card) for card in board.findChildren(
-        AutonaScoreboardPlayerWidget)} == {id(card) for card in live}, (
-        "a retired card is still on the board")
-    assert board.playerNumber.value() == len(board.team1playerWidgets)
-    if live:
-        assert board.charNumber.value() == len(live[0].character_elements)
 
 
-def _rosterSteps(board, web):
+def _rosterSteps(web):
+    def lastPlayerUp():
+        last = len(StateManager.Get("score.2.team.1.player") or {})
+        if last > 1:
+            _move(2, 1, last, -1)()
+
     return [
-        ("players 3", lambda: board.playerNumber.setValue(3)),
-        ("characters 4", lambda: board.charNumber.setValue(4)),
+        ("players 3", _players(2, 3)),
+        ("characters 4", _characters(2, 4)),
         ("fill", lambda: (
             web.update_player(2, 1, 3, dict(PLAYER_A)),
             web.update_player(2, 2, 1, dict(PLAYER_B)))),
-        ("swap", board.SwapTeams),
-        ("move the last player up", lambda: board._MovePlayer(
-            board.team1playerWidgets[-1], -1)),
-        ("characters 1", lambda: board.charNumber.setValue(1)),
+        ("swap", _swap(2)),
+        ("move the last player up", lastPlayerUp),
+        ("characters 1", _characters(2, 1)),
         ("web players 1", lambda: web.set_route(2, players=1)),
         ("web players and characters", lambda: web.set_route(
             2, players=2, characters=3)),
-        ("load a 3v3 set", lambda: apply_set(board, _set(
+        ("load a 3v3 set", lambda: apply_set(2, _set(
             [_entrant("C1"), _entrant("C2"), _entrant("C3", "Zelda")],
             [_entrant("D1"), _entrant("D2", "Mario"), _entrant("D3")]))),
-        ("swap the 3v3", board.SwapTeams),
-        ("load a 2v2 set", lambda: apply_set(board, _set(
+        ("swap the 3v3", _swap(2)),
+        ("load a 2v2 set", lambda: apply_set(2, _set(
             [_entrant("A1", "Mario"), _entrant("A2", "Luigi", "Peach")],
             [_entrant("B1", "Bowser"), _entrant("B2")]))),
-        ("load a 1v1 set", lambda: apply_set(board, _set(
+        ("load a 1v1 set", lambda: apply_set(2, _set(
             [_entrant("E1", "Luigi")], [_entrant("F1")]))),
         ("load a two-player game", lambda: loadGame(TEAM_GAME)),
-        ("players 4", lambda: board.playerNumber.setValue(4)),
+        ("players 4", _players(2, 4)),
         ("load a one-player game", lambda: loadGame("tgame")),
         ("web clear all", lambda: web.clear_all(2)),
-        ("players 0", lambda: board.playerNumber.setValue(0)),
-        ("players 2 from none", lambda: board.playerNumber.setValue(2)),
+        ("players 0", _players(2, 0)),
+        ("players 2 from none", _players(2, 2)),
         ("web characters 0", lambda: web.set_route(2, characters=0)),
-        ("characters 2", lambda: board.charNumber.setValue(2)),
+        ("characters 2", _characters(2, 2)),
         ("core roster 1 / 1", lambda: AutonaActions.instance.SetRoster(
             2, 1, 1)),
     ]
 
 
 def test_the_cards_follow_repeated_roster_changes(world, autonaApp):
-    """Cards and character rows built and torn down over and over, from
-    every entry point, around swaps, moves and set loads: after each step
-    the board has a live card per slot and a row per character slot, the
-    cards it retired wrote nothing however they were poked, and everything
-    it took off is destroyed once the event loop gets to it -- not before."""
+    """The roster built and taken down over and over, from every entry
+    point, around swaps, moves and set loads: after each step every team's
+    slots are whole. (The cards that followed it, retired and destroyed,
+    were checked here until ADR-005 S4ac-3.)"""
     web = autonaApp.web()
-    board = autonaApp.board(2)
-    with _Lifecycle() as lifecycle:
-        for lap in range(4):
-            for label, action in _rosterSteps(board, web):
-                step = f"lap {lap}: {label}"
-                retiredBefore = len(lifecycle.retired)
-                action()
-                retired = lifecycle.retired[retiredBefore:]
-                for card in retired:
-                    assert card not in board.playerWidgets, step
-                    # Retired in the held cycle; destroyed from the event
-                    # loop (a game load runs the loop itself).
-                    if not Shiboken.isValid(card):
-                        continue
-                    assert card.isHidden(), step
-                    before = _boardState()
-                    _poke(card)
-                    assert _boardState() == before, (
-                        f"{step}: a retired card {card.path} wrote")
-                autonaApp.settle()
-                for card in retired:
-                    assert not Shiboken.isValid(card) \
-                        or card.parentWidget() is None, (
-                        f"{step}: {card.path} was not taken off the board")
-                lifecycle.reap()
-                assert not any(Shiboken.isValid(card) for card in retired), (
-                    f"{step}: a retired card was not deleted")
-                assert not any(Shiboken.isValid(row)
-                               for row in lifecycle.rows), (
-                    f"{step}: a character row taken off was not deleted")
-                _assertCardsFollow(board)
-                assert "GHOST" not in _boardState(), step
-                StateManager.CommitHeld("score.2")
-                autonaApp.settle()
-        # Cards and rows did come and go, on every lap.
-        assert len(lifecycle.retired) >= 4 * 10
-        assert len(lifecycle.rows) >= 4 * 6
-
-
-def test_a_board_card_writes_nothing_as_it_is_built(world, autonaApp):
-    """The slots are seeded before their cards exist (SetRoster): building
-    a card, and the rows of a character count, leaves the state as the
-    roster change wrote it."""
-    web = autonaApp.web()
-    board = autonaApp.board(2)
-    sync = board._SyncPlayerCards
-    passes = []
-
-    def _sync():
-        before = _boardState()
-        cards = len(board.playerWidgets)
-        rows = sum(len(card.character_elements)
-                   for card in board.playerWidgets)
-        sync()
-        passes.append((before, _boardState(), cards,
-                       len(board.playerWidgets), rows,
-                       sum(len(card.character_elements)
-                           for card in board.playerWidgets)))
-
-    with patch.object(board, "_SyncPlayerCards", _sync):
-        for action in (
-                lambda: board.playerNumber.setValue(3),
-                lambda: board.charNumber.setValue(4),
-                lambda: web.set_route(2, players=4, characters=2),
-                lambda: apply_set(board, _set(
-                    *[[_entrant(f"T{t}P{i}") for i in range(1, 6)]
-                      for t in (1, 2)])),
-                lambda: loadGame(TEAM_GAME),
-                lambda: board.playerNumber.setValue(1)):
+    autonaApp.ready(2)
+    for lap in range(4):
+        for label, action in _rosterSteps(web):
             action()
             autonaApp.settle()
-    grew = [p for p in passes if p[3] > p[2] or p[5] > p[4]]
-    assert grew, "no pass built a card or a row"
-    for before, after, *_counts in passes:
-        assert after == before, "building the cards wrote to the state"
-
-
-def test_a_shrink_destroys_from_the_event_loop_and_releases_the_items(
-        world, autonaApp):
-    """Nothing is torn down inside the held cycle that noticed the slots go:
-    the cards and rows are hidden there and destroyed once control is back
-    in the event loop, every QLayoutItem wrapper that goes with them
-    released from PySide first (agent-pitfalls #14) -- a wrapper still
-    registered for a freed item is what turned into access violations in
-    unrelated constructors."""
-    web = autonaApp.web()
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(3)
-    board.charNumber.setValue(4)
-    autonaApp.settle()
-
-    gone = [board.team1playerWidgets[2], board.team2playerWidgets[2]]
-    kept = [card for card in board.playerWidgets if card not in gone]
-    rows = [row[0] for card in kept for row in card.character_elements[1:]]
-    # Wrappers handed out for the items that go: the slots of the team
-    # columns' layouts, the cards' own, the kept cards' character lists.
-    items = []
-    layouts = [card.character_container.layout() for card in kept]
-    for card in gone:
-        layouts += [card.parentWidget().layout(), card.layout()]
-        layouts += card.findChildren(QLayout)
-    for layout in layouts:
-        items += [layout.itemAt(i) for i in range(layout.count())]
-    items = [item for item in items
-             if item is not None and item.layout() is None]
-    try:
-        with _Lifecycle() as lifecycle:
-            web.set_route(2, players=2, characters=1)
-            # The held cycle: retired and taken off, nothing destroyed.
-            assert lifecycle.retired == gone
-            for widget in gone + rows:
-                assert Shiboken.isValid(widget) and widget.isHidden()
-            for card in gone:
-                assert isinstance(card.parentWidget(), QGroupBox)
-            assert all(Shiboken.isValid(item) for item in items)
-
+            _assertRosterWhole()
+            StateManager.CommitHeld("score.2")
             autonaApp.settle()
-            # The event loop: out of the layouts, the items' wrappers
-            # released, and deleted (or about to be).
-            assert not any(Shiboken.isValid(item) for item in items), (
-                "a QLayoutItem wrapper outlived its item")
-            for widget in gone + rows:
-                assert not Shiboken.isValid(widget) \
-                    or widget.parentWidget() is None
-            assert sorted(map(id, lifecycle.rows)) == sorted(map(id, rows))
-        assert not any(Shiboken.isValid(widget) for widget in gone + rows)
-        _assertCardsFollow(board)
-    finally:
-        for item in items:
-            if Shiboken.isValid(item):
-                Shiboken.invalidate(item)
-
-
-def test_a_card_retired_mid_edit_does_not_write_its_slot_back(
-        world, autonaApp):
-    """The slot goes before the board's held cycle retires the card (the
-    roster change is one save cycle, and its notification comes last): an
-    edit the card finishes in between -- a focus-out, a queued pick -- must
-    not write the slot back. Nor once it is retired, with the slot there
-    again under a new card."""
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(2)
-    autonaApp.settle()
-    StateManager.CommitHeld("score.2")
-    autonaApp.settle()
-    card = board.team1playerWidgets[1]
-    path = card.path
-
-    with _Lifecycle() as lifecycle:
-        with StateManager.SaveBlock():
-            AutonaActions.instance.SetRoster(2, players=1)
-            # In the save cycle: the slot is gone, the card not retired yet.
-            assert StateManager.Get(path) is None
-            assert card in board.team1playerWidgets
-            _poke(card)
-            assert StateManager.Get(path) is None, "a ghost slot"
-        assert lifecycle.retired[0] is card
-        assert StateManager.Get(path) is None
-
-        # The slot comes back under a new card; the old one still writes
-        # nothing to it.
-        board.playerNumber.setValue(2)
-        assert board.team1playerWidgets[1] is not card
-        before = _boardState()
-        _poke(card)
-        assert _boardState() == before
-        autonaApp.settle()
-    assert not Shiboken.isValid(card)
-    _assertCardsFollow(board)
-    assert "GHOST" not in _boardState()
 
 
 def _loadGameThreaded(codename):
@@ -708,26 +458,25 @@ def _loadGameThreaded(codename):
 def test_a_threaded_game_load_publishes_the_recorded_roster(
         world, autonaApp):
     """The recorded game load (a synchronous one) replayed on the loader's
-    thread: the same state, the same cards, nothing left behind 反映."""
+    thread: the same state, nothing left behind 反映 (and, until ADR-005
+    S4ac-3, the same cards)."""
     if RECORD:
         pytest.skip("not part of the recording")
     web = autonaApp.web()
     steps = Steps(autonaApp, 2)
-    autonaApp.board(2)
+    autonaApp.ready(2)
     steps.record("built")
-    board = steps.board
     steps.run("fill", lambda: web.update_player(2, 1, 1, dict(PLAYER_A)))
-    steps.run("characters 2", lambda: board.charNumber.setValue(2))
-    with _Lifecycle():
-        steps.run("load a two-player game",
-                  lambda: _loadGameThreaded(TEAM_GAME), commit=False)
-        _assertCardsFollow(board)
+    steps.run("characters 2", _characters(2, 2))
+    steps.run("load a two-player game",
+              lambda: _loadGameThreaded(TEAM_GAME), commit=False)
+    _assertRosterWhole()
 
     golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))["game load"]
     for actual, expected in zip(steps.recorded, golden):
         assert actual["step"] == expected["step"]
-        differ = [field for field in expected
-                  if actual.get(field) != expected[field]]
+        differ = [field for field in expected if field not in WIDGET_FIELDS
+                  and actual.get(field) != expected[field]]
         assert not differ, f"{actual['step']!r} differs in {differ}"
 
 
@@ -735,8 +484,8 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
         world, autonaApp, monkeypatch):
     """ADR-005 S3f-4 review: the load job opens the save cycle, the GUI
     thread publishes it at the end of _Publish. The game's writes and the
-    roster's (board 2 to the game's two players, committed by the board
-    within the load) go out as that one cycle's delta, published on the GUI
+    roster's (board 2 to the game's two players, committed within the
+    load: AutonaActions.CommitGameLoad) go out as that one cycle's delta, published on the GUI
     thread while the load is still publishing -- and the bridge delivers
     the cycle's notifications there, direct, not queued after it
     (agent-pitfalls #17: one cycle under one hold of the lock)."""
@@ -746,7 +495,7 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
     if RECORD:
         pytest.skip("not part of the recording")
     manager = AutonaGameAssetManager.instance
-    autonaApp.board(2)
+    autonaApp.ready(2)
     main = threading.main_thread().name
     cycles = []
     events = []
@@ -789,9 +538,8 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
     bridge.state_updated.connect(onBridgeDelta)
     bridge.held_dirty_changed.connect(onBridgeDirty)
     try:
-        with _Lifecycle():
-            _loadGameThreaded(TEAM_GAME)
-            autonaApp.settle()
+        _loadGameThreaded(TEAM_GAME)
+        autonaApp.settle()
     finally:
         bridge.held_dirty_changed.disconnect(onBridgeDirty)
         bridge.state_updated.disconnect(onBridgeDelta)
@@ -825,10 +573,10 @@ def test_a_load_that_changes_the_players_per_team_leaves_nothing_lit(
 
     if RECORD:
         pytest.skip("not part of the recording")
-    board = autonaApp.board(2)
+    autonaApp.ready(2)
     StateManager.CommitHeld("score.2")
     autonaApp.settle()
-    assert not board.btApply.isEnabled()
+    assert not StateManager.HasPendingChanges("score.2")
     told = []
 
     def onDirty(prefix, dirty):
@@ -838,88 +586,61 @@ def test_a_load_that_changes_the_players_per_team_leaves_nothing_lit(
     bridge = StateManagerBridge.instance
     bridge.held_dirty_changed.connect(onDirty)
     try:
-        with _Lifecycle():
-            _loadGameThreaded(TEAM_GAME)
-            autonaApp.settle()
+        _loadGameThreaded(TEAM_GAME)
+        autonaApp.settle()
     finally:
         bridge.held_dirty_changed.disconnect(onDirty)
 
     assert len(StateManager.Get("score.2.team.1.player")) == 2
     assert not StateManager.HasPendingChanges("score.2")
+    # What a 反映 button reads: the last word is "clean", and true then.
+    # (The Qt board's button was checked here until ADR-005 S4ac-3.)
     assert told[0] == (True, True) and told[-1] == (False, False), told
-    assert not board.btApply.isEnabled(), (
-        "the 反映 button stayed lit with nothing pending")
 
 
 # ── ADR-005 S3e-6 review ─────────────────────────────────────────────────
 
-def _losers(board, team):
-    column = board.team1column if team == 1 else board.team2column
-    return column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
-
-
 def test_the_singles_losers_box_outlives_the_players(world, autonaApp):
-    """The singles board's LOSERS box is on a row of its own below the
-    cards, not on the solo card's ">>詳細" row: the Web can take the board
-    to no players, and the card went with its slot -- the box with it, for
-    good. Through 0 -> 1 -> 0 -> 1 players it stays, and still writes."""
+    """The singles board's LOSERS flags are the team's, not a slot's: the
+    Web can take the board to no players, and through 0 -> 1 -> 0 -> 1
+    players they are still there and still written. (The Qt board's box on
+    its own row below the cards, which outlived them, was checked here
+    until ADR-005 S4ac-3.)"""
     web = autonaApp.web()
-    board = autonaApp.board(1)
-    boxes = [_losers(board, team) for team in (1, 2)]
-    for team, column in ((1, board.team1column), (2, board.team2column)):
-        row = column.findChild(QHBoxLayout, "losersRow")
-        assert row is not None and row.indexOf(boxes[team - 1]) >= 0
-        groupBox = column.findChild(QGroupBox, "groupBox")
-        layout = column.layout()
-        assert layout.indexOf(groupBox) + 1 == next(
-            index for index in range(layout.count())
-            if layout.itemAt(index).layout() is row)
-        assert not isinstance(boxes[team - 1].parentWidget(),
-                              AutonaScoreboardPlayerWidget)
-
-    with _Lifecycle() as lifecycle:
-        flag = False
-        for players in (0, 1, 0, 1):
-            web.set_route(1, players=players)
+    autonaApp.ready(1)
+    flag = False
+    for players in (0, 1, 0, 1):
+        web.set_route(1, players=players)
+        autonaApp.settle()
+        assert len(StateManager.Get("score.1.team.1.player") or {}) == players
+        flag = not flag
+        for team in (1, 2):
+            web.set_route(1, team=str(team), losers=str(flag).lower())
             autonaApp.settle()
-            lifecycle.reap()
-            assert len(board.team1playerWidgets) == players
-            flag = not flag
-            for team in (1, 2):
-                box = _losers(board, team)
-                assert box is boxes[team - 1] and Shiboken.isValid(box), (
-                    f"players {players}: the LOSERS box went")
-                assert not box.isHidden()
-                box.setChecked(flag)
-                assert StateManager.Get(f"score.1.team.{team}.losers") \
-                    is flag, f"players {players}: the box wrote nothing"
-        assert lifecycle.retired, "no card was retired"
+            assert StateManager.Get(f"score.1.team.{team}.losers") is flag, (
+                f"players {players}: the flag was not written")
 
 
 def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
     """The held notifications -- and, for a write on the GUI thread, the
-    board's handlers on them, direct -- run inside StateManager.lock
-    (SaveState's, or a caller's around it), and the board builds its cards
-    there: its later handlers in the same cycle rely on them. So nothing
-    there waits on another thread (agent-pitfalls #17): a run_sync (what a
-    gui_thread_sync does) made holding the lock never returns if the thread
-    it waits on is the one that wants the lock. The roster's entry points
-    -- a change under a caller's lock, the Web's, a threaded game load, a
-    commit -- call none from inside a notification or with the lock held,
-    on any thread.
+    handlers on them, direct -- run inside StateManager.lock (SaveState's,
+    or a caller's around it). So nothing there waits on another thread
+    (agent-pitfalls #17): a run_sync (what a gui_thread_sync does) made
+    holding the lock never returns if the thread it waits on is the one
+    that wants the lock. The roster's entry points -- a change under a
+    caller's lock, the Web's, a threaded game load, a commit -- call none
+    from inside a notification or with the lock held, on any thread.
 
-    That includes 反映 on the GUI thread with a roster change pending that
-    the board has not followed yet: the commit's False comes from the drain
-    (S4u), so under the lock and direct, and it is what builds the cards."""
+    Until ADR-005 S4ac-3 the board built its cards there too, from 反映 on
+    the GUI thread with a roster change pending it had not followed yet
+    (the commit's False comes from the drain, S4u): checked here then."""
     from src.Helpers import AutonaQtHelper
     web = autonaApp.web()
-    board = autonaApp.board(2)
+    autonaApp.ready(2)
     executor = AutonaQtHelper.gui_executor
     runSync = executor.run_sync
-    follow = board._FollowRoster
     inside = threading.local()
     waits = []
-    builtOnTheFalse = []
 
     def _counted(channel):
         notify = channel.notify
@@ -941,13 +662,6 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                       getattr(inside, "depth", 0)))
         return runSync(fn)
 
-    def _follow():
-        cards = len(board.team1playerWidgets)
-        follow()
-        if (len(board.team1playerWidgets) > cards
-                and getattr(inside, "lowered", 0)):
-            builtOnTheFalse.append(StateManager.lock._is_owned())
-
     def _rosterFromAnotherThread(players):
         # Its held cycle is queued for this thread, which is not back in the
         # event loop before the commit.
@@ -963,11 +677,9 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                          _counted(observers.held_dirty_changed)), \
             patch.object(observers.state_updated, "notify",
                          _counted(observers.state_updated)), \
-            patch.object(executor, "run_sync", _runSync), \
-            patch.object(board, "_FollowRoster", _follow), _Lifecycle():
+            patch.object(executor, "run_sync", _runSync):
         with StateManager.lock:
             AutonaActions.instance.SetRoster(2, 3, 2)
-        assert len(board.team1playerWidgets) == 3
         with StateManager.lock:
             with StateManager.SaveBlock():
                 AutonaActions.instance.SetRoster(2, 1)
@@ -976,48 +688,50 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
         autonaApp.settle()
         StateManager.CommitHeld("score.2")
         autonaApp.settle()
-        assert not builtOnTheFalse, "the steps above were not to take this path"
 
-        players = len(board.team1playerWidgets)
+        players = AutonaActions.instance.RosterCount(2, 1)
         _rosterFromAnotherThread(players + 1)
-        assert len(board.team1playerWidgets) == players
         StateManager.CommitHeld("score.2")
-        assert len(board.team1playerWidgets) == players + 1
+        assert AutonaActions.instance.RosterCount(2, 1) == players + 1
         autonaApp.settle()
 
         with StateManager.SaveBlock():
             AutonaActions.instance.SetRoster(2, players + 2)
             StateManager.CommitHeld("score.2")
-        assert len(board.team1playerWidgets) == players + 2
+        assert AutonaActions.instance.RosterCount(2, 1) == players + 2
         autonaApp.settle()
     assert waits, "no entry point waited on the GUI thread at all"
     assert not [wait for wait in waits if wait[1] or wait[2]], waits
-    assert builtOnTheFalse == [True, True], builtOnTheFalse
-    _assertCardsFollow(board)
+    _assertRosterWhole()
 
 
 def test_a_commit_inside_another_save_block_leaves_no_card_behind(
         world, autonaApp):
     """CommitHeld drops the held cycle a board still had owed (反映 is not
     an edit). A roster change another thread's save block made just before
-    it was in that cycle: the board follows it from the commit instead
-    (the save block is process-wide, so this thread's stands for it)."""
-    board = autonaApp.board(2)
-    with _Lifecycle():
-        with StateManager.SaveBlock():
-            AutonaActions.instance.SetRoster(2, 3, 2)
-            StateManager.CommitHeld("score.2")
-        autonaApp.settle()
-        _assertCardsFollow(board)
-        assert len(board.team1playerWidgets) == 3
+    it was in that cycle: it is what the commit publishes (the save block
+    is process-wide, so this thread's stands for it). (The Qt board's cards
+    followed it from the commit, checked here until ADR-005 S4ac-3.)"""
+    def counts():
+        return [(len(StateManager.GetCommitted(f"score.2.team.{team}.player")),
+                 [len(slot["character"]) for slot in StateManager.GetCommitted(
+                     f"score.2.team.{team}.player").values()])
+                for team in (1, 2)]
 
-        with StateManager.SaveBlock():
-            AutonaActions.instance.SetRoster(2, 1, 4)
-            StateManager.CommitHeld("score.2")
-        autonaApp.settle()
-    _assertCardsFollow(board)
-    assert len(board.team1playerWidgets) == 1
-    assert len(board.team1playerWidgets[0].character_elements) == 4
+    autonaApp.ready(2)
+    with StateManager.SaveBlock():
+        AutonaActions.instance.SetRoster(2, 3, 2)
+        StateManager.CommitHeld("score.2")
+    autonaApp.settle()
+    _assertRosterWhole()
+    assert counts() == [(3, [2, 2, 2])] * 2
+
+    with StateManager.SaveBlock():
+        AutonaActions.instance.SetRoster(2, 1, 4)
+        StateManager.CommitHeld("score.2")
+    autonaApp.settle()
+    _assertRosterWhole()
+    assert counts() == [(1, [4])] * 2
 
 
 def _fillPicks(number=2):
@@ -1375,54 +1089,6 @@ def test_a_request_for_the_characters_leaves_the_players_as_they_are(
     assert len(StateManager.Get("score.2.team.1.player.1.character")) == 4
 
 
-@contextmanager
-def _shown(board):
-    """The board's window shown, as on screen (a popup needs it)."""
-    window = board.window()
-    board.setVisible(True)
-    window.show()
-    window.activateWindow()
-    QApplication.processEvents()
-    try:
-        yield
-    finally:
-        standIn = QWidget()
-        standIn.show()
-        standIn.activateWindow()
-        QApplication.processEvents()
-        window.hide()
-        board.setVisible(False)
-        standIn.hide()
-        standIn.deleteLater()
-        QCoreApplication.sendPostedEvents(standIn, QEvent.Type.DeferredDelete)
-        QApplication.processEvents()
-
-
-def test_a_retired_card_closes_its_open_combo_list(world, autonaApp):
-    """A combo's list open on a card the roster drops: the list is a popup
-    window of its own (its parent is the combo, so it is no descendant of
-    the card as isAncestorOf() sees one), and is closed with the card
-    rather than left over a card that is gone."""
-    board = autonaApp.board(2)
-    AutonaActions.instance.SetRoster(2, 2, 2)
-    autonaApp.settle()
-    card = board.team1playerWidgets[1]
-    combo = card.character_elements[0][1]
-    with _shown(board):
-        combo.showPopup()
-        QApplication.processEvents()
-        view = combo.view()
-        assert view.isVisible() and QApplication.activePopupWidget(), (
-            "the harness could not open the list")
-        with _Lifecycle() as lifecycle:
-            AutonaActions.instance.SetRoster(2, 1)
-            assert card in lifecycle.retired
-            assert QApplication.activePopupWidget() is None
-            assert not view.isVisible()
-            autonaApp.settle()
-    _assertCardsFollow(board)
-
-
 def test_the_same_roster_writes_nothing(world, autonaApp):
     """SetRoster with the counts the board already has -- given, or kept
     with None -- writes nothing, counted as the board counts its cards
@@ -1451,44 +1117,30 @@ def test_the_same_roster_writes_nothing(world, autonaApp):
     assert actions.RosterCount(2, 2) == 2
 
 
-def test_a_board_card_that_fails_to_go_does_not_keep_the_others(
+def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
         world, autonaApp):
-    """The defences around the cards' lifecycle: a retired card whose
-    destruction raises leaves the others to be destroyed, and a card sync
-    that raises does not stop the commit a game load ends with."""
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(3)
-    autonaApp.settle()
+    """What raises in one of the load's onLoad slots is reported by the
+    emit, and the commit that follows the slots
+    (AutonaGameAssetManager._Publish) goes ahead. The board's card sync was
+    the slot here until ADR-005 S4ac-3 removed it, with the cards'
+    destruction that raised (a defence of the cards' lifecycle)."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+
+    autonaApp.ready(2)
     StateManager.CommitHeld("score.2")
     autonaApp.settle()
-    gone = board.team1playerWidgets[1:] + board.team2playerWidgets[1:]
-    destroy = AutonaScoreboardPlayerWidget.Destroy
-
-    def _destroy(card):
-        if card is gone[0]:
-            raise ValueError("boom")
-        destroy(card)
-
-    with patch.object(AutonaScoreboardPlayerWidget, "Destroy", _destroy), \
-            _Lifecycle() as lifecycle:
-        board.playerNumber.setValue(1)
-        autonaApp.settle()
-        lifecycle.reap()
-        assert not any(Shiboken.isValid(card) for card in gone[1:])
-    if Shiboken.isValid(gone[0]):
-        destroy(gone[0])
-        autonaApp.settle()
-
-    def _raise(_board):
-        raise RuntimeError("sync failed")
-
-    board.playerNumber.setValue(2)
+    _players(2, 2)()
     assert StateManager.HasPendingChanges("score.2")
-    # The board's handler is one of the load's onLoad slots: what it raises
-    # is reported by the emit, and the commit that follows the slots
-    # (AutonaGameAssetManager._Publish) goes ahead.
-    with patch.object(AutonaScoreboardWidget, "_SyncPlayerCards", _raise):
+
+    def _raise():
+        raise RuntimeError("a slot failed")
+
+    signals = AutonaGameAssetManager.instance.signals
+    signals.onLoad.connect(_raise)
+    try:
         autonaApp.publishGameLoad()
+    finally:
+        signals.onLoad.disconnect(_raise)
     assert not StateManager.HasPendingChanges("score.2"), (
         "the load's commit did not run")
     autonaApp.settle()

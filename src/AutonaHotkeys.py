@@ -108,8 +108,9 @@ class AutonaHotkeys(QObject):
         Top 8 panel to ask it; a React page since ADR-005 S4i).
 
         `load_set` joined them in ADR-005 S4y: it opens the active board's
-        set-selection window, which is the shell's (AutonaShellOperations)
-        instead of the board's. Each built 1v1 / team board connected it to
+        set selection through the shell (AutonaShellOperations) instead of
+        the board's window -- the SCORE page's dialog since ADR-005 S4ab-2,
+        and only that since S4ac-3. Each built 1v1 / team board connected it to
         itself until then, so it opened every built board's window -- a
         hidden one's too, stacked -- and none in crew format if neither had
         been built.
@@ -217,36 +218,39 @@ class AutonaHotkeys(QObject):
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
             return
         number = actions.ActiveBoard()
-        # Through the board host, not the board's widget (ADR-005 S4y):
-        # whether the board is built is core's flag (DesktopBoardHost.Built),
-        # and finishing the field is the host's CommitEdit. Imported here, as
-        # the web layer is not this module's to pull in when it is imported.
+        # Through the board host, not the board's widget (ADR-005 S4y).
+        # Imported here, as the web layer is not this module's to pull in
+        # when it is imported.
         from . import AutonaWebOperations
         host = AutonaWebOperations.boardHost
         if not host.Built(number):
-            # A board core does not have: its launch failed (every board is
-            # made, and boards 1 / 2 held, at launch since ADR-005 S4ac-1).
-            # Until then the desktop made a board as it built its widgets,
-            # and an unbuilt one was not held: a swap there would have been
-            # published at once and wiped by the seed that built it.
+            # Always built since ADR-005 S4ac-1/S4ac-3: every board is made,
+            # and boards 1 / 2 held, at launch in core, and the desktop's
+            # host answers as the headless one (it read core's flag until
+            # S4ac-3). Until S4ac-1 the desktop made a board as it built its
+            # widgets, and an unbuilt one was not held: a swap there would
+            # have been published at once and wiped by the seed that built
+            # it. The check goes with the host's hooks in S4ad.
             logger.debug(f"Swap hotkey ignored: board {number} is not built")
             return
         if number in AutonaActions.SCORE_BOARDS:
-            # A field being typed in on that board is finished first, as
-            # the SWAP button does (AutonaScoreboardWidget.
-            # CommitFocusedEdit): the typed text belongs to the player who
-            # is about to move.
+            # A field being typed in on that board was finished first, as
+            # the Qt SWAP button did: the typed text belonged to the player
+            # about to move. Nothing since ADR-005 S4ac-3 removed the Qt
+            # SCORE (the host's CommitEdit; the SCORE page finishes its own
+            # field before it asks for a swap); it goes in S4ad.
             host.CommitEdit(number)
         actions.SwapTeams(number)
 
     @staticmethod
     def _onLoadSet():
-        """Open the active board's set selection window (the shell's,
-        AutonaShellOperations; ADR-005 S4y). Ignored in crew format (no set
-        window) and while core does not have the active board (as the swap:
-        its launch failed -- every board is made at launch since ADR-005
-        S4ac-1; until then a set loaded onto an unbuilt board was wiped by
-        the seed that built it)."""
+        """Open the active board's set selection: the SCORE page's dialog,
+        through the shell (AutonaShellOperations.ShowSetSelection; ADR-005
+        S4y / S4ab-2 -- the Qt window on the way back to the Qt panel until
+        S4ac-3). Ignored in crew format (no set selection). The board host's
+        Built is always true since S4ac-3, as for the swap (every board is
+        made at launch since ADR-005 S4ac-1; until then a set loaded onto an
+        unbuilt board was wiped by the seed that built it)."""
         actions = AutonaActions.instance
         if actions is None:
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
@@ -256,8 +260,8 @@ class AutonaHotkeys(QObject):
             logger.debug(f"Load set hotkey ignored: board {number} has no "
                          "set window")
             return
-        # Imported here: both import widgets and the web layer, which are
-        # not this module's to pull in when it is imported.
+        # Imported here: the web layer and the shell operations are not this
+        # module's to pull in when it is imported.
         from . import AutonaWebOperations
         from .AutonaShellOperations import AutonaShellOperations
         if not AutonaWebOperations.boardHost.Built(number):

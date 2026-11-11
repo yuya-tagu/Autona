@@ -242,51 +242,6 @@ def test_a_model_takes_icons_and_pack_from_its_own_snapshot(
     assert not model.item(mario).icon().isNull()
 
 
-def test_a_tracker_row_is_rebound_to_the_new_stage_model(
-        goldenGames, autonaApp, monkeypatch):
-    from qtpy.QtWidgets import QComboBox
-    from src.core.SettingsManager import SettingsManager
-
-    # The tracker ships disabled. Patch the lookup rather than the
-    # process-global setting (as tests/test_scoreboard_operations.py does).
-    realGet = SettingsManager.Get
-    monkeypatch.setattr(SettingsManager, "Get", staticmethod(
-        lambda key, default=None:
-            False if key == "general.disable_individual_game_tracker"
-            else realGet(key, default)))
-    from src.core.Actions import AutonaActions
-
-    manager = goldenGames
-    _load(manager, "tgame")
-    tracker = autonaApp.board(1).individualGameTracker
-    # Three rows: the set length resizes them in core, and the board builds
-    # their buttons from its held cycle (ADR-005 S2e).
-    AutonaActions.instance.SetBestOf(1, 3)
-    autonaApp.settle()
-    combos = [row.findChild(QComboBox, f"stageMenu_{index}")
-              for index, row in enumerate(tracker.stage_widget_list)]
-    assert combos and all(c is not None for c in combos)
-    # Pick a stage on the first row, the way an operator does.
-    combos[0].setCurrentIndex(combos[0].findText("Final Destination"))
-    autonaApp.settle()
-    stages = autonaApp.get("score.1.stages")
-    revision = autonaApp.state.revision
-
-    # New stage models without the board's row rebuild (which normally
-    # follows on the same onLoad).
-    manager.UpdateStageModel()
-    assert all(c.model() is not manager.stageModelWithBlank for c in combos)
-
-    tracker.RebindStageModel()
-    autonaApp.settle()
-
-    assert all(c.model() is manager.stageModelWithBlank for c in combos)
-    assert combos[0].currentText() == "Final Destination"
-    # Not a selection: nothing was written.
-    assert autonaApp.get("score.1.stages") == stages
-    assert autonaApp.state.revision == revision
-
-
 # ── the threaded load ───────────────────────────────────────────────────
 
 LOADER_TIMEOUT_SECS = 30

@@ -7816,3 +7816,114 @@ S4ac-3（Qt の SCORE とボードのウィジェットの削除）の前に、�
     - `tests/conftest.py`: autouse の `_freshSettingsRecord` が記録と退避先をテストごとに空にする（クラスの持ち物なので、あるテストが残した記録が次のテストのファイルの上に戻らないように。`_freshStatistics` と同じ形）
   - **壊して確認（追加 2）**（1 か所ずつ壊して `test_settings_manager_load_failed` / `test_color_service` / `test_app_settings` / `test_api_v1_settings` の全件と `test_headless_seed` / `test_api_v1_thumbnail` / `test_api_v1_result` の該当分を回し、毎回バイト単位で戻した。21 か所すべて落ちた。括弧は落ちた件数）: 起動の読み直しを外す（8）・待たない（2）・壊れたファイルでも待つ（8）・記録を戻さない（16）・記録を間引かない（2）・親の記録まで消す（3）・逆順に戻す（1）・退避で記録を捨てない（1）・消えたファイルで保存しない（1）・開けない間にメモリを変えない（7）・記録しない（21）・`PrepareWrite` が保存の失敗を写さない（2）・戻したのに保存しない（13）・無いキーの `Unset` が保存する（1）・`movedAside` を持たない（9）・v1 がパスを返す（2）・LAN の確認の条件を戻す（1）・`ColorService` の確認を戻す（1）・マウントが読み直さない（1）・戻せない形で例外を漏らす（1）・`SetMany` の失敗を空の代わりに戻す（1）
   - **検証（追加 2）**: 直列で `test_settings_manager_load_failed` / `test_settings_manager_threadsafe` / `test_app_settings` / `test_hotkey_rules` / `test_web_access` / `test_designer_service` / `test_color_service` / `test_import_side_effects` / `test_core_qt_free` 851 passed、`test_stream_service` / `test_thumbnail_service` / `test_result_service` / `test_api_v1_stream` / `test_api_v1_thumbnail` / `test_api_v1_result` / `test_api_v1_settings` / `test_headless_seed` / `test_bootstrap_split` / `test_webserver_routes` / `test_hotkeys_enabled` / `test_hotkeys_suspend` / `test_set_follow_flow` 1115 passed。`python scripts/run_tests_parallel.py` 6399 passed・0 failed・2 skipped（+36）。アプリ本体は起動していない（実機確認はメイン）
+
+#### S4ac-3 Qt の SCORE の削除（2026-11-11）
+
+Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボード・選手カード）、退路の設定 `general.qt_scoreboard_panel`、Qt のセット選択 / 配信台の窓、隠しの部品（`thumbnailBtn` / `GenerateThumbnail` / ウィジェットの `PostToX` / 隠しスピン `charNumber`）を削除した。SCORE は React のページ（S4aa）だけになり、サイドバーの項目はすべて共有ビューの React のページになった。ボードは S4ac-1 から起動時に core が作っているので、state の形と書き込みは変えていない（golden 差分なし）。
+
+- **完了内容**
+  - 削除したファイル（HEAD の行数）
+
+    | ファイル | 行 |
+    |---|---|
+    | `src/AutonaScoreboardWidget.py` | 2145 |
+    | `src/AutonaScoreboardPlayerWidget.py` | 1540 |
+    | `src/AutonaCrewBattleWidget.py` | 645 |
+    | `src/AutonaSelectSetWindow.py` | 480 |
+    | `src/AutonaBasePlayerWidget.py` | 429 |
+    | `src/AutonaIndividualGameTracker.py` | 274 |
+    | `src/AutonaScoreboardManager.py` | 201 |
+    | `src/AutonaSelectStationWindow.py` | 130 |
+    | `src/layout/AutonaScoreboardPlayer.ui` / `AutonaScoreboardScore.ui` / `AutonaScoreboardTeam.ui`（`src/layout/` ごと） | 326 / 297 / 170 |
+    | `tests/test_player_card_render.py`（→ 新 `tests/test_board_operations.py` 1698 行） | 3196 |
+    | `tests/test_player_widgets.py`（→ 新 `tests/test_player_load.py` 623 行） | 992 |
+    | `tests/test_select_set_cache.py` | 290 |
+    | `tests/test_wrapper_lifetime.py` | 177 |
+
+  - `src/` と spec: 34 ファイル、+418 / −8307
+    - `src/Autona.py`: マネージャの生成・`dockWidgets`・`_PreparePanel`・`_SettleWayBack`・`ScoreSetsOnPage`・`_wayBackItems` / `_qtPanels`・`self.scoreboard`・形式の切り替えでのボードの表示を削除。`_CreateScoreboardPanel` は `_WebPanel("scoreboard")` だけ
+    - `src/AutonaWebPanelHost.py`: `QT_FALLBACK_SETTINGS` / `UsesQtPanel` を削除
+    - `src/AutonaWebOperations.py`: `DesktopBoardHost` は `Run`（GUI スレッドで同期実行）だけ。ほかのフック（`Prepare` / `Built` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded`）は既定の `BoardHost` のまま（`Built` は常に真、ほかは何もしない）。引数なしで作る
+    - `src/AutonaShellOperations.py`: Qt の窓（`_setWindows` / `_stationWindows`）を削除。`ShowSetSelection` / `OpenSetSelection` は SCORE のページのダイアログ（`Window.OpenScoreSets`）だけを開く。メインウィンドウの前の依頼はログだけ
+    - `src/Settings/AutonaSettingsWindow.py`: 一般タブの「従来版（Qt）で表示する」を削除
+    - `src/bootstrap.py`: マネージャの生成を削除、`DesktopBoardHost()` は引数なし（`MakeBoards(panel=True)` の位置は変えない）
+    - `src/i18n/Autona_{en,ja}.{ts,qm}`: 削除したクラスの文脈を削除して再コンパイル
+    - `dependencies/autona.spec`: `('../src/layout/*', 'src/layout')` を削除（ほかの datas の glob の参照先が存在することは確認した。ビルドはしていない）
+    - コメント・docstring だけ: `AutonaHotkeys` / `AutonaSidebar` / `Helpers/AutonaNetworkHelper` / `core/{Actions,CrewBattleService,GameTrackerService,PlayerService,SetLoadService,SetSelectionService,StateSchema}` / `headless.py` / `AutonaApiV1.py`
+  - `tests/`: 50 ファイル、+2290 / −10599（新規 2 ファイルを除く）。変えたファイルのテスト関数は 964 → 806（名前が消えた 266・新しい名前 108。新しい名前は改名と、2 つの新ファイルへの移設 43）。**削除はおよそ 158 関数**（ウィジェットの描画・入力中の欄・カード / 行ウィジェットの寿命・Qt の窓・退路とドック・リーク / wrapper の pin・AST の構造の pin）。**同じ名前のまま操作だけを core に差し替えたもの**は下の台帳の各ファイルの「書き直し」
+    - S4ac-2 の残置 2（中身と合わない古い名前 6 本）を直した（`test_set_follow.py` の 2 本・`test_scoreboard_operations.py` の 4 本）
+    - ハーネス（`tests/conftest.py`）: ウィジェットの節（`board()`・`manager`・`allowWidgets()`・`_failOnBoardWidgets`・`_dropBoardWidget`）を削除。`ready(n)` / `readyAll()` / `dropAllBoards()` / `boardsNow()` は core だけ。junction から `src/layout` を外した。ヘルパ `edit_tag(path, text)`（Qt のカードのタグ欄の確定と同じ保存サイクルの順で `PlayerService` を呼ぶ）・`clear_players`
+  - docs: `Design.md` / `external-control-api.md`（§2.12 に「ボードの構築」の注記: 本書の「未構築のボード」「入力中の欄を先に確定する」は S4ac-3 から何もしない）/ `rules/state-and-webserver.md` / `rules/python-widgets.md` / `rules/agent-pitfalls.md`（#5 を退役、#7 の題と中身、#13 / #13b / #14 / #15 の実装例と pin、#17、#2 / #4）/ `known-smells.md`（S-01 / S-02 / S-14 / S-17）/ `docs/product/features.md` / `manual-test-checklist.md` / `README.md` / `ROADMAP.md` / `docs/architecture/current-architecture.md` / `test-automation-strategy.md`。`web/src/ScorePage/{SetSelection.tsx,setRows.ts,setRows.test.js}` はコメントだけ（Qt の窓を過去形に）
+
+- **判断と理由**
+  1. **`DesktopBoardHost` の空のフックは残した**: `Prepare` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` と `Built` の判定（ホットキー・`_crew_not_built`）を消すのは呼び手の整理を伴うので S4ad。`Run` を GUI スレッドから外すのも S4ad（理由だった Qt のカードの 2 書き込みはもう無いが、外すのはスレッド境界の変更）
+  2. **メインウィンドウの前のセット選択はログだけ**: 落とし先だった Qt の窓が無い。ホットキー・legacy の open-set の答え（`"OK"`）は変えない
+  3. **SCORE の項目はほかの React の項目と同じく共有ビューに加わる**: 退路の設定を初めて開くときに読むために、SCORE だけ初めて開くまで共有ビューに加わらなかった。読むものが無くなった
+  4. **古い `qt_scoreboard_panel` は移行せず無視**（S4ac の設計のリード判断 4）。v1 の `PATCH /settings/general` は未知のキーとして 400（前から受けていなかった）
+  5. **ウィジェットのテストの扱い**: (a) ウィジェットの描画・入力中の欄・ウィジェットの寿命だけを見るものは削除。(b) ウィジェットの操作が core / state / v1 の性質の唯一の番だったものは、ウィジェットが呼んでいた core を同じ保存サイクルの区切りで呼ぶテストに書き直し、state の assert は緩めない（下の台帳）。(c) golden（ウィジェットのあるボードで録ったもの）は録音を変えず、ドライバを core にして同じ録音と照合する。比較から外したのはウィジェットの欄だけ（各カードの `shown`・`cards` / `spin` / `teamNamesShown`・自動更新の行の文言）
+  6. **objectName の契約**: .ui が無いので解析を外し、`EXPECTED` を当時の objectName の凍結した写しとして残した。schema の定数との比較は部分集合から**一致**に強めた。core 外の書き手の台帳と「Qt ウィジェットは state を書かない」は残す
+  7. **使われなくなった部品は残した**: `AutonaQtHelper.HeldBackText`（呼び手なし。`test_held_back_text.py` は残す）、Qt のモデル（国の `countryModel` と `countriesAboutToReload`、ステージ・キャラ・スキン・バリアントのモデル、`stageModelWithBlank` / `UpdateStageModel`）、`PlayerService.SetSeed` / `SetPlayerId` の `announce=`（アプリの呼び手なし。テストの `edit_tag` が使う）、`AutonaTournamentDataProvider` のセット読込のアダプタの一部。S4ac の設計のリード判断 3 のとおり Qt の整理（S4ad の後）でまとめて消す
+  8. ステージの行の UI は Qt の SCORE にだけあったので一緒に消えた。core（`GameTrackerService`）・v1 の `stages`・設定 `disable_individual_game_tracker` は S4ac-4（オーナー論点 1）まで残す
+
+- **動作の違い**
+  1. SCORE は常に React のページ。設定 → 一般の「従来版（Qt）で表示する」が無い。古い `settings.json` の `general.qt_scoreboard_panel: true` は読まない
+  2. デスクトップの `Prepare` は core に無いボードを作り直さない（`Built` は常に真。ヘッドレスと同じ）。core に無いボードは起動時の `MakeBoards` の失敗（起動自体が失敗する）か、テストのハーネスが落としたときだけで、アプリでは起きない
+  3. メインウィンドウができる前のセット選択の依頼は何も開かずログだけ（それまでは Qt の窓）
+  4. シャットダウン中の読み（`get_swap` ほか）は GUI スレッドを待たない（GUI スレッドでボードを作り直す経路が無くなった。`test_asset_jobs.py` の "an unbuilt board" の場合を外した）
+  5. Qt の SCORE にだけあったもの: ステージの行・「前のセットを読み込む」・サムネイルの即時生成ボタン・目アイコンのメニュー・詳細ダイアログ。サムネイルはサムネイルのページと X 投稿（`thumbnail:generate`）が作る
+  6. クリア・入れ替えの前に Qt の入力中の欄を確定する仕事は無くなった（SCORE ページは欄を確定してから依頼する）
+  7. 起動時に Qt のボード（形式の 1 面）を建てない。`STARTUP phase=` の名前は変わらない
+  8. 起動時の `tournament_changed.emit()`（旧 `AutonaScoreboardWidget.__init__`。1v1 / チームの形式で起動したときだけ出ていた。クルー形式の起動では元から出ていない）が無くなった。実害なし: 受け手のうち `UpdateTournamentButton` は Window の構築中に直接 1 回呼ばれ（`tournament_data_updated` / `tournament_url_update` にも繋がっている）、`SetGame` は直後の `ReloadGames()` が呼ぶ。`moddedContentCheck` は作った時点で未チェックで、作ってから旧 emit までにイベントループが回らない（スプラッシュの最後の `processEvents` はその前）ので、`onLoad` がまだ出ておらず `setChecked(False)` は何もしていなかった。残りの受け手はボード自身の `UpdateBottomButtons` だけ
+
+- **残置とリスク**
+  1. 上の判断 7 の未使用の部品と、`DesktopBoardHost` の空のフック・`Built` の判定（S4ad / Qt の整理）
+  2. golden の `tests/fixtures/countries` の `comboDigests` / `comboJPHead`、`setRows.cases.json` の `windowCells` は Python から読まれなくなった（fixture は不変。`record_golden.py` は旧チェックアウトで録る前提のまま）
+  3. `tests/live/test_startgg_live.py`（ネットワーク必須・未実行）の「再起動後の score の復元が None」の検査は、S4ac-1 から起動時に 3 ボードが作られるので古い可能性がある（S4ac-3 の範囲外。実行していない）
+  4. `CLAUDE.md` の「起動時に無条件で作るのは Scoreboard」の行は古い（サブエージェントは CLAUDE.md を編集しないので、メインで直す）
+  5. 歴史の文書（`docs/tasks/`・ADR・`headless-core-redesign.md`・`startup-architecture-redesign.md`・`external-control-api-candidates.md`）は更新していない
+  6. ウィジェットを経由していた検査のうち、描画の書き戻し（エコーループ）・入力中の欄の保護は、対象が消えたので網も無くなった（S4ac-2 の残置 1 は解消）
+  7. 使われなくなった部品の続き（検収レビュー。コードは消さず S4ad で消す）:
+     - `src/AutonaPlayerDB.py` の `completerModel` / `GetCompleterModel()`（受け手だった Qt のカードのタグ欄のコンプリータが消えた）。選手 DB が変わるたびに `SetupModel` が GUI スレッドで補完用のモデル（`model` と proxy）を作り直す負荷が残る（`db_updated` 自体は Web サーバーの送信が使う）
+     - `AutonaSetFollowUtil.followChanged` / `FollowChanged` と、`core/SetFollowService.py` からの emit（2 か所）。受け手だった Qt のボードのタイマー行が消え、受け手は無い（v1 / Socket.IO は `SetFollowService.changes` を使う）
+     - `src/ui_constants.py` の `QDockWidget` の QSS とコメント（「The panels are still QDockWidget subclasses」）。当たる Qt のパネルが無い
+
+- **書き直したテストの台帳**（ウィジェットが core / state / v1 の性質の唯一の番だったもの。state の assert は同じ）
+  - `test_board_operations.py`（旧 `test_player_card_render.py`。golden 7 本）: 手順はウィジェットが呼んでいた core を同じ保存サイクルの区切りで（PLAYERS = `SetPlayersPerTeam`、キャラ数 = `SetCharactersPerPlayer`、BEST OF = `SetBestOf`（スピンボックスは値が変わったときだけ発火、を再現）、+1 / −1 = `AdjustScore`、LOSERS = `SetTeamLosers`、チーム名 = `SetTeamName` → `PublishTeamLogo`、SWAP = `SwapTeams`、上下 = `SwapPlayers`、キャラのコンボ = `PublishCharacterSlots` 2 回、タグの欄 = `edit_tag`、ステージのボタン = `SetStageResult` → `PublishStageResults`、すべての入力値をリセット = `reset_all`、ゲームのロード = `ApplyGameRoster` → `RepublishBestOfs` → `CommitGameLoad`）。外した比較は各ステップ後のカード・LOSERS・BEST OF・ステージ行の表示だけ。`..._on_an_unbuilt_board_...` → `..._on_a_board_just_made_...`（録音はルートの `Prepare` がボードを建てていた。各手で起動と同じ `EnsureBoard(n, panel=True)` を先に呼ぶ）
+  - `test_player_load.py`（旧 `test_player_widgets.py`）: カードの `SetData` → `load_player`、`Clear` → `ClearSlot`、上下の端 → Web の `swap_players` が False で state 不変、地域の詰め直し → 国 A → B で地域が B の解決になる
+  - `test_player_apply.py` / `test_player_slot_publish.py` / `test_roster_flow.py` / `test_set_follow_flow.py` / `test_stats_flow.py` / `test_crew_operations.py`（golden）: 録音は不変。ドライバを core に（`test_stats_flow.py` のタグの確定は `PlayerService.Edit` ではなく `edit_tag`: Edit は同じ書き込みを 1 サイクルで出すので delta の区切りが録音と違う。`test_routes_reach_a_board_that_is_not_built` → `..._just_made`）
+  - `test_scoreboard_operations.py`: best_of とその行（1 サイクル・state の行・`StageCount`）、ゲームのロードの行の作り直し（`rowsVersion` と state の行）、ゲームのロードの後に何も pending が無い・書いたものが公開される、ボードを作っている間に書いたものが公開される、落としたボードの行は core に残る（`AutonaActions.GameTracker(1)` の同一性）、Web のスワップ / クリアが起動済みのボードで反映待ちになる、スワップのフラグを読んでもボードを作らない、load_set のホットキーがページのダイアログを開く
+  - `test_api_v1_score.py` / `test_api_v1_score_fields.py` / `test_api_v1_crew.py` / `test_api_v1.py`: 「カード / 入力欄 / コンボと同じ書き込み」の比較を、HEAD の比較で一致していたルート自身の結果に移し、デスクトップ == ヘッドレスの比較を残した（ステージの行は一致していた行を凍結した `STAGE_ROWS`、match の候補は `MatchNameCandidates.Candidates(n)`）
+  - `test_api_v1_score_fields.py` の欄とキャラ行の 2 本（検収レビューの指摘 1。デスクトップ == ヘッドレスだけでは、両シェルが同じ `PlayerService.Edit` / `EditCharacter` を通るので自分と比べているだけだった）: `test_the_fields_write_what_the_qt_card_wrote` / `test_a_character_row_writes_what_the_qt_card_s_combos_wrote` に戻し、両シェルの出力を Qt のカードの録音 `tests/fixtures/score_fields/golden.json` と完全一致で照合する。録音は f71a3b90（S4ac-3 の直前）の HEAD のテストをそのまま使い、カードの操作の出力を書き出したもの（書いたキーと値のバイト（= キー順）を順に・反映で公開した delta・反映後のスロット / キャラ行）。同じ回でルートの出力がカードと一致すること（HEAD のテスト 195 本が緑）と、いまのルートの出力が録音と一致することを確かめた（`Edit` / `EditCharacter` と v1 のルートは S4ac-3 で docstring しか変えていない）。クルーの `test_api_v1_crew.py` は golden が別にあるのでそのまま
+  - `test_web_operations.py`: スピンボックス → `SetPlayersPerTeam` / `SetCharactersPerPlayer`。シェル操作の検査は Qt の窓の監視 → `Window.OpenScoreSets`（GUI スレッド・答えの前に開く・`"OK"` は同じ）
+  - `test_set_follow.py`: `test_a_built_board_is_there_for_the_host_only_once_it_is` を、デスクトップの `Built` は常に真・`Prepare` はボードを作らない（`BoardEnsured` False・`score.2` なし）の pin にした（動作の違い 2）
+  - `test_headless_seed.py`: `test_the_desktop_board_host_only_runs_the_operation`（3 面とも `Built`、`Prepare(1)` は何も作らない、フックは pending に触らない）
+  - `test_set_selection.py`: 窓と v1 の比較 → v1 だけ（窓が頼んでいた引数は parametrize に凍結、窓の表は `setRows.cases.json` が持つ）
+  - `test_web_panel_host.py`: 退路とドックの 11 本を削除、SCORE の項目は React のページだけ・ドックのページは無い、共有ビューが SCORE を他の項目と一緒に引き取る（動作の違い）、ブラウザ版の URL は `BrowserScoreboardUrl` の展開した期待値（8 パターン同じ）。`test_web_access.py` の 2 本も `BrowserScoreboardUrl` に
+  - そのほか（`ready(n)` への置き換えとウィジェットの assert の除去だけ）: `test_crew_board.py`・`test_match_name_candidates.py`・`test_save_block_symmetry.py`・`test_score_typing.py`・`test_scoreboard_post.py`・`test_stats_util.py`・`test_battle_format.py`・`test_signal_lifetime.py`・`test_harness_isolation.py`・`test_country_helper_{model,flags}.py`・`test_asset_jobs.py`・`test_thumbnail_render.py`・`test_bootstrap_split.py`・`test_import_side_effects.py`・`test_headless.py`・`test_state_schema.py`・`test_game_asset_manager_models.py`・`tests/live`（未実行）
+  - `test_objectname_keypath_contract.py`: 判断 6
+
+- **pin**: `tests/test_web_panel_host.py::test_the_qt_scoreboard_panel_and_its_switch_are_gone` — 削除した 8 モジュールと `src/layout` が無い・`AutonaColorButton` は残る・`QT_FALLBACK_SETTINGS` / `UsesQtPanel` が無い・`src` の文字列定数と `web/src` に `qt_scoreboard_panel` が無い・`src` / `main.py` / `tests` / `tests/live` が削除したモジュールを import しない（AST。`tests/fixtures` の録音スクリプトは旧チェックアウトで動くので対象外）・spec が `src/layout` を集めない。ほかに `test_api_v1_score_fields.py` の 2 本（v1 の欄・キャラ行 == Qt のカードの録音）、`test_objectname_keypath_contract.py` の 2 本（schema == 凍結した名前）、`test_set_follow.py` / `test_headless_seed.py` の `Built` / `Prepare` の pin（上の台帳）
+
+- **壊して確認**（1 か所ずつ壊して回し、戻したことを git diff のハッシュと status で確かめた）
+  - 新しい pin（10 通り、すべて落ちた）: モジュールの復活 / `src/layout` の復活 / `QT_FALLBACK_SETTINGS` / `UsesQtPanel` / `src` の設定の読み手 / React の読み手 / `src` の from-import / `tests` の `from src import X` / `tests/live` の import / spec の行
+  - golden のドライバ: キャラの選択を 1 回の公開にすると `test_board_operations` の "pick a character" が cycles 1 != 2 で落ちた
+  - カードの録音（5 通り、すべて録音との照合で落ちた）: 欄の割り当て（実名を twitter に書く）→ 欄の 1 本 / スキンの行のずれ・キャラを変えたときのバリアントの取りこぼし → キャラ行の 1 本 / Set の順（空の地域より先に国・名前より先に画像）→ 欄の 1 本
+
+- **golden**: 既存の `tests/fixtures/**` は差分なし（`git diff --stat HEAD -- tests/fixtures` が空）。新規は `tests/fixtures/score_fields/golden.json` だけ（上の台帳の `test_api_v1_score_fields.py`。f71a3b90 の Qt のカードの出力）
+
+- **検証**
+  - 変えたテストファイルごとの pytest: 緑
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: 6180 passed / 0 failed / 2 skipped
+  - 全量（直列。CI と同じ環境変数 `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu` / `QTWEBENGINE_DISABLE_SANDBOX=1`、`--ignore=tests/live --ignore=tests/test_designer_runtime_contract.py`）: 6172 passed / 2 skipped
+  - `npm run build`: OK。jest `src/ScorePage`: 112 passed。`npm run test:e2e`: 77 passed
+  - 検収レビューの指摘の修正の後: `tests/test_api_v1_score_fields.py` 195 passed、並列ランナー 6180 passed / 0 failed / 2 skipped
+  - 環境変数なし（GPU 有効）のローカルの直列の全量は 2 回とも QtWebEngine の中の `0x80000003` で落ちた（1 回目は `test_result_render.py`（jest・e2e と同時に実行）、2 回目は `test_thumbnail_render.py`。どちらも 80% 付近の描画の待ち）。2 ファイルとも単独では通る。描画のコードは変えておらず、`test_thumbnail_render.py` の変更は assert 1 か所と docstring だけ。HEAD で同じ条件の比較はしていない
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  1. 前のビルドで「従来版（Qt）で表示する」を ON にした `settings.json`（`general.qt_scoreboard_panel: true`）で起動 → SCORE は Web 版のページ、エラーなし。設定 → 一般にチェックボックスが無い
+  2. 起動直後（SCORE をまだ開いていない）に v1 / legacy でスコア・選手・セットを書く → 落ちず、SCORE を開くと書いた値（反映待ちを含む）が出る。反映で公開される
+  3. 1v1 ↔ チーム ↔ クルーの切り替え（サイドバーと `PUT /battle-format`）でページが追従し、エラーなし
+  4. Ctrl+Shift+O と `/scoreboard1-open-set` でメインウィンドウが前に出て SCORE のページのセット選択のダイアログが開く（1v1 での `/scoreboard2-open-set` はログだけ）
+  5. SCORE ページの X 投稿（画像の生成とクリップボード）と「ブラウザ版を開く」
+  6. ほかの React の項目を先に開いてから SCORE を開く／SCORE を先に開いてからほかを開く → どちらも同じ共有ビューで切り替わる（白画面・二重読み込みなし）
+  7. `main.log` の `STARTUP phase=window-init` → `core-shown` の間が前のビルドより長くなっていない

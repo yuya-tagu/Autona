@@ -68,9 +68,9 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 - パネル: 外から構築を強制する入口は無くなった。実況は ADR-005 S3e-2 から `core/CommentaryService`、
   Top 8 の取り込みは S3e-8 から `core/Top8Service` が state を書くので、どちらもパネルを構築しない
   （`EnsureCommentaryPanel()` / `EnsureTop8Panel()` は削除）
-- board: `AutonaScoreboardManager.GetScoreboard(N)`（GUI スレッドへ marshal して構築）
+- board: ボードは起動時に core が 3 つとも作る（`AutonaActions.MakeBoards`。ADR-005 S4ac-1）。Qt のボード（`AutonaScoreboardManager.GetScoreboard(N)`）は ADR-005 S4ac-3 で削除
 - state: パネル未構築でも読める初期値は `Window._SeedPanelState()`（theme/accent・`top8` 正規化・
-  `commentary` 正規化・`stream.org*Version`）と `CreateScoreboard()`（`score.{N}` スケルトン）が書く
+  `commentary` 正規化・`stream.org*Version`）と `AutonaActions.MakeBoards()`（`score.{N}`。ADR-005 S4ac-1 までは `CreateScoreboard()` がスケルトンを書いた。S4ac-3 で削除）が書く
 
 ## 既存 HTTP / WebSocket 制御面（重要）
 

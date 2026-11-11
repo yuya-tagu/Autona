@@ -74,7 +74,7 @@
 
 ## 2. スコアボード管理
 
-[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)。
+[web/src/ScorePage/](../../web/src/ScorePage/)（React の SCORE ページ。ADR-005 S4aa）・[src/core/Actions.py](../../src/core/Actions.py)。Qt のスコアボード（`AutonaScoreboardWidget` ほか）は ADR-005 S4ac-3 で削除した。
 
 ### できること
 - **スコア加算・減算** — チーム 1 / チーム 2 それぞれに +1 / −1
@@ -86,18 +86,18 @@
 - **リセット（Reset Score）** — 両チームのスコアを 0 に戻す
 - **全クリア（Clear All）** — 選手情報を含めてスコアボードを初期化（Web UI の Clear All ボタン / `*-clear-all` ルート）
 - **1v1 ⇄ チーム モード切替**
-- **前セットの読み込み（Load Previous Set）**
-- **Start.gg セット選択ウィンドウ**
-- **Station 選択ウィンドウ**
-- **サムネイル即時生成ボタン** — スコアボード上部に配置、対戦動画 PNG を出力
+- **Start.gg セット選択ダイアログ**（「大会の試合を選ぶ」。ADR-005 S4ab）
+- **配信台（Station）選択ダイアログ** と追従中のタイマー行
 - **ブラウザ版スコアボードを開くボタン** — `http://localhost:{port}/scoreboard` を既定ブラウザで開く
 - **X 投稿ボタン** — § 5 参照
+
+Qt 版にあった「前セットの読み込み」「サムネイル即時生成ボタン」は Qt のスコアボードと一緒に削除した（ADR-005 S4ac-3。サムネイルはサムネイルのページと X 投稿が作る）。
 
 ---
 
 ## 3. 選手情報管理
 
-[src/AutonaScoreboardPlayerWidget.py](../../src/AutonaScoreboardPlayerWidget.py)。
+[web/src/ScorePage/Cards.tsx](../../web/src/ScorePage/Cards.tsx)・[src/core/PlayerService.py](../../src/core/PlayerService.py)（Qt の選手カード `AutonaScoreboardPlayerWidget` は ADR-005 S4ac-3 で削除）。
 
 ### 入力項目
 - ゲーマータグ / 本名 / スポンサー（Prefix）
@@ -111,13 +111,13 @@
 ### 連携機能
 - タグ入力でローカル DB 自動補完
 - 国旗 / キャラアイコン / スポンサーロゴの自動表示
-- 表示項目ごとの表示・非表示トグル（スコアボードの eye メニュー / Web UI の DISPLAY_OPTIONS。Twitter / Pronoun 等）
+- 表示項目ごとの表示・非表示トグル（Web UI の DISPLAY_OPTIONS。Twitter / Pronoun 等。Qt のスコアボードの eye メニューは ADR-005 S4ac-3 で削除）
 
 ---
 
 ## 4. 配信チャネル・ストリーム URL 管理
 
-[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)（`_addStreamChannel`・`PopulateStreamChannels`）。
+[web/src/StreamPage/](../../web/src/StreamPage/)・[src/core/StreamService.py](../../src/core/StreamService.py)（配信設定のページ。ADR-005 S4d / S4e。Qt のスコアボードの欄は ADR-005 S4ac-3 で削除）。
 
 - スコアボードにストリーム URL 欄（YouTube / Twitch / ニコ生 等）
 - **ストリームチャネル追加ボタン** — 使う URL をドロップダウンにプリセット登録
@@ -128,10 +128,10 @@
 
 ## 5. X（旧 Twitter）投稿
 
-[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py) `PostToX`。
+SCORE ページの X 投稿ボタン（[web/src/ScorePage/](../../web/src/ScorePage/)）。本文は `AutonaActions.PostText`（`GET /api/v1/scoreboards/{n}/post`、ADR-005 S4x）。Qt のスコアボードの `PostToX` は ADR-005 S4ac-3 で削除した。
 
 ### ワンクリックで以下を実行
-1. **サムネイル画像を自動生成**（`GenerateThumbnail(quiet_mode=True)`）
+1. **サムネイル画像を自動生成**（`POST /api/v1/thumbnail:generate`。クルーボードは画像なし）
 2. **クリップボードに画像をコピー**
 3. **ツイート本文を自動組み立て**
    - 大会名（`tournamentInfo.tournamentName`）
@@ -227,7 +227,7 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 13. クルーバトル
 
-[src/AutonaCrewBattleWidget.py](../../src/AutonaCrewBattleWidget.py)（board 3。[src/AutonaScoreboardManager.py](../../src/AutonaScoreboardManager.py) が生成）。
+SCORE ページのクルー形式（board 3。[web/src/ScorePage/](../../web/src/ScorePage/)）・[src/core/CrewBattleService.py](../../src/core/CrewBattleService.py)。Qt のクルーボード（`AutonaCrewBattleWidget`）は ADR-005 S4ac-3 で削除した。
 
 - メンバー数設定（1〜9人、両チーム共通）
 - メンバーごとのストック数管理・チーム合計の自動集計（名前未入力のメンバーは合計に含まない）
@@ -241,10 +241,11 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 14. Individual Game Tracker
 
-[src/AutonaIndividualGameTracker.py](../../src/AutonaIndividualGameTracker.py)。
+[src/core/GameTrackerService.py](../../src/core/GameTrackerService.py)（記録と v1 の `GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`）。
 
 - Bo3/Bo5 の各ゲームごとに使われたステージ・勝者を記録（ベータ機能）
 - 設定から有効化
+- 行の UI は Qt のスコアボード（`AutonaIndividualGameTracker`）にだけあり、ADR-005 S4ac-3 で一緒に削除した。React の SCORE ページには出さない（順序 6 の論点 1）。core と v1 を消すかは S4ac-4 のオーナー論点
 
 ---
 

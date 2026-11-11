@@ -1,4 +1,4 @@
-"""What the crew battle board (score.3) writes, against the real widget.
+"""What the crew battle board (score.3) writes, through core.
 
 Board 3 is the one scoreboard that had no behavioural coverage at all: it
 carries neither a Start.gg pull nor a character UI, so none of the set-load
@@ -13,25 +13,28 @@ unification would have been a silent behaviour change nobody could have
 detected. These tests were written against the pre-migration widget so the
 crew rules were pinned *first* and the move is provably behaviour preserving.
 Since ADR-005 S3e-2 the operations are CrewBattleService's (the board's
-`crew`), called here the way the board's inputs and the Web call them;
-tests/test_crew_operations.py pins the Web's against a recording of the
-widget path and the board's rendering of the state.
+`crew`), called here the way the board's inputs called them and the Web
+calls them; tests/test_crew_operations.py pins the Web's against a recording
+of the widget path. The widget went in ADR-005 S4ac-3: the board is made in
+core (`autonaApp.ready(3)`), and what its inputs ran is called directly.
 
-The assertions read StateManager rather than the widgets, for the same
-reason the scoreboard suite does: StateManager is what the OBS crew overlay
-and the Web UI consume. A test that types into no widget and reads none
-makes the board in core (`autonaApp.ready(3)`, ADR-005 S4ac-2).
+The assertions read StateManager, for the same reason the scoreboard suite
+does: StateManager is what the OBS crew overlay and the Web UI consume.
 """
 from unittest.mock import patch
 
 import pytest
 
-from src.AutonaCrewBattleWidget import (
-    DEFAULT_COLORS, DEFAULT_MEMBER_NUM, DEFAULT_STOCK, MAX_MEMBERS)
+from src.core.CrewBattleService import CrewBattleService
 from tests.conftest import apply_set
 
 BOARD = 3
 PREFIX = f"score.{BOARD}"
+
+MAX_MEMBERS = CrewBattleService.MAX_MEMBERS
+DEFAULT_STOCK = CrewBattleService.DEFAULT_STOCK
+DEFAULT_MEMBER_NUM = CrewBattleService.DEFAULT_MEMBER_NUM
+DEFAULT_COLORS = CrewBattleService.DEFAULT_COLORS
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -44,40 +47,38 @@ def _get(app, *parts):
     return app.get(_key(*parts))
 
 
-def _row(board, side, member):
-    """One member row. `side` is 0-based (team 1 = 0), `member` 1-based."""
-    return board.memberRows[side][member - 1]
-
-
-def _nameMember(board, side, member, name):
-    """Type a member name the way an operator does (edit + focus out) on the
-    board's widgets, or, on a board number (a board readied with no widget,
-    ADR-005 S4ac-2), what the name field runs: the board's `crew`'s
-    SetMemberName."""
-    if isinstance(board, int):
-        _crew().SetMemberName(side + 1, member, name)
-        return
-    edit = _row(board, side, member)["name"]
-    edit.setText(name)
-    edit.editingFinished.emit()
-
-
 def _crew():
-    """What the board's inputs call (its `crew`), with no widget: the
-    service works from the state, so one per call is the same one."""
-    from src.core.CrewBattleService import CrewBattleService
+    """What the board's inputs called (its `crew`): the service works from
+    the state, so one per call is the same one."""
     return CrewBattleService(BOARD)
 
 
-def _typeTeamName(board, side, name):
-    edit = board.teamNameEdits[side]
-    edit.setText(name)
-    edit.editingFinished.emit()
+def _actions():
+    from src.core.Actions import AutonaActions
+    return AutonaActions.instance
 
 
-def _typeCombo(combo, text):
-    combo.setCurrentText(text)
-    combo.lineEdit().editingFinished.emit()
+# What the Qt board's inputs ran, until ADR-005 S4ac-3 removed it. `side` is
+# 0-based (team 1 = 0), `member` 1-based.
+
+def _nameMember(side, member, name):
+    """A member's name field."""
+    _crew().SetMemberName(side + 1, member, name)
+
+
+def _typeTeamName(side, name):
+    """A crew's name field."""
+    _actions().SetTeamName(BOARD, side + 1, name)
+
+
+def _pickColor(side, color):
+    """A crew's colour button."""
+    _actions().SetTeamColor(BOARD, side + 1, color)
+
+
+def _typeMatchField(field, text):
+    """One of the match bar's combos."""
+    _actions().SetMatchField(BOARD, field, text)
 
 
 class _SetSpy:
@@ -170,7 +171,7 @@ def test_the_crew_board_writes_no_key_outside_its_own_subtree(autonaApp):
     crew board would clear the display name boards 1/2 had published.
     """
     with _SetSpy() as spy:
-        autonaApp.board(BOARD)
+        autonaApp.ready(BOARD)
         autonaApp.settle()
 
     stray = [key for key in spy.keys
@@ -181,9 +182,9 @@ def test_the_crew_board_writes_no_key_outside_its_own_subtree(autonaApp):
 # ── the team total (stocks summed by the board) ──────────────────────────
 
 def test_a_named_member_counts_toward_the_team_total(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
+    _nameMember(0, 1, "Alpha")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "name") == "Alpha"
@@ -196,20 +197,20 @@ def test_an_unnamed_member_does_not_count_toward_the_total(autonaApp):
     Every row starts at full stocks, so summing all of them would show 9 on
     an empty board. Only named rows count.
     """
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
-    _nameMember(board, 0, 2, "   ")        # whitespace is not a name
+    _nameMember(0, 1, "Alpha")
+    _nameMember(0, 2, "   ")        # whitespace is not a name
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "score") == DEFAULT_STOCK
 
 
 def test_a_member_beyond_the_visible_count_does_not_count(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
     for member in range(1, MAX_MEMBERS + 1):
-        _nameMember(board, 0, member, f"P{member}")
+        _nameMember(0, member, f"P{member}")
     autonaApp.settle()
 
     # Only DEFAULT_MEMBER_NUM rows are visible, so only those are summed.
@@ -218,13 +219,13 @@ def test_a_member_beyond_the_visible_count_does_not_count(autonaApp):
 
 
 def test_clearing_a_member_name_takes_its_stocks_off_the_total(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
+    _nameMember(0, 1, "Alpha")
     autonaApp.settle()
     assert _get(autonaApp, "team", 1, "score") == DEFAULT_STOCK
 
-    _nameMember(board, 0, 1, "")
+    _nameMember(0, 1, "")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "score") == 0
@@ -233,7 +234,7 @@ def test_clearing_a_member_name_takes_its_stocks_off_the_total(autonaApp):
 def test_a_stock_change_reaches_the_state_and_the_total(autonaApp):
     autonaApp.ready(BOARD)
 
-    _nameMember(BOARD, 0, 1, "Alpha")
+    _nameMember(0, 1, "Alpha")
     _crew().AdjustMemberStock(1, 1, -1)
     autonaApp.settle()
 
@@ -262,7 +263,7 @@ def test_a_remote_team_score_command_does_not_crash_or_alter_the_total(
     and without disturbing the total the roster produces.
     """
     autonaApp.ready(BOARD)
-    _nameMember(BOARD, 0, 1, "Alpha")
+    _nameMember(0, 1, "Alpha")
     autonaApp.settle()
 
     autonaApp.web().team_scoreup(BOARD, "1")
@@ -274,11 +275,11 @@ def test_a_remote_team_score_command_does_not_crash_or_alter_the_total(
 
 def test_changing_the_member_count_writes_both_teams(autonaApp):
     """One spinbox, two teams -- crew battles are symmetric by definition."""
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
     for member in range(1, MAX_MEMBERS + 1):
-        _nameMember(board, 0, member, f"P{member}")
-    board.playerNumber.setValue(5)
+        _nameMember(0, member, f"P{member}")
+    _crew().SetMemberCount(5)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "memberNum") == 5
@@ -289,34 +290,31 @@ def test_changing_the_member_count_writes_both_teams(autonaApp):
 # ── team header (name / colour) ──────────────────────────────────────────
 
 def test_typing_a_team_name_reaches_the_state(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _typeTeamName(board, 0, "Team Rocket")
+    _typeTeamName(0, "Team Rocket")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "teamName") == "Team Rocket"
 
 
 def test_picking_a_team_colour_reaches_the_state(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    board.colorButtons[1].setColor("#123456")
+    _pickColor(1, "#123456")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 2, "color") == "#123456"
 
 
 def test_a_remote_colour_change_reaches_the_crew_board(autonaApp):
-    """AutonaActions writes it; the board mirrors it into its button.
-
-    The mirror is what stops the operator's swatch from showing the previous
-    colour after an /api/v1 or legacy REST change, and it must not write the
-    value straight back (that is what _SyncTeamColors' QSignalBlocker is
-    for).
+    """AutonaActions writes it, in one publish. (The Qt board mirrored it
+    into its button without writing it back, checked here until ADR-005
+    S4ac-3; the React page reads the state.)
     """
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     revision = StateManager.revision
@@ -324,9 +322,8 @@ def test_a_remote_colour_change_reaches_the_crew_board(autonaApp):
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "color") == "#abcdef"
-    assert board.colorButtons[0].color() == "#abcdef"
     assert StateManager.revision == revision + 1, (
-        "the crew board echoed the remote colour change back")
+        "the remote colour change published more than once")
 
 
 # ── the active member marker ─────────────────────────────────────────────
@@ -341,14 +338,13 @@ def test_the_active_member_is_published_as_a_string(autonaApp):
 
 
 def test_only_one_member_of_a_team_can_be_active(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    board.crew.SelectActiveMember(1, 1)
-    board.crew.SelectActiveMember(1, 3)
+    _crew().SelectActiveMember(1, 1)
+    _crew().SelectActiveMember(1, 3)
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "activeMember") == "3"
-    assert _row(board, 0, 1)["active"].isChecked() is False
 
 
 def test_clearing_the_active_member_publishes_zero(autonaApp):
@@ -376,19 +372,19 @@ def test_the_two_teams_keep_separate_active_members(autonaApp):
 # ── swap / reset / clear ─────────────────────────────────────────────────
 
 def test_swapping_exchanges_the_whole_board(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _typeTeamName(board, 0, "Alpha")
-    _typeTeamName(board, 1, "Bravo")
-    _nameMember(board, 0, 1, "A1")
-    _nameMember(board, 1, 1, "B1")
-    board.crew.AdjustMemberStock(1, 1, -2)
-    board.crew.SelectActiveMember(2, 1)
-    board.colorButtons[0].setColor("#111111")
-    board.colorButtons[1].setColor("#222222")
+    _typeTeamName(0, "Alpha")
+    _typeTeamName(1, "Bravo")
+    _nameMember(0, 1, "A1")
+    _nameMember(1, 1, "B1")
+    _crew().AdjustMemberStock(1, 1, -2)
+    _crew().SelectActiveMember(2, 1)
+    _pickColor(0, "#111111")
+    _pickColor(1, "#222222")
     autonaApp.settle()
 
-    board.SwapTeams()
+    _crew().SwapTeams()
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "teamName") == "Bravo"
@@ -402,34 +398,34 @@ def test_swapping_exchanges_the_whole_board(autonaApp):
     assert _get(autonaApp, "team", 2, "color") == "#111111"
     assert _get(autonaApp, "team", 1, "score") == DEFAULT_STOCK
     assert _get(autonaApp, "team", 2, "score") == DEFAULT_STOCK - 2
-    assert board.teamsSwapped is True
+    assert _crew().teamsSwapped is True
 
 
 def test_swapping_twice_is_the_identity(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "A1")
-    _nameMember(board, 1, 1, "B1")
+    _nameMember(0, 1, "A1")
+    _nameMember(1, 1, "B1")
     autonaApp.settle()
 
-    board.SwapTeams()
-    board.SwapTeams()
+    _crew().SwapTeams()
+    _crew().SwapTeams()
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "name") == "A1"
     assert _get(autonaApp, "team", 2, "player", 1, "name") == "B1"
-    assert board.teamsSwapped is False
+    assert _crew().teamsSwapped is False
 
 
 def test_reset_score_restores_stocks_but_keeps_the_crew(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _nameMember(board, 0, 1, "Alpha")
-    board.crew.AdjustMemberStock(1, 1, -2)
-    board.crew.SelectActiveMember(1, 1)
+    _nameMember(0, 1, "Alpha")
+    _crew().AdjustMemberStock(1, 1, -2)
+    _crew().SelectActiveMember(1, 1)
     autonaApp.settle()
 
-    board.ResetScore()
+    _crew().ResetStocks()
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "player", 1, "stock") == DEFAULT_STOCK
@@ -442,7 +438,7 @@ def test_reset_score_restores_stocks_but_keeps_the_crew(autonaApp):
 def test_clear_all_wipes_the_crew(autonaApp):
     autonaApp.ready(BOARD)
 
-    _nameMember(BOARD, 0, 1, "Alpha")
+    _nameMember(0, 1, "Alpha")
     _crew().AdjustMemberStock(1, 1, -2)
     _crew().SelectActiveMember(1, 1)
     autonaApp.settle()
@@ -459,11 +455,11 @@ def test_clear_all_wipes_the_crew(autonaApp):
 # ── the match bar (crew has phase / pool / match too) ────────────────────
 
 def test_typing_in_the_crew_match_bar_reaches_the_state(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    _typeCombo(board.phaseCombo, "Pools")
-    _typeCombo(board.poolCombo, "A")
-    _typeCombo(board.matchCombo, "Winners Final")
+    _typeMatchField("phase", "Pools")
+    _typeMatchField("pool", "A")
+    _typeMatchField("match", "Winners Final")
     autonaApp.settle()
 
     assert _get(autonaApp, "phase") == "Pools"
@@ -475,10 +471,10 @@ def test_typing_in_the_crew_match_bar_reaches_the_state(autonaApp):
 def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
     # S-17, board 3 half: the generic resets clear round / phase / pool here
     # too (tests/test_scoreboard_operations.py has boards 1/2).
-    board = autonaApp.board(BOARD)
-    _typeCombo(board.phaseCombo, "Pools")
-    _typeCombo(board.poolCombo, "A")
-    _typeCombo(board.matchCombo, "Winners Final")
+    autonaApp.ready(BOARD)
+    _typeMatchField("phase", "Pools")
+    _typeMatchField("pool", "A")
+    _typeMatchField("match", "Winners Final")
     autonaApp.settle()
 
     getattr(autonaApp.web(), reset)(BOARD)
@@ -487,10 +483,6 @@ def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
     assert _get(autonaApp, "phase") == ""
     assert _get(autonaApp, "pool") == ""
     assert _get(autonaApp, "match") == ""
-    # The board renders the reset into its combos (ADR-005 S3e-2: it used
-    # to blank them itself, as nothing rendered these keys).
-    assert (board.phaseCombo.currentText(), board.poolCombo.currentText(),
-            board.matchCombo.currentText()) == ("", "", "")
     # Board 3 has never published the English round name; a reset must not
     # start to.
     assert _get(autonaApp, "match_en") is None
@@ -653,25 +645,15 @@ def restoreTournamentInfo(autonaApp):
 
 def test_typing_a_display_tournament_name_reaches_the_state(
         autonaApp, restoreTournamentInfo):
-    board = autonaApp.board(BOARD)
+    # What the Qt board's 表示大会名 field ran (until ADR-005 S4ac-3).
+    from src.core.TournamentInfoService import TournamentInfoService
 
-    board.displayTournamentNameEdit.setText("Crew Cup")
-    board.displayTournamentNameEdit.editingFinished.emit()
+    autonaApp.ready(BOARD)
+
+    TournamentInfoService.instance.SetDisplayName("Crew Cup")
     autonaApp.settle()
 
     assert autonaApp.get("tournamentInfo.displayTournamentName") == "Crew Cup"
-
-
-def test_a_display_name_written_elsewhere_reaches_the_crew_field(
-        autonaApp, restoreTournamentInfo):
-    from src.core.TournamentInfoService import TournamentInfoService
-
-    board = autonaApp.board(BOARD)
-
-    TournamentInfoService.instance.SetDisplayName("From the EVENT tab")
-    autonaApp.settle()
-
-    assert board.displayTournamentNameEdit.text() == "From the EVENT tab"
 
 
 # ── echo-loop / write-key checks ─────────────────────────────────────────
@@ -691,76 +673,76 @@ def _revisionCost(app, action):
 
 
 def test_a_member_name_edit_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
     cost = _revisionCost(
-        autonaApp, lambda: _nameMember(board, 0, 1, "Alpha"))
+        autonaApp, lambda: _nameMember(0, 1, "Alpha"))
 
     assert cost == 1, f"a member name edit published {cost} times"
 
 
 def test_a_stock_change_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
+    autonaApp.ready(BOARD)
+    _nameMember(0, 1, "Alpha")
 
     cost = _revisionCost(
-        autonaApp, lambda: board.crew.AdjustMemberStock(1, 1, -1))
+        autonaApp, lambda: _crew().AdjustMemberStock(1, 1, -1))
 
     assert cost == 1, f"a stock change published {cost} times"
 
 
 def test_a_member_count_change_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
+    autonaApp.ready(BOARD)
+    _nameMember(0, 1, "Alpha")
 
-    cost = _revisionCost(autonaApp, lambda: board.playerNumber.setValue(5))
+    cost = _revisionCost(autonaApp, lambda: _crew().SetMemberCount(5))
 
     assert cost == 1, f"a member count change published {cost} times"
 
 
 def test_a_swap_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
-    _nameMember(board, 1, 1, "Bravo")
+    autonaApp.ready(BOARD)
+    _nameMember(0, 1, "Alpha")
+    _nameMember(1, 1, "Bravo")
 
-    cost = _revisionCost(autonaApp, board.SwapTeams)
+    cost = _revisionCost(autonaApp, _crew().SwapTeams)
 
     assert cost == 1, f"a swap published {cost} times"
 
 
 def test_a_reset_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
-    board.crew.AdjustMemberStock(1, 1, -1)
+    autonaApp.ready(BOARD)
+    _nameMember(0, 1, "Alpha")
+    _crew().AdjustMemberStock(1, 1, -1)
 
-    cost = _revisionCost(autonaApp, board.ResetScore)
+    cost = _revisionCost(autonaApp, _crew().ResetStocks)
 
     assert cost == 1, f"a stock reset published {cost} times"
 
 
 def test_a_clear_all_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Alpha")
+    autonaApp.ready(BOARD)
+    _nameMember(0, 1, "Alpha")
 
-    cost = _revisionCost(autonaApp, board.crew.ClearCrew)
+    cost = _revisionCost(autonaApp, _crew().ClearCrew)
 
     assert cost == 1, f"clear all published {cost} times"
 
 
 def test_an_active_toggle_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
-    cost = _revisionCost(autonaApp, lambda: board.crew.SelectActiveMember(1, 1))
+    cost = _revisionCost(autonaApp, lambda: _crew().SelectActiveMember(1, 1))
 
     assert cost == 1, f"an active toggle published {cost} times"
 
 
 def test_a_change_set_data_call_is_exactly_one_publish(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
 
     cost = _revisionCost(
         autonaApp,
-        lambda: apply_set(board,
+        lambda: apply_set(BOARD,
             {"round_name": "WF", "tournament_phase": "Top 8",
              "tournament_pool": "A", "bestOf": 5}))
 
@@ -774,11 +756,11 @@ def test_a_member_name_edit_writes_only_that_team(autonaApp):
     team total (the total depends on which rows are named, so the recompute
     is not optional), and nothing on the other team.
     """
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     with _SetSpy() as spy:
-        _nameMember(board, 0, 1, "Alpha")
+        _nameMember(0, 1, "Alpha")
         autonaApp.settle()
 
     assert _key("team", 1, "player", 1, "name") in spy.keys
@@ -788,11 +770,11 @@ def test_a_member_name_edit_writes_only_that_team(autonaApp):
 
 
 def test_the_active_toggle_writes_exactly_one_key(autonaApp):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     with _SetSpy() as spy:
-        board.crew.SelectActiveMember(1, 2)
+        _crew().SelectActiveMember(1, 2)
         autonaApp.settle()
 
     assert spy.keys == [_key("team", 1, "activeMember")]
@@ -804,11 +786,11 @@ def test_the_active_toggle_writes_exactly_one_key(autonaApp):
     ("pool", "tournament_pool"),
 ])
 def test_one_set_field_writes_one_key(autonaApp, field, payloadKey):
-    board = autonaApp.board(BOARD)
+    autonaApp.ready(BOARD)
     autonaApp.settle()
 
     with _SetSpy() as spy:
-        apply_set(board, {payloadKey: "value"})
+        apply_set(BOARD, {payloadKey: "value"})
         autonaApp.settle()
 
     assert spy.keys == [_key(field)]

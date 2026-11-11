@@ -24,7 +24,10 @@ golden.json, as S4n's were. The scenarios are
 tests/fixtures/player_apply/scenarios.py; every step records the outcome, the
 save cycles, the statistics triggers, every state write under the board, the
 whole subtree afterwards (key order included), what each card shows and the
-player database file.
+player database file. This replays it through what the card and the board
+called -- the card and the board themselves until ADR-005 S4ac-3, which
+removed them with the Qt SCORE; what each card showed is no longer compared
+(no card is left to show it), every other field is.
 tests/test_player_service.py replays the same recording through
 PlayerService alone.
 
@@ -42,10 +45,8 @@ from pathlib import Path
 import orjson
 import pytest
 
-from qtpy.QtWidgets import QLineEdit
-
 from src import AutonaWebOperations as WebOps
-from src.core import StateSchema as schema
+from src.core.Actions import AutonaActions
 from src.core.BadWordFilter import BadWordFilter
 from src.core.DictHelper import deep_clone
 from src.core.PlayerDB import PlayerDB
@@ -53,6 +54,8 @@ from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from tests.conftest import apply_set
+# The board's players / characters per player spinboxes, as they asked.
+from tests.test_board_operations import _setCharacters, _setPlayers
 # The S1d world: the fixture games under the slot recording's locale.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
 from tests.fixtures.player_slots.recording import digest, encode
@@ -118,33 +121,11 @@ def _slots(app, cards):
     """The exact encoding of each card's slot, as a digest: what the
     service-only replay compares (it builds the slots, not the board)."""
     result = {}
-    for card in cards:
+    for path in cards:
         with StateManager.lock:
-            value = deep_clone(StateManager.Get(card.path) or {})
-        result[card.path] = digest(normalise(encode(value), app.dir))
+            value = deep_clone(StateManager.Get(path) or {})
+        result[path] = digest(normalise(encode(value), app.dir))
     return result
-
-
-def _comboCode(combo):
-    data = combo.currentData()
-    return data.get("code") if isinstance(data, dict) else None
-
-
-def _shown(card):
-    """What one card shows: its fields, and its character rows as the
-    identifiers a pick hands over."""
-    shown = {field: card._w(field, QLineEdit).text()
-             for field in schema.PLAYER_LINE_EDIT_KEYS}
-    shown[schema.PLAYER_NOTE_KEY] = card.custom_textbox.toPlainText()
-    shown[schema.PLAYER_SEED_KEY] = card._w(schema.PLAYER_SEED_KEY).value()
-    shown["country"] = _comboCode(card._w(schema.PLAYER_COUNTRY_KEY))
-    shown["region"] = _comboCode(card._w(schema.PLAYER_STATE_KEY))
-    shown["character"] = []
-    for _element, character, color, variant in card.character_elements:
-        slot = card._CharacterSlot(character, color, variant)
-        shown["character"].append(
-            [slot.character, slot.skin, slot.variant, slot.text])
-    return shown
 
 
 def _dbText():
@@ -157,31 +138,34 @@ def _dbText():
 # ── the world a scenario runs in ─────────────────────────────────────────
 
 class _World:
-    """The board a scenario drives."""
+    """The board a scenario drives (its number)."""
 
     def __init__(self, app, scenario):
         self.app = app
         self.scenario = scenario
-        self.board = app.board(scenario["board"])
-        self.board.playerNumber.setValue(scenario.get("players", 1))
-        self.board.charNumber.setValue(3)
+        self.board = app.ready(scenario["board"])
+        _setPlayers(self.board, scenario.get("players", 1))
+        _setCharacters(self.board, 3)
         app.settle()
-        self.root = self.board.statePrefix
+        self.root = f"score.{self.board}"
 
     @property
     def cards(self):
-        return list(self.board.playerWidgets)
+        """The slot paths the board's cards stood for: team 1's, then team
+        2's (a card per slot the state has)."""
+        return [f"{self.root}.team.{team}.player.{player}"
+                for team in (1, 2)
+                for player in range(
+                    1, AutonaActions.RosterCount(self.board, team) + 1)]
 
     def card(self, slot):
+        """The slot path of the card at (team, player)."""
         team, player = slot
-        widgets = (self.board.team1playerWidgets if team == 1
-                   else self.board.team2playerWidgets)
-        return widgets[player - 1]
+        return f"{self.root}.team.{team}.player.{player}"
 
     def snapshot(self):
         entry = _subtree(self.app, self.root)
         entry["slots"] = _slots(self.app, self.cards)
-        entry["shown"] = {card.path: _shown(card) for card in self.cards}
         entry["db"] = _dbText()
         return entry
 
@@ -190,42 +174,51 @@ class _World:
 
 
 def _run(world, step):
-    """One step of a scenario, through the entry point it names."""
+    """One step of a scenario, through what the entry point it names
+    called."""
     op = step["op"]
     board = world.board
     if op == "set":
-        return world.card(step["slot"]).SetData(
-            copy.deepcopy(step["data"]), dontLoadFromDB=not step["loadFromDB"],
-            clear=step["clear"], no_mains=step["no_mains"])
+        # The card's SetData (the name completer's pick and the Qt Player
+        # List's editor): PlayerService.ApplyData. The card answered
+        # nothing.
+        PlayerService(world.card(step["slot"])).ApplyData(
+            copy.deepcopy(step["data"]), step["loadFromDB"], step["clear"],
+            step["no_mains"])
+        return None
     if op == "clear":
-        return world.card(step["slot"]).Clear(no_mains=step["no_mains"])
+        # The card's clear button: PlayerService.ClearSlot, answering
+        # nothing as above.
+        PlayerService(world.card(step["slot"])).ClearSlot(step["no_mains"])
+        return None
     if op == "save":
-        return world.card(step["slot"]).player.SavePlayerToDB()
+        return PlayerService(world.card(step["slot"])).SavePlayerToDB()
     if op == "typed":
         with StateManager.SaveBlock():
-            PlayerService(world.card(step["slot"]).path).PublishCharacterSlots(
+            PlayerService(world.card(step["slot"])).PublishCharacterSlots(
                 [CharacterSlot(**slot) for slot in step["slots"]])
         return None
     if op == "chars":
-        board.charNumber.setValue(step["count"])
+        _setCharacters(board, step["count"])
         return None
     if op == "tag":
         # The Web's tag lookup (the board's LoadPlayerFromTag when this was
         # recorded): its "OK" / "ERROR" are what that answered True / False.
         answer = WebOps.load_player_from_tag(
-            board.scoreboardNumber, step["tag"], step["team"],
-            step["player"], step.get("no_mains", False))
+            board, step["tag"], step["team"], step["player"],
+            step.get("no_mains", False))
         return {"OK": True, "ERROR": False}[answer]
     if op == "update":
         # /api/v1's player PATCH: the board's ApplyPlayerData when this was
         # recorded, the Web's operation since ADR-005 S3e-4.
-        return WebOps.update_player(board.scoreboardNumber, step["team"],
-                                    step["player"],
+        return WebOps.update_player(board, step["team"], step["player"],
                                     copy.deepcopy(step["data"]))
     if op == "setdata":
         return apply_set(board, copy.deepcopy(step["payload"]))
     if op == "swap":
-        return board.SwapTeams()
+        # The board's SWAP button, which answered nothing.
+        AutonaActions.instance.SwapTeams(board)
+        return None
     raise AssertionError(f"unknown op {op!r}")
 
 
@@ -317,7 +310,7 @@ def _save(name, record):
         json.dumps(golden, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-# ── the recording, replayed through the card and the board ───────────────
+# ── the recording, replayed through what the card and the board called ───
 
 # The steps whose code S3e-3 did not touch: their writes must match one for
 # one. Everything else is compared per player slot, runs collapsed.
@@ -335,8 +328,10 @@ def _assertStep(name, index, actual, expected):
         expectedCalls = {path: collapsed(calls) for path, calls
                          in byPlayer(expected["calls"]).items()}
         assert actualCalls == expectedCalls, where
+    # Every recorded field but what the cards showed ("shown"): no card is
+    # left to show it since ADR-005 S4ac-3.
     for field in ("result", "cycles", "stats", "state", "keyOrder", "slots",
-                  "shown", "db", "stateDigest"):
+                  "db", "stateDigest"):
         assert actual.get(field) == expected.get(field), (where, field)
 
 
@@ -349,8 +344,8 @@ def test_recorded_player_loads_publish_the_recorded_state(
         _save(scenario["name"], record)
         return
     expected = GOLDEN[scenario["name"]]
-    initial = {k: v for k, v in record["initial"].items()}
-    assert initial == expected["initial"], scenario["name"]
+    initial = {k: v for k, v in expected["initial"].items() if k != "shown"}
+    assert record["initial"] == initial, scenario["name"]
     assert [s["op"] for s in record["steps"]] \
         == [s["op"] for s in expected["steps"]]
     for index, (actual, wanted) in enumerate(
@@ -358,21 +353,9 @@ def test_recorded_player_loads_publish_the_recorded_state(
         _assertStep(scenario["name"], index, actual, wanted)
 
 
-# ── the card asks, the core writes ───────────────────────────────────────
+# ── the set's players are loaded through the core ────────────────────────
 
 SRC = Path(__file__).resolve().parent.parent / "src"
-
-# What a card's load / clear may no longer do: scan a combo's model
-# for a row, put a value into a widget, or emit a widget's signal for its
-# handler to publish. Showing what was written is the render's
-# (_RenderSlot), which writes nothing.
-WIDGET_FILLING = {
-    "model", "rowCount", "item", "findData", "findText", "currentData",
-    "setCurrentIndex", "setText", "setPlainText", "setValue", "setEditText",
-    "emit",
-}
-CORE_BACKED = ("SetData", "Clear", "_OnCompleterPick", "_ShowOwnOperation")
-
 
 def _methods(module, cls):
     tree = ast.parse((SRC / module).read_text(encoding="utf-8"))
@@ -389,47 +372,15 @@ def _attributeCalls(node):
             and isinstance(call.func, ast.Attribute)}
 
 
-def test_a_cards_load_and_clear_only_ask_the_core():
-    methods = _methods("AutonaScoreboardPlayerWidget.py",
-                       "AutonaScoreboardPlayerWidget")
-    for name in CORE_BACKED:
-        assert name in methods, name
-        assert _attributeCalls(methods[name]) & WIDGET_FILLING == set(), name
-    assert {"ApplyData"} <= _attributeCalls(methods["SetData"])
-    assert {"ClearSlot"} <= _attributeCalls(methods["Clear"])
-    # The country model and the bad-word filter were SetData's: the card
-    # has no use for either any more.
-    source = (SRC / "AutonaScoreboardPlayerWidget.py").read_text(
-        encoding="utf-8")
-    assert "AutonaCountryHelper" not in source
-    assert "AutonaBadWordFilter" not in source
-
-
-def test_the_board_loads_players_through_the_core():
-    methods = _methods("AutonaScoreboardWidget.py", "AutonaScoreboardWidget")
+def test_the_set_s_players_are_loaded_through_the_core():
     # A set's entrants and a one-player payload are core's since ADR-005
-    # S3e-7 (SetFollowService.ApplySetPayload), and the board has no set
-    # entry of its own since S4x (its ChangeSetData only handed over). The
-    # tag lookup is the Web's (AutonaWebOperations.load_player_from_tag).
-    assert not {"_ApplyEntrants", "_ApplySinglePlayerData", "_WritePlayerSlot",
-                "LoadPlayerFromTag", "_ApplyPlayer",
-                "_PlayerSlotPath"} & set(methods)
-    assert "ChangeSetData" not in methods
+    # S3e-7 (SetFollowService.ApplySetPayload); the board that loaded them
+    # (and then only handed them over, until S4x) went in S4ac-3. They load
+    # through PlayerService.ApplyData, not a card's SetData, and save no
+    # card's player.
     follow = _methods("core/SetFollowService.py", "SetFollowService")
     for name in ("_ApplyEntrants", "_ApplySinglePlayer"):
         calls = _attributeCalls(follow[name])
         assert "SetData" not in calls, name
         assert "SavePlayerToDB" not in calls, name
     assert "ApplyData" in _attributeCalls(follow["_ApplyPlayer"])
-
-
-def test_no_card_lock_is_left():
-    """`dataLock` serialised SetData against the card's own handlers -- all
-    of them on the GUI thread. The load is one core write under the state's
-    lock now."""
-    for module in ("AutonaScoreboardPlayerWidget.py",
-                   "AutonaBasePlayerWidget.py", "AutonaScoreboardWidget.py"):
-        tree = ast.parse((SRC / module).read_text(encoding="utf-8"))
-        names = {node.attr for node in ast.walk(tree)
-                 if isinstance(node, ast.Attribute)}
-        assert not names & {"dataLock", "_bulk_updating"}, module

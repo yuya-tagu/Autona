@@ -61,14 +61,14 @@ Board page's Designer (S4s): this server's /web?view=designer, from a click,
 opens AutonaDesignerWindow, which holds the Designer's token. No token reaches
 the page and there is no shell operation for it. The SCORE page's "ブラウザ版を
 開く" (S4aa) is the other: this server's /scoreboard or /team, from a click,
-goes to the default browser as the Qt board's button opens it -- the address
+goes to the default browser as the Qt board's button opened it -- the address
 other devices reach and, with LAN access on, the token -- built here at the
 click, so the token does not reach the page either. The Window builds the host
 from the factory of the first React panel opened and calls ShowPanel() on every
 reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
-straight (S4e: several items, one host page). A React panel may still be shown
-in its Qt version by one setting while that version is kept
-(QT_FALLBACK_SETTINGS, read when the item is first chosen; S4b, S4aa).
+straight (S4e: several items, one host page). Every sidebar item is a React
+panel: the last Qt version kept behind a setting, SCORE's (S4aa), went with
+the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c).
 
 Importing it creates nothing.
 """
@@ -118,23 +118,6 @@ _SCORE_SETS_TAKEN = "taken"
 SCORE_PANEL = "scoreboard"
 
 
-# The way back to a React panel's Qt version while that version is kept
-# (ADR-005 S4b for Commentary until S4c; S4aa for SCORE until S4ac removes
-# the Qt boards): React panel -> the boolean general setting that shows the
-# Qt panel instead. Off by default.
-QT_FALLBACK_SETTINGS = {
-    "scoreboard": "general.qt_scoreboard_panel",
-}
-
-
-def UsesQtPanel(panel):
-    """Whether the desktop shows ``panel``'s Qt version instead of the React
-    page (the operator's QT_FALLBACK_SETTINGS switch). False for a panel
-    without one, and for anything stored but True."""
-    key = QT_FALLBACK_SETTINGS.get(panel)
-    return bool(key and SettingsManager.Get(key, False) is True)
-
-
 def PanelPath(panel):
     """The path + query the host opens for ``panel``."""
     query = urlencode({"desktop": "1",
@@ -173,8 +156,8 @@ def _IsDesignerUrl(url, pageUrl):
 
 
 # The browser version of the scoreboards the SCORE page opens (S4aa): the
-# paths the Qt boards' "ブラウザ版を開く" opens (board 2 "team", board 1
-# "scoreboard"; AutonaScoreboardWidget).
+# paths the Qt boards' "ブラウザ版を開く" opened (board 2 "team", board 1
+# "scoreboard"; the Qt boards went in ADR-005 S4ac-3).
 _BROWSER_SCOREBOARD_PATHS = ("/scoreboard", "/team")
 
 
@@ -190,9 +173,9 @@ def _IsBrowserScoreboardUrl(url, pageUrl):
 
 
 def BrowserScoreboardUrl(path):
-    """The URL the Qt board's "ブラウザ版を開く" opens for ``path``
-    ("/scoreboard" or "/team"; AutonaScoreboardWidget.webScoreboardUrl and
-    _WebScoreboardOpenUrl), read at the click: the address the web server is
+    """The URL the SCORE page's "ブラウザ版を開く" opens for ``path``
+    ("/scoreboard" or "/team"; the shape of the Qt board's button until
+    ADR-005 S4ac-3), read at the click: the address the web server is
     reached at (the LAN address with LAN access on), and the access token only
     with LAN access on, so the same URL works when copied to another device
     (the page takes it off the address bar: web/src/autonaToken.ts). With LAN
@@ -201,8 +184,8 @@ def BrowserScoreboardUrl(path):
     The port and LAN access are what the server really listens on
     (WebServer.Listening(); a change in the settings takes effect at its next
     start), the settings only while none runs -- as the Stats Display Settings
-    page's Companion URL (AutonaWebOperations.get_stats_overlays). The Qt
-    board's button reads the settings when the board is built."""
+    page's Companion URL (AutonaWebOperations.get_stats_overlays). (The Qt
+    board's button read the settings when the board was built.)"""
     from .AutonaWebServer import WebServer
     bound = WebServer.Listening()
     if bound is None:
@@ -243,7 +226,8 @@ class _PanelPage(QWebEnginePage):
     A new window goes to the default browser instead, when it is the web's
     (S4r), but for the Designer's URL, which is the host's (designerRequested,
     S4s), and the browser scoreboard's, which goes to the default browser as
-    the Qt board's button opens it (BrowserScoreboardUrl, S4aa). Script
+    built at the click (BrowserScoreboardUrl, S4aa: the shape of the Qt
+    board's button, removed in ADR-005 S4ac-3). Script
     without the operator's click does not get here (JavascriptCanOpenWindows,
     _EnsureView).
 

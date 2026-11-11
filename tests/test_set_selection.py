@@ -1,13 +1,16 @@
-"""The set selection's lists (ADR-005 S4v): core's SetSelectionService, its v1
-routes, and the Qt windows' agreement with them.
+"""The set selection's lists (ADR-005 S4v): core's SetSelectionService and its
+v1 routes.
 
-What the Qt set selection and station windows fetch, for a page and a shell
+What the Qt set selection and station windows fetched, for a page and a shell
 with no window. Pinned here: reading never fetches; one fetch per list, another
 query replacing the set list's and the same one refused; a failed request told
 from an empty answer; what a stale answer does (nothing), across a replacement,
 a cancel and a tournament change; the set list coming back with its tournament
-as the window's cache does, the others not; the rows' whitelist; the access
-rules; and the windows asking start.gg the same and showing the same.
+as the window's cache did, the others not; the rows' whitelist; the access
+rules; and v1 asking start.gg what the windows asked. (The windows, compared
+with v1 here until then, went with the Qt SCORE in ADR-005 S4ac-3; what they
+asked is frozen in the parameters below, and what they showed is the SCORE
+page's table, web/src/ScorePage/setRows.cases.json.)
 
 The provider is faked at its interface (the real one's strict mode is
 tests/test_startgg_parse.py's), on the real adapter's jobs. What a board then
@@ -443,6 +446,7 @@ def test_the_base_provider_says_what_the_lists_ask_with(method, asked):
 
 @pytest.mark.parametrize("phase, finished, groups, query", [
     (ALL_PHASES, False, [101, 102, 103], ALL_PHASES),
+    (ALL_PHASES, True, [101, 102, 103], ALL_PHASES),
     (11, False, [101, 102], 11),
     # The phase as the phases have it, however it was named.
     ("12", True, [103], 12),
@@ -1314,173 +1318,32 @@ def test_the_reads_need_no_token(autonaApp, service, peer, path):
     assert peer.get(path).status_code == 200
 
 
-# ── both entrances ask the same and show the same ────────────────────────
+# ── what the Qt windows asked and showed (until ADR-005 S4ac-3) ───────────
 
-@pytest.fixture
-def setWindow(service, autonaApp):
-    from qtpy.QtWidgets import QWidget
-    from src.AutonaSelectSetWindow import AutonaSelectSetWindow
-
-    AutonaSelectSetWindow._cache = None
-    AutonaSelectSetWindow._sortState = None
-    parent = QWidget()
-    window = AutonaSelectSetWindow(parent, 1)
-    try:
-        yield window
-    finally:
-        adapter = AutonaTournamentDataProvider.instance
-        adapter.CancelSetLoad()
-        window.deleteLater()
-        parent.deleteLater()
-        AutonaSelectSetWindow._cache = None
-        AutonaSelectSetWindow._sortState = None
-        autonaApp.settle()
-
-
-@pytest.mark.parametrize("comboIndex, phase, finished", [
-    (1, ALL_PHASES, False),      # All phases
-    (1, ALL_PHASES, True),
-    (2, 11, False),              # Pools
-    (3, 12, True),               # Top 8
-])
-def test_the_window_and_v1_ask_start_gg_the_same(
-        service, autonaApp, setWindow, comboIndex, phase, finished):
-    provider = FakeTournament()
-    _load(service, provider)
-    setWindow._onPhasesUpdated(PHASE_ANSWER)
-    setWindow.phaseCombo.setCurrentIndex(comboIndex)
-    setWindow.showFinished.setChecked(finished)
-    setWindow._FetchSets()
-    _drain(autonaApp)
-
-    _fetched(service, autonaApp, provider)
-    assert service.RefreshSets(phase, finished) == STARTED
-    _drain(autonaApp)
-
-    assert len(provider.asked[SETS]) == 2
-    assert provider.asked[SETS][0] == provider.asked[SETS][1]
-
-
-def test_the_window_and_v1_ask_the_same_with_no_phases(
-        service, autonaApp, setWindow):
+def test_v1_asks_what_the_window_asked_with_no_phases(service, autonaApp):
+    # The whole event, as the window asked with its phase combo hidden.
     provider = FakeTournament(phases=[])
     _load(service, provider)
-    setWindow._onPhasesUpdated([])
-    setWindow._FetchSets()
-    _drain(autonaApp)
     assert service.RefreshSets(None, False) == STARTED
     _drain(autonaApp)
-    assert provider.asked[SETS] == [{"finished": False, "groups": None}] * 2
+    assert provider.asked[SETS] == [{"finished": False, "groups": None}]
 
 
-def test_the_window_and_v1_refuse_the_same_with_none_chosen(
-        service, autonaApp, setWindow):
+def test_v1_refuses_what_the_window_refused_with_none_chosen(
+        service, autonaApp):
+    # The window's "Select a phase...": nothing asked.
     provider = FakeTournament()
     _load(service, provider)
-    setWindow._onPhasesUpdated(PHASE_ANSWER)
-    setWindow.phaseCombo.setCurrentIndex(0)      # Select a phase...
-    setWindow._FetchSets()
-    _drain(autonaApp)
     _fetched(service, autonaApp, provider)
     assert service.RefreshSets(None, False) == PHASE_REQUIRED
     assert provider.asked[SETS] == []
 
 
-def _side(row, side):
-    """What the page writes in a player column: the window's rule for doubles,
-    which looks at the first side only (external-control-api.md §5.18)."""
-    from qtpy.QtWidgets import QApplication
-
-    name = row[side]["name"]
-    if len(row["p1"]["members"]) > 1:
-        name += (" " + QApplication.translate("punctuation", "(")
-                 + ", ".join(row[side]["members"])
-                 + QApplication.translate("punctuation", ")"))
-    return name
-
-
-def _columns(row):
-    return [row["stream"], row["station"], row["phase"], row["pool"],
-            row["round"], _side(row, "p1"), _side(row, "p2")]
-
-
-def _complete(row):
-    return row["p1"]["name"] != "" and row["p2"]["name"] != ""
-
-
-def _table(window):
-    model = window.model
-    return [[model.item(r, c).text() for c in range(7)]
-            for r in range(model.rowCount())]
-
-
-SHOWN = [
-    _set(1),
-    _set(2, stream="channel", station=None, tournament_pool=""),
-    _set(3, ("ALPHA", "ALICE"), ("BRAVO", "BOB"), round_name="Grand Final"),
-    # A doubles set with one side still unknown, and the other way around.
-    _set(4, ("ALPHA", "ALICE"), ()),
-    _set(5, (), ("BRAVO", "BOB")),
-    _set(6, (), ()),
-]
-
-
-def test_the_window_shows_what_the_rows_say(service, autonaApp, setWindow):
-    """The columns from v1's rows, by the rules the page is told, are the
-    window's table: and its "Show complete pairs" is the rows' filter."""
-    provider = FakeTournament(phases=[], sets=SHOWN)
-    _load(service, provider)
-    setWindow._onPhasesUpdated([])
-    setWindow._FetchSets()
-    _drain(autonaApp)
-    table = _table(setWindow)
-    assert len(table) == len(SHOWN)
-
-    assert service.RefreshSets(None, False) == STARTED
-    _drain(autonaApp)
-    rows = service.Result(SETS)["rows"]
-    assert [_columns(row) for row in rows] == table
-    # The hidden column the search reaches and the load reads.
-    assert [str(row["id"]) for row in rows] == [
-        setWindow.model.item(r, setWindow.DATA_COLUMN).text()
-        for r in range(setWindow.model.rowCount())]
-
-    setWindow.showCompletePairs.setChecked(True)
-    setWindow._RenderSets(setWindow._CachedSets())
-    assert [_columns(row) for row in rows if _complete(row)] == _table(
-        setWindow)
-
-
-def test_the_station_window_shows_what_the_rows_say(service, autonaApp):
-    from qtpy.QtWidgets import QWidget
-    from src.AutonaSelectStationWindow import AutonaSelectStationWindow
-
-    provider = FakeTournament()
-    _load(service, provider)
-    parent = QWidget()
-    window = AutonaSelectStationWindow(parent, 1)
-    try:
-        window.LoadStations()
-        _drain(autonaApp)
-        model = window.proxyModel.sourceModel()
-        table = [[model.item(r, c).text() for c in range(4)]
-                 for r in range(model.rowCount())]
-        assert len(table) == len(STATION_ANSWER)
-
-        _fetched(service, autonaApp, provider, STATIONS)
-        assert [[row["type"], str(row["id"]), row["stream"],
-                 str(row["identifier"])]
-                for row in service.Result(STATIONS)["rows"]] == table
-    finally:
-        window.deleteLater()
-        parent.deleteLater()
-        autonaApp.settle()
-
-
-# One table for core, the windows and the SCORE page (web/src/ScorePage/
-# setRows.ts, whose jest test reads the same file; ADR-005 S4ab): for each
-# set / station the provider answers, the row v1 makes of it and what the
-# window shows -- which is what the page shows of that row.
+# One table for core and the SCORE page (web/src/ScorePage/setRows.ts, whose
+# jest test reads the same file; ADR-005 S4ab): for each set / station the
+# provider answers, the row v1 makes of it and what the page shows of that
+# row -- what the Qt windows showed until ADR-005 S4ac-3 (compared here until
+# then; `windowCells` is where the station window differed).
 PAGE_CASES = json.loads(
     (Path(__file__).resolve().parent.parent / "web" / "src" / "ScorePage"
      / "setRows.cases.json").read_text(encoding="utf-8"))
@@ -1494,56 +1357,21 @@ def test_the_page_s_table_has_core_s_rows():
         case["row"] for case in PAGE_CASES["stations"]]
 
 
-def test_the_page_s_table_is_what_the_set_window_shows(
-        service, autonaApp, setWindow):
-    """The table's cells are the window's columns, its ids the hidden column
-    the search reaches, its complete pairs what "Show complete pairs" keeps;
-    and v1 answers its rows for the same fetch."""
+def test_v1_answers_the_page_s_rows_for_a_fetch(service, autonaApp):
     cases = PAGE_CASES["sets"]
     provider = FakeTournament(phases=[], sets=[case["set"] for case in cases])
     _load(service, provider)
-    setWindow._onPhasesUpdated([])
-    setWindow._FetchSets()
-    _drain(autonaApp)
-
-    assert _table(setWindow) == [case["cells"] for case in cases]
-    assert [setWindow.model.item(r, setWindow.DATA_COLUMN).text()
-            for r in range(setWindow.model.rowCount())] == [
-        str(case["row"]["id"]) for case in cases]
-    setWindow.showCompletePairs.setChecked(True)
-    setWindow._RenderSets(setWindow._CachedSets())
-    assert _table(setWindow) == [
-        case["cells"] for case in cases if case["complete"]]
 
     assert service.RefreshSets(None, False) == STARTED
     _drain(autonaApp)
     assert service.Result(SETS)["rows"] == [case["row"] for case in cases]
 
 
-def test_the_page_s_table_is_what_the_station_window_shows(service, autonaApp):
-    from qtpy.QtWidgets import QWidget
-    from src.AutonaSelectStationWindow import AutonaSelectStationWindow
-
+def test_v1_answers_the_page_s_station_rows_for_a_fetch(service, autonaApp):
     cases = PAGE_CASES["stations"]
     provider = FakeTournament(stations=[case["station"] for case in cases])
     _load(service, provider)
-    parent = QWidget()
-    window = AutonaSelectStationWindow(parent, 1)
-    try:
-        window.LoadStations()
-        _drain(autonaApp)
-        model = window.proxyModel.sourceModel()
-        # `windowCells`: where the window differs from the page -- its
-        # str(None), which the page does not copy (it shows nothing).
-        assert [[model.item(r, c).text() for c in range(4)]
-                for r in range(model.rowCount())] == [
-            case.get("windowCells", case["cells"]) for case in cases]
-        assert any("windowCells" in case for case in cases)
 
-        _fetched(service, autonaApp, provider, STATIONS)
-        assert service.Result(STATIONS)["rows"] == [
-            case["row"] for case in cases]
-    finally:
-        window.deleteLater()
-        parent.deleteLater()
-        autonaApp.settle()
+    _fetched(service, autonaApp, provider, STATIONS)
+    assert service.Result(STATIONS)["rows"] == [
+        case["row"] for case in cases]

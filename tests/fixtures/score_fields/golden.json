@@ -1,0 +1,313 @@
+{
+ "fields": [
+  [
+   "the tag",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.name",
+      "\"ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedName",
+      "\"SP | ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedOnlyName",
+      "\"ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.avatar",
+      "null"
+     ],
+     [
+      "score.1.team.1.player.1.id",
+      "null"
+     ],
+     [
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "score.1.last_sets.1",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"id\"], \"action\": \"type_changes\", \"value\": null, \"old_value\": \"unknown___\", \"type\": \"<class 'NoneType'>\", \"old_type\": \"<class 'int'>\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"ALPHA2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mergedName\"], \"action\": \"values_changed\", \"value\": \"SP | ALPHA2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mergedOnlyName\"], \"action\": \"values_changed\", \"value\": \"ALPHA2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"SP\",\"real_name\":\"Real Alpha\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"alpha_tw\",\"custom_textbox\":\"first\",\"mergedName\":\"SP | ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the sponsor",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.team",
+      "\"NEW\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedName",
+      "\"NEW | ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedOnlyName",
+      "\"ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.avatar",
+      "null"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"team\"], \"action\": \"values_changed\", \"value\": \"NEW\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mergedName\"], \"action\": \"values_changed\", \"value\": \"NEW | ALPHA2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"NEW\",\"real_name\":\"Real Alpha\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"alpha_tw\",\"custom_textbox\":\"first\",\"mergedName\":\"NEW | ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the sponsor emptied",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.team",
+      "\"\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedName",
+      "\"ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.mergedOnlyName",
+      "\"ALPHA2\""
+     ],
+     [
+      "score.1.team.1.player.1.avatar",
+      "null"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"team\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mergedName\"], \"action\": \"values_changed\", \"value\": \"ALPHA2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Real Alpha\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"alpha_tw\",\"custom_textbox\":\"first\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the real name",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.real_name",
+      "\"Someone\""
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"real_name\"], \"action\": \"values_changed\", \"value\": \"Someone\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"alpha_tw\",\"custom_textbox\":\"first\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the twitter",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.twitter",
+      "\"tw2\""
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"tw2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"first\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the note",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.custom_textbox",
+      "\"one\\ntwo\""
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"custom_textbox\"], \"action\": \"values_changed\", \"value\": \"one\\ntwo\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "a country",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.state",
+      "{}"
+     ],
+     [
+      "score.1.team.1.player.1.country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"\u65e5\u672c\",\"emoji\":\"\ud83c\uddef\ud83c\uddf5\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"\u65e5\u672c\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\"], \"action\": \"values_changed\", \"value\": {\"asset\": \"./assets/country_flag/jp.png\", \"code\": \"JP\", \"display_name\": \"\u65e5\u672c\", \"emoji\": \"\ud83c\uddef\ud83c\uddf5\", \"en_name\": \"Japan\", \"latitude\": \"36.00000000\", \"longitude\": \"138.00000000\", \"name\": \"\u65e5\u672c\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"\u65e5\u672c\",\"emoji\":\"\ud83c\uddef\ud83c\uddf5\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"\u65e5\u672c\"},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "a region",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.state",
+      "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"state\"], \"action\": \"values_changed\", \"value\": {\"asset\": \"./assets/state_flag/JP/13.png\", \"code\": \"13\", \"latitude\": \"35.67686010\", \"longitude\": \"139.76389470\", \"name\": \"Tokyo\", \"original_code\": \"13\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"\u65e5\u672c\",\"emoji\":\"\ud83c\uddef\ud83c\uddf5\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"\u65e5\u672c\"},\"state\":{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "another country",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.state",
+      "{}"
+     ],
+     [
+      "score.1.team.1.player.1.country",
+      "{\"asset\":\"./assets/country_flag/us.png\",\"code\":\"US\",\"display_name\":\"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\",\"emoji\":\"\ud83c\uddfa\ud83c\uddf8\",\"en_name\":\"United States\",\"latitude\":\"38.00000000\",\"longitude\":\"-97.00000000\",\"name\":\"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./assets/country_flag/us.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"code\"], \"action\": \"values_changed\", \"value\": \"US\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"display_name\"], \"action\": \"values_changed\", \"value\": \"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"emoji\"], \"action\": \"values_changed\", \"value\": \"\ud83c\uddfa\ud83c\uddf8\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"en_name\"], \"action\": \"values_changed\", \"value\": \"United States\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"latitude\"], \"action\": \"values_changed\", \"value\": \"38.00000000\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"longitude\"], \"action\": \"values_changed\", \"value\": \"-97.00000000\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\", \"name\"], \"action\": \"values_changed\", \"value\": \"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"state\"], \"action\": \"values_changed\", \"value\": {}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{\"asset\":\"./assets/country_flag/us.png\",\"code\":\"US\",\"display_name\":\"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\",\"emoji\":\"\ud83c\uddfa\ud83c\uddf8\",\"en_name\":\"United States\",\"latitude\":\"38.00000000\",\"longitude\":\"-97.00000000\",\"name\":\"\u30a2\u30e1\u30ea\u30ab\u5408\u8846\u56fd\"},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "no country",
+   {
+    "sets": [
+     [
+      "score.1.team.1.player.1.state",
+      "{}"
+     ],
+     [
+      "score.1.team.1.player.1.country",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"country\"], \"action\": \"values_changed\", \"value\": {}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ],
+  [
+   "the same tag again",
+   {
+    "sets": [],
+    "deltas": [],
+    "bigChanges": 0
+   },
+   "{\"seed\":3,\"birthday\":false,\"country\":{},\"state\":{},\"character\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"mains\":{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}},\"online_avatar\":\"avatars/alpha.png\",\"name\":\"ALPHA2\",\"team\":\"\",\"real_name\":\"Someone\",\"avatar\":null,\"id\":null,\"city\":\"Shibuya\",\"twitter\":\"tw2\",\"custom_textbox\":\"one\\ntwo\",\"mergedName\":\"ALPHA2\",\"mergedOnlyName\":\"ALPHA2\"}"
+  ]
+ ],
+ "characters": [
+  [
+   "Mario on row 1",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"codename\"], \"action\": \"dictionary_item_added\", \"value\": \"mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"display_name\"], \"action\": \"dictionary_item_added\", \"value\": \"\u746a\u5229\u6b50\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"dictionary_item_added\", \"value\": \"Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"modded\"], \"action\": \"dictionary_item_added\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\u30de\u30ea\u30aa\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\"], \"action\": \"values_changed\", \"value\": {\"base_files/icon\": {\"asset\": \"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\", \"type\": [\"icon\"]}, \"full\": {\"asset\": \"./user_data/games/tgame//full/mario_0.png\", \"average_size\": {\"x\": 100.0, \"y\": 120.0}, \"eyesight\": {\"x\": 10, \"y\": 20}, \"image_size\": [100, 120], \"metadata\": {\"0\": {\"title\": \"\u91cd\u3055\", \"title_en\": \"Weight\", \"value\": \"98kg\", \"value_en\": \"98\"}}, \"rescaling_factor\": 1, \"type\": [\"full\"], \"uncropped_edge\": [\"u\", \"d\"]}, \"portrait\": {\"asset\": \"./user_data/games/tgame//portrait/mario_0.png\", \"average_size\": {\"x\": 200.0, \"y\": 200.0}, \"type\": \"portrait\"}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"skin\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"mario\",\"display_name\":\"\u746a\u5229\u6b50\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"\u30de\u30ea\u30aa\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "its third skin, another character",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"values_changed\", \"value\": \"Dr. Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"Dr. Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"base_files/icon\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//full/mario_2.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"portrait\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//portrait/mario_2.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"skin\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"mario\",\"display_name\":\"\u746a\u5229\u6b50\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "a variant",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"variant\"], \"action\": \"values_changed\", \"value\": {\"codename\": \"ex\", \"display_name\": \"\u5f37\u5316\", \"en_name\": \"EX\", \"icon_path\": \"./user_data/games/tgame/variant_icon/var_ex.png\", \"image_size\": [32, 32], \"name\": \"EX\u7248\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"mario\",\"display_name\":\"\u746a\u5229\u6b50\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"ex\",\"display_name\":\"\u5f37\u5316\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX\u7248\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "Luigi: the first skin, the variant kept",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"image_size\"], \"action\": \"dictionary_item_removed\", \"value\": [100, 120], \"old_value\": \"unknown___\", \"type\": \"<class 'list'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"rescaling_factor\"], \"action\": \"dictionary_item_removed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"codename\"], \"action\": \"values_changed\", \"value\": \"luigi\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"display_name\"], \"action\": \"values_changed\", \"value\": \"\u8def\u6613\u5409\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"values_changed\", \"value\": \"Luigi\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\u30eb\u30a4\u30fc\u30b8\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"base_files/icon\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//full/luigi_0.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"eyesight\", \"x\"], \"action\": \"values_changed\", \"value\": 12, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"eyesight\", \"y\"], \"action\": \"values_changed\", \"value\": 22, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"metadata\", \"0\", \"value\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"full\", \"metadata\", \"0\", \"value_en\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\", \"portrait\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//portrait/luigi_0.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"skin\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"luigi\",\"display_name\":\"\u8def\u6613\u5409\",\"en_name\":\"Luigi\",\"modded\":false,\"name\":\"\u30eb\u30a4\u30fc\u30b8\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/luigi_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":12,\"y\":22},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/luigi_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"ex\",\"display_name\":\"\u5f37\u5316\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX\u7248\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "no variant",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"variant\"], \"action\": \"values_changed\", \"value\": {}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"luigi\",\"display_name\":\"\u8def\u6613\u5409\",\"en_name\":\"Luigi\",\"modded\":false,\"name\":\"\u30eb\u30a4\u30fc\u30b8\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/luigi_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":12,\"y\":22},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/luigi_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "Peach on row 2",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"codename\"], \"action\": \"dictionary_item_added\", \"value\": \"peach\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"display_name\"], \"action\": \"dictionary_item_added\", \"value\": \"\u78a7\u59ec\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"en_name\"], \"action\": \"dictionary_item_added\", \"value\": \"Peach\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"modded\"], \"action\": \"dictionary_item_added\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"name\"], \"action\": \"values_changed\", \"value\": \"Peach\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"assets\"], \"action\": \"values_changed\", \"value\": {\"base_files/icon\": {\"asset\": \"./user_data/games/tgame//base_files/icon/chara_2_peach_00.png\", \"type\": [\"icon\"]}, \"full\": {\"asset\": \"./user_data/games/tgame//full/peach_0.png\", \"average_size\": {\"x\": 100.0, \"y\": 120.0}, \"metadata\": {\"0\": {\"title\": \"\u91cd\u3055\", \"title_en\": \"Weight\", \"value\": \"\", \"value_en\": \"\"}}, \"type\": [\"full\"], \"uncropped_edge\": [\"u\", \"d\"], \"unflippable\": true}, \"portrait\": {\"asset\": \"./user_data/games/tgame//portrait/peach_0.png\", \"average_size\": {\"x\": 200.0, \"y\": 200.0}, \"type\": \"portrait\"}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"skin\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"luigi\",\"display_name\":\"\u8def\u6613\u5409\",\"en_name\":\"Luigi\",\"modded\":false,\"name\":\"\u30eb\u30a4\u30fc\u30b8\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/luigi_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":12,\"y\":22},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/luigi_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"codename\":\"peach\",\"display_name\":\"\u78a7\u59ec\",\"en_name\":\"Peach\",\"modded\":false,\"name\":\"Peach\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_peach_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/peach_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"],\"unflippable\":true},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/peach_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "its second skin",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"assets\", \"base_files/icon\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//base_files/icon/chara_2_peach_01.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"assets\", \"full\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//full/peach_1.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"assets\", \"portrait\", \"asset\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//portrait/peach_1.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2, \"skin\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"luigi\",\"display_name\":\"\u8def\u6613\u5409\",\"en_name\":\"Luigi\",\"modded\":false,\"name\":\"\u30eb\u30a4\u30fc\u30b8\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/luigi_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":12,\"y\":22},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/luigi_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"codename\":\"peach\",\"display_name\":\"\u78a7\u59ec\",\"en_name\":\"Peach\",\"modded\":false,\"name\":\"Peach\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_peach_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/peach_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"],\"unflippable\":true},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/peach_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "a character without skins",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3, \"codename\"], \"action\": \"dictionary_item_added\", \"value\": \"noart\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3, \"display_name\"], \"action\": \"dictionary_item_added\", \"value\": \"NoArt\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3, \"en_name\"], \"action\": \"dictionary_item_added\", \"value\": \"NoArt\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3, \"modded\"], \"action\": \"dictionary_item_added\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3, \"name\"], \"action\": \"values_changed\", \"value\": \"NoArt\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"codename\":\"luigi\",\"display_name\":\"\u8def\u6613\u5409\",\"en_name\":\"Luigi\",\"modded\":false,\"name\":\"\u30eb\u30a4\u30fc\u30b8\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/luigi_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":12,\"y\":22},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/luigi_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"codename\":\"peach\",\"display_name\":\"\u78a7\u59ec\",\"en_name\":\"Peach\",\"modded\":false,\"name\":\"Peach\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_peach_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/peach_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"],\"unflippable\":true},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/peach_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"3\":{\"codename\":\"noart\",\"display_name\":\"NoArt\",\"en_name\":\"NoArt\",\"modded\":false,\"name\":\"NoArt\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "row 1 emptied",
+   [
+    "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"codename\"], \"action\": \"dictionary_item_removed\", \"value\": \"luigi\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"display_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"\u8def\u6613\u5409\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"Luigi\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"modded\"], \"action\": \"dictionary_item_removed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"assets\"], \"action\": \"values_changed\", \"value\": {}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"skin\"], \"action\": \"values_changed\", \"value\": -1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   0,
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"codename\":\"peach\",\"display_name\":\"\u78a7\u59ec\",\"en_name\":\"Peach\",\"modded\":false,\"name\":\"Peach\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_peach_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/peach_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"],\"unflippable\":true},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/peach_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"3\":{\"codename\":\"noart\",\"display_name\":\"NoArt\",\"en_name\":\"NoArt\",\"modded\":false,\"name\":\"NoArt\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "the same character again",
+   [],
+   0,
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"codename\":\"peach\",\"display_name\":\"\u78a7\u59ec\",\"en_name\":\"Peach\",\"modded\":false,\"name\":\"Peach\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_peach_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/peach_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"metadata\":{\"0\":{\"title\":\"\u91cd\u3055\",\"title_en\":\"Weight\",\"value\":\"\",\"value_en\":\"\"}},\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"],\"unflippable\":true},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/peach_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"3\":{\"codename\":\"noart\",\"display_name\":\"NoArt\",\"en_name\":\"NoArt\",\"modded\":false,\"name\":\"NoArt\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ]
+ ]
+}

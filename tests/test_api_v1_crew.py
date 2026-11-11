@@ -1,7 +1,7 @@
 """The crew board's /api/v1 routes (ADR-005 S4w).
 
-Everything the Qt crew board can do, for the React SCORE page, with the Qt
-board still there and unchanged:
+Everything the Qt crew board could do, for the React SCORE page (the Qt board
+was left unchanged then, and went in ADR-005 S4ac-3):
 
 - ``PATCH /api/v1/scoreboards/3/teams/{t}/members/{m}``              name, stock, active
 - ``POST  /api/v1/scoreboards/3/teams/{t}/members/{m}/stock:adjust`` a relative stock change
@@ -13,17 +13,15 @@ and what boards 1/2 already had, open to board 3: ``:swap-teams``,
 ``teams/{t}/color`` and ``PATCH set``.
 
 Through Flask's test client against the real route table, on both shells: the
-board's own inputs, the route on the desktop and the route headless have to
-end up in the same state, write by write.
+route on the desktop and the route headless have to end up in the same state,
+write by write (and, until S4ac-3, as the board's own inputs did).
 """
 import json
 import threading
-import urllib.parse
 import uuid
 from unittest.mock import patch
 
 import pytest
-from qtpy.QtWidgets import QApplication, QMessageBox
 
 from src import AutonaWebOperations as WebOps
 from src.core import StateSchema as schema
@@ -37,10 +35,7 @@ from tests.test_api_v1 import (  # noqa: F401
     _assertRejected, _requestOnWorkerThread, client, webApp)
 from tests.test_api_v1_score import (  # noqa: F401
     _cycles, _ok, lanServer, launchedBoards)
-from tests.test_crew_board import _typeCombo
-from tests.test_crew_operations import (
-    _focus, _fromState, _golden, _nameMember, _onScreen, _row, _setUpDesktop,
-    _setUpHeadless, _shown, _typeTeamName)
+from tests.test_crew_operations import _golden, _setUpDesktop, _setUpHeadless
 from tests.test_web_access import LAN_PEER
 from tests.test_web_operations import _goHeadless
 
@@ -71,8 +66,14 @@ def _sendOk(client, route):
     return _ok(_send(client, route))
 
 
-def _board(app):
-    return app.manager.scoreboards.get(BOARD)
+def _madeBoards():
+    """The boards core has made (AutonaActions.BoardEnsured). Until ADR-005
+    S4ac-3 the crew board's widgets were what these tests looked for: the
+    desktop built them, and made a board core did not have again, for a
+    write (DesktopBoardHost.Prepare)."""
+    from src.core.Actions import AutonaActions
+    return [number for number in AutonaActions.BOARDS
+            if AutonaActions.instance.BoardEnsured(number)]
 
 
 @pytest.fixture(params=["desktop", "headless"])
@@ -98,130 +99,75 @@ def _dropHeadlessBoards(app):
 
 @pytest.fixture
 def noBoard(autonaApp):
-    """The desktop with no board in core and no widget: what a launch leaves
-    when it failed (every board is made at launch since ADR-005 S4ac-1; this
-    was the lazy board, not asked for yet, until then)."""
+    """The desktop with no board in core: what a launch leaves when it
+    failed (every board is made at launch since ADR-005 S4ac-1; this was the
+    lazy board, not asked for yet, until then). What is refused is refused
+    before anything is made or written."""
     autonaApp.dropAllBoards()
-    assert _board(autonaApp) is None
+    assert _madeBoards() == []
     return autonaApp
 
 
-@pytest.fixture(params=["not made", "launched"])
-def unbuiltBoards(request):
-    """The boards with no widget: core does not have them (`noBoard`), or
-    made at launch (`launchedBoards`: every launch, ADR-005 S4ac-1)."""
-    fixture = "noBoard" if request.param == "not made" else "launchedBoards"
-    app = request.getfixturevalue(fixture)
-    assert _board(app) is None
-    return app
+# ── the route on the desktop, the route headless ─────────────────────────
 
-
-# ── the board's inputs, the route on the desktop, the route headless ─────
-
-# (what it is, the board's input, the route)
+# (what it is, the route): what the board's inputs wrote until ADR-005
+# S4ac-3 removed them (the routes were checked against them until then)
 STEPS = [
-    ("the count",
-     lambda b: b.playerNumber.setValue(5),
-     ("patch", f"{URL}/set", {"players": 5})),
-    ("a name",
-     lambda b: _nameMember(b, 0, 1, "A1"),
-     ("patch", _member(1, 1), {"name": "A1"})),
-    ("the other crew's name",
-     lambda b: _nameMember(b, 1, 4, "B4"),
-     ("patch", _member(2, 4), {"name": "B4"})),
-    ("a stock",
-     lambda b: _row(b, 0, 1)["stock"].setValue(1),
-     ("patch", _member(1, 1), {"stock": 1})),
-    ("a stock down",
-     lambda b: _row(b, 1, 4)["stock"].setValue(2),
-     ("post", _stock(2, 4), {"delta": -1})),
-    ("a stock up",
-     lambda b: _row(b, 1, 4)["stock"].setValue(9),
-     ("post", _stock(2, 4), {"delta": 7})),
-    ("playing",
-     lambda b: _row(b, 0, 1)["active"].setChecked(True),
-     ("patch", _member(1, 1), {"active": True})),
-    ("someone else playing",
-     lambda b: _row(b, 0, 2)["active"].setChecked(True),
-     ("patch", _member(1, 2), {"active": True})),
-    ("nobody playing",
-     lambda b: _row(b, 0, 2)["active"].setChecked(False),
-     ("patch", _member(1, 2), {"active": False})),
+    ("the count", ("patch", f"{URL}/set", {"players": 5})),
+    ("a name", ("patch", _member(1, 1), {"name": "A1"})),
+    ("the other crew's name", ("patch", _member(2, 4), {"name": "B4"})),
+    ("a stock", ("patch", _member(1, 1), {"stock": 1})),
+    ("a stock down", ("post", _stock(2, 4), {"delta": -1})),
+    ("a stock up", ("post", _stock(2, 4), {"delta": 7})),
+    ("playing", ("patch", _member(1, 1), {"active": True})),
+    ("someone else playing", ("patch", _member(1, 2), {"active": True})),
+    ("nobody playing", ("patch", _member(1, 2), {"active": False})),
     ("the crew's name",
-     lambda b: _typeTeamName(b, 0, "Alpha"),
      ("patch", f"{URL}/set", {"teamName": {"team": 1, "value": "Alpha"}})),
-    ("the colour",
-     lambda b: b.colorButtons[1].setColor("#123456"),
-     ("post", _color(2), {"color": "#123456"})),
-    ("the phase",
-     lambda b: _typeCombo(b.phaseCombo, "Pools"),
-     ("patch", f"{URL}/set", {"phase": "Pools"})),
-    ("the pool",
-     lambda b: _typeCombo(b.poolCombo, "Group A"),
-     ("patch", f"{URL}/set", {"pool": "Group A"})),
-    ("the match",
-     lambda b: _typeCombo(b.matchCombo, "WF"),
-     ("patch", f"{URL}/set", {"match": "WF"})),
-    ("swap",
-     lambda b: b.btSwap.click(),
-     ("post", f"{URL}:swap-teams")),
-    ("a stock, swapped",
-     lambda b: _row(b, 0, 4)["stock"].setValue(8),
-     ("patch", _member(1, 4), {"stock": 8})),
-    ("reset stocks",
-     lambda b: b.btReset.click(),
-     ("post", f"{URL}/score:reset")),
-    ("an emptied name",
-     lambda b: _nameMember(b, 0, 4, ""),
-     ("patch", _member(1, 4), {"name": ""})),
-    ("swap back",
-     lambda b: b.btSwap.click(),
-     ("post", f"{URL}:swap-teams")),
-    ("the count down",
-     lambda b: b.playerNumber.setValue(1),
-     ("patch", f"{URL}/set", {"players": 1})),
+    ("the colour", ("post", _color(2), {"color": "#123456"})),
+    ("the phase", ("patch", f"{URL}/set", {"phase": "Pools"})),
+    ("the pool", ("patch", f"{URL}/set", {"pool": "Group A"})),
+    ("the match", ("patch", f"{URL}/set", {"match": "WF"})),
+    ("swap", ("post", f"{URL}:swap-teams")),
+    ("a stock, swapped", ("patch", _member(1, 4), {"stock": 8})),
+    ("reset stocks", ("post", f"{URL}/score:reset")),
+    ("an emptied name", ("patch", _member(1, 4), {"name": ""})),
+    ("swap back", ("post", f"{URL}:swap-teams")),
+    ("the count down", ("patch", f"{URL}/set", {"players": 1})),
 ]
 
 
 def _play(app, act):
     played = []
-    for label, input_, route in STEPS:
+    for label, route in STEPS:
         with WriteRecorder() as recorder:
-            act(input_, route)
+            act(route)
             app.settle()
         played.append((label, recorder.Result(), encode(app.get("score.3"))))
     return played
 
 
-def test_the_routes_write_what_the_board_s_inputs_write(
+def test_the_routes_write_the_same_on_both_shells(
         autonaApp, client, monkeypatch):
-    board = autonaApp.board(BOARD)
-    byBoard = _play(autonaApp, lambda input_, _route: input_(board))
+    """Route by route, the desktop (the crew board made at launch) and the
+    headless shell write the same. Until ADR-005 S4ac-3 both were checked
+    against the Qt board's own inputs, which went with it; what the routes
+    write against what the board wrote when it was recorded is
+    test_the_routes_write_what_the_board_wrote's."""
+    autonaApp.ready(BOARD)
+    onTheDesktop = _play(autonaApp, lambda route: _sendOk(client, route))
     # Not two recordings of nothing: every step of the script did something.
-    assert [label for label, recorded, _state in byBoard
+    assert [label for label, recorded, _state in onTheDesktop
             if not recorded["sets"]] == []
-
-    board = autonaApp.board(BOARD)
-
-    def throughTheRoute(_input, route):
-        _sendOk(client, route)
-        # The board follows, and following writes nothing.
-        with WriteRecorder() as following:
-            autonaApp.settle()
-        assert following.sets == []
-        assert _shown(board) == _fromState(autonaApp)
-
-    onTheDesktop = _play(autonaApp, throughTheRoute)
-    assert onTheDesktop == byBoard
 
     with monkeypatch.context() as headless:
         _goHeadless(autonaApp, headless)
         try:
             with_no_board = _play(
-                autonaApp, lambda _input, route: _sendOk(client, route))
+                autonaApp, lambda route: _sendOk(client, route))
         finally:
             _dropHeadlessBoards(autonaApp)
-    assert with_no_board == byBoard
+    assert with_no_board == onTheDesktop
 
 
 # What the board wrote when it was recorded (tests/fixtures/crew_operations):
@@ -474,8 +420,8 @@ def test_the_x_post_is_read_under_one_hold_of_the_lock(autonaApp, crewShell):
 def test_the_routes_answer_from_another_thread_on_the_desktop(
         autonaApp, client):
     """What a request is: a thread that is not the GUI's, with the board's
-    work to be done on it."""
-    autonaApp.dropAllBoards()
+    work to be done on it (DesktopBoardHost.Run)."""
+    autonaApp.ready(BOARD)
     answers = _requestOnWorkerThread(lambda: [_send(client, route) for route in (
         ("patch", _member(1, 1), {"name": "One", "active": True}),
         ("post", _stock(1, 1), {"delta": -1}),
@@ -491,8 +437,9 @@ def test_the_routes_answer_from_another_thread_on_the_desktop(
     )])
     autonaApp.settle()
     assert [answer.status_code for answer in answers] == [200] * len(answers)
-    assert _board(autonaApp) is not None
-    assert _shown(_board(autonaApp)) == _fromState(autonaApp)
+    # The clear, last of the writes, took the crews down to one member.
+    assert autonaApp.get("score.3.team.1.memberNum") == 1
+    assert autonaApp.get("score.3.team.1.player.1.name") == ""
 
 
 # ── the same thing again ─────────────────────────────────────────────────
@@ -683,7 +630,7 @@ def _refused(app, send, code="INVALID_ARGUMENT", status=400):
         app.settle()
     _assertRejected(response, code, status)
     assert recorder.sets == []
-    assert _board(app) is None
+    assert _madeBoards() == []
 
 
 def _ids(values):
@@ -766,7 +713,7 @@ def test_a_member_that_is_not_there_is_refused(
     response = getattr(client, method)(url(t, m, n), json=body)
     _assertRejected(response, code, status)
     noBoard.settle()
-    assert noBoard.manager.scoreboards == {}
+    assert _madeBoards() == []
 
 
 @pytest.mark.parametrize("text", ["-1", "1.5", "x"])
@@ -776,7 +723,7 @@ def test_a_member_number_that_is_not_one_has_no_route(noBoard, client, text):
         noBoard.settle()
     assert response.status_code in (404, 405)
     assert recorder.sets == []
-    assert _board(noBoard) is None
+    assert _madeBoards() == []
 
 
 @pytest.mark.parametrize("n", [0, 4])
@@ -784,7 +731,7 @@ def test_the_x_post_is_a_board_s(noBoard, client, n):
     # Boards 1/2 have one too since ADR-005 S4x
     # (tests/test_scoreboard_post.py).
     _assertRejected(client.get(f"/api/v1/scoreboards/{n}/post"))
-    assert noBoard.manager.scoreboards == {}
+    assert _madeBoards() == []
 
 
 @pytest.mark.parametrize("route", [
@@ -834,12 +781,9 @@ def test_a_member_the_board_does_not_show_cannot_be_playing(
 
 def test_a_marker_a_lowered_count_left_behind_can_be_taken_off(
         autonaApp, client, crewShell):
-    """Lowering the count leaves the marker where it is, as Qt does, on a
+    """Lowering the count leaves the marker where it is, as Qt did, on a
     row no longer shown: `active: false` takes it off there, and
     `active: true` does not put it back."""
-    if crewShell == "desktop":
-        # Its widgets are checked below (they go in ADR-005 S4ac-3).
-        autonaApp.board(BOARD)
     for route in (("patch", f"{URL}/set", {"players": 5}),
                   ("patch", _member(1, 5), {"active": True}),
                   ("patch", f"{URL}/set", {"players": 3})):
@@ -851,56 +795,9 @@ def test_a_marker_a_lowered_count_left_behind_can_be_taken_off(
     _sendOk(client, ("patch", _member(1, 5), {"active": False}))
     autonaApp.settle()
     assert autonaApp.get("score.3.team.1.activeMember") == "0"
-    if crewShell == "desktop":
-        assert _shown(_board(autonaApp)) == _fromState(autonaApp)
 
 
-def test_a_board_not_built_has_the_members_building_it_shows(noBoard, client):
-    """Before the board is built the count is its seed's (3), whatever its
-    placeholder holds: building it writes the seed over it."""
-    StateManager.Set("score.3.team.1.memberNum", 9)
-    noBoard.settle()
-    try:
-        _refused(noBoard, lambda: client.patch(
-            _member(1, 4), json={"active": True}))
-        _sendOk(client, ("patch", _member(1, 3), {"active": True}))
-        noBoard.settle()
-        assert noBoard.get("score.3.team.1.memberNum") == 3
-        assert noBoard.get("score.3.team.1.activeMember") == "3"
-    finally:
-        StateManager.Unset("score.3")
-        noBoard.settle()
-
-
-# ── the board that has not been built ────────────────────────────────────
-
-@pytest.mark.parametrize("route,key,value", [
-    (("patch", _member(1, 1), {"name": "One"}),
-     "team.1.player.1.name", "One"),
-    (("patch", _member(1, 1), {"stock": 7}), "team.1.player.1.stock", 7),
-    (("patch", _member(2, 3), {"active": True}), "team.2.activeMember", "3"),
-    (("post", _stock(1, 2), {"delta": -1}), "team.1.player.2.stock", 2),
-    (("patch", f"{URL}/set", {"phase": "P"}), "phase", "P"),
-    (("patch", f"{URL}/set", {"bestOf": 3}), "best_of", 3),
-    (("patch", f"{URL}/set", {"players": 7}), "team.2.memberNum", 7),
-    (("patch", f"{URL}/set", {"teamName": {"team": 2, "value": "Bravo"}}),
-     "team.2.teamName", "Bravo"),
-    (("post", _color(2), {"color": "#123456"}), "team.2.color", "#123456"),
-    (("post", f"{URL}:swap-teams"), "teamsSwapped", True),
-    (("post", f"{URL}:clear", CONFIRM), "team.1.memberNum", 1),
-], ids=lambda value: value[1].split("scoreboards/3")[1]
-    if isinstance(value, tuple) else None)
-def test_a_write_builds_the_board_first_and_stays(
-        noBoard, client, route, key, value):
-    """A write to a board that is not built yet would be wiped by the seed
-    that builds it later."""
-    _sendOk(client, route)
-    noBoard.settle()
-    board = _board(noBoard)
-    assert board is not None
-    assert noBoard.get(f"score.3.{key}") == value
-    assert _shown(board) == _fromState(noBoard)
-
+# ── what a fresh board has ───────────────────────────────────────────────
 
 @pytest.mark.parametrize("route", [
     ("post", f"{URL}/score:reset"),
@@ -911,26 +808,26 @@ def test_a_write_builds_the_board_first_and_stays(
     ("get", "/api/v1/match-names/candidates"),
 ], ids=lambda route: route[1].split("/api/v1")[1])
 def test_what_means_nothing_to_a_fresh_board_does_not_build_it(
-        unbuiltBoards, client, route):
-    """Nothing written (the revision stays) and no widget built: skipped on
-    a board core does not have (_crew_not_built), run on one made at launch
-    -- which has nothing to reset (the next test)."""
+        launchedBoards, client, route):
+    """Nothing written (the revision stays) on the boards as a launch makes
+    them (ADR-005 S4ac-1) -- which have nothing to reset (the next test).
+    Until ADR-005 S4ac-3 it ran on a board core did not have too, which the
+    resets skipped (_crew_not_built) rather than make it again with its
+    widgets: nothing makes a board again since, and nothing builds."""
     revision = StateManager.revision
     with WriteRecorder() as recorder:
         _sendOk(client, route)
-        unbuiltBoards.settle()
+        launchedBoards.settle()
     assert recorder.sets == []
     assert StateManager.revision == revision
-    assert _board(unbuiltBoards) is None
 
 
 def test_a_fresh_board_really_has_nothing_to_reset(noBoard, client):
-    """What the skipped resets rest on, and what a made board's resets do
-    (ADR-005 S4ac-1: the crew board is made at launch): the same resets on a
-    fresh board change nothing and write nothing. The match reset blanks
-    only the fields the board has (AutonaActions.ClearMatchInfo), and no
-    seed writes a crew board's pool; it wrote one (pool = "") until the
-    S4ac-1 review."""
+    """What the resets on a fresh board rest on (ADR-005 S4ac-1: the crew
+    board is made at launch): the same resets on a fresh board change
+    nothing and write nothing. The match reset blanks only the fields the
+    board has (AutonaActions.ClearMatchInfo), and no seed writes a crew
+    board's pool; it wrote one (pool = "") until the S4ac-1 review."""
     noBoard.ready(BOARD)
     fresh = json.loads(encode(noBoard.get("score.3")))
     assert "pool" not in fresh
@@ -946,20 +843,18 @@ def test_a_fresh_board_really_has_nothing_to_reset(noBoard, client):
     assert json.loads(encode(noBoard.get("score.3"))) == fresh
 
 
-def test_a_reset_of_a_1v1_board_still_runs_unbuilt(unbuiltBoards, client):
-    # What boards 1/2 did: not the crew board's to skip for them. With no
-    # widget, on a board core does not have or one made at launch (held:
-    # the live value is what is read here).
+def test_a_reset_of_a_1v1_board_still_runs_unbuilt(launchedBoards, client):
+    # What boards 1/2 did: not the crew board's to skip for them. On the
+    # boards a launch makes (held: the live value is what is read here).
     _ok(client.post("/api/v1/scoreboards/1/score:set",
                     json={"team1": 2, "team2": 1}))
-    unbuiltBoards.settle()
-    assert unbuiltBoards.get("score.1.team.1.score") == 2
+    launchedBoards.settle()
+    assert launchedBoards.get("score.1.team.1.score") == 2
     _ok(client.post("/api/v1/scoreboards/1/score:reset"))
-    unbuiltBoards.settle()
-    assert unbuiltBoards.get("score.1.team.1.score") == 0
-    assert unbuiltBoards.manager.scoreboards.get(1) is None
+    launchedBoards.settle()
+    assert launchedBoards.get("score.1.team.1.score") == 0
     StateManager.Unset("score.1")
-    unbuiltBoards.settle()
+    launchedBoards.settle()
 
 
 # ── who may ──────────────────────────────────────────────────────────────
@@ -996,7 +891,7 @@ def test_a_write_needs_this_pc_or_the_token(
     assert refused.status_code == 401
     assert refused.get_json()["error"]["code"] == "UNAUTHENTICATED"
     assert recorder.sets == []
-    assert _board(autonaApp) is None
+    assert _madeBoards() == []
 
     token = WebAccess.RegenerateToken()
     assert _send(peer, route,
@@ -1014,7 +909,7 @@ def test_a_write_from_another_site_is_refused(
     assert refused.status_code == 403
     assert refused.get_json()["error"]["code"] == "FORBIDDEN"
     assert recorder.sets == []
-    assert _board(autonaApp) is None
+    assert _madeBoards() == []
 
 
 @pytest.mark.parametrize("route", READS, ids=_routeIds(READS))
@@ -1141,17 +1036,6 @@ def test_the_swap_flag_is_in_the_state_and_in_the_delta(
     assert _ok(client.get(URL))["data"]["swapped"] is False
 
 
-def test_the_swap_flag_is_what_the_board_reads(autonaApp, client):
-    board = autonaApp.board(BOARD)
-    assert board.teamsSwapped is False
-    _sendOk(client, ("post", f"{URL}:swap-teams"))
-    assert board.teamsSwapped is True
-    board.btSwap.click()
-    autonaApp.settle()
-    assert autonaApp.get("score.3.teamsSwapped") is False
-    assert _ok(client.get(URL))["data"]["swapped"] is False
-
-
 def test_the_swap_flag_is_one_more_key_of_the_program_state(
         autonaApp, client):
     autonaApp.ready(BOARD)
@@ -1182,54 +1066,20 @@ def test_a_clear_or_a_reset_does_not_unswap(autonaApp, client, crewShell):
         assert autonaApp.get("score.3.teamsSwapped") is True
 
 
-# ── the Qt board follows ─────────────────────────────────────────────────
-
-def test_a_name_being_typed_in_is_left_alone(autonaApp, client):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "Before")
-    autonaApp.settle()
-    edit = _row(board, 0, 1)["name"]
-    other = board.teamNameEdits[0]
-
-    with _onScreen(board, autonaApp):
-        _focus(edit, autonaApp)
-        _sendOk(client, ("patch", _member(1, 1), {"name": "From the page"}))
-        autonaApp.settle()
-        assert edit.text() == "Before"
-        assert autonaApp.get("score.3.team.1.player.1.name") == "From the page"
-
-        with WriteRecorder() as recorder:
-            _focus(other, autonaApp)
-        assert [key for key, _value in recorder.sets
-                if key.endswith("player.1.name")] == []
-        assert edit.text() == "From the page"
-    assert autonaApp.get("score.3.team.1.player.1.name") == "From the page"
-
-
-def test_a_swap_takes_what_is_being_typed_with_the_crew(autonaApp, client):
-    board = autonaApp.board(BOARD)
-    edit = _row(board, 0, 1)["name"]
-    with _onScreen(board, autonaApp):
-        _focus(edit, autonaApp)
-        edit.setText("Typed")
-        _sendOk(client, ("post", f"{URL}:swap-teams"))
-        autonaApp.settle()
-    assert autonaApp.get("score.3.team.2.player.1.name") == "Typed"
-    assert autonaApp.get("score.3.team.1.player.1.name") == ""
-
+# ── the row boards 1/2 share ─────────────────────────────────────────────
 
 def test_the_display_name_field_follows_the_route_it_shares(
         autonaApp, client):
     """The 表示大会名 row is boards 1/2's too, so the route was already
-    there: PATCH /tournament/info."""
-    board = autonaApp.board(BOARD)
+    there: PATCH /tournament/info. (The Qt crew board's field followed it
+    until ADR-005 S4ac-3; the React page reads the key.)"""
+    autonaApp.ready(BOARD)
     key = TournamentInfoService.Key(schema.TOURNAMENT_DISPLAY_NAME_KEY)
     before = StateManager.Get(key, "") or ""
     try:
         _ok(client.patch("/api/v1/tournament/info",
                          json={"displayTournamentName": "Shown Cup"}))
         autonaApp.settle()
-        assert board.displayTournamentNameEdit.text() == "Shown Cup"
         assert StateManager.Get(key) == "Shown Cup"
     finally:
         TournamentInfoService.instance.SetDisplayName(before)
@@ -1319,7 +1169,7 @@ def test_what_the_x_post_is_missing(
 
 def test_the_x_post_of_a_board_that_is_not_built_has_nothing(noBoard, client):
     assert _post(client)["missing"] == ["team1", "team2", "round"]
-    assert _board(noBoard) is None
+    assert _madeBoards() == []
 
 
 @pytest.mark.parametrize("name,line", [
@@ -1348,61 +1198,33 @@ def test_the_tournament_name_goes_in_as_it_reads(
         autonaApp.settle()
 
 
-def _clickPost(board):
-    with patch("webbrowser.open") as opened:
-        board.xpostBtn.click()
-    return opened
-
-
-def test_the_button_posts_what_the_route_answers(autonaApp, client, cup):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "A 1&")
-    _nameMember(board, 1, 1, "日本語")
-    _typeTeamName(board, 1, "Bravo")
-    _typeCombo(board.phaseCombo, "Pools")
-    _typeCombo(board.matchCombo, "WF")
-    autonaApp.settle()
-
-    opened = _clickPost(board)
-
-    opened.assert_called_once()
-    url = opened.call_args[0][0]
-    prefix = "https://twitter.com/intent/tweet?text="
-    assert url.startswith(prefix)
-    assert urllib.parse.unquote(url[len(prefix):]) == _post(client)["text"]
-    assert urllib.parse.unquote(url[len(prefix):]) \
-        == "Cup\n[Pools] - WF\n\nA 1&\nvs\nBravo (日本語)"
-
-
-def test_the_button_says_what_is_missing(autonaApp, client):
-    board = autonaApp.board(BOARD)
-    _nameMember(board, 0, 1, "A1")
-    autonaApp.settle()
-
-    shown = []
-    with patch.object(QMessageBox, "exec",
-                      lambda box: shown.append(box.informativeText())):
-        opened = _clickPost(board)
-
-    opened.assert_not_called()
-    translate = QApplication.translate
-    assert shown == ["\n".join((
-        f"- {translate('app', 'Team 2 player name')}",
-        f"- {translate('app', 'Round name')}"))]
-    assert _post(client)["missing"] == ["team2", "round"]
+def test_the_x_post_takes_the_names_as_they_are(
+        autonaApp, client, crewShell, cup):
+    """What the Qt board's button posted, through the route the React page
+    posts from (the button and its message box went in ADR-005 S4ac-3)."""
+    _name(client, 1, 1, "A 1&")
+    _name(client, 2, 1, "日本語")
+    _sendOk(client, ("patch", f"{URL}/set", {
+        "phase": "Pools", "match": "WF",
+        "teamName": {"team": 2, "value": "Bravo"}}))
+    assert _post(client) == {
+        "text": "Cup\n[Pools] - WF\n\nA 1&\nvs\nBravo (日本語)",
+        "missing": []}
 
 
 # ── what the combos offer ────────────────────────────────────────────────
 
 def test_the_candidates_are_what_the_combos_offer(autonaApp, client):
-    board = autonaApp.board(BOARD)
+    """What the Qt board's combos offered under their blank row (they were
+    checked against the route until ADR-005 S4ac-3): core's
+    MatchNameCandidates, by board."""
+    from src.core.MatchNameCandidates import MatchNameCandidates
+    autonaApp.ready(BOARD)
     candidates = _ok(client.get("/api/v1/match-names/candidates"))["data"]
     assert set(candidates) == {"phase", "pool", "match"}
+    assert candidates == MatchNameCandidates.instance.Candidates(BOARD)
 
-    for field, combo in board._matchCombos.items():
-        items = [combo.itemText(row) for row in range(combo.count())]
-        assert items[0] == ""
-        assert items[1:] == candidates[field], field
+    for field in ("phase", "pool", "match"):
         assert candidates[field], field
         assert not [name for name in candidates[field] if "{0}" in name]
 
@@ -1511,14 +1333,18 @@ def test_a_round_name_that_is_not_text_is_no_candidate(autonaApp, client):
 ], ids=["no terms", "numbers", "fields and a lone brace"])
 def test_the_crew_board_builds_on_broken_terms(
         autonaApp, client, phaseNames, matchNames):
+    """The candidates are answered on broken terms, text only. (The Qt crew
+    board built its combos from them, checked here until ADR-005 S4ac-3.)"""
+    from src.core.MatchNameCandidates import MatchNameCandidates
     phaseTerms, matchTerms = _terms(phaseNames, matchNames)
     with phaseTerms, matchTerms:
-        board = autonaApp.board(BOARD)
+        autonaApp.ready(BOARD)
         candidates = _ok(client.get("/api/v1/match-names/candidates"))["data"]
+        assert candidates == MatchNameCandidates.instance.Candidates(BOARD)
 
-    for field, combo in board._matchCombos.items():
-        items = [combo.itemText(row) for row in range(combo.count())]
-        assert items == [""] + candidates[field], field
+    assert set(candidates) == {"phase", "pool", "match"}
+    for field, names in candidates.items():
+        assert all(isinstance(name, str) and name for name in names), field
 
 
 # ── core, without a route ────────────────────────────────────────────────
@@ -1569,16 +1395,19 @@ def test_core_says_whether_it_changed_anything(autonaApp, crewShell):
 
 
 def test_the_board_s_reset_button_twice_costs_one_cycle(autonaApp):
-    board = autonaApp.board(BOARD)
-    _row(board, 0, 1)["stock"].setValue(1)
+    """What the Qt board's リセット button ran, twice in one turn of the
+    event loop (the button went in ADR-005 S4ac-3): the second writes
+    nothing."""
+    autonaApp.ready(BOARD)
+    crew = CrewBattleService(BOARD)
+    assert crew.UpdateMember(1, 1, stock=1) is True
     autonaApp.settle()
     with _cycles() as cycles:
-        board.btReset.click()
-        board.btReset.click()
+        crew.ResetStocks()
+        crew.ResetStocks()
         autonaApp.settle()
     assert cycles == [["published"]]
     assert autonaApp.get("score.3.team.1.player.1.stock") == 3
-    assert _shown(board) == _fromState(autonaApp)
 
 
 # ── the catalogue a person reads ─────────────────────────────────────────

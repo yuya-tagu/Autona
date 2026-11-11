@@ -241,7 +241,7 @@ def test_an_offline_events_best_of_is_dropped_on_purpose(autonaApp, liveEvent):
         "precondition: the legacy endpoint does report a bestOf"
         f" (got {legacy.get('bestOf')!r})")
 
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     before = autonaApp.get("score.1.best_of")
 
     data = copy.deepcopy(match)
@@ -338,8 +338,10 @@ def test_a_restart_restores_the_tournament_and_refetches(autonaApp, liveEvent,
     assert result["restored_tournament_name"] == tournamentName
     assert result["restored_num_entrants"] == numEntrants
 
-    # (b) ...but the scoreboard did not. AutonaScoreboardManager.__init__
-    # unsets score.* on purpose: a board rebuilt from a stale file would
+    # (b) ...but the scoreboard did not. The launch unsets score.* on
+    # purpose (StateSchema.ResetScoreRoot, through AutonaActions.MakeBoards
+    # since ADR-005 S4ac-1; AutonaScoreboardManager.__init__ until then, gone
+    # with the Qt SCORE in S4ac-3): a board rebuilt from a stale file would
     # show the previous session's players with no set loaded.
     assert result["persisted_score_keys"], (
         "precondition: score.* really was in the file the probe read")

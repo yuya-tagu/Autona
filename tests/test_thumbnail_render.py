@@ -1178,7 +1178,8 @@ def test_the_shells_synchronous_thumbnail_draws_a_board_with_none_built(
     """ADR-005 S4y: the legacy route's and the X post's thumbnail is core's
     ThumbnailService.DrawBoard with the desktop's synchronous draw
     (AutonaShellOperations.DrawThumbnail), the real renderer: a PNG and a
-    JPG at broadcast size, with no board widget built or asked."""
+    JPG at broadcast size, with no board made or asked for (no board widget
+    built, until ADR-005 S4ac-3 removed them)."""
     from src.AutonaShellOperations import AutonaShellOperations
 
     autonaApp.dropAllBoards()
@@ -1193,7 +1194,8 @@ def test_the_shells_synchronous_thumbnail_draws_a_board_with_none_built(
     jpg = Path(path).with_suffix(".jpg")
     assert Image.open(jpg).format == "JPEG"
     assert Image.open(jpg).size == (1920, 1080)
-    assert autonaApp.manager.scoreboards == {}
+    from src.core.Actions import AutonaActions
+    assert not any(AutonaActions.instance.BoardEnsured(n) for n in (1, 2, 3))
     # Not a run of the lane: nothing published.
     assert SM.Get(thumbnails.RENDER_PATH) == published
 

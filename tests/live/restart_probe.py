@@ -36,8 +36,8 @@ def main():
     from qtpy.QtCore import QEventLoop, QTimer
     from qtpy.QtWidgets import QApplication
 
-    # AutonaScoreboardManager is a QWidget; constructing one without a
-    # QApplication aborts at the C++ level.
+    # bootstrap_gui() builds QWidgets (the Alert / Updater adapters);
+    # constructing one without a QApplication aborts at the C++ level.
     app = QApplication.instance() or QApplication([])
 
     result = {}
@@ -72,8 +72,9 @@ def main():
 
     from src.bootstrap import bootstrap_core, bootstrap_gui
     bootstrap_core()
-    # The desktop's half too: (b) below is AutonaScoreboardManager's doing,
-    # and the scoreboard dock is built by bootstrap_gui() (ADR-005 S3c).
+    # The desktop's half too: (b) below is the launch's MakeBoards, which
+    # bootstrap_gui() runs (ADR-005 S4ac-1; AutonaScoreboardManager's doing
+    # until then, gone with the Qt SCORE in S4ac-3).
     bootstrap_gui()
 
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -81,8 +82,9 @@ def main():
     from src.core.StateManager import StateManager
 
     # (a) StateManager.LoadState() restored the persisted tree, and
-    # (b) AutonaScoreboardManager.__init__ deliberately dropped score.*
-    #     -- a scoreboard must come up empty, not showing yesterday's set.
+    # (b) the launch (StateSchema.ResetScoreRoot) deliberately dropped
+    #     score.* -- a scoreboard must come up empty, not showing
+    #     yesterday's set.
     result["restored_tournament_name"] = StateManager.Get(
         "tournamentInfo.tournamentName")
     result["restored_num_entrants"] = StateManager.Get(

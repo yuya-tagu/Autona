@@ -5,8 +5,9 @@ testable rules: what a merged display name looks like, where a local avatar
 is looked for, what "this slot is now somebody else" means for the
 statistics fetches -- all of it lived inside a QGroupBox that could only be
 built with a QApplication, three combo models and a .ui file. **Nothing here
-builds a widget**, which is the point of the move; the widget-level
-behaviour it is paired with stays in tests/test_player_widgets.py.
+builds a widget**, which is the point of the move. (The card it was paired
+with went with the Qt SCORE in ADR-005 S4ac-3, and its tests with it: the
+SCORE page edits the slot through these same methods, over v1.)
 
 Two properties get most of the attention:
 
@@ -114,8 +115,8 @@ def _heldSpy():
 #
 # What ships is a board slot: the commentary panel was a React page, the
 # `{base}.slot.{I}.player.{M}` roster editor was retired, and `player_editor.1`
-# went with the Qt Player List (ADR-005 S4n). test_player_widgets.py pins that
-# it is the only construction.
+# went with the Qt Player List (ADR-005 S4n). The board's card, the last
+# widget that built one, went in S4ac-3.
 
 def test_every_write_stays_under_the_slot_it_was_given():
     path = BOARD_PATH
@@ -266,9 +267,10 @@ def test_a_code_the_catalog_does_not_know_is_no_location():
 def test_an_empty_location_is_published_rather_than_skipped():
     """The blank row every region rebuild starts on has to reach the state.
 
-    Guarding it as "same value, skip" would swallow the publish
-    tests/test_player_widgets counts to know the in-place refill still emits
-    exactly one index change per country change.
+    Guarding it as "same value, skip" would swallow the publish the card's
+    region combo was counted by (its in-place refill emitted exactly one
+    index change per country change; the card went in ADR-005 S4ac-3), and
+    the recordings (tests/test_player_apply.py) still have it.
     """
     service = PlayerService(BOARD_PATH, countries=_Countries())
     with patch.object(SM, "Set", wraps=SM.Set) as written:
@@ -793,7 +795,8 @@ def test_every_recorded_country_and_region_is_rebuilt_byte_for_byte(
 # ADR-005 S3e-3 moved the card's SetData / Clear / SavePlayerToDB into this
 # class (ApplyData / ClearSlot / SavePlayerToDB). tests/test_player_apply.py
 # replays tests/fixtures/player_apply/golden.json -- recorded through the
-# widget implementation -- through the card and the board; this replays
+# widget implementation -- through what the card and the board called (the
+# card and the board themselves until ADR-005 S4ac-3); this replays
 # every scenario that needs nothing but a slot (`core` not False) through
 # PlayerService with no widget at all, the way a headless shell loads a
 # player. Compared: each slot's exact value (key order included), every

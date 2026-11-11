@@ -52,10 +52,10 @@ every other entry point drove that spinbox. What is still outside:
   display is `SetScore` since ADR-005 S4x, as v1's score:set is (it was the
   tracker's own `UpdateScore` until then), so no entry point is outside.
   The game rows follow the score in the operation that moved it
-  (`GameTrackerService.FollowScores`, ADR-005 S4t), and a board only renders
-  the result (`AutonaScoreboardWidget._SyncScoreDisplays`): the follow used
-  to be that method's, with the old value on its spinbox and the tracker's
-  own writes told apart by a flag. Nothing outside core re-Sets the score:
+  (`GameTrackerService.FollowScores`, ADR-005 S4t): the follow used to be
+  the Qt board's render (`AutonaScoreboardWidget._SyncScoreDisplays`, gone
+  with the Qt SCORE in S4ac-3), with the old value on its spinbox and the
+  tracker's own writes told apart by a flag. Nothing outside core re-Sets the score:
   `StageResultsToScore` used to echo the published value back and no longer
   does.
 
@@ -156,13 +156,13 @@ class AutonaActions:
     # AutonaActions.instance, matching the other singletons.
     instance: "AutonaActions" = None
 
-    # Battle format -> board number. The Qt-side registry
-    # (AutonaScoreboardManager.FORMAT_BOARDS) aliases this mapping rather than
-    # spelling it out again: the hotkeys resolve the active board here, in
-    # core, and a second copy is exactly the drift that would make the
-    # headless answer differ from the one the window shows. Read-only,
-    # because an alias of a plain dict is a shared mutable that any one of
-    # its holders could edit for all the others.
+    # Battle format -> board number. The one copy: the Qt-side registry
+    # (AutonaScoreboardManager.FORMAT_BOARDS, gone with the Qt SCORE in
+    # ADR-005 S4ac-3) aliased it rather than spelling it out again, as a
+    # second copy is exactly the drift that would make the headless answer
+    # differ from the one the window shows. Read-only, because an alias of a
+    # plain dict is a shared mutable that any one of its holders could edit
+    # for all the others.
     FORMAT_BOARDS = MappingProxyType({"singles": 1, "team": 2, "crew": 3})
 
     # Boards 1 (1v1) and 2 (team) carry a per-team score that an operator
@@ -182,9 +182,8 @@ class AutonaActions:
     # The score spinboxes are plain QSpinBoxes with Qt's default range, and
     # that range has always been the only guard against a negative or absurd
     # score reaching an overlay. Now that the write no longer goes through
-    # the widget, the clamp has to live with the operation.
-    # AutonaScoreboardWidget applies these to the spinboxes so the two cannot
-    # drift apart.
+    # the widget, the clamp has to live with the operation (the Qt board
+    # applied these to its spinboxes until ADR-005 S4ac-3; v1 checks them).
     SCORE_MIN = 0
     SCORE_MAX = 99
     # The same for the set length: the BEST OF spinbox's range (Qt's default
@@ -378,24 +377,24 @@ class AutonaActions:
         (bootstrap_gui()), the headless shell without
         (src/headless._SeedBoards): it holds nothing (it has no 反映 button),
         and the polling setting and the display options it restored are the
-        operator's. The desktop's widgets are built later, and only render
-        what they find (AutonaScoreboardWidget); their build still calls
-        this (AutonaScoreboardManager.EnsureScoreboard), which does nothing
-        for a board made at launch. Until S4ac-1 the desktop made a board as
+        operator's. The desktop's Qt boards rendered what they found, and
+        their build called this for a board core did not have, until
+        ADR-005 S4ac-3 removed them (the React SCORE page renders the state).
+        Until S4ac-1 the desktop made a board as
         it first built its widgets; until ADR-005 S4y the three were the
         board build's and the hold the board widget's constructor's, after
         the seed, in this order: the save cycle and what it publishes are
         the same. A writer on another thread between the seed and the hold
         is published, not held.
 
-        What a board host's Built() answers (BoardEnsured): the desktop's
-        widgets are drawn after this, by the shell. Board 3 (crew) is never
+        What BoardEnsured answers (the desktop's board host's Built() until
+        ADR-005 S4ac-3). Board 3 (crew) is never
         held, with or without `panel` (it publishes as it goes); neither
         are its display options rewritten nor the polling turned off, as
         its build never did.
 
-        Called where the shell makes its boards (both launches, and the
-        desktop's widget build: the GUI thread). The board counts as ready
+        Called where the shell makes its boards (both launches: MakeBoards;
+        the desktop's widget build too until ADR-005 S4ac-3). The board counts as ready
         once it is: at the end of
         the save cycle's writes, under the lock that registers its hold, so
         a reader sees it ready and held together or neither. A second call
@@ -437,20 +436,19 @@ class AutonaActions:
         return True
 
     def ForgetBoard(self, board):
-        """Undo EnsureBoard for a board that could not be made or drawn: it
-        is no longer ready (BoardEnsured, a board host's Built()), and a
+        """Undo EnsureBoard for a board that could not be made: it is no
+        longer ready (BoardEnsured), and a
         1v1 / team board leaves its 反映 hold (StateSchema.ReleaseBoard),
         what was pending published -- a hold with no board to apply it would
         keep its edits from the outputs. The state is left as it is; the
         next EnsureBoard writes the launch state again.
 
-        Called by EnsureBoard when it raised, and by the desktop when the
-        board's widgets could not be built right after the call that made it
-        (AutonaScoreboardManager.EnsureScoreboard): a board made in core
-        with no widget would answer Built() with nothing to render it, and
-        the swap / load-set hotkeys would act on it. Not for a board made
+        Called by EnsureBoard when it raised. Until ADR-005 S4ac-3 the
+        desktop called it too when the board's Qt widgets could not be
+        built right after the call that made it
+        (AutonaScoreboardManager.EnsureScoreboard), but not for a board made
         before (at launch since ADR-005 S4ac-1): forgotten, the next build
-        would seed it again over what was written to it since."""
+        would have seeded it again over what was written to it since."""
         board = self._asInt(board, 0)
         with StateManager.lock:
             self._ensuredBoards.discard(board)
@@ -720,14 +718,14 @@ class AutonaActions:
     def SetTeamName(self, board, team, name) -> bool:
         """Set one team's displayed name. True if the state changed.
 
-        The team crest that goes with it is *not* written here: on the
-        desktop the QLineEdit's second handler
-        (`AutonaScoreboardWidget.ExportTeamLogo` ->
-        `SetLoadService.PublishTeamLogo`) does that, which is the arrangement
-        this replaced and the one the set-load path pairs into
-        `ApplyTeamName`. That second handler exists only on boards 1/2 --
-        board 3's team name field has always called just this one, and a
-        crew has no logo to resolve.
+        The team crest that goes with it is *not* written here: the Web's
+        set fields (AutonaWebOperations.set_route, v1's PATCH set -- what
+        the SCORE page sends) call `SetLoadService.PublishTeamLogo` after
+        it, as the Qt board's QLineEdit's second handler
+        (`AutonaScoreboardWidget.ExportTeamLogo`, gone with the Qt SCORE in
+        ADR-005 S4ac-3) did, and the set-load path pairs the two into
+        `ApplyTeamName`. Only boards 1/2 have a crest -- board 3's team name
+        has always been just this one, and a crew has no logo to resolve.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):
@@ -1109,9 +1107,10 @@ class AutonaActions:
     # is the *count* -- how many slots a team has, and how many character
     # slots a player has. Since ADR-005 S3e-6 the count is the state's: the
     # slots themselves, set by `SetRoster` from every entry point (the
-    # board's two spinboxes, a new board's seed, a game
+    # SCORE page's two counts, a new board's seed, a game
     # load's players-per-team, a set's entrants, the Web's set_route /
-    # clear_all), and a board builds and removes player cards to follow it.
+    # clear_all). The Qt board built and removed player cards to follow it
+    # until ADR-005 S4ac-3.
     # It used to be the board's spinboxes (playerNumber / charNumber), whose
     # cards published the slots as they were built and unset them as they
     # were torn down -- which a shell without the board could not do at all.

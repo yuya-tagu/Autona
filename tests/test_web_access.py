@@ -1306,35 +1306,39 @@ def test_the_copied_curl_carries_the_token_only_for_a_lan_write(apiWindow,
     assert header not in apiWindow._buildCurl(read)
 
 
+def _browserScoreboard(monkeypatch):
+    """The URL "ブラウザ版を開く" opens (the SCORE page's, built by the
+    desktop at the click: AutonaWebPanelHost.BrowserScoreboardUrl; the Qt
+    board's button built the same until ADR-005 S4ac-3), with no server
+    running: the settings' port and LAN access, LAN_HOST as this PC's
+    address."""
+    from src import AutonaWebPanelHost as HostModule
+    from src.AutonaWebServer import WebServer
+
+    monkeypatch.setattr(WebServer, "_listening", None)
+    monkeypatch.setattr(HostModule, "GetLocalIP", lambda: LAN_HOST)
+    return HostModule.BrowserScoreboardUrl("/scoreboard")
+
+
 @pytest.mark.parametrize("lan, carries", [(False, False), (True, True)])
 def test_open_in_browser_carries_the_token_only_with_lan_access(
-        qapp, settings, lan, carries):
+        qapp, settings, monkeypatch, lan, carries):
     # "ブラウザ版を開く": with LAN access off the page is on this PC and needs
     # no token -- and one opened without it outlives a regenerate.
-    from types import SimpleNamespace
-
-    from src.AutonaScoreboardWidget import AutonaScoreboardWidget
-
     settings.settings = {"general": {"webserver_listen_lan": lan}}
-    board = SimpleNamespace(webScoreboardUrl="http://127.0.0.1:5107/scoreboard")
-    url = AutonaScoreboardWidget._WebScoreboardOpenUrl(board)
+    url = _browserScoreboard(monkeypatch)
     token = WebAccess.Token()
-    assert url == ("http://127.0.0.1:5107/scoreboard?token=" + token
-                   if carries else "http://127.0.0.1:5107/scoreboard")
+    base = f"http://{LAN_HOST if lan else '127.0.0.1'}:5107/scoreboard"
+    assert url == (base + "?token=" + token if carries else base)
 
 
 def test_open_in_browser_without_a_usable_token_carries_none(
         qapp, settings, monkeypatch, tmp_path):
-    from types import SimpleNamespace
-
-    from src.AutonaScoreboardWidget import AutonaScoreboardWidget
-
     # A private settings.json that still cannot be opened: with loadFailed
     # the next write reads the file again, which must never be the real
     # user_data/ one.
     saved = _unreadSettings(monkeypatch, tmp_path / "settings.json")
     settings.settings = {"general": {"webserver_listen_lan": True}}
-    board = SimpleNamespace(webScoreboardUrl="http://192.168.1.5:5107/scoreboard")
-    assert AutonaScoreboardWidget._WebScoreboardOpenUrl(board) == (
-        "http://192.168.1.5:5107/scoreboard")
+    assert _browserScoreboard(monkeypatch) == (
+        f"http://{LAN_HOST}:5107/scoreboard")
     assert saved == []

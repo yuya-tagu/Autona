@@ -203,12 +203,10 @@ from .core.SettingsManager import SettingsManager
 from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
-from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaShellOperations import AutonaShellOperations
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
-from .AutonaWebPanelHost import (
-    AutonaWebPanelHost, QT_FALLBACK_SETTINGS, UsesQtPanel, WebPanelPages)
+from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
 from .core import WebAccess
 # autopep8: on
 
@@ -352,20 +350,16 @@ class Window(QMainWindow):
         # panel exists (startup Step 4b-2 / 4b-3).
         self._SeedPanelState()
 
-        # Each panel below is a QDockWidget subclass, but they are no longer
-        # docked: their title bars are hidden and dock features disabled, so
-        # they behave as plain panels. They are collected here and later added
-        # as pages of a QStackedWidget driven by the left sidebar (see the
-        # "Sidebar navigation" block further down).
-        #
-        # Only the Scoreboard is built here. Every other panel is constructed
-        # the first time its page is revealed (see the _Create*Panel
-        # factories and _EnsurePanelAt): the preview panels each owned a
-        # QWebEngineView until they became React pages (ADR-005 S4), and the
-        # remaining five (Stream / Thumbnail / Result / Statistics / Player
-        # List) together added ~2.9s to the window-init -> core-shown gap for
-        # UI most launches never open.
-        self.dockWidgets = []
+        # Every panel is a React page in the shared web view (ADR-005 S4; the
+        # last Qt panel, SCORE, went in S4ac-3), a page of the QStackedWidget
+        # driven by the left sidebar (see the "Sidebar navigation" block
+        # further down). None is built here: the view is constructed the
+        # first time a page is revealed (see the _Create*Panel factories and
+        # _EnsurePanelAt). The Qt panels were QDockWidget subclasses, shown
+        # undocked; the preview panels each owned a QWebEngineView, and five
+        # (Stream / Thumbnail / Result / Statistics / Player List) together
+        # added ~2.9s to the window-init -> core-shown gap for UI most
+        # launches never open.
 
         # EVENT — lazy since headless core Step 4b: see _CreateEventPanel. It
         # was the last eager panel, and could only be one because it was the
@@ -395,24 +389,12 @@ class Window(QMainWindow):
 
         splash.set_message(splash_msgs[0], progress=0.40)
 
-        # SCORE: the React page in the shared web view since ADR-005 S4aa,
-        # its sidebar item a lazy factory (_CreateScoreboardPanel). The dock
-        # is made all the same: it holds the boards, built from startup as
-        # before (CreateScoreboard / SetBattleFormat below, and on demand),
-        # and is the item's page only on the way back to the Qt panel --
-        # inserted then, and kept as a dock (_EnsurePanelAt).
-        self.scoreboard = AutonaScoreboardManager.instance
-        # The window's child, so it goes with the window as it did when it was
-        # an eager page; hidden, or it would show over the window with it
-        # (it is no page and no dock of the window's: neither in dockWidgets
-        # nor in a dock area). The way back puts it on the stack, which
-        # shows it.
-        self.scoreboard.setParent(self)
-        self.scoreboard.hide()
-        self.scoreboard.setWindowIcon(QIcon(UI.icon_path('scoreboard.svg')))
-        self.scoreboard.setObjectName("Scoreboard")
-        AutonaScoreboardManager.instance.setWindowTitle(
-            QApplication.translate("app", "Scoreboard"))
+        # SCORE: the React page in the shared web view (ADR-005 S4aa), its
+        # sidebar item a lazy factory (_CreateScoreboardPanel). Its boards are
+        # core's, made at launch (AutonaActions.MakeBoards, bootstrap_gui();
+        # S4ac-1). The Qt boards' dock (AutonaScoreboardManager), built here
+        # until ADR-005 S4ac-3, and the setting that showed it instead
+        # (general.qt_scoreboard_panel) are gone.
         splash.set_message(splash_msgs[1], progress=0.55)
 
         # The web server is NOT built here (startup Step 4c). Constructing the
@@ -491,9 +473,6 @@ class Window(QMainWindow):
             ]),
         ]
 
-        for dw in self.dockWidgets:
-            self._PreparePanel(dw)
-
         self.setMinimumWidth(480)
 
         # ── Sidebar navigation (replaces tabified docks + QMenuBar) ──
@@ -544,11 +523,6 @@ class Window(QMainWindow):
         # item shows (_OnStackPageChanged tells the host on every reveal).
         self._webPanelHost = None
         self._webPanelPages = WebPanelPages()
-        # React items that can still show their Qt panel (QT_FALLBACK_SETTINGS;
-        # ADR-005 S4aa): nav index -> panel, until the item is first chosen
-        # and the setting read (_SettleWayBack). The panels shown in Qt then.
-        self._wayBackItems = {}
-        self._qtPanels = set()
         self._buildingPanel = False  # suppresses currentChanged during a swap
         for categoryTitle, panels in self._navSections:
             if categoryTitle:
@@ -558,9 +532,7 @@ class Window(QMainWindow):
                     index = self.stack.addWidget(QWidget())
                     self._lazyPanels[index] = (page, key)
                     self._panelIndexes[key] = index
-                    if key in QT_FALLBACK_SETTINGS:
-                        self._wayBackItems[index] = key
-                    elif WebAccess.IsWebPanel(key):
+                    if WebAccess.IsWebPanel(key):
                         self._webPanelPages.Add(index, key)
                 else:
                     index = self.stack.addWidget(page)
@@ -611,10 +583,10 @@ class Window(QMainWindow):
         # The sidebar header hosts the segmented control; choosing a format
         # is core's switch (AutonaActions.SetBattleFormat, ADR-005 S4x: v1's
         # PUT /battle-format is the same one): it persists the format and the
-        # RESULT layout follows. What the window shows for a format -- the
-        # SCORE board (1v1 / team / crew) and this segment -- follows the
-        # switch's notice (_ShowBattleFormat). The persisted format is applied
-        # after the scoreboards are created (see CreateScoreboard call below).
+        # RESULT layout follows. The segment follows the switch's notice
+        # (_ShowBattleFormat), and the SCORE page follows it on its own (the
+        # web server's `battle_format`; the Qt SCORE's board did until
+        # ADR-005 S4ac-3).
         self.sidebar.setFormat(self._resolveBattleFormat())
         self.sidebar.formatSelected.connect(
             AutonaActions.instance.SetBattleFormat)
@@ -771,18 +743,13 @@ class Window(QMainWindow):
         self.sidebar.helpButton.setText(
             QApplication.translate("app", "Help & Settings"))
 
-        # Build only the board the persisted battle format shows (startup
-        # Step 4e — the other boards are built the first time they are needed)
-        # and apply that format so the board matches. The "Rules" menu switches
-        # between them at runtime. The result's layout follows a format as it
-        # is chosen (SetBattleFormat), and a page reads the layout.
-        # The set selection windows first (ADR-005 S4y: the shell's, parented
-        # to this window; the board shown at startup built its own here until
-        # then), so that they follow the tournament from the start.
+        # The shell operations' main window: what opens the SCORE page's set
+        # selection for the load_set hotkey and the legacy open-set route
+        # (ADR-005 S4ab-2). Until ADR-005 S4ac-3 the Qt set selection windows
+        # were built here, parented to this window, and then the widgets of
+        # the board the persisted battle format shows (CreateScoreboard /
+        # SetBattleFormat); the boards are core's, made at launch.
         AutonaShellOperations.instance.UiMounted(self)
-        battleFormat = self._resolveBattleFormat()
-        AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
-        AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
 
         self.ReloadGames()
 
@@ -1021,14 +988,11 @@ class Window(QMainWindow):
         return self._WebPanel("event")
 
     def _CreateScoreboardPanel(self):
-        # ADR-005 S4aa: the React page in the shared web view, unless the
-        # operator switched back to the Qt panel (general.qt_scoreboard_panel,
-        # read on the item's first choice: _SettleWayBack). The boards are
-        # the dock's either way, built from startup (S4ac removes the way
-        # back with the Qt boards).
-        if "scoreboard" not in self._qtPanels:
-            return self._WebPanel("scoreboard")
-        return self.scoreboard
+        # ADR-005 S4aa: the React page in the shared web view. The way back
+        # to the Qt panel (general.qt_scoreboard_panel) went with the Qt
+        # boards in S4ac-3; an old settings.json may still carry the key,
+        # which nothing reads.
+        return self._WebPanel("scoreboard")
 
     def _CreateBoardPanel(self):
         # ADR-005 S4s: the React page in the shared web view.
@@ -1100,28 +1064,6 @@ class Window(QMainWindow):
         for other in self._webPanelPages.HostBuilt(index):
             self._lazyPanels.pop(other, None)
 
-    def _PreparePanel(self, dw):
-        """Panel post-processing that used to be the loop over dockWidgets.
-
-        Applied to the eager panels in one pass from __init__ and to a lazy
-        panel right after its factory returns.
-        """
-        dw.setMinimumWidth(0)
-        if not isinstance(dw, QDockWidget):
-            # The React panels' web view: a plain page, no dock chrome.
-            return
-        # Call via class to avoid shadowing by instance attrs (e.g. a panel's own .widget)
-        inner = QDockWidget.widget(dw)
-        if inner:
-            inner.setMinimumWidth(0)
-            inner.setSizePolicy(
-                QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
-        # Hide the gray title strip at the top of every dock tab.
-        # The left sidebar already identifies the active tab, so the
-        # redundant header just eats vertical space.
-        dw.setTitleBarWidget(QWidget())
-        dw.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-
     def _OnNavSelected(self, nav):
         """Show sidebar item `nav`'s stack page: a sidebar click, and the
         QSettings tab restore at the end of __init__.
@@ -1131,45 +1073,16 @@ class Window(QMainWindow):
         another leaves the stack where it is, and currentChanged only fires
         when the index moves, so the page change is handled here then.
         """
-        self._SettleWayBack(nav)
         index = self._webPanelPages.StackIndex(nav)
         if self.stack.currentIndex() == index:
             self._OnStackPageChanged(index)
         else:
             self.stack.setCurrentIndex(index)
 
-    def _SettleWayBack(self, nav):
-        """On the first choice of a React item that has a Qt version
-        (QT_FALLBACK_SETTINGS; ADR-005 S4aa), read the operator's setting
-        then (S4b decision 11: when the panel is first opened, so a change
-        takes effect on the next start): the Qt panel is the item's own
-        lazy page (its factory returns it), or the item joins the other
-        React items -- showing the shared view's page from here on, its
-        own placeholder never built once the view exists."""
-        key = self._wayBackItems.pop(nav, None)
-        if key is None:
-            return
-        if UsesQtPanel(key):
-            self._qtPanels.add(key)
-            return
-        self._webPanelPages.Add(nav, key)
-        if self._webPanelHost is not None:
-            self._lazyPanels.pop(nav, None)
-
     # ── SCORE's set selection asked for from outside (ADR-005 S4ab-2) ────
     # The load_set hotkey and the legacy open-set route (AutonaShellOperations)
-    # open the SCORE page's dialog rather than the Qt window, while SCORE is
-    # the React page.
-
-    def ScoreSetsOnPage(self):
-        """Whether SCORE's set selection is its React page's dialog: SCORE is
-        not the Qt panel, nor is to be on its first choice. The way-back
-        setting is only looked at here, not settled (_SettleWayBack): it still
-        takes effect when the item is first opened, as its text says."""
-        if "scoreboard" in self._qtPanels:
-            return False
-        nav = self._panelIndexes["scoreboard"]
-        return not (nav in self._wayBackItems and UsesQtPanel("scoreboard"))
+    # open the SCORE page's dialog (the Qt window until ADR-005 S4ac-3, on
+    # the way back to the Qt panel).
 
     def OpenScoreSets(self, board):
         """Bring the window to the front on SCORE and have its page open board
@@ -1178,8 +1091,8 @@ class Window(QMainWindow):
         it can (AutonaWebPanelHost.OpenScoreSets: after the view's build, a
         load or a thaw). The page opens it as its own button does -- on the
         board it shows, with a tournament -- and else just shows itself.
-        Only while ScoreSetsOnPage(). Nothing once the window is closing: a
-        request then would show it again and build the host being torn down."""
+        Nothing once the window is closing: a request then would show it
+        again and build the host being torn down."""
         if self._shuttingDown:
             logger.info("The set selection was asked for while the window "
                         "closes: nothing opened")
@@ -1241,7 +1154,6 @@ class Window(QMainWindow):
         self._buildingPanel = True
         try:
             panel = factory()
-            self._PreparePanel(panel)
             # removeWidget() on the visible page makes Qt pick another one and
             # emit currentChanged; _buildingPanel keeps that from building a
             # panel the user never asked for. insertWidget() at the same index
@@ -1255,9 +1167,6 @@ class Window(QMainWindow):
                 self._AdoptWebPanelHost(index, panel)
             if wasCurrent:
                 self.stack.setCurrentIndex(index)
-            if isinstance(panel, QDockWidget):
-                # Not the React panels' web view: a plain page, not a dock.
-                self.dockWidgets.append(panel)
             # Startup applies the tab-bar policy to every child that exists at
             # that point; panels born later need the same treatment.
             self._ApplyTabBarPolicy(panel)
@@ -1615,14 +1524,14 @@ class Window(QMainWindow):
 
     def _ShowBattleFormat(self, fmt):
         # What the window shows for a battle format just switched to
-        # (StateManagerBridge.battle_format_changed): the SCORE tab's board 1
-        # (1v1), 2 (team) or 3 (crew) -- built first if it is not -- and the
-        # sidebar segment, kept in sync when the switch came from elsewhere
-        # (setChecked does not re-emit the click signal). The switch itself
-        # -- the settings and the RESULT layout -- is core's
-        # (AutonaActions.SetBattleFormat, ADR-005 S4x); this was the window's
-        # SetBattleFormat, which did all of it.
-        AutonaScoreboardManager.instance.SetBattleFormat(fmt)
+        # (StateManagerBridge.battle_format_changed): the sidebar segment,
+        # kept in sync when the switch came from elsewhere (setChecked does
+        # not re-emit the click signal). The SCORE page follows the switch on
+        # its own (the web server's `battle_format`); the Qt SCORE's board 1
+        # (1v1), 2 (team) or 3 (crew) was shown here until ADR-005 S4ac-3.
+        # The switch itself -- the settings and the RESULT layout -- is
+        # core's (AutonaActions.SetBattleFormat, ADR-005 S4x); this was the
+        # window's SetBattleFormat, which did all of it.
         if getattr(self, "sidebar", None) is not None:
             self.sidebar.setFormat(fmt)
 

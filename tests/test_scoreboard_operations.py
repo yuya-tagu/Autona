@@ -1,35 +1,27 @@
-"""Scoreboard operations against the real widgets.
+"""Scoreboard operations, through core and the web operations.
 
 These are the four things a caster does to a scoreboard during a stream --
 change the score, swap sides, reset the score, clear the board -- driven
-through the same entry points the +1 buttons, the hotkeys, the Web UI and
-the external control API use. Every one of them had a shipped bug at some
-point (see docs/changes/test-automation-strategy.md §2), and none of them
-had a test.
+through the same entry points the hotkeys, the Web UI and the external
+control API use. Every one of them had a shipped bug at some point (see
+docs/changes/test-automation-strategy.md §2), and none of them had a test.
 
-Nothing is stubbed: `autonaApp.board(n)` is the production
-AutonaScoreboardWidget / AutonaCrewBattleWidget, and `autonaApp.web()`
-is the web operations module the HTTP routes delegate to
-(src/AutonaWebOperations.py). A test that drives no widget and reads no
-widget makes its board in core instead (`autonaApp.ready(n)`, as the
-desktop makes it at launch; ADR-005 S4ac-2), with what a widget's button
-runs called directly where it only sets the scene.
+Nothing is stubbed: `autonaApp.ready(n)` makes the board in core as the
+desktop makes it at launch, and `autonaApp.web()` is the web operations
+module the HTTP routes delegate to (src/AutonaWebOperations.py). The Qt
+SCORE's board widgets went in ADR-005 S4ac-3; where a test drove one of
+them, it calls what that widget ran (the AutonaActions operation behind
+its button, spinbox or field).
 
-The assertions read StateManager rather than the widgets, because
-StateManager is what OBS overlays and the Web UI actually consume -- a
-spinbox showing the right number while the state kept the old one is the
-failure these tests exist to catch.
+The assertions read StateManager, because StateManager is what OBS
+overlays and the Web UI actually consume.
 """
 import contextlib
 from unittest.mock import patch
 
 import pytest
 
-from qtpy.QtCore import QCoreApplication, QEvent, QSignalBlocker
-from qtpy.QtWidgets import (
-    QCheckBox, QComboBox, QLineEdit, QPushButton, QWidget)
-from shiboken6 import Shiboken
-
+from src.core.GameTrackerService import TEAM_1, TEAM_2, UNREPORTED
 from src.core.SettingsManager import SettingsManager
 from tests.conftest import (apply_set, clear_players, load_player,
                             tournamentLoaded)
@@ -54,14 +46,9 @@ def _score(app, team, board=1):
 
 
 def _setPlayerName(board, team, name):
-    """Seed a player tag the way a loaded set does: through the slot's card
-    on a board's widgets, or what the card runs (load_player) on a board
-    number (a board readied with no widget, ADR-005 S4ac-2)."""
-    if isinstance(board, int):
-        load_player(board, team, {"gamerTag": name})
-        return
-    widgets = board.team1playerWidgets if team == 1 else board.team2playerWidgets
-    widgets[0].SetData({"gamerTag": name}, dontLoadFromDB=True)
+    """Seed a player tag on board number `board` the way a loaded set does:
+    what the slot's card ran (load_player)."""
+    load_player(board, team, {"gamerTag": name})
 
 
 def _playerName(app, team, board=1):
@@ -70,23 +57,33 @@ def _playerName(app, team, board=1):
     return app.get(f"score.{board}.team.{team}.player.1.name")
 
 
-def _losers(board, team):
-    column = board.team1column if team == 1 else board.team2column
-    return column.findChild(QCheckBox, "losers")
+def _actions():
+    from src.core.Actions import AutonaActions
+    return AutonaActions.instance
 
 
-def _teamName(board, team):
-    column = board.team1column if team == 1 else board.team2column
-    return column.findChild(QLineEdit, "teamName")
+def _typeTeamName(board, team, text):
+    """A team name finished as the Qt board's field did (it went in ADR-005
+    S4ac-3): the name, then its crest, each written only on a change and in
+    its own save cycle. The Web's set_route writes the pair in one."""
+    from src.core.SetLoadService import SetLoadService
+
+    _actions().SetTeamName(board, team, text)
+    SetLoadService(board).PublishTeamLogo(team, text)
 
 
-def _stageButton(board, game, team):
-    """The T1 / T2 result button on one stage row. `game` is 1-based."""
+def _clickStage(board, game, team):
+    """A click on the T1 / T2 button of game `game`'s row (1-based), as the
+    Qt game tracker ran it until ADR-005 S4ac-3: the button toggled, so the
+    row goes to that team -- or back to unreported when it had it -- and a
+    row that was written sums the score from the rows."""
+    tracker = _actions().GameTracker(board)
     index = game - 1
-    row = board.individualGameTracker.stage_widget_list[index]
-    button = row.findChild(QPushButton, f"stageTeam{team}Check_{index}")
-    assert button is not None, f"no stage button for game {game}, team {team}"
-    return button
+    assert index < tracker.StageCount(), f"no row for game {game}"
+    result = TEAM_1 if team == 1 else TEAM_2
+    winner = UNREPORTED if tracker.GameWinner(index) == result else result
+    if tracker.SetStageResult(index, winner):
+        tracker.PublishStageResults()
 
 
 def _wonGames(app, team, board=1):
@@ -135,40 +132,42 @@ def _restoredDisplayOption(key):
 # ── score ────────────────────────────────────────────────────────────────
 
 def test_score_up_and_down_reach_the_state(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
+    actions = _actions()
 
-    board.CommandScoreChange(0, 1)
-    board.CommandScoreChange(0, 1)
-    board.CommandScoreChange(1, 1)
+    # The +1 / -1 (the Qt board's CommandScoreChange; 1-based teams here).
+    actions.AdjustScore(board, 1, 1)
+    actions.AdjustScore(board, 1, 1)
+    actions.AdjustScore(board, 2, 1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 2
     assert _score(autonaApp, 2) == 1
 
-    board.CommandScoreChange(0, -1)
+    actions.AdjustScore(board, 1, -1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 1
 
 
 def test_score_never_goes_negative(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.CommandScoreChange(0, -1)
+    _actions().AdjustScore(board, 1, -1)
     autonaApp.settle()
 
-    # The spinbox floor is the guard; without it the overlay would render a
+    # The spinbox floor was the guard; without it the overlay would render a
     # "-1" that no operator can produce deliberately.
     assert _score(autonaApp, 1) == 0
 
 
 def test_unknown_team_index_is_ignored(autonaApp):
-    board = autonaApp.board(1)
-    board.CommandScoreChange(0, 1)
+    board = autonaApp.ready(1)
+    _actions().AdjustScore(board, 1, 1)
     autonaApp.settle()
 
     # Reachable from the API/hotkey layer; must not raise or corrupt a board.
-    board.CommandScoreChange(5, 1)
+    _actions().AdjustScore(board, 6, 1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 1
@@ -178,9 +177,9 @@ def test_unknown_team_index_is_ignored(autonaApp):
 # ── best of ──────────────────────────────────────────────────────────────
 
 def test_best_of_publishes_every_derived_field(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.bestOfSpin.setValue(5)
+    _actions().SetBestOf(board, 5)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == 5
@@ -195,11 +194,11 @@ def test_best_of_publishes_every_derived_field(autonaApp):
 
 
 def test_best_of_zero_blanks_the_long_texts(autonaApp):
-    board = autonaApp.board(1)
-    board.bestOfSpin.setValue(3)
+    board = autonaApp.ready(1)
+    _actions().SetBestOf(board, 3)
     autonaApp.settle()
 
-    board.bestOfSpin.setValue(0)
+    _actions().SetBestOf(board, 0)
     autonaApp.settle()
 
     # 0 means "not set" — the overlay shows nothing rather than "Best of 0".
@@ -207,154 +206,78 @@ def test_best_of_zero_blanks_the_long_texts(autonaApp):
     assert autonaApp.get("score.1.first_to_text") == ""
 
 
-def test_changing_best_of_does_not_pile_up_stage_rows(autonaApp):
-    """Each best-of change rebuilds the game tracker's stage list.
-
-    It used to keep every list it had ever built: removeWidget() takes the old
-    container out of the layout but leaves it parented to the tracker, so the
-    dead rows stayed alive -- along with the currentIndexChanged lambdas that
-    write score.1.stages.*, which then answered a stage-model reload from
-    widgets no longer on screen.
-
-    Run with the tracker switched on, so the rows themselves are built and
-    counted; the default (off) build would only ever leak the empty container.
-    """
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        tracker = board.individualGameTracker
-
-        # Warm up through one full rebuild, so the baseline is a settled
-        # tracker rather than the one __init__ happened to leave behind.
-        board.bestOfSpin.setValue(5)
-        board.bestOfSpin.setValue(3)
-        autonaApp.settle()
-        before = len(tracker.findChildren(QWidget))
-
-        for value in (5, 3, 5, 3, 5, 3):
-            board.bestOfSpin.setValue(value)
-        autonaApp.settle()
-
-        assert len(tracker.findChildren(QWidget)) == before, (
-            "a best-of change left its old stage list parented to the tracker. "
-            "removeWidget() only detaches it from the layout -- the container "
-            "has to be destroyed, or every rebuild stays alive for the session")
-
-
-def test_the_replaced_stage_list_is_destroyed(autonaApp):
-    """Un-parenting the old list is not enough: it has to be deleted.
-
-    The count above only sees the tracker's children, so setParent(None) alone
-    would satisfy it while the container -- and its stage rows, and their
-    connections -- lived on as an orphaned top-level widget. This is the half
-    that pins the deleteLater().
-
-    The harness never reaps deferred deletions on its own (loop level 0, no
-    exec(); see tests/conftest.py), so the DeferredDelete is delivered here
-    explicitly, aimed at the container so nothing else is torn down with it.
-    """
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        tracker = board.individualGameTracker
-
-        board.bestOfSpin.setValue(5)
-        autonaApp.settle()
-        replaced = tracker.stage_order_list_widget
-        assert Shiboken.isValid(replaced)
-
-        board.bestOfSpin.setValue(3)
-        autonaApp.settle()
-
-        assert replaced is not tracker.stage_order_list_widget
-        assert replaced.parent() is None, (
-            "the replaced stage list is still parented to the tracker")
-
-        QCoreApplication.sendPostedEvents(replaced, QEvent.Type.DeferredDelete)
-        assert not Shiboken.isValid(replaced), (
-            "the replaced stage list was never handed to deleteLater(), so "
-            "nothing will ever destroy it: it stays alive as an orphan, with "
-            "its stage combos still connected to the shared stage model and "
-            "still writing score.1.stages.*")
-
-
 # The set length is the state's since ADR-005 S2e: AutonaActions.SetBestOf
-# writes it and resizes a built board's rows, from whichever entry point,
-# and the spinbox and the rows render it from the board's held cycle.
+# writes it and resizes the board's rows, from whichever entry point (the Qt
+# board's spinbox and rows rendered it from the held cycle until S4ac-3).
 
-def test_a_best_of_set_in_core_reaches_the_spinbox_and_the_rows(autonaApp):
-    """The way the Web, /api/v1 and a set load set it: not through the
-    spinbox. One save cycle -- the render writes nothing."""
-    from src.core.Actions import AutonaActions
-
+def test_a_best_of_set_in_core_is_one_cycle_with_its_rows(autonaApp):
+    """The way the Web, /api/v1 and a set load set it: the length and its
+    rows in one save cycle."""
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        tracker = board.individualGameTracker
+        board = autonaApp.ready(1)
         seen, unsubscribe = _heldUpdateSpy("score.1")
         try:
-            AutonaActions.instance.SetBestOf(1, 7)
+            _actions().SetBestOf(board, 7)
             autonaApp.settle()
         finally:
             unsubscribe()
 
     assert seen == ["score.1"]
-    assert board.bestOfSpin.value() == 7
-    assert len(tracker.stage_widget_list) == 7
+    assert autonaApp.get("score.1.best_of") == 7
     assert len(autonaApp.get("score.1.stages")) == 7
-    assert not tracker.isHidden()
+    assert _actions().GameTracker(board).StageCount() == 7
 
 
 def test_a_best_of_set_from_another_thread_reaches_the_board(autonaApp):
-    """AutonaActions may be called from any thread; the board renders on
-    its own, from the held cycle Qt queues across."""
+    """AutonaActions may be called from any thread: the length and its rows
+    land as from the GUI thread."""
     import threading
 
-    from src.core.Actions import AutonaActions
-
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
+        board = autonaApp.ready(1)
         worker = threading.Thread(
-            target=lambda: AutonaActions.instance.SetBestOf(1, 5))
+            target=lambda: _actions().SetBestOf(board, 5))
         worker.start()
         worker.join()
         autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == 5
-    assert board.bestOfSpin.value() == 5
-    assert len(board.individualGameTracker.stage_widget_list) == 5
+    assert len(autonaApp.get("score.1.stages")) == 5
 
 
 def test_a_game_load_starts_the_rows_over_at_the_same_length(autonaApp):
-    """The rows recorded games of the previous game's stages: the buttons
-    are built again, unchecked, though their number does not change."""
+    """The rows recorded games of the previous game's stages: they start
+    over, unreported, though their number does not change."""
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        tracker = board.individualGameTracker
-        board.bestOfSpin.setValue(3)
+        board = autonaApp.ready(1)
+        tracker = _actions().GameTracker(board)
+        _actions().SetBestOf(board, 3)
         autonaApp.settle()
-        _stageButton(board, game=1, team=1).click()
+        _clickStage(board, game=1, team=1)
         autonaApp.settle()
-        rows = tracker.stage_order_list_widget
+        rows = tracker.rowsVersion
         autonaApp.state.CommitHeld("score.1")
         autonaApp.settle()
 
         autonaApp.publishGameLoad()
 
-    assert tracker.stage_order_list_widget is not rows
-    assert len(tracker.stage_widget_list) == 3
+    # Rebuilt (what told the Qt rows to rebuild their buttons).
+    assert tracker.rowsVersion != rows
+    assert len(autonaApp.get("score.1.stages")) == 3
     assert _wonGames(autonaApp, 1) == []
-    assert not _stageButton(board, game=1, team=1).isChecked()
-    # All of it published, so the 反映 button is not left lit. The commit
-    # used to swallow the held notification that renders the rows, so a real
-    # load left the first button checked on an empty row (ADR-005 S4t): the
-    # board's onLoad handler renders them now.
+    # All of it published, so nothing is left pending behind 反映 (the
+    # commit used to swallow the held notification that rendered the Qt
+    # rows: ADR-005 S4t).
     assert autonaApp.state.HasPendingChanges("score.1") is False
     assert autonaApp.state.GetCommitted("score.1.stages.1.t1_win") is False
 
 
 def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
-    """The commit comes after every onLoad slot: a player card's
-    ReloadCharacters writes what its rows pick as it rebinds them. Committed
-    ahead of them, the 反映 button stays lit after a load nobody edited
-    (a held write after the commit raises the flag and nothing lowers it)."""
+    """The commit comes after every onLoad slot, so what a slot writes goes
+    out with the load (a Qt player card's ReloadCharacters wrote what its
+    rows picked as it rebound them, until ADR-005 S4ac-3). Committed ahead
+    of them, the 反映 button stays lit after a load nobody edited (a held
+    write after the commit raises the flag and nothing lowers it)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
 
@@ -375,21 +298,21 @@ def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
         "score.1.team.1.teamName") == "written on onLoad"
 
 
-def test_a_game_load_that_wrote_the_board_leaves_the_apply_button_off(
-        autonaApp):
+def test_a_game_load_that_wrote_the_board_leaves_nothing_pending(autonaApp):
     """The load's commit is queued inside its save cycle. The flag used to
     be lowered right there, with the keys still pending, so the board asked
     HasPendingChanges and kept the button lit; the drain that followed said
     nothing, and 反映 had nothing pending to lower it with (S4u). The False
     now comes from the drain: what the notifications last said is what
-    HasPendingChanges says."""
+    HasPendingChanges says -- which is what lights the SCORE page's 反映
+    (the Qt board's button, until ADR-005 S4ac-3)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.core.Actions import AutonaActions
 
-    board = autonaApp.board(1)
+    autonaApp.ready(1)
+    actions = _actions()
     autonaApp.state.CommitHeld("score.1")
     autonaApp.settle()
-    assert not board.btApply.isEnabled()
+    assert autonaApp.state.HasPendingChanges("score.1") is False
     told = []
 
     def onDirty(prefix, dirty):
@@ -397,7 +320,7 @@ def test_a_game_load_that_wrote_the_board_leaves_the_apply_button_off(
             told.append((dirty, autonaApp.state.HasPendingChanges(prefix)))
 
     def write():
-        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+        actions.SetTeamName(1, 1, "written on onLoad")
 
     signals = AutonaGameAssetManager.instance.signals
     channel = autonaApp.state.observers.held_dirty_changed
@@ -412,15 +335,13 @@ def test_a_game_load_that_wrote_the_board_leaves_the_apply_button_off(
     assert autonaApp.state.HasPendingChanges("score.1") is False
     assert told == [(True, True), (False, False)], (
         "each notification did not say what HasPendingChanges said")
-    assert not board.btApply.isEnabled(), (
-        "the 反映 button stayed lit with nothing pending")
 
-    # And a real edit still lights it and 反映 still lowers it.
-    AutonaActions.instance.SetTeamName(1, 1, "edited")
-    assert board.btApply.isEnabled()
-    AutonaActions.instance.ApplyChanges(1)
+    # And a real edit is still pending, and 反映 still publishes it.
+    actions.SetTeamName(1, 1, "edited")
+    assert autonaApp.state.HasPendingChanges("score.1") is True
+    actions.ApplyChanges(1)
     autonaApp.settle()
-    assert not board.btApply.isEnabled()
+    assert autonaApp.state.HasPendingChanges("score.1") is False
 
 
 def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
@@ -434,7 +355,7 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
     from src.core.Actions import AutonaActions
     from src.StateManagerBridge import StateManagerBridge
 
-    board = autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.CommitHeld("score.1")
     autonaApp.settle()
     sent = []
@@ -479,14 +400,13 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
         bridge.held_state_updated.disconnect(told)
         bridge.held_dirty_changed.disconnect(told)
         signals.onLoad.disconnect(write)
-    assert not board.btApply.isEnabled()
 
 
 @contextlib.contextmanager
 def _writtenDuringTheLoad(write):
     """`write` while a game load's save cycle is open, after the wiring's
-    roster and ahead of the boards' handlers: where a writer on another thread
-    lands while the load decodes its assets."""
+    roster and ahead of the commit: where a writer on another thread lands
+    while the load decodes its assets."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
     def slot(_snapshot):
@@ -500,15 +420,15 @@ def _writtenDuringTheLoad(write):
         signal.disconnect(slot)
 
 
-def test_a_game_load_shows_what_was_written_during_it(autonaApp):
+def test_a_game_load_publishes_what_was_written_during_it(autonaApp):
     """The commit closing the load takes the held cycle with it, so nothing
-    else tells the board about a score or a set's fields that arrived in the
-    load's save cycle. They go out with the commit; the board shows them too."""
+    else would publish a score or a set's fields that arrived in the load's
+    save cycle. They go out with the commit (the Qt board showed them from
+    its onLoad handler until ADR-005 S4ac-3)."""
     from src.core import StateSchema as schema
-    from src.core.Actions import AutonaActions
 
-    board = autonaApp.board(1)
-    actions = AutonaActions.instance
+    autonaApp.ready(1)
+    actions = _actions()
 
     def write():
         actions.SetScore(1, 1, 3)
@@ -520,107 +440,49 @@ def test_a_game_load_shows_what_was_written_during_it(autonaApp):
     with _writtenDuringTheLoad(write):
         autonaApp.publishGameLoad()
 
-    assert autonaApp.state.GetCommitted("score.1.team.1.score") == 3
-    assert board.scoreDisplay1.value() == 3
-    assert board.bestOfSpin.value() == 5
-    assert board.matchCombo.currentText() == "Grand Final"
-    assert board.team2column.findChild(
-        QCheckBox, schema.TEAM_LOSERS_KEY).isChecked()
-    assert board.team2column.findChild(
-        QLineEdit, schema.TEAM_NAME_KEY).text() == "Late"
+    committed = autonaApp.state.GetCommitted
+    assert committed("score.1.team.1.score") == 3
+    assert committed("score.1.best_of") == 5
+    assert committed("score.1.match") == "Grand Final"
+    assert committed("score.1.team.2.losers") is True
+    assert committed("score.1.team.2.teamName") == "Late"
+    assert autonaApp.state.HasPendingChanges("score.1") is False
 
 
-def test_a_game_load_leaves_a_field_being_edited_alone(autonaApp):
-    """The load's render keeps the rule of every other (_SyncSetFields,
-    _SyncBestOf). The fields show the state once the operator has left them."""
+def test_what_is_written_while_a_board_is_made_is_published(autonaApp):
+    """A writer on another thread does not wait for a board being made, and
+    ahead of the hold its write makes no held notification: it is published
+    at once, and nothing is pending behind 反映 once the board is held.
+    (The Qt board's build ended with a render that showed it, until ADR-005
+    S4ac-3.)"""
     from src.core import StateSchema as schema
-    from src.core.Actions import AutonaActions
-
-    board = autonaApp.board(1)
-    actions = AutonaActions.instance
-    name = board.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
-    match = board.matchCombo.lineEdit()
-    for edit in (name, match):
-        with QSignalBlocker(edit):
-            edit.setText("typing")
-
-    def write():
-        actions.SetBestOf(1, 5)
-        actions.SetMatchField(1, schema.MATCH_KEY, "Grand Final")
-        actions.SetTeamName(1, 2, "Late")
-
-    with _writtenDuringTheLoad(write), \
-            patch.object(name, "hasFocus", return_value=True), \
-            patch.object(match, "hasFocus", return_value=True), \
-            patch.object(board.bestOfSpin, "hasFocus", return_value=True):
-        autonaApp.publishGameLoad()
-
-        assert name.text() == "typing"
-        assert match.text() == "typing"
-        assert board.bestOfSpin.value() == 0
-
-    board._onHeldStateUpdated(board.statePrefix)
-
-    assert name.text() == "Late"
-    assert match.text() == "Grand Final"
-    assert board.bestOfSpin.value() == 5
-
-
-def test_a_boards_game_load_handler_writes_nothing(autonaApp):
-    """What a load writes is the shared wiring's and the commit's; the board
-    only shows it, its new cards included."""
-    from src.core.Actions import AutonaActions
-
-    board = autonaApp.board(1)
-    actions = AutonaActions.instance
-    state = autonaApp.state
-
-    with state.SaveBlock():
-        actions.SetRoster(1, 2, None)
-        actions.SetBestOf(1, 3)
-        actions.SetScore(1, 1, 2)
-        with patch.object(state, "Set") as written, \
-                patch.object(state, "Unset") as unset:
-            board._onGameAssetsLoaded()
-
-    written.assert_not_called()
-    unset.assert_not_called()
-    assert len(board.team1playerWidgets) == 2
-    assert board.bestOfSpin.value() == 3
-    assert board.scoreDisplay1.value() == 2
-
-
-def test_a_board_shows_what_was_written_while_it_was_being_built(autonaApp):
-    """A writer on another thread does not wait for a board being built, and
-    ahead of the hold its write makes no held notification. So the build ends
-    with a render, one that writes nothing: nothing is pending behind 反映."""
-    from src.core import StateSchema as schema
-    from src.core.Actions import AutonaActions
 
     hold = schema.HoldBoard
 
     def holdAfterAWrite(number):
-        actions = AutonaActions.instance
+        actions = _actions()
         actions.SetScore(number, 1, 3)
         actions.SetBestOf(number, 5)
         actions.SetMatchField(number, schema.MATCH_KEY, "Grand Final")
         hold(number)
 
     with patch.object(schema, "HoldBoard", side_effect=holdAfterAWrite):
-        board = autonaApp.board(1)
+        autonaApp.ready(1)
 
-    assert board.scoreDisplay1.value() == 3
-    assert board.bestOfSpin.value() == 5
-    assert board.matchCombo.currentText() == "Grand Final"
+    committed = autonaApp.state.GetCommitted
+    assert committed("score.1.team.1.score") == 3
+    assert committed("score.1.best_of") == 5
+    assert committed("score.1.match") == "Grand Final"
     assert autonaApp.state.HasPendingChanges("score.1") is False
 
 
-def test_a_game_load_leaves_a_board_that_is_not_built_as_it_is(autonaApp):
-    """A board with no widget is not held, and has no set length to start
-    over: the skeleton stays what it is, live and published, and the commit
+def test_a_game_load_leaves_a_board_that_is_not_made_as_it_is(autonaApp):
+    """A board not made (its launch failed; only a test's harness drops one
+    since ADR-005 S4ac-1) is not held, and has no set length to start over:
+    the skeleton stays what it is, live and published, and the commit
     (AutonaActions.CommitGameLoad names both boards) finds nothing on it."""
     autonaApp.dropAllBoards()
-    board = autonaApp.board(1)
+    autonaApp.ready(1)
     autonaApp.state.Set("score.2", {})
     autonaApp.settle()
 
@@ -630,14 +492,14 @@ def test_a_game_load_leaves_a_board_that_is_not_built_as_it_is(autonaApp):
         assert autonaApp.get("score.2") == {}
         assert autonaApp.state.GetCommitted("score.2") == {}
         assert autonaApp.state.HasPendingChanges("score.2") is False
-        assert board.bestOfSpin.value() == 0
     finally:
         autonaApp.state.Unset("score.2")
         autonaApp.settle()
 
 
 @pytest.mark.parametrize("number, turnsOff", [(1, True), (2, True), (3, False)])
-def test_building_a_board_turns_the_polling_off(autonaApp, number, turnsOff):
+def test_making_a_board_on_the_desktop_turns_the_polling_off(
+        autonaApp, number, turnsOff):
     """The desktop's alone (SetFollowService.TurnOffPolling): polling left
     the board's UI, so a stale setting must not keep it running. Not in the
     seed the headless shell shares, whose polling is the operator's
@@ -656,16 +518,14 @@ def test_building_a_board_turns_the_polling_off(autonaApp, number, turnsOff):
 
 
 def test_a_dropped_board_leaves_its_game_rows_to_core(autonaApp):
-    """The board renders core's tracker and does not own it (ADR-005 S4t;
-    it used to register its own for as long as it existed): the rows go on
-    without a widget, and a board built later renders the same one."""
-    from src.core.Actions import AutonaActions
-
-    actions = AutonaActions.instance
+    """The tracker is core's (ADR-005 S4t; the Qt board registered its own
+    for as long as it existed until then, and rendered core's until S4ac-3):
+    the rows go on with the board dropped, and the board made again uses the
+    same one."""
+    actions = _actions()
     tracker = actions.GameTracker(1)
-    board = autonaApp.board(1)
-    assert board.individualGameTracker.service is tracker
-    del board
+    autonaApp.ready(1)
+    assert actions.GameTracker(1) is tracker
 
     autonaApp._dropBoard(1)
 
@@ -684,40 +544,6 @@ def test_a_dropped_board_leaves_its_game_rows_to_core(autonaApp):
         autonaApp.settle()
 
 
-def test_a_click_on_a_game_the_set_no_longer_has_is_refused(autonaApp):
-    """A set length set from another thread resizes the rows at once; the
-    buttons are rebuilt when the held cycle reaches the GUI thread. A click
-    in between on a row that is gone records nothing -- no stray
-    `stages.5` -- and the score is not summed from it."""
-    import threading
-
-    from src.core.Actions import AutonaActions
-
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        tracker = board.individualGameTracker
-        board.bestOfSpin.setValue(5)
-        autonaApp.settle()
-        stale = _stageButton(board, game=5, team=1)
-
-        worker = threading.Thread(
-            target=lambda: AutonaActions.instance.SetBestOf(1, 3))
-        worker.start()
-        worker.join()
-        assert len(tracker.stage_widget_list) == 5, (
-            "precondition: the buttons are not rebuilt yet")
-
-        stale.click()
-        assert sorted(autonaApp.get("score.1.stages")) == ["1", "2", "3"]
-        assert _score(autonaApp, 1) == 0
-
-        autonaApp.settle()
-
-    assert len(tracker.stage_widget_list) == 3
-    assert sorted(autonaApp.get("score.1.stages")) == ["1", "2", "3"]
-    assert _score(autonaApp, 1) == 0 and _wonGames(autonaApp, 1) == []
-
-
 def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
         autonaApp, monkeypatch):
     """An empty matchNames (the locale tables not loaded) makes the Qt
@@ -729,7 +555,7 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
     from src.core.StateManager import StateManager
 
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
+        board = autonaApp.ready(1)
         monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
 
         apply_set(board, {
@@ -739,7 +565,7 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
 
         assert autonaApp.get("score.1.best_of") == 5
         assert autonaApp.get("score.1.best_of_text") == "Best of 5"
-        assert len(board.individualGameTracker.stage_widget_list) == 5
+        assert len(autonaApp.get("score.1.stages")) == 5
         assert autonaApp.get("score.1.team.1.losers") is True
         assert _playerName(autonaApp, 1) == "AAA"
         assert _playerName(autonaApp, 2) == "BBB"
@@ -758,8 +584,8 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
 def test_a_set_with_a_best_of_that_is_not_a_number_still_loads(autonaApp):
     """The one key is refused (a warning) and the rest of the set applies;
     the spinbox's TypeError used to abandon the losers and the players."""
-    board = autonaApp.board(1)
-    board.bestOfSpin.setValue(3)
+    board = autonaApp.ready(1)
+    _actions().SetBestOf(board, 3)
     autonaApp.settle()
 
     apply_set(board, {
@@ -768,7 +594,6 @@ def test_a_set_with_a_best_of_that_is_not_a_number_still_loads(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == 3
-    assert board.bestOfSpin.value() == 3
     assert autonaApp.get("score.1.team.1.losers") is True
     assert _playerName(autonaApp, 1) == "AAA"
     assert _playerName(autonaApp, 2) == "BBB"
@@ -777,36 +602,35 @@ def test_a_set_with_a_best_of_that_is_not_a_number_still_loads(autonaApp):
 # ── swap ─────────────────────────────────────────────────────────────────
 
 def test_swap_exchanges_scores_players_and_flags(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
+    actions = _actions()
 
-    board.CommandScoreChange(0, 2)
-    board.CommandScoreChange(1, 1)
+    actions.AdjustScore(board, 1, 2)
+    actions.AdjustScore(board, 2, 1)
     _setPlayerName(board, 1, "LEFT")
     _setPlayerName(board, 2, "RIGHT")
-    _losers(board, 2).setChecked(True)
+    actions.SetTeamLosers(board, 2, True)
     autonaApp.settle()
 
-    board.SwapTeams()
+    actions.SwapTeams(board)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 1
     assert _score(autonaApp, 2) == 2
     assert _playerName(autonaApp, 1) == "RIGHT"
     assert _playerName(autonaApp, 2) == "LEFT"
-    assert _losers(board, 1).isChecked() is True
-    assert _losers(board, 2).isChecked() is False
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert autonaApp.get("score.1.team.2.losers") is False
 
 
 def test_swap_exchanges_team_names(autonaApp):
-    board = autonaApp.board(2)  # team board: the names are visible there
+    board = autonaApp.ready(2)  # team board: the names are visible there
 
-    _teamName(board, 1).setText("Alpha")
-    _teamName(board, 1).editingFinished.emit()
-    _teamName(board, 2).setText("Bravo")
-    _teamName(board, 2).editingFinished.emit()
+    _typeTeamName(board, 1, "Alpha")
+    _typeTeamName(board, 2, "Bravo")
     autonaApp.settle()
 
-    board.SwapTeams()
+    _actions().SwapTeams(board)
     autonaApp.settle()
 
     assert autonaApp.get("score.2.team.1.teamName") == "Bravo"
@@ -814,15 +638,15 @@ def test_swap_exchanges_team_names(autonaApp):
 
 
 def test_swap_is_its_own_inverse(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.CommandScoreChange(0, 3)
+    _actions().AdjustScore(board, 1, 3)
     _setPlayerName(board, 1, "LEFT")
     _setPlayerName(board, 2, "RIGHT")
     autonaApp.settle()
 
-    board.SwapTeams()
-    board.SwapTeams()
+    _actions().SwapTeams(board)
+    _actions().SwapTeams(board)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 3
@@ -832,40 +656,38 @@ def test_swap_is_its_own_inverse(autonaApp):
 
 
 def test_swap_publishes_the_swapped_flag(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.SwapTeams()
+    _actions().SwapTeams(board)
     autonaApp.settle()
     assert autonaApp.get("score.1.teamsSwapped") is True
 
-    board.SwapTeams()
+    _actions().SwapTeams(board)
     autonaApp.settle()
     assert autonaApp.get("score.1.teamsSwapped") is False
 
 
-def test_a_swap_is_one_save_cycle_and_the_cards_show_it(autonaApp):
-    board = autonaApp.board(1)
+def test_a_swap_is_one_save_cycle(autonaApp):
+    board = autonaApp.ready(1)
     _setPlayerName(board, 1, "LEFT")
     _setPlayerName(board, 2, "RIGHT")
     autonaApp.settle()
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.SwapTeams()
+        _actions().SwapTeams(board)
         autonaApp.settle()
     finally:
         unsubscribe()
 
     assert seen == ["score.1"]
-    tag = board.team1playerWidgets[0].findChild(QLineEdit, "name")
-    assert tag.text() == "RIGHT"
-    tag = board.team2playerWidgets[0].findChild(QLineEdit, "name")
-    assert tag.text() == "LEFT"
+    assert _playerName(autonaApp, 1) == "RIGHT"
+    assert _playerName(autonaApp, 2) == "LEFT"
 
 
 # The swap is a core operation since ADR-005 S2c (AutonaActions.SwapTeams).
-# The hotkey calls it for the active board; the Web UI builds the board
-# first, as it always did (an unbuilt board is not held).
+# The hotkey calls it for the active board, the Web UI for the board it
+# names -- made, and held, at launch since S4ac-1.
 
 
 _STATS_SIGNALS = StatsTriggers.NAMES
@@ -890,14 +712,15 @@ def test_a_1v1_swap_refetches_the_stats_once(autonaApp, ids, fetches):
     the board did, from _NoticeSwap, until ADR-005 S3e-5): once per swap,
     and only when it put other players on the sides. The upset factor is
     recalculated by the operation, not through the trigger."""
-    board = autonaApp.board(1)
-    for card, value in zip((board.team1playerWidgets[0],
-                            board.team2playerWidgets[0]), ids):
-        card.player.SetPlayerId(value)
+    from src.core.PlayerService import PlayerService
+
+    board = autonaApp.ready(1)
+    for team, value in zip((1, 2), ids):
+        PlayerService(f"score.1.team.{team}.player.1").SetPlayerId(value)
     autonaApp.settle()
 
     with _statsFetches(board) as counts:
-        board.SwapTeams()
+        _actions().SwapTeams(board)
         autonaApp.settle()
 
     assert counts == dict(dict.fromkeys(_STATS_SIGNALS, fetches),
@@ -924,38 +747,13 @@ def test_the_swap_hotkey_swaps_the_active_board_only(autonaApp):
     assert autonaApp.get("score.2.teamsSwapped") is None
 
 
-def test_the_swap_hotkey_does_nothing_with_no_board_built(autonaApp):
-    """As before the swap moved to core (each built board connected the
-    hotkey to itself). Unlike the score hotkeys, which do work without a
-    panel: an unbuilt board is not held, so a swap there would be published
-    at once and then wiped by the seed that builds the board."""
-    from src.AutonaHotkeys import AutonaHotkeys
-    from src.core.Actions import AutonaActions
-    from src.core.StateManager import StateManager
-
-    autonaApp.dropAllBoards()
-    StateManager.Unset("score.1")
-    autonaApp.settle()
-    assert AutonaActions.instance.ActiveBoard() == 1
-    try:
-        with patch.object(AutonaActions.instance, "SwapTeams") as swap:
-            AutonaHotkeys.signals.swap_teams.emit()
-            autonaApp.settle()
-
-        swap.assert_not_called()
-        assert autonaApp.manager.scoreboards.get(1) is None
-        assert autonaApp.get("score.1") is None
-    finally:
-        StateManager.Unset("score.1")
-        autonaApp.settle()
-
-
 def test_the_swap_hotkey_asks_the_board_host_not_the_widget(
         autonaApp, monkeypatch):
-    """ADR-005 S4y: whether the active board is built is core's flag (the
-    board host's Built), and the field being typed in is finished through
-    the host's CommitEdit -- the hotkey no longer reaches into the dock's
-    widgets."""
+    """ADR-005 S4y: whether the active board is built is the board host's
+    (Built), and the field being typed in is finished through the host's
+    CommitEdit -- the hotkey no longer reaches into the dock's widgets.
+    Both answer as the headless host's since S4ac-3 (always built, nothing
+    to finish); the check goes with the host's hooks in S4ad."""
     from src import AutonaWebOperations as WebOps
     from src.AutonaHotkeys import AutonaHotkeys
     from src.core.Actions import AutonaActions
@@ -970,12 +768,11 @@ def test_the_swap_hotkey_asks_the_board_host_not_the_widget(
         autonaApp.settle()
         assert calls == [1, ("swap", 1)]
 
-        # Core's flag gone (the board made afresh next time): ignored.
+        # A host that says the board is not there: ignored.
         calls.clear()
-        with patch.object(AutonaActions.instance, "BoardEnsured",
-                          return_value=False):
-            AutonaHotkeys.signals.swap_teams.emit()
-            autonaApp.settle()
+        monkeypatch.setattr(host, "Built", lambda n: False)
+        AutonaHotkeys.signals.swap_teams.emit()
+        autonaApp.settle()
         assert calls == []
 
 
@@ -1006,33 +803,24 @@ def test_the_load_set_hotkey_opens_the_active_boards_window_only(
     assert opened == [1, 2]
 
 
-@pytest.mark.parametrize("onPage", [True, False], ids=["page", "qt"])
-def test_the_load_set_hotkey_opens_the_score_pages_dialog_or_the_qt_window(
-        autonaApp, monkeypatch, onPage):
-    """ADR-005 S4ab-2: while SCORE is the React page, Ctrl+Shift+O has the
-    main window show SCORE and its page open the active board's dialog
-    (Window.OpenScoreSets), and opens no Qt window; on the way back to the
-    Qt panel (general.qt_scoreboard_panel), the Qt window as before. The
+def test_the_load_set_hotkey_opens_the_score_pages_dialog(
+        autonaApp, monkeypatch):
+    """ADR-005 S4ab-2: Ctrl+Shift+O has the main window show SCORE and its
+    page open the active board's dialog (Window.OpenScoreSets). The way
+    back to the Qt window (general.qt_scoreboard_panel) went in S4ac-3. The
     main window is stood in for (src/Autona.py cannot be imported)."""
-    from src.AutonaHotkeys import AutonaHotkeys
-    from src.AutonaShellOperations import AutonaShellOperations
     from types import SimpleNamespace
 
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaShellOperations import AutonaShellOperations
     from src.core.Actions import AutonaActions
 
     shell = AutonaShellOperations.instance
     autonaApp.ready(1)
     autonaApp.ready(2)
-    opened = []
-    for number in (1, 2):
-        window = shell.SetWindow(number)
-        monkeypatch.setattr(window, "PrepareForDisplay",
-                            lambda number=number: opened.append(("prepare", number)))
-        monkeypatch.setattr(window, "show",
-                            lambda number=number: opened.append(("show", number)))
     asked = []
-    monkeypatch.setattr(shell, "_parent", SimpleNamespace(
-        ScoreSetsOnPage=lambda: onPage, OpenScoreSets=asked.append))
+    monkeypatch.setattr(shell, "_parent",
+                        SimpleNamespace(OpenScoreSets=asked.append))
 
     AutonaHotkeys.signals.load_set.emit()
     autonaApp.settle()
@@ -1040,22 +828,13 @@ def test_the_load_set_hotkey_opens_the_score_pages_dialog_or_the_qt_window(
         AutonaHotkeys.signals.load_set.emit()
         autonaApp.settle()
 
-    if onPage:
-        assert asked == [1, 2]
-        assert opened == []
-    else:
-        assert asked == []
-        assert opened == [("prepare", 1), ("show", 1),
-                          ("prepare", 2), ("show", 2)]
+    assert asked == [1, 2]
 
 
-@pytest.mark.parametrize("failing", ["OpenScoreSets", "ScoreSetsOnPage"])
 def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
-        autonaApp, monkeypatch, failing):
-    """What the page's way raises (asking the main window, or asking it
-    which way it is) is logged, not raised out of the hotkey's handler (to
-    sys.excepthook, PySide6's for a slot), and opens the Qt window no more
-    than a request that went through."""
+        autonaApp, monkeypatch):
+    """What asking the main window raises is logged, not raised out of the
+    hotkey's handler (to sys.excepthook, PySide6's for a slot)."""
     import sys
     from types import SimpleNamespace
 
@@ -1066,19 +845,11 @@ def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
 
     shell = AutonaShellOperations.instance
     autonaApp.ready(1)
-    opened = []
-    window = shell.SetWindow(1)
-    monkeypatch.setattr(window, "PrepareForDisplay",
-                        lambda: opened.append("prepare"))
-    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
 
     def fail(*args):
         raise RuntimeError("the window failed")
 
-    main = SimpleNamespace(ScoreSetsOnPage=lambda: True,
-                           OpenScoreSets=lambda board: None)
-    setattr(main, failing, fail)
-    monkeypatch.setattr(shell, "_parent", main)
+    monkeypatch.setattr(shell, "_parent", SimpleNamespace(OpenScoreSets=fail))
     hooked = []
     monkeypatch.setattr(sys, "excepthook",
                         lambda kind, error, trace: hooked.append(error))
@@ -1094,78 +865,28 @@ def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
     assert hooked == []
     assert [str(record["exception"].value) for record in logged
             if record["exception"] is not None] == ["the window failed"]
-    assert opened == []
 
 
-@pytest.mark.parametrize("active", [3, 1], ids=["crew", "unbuilt"])
 def test_the_load_set_hotkey_does_nothing_without_a_set_window(
-        autonaApp, monkeypatch, active):
-    """The crew board has no set window; an unbuilt board gets none either
-    (as the swap: a set loaded onto it would be wiped by the seed that
-    builds it). Each built board answered for itself until ADR-005 S4y."""
+        autonaApp, monkeypatch):
+    """The crew board has no set selection. Each built board answered for
+    itself until ADR-005 S4y; an unbuilt board got none either until S4ac-3
+    (every board is made at launch, and the host says so)."""
     from src.AutonaHotkeys import AutonaHotkeys
     from src.AutonaShellOperations import AutonaShellOperations
     from src.core.Actions import AutonaActions
 
     autonaApp.dropAllBoards()
-    if active == 3:
-        autonaApp.ready(1)
+    autonaApp.ready(1)
     opened = []
     monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
                         lambda n: opened.append(n))
 
-    with patch.object(AutonaActions.instance, "ActiveBoard",
-                      return_value=active):
+    with patch.object(AutonaActions.instance, "ActiveBoard", return_value=3):
         AutonaHotkeys.signals.load_set.emit()
         autonaApp.settle()
 
     assert opened == []
-    if active == 1:
-        # Not built for it either.
-        assert autonaApp.manager.scoreboards.get(1) is None
-
-
-@pytest.mark.parametrize("number", [1, 2])
-def test_the_set_button_opens_its_boards_window_through_the_shell(
-        autonaApp, monkeypatch, number):
-    """The board's 大会の試合を選ぶ button asks the shell (AutonaShellOperations,
-    ADR-005 S4y) for its own board's window; the board owned the window
-    until then."""
-    from src.AutonaShellOperations import AutonaShellOperations
-
-    board = autonaApp.board(number)
-    opened = []
-    monkeypatch.setattr(AutonaShellOperations.instance, "ShowSetSelection",
-                        lambda n: opened.append(n))
-    board.btSelectSet.setEnabled(True)  # enabled once a tournament is read
-
-    board.btSelectSet.click()
-
-    assert opened == [number]
-
-
-@pytest.mark.parametrize("number", [1, 2])
-def test_each_board_has_its_own_set_and_station_window(
-        autonaApp, monkeypatch, number):
-    """One set window and one station window per board 1/2, made once: a
-    window loads onto its own board, and its station button opens its own
-    board's station window."""
-    from src.AutonaShellOperations import AutonaShellOperations
-
-    shell = AutonaShellOperations.instance
-    window = shell.SetWindow(number)
-    assert shell.SetWindow(number) is window
-    assert window.board == number
-    assert shell.StationWindow(number).board == number
-    assert shell.StationWindow(number) is shell.StationWindow(number)
-    assert shell.SetWindow(3 - number) is not window
-    stations = []
-    monkeypatch.setattr(shell, "ShowStationSelection",
-                        lambda n: stations.append(n))
-
-    window.btTrackStation.click()
-
-    assert stations == [number]
 
 
 def test_a_web_swap_is_done_when_it_answers(autonaApp):
@@ -1185,49 +906,49 @@ def test_a_web_swap_is_done_when_it_answers(autonaApp):
     assert actions.get_swap(1) == "False"
 
 
-def test_a_web_swap_builds_the_board_first(autonaApp):
-    """An unbuilt board is not held, and building it seeds its subtree
-    afresh: a swap made on it before the build would go out at once -- to
-    a board no 反映 button shows -- and then be wiped. So the route builds
-    the board first, as it always did, and the swap waits for 反映 there
-    and survives every later route to the board."""
+def test_a_web_swap_waits_for_apply_on_the_launched_board(autonaApp):
+    """The board is made, and held, at launch (ADR-005 S4ac-1): a swap from
+    the Web waits for 反映 there and survives every later route to the
+    board. Until S4ac-3 the route built a board that had no widgets first
+    (before S4ac-1 an unbuilt board was not held, and building it seeded
+    its subtree afresh)."""
     from src.core.StateManager import StateManager
 
-    autonaApp.dropAllBoards()
-    StateManager.Unset("score.2")
-    autonaApp.settle()
+    autonaApp.ready(2)
+    committed = StateManager.GetCommitted("score.2.teamsSwapped")
     actions = autonaApp.web()
-    try:
-        assert actions.swap_teams(2) == "OK"
-        autonaApp.settle()
 
-        board = autonaApp.manager.scoreboards.get(2)
-        assert board is not None
-        assert autonaApp.get("score.2.teamsSwapped") is True
-        assert StateManager.HasPendingChanges("score.2") is True
-        assert StateManager.GetCommitted("score.2.teamsSwapped") is None
+    assert actions.swap_teams(2) == "OK"
+    autonaApp.settle()
 
-        assert autonaApp.manager.GetScoreboard(2) is board
-        assert actions.get_swap(2) == "True"
-        actions.get_scoreboard(2)
-        autonaApp.settle()
-        assert autonaApp.get("score.2.teamsSwapped") is True
-    finally:
-        autonaApp.dropAllBoards()
-        StateManager.Unset("score.2")
-        autonaApp.settle()
+    assert autonaApp.get("score.2.teamsSwapped") is True
+    assert StateManager.HasPendingChanges("score.2") is True
+    assert StateManager.GetCommitted("score.2.teamsSwapped") == committed
+    assert committed is not True
+
+    assert actions.get_swap(2) == "True"
+    actions.get_scoreboard(2)
+    autonaApp.settle()
+    assert autonaApp.get("score.2.teamsSwapped") is True
 
 
-def test_reading_the_swap_flag_builds_the_board(autonaApp):
-    """As before S2c: get_swap reached the flag through the board."""
+def test_reading_the_swap_flag_makes_no_board(autonaApp):
+    """get_swap reads the flag from the state and writes nothing. The
+    desktop built the board's widgets for it until ADR-005 S4ac-3 (before
+    S2c it reached the flag through the board); nothing makes a board
+    again since."""
+    from src.core.Actions import AutonaActions
     from src.core.StateManager import StateManager
 
     autonaApp.dropAllBoards()
     StateManager.Unset("score.2")
     autonaApp.settle()
     try:
-        assert autonaApp.web().get_swap(2) == "False"
-        assert autonaApp.manager.scoreboards.get(2) is not None
+        with WriteRecorder() as recorder:
+            assert autonaApp.web().get_swap(2) == "False"
+            autonaApp.settle()
+        assert recorder.sets == []
+        assert not AutonaActions.instance.BoardEnsured(2)
     finally:
         autonaApp.dropAllBoards()
         StateManager.Unset("score.2")
@@ -1237,14 +958,14 @@ def test_reading_the_swap_flag_builds_the_board(autonaApp):
 # ── reset score ──────────────────────────────────────────────────────────
 
 def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
 
-    board.CommandScoreChange(0, 2)
-    board.CommandScoreChange(1, 3)
+    _actions().AdjustScore(board, 1, 2)
+    _actions().AdjustScore(board, 2, 3)
     _setPlayerName(board, 1, "KEEP ME")
     autonaApp.settle()
 
-    board.ResetScore()
+    _actions().ResetScore(board)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 0
@@ -1255,8 +976,8 @@ def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
 
 # ── the web operations layer ─────────────────────────────────────────────
 #
-# clear_all / reset_match reached for the best_of spinbox, which the 1v1 and
-# team boards reparent out of `scoreColumn` while they are built. Looking it
+# clear_all / reset_match reached for the best_of spinbox, which the Qt 1v1
+# and team boards reparented out of `scoreColumn` while built. Looking it
 # up with scoreColumn.findChild() therefore returned None and raised
 # AttributeError -- an HTTP 500 on /scoreboard<N>-clear-all and on the API's
 # :clear / :reset-match (fixed in 019d85f9). These run through the real web
@@ -1270,7 +991,7 @@ def test_reset_match_clears_score_and_best_of(autonaApp, boardNumber):
     autonaApp.ready(boardNumber)
     actions = autonaApp.web()
 
-    # What the board's +1 button and BEST OF spinbox run.
+    # What the +1 and BEST OF run (the Qt board's, until ADR-005 S4ac-3).
     AutonaActions.instance.AdjustScore(boardNumber, 1, 2)
     AutonaActions.instance.SetBestOf(boardNumber, 5)
     autonaApp.settle()
@@ -1291,7 +1012,8 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
 
     DEFAULT_STOCK = CrewBattleService.DEFAULT_STOCK
     autonaApp.ready(3)
-    # What the board's stock spinboxes and active buttons run (its `crew`).
+    # What the crew board's stock spinboxes and active buttons ran (its
+    # `crew`; the Qt board went in ADR-005 S4ac-3).
     crew = CrewBattleService(3)
 
     crew.AdjustMemberStock(1, 1, -2)
@@ -1330,7 +1052,7 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
     assert autonaApp.get("score.3.best_of") == 5
 
 
-def test_crew_board_seeds_best_of_at_construction(autonaApp):
+def test_the_crew_board_is_made_with_a_best_of(autonaApp):
     # Overlays read score.3.best_of unconditionally, so the key must exist
     # from the start rather than only after the first set data.
     autonaApp.ready(3)
@@ -1372,7 +1094,7 @@ def test_clear_all_resets_scores_best_of_and_players(autonaApp, boardNumber):
     autonaApp.ready(boardNumber)
     actions = autonaApp.web()
 
-    # What the board's +1 button and BEST OF spinbox run.
+    # What the +1 and BEST OF run (the Qt board's, until ADR-005 S4ac-3).
     AutonaActions.instance.AdjustScore(boardNumber, 1, 2)
     AutonaActions.instance.SetBestOf(boardNumber, 5)
     _setPlayerName(boardNumber, 1, "GONE")
@@ -1393,7 +1115,7 @@ def test_reset_scores_action_leaves_players_alone(autonaApp):
     autonaApp.ready(1)
     actions = autonaApp.web()
 
-    AutonaActions.instance.AdjustScore(1, 1, 2)   # the board's +1 button
+    AutonaActions.instance.AdjustScore(1, 1, 2)   # the +1
     _setPlayerName(1, 1, "KEEP ME")
     autonaApp.settle()
 
@@ -1404,7 +1126,7 @@ def test_reset_scores_action_leaves_players_alone(autonaApp):
     assert _playerName(autonaApp, 1) == "KEEP ME"
 
 
-def test_score_up_action_matches_the_widget(autonaApp):
+def test_the_score_up_and_down_actions_reach_the_state(autonaApp):
     autonaApp.ready(1)
     actions = autonaApp.web()
 
@@ -1433,10 +1155,10 @@ def test_team_color_action_reaches_the_state(autonaApp):
 
 # ── the inverted write path (headless core Step 3) ───────────────────────
 #
-# The score is written by AutonaActions and the board follows the state, so
-# the two things that can go wrong are new: the display can drift away from
-# what was published, and the board's reaction to a change can write it back
-# (the echo loop the design forbids -- Design.md §3, docs/changes/
+# The score is written by AutonaActions and what shows it follows the state
+# (the Qt board did until ADR-005 S4ac-3, the SCORE page since), so the
+# thing that can go wrong is a reaction to a change writing it back (the
+# echo loop the design forbids -- Design.md §3, docs/changes/
 # headless-core-redesign.md §3).
 
 def _heldUpdateSpy(prefix):
@@ -1459,53 +1181,38 @@ def _heldUpdateSpy(prefix):
         onHeld)
 
 
-def test_the_board_display_follows_the_published_score(autonaApp):
-    board = autonaApp.board(1)
-
-    # Straight to the state, as a hotkey or an API call now does -- no
-    # spinbox involved.
-    autonaApp.web().team_scoreup(1, 1)
-    autonaApp.settle()
-
-    assert board.scoreDisplay1.value() == 1, (
-        "the score spinbox no longer follows the state it is supposed to "
-        "render; an operator would see a different score from the overlay")
-
-
 def test_a_score_change_is_exactly_one_save_cycle(autonaApp):
-    """Echo-loop check: the board's reaction must not write the score back."""
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    """Echo-loop check: nothing reacting to the change may write the score
+    back."""
+    board = autonaApp.ready(1)
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.CommandScoreChange(0, 1)
+        _actions().AdjustScore(board, 1, 1)
         autonaApp.settle()
     finally:
         unsubscribe()
 
     assert _score(autonaApp, 1) == 1
     assert seen == ["score.1"], (
-        f"a +1 produced {len(seen)} save cycles instead of 1: the board "
+        f"a +1 produced {len(seen)} save cycles instead of 1: something "
         "reacted to the state change by writing it again")
 
 
 def test_reset_score_is_exactly_one_save_cycle(autonaApp):
-    board = autonaApp.board(1)
-    board.CommandScoreChange(0, 2)
-    board.CommandScoreChange(1, 1)
+    board = autonaApp.ready(1)
+    _actions().AdjustScore(board, 1, 2)
+    _actions().AdjustScore(board, 2, 1)
     autonaApp.settle()
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.ResetScore()
+        _actions().ResetScore(board)
         autonaApp.settle()
     finally:
         unsubscribe()
 
     assert _score(autonaApp, 1) == 0 and _score(autonaApp, 2) == 0
-    assert board.scoreDisplay1.value() == 0
-    assert board.scoreDisplay2.value() == 0
     # Two keys, one cycle -- an overlay must never render a half-reset board.
     assert seen == ["score.1"]
 
@@ -1565,47 +1272,43 @@ def test_the_score_hotkey_is_routed_exactly_once(autonaApp):
         "one hotkey press did not produce exactly one +1")
 
 
-def test_the_sponsor_toggle_publishes_once_and_does_not_echo(autonaApp):
-    """The desktop display-option control goes through Actions now.
+def test_the_sponsor_toggle_publishes_once(autonaApp):
+    """A display option is toggled through Actions (the Web's eye menu; the
+    Qt board's sponsor checkbox until ADR-005 S4ac-3).
 
     display_options.* is not held, so this is the operation where a delta is
-    directly observable: exactly one revision per toggle, and the board's own
-    mirror (the QAction, the checkbox, the inline sponsor field) must not
-    produce a second one.
+    directly observable: exactly one revision per toggle. (The Qt board's
+    mirrors -- the QAction, the checkbox, the inline sponsor field -- were
+    checked not to produce a second one.)
     """
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    autonaApp.ready(1)
     with _restoredDisplayOption("show_sponsor"):
         revision = StateManager.revision
-        board.hideSponsorCheck.setChecked(True)
+        _actions().SetDisplayOption("show_sponsor", False)
         autonaApp.settle()
 
         assert autonaApp.get("display_options.show_sponsor") is False
         assert StateManager.revision == revision + 1, (
-            "the sponsor toggle published more than once: the board wrote "
-            "the state change back after receiving it")
-        # The invisible carrier the overlays' Qt-side equivalent reads.
-        assert board._eyeActions["show_sponsor"].isChecked() is False
+            "the sponsor toggle published more than once")
 
 
-def test_a_remote_display_option_reaches_a_built_board(autonaApp):
+def test_a_remote_display_option_reaches_the_state(autonaApp):
     """POST /display-option no longer pokes each board's QAction.
 
-    It writes the option once; boards mirror it from the state notification.
-    Before Step 3 the route walked boards 1 and 2 -- and *built* both of them
-    as a side effect of a Web UI eye-menu click.
+    It writes the option once. Before Step 3 the route walked boards 1 and
+    2 -- and *built* both of them as a side effect of a Web UI eye-menu
+    click; the Qt boards mirrored it from the state notification until
+    ADR-005 S4ac-3.
     """
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    autonaApp.ready(1)
     with _restoredDisplayOption("show_seed"):
         autonaApp.web().set_display_option(
             {"option": "show_seed", "value": False})
         autonaApp.settle()
 
         assert autonaApp.get("display_options.show_seed") is False
-        assert board._eyeActions["show_seed"].isChecked() is False
 
 
 def test_an_unknown_display_option_is_still_rejected(autonaApp):
@@ -1617,96 +1320,56 @@ def test_an_unknown_display_option_is_still_rejected(autonaApp):
     assert autonaApp.get("display_options.show_nothing") is None
 
 
-# ── the panel's own fields (headless core Step 5) ────────────────────────
+# ── the board's own fields (headless core Step 5) ────────────────────────
 #
-# The team card's two inputs and the match bar's three combos used to be
-# bound by findChildren loops that wrote score.{N}.team.{T}.{objectName} /
-# score.{N}.{objectName}. They call AutonaActions now, against key names that
-# live in StateSchema. What that can break is what these check: the operator's
-# edit still has to reach the state, the widgets' *other* handlers have to
-# survive (the team crest, the " [L]" suffix), and neither may cost an extra
-# save cycle.
+# The Qt board's team card inputs and match bar combos used to be bound by
+# findChildren loops that wrote score.{N}.team.{T}.{objectName} /
+# score.{N}.{objectName}. They called AutonaActions from Step 5, against key
+# names that live in StateSchema, and went in ADR-005 S4ac-3; the operations
+# they called are what is checked here: the edit reaches the state, the
+# " [L]" suffix comes with the flag, and nothing costs an extra save cycle.
 
-def test_typing_a_team_name_reaches_the_state(autonaApp):
-    board = autonaApp.board(2)  # the team board, where the names are visible
-    edit = _teamName(board, 1)
-
-    edit.setText("Alpha")
-    edit.editingFinished.emit()
-    autonaApp.settle()
-
-    assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
-
-
-def test_a_team_name_edit_is_exactly_one_save_cycle(autonaApp):
-    """Echo-loop check, and the crest handler has to stay free.
-
-    editingFinished runs two handlers: the name write and the team-crest
-    lookup. The crest is a no-op when no ./user_data/team_logo file matches
-    (SetLoadService._SetIfChanged), so the pair is one cycle -- a second one
-    would mean either handler wrote something it did not have to.
-    """
-    board = autonaApp.board(2)
-    autonaApp.settle()
-
-    seen, unsubscribe = _heldUpdateSpy("score.2")
-    try:
-        edit = _teamName(board, 1)
-        edit.setText("Alpha")
-        edit.editingFinished.emit()
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
-    assert seen == ["score.2"], (
-        f"a team name edit produced {len(seen)} save cycles instead of 1")
-
-
-def test_leaving_a_team_name_unchanged_does_not_light_the_apply_button(
-        autonaApp):
+def test_the_same_team_name_again_leaves_nothing_pending(autonaApp):
     """Behaviour change, pinned deliberately (headless core Step 5).
 
-    editingFinished fires on every focus-out, typed into or not, and the old
-    handler wrote unconditionally -- so tabbing through the field marked the
-    board dirty. The write is guarded now, the same way the set-load path has
-    been since Step 4b.
+    The Qt field's editingFinished fired on every focus-out, typed into or
+    not, and the old handler wrote unconditionally -- so tabbing through the
+    field marked the board dirty. The name and its crest are written only on
+    a change since, the same way the set-load path has been since Step 4b.
     """
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(2)
-    edit = _teamName(board, 1)
-    edit.setText("Alpha")
-    edit.editingFinished.emit()
+    board = autonaApp.ready(2)
+    _typeTeamName(board, 1, "Alpha")
     StateManager.CommitHeld("score.2")
     autonaApp.settle()
     assert StateManager.HasPendingChanges("score.2") is False
 
-    edit.editingFinished.emit()
+    _typeTeamName(board, 1, "Alpha")
     autonaApp.settle()
 
     assert StateManager.HasPendingChanges("score.2") is False
 
 
-def test_the_losers_checkbox_writes_the_flag_and_the_player_names(autonaApp):
+def test_the_losers_flag_writes_the_flag_and_the_player_names(autonaApp):
     """The flag and the " [L]" the thumbnail generator renders, together.
 
     Both are AutonaActions.SetTeamLosers since ADR-005 S2b, in one save
-    cycle. The suffix used to be the checkbox's second handler -- every
-    player card's SetLosers, connected per card -- so the set-load path
+    cycle. The suffix used to be the Qt LOSERS checkbox's second handler --
+    every player card's SetLosers, connected per card -- so the set-load path
     needed its own copy (_ApplyLosersToPlayers) because it does not have
     this signal; now the two paths share the core half.
     """
     from src.core.StateManager import StateManager
 
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     _setPlayerName(board, 1, "AAA")
     autonaApp.settle()
 
     cycles = []
     StateManager.observers.held_state_updated.subscribe(cycles.append)
     try:
-        _losers(board, 1).setChecked(True)
+        _actions().SetTeamLosers(board, 1, True)
         autonaApp.settle()
     finally:
         StateManager.observers.held_state_updated.unsubscribe(cycles.append)
@@ -1716,73 +1379,22 @@ def test_the_losers_checkbox_writes_the_flag_and_the_player_names(autonaApp):
     assert autonaApp.get("score.1.team.1.player.1.mergedOnlyName") == "AAA [L]"
     assert cycles.count("score.1") == 1
 
-    _losers(board, 1).setChecked(False)
+    _actions().SetTeamLosers(board, 1, False)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.losers") is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
 
 
-def test_a_losers_flip_from_another_thread_mid_name_edit_keeps_the_new_name(
-        autonaApp):
-    """AutonaActions.SetTeamLosers is core and may run on any thread.
-
-    It rebuilds the team's display names from the slots' state. A name edit
-    is two handlers of one editingFinished: the tag reaching the state
-    (_OnTextChanged) and the display name being published (NameChanged).
-    With the publish first, a flip landing right after it rebuilt the name
-    from the previous tag -- "OLD [L]" next to name "NEW" -- and nothing
-    published it again. The tag goes first since ADR-005 S2b; the flip is
-    run here, on a real second thread, at exactly that point.
-    """
-    import threading
-
+def test_the_match_bar_reaches_the_state(autonaApp):
     from src.core import StateSchema as schema
-    from src.core.Actions import AutonaActions
 
-    board = autonaApp.board(1)
-    _setPlayerName(board, 1, "OLD")
-    autonaApp.settle()
-    card = board.team1playerWidgets[0]
-    service = card.player
-    publish = service.PublishMergedName
-    flips = []
+    board = autonaApp.ready(1)
 
-    def publishThenFlip(sponsor, tag):
-        merged = publish(sponsor, tag)
-        if not flips:
-            worker = threading.Thread(
-                target=lambda: flips.append(
-                    AutonaActions.instance.SetTeamLosers(1, 1, True)))
-            worker.start()
-            worker.join(timeout=10)
-            assert not worker.is_alive()
-        return merged
-
-    service.PublishMergedName = publishThenFlip
-    try:
-        edit = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
-        edit.setText("NEW")
-        edit.editingFinished.emit()
-        autonaApp.settle()
-    finally:
-        del service.PublishMergedName
-
-    assert flips == [True]
-    assert autonaApp.get("score.1.team.1.player.1.name") == "NEW"
-    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "NEW [L]"
-    assert autonaApp.get(
-        "score.1.team.1.player.1.mergedOnlyName") == "NEW [L]"
-
-
-def test_typing_in_the_match_bar_reaches_the_state(autonaApp):
-    board = autonaApp.board(1)
-
-    for combo, value in ((board.phaseCombo, "Bracket"),
-                         (board.poolCombo, "Pool A"),
-                         (board.matchCombo, "Winners Final")):
-        combo.setCurrentText(value)
-        combo.lineEdit().editingFinished.emit()
+    for field, value in ((schema.PHASE_KEY, "Bracket"),
+                         (schema.POOL_KEY, "Pool A"),
+                         (schema.MATCH_KEY, "Winners Final")):
+        _actions().SetMatchField(board, field, value)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.phase") == "Bracket"
@@ -1791,19 +1403,16 @@ def test_typing_in_the_match_bar_reaches_the_state(autonaApp):
 
 
 def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
-    """Two signals, one write.
+    """One field, one write. (The Qt combo's currentIndexChanged and its
+    line edit's editingFinished were both wired to it, so picking a listed
+    entry used to write the same value twice.)"""
+    from src.core import StateSchema as schema
 
-    Both currentIndexChanged and the line edit's editingFinished are wired to
-    the same operation (either can be what changed the text), so picking a
-    listed entry used to write the same value twice.
-    """
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    board = autonaApp.ready(1)
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.matchCombo.setCurrentText("Winners Final")
-        board.matchCombo.lineEdit().editingFinished.emit()
+        _actions().SetMatchField(board, schema.MATCH_KEY, "Winners Final")
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -1824,41 +1433,30 @@ def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
 # SetLoadService.ApplyMatchInfo keeps the round for a payload that carries
 # none, so a reset-style clear there would blank the round mid-stream.
 
-def _confirmed(method):
-    """Run a method that asks "are you sure?" first, answering Yes."""
-    from qtpy.QtWidgets import QMessageBox
-
-    with patch.object(QMessageBox, "question",
-                      return_value=QMessageBox.StandardButton.Yes):
-        method()
-
-
 _RESETS = {
-    "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
-    "reset_match": lambda app, board, n: app.web().reset_match(n),
-    "clear_all": lambda app, board, n: app.web().clear_all(n),
+    # すべての入力値をリセット (the Qt board's button until ADR-005 S4ac-3).
+    "reset_all": lambda app, n: app.web().reset_all(n),
+    "reset_match": lambda app, n: app.web().reset_match(n),
+    "clear_all": lambda app, n: app.web().clear_all(n),
 }
 
 
 @pytest.mark.parametrize("reset", sorted(_RESETS))
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_a_reset_clears_the_match_bar(autonaApp, boardNumber, reset):
-    board = autonaApp.board(boardNumber)
+    board = autonaApp.ready(boardNumber)
     apply_set(board, dict(_SET))
     autonaApp.settle()
-    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
+    assert _matchFields(autonaApp, board) == (
+        "Winners Final", "Bracket", "Pool A")
 
-    _RESETS[reset](autonaApp, board, boardNumber)
+    _RESETS[reset](autonaApp, boardNumber)
     autonaApp.settle()
 
     prefix = f"score.{boardNumber}"
-    assert autonaApp.get(f"{prefix}.match") == ""
-    assert autonaApp.get(f"{prefix}.phase") == ""
-    assert autonaApp.get(f"{prefix}.pool") == ""
+    assert _matchFields(autonaApp, board) == ("", "", "")
     # The English form of the same round name (the YouTube title reads it).
     assert autonaApp.get(f"{prefix}.match_en") == ""
-    # The combos follow the state, exactly as they do for a loaded set.
-    assert _matchFields(board) == ("", "", "")
     # ...and the half of the reset that already worked still does.
     assert (_score(autonaApp, 1, boardNumber),
             _score(autonaApp, 2, boardNumber)) == (0, 0)
@@ -1869,7 +1467,7 @@ def test_a_reset_clears_the_match_bar(autonaApp, boardNumber, reset):
 def tournament():
     """A tournament loaded that answers nothing: a set loads only with one
     (SetFollowService, ADR-005 S3e-7 review). The tests here drive the
-    board's part of a load, and the answer by hand."""
+    load, and the answer by hand."""
     with tournamentLoaded():
         yield
 
@@ -1881,35 +1479,37 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
     A payload carrying no round_name / tournament_phase / tournament_pool
     leaves the match bar as the previous set had it.
     """
-    board = autonaApp.board(1)
+    from src.core.SetFollowService import SetFollowService
+
+    board = autonaApp.ready(1)
     apply_set(board, dict(_SET))
     autonaApp.settle()
 
-    board.setFollow.LoadSet({"id": "1001", "auto_update": "set"})
+    SetFollowService(board).LoadSet({"id": "1001", "auto_update": "set"})
     autonaApp.settle()
     # The pre-pass alone must not have touched it either.
     assert autonaApp.get("score.1.match") == "Winners Final"
 
-    board.setFollow.UpdateSetData(
+    SetFollowService(board).UpdateSetData(
         {"id": "1001", "team1score": 1, "team2score": 0})
     autonaApp.settle()
 
-    assert autonaApp.get("score.1.match") == "Winners Final"
-    assert autonaApp.get("score.1.phase") == "Bracket"
-    assert autonaApp.get("score.1.pool") == "Pool A"
-    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
+    assert _matchFields(autonaApp, board) == (
+        "Winners Final", "Bracket", "Pool A")
     assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (1, 0)
 
 
 def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
                                                              tournament):
-    board = autonaApp.board(1)
+    from src.core.SetFollowService import SetFollowService
+
+    board = autonaApp.ready(1)
     apply_set(board, dict(_SET))
     autonaApp.settle()
 
-    board.setFollow.LoadSet({"id": "1002", "auto_update": "set"})
+    SetFollowService(board).LoadSet({"id": "1002", "auto_update": "set"})
     autonaApp.settle()
-    board.setFollow.UpdateSetData({
+    SetFollowService(board).UpdateSetData({
         "id": "1002",
         "round_name": "Losers Final",
         "round_name_en": "Losers Final",
@@ -1918,26 +1518,21 @@ def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
     })
     autonaApp.settle()
 
-    assert autonaApp.get("score.1.match") == "Losers Final"
     assert autonaApp.get("score.1.match_en") == "Losers Final"
-    assert autonaApp.get("score.1.phase") == "Top 8"
-    assert autonaApp.get("score.1.pool") == "Pool B"
-    assert _matchFields(board) == ("Losers Final", "Top 8", "Pool B")
+    assert _matchFields(autonaApp, board) == ("Losers Final", "Top 8", "Pool B")
 
 
 def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
         autonaApp):
-    # The half of ClearScore that does work, driven through the rewired
-    # widgets: the spinboxes reach AutonaActions.SetScore (ADR-005 S4x;
-    # GameTrackerService.UpdateScore until then) and the checkboxes still
-    # reach AutonaActions.SetTeamLosers.
-    board = autonaApp.board(1)
+    # The half of ClearScore that does work (AutonaActions.ClearScore; the
+    # Qt board drove its spinboxes and checkboxes to it until ADR-005 S2d).
+    board = autonaApp.ready(1)
     apply_set(board, dict(_SET))
     autonaApp.settle()
     assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (2, 1)
     assert autonaApp.get("score.1.team.2.losers") is True
 
-    board.ClearScore()
+    _actions().ClearScore(board)
     autonaApp.settle()
 
     assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (0, 0)
@@ -1948,17 +1543,16 @@ def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
     """The six derived keys and the stage rows are one operation.
 
     AutonaActions.SetBestOf writes the six keys and, through the board's
-    registered tracker, GameTrackerService.SetStageCount in one block, so
-    the whole change is a single export (ADR-005 S2e; the spinbox's handler
-    wrapped the two before). Tracker off here, which is the shipped default;
-    with it on the rows join the same cycle.
+    tracker, GameTrackerService.SetStageCount in one block, so the whole
+    change is a single export (ADR-005 S2e; the spinbox's handler wrapped
+    the two before). Tracker off here, which is the shipped default; with
+    it on the rows join the same cycle.
     """
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    board = autonaApp.ready(1)
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        board.bestOfSpin.setValue(5)
+        _actions().SetBestOf(board, 5)
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -1969,30 +1563,31 @@ def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
         f"a best-of change produced {len(seen)} save cycles instead of 1")
 
 
-def test_the_display_tournament_name_field_publishes_once(autonaApp):
-    """Not held (it is tournamentInfo.*), so the delta is directly visible."""
+def test_the_display_tournament_name_publishes_once(autonaApp):
+    """Not held (it is tournamentInfo.*), so the delta is directly visible.
+    TournamentInfoService.SetDisplayName: what the Qt board's field ran
+    until ADR-005 S4ac-3, and the SCORE page's route."""
     from src.core.StateManager import StateManager
+    from src.core.TournamentInfoService import TournamentInfoService
 
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    autonaApp.ready(1)
     stored = StateManager.Get("tournamentInfo.displayTournamentName")
     try:
         revision = StateManager.revision
-        board.displayTournamentNameEdit.setText("SPECIAL EDITION")
-        board.displayTournamentNameEdit.editingFinished.emit()
+        TournamentInfoService.instance.SetDisplayName("SPECIAL EDITION")
         autonaApp.settle()
 
         assert autonaApp.get(
             "tournamentInfo.displayTournamentName") == "SPECIAL EDITION"
         assert StateManager.revision == revision + 1, (
-            "the display-name field published more than once: the board wrote "
-            "the state change back after receiving it")
+            "the display name published more than once")
     finally:
         StateManager.Set(
             "tournamentInfo.displayTournamentName", stored or "")
 
 
-def test_building_a_board_republishes_every_display_option(autonaApp):
+def test_making_a_board_on_the_desktop_republishes_every_display_option(
+        autonaApp):
     """The loop the board used to carry its own copy of.
 
     An operator's toggles persist in SettingsManager, so building a board is
@@ -2033,16 +1628,16 @@ def test_building_a_board_republishes_every_display_option(autonaApp):
 
 @pytest.fixture
 def trackedBoard(autonaApp):
-    """Board 1 with the game tracker enabled and five stage rows built.
+    """Board 1's number, with the game tracker enabled and five stage rows.
 
     The setting is patched rather than written: SettingsManager is
     process-global and shared with the rest of the session.
     """
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.board(1)
-        board.bestOfSpin.setValue(5)
+        board = autonaApp.ready(1)
+        _actions().SetBestOf(board, 5)
         autonaApp.settle()
-        assert len(board.individualGameTracker.stage_widget_list) == 5
+        assert len(autonaApp.get("score.1.stages")) == 5
         yield board
 
 
@@ -2057,7 +1652,7 @@ def test_a_stage_click_awards_exactly_the_game_that_was_clicked(
     2, on top of the game 1 the operator actually clicked. Only the
     operations that move the score follow it now (ADR-005 S4t).
     """
-    _stageButton(trackedBoard, game=1, team=1).click()
+    _clickStage(trackedBoard, game=1, team=1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 1
@@ -2085,7 +1680,7 @@ def test_a_stage_click_is_exactly_two_save_cycles(autonaApp, trackedBoard):
     """
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        _stageButton(trackedBoard, game=1, team=1).click()
+        _clickStage(trackedBoard, game=1, team=1)
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -2097,9 +1692,9 @@ def test_a_stage_click_is_exactly_two_save_cycles(autonaApp, trackedBoard):
 def test_stage_clicks_keep_tracking_each_game_independently(
         autonaApp, trackedBoard):
     """The other half of the fix: suppression must not disable the tracker."""
-    _stageButton(trackedBoard, game=1, team=1).click()
-    _stageButton(trackedBoard, game=2, team=2).click()
-    _stageButton(trackedBoard, game=3, team=1).click()
+    _clickStage(trackedBoard, game=1, team=1)
+    _clickStage(trackedBoard, game=2, team=2)
+    _clickStage(trackedBoard, game=3, team=1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 2
@@ -2115,12 +1710,12 @@ def test_unclicking_a_stage_takes_the_score_back_down(
     Without the guard this ran DecrementScore on top of the operator's own
     un-check and cleared a second game.
     """
-    _stageButton(trackedBoard, game=1, team=1).click()
-    _stageButton(trackedBoard, game=2, team=1).click()
+    _clickStage(trackedBoard, game=1, team=1)
+    _clickStage(trackedBoard, game=2, team=1)
     autonaApp.settle()
     assert _wonGames(autonaApp, 1) == [1, 2]
 
-    _stageButton(trackedBoard, game=2, team=1).click()
+    _clickStage(trackedBoard, game=2, team=1)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 1
@@ -2137,7 +1732,7 @@ def test_a_score_button_with_the_tracker_on_marks_one_stage(
     """
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        trackedBoard.CommandScoreChange(0, 1)
+        _actions().AdjustScore(trackedBoard, 1, 1)
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -2153,13 +1748,13 @@ def test_a_score_button_with_the_tracker_on_marks_one_stage(
 
 def test_a_score_reset_with_the_tracker_on_clears_every_stage(
         autonaApp, trackedBoard):
-    trackedBoard.CommandScoreChange(0, 2)
-    trackedBoard.CommandScoreChange(1, 1)
+    _actions().AdjustScore(trackedBoard, 1, 2)
+    _actions().AdjustScore(trackedBoard, 2, 1)
     autonaApp.settle()
     assert _wonGames(autonaApp, 1) == [1, 2]
     assert _wonGames(autonaApp, 2) == [3]
 
-    trackedBoard.ResetScore()
+    _actions().ResetScore(trackedBoard)
     autonaApp.settle()
 
     assert _score(autonaApp, 1) == 0 and _score(autonaApp, 2) == 0
@@ -2173,13 +1768,13 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
     of both teams in one cycle -- it was one cycle a row until ADR-005 S2e,
     and one more for the rows until S4t. The same follow serves a +2, a
     loaded set's score and the clears."""
-    trackedBoard.CommandScoreChange(0, 2)
-    trackedBoard.CommandScoreChange(1, 1)
+    _actions().AdjustScore(trackedBoard, 1, 2)
+    _actions().AdjustScore(trackedBoard, 2, 1)
     autonaApp.settle()
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        trackedBoard.ResetScore()
+        _actions().ResetScore(trackedBoard)
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -2191,7 +1786,7 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
-        trackedBoard.CommandScoreChange(0, 2)
+        _actions().AdjustScore(trackedBoard, 1, 2)
         autonaApp.settle()
     finally:
         unsubscribe()
@@ -2200,67 +1795,18 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
     assert seen == ["score.1"]
 
 
-# ── lifecycle ────────────────────────────────────────────────────────────
-
-def test_close_without_a_loaded_set_does_not_raise(autonaApp):
-    """BUG-5: the board's timers stayed None until a set was loaded, but
-    closeEvent used to call .stop() on both unconditionally. Closing a board
-    that never had a set loaded raised AttributeError -- Qt swallows
-    exceptions from event handlers, so it was silent in production. The poll
-    is core's since ADR-005 S3e-7; the board keeps only the countdown's
-    clock, None until the timer row is first shown. Calling closeEvent()
-    directly (rather than .close()) makes a regression fail loudly instead
-    of vanishing into Qt's exception hook again.
-    """
-    from qtpy.QtGui import QCloseEvent
-
-    board = autonaApp.board(1)
-    assert board._followClock is None
-
-    board.closeEvent(QCloseEvent())  # must not raise
-
-
-def test_close_while_following_stops_the_poll_and_the_countdown(
-        autonaApp, monkeypatch, tournament):
-    """The None guard must not break the ordinary path: closing a board
-    that is polling stops the poll (core's) and the countdown (the
-    board's), as stopping the board's own two timers did."""
-    from qtpy.QtGui import QCloseEvent
-
-    from src.core.SetFollowService import SetFollowService
-    from src.core.SettingsManager import SettingsManager
-
-    board = autonaApp.board(1)
-    realGet = SettingsManager.Get
-    monkeypatch.setattr(SettingsManager, "Get", lambda key, default=None: (
-        False if key == "general.disable_autoupdate"
-        else realGet(key, default)))
-    board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
-    autonaApp.settle()
-    timer = SetFollowService.fetcher._timers[1]
-    assert timer.isActive()
-    assert board._followClock.isActive()
-    assert not board.timerLayout.isHidden()
-
-    board.closeEvent(QCloseEvent())
-
-    assert not timer.isActive()
-    assert not board._followClock.isActive()
-    assert SetFollowService(1).Following() is None
-
-
 # ── set loading (headless core Step 4b) ──────────────────────────────────
 #
-# The board no longer *is* the set data: core/SetLoadService writes it and
-# these widgets render it (_SyncSetFields / _SyncScoreDisplays). So the two
-# things worth checking through a real board are the ones the service tests
-# cannot see -- that the widgets actually follow, and that following does
-# not write the value straight back.
+# The board no longer *is* the set data: core/SetLoadService writes it (the
+# Qt board's widgets rendered it until ADR-005 S4ac-3). What is checked here
+# beyond the service tests: the load as the app runs it reaches the state,
+# in one cycle, and lands on the right side of a swapped board.
 
-def _matchFields(board):
-    return (board.matchCombo.currentText(),
-            board.phaseCombo.currentText(),
-            board.poolCombo.currentText())
+def _matchFields(app, board):
+    """(match, phase, pool) of board number `board`, from the state."""
+    prefix = f"score.{board}"
+    return (app.get(f"{prefix}.match"), app.get(f"{prefix}.phase"),
+            app.get(f"{prefix}.pool"))
 
 
 _SET = {
@@ -2289,28 +1835,14 @@ def test_a_loaded_set_reaches_the_state(autonaApp):
     assert autonaApp.get("score.1.team.2.losers") is True
 
 
-def test_the_board_renders_a_loaded_set(autonaApp):
-    """The widgets follow the state now instead of being poked into it."""
-    board = autonaApp.board(1)
-    apply_set(board, dict(_SET))
-    autonaApp.settle()
-
-    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
-    assert board.scoreDisplay1.value() == 2
-    assert board.scoreDisplay2.value() == 1
-    assert _losers(board, 1).isChecked() is False
-    assert _losers(board, 2).isChecked() is True
-
-
 def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
-    """Echo-loop check: rendering the set must not write any of it back.
+    """Echo-loop check: nothing reacting to the set may write any of it back.
 
-    Tracker OFF, which is the shipped default and what `autonaApp.board(1)`
+    Tracker OFF, which is the shipped default and what `autonaApp.ready(1)`
     gives. With it on, the rows a loaded score moves are in the same cycle
-    (tests/test_player_card_render.py, S4T_BEST_OF_CHANGES).
+    (tests/test_board_operations.py, S4T_BEST_OF_CHANGES).
     """
-    board = autonaApp.board(1)
-    autonaApp.settle()
+    board = autonaApp.ready(1)
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
     try:
@@ -2320,8 +1852,8 @@ def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
         unsubscribe()
 
     assert seen == ["score.1"], (
-        f"loading a set produced {len(seen)} save cycles instead of 1: the "
-        "board reacted to the state change by writing it again")
+        f"loading a set produced {len(seen)} save cycles instead of 1: "
+        "something reacted to the state change by writing it again")
 
 
 def test_reloading_the_same_set_publishes_nothing(autonaApp):
@@ -2370,8 +1902,8 @@ def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
     assert _playerName(autonaApp, 1, board=2) == "C"
 
 
-def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
-    board = autonaApp.board(2)
+def test_a_loaded_team_name_reaches_the_state(autonaApp):
+    board = autonaApp.ready(2)
     apply_set(board, {
         "entrants": [[{"gamerTag": "A"}, {"gamerTag": "B"}],
                      [{"gamerTag": "C"}, {"gamerTag": "D"}]],
@@ -2380,8 +1912,7 @@ def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
-    assert _teamName(board, 1).text() == "Alpha"
-    assert _teamName(board, 2).text() == "Bravo"
+    assert autonaApp.get("score.2.team.2.teamName") == "Bravo"
 
 
 def test_following_a_set_records_which_set_it_is(autonaApp, tournament):
@@ -2438,11 +1969,10 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
 
     SetLoadService writes team.{t}.score and *nothing under stages*; the
     rows follow in the operation around it (SetFollowService.ApplySetPayload
-    -> GameTrackerService.FollowScores). The row
-    count must be untouched by a set load: only
-    GameTrackerService.SetStageCount() keeps it equal to the widget's
-    stage_widget_list, so a writer that grew `stages` on its own would leave
-    rows nothing renders (see StageCount()).
+    -> GameTrackerService.FollowScores). The row count must be untouched by
+    a set load: only GameTrackerService.SetStageCount() sets it, so a writer
+    that grew `stages` on its own would leave rows nothing renders (see
+    StageCount()).
     """
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
         apply_set(trackedBoard, {"team1score": 2, "team2score": 1})
@@ -2451,7 +1981,6 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
     assert _wonGames(autonaApp, 1) == [1, 2]
     assert _wonGames(autonaApp, 2) == [3]
     assert len(autonaApp.get("score.1.stages") or {}) == 5
-    assert len(trackedBoard.individualGameTracker.stage_widget_list) == 5
 
 
 @pytest.mark.parametrize("games, swapped", [
@@ -2460,7 +1989,7 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
     # 1-1: the score does not move, the rows still mirror.
     (((1, 1), (2, 2)), {1: [2], 2: [1]}),
 ])
-def test_a_swap_mirrors_the_games_on_the_rows_and_the_buttons(
+def test_a_swap_mirrors_the_games_on_the_rows(
         autonaApp, trackedBoard, games, swapped):
     """The swap mirrors the rows in the same save cycle as it exchanges the
     scores (ADR-005 S2c). It used to swap the scores through the spinboxes,
@@ -2468,18 +1997,15 @@ def test_a_swap_mirrors_the_games_on_the_rows_and_the_buttons(
     T1 came out as T1 T2 T1, 1-2 on the score and 2-1 on the rows."""
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
         for game, team in games:
-            _stageButton(trackedBoard, game=game, team=team).click()
+            _clickStage(trackedBoard, game=game, team=team)
         autonaApp.settle()
 
-        trackedBoard.SwapTeams()
+        _actions().SwapTeams(trackedBoard)
         autonaApp.settle()
 
     for team in (1, 2):
         assert _wonGames(autonaApp, team) == swapped[team]
         assert _score(autonaApp, team) == len(swapped[team])
-        for game in range(1, 6):
-            assert _stageButton(trackedBoard, game, team).isChecked() \
-                == (game in swapped[team]), (team, game)
 
 
 def test_a_reset_set_load_does_not_reshuffle_recorded_games(
@@ -2494,9 +2020,9 @@ def test_a_reset_set_load_does_not_reshuffle_recorded_games(
     score actually moved.
     """
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        _stageButton(trackedBoard, game=1, team=2).click()
-        _stageButton(trackedBoard, game=2, team=1).click()
-        _stageButton(trackedBoard, game=3, team=1).click()
+        _clickStage(trackedBoard, game=1, team=2)
+        _clickStage(trackedBoard, game=2, team=1)
+        _clickStage(trackedBoard, game=3, team=1)
         autonaApp.settle()
         assert _wonGames(autonaApp, 1) == [2, 3]
         assert _wonGames(autonaApp, 2) == [1]
@@ -2512,15 +2038,15 @@ def test_a_reset_set_load_does_not_reshuffle_recorded_games(
 def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
     """The " [L]" suffix the thumbnail generator renders.
 
-    The checkbox is only rendered by a set load (_SyncSetFields sets it with
-    its signals blocked, because it is the render side and may not write),
-    so the names cannot come from its `toggled`: SetLoadService.ApplyLosers
-    writes the flag and its team's names together (ADR-005 S2b). Before
-    that the board carried the flag into each card by hand
-    (_ApplyLosersToPlayers), and without it the state and the checkbox said
-    "losers" while the exported name did not.
+    The Qt checkbox was only rendered by a set load (_SyncSetFields set it
+    with its signals blocked, because it was the render side and could not
+    write), so the names could not come from its `toggled`:
+    SetLoadService.ApplyLosers writes the flag and its team's names together
+    (ADR-005 S2b). Before that the board carried the flag into each card by
+    hand (_ApplyLosersToPlayers), and without it the state said "losers"
+    while the exported name did not.
     """
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
     apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": False, "team2losers": True, "overwrite": True,
@@ -2532,9 +2058,7 @@ def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
     # The carriers of the same fact must agree.
     assert autonaApp.get("score.1.team.2.losers") is True
-    assert _losers(board, 2).isChecked() is True
     assert autonaApp.get("score.1.team.1.losers") is False
-    assert _losers(board, 1).isChecked() is False
 
 
 def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
@@ -2559,10 +2083,11 @@ def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
 
 
 def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
-    """ClearScore drives the checkbox directly (no blocker), so the names
-    lose their suffix through its `toggled` -- AutonaActions.SetTeamLosers,
-    the same core half a set load uses (SetLoadService.ApplyLosers)."""
-    board = autonaApp.board(1)
+    """ClearScore takes the flags and their " [L]" together
+    (AutonaActions.ClearScore, ADR-005 S2d: SetTeamLosers, the same core
+    half a set load uses through SetLoadService.ApplyLosers; the Qt board
+    drove its checkboxes to it until then)."""
+    board = autonaApp.ready(1)
     apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team2losers": True, "overwrite": True,
@@ -2570,35 +2095,31 @@ def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
     autonaApp.settle()
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB [L]"
 
-    board.ClearScore()
+    _actions().ClearScore(board)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.2.losers") is False
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB"
-    assert _losers(board, 2).isChecked() is False
 
 
 def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     """The flags and the names cross over together in the state
     (AutonaActions.SwapTeams): a name's " [L]" came from its team's flag,
-    and the flag goes with it, so nothing is re-derived. The checkboxes
-    render the result."""
-    board = autonaApp.board(1)
+    and the flag goes with it, so nothing is re-derived."""
+    board = autonaApp.ready(1)
     apply_set(board, {
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team1losers": False, "team2losers": True, "overwrite": True,
     })
     autonaApp.settle()
 
-    board.SwapTeams()
+    _actions().SwapTeams(board)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.losers") is True
     assert autonaApp.get("score.1.team.2.losers") is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB [L]"
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"
-    assert _losers(board, 1).isChecked() is True
-    assert _losers(board, 2).isChecked() is False
 
 
 # ── clearing (ADR-005 S2d) ───────────────────────────────────────────────
@@ -2606,42 +2127,41 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
 # The clears are core operations (AutonaActions.ClearScore / ResetMatch /
 # ClearPlayers / ClearBoard): one save cycle each, where the board used to
 # drive its widgets back to empty -- a cycle per player card, per score
-# spinbox and per losers box. What a board still adds is checked here:
-# the cards follow, the set loaded last is forgotten, the statistics are
-# fetched once, and the Web builds the board first.
+# spinbox and per losers box. What is checked here: one cycle, the set
+# loaded last forgotten, the statistics fetched once, and the Web's clears
+# on the board made at launch.
 
 _CLEARS = {
     # The board host's clear (the board's CommandClearAll until ADR-005
     # S4x): what reset_players runs, without the Web around it.
-    "ClearPlayers": lambda app, board, n: clear_players(board),
-    "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
-    "reset_players": lambda app, board, n: app.web().reset_players(n),
-    "clear_all": lambda app, board, n: app.web().clear_all(n),
+    "ClearPlayers": lambda app, n: clear_players(n),
+    # すべての入力値をリセット (the Qt board's button until ADR-005 S4ac-3).
+    "reset_all": lambda app, n: app.web().reset_all(n),
+    "reset_players": lambda app, n: app.web().reset_players(n),
+    "clear_all": lambda app, n: app.web().clear_all(n),
 }
 
 
-@pytest.mark.parametrize("clear", ["ClearPlayers", "ResetAllInputs"])
-def test_a_clear_is_one_save_cycle_and_the_cards_show_it(autonaApp, clear):
-    board = autonaApp.board(2)
+@pytest.mark.parametrize("clear", ["ClearPlayers", "reset_all"])
+def test_a_clear_is_one_save_cycle(autonaApp, clear):
+    board = autonaApp.ready(2)
     _setPlayerName(board, 1, "LEFT")
     _setPlayerName(board, 2, "RIGHT")
-    board.CommandScoreChange(0, 2)
+    _actions().AdjustScore(board, 1, 2)
     autonaApp.settle()
 
     seen, unsubscribe = _heldUpdateSpy("score.2")
     try:
-        _CLEARS[clear](autonaApp, board, 2)
+        _CLEARS[clear](autonaApp, board)
         autonaApp.settle()
     finally:
         unsubscribe()
 
     assert seen == ["score.2"]
-    for card in board.playerWidgets:
-        assert card.findChild(QLineEdit, "name").text() == ""
     assert not _playerName(autonaApp, 1, board=2)
-    expectedScore = 0 if clear == "ResetAllInputs" else 2
+    assert not _playerName(autonaApp, 2, board=2)
+    expectedScore = 0 if clear == "reset_all" else 2
     assert _score(autonaApp, 1, board=2) == expectedScore
-    assert board.scoreDisplay1.value() == expectedScore
 
 
 def test_a_board_reset_takes_the_team_names_and_keeps_the_counts(autonaApp):
@@ -2649,23 +2169,20 @@ def test_a_board_reset_takes_the_team_names_and_keeps_the_counts(autonaApp):
     names instead (unless it shrinks the roster to one player) and resets
     the counts -- the two differ, as they always have (ADR-005 S2
     decision 3)."""
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(2)
+    board = autonaApp.ready(2)
+    _actions().SetPlayersPerTeam(board, 2)
     autonaApp.settle()
     for team in (1, 2):
-        edit = _teamName(board, team)
-        edit.setText(f"Team {team}")
-        edit.editingFinished.emit()
+        _typeTeamName(board, team, f"Team {team}")
     autonaApp.settle()
 
-    _confirmed(board.ResetAllInputs)
+    autonaApp.web().reset_all(board)
     autonaApp.settle()
 
     assert autonaApp.get("score.2.team.1.teamName") == ""
     assert autonaApp.get("score.2.team.2.teamName") == ""
-    assert _teamName(board, 1).text() == ""
-    assert board.playerNumber.value() == 2
     assert len(autonaApp.get("score.2.team.1.player")) == 2
+    assert len(autonaApp.get("score.2.team.2.player")) == 2
 
 
 @pytest.mark.parametrize("clear", sorted(_CLEARS))
@@ -2678,15 +2195,17 @@ def test_a_clear_refetches_the_stats_once(autonaApp, clear, ids, fetches):
     its id (one fetch per card); the clear asks once now (the board did
     until ADR-005 S3e-5, the operation since: AutonaActions.ClearPlayers),
     and the upset factor is recalculated by the operation."""
-    board = autonaApp.board(1)
-    for card, value in zip((board.team1playerWidgets[0],
-                            board.team2playerWidgets[0]), ids):
-        card.player.SetPlayerId(value)
-        card.player.SetText("name", "SOMEONE")
+    from src.core.PlayerService import PlayerService
+
+    board = autonaApp.ready(1)
+    for team, value in zip((1, 2), ids):
+        player = PlayerService(f"score.1.team.{team}.player.1")
+        player.SetPlayerId(value)
+        player.SetText("name", "SOMEONE")
     autonaApp.settle()
 
     with _statsFetches(board) as counts:
-        _CLEARS[clear](autonaApp, board, 1)
+        _CLEARS[clear](autonaApp, board)
         autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.player.1.id") is None
@@ -2702,25 +2221,26 @@ def test_the_same_set_loads_again_after_a_clear(autonaApp, clear,
     fetch is the set follow's (SetFollowService.fetcher, ADR-005 S3e-7)."""
     from src.core.SetFollowService import SetFollowService
 
-    board = autonaApp.board(1)
+    board = autonaApp.ready(1)
+    follow = SetFollowService(board)
     actions = autonaApp.web()
     with patch.object(SetFollowService.fetcher, "Match") as fetched:
         try:
-            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
-            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
+            follow.LoadSet({"id": "999", "auto_update": "set"})
+            follow.LoadSet({"id": "999", "auto_update": "set"})
             autonaApp.settle()
             assert fetched.call_count == 1
             assert actions.get_set(1) == "999"
 
-            _CLEARS[clear](autonaApp, board, 1)
+            _CLEARS[clear](autonaApp, board)
             autonaApp.settle()
             assert actions.get_set(1) == "0"
 
-            board.setFollow.LoadSet({"id": "999", "auto_update": "set"})
+            follow.LoadSet({"id": "999", "auto_update": "set"})
             autonaApp.settle()
             assert fetched.call_count == 2
         finally:
-            board.StopAutonaUpdate(clear_variables=True)
+            follow.StopFollowing(forget=True)
             autonaApp.settle()
 
 
@@ -2733,58 +2253,48 @@ _WEB_CLEARS = {
 
 
 @pytest.mark.parametrize("route", sorted(_WEB_CLEARS))
-def test_a_web_clear_builds_the_board_first(autonaApp, route):
-    """As GetScoreboard() did before S2d: an unbuilt board is not held,
-    and building it seeds its subtree afresh, so the route builds it and
-    the write waits for 反映 there."""
+def test_a_web_clear_reaches_the_launched_board(autonaApp, route):
+    """The board is made, and held, at launch (ADR-005 S4ac-1): the route's
+    write lands on it and waits for 反映. Until S4ac-3 the route built a
+    board that had no widgets first, as GetScoreboard() did before S2d (an
+    unbuilt board was not held, and building it seeded its subtree
+    afresh)."""
     from src.core.StateManager import StateManager
 
-    autonaApp.dropAllBoards()
-    StateManager.Unset("score.2")
-    autonaApp.settle()
+    autonaApp.ready(2)
     actions = autonaApp.web()
-    try:
-        _WEB_CLEARS[route](actions)
-        autonaApp.settle()
+    _WEB_CLEARS[route](actions)
+    autonaApp.settle()
 
-        board = autonaApp.manager.scoreboards.get(2)
-        assert board is not None
-        assert autonaApp.manager.GetScoreboard(2) is board
-        state = autonaApp.get("score.2")
-        if route in ("reset_match", "clear_all"):
-            for team in ("1", "2"):
-                assert state["team"][team]["score"] == 0
-                assert state["team"][team]["losers"] is False
-            assert (state["match"], state["phase"], state["pool"])                 == ("", "", "")
-            assert state["best_of"] == 0
-        if route in ("reset_players", "clear_all"):
-            for team in ("1", "2"):
-                for slot in state["team"][team]["player"].values():
-                    # A fresh slot has no text keys; the clear adds none.
-                    assert not slot.get("name") and not slot.get("team")
-                    assert slot["seed"] == 0
-                    assert slot["online_avatar"] is None
-            assert all(not card.findChild(QLineEdit, "name").text()
-                       for card in board.playerWidgets)
-        if route == "clear_all":
-            assert len(state["team"]["1"]["player"]) == 1
-            assert board.playerNumber.value() == 1
-        if route == "set_route":
-            assert autonaApp.get("score.2.match") == "Grand Final"
-            assert StateManager.HasPendingChanges("score.2") is True
-            assert StateManager.GetCommitted("score.2.match") \
-                != "Grand Final"
-            assert board.matchCombo.currentText() == "Grand Final"
-    finally:
-        autonaApp.dropAllBoards()
-        StateManager.Unset("score.2")
-        autonaApp.settle()
+    state = autonaApp.get("score.2")
+    if route in ("reset_match", "clear_all"):
+        for team in ("1", "2"):
+            assert state["team"][team]["score"] == 0
+            assert state["team"][team]["losers"] is False
+        assert (state["match"], state["phase"], state["pool"]) \
+            == ("", "", "")
+        assert state["best_of"] == 0
+    if route in ("reset_players", "clear_all"):
+        for team in ("1", "2"):
+            for slot in state["team"][team]["player"].values():
+                # A fresh slot has no text keys; the clear adds none.
+                assert not slot.get("name") and not slot.get("team")
+                assert slot["seed"] == 0
+                assert slot["online_avatar"] is None
+    if route == "clear_all":
+        assert len(state["team"]["1"]["player"]) == 1
+    if route == "set_route":
+        assert autonaApp.get("score.2.match") == "Grand Final"
+        assert StateManager.HasPendingChanges("score.2") is True
+        assert StateManager.GetCommitted("score.2.match") \
+            != "Grand Final"
 
 
 def test_reading_the_set_loaded_last_builds_nothing(autonaApp):
     """get_set reads what core keeps by board (SetLoadService, ADR-005
     S3e-7), in both shells since ADR-005 S4x: the desktop's built the board
     first, for a value no board holds."""
+    from src.core.Actions import AutonaActions
     from src.core.SetLoadService import SetLoadService
     from src.core.StateManager import StateManager
 
@@ -2801,7 +2311,8 @@ def test_reading_the_set_loaded_last_builds_nothing(autonaApp):
             assert actions.get_set(3) == "0"
             autonaApp.settle()
         assert recorder.sets == []
-        assert autonaApp.manager.scoreboards == {}
+        assert not any(AutonaActions.instance.BoardEnsured(number)
+                       for number in AutonaActions.BOARDS)
     finally:
         SetLoadService(2).lastSetSelected = None
         autonaApp.settle()
@@ -2816,8 +2327,7 @@ def test_a_web_team_name_is_one_save_cycle_with_its_crest(autonaApp):
     crest.parent.mkdir(parents=True, exist_ok=True)
     crest.write_bytes(b"")
     try:
-        board = autonaApp.board(2)
-        autonaApp.settle()
+        autonaApp.ready(2)
 
         seen, unsubscribe = _heldUpdateSpy("score.2")
         try:
@@ -2831,8 +2341,8 @@ def test_a_web_team_name_is_one_save_cycle_with_its_crest(autonaApp):
 
         assert seen == ["score.2"]
         assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
-        assert autonaApp.get("score.2.team.1.logo")             == "./user_data/team_logo/alpha.png"
-        assert _teamName(board, 1).text() == "Alpha"
+        assert autonaApp.get("score.2.team.1.logo") \
+            == "./user_data/team_logo/alpha.png"
 
         # A name without a crest takes the crest away, in the same cycle.
         seen, unsubscribe = _heldUpdateSpy("score.2")
@@ -2868,105 +2378,25 @@ def test_a_clear_keeps_the_city(autonaApp):
     assert autonaApp.get("score.1.team.1.player.1.city") == "Shibuya"
 
 
-# ── the player card's write path (headless core Step 5, instalment 2) ────
+# ── the roster (headless core Step 5, instalment 2) ──────────────────────
 #
-# The card's inputs are wired to core/PlayerService by name now
-# (StateSchema.PLAYER_INPUT_KEYS) instead of through a findChildren loop that
-# used each widget's objectName as the last key segment. The service is
-# tested without Qt in tests/test_player_service.py; what needs a real widget
-# is the wiring itself -- that each input still reaches its key, that the
-# board does not write anything back when it renders the result, and that the
-# roster's own size changes still take the state with them.
-
-
-def _tagEdit(board, team, index=0):
-    from src.core import StateSchema as schema
-
-    widgets = board.team1playerWidgets if team == 1 else board.team2playerWidgets
-    return widgets[index].findChild(QLineEdit, schema.PLAYER_TAG_KEY)
-
-
-def test_typing_a_player_tag_reaches_its_key(autonaApp):
-    board = autonaApp.board(1)
-    autonaApp.settle()
-
-    edit = _tagEdit(board, 1)
-    edit.setText("TAG")
-    edit.editingFinished.emit()
-    autonaApp.settle()
-
-    assert _playerName(autonaApp, 1) == "TAG"
-    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "TAG"
-
-
-def test_a_player_tag_edit_is_exactly_three_save_cycles(autonaApp):
-    """Echo-loop check, with the number stated so a fourth writer is noticed.
-
-    One editingFinished runs three operations, and each is a cycle of its
-    own: the display names (`PlayerService.PublishMergedName`, one block for
-    the two spellings), the name-derived images (`PublishImages`, one block
-    for the avatar and the sponsor crests), and the tag itself. The player id
-    is a fourth handler but writes nothing when the slot has not changed
-    hands.
-
-    It was four before the player instalment -- the two name spellings were
-    bare Sets. Nothing is published while the board is held either way, so
-    this is a tripwire rather than a correctness bound.
-    """
-    board = autonaApp.board(1)
-    autonaApp.settle()
-
-    seen, unsubscribe = _heldUpdateSpy("score.1")
-    try:
-        edit = _tagEdit(board, 1)
-        edit.setText("TAG")
-        edit.editingFinished.emit()
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert _playerName(autonaApp, 1) == "TAG"
-    assert seen == ["score.1"] * 3, (
-        f"a player tag edit produced {len(seen)} save cycles instead of 3")
-
-
-def test_finishing_an_edit_in_the_country_combo_writes_no_stray_key(autonaApp):
-    """A pre-existing leak the static wiring closes.
-
-    The country and region combos are editable, so each owns an internal
-    QLineEdit whose objectName is "". `findChildren(QLineEdit)` reached them,
-    so finishing an edit there published `score.1.team.1.player.1.` -- a key
-    with an empty last segment, which nothing reads and every export carried.
-    """
-    from src.core import StateSchema as schema
-
-    board = autonaApp.board(1)
-    autonaApp.settle()
-    player = board.team1playerWidgets[0]
-
-    combo = player._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-    combo.lineEdit().setText("Japan (JP)")
-    combo.lineEdit().editingFinished.emit()
-    autonaApp.settle()
-
-    assert "" not in (autonaApp.get(player.path) or {}), (
-        "an edit in the country combo wrote a nameless key under the player")
+# The Qt player card's inputs were wired to core/PlayerService by name
+# (StateSchema.PLAYER_INPUT_KEYS) from Step 5 and went in ADR-005 S4ac-3;
+# the service is tested in tests/test_player_service.py. What is left here:
+# the roster's own size changes still take the state with them.
 
 
 def test_shrinking_the_roster_takes_the_player_slots_with_it(autonaApp):
-    board = autonaApp.board(2)
-    board.playerNumber.setValue(3)
+    board = autonaApp.ready(2)
+    _actions().SetPlayersPerTeam(board, 3)
     autonaApp.settle()
     for team in (1, 2):
-        widgets = (board.team1playerWidgets if team == 1
-                   else board.team2playerWidgets)
-        for index, widget in enumerate(widgets):
-            widget.SetData({"gamerTag": f"T{team}P{index + 1}"},
-                           dontLoadFromDB=True)
+        for slot in (1, 2, 3):
+            load_player(board, team, {"gamerTag": f"T{team}P{slot}"}, slot)
     autonaApp.settle()
     assert autonaApp.get("score.2.team.1.player.3.name") == "T1P3"
 
-    board.playerNumber.setValue(1)
+    _actions().SetPlayersPerTeam(board, 1)
     autonaApp.settle()
 
     for team in (1, 2):
@@ -2985,12 +2415,13 @@ def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
     -- so their mergedName lost the " [L]" the thumbnail generator renders.
     The player instalment had the new cards read the flag as they were built
     (_AdoptTeamLosers); since ADR-005 S2b there is no per-card flag at all:
-    a card publishes its name with the flag it finds in the state, which
+    a player's name is published with the flag it finds in the state, which
     SetLoadService.ApplyLosers has written before the entrants are poured in.
     """
-    board = autonaApp.board(2)
-    autonaApp.settle()
-    assert len(board.team1playerWidgets) == 1
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.ready(2)
+    assert AutonaActions.RosterCount(board, 1) == 1
 
     apply_set(board, {
         "entrants": [[{"gamerTag": "A1"}, {"gamerTag": "A2"}],
@@ -2999,32 +2430,10 @@ def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
     })
     autonaApp.settle()
 
-    assert len(board.team1playerWidgets) == 2
+    assert AutonaActions.RosterCount(board, 1) == 2
     assert [autonaApp.get(f"score.2.team.1.player.{m}.mergedName")
             for m in (1, 2)] == ["A1 [L]", "A2 [L]"]
     # ...and the team that did not come out of losers stays unflagged.
     assert [autonaApp.get(f"score.2.team.2.player.{m}.mergedName")
             for m in (1, 2)] == ["B1", "B2"]
 
-
-def test_the_details_dialog_apply_button_commits_the_board(autonaApp):
-    """反映 from inside a player card is the board-level publish.
-
-    The button used to call StateManager.CommitHeld with a prefix it sliced
-    out of self.path; it resolves the board through PlayerService and calls
-    the same operation the board's own button does.
-    """
-    from src.core.StateManager import StateManager
-
-    board = autonaApp.board(1)
-    autonaApp.settle()
-    player = board.team1playerWidgets[0]
-
-    _setPlayerName(board, 1, "PENDING")
-    autonaApp.settle()
-    assert StateManager.HasPendingChanges("score.1") is True
-
-    player.btApplyDetails.click()
-    autonaApp.settle()
-
-    assert StateManager.HasPendingChanges("score.1") is False
