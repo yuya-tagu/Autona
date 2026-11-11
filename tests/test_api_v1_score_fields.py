@@ -16,6 +16,7 @@ and published at once headless. A refused field writes nothing.
 import copy
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -83,6 +84,49 @@ def _asRecorded(played):
     return json.loads(json.dumps(played))
 
 
+# The locale the fields' recording ran under: the recording machine's first
+# UI language (a Japanese Windows), which LoadLocale() falls back to when the
+# settings name none. The character rows need none: goldenGames pins the
+# game recording's locale.
+RECORDED_LOCALE = "ja-Jpan-JP"
+LOCALE_SETTINGS = ("program_language", "game_asset_language",
+                   "fg_term_language")
+
+
+@pytest.fixture
+def recordedLocale(autonaApp):
+    """The countries loaded under the recording's locale, whatever the
+    machine's, as tests/test_set_follow_flow.py's recordedLocale.
+
+    A country's value carries its names in the program and export locales
+    ("日本" / "Japan"), taken when the countries are loaded; an English
+    runner wrote every country step with the other names. Pinned the way
+    the harness loads it at start-up (LoadLocale, LoadRoundNames), with the
+    countries reloaded under it; afterwards all three are loaded again
+    under the harness's own settings.
+    """
+    from src.core.SettingsManager import SettingsManager
+    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+
+    def load():
+        AutonaLocaleHelper.LoadLocale()
+        AutonaLocaleHelper.LoadRoundNames()
+        AutonaCountryHelper.LoadCountries()
+        autonaApp.settle()
+
+    realGet = SettingsManager.Get
+    with patch.object(SettingsManager, "Get", lambda key, default=None: (
+            RECORDED_LOCALE if key in LOCALE_SETTINGS
+            else realGet(key, default))):
+        load()
+    assert CountryCatalog.instance.IsLoaded()
+    try:
+        yield
+    finally:
+        load()
+
+
 @pytest.fixture
 def countries(autonaApp):
     """The country data, loaded the way the first card built loads it (the
@@ -138,9 +182,9 @@ def _play(app, client):
 
 
 def test_the_fields_write_what_the_qt_card_wrote(
-        autonaApp, client, countries, monkeypatch):
+        autonaApp, client, recordedLocale, monkeypatch):
     # Against the Qt card itself until ADR-005 S4ac-3, against its
-    # recording since.
+    # recording since (under its locale: recordedLocale).
     onCard = _onTheCard("fields")
     assert [label for label, _recorded, _slot_ in onCard] \
         == [label for label, _body in FIELD_STEPS]
