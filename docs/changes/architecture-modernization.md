@@ -7927,3 +7927,13 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
   5. SCORE ページの X 投稿（画像の生成とクリップボード）と「ブラウザ版を開く」
   6. ほかの React の項目を先に開いてから SCORE を開く／SCORE を先に開いてからほかを開く → どちらも同じ共有ビューで切り替わる（白画面・二重読み込みなし）
   7. `main.log` の `STARTUP phase=window-init` → `core-shown` の間が前のビルドより長くなっていない
+
+
+### 2026-11-12 S4ac-3 の実機確認で見つかった 2 件
+
+- **共有ビューの React のページがスクロールできない**: `web/src/App.css` の `body { overflow: hidden; margin: 0; }`（ScoreboardPage が import）を CRA が全ページの `main.css` にまとめるため、デスクトップの共有ビュー（`/web/<panel>?desktop=1`）にも効き、`html` が visible なので body の hidden が viewport に伝わってホイールでもスクロールバーでも動かなかった（小さいウィンドウで SCORE の下部に届かない）。直し: App.css の body ブロックを削除（`margin: 0` は `index.css` に既にある）。`overflow: hidden` は `ScoreboardPage` のマウント中だけ `document.body.style.overflow` に付け、アンマウントで戻す（`/scoreboard`・`/team` の OBS 用の見た目は同じ）。副作用として `/web`（WebPage）も body の hidden が外れ、スクロールできるようになる。
+- **pin**: `web/e2e/page-scroll.spec.ts`（高さ 120px の viewport で、`/web/<panel>?desktop=1` の全 12 ページがホイールで `scrollY` が動く。文書が viewport に収まるページ（shell-check）は skip。`/scoreboard`・`/team` の body が `overflow: hidden`）。App.css に `body { overflow: hidden }` を戻すと 11 本が落ちることを確認（戻して再ビルド済み）。
+- **タイトルバーの色**: Windows 11 の既定のダークのタイトルバー (32,32,32) がアプリの青みのグレー (25,27,32) と合っていなかった。`src/Helpers/AutonaTitleBar.py` の `ApplyTitleBarTheme` が `DwmSetWindowAttribute` で `DWMWA_CAPTION_COLOR`(35) を `ui_constants.palette()["bg_secondary"]`（サイドバー・ステータスバーと同じ）、`DWMWA_TEXT_COLOR`(36) を `text_primary`、`DWMWA_BORDER_COLOR`(34) を `border_default` にする（COLORREF は 0x00BBGGRR）。全ウィンドウには、`QGuiApplication.focusWindowChanged` に繋いだ `TitleBarThemer` が、`QWindow.type()` が Window / Dialog のものだけに 1 回ずつ当てる（Popup・ToolTip・Splash は除く。QApplication 全体のイベントフィルタは常時の負荷とメニュー枠の誤染色があるので採らなかった）。メインウィンドウは `show()` の直後にも明示的に当てる。Windows 10・非 Windows・呼び出しの失敗では何もせず（debug ログ）、例外を出さない。
+- **pin**: `tests/test_title_bar.py`（属性番号と COLORREF・Window / Dialog には当て Popup / ToolTip には当てない・同じウィンドウに二度当てない・キャプション失敗時に残りを呼ばない・例外を握りつぶす・非 Windows で呼ばない）。実機でのタイトルバーの色はメインが確認する。
+- **スクロールバー**: スクロールできるようになった共有ビューのページに、Chromium の標準の明るいスクロールバーが出て配色から浮いた。`web/src/PanelShell/panelScrollbar.css`（Designer の `styles.css` と同じ規則の複製。Designer 側は変えない）を `html.panel-shell` 配下だけに当てる（`PanelShell` がマウント中だけ `<html>` にクラスとテーマの文字色を付け、アンマウントで戻す）。色は `currentColor`（テーマの `text.primary`）の 28%（hover 45%）で、新しい色は決めていない。OBS 用のページは PanelShell を通らないので変わらない。pin は `page-scroll.spec.ts` の 2 本（`/web/stream?desktop=1` で `scrollbar-width: thin` と `scrollbar-color` が auto でない、`/scoreboard` では auto のまま）
+- **実機（メイン、隔離データの `python main.py`、2026-11-12）**: タイトルバーの色はサイドバーと同じ (25,27,32) を画面上で計測。小さいウィンドウで SCORE ページにダークのスクロールバーが出る。オーナーが実機で見て「問題なし」（スクロール・スクロールバー・タイトルバー・設定ウィンドウのタイトルバー）

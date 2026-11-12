@@ -49,6 +49,16 @@ function ScoreboardPageInner(props: any) {
     const teamKeys = Object.keys(score?.team || {}).sort();
     const scoreSubmit = useScoreSubmit(SCOREBOARD_ID, teamKeys);
 
+    // This standalone page never scrolls (OBS browser source: no scrollbars).
+    // It used to be a global `body { overflow: hidden }` in App.css, which
+    // CRA bundles into every page and so froze the desktop's shared-view
+    // pages (/web/<panel>) too. Scope it to this page's lifetime.
+    React.useEffect(() => {
+        const previous = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = previous; };
+    }, []);
+
     React.useEffect(() => {
         document.title = `Autona ${i18n.t("scoreboard")}`;
         websocketInit();
