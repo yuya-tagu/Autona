@@ -27,9 +27,9 @@ What is left here is the transport, registered once by bootstrap_core() as
   answering while the app winds down starts nothing more. The time to the
   next tick is kept next to them, for any thread (`RemainingMs`), from when a
   poll is asked for: a request's thread tells of it before the main thread
-  starts its timer;
-- `followChanged(board)`: what the board follows changed, for the board's
-  timer row (connected with a bound method, so it dies with the board).
+  starts its timer. (`followChanged(board)`, for the Qt board's timer row,
+  went in ADR-005 S4ad with nothing connected to it: SetFollowService.changes
+  tells the web server.)
 
 QtCore only: the headless shell has it too, so headless set loads fetch and
 follow under its QCoreApplication.
@@ -56,8 +56,6 @@ class _FollowSignals(QObject):
     answered = Signal(object, object)
     # fn: run on the main thread.
     onMain = Signal(object)
-    # board: what the board follows changed.
-    followChanged = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -226,6 +224,3 @@ class AutonaSetFollowUtil:
         if nextTick is None:
             return None
         return max(0, int((nextTick - time.monotonic()) * 1000))
-
-    def FollowChanged(self, board):
-        self.signals.followChanged.emit(int(board))

@@ -216,7 +216,8 @@ def test_bootstrap_gui_steps_and_their_order():
         # bootstrap_core(), before the Window.
         "AutonaActions.instance.MakeBoards()",
         "AutonaShellOperations()",
-        "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost()",
+        # No board host of its own since ADR-005 S4ad (DesktopBoardHost ran
+        # the board operations on the GUI thread): the web layer's one.
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
         "AutonaWebOperations.openSetSelection"
@@ -255,11 +256,13 @@ def test_the_shared_wiring_steps():
 def test_both_shells_follow_a_game_load_with_the_same_roster():
     """A game load's roster (the game's players per team, the default
     characters per player) is AutonaActions.ApplyGameRoster, run through
-    the shell's board host. It was each built board's onLoad handler until
-    ADR-005 S3e-6, so the headless shell's boards never followed a load.
-    One function makes the connection: bootstrap_gui() for the desktop
-    (the order: test_bootstrap_gui_steps_and_their_order) and the headless
-    shell for its loader. The window does not make it again. (The Qt boards'
+    the board host -- with the set length and the commit (in a finally), in
+    one save block (ADR-005 S4ad: the commit was the desktop asset adapter's,
+    after onLoad, until then). It was each built board's onLoad handler until ADR-005
+    S3e-6, so the headless shell's boards never followed a load. One
+    function makes the connection: bootstrap_gui() for the desktop (the
+    order: test_bootstrap_gui_steps_and_their_order) and the headless shell
+    for its loader. The window does not make it again. (The Qt boards'
     onLoad handler only showed the state from S3e-6 and went with them in
     ADR-005 S4ac-3.)"""
     assert _steps("wire_game_roster") == ["game_loaded.connect(apply)"]
@@ -268,7 +271,28 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
     apply = next(node for node in ast.walk(tree)
                  if isinstance(node, ast.FunctionDef) and node.name == "apply"
                  and "ApplyGameRoster" in ast.unparse(node))
-    assert "AutonaWebOperations.boardHost.Run(" in ast.unparse(apply)
+    assert "AutonaWebOperations.boardHost.Run(run)" in ast.unparse(apply)
+    run = next(node for node in ast.walk(apply)
+               if isinstance(node, ast.FunctionDef) and node.name == "run")
+    block, = run.body
+    assert isinstance(block, ast.With)
+    assert ast.unparse(block.items[0]) == "StateManager.SaveBlock()"
+    # The commit in a finally: a roster that raises leaves nothing of the
+    # load behind 反映 (the ADR-005 S4ad review; its behaviour:
+    # test_scoreboard_operations' test_a_game_load_whose_roster_raises_
+    # still_commits).
+    guarded, = block.body
+    assert isinstance(guarded, ast.Try) and not guarded.handlers
+    assert [ast.unparse(statement) for statement in guarded.body] == [
+        "AutonaActions.instance.ApplyGameRoster(replaced)",
+        "AutonaActions.instance.RepublishBestOfs()"]
+    assert [ast.unparse(statement) for statement in guarded.finalbody] == [
+        "AutonaActions.instance.CommitGameLoad()"]
+    # Nothing else commits a load: not the desktop's asset adapter.
+    for path in ("src/AutonaGameAssetManager.py", "src/headless.py",
+                 "src/Autona.py"):
+        assert not [call for call in _calls(path)
+                    if "CommitGameLoad" in call], path
     counts = {shell: sum(call.startswith("wire_game_roster(")
                          for call in _calls(shell))
               for shell in ("src/bootstrap.py", "src/Autona.py",
@@ -660,7 +684,8 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["hotkeys_applied"] is True
     assert result["country_helper"]
     assert result["slot_order"] == ["provider:1386", "restore"]
-    assert result["board_host"] == "DesktopBoardHost"
+    # The web layer's own board host, as headless (ADR-005 S4ad).
+    assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True, True]
     assert result["boards_ensured"] == [True, True, True]

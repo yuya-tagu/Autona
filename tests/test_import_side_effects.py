@@ -213,9 +213,10 @@ shell_operations = importlib.import_module(
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
 # WebServer.__init__ registers it on the app.
 web_server = importlib.import_module("src.AutonaWebServer").WebServer
-# The web operations of both shells (ADR-005 S3c). The desktop's board host,
-# game loader and shell operations (S3e-9) are registered by bootstrap_gui(),
-# never on import.
+# The web operations of both shells (ADR-005 S3c). The desktop's game loader
+# and shell operations (S3e-9) are registered by bootstrap_gui(), never on
+# import; the board host is the module's own, the same in both shells since
+# ADR-005 S4ad.
 web_operations = importlib.import_module("src.AutonaWebOperations")
 # The set follow (ADR-005 S3e-7): core's service and the Qt transport that
 # bootstrap_core() registers on it. Importing either registers, builds and

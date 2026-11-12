@@ -293,9 +293,9 @@ steps.append(["segment crew", shown()])
 segment["crew"].click()
 steps.append(["segment crew again", shown()])
 
-# From elsewhere -- v1's PUT, through the real route table (on this thread,
-# the GUI thread, as the board host runs it) -- and core directly: the
-# segment follows as the board does.
+# From elsewhere -- v1's PUT, through the real route table (on this
+# thread, under the board host's lock) -- and core
+# directly: the segment follows as the board does.
 from src.AutonaApiV1 import api_v1
 from src.AutonaWebServer import _build_web_app
 
@@ -307,6 +307,26 @@ steps.append(["v1 singles", dict(shown(), status=answer.status_code)])
 
 AutonaActions.instance.SetBattleFormat("team")
 steps.append(["core team", shown()])
+
+# v1's PUT from a request thread, the operator's click right after it
+# (ADR-005 S4ad: the board operations run on the calling thread). The
+# request's notice reaches the window queued, the click's at once, so the
+# request's comes in last: the segment shows the format in force, not the
+# format that notice carries.
+import threading
+answers = []
+request = threading.Thread(target=lambda: answers.append(
+    web.test_client().put("/api/v1/battle-format",
+                          json={"format": "crew"}).status_code))
+request.start()
+request.join()
+# Switched on the request's thread before it answered; the window's notice
+# is still queued.
+steps.append(["v1 from a thread", {"status": answers,
+                                   "format": shown()["format"]}])
+segment["singles"].click()
+app.processEvents()
+steps.append(["v1 from a thread, then the segment", shown()])
 
 # The switches wrote to no held board either (each built the format's
 # board's widgets until ADR-005 S4ac-3).
@@ -342,15 +362,19 @@ def test_the_real_window_s_segment_follows_every_switch(tmp_path):
                                    "status": 200}
     assert steps["core team"] == {"segment": ["team"], "format": "team",
                                   "active": 2}
+    assert steps["v1 from a thread"] == {"status": [200], "format": "crew"}
+    assert steps["v1 from a thread, then the segment"] == {
+        "segment": ["singles"], "format": "singles", "active": 1}
     assert steps["pending after the switches"] == [False, False, False]
 
 
 def test_the_notice_reaches_the_gui_thread_from_a_request_thread(
-        autonaApp, client, settings):
-    """The desktop runs the switch on its GUI thread (the board host's
-    Run), so the window's slot -- which sets the sidebar's segment (and
-    built and showed a Qt board until ADR-005 S4ac-3) -- runs there whatever
-    thread the request came in on."""
+        autonaApp, client, settings, boardLock):
+    """The switch runs on the request's thread, under the board host's lock
+    (ADR-005 S4ad; the desktop's host ran it on its GUI thread until then),
+    and the window's slot -- which sets the sidebar's segment (and built and
+    showed a Qt board until ADR-005 S4ac-3) -- still runs on the GUI thread:
+    the bridge's signal, emitted on the request's thread, is queued there."""
     threads = []
     switched = []
 
@@ -358,10 +382,8 @@ def test_the_notice_reaches_the_gui_thread_from_a_request_thread(
         threads.append((fmt, threading.current_thread()))
 
     def switching(fmt):
-        # Core's notice, on the thread that switched: the board host's Run
-        # put the switch on the GUI thread, so the window's slot is direct
-        # and has run before the request answers.
-        switched.append((fmt, threading.current_thread()))
+        # Core's notice, on the thread that switched, under the host's lock.
+        switched.append((fmt, threading.current_thread(), boardLock.held()))
 
     bridge = StateManagerBridge.instance
     bridge.battle_format_changed.connect(seen)
@@ -374,7 +396,9 @@ def test_the_notice_reaches_the_gui_thread_from_a_request_thread(
         AutonaActions.battleFormatChanges.unsubscribe(switching)
         bridge.battle_format_changed.disconnect(seen)
     assert body.status_code == 200
-    assert switched == [("team", threading.main_thread())]
+    [(fmt, thread, locked)] = switched
+    assert (fmt, locked) == ("team", True)
+    assert thread is not threading.main_thread()
     assert threads == [("team", threading.main_thread())]
 
 

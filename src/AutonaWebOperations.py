@@ -15,26 +15,22 @@ These kinds live here:
   options, the game / country / player DB readers, the tournament URL.
 - the operations ADR-005 S2 moved into core (swap, the clears, the set
   fields, losers, the team name, reset score, and the readers get_swap /
-  get_set / get_scoreboard). They call core in both shells too; what the
-  desktop adds around that call is its GUI thread, where it runs them (see
-  DesktopBoardHost.Run). Until ADR-005 S4ac-3 removed the Qt SCORE it also
-  let the field being typed in on a board's widgets finish first. The board
-  itself is core's, made at launch in both shells, and held on the desktop
-  (ADR-005 S4ac-1); until then the desktop built a board first, because an
-  unbuilt one was not held and the seed of its build wiped the write. The
-  player / character counts of
+  get_set / get_scoreboard). They call core in both shells, on the calling
+  thread, one at a time (`boardHost`, the one BoardHost of both shells:
+  its lock). The board itself is core's, made at launch in both shells,
+  and held on the desktop (ADR-005 S4ac-1) -- what a write leaves there is
+  published by 反映, headless at once. The player / character counts of
   boards 1/2 are core's too since S3e-6 (AutonaActions.SetRoster; they were
   the board's spinboxes, and a shell without the board refused them).
 
-  That difference is one object the shell registers, `boardHost`: the
-  headless default (`BoardHost`) runs the operation on the calling thread,
-  one at a time -- the write is published at once, which is right there:
-  there is no 反映 button. bootstrap_gui() registers `DesktopBoardHost`.
+  Until ADR-005 S4ad the desktop registered a host of its own
+  (DesktopBoardHost) that ran them on its GUI thread, for the Qt SCORE's
+  widgets (a field being typed in finished first, a board built first);
+  the widgets went with S4ac-3 and the GUI thread with S4ad.
 - the crew board's operations (its members' stocks and active member, and
   its swap / resets / clears / set fields) and the caster line-up's
   (ADR-005 S3e-2): core's CrewBattleService and CommentaryService, in both
-  shells. The crew ones go through the board host like the S2 ones (the
-  desktop runs them on its GUI thread); the
+  shells. The crew ones go through the board host like the S2 ones; the
   line-up has no board and is written on the calling thread. The board and
   the Commentary page render what was written.
 - 配信設定's (ADR-005 S4e): core's StreamService -- the channels, the stream
@@ -48,9 +44,7 @@ These kinds live here:
   runs on the main thread. The Event page renders what was written.
 - the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
   players and the legacy update-team) and the tag lookup -- core's
-  PlayerService.ApplyData, through the board host like the S2 ones. The
-  desktop's host adds what the board's cards do around a load (the typed
-  combo text).
+  PlayerService.ApplyData, through the board host like the S2 ones.
 - the statistics of boards 1/2 (ADR-005 S3e-5): core's StatsService,
   through the board host like the S2 ones, in both shells. The fetches are
   the shell's (StatsService.fetcher) and answer into the state later.
@@ -91,6 +85,7 @@ import threading
 
 import orjson
 from loguru import logger
+from qtpy.QtCore import QCoreApplication
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
@@ -128,8 +123,8 @@ from .core.TournamentService import TournamentService
 from .core import StateSchema as schema
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .Helpers.AutonaQtHelper import (
-    GuiMarshalAborted, gui_thread_sync)
+from .Helpers import AutonaQtHelper
+from .Helpers.AutonaQtHelper import GuiMarshalAborted
 
 
 NOT_AVAILABLE_MESSAGE = "not available in headless"
@@ -176,31 +171,53 @@ def _on_gui_thread(call, what):
         raise NotAvailable(SHUTTING_DOWN_MESSAGE) from None
 
 
-class BoardHost:
-    """Where the S2 operations run: the headless shell's, the default until
-    a shell registers another, and all of the desktop's but Run since
-    ADR-005 S4ac-3 (DesktopBoardHost).
+def _refuse_at_shutdown():
+    """NotAvailable (the 503) for a board operation off the main thread once
+    the app is shutting down -- what `_on_gui_thread` answered for one while
+    the desktop's host waited for the GUI thread (until ADR-005 S4ad). With
+    no application at all (a script, a test without Qt) there is no shutdown
+    to refuse for."""
+    if AutonaQtHelper.in_gui_thread() or QCoreApplication.instance() is None:
+        return
+    reason = AutonaQtHelper.gui_unavailable_reason()
+    if reason is not None:
+        logger.info(f"web operations: a board operation not run: {reason}")
+        raise NotAvailable(SHUTTING_DOWN_MESSAGE)
 
-    The operation runs on the calling thread; nothing is built. A board no
-    shell has (neither 1/2 nor the crew board) is refused by the operations
-    themselves (NotAvailable), in both shells. The hooks below that do
-    nothing (Prepare, CommitEdit, DiscardTypedText, PlayerLoaded) were the
-    desktop's board widgets' until S4ac-3, and go in S4ad.
+
+class BoardHost:
+    """Where the board operations run, in both shells: on the calling thread,
+    one at a time. The one host of both shells since ADR-005 S4ad -- until
+    then the desktop registered DesktopBoardHost, which ran them on its GUI
+    thread for the Qt SCORE's widgets (removed in S4ac-3) and had hooks
+    around them (Prepare, Built, CommitEdit, DiscardTypedText, PlayerLoaded)
+    that did nothing once the widgets were gone.
+
+    Nothing is built: core makes every board at launch in both shells
+    (AutonaActions.MakeBoards). A board no shell has (neither 1/2 nor the
+    crew board) is refused by the operations themselves (NotAvailable).
     """
 
     def __init__(self):
-        # One operation at a time. An S2 operation is several core calls
+        # One operation at a time. A board operation is several core calls
         # (clear_all is four save cycles, /api/v1's PATCH set up to three
-        # calls in one task); the desktop queues them on its GUI thread, and
-        # with none, two requests' threads would interleave them. Re-entrant:
-        # an operation run here runs others here (PATCH set's task calls
-        # set_route).
+        # calls in one task), and two callers' threads would interleave
+        # them. Re-entrant: an operation run here runs others here (PATCH
+        # set's task calls set_route).
         #
-        # Taken by the web layer's request threads and, headless, by the
-        # main thread too: a game load's roster runs here
-        # (bootstrap.wire_game_roster, ADR-005 S3e-6). Never with
-        # StateManager.lock held -- it is always the outermost lock, so it
-        # cannot close a cycle with that one. INVARIANT: nothing run under
+        # Taken by the web layer's request threads and by the main thread:
+        # a game load's roster and commit (bootstrap.wire_game_roster,
+        # ADR-005 S3e-6 / S4ad), the set follow's answers and poll
+        # (SetFollowService), the desktop's game load from its rebuild to
+        # its cycle's close (the asset adapter's _Publish, the roster and
+        # commit inside it), its board hotkeys (±1, reset, 反映, swap) and
+        # format switch (ADR-005 S4ad: until then the desktop's operations
+        # ran on its GUI thread, which serialized them with those). Not
+        # fair: request threads may pass a waiting main thread over (RLock
+        # is not FIFO); the operations are short, so it waits for a few
+        # (ADR-005 S4ad review, accepted). Never with StateManager.lock
+        # held -- it is always the outermost lock, so it cannot close a
+        # cycle with that one. INVARIANT: nothing run under
         # it waits for the main thread (a gui_thread_sync, a queued call
         # waited on, a join of something that needs it). The main thread
         # may be the one waiting for this lock, so such a wait never ends.
@@ -208,56 +225,50 @@ class BoardHost:
         # whose change relay runs on the main thread (`_save_record`,
         # ADR-005 S3e-4 review).
         self._lock = threading.RLock()
+        # How deep the calling thread is in Run: the shutdown check is the
+        # outermost call's.
+        self._depth = threading.local()
 
-    def Run(self, op):
-        """Run `op()` where this shell runs board operations."""
+    def Run(self, op, atShutdown=False):
+        """Run `op()` on the calling thread, under the board lock.
+
+        Once the app is shutting down (gui_unavailable_reason(): the window
+        closed and the background tasks stopped, or the event loop over),
+        an operation from a thread other than the main one -- a late
+        request's -- is not run: NotAvailable, the 503 it answered when the
+        desktop's host waited for the GUI thread (ADR-005 S3f-4 review;
+        kept as a flag since S4ad, which runs the operations on the calling
+        thread), logged at INFO, and nothing written. The same in both
+        shells. Not refused: the main thread's (it ends the shutdown
+        itself), an operation already running (checked on the outermost
+        call, so one is not split), and `atShutdown` -- the shutdown's own
+        writes (a game load's settle: the asset adapter's
+        _SettleUnannounced, the headless _SettleStopped).
+        """
         with self._lock:
-            return op()
-
-    def Prepare(self, board):
-        """Make board `board` ready to be written or read: nothing, as both
-        shells make all three at launch (AutonaActions.MakeBoards). The
-        desktop made a board core did not have again, with its widgets,
-        until ADR-005 S4ac-3."""
-
-    def Built(self, board):
-        """Whether board `board` is there without Prepare: always, as both
-        shells make all three at launch (AutonaActions.MakeBoards:
-        bootstrap_gui(), src/headless._SeedBoards). The desktop read core's
-        flag (AutonaActions.BoardEnsured) until ADR-005 S4ac-3."""
-        return True
-
-    def CommitEdit(self, board):
-        """Finish the field being typed in on board `board`: nothing, with
-        no board widget (the desktop's, until ADR-005 S4ac-3)."""
-
-    def DiscardTypedText(self, board):
-        """Drop, on every card of board `board`, the text typed into its
-        combos and never picked (after a players' clear): nothing, with no
-        card (the desktop's, until ADR-005 S4ac-3)."""
+            depth = getattr(self._depth, "value", 0)
+            if depth == 0 and not atShutdown:
+                _refuse_at_shutdown()
+            self._depth.value = depth + 1
+            try:
+                return op()
+            finally:
+                self._depth.value = depth
 
     def ClearPlayers(self, board, no_mains=False):
         """Empty every player slot of board `board` (1/2), and forget the set
         it loaded last -- loading it again loads it again (ADR-005 S3e-7: a
         set loads here too). The same in both shells since ADR-005 S4x (the
-        desktop's ran the board's CommandClearAll), in its order: the field
-        being typed in is finished first, so the clear takes a card's typed
-        text with it (CommitEdit), and after the clear every card drops the
-        text typed into its combos and never picked -- the combo whose list
-        is open included, unlike after a load from elsewhere: the clear is
-        the operator's operation on the board (DiscardTypedText). Both are
-        nothing with no widget -- in both shells since ADR-005 S4ac-3, which
-        removed the Qt SCORE. Prepared first, as every board operation. The
-        statistics are the operation's (AutonaActions.ClearPlayers, ADR-005
-        S3e-5). Any other board is refused before anything is written."""
+        desktop's ran the board's CommandClearAll; the field being typed in
+        and the typed combo text that clear finished and dropped went with
+        the Qt SCORE, S4ac-3). The statistics are the operation's
+        (AutonaActions.ClearPlayers, ADR-005 S3e-5). Any other board is
+        refused before anything is written."""
         number = _require_board(board)
         if number not in AutonaActions.SCORE_BOARDS:
             # The crew board's members are CrewBattleService.ClearCrew's.
             raise NotAvailable(f"scoreboard {number} has no player slots")
-        self.Prepare(board)
-        self.CommitEdit(board)
         AutonaActions.instance.ClearPlayers(board, no_mains)
-        self.DiscardTypedText(board)
         SetLoadService(number).lastSetSelected = None
 
     def ResetCounts(self, board):
@@ -280,53 +291,19 @@ class BoardHost:
             return None
         return SetLoadService(_board(board)).lastSetSelected
 
-    def PlayerLoaded(self, board, team, player, cleared):
-        """A player was loaded into slot `player` of state team `team` on
-        board `board` (1/2); `cleared`: whether the load cleared the slot
-        first. Called inside the load's save block. With no card there is
-        nothing to tidy up (the desktop's cards dropped their typed combo
-        text here until ADR-005 S4ac-3). (The statistics the load calls for are its own
-        -- PlayerService.Announce, ADR-005 S3e-5 -- in both shells.)
-        """
-
-
-class DesktopBoardHost(BoardHost):
-    """The desktop's board host: the operations on its GUI thread.
-    Registered by bootstrap_gui().
-
-    Only Run is the desktop's own since ADR-005 S4ac-3, which removed the Qt
-    SCORE: the rest is the headless host's (BoardHost). Core makes every
-    board at launch (AutonaActions.MakeBoards, bootstrap_gui(); S4ac-1), so
-    there is nothing to prepare -- until S4ac-3 Prepare made a board core did
-    not have again, with its widgets (AutonaScoreboardManager), which only a
-    test's harness could bring about -- and nothing is built: no field being
-    typed in to finish, no card to tidy up. The hooks left empty that way
-    (Prepare, CommitEdit, DiscardTypedText, PlayerLoaded) go in S4ad, with
-    Run's GUI thread."""
-
-    def Run(self, op):
-        # On the GUI thread, not under the headless host's lock (reviewed in
-        # ADR-005 S3e-4, kept): a card committed a typed sponsor / tag in
-        # two writes on that thread -- the field, then the display name,
-        # images and id -- and a swap, a clear or a load landing between the
-        # two from another thread left the display name on the wrong slot.
-        # Queued on the GUI thread, an operation runs between two events,
-        # never inside one. The cards went with the Qt SCORE (ADR-005
-        # S4ac-3); taking the operations off the GUI thread is S4ad's.
-        return _on_gui_thread(gui_thread_sync(op), "a board operation")
-
 
 # ── Registrations (filled in by the shell) ───────────────────────────────
 
-# Where the S2 operations run: BoardHost (no board) unless the desktop
-# registered its DesktopBoardHost (bootstrap_gui()).
+# Where the board operations run: the one BoardHost of both shells (ADR-005
+# S4ad; a module attribute still, so a test can give an operation its own).
 boardHost = BoardHost()
 
 
 def current_board_host():
-    """The board host registered now -- what core's set follow runs its
-    board operations through (SetFollowService.boardHost, bootstrap_core();
-    read when used, as the desktop registers its own afterwards)."""
+    """The board host now -- what core's set follow runs its board
+    operations through (SetFollowService.boardHost, bootstrap_core(); core
+    does not import the web layer). Read when used, so a test that gives
+    the operations a host of its own gives it to the set follow too."""
     return boardHost
 
 # How a game is loaded by codename, with the asset adapter's signature:
@@ -1242,9 +1219,12 @@ def set_battle_format(fmt):
     """Switch the battle format (AutonaActions.SetBattleFormat, the sidebar's
     operation): True if it switched, False for the format in force (nothing
     written, nothing notified). ValueError for an unknown format, before
-    anything is written. Run where the board operations run: on the desktop
-    that is the GUI thread, so the notice reaches the window there and the
-    format's board is built (and shown) before this returns."""
+    anything is written. Run under the board lock, on the calling thread
+    (the sidebar's switch too, ADR-005 S4ad), so two switches never
+    interleave their check and their writes. The desktop's window hears of
+    it through the bridge's battle_format_changed: queued to the GUI thread
+    from another thread (on the GUI thread until S4ad, so it was shown
+    before this returned)."""
     return boardHost.Run(lambda: AutonaActions.instance.SetBattleFormat(fmt))
 
 
@@ -1262,8 +1242,9 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
     A board other than 1/2/3 has none of them: its set fields (best of,
     phase, pool, match, losers) and counts are refused before anything is
     written (NotAvailable: 503, legacy / Socket.IO / v1 alike), and a team
-    name for it writes nothing, as before. The board is not asked for
-    either: the desktop's host would log an unknown scoreboard.
+    name for it writes nothing, as before. (Until ADR-005 S4ad the board
+    host was not asked for it either: the desktop's would have logged an
+    unknown scoreboard.)
     """
     host = boardHost
 
@@ -1271,10 +1252,10 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # The counts are core's in both shells: boards 1/2's roster
         # (AutonaActions.SetRoster, ADR-005 S3e-6 -- the board's two
         # spinboxes until then, so a shell with no board refused them), the
-        # crew board's member count (S3e-2). The board is prepared first (on
-        # the desktop: made again only if core does not have it, ADR-005
-        # S4ac-1; built until then, so the change was held for 反映 and not
-        # wiped by the seed of a later build).
+        # crew board's member count (S3e-2). Every board is made at launch
+        # (ADR-005 S4ac-1), so the change is held for 反映 on the desktop;
+        # until then the board was built first, or the seed of a later build
+        # wiped it.
         crew = _is_crew(scoreboard)
         if players is not None or characters is not None:
             # Boards 1/2 and the crew board have counts; any other is
@@ -1282,23 +1263,22 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
             # were the board's widgets (503, legacy / Socket.IO / v1 alike)
             # -- not answered OK having changed nothing.
             _require_board(scoreboard)
-            host.Prepare(scoreboard)
 
         # best-of=<Best Of Amount>
         if bestOf is not None:
-            _apply_set_fields(host, scoreboard, {'bestOf': int(bestOf)})
+            _apply_set_fields(scoreboard, {'bestOf': int(bestOf)})
 
         # phase=<Phase Name>
         if phase is not None:
-            _apply_set_fields(host, scoreboard, {'tournament_phase': phase})
+            _apply_set_fields(scoreboard, {'tournament_phase': phase})
 
         # pool=<Pool Name>
         if pool is not None:
-            _apply_set_fields(host, scoreboard, {'tournament_pool': pool})
+            _apply_set_fields(scoreboard, {'tournament_pool': pool})
 
         # match=<Match Name>
         if match is not None:
-            _apply_set_fields(host, scoreboard, {'round_name': match})
+            _apply_set_fields(scoreboard, {'round_name': match})
 
         # players=<Amount of Players> (the crew board: its member count).
         # Each count is a save cycle of its own, as each spinbox's was.
@@ -1319,7 +1299,7 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # Set-shaped: `team` is the set's team, which a swap moves to the
         # other column (SetLoadService.ApplyLosers).
         if losers is not None:
-            _apply_set_fields(host, scoreboard, {
+            _apply_set_fields(scoreboard, {
                 'team' + str(team) + 'losers':
                     False if losers.lower() == 'false' else True})
 
@@ -1330,8 +1310,6 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # the column this addressed.
         if teamName is not None and team is not None:
             board = _board(scoreboard)
-            if crew or board in AutonaActions.SCORE_BOARDS:
-                host.Prepare(scoreboard)
             idx = int(team)
             if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
                 with StateManager.SaveBlock():
@@ -1363,7 +1341,7 @@ def _set_characters(host, scoreboard, count):
     AutonaActions.instance.SetCharactersPerPlayer(scoreboard, count)
 
 
-def _apply_set_fields(host, scoreboard, payload):
+def _apply_set_fields(scoreboard, payload):
     """One set_route field, as the set payload it has always been.
 
     On boards 1/2 that payload is applied by core (ADR-005 S2d), as the
@@ -1371,8 +1349,8 @@ def _apply_set_fields(host, scoreboard, payload):
     round text (blanked by every payload that carries none --
     SetLoadService.ApplyMatchInfo), a best of (AutonaActions.SetBestOf, S2e;
     0 is not carried -- SetLoadService.BestOfFromSetData) and a losers flag
-    (ApplyLosers). The board is prepared first, so on the desktop the write
-    waits for 反映 like any other. The crew board reads the payload by its
+    (ApplyLosers). On the desktop the write waits for 反映 like any other
+    (the board is held from launch). The crew board reads the payload by its
     own rules (CrewBattleService.ApplySetData, S3e-2). Any other board has
     none to apply it to: refused before anything is written (NotAvailable),
     as the counts are. It was emitted on that board's signal: the headless host
@@ -1380,7 +1358,6 @@ def _apply_set_fields(host, scoreboard, payload):
     not have (500).
     """
     board = _require_board(scoreboard)
-    host.Prepare(scoreboard)
     if board == CREW_BOARD:
         CrewBattleService(CREW_BOARD).ApplySetData(payload)
         return
@@ -1400,8 +1377,7 @@ def set_team_losers(scoreboard, team, value):
     the " [L]" on that team's player names -- not set_route's set-shaped
     `team{N}losers` payload, which lands on the other side of a swapped
     board. What that payload did besides is kept, because it is visible
-    from outside: the board is prepared first (built and held on the
-    desktop), and the match-info half of the payload blanks match_en for a
+    from outside: the match-info half of the payload blanks match_en for a
     payload without round_name_en -- also when the flag does not change.
     Applied first, in the same save block: one save cycle, as before.
     """
@@ -1411,7 +1387,6 @@ def set_team_losers(scoreboard, team, value):
         board = _board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             return f"ERROR: scoreboard {scoreboard} is not available"
-        host.Prepare(scoreboard)
         with StateManager.SaveBlock():
             SetLoadService(board).ApplyMatchInfo({})
             AutonaActions.instance.SetTeamLosers(scoreboard, team, value)
@@ -1424,15 +1399,11 @@ def swap_teams(scoreboard):
     # A 1v1 / team board's swap is a state operation (AutonaActions.SwapTeams,
     # ADR-005 S2c); the crew board's is CrewBattleService.SwapTeams (S3e-2).
     # The flag is `score.{n}.teamsSwapped` on all three (the crew board's since
-    # S4w). Either way the board lets the field being typed in finish first,
-    # so the text travels with the swap as it did when the widget swapped its
-    # rows. Any other board: NotAvailable (`_require_board`).
+    # S4w). Any other board: NotAvailable (`_require_board`).
     host = boardHost
 
     def run():
         board = _require_board(scoreboard)
-        host.Prepare(scoreboard)
-        host.CommitEdit(scoreboard)
         if board == CREW_BOARD:
             CrewBattleService(CREW_BOARD).SwapTeams()
         else:
@@ -1449,19 +1420,14 @@ def _swap_flag(board):
 
 def get_swap(scoreboard):
     # The live flag: a swap is reported as soon as it is made, before 反映
-    # publishes it. The board is prepared first, as the route always did
-    # (nothing to do: every board is made at launch, ADR-005 S4ac-1). Any
-    # other board: NotAvailable, before anything is read.
+    # publishes it. Any other board: NotAvailable, before anything is read.
     board = _require_board(scoreboard)
-    boardHost.Prepare(scoreboard)
     return str(_swap_flag(board))
 
 
 def get_scoreboard(scoreboard):
-    # Read from the state. The board is prepared first: core made every
-    # board at launch, whole, in both shells (AutonaActions.MakeBoards,
-    # ADR-005 S4ac-1), so there is nothing to do (until ADR-005 S4ac-3 the
-    # desktop made again a board core did not have). Until S4ac-1 the
+    # Read from the state: core made every board at launch, whole, in both
+    # shells (AutonaActions.MakeBoards, ADR-005 S4ac-1). Until S4ac-1 the
     # desktop built the board here: building wrote its full initial subtree,
     # and an unbuilt board's was only the skeleton (StateSchema.SeedBoard).
     # Committed view: pending (not yet 反映-applied) desktop edits must not
@@ -1469,7 +1435,6 @@ def get_scoreboard(scoreboard):
     # has is refused first (503, ADR-005 S4x review): the desktop built
     # nothing for it and the route answered 500 for the None it read.
     _require_board(scoreboard)
-    boardHost.Prepare(scoreboard)
     return StateManager.GetCommitted(f'score.{_board(scoreboard)}')
 
 
@@ -1480,10 +1445,7 @@ def get_pending(scoreboard):
     lock. Whether it is held is the shell's: the desktop's boards 1/2 are, the
     crew board and every headless board are not, and those have nothing
     pending. get_scoreboard stays the published view; the route answering this
-    one is guarded, not READ. Prepared first, like get_scoreboard -- never
-    with the lock held: the desktop's Prepare waited for the GUI thread when
-    it could build (until ADR-005 S4ac-3)."""
-    boardHost.Prepare(scoreboard)
+    one is guarded, not READ."""
     board = _board(scoreboard)
     prefix = f"score.{board}"
     with StateManager.lock:
@@ -1505,7 +1467,6 @@ def reset_scores(scoreboard):
         if board != CREW_BOARD:
             AutonaActions.instance.ResetScore(scoreboard)
             return "OK"
-        host.Prepare(scoreboard)
         CrewBattleService(CREW_BOARD).ResetStocks()
         return "OK"
 
@@ -1536,13 +1497,8 @@ def _reset_match(scoreboard):
 def _clear_players(host, scoreboard):
     # Every member row of the crew board emptied (core's, S3e-2); a 1v1 /
     # team board's players through its host (BoardHost.ClearPlayers, which
-    # refuses any other board). The field being typed in finishes first, as
-    # boards 1/2's clear finishes it: the clear then takes the typed text
-    # with it, instead of leaving it in the field to be written once the
-    # operator leaves it.
+    # refuses any other board).
     if _is_crew(scoreboard):
-        host.Prepare(scoreboard)
-        host.CommitEdit(scoreboard)
         CrewBattleService(CREW_BOARD).ClearCrew()
         return
     host.ClearPlayers(scoreboard)
@@ -1562,7 +1518,6 @@ def reset_match(scoreboard):
 
     def run():
         _require_board(scoreboard)
-        host.Prepare(scoreboard)
         _reset_match(scoreboard)
         return "OK"
 
@@ -1583,17 +1538,12 @@ def clear_all(scoreboard):
     # Not AutonaActions.ClearBoard (the desktop's reset-all): this keeps the
     # team names (unless the roster shrinks to one player: SetRoster), and
     # the player / character counts change between the reset and the
-    # players' clear -- in
-    # this order, which decides what the mains end up as. On the crew board
-    # the field being typed in finishes before anything is reset (see
-    # `_clear_players`), so the match bar's reset takes its text too.
+    # players' clear -- in this order, which decides what the mains end up
+    # as.
     host = boardHost
 
     def run():
         _require_board(scoreboard)
-        host.Prepare(scoreboard)
-        if _is_crew(scoreboard):
-            host.CommitEdit(scoreboard)
         _reset_match(scoreboard)
         _reset_counts(host, scoreboard)
         _clear_players(host, scoreboard)
@@ -1606,24 +1556,17 @@ def reset_all(scoreboard):
     """すべての入力値をリセット on board 1/2 (AutonaActions.ClearBoard): the
     players, the score, the match bar, the team names with their crests and
     the best of, in one save cycle; the counts stay. Not clear_all, which
-    resets the counts and keeps the team names (ADR-005 S2 decision 3). What
-    the desktop's button adds around it, through the host: the field being
-    typed in finishes first, so the clear takes its text; the cards drop what
-    was typed into their combos; and the set loaded last is forgotten, so
-    loading it again loads it."""
+    resets the counts and keeps the team names (ADR-005 S2 decision 3). The
+    set loaded last is forgotten too, so loading it again loads it. (The
+    field being typed in and the cards' typed combo text, which the Qt
+    board's button finished and dropped around it, went with the Qt SCORE,
+    ADR-005 S4ac-3.)"""
     host = boardHost
 
     def run():
         board = _board(scoreboard)
-        host.Prepare(scoreboard)
         with StateManager.SaveBlock():
-            host.CommitEdit(scoreboard)
             AutonaActions.instance.ClearBoard(board)
-            for team in (1, 2):
-                roster = StateManager.Get(
-                    f"score.{board}.team.{team}.player")
-                for slot in (roster if isinstance(roster, dict) else ()):
-                    host.PlayerLoaded(board, team, int(slot), True)
             SetLoadService(board).lastSetSelected = None
         return "OK"
 
@@ -1631,18 +1574,16 @@ def reset_all(scoreboard):
 
 
 # ── the crew board's members (ADR-005 S3e-2) ─────────────────────────────
-# Core's (CrewBattleService), run where the board operations run: on the
-# desktop the write is made on the GUI thread, as the board's own inputs
-# make theirs (the board prepared first; ADR-005 S4ac-1). Another board has
-# no members, and answers "OK" having done nothing, as it always did
-# (without reading the numbers). `team` and `member` are 1-based; on the crew board a number
-# that is not one raises (ValueError), as the board's signal did.
+# Core's (CrewBattleService), run where the board operations run (the board
+# host, ADR-005 S4ad). Another board has no members, and answers "OK"
+# having done nothing, as it always did (without reading the numbers).
+# `team` and `member` are 1-based; on the crew board a number that is not
+# one raises (ValueError), as the board's signal did.
 
 def crew_member_stock(scoreboard, team, member, change):
     host = boardHost
 
     def run():
-        host.Prepare(scoreboard)
         if _is_crew(scoreboard):
             CrewBattleService(CREW_BOARD).AdjustMemberStock(
                 int(team), int(member), int(change))
@@ -1656,7 +1597,6 @@ def crew_set_active(scoreboard, team, member):
     host = boardHost
 
     def run():
-        host.Prepare(scoreboard)
         if _is_crew(scoreboard):
             CrewBattleService(CREW_BOARD).SelectActiveMember(
                 int(team), int(member))
@@ -1669,12 +1609,8 @@ def crew_set_active(scoreboard, team, member):
 # S4w). The same values again write nothing.
 
 def crew_member_count():
-    """How many members the crew board shows: the state's count, or on a
-    board core does not have (its launch failed; every board is made at
-    launch since ADR-005 S4ac-1) the count making it will give it, its
-    seed's. Read without building anything."""
-    if not boardHost.Built(CREW_BOARD):
-        return CrewBattleService.DEFAULT_MEMBER_NUM
+    """How many members the crew board shows: the state's count (every
+    board is made at launch since ADR-005 S4ac-1)."""
     return CrewBattleService(CREW_BOARD).MemberNum()
 
 
@@ -1683,7 +1619,6 @@ def crew_update_member(team, member, fields):
     host = boardHost
 
     def run():
-        host.Prepare(CREW_BOARD)
         CrewBattleService(CREW_BOARD).UpdateMember(team, member, **fields)
 
     host.Run(run)
@@ -1697,7 +1632,6 @@ def crew_update_set(fields):
     host = boardHost
 
     def run():
-        host.Prepare(CREW_BOARD)
         crew = CrewBattleService(CREW_BOARD)
         actions = AutonaActions.instance
         with StateManager.SaveBlock():
@@ -1716,13 +1650,12 @@ def crew_update_set(fields):
 
 def crew_team_color(team, color):
     """One crew's colour, the operation its colour button calls. Unlike
-    `team_color`, the board is prepared first (made again if core does not
-    have it; until ADR-005 S4ac-1 built, as an unbuilt board's seed wiped the
-    write), and a colour it already has is not written."""
+    `team_color`, it runs under the board lock (until ADR-005 S4ac-1 the
+    board was built first, as an unbuilt board's seed wiped the write), and
+    a colour it already has is not written."""
     host = boardHost
 
     def run():
-        host.Prepare(CREW_BOARD)
         with StateManager.lock:
             if StateManager.Get(
                     f"score.{CREW_BOARD}.team.{team}.color") != color:
@@ -1746,11 +1679,12 @@ def get_board_post(scoreboard):
 
 # ── the player slots of boards 1/2 (ADR-005 S3e-4) ───────────────────────
 # Core's (PlayerService.ApplyData, S3e-3), run where the board operations
-# run: on the desktop the load is made on the GUI thread (where the board's
-# cards were, until ADR-005 S4ac-3: the host's PlayerLoaded). A slot is one
-# the *state* has -- core seeds them as it makes the board
-# (AutonaActions.SeedFreshBoard), at launch in both shells since ADR-005
-# S4ac-1 -- so the range is checked the same way in both shells. The SCORE
+# run (the board host: on the calling thread, in both shells since ADR-005
+# S4ad; the desktop's ran them on its GUI thread until then, where the
+# board's Qt cards were until S4ac-3). A slot is one the *state* has --
+# core seeds them as it makes the board (AutonaActions.SeedFreshBoard), at
+# launch in both shells since ADR-005 S4ac-1 -- so the range is checked the
+# same way in both shells. The SCORE
 # page draws the load from the state, like any write.
 
 def _player_path(board, team, player):
@@ -1764,19 +1698,17 @@ def _player_path(board, team, player):
     return path
 
 
-def _load_player(host, board, team, player, data, loadFromDB, clear,
+def _load_player(board, team, player, data, loadFromDB, clear,
                  no_mains=False):
-    """Load `data` into the slot (an existing one: _player_path) and tell
-    the host, inside the load's save block. The load asks for its
-    statistics itself (PlayerService.Announce): `recent_sets` /
-    `upset_factor` are written into the same cycle, as the cards' were.
-    Raises what the load raises (the host is told all the same)."""
+    """Load `data` into the slot (an existing one: _player_path), in one
+    save block. The load asks for its statistics itself
+    (PlayerService.Announce): `recent_sets` / `upset_factor` are written
+    into the same cycle, as the cards' were. Raises what the load raises.
+    (Until ADR-005 S4ad the host was told of it, for the Qt cards' typed
+    combo text: PlayerLoaded, empty since S4ac-3.)"""
     service = PlayerService(_player_path(board, team, player))
     with StateManager.SaveBlock():
-        try:
-            service.ApplyData(data, loadFromDB, clear, no_mains)
-        finally:
-            host.PlayerLoaded(board, team, player, clear)
+        service.ApplyData(data, loadFromDB, clear, no_mains)
 
 
 def update_player(scoreboard, team, player, data):
@@ -1785,8 +1717,7 @@ def update_player(scoreboard, team, player, data):
     blanks match_en). `team` is the state team (no swap flip).
 
     True when applied; False when the state team has no such slot (the
-    route's 404) -- checked after the board host's Prepare, since making a
-    board core does not have is what writes its slots. An exception from the write propagates (500).
+    route's 404). An exception from the write propagates (500).
     One save cycle, `savePlayerToDb`'s state write included; its database
     write follows, outside the host (_save_record).
     """
@@ -1797,13 +1728,12 @@ def update_player(scoreboard, team, player, data):
         team_, player_ = int(team), int(player)
         if board not in AutonaActions.SCORE_BOARDS:
             return False, None
-        host.Prepare(scoreboard)
         path = _player_path(board, team_, player_)
         if path is None:
             return False, None
         record = None
         with StateManager.SaveBlock():
-            _load_player(host, board, team_, player_, data, True, False)
+            _load_player(board, team_, player_, data, True, False)
             if data.get("savePlayerToDb", False):
                 record = PlayerService(path).PrepareSaveToDB()
         return True, record
@@ -1815,17 +1745,14 @@ def update_player(scoreboard, team, player, data):
 
 def _edit_slot(scoreboard, team, player, edit):
     """`edit(service)` on the PlayerService of slot `player` of state team
-    `team` on board 1/2, where the board operations run, the board prepared
-    first (made again if core does not have it; ADR-005 S4ac-1); what it
-    returns. NoSuchSlot when the state team has no such slot, checked after
-    the preparation, since making a board is what writes its slots."""
+    `team` on board 1/2, where the board operations run; what it returns.
+    NoSuchSlot when the state team has no such slot."""
     host = boardHost
 
     def run():
         board = _require_board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             raise NotAvailable(f"scoreboard {scoreboard} has no player slots")
-        host.Prepare(scoreboard)
         path = _player_path(board, int(team), int(player))
         if path is None:
             raise NoSuchSlot(
@@ -1874,7 +1801,6 @@ def update_match(scoreboard, fields):
         board = _require_board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             raise NotAvailable(f"scoreboard {scoreboard} has no match bar")
-        host.Prepare(scoreboard)
         actions = AutonaActions.instance
         with StateManager.SaveBlock():
             for field in schema.SCORE_MATCH_FIELDS:
@@ -1929,11 +1855,8 @@ def set_team_data(scoreboard, team, player, data):
     def run():
         board = _require_board(scoreboard)
         record = None
-        # Built before the save block opens: the build is what holds the
-        # board for 反映 (S2c 判断 7).
-        host.Prepare(scoreboard)
         with StateManager.SaveBlock():
-            _apply_set_fields(host, scoreboard, payload)
+            _apply_set_fields(scoreboard, payload)
             if board in AutonaActions.SCORE_BOARDS and team and player:
                 try:
                     team_, player_ = int(team), int(player)
@@ -1941,8 +1864,7 @@ def set_team_data(scoreboard, team, player, data):
                     if path is None:
                         raise IndexError(
                             f"team {team} has no player {player}")
-                    _load_player(host, board, team_, player_, data, True,
-                                 False)
+                    _load_player(board, team_, player_, data, True, False)
                     if data.get("savePlayerToDb", False):
                         record = PlayerService(path).PrepareSaveToDB()
                 except Exception as e:
@@ -1999,7 +1921,6 @@ def _load_player_record(scoreboard, lookup, team, player, no_mains):
         board = _require_board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             raise ValueError(f"scoreboard {scoreboard} has no player slots")
-        host.Prepare(scoreboard)
         team_, player_ = int(team), int(player)
         # The live dict (PlayerDB.Get): copied under the lock it is written
         # under, as the load is not.
@@ -2015,8 +1936,7 @@ def _load_player_record(scoreboard, lookup, team, player, no_mains):
         if path is None:
             raise NoSuchSlot(
                 f"scoreboard {board} team {team} has no player {player}")
-        _load_player(host, board, team_, player_, playerData, True, True,
-                     no_mains)
+        _load_player(board, team_, player_, playerData, True, True, no_mains)
         return "OK"
 
     return host.Run(run)
@@ -2025,23 +1945,15 @@ def _load_player_record(scoreboard, lookup, team, player, no_mains):
 def clear_player(scoreboard, team, player):
     """Empty one player slot of state team `team` on board 1/2, as the card's
     clear button does (PlayerService.ClearSlot, statistics included). False
-    when the team has no such slot. The field being typed in finishes first,
-    so the clear takes its text; the card then drops what was typed into its
-    combos, as after any load that clears."""
+    when the team has no such slot."""
     host = boardHost
 
     def run():
         board = _board(scoreboard)
-        host.Prepare(scoreboard)
-        host.CommitEdit(scoreboard)
         path = _player_path(board, team, player)
         if path is None:
             return False
-        with StateManager.SaveBlock():
-            try:
-                PlayerService(path).ClearSlot()
-            finally:
-                host.PlayerLoaded(board, team, player, True)
+        PlayerService(path).ClearSlot()
         return True
 
     return host.Run(run)
@@ -2051,14 +1963,11 @@ def swap_players(scoreboard, team, first, second):
     """Exchange two player slots of state team `team` on board 1/2, as a
     card's move up / down does (AutonaActions.SwapPlayers). False when the
     team lacks either: SwapPlayers would move the slot it has into the gap.
-    The field being typed in finishes first, so its text moves with the slot.
     """
     host = boardHost
 
     def run():
         board = _board(scoreboard)
-        host.Prepare(scoreboard)
-        host.CommitEdit(scoreboard)
         with StateManager.lock:
             if (_player_path(board, team, first) is None
                     or _player_path(board, team, second) is None):
@@ -2070,27 +1979,25 @@ def swap_players(scoreboard, team, first, second):
 
 
 # ── the statistics of boards 1/2 (ADR-005 S3e-5) ─────────────────────────
-# Core's (StatsService), run where the board operations run: prepared
-# first (a board core does not have is made), as the desktop built the
-# board when asking its stats util for them did until ADR-005 S4ac-1.
-# A statistic is fetched or recalculated now; a fetch answers into the
+# Core's (StatsService), run where the board operations run (the desktop
+# built the board when asking its stats util for them until ADR-005
+# S4ac-1). A statistic is fetched or recalculated now; a fetch answers into the
 # state later (the provider's worker), which is all the routes ever waited
 # for. "OK" whatever there was to fetch -- a fetch that raised included
 # (logged: StatsService.RefreshQuietly), as when the routes only emitted
 # the board's signals. Only boards 1/2 have statistics: the crew board
 # raises (ValueError: the legacy route's 500, as its missing stats util
-# did), without being built; a board no shell has is refused (NotAvailable:
+# did); a board no shell has is refused (NotAvailable:
 # 503, since the ADR-005 S4x review); a board number that is not a number
 # raises.
 
-def _stats_board(host, scoreboard):
+def _stats_board(scoreboard):
     board = int(scoreboard)
     # A board no shell has: 503, as every board operation (ADR-005 S4x
     # review). The crew board raises below (500), as it always did.
     _require_board(board)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} has no statistics")
-    host.Prepare(board)
     return StatsService(board)
 
 
@@ -2098,7 +2005,7 @@ def stats_recent_sets(scoreboard):
     host = boardHost
 
     def run():
-        _stats_board(host, scoreboard).RefreshQuietly(
+        _stats_board(scoreboard).RefreshQuietly(
             StatsService.RECENT_SETS)
         return "OK"
 
@@ -2109,7 +2016,7 @@ def stats_upset_factor(scoreboard):
     host = boardHost
 
     def run():
-        _stats_board(host, scoreboard).RefreshQuietly(
+        _stats_board(scoreboard).RefreshQuietly(
             StatsService.UPSET_FACTOR)
         return "OK"
 
@@ -2138,7 +2045,7 @@ def stats_last_sets(scoreboard, player):
     host = boardHost
 
     def run():
-        stats = _stats_board(host, scoreboard)
+        stats = _stats_board(scoreboard)
         for team in teams:
             stats.RefreshQuietly(StatsService.LAST_SETS, team)
         return "OK"
@@ -2153,7 +2060,7 @@ def stats_history_sets(scoreboard, player):
     host = boardHost
 
     def run():
-        stats = _stats_board(host, scoreboard)
+        stats = _stats_board(scoreboard)
         for team in teams:
             stats.RefreshQuietly(StatsService.HISTORY_SETS, team)
         return "OK"
@@ -2165,7 +2072,7 @@ def refresh_stats(scoreboard):
     """Every statistic of a board, as the Statistics page's button asks for
     them (StatsService.RefreshAll). The fetches are async: this returns
     once they are started, and the results land in the state a moment
-    later. A board other than 1/2 answers an error string (not built)."""
+    later. A board other than 1/2 answers an error string."""
     host = boardHost
 
     def run():
@@ -2173,7 +2080,6 @@ def refresh_stats(scoreboard):
         if board not in AutonaActions.SCORE_BOARDS:
             logger.warning(f"[Stats] scoreboard {scoreboard} has no stats")
             return f"ERROR: scoreboard {scoreboard} does not support stats"
-        host.Prepare(board)
         StatsService(board).RefreshAll()
         return "OK"
 
@@ -2191,22 +2097,20 @@ def get_set(scoreboard):
 
 
 # ── set loading and following (ADR-005 S3e-7) ────────────────────────────
-# Core's (SetFollowService), run where the board operations run: the
-# desktop runs them on its GUI thread, as the board's own set window does
-# (a board core does not have is made first; ADR-005 S4ac-1). The set is fetched, and followed, from the
-# provider's worker and the shell's clock; what they answer lands in the
-# state later, which is all the routes ever waited for. Only boards 1/2
-# load sets: the crew board raises (ValueError: the legacy route's 500, as
-# the board's missing signal did) without being built, and a board no shell
-# has is refused (NotAvailable: 503, since the ADR-005 S4x review).
+# Core's (SetFollowService), run where the board operations run (the board
+# host, as the set follow's own answers and poll are). The set is fetched,
+# and followed, from the provider's worker and the shell's clock; what they
+# answer lands in the state later, which is all the routes ever waited for.
+# Only boards 1/2 load sets: the crew board raises (ValueError: the legacy
+# route's 500, as the board's missing signal did), and a board no shell has
+# is refused (NotAvailable: 503, since the ADR-005 S4x review).
 
-def _set_board(host, scoreboard):
+def _set_board(scoreboard):
     # A board no shell has: 503, as every board operation (ADR-005 S4x
     # review). The crew board raises below (500), as it always did.
     board = _require_board(scoreboard)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} does not load sets")
-    host.Prepare(board)
     return SetFollowService(board)
 
 
@@ -2229,7 +2133,7 @@ def load_set(scoreboard, set=None, no_mains=False):
     host = boardHost
 
     def run():
-        _set_board(host, scoreboard).LoadSet(data)
+        _set_board(scoreboard).LoadSet(data)
         return "OK"
 
     return host.Run(run)
@@ -2268,14 +2172,13 @@ def post_score(data):
 
     def run():
         if scoreboard_number == CREW_BOARD:
-            host.Prepare(CREW_BOARD)
             try:
                 CrewBattleService(CREW_BOARD).ApplySetData(payload)
             except Exception:
                 logger.exception("post_score: the crew board's payload "
                                  "was not applied")
             return None
-        follow = _set_board(host, scoreboard_number)
+        follow = _set_board(scoreboard_number)
         try:
             return follow.ApplySetPayload(payload)
         except Exception:
@@ -2309,7 +2212,7 @@ def pull_stream_set(scoreboard):
     host = boardHost
 
     def run():
-        follow = _set_board(host, scoreboard)
+        follow = _set_board(scoreboard)
         channel = stream_channel()
         if channel is None:
             return "OK"
@@ -2334,28 +2237,20 @@ def follow_station(scoreboard, station):
     whatever the board shows). `station` is what a row of the list names:
     {"type", "id", "identifier"}."""
     host = boardHost
-    host.Run(lambda: _set_board(host, scoreboard).FollowStation(station))
+    host.Run(lambda: _set_board(scoreboard).FollowStation(station))
 
 
 def stop_follow(scoreboard):
     """The board's timer row's cancel button: stop polling, forget the station
     and the followed set (SetFollowService.StopFollowing(forget=True)), on a
     board that follows nothing writing nothing (its writes are SetIfChanged).
-    A board core does not have (its launch failed; every board is made at
-    launch since ADR-005 S4ac-1, the desktop's as it was built until then)
-    follows nothing -- a load makes it -- and is not made for this: making it
-    seeds it and turns the polling setting off. Nothing is built for it
-    either."""
+    Every board is made at launch (ADR-005 S4ac-1); until S4ad this asked
+    the host whether the board was built first, and the desktop's could say
+    no until S4ac-1."""
     board = _board(scoreboard)
     if board not in AutonaActions.SCORE_BOARDS:
         raise ValueError(f"scoreboard {scoreboard} does not load sets")
-    host = boardHost
-
-    def run():
-        if host.Built(board):
-            SetFollowService(board).StopFollowing(forget=True)
-
-    host.Run(run)
+    boardHost.Run(lambda: SetFollowService(board).StopFollowing(forget=True))
 
 
 # ═══════════════════════════════════════════════════════════════════════

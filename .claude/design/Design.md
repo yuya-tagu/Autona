@@ -726,8 +726,8 @@ Step 5（T-19）で順に静的化し、**全族が完了**（`StateSchema.DYNAM
 │  Web/外部の唯一の入口            │
 │  （両シェル共通。S3e-9）         │
 │  シェルの違いは登録だけ:         │
-│  ボードホスト・ゲームのローダー・│
-│  シェル操作2本（ヘッドレス503）  │
+│  ゲームのローダー・              │
+│  シェル操作（ヘッドレス503）     │
 └────────────┬────────────────────┘
              │ StateManager.Set / Unset / SaveBlock
              ▼
@@ -756,14 +756,15 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 **ヘッドレス起動**（`python main.py --headless`、ADR-005 S3c。`src/headless.py`）では、右下の PyQt UI が無い。
 QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（`GameAssetCatalog` 直。
 Qt モデルなし）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
-`wire_web_server`、Web 操作のボード周りの違いは `AutonaWebOperations.boardHost`（デスクトップは
-`DesktopBoardHost`（ADR-005 S4ac-3 から操作を GUI スレッドで走らせる `Run` だけ）、ヘッドレスは既定の `BoardHost`）が吸収する。
+`wire_web_server`。Web のボードの操作は両シェルとも同じボードホスト `AutonaWebOperations.boardHost`（`BoardHost`）を通り、
+呼び出し元のスレッドで 1 本の再入可能ロックの下で走る（ADR-005 S4ad。それまでデスクトップは `DesktopBoardHost` が GUI スレッドで走らせていた）。
 ボードは held にならず（`MakeBoards` を `panel` なしで呼ぶ。S4ac-1）、
 書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作（セット選択を
 開く `open_sets`（SCORE のページのダイアログ。S4ab-2。Qt の窓は S4ac-3 で削除）・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
 `AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` に、シェルのアダプタ
 `AutonaShellOperations`（S4y でスコアボード dock から移した）の同名の操作を登録する）だけで、ほかの Web 操作は
-すべて動く（ADR-005 S3e-9・S4o）。
+すべて動く（ADR-005 S3e-9・S4o）。終了の開始（バックグラウンドの仕事を止めた後・イベントループの終了後）からは、
+リクエストのボードの操作も何も書かずに 503 を返す（ボードホストの `Run`。両シェル同じ。S4ad のレビュー）。
 
 #### 3.2.2 書き込み規約
 
@@ -958,7 +959,8 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 
 > **NOTE（ナビゲーション刷新 / STATE_VERSION 13）**: タブ化 Dock + `QMenuBar` は廃止。
 > 各パネルは依然 `QDockWidget` サブクラスだが**ドックせず**、左サイドバー
-> （`AutonaSidebar`）＋中央 `QStackedWidget` のページとして表示する。自前描画タブバー
+> （`AutonaSidebar`）＋中央 `QStackedWidget` のページとして表示する（当時の記述。Qt のパネルは
+> ADR-005 S4ac-3 で無くなり、ページはすべて共有ビューの React。`ui_constants` の `QDockWidget` の QSS は S4ad で削除）。自前描画タブバー
 > `AutonaDockTabTheme` は削除。運用操作（大会選択 / ゲーム選択 / 1v1·Team·Crew 形式）は
 > サイドバー上部、設定・ヘルプは下部「Help & Settings」ボタンに集約。サイドバー地は
 > ダークで、**選択中ナビのみブランド赤でハイライト**する（全面赤にはしない）。
@@ -1578,7 +1580,7 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations` で開く。メインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く（ADR-005 S4ab-2。Qt のセット選択ウィンドウは S4ac-3 で削除）。クルー形式・メインウィンドウができる前なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。ボードは S4ac-1 から起動時に 3 つとも作られる） |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ボードのホットキー（スコア ±1・リセット・反映・スワップ）はボードホストの `Run` の中で対象ボードを読んで書く（`AutonaHotkeys._runOnActiveBoard`。ADR-005 S4ad とそのレビュー: Web のボードの操作がリクエストのスレッドで走るので、その途中に入らないように）。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations` で開く。メインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く（ADR-005 S4ab-2。Qt のセット選択ウィンドウは S4ac-3 で削除）。クルー形式・メインウィンドウができる前なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。ボードは S4ac-1 から起動時に 3 つとも作られる） |
 
 ### 6.2 デフォルトホットキー一覧
 

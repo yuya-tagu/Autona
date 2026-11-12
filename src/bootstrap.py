@@ -258,8 +258,9 @@ def bootstrap_core():
     # windows, the web server's load-set / score / pull-stream -- all of
     # which are the shell's, after this function returns. Its QObject and
     # its poll timers live on the main thread, which is where this runs.
-    # The board operations run through the shell's board host, read when
-    # used: the desktop registers its own in bootstrap_gui(), after this.
+    # The board operations run through the board host (the web layer's
+    # one BoardHost of both shells since ADR-005 S4ad), read when used: core
+    # does not import the web layer.
     from . import AutonaWebOperations
     from .AutonaSetFollowUtil import AutonaSetFollowUtil
     from .core.SetFollowService import SetFollowService
@@ -586,9 +587,8 @@ def bootstrap_gui():
     # restored state it drops -- the settings it reads, AutonaActions).
     # Before the Window: its _SeedPanelState (one save cycle of its own,
     # which reads no board) and the web server (Window._StartWebServer), so
-    # no request reaches a board that is not made or not yet held. Before
-    # the board host is registered below, which reads nothing at this
-    # point. The headless shell makes the same boards without `panel`
+    # no request reaches a board that is not made or not yet held. The
+    # headless shell makes the same boards without `panel`
     # (src/headless._SeedBoards).
     from .core.Actions import AutonaActions
     AutonaActions.instance.MakeBoards(panel=True)
@@ -604,18 +604,18 @@ def bootstrap_gui():
 
     # ORDER CONSTRAINT: the web operations' desktop registrations, after the
     # objects they point at (the shell operations and the asset adapter,
-    # both above). The S2 operations run on the GUI thread
-    # (DesktopBoardHost.Run; until ADR-005 S4ac-3 the host also built and
-    # committed through the scoreboard dock's widgets), and a game is loaded
-    # through the adapter, so its Qt models follow. The shell operations
-    # (the set selection, the thumbnail, ADR-005 S3e-9; the image renderer,
-    # S4o) are AutonaShellOperations' (the dock's until S4y). The defaults
-    # are the headless shell's (operations on the calling thread; no loader
-    # until it registers its own; no shell operation: 503). Before the web
-    # server exists (Window._StartWebServer), so no request can reach the
-    # defaults on the desktop (ADR-005 S3c).
+    # both above). A game is loaded through the adapter, so its Qt models
+    # follow. The shell operations (the set selection, the thumbnail,
+    # ADR-005 S3e-9; the image renderer, S4o) are AutonaShellOperations'
+    # (the dock's until S4y), run on the GUI thread. The defaults are the
+    # headless shell's (no loader until it registers its own; no shell
+    # operation: 503). Before the web server exists
+    # (Window._StartWebServer), so no request can reach the defaults on the
+    # desktop (ADR-005 S3c). The board operations are not registered: they
+    # run on the calling thread under the board host's lock in both shells
+    # (AutonaWebOperations.boardHost, ADR-005 S4ad; the desktop registered
+    # DesktopBoardHost, which ran them on the GUI thread, until then).
     from . import AutonaWebOperations
-    AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost()
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
     AutonaWebOperations.openSetSelection = (
@@ -626,13 +626,12 @@ def bootstrap_gui():
         AutonaShellOperations.instance.StartImageRender)
 
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
-    # per player), the wiring the headless shell makes too. On gameLoaded,
-    # which the adapter emits just before onLoad, so it runs ahead of every
-    # slot on onLoad (the player cards' ReloadCharacters and the boards'
-    # _onGameAssetsLoaded were among them until ADR-005 S4ac-3). The adapter
-    # commits it once the slots have run (AutonaActions.CommitGameLoad,
-    # ADR-005 S4t; moving the commit into the wiring is S4ad's). The board
-    # host it runs through is registered just above.
+    # per player), its set length and its commit, the wiring the headless
+    # shell makes too. On gameLoaded, which the adapter emits just before
+    # onLoad, so it runs ahead of every slot on onLoad (the player cards'
+    # ReloadCharacters and the boards' _onGameAssetsLoaded were among them
+    # until ADR-005 S4ac-3, which is why the adapter committed after onLoad
+    # until S4ad).
     wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)
 
     logger.debug("bootstrap_gui complete")
@@ -689,7 +688,20 @@ def wire_game_roster(game_loaded):
       with AutonaActions.RepublishBestOfs: each board's set length again
       (ADR-005 S4t: it was each built board's onLoad handler, so the
       headless shell did without; the game tracker's rows started over with
-      it until ADR-005 S4ac-4).
+      it until ADR-005 S4ac-4). And, in the same save block, the commit of
+      both boards (AutonaActions.CommitGameLoad: a load is the fresh
+      baseline, not edits waiting behind 反映; ADR-005 S4ad -- the
+      desktop's asset adapter committed after onLoad until then, because a
+      Qt player card wrote its rows on onLoad, until S4ac-3), even when the
+      roster or the set length raises. Inside a game load's own save cycle
+      (the desktop's: opened on the loader thread, closed at the end of
+      _Publish) the commit only queues the boards, and the cycle's close
+      publishes everything pending on them -- what onLoad's slots wrote
+      after it included, and a core-direct write (score:adjust, a colour)
+      another thread made meanwhile, as before. No other thread's board
+      operation gets in between: _Publish holds the board host's lock from
+      the rebuild to the cycle's close. Headless nothing is held, so the
+      commit finds nothing.
 
     The load's own snapshot, not the catalog's Current(): this slot runs on
     the main thread, which the load hands it to (the desktop's load job
@@ -699,14 +711,14 @@ def wire_game_roster(game_loaded):
     a switch followed at once by a reload of the new game would read "no
     switch" twice and keep the previous game's picks.
 
-    Run where the shell runs board operations (AutonaWebOperations
-    .boardHost): on the desktop that is its GUI thread, where the board's
-    cards made their own writes until ADR-005 S4ac-3; headless, one
-    operation at a time. Until
-    ADR-005 S3e-6 it was each built board's onLoad handler, so the headless
-    shell's boards never followed a game load. bootstrap_gui() makes it for
-    the desktop (ahead of the
-    boards), src/headless.py for its shell.
+    One board operation (AutonaWebOperations.boardHost: under its lock, on
+    the main thread this runs on, in both shells since ADR-005 S4ad -- the
+    desktop's ran on its GUI thread, which is the main thread, under no
+    lock until then; inside the desktop load's own operation, _Publish), so
+    no other board operation lands between the roster and the commit. Until ADR-005 S3e-6 it was each built board's onLoad
+    handler, so the headless shell's boards never followed a game load.
+    bootstrap_gui() makes it for the desktop, src/headless.py for its
+    shell.
     """
     from . import AutonaWebOperations
     from .core.Actions import AutonaActions
@@ -717,8 +729,15 @@ def wire_game_roster(game_loaded):
 
         def run():
             with StateManager.SaveBlock():
-                AutonaActions.instance.ApplyGameRoster(replaced)
-                AutonaActions.instance.RepublishBestOfs()
+                try:
+                    AutonaActions.instance.ApplyGameRoster(replaced)
+                    AutonaActions.instance.RepublishBestOfs()
+                finally:
+                    # Committed whatever the roster did: a load's writes
+                    # (the selection, what the roster wrote before failing)
+                    # are not left waiting behind 反映 (the asset adapter's
+                    # _Publish committed on every path until ADR-005 S4ad).
+                    AutonaActions.instance.CommitGameLoad()
 
         AutonaWebOperations.boardHost.Run(run)
 

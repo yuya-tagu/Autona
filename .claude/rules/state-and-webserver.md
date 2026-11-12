@@ -86,7 +86,7 @@ paths:
   ボード 1 / 2 の最初の構築のたび）。settings.json を読めなかった起動では SettingsManager が読み直してから書き、まだ開けなければ
   この起動の間だけメモリに持つ（下の SettingsManager の項。2026-11-11 まではここで書かずにいた）。ヘッドレスの取り直しの既定を変えない）と、最後に `schema.HoldBoard`（反映ボタン。シードより先に
   登録するとシードが公開されない。S4y まではボードの `__init__` がウィジェットの構築の後に登録していた）。
-  ボードホストの `Built` は両シェルとも常に真で、`Prepare` は何もしない（ADR-005 S4ac-3。それまでデスクトップは `Built` でこのフラグを読み、
+  ボードホストの `Built` / `Prepare` は ADR-005 S4ad で削除した（S4ac-3 からは常に真・何もしないだった。それまでデスクトップは `Built` でこのフラグを読み、
   `Prepare` は core に無いボード（起動時の作成の失敗・ハーネスが落としたボード）だけをウィジェットごと作り直していた。S4ac-1 の検収レビュー）
 - `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は基本的に**列挙のみ**（マイグレーション層の
   アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
@@ -201,7 +201,7 @@ paths:
   イベントループに戻ってから 1 回。ADR-005 S3e-5。それまではボードが held サイクルでフラグの反転を検知して出していた）。
   アップセット係数は操作が core 内で再計算する。
   入力中の欄を入替・移動の前に確定する仕事（`AutonaScoreboardWidget.CommitFocusedEdit`。ボードホストの `CommitEdit`）は
-  Qt のボードにだけあり、S4ac-3 で無くなった（SCORE ページは欄を確定してから依頼する）。`CommitEdit` は S4ad まで空のまま残る
+  Qt のボードにだけあり、S4ac-3 で無くなった（SCORE ページは欄を確定してから依頼する）。空になった `CommitEdit` は S4ad で削除した
 - **クルーボード（board 3）は `CrewBattleService` が書き手**（Step 5 第 4 弾）。
   ただし *入口* のうち board 1/2 と語義が同じもの — チーム名（`SetTeamName`）・
   チームカラー（`SetTeamColor`）・match バーの 3 combo（`SetMatchField`）— は
@@ -214,27 +214,33 @@ paths:
   シードは書かず、無ければ false。`SeedFreshBoard` の `SeedBoard` と起動時の `ResetScoreRoot` で消える）。
   v1 は Qt のボードの入力欄と同じ操作を呼ぶ（ADR-005 S4w。`external-control-api.md` §2.12）: 1 メンバーの `UpdateMember`（名前・ストック・出場中を 1 回の lock と 1 保存サイクルで）・
   `AdjustMemberStock`、`AutonaWebOperations.crew_update_set`（`PATCH set`。legacy の `set_route` は通らない: チーム名を書かず値を丸める）・`crew_team_color`。
-  **同じ値は書かない**（`_RepublishBoard` は変わらないボードを書かない）。書き込みの前にボードホストの `Prepare`（S4ac-3 から何もしない。それまではデスクトップで core に無いボードだけを作り直した）。
-  リセット 3 本は `AutonaApiV1._crew_not_built`（`Built` が常に真なので S4ac-3 から常に偽）。作成済みのまっさらなボードには何も書かない
+  **同じ値は書かない**（`_RepublishBoard` は変わらないボードを書かない）。書き込みはボードホストの `Run` の中（その前の `Prepare` は S4ac-3 から何もせず、S4ad で削除。それまではデスクトップで core に無いボードだけを作り直した）。
+  リセット 3 本の `AutonaApiV1._crew_not_built`（`Built` が常に真なので S4ac-3 から常に偽）も S4ad で削除した。作成済みのまっさらなボードには何も書かない
   （`ClearMatchInfo` は match バーの欄をボードにあるものだけ空にする。クルーのシードに `pool` は無い。S4ac-1 の検収レビュー）。読み取りの X 投稿文は `PostText`（SCORE ページのボタンも同じ v1 を呼ぶ）。
   ボード 1 / 2 の X 投稿文は `AutonaActions.PostText(board)`（ADR-005 S4x。`(text, missing)` を lock の 1 回の保持で読む。
   SCORE ページのボタンは v1 でこれを読んで、`missing` があれば断り、無ければサムネイルを作ってから X を開く。Qt のボタンは S4ac-3 で削除）。
   v1 は `GET /scoreboards/{n}/post`（`get_board_post`。3 ボードとも）で、反映前の値と選手の X ハンドルを返すので PLAYERDB
 - **対戦形式の切り替えは `AutonaActions.SetBattleFormat(fmt)`**（ADR-005 S4x。それまでは `Window.SetBattleFormat`）。
-  サイドバーと v1 の `PUT /battle-format`（`AutonaWebOperations.set_battle_format`。ボードホストの `Run` の中）が呼ぶ。
+  サイドバーと v1 の `PUT /battle-format` がどちらも `AutonaWebOperations.set_battle_format`（ボードホストの `Run` の中）を通して呼ぶ（サイドバーは ADR-005 S4ad から。それまでは core を直接呼び、GUI スレッドで Web の操作と分かれていた）。
   いまの形式（`ResolveBattleFormat`）と同じなら何も書かず何も知らせずに False。変わるときは設定 2 つ
   （`scoreboard.battle_format` と旧 `team_mode`）→ `AutonaActions.battleFormatChanges`（クラスの `ObserverChannel`。
-  Bridge が `battle_format_changed` に変換し、`Window._ShowBattleFormat` がサイドバーを合わせる（S4ac-3 までは Qt のボードの表示も）。
-  両シェルの `WebServer.on_battle_format_change` が Socket.IO の `battle_format` にする（ADR-005 S4z。React の SCORE ページが形式のボードを出すため。S4x は「設定なので通知しない」だった））→ `ResultService.FollowBattleFormat` の順。通知は切り替えたスレッドで出る（デスクトップの v1 は
-  GUI スレッド）。起動時に建てるボードのウィジェットは S4ac-3 で無くなった（それまで形式の決定は Window。S4y の範囲）
+  Bridge が `battle_format_changed` に変換し、`Window._ShowBattleFormat` がサイドバーを合わせる（S4ac-3 までは Qt のボードの表示も。通知の値ではなく、その時点の形式 `_resolveBattleFormat()` を描く: v1 の切り替えの通知は queued で遅れて届き、その間にサイドバーで切り替わりうる。ADR-005 S4ad）。
+  両シェルの `WebServer.on_battle_format_change` が Socket.IO の `battle_format` にする（ADR-005 S4z。React の SCORE ページが形式のボードを出すため。S4x は「設定なので通知しない」だった））→ `ResultService.FollowBattleFormat` の順。通知は切り替えたスレッドで出る（v1 はリクエストのスレッド、サイドバーは
+  GUI スレッド。S4ad までデスクトップの v1 も GUI スレッドだった）。起動時に建てるボードのウィジェットは S4ac-3 で無くなった（それまで形式の決定は Window。S4y の範囲）
 - **best_of は state 主導**（ADR-005 S2e）。`SetBestOf(board, n)`（board 1,2。board 3 は False で、
   クルーは `CrewBattleService`）が 6 キーを 1 `SaveBlock` で書く（ゲームトラッカーの行も同じブロックで作り直していた。
   ADR-005 S4ac-4 でトラッカーごと削除）。
   0〜99 に丸め、値が変わらなければ何も書かない（旧 `valueChanged` と同じ）。
   ゲームのロードは `RepublishBestOfs()`（シードされた全ボードで文言を作り直す。変わらなければ書かない。呼ぶのは
   `bootstrap.wire_game_roster` で、両シェルが同じ。ADR-005 S4t）。反映まで済ませるのは `CommitGameLoad()` で、
-  デスクトップのアダプタの `_Publish` が `onLoad` の後に呼ぶ（Qt のカードの作り直しが onLoad の中で書いていたため。
-  ヘッドレスは held が無いので呼ばない。カードは S4ac-3 で消えたので結線へ移せる。S4ad 以降の整理）。
+  ADR-005 S4ad から `bootstrap.wire_game_roster` がロスター・`RepublishBestOfs` と同じ保存ブロックで、ボードホストの `Run` の中で呼ぶ
+  （両シェル同じ。ヘッドレスは held が無いので何も起きない。ロスターか `RepublishBestOfs` が例外を出しても `finally` で必ず呼ぶ）。
+  ロードの保存サイクルの中の commit は積むだけで、サイクルを閉じるとき
+  （`onLoad` の後）に、そのとき未反映のものをまとめて公開するので、`onLoad` のスロットが書いたものも一緒に出る（それまではデスクトップの
+  アダプタの `_Publish` が `onLoad` の後に呼んでいた。Qt のカードの作り直しが onLoad の中で書いていたため。カードは S4ac-3 で消えた）。
+  デスクトップの `_Publish` はモデルの作り直しからサイクルを閉じるまで全体がボードホストの `Run` の中なので（S4ad のレビュー）、
+  その間に別スレッドのボードの操作（held の書き込み）が入って commit と一緒に反映なしで出ることは無い（S4ad までは GUI スレッドに並んでいた）。
+  core 直結の書き込み（`score:adjust` など）と、ローダーのスレッドが `SelectGame` している間（`_Publish` より前）の書き込みは、従来どおり一緒に出る。
   Qt のスピンボックスと行の描画（held サイクルの `_SyncBestOf`）は S4ac-3 で Qt の SCORE ごと削除した。
   入口はすべてこの操作: SCORE ページ（v1 `PATCH /scoreboards/{n}/match`）・セット読込（`SetLoadService.BestOfFromSetData`。
   0・空は運ばない）・Web `set_route` の bestOf（v1 `PATCH set` 含む）・`AutonaWebOperations._reset_match`・`ClearBoard`（最後に 0）
@@ -263,30 +269,38 @@ paths:
   S3e-4 で移した選手の Web 操作（`update_player` / `set_team_data` / `load_player_from_tag`。`PlayerService.ApplyData`）と、
   S3e-5 で移した統計（`stats_*` 4 本・`refresh_stats`。`StatsService`）と、
   S3e-7 で移したセット読込と追従（`load_set` / `post_score` / `pull_stream_set`。`SetFollowService`）は
-  どちらのシェルでも core を呼び、**その周りのボードの仕事をシェルが登録するボードホスト
-  （`AutonaWebOperations.boardHost`）が受け持つ**:
-  - デスクトップ（`DesktopBoardHost`。`bootstrap_gui()` が登録）: GUI スレッドで同期実行する（`Run` だけがデスクトップのもの。ADR-005 S4ac-3）。
-    理由だった Qt の選手カードの入力確定（GUI スレッド上で「フィールド → 合成名」の 2 書き込みに分かれ、その間に割り込むと
-    合成名が反対のスロットに残る。S3e-4 で見直して維持した）は S4ac-3 でカードごと無くなり、GUI スレッドから外すのは S4ad の仕事。
-    ほかのフック（`Prepare` / `Built` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded`）は S4ac-3 から既定の `BoardHost` のまま
-    （ボードは起動時に core にあり、確定する欄も捨てる文字も無い。空のフックは S4ad で消す）。S4ac-3 まではデスクトップが
-    core に無いボード（起動時の作成の失敗・ハーネスが落としたボード）を `EnsureScoreboard` でウィジェットごと作り直し、
-    ウィジェットがあるときだけ欄の確定・コンボの打ちかけの文字の破棄をしていた（S4ac-1 までは未構築のボードを構築してから書いた:
-    未構築ボードは held でなく、書き込みが即時公開されたあと構築時のシードで消えたため）。ボード 1 / 2 の
-    人数 / キャラ数も ADR-005 S3e-6 から core（`AutonaActions.SetRoster`。それまではボードのスピンボックスで、
-    ヘッドレスは 503。クルーボードの人数は S3e-2 から core）。
-    選手のクリア（`ClearPlayers`: `CommitEdit` → `AutonaActions.ClearPlayers` → `DiscardTypedText` → 最後に読んだセットを忘れる）と
-    最後に読んだセット（`LastSet`。`SetLoadService`）は ADR-005 S4x から基底クラスの 1 つ（それまではボードの `CommandClearAll` と属性。`get_set` もボードを構築しない）。
-    キャラ枠の無いボードが次の選手に渡すキャラ数の記憶も core（`AutonaActions.EmptyRosterCharacters`。Qt のボードの隠れたスピンボックス `charNumber` が描画していた。S4ac-3 で削除）
-  - ヘッドレス（`BoardHost`。既定）: 呼び出し元のスレッドで core を呼ぶ。1 本の再入可能ロック（`RLock`）で 1 つずつ
-    実行する（GUI スレッドに並ばないので、`clear_all` や v1 `PATCH set` の途中に別の要求が混ざらないように。
-    ロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない。待つもの（`savePlayerToDb` の選手 DB への
-    書き込み: `PlayerDB.changed` → `AutonaPlayerDB.SetupModel` がメインスレッドで走る）は `Run` を抜けてから行う。S3e-4 レビュー）。ボードは held にならず即時公開
-    （反映ボタンが無いのでこれが正しい）。ボード 1〜3 以外（どのシェルにも無いボード）は操作自身が両シェルとも `NotAvailable`（503）で断る
-    （ADR-005 S4x でボードホストの `Widget()` を削除した。それまではそこで 503、デスクトップは 500）。ボード 1 / 2 の
-    人数 / キャラ数（`set_route` の `players` / `characters`・`clear_all`）とゲームのロードの既定人数も、
-    S3e-6 からは両シェルで同じ core の操作（ゲームのロードは `bootstrap.wire_game_roster`）。統計は両シェルとも
-    core が取り直す（ADR-005 S3e-5。`PlayerLoaded` は何もしない）
+  どちらのシェルでも core を呼び、**その周りのボードの仕事はボードホスト（`AutonaWebOperations.boardHost`）が受け持つ**。
+  **ボードホストは両シェルで同じ `BoardHost`**（ADR-005 S4ad。デスクトップがシェルとして登録するものは無い）:
+  - 呼び出し元のスレッド（Flask / Socket.IO のリクエスト、ホットキー・サイドバー・セットの追従の答えと時計・ゲームのロード
+    （デスクトップは `_Publish` 全体。結線のロスターと commit はその中）ならメインスレッド、終了中のロードの後始末ならローダーのスレッド）で
+    core を呼ぶ。1 本の再入可能ロック（`RLock`）で 1 つずつ
+    実行する（`clear_all` や v1 `PATCH set` の途中に別の要求・ホットキー・追従の書き込みが混ざらないように）。公平ではない
+    （RLock は FIFO でないので、待っているメインスレッドをリクエストのスレッドが追い越しうる。操作は短いので受容。S4ad のレビュー）。
+    **終了の開始からはメインスレッド以外のボードの操作を断る**（`Run` のいちばん外側の呼び出しで `gui_unavailable_reason()` を見て、
+    何も書かずに `NotAvailable(SHUTTING_DOWN_MESSAGE)` = 503。INFO のログ。両シェル同じ。S4ad までデスクトップのホストが GUI スレッドを
+    待てなくて返していた 503 を、終了のフラグで保つ）。断らないのはメインスレッドの操作・走っている操作の中の入れ子・終了中のロードの
+    後始末（`Run(op, atShutdown=True)`: `_SettleUnannounced` / ヘッドレスの `_SettleStopped`）。QCoreApplication が無いときも断らない
+    **ロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない**（いちばん外側のロック）。待つもの
+    （`savePlayerToDb` の選手 DB への書き込み。`PlayerDB.changed` → `AutonaPlayerDB.SetupModel` はメインスレッドで走る。
+    ADR-005 S3f-2 から待たないが、外に出したまま）は `Run` を抜けてから行う（S3e-4 レビュー）。新しいボードの操作は
+    `boardHost.Run` を通す（core 直結の 1 回の呼び出し（`score:adjust` など）は通さなくてよい: 1 つの操作は自分の保存ブロックと
+    `StateManager.lock` で原子的）
+  - ボード 1〜3 以外（どのシェルにも無いボード）は操作自身が両シェルとも `NotAvailable`（503）で断る
+    （ADR-005 S4x でボードホストの `Widget()` を削除した。それまではそこで 503、デスクトップは 500）。
+    選手のクリア（`ClearPlayers`: `AutonaActions.ClearPlayers` → 最後に読んだセットを忘れる）と最後に読んだセット（`LastSet`。
+    `SetLoadService`）は ADR-005 S4x からホストの 1 つ（それまではボードの `CommandClearAll` と属性。`get_set` もボードを構築しない）。
+    キャラ枠の無いボードが次の選手に渡すキャラ数の記憶も core（`AutonaActions.EmptyRosterCharacters`。Qt のボードの隠れたスピンボックス `charNumber` が描画していた。S4ac-3 で削除）。
+    ボード 1 / 2 の人数 / キャラ数（`set_route` の `players` / `characters`・`clear_all`）とゲームのロードの既定人数も、
+    S3e-6 から両シェルで同じ core の操作（`AutonaActions.SetRoster`。ゲームのロードは `bootstrap.wire_game_roster`）。統計は両シェルとも
+    core が取り直す（ADR-005 S3e-5）
+  - デスクトップのボード 1 / 2 は held（反映待ち）、ヘッドレスは即時公開（反映ボタンが無いのでこれが正しい）。違いはそこだけ
+  - 経緯: S4ad まではデスクトップが `DesktopBoardHost`（`bootstrap_gui()` が登録）で操作を GUI スレッドで同期実行していた。
+    理由は Qt の選手カードの入力確定（GUI スレッド上で「フィールド → 合成名」の 2 書き込みに分かれ、その間に割り込むと
+    合成名が反対のスロットに残る。S3e-4 で見直して維持した）で、カードは S4ac-3 で無くなった。フック（`Prepare` / `Built` /
+    `CommitEdit` / `DiscardTypedText` / `PlayerLoaded`）は S4ac-3 から何もせず、S4ad でデスクトップのホストと一緒に削除した。
+    それまではデスクトップが core に無いボードを `EnsureScoreboard` でウィジェットごと作り直し、ウィジェットがあるときだけ
+    欄の確定・コンボの打ちかけの文字の破棄をしていた（S4ac-1 までは未構築のボードを構築してから書いた: 未構築ボードは
+    held でなく、書き込みが即時公開されたあと構築時のシードで消えたため）
 - **SaveBlock は複数キーを 1 サイクルにまとめる時だけ**使う（単一キーなら不要）。
   かつては「空 `changedKeys` の SaveState = `include_paths=[]` = フィルタなし =
   全 state 差分」という地雷があったが、**Step 4a で `SaveState` 側が空 `changedKeys`
@@ -299,9 +313,12 @@ paths:
 - ホットキーは `AutonaHotkeys.ConnectActions()` が `bootstrap_gui()` から 1 回だけ結線する（ADR-005 S3c でデスクトップ側の段へ移動。ヘッドレスにはホットキーが無い）。
   対象ボードは `AutonaActions.ActiveBoard()`（`SettingsManager.scoreboard.battle_format`）。
   `swap_teams` も S2c からここ（旧: 構築済みの全ボードに接続しており、形式切替後は両ボードが入れ替わった）。
-  `swap_teams` の未構築判定と入力中の欄の確定はボードホスト（`boardHost.Built` / `CommitEdit`）に聞き、ボードの
-  ウィジェットを引かない（ADR-005 S4y）。S4ac-3 からはどちらも素通り（`Built` は常に真、`CommitEdit` は何もしない。S4ad で消す。
-  S4ac-1 までは未構築のボードでは何もしなかった: 未構築ボードは held でないので、入れ替えると即時公開され、構築時のシードで消えた）。
+  ボードのホットキー（スコア ±1・`reset_scores`・`apply_changes`（反映）・`swap_teams`）は GUI スレッドでボードホストの `Run` の中から
+  core を呼び、対象ボード（`ActiveBoard()`）もその中で読む（`AutonaHotkeys._runOnActiveBoard`。ADR-005 S4ad でスワップ、そのレビューで
+  残りも。Web の操作がリクエストのスレッドで走るようになったので、同じロックで直列にする。v1 の `:apply` はボードの操作ではなく、
+  S4u からロックの外のまま）。未構築判定と入力中の欄の確定（`boardHost.Built` / `CommitEdit`。S4y でボードの
+  ウィジェットから移し、S4ac-3 から素通り）は S4ad で削除した（S4ac-1 までは未構築のボードでは何もしなかった: 未構築ボードは
+  held でないので、入れ替えると即時公開され、構築時のシードで消えた）。
   パネル操作の `load_set` も S4y から `ConnectActions()` が結線し、アクティブ
   ボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations.ShowSetSelection` で開く（クルー形式なら何もしない。
   それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた）。メインウィンドウを前に出して SCORE に切り替え、
@@ -319,8 +336,8 @@ paths:
   起動時から held にする案（ADR-005 S2 判断 7）は S2c で一度撤回した（Web UI に反映ボタンが無く、デスクトップの反映は
   表示中のボードだけなので、形式と食い違う面への書き込みがどこにも出ないまま、構築時の `SeedBoard` で消えた）。React の
   反映ボタン（S4aa）の後に入れた（`docs/changes/architecture-modernization.md` の順序 6 の判断 2・S4ac-1 の節）。
-  上の「未構築」の記述（`swap_teams` / `load_set` の判定・`Prepare`）は、S4ac-3 からどのシェルでも当たらない
-  （`Built` は常に真、`Prepare` は何もしない。S4ac-3 まではデスクトップのボードの作成が失敗したときだけ当たった）
+  上の「未構築」の記述（`swap_teams` / `load_set` の判定・`Prepare`）は、S4ac-3 からどのシェルでも当たらず
+  （`Built` は常に真、`Prepare` は何もしない。S4ac-3 まではデスクトップのボードの作成が失敗したときだけ当たった）、S4ad で判定ごと削除した
 
 ## ドメインサービス（core の per-board オブジェクト）
 
@@ -331,7 +348,7 @@ paths:
 | サービス | 所有者 | 責務 |
 |---------|--------|------|
 | `src/core/StatsService.py` | なし（`StatsService(n)` を呼ぶたびに作る。取得の `fetcher`（`AutonaStatsUtil`。`bootstrap_core()` が登録）と要求番号はクラスの持ち物） | 統計のすべて（ADR-005 S3e-5）: いつ取り直すか（`PlayerChanged` = 選手の読込・クリア・カードの手入力の id / seed の変化。`PlayerService.Announce` が書き込みの保存ブロックの中で呼ぶ / `TeamsChanged` = スワップ・上下移動・クリア。`AutonaActions` が操作の後に呼び、`fetcher.Later` でイベントループに戻ってからボードごとに 1 回 / `Refresh` / `RefreshAll` = Web のルート。統計情報ページ（React の `StatsPage`。ADR-005 S4k）の「統計情報を取得する」は v1 の `POST /api/v1/scoreboards/1/stats:refresh`）・取得可否の判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み。人数は state のスロット数（0 なら `DefaultPlayersPerTeam()`）。**遅れた答えは捨てる**: 要求ごとに（ボード, 統計, チーム）の番号を `StateManager.lock` の中で振り、答えはメインスレッドで、番号が最新かつスロットが要求したときの選手のままのときだけ書く。番号は 1 つのカウンタから出す（キーをまたいで重ならない）。取得の開始はロックの外。**取得の失敗は統計ごとにログに残して次へ進む**（`RefreshQuietly`。いくつも依頼する入口と Web のルートはこれを呼び、ルートは `"OK"` のまま。旧実装は統計ごとの Qt シグナルだった）。ボードの構築・シェルによらず動く |
-| `src/core/SetFollowService.py` | なし（`SetFollowService(n)` を呼ぶたびに作る。何を追従しているか・ステーション・要求番号はボード番号ごとにクラスが持つ。取得と 5 秒の時計の `fetcher`（`AutonaSetFollowUtil`）とボードホストの引き方 `boardHost` は `bootstrap_core()` が登録） | セット読込と追従のすべて（ADR-005 S3e-7。それまではボードのウィジェット・2 つの QTimer・provider アダプタの Worker）: `LoadSet`（Web の `load_set`。SCORE ページのセット選択のダイアログは v1 の `:load-set` で同じ操作。S4ac-3 まではセット選択ウィンドウも。クリア → 追従の記録 → 取得 → 答えを `UpdateSetData`。**大会が読み込まれていなければ何もしない**＝ボードを消さない）・`FollowStation`（v1 の `:follow` のステーション / 配信。S4ac-3 まではステーションウィンドウも）・`PullStream`（Web の `pull_stream_set`。**追従中のチャンネルなら照会し直すだけ**で、セットが変わったときだけ読み直す。Web UI の自動更新スイッチが数秒ごとに送るので、毎回追従し直すとクリア → スコア 0 になる。追従を始める最初の 1 回も、最後に読んだセットと同じならクリアしない）・`StopFollowing`（v1 の `:stop-follow`。S4ac-3 まではタイマー行のキャンセルも）・`Tick`（5 秒ごとの取り直し。`general.disable_autoupdate` が明示的に `false` のときだけ。デスクトップは起動のたびに `true` にする（`MakeBoards(panel=True)` → `TurnOffPolling`。ADR-005 S4ac-1。それまではボード 1 / 2 の構築のたび。settings.json を読めなかった起動では SettingsManager が読み直してから書き、まだ開けなければこの起動の間だけメモリに持って、読めたら戻す）ので、設定画面の「Disable automatic set updating」を外すと次の起動まで取り直す）・`ApplySetPayload`（旧 `ChangeSetData`。取得したセットと `POST /score` の 1 保存サイクル）。**判定と書き込みはすべてボードホストの `Run` の中**（答えの照会番号・要求番号の判定もその先頭で行うので、判定の直後に別スレッドの Web 操作が割り込まない）。取得の答えはメインスレッドに届く（`fetcher` の `Signal(object)`。旧 Worker 自身のシグナルは GC で答えが消えることがあった）。**遅れた答えは捨てる**: 読んだセットでない答え（`IsStaleUpdate`）・後から全読込が始まった取り直し（要求番号）・手動 / Web の読込（読み込んだときだけ）・別のステーション・キャンセルの後に返った照会と、後から出した照会が先に答えた照会（照会番号。pull と tick で 1 列）。**全読込の取得が失敗したら（セットの無い答え・例外・取得できない）、最後に読んだセットを忘れる**（ボードはクリア済みで何も出ていない。次の pull・照会・tick・同じセットの選び直しで読み直す）。ステーションは先頭のセットだけを読み、後続セットは取得しない（ADR-005 S3f-3。表示する箇所が無く、`score.{n}.station_queue` は `{}` のまま）。ロックの中で取得を待たない（pitfalls #17）。1 人分の `POST /score`（`team` / `player`）は state に無いスロット（"0"・負の数を含む）を書かずにログに残す。**何を追従しているかは state に入れない**（`tests/test_set_follow_flow.py` の golden が全ての書き込みを照合し、`program_state.json` のキーも増えるため）。読むのは `Snapshot()`（`{station, poll: {mode, identifier, secondsLeft}, pollingEnabled, setId}`。どのスレッドでも。v1 の `GET /scoreboards/{n}/follow`）、変わったことを知るのはクラスのチャンネル `changes`（`ObserverChannel`。引数はボード番号。ホストの中で出るので `StateManager.lock` の中でありうる。受け手は積むだけにする。`WebServer.on_follow_change` が `scoreboard_follow` にする。**変わったときだけ出す**: ステーションか取り直しの時計が変わったとき（止めるものが無いキャンセル・同じステーションの選び直しでは出ない）と、ボードに書かずに `setId` が null に戻ったとき（`_LoadFailed`・`_Follow` の読み直し）。`fetcher.FollowChanged` も出すが、受け手だった Qt のタイマー行は S4ac-3 で削除し、受け手は無い（S4ad で消す））。`fetcher.RemainingMs` は次の tick の時刻（`time.monotonic`）から計算するので**どのスレッドからでも呼べる**（ADR-005 S4v。`QTimer.remainingTime()` はイベントディスパッチャの無いスレッドから呼ぶとプロセスが落ちる。実測）。その時刻は別スレッドの `Poll` がその場で記録する（ヘッドレスの読み込みはリクエストのスレッドで走り、タイマーの開始はメインスレッドへ queued なので、先に出る通知の読み手に `secondsLeft: null` を見せない）。v1 の入口は `:follow` / `:stop-follow`（`AutonaWebOperations.follow_station` / `stop_follow`。`FollowStation` / `StopFollowing(forget=True)` を呼ぶ（S4ac-3 まではステーションウィンドウの入口と同じ）。`:follow` の前にボードホストの `Prepare`（S4ac-3 から何もしない。それまではデスクトップで core に無いボードだけを作り直した）。`:stop-follow` は core に無いボード（`BoardHost.Built` が偽。S4ac-3 から常に真）なら作りも書きもしない。作成済みのボードではキャンセルを通し、書き込みは `SetIfChanged` なので、何も追従していないボードには何も書かない（反映ボタンを点けない）。どちらもウィジェットを建てない） |
+| `src/core/SetFollowService.py` | なし（`SetFollowService(n)` を呼ぶたびに作る。何を追従しているか・ステーション・要求番号はボード番号ごとにクラスが持つ。取得と 5 秒の時計の `fetcher`（`AutonaSetFollowUtil`）とボードホストの引き方 `boardHost` は `bootstrap_core()` が登録） | セット読込と追従のすべて（ADR-005 S3e-7。それまではボードのウィジェット・2 つの QTimer・provider アダプタの Worker）: `LoadSet`（Web の `load_set`。SCORE ページのセット選択のダイアログは v1 の `:load-set` で同じ操作。S4ac-3 まではセット選択ウィンドウも。クリア → 追従の記録 → 取得 → 答えを `UpdateSetData`。**大会が読み込まれていなければ何もしない**＝ボードを消さない）・`FollowStation`（v1 の `:follow` のステーション / 配信。S4ac-3 まではステーションウィンドウも）・`PullStream`（Web の `pull_stream_set`。**追従中のチャンネルなら照会し直すだけ**で、セットが変わったときだけ読み直す。Web UI の自動更新スイッチが数秒ごとに送るので、毎回追従し直すとクリア → スコア 0 になる。追従を始める最初の 1 回も、最後に読んだセットと同じならクリアしない）・`StopFollowing`（v1 の `:stop-follow`。S4ac-3 まではタイマー行のキャンセルも）・`Tick`（5 秒ごとの取り直し。`general.disable_autoupdate` が明示的に `false` のときだけ。デスクトップは起動のたびに `true` にする（`MakeBoards(panel=True)` → `TurnOffPolling`。ADR-005 S4ac-1。それまではボード 1 / 2 の構築のたび。settings.json を読めなかった起動では SettingsManager が読み直してから書き、まだ開けなければこの起動の間だけメモリに持って、読めたら戻す）ので、設定画面の「Disable automatic set updating」を外すと次の起動まで取り直す）・`ApplySetPayload`（旧 `ChangeSetData`。取得したセットと `POST /score` の 1 保存サイクル）。**判定と書き込みはすべてボードホストの `Run` の中**（答えの照会番号・要求番号の判定もその先頭で行うので、判定の直後に別スレッドの Web 操作が割り込まない）。取得の答えはメインスレッドに届く（`fetcher` の `Signal(object)`。旧 Worker 自身のシグナルは GC で答えが消えることがあった）。**遅れた答えは捨てる**: 読んだセットでない答え（`IsStaleUpdate`）・後から全読込が始まった取り直し（要求番号）・手動 / Web の読込（読み込んだときだけ）・別のステーション・キャンセルの後に返った照会と、後から出した照会が先に答えた照会（照会番号。pull と tick で 1 列）。**全読込の取得が失敗したら（セットの無い答え・例外・取得できない）、最後に読んだセットを忘れる**（ボードはクリア済みで何も出ていない。次の pull・照会・tick・同じセットの選び直しで読み直す）。ステーションは先頭のセットだけを読み、後続セットは取得しない（ADR-005 S3f-3。表示する箇所が無く、`score.{n}.station_queue` は `{}` のまま）。ロックの中で取得を待たない（pitfalls #17）。1 人分の `POST /score`（`team` / `player`）は state に無いスロット（"0"・負の数を含む）を書かずにログに残す。**何を追従しているかは state に入れない**（`tests/test_set_follow_flow.py` の golden が全ての書き込みを照合し、`program_state.json` のキーも増えるため）。読むのは `Snapshot()`（`{station, poll: {mode, identifier, secondsLeft}, pollingEnabled, setId}`。どのスレッドでも。v1 の `GET /scoreboards/{n}/follow`）、変わったことを知るのはクラスのチャンネル `changes`（`ObserverChannel`。引数はボード番号。ホストの中で出るので `StateManager.lock` の中でありうる。受け手は積むだけにする。`WebServer.on_follow_change` が `scoreboard_follow` にする。**変わったときだけ出す**: ステーションか取り直しの時計が変わったとき（止めるものが無いキャンセル・同じステーションの選び直しでは出ない）と、ボードに書かずに `setId` が null に戻ったとき（`_LoadFailed`・`_Follow` の読み直し）。`fetcher.FollowChanged` は受け手だった Qt のタイマー行（S4ac-3 で削除）が無くなったので S4ad で削除した）。`fetcher.RemainingMs` は次の tick の時刻（`time.monotonic`）から計算するので**どのスレッドからでも呼べる**（ADR-005 S4v。`QTimer.remainingTime()` はイベントディスパッチャの無いスレッドから呼ぶとプロセスが落ちる。実測）。その時刻は別スレッドの `Poll` がその場で記録する（ヘッドレスの読み込みはリクエストのスレッドで走り、タイマーの開始はメインスレッドへ queued なので、先に出る通知の読み手に `secondsLeft: null` を見せない）。v1 の入口は `:follow` / `:stop-follow`（`AutonaWebOperations.follow_station` / `stop_follow`。`FollowStation` / `StopFollowing(forget=True)` を呼ぶ（S4ac-3 まではステーションウィンドウの入口と同じ）。どちらもボードホストの `Run` の中（`:follow` の前の `Prepare` と、`:stop-follow` の「core に無いボード（`BoardHost.Built` が偽）なら作りも書きもしない」は、S4ac-3 から何もせず S4ad で削除した）。書き込みは `SetIfChanged` なので、何も追従していないボードには何も書かない（反映ボタンを点けない）。どちらもウィジェットを建てない） |
 | `src/core/SetLoadService.py` | なし（`SetLoadService(n)` を呼ぶたびに作る。`SetFollowService`・ボードホスト・Web の操作が使う。S4ac-3 までは Qt のボードの `setLoad` も） | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。最後に読んだセット `lastSetSelected` も持つ（state の外。ADR-005 S2d でボード属性から移動。S3e-7 からボード番号ごとにクラスが持つので、ボードのインスタンスでもヘッドレスでも同じ値を読む。クリアと `ClearSetTracking()` で忘れるので、同じセットを選び直すと再読込される。`get_set` と stale 判定が読む）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本（`score.{n}.teamsSwapped` を読む。S2c までボード属性を callable で注入していた） |
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**大会情報ページの入力欄の `Set{Text,Number,Date}Field`**（`PATCH /api/v1/tournament/info`。日付は `SetDate`）・表示大会名の 3 系統の上書き規則・起動時シード（`logoVersion` / `bannerVersion` の publish と `media` の idle 戻し）。日付は整形済みの `startAt` と並べて `startAtDate`（`YYYY-MM-DD`）を同じ保存サイクルで公開し、日付欄は `DateOf` で描いて `SetDate(field, "YYYY-MM-DD")` で書く（その日の 0 時の unix 秒への変換は core。ADR-005 S4f）。ページを開いていなくても（ヘッドレスでも）動く。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は React の SCORE ページにあり、v1 の `PATCH /api/v1/tournament/info`（`AutonaWebOperations.update_tournament_info`）が `SetDisplayName` を呼ぶ**（Qt の SCORE パネルとクルーボードの 2 箇所（クルー側は Step 5 第 4 弾で合流）も同じ操作を呼んでいた。S4ac-3 で削除） |
 | `src/core/PlayerService.py` | なし（スロットの path に束縛した**一時インスタンス**を呼び出し側が作って使い捨てる: Web の操作・セット読込・`AutonaActions.ClearPlayers`・モジュール関数 `RepublishTeamMergedNames(board, team)`。S4ac-3 までは選手ウィジェット 1 枚につき 1 個の `AutonaBasePlayerWidget.player` もあった） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。**選手の読込（`ApplyData(data, loadFromDB, clear, no_mains)`）・スロットのクリア（`ClearSlot`）・DB への保存（`SavePlayerToDB` = state 側の `PrepareSaveToDB`（番号付きの記録を返す）+ DB 側の `SaveRecordToDB`。Web の操作は DB 側をボードホストの外で呼ぶ: `PlayerDB.changed` の受け手 `AutonaPlayerDB.SetupModel` がメインスレッドを待っていたため（ADR-005 S3f-2 で待たなくなった）。外へ出したので、同じ DB キーにもっと新しい番号の記録が保存済みなら古い方を捨てる。ADR-005 S3e-4 レビュー）もここ**（ADR-005 S3e-3）: 読込は DB の記録とのマージ・悪語フィルタ（コピーに対して。呼び出し側の dict と DB の記録は書き換えない）・国 / 地域（code と `FindState`）・mains → キャラスロット・seed・合成名と画像を 1 保存サイクルで書き、旧カードの `SetData` と同じ Set 列を出す（`tests/test_player_apply.py` / `tests/test_player_service.py` が ae922c24 の録画と照合）。操作の前後で id / seed が変わったか（`SlotChange`。戻り値でもある）で、読込自身が統計を 1 回だけ依頼する（`Announce` → `StatsService.PlayerChanged`。ボードのスロットだけ。`SetSeed` / `SetPlayerId` の `announce=True` は Qt のカードの手入力として依頼するためのもので、S4ac-3 からアプリに呼び手は無い（テストの `edit_tag` が録画の再生に使う）。ADR-005 S3e-5。それまでは呼び出し側のカード・ボード・ボードホストが依頼していた）。**クリアしない読込（Web の選手編集・legacy `update-team`）で、書き込み後のスポンサー + タグの組が前と違えば別の選手として扱い、読込が書かない id・city を空にする**（`_NamesAnotherPlayer`。ADR-005 S3e-4。同じ組なら残す。残すかは読込が実際に書いたかで決めるので、途中の例外でも前の選手の id が残らない。online_avatar・seed は残す: Qt のカードの手入力の `NameChanged` と同じで、LIVE-BUG-1「タグを直しても顔写真は消えない」を守る）。保存はウィジェットではなく state から組む。**v1 の欄とキャラの行の編集もここ**（ADR-005 S4z）: `Edit(texts, country, region)` は選手の入力欄の確定（S4ac-3 までの Qt のカードの入力欄と同じ書き込み）（文字の欄・国・地域。スポンサー / タグが変われば合成名と画像を作り直して id を空にし、統計を依頼する。途中で例外が出ても書いたぶんについて同じことをする: `ApplyData` と同じ保証）、`EditCharacter(row, character, skin, variant, game)` はキャラ行の 3 つのコンボの選択（行は state のキャラ枠の数だけ。0 なら行は無い）。どちらも 1 保存サイクルで、断るときは何も書かずに理由のコードを返す。`AutonaActions.ClearPlayers` も各スロットの `ClearSlot` を呼ぶ。`BoardNumber()` は `score.{N}` の番号を返す（それ以外のパスは `None`）。**`mergedName` / `mergedOnlyName` の ` [L]` は state のチームの `losers` から付ける**（`PublishMergedName(sponsor, tag)` が `TeamLosersKey()` を読む。ADR-005 S2b）。フラグの書き手は同じ SaveBlock で `RepublishTeamMergedNames` を呼び、チーム全員の名前を state の `team` / `name` から作り直す: `AutonaActions.SetTeamLosers`（LOSERS チェックボックス・v1 `PATCH set` の `AutonaWebOperations.set_team_losers`）と `SetLoadService.ApplyLosers`（セット読込・legacy `-set?losers=` の `ChangeSetData`。`DisplayTeam` で解いたチーム）。どちらもフラグが変わったときだけ。Qt のカード（S4ac-3 で削除）は名前確定で `_OnTextChanged`（state に書く）→ `NameChanged`（publish）の順に走ったので、作り直しがどのスレッドから割り込んでも同じ名前になった。**国/州とキャラスロットは呼び出し側から識別子だけを受け取り、値はここで組む**（ADR-005 S1d）: `SetCountry(code)` / `SetRegion(countryCode, regionCode)` は `CountryCatalog.CountryByCode` / `State` から、`PublishCharacterSlots([CharacterSlot(en_name, skin 行, variant en_name, フォールバック名), ...])` は `GameAssetCatalog.CharacterRow` / `SkinRow` / `VariantRow` から（1 回の publish は `Current()` 1 回のスナップショットで解決）。入れ子のキー順は旧実装が Qt モデル経由で出していた QVariantMap 順を `DictHelper.qvariantmap_copy` で再現する（`program_state.json` と Socket.IO delta のバイト互換。`tests/test_player_slot_publish.py` と `tests/test_player_service.py` が移行前の golden と照合）。カタログが知らない識別子は、キャラなら `{"name": フォールバック名}`（手入力テキスト、または選ばれた行自身の `name`。コンボの「表示名 / en_name」ラベルは使わない）、国/州なら `{}`。カタログは `games=` / `countries=` で差し替え可能（既定は呼び出し時の `.instance`） |
@@ -339,7 +356,7 @@ paths:
 | `src/core/CommentaryService.py` | なし（モジュール関数） | `commentary.*` の書き込み全部（ADR-005 S3e-2）: 選手データでの 1 枠の上書き（`ApplyPlayerData`。Web と補完の選択。悪語フィルタ → 正規化 → 1 枠をマージしてルートごと 1 回 publish = 旧パネル経由と同じ Set）・タグからの読込（`LoadFromTag`。`PlayerDB`）・パネルの 1 欄の編集（`SetField`。値が変わったときだけ。表示は `MAX_DISPLAY` 人まで）・並べ替え（`Reorder`）。実況パネルは Web 版（React の `CommentaryPage`）だけで、state を描画するだけ（書き手は core の本サービス。ADR-005 S4c で Qt 版を削除） |
 | `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（ページの選手の編集 `UpdatePlayer`（ADR-005 S4i から React のページが `PATCH /api/v1/top8/players/<slot>` で呼ぶ。1 リクエストの欄を `StateManager.lock` の中でゲームのカタログの 1 つの snapshot と国の 1 回の参照で解決し、1 つでも断れば何も書かず、1 保存サイクルで書く。キャラに `game` が付いていれば読み込み中のゲームの codename と照合する）と、1 欄の `SetPlayerText` / `SetPlayerCountry` / `SetPlayerCharacter`（その 1 キーだけを、変わったときだけ）・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。**国とキャラは識別子で受け取り、値はここで組む**（ADR-005 S4h）: `SetPlayerCountry(slot, code)` は `PlayerService.BuildCountryValue`（選手カードと同じ形・キー順。カスタム国旗も code）、`SetPlayerCharacter(slot, en_name, skin)` は `CharacterValue` = `PlayerService.BuildCharacterValue`（スキンの行が範囲外なら最初のスキン。オーバーレイが描く `assets` 込み）。カタログが知らない code / en_name は書かずに False。取り込み（`ResolveImportedPlayer`）のキャラは `ImportedCharacterValue`: 従来のキャラの config のコピーをキー・値・順序ともそのまま残し、`CharacterValue` にしかないキーを後ろに足す（追加だけ。`out/top8/...` のテキストと自作レイアウトのため。コンボに無いキャラ = mods オフの modded はコピーだけ）。state の値 → 選択（en_name, スキンの行）は `CharacterPick`（codename が一致する行を優先。codename の無い値は全キャラのスキンから assets で探す。S4h より前の 3 つの形も読む）。ページは同じ規則を TS に持つ（`web/src/Top8Page/characterPick.ts`。`characterPick.cases.json` を `tests/test_top8_service.py` と jest の両方が読み、食い違いを検出する。S4i）。**反映 `ApplyScores` は渡された試合だけを更新するマージ**（渡されなかった試合は今の値を保つ。lock の中で読んで書く。スコアは 0〜`SCORE_MAX`(99) の int 2 つの list だけ。1 つでも不正なら何も書かずに None。S4h）。**取り込みの入口は `RefreshFromProvider()` の 1 つ**（ADR-005 S3e-8。ページの「大会結果を読み込む」（`POST /api/v1/bracket:refresh`）・ホットキー・legacy / Socket.IO が同じ関数を呼び、ヘッドレスでも動く）: 大会の最後の phase のダブルエリミのグループ（`TargetPhaseGroup`）→ 取得 → `core/Bracket` → `Top8Model.FromBracket` → 選手を `GameAssetCatalog` / `CountryCatalog` で解決 → `ImportBracket`。取得は `bootstrap_core()` が注入する `fetcher`（provider の `RunWithProvider`。provider のワーカースレッドで走る）。実行中フラグは取り込み全体（取得〜書き込み）で 1 つ、全入口が共有し、実行中の要求は `BUSY` で捨てる（キューしない）。選手の解決と書き込みは `StateManager.lock` の中（ゲームの切り替えとの競合で前のゲームのキャラが残らない）。空・失敗の結果は何も書かない。**ゲームが別のゲームに変わったときのキャラの消去 `ForgetCharacters()`** も持つ（キャラがある枠だけ・1 保存サイクル。呼ぶのは `GameAssetCatalog.SelectGame` だけ）。Top 8 のページ（React。S4i）は操作を依頼し、state を描画するだけ（実況パネルと同じ型）。トポロジ自体は Qt-free の `src/core/Top8Model.py` が正本 |
 | `src/core/ColorService.py` | なし（モジュール関数） | 大会カラー（`tournamentInfo.themeColor`/`accentColor`）と機能別カラー（`colors.{feature}.*`）の読み・書き・起動シード。**`tournamentInfo` プレフィックスだがこの族は本サービスのもの**で、`TournamentInfoService` は触らない（歴史的なキー名） |
-| `src/core/GameAssetCatalog.py` | `GameAssetCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaGameAssetManager` が包む） | ゲームアセットの正本（スキャン・ロード・キャラ/スキン/ステージ/アセットパス・Start.gg ID 解決）と `game.*` の書き込み。ロード結果は不変スナップショットで差し替え、リーダーはロックを取らない。書き手のロック保持中に `run_sync` / Qt シグナル / observer を呼ばない（ADR-005 S1a）。**例外は `SelectGame` の `progress` コールバックだけ**でロック保持中に呼ばれるため、渡す側はブロックしない（queued で投げるだけ。アダプタは `AutonaStatusManager` を渡す）。observer から書き手を呼ばない（agent-pitfalls #16）。**`SelectGame` は、state の `game.codename` が空でなく新しい codename と違うとき、Top 8 と大会リザルトのキャラを空にする**（writer lock を離した後・同じ `SaveBlock` の中で `Top8Service.ForgetCharacters()` と `ResultService.ForgetCharacters()`（ADR-005 S4q）を直接呼ぶ。observer は使わない。起動時の復元（`game` が空）・同じゲームの選び直しでは呼ばない。ADR-005 S3e-8）。同じ判定はスナップショットの `replaced`（置き換えた前のゲームの codename。それ以外と `ForgetSelection` の後は None）に残り、ボードの選手のキャラと mains はロード後にシェルが走らせる `AutonaActions.ApplyGameRoster(replaced)` が空にする。値はロードが返したスナップショットのもので、ローダーの `gameLoaded`（`Signal(object)`。デスクトップはアダプタ、ヘッドレスは `HeadlessGames`。`onLoad` / `gameChanged` の直前に出る）で `bootstrap.wire_game_roster` に渡る。後から `Current()` を読まない（スロットが走る頃には、次のロードのスナップショットになりうる。ADR-005 S3e-6 レビュー）。**デスクトップのロードは `TaskExecutor` のジョブ 1 本（ローダー）**（ADR-005 S3f-4。旧 `AssetsLoaderThread`）: 要求は最新の 1 つだけを記録し（`_requestLock`）、ローダーが走っていなければ 1 本積む。ローダーは待っている最新の要求を、無くなるまで順に取る（要求ごとのジョブにしない: 立て続けの切り替えでジョブレーンを埋めない）。ローダーが保存ブロックを開いて `SelectGame` を呼び、モデルの作り直し・`gameLoaded`・`onLoad` は `run_sync` で GUI スレッドに渡した `_Publish` の中で順に走る（ロスターの書き込みも同じ保存サイクル）。ブロックを閉じるのも `_Publish` の終わりの GUI スレッドなので、通常は公開も held 通知も GUI スレッドから direct に出る（pitfalls #17 の原子性を保つ）。ただしそのとき別スレッドの SaveBlock が開いていれば、最後に閉じたスレッドが公開する。**ヘッドレス（`src/headless.HeadlessGames`）も同じ設計のジョブ 1 本**（ADR-005 S3f-6。旧: 要求ごとの daemon スレッド）で、保存ブロックを `SelectGame` の後に閉じ、ロード後の処理（選択の保存・`gameLoaded` / `gameChanged`）を `run_sync` でメインスレッドに渡して待つ（非同期の要求も。見捨てられたら `_SettleStopped`）。**後から来た要求が勝つ**（世代番号。待っている要求は新しい要求に置き換わると選ばずに終わる。同期ロード（`set_game`）は、自分か後の要求の試行が終わってから戻る。`"OK"` は成否を問わず「試行が終わった」で、GUI スレッドで同期ロードしていた頃と同じ）。ローダーが要求を取った直後に終了中（`gui_unavailable_reason()`）なら何も書かずに `done` へ進む（両シェル）。選択の後に終了が来たら、ロスター（前のゲームのキャラの消去）・ボードの反映・選択の保存をローダーのスレッドで書き、state.json を 1 つのゲームに揃える（デスクトップは `_SettleUnannounced`、ヘッドレスは `_SettleStopped`）。デスクトップでモデルの作り直しが失敗したとき（`FAILED`）も、`_Publish` がサイクルを閉じる前に GUI スレッドで同じことをする。GUI スレッドからの同期ロードは RuntimeError。要求の Future は取り消せない（`cancel()` は False。空の codename は答えの済んだ `SKIPPED`）。`done()` は試行を終わらせたスレッド（ローダーのジョブレーン・置き換えた要求のスレッド・シャットダウンのスレッドなど）で走るので、短く済ませ、別のロードを頼まない（ジョブレーンからはローダーを起こせず、同期なら自己デッドロック）。ゲームが変わったときの全量の Socket.IO 送信（`ws_game_changed`）は、ロードの公開（`StateManager.WhenPublished`）とその delta の送信（`WebServer._after_pending_deltas`）の後に出す（revision の契約: R+1 の delta が先、全量の revision は中身と一致。開いている delta の窓はこのときだけ待たずに送る）。**Web / Start.gg のリーダーはカタログを直接読む**（ADR-005 S1b）: `AutonaWebOperations.get_games` / `get_characters` / `get_variants` は `*Payload()` を返すだけで `@gui_thread_sync` を持たない。`StartGGDataProvider` は `CharacterFromStartGGId` / `StageFromStartGGId` で解決し、1 つの結果（1 セットのパース・1 エントラント）を組む間は `Current()` を 1 回取って `snapshot=` で渡す（start.gg の ID → 名前の表 `_startggCharacters` はスナップショット外だが、ゲーム非依存なので実害なし）。ゲームの切り替えは codename で `LoadGameByCodename` を呼ぶ（スキャン上の位置を引いてから位置でロードしない。間の再スキャンで別ゲームになる）。終了を待つ側は `done=`（成否を問わず 1 回）を使い、onLoad（実際にロードされたときだけ）で待たない。新しいリーダーをアダプタの旧プロパティ（`games` / `selectedGame` / `characters` ほか。GUI 側の残りは S4 で消える）に繋がない。ペイロードの入れ子のキー順は旧モデル経由の QVariantMap 順を再現している（Socket.IO のバイト互換。`DictHelper.qvariantmap_copy`（S1d で core 共用に移動。選手スロットの値も使う）。str キーの dict と list だけ変換し、tuple と非 str キーの dict は PySide6 と同じく並べ替えない） |
+| `src/core/GameAssetCatalog.py` | `GameAssetCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaGameAssetManager` が包む） | ゲームアセットの正本（スキャン・ロード・キャラ/スキン/ステージ/アセットパス・Start.gg ID 解決）と `game.*` の書き込み。ロード結果は不変スナップショットで差し替え、リーダーはロックを取らない。書き手のロック保持中に `run_sync` / Qt シグナル / observer を呼ばない（ADR-005 S1a）。**例外は `SelectGame` の `progress` コールバックだけ**でロック保持中に呼ばれるため、渡す側はブロックしない（queued で投げるだけ。アダプタは `AutonaStatusManager` を渡す）。observer から書き手を呼ばない（agent-pitfalls #16）。**`SelectGame` は、state の `game.codename` が空でなく新しい codename と違うとき、Top 8 と大会リザルトのキャラを空にする**（writer lock を離した後・同じ `SaveBlock` の中で `Top8Service.ForgetCharacters()` と `ResultService.ForgetCharacters()`（ADR-005 S4q）を直接呼ぶ。observer は使わない。起動時の復元（`game` が空）・同じゲームの選び直しでは呼ばない。ADR-005 S3e-8）。同じ判定はスナップショットの `replaced`（置き換えた前のゲームの codename。それ以外と `ForgetSelection` の後は None）に残り、ボードの選手のキャラと mains はロード後にシェルが走らせる `AutonaActions.ApplyGameRoster(replaced)` が空にする。値はロードが返したスナップショットのもので、ローダーの `gameLoaded`（`Signal(object)`。デスクトップはアダプタ、ヘッドレスは `HeadlessGames`。`onLoad` / `gameChanged` の直前に出る）で `bootstrap.wire_game_roster` に渡る。後から `Current()` を読まない（スロットが走る頃には、次のロードのスナップショットになりうる。ADR-005 S3e-6 レビュー）。**デスクトップのロードは `TaskExecutor` のジョブ 1 本（ローダー）**（ADR-005 S3f-4。旧 `AssetsLoaderThread`）: 要求は最新の 1 つだけを記録し（`_requestLock`）、ローダーが走っていなければ 1 本積む。ローダーは待っている最新の要求を、無くなるまで順に取る（要求ごとのジョブにしない: 立て続けの切り替えでジョブレーンを埋めない）。ローダーが保存ブロックを開いて `SelectGame` を呼び、モデルの作り直し・`gameLoaded`・`onLoad` は `run_sync` で GUI スレッドに渡した `_Publish` の中で順に走る（ロスターの書き込みも同じ保存サイクル。`_Publish` 全体がボードホストの `Run` の中: ADR-005 S4ad のレビュー）。ブロックを閉じるのも `_Publish` の終わりの GUI スレッドなので、通常は公開も held 通知も GUI スレッドから direct に出る（pitfalls #17 の原子性を保つ）。ただしそのとき別スレッドの SaveBlock が開いていれば、最後に閉じたスレッドが公開する。**ヘッドレス（`src/headless.HeadlessGames`）も同じ設計のジョブ 1 本**（ADR-005 S3f-6。旧: 要求ごとの daemon スレッド）で、保存ブロックを `SelectGame` の後に閉じ、ロード後の処理（選択の保存・`gameLoaded` / `gameChanged`）を `run_sync` でメインスレッドに渡して待つ（非同期の要求も。見捨てられたら `_SettleStopped`）。**後から来た要求が勝つ**（世代番号。待っている要求は新しい要求に置き換わると選ばずに終わる。同期ロード（`set_game`）は、自分か後の要求の試行が終わってから戻る。`"OK"` は成否を問わず「試行が終わった」で、GUI スレッドで同期ロードしていた頃と同じ）。ローダーが要求を取った直後に終了中（`gui_unavailable_reason()`）なら何も書かずに `done` へ進む（両シェル）。選択の後に終了が来たら、ロスター（前のゲームのキャラの消去）・ボードの反映・選択の保存をローダーのスレッドで書き、state.json を 1 つのゲームに揃える（デスクトップは `_SettleUnannounced`、ヘッドレスは `_SettleStopped`）。デスクトップでモデルの作り直しが失敗したとき（`FAILED`）も、`_Publish` がサイクルを閉じる前に GUI スレッドで同じことをする。GUI スレッドからの同期ロードは RuntimeError。要求の Future は取り消せない（`cancel()` は False。空の codename は答えの済んだ `SKIPPED`）。`done()` は試行を終わらせたスレッド（ローダーのジョブレーン・置き換えた要求のスレッド・シャットダウンのスレッドなど）で走るので、短く済ませ、別のロードを頼まない（ジョブレーンからはローダーを起こせず、同期なら自己デッドロック）。ゲームが変わったときの全量の Socket.IO 送信（`ws_game_changed`）は、ロードの公開（`StateManager.WhenPublished`）とその delta の送信（`WebServer._after_pending_deltas`）の後に出す（revision の契約: R+1 の delta が先、全量の revision は中身と一致。開いている delta の窓はこのときだけ待たずに送る）。**Web / Start.gg のリーダーはカタログを直接読む**（ADR-005 S1b）: `AutonaWebOperations.get_games` / `get_characters` / `get_variants` は `*Payload()` を返すだけで `@gui_thread_sync` を持たない。`StartGGDataProvider` は `CharacterFromStartGGId` / `StageFromStartGGId` で解決し、1 つの結果（1 セットのパース・1 エントラント）を組む間は `Current()` を 1 回取って `snapshot=` で渡す（start.gg の ID → 名前の表 `_startggCharacters` はスナップショット外だが、ゲーム非依存なので実害なし）。ゲームの切り替えは codename で `LoadGameByCodename` を呼ぶ（スキャン上の位置を引いてから位置でロードしない。間の再スキャンで別ゲームになる）。終了を待つ側は `done=`（成否を問わず 1 回）を使い、onLoad（実際にロードされたときだけ）で待たない。新しいリーダーをアダプタの旧プロパティ（`games` / `selectedGame` / `characters` ほか。GUI 側の残りは S4 で消える）に繋がない。ペイロードの入れ子のキー順は旧モデル経由の QVariantMap 順を再現している（Socket.IO のバイト互換。`DictHelper.qvariantmap_copy`（S1d で core 共用に移動。選手スロットの値も使う）。str キーの dict と list だけ変換し、tuple と非 str キーの dict は PySide6 と同じく並べ替えない） |
 | `src/core/CountryCatalog.py` | `CountryCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaCountryHelper` が国モデルを作る） | 国・地域（states）・カスタム国旗・都市→地域表の正本（ADR-005 S1c）。`Load()` が唯一の書き手で不変スナップショットを差し替え、リーダーはロックを取らない。state は書かない。ロードは `Window.__init__` の `AutonaCountryHelper.instance.init()`（ヘッドレスは `src/headless.py` が `Load()` を直接呼ぶ。国名がロケール依存なので `LoadLocale()` の後。ロケールは callable 注入）。都市→地域表（`FindState`）も `Load()` が 1 回だけ読む（最初の照会は選手の読込から `StateManager.lock` の中で来うるため。ADR-005 S3e-3。`Load()` していないカタログでは最初の照会で読む）。**データを返すリーダーは必ずコピー**を返し、表に書き戻さない（旧 `LoadStates` と Start.gg の次セット解決が地域 dict に `asset` を書き込み、`get_states` の出力が「デスクトップがその国を表示したか」で揺れていた）。地域の `asset`（旗パス）は `States()` / `State()` が呼ばれた時点で解決する（地域ごとにディスクを見る。旗の要らない照合 = 選手の読込の地域コード合わせは、`StateManager.lock` の中なので `StateCodes()`（code / original_code だけ）を使う。ADR-005 S3e-3）。`AutonaWebOperations.get_states` は `States()` を返すだけで `@gui_thread_sync` を持たない。Start.gg は `CountryCodeFromEnName` / `FindState` / `State` / `BasicCountryInfo` で解決する。選手の国を code から引くのは `CountryByCode`（標準国 → カスタム国旗の順。国モデル走査と同じ答え。`PlayerService.CountryValue` が使う） |
 | `src/core/SponsorHelper.py` | なし（静的メソッド） | `...player.{M}.sponsor_logo` / `sponsor_logos.{I}` の解決と書き込み。`PlayerService.PublishImages` から呼ばれる |
 | `src/core/TournamentMediaService.py` | `TournamentMediaService.instance`（`bootstrap_core()` 生成。今の provider の引き方 `currentProvider` は注入） | 大会アイコン / バナーのすべて（ADR-005 S4f）: ファイルからの取り込み `ImportMedia(kind, bytes)`（アイコンは長辺 512、バナーは長辺 1920 の PNG。検証・縮小・tmp → `os.replace` は配信団体素材と共通の `core/ImageImport.py`）・大会からの取得 `FetchMedia()`（`TaskExecutor` のジョブ 1 本、状態は `tournamentInfo.media.{status,error,revision}`。大会は URL（`provider.url`）で見分ける。実行中の要求は、同じ大会なら `BUSY`、別の大会なら `QUEUED`（走っている取得が終わったら同じジョブがその時点の大会で取り直す。大会の設定の `fetchMedia` が捨てられないように。S4f レビュー M1）。答えを待つ間に大会が変わったら書かずに `superseded`。照会の失敗（provider の `strict=True` の lookup が例外）は `fetch_failed` で、「メディアが無い」`no_media` と区別する）・既定に戻す `ResetMedia()`。`logoVersion` / `bannerVersion` を publish する。大会情報ページ（React の `EventPage`。ADR-005 S4g）は `/api/v1/tournament/media*` で依頼して state を描画するだけ |
@@ -528,10 +545,9 @@ paths:
 
 - `Helpers/` 配下はユーティリティ。各ファイルは単一責務
 - `AutonaQtHelper.py` の `GuiExecutor` はワーカースレッドから GUI 操作する際の橋渡し
-- `AutonaQtHelper.HeldBackText` は、state を描画する入力欄の「描画が残した文字は書き戻さない、打った文字は書く」判定
-  （選手カード・ボード 1 / 2 のチーム名・クルーボードが共有していた。ADR-005 S3e-2）。打ちかけの間にその欄自身の値が
-  別の所で書かれたときだけは、その書き込みが勝つ（S2d）。**S4ac-3 で Qt の SCORE が消えて呼び出し側は無い**（Qt の整理で消す。
-  `tests/test_held_back_text.py` が規則を pin したまま）。新しい UI は React で作る（ADR-005）
+- `AutonaQtHelper.HeldBackText`（state を描画する入力欄の「描画が残した文字は書き戻さない、打った文字は書く」判定。選手カード・
+  ボード 1 / 2 のチーム名・クルーボードが共有していた。ADR-005 S3e-2）は、S4ac-3 で Qt の SCORE が消えて呼び出し側が無くなり、
+  S4ad で `tests/test_held_back_text.py` と一緒に削除した。新しい UI は React で作る（ADR-005）
 - `AutonaCountryHelper` / `AutonaLocaleHelper` はシグナルを持つ。変更通知が必要な場面で使う
   （`AutonaCountryHelper` は ADR-005 S1c 以降、国モデル `countryModel` と `countriesAboutToReload` / `countriesUpdated` だけを持つ
   Qt アダプタ。国・地域のデータは `core/CountryCatalog` を読む）
@@ -545,7 +561,8 @@ paths:
   `TournamentPlayers()` の深いコピーをシリアライズする。保存はロックの中で JSON 文字列にするだけで、書き込みはロックの外
   （保存専用のロックと世代番号で直列化。mkstemp → `os.replace` を 4 回試行し、だめなら旧実装と同じ上書き。`local_players.json` の
   バイトは旧実装と同じ）。変更は `changed`（ObserverChannel）で
-  **ロックの外から**通知する。`AutonaPlayerDB` は補完モデルと `signals.db_updated` だけの Qt アダプタで、`bootstrap_core()` の
+  **ロックの外から**通知する。`AutonaPlayerDB` は選手の Qt モデル（`model`。消費者は無く、Qt のモデルの片付けで消す。補完の proxy `completerModel` /
+  `GetCompleterModel()` は受け手の Qt のカードと一緒に S4ad で削除）と `signals.db_updated` だけの Qt アダプタで、`bootstrap_core()` の
   `Attach()` が `changed` → `SetupModel`（GUI スレッドで `db_updated`。他スレッドからは積むだけで待たない: ADR-005 S3f-2）を中継する（process 寿命の static クラスなので
   `tests/test_signal_lifetime.py` の購読許可リストに入っている）。選手データの読み書きは `PlayerDB.instance` を呼び、
   `AutonaPlayerDB` にデータの操作を足さない

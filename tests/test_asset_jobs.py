@@ -867,9 +867,10 @@ def test_a_loader_the_shutdown_cancels_while_queued_stops_its_request(
 
 
 def _headlessGames(monkeypatch, provider=None):
-    """A headless loader over the session's catalog, with the headless
-    board host (what follows a load the shutdown stopped writes through
-    it; the harness registered the desktop's)."""
+    """A headless loader over the session's catalog, with a board host of
+    its own (what follows a load the shutdown stopped writes through it;
+    the one BoardHost of both shells since ADR-005 S4ad -- the harness had
+    registered the desktop's until then)."""
     from src import AutonaWebOperations as WebOps
     from src.AutonaWebOperations import BoardHost
     from src.core.GameAssetCatalog import GameAssetCatalog
@@ -1449,24 +1450,29 @@ def _logRecords():
 
 def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         autonaApp, ownExecutor):
-    """The board host's operation, the shell operations: once the GUI
-    thread will not run them, the request is answered as unavailable (503)
-    and logged at INFO -- not a 500 with an ERROR traceback (ADR-005 S3f-4
-    review). (An unbuilt board's build was one too: the desktop built a
-    board core did not have on its GUI thread until ADR-005 S4ac-3, which
-    removed the Qt SCORE; nothing is built for a read since, in either
-    shell.)"""
+    """The shell operations and the board operations: once the app is
+    shutting down, the request is answered as unavailable (503) and logged
+    at INFO -- not a 500 with an ERROR traceback (ADR-005 S3f-4 review).
+    The shell operations because the GUI thread will not run them. A board
+    operation runs on the request's thread since ADR-005 S4ad (the desktop's
+    board host ran it on the GUI thread until then, and answered so for
+    that reason): the host refuses it on the same flag, before it writes
+    (the next test). (An unbuilt board's build was one too: the desktop
+    built a board core did not have on its GUI thread until ADR-005 S4ac-3,
+    which removed the Qt SCORE; nothing is built for a read since, in
+    either shell.)"""
     from src import AutonaWebOperations as WebOps
     from src.AutonaWebOperations import NotAvailable, SHUTTING_DOWN_MESSAGE
 
+    autonaApp.ready(1)
     web = autonaApp.web()
     ownExecutor.shutdown(WAIT)
     calls = {
-        "a board operation": lambda: web.swap_teams(1),
         "the set selection": lambda: web.open_sets(1),
         "the thumbnail": lambda: web.get_thumbnail(1, "png"),
         "an image render": lambda: WebOps.start_image_render(
             "thumbnail", ({}, {}, {}), lambda *_: None),
+        "a board operation": lambda: web.swap_teams(1),
     }
     records, stop = _logRecords()
     try:
@@ -1484,6 +1490,85 @@ def test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable(
         == []
     assert any("not run" in r["message"] for r in records
                if r["level"].name == "INFO")
+
+
+def test_a_board_operation_at_shutdown_writes_nothing_off_the_main_thread(
+        autonaApp, ownExecutor, boardLock):
+    """ADR-005 S4ad review: a board operation runs on the request's thread
+    since S4ad, so nothing makes it wait for the GUI thread any more -- the
+    board host refuses it on the shutdown's own flag (gui_unavailable_
+    reason(): the background tasks stopped here), before it runs anything:
+    the 503 of the desktop's host, which waited for the GUI thread until
+    then. The main thread's operations (a hotkey) still run, and so does an
+    operation already running when the shutdown began (checked on the
+    outermost call: the inner ones of a composite operation are not
+    refused)."""
+    from src import AutonaWebOperations as WebOps
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.AutonaWebOperations import NotAvailable, SHUTTING_DOWN_MESSAGE
+    from src.core.StateManager import StateManager
+
+    autonaApp.ready(1)
+    ran = []
+
+    def composite():
+        # The shutdown begins while it runs; its inner operation runs.
+        ownExecutor.shutdown(WAIT)
+        ran.append(boardLock.held())
+        return WebOps.swap_teams(1)
+
+    thread, outcome = _onAnotherThread(
+        lambda: WebOps.boardHost.Run(composite))
+    thread.join(WAIT)  # this thread does not pump
+    assert not thread.is_alive()
+    assert outcome == {"result": "OK"} and ran == [True]
+    assert StateManager.Get("score.1.teamsSwapped") is True
+
+    thread, outcome = _onAnotherThread(lambda: WebOps.swap_teams(1))
+    thread.join(WAIT)
+    assert not thread.is_alive()
+    error = outcome.get("error")
+    assert isinstance(error, NotAvailable), outcome
+    assert error.message == SHUTTING_DOWN_MESSAGE
+    assert StateManager.Get("score.1.teamsSwapped") is True
+
+    AutonaHotkeys.signals.swap_teams.emit()
+    assert StateManager.Get("score.1.teamsSwapped") is False
+
+
+def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
+        autonaApp, ownExecutor, boardLock, monkeypatch):
+    """The asset adapter's _SettleUnannounced, on the loader's thread once
+    the shutdown came after the selection (STOPPED): the roster and the
+    commit the load would have run, written there as one board operation
+    -- under the board host's lock -- which the host does not refuse as it
+    refuses a late request's (`atShutdown`; ADR-005 S4ad review). The pick
+    is persisted after it."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.core.Actions import AutonaActions
+    from src.core.GameAssetCatalog import GameAssetCatalog
+
+    autonaApp.ready(1)
+    actions = AutonaActions.instance
+    manager = AutonaGameAssetManager.instance
+    calls = []
+    monkeypatch.setattr(
+        actions, "ApplyGameRoster",
+        lambda replaced: calls.append(("roster", boardLock.held())) or [1])
+    monkeypatch.setattr(
+        actions, "ApplyChanges",
+        lambda board: calls.append(("commit", board, boardLock.held())))
+    monkeypatch.setattr(manager, "_PersistSelectedGame",
+                        lambda: calls.append(("pick", boardLock.held())))
+    ownExecutor.shutdown(WAIT)
+
+    thread, outcome = _onAnotherThread(lambda: manager._SettleUnannounced(
+        GameAssetCatalog.instance.Current()))
+    thread.join(WAIT)  # this thread does not pump
+
+    assert not thread.is_alive()
+    assert "error" not in outcome, outcome
+    assert calls == [("roster", True), ("commit", 1, True), ("pick", False)]
 
 
 # ── the start.gg character download ──────────────────────────────────────

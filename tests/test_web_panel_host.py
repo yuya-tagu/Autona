@@ -2207,6 +2207,38 @@ def test_the_game_tracker_and_its_switch_are_gone():
     assert pages == []
 
 
+def test_the_qt_score_s_leftovers_are_gone():
+    # ADR-005 S4ad: what lost its last consumer with the Qt SCORE (S4ac-3,
+    # its acceptance review's leftovers) went: the player-name completers'
+    # proxy over the player DB's model, the set follow's notice to the Qt
+    # board's timer row (core's emit and the Qt signal), the panels' dock
+    # QSS and the typed-text rule of the Qt fields. (The Qt models
+    # themselves -- the player DB's, the asset adapter's, the countries' --
+    # are a later stage's.)
+    from src import AutonaPlayerDB as playerDb
+    from src import AutonaSetFollowUtil as followUtil
+    from src.Helpers import AutonaQtHelper
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not hasattr(playerDb.AutonaPlayerDB, "completerModel")
+    assert not hasattr(playerDb.AutonaPlayerDB, "GetCompleterModel")
+    assert not hasattr(playerDb, "_TournamentEntrantsProxy")
+    assert not hasattr(followUtil.AutonaSetFollowUtil, "FollowChanged")
+    assert not hasattr(followUtil._FollowSignals, "followChanged")
+    calls = [node.attr for node in ast.walk(ast.parse(
+                 (src / "core" / "SetFollowService.py").read_text(
+                     encoding="utf-8")))
+             if isinstance(node, ast.Attribute)
+             and node.attr == "FollowChanged"]
+    assert calls == []
+    assert not hasattr(AutonaQtHelper, "HeldBackText")
+    assert not (PROJECT_ROOT / "tests" / "test_held_back_text.py").exists()
+    assert [value for value in _stringConstants(
+                src / "ui_constants.py", docstrings=False)
+            if "QDockWidget" in value] == []
+
+
 # ── several React items, one host page (ADR-005 S4e) ────────────────────
 
 def test_a_react_item_shows_its_own_page_until_the_host_is_built():

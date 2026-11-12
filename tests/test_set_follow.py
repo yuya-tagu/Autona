@@ -28,8 +28,9 @@ recorded before the move). This file is what the golden cannot hold:
   forgotten, an update after the set was loaded again -- checked where the
   board's operations run, so a web load landing right after the check
   replaces the lookup's set;
-- the board operations run where the shell runs them (the headless host's
-  lock), and nothing waits for the GUI thread with the state's lock held;
+- the board operations run under the board host's lock, on the calling
+  thread in both shells (ADR-005 S4ad), and nothing waits for the GUI
+  thread with the state's lock held;
 - the poll's clock runs under a bare QCoreApplication, and stops for good
   when the app quits;
 - v1's follow, stop and read (ADR-005 S4v) do what the station window and the
@@ -1152,17 +1153,17 @@ def test_an_update_answering_after_the_set_was_loaded_again_is_dropped(
 
 
 def test_answers_apply_on_the_headless_host(autonaApp, headless,
-                                            monkeypatch):
+                                            monkeypatch, boardLock):
     """A fetched set is applied where the headless shell runs its board
     operations -- one at a time with the web's (the host's lock)."""
     from src.core.SetFollowService import SetFollowService
 
-    host, client, _ = headless
+    _host, client, _ = headless
     held = []
     real = SetFollowService.ApplySetPayload
 
     def spy(self, data):
-        held.append(host._lock._is_owned())
+        held.append(boardLock.held())
         return real(self, data)
 
     monkeypatch.setattr(SetFollowService, "ApplySetPayload", spy)
@@ -1219,11 +1220,12 @@ def test_a_web_load_right_after_a_lookup_is_checked_replaces_it(
 
 def test_no_thread_waits_for_the_gui_with_the_state_lock(
         autonaApp, desktop, settings, provider):
-    """The desktop's operations from a request thread marshal onto the GUI
-    thread (DesktopBoardHost.Run) and wait for it; none of that happens
-    with StateManager.lock held (agent-pitfalls #17) -- on the request
-    thread, or on the GUI thread, where the answers and the clock's tick
-    run (a run_sync there runs at once)."""
+    """The desktop's operations from a request thread run there, under the
+    board host's lock, and wait for nothing on the GUI thread (ADR-005
+    S4ad: until then DesktopBoardHost.Run marshalled them onto it and
+    waited). No wait for the GUI thread happens with StateManager.lock held
+    either (agent-pitfalls #17) -- on the GUI thread, where the answers and
+    the clock's tick run, a run_sync runs at once."""
     from src.Helpers import AutonaQtHelper
 
     _, client, _ = desktop
@@ -1251,8 +1253,8 @@ def test_no_thread_waits_for_the_gui_with_the_state_lock(
     assert autonaApp.get("score.1.team.1.player.1.name") == "STREAMER"
     _setFollow().StopFollowing(forget=True)
 
-    assert [wait for wait in waits if not wait[0]], (
-        "no operation marshalled onto the GUI thread", waits)
+    assert not [wait for wait in waits if not wait[0]], (
+        "a request thread waited for the GUI thread", waits)
     assert not [wait for wait in waits if wait[1]], waits
 
 
@@ -1837,21 +1839,27 @@ def test_reading_builds_no_board(autonaApp, desktop, provider):
     assert not AutonaActions.instance.BoardEnsured(2)
 
 
-def test_a_built_board_is_there_for_the_host_only_once_it_is(
+def test_the_set_follow_runs_through_the_one_board_host(
         autonaApp, desktop):
-    """Every board is there for both hosts, and Prepare makes none (ADR-005
-    S4ac-3): core makes the three at launch. Until then the desktop's host
-    read core's flag and Prepare made a board core did not have again, with
-    its widgets -- which only a test's harness could bring about."""
+    """The set follow's board host (SetFollowService.boardHost, read when
+    used) is the web layer's, the same BoardHost in both shells since
+    ADR-005 S4ad, and it makes no board: core makes the three at launch.
+    Until S4ac-3 the desktop's host read core's flag (Built) and Prepare
+    made a board core did not have again, with its widgets; the empty hooks
+    went with the desktop's host in S4ad."""
     from src.core.Actions import AutonaActions
+    from src.core.SetFollowService import SetFollowService
 
     host = WebOps.current_board_host()
+    assert host is WebOps.boardHost
+    assert type(host) is BoardHost
+    assert SetFollowService._Host() is host
+    for name in ("Prepare", "Built", "PlayerLoaded"):
+        assert not hasattr(host, name), name
     autonaApp._dropBoard(2)
-    assert host.Built(2) is True
-    host.Prepare(2)
+    host.Run(lambda: None)
     assert not AutonaActions.instance.BoardEnsured(2)
     assert autonaApp.get("score.2") is None
-    assert BoardHost().Built(2) is True
 
 
 @pytest.mark.parametrize("body", [

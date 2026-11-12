@@ -449,13 +449,16 @@ class HeadlessGames:
         # holds one game -- the desktop adapter's _SettleUnannounced (ADR-005
         # S3f-4 review). The roster the load asks for (gameLoaded ->
         # bootstrap.wire_game_roster: the previous game's picks emptied),
-        # through the board host as there, then the pick persisted. The web
-        # push and the player DB refresh are left: the app is going away.
+        # through the board host as there (`atShutdown`: the shutdown's own
+        # write, which the host does not refuse as it refuses a late
+        # request's), then the pick persisted. The web push and the player
+        # DB refresh are left: the app is going away.
         from . import AutonaWebOperations
         from .core.Actions import AutonaActions
         replaced = getattr(snapshot, "replaced", None)
         AutonaWebOperations.boardHost.Run(
-            lambda: AutonaActions.instance.ApplyGameRoster(replaced))
+            lambda: AutonaActions.instance.ApplyGameRoster(replaced),
+            atShutdown=True)
         self._PersistPick()
 
     @staticmethod

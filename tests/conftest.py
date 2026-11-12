@@ -172,6 +172,57 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+class BoardLockRecord:
+    """Whether the calling thread is inside a board operation -- the `op`
+    a BoardHost runs under its lock -- as the `boardLock` fixture records
+    it."""
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def held(self):
+        return getattr(self._local, "depth", 0) > 0
+
+
+@pytest.fixture
+def boardLock(monkeypatch):
+    """Every BoardHost's Run, recording which thread is inside its `op`
+    (ADR-005 S4ad review): `boardLock.held()` says whether the caller is
+    under a board host's lock. Recorded by wrapping Run, not by asking the
+    RLock (`_is_owned()` is private), so a write that skips the host reads
+    False. Patched on the class, so it records for the host a test swaps in
+    too (the headless fixtures' own BoardHost()) -- and on the shared host
+    when an earlier test's monkeypatch of its Run left one there (undoing a
+    patch of an instance's method sets the bound method back on the
+    instance, where it hides the class's)."""
+    from src import AutonaWebOperations
+    from src.AutonaWebOperations import BoardHost
+
+    record = BoardLockRecord()
+
+    def recording(callRun):
+        def run(op, *args, **kwargs):
+            def inside():
+                local = record._local
+                local.depth = getattr(local, "depth", 0) + 1
+                try:
+                    return op()
+                finally:
+                    local.depth -= 1
+            return callRun(inside, *args, **kwargs)
+        return run
+
+    realRun = BoardHost.Run
+    host = AutonaWebOperations.boardHost
+    if "Run" in vars(host):
+        monkeypatch.setattr(host, "Run", recording(vars(host)["Run"]))
+    monkeypatch.setattr(
+        BoardHost, "Run",
+        lambda self, op, *args, **kwargs: recording(
+            lambda *a, **k: realRun(self, *a, **k))(op, *args, **kwargs))
+    return record
+
+
 TREE_REMOVAL_TIMEOUT_SECS = 10
 
 
@@ -711,10 +762,12 @@ class _AutonaHarness:
 
     def publishGameLoad(self):
         """The GUI thread's end of a game load, on the game loaded now:
-        AutonaGameAssetManager._Publish, with no loader thread. The models
-        rebuilt, gameLoaded (the shared wiring's roster and set length), onLoad
-        (every slot connected to it, in its real place), the commit and the
-        save cycle closed, as in the app.
+        AutonaGameAssetManager._Publish, with no loader thread -- the load's
+        save cycle opened here, as the loader opens it. Under the board
+        host's lock, the models rebuilt, gameLoaded (the shared wiring's
+        roster, set length and commit, queued in that cycle), onLoad (every
+        slot connected to it, in its real place) and the cycle closed, as in
+        the app.
         """
         from src.AutonaGameAssetManager import (AutonaGameAssetManager,
                                                 _SaveCycle)
@@ -764,8 +817,9 @@ class _AutonaHarness:
     def web(self):
         """The web operations every route reaches (src/AutonaWebOperations
         .py, ADR-005 S3c; all of them since S3e-9). Here they run through
-        what bootstrap_gui() registered -- the desktop's board host and the
-        shell operations -- as in the app. A module: web().swap_teams(1).
+        what bootstrap_gui() registered -- the shell operations; the board
+        operations through the web layer's one board host (ADR-005 S4ad) --
+        as in the app. A module: web().swap_teams(1).
         """
         from src import AutonaWebOperations
         return AutonaWebOperations
@@ -846,8 +900,8 @@ def _autonaRuntime(qapp, tmp_path_factory):
         from src.bootstrap import bootstrap_core, bootstrap_gui
 
         # Both stages, as src/Autona.py runs them: the desktop's Qt adapters
-        # (the board host, the shell operations, the hotkeys, the models) are
-        # what several tests drive.
+        # (the shell operations, the hotkeys, the models) are what several
+        # tests drive.
         bootstrap_core()
         bootstrap_gui()
         harness = _AutonaHarness(directory)
@@ -856,8 +910,8 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # tests/test_headless_seed.py. They are dropped below.
         harness.launch = harness.boardsNow()
         # Normally done by src/Autona.py at import time. The @gui_thread_sync
-        # operations (the desktop board host, the shell operations) and the
-        # game load job's model marshal raise without it, and that module is
+        # operations (the shell operations) and the game load job's model
+        # marshal raise without it, and that module is
         # the one thing tests must not import (agent-pitfalls #1).
         if AutonaQtHelper.gui_executor is None:
             AutonaQtHelper.init_gui_executor()

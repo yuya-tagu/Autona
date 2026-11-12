@@ -8015,6 +8015,118 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
   5. `GET http://127.0.0.1:5107/api/v1/stages` が 404、`PATCH /api/v1/scoreboards/1/stages/1` が 405
 
 
+#### S4ad ボードホストの marshal の除去（2026-11-12）
+
+デスクトップのボードホスト `DesktopBoardHost`（ボードの操作を GUI スレッドで同期実行していた）を削除し、**ボードの操作は両シェルとも呼び出し元のスレッドで、`AutonaWebOperations.boardHost`（`BoardHost`）の 1 本の再入可能ロックの下で走る**（ヘッドレスと同じ）。あわせて、S4ac-3 から何もしなくなっていたフック（`Prepare` / `Built` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded`）とその呼び手の判定、`CommitGameLoad` の順序の制約、S4ac-3 の残置 7 の未使用の部品を消した。S4y の申し送り（`Run` と `Prepare` の marshal を同時に外す）の実施。
+
+- **完了内容**
+  - `src/`: 14 ファイル、+345 / −632
+    - `AutonaWebOperations.py`: `class DesktopBoardHost` と、`BoardHost` の `Prepare` / `Built` / `CommitEdit` / `DiscardTypedText` / `PlayerLoaded` を削除（`BoardHost` は `Run` / `ClearPlayers` / `ResetCounts` / `LastSet` だけ）。呼び手の `host.Prepare(...)` / `CommitEdit` / `PlayerLoaded` と `reset_all` のスロットのループを外し、`_apply_set_fields` / `_load_player` / `_stats_board` / `_set_board` から host 引数を外した。`crew_member_count` は `CrewBattleService(3).MemberNum()` だけ、`stop_follow` は `Run` の中で `StopFollowing(forget=True)` だけ。`gui_thread_sync` の import を外した（シェル操作の `_on_gui_thread` は残る）
+    - `bootstrap.py`: `bootstrap_gui()` の `boardHost = DesktopBoardHost()` の登録を削除。`wire_game_roster` は `Run` の中で `with StateManager.SaveBlock(): try: ApplyGameRoster(replaced) → RepublishBestOfs() finally: CommitGameLoad()`（`finally` はレビューの 1）
+    - `AutonaGameAssetManager.py`: `_Publish` の `onLoad` の後の `CommitGameLoad()` を削除し、`_Publish` 全体（作り直し → `gameLoaded` → `onLoad` → サイクルを閉じる）を `boardHost.Run` の中へ（レビューの 2）。終了中・作り直しの失敗の後始末 `_SettleUnannounced` のロスターと反映を `boardHost.Run(settle, atShutdown=True)` の中へ（ヘッドレスの `_SettleStopped` と同じ）
+    - `AutonaHotkeys.py`: ボードのホットキー（スコア ±1・リセット・反映・スワップ）は `_runOnActiveBoard` で `boardHost.Run(lambda: operation(actions, actions.ActiveBoard()))`（対象ボードもロックの中で読む。S4ad ではスワップだけで、残りはレビューの 3・6）。`Built` / `CommitEdit` の判定を削除。`load_set` の `Built` の判定も削除
+    - `AutonaWebOperations.py`（レビューの 4）: `BoardHost.Run(op, atShutdown=False)`。いちばん外側の呼び出しで、メインスレッド以外かつ `gui_unavailable_reason()` が理由を返すとき（QCoreApplication があるときだけ）、何も走らせずに INFO のログと `NotAvailable(SHUTTING_DOWN_MESSAGE)`（`_refuse_at_shutdown`）。深さは `threading.local`。`headless.py` の `_SettleStopped` も `atShutdown=True`
+    - `AutonaApiV1.py`: `_crew_not_built` を削除し、クルーのリセット 3 本は無条件に Web の操作を呼ぶ
+    - `Autona.py`: サイドバーの `formatSelected` を `AutonaWebOperations.set_battle_format` に繋ぐ（それまでは `AutonaActions.instance.SetBattleFormat`）。`_ShowBattleFormat` は通知の値ではなく `_resolveBattleFormat()` を描く
+    - 残置 7 の削除: `AutonaPlayerDB` の `_TournamentEntrantsProxy` / `completerModel` / `GetCompleterModel()` と proxy の `setSourceModel` / `invalidateFilter`、`AutonaSetFollowUtil.followChanged` / `FollowChanged` と `core/SetFollowService.py` の emit 2 か所（と `_NoFetcher.FollowChanged`・`_CallerThread.PlayerLoaded`・`ApplySetPayload` 以下の host 引数）、`ui_constants.py` の `QDockWidget` の QSS とコメント、`AutonaQtHelper.HeldBackText`
+    - コメント・docstring だけ: `core/Actions.py`（`EnsureBoard` / `SetBattleFormat` / `CommitGameLoad`）・`StateManagerBridge.py`・`AutonaWebServer.py`
+  - `tests/`: 18 ファイル（削除 1 を含む）、+415 / −300。新しい pin は下の pin。`test_held_back_text.py` は規則ごと削除。`test_player_db.py` は proxy の退避と比較を外し、入場者の絞り込みは `PlayerDB.TournamentPlayers()`（Web サーバーの送信が読むもの）で見る。`test_api_v1_players.py` は `_load_player` の差し替えの引数から host を外した
+  - docs: `external-control-api.md`（§1 の不変条件・§2.12 に「ボードの操作のスレッド」の注記・§6.3 / §6.8 / §6.40・§9 のスレッドと終了中の 503）/ `Design.md`（構成図の箱・ヘッドレスの段落・パネルの NOTE）/ `rules/state-and-webserver.md`（ボードホストの節を 1 つに・クルー・対戦形式・best_of と `CommitGameLoad`・ホットキー・追従・`HeldBackText`・`AutonaPlayerDB`）/ `rules/agent-pitfalls.md` の #2
+  - レビューの修正（2026-11-12。高はなし）: 上の `bootstrap.py`（1）・`AutonaGameAssetManager.py`（2）・`AutonaHotkeys.py`（3・6）・`AutonaWebOperations.py` / `headless.py`（4）に加え、古い記述（8）: `AutonaWebOperations.py` の `set_route` の docstring（デスクトップのホスト）と選手のスロットの節のコメント（カードが消えたのは S4ac-3）・`core/PlayerDB.py` の `TournamentPlayers`（デスクトップの名前の補完）・`external-control-api.md` §6.3 の確定・構築の本文（経緯に移した）・`test_api_v1.py` のテスト名（`test_set_patch_nests_under_the_board_lock_off_thread`）。`core/Actions.py` の `CommitGameLoad` の docstring。docs は `external-control-api.md` §2.12 / §9・`Design.md` のヘッドレスの段落・`rules/state-and-webserver.md`（ボードホスト・`CommitGameLoad`・ホットキー・`GameAssetCatalog` の行）・`rules/agent-pitfalls.md` #2（`atShutdown`）。テスト（5）: `conftest.py` に `boardLock` fixture、`test_battle_format.py` の probe に応答 200 とクリック前の形式、`test_web_operations.py` の `test_a_save_from_a_request_thread_finishes` の重複したパラメータ（`desktop` / `headless` は同じホストを通るので 1 本に。選手 DB の変更の中継が実際に GUI スレッドでモデルを作り直すデスクトップの方を残した）
+
+- **設計: どのスレッドで何が走るか**
+
+  | 入口 | スレッド | ボードのロック |
+  |------|---------|--------------|
+  | Web / v1 / Socket.IO のボードの操作（`swap_teams`・クリア・`set_route`・選手・統計・セット読込と追従・クルー ほか） | リクエストのスレッド（S4ad までデスクトップは GUI スレッドへ marshal して待った） | `Run` |
+  | ホットキーのスワップ | GUI（WM_HOTKEY のネイティブイベントフィルタ） | `Run`（S4ad で追加） |
+  | ホットキーのスコア ±1・リセット・反映 | GUI | `Run`（レビューの 3 で追加。S4ad の初版では通さなかった。対象ボードもロックの中で読む: レビューの 6）。v1 の `:apply` は S4u からロックの外のまま |
+  | サイドバーの形式の切り替え | GUI | `Run`（`set_battle_format` 経由に変更） |
+  | セットの追従の答え・5 秒の tick | メイン（`fetcher` の `Signal(object)`・`QTimer`） | `Run`（従来から。デスクトップでは marshal が即時実行だった） |
+  | ゲームのロード: デスクトップの `_Publish` 全体（モデルの作り直し → `gameLoaded`（ロスター・`RepublishBestOfs`・`CommitGameLoad`）→ `onLoad` → サイクルを閉じる） | GUI（ローダーの `run_sync`） | `Run`（レビューの 2。結線の `Run` はその中で入れ子） |
+  | ゲームのロード: ヘッドレスのロスター・`RepublishBestOfs`・`CommitGameLoad` | メイン（ローダーの `run_sync`） | `Run`（1 つの保存ブロック） |
+  | 終了中・作り直しの失敗の後始末 `_SettleUnannounced`（ヘッドレスは `_SettleStopped`） | ローダーのスレッド（作り直しの失敗では GUI。`_Publish` の `Run` の中） | `Run(..., atShutdown=True)`（終了中でも断らない） |
+  | シェル操作 3 本（`openSetSelection` / `renderThumbnail` / `startImageRender`） | GUI（`AutonaShellOperations` の `@gui_thread_sync` のまま） | — |
+
+  - **不変条件**（`BoardHost.__init__` のコメント）: ボードのロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない（いちばん外側のロック）。待つもの（`savePlayerToDb` の選手 DB への書き込み）は `Run` の外。ボードの操作は GUI スレッドもローダーも待たない（`set_game` の同期ロードは `Run` の外で、ボードの操作はロードを待たない）ので、メインスレッドとローダーがボードのロックを取ってもデッドロックしない
+  - **GUI スレッド以外からの Qt**: ボードの操作が触る Qt は、Bridge の再 emit（`state_updated` / `held_*` / `follow_changed` / `battle_format_changed`。書いたスレッドで emit され、QObject の受け手（`Window._ShowBattleFormat`）には queued で届く。素の Python の受け手 `WebServer.on_*` は積むだけで、どのスレッドからでもよい: ヘッドレスと core 直結の書き込みが元からこの経路）・`AutonaSetFollowUtil.Poll`（GUI スレッド以外では時刻を記録して `onMain` に queued で渡す。S4v からヘッドレスが使っていた経路）・`AutonaPlayerDB.SetupModel`（`gui_thread_async`）・統計の `fetcher.Later`（queued）だけ。どのスレッドからでも emit されていた `followChanged` は削除した
+
+- **判断と理由**
+  1. **ホストは 1 クラスにした**: S4ac-3 からフックは空で、`Run` の GUI スレッドだけが違っていた。理由だった Qt の選手カードの 2 書き込み（S3e-4）はカードと一緒に無くなっているので、`Run` を外せばヘッドレスの `BoardHost` と同じになる。`DesktopBoardHost` と登録を削除し、`boardHost` はモジュールの既定の `BoardHost()` のまま（import で作るのは RLock 1 つだけ。pitfalls #1 は変わらない）。ボードホストの抽象（`boardHost` の差し替え口）はテストが新しいホストに差し替えるために残した（シェルの違いはもう無い）
+  2. **GUI スレッドの入口のうち、Web の操作と同じボードを書くものをロックに入れた**: GUI スレッドが Web の操作を直列にしていた性質が無くなるので。ホットキーのスワップ（スロットを入れ替えるので、`clear_all` や `PATCH set` のチームごとの書き込みの間に入ると後半が反対の列に書かれる）と、サイドバーの形式の切り替え（v1 の `PUT /battle-format` と並ぶと、設定・通知・`FollowBattleFormat` が交互に走りうる）。初版はスコア ±1・リセット・反映を通さなかった（単発の core の操作で、ヘッドレスの core 直結の書き込みと同じ扱い）が、**レビューの 3 で通した**: デスクトップでは S4ad まで Web の複合操作の途中に入らなかったので、その動作を保つ（反映が `clear_all` の途中を公開する・リセットが `PATCH set` の間に入る、が無いように）。対象ボード（`ActiveBoard()`）もロックの中で読む（レビューの 6: 外で読むと、間に入った形式の切り替え（これもボードの操作）の前のボードに書く）。v1 の `:apply`・`score:adjust` などの core 直結の Web の書き込みは S4u からロックの外で、変えない
+  3. **`_ShowBattleFormat` は現在の形式を描く**: v1 の切り替えの通知はリクエストのスレッドから queued で届き、サイドバーの切り替えの通知は direct。v1 の直後に操作者がサイドバーで切り替えると、古い通知が後から届いて古い形式を描く（Web サーバーの `battle_format` が値を運ばないのと同じ考え方）
+  4. **`CommitGameLoad` はロスターと同じ操作にした（ボードホストのロックの下）**: 「`onLoad` の後」という順序の制約は、Qt のカードの `ReloadCharacters` が `onLoad` の中で held に書いたためで、カードは S4ac-3 で消えた。いまの `onLoad` のスロット（`Window.SetGame`・mods のチェックの lambda・`_PersistSelectedGame`・`AutonaPlayerDB.SetupModel`）はボードの state を書かない。そこで commit を `wire_game_roster` の、ロスター・`RepublishBestOfs` と同じ保存ブロックへ移し、`Run` の中で呼ぶ（両シェル同じ結線になり、デスクトップのアダプタは commit を知らない）。保存ブロックの中の `CommitHeld` は prefix を積むだけで、いちばん外側のブロックが閉じるとき（デスクトップは `_Publish` の終わり = `onLoad` の後）にそのとき未反映のものを全部公開するので、`onLoad` のスロットが将来 held に書いても一緒に出る（`test_a_game_load_publishes_what_its_slots_wrote` が pin。順序の制約は「サイクルの中で commit する」に置き換わった）。ヘッドレスは held が無いので何も見つからず、余分なサイクルも出ない。`StateManager.lock` で囲まなかったのは、ボードのロックを `StateManager.lock` の中で取らない不変条件があり、ロスターは保存ブロックで 1 サイクルになっていて、ボードの操作どうしの原子性はボードのロックの役目だから
+  5. **終了中のボードの操作は、終了のフラグで 503 にする**（レビューの 4。初版は「GUI スレッドを待たないので書いて答える」だった）: S4ad までデスクトップの 503 は marshal の副産物（`run_sync` が `gui_unavailable_reason()` を見て見捨てる → `_on_gui_thread` が 503）だったので、同じ述語を `BoardHost.Run` が直接見る。条件は run_sync が見捨てた条件と同じ（`aboutToQuit` の後・QCoreApplication が無い・`TaskExecutor.stopping`。デスクトップでは `closeEvent` が Web サーバーを止めた後の `TaskExecutor.shutdown` から）。断らないもの: メインスレッドの操作（終了そのものを進めるスレッド。ホットキー・`_Publish`・追従の答え）・`Run` の入れ子（走っている複合操作を途中で割らない。いちばん外側の呼び出しだけを見る）・`atShutdown=True`（終了中のロードの後始末 `_SettleUnannounced` / `_SettleStopped`。それを断ると state.json が 2 つのゲームに割れる: S3f-4 レビュー）・QCoreApplication が無いとき（スクリプト・Qt の無いテスト。止める終了が無い）。**ヘッドレスも同じ**にした（S4ad までヘッドレスの終了中のボードの操作は書いて答えていた。1 つのホストでシェルの違いを持たないため。ヘッドレスで当たるのは、イベントループが終わってから Web サーバーを止めるまでの間に来た要求だけ）。core 直結の書き込み（`score:adjust` など）は従来どおり終了中も答える
+  6. **`_SettleUnannounced` もロックの下**: それまでは GUI スレッドに渡すホストを待てないので core を直接呼んでいた。ヘッドレスの `_SettleStopped` と同じ形にした（`atShutdown=True`: 判断 5）
+  7. **`AutonaPlayerDB` は補完の proxy とその作り直しだけを消した**: `model` / `_retiredModel` / `modelEnabled` / `EnableModel` / `_BuildModel` は範囲外の「PlayerDB のモデル」として残した。`_BuildModel` は選んだゲームの mains をその場で正規化する（DB の副作用。S3c-2 判断 5。`test_the_model_build_still_normalises_the_loaded_games_mains`）ので、正規化を core に移すまでモデルごとは消せない
+  8. **新しい `@gui_thread_sync` は足していない**。golden の録音は変えていない（下の検証）
+  9. **`_Publish` 全体をボードのロックの下にした**（レビューの 2）: 初版はロスターと commit だけがロックの下で、commit の公開はサイクルを閉じるとき（`_Publish` の終わり）なので、GUI スレッドがロックを離してから閉じるまでの間に別スレッドのボードの操作（held の書き込み）が入ると、ロードの commit と一緒に反映なしで公開された（S4ad までは GUI スレッドに並んでいたので入れなかった）。広げる前に、その区間に別スレッドを待つものが無いことを確かめた: `_RebuildModels` は decode を submit するだけで待たない（待つのはローダーの `_WaitForDecodes`、`_Publish` の外）。`onLoad` のスロットは `Window.SetGame`（`GameChanged` → `ws_game_changed` → `StateManager.WhenPublished` に積むだけ）・mods のチェックの lambda（`setChecked` が非同期のロードを頼むだけ）・`_PersistSelectedGame`（`SettingsManager.lock`。順序はボード → 設定）・`AutonaPlayerDB.SetupModel`（`modelLock` → `PlayerDB.lock`。順序はボード → モデル → DB）。どれも `run_sync` / `gui_thread_sync` / `exec` / `processEvents` を呼ばず、ボードのロックを持って `_Publish` を待つ者もいない（`set_game` の同期ロードは `Run` の外、ボードの操作はロードを待たない）。逆順にロックを取る者（設定・モデル・DB のロックを持ってボードのロックを取る）も無い。なので広げても GUI スレッドはリクエストの操作が終わるのを待つだけで、デッドロックしない。保証の範囲は S4ad 以前と同じ `_Publish` の間だけで、ローダーが `SelectGame` している間（`_Publish` の前）のボードの操作はこれまでどおりロードと一緒に公開される（残置 5）
+
+- **動作の違い**
+  1. デスクトップのボードの操作は、GUI スレッドに並ばずリクエストのスレッドで走る。応答の時点で書き込みが済んでいる・held の扱い・断り方は同じ。GUI スレッドが忙しい（ページの描画・モデルの作り直し）間も Web の操作が待たされない
+  2. 終了中のボードの操作: デスクトップは S4ad 以前と同じく 503 `the app is shutting down`（レビューの 4 で保った。marshal ではなく終了のフラグで返す）。**ヘッドレスは終了の開始（イベントループの終了・`TaskExecutor.shutdown`）の後に来たリクエストのボードの操作が 503 になる**（それまでは書いて答えていた）
+  3. v1 の `PUT /battle-format` のサイドバーの更新は GUI スレッドへ queued で、応答の後になりうる（それまでは応答の前）。SCORE ページは元から Socket.IO の `battle_format` で追従している
+  4. デスクトップのボードの操作の held 通知・delta は、書いたスレッド（リクエスト）で出て Web サーバーに積まれる（ヘッドレスと同じ）。`scoreboard_pending` / `program_state_update` の中身と順序の規則は変わらない
+  5. ボードのホットキー（スワップ・スコア ±1・リセット・反映）とゲームのロードの `_Publish` は、走っている Web のボードの操作が終わるまで待つ（それまでは GUI スレッドに並んでいた Web の操作の前後に入った。結果の並びは同じ）
+  6. ゲームのロードの commit の位置が `onLoad` の前（同じ保存サイクルの中）になった。公開されるもの・サイクル数は同じ（golden 不変）
+
+- **残置とリスク**
+  1. **次の段（Qt のモデルの片付け）で消せるもの**（調べた結果。agent-pitfalls #13 はそれまで残す）:
+     - `AutonaGameAssetManager` のキャラ・スキン・バリアント・カラーのモデルと `_retiredModels`、その作り直し `_RebuildModels`（`_Publish` の先頭。消すとロードの GUI スレッドの仕事は `gameLoaded` / `onLoad` の emit だけになり、`run_sync` の要否を見直せる）。読み手はテストと `tests/fixtures/game_assets/golden.json` の比較だけ（Web は S1b からカタログを読む）
+     - `AutonaPlayerDB.model` / `_retiredModel` / `modelEnabled` / `EnableModel` / `_BuildModel`（判断 7。先に mains の正規化を core（`PlayerDB` の読込か `GameAssetCatalog` の選択）へ移す。消すと `SetupModel` は `db_updated` の emit だけになる）
+     - `AutonaCountryHelper.countryModel` / `countriesAboutToReload` / `countriesUpdated`（どれも受け手・読み手なし。`Window.__init__` の `init()` が `CountryCatalog.Load()` を呼ぶ役目だけが残る）
+     - `PlayerService.SetSeed` / `SetPlayerId` の `announce=`（アプリの呼び手なし。テストの `edit_tag` が録画の再生に使う）
+     - `AutonaTournamentDataProvider` のセット読込のアダプタの一部（S4ac-3 の判断 7）
+  2. 歴史の文書（この文書の S3e / S4y / S4ac-3 の節、`headless-core-redesign.md`）は当時のまま。本書と `external-control-api.md` の「GUI スレッドで同期実行する」は §2.12 の注記で受けた
+  3. ~~ホットキーのスコア ±1・リセット・反映は `Run` の外~~（レビューの 3 で `Run` に入れた: 判断 2）
+  4. queued で届く通知（v1 の形式の切り替え）と direct の通知の順序が前後しうる（判断 3 で描画は現在値に揃えた。ほかに通知の payload を信じる GUI の受け手は無い）
+  5. ローダーが `SelectGame` している間（`_Publish` の前。保存サイクルは開いている）に入った別スレッドのボードの操作の held の書き込みは、ロードの commit と一緒に反映なしで公開される。S4ad 以前も同じ（GUI スレッドは空いていて Web の操作を走らせた）。core 直結の書き込み（`score:adjust` など）は `_Publish` の間も同じ。閉じるには、`SelectGame` の前からボードのロックを取る（ローダーのスレッドがロックを持ったまま GUI スレッドを `run_sync` で待つので、不変条件に反する）か、ロードの state の書き込みをサイクルごと GUI スレッドに寄せる設計が要る。どちらも S4ad 以前より強い保証で、範囲外
+  6. **GUI スレッドがボードのロックを待つ**（受容。レビューの 7）: `RLock` は FIFO でないので、待っているメインスレッドをリクエストのスレッドが追い越しうる。ボードの操作は短く（state の書き込みだけで、取得・DB の書き込みは `Run` の外）、Web の操作が連続しても GUI が止まるのは数操作ぶん
+  7. **終了中に走っている複合操作は最後まで書く**（判断 5: いちばん外側の呼び出しだけを見る）。終了の開始より前に `Run` に入った操作だけで、503 を返すべき新しい要求ではない
+
+- **pin**
+  - `test_web_operations.py::test_a_desktop_board_operation_runs_on_the_calling_thread`（6 通り: swap・clear all・set fields・選手・クルーのストック・reset all）: デスクトップのブートストラップのまま、別スレッドの操作が GUI スレッドのイベントを 1 つも処理せずに終わり、`Run` も書き込みもそのスレッドで、書き込みはボードのロックの中、`Run` に入るときに `StateManager.lock` を持っていない
+  - `test_web_operations.py::test_no_board_host_has_a_widget_any_more`: `BoardHost` にフックが無く、モジュールに `DesktopBoardHost` / `gui_thread_sync` が無い。`test_headless_seed.py::test_the_desktop_board_host_is_the_headless_one`・`test_bootstrap_split.py`（登録の手順に無い・GUI の probe で `BoardHost`）
+  - `test_set_follow.py::test_no_thread_waits_for_the_gui_with_the_state_lock`: リクエストのスレッドから GUI スレッドへの `run_sync` が 1 つも無い（それまでは「ある」ことを確かめていた）
+  - `test_scoreboard_operations.py::test_a_board_hotkey_runs_under_the_board_host_s_lock`（7 通り: スコア ±1 の 4 本・リセット・反映・スワップ。操作と `ActiveBoard()` の読みがどちらもボードのロックの中）/ `test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock`（作り直し → ロスター → commit → `onLoad` → サイクルを閉じる、がすべてボードのロックの中。commit の時点で保存ブロックが 2 段（ロードのサイクル + 結線のブロック）で、ロードが書いた held の値は commit の後も `onLoad` の中でも未反映（積んだだけ）、閉じた後は未反映なしで `onLoad` のスロットが書いた値も公開済み。ロスターで `StateManager.lock` を持っていない）/ `test_a_game_load_whose_roster_raises_still_commits`（ロスターが held に書いてから例外 → 閉じた後に未反映が残らない）・`test_bootstrap_split.py::test_both_shells_follow_a_game_load_with_the_same_roster`（`run` の保存ブロックの中身が `try`（ロスター・`RepublishBestOfs`）/ `finally`（`CommitGameLoad`）ちょうど、ほかに `CommitGameLoad` の呼び手が無い）
+  - `test_battle_format.py::test_the_real_window_s_segment_follows_every_switch`: 本物のウィンドウで「v1 をスレッドから（200 で答え、クリック前の形式が crew）→ すぐサイドバーで切り替え」の後もセグメントが後者を示す・`test_the_notice_reaches_the_gui_thread_from_a_request_thread`（切り替えはリクエストのスレッドでボードのロックの中、Bridge の受け手は GUI スレッド）・`test_result_service.py::test_the_window_leaves_the_layout_to_the_switch`（サイドバーの接続先が `AutonaWebOperations.set_battle_format`）
+  - `test_asset_jobs.py::test_a_request_that_needs_the_gui_thread_at_shutdown_is_unavailable`（終了中の swap も 503・INFO で `not run`）/ `test_a_board_operation_at_shutdown_writes_nothing_off_the_main_thread`（終了の開始の前に入った複合操作の中の swap は書く・後から来たリクエストの swap は 503 で何も書かない・メインスレッドのホットキーは書く）/ `test_a_load_s_settle_at_shutdown_runs_under_the_board_lock`（終了後にローダーのスレッドから `_SettleUnannounced` → ロスターと反映がボードのロックの中で走り、選択の保存はその後）
+  - ロックの所有は `RLock._is_owned()` ではなく、`tests/conftest.py` の `boardLock` fixture（`BoardHost.Run` を包んで、`op` の中にいるスレッドを `threading.local` で数える）で見る。`StateManager.lock` の `_is_owned()` は残した（生きている保持者がいる core の RLock を差し替えずに包む方法が無い）。fixture はクラスと、前のテストの monkeypatch の後始末が共有のホストに残した `Run`（インスタンスのメソッドの差し替えを戻すと、束縛メソッドがインスタンス属性として残る）の両方を包む
+  - `test_web_panel_host.py::test_the_qt_score_s_leftovers_are_gone`（残置 7 の部品が無い）
+
+- **壊して確認**（1 か所ずつ戻して回し、落ちることを確かめてから、退避したファイルで戻した。戻した後の `git diff HEAD -- src` のハッシュが壊す前と一致）
+  - `BoardHost.Run` を GUI スレッドへの `gui_thread_sync` に戻す → スレッドの pin 6 本・追従の `run_sync` の pin・終了中の swap・形式の通知の 9 本が落ちた
+  - `CommitGameLoad` を `_Publish` の `onLoad` の後に戻し、結線から外す → commit の順の pin と bootstrap の AST の 2 本が落ちた（golden の `test_board_operations` / `test_roster_flow` は通る = 公開は同じ）
+  - ホットキーのスワップを直接呼ぶ・サイドバーを core に直結 → それぞれ 1 本ずつ落ちた
+  - `_ShowBattleFormat` を通知の値を描く形に戻す → 本物のウィンドウのセグメントの probe が落ちた（`crew` != `singles`）
+  - `swap_teams` の `Run` を `StateManager.lock` の中で呼ぶ → スレッドの pin（swap）が落ちた
+  - `BoardHost.Prepare` の復活・`AutonaPlayerDB.completerModel` の復活・`ui_constants` に `QDockWidget` の文字列・`SetFollowService` に `FollowChanged` の呼び出し → それぞれの pin が落ちた
+  - レビューの修正（同じ手順。戻した後の 4 ファイルの md5 が修正後と一致）:
+    - 1: 結線の `try` / `finally` を外す → ロスターの例外の pin（閉じた後も未反映が残る）と bootstrap の AST の 2 本が落ちた
+    - 2: `_Publish` の `boardHost.Run(publish)` を `publish()` に → ロードの commit の pin（作り直し・`onLoad`・閉じるがロックの外）が落ちた
+    - 3: スコア ±1・リセット・反映を `Run` を通さず直接呼ぶ → ホットキーの pin 6 本が落ちた（スワップは通る）
+    - 6: `ActiveBoard()` を `Run` の外で読む → ホットキーの pin 7 本が落ちた
+    - 4: `_SettleUnannounced` の `atShutdown=True` を外す → 後始末の pin と既存の `test_a_load_job_waiting_on_the_gui_thread_is_released_by_the_shutdown`（STOPPED が FAILED になる）の 2 本が落ちた。`Run` の終了の判定を外す → 終了中の 503 の pin 2 本が落ちた
+
+- **golden**: `tests/fixtures/**` は差分なし（`git diff --stat HEAD -- tests/fixtures` が空）。golden を照合するテスト（`test_board_operations` / `test_roster_flow` / `test_set_follow_flow` / `test_crew_operations` / `test_player_apply` ほか）は録音のまま緑。delta の形は変わっていない（commit の位置を戻しても同じ公開になる: 上の壊して確認）
+
+- **検証**
+  - 変えたテストファイルごとの pytest: 緑（`test_asset_jobs` / `test_bootstrap_split` / `test_web_operations` / `test_player_db` / `test_result_service` 450 passed、`test_api_v1_crew` / `test_headless` / `test_import_side_effects` / `test_crew_operations` / `test_api_v1` / `test_battle_format` / `test_headless_seed` / `test_set_follow` / `test_scoreboard_operations` / `test_roster_flow` / `test_commentary_service` 898 passed / 1 skipped、`test_api_v1_players` 133 passed）
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6080 passed / 0 failed / 2 skipped**。1 回目は `test_api_v1_players.py` の `_load_player` の差し替え（引数の数）の 1 件と、`test_result_render.py::test_a_shipped_page_draws_the_sample` の QtWebEngine の `0x80000003`（並列ランナーは GPU の環境変数を付けない。S4ac-3 の検証に書いた既知の落ち方で、ファイル単独では 38 passed）で落ち、前者を直して 2 回目が緑
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6080 passed / 25 skipped（`tests/live` 23・録音専用 2）/ 0 failed**
+  - レビューの修正の後: 変えたテストファイル（`test_scoreboard_operations` / `test_bootstrap_split` / `test_asset_jobs` / `test_web_operations` / `test_set_follow` / `test_battle_format` / `test_api_v1`）483 passed。全量（直列・同じ環境変数）**6087 passed / 25 skipped / 0 failed**（+7: ホットキーの pin 7 通り（スワップの 1 本を置き換え）・ロスターの例外の pin・終了中の後始末の pin、重複したパラメータの 1 本を減らした）。pyflakes は変えたファイルで HEAD に無い警告なし。`tests/fixtures` の差分なし
+  - pyflakes: 変えたファイルで HEAD に無い警告なし。`git diff --check` も空
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない（実機はメイン）
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  1. SCORE のページで、スコア ±1・スワップ・選手の編集と読込・すべての入力値をリセット・セットの読込と追従を一通り → 値が反映待ちになり、反映で公開される。`main.log` に例外・`GuiMarshalAborted`・ロックの警告が無い
+  2. SCORE のページで操作しながら Ctrl+Shift+S（スワップのホットキー）を連打 → 入れ替えが崩れない（チーム名・選手・スコアが列ごと動く）
+  3. サイドバーの 1v1 / チーム / クルーの切り替えと、`PUT /api/v1/battle-format`（curl）を交互に・続けて → サイドバーのセグメントと SCORE のページが最後に選んだ形式に揃う
+  4. ゲームを切り替える → 反映待ちが点かない（ロードの commit）・BEST OF の文言が正しい
+  5. 選手 DB の変更（選手リストのページでの保存・大会の入場者の取得）→ SCORE のページの名前の候補が入場者に絞られ、大会を外すと全員に戻る（補完の proxy を消した影響が無いこと）
+  6. アプリを閉じる → 終了が遅くならず、ログに終了中のボードの操作のエラーが無い
+
+
 ### 2026-11-12 S4ac-3 の実機確認で見つかった 2 件
 
 - **共有ビューの React のページがスクロールできない**: `web/src/App.css` の `body { overflow: hidden; margin: 0; }`（ScoreboardPage が import）を CRA が全ページの `main.css` にまとめるため、デスクトップの共有ビュー（`/web/<panel>?desktop=1`）にも効き、`html` が visible なので body の hidden が viewport に伝わってホイールでもスクロールバーでも動かなかった（小さいウィンドウで SCORE の下部に届かない）。直し: App.css の body ブロックを削除（`margin: 0` は `index.css` に既にある）。`overflow: hidden` は `ScoreboardPage` のマウント中だけ `document.body.style.overflow` に付け、アンマウントで戻す（`/scoreboard`・`/team` の OBS 用の見た目は同じ）。副作用として `/web`（WebPage）も body の hidden が外れ、スクロールできるようになる。

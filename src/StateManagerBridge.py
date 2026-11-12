@@ -73,8 +73,10 @@ class StateManagerBridge(QObject):
     # The battle format was switched (core's AutonaActions.battleFormatChanges,
     # ADR-005 S4x): a setting, not the state, converted the same way. Carries
     # the format ("singles" / "team" / "crew"). Emitted on the switching
-    # thread: the window's slot runs at once on the GUI thread (the sidebar,
-    # v1 through the desktop board host's Run) and is queued from any other.
+    # thread: the window's slot runs at once on the GUI thread (the
+    # sidebar) and is queued from any other (v1's request thread, since
+    # ADR-005 S4ad -- the desktop board host ran it on the GUI thread until
+    # then), so the window reads the format in force rather than this one.
     # The web server's (`battle_format` to its clients, ADR-005 S4z) too.
     battle_format_changed = Signal(str)
     # The saved hotkeys changed through the settings page (core's

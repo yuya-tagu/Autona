@@ -1,12 +1,16 @@
 """The web operations of both shells (src/AutonaWebOperations.py, ADR-005 S3c).
 
 The routes call the same functions in the desktop app and in
-``main.py --headless``; what differs is the board host the shell registered.
-Pinned here:
+``main.py --headless``, through the same board host (one BoardHost since
+ADR-005 S4ad; the desktop registered its own, which ran them on the GUI
+thread, until then); what differs is whether the boards are held. Pinned
+here:
 
-- the S2 operations write the same state whichever host runs them -- the
-  desktop's (the board built, the write held for 反映) and the headless one
-  (no board, published at once);
+- the S2 operations write the same state in both shells -- the desktop's
+  (the board held, the write waiting for 反映) and the headless one (not
+  held, published at once);
+- on the desktop they run on the calling thread, as headless, without
+  waiting for the GUI thread (ADR-005 S4ad);
 - headless, only the two shell operations (ADR-005 S3e-9) -- opening the
   set selection window and the thumbnail, which the desktop registers --
   are refused with NotAvailable, and the server turns that into 503 in the
@@ -22,9 +26,8 @@ Pinned here:
   tests/test_roster_flow.py), and set loading and following -- load-set,
   POST /score, pull-stream -- since S3e-7 (tests/test_set_follow.py; the
   board's recording: tests/test_set_follow_flow.py);
-- headless, the S2 operations run one at a time (the host's re-entrant
-  lock), so a composite one (clear_all) is not interleaved with another
-  request.
+- the S2 operations run one at a time (the host's re-entrant lock), so a
+  composite one (clear_all) is not interleaved with another request.
 """
 import copy
 import json
@@ -143,8 +146,7 @@ OPERATIONS = {
 def test_both_hosts_write_the_same_state(autonaApp, monkeypatch, name):
     operation = OPERATIONS[name]
 
-    # The desktop: the board made as at launch (held; no widget), the
-    # operation on the GUI thread.
+    # The desktop: the board made as at launch (held; no widget).
     autonaApp.ready(BOARD)
     _prepare(BOARD)
     autonaApp.settle()
@@ -277,8 +279,7 @@ def test_both_hosts_load_the_same_player(autonaApp, monkeypatch, playerDB,
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
     n = 1
 
-    # The desktop: the board made as at launch (held; no widget), the load
-    # on the GUI thread.
+    # The desktop: the board made as at launch (held; no widget).
     autonaApp.ready(n)
     _state().Set(f"score.{n}.match_en", "Winners Final")
     autonaApp.settle()
@@ -510,30 +511,25 @@ def _onAWorkerThread(call, timeout=10.0):
     return outcome["result"]
 
 
-@pytest.mark.parametrize("host", ["desktop", "headless"])
 def test_a_save_from_a_request_thread_finishes(
-        autonaApp, monkeypatch, realPlayerDB, host):
-    """The real path from a request thread: the desktop's board host queues
-    the operation on the GUI thread and waits for it; the headless one runs
-    it on the request thread, under its lock. Either way the database write
-    that follows announces the change, and AutonaPlayerDB.SetupModel runs
-    on the main thread (the GUI executor) while the request thread waits.
+        autonaApp, realPlayerDB):
+    """The real path from a request thread: the board host runs the
+    operation on the request thread, under its lock (the one host of both
+    shells since ADR-005 S4ad; the desktop's queued it on the GUI thread
+    and waited for it until then, so this ran once per shell). The database
+    write that follows announces the change, and AutonaPlayerDB.SetupModel
+    -- the desktop's, which rebuilds the player model -- runs on the main
+    thread (the GUI executor) while the request thread waits.
 
     While it waits, the main thread runs a board operation of its own
     (another edit) -- the lock it takes must be free. With the write made
-    under the headless host's lock, the main thread would wait for the lock
-    the request thread holds while that thread waits for the main thread:
-    the lock is tried with a timeout here, so that is a failure rather than
-    a hang. Headless, the relay only emits db_updated (no completer model),
-    as the headless shell's does."""
-    from src.AutonaPlayerDB import AutonaPlayerDB
+    under the host's lock, the main thread would wait for the lock the
+    request thread holds while that thread waits for the main thread: the
+    lock is tried with a timeout here, so that is a failure rather than a
+    hang."""
     from src.Helpers.AutonaQtHelper import gui_thread_sync
 
-    if host == "desktop":
-        autonaApp.ready(1)
-    else:
-        _goHeadless(autonaApp, monkeypatch)
-        monkeypatch.setattr(AutonaPlayerDB, "modelEnabled", False)
+    autonaApp.ready(1)
     boardHost = WebOps.boardHost
     seen = []
 
@@ -558,14 +554,99 @@ def test_a_save_from_a_request_thread_finishes(
                  _state().Get("score.1.team.2.player.1.name"))
     finally:
         realPlayerDB.changed.unsubscribe(onTheMainThread)
-        if host == "headless":
-            _dropHeadlessBoards(autonaApp)
 
     assert applied is True
     assert seen == [("main thread", True), ("edit", True)]
     assert names == ("ALPHA", "BRAVO")
     with realPlayerDB.lock:
         assert list(realPlayerDB.database) == ["SP ALPHA"]
+
+
+# ── the thread a desktop board operation runs on (ADR-005 S4ad) ──────────
+
+# The board operations by kind: the S2 ones, a composite one, the set
+# fields, a player load, the crew board's, the set follow's. v1's routes
+# call these same functions.
+THREAD_OPERATIONS = {
+    "swap": lambda: WebOps.swap_teams(1),
+    "clear all": lambda: WebOps.clear_all(2),
+    "set fields": lambda: WebOps.set_route(1, bestOf=3, match="Final"),
+    "player": lambda: WebOps.update_player(
+        1, 1, 1, {"gamerTag": "ALPHA", "prefix": "SP"}),
+    "crew": lambda: WebOps.crew_member_stock(3, 1, 1, -1),
+    "reset all": lambda: WebOps.reset_all(1),
+}
+
+
+@pytest.mark.parametrize("name", list(THREAD_OPERATIONS))
+def test_a_desktop_board_operation_runs_on_the_calling_thread(
+        autonaApp, monkeypatch, boardLock, name):
+    """On the desktop's own bootstrap (the board host bootstrap_gui()
+    leaves, the boards it made and holds), a board operation from a request
+    thread runs there, under the host's lock, and returns without this
+    thread -- the GUI thread -- dispatching a single event meanwhile: it
+    waits for nothing on the GUI thread, as headless. Its writes are made
+    on the request thread too, and the host's lock is taken without the
+    state's held (the host's is the outer one). Until ADR-005 S4ad the
+    desktop's host (DesktopBoardHost) queued it on the GUI thread and
+    waited for it."""
+    autonaApp.readyAll()
+    for board in (1, 2):
+        _prepare(board)
+    autonaApp.settle()
+    host = WebOps.boardHost
+    assert type(host) is BoardHost
+    hostRun = host.Run
+    runs = []
+
+    def run(op, **kwargs):
+        # StateManager.lock is core's RLock, which the test cannot wrap
+        # under its live holders: asked directly.
+        runs.append((threading.current_thread(), _state().lock._is_owned()))
+        return hostRun(op, **kwargs)
+
+    monkeypatch.setattr(host, "Run", run)
+    written = []
+
+    def onWrite(*args):
+        written.append((threading.current_thread(), boardLock.held()))
+
+    channels = (_state().observers.state_updated,
+                _state().observers.held_state_updated)
+    outcome = {}
+    done = threading.Event()
+
+    def work():
+        try:
+            outcome["result"] = THREAD_OPERATIONS[name]()
+        except BaseException as e:  # surfaced below
+            outcome["error"] = e
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=work, daemon=True)
+    for channel in channels:
+        channel.subscribe(onWrite)
+    try:
+        worker.start()
+        # No event of this thread is dispatched while the request runs.
+        finished = done.wait(5)
+    finally:
+        for channel in channels:
+            channel.unsubscribe(onWrite)
+        # A host that waits for this thread (the desktop's until S4ad) is
+        # let finish, so a failure here does not leave it waiting.
+        deadline = time.monotonic() + 10
+        while worker.is_alive() and time.monotonic() < deadline:
+            autonaApp.settle()
+            worker.join(0.01)
+        autonaApp.settle()
+
+    assert finished, "the operation waited for the GUI thread"
+    assert "error" not in outcome, outcome.get("error")
+    assert runs and set(runs) == {(worker, False)}
+    assert written, "the operation wrote nothing"
+    assert set(written) == {(worker, True)}
 
 
 @pytest.mark.parametrize("host", ["desktop", "headless"])
@@ -575,8 +656,8 @@ def test_a_web_load_asks_for_the_statistics(autonaApp, monkeypatch,
     recent sets and that team's last sets / standings; a seed that moved:
     the upset factor) are the load's own since ADR-005 S3e-5
     (PlayerService.Announce), in both shells. Until then the built board's
-    card asked for them (DesktopBoardHost.PlayerLoaded), and headless
-    nothing did."""
+    card asked for them (the desktop board host's PlayerLoaded, removed in
+    S4ad), and headless nothing did."""
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
     if host == "desktop":
         autonaApp.ready(1)
@@ -941,11 +1022,10 @@ def test_the_hidden_spinbox_shows_the_count_core_keeps(autonaApp):
 
 
 # The board host's ClearPlayers is the same in both shells since ADR-005
-# S4x (the desktop's ran the board's CommandClearAll): the field being typed
-# in is finished first (CommitEdit), each slot's card drops its typed combo
-# text after (PlayerLoaded), and the set loaded last is forgotten. (The
-# cards, their typed text and its test went with the Qt SCORE in ADR-005
-# S4ac-3: the desktop's hooks do nothing now.)
+# S4x (the desktop's ran the board's CommandClearAll): the players emptied
+# and the set loaded last forgotten. (The field being typed in and the
+# cards' typed combo text it finished and dropped went with the Qt SCORE in
+# ADR-005 S4ac-3, the hooks for them with the desktop's host in S4ad.)
 @pytest.mark.parametrize("no_mains", [False, True])
 def test_both_hosts_clear_the_players_to_the_same_state(
         autonaApp, monkeypatch, no_mains):
@@ -1270,13 +1350,12 @@ def _route_board(path):
 @pytest.mark.parametrize("shell", ["desktop", "headless"])
 def test_a_board_no_shell_has_is_refused_by_both_hosts(
         server, autonaApp, monkeypatch, shell):
-    from src.AutonaWebOperations import DesktopBoardHost
     from tests.fixtures.write_recording import WriteRecorder
 
     if shell == "headless":
         monkeypatch.setattr(WebOps, "boardHost", BoardHost())
     else:
-        assert isinstance(WebOps.boardHost, DesktopBoardHost)
+        assert type(WebOps.boardHost) is BoardHost
         # What bootstrap_gui() registers (the server fixture unregisters
         # them): the board is refused before the shell is asked.
         from src.AutonaShellOperations import AutonaShellOperations
@@ -1321,16 +1400,17 @@ def test_a_board_no_shell_has_is_refused_by_both_hosts(
 
 def test_no_board_host_has_a_widget_any_more():
     # What the operations used to reach the board widgets through
-    # (ADR-005 S4x): gone from both hosts, with the memory of the characters
-    # per player of an empty board (core's) and the desktop's own clear and
-    # last set (the base's, the same in both shells).
-    from src.AutonaWebOperations import DesktopBoardHost
+    # (ADR-005 S4x): gone, with the memory of the characters per player of
+    # an empty board (core's). The desktop's own host went in S4ad, with
+    # the hooks it and the headless one had for the Qt SCORE's widgets
+    # (empty since S4ac-3): one BoardHost for both shells.
+    import src.AutonaWebOperations as module
     for name in ("Widget", "EmptyRosterCharacters",
-                 "KeepEmptyRosterCharacters"):
+                 "KeepEmptyRosterCharacters", "Prepare", "Built",
+                 "CommitEdit", "DiscardTypedText", "PlayerLoaded"):
         assert not hasattr(BoardHost, name), name
-        assert not hasattr(DesktopBoardHost, name), name
-    for name in ("ClearPlayers", "LastSet"):
-        assert name not in DesktopBoardHost.__dict__, name
+    assert not hasattr(module, "DesktopBoardHost")
+    assert not hasattr(module, "gui_thread_sync")
 
 
 # What answered 503 until ADR-005 S3e-6 (the board host's NotAvailable):
@@ -1996,8 +2076,6 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     autonaApp._dropBoard(2)
     main = _MainWindow()
     monkeypatch.setattr(shell, "_parent", main)
-    prepared = []
-    monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
     assert AutonaActions.instance.ActiveBoard() == 1
     app, socketio = server
     client = app.test_client()
@@ -2008,9 +2086,6 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
     assert main.asked == [(1, True)]
-    # No board made ready for it: what the dialog loads goes through
-    # /api/v1's :load-set.
-    assert prepared == []
 
     ws = socketio.test_client(app, flask_test_client=client)
     ws.get_received()
@@ -2032,7 +2107,6 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
     assert main.asked == [(1, True)] * 2
-    assert prepared == []
     assert not AutonaActions.instance.BoardEnsured(2)
     assert any("scoreboard 2" in message and "nothing opened" in message
                for message in logged), logged
@@ -2095,8 +2169,6 @@ def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
 
     monkeypatch.setattr(main, "OpenScoreSets", fail)
     monkeypatch.setattr(shell, "_parent", main)
-    prepared = []
-    monkeypatch.setattr(WebOps.boardHost, "Prepare", prepared.append)
     hooked = []
     monkeypatch.setattr(sys, "excepthook",
                         lambda kind, error, trace: hooked.append(error))
@@ -2112,7 +2184,6 @@ def test_on_the_score_page_an_open_set_that_raises_still_answers_ok(
         str(record["exception"].value) for record in logged
         if record["exception"] is not None]
     assert reported == ["the window failed"]
-    assert prepared == []
 
 
 # ── every route and event answers headless (ADR-005 S3e-9) ───────────────
@@ -2549,15 +2620,14 @@ def test_the_set_lookup_answers_headless_with_a_tournament(
     assert asked == [7, 8]
 
 
-# What answers 500 in the walk is not the headless shell's: the desktop's
-# board host answers it alike -- the crew board's checks come before a
-# board is built, and the set lookup has no provider in either shell.
+# What answers 500 in the walk is not the headless shell's: the desktop
+# answers it alike -- the crew board's checks, and the set lookup has no
+# provider in either shell.
 def test_what_answers_500_headless_answers_500_on_the_desktop(
         server, autonaApp, monkeypatch, playerDB):
     from src.AutonaTournamentDataProvider import (
         AutonaTournamentDataProvider)
-    from src.AutonaWebOperations import DesktopBoardHost
-    assert isinstance(WebOps.boardHost, DesktopBoardHost)
+    assert type(WebOps.boardHost) is BoardHost
     monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
                         None)
     app, _ = server

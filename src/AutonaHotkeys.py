@@ -172,12 +172,29 @@ class AutonaHotkeys(QObject):
     # receiver whose death Qt would need to notice.
 
     @staticmethod
-    def _adjustActiveScore(team, delta):
+    def _runOnActiveBoard(operation):
+        """`operation(actions, board)` on the active board, as one board
+        operation: run by the board host, under its lock, with the active
+        board read there too (ADR-005 S4ad review). The board operations run
+        on their callers' threads since S4ad, and a hotkey landing between
+        the calls of a web one (clear_all's cycles, a PATCH set's) would
+        split it; until then they ran on this (the GUI) thread, which kept
+        them apart. Read under the lock, the board is the one the operation
+        runs on, not one a format switch (also a board operation) replaced
+        in between. Imported here, as the web layer is not this module's to
+        pull in when it is imported."""
         actions = AutonaActions.instance
         if actions is None:
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
             return
-        actions.AdjustScore(actions.ActiveBoard(), team, delta)
+        from . import AutonaWebOperations
+        AutonaWebOperations.boardHost.Run(
+            lambda: operation(actions, actions.ActiveBoard()))
+
+    @staticmethod
+    def _adjustActiveScore(team, delta):
+        AutonaHotkeys._runOnActiveBoard(
+            lambda actions, board: actions.AdjustScore(board, team, delta))
 
     @staticmethod
     def _onTeam1ScoreUp():
@@ -197,60 +214,33 @@ class AutonaHotkeys(QObject):
 
     @staticmethod
     def _onResetScores():
-        actions = AutonaActions.instance
-        if actions is None:
-            logger.warning("Hotkey ignored: AutonaActions is not built yet")
-            return
-        actions.ResetScore(actions.ActiveBoard())
+        AutonaHotkeys._runOnActiveBoard(
+            lambda actions, board: actions.ResetScore(board))
 
     @staticmethod
     def _onApplyChanges():
-        actions = AutonaActions.instance
-        if actions is None:
-            logger.warning("Hotkey ignored: AutonaActions is not built yet")
-            return
-        actions.ApplyChanges(actions.ActiveBoard())
+        # 反映 under the board lock too, so it does not publish half of a
+        # web operation (v1's apply is not a board operation and runs
+        # outside it, as since ADR-005 S4u).
+        AutonaHotkeys._runOnActiveBoard(
+            lambda actions, board: actions.ApplyChanges(board))
 
     @staticmethod
     def _onSwapTeams():
-        actions = AutonaActions.instance
-        if actions is None:
-            logger.warning("Hotkey ignored: AutonaActions is not built yet")
-            return
-        number = actions.ActiveBoard()
-        # Through the board host, not the board's widget (ADR-005 S4y).
-        # Imported here, as the web layer is not this module's to pull in
-        # when it is imported.
-        from . import AutonaWebOperations
-        host = AutonaWebOperations.boardHost
-        if not host.Built(number):
-            # Always built since ADR-005 S4ac-1/S4ac-3: every board is made,
-            # and boards 1 / 2 held, at launch in core, and the desktop's
-            # host answers as the headless one (it read core's flag until
-            # S4ac-3). Until S4ac-1 the desktop made a board as it built its
-            # widgets, and an unbuilt one was not held: a swap there would
-            # have been published at once and wiped by the seed that built
-            # it. The check goes with the host's hooks in S4ad.
-            logger.debug(f"Swap hotkey ignored: board {number} is not built")
-            return
-        if number in AutonaActions.SCORE_BOARDS:
-            # A field being typed in on that board was finished first, as
-            # the Qt SWAP button did: the typed text belonged to the player
-            # about to move. Nothing since ADR-005 S4ac-3 removed the Qt
-            # SCORE (the host's CommitEdit; the SCORE page finishes its own
-            # field before it asks for a swap); it goes in S4ad.
-            host.CommitEdit(number)
-        actions.SwapTeams(number)
+        # The crew board's swap is not core's AutonaActions.SwapTeams (it
+        # answers False, as the hotkey always left that board alone).
+        AutonaHotkeys._runOnActiveBoard(
+            lambda actions, board: actions.SwapTeams(board))
 
     @staticmethod
     def _onLoadSet():
         """Open the active board's set selection: the SCORE page's dialog,
         through the shell (AutonaShellOperations.ShowSetSelection; ADR-005
         S4y / S4ab-2 -- the Qt window on the way back to the Qt panel until
-        S4ac-3). Ignored in crew format (no set selection). The board host's
-        Built is always true since S4ac-3, as for the swap (every board is
-        made at launch since ADR-005 S4ac-1; until then a set loaded onto an
-        unbuilt board was wiped by the seed that built it)."""
+        S4ac-3). Ignored in crew format (no set selection). Every board is
+        made at launch since ADR-005 S4ac-1 (until then a set loaded onto an
+        unbuilt board was wiped by the seed that built it, and this asked
+        the board host whether it was built, until S4ad)."""
         actions = AutonaActions.instance
         if actions is None:
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
@@ -260,14 +250,9 @@ class AutonaHotkeys(QObject):
             logger.debug(f"Load set hotkey ignored: board {number} has no "
                          "set window")
             return
-        # Imported here: the web layer and the shell operations are not this
-        # module's to pull in when it is imported.
-        from . import AutonaWebOperations
+        # Imported here: the shell operations are not this module's to pull
+        # in when it is imported.
         from .AutonaShellOperations import AutonaShellOperations
-        if not AutonaWebOperations.boardHost.Built(number):
-            logger.debug(
-                f"Load set hotkey ignored: board {number} is not built")
-            return
         shell = AutonaShellOperations.instance
         if shell is None:
             logger.warning("Hotkey ignored: the shell operations are not "

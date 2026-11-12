@@ -70,7 +70,8 @@ def _madeBoards():
     """The boards core has made (AutonaActions.BoardEnsured). Until ADR-005
     S4ac-3 the crew board's widgets were what these tests looked for: the
     desktop built them, and made a board core did not have again, for a
-    write (DesktopBoardHost.Prepare)."""
+    write (the desktop board host's Prepare, gone with that host in
+    ADR-005 S4ad)."""
     from src.core.Actions import AutonaActions
     return [number for number in AutonaActions.BOARDS
             if AutonaActions.instance.BoardEnsured(number)]
@@ -419,8 +420,9 @@ def test_the_x_post_is_read_under_one_hold_of_the_lock(autonaApp, crewShell):
 
 def test_the_routes_answer_from_another_thread_on_the_desktop(
         autonaApp, client):
-    """What a request is: a thread that is not the GUI's, with the board's
-    work to be done on it (DesktopBoardHost.Run)."""
+    """What a request is: a thread that is not the GUI's, the board's work
+    done on it under the board host's lock (ADR-005 S4ad; the desktop's
+    board host ran it on the GUI thread until then)."""
     autonaApp.ready(BOARD)
     answers = _requestOnWorkerThread(lambda: [_send(client, route) for route in (
         ("patch", _member(1, 1), {"name": "One", "active": True}),
@@ -812,8 +814,9 @@ def test_what_means_nothing_to_a_fresh_board_does_not_build_it(
     """Nothing written (the revision stays) on the boards as a launch makes
     them (ADR-005 S4ac-1) -- which have nothing to reset (the next test).
     Until ADR-005 S4ac-3 it ran on a board core did not have too, which the
-    resets skipped (_crew_not_built) rather than make it again with its
-    widgets: nothing makes a board again since, and nothing builds."""
+    resets skipped (_crew_not_built, always false from then and removed in
+    S4ad) rather than make it again with its widgets: nothing makes a board
+    again since, and nothing builds."""
     revision = StateManager.revision
     with WriteRecorder() as recorder:
         _sendOk(client, route)

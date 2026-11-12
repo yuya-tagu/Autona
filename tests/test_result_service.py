@@ -2206,8 +2206,11 @@ def test_the_window_leaves_the_layout_to_the_switch():
             slots.setdefault(ast.unparse(call.func.value), []).append(
                 [ast.unparse(arg) for arg in call.args]
                 + [ast.unparse(keyword) for keyword in call.keywords])
+    # The sidebar's switch goes through the web layer's operation, under the
+    # board host's lock, as v1's PUT does (ADR-005 S4ad: core's operation
+    # directly until then, kept apart from the web's by the GUI thread).
     assert slots["self.sidebar.formatSelected"] == [
-        ["AutonaActions.instance.SetBattleFormat"]]
+        ["AutonaWebOperations.set_battle_format"]]
     assert slots["StateManagerBridge.instance.battle_format_changed"] == [
         ["self._ShowBattleFormat"]]
 

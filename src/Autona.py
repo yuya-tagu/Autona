@@ -208,6 +208,7 @@ from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaShellOperations import AutonaShellOperations
+from . import AutonaWebOperations
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
 from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
@@ -585,15 +586,19 @@ class Window(QMainWindow):
 
         # ── Operations: battle format segment (1v1 / Team / Crew) ──
         # The sidebar header hosts the segmented control; choosing a format
-        # is core's switch (AutonaActions.SetBattleFormat, ADR-005 S4x: v1's
-        # PUT /battle-format is the same one): it persists the format and the
-        # RESULT layout follows. The segment follows the switch's notice
-        # (_ShowBattleFormat), and the SCORE page follows it on its own (the
-        # web server's `battle_format`; the Qt SCORE's board did until
-        # ADR-005 S4ac-3).
+        # is core's switch (AutonaActions.SetBattleFormat, ADR-005 S4x),
+        # through the web operation v1's PUT /battle-format runs
+        # (AutonaWebOperations.set_battle_format): a board operation, under
+        # the board host's lock, so a switch from here and one from v1's
+        # request thread never interleave their check and their writes
+        # (ADR-005 S4ad; both ran on this thread until then). It persists
+        # the format and the RESULT layout follows. The segment follows the
+        # switch's notice (_ShowBattleFormat), and the SCORE page follows it
+        # on its own (the web server's `battle_format`; the Qt SCORE's board
+        # did until ADR-005 S4ac-3).
         self.sidebar.setFormat(self._resolveBattleFormat())
         self.sidebar.formatSelected.connect(
-            AutonaActions.instance.SetBattleFormat)
+            AutonaWebOperations.set_battle_format)
         StateManagerBridge.instance.battle_format_changed.connect(
             self._ShowBattleFormat)
 
@@ -921,9 +926,9 @@ class Window(QMainWindow):
         # The failure callback runs on the server thread; the dialog belongs
         # on the GUI thread, which is where the old queued start_failed
         # signal delivered it too. Nothing else to hand in: the desktop's
-        # side of the web operations (the board host, the game loader, the
-        # shell operations) was registered by bootstrap_gui() (ADR-005
-        # S3e-9).
+        # side of the web operations (the game loader, the shell
+        # operations) was registered by bootstrap_gui() (ADR-005 S3e-9; the
+        # board host too until S4ad).
         self.webserver = WebServer(
             on_start_failed=lambda error: AutonaQtHelper.gui_executor(
                 lambda: self.OnWebServerStartFailed(error)))
@@ -1528,18 +1533,23 @@ class Window(QMainWindow):
         # which the hotkeys used to miss (headless core Step 3).
         return AutonaActions.instance.ResolveBattleFormat()
 
-    def _ShowBattleFormat(self, fmt):
+    def _ShowBattleFormat(self, fmt=None):
         # What the window shows for a battle format just switched to
         # (StateManagerBridge.battle_format_changed): the sidebar segment,
         # kept in sync when the switch came from elsewhere (setChecked does
-        # not re-emit the click signal). The SCORE page follows the switch on
-        # its own (the web server's `battle_format`); the Qt SCORE's board 1
-        # (1v1), 2 (team) or 3 (crew) was shown here until ADR-005 S4ac-3.
-        # The switch itself -- the settings and the RESULT layout -- is
-        # core's (AutonaActions.SetBattleFormat, ADR-005 S4x); this was the
-        # window's SetBattleFormat, which did all of it.
+        # not re-emit the click signal). The format in force, not the
+        # notice's: a switch from v1's request thread is queued here, one
+        # from the sidebar is not, so a v1 switch followed at once by the
+        # operator's arrives after it and would show the older format
+        # (ADR-005 S4ad: v1's switch ran on this thread until then). The
+        # SCORE page follows the switch on its own (the web server's
+        # `battle_format`, which carries nothing either); the Qt SCORE's
+        # board 1 (1v1), 2 (team) or 3 (crew) was shown here until ADR-005
+        # S4ac-3. The switch itself -- the settings and the RESULT layout --
+        # is core's (AutonaActions.SetBattleFormat, ADR-005 S4x); this was
+        # the window's SetBattleFormat, which did all of it.
         if getattr(self, "sidebar", None) is not None:
-            self.sidebar.setFormat(fmt)
+            self.sidebar.setFormat(self._resolveBattleFormat())
 
     def LoadTheme(self):
         # The app is dark-only. Theme is applied once at startup; there is

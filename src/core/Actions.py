@@ -58,8 +58,8 @@ every other entry point drove that spinbox. What is still outside:
 A fresh board's launch write is here too (`SeedFreshBoard`, ADR-005 S4t): the
 board's widgets used to write it as they were built. So is making a board
 ready to be used (`EnsureBoard`, S4y: the launch write, and on the desktop the
-反映 hold the board widget's constructor registered), which is what a board
-host's Built() answers -- every board at launch since S4ac-1 (`MakeBoards`).
+反映 hold the board widget's constructor registered) -- every board at launch
+since S4ac-1 (`MakeBoards`).
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -202,8 +202,8 @@ class AutonaActions:
         # it never was. Guarded by StateManager.lock.
         self._emptyCharacters = {}
         # The boards EnsureBoard made ready (their launch write, and on the
-        # desktop the 反映 hold): what a board host's Built() answers. Not in
-        # the state. Guarded by StateManager.lock.
+        # desktop the 反映 hold): what BoardEnsured answers. Not in the
+        # state. Guarded by StateManager.lock.
         self._ensuredBoards = set()
         # The boards an EnsureBoard is making right now (not ready yet): a
         # second call returns at once instead of making them again. Guarded
@@ -269,9 +269,14 @@ class AutonaActions:
         Persists `scoreboard.battle_format` (the source of truth) and mirrors
         the legacy `scoreboard.team_mode` bool, so rolling back to an older
         build still restores 1v1 / team. Then tells the shell
-        (battleFormatChanges: the desktop shows the format's board -- built
-        first if it is not -- and the sidebar segment), and the result's
-        layout follows (ResultService.FollowBattleFormat), in that order.
+        (battleFormatChanges: the desktop's window shows the format's board
+        and the sidebar segment, on its GUI thread), and the result's layout
+        follows (ResultService.FollowBattleFormat), in that order.
+
+        The check and the writes are not one atomic step: the callers run it
+        as a board operation (AutonaWebOperations.set_battle_format, under
+        the board host's lock -- the sidebar's switch and v1's alike since
+        ADR-005 S4ad), so two switches never interleave.
 
         The window's SetBattleFormat until ADR-005 S4x, which the sidebar
         drove; the sidebar and v1's PUT /battle-format call this now, so the
@@ -370,7 +375,7 @@ class AutonaActions:
         is published, not held.
 
         What BoardEnsured answers (the desktop's board host's Built() until
-        ADR-005 S4ac-3). Board 3 (crew) is never
+        ADR-005 S4ac-3; the hook went in S4ad). Board 3 (crew) is never
         held, with or without `panel` (it publishes as it goes); neither
         are its display options rewritten nor the polling turned off, as
         its build never did.
@@ -1717,12 +1722,20 @@ class AutonaActions:
         rewrites characters and defaults wholesale, so that is the fresh
         baseline rather than edits waiting behind the 反映 button.
 
-        Called by the desktop's asset adapter after the load's slots
-        (AutonaGameAssetManager._Publish), not with the roster they follow:
-        a player card's ReloadCharacters still writes what its rows pick when
-        it rebinds them, on onLoad. Each built board's onLoad handler did
-        this until ADR-005 S4t. The headless shell holds nothing, so it has
-        nothing to commit.
+        Called with the roster and the set length the load writes, in their
+        save block, under the board host's lock (bootstrap.wire_game_roster,
+        in both shells since ADR-005 S4ad; even when they raise). Inside the
+        load's own save cycle it only queues the boards: the cycle's close
+        publishes all that is pending on them then, what was written after
+        this included (an onLoad slot, another thread's core-direct write
+        while the load runs -- its board operations wait, as the desktop's
+        _Publish holds the board host's lock until the cycle closes). Until
+        S4ad the desktop's asset adapter called it after the load's onLoad
+        slots (AutonaGameAssetManager._Publish), as a Qt player card's
+        ReloadCharacters wrote what its rows picked on onLoad (until
+        ADR-005 S4ac-3); each built board's onLoad handler did it until
+        S4t. The headless shell holds nothing, so it finds nothing to
+        commit.
         """
         for board in self.SCORE_BOARDS:
             self.ApplyChanges(board)

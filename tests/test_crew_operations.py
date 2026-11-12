@@ -130,10 +130,11 @@ def test_record(autonaApp):
 #
 # The golden was recorded through the board widget, before the move. The
 # operations are core's now (CrewBattleService) and have to write the same,
-# set by set and cycle by cycle, on the desktop (the board made at launch,
-# the operation on its GUI thread; the widget went in ADR-005 S4ac-3) and on
-# the headless board host (the same state, from core alone -- refused with
-# 503 until S3e-2).
+# set by set and cycle by cycle, on the desktop (the board made at launch;
+# the widget went in ADR-005 S4ac-3, and the operation ran on its GUI thread
+# until S4ad) and on the headless shell's boards (the same state, from core
+# alone -- refused with 503 until S3e-2). Both through the one BoardHost
+# since S4ad.
 
 SCENARIO = {label: (name, args, kwargs)
             for label, name, args, kwargs in SCENARIOS}
@@ -154,8 +155,9 @@ def test_the_desktop_writes_what_the_board_wrote(autonaApp, label):
 
 @pytest.fixture
 def headless(autonaApp, monkeypatch):
-    """No board built, the headless board host and the boards the headless
-    shell seeds (src/headless._SeedBoards)."""
+    """No board built, a fresh board host (the one class of both shells
+    since ADR-005 S4ad) and the boards the headless shell seeds
+    (src/headless._SeedBoards)."""
     from src import headless as shell
     autonaApp.dropAllBoards()
     with _state().SaveBlock():
