@@ -1048,9 +1048,11 @@ def _requestOnWorkerThread(requests):
     return outcome["responses"]
 
 
-def test_set_patch_with_nested_gui_sync_does_not_deadlock_off_thread(
+def test_set_patch_nests_under_the_board_lock_off_thread(
         autonaApp, client):
-    """losers + teamName from a worker thread: set_update nests gui_thread_sync."""
+    """losers + teamName from a worker thread: the PATCH set's operations
+    nest under the board host's re-entrant lock, on the request's thread
+    (ADR-005 S4ad; they nested gui_thread_sync until then)."""
     autonaApp.ready(2)
     autonaApp.settle()
 

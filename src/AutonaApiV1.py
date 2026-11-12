@@ -174,16 +174,6 @@ def _crew_member(n, t, m):
         raise ApiError(NOT_FOUND, f"team {t} has no member {m}", 404)
 
 
-def _crew_not_built(n):
-    """Whether `n` is the crew board and core does not have it: its launch
-    failed (every board is made at launch in both shells since ADR-005
-    S4ac-1; until then this was the desktop's lazy board). A board made now
-    would be made fresh: a reset has nothing to do, and no reason to make
-    it. A made board's resets run, and on a fresh one write nothing
-    (AutonaActions.ClearMatchInfo blanks only the fields it has)."""
-    return n == WebOps.CREW_BOARD and not WebOps.boardHost.Built(n)
-
-
 def _validate_team(t):
     if t not in (1, 2):
         raise ApiError(INVALID_ARGUMENT, "team must be 1 or 2", 400)
@@ -523,11 +513,12 @@ def get_battle_format():
 @write_op("battle-format.set")
 def battle_format_set():
     # {"format": "singles" | "team" | "crew"}: the sidebar's switch
-    # (AutonaActions.SetBattleFormat, ADR-005 S4x). The desktop shows the
-    # format's board (built if it is not) before this answers; the result's
-    # layout follows. `changed`: false for the format in force, which writes
-    # nothing. The revision covers what the switch wrote to the state (the
-    # result's layout, a board built).
+    # (AutonaActions.SetBattleFormat, ADR-005 S4x), under the board lock on
+    # this thread; the desktop's window shows the format's board once the
+    # notice queued to its GUI thread runs (before this answered until
+    # ADR-005 S4ad). The result's layout follows. `changed`: false for the
+    # format in force, which writes nothing. The revision covers what the
+    # switch wrote to the state (the result's layout).
     fmt = _json_body().get("format")
     if not isinstance(fmt, str) or fmt not in AutonaActions.FORMAT_BOARDS:
         raise ApiError(
@@ -1025,8 +1016,7 @@ def score_reset(n):
     # and does not move until 反映 -- same as score:adjust above. Board 3: every
     # member back to full stocks and nobody playing (the board's Reset Stocks,
     # CrewBattleService.ResetStocks), published at once.
-    if not _crew_not_built(n):
-        WebOps.reset_scores(n)
+    WebOps.reset_scores(n)
     return ok(revision=current_revision())
 
 
@@ -1175,11 +1165,11 @@ def set_update(n):
         # the losers flag, then the team name. That order is why the name
         # goes in a call of its own. One task through the board host, so no
         # other board operation (a swap, a clear, another PATCH set) lands
-        # between the calls: the desktop runs it on the GUI thread, the
-        # headless host under its re-entrant lock (the calls inside run
-        # there again). Core-direct writes (score:adjust, a colour) are not
-        # board operations and can land in between in either shell, as
-        # they always could.
+        # between the calls: under its re-entrant lock, in both shells since
+        # ADR-005 S4ad (the calls inside run there again; the desktop ran
+        # it on the GUI thread until then). Core-direct writes
+        # (score:adjust, a colour) are not board operations and can land in
+        # between, as they always could.
         if kwargs or (losers is None and team_name is None):
             WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
         if losers is not None:
@@ -2528,8 +2518,7 @@ def _require_confirm(body):
 @write_op("clear")
 def clear(n):
     # Board 3: the reset of :reset-match, one member a crew, every row emptied
-    # (the crews' names and colours stay). Not a reset _crew_not_built skips:
-    # one member a crew is not what a fresh board has.
+    # (the crews' names and colours stay).
     validate_scoreboard(n)
     _require_confirm(_json_body())
     WebOps.clear_all(n)
@@ -2554,8 +2543,7 @@ def reset_players(n):
     # Board 3: every member row emptied, the count stays (ClearCrew).
     validate_scoreboard(n)
     _require_confirm(_json_body())
-    if not _crew_not_built(n):
-        WebOps.reset_players(n)
+    WebOps.reset_players(n)
     return ok(revision=current_revision())
 
 
@@ -2565,8 +2553,7 @@ def reset_match(n):
     # Board 3: full stocks and nobody playing, the match bar and the best of.
     validate_scoreboard(n)
     _require_confirm(_json_body())
-    if not _crew_not_built(n):
-        WebOps.reset_match(n)
+    WebOps.reset_match(n)
     return ok(revision=current_revision())
 
 

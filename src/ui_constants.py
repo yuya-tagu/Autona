@@ -448,33 +448,6 @@ QTabBar::tab:selected:hover:enabled {{
     border-color: transparent;
 }}
 
-/* === Panel widgets (former docks) === */
-/* The panels are still QDockWidget subclasses, but they are no longer
-   docked: each is a page of the main-window QStackedWidget, with its title
-   bar hidden. No frame border, so pages sit flush against the sidebar.
-   qdarktheme's base template also sets a 4px border-radius on QDockWidget;
-   border:none alone doesn't clear it, so the corners stayed rounded and let
-   the window background show through as a faint grey frame. Reset it here
-   too (and pin background to match the surrounding stack) so the page sits
-   perfectly flush. */
-QDockWidget {{
-    color: {p['text_primary']};
-    titlebar-close-icon: none;
-    titlebar-normal-icon: none;
-    border: none;
-    border-radius: 0;
-    background: {p['bg_primary']};
-}}
-QDockWidget::title {{
-    background-color: {p['bg_tertiary']};
-    color: {p['text_primary']};
-    padding: 6px 12px;
-    border-bottom: 2px solid {p['accent_subtle']};
-    text-align: left;
-    font-size: {FONT_SM}pt;
-    font-weight: 700;
-}}
-
 /* === Menu bar & toolbar === */
 QMenuBar {{
     background-color: {p['bg_primary']};

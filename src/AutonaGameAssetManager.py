@@ -487,9 +487,14 @@ class AutonaGameAssetManager(QObject):
         # _SaveCycle releases once, from _Publish or, when the GUI thread did
         # not run it (skipped, aborted, failed first), from here. The
         # cycle stays open while the GUI thread rebuilds the models and runs
-        # the slots: other threads' writes meanwhile are published with it.
-        # The catalog's writer lock is released by the time the GUI thread
-        # is waited on (SelectGame returned).
+        # the slots: other threads' core-direct writes meanwhile (score:
+        # adjust, a colour) are published with it, and their board
+        # operations wait, as _Publish holds the board host's lock (ADR-005
+        # S4ad review; they waited behind it on the GUI thread until S4ad).
+        # Writes made while this thread selects -- before _Publish -- go out
+        # with the load too, a board operation's included, as they always
+        # did. The catalog's writer lock is released by the time the GUI
+        # thread is waited on (SelectGame returned).
         self.catalog.ReloadStartGGCharacters()
         cycle = _SaveCycle()
         # The icon decodes the rebuild starts, collected as they start: they
@@ -527,45 +532,78 @@ class AutonaGameAssetManager(QObject):
         # bootstrap.wire_game_roster: the previous game's picks emptied),
         # committed as an announced load commits it, then the
         # pick persisted (onLoad's _PersistSelectedGame). Core's operations,
-        # callable from any thread -- not through the board host, which
-        # hands its work to the GUI thread (the loader's thread would wait
-        # for it). Left as they are: the models a failed rebuild left
+        # through the board host as the announced load's (its lock, on this
+        # thread -- the loader's or the GUI thread, inside _Publish's own
+        # operation there; the headless shell's _SettleStopped does the
+        # same). `atShutdown`: the host refuses a board operation off the
+        # main thread once the app is shutting down (the 503 a late request
+        # gets), and this one is that shutdown's own write. Until ADR-005
+        # S4ad the desktop's host handed its work to the GUI thread, which
+        # the loader's thread would have waited for, so this called core
+        # directly. Left as they are: the models a failed rebuild left
         # part-way -- the next load redoes them (_RebuildModels).
+        from . import AutonaWebOperations
         from .core.Actions import AutonaActions
         actions = AutonaActions.instance
-        for board in actions.ApplyGameRoster(
-                getattr(snapshot, "replaced", None)):
-            actions.ApplyChanges(board)
+
+        def settle():
+            for board in actions.ApplyGameRoster(
+                    getattr(snapshot, "replaced", None)):
+                actions.ApplyChanges(board)
+
+        AutonaWebOperations.boardHost.Run(settle, atShutdown=True)
         self._PersistSelectedGame()
 
     def _Publish(self, snapshot, cycle, decodes):
         # GUI thread: the models rebuilt, then the load announced --
-        # gameLoaded (the roster) ahead of onLoad (everything that rebinds to
-        # the new models), each slot run here, in connection order -- and
-        # last the load's save cycle closed, here too. So a load that
+        # gameLoaded (the roster, the set length and the commit:
+        # bootstrap.wire_game_roster) ahead of onLoad (everything that
+        # rebinds to the new models), each slot run here, in connection
+        # order -- and last the load's save cycle closed, here too, which
+        # publishes what the commit queued. So a load that
         # returns has had all of them run: what set_game's "OK" has always
         # meant. (Until ADR-005 S3f-4 the loader thread emitted them and the
         # slots ran queued after it, each in a save cycle of its own.) The
         # icon decodes the rebuild starts go into `decodes`.
-        try:
+        #
+        # All of it one board operation (AutonaWebOperations.boardHost,
+        # under its lock; ADR-005 S4ad review): the commit gameLoaded queues
+        # is published when the cycle closes, so a board operation of
+        # another thread landing between them -- a web edit, held -- would
+        # go out with the load's commit, without 反映. Until S4ad those ran
+        # on this (the GUI) thread, queued behind this call. Nothing in here
+        # waits for another thread (the rebuild only starts its decodes;
+        # onLoad's slots take the settings' / player models' locks, which
+        # come after this one, and queue the rest), so a request thread
+        # holding the lock only makes this wait for its operation to end.
+        # Imported here: the web layer is not this module's to pull in when
+        # it is imported.
+        from . import AutonaWebOperations
+
+        def publish():
             try:
-                self._RebuildModels(decodes)
-            except Exception:
-                # Not announced, then (FAILED): what the slots would have
-                # written goes with the selection all the same, before the
-                # cycle closes (ADR-005 S3f-4 review). The slots' exceptions
-                # do not reach here: emit reports them and goes on.
-                self._SettleUnannounced(snapshot)
-                raise
-            self.signals.gameLoaded.emit(snapshot)
-            self.signals.onLoad.emit()
-            # Last: it takes what those slots wrote with it (ADR-005 S4t;
-            # each board's onLoad handler did this, ahead of the cards built
-            # after the board). Queued for the cycle closed below.
-            from .core.Actions import AutonaActions
-            AutonaActions.instance.CommitGameLoad()
-        finally:
-            cycle.Release()
+                try:
+                    self._RebuildModels(decodes)
+                except Exception:
+                    # Not announced, then (FAILED): what the slots would
+                    # have written goes with the selection all the same,
+                    # before the cycle closes (ADR-005 S3f-4 review). The
+                    # slots' exceptions do not reach here: emit reports them
+                    # and goes on.
+                    self._SettleUnannounced(snapshot)
+                    raise
+                self.signals.gameLoaded.emit(snapshot)
+                self.signals.onLoad.emit()
+                # The commit (AutonaActions.CommitGameLoad) is the wiring's,
+                # on gameLoaded, with the roster since ADR-005 S4ad. It was
+                # called here, after onLoad, while a Qt player card wrote
+                # its rows on onLoad (until S4ac-3). Queued inside this
+                # cycle, it still takes what onLoad's slots write with it,
+                # when the cycle closes below.
+            finally:
+                cycle.Release()
+
+        AutonaWebOperations.boardHost.Run(publish)
 
     @staticmethod
     def _WaitForDecodes(decodes):

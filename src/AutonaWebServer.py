@@ -918,8 +918,8 @@ class WebServer:
 
         # The server knows no shell: what differs between the desktop and
         # the headless shell is registered on AutonaWebOperations by the
-        # shell (the board host, the game loader, the shell operations;
-        # ADR-005 S3c / S3e-9), so both build it the same way.
+        # shell (the game loader, the shell operations; ADR-005 S3c / S3e-9;
+        # the board host too until S4ad), so both build it the same way.
 
         # Through the bridge rather than subscribing to the core channels
         # directly. Both handlers are plain functions, and PySide6 still

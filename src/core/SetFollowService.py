@@ -78,9 +78,10 @@ lookup, tick or the same set chosen again loads it again. It was skipped as
 the set already shown, and the board stayed empty.
 
 Threads. Every operation -- what it decides and what it writes -- runs
-through the board host (``boardHost()``: the desktop's runs it on the GUI
-thread, the headless one under its lock, one at a time with the web's),
-the fetcher's answers arrive on the main thread and go through it too, and
+through the board host (``boardHost()``: under its lock, on the calling
+thread, one at a time with the web's -- in both shells since ADR-005 S4ad;
+the desktop's ran it on the GUI thread until then), the fetcher's answers
+arrive on the main thread and go through it too, and
 nothing here waits for another thread: the fetches are started, never
 joined, and no lock of this module is held while calling out (agent-pitfalls
 #17).
@@ -92,9 +93,10 @@ onResult)`` start a fetch (False when no tournament is loaded) and call
 ``onResult(data)`` on the main thread when
 it answers -- ``Match``'s ``onError(error)`` when it raised; ``Poll(board)``
 makes the board's clock follow
-``PollGeneration(board)``; ``FollowChanged(board)`` tells the board what it
-follows changed; ``RemainingMs(board)`` is the time to the next
-tick, or None, from any thread.
+``PollGeneration(board)``; ``RemainingMs(board)`` is the time to the next
+tick, or None, from any thread. (``FollowChanged(board)``, which told the
+Qt board what it follows changed, went in ADR-005 S4ad: ``changes`` tells
+the web server.)
 
 Import side effects: none (agent-pitfalls #1).
 """
@@ -120,9 +122,9 @@ class SetFollowService:
 
     # Registered by bootstrap_core(): the provider and the clock
     # (AutonaSetFollowUtil), and where a board operation runs -- a callable
-    # answering the shell's board host (AutonaWebOperations.boardHost, read
-    # when it is used: the desktop registers its own after bootstrap_core()).
-    # None: nothing is fetched / the operation runs on the calling thread.
+    # answering the board host (AutonaWebOperations.boardHost, read when it
+    # is used: core does not import the web layer). None: nothing is
+    # fetched / the operation runs on the calling thread.
     fetcher = None
     boardHost = None
 
@@ -438,9 +440,7 @@ class SetFollowService:
             SetFollowService._polls[self.scoreboardNumber] = {
                 "data": data, "mode": mode, "identifier": identifier,
                 "generation": self._Next()}
-        fetcher = self._Fetcher()
-        fetcher.Poll(self.scoreboardNumber)
-        fetcher.FollowChanged(self.scoreboardNumber)
+        self._Fetcher().Poll(self.scoreboardNumber)
         SetFollowService.changes.notify(self.scoreboardNumber)
 
     def Tick(self):
@@ -490,9 +490,7 @@ class SetFollowService:
                         board, None) is not None:
                     stopped = True
             self._Bump()
-            fetcher = self._Fetcher()
-            fetcher.Poll(board)
-            fetcher.FollowChanged(board)
+            self._Fetcher().Poll(board)
             if forget:
                 self.setLoad.ClearSetTracking()
             if stopped:
@@ -610,7 +608,6 @@ class SetFollowService:
         `savePlayerToDb` is returned, for the caller to save once it holds
         no lock (`SaveRecord`); None otherwise.
         """
-        host = self._Host()
         board = self.scoreboardNumber
         service = self.setLoad
         record = None
@@ -628,9 +625,9 @@ class SetFollowService:
 
             upsetStale = False
             if data.get("entrants"):
-                upsetStale = self._ApplyEntrants(host, data)
+                upsetStale = self._ApplyEntrants(data)
             else:
-                applied, record = self._ApplySinglePlayer(host, data)
+                applied, record = self._ApplySinglePlayer(data)
                 if not applied:
                     # Neither entrants nor a team / player: nothing more to
                     # apply -- the bracket type included, as before (a
@@ -642,7 +639,7 @@ class SetFollowService:
                 StatsService(board).RefreshQuietly(StatsService.UPSET_FACTOR)
         return record
 
-    def _ApplyEntrants(self, host, data) -> bool:
+    def _ApplyEntrants(self, data) -> bool:
         """Pour a set's two entrant rosters into the player slots.
 
         True when the upset factor is left to recalculate: the roster went
@@ -685,18 +682,17 @@ class SetFollowService:
                         # The full player dict carries the mains; the
                         # mains-only load is for the non-overwrite case.
                         change = self._ApplyPlayer(
-                            host, stateTeam, p + 1, player, True, True,
-                            noMains)
+                            stateTeam, p + 1, player, True, True, noMains)
                     elif data.get("has_selection_data") and noMains != True:
                         change = self._ApplyPlayer(
-                            host, stateTeam, p + 1,
+                            stateTeam, p + 1,
                             {"mains": player.get("mains")}, False, False)
                     seedMoved = seedMoved or change.seedChanged
         except Exception as e:
             logger.error(f"Error while setting entrants: {e}")
         return singlesChanged and not seedMoved
 
-    def _ApplySinglePlayer(self, host, data):
+    def _ApplySinglePlayer(self, data):
         """A one-player payload (POST /score's `team` / `player` / `data`):
         (False, None) when it names no team or player.
 
@@ -719,7 +715,7 @@ class SetFollowService:
                     1 <= player_ <= AutonaActions.RosterCount(board, team_):
                 raise IndexError(f"team {team} has no player {player}")
             payload = data.get("data")
-            self._ApplyPlayer(host, team_, player_, payload, True, False)
+            self._ApplyPlayer(team_, player_, payload, True, False)
             if payload.get("savePlayerToDb", False):
                 record = PlayerService(
                     _SlotPath(board, team_, player_)).PrepareSaveToDB()
@@ -728,18 +724,15 @@ class SetFollowService:
                          f"player {player} not written: {e}")
         return True, record
 
-    def _ApplyPlayer(self, host, team, slot, data, loadFromDB, clear,
+    def _ApplyPlayer(self, team, slot, data, loadFromDB, clear,
                      no_mains=False) -> SlotChange:
         """Load a player into slot `slot` of state team `team`
         (PlayerService.ApplyData, which asks for its statistics too), in one
-        save cycle, telling the host (the desktop's card drops the text
-        typed into its combos after a load that cleared)."""
+        save cycle. (The host was told of it until ADR-005 S4ad, for the Qt
+        cards' typed combo text: PlayerLoaded, empty since S4ac-3.)"""
         service = PlayerService(_SlotPath(self.scoreboardNumber, team, slot))
         with StateManager.SaveBlock():
-            try:
-                return service.ApplyData(data, loadFromDB, clear, no_mains)
-            finally:
-                host.PlayerLoaded(self.scoreboardNumber, team, slot, clear)
+            return service.ApplyData(data, loadFromDB, clear, no_mains)
 
     # ── tests ────────────────────────────────────────────────────────────
 
@@ -784,7 +777,7 @@ def _SlotPath(board, team, player):
 
 
 class _CallerThread:
-    """No board host registered: the operation runs here, nothing to tell."""
+    """No board host registered: the operation runs here."""
 
     def Run(self, op):
         return op()
@@ -792,9 +785,6 @@ class _CallerThread:
     def ClearPlayers(self, board, no_mains=False):
         AutonaActions.instance.ClearPlayers(board, no_mains)
         SetLoadService(board).lastSetSelected = None
-
-    def PlayerLoaded(self, board, team, player, cleared):
-        pass
 
 
 class _NoFetcher:
@@ -816,9 +806,6 @@ class _NoFetcher:
         return False
 
     def Poll(self, board):
-        pass
-
-    def FollowChanged(self, board):
         pass
 
     def RemainingMs(self, board):

@@ -9,7 +9,8 @@ network) stubbed out. Pinned:
   counterparts: the game selector the tournament provider loads its game
   through (S3c-1 review: a missing one means a tournament's game never
   loads, with only a warning in the log), the game loader the web
-  operations use, the headless board host; no desktop adapter is built and
+  operations use; the board host is the one of both shells (ADR-005 S4ad:
+  the desktop registered its own until then); no desktop adapter is built and
   the player DB builds no Qt model (QtGui);
 - what the run makes and imports (ADR-005 S3f-6): no GUI application
   object, no widget, and none of the src modules that define a QWidget

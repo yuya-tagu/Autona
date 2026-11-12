@@ -790,7 +790,7 @@ def test_a_load_copies_the_record_under_the_database_s_lock(board, monkeypatch):
     loaded = []
     monkeypatch.setattr(
         WebOps, "_load_player",
-        lambda host, board_, team, player, data, *args: loaded.append(data))
+        lambda board_, team, player, data, *args: loaded.append(data))
 
     _ok(board.client.post(
         "/api/v1/scoreboards/1/teams/1/players/1:load", json={"tag": "alpha"}))

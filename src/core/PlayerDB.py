@@ -464,8 +464,9 @@ class PlayerDB:
 
     def TournamentPlayers(self):
         """The players a client is shown: only the loaded tournament's
-        entrants when one is loaded, the whole DB otherwise (the same rule
-        as the desktop name completers).
+        entrants when one is loaded, the whole DB otherwise (the rule the
+        desktop's Qt name completers followed, until they went with the Qt
+        player cards: ADR-005 S4ac-3 / S4ad).
 
         For use outside the process (the web server's /playerdb and its
         Socket.IO push): a deep copy, players and all, taken under the lock,

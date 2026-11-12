@@ -448,7 +448,7 @@ def adapter(autonaApp, tmp_path):
 
     session_db = PlayerDB.instance
     saved = {name: getattr(AutonaPlayerDB, name)
-             for name in ("model", "completerModel", "_retiredModel")}
+             for name in ("model", "_retiredModel")}
     assert AutonaPlayerDB._attachedTo is session_db
     assert AutonaPlayerDB.modelEnabled  # the desktop harness built the model
 
@@ -468,12 +468,9 @@ def adapter(autonaApp, tmp_path):
         AutonaPlayerDB.signals.db_updated.disconnect(count)
         PlayerDB.instance = session_db
         AutonaPlayerDB.Attach()
-        # The test's builds re-pointed the (shared) completer proxy at the
-        # test's model. Point it back at the session's model before dropping
-        # the test's (agent-pitfalls #13: rewire first, then let go).
-        proxy, model = saved["completerModel"], saved["model"]
-        if proxy is not None and model is not None:
-            proxy.setSourceModel(model)
+        # (The completers' proxy the test's builds re-pointed at the test's
+        # model, and that had to be pointed back first, went in ADR-005
+        # S4ad: no model is shared any more.)
         for name, value in saved.items():
             setattr(AutonaPlayerDB, name, value)
 
@@ -537,11 +534,11 @@ def test_a_worker_change_reaches_db_updated_on_the_gui_thread(
 
     assert emitted == [True]
     assert db.tournamentTags == {"E1", "E2"}
-    proxy = AutonaPlayerDB.GetCompleterModel()
-    assert sorted(proxy.data(proxy.index(row, 0))
-                  for row in range(proxy.rowCount())) == ["E1", "E2"]
+    # What the web server's player DB push sends (the completers' proxy
+    # filtered the same way until ADR-005 S4ad).
+    assert sorted(db.TournamentPlayers()) == ["E1", "E2"]
     AutonaPlayerDB.ClearTournamentPlayers()
-    assert proxy.rowCount() == 20
+    assert len(db.TournamentPlayers()) == 20
 
 
 def test_unloading_the_tournament_pushes_the_whole_db_again(adapter, settings):

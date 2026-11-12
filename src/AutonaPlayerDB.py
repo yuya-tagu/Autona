@@ -13,31 +13,22 @@ class AutonaPlayerDBSignals(QObject):
     db_updated = Signal()
 
 
-class _TournamentEntrantsProxy(QSortFilterProxyModel):
-    """Filters the player model down to the currently loaded
-    tournament's entrants (PlayerDB.tournamentTags). Passes every
-    row through while no tournament entrant set is known, so completers
-    fall back to the whole DB."""
-
-    def filterAcceptsRow(self, source_row, source_parent):
-        tags = PlayerDB.instance.tournamentTags
-        if not tags:
-            return True
-        index = self.sourceModel().index(source_row, 0, source_parent)
-        return self.sourceModel().data(index) in tags
-
-
 class AutonaPlayerDB:
     """The player DB's Qt adapter (ADR-005 S3e-1).
 
     The data -- the players, Load / Add / Delete / Get / Save, the loaded
     tournament's entrant tags -- is src/core/PlayerDB.py
     (`PlayerDB.instance`); call it for anything that reads or changes a
-    player. What stays here is Qt: the completer model and its tournament
-    filter, and `signals.db_updated`, which the widgets and the web server's
-    player DB push listen to. Attach() relays every change the core
-    announces to SetupModel(), i.e. to db_updated on the GUI thread, exactly
-    where the old class called SetupModel() itself.
+    player. What stays here is Qt: the player model, and `signals.db_updated`,
+    which the web server's player DB push listens to. Attach() relays every
+    change the core announces to SetupModel(), i.e. to db_updated on the GUI
+    thread, exactly where the old class called SetupModel() itself. (The
+    completers' proxy over the model, filtered to the tournament's entrants
+    -- `completerModel` / GetCompleterModel() -- went in ADR-005 S4ad: its
+    last consumer, the Qt player card's name completer, went with the Qt
+    SCORE in S4ac-3. The model has no consumer either; it goes with the Qt
+    models' clean-up, once the mains normalisation its build does in place
+    is core's.)
 
     Everything here runs on the GUI thread, and nothing waits for it there
     (gui_thread_async, ADR-005 S3f-2): called on the GUI thread it runs at
@@ -47,17 +38,14 @@ class AutonaPlayerDB:
     core executor must not, since that wait never returns once the event
     loop has stopped. Queued from one thread, the calls run in the order
     they were made (SetTournamentPlayers before the announcement's
-    SetupModel, so the rebuilt proxy filters by the new entrants).
+    SetupModel, so the db_updated slots read the new entrants).
     """
     signals = AutonaPlayerDBSignals()
     model: QStandardItemModel = None
-    # Stable proxy over `model` used by the player-name completers; the
-    # source model is swapped on every SetupModel rebuild. See
-    # GetCompleterModel().
-    completerModel: _TournamentEntrantsProxy = None
-    # Previous generation of `model`, kept alive for one rebuild cycle so
-    # the proxy/completer chain never references a deleted C++ model (see
-    # SetupModel).
+    # Previous generation of `model`, kept alive for one rebuild cycle
+    # (agent-pitfalls #13). It kept the completers' proxy from referencing a
+    # deleted C++ model until ADR-005 S4ad removed the proxy; it goes with
+    # the model (see the class docstring).
     _retiredModel: QStandardItemModel = None
     # Whether SetupModel builds the Qt model (QStandardItemModel + QIcons,
     # i.e. QtGui). Switched on by the desktop shell (bootstrap_gui ->
@@ -102,7 +90,7 @@ class AutonaPlayerDB:
     def SetupModel():
         """Refresh what the DB's consumers see after it changed.
 
-        On the desktop: rebuild the completer model (below), which also
+        On the desktop: rebuild the player model (below), which also
         normalises the loaded game's mains in place, then emit db_updated.
         Without the model (the headless shell, see `modelEnabled`): emit
         db_updated only -- the web server's player DB push is what listens
@@ -131,14 +119,11 @@ class AutonaPlayerDB:
         # announces a change while holding the lock, so a worker blocked on it
         # cannot be the one this thread is waiting for.
         with AutonaPlayerDB.modelLock, db.lock:
-            # Retire — don't delete — the outgoing source model. Dropping the
-            # last Python reference here destroys the C++ model while it is
-            # still installed as completerModel's source; the proxy's stale
-            # row mapping (and the QCompleter persistents built on it) then
-            # crash with an access violation inside the setSourceModel()
-            # reset cascade below (boot crash, 2026-07-11). Holding one
-            # generation keeps every dangling C++ reference valid until the
-            # swap has rewired the proxy to the new model.
+            # Retire — don't delete — the outgoing model (agent-pitfalls
+            # #13): dropping its last Python reference destroyed the C++
+            # model while it was still the completers' proxy's source, and
+            # the proxy's reset crashed (boot crash, 2026-07-11). The proxy
+            # went in ADR-005 S4ad; the retire stays until the model goes.
             AutonaPlayerDB._retiredModel = AutonaPlayerDB.model
             AutonaPlayerDB.model = QStandardItemModel()
 
@@ -209,29 +194,20 @@ class AutonaPlayerDB:
                             f'Error loading player from local DB: {player.get("gamerTag")}')
                         logger.error(traceback.format_exc())
 
-            if AutonaPlayerDB.completerModel is None:
-                AutonaPlayerDB.completerModel = _TournamentEntrantsProxy()
-            AutonaPlayerDB.completerModel.setSourceModel(AutonaPlayerDB.model)
-
         # After both locks: db_updated's slots (the web server's push among
         # them) read the DB through the core's own locked readers, and none
         # of them rebuilds the model (modelLock is not re-entrant).
         AutonaPlayerDB.signals.db_updated.emit()
 
     @staticmethod
-    def GetCompleterModel():
-        """Model for the player-name completers: only the loaded
-        tournament's entrants, or the whole DB when no tournament is
-        loaded. Built by SetupModel — None until the first build, same
-        lifecycle as `model`."""
-        return AutonaPlayerDB.completerModel
-
-    @staticmethod
     @gui_thread_async
     def SetTournamentPlayers(tags, cancel_event=None):
-        """Restrict the completer candidates to the given DB tags (the
-        loaded tournament's entrants). Called from the entrants fetch job;
-        queued to the GUI thread for the proxy refilter, not waited for.
+        """Restrict the player candidates to the given DB tags (the loaded
+        tournament's entrants: PlayerDB.SetTournamentTags, which the web
+        server's player DB push reads). Called from the entrants fetch job;
+        queued to the GUI thread, not waited for, so it lands ahead of the
+        fetch's own save announcement (it refiltered the completers' proxy
+        there too, until ADR-005 S4ad).
 
         `cancel_event`: the fetch's. Set by the time this runs, another
         tournament (or none) was loaded meanwhile -- it is set on the GUI
@@ -242,13 +218,11 @@ class AutonaPlayerDB:
                         "dropped")
             return
         PlayerDB.instance.SetTournamentTags(tags)
-        if AutonaPlayerDB.completerModel is not None:
-            AutonaPlayerDB.completerModel.invalidateFilter()
 
     @staticmethod
     @gui_thread_async
     def ClearTournamentPlayers():
-        """Back to the whole DB as completer candidates (no tournament
+        """Back to the whole DB as player candidates (no tournament
         loaded).
 
         Announced with db_updated: the web server's player DB push sends
@@ -259,6 +233,4 @@ class AutonaPlayerDB:
         (NotifyChanged), queued after this filter."""
         if not PlayerDB.instance.ClearTournamentTags():
             return
-        if AutonaPlayerDB.completerModel is not None:
-            AutonaPlayerDB.completerModel.invalidateFilter()
         AutonaPlayerDB.signals.db_updated.emit()

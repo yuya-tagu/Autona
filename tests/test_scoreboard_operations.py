@@ -206,11 +206,14 @@ def test_a_best_of_set_from_another_thread_reaches_the_board(autonaApp):
 
 
 def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
-    """The commit comes after every onLoad slot, so what a slot writes goes
-    out with the load (a Qt player card's ReloadCharacters wrote what its
-    rows picked as it rebound them, until ADR-005 S4ac-3). Committed ahead
-    of them, the 反映 button stays lit after a load nobody edited (a held
-    write after the commit raises the flag and nothing lowers it)."""
+    """What an onLoad slot writes goes out with the load (a Qt player card's
+    ReloadCharacters wrote what its rows picked as it rebound them, until
+    ADR-005 S4ac-3): the commit, on gameLoaded with the roster since S4ad,
+    only queues the boards inside the load's save cycle, and the cycle's
+    close -- after every onLoad slot -- publishes all that is pending then.
+    Were it published at the commit, the 反映 button would stay lit after a
+    load nobody edited (a held write after the commit raises the flag and
+    nothing lowers it)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
 
@@ -338,7 +341,8 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
 @contextlib.contextmanager
 def _writtenDuringTheLoad(write):
     """`write` while a game load's save cycle is open, after the wiring's
-    roster and ahead of the commit: where a writer on another thread lands
+    roster and its commit (which only queues the boards; ADR-005 S4ad) and
+    ahead of the cycle's close: where a writer on another thread lands
     while the load decodes its assets."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
@@ -354,10 +358,10 @@ def _writtenDuringTheLoad(write):
 
 
 def test_a_game_load_publishes_what_was_written_during_it(autonaApp):
-    """The commit closing the load takes the held cycle with it, so nothing
+    """The commit the load queues takes the held cycle with it, so nothing
     else would publish a score or a set's fields that arrived in the load's
-    save cycle. They go out with the commit (the Qt board showed them from
-    its onLoad handler until ADR-005 S4ac-3)."""
+    save cycle. They go out with it when the cycle closes (the Qt board
+    showed them from its onLoad handler until ADR-005 S4ac-3)."""
     from src.core import StateSchema as schema
 
     autonaApp.ready(1)
@@ -413,7 +417,8 @@ def test_a_game_load_leaves_a_board_that_is_not_made_as_it_is(autonaApp):
     """A board not made (its launch failed; only a test's harness drops one
     since ADR-005 S4ac-1) is not held, and has no set length to start over:
     the skeleton stays what it is, live and published, and the commit
-    (AutonaActions.CommitGameLoad names both boards) finds nothing on it."""
+    (AutonaActions.CommitGameLoad names both boards; the wiring's since
+    ADR-005 S4ad) finds nothing on it."""
     autonaApp.dropAllBoards()
     autonaApp.ready(1)
     autonaApp.state.Set("score.2", {})
@@ -651,33 +656,164 @@ def test_the_swap_hotkey_swaps_the_active_board_only(autonaApp):
     assert autonaApp.get("score.2.teamsSwapped") is None
 
 
-def test_the_swap_hotkey_asks_the_board_host_not_the_widget(
-        autonaApp, monkeypatch):
-    """ADR-005 S4y: whether the active board is built is the board host's
-    (Built), and the field being typed in is finished through the host's
-    CommitEdit -- the hotkey no longer reaches into the dock's widgets.
-    Both answer as the headless host's since S4ac-3 (always built, nothing
-    to finish); the check goes with the host's hooks in S4ad."""
-    from src import AutonaWebOperations as WebOps
+# Each board hotkey, the operation it runs and that operation's arguments on
+# the active board (1 in singles).
+BOARD_HOTKEYS = {
+    "team1_score_up": ("AdjustScore", (1, 1, 1)),
+    "team1_score_down": ("AdjustScore", (1, 1, -1)),
+    "team2_score_up": ("AdjustScore", (1, 2, 1)),
+    "team2_score_down": ("AdjustScore", (1, 2, -1)),
+    "reset_scores": ("ResetScore", (1,)),
+    "apply_changes": ("ApplyChanges", (1,)),
+    "swap_teams": ("SwapTeams", (1,)),
+}
+
+
+@pytest.mark.parametrize("hotkey", list(BOARD_HOTKEYS))
+def test_a_board_hotkey_runs_under_the_board_host_s_lock(
+        autonaApp, boardLock, hotkey):
+    """ADR-005 S4ad: the board operations run on their callers' threads, so
+    a board hotkey's (on the GUI thread) is one of them -- run by the board
+    host, under its lock, the active board read there too -- or it would
+    land between the calls of a web operation running on a request thread
+    (clear_all's cycles, a PATCH set's), and act on a board a format switch
+    replaced meanwhile. Until S4ad those ran on the GUI thread too, which
+    kept them apart: the swap since S4ad, ±1 / reset / 反映 since its
+    review. The swap asked the host whether the board was built (Built) and
+    had it finish the field being typed in (CommitEdit; S4y) until then,
+    hooks that answered as the headless host's once the Qt SCORE went
+    (S4ac-3)."""
     from src.AutonaHotkeys import AutonaHotkeys
     from src.core.Actions import AutonaActions
 
     autonaApp.ready(1)
-    host = WebOps.boardHost
+    actions = AutonaActions.instance
+    method, arguments = BOARD_HOTKEYS[hotkey]
+    realActiveBoard = actions.ActiveBoard
     calls = []
-    monkeypatch.setattr(host, "CommitEdit", lambda n: calls.append(n))
-    with patch.object(AutonaActions.instance, "SwapTeams",
-                      side_effect=lambda n: calls.append(("swap", n))):
-        AutonaHotkeys.signals.swap_teams.emit()
-        autonaApp.settle()
-        assert calls == [1, ("swap", 1)]
 
-        # A host that says the board is not there: ignored.
-        calls.clear()
-        monkeypatch.setattr(host, "Built", lambda n: False)
-        AutonaHotkeys.signals.swap_teams.emit()
+    def activeBoard():
+        calls.append(("active board", boardLock.held()))
+        return realActiveBoard()
+
+    def operation(*args):
+        calls.append((method, args, boardLock.held()))
+
+    with patch.object(actions, "ActiveBoard", side_effect=activeBoard), \
+            patch.object(actions, method, side_effect=operation):
+        getattr(AutonaHotkeys.signals, hotkey).emit()
         autonaApp.settle()
-        assert calls == []
+    assert calls == [("active board", True), (method, arguments, True)]
+
+
+def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
+        autonaApp, boardLock, monkeypatch):
+    """ADR-005 S4ad: the load's commit (AutonaActions.CommitGameLoad) is the
+    wiring's (bootstrap.wire_game_roster), in the save block of the roster
+    and the set length, once, on gameLoaded, ahead of every onLoad slot --
+    not the asset adapter's after onLoad, where it was while a Qt player
+    card wrote its rows on onLoad (until S4ac-3). Inside the load's own
+    cycle it only queues the board: what the load wrote is still pending
+    after it and through onLoad, and goes out, with what onLoad's slots
+    wrote, when _Publish closes the cycle. All of it under the board host's
+    lock, from the rebuild to the close (the review: a board operation of
+    another thread landing before the close would go out with the commit,
+    without 反映)."""
+    from src.AutonaGameAssetManager import (AutonaGameAssetManager,
+                                            _SaveCycle)
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
+    state = autonaApp.state
+    actions = AutonaActions.instance
+    manager = AutonaGameAssetManager.instance
+    blocked = state.saveBlocked
+    calls = []
+    realCommit = actions.CommitGameLoad
+    realRoster = actions.ApplyGameRoster
+    realRebuild = manager._RebuildModels
+    realRelease = _SaveCycle.Release
+
+    def rebuild(*args):
+        calls.append(("rebuild", boardLock.held()))
+        return realRebuild(*args)
+
+    def roster(replaced):
+        # The host's lock is the outer one: never taken inside the state's
+        # (core's RLock, which the test cannot wrap under its live holders,
+        # so this one is asked).
+        calls.append(("roster", boardLock.held(), state.lock._is_owned()))
+        result = realRoster(replaced)
+        state.Set("score.1.team.1.teamName", "THE LOAD")
+        return result
+
+    def commit():
+        realCommit()
+        # The load's cycle and the wiring's own block are open: queued.
+        calls.append(("commit", boardLock.held(),
+                      state.saveBlocked - blocked,
+                      state.HasPendingChanges("score.1")))
+
+    def onLoad():
+        state.Set("score.1.team.2.teamName", "ON LOAD")
+        calls.append(("onLoad", boardLock.held(),
+                      state.HasPendingChanges("score.1")))
+
+    def release(cycle):
+        calls.append(("close", boardLock.held()))
+        return realRelease(cycle)
+
+    monkeypatch.setattr(manager, "_RebuildModels", rebuild)
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+    monkeypatch.setattr(actions, "CommitGameLoad", commit)
+    monkeypatch.setattr(_SaveCycle, "Release", release)
+    signals = manager.signals
+    signals.onLoad.connect(onLoad)
+    try:
+        autonaApp.publishGameLoad()
+    finally:
+        signals.onLoad.disconnect(onLoad)
+
+    assert calls == [("rebuild", True), ("roster", True, False),
+                     ("commit", True, 2, True), ("onLoad", True, True),
+                     ("close", True)]
+    # The close published both, with nothing left behind 反映.
+    assert state.HasPendingChanges("score.1") is False
+    assert state.GetCommitted("score.1.team.1.teamName") == "THE LOAD"
+    assert state.GetCommitted("score.1.team.2.teamName") == "ON LOAD"
+
+
+def test_a_game_load_whose_roster_raises_still_commits(
+        autonaApp, monkeypatch):
+    """The wiring commits whatever the roster does (ADR-005 S4ad review:
+    try / finally): a roster that wrote, then raised, leaves nothing of the
+    load waiting behind 反映 once the cycle closes. The asset adapter's
+    _Publish committed on every path until S4ad. The exception is the
+    slot's: emit reports it and the load goes on (onLoad runs)."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.core.Actions import AutonaActions
+
+    autonaApp.ready(1)
+    state = autonaApp.state
+    actions = AutonaActions.instance
+    loaded = []
+
+    def roster(replaced):
+        state.Set("score.1.team.1.teamName", "HALF A ROSTER")
+        raise RuntimeError("the roster failed part-way")
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+    signals = AutonaGameAssetManager.instance.signals
+    onLoad = lambda: loaded.append(state.HasPendingChanges("score.1"))
+    signals.onLoad.connect(onLoad)
+    try:
+        autonaApp.publishGameLoad()
+    finally:
+        signals.onLoad.disconnect(onLoad)
+
+    assert loaded == [True]
+    assert state.HasPendingChanges("score.1") is False
+    assert state.GetCommitted("score.1.team.1.teamName") == "HALF A ROSTER"
 
 
 def test_the_load_set_hotkey_opens_the_active_boards_window_only(

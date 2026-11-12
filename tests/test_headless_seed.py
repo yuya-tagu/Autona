@@ -496,35 +496,30 @@ def test_the_headless_boards_are_made_and_not_held(noBoards):
     assert not any(_held(n) for n in (1, 2, 3))
 
 
-def test_the_desktop_board_host_only_runs_the_operation(noBoards):
-    """DesktopBoardHost is Run alone since ADR-005 S4ac-3: every board is
-    made at launch (S4ac-1), so Built says yes, and Prepare / CommitEdit /
-    DiscardTypedText / PlayerLoaded have no widget to build or finish --
-    they make, seed and write nothing, as the headless host's. Until S4ac-3
-    Built was core's flag and Prepare made a board core did not have (only
-    the harness's drop brings that about), then its widgets. The checks the
-    hotkeys still make of Built go in S4ad."""
+def test_the_desktop_board_host_is_the_headless_one(noBoards):
+    """The desktop's bootstrap registers no board host of its own since
+    ADR-005 S4ad: the board operations run through the web layer's one
+    BoardHost, on the calling thread, as headless. Run makes, seeds and
+    writes nothing but the operation; with no board core has, nothing is
+    made for it (every board is made at launch since S4ac-1). Until S4ad
+    the desktop's DesktopBoardHost ran the operation on the GUI thread, with
+    empty hooks since S4ac-3 (Prepare / Built / CommitEdit /
+    DiscardTypedText / PlayerLoaded) that made the Qt boards and finished
+    their fields until then."""
     from src import AutonaWebOperations as WebOps
 
     host = WebOps.boardHost
-    assert isinstance(host, WebOps.DesktopBoardHost)
-    assert [host.Built(n) for n in (1, 2, 3)] == [True] * 3
+    assert type(host) is WebOps.BoardHost
+    assert not hasattr(WebOps, "DesktopBoardHost")
 
-    host.Prepare(1)
+    assert host.Run(lambda: "ran") == "ran"
     noBoards.settle()
     assert AutonaActions.instance.BoardEnsured(1) is False
     assert StateManager.Get("score.1") is None
     assert not _held(1)
 
     AutonaActions.instance.MakeBoards(panel=True)
-    AutonaActions.instance.SetTeamName(2, 1, "kept")
-
-    def everything():
-        host.Prepare(2)
-        host.CommitEdit(2)
-        host.DiscardTypedText(2)
-        host.PlayerLoaded(2, 1, 1, True)
-    host.Run(everything)
+    host.Run(lambda: AutonaActions.instance.SetTeamName(2, 1, "kept"))
     noBoards.settle()
 
     assert StateManager.Get("score.2.team.1.teamName") == "kept"
