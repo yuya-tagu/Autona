@@ -281,13 +281,6 @@ def test_there_is_no_such_new_board(noBoards, board):
     assert StateManager.Get("score", None) in (None, {})
 
 
-def test_a_new_board_with_the_tracker_on_has_no_rows_yet(noBoards):
-    with _settingsWith({"general.disable_individual_game_tracker": False}):
-        AutonaActions.instance.SeedFreshBoard(1)
-
-    assert StateManager.Get("score.1.stages") == {}
-
-
 def test_the_roster_seed_is_written_after_the_score_reset(autonaApp):
     """_SeedBoards starts from ResetScoreRoot: a seed written before it
     would be dropped with the rest of the restored score."""
@@ -626,6 +619,32 @@ def test_the_desktop_and_headless_launches_make_the_same_boards(
     assert headless["options"] == displayOptions
     assert desktop["written"] == {("general.disable_autoupdate", True)}
     assert headless["written"] == set()
+
+
+@pytest.mark.parametrize("panel", [True, False], ids=["desktop", "headless"])
+def test_a_restored_board_with_game_rows_launches_without_them(
+        noBoards, panel):
+    """A state.json written before ADR-005 S4ac-4 still holds each board's
+    game tracker rows (`score.{n}.stages`), and nothing migrates them: the
+    launch's MakeBoards drops the restored score (ResetScoreRoot) and makes
+    every board from its skeleton (SeedBoard replaces the subtree), so the
+    rows go with the rest, and the boards it makes have none."""
+    rows = {str(game): {"t1_win": game == 1, "t2_win": game == 2,
+                        "tie": False}
+            for game in range(1, 4)}
+    StateManager.Set("score", {"1": {"best_of": 3, "stages": rows},
+                               "2": {"best_of": 3, "stages": rows},
+                               "3": {"stages": {}}})
+    noBoards.settle()
+
+    assert AutonaActions.instance.MakeBoards(panel=panel) is True
+    noBoards.settle()
+
+    for number in (1, 2, 3):
+        board = _published(number)
+        assert board["team"]["1"]["player"], number
+        assert "stages" not in board, number
+        assert "stages" not in StateManager.Get(f"score.{number}"), number
 
 
 @pytest.mark.parametrize("panel", [True, False])

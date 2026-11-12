@@ -380,6 +380,6 @@ Web 版だけ（サイドバー Data の「選手一覧」= 共有ビューの `
 | 選手の操作（`PlayerService`） | SCORE ページの選手カードで選手操作（board 1/2/3。Qt の選手カードは S4ac-3 で削除） |
 | StateManager (S-09) | Web UI へのリアルタイム配信が壊れていないこと |
 | __init__ 分割 (S-02, S-03) | 全サイドバーパネルが表示されること（初回表示時構築を含む） |
-| GameAssetManager (S-04) | ゲーム変更後のキャラ/ステージ読み込み |
+| GameAssetManager (S-04) | ゲーム変更後のキャラ読み込み（ステージのモデルは ADR-005 S4ac-4 で削除） |
 | 起動シーケンス / bootstrap (S-10) | `pytest tests/test_import_side_effects.py` が通ること + 上記「起動・終了」全項目 |
 | パネルの遅延構築 | 対象パネルを**開かずに**関連機能を操作（ホットキー・Web API・OBS オーバーレイ）してエラーが出ないこと |

@@ -686,9 +686,10 @@ def wire_game_roster(game_loaded):
       AutonaActions.ApplyGameRoster: each board with a roster goes to the
       game's players per team and the default characters per player, its
       picks emptied when that load replaced another game. In one save cycle
-      with AutonaActions.RepublishBestOfs: each board's set length again, the
-      game rows starting over (ADR-005 S4t: it was each built board's onLoad
-      handler, so the headless shell did without).
+      with AutonaActions.RepublishBestOfs: each board's set length again
+      (ADR-005 S4t: it was each built board's onLoad handler, so the
+      headless shell did without; the game tracker's rows started over with
+      it until ADR-005 S4ac-4).
 
     The load's own snapshot, not the catalog's Current(): this slot runs on
     the main thread, which the load hands it to (the desktop's load job

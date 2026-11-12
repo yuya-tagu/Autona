@@ -95,7 +95,7 @@ ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, 
 - **`StateManager.Set` / `Unset` を Qt ウィジェットから呼ばない**。書き込みは
   `src/core/Actions.py` の `AutonaActions` か、core のドメインサービス
   （`PlayerService` / `SetLoadService` / `SetFollowService` / `CrewBattleService` / `TournamentInfoService` /
-  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService` / `CommentaryService` /
+  `Top8Service` / `ColorService` / `StatsService` / `CommentaryService` /
   `ThumbnailService` / `ResultService`）を通す。
   サブツリーのシード・破棄は `src/core/StateSchema.py`
 - ウィジェットの役割は「操作を依頼する」「state を読んで描画する」の 2 つだけ。

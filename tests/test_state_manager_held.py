@@ -338,7 +338,8 @@ def test_prefix_wide_held_write_keeps_live_exempt_values():
 # SaveState with an empty changed-key list. That list is handed to DeepDiff
 # as `include_paths`, and DeepDiff reads an empty one as "no filter" -- the
 # most expensive diff there is, on every +1 with the game tracker on, every
-# SwapTeams and every stage click (headless core Step 4a).
+# SwapTeams and every stage click (headless core Step 4a; the tracker went in
+# ADR-005 S4ac-4).
 #
 # It was not even a *harmless* full diff: lastSavedState is only advanced at
 # the paths each cycle diffs, so it does not have to equal the live state
@@ -384,7 +385,7 @@ def test_a_held_only_save_block_never_diffs(monkeypatch, _heldOnlyBoard):
 
     with SM.SaveBlock():
         SM.Set(f"{_heldOnlyBoard}.team.1.score", 1)
-        SM.Set(f"{_heldOnlyBoard}.stages.1.t1_win", True)
+        SM.Set(f"{_heldOnlyBoard}.team.2.score", 2)
 
     assert diffs.calls == [], (
         "a save cycle with nothing to publish still ran DeepDiff; with an "

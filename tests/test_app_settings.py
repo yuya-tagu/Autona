@@ -38,8 +38,7 @@ SECRET_PAIRING = "PAIR-9876"
 
 GENERAL_NAMES = ["profanity_filter", "disable_autoupdate",
                  "disable_scoreupdate", "disable_export", "disable_overwrite",
-                 "disable_individual_game_tracker", "team_1_default_color",
-                 "team_2_default_color"]
+                 "team_1_default_color", "team_2_default_color"]
 
 
 @pytest.fixture
@@ -76,6 +75,7 @@ def test_the_read_is_the_allow_list_and_nothing_else(saves):
         "general": {"webserver_token": SECRET_TOKEN,
                     "webserver_port": 6000,
                     "qt_scoreboard_panel": True,
+                    "disable_individual_game_tracker": False,
                     "theme_color": "#123456",
                     "profanity_filter": False},
         "designer": {"figma_pairing_code": SECRET_PAIRING},
@@ -98,7 +98,8 @@ def test_the_read_is_the_allow_list_and_nothing_else(saves):
     text = json.dumps(described, ensure_ascii=False)
     assert SECRET_TOKEN not in text
     assert SECRET_PAIRING not in text
-    for other in ("webserver_token", "qt_scoreboard_panel", "theme_color",
+    for other in ("webserver_token", "qt_scoreboard_panel",
+                  "disable_individual_game_tracker", "theme_color",
                   "#123456", "Ctrl+Alt+O", "ssbu", "figma"):
         assert other not in text
     assert described["general"]["profanity_filter"] is False
@@ -112,7 +113,7 @@ def test_nothing_saved_reads_as_the_defaults(saves):
     assert described["general"] == {
         "profanity_filter": True, "disable_autoupdate": True,
         "disable_scoreupdate": False, "disable_export": False,
-        "disable_overwrite": False, "disable_individual_game_tracker": True,
+        "disable_overwrite": False,
         "team_1_default_color": "#fe3636", "team_2_default_color": "#2e89ff"}
     assert described["network"] == {
         "port": DEFAULT_WEBSERVER_PORT, "listenLan": None, "listening": None,
@@ -281,6 +282,13 @@ def test_the_qt_scoreboard_switch_is_not_one_of_them():
         s.key for s in module.SETTINGS}
 
 
+def test_the_game_tracker_switch_is_not_one_of_them():
+    # general.disable_individual_game_tracker went with the per-game
+    # tracker (ADR-005 S4ac-4). A saved value is ignored, not migrated.
+    assert "general.disable_individual_game_tracker" not in {
+        s.key for s in module.SETTINGS}
+
+
 # ── the writes ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("update, fields, name", [
@@ -289,6 +297,8 @@ def test_the_qt_scoreboard_switch_is_not_one_of_them():
     ("UpdateGeneral", {"profanity_filter": None}, "profanity_filter"),
     ("UpdateGeneral", {"profanity_filter": 0}, "profanity_filter"),
     ("UpdateGeneral", {"qt_scoreboard_panel": True}, "qt_scoreboard_panel"),
+    ("UpdateGeneral", {"disable_individual_game_tracker": False},
+     "disable_individual_game_tracker"),
     ("UpdateGeneral", {"webserver_token": "x"}, "webserver_token"),
     ("UpdateGeneral", {"port": 6000}, "port"),
     ("UpdateGeneral", {"team_1_default_color": "red"}, "team_1_default_color"),

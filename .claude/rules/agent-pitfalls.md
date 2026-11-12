@@ -253,5 +253,5 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 
 - `held_state_updated` / `held_dirty_changed` / `state_updated` は `StateManager.lock` の中で出る（`SaveState` の中。lock を持った呼び出し側の中で書いたときはその中）。GUI スレッドで書いた変更なら、Bridge 経由のウィジェットのハンドラも direct に、lock を持ったまま走る
 - だからハンドラの中で別スレッドを待たない: `gui_thread_sync` / `run_sync` / `QDialog.exec()` / `processEvents()` をしない。待たれたスレッドが lock を取りに来ていればデッドロックになる（`exec` / `processEvents` は再入も起こす: #9）
-- Qt のカードの構築（`AutonaScoreboardWidget._SyncPlayerCards`）は lock の中で行い、それを許容していた（同じ held サイクルの後続ハンドラが、カードがあることを前提にしていたため。S4ac-3 で Qt の SCORE ごと削除）。held の通知を lock の外へ出す案は採らなかった: ハンドラ全体が lock の中で走ることが暗黙の原子性になっていて（例: ステージボタンの `PublishStageResults` の held ハンドラの途中に Flask スレッドの `score:adjust` が割り込まない）、外へ出すとその競合が入るため
+- Qt のカードの構築（`AutonaScoreboardWidget._SyncPlayerCards`）は lock の中で行い、それを許容していた（同じ held サイクルの後続ハンドラが、カードがあることを前提にしていたため。S4ac-3 で Qt の SCORE ごと削除）。held の通知を lock の外へ出す案は採らなかった: ハンドラ全体が lock の中で走ることが暗黙の原子性になっていて（当時の例: ステージボタンの `PublishStageResults` の held ハンドラの途中に Flask スレッドの `score:adjust` が割り込まなかった。例の機能は ADR-005 S4ac-4 で削除したが、理由自体は残る）、外へ出すとその競合が入るため
 - pin: `tests/test_roster_flow.py` の `test_no_thread_is_waited_on_inside_a_held_cycle`（S4ac-3 から core の held サイクルだけを見る）

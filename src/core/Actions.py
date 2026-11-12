@@ -43,29 +43,17 @@ made the set length the state's (`SetBestOf`): it was the BEST OF spinbox's,
 whose valueChanged published it and rebuilt the game tracker's rows, and
 every other entry point drove that spinbox. What is still outside:
 
-- **The other writers of the score.** `AdjustScore` / `ResetScore`
-  below are not the *only* writers of `score.{n}.team.{t}.score`. Three
+- **The other writer of the score.** `AdjustScore` / `ResetScore`
+  below are not the *only* writers of `score.{n}.team.{t}.score`. Two
   writers live inside core -- this class (`SetScore` / `AdjustScore` /
-  `ResetScore`, `SwapTeams` since S2c and the clears since S2d), the stage
-  tally in `GameTrackerService.PublishStageResults`, and a loaded set's
-  `SetLoadService.ApplyScores` (Step 4b). A number typed into the score
-  display is `SetScore` since ADR-005 S4x, as v1's score:set is (it was the
-  tracker's own `UpdateScore` until then), so no entry point is outside.
-  The game rows follow the score in the operation that moved it
-  (`GameTrackerService.FollowScores`, ADR-005 S4t): the follow used to be
-  the Qt board's render (`AutonaScoreboardWidget._SyncScoreDisplays`, gone
-  with the Qt SCORE in S4ac-3), with the old value on its spinbox and the
-  tracker's own writes told apart by a flag. Nothing outside core re-Sets the score:
-  `StageResultsToScore` used to echo the published value back and no longer
-  does.
-
-(`best_of` used to be listed here as an inversion left on purpose: making
-the state lead would have put `GameTrackerService.SetStageCount`, which
-writes, inside the notification for the write that triggered it -- a second,
-re-entrant held cycle per change. S2e resolved it the other way round: the
-rows are resized *here*, in the same block as the set length, through the
-board's tracker (`GameTracker`), and the board only renders the result. The
-notification writes nothing.)
+  `ResetScore`, `SwapTeams` since S2c and the clears since S2d) and a
+  loaded set's `SetLoadService.ApplyScores` (Step 4b). A number typed into
+  the score display is `SetScore` since ADR-005 S4x, as v1's score:set is,
+  so no entry point is outside. The per-game tracker's stage tally was a
+  third (`GameTrackerService.PublishStageResults`), and its game rows
+  followed the score in the operation that moved it (ADR-005 S4t); the
+  tracker, its rows (`score.{n}.stages`) and its setting went in ADR-005
+  S4ac-4.
 
 A fresh board's launch write is here too (`SeedFreshBoard`, ADR-005 S4t): the
 board's widgets used to write it as they were built. So is making a board
@@ -92,7 +80,6 @@ from loguru import logger
 from . import StateSchema as schema
 from .CrewBattleService import CrewBattleService
 from .DictHelper import deep_clone
-from .GameTrackerService import GameTrackerService
 from .GameAssetCatalog import GameAssetCatalog
 from .Observable import ObserverChannel
 from .PlayerService import (
@@ -208,11 +195,6 @@ class AutonaActions:
         # may not (tests/test_core_qt_free.py). bootstrap_core() passes
         # AutonaLocaleHelper.FormatMatchText.
         self._formatMatchText = formatMatchText
-        # {board: GameTrackerService}: the game rows of each 1v1 / team board
-        # (GameTracker). One per board for the life of the app, whichever
-        # shell it is and whether or not a widget renders them (ADR-005 S4t).
-        self._gameTrackers = {
-            board: GameTrackerService(board) for board in self.SCORE_BOARDS}
         # {board: count}: the characters per player a 1v1 / team board with
         # no character slot gives the players it gets next -- asked for while
         # it had none, else what it had when it lost its last player
@@ -586,22 +568,17 @@ class AutonaActions:
             return None
 
         key = f"score.{board}.team.{team}.score"
-        tracker = self.GameTracker(board)
-        # One save cycle with the game row it awards or clears (ADR-005 S4t;
-        # the board's held cycle followed in a second one until then).
-        with StateManager.SaveBlock():
-            with StateManager.lock:
-                before = tracker.Scores()
-                value = self._clampScore(
-                    self._asInt(StateManager.Get(key, 0))
-                    + self._asInt(delta))
-                StateManager.Set(key, value)
-                tracker.FollowScores(before)
+        with StateManager.lock:
+            value = self._clampScore(
+                self._asInt(StateManager.Get(key, 0)) + self._asInt(delta))
+            # No SaveBlock: a single write is already a single save cycle
+            # (the block was for the game row that followed it, ADR-005 S4t,
+            # gone with the tracker in S4ac-4).
+            StateManager.Set(key, value)
         return value
 
     def ResetScore(self, board):
-        """Zero both teams' scores in one save cycle, with the game rows that
-        follow them. True if it applied.
+        """Zero both teams' scores in one save cycle. True if it applied.
 
         Driving the two spinboxes in turn (as the old path did) notified
         twice, and on an unheld board would have shown a half-reset
@@ -614,14 +591,10 @@ class AutonaActions:
             # routing board 3 to the widget.
             logger.debug(f"ResetScore: board {board} has no team-level score")
             return False
-        tracker = self.GameTracker(board)
         with StateManager.SaveBlock():
-            with StateManager.lock:
-                before = tracker.Scores()
-                for team in (1, 2):
-                    StateManager.Set(
-                        f"score.{board}.team.{team}.score", self.SCORE_MIN)
-                tracker.FollowScores(before)
+            for team in (1, 2):
+                StateManager.Set(
+                    f"score.{board}.team.{team}.score", self.SCORE_MIN)
         return True
 
     def SetScore(self, board, team, value):
@@ -659,12 +632,8 @@ class AutonaActions:
                 "(crew scores are summed from member stocks); ignoring")
             return None
         value = self._clampScore(self._asInt(value))
-        tracker = self.GameTracker(board)
-        with StateManager.SaveBlock():
-            with StateManager.lock:
-                before = tracker.Scores()
-                self._SetIfChanged(f"score.{board}.team.{team}.score", value)
-                tracker.FollowScores(before)
+        with StateManager.lock:
+            self._SetIfChanged(f"score.{board}.team.{team}.score", value)
         return value
 
     # ── team color ───────────────────────────────────────────────────────
@@ -792,12 +761,11 @@ class AutonaActions:
         applied; False for the crew board, which swaps itself.
 
         What crosses over: every player slot, the score, the losers flag,
-        the team name and crest, and the game tracker's per-game winners
-        (mirrored: a game team 1 won is team 2's after the swap). The team
-        colors stay where they are -- they are the sides' colors, not the
-        players'. `score.{n}.teamsSwapped` is toggled: it is what tells a set
-        load which side a set's first entrant goes to
-        (`SetLoadService.DisplayTeam`), so clearing a board never resets it.
+        and the team name and crest. The team colors stay where they are --
+        they are the sides' colors, not the players'.
+        `score.{n}.teamsSwapped` is toggled: it is what tells a set load which
+        side a set's first entrant goes to (`SetLoadService.DisplayTeam`), so
+        clearing a board never resets it.
 
         The names do not need re-deriving: a player's " [L]" comes from the
         flag of the team the name was published on, and that flag crosses
@@ -825,7 +793,6 @@ class AutonaActions:
                 self._ExchangeLeaves(
                     f"{prefix}.team.1", f"{prefix}.team.2", TEAM_SWAP_ORDER,
                     TEAM_DEFAULTS, TEAM_ALWAYS, listedOnly=True)
-                self.GameTracker(board).SwapStageResults()
                 StateManager.Set(f"{prefix}.teamsSwapped", not bool(
                     StateManager.Get(f"{prefix}.teamsSwapped", False)))
                 # A slot pair holding two ids: both teams have other
@@ -979,22 +946,16 @@ class AutonaActions:
 
         Only what changes is written, as the spinboxes and the checkboxes
         did (neither emits for its current value). A losers flag that goes
-        takes its team's " [L]" with it (`SetTeamLosers`). The game
-        tracker's rows follow the score in the same block, as they do for
-        `ResetScore`.
+        takes its team's " [L]" with it (`SetTeamLosers`).
         """
         board = self._asInt(board, 0)
         if board not in self.SCORE_BOARDS:
             logger.debug(f"ClearScore: board {board} is not a score board")
             return False
-        tracker = self.GameTracker(board)
         with StateManager.SaveBlock():
-            with StateManager.lock:
-                before = tracker.Scores()
-                for team in (1, 2):
-                    self._SetIfChanged(
-                        f"score.{board}.team.{team}.score", self.SCORE_MIN)
-                tracker.FollowScores(before)
+            for team in (1, 2):
+                self._SetIfChanged(
+                    f"score.{board}.team.{team}.score", self.SCORE_MIN)
             for team in (1, 2):
                 self.SetTeamLosers(board, team, False)
         return True
@@ -1594,31 +1555,20 @@ class AutonaActions:
 
     # ── best of ──────────────────────────────────────────────────────────
 
-    def GameTracker(self, board):
-        """The GameTrackerService of 1v1 / team board `board`: its game rows.
-
-        Core's, in every shell and with or without a built board (ADR-005
-        S4t). The board's widget renders this one. Until then the board
-        built it and registered it here while it existed, so the rows, and
-        the score following onto them, were a built board's alone.
-        """
-        return self._gameTrackers[self._asInt(board, 0)]
-
     def SetBestOf(self, board, value) -> bool:
         """Set a board's set length. True if it changed.
 
-        The six derived keys and the game tracker's rows (one unreported row
-        per game, none with the tracker switched off), in one save cycle --
-        see `_PublishBestOf`. The board's BEST OF
-        spinbox and its rows render the result from the held cycle (ADR-005
-        S2e); every entry point comes here: the spinbox, a set load, the
-        Web's set_route / reset_match / clear_all, /api/v1's PATCH set and
-        the reset-all button (`ClearBoard`).
+        The six derived keys, in one save cycle -- see `_PublishBestOf`.
+        Every entry point comes here (ADR-005 S2e): the SCORE page, a set
+        load, the Web's set_route / reset_match / clear_all, /api/v1's PATCH
+        set and the reset-all button (`ClearBoard`). The game tracker's rows
+        were rebuilt in the same cycle until the tracker went (ADR-005
+        S4ac-4).
 
-        A value the board already has is not a write, and it does not reset
-        the rows: the spinbox's valueChanged, which all of those used to go
-        through, does not fire for its current value. A game load re-asserts
-        it on purpose (`RepublishBestOf`). Clamped to the spinbox's range, as
+        A value the board already has is not a write: the spinbox's
+        valueChanged, which all of those used to go through, did not fire
+        for its current value. A game load re-asserts it on purpose
+        (`RepublishBestOf`). Clamped to the spinbox's range, as
         setValue() clamped it; a value that is not a number at all is
         refused with a warning rather than read as 0, which would clear the
         set length (the rule SetLoadService applies to a set's numbers).
@@ -1643,14 +1593,13 @@ class AutonaActions:
         return True
 
     def RepublishBestOf(self, board) -> bool:
-        """Publish a board's current set length again, rows included. True
-        if it applied.
+        """Publish a board's current set length again. True if it applied.
 
         What a game load does (`RepublishBestOfs`), as the spinbox's
         re-emitted valueChanged did: the localized texts are derived again (a
-        reload can be a locale change) and the rows start over -- they
-        recorded games of the previous game's stages, and whether the
-        tracker is on is read again.
+        reload can be a locale change). Only what changes is written. The
+        game tracker's rows started over here too, until the tracker went
+        (ADR-005 S4ac-4).
         """
         board = self._asInt(board, 0)
         if board not in self.SCORE_BOARDS:
@@ -1687,15 +1636,12 @@ class AutonaActions:
         Six keys, because they are one fact: the raw `best_of`, the short
         forms overlays use in tight spaces (`BO5` / `FT3`), and the
         localized long forms. 0 means "not set", and the long forms are then
-        blank rather than "Best of 0". Then the rows, after the keys as the
-        spinbox handler wrote them: `GameTrackerService.SetStageCount()` is
-        the only thing allowed to resize them, and it is reached here through
-        the board's tracker.
+        blank rather than "Best of 0".
 
         A formatter that raises gets the English default instead
-        (`_matchText`), so the rows and the other keys are written all the
-        same. Anything else that raises does so inside the caller's block
-        rather than around it, so a failure cannot leave `saveBlocked`
+        (`_matchText`), so the other keys are written all the same.
+        Anything else that raises does so inside the caller's block rather
+        than around it, so a failure cannot leave `saveBlocked`
         positive -- which would freeze ./out and the WebSocket feed for the
         rest of the session (agent-pitfalls #6).
         """
@@ -1711,8 +1657,6 @@ class AutonaActions:
         self._SetIfChanged(
             f"{prefix}.first_to_text",
             self._matchText("first_to", firstTo) if value > 0 else "")
-        tracker = self.GameTracker(board)
-        tracker.SetStageCount(tracker.ResolveStageCount(value))
 
     # ── display options ──────────────────────────────────────────────────
 

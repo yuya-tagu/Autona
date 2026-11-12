@@ -39,6 +39,20 @@ every card, LOSERS box, BEST OF spinbox and stage row showing the state
 after every step, and the cards' render writing nothing (ADR-005 S2a) --
 went with the widgets; it was tests/test_player_card_render.py.
 
+ADR-005 S4ac-4 removed the game tracker: the rows under `score.{n}.stages`,
+the setting that switched them on and the stage clicks. The recordings keep
+them, so one more layer is applied last to every recorded step
+(_assertReplayed): the rows come out of the expected state and of the
+recorded key order; the state digest is checked by putting the recorded rows
+back into this tree's subtree where the recorded key order had them, so every
+other byte still has to match; and the cycles and publication of the steps
+whose writes included the rows are this tree's own (the S4AC4_* tables, each
+checked against the pre-S4ac-4 tree's (8b4b2fdf) delta rows with the rows
+under `stages` taken out; tests/fixtures/board_operations/verify_s4ac4.py
+runs that check again, see the note above the tables). A recorded stage click is the score the clicks summed
+to, typed through v1's score:set (_resultsScore). "tracker on" in a step's
+name is the recording's key, not a setting.
+
 The fixture world (games, custom flags, locale) is the S1d recording's
 (tests/test_player_slot_publish.py), so the character slots have real
 rows, skins (one of which is a different character -- Dr. Mario) and
@@ -47,7 +61,6 @@ variants.
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import orjson
 import pytest
@@ -56,11 +69,9 @@ from src import AutonaWebOperations as WebOps
 from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.DictHelper import deep_clone
-from src.core.GameTrackerService import TEAM_1, TEAM_2, UNREPORTED
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SetFollowService import SetFollowService
 from src.core.SetLoadService import SetLoadService
-from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from tests.conftest import (apply_set, clear_players, edit_tag, load_player,
                             tournamentLoaded)
@@ -78,7 +89,8 @@ GOLDEN_PATH = (Path(__file__).resolve().parent / "fixtures"
 GOLDEN = None if RECORD else json.loads(
     GOLDEN_PATH.read_text(encoding="utf-8"))
 # The swap / move operations with everything they move set up (ids, a city,
-# an avatar, distinct mains, a team crest, the game tracker on). Recorded on
+# an avatar, distinct mains, a team crest, the game tracker on -- gone in
+# ADR-005 S4ac-4, see the module docstring). Recorded on
 # the last pre-S2c tree (6a6f04cc) with `-k swap_operations`; golden.json
 # above is still the pre-S2b recording, so the two are recorded separately.
 SWAP_GOLDEN_PATH = GOLDEN_PATH.parent / "swap_golden.json"
@@ -234,6 +246,11 @@ def _keyOrders(value, path=""):
 def _boardKeyOrder(prefix=PREFIX):
     with StateManager.lock:
         return _keyOrders(deep_clone(StateManager.Get(prefix) or {}))
+
+
+def _boardSubtree(prefix=PREFIX):
+    with StateManager.lock:
+        return deep_clone(StateManager.Get(prefix) or {})
 
 
 # ── the operations ───────────────────────────────────────────────────────
@@ -412,21 +429,6 @@ SWAP_PLAYERS = {
 # by the lower-cased name), so one side has a logo and the other has none.
 TEAM_LOGO = Path("user_data") / "team_logo" / "alpha.png"
 
-_realSettingsGet = SettingsManager.Get
-
-
-def _trackerEnabled(key, default=None):
-    # The individual game tracker ships disabled; patched rather than
-    # written, as in tests/test_scoreboard_operations.py.
-    if key == "general.disable_individual_game_tracker":
-        return False
-    return _realSettingsGet(key, default)
-
-
-def _withTracker(operation):
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        operation()
-
 
 def _gameLoaded():
     """What a game load runs: what the shared wiring writes (bootstrap.
@@ -438,20 +440,6 @@ def _gameLoaded():
     actions.ApplyGameRoster()
     actions.RepublishBestOfs()
     actions.CommitGameLoad()
-
-
-def _clickStage(board, game, team):
-    """A click on the T1 / T2 button of game `game`'s row (1-based): the
-    button toggled, so the row goes to that team -- or back to unreported
-    when it had it -- and a row that was written sums the score from the
-    rows (the tracker's _StageResultClicked)."""
-    tracker = AutonaActions.instance.GameTracker(board)
-    index = game - 1
-    assert index < tracker.StageCount(), (board, game)
-    result = TEAM_1 if team == 1 else TEAM_2
-    winner = UNREPORTED if tracker.GameWinner(index) == result else result
-    if tracker.SetStageResult(index, winner):
-        tracker.PublishStageResults()
 
 
 def _fillFrom(board, team, players):
@@ -467,8 +455,7 @@ def _swapSteps(board):
     return [
         ("two players, two characters", lambda: (
             _setPlayers(board, 2), _setCharacters(board, 2))),
-        ("tracker on, best of 5",
-         lambda: _withTracker(lambda: _setBestOf(board, 5))),
+        ("tracker on, best of 5", lambda: _setBestOf(board, 5)),
         ("fill team 1", lambda: _fillFrom(board, 1, SWAP_PLAYERS)),
         ("fill team 2", lambda: _fillFrom(board, 2, SWAP_PLAYERS)),
         # A character-count change republishes every slot's characters as
@@ -476,8 +463,9 @@ def _swapSteps(board):
         ("three characters", lambda: _setCharacters(board, 3)),
         ("team names", lambda: (_teamName(board, 1, "Alpha"),
                                 _teamName(board, 2, "Bravo"))),
-        # T2, T1, T1: 2-1, and an order a swap has to keep (mirrored).
-        ("stage results", lambda: _stageResults(board)),
+        # T2, T1, T1 on the rows were 2-1, an order a swap had to keep
+        # (mirrored).
+        ("stage results", lambda: _resultsScore(board, 2, 1)),
         ("losers", lambda: _losers(board, 2)),
         ("swap teams", lambda: _swap(board)),
         ("move a player down", lambda: _move(board, 1, 1, 1)),
@@ -523,14 +511,13 @@ def _clearSteps(board, app):
     return [
         ("two players, two characters", lambda: (
             _setPlayers(board, 2), _setCharacters(board, 2))),
-        ("tracker on, best of 5",
-         lambda: _withTracker(lambda: _setBestOf(board, 5))),
+        ("tracker on, best of 5", lambda: _setBestOf(board, 5)),
         ("fill both teams", lambda: _fillBoth(board)),
         ("team names", lambda: (_teamName(board, 1, "Alpha"),
                                 _teamName(board, 2, "Bravo"))),
         ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
         # T2, T1, T1: 2-1 on the rows and on the score.
-        ("stage results", lambda: _stageResults(board)),
+        ("stage results", lambda: _resultsScore(board, 2, 1)),
         ("losers", lambda: _losers(board, 2)),
         ("clear the score", lambda: AutonaActions.instance.ClearScore(board)),
         ("score and losers again", lambda: (
@@ -540,8 +527,7 @@ def _clearSteps(board, app):
          lambda: apply_set(board, dict(
              _SET_MATCH_BAR, team1score=2, team2score=1, team1losers=True))),
         ("web reset match", lambda: actions.reset_match(BOARD)),
-        ("tracker on, best of 3",
-         lambda: _withTracker(lambda: _setBestOf(board, 3))),
+        ("tracker on, best of 3", lambda: _setBestOf(board, 3)),
         ("web set route", lambda: actions.set_route(
             BOARD, phase="Bracket", pool="Pool B", match="Grand Final",
             losers="true", team="2")),
@@ -573,7 +559,7 @@ def _clearSteps(board, app):
         ("two players, two characters, best of 5 and refill everything",
          lambda: (_setPlayers(board, 2),
                   _setCharacters(board, 2),
-                  _withTracker(lambda: _setBestOf(board, 5)),
+                  _setBestOf(board, 5),
                   _everything(board))),
         ("reset all inputs", lambda: _resetAll(board)),
         ("refill everything again", lambda: _everything(board)),
@@ -584,11 +570,15 @@ def _clearSteps(board, app):
     ]
 
 
-def _stageResults(board):
-    # T2, T1, T1: 2-1 on the rows and on the score.
-    _clickStage(board, 1, 2)
-    _clickStage(board, 2, 1)
-    _clickStage(board, 3, 1)
+def _resultsScore(board, team1, team2):
+    """Where a recording clicked game results (T2, T1, T1 on games 1 to 3 of
+    the game tracker's rows, which summed them into the score), the score
+    they came to, typed through v1's score:set (AutonaWebOperations.
+    set_scores: both teams in one save cycle, each written only on a
+    change). The tracker went in ADR-005 S4ac-4; `team1` / `team2` are the
+    recording's score after the step (the toggles of a click on a game the
+    team had won already included)."""
+    WebOps.set_scores(board, team1, team2)
 
 
 def _follow(board, setId, noMains):
@@ -611,11 +601,10 @@ def _singlesClearSteps(board, app):
     number = board
     return [
         ("two characters", lambda: _setCharacters(board, 2)),
-        ("tracker on, best of 5",
-         lambda: _withTracker(lambda: _setBestOf(board, 5))),
+        ("tracker on, best of 5", lambda: _setBestOf(board, 5)),
         ("fill both players", lambda: _fillBoth(board)),
         ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
-        ("stage results", lambda: _stageResults(board)),
+        ("stage results", lambda: _resultsScore(board, 2, 1)),
         ("losers", lambda: _losers(board, 2)),
         ("clear the score", lambda: AutonaActions.instance.ClearScore(board)),
         ("score and losers again", lambda: (
@@ -641,7 +630,7 @@ def _singlesClearSteps(board, app):
         ("web clear all", lambda: actions.clear_all(number)),
         ("two characters, best of 5 and refill everything", lambda: (
             _setCharacters(board, 2),
-            _withTracker(lambda: _setBestOf(board, 5)),
+            _setBestOf(board, 5),
             _everything(board, teamNames=False))),
         ("reset all inputs", lambda: _resetAll(board)),
         ("refill everything again",
@@ -653,36 +642,37 @@ def _singlesClearSteps(board, app):
 
 def _prepassSteps(board):
     """A set load's pre-pass (the players, then the score) on a team board
-    whose game tracker has rows recorded -- without keeping the mains, then
-    keeping them -- and the set followed already chosen again, which skips
-    it."""
+    with a score -- recorded with the game tracker's rows holding it --
+    without keeping the mains, then keeping them, and the set followed
+    already chosen again, which skips it."""
     return [
         ("two players, two characters", lambda: (
             _setPlayers(board, 2), _setCharacters(board, 2))),
-        ("tracker on, best of 5",
-         lambda: _withTracker(lambda: _setBestOf(board, 5))),
+        ("tracker on, best of 5", lambda: _setBestOf(board, 5)),
         ("fill both teams", lambda: _fillBoth(board)),
         ("team names", lambda: (_teamName(board, 1, "Alpha"),
                                 _teamName(board, 2, "Bravo"))),
         ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
-        ("stage results", lambda: _stageResults(board)),
+        ("stage results", lambda: _resultsScore(board, 2, 1)),
         ("losers", lambda: _losers(board, 2)),
         ("follow a set without keeping mains",
          lambda: _follow(board, "999", False)),
         ("refill, stage results and losers", lambda: (
-            _fillBoth(board), _stageResults(board), _losers(board, 1))),
+            _fillBoth(board), _resultsScore(board, 2, 1),
+            _losers(board, 1))),
         ("follow another set keeping mains",
          lambda: _follow(board, "1000", True)),
         ("refill and stage results", lambda: (
-            _fillBoth(board), _stageResults(board))),
+            _fillBoth(board), _resultsScore(board, 2, 1))),
         ("follow the same set again", lambda: _follow(board, "1000", True)),
     ]
 
 
 def _runSteps(app, board, afterEach=None, steps=None, stats=False,
-              keyOrders=None):
+              keyOrders=None, raws=None):
     # The board's own subtree: the team board's everywhere but the singles
-    # clears (ADR-005 S2d review).
+    # clears (ADR-005 S2d review). `raws` takes the subtree itself after
+    # each step, for the S4ac-4 state digest check (_assertReplayed).
     prefix = f"score.{board}"
     recorded = []
     for name, step in (steps if steps is not None else _steps(board)):
@@ -693,6 +683,8 @@ def _runSteps(app, board, afterEach=None, steps=None, stats=False,
         if stats:
             entry["stats"] = triggers.counts
         entry.update(_boardState(app, prefix))
+        if raws is not None:
+            raws.append(_boardSubtree(prefix))
         if keyOrders is not None:
             keyOrders.append({"step": name,
                               "keyOrder": _boardKeyOrder(prefix)})
@@ -1071,6 +1063,391 @@ S4T_BEST_OF_CHANGES = {
 }
 
 
+# What ADR-005 S4ac-4 changed on purpose, per recorded step, applied last
+# (_assertReplayed). The digests are this tree's: a recording holds only the
+# digest of what 反映 published, so the game rows cannot be taken out of it.
+# Each entry was checked against the last tree before S4ac-4 (8b4b2fdf, the
+# tree of the merge 2d47c1db), run with the same steps: the delta rows behind
+# every listed digest are that tree's with every row under `stages` taken
+# out (also from inside a value that adds or replaces a whole board), and a
+# field is listed only where it moved. The check can be run again with
+# tests/fixtures/board_operations/verify_s4ac4.py (its docstring has the
+# steps: it runs this file in a copy of 8b4b2fdf and in this tree and
+# compares the rows behind the digests).
+#
+# - `published` / `publishedRows` alone: what 反映 published had game rows
+#   in it (a best of resized them, a score moved them, a clear or a set load
+#   reset them). Every other row is the recording's.
+# - A stage click step: the score the clicks came to, typed through v1's
+#   score:set (_resultsScore). One cycle where the clicks were six, and none
+#   where the score was that already. A step that does more than the clicks
+#   keeps the recording's cycles for the rest (the comment above each entry
+#   gives old -> new).
+# - A game load: AutonaActions.RepublishBestOfs reset the rows in a block of
+#   its own, a cycle even when they did not change (StateManager.Set always
+#   records the key). With the texts unchanged it writes nothing now.
+# - The pre-pass's "follow a set without keeping mains": one
+#   `values_changed` row for the whole board where the recording has a row
+#   per field, with the same state. DeepDiff (8.x, threshold_to_diff_deeper
+#   0.33) reports a dict as replaced when fewer than a third of the keys the
+#   cycle diffs at that level were in the last published state. The follow
+#   diffs auto_update, set_id, station and team there and only team was
+#   published before (1 of 4); the recording also diffed the rows, published
+#   before (2 of 5). The clear recordings' "follow a set" were that one row
+#   already.
+#
+# The board operations recording kept the tracker off: nothing moved there.
+S4AC4_CHANGES = {}
+
+S4AC4_SWAP_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "39e7bc0d6ed78b8e"],
+        "publishedRows": "d3e486023b1c59c4"},
+    "a point with the tracker on": {
+        "published": [1, 0, "365ea18c8f5199f8"],
+        "publishedRows": "044114140e2b2662"},
+}
+
+S4AC4_CLEAR_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "39e7bc0d6ed78b8e"],
+        "publishedRows": "d3e486023b1c59c4"},
+    "clear the score": {
+        "published": [1, 0, "f99c9d1d0aea380e"],
+        "publishedRows": "ddd80a19a3396f04"},
+    "score and losers again": {
+        "published": [1, 0, "6e7101f43d1b3d54"],
+        "publishedRows": "3e1e7866d48960da"},
+    "reset match": {
+        "published": [1, 0, "13d4c07589a918ab"],
+        "publishedRows": "c2552b61b6d9d2e5"},
+    "a set with a match bar, a score and losers": {
+        "published": [1, 0, "98d7c3eeae217917"],
+        "publishedRows": "d903f229fba0fd6c"},
+    "web reset match": {
+        "published": [1, 0, "95da9f75e98f7a19"],
+        "publishedRows": "db6e0b3cd3278131"},
+    "tracker on, best of 3": {
+        "published": [1, 0, "8e83cd6c37c95bcd"],
+        "publishedRows": "00570ec394475723"},
+    "refill everything": {
+        "published": [1, 0, "1667e6f68cff5a56"],
+        "publishedRows": "b478ee40cc6cc75b"},
+    "web clear all": {
+        "published": [1, 0, "dfe368ecba06d055"],
+        "publishedRows": "7d1c8649b7f746d5"},
+    "two players, two characters, best of 5 and refill everything": {
+        "published": [1, 0, "60731e33f7fa0d5a"],
+        "publishedRows": "b336b0acd7a1a85f"},
+    "reset all inputs": {
+        "published": [1, 0, "c1a1ae1492706da5"],
+        "publishedRows": "3a93b40ee8a5534a"},
+    "follow a set": {
+        "published": [1, 0, "e6923f06d3be34c1"],
+        "publishedRows": "35a52d1c613c13dc"},
+}
+
+S4AC4_SINGLES_CLEAR_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "c8084779da281933"],
+        "publishedRows": "010a903ed476aeb0"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "083e02b7fef55025"],
+        "publishedRows": "a6a65832e9da4e3a"},
+    "clear the score": {
+        "published": [1, 0, "ba77a835cf71a76c"],
+        "publishedRows": "e203066678b70fc7"},
+    "score and losers again": {
+        "published": [1, 0, "fb92a9765b8f2e00"],
+        "publishedRows": "b470e2ee0b648146"},
+    "reset match": {
+        "published": [1, 0, "2c6ca00e5901afd3"],
+        "publishedRows": "92e6bbbf2d12ae09"},
+    "a set with a match bar, a score and losers": {
+        "published": [1, 0, "b177f076d1cc921c"],
+        "publishedRows": "93496bf21f81c859"},
+    "web reset match": {
+        "published": [1, 0, "d74a1825031658f5"],
+        "publishedRows": "0e161865b4afb007"},
+    "two characters, best of 5 and refill everything": {
+        "published": [1, 0, "b8df5c8c792d5878"],
+        "publishedRows": "b1bfa740fbbf0665"},
+    "reset all inputs": {
+        "published": [1, 0, "7894c29030654d28"],
+        "publishedRows": "d4ee93328151d79c"},
+    "follow a set without keeping mains": {
+        "published": [1, 0, "2e1421241e2f6d90"],
+        "publishedRows": "6e40af3af1c22794"},
+}
+
+S4AC4_PREPASS_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "39e7bc0d6ed78b8e"],
+        "publishedRows": "d3e486023b1c59c4"},
+    # One row for the whole board (the note above).
+    "follow a set without keeping mains": {
+        "published": [1, 0, "75a828aa0446b24e"],
+        "publishedRows": "e55045278764d875"},
+    # 11 -> 6: the clicks' 6 cycles are one score:set; the refill and the
+    # losers keep the recording's 5
+    "refill, stage results and losers": {
+        "cycles": 6,
+        "published": [1, 0, "aeb779a8536f78e1"],
+        "publishedRows": "923a179475b797e8"},
+    "follow another set keeping mains": {
+        "published": [1, 0, "210ec6fc922108c7"],
+        "publishedRows": "5538ec86494c3748"},
+    # 10 -> 5: the clicks' 6 cycles are one score:set; the refill keeps the
+    # recording's 4
+    "refill and stage results": {
+        "cycles": 5,
+        "published": [1, 0, "3028177daa928a85"],
+        "publishedRows": "28af489cc03bf967"},
+}
+
+S4AC4_BEST_OF_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "39e7bc0d6ed78b8e"],
+        "publishedRows": "d3e486023b1c59c4"},
+    "tracker on, best of 7 over the results": {
+        "published": [1, 0, "dbf8345310a36ce8"],
+        "publishedRows": "8afa4856d2ee6dfb"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results on the new rows": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "tracker on, best of 3": {
+        "published": [1, 0, "8e83cd6c37c95bcd"],
+        "publishedRows": "00570ec394475723"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results on every game": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "tracker on, reset the score": {
+        "published": [1, 0, "fbc0488e07857f93"],
+        "publishedRows": "3a81471b7a36b3a7"},
+    "tracker on, best of 5 again": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    "a set with a score, tracker on": {
+        "published": [1, 0, "9f45725d1768182c"],
+        "publishedRows": "bbc6242045683124"},
+    "web best of 7, tracker on": {
+        "published": [1, 0, "dbf8345310a36ce8"],
+        "publishedRows": "8afa4856d2ee6dfb"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results after the web": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "web best of 3 blanks the English round": {
+        "published": [1, 0, "67e690cbfbc36f94"],
+        "publishedRows": "a7f7ed451ced6926"},
+    "web best of over the maximum, tracker off": {
+        "published": [1, 0, "fce8174ab01ad697"],
+        "publishedRows": "efb78dcd33f983ce"},
+    "v1 best of 5, tracker on": {
+        "published": [1, 0, "a47c5e08835f8d1e"],
+        "publishedRows": "1ed36e302c5d3732"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results after v1": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "v1 best of 7 with a phase and a match": {
+        "published": [1, 0, "2d5bf469ffb30ec0"],
+        "publishedRows": "a42ebb143f65a364"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results before a set": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "a set with a best of, a round and a score": {
+        "published": [1, 0, "bace8f1f0c97f6f5"],
+        "publishedRows": "55a5cac8beeda3c9"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results after the set": {
+        "cycles": 1,
+        "published": [1, 0, "49fd6e0d3014ecc1"],
+        "publishedRows": "0d976100bb398ebb"},
+    # no reset of the rows: RepublishBestOfs writes nothing
+    "game load, tracker on": {"cycles": 1},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results after the game load": {
+        "cycles": 1,
+        "published": [1, 0, "01720f67ca3426d2"],
+        "publishedRows": "e0389635e3695a69"},
+    "web reset match, tracker on": {
+        "published": [1, 0, "7d34374bfb4cf3fc"],
+        "publishedRows": "23e651f64161b437"},
+    # 7 -> 2: the clicks' 6 cycles are one score:set; the best of keeps the
+    # recording's 1
+    "tracker on, best of 5 and stage results": {
+        "cycles": 2,
+        "published": [1, 0, "b0986752e2e58df4"],
+        "publishedRows": "5221cc0b5461107b"},
+    "web clear all, tracker on": {
+        "published": [1, 0, "b466528afb32a903"],
+        "publishedRows": "7959c151c89230f9"},
+    # 9 -> 4: the clicks' 6 cycles are one score:set; the refill and the
+    # best of keep the recording's 3
+    "refill, best of 5 and stage results": {
+        "cycles": 4,
+        "published": [1, 0, "0cd32445de01c4ef"],
+        "publishedRows": "807e451154c75fc5"},
+    "reset all inputs, tracker on": {
+        "published": [1, 0, "b91bdabbe2ad2ddb"],
+        "publishedRows": "8f95f48c70386170"},
+    # no reset of the rows: RepublishBestOfs writes nothing
+    "game load with no best of, tracker on": {"cycles": 1},
+    "tracker on, best of 3 after the resets": {
+        "published": [1, 0, "8e83cd6c37c95bcd"],
+        "publishedRows": "00570ec394475723"},
+}
+
+S4AC4_SINGLES_BEST_OF_CHANGES = {
+    "tracker on, best of 5": {
+        "published": [1, 0, "c8084779da281933"],
+        "publishedRows": "010a903ed476aeb0"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results": {
+        "cycles": 1,
+        "published": [1, 0, "083e02b7fef55025"],
+        "publishedRows": "a6a65832e9da4e3a"},
+    "tracker on, best of 7 over the results": {
+        "published": [1, 0, "a3e3258cf00efe10"],
+        "publishedRows": "9af4874853eafaaa"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results on the new rows": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "tracker on, best of 3": {
+        "published": [1, 0, "d9ae1f112f3ea060"],
+        "publishedRows": "def1695497d93964"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results on every game": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "tracker on, reset the score": {
+        "published": [1, 0, "9b7f3f95bb9785d3"],
+        "publishedRows": "32c125563964a7e2"},
+    "tracker on, best of 5 again": {
+        "published": [1, 0, "c8084779da281933"],
+        "publishedRows": "010a903ed476aeb0"},
+    "a set with a score, tracker on": {
+        "published": [1, 0, "5513f210b2d04933"],
+        "publishedRows": "770eabe34554ddef"},
+    "web best of 7, tracker on": {
+        "published": [1, 0, "a3e3258cf00efe10"],
+        "publishedRows": "9af4874853eafaaa"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results after the web": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "web best of 3 blanks the English round": {
+        "published": [1, 0, "58a2e6dde5a0dc49"],
+        "publishedRows": "3f14bc73381d57e9"},
+    "web best of over the maximum, tracker off": {
+        "published": [1, 0, "2b6cf16f8fb5c80e"],
+        "publishedRows": "478f153c287e7cdd"},
+    "v1 best of 5, tracker on": {
+        "published": [1, 0, "c8084779da281933"],
+        "publishedRows": "010a903ed476aeb0"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results after v1": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "v1 best of 7 with a phase and a match": {
+        "published": [1, 0, "8902d8249d87f12e"],
+        "publishedRows": "514d1f3b55bc26d1"},
+    # 2-1 already: score:set writes nothing, 反映 publishes nothing
+    "stage results before a set": {
+        "cycles": 0,
+        "published": [0, 0, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "a set with a best of, a round and a score": {
+        "published": [1, 0, "87fc8febf7d97c34"],
+        "publishedRows": "abb277dab783124d"},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results after the set": {
+        "cycles": 1,
+        "published": [1, 0, "84264cd77bfc7929"],
+        "publishedRows": "68935926d6b44b81"},
+    # no reset of the rows: RepublishBestOfs writes nothing
+    "game load, tracker on": {"cycles": 1},
+    # 6 -> 1: the clicks' 6 cycles are one score:set
+    "stage results after the game load": {
+        "cycles": 1,
+        "published": [1, 0, "cb1972a4490187a4"],
+        "publishedRows": "7e1d8818c0bcdcc0"},
+    "web reset match, tracker on": {
+        "published": [1, 0, "d8ec83a8b10664e4"],
+        "publishedRows": "1a93a0415ccf7619"},
+    # 7 -> 2: the clicks' 6 cycles are one score:set; the best of keeps the
+    # recording's 1
+    "tracker on, best of 5 and stage results": {
+        "cycles": 2,
+        "published": [1, 0, "40873343123364d7"],
+        "publishedRows": "32431e1b219d2816"},
+    "web clear all, tracker on": {
+        "published": [1, 0, "0536d62da5b81e8e"],
+        "publishedRows": "84803ae2c0908217"},
+    # 9 -> 4: the clicks' 6 cycles are one score:set; the refill and the
+    # best of keep the recording's 3
+    "refill, best of 5 and stage results": {
+        "cycles": 4,
+        "published": [1, 0, "8ea2cfb2c3aa3fd0"],
+        "publishedRows": "c56e3f009e9cc42e"},
+    "reset all inputs, tracker on": {
+        "published": [1, 0, "1d28ec04c73ae887"],
+        "publishedRows": "9980fca42b7505b4"},
+    # no reset of the rows: RepublishBestOfs writes nothing
+    "game load with no best of, tracker on": {"cycles": 1},
+    "tracker on, best of 3 after the resets": {
+        "published": [1, 0, "d9ae1f112f3ea060"],
+        "publishedRows": "def1695497d93964"},
+}
+
+S4AC4_UNBUILT_CHANGES = {
+    "web best of on an unbuilt team board": {
+        "during": [1, 0, "8ad78988539fac19"],
+        "published": [1, 0, "44f8650c8ef9069d"],
+        "publishedRows": "67c150d8e1ee7ec6"},
+    "v1 best of on an unbuilt singles board": {
+        "during": [1, 0, "2fd0423f6c5819e1"],
+        "published": [1, 0, "5825a539b6196658"],
+        "publishedRows": "a1b668b1cf31cebc"},
+}
+
+
 def _layered(*layers):
     """Per-step change dicts of successive migrations as one: a later
     migration's fields replace an earlier one's for the same step."""
@@ -1152,7 +1529,8 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
     published are what the pre-migration tree produced, apart from what the
     migrations changed on purpose."""
     keyOrders = []
-    recorded = _runSteps(autonaApp, board, keyOrders=keyOrders)
+    raws = []
+    recorded = _runSteps(autonaApp, board, keyOrders=keyOrders, raws=raws)
 
     if RECORD_KEY_ORDER:
         _recordKeyOrder("board operations", keyOrders)
@@ -1169,15 +1547,8 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
         S2D_CHANGES, recording), S3E3_CHANGES, recording), S3E6_CHANGES,
         recording)
               for entry in recording]
-    assert [e["step"] for e in recorded] == [e["step"] for e in golden]
-    for actual, expected in zip(recorded, golden):
-        assert actual["state"] == expected["state"], actual["step"]
-    # Before the digests: where S2c changed a step's values, its digest is
-    # this tree's own, and only the recorded key order can say the order
-    # is still the old one.
-    _assertKeyOrder("board operations", keyOrders)
-    for actual, expected in zip(recorded, golden):
-        assert actual == expected, actual["step"]
+    _assertReplayed(autonaApp, "board operations", recorded, raws, keyOrders,
+                    golden, S4AC4_CHANGES)
 
 
 def _recordKeyOrder(section, keyOrders):
@@ -1198,7 +1569,9 @@ def _assertKeyOrder(section, keyOrders):
     assert KEY_ORDER is not None and section in KEY_ORDER, (
         f"{KEY_ORDER_PATH} has no {section!r}: record it on the pre-S2c "
         "tree (see KEY_ORDER_PATH above)")
-    recording = KEY_ORDER[section]
+    recording = [{"step": e["step"],
+                  "keyOrder": _keyOrderWithoutTheRows(e["keyOrder"])}
+                 for e in KEY_ORDER[section]]
     assert [e["step"] for e in keyOrders] == [e["step"] for e in recording]
     differences = {}
     for actual, expected in zip(keyOrders, recording):
@@ -1211,6 +1584,71 @@ def _assertKeyOrder(section, keyOrders):
         if changed:
             differences[actual["step"]] = changed
     assert differences == {}
+
+
+def _keyOrderWithoutTheRows(order):
+    """A recorded key order with the game tracker's rows taken out (ADR-005
+    S4ac-4): no `stages` among the board's keys, no `stages.*` dict. The
+    other keys keep their recorded order."""
+    return {path: ([key for key in keys if key != "stages"] if path == ""
+                   else keys)
+            for path, keys in order.items()
+            if path != "stages" and not path.startswith("stages.")}
+
+
+# ── ADR-005 S4ac-4: the game tracker is gone ─────────────────────────────
+#
+# The last layer, on every recorded step (see the module docstring). What
+# it pins: the board never has a `stages` key again, everything else the
+# recordings hold is unchanged (state, key order, and the state digest with
+# the recorded rows put back), and the cycles and publication differ only
+# where the S4AC4_* tables below say so.
+
+def _withTheRecordedRows(raw, rows, order):
+    """`raw` (a board subtree as this tree leaves it) with the recorded game
+    rows `rows` put back where the recorded key order `order` had them: what
+    the tree with the game tracker held, byte for byte, if nothing else
+    moved."""
+    if rows is None:
+        return raw
+    table = {number: {key: rows[number][key]
+                      for key in order[f"stages.{number}"]}
+             for number in order["stages"]}
+    return {key: (table if key == "stages" else raw[key])
+            for key in order[""]}
+
+
+def _assertReplayed(app, section, recorded, raws, keyOrders, golden,
+                    changes):
+    """`recorded` against `golden` (the recording with every earlier
+    migration's layer applied), with the S4ac-4 layer applied last: no rows
+    in the expected state or key order, the state digest checked with the
+    recorded rows put back, and `changes` (that section's S4AC4_* table) for
+    the steps whose cycles or publication moved."""
+    recording = golden
+    expectedRows = []
+    expected = []
+    for entry in golden:
+        entry = json.loads(json.dumps(entry))
+        expectedRows.append(entry["state"].pop("stages", None))
+        expected.append(_withChanges(entry, changes, recording))
+    assert [e["step"] for e in recorded] == [e["step"] for e in expected]
+    assert all("stages" not in raw for raw in raws), (
+        "a board has the game tracker's rows again")
+    for actual, wanted in zip(recorded, expected):
+        assert actual["state"] == wanted["state"], actual["step"]
+    # Before the digests, as everywhere: only the recorded key order can say
+    # the order of a step whose digest is this tree's own is the old one.
+    _assertKeyOrder(section, keyOrders)
+    orders = KEY_ORDER[section]
+    for actual, raw, wanted, rows, order in zip(
+            recorded, raws, expected, expectedRows, orders):
+        rebuilt = _withTheRecordedRows(raw, rows, order["keyOrder"])
+        assert digest(_normalise(encode(rebuilt), app)) \
+            == wanted["stateDigest"], actual["step"]
+        wanted["stateDigest"] = actual["stateDigest"]
+    for actual, wanted in zip(recorded, expected):
+        assert actual == wanted, actual["step"]
 
 
 @pytest.fixture
@@ -1231,8 +1669,9 @@ def test_swap_operations_publish_the_recorded_state(
     purpose (S2C_SWAP_CHANGES), and the statistics fetched once per
     operation."""
     keyOrders = []
+    raws = []
     recorded = _runSteps(autonaApp, board, steps=_swapSteps(board),
-                         stats=True, keyOrders=keyOrders)
+                         stats=True, keyOrders=keyOrders, raws=raws)
 
     if RECORD_KEY_ORDER:
         _recordKeyOrder("swap operations", keyOrders)
@@ -1251,15 +1690,8 @@ def test_swap_operations_publish_the_recorded_state(
         entry, S2C_SWAP_CHANGES, recording), S3E6_SWAP_CHANGES, recording),
         S4T_SWAP_CHANGES, recording)
               for entry in recording]
-    assert [e["step"] for e in recorded] == [e["step"] for e in golden]
-    for actual, expected in zip(recorded, golden):
-        assert actual["state"] == expected["state"], actual["step"]
-    # Before the digests: where S2c changed a step's values, its digest is
-    # this tree's own, and only the recorded key order can say the order
-    # is still the old one.
-    _assertKeyOrder("swap operations", keyOrders)
-    for actual, expected in zip(recorded, golden):
-        assert actual == expected, actual["step"]
+    _assertReplayed(autonaApp, "swap operations", recorded, raws, keyOrders,
+                    golden, S4AC4_SWAP_CHANGES)
 
 
 def _recordClearGolden(section, recorded, path=CLEAR_GOLDEN_PATH):
@@ -1275,16 +1707,18 @@ def _recordClearGolden(section, recorded, path=CLEAR_GOLDEN_PATH):
 
 def _replayClears(app, board, steps, section, keyOrderSection, changes,
                   path=CLEAR_GOLDEN_PATH, tree="pre-S2d tree (2045c973)",
-                  selector="clear_operations"):
+                  selector="clear_operations", trackerChanges=None):
     """`steps` against the pre-S2d recording `section` of clear_golden.json:
     the same state (key order included), cycles, publication and
-    statistics fetches, apart from `changes`.
+    statistics fetches, apart from `changes` and, last, the S4ac-4 layer
+    with `trackerChanges` (_assertReplayed).
 
     The best-of recordings (ADR-005 S2e) are replayed the same way from
     their own file (`path`, recorded on `tree`)."""
     keyOrders = []
+    raws = []
     recorded = _runSteps(app, board, steps=steps, stats=True,
-                         keyOrders=keyOrders)
+                         keyOrders=keyOrders, raws=raws)
 
     if RECORD_KEY_ORDER:
         _recordKeyOrder(keyOrderSection, keyOrders)
@@ -1300,12 +1734,8 @@ def _replayClears(app, board, steps, section, keyOrderSection, changes,
     recording = golden[section]
     golden = [_withChanges(entry, changes, recording)
               for entry in recording]
-    assert [e["step"] for e in recorded] == [e["step"] for e in golden]
-    for actual, expected in zip(recorded, golden):
-        assert actual["state"] == expected["state"], actual["step"]
-    _assertKeyOrder(keyOrderSection, keyOrders)
-    for actual, expected in zip(recorded, golden):
-        assert actual == expected, actual["step"]
+    _assertReplayed(app, keyOrderSection, recorded, raws, keyOrders, golden,
+                    trackerChanges or {})
 
 
 def test_clear_operations_publish_the_recorded_state(
@@ -1314,7 +1744,8 @@ def test_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
                   "operations", "clear operations",
                   _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES,
-                           S3E6_CLEAR_CHANGES, S4T_CLEAR_CHANGES))
+                           S3E6_CLEAR_CHANGES, S4T_CLEAR_CHANGES),
+                  trackerChanges=S4AC4_CLEAR_CHANGES)
 
 
 @pytest.fixture
@@ -1331,7 +1762,8 @@ def test_singles_clear_operations_publish_the_recorded_state(
                   "singles", "singles clear operations",
                   _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES,
                            S3E6_SINGLES_CLEAR_CHANGES,
-                           S4T_SINGLES_CLEAR_CHANGES))
+                           S4T_SINGLES_CLEAR_CHANGES),
+                  trackerChanges=S4AC4_SINGLES_CLEAR_CHANGES)
 
 
 def test_set_load_prepass_clear_operations_publish_the_recorded_state(
@@ -1340,7 +1772,8 @@ def test_set_load_prepass_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _prepassSteps(board),
                   "prepass", "set load pre-pass",
                   _layered(S2D_PREPASS_CHANGES, S2E_PREPASS_CHANGES,
-                           S3E6_PREPASS_CHANGES, S4T_PREPASS_CHANGES))
+                           S3E6_PREPASS_CHANGES, S4T_PREPASS_CHANGES),
+                  trackerChanges=S4AC4_PREPASS_CHANGES)
 
 
 # ── the best of (ADR-005 S2e) ────────────────────────────────────────────
@@ -1349,9 +1782,9 @@ def test_set_load_prepass_clear_operations_publish_the_recorded_state(
 # six keys and rebuilt the game tracker's rows, and every other entry point
 # (a set load, the Web's set_route / reset_match / clear_all, /api/v1's
 # PATCH set, a game load, the reset-all button) drove that spinbox. S2e makes
-# it a core operation (AutonaActions.SetBestOf) that resizes the rows in the
+# it a core operation (AutonaActions.SetBestOf) that resized the rows in the
 # same cycle (the spinbox and the rows rendered the state until ADR-005
-# S4ac-3 removed them). Recorded on the
+# S4ac-3 removed them; the rows went in S4ac-4). Recorded on the
 # last pre-S2e tree (79da38bf) with `-k best_of_operations`, one section per
 # test in best_of_golden.json, the key order in key_order.json.
 
@@ -1366,19 +1799,17 @@ def _v1Set(client, number, body):
 
 
 def _bestOfSteps(board, app, client):
-    """Every way the set length is set, on a board with the game tracker on
-    and off: the spinbox, a set load, the Web's set_route (a number and a
-    query string), /api/v1's PATCH set, a game load, the Web's resets and
-    the reset-all button -- with game results recorded in between, so that
-    a step that rebuilt the rows (or did not) shows."""
+    """Every way the set length is set: the spinbox, a set load, the Web's
+    set_route (a number and a query string), /api/v1's PATCH set, a game
+    load, the Web's resets and the reset-all button. Recorded on a board
+    with the game tracker on and off and with game results clicked in
+    between, so that a step that rebuilt the rows (or did not) showed; the
+    clicks are the score they came to now (_resultsScore)."""
     actions = app.web()
     number = board
 
     def spin(value):
         return lambda: _setBestOf(board, value)
-
-    def tracked(operation):
-        return lambda: _withTracker(operation)
 
     def web(**query):
         return lambda: actions.set_route(number, **query)
@@ -1399,59 +1830,57 @@ def _bestOfSteps(board, app, client):
         ("the same best of", spin(5)),
         ("best of 0", spin(0)),
         ("best of over the maximum", spin(150)),
-        ("tracker on, best of 5", tracked(spin(5))),
-        ("stage results", lambda: _stageResults(board)),
-        ("tracker on, best of 7 over the results", tracked(spin(7))),
-        ("stage results on the new rows", lambda: _stageResults(board)),
-        ("tracker on, best of 3", tracked(spin(3))),
-        ("stage results on every game", lambda: _stageResults(board)),
+        ("tracker on, best of 5", spin(5)),
+        ("stage results", lambda: _resultsScore(board, 2, 1)),
+        ("tracker on, best of 7 over the results", spin(7)),
+        ("stage results on the new rows", lambda: _resultsScore(board, 2, 1)),
+        ("tracker on, best of 3", spin(3)),
+        ("stage results on every game", lambda: _resultsScore(board, 2, 1)),
         ("a point on a full set", lambda: _score(board, 1, 1)),
         ("tracker on, reset the score",
-         tracked(lambda: AutonaActions.instance.ResetScore(board))),
-        ("tracker on, best of 5 again", tracked(spin(5))),
-        ("a set with a score, tracker on", tracked(lambda: apply_set(board,
-            {"team1score": 2, "team2score": 1}))),
-        ("web best of 7, tracker on", tracked(web(bestOf=7))),
-        ("stage results after the web", lambda: _stageResults(board)),
-        ("web same best of, tracker on", tracked(web(bestOf="7"))),
-        ("web best of 0 is not carried", tracked(web(bestOf=0))),
+         lambda: AutonaActions.instance.ResetScore(board)),
+        ("tracker on, best of 5 again", spin(5)),
+        ("a set with a score, tracker on", lambda: apply_set(board,
+            {"team1score": 2, "team2score": 1})),
+        ("web best of 7, tracker on", web(bestOf=7)),
+        ("stage results after the web", lambda: _resultsScore(board, 2, 1)),
+        ("web same best of, tracker on", web(bestOf="7")),
+        ("web best of 0 is not carried", web(bestOf=0)),
         ("a match bar", lambda: apply_set(board, dict(_SET_MATCH_BAR))),
-        ("web best of 3 blanks the English round",
-         tracked(web(bestOf="3"))),
+        ("web best of 3 blanks the English round", web(bestOf="3")),
         ("web best of over the maximum, tracker off", web(bestOf=150)),
-        ("v1 best of 5, tracker on", tracked(v1({"bestOf": 5}))),
-        ("stage results after v1", lambda: _stageResults(board)),
-        ("v1 best of 7 with a phase and a match", tracked(v1(
-            {"bestOf": 7, "phase": "Top 8", "match": "Grand Final"}))),
-        ("v1 best of 0 is not carried", tracked(v1({"bestOf": 0}))),
-        ("stage results before a set", lambda: _stageResults(board)),
+        ("v1 best of 5, tracker on", v1({"bestOf": 5})),
+        ("stage results after v1", lambda: _resultsScore(board, 2, 1)),
+        ("v1 best of 7 with a phase and a match", v1(
+            {"bestOf": 7, "phase": "Top 8", "match": "Grand Final"})),
+        ("v1 best of 0 is not carried", v1({"bestOf": 0})),
+        ("stage results before a set", lambda: _resultsScore(board, 2, 1)),
         ("a set with a best of, a round and a score",
-         tracked(lambda: apply_set(board, {
+         lambda: apply_set(board, {
              "bestOf": 5, "round_name": "Losers Final",
-             "team1score": 1, "team2score": 2}))),
-        ("stage results after the set", lambda: _stageResults(board)),
-        ("a set with the same best of", tracked(lambda: apply_set(board,
-            {"bestOf": 5, "round_name": "Losers Final"}))),
-        ("a set with best of 0", tracked(lambda: apply_set(board,
-            {"bestOf": 0, "round_name": "Losers Final"}))),
-        ("game load, tracker on", tracked(_gameLoaded)),
+             "team1score": 1, "team2score": 2})),
+        # The rows the set left were T2 on game 1, so the click there took
+        # it back: 2-0.
+        ("stage results after the set", lambda: _resultsScore(board, 2, 0)),
+        ("a set with the same best of", lambda: apply_set(board,
+            {"bestOf": 5, "round_name": "Losers Final"})),
+        ("a set with best of 0", lambda: apply_set(board,
+            {"bestOf": 0, "round_name": "Losers Final"})),
+        ("game load, tracker on", _gameLoaded),
         ("stage results after the game load",
-         lambda: _stageResults(board)),
+         lambda: _resultsScore(board, 2, 1)),
         ("web reset match, tracker on",
-         tracked(lambda: actions.reset_match(number))),
+         lambda: actions.reset_match(number)),
         ("tracker on, best of 5 and stage results",
-         tracked(lambda: (_setBestOf(board, 5), _stageResults(board)))),
-        ("web clear all, tracker on",
-         tracked(lambda: actions.clear_all(number))),
+         lambda: (_setBestOf(board, 5), _resultsScore(board, 2, 1))),
+        ("web clear all, tracker on", lambda: actions.clear_all(number)),
         ("refill, best of 5 and stage results",
-         tracked(lambda: (_fillBoth(board), _setBestOf(board, 5),
-                          _stageResults(board)))),
-        ("reset all inputs, tracker on",
-         tracked(lambda: _resetAll(board))),
+         lambda: (_fillBoth(board), _setBestOf(board, 5),
+                  _resultsScore(board, 2, 1))),
+        ("reset all inputs, tracker on", lambda: _resetAll(board)),
         ("reset all inputs again", lambda: _resetAll(board)),
-        ("game load with no best of, tracker on",
-         tracked(_gameLoaded)),
-        ("tracker on, best of 3 after the resets", tracked(spin(3))),
+        ("game load with no best of, tracker on", _gameLoaded),
+        ("tracker on, best of 3 after the resets", spin(3)),
     ]
 
 
@@ -1498,7 +1927,8 @@ def test_best_of_operations_publish_the_recorded_state(
                   _layered(S2E_CHANGES, S3E6_BEST_OF_CHANGES,
                            S4T_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH, tree=BEST_OF_TREE,
-                  selector="best_of_operations")
+                  selector="best_of_operations",
+                  trackerChanges=S4AC4_BEST_OF_CHANGES)
 
 
 def test_singles_best_of_operations_publish_the_recorded_state(
@@ -1510,7 +1940,8 @@ def test_singles_best_of_operations_publish_the_recorded_state(
                   _layered(S2E_SINGLES_CHANGES, S3E6_SINGLES_BEST_OF_CHANGES,
                            S4T_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH,
-                  tree=BEST_OF_TREE, selector="best_of_operations")
+                  tree=BEST_OF_TREE, selector="best_of_operations",
+                  trackerChanges=S4AC4_SINGLES_BEST_OF_CHANGES)
 
 
 def test_best_of_operations_on_a_board_just_made_publish_the_recorded_state(
@@ -1533,7 +1964,7 @@ def test_best_of_operations_on_a_board_just_made_publish_the_recorded_state(
         def step():
             assert AutonaActions.instance.EnsureBoard(number, panel=True)
             route()
-        return lambda: _withTracker(step)
+        return step
 
     steps = [
         ("web best of on an unbuilt team board", 2,
@@ -1550,6 +1981,7 @@ def test_best_of_operations_on_a_board_just_made_publish_the_recorded_state(
 
     recorded = []
     keyOrders = []
+    raws = []
     for name, number, step in steps:
         prefix = f"score.{number}"
         assert not AutonaActions.instance.BoardEnsured(number)
@@ -1561,6 +1993,7 @@ def test_best_of_operations_on_a_board_just_made_publish_the_recorded_state(
                             digest(_normalise(during.encoded(sortKeys=True),
                                               autonaApp))]}
         entry.update(_boardState(autonaApp, prefix))
+        raws.append(_boardSubtree(prefix))
         keyOrders.append({"step": name, "keyOrder": _boardKeyOrder(prefix)})
         assert AutonaActions.instance.BoardEnsured(number)
         with _Published() as published:
@@ -1585,8 +2018,8 @@ def test_best_of_operations_on_a_board_just_made_publish_the_recorded_state(
         f"{BEST_OF_GOLDEN_PATH} has no 'unbuilt': it is recorded on the "
         f"{BEST_OF_TREE} with AUTONA_RECORD_BOARD_OPERATIONS=1 "
         "-k best_of_operations")
-    _assertKeyOrder("unbuilt best of operations", keyOrders)
-    assert recorded == golden["unbuilt"]
+    _assertReplayed(autonaApp, "unbuilt best of operations", recorded, raws,
+                    keyOrders, golden["unbuilt"], S4AC4_UNBUILT_CHANGES)
 
 
 # The steps that are one operation in one save cycle. The others were a

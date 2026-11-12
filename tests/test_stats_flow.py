@@ -33,6 +33,11 @@ ApplyData / ClearSlot, the seed spinbox SetSeed(announce=True), the board's
 SWAP / move / すべての入力値をリセット AutonaActions.SwapTeams / SwapPlayers and v1's
 :reset-all. Their fetches, writes and deltas are the recording's.
 
+ADR-005 S4ac-4 removed the game tracker's rows, `score.{n}.stages`, which
+the recording holds empty: in a board published whole (a delta row that
+carries the whole board) and among each board's keys. _withoutTheRows takes
+exactly those out of the recording; everything else is compared as before.
+
 Record (on the pre-S3e-5 tree only):
 
     AUTONA_RECORD_STATS=1 python -m pytest tests/test_stats_flow.py
@@ -267,6 +272,18 @@ _ADDED_RESPONSES = {
 }
 
 
+def _withoutTheRows(recording):
+    """The recording without the game tracker's empty rows (ADR-005
+    S4ac-4): the key in a published board and among each board's keys."""
+    steps = [dict(step, deltas=[d.replace(', "stages": {}', "")
+                                for d in step["deltas"]])
+             for step in recording["steps"]]
+    boards = {number: dict(board, keys=[key for key in board["keys"]
+                                        if key != "stages"])
+              for number, board in recording["boards"].items()}
+    return dict(recording, steps=steps, boards=boards)
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -278,7 +295,8 @@ def _check(name, recorded):
             json.dumps(golden, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
+    golden = _withoutTheRows(
+        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name])
     expectedSteps = [
         dict(step, responses=step["responses"]
              + _ADDED_RESPONSES.get((name, step["step"]), []))

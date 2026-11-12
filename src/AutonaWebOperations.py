@@ -446,61 +446,6 @@ def apply_changes(scoreboard):
     return "OK"
 
 
-# What update_stage refuses. The route says what each one means.
-STAGE_NO_ROWS = "no_rows"
-STAGE_NO_SUCH_GAME = "no_such_game"
-STAGE_UNKNOWN = "unknown_stage"
-
-
-def update_stage(scoreboard, game, fields):
-    """One game row of board 1/2 (`game`: 1-based, the state's key). Some of
-    `winner` (GameTrackerService's UNREPORTED / TIE / TEAM_1 / TEAM_2: already
-    validated) and `stage` (a stage's en_name, GameAssetCatalog.StageRow; None
-    empties it, as the combo's blank row), in one save cycle: None, or the
-    refusal, with nothing written.
-
-    A result moves the team scores to what the rows add up to, as a click on
-    the tracker's buttons does (PublishStageResults); it takes two cycles
-    there, and one here. Pure state, like set_scores: the board follows from
-    the held cycle, and the rows are the state's whatever the tracker's
-    setting says now (it only decides how many SetBestOf makes). The same
-    value again is not a write: on a held board it would light 反映 for
-    nothing, and a result would sum the score over a +1 made since.
-
-    The stage is resolved under the lock, against one snapshot, as
-    Top8Service.UpdatePlayer resolves its picks: a game load swaps the
-    snapshot and only then starts the rows over (RepublishBestOfs, under this
-    lock), so a stage read off one game is never written to the rows of the
-    next.
-    """
-    boardHost.Prepare(scoreboard)
-    board = _board(scoreboard)
-    tracker = AutonaActions.instance.GameTracker(board)
-    row = f"score.{board}.stages.{game}"
-    with StateManager.lock:
-        count = tracker.StageCount()
-        if count == 0:
-            return STAGE_NO_ROWS
-        if game > count:
-            return STAGE_NO_SUCH_GAME
-        asset = None
-        if fields.get("stage") is not None:
-            catalog = GameAssetCatalog.instance
-            asset = catalog.StageRow(fields["stage"],
-                                     snapshot=catalog.Current())
-            if asset is None:
-                return STAGE_UNKNOWN
-        with StateManager.SaveBlock():
-            if "stage" in fields and fields["stage"] != StateManager.Get(
-                    f"{row}.en_name"):
-                tracker.SetStageAsset(game - 1, asset or {})
-            if ("winner" in fields
-                    and fields["winner"] != tracker.GameWinner(game - 1)):
-                tracker.SetStageResult(game - 1, fields["winner"])
-                tracker.PublishStageResults()
-    return None
-
-
 # ── readers ──────────────────────────────────────────────────────────────
 # The game asset readers read the Qt-free catalog (ADR-005 S1b), each
 # payload from one reference the catalog takes once, so a load or rescan
@@ -535,10 +480,6 @@ def get_characters():
 
 def get_variants():
     return GameAssetCatalog.instance.VariantsPayload()
-
-
-def get_stages():
-    return GameAssetCatalog.instance.StagesPayload()
 
 
 def get_comms():
@@ -1431,11 +1372,10 @@ def _apply_set_fields(host, scoreboard, payload):
     SetLoadService.ApplyMatchInfo), a best of (AutonaActions.SetBestOf, S2e;
     0 is not carried -- SetLoadService.BestOfFromSetData) and a losers flag
     (ApplyLosers). The board is prepared first, so on the desktop the write
-    waits for 反映 like any other and a best of resizes the board's game rows
-    with it. The crew board reads the payload by its own rules
-    (CrewBattleService.ApplySetData, S3e-2). Any other board has none to
-    apply it to: refused before anything is written (NotAvailable), as the
-    counts are. It was emitted on that board's signal: the headless host
+    waits for 反映 like any other. The crew board reads the payload by its
+    own rules (CrewBattleService.ApplySetData, S3e-2). Any other board has
+    none to apply it to: refused before anything is written (NotAvailable),
+    as the counts are. It was emitted on that board's signal: the headless host
     refused it the same way, and the desktop failed on the board it does
     not have (500).
     """

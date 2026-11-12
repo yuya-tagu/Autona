@@ -4,8 +4,6 @@ What the React SCORE page will read and write through, added to /api/v1 with
 the Qt panel still there:
 
 - ``GET   /api/v1/scoreboards/{n}/pending``     the live values of a held board
-- ``GET   /api/v1/stages``                      what a game row can be set to
-- ``PATCH /api/v1/scoreboards/{n}/stages/{g}``  one game row
 - ``POST  .../teams/{t}/players/{p}:clear``     one slot
 - ``POST  .../teams/{t}/players:swap``          a card's move up / down
 - ``POST  /api/v1/scoreboards/{n}:reset-all``   the desktop's すべての入力値をリセット
@@ -15,6 +13,10 @@ Through Flask's test client against the real route table, on both shells where
 the operation is theirs alike: the desktop's real boards and the headless host.
 Added only: the published view (GET /scoreboards/{n}, /state, program_state,
 out/) keeps its meaning, which is pinned first (ADR-005 D4).
+
+``GET /api/v1/stages`` and ``PATCH /api/v1/scoreboards/{n}/stages/{g}`` (one
+game row) went with the game tracker in S4ac-4: their absence is pinned in
+tests/test_web_panel_host.py.
 """
 import contextlib
 import copy
@@ -29,16 +31,13 @@ from src.AutonaWebServer import WebServer
 from src.core import StateSchema as schema
 from src.core import WebAccess
 from src.core.Actions import AutonaActions
-from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.SetLoadService import SetLoadService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from src.core.TournamentInfoService import TournamentInfoService
 from tests.fixtures.write_recording import WriteRecorder
 from tests.test_api_v1 import (  # noqa: F401
-    _assertRejected, _requestOnWorkerThread, client, webApp)
-from tests.test_game_asset_manager_models import (  # noqa: F401
-    GOLDEN, _load, goldenGames)
+    _assertRejected, client, webApp)
 
 from tests.test_web_access import LAN_HOST, LAN_HOST_2, LAN_PEER
 from tests.test_web_operations import _goHeadless
@@ -388,331 +387,6 @@ def test_reading_a_launched_board_writes_nothing(launchedBoards, client, n):
     assert StateManager.revision == revision
 
 
-# ── game rows ────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def trackerOn(monkeypatch):
-    # The tracker ships disabled. The lookup, not the process-global setting
-    # (as tests/test_scoreboard_operations.py does).
-    realGet = SettingsManager.Get
-    monkeypatch.setattr(SettingsManager, "Get", staticmethod(
-        lambda key, default=None:
-            False if key == "general.disable_individual_game_tracker"
-            else realGet(key, default)))
-
-
-@pytest.fixture
-def rows(goldenGames, trackerOn, shell, autonaApp):
-    """Three game rows on board 1 with a game that has stages, nothing to
-    反映."""
-    _load(goldenGames, "tgame")
-    AutonaActions.instance.SetBestOf(1, 3)
-    AutonaActions.instance.ApplyChanges(1)
-    autonaApp.settle()
-    return shell
-
-
-def _stage(client, game, body, n=1):
-    return client.patch(f"/api/v1/scoreboards/{n}/stages/{game}", json=body)
-
-
-def _row(game, n=1):
-    return StateManager.Get(f"score.{n}.stages.{game}")
-
-
-def _flags(game):
-    row = _row(game)
-    return (bool(row.get("t1_win")), bool(row.get("t2_win")),
-            bool(row.get("tie")))
-
-
-def _scores(n=1):
-    return (StateManager.Get(f"score.{n}.team.1.score"),
-            StateManager.Get(f"score.{n}.team.2.score"))
-
-
-def test_a_winner_moves_the_row_and_the_scores_in_one_cycle(
-        autonaApp, client, rows):
-    with _cycles() as told:
-        _ok(_stage(client, 1, {"winner": 1}))
-        autonaApp.settle()
-    _oneCycle(told)
-    assert _flags(1) == (True, False, False)
-    assert _scores() == (1, 0)
-
-    _ok(_stage(client, 2, {"winner": 2}))
-    assert _flags(2) == (False, True, False)
-    assert _scores() == (1, 1)
-
-    _ok(_stage(client, 3, {"winner": "tie"}))
-    assert _flags(3) == (False, False, True)
-    assert _scores() == (1, 1)
-
-    # null: not played, and the score falls back with it.
-    _ok(_stage(client, 1, {"winner": None}))
-    assert _flags(1) == (False, False, False)
-    assert _scores() == (0, 1)
-    autonaApp.settle()
-
-
-def test_a_stage_and_a_winner_are_one_cycle_and_keep_each_other(
-        autonaApp, client, rows):
-    with _cycles() as told:
-        _ok(_stage(client, 2, {"stage": "Battlefield", "winner": 1}))
-        autonaApp.settle()
-    _oneCycle(told)
-    assert _row(2)["en_name"] == "Battlefield"
-    assert _flags(2) == (True, False, False)
-
-    # The stage alone keeps the result, and the result alone keeps the stage.
-    _ok(_stage(client, 2, {"stage": "Final Destination"}))
-    assert _row(2)["en_name"] == "Final Destination"
-    assert _flags(2) == (True, False, False)
-    _ok(_stage(client, 2, {"winner": 2}))
-    assert _row(2)["en_name"] == "Final Destination"
-    assert _flags(2) == (False, True, False)
-
-    _ok(_stage(client, 2, {"stage": None}))
-    assert "en_name" not in _row(2)
-    assert _flags(2) == (False, True, False)
-    autonaApp.settle()
-
-
-# What the Qt row's stage combo wrote, which a v1 stage write was compared
-# against until the combo went with the Qt SCORE (ADR-005 S4ac-3): the
-# QVariantMap's key order, program_state.json's and the delta's bytes (the
-# identifier rule of python-widgets.md). Frozen from that comparison.
-STAGE_ROWS = {
-    "Final Destination": (
-        '{"codename": "fd", "display_name": "Final Destination", '
-        '"en_name": "Final Destination", "name": "Final Destination", '
-        '"path": "./user_data/games/tgame/stage_icon/stage_fd.png", '
-        '"smashgg_id": 328, "t1_win": false, "t2_win": false, "tie": false}'),
-    "Smashville": (
-        '{"codename": "smashville", "display_name": "\\u5c0f\\u93ae", '
-        '"en_name": "Smashville", "locale": {"zh": "\\u5c0f\\u93ae"}, '
-        '"name": "Smashville", '
-        '"path": "./user_data/games/tgame/stage_icon/stage_smashville.png", '
-        '"smashgg_id": 484, "t1_win": false, "t2_win": false, "tie": false}'),
-    "Battlefield": (
-        '{"codename": "battlefield", "display_name": "\\u6230\\u5834", '
-        '"en_name": "Battlefield", '
-        '"locale": {"ja": "\\u6226\\u5834", "zh_TW": "\\u6230\\u5834"}, '
-        '"name": "\\u6226\\u5834", '
-        '"path": "./user_data/games/tgame/stage_icon/stage_battlefield.png", '
-        '"smashgg_id": 311, "t1_win": false, "t2_win": false, "tie": false}'),
-    None: '{"t1_win": false, "t2_win": false, "tie": false}',
-}
-
-
-def test_a_stage_writes_what_the_rows_combo_wrote(
-        autonaApp, client, goldenGames, trackerOn):
-    _load(goldenGames, "tgame")
-    autonaApp.ready(1)
-    AutonaActions.instance.SetBestOf(1, 3)
-    autonaApp.settle()
-
-    # Battlefield has the nested `locale` the copy has to order too.
-    for enName in ("Final Destination", "Smashville", "Battlefield", None):
-        _ok(_stage(client, 2, {"stage": enName}))
-        autonaApp.settle()
-        assert json.dumps(_row(2)) == STAGE_ROWS[enName], enName
-
-
-def test_a_result_written_on_a_request_thread_waits_for_apply(
-        autonaApp, client, goldenGames, trackerOn):
-    # On a request's own thread, as Flask runs it. The Qt board drew the
-    # buttons and the score from the held cycle until ADR-005 S4ac-3.
-    _load(goldenGames, "tgame")
-    autonaApp.ready(1)
-    AutonaActions.instance.SetBestOf(1, 3)
-    AutonaActions.instance.ApplyChanges(1)
-    autonaApp.settle()
-
-    def write(game, winner):
-        response, = _requestOnWorkerThread(
-            lambda: [_stage(client, game, {"winner": winner})])
-        _ok(response)
-        autonaApp.settle()
-
-    write(1, 1)
-    assert _flags(1) == (True, False, False)
-    assert _scores() == (1, 0)
-    assert _pending(client)["dirty"] is True
-    # Nothing published until 反映.
-    assert _published(client)["stages"]["1"].get("t1_win") in (False, None)
-
-    write(2, 2)
-    assert _flags(2) == (False, True, False)
-    assert _scores() == (1, 1)
-
-    write(3, "tie")
-    assert _flags(3) == (False, False, True)
-    assert _scores() == (1, 1)
-
-    write(2, None)
-    assert _flags(2) == (False, False, False)
-    assert _scores() == (1, 0)
-
-    _apply(client)
-    autonaApp.settle()
-    assert _pending(client)["dirty"] is False
-    assert _published(client)["stages"]["1"]["t1_win"] is True
-
-
-def test_a_game_load_cannot_land_between_a_stage_and_its_row(
-        autonaApp, client, rows, monkeypatch):
-    # Read off the old game outside the lock, the row would be written after
-    # the load started the rows over: the old game's stage on the new game's
-    # row. What a load does there, from its thread, right after the read.
-    catalog = GameAssetCatalog.instance
-    stageRow = catalog.StageRow
-    load = threading.Thread(target=AutonaActions.instance.RepublishBestOfs,
-                            daemon=True)
-    snapshots = []
-
-    def resolved(enName, snapshot=None):
-        snapshots.append(snapshot)
-        row = stageRow(enName, snapshot=snapshot)
-        load.start()
-        load.join(0.2)
-        return row
-
-    monkeypatch.setattr(catalog, "StageRow", resolved)
-    _ok(_stage(client, 1, {"stage": "Battlefield"}))
-    load.join(30)
-    assert not load.is_alive()
-    autonaApp.settle()
-
-    assert len(snapshots) == 1 and snapshots[0] is catalog.Current()
-    # It waited for the write, and the rows it started over took the stage.
-    assert "en_name" not in _row(1)
-
-
-def test_a_game_row_on_a_new_board(autonaApp, client, goldenGames, trackerOn):
-    _load(goldenGames, "tgame")
-    autonaApp.ready(2)
-
-    # A new board has no set length, so no rows. (Until ADR-005 S4ac-3 the
-    # route also built a board core did not have, which only a test's
-    # harness could bring about.)
-    _assertRejected(_stage(client, 1, {"winner": 1}, n=2), "NOT_READY", 409)
-    assert "score.2" in StateManager.heldPrefixes
-    assert _pending(client, 2)["dirty"] is False
-
-    # With a length it has rows, and what is written there waits for 反映.
-    _ok(client.patch("/api/v1/scoreboards/2/set", json={"bestOf": 3}))
-    _apply(client, 2)
-    autonaApp.settle()
-    _ok(_stage(client, 1, {"winner": 1}, n=2))
-    autonaApp.settle()
-
-    pending = _pending(client, 2)
-    assert (pending["held"], pending["dirty"]) == (True, True)
-    assert pending["board"]["stages"]["1"]["t1_win"] is True
-    assert _published(client, 2)["stages"]["1"].get("t1_win") in (False, None)
-
-
-def test_with_the_teams_swapped_a_winner_is_the_states_team(autonaApp, client,
-                                                            rows):
-    _ok(client.post("/api/v1/scoreboards/1:swap-teams"))
-    autonaApp.settle()
-    assert StateManager.Get("score.1.teamsSwapped") is True
-
-    _ok(_stage(client, 1, {"winner": 1}))
-
-    assert _flags(1) == (True, False, False)
-    assert _scores() == (1, 0)
-    autonaApp.settle()
-
-
-def test_the_same_value_again_is_not_a_write(autonaApp, client, goldenGames,
-                                             trackerOn):
-    _load(goldenGames, "tgame")
-    autonaApp.ready(1)
-    AutonaActions.instance.SetBestOf(1, 3)
-    autonaApp.settle()
-    _ok(_stage(client, 1, {"winner": 1, "stage": "Battlefield"}))
-    _apply(client)
-    autonaApp.settle()
-    assert _pending(client)["dirty"] is False
-
-    with _cycles() as told:
-        _ok(_stage(client, 1, {"winner": 1, "stage": "Battlefield"}))
-        _ok(_stage(client, 2, {"winner": None, "stage": None}))
-        autonaApp.settle()
-
-    assert told == []
-    assert _pending(client)["dirty"] is False
-
-    # And the score is not summed over a +1 made since.
-    _ok(client.post("/api/v1/scoreboards/1/teams/2/score:adjust",
-                    json={"delta": 1}))
-    autonaApp.settle()
-    score = _scores()
-    _ok(_stage(client, 1, {"winner": 1}))
-    assert _scores() == score
-
-
-@pytest.mark.parametrize("body", [
-    {}, {"unknown": 1}, {"winner": 1, "unknown": 1},
-    {"winner": 3}, {"winner": 0}, {"winner": True}, {"winner": "1"},
-    {"winner": 1.0}, {"winner": []}, {"winner": {}},
-    {"stage": 1}, {"stage": ""}, {"stage": True}, {"stage": []},
-])
-def test_a_body_that_says_nothing_valid_writes_nothing(
-        autonaApp, client, rows, body):
-    before = copy.deepcopy(StateManager.Get("score.1"))
-    _assertRejected(_stage(client, 1, body))
-    assert StateManager.Get("score.1") == before
-
-
-def test_the_refusals_write_nothing(autonaApp, client, rows):
-    before = copy.deepcopy(StateManager.Get("score.1"))
-
-    # No such game, the game's number, an unknown stage.
-    _assertRejected(_stage(client, 4, {"winner": 1}), "NOT_FOUND", 404)
-    _assertRejected(_stage(client, 0, {"winner": 1}))
-    _assertRejected(_stage(client, 1, {"stage": "Nowhere", "winner": 1}))
-    # Boards 1/2 have rows: the crew board has none, and no board 4 exists.
-    _assertRejected(_stage(client, 1, {"winner": 1}, n=3))
-    _assertRejected(_stage(client, 1, {"winner": 1}, n=4))
-
-    assert StateManager.Get("score.1") == before
-
-
-def test_without_rows_the_answer_says_so(autonaApp, client, shell):
-    # The tracker off (as shipped), so a set length makes no rows. A set with
-    # no best of on the tracker turned on answers the same.
-    AutonaActions.instance.SetBestOf(1, 3)
-    autonaApp.settle()
-    before = copy.deepcopy(StateManager.Get("score.1"))
-
-    _assertRejected(_stage(client, 1, {"winner": 1}), "NOT_READY", 409)
-    # The unknown stage is a question only rows could answer.
-    _assertRejected(_stage(client, 1, {"stage": "Nowhere"}), "NOT_READY", 409)
-
-    assert StateManager.Get("score.1") == before
-
-
-def test_the_stages_route_lists_what_a_row_takes(autonaApp, client, rows):
-    listed = _ok(client.get("/api/v1/stages"))["data"]
-
-    # The rows of a game row's combo, its blank one left out.
-    combo = GOLDEN["scenarios"]["tgame"]["models"]["stageWithBlank"][1:]
-    assert listed == [{"text": text, **row} for text, row in combo]
-    assert [entry["en_name"] for entry in listed] == [
-        "Final Destination", "Smashville", "Battlefield"]
-    for game, entry in enumerate(listed[:3], start=1):
-        _ok(_stage(client, game, {"stage": entry["en_name"]}))
-        assert _row(game)["en_name"] == entry["en_name"]
-    autonaApp.settle()
-
-
-def test_no_game_has_no_stages(autonaApp, client):
-    assert _ok(client.get("/api/v1/stages"))["data"] == []
-
-
 # ── one slot, and moving a card ──────────────────────────────────────────
 
 @pytest.fixture
@@ -864,6 +538,11 @@ def test_on_a_held_board_a_slot_waits_for_the_apply(autonaApp, client, url,
 
 
 # ── everything on the board ──────────────────────────────────────────────
+
+def _scores(n=1):
+    return (StateManager.Get(f"score.{n}.team.1.score"),
+            StateManager.Get(f"score.{n}.team.2.score"))
+
 
 def _filledBoard(client, autonaApp):
     _ok(client.patch("/api/v1/scoreboards/2/set", json={

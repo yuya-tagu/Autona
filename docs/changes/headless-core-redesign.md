@@ -932,7 +932,7 @@ core 側の書き手（= 正本）は以下。**キー族ごとに所有者が 1
 |--------|--------|
 | `score.{1,2}.*`（操作） | `core/Actions.py` |
 | `score.{1,2}.*`（セット読込） | `core/SetLoadService.py` |
-| `score.{n}.stages.*` / ステージ⇔スコア | `core/GameTrackerService.py` |
+| ~~`score.{n}.stages.*` / ステージ⇔スコア~~ | ~~`core/GameTrackerService.py`~~（ADR-005 S4ac-4 でキー族ごと削除。2026-11-12） |
 | `score.{n}.team.{t}.player.{m}.*` | `core/PlayerService.py`（`sponsor_logo*` は `core/SponsorHelper.py`） |
 | `score.{n}.{last,history,recent}_sets` / `upset_factor` | `core/StatsService.py` |
 | `score.3.*`（クルー） | `core/CrewBattleService.py` |

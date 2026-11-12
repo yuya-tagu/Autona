@@ -179,7 +179,7 @@
 - **board 3（crew）は別クラス**（書き手は `CrewBattleService`）。クルーボードでできることは ADR-005 S4w で v1 に揃った:
   - 同じ意味のものは同じルート: `:swap-teams`（§6.3）・`score:reset`（§6.2）・`teams/{t}/color`（§6.4）・`PATCH set`（§6.5）・`:clear` / `:reset-players` / `:reset-match`（§7.1）・`PATCH /tournament/info` の `displayTournamentName`（§6.19）・読みの `GET /scoreboards/3` と `/pending`（§5）
   - クルーだけのもの: メンバー（§6.38・§6.39）。**board 1 / 2 に投げると `400 INVALID_ARGUMENT`**。X 投稿文（§5.19）は ADR-005 S4x からボード 1 / 2 にもある。コンボの候補（§5.20）は `?board=` を取る（省略できる）
-  - クルーに無いものは `400 INVALID_ARGUMENT` で**明示拒否**する: `score:adjust` / `score:set`（合計はストックから算出する。チームのスコアは無い）・`:apply`（held でない）・`stats:refresh`・選手のルート・`stages`・`:load-set` / `:pull-stream` / `:follow` / `:stop-follow` / `GET follow`・`:reset-all`
+  - クルーに無いものは `400 INVALID_ARGUMENT` で**明示拒否**する: `score:adjust` / `score:set`（合計はストックから算出する。チームのスコアは無い）・`:apply`（held でない）・`stats:refresh`・選手のルート・`:load-set` / `:pull-stream` / `:follow` / `:stop-follow` / `GET follow`・`:reset-all`
   - **未構築のクルーボード**（デスクトップの遅延構築）: 書き込みは構築してから書く（未構築への書き込みは構築時のシードで消える）。`score:reset`・`:reset-players`・`:reset-match` と `stock:adjust` の `delta: 0` は、まっさらなボードに意味が無いので**構築せず何も書かずに `200`**。`GET /scoreboards/{n}/post`・`/match-names/candidates` も構築しない。`:clear`・`:swap-teams` は構築する（まっさらなボードを変える）。既存の `GET /scoreboards/3` と `/pending` は従来どおり構築する
 - **非表示ボードへの操作は配信に出ない**: OBS は表示中ボードのレイアウトを参照するため、裏ボードを
   操作しても画面は変わらない。誤対象を避けるため、`GET /api/v1/health`（§5.1）に**現在アクティブな
@@ -226,7 +226,6 @@
 | `GET /api/v1/settings` | 設定ウィンドウの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
-| `GET /api/v1/stages` | 読み込み中のゲームのステージ（§5.16。2026-11-09 追加） | `get_stages`（`core/GameAssetCatalog.StagesPayload`） | — |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
@@ -544,9 +543,9 @@ Board のページが OBS の「ローカルファイル」に指定させるフ
 - 届くのはデスクトップのボード 1 / 2 の held サイクルからだけで、ヘッドレスでは出ない（`program_state_update` で足りる）。統計の除外キー（`STATS_KEYS`）は held 通知を出さず `program_state_update` で届く
 - 接続の直後は通知が来ないので、最初に 1 回 `GET .../pending` を読む
 
-### 5.16 `GET /api/v1/stages`（2026-11-09 追加・ADR-005 S4u）
+### 5.16 `GET /api/v1/stages`（2026-11-09 追加・ADR-005 S4u。**2026-11-12 ADR-005 S4ac-4 で削除**）
 
-読み込み中のゲームのステージ。トラッカーの行のコンボと同じ順（空行を除く）の `[{ "text": "表示名", "en_name": "...", "codename": "...", "path": "...", ... }]`。`en_name` が `PATCH .../stages/{game}` に渡す識別子（§6.36）。`text` のほかは行の値をそのまま（キー順は Qt のモデルが出していた順。`core/GameAssetCatalog.StagesPayload`）。ゲームが無ければ `[]`。
+ゲームトラッカー（ゲームごとの勝敗とステージの行）と一緒に削除した（オーナー承認 2026-11-11）。いまは静的配信の `404`（v1 のエンベロープではない）。節の番号は欠番として残す。
 
 ### 5.17 `GET /api/v1/scoreboards/{n}/follow`（2026-11-09 追加・ADR-005 S4v）
 
@@ -663,7 +662,7 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
   "general": {
     "profanity_filter": true, "disable_autoupdate": true,
     "disable_scoreupdate": false, "disable_export": false,
-    "disable_overwrite": false, "disable_individual_game_tracker": true,
+    "disable_overwrite": false,
     "team_1_default_color": "#fe3636", "team_2_default_color": "#2e89ff"
   },
   "network": {
@@ -695,7 +694,7 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
-**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.36・§6.37・§6.41〜6.43 および §7 の
+**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.37・§6.41〜6.43 および §7 の
 クリア/リセット/セット読込）は、デスクトップ UI の操作と同一の Qt 経路を通って
 `score.{n}` の held サブツリー（`StateManager.HoldSubtree`）に着地する。したがって
 **アプリのスコアボード入力機能には即座に映るが、layout（OBS オーバーレイ・WS デルタ・
@@ -728,7 +727,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - body: なし
 - 委譲: `swap_teams` = #21 → ボードを構築してから `AutonaActions.SwapTeams`（core。ADR-005 S2c〜）
 - 入れ替えるもの: 選手スロット全体（キャラのバリアント・mains・id・city・アバター・スポンサー画像を含む）・
-  スコア・LOSERS・チーム名・チームロゴ・ゲームトラッカーの勝敗（鏡映）。**チームカラーは入れ替えない**（色は列のもの）。
+  スコア・LOSERS・チーム名・チームロゴ。**チームカラーは入れ替えない**（色は列のもの）。
   `score.{n}.teamsSwapped` を反転する（セット読込がどちらの列に第 1 エントラントを置くかの正本）。1 回の保存サイクル。
 - `@gui_thread_sync` で同期実行（S2f まで。選手カードの入力確定が GUI スレッドで 2 書き込みに分かれるため、
   その間に入らないように）。応答時点で入替は完了している（旧実装は queued シグナルで、入替前に `OK` を返していた）。
@@ -1035,14 +1034,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`（未知の `target`、`design` なのに `designId` が無い）、`CONFLICT` 409（`designId` が今の選択と違う: 操作者が見ていたファイルではない）、`NOT_FOUND`（ファイルが無い。デザインが無いときも。相対パスをログに残す）、`INTERNAL`（ファイルマネージャを起動できない）。どれも何も開かない
 - 拒否のログには、この PC の要求と認められなかった元の理由（`forwarded` / `foreign_host` / `foreign_origin` など。トークンで通るはずだったものは `token`）を残す。応答は 1 つ
 
-### 6.36 ゲームの行 `PATCH /api/v1/scoreboards/{n}/stages/{game}`（2026-11-09 追加・ADR-005 S4u）
-- `{n}` は 1 / 2。`{game}` は 1 始まり（state の `score.{n}.stages` のキー）
-- body: `{ "winner": 1 | 2 | "tie" | null, "stage": "<en_name>" | null }` の一部。`winner` の `null` は未報告、数字は**状態側のチーム**（ほかの v1 と同じ）。`stage` は §5.16 の `en_name`、`null` で空にする（コンボの空行と同じ）
-- 1 保存サイクルで書く。`winner` は行の合計をチームのスコアに書く（トラッカーのボタンと同じ `PublishStageResults`）。`stage` の値は Qt のコンボの `currentData()` とキー順まで同じ
-- 同じ値はもう一度書かない（反映ボタンを点けない。`winner` の再送で、そのあとの `+1` を行の合計で上書きしない）
-- held 対象（§6 冒頭の反映ゲート）。`revision` は最後に公開されたもの。ヘッドレスは即時公開
-- 判定は**行があるか**で、設定を見ない。トラッカーを OFF にしたあとに残っている行は書ける（行を作るかどうかを決めるのは `SetBestOf` のときの設定だけ）
-- エラー: `INVALID_ARGUMENT`（空 body・未知キー・型・`{game}` が 0・未知のステージ・board 3）、`NOT_READY` 409（行が 1 つも無い: トラッカーが OFF か best of が未設定。これは未知のステージより先に判定する）、`NOT_FOUND` 404（その番号の行が無い）。**断るときは何も書かない**
+### 6.36 ゲームの行 `PATCH /api/v1/scoreboards/{n}/stages/{game}`（2026-11-09 追加・ADR-005 S4u。**2026-11-12 ADR-005 S4ac-4 で削除**）
+- ゲームトラッカーと一緒に削除した（§5.16）。state の `score.{n}.stages` も無くなった（古い `state.json` に残っていても、起動時のボードの作成が `score` ごと作り直すので読まれない）。いまは `405`（同じパスの GET を静的配信が受けるため。v1 のエンベロープではない）。節の番号は欠番として残す
 
 ### 6.37 選手の上下移動 `POST /api/v1/scoreboards/{n}/teams/{t}/players:swap`（2026-11-09 追加・ADR-005 S4u）
 - `{n}` は 1 / 2。`{t}` は状態側のチーム。body: `{ "first": 1, "second": 2 }`（1 以上の整数で別々の番号）
