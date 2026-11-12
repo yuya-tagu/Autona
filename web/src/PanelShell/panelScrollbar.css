@@ -1,0 +1,43 @@
+/* Scrollbars of the shared-view pages (/web/<panel>), matching the
+   Designer's (ScoreboardDesigner/styles.css). Scoped to html.panel-shell,
+   which PanelShell sets while mounted, so the OBS overlay page is untouched.
+   currentColor is the theme's text color (PanelShell also puts it on <html>
+   so the document's own scrollbar follows the theme). */
+html.panel-shell,
+html.panel-shell * {
+  scrollbar-color:
+    color-mix(in srgb, currentColor 28%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+html.panel-shell *::-webkit-scrollbar,
+html.panel-shell::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.panel-shell *::-webkit-scrollbar-track,
+html.panel-shell *::-webkit-scrollbar-corner,
+html.panel-shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.panel-shell *::-webkit-scrollbar-thumb,
+html.panel-shell::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+  background-clip: padding-box;
+}
+
+html.panel-shell *::-webkit-scrollbar-thumb:hover,
+html.panel-shell::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+html.panel-shell *::-webkit-scrollbar-button,
+html.panel-shell::-webkit-scrollbar-button {
+  display: none;
+}

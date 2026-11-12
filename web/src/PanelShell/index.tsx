@@ -1,11 +1,12 @@
 import React from "react";
-import {Box, Typography} from "@mui/material";
+import {Box, Typography, useTheme} from "@mui/material";
 import {useNavigate, useParams, useSearchParams} from "react-router-dom";
 import i18n from "../i18n/config";
 import websocketInit from "../ScoreboardPage/websocketInit";
 import {PanelShellContext} from "./context";
 import {registerRouterNavigate} from "./hostApi";
 import {panelPage} from "./registry";
+import "./panelScrollbar.css";
 
 // The shell every React panel page runs in (ADR-005 S4a), routed at
 // /web/:panel (index.js). It
@@ -57,6 +58,20 @@ export default function PanelShell() {
     const desktop = searchParams.get("desktop") === "1";
     const language = usePanelLanguage(searchParams.get("lng"));
     const navigate = useNavigate();
+    const textColor = useTheme().palette.text.primary;
+
+    // Scrollbar styling (panelScrollbar.css) hangs on html.panel-shell, and
+    // takes its color from <html>'s text color; both undone on unmount.
+    React.useEffect(() => {
+        const root = document.documentElement;
+        const previous = root.style.color;
+        root.classList.add("panel-shell");
+        root.style.color = textColor;
+        return () => {
+            root.classList.remove("panel-shell");
+            root.style.color = previous;
+        };
+    }, [textColor]);
 
     // A layout effect: registered as the router commits, so a navigation
     // the desktop asks for right after the page loads is not missed.

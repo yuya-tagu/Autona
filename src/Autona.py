@@ -150,6 +150,10 @@ logger.critical("=== Autona IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
 
+# Tint each window's Windows 11 title bar to the app palette (on focus).
+from .Helpers.AutonaTitleBar import Install as _InstallTitleBarThemer
+_titleBarThemer = _InstallTitleBarThemer(App)
+
 from autona_splash import (
     LoadingOverlay,
     active_splash,
@@ -779,6 +783,8 @@ class Window(QMainWindow):
         splash.set_message(splash_msgs[2], progress=1.0)
         splash.finish(self)
         self.show()
+        # The main window may not take focus at launch; theme it explicitly.
+        _titleBarThemer.Apply(self.windowHandle())
         log_startup_phase("core-shown")
 
         # Cover the main window with a spinner until Qt finishes its

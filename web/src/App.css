@@ -7,10 +7,3 @@
   place-content: center;
   height: 100%;
 }
-
-/* font-family / weight come from the MUI theme (themes.js); this used to
-   force Roboto Condensed bold app-wide and fought the design tokens. */
-body {
-  overflow: hidden;
-  margin: 0;
-}
