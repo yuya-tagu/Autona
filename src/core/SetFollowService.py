@@ -616,20 +616,11 @@ class SetFollowService:
         record = None
         with StateManager.SaveBlock():
             service.ApplyMatchInfo(data)
-            # The game rows follow the net move of the score, on the rows
-            # the set's length leaves (GameTrackerService.FollowScores). The
-            # lock is for a +1 from another thread: its own follow would be
-            # counted a second time here.
-            actions = AutonaActions.instance
-            tracker = actions.GameTracker(board)
-            with StateManager.lock:
-                scores = tracker.Scores()
-                service.ApplyScores(data)
+            service.ApplyScores(data)
 
-                bestOf = service.BestOfFromSetData(data)
-                if bestOf is not None:
-                    actions.SetBestOf(board, bestOf)
-                tracker.FollowScores(scores)
+            bestOf = service.BestOfFromSetData(data)
+            if bestOf is not None:
+                AutonaActions.instance.SetBestOf(board, bestOf)
 
             # The flag and its team's " [L]" names (ADR-005 S2b). The
             # stream URL is the operator's (the dropdown): not written.

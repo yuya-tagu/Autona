@@ -26,13 +26,11 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
-from src.core.GameTrackerService import TEAM_1, UNREPORTED
 from src.core.SettingsManager import SettingsManager
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
@@ -734,23 +732,6 @@ def test_swapping_twice_restores_every_value(actions, heldBoard):
         assert after["team"][team]["score"] == before["team"][team]["score"]
 
 
-def test_swap_teams_mirrors_the_game_results(actions, heldBoard):
-    from src.core.GameTrackerService import (
-        GameTrackerService, TEAM_1, TEAM_2, UNREPORTED)
-    _sides(actions)
-    tracker = GameTrackerService(BOARD)
-    tracker.SetStageCount(5)
-    for index, winner in enumerate((TEAM_2, TEAM_1, TEAM_1)):
-        tracker.SetStageResult(index, winner)
-
-    actions.SwapTeams(BOARD)
-
-    assert [tracker.GameWinner(i) for i in range(5)] == [
-        TEAM_1, TEAM_2, TEAM_2, UNREPORTED, UNREPORTED]
-    assert tracker.SumStageResults() == (
-        SM.Get(f"{PREFIX}.team.1.score"), SM.Get(f"{PREFIX}.team.2.score"))
-
-
 def test_swap_teams_recalculates_the_upset_factor(actions, heldBoard):
     """The seeds move with the players. The upset factor is a statistic
     (published at once, not held) and is recalculated by the operation --
@@ -1176,18 +1157,8 @@ def test_best_of_falls_back_to_the_shipped_english_text(heldBoard):
     assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
 
 
-# The set length leads since ADR-005 S2e: SetBestOf is every entry point's,
-# and it resizes a built board's game rows in the same cycle through the
-# tracker the board registers. A fresh AutonaActions where the registry
-# matters, so that no board another module left built takes part.
-
-@pytest.fixture
-def trackerOn():
-    # The tracker ships disabled; the isolated settings are put back by
-    # _isolated_state.
-    SettingsManager.settings = {
-        "general": {"disable_individual_game_tracker": False}}
-
+# The set length leads since ADR-005 S2e: SetBestOf is every entry point's
+# (the game tracker's rows followed it in the same cycle until S4ac-4).
 
 def test_the_same_best_of_is_not_a_write(actions, heldBoard, spy):
     # The spinbox's valueChanged, which every entry point went through, does
@@ -1224,18 +1195,16 @@ def test_a_best_of_that_is_not_a_number_is_refused(actions, heldBoard, spy,
     assert spy.held_updates == []
 
 
-def test_a_failing_text_formatter_gets_the_english_default(heldBoard,
-                                                           trackerOn):
+def test_a_failing_text_formatter_gets_the_english_default(heldBoard):
     """The Qt formatter raises while the locale tables are empty, and a
-    custom term file can hold a template .format() rejects. The set length,
-    its short forms and the rows are written all the same, with the English
-    texts, and nothing reaches the caller -- a set load, the Web's set_route
-    and a game load call this directly since ADR-005 S2e."""
+    custom term file can hold a template .format() rejects. The set length
+    and its short forms are written all the same, with the English texts,
+    and nothing reaches the caller -- a set load, the Web's set_route and a
+    game load call this directly since ADR-005 S2e."""
     def broken(key, number):
         return {}.get(key).format(number)
 
     actions = AutonaActions(formatMatchText=broken)
-    tracker = actions.GameTracker(BOARD)
 
     assert actions.SetBestOf(BOARD, 5) is True
 
@@ -1243,7 +1212,6 @@ def test_a_failing_text_formatter_gets_the_english_default(heldBoard,
     assert SM.Get(f"{PREFIX}.best_of_short_text") == "BO5"
     assert SM.Get(f"{PREFIX}.best_of_text") == "Best of 5"
     assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
-    assert tracker.StageCount() == 5
     assert SM.saveBlocked == 0
 
     def badTemplate(key, number):
@@ -1266,57 +1234,28 @@ def test_the_crew_board_keeps_its_own_best_of(actions):
     assert SM.Get("score.3") == {"best_of": 3}
 
 
-def test_a_best_of_resizes_the_rows_in_the_same_cycle(
-        heldBoard, spy, trackerOn):
-    actions = AutonaActions()
-    tracker = actions.GameTracker(BOARD)
-
-    actions.SetBestOf(BOARD, 5)
-
-    assert [tracker.GameWinner(i) for i in range(tracker.StageCount())] \
-        == [UNREPORTED] * 5
-    assert spy.held_updates_for(PREFIX) == [PREFIX]
-    # The rows after the six keys, as the spinbox's handler wrote them.
-    assert list(SM.Get(PREFIX)) == [
-        "team", "best_of", "best_of_short_text", "best_of_text", "first_to",
-        "first_to_short_text", "first_to_text", "stages"]
-
-
-def test_the_tracker_switched_off_gives_no_rows(heldBoard):
+def test_a_best_of_writes_its_six_keys_in_one_cycle(heldBoard, spy):
     AutonaActions().SetBestOf(BOARD, 5)
 
-    assert SM.Get(f"{PREFIX}.stages") == {}
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    # In the order the spinbox's handler wrote them, and nothing after them
+    # (the game tracker's `stages` came last until ADR-005 S4ac-4).
+    assert list(SM.Get(PREFIX)) == [
+        "team", "best_of", "best_of_short_text", "best_of_text", "first_to",
+        "first_to_short_text", "first_to_text"]
 
 
-def test_the_same_best_of_keeps_the_recorded_games(heldBoard, trackerOn):
+def test_republishing_an_unchanged_best_of_writes_nothing(heldBoard, spy):
+    """A game load with the texts the same: nothing to publish, so the
+    board is not dirtied (the tracker's rows starting over were a write on
+    every game load until ADR-005 S4ac-4)."""
     actions = AutonaActions()
-    tracker = actions.GameTracker(BOARD)
     actions.SetBestOf(BOARD, 5)
-    tracker.SetStageResult(0, TEAM_1)
-
-    assert actions.SetBestOf(BOARD, 5) is False
-
-    assert tracker.GameWinner(0) == TEAM_1
-
-
-def test_republishing_the_best_of_starts_the_rows_over(
-        heldBoard, spy, trackerOn):
-    """A game load: the rows recorded games of the previous game's stages,
-    so they start over at the same length -- a rebuild the widget learns of
-    from rowsVersion, the count being unchanged."""
-    actions = AutonaActions()
-    tracker = actions.GameTracker(BOARD)
-    actions.SetBestOf(BOARD, 5)
-    tracker.SetStageResult(0, TEAM_1)
-    version = tracker.rowsVersion
     spy.held_updates.clear()
 
     assert actions.RepublishBestOf(BOARD) is True
 
-    assert tracker.StageCount() == 5
-    assert tracker.GameWinner(0) == UNREPORTED
-    assert tracker.rowsVersion == version + 1
-    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    assert spy.held_updates_for(PREFIX) == []
 
 
 def test_republishing_the_best_of_derives_the_texts_again(heldBoard):
@@ -1331,194 +1270,18 @@ def test_republishing_the_best_of_derives_the_texts_again(heldBoard):
     assert SM.Get(f"{PREFIX}.first_to_text") == "new 3"
 
 
-def test_a_board_with_no_widget_has_its_rows_all_the_same(heldBoard,
-                                                          trackerOn):
-    """The tracker is core's and always there (ADR-005 S4t). No board built
-    used to mean the six keys alone: its rows were the widget's to register."""
-    AutonaActions().SetBestOf(BOARD, 5)
-
-    assert SM.Get(f"{PREFIX}.best_of") == 5
-    assert len(SM.Get(f"{PREFIX}.stages")) == 5
-
-
-def test_a_board_keeps_its_one_tracker(actions):
-    """Whatever is built and dropped around it: the one tracker of a board
-    (a built Qt board's widget rendered it until ADR-005 S4ac-3:
-    AutonaIndividualGameTracker.service)."""
-    assert actions.GameTracker(1) is actions.GameTracker("1")
-    assert actions.GameTracker(1) is not actions.GameTracker(2)
-    assert actions.GameTracker(2).scoreboardNumber == 2
-
-
-# ── the rows follow the score, in the operation (ADR-005 S4t) ────────────
-#
-# They used to follow from the board's held cycle (_SyncScoreDisplays, with
-# the old value on its spinbox), so nothing followed on a board with no
-# widget. These run with no widget at all.
-
-def _rows(actions, team):
-    return actions.GameTracker(BOARD).WonStages(team)
-
-
-@pytest.fixture
-def rows(heldBoard, trackerOn):
-    actions = AutonaActions()
-    actions.SetBestOf(BOARD, 5)
-    return actions
-
-
-def test_a_point_marks_the_next_game_in_one_cycle(rows, spy):
-    spy.held_updates.clear()
-
-    rows.AdjustScore(BOARD, 1, 1)
-
-    assert SM.Get(f"{PREFIX}.team.1.score") == 1
-    assert _rows(rows, 0) == [0]
-    assert spy.held_updates_for(PREFIX) == [PREFIX], (
-        "the score and the row it moved are one operation")
-
-
-def test_a_point_off_clears_the_last_game_that_team_won(rows):
-    rows.AdjustScore(BOARD, 1, 1)
-    rows.AdjustScore(BOARD, 2, 1)
-    rows.AdjustScore(BOARD, 1, 1)
-
-    rows.AdjustScore(BOARD, 1, -1)
-
-    assert _rows(rows, 0) == [0]
-    assert _rows(rows, 1) == [1]
-
-
-def test_a_score_set_from_the_api_moves_the_rows_by_as_many_games(rows):
-    rows.SetScore(BOARD, 2, 3)
-
-    assert _rows(rows, 1) == [0, 1, 2]
-
-    rows.SetScore(BOARD, 2, 1)
-
-    assert _rows(rows, 1) == [0]
-
-
-def test_a_reset_and_a_clear_empty_the_rows(rows):
-    rows.AdjustScore(BOARD, 1, 2)
-    rows.ResetScore(BOARD)
-    assert _rows(rows, 0) == []
-
-    rows.AdjustScore(BOARD, 2, 2)
-    rows.ClearScore(BOARD)
-    assert _rows(rows, 1) == []
-
-
-def test_a_score_at_its_limit_moves_no_row(rows, spy):
-    rows.AdjustScore(BOARD, 1, -1)      # already 0
-    assert _rows(rows, 0) == []
-
-
-def test_a_swap_mirrors_the_rows_rather_than_following_the_scores(rows):
-    rows.AdjustScore(BOARD, 1, 2)
-
-    rows.SwapTeams(BOARD)
-
-    assert SM.Get(f"{PREFIX}.team.2.score") == 2
-    assert _rows(rows, 1) == [0, 1]
-    assert _rows(rows, 0) == [], "the swap followed its own score write"
-
-
-def test_no_rows_nothing_follows(heldBoard, spy):
-    """The shipped default (the tracker off), and a best of unset: one
-    cycle for the score and no stages key beyond what was there."""
-    actions = AutonaActions()
-    spy.held_updates.clear()
-
-    actions.AdjustScore(BOARD, 1, 1)
-
-    assert SM.Get(f"{PREFIX}.team.1.score") == 1
-    assert SM.Get(f"{PREFIX}.stages", None) is None
-    assert spy.held_updates_for(PREFIX) == [PREFIX]
-
-
-def test_a_score_that_is_not_a_number_is_not_followed(rows):
-    tracker = rows.GameTracker(BOARD)
-    SM.Set(f"{PREFIX}.team.1.score", "two")
-    before = tracker.Scores()
-    assert before == (None, 0)
-
-    SM.Set(f"{PREFIX}.team.1.score", 3)
-    SM.Set(f"{PREFIX}.team.2.score", 1)
-    tracker.FollowScores(before)
-
-    assert tracker.WonStages(0) == [], "made up a move from a value it lost"
-    assert tracker.WonStages(1) == [0], "the other team's move was dropped"
-
-
-def _overlapping(tracker, method, write):
-    """`tracker.method` patched so that `write` starts on a thread of its own
-    as the caller has just read through it, and is given a moment to run to
-    the end: a caller holding StateManager.lock keeps it waiting instead.
-    Returns the patch and the thread."""
-    real = getattr(tracker, method)
-    thread = threading.Thread(target=write, daemon=True)
-
-    def reading(*args, **kwargs):
-        value = real(*args, **kwargs)
-        if thread.ident is None:
-            thread.start()
-            thread.join(0.3)
-        return value
-
-    return patch.object(tracker, method, side_effect=reading), thread
-
-
-def test_a_point_from_another_thread_is_not_followed_twice(rows):
-    """`before` is read under the lock with the write, so a +1 on another
-    thread waits for this one's follow. With nothing in the way, the second
-    +1 lands between the read and the write: the first then writes on top of
-    it and follows a move of 2 from `before`, on top of the row the second has
-    already awarded. Three rows for a score of 2."""
-    tracker = rows.GameTracker(BOARD)
-    overlap, other = _overlapping(
-        tracker, "Scores", lambda: rows.AdjustScore(BOARD, 1, 1))
-
-    with overlap:
-        rows.AdjustScore(BOARD, 1, 1)
-        other.join(5)
-
-    assert not other.is_alive()
-    assert SM.Get(f"{PREFIX}.team.1.score") == 2
-    assert _rows(rows, 0) == [0, 1]
-
-
-def test_a_point_from_another_thread_survives_a_stage_click(rows):
-    """PublishStageResults sums and writes under one lock. With nothing in the
-    way, a +1 lands between the two, and the older sum writes over its score
-    while the row it awarded stays."""
-    tracker = rows.GameTracker(BOARD)
-    overlap, other = _overlapping(
-        tracker, "SumStageResults", lambda: rows.AdjustScore(BOARD, 1, 1))
-
-    with overlap:
-        tracker.PublishStageResults()
-        other.join(5)
-
-    assert not other.is_alive()
-    assert SM.Get(f"{PREFIX}.team.1.score") == 1
-    assert _rows(rows, 0) == [0]
-
-
 # ── a game load (ADR-005 S4t) ────────────────────────────────────────────
 
-def test_a_game_load_restarts_the_rows_of_every_board_with_a_set_length(
-        heldBoard, trackerOn):
-    actions = AutonaActions()
-    actions.SetBestOf(BOARD, 3)
-    tracker = actions.GameTracker(BOARD)
-    tracker.SetStageResult(0, TEAM_1)
+def test_a_game_load_republishes_every_board_with_a_set_length(heldBoard):
+    AutonaActions(formatMatchText=lambda key, n: f"old {n}").SetBestOf(
+        BOARD, 3)
     SM.Set("score.2", {})               # seeded, but no set length yet
 
-    assert actions.RepublishBestOfs() == [BOARD]
+    republished = AutonaActions(
+        formatMatchText=lambda key, n: f"new {n}").RepublishBestOfs()
 
-    assert tracker.StageCount() == 3
-    assert tracker.GameWinner(0) == UNREPORTED
+    assert republished == [BOARD]
+    assert SM.Get(f"{PREFIX}.best_of_text") == "new 3"
     assert SM.Get("score.2") == {}, "a board with no set length grew one"
 
 

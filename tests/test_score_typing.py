@@ -3,33 +3,19 @@
 The Qt board's two score spinboxes wrote through the game tracker's own
 UpdateScore (GameTrackerService), a second writer of
 score.{n}.team.{t}.score beside core's. They called the operation v1's
-``score:set`` calls from S4x (AutonaActions.SetScore): one save cycle with
-the game rows following, and nothing written for the score the state
-already has. The spinboxes went with the Qt board in S4ac-3; what they
-called, the route on the desktop and the route headless still write the
-same.
+``score:set`` calls from S4x (AutonaActions.SetScore): one save cycle, and
+nothing written for the score the state already has. The spinboxes went
+with the Qt board in S4ac-3 and the tracker in S4ac-4; what they called,
+the route on the desktop and the route headless still write the same.
 """
 import pytest
 
-from src.core import GameTrackerService as tracker
 from src.core.Actions import AutonaActions
-from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from tests.fixtures.write_recording import WriteRecorder, encode
 from tests.test_api_v1 import client, webApp  # noqa: F401
 from tests.test_api_v1_score import _ok
 from tests.test_web_operations import _dropHeadlessBoards, _goHeadless
-
-
-@pytest.fixture
-def trackerOn(monkeypatch):
-    # The tracker ships disabled. The lookup, not the process-global setting
-    # (as tests/test_api_v1_score.py does).
-    realGet = SettingsManager.Get
-    monkeypatch.setattr(SettingsManager, "Get", staticmethod(
-        lambda key, default=None:
-            False if key == "general.disable_individual_game_tracker"
-            else realGet(key, default)))
 
 
 # (what it is, the team typed in, the number typed, both teams' scores --
@@ -45,7 +31,7 @@ STEPS = [
 
 
 def _setUp(n):
-    # A set of five games, so the rows have somewhere to follow to.
+    # A set of five games, as a board in play has.
     AutonaActions.instance.SetBestOf(n, 5)
     AutonaActions.instance.ApplyChanges(n)
 
@@ -68,18 +54,15 @@ def _play(app, n, act):
 
 @pytest.mark.parametrize("n", [1, 2])
 def test_set_score_writes_what_score_set_writes(
-        autonaApp, client, monkeypatch, trackerOn, n):
+        autonaApp, client, monkeypatch, n):
     # What the Qt board's score display called on a number typed (S4x).
     autonaApp.ready(n)
     typed = _play(autonaApp, n,
                   lambda team, value, _scores:
                       AutonaActions.instance.SetScore(n, team, value))
-    # Every step wrote the score, and the rows followed it.
+    # Every step wrote the score.
     assert [label for label, recorded, _state in typed
             if not recorded["sets"]] == []
-    assert any(key.startswith(f"score.{n}.stages.")
-               for _label, recorded, _state in typed
-               for key, _value in recorded["sets"])
 
     def throughTheRoute(_team, _value, scores):
         _ok(client.post(f"/api/v1/scoreboards/{n}/score:set",
@@ -97,7 +80,7 @@ def test_set_score_writes_what_score_set_writes(
 
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_set_score_is_one_save_cycle_with_the_rows(autonaApp, trackerOn, n):
+def test_set_score_is_one_save_cycle(autonaApp, n):
     autonaApp.ready(n)
     _setUp(n)
     autonaApp.settle()
@@ -110,8 +93,6 @@ def test_set_score_is_one_save_cycle_with_the_rows(autonaApp, trackerOn, n):
         StateManager.observers.held_state_updated.unsubscribe(cycles.append)
     assert cycles == [f"score.{n}"]
     assert autonaApp.get(f"score.{n}.team.1.score") == 3
-    rows = AutonaActions.instance.GameTracker(n)
-    assert [rows.GameWinner(game) for game in range(4)]         == [tracker.TEAM_1] * 3 + [tracker.UNREPORTED]
 
 
 @pytest.mark.parametrize("n", [1, 2])
@@ -128,11 +109,3 @@ def test_the_score_the_state_has_writes_nothing(autonaApp, n):
         autonaApp.settle()
     assert recorder.sets == [] and recorder.deltas == []
     assert StateManager.HasPendingChanges(f"score.{n}") is False
-
-
-def test_the_tracker_has_no_score_writer_of_its_own():
-    # The writers of a team's score inside core are AutonaActions, the
-    # tracker's PublishStageResults (rows -> score) and the set load's
-    # ApplyScores (.claude/rules/state-and-webserver.md).
-    from src.core.GameTrackerService import GameTrackerService
-    assert not hasattr(GameTrackerService, "UpdateScore")

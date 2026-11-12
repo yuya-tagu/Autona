@@ -7389,7 +7389,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 | 一般 | スコアの自動更新を無効 | `general.disable_scoreupdate` | False | False（`SetLoadService`） | すぐ | WRITE |
 | 一般 | ファイル出力を無効 | `general.disable_export` | False | False（`StateManager`） | すぐ | WRITE |
 | 一般 | 選手 DB を上書きしない | `general.disable_overwrite` | False | False（`PlayerDB` / `SetFollowService`） | **すぐ**（文言は「再起動後」） | WRITE |
-| 一般 | ゲームトラッカーを無効（BETA） | `general.disable_individual_game_tracker` | True | True（`GameTrackerService`） | 次の起動（文言どおり） | WRITE |
+| 一般 | ゲームトラッカーを無効（BETA） | `general.disable_individual_game_tracker` | True | True（`GameTrackerService`） | 次の起動（文言どおり） | WRITE（**S4ac-4 で設定ごと削除**） |
 | 一般 | Qt 版の SCORE パネル | `general.qt_scoreboard_panel` | False | — | 初回表示まで | **v1 に入れない**（S4ac で消える） |
 | 一般 | チーム 1 / 2 の既定色 | `general.team_{1,2}_default_color` | #fe3636 / #2e89ff | `AutonaActions.DEFAULT_TEAM_COLORS` と同じ | 次のボード構築 | WRITE |
 | 言語 | プログラム / ゲームアセット / 大会用語 | `program_language` / `game_asset_language` / `fg_term_language` | "default" | None（`LoadLocale` は None と "" を "default" とみなす） | 次の起動（Qt は変えるとアプリを閉じる） | THIS_PC |
@@ -7467,12 +7467,12 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - 初回起動の bind 失敗で `restartPending` が立つ（どのみち再起動が要るので許容）
   - Qt の窓は web からの保存後も古い表示のまま（S4af で消える）
   - 同一オリジンのレイアウトの JS が `THIS_PC` を通れる（既存の `THIS_PC` と同じ脅威モデル。S4af の iframe の sandbox で一部緩和。OBS のブラウザソースは対象外）
-  - Qt の窓の「再起動で反映」の文言（`disable_overwrite`・`disable_individual_game_tracker` は即時）を S4af で合わせる
+  - Qt の窓の「再起動で反映」の文言（`disable_overwrite`・`disable_individual_game_tracker` は即時）を S4af で合わせる（`disable_individual_game_tracker` は S4ac-4 で削除）
   - **S4af で直す**（Qt の `.ts` は触っていない）:
     - `disable_overwrite` の文言「再起動後に反映」→ すぐ効く
     - `disable_autoupdate` の既定（窓 False / 読み手 True）
     - Qt の記録の綴り（`Esc` / `Del` / `PgUp` など）は parser が読めない。組み立て式にすれば作られない。保存済みの値は GET の `valid: false` でページが知らせる
-    - ゲームトラッカーの BETA 表示（`assets/versions.json`）は GET に入れていない。ページで出すかを S4af で決める
+    - ゲームトラッカーの BETA 表示（`assets/versions.json`）は GET に入れていない。ページで出すかを S4af で決める → S4ac-4 でトラッカーと `beta_features` を削除し、対象が無くなった
     - 上のポートの読み手
 - **pin**
   - `tests/test_hotkey_rules.py`（141 件）: 旧 `_parse_shortcut` の写しと、語彙・Qt の綴り・記号・大文字小文字・並び・壊れた文字列の 3,363 通りで同じ答え。定数と既定（順序も）。旧 validator の写しと `NormalizeShortcut` / `FindDuplicates` が同じ。警告のコードと、Qt の窓の文が旧 validator と同じ。validator が無いこと。語彙は全部登録できること。`Canonical`。`Describe` の `valid: false`。`Update` の全部か無しか・409 の相手・入れ替え・同じ値・別の綴り・`loadFailed`・警告・通知は lock の外で 1 回。重複は（修飾キー, VK）で比べる（`Return` = `Enter`・`Esc` = `Escape`・並び順は無関係。読めない値どうしは正規化した文字列）、OS / OBS の警告を（修飾キー, VK）で引く（`Ctrl+Escape` / `Ctrl+Shift+Escape`）、`no_modifier`（F キーは除外・優先順）、文字列でない保存値と `hotkeys` 自体が壊れていても `CurrentKeys()` / `Describe` / `Update` が落ちない。旧 validator との一致テストからは `{"Ctrl+A", "A+Ctrl"}` を外し、新しい重複のテストへ移した
@@ -7514,7 +7514,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 | S4ac-1 | **起動時の held 登録**（Qt 版と退路は残す）: `AutonaActions.MakeBoards`、`bootstrap_gui()` で `panel=True`、`CreateScoreboard` のスケルトンの上書きを外す | 高 | 不可 |
 | S4ac-2 | テストのハーネスをウィジェットから外す（`tests/` だけ。`autonaApp.ready(n)` など）+ ページの F3（`web/`。`loadFailed` を形式と キャラの 2 つに分ける） | 通常 | 不可（F3 が web） |
 | S4ac-3 | Qt の SCORE・退路（`general.qt_scoreboard_panel`）・Qt の窓・隠しの部品の削除（IME ゲートの後に merge） | 高 | 不可 |
-| S4ac-4 | ステージの core / v1 の削除（下のオーナー論点の承認が前提） | 高 | 不可 |
+| S4ac-4 | ステージの core / v1 の削除（下のオーナー論点の承認が前提。2026-11-11 承認・2026-11-12 実施） | 高 | 不可 |
 | 独立 B | `main_generate_thumbnail` の `isPreview` の削除（**PR #281 で済み**） | 通常 | 可 |
 | （PR #281） | オフスクリーン描画が、引き継いだ読み込みの失敗で取り残される不具合の修正 | 通常 | — |
 | （PR #281） | `tests/test_state_manager_held.py` が後続のモジュールに held の登録と未反映を残す分離漏れの修正 | 通常 | — |
@@ -7529,7 +7529,8 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 
 **オーナー論点**
 
-1. **ステージの core / v1 を消すか**（2026-11-11 に質問中）: 順序 6 の論点 1 でステージの行を React に出さないと決めた後に残る `GameTrackerService`・`GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`・`PublishStageResults` / `SwapStageResults` / `FollowScores` のステージの部分・設定 `disable_individual_game_tracker`。消すなら S4ac-4（golden 8 ファイルから `score.{n}.stages` の `{}` が消えるだけ。`ResetScoreRoot` されるので移行は要らない）
+1. **ステージの core / v1 を消すか**（2026-11-11 に質問）: 順序 6 の論点 1 でステージの行を React に出さないと決めた後に残る `GameTrackerService`・`GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`・`PublishStageResults` / `SwapStageResults` / `FollowScores` のステージの部分・設定 `disable_individual_game_tracker`。消すなら S4ac-4（golden 8 ファイルから `score.{n}.stages` の `{}` が消えるだけ。`ResetScoreRoot` されるので移行は要らない）
+   - **回答（2026-11-11 オーナー）: 「ステージの core・v1・設定を削除してよい」**。S4ac-4 で削除した（下の S4ac-4 の節）
 
 #### S4ac-1 起動時の held 登録（2026-11-11）
 
@@ -7927,6 +7928,91 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
   5. SCORE ページの X 投稿（画像の生成とクリップボード）と「ブラウザ版を開く」
   6. ほかの React の項目を先に開いてから SCORE を開く／SCORE を先に開いてからほかを開く → どちらも同じ共有ビューで切り替わる（白画面・二重読み込みなし）
   7. `main.log` の `STARTUP phase=window-init` → `core-shown` の間が前のビルドより長くなっていない
+
+#### S4ac-4 ステージの削除（2026-11-12）
+
+ゲームごとのトラッカー（Bo3 / Bo5 の各ゲームのステージと勝者の行 `score.{n}.stages`）を core・v1・設定から削除した。**オーナー承認: 2026-11-11「ステージの core・v1・設定を削除してよい」**（上の S4ac の設計のオーナー論点 1）。行の UI は S4ac-3 で Qt の SCORE と一緒に消えていて、React には順序 6 の論点 1 で出さないと決めていたので、画面の違いは設定 → 一般のチェックボックスが消えることだけ。外から見える違いは state の `score.{1,2}.stages` が無くなることと、v1 の 2 ルートが無くなること（下の動作の違い）。
+
+- **完了内容**
+  - 削除したファイル: `src/core/GameTrackerService.py`（388 行）・`tests/test_game_tracker_service.py`（370 行）
+  - `src/` と `assets/`: 21 ファイル（`.qm` 2 を含む）、+88 / −865
+    - `core/Actions.py`: ボードごとのトラッカー `_gameTrackers` / `GameTracker(board)`。スコアを動かす操作（`AdjustScore` / `ResetScore` / `SetScore` / `ClearScore`）の `Scores()` + `FollowScores`、`SwapTeams` の `SwapStageResults`、`_PublishBestOf` の行数の作り直し（`SetStageCount(ResolveStageCount)`）。`AdjustScore` は書き込みが 1 つなので `SaveBlock` を外した（lock は読みから書きまで残す）。スコアの書き手の説明は 2 系統に
+    - `AutonaWebOperations.py`: `update_stage` / `get_stages` / `STAGE_NO_ROWS` / `STAGE_NO_SUCH_GAME` / `STAGE_UNKNOWN`
+    - `AutonaApiV1.py`: `GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`・`_STAGE_WINNERS` / `_STAGE_REFUSALS`。`AutonaApiInfoWindow.py` の 2 行。`core/WebAccess.py` の `api_v1.get_stages` / `api_v1.stage_update`（v1 のルートは 77 → 76 本、`EXPECTED_API_V1_ROUTES` は 120 → 118 本）
+    - `core/StateSchema.py`: `SCORE_BOARD_KEYS` の `"stages.{I}"`
+    - `core/SetFollowService.py`: セット読込のスコアの前後の `FollowScores`（と、そのための lock）。`core/SetLoadService.py`: 行の不変条件の docstring
+    - `core/GameAssetCatalog.py`: `stageRows` / `stageRowsSorted` / `StagesPayload` / `StageRow`（読み手は v1 とトラッカーのコンボだけ）。`AutonaGameAssetManager.py`: `stageModel` / `stageModelWithBlank` / `UpdateStageModel` / `LoadStageImage` / `LoadStageImageComplete` / `_stageIconGeneration` / プロパティ `stages`（読み手はテストだけだった。ステージの定義は `GameAssetCatalog.Current().stages` に残る）
+    - `core/AppSettings.py`: `general.disable_individual_game_tracker`。`Settings/AutonaSettingsWindow.py`: 一般タブのチェックボックス。`Helpers/AutonaVersionHelper.py`: `get_beta_status` / `add_beta_label`（呼び手はこのチェックボックスだけ）。`assets/versions.json`: `beta_features`（読み手は `get_beta_status` だけ。`web_score` は HEAD でも読まれていなかった。`program` だけを読むアップデーター・リリーススクリプトは無関係）
+    - `i18n/Autona_{en,ja}.ts`: チェックボックスの文言を削除して `.qm` を再コンパイル
+    - コメント・docstring だけ: `bootstrap.py` / `core/StateManager.py`
+  - `tests/`: 23 ファイル（削除 1 を含む）、+939 / −1750。新規は照合スクリプト `tests/fixtures/board_operations/verify_s4ac4.py`（257 行。下の golden）。トラッカー・v1 の 2 ルート・`StagesPayload` / ステージのモデル・設定のテストを削除し、スコアの操作のテストから行の assert を外した（`test_actions` / `test_api_v1_score` / `test_scoreboard_operations` / `test_set_follow` / `test_score_typing` / `test_game_asset_*` ほか）。golden は下の golden
+  - docs: `external-control-api.md`（§5.16 / §6.36 は「削除」の注記を残して番号を欠番に。設定の例・反映の門の一覧・入替・クルーの拒否の一覧から外した）/ `Design.md` / `rules/state-and-webserver.md` / `rules/python-widgets.md` / `runtime-operations.md` / `docs/product/features.md`（§14 は目次のアンカーのため見出しを残して本文を「削除済み」に）/ `headless-core-redesign.md`（キー族の表の行を取り消し線）/ `rules/agent-pitfalls.md` の #17（例の `PublishStageResults` が消えた機能であることを明記。理由は残る）/ `manual-test-checklist.md`（GameAssetManager の確認はキャラだけ）
+
+- **判断と理由**
+  1. **古い `state.json` の `score.{n}.stages` は移行しない**: 起動時の `MakeBoards` が `ResetScoreRoot` でボードのルートを消し、`SeedBoard` が `Set(prefix, {})` で部分木ごと置き換えてから作るので、保存された行は読まれずに消える。`StateMigrations` の step も `STATE_VERSION` の変更も要らない（設計時の見立てのとおり）。pin は `test_headless_seed.py::test_a_restored_board_with_game_rows_launches_without_them`（デスクトップ / ヘッドレス。行のあるボード 1 / 2 と `stages: {}` のボード 3 を復元して起動 → 公開した state にもライブのボードにも `stages` が無く、選手のスロットはある）。`ResetScoreRoot` を外しても `SeedBoard` の置き換えだけで通る（二重に守られている）
+  2. **古い `settings.json` の `general.disable_individual_game_tracker` は移行せず無視**（S4ac-3 の `qt_scoreboard_panel` と同じ。S4c の前例）。読み手がいないので値に関係なく何も起きない。v1 の `PATCH /settings/general` は未知のキーとして 400（`test_api_v1_settings.py` / `test_app_settings.py`）
+  3. **v1 の 2 ルートは代わりの答えを置かずに消した**（410 などの専用ルートを足さない）。外部の呼び手が受け取るものは下の動作の違い 3
+  4. **`beta_features` ごと消した**: BETA の表示はこのチェックボックスだけが使っていた。S4ae の申し送り「ゲームトラッカーの BETA 表示をページで出すかを S4af で決める」は対象が無くなった
+  5. **golden の録音は変えない**: S4t / S4ac-3 と同じく、変えた分をテストの側の層として最後に当てる（下の golden）。差分は 1 件ずつ原因を確かめた
+  6. **ステージという語のほかの意味は残す**（下の残置 1）
+
+- **動作の違い**
+  1. state から `score.{1,2}.stages` が消える（`program_state.json`・WebSocket の delta・`/api/v1` のボードの読み取り）。同梱の `layout/` と `web/src` に読み手は無い（`git grep`。`has_stages` はゲームの別のキー）。ユーザーの自作レイアウトが読んでいれば空になる
+  2. 設定 → 一般の「個別ゲームトラッカーを無効化（再起動後に反映）」（BETA の表示付き。既定はチェックあり = 無効）が無い
+  3. **v1 の外部の呼び手が受け取るもの**（この PC からでも LAN からでも同じ。どちらもルーティングの段で決まり、トークンの検査より前）:
+     - `GET /api/v1/stages` → **404**（v1 の封筒ではなく、静的ファイルのルートの `File not found`）
+     - `PATCH /api/v1/scoreboards/{n}/stages/{game}` → **405**（HTML。同じパターンの静的ルートが GET だけを持つため）
+  4. スコアの操作の保存サイクルが減る: `+1` / `-1`・スコアの手入力・リセット・クリア・セット読込で行の追従の書き込みが無くなった。ゲームのロードは文言が変わらなければ何も書かない（それまでは行の作り直しで、変化が無くても 1 サイクル出ていた）
+  5. `out/` は、行が空なら元からファイルが無かったので変わらない。前の版でトラッカーを ON にして行を作っていた場合、`out/score/{b}/stages/` の古いテキストは残る（起動時の書き出しの比較元が `{}` で、消えたキーとして見えない。ほかの廃止したキーと同じ）
+
+- **残置とリスク**
+  1. **残したステージ**（別の意味。トラッカーとは無関係）: start.gg のステージストライク / ルールセット（`StartGGDataProvider`）・ゲームのステージの定義 `GameAssetCatalog.stages` と `StageFromStartGGId`（start.gg のセット読込が使う）・アセットパックの `stage_icon`・`game.has_stages`（`GAME_KEYS` と Web の `backendDataTypes`）・Web の Stage Strike の訳語・Top 8 の「staged scores」（入力の下書き）・`Design.md` の `stage_strike` の木の行・`tests/fixtures/game_assets/golden.json` のステージのモデル（録音。読まれなくなった）・`Actions.py` / `bootstrap.py` / `AppSettings.py` / `GameAssetCatalog.py` の歴史のコメント（S4ac-4 で消えたことを書いたもの）
+  2. 上の動作の違い 5 の `out/` の古いファイル（掃除はしない）
+  3. 歴史の文書（この文書の S4t / S4u / S4ab-2 / S4ac-3 の節、`headless-core-redesign.md` の Step 4a の記述）は当時のまま
+
+- **持ち越し**: DeepDiff の `threshold_to_diff_deeper`（delta の行の形が前回の公開とのキーの重なりで変わる。下の golden の 4）は別タスクで扱う。S4ac-4 では直さず、表の 1 行で受けている
+
+- **pin**: `tests/test_web_panel_host.py::test_the_game_tracker_and_its_switch_are_gone`（S4ac-3 の `test_the_qt_scoreboard_panel_and_its_switch_are_gone` に倣う）
+  - `core/GameTrackerService.py` が無く、`src` / `main.py` / `tests` / `tests/live` に import が無い（AST）・`AutonaActions` に `GameTracker` が無い
+  - `SCORE_BOARD_KEYS` に `stages` で始まる項目が無い
+  - `GameAssetCatalog` / `AutonaGameAssetManager` の AST（関数・クラスの定義・属性・注釈付きの代入）に `StagesPayload` / `StageRow` / `stageRows` / `stageRowsSorted` / `stageModel` / `stageModelWithBlank` / `UpdateStageModel` / `LoadStageImage` / `LoadStageImageComplete` / `_stageIconGeneration` が無い
+  - Web サーバーと `api_v1` に `/stages` を含むルールが無い・`ROUTE_ACCESS` に `api_v1.get_stages` / `api_v1.stage_update` が無い
+  - `AppSettings.SETTINGS` に設定が無い・`src` の文字列定数（docstring を除く。消えたことを書いた docstring は読み手ではない）と `web/src` に `individual_game_tracker` が無い
+  - ほかに: `test_headless_seed.py` の古い state の起動（判断 1）、`test_app_settings.py::test_the_game_tracker_switch_is_not_one_of_them`、`test_webserver_routes.py` のルートの数（76 / 118）
+
+- **壊して確認**（1 か所ずつ戻して回し、落ちることを確かめてから戻した）
+  - 新しい pin（8 通り、すべて落ちた）: `core/GameTrackerService.py` の復活・`GameAssetCatalog` に `StagesPayload` の定義・`AutonaGameAssetManager` に `self.stageModel`・`GET /api/v1/stages` のルート・`AppSettings` / `StateSchema` / `WebAccess` を HEAD に戻す（設定・`stages.{I}`・`ROUTE_ACCESS`）・`src` のモジュール定数 `"disable_individual_game_tracker"`。戻した後の pin は緑
+  - pin の文字列の検査（docstring を除いた後）: `src` に設定のキーを読む関数を足す・設定の窓を HEAD に戻す（チェックボックスの引数）→ どちらも `assert readers == []` で落ちた。キーを書いた docstring を足しても通る
+  - 古い state の起動: 判断 1 のとおり、`ResetScoreRoot` を外しただけでは落ちない（`SeedBoard` の置き換えが残るため）。docstring にその旨を書いた
+  - 表の照合スクリプト（下の golden）: 全体の 1 行の例外（`WHOLE_BOARD`）を外すと、その 1 ステップの `published` / `publishedRows` の 2 件で落ちた
+
+- **golden**: `tests/fixtures/**` は差分なし（`git diff --stat HEAD -- tests/fixtures` が空）。録音に `stages` を持つ 9 ファイルのうち、`game_assets` はステージのモデルが読まれなくなっただけ。照合の側で当てた層:
+  1. `roster` / `set_follow` / `stats`: `"stages":{}` が消えるだけ（state・書き込みの列・delta・キーの一覧から外して照合）。ほかのバイトは録音のまま
+  2. `test_player_apply.py`: ボードの部分木のダイジェストだけ。録音のキー順の位置（`first_to_text` の後）に `"stages": {}` を戻して計算する
+  3. `board_operations`（`golden` / `swap` / `clear` / `best_of` / `key_order`）: 期待の state と録音のキー順から行を外し、state のダイジェストは録音の行を録音のキー順の位置に戻して照合（ほかのバイトはすべて一致が要る）。行を書いていたステップのサイクル数と公開は、このツリーの値を表（`S4AC4_*`。swap 3・clear 13・singles clear 10・prepass 6・best of 28・singles best of 28・unbuilt 2 ステップ）に固定し、各行を HEAD のツリーの delta から `stages` の行（ボード全体・`score` ルートの値の中を含む）を外したものと照合した。内訳:
+     - 反映の公開に行が入っていただけ（best of で作り直し・スコアで追従・クリア / セット読込でリセット）: ほかの行は録音のまま
+     - ステージのボタンのステップ: クリックで集計されたスコアを v1 の `score:set` で書く（`_resultsScore`）。クリックの 6 サイクルが 1 サイクル（6 → 1）、スコアが既にそうだったステップは 0（6 → 0）。ほかの操作も含むステップは、残りの操作のサイクルが録音のまま（11 → 6: 詰め直しと LOSERS の 5・10 → 5: 詰め直しの 4・7 → 2: best of の 1・9 → 4: 詰め直しと best of の 3）
+     - ゲームのロード: `RepublishBestOfs` の行の作り直しの 1 サイクルが無くなった（2 → 1）
+     - トラッカーを切っていた「board operations」の録音は何も変わらない（`S4AC4_CHANGES = {}`）
+  4. **想定外だった 1 件**（原因を調べて受け入れた）: prepass の「follow a set without keeping mains」の反映が、録音では欄ごとの行、いまはボード全体の `values_changed` 1 行になる。state は同じ。原因は DeepDiff 8.1.1 の `threshold_to_diff_deeper=0.33`: そのサイクルが比べる階層のキーのうち、前回の公開にあったものが 1/3 未満だと dict ごと置き換えとして出す。追従は `auto_update` / `set_id` / `station` / `team` を比べ、前回の公開にあったのは `team` だけ（1/4）。録音のときは前回の公開にあった `stages` も比べていた（2/5）。clear の録音の「follow a set」はもともとこの 1 行の形（HEAD でも同じ形）。オーバーレイと `/web` は delta を state に当てるだけなので結果は同じ
+  - **照合の再現**: 表の digest は録音ではなくこのツリーの出力（録音には公開した delta の digest しか無く、録音から行を外せない）。照合に使った木は **8b4b2fdf**（S4ac-4 の直前。マージ 2d47c1db と同じツリー）。`tests/fixtures/board_operations/verify_s4ac4.py` が照合を再現する: `git archive 8b4b2fdf | tar -x -C ../autona-pre-s4ac4` で作ったコピーとこのツリーで `tests/test_board_operations.py` を回し（どちらも緑が前提。古い木の出力 = 以前の層を当てた録音）、表が書き換えるフィールドごとに、digest の元の delta の行が「古い木の行から `stages` の行を外したもの」と一致すること・delta の数が追従すること・表のフィールドが実際に動いたものだけであることを確かめる。全体の 1 行（4）は、新しい 1 行が古い欄ごとの行のすべてと矛盾しないことを確かめる。2026-11-12 に実行して OK（8 表・90 ステップ）。pytest は集めない（`test_*.py` ではない）
+  - 設計時の見立て（「golden 8 ファイルから `{}` が消えるだけ」）との違いは 3 のサイクル数・公開・ゲームのロードと 4。どれもトラッカーが書いていた分が消えたもの
+
+- **検証**
+  - 変えたテストファイルごとの pytest: 緑（`test_board_operations.py` 15・`test_player_apply` / `test_roster_flow` / `test_set_follow_flow` / `test_player_service` 130・`test_stats_flow` + ルート 10・`test_headless_seed.py` 50）
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: 6083 passed / 0 failed / 2 skipped（S4ac-3 の 6180 から、削除したテストの分が減った）
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: 6083 passed / 25 skipped（`tests/live` 23・録音専用 2）/ 0 failed
+  - v1 の 2 ルートの答え: Flask の test client で、この PC と LAN（トークンなし）から `GET /api/v1/stages` 404・`PATCH /api/v1/scoreboards/1/stages/1` 405 を確かめた（一時的なテスト。リポジトリには入れていない）
+  - pyflakes: 変えたファイルで HEAD に無い警告なし
+  - 独立レビューの指摘の修正の後（表の注記と照合スクリプト・pin の docstring の除外・#17 / チェックリスト）: `test_board_operations.py` 15 passed・`test_web_panel_host.py` 145 passed・`verify_s4ac4.py` OK・直列の全量 6083 passed / 25 skipped / 0 failed
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  1. 前の版でトラッカーを ON にした `settings.json`（`general.disable_individual_game_tracker: false`）と、行のある `state.json`（`score.1.stages.{1..3}`）で起動 → エラーなし。SCORE のページが普通に出て、`out/program_state.json` の `score.1` / `score.2` に `stages` が無い
+  2. 設定 → 一般にトラッカーのチェックボックスが無い（ほかの項目の並びが崩れていない）
+  3. SCORE のページで BEST OF の変更・`+1` / `-1`・スコアの手入力・すべての入力値をリセット・セットの読込と追従 → 値が反映されて公開される（ログに `GameTracker` / `stages` のエラーが無い）
+  4. ゲームを切り替える → BEST OF の文言がロケールどおり、反映待ちが点かない
+  5. `GET http://127.0.0.1:5107/api/v1/stages` が 404、`PATCH /api/v1/scoreboards/1/stages/1` が 405
 
 
 ### 2026-11-12 S4ac-3 の実機確認で見つかった 2 件

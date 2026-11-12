@@ -241,11 +241,7 @@ SCORE ページのクルー形式（board 3。[web/src/ScorePage/](../../web/src
 
 ## 14. Individual Game Tracker
 
-[src/core/GameTrackerService.py](../../src/core/GameTrackerService.py)（記録と v1 の `GET /api/v1/stages`・`PATCH /api/v1/scoreboards/{n}/stages/{game}`）。
-
-- Bo3/Bo5 の各ゲームごとに使われたステージ・勝者を記録（ベータ機能）
-- 設定から有効化
-- 行の UI は Qt のスコアボード（`AutonaIndividualGameTracker`）にだけあり、ADR-005 S4ac-3 で一緒に削除した。React の SCORE ページには出さない（順序 6 の論点 1）。core と v1 を消すかは S4ac-4 のオーナー論点
+**削除済み**。Bo3/Bo5 の各ゲームごとに使われたステージ・勝者を記録するベータ機能だった。行の UI（Qt のスコアボードの `AutonaIndividualGameTracker`）は ADR-005 S4ac-3 で Qt の SCORE ごと削除し、記録（core の `GameTrackerService`・state の `score.{n}.stages`）・v1 の `GET /api/v1/stages` / `PATCH /api/v1/scoreboards/{n}/stages/{game}`・設定 `general.disable_individual_game_tracker` も ADR-005 S4ac-4（2026-11-12、オーナー承認 2026-11-11）で削除した。節の番号は欠番として残す。
 
 ---
 
@@ -396,7 +392,6 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 - 下品表現フィルター
 - 自動セット更新の有効/無効
 - サムネイルウィジェット無効化
-- Individual Game Tracker 有効化（ベータ）
 
 ### Hotkeys タブ
 - 各アクションの再割り当て

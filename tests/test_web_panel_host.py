@@ -2066,10 +2066,22 @@ def _importedModules(path):
     return names
 
 
-def _stringConstants(path):
+def _stringConstants(path, docstrings=True):
+    """The string constants of a module. `docstrings=False` leaves out the
+    docstrings (a module's, class's or function's leading string), which
+    record a name without reading it."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    skipped = set()
+    if not docstrings:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)) and node.body:
+                first = node.body[0]
+                if isinstance(first, ast.Expr)                         and isinstance(first.value, ast.Constant)                         and isinstance(first.value.value, str):
+                    skipped.add(id(first.value))
     return [node.value for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and id(node) not in skipped]
 
 
 def test_the_qt_scoreboard_panel_and_its_switch_are_gone():
@@ -2119,6 +2131,80 @@ def test_the_qt_scoreboard_panel_and_its_switch_are_gone():
     spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
         encoding="utf-8")
     assert "src/layout" not in spec
+
+
+def test_the_game_tracker_and_its_switch_are_gone():
+    # ADR-005 S4ac-4 (the owner's go-ahead, 2026-11-11): the per-game
+    # tracker went from core, v1 and the settings after its Qt rows went
+    # with the Qt SCORE (S4ac-3). None of it may come back: the service,
+    # the board's `stages` rows, v1's two routes and the switch
+    # `general.disable_individual_game_tracker` (a stale key in a user's
+    # settings.json is never read, a stale `score.{n}.stages` in state.json
+    # goes with the launch's ResetScoreRoot).
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.AutonaWebServer import _build_web_app
+    from src.core import AppSettings
+    from src.core import StateSchema as schema
+    from src.core.Actions import AutonaActions
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "core" / "GameTrackerService.py").exists()
+    scanned = [*sorted(src.rglob("*.py")), PROJECT_ROOT / "main.py",
+               *sorted((PROJECT_ROOT / "tests").glob("*.py")),
+               *sorted((PROJECT_ROOT / "tests" / "live").glob("*.py"))]
+    importers = [str(path.relative_to(PROJECT_ROOT)) for path in scanned
+                 if "GameTrackerService" in _importedModules(path)]
+    assert importers == []
+    assert not hasattr(AutonaActions, "GameTracker")
+
+    # The rows: no key of the board's, nothing that builds their combos
+    # (the asset adapter's models are instance attributes, so the source is
+    # read: no definition or attribute of those names).
+    assert [key for key in schema.SCORE_BOARD_KEYS
+            if key.split(".")[0] == "stages"] == []
+    gone = {"StagesPayload", "StageRow", "stageRows", "stageRowsSorted",
+            "stageModel", "stageModelWithBlank", "UpdateStageModel",
+            "LoadStageImage", "LoadStageImageComplete",
+            "_stageIconGeneration"}
+    for module in (GameAssetCatalog, AutonaGameAssetManager):
+        path = PROJECT_ROOT / module.__module__.replace(".", "/")
+        tree = ast.parse(path.with_suffix(".py").read_text(encoding="utf-8"))
+        names = {node.name for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+        names |= {node.attr for node in ast.walk(tree)
+                  if isinstance(node, ast.Attribute)}
+        names |= {node.target.id for node in ast.walk(tree)
+                  if isinstance(node, ast.AnnAssign)
+                  and isinstance(node.target, ast.Name)}
+        assert sorted(names & gone) == [], module.__module__
+
+    # v1: neither route is served or classified.
+    app, _socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    rules = [str(rule.rule) for rule in app.url_map.iter_rules()]
+    assert [rule for rule in rules if "/stages" in rule] == []
+    for endpoint in ("api_v1.get_stages", "api_v1.stage_update"):
+        assert endpoint not in WebAccess.ROUTE_ACCESS, endpoint
+
+    # The switch: not a setting, no reader of the key (as a string anywhere
+    # in src's code -- comments and docstrings recording that it went do not
+    # read it -- nor in the React pages).
+    assert "disable_individual_game_tracker" not in [
+        setting.name for setting in AppSettings.SETTINGS]
+    readers = [str(path.relative_to(PROJECT_ROOT))
+               for path in sorted(src.rglob("*.py"))
+               if any("individual_game_tracker" in value
+                      for value in _stringConstants(path, docstrings=False))]
+    assert readers == []
+    web = PROJECT_ROOT / "web" / "src"
+    pages = [str(path.relative_to(PROJECT_ROOT))
+             for pattern in ("*.js", "*.jsx", "*.ts", "*.tsx")
+             for path in web.rglob(pattern)
+             if "individual_game_tracker" in path.read_text(encoding="utf-8")]
+    assert pages == []
 
 
 # ── several React items, one host page (ADR-005 S4e) ────────────────────

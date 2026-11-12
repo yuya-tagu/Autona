@@ -16,7 +16,6 @@ read-only properties over the current snapshot. They hand out the catalog's
 own dicts: treat them as read-only and copy before writing (into the state,
 say).
 """
-import os
 import threading
 import traceback
 from concurrent.futures import CancelledError, Future
@@ -117,8 +116,6 @@ class AutonaGameAssetManager(QObject):
         self.skinModels = {}
         self.variantModel = QStandardItemModel()
         self.colorModel = QStandardItemModel()
-        self.stageModel = QStandardItemModel()
-        self.stageModelWithBlank = QStandardItemModel()
         # The previous model generation, kept alive until the next rebuild
         # (agent-pitfalls #13). See _RebuildModels.
         self._retiredModels = None
@@ -139,11 +136,11 @@ class AutonaGameAssetManager(QObject):
         self._loaderRunning = False
         self._loadFuture = None
         self._finishedGeneration = 0
-        # Generation of the stage / skin models the icon decodes are for.
-        # Bumped whenever UpdateStageModel / UpdateSkinModel replace those
-        # models; a decode result carrying an older value belongs to a retired
-        # generation and is dropped instead of being applied to its items.
-        self._stageIconGeneration = 0
+        # Generation of the skin models the icon decodes are for. Bumped
+        # whenever UpdateSkinModel replaces those models; a decode result
+        # carrying an older value belongs to a retired generation and is
+        # dropped instead of being applied to its items. (The per-game
+        # tracker's stage models had one too, until ADR-005 S4ac-4.)
         self._skinIconGeneration = 0
 
         # Startup restore of the last-used game (see _RestoreSelectedGame).
@@ -183,10 +180,6 @@ class AutonaGameAssetManager(QObject):
     @property
     def colors(self):
         return self.catalog.Current().colors
-
-    @property
-    def stages(self):
-        return self.catalog.Current().stages
 
     @property
     def biggestCompletePack(self):
@@ -536,9 +529,8 @@ class AutonaGameAssetManager(QObject):
         # pick persisted (onLoad's _PersistSelectedGame). Core's operations,
         # callable from any thread -- not through the board host, which
         # hands its work to the GUI thread (the loader's thread would wait
-        # for it). Left as they are: the stage rows, and the models a failed
-        # rebuild left part-way -- the next load redoes both
-        # (RepublishBestOf, _RebuildModels).
+        # for it). Left as they are: the models a failed rebuild left
+        # part-way -- the next load redoes them (_RebuildModels).
         from .core.Actions import AutonaActions
         actions = AutonaActions.instance
         for board in actions.ApplyGameRoster(
@@ -623,7 +615,7 @@ class AutonaGameAssetManager(QObject):
         asked for it, so overlapping loads converge on the latest one, and
         skips when the models already belong to that generation. GUI thread
         only (QPixmap / QIcon). Returns the Futures of the icon decodes it
-        started (UpdateSkinModel / UpdateStageModel), [] when it skipped:
+        started (UpdateSkinModel), [] when it skipped:
         `decodes` if given, appended to as each decode starts -- so a caller
         has the ones started before a failure part-way (the loader waits
         for them).
@@ -640,13 +632,12 @@ class AutonaGameAssetManager(QObject):
         # class as the AutonaPlayerDB.SetupModel boot crash, 2026-07-11).
         self._retiredModels = [
             self.characterModel, self.skinModels, self.variantModel,
-            self.colorModel, self.stageModel, self.stageModelWithBlank]
+            self.colorModel]
         self._modelGeneration = snapshot.generation
         self.UpdateCharacterModel(snapshot)
         self.UpdateSkinModel(snapshot, decodes)
         self.UpdateVariantModel(snapshot)
         self.UpdateColorModel(snapshot)
-        self.UpdateStageModel(snapshot, decodes)
         return decodes
 
     def _DecodeIcons(self, decode, complete, *args, task_name):
@@ -664,91 +655,6 @@ class AutonaGameAssetManager(QObject):
             result = decode(*args)
             AutonaQtHelper.gui_executor(lambda: complete(result))
         return TaskExecutor.instance.submit_fanout(run, task_name=task_name)
-
-    def UpdateStageModel(self, snapshot=None, decodes=None):
-        """Rebuild the two stage models; the Futures of their icon decodes
-        (appended to `decodes` if given, and that list returned)."""
-        snapshot = snapshot or self.catalog.Current()
-        decodes = [] if decodes is None else decodes
-        try:
-            self._stageIconGeneration += 1
-            generation = self._stageIconGeneration
-            self.stageModel = QStandardItemModel()
-            self.stageModelWithBlank = QStandardItemModel()
-            if not self._HasGame(snapshot):
-                return decodes
-            # Add blank
-            item = QStandardItem("")
-            item.setData({}, Qt.ItemDataRole.UserRole)
-            self.stageModelWithBlank.appendRow(item)
-
-            # The catalog orders both lists: config order for the stage
-            # combo, sorted for the with-blank one.
-            for model, rows in ((self.stageModel, snapshot.stageRows),
-                                (self.stageModelWithBlank,
-                                 snapshot.stageRowsSorted)):
-                for text, stage in rows:
-                    item = QStandardItem(text)
-                    item.setData(stage, Qt.ItemDataRole.UserRole)
-                    model.appendRow(item)
-
-                    decodes.append(self._DecodeIcons(
-                        self.LoadStageImage, self.LoadStageImageComplete,
-                        stage, item, generation,
-                        task_name=f"stage icon ({text})"))
-        except Exception:
-            logger.error(traceback.format_exc())
-        return decodes
-
-    def LoadStageImage(self, stage, item, generation):
-        # Runs on a fan-out thread. QPixmap / QIcon are GUI-thread only, so
-        # this stops at a QImage; LoadStageImageComplete converts it on the GUI
-        # thread. A None image asks for the fallback (cancel) icon.
-        try:
-            if stage.get("path") and os.path.exists(stage.get("path")):
-                img = Image.open(stage.get("path"))
-
-                resizeMultiplier = 1
-
-                if img.width > img.height:
-                    resizeMultiplier = 64/img.width
-                else:
-                    resizeMultiplier = 64/img.height
-
-                img = img.resize((int(img.width*resizeMultiplier),
-                                 int(img.height*resizeMultiplier)), Image.BILINEAR)
-
-                img = img.convert("RGBA")
-                data = img.tobytes("raw", "RGBA")
-                qimg = QImage(
-                    data, img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-
-                # copy(): the QImage above only wraps `data`, which does not
-                # outlive this call; the GUI thread gets one owning its pixels.
-                return (generation, item, qimg.copy())
-        except Exception:
-            logger.error(traceback.format_exc())
-            return (generation, item, None)
-
-    def LoadStageImageComplete(self, result):
-        # GUI thread (handed over by the LoadStageImage decode).
-        try:
-            if result is None:
-                return
-            generation, item, image = result
-            if generation != self._stageIconGeneration:
-                # The stage models were rebuilt while this decode ran: its
-                # item belongs to a retired generation.
-                return
-            if image is None:
-                icon = QIcon(QPixmap(CANCEL_ICON_PATH).scaled(32, 32))
-            else:
-                icon = QIcon(QPixmap.fromImage(image))
-            if not icon.isNull():
-                item.setIcon(icon)
-        except Exception:
-            logger.error(traceback.format_exc())
-            return (None)
 
     def GetStockIcon(self, en_name, skin=0):
         # Shared, memoised 32px stock-icon QIcon for a character/skin, from
@@ -889,8 +795,9 @@ class AutonaGameAssetManager(QObject):
         return decodes
 
     def LoadSkinImages(self, allAssetData, allItem, skinModel, generation, biggestCompletePack):
-        # Runs on a fan-out thread: stops at QImage (see LoadStageImage);
-        # LoadSkinImagesComplete builds the icons on the GUI thread.
+        # Runs on a fan-out thread. QPixmap / QIcon are GUI-thread only, so
+        # this stops at QImage; LoadSkinImagesComplete builds the icons on
+        # the GUI thread.
         # skinModel is unused: passed only to keep the model alive while the decode runs.
         # A None image (no usable asset, or one that failed to decode) asks
         # for the fallback (cancel) icon, per skin. The old code

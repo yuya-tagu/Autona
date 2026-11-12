@@ -2192,7 +2192,6 @@ _BODIES = {
     "api_v1.player_swap": {"first": 1, "second": 2},
     "api_v1.crew_member_update": {"name": "Walk"},
     "api_v1.crew_member_stock_adjust": {"delta": -1},
-    "api_v1.stage_update": {"winner": 1},
     "api_v1.display_options_update": {_DISPLAY_OPTION: True},
     "api_v1.clear": {"confirm": True},
     "api_v1.reset_all": {"confirm": True},
@@ -2264,7 +2263,7 @@ _NOT_200 = {
     **{(f"api_v1.{name}", 3): 400 for name in (
         "score_adjust", "score_set", "player_update", "player_load",
         "apply_changes", "stats_refresh", "load_set", "pull_stream",
-        "player_clear", "player_swap", "stage_update", "reset_all",
+        "player_clear", "player_swap", "reset_all",
         "get_scoreboard_follow", "follow", "stop_follow",
         # ADR-005 S4z.
         "player_fields_update", "player_character_update",
@@ -2275,8 +2274,6 @@ _NOT_200 = {
         "crew_member_update", "crew_member_stock_adjust")},
     # A team of one player has no second slot to exchange it with.
     ("api_v1.player_swap", 1): 404, ("api_v1.player_swap", 2): 404,
-    # The tracker is off here: the set has no game rows.
-    ("api_v1.stage_update", 1): 409, ("api_v1.stage_update", 2): 409,
     # No tournament loaded: the legacy set lookup raises (its provider is
     # None -- the desktop's too), /api/v1 answers 409 NOT_READY.
     ("get_match", None): 500,

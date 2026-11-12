@@ -143,19 +143,25 @@ def test_the_next_best_of_after_a_broken_locale_publishes_normally(
 def test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked(
         autonaApp):
     """The formatter's failure no longer raises (see _breakBestOfFormatting),
-    so the block is tested with a write inside it that does: the stage rows'
-    rebuild. The exception reaches the caller -- SetBestOf is called
+    so the block is tested with a write inside it that does: the last of the
+    six keys (the stage rows' rebuild, until the tracker went in ADR-005
+    S4ac-4). The exception reaches the caller -- SetBestOf is called
     directly now -- and the counter is back at zero on the way out."""
     from unittest.mock import patch
 
     from src.core.Actions import AutonaActions
-    from src.core.GameTrackerService import GameTrackerService
+    from src.core.StateManager import StateManager
+
+    def raiseOnTheLastKey(key, value):
+        if key == "score.1.first_to_text":
+            raise RuntimeError("first_to_text")
+        return StateManager.SetIfChanged(key, value)
 
     autonaApp.ready(1)
     state = autonaApp.state
     try:
-        with patch.object(GameTrackerService, "SetStageCount",
-                          side_effect=RuntimeError("rows")):
+        with patch.object(AutonaActions, "_SetIfChanged",
+                          side_effect=raiseOnTheLastKey):
             with pytest.raises(RuntimeError):
                 AutonaActions.instance.SetBestOf(1, 5)
         assert state.saveBlocked == 0
@@ -177,9 +183,9 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
     no place to put a finally, so the pairing is only as safe as the code
     between the brackets. Pinning the handler as a real method keeps the
     `with StateManager.SaveBlock():` the only way to write it -- in core
-    since ADR-005 S2e, where the six keys and the stage rows are written
-    (AutonaActions.SetBestOf / RepublishBestOf / RepublishBestOfs; the Qt
-    spinbox's handler only asked for the change, and went in S4ac-3).
+    since ADR-005 S2e, where the six keys are written (AutonaActions.SetBestOf
+    / RepublishBestOf / RepublishBestOfs; the Qt spinbox's handler only asked
+    for the change, and went in S4ac-3; the stage rows went in S4ac-4).
     """
     import inspect
 

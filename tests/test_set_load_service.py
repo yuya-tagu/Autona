@@ -12,11 +12,10 @@ leaving it alone -- lived as comments rather than tests.
 Since headless core Step 4b the rules are ``src/core/SetLoadService.py`` and
 this module is where they are pinned.
 
-Isolation follows tests/test_game_tracker_service.py: StateManager writes
-./out relative to the CWD, so this runs in a temp directory, and the shared
-singletons are handed back untouched -- this module runs in the same
-process, against the same StateManager, as the widget harness in later
-modules.
+Isolation: StateManager writes ./out relative to the CWD, so this runs in
+a temp directory, and the shared singletons are handed back untouched --
+this module runs in the same process, against the same StateManager, as the
+widget harness in later modules.
 """
 import os
 import tempfile
@@ -49,8 +48,7 @@ def _isolated_state():
         changedKeys = list(SM.changedKeys)
         heldPrefixes = set(SM.heldPrefixes)
         heldKeys = {prefix: list(keys) for prefix, keys in SM.heldKeys.items()}
-        # Same reason as the tracker suite: a board built by the widget
-        # harness registers score.1 as held, which would swallow every write
+        # A board built by the widget harness registers score.1 as held, which would swallow every write
         # below into heldKeys and make the save-cycle counts read zero.
         SM.heldPrefixes = set()
         SM.heldKeys = {}

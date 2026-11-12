@@ -609,9 +609,9 @@ class StateManager:
                     #
                     # This is the ordinary shape of a SaveBlock that only
                     # wrote held keys (a write under a held prefix goes to
-                    # heldKeys, never to changedKeys): every +1 with the game
-                    # tracker on, the stage handlers, ResetScore. (Not the
-                    # swap since ADR-005 S2c: it
+                    # heldKeys, never to changedKeys): ResetScore, both teams'
+                    # score:set.
+                    # (Not the swap since ADR-005 S2c: it
                     # also re-Sets the upset factor, a held-exempt stats key.)
                     # It also covers CommitHeld on a board with nothing
                     # pending.

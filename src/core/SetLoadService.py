@@ -11,7 +11,7 @@ spinboxes so their ``valueChanged`` would write the score. The state was the
 *byproduct* of poking a form.
 
 Since headless core Step 4b it is the other way round, matching what Step 3
-did to the score and Step 4a to the stage rows: **this class decides and
+did to the score: **this class decides and
 writes, the board renders what it finds in the state** (the Qt board's
 ``_SyncSetFields`` / ``_SyncScoreDisplays`` until S4ac-3; the SCORE page
 now). That
@@ -32,15 +32,6 @@ Best of: what a payload carries is read here (``BestOfFromSetData``), and
 written by ``AutonaActions.SetBestOf`` -- the operation every entry point of
 the set length shares since ADR-005 S2e (it was the BEST OF spinbox, which
 the board drove from a set load).
-
-INVARIANT -- stage rows. Nothing here writes ``score.{n}.stages.*``. The row
-count is resized by ``GameTrackerService.SetStageCount()`` alone, reached
-from ``AutonaActions.SetBestOf`` (see ``StageCount()``), and a set load that
-grew the rows on its own would leave rows nothing renders. A loaded score
-reaches the stages the same way a +1 does: this class writes
-``team.{t}.score`` and the operation around it
-(``SetFollowService.ApplySetPayload``) hands the transition to
-``GameTrackerService.FollowScores``, in the same block (ADR-005 S4t).
 
 Import side effects: none (agent-pitfalls #1). An instance is bound to one
 board and holds nothing of its own (the set loaded last is class-level, by
@@ -235,13 +226,7 @@ class SetLoadService:
 
         `reset_score` zeroes both first, exactly as the old code did by
         driving the spinboxes to 0 -- but the zero and the value that
-        follows it now land in the same save cycle, so the rows follow one
-        transition instead of two (the caller's FollowScores). That matters
-        for the individual game
-        tracker: the old "clear then re-award" pass rebuilt the stage rows
-        from scratch, which reordered them whenever a set had interleaved
-        wins (T2, T1, T1 came back as T1, T1, T2). The rows are left alone
-        when the score does not actually move now.
+        follows it now land in the same save cycle (the caller's block).
 
         `general.disable_scoreupdate` suppresses only the scores the payload
         brought, never the reset -- same as before.

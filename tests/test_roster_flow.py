@@ -30,6 +30,11 @@ The save cycles a step took are not part of it: a count change used to be
 one cycle per card for the characters, and is one now (the held cycles are
 the board's own business -- nothing is published until 反映).
 
+ADR-005 S4ac-4 removed the game tracker's rows, `score.{n}.stages`, which
+the recording holds empty in every board subtree: they are taken out of the
+recorded subtree (_withoutTheRows) and every other byte is compared as
+before.
+
 Record (on the pre-S3e-6 tree only):
 
     AUTONA_RECORD_ROSTER=1 python -m pytest tests/test_roster_flow.py -k recorded
@@ -134,6 +139,14 @@ class Steps:
 
 # ── golden ───────────────────────────────────────────────────────────────
 
+def _withoutTheRows(step):
+    """A recorded step without the game tracker's empty rows (ADR-005
+    S4ac-4), the only key of the recording the board no longer has."""
+    if "state" not in step:
+        return step
+    return dict(step, state=step["state"].replace(',"stages":{}', ""))
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -145,7 +158,8 @@ def _check(name, recorded):
             json.dumps(golden, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
+    golden = [_withoutTheRows(step) for step in
+              json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]]
     assert [s["step"] for s in recorded] == [s["step"] for s in golden]
     for actual, expected in zip(recorded, golden):
         differ = [field for field in expected if field not in WIDGET_FIELDS
@@ -472,7 +486,8 @@ def test_a_threaded_game_load_publishes_the_recorded_roster(
               lambda: _loadGameThreaded(TEAM_GAME), commit=False)
     _assertRosterWhole()
 
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))["game load"]
+    golden = [_withoutTheRows(step) for step in json.loads(
+        GOLDEN_PATH.read_text(encoding="utf-8"))["game load"]]
     for actual, expected in zip(steps.recorded, golden):
         assert actual["step"] == expected["step"]
         differ = [field for field in expected if field not in WIDGET_FIELDS

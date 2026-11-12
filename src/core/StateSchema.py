@@ -269,7 +269,6 @@ SCORE_BOARD_KEYS = (
     "station",
     "station_queue",
     "teamsSwapped",
-    "stages.{I}",            # dict: t1_win, t2_win, tie
     "last_sets.{T}.{I}",
     "history_sets.{T}.{I}",
     "recent_sets",           # dict: sets, request_time

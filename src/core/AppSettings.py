@@ -66,8 +66,8 @@ SETTINGS = (
             False, BOOL),
     Setting(GENERAL, "disable_overwrite", "general.disable_overwrite",
             False, BOOL),
-    Setting(GENERAL, "disable_individual_game_tracker",
-            "general.disable_individual_game_tracker", True, BOOL),
+    # general.disable_individual_game_tracker went with the per-game
+    # tracker (ADR-005 S4ac-4): a saved value is never read.
     Setting(GENERAL, "team_1_default_color", "general.team_1_default_color",
             "#fe3636", COLOR),
     Setting(GENERAL, "team_2_default_color", "general.team_2_default_color",

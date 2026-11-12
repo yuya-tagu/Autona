@@ -34,7 +34,10 @@ PlayerService alone.
 What S3e-3 changed on purpose is listed in ``CHANGES`` and applied to the
 recording before the comparison; everything else has to match. The
 steps the S3e-3 review changed were recorded again on that tree instead
-(marked "rerecorded" in golden.json; see ``CHANGES``).
+(marked "rerecorded" in golden.json; see ``CHANGES``). ADR-005 S4ac-4
+removed the game tracker's rows, which the recorded subtrees held empty:
+the state digest is taken with them put back where they were
+(_withTheRecordedRows).
 """
 import ast
 import copy
@@ -100,13 +103,28 @@ def _keyOrders(value, path=""):
     return orders
 
 
+def _withTheRecordedRows(board):
+    """`board` as the recorded tree held it, for the digest: ADR-005 S4ac-4
+    removed the game tracker's rows, which the recording has empty in every
+    scenario, right after `first_to_text` (where a best of wrote them, as in
+    every recorded key order of tests/test_board_operations.py). Every
+    other byte of the subtree is still compared."""
+    assert "stages" not in board, "a board has the game tracker's rows again"
+    rebuilt = {}
+    for key, item in board.items():
+        rebuilt[key] = item
+        if key == "first_to_text":
+            rebuilt["stages"] = {}
+    return rebuilt
+
+
 def _subtree(app, root):
     """The subtree as a digest of its exact encoding (key order included),
     plus, readable, what a player load can move: the teams and the board's
     own scalars (the upset factor)."""
     with StateManager.lock:
         value = deep_clone(StateManager.Get(root) or {})
-    exact = normalise(encode(value), app.dir)
+    exact = normalise(encode(_withTheRecordedRows(value)), app.dir)
     shown = {key: item for key, item in value.items()
              if key == "team" or not isinstance(item, (dict, list))}
     readable = json.loads(normalise(orjson.dumps(

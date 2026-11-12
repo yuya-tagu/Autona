@@ -54,7 +54,6 @@ from .core import TournamentMediaService as tournamentMedia
 from .core import TournamentService as tournaments
 from .core.CrewBattleService import CrewBattleService
 from .core.GameAssetCatalog import GameAssetCatalog
-from .core.GameTrackerService import TEAM_1, TEAM_2, TIE, UNREPORTED
 from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
 from .core.SettingsManager import SettingsUnreadable
@@ -657,15 +656,6 @@ def get_characters():
 @api_handler
 def get_variants():
     return ok(data=WebOps.get_variants())
-
-
-@api_v1.route("/stages")
-@api_handler
-def get_stages():
-    # The stages the loaded game offers a game row, in the combo's order:
-    # [{"text", "en_name", ...}]. `en_name` is what PATCH .../stages/{game}
-    # takes (ADR-005 S4u).
-    return ok(data=WebOps.get_stages())
 
 
 @api_v1.route("/sets")
@@ -1659,61 +1649,6 @@ def crew_member_stock_adjust(n, t, m):
     return ok(revision=current_revision())
 
 
-# PATCH .../stages/{game}'s `winner`: None (not played) is apart, a value of
-# its own. The state team, like every v1 team number.
-_STAGE_WINNERS = {1: TEAM_1, 2: TEAM_2, "tie": TIE}
-# What it answers for each of WebOps.update_stage's refusals.
-_STAGE_REFUSALS = {
-    WebOps.STAGE_NO_ROWS:
-        (NOT_READY, "the set has no game rows: the game tracker is off, or "
-                    "no best of is set", 409),
-    WebOps.STAGE_NO_SUCH_GAME:
-        (NOT_FOUND, "the set has no such game", 404),
-    WebOps.STAGE_UNKNOWN:
-        (INVALID_ARGUMENT, "unknown stage", 400),
-}
-
-
-@api_v1.route("/scoreboards/<int:n>/stages/<int:game>", methods=["PATCH"])
-@write_op("stage.update")
-def stage_update(n, game):
-    # Some of {"winner": 1, 2, "tie" or null (not played), "stage": an en_name
-    # from GET /stages, or null to empty it}: one game row (1-based, the
-    # state's key), in one save cycle (ADR-005 S4u). A winner moves the team
-    # scores to what the rows add up to, as the tracker's buttons do.
-    require_board_12(n)
-    if game < 1:
-        raise ApiError(INVALID_ARGUMENT, "game must be 1 or greater", 400)
-    body = _json_body()
-    unknown = sorted(k for k in body if k not in ("winner", "stage"))
-    if unknown:
-        raise ApiError(
-            INVALID_ARGUMENT, f"unknown stage field: {', '.join(unknown)}", 400)
-    if not body:
-        raise ApiError(INVALID_ARGUMENT, "one of winner, stage is required", 400)
-    fields = {}
-    if "winner" in body:
-        winner = body["winner"]
-        if winner is None:
-            fields["winner"] = UNREPORTED
-        elif (isinstance(winner, (int, str)) and not isinstance(winner, bool)
-                and winner in _STAGE_WINNERS):
-            fields["winner"] = _STAGE_WINNERS[winner]
-        else:
-            raise ApiError(
-                INVALID_ARGUMENT, 'winner must be 1, 2, "tie" or null', 400)
-    if "stage" in body:
-        if body["stage"] is not None and (
-                not isinstance(body["stage"], str) or not body["stage"]):
-            raise ApiError(
-                INVALID_ARGUMENT, "stage must be a stage's en_name or null", 400)
-        fields["stage"] = body["stage"]
-    refusal = WebOps.update_stage(n, game, fields)
-    if refusal is not None:
-        raise ApiError(*_STAGE_REFUSALS[refusal])
-    return ok(revision=current_revision())
-
-
 # What PUT /players answers for each of PlayerDirectory.Save's refusals. Fixed
 # messages: a refused value can be a person's.
 _PLAYER_SAVE_REFUSALS = {
@@ -2045,9 +1980,9 @@ def _settings_refused(refusal):
 @write_op("settings.general")
 def settings_general_update():
     # Some of profanity_filter, disable_autoupdate, disable_scoreupdate,
-    # disable_export, disable_overwrite, disable_individual_game_tracker
-    # (true / false) and team_1_default_color, team_2_default_color (#rgb /
-    # #rrggbb, saved as #rrggbb).
+    # disable_export, disable_overwrite (true / false) and
+    # team_1_default_color, team_2_default_color (#rgb / #rrggbb, saved as
+    # #rrggbb).
     refusal, _written = WebOps.update_general_settings(_json_body())
     if refusal is not None:
         _settings_refused(refusal)

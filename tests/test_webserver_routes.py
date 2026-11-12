@@ -148,7 +148,6 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/set', 'api_v1.set_update', 'OPTIONS,PATCH'),
-    ('/api/v1/scoreboards/<int:n>/stages/<int:game>', 'api_v1.stage_update', 'OPTIONS,PATCH'),
     ('/api/v1/scoreboards/<int:n>/stats:refresh', 'api_v1.stats_refresh', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/color', 'api_v1.team_color', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/members/<int:m>', 'api_v1.crew_member_update', 'OPTIONS,PATCH'),
@@ -176,7 +175,6 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/settings/hotkeys', 'api_v1.settings_hotkeys_update', 'OPTIONS,PATCH'),
     ('/api/v1/settings/language', 'api_v1.settings_language_update', 'OPTIONS,PATCH'),
     ('/api/v1/settings/network', 'api_v1.settings_network_update', 'OPTIONS,PATCH'),
-    ('/api/v1/stages', 'api_v1.get_stages', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
@@ -581,7 +579,8 @@ def test_the_classification_follows_the_rules():
     # from their unpublished values (S4x: v1 73 of 112), and the SCORE page's
     # field, character row and match bar writes (S4z: v1 76 of 115), and the
     # settings page's read, its general write and its three this-PC writes
-    # (S4ae: v1 77 of 120).
+    # (S4ae: v1 77 of 120), less the game tracker's write and read, removed
+    # with it (S4ac-4: v1 76 of 118).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -590,8 +589,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 77
-    assert len(EXPECTED_API_V1_ROUTES) == 120
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
+    assert len(EXPECTED_API_V1_ROUTES) == 118
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

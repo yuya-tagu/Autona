@@ -53,6 +53,12 @@ asked for at all (nothing showed them), so the two station steps that
 asked ("station window: station 4", "the station moves on") no longer list
 that request (`GetFutureMatchesList`) among their calls; everything else
 -- the writes, the deltas, the board -- is replayed exactly.
+
+ADR-005 S4ac-4 removed the game tracker's rows, `score.{n}.stages`. The
+recording holds them empty: a best of or a clear wrote `{}` to them (a
+write that is gone), and a board published whole carried them (a key that
+is gone). _withoutTheRows takes exactly those out of the recording;
+everything else is compared as before.
 """
 import copy
 import json
@@ -330,6 +336,27 @@ def _followRow(ui):
             for number, row in ui.items()}
 
 
+def _withoutTheRows(recording):
+    """The recording without the game tracker's empty rows (ADR-005
+    S4ac-4): their writes, the key in a published board (a delta row that
+    carries the whole board) and the key in each board subtree."""
+    def isRowsWrite(write):
+        key = write[1].split(".")
+        return (write == ["set", write[1], "{}"] and len(key) == 3
+                and key[0] == "score" and key[2] == "stages")
+
+    steps = [dict(step,
+                  writes=[w for w in step["writes"] if not isRowsWrite(w)],
+                  deltas=[d.replace(', "stages": {}', "")
+                          for d in step["deltas"]])
+             for step in recording["steps"]]
+    boards = {number: None if board is None else {
+        "keys": [key for key in board["keys"] if key != "stages"],
+        "state": board["state"].replace(',"stages":{}', "")}
+        for number, board in recording["boards"].items()}
+    return dict(recording, steps=steps, boards=boards)
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -341,7 +368,8 @@ def _check(name, recorded):
             json.dumps(golden, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
+    golden = _withoutTheRows(
+        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name])
     expectedSteps = golden["steps"]
     actualSteps = recorded["steps"]
     assert [s["step"] for s in actualSteps] == \

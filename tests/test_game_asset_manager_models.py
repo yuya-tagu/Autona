@@ -10,10 +10,10 @@ payloads through the WebServerActions readers. Those walked the models (on
 the GUI thread) until S1b; they read the catalog now, on whatever thread
 asks, and the same recording pins that their output did not move.
 
-They also pin the two lifetime rules of the rebuild: every model of the
-previous generation, the per-game tracker's stage model included, is retired
-rather than dropped (agent-pitfalls #13), and a tracker row that outlives a
-rebuild is rebound without writing the state.
+They also pin the lifetime rule of the rebuild: every model of the previous
+generation is retired rather than dropped (agent-pitfalls #13). The
+recording's `stage` / `stageWithBlank` models were the per-game tracker's
+combos; they went with it in ADR-005 S4ac-4 and are no longer read.
 
 The last block drives the load job (a TaskExecutor job since ADR-005 S3f-4;
 a QThread until then) -- the path every pick in the UI takes -- and what
@@ -103,8 +103,6 @@ def test_the_models_match_the_recording(goldenGames, autonaApp, label):
     assert _rows(manager.characterModel) == models["character"]
     assert _rows(manager.variantModel) == models["variant"]
     assert _rows(manager.colorModel) == models["color"]
-    assert _rows(manager.stageModel) == models["stage"]
-    assert _rows(manager.stageModelWithBlank) == models["stageWithBlank"]
     assert {en: _rows(model) for en, model in manager.skinModels.items()} \
         == models["skins"]
     assert autonaApp.get("game") == golden["state"]
@@ -179,17 +177,17 @@ def test_every_model_of_the_previous_generation_is_retired(goldenGames):
     manager = goldenGames
     _load(manager, "tgame")
     previous = [manager.characterModel, manager.skinModels,
-                manager.variantModel, manager.colorModel, manager.stageModel,
-                manager.stageModelWithBlank]
+                manager.variantModel, manager.colorModel]
 
     _load(manager, "game2")
 
-    # Six, the tracker's stage model included: a combo still bound to one of
-    # them until its onLoad handler rebinds must not see it deleted.
-    assert len(manager._retiredModels) == 6
+    # Four (six until the tracker's two stage models went in ADR-005
+    # S4ac-4): a combo still bound to one of them until its onLoad handler
+    # rebinds must not see it deleted.
+    assert len(manager._retiredModels) == 4
     assert all(old is kept
                for old, kept in zip(previous, manager._retiredModels))
-    assert manager.stageModelWithBlank is not previous[-1]
+    assert manager.colorModel is not previous[-1]
 
 
 def test_reloading_the_same_generation_rebuilds_nothing(goldenGames):

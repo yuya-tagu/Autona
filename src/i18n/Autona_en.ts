@@ -1112,11 +1112,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Custom Flags</translation>
     </message>
     <message>
-        <location filename="..\Helpers\AutonaVersionHelper.py" line="20" />
-        <source>beta</source>
-        <translation>beta</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />
@@ -1285,13 +1280,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Settings\AutonaSettingsWindow.py" line="82" />
         <source>Disable Autona file exporting</source>
         <translation>Disable Autona file exporting</translation>
-    </message>
-</context><context>
-    <name>settings.disable_individual_game_tracker</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
-        <source>Disables the individual game tracker (takes effect on next restart)</source>
-        <translation>Disables the individual game tracker (takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>

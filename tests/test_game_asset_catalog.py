@@ -157,9 +157,9 @@ def test_a_load_matches_the_recording(catalog, label):
     assert _rows(snap.characterRows) == models["character"][1:]
     assert _rows(snap.variantRows) == models["variant"][1:]
     assert _rows(snap.colorRows) == models["color"][1:]
-    assert _rows(snap.stageRows) == models["stage"]
-    assert models["stageWithBlank"][0] == ["", {}]
-    assert _rows(snap.stageRowsSorted) == models["stageWithBlank"][1:]
+    # The recording's `stage` / `stageWithBlank` were the per-game tracker's
+    # combos, gone with it in ADR-005 S4ac-4 (the catalog builds no rows for
+    # them; `snap.stages` above is start.gg's table).
     assert {en: [[text, _norm(data)] for _skin, text, data in rows]
             for en, rows in snap.skinRows.items()} == models["skins"]
 

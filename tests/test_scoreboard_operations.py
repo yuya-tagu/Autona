@@ -21,24 +21,11 @@ from unittest.mock import patch
 
 import pytest
 
-from src.core.GameTrackerService import TEAM_1, TEAM_2, UNREPORTED
 from src.core.SettingsManager import SettingsManager
 from tests.conftest import (apply_set, clear_players, load_player,
                             tournamentLoaded)
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.fixtures.write_recording import WriteRecorder
-
-# The individual game tracker ships disabled, so the stage rows it rebuilds on
-# every best-of change are not built at all by default. Patching the lookup
-# (rather than writing the setting) keeps SettingsManager -- which is
-# process-global and shared with the rest of the session -- untouched.
-_realSettingsGet = SettingsManager.Get
-
-
-def _trackerEnabled(key, default=None):
-    if key == "general.disable_individual_game_tracker":
-        return False
-    return _realSettingsGet(key, default)
 
 
 def _score(app, team, board=1):
@@ -70,28 +57,6 @@ def _typeTeamName(board, team, text):
 
     _actions().SetTeamName(board, team, text)
     SetLoadService(board).PublishTeamLogo(team, text)
-
-
-def _clickStage(board, game, team):
-    """A click on the T1 / T2 button of game `game`'s row (1-based), as the
-    Qt game tracker ran it until ADR-005 S4ac-3: the button toggled, so the
-    row goes to that team -- or back to unreported when it had it -- and a
-    row that was written sums the score from the rows."""
-    tracker = _actions().GameTracker(board)
-    index = game - 1
-    assert index < tracker.StageCount(), f"no row for game {game}"
-    result = TEAM_1 if team == 1 else TEAM_2
-    winner = UNREPORTED if tracker.GameWinner(index) == result else result
-    if tracker.SetStageResult(index, winner):
-        tracker.PublishStageResults()
-
-
-def _wonGames(app, team, board=1):
-    """Which games the state records as won by `team` (1-based game numbers)."""
-    stages = app.get(f"score.{board}.stages") or {}
-    key = f"t{team}_win"
-    return sorted(int(game) for game, result in stages.items()
-                  if isinstance(result, dict) and result.get(key))
 
 
 @contextlib.contextmanager
@@ -207,69 +172,37 @@ def test_best_of_zero_blanks_the_long_texts(autonaApp):
 
 
 # The set length is the state's since ADR-005 S2e: AutonaActions.SetBestOf
-# writes it and resizes the board's rows, from whichever entry point (the Qt
-# board's spinbox and rows rendered it from the held cycle until S4ac-3).
+# writes it, from whichever entry point (the Qt board's spinbox rendered it
+# from the held cycle until S4ac-3; the game tracker's rows followed it until
+# S4ac-4).
 
-def test_a_best_of_set_in_core_is_one_cycle_with_its_rows(autonaApp):
-    """The way the Web, /api/v1 and a set load set it: the length and its
-    rows in one save cycle."""
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.ready(1)
-        seen, unsubscribe = _heldUpdateSpy("score.1")
-        try:
-            _actions().SetBestOf(board, 7)
-            autonaApp.settle()
-        finally:
-            unsubscribe()
+def test_a_best_of_set_in_core_is_one_cycle(autonaApp):
+    """The way the Web, /api/v1 and a set load set it: one save cycle."""
+    board = autonaApp.ready(1)
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        _actions().SetBestOf(board, 7)
+        autonaApp.settle()
+    finally:
+        unsubscribe()
 
     assert seen == ["score.1"]
     assert autonaApp.get("score.1.best_of") == 7
-    assert len(autonaApp.get("score.1.stages")) == 7
-    assert _actions().GameTracker(board).StageCount() == 7
 
 
 def test_a_best_of_set_from_another_thread_reaches_the_board(autonaApp):
-    """AutonaActions may be called from any thread: the length and its rows
-    land as from the GUI thread."""
+    """AutonaActions may be called from any thread: the length lands as
+    from the GUI thread."""
     import threading
 
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.ready(1)
-        worker = threading.Thread(
-            target=lambda: _actions().SetBestOf(board, 5))
-        worker.start()
-        worker.join()
-        autonaApp.settle()
+    board = autonaApp.ready(1)
+    worker = threading.Thread(
+        target=lambda: _actions().SetBestOf(board, 5))
+    worker.start()
+    worker.join()
+    autonaApp.settle()
 
     assert autonaApp.get("score.1.best_of") == 5
-    assert len(autonaApp.get("score.1.stages")) == 5
-
-
-def test_a_game_load_starts_the_rows_over_at_the_same_length(autonaApp):
-    """The rows recorded games of the previous game's stages: they start
-    over, unreported, though their number does not change."""
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.ready(1)
-        tracker = _actions().GameTracker(board)
-        _actions().SetBestOf(board, 3)
-        autonaApp.settle()
-        _clickStage(board, game=1, team=1)
-        autonaApp.settle()
-        rows = tracker.rowsVersion
-        autonaApp.state.CommitHeld("score.1")
-        autonaApp.settle()
-
-        autonaApp.publishGameLoad()
-
-    # Rebuilt (what told the Qt rows to rebuild their buttons).
-    assert tracker.rowsVersion != rows
-    assert len(autonaApp.get("score.1.stages")) == 3
-    assert _wonGames(autonaApp, 1) == []
-    # All of it published, so nothing is left pending behind 反映 (the
-    # commit used to swallow the held notification that rendered the Qt
-    # rows: ADR-005 S4t).
-    assert autonaApp.state.HasPendingChanges("score.1") is False
-    assert autonaApp.state.GetCommitted("score.1.stages.1.t1_win") is False
 
 
 def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
@@ -517,33 +450,6 @@ def test_making_a_board_on_the_desktop_turns_the_polling_off(
     assert ("general.disable_autoupdate" in written) is turnsOff
 
 
-def test_a_dropped_board_leaves_its_game_rows_to_core(autonaApp):
-    """The tracker is core's (ADR-005 S4t; the Qt board registered its own
-    for as long as it existed until then, and rendered core's until S4ac-3):
-    the rows go on with the board dropped, and the board made again uses the
-    same one."""
-    actions = _actions()
-    tracker = actions.GameTracker(1)
-    autonaApp.ready(1)
-    assert actions.GameTracker(1) is tracker
-
-    autonaApp._dropBoard(1)
-
-    try:
-        with patch.object(SettingsManager, "Get",
-                          side_effect=_trackerEnabled):
-            actions.SetBestOf(1, 5)
-            actions.AdjustScore(1, 1, 1)
-        autonaApp.settle()
-        assert autonaApp.get("score.1.best_of") == 5
-        assert len(autonaApp.get("score.1.stages")) == 5
-        assert _wonGames(autonaApp, 1) == [1]
-        assert actions.GameTracker(1) is tracker
-    finally:
-        autonaApp.state.Unset("score.1")
-        autonaApp.settle()
-
-
 def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
         autonaApp, monkeypatch):
     """An empty matchNames (the locale tables not loaded) makes the Qt
@@ -554,27 +460,25 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
     from src.core.StateManager import StateManager
 
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.ready(1)
-        monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
+    board = autonaApp.ready(1)
+    monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
 
-        apply_set(board, {
-            "bestOf": 5, "team1losers": True, "overwrite": True,
-            "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
-        autonaApp.settle()
+    apply_set(board, {
+        "bestOf": 5, "team1losers": True, "overwrite": True,
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
+    autonaApp.settle()
 
-        assert autonaApp.get("score.1.best_of") == 5
-        assert autonaApp.get("score.1.best_of_text") == "Best of 5"
-        assert len(autonaApp.get("score.1.stages")) == 5
-        assert autonaApp.get("score.1.team.1.losers") is True
-        assert _playerName(autonaApp, 1) == "AAA"
-        assert _playerName(autonaApp, 2) == "BBB"
+    assert autonaApp.get("score.1.best_of") == 5
+    assert autonaApp.get("score.1.best_of_text") == "Best of 5"
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert _playerName(autonaApp, 1) == "AAA"
+    assert _playerName(autonaApp, 2) == "BBB"
 
-        assert autonaApp.web().set_route(1, bestOf=7) == "OK"
-        autonaApp.settle()
-        assert autonaApp.get("score.1.first_to_text") == "First to 4"
+    assert autonaApp.web().set_route(1, bestOf=7) == "OK"
+    autonaApp.settle()
+    assert autonaApp.get("score.1.first_to_text") == "First to 4"
 
-        autonaApp.publishGameLoad()
+    autonaApp.publishGameLoad()
 
     assert StateManager.HasPendingChanges("score.1") is False
     assert StateManager.GetCommitted("score.1.best_of_text") == "Best of 7"
@@ -1540,13 +1444,11 @@ def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
 
 
 def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
-    """The six derived keys and the stage rows are one operation.
+    """The six derived keys are one operation.
 
-    AutonaActions.SetBestOf writes the six keys and, through the board's
-    tracker, GameTrackerService.SetStageCount in one block, so the whole
+    AutonaActions.SetBestOf writes the six keys in one block, so the whole
     change is a single export (ADR-005 S2e; the spinbox's handler wrapped
-    the two before). Tracker off here, which is the shipped default; with
-    it on the rows join the same cycle.
+    them before, with the game tracker's rows until S4ac-4).
     """
     board = autonaApp.ready(1)
 
@@ -1610,191 +1512,6 @@ def test_making_a_board_on_the_desktop_republishes_every_display_option(
             StateManager.Set("display_options", stored)
 
 
-# ── the individual game tracker, switched ON ─────────────────────────────
-#
-# The tracker ships disabled, so every test above runs with no stage rows at
-# all -- which is exactly the configuration in which the score's two writers
-# (AutonaActions and the tracker's own stage tally) cannot collide. With it on
-# they both write score.{n}.team.{t}.score. Since ADR-005 S4t the operations
-# move the rows themselves (GameTrackerService.FollowScores), and the board
-# only renders what the state holds, so one writer's write can no longer be
-# read as an operator action by the other.
-#
-# Note on save cycles: a score operation is one held_state_updated here, as
-# with the tracker off: the score and the rows it moved go together. (It was
-# two until ADR-005 S4t, the row a second cycle from the board's handler.) A
-# stage click is still two, see below.
-
-
-@pytest.fixture
-def trackedBoard(autonaApp):
-    """Board 1's number, with the game tracker enabled and five stage rows.
-
-    The setting is patched rather than written: SettingsManager is
-    process-global and shared with the rest of the session.
-    """
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        board = autonaApp.ready(1)
-        _actions().SetBestOf(board, 5)
-        autonaApp.settle()
-        assert len(autonaApp.get("score.1.stages")) == 5
-        yield board
-
-
-def test_a_stage_click_awards_exactly_the_game_that_was_clicked(
-        autonaApp, trackedBoard):
-    """Regression: one click used to win the next game as well.
-
-    StageResultsChanged writes the score it summed from the rows, and that
-    write notifies synchronously -- it reached _SyncScoreDisplays while the
-    spinbox still held the old value. Read as an ordinary 0 -> 1 transition
-    it called SyncStagesToScore, which awarded the first *empty* stage: game
-    2, on top of the game 1 the operator actually clicked. Only the
-    operations that move the score follow it now (ADR-005 S4t).
-    """
-    _clickStage(trackedBoard, game=1, team=1)
-    autonaApp.settle()
-
-    assert _score(autonaApp, 1) == 1
-    assert _score(autonaApp, 2) == 0
-    assert _wonGames(autonaApp, 1) == [1], (
-        "a single stage click marked more than the game it was on: the "
-        "board reacted to the tracker's own score write by asking the "
-        "tracker to award another stage for it")
-
-
-def test_a_stage_click_is_exactly_two_save_cycles(autonaApp, trackedBoard):
-    """One click = the row it wrote, then the score that follows from it.
-
-    History, because the number has been wrong twice. Before headless core
-    Step 4a a click ran six held cycles: three bare Sets for the result
-    flags, the summed score, and two more from StageResultsToScore re-Setting
-    what the tracker had just written. Step 4a folded the flags into one
-    SaveBlock (six -> four) and the review of it removed the redundant pair
-    (four -> two). Two is the floor without merging the row write and the
-    score write into a single cycle, which would need one writer for both.
-
-    Nothing is published while the board is held either way, so this is not
-    a correctness bound -- it is the tripwire for a third writer creeping
-    back in, which is exactly how the extra pair survived Step 4a.
-    """
-    seen, unsubscribe = _heldUpdateSpy("score.1")
-    try:
-        _clickStage(trackedBoard, game=1, team=1)
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert seen == ["score.1", "score.1"], (
-        f"a stage click produced {len(seen)} save cycles instead of 2")
-
-
-def test_stage_clicks_keep_tracking_each_game_independently(
-        autonaApp, trackedBoard):
-    """The other half of the fix: suppression must not disable the tracker."""
-    _clickStage(trackedBoard, game=1, team=1)
-    _clickStage(trackedBoard, game=2, team=2)
-    _clickStage(trackedBoard, game=3, team=1)
-    autonaApp.settle()
-
-    assert _score(autonaApp, 1) == 2
-    assert _score(autonaApp, 2) == 1
-    assert _wonGames(autonaApp, 1) == [1, 3]
-    assert _wonGames(autonaApp, 2) == [2]
-
-
-def test_unclicking_a_stage_takes_the_score_back_down(
-        autonaApp, trackedBoard):
-    """The mirror image: clicking a checked button clears that game.
-
-    Without the guard this ran DecrementScore on top of the operator's own
-    un-check and cleared a second game.
-    """
-    _clickStage(trackedBoard, game=1, team=1)
-    _clickStage(trackedBoard, game=2, team=1)
-    autonaApp.settle()
-    assert _wonGames(autonaApp, 1) == [1, 2]
-
-    _clickStage(trackedBoard, game=2, team=1)
-    autonaApp.settle()
-
-    assert _score(autonaApp, 1) == 1
-    assert _wonGames(autonaApp, 1) == [1]
-
-
-def test_a_score_button_with_the_tracker_on_marks_one_stage(
-        autonaApp, trackedBoard):
-    """The normal case, which the guard must leave working.
-
-    A +1 that did NOT come from the tracker is exactly the transition the
-    stage rows are supposed to follow: the score goes up by one and the first
-    empty game is marked for that team.
-    """
-    seen, unsubscribe = _heldUpdateSpy("score.1")
-    try:
-        _actions().AdjustScore(trackedBoard, 1, 1)
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert _score(autonaApp, 1) == 1
-    assert _wonGames(autonaApp, 1) == [1]
-    # The score and the row, as with the tracker off
-    # (test_a_score_change_is_exactly_one_save_cycle): see the section note.
-    assert seen == ["score.1"], (
-        f"a +1 with the tracker on produced {len(seen)} save cycles "
-        "instead of 1")
-
-
-def test_a_score_reset_with_the_tracker_on_clears_every_stage(
-        autonaApp, trackedBoard):
-    _actions().AdjustScore(trackedBoard, 1, 2)
-    _actions().AdjustScore(trackedBoard, 2, 1)
-    autonaApp.settle()
-    assert _wonGames(autonaApp, 1) == [1, 2]
-    assert _wonGames(autonaApp, 2) == [3]
-
-    _actions().ResetScore(trackedBoard)
-    autonaApp.settle()
-
-    assert _score(autonaApp, 1) == 0 and _score(autonaApp, 2) == 0
-    assert _wonGames(autonaApp, 1) == []
-    assert _wonGames(autonaApp, 2) == []
-
-
-def test_a_score_moving_several_games_is_followed_in_one_cycle(
-        autonaApp, trackedBoard):
-    """Three recorded games cleared by one reset: the score and every row
-    of both teams in one cycle -- it was one cycle a row until ADR-005 S2e,
-    and one more for the rows until S4t. The same follow serves a +2, a
-    loaded set's score and the clears."""
-    _actions().AdjustScore(trackedBoard, 1, 2)
-    _actions().AdjustScore(trackedBoard, 2, 1)
-    autonaApp.settle()
-
-    seen, unsubscribe = _heldUpdateSpy("score.1")
-    try:
-        _actions().ResetScore(trackedBoard)
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert _wonGames(autonaApp, 1) == [] and _wonGames(autonaApp, 2) == []
-    assert seen == ["score.1"], (
-        f"a reset of three recorded games produced {len(seen)} save cycles "
-        "instead of 1")
-
-    seen, unsubscribe = _heldUpdateSpy("score.1")
-    try:
-        _actions().AdjustScore(trackedBoard, 1, 2)
-        autonaApp.settle()
-    finally:
-        unsubscribe()
-
-    assert _wonGames(autonaApp, 1) == [1, 2]
-    assert seen == ["score.1"]
-
-
 # ── set loading (headless core Step 4b) ──────────────────────────────────
 #
 # The board no longer *is* the set data: core/SetLoadService writes it (the
@@ -1836,12 +1553,8 @@ def test_a_loaded_set_reaches_the_state(autonaApp):
 
 
 def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
-    """Echo-loop check: nothing reacting to the set may write any of it back.
-
-    Tracker OFF, which is the shipped default and what `autonaApp.ready(1)`
-    gives. With it on, the rows a loaded score moves are in the same cycle
-    (tests/test_board_operations.py, S4T_BEST_OF_CHANGES).
-    """
+    """Echo-loop check: nothing reacting to the set may write any of it
+    back."""
     board = autonaApp.ready(1)
 
     seen, unsubscribe = _heldUpdateSpy("score.1")
@@ -1962,77 +1675,6 @@ def test_a_stale_async_refresh_is_dropped(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.1.match") == "Winners Final"
-
-
-def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
-    """A set's score awards games the same way a +1 does.
-
-    SetLoadService writes team.{t}.score and *nothing under stages*; the
-    rows follow in the operation around it (SetFollowService.ApplySetPayload
-    -> GameTrackerService.FollowScores). The row count must be untouched by
-    a set load: only GameTrackerService.SetStageCount() sets it, so a writer
-    that grew `stages` on its own would leave rows nothing renders (see
-    StageCount()).
-    """
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        apply_set(trackedBoard, {"team1score": 2, "team2score": 1})
-        autonaApp.settle()
-
-    assert _wonGames(autonaApp, 1) == [1, 2]
-    assert _wonGames(autonaApp, 2) == [3]
-    assert len(autonaApp.get("score.1.stages") or {}) == 5
-
-
-@pytest.mark.parametrize("games, swapped", [
-    # 2-1: the scores cross over with the rows.
-    (((1, 2), (2, 1), (3, 1)), {1: [1], 2: [2, 3]}),
-    # 1-1: the score does not move, the rows still mirror.
-    (((1, 1), (2, 2)), {1: [2], 2: [1]}),
-])
-def test_a_swap_mirrors_the_games_on_the_rows(
-        autonaApp, trackedBoard, games, swapped):
-    """The swap mirrors the rows in the same save cycle as it exchanges the
-    scores (ADR-005 S2c). It used to swap the scores through the spinboxes,
-    whose transition the tracker then followed on top of the mirror: T2 T1
-    T1 came out as T1 T2 T1, 1-2 on the score and 2-1 on the rows."""
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        for game, team in games:
-            _clickStage(trackedBoard, game=game, team=team)
-        autonaApp.settle()
-
-        _actions().SwapTeams(trackedBoard)
-        autonaApp.settle()
-
-    for team in (1, 2):
-        assert _wonGames(autonaApp, team) == swapped[team]
-        assert _score(autonaApp, team) == len(swapped[team])
-
-
-def test_a_reset_set_load_does_not_reshuffle_recorded_games(
-        autonaApp, trackedBoard):
-    """Behaviour change, pinned deliberately (headless core Step 4b).
-
-    /post_data always sends reset_score, and the old path acted on it
-    literally: the spinboxes went to 0 (clearing every row) and then back up
-    (re-awarding from the top), so a set whose wins alternated came back
-    reordered -- T2, T1, T1 turned into T1, T1, T2. The zero and the real
-    value are one save cycle now, so the rows only move by however much the
-    score actually moved.
-    """
-    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
-        _clickStage(trackedBoard, game=1, team=2)
-        _clickStage(trackedBoard, game=2, team=1)
-        _clickStage(trackedBoard, game=3, team=1)
-        autonaApp.settle()
-        assert _wonGames(autonaApp, 1) == [2, 3]
-        assert _wonGames(autonaApp, 2) == [1]
-
-        apply_set(trackedBoard,
-            {"reset_score": True, "team1score": 2, "team2score": 1})
-        autonaApp.settle()
-
-    assert _wonGames(autonaApp, 1) == [2, 3]
-    assert _wonGames(autonaApp, 2) == [1]
 
 
 def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):

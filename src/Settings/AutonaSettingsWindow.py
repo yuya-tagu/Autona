@@ -3,7 +3,6 @@ from qtpy.QtWidgets import *
 from .SettingsWidget import SettingsWidget
 from ..core.SettingsManager import DEFAULT_WEBSERVER_PORT
 from ..AutonaHotkeys import AutonaHotkeys
-from ..Helpers.AutonaVersionHelper import add_beta_label
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
 
@@ -95,14 +94,6 @@ class AutonaSettingsWindow(QDialog):
             "disable_overwrite",
             "checkbox",
             False
-        ))
-
-        generalSettings.append((
-            add_beta_label(QApplication.translate(
-                "settings.disable_individual_game_tracker", "Disables the individual game tracker (takes effect on next restart)"), "game_tracker"),
-            "disable_individual_game_tracker",
-            "checkbox",
-            True
         ))
 
         generalSettings.append((
