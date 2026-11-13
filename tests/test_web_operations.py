@@ -518,7 +518,8 @@ def test_a_save_from_a_request_thread_finishes(
     shells since ADR-005 S4ad; the desktop's queued it on the GUI thread
     and waited for it until then, so this ran once per shell). The database
     write that follows announces the change, and AutonaPlayerDB.SetupModel
-    -- the desktop's, which rebuilds the player model -- runs on the main
+    -- the refresh, which normalises the mains (it rebuilt the desktop's
+    player model until the Qt model clean-up's PR3) -- runs on the main
     thread (the GUI executor) while the request thread waits.
 
     While it waits, the main thread runs a board operation of its own

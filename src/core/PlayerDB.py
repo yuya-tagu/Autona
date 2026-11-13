@@ -3,9 +3,10 @@
 The data half of what used to be src/AutonaPlayerDB.py, moved here Qt-free
 (ADR-005 S3e-1): the players by tag, loading (with the legacy CSV import),
 merging, deleting, looking up and saving them, and the tags of the loaded
-tournament's entrants. The Qt half -- the completer model and the
-`db_updated` signal -- stays in src/AutonaPlayerDB.py, which subscribes to
-`changed` here.
+tournament's entrants. The Qt half -- the `db_updated` signal -- stays in
+src/AutonaPlayerDB.py, which subscribes to `changed` here. (Its completer
+model went in ADR-005 S4ad / the Qt model clean-up's PR3; the mains
+normalisation its build did in place is NormaliseMains here.)
 
 What changed in the move, and what did not:
 
@@ -13,17 +14,18 @@ What changed in the move, and what did not:
   dict written from the GUI thread (the player card, the RESULT import, the
   player browser) and from the start.gg entrants worker at the same time.
   Readers outside this class go through Get / Contains / Items /
-  GetPlayerFromTag / TournamentPlayers; the Qt adapter, which also rewrites
-  mains in place while building its model, holds `lock` itself. What leaves
+  GetPlayerFromTag / TournamentPlayers; NormaliseMains, which rewrites
+  mains in place, holds `lock` for its whole walk. What leaves
   the process (TournamentPlayers: the web server's /playerdb and its
   Socket.IO push) is a deep copy taken under the lock, so serialising it
   never races a writer.
 - Changes are announced on `changed` (an ObserverChannel: several
   subscribers, synchronous, each one's exception isolated), always *outside*
   `lock`. The Qt adapter's subscriber marshals to the GUI thread, and the
-  model build there takes `lock`; until ADR-005 S3f-2 the subscriber also
-  waited for it, and announcing under the lock deadlocked a worker against
-  the GUI thread. A subscriber may still take the lock. One announcement per
+  refresh there (NormaliseMains) takes `lock`; until ADR-005 S3f-2 the
+  subscriber also waited for it, and announcing under the lock deadlocked a
+  worker against the GUI thread. A subscriber may still take the lock. One
+  announcement per
   LoadDB / AddPlayers (unless deferRefresh) / DeletePlayer, and one per
   explicit NotifyChanged() -- the points where the old code called
   SetupModel(), so db_updated fires as often as it did.
@@ -283,6 +285,76 @@ class PlayerDB:
                     and not isinstance(stored["mains"], dict):
                 stored["mains"] = PlayerDB.ParseMains(stored["mains"])
 
+    def NormaliseMains(self, codename):
+        """Rewrite the `codename` game's mains of every player in place:
+        each [character, skin] or [character, skin, variant] becomes
+        [character, int skin, variant or ""] (S3c-2 decision 5).
+
+        The desktop's Qt player model did this as a side effect of its build
+        on every refresh (AutonaPlayerDB._BuildModel), until the Qt model
+        clean-up's PR3 moved it here as it was; both shells call it now
+        (AutonaPlayerDB.SetupModel: every change announcement and every game
+        load). tests/test_player_db.py pins it against what the model build
+        did, quirks included:
+
+        - only a `mains` that is exactly a dict, and truthy, holding
+          `codename` is looked at (a stored JSON string is not), and in it
+          only `codename`'s list -- no other game's;
+        - the filter reads `isinstance(main, list) and len(main) == 2 or
+          len(main) == 3` (sic): anything 3 long is taken, a main with no
+          len() fails the player before anything is rewritten, and a list
+          of another length is skipped, not removed;
+        - a skin int() cannot convert is 0, logged with its traceback;
+          int() is what reads it (2.7 -> 2, True -> 1, " 3 " -> 3);
+        - one player's error is logged with its gamerTag and stops that
+          player only: what was rewritten before it in that player's list
+          stays rewritten.
+
+        No save and no change announcement: the next save writes the
+        rewrite out (AddPlayers / DeletePlayer / a player save), and the
+        caller tells the listeners (db_updated) whether anything changed or
+        not, as the model build did. Under `lock` for the whole walk (the
+        entrants worker merges into the same dicts); nothing in it waits.
+        """
+        with self.lock:
+            for player in self.database.values():
+                if player is not None:
+                    try:
+                        if player.get("mains") and type(player.get("mains")) == dict:
+                            if codename in player.get("mains", {}).keys():
+                                playerMains = player.get("mains")[codename]
+
+                                if playerMains is not None and len(playerMains) > 0:
+                                    # Meant: a list of size 2 [character,
+                                    # skin] or 3 (+ variant). The precedence
+                                    # is the model build's, kept.
+                                    playerMains = [main for main in playerMains if isinstance(
+                                        main, list) and (len(main) == 2) or (len(main) == 3)]
+
+                                    # If the skin is invalid, default to 0
+                                    for main in playerMains:
+                                        while len(main) < 3:
+                                            main.append("")
+                                        skin = 0
+                                        try:
+                                            skin = int(main[1])
+                                        except Exception:
+                                            logger.error(
+                                                f'Local DB error: Player {player.get("gamerTag")} has an invalid skin for character {main[0]}')
+                                            logger.error(traceback.format_exc())
+                                        main[1] = skin
+
+                                        # If no variant, set to none
+                                        if len(main) >= 3:
+                                            variant = main[2]
+                                        else:
+                                            variant = ""
+                                        main[2] = variant
+                    except Exception:
+                        logger.error(
+                            f'Error loading player from local DB: {player.get("gamerTag")}')
+                        logger.error(traceback.format_exc())
+
     def DeletePlayer(self, tag):
         with self.lock:
             if tag in self.database:
@@ -470,9 +542,9 @@ class PlayerDB:
 
         For use outside the process (the web server's /playerdb and its
         Socket.IO push): a deep copy, players and all, taken under the lock,
-        so serialising it cannot race the entrants worker or the model
-        build, both of which change player dicts (and their mains lists) in
-        place. Key order is kept, so the JSON is the same as the live
+        so serialising it cannot race the entrants worker or
+        NormaliseMains, both of which change player dicts (and their mains
+        lists) in place. Key order is kept, so the JSON is the same as the live
         dict's."""
         with self.lock:
             tags = self.tournamentTags

@@ -8390,3 +8390,43 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
 - **文書**: pitfalls #13 / #15 の `AutonaCountryHelper` の記述を「削除済み・実例なし（Qt の一般則）」に、`state-and-webserver.md`（Helpers / CountryCatalog の行）・`Design.md`・`features.md`・`known-smells.md` の現役扱いの記述を直した（過去の節・`docs/tasks/` は歴史なので触らない）
 - **検証**: 下の結果を参照（全量は並列ランナーと直列の両方）。`web/` は変えていない。アプリ本体は起動していない
 - **実機で見ること（メイン）**: 起動する。SCORE と Top 8 で国と地域を選べる。`user_data/additional_flag` のカスタム国旗が一覧（`/api/v1/countries`）に出る。`STARTUP phase` のログが PR1 より遅くなっていない
+
+##### PR3
+
+- **変更**
+  - `src/core/PlayerDB.py`: `NormaliseMains(codename)` を追加した。`AutonaPlayerDB._BuildModel` の正規化の部分を、式・順序・例外の扱い・ログの文言ごと移した（`PlayerDB.lock` の中で全選手を回す）。保存も通知もしない
+  - `src/AutonaPlayerDB.py`: `SetupModel` を「`GameAssetCatalog.instance.Current().game` の `codename` を 1 回読む → `PlayerDB.NormaliseMains` → `db_updated`」にした（`gui_thread_async` のまま。名前は呼び手のために残した）。`model` / `_retiredModel` / `modelEnabled` / `EnableModel` / `_BuildModel` / `modelLock`、`AutonaGameAssetManager` の import と `GetStockIcon` / `characters` の利用、QtGui / QtWidgets の star import を削除した（QtCore の `QObject` / `Signal` だけ）
+  - `src/bootstrap.py`: `bootstrap_gui()` の手順 `AutonaPlayerDB.EnableModel()` を削除した。`onLoad.connect(AutonaPlayerDB.SetupModel)` は残し、ORDER CONSTRAINT を「最初の `UiMounted()` のロードより前に結線する（正規化と push）」にした。`bootstrap_core()` の PlayerDB の節のコメント（モデルの記述）も直した。カタログは PlayerDB より前に作るので、relay がカタログを読む順序は満たしている
+  - `src/headless.py`: ヘッドレスの経路は既存の `games.signals.gameChanged.connect(AutonaPlayerDB.SetupModel)` をそのまま使う（`_OnLoaded` がメインスレッドで、ロードの保存ブロックを閉じた後・`StateManager.lock` の外で出す。デスクトップの `onLoad` と同じく「ロードが実際に済んだときだけ」）。新しい結線は足していない（足すと 1 回のロードで 2 回回る）。コメントに正規化を書いた
+  - コメントの追従: `AutonaGameAssetManager.GetStockIcon`（呼び手 0。PR4 で削除）・`PlayerService._SkinNumber` / `SaveRecordToDB`・core `PlayerDB` の docstring
+- **正規化の移植（仕様。HEAD のモデルの構築と同じ）**
+  - 対象: `mains` が真で `type(mains) == dict`（JSON 文字列のままの mains は見ない）で、選んでいるゲームの codename をキーに持つ選手。触るのはそのゲームのリストだけ（他のゲームは保存されたまま）
+  - リストが None・空なら何もしない。`len()` の無い値（数）はその選手のエラー
+  - 抽出は `isinstance(main, list) and len(main) == 2 or len(main) == 3`（優先順位の癖をそのまま）。長さ 3 の文字列・3 キーの dict も通る。`len()` の無い要素（数・None）があると、何も書き換えずにその選手のエラー。長さ 2 / 3 以外のリストは飛ばし、DB からは消さない
+  - 各要素: 長さ 3 まで `""` を足す → スキンを `int()` で読む（2.7 → 2・True → 1・" 3 " → 3。"2.5" / "x" / None / "" / list は 0 と ERROR 2 行: `Local DB error: Player {gamerTag} has an invalid skin for character {main[0]}` と traceback）→ バリアントは `main[2]` のまま（None も残る）
+  - 1 人の途中の例外は `Error loading player from local DB: {gamerTag}` と traceback を出し、その選手だけ止める（そのリストで先に書き換えた要素は書き換わったまま）。キー 0 の無い 3 キーの dict はスキンのエラーのログの組み立て（`main[0]`）が落ちて、この経路で何も書かずに止まる
+  - 保存しない・`changed` を出さない。`db_updated` は書き換えの有無によらず `SetupModel` が 1 回出す（HEAD と同じ）。書き換えは次の保存（`AddPlayers` / `DeletePlayer` / 選手の保存）で `local_players.json` に出る
+  - 再現しないもの（モデルの部品で、正規化ではない）: アイコンの検索 `playerMains[0][0]` が抽出後の空のリストで出していた IndexError のエラーログ（長さ 1 / 4 のリストだけの選手・文字列の mains の選手）と、`QStandardItem(tag)` の構築が失敗した選手（タグが 32bit を超える数・NaN。手で書いた JSON でしか起きない）を飛ばしていたこと。codename は refresh ごとに 1 回読む（HEAD は選手ごとに `selectedGame` を読んでいた。差はロードと同時に走ったときだけ）
+- **特性テスト**（`tests/test_player_db.py`）
+  - `NORMALISE_CASES`（28 ケース）と refresh のテスト（スキンのエラーの文言・次の選手へ進む分離・選んでいるゲーム以外と対象外の形・ゲーム未選択・保存も通知もしない・出力の形）を、先に HEAD（0f42a3b2）のデスクトップの経路（`AutonaPlayerDB.SetupModel` → `_BuildModel`）に対して書き、緑（34 件）を確認してから移植した。移植後も同じテスト（同じ `SetupModel` 経由で core を通る）が緑。表の最後の列が None のケースは、HEAD がアイコンの検索でエラーログを出していた所で、ログは見ない
+  - 書いている途中で HEAD の癖が 1 つ見つかり、表に足した: キー 0 の無い dict の要素はログの組み立てで落ちる（上の仕様）
+  - core だけのテスト（`test_normalise_mains_*`。Qt なし）も同じ表を使い、2 回目は何も変えず何もログしないこと・保存も通知もしないこと・`lock` を取って回ること（再入可）を見る
+  - 出力の形: `tests/fixtures/player_db/normalised_golden.json`（HEAD のデスクトップのモデルの構築から記録。`/playerdb` の push の JSON と `local_players.json`。キー順込み。他のゲームの mains・JSON 文字列の mains・保存しないキー・長さ 1 / 4 のリスト・途中で落ちる選手を含む）。デスクトップは `test_a_refresh_keeps_the_outputs_shape`、ヘッドレスは `tests/test_headless.py` の組み立ての probe（同じ `local_players.json` を置いて起動し、復元のロードの後の push の JSON・HTTP の `/playerdb`・保存した `local_players.json`）が同じ golden と一致する = 両シェルの正規化の結果が一致する
+- **ヘッドレスで変わること**
+  - ゲームのロードの後と DB の変更の通知のたびに、選んでいるゲームの mains を正規化する。`/playerdb`・`ws_playerdb` が正規化した mains を返し、次の保存で `local_players.json` にも出る（デスクトップと同じ形）。S3c-2 判断 5（「ヘッドレスは正規化しない」）と S3e-3 判断 7 はこれで撤回
+  - state は変わらない（選手の読込 `PlayerService._ApplyMains` は両方の綴りを同じに読む）
+  - メインスレッドで `PlayerDB.lock` を取る仕事が 1 つ増える（デスクトップは前から同じ）。ロックの中で他のスレッドを待たない
+- **pin**
+  - `tests/test_web_panel_host.py::test_the_unused_qt_model_leftovers_are_gone`: 名前表に `EnableModel` / `modelEnabled` / `_BuildModel` / `modelLock` / `_retiredModel` を追加（`model` は一般的すぎるので名前表に入れず、`AutonaPlayerDB` に属性 `model` が無いことを見る）。`src/AutonaPlayerDB.py` が QtGui / QtWidgets / `AutonaGameAssetManager` を import しないこと
+  - 更新: `test_bootstrap_split.py`（手順の `EnableModel()`・probe の `player_db_model`）・`test_headless.py`（`player_db_model` を正規化の golden に置換）・`test_import_side_effects.py`（`modelEnabled`）・`test_player_db.py`（adapter の fixture からモデルの退避を外し、モデルの行を見ていた所は DB の行に）
+- **文書**: pitfalls #13（`AutonaPlayerDB._retiredModel` の実例）・`state-and-webserver.md`（Helpers の `AutonaPlayerDB` の行に `SetupModel` と `NormaliseMains`）・`Design.md`・`features.md`
+- **検証**
+  - 特性テスト: HEAD（0f42a3b2）のモデルの構築に対して `tests/test_player_db.py -k refresh` **34 passed**（移植前）→ 移植後 `tests/test_player_db.py` 全体 **90 passed**
+  - 影響範囲（`test_player_db` / `test_headless` / `test_bootstrap_split` / `test_import_side_effects` / `test_web_panel_host` / `test_provider_jobs` / `test_signal_lifetime` / `test_core_qt_free` / `test_player_service` / `test_web_operations`）: **502 passed**
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6208 passed / 0 failed / 2 skipped**
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6208 passed / 25 skipped / 0 failed**（golden の `test_player_service` / `test_board_operations` は緑のまま）
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない
+- **実機で見ること（メイン）**
+  - 選手リスト（PLAYERS）で、旧形式の mains（`local_players.json` の `["mario","2"]` のようにスキンが文字列・バリアントの枠が無いもの）の選手を表示する → 編集する → 保存する。キャラとスキンが崩れない。保存後の `local_players.json` のその選手の今のゲームの mains が `["mario", 2, ""]` の形になり、他のゲームの mains は元のまま
+  - ゲームを切り替えた後に、SCORE で選手を読み込む（タグの検索・選手リストから）。キャラ・スキン・バリアントが今のゲームのもので出る
+  - 起動直後（前回のゲームの復元）に `main.log` に `Error loading player from local DB` / `Local DB error` が想定外に増えていない（壊れた mains の選手が DB にいれば以前と同じ行が出る。長さ 1 / 4 のリストだけの選手でアイコンの検索が出していた行は出なくなる）

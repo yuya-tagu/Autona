@@ -978,13 +978,14 @@ def _desktopMains(text):
     """local_players.json with the loaded game's mains as the desktop holds
     them: [character, skin as a number, variant or ""].
 
-    The desktop's completer model rewrites them so in place on every
-    database change (AutonaPlayerDB._BuildModel, S3c-2 decision 5), and the
-    next save writes them out; the service alone (a headless shell) leaves
-    a record's mains as they were stored. S3e-3 kept that in the adapter: a
-    load reads both spellings alike (PlayerService._ApplyMains), and moving
-    it would change the headless shell's local_players.json and /playerdb.
-    Applied to both sides, so only this difference is excused."""
+    The player DB's refresh rewrites them so in place on every database
+    change (PlayerDB.NormaliseMains through AutonaPlayerDB.SetupModel, S3c-2
+    decision 5: the desktop's completer model build when this was recorded,
+    both shells since the Qt model clean-up's PR3), and the next save
+    writes them out; the service alone, with no refresh, leaves a record's
+    mains as they were stored. A load reads both spellings alike
+    (PlayerService._ApplyMains). Applied to both sides, so only this
+    difference is excused."""
     if text is None:
         return None
     players = json.loads(text)
@@ -1549,9 +1550,9 @@ def test_a_main_whose_skin_is_not_a_number_is_its_first_skin(
         loadWorld, warnings, skin):
     """A `mains` entry's skin is a row number. One that is not raised
     (ValueError, the characters unwritten) -- in the data handed over, and
-    on a headless shell in a database record too, which the desktop's
-    completer model rewrites to 0 before anything reads it
-    (AutonaPlayerDB._BuildModel). The first skin, as that rewrite, with a
+    in a database record not yet refreshed, which the player DB's refresh
+    rewrites to 0 (PlayerDB.NormaliseMains; the desktop's model build until
+    the Qt model clean-up's PR3). The first skin, as that rewrite, with a
     warning: both shells load the same characters."""
     loaded = loadWorld.service()
     reference = loadWorld.service("score.1.team.2.player.1")

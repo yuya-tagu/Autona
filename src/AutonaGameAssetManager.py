@@ -713,8 +713,9 @@ class AutonaGameAssetManager(QObject):
     def GetStockIcon(self, en_name, skin=0):
         # Shared, memoised 32px stock-icon QIcon for a character/skin, from
         # the current snapshot. QIcon / QPixmap must be built on the GUI
-        # thread; all callers (AutonaPlayerDB.SetupModel, the player browser)
-        # run there. Returns an empty QIcon when no path exists.
+        # thread. Returns an empty QIcon when no path exists. No caller
+        # since the Qt model clean-up's PR3 (the player model, its last one,
+        # went); it goes with the asset models in PR4.
         return self._StockIcon(self.catalog.Current(), en_name, skin)
 
     def _StockIcon(self, snapshot, en_name, skin):

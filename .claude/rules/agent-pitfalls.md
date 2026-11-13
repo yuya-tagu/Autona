@@ -185,7 +185,8 @@ access violation を起こす（2026-07-11 起動クラッシュ:
 `AutonaPlayerDB.SetupModel` の `setSourceModel` で発生）。
 
 - 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**:
-  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` が実例
+  `AutonaGameAssetManager._retiredModels` が実例（`AutonaPlayerDB._retiredModel` も実例だったが、
+  選手の Qt モデルごと Qt モデルの整理 PR3 で削除した。モデルが行っていた mains の正規化は core の `PlayerDB.NormaliseMains`）
 - 新モデルへの `setSourceModel()` / `setModel()` の付け替えが完了するまで
   旧モデルを削除しない。全消費者が onLoad 等の後続ハンドラで付け替える場合は
   ハンドラ完了まで（= 次回再構築まで）保持する
