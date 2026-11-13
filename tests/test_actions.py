@@ -1287,13 +1287,30 @@ def test_a_game_load_republishes_every_board_with_a_set_length(heldBoard):
 
 def test_a_game_load_commits_the_boards_it_rewrote(heldBoard, spy):
     actions = AutonaActions()
-    actions.SetBestOf(BOARD, 3)
-    assert SM.HasPendingChanges(PREFIX) is True
+    with SM.RecordHeldWrites() as written:
+        actions.SetBestOf(BOARD, 3)
+        assert SM.HasPendingChanges(PREFIX) is True
 
-    actions.CommitGameLoad()
+        actions.CommitGameLoad(written)
 
     assert SM.HasPendingChanges(PREFIX) is False
     assert SM.GetCommitted(f"{PREFIX}.best_of") == 3
+
+
+def test_a_game_load_leaves_an_edit_it_did_not_write_pending(heldBoard):
+    """What the load did not write -- an edit pending before it, here --
+    waits for 反映 (the fix of 2026-11-12: it went out with the load)."""
+    actions = AutonaActions()
+    actions.SetTeamName(BOARD, 1, "EDITED")
+    with SM.RecordHeldWrites() as written:
+        actions.SetBestOf(BOARD, 3)
+        actions.CommitGameLoad(written)
+
+    assert SM.GetCommitted(f"{PREFIX}.best_of") == 3
+    assert SM.GetCommitted(f"{PREFIX}.team.1.teamName") != "EDITED"
+    assert SM.HasPendingChanges(PREFIX) is True
+    actions.ApplyChanges(BOARD)
+    assert SM.GetCommitted(f"{PREFIX}.team.1.teamName") == "EDITED"
 
 
 

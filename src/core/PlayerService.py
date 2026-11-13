@@ -529,7 +529,10 @@ class PlayerService:
         `includeMains` additionally republishes them as the player's mains,
         which is what a slot-count change does -- one save cycle for the two
         keys, since they are written from the same read (and, as before, the
-        same dict). `snapshot` is the GameAssetCatalog.Current() the slots
+        same dict). For the same reason one group for a recorded commit
+        (StateManager.HeldWriteGroup: a game load's), published together or
+        not at all: apart, OBS would show characters and mains that
+        disagree. `snapshot` is the GameAssetCatalog.Current() the slots
         were resolved against, when the caller took one (a resize keeps
         picks read from the state: AutonaActions.SetRoster).
         """
@@ -540,7 +543,7 @@ class PlayerService:
         if not includeMains:
             StateManager.Set(self.Key("character"), characters)
             return
-        with StateManager.SaveBlock():
+        with StateManager.SaveBlock(), StateManager.HeldWriteGroup():
             StateManager.Set(self.Key("character"), characters)
             StateManager.Set(self.Key("mains"), characters)
 

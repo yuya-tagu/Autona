@@ -7570,7 +7570,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - `.claude/design/external-control-api.md` の「未構築のボード」の記述（§2.12 のクルーボード・§6 の `GET /scoreboards/{n}` / `pending`・スワップ・チーム色・`:stop-follow` など）は残している。検収レビューの A・B の後は外から見える答え（200・書き込み無し・held）が記述と同じで、違うのは中の手順（構築する / しない）だけのため。ボードの構築という概念が消える S4ac-3 でまとめて直す。外から見える違いが残った §7.1 のクルーの `:reset-match` の `pool`（足さなくなった）だけ直した
   - **#2 見せていないボードの未反映が残る間の複製**: held のボードに未反映があると、`SaveState` は保存サイクルごとに state 全体を `deep_clone`（msgpack の往復）して未反映を戻した公開用の state を作る。S4ac-1 から、見せていないボード 1 / 2 への v1 の書き込みの未反映が反映まで残りうる。実測（開発データの `out/program_state.json`。msgpack 32 KB）で 1 回約 0.27 ms。差分のあるサイクルは元から複製するので、増えるのは差分の無いサイクルの分だけ。受け入れる: 表示中のボードの未反映でも元から同じことが起き、React のページからいつでも反映できるため。改善案（dirty なボードの subtree だけを複製する）は別の段の候補
   - **#4 退路の Qt モード**（`general.qt_scoreboard_panel`）では、見せていないボードへの外部の書き込みは、形式の切り替え（ウィジェットが state から描く）か `:apply` まで画面にも OBS にも出ない（Qt の反映ボタンは表示中のボードのものだけ）。S4ac-3 で退路ごと消える
-  - **#11 ゲームのロードは両ボードの未反映を公開する**（上の動作の違いの `CommitGameLoad`）: 見せていないボードに v1 で書いて反映前の値も、ロードで OBS に出る。表示中のボードでも元から同じ（ロードはキャラと既定を書き直す基準点で、反映を伴う）
+  - ~~**#11 ゲームのロードは両ボードの未反映を公開する**（上の動作の違いの `CommitGameLoad`）: 見せていないボードに v1 で書いて反映前の値も、ロードで OBS に出る。表示中のボードでも元から同じ（ロードはキャラと既定を書き直す基準点で、反映を伴う）~~ → **解消（2026-11-12）**: ロードは自分が書いたキーだけを公開する（`StateManager.RecordHeldWrites` + `CommitHeld(prefix, written)`。下の「S4ad の残置 5 の解消」）
   - Qt のボードのウィジェットのコメント（`AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の「`AutonaScoreboardManager` が先に `EnsureBoard` を呼んだ」）は直していない（S4ac-3 でファイルごと消える）
   - `MakeBoards(panel=True)` は `TurnOffPolling` を 2 回（ボード 1 と 2）、`PublishDisplayOptions` を 2 回走らせる（`EnsureBoard` を 3 回呼ぶ形のまま。設定ファイルの書き込みが起動時に 2 回）。害は無い
   - 起動時のボードは、その時点で復元されている `game.defaults` の人数で作る（それまでの形式のボードと同じ。見せていないボードは、それまでは構築した時点のゲームの人数だった）。ゲームのロードが `ApplyGameRoster` で揃える
@@ -8080,7 +8080,7 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
   2. 歴史の文書（この文書の S3e / S4y / S4ac-3 の節、`headless-core-redesign.md`）は当時のまま。本書と `external-control-api.md` の「GUI スレッドで同期実行する」は §2.12 の注記で受けた
   3. ~~ホットキーのスコア ±1・リセット・反映は `Run` の外~~（レビューの 3 で `Run` に入れた: 判断 2）
   4. queued で届く通知（v1 の形式の切り替え）と direct の通知の順序が前後しうる（判断 3 で描画は現在値に揃えた。ほかに通知の payload を信じる GUI の受け手は無い）
-  5. ローダーが `SelectGame` している間（`_Publish` の前。保存サイクルは開いている）に入った別スレッドのボードの操作の held の書き込みは、ロードの commit と一緒に反映なしで公開される。S4ad 以前も同じ（GUI スレッドは空いていて Web の操作を走らせた）。core 直結の書き込み（`score:adjust` など）は `_Publish` の間も同じ。閉じるには、`SelectGame` の前からボードのロックを取る（ローダーのスレッドがロックを持ったまま GUI スレッドを `run_sync` で待つので、不変条件に反する）か、ロードの state の書き込みをサイクルごと GUI スレッドに寄せる設計が要る。どちらも S4ad 以前より強い保証で、範囲外
+  5. ~~ローダーが `SelectGame` している間（`_Publish` の前。保存サイクルは開いている）に入った別スレッドのボードの操作の held の書き込みは、ロードの commit と一緒に反映なしで公開される。S4ad 以前も同じ（GUI スレッドは空いていて Web の操作を走らせた）。core 直結の書き込み（`score:adjust` など）は `_Publish` の間も同じ。閉じるには、`SelectGame` の前からボードのロックを取る（ローダーのスレッドがロックを持ったまま GUI スレッドを `run_sync` で待つので、不変条件に反する）か、ロードの state の書き込みをサイクルごと GUI スレッドに寄せる設計が要る。どちらも S4ad 以前より強い保証で、範囲外~~（**解消**（2026-11-12）: ロックではなく、ロードの commit が「ロードが書いたキー」だけを公開する形にした。次の節「S4ad の残置 5 の解消」）
   6. **GUI スレッドがボードのロックを待つ**（受容。レビューの 7）: `RLock` は FIFO でないので、待っているメインスレッドをリクエストのスレッドが追い越しうる。ボードの操作は短く（state の書き込みだけで、取得・DB の書き込みは `Run` の外）、Web の操作が連続しても GUI が止まるのは数操作ぶん
   7. **終了中に走っている複合操作は最後まで書く**（判断 5: いちばん外側の呼び出しだけを見る）。終了の開始より前に `Run` に入った操作だけで、503 を返すべき新しい要求ではない
 
@@ -8125,6 +8125,112 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
   4. ゲームを切り替える → 反映待ちが点かない（ロードの commit）・BEST OF の文言が正しい
   5. 選手 DB の変更（選手リストのページでの保存・大会の入場者の取得）→ SCORE のページの名前の候補が入場者に絞られ、大会を外すと全員に戻る（補完の proxy を消した影響が無いこと）
   6. アプリを閉じる → 終了が遅くならず、ログに終了中のボードの操作のエラーが無い
+
+#### S4ad の残置 5 の解消: ゲームのロードの commit は、ロードが書いたものだけを公開する（2026-11-12）
+
+- **不具合**: デスクトップで、ゲームの切り替え中に SCORE のページ（v1 `PATCH /api/v1/scoreboards/1/teams/1/players/1/fields`）で編集したタグが、反映なしで OBS（`out/program_state.json`）に出た（S4ad の実機確認。6 回の切り替えの間の 40 回の書き込みのうち、打ちかけのタグ `E10` / `E12` が出た）。HEAD（S4ad）でも 2d1f9efe でも再現する、S4ad より前からの不具合で、S4ad の残置 5 に書いた窓
+- **原因**: `AutonaActions.CommitGameLoad` が各ボードの `ApplyChanges`（= `CommitHeld(prefix)`）で、ボードの未反映を**全部**公開していた。ロードの保存サイクルの中では積むだけで、サイクルを閉じるとき（`_Publish` の終わり）にそのとき未反映のものをまとめて出す。そのサイクルはローダーのスレッドが `SelectGame` の前に開くので、(a) その間（`_Publish` の前。ボードのロックはまだ誰も持っていない）にリクエストのスレッドで走ったボードの操作の held の書き込み、(b) `_Publish` の間の core 直結の書き込み（`score:adjust` など、ボードのロックを取らないもの）、(c) ロードの前から反映待ちだった編集が、ロードの commit と一緒に反映なしで出た。S4ad は `_Publish` をボードのロックに入れて、`_Publish` の間のボードの操作だけを閉じた。何を出すかを「いつ書かれたか」（commit を積んでから閉じるまで）で決めていたことが原因で、窓をロックで閉じても (b) と (c) は残る
+- **修正**: 何を出すかを「誰が書いたか」で決める
+  - `StateManager.RecordHeldWrites()`（context manager。`HeldWrites` を yield する）: ブロックの中で**このスレッドが**書いた held のキーを記録する（`mine`）。ほかの未反映（記録を始めたときに未反映だったもの・別のスレッドの書き込み・記録が終わった後の書き込み）は `others` に入る。同じスレッドで入れ子にすると外側の記録に合流する（`SaveBlock` と同じ考え方）。記録は `_trackChangedKey` の中で `StateManager.lock` の下で付ける（`_noteHeldWrite`。記録が 1 つも無いときは何もしない）
+  - `StateManager.CommitHeld(prefix, written)`: `written` を渡すと、その操作の commit として積む（`_commitWritten`）。どのキーを出すかは drain のとき（`SaveState` の `_drainWritten`）に決めるので、commit の後に同じサイクルで書いたもの（`onLoad` のスロット）も一緒に出る。`written=None` は従来の全部の commit。記録が終わって片付いた後の `written` を渡すと、警告して何も出さない
+  - 出すキー（`_publishedUnits`）: 操作が書いた未反映のキーのうち、ほかの書き手の未反映のキーが同じ・上（祖先）・下（子孫）に無いもの。公開済みの state（`lastSavedState`）に祖先の dict が無いキーは、無い祖先のいちばん外側（held の prefix より上には行かない）を単位に、丸ごと出すか丸ごと残す（`_missingAncestor`。キーごとに出すと、ライブの state と違うキー順の dict を公開しうるうえ、ほかの書き手が作りかけているサブツリーの一部を出しうる）
+  - 公開のビュー: 未反映が残るボードは、従来どおり公開済みの値に戻したうえで（`_revertHeldSubtrees`）、出す単位だけをライブの値で置く（`_takeLive`。ライブに無いキーは消す）。置いた単位の親 dict のキー順はライブの親の順に揃える（ライブに無い、削除が反映待ちのキーはその後ろに元の順で）。残りが無ければ、従来の全部の commit と同じ（ボードはライブのまま）
+  - `StateManager.HeldWriteGroup(authoritative=False)`（context manager）: 記録しているスレッドで、ブロックの中の書き込みを 1 グループにする。グループのキーは一緒に出るか一緒に残る（どれかがほかの書き手の未反映と重なって残れば、最後の書き込みがそのグループだったキーは全部残る）。`authoritative=True` は「誰の編集からも作っていない、操作が決めた値」の宣言で、ほかの書き手の未反映のキーのうち、そのキーの最後の authoritative の書き込みより**前**に書かれた**同じキーか子孫**のものは「上書きされた」として重なりに数えず、一緒に公開して反映待ちから外す（ライブの値は操作の値で、編集はもうライブに無い）。祖先と、後から書かれたものは従来どおり重なり。入れ子は外側に合流し、記録の外では何もしない。そのために held の書き込みに順番を振り（`_heldWriteCount`。記録があるときだけ）、`HeldWrites.others` を {キー: 最後の書き込みの順}、`mine` を {キー: `OwnWrite`（dot・最後の書き込みのグループ・最後の authoritative の書き込みの順）} にした
+  - 宣言: `AutonaActions.SetRoster` が、落とす選手枠（チームごと）・ゲーム切替の空のキャラと mains（`forgetPicks`。選手ごと）・空の選手枠のシード（`SeedEmpty`。選手ごと）・1 人以下にしたときの空のチーム名とロゴ（チームごと）を authoritative のグループで書く。キャラ枠の数の変更でピックから作り直すキャラと mains は authoritative ではない。`PlayerService.PublishCharacterSlots(includeMains=True)` は `character` と `mains` を 1 グループで書く（呼び手のグループがあればそれに合流する）
+  - 公開に失敗したときの出直し: drain が出すと決めた単位を `StateManager._takenLive` に置き、`lastSavedState` を更新した後に消す（diff が空でも、単位を置いた公開のビューを `lastSavedState` にしてから消す。再レビューの指摘 2）。DeepDiff などで失敗すると、単位は残り、キーは `changedKeys` に残るので、次の `SaveState` が同じ単位をライブで置いて出す（全部の commit と同じ「次の SaveState で出直す」）。その間に単位の中か上へ held の書き込みが来たら、その単位は丸ごと反映待ちに戻す（`_keepPending`。ほかの書き手の編集を乗せて出さない）
+  - 記録の片付け: `_pruneRecords()`（終わって commit を積んでいない記録を落とす）を、記録の終わり・`ReleaseSubtree`・`_drainWritten` の `finally`（drain が例外を出しても）で呼ぶ。記録が無いとき（`_pruneRecords`）・積まれた commit が無いとき（`_drainWritten`）は何もせずに戻る（再レビューの指摘 8。記録の無い保存サイクルの負担を無くす）
+  - **ライブがすでにロードの値のときも書く**（実機確認と再レビューの指摘 1）: held の書き込みは値が変わらなくても記録されるので、ロスターが決める値を「ライブと同じなら書かない」で飛ばすと、反映していない編集がライブを先にその値にしていたとき、公開済みの値が OBS に残り、反映も点いたままだった。`AutonaActions.SetRoster` は、ライブも公開済み（`StateManager.GetCommitted`）もその値で、そのキー以下に未反映が無いとき（`StateManager.HasPendingAt(key)` を足した）だけ飛ばす。どれもロードの記録の中（`StateManager.Recording()` を足した。このスレッドに `RecordHeldWrites` が開いているか）でだけ行い、ロードの外の `SetRoster` の書き込みは 2026-11-12 より前と同じ（判断 9）:
+    - 切り替えの空のキャラと mains: `_NothingToEmpty`（`_IsBlank` がライブだけを見ていた。Mario を反映 → キャラ行を空にして反映しない → 別のゲームへ、で OBS に Mario が残った）
+    - 1 人以下にして空にするチーム名とロゴ: `_SetDecided`（`SetIfChanged` だった。"Foo" を反映 → 空にして反映しない → 1 人のゲームへ、で "Foo" が残った）。人数が変わったかは、ライブの人数に加えて公開済みの人数（`_PublishedRoster`）でも見る（人数を減らして反映しないまま 1 人のゲームへ切り替えると、ライブの人数はもう 1 で、チーム名を空にしなかった）
+    - 人数で落とす枠: `_TrimPublished`（ライブに無く公開済みにある枠も `Unset` する。2 人で反映 → 1 人に減らして反映しない → 1 人の別のゲームへ、で前のゲームのキャラを持った 2 人目が OBS に残った）
+    - 空の選手枠のシード: 枠に未反映があれば、先に枠そのものを `Unset` する（ライブに無いので何も変わらない）。シードはキーごとに書くので、枠の削除の未反映（祖先）と重なって反映待ちに残っていた（人数を減らして反映しないまま同じゲームを読み直す）。枠ごとをシードのキーにして、上書きした削除を外す
+  - **巻き込みを推移的に閉じる**（再レビューの指摘 3）: `_publishedUnits` で、残す単位はそこに書いたキーのグループを、残すグループはそのキーの単位を、固定点まで巻き込む。残す単位の上にある単位も残す（出すと、ライブの部分木に残す値を乗せて出す）。それまでは 1 段で止まり、グループ経由で残した単位と単位を分け合う別のグループが出た
+  - ハーネス: `tests/conftest.py` の `_dropBoard` が `_commitWritten` / `_takenLive` / 記録の `mine` / `others` も捨てる（再レビューの指摘 7）
+  - 呼び手: `bootstrap.wire_game_roster` の `run()` は `RecordHeldWrites()` の中で、従来の保存ブロック（ロスター・`RepublishBestOfs` / `finally`: `CommitGameLoad(written)`）。デスクトップの `_Publish` はモデルの作り直しからサイクルを閉じるまでを `RecordHeldWrites()` で囲む（結線の記録はこれに合流するので、`onLoad` のスロットの書き込みもロードのもの。スレッドで見分けるので、スロットが別のスレッドで書いた held はほかの書き手のものになる。`_Publish` のコメントに書いた）。終了中・作り直しの失敗の後始末 `_SettleUnannounced` は、ロスターを当てたボードごとの `ApplyChanges` をやめ、`RecordHeldWrites()` の中で `ApplyGameRoster` → `CommitGameLoad(written)`。`AutonaActions.CommitGameLoad(written)` は各ボードの `CommitHeld(prefix, written)`
+  - ファイル: `src/core/StateManager.py`・`src/core/Actions.py`・`src/core/PlayerService.py`・`src/bootstrap.py`・`src/AutonaGameAssetManager.py`（`StateManager` 以外は呼び方・宣言・コメント・docstring）
+
+- **判断と理由**
+  1. **ロックで窓を閉じない**: `SelectGame` の前からボードのロックを取ると、ローダーのスレッドがロックを持ったまま GUI スレッドを `run_sync` で待つ（ボードホストの不変条件に反する）。core 直結の書き込み（b）とロード前からの未反映（c）は、ロックでは閉じない
+  2. **ロードが上書きした、ほかの書き手の未反映のキーは、ロードの値がその編集から作られうるなら残し、ロードが決めた固定の値なら出す**（重なりの扱い）: 例: 操作者が BEST OF を 5 にして反映していない間に、ロケールの違うゲームへ切り替えると、`RepublishBestOfs` が 5 から文言を作り直す。その文言を出すと、反映していない 5 から作った値が OBS に出る。そこで、同じキー・祖先・子孫のどれかで重なれば残し、次の反映で（そのときのライブの値で）出す（逆は、反映していない値が漏れる、を直す目的に反する）。一方、ゲームの切り替えでロスターが空にするキャラと mains・人数で落とす選手枠・空のチーム名は、操作者の値から作っていない固定の値で、ライブからは編集が消えている。最初の版はこれも残したので、未反映のキャラがあるスロットで別のゲームへ切り替えると `character` は重なりで残り `mains` は空で出て、OBS で前のゲームのキャラと空の mains が食い違い、公開済みと同じ値でも反映が点いたままだった（独立レビューの指摘）。どちらに当たるかはキーの位置からは分からないので、操作の側が `HeldWriteGroup(authoritative=True)` で宣言する（メインの判断の対案 a）。宣言があっても祖先の未反映は重なりに数える（祖先の値には、操作が書かなかった部分が残っている）
+  3. **時刻ではなくスレッドで見分ける**: ロードの書き込みは GUI スレッド（`_Publish`。ボードのロックの中なので、そのスレッドで別のボードの操作は走らない）か、終了中の後始末を走らせるスレッドのもの。ボードの操作はリクエストのスレッド、core 直結の書き込みも呼び出し元のスレッドで走る。ローダーのスレッドの `SelectGame` は held のキーを書かない（`game.*` と Top 8 / リザルト）
+  4. **ヘッドレスは変わらない**: ヘッドレスはボードを held にしない（`EnsureBoard(panel=False)` は `HoldBoard` を呼ばない）。held の書き込みが無いので記録には何も入らず、部分の commit は何も見つけない（従来の全部の commit も何も見つけなかった）。公開・サイクル数・delta は同じ。`_SettleStopped` はロスターだけで commit を呼ばない（変更なし）
+  5. **部分の commit は `held_state_updated` を消さない**: 全部の commit は `_heldTouched` を捨てる（全部出すので）が、部分の commit は残すので、ロードのサイクルを閉じるときに `held_state_updated` が出ることがある（値を運ばない合図で、読み手は現在値を読む）。`held_dirty_changed(False)` は従来どおり、drain の後に未反映が無いときだけ出る
+  6. **一緒に作った値は一緒に出す**（対案 b）: 1 人の `character` と `mains` は同じピックから作る。キーの位置だけで判定すると、未反映のピックと重なる `character` は残り、重ならない `mains` は出る（同じゲームの再ロードでキャラ枠の数が変わると、未反映のピックから作り直した mains が出た。レビューの指摘）。グループのどれかが残れば全部残す。authoritative のグループは上書きした未反映と重ならないので、全部出る（authoritative が優先）
+  7. **判定はキーの位置とスレッドだけで、値の出どころは見ない**（限界）: 操作がほかの書き手の未反映のキーを読んで、重ならない別のキーに書いた値は、グループにしていなければその編集から作ったと分からずに出る。今のロードの書き込みでは、BEST OF の文言は `SetBestOf` が同じキーにも書くので重なりで捕まり、キャラと mains はグループにした。新しく作り直す値を足すなら、読んだキーと同じグループで書くか、重なるキーに書く
+  8. **公開の失敗は次の SaveState で出直す**: 全部の commit は drain でキーを `changedKeys` に移し、失敗しても次の `SaveState` が出す。部分の commit は公開のビューでライブに置く単位が要るので、それを `_takenLive` に持ち越し、`lastSavedState` を更新した後で消す（最初の版は drain の戻り値で、失敗するとキーは反映待ちから外れたのに公開もされなかった）
+  9. **ロスターが決める値は、ライブが同じでも公開済みと違うか未反映があれば書く。ただしロードの記録の中だけ**（再レビュー）: 書かなければ記録に入らず、ロードの commit が出さない。ライブも公開済みも同じ値で未反映も無ければ、今までどおり書かない。ロードの外（操作者の人数の変更・セットの読込と追従）では反映が未反映を全部出すので、書く理由が無い。最初の版は記録の外でも書き、ライブの state は変えないが書き込みの列が変わった: 全量の並列で `test_set_follow_flow.py::test_post_score` の golden（ステップ 'entrants again after none'）が、枠の削除が反映待ちの board 1 のセットの追従で、シードの前の `Unset`（枠ごと）が 2 つ増えたのを捕まえた。そこで `StateManager.Recording()` で分け、記録の外ではチーム名とロゴは `SetIfChanged`・切り替えの空のキャラは `_IsBlank`・人数はライブの人数だけ・公開済みの枠の `Unset` と枠ごとの `Unset` はしない（2026-11-12 より前と同じ）。ヘッドレスのロードの後始末（`_SettleStopped` の `ApplyGameRoster`）も記録の外だが、held が無いので公開済みはライブと同じで、どちらでも同じ
+  10. **公開の差分が空でも、出す単位は公開のビューに残す**（再レビューの指摘 2）: 差分が空のときに `_takenLive` を捨てると、DeepDiff が見ない変更（`exclude_types` の None）だけを出した単位が、次のサイクルで公開済みの古い値に戻る。ただし deepdiff 8.1.1 は `include_paths` を渡すと None への変更も行にする（`_skip_this` で include の分岐が `exclude_types` の `elif` より先）、`SaveState` は常に渡すので、今は差分が空にならない。規則とコメントは「行に出ない」としていて、deepdiff の更新で起きうるので、防御として直した（pin は DeepDiff を None を見ない形に差し替えて再現）
+
+- **動作の違い**
+  1. ゲームの切り替えで公開されるのは、ロードが書いたものだけになった。操作者の未反映（ロードの前から・ロード中のリクエストのスレッドの編集・core 直結の書き込み）は反映待ちのまま残り、SCORE のページの反映は点いたままで、反映で出る。以前はロードと一緒に反映なしで出て、反映も消えた
+  2. ロードが書いたキーが操作者の未反映と重なったとき:
+     - ロードがその編集から作りうる値は反映待ちに残る: 反映していない BEST OF がある間の、ロケールの違うゲームへの切り替え（文言が反映待ち）/ 反映していないキャラの選択があるスロットで、キャラ枠の数が変わる同じゲームの再ロード（ピックから作り直したキャラと mains が**両方**反映待ちで、OBS は前の枠のまま）。どれも反映で揃う
+     - ロードが決めた固定の値は出て、上書きされた操作者の未反映（ライブからも消えている）は反映待ちから外れる: 反映していないキャラの選択があるスロットで別のゲームへ切り替える（キャラと mains が両方空で出る）/ 反映していない編集があるスロットをロードが人数で落とす（スロットが OBS から消える）/ 1 人以下にして空にするチーム名とロゴ / 空の選手枠のシード（人数を減らして反映していない枠を、同じゲームの読み直しがシードし直すときも: 枠ごとをシードのキーにする）。ほかに未反映が無ければ反映は消える（公開済みと同じ値でも点いたままにならない）。反映していない編集がライブを先にその値にしていても（キャラ行を空にした・チーム名を空にした・人数を減らした）、公開済みと違えば出す（再レビュー）
+     - 祖先の未反映は宣言があっても残る（安全側）: 例: 枠ごとの未反映（`SwapPlayers` が片方にしか無い枠を丸ごと動かした）の下に、切り替えが書く空のキャラと mains
+  3. 未反映の無いボードでのゲームの切り替えは以前と同じ（全部がロードの書き込みなので全部出て、反映は点かない。golden 不変）
+  4. ヘッドレスは変わらない（判断 4）
+
+- **残置とリスク**
+  1. 2 つの記録が同時にあって同じキーを書くと、そのキーはどちらにとっても「ほかの書き手のもの」になって残る（安全側。pin した）。ロードは 1 本のローダーで直列なので、実際には起きない
+  2. 記録している間の held の書き込みは、記録の数だけ dict の操作が増える（記録が無いときは `if` 1 つ）。drain は「ロードのキーの数 × ほかの書き手の未反映の数」と「ほかの書き手の未反映の数 × authoritative のキーの数」の文字列比較（ロスターで数百程度）
+  3. 判定はキーの位置とスレッドだけ（判断 7）。`gameLoaded` / `onLoad` のスロットが別のスレッドで held を書くと、ほかの書き手のものとして反映待ちに残る（安全側。`_Publish` のコメントに明記）
+  4. `state_updated` のハンドラが同じ `SaveState` の中で held でないキーを書くと、`SaveState` が入れ子に走る（RLock で再入し、内側が先に公開して `lastSavedState` を進め、外側が後から自分のスナップショットで上書きする）のは部分の commit より前からの問題で、今回は触っていない（部分の commit の単位は内側の公開で `_takenLive` から消え、外側のスナップショットにも入っているので、食い違いは足していない）
+  5. rules（`.claude/rules/state-and-webserver.md` の best_of の項）は、メインが入れ替えた文に、この作業で `CommitGameLoad(written)` と宣言・グループの文を足した
+  6. `_keepPending` で反映待ちに戻した単位は、記録の `others` に入らない（再レビューの指摘 4。受け入れる）: 戻した単位のキーは記録の `mine` からも drain で外れているので、どちらにも無く部分の commit では出ず、反映で出る（安全側）
+  7. `_takeLive` の並べ替えで、削除が反映待ちのキーの親 dict の中の位置が、公開のビューで一時的に後ろへ動く（再レビューの指摘 5。受け入れる）。値は変わらず、反映でライブの順に揃う
+  8. 記録の中の authoritative は、同じ記録の後の通常の書き込み（同じキー）で消えない（再レビューの指摘 6。判断 7 の限界として受け入れる）: 後の通常の書き込みも、authoritative の書き込みより前のほかの書き手の未反映を上書きしたものとして出る。今のロードでは同じキーに authoritative と通常の両方を書く操作は無い
+  9. 人数で落とす枠のうち、ライブにも公開済みにも無く未反映の書き込みだけがある枠（増やして減らし、どちらも反映していない）は書かない（`_TrimPublished` は公開済みの枠だけを見る）。OBS には出るものが無く、反映が点いたままになるだけ
+  10. `.claude/rules/state-and-webserver.md` の「`None` との間の変更は行に出ない（`exclude_types`）」は、`include_paths` を渡す `SaveState` の diff には当たらない（判断 10）。規則の文は直していない（delta の行の扱いの別の話で、Socket.IO の行の pin（`stateDelta.cases.json`）に None の場合が無い）
+
+- **pin**
+  - `test_scoreboard_operations.py::test_a_game_load_publishes_only_what_it_wrote`: ロード前の未反映（v1 の編集 `BEFORE`）・ローダーが選んでいる間のリクエストのスレッドの v1 の編集（`E10`）・`_Publish` の間の別のスレッドの core 直結のスコア → どれも公開されず delta にも無い。ロードのロスターと `onLoad` のスロットの書き込みは公開。反映で全部出る / `test_a_load_s_write_over_a_pending_edit_waits_with_it`: 反映していない BEST OF 5 の間に文言を作り直すロード → 文言と best_of は反映待ち、ロードのほかの書き込みは公開
+  - `test_actions.py::test_a_game_load_leaves_an_edit_it_did_not_write_pending`
+  - `test_state_manager_held.py` の部分の commit の 11 本: 自分の書き込みだけを出し、前からの未反映と別のスレッドの書き込みは残る（同じサイクルの commit の後の書き込みは出る）/ 全部が自分のものなら False / 入れ子は外側の記録 / 重なり 3 通り（同じ・上・下）/ 記録の後の書き込みはほかの書き手 / 新しいサブツリーは丸ごとライブの順で / ほかの書き手が書き込んだ新しいサブツリーは一部も出さない / 記録の後の commit は警告して何も出さない / release は部分の commit を捨てる。どのテストの後も記録の帳簿（`_heldRecords` / `_commitWritten` / `_takenLive`）が空
+  - レビューの指摘の修正で足した `test_state_manager_held.py` の 15 本（11 関数）: authoritative は上書きした未反映を出して外す 3 通り（同じ・下は外れる / 上は残る）/ authoritative の後の別のスレッドの書き込みは残る / 公開済みと同じ値への authoritative の書き込みで False / グループは一緒に残る・authoritative なら一緒に出る（2 通り。入れ子のグループは外側）/ 記録の外のグループは何もしない / 公開の失敗の出直し 2 通り（次の `SaveState` で出る / その間に書かれたら反映待ちに戻る）/ 2 つの記録が同時（それぞれ自分のものを出し、両方が書いたキーは残る）/ 終わった記録を別のスレッドが drain する / 出した単位はライブのキー順の位置に置く / release は終わった記録をすぐ落とす / drain が例外を出しても終わった記録を落とす
+  - `test_roster_flow.py::test_a_switch_publishes_blank_characters_over_a_pick_not_applied[picks / blank]`: 未反映のピック → 別のゲームへ切り替え（実際のローダー）→ キャラと mains が両方空で公開、反映待ちが消える（blank: 公開済みが空でも反映が消える = 指摘 5）/ `test_a_reload_keeps_resized_characters_and_mains_back_with_a_pick`: キャラ枠 2 で反映 → 未反映のピック → 同じゲームの再ロード（3 枠）→ ピックしたスロットのキャラと mains は両方反映待ち（公開は 2 枠の空のまま）、ほかのスロットは 3 枠で公開、反映で揃う
+  - 実機確認と再レビューの後に足した pin:
+    - `test_roster_flow.py::test_a_switch_publishes_blank_characters_over_a_pick_not_applied[cleared / undone]`: Mario を反映 → キャラ行を空にして反映しない → 別のゲームへ → 空で公開・反映が消える / 選んで空に戻し、どちらも反映しない（ライブも公開済みも空で未反映だけ）→ 反映が消える
+    - `test_roster_flow.py::test_a_switch_writes_nothing_over_slots_blank_and_published_blank`: ライブも公開済みも空で未反映の無い枠に、人数の変わらない切り替え → `score.2` に何も書かず、反映は点かない
+    - `test_roster_flow.py::test_a_load_publishes_what_the_roster_decides_over_an_edit_not_applied`（5 件）: 実際のロードで、人数で落とす枠（`slot`: 2 人目に打った名前の上）・空のチーム名（`name`: 打ったチーム名の上）・空の選手枠のシード（`seed`: 人数を減らして同じゲームを読み直す）が反映待ちの編集を上書きして出る / 指摘 1 の再現 2 つ（`removed`: 2 人で反映 → 1 人に減らして反映しない → 1 人のゲームへ。`emptied`: "Foo" を反映 → 空にして反映しない → 1 人のゲームへ）。どれも公開済み（`lastSavedState`）を読み、反映待ちが残らないこと
+    - `test_roster_flow.py::test_outside_a_load_the_roster_writes_only_what_changes`: ロードの外（記録が無い）で、人数を減らしてチーム名が空のまま反映していないボードに、同じ人数をもう一度 → 何も書かない（公開済みの枠の `Unset`・チーム名の書き直しをしない）/ 人数を戻す → 枠のシードはキーごとで、枠ごとの `Unset` をしない（`test_set_follow_flow.py::test_post_score` の golden もこれを見る）
+    - `test_state_manager_held.py`: 差分の無い（None への変更だけの）部分の commit が公開のビューに残る（DeepDiff を None を見ない形に差し替える）/ グループと単位の巻き込みが推移的に閉じる / 残す単位の上の単位も残る
+    - `test_harness_isolation.py`: ボードを落とすと部分の commit の帳簿（`_commitWritten` / `_takenLive` / 記録の `mine` / `others`）も残らない（新しい関数 1 つと、既存の held の登録の検査に 2 行）
+  - 既存の 2 本は、ロード前の未反映をロードが出すこと（今回の不具合の挙動）を前提にしていたので、ロード自身の書き込みで判定する形に書き直した: `test_scoreboard_operations.py::test_a_failing_match_text_does_not_stop_what_sets_the_best_of`（別の文言で反映しておき、ロードが英語の既定で作り直したものを公開する）・`test_roster_flow.py::test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit`（2 人で反映しておき、ロードが 1 人に減らしたものを公開する）
+  - `test_bootstrap_split.py::test_both_shells_follow_a_game_load_with_the_same_roster`: `run` の本体が `RecordHeldWrites() as written` の中の保存ブロックちょうど、`finally` が `CommitGameLoad(written)`、アダプタの呼び手は `_SettleUnannounced` の 1 つ
+  - `test_board_operations.py` の `_gameLoaded()` も記録の中で `CommitGameLoad(written)` を呼ぶ（ステップの始まりは未反映が無いので golden 不変）
+  - `test_asset_jobs.py::test_a_load_s_settle_at_shutdown_runs_under_the_board_lock`: 差し替えて記録する先を `ApplyChanges` から `CommitGameLoad` に変え、記録の中（`written.open`）でボードのロックの下で呼ばれることを見る
+
+- **壊して確認**（ソースは変えず、テストのプラグインで差し替えて回した）
+  - 修正前のコードで、再現テスト 2 本が落ちた（`E10` が公開された・文言が漏れた）
+  - `CommitGameLoad` を全部の commit に戻す → 再現テスト 2 本と `test_actions` の 1 本が落ちた
+  - 重なりの判定を外す（`others` を空にする）→ 重なり 3 通り・記録の後の書き込み・ほかの書き手の新しいサブツリーの 5 本が落ちた
+  - 無い祖先の扱いを外す → ほかの書き手の新しいサブツリーの 1 本が落ちた
+  - レビューの指摘の修正（`test_state_manager_held` + `test_roster_flow`）: `HeldWriteGroup` を何もしないもの（= 最初の版）に → 8 本（authoritative 3・グループ 2・統合 3。指摘 1 と 2 の pin が最初の版で落ちる）/ authoritative を無視 → 6 本 / グループの巻き込みを外す → 2 本（グループ・再ロード）/ 失敗した公開の単位を持ち越さない → 出直しの 1 本 / 失敗の後の書き込みを反映待ちに戻さない → 1 本 / 記録の片付け（`ReleaseSubtree` と drain の `finally`）を外す → 2 本 / キー順をライブに揃えない → 1 本
+  - 実機確認と再レビューの修正: 切り替えの空のキャラの判定を `_IsBlank` に戻す → `cleared` / `undone` の 2 本 / `_SetDecided` を `SetIfChanged` に → `removed` / `emptied` / `_TrimPublished` を外す → `removed` / 公開済みの枠を読まずライブの枠を読む → `removed` / `HasPendingAt` を常に偽 → `seed` / `undone` / authoritative を無視 → ロードの pin 5 件と空のキャラの 4 件（と既存の held の 4 件）/ 差分が空のときに公開のビューを `lastSavedState` にしない → None の 1 本 / 巻き込みを 1 段に戻す → 推移の 1 本、上の単位を巻き込まない → 上の単位の 1 本 / `_dropBoard` の帳簿の片付けを外す → ハーネスの 1 本（ハーネス・None・推移・上の単位はソースを一時的に修正前に戻して、ほかはテストのプラグインの差し替えで）
+  - 記録の中だけに分けた後（判断 9）: 上の差し替えを全部回し直して同じ本数が落ちる。加えて `StateManager.Recording` を常に偽（= ロードの中でも書かない）→ `cleared` / `undone` / `seed` / `removed` / `emptied` の 5 本 / 常に真（= ロードの外でも書く。分ける前の版）→ `test_set_follow_flow.py::test_post_score` の golden と `test_outside_a_load_the_roster_writes_only_what_changes` の 2 本
+
+- **golden**: `tests/fixtures/**` は差分なし（`git diff --stat HEAD -- tests/fixtures` が空）。golden を照合するテスト（`test_board_operations` / `test_roster_flow` / `test_set_follow_flow` ほか）は録音のまま緑で、delta の形は変わっていない（golden のロードはどれも未反映の無いボードで走る: 動作の違い 3）
+
+- **検証**
+  - 変えたテストファイル（`test_scoreboard_operations` / `test_actions` / `test_bootstrap_split` / `test_state_manager_held` / `test_board_operations` / `test_roster_flow`）: 修正後に 2 本（上の書き直し）が落ち、書き直して緑。全量の並列の 1 回目で `test_asset_jobs` の後始末の pin が `ApplyChanges` の差し替えを見ていて落ち（6099 passed / 1 failed / 2 skipped）、差し替え先を直して `test_asset_jobs` 48 passed
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6100 passed / 0 failed / 2 skipped**（2 回目。1 回目は上の `test_asset_jobs` の 1 件）
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6100 passed / 25 skipped / 0 failed**（S4ad の 6087 から +13: 再現 2 本から置き換えた 1 本を引いて +1・`test_actions` +1・`test_state_manager_held` +11（9 関数。重なりの 3 通りを含む））
+  - レビューの指摘の修正の後: 影響のあるテストファイル 12 本（上の 6 本と `test_asset_jobs` / `test_player_service` / `test_headless_seed` / `test_player_slot_publish` / `test_import_side_effects` / `test_api_v1_score_fields`）721 passed。全量の並列 **6118 passed / 0 failed / 2 skipped**、全量の直列（同じ環境変数）**6118 passed / 25 skipped / 0 failed**（+18: `test_state_manager_held` +15・`test_roster_flow` +3）
+  - 実機確認と再レビューの修正の後: 1 回目の全量の並列で `test_set_follow_flow.py::test_post_score` の golden が落ち（6129 passed / 1 failed / 2 skipped。判断 9）、ロードの記録の中だけに分けて緑。影響のあるテストファイル 16 本（上の 12 本と `test_harness_isolation` / `test_set_follow_flow` / `test_core_qt_free` / `test_objectname_keypath_contract`）780 passed。全量の並列 **6131 passed / 0 failed / 2 skipped**、全量の直列（同じ環境変数）**6131 passed / 25 skipped / 0 failed**（+13: `test_roster_flow` +9・`test_state_manager_held` +3・`test_harness_isolation` +1）
+  - pyflakes: 変えたファイルで HEAD に無い警告なし。`git diff --check` も空
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない（実機はメイン）
+
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  1. SCORE のページで選手のタグを打ちながら、ゲームを何度も切り替える → OBS（`out/program_state.json`・オーバーレイ）にタグが出ず、反映は点いたまま。反映でタグが出る
+  2. 未反映の無いボードでゲームを切り替える → 反映が点かない。BEST OF の文言・キャラの枠がロードのとおりに OBS に出る
+  3. スコア ±1（SCORE のページ）を押した直後に切り替える → スコアは反映待ちのまま残り、反映で出る
+  4. 反映していないキャラの選択があるボードで別のゲームへ切り替える → キャラと mains がどちらも空で OBS に出て、ほかに未反映が無ければ反映が消える（動作の違い 2）
+  5. SCORE のページでキャラ枠の数を 2 にして反映 → キャラを選んで反映しないまま、同じゲームをもう一度読み込む（キャラ枠は既定の 3 に戻る）→ そのスロットのキャラと mains はどちらも反映待ち（OBS は 2 枠のまま）、ほかのスロットは 3 枠で OBS に出る。反映で揃う
+  6. 2 人のゲームで 2 人目にタグを打って反映しないまま、1 人のゲームへ切り替える → 2 人目の枠が OBS から消え、チーム名は空で出る。ほかに未反映が無ければ反映が消える
+  7. 1P のキャラ 1 行目に Mario を選んで反映 → キャラ行を空にして反映しない → 別のゲームへ切り替える → OBS のキャラと mains が空になり、ほかに未反映が無ければ反映が消える（実機確認で見つかった穴）
+  8. 2 人のゲームでキャラを選んで反映 → 人数を 1 にして反映しない → 1 人の別のゲームへ切り替える → 2 人目の枠が OBS から消え、反映が消える
+  9. 2 人のゲームでチーム名 "Foo" を反映 → チーム名を空にして反映しない → 1 人のゲームへ切り替える → OBS のチーム名が空になり、反映が消える
+  10. 2 人のゲームで 2 人目にタグを打って反映 → 人数を 1 にして反映しない → 同じゲームをもう一度読み込む → 2 人目が空の枠で OBS に出て、反映が消える
 
 
 ### 2026-11-12 S4ac-3 の実機確認で見つかった 2 件

@@ -830,6 +830,240 @@ def test_a_game_switch_forgets_every_pick_a_reload_keeps_them(
     assert catalog.Current().replaced is None
 
 
+@pytest.mark.parametrize("applied", ["picks", "blank", "cleared", "undone"])
+def test_a_switch_publishes_blank_characters_over_a_pick_not_applied(
+        world, autonaApp, applied):
+    """Review of the 2026-11-12 fix (a load publishes what it wrote): a
+    pick not applied yet, then a switch to another game. The blank
+    characters and mains are the load's own values, made from no pick
+    (StateManager.HeldWriteGroup's `authoritative`), so both go out over
+    it, and it is no longer pending -- it is gone from the live state too.
+    Under the first cut the characters waited with the pick (someone
+    else's pending key) while the mains went out blank: OBS showed the
+    previous game's characters beside blank mains; and over picks applied
+    blank, the 反映 button stayed lit with nothing to apply.
+
+    `cleared` (the real-machine check of the review fix): Mario applied,
+    then the row emptied and not applied -- the live slot is blank already,
+    what is published is not. The switch skipped a blank live slot, so it
+    wrote nothing there: OBS kept Mario in the new game, and the 反映
+    button stayed lit. `undone`: a pick made and emptied again, neither
+    applied -- blank live and published, the edit still pending: the blanks
+    go out over it, and 反映 goes off."""
+    actions = AutonaActions.instance
+    assert StateManager.Get("game.codename") == "tgame"
+    autonaApp.ready(2)
+    actions.SetRoster(2, 1, 3)
+    player = PlayerService("score.2.team.1.player.1")
+    if applied == "picks":
+        _fillPicks()
+    elif applied == "cleared":
+        assert player.EditCharacter(1, character="Mario") is None
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    assert not StateManager.HasPendingChanges("score.2")
+    if applied == "cleared":
+        assert _picks(read=StateManager.GetCommitted)["1.1.character"][0]
+    assert player.EditCharacter(
+        1, character="" if applied == "cleared" else "Peach") is None
+    if applied == "undone":
+        assert player.EditCharacter(1, character="") is None
+    assert StateManager.HasPendingChanges("score.2")
+    if applied in ("cleared", "undone"):
+        assert _picks()["1.1.character"] == ["", "", ""]
+    if applied == "cleared":
+        assert _picks(read=StateManager.GetCommitted)["1.1.character"][0]
+
+    loadGame(TEAM_GAME)
+
+    blank = {f"{team}.{slot}.{group}": ["", "", ""]
+             for team in (1, 2) for slot in (1, 2)
+             for group in ("character", "mains")}
+    assert _picks() == blank
+    assert _picks(read=_published) == blank
+    assert not StateManager.HasPendingChanges("score.2")
+
+
+def test_a_switch_writes_nothing_over_slots_blank_and_published_blank(
+        world, autonaApp):
+    """A switch over slots whose characters and mains are blank, live and
+    published, with nothing pending on them -- the counts the new game's:
+    nothing to empty, so nothing is written there and the 反映 button stays
+    off (the `cleared` case above writes the blank only because what is
+    published, or someone's pending edit, is not)."""
+    actions = AutonaActions.instance
+    assert StateManager.Get("game.codename") == "tgame"
+    autonaApp.ready(2)
+    actions.SetRoster(2, 2, 3)
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    assert not StateManager.HasPendingChanges("score.2")
+
+    writes = []
+    original = StateManager.Set
+
+    def recording(key, value):
+        writes.append(key)
+        original(key, value)
+
+    with patch.object(StateManager, "Set", side_effect=recording):
+        loadGame(TEAM_GAME)
+
+    assert not [key for key in writes if key.startswith("score.2.")], writes
+    assert not StateManager.HasPendingChanges("score.2")
+
+
+def _published(key):
+    """`key` as published (lastSavedState): what the outputs have."""
+    from src.core.DictHelper import deep_get
+    with StateManager.lock:
+        return deep_get(StateManager.lastSavedState, key)
+
+
+@pytest.mark.parametrize("edit", ["slot", "name", "seed", "removed",
+                                  "emptied"])
+def test_a_load_publishes_what_the_roster_decides_over_an_edit_not_applied(
+        world, autonaApp, edit):
+    """What the roster decides on its own in a real load -- the slots the
+    new count drops (a switch to a game of one player a team), the team
+    names of one player a team, an empty slot's seed (a reload, the count
+    back) -- goes out with the load over an edit not applied there
+    (StateManager.HeldWriteGroup's `authoritative`), and nothing is left
+    pending: `slot` (a name typed in a slot dropped), `name` (a team name
+    typed), `seed` (the count lowered, the slot seeded again).
+
+    `removed` / `emptied` (the re-review of 2026-11-12): the edit made the
+    live state what the load decides already -- the count lowered (no slot
+    2 live), the team name emptied -- while the outputs still have the
+    slot and the name. The load wrote nothing where the live state had its
+    value, so OBS kept the previous game's slot 2 and the team name, and
+    反映 stayed lit: AutonaActions._TrimPublished / _SetDecided write it
+    all the same, read against what is published."""
+    actions = AutonaActions.instance
+    autonaApp.ready(2)
+    loadGame(TEAM_GAME)
+    assert sorted(StateManager.Get("score.2.team.1.player")) == ["1", "2"]
+    _fillPicks()
+    assert PlayerService("score.2.team.1.player.2").Edit(
+        {"name": "ZED"}) is None
+    if edit != "seed":
+        actions.SetTeamName(2, 1, "Foo")
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    assert not StateManager.HasPendingChanges("score.2")
+    assert _published("score.2.team.1.player.2.name") == "ZED"
+
+    if edit == "slot":
+        assert PlayerService("score.2.team.1.player.2").Edit(
+            {"name": "YOU"}) is None
+    elif edit == "name":
+        actions.SetTeamName(2, 1, "Bar")
+    elif edit == "emptied":
+        actions.SetTeamName(2, 1, "")
+    else:
+        actions.SetPlayersPerTeam(2, 1)
+        assert sorted(StateManager.Get("score.2.team.1.player")) == ["1"]
+    assert StateManager.HasPendingChanges("score.2")
+    if edit != "seed":
+        assert _published("score.2.team.1.teamName") == "Foo"
+
+    loadGame(TEAM_GAME if edit == "seed" else "tgame")
+
+    assert not StateManager.HasPendingChanges("score.2")
+    blank = ["", "", ""]
+    if edit == "seed":
+        assert sorted(_published("score.2.team.1.player")) == ["1", "2"]
+        assert not _published("score.2.team.1.player.2").get("name")
+        assert [value.get("name") for value in _published(
+            "score.2.team.1.player.2.character").values()] == blank
+        return
+    for team in (1, 2):
+        assert sorted(_published(f"score.2.team.{team}.player")) == ["1"]
+        assert _published(f"score.2.team.{team}.teamName") == ""
+        for group in ("character", "mains"):
+            assert [value.get("name") for value in _published(
+                f"score.2.team.{team}.player.1.{group}").values()] == blank
+    assert _published("score.2") == StateManager.Get("score.2")
+
+
+def test_outside_a_load_the_roster_writes_only_what_changes(
+        world, autonaApp):
+    """Outside a game load's recording (StateManager.Recording: the
+    operator's count, a set's load and follow) 反映 publishes every pending
+    key, so SetRoster writes what it wrote before 2026-11-12: nothing where
+    the live state has its value already, published or not -- none of the
+    writes a load's partial commit needs (AutonaActions._SetDecided,
+    _TrimPublished, the seed's claim of a slot whose removal is pending).
+    Written all the same, they change no value but the writes: the golden
+    of test_set_follow_flow's post_score caught the seed's claim."""
+    actions = AutonaActions.instance
+    autonaApp.ready(2)
+    loadGame(TEAM_GAME)
+    actions.SetTeamName(2, 1, "Foo")
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    actions.SetPlayersPerTeam(2, 1)
+    # Live: one player, no team name; published: two, "Foo".
+    assert StateManager.Get("score.2.team.1.teamName") == ""
+    assert _published("score.2.team.1.teamName") == "Foo"
+    assert sorted(_published("score.2.team.1.player")) == ["1", "2"]
+
+    writes = []
+    realSet, realUnset = StateManager.Set, StateManager.Unset
+
+    def recordSet(key, value):
+        writes.append(("set", key))
+        realSet(key, value)
+
+    def recordUnset(key):
+        writes.append(("unset", key))
+        realUnset(key)
+
+    with patch.object(StateManager, "Set", side_effect=recordSet), \
+            patch.object(StateManager, "Unset", side_effect=recordUnset):
+        actions.SetPlayersPerTeam(2, 1)
+        assert writes == []
+        actions.SetPlayersPerTeam(2, 2)
+
+    # Slot 2 seeded again, key by key, without unsetting it first.
+    assert ("set", "score.2.team.1.player.2.seed") in writes, writes
+    assert not [write for write in writes if write[0] == "unset"], writes
+    assert StateManager.HasPendingChanges("score.2")
+
+
+def test_a_reload_keeps_resized_characters_and_mains_back_with_a_pick(
+        world, autonaApp):
+    """The same game reloaded, its characters per player another number:
+    a slot's characters and mains are made again from its picks -- one
+    group (PlayerService.PublishCharacterSlots) -- so with a pick not
+    applied, both wait for 反映 with it. Under the first cut the mains went
+    out, made from that pick, while the characters waited."""
+    actions = AutonaActions.instance
+    assert StateManager.Get("game.codename") == "tgame"
+    autonaApp.ready(2)
+    actions.SetRoster(2, 1, 2)
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    assert PlayerService("score.2.team.1.player.1").EditCharacter(
+        1, character="Luigi") is None
+
+    loadGame("tgame")
+
+    live = _picks()
+    picked = live["1.1.character"]
+    assert picked[0] and picked[1:] == ["", ""] and live["1.1.mains"] == picked
+    committed = _picks(read=StateManager.GetCommitted)
+    assert committed["1.1.character"] == committed["1.1.mains"] == ["", ""]
+    # The slot nobody picked on went out, resized.
+    assert committed["2.1.character"] == committed["2.1.mains"] \
+        == ["", "", ""]
+    assert StateManager.HasPendingChanges("score.2")
+
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    assert _picks(read=StateManager.GetCommitted) == live
+
+
 @pytest.mark.parametrize("shell", ["desktop", "headless"])
 def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
         world, autonaApp, monkeypatch, shell):
@@ -1142,10 +1376,14 @@ def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
     autonaApp.ready(2)
+    # A roster of two 反映'd, which the load (tgame: one a team) trims: the
+    # load's own writes, which only its commit publishes. (An edit pending
+    # before the load would wait for 反映 whatever the slots do.)
+    _players(2, 2)()
     StateManager.CommitHeld("score.2")
     autonaApp.settle()
-    _players(2, 2)()
-    assert StateManager.HasPendingChanges("score.2")
+    assert sorted(StateManager.GetCommitted("score.2.team.1.player")) == [
+        "1", "2"]
 
     def _raise():
         raise RuntimeError("a slot failed")
@@ -1158,4 +1396,5 @@ def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
         signals.onLoad.disconnect(_raise)
     assert not StateManager.HasPendingChanges("score.2"), (
         "the load's commit did not run")
+    assert sorted(StateManager.GetCommitted("score.2.team.1.player")) == ["1"]
     autonaApp.settle()

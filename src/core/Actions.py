@@ -1104,7 +1104,9 @@ class AutonaActions:
         wrote:
 
         - the slots above `players` go (both teams; a slot the state
-          carries without a card -- a restored roster -- included);
+          carries without a card -- a restored roster -- included, and, in
+          a game load, one only the published roster still has:
+          _TrimPublished);
         - a kept slot whose character slots are another number republishes
           them, and its mains with them (PlayerService.PublishCharacterSlots,
           as a card's slot-count change did): its first picks kept, blank
@@ -1112,15 +1114,21 @@ class AutonaActions:
         - with `forgetPicks` (a game load that replaced another game:
           ApplyGameRoster), every kept slot's characters and mains are
           republished blank instead, whatever their number -- unless they
-          already are;
+          already are (inside the load's recording: published too, with no
+          edit pending on them -- _NothingToEmpty);
         - a missing slot is seeded as an empty card seeded it
           (PlayerService.SeedEmpty), one index at a time, team 1 first;
         - going from another count (the larger team's, counted as the board
-          counts its cards: RosterCount) to one player a team (or none)
-          empties the team names and their crests, as the board's team-name
-          fields did when they were hidden.
+          counts its cards: RosterCount -- or, in a game load, the count
+          published) to one player a team (or none) empties the team names
+          and their crests, as the board's team-name fields did when they
+          were hidden.
 
-        The same counts as before, without `forgetPicks`, write nothing.
+        "In a game load": inside its recording (StateManager.Recording),
+        where what is published is read too (see the comment below). The
+        same counts as before, without `forgetPicks`, write nothing outside
+        one; inside, only what the outputs lack (an edit not applied made
+        the live state the value already).
         """
         board = self._asInt(board, 0)
         if board not in self.SCORE_BOARDS:
@@ -1139,9 +1147,31 @@ class AutonaActions:
                         characters, DEFAULT_CHARACTERS_PER_PLAYER),
                         self.MAX_CHARACTERS_PER_PLAYER))
 
+                # What the roster decides on its own -- the slots it drops,
+                # the blank characters of a switch, an empty card's seed, no
+                # team name -- goes out with a game load's commit over an
+                # edit pending there, which it overwrote: authoritative
+                # (StateManager.HeldWriteGroup). The resized characters are
+                # made from the slot's picks, and wait with a pick not
+                # applied. Where the live state has such a value already but
+                # what is published has not (an edit not applied made it),
+                # it is written all the same: the commit carries what the
+                # operation wrote, and left out, the outputs would keep the
+                # published one. Only inside a game load's recording
+                # (StateManager.Recording): elsewhere 反映 publishes every
+                # pending key, so such a write would only add one -- the
+                # writes outside a load are those before 2026-11-12.
+                decide = StateManager.Recording()
+
+                # The count published, read before anything is written.
+                shown = max(self._Contiguous(self._PublishedRoster(
+                    board, team)) for team in (1, 2)) if decide else current
                 if target is not None:
                     for team in (1, 2):
-                        self.TrimTeamRoster(board, team, target)
+                        with StateManager.HeldWriteGroup(authoritative=True):
+                            if decide:
+                                self._TrimPublished(board, team, target)
+                            self.TrimTeamRoster(board, team, target)
 
                 # The slots kept: 1..target, or -- the players kept --
                 # every one each team has, in order.
@@ -1165,7 +1195,10 @@ class AutonaActions:
                             f"score.{board}.team.{team}.player.{key}")
                         picks = slot.get("character")
                         if forgetPicks:
-                            if self._IsBlank(service, slot, count, snap):
+                            if self._NothingToEmpty(
+                                    service, slot, count, snap) if decide \
+                                    else self._IsBlank(
+                                        service, slot, count, snap):
                                 continue
                             slots = [CharacterSlot()] * count
                         elif isinstance(picks, dict) and len(picks) == count:
@@ -1173,24 +1206,76 @@ class AutonaActions:
                         else:
                             slots = self._ResizedPicks(
                                 service, picks, count, snap)
-                        service.PublishCharacterSlots(
-                            slots, includeMains=True, snapshot=snap)
+                        with StateManager.HeldWriteGroup(
+                                authoritative=bool(forgetPicks)):
+                            service.PublishCharacterSlots(
+                                slots, includeMains=True, snapshot=snap)
 
                 for index in range(1, (target or 0) + 1):
                     for team in (1, 2):
                         if not isinstance(
                                 rosters[team].get(str(index)), dict):
-                            PlayerService(
-                                f"score.{board}.team.{team}.player.{index}"
-                            ).SeedEmpty(count)
+                            path = f"score.{board}.team.{team}.player." \
+                                f"{index}"
+                            with StateManager.HeldWriteGroup(
+                                    authoritative=True):
+                                # The seed writes the slot key by key, below
+                                # an edit pending on the slot itself (the
+                                # slot removed, not applied), which would
+                                # hold it back: the slot is the seed's as a
+                                # whole, so it is written as such first (no
+                                # key live, nothing changes).
+                                if decide and StateManager.HasPendingAt(path):
+                                    StateManager.Unset(path)
+                                PlayerService(path).SeedEmpty(count)
 
-                if target is not None and target != current and target <= 1:
+                # From another count -- the live one, or the one published
+                # (a count change not applied).
+                if target is not None and target <= 1 and (
+                        target != current or target != shown):
                     for team in (1, 2):
-                        self.SetTeamName(board, team, "")
-                        # The crest of no name, as in ClearBoard.
-                        self._SetIfChanged(
-                            f"score.{board}.team.{team}.logo", None)
+                        with StateManager.HeldWriteGroup(authoritative=True):
+                            # SetTeamName's write, and the crest of no name,
+                            # as in ClearBoard.
+                            write = self._SetDecided if decide \
+                                else self._SetIfChanged
+                            write(f"score.{board}.team.{team}."
+                                  f"{schema.TEAM_NAME_KEY}", "")
+                            write(f"score.{board}.team.{team}.logo", None)
         return True
+
+    @staticmethod
+    def _SetDecided(key, value) -> bool:
+        """Set `key` to a value an operation decides on its own (in an
+        authoritative HeldWriteGroup) unless there is nothing to change:
+        the live state and what is published have it, and no edit is
+        pending at or below it. True if written.
+
+        Not SetIfChanged: a live value an edit not applied made (a team name
+        emptied, not applied) is the operation's value already, and a game
+        load's commit publishes what the operation wrote -- skipped, the
+        outputs would keep the published one, and 反映 stay lit. A held
+        write is recorded whether or not it changes the value."""
+        # No key counts as None, as SetIfChanged has it.
+        if StateManager.Get(key) == value \
+                and StateManager.GetCommitted(key) == value \
+                and not StateManager.HasPendingAt(key):
+            return False
+        StateManager.Set(key, value)
+        return True
+
+    def _TrimPublished(self, board, team, target):
+        """TrimTeamRoster for the slots above `target` the live roster has
+        not and the published one has: an edit not applied removed them
+        (fewer players a team). Removed again, in SetRoster's authoritative
+        group, so a game load's commit takes them out of the outputs too."""
+        prefix = f"score.{board}.team.{team}.player"
+        live = StateManager.Get(prefix)
+        if not isinstance(live, dict):
+            return
+        for slot in list(self._PublishedRoster(board, team)):
+            if self._asInt(slot, 0) > target and slot not in live:
+                StateManager.Unset(f"{prefix}.{slot}")
 
     def SetPlayersPerTeam(self, board, players) -> bool:
         """`players` player slots a team on board `board` (SetRoster), with
@@ -1306,6 +1391,14 @@ class AutonaActions:
         roster = StateManager.Get(f"score.{board}.team.{team}.player")
         return dict(roster) if isinstance(roster, dict) else {}
 
+    @staticmethod
+    def _PublishedRoster(board, team) -> dict:
+        """_Roster as it is published (StateManager.GetCommitted: the live
+        one when nothing is pending on the board)."""
+        roster = StateManager.GetCommitted(
+            f"score.{board}.team.{team}.player")
+        return dict(roster) if isinstance(roster, dict) else {}
+
     def _CharacterCount(self, rosters) -> int:
         """The character slots the board's players have: those of its first
         slot, the default for a board with none."""
@@ -1355,6 +1448,22 @@ class AutonaActions:
                     str(k): v for k, v in value.items()} != blank:
                 return False
         return True
+
+    def _NothingToEmpty(self, service, slot, count, snap) -> bool:
+        """Whether a game switch has nothing to empty in a slot: its
+        characters and mains `count` blank ones live (_IsBlank) and
+        published (or the slot not published at all), and no edit pending
+        on them. A slot blank live only -- a pick emptied, not applied --
+        still gets the blanks, so a game load's commit carries them out over
+        the pick published (StateManager.GetCommitted)."""
+        if not self._IsBlank(service, slot, count, snap):
+            return False
+        published = StateManager.GetCommitted(service.path)
+        if isinstance(published, dict) \
+                and not self._IsBlank(service, published, count, snap):
+            return False
+        return not any(StateManager.HasPendingAt(f"{service.path}.{key}")
+                       for key in ("character", "mains"))
 
     def ClearTeamRoster(self, board, team) -> bool:
         """Drop every player slot of one team. True if it applied.
@@ -1717,25 +1826,41 @@ class AutonaActions:
         """
         StateManager.CommitHeld(f"score.{self._asInt(board, 0)}")
 
-    def CommitGameLoad(self):
+    def CommitGameLoad(self, written):
         """Publish what a game load wrote on the 1v1 / team boards: it
         rewrites characters and defaults wholesale, so that is the fresh
         baseline rather than edits waiting behind the 反映 button.
 
+        `written`: the load's StateManager.RecordHeldWrites, which this
+        is called inside of. Only what the load wrote is published
+        (StateManager.CommitHeld with it): an edit pending before the load,
+        and one another thread makes while it runs -- a board operation
+        while the loader selects the game, a core-direct write at any time
+        -- stay behind 反映. So does a key the load writes over such an
+        edit (published, it would show what the load made of the edit: the
+        set length's texts derived from a BEST OF not applied; a slot's
+        resized characters, with its mains, made from a pick not applied).
+        Not a value the load decides on its own, made from no edit (SetRoster:
+        the blank characters and mains of a switch, the slots it drops, an
+        empty card's seed, no team name; StateManager.HeldWriteGroup's
+        `authoritative`): it goes out, and the edit it overwrote -- gone
+        from the live state -- is no longer pending. Until the fix of
+        2026-11-12 every pending key went out with the load.
+
         Called with the roster and the set length the load writes, in their
         save block, under the board host's lock (bootstrap.wire_game_roster,
-        in both shells since ADR-005 S4ad; even when they raise). Inside the
-        load's own save cycle it only queues the boards: the cycle's close
-        publishes all that is pending on them then, what was written after
-        this included (an onLoad slot, another thread's core-direct write
-        while the load runs -- its board operations wait, as the desktop's
-        _Publish holds the board host's lock until the cycle closes). Until
-        S4ad the desktop's asset adapter called it after the load's onLoad
-        slots (AutonaGameAssetManager._Publish), as a Qt player card's
+        in both shells since ADR-005 S4ad; even when they raise), and by the
+        desktop asset adapter's settle of a load it does not announce
+        (_SettleUnannounced). Inside the load's own save cycle it only
+        queues the boards: the cycle's close publishes what the load wrote
+        by then, onLoad's slots included (the desktop's _Publish records
+        from the rebuild to the close). Until S4ad the desktop's asset
+        adapter called it after the load's onLoad slots
+        (AutonaGameAssetManager._Publish), as a Qt player card's
         ReloadCharacters wrote what its rows picked on onLoad (until
         ADR-005 S4ac-3); each built board's onLoad handler did it until
         S4t. The headless shell holds nothing, so it finds nothing to
         commit.
         """
         for board in self.SCORE_BOARDS:
-            self.ApplyChanges(board)
+            StateManager.CommitHeld(f"score.{board}", written)
