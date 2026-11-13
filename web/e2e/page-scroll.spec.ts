@@ -9,7 +9,7 @@ import {keepLocal, serverUrl} from "./server";
 const PANELS = [
     "shell-check", "commentary", "stream", "event", "top8", "stats",
     "statsPreview", "playerBrowser", "thumbnail", "result", "board",
-    "scoreboard",
+    "scoreboard", "settings",
 ];
 
 test.beforeEach(async ({page}) => {

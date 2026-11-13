@@ -40,6 +40,13 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 
    - カテゴリ見出しはナビ index を消費しないため、ナビ index = stack ページ index は維持される
 3. `Window.STATE_VERSION` をインクリメント
 
+**サイドバーの項目でないページ**（設定。ADR-005 S4af）は、ナビ項目の後ろにスタックのページとして足す
+（`_lazyPanels` / `_panelIndexes` / `_webPanelPages.Add` に登録し、`_navSections` には入れない）。ナビ項目の
+nav index == stack index と保存済みのサイドバーの index は動かないので `STATE_VERSION` は上げない。開くのは
+`Window.OpenSettings`（サイドバーのハイライトを `AutonaSidebar.clearCurrent()` で消す。項目を押せばそのページに戻る）、
+終了時に覚える項目は `_NavToRemember`（設定ページの間はその前の項目）。起動時の復元は保存した index が
+ナビ項目の範囲（`0 <= index < _panelIndexes["settings"]`）のときだけ
+
 パネルはすべて **遅延構築**（起動 Step 4b-2）: `_Create*Panel()` ファクトリを書いて
 `(self._CreateXxxPanel, 'icon.svg', ナビラベル, 'キー')` を `_navSections` に
 追加する。stack にはプレースホルダが入り、初回表示時に `_EnsurePanelAt` が

@@ -51,6 +51,7 @@ from src import AutonaWebPanelHost as HostModule
 from src.AutonaWebPanelHost import AutonaWebPanelHost, PanelPath, WebPanelPages
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
+from src.core.SettingsManager import SettingsManager
 
 ACTIVE = QWebEnginePage.LifecycleState.Active
 FROZEN = QWebEnginePage.LifecycleState.Frozen
@@ -202,9 +203,9 @@ def buildHost(qapp, panelServer, monkeypatch):
     monkeypatch.setattr(WPL, "_pendingLoaders", [])
     monkeypatch.setattr(WPL, "_readyCallbacks", [])
     target = {"port": port}
-    realGet = WPL.SettingsManager.Get
+    realGet = SettingsManager.Get
     monkeypatch.setattr(
-        WPL.SettingsManager, "Get",
+        SettingsManager, "Get",
         lambda key, default=None: (target["port"]
                                    if key == "general.webserver_port"
                                    else realGet(key, default)))
@@ -663,7 +664,7 @@ def _webServerSettings(monkeypatch, *, lan, token=FAKE_TOKEN,
 
     settings = {"general.webserver_port": 5107,
                 "general.webserver_listen_lan": lan}
-    monkeypatch.setattr(HostModule.SettingsManager, "Get",
+    monkeypatch.setattr(SettingsManager, "Get",
                         lambda key, default=None: settings.get(key, default))
     monkeypatch.setattr(HostModule, "GetLocalIP", lambda: host)
     # The Qt board's address (GetWebServerHost) too.
@@ -1333,9 +1334,9 @@ def test_a_refused_load_is_retried_then_given_up(qapp, monkeypatch,
     # times, then reports the failure once.
     monkeypatch.setattr(WPL, "_webServerReady", True)
     monkeypatch.setattr(WPL.LocalPageLoader, "LOAD_RETRY_MS", 50)
-    realGet = WPL.SettingsManager.Get
+    realGet = SettingsManager.Get
     monkeypatch.setattr(
-        WPL.SettingsManager, "Get",
+        SettingsManager, "Get",
         lambda key, default=None: (refusedPort
                                    if key == "general.webserver_port"
                                    else realGet(key, default)))
@@ -1996,7 +1997,8 @@ def test_the_qt_board_panel_is_gone():
     # preview, the colour cards only it still had and the option panels nothing
     # built may not come back in src/, nor the translations only they used, nor
     # the options' store and action (nothing called them, no overlay read them).
-    # The colour button stays: the crew board and the settings use it.
+    # (The colour button, which the crew board and the Qt settings window
+    # used, went with the latter in S4af: test_the_qt_settings_window_is_gone.)
     from tests.conftest import PROJECT_ROOT
 
     src = PROJECT_ROOT / "src"
@@ -2004,8 +2006,7 @@ def test_the_qt_board_panel_is_gone():
                  "AutonaFeatureColors.py", "LayoutOptions",
                  "core/LayoutOptionsManager.py"):
         assert not (src / gone).exists(), gone
-    for kept in ("AutonaColorButton.py", "AutonaDesignerWindow.py",
-                 "AutonaWebPageLifecycle.py"):
+    for kept in ("AutonaDesignerWindow.py", "AutonaWebPageLifecycle.py"):
         assert (src / kept).exists(), kept
     words = ("import AutonaBoardWidget", "AutonaBoardWidget(",
              "AutonaLayoutPreview(", "import AutonaLayoutPreview",
@@ -2096,8 +2097,6 @@ def test_the_qt_scoreboard_panel_and_its_switch_are_gone():
     for name in QT_SCOREBOARD_MODULES:
         assert not (src / f"{name}.py").exists(), name
     assert not (src / "layout").exists()
-    # The colour button stays: the settings use it.
-    assert (src / "AutonaColorButton.py").exists()
 
     # The switch: no table of way-back settings, no reader of the key (as
     # a string anywhere in src -- comments recording that it went are not
@@ -2284,16 +2283,18 @@ class _WindowRig:
     which cannot be imported: agent-pitfalls #1) on a stack built the way
     _BuildUi builds it, with a few sidebar items: six React ones and a
     made-up lazy Qt one (the sidebar has no Qt item left since S4aa, and the
-    factories' path for a Qt panel is still there), in the real order. Off
-    screen, so the host builds no view; what it was asked to show is its
-    _panel."""
+    factories' path for a Qt panel is still there), in the real order, and
+    the Settings page after them (S4af). Off screen, so the host builds no
+    view; what it was asked to show is its _panel. The sidebar is a stand-in
+    (_FakeSidebar) that choose() highlights as a click does."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged",
                "_EnsurePanelAt", "_WebPanel", "_AdoptWebPanelHost",
                "_CreateEventPanel", "_CreateStreamPanel",
                "_CreateScoreboardPanel", "_CreateTop8Panel",
                "_CreateCommentaryPanel", "_CreateStatsPanel",
-               "OpenScoreSets")
+               "OpenScoreSets", "OpenSettings", "_NavToRemember",
+               "_CreateSettingsPanel")
 
     def __init__(self):
         import ast
@@ -2346,12 +2347,22 @@ class _WindowRig:
             w._panelIndexes[key] = index
             if WebAccess.IsWebPanel(key):
                 w._webPanelPages.Add(index, key)
+        # As _BuildUi: the Settings page after the items, no item's.
+        index = w.stack.addWidget(QWidget())
+        w._lazyPanels[index] = (w._CreateSettingsPanel, "settings")
+        w._panelIndexes["settings"] = index
+        w._webPanelPages.Add(index, "settings")
+        w._navBeforeSettings = 0
+        w.sidebar = _FakeSidebar()
         w.stack.currentChanged.connect(w._OnStackPageChanged)
         self.placeholders = [w.stack.widget(index)
                              for index in range(w.stack.count())]
 
     def choose(self, nav):
-        # What a sidebar click does (navSelected -> _OnNavSelected).
+        # What a sidebar click does (the item highlighted, navSelected ->
+        # _OnNavSelected).
+        if isinstance(self.window.sidebar, _FakeSidebar):
+            self.window.sidebar.setCurrentIndex(nav)
         self.window._OnNavSelected(nav)
         return self.window.stack.currentIndex()
 
@@ -2361,7 +2372,23 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT = range(7)
+class _FakeSidebar:
+    """AutonaSidebar's highlight: the item checked, -1 for none."""
+
+    def __init__(self):
+        self.current = -1
+
+    def currentIndex(self):
+        return self.current
+
+    def setCurrentIndex(self, nav):
+        self.current = nav
+
+    def clearCurrent(self):
+        self.current = -1
+
+
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT, SETTINGS = range(8)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -2613,6 +2640,217 @@ def test_the_set_selection_asked_for_while_the_window_closes_does_nothing(
     assert order == []
     assert w.stack.currentIndex() == LAZY_QT
     assert rig.hosts() == []
+
+
+# ── the Settings page (ADR-005 S4af) ────────────────────────────────────
+
+def _askingSettings(rig):
+    """What OpenSettings does to the window: brought to the front."""
+    order = []
+    rig.window._BringToFront = lambda: order.append("front")
+    return order
+
+
+def test_the_settings_page_shows_the_host_with_no_item_highlighted(qapp):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingSettings(rig)
+    rig.choose(STREAM)
+    host = w._webPanelHost
+
+    w.OpenSettings()
+
+    # The same host page, told the Settings panel; no item highlighted.
+    assert order == ["front"]
+    assert host._panel == "settings"
+    assert w.stack.currentIndex() == STREAM
+    assert rig.hosts() == [STREAM]
+    assert w.stack.widget(SETTINGS) is rig.placeholders[SETTINGS]
+    assert SETTINGS not in w._lazyPanels
+    assert w.sidebar.currentIndex() == -1
+    # The window reopens on the item chosen before.
+    assert w._NavToRemember() == STREAM
+
+    # An item chosen leaves it, and is the one to reopen on.
+    assert rig.choose(COMMENTARY) == STREAM
+    assert host._panel == "commentary"
+    assert w._NavToRemember() == COMMENTARY
+
+
+def test_the_settings_page_opened_first_builds_the_host_on_its_page(qapp):
+    rig = _WindowRig()
+    w = rig.window
+    _askingSettings(rig)
+    rig.choose(LAZY_QT)
+
+    w.OpenSettings()
+
+    assert w.stack.currentIndex() == SETTINGS
+    assert rig.hosts() == [SETTINGS]
+    assert w._webPanelHost._panel == "settings"
+    assert w._NavToRemember() == LAZY_QT
+    # The React items show it from then on.
+    assert STREAM not in w._lazyPanels
+    assert rig.choose(STREAM) == SETTINGS
+    assert w._webPanelHost._panel == "stream"
+    assert rig.choose(LAZY_QT) == LAZY_QT
+    assert rig.built == ["lazyQt"]
+
+
+def test_opening_the_settings_page_again_keeps_the_item_before_it(qapp):
+    # The second request (the menu while it shows): no item is highlighted
+    # then, so the one chosen before stays the one to reopen on.
+    rig = _WindowRig()
+    w = rig.window
+    _askingSettings(rig)
+    rig.choose(TOP8)
+    w.OpenSettings()
+    asked = []
+    w._webPanelHost.ShowPanel = asked.append
+
+    w.OpenSettings()
+
+    assert asked == ["settings"]
+    assert w._NavToRemember() == TOP8
+
+
+def test_the_settings_page_asked_for_while_the_window_closes_does_nothing(qapp):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingSettings(rig)
+    rig.choose(LAZY_QT)
+    w._shuttingDown = True
+
+    w.OpenSettings()
+
+    assert order == []
+    assert w.stack.currentIndex() == LAZY_QT
+    assert w.sidebar.currentIndex() == LAZY_QT
+    assert rig.hosts() == []
+
+
+def test_the_sidebar_highlights_no_item_and_then_the_next_chosen(qapp):
+    # AutonaSidebar.clearCurrent: an exclusive group never unchecks its
+    # checked button; a click afterwards checks one item as usual.
+    from qtpy.QtGui import QIcon
+
+    from src.AutonaSidebar import AutonaSidebar
+
+    sidebar = AutonaSidebar()
+    try:
+        for title in ("A", "B", "C"):
+            sidebar.addNavItem(QIcon(), title)
+        sidebar.setCurrentIndex(1)
+
+        sidebar.clearCurrent()
+        assert sidebar.currentIndex() == -1
+        sidebar.clearCurrent()
+        assert sidebar.currentIndex() == -1
+
+        sidebar._navButtons[2].click()
+        assert sidebar.currentIndex() == 2
+        sidebar._navButtons[0].click()
+        assert [button.isChecked() for button in sidebar._navButtons] == [
+            True, False, False]
+    finally:
+        sidebar.deleteLater()
+
+
+def test_the_settings_page_is_no_sidebar_item_to_reopen_on():
+    # The window remembers an item, never the Settings page (closeEvent
+    # saves _NavToRemember), and restores an item only.
+    tree = ast.parse(_autonaSource())
+    close = next(node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name == "closeEvent")
+    assert any(isinstance(node, ast.Attribute)
+               and node.attr == "_NavToRemember" for node in ast.walk(close))
+    assert 'savedIndex < self._panelIndexes["settings"]' in _autonaSource()
+    assert "settings" in WebAccess.WEB_PANELS
+
+
+# The Qt settings window's modules (ADR-005 S4af) and the colour button only
+# it used.
+QT_SETTINGS_MODULES = ("AutonaSettingsWindow", "SettingsWidget",
+                       "AutonaColorButton")
+# What went with them: the window's accessor and handle, the key recorder,
+# the hotkeys' switch hook only the window called.
+QT_SETTINGS_NAMES = ("AutonaSettingsWindow", "SettingsWidget",
+                     "AutonaColorButton", "EnsureSettingsWindow",
+                     "_settingsWindow", "HotkeyCaptureEdit",
+                     "ApplyEnabledSetting", "_HotkeyWarningText")
+# The window's translation contexts (both .ts files).
+QT_SETTINGS_CONTEXTS = (
+    "settings", "settings.bsky", "settings.disable_autoupdate",
+    "settings.disable_export", "settings.disable_overwrite",
+    "settings.disable_scoreupdate", "settings.disable_thumbnail_widget",
+    "settings.general", "settings.webserver_listen_lan", "settings.hotkeys",
+    "settings.team_1_default_color", "settings.team_2_default_color")
+
+
+def _codeNames(path):
+    """The identifiers a module's code uses: names, attributes, definitions
+    and imports (comments and docstrings that record a name do not)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.update(node.name.split("."))
+    return names
+
+
+def test_the_qt_settings_window_is_gone():
+    # ADR-005 S4af (the owner's go-ahead: no way back): the React page
+    # (/web/settings, the menu's Window.OpenSettings) is the only settings
+    # UI. Neither the Qt window, its rows' widget, the colour button only it
+    # used, the key recorder, the hotkeys' switch hook nor the window's
+    # translations may come back.
+    import re
+
+    from src import AutonaHotkeys
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "Settings").exists()
+    assert not (src / "AutonaColorButton.py").exists()
+    assert not hasattr(AutonaHotkeys.AutonaHotkeys, "ApplyEnabledSetting")
+
+    # Nothing imports or names what went: the app, its entry point and the
+    # tests (the recorders under tests/fixtures run against an older
+    # checkout, and are not scanned).
+    scanned = [*sorted(src.rglob("*.py")), PROJECT_ROOT / "main.py",
+               *sorted((PROJECT_ROOT / "tests").glob("*.py")),
+               *sorted((PROJECT_ROOT / "tests" / "live").glob("*.py"))]
+    importers = {str(path.relative_to(PROJECT_ROOT)):
+                 sorted(_importedModules(path) & set(QT_SETTINGS_MODULES))
+                 for path in scanned}
+    assert {path: names for path, names in importers.items() if names} == {}
+    users = {str(path.relative_to(PROJECT_ROOT)):
+             sorted(_codeNames(path) & set(QT_SETTINGS_NAMES))
+             for path in sorted(src.rglob("*.py"))}
+    assert {path: names for path, names in users.items() if names} == {}
+
+    # The translations: none of the window's contexts, nothing located in
+    # its files. The menu's "Settings" (the app context) stays.
+    for name in ("Autona_en.ts", "Autona_ja.ts"):
+        text = (src / "i18n" / name).read_text(encoding="utf-8")
+        contexts = set(re.findall(r"<name>([^<]+)</name>", text))
+        assert contexts & set(QT_SETTINGS_CONTEXTS) == set(), name
+        assert "Settings\\" not in text, name
+        assert "AutonaColorButton" not in text, name
+        assert "<source>Settings</source>" in text, name
+
+    # The build collects nothing of it.
+    spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
+        encoding="utf-8")
+    assert "src/Settings" not in spec and "src\\Settings" not in spec
 
 
 @pytest.mark.parametrize("state", ["minimized", "maximized-then-minimized",

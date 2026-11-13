@@ -164,7 +164,6 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 **ページ一覧** — 詳細は §4.2 参照。
 
 **使われない領域**:
-- 設定ダイアログ（PyQt に集約）
 - ブラケット表示（必要時に追加検討）
 - 画像生成の起動（PyQt から起動）
 
@@ -826,8 +825,8 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | 設定種別 | 保存先 | 形式 | 所有 | 編集経路 |
 |---------|------|------|------|--------|
-| 一般設定（言語、テーマ色、Web ポート、表示オプション、Bluesky アカウント、Twitch アカウント等） | `./user_data/settings.json` | JSON | `SettingsManager` | PyQt 設定ダイアログ |
-| ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | PyQt 設定ダイアログ |
+| 一般設定（言語、テーマ色、Web ポート、表示オプション、Bluesky アカウント、Twitch アカウント等） | `./user_data/settings.json` | JSON | `SettingsManager` | React の設定ページ（`/web/settings`。ADR-005 S4af）と各ページ |
+| ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | React の設定ページのホットキー区画（ADR-005 S4af） |
 | ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
 | サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
@@ -935,6 +934,7 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | 7.5 | `WebPanels`（共有ホスト。ナビの文言は `Stats Display Settings`、ナビのキーは `statsPreview`） | React の `StatsPreviewPage`（`/web/statsPreview`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4l）。Qt 版（`AutonaStatsPreviewWidget`）は S4l で削除済み | 統計オーバーレイ 7 種（`core/StatsOverlays` の固定表。`last_sets` / `tournament_history` は player1 / player2 の 2 項目）から 1 つを選び、プレビュー（オーバーレイ自体の縮小表示）・OBS 用 URL・機能別カラー（`stats`）・Companion マクロ（`stats:refresh` のメソッド・パス・URL）を出す。選択は `settings.json` の `stats_preview.selected_type`（`GET /api/v1/stats/overlays` / `PUT .../selected`）。state を書くのは色カード（`PATCH /api/v1/colors/stats`）だけ | `colors.stats.*` | `colors.stats.*`, `tournamentInfo.*` | ✓ |
 | 8 | `WebPanels`（共有ホスト。ナビの文言は `Player List`、ナビのキーは `playerBrowser`） | React の `PlayerBrowserPage`（`/web/playerBrowser`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4n）。Qt 版（`AutonaPlayerBrowserWidget` と、選手カードの `player_editor` 向けの分岐）は S4n で削除済み | 選手一覧（2タブ）: トーナメント出場選手（`core/PlayerDirectory.Entrants`: `StreamService.TopEntrants` ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット = v1 `:load`）／登録済み選手（`core/PlayerDirectory.Registered`。検索・ソート・100 行ごとのページ分割・新規登録・編集・削除 = v1 `PUT /players` / `POST /players:delete`）。編集の下書きはページのローカルで、保存のときだけ送る | なし（state に書かない。`player_editor` は古い `state.json` の掃除だけ残る） | `PlayerDB.instance`（core）, `StreamService.TopEntrants`（state 非依存）。再読込は Socket.IO `autonaPlayers.players`・`tournamentInfo.load`・`game` | ✓ |
 
+> **設定**（サイドバー下部「Help & Settings」の「設定」）は React の `SettingsPage`（`/web/settings`。ADR-005 S4af）で、共有ビュー `AutonaWebPanelHost` に表示する。サイドバーの項目ではなく、スタックのナビ項目の後ろのページ（`Window.OpenSettings`。開いている間はサイドバーのどの項目もハイライトしない。終了時はその前に開いていた項目を覚える）。4 区画: 一般（運用のスイッチ 5 つと既定のチームカラー。WRITE・すぐ効く）・ネットワーク（ポートと LAN。THIS_PC・再起動で反映）・言語（3 つ。THIS_PC・再起動で反映。アプリは閉じない）・ホットキー（Ctrl / Alt / Shift とキーの組み立て。THIS_PC・保存したらすぐ効く）。書き込みは `GET` / `PATCH /api/v1/settings*`（core の `AppSettings` / `HotkeyRules`。`external-control-api.md` §5.22）。Qt の設定ウィンドウ（`AutonaSettingsWindow` / `SettingsWidget`）は S4af で削除済み
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。旧 `ANLYSE`（`AutonaAnalysisWidget`）は `Statistics` パネルのサブタブだったが、ADR-005 S4k で React の統計情報ページの 4 つ目のタブ「この大会の試合一覧」になり、Qt 版は削除済み。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
 > スコアボードの人数と「1選手あたりのキャラ数」は state が正本（スロット数とスロットの `character` の数。`AutonaActions.SetRoster`、ADR-005 S3e-6）。SCORE ページの人数・キャラ数の欄は v1 で変更を依頼し、state を表示するだけ（キャラ数の初期値 3）。人数 0 のボードは次の選手のキャラ数を覚えておく（core の `AutonaActions`。ADR-005 S4x から両シェルで 1 つ。Qt のボードの隠しスピン `charNumber` は S4ac-3 で削除）。ゲームのロードが別のゲームへの切り替えなら、全スロットのキャラと mains を空にする（起動時の復元・同じゲームの再ロードでは空にしない。Top 8 と同じ規則）。
@@ -1003,7 +1003,7 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 |---------|------|
 | スコアボード番号 | board1=1v1、board2=team、board3=crew。画面表示は `scoreboard.battle_format`（`singles` / `team` / `crew`）で切り替える |
 | 編集 → state 即時反映 | `editingFinished` / `valueChanged` 等で `StateManager.Set` を呼ぶ。バッチ操作は `SaveBlock()` で囲む |
-| 設定ダイアログは別 QDialog | ドック自身は設定 UI を持たず、`AutonaSettingsWindow` に集約 |
+| 設定は 1 ページ | パネルは自分の設定 UI を持たず、アプリの設定は React の設定ページ（`/web/settings`。ADR-005 S4af。Qt の `AutonaSettingsWindow` は削除）に集約 |
 
 ### 4.2 React Web UI ページ仕様
 
@@ -1015,7 +1015,7 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）と設定の `settings`（S4af。サイドバーの項目ではなく「Help & Settings」→「設定」が開く。スタックのページはナビ項目の後ろ）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1370,7 +1370,7 @@ async function initResult({ data, config, layout }) {
 | P1 | `#DC143C`（= brand） | プレイヤー1 のスコア背景・名前枠 |
 | P2 | `#3D8BE8` | プレイヤー2 のスコア背景・名前枠 |
 
-P1/P2 は **テーマ色ではなく競技上の識別色**（`design-tokens.json` の `player_colors`）。React 側は `theme.palette.p1color` / `p2color` でアクセス。PyQt 側は `AutonaColorButton` が動的に `setStyleSheet` で適用。**チームカラーがユーザー指定された場合はその値が優先**される（`score.{N}.team.{T}.color`）。
+P1/P2 は **テーマ色ではなく競技上の識別色**（`design-tokens.json` の `player_colors`）。React 側は `theme.palette.p1color` / `p2color` でアクセス（PyQt 側の `AutonaColorButton` は ADR-005 S4af で設定ウィンドウと一緒に削除した）。**チームカラーがユーザー指定された場合はその値が優先**される（`score.{N}.team.{T}.color`）。
 
 **可読性ルール**: P2 背景（`#3D8BE8`）上に小さい白文字を置く場合は、テキストシャドウ・縁取り・濃色テキストなどで可読性を担保する。LIGHT モードで P2 背景上に淡色テキストを置く場合も同様。
 
@@ -1634,7 +1634,7 @@ const themeColor = fc.themeColor || ti.themeColor;
 
 #### 6.4.2 配信ソフトと被るキー
 
-OBS Studio のデフォルトホットキー（録画開始・シーン切替・ミュート等）と被ると、配信中に意図しない操作が走る。**OBS のホットキー設定とユーザー側で確認**できるよう、設定ダイアログに警告メッセージを表示する（実装タスク。§8）。
+OBS Studio のデフォルトホットキー（録画開始・シーン切替・ミュート等）と被ると、配信中に意図しない操作が走る。**OBS のホットキー設定とユーザー側で確認**できるよう、設定ページに警告メッセージを表示する（`HotkeyRules.WarningFor` のコード `obs_likely`。§8 T-17）。ほかの警告: OS の予約（`os_reserved`）・修飾キーなし（`no_modifier`。F キーは除く）・Shift だけ（`shift_only`。大文字や記号の入力・Shift+矢印の選択を奪う。F キーは除く。ADR-005 S4af）。どれも保存は通す
 
 #### 6.4.3 アプリ内既存キーと被るキー
 
@@ -1644,8 +1644,8 @@ OBS Studio のデフォルトホットキー（録画開始・シーン切替・
 
 | ルール | 内容 |
 |------|------|
-| **R-Hotkey-7** | ホットキー設定は PyQt の `AutonaSettingsWindow` または専用ダイアログで編集する |
-| **R-Hotkey-8** | 編集 UI は「キャプチャモード」（実際に押した組み合わせを記録）と「文字列入力」の両対応が望ましい |
+| **R-Hotkey-7** | ホットキー設定は React の設定ページ（`/web/settings` のホットキー区画。ADR-005 S4af）で編集する。Qt の `AutonaSettingsWindow` は削除した |
+| **R-Hotkey-8** | 編集 UI は**組み立て式**（Ctrl / Alt / Shift のチェックと、語彙 `HotkeyRules.KEYS` からのキーの選択。保存は `Canonical` の綴り）。押した組み合わせの記録（Qt の `QKeySequenceEdit`）は、parser が読めない綴り（`Esc` / `Del` / `PgUp` など）を作ったのでやめた（ADR-005 S4af。オーナー決定 4） |
 | **R-Hotkey-9** | 重複設定（同じキーが複数アクションに割り当て）は保存時に検出して警告 |
 | **R-Hotkey-10** | リセットボタンで個別アクション・全体それぞれデフォルトに戻せる |
 
@@ -1660,9 +1660,9 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | ステップ | 内容 |
 |---------|------|
 | 1 | `AutonaHotkeysSignals` に Signal 追加 |
-| 2 | `core/HotkeyRules.DEFAULT_KEYS` にデフォルト追加（`AutonaHotkeys.keys` はそのコピー。表示順もこの順。設定ウィンドウの `key_names` と、S4af 以降は React の設定ページのラベル表にも足す） |
+| 2 | `core/HotkeyRules.DEFAULT_KEYS` にデフォルト追加（`AutonaHotkeys.keys` はそのコピー。表示順もこの順） |
 | 3 | 受け取り側 Widget で `AutonaHotkeys.signals.{action_key}.connect(self.{handler})` |
-| 4 | 設定ダイアログのアクション一覧に追加（i18n 表示名込み） |
+| 4 | 設定ページの表示順 `HOTKEY_ACTIONS`（`web/src/SettingsPage/Cards.tsx`）と表示名 `settings_hotkey_action_<action>`（`web/src/i18n/locales/{en,ja}.json`）に追加（JSON のキーは Flask がソートするので、ページは自分の表の順で並べる） |
 | 5 | §6.2 の表に追加（本書を更新） |
 | 6 | OBS / アプリ標準との衝突確認 |
 
@@ -1829,7 +1829,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | 1 | `src/i18n/ko/...` | PyQt 側翻訳ファイル + `.qm` 生成 |
 | 2 | `web/src/i18n/locales/ko.json` | React 側翻訳ファイル |
 | 3 | `web/src/i18n/config.js` | `resources` に `ko` を追加、`i18n.languages` リストに追加 |
-| 4 | PyQt `AutonaSettingsWindow` の言語選択 | 選択肢に「한국어」を追加 |
+| 4 | `src/i18n/mapping.json` の `languages` | `"ko": ["한국어", "Korean"]` を追加（`AutonaLocaleHelper.languages`。設定ページの言語の選択肢は `GET /api/v1/settings` の `language.choices` で、ここから来る） |
 
 ### 7.9 新 React ページの追加
 
@@ -1950,7 +1950,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
 | **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | 試合一覧は core の `AnalysisService`（ADR-005 S4j）と React のページ（S4k）に移り、Qt 版は削除。golden（`tests/fixtures/analysis_rows/golden.json`）・`tests/test_analysis_rows.py` / `test_analysis_service.py` / `test_api_v1_analysis.py`・jest の `analysisRows.test.js` が回帰を pin | ✅ 完了（ADR-005 S4j / S4k） |
 | **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し（ADR-005 S4ae で `src/core/HotkeyRules.py` へ移し、validator は削除。警告はコード `os_reserved` / `obs_likely` / `no_modifier` になり、窓の文は `SettingsWidget._HotkeyWarningText` が同じ文に組み立てる）、`Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出す | ✅ 完了（M3） |
+| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し（ADR-005 S4ae で `src/core/HotkeyRules.py` へ移し、validator は削除。警告はコード `os_reserved` / `obs_likely` / `no_modifier` になり、S4af で `shift_only` を足した）、当時の `Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出した。S4af から React の設定ページが、重複は保存の 409 の snackbar（相手のアクション名つき）、警告は snackbar と行の下の文（旧ダイアログと同じ文。OBS の文の余分な空白だけ除いた）で出す | ✅ 完了（M3） |
 
 ### 8.3 優先度: 低（長期的な構造改善）
 

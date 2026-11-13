@@ -384,20 +384,27 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 25. 設定・環境
 
-[src/Settings/AutonaSettingsWindow.py](../../src/Settings/AutonaSettingsWindow.py)。
+「Help & Settings」→「設定」で開く React の設定ページ（`/web/settings`。[web/src/SettingsPage/](../../web/src/SettingsPage/)。ADR-005 S4af）。共有ビューに出て、ブラウザ（`http://127.0.0.1:5107/web/settings`）でも同じ操作ができる。読み書きは `GET` / `PATCH /api/v1/settings*`。ネットワーク・言語・ホットキーはこの PC からだけ変えられる（LAN の端末はトークンがあっても断られる）。
 
-### General タブ
-- Web サーバーポート（既定 5107）
-- LAN 公開（他デバイスからのアクセス許可。次回起動で反映）
+### 一般（すぐ反映）
 - 下品表現フィルター
-- 自動セット更新の有効/無効
-- サムネイルウィジェット無効化
+- セットの自動更新を無効（デスクトップは起動のたびにオンに戻す）
+- スコアの自動更新を無効
+- ファイル出力を無効
+- ローカル選手 DB の既存値を上書きしない
+- チーム 1 / 2 の既定の色
 
-### Hotkeys タブ
-- 各アクションの再割り当て
+### ネットワーク（再起動で反映）
+- Web サーバーポート（既定 5107。1〜65535）。待ち受け中のポートも表示する
+- LAN 公開（他デバイスからのアクセス許可）
+- Web サーバーが起動できないとき（ポートが使用中など）はページを開けないので、`user_data/settings.json` の `general.webserver_port` を書き換えて再起動するか、ポートを使っているアプリを終了する
 
-### Language タブ
+### 言語（再起動で反映。アプリは閉じない）
 - Program / Game Asset / Tournament term の言語設定（§ 26）
+
+### ホットキー（保存したらすぐ反映）
+- 有効 / 無効
+- 各アクションの割り当て（Ctrl / Alt / Shift とキーを選ぶ組み立て式）。別のアクションと同じキーは保存できない。OS・OBS と重なりがちなキー、修飾キーなし、Shift だけのキーは警告して保存する
 
 ---
 

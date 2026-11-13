@@ -185,7 +185,6 @@ bootstrap_core()
 bootstrap_gui()
 
 # autopep8: off
-from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
 from .AutonaApiInfoWindow import AutonaApiInfoWindow
 from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
 from .AutonaObsGuideWindow import AutonaObsGuideWindow
@@ -542,6 +541,17 @@ class Window(QMainWindow):
                 else:
                     index = self.stack.addWidget(page)
                 self.sidebar.addNavItem(QIcon(UI.icon_path(iconName)), label)
+        # The Settings page (ADR-005 S4af): a React panel the Help & Settings
+        # menu opens (OpenSettings), not a sidebar item. A lazy page after
+        # the items', so nav index == stack index still holds for every item
+        # and the saved sidebar index does not move (no STATE_VERSION bump).
+        index = self.stack.addWidget(QWidget())
+        self._lazyPanels[index] = (self._CreateSettingsPanel, "settings")
+        self._panelIndexes["settings"] = index
+        self._webPanelPages.Add(index, "settings")
+        # The item the window reopens on while the Settings page shows (no
+        # item is highlighted then): the one chosen before it.
+        self._navBeforeSettings = 0
         # Connected after the pages exist so the initial addWidget() cannot
         # trigger a build before _lazyPanels is complete.
         self.stack.currentChanged.connect(self._OnStackPageChanged)
@@ -552,11 +562,12 @@ class Window(QMainWindow):
         # Former Edit / API Settings / Help menus, merged into one dropdown.
         helpMenu = QMenu(self)
 
-        # Lazy dialog slots (startup Step 4a). The settings / guide windows
-        # reachable from this menu are no longer built during startup: each
-        # one is constructed by its Ensure*Window() accessor on first open and
-        # kept afterwards, so state survives close/reopen exactly as before.
-        self._settingsWindow = None
+        # Lazy dialog slots (startup Step 4a). The guide windows reachable
+        # from this menu are no longer built during startup: each one is
+        # constructed by its Ensure*Window() accessor on first open and kept
+        # afterwards, so state survives close/reopen exactly as before.
+        # Settings is a React page in the shared view since ADR-005 S4af
+        # (OpenSettings); the Qt settings window was one of these.
         self._gameAssetGuideWindow = None
         self._apiInfoWindow = None
         self._companionGuideWindow = None
@@ -565,7 +576,7 @@ class Window(QMainWindow):
         action = helpMenu.addAction(
             QApplication.translate("Settings", "Settings"))
         action.setIcon(QIcon(UI.icon_path('settings.svg')))
-        action.triggered.connect(lambda: self.EnsureSettingsWindow().show())
+        action.triggered.connect(lambda: self.OpenSettings())
 
         action = helpMenu.addAction(
             QApplication.translate("app", "Always on top"))
@@ -582,7 +593,7 @@ class Window(QMainWindow):
             lambda: self.EnsureGameAssetGuideWindow().show())
 
         # Program / game-asset / tournament-term language selectors moved to
-        # the Settings window (Help & Settings → Settings → Language).
+        # the Settings page (Help & Settings → Settings → Language).
 
         # ── Operations: battle format segment (1v1 / Team / Crew) ──
         # The sidebar header hosts the segmented control; choosing a format
@@ -770,9 +781,10 @@ class Window(QMainWindow):
         # Restore the last-selected sidebar tab and collapsed state.
         savedIndex = self.qtSettings.value(
             f"sidebarIndex_v{self.STATE_VERSION}", 0, type=int)
-        if 0 <= savedIndex < self.stack.count():
-            # The saved index is the sidebar's (closeEvent); a React item's
-            # page is the shared view's, as on a click.
+        if 0 <= savedIndex < self._panelIndexes["settings"]:
+            # The saved index is the sidebar's (closeEvent: an item, never
+            # the Settings page after them); a React item's page is the
+            # shared view's, as on a click.
             self.sidebar.setCurrentIndex(savedIndex)
             self._OnNavSelected(savedIndex)
         if self.qtSettings.value(
@@ -913,7 +925,7 @@ class Window(QMainWindow):
                     "by default for security.\n\n"
                     "If you connect from other devices on your LAN (OBS on another PC, "
                     "smartphone remote control), enable LAN access now.\n\n"
-                    "You can change this later under Settings → General."),
+                    "You can change this later under Settings → Network."),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             ) == QMessageBox.StandardButton.Yes
@@ -1042,6 +1054,11 @@ class Window(QMainWindow):
         # ADR-005 S4n: the React page in the shared web view.
         return self._WebPanel("playerBrowser")
 
+    def _CreateSettingsPanel(self):
+        # ADR-005 S4af: the React page in the shared web view (not a sidebar
+        # item: OpenSettings).
+        return self._WebPanel("settings")
+
     def _WebPanel(self, panel):
         """The shared web view (AutonaWebPanelHost), built as the stack page
         of `panel`, the first React panel opened.
@@ -1077,7 +1094,8 @@ class Window(QMainWindow):
 
     def _OnNavSelected(self, nav):
         """Show sidebar item `nav`'s stack page: a sidebar click, and the
-        QSettings tab restore at the end of __init__.
+        QSettings tab restore at the end of __init__ (and the Settings page,
+        a page of its own after the items': OpenSettings).
 
         Its own page, but for a React item once the shared web view exists:
         that view's page (WebPanelPages). Going from one React item to
@@ -1117,6 +1135,35 @@ class Window(QMainWindow):
             # Its build failed (logged by _EnsurePanelAt): no page to ask.
             return
         host.OpenScoreSets(board)
+
+    # ── The Settings page (ADR-005 S4af) ─────────────────────────────────
+    # The Help & Settings menu's "Settings" and the API window's "Open
+    # settings" (the Qt settings window, non-modal, until S4af).
+
+    def OpenSettings(self):
+        """Show the Settings page: a React panel in the shared view, as a
+        sidebar item's, but not one -- no item is highlighted while it
+        shows, and choosing one leaves it. The window comes to the front
+        first: the API window asks from a window of its own. Nothing once
+        the window is closing (a request then would build the host being
+        torn down)."""
+        if self._shuttingDown:
+            logger.info("The settings page was asked for while the window "
+                        "closes: nothing opened")
+            return
+        self._BringToFront()
+        nav = self.sidebar.currentIndex()
+        if nav >= 0:
+            self._navBeforeSettings = nav
+        self.sidebar.clearCurrent()
+        self._OnNavSelected(self._panelIndexes["settings"])
+
+    def _NavToRemember(self):
+        """The sidebar item the window reopens on (closeEvent): the one
+        highlighted, or, while the Settings page shows (none is), the one
+        chosen before it."""
+        nav = self.sidebar.currentIndex()
+        return self._navBeforeSettings if nav < 0 else nav
 
     def _BringToFront(self):
         """Show the window in front of the others, restored if it was
@@ -1196,8 +1243,8 @@ class Window(QMainWindow):
             self._EnsurePanelAt(current)
         return panel
 
-    # ── Lazy settings / guide dialogs (startup Step 4a) ──────────────────
-    # Each of these five dialogs is only reachable from a menu entry, so
+    # ── Lazy guide dialogs (startup Step 4a) ─────────────────────────────
+    # Each of these four dialogs is only reachable from a menu entry, so
     # building them during startup charged every launch for UI nobody had
     # asked for. They are constructed on first access and reused from then
     # on, which keeps the previous behaviour of a single long-lived instance
@@ -1219,9 +1266,6 @@ class Window(QMainWindow):
             # at that point; dialogs born later need the same treatment.
             self._ApplyTabBarPolicy(window)
         return window
-
-    def EnsureSettingsWindow(self):
-        return self._EnsureLazyWindow("_settingsWindow", AutonaSettingsWindow)
 
     def EnsureGameAssetGuideWindow(self):
         return self._EnsureLazyWindow(
@@ -1368,8 +1412,9 @@ class Window(QMainWindow):
             "portguard",
             "The web server could not start on port {port}:\n\n{error}\n\n"
             "OBS browser sources and the Web UI will not work.\n"
-            "Change the port under Settings → General → Webserver Port "
-            "and restart Autona.")
+            "Change general.webserver_port in user_data/settings.json and "
+            "restart Autona, or quit the application that is using the "
+            "port.")
             .replace("{port}", str(self.webserver.port))
             .replace("{error}", error))
         box.setStandardButtons(QMessageBox.StandardButton.Ok)
@@ -1393,7 +1438,7 @@ class Window(QMainWindow):
             self.qtSettings.setValue("geometry", self.saveGeometry())
             self.qtSettings.setValue(
                 f"sidebarIndex_v{self.STATE_VERSION}",
-                self.sidebar.currentIndex())
+                self._NavToRemember())
             self.qtSettings.setValue(
                 f"sidebarCollapsed_v{self.STATE_VERSION}",
                 self.sidebar.isHidden())

@@ -4,8 +4,10 @@ Tests for the hotkeys.hotkeys_enabled setting (AutonaHotkeys).
 Win32 RegisterHotKey grabs a combination system-wide, so checking the setting
 only inside HotkeyTriggered() is not enough: disabling hotkeys would still
 swallow Ctrl+Shift+1 etc. for every other application. SetupHotkeys() must
-therefore skip registration while disabled, and ApplyEnabledSetting() must
-release the existing grabs the moment the checkbox is unticked.
+therefore skip registration while disabled, and a save that turns hotkeys
+off must release the existing grabs at once: the settings page's save
+reaches ReloadHotkeys() (through StateManagerBridge.hotkeys_changed; the
+Qt settings window's ApplyEnabledSetting went with it in ADR-005 S4af).
 
 Importing the module is enough to drive it: neither AutonaHotkeys nor the
 SettingsManager it pulls in builds anything or touches the filesystem at
@@ -60,18 +62,25 @@ def user32():
             yield fake
 
 
+KEYS = {
+    "reset_scores": "Ctrl+Shift+R",
+    "swap_teams": "Ctrl+Shift+S",
+}
+
+
 @pytest.fixture
 def hotkeys(enabled, user32):
     hk = _mod.AutonaHotkeys()
-    hk.loaded_keys = {
-        "reset_scores": "Ctrl+Shift+R",
-        "swap_teams": "Ctrl+Shift+S",
-    }
-    return hk
+    hk.loaded_keys = dict(KEYS)
+    # The saved shortcuts are these two: what ReloadHotkeys reads again.
+    with patch.object(hk, "LoadUserHotkeys",
+                      lambda: setattr(hk, "loaded_keys", dict(KEYS))):
+        yield hk
 
 
-def test_apply_disabled_releases_os_grabs(hotkeys, user32, enabled):
-    """Unticking the checkbox must unregister, not merely ignore events."""
+def test_a_save_turning_hotkeys_off_releases_os_grabs(hotkeys, user32,
+                                                     enabled):
+    """Turning the switch off must unregister, not merely ignore events."""
     hotkeys.SetupHotkeys()
     registered_ids = list(hotkeys._registered_ids.keys())
     assert len(registered_ids) == 2
@@ -79,7 +88,7 @@ def test_apply_disabled_releases_os_grabs(hotkeys, user32, enabled):
     user32.UnregisterHotKey.reset_mock()
 
     enabled.value = False
-    hotkeys.ApplyEnabledSetting()
+    hotkeys.ReloadHotkeys()
 
     unregistered = [c[0][1] for c in user32.UnregisterHotKey.call_args_list]
     assert sorted(unregistered) == sorted(registered_ids)
@@ -87,15 +96,20 @@ def test_apply_disabled_releases_os_grabs(hotkeys, user32, enabled):
     assert user32.RegisterHotKey.call_count == 0
 
 
-def test_apply_enabled_registers(hotkeys, user32, enabled):
-    """Re-ticking the checkbox re-registers every configured key."""
+def test_a_save_turning_hotkeys_on_registers(hotkeys, user32, enabled):
+    """Turning the switch on again registers every configured key."""
     enabled.value = True
 
-    hotkeys.ApplyEnabledSetting()
+    hotkeys.ReloadHotkeys()
 
     assert user32.RegisterHotKey.call_count == 2
     assert sorted(hotkeys._registered_ids.values()) == [
         "reset_scores", "swap_teams"]
+
+
+def test_the_qt_windows_switch_hook_is_gone():
+    """The page's save is the one way a switch change takes effect."""
+    assert not hasattr(_mod.AutonaHotkeys, "ApplyEnabledSetting")
 
 
 def test_setup_registers_nothing_while_disabled(hotkeys, user32, enabled):
@@ -122,13 +136,14 @@ def test_resume_after_disabled_while_suspended(hotkeys, user32, enabled):
     assert hotkeys._capture_suspended is False
 
 
-def test_apply_enabled_while_suspended_defers_to_resume(hotkeys, user32, enabled):
-    """The suspend guard wins; ResumeCapture() does the actual registration."""
+def test_a_save_while_suspended_defers_to_resume(hotkeys, user32, enabled):
+    """The suspend guard wins; ResumeCapture() does the actual registration
+    (the test session keeps the hotkeys suspended: tests/conftest.py)."""
     hotkeys.SetupHotkeys()
     hotkeys.SuspendCapture()
     user32.RegisterHotKey.reset_mock()
 
-    hotkeys.ApplyEnabledSetting()
+    hotkeys.ReloadHotkeys()
 
     assert user32.RegisterHotKey.call_count == 0
     assert hotkeys._registered_ids == {}

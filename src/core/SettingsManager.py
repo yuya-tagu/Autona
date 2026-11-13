@@ -329,7 +329,8 @@ class SettingsManager:
         launch and still cannot be opened, the change is made in memory
         only -- in effect for this run, not saved -- and logged; it is put
         back over the file when a later write can read it (_Settle). Its
-        callers (the Qt settings window and the rest) do not expect an
+        callers (SetFollowService.TurnOffPolling, the battle format and the
+        rest; the Qt settings window until ADR-005 S4af) do not expect an
         error. A caller that decides what to write from what is saved calls
         PrepareWrite() first instead (strict)."""
         SettingsManager._Change(key, value)

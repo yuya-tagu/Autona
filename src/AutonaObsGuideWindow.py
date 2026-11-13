@@ -29,7 +29,7 @@ from qtpy.QtWidgets import *
 import json
 import os
 
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .AutonaWebServer import WebServer
 
 
 def _tr(text):
@@ -150,7 +150,9 @@ class AutonaObsGuideWindow(QDialog):
 
     # ── Connection / paths ───────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        # Where the server listens now, the settings only while none runs
+        # (a saved port takes effect at the next start: ADR-005 S4af).
+        port, _lan = WebServer.Serving()
         # Always advertise loopback here (unlike AutonaApiInfoWindow, which
         # shows the LAN IP for Companion/phones on other devices). ASS runs
         # inside OBS on this same PC in practice; the server binds 0.0.0.0
@@ -199,11 +201,11 @@ class AutonaObsGuideWindow(QDialog):
         return group
 
     def _refresh(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        port, lan = WebServer.Serving()
         self.baseUrlField.setText(self._baseUrl())
         self.outDirField.setText(self._outDir())
         self.portLabel.setText(_tr("Port") + f": {port}")
-        if SettingsManager.Get("general.webserver_listen_lan", False):
+        if lan:
             # ADR-005 S3a: from another PC, these operations need the token;
             # ?token= works whatever headers the HTTP action can set.
             self.lanNoteLabel.setText(_tr(
@@ -212,10 +214,14 @@ class AutonaObsGuideWindow(QDialog):
                 "?token=<access token> to the end of the URL (&token=<access "
                 "token> if the URL already has a ?; copy the token from API "
                 "Settings → Open reference & tester)."))
+        elif WebServer.LanOnAtRestart():
+            self.lanNoteLabel.setText(_tr(
+                "LAN access: saved as on, takes effect when Autona is "
+                "restarted — until then OBS must run on this PC."))
         else:
             self.lanNoteLabel.setText(_tr(
                 "LAN access: disabled — OBS must run on this PC. To use OBS on "
-                "another PC, enable it under Settings → General (restart required)."))
+                "another PC, enable it under Settings → Network (restart required)."))
         self._populateHttp()
 
     # ── (B) ASS -> Autona via the HTTP action ────────────────────────────

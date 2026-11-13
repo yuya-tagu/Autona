@@ -21,7 +21,7 @@ from qtpy.QtWidgets import *
 
 import json
 
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .AutonaWebServer import WebServer
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
@@ -135,7 +135,9 @@ class AutonaIntegrationGuideWindow(QDialog):
 
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        # Where the server listens now, the settings only while none runs
+        # (a saved port takes effect at the next start: ADR-005 S4af).
+        port, _lan = WebServer.Serving()
         return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
@@ -169,16 +171,20 @@ class AutonaIntegrationGuideWindow(QDialog):
         return group
 
     def _refresh(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        port, lan = WebServer.Serving()
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
-        if SettingsManager.Get("general.webserver_listen_lan", False):
+        if lan:
             self.lanNoteLabel.setText(
                 _tr("This device must be on the same LAN as this PC."))
+        elif WebServer.LanOnAtRestart():
+            self.lanNoteLabel.setText(_tr(
+                "LAN access: saved as on, takes effect when Autona is "
+                "restarted — until then other devices cannot connect."))
         else:
             self.lanNoteLabel.setText(_tr(
                 "LAN access: disabled — other devices cannot connect. "
-                "Enable it under Settings → General (restart required)."))
+                "Enable it under Settings → Network (restart required)."))
         self._populateExamples()
 
     # ── Setup steps ──────────────────────────────────────────────────────

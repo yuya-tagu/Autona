@@ -105,7 +105,7 @@ from .core.CrewBattleService import CrewBattleService
 from .core.DictHelper import qvariantmap_copy
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.MatchNameCandidates import MatchNameCandidates
-from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
+from .core.SettingsManager import SettingsManager
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core import SetSelectionService as selection
@@ -649,12 +649,7 @@ def get_stats_overlays():
     from .AutonaWebServer import WebServer
     # What the server really listens on (a change in the settings takes
     # effect at the next start); the settings only when none runs.
-    bound = WebServer.Listening()
-    if bound is None:
-        bound = (SettingsManager.Get("general.webserver_port",
-                                     DEFAULT_WEBSERVER_PORT),
-                 SettingsManager.Get("general.webserver_listen_lan", False))
-    port, lan = bound
+    port, lan = WebServer.Serving()
     host = GetLocalIP() if lan else "127.0.0.1"
     return {
         "overlays": StatsOverlays.Overlays(),
@@ -682,9 +677,13 @@ def select_stats_overlay(key):
 # refusals; these apply.
 
 def get_settings():
-    """{"general", "network", "language", "hotkeys"}: an allow-list
-    (AppSettings.Describe + HotkeyRules.Describe), never the access token."""
-    return dict(AppSettings.instance.Describe(),
+    """{"general", "network", "language", "hotkeys", "defaults", ...}: an
+    allow-list (AppSettings.Describe + HotkeyRules.Describe, the hotkey
+    switch's default in defaults.hotkeys), never the access token."""
+    described = AppSettings.instance.Describe()
+    return dict(described,
+                defaults=dict(described["defaults"],
+                              hotkeys=HotkeyRules.Defaults()),
                 hotkeys=HotkeyRules.Describe())
 
 

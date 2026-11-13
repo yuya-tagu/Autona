@@ -1,5 +1,5 @@
-"""The settings window's settings in core (src/core/AppSettings.py, ADR-005
-S4ae).
+"""The settings page's settings in core (src/core/AppSettings.py, ADR-005
+S4ae; the page is S4af's).
 
 Pinned:
 
@@ -7,8 +7,9 @@ Pinned:
   port and LAN access, the three languages -- never the access token, the
   Designer pairing code or any other key settings.json holds;
 - the table's defaults are the readers' (an AST scan of every
-  SettingsManager.Get of those keys in src, the settings window excepted:
-  it keeps its own until S4af);
+  SettingsManager.Get of those keys in src; the Qt settings window, which
+  kept its own, went in S4af), and Describe sends them for the page's
+  "Default" buttons;
 - an update validates everything first and writes once, nothing when
   nothing changes; when the launch could not read settings.json, against
   the file read again (or after moving a corrupt one aside), and nothing at
@@ -86,8 +87,8 @@ def test_the_read_is_the_allow_list_and_nothing_else(saves):
 
     described = _make().Describe()
 
-    assert set(described) == {"general", "network", "language", "loadFailed",
-                              "movedAside"}
+    assert set(described) == {"general", "network", "language", "defaults",
+                              "loadFailed", "movedAside"}
     assert described["loadFailed"] is False
     assert described["movedAside"] is None
     assert list(described["general"]) == GENERAL_NAMES
@@ -125,6 +126,40 @@ def test_nothing_saved_reads_as_the_defaults(saves):
             {"code": "ja", "name": "日本語", "englishName": "Japanese"}],
         "restartPending": False}
     assert saves == []
+
+
+def test_the_defaults_are_sent_as_a_save_takes_them(saves):
+    # What the page's "Default" buttons send: the table's, LAN access off
+    # (its None is "not decided", which a save never is). The same whatever
+    # is saved.
+    SettingsManager.settings.update({
+        "general": {"profanity_filter": False, "webserver_port": 6000,
+                    "webserver_listen_lan": True},
+        "program_language": "ja"})
+
+    defaults = _make().Describe()["defaults"]
+
+    assert defaults == module.Defaults()
+    assert defaults == {
+        "general": {
+            "profanity_filter": True, "disable_autoupdate": True,
+            "disable_scoreupdate": False, "disable_export": False,
+            "disable_overwrite": False,
+            "team_1_default_color": "#fe3636",
+            "team_2_default_color": "#2e89ff"},
+        "network": {"port": DEFAULT_WEBSERVER_PORT, "listenLan": False},
+        "language": {"program": "default", "gameAsset": "default",
+                     "fgTerm": "default"}}
+    assert saves == []
+
+
+def test_every_default_is_one_an_update_takes(saves):
+    settings = _make()
+    defaults = module.Defaults()
+
+    assert settings.UpdateGeneral(defaults["general"])[0] is None
+    assert settings.UpdateNetwork(defaults["network"])[0] is None
+    assert settings.UpdateLanguage(defaults["language"])[0] is None
 
 
 def test_a_saved_value_of_another_type_reads_as_the_default(saves):
@@ -176,16 +211,15 @@ def test_the_language_list_failing_leaves_the_choices_empty(saves):
 
 def _readers():
     """Every SettingsManager.Get("<key>", default) in src with a literal key,
-    the settings window and AppSettings itself left out: {key: [(path,
-    default)]}. A default that is a name is resolved for the one name the
-    readers use (DEFAULT_WEBSERVER_PORT)."""
+    AppSettings itself left out: {key: [(path, default)]}. A default that
+    is a name is resolved for the one name the readers use
+    (DEFAULT_WEBSERVER_PORT)."""
     names = {"DEFAULT_WEBSERVER_PORT": DEFAULT_WEBSERVER_PORT,
              "None": None, "True": True, "False": False}
     found = {}
     skipped = {PROJECT_ROOT / "src" / "core" / "AppSettings.py"}
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
-        if path in skipped or "Settings" in path.relative_to(
-                PROJECT_ROOT / "src").parts[:1]:
+        if path in skipped:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -222,7 +256,7 @@ READERS = _readers()
     ids=lambda s: s.name)
 def test_each_reader_takes_the_tables_default(setting):
     readers = READERS.get(setting.key, [])
-    # Not vacuous: each of these is read somewhere outside the window.
+    # Not vacuous: each of these is read somewhere.
     assert readers, f"no reader of {setting.key}"
     assert all(default == setting.default and type(default) is type(
         setting.default) for _, default in readers), readers

@@ -188,7 +188,6 @@
 </context><context>
     <name>Settings</name>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="13" />
         <location filename="..\Autona.py" line="610" />
         <source>Settings</source>
         <translation>Settings</translation>
@@ -215,24 +214,36 @@
         <translation>From other devices on the LAN, every operation that changes something (and the player list) needs the access token: send the header X-Autona-Token: &lt;token&gt; (or Authorization: Bearer &lt;token&gt;, or add ?token=&lt;token&gt; to the URL). Reading the state and the overlays needs no token.</translation>
     </message>
     <message>
-        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</source>
-        <translation>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</translation>
+        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → Network (restart required).</source>
+        <translation>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → Network (restart required).</translation>
+    </message>
+    <message>
+        <source>LAN access is saved as on and takes effect when Autona is restarted; until then the API is reachable from this PC only.</source>
+        <translation>LAN access is saved as on and takes effect when Autona is restarted; until then the API is reachable from this PC only.</translation>
     </message>
     <message>
         <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address and add ?token=&lt;access token&gt; to the end of the URL (&amp;token=&lt;access token&gt; if the URL already has a ?; copy the token from API Settings → Open reference &amp; tester).</source>
         <translation>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address and add ?token=&lt;access token&gt; to the end of the URL (&amp;token=&lt;access token&gt; if the URL already has a ?; copy the token from API Settings → Open reference &amp; tester).</translation>
     </message>
     <message>
-        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>
-        <translation>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</translation>
+        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → Network (restart required).</source>
+        <translation>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → Network (restart required).</translation>
+    </message>
+    <message>
+        <source>LAN access: saved as on, takes effect when Autona is restarted — until then OBS must run on this PC.</source>
+        <translation>LAN access: saved as on, takes effect when Autona is restarted — until then OBS must run on this PC.</translation>
     </message>
     <message>
         <source>This device must be on the same LAN as this PC.</source>
         <translation>This device must be on the same LAN as this PC.</translation>
     </message>
     <message>
-        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
-        <translation>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</translation>
+        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → Network (restart required).</source>
+        <translation>LAN access: disabled — other devices cannot connect. Enable it under Settings → Network (restart required).</translation>
+    </message>
+    <message>
+        <source>LAN access: saved as on, takes effect when Autona is restarted — until then other devices cannot connect.</source>
+        <translation>LAN access: saved as on, takes effect when Autona is restarted — until then other devices cannot connect.</translation>
     </message>
     <message>
         <source>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</source>
@@ -782,47 +793,6 @@
         <translation>Add game assets</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="486" />
-        <source>Program language changed successfully.</source>
-        <translation>Program language changed successfully.</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="488" />
-        <source>Program Language</source>
-        <translation>Program Language</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="492" />
-        <source>System language</source>
-        <translation>System language</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="512" />
-        <source>Game Asset Language changed successfully.</source>
-        <translation>Game Asset Language changed successfully.</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="514" />
-        <source>Game Asset Language</source>
-        <translation>Game Asset Language</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="544" />
-        <location filename="..\Autona.py" line="518" />
-        <source>Same as program language</source>
-        <translation>Same as program language</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="538" />
-        <source>Tournament term language changed successfully.</source>
-        <translation>Tournament term language changed successfully.</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="540" />
-        <source>Tournament term language</source>
-        <translation>Tournament term language</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="569" />
         <source>Check for updates</source>
         <translation>Check for updates</translation>
@@ -1137,7 +1107,7 @@ If this is a stale Autona instance, the Web UI will appear blank because Windows
 
 Terminate the existing process(es) and continue?
 
-Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</source>
+Alternatively, choose No, then change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</source>
         <translation>Port {port} is already in use by another process:
 
 {details}
@@ -1146,7 +1116,7 @@ If this is a stale Autona instance, the Web UI will appear blank because Windows
 
 Terminate the existing process(es) and continue?
 
-Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</translation>
+Alternatively, choose No, then change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</translation>
     </message>
     <message>
         <source>LAN access</source>
@@ -1157,12 +1127,12 @@ Alternatively, choose No and change the port under Settings → General → Webs
 
 If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
 
-You can change this later under Settings → General.</source>
+You can change this later under Settings → Network.</source>
         <translation>Autona's web server now listens only on this PC (127.0.0.1) by default for security.
 
 If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
 
-You can change this later under Settings → General.</translation>
+You can change this later under Settings → Network.</translation>
     </message>
     <message>
         <source>Web server failed to start</source>
@@ -1174,13 +1144,13 @@ You can change this later under Settings → General.</translation>
 {error}
 
 OBS browser sources and the Web UI will not work.
-Change the port under Settings → General → Webserver Port and restart Autona.</source>
+Change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</source>
         <translation>The web server could not start on port {port}:
 
 {error}
 
 OBS browser sources and the Web UI will not work.
-Change the port under Settings → General → Webserver Port and restart Autona.</translation>
+Change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</translation>
     </message>
     <message>
         <location filename="..\AutonaWebServer.py" line="831" />
@@ -1203,205 +1173,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Autona.py" line="865" />
         <source>)</source>
         <translation>)</translation>
-    </message>
-</context><context>
-    <name>settings</name>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="35" />
-        <source>Default</source>
-        <translation>Default</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="129" />
-        <source>General</source>
-        <translation>General</translation>
-    </message>
-    <message>
-        <source>Language</source>
-        <translation>Language</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="163" />
-        <source>Hotkeys</source>
-        <translation>Hotkeys</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
-        <source>Bluesky</source>
-        <translation>Bluesky</translation>
-    </message>
-</context><context>
-    <name>settings.bsky</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="262" />
-        <source>Enable Bluesky Features</source>
-        <translation>Enable Bluesky Features</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="269" />
-        <source>Host server</source>
-        <translation>Host server</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="276" />
-        <source>Bluesky Handle</source>
-        <translation>Bluesky Handle</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="283" />
-        <source>Application Password</source>
-        <translation>Application Password</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="289" />
-        <source>You can get an app password by going into your Bluesky settings -&gt; Privacy &amp; Security</source>
-        <translation>You can get an app password by going into your Bluesky settings -&gt; Privacy &amp; Security</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="291" />
-        <source>Please note that said app password will be stored in plain text on your computer</source>
-        <translation>Please note that said app password will be stored in plain text on your computer</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="293" />
-        <source>Do not use your regular account password!</source>
-        <translation>Do not use your regular account password!</translation>
-    </message>
-</context><context>
-    <name>settings.disable_autoupdate</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="66" />
-        <source>Disable automatic set updating for the scoreboard</source>
-        <translation>Disable automatic set updating for the scoreboard</translation>
-    </message>
-</context><context>
-    <name>settings.disable_export</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="82" />
-        <source>Disable Autona file exporting</source>
-        <translation>Disable Autona file exporting</translation>
-    </message>
-</context><context>
-    <name>settings.disable_overwrite</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="90" />
-        <source>Do not override existing values in the local player database (takes effect on next restart)</source>
-        <translation>Do not override existing values in the local player database (takes effect on next restart)</translation>
-    </message>
-</context><context>
-    <name>settings.disable_scoreupdate</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="74" />
-        <source>Disable automatic score updating for the scoreboard</source>
-        <translation>Disable automatic score updating for the scoreboard</translation>
-    </message>
-</context><context>
-    <name>settings.disable_thumbnail_widget</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="58" />
-        <source>Disables the Thumbnail Widget from starting (takes effect on next restart)</source>
-        <translation>Disables the Thumbnail Widget from starting (takes effect on next restart)</translation>
-    </message>
-</context><context>
-    <name>settings.general</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="42" />
-        <source>Webserver Port (takes effect on next restart)</source>
-        <translation>Webserver Port (takes effect on next restart)</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
-        <source>Enable profanity filter</source>
-        <translation>Enable profanity filter</translation>
-    </message>
-</context><context>
-    <name>settings.webserver_listen_lan</name>
-    <message>
-        <source>Allow access from other devices on the LAN (takes effect on next restart)</source>
-        <translation>Allow access from other devices on the LAN (takes effect on next restart)</translation>
-    </message>
-</context><context>
-    <name>settings.hotkeys</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="136" />
-        <source>Enable hotkeys</source>
-        <translation>Enable hotkeys</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="143" />
-        <source>Load set</source>
-        <translation>Load set</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="144" />
-        <source>Team 1 score up</source>
-        <translation>Team 1 score up</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="145" />
-        <source>Team 1 score down</source>
-        <translation>Team 1 score down</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="146" />
-        <source>Team 2 score up</source>
-        <translation>Team 2 score up</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="147" />
-        <source>Team 2 score down</source>
-        <translation>Team 2 score down</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="148" />
-        <source>Reset scores</source>
-        <translation>Reset scores</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="149" />
-        <source>Swap teams</source>
-        <translation>Swap teams</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
-        <source>Reload Top 8 from Start.gg</source>
-        <translation>Reload Top 8 from Start.gg</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="199" />
-        <source>Apply changes</source>
-        <translation>Apply changes</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="147" />
-        <source>Hotkey conflict</source>
-        <translation>Hotkey conflict</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="149" />
-        <source>'{shortcut}' is already assigned to: {others}.
-Choose a different combination or clear the conflicting assignment first.</source>
-        <translation>'{shortcut}' is already assigned to: {others}.
-Choose a different combination or clear the conflicting assignment first.</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="171" />
-        <source>Possible hotkey conflict</source>
-        <translation>Possible hotkey conflict</translation>
-    </message>
-</context><context>
-    <name>settings.team_1_default_color</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
-        <source>Default Color of Team 1</source>
-        <translation>Default Color of Team 1</translation>
-    </message>
-</context><context>
-    <name>settings.team_2_default_color</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="122" />
-        <source>Default Color of Team 2</source>
-        <translation>Default Color of Team 2</translation>
     </message>
 </context><context>
     <name>thumb_app</name>

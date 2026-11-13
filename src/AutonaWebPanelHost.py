@@ -68,7 +68,9 @@ from the factory of the first React panel opened and calls ShowPanel() on every
 reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
 straight (S4e: several items, one host page). Every sidebar item is a React
 panel: the last Qt version kept behind a setting, SCORE's (S4aa), went with
-the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c).
+the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c). So is the Settings
+page (S4af), which is not a sidebar item: the Help & Settings menu opens it
+(Window.OpenSettings), as a page of its own after the items'.
 
 Importing it creates nothing.
 """
@@ -90,7 +92,6 @@ from .AutonaWebPageLifecycle import (
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIP
 from .core import WebAccess
-from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from . import ui_constants as UI
 
 logger = logging.getLogger(__name__)
@@ -181,18 +182,13 @@ def BrowserScoreboardUrl(path):
     (the page takes it off the address bar: web/src/autonaToken.ts). With LAN
     access off it has none: a page on this PC needs none.
 
-    The port and LAN access are what the server really listens on
-    (WebServer.Listening(); a change in the settings takes effect at its next
-    start), the settings only while none runs -- as the Stats Display Settings
-    page's Companion URL (AutonaWebOperations.get_stats_overlays). (The Qt
-    board's button read the settings when the board was built.)"""
+    The port and LAN access are what the server really listens on (a change
+    in the settings takes effect at its next start), the settings only while
+    none runs: WebServer.Serving(), as every URL that names the server
+    (ADR-005 S4af). (The Qt board's button read the settings when the board
+    was built.)"""
     from .AutonaWebServer import WebServer
-    bound = WebServer.Listening()
-    if bound is None:
-        bound = (SettingsManager.Get("general.webserver_port",
-                                     DEFAULT_WEBSERVER_PORT),
-                 SettingsManager.Get("general.webserver_listen_lan", False))
-    port, lan = bound
+    port, lan = WebServer.Serving()
     url = f"http://{GetLocalIP() if lan else '127.0.0.1'}:{port}{path}"
     token = WebAccess.Token()
     if not token or not lan:
@@ -314,6 +310,10 @@ class WebPanelPages:
     there). From then on every React item shows that page, and the host is
     told which panel: the one the operator chose last (``selected``). The
     other React items' placeholders are never built (``HostBuilt``).
+
+    The Settings page (ADR-005 S4af) is kept the same way, though no
+    sidebar item opens it: its page comes after the items' (the menu's
+    Window.OpenSettings asks for it as a click asks for an item).
 
     Plain bookkeeping (no Qt): the Window asks it on every sidebar choice
     and every page reveal.
