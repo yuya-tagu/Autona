@@ -180,6 +180,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stats/overlays', 'api_v1.get_stats_overlays', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stats/overlays/selected', 'api_v1.select_stats_overlay', 'OPTIONS,PUT'),
+    ('/api/v1/status', 'api_v1.get_status', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stream', 'api_v1.stream_update', 'OPTIONS,PUT'),
     ('/api/v1/stream/channels', 'api_v1.get_stream_channels', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stream/channels', 'api_v1.stream_channel_add', 'OPTIONS,POST'),
@@ -580,7 +581,8 @@ def test_the_classification_follows_the_rules():
     # field, character row and match bar writes (S4z: v1 76 of 115), and the
     # settings page's read, its general write and its three this-PC writes
     # (S4ae: v1 77 of 120), less the game tracker's write and read, removed
-    # with it (S4ac-4: v1 76 of 118).
+    # with it (S4ac-4: v1 76 of 118), and the status' read (S-final SF-2:
+    # v1 76 of 119).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -590,7 +592,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 118
+    assert len(EXPECTED_API_V1_ROUTES) == 119
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

@@ -21,6 +21,7 @@ import orjson
 from loguru import logger
 
 from .core.StateManager import StateManager
+from .core.StatusService import StatusService
 from .StateManagerBridge import StateManagerBridge
 from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import (
@@ -168,6 +169,9 @@ def _build_web_app():
     def ws_connect(message):
         WebServer._authorize_ws_connection(message)
         WebServer.ws_program_state(message)
+        # What the app is busy with, as the state: to the new connection,
+        # then on every change (`status`, ADR-005 S-final SF-2).
+        WebServer.ws_emit('status', StatusService.Snapshot())
 
     # `ws_program_state` cannot become a closure-local: it is also connected to
     # StateManagerBridge.instance.state_big_change and called as
@@ -944,6 +948,9 @@ class WebServer:
         # And for the battle format (ADR-005 S4z).
         StateManagerBridge.instance.battle_format_changed.connect(
             WebServer.on_battle_format_change)
+        # And for what the app is busy with (ADR-005 S-final SF-2).
+        StateManagerBridge.instance.status_changed.connect(
+            WebServer.on_status_change)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
@@ -1050,6 +1057,10 @@ class WebServer:
     # Whether the battle format changed since the last flush: its
     # `battle_format` notice (on_battle_format_change).
     _battle_format_notice = False
+    # Whether what the app is busy with changed since the last flush: its
+    # `status` (on_status_change).
+    _status_notice = False
+    _status_notice_ts = 0.0      # _delta_clock() of the last status sent
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -1085,12 +1096,14 @@ class WebServer:
             notices = WebServer._take_held_notices()
             follows = WebServer._take_follow_notices()
             battleFormat = WebServer._take_battle_format_notice()
+            status = WebServer._take_status_notice()
         if payload is not None:
             WebServer._send_deltas(payload)
         WebServer._run_after_deltas(after)
         WebServer._send_held_notices(notices)
         WebServer._send_follow_notices(follows)
         WebServer._send_battle_format_notice(battleFormat)
+        WebServer._send_status_notice(status)
 
     @staticmethod
     def _after_pending_deltas(fn):
@@ -1355,6 +1368,57 @@ class WebServer:
         except Exception:
             logger.error(traceback.format_exc())
 
+    # ── What the app is busy with (ADR-005 S-final SF-2) ─────────────
+    # `status` {"revision", "jobs"}: core's StatusService changed (a
+    # start.gg fetch, the game asset load, a provider job; what the
+    # desktop's footer shows). Unlike the notices above it carries the
+    # value, StatusService.Snapshot() read when it is sent -- the latest,
+    # however many changes the flush took in: progress ticks come quickly,
+    # and a cue would make every client ask GET /api/v1/status for each.
+    # Its `revision` grows on every change, so a reader keeps the newer of
+    # an answer and an event. A new connection gets one at once (ws_connect).
+    # Sent by the one flusher after the batch's deltas and the other notices,
+    # to everyone (the route is READ: codes and counts, a game's codename).
+    # A burst (the asset load's progress) makes one per window, the way a
+    # board's pending notices do: its quiet spell is its own
+    # (_status_notice_ts), and its window is shared with the deltas.
+
+    @staticmethod
+    def on_status_change():
+        """StateManagerBridge.status_changed. Queues and notifies only,
+        like on_battle_format_change: it is told on the reporting thread,
+        possibly under the game catalog's writer lock."""
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
+            WebServer._status_notice = True
+            if WebServer._delta_due is None:
+                now = WebServer._delta_clock()
+                quiet = (now - WebServer._status_notice_ts) >= 0.05
+                WebServer._delta_due = now if quiet else (
+                    now + WebServer._adaptive_debounce_sec(0))
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _take_status_notice():
+        """Whether to send the status in this flush. Called holding
+        _delta_cond."""
+        notice = WebServer._status_notice
+        if notice:
+            WebServer._status_notice = False
+            WebServer._status_notice_ts = WebServer._delta_clock()
+        return notice
+
+    @staticmethod
+    def _send_status_notice(notice):
+        # Outside _delta_cond, like a send.
+        if not notice:
+            return
+        try:
+            WebServer.ws_emit('status', StatusService.Snapshot())
+        except Exception:
+            logger.error(traceback.format_exc())
+
     @staticmethod
     def _run_delta_flusher(generation):
         """The flusher thread: send each batch when it is due, and the one
@@ -1393,12 +1457,14 @@ class WebServer:
                 notices = WebServer._take_held_notices()
                 follows = WebServer._take_follow_notices()
                 battleFormat = WebServer._take_battle_format_notice()
+                status = WebServer._take_status_notice()
             if payload is not None:
                 WebServer._send_deltas(payload)
             WebServer._run_after_deltas(after)
             WebServer._send_held_notices(notices)
             WebServer._send_follow_notices(follows)
             WebServer._send_battle_format_notice(battleFormat)
+            WebServer._send_status_notice(status)
             if not running:
                 return
 
@@ -1420,6 +1486,7 @@ class WebServer:
             WebServer._held_notices = set()
             WebServer._follow_notices = set()
             WebServer._battle_format_notice = False
+            WebServer._status_notice = False
             WebServer._delta_due = (
                 WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()

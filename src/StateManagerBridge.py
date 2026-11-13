@@ -48,6 +48,7 @@ from .core.Actions import AutonaActions
 from .core import HotkeyRules
 from .core.SetFollowService import SetFollowService
 from .core.StateManager import StateManager
+from .core.StatusService import StatusService
 
 
 class StateManagerBridge(QObject):
@@ -86,6 +87,15 @@ class StateManagerBridge(QObject):
     # and, the hotkeys object living on the GUI thread, queued there --
     # where RegisterHotKey has to run. The headless shell connects nothing.
     hotkeys_changed = Signal()
+    # What the app is busy with changed (core's StatusService.changes,
+    # ADR-005 S-final SF-2): not the state, converted the same way, with no
+    # value -- the receivers read StatusService.Current() / Snapshot().
+    # Emitted on the reporting thread: a start.gg worker, the game loader
+    # (under the game catalog's writer lock, so nothing here may block --
+    # it is queued to the GUI thread off it). The desktop's footer
+    # (Window._on_status_changed) and the web server's `status` notice
+    # (WebServer.on_status_change) are connected to it.
+    status_changed = Signal()
 
     def __init__(self, parent=None):
         # A second bridge would subscribe the same channels again and
@@ -113,6 +123,7 @@ class StateManagerBridge(QObject):
         SetFollowService.changes.subscribe(self._onFollowChanged)
         AutonaActions.battleFormatChanges.subscribe(self._onBattleFormatChanged)
         HotkeyRules.changes.subscribe(self._onHotkeysChanged)
+        StatusService.changes.subscribe(self._onStatusChanged)
 
     # -- channel callbacks: re-emit, nothing else --------------------------
 
@@ -136,3 +147,6 @@ class StateManagerBridge(QObject):
 
     def _onHotkeysChanged(self):
         self.hotkeys_changed.emit()
+
+    def _onStatusChanged(self):
+        self.status_changed.emit()

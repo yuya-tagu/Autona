@@ -12,6 +12,7 @@ from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..core.GameAssetCatalog import GameAssetCatalog
 from ..AutonaPlayerDB import AutonaPlayerDB
 from ..core.PlayerDB import PlayerDB
+from ..core.StatusService import StatusService
 from ..core.StreamService import StreamService
 from ..core.TaskExecutor import TaskExecutor
 from .TournamentDataProvider import TournamentDataProvider
@@ -420,10 +421,8 @@ class StartGGDataProvider(TournamentDataProvider):
                     finalSets[str(lastRound + 1)] = [gfsReset]
 
     def GetTournamentPhaseGroup(self, id, progress_callback=None, cancel_event=None):
-        from ..Helpers.AutonaStatusManager import AutonaStatusManager
         finalData = {}
-        status_token = AutonaStatusManager.push(
-            "Start.gg からブラケット情報を取得中...")
+        status_token = StatusService.Push("startgg_bracket")
 
         try:
             data = self.QueryRequests(
@@ -497,7 +496,7 @@ class StartGGDataProvider(TournamentDataProvider):
         except:
             logger.error(traceback.format_exc())
         finally:
-            AutonaStatusManager.pop(status_token)
+            StatusService.Pop(status_token)
 
         return finalData
 
@@ -579,10 +578,9 @@ class StartGGDataProvider(TournamentDataProvider):
         return finalData
 
     def GetMatch(self, setId, progress_callback=None, cancel_event=None):
-        from ..Helpers.AutonaStatusManager import AutonaStatusManager
         executor = self._FanOut()
         finalResult = None
-        status_token = AutonaStatusManager.push("Start.gg からセット情報を取得中...")
+        status_token = StatusService.Push("startgg_set")
 
         try:
             result = {}
@@ -628,7 +626,7 @@ class StartGGDataProvider(TournamentDataProvider):
         except Exception as e:
             logger.error(traceback.format_exc())
         finally:
-            AutonaStatusManager.pop(status_token)
+            StatusService.Pop(status_token)
         return finalResult
 
     def _GetMatchTasks(self, setId, progress_callback, cancel_event):
@@ -681,10 +679,8 @@ class StartGGDataProvider(TournamentDataProvider):
         how many pages are missing from the answer -- those that still failed
         after their retry, and those of a first page that only answered on
         its retry: the other pages are not asked for then (below)."""
-        from ..Helpers.AutonaStatusManager import AutonaStatusManager
         executor = self._FanOut()
-        status_token = AutonaStatusManager.push(
-            "Start.gg からセット一覧を取得中...")
+        status_token = StatusService.Push("startgg_sets")
         final_data = []
         try:
             logger.info(f"Get matches (getFinished={getFinished})")
@@ -721,10 +717,10 @@ class StartGGDataProvider(TournamentDataProvider):
             def report(done, totalPages):
                 if progress_callback:
                     progress_callback(done, totalPages)
-                AutonaStatusManager.update(
-                    status_token,
-                    f"Start.gg からセット一覧を取得中... ({done}/{totalPages})",
-                    progress=done, total=totalPages)
+                StatusService.Update(
+                    status_token, "startgg_sets_page",
+                    {"page": done, "pages": totalPages},
+                    done=done, total=totalPages)
 
             logger.info("Fetching sets")
 
@@ -784,10 +780,9 @@ class StartGGDataProvider(TournamentDataProvider):
                 logger.error(
                     f"GetMatches: pages {stillFailed} of {totalPages} failed;"
                     " their sets are missing from the list")
-                AutonaStatusManager.update(
-                    status_token,
-                    "セット一覧の一部ページ取得に失敗しました"
-                    f" ({len(stillFailed)}/{totalPages})")
+                StatusService.Update(
+                    status_token, "startgg_sets_failed",
+                    {"failed": len(stillFailed), "pages": totalPages})
 
             # Assemble in page order. Live brackets can shift sets across
             # page boundaries mid-fetch, so dedupe by set id.
@@ -807,7 +802,7 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return final_data
         finally:
-            AutonaStatusManager.pop(status_token)
+            StatusService.Pop(status_token)
 
     def GetStations(self, progress_callback=None, cancel_event=None,
                     strict=False):
@@ -2109,8 +2104,7 @@ class StartGGDataProvider(TournamentDataProvider):
             return []
 
     def GetEntrantsWorker(self, eventSlug, progress_callback, cancel_event):
-        from ..Helpers.AutonaStatusManager import AutonaStatusManager
-        status_token = AutonaStatusManager.push("Start.gg から参加者情報を取得中...")
+        status_token = StatusService.Push("startgg_entrants")
         try:
             page = 1
             totalPages = 1
@@ -2143,10 +2137,10 @@ class StartGGDataProvider(TournamentDataProvider):
                 if stopped():
                     return
                 logger.info(str(page) + "/" + str(totalPages))
-                AutonaStatusManager.update(
-                    status_token,
-                    f"Start.gg から参加者情報を取得中... ({page}/{totalPages})",
-                    progress=page - 1, total=totalPages)
+                StatusService.Update(
+                    status_token, "startgg_entrants_page",
+                    {"page": page, "pages": totalPages},
+                    done=page - 1, total=totalPages)
                 data = self.QueryRequests(
                     "https://www.start.gg/api/-/gql",
                     type=requests.post,
@@ -2229,7 +2223,7 @@ class StartGGDataProvider(TournamentDataProvider):
         except Exception as e:
             logger.error(traceback.format_exc())
         finally:
-            AutonaStatusManager.pop(status_token)
+            StatusService.Pop(status_token)
 
     def ProcessEntrantData(entrant, setData=[]):
         player = entrant.get("player")

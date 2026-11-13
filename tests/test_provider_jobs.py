@@ -305,33 +305,35 @@ def test_an_answer_made_after_the_stop_is_dropped(adapter, executor, path):
 
 def test_run_with_provider_runs_on_the_job_lane_with_its_status(
         adapter, monkeypatch):
-    from src.Helpers.AutonaStatusManager import AutonaStatusManager
+    from src.core.StatusService import StatusService
     shown = []
-    push, pop = AutonaStatusManager.push, AutonaStatusManager.pop
+    push, pop = StatusService.Push, StatusService.Pop
 
-    def spyPush(message, *args):
-        token = push(message, *args)
-        shown.append(("push", message, token))
+    def spyPush(code, *args):
+        token = push(code, *args)
+        shown.append(("push", code, token))
         return token
 
     def spyPop(token):
         shown.append(("pop", token))
         pop(token)
 
-    monkeypatch.setattr(AutonaStatusManager, "push", spyPush)
-    monkeypatch.setattr(AutonaStatusManager, "pop", spyPop)
+    monkeypatch.setattr(StatusService, "Push", spyPush)
+    monkeypatch.setattr(StatusService, "Pop", spyPop)
     provider = adapter.provider = SimpleNamespace(name="fake")
     ran = []
 
+    # The status is a code (ADR-005 S-final SF-2), shown while the job runs.
     assert adapter.RunWithProvider(
         lambda given: ran.append((given, threading.current_thread().name)),
-        status="working")
+        status="top8_import")
     assert TaskExecutor.instance.drain(WAIT)
 
     [(given, thread)] = ran
     assert given is provider and thread.startswith(JOB_THREAD_PREFIX)
     token = shown[0][-1]
-    assert shown == [("push", "working", token), ("pop", token)]
+    assert shown == [("push", "top8_import", token), ("pop", token)]
+    assert token not in StatusService._jobs
 
 
 def test_run_with_provider_starts_nothing_without_a_provider_or_after_the_shutdown(
@@ -556,7 +558,7 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
         startgg, executor, monkeypatch, when):
     from src.AutonaPlayerDB import AutonaPlayerDB
     from src.core.PlayerDB import PlayerDB
-    from src.Helpers.AutonaStatusManager import AutonaStatusManager
+    from src.core.StatusService import StatusService
 
     jobs = executor()
     done = []
@@ -570,8 +572,8 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
         AutonaPlayerDB, "SetTournamentPlayers",
         lambda tags, cancel_event=None: done.append(("tags", cancel_event)))
     popped = []
-    pop = AutonaStatusManager.pop
-    monkeypatch.setattr(AutonaStatusManager, "pop",
+    pop = StatusService.Pop
+    monkeypatch.setattr(StatusService, "Pop",
                         lambda token: (popped.append(token), pop(token)))
     pages = []
     cancel = threading.Event()

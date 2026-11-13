@@ -24,6 +24,7 @@ from qtpy.QtCore import *
 from .core.AnalysisService import AnalysisService
 from .core.SetSelectionService import SetSelectionService
 from .core.StateManager import StateManager
+from .core.StatusService import StatusService
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
 from .core import TournamentService as tournament_service
@@ -427,9 +428,10 @@ class AutonaTournamentDataProvider(QObject):
         thread pool until ADR-005 S3f-2.
 
         The provider is the one loaded now, read once here. `status`, when
-        given, is shown in the footer while the job runs. True if the job
-        was started; False, running nothing, when no tournament is loaded
-        or the executor has shut down (the app is quitting). A started job
+        given, is a status code (core's StatusService.CODES) shown in the
+        footer while the job runs. True if the job was started; False,
+        running nothing, when no tournament is loaded or the executor has
+        shut down (the app is quitting). A started job
         is always called, exactly once -- unless the shutdown cancels it
         while it is still queued: the status is only a display, and a
         failure to show it must not skip the job (the Top 8 import releases
@@ -442,14 +444,10 @@ class AutonaTournamentDataProvider(QObject):
             return False
 
         def run():
-            statusManager = token = None
+            token = None
             try:
-                # Imported here, not at module level: the status manager
-                # builds its signal QObject on import (agent-pitfalls #1).
-                from .Helpers.AutonaStatusManager import AutonaStatusManager
-                statusManager = AutonaStatusManager
                 if status:
-                    token = statusManager.push(status)
+                    token = StatusService.Push(status)
             except Exception:
                 logger.exception("could not show a provider job's status")
             try:
@@ -459,7 +457,7 @@ class AutonaTournamentDataProvider(QObject):
             finally:
                 if token is not None:
                     try:
-                        statusManager.pop(token)
+                        StatusService.Pop(token)
                     except Exception:
                         logger.exception(
                             "could not clear a provider job's status")

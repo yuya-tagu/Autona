@@ -777,10 +777,16 @@ SetFollowService.changes.notify(1)
 # The battle format (ADR-005 S4z): core's channel, from __init__ too.
 from src.core.Actions import AutonaActions
 AutonaActions.battleFormatChanges.notify("team")
+# What the app is busy with (ADR-005 S-final SF-2): core's channel, from
+# __init__ too; the notice carries the status as it is when sent.
+from src.core.StatusService import StatusService
+status_token = StatusService.Push("top8_import")
+status_snapshot = StatusService.Snapshot()
 deadline = time.monotonic() + 10
-while len(notices) < 4 and time.monotonic() < deadline:
+while len(notices) < 5 and time.monotonic() < deadline:
     time.sleep(0.02)
 WebServer.ws_emit = real_emit
+StatusService.Pop(status_token)
 
 started = time.monotonic()
 stopped = server.stop(10.0)
@@ -813,6 +819,7 @@ report({
     "health": health,
     "flusher_while_serving": flusher_while_serving,
     "notices": notices,
+    "status_snapshot": status_snapshot,
     "stopped": stopped,
     "stop_seconds": stop_seconds,
     "after_stop": after_stop,
@@ -841,7 +848,10 @@ def test_web_server_thread_serves_stops_and_reports_a_failed_start(
         ["scoreboard_pending", {"board": 1, "dirty": False}],
         ["scoreboard_pending", {"board": 2, "dirty": False}],
         ["scoreboard_follow", {"board": 1}],
-        ["battle_format", {}]]
+        ["battle_format", {}],
+        ["status", result["status_snapshot"]]]
+    assert [job["code"] for job in result["status_snapshot"]["jobs"]] == [
+        "top8_import"]
     # stop() joins the delta flusher too: no AutonaWebServer* thread is
     # left below (server_threads).
     assert result["stopped"] is True

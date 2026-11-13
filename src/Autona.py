@@ -204,7 +204,7 @@ from .core.TournamentInfoService import TournamentInfoService
 from .core.SettingsManager import SettingsManager
 from .core.TaskExecutor import TaskExecutor
 from .core.CountryCatalog import CountryCatalog
-from .Helpers.AutonaStatusManager import AutonaStatusManager
+from .core.StatusService import StatusService
 from .AutonaShellOperations import AutonaShellOperations
 from . import AutonaWebOperations
 from src.AutonaWebServer import WebServer, check_webserver_port
@@ -855,7 +855,9 @@ class Window(QMainWindow):
 
         # Footer status bar — surfaces the current long-running task
         # (Start.gg fetches, asset reloads, etc.) so the user can tell
-        # the app is busy rather than frozen.
+        # the app is busy rather than frozen. Its source is core's
+        # StatusService (ADR-005 S-final SF-2), the same one GET
+        # /api/v1/status and Socket.IO's `status` give the web clients.
         self._statusBar = self.statusBar()
         self._statusBar.setSizeGripEnabled(False)
         # Right margin so the progress bar doesn't touch the window edge.
@@ -885,8 +887,11 @@ class Window(QMainWindow):
                 chunk=UI.palette()["brand"]))
         self._statusProgress.setVisible(False)
         self._statusBar.addWidget(self._statusProgress)
-        AutonaStatusManager.signals.changed.connect(
+        StateManagerBridge.instance.status_changed.connect(
             self._on_status_changed)
+        # A job already running (one pushed before the footer existed) is
+        # shown now, not at its next change.
+        self._on_status_changed()
 
     # ── Web server, started after the window is shown (startup Step 4c) ──
 
@@ -1283,13 +1288,19 @@ class Window(QMainWindow):
             bar.setElideMode(Qt.TextElideMode.ElideNone)
             bar.setUsesScrollButtons(True)
 
-    @Slot(str, int, int)
-    def _on_status_changed(self, message: str, progress: int, total: int):
-        # Runs on the GUI thread thanks to Qt's auto signal connection.
-        self._statusLabel.setText(message)
+    @Slot()
+    def _on_status_changed(self):
+        # Runs on the GUI thread thanks to Qt's auto signal connection
+        # (StateManagerBridge.status_changed, queued from a worker). The
+        # notice carries no value: the job shown is the latest one, read
+        # here -- the last pushed still running -- in the program's language
+        # (AutonaLocaleHelper.StatusText). No job: an empty label.
+        job = StatusService.Current()
+        self._statusLabel.setText(AutonaLocaleHelper.StatusText(job))
+        total = job["total"] if job else 0
         if total > 0:
             self._statusProgress.setRange(0, total)
-            self._statusProgress.setValue(min(progress, total))
+            self._statusProgress.setValue(min(job["done"], total))
             self._statusProgress.setVisible(True)
         else:
             self._statusProgress.setVisible(False)

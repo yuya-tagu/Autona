@@ -111,6 +111,49 @@ class AutonaLocaleHelper(QObject):
         else:
             AutonaLocaleHelper.fgTermLocale = current_locale[0]
 
+    # The desktop footer's words for core's status codes (ADR-005 S-final
+    # SF-2): the English sources of the "status" context in src/i18n/*.ts,
+    # formatted with the job's args. core's StatusService.CODES is the list;
+    # the web's i18next keys status_<code> are the same words.
+    # tests/test_status_service.py checks that every table has every code.
+    # Goes with the Qt footer (SF-5b).
+    STATUS_TEXT = {
+        "startgg_bracket": "Fetching bracket data from Start.gg...",
+        "startgg_set": "Fetching set data from Start.gg...",
+        "startgg_sets": "Fetching the set list from Start.gg...",
+        "startgg_sets_page":
+            "Fetching the set list from Start.gg... ({page}/{pages})",
+        "startgg_sets_failed":
+            "Some pages of the set list could not be fetched"
+            " ({failed}/{pages})",
+        "startgg_entrants": "Fetching entrants from Start.gg...",
+        "startgg_entrants_page":
+            "Fetching entrants from Start.gg... ({page}/{pages})",
+        "assets_load": "Loading game assets... ({codename})",
+        "top8_import": "Building the TOP 8...",
+        "result_import": "Fetching the results...",
+    }
+
+    @staticmethod
+    def StatusText(job) -> str:
+        """A status job (core's StatusService.Current()) as the footer
+        shows it, in the program's language: its code's translated words
+        with its args. "" for no job; the code itself for one this table
+        does not know (a mistake the tables' test catches)."""
+        if not job:
+            return ""
+        code = job.get("code")
+        source = AutonaLocaleHelper.STATUS_TEXT.get(code)
+        if source is None:
+            return str(code or "")
+        text = QCoreApplication.translate("status", source)
+        try:
+            return text.format(**job.get("args", {}))
+        except (KeyError, IndexError, ValueError):
+            logger.warning(f"status {code!r}: its words did not take its "
+                           f"args {job.get('args')!r}")
+            return text
+
     @staticmethod
     def FormatMatchText(key, number) -> str:
         """One of the localized set-length texts ("Best of 5" / "First to 3").

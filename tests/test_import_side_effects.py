@@ -159,6 +159,11 @@ set_selection_service = importlib.import_module(
 # no shell is marked as registering hotkeys on import.
 app_settings = importlib.import_module("src.core.AppSettings").AppSettings
 hotkey_rules = importlib.import_module("src.core.HotkeyRules")
+# What the app is busy with (ADR-005 S-final SF-2): no job is shown and
+# nobody listens on import (only the bridge subscribes, built by
+# bootstrap_core()).
+status_service = importlib.import_module(
+    "src.core.StatusService").StatusService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -283,6 +288,10 @@ assert app_settings.instance is None, "import created AppSettings.instance"
 assert hotkey_rules.applied is False, "import marked the hotkeys applied"
 assert hotkey_rules.changes.subscriber_count() == 0, \
     "import subscribed to the hotkeys' changes"
+assert status_service.Snapshot() == {"revision": 0, "jobs": []}, \
+    "import showed a status"
+assert status_service.changes.subscriber_count() == 0, \
+    "import subscribed to the status' changes"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

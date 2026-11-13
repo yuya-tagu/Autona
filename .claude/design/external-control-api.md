@@ -202,7 +202,7 @@
 
 ## 4. WebSocket 購読（既存を流用）
 
-- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 3 つだけ: `scoreboard_pending`（§5.15。ADR-005 S4u）と `scoreboard_follow`（§5.17。ADR-005 S4v）と `battle_format`（§5.21。ADR-005 S4z）。公開値の配信は変わらない。
+- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 3 つ（`scoreboard_pending`（§5.15。ADR-005 S4u）・`scoreboard_follow`（§5.17。ADR-005 S4v）・`battle_format`（§5.21。ADR-005 S4z））と、アプリの実行中の仕事を運ぶ `status`（§5.23。ADR-005 S-final SF-2。state ではない）だけ。公開値の配信は変わらない。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
   - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
@@ -226,6 +226,7 @@
 | `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
 | `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加。変わると Socket.IO の `battle_format` が出る: S4z） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
 | `GET /api/v1/settings` | 設定ページの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加。`defaults` は 2026-11-13） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
+| `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -700,6 +701,46 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 - `hotkeys.keys`: 全アクション。`value` は保存値（無ければ既定。文字列でない保存値は null）、`valid` は登録が読めるか（`""` = ショートカットなしは true。旧ウィンドウの記録が作った `Esc` / `PgUp` などは false で、登録されていない）、`warning` は `os_reserved` / `obs_likely` / `no_modifier`（修飾キーなしの 1 キー。F1〜F24 は除く）/ `shift_only`（修飾キーが Shift だけ。どのアプリで打った大文字・記号・Shift+矢印の選択も Autona に取られる。F1〜F24 は除く。2026-11-13）/ null（優先順は os_reserved → obs_likely → no_modifier / shift_only。警告は（修飾キー, VK）で引くので `Ctrl+Escape` も `os_reserved`）。文字列でない保存値でも落ちない。**オブジェクトのキーの順は保たれない**（JSON はソートされる）ので、表示順はクライアントが決める
 - `hotkeys.vocabulary`: PATCH が受けるショートカットの部品（Ctrl / Alt / Shift と、キー 1 つ）。`applied`: このシェルが OS に登録するか（デスクトップ true、ヘッドレス false）
 - `defaults`（2026-11-13）: 一般・ネットワーク・言語の各項目と、ホットキーの有効のスイッチの既定を、PATCH がそのまま受ける形で（`core/AppSettings.Defaults()` と `core/HotkeyRules.Defaults()` の `hotkeys.enabled`。設定ページの「デフォルト」が送る値）。`listenLan` の既定は false（保存が無い = null は「未決定」で、PATCH は真偽しか受けないため。設定ページは未決定をデフォルト扱いにし、「デフォルト」で false を書かない）。ショートカットの既定は `hotkeys.keys.<action>.default`
+
+### 5.23 `GET /api/v1/status`（2026-11-14 追加・ADR-005 S-final SF-2）
+
+アプリが実行中の長い仕事（start.gg の取得・ゲームアセットのロード・Top 8 / 大会リザルトの取り込み）。デスクトップのフッターと同じ源（`core/StatusService`）。state ではないので state の `revision` は付かない（`data.revision` はこの表の版）。READ（コードと件数と、ロード中のゲームの codename だけ）
+
+```json
+{ "ok": true, "data": {
+  "revision": 12,
+  "jobs": [
+    {"id": 3, "code": "startgg_entrants", "args": {}, "done": 0, "total": 0},
+    {"id": 4, "code": "assets_load", "args": {"codename": "ssbu"}, "done": 10, "total": 80}
+  ]
+} }
+```
+
+- `jobs`: 始まった順。**最後の 1 つがフッターに出す仕事**。何も走っていなければ `[]`。`total` 0 は「進み具合を測れない」（文言だけ）、それ以外は `total` のうち `done` が済んだ
+- `revision`: 変わるたびに増える。プロセスごとに 0 から数え直す（再起動で戻る）
+- **文言はコードと引数**で、読み手が自分の言語に訳す（英語の UI に日本語を出さないため）。サーバーは文を返さない。コードと引数（`core/StatusService.CODES` が正本。デスクトップの訳は `AutonaLocaleHelper.STATUS_TEXT` と `src/i18n/*.ts` の `status` コンテキスト、Web は i18next の `status_<code>`。表のずれは `tests/test_status_service.py` が検査）:
+
+| `code` | `args` | 日本語 | English |
+|--------|--------|--------|---------|
+| `startgg_bracket` | — | Start.gg からブラケット情報を取得中... | Fetching bracket data from Start.gg... |
+| `startgg_set` | — | Start.gg からセット情報を取得中... | Fetching set data from Start.gg... |
+| `startgg_sets` | — | Start.gg からセット一覧を取得中... | Fetching the set list from Start.gg... |
+| `startgg_sets_page` | `page`, `pages` | Start.gg からセット一覧を取得中... (page/pages) | Fetching the set list from Start.gg... (page/pages) |
+| `startgg_sets_failed` | `failed`, `pages` | セット一覧の一部ページ取得に失敗しました (failed/pages) | Some pages of the set list could not be fetched (failed/pages) |
+| `startgg_entrants` | — | Start.gg から参加者情報を取得中... | Fetching entrants from Start.gg... |
+| `startgg_entrants_page` | `page`, `pages` | Start.gg から参加者情報を取得中... (page/pages) | Fetching entrants from Start.gg... (page/pages) |
+| `assets_load` | `codename` | ゲームアセットを読み込み中... (codename) | Loading game assets... (codename) |
+| `top8_import` | — | TOP 8 を構築中... | Building the TOP 8... |
+| `result_import` | — | リザルトを取得中... | Fetching the results... |
+
+  知らないコード（新しいアプリと古いクライアント）はコードそのものを出す
+
+**通知 `status`（Socket.IO。2026-11-14 追加・ADR-005 S-final SF-2）**: 上と同じ `{revision, jobs}` を運ぶ（ほかの通知と違って**値を運ぶ**: 進み具合は短い間隔で変わり、通知のたびに全クライアントが GET すると無駄なため）。
+
+- **接続の直後に 1 回**、その接続にだけ送る（`program_state` の後）。以後は変わるたびに全接続へ
+- 値は**送る時点の最新**: 1 回の送信の間に何度変わっても 1 通。`program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow`・`battle_format` の後に送る。`scoreboard_pending` と同じく自分の静かな間隔（50 ms）を持ち、続けて変わると窓ごとに 1 通（ロードの進み具合）。delta の間隔は動かさない
+- GET の答えと通知のうち `revision` の大きい方が新しい。再接続の後は（再起動で 0 から数え直すので）次に届いたものをそのまま使う（接続の直後に届く）
+- ヘッドレスでも出る（`StatusService.changes` → Bridge の `status_changed` → `WebServer.on_status_change`）。ヘッドレスのゲームのロードは進み具合を出さない（start.gg の取得と Top 8 / リザルトの取り込みは出る）
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 

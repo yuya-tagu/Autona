@@ -4,7 +4,9 @@ One process, started the way an operator starts it, in a throwaway working
 directory on a free port (ADR-005 S3c; the first of S3d's smoke checks):
 
 - it serves: /api/v1/health, the state over Socket.IO, a core write
-  (score:adjust) reaching the state and the Socket.IO delta stream;
+  (score:adjust) reaching the state and the Socket.IO delta stream, and
+  what the app is busy with (Socket.IO's `status` on connect and GET
+  /api/v1/status, ADR-005 S-final SF-2);
 - the crew board's routes, on the board it seeds (ADR-005 S4w);
 - the two shell operations, the desktop's alone (ADR-005 S3e-9: the set
   selection window and the thumbnail), answer 503 UNAVAILABLE; the Top 8
@@ -138,6 +140,10 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
                       lambda data: received.append(("program_state", data)))
             client.on("program_state_update",
                       lambda data: received.append(("update", data)))
+            # What the app is busy with (ADR-005 S-final SF-2): told to a
+            # new connection at once.
+            client.on("status",
+                      lambda data: received.append(("status", data)))
             client.connect(f"http://127.0.0.1:{port}",
                            transports=["polling"], wait_timeout=10)
             try:
@@ -146,6 +152,11 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
                         name == "program_state" for name, _ in received)):
                     time.sleep(0.1)
                 assert any(name == "program_state" for name, _ in received)
+                while (time.monotonic() < deadline and not any(
+                        name == "status" for name, _ in received)):
+                    time.sleep(0.1)
+                [told] = [data for name, data in received if name == "status"]
+                assert set(told) == {"revision", "jobs"}, told
 
                 status, body = _request(
                     port, "/api/v1/scoreboards/1/teams/1/score:adjust",
@@ -164,6 +175,13 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
             assert any("score.1.team.1.score" in update
                        or ('"score"' in update and '"team"' in update)
                        for update in updates), received[-3:]
+
+            # The same status on GET (nothing runs: no tournament, and the
+            # headless game load reports none).
+            status, body = _request(port, "/api/v1/status")
+            assert status == 200, body
+            assert body["data"]["jobs"] == []
+            assert body["data"]["revision"] >= told["revision"]
 
             # Published at once: there is no board to hold it.
             status, body = _request(port, "/api/v1/state")

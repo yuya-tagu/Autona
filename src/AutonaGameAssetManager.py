@@ -28,6 +28,7 @@ from qtpy.QtCore import QObject, Signal
 
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
+from .core.StatusService import StatusService
 from .core.TaskExecutor import TaskExecutor
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaQtHelper import GuiMarshalAborted, in_gui_thread
@@ -411,8 +412,14 @@ class AutonaGameAssetManager(QObject):
         # marshal rebuilt the Qt models first (QPixmap / QIcon are
         # GUI-thread only; built here they crashed at boot). Whether the
         # marshal is still needed is the run_sync review's (S-final).
-        from .Helpers.AutonaStatusManager import AutonaStatusManager
-        status = {}
+        #
+        # The footer's progress (core's StatusService, ADR-005 S-final
+        # SF-2): called by the catalog under its writer lock, it only
+        # records and tells a channel whose one subscriber queues a Qt
+        # signal, so it never blocks. Pushed on the first report, so a load
+        # the catalog skips shows nothing; updated every 5 characters.
+        progress = StatusService.Progress(
+            "assets_load", {"codename": request.codename}, every=5)
         try:
             # Checked before anything is written. Once the app is shutting
             # down, a load that waited for the loader would publish its
@@ -427,12 +434,12 @@ class AutonaGameAssetManager(QObject):
                 return STOPPED
             return self._Load(
                 request.codename, request.modsActive, request.reload,
-                self._StatusProgress(request.codename, status))
+                progress)
         except Exception:
             logger.error(traceback.format_exc())
             return FAILED
         finally:
-            AutonaStatusManager.pop(status.get("token"))
+            progress.Close()
 
     def _Load(self, codename, mods_active, mods_reload_mode, progress):
         # The loader's load: the selection here, what follows it on the GUI
@@ -572,21 +579,3 @@ class AutonaGameAssetManager(QObject):
                     cycle.Release()
 
         AutonaWebOperations.boardHost.Run(publish)
-
-    @staticmethod
-    def _StatusProgress(codename, status):
-        # Footer progress for the threaded load. Called by the catalog under
-        # its writer lock: AutonaStatusManager only emits a (queued) signal,
-        # so this never blocks. The status is pushed on the first call, so
-        # a load the catalog skips shows nothing.
-        from .Helpers.AutonaStatusManager import AutonaStatusManager
-        message = f"ゲームアセットを読み込み中... ({codename})"
-
-        def progress(done, total):
-            if status.get("token") is None:
-                status["token"] = AutonaStatusManager.push(message)
-            # Throttled to every 5 characters to avoid signal spam.
-            if done > 0 and (done % 5 == 0 or done >= total):
-                AutonaStatusManager.update(
-                    status["token"], message, progress=done, total=total)
-        return progress

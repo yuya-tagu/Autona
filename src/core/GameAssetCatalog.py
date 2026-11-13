@@ -34,8 +34,9 @@ Locking rules
   the writer lock: the GUI thread may be waiting on the very same lock
   (the synchronous load path, `ForgetSelection`), and that is a deadlock.
   The one callback invoked under the lock is `SelectGame`'s `progress`; it
-  must not block the calling thread (the Qt adapter passes a status update,
-  which is a queued signal when the load runs on a worker).
+  must not block the calling thread (the Qt adapter passes the footer's
+  `StatusService.Progress`, which records the job and tells a channel whose
+  one subscriber -- StateManagerBridge -- queues a Qt signal).
 - `game.*` is published inside the lock, so the snapshot swap and the state
   can never disagree, and the `StateManager.SaveBlock()` is opened *outside*
   it: the save cycle (and with it every observer) runs after the lock is

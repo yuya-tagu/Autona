@@ -138,6 +138,9 @@ ROUTE_ACCESS = {
     # ── /api/v1 (GET = READ, POST / PATCH / PUT / DELETE = WRITE) ──
     "api_v1.state": READ,
     "api_v1.health": READ,
+    # What the app is busy with (ADR-005 S-final SF-2): status codes, counts
+    # and a game's codename, as the footer shows anyone at the PC.
+    "api_v1.get_status": READ,
     # The format in force, as health's activeBoard; the switch (ADR-005 S4x).
     "api_v1.get_battle_format": READ,
     "api_v1.battle_format_set": WRITE,

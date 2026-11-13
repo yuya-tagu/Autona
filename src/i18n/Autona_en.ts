@@ -805,6 +805,48 @@ Change general.webserver_port in user_data/settings.json and restart Autona, or 
         <translation>)</translation>
     </message>
 </context><context>
+    <name>status</name>
+    <message>
+        <source>Fetching bracket data from Start.gg...</source>
+        <translation>Fetching bracket data from Start.gg...</translation>
+    </message>
+    <message>
+        <source>Fetching set data from Start.gg...</source>
+        <translation>Fetching set data from Start.gg...</translation>
+    </message>
+    <message>
+        <source>Fetching the set list from Start.gg...</source>
+        <translation>Fetching the set list from Start.gg...</translation>
+    </message>
+    <message>
+        <source>Fetching the set list from Start.gg... ({page}/{pages})</source>
+        <translation>Fetching the set list from Start.gg... ({page}/{pages})</translation>
+    </message>
+    <message>
+        <source>Some pages of the set list could not be fetched ({failed}/{pages})</source>
+        <translation>Some pages of the set list could not be fetched ({failed}/{pages})</translation>
+    </message>
+    <message>
+        <source>Fetching entrants from Start.gg...</source>
+        <translation>Fetching entrants from Start.gg...</translation>
+    </message>
+    <message>
+        <source>Fetching entrants from Start.gg... ({page}/{pages})</source>
+        <translation>Fetching entrants from Start.gg... ({page}/{pages})</translation>
+    </message>
+    <message>
+        <source>Loading game assets... ({codename})</source>
+        <translation>Loading game assets... ({codename})</translation>
+    </message>
+    <message>
+        <source>Building the TOP 8...</source>
+        <translation>Building the TOP 8...</translation>
+    </message>
+    <message>
+        <source>Fetching the results...</source>
+        <translation>Fetching the results...</translation>
+    </message>
+</context><context>
     <name>thumb_app</name>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="221" />
