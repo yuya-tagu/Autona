@@ -718,13 +718,20 @@ def _slot(team=1, board=BOARD):
     return PlayerService(f"score.{board}.team.{team}.player.1")
 
 
+def _announce_id(slot, value):
+    changed = slot.SetPlayerId(value)
+    if changed:
+        slot.Announce(SlotChange(idChanged=True))
+    return changed
+
+
 def test_a_new_id_asks_once_and_a_reasserted_one_not_at_all(fetcher):
     _seedPairing([1, 10], [2, 20])
     _roster()
 
-    assert _slot(2).SetPlayerId([3, 30], announce=True) is True
-    assert _slot(2).SetPlayerId([3, 30], announce=True) is False
-    # Without announce (an operation that asks once for everything).
+    assert _announce_id(_slot(2), [3, 30]) is True
+    assert _announce_id(_slot(2), [3, 30]) is False
+    # Without Announce (an operation that asks once for everything).
     _slot(1).SetPlayerId([4, 40])
 
     assert [kind for kind, _ in fetcher.asked()] == [
@@ -735,10 +742,11 @@ def test_a_seed_asks_for_the_upset_factor(fetcher):
     _roster()
     SM.Set(f"{PREFIX}.team.2.player.1.seed", 5)
 
-    _slot(1).SetSeed(1, announce=True)
+    _slot(1).SetSeed(1)
+    _slot(1).Announce(SlotChange(seedChanged=True))
     assert SM.Get(f"{PREFIX}.upset_factor") == 4
 
-    _slot(1).SetSeed(3)   # no announce: the factor stays
+    _slot(1).SetSeed(3)   # no Announce: the factor stays
     assert SM.Get(f"{PREFIX}.upset_factor") == 4
 
 
@@ -777,8 +785,9 @@ def test_a_slot_outside_the_boards_has_no_statistics(fetcher):
     try:
         slot.ApplyData({"gamerTag": "X", "id": [9, 90], "seed": 4},
                        False, True)
-        slot.SetPlayerId([8, 80], announce=True)
-        slot.SetSeed(2, announce=True)
+        _announce_id(slot, [8, 80])
+        slot.SetSeed(2)
+        slot.Announce(SlotChange(seedChanged=True))
     finally:
         SM.Unset("elsewhere")
 

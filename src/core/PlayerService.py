@@ -384,9 +384,10 @@ class PlayerService:
         StateManager.Set(self.Key(field), "" if value is None else str(value))
         return True
 
-    def SetSeed(self, value, announce=False) -> bool:
-        """Publish the seed as a number; with `announce`, recalculate the
-        upset factor too (the card's seed spinbox: Announce).
+    def SetSeed(self, value) -> bool:
+        """Publish the seed as a number. Does not ask for the statistics:
+        a caller that wants the upset factor recalculated follows it with
+        Announce(SlotChange(seedChanged=True)).
 
         Three callers used to write it in two different types: the spinbox's
         ``valueChanged`` and ``SetData`` wrote an int, while the spinbox's
@@ -398,8 +399,6 @@ class PlayerService:
         """
         StateManager.Set(
             self.Key(schema.PLAYER_SEED_KEY), self._asInt(value, 0))
-        if announce:
-            self.Announce(SlotChange(seedChanged=True))
         return True
 
     def SetBirthday(self, value) -> bool:
@@ -561,19 +560,17 @@ class PlayerService:
         StateManager.Set(self.Key("city"), city)
         return True
 
-    def SetPlayerId(self, value, announce=False) -> bool:
+    def SetPlayerId(self, value) -> bool:
         """Set the provider's player id. True when the state changed.
 
-        With `announce` (the card's renamed player: NameChanged), a change
-        asks for the statistics (Announce): they hang off "the player in
-        this slot is now someone else", so they are asked for on a change
-        and not on a re-assertion.
+        Does not ask for the statistics. The statistics hang off "the player
+        in this slot is now someone else", so a caller asks for them on a
+        change and not on a re-assertion:
+        ``if svc.SetPlayerId(v): svc.Announce(SlotChange(idChanged=True))``.
         """
         if StateManager.Get(self.Key("id")) == value:
             return False
         StateManager.Set(self.Key("id"), value)
-        if announce:
-            self.Announce(SlotChange(idChanged=True))
         return True
 
     def SetOnlineAvatar(self, value):

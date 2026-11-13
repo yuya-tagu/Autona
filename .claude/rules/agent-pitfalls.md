@@ -111,8 +111,8 @@ React ページのローカルにあり、state には出ない）。`player_edi
   保存・削除は `core/PlayerDirectory`（v1 `PUT /players` / `POST /players:delete`。ADR-005 S4m）
 - 統計の依頼は core（ADR-005 S3e-5）: `PlayerService.Announce(SlotChange)` が
   ボードのスロット（`score.*`）でだけ `StatsService.PlayerChanged` を呼ぶ（読込・クリアは
-  自分の保存ブロックの中で。v1 の `Edit` も同じ。`SetSeed` / `SetPlayerId` の `announce=True` は Qt のカードの手入力のためのもので、
-  S4ac-3 からアプリに呼び手は無い。テストの `edit_tag` が録画の再生に使う）。カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
+  自分の保存ブロックの中で。v1 の `Edit` も同じ。`SetSeed` / `SetPlayerId` は統計を依頼しない
+  （Qt のカードの手入力のための `announce=` 引数は削除した。依頼するなら呼び手が明示的に `Announce(SlotChange(...))` を呼ぶ。テストの `edit_tag` が録画の再生でそうしている）。カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
   削除済み。`SlotChange` は操作の前後の state の（id, seed）の比較
 
 ## 8. Autona.exe はプロジェクト直下

@@ -12,9 +12,9 @@ silently lost. Pinned here:
   long-lived GUI executor from the job's `then`); the fetch itself runs on
   a job-lane thread, called as the Worker called it (with a progress
   callback and a cancel event);
-- the set list: its progress arrives ahead of its list, and only the newest
-  load answers -- the one before it is told to stop and what it already
-  queued is dropped;
+- (the set list and station loads, and their delivery by load number, went
+  with their only consumer, the Qt set selection window: ADR-005 Qt model
+  cleanup PR1);
 - RunWithProvider runs its job on the job lane with its status shown and
   cleared, and starts nothing without a provider or after the shutdown;
 - the provider's own entrants fetch is a job too, and the provider stops
@@ -125,8 +125,6 @@ def _connect(signal, answers, tag):
     return lambda: signal.disconnect(record)
 
 
-SETS = [{"id": 1}, {"id": 2}]
-
 # kind -> (provider method, its answer, the answers the app sees)
 FETCHES = {
     "tournament data": (
@@ -135,15 +133,6 @@ FETCHES = {
     "phases": (
         "GetTournamentPhases", [{"id": 7, "name": "Pools"}],
         [("phases", ([{"id": 7, "name": "Pools"}],))]),
-    "stations": (
-        "GetStations", [{"id": 3}],
-        [("stations", ([{"id": 3}],))]),
-    "set list": (
-        "GetMatches", SETS,
-        [("progress", ({"progress": 1, "totalPages": 2, "sets": []},)),
-         ("progress", ({"progress": 2, "totalPages": 2, "sets": []},)),
-         ("finished", (SETS,)),
-         ("progress", ({"progress": 0, "totalPages": 0, "sets": SETS},))]),
 }
 
 
@@ -158,13 +147,6 @@ def _start(adapter, kind, answers):
         undo = [_connect(signals.tournament_phases_updated, answers,
                          "phases")]
         adapter.GetTournamentPhases()
-    elif kind == "stations":
-        undo = [_connect(signals.get_stations_finished, answers, "stations")]
-        adapter.LoadStations()
-    else:
-        undo = [_connect(signals.sets_data_updated, answers, "progress"),
-                _connect(signals.get_sets_finished, answers, "finished")]
-        adapter.LoadSets(True)
     return undo
 
 
@@ -174,8 +156,7 @@ def test_each_fetch_answers_once_on_the_gui_thread_after_a_collection(
     method, value, expected = FETCHES[kind]
     gate = threading.Event()
     # A copy: the adapter completes the tournament data in place.
-    fetch = _Fetch(gate, copy.deepcopy(value),
-                   progress=[(1, 2), (2, 2)] if kind == "set list" else ())
+    fetch = _Fetch(gate, copy.deepcopy(value))
     adapter.provider = SimpleNamespace(**{method: fetch})
     answers = []
 
@@ -199,43 +180,6 @@ def test_each_fetch_answers_once_on_the_gui_thread_after_a_collection(
     assert thread.startswith(JOB_THREAD_PREFIX)
     # Called as the Worker called it.
     assert "progress_callback" in kwargs and "cancel_event" in kwargs
-
-
-def test_a_newer_set_list_load_drops_what_the_older_one_queued(
-        adapter, executor):
-    """The window asks again while the first list is on its way: the first
-    load is told to stop (its cancel event) and its answers, already queued
-    to the GUI thread, are dropped. Until S3f-2 the old Worker's signals
-    were blocked, which let an answer already queued through."""
-    jobs = executor(stepped=True)
-    gate = threading.Event()
-    gate.set()
-    first = _Fetch(gate, [{"id": "old"}], progress=[(1, 1)])
-    second = _Fetch(gate, [{"id": "new"}], progress=[(1, 1)])
-    answers = []
-    undo = [_connect(adapter.signals.sets_data_updated, answers, "progress"),
-            _connect(adapter.signals.get_sets_finished, answers, "finished")]
-    try:
-        adapter.provider = SimpleNamespace(GetMatches=first)
-        adapter.LoadSets(False)
-        assert jobs.run_next()  # its progress and list are queued now
-
-        adapter.provider = SimpleNamespace(GetMatches=second)
-        adapter.LoadSets(False)
-        assert jobs.run_next()
-        _pump(lambda: len(answers) >= 3)
-    finally:
-        for disconnect in undo:
-            disconnect()
-
-    new = [{"id": "new"}]
-    assert [(tag, args) for tag, args, _main in answers] == [
-        ("progress", ({"progress": 1, "totalPages": 1, "sets": []},)),
-        ("finished", (new,)),
-        ("progress", ({"progress": 0, "totalPages": 0, "sets": new},)),
-    ]
-    assert first.calls[0][1]["cancel_event"].is_set()
-    assert not second.calls[0][1]["cancel_event"].is_set()
 
 
 @pytest.mark.parametrize("then", ["another tournament", "no tournament"])
@@ -302,30 +246,6 @@ def test_the_statistics_fetches_are_jobs_called_as_the_worker_called_them(
         kwargs["callback"].emit(name)
     assert answered == list(fetches)
     assert fetches["GetLastSets"].calls[0][1]["playerID"] == 1
-
-
-def test_cancelling_the_set_list_drops_what_it_queued(adapter, executor):
-    """A set picked while the list loads (the set selection window): the
-    load is told to stop and its answers, queued or not, are dropped."""
-    jobs = executor(stepped=True)
-    gate = threading.Event()
-    gate.set()
-    fetch = _Fetch(gate, [{"id": 1}], progress=[(1, 1)])
-    answers = []
-    undo = [_connect(adapter.signals.sets_data_updated, answers, "progress"),
-            _connect(adapter.signals.get_sets_finished, answers, "finished")]
-    try:
-        adapter.provider = SimpleNamespace(GetMatches=fetch)
-        adapter.LoadSets(False)
-        assert jobs.run_next()  # its progress and list are queued now
-        adapter.CancelSetLoad()
-        _flush()
-    finally:
-        for disconnect in undo:
-            disconnect()
-
-    assert answers == []
-    assert fetch.calls[0][1]["cancel_event"].is_set()
 
 
 def _flush():
