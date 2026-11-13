@@ -10,8 +10,7 @@ network) stubbed out. Pinned:
   through (S3c-1 review: a missing one means a tournament's game never
   loads, with only a warning in the log), the game loader the web
   operations use; the board host is the one of both shells (ADR-005 S4ad:
-  the desktop registered its own until then); no desktop adapter is built and
-  the player DB builds no Qt model (QtGui);
+  the desktop registered its own until then); no desktop adapter is built;
 - what the run makes and imports (ADR-005 S3f-6): no GUI application
   object, no widget, and none of the src modules that define a QWidget
   subclass (found by AST) -- in place of "no QtGui / QtWidgets", which
@@ -19,7 +18,10 @@ network) stubbed out. Pinned:
 - the games follow the desktop's startup: the scan, the provider's game
   re-applied after every scan (selector first), the last pick restored once
   -- loaded through the catalog, with the pick persisted and the web
-  server's / player DB's listeners told;
+  server's / player DB's listeners told; the player DB's refresh normalises
+  the loaded game's mains as the desktop's does (the Qt model clean-up's
+  PR3): /playerdb, its push and local_players.json match the golden the
+  desktop is held to (tests/fixtures/player_db/normalised_golden.json);
 - the shared wiring is live: a tournament payload is written, a cleared URL
   forgets the selected game;
 - the shutdown stops the server, stops the task executor (running jobs told
@@ -38,6 +40,7 @@ The real process -- main.py --headless, its single-instance gate and its
 stop on Ctrl+Break -- is tests/test_headless_smoke.py.
 """
 import ast
+import json
 import os
 import subprocess
 import sys
@@ -48,6 +51,8 @@ import pytest
 from tests.test_bootstrap_split import _PRELUDE, _free_port, _probe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+NORMALISED_GOLDEN = (PROJECT_ROOT / "tests" / "fixtures" / "player_db"
+                     / "normalised_golden.json")
 
 _ASSEMBLY_SCRIPT = _PRELUDE + r'''
 import os
@@ -73,6 +78,14 @@ with open("user_data/games/probe_game/base_files/icon/config.json", "w",
 from PIL import Image
 Image.new("RGBA", (8, 8), (200, 30, 30, 255)).save(
     "user_data/games/probe_game/base_files/icon/mario_0.png")
+# A player DB whose probe_game mains are stored the old ways (the skin a
+# string, no variant slot): tests/fixtures/player_db/normalised_golden.json,
+# which the desktop's refresh is held to as well (tests/test_player_db.py).
+with open(os.path.join(sys.argv[1], "tests", "fixtures", "player_db",
+                       "normalised_golden.json"), encoding="utf-8") as f:
+    normalised = json.load(f)
+with open("user_data/local_players.json", "w", encoding="utf-8") as f:
+    f.write(normalised["local_players"])
 
 from qtpy.QtCore import QCoreApplication
 app = QCoreApplication([])
@@ -137,12 +150,23 @@ result["restored"] = pump(
     and "db_updated" in events)
 result["persisted"] = SettingsManager.Get("SELECTED_GAME_CODENAME")
 result["events"] = events[:]
-result["player_db_model"] = AutonaPlayerDB.model is not None
+
+# The load's player DB refresh normalised the loaded game's mains, as the
+# desktop's does (the Qt model clean-up's PR3; the headless shell kept them
+# as stored until then): what the push sends, and the next save's file.
+from src.core.PlayerDB import PlayerDB
+result["playerdb_push"] = json.dumps(WebOps.get_playerdb())
+PlayerDB.instance.SaveDB()
+with open("user_data/local_players.json", encoding="utf-8") as f:
+    result["local_players"] = f.read()
 
 # Served by the thread.
 with urllib.request.urlopen(
         f"http://127.0.0.1:{port}/api/v1/health", timeout=5) as response:
     result["health"] = response.status
+with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/playerdb", timeout=5) as response:
+    result["playerdb_http"] = json.loads(response.read())
 
 # The settings page's (ADR-005 S4ae): no hotkeys object here, so the page is
 # told they are not applied; a save still reaches settings.json, as this
@@ -272,7 +296,14 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["persisted"] == "probe_game"
     assert "gameChanged" in result["events"]
     assert "db_updated" in result["events"]
-    assert result["player_db_model"] is False
+    # ...and the player DB followed it as the desktop's does: the same
+    # normalised mains in /playerdb, its push and local_players.json, key
+    # order included (the golden is the desktop's model build's).
+    golden = json.loads(NORMALISED_GOLDEN.read_text(encoding="utf-8"))
+    assert golden["codename"] == "probe_game"
+    assert result["playerdb_push"] == golden["after"]["playerdb"]
+    assert result["local_players"] == golden["after"]["local_players"]
+    assert result["playerdb_http"] == json.loads(golden["after"]["playerdb"])
 
     assert result["health"] == 200
     # The settings page (ADR-005 S4ae): the headless shell registers no

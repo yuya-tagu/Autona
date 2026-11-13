@@ -353,7 +353,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 22. ローカル選手 DB
 
-[src/core/PlayerDB.py](../../src/core/PlayerDB.py)（データ。Qt の補完モデルは [src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)）。
+[src/core/PlayerDB.py](../../src/core/PlayerDB.py)（データと mains の正規化。変更の通知を Web の push に中継する Qt のアダプタは [src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)）。
 
 - 保存先: `user_data/local_players.json`
 - 項目: prefix / gamerTag / name / twitter / country_code / state_code / mains / pronoun / custom_textbox

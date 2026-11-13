@@ -22,10 +22,19 @@ tournament's entrant tags) into src/core/PlayerDB.py. Pinned here:
 - through the Qt adapter, db_updated fires once per announcement, from a
   worker as well (the adapter queues to the GUI thread and the core does
   not hold its lock meanwhile; since ADR-005 S3f-2 the worker does not wait
-  for the GUI thread), and the model build still normalises the loaded
-  game's mains in place.
+  for the GUI thread);
+- the mains normalisation (PlayerDB.NormaliseMains, S3c-2 decision 5): the
+  desktop's Qt model build did it in place until the Qt model clean-up's
+  PR3 moved it to core. NORMALISE_CASES and the refresh tests were green
+  against the model build (0f42a3b2) before the move, and are against core
+  after it, through the desktop's refresh (AutonaPlayerDB.SetupModel) and
+  core alone; the outputs it changes (/playerdb, its push,
+  local_players.json) match what the model build left
+  (normalised_golden.json, recorded from it), on the headless shell too
+  (tests/test_headless.py).
 """
 import ast
+import copy
 import json
 import os
 import threading
@@ -42,6 +51,72 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = json.loads(
     (PROJECT_ROOT / "tests" / "fixtures" / "player_db" / "golden.json")
     .read_text(encoding="utf-8"))
+# What the desktop's Qt model build (0f42a3b2) left of a player DB in the
+# outputs (the push's JSON, local_players.json) once it normalised it.
+NORMALISED_GOLDEN = json.loads(
+    (PROJECT_ROOT / "tests" / "fixtures" / "player_db"
+     / "normalised_golden.json").read_text(encoding="utf-8"))
+
+# The mains normalisation (S3c-2 decision 5): the selected game's mains,
+# rewritten in place -- the skin a number (0 when it is not one, logged), a
+# variant slot "" added. Quirks kept: the filter reads
+# `isinstance(main, list) and len(main) == 2 or len(main) == 3` (so any
+# 3-long thing is taken, and a main with no len() fails the player), a list
+# that is not 2 or 3 long is left as it is (not removed), and one player's
+# error stops that player only.
+NORMALISED_GAME = "tgame"
+INVALID_SKIN = "Local DB error: Player"
+PLAYER_ERROR = "Error loading player from local DB:"
+# {case: (the selected game's stored mains, after, "invalid skin" errors,
+#  whether the player's walk ends on an error)}. None for the last: the
+# Qt model build logged one there after the normalisation (its icon lookup
+# on an empty list), not part of it.
+NORMALISE_CASES = {
+    "skin-number": ([["mario", 2]], [["mario", 2, ""]], 0, False),
+    "skin-string": ([["mario", "2"]], [["mario", 2, ""]], 0, False),
+    "with-variant": ([["mario", "2", "EX"]], [["mario", 2, "EX"]], 0, False),
+    "variant-kept": ([["mario", 1, None]], [["mario", 1, None]], 0, False),
+    "skin-word": ([["mario", "x"]], [["mario", 0, ""]], 1, False),
+    "skin-null": ([["mario", None, "EX"]], [["mario", 0, "EX"]], 1, False),
+    "skin-empty": ([["mario", ""]], [["mario", 0, ""]], 1, False),
+    "skin-decimal-string": ([["mario", "2.5"]], [["mario", 0, ""]], 1, False),
+    "skin-float": ([["mario", 2.7]], [["mario", 2, ""]], 0, False),
+    "skin-bool": ([["mario", True]], [["mario", 1, ""]], 0, False),
+    "skin-spaced": ([["mario", " 3 "]], [["mario", 3, ""]], 0, False),
+    "skin-list": ([["mario", [1]]], [["mario", 0, ""]], 1, False),
+    "several": ([["mario", "1"], ["luigi", "x", "V"]],
+                [["mario", 1, ""], ["luigi", 0, "V"]], 1, False),
+    "one-long-kept": ([["mario"]], [["mario"]], 0, None),
+    "four-long-kept": ([["mario", "1", "EX", "y"]],
+                       [["mario", "1", "EX", "y"]], 0, None),
+    "mixed-lengths": ([["mario"], ["luigi", "3"], ["peach", "a", "V"]],
+                      [["mario"], ["luigi", 3, ""], ["peach", 0, "V"]],
+                      1, False),
+    "empty": ([], [], 0, False),
+    "null": (None, None, 0, False),
+    # The precedence: a 3-long string is taken, its skin read ("b": not a
+    # number), and the write into it fails the player.
+    "string-main": (["abc"], ["abc"], 1, True),
+    "string-main-digit": (["a5c"], ["a5c"], 0, True),
+    # ...a 3-key dict too: its skin (key 1) is no number, and the error's
+    # own message (key 0) fails the player, before anything is written.
+    "dict-main": ([{"a": 1, "b": 2, "c": 3}], [{"a": 1, "b": 2, "c": 3}],
+                  0, True),
+    # With keys 0 and 1: the skin's write replaces key 1, the variant's
+    # read (key 2) fails the player.
+    "dict-main-indexed": ([{0: "mario", 1: "x", "c": 3}],
+                          [{0: "mario", 1: 0, "c": 3}], 1, True),
+    # A main with no len() fails the filter, before anything is rewritten.
+    "number-main": ([["mario", "2"], 5], [["mario", "2"], 5], 0, True),
+    "null-main": ([["mario", "2"], None], [["mario", "2"], None], 0, True),
+    # What came before the failing main stays rewritten, what follows not.
+    "partial": ([["mario", "2"], "abc", ["luigi", "3"]],
+                [["mario", 2, ""], "abc", ["luigi", "3"]], 1, True),
+    # Not a list: a string's characters (none 3 long), a dict's keys.
+    "string-mains": ("abc", "abc", 0, None),
+    "dict-mains": ({"abc": 1}, {"abc": 1}, 1, True),
+    "number-mains": (5, 5, 0, True),
+}
 
 
 @pytest.fixture
@@ -436,21 +511,111 @@ def test_readers_can_run_while_a_worker_adds_players(tmp_path, settings):
     assert len(db.Items()) == 40 * 50
 
 
+# -- the mains normalisation (core) ------------------------------------------
+
+
+@pytest.fixture
+def errors():
+    from loguru import logger
+
+    messages = []
+    handler = logger.add(lambda message: messages.append(str(message)),
+                         level="ERROR", format="{message}")
+    try:
+        yield messages
+    finally:
+        logger.remove(handler)
+
+
+def _put(db, tag, record):
+    # Straight into the dict: AddPlayers would rewrite a one-element main.
+    with db.lock:
+        db.database[tag] = record
+    return record
+
+
+def _logged(messages, prefix, tag=None):
+    lines = [m.rstrip("\n") for m in messages]
+    return [m for m in lines if m.startswith(prefix)
+            and (tag is None or m == f"{prefix} {tag}")]
+
+
+@pytest.mark.parametrize("case", sorted(NORMALISE_CASES))
+def test_normalise_mains_rewrites_the_games_mains(case, tmp_path, errors):
+    """NORMALISE_CASES on core alone: what the model build did, with no Qt
+    (the headless shell's refresh). Where the model build logged an error
+    after the normalisation (None), core logs none."""
+    stored, after, invalidSkins, stops = NORMALISE_CASES[case]
+    db = _db(tmp_path)
+    record = _put(db, "K", {"gamerTag": "K", "mains": {
+        NORMALISED_GAME: copy.deepcopy(stored), "other": [["luigi", "2"]]}})
+
+    db.NormaliseMains(NORMALISED_GAME)
+
+    assert record["mains"] == {NORMALISED_GAME: after,
+                               "other": [["luigi", "2"]]}
+    assert len(_logged(errors, INVALID_SKIN)) == invalidSkins
+    assert bool(_logged(errors, PLAYER_ERROR, "K")) is bool(stops)
+
+
+def test_normalise_mains_is_idempotent_and_quiet(tmp_path, settings,
+                                                 errors):
+    """Run again, it rewrites nothing more, logs nothing more; it never
+    saves nor announces (the caller's db_updated does the telling)."""
+    db = _db(tmp_path)
+    db.LoadDB()
+    record = _put(db, "K", {"gamerTag": "K", "mains": {NORMALISED_GAME: [
+        ["mario", "x"], ["luigi", "2", "V"]]}})
+    db.SaveDB()
+    before = Path(db.path).read_bytes()
+    announced = []
+    db.changed.subscribe(lambda: announced.append(1))
+
+    db.NormaliseMains(NORMALISED_GAME)
+    once = copy.deepcopy(record)
+    logged = len(errors)
+    db.NormaliseMains(NORMALISED_GAME)
+
+    assert record == once == {"gamerTag": "K", "mains": {NORMALISED_GAME: [
+        ["mario", 0, ""], ["luigi", 2, "V"]]}}
+    assert len(errors) == logged == 2  # the invalid skin, its traceback
+    assert Path(db.path).read_bytes() == before
+    assert announced == []
+
+
+def test_normalise_mains_holds_the_lock_for_the_walk(tmp_path):
+    """The entrants worker merges into the same dicts under `lock`: the
+    walk takes it (re-entrant: a caller already holding it goes on)."""
+    db = _db(tmp_path)
+    _put(db, "K", {"gamerTag": "K", "mains": {NORMALISED_GAME: [
+        ["mario", "1"]]}})
+    walked = threading.Event()
+
+    def other():
+        db.NormaliseMains(NORMALISED_GAME)
+        walked.set()
+
+    with db.lock:
+        thread = threading.Thread(target=other, daemon=True)
+        thread.start()
+        assert not walked.wait(0.2)
+        db.NormaliseMains(NORMALISED_GAME)  # re-entrant
+    assert walked.wait(10)
+    thread.join(10)
+    assert db.Get("K")["mains"][NORMALISED_GAME] == [["mario", 1, ""]]
+
+
 # -- the Qt adapter --------------------------------------------------------
 
 
 @pytest.fixture
 def adapter(autonaApp, tmp_path):
     """A fresh core DB (in tmp) with the adapter attached to it, and a
-    counter on db_updated. Afterwards the session's DB is attached again and
-    the adapter's models are put back as they were."""
+    counter on db_updated. Afterwards the session's DB is attached again."""
     from src.AutonaPlayerDB import AutonaPlayerDB
 
     session_db = PlayerDB.instance
-    saved = {name: getattr(AutonaPlayerDB, name)
-             for name in ("model", "_retiredModel")}
     assert AutonaPlayerDB._attachedTo is session_db
-    assert AutonaPlayerDB.modelEnabled  # the desktop harness built the model
 
     db = _db(tmp_path)
     PlayerDB.instance = db
@@ -468,11 +633,8 @@ def adapter(autonaApp, tmp_path):
         AutonaPlayerDB.signals.db_updated.disconnect(count)
         PlayerDB.instance = session_db
         AutonaPlayerDB.Attach()
-        # (The completers' proxy the test's builds re-pointed at the test's
-        # model, and that had to be pointed back first, went in ADR-005
-        # S4ad: no model is shared any more.)
-        for name, value in saved.items():
-            setattr(AutonaPlayerDB, name, value)
+        # (The adapter's models, put back here until the Qt model clean-up's
+        # PR3 removed the last one, are gone.)
 
 
 def test_db_updated_fires_once_per_change(adapter, settings):
@@ -496,10 +658,9 @@ def test_db_updated_fires_once_per_change(adapter, settings):
     AutonaPlayerDB.ClearTournamentPlayers()  # no entrants to forget
     assert len(emitted) == 5
     assert all(emitted)  # on the GUI thread
-
-    tags = [AutonaPlayerDB.model.item(row).text()
-            for row in range(AutonaPlayerDB.model.rowCount())]
-    assert tags == ["Bravo"]
+    # What the push sends (the player model held the same rows until the Qt
+    # model clean-up's PR3).
+    assert [tag for tag, _ in db.Items()] == ["Bravo"]
 
 
 def test_a_worker_change_reaches_db_updated_on_the_gui_thread(
@@ -569,25 +730,152 @@ def test_unloading_the_tournament_pushes_the_whole_db_again(adapter, settings):
     assert pushed == [["Alpha", "Bravo"]]
 
 
-def test_the_model_build_still_normalises_the_loaded_games_mains(
-        adapter, settings, monkeypatch):
-    # S3c-2 decision 5: the adapter's model build rewrites the selected
-    # game's mains in place (skin to int, a variant slot added). It stays in
-    # the adapter for now; this pins that the move did not lose it.
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+def _selectGame(monkeypatch, codename):
+    """The catalog's selected game, as a refresh reads it (the asset
+    adapter's `selectedGame` is the same snapshot's `game`)."""
+    from dataclasses import replace
+
+    from src.core.GameAssetCatalog import GameAssetCatalog
+
+    catalog = GameAssetCatalog.instance
+    snapshot = replace(catalog.Current(),
+                       game={"codename": codename} if codename else {},
+                       codename=codename)
+    monkeypatch.setattr(catalog, "Current", lambda: snapshot)
+
+
+@pytest.mark.parametrize("case", sorted(NORMALISE_CASES))
+def test_a_refresh_normalises_the_selected_games_mains(
+        case, adapter, settings, monkeypatch, errors):
+    """The desktop's refresh (AutonaPlayerDB.SetupModel: every DB change
+    and every game load) rewrites the selected game's mains in place;
+    another game's are left as stored."""
+    stored, after, invalidSkins, stops = NORMALISE_CASES[case]
+    AutonaPlayerDB, db, emitted = adapter
+    _selectGame(monkeypatch, NORMALISED_GAME)
+    record = _put(db, "K", {"gamerTag": "K", "mains": {
+        NORMALISED_GAME: copy.deepcopy(stored), "other": [["luigi", "2"]]}})
+
+    AutonaPlayerDB.SetupModel()
+
+    assert record["mains"] == {NORMALISED_GAME: after,
+                               "other": [["luigi", "2"]]}
+    assert len(_logged(errors, INVALID_SKIN)) == invalidSkins
+    if stops is not None:
+        assert bool(_logged(errors, PLAYER_ERROR, "K")) is stops
+    assert emitted == [True]
+
+
+def test_a_refresh_names_the_invalid_skin(adapter, settings, monkeypatch,
+                                          errors):
+    AutonaPlayerDB, db, emitted = adapter
+    _selectGame(monkeypatch, NORMALISED_GAME)
+    _put(db, "SPN K", {"prefix": "SPN", "gamerTag": "K",
+                       "mains": {NORMALISED_GAME: [["mario", "x"]]}})
+
+    AutonaPlayerDB.SetupModel()
+
+    assert _logged(errors, INVALID_SKIN) == [
+        "Local DB error: Player K has an invalid skin for character mario"]
+    # Each error with its traceback (ValueError: int("x")).
+    assert any("ValueError" in m for m in errors)
+
+
+def test_a_refresh_goes_on_with_the_next_player(adapter, settings,
+                                                monkeypatch, errors):
+    """One player's error stops that player only (logged with the
+    gamerTag); what was rewritten before it stays rewritten."""
+    AutonaPlayerDB, db, emitted = adapter
+    _selectGame(monkeypatch, NORMALISED_GAME)
+    first = _put(db, "A", {"gamerTag": "A", "mains": {NORMALISED_GAME: [
+        ["mario", "2"], "abc", ["luigi", "3"]]}})
+    second = _put(db, "B", {"gamerTag": "B", "mains": {NORMALISED_GAME: [
+        ["mario", "4"]]}})
+
+    AutonaPlayerDB.SetupModel()
+
+    assert first["mains"][NORMALISED_GAME] == [
+        ["mario", 2, ""], "abc", ["luigi", "3"]]
+    assert second["mains"][NORMALISED_GAME] == [["mario", 4, ""]]
+    assert _logged(errors, PLAYER_ERROR) == [f"{PLAYER_ERROR} A"]
+    assert emitted == [True]
+
+
+@pytest.mark.parametrize("codename", [NORMALISED_GAME, None])
+def test_a_refresh_leaves_what_is_not_the_selected_games_list(
+        codename, adapter, settings, monkeypatch, errors):
+    """Only a per-game dict (exactly a dict) holding the selected game is
+    touched: not a stored JSON string, an empty dict, a record without
+    mains, nor anything while no game is selected."""
+    AutonaPlayerDB, db, emitted = adapter
+    _selectGame(monkeypatch, codename)
+    records = {
+        "string": {"gamerTag": "S", "mains": json.dumps(
+            {NORMALISED_GAME: [["mario", "2"]]})},
+        "empty": {"gamerTag": "E", "mains": {}},
+        "missing": {"gamerTag": "M"},
+        "absent": {"gamerTag": "O", "mains": {"other": [["mario", "2"]]}},
+        "falsy": {"gamerTag": "F", "mains": None},
+    }
+    if codename is None:
+        records["unselected"] = {"gamerTag": "U", "mains": {
+            NORMALISED_GAME: [["mario", "2"]]}}
+    for tag, record in records.items():
+        _put(db, tag, record)
+    stored = copy.deepcopy(records)
+
+    AutonaPlayerDB.SetupModel()
+
+    assert records == stored
+    assert errors == []
+    assert emitted == [True]
+
+
+def test_a_refresh_neither_saves_nor_announces(adapter, settings,
+                                               monkeypatch):
+    """The rewrite is in memory: the next save writes it out (as the model
+    build's always was), and it is no change announcement -- db_updated
+    still fires once per refresh, rewritten or not."""
+    AutonaPlayerDB, db, emitted = adapter
+    db.LoadDB()
+    _put(db, "K", {"gamerTag": "K", "mains": {NORMALISED_GAME: [
+        ["mario", "2"]]}})
+    db.SaveDB()
+    before = Path(db.path).read_bytes()
+    announced = []
+    db.changed.subscribe(lambda: announced.append(1))
+    emitted.clear()
+    _selectGame(monkeypatch, NORMALISED_GAME)
+
+    AutonaPlayerDB.SetupModel()
+    AutonaPlayerDB.SetupModel()  # nothing left to rewrite
+
+    assert Path(db.path).read_bytes() == before
+    assert announced == []
+    assert emitted == [True, True]
+    db.SaveDB()
+    assert json.loads(Path(db.path).read_text(encoding="utf-8"))[0][
+        "mains"] == {NORMALISED_GAME: [["mario", 2, ""]]}
+
+
+def test_a_refresh_keeps_the_outputs_shape(adapter, settings, monkeypatch):
+    """What a refresh rewrites reaches /playerdb, its Socket.IO push and
+    local_players.json exactly as the desktop's model build left them, key
+    order included (NORMALISED_GOLDEN, recorded from it). The headless
+    shell is held to the same file (tests/test_headless.py)."""
+    from src.AutonaWebOperations import get_playerdb
 
     AutonaPlayerDB, db, emitted = adapter
-    manager = AutonaGameAssetManager.instance
-    monkeypatch.setattr(type(manager), "selectedGame",
-                        property(lambda self: {"codename": "testgame"}),
-                        raising=False)
-    db.LoadDB()
-    db.AddPlayers([_player("Alpha", mains={"testgame": [["mario", "2"]],
-                                            "other": [["luigi", "x"]]})])
+    Path(db.path).write_text(NORMALISED_GOLDEN["local_players"],
+                             encoding="utf-8")
+    _selectGame(monkeypatch, NORMALISED_GOLDEN["codename"])
 
-    mains = db.Get("Alpha")["mains"]
-    assert mains["testgame"] == [["mario", 2, ""]]
-    assert mains["other"] == [["luigi", "x"]]  # another game: untouched
+    db.LoadDB()  # its announcement is the refresh
+    db.SaveDB()
+
+    assert json.dumps(get_playerdb()) == NORMALISED_GOLDEN["after"]["playerdb"]
+    assert Path(db.path).read_text(encoding="utf-8") \
+        == NORMALISED_GOLDEN["after"]["local_players"]
 
 
 def test_attach_moves_the_relay_to_a_replaced_instance(adapter, settings):
@@ -625,9 +913,10 @@ def _dotted(node):
 
 
 def test_the_entrants_fetch_saves_filters_then_announces():
-    # The rebuilt completer proxy must filter by the new entrants from its
-    # first build, so the tags go in between the save and the announcement
-    # (the announcement is what rebuilds the model and fires db_updated).
+    # The push must send the new entrants from the announcement on, so the
+    # tags go in between the save and the announcement (the announcement is
+    # what fires db_updated; it rebuilt the completer proxy too, until
+    # ADR-005 S4ad).
     source = (PROJECT_ROOT / "src" / "TournamentDataProvider"
               / "StartGGDataProvider.py").read_text(encoding="utf-8")
     tree = ast.parse(source)

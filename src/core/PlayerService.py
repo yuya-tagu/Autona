@@ -1231,12 +1231,13 @@ class PlayerService:
 
     def _SkinNumber(self, value, character) -> int:
         """A `mains` entry's skin row, or the first skin (0) for one that is
-        not a number -- with a warning. The desktop's completer model
-        rewrites a stored record's mains so (AutonaPlayerDB._BuildModel,
-        S3c-2 decision 5) before anything loads it; reading them alike here
-        gives both shells the same characters, a headless one included,
-        where the record is loaded as stored. A dict main used to raise on
-        it (ValueError, its characters unwritten); an infinity, an
+        not a number -- with a warning. The player DB's refresh rewrites a
+        stored record's selected-game mains so (PlayerDB.NormaliseMains,
+        S3c-2 decision 5; both shells since the Qt model clean-up's PR3,
+        the desktop's model build before), but not the data handed over nor
+        a record read before a refresh; reading them alike here gives both
+        shells the same characters. A dict main used to raise on it
+        (ValueError, its characters unwritten); an infinity, an
         OverflowError."""
         try:
             return int(value)
@@ -1259,10 +1260,10 @@ class PlayerService:
         of a stored JSON string too (PlayerDB.KeepStoredMains).
 
         Called with no lock held -- a board host's included: the database
-        announces the change (PlayerDB.changed), and its relay rebuilds the
-        completer model on the main thread (AutonaPlayerDB.SetupModel, both
-        shells; ADR-005 S3e-4 review), which until ADR-005 S3f-2 also waited
-        for it.
+        announces the change (PlayerDB.changed), and its relay refreshes on
+        the main thread (AutonaPlayerDB.SetupModel, both shells; ADR-005
+        S3e-4 review; the completer model's rebuild until the Qt model
+        clean-up), which until ADR-005 S3f-2 also waited for it.
 
         Saves of one player can therefore reach here out of the order their
         slots were read in (two Web edits, each saved after its board host

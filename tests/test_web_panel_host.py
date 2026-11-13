@@ -2817,7 +2817,11 @@ QT_MODEL_CLEANUP_NAMES = (
     "sets_data_updated", "twitch_username_updated", "NoIconProxyModel",
     # PR2: the country model adapter (the catalog is read directly)
     "AutonaCountryHelper", "countriesUpdated", "countriesAboutToReload",
-    "LoadCountries")
+    "LoadCountries",
+    # PR3: the player DB's Qt model (its build's mains normalisation is
+    # core's PlayerDB.NormaliseMains; `model` itself is too common a name)
+    "EnableModel", "modelEnabled", "_BuildModel", "modelLock",
+    "_retiredModel")
 
 
 def test_the_unused_qt_model_leftovers_are_gone():
@@ -2835,6 +2839,15 @@ def test_the_unused_qt_model_leftovers_are_gone():
     # The statistics are asked for by an explicit Announce, not by a flag.
     for method in (PlayerService.SetSeed, PlayerService.SetPlayerId):
         assert "announce" not in inspect.signature(method).parameters
+
+    # PR3: the player DB adapter holds no Qt model, and needs no QtGui.
+    from src.AutonaPlayerDB import AutonaPlayerDB
+    assert not hasattr(AutonaPlayerDB, "model")
+    tree = ast.parse((src / "AutonaPlayerDB.py").read_text(encoding="utf-8"))
+    imported = {node.module for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)}
+    assert not imported & {"qtpy.QtGui", "qtpy.QtWidgets",
+                           "AutonaGameAssetManager"}, imported
 
 
 def test_the_qt_settings_window_is_gone():

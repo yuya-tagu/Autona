@@ -678,7 +678,11 @@ def Assemble(app, shell=None):
     provider.selectGameFromStartGGId = games.SelectGameFromStartGGId
     AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename
     # The player DB follows a game load, as it follows the adapter's onLoad
-    # on the desktop.
+    # on the desktop: the loaded game's mains normalised in place
+    # (PlayerDB.NormaliseMains) -- since the Qt model clean-up's PR3, which
+    # moved that out of the desktop's Qt model build -- then the push
+    # (db_updated). On the main thread, once the load is over (_OnLoaded),
+    # outside the load's save block and any StateManager lock.
     games.signals.gameChanged.connect(AutonaPlayerDB.SetupModel)
     # ...and so do the boards' rosters (the game's players per team), with
     # the desktop's wiring. Before games.Start() below restores a game.

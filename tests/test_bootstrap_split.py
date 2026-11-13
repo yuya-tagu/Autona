@@ -15,8 +15,7 @@ bootstrap_gui() adds the desktop's Qt adapters on top. These tests pin:
 - that bootstrap_gui() builds the adapters, wires the provider to the game
   asset adapter -- its slot on onLoadAssets running before the adapter's
   own startup restore, on a real emit -- registers the desktop's board host
-  and game loader for the web operations, switches the player DB model on,
-  still drops the persisted `score` subtree, and makes the three boards in
+  and game loader for the web operations, still drops the persisted `score` subtree, and makes the three boards in
   its place, boards 1 / 2 held (ADR-005 S4ac-1);
 - that the wiring both shells make (bootstrap.wire_tournament_data /
   wire_web_server) is what the window and src/headless.py both call, and
@@ -180,8 +179,8 @@ def test_bootstrap_core_steps_and_their_order():
 def test_bootstrap_gui_steps_and_their_order():
     # bootstrap_core() first. The relative order of the constructions is the
     # one they had inside the old single bootstrap_core(); the provider and
-    # PlayerDB wirings follow the adapter they connect to (the model switched
-    # on before the first SetupModel), and the hotkeys are routed to
+    # PlayerDB wirings follow the adapter they connect to (before its first
+    # UiMounted() load), and the hotkeys are routed to
     # AutonaActions right after they exist. The web operations' desktop
     # registrations (the board host, the game loader, and the shell
     # operations -- ADR-005 S3e-9) come after the boards, the shell
@@ -205,7 +204,9 @@ def test_bootstrap_gui_steps_and_their_order():
         " = AutonaGameAssetManager.instance.SetGameFromStartGGId",
         "AutonaGameAssetManager.instance.signals.onLoadAssets.connect("
         "AutonaTournamentDataProvider.instance.SetGameFromProvider)",
-        "AutonaPlayerDB.EnableModel()",
+        # The player DB's refresh (the mains normalised, the push) follows a
+        # load; its Qt model (EnableModel, before this) went in the Qt model
+        # clean-up's PR3.
         "AutonaGameAssetManager.instance.signals.onLoad.connect("
         "AutonaPlayerDB.SetupModel)",
         "AutonaAlertNotification()",
@@ -522,7 +523,6 @@ report({
     "shell_operations": [AutonaWebOperations.openSetSelection is not None,
                          AutonaWebOperations.renderThumbnail is not None,
                          AutonaWebOperations.startImageRender is not None],
-    "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
 })
@@ -554,11 +554,10 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["selector_registered"] is False
     # The web operations' defaults: no board, no game loader (the headless
     # shell registers its own), no shell operation (the desktop's alone,
-    # ADR-005 S3e-9), and no player DB model (QtGui).
+    # ADR-005 S3e-9).
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is False
     assert result["shell_operations"] == [False, False, False]
-    assert result["player_db_model"] is False
     # The core bad-word filter got AutonaLocaleHelper's locale and country
     # tables (ADR-005 S3e-1), and the player DB its db_updated relay.
     assert result["bad_words_loaded"] is True
@@ -596,7 +595,6 @@ bootstrap_gui()
 bootstrap_gui()  # idempotent
 
 from src import AutonaWebOperations
-from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaShellOperations import AutonaShellOperations
@@ -668,7 +666,6 @@ report({
     # one it showed (AutonaActions.EnsureBoard, ADR-005 S4y).
     "boards_ensured": [AutonaActions.instance.BoardEnsured(n)
                        for n in (1, 2, 3)],
-    "player_db_model": AutonaPlayerDB.modelEnabled,
     "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -702,7 +699,6 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True, True]
     assert result["boards_ensured"] == [True, True, True]
-    assert result["player_db_model"] is True
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False

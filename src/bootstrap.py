@@ -177,8 +177,10 @@ def bootstrap_core():
     # db_updated on the GUI thread, which is what the web server's player DB
     # push listens to (wire_web_server) -- the StateManagerBridge
     # arrangement. The relay is QtCore only (a QObject signal marshalled
-    # through the GUI executor, which the shells start before LoadDB); the
-    # model it can also rebuild is QtGui and switched on by bootstrap_gui().
+    # through the GUI executor, which the shells start before LoadDB). Before
+    # the emit it normalises the selected game's mains (PlayerDB
+    # .NormaliseMains, the Qt model clean-up's PR3), reading the selection
+    # from GameAssetCatalog.instance, made above.
     from .core.PlayerDB import PlayerDB
     from .AutonaPlayerDB import AutonaPlayerDB
     if PlayerDB.instance is None:
@@ -527,22 +529,20 @@ def bootstrap_gui():
     AutonaGameAssetManager.instance.signals.onLoadAssets.connect(
         AutonaTournamentDataProvider.instance.SetGameFromProvider)
 
-    # PlayerDB's model rebuild must be wired to GameAssetManager.onLoad before
-    # the first LoadGames() (UiMounted). This used to be an import-time side
-    # effect at the bottom of AutonaPlayerDB, which silently required
-    # GameAssetManager.instance to exist before *anything* imported PlayerDB --
-    # including TournamentDataProvider and StartGGDataProvider, which both do.
-    # The data and its change relay are bootstrap_core()'s (core/PlayerDB +
+    # The player DB's refresh follows a game load: SetupModel normalises the
+    # loaded game's mains (PlayerDB.NormaliseMains) and pushes the DB
+    # (db_updated). This used to be an import-time side effect at the bottom
+    # of AutonaPlayerDB, which silently required GameAssetManager.instance to
+    # exist before *anything* imported PlayerDB -- including
+    # TournamentDataProvider and StartGGDataProvider, which both do. The data
+    # and its change relay are bootstrap_core()'s (core/PlayerDB +
     # AutonaPlayerDB.Attach, ADR-005 S3e-1); the Qt adapter is a static
-    # class, so there is no instance to create here, only this wiring.
-    # ORDER CONSTRAINT: the model (QStandardItemModel + QIcons, i.e. QtGui)
-    # is the desktop's, so it is switched on here, before the first
-    # SetupModel() -- the window's LoadDB(), whose change announcement the
-    # relay turns into one. Without it SetupModel only emits db_updated: the
-    # headless shell, where a start.gg entrants fetch still updates the DB
-    # from a worker thread (ADR-005 S3c).
+    # class, so there is no instance to create here, only this wiring. (Its
+    # Qt model, switched on here until the Qt model clean-up's PR3, is gone:
+    # both shells normalise, the headless one on its loader's gameChanged.)
+    # ORDER CONSTRAINT: connected before the first UiMounted() load, so that
+    # load normalises and pushes as every later one does.
     from .AutonaPlayerDB import AutonaPlayerDB
-    AutonaPlayerDB.EnableModel()
     AutonaGameAssetManager.instance.signals.onLoad.connect(
         AutonaPlayerDB.SetupModel)
 

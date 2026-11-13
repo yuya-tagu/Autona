@@ -571,8 +571,15 @@ paths:
   `TournamentPlayers()` の深いコピーをシリアライズする。保存はロックの中で JSON 文字列にするだけで、書き込みはロックの外
   （保存専用のロックと世代番号で直列化。mkstemp → `os.replace` を 4 回試行し、だめなら旧実装と同じ上書き。`local_players.json` の
   バイトは旧実装と同じ）。変更は `changed`（ObserverChannel）で
-  **ロックの外から**通知する。`AutonaPlayerDB` は選手の Qt モデル（`model`。消費者は無く、Qt のモデルの片付けで消す。補完の proxy `completerModel` /
-  `GetCompleterModel()` は受け手の Qt のカードと一緒に S4ad で削除）と `signals.db_updated` だけの Qt アダプタで、`bootstrap_core()` の
-  `Attach()` が `changed` → `SetupModel`（GUI スレッドで `db_updated`。他スレッドからは積むだけで待たない: ADR-005 S3f-2）を中継する（process 寿命の static クラスなので
-  `tests/test_signal_lifetime.py` の購読許可リストに入っている）。選手データの読み書きは `PlayerDB.instance` を呼び、
-  `AutonaPlayerDB` にデータの操作を足さない
+  **ロックの外から**通知する。`AutonaPlayerDB` は `signals.db_updated` だけの Qt アダプタ（QtCore だけ。選手の Qt モデル `model` は
+  Qt モデルの整理 PR3 で、補完の proxy `completerModel` / `GetCompleterModel()` は受け手の Qt のカードと一緒に S4ad で削除）で、`bootstrap_core()` の
+  `Attach()` が `changed` → `SetupModel` を中継する（process 寿命の static クラスなので `tests/test_signal_lifetime.py` の購読許可リストに入っている）。
+  `SetupModel` は GUI スレッドで（他スレッドからは積むだけで待たない: ADR-005 S3f-2）、選んでいるゲーム（`GameAssetCatalog.instance.Current().game` の
+  `codename`）の mains を `PlayerDB.NormaliseMains` でその場で正規化してから `db_updated` を出す。呼ばれるのは変更の通知と、ゲームのロードの後
+  （デスクトップはアセットアダプタの `onLoad`、ヘッドレスはローダーの `gameChanged`）で、**両シェルで同じ**（PR3 まではデスクトップのモデルの構築の副作用で、
+  ヘッドレスは正規化しなかった）
+  - `NormaliseMains(codename)` は `PlayerDB.lock` の中で全選手を回し、そのゲームの `[キャラ, スキン, (バリアント)]` を `[キャラ, int スキン, バリアント or ""]` に揃える。
+    モデルの構築の癖を残している（`isinstance(main, list) and len == 2 or len == 3` の優先順位・長さ 2 / 3 以外のリストは消さずに飛ばす・
+    1 人の途中の例外はログに出してその選手だけ止める）。保存も通知もしない（次の保存で `local_players.json` に出る。`db_updated` は書き換えの有無によらず出る）。
+    `tests/test_player_db.py` の `NORMALISE_CASES` と `tests/fixtures/player_db/normalised_golden.json`（モデルの構築から記録）が pin する
+  - 選手データの読み書きは `PlayerDB.instance` を呼び、`AutonaPlayerDB` にデータの操作を足さない
