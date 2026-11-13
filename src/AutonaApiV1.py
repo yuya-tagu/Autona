@@ -57,6 +57,7 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
 from .core.SettingsManager import SettingsUnreadable
+from .core.StatusService import StatusService
 # Importing these builds nothing (agent-pitfalls #1): their singletons
 # (`.instance`) are created by src/bootstrap.py and read per request.
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -498,6 +499,18 @@ def health():
         "outLastWriteUnix": out_mtime,
     }
     return ok(data=data, revision=StateManager.revision)
+
+
+@api_v1.route("/status")
+@api_handler
+def get_status():
+    # What the app is busy with (ADR-005 S-final SF-2; the desktop footer's
+    # source): {"revision": n, "jobs": [{"id", "code", "args", "done",
+    # "total"}, ...]}, the last job the one shown. Words are codes the
+    # reader translates (core's StatusService.CODES). Its own revision, not
+    # the state's: none on the envelope. Socket.IO's `status` carries the
+    # same on every change.
+    return ok(data=StatusService.Snapshot())
 
 
 @api_v1.route("/battle-format")

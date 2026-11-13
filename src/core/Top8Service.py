@@ -504,7 +504,7 @@ def ImportBracket(players, matches):
 # (an empty list / dict when a request failed). None: nothing can import.
 fetcher = None
 
-IMPORT_STATUS = "TOP 8 を構築中..."
+IMPORT_STATUS = "top8_import"
 
 # What RefreshFromProvider answers.
 STARTED = "started"

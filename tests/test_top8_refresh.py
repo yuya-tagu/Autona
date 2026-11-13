@@ -605,27 +605,20 @@ def test_a_failed_fetch_writes_nothing_and_releases(bracket, make):
     assert encode(_state().Get("top8")) == encode(_baseline())
 
 
-@pytest.mark.parametrize("broken", ["push", "import"])
 def test_a_failing_status_still_imports_and_releases(
-        bracket, countries, monkeypatch, broken):
-    """The shell's fetcher shows a footer status around the job. Showing it
-    can fail before the job has even begun (the status manager's import,
-    its push); the import must still run and the flag still come down --
-    nothing else ever releases it, and every later request from every way
-    in would answer BUSY for the rest of the session."""
-    import sys
+        bracket, countries, monkeypatch):
+    """The shell's fetcher shows a status around the job (core's
+    StatusService, ADR-005 S-final SF-2). Showing it can fail before the job
+    has even begun (its push); the import must still run and the flag still
+    come down -- nothing else ever releases it, and every later request from
+    every way in would answer BUSY for the rest of the session."""
     from src.core import Top8Service
-    if broken == "push":
-        from src.Helpers.AutonaStatusManager import AutonaStatusManager
+    from src.core.StatusService import StatusService
 
-        def push(*args, **kwargs):
-            raise RuntimeError("the footer is gone")
+    def push(*args, **kwargs):
+        raise RuntimeError("the footer is gone")
 
-        monkeypatch.setattr(AutonaStatusManager, "push", staticmethod(push))
-    else:
-        # None in sys.modules: the fetcher's lazy import raises.
-        monkeypatch.setitem(sys.modules, "src.Helpers.AutonaStatusManager",
-                            None)
+    monkeypatch.setattr(StatusService, "Push", staticmethod(push))
     _reset(bracket)
     provider = _useProvider(ENTRY_LABEL)
     done = []

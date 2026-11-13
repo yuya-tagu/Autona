@@ -758,5 +758,15 @@
     "settings_hotkey_warning_os_reserved": "'{{shortcut}}' is widely reserved by the OS and common apps (copy, save, window operations...). While another app has the focus, it does not reach Autona.",
     "settings_hotkey_warning_obs_likely": "'{{shortcut}}' is often assigned in OBS Studio (start recording, switch scenes...). To avoid unintended actions while streaming, check that it does not overlap OBS's hotkeys.",
     "settings_hotkey_warning_no_modifier": "'{{shortcut}}' has no modifier (Ctrl / Alt / Shift): pressing this key in any app goes to Autona instead of that app.",
-    "settings_hotkey_warning_shift_only": "'{{shortcut}}' uses Shift alone: typing a capital letter or a symbol, or selecting text, in any app goes to Autona instead. Adding Ctrl or Alt is recommended."
+    "settings_hotkey_warning_shift_only": "'{{shortcut}}' uses Shift alone: typing a capital letter or a symbol, or selecting text, in any app goes to Autona instead. Adding Ctrl or Alt is recommended.",
+    "status_startgg_bracket": "Fetching bracket data from Start.gg...",
+    "status_startgg_set": "Fetching set data from Start.gg...",
+    "status_startgg_sets": "Fetching the set list from Start.gg...",
+    "status_startgg_sets_page": "Fetching the set list from Start.gg... ({{page}}/{{pages}})",
+    "status_startgg_sets_failed": "Some pages of the set list could not be fetched ({{failed}}/{{pages}})",
+    "status_startgg_entrants": "Fetching entrants from Start.gg...",
+    "status_startgg_entrants_page": "Fetching entrants from Start.gg... ({{page}}/{{pages}})",
+    "status_assets_load": "Loading game assets... ({{codename}})",
+    "status_top8_import": "Building the TOP 8...",
+    "status_result_import": "Fetching the results..."
 }

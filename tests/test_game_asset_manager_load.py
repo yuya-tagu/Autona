@@ -178,30 +178,38 @@ def _waitForLoader(manager=None):
 
 @pytest.fixture
 def statusCalls(monkeypatch):
-    """AutonaStatusManager's footer calls, recorded and passed through."""
-    from src.Helpers.AutonaStatusManager import AutonaStatusManager
+    """The footer's calls (core's StatusService, ADR-005 S-final SF-2),
+    recorded and passed through, as (kind, token, words): a job's words as
+    the desktop footer shows them (AutonaLocaleHelper.StatusText of the
+    code and args it was given -- an unknown code shows as itself)."""
+    from src.core.StatusService import StatusService
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
     calls = []
-    realPush = AutonaStatusManager.push
-    realUpdate = AutonaStatusManager.update
-    realPop = AutonaStatusManager.pop
+    realPush = StatusService.Push
+    realUpdate = StatusService.Update
+    realPop = StatusService.Pop
 
-    def push(message, progress=0, total=0):
-        token = realPush(message, progress, total)
-        calls.append(("push", token, message))
+    def words(code, args):
+        return AutonaLocaleHelper.StatusText({"code": code,
+                                              "args": args or {}})
+
+    def push(code, args=None, done=0, total=0):
+        token = realPush(code, args, done, total)
+        calls.append(("push", token, words(code, args)))
         return token
 
-    def update(token, message, progress=0, total=0):
-        calls.append(("update", token, message))
-        realUpdate(token, message, progress=progress, total=total)
+    def update(token, code, args=None, done=0, total=0):
+        calls.append(("update", token, words(code, args)))
+        realUpdate(token, code, args, done=done, total=total)
 
     def pop(token):
         calls.append(("pop", token, None))
         realPop(token)
 
-    monkeypatch.setattr(AutonaStatusManager, "push", staticmethod(push))
-    monkeypatch.setattr(AutonaStatusManager, "update", staticmethod(update))
-    monkeypatch.setattr(AutonaStatusManager, "pop", staticmethod(pop))
+    monkeypatch.setattr(StatusService, "Push", staticmethod(push))
+    monkeypatch.setattr(StatusService, "Update", staticmethod(update))
+    monkeypatch.setattr(StatusService, "Pop", staticmethod(pop))
     return calls
 
 
@@ -225,7 +233,7 @@ def _loaderStatus(calls, codename):
 
 def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
         goldenGames, autonaApp, statusCalls, onLoadCount):
-    from src.Helpers.AutonaStatusManager import AutonaStatusManager
+    from src.core.StatusService import StatusService
 
     manager = goldenGames
     manager.LoadGameByCodename("tgame", async_mode=True)
@@ -244,7 +252,15 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
                if call[:2] == ("update", token)]
     # The last progress tick lands before the pop, and the footer is clear.
     assert updates and max(updates) < pops[0]
-    assert token not in AutonaStatusManager._stack
+    assert token not in StatusService._jobs
+    # Its words are the load's code with the game (the footer and the web
+    # translate them), never a sentence of the loader's own.
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    loading = AutonaLocaleHelper.StatusText(
+        {"code": "assets_load", "args": {"codename": "tgame"}})
+    said = [words for kind, tok, words in statusCalls
+            if tok == token and kind != "pop"]
+    assert said and all(words == loading for words in said)
 
 
 def test_a_skipped_threaded_load_shows_no_status(
@@ -260,7 +276,7 @@ def test_a_skipped_threaded_load_shows_no_status(
     autonaApp.settle()
 
     assert onLoadCount == []
-    # Nothing pushed; the loader's unconditional pop(None) is a no-op.
+    # Nothing pushed; the loader's unconditional close pops None: a no-op.
     assert [call for call in statusCalls if call[0] != "pop"] == []
     assert all(token is None for _kind, token, _m in statusCalls)
 

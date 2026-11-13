@@ -155,7 +155,7 @@ FETCH_FAILED = "fetch_failed"   # start.gg did not answer, or not readably
 NO_STANDINGS = "no_standings"   # it answered: the event has none yet
 IMPORT_FAILED = "import_failed" # it answered: its answer did not go in the rows
 CHANGED = "changed"             # the game or the tournament was switched
-IMPORT_STATUS = "リザルトを取得中..."
+IMPORT_STATUS = "result_import"
 
 # How many standings the post's text lists.
 POST_RANKS = 4

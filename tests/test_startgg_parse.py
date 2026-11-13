@@ -45,6 +45,7 @@ import pytest
 from src.core.CountryCatalog import CountryCatalog, state_flag_path
 from src.core.DictHelper import deep_get
 from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
+from src.core.StatusService import StatusService
 from src.core.TaskExecutor import FANOUT_THREAD_PREFIX, TaskExecutor
 from tests.conftest import _link_tree
 
@@ -84,21 +85,6 @@ class _MockAutonaLocaleHelper:
         "losers_round": "Losers Round {}",
         "round": "Round {}",
     }
-
-
-# --- AutonaStatusManager (lazily imported inside GetMatches) ---
-class _MockStatusManager:
-    @staticmethod
-    def push(message, **kwargs):
-        return object()
-
-    @staticmethod
-    def update(token, message=None, **kwargs):
-        pass
-
-    @staticmethod
-    def pop(token):
-        pass
 
 
 # --- Minimal QObject mock ---
@@ -152,6 +138,12 @@ def _setup_mock_modules():
             "src.core.GameAssetCatalog",
             {"GameAssetCatalog": GameAssetCatalog},
         ),
+        # The real (Qt-free) class: the fetches show their status there
+        # (ADR-005 S-final SF-2), as codes.
+        "src.core.StatusService": _make_mock_module(
+            "src.core.StatusService",
+            {"StatusService": StatusService},
+        ),
         "src.Helpers.AutonaDirHelper": _make_mock_module(
             "src.Helpers.AutonaDirHelper",
             {"AutonaResolve": lambda x: x},
@@ -163,10 +155,6 @@ def _setup_mock_modules():
         "src.Helpers.AutonaLocaleHelper": _make_mock_module(
             "src.Helpers.AutonaLocaleHelper",
             {"AutonaLocaleHelper": _MockAutonaLocaleHelper},
-        ),
-        "src.Helpers.AutonaStatusManager": _make_mock_module(
-            "src.Helpers.AutonaStatusManager",
-            {"AutonaStatusManager": _MockStatusManager},
         ),
         "src.AutonaPlayerDB": _make_mock_module(
             "src.AutonaPlayerDB",
@@ -227,10 +215,6 @@ finally:
     # modules, and would otherwise get these mocks handed to them. The
     # provider bound its dependencies (mock QObject, mock asset manager, ...)
     # at exec time, so dropping the sys.modules entries costs nothing here.
-    # The one thing resolved later is the lazy
-    # `from ..Helpers.AutonaStatusManager import AutonaStatusManager` inside
-    # GetMatches(); it then loads the real module, which is Qt-only, needs no
-    # QApplication and emits into the void with no receivers connected.
     _teardown_mock_modules()
 
 

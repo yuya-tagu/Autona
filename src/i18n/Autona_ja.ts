@@ -805,6 +805,48 @@ user_data/settings.json の general.webserver_port を変更して Autona を再
         <translation>)</translation>
     </message>
 </context><context>
+    <name>status</name>
+    <message>
+        <source>Fetching bracket data from Start.gg...</source>
+        <translation>Start.gg からブラケット情報を取得中...</translation>
+    </message>
+    <message>
+        <source>Fetching set data from Start.gg...</source>
+        <translation>Start.gg からセット情報を取得中...</translation>
+    </message>
+    <message>
+        <source>Fetching the set list from Start.gg...</source>
+        <translation>Start.gg からセット一覧を取得中...</translation>
+    </message>
+    <message>
+        <source>Fetching the set list from Start.gg... ({page}/{pages})</source>
+        <translation>Start.gg からセット一覧を取得中... ({page}/{pages})</translation>
+    </message>
+    <message>
+        <source>Some pages of the set list could not be fetched ({failed}/{pages})</source>
+        <translation>セット一覧の一部ページ取得に失敗しました ({failed}/{pages})</translation>
+    </message>
+    <message>
+        <source>Fetching entrants from Start.gg...</source>
+        <translation>Start.gg から参加者情報を取得中...</translation>
+    </message>
+    <message>
+        <source>Fetching entrants from Start.gg... ({page}/{pages})</source>
+        <translation>Start.gg から参加者情報を取得中... ({page}/{pages})</translation>
+    </message>
+    <message>
+        <source>Loading game assets... ({codename})</source>
+        <translation>ゲームアセットを読み込み中... ({codename})</translation>
+    </message>
+    <message>
+        <source>Building the TOP 8...</source>
+        <translation>TOP 8 を構築中...</translation>
+    </message>
+    <message>
+        <source>Fetching the results...</source>
+        <translation>リザルトを取得中...</translation>
+    </message>
+</context><context>
     <name>thumb_app</name>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="221" />

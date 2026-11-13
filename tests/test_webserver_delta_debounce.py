@@ -346,7 +346,7 @@ def wire(monkeypatch, tmp_path):
     flask_client = app.test_client()
     flask_client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
     ws = socketio.test_client(app, flask_test_client=flask_client)
-    ws.get_received()   # the program_state sent on connect
+    ws.get_received()   # the program_state and status sent on connect
     yield ws
     ws.disconnect()
 
@@ -1245,3 +1245,144 @@ def test_a_format_notice_is_queued_with_the_state_lock_held(flusher):
     assert not thread.is_alive()
     assert arrived == [True]
     assert flusher.stop() is True
+
+
+# ── what the app is busy with (ADR-005 S-final SF-2) ─────────────────────
+# StatusService.changes becomes `status` with the status as it is when sent
+# (not a cue: progress ticks come quickly), to everyone, after the deltas
+# and the other notices of its flush, from the flusher. A burst is one a
+# window, like a board's pending notices.
+
+STATUS = "status"
+
+
+@pytest.fixture
+def statuses(monkeypatch, debounce):
+    from src.core.Observable import ObserverChannel
+    from src.core.StatusService import StatusService
+    monkeypatch.setattr(WebServer, "_follow_notices", set())
+    monkeypatch.setattr(WebServer, "_battle_format_notice", False)
+    monkeypatch.setattr(WebServer, "_status_notice", False)
+    monkeypatch.setattr(WebServer, "_status_notice_ts", 0.0)
+    # A status of its own, told to nobody: the test tells the server.
+    monkeypatch.setattr(StatusService, "_jobs", {})
+    monkeypatch.setattr(StatusService, "_revision", 0)
+    monkeypatch.setattr(StatusService, "_nextToken", 0)
+    monkeypatch.setattr(StatusService, "changes", ObserverChannel("status"))
+    debounce.status = StatusService
+    return debounce
+
+
+def _statusAt(debounce, ms, change):
+    debounce._fireUntil(_at(ms))
+    debounce.clock.now = _at(ms)
+    result = change()
+    WebServer.on_status_change()
+    return result
+
+
+def _statusJob(token, code, args=None, done=0, total=0):
+    return {"id": token, "code": code, "args": args or {}, "done": done,
+            "total": total}
+
+
+def test_a_status_notice_goes_out_at_once_with_the_status(statuses):
+    token = _statusAt(statuses, 0, lambda: statuses.status.Push("top8_import"))
+    statuses._fireUntil(None)
+    assert statuses.sent == [(0, STATUS, [{
+        "revision": 1, "jobs": [_statusJob(token, "top8_import")]}], {})]
+
+
+def test_a_flush_sends_the_status_once_as_it_is_then(statuses):
+    status = statuses.status
+    token = _statusAt(statuses, 0, lambda: status.Push(
+        "startgg_sets_page", {"page": 1, "pages": 3}, 1, 3))
+    # Inside the window the first one opened: one notice, the last status.
+    _statusAt(statuses, 10, lambda: status.Update(
+        token, "startgg_sets_page", {"page": 2, "pages": 3}, 2, 3))
+    _statusAt(statuses, 20, lambda: status.Update(
+        token, "startgg_sets_page", {"page": 3, "pages": 3}, 3, 3))
+    statuses._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in statuses.sent] == [
+        (0, STATUS), (60, STATUS)]
+    assert [args for _ms, _e, args, _k in statuses.sent] == [
+        [{"revision": 1, "jobs": [_statusJob(
+            token, "startgg_sets_page", {"page": 1, "pages": 3}, 1, 3)]}],
+        [{"revision": 3, "jobs": [_statusJob(
+            token, "startgg_sets_page", {"page": 3, "pages": 3}, 3, 3)]}]]
+
+
+def test_a_status_notice_goes_after_the_deltas_and_the_other_notices(
+        statuses):
+    statuses.arrive(0, _changes(1))
+    statuses.arrive(10, _changes(2))
+    _statusAt(statuses, 20, lambda: statuses.status.Push("result_import"))
+    WebServer.on_follow_change(1)
+    WebServer.on_battle_format_change("team")
+    statuses.arrive(30, _changes(3))
+    statuses._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in statuses.sent] == [
+        (0, "program_state_update"), (60, "program_state_update"),
+        (60, "scoreboard_follow"), (60, "battle_format"), (60, STATUS)]
+
+
+def test_the_deltas_schedule_does_not_follow_a_status_notice(statuses):
+    _statusAt(statuses, 0, lambda: statuses.status.Push("top8_import"))
+    statuses.arrive(10, _changes(1))
+    statuses._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in statuses.sent] == [
+        (0, STATUS), (10, "program_state_update")]
+
+
+def test_a_failed_status_notice_takes_nothing_with_it(statuses):
+    statuses.fail = RuntimeError("the socket said no")
+    token = _statusAt(statuses, 0, lambda: statuses.status.Push("top8_import"))
+    statuses._fireUntil(None)
+    statuses.fail = None
+    # Not sent again: the next one is the next change's.
+    statuses._fireUntil(None)
+    assert statuses.sent == []
+    _statusAt(statuses, 100, lambda: statuses.status.Pop(token))
+    statuses._fireUntil(None)
+    assert statuses.sent == [(100, STATUS, [{"revision": 2, "jobs": []}], {})]
+
+
+def test_without_a_flusher_a_status_notice_is_not_kept(statuses, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    WebServer.on_status_change()
+    assert WebServer._status_notice is False
+    assert statuses.driver.due() is None
+
+
+def _statusOnly(sends):
+    with sends.cond:
+        return [(event, payload) for _t, _at, event, payload in sends.sent
+                if event == STATUS]
+
+
+def test_the_flusher_sends_a_status_notice_on_its_own_thread(flusher):
+    from src.core.StatusService import StatusService
+    flusher.start()
+    thread = WebServer._delta_thread
+
+    WebServer.on_status_change()
+
+    assert flusher.waitFor(1)
+    assert _statusOnly(flusher) == [(STATUS, StatusService.Snapshot())]
+    assert flusher.threads() == [thread]
+    assert flusher.stop() is True
+
+
+def test_a_new_start_starts_with_no_status_notice(flusher, monkeypatch):
+    flusher.start()
+    assert flusher.stop() is True
+    monkeypatch.setattr(WebServer, "_status_notice", True)
+
+    flusher.start()
+    WebServer.on_held_change("score.1")
+    assert flusher.waitFor(1)
+    assert flusher.stop() is True
+    assert _statusOnly(flusher) == []
+

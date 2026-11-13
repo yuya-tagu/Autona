@@ -758,5 +758,15 @@
     "settings_hotkey_warning_os_reserved": "'{{shortcut}}' は OS や一般的なアプリ (コピー・保存・ウィンドウ操作など) で広く予約されています。他アプリにフォーカスがあると Autona に届きません。",
     "settings_hotkey_warning_obs_likely": "'{{shortcut}}' は OBS Studio で録画開始 / シーン切替などに割り当てられがちです。配信中の意図しない動作を避けるため、OBS 側のホットキー設定と重複しないか確認してください。",
     "settings_hotkey_warning_no_modifier": "'{{shortcut}}' には修飾キー（Ctrl / Alt / Shift）がありません。どのアプリでこのキーを押しても Autona に届き、そのアプリには入力されません。",
-    "settings_hotkey_warning_shift_only": "'{{shortcut}}' は Shift だけの組み合わせです。どのアプリでも、大文字や記号の入力・文字の選択がこのキーで Autona に取られます。Ctrl か Alt を足すことをおすすめします。"
+    "settings_hotkey_warning_shift_only": "'{{shortcut}}' は Shift だけの組み合わせです。どのアプリでも、大文字や記号の入力・文字の選択がこのキーで Autona に取られます。Ctrl か Alt を足すことをおすすめします。",
+    "status_startgg_bracket": "Start.gg からブラケット情報を取得中...",
+    "status_startgg_set": "Start.gg からセット情報を取得中...",
+    "status_startgg_sets": "Start.gg からセット一覧を取得中...",
+    "status_startgg_sets_page": "Start.gg からセット一覧を取得中... ({{page}}/{{pages}})",
+    "status_startgg_sets_failed": "セット一覧の一部ページ取得に失敗しました ({{failed}}/{{pages}})",
+    "status_startgg_entrants": "Start.gg から参加者情報を取得中...",
+    "status_startgg_entrants_page": "Start.gg から参加者情報を取得中... ({{page}}/{{pages}})",
+    "status_assets_load": "ゲームアセットを読み込み中... ({{codename}})",
+    "status_top8_import": "TOP 8 を構築中...",
+    "status_result_import": "リザルトを取得中..."
 }
