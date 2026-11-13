@@ -194,7 +194,6 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .core.ColorService import SeedColorState
 from .AutonaSidebar import AutonaSidebar
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .core.PlayerDB import PlayerDB
 from .core.StateManager import StateManager
@@ -841,7 +840,6 @@ class Window(QMainWindow):
         # see the Ensure*Window() accessors.
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
-        AutonaAlertNotification.instance.UiMounted()
         # Silent startup check runs only for the frozen distribution — in
         # dev mode (python main.py) we can't self-install, so skip the
         # noise of a "can't auto-install" dialog at every launch.

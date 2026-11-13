@@ -551,16 +551,10 @@ def bootstrap_gui():
     AutonaGameAssetManager.instance.signals.onLoad.connect(
         AutonaPlayerDB.SetupModel)
 
-    # AlertNotification and Updater have no dependency on each other, nor on
-    # anything constructed above: both __init__ only build the object itself
-    # (AlertNotification also ensures ./user_data/alerts_red.json exists).
-    # Kept in this order, the order of the old import-time construction in
-    # Autona.py (imports 177 -> 178). Both are the desktop's: the alerts are
-    # dialogs and the updater replaces the installed exe.
-    from .AutonaAlertNotification import AutonaAlertNotification
-    if AutonaAlertNotification.instance is None:
-        AutonaAlertNotification.instance = AutonaAlertNotification()
-
+    # The Updater depends on nothing constructed above: its __init__ only
+    # builds the object itself. It is the desktop's: it replaces the
+    # installed exe. (AutonaAlertNotification, which was built right before
+    # it, is gone: nothing ever emitted its `alerts` signal -- ADR-005 SF-1.)
     from .AutonaUpdater import AutonaUpdater
     if AutonaUpdater.instance is None:
         AutonaUpdater.instance = AutonaUpdater()

@@ -209,7 +209,6 @@ def test_bootstrap_gui_steps_and_their_order():
         # clean-up's PR3.
         "AutonaGameAssetManager.instance.signals.onLoad.connect("
         "AutonaPlayerDB.SetupModel)",
-        "AutonaAlertNotification()",
         "AutonaUpdater()",
         # The desktop's boards, made at launch in core and boards 1 / 2 held
         # (ADR-005 S4ac-1; `panel=True` is pinned by the probe below): after
@@ -434,7 +433,6 @@ from src.bootstrap import bootstrap_core
 bootstrap_core()
 
 from src import AutonaWebOperations
-from src.AutonaAlertNotification import AutonaAlertNotification
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaPlayerDB import AutonaPlayerDB
@@ -509,8 +507,6 @@ report({
     "gui": {
         "AutonaHotkeys": AutonaHotkeys.instance is not None,
         "AutonaGameAssetManager": AutonaGameAssetManager.instance is not None,
-        "AutonaAlertNotification":
-            AutonaAlertNotification.instance is not None,
         "AutonaUpdater": AutonaUpdater.instance is not None,
         "AutonaShellOperations": AutonaShellOperations.instance is not None,
         # No shell registers hotkeys with the OS here (ADR-005 S4ae).

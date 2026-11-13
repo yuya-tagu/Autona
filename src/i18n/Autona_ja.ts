@@ -2,190 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ja_JP">
 <context>
-    <name>DockWidget</name>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Bracket</source>
-        <translation>トーナメント表</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Phase Group</source>
-        <translation>フェーズグループ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Limit exported bracket</source>
-        <translation>エクスポートするトーナメント表を制限する</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Phase</source>
-        <translation>フェーズ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Winners Only</source>
-        <translation>勝者のみ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Progressions in</source>
-        <translation>進行回数</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Progressions out</source>
-        <translation>退行回数</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source> players</source>
-        <translation>のプレイヤーたち</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Top </source>
-        <translation>トップ</translation>
-    </message>
-</context><context>
-    <name>Form</name>
-    <message>
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>Team Name</source>
-        <translation>チーム名</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>Form</source>
-        <translation>フォーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>SPONSORS?</source>
-        <translation>所属タグ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Sponsor</source>
-        <translation>所属タグ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>GamerTag</source>
-        <translation>ハンドルネーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Country</source>
-        <translation>国</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Region</source>
-        <translation>地域</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>CHARACTERS</source>
-        <translation>使用キャラクター</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>LOCATION</source>
-        <translation>本拠地</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>TWITTER</source>
-        <translation>ツイッター</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Handle Only</source>
-        <translation>ユーザー名のみ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>ACTIVE</source>
-        <translation>稼働中</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>DEAD?</source>
-        <translation>停止？</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>STOCKS/LIVES</source>
-        <translation>ストック／ライフ</translation>
-    </message>
-</context><context>
-    <name>GroupBox</name>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>GroupBox</source>
-        <translation>実況者</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Commentator 1</source>
-        <translation>実況者1</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>TEAM/NAME</source>
-        <translation>所属タグ/ハンドルネーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Team</source>
-        <translation>所属タグ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>GamerTag</source>
-        <translation>ハンドルネーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>REAL NAME</source>
-        <translation>本名</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Real Name</source>
-        <translation>本名</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>TWITTER</source>
-        <translation>ツイッター</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Handle Only</source>
-        <translation>ユーザー名のみ</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <source>SPONSOR/TAG</source>
-        <translation>所属タグ/ハンドルネーム</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <source>Sponsor</source>
-        <translation>所属タグ</translation>
-    </message>
-</context><context>
     <name>Settings</name>
     <message>
         <location filename="..\Autona.py" line="610" />
@@ -630,10 +446,6 @@
         <translation>Companion を別の PC で動かす場合（LAN アクセス）は、ヘッダ X-Autona-Token も追加し、値にアクセストークンを入れてください。トークンは ヘルプ＆設定 → API設定 → リファレンス・テスターを開く からコピーできます。</translation>
     </message>
     <message>
-        <source>Layout a panel shows (kind=commentary|top8)</source>
-        <translation>パネルが選んでいるレイアウト（kind=commentary|top8）</translation>
-    </message>
-    <message>
         <source>Commentary role / icon candidates</source>
         <translation>実況・解説の役割・アイコンの候補</translation>
     </message>
@@ -762,30 +574,14 @@
         <translation>選手一覧</translation>
     </message>
     <message>
-        <location filename="..\AutonaNotesWidget.py" line="34" />
-        <location filename="..\Autona.py" line="387" />
-        <source>Additional Notes</source>
-        <translation>メモ</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="393" />
         <source>Statistics</source>
         <translation>統計情報</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="447" />
-        <source>Edit</source>
-        <translation>編集</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="450" />
         <source>Always on top</source>
         <translation>常に手前に表示</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="457" />
-        <source>Toggle widgets</source>
-        <translation>ツールの表示</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="479" />
@@ -796,16 +592,6 @@
         <location filename="..\Autona.py" line="569" />
         <source>Check for updates</source>
         <translation>更新情報を調べる</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="580" />
-        <source>A new window has been opened in your default webbrowser.</source>
-        <translation>既定のウェブブラウザで新しいウィンドウが開きました。</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="583" />
-        <source>Help</source>
-        <translation>ヘルプ</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="585" />
@@ -821,24 +607,9 @@
         <translation>Autona について</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="619" />
-        <source>Rules</source>
-        <translation>対戦形式</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="646" />
-        <source>Startgg</source>
-        <translation>Startgg</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="654" />
         <source>Unset tournament</source>
         <translation>大会の設定を解除</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="690" />
-        <source>Title</source>
-        <translation>ゲームタイトル</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="716" />
@@ -850,50 +621,6 @@
         <location filename="..\Autona.py" line="743" />
         <source>API Settings</source>
         <translation>API設定</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAlertNotification.py" line="38" />
-        <source>Notifications ({0}/{1})</source>
-        <translation>通知({0}/{1})</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAlertNotification.py" line="46" />
-        <source>Remind later</source>
-        <translation>プログラムを再度実行した時にこの通知を表示する</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketView.py" line="407" />
-        <source>トーナメント情報が未取得です。
-フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。
-
-No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
-        <translation>トーナメント情報が未取得です。
-フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="82" />
-        <source>Characters per player</source>
-        <translation>各プレイヤーの使用キャラクター数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="97" />
-        <source>Loading bracket...</source>
-        <translation>ブラケットを読み込み中...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="131" />
-        <source>Update bracket info</source>
-        <translation>ブラケット情報を更新</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="129" />
-        <source>Phase</source>
-        <translation>フェーズ</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="139" />
-        <source>Match</source>
-        <translation>ラウンド</translation>
     </message>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="149" />
@@ -932,75 +659,9 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Team / Crew 縦並び (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
-        <source>Clear</source>
-        <translation>リセット</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="0" />
         <source>Stats Display Settings</source>
         <translation>統計情報表示設定</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />
-        <source>Stock Pool (Smash)</source>
-        <translation>ストックプール（スマブラ）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleModeEnum.py" line="18" />
-        <source>First To (First To X Team Individuals)</source>
-        <translation>先取ポイント（チーム個別 X 先取）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="65" />
-        <source>Crew/Team Battle</source>
-        <translation>クルーバトル／チーム戦</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="82" />
-        <source>Number of Players</source>
-        <translation>プレイヤー人数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="92" />
-        <source>Characters per Player</source>
-        <translation>プレイヤーごとの使用キャラ数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="245" />
-        <location filename="..\AutonaTeamBattleWidget.py" line="103" />
-        <source>Lives/Stocks per Player</source>
-        <translation>プレイヤーごとのストック数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="113" />
-        <source>Battle Mode</source>
-        <translation>バトルモード</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="187" />
-        <source>Reset Player Mode Values</source>
-        <translation>プレイヤーモードの設定をリセット</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="189" />
-        <source>Reset Battle Mode</source>
-        <translation>バトルモードをリセット</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="251" />
-        <source>First To Amount</source>
-        <translation>先取スコア</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="159" />
-        <source>STOCKS/LIVES</source>
-        <translation>ストック／ライフ</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="161" />
-        <source>GAMES WON</source>
-        <translation>勝利ゲーム数</translation>
     </message>
     <message>
         <location filename="..\core\ThumbnailService.py" line="90" />
@@ -1033,16 +694,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>大会のURLを貼る</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="185" />
-        <source>Set Twitch username</source>
-        <translation>Twitchでのユーザー名を入力</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="185" />
-        <source>Twitch Username:</source>
-        <translation>Twitchでのユーザー名:</translation>
-    </message>
-    <message>
         <location filename="..\AutonaTournamentDataProvider.py" line="321" />
         <source>Confirm</source>
         <translation>確認</translation>
@@ -1068,28 +719,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>大会 URL の形式が正しく、存在するイベントを指しているか確認してから再試行してください。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="125" />
-        <source>Update download complete. The program will extract the update upon closing.</source>
-        <translation>アップデートのダウンロードが完了しました。アプリ終了時に更新を展開します。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="129" />
-        <source>Please ensure the layout folder or its contents aren't open in another application before closing this window.</source>
-        <translation>このウィンドウを閉じる前に、レイアウトフォルダやその中身が他のアプリで開かれていないことを確認してください。</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>サンプル大会</translation>
-    </message>
-</context><context>
-    <name>notes</name>
-    <message>
-        <location filename="..\AutonaNotesWidget.py" line="17" />
-        <source>Title</source>
-        <translation>タイトル</translation>
     </message>
 </context><context>
     <name>portguard</name>
@@ -1185,11 +819,6 @@ user_data/settings.json の general.webserver_port を変更して Autona を再
 </context><context>
     <name>updater</name>
     <message>
-        <location filename="..\AutonaUpdater.py" line="144" />
-        <source>Error while backing up the layout folder:</source>
-        <translation>レイアウトフォルダのバックアップ中にエラーが発生しました:</translation>
-    </message>
-    <message>
         <location filename="..\AutonaUpdater.py" line="149" />
         <source>Retry</source>
         <translation>再試行</translation>
@@ -1268,21 +897,6 @@ user_data/settings.json の general.webserver_port を変更して Autona を再
         <location filename="..\AutonaUpdater.py" line="570" />
         <source>Download failed: {0}</source>
         <translation>ダウンロードに失敗しました: {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="645" />
-        <source>Update available</source>
-        <translation>アップデートがあります</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="646" />
-        <source>Version {0} is available, but it updates core components (Qt {1} → {2}) that can't be replaced automatically. Please download it and reinstall manually.</source>
-        <translation>バージョン {0} が利用可能ですが、自動で置き換えられないコアコンポーネント (Qt {1} → {2}) を更新します。ダウンロードして手動で再インストールしてください。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="653" />
-        <source>Open releases page</source>
-        <translation>リリースページを開く</translation>
     </message>
     <message>
         <location filename="..\AutonaUpdater.py" line="674" />

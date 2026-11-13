@@ -221,7 +221,7 @@ React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デス
 
 ## 12. 補助ウィジェット
 
-- **アラート通知**（[src/AutonaAlertNotification.py](../../src/AutonaAlertNotification.py)）
+- （アラート通知は何も emit されない死んだコードだったので、ADR-005 SF-1 で削除した）
 
 ---
 

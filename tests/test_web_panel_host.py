@@ -2948,6 +2948,39 @@ def test_the_unused_qt_model_leftovers_are_gone():
     assert settlers == ["_Load"], settlers
 
 
+# ADR-005 S-final SF-1: what the dead-code sweep removed. The Alert
+# notification (nothing ever emitted its `alerts` signal), `ui_layout`
+# (no caller left), the combo helper `ShowComboText`, and the catalog's
+# snapshot fields / readers whose only consumer was the Qt models (gone in
+# the Qt model clean-up's PR4).
+SF1_REMOVED_MODULES = ("AutonaAlertNotification", "ui_layout")
+SF1_REMOVED_NAMES = (
+    "AutonaAlertNotification", "ShowComboText", "colorRows",
+    "stockIconPaths", "biggestCompletePack", "PresetColor", "StockIconPath")
+# Translation contexts of the deleted .ui files / widgets.
+SF1_REMOVED_TS_CONTEXTS = ("Form", "GroupBox", "DockWidget", "notes")
+
+
+def test_the_sf1_dead_code_is_gone():
+    import xml.etree.ElementTree as ET
+
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    for module in SF1_REMOVED_MODULES:
+        assert not (src / f"{module}.py").exists(), module
+    users = {str(path.relative_to(PROJECT_ROOT)):
+             sorted(_codeNames(path) & set(SF1_REMOVED_NAMES))
+             for path in sorted(src.rglob("*.py"))}
+    assert {path: names for path, names in users.items() if names} == {}
+
+    for ts in sorted((src / "i18n").glob("Autona_*.ts")):
+        contexts = {node.findtext("name")
+                    for node in ET.parse(ts).getroot().findall("context")}
+        assert contexts.isdisjoint(SF1_REMOVED_TS_CONTEXTS), (
+            ts.name, contexts & set(SF1_REMOVED_TS_CONTEXTS))
+
+
 def test_the_qt_settings_window_is_gone():
     # ADR-005 S4af (the owner's go-ahead: no way back): the React page
     # (/web/settings, the menu's Window.OpenSettings) is the only settings

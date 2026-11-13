@@ -2,190 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en_US">
 <context>
-    <name>DockWidget</name>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Bracket</source>
-        <translation>Bracket</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Phase Group</source>
-        <translation>Phase Group</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Limit exported bracket</source>
-        <translation>Limit exported bracket</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Phase</source>
-        <translation>Phase</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Winners Only</source>
-        <translation>Winners Only</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Progressions in</source>
-        <translation>Progressions in</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Progressions out</source>
-        <translation>Progressions out</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source> players</source>
-        <translation> players</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBracket.ui" line="0" />
-        <source>Top </source>
-        <translation>Top </translation>
-    </message>
-</context><context>
-    <name>Form</name>
-    <message>
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>Team Name</source>
-        <translation>Team Name</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>Form</source>
-        <translation>Form</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <source>SPONSORS?</source>
-        <translation>SPONSORS?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Sponsor</source>
-        <translation>Sponsor</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>GamerTag</source>
-        <translation>GamerTag</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Country</source>
-        <translation>Country</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Region</source>
-        <translation>Region</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>CHARACTERS</source>
-        <translation>CHARACTERS</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>LOCATION</source>
-        <translation>LOCATION</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>TWITTER</source>
-        <translation>TWITTER</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>Handle Only</source>
-        <translation>Handle Only</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>ACTIVE</source>
-        <translation>ACTIVE</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>DEAD?</source>
-        <translation>DEAD?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
-        <source>STOCKS/LIVES</source>
-        <translation>STOCKS/LIVES</translation>
-    </message>
-</context><context>
-    <name>GroupBox</name>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>GroupBox</source>
-        <translation>GroupBox</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Commentator 1</source>
-        <translation>Commentator 1</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>TEAM/NAME</source>
-        <translation>TEAM/NAME</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Team</source>
-        <translation>Team</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>GamerTag</source>
-        <translation>GamerTag</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>REAL NAME</source>
-        <translation>REAL NAME</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Real Name</source>
-        <translation>Real Name</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>TWITTER</source>
-        <translation>TWITTER</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <location filename="..\layout\AutonaCommentary.ui" line="0" />
-        <source>Handle Only</source>
-        <translation>Handle Only</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <source>SPONSOR/TAG</source>
-        <translation>SPONSOR/TAG</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaCommentator.ui" line="0" />
-        <source>Sponsor</source>
-        <translation>Sponsor</translation>
-    </message>
-</context><context>
     <name>Settings</name>
     <message>
         <location filename="..\Autona.py" line="610" />
@@ -630,10 +446,6 @@
         <translation>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</translation>
     </message>
     <message>
-        <source>Layout a panel shows (kind=commentary|top8)</source>
-        <translation>Layout a panel shows (kind=commentary|top8)</translation>
-    </message>
-    <message>
         <source>Commentary role / icon candidates</source>
         <translation>Commentary role / icon candidates</translation>
     </message>
@@ -762,30 +574,14 @@
         <translation>Player List</translation>
     </message>
     <message>
-        <location filename="..\AutonaNotesWidget.py" line="34" />
-        <location filename="..\Autona.py" line="387" />
-        <source>Additional Notes</source>
-        <translation>Additional Notes</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="393" />
         <source>Statistics</source>
         <translation>Statistics</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="447" />
-        <source>Edit</source>
-        <translation>Edit</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="450" />
         <source>Always on top</source>
         <translation>Always on top</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="457" />
-        <source>Toggle widgets</source>
-        <translation>Toggle widgets</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="479" />
@@ -796,16 +592,6 @@
         <location filename="..\Autona.py" line="569" />
         <source>Check for updates</source>
         <translation>Check for updates</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="580" />
-        <source>A new window has been opened in your default webbrowser.</source>
-        <translation>A new window has been opened in your default webbrowser.</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="583" />
-        <source>Help</source>
-        <translation>Help</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="585" />
@@ -821,24 +607,9 @@
         <translation>About Autona</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="619" />
-        <source>Rules</source>
-        <translation>Rules</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="646" />
-        <source>Startgg</source>
-        <translation>Startgg</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="654" />
         <source>Unset tournament</source>
         <translation>Unset tournament</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="690" />
-        <source>Title</source>
-        <translation>Title</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="716" />
@@ -850,49 +621,6 @@
         <location filename="..\Autona.py" line="743" />
         <source>API Settings</source>
         <translation>API Settings</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAlertNotification.py" line="38" />
-        <source>Notifications ({0}/{1})</source>
-        <translation>Notifications ({0}/{1})</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAlertNotification.py" line="46" />
-        <source>Remind later</source>
-        <translation>Remind later</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketView.py" line="407" />
-        <source>トーナメント情報が未取得です。
-フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。
-
-No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
-        <translation>No bracket data. Pick a phase group, or retry if Start.gg timed out.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="82" />
-        <source>Characters per player</source>
-        <translation>Characters per player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="97" />
-        <source>Loading bracket...</source>
-        <translation>Loading bracket...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaBracketWidget.py" line="131" />
-        <source>Update bracket info</source>
-        <translation>Update bracket info</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="129" />
-        <source>Phase</source>
-        <translation>Phase</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="139" />
-        <source>Match</source>
-        <translation>Match</translation>
     </message>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="149" />
@@ -931,75 +659,9 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Team / Crew vertical (1920x1080)</translation>
     </message>
     <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
-        <source>Clear</source>
-        <translation>Clear</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="0" />
         <source>Stats Display Settings</source>
         <translation>Stats Display Settings</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />
-        <source>Stock Pool (Smash)</source>
-        <translation>Stock Pool (Smash)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleModeEnum.py" line="18" />
-        <source>First To (First To X Team Individuals)</source>
-        <translation>First To (First To X Team Individuals)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="65" />
-        <source>Crew/Team Battle</source>
-        <translation>Crew/Team Battle</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="82" />
-        <source>Number of Players</source>
-        <translation>Number of Players</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="92" />
-        <source>Characters per Player</source>
-        <translation>Characters per Player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="245" />
-        <location filename="..\AutonaTeamBattleWidget.py" line="103" />
-        <source>Lives/Stocks per Player</source>
-        <translation>Lives/Stocks per Player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="113" />
-        <source>Battle Mode</source>
-        <translation>Battle Mode</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="187" />
-        <source>Reset Player Mode Values</source>
-        <translation>Reset Player Mode Values</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="189" />
-        <source>Reset Battle Mode</source>
-        <translation>Reset Battle Mode</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamBattleWidget.py" line="251" />
-        <source>First To Amount</source>
-        <translation>First To Amount</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="159" />
-        <source>STOCKS/LIVES</source>
-        <translation>STOCKS/LIVES</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTeamPlayerWidget.py" line="161" />
-        <source>GAMES WON</source>
-        <translation>GAMES WON</translation>
     </message>
     <message>
         <location filename="..\core\ThumbnailService.py" line="90" />
@@ -1032,16 +694,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Set tournament URL</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="185" />
-        <source>Set Twitch username</source>
-        <translation>Set Twitch username</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="185" />
-        <source>Twitch Username:</source>
-        <translation>Twitch Username:</translation>
-    </message>
-    <message>
         <location filename="..\AutonaTournamentDataProvider.py" line="321" />
         <source>Confirm</source>
         <translation>Confirm</translation>
@@ -1067,28 +719,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Make sure that your tournament URL is correctly formatted and points to an existing event, and try again.</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="125" />
-        <source>Update download complete. The program will extract the update upon closing.</source>
-        <translation>Update download complete. The program will extract the update upon closing.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="129" />
-        <source>Please ensure the layout folder or its contents aren't open in another application before closing this window.</source>
-        <translation>Please ensure the layout folder or its contents aren't open in another application before closing this window.</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />
         <source>Sample Tournament</source>
         <translation>Sample Tournament</translation>
-    </message>
-</context><context>
-    <name>notes</name>
-    <message>
-        <location filename="..\AutonaNotesWidget.py" line="17" />
-        <source>Title</source>
-        <translation>Title</translation>
     </message>
 </context><context>
     <name>portguard</name>
@@ -1184,11 +819,6 @@ Change general.webserver_port in user_data/settings.json and restart Autona, or 
 </context><context>
     <name>updater</name>
     <message>
-        <location filename="..\AutonaUpdater.py" line="144" />
-        <source>Error while backing up the layout folder:</source>
-        <translation>Error while backing up the layout folder:</translation>
-    </message>
-    <message>
         <location filename="..\AutonaUpdater.py" line="149" />
         <source>Retry</source>
         <translation>Retry</translation>
@@ -1267,21 +897,6 @@ Change general.webserver_port in user_data/settings.json and restart Autona, or 
         <location filename="..\AutonaUpdater.py" line="570" />
         <source>Download failed: {0}</source>
         <translation>Download failed: {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="645" />
-        <source>Update available</source>
-        <translation>Update available</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="646" />
-        <source>Version {0} is available, but it updates core components (Qt {1} → {2}) that can't be replaced automatically. Please download it and reinstall manually.</source>
-        <translation>Version {0} is available, but it updates core components (Qt {1} → {2}) that can't be replaced automatically. Please download it and reinstall manually.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaUpdater.py" line="653" />
-        <source>Open releases page</source>
-        <translation>Open releases page</translation>
     </message>
     <message>
         <location filename="..\AutonaUpdater.py" line="674" />
