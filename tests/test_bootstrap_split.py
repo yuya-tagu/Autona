@@ -298,8 +298,9 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
         "AutonaActions.instance.CommitGameLoad(written)"]
     # Nothing else commits an announced load: not the desktop's asset
     # adapter, whose one commit is the settle of a load it does not announce
-    # (_SettleUnannounced: the shutdown came first, or the rebuild failed),
-    # of what that settle's roster wrote.
+    # (_SettleUnannounced: the shutdown came first; a failed Qt model
+    # rebuild too, until the Qt model clean-up's PR4), of what that settle's
+    # roster wrote.
     assert [call for call in _calls("src/AutonaGameAssetManager.py")
             if "CommitGameLoad" in call] == [
         "actions.CommitGameLoad(written)"]

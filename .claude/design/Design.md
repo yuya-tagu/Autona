@@ -754,7 +754,7 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 
 **ヘッドレス起動**（`python main.py --headless`、ADR-005 S3c。`src/headless.py`）では、右下の PyQt UI が無い。
 QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（`GameAssetCatalog` 直。
-Qt モデルなし）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
+Qt モデルは Qt モデルの整理 PR4 でデスクトップからも無くなった）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
 `wire_web_server`。Web のボードの操作は両シェルとも同じボードホスト `AutonaWebOperations.boardHost`（`BoardHost`）を通り、
 呼び出し元のスレッドで 1 本の再入可能ロックの下で走る（ADR-005 S4ad。それまでデスクトップは `DesktopBoardHost` が GUI スレッドで走らせていた）。
 ボードは held にならず（`MakeBoards` を `panel` なしで呼ぶ。S4ac-1）、
@@ -833,7 +833,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（ADR-005 S3e-1。選んでいるゲームの mains の正規化も `PlayerDB.NormaliseMains`。Qt 側の `AutonaPlayerDB` は変更を `db_updated` に中継するだけ: 補完モデルは Qt モデルの整理 PR3 で削除） | React の Player List（`/web/playerBrowser`。v1 `PUT /players`）+ 直接 JSON 編集 |
 | 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
-| ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側は `AutonaGameAssetManager` がモデル化） | アセット追加時に手動編集 |
+| ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側の `AutonaGameAssetManager` はロードのジョブと通知だけ。Qt のモデル化は Qt モデルの整理 PR4 で削除。React のページは Web の操作でカタログを読む） | アセット追加時に手動編集 |
 | 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog` | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
 | サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
 | OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
@@ -1891,7 +1891,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | # | ファイル | 内容 |
 |---|---------|------|
 | 1 | `user_data/games/{game}/{asset_type}/config.json` | アセット定義を追加 |
-| 2 | `src/core/GameAssetCatalog.py` | 新 asset_type の解決が必要なら追加（コンボに出すなら `AutonaGameAssetManager` のモデル構築も） |
+| 2 | `src/core/GameAssetCatalog.py` | 新 asset_type の解決が必要なら追加（ページの選択肢に出すならカタログのペイロード（`*Payload()`）と Web の操作も。Qt のモデルは無い: Qt モデルの整理 PR4） |
 | 3 | State キーパス（§3.1.2） | State に保持する場合は静的キーパスとして追記 |
 | 4 | 利用 UI / テンプレ | PyQt / OBS / 画像生成側で参照を追加 |
 

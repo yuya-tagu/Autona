@@ -298,19 +298,19 @@ def drain_tasks(timeout=TASKS_TIMEOUT_SECS):
     the asset tests used until ADR-005 S3f-4.
 
     Pumps this (the GUI) thread while it waits: a game load job marshals its
-    models onto it (run_sync), so a plain drain() would wait for the job
-    that waits for us. Done once the executor is idle after the GUI thread
-    has run what the tasks queued there (a decoded icon, the scan's
-    onLoadAssets) -- which can submit more (the restore's load), so it
-    looks again. Test harness only: src never pumps the event loop
-    (agent-pitfalls #9).
+    announcement onto it (run_sync), so a plain drain() would wait for the
+    job that waits for us. Done once the executor is idle after the GUI
+    thread has run what the tasks queued there (the scan's onLoadAssets) --
+    which can submit more (the restore's load), so it looks again. Test
+    harness only: src never pumps the event loop (agent-pitfalls #9).
 
     Everything means everything: a stepped executor's queued jobs run too,
     still one at a time -- a step that is waiting for this thread (its
     run_next() timed out after the short slice below) is waited for, with
     the events processed in between, before the next one starts
-    (TaskExecutor.run_next). A test stepping its jobs by hand waits for icon
-    decodes with deliver_decodes() instead.
+    (TaskExecutor.run_next). (deliver_decodes(), for a test stepping its
+    jobs by hand, waited for the asset adapter's icon decodes until the Qt
+    model clean-up's PR4 removed them.)
     """
     import time
 
@@ -327,22 +327,6 @@ def drain_tasks(timeout=TASKS_TIMEOUT_SECS):
                 return
         assert time.monotonic() < deadline, \
             "the background tasks did not finish"
-
-
-def deliver_decodes(decodes, timeout=TASKS_TIMEOUT_SECS):
-    """Wait for icon decodes -- the Futures a model rebuild of the asset
-    adapter returned -- then run what they handed to the GUI thread (the
-    icons set on their items). Nothing else the executor runs is touched,
-    so it suits a test whose jobs are stepped by hand."""
-    from concurrent.futures import CancelledError
-
-    from qtpy.QtWidgets import QApplication
-
-    for future in decodes:
-        # TimeoutError fails the test; a decode's own error was logged.
-        with contextlib.suppress(CancelledError):
-            future.exception(timeout)
-    QApplication.processEvents()
 
 
 @pytest.fixture(autouse=True)
@@ -724,18 +708,16 @@ class _AutonaHarness:
         """Install and load a small synthetic game, HARNESS_GAME.
 
         The harness has no game installed (its user_data/games is empty), so
-        AutonaGameAssetManager.characterModel has zero rows: every character
-        combo can only ever sit at index -1, and any assertion about *which*
+        the catalog has no characters, and any assertion about *which*
         character a slot ended up on is vacuous. This writes a real game pack
         -- one stock-icon PNG per character and skin -- into the runtime
         user_data/games and loads it through the production path: the
-        catalog's scan and load, then the Qt adapter's model rebuild.
+        catalog's scan and load (and the Qt adapter's model rebuild, until
+        the Qt model clean-up's PR4 removed the models).
 
-        What it leaves out is the onLoad broadcast that ends a real load
-        (publishGameLoad() is that end), so nothing connected to it reacts.
-
-        The icon decodes the rebuild starts are waited out here: they must
-        not outlive the CWD.
+        What it leaves out is the GUI thread's end of a real load -- the
+        announcement and its commit (publishGameLoad() is that end) -- so
+        nothing connected to gameLoaded / onLoad reacts.
         """
         from PIL import Image
 
@@ -762,19 +744,16 @@ class _AutonaHarness:
         catalog = GameAssetCatalog.instance
         catalog.ScanGames()
         catalog.SelectGame(HARNESS_GAME, reload=True)
-        manager = AutonaGameAssetManager.instance
-        deliver_decodes(manager._RebuildModels())
         self._gameInstalled = True
-        return manager
+        return AutonaGameAssetManager.instance
 
     def publishGameLoad(self):
         """The GUI thread's end of a game load, on the game loaded now:
         AutonaGameAssetManager._Publish, with no loader thread -- the load's
         save cycle opened here, as the loader opens it. Under the board
-        host's lock, the models rebuilt, gameLoaded (the shared wiring's
-        roster, set length and commit, queued in that cycle), onLoad (every
-        slot connected to it, in its real place) and the cycle closed, as in
-        the app.
+        host's lock, gameLoaded (the shared wiring's roster, set length and
+        commit, queued in that cycle), onLoad (every slot connected to it,
+        in its real place) and the cycle closed, as in the app.
         """
         from src.AutonaGameAssetManager import (AutonaGameAssetManager,
                                                 _SaveCycle)
@@ -782,35 +761,30 @@ class _AutonaHarness:
 
         cycle = _SaveCycle()
         cycle.Open()
-        decodes = []
         AutonaGameAssetManager.instance._Publish(
-            GameAssetCatalog.instance.Current(), cycle, decodes)
-        deliver_decodes(decodes)
+            GameAssetCatalog.instance.Current(), cycle)
         self.settle()
 
     def _restoreAssets(self):
-        """Uninstall HARNESS_GAME and go back to the no-game models.
+        """Uninstall HARNESS_GAME and go back to no game loaded.
 
-        The icon decodes of loadCharacters' rebuild were waited for there,
-        and a game load a test ran in between is waited for by the test
-        (drain_tasks): the decodes run on the task executor, which may be a
-        test's stepped one here, whose queued jobs must stay queued."""
+        A game load a test ran in between is waited for by the test
+        (drain_tasks): the task executor may be a test's stepped one here,
+        whose queued jobs must stay queued."""
         if not self._gameInstalled:
             return
         from qtpy.QtWidgets import QApplication
 
-        from src.AutonaGameAssetManager import AutonaGameAssetManager
         from src.core.GameAssetCatalog import GameAssetCatalog
 
-        manager = AutonaGameAssetManager.instance
         QApplication.processEvents()
         remove_tree(self.dir / "user_data" / "games" / HARNESS_GAME)
         catalog = GameAssetCatalog.instance
         catalog.ScanGames()
-        # The empty snapshot rebuilds the empty models of a fresh start; the
-        # synthetic generation is retired, not dropped (agent-pitfalls #13).
+        # The empty snapshot of a fresh start. (The Qt adapter rebuilt its
+        # empty models from it, retiring the synthetic generation, until the
+        # Qt model clean-up's PR4.)
         catalog.ResetGameState()
-        manager._RebuildModels()
         self._gameInstalled = False
 
     def dropAllBoards(self):

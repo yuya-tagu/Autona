@@ -727,7 +727,7 @@ def test_an_imported_player_gets_the_overlays_icon(bracket, countries):
 # ── a game switch empties the characters, in either shell ────────────────
 
 # The golden fixture games (tgame, game2) installed into the harness.
-from tests.test_game_asset_manager_models import goldenGames  # noqa: E402,F401
+from tests.test_game_asset_manager_load import goldenGames  # noqa: E402,F401
 
 SEEDED_CHARACTERS = {"3": {"1": {"en_name": "Somebody", "assets": {}}},
                      "8": {"1": {"en_name": "Someone else"}}}

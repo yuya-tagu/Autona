@@ -33,7 +33,7 @@ from tests.test_api_v1 import _assertRejected, client, webApp  # noqa: F401
 from tests.test_api_v1_score import (  # noqa: F401
     _apply, _cycles, _ok, _oneCycle, _pending, _published, desktopBoards,
     shell)
-from tests.test_game_asset_manager_models import (  # noqa: F401
+from tests.test_game_asset_manager_load import (  # noqa: F401
     _load, goldenGames)
 from tests.test_web_operations import _dropHeadlessBoards, _goHeadless
 

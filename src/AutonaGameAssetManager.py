@@ -3,30 +3,29 @@
 The data -- games, characters, skins, stages, asset paths, the start.gg id
 tables -- lives in the Qt-free `src/core/GameAssetCatalog.py`. This class only:
 
-- turns the catalog's current snapshot into the QStandardItemModels the
-  combos bind to, plus their icons (decoded on the TaskExecutor's fan-out
-  lane, applied on the GUI thread);
 - runs the catalog's slow operations (scan, load, start.gg download) as
   jobs of the TaskExecutor (ADR-005 S3f-4; they were QThreads) and announces
-  them through `signals.onLoadAssets` / `onLoad`;
+  them through `signals.onLoadAssets` / `gameLoaded` / `onLoad` (a load's
+  on the GUI thread, _Publish);
 - persists and restores the last selected game (SettingsManager).
 
-The old attributes (`games`, `selectedGame`, `characters`, ...) are
-read-only properties over the current snapshot. They hand out the catalog's
-own dicts: treat them as read-only and copy before writing (into the state,
-say).
+Until the Qt model clean-up's PR4 it also turned the catalog's snapshot
+into the QStandardItemModels the Qt combos bound to, with their icons
+decoded on the TaskExecutor's fan-out lane; the combos had all gone (the
+React pages read the catalog through the web operations), so it holds no
+Qt model and needs no QtGui.
+
+`games` / `selectedGame` / `has_modded_content` are read-only properties
+over the current snapshot. They hand out the catalog's own dicts: treat
+them as read-only and copy before writing (into the state, say).
 """
 import threading
 import traceback
-from concurrent.futures import CancelledError, Future
+from concurrent.futures import Future
 
 from loguru import logger
-from PIL import Image
-from qtpy.QtCore import *
-from qtpy.QtGui import *
-from qtpy.QtWidgets import *
+from qtpy.QtCore import QObject, Signal
 
-from .core.GameAssetCatalog import CANCEL_ICON_PATH
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
 from .core.TaskExecutor import TaskExecutor
@@ -106,22 +105,6 @@ class AutonaGameAssetManager(QObject):
         self.catalog = catalog
         self.signals = AutonaGameAssetManagerSignals()
 
-        # Memoised 32px stock-icon QIcons, keyed by (en_name, skin), for the
-        # snapshot generation in _iconCacheGeneration. QIcon must be built
-        # on the GUI thread; all callers run there.
-        self._iconCache = {}
-        self._iconCacheGeneration = None
-
-        self.characterModel = QStandardItemModel()
-        self.skinModels = {}
-        self.variantModel = QStandardItemModel()
-        self.colorModel = QStandardItemModel()
-        # The previous model generation, kept alive until the next rebuild
-        # (agent-pitfalls #13). See _RebuildModels.
-        self._retiredModels = None
-        # The snapshot generation the models above were built from.
-        self._modelGeneration = None
-
         # The game loads (ADR-005 S3f-4 review): one loader job at most,
         # taking the latest request until none is waiting (_LoaderJob).
         # Under _requestLock -- a Condition, which a synchronous request
@@ -136,12 +119,6 @@ class AutonaGameAssetManager(QObject):
         self._loaderRunning = False
         self._loadFuture = None
         self._finishedGeneration = 0
-        # Generation of the skin models the icon decodes are for. Bumped
-        # whenever UpdateSkinModel replaces those models; a decode result
-        # carrying an older value belongs to a retired generation and is
-        # dropped instead of being applied to its items. (The per-game
-        # tracker's stage models had one too, until ADR-005 S4ac-4.)
-        self._skinIconGeneration = 0
 
         # Startup restore of the last-used game (see _RestoreSelectedGame).
         # Armed by UiMounted() so a later LoadGames() rescan — "Add game
@@ -153,9 +130,10 @@ class AutonaGameAssetManager(QObject):
         # lock.)
         self.signals.onLoad.connect(self._PersistSelectedGame)
 
-        self._RebuildModels()
-
     # ── read-only views of the current snapshot ─────────────────────────
+    # (`characters` / `skins` / `variants` / `colors` / `biggestCompletePack`
+    # went with the Qt models in the Qt model clean-up's PR4: no reader was
+    # left. Read the catalog's Current() instead.)
 
     @property
     def games(self):
@@ -164,26 +142,6 @@ class AutonaGameAssetManager(QObject):
     @property
     def selectedGame(self):
         return self.catalog.Current().game
-
-    @property
-    def characters(self):
-        return self.catalog.Current().characters
-
-    @property
-    def skins(self):
-        return self.catalog.Current().skins
-
-    @property
-    def variants(self):
-        return self.catalog.Current().variants
-
-    @property
-    def colors(self):
-        return self.catalog.Current().colors
-
-    @property
-    def biggestCompletePack(self):
-        return self.catalog.Current().biggestCompletePack
 
     @property
     def has_modded_content(self):
@@ -286,8 +244,8 @@ class AutonaGameAssetManager(QObject):
         all, on the calling thread. Off: returns once the attempt is over
         (below) -- from a thread other than the GUI thread only (a web
         request: AutonaWebOperations.set_game), since the loader marshals
-        the models onto the GUI thread; on the GUI thread it raises
-        RuntimeError.
+        the load's announcement onto the GUI thread (_Publish); on the GUI
+        thread it raises RuntimeError.
 
         The latest request wins: a request still waiting for the loader when
         a newer one comes is not loaded (SUPERSEDED, nothing selected), so
@@ -327,8 +285,8 @@ class AutonaGameAssetManager(QObject):
         if not async_mode and in_gui_thread():
             raise RuntimeError(
                 "a synchronous game load waits for the loader, which "
-                "marshals the models onto the GUI thread: it cannot be made "
-                "from the GUI thread")
+                "marshals the load's announcement onto the GUI thread: it "
+                "cannot be made from the GUI thread")
 
         request = _LoadRequest(codename, mods_active, mods_reload_mode, done)
         orphan = None
@@ -422,10 +380,11 @@ class AutonaGameAssetManager(QObject):
         # The loader, on a job-lane thread: the latest request, until none
         # is waiting. One at a time by construction (LoadGameByCodename
         # starts it only when none runs), so a load is over -- the next may
-        # select a game -- once its icon decodes are, and the requests that
-        # wait take no job lane (each used to be a job of its own blocked on
-        # a lock: rapid switching could take all four lanes from the
-        # provider's fetches; ADR-005 S3f-4 review).
+        # select a game -- once what follows its selection on the GUI thread
+        # is (its icon decodes too, until the Qt model clean-up's PR4), and
+        # the requests that wait take no job lane (each used to be a job of
+        # its own blocked on a lock: rapid switching could take all four
+        # lanes from the provider's fetches; ADR-005 S3f-4 review).
         while True:
             with self._requestLock:
                 request, self._pendingLoad = self._pendingLoad, None
@@ -443,11 +402,15 @@ class AutonaGameAssetManager(QObject):
                 self._SettleAndFinish(request, outcome)
 
     def _RunLoad(self, request):
-        # One request's attempt; its outcome. The models are rebuilt on the
-        # GUI thread, marshalled by run_sync (QPixmap / QIcon are GUI-thread
-        # only; built here they crashed at boot), which gives up if the app
-        # shuts down first (so the shutdown and the interpreter's exit do
-        # not wait on the loader for ever).
+        # One request's attempt; its outcome. What follows the selection --
+        # the announcement, whose onLoad slots touch the window's widgets
+        # (its game button, the mods checkbox) -- runs on the GUI thread,
+        # marshalled by run_sync (_Publish), which gives up if the app shuts
+        # down first (so the shutdown and the interpreter's exit do not wait
+        # on the loader for ever). Until the Qt model clean-up's PR4 the
+        # marshal rebuilt the Qt models first (QPixmap / QIcon are
+        # GUI-thread only; built here they crashed at boot). Whether the
+        # marshal is still needed is the run_sync review's (S-final).
         from .Helpers.AutonaStatusManager import AutonaStatusManager
         status = {}
         try:
@@ -486,8 +449,9 @@ class AutonaGameAssetManager(QObject):
         # BlockSaving, one ReleaseSaving on every path (agent-pitfalls #6):
         # _SaveCycle releases once, from _Publish or, when the GUI thread did
         # not run it (skipped, aborted, failed first), from here. The
-        # cycle stays open while the GUI thread rebuilds the models and runs
-        # the slots: other threads' board operations wait, as _Publish holds
+        # cycle stays open while the GUI thread runs the slots (it rebuilt
+        # the Qt models first until the Qt model clean-up's PR4): other
+        # threads' board operations wait, as _Publish holds
         # the board host's lock (ADR-005 S4ad review; they waited behind it
         # on the GUI thread until S4ad), and their core-direct writes
         # meanwhile (score:adjust, a colour) land in the cycle. Neither
@@ -499,9 +463,6 @@ class AutonaGameAssetManager(QObject):
         # waited on (SelectGame returned).
         self.catalog.ReloadStartGGCharacters()
         cycle = _SaveCycle()
-        # The icon decodes the rebuild starts, collected as they start: they
-        # are waited for however far the rebuild got.
-        decodes = []
         cycle.Open()
         try:
             snapshot = self.catalog.SelectGame(
@@ -511,40 +472,38 @@ class AutonaGameAssetManager(QObject):
                 return SKIPPED
             try:
                 AutonaQtHelper.gui_executor.run_sync(
-                    lambda: self._Publish(snapshot, cycle, decodes))
+                    lambda: self._Publish(snapshot, cycle))
             except GuiMarshalAborted as aborted:
                 logger.info(f"Game load of {codename} stopped: {aborted}")
                 self._SettleUnannounced(snapshot)
                 return STOPPED
             return LOADED
         finally:
-            try:
-                cycle.Release()
-            finally:
-                self._WaitForDecodes(decodes)
+            # (It waited for the icon decodes the model rebuild had started
+            # too, until the Qt model clean-up's PR4.)
+            cycle.Release()
 
     def _SettleUnannounced(self, snapshot):
         # The selection is in the state and goes out with the load's cycle,
         # but the load will not be announced (gameLoaded, onLoad): the
-        # shutdown came first (STOPPED; on the loader's thread) or the model
-        # rebuild failed (FAILED; on the GUI thread, in _Publish). What
+        # shutdown came first (STOPPED; on the loader's thread). What
         # their slots would have written after it is written here, in that
         # cycle, so the state -- and state.json -- holds one game (ADR-005
         # S3f-4 reviews). The roster the load asks for (gameLoaded ->
         # bootstrap.wire_game_roster: the previous game's picks emptied),
         # committed as an announced load commits it (what the roster wrote,
-        # recorded; inside _Publish, its recording), then the
-        # pick persisted (onLoad's _PersistSelectedGame). Core's operations,
-        # through the board host as the announced load's (its lock, on this
-        # thread -- the loader's or the GUI thread, inside _Publish's own
-        # operation there; the headless shell's _SettleStopped does the
-        # same). `atShutdown`: the host refuses a board operation off the
-        # main thread once the app is shutting down (the 503 a late request
-        # gets), and this one is that shutdown's own write. Until ADR-005
-        # S4ad the desktop's host handed its work to the GUI thread, which
-        # the loader's thread would have waited for, so this called core
-        # directly. Left as they are: the models a failed rebuild left
-        # part-way -- the next load redoes them (_RebuildModels).
+        # recorded), then the pick persisted (onLoad's _PersistSelectedGame).
+        # Core's operations, through the board host as the announced load's
+        # (its lock, on this thread; the headless shell's _SettleStopped
+        # does the same). `atShutdown`: the host refuses a board operation
+        # off the main thread once the app is shutting down (the 503 a late
+        # request gets), and this one is that shutdown's own write. Until
+        # ADR-005 S4ad the desktop's host handed its work to the GUI thread,
+        # which the loader's thread would have waited for, so this called
+        # core directly. (_Publish called it too, on the GUI thread inside
+        # its own operation and recording, when the Qt model rebuild failed
+        # -- FAILED -- until the Qt model clean-up's PR4 removed the
+        # rebuild.)
         from . import AutonaWebOperations
         from .core.Actions import AutonaActions
         actions = AutonaActions.instance
@@ -559,37 +518,38 @@ class AutonaGameAssetManager(QObject):
         AutonaWebOperations.boardHost.Run(settle, atShutdown=True)
         self._PersistSelectedGame()
 
-    def _Publish(self, snapshot, cycle, decodes):
-        # GUI thread: the models rebuilt, then the load announced --
-        # gameLoaded (the roster, the set length and the commit:
-        # bootstrap.wire_game_roster) ahead of onLoad (everything that
-        # rebinds to the new models), each slot run here, in connection
-        # order -- and last the load's save cycle closed, here too, which
-        # publishes what the commit queued. So a load that
-        # returns has had all of them run: what set_game's "OK" has always
-        # meant. (Until ADR-005 S3f-4 the loader thread emitted them and the
-        # slots ran queued after it, each in a save cycle of its own.) The
-        # icon decodes the rebuild starts go into `decodes`.
+    def _Publish(self, snapshot, cycle):
+        # GUI thread: the load announced -- gameLoaded (the roster, the set
+        # length and the commit: bootstrap.wire_game_roster) ahead of onLoad
+        # (the window's game button and mods checkbox, the persisted pick,
+        # the player DB's refresh), each slot run here, in connection order
+        # -- and last the load's save cycle closed, here too, which
+        # publishes what the commit queued. So a load that returns has had
+        # all of them run: what set_game's "OK" has always meant. (Until
+        # ADR-005 S3f-4 the loader thread emitted them and the slots ran
+        # queued after it, each in a save cycle of its own. Until the Qt
+        # model clean-up's PR4 the Qt models were rebuilt here first, and a
+        # rebuild that raised settled the load unannounced -- FAILED -- in
+        # this same operation and recording.)
         #
         # All of it one board operation (AutonaWebOperations.boardHost,
         # under its lock; ADR-005 S4ad review): no board operation of
         # another thread lands between the roster, the slots and the close.
         # Until S4ad those ran on this (the GUI) thread, queued behind this
-        # call. Nothing in here waits for another thread (the rebuild only
-        # starts its decodes; onLoad's slots take the settings' / player
-        # models' locks, which come after this one, and queue the rest), so
-        # a request thread holding the lock only makes this wait for its
-        # operation to end. What another thread writes meanwhile all the
-        # same (a core-direct write: score:adjust), or wrote while the
-        # loader selected (a board operation too), is not the load's: the
-        # commit publishes what the load wrote -- recorded here from the
-        # rebuild to the close (StateManager.RecordHeldWrites; the
-        # wiring's and the settle's join it) -- and leaves the rest behind
-        # 反映. Until the fix of 2026-11-12 the close published all of it.
-        # The load's writes are told by thread: a gameLoaded / onLoad slot
-        # that writes held keys from another thread (a job it hands off and
-        # waits for, a queued call) is someone else to the commit, and what
-        # it writes waits for 反映.
+        # call. Nothing in here waits for another thread (onLoad's slots
+        # take the settings' / player DB's locks, which come after this one,
+        # and queue the rest), so a request thread holding the lock only
+        # makes this wait for its operation to end. What another thread
+        # writes meanwhile all the same (a core-direct write: score:adjust),
+        # or wrote while the loader selected (a board operation too), is not
+        # the load's: the commit publishes what the load wrote -- recorded
+        # here from the announcement to the close
+        # (StateManager.RecordHeldWrites; the wiring's joins it) -- and
+        # leaves the rest behind 反映. Until the fix of 2026-11-12 the close
+        # published all of it. The load's writes are told by thread: a
+        # gameLoaded / onLoad slot that writes held keys from another thread
+        # (a job it hands off and waits for, a queued call) is someone else
+        # to the commit, and what it writes waits for 反映.
         # Imported here: the web layer is not this module's to pull in when
         # it is imported.
         from . import AutonaWebOperations
@@ -597,16 +557,8 @@ class AutonaGameAssetManager(QObject):
         def publish():
             with StateManager.RecordHeldWrites():
                 try:
-                    try:
-                        self._RebuildModels(decodes)
-                    except Exception:
-                        # Not announced, then (FAILED): what the slots would
-                        # have written goes with the selection all the same,
-                        # before the cycle closes (ADR-005 S3f-4 review).
-                        # The slots' exceptions do not reach here: emit
-                        # reports them and goes on.
-                        self._SettleUnannounced(snapshot)
-                        raise
+                    # The slots' exceptions do not reach here: emit reports
+                    # them and goes on.
                     self.signals.gameLoaded.emit(snapshot)
                     self.signals.onLoad.emit()
                     # The commit (AutonaActions.CommitGameLoad) is the
@@ -620,19 +572,6 @@ class AutonaGameAssetManager(QObject):
                     cycle.Release()
 
         AutonaWebOperations.boardHost.Run(publish)
-
-    @staticmethod
-    def _WaitForDecodes(decodes):
-        # Each decode's own Future: result() sees a cancellation at once
-        # (concurrent.futures.wait would not see the shutdown's; see
-        # core/TaskExecutor). A failed decode was logged by its lane.
-        for future in decodes:
-            try:
-                future.result()
-            except CancelledError:
-                pass
-            except Exception:
-                pass
 
     @staticmethod
     def _StatusProgress(codename, status):
@@ -651,384 +590,3 @@ class AutonaGameAssetManager(QObject):
                 AutonaStatusManager.update(
                     status["token"], message, progress=done, total=total)
         return progress
-
-    # ── models ──────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _HasGame(snapshot):
-        # False only for the snapshot before any load (and after
-        # ResetGameState): its models are empty, without the blank first
-        # rows, exactly as before the first load.
-        return bool(snapshot.codename or snapshot.characters or snapshot.stages
-                    or snapshot.variants or snapshot.colors)
-
-    def _RebuildModels(self, decodes=None):
-        """Rebuild every model from the catalog's current snapshot.
-
-        Reads Current() rather than taking the snapshot of the load that
-        asked for it, so overlapping loads converge on the latest one, and
-        skips when the models already belong to that generation. GUI thread
-        only (QPixmap / QIcon). Returns the Futures of the icon decodes it
-        started (UpdateSkinModel), [] when it skipped:
-        `decodes` if given, appended to as each decode starts -- so a caller
-        has the ones started before a failure part-way (the loader waits
-        for them).
-        """
-        decodes = [] if decodes is None else decodes
-        snapshot = self.catalog.Current()
-        if snapshot.generation == self._modelGeneration:
-            return decodes
-        # Retire the previous model generation instead of letting it be
-        # garbage-collected mid-swap: player-widget combos and proxies stay
-        # attached to the old models until their onLoad handlers
-        # (ReloadCharacters etc.) rebind AFTER this batch, and deleting a C++
-        # model under a live view/proxy is an access-violation crash (same
-        # class as the AutonaPlayerDB.SetupModel boot crash, 2026-07-11).
-        self._retiredModels = [
-            self.characterModel, self.skinModels, self.variantModel,
-            self.colorModel]
-        self._modelGeneration = snapshot.generation
-        self.UpdateCharacterModel(snapshot)
-        self.UpdateSkinModel(snapshot, decodes)
-        self.UpdateVariantModel(snapshot)
-        self.UpdateColorModel(snapshot)
-        return decodes
-
-    def _DecodeIcons(self, decode, complete, *args, task_name):
-        """Run `decode(*args)` on the TaskExecutor's fan-out lane and hand its
-        result to `complete` on the GUI thread; the decode's Future.
-
-        The fan-out lane, not the job lane: the loader job waits for these
-        (_WaitForDecodes), and a job waits only on fan-out tasks (core
-        /TaskExecutor). The decode stops at QImage; `complete` builds the
-        QPixmap / QIcon and sets it on the GUI thread, through the long-lived
-        GUI executor (the Worker's own signals object these went through
-        until ADR-005 S3f-4 could be collected before its answer arrived).
-        """
-        def run():
-            result = decode(*args)
-            AutonaQtHelper.gui_executor(lambda: complete(result))
-        return TaskExecutor.instance.submit_fanout(run, task_name=task_name)
-
-    def GetStockIcon(self, en_name, skin=0):
-        # Shared, memoised 32px stock-icon QIcon for a character/skin, from
-        # the current snapshot. QIcon / QPixmap must be built on the GUI
-        # thread. Returns an empty QIcon when no path exists. No caller
-        # since the Qt model clean-up's PR3 (the player model, its last one,
-        # went); it goes with the asset models in PR4.
-        return self._StockIcon(self.catalog.Current(), en_name, skin)
-
-    def _StockIcon(self, snapshot, en_name, skin):
-        # The icon comes from `snapshot`, so a model built from one snapshot
-        # never mixes in another game's icon when a load lands meanwhile.
-        # The cache follows the snapshot generation.
-        if snapshot.generation != self._iconCacheGeneration:
-            self._iconCache = {}
-            self._iconCacheGeneration = snapshot.generation
-        cache_key = (en_name, skin)
-        icon = self._iconCache.get(cache_key)
-        if icon is None:
-            path = snapshot.stockIconPaths.get(en_name, {}).get(skin)
-            if path is None:
-                return QIcon()
-            icon = QIcon(QPixmap.fromImage(QImage(path).scaledToWidth(
-                32, Qt.TransformationMode.SmoothTransformation)))
-            self._iconCache[cache_key] = icon
-        return icon
-
-    def UpdateCharacterModel(self, snapshot=None):
-        snapshot = snapshot or self.catalog.Current()
-        try:
-            self.characterModel = QStandardItemModel()
-            if not self._HasGame(snapshot):
-                return
-
-            # Add one empty
-            item = QStandardItem("")
-            self.characterModel.appendRow(item)
-
-            # Rows come in display order, modded ones already left out while
-            # mods are off (GameAssetCatalog).
-            for text, data in snapshot.characterRows:
-                item = QStandardItem()
-                item.setData(text, Qt.ItemDataRole.EditRole)
-                item.setIcon(self._StockIcon(snapshot, data.get("en_name"), 0))
-                item.setData(data, Qt.ItemDataRole.UserRole)
-                self.characterModel.appendRow(item)
-        except Exception:
-            logger.error(traceback.format_exc())
-
-    def UpdateColorModel(self, snapshot=None):
-        snapshot = snapshot or self.catalog.Current()
-        try:
-            self.colorModel = QStandardItemModel()
-            if not self._HasGame(snapshot):
-                return
-
-            # Add one empty
-            item = QStandardItem("")
-            self.colorModel.appendRow(item)
-
-            for text, data in snapshot.colorRows:
-                item = QStandardItem()
-                item.setData(text, Qt.ItemDataRole.EditRole)
-
-                try:
-                    icon = QPixmap(100, 100)
-                    icon.fill(QColor("#" + data.get("value")))
-                    item.setIcon(QIcon(icon))
-                except Exception:
-                    # A colour without a value: the row stays, iconless.
-                    logger.error(traceback.format_exc())
-
-                item.setData(data, Qt.ItemDataRole.UserRole)
-                self.colorModel.appendRow(item)
-        except Exception:
-            logger.error(traceback.format_exc())
-
-    def UpdateVariantModel(self, snapshot=None):
-        snapshot = snapshot or self.catalog.Current()
-        try:
-            self.variantModel = QStandardItemModel()
-            if not self._HasGame(snapshot):
-                return
-
-            # Add one empty
-            item = QStandardItem("")
-            self.variantModel.appendRow(item)
-
-            for text, data in snapshot.variantRows:
-                item = QStandardItem()
-                item.setData(text, Qt.ItemDataRole.EditRole)
-
-                if data.get("icon_path"):
-                    item.setIcon(QIcon(QPixmap.fromImage(QImage(data["icon_path"]))))
-                else:
-                    item.setIcon(QIcon(QPixmap.fromImage(QImage(CANCEL_ICON_PATH))))
-
-                item.setData(data, Qt.ItemDataRole.UserRole)
-                self.variantModel.appendRow(item)
-        except Exception:
-            logger.error(traceback.format_exc())
-
-    def UpdateSkinModel(self, snapshot=None, decodes=None):
-        """Rebuild the skin models, one per character; the Futures of their
-        icon decodes, one per character (appended to `decodes` as each
-        starts, if given, and that list returned)."""
-        snapshot = snapshot or self.catalog.Current()
-        self.skinModels = {}
-        self._skinIconGeneration += 1
-        generation = self._skinIconGeneration
-
-        decodes = [] if decodes is None else decodes
-
-        for key, rows in snapshot.skinRows.items():
-            skinModel = QStandardItemModel()
-
-            allAssetData = []
-            allItem = []
-
-            for _skin, text, assetData in rows:
-                item = QStandardItem()
-                skinModel.appendRow(item)
-                item.setData(text, Qt.ItemDataRole.EditRole)
-                item.setData(assetData, Qt.ItemDataRole.UserRole)
-
-                allItem.append(item)
-                allAssetData.append(assetData)
-
-            self.skinModels[key] = skinModel
-
-            # The pack comes from the snapshot the rows were built from, not
-            # from Current() inside the decode (a later load may have landed).
-            decodes.append(self._DecodeIcons(
-                self.LoadSkinImages, self.LoadSkinImagesComplete,
-                allAssetData, allItem, skinModel, generation,
-                snapshot.biggestCompletePack,
-                task_name=f"skin icons ({key})"))
-
-        return decodes
-
-    def LoadSkinImages(self, allAssetData, allItem, skinModel, generation, biggestCompletePack):
-        # Runs on a fan-out thread. QPixmap / QIcon are GUI-thread only, so
-        # this stops at QImage; LoadSkinImagesComplete builds the icons on
-        # the GUI thread.
-        # skinModel is unused: passed only to keep the model alive while the decode runs.
-        # A None image (no usable asset, or one that failed to decode) asks
-        # for the fallback (cancel) icon, per skin. The old code
-        # opened cancel.svg with PIL, which cannot read SVG, so one
-        # asset-less skin dropped the icons of the whole character.
-        images = []
-
-        for i in range(len(allAssetData)):
-            assetData = allAssetData[i]
-            try:
-                # Set to use first asset as a fallback
-                key = biggestCompletePack
-                asset = None
-
-                if assetData["assets"].get(key):
-                    asset = assetData["assets"][key]
-                elif assetData["assets"].get("full"):
-                    asset = assetData["assets"]["full"]
-                elif assetData["assets"].get("base_files/icon"):
-                    asset = assetData["assets"]["base_files/icon"]
-
-                if not asset or not asset.get("asset"):
-                    images.append(None)
-                    continue
-
-                img = Image.open(asset["asset"])
-
-                targetW = 128
-                targetH = 96
-
-                originalW = img.width
-                originalH = img.height
-
-                proportional_zoom = 1
-
-                if asset.get("average_size"):
-                    proportional_zoom = 0
-                    proportional_zoom = max(
-                        proportional_zoom,
-                        (targetW / asset.get("average_size", {}).get("x", 0)) * 1.2
-                    )
-                    proportional_zoom = max(
-                        proportional_zoom,
-                        (targetH / asset.get("average_size", {}).get("y", 0)) * 1.2
-                    )
-
-                # For cropped assets, zoom to fill
-                # Calculate max zoom
-                zoom_x = targetW / originalW
-                zoom_y = targetH / originalH
-
-                minZoom = 1
-                rescalingFactor = 1
-                customZoom = 1
-
-                if asset.get("rescaling_factor"):
-                    rescalingFactor = asset.get("rescaling_factor")
-
-                uncropped_edge = asset.get("uncropped_edge", [])
-
-                if not uncropped_edge or len(uncropped_edge) == 0:
-                    if zoom_x > zoom_y:
-                        minZoom = zoom_x
-                    else:
-                        minZoom = zoom_y
-                else:
-                    if (
-                        "u" in uncropped_edge and
-                        "d" in uncropped_edge and
-                        "l" in uncropped_edge and
-                        "r" in uncropped_edge
-                    ):
-                        if "icon" in asset.get("type", []):
-                            customZoom = 0.5 # Add zoom for icons to fit
-                        else:
-                            customZoom = 1.2  # Add zoom in for uncropped assets
-                        minZoom = customZoom * proportional_zoom * rescalingFactor
-                    elif (
-                        not "l" in uncropped_edge and
-                        not "r" in uncropped_edge
-                    ):
-                        minZoom = zoom_x
-                    elif (
-                        not "u" in uncropped_edge and
-                        not "d" in uncropped_edge
-                    ):
-                        minZoom = zoom_y
-                    else:
-                        minZoom = customZoom * proportional_zoom * rescalingFactor
-
-                zoom = max(minZoom, customZoom * minZoom)
-
-                # Centering
-                xx = 0
-                yy = 0
-
-                eyesight = asset.get("eyesight")
-
-                if not eyesight:
-                    eyesight = {
-                        "x": originalW / 2,
-                        "y": originalH / 2
-                    }
-
-                xx = -eyesight["x"] * zoom + targetW / 2
-
-                maxMoveX = targetW - originalW * zoom
-
-                if not uncropped_edge or not "l" in uncropped_edge:
-                    if (xx > 0):
-                        xx = 0
-
-                if not uncropped_edge or not "r" in uncropped_edge:
-                    if (xx < maxMoveX):
-                        xx = maxMoveX
-
-                yy = -eyesight["y"] * zoom + targetH / 2
-
-                maxMoveY = targetH - originalH * zoom
-
-                if not uncropped_edge or not "u" in uncropped_edge:
-                    if (yy > 0):
-                        yy = 0
-
-                if not uncropped_edge or not "d" in uncropped_edge:
-                    if (yy < maxMoveY):
-                        yy = maxMoveY
-
-                img = img.resize(
-                    (int(originalW*zoom), int(originalH*zoom)), Image.BILINEAR)
-                img = img.crop((
-                    int(-xx),
-                    int(-yy),
-                    int(-xx+128),
-                    int(-yy+96)
-                ))
-
-                img = img.convert("RGBA")
-                data = img.tobytes("raw", "RGBA")
-                qimg = QImage(
-                    data, img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-
-                # copy(): own the pixels, `data` does not outlive this call.
-                images.append(qimg.copy())
-            except Exception:
-                logger.error(traceback.format_exc())
-                images.append(None)
-
-        return (generation, [(allItem[i], images[i]) for i in range(len(allItem))])
-
-    def LoadSkinImagesComplete(self, result):
-        # GUI thread (handed over by the LoadSkinImages decode).
-        try:
-            if result is None:
-                return
-            generation, pairs = result
-            if generation != self._skinIconGeneration:
-                # The skin models were rebuilt while this decode ran: its
-                # items belong to a retired generation.
-                return
-            fallback = None
-            for item, image in pairs:
-                if image is None:
-                    if fallback is None:
-                        fallback = QIcon(
-                            QPixmap(CANCEL_ICON_PATH).scaled(32, 32))
-                    icon = fallback
-                else:
-                    icon = QIcon(QPixmap.fromImage(image))
-                if not icon.isNull():
-                    item.setIcon(icon)
-        except Exception:
-            logger.error(traceback.format_exc())
-            return (None)
-
-    # ── lookups (delegated to the catalog) ──────────────────────────────
-
-    def GetCharacterAssets(self, characterCodename: str, skin: int, assetpack: str = None):
-        return self.catalog.CharacterAssets(characterCodename, skin, assetpack)

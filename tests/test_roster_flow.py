@@ -456,9 +456,10 @@ def test_the_cards_follow_repeated_roster_changes(world, autonaApp):
 
 def _loadGameThreaded(codename):
     """A game load as a job of the TaskExecutor, as the GAME menu runs it
-    (ADR-005 S3f-4; the asset loader's QThread until then): the models, then
-    the roster (gameLoaded) and the boards' onLoad handlers run on the GUI
-    thread, marshalled from the job while its save block is still open. This
+    (ADR-005 S3f-4; the asset loader's QThread until then): the roster
+    (gameLoaded) and the onLoad handlers run on the GUI thread (after the Qt
+    models' rebuild until the Qt model clean-up's PR4), marshalled from the
+    job while its save block is still open. This
     thread is pumped while waiting -- the job marshals onto it (run_sync),
     so blocking on its Future would deadlock."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
@@ -1192,7 +1193,10 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
     (ADR-005 S3f-4 review). Without it the next launch restored the new
     game over the old game's characters (desktop: the pick was persisted,
     the roster never ran) or the old game over the new one's state
-    (headless: neither ran)."""
+    (headless: neither ran). A desktop load whose Qt model rebuild failed
+    (FAILED) was settled the same way, on the GUI thread, until the Qt model
+    clean-up's PR4 removed the rebuild and its test: this one pins the
+    settle (_SettleUnannounced) now."""
     from src import AutonaWebOperations as WebOps
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
@@ -1247,57 +1251,6 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
         assert not worker.is_alive()
 
     assert stopping and StateManager.saveBlocked == 0
-    assert StateManager.GetCommitted("game.codename") == TEAM_GAME
-    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == TEAM_GAME
-    # TEAM_GAME's roster (two a team), every pick and main blank, published.
-    blank = {f"{team}.{slot}.{group}": ["", "", ""]
-             for team in (1, 2) for slot in (1, 2)
-             for group in ("character", "mains")}
-    assert _picks(read=StateManager.GetCommitted) == blank
-    assert not StateManager.HasPendingChanges("score.2")
-
-
-def test_a_load_whose_models_fail_keeps_one_game(world, autonaApp,
-                                                 monkeypatch):
-    """The desktop's model rebuild fails on the GUI thread after a switch's
-    selection (FAILED): the load is not announced, but its selection is
-    published with its cycle -- and so is what the announcement's slots
-    would have written, there, before the cycle closes: the previous game's
-    picks emptied with the new game's roster (committed on the held board)
-    and the pick persisted, as for a load the shutdown stopped (ADR-005
-    S3f-4 review). Without it the state held the new game over the old
-    game's characters, and the next launch restored the old game."""
-    from src.AutonaGameAssetManager import FAILED, AutonaGameAssetManager
-    from src.core.SettingsManager import SettingsManager
-
-    manager = AutonaGameAssetManager.instance
-    actions = AutonaActions.instance
-    assert StateManager.Get("game.codename") == "tgame"
-    assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") != TEAM_GAME
-    autonaApp.ready(2)  # made: its writes are held until committed
-    actions.SetRoster(2, 1, 3)
-    _fillPicks()
-    actions.ApplyChanges(2)
-    autonaApp.settle()
-    picked = _picks(read=StateManager.GetCommitted)
-    assert all(all(names) for names in picked.values()), picked
-
-    failures = []
-    realRebuild = manager._RebuildModels
-
-    def failing(decodes=None):
-        if not failures:  # the load's; not a later rebuild (the teardown's)
-            failures.append(threading.current_thread().name)
-            raise RuntimeError("a model failed")
-        return realRebuild(decodes)
-
-    monkeypatch.setattr(manager, "_RebuildModels", failing)
-    future = manager.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
-    drain_tasks()
-
-    assert future.result(0) == FAILED
-    assert failures == [threading.main_thread().name]
-    assert StateManager.saveBlocked == 0
     assert StateManager.GetCommitted("game.codename") == TEAM_GAME
     assert SettingsManager.Get("SELECTED_GAME_CODENAME") == TEAM_GAME
     # TEAM_GAME's roster (two a team), every pick and main blank, published.

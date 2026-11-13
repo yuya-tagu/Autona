@@ -16,7 +16,7 @@ Two stages (ADR-005 S3c):
   it builds are QtCore ones (QObject), which a QCoreApplication serves.
   The headless shell (main.py --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
-  hotkeys, the game asset / country models, the player DB model wiring, the
+  hotkeys, the game asset loader adapter, the player DB refresh wiring, the
   alert and updater objects, the boards made and held at launch, the shell
   operations, and the registrations that make the web operations run on the
   GUI thread (the scoreboard dock, through which they ran, went with the Qt
@@ -458,8 +458,11 @@ def bootstrap_gui():
     """Create the desktop shell's Qt adapters on top of bootstrap_core().
 
     Called from src/Autona.py right after bootstrap_core(), before the
-    Window is built. Needs a QApplication (the asset and player models are
-    QtGui's). Safe to call more than once; only the first call does work.
+    Window is built, under the desktop's QApplication (what it wires serves
+    the window: the hotkeys, the alert and updater dialogs). It built QtGui
+    models too -- the asset, country and player models -- until the Qt model
+    clean-up removed them (PR2-PR4). Safe to call more than once; only the
+    first call does work.
 
     Every step here used to sit inside bootstrap_core(), interleaved with
     the core steps. Moving them behind it changes the construction order only
@@ -505,7 +508,9 @@ def bootstrap_gui():
     HotkeyRules.applied = True
 
     # ORDER CONSTRAINT: the Qt adapter wraps the game asset catalog
-    # (bootstrap_core()). It only builds the (empty) Qt models here.
+    # (bootstrap_core()). Its construction builds no Qt model (it built the
+    # empty asset models here until the Qt model clean-up's PR4): only its
+    # signals and the loader's bookkeeping.
     from .core.GameAssetCatalog import GameAssetCatalog
     from .AutonaGameAssetManager import AutonaGameAssetManager
     if AutonaGameAssetManager.instance is None:
@@ -513,8 +518,8 @@ def bootstrap_gui():
             GameAssetCatalog.instance)
 
     # The provider's game follows through the adapter on the desktop: a
-    # start.gg videogame id loads through it (so its Qt models are rebuilt
-    # and onLoad fires), and every scan re-applies the provider's game. The
+    # start.gg videogame id loads through it (so the load is announced:
+    # gameLoaded, onLoad), and every scan re-applies the provider's game. The
     # connection used to be made in the provider's __init__; making it here
     # keeps it the first slot on onLoadAssets, ahead of everything the
     # Window connects: Window.ReloadGames (Window.__init__), the EVENT
@@ -590,8 +595,8 @@ def bootstrap_gui():
 
     # ORDER CONSTRAINT: the web operations' desktop registrations, after the
     # objects they point at (the shell operations and the asset adapter,
-    # both above). A game is loaded through the adapter, so its Qt models
-    # follow. The shell operations (the set selection, the thumbnail,
+    # both above). A game is loaded through the adapter, so its
+    # announcement (gameLoaded / onLoad) follows. The shell operations (the set selection, the thumbnail,
     # ADR-005 S3e-9; the image renderer, S4o) are AutonaShellOperations'
     # (the dock's until S4y), run on the GUI thread. The defaults are the
     # headless shell's (no loader until it registers its own; no shell
@@ -688,7 +693,8 @@ def wire_game_roster(game_loaded):
       the loader thread, closed at the end of _Publish) it only queues the
       boards, and the cycle's close publishes what the load wrote by then
       -- what onLoad's slots wrote after the commit included: _Publish
-      records from the rebuild to the close, and this joins it. Headless
+      records from gameLoaded's emit to the close, and this joins it (from
+      the Qt models' rebuild until the Qt model clean-up's PR4). Headless
       nothing is held, so the commit finds nothing.
 
     The load's own snapshot, not the catalog's Current(): this slot runs on
@@ -717,8 +723,10 @@ def wire_game_roster(game_loaded):
 
         def run():
             # The load's writes, told apart from everyone else's: the
-            # desktop's _Publish records from the rebuild to the cycle's
-            # close, which this joins (onLoad's slots go with them).
+            # desktop's _Publish records from gameLoaded's emit to the
+            # cycle's close, which this joins (onLoad's slots go with them).
+            # (From the Qt models' rebuild until the Qt model clean-up's
+            # PR4.)
             with StateManager.RecordHeldWrites() as written:
                 with StateManager.SaveBlock():
                     try:

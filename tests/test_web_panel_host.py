@@ -2823,6 +2823,49 @@ QT_MODEL_CLEANUP_NAMES = (
     "EnableModel", "modelEnabled", "_BuildModel", "modelLock",
     "_retiredModel")
 
+# PR4: the asset adapter's Qt models and their icons (the React pages read
+# the catalog through the web operations; no combo was left). Its own names,
+# so looked for where they lived and were used -- the adapter and the
+# modules that import it -- not in all of src: an unrelated module may well
+# have an `_iconCache` or a `_HasGame` of its own.
+QT_ASSET_MODEL_NAMES = (
+    "characterModel", "skinModels", "variantModel", "colorModel",
+    "_retiredModels", "_modelGeneration", "_RebuildModels",
+    "UpdateCharacterModel", "UpdateSkinModel", "UpdateVariantModel",
+    "UpdateColorModel", "_HasGame", "_DecodeIcons", "LoadSkinImages",
+    "LoadSkinImagesComplete", "_skinIconGeneration", "_WaitForDecodes",
+    "GetStockIcon", "_StockIcon", "_iconCache", "_iconCacheGeneration",
+    "GetCharacterAssets")
+
+# PR4: the asset adapter's properties that read the catalog for the Qt side
+# (common words: looked for as the adapter's attributes only).
+QT_ASSET_MODEL_PROPERTIES = (
+    "characters", "skins", "variants", "colors", "biggestCompletePack")
+
+# PR4: what the asset adapter must not build or name any more -- the QtGui
+# types of its models and icons.
+QT_GUI_MODEL_TYPES = (
+    "QStandardItemModel", "QStandardItem", "QIcon", "QPixmap", "QImage",
+    "QColor")
+
+
+def _importsTheAssetAdapter(tree):
+    """Whether a module imports src/AutonaGameAssetManager.py (`from
+    .AutonaGameAssetManager import ...`, `from . import
+    AutonaGameAssetManager`, `import src.AutonaGameAssetManager`)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[-1] == "AutonaGameAssetManager":
+                return True
+            if any(alias.name == "AutonaGameAssetManager"
+                   for alias in node.names):
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name.split(".")[-1] == "AutonaGameAssetManager"
+                   for alias in node.names):
+                return True
+    return False
+
 
 def test_the_unused_qt_model_leftovers_are_gone():
     import inspect
@@ -2848,6 +2891,61 @@ def test_the_unused_qt_model_leftovers_are_gone():
                 if isinstance(node, ast.ImportFrom)}
     assert not imported & {"qtpy.QtGui", "qtpy.QtWidgets",
                            "AutonaGameAssetManager"}, imported
+
+    # PR4: the asset adapter holds no Qt model, builds no icon and needs no
+    # QtGui (nor PIL, which decoded the icons): QtCore's QObject / Signal
+    # for its signals, and the loads.
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    adapter = src / "AutonaGameAssetManager.py"
+    tree = ast.parse(adapter.read_text(encoding="utf-8"))
+    # Its names, in it and in the modules that import it.
+    scope = {str(path.relative_to(PROJECT_ROOT)): path
+             for path in sorted(src.rglob("*.py"))
+             if path == adapter or _importsTheAssetAdapter(
+                 ast.parse(path.read_text(encoding="utf-8")))}
+    # (Its importers today: the window, the asset guide, the composition
+    # root. A detection that found none would check nothing.)
+    assert {"src/AutonaGameAssetManager.py", "src/Autona.py",
+            "src/bootstrap.py"} <= {key.replace("\\", "/") for key in scope}
+    users = {key: sorted(_codeNames(path) & set(QT_ASSET_MODEL_NAMES))
+             for key, path in scope.items()}
+    assert {key: names for key, names in users.items() if names} == {}
+    # Its properties: neither on the class nor set on an instance
+    # (`self.characters = ...`) anywhere in it.
+    for name in QT_ASSET_MODEL_PROPERTIES:
+        assert not hasattr(AutonaGameAssetManager, name), name
+    assigned = sorted(
+        part.attr for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+        for target in (node.targets if isinstance(node, ast.Assign)
+                       else [node.target])
+        for part in ast.walk(target)  # a, self.x = ...: the tuple's parts
+        if isinstance(part, ast.Attribute)
+        and isinstance(part.value, ast.Name) and part.value.id == "self"
+        and part.attr in QT_ASSET_MODEL_PROPERTIES)
+    assert assigned == [], assigned
+    assert list(inspect.signature(AutonaGameAssetManager._Publish)
+                .parameters) == ["self", "snapshot", "cycle"]
+    imported = {node.module for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)}
+    imported |= {alias.name for node in ast.walk(tree)
+                 if isinstance(node, ast.Import) for alias in node.names}
+    assert not imported & {"qtpy.QtGui", "qtpy.QtWidgets", "PIL"}, imported
+    assert _codeNames(adapter) & set(QT_GUI_MODEL_TYPES) == set()
+    # A load that is not announced is settled on one path only: the
+    # shutdown's (STOPPED, in _Load). _Publish settled a failed model
+    # rebuild (FAILED) too, until the models went. Every call of the name
+    # counts, whatever it is called on (self, the instance, a local).
+    settlers = sorted(
+        function.name for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and (isinstance(node.func, ast.Attribute)
+             and node.func.attr == "_SettleUnannounced"
+             or isinstance(node.func, ast.Name)
+             and node.func.id == "_SettleUnannounced"))
+    assert settlers == ["_Load"], settlers
 
 
 def test_the_qt_settings_window_is_gone():

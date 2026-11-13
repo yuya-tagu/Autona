@@ -116,7 +116,9 @@ ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, 
   `PlayerService.PublishCharacterSlots` / `SetCountry` / `SetRegion`。v1 の `Edit` / `EditCharacter` も同じ）。Qt モデルの UserRole を
   読み出してそのまま publish すると、値の形とキー順（QVariantMap 順 = 外部契約）が
   Qt に縛られ、Qt なしでは同じ state を作れなくなる
-  - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る
+  - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る（Qt モデルの整理 PR4 で最後の Qt のモデル
+    （`AutonaGameAssetManager` のキャラ・スキン・バリアント・カラーのモデル）も削除し、今は該当する Qt のウィジェットが無い。
+    React のページはカタログのペイロード（`GameAssetCatalog.*Payload()` / `CountryCatalog`）の行を描く）
   - **カードの数も state に従う**（ADR-005 S3e-6）: 人数・キャラ数は `AutonaActions.SetRoster` が
     スロットとキャラ枠を増減する。Qt のボードは held サイクルの中でカード・キャラ行を作り / 退役させ、
     破棄を `QTimer.singleShot(0)` でイベントループに戻してから pitfalls #14 の invalidate を通して行っていた

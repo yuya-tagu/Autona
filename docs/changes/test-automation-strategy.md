@@ -373,17 +373,20 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 #### ハーネス制約: 合成ゲームが無いとキャラ選択のテストは空振りする
 
 ハーネスの `user_data/games` は空なので
-`AutonaGameAssetManager.characterModel` は 0 行。キャラコンボは index -1 から
-動かせず、「どのスロットに誰が入ったか」の assert が全て自明に通ってしまう。
+カタログにキャラが無い（当時は `AutonaGameAssetManager.characterModel` が 0 行で、キャラコンボは index -1 から
+動かなかった）。「どのスロットに誰が入ったか」の assert が全て自明に通ってしまう。
 `_AutonaHarness.loadCharacters()` は最小限の**実ゲームパック**（`harness_game`、
 キャラ × スキンごとに 1 枚のアイコン PNG）をランタイムの `user_data/games` に書き出し、
-production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()` → アダプタの
-`_RebuildModels()`）で読み込む（ADR-005 S1a 以降。旧版は属性を直接差し込んでいた）。
-本物のロードとの違いは最後の `onLoad` を emit しないことだけ — 他のテストが残した
-ウィジェットを反応させないため。既存のコンボは `onLoad` でしか再バインドしないので、
-ロスターを見せたいウィジェットより先に呼ぶ。アイコンワーカーは CWD 復元をまたがないよう
-その場で待ち合わせる。テスト後（`dropAllBoards()`）はパックを削除して
-`ResetGameState()` → 空モデルへ戻す（旧世代は `agent-pitfalls #13` に従い 1 世代 retire）。
+production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()`。Qt モデルの整理 PR4 まではアダプタの
+`_RebuildModels()` も）で読み込む（ADR-005 S1a 以降。旧版は属性を直接差し込んでいた）。
+本物のロードとの違いは GUI スレッドの側（`gameLoaded` とそのロスター・commit、`onLoad`）を出さないこと —
+それは `publishGameLoad()` が受け持つ（ロードの保存サイクルを開いて `AutonaGameAssetManager._Publish` を呼ぶ。
+ボードホストのロックの下で `gameLoaded` → `onLoad` → サイクルを閉じる、本物と同じ順）。`gameLoaded` / `onLoad` に
+繋がったものを反応させたいテストは、`loadCharacters()` の後に `publishGameLoad()` を呼ぶ。今はロスターを見せる
+Qt のコンボもウィジェットも無い（PR4 までは既存のコンボが `onLoad` でしか再バインドしなかったので、それより先に呼んでいた）。
+テスト後（`dropAllBoards()`）はパックを削除して
+`ResetGameState()` で空に戻す（PR4 まではアイコンのデコードをその場で待ち合わせ、空モデルへ戻して旧世代を
+`agent-pitfalls #13` に従い 1 世代 retire していた）。
 
 #### 未修正の細かい歪み（今回は触っていない）
 

@@ -1854,7 +1854,8 @@ class AutonaActions:
         (_SettleUnannounced). Inside the load's own save cycle it only
         queues the boards: the cycle's close publishes what the load wrote
         by then, onLoad's slots included (the desktop's _Publish records
-        from the rebuild to the close). Until S4ad the desktop's asset
+        from gameLoaded's emit to the close; from the Qt models' rebuild
+        until the Qt model clean-up's PR4). Until S4ad the desktop's asset
         adapter called it after the load's onLoad slots
         (AutonaGameAssetManager._Publish), as a Qt player card's
         ReloadCharacters wrote what its rows picked on onLoad (until
