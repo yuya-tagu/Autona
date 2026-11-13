@@ -407,11 +407,10 @@ def bootstrap_core():
 
     # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
     # countries, regions and the city -> region lookup, ADR-005 S1c) has to
-    # exist before its Qt adapter (bootstrap_gui()), whose LoadCountries()
-    # drives it, and before any reader -- the player widgets built from
-    # Window.__init__, the Start.gg parser, the web server. It depends on
-    # nothing constructed here. Nothing is read here: the load is the
-    # shell's (AutonaCountryHelper.init() in Window.__init__), after
+    # exist before any reader -- the Start.gg parser, the web server. It
+    # depends on nothing constructed here. Nothing is read here: the load is
+    # the shell's (`CountryCatalog.instance.Load()` in Window.__init__ for the
+    # desktop, src/headless.py for headless), after
     # LoadLocale(), because the country names are localized and the locale
     # is only read through the injected callable at load time (the
     # GameAssetCatalog pattern).
@@ -560,19 +559,6 @@ def bootstrap_gui():
     from .AutonaUpdater import AutonaUpdater
     if AutonaUpdater.instance is None:
         AutonaUpdater.instance = AutonaUpdater()
-
-    # CountryHelper (the country catalog's Qt adapter) has an empty __init__
-    # -- the expensive part (LoadCountries: the catalog load, ~250 flag icons
-    # + the country model) still runs from init(), called by the window. Its
-    # import-time construction used to happen wherever the module was first
-    # pulled in (in practice through StartGGDataProvider, i.e. earlier than
-    # the Autona.py import that nominally owned it); the constructor depends
-    # on nothing, so pinning it here is behaviour preserving and matches the
-    # old nominal import order (CountryHelper before ScoreboardManager, which
-    # went with the Qt SCORE in ADR-005 S4ac-3).
-    from .Helpers.AutonaCountryHelper import AutonaCountryHelper
-    if AutonaCountryHelper.instance is None:
-        AutonaCountryHelper.instance = AutonaCountryHelper()
 
     # ORDER CONSTRAINT: the desktop's boards, all three, made at launch in
     # core (ADR-005 S4ac-1): the restored `score` subtree dropped, each

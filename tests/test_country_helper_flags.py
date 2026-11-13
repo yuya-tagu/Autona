@@ -1,7 +1,7 @@
 """BUG-2 (docs/changes/test-automation-strategy.md §3): a missing
 `./user_data/additional_flag` used to take every flag down with it.
 
-`AutonaCountryHelper.LoadCountries` built the whole standard country list and
+`AutonaCountryHelper.LoadCountries` (now `CountryCatalog.Load`) built the whole standard country list and
 model first, then reached `os.listdir("./user_data/additional_flag")` for the
 optional custom-flag add-on. That directory is normally shipped and git
 tracked, so this only bit a user who had cleaned out `user_data` -- but the
@@ -21,7 +21,6 @@ load is never at the mercy of the optional add-on.
 """
 import shutil
 
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.core.CountryCatalog import CountryCatalog
 from tests.conftest import load_player
 
@@ -34,19 +33,16 @@ def _removeAdditionalFlagDir():
 
 # ── the direct repro: LoadCountries() with the directory absent ──────────
 
-def test_load_countries_populates_the_model_without_additional_flag_dir(
-        autonaApp):
+def test_load_populates_the_catalog_without_additional_flag_dir(autonaApp):
     """The BUG-2 repro, called directly so it does not depend on whether an
     earlier test in this (session-scoped) harness already lazily triggered
     LoadCountries() once and left additional_flag behind."""
     _removeAdditionalFlagDir()
 
-    AutonaCountryHelper.LoadCountries()
+    assert CountryCatalog.instance.Load()
 
-    assert AutonaCountryHelper.countryModel is not None
-    # Row 0 is the "no country" placeholder; real entries start at 1. ~250
-    # countries ship in assets/countries+states.json.
-    assert AutonaCountryHelper.countryModel.rowCount() > 100
+    # ~250 countries ship in assets/countries+states.json.
+    assert len(CountryCatalog.instance.Current().countryRows) > 100
 
 
 def test_load_countries_creates_the_missing_directory(autonaApp):
@@ -55,7 +51,7 @@ def test_load_countries_creates_the_missing_directory(autonaApp):
     cleaned-out user_data."""
     _removeAdditionalFlagDir()
 
-    AutonaCountryHelper.LoadCountries()
+    CountryCatalog.instance.Load()
 
     import os
     assert os.path.isdir(ADDITIONAL_FLAG_DIR)
@@ -64,7 +60,7 @@ def test_load_countries_creates_the_missing_directory(autonaApp):
 def test_standard_flag_lookup_works_without_additional_flag_dir(autonaApp):
     _removeAdditionalFlagDir()
 
-    AutonaCountryHelper.LoadCountries()
+    CountryCatalog.instance.Load()
 
     info = CountryCatalog.instance.BasicCountryInfo("JP")
     assert info.get("en_name") == "Japan"

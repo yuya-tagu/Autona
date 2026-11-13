@@ -202,8 +202,8 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 対策は state コンボの **in-place refill**（`_EnsureStateModel()` で
 生涯 1 回だけ `setModel`、以後は `clear()` + `appendRow()` で行を入れ替え。
 `_retiredStateModel` は廃止）だった。選手ウィジェットと、同じ形の「1 モデルを使い回す」実装の
-`AutonaSelectSetWindow` は ADR-005 S4ac-3 で Qt の SCORE ごと削除した。今も残る実例は
-`AutonaCountryHelper.countryModel`（#15）。
+`AutonaSelectSetWindow` は ADR-005 S4ac-3 で Qt の SCORE ごと削除した。共有の国モデル `AutonaCountryHelper.countryModel`（#15）も
+Qt モデルの整理 PR2 で削除した。今、この形の実例は無い（Qt の一般則として残す）。
 
 - 保持機構は未特定（素の `QComboBox` 単体では旧モデルは解放される）。
   一般則として「コンボは渡された全モデルを保持する」と書かないこと。
@@ -226,7 +226,7 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 - ライブモデルへ 1 行ずつ追加するとビュー／コンプリータへの通知が行数ぶん出る。
   `with QSignalBlocker(combo):` で囲み、最後に必要なシグナルだけ 1 回 emit して
   旧 `setModel` 相当の発火に揃える（実装例だった `LoadStates` は S4ac-3 で削除。
-  `AutonaCountryHelper` の国モデルの再充填も `appendRow` のループ）
+  国モデル `AutonaCountryHelper` の再充填も `appendRow` のループだった。Qt モデルの整理 PR2 で削除）
 
 ## 14. QLayoutItem 系は PySide6 の追跡外 — 破棄前に `Shiboken.invalidate()` する（2026-08-03 フルスイートAV根治で確定）
 
@@ -243,7 +243,7 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 ## 15. `QCompleter(model)` はモデルへの Python 参照を保持しない（PySide6 6.11 実測）
 
 - コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
-- 関連（2026-10-23 ADR-005 S1c で解消）: 共有 `AutonaCountryHelper.countryModel` は初回ロードで 1 個作ったきり差し替えない（再ロードは同じモデルを `clear()` + `appendRow` で入れ替える）。かつて #13 規約の唯一の例外だった「retire 世代なしの差し替え」はもう無い。選手ウィジェットのコンプリータも `QCompleter()` + `setModel()` に揃えていた（`AutonaBasePlayerWidget._WireCountryState`。S4ac-3 で削除）。再ロードは `clear()` の直前に `countriesAboutToReload` が出るので、国コンボの index を state に流す消費者はそこで経路を止め、`countriesUpdated` で選び直す（Top 8・選手カードが実例だった。止めないと再ロードで国が `{}` に publish される。どちらも React になり、S4ac-3 から国モデルの消費者は無い。Qt の整理で消す）
+- 関連（削除済み・実例なし）: 共有の国モデル `AutonaCountryHelper.countryModel`（初回ロードで 1 個作ったきり差し替えず、再ロードは `clear()` + `appendRow` で入れ替え、`countriesAboutToReload` / `countriesUpdated` で消費者が経路を止めて選び直す形）と、その消費者（選手ウィジェット・Top 8）は ADR-005 S4ac-3 / Qt モデルの整理 PR2 までに全部削除した。国・地域は Qt-free の `core/CountryCatalog` を直接読む。Qt の一般則（共有モデルは差し替えない・コンプリータは `QCompleter()` + `setModel()`）だけが残る
 
 ## 16. StateManager の observer から GameAssetCatalog の writer を呼ばない（ADR-005 S1a）
 

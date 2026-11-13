@@ -117,7 +117,7 @@ def slotEnv(autonaApp):
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
-    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+    from src.core.CountryCatalog import CountryCatalog
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
     locale = LOCALE
@@ -131,7 +131,7 @@ def slotEnv(autonaApp):
     flags.mkdir(parents=True, exist_ok=True)
     for name in CUSTOM_FLAGS:
         (flags / name).write_bytes(b"")
-    AutonaCountryHelper.LoadCountries()
+    CountryCatalog.instance.Load()
 
     games = autonaApp.dir / "user_data" / "games"
     copy_trees([(GAME_FIXTURE / "games" / name, games / name)
@@ -163,7 +163,7 @@ def slotEnv(autonaApp):
             (flags / name).unlink(missing_ok=True)
         (AutonaLocaleHelper.programLocale, AutonaLocaleHelper.exportLocale,
          AutonaLocaleHelper.remapping) = saved
-        AutonaCountryHelper.LoadCountries()
+        CountryCatalog.instance.Load()
         autonaApp.settle()
 
 

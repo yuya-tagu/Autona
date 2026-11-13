@@ -1,23 +1,16 @@
-"""The Qt side of the country catalog, against the pre-S1c recording.
+"""The Web reader of the country catalog, against the pre-S1c recording.
 
 ADR-005 S1c moved the country data into the Qt-free core CountryCatalog
-(tests/test_country_catalog.py). What stayed in Qt is checked here against
-the same recording (tests/fixtures/countries/golden.json, taken from the old
-AutonaCountryHelper before the move by record_golden.py next to it):
+(tests/test_country_catalog.py). The Web reader get_states is checked here
+against the same recording (tests/fixtures/countries/golden.json, taken from
+the old AutonaCountryHelper before the move by record_golden.py next to it):
+the recorded payload byte for byte, the same whatever a player loaded has
+written, no @gui_thread_sync, and answered on a worker thread while the GUI
+thread is not spinning its event loop.
 
-- the shared country model, row by row (DisplayRole, UserRole, enabled,
-  selectable), under three locale pairs and with custom flags installed --
-  and that a reload refills that one model instead of swapping in a new
-  one (agent-pitfalls #13 / #15);
-- the Web reader get_states: the recorded payload byte for byte, the same
-  whatever a player loaded has written, no @gui_thread_sync, and answered on
-  a worker thread while the GUI thread is not spinning its event loop.
-
-The model's consumers went with them: the player cards (ADR-005 S4ac-3;
-their reload, wiring and fallback tests, and the region combo their
-LoadStates filled -- the recording's `comboDigests` / `comboJPHead`, which
-nothing reads any more) and the TOP 8 panel (S4i, a React page reading
-GET /api/v1/countries).
+The Qt country model (the `AutonaCountryHelper` adapter) and its tests went
+in the Qt model cleanup PR2; the recording's `modelRows*` / `combo*` entries
+are no longer read.
 """
 import ast
 import hashlib
@@ -27,10 +20,6 @@ from pathlib import Path
 
 import pytest
 
-from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QComboBox
-
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core.CountryCatalog import CountryCatalog
 
@@ -44,22 +33,12 @@ def digest(value):
     return hashlib.sha256(json.dumps(value).encode("utf-8")).hexdigest()[:16]
 
 
-def _rows(model):
-    rows = []
-    for row in range(model.rowCount()):
-        item = model.item(row)
-        rows.append([item.data(Qt.ItemDataRole.DisplayRole),
-                     item.data(Qt.ItemDataRole.UserRole),
-                     item.isEnabled(), item.isSelectable()])
-    return rows
-
-
 @pytest.fixture
 def countries(autonaApp):
     """Load the countries under a recorded locale, custom flags installed.
 
     Yields `load(label)`. Afterwards the flags are removed and the catalog
-    and the model are reloaded under the harness's own locale, so later
+    is reloaded under the harness's own locale, so later
     tests see the standard data.
     """
     flags = autonaApp.dir / "user_data" / "additional_flag"
@@ -72,7 +51,7 @@ def countries(autonaApp):
         locale = GOLDEN["locales"][label]
         AutonaLocaleHelper.programLocale = locale["program"]
         AutonaLocaleHelper.exportLocale = locale["export"]
-        AutonaCountryHelper.LoadCountries()
+        CountryCatalog.instance.Load()
         return CountryCatalog.instance
 
     try:
@@ -81,57 +60,7 @@ def countries(autonaApp):
         for name in GOLDEN["customFlags"]:
             (flags / name).unlink(missing_ok=True)
         AutonaLocaleHelper.programLocale, AutonaLocaleHelper.exportLocale = saved
-        AutonaCountryHelper.LoadCountries()
-
-
-# ── the country model ────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("label", list(GOLDEN["scenarios"]))
-def test_the_country_model_matches_the_recording(countries, label):
-    golden = GOLDEN["scenarios"][label]
-    countries(label)
-
-    rows = _rows(AutonaCountryHelper.countryModel)
-    assert len(rows) == golden["modelRowCount"]
-    assert rows[:3] == golden["modelRowsHead"]
-    # The separator's label goes through the translator the harness's
-    # LoadLocale() installed for this machine; the recording had none.
-    separator = 1 + len(golden["codes"])
-    separatorText = "    " + QApplication.translate(
-        "app", "Custom Flags").upper() + "    "
-    assert rows[separator] == [separatorText] + golden["modelRowsTail"][0][1:]
-    assert rows[separator + 1:] == golden["modelRowsTail"][1:]
-    assert [digest(row) for index, row in enumerate(rows)
-            if index != separator] \
-        == [rowDigest for index, rowDigest
-            in enumerate(golden["modelRowDigests"]) if index != separator]
-
-
-def test_a_reload_refills_the_one_model(countries):
-    """The model every combo and completer holds is never replaced: a
-    swapped-out model was the one exception to the retire rule
-    (agent-pitfalls #15), and a refill needs none."""
-    countries("en")
-    model = AutonaCountryHelper.countryModel
-    combo = QComboBox()
-    combo.setModel(model)
-    rowCount = model.rowCount()
-    updates = []
-
-    def updated():
-        updates.append(1)
-
-    AutonaCountryHelper.signals.countriesUpdated.connect(updated)
-    try:
-        countries("ja")
-    finally:
-        AutonaCountryHelper.signals.countriesUpdated.disconnect(updated)
-
-    assert AutonaCountryHelper.countryModel is model
-    assert model.rowCount() == rowCount
-    assert combo.model() is model and combo.count() == rowCount
-    assert combo.itemText(1) == GOLDEN["scenarios"]["ja"]["modelRowsHead"][1][0]
-    assert updates == [1]
+        CountryCatalog.instance.Load()
 
 
 def test_a_player_loaded_with_a_country_changes_no_payload(

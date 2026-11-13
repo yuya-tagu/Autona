@@ -204,7 +204,7 @@ from .core.Actions import AutonaActions
 from .core.TournamentInfoService import TournamentInfoService
 from .core.SettingsManager import SettingsManager
 from .core.TaskExecutor import TaskExecutor
-from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+from .core.CountryCatalog import CountryCatalog
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaShellOperations import AutonaShellOperations
 from . import AutonaWebOperations
@@ -335,7 +335,9 @@ class Window(QMainWindow):
         self.allplayers = None
         self.local_players = None
 
-        AutonaCountryHelper.instance.init()
+        # Directly, as the headless shell does: the catalog is the whole
+        # load now (no Qt country model to fill). After LoadLocale().
+        CountryCatalog.instance.Load()
         splash.set_message(splash_msgs[0], progress=0.15)
 
         try:
@@ -833,11 +835,7 @@ class Window(QMainWindow):
         self._ApplyTabBarPolicy(self)
 
         # NOTE: countries are loaded once, early in __init__ (see
-        # AutonaCountryHelper.instance.init() above). The second, identical
-        # LoadCountries() that used to sit here re-parsed the ~2 MB JSON and
-        # rebuilt the 250-row countryModel from scratch after every widget had
-        # already installed the first model — pure duplicate work, and a model
-        # swap that agent-pitfalls #13 warns about. Removed.
+        # CountryCatalog.instance.Load() above); do not load them a second time.
         # NOTE: the settings / guide dialogs used to be constructed above and
         # UiMounted() here. They are built on first open instead (Step 4a) —
         # see the Ensure*Window() accessors.

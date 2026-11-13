@@ -2814,7 +2814,10 @@ QT_MODEL_CLEANUP_NAMES = (
     "LoadSets", "CancelSetLoad", "_OnSetsProgress", "_OnSetsLoaded",
     "LoadStations", "_OnStationsLoaded", "_setLoadGeneration",
     "_setLoadCancel", "get_sets_finished", "get_stations_finished",
-    "sets_data_updated", "twitch_username_updated", "NoIconProxyModel")
+    "sets_data_updated", "twitch_username_updated", "NoIconProxyModel",
+    # PR2: the country model adapter (the catalog is read directly)
+    "AutonaCountryHelper", "countriesUpdated", "countriesAboutToReload",
+    "LoadCountries")
 
 
 def test_the_unused_qt_model_leftovers_are_gone():

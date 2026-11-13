@@ -8373,3 +8373,20 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
   - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6149 passed / 0 failed / 2 skipped**
   - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6149 passed / 25 skipped / 0 failed**（golden の `test_stats_flow` / `test_stats_service` / `test_board_operations` は緑のまま）
   - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない
+
+##### PR2
+
+- **変更**
+  - `src/Helpers/AutonaCountryHelper.py` をクラスごと削除（`countryModel` / `countriesAboutToReload` / `countriesUpdated` / `LoadCountries` / `init`。消費者は S4ac-3 から無かった）
+  - `src/Autona.py`: `Window.__init__` の `AutonaCountryHelper.instance.init()` を `CountryCatalog.instance.Load()` の直接呼び出しに置換（ヘッドレスの `src/headless.py` と同じ形）。呼ぶ位置・スレッド（GUI スレッド・`LoadLocale()` の後・起動フェーズの同じ位置）は変えていないので `STARTUP phase` の区切りは変わらない。国のモデル（約 250 行の `QStandardItem` と旗のアイコン）を作る分だけ、むしろ軽くなる
+  - `src/bootstrap.py`: `bootstrap_gui()` の `AutonaCountryHelper()` の生成を削除。`bootstrap_core()` の CountryCatalog の ORDER CONSTRAINT を「読み込みはシェルの `Load()`（デスクトップは Window、ヘッドレスは `headless.py`）」に書き直した
+  - i18n: `src/i18n/Autona_{en,ja}.ts` から `AutonaCountryHelper.py` の "Custom Flags"（他に使う箇所なし）を手で削除。`.qm` は `compile_translations.ps1` で再生成
+- **テスト**
+  - 置換（`LoadCountries()` → `CountryCatalog.instance.Load()`）: `conftest.py`・`test_api_v1_score_fields.py`・`test_player_slot_publish.py`・`test_set_follow_flow.py`
+  - 削除（モデル自体を見るテスト）: `test_country_helper_model.py` の `test_the_country_model_matches_the_recording`（3 ロケール）・`test_a_reload_refills_the_one_model`、`_rows` ヘルパー
+  - 残して移した（カタログの振る舞い）: `test_country_helper_model.py` の `get_states` 系（golden のバイト一致・GUI ホップ無し・ワーカースレッド）と、`test_country_helper_flags.py` の 4 本（`additional_flag` 無しでカタログがロードされる・ディレクトリを作る・標準旗の検索・国コードが選手の読込で state に出る）。前者の最初の 1 本は国のモデルの `rowCount()` ではなくカタログの `countryRows` の件数を見る形にした
+  - pin を更新: `test_bootstrap_split.py`（手順の `AutonaCountryHelper()`・probe の `country_helper`）・`test_headless.py`・`test_import_side_effects.py`（`country_helper` の副作用検査）
+- **pin**: `tests/test_web_panel_host.py::test_the_unused_qt_model_leftovers_are_gone` の名前表に `AutonaCountryHelper` / `countriesUpdated` / `countriesAboutToReload` / `LoadCountries` を追加（`src/**/*.py` のコードに戻らないこと）
+- **文書**: pitfalls #13 / #15 の `AutonaCountryHelper` の記述を「削除済み・実例なし（Qt の一般則）」に、`state-and-webserver.md`（Helpers / CountryCatalog の行）・`Design.md`・`features.md`・`known-smells.md` の現役扱いの記述を直した（過去の節・`docs/tasks/` は歴史なので触らない）
+- **検証**: 下の結果を参照（全量は並列ランナーと直列の両方）。`web/` は変えていない。アプリ本体は起動していない
+- **実機で見ること（メイン）**: 起動する。SCORE と Top 8 で国と地域を選べる。`user_data/additional_flag` のカスタム国旗が一覧（`/api/v1/countries`）に出る。`STARTUP phase` のログが PR1 より遅くなっていない

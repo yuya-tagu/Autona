@@ -124,8 +124,7 @@ result = {
                          WebOps.startImageRender is not None],
     "desktop": [name for module, name in (
         ("src.AutonaGameAssetManager", "AutonaGameAssetManager"),
-        ("src.AutonaHotkeys", "AutonaHotkeys"),
-        ("src.Helpers.AutonaCountryHelper", "AutonaCountryHelper"))
+        ("src.AutonaHotkeys", "AutonaHotkeys"))
         if built(module, name)],
     "seeded": {key: isinstance(StateManager.Get(key), dict)
                for key in ("score.1", "score.2", "score.3",

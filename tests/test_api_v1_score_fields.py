@@ -106,13 +106,12 @@ def recordedLocale(autonaApp):
     under the harness's own settings.
     """
     from src.core.SettingsManager import SettingsManager
-    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
     def load():
         AutonaLocaleHelper.LoadLocale()
         AutonaLocaleHelper.LoadRoundNames()
-        AutonaCountryHelper.LoadCountries()
+        CountryCatalog.instance.Load()
         autonaApp.settle()
 
     realGet = SettingsManager.Get
@@ -132,9 +131,8 @@ def countries(autonaApp):
     """The country data, loaded the way the first card built loads it (the
     harness builds no card until a test asks for one). Kept loaded: a card
     built by any later test would load it anyway."""
-    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
     if not CountryCatalog.instance.IsLoaded():
-        AutonaCountryHelper.LoadCountries()
+        CountryCatalog.instance.Load()
         autonaApp.settle()
     assert CountryCatalog.instance.IsLoaded()
 

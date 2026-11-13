@@ -1078,11 +1078,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>このウィンドウを閉じる前に、レイアウトフォルダやその中身が他のアプリで開かれていないことを確認してください。</translation>
     </message>
     <message>
-        <location filename="..\Helpers\AutonaCountryHelper.py" line="196" />
-        <source>Custom Flags</source>
-        <translation>カスタムフラグ</translation>
-    </message>
-    <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="97" />
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="76" />
         <location filename="..\core\ResultService.py" line="1000" />

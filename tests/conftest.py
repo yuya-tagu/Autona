@@ -635,14 +635,13 @@ class _AutonaHarness:
 
     def _loadCountries(self):
         """The country data, which the window loads at launch before any
-        board is used (Window.__init__: AutonaCountryHelper.init) and the
+        board is used (Window.__init__: CountryCatalog.instance.Load) and the
         harness, which builds no window, loads with the first board readied
         here, so a player load resolves its country and region as in the
         app. Kept loaded once loaded."""
-        from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
         from src.core.CountryCatalog import CountryCatalog
         if not CountryCatalog.instance.IsLoaded():
-            AutonaCountryHelper.LoadCountries()
+            CountryCatalog.instance.Load()
 
     def _dropBoard(self, number):
         """Drop board `number`: what core keeps of it forgotten, its 反映
