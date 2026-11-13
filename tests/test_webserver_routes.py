@@ -107,10 +107,13 @@ EXPECTED_ROUTES = [
 # colors/tournament for the Event page (S4g); countries and top8/* for the
 # Top 8 page (S4i); analysis* for the Statistics page's match list (S4k);
 # stats/overlays* for the Stats Display Settings page (S4l); players* and
-# players/<p>:load for the player list (S4m).
+# players/<p>:load for the player list (S4m); api-catalog and connection for
+# the guides (ADR-005 S-final SF-3a).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
+    # The API guide's catalogue (ADR-005 S-final SF-3a).
+    ('/api/v1/api-catalog', 'api_v1.get_api_catalog', 'GET,HEAD,OPTIONS'),
     ('/api/v1/battle-format', 'api_v1.get_battle_format', 'GET,HEAD,OPTIONS'),
     ('/api/v1/battle-format', 'api_v1.battle_format_set', 'OPTIONS,PUT'),
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
@@ -122,6 +125,8 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/commentary/<int:slot>/player', 'api_v1.commentary_player', 'OPTIONS,POST'),
     ('/api/v1/commentary/options', 'api_v1.get_commentary_options', 'GET,HEAD,OPTIONS'),
     ('/api/v1/commentary/reorder', 'api_v1.commentary_reorder', 'OPTIONS,POST'),
+    # What the guides show of the server and its files (SF-3a).
+    ('/api/v1/connection', 'api_v1.get_connection', 'GET,HEAD,OPTIONS'),
     ('/api/v1/countries', 'api_v1.get_countries', 'GET,HEAD,OPTIONS'),
     ('/api/v1/countries/<code>/states', 'api_v1.get_country_states', 'GET,HEAD,OPTIONS'),
     ('/api/v1/display-options', 'api_v1.display_options_update', 'OPTIONS,PATCH'),
@@ -527,7 +532,9 @@ def test_the_classification_follows_the_rules():
     # for this PC alone (S4s), and a board's X post, made from those values as
     # its button makes it (S4x), and the settings page's port / LAN access,
     # languages and hotkeys, which are this PC's to change (S4ae; its general
-    # switches are a plain write).
+    # switches are a plain write), and the guides' connection (this PC's
+    # folders), this PC's alone too (SF-3a; their API catalogue is a plain
+    # read).
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
                       "api_v1.get_result_post", "api_v1.get_board_files",
                       "api_v1.get_scoreboard_pending",
@@ -535,7 +542,8 @@ def test_the_classification_follows_the_rules():
     thisPc = {"api_v1.reveal_board_file",
               "api_v1.settings_network_update",
               "api_v1.settings_language_update",
-              "api_v1.settings_hotkeys_update"}
+              "api_v1.settings_hotkeys_update",
+              "api_v1.get_connection"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -581,8 +589,9 @@ def test_the_classification_follows_the_rules():
     # field, character row and match bar writes (S4z: v1 76 of 115), and the
     # settings page's read, its general write and its three this-PC writes
     # (S4ae: v1 77 of 120), less the game tracker's write and read, removed
-    # with it (S4ac-4: v1 76 of 118), and the status' read (S-final SF-2:
-    # v1 76 of 119).
+    # with it (S4ac-4: v1 76 of 118), the status' read (S-final SF-2: v1 76 of
+    # 119), and the guides' catalogue read and their connection's this-PC read
+    # (S-final SF-3a: v1 76 of 121).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -592,7 +601,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 119
+    assert len(EXPECTED_API_V1_ROUTES) == 121
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

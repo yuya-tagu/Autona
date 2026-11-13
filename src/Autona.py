@@ -956,7 +956,8 @@ class Window(QMainWindow):
         # — clients pull the player DB on demand (GET /playerdb, socket
         # 'playerdb') and none can be connected before the server is
         # listening anyway.
-        wire_web_server(self.webserver, self.signals.GameChanged)
+        wire_web_server(self.webserver, self.signals.GameChanged,
+                        AutonaGameAssetManager.instance.signals.onLoadAssets)
 
         # Release the embedded view that fetches its pages from this server
         # (the React panel host): it does not even build its view before this

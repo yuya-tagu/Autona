@@ -739,20 +739,25 @@ def wire_game_roster(game_loaded):
     game_loaded.connect(apply)
 
 
-def wire_web_server(webserver, game_changed):
+def wire_web_server(webserver, game_changed, games_scanned):
     """Connect what the web server pushes on its own, as both shells need it.
 
     - `game_changed` (a Qt signal: the window's GameChanged, the headless
       loader's) -> webserver.ws_game_changed: the full state and the new
       character list to every client.
+    - `games_scanned` (a Qt signal: the asset adapter's onLoadAssets, the
+      headless loader's gamesScanned) -> webserver.on_games_change: the
+      `games_changed` notice, GET /api/v1/games may answer otherwise
+      (ADR-005 S-final SF-3a).
     - AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb: the player
       DB to the connections allowed to read it.
 
     Connected after the server exists, i.e. after LoadDB(): nothing is lost,
-    clients pull both on (re)connect. Was the window's alone until ADR-005
-    S3c.
+    clients pull all three on (re)connect. Was the window's alone until
+    ADR-005 S3c.
     """
     from .AutonaPlayerDB import AutonaPlayerDB
 
     game_changed.connect(webserver.ws_game_changed)
+    games_scanned.connect(webserver.on_games_change)
     AutonaPlayerDB.signals.db_updated.connect(webserver.ws_playerdb)

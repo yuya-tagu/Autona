@@ -8511,7 +8511,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   4. **Alert 通知は削除**（死んでいて見た目の変化なし。機能削除に当たらない）
   5. **i18n の一本化の定義**: アプリ UI の文言は i18next が唯一の正本。Qt `.ts` に残すのは Web サーバーより前に出るネイティブのダイアログと Updater だけ。スプラッシュの日本語直書きは範囲外（`LoadLocale` より前）
   6. **DeepDiff の `threshold_to_diff_deeper` は S-final の範囲外**（Socket.IO の外部契約 D4 の話。別タスク）
-  7. トークンの表示・再発行を v1（THIS_PC のみ）に出す（SF-3a。区分「高」・独立レビュー必須）
+  7. トークンの表示・再発行を v1（THIS_PC）には出さない（SF-3a のレビューで外した。同じオリジンの `layout/` のページ（OBS のブラウザソース・直接開いたブラウザ）も THIS_PC を通るので、第三者製レイアウトが持ち出せる。経路は SF-4a で「シェルが共有ビューのメインフレームにだけ渡す秘密」を求める形にする。SF-8a でも閉じない）
 - **オーナー確認が要るもの（SF-4a / SF-5b の前まで）**
   - ガイド類（API・Companion・OBS・アセット・About）が別ウィンドウからメインビューのページになる（並べて見られなくなる）
   - SF-5b: サイドバー・ヘッダ・フッターが React の見た目になる／大会 URL 入力がページ内ダイアログになる／起動時は Web サーバー起動までオーバーレイ、起動失敗時はエラーページだけになる
@@ -8523,23 +8523,26 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   |---|---|---|---|
   | SF-1 | 死んだコードの掃除: `AutonaAlertNotification`（bootstrap の手順と pin ごと）・`ui_layout.py`・`ShowComboText`・`.ts` の死んだ文脈（`.qm` 再生成）・`GameAssetCatalog` の未使用フィールド（`colorRows` / `stockIconPaths` / `biggestCompletePack` / `PresetColor` / `StockIconPath`。golden の `models` 節も合わせる） | 通常 | なし |
   | SF-2 | フッター進捗を Qt から外す: `AutonaStatusManager` を Qt 非依存の observer に、Socket.IO `status` と v1 `GET /status`（追加のみ）。文言はコード＋引数。Qt のフッターは当面同じ源を読む | 通常 | SF-1 |
-  | SF-3a | ガイド類のための v1（THIS_PC）: トークン表示・再発行、`out/` の絶対パスと接続情報、API カタログを `core/ApiCatalog.py`（純データ）に移して GET。アセット一覧の変更通知 | 高 | SF-2 |
-  | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧・インストール・ZIP アップロード・パスからの取り込み（THIS_PC） | 通常 | SF-3a |
-  | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・オーナー確認 |
+  | SF-3a | ガイド類のための v1: `out/` の絶対パスと接続情報（THIS_PC）、API カタログを `core/ApiCatalog.py`（純データ）に移して GET、ゲーム一覧の変更通知（Socket.IO `games_changed`）。トークンのルートは作らない（SF-4a） | 高 | SF-2 |
+  | SF-8a | プレビューを別オリジンに（S4s 判断 9）: 読み取り専用のプレビュー用リスナーを別ポートに立て（そこから来た要求は Authorize の前に拒否）、DesignPane の iframe をそこから `sandbox="allow-scripts allow-same-origin"` で読み、フォーカスを奪った iframe を外す。`/health` に `previewPort`（追加）。今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスクがあるため、SF-4a より前に入れる | 高 | SF-3a |
+  | SF-8b | 共有ビューのクリップボード: `JavascriptCanAccessClipboard` を外し、`permissionRequested` で ClipboardReadWrite をページ自身のオリジンにだけ許す。既定プロファイルを `AskEveryTime` に（許可が別ビューへ漏れるため） | 高 | SF-8a |
+  | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧・インストール・ZIP アップロード・パスからの取り込み（THIS_PC） | 通常 | SF-8b |
+  | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
   | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除 | 通常 | SF-3b・SF-4a |
   | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない | 通常 | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
   | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
-  | SF-8 | プレビューを別ビューに（S4s 判断 9）: spike。案は `OwnOrigins` に入らない別の読み取り専用 origin。駄目なら別 `QWebEngineView` | 高 | SF-5b |
   | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales） | 高 | SF-5b 以降・オーナー判断 |
   | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
+
+- **順序の変更（2026-11-14 SF-3a のレビュー・SF-8 の spike の後）**: SF-1 → SF-2 → SF-3a → SF-8a → SF-8b → SF-3b → SF-4a → …。SF-8a / 8b を SF-4a より前に入れる（今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスク）。トークンの表示・再発行のルートは SF-3a から外して SF-4a へ。SF-6a（テストだけ）は空いた所で
 
 - **リスク**
   - SF-6 が技術的に最重（held/commit・ボードロック順・終了中の settle・保存ブロック均衡 pitfalls #6 / #17）。直列 golden と両シェルのパラメータ化 pin が条件
   - SF-5b: 起動の体感と `STARTUP phase` の数字・保存ページの読み替え・ホットキー `load_set` の経路・ハーネスの書き直し量
-  - シェル要求の横取り: 同オリジン iframe（レイアウトのプレビュー）からも出せる → 動詞を害の小さいものに絞り、ユーザー操作必須、SF-8 で閉じる
-  - SF-3a: 認証面が増える。独立レビュー必須
+  - シェル要求の横取り: 同オリジン iframe（レイアウトのプレビュー）からも出せる → 動詞を害の小さいものに絞り、ユーザー操作必須、SF-8a / 8b で閉じる
+  - SF-3a: 認証面が増える（`/connection` の THIS_PC）。独立レビュー必須。トークンのルートはレビューで外した
   - 自動更新: Updater に触らない。更新確認がシェル要求経由でも動くことを実機で確認
 
 ##### SF-1 死んだコードの掃除（2026-11-14）
@@ -8582,3 +8585,14 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - `tests/test_webserver_delta_debounce.py`（`status` の送信: すぐ出る・窓に 1 通で最新の値・delta と他の通知の後・delta の間隔を動かさない・失敗は持ち越さない・flusher の外では積まない・flusher のスレッドで送る・再 start で残さない）、`tests/test_bootstrap_split.py`（`WebServer.__init__` の結線に `status`）、`tests/test_import_side_effects.py`（import で仕事も購読も無い）、`tests/test_headless_smoke.py`（実ヘッドレスで接続時の `status` と GET）、`web/e2e/status.spec.ts`（新規）、`web/src/PanelShell/useAppStatus.test.js`（新規）
   - 直した pin: `tests/test_game_asset_manager_load.py`（フッターの呼び出しの記録を `StatusService` に）、`tests/test_provider_jobs.py`、`tests/test_startgg_parse.py`（スタブの `AutonaStatusManager` を外し、実クラスの `StatusService` を渡す）、`tests/test_top8_refresh.py`（遅延 import の失敗のケースは import が無くなったので外し、push の失敗だけ残した）
 - **SF-7 で**: フッター（SF-5b で消える）と一緒に `AutonaLocaleHelper.STATUS_TEXT` / `StatusText` と `.ts` の `status` 文脈を外す（Web の訳は残る）
+
+##### SF-3a ガイドの v1（API カタログ・接続情報・ゲーム一覧の通知）
+- 目的: SF-4a の React ページ（/web/api・/web/companion・/web/obs）が Qt のガイド窓の読むものを v1 で読めるようにする。窓の削除は SF-4a
+- API カタログを src/core/ApiCatalog.py（Qt なし純データ: ENDPOINTS 70・ERROR_CODES 10・PATH_DEFAULTS・ConcretePath・Payload）へ。id は Flask endpoint 名（翻訳キー）。窓は core を読むだけで見た目・文言・挙動不変。GET /api/v1/api-catalog は READ（ガイド自身とトークンの行は載せない）
+- GET /api/v1/connection（THIS_PC・no-store）: port / lan / lanAtRestart（Serving() を 1 回）・baseUrl（GetWebServerHost(lan)）・localBaseUrl・outDir・pathSeparator。3 窓と同じ値を pin。LAN・別オリジン・Origin null・Sec-Fetch-Site・別名/ポート違い Host・X-Forwarded-For/Forwarded/X-Real-IP はトークンがあっても 403
+- Socket.IO games_changed（{}）を追加。battle_format と同じ型で flusher が最後に全接続へ、1 送信 1 通。デスクトップ onLoadAssets・ヘッドレス新設 gamesScanned を wire_web_server の第 3 引数で on_games_change に。スキャンのジョブから emit され main に queued で届く（_delta_cond 内で積むだけ）
+- 判断: アクセストークンの表示・再発行のルートは作らない（実装後に外した）。THIS_PC は「この PC の要求か」しか見ず、layout/ のページ（OBS のブラウザソース・直接開いたブラウザ）も同じオリジンで GRANT_AMBIENT を通るため、第三者製レイアウトがトークンを持ち出せる（LAN 有効なら消した後も遠隔で書ける）。SF-8a では閉じない。トークンは今の API 設定ウィンドウだけ。SF-4a でシェルが共有ビューのメインフレームにだけ注入する秘密を要求する経路を設計する。THIS_PC は秘密を守る区分ではないことを state-and-webserver.md と仕様 §2.2 に明記
+- v1 119 → 121（WRITE 76 のまま）
+- テスト: 新規 tests/test_api_v1_guides.py、test_web_access（/connection の許可表・トークンのルートが無いこと・通知の配信先）、test_webserver_delta_debounce（9 件）、test_webserver_routes、test_bootstrap_split、test_api_v1_crew
+- 持ち越し: /connection の outDir（ユーザー名を含む絶対パス）は同一オリジンのレイアウトから読める（obs-path と同程度）。SF-4a で同じ秘密で包むか判断。起動前に終わったスキャンは通知なし（接続時に GET /games）
+- 独立レビュー済み（中 1: トークン持ち出し → ルート削除で対応。低 6: スレッド記述・コメント・拒否 parametrize・ホスト決定の一本化を反映。Qt 窓の表示が v1 再発行で古くなる件はルート削除で消滅）

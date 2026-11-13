@@ -1244,6 +1244,117 @@ def test_the_battle_format_notice_reaches_whoever_can_read_it(server):
             ("battle_format", [{}])]
 
 
+def test_the_games_notice_reaches_whoever_can_read_it(server):
+    # GET /games is a READ, and the notice carries nothing (ADR-005 S-final
+    # SF-3a): with no room, as the battle format's.
+    from src.AutonaWebServer import WebServer
+
+    local = _ws(server)
+    with_token = _ws(server, LAN_PEER, auth={"token": WebAccess.Token()})
+    without = _ws(server, LAN_PEER)
+    for ws in (local, with_token, without):
+        ws.get_received()
+
+    # What the flusher runs: outside any request.
+    WebServer._send_games_notice(True)
+    WebServer._send_games_notice(False)
+
+    for ws in (local, with_token, without):
+        assert [(packet["name"], packet["args"]) for packet in ws.get_received()] == [
+            ("games_changed", [{}])]
+
+
+# ── The guides' routes (ADR-005 S-final SF-3a) ───────────────────────────
+# The connection is THIS_PC: this PC's own request only (loopback or its LAN
+# address, its own Host, no forwarding, no foreign page), token or not -- it
+# names this PC's folders. The catalogue is a READ. The access token has no
+# route (a same-origin layout/ page would pass as this PC's own request;
+# its route is SF-4a's).
+
+CONNECTION_URL = "/api/v1/connection"
+CATALOG_URL = "/api/v1/api-catalog"
+
+
+def test_this_pc_reads_the_connection_with_no_token(server):
+    response = _client(server).get(CONNECTION_URL)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["ok"] is True
+    assert response.headers["Cache-Control"] == "no-store"
+    # No secret in it.
+    assert WebAccess.Token()
+    assert WebAccess.Token().encode() not in response.data
+
+
+@pytest.mark.parametrize("local", [LAN_HOST, LAN_HOST_2])
+def test_this_pc_under_its_lan_address_reads_the_connection(server, local):
+    response = _client(server, local).get(CONNECTION_URL,
+                                          headers={"Host": local})
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("withToken", [False, True])
+def test_another_computer_gets_no_connection_even_with_the_token(
+        server, withToken):
+    token = WebAccess.Token()
+    headers = {WebAccess.TOKEN_HEADER: token} if withToken else {}
+
+    response = _client(server, LAN_PEER).get(CONNECTION_URL, headers=headers)
+
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.THIS_PC_ONLY)
+    assert token.encode() not in response.data
+
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": "null"},                       # sandboxed iframe / file:// page
+    {"Origin": "https://evil.example"},
+    {"Origin": "http://localhost:3000"},      # another local server
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Sec-Fetch-Site": "same-site"},
+    {"Host": "evil.example"},                 # DNS rebinding
+    {"Host": "127.0.0.1:9999"},               # this PC's name, another port
+    {"X-Forwarded-For": "203.0.113.9"},       # a local proxy relaying
+    {"Forwarded": "for=203.0.113.9"},
+    {"X-Real-IP": "203.0.113.9"},
+])
+@pytest.mark.parametrize("withToken", [False, True])
+def test_only_this_pcs_own_request_gets_the_connection(
+        server, headers, withToken):
+    token = WebAccess.Token()
+    sent = dict(headers)
+    if withToken:
+        sent[WebAccess.TOKEN_HEADER] = token
+
+    response = _client(server).get(CONNECTION_URL, headers=sent)
+
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.THIS_PC_ONLY)
+    assert token.encode() not in response.data
+
+
+@pytest.mark.parametrize("url", [
+    "/api/v1/settings/access-token",
+    "/api/v1/settings/access-token:regenerate",
+])
+def test_the_access_token_has_no_route(server, url):
+    # Not even from this PC: a page of this origin would pass as its request.
+    token = WebAccess.Token()
+    client = _client(server)
+    for response in (client.get(url), client.post(url, json={"confirm": True})):
+        assert response.status_code in (404, 405)
+        assert token.encode() not in response.data
+    assert WebAccess.Token() == token
+
+
+def test_the_api_catalog_is_read_from_anywhere(server):
+    for client, headers in ((_client(server, LAN_PEER), {}),
+                            (_client(server), {"Origin": "https://evil.example",
+                                               "Sec-Fetch-Site": "cross-site"})):
+        response = client.get(CATALOG_URL, headers=headers)
+        assert response.status_code == 200
+        assert response.get_json()["data"]["endpoints"]
+
+
 # ── The API settings window's token row ──────────────────────────────────
 
 
@@ -1294,9 +1405,12 @@ def test_the_api_window_regenerates_only_when_confirmed(apiWindow,
 
 def test_the_copied_curl_carries_the_token_only_for_a_lan_write(apiWindow,
                                                                settings):
-    write = ("POST", "/scoreboard/{n}/team/{t}/score:increment",
-             "", None, False, True, False)
-    read = ("GET", "/state", "", None, False, False, False)
+    from src.core.ApiCatalog import Endpoint
+
+    write = Endpoint("score_increment", "POST",
+                     "/scoreboard/{n}/team/{t}/score:increment",
+                     "", None, False, True, False)
+    read = Endpoint("state", "GET", "/state", "", None, False, False, False)
     header = f"{WebAccess.TOKEN_HEADER}: {WebAccess.Token()}"
 
     assert header not in apiWindow._buildCurl(write)   # loopback: no token

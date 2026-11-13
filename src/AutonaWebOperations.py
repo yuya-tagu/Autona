@@ -81,6 +81,7 @@ Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
 """
 import copy
+import os
 import threading
 
 import orjson
@@ -89,6 +90,7 @@ from qtpy.QtCore import QCoreApplication
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core import ApiCatalog
 from .core import ColorService
 from .core import CommentaryModel as comms
 from .core import CommentaryService
@@ -701,6 +703,45 @@ def update_language_settings(fields):
 
 def update_hotkey_settings(enabled=None, keys=None):
     return HotkeyRules.Update(enabled=enabled, keys=keys)
+
+
+# ── The guides (ADR-005 S-final SF-3a) ───────────────────────────────────
+# What the API / Companion / OBS guide windows read for themselves, for the
+# pages that replace them (SF-4a): core's API catalogue and where the server
+# and its out/ files are. Both shells, the calling thread; nothing is
+# written. (Not the access token: the windows show and replace it, its route
+# is SF-4a's.)
+
+def get_api_catalog():
+    return ApiCatalog.Payload()
+
+
+def get_connection():
+    """What the guide windows show of the server and its files.
+
+    `port` / `lan` are WebServer.Serving() (what it is bound with; the
+    settings while none runs) and `lanAtRestart` WebServer.LanOnAtRestart()
+    (LAN access saved as on while the running server is this PC's only: the
+    windows' "takes effect after a restart"). `baseUrl` is the API's at the
+    address user-facing URLs advertise (this PC's LAN IP with LAN access,
+    else the loopback; the API and Companion windows'), `localBaseUrl` the
+    loopback's (the OBS window's: OBS runs on this PC). `outDir` is out/'s
+    absolute path (the OBS window's watch files are below it) and
+    `pathSeparator` the one to join them with."""
+    from .Helpers.AutonaNetworkHelper import GetWebServerHost
+    from .AutonaWebServer import WebServer
+    # One reading for the port and the host (the windows' GetWebServerHost,
+    # given this reading's LAN access).
+    port, lan = WebServer.Serving()
+    return {
+        "port": port,
+        "lan": lan,
+        "lanAtRestart": WebServer.LanOnAtRestart(),
+        "baseUrl": f"http://{GetWebServerHost(lan)}:{port}/api/v1",
+        "localBaseUrl": f"http://127.0.0.1:{port}/api/v1",
+        "outDir": os.path.normpath(os.path.abspath("./out")),
+        "pathSeparator": os.sep,
+    }
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────
