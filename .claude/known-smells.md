@@ -147,7 +147,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 > 削除理由（起動時 46MB JSON パース＋エントラント毎の線形スキャン）は、
 > `scripts/gen_city_to_state.py` がビルド時に `assets/city_to_state.json`
 > （`{国コード: {正規化キー: 州 iso2}}` 約 2.5MB）を事前計算し、
-> `AutonaCountryHelper.FindState`（2026-10-23 ADR-005 S1c で `core/CountryCatalog.FindState` へ移動）が初回参照時に遅延ロードして O(1) で引く形で解消した。
+> 旧 `AutonaCountryHelper.FindState`（2026-10-23 ADR-005 S1c で `core/CountryCatalog.FindState` へ移動）が初回参照時に遅延ロードして O(1) で引く形で解消した。
 > 複数県にまたがる曖昧な市名（Kawasaki / Ota / Minato 等、JP 69 キー・全世界 7,568 キー）は
 > **表に載せず未解決**にする（配信では誤った地域表示が空欄より悪い）。
 > テストは `tests/test_find_state.py`、StartGG 側の挙動 pin は `tests/test_startgg_parse.py`。

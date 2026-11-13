@@ -6,7 +6,7 @@ This test pins down what has already been migrated: importing
 SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
 AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider / AutonaAlertNotification
-/ AutonaUpdater / AutonaCountryHelper / AutonaShellOperations /
+/ AutonaUpdater / AutonaShellOperations /
 AutonaWebServer must not build a QApplication, must not create any of those
 singleton instances, must not load any data file, and must not touch the
 filesystem below the current working directory (./out, ./user_data/games,
@@ -109,8 +109,8 @@ core_actions = importlib.import_module("src.core.Actions").AutonaActions
 game_catalog = importlib.import_module(
     "src.core.GameAssetCatalog").GameAssetCatalog
 # The country catalog (ADR-005 S1c): the Qt-free half of what used to be
-# AutonaCountryHelper, likewise created by bootstrap_core() (the adapter by
-# bootstrap_gui()).
+# AutonaCountryHelper (deleted in the Qt model cleanup), likewise created by
+# bootstrap_core().
 country_catalog = importlib.import_module(
     "src.core.CountryCatalog").CountryCatalog
 # The web server's access policy (ADR-005 S3a). It reads -- or issues and
@@ -199,8 +199,6 @@ tdp = importlib.import_module(
 alerts = importlib.import_module(
     "src.AutonaAlertNotification").AutonaAlertNotification
 updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
-country_helper = importlib.import_module(
-    "src.Helpers.AutonaCountryHelper").AutonaCountryHelper
 # (AutonaScoreboardManager stood here, dragging in the whole Qt scoreboard
 # widget tree; it went with the Qt SCORE in ADR-005 S4ac-3.)
 # The desktop's shell operations (ADR-005 S4y; the dock's and its boards'
@@ -261,8 +259,6 @@ assert tdp.instance is None, \
 assert alerts.instance is None, \
     "import created AutonaAlertNotification.instance"
 assert updater.instance is None, "import created AutonaUpdater.instance"
-assert country_helper.instance is None, \
-    "import created AutonaCountryHelper.instance"
 assert shell_operations.instance is None, \
     "import created AutonaShellOperations.instance"
 assert bridge.instance is None, "import created StateManagerBridge.instance"
@@ -459,10 +455,6 @@ assert not os.path.exists("./user_data/additional_flag"),     "CountryCatalog() 
 assert country_catalog.instance.Load(), "CountryCatalog.Load() failed"
 assert country_catalog.instance.BasicCountryInfo("JP").get("en_name")     == "Japan", "CountryCatalog.Load() did not load the country data"
 assert os.path.isdir("./user_data/additional_flag"),     "CountryCatalog.Load() did not create ./user_data/additional_flag"
-
-# No positive control for AutonaCountryHelper (its __init__ is empty; the real
-# work is LoadCountries(), driven from init(), and it builds Qt items). The
-# import-time assertions above are the contract.
 
 print("OK")
 '''

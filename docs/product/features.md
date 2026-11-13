@@ -467,7 +467,7 @@ Help & Settings メニュー。
 - 複数スポンサー対応
 
 ### 国・地域マスタ
-[src/core/CountryCatalog.py](../../src/core/CountryCatalog.py)（データ。Qt の国コンボ用モデルは [src/Helpers/AutonaCountryHelper.py](../../src/Helpers/AutonaCountryHelper.py)）。
+[src/core/CountryCatalog.py](../../src/core/CountryCatalog.py)（データ。Qt の国モデルは削除済み）。
 - ISO 国コード / 米国州コードの国旗マスタ
 
 ### 下品表現フィルター

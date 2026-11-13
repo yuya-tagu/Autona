@@ -210,7 +210,6 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaPlayerDB.SetupModel)",
         "AutonaAlertNotification()",
         "AutonaUpdater()",
-        "AutonaCountryHelper()",
         # The desktop's boards, made at launch in core and boards 1 / 2 held
         # (ADR-005 S4ac-1; `panel=True` is pinned by the probe below): after
         # bootstrap_core(), before the Window.
@@ -440,7 +439,6 @@ from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.AutonaUpdater import AutonaUpdater
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
 from src.StateManagerBridge import StateManagerBridge
 from src.core.Actions import AutonaActions
@@ -512,7 +510,6 @@ report({
         "AutonaAlertNotification":
             AutonaAlertNotification.instance is not None,
         "AutonaUpdater": AutonaUpdater.instance is not None,
-        "AutonaCountryHelper": AutonaCountryHelper.instance is not None,
         "AutonaShellOperations": AutonaShellOperations.instance is not None,
         # No shell registers hotkeys with the OS here (ADR-005 S4ae).
         "hotkeys_applied": HotkeyRules.applied,
@@ -604,7 +601,6 @@ from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaShellOperations import AutonaShellOperations
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
 from src.core import HotkeyRules
 from src.core.Actions import AutonaActions
@@ -653,7 +649,6 @@ report({
     "hotkeys": AutonaHotkeys.instance is not None,
     "actions_connected": AutonaHotkeys._actions_connected,
     "hotkeys_applied": HotkeyRules.applied,
-    "country_helper": AutonaCountryHelper.instance is not None,
     "slot_order": order,
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename
@@ -701,7 +696,6 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["pending"] == [False, False, False]
     assert result["hotkeys"] and result["actions_connected"]
     assert result["hotkeys_applied"] is True
-    assert result["country_helper"]
     assert result["slot_order"] == ["provider:1386", "restore"]
     # The web layer's own board host, as headless (ADR-005 S4ad).
     assert result["board_host"] == "BoardHost"

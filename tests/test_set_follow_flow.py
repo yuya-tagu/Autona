@@ -418,13 +418,13 @@ def recordedLocale(autonaApp):
     test, and `provider` drops them before this is undone.
     """
     from src.core.SettingsManager import SettingsManager
-    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+    from src.core.CountryCatalog import CountryCatalog
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
     def load():
         AutonaLocaleHelper.LoadLocale()
         AutonaLocaleHelper.LoadRoundNames()
-        AutonaCountryHelper.LoadCountries()
+        CountryCatalog.instance.Load()
         autonaApp.settle()
 
     realGet = SettingsManager.Get
