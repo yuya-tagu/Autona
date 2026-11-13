@@ -140,19 +140,14 @@ class GameAssetSnapshot:
     variants: dict = field(default_factory=dict)
     variantRows: tuple = ()
     colors: list = field(default_factory=list)
-    colorRows: tuple = ()
     # No rows: the per-game tracker's stage combos were their only reader
     # (gone in ADR-005 S4ac-4). The table is start.gg's (StageFromStartGGId).
     stages: dict = field(default_factory=dict)
-    # {en_name: {skin: path}} (the Qt adapter decoded them into QIcons for
-    # its models until the Qt model clean-up's PR4).
-    stockIconPaths: dict = field(default_factory=dict)
     # {codename: {asset pack: [filename, ...]}}: the one directory scan per
     # load that CharacterAssets() reads instead of the filesystem.
     assetIndex: dict = field(default_factory=dict)
     # {variant codename: {"path": str, "image_size": any}}
     variantIconIndex: dict = field(default_factory=dict)
-    biggestCompletePack: Optional[str] = None
     hasModdedContent: bool = False
     # The game this load replaced, when it replaced a different one; None
     # on the first load of a session (`game` is empty then:
@@ -505,22 +500,11 @@ class GameAssetCatalog:
         variant = self._current.variants.get(en_name)
         return deep_clone(variant) if variant is not None else None
 
-    def PresetColor(self, row):
-        """The preset colour at colour-combo row `row` (row 0 is the blank
-        entry), or None."""
-        rows = self._current.colorRows
-        if not isinstance(row, int) or row < 1 or row > len(rows):
-            return None
-        return deep_clone(rows[row - 1][1])
-
     def CharacterAssets(self, codename, skin, assetpack=None) -> dict:
         snap = self._current
         return deep_clone(_CharacterAssets(
             snap.game, snap.assetIndex, codename, skin, assetpack,
             self._locales()[1]))
-
-    def StockIconPath(self, en_name, skin=0):
-        return self._current.stockIconPaths.get(en_name, {}).get(skin)
 
     def CharacterFromStartGGId(self, smashgg_id, snapshot=None):
         """(en_name, character) for a start.gg character id, or None.
@@ -859,7 +843,7 @@ class GameAssetCatalog:
         variants = gameObj.get("variant_to_codename", {})
         colors = gameObj.get("preset_colors", [])
 
-        progressTotal = max(1, len(characters) * 2)
+        progressTotal = max(1, len(characters))
 
         def reportProgress(done):
             if progress is not None:
@@ -870,45 +854,6 @@ class GameAssetCatalog:
         self._CopyCSS(game)
 
         assets = gameObj.get("assets", {})
-
-        # ── stock icons ──────────────────────────────────────────────────
-        assetsKey = ""
-        if len(list(assets.keys())) > 0:
-            assetsKey = list(assets.keys())[0]
-
-        for asset in list(assets.keys()):
-            if "icon" in assets[asset].get("type", ""):
-                assetsKey = asset
-                break
-
-        assetsObj = assets.get(assetsKey, None)
-        files = sorted(os.listdir(GAMES_DIR+game+'/'+assetsKey))
-
-        stockIcons = {}
-
-        for charIndex, c in enumerate(characters.keys()):
-            reportProgress(charIndex + 1)
-            stockIcons[c] = {}
-
-            filteredFiles = \
-                [f for f in files if f.startswith(assetsObj.get(
-                    "prefix", "")+characters[c].get("codename")+assetsObj.get("postfix", ""))]
-
-            if len(filteredFiles) == 0:
-                stockIcons[c][0] = CANCEL_ICON_PATH
-
-            for f in filteredFiles:
-                numberStart = f.rfind(
-                    assetsObj.get("postfix", "")) + len(assetsObj.get("postfix", ""))
-                numberEnd = f.rfind(".")
-                number = 0
-                try:
-                    number = int(f[numberStart:numberEnd])
-                except Exception:
-                    logger.error(f)
-                stockIcons[c][number] = GAMES_DIR+game+'/'+assetsKey+'/'+f
-
-        logger.info("Loaded stock icons")
 
         # ── skins + the asset file index ─────────────────────────────────
         skins = {}
@@ -927,7 +872,7 @@ class GameAssetCatalog:
                 packFiles[assetsKey] = []
 
         for charIndex, c in enumerate(characters.keys()):
-            reportProgress(len(characters) + charIndex + 1)
+            reportProgress(charIndex + 1)
             skins[c] = {}
             codename = characters[c].get("codename")
             for assetsKey in list(gameObj["assets"].keys()):
@@ -983,20 +928,6 @@ class GameAssetCatalog:
                 assets[assetsKey]["complete"] = complete
             except Exception:
                 logger.error(traceback.format_exc())
-
-        # Get biggest complete pack
-        biggestCompletePack = "base_files/icon"
-        biggestAverage = 0
-
-        for asset in list(assets.keys()):
-            if assets[asset].get("complete") and assets[asset].get("average_size") and asset not in ["stage_icon", "variant_icon"]:
-                size = sum(assets[asset].get("average_size").values())
-
-                if size > biggestAverage:
-                    biggestCompletePack = asset
-                    biggestAverage = size
-
-        logger.info("Biggest complete assets: " + biggestCompletePack)
 
         # ── stage icon paths ─────────────────────────────────────────────
         stageKey = None
@@ -1199,26 +1130,6 @@ class GameAssetCatalog:
         except Exception:
             logger.error(traceback.format_exc())
 
-        colorRows = []
-        try:
-            for c in range(len(colors)):
-                name = colors[c].get("name")
-                text = name
-                data = {
-                    "name": colors[c].get("export_name"),
-                    # The colour's index, not a name: what the old model
-                    # stored, and what the payload readers get.
-                    "en_name": c,
-                    "display_name": colors[c].get("display_name"),
-                    "value": colors[c].get("value"),
-                    "force_opponent": colors[c].get("force_opponent")
-                }
-                if colors[c].get("display_name") != name:
-                    text = f'{colors[c].get("display_name")} / {name}'
-                colorRows.append((text, data))
-        except Exception:
-            logger.error(traceback.format_exc())
-
         try:
             for stage in gameObj.get("stage_to_codename", {}).values():
                 # Stage name translations. `name` was reset to the stage key
@@ -1256,11 +1167,8 @@ class GameAssetCatalog:
             variants=variants,
             variantRows=_utf16_sorted(variantRows),
             colors=colors,
-            colorRows=_utf16_sorted(colorRows),
             stages=stages,
-            stockIconPaths=stockIcons,
             assetIndex=assetIndex,
             variantIconIndex=variantIconIndex,
-            biggestCompletePack=biggestCompletePack,
             hasModdedContent=hasModdedContent,
         )

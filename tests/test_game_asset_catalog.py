@@ -140,10 +140,8 @@ def test_a_load_matches_the_recording(catalog, label):
     assert _norm(snap.variants) == golden["variants"]
     assert _norm(snap.colors) == golden["colors"]
     assert _norm(snap.stages) == golden["stages"]
-    assert _norm(snap.stockIconPaths) == golden["stockIcons"]
     assert _norm(snap.assetIndex) == golden["characterAssetIndex"]
     assert _norm(snap.variantIconIndex) == golden["variantIconIndex"]
-    assert snap.biggestCompletePack == golden["biggestCompletePack"]
     assert snap.hasModdedContent == golden["hasModdedContent"]
 
     for key, expected in golden["characterAssets"].items():
@@ -156,7 +154,6 @@ def test_a_load_matches_the_recording(catalog, label):
     assert models["character"][0] == ["", None]
     assert _rows(snap.characterRows) == models["character"][1:]
     assert _rows(snap.variantRows) == models["variant"][1:]
-    assert _rows(snap.colorRows) == models["color"][1:]
     # The recording's `stage` / `stageWithBlank` were the per-game tracker's
     # combos, gone with it in ADR-005 S4ac-4 (the catalog builds no rows for
     # them; `snap.stages` above is start.gg's table).
@@ -463,13 +460,8 @@ def test_readers_never_see_two_games_mixed(catalog):
         seen.add(snap.codename)
         assert snap.game["codename"] == snap.codename
         assert set(snap.characters) == expected[snap.codename]
-        assert set(snap.stockIconPaths) == expected[snap.codename]
         assert {data["en_name"] for _t, data in snap.characterRows} \
             <= expected[snap.codename]
-        assert all(path.startswith(f"./user_data/games/{snap.codename}/")
-                   for icons in snap.stockIconPaths.values()
-                   for path in icons.values()
-                   if "cancel.svg" not in path)
         payload = catalog.CharactersPayload()
         assert {item["en_name"] for item in payload.values()} \
             <= expected["tgame"] | expected["game2"]
@@ -496,8 +488,8 @@ def test_progress_runs_and_observers_run_outside_the_lock(catalog):
         SM.observers.state_updated.unsubscribe(onUpdate)
 
     characters = len(GOLDEN["scenarios"]["tgame"]["characters"])
-    assert calls[0] == (0, characters * 2)
-    assert calls[-1] == (characters * 2, characters * 2)
+    assert calls[0] == (0, characters)
+    assert calls[-1] == (characters, characters)
     # The state publish is inside the lock, but the save cycle -- and every
     # observer with it -- runs after the lock is released.
     assert lockedDuringNotify and not any(lockedDuringNotify)

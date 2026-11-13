@@ -5,12 +5,12 @@ every static data load -- out of module level and into src/bootstrap.py.
 This test pins down what has already been migrated: importing
 SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
 AutonaPlayerDB / AutonaLocaleHelper /
-StartGGDataProvider / AutonaTournamentDataProvider / AutonaAlertNotification
+StartGGDataProvider / AutonaTournamentDataProvider
 / AutonaUpdater / AutonaShellOperations /
 AutonaWebServer must not build a QApplication, must not create any of those
 singleton instances, must not load any data file, and must not touch the
 filesystem below the current working directory (./out, ./user_data/games,
-./user_data/alerts_red.json, ./user_data/settings.json,
+./user_data/settings.json,
 ./user_data/badword_*.txt).
 
 Headless core Step 1 adds two things to that list. The core package itself
@@ -196,8 +196,6 @@ startgg = importlib.import_module(
     "src.TournamentDataProvider.StartGGDataProvider").StartGGDataProvider
 tdp = importlib.import_module(
     "src.AutonaTournamentDataProvider").AutonaTournamentDataProvider
-alerts = importlib.import_module(
-    "src.AutonaAlertNotification").AutonaAlertNotification
 updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
 # (AutonaScoreboardManager stood here, dragging in the whole Qt scoreboard
 # widget tree; it went with the Qt SCORE in ADR-005 S4ac-3.)
@@ -256,8 +254,6 @@ assert game_assets.instance is None, \
     "import created AutonaGameAssetManager.instance"
 assert tdp.instance is None, \
     "import created AutonaTournamentDataProvider.instance"
-assert alerts.instance is None, \
-    "import created AutonaAlertNotification.instance"
 assert updater.instance is None, "import created AutonaUpdater.instance"
 assert shell_operations.instance is None, \
     "import created AutonaShellOperations.instance"
@@ -437,13 +433,6 @@ assert not os.path.exists("./user_data/games"), \
 game_catalog.instance.ScanGames()
 assert os.path.isdir("./user_data/games"), \
     "GameAssetCatalog.ScanGames() did not create ./user_data/games"
-
-# Same for AutonaAlertNotification: MarkNotificationRed() needs the file, so
-# the guarantee moved from module level into __init__. No QApplication is
-# needed -- it is a plain QObject.
-alerts.instance = alerts()
-assert os.path.isfile("./user_data/alerts_red.json"), \
-    "AutonaAlertNotification() did not create ./user_data/alerts_red.json"
 
 # The country catalog reads nothing until Load() -- which the Qt adapter
 # drives from Window.__init__, once the locale is known -- and the

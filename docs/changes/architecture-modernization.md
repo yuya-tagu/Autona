@@ -257,7 +257,7 @@ core が状態とドメインの唯一の正本で、すべての UI（デスク
 | **S2 選手スロットの正本を state へ**（R1） | `SwapWith` / `ClearScore` / `ResetAllInputs` / `CommandClearAll` を `Actions.SwapTeams(board)` / `ClearBoard(board)` へ。選手カードは state から描画。残りのホットキー 3 本も Actions へ | `WebServerActions` の `GetScoreboard(` が board 1/2 でゼロ。`teamsSwapped` 属性削除。swap を Qt なしでテスト。「1 操作で delta 1 回」検証 |
 | **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QCoreApplication + イベントループ。QtGui なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + CSRF 対策）。`WebServerActions` を core 直結分だけ縮める（2026-10-25 改定。§5 S3 設計） | ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`。**`WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ」は S3e へ移動**（S3e-9 で廃止。完了条件の確認は §5「S3e 全体の完了報告」） |
 | **S4〜 パネル単位の React 化**（R6） | `QStackedWidget` の各ページを `QWebEngineView(/web/<panel>)` に差し替え。順序: Commentary（**IME 実機ゲート**）→ Stream → Event → Top8 → Stats → PlayerDB → Result/Thumbnail（設定 UI のみ）→ Board → SCORE（Crew 含む）→ Settings | パネルごとに Qt 版削除 + 手動チェックリスト該当節通過 |
-| **S-final シェル化** | Window = WebEngineView 1 枚 + トレイ + ホットキー。i18n を i18next に一本化。WebView2 化の要否を判断 | Qt Widgets パネル 0 |
+| **S-final シェル化** | Window = WebEngineView 1 枚 + トレイ + ホットキー。i18n を i18next に一本化。WebView2 化の要否を判断（**トレイは作らない（2026-11-14 判断）**。実装されたことが無く、需要の記録も無い。末尾の「S-final シェル化（設計・2026-11-14）」を参照） | Qt Widgets パネル 0 |
 
 **外部契約（§2.8）の守り方**: StateManager の export 部分は S3 でモジュール分離するだけでロジックを変えない（既存テストが pin）/ Socket.IO のイベント名・payload・revision は不変 / v1 は追加のみ / `settings.json`・`local_players.json`・`project.json` は読み替えのみで形式不変 / アセットパック不変 / **自動更新は onedir・zip 構造・ヘルパーに一切触らない**（S-final で WebView2 化する場合のみ例外とし、旧版からの実機更新テストを必須にする）。
 
@@ -8358,7 +8358,7 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
   - PR2（通常）: `AutonaCountryHelper` の削除、i18n の文脈の削除と `.qm` の再生成、pitfalls #15・`state-and-webserver.md` の更新
   - PR3（通常）: `NormaliseMains` を core に、`AutonaPlayerDB` の model 系の削除、ヘッドレスとの一致テスト
   - PR4（高）: `AutonaGameAssetManager` のモデル群の削除、pitfalls #13 / #13b の更新。S4ad・残置 5 の pin が全緑なのが条件
-- **範囲外（記録のみ）**: `run_sync` の見直し（S-final）、デスクトップのローダーと `HeadlessGames` の統合、golden の `game_assets` のモデル節と countries の `modelRows`（fixture は残す）
+- **範囲外（記録のみ）**: `run_sync` の見直し（S-final。SF-6 で行う）、デスクトップのローダーと `HeadlessGames` の統合（SF-6）、golden の `game_assets` のモデル節と countries の `modelRows`（fixture は残す）
 
 ##### PR1
 
@@ -8435,7 +8435,7 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
 
 - **変更**
   - `src/AutonaGameAssetManager.py`（1034 → 592 行）: Qt のモデル群（`characterModel` / `skinModels` / `variantModel` / `colorModel`、退避の `_retiredModels`、`_modelGeneration`、`_RebuildModels`、`Update{Character,Skin,Variant,Color}Model`）、アイコンのデコード（`_DecodeIcons` / `LoadSkinImages` / `LoadSkinImagesComplete` / `_skinIconGeneration` / `_WaitForDecodes`、`_Load` / `_Publish` の `decodes` 引数、`_HasGame`）、`GetStockIcon` / `_StockIcon` / `_iconCache` / `_iconCacheGeneration`、プロパティ `characters` / `skins` / `variants` / `colors` / `biggestCompletePack`、`GetCharacterAssets`、`_Publish` の作り直しの失敗の分岐（GUI スレッドで `_SettleUnannounced` して FAILED）を削除した。import は QtCore の `QObject` / `Signal` だけ（QtGui と PIL を外した）。削除の前に grep で、src に受け手が無いことを確かめた（`GetStockIcon` の最後の呼び手は PR3 で消えた `_BuildModel`、プロパティ 5 つと `GetCharacterAssets` は呼び手 0）
-  - 残したもの: `_SaveCycle`・`StateManager.RecordHeldWrites`・`CommitHeld`（`CommitGameLoad`）・`boardHost.Run`・`run_sync`・`_SettleUnannounced`（STOPPED の経路）、ローダー（`_LoaderJob` / `_RunLoad`。最新の依頼が勝つ）・スキャン・選んだゲームの保存と起動時の復元、シグナル `gameLoaded` / `onLoad` / `onLoadAssets`、プロパティ `games` / `selectedGame` / `has_modded_content`、フッターの進捗（`_StatusProgress`）。`run_sync` の見直しは範囲外（S-final）
+  - 残したもの: `_SaveCycle`・`StateManager.RecordHeldWrites`・`CommitHeld`（`CommitGameLoad`）・`boardHost.Run`・`run_sync`・`_SettleUnannounced`（STOPPED の経路）、ローダー（`_LoaderJob` / `_RunLoad`。最新の依頼が勝つ）・スキャン・選んだゲームの保存と起動時の復元、シグナル `gameLoaded` / `onLoad` / `onLoadAssets`、プロパティ `games` / `selectedGame` / `has_modded_content`、フッターの進捗（`_StatusProgress`）。`run_sync` の見直しは範囲外（S-final。SF-6 で行う）
   - `src/core/GameAssetCatalog.py`: コメントだけ（アダプタの説明、「Qt のモデルは有効なまま」の削除、`stockIconPaths` の消費者）
   - `src/bootstrap.py`: コメントと docstring だけ（「空の Qt モデルを作る」「asset / player のモデルは QtGui」を直した）。生成順は変えていない
   - コメントの追従（独立レビューの指摘）: 記録の範囲を「作り直しからサイクルを閉じるまで」と書いていた `src/bootstrap.py` の `wire_game_roster`（docstring と `run` の中）と `src/core/Actions.py` の `CommitGameLoad` の docstring を「`gameLoaded` の emit からサイクルを閉じるまで」に。対比が意味を失った `src/headless.py` の `HeadlessGames` の docstring（「no Qt models」）と `_Load` の相当部分のコメント、事実と逆になった `tests/test_objectname_keypath_contract.py` の書き手台帳のコメント（「アダプタはモデルを作るだけ」）、PR2 の取り残しの `src/core/CountryCatalog.py` の docstring（国の `QStandardItemModel` を作る Qt のアダプタの記述 3 か所）を直した
@@ -8469,7 +8469,7 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
   - 名前が `_SettleUnannounced` の呼び出し（受け手を問わない属性の呼び出しと、名前だけの呼び出し）が `_Load` の中だけにあること（未通知のロードを揃える経路は終了中の 1 つ）
   - pin が落ちることを確かめた変更: アダプタに `self.characters = []`、`_Publish` に別の受け手の `manager._SettleUnannounced(...)`、`src/bootstrap.py` に `_iconCache`。無関係なモジュール（`src/core/ColorService.py`）の `_iconCache` では落ちない
 - **文書**: pitfalls #13 / #13b を「実例なし（Qt の一般則）」に（#2 の括弧書きも）、`state-and-webserver.md`（GameAssetCatalog の行と best_of の記録の記述）・`Design.md`・`python-widgets.md`・`external-control-api.md`（§2.12 とロードの節のモデルの作り直しの記述）・`docs/changes/test-automation-strategy.md`（ハーネスのアセットの読み込みの記述。`loadCharacters()` が出さない GUI スレッドの側は `publishGameLoad()` が受け持つこと、ロスターを見せる Qt のコンボもウィジェットも無いこと）の現役扱いの記述を直した（過去の節は歴史なので触らない）。pitfalls は独立レビューの指摘で、#2 の `bootstrap_gui()` の行末の「スコアボード dock」（S4ac-3 で削除済み）を消し、#13 / #13b の「Qt のモデルは無い」を「共有したり差し替えたりする Qt のモデルは無い」に直した（`AutonaGameAssetGuideWindow` の編集可能な `QComboBox` と `QCompleter` の内部のモデルがあるため）
-- **範囲外（後で削除。記録のみ）**: core の `GameAssetCatalog` に、消費者の居ないものが残っている（Qt のモデルとアイコンのためのもの）。`GameAssetSnapshot.stockIconPaths` / `StockIconPath()`、`colorRows` / `PresetColor()`、スナップショットの `biggestCompletePack`、スナップショットの docstring のコンボを前提にした記述。src での参照は `GameAssetCatalog.py` の中だけ（アダプタには削除の経緯のコメントだけ）。golden の `models` 節を照合する `tests/test_game_asset_catalog.py` が行を読むので、消すときはそちらと一緒に
+- **範囲外（後で削除。記録のみ）**: core の `GameAssetCatalog` に、消費者の居ないものが残っている（Qt のモデルとアイコンのためのもの）。`GameAssetSnapshot.stockIconPaths` / `StockIconPath()`、`colorRows` / `PresetColor()`、スナップショットの `biggestCompletePack`、スナップショットの docstring のコンボを前提にした記述。src での参照は `GameAssetCatalog.py` の中だけ（アダプタには削除の経緯のコメントだけ）。golden の `models` 節を照合する `tests/test_game_asset_catalog.py` が行を読むので、消すときはそちらと一緒に（**SF-1 で消した**。末尾の SF-1 の節を参照）
 - **検証**
   - 影響範囲（`test_game_asset_manager_load` / `test_asset_jobs` / `test_scoreboard_operations` / `test_roster_flow` / `test_player_slot_publish` / `test_web_panel_host` / `test_bootstrap_split`）: **367 passed**。独立レビューの修正の後（同じ 7 ファイルに `test_objectname_keypath_contract` / `test_headless` / `test_country_helper_model` / `test_country_helper_flags` / `test_import_side_effects` / `test_core_qt_free` を足して）: **413 passed**
   - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6198 passed / 0 failed / 2 skipped**（PR3 の 6208 から、削除したテストの分が減った）。独立レビューの修正の後: **6201 passed / 0 failed / 2 skipped**（追加したテストの 3 通り）
@@ -8487,3 +8487,76 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
   - ロード中にアプリを終了する（固まらずに終わる。次の起動で 1 つのゲームに揃っている）
   - 起動時に前回のゲームが戻る
   - フッターの進捗が出て、ロードの後に消える
+
+#### S-final シェル化（設計・2026-11-14）
+
+S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・スタック PR は使わない）で進める。設計の前に調べて分かった事実と、そこから決めた判断を残す。
+
+- **前提（調査で判明）**
+  - トレイ（`QSystemTrayIcon`）は実装されたことが無い（ADR-005 D1・§4.2 の前提と違う）
+  - `AutonaAlertNotification` は死んでいる（`signals.alerts` を emit する所が 0、`UiMounted` は即 return）
+  - `src/ui_layout.py` は呼び手 0（参照は `tests/test_headless.py` の 1 か所だけ）、`AutonaQtHelper.ShowComboText` も呼び手 0
+  - 共有ビューにはページ→シェルの経路が無い（QWebChannel なし）。使える形は Designer の `window.open` を `_OpenOutside` で横取りする形だけ
+  - `.ts` 268 件のうち死んだ文脈が約 35（DockWidget 9・Form 14・GroupBox 11・notes 1 ほか）
+  - 同梱物に未使用の Qt モジュール（Quick3D・Charts・Location・Multimedia・Graphs・QuickControls2・`qml/` 27MB）、`qtwebengine_locales` 44MB。WebEngine 本体は約 340MB
+  - 英語表示でも日本語直書きが残る: スプラッシュ（`autona_splash.py:150` 付近）、Start.gg のフッター進捗（`StartGGDataProvider.py:425/585/686/2113`）
+- **完了条件「Qt Widgets パネル 0」**
+  - アプリの機能を Qt Widgets で描く UI が 0。中央は共有ビュー（`AutonaWebPanelHost`）1 枚だけ。`QStackedWidget`・サイドバー・`QMenu`（ホストの右クリックを除く）・`QStatusBar`・ガイド類や入力用 `QDialog` が src に無い
+  - 残してよいもの: `main.py` の単一インスタンス・`QApplication`／スプラッシュ／Window（中央はホストだけ・ジオメトリと最後のページ・終了・Web サーバー起動・最前面）／ネイティブのダイアログ（LAN 初回確認・ポート競合・起動失敗・`refuse_frozen_headless`・Updater 全部・フォルダ選択）／WebEngine のホスト（共有ビュー・Designer・オフスクリーン描画）／Win32 ホットキー・タイトルバー色・`ui_constants`（縮小）・qdarktheme／QtCore アダプタと headless／`.ts` はネイティブのダイアログと Updater の約 40 件だけ
+  - pin: AST で「src の `QWidget` / `QDialog` / `QMainWindow` 派生 ⊆ 許可リスト（Window・ホスト・`_PanelView`・`AutonaDesignerWindow`・`_UpdateDialog`）」「`Autona.py` が `QStackedWidget` / `QToolButton` / `QStatusBar` / `QMenuBar` を参照しない」、`.ts` の文脈も許可リストで pin（SF-5b / SF-7）
+- **判断（エンジニアリード・2026-11-14）**
+  1. **トレイは作らない**。S-final の完了条件から外す（実装されたことが無く、需要の記録も無い）
+  2. **WebView2 化しない。QtWebEngine を継続**。別 ADR は書かず ADR-005 D5 に決定を追記する（SF-10）。理由: オフスクリーン描画（サムネ・リザルト）が QtWebEngine に残る限りサイズは減らない／WebView2 に実用的なオフスクリーン描画が無い／zip 構造が変わり自動更新ヘルパーへの制約（§4.4 末尾の「外部契約の守り方」）に反する／PySide6 はどのみち残る。サイズ削減は SF-9（任意・オーナー判断）で
+  3. **アセットのフォルダ取り込みはネイティブのフォルダ選択で残す**（機能削除しない）
+  4. **Alert 通知は削除**（死んでいて見た目の変化なし。機能削除に当たらない）
+  5. **i18n の一本化の定義**: アプリ UI の文言は i18next が唯一の正本。Qt `.ts` に残すのは Web サーバーより前に出るネイティブのダイアログと Updater だけ。スプラッシュの日本語直書きは範囲外（`LoadLocale` より前）
+  6. **DeepDiff の `threshold_to_diff_deeper` は S-final の範囲外**（Socket.IO の外部契約 D4 の話。別タスク）
+  7. トークンの表示・再発行を v1（THIS_PC のみ）に出す（SF-3a。区分「高」・独立レビュー必須）
+- **オーナー確認が要るもの（SF-4a / SF-5b の前まで）**
+  - ガイド類（API・Companion・OBS・アセット・About）が別ウィンドウからメインビューのページになる（並べて見られなくなる）
+  - SF-5b: サイドバー・ヘッダ・フッターが React の見た目になる／大会 URL 入力がページ内ダイアログになる／起動時は Web サーバー起動までオーバーレイ、起動失敗時はエラーページだけになる
+  - SF-9（同梱物の削減）をやるか（配布物が変わる）
+  - SF-8 の spike が失敗したとき残るリスクを受け入れるか
+- **段**
+
+  | 段 | 内容 | 区分 | 依存 |
+  |---|---|---|---|
+  | SF-1 | 死んだコードの掃除: `AutonaAlertNotification`（bootstrap の手順と pin ごと）・`ui_layout.py`・`ShowComboText`・`.ts` の死んだ文脈（`.qm` 再生成）・`GameAssetCatalog` の未使用フィールド（`colorRows` / `stockIconPaths` / `biggestCompletePack` / `PresetColor` / `StockIconPath`。golden の `models` 節も合わせる） | 通常 | なし |
+  | SF-2 | フッター進捗を Qt から外す: `AutonaStatusManager` を Qt 非依存の observer に、Socket.IO `status` と v1 `GET /status`（追加のみ）。文言はコード＋引数。Qt のフッターは当面同じ源を読む | 通常 | SF-1 |
+  | SF-3a | ガイド類のための v1（THIS_PC）: トークン表示・再発行、`out/` の絶対パスと接続情報、API カタログを `core/ApiCatalog.py`（純データ）に移して GET。アセット一覧の変更通知 | 高 | SF-2 |
+  | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧・インストール・ZIP アップロード・パスからの取り込み（THIS_PC） | 通常 | SF-3a |
+  | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・オーナー確認 |
+  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除 | 通常 | SF-3b・SF-4a |
+  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない | 通常 | SF-4b |
+  | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
+  | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
+  | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
+  | SF-8 | プレビューを別ビューに（S4s 判断 9）: spike。案は `OwnOrigins` に入らない別の読み取り専用 origin。駄目なら別 `QWebEngineView` | 高 | SF-5b |
+  | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales） | 高 | SF-5b 以降・オーナー判断 |
+  | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
+
+- **リスク**
+  - SF-6 が技術的に最重（held/commit・ボードロック順・終了中の settle・保存ブロック均衡 pitfalls #6 / #17）。直列 golden と両シェルのパラメータ化 pin が条件
+  - SF-5b: 起動の体感と `STARTUP phase` の数字・保存ページの読み替え・ホットキー `load_set` の経路・ハーネスの書き直し量
+  - シェル要求の横取り: 同オリジン iframe（レイアウトのプレビュー）からも出せる → 動詞を害の小さいものに絞り、ユーザー操作必須、SF-8 で閉じる
+  - SF-3a: 認証面が増える。独立レビュー必須
+  - 自動更新: Updater に触らない。更新確認がシェル要求経由でも動くことを実機で確認
+
+##### SF-1 死んだコードの掃除（2026-11-14）
+
+区分は通常。見た目の変化なし。
+
+- **削除したもの（呼び手 0 を grep で確認）**
+  - `src/AutonaAlertNotification.py`: `signals.alerts` を emit する所が src に無く、`UiMounted` は即 return。`src/Autona.py` の import と `UiMounted()` の呼び出し、`src/bootstrap.py` の生成手順（`bootstrap_gui()` は Updater だけを作る。ORDER CONSTRAINT のコメントも Updater だけの記述に直した）を外した。`user_data/alerts_red.json` はもう作らない（既存のファイルは放置。`.gitignore` の記述は残す）
+  - `src/ui_layout.py`: src に呼び手が無い（`Autona.py` ほかの import 0。参照は `tests/test_headless.py` のヘッドレスが widget モジュールを import しない検査の除外リストだけ）
+  - `AutonaQtHelper.ShowComboText`: src・tests に呼び手 0
+  - `src/core/GameAssetCatalog.py`: `GameAssetSnapshot.colorRows` / `stockIconPaths` / `biggestCompletePack`、`PresetColor()` / `StockIconPath()`。読み手は `GameAssetCatalog.py` の中と `tests/test_game_asset_catalog.py` だけだった。値を作るだけだった処理（ストックアイコンの走査ループ・色の行の組み立て・最大のコンプリートパックの計算）も消した。**進捗の通知は 2 段（キャラ数 × 2）から 1 段（キャラ数）になった**（走査ループが `reportProgress` を呼んでいたため。ロードのフッターの進捗は 0 からキャラ数で終わる）。`CANCEL_ICON_PATH` は `tests/test_state_manager_image_export.py` が使うので残した
+  - `.ts`: 参照するコードが src に無い文脈・原文を、en / ja の両方から各 73 件削除（268 → 195 件）。`.qm` は `scripts/compile_translations.ps1` で再生成
+    - `Form` 14・`GroupBox` 11・`DockWidget` 9・`notes` 1（削除済みの `.ui` / ウィジェット由来。`translate("Form", ...)` 等の呼び出しは src に無い）
+    - `app`: Alert の 2 件、削除済みの Qt ウィジェット由来（ブラケット・チームバトル・選手ウィジェット・メニューの `Edit` / `Help` ほか）
+    - `updater` 4 件（`Update available` ほか。Updater のコードが使わなくなった旧文言。コードは触っていない）、`api` 1 件（`kind=commentary|top8` の旧文言。`|board` つきに置き換わっている）
+- **golden**: `tests/fixtures/game_assets/golden.json` から、各シナリオの `stockIcons` / `biggestCompletePack` / `models.color` を削除（キー削除のみ。他の値は変わらない）。`test_game_asset_catalog.py` の該当検査（と、並行読み取りの検査のストックアイコン部分）を外し、進捗の期待を 1 段に直した
+- **pin**: `tests/test_web_panel_host.py::test_the_sf1_dead_code_is_gone`（`test_the_unused_qt_model_leftovers_are_gone` と同じ形）
+  - 2 つのモジュールのファイルが無いこと、消した名前（`AutonaAlertNotification` / `ShowComboText` / `colorRows` / `stockIconPaths` / `biggestCompletePack` / `PresetColor` / `StockIconPath`）が src の `.py` のコードに現れないこと（AST。コメントと docstring は数えない）
+  - en / ja の `.ts` に `Form` / `GroupBox` / `DockWidget` / `notes` の文脈が無いこと
+  - 外した pin: `tests/test_bootstrap_split.py`（手順の一覧と `gui` の存在確認から Alert）、`tests/test_import_side_effects.py`（Alert の import 時の生成なし・`__init__` のファイル作成）、`tests/test_signal_lifetime.py`（`PROCESS_WIDE_SENDERS`）、`tests/test_headless.py`（`ui_layout` の除外）

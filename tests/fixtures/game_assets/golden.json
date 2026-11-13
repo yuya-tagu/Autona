@@ -1209,42 +1209,6 @@
      "display_name": "Mod Land"
     }
    },
-   "stockIcons": {
-    "Mario": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_mario_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_mario_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_mario_02.png"
-    },
-    "Luigi": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_luigi_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_luigi_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_luigi_02.png"
-    },
-    "Peach": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_peach_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_peach_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_peach_02.png"
-    },
-    "Bowser": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_koopa_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_koopa_01.png"
-    },
-    "Zelda": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_zelda_00.png"
-    },
-    "Ghost": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_ghost_00.png"
-    },
-    "Random": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_random_00.png"
-    },
-    "Waluigi": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_waluigi_00.png"
-    },
-    "NoArt": {
-     "<int>0": "./assets/icons/cancel.svg"
-    }
-   },
    "characterAssetIndex": {
     "mario": {
      "base_files": [],
@@ -1391,7 +1355,6 @@
      "image_size": null
     }
    },
-   "biggestCompletePack": "full",
    "hasModdedContent": true,
    "characterAssets": {
     "mario:0": {
@@ -2549,42 +2512,6 @@
         32
        ],
        "name": "EX版"
-      }
-     ]
-    ],
-    "color": [
-     [
-      "",
-      null
-     ],
-     [
-      "Blue",
-      {
-       "display_name": "Blue",
-       "en_name": 1,
-       "force_opponent": null,
-       "name": "Blue",
-       "value": "0000ff"
-      }
-     ],
-     [
-      "Green",
-      {
-       "display_name": "Green",
-       "en_name": 2,
-       "force_opponent": null,
-       "name": "緑",
-       "value": "00ff00"
-      }
-     ],
-     [
-      "紅 / Red",
-      {
-       "display_name": "紅",
-       "en_name": 0,
-       "force_opponent": "0000ff",
-       "name": "Red",
-       "value": "ff0000"
       }
      ]
     ],
@@ -4839,42 +4766,6 @@
      "display_name": "Mod Land"
     }
    },
-   "stockIcons": {
-    "Mario": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_mario_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_mario_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_mario_02.png"
-    },
-    "Luigi": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_luigi_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_luigi_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_luigi_02.png"
-    },
-    "Peach": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_peach_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_peach_01.png",
-     "<int>2": "./user_data/games/tgame/base_files/icon/chara_2_peach_02.png"
-    },
-    "Bowser": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_koopa_00.png",
-     "<int>1": "./user_data/games/tgame/base_files/icon/chara_2_koopa_01.png"
-    },
-    "Zelda": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_zelda_00.png"
-    },
-    "Ghost": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_ghost_00.png"
-    },
-    "Random": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_random_00.png"
-    },
-    "Waluigi": {
-     "<int>0": "./user_data/games/tgame/base_files/icon/chara_2_waluigi_00.png"
-    },
-    "NoArt": {
-     "<int>0": "./assets/icons/cancel.svg"
-    }
-   },
    "characterAssetIndex": {
     "mario": {
      "base_files": [],
@@ -5021,7 +4912,6 @@
      "image_size": null
     }
    },
-   "biggestCompletePack": "full",
    "hasModdedContent": true,
    "characterAssets": {
     "mario:0": {
@@ -6189,42 +6079,6 @@
         32
        ],
        "name": "EX版"
-      }
-     ]
-    ],
-    "color": [
-     [
-      "",
-      null
-     ],
-     [
-      "Blue",
-      {
-       "display_name": "Blue",
-       "en_name": 1,
-       "force_opponent": null,
-       "name": "Blue",
-       "value": "0000ff"
-      }
-     ],
-     [
-      "Green",
-      {
-       "display_name": "Green",
-       "en_name": 2,
-       "force_opponent": null,
-       "name": "緑",
-       "value": "00ff00"
-      }
-     ],
-     [
-      "紅 / Red",
-      {
-       "display_name": "紅",
-       "en_name": 0,
-       "force_opponent": "0000ff",
-       "name": "Red",
-       "value": "ff0000"
       }
      ]
     ],
@@ -7884,11 +7738,6 @@
    "variants": {},
    "colors": [],
    "stages": {},
-   "stockIcons": {
-    "Ryu": {
-     "<int>0": "./user_data/games/game2/base_files/icon/ryu_0.png"
-    }
-   },
    "characterAssetIndex": {
     "ryu": {
      "base_files": [],
@@ -7898,7 +7747,6 @@
     }
    },
    "variantIconIndex": {},
-   "biggestCompletePack": "base_files/icon",
    "hasModdedContent": false,
    "characterAssets": {
     "ryu:0": {
@@ -7952,12 +7800,6 @@
      ]
     ],
     "variant": [
-     [
-      "",
-      null
-     ]
-    ],
-    "color": [
      [
       "",
       null

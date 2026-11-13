@@ -40,7 +40,6 @@ CORE_DIR = SRC_ROOT / "core"
 PROCESS_WIDE_SENDERS = (
     "AutonaGameAssetManager.instance.signals",
     "AutonaTournamentDataProvider.instance.signals",
-    "AutonaAlertNotification.instance.signals",
     "AutonaHotkeys.signals",
     "AutonaPlayerDB.signals",
     # The state layer's Qt signals live on the adapter now, not on

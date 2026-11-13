@@ -343,9 +343,7 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["qt"] == {"gui_application": False, "widgets": 0}
     imported = set(result["src_modules"])
     assert "src.headless" in imported and "src.AutonaWebServer" in imported
-    # ui_layout defines no widget (ADR-005 S4r took its last one) but is only
-    # there to build them.
-    widgetModules = _widget_modules() | {"src.ui_layout"}
+    widgetModules = _widget_modules()
     assert imported.isdisjoint(widgetModules), sorted(
         imported & widgetModules)
 

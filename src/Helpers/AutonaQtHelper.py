@@ -229,19 +229,3 @@ def assert_gui_thread(fn=None):
         return deco
     else:
         return _assert()
-
-
-def ShowComboText(combo, text):
-    """Show `text` in editable combo `combo` with the row that has it
-    selected -- or no row (index -1) and the text alone when the list has
-    none, so that a pick of any row changes the index.
-
-    Not setCurrentText: on an editable combo it sets the line edit's text and
-    leaves the index where it was, and a pick of the row it was left on is
-    no index change -- no currentIndexChanged, nothing written (the blank
-    row, picked over a name a render showed; ADR-005 S4x review). Emits what
-    setCurrentIndex emits: the caller blocks the combo's and its line
-    edit's signals, as a render does."""
-    combo.setCurrentIndex(combo.findText(text))
-    if combo.currentText() != text:
-        combo.setEditText(text)
