@@ -414,7 +414,8 @@ def StaticPath(filename):
 # "statsPreview" is 統計情報表示設定 (S4l);
 # "playerBrowser" is 選手リスト (S4n); "thumbnail" is サムネイル (S4p);
 # "result" is 大会リザルト (S4r); "board" is スコアボード設定 (S4s);
-# "scoreboard" is スコアボード入力 (S4aa).
+# "scoreboard" is スコアボード入力 (S4aa); "settings" is 設定 (S4af: the Help &
+# Settings menu's, not a sidebar item).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -428,6 +429,7 @@ WEB_PANELS = frozenset({
     "result",
     "board",
     "scoreboard",
+    "settings",
 })
 
 

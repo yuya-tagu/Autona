@@ -121,6 +121,18 @@ class AutonaSidebar(QWidget):
         if 0 <= idx < len(self._navButtons):
             self._navButtons[idx].setChecked(True)
 
+    def clearCurrent(self) -> None:
+        """Highlight no item: a page that is not one shows (the Settings
+        page, ADR-005 S4af). The next item chosen is checked as usual. An
+        exclusive group never unchecks its checked button, so it is let go
+        of for the moment."""
+        checked = self._navGroup.checkedButton()
+        if checked is None:
+            return
+        self._navGroup.setExclusive(False)
+        checked.setChecked(False)
+        self._navGroup.setExclusive(True)
+
     def currentIndex(self) -> int:
         for i, btn in enumerate(self._navButtons):
             if btn.isChecked():

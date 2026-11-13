@@ -163,7 +163,7 @@ class AutonaActions:
     BOARDS = SCORE_BOARDS + (CREW_BOARD,)
 
     # A fresh board's team colours when the settings name none
-    # (general.team_{t}_default_color; the settings window's defaults).
+    # (general.team_{t}_default_color; the settings page's defaults).
     DEFAULT_TEAM_COLORS = MappingProxyType({1: "#fe3636", 2: "#2e89ff"})
 
     # The score spinboxes are plain QSpinBoxes with Qt's default range, and

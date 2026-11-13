@@ -28,7 +28,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from shiboken6 import Shiboken
 
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .AutonaWebServer import WebServer
 from .core import WebAccess
 from .core.TaskExecutor import TaskExecutor
 from .Helpers import AutonaQtHelper
@@ -163,8 +163,8 @@ class AutonaApiInfoWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
 
-    # UI is built lazily once the app is fully up, mirroring
-    # AutonaSettingsWindow (called from Window after construction).
+    # UI is built lazily once the app is fully up (called from Window after
+    # construction).
     def UiMounted(self):
         self.setWindowTitle(QApplication.translate("app", "API Settings"))
         self.resize(940, 620)
@@ -182,7 +182,9 @@ class AutonaApiInfoWindow(QDialog):
 
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        # Where the server listens now, the settings only while none runs
+        # (a saved port takes effect at the next start: ADR-005 S4af).
+        port, _lan = WebServer.Serving()
         return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
@@ -248,21 +250,25 @@ class AutonaApiInfoWindow(QDialog):
         return group
 
     def _refreshBaseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        port, lan = WebServer.Serving()
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
         self.tokenField.setText(WebAccess.Token())
-        if SettingsManager.Get("general.webserver_listen_lan", False):
+        if lan:
             self.warningLabel.setText("⚠ " + _tr(
                 "From other devices on the LAN, every operation that changes "
                 "something (and the player list) needs the access token: send "
                 "the header X-Autona-Token: <token> (or Authorization: Bearer "
                 "<token>, or add ?token=<token> to the URL). Reading the state "
                 "and the overlays needs no token."))
+        elif WebServer.LanOnAtRestart():
+            self.warningLabel.setText(_tr(
+                "LAN access is saved as on and takes effect when Autona is "
+                "restarted; until then the API is reachable from this PC only."))
         else:
             self.warningLabel.setText(_tr(
                 "LAN access is disabled; the API is reachable from this PC only. "
-                "Enable it under Settings → General (restart required)."))
+                "Enable it under Settings → Network (restart required)."))
 
     def _regenerateToken(self):
         # Button context, so the confirm is a top-level modal, not a nested
@@ -278,14 +284,16 @@ class AutonaApiInfoWindow(QDialog):
         self.tokenField.setText(WebAccess.RegenerateToken())
 
     def _openSettings(self):
-        # The Settings dialog (with the Webserver Port field) lives on the
-        # main window; reuse it rather than duplicating the port control.
-        # Built on first open by the main window (startup Step 4a), so go
-        # through its accessor rather than a plain attribute.
+        # The Settings page (with the port and LAN access) is the main
+        # window's, a React page in its shared view since ADR-005 S4af
+        # (the Qt settings window until then); reuse it rather than
+        # duplicating the port control. This window closes: it is not
+        # modal, and would stay over the page it opened.
         window = self.parent()
-        ensure = getattr(window, "EnsureSettingsWindow", None)
-        if ensure is not None:
-            ensure().show()
+        openSettings = getattr(window, "OpenSettings", None)
+        if openSettings is not None:
+            self.close()
+            openSettings()
 
     # ── Reference tab ────────────────────────────────────────────────────
     def _buildReferenceTab(self):
@@ -386,8 +394,7 @@ class AutonaApiInfoWindow(QDialog):
         # The Base URL is the LAN address when LAN access is on, i.e. the
         # command is meant for another device: give it the token a write
         # needs there (ADR-005 S3a).
-        if method != "GET" and SettingsManager.Get(
-                "general.webserver_listen_lan", False):
+        if method != "GET" and WebServer.Serving()[1]:
             parts.append(f'-H "{WebAccess.TOKEN_HEADER}: {WebAccess.Token()}"')
         if body is not None:
             parts.append('-H "Content-Type: application/json"')
@@ -503,7 +510,7 @@ class AutonaApiInfoWindow(QDialog):
 
         # Resolve against the local server (always reachable on loopback even
         # if the Base URL shows the LAN address).
-        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        port, _lan = WebServer.Serving()
         url = f"http://127.0.0.1:{port}/api/v1{path}"
 
         self.sendBtn.setEnabled(False)

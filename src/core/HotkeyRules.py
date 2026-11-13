@@ -5,7 +5,7 @@ Qt-free, so both shells and the web operations read the same rules. Until
 S4ae they were split between the desktop's AutonaHotkeys (the defaults and
 the parser that turns "Ctrl+Shift+O" into a Win32 registration) and
 Helpers/AutonaHotkeyValidator (the duplicate check and the OS / OBS
-warnings the settings window shows). The registration itself stays the
+warnings the Qt settings window showed). The registration itself stays the
 desktop's (AutonaHotkeys: RegisterHotKey is bound to the GUI thread's
 message queue); this module only decides.
 
@@ -18,8 +18,8 @@ message queue); this module only decides.
   CollisionSummary: the old validator's functions, comparing shortcuts as
   the keys they name ("Ctrl+Return" is "Ctrl+Enter", Qt's "Esc" is
   "Escape"). A warning is a code (WARNING_OS_RESERVED / WARNING_OBS_LIKELY
-  / WARNING_NO_MODIFIER) now; the Qt settings window builds the old text
-  from the first two, and the web page its own.
+  / WARNING_NO_MODIFIER / WARNING_SHIFT_ONLY); the settings page words it
+  (the Qt settings window, which worded the first two, went in S4af).
 - Vocabulary / Canonical: what a client may compose (Ctrl / Alt / Shift and
   one key the parser reads) and the spelling a saved value gets.
 - Describe / Update: the settings page's read and write (GET / PATCH
@@ -65,7 +65,7 @@ VK_MAP = {
 # (Ctrl+S=Save, Ctrl+O=Open, Ctrl+P=Print, Ctrl+R=Reload). Score buttons use
 # top-row digits 1..4 -- F-keys are reserved on many keyboards for OS / OBS
 # hotkeys and operators prefer to keep them free for streaming software.
-# The order is the settings window's and the page's.
+# The order is the page's (the Qt settings window's until S4af).
 DEFAULT_KEYS = {
     "load_set": "Ctrl+Shift+O",
     "team1_score_up": "Ctrl+Shift+1",
@@ -144,11 +144,13 @@ def NormalizeShortcut(shortcut):
     return "+".join([*mods, key])
 
 
-# The spellings Qt's key recorder (QKeySequenceEdit) writes for keys the
-# parser names otherwise. The parser does not read them -- a saved
-# "Ctrl+Esc" registers nothing, and widening it would change what registers
-# -- but they name the same key: the duplicate check and the warnings
-# compare them as that key.
+# The spellings Qt's key recorder (QKeySequenceEdit, the Qt settings
+# window's until ADR-005 S4af) wrote for keys the parser names otherwise.
+# The parser does not read them -- a saved "Ctrl+Esc" registers nothing,
+# and widening it would change what registers -- but they name the same
+# key: the duplicate check and the warnings compare them as that key. The
+# page composes from the vocabulary, so writes none; settings.json may
+# still hold one (Describe's `valid` is false).
 _QT_SPELLINGS = {"esc": "escape", "del": "delete", "ins": "insert",
                  "pgup": "pageup", "pgdown": "pagedown"}
 
@@ -244,15 +246,21 @@ WARNING_OBS_LIKELY = "obs_likely"
 # Warned, not refused: saved settings have such keys, and refusing would
 # break them.
 WARNING_NO_MODIFIER = "no_modifier"
+# A key with Shift alone (Shift+A, Shift+1, Shift+Space, Shift+Left; the
+# function keys excepted): registered, typing it in every app on this PC
+# -- a capital letter, a symbol, selecting text -- goes to Autona instead
+# (ADR-005 S4af). Warned, not refused, as WARNING_NO_MODIFIER.
+WARNING_SHIFT_ONLY = "shift_only"
 
 
 def WarningFor(shortcut):
     """The warning `shortcut` gets (WARNING_OS_RESERVED /
     WARNING_OBS_LIKELY for clashing with a well-known OS / OBS binding,
-    WARNING_NO_MODIFIER for a key with no modifier), else None. Compared as
-    the key it names (_KeyOf); a shortcut that names no key the parser
-    knows is compared by its spelling, against the two lists only. The OS
-    one wins, then the OBS one."""
+    WARNING_NO_MODIFIER for a key with no modifier, WARNING_SHIFT_ONLY for
+    one with Shift alone), else None. Compared as the key it names
+    (_KeyOf); a shortcut that names no key the parser knows is compared by
+    its spelling, against the two lists only. The OS one wins, then the
+    OBS one."""
     key = _KeyOf(shortcut)
     if key is None:
         return None
@@ -267,9 +275,13 @@ def WarningFor(shortcut):
     if key in _OBS_LIKELY_KEYS:
         return WARNING_OBS_LIKELY
     _, modifiers, vk = key
-    if (not modifiers & (MOD_CONTROL | MOD_ALT | MOD_SHIFT)
-            and vk not in _FUNCTION_KEYS):
+    if vk in _FUNCTION_KEYS:
+        return None
+    held = modifiers & (MOD_CONTROL | MOD_ALT | MOD_SHIFT)
+    if not held:
         return WARNING_NO_MODIFIER
+    if held == MOD_SHIFT:
+        return WARNING_SHIFT_ONLY
     return None
 
 
@@ -362,8 +374,8 @@ def CurrentKeys():
     a string), else the default; the defaults alone when the saved subtree
     is not an object. The one merge of the saved shortcuts over the
     defaults: the desktop registers it (AutonaHotkeys.LoadUserHotkeys), and
-    the page and the Qt settings window check a new shortcut against it --
-    an action never saved still takes its default's key."""
+    the page checks a new shortcut against it -- an action never saved
+    still takes its default's key."""
     with SettingsManager.lock:
         stored = SettingsManager.Get(ROOT, {})
         if not isinstance(stored, dict):
@@ -398,6 +410,13 @@ def Describe():
             "vocabulary": Vocabulary(), "applied": applied}
 
 
+def Defaults():
+    """{"enabled": DEFAULT_ENABLED}: what the settings page's "Default"
+    sends for the switch (GET /api/v1/settings `defaults.hotkeys`; each
+    shortcut's default is in its own entry). ADR-005 S4af."""
+    return {"enabled": DEFAULT_ENABLED}
+
+
 def Update(enabled=None, keys=None):
     """Save the switch and / or some shortcuts ({action: shortcut}; "" for
     none), all or nothing. Returns (refusal, warnings, written):
@@ -408,8 +427,9 @@ def Update(enabled=None, keys=None):
       SettingsManager.PrepareWrite), INVALID for a value that is not
       one (`name` the field), CONFLICT when a shortcut would be another
       action's too (`name` the action asked for, `detail` the others).
-    - warnings: [{"action", "code"}] for the shortcuts asked for that clash
-      with an OS / OBS binding; saved all the same.
+    - warnings: [{"action", "code"}] for the shortcuts asked for that
+      WarningFor warns of (clashing with an OS / OBS binding, no modifier,
+      Shift alone); saved all the same.
     - written: whether anything was written (and `changes` notified).
 
     A shortcut is saved spelled as Canonical spells it. What equals the

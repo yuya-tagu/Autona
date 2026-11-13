@@ -7405,7 +7405,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 **決定**
 
 1. **置き場所**: メニューの「設定」から共有ビューに `/web/settings` を出す（S4af）
-2. **区分**: ネットワーク（ポート・LAN）・言語・ホットキーは **THIS_PC**（LAN からはトークンがあっても 403）。一般の運用項目と既定色は **WRITE**。**GET は READ で、返すキーは許可リスト**（トークン・ペアリングコード・その他のキーは返さない）。トークンの表示・再発行はこの移行で扱わない。共有ビューのレイアウトの iframe の sandbox は S4af（web）で扱う
+2. **区分**: ネットワーク（ポート・LAN）・言語・ホットキーは **THIS_PC**（LAN からはトークンがあっても 403）。一般の運用項目と既定色は **WRITE**。**GET は READ で、返すキーは許可リスト**（トークン・ペアリングコード・その他のキーは返さない）。トークンの表示・再発行はこの移行で扱わない。共有ビューのレイアウトの iframe の sandbox は S4af（web）で扱う → S4af で試したが実機でレイアウトが壊れたので撤回（S4af の判断 7）
 3. **言語を変えてもアプリを閉じない**。「再起動すると反映」の案内だけを出す（S4af）。S4ae は GET に `restartPending` を出す
 4. **ホットキーは組み立て式**（Ctrl / Alt / Shift + キーの選択。S4af）。S4ae は GET に語彙を返し、PATCH は parser が読めないキーを 400 で断る
 5. **退路なしの 2 段**（S4ae → S4af）
@@ -7414,7 +7414,7 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
 8. **ホットキーの再登録は GUI スレッドで**: core の `HotkeyRules.changes` → Bridge の `hotkeys_changed` → GUI スレッドにいる `AutonaHotkeys` の bound method（queued）。`RegisterHotKey` は呼んだスレッドのメッセージキューに付くため。`@gui_thread_sync` は足さない。ヘッドレスには `AutonaHotkeys` が無いので `applied: false`（保存は通る）
 9. **ページの URL は実際の待ち受けポート**: `LocalUrl` と Designer は `WebServer.Listening()` を読み、サーバーが無いときだけ設定値（`BrowserScoreboardUrl` の前例）
 
-**S4af の範囲**: React の `/web/settings`（一般・ネットワーク・言語・ホットキーの 4 区画）、メニューの「設定」を共有ビューへ、`AutonaSettingsWindow.py` / `SettingsWidget.py` と Qt の翻訳の削除、言語の変更で閉じない（案内だけ）、ホットキーの組み立て式の編集、共有ビューの iframe の sandbox、下の「S4af で直す」
+**S4af の範囲**: React の `/web/settings`（一般・ネットワーク・言語・ホットキーの 4 区画）、メニューの「設定」を共有ビューへ、`AutonaSettingsWindow.py` / `SettingsWidget.py` と Qt の翻訳の削除、言語の変更で閉じない（案内だけ）、ホットキーの組み立て式の編集、共有ビューの iframe の sandbox（撤回。S4af の判断 7）、下の「S4af で直す」（**2026-11-13 実施**。「#### S4af Settings の React 化」の節）
 
 **地雷**
 - `settings.json` の保存形式（キーと値の型）は変えない。`listen_lan` の None（未決定）は、ほかの保存で bool にしない
@@ -7466,9 +7466,9 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - 「待ち受け中ならその値」のフォールバックが 3 か所に重複（`AutonaWebPanelHost` / `AutonaWebOperations` / `AutonaWebPageLifecycle.LocalUrl`）。上の読み手と合わせて 1 ヘルパーへ寄せる（S4af）
   - 初回起動の bind 失敗で `restartPending` が立つ（どのみち再起動が要るので許容）
   - Qt の窓は web からの保存後も古い表示のまま（S4af で消える）
-  - 同一オリジンのレイアウトの JS が `THIS_PC` を通れる（既存の `THIS_PC` と同じ脅威モデル。S4af の iframe の sandbox で一部緩和。OBS のブラウザソースは対象外）
+  - 同一オリジンのレイアウトの JS が `THIS_PC` を通れる（既存の `THIS_PC` と同じ脅威モデル。S4af の iframe の sandbox で一部緩和。OBS のブラウザソースは対象外）→ **S4af で sandbox を試したが、実機でレイアウトが壊れたため撤回した**（S4af の判断 7）。S4s の直さず記録する点 9 の「プレビューを別のビューに分ける」として持ち越し
   - Qt の窓の「再起動で反映」の文言（`disable_overwrite`・`disable_individual_game_tracker` は即時）を S4af で合わせる（`disable_individual_game_tracker` は S4ac-4 で削除）
-  - **S4af で直す**（Qt の `.ts` は触っていない）:
+  - **S4af で直す**（Qt の `.ts` は触っていない）→ **すべて S4af で済み**（2026-11-13。下の S4af の節）:
     - `disable_overwrite` の文言「再起動後に反映」→ すぐ効く
     - `disable_autoupdate` の既定（窓 False / 読み手 True）
     - Qt の記録の綴り（`Esc` / `Del` / `PgUp` など）は parser が読めない。組み立て式にすれば作られない。保存済みの値は GET の `valid: false` でページが知らせる
@@ -7504,6 +7504,106 @@ S4y で、ボードのウィジェットにしか無い処理は無くなった�
   - `PATCH /settings/language` の `en-US` → `restartPending: true` でアプリは閉じない、`default` に戻すと false
   - Qt の設定窓: 一般・ホットキーのタブが開く（ポートは待ち受け中の値）。**手で数値を入れた項目（`reset_scores: 5`）は記録欄に読めない記号が出る**（`QKeySequence(5)`。落ちない。以前は起動で落ちていたので出なかった。窓は S4af で消えるので残置）
   - 未確認: キーを押して記録する操作（重複のダイアログ・新規インストールの既定との重複）、ポート欄の上限 65535、Designer の URL、LAN からの 403（いずれも pytest で pin。キー入力を投函で流せないため）
+
+#### S4af Settings の React 化（2026-11-13）
+
+メニュー「Help & Settings」→「設定」で、Qt の設定ウィンドウの代わりに共有ビューの React のページ `/web/settings` を開く。4 区画（一般・ネットワーク・言語・ホットキー）で、読み書きは S4ae の v1（`GET` / `PATCH /api/v1/settings*`）だけ。**Qt の `AutonaSettingsWindow.py` / `SettingsWidget.py` と、そこだけが使っていた `AutonaColorButton.py`・Qt の翻訳を削除した（退路なし。オーナー決定 5）**。あわせて S4ae の「S4af で直す」（ポートの読み手の一本化・Shift だけの警告・`disable_autoupdate` の既定の表示・再起動の文言）を片付けた。プレビューの iframe の sandbox は試したが、実機でレイアウトが壊れたので撤回した（判断 7）。ポートが使えずに Web サーバーが起動できないときの案内は、オーナー決定 B（2026-11-13）で `user_data/settings.json` を指す文言に改めた（下の判断 9）。独立レビュー（高 0・中 1・低 11）の指摘は同じ日に直した（下の「レビューで直したもの」）。リスク区分は**高**（Qt の UI と翻訳の削除、ホットキーの登録の経路、共有ビューのページの追加）。
+
+- **完了内容**
+  - `src/`: 25 ファイル、+347 / −1251（削除 3 ファイル）
+    - `Autona.py`: 設定ページを**サイドバーの項目でないスタックのページ**としてナビ項目の後ろに足す（`_lazyPanels` / `_panelIndexes["settings"]` / `_webPanelPages.Add`、ファクトリ `_CreateSettingsPanel` → `_WebPanel("settings")`）。`OpenSettings()`（終了中なら何もしない → ウィンドウを前に出す → 今の項目を `_navBeforeSettings` に控える → `sidebar.clearCurrent()` → `_OnNavSelected(設定のページ)`）。終了時に保存するのは `_NavToRemember()`（設定ページの間はその前の項目）、起動時の復元は保存した index がナビ項目の範囲のときだけ。メニューの「設定」は `OpenSettings`。`EnsureSettingsWindow` / `_settingsWindow` / import を削除。ポートの失敗ダイアログ・初回の LAN の確認の文言（判断 9）
+    - `AutonaSidebar.py`: `clearCurrent()`（排他のボタングループを一時的に非排他にしてチェックを外す。次に押した項目は通常どおりチェックされる）
+    - `AutonaWebServer.py`: `WebServer.Serving()`（待ち受けている値、サーバーが無いときだけ設定。LAN の未決定 None は、待ち受けの値でも設定でも False）・`WebServer.LanOnAtRestart()`（LAN を有効で保存したが、走っているサーバーはこの PC だけで待ち受けている = 再起動で効く。サーバーが無いときは False）。ポートの確認ダイアログの文言（判断 9）
+    - `Serving()` に寄せた読み手: `AutonaWebPanelHost.BrowserScoreboardUrl`・`AutonaWebOperations.get_stats_overlays`（Companion の URL）・`AutonaWebPageLifecycle.LocalUrl`・`AutonaApiInfoWindow`（4 か所。「設定を開く」は API ダイアログを閉じてから `Window.OpenSettings`）・`AutonaObsGuideWindow` / `AutonaIntegrationGuideWindow`（各 2 か所）・`Helpers/AutonaNetworkHelper.GetWebServerHost`。「Settings → General」の案内は「Settings → Network」に。3 つのガイドの LAN の注記は、`LanOnAtRestart()` のとき「有効として保存済み。再起動すると有効になる（それまではこの PC だけ）」
+    - `core/WebAccess.py`: `WEB_PANELS` に `"settings"`
+    - `core/AppSettings.py`: `Defaults()`（各項目の既定を PATCH が受ける形で。`listenLan` は false）。`Describe()` が `defaults` を返す
+    - `core/HotkeyRules.py`: 警告コード `WARNING_SHIFT_ONLY`（`shift_only`。修飾キーが Shift だけ。F キーは除く。拒否しない）、`Defaults()`（`{"enabled": DEFAULT_ENABLED}`）
+    - `AutonaWebOperations.get_settings`: `defaults.hotkeys` に `HotkeyRules.Defaults()`（有効のスイッチの既定をページに直書きしない）
+    - `AutonaHotkeys.py`: `ApplyEnabledSetting` を削除（呼び手は Qt の窓だけ。オン / オフは `ReloadHotkeys` → `SetupHotkeys` が読む）。`SuspendCapture` / `ResumeCapture` の docstring（呼ぶのはテストのセッションだけ）
+    - コメントだけ: `core/Actions.py`・`core/SetFollowService.py`・`core/SettingsManager.py`・`AutonaApiV1.py`（`settings_hotkeys_update` の warnings のコード）
+    - `i18n/Autona_{ja,en}.ts` / `.qm`: 窓の翻訳の文脈 12 個（`settings` / `settings.general` / `settings.hotkeys` ほか）を削除し、文言を変えた 3 つ（判断 9 と LAN の確認）を更新、ガイドの「保存済み・再起動待ち」の 3 つを追加（文脈 `api`。lupdate が無いので手で）。`.qm` は `scripts/compile_translations.ps1` で再生成（269 件ずつ）。メニューの `<source>Settings</source>`（文脈 `Settings`）は残す
+  - `web/`
+    - `src/SettingsPage/`（新規）: `index.tsx`（読み込み・再試行・保存・エラーの言い分け）、`Cards.tsx`（4 区画）、`hotkeys.ts`（ショートカットの分解・組み立て・同じキーの相手探し）、`SettingsPage.test.js`
+    - `src/PanelShell/registry.tsx`: `"settings": SettingsPage`
+    - `src/i18n/locales/{en,ja}.json`: `settings_*` を 70 個ほど
+    - `e2e/settings.spec.ts`（新規）、`e2e/page-scroll.spec.ts` に `"settings"`
+- **ページの形**
+  - 一般（WRITE。保存したらすぐ効く）: 不適切語フィルタ・セットの自動更新を無効・スコアの自動更新を無効・ファイル出力を無効・選手 DB を上書きしない、のスイッチ 5 つと、チーム 1 / 2 の既定の色。各行に「デフォルト」ボタン（既定のときは押せない。値は GET の `defaults`）。`disable_autoupdate` には「デスクトップは起動のたびにオンに戻す」の注記
+  - ネットワーク（THIS_PC。再起動で反映）: ポートは入力欄 +「変更」（フォームの送信。1〜65535 の整数以外は説明つきで送らない）、LAN のスイッチ（null は「未決定。次の起動で聞く」の注記つきでオフ表示。未決定はデフォルト扱いで「デフォルト」は押せない）、待ち受け中のポートと範囲、`restartPending` のとき再起動の案内
+  - 言語（THIS_PC。再起動で反映）: 3 つのセレクト（プログラムは「システムの言語」、残り 2 つは「プログラムの言語と同じ」が既定。選択肢は `name / englishName`）。`restartPending` のとき「再起動すると反映。アプリはこのまま使える」
+  - ホットキー（THIS_PC。保存したらすぐ効く）: 有効のスイッチ、アクションごとに今の値・Ctrl / Alt / Shift のチェック・キーのセレクト（語彙と「なし」）・「保存」（組み立てを触って、始めの組み立てと違うときだけ押せる。綴りの違う保存値（`ctrl+shift+o`・`Ctrl+Return`）は未編集なら押せない。コントロールで表せない保存値（文字列でない・語彙に無いキー）の行は「なし」から始まり、触るまで押せない）・「デフォルト」。保存値が登録されない（`valid: false`。文字列でない値も）なら「この値ではホットキーが登録されません」。組み立て中の下書きは、ほかの行の保存・有効の切り替え・読み直しで消えない。警告は行の下の文と snackbar。`applied: false`（ヘッドレス）なら「このアプリはホットキーを登録しない。保存はデスクトップが使う」
+  - 表示順はページの表（`HOTKEY_ACTIONS` は `DEFAULT_KEYS` の順）。Flask が JSON のキーをソートするため
+- **判断と理由**
+  1. **設定ページはサイドバーの項目にしない**: メニューから開く設定で、運用のナビに並べない（オーナー決定 1）。スタックのナビ項目の後ろに置くので、ナビ項目の nav index == stack index と保存済みのサイドバーの index は動かず、`STATE_VERSION` を上げない。開いている間はどの項目もハイライトしない（ハイライトした項目と違うページが出ているのを避ける）。終了時は前の項目を覚える（設定ページで起動しない）
+  2. **保存は区画ごとに即時、ホットキーとポートだけ明示の確定**: スイッチ・色・言語は選んだら PATCH（Qt の窓と同じ即時）。ポートは打鍵ごとに保存すると途中の値（`51`）を書くので「変更」で送る（窓のスピンは打鍵ごとに保存していた）。ホットキーはチェックとキーを組み立ててから「保存」（途中の組み合わせを登録しない・重複の 409 を 1 回で言う）
+  3. **重複の 409 の文はページが組む**: サーバーのメッセージは英語でアクションの id なので、ページが手元の値から同じキーの相手を探して（`sharingActions`。Qt の綴り・並び順・`Return` を同じキーとして読む）、表示名で「…already assigned to: <相手>」を出す。見つからなければ相手なしの文
+  4. **エラーの言い分け**: THIS_PC の区画の 403 は「この PC からのみ変更できる」、それ以外の 401 / 403 はトークンの案内（1 回だけ）、409 `NOT_READY` は「settings.json を開けないので保存していない」、ホットキーの 400 は「ショートカットではない」。`api.ts` のエラーが持つのは `status` と `code` で、メッセージは使わない
+  5. **`loadFailed` の間の保存の後は全部を読み直す**: 読めなかった起動でも、保存が `settings.json` を読み直す（2026-11-11 の節）。そのときほかの区画の表示はまだ既定なので、保存が通ったら GET し直して全区画を入れ替える
+  6. **Shift だけの警告 `shift_only`**: `Shift+A` などはどのアプリで打った大文字・記号・Shift+矢印の選択も Autona に取られる。`no_modifier` と同じく拒否せず警告（F キーは除く。優先順は OS → OBS → `no_modifier` / `shift_only`）。v1 の `warnings` と GET の `warning` にも出る
+  7. **プレビューの iframe の sandbox は撤回した（マージ済みの main と同じ、sandbox なし）**: プレビューは `layout/` のデザインの JS（ダウンロードしたものも）を、クリップボードを許した共有ビューの中で動かす（S4s の直さず記録する点 9）。`sandbox="allow-scripts"`（独自のオリジンを持たせない）を試したが、メインの実機確認（QtWebEngine で同じページを sandbox あり / なしで並べて描画）でレイアウトが壊れた。opaque origin では同じサーバーのものも別のオリジンになり、(1) `document.styleSheets[..].cssRules` を読むと SecurityError（`scoreboard_simple/common.js` の `setRule` ← `adaptColorsForTheme` ← `index.js` の `Update` で投げ、P1 側とフェーズ表示が描かれない）、(2) `layout/include/globals.js` の `resizeInCanvas` の `toDataURL` が tainted canvas で投げる、(3) `localStorage` が例外を投げる。「読み取りは CORS `*` で通るので表示は変わらない」という前提は誤りだった。ダウンロードした任意のレイアウトも同じ理由で壊れるので、レイアウトを 1 つずつ直す方式では閉じられない。sandbox と、そのために足したレイアウトの try/catch（`common.js` 3 つ・`globals.js`）は全部戻した。**S4s の直さず記録する点 9 の「プレビューを別のビュー（クリップボードを許さないビュー）に分ける」として持ち越す**
+  8. **ポートの読み手は `WebServer.Serving()` の 1 つ**: 保存したポートは次の起動で効くので、案内・URL は今待ち受けているポートを言う（S4ae では 3 か所にフォールバックの写しがあり、残りは設定だけを読んでいた）。設定のポート・LAN を読むのはサーバー自身だけ、`Listening()` を呼ぶのは `Serving` と `bootstrap_core()` だけ（AST で pin）。初回の LAN の確認とヘッドレスのログは「未決定」を見るので設定を読む
+  9. **Web サーバーが起動できないときの案内（オーナー決定 B、2026-11-13）**: 設定ページは Web サーバーの上で動くので、ポートが使えずにサーバーが起動できないと開けない。Qt の窓が消えると、アプリの中でポートを直す手段が無くなる。案 A（Qt の小さなポートのダイアログを残す）と案 B（文言だけ直す）からオーナーが B を選んだ（Qt の UI は足さない: ADR-005）。確認ダイアログの「No」を選んだときの案内と、起動失敗のダイアログは「`user_data/settings.json` の `general.webserver_port` を変えて Autona を再起動するか、ポートを使っているアプリを終了する」（ヘッドレスのログ `log_webserver_port` と同じ書き方）。初回の LAN の確認は「後から 設定 → ネットワーク で変えられる」
+  10. **言語を変えてもアプリを閉じない**（オーナー決定 3）: Qt の窓は変えるとアプリを閉じていた。ページは「再起動すると反映」だけを出し、ほかのページはそのまま使える
+  11. **`disable_autoupdate` は表の既定（オン）で表示する**: 窓は保存が無いとオフで表示していたが、セットの追従は保存が無ければオンとして読む。デスクトップが起動のたびにオンに戻すことを注記する
+  12. **`disable_overwrite` はすぐ効く**: 窓の「再起動後に反映」は誤り（読み手は毎回読む）。ページの一般区画は「一般の設定はすぐ反映」
+  13. **`AutonaColorButton` も削除**: 呼び手は窓の 2 つの色の行だけだった。ページの色は既存の `ColorRow`
+  14. **`ApplyEnabledSetting` を削除**: 窓のチェックボックスだけが呼んでいた。v1 の保存は `hotkeys_changed` → `ReloadHotkeys` で、`SetupHotkeys` が有効のフラグを読む（オフなら全部外す）ので、別の入口は要らない
+- **レビューで直したもの**（独立レビュー 2026-11-13。高 0・中 1・低 11。#10 は sandbox の撤回で不要になった）
+  1. [中] ホットキーの行の下書きが、ほかの行の保存で保存値に戻った: 保存の答えで `hotkeys` 区画が丸ごと替わり、語彙の配列が新しくなるので、分解のメモの依存（`entry.value` と配列そのもの）が変わって全行の下書きを戻していた（有効の切り替え・読み直しも同じ）。依存を `entry.value` と語彙の中身（`keys.join`）にした
+  2. [低] 文字列でない保存値（`value: null, valid: false`）の行に「この値ではホットキーが登録されません」が出なかった。条件を `!entry.valid` に
+  3. [低] 正規の綴りでない有効な値（`ctrl+shift+o`・`Ctrl+Return`）だと未編集でも「保存」が押せ、読めない値（`Shift+!` 等）は下書きが「なし」なので押すと `""` で割り当てが消えた。「変えた」は組み立てを触ったか（始めの組み立てと比べる）で判定し、読めない値の行は触るまで押せない（触れば「なし」で外せる）
+  4. [低] LAN の未決定（null）で「デフォルト」が押せ、押すと false を保存して初回の確認が出なくなった。未決定はデフォルト扱いで押せない（旧 Qt と同じく未決定のまま残す）
+  5. [低] ホットキー有効の既定 `true` がページに直書きだった。core の `HotkeyRules.DEFAULT_ENABLED` を GET の `defaults.hotkeys.enabled` で送る（`external-control-api.md` §5.22）
+  6. [低] 古いコメント: `AutonaApiV1.settings_hotkeys_update` の warnings のコード（`no_modifier` / `shift_only` が抜け）、`HotkeyRules.Update` の docstring
+  7. [低] API ダイアログ（非モーダル）の「設定を開く」で、ダイアログが設定ページを覆いえた。開くときにダイアログを閉じる
+  8. [低] LAN を保存して再起動していない間、API / OBS / 連携のガイドが「設定 → ネットワークで有効にしてください（要再起動）」と言った。保存値がオン・待ち受けがこの PC だけのとき（`WebServer.LanOnAtRestart()`）は「有効として保存済み。再起動で有効になる」に分けた（翻訳 3 つを追加）。ガイドは開いたときに組み、「更新」ボタンで組み直す（開き直しでは組み直さない。既存のまま）
+  9. [低] `Serving()` が、待ち受けの LAN が None のとき None を返しえた。`bool()` で揃えた
+  11. [低] ポートの読み手の pin が `src/Autona.py` と `src/headless.py` を丸ごと除いていた。除くのは「未決定」を見る 2 つの読み（`_StartWebServer` / `Assemble` の中の `Get("general.webserver_listen_lan", None)`）だけにし、その 2 つがあることも見る
+  12. [低] `ja.json` の `settings_hotkey_warning_obs_likely` の「などに 割り当てられがち」の余分な空白を除いた（旧文言の空白は文字列リテラルの連結の跡。比べるテストは空白を除いて比べる）
+- **動作の違い**
+  - 設定は非モーダルの別ウィンドウではなく、メインウィンドウの共有ビューのページ。設定とほかのページを並べて見られない。ブラウザ（`/web/settings`）でも開け、LAN の端末からはトークンつきで一般だけ変えられる
+  - **Web サーバーが起動できないとき（ポートが使用中など）、アプリの中でポートを直せない**（後退。判断 9）。同じとき、言語・ホットキーもアプリの中では変えられない（`settings.json` を書き換える）
+  - 言語を変えてもアプリは閉じない
+  - ホットキーは押して記録するのではなく、Ctrl / Alt / Shift とキーを選んで「保存」。記号のキーなど語彙に無いキーは選べない（窓は記録できたが parser が読めず登録されなかった）。重複の断りはダイアログではなく snackbar
+  - `Shift+文字` などに警告が出る（保存はされる）
+  - `disable_autoupdate` は保存が無いとオンで表示される。`disable_overwrite` に「再起動後」と書かない
+  - ポートは「変更」で保存（打鍵ごとではない）
+  - API 設定ウィンドウ・OBS ガイド・連携ガイドの URL と LAN の注記が、保存しただけの値ではなく待ち受け中の値を言う。LAN を有効で保存して再起動前なら「保存済み・再起動で有効」と言う
+  - API 設定ウィンドウの「設定を開く」はウィンドウを閉じる（窓のときは設定の窓が別に開いた）
+  - ポートの失敗ダイアログ・初回の LAN の確認の文言（判断 9）
+- **削除したもの**
+  - `src/Settings/AutonaSettingsWindow.py`（250 行）・`src/Settings/SettingsWidget.py`（266 行。キーの記録 `HotkeyCaptureEdit`・`_HotkeyWarningText` を含む）・`src/AutonaColorButton.py`（71 行）
+  - `Window.EnsureSettingsWindow` / `_settingsWindow`、`AutonaHotkeys.ApplyEnabledSetting`
+  - Qt の翻訳の文脈 12 個（両方の `.ts` / `.qm`）
+  - テスト: `tests/test_hotkey_rules.py` の窓の節（窓の fixture・ポートの上限・窓の文の比較）、`tests/test_hotkeys_enabled.py` の `ApplyEnabledSetting` のテスト（`ReloadHotkeys` のテストに置き換え）
+- **残置とリスク**
+  - Web サーバーが起動できないときの後退（上）。オーナー決定 B で受容
+  - `SuspendCapture` / `ResumeCapture` は残す（テストのセッションがホットキーを OS から離すのに使う。アプリに呼び手は無い）
+  - `HotkeyRules._QT_SPELLINGS`（`Esc` / `Del` / `PgUp` など）は残す: 窓が保存した値が `settings.json` に残りうる。ページはそれを「登録されない」と表示し、組み立て直せば語彙の綴りで保存する
+  - トークンの表示・再発行は API 設定ウィンドウのまま（決定 2 で範囲外）
+  - **プレビューのレイアウトの JS は、今までどおりクリップボードを許した共有ビューの中で、同一オリジンで動く**（判断 7 で sandbox を撤回。S4ae の残置「同一オリジンのレイアウトの JS が THIS_PC を通れる」と S4s の直さず記録する点 9 は未解決のまま。プレビューを別のビューに分けるのが次の手）
+  - jest の `SettingsPage.test.js` の既定のホットキーは作り物（`load_set: "Ctrl+Shift+S"` など）。実物の既定は e2e と pytest が見る
+  - 共有ビューのページなので、設定ページを開くと共有ビューのほかのページ（例: SCORE）の表示を置き換える（ほかのサイドバーの項目と同じ）
+- **pin**
+  - `tests/test_web_panel_host.py`: 設定ページはハイライトなしでホストを出す・最初に開くとそのページにホストを建てる・2 回目でも前の項目を覚える・終了中は何もしない・本物の `AutonaSidebar` の `clearCurrent` と次の選択・設定ページはサイドバーの復元の対象にならない・**削除の pin `test_the_qt_settings_window_is_gone`**（3 ファイルが無い、src に import も識別子（`EnsureSettingsWindow` / `HotkeyCaptureEdit` / `ApplyEnabledSetting` / `_HotkeyWarningText` ほか。AST）も無い、両方の `.ts` に窓の文脈と `Settings\` の location が無い・`<source>Settings</source>` は残る、spec に `src/Settings` が無い）
+  - `tests/test_hotkey_rules.py`: `shift_only`（`Shift+A` / `Shift+1` / `Shift+Space` / `Shift+Left` / 小文字。`Shift+F5` / `Ctrl+Shift+A` / `Alt+Shift+A` は出ない）、保存は通る、**ページの警告の文（`ja.json`）が窓の文と同じ**（os / obs。obs は窓の文の余分な空白を除いて比べる）・どのコードにも文がある
+  - `tests/test_app_settings.py`: GET に `defaults`、`Defaults()` の値は保存がそのまま受け、読み手の既定と同じ
+  - `tests/test_api_v1_settings.py`: `defaults`（`hotkeys.enabled` 込み）、`shift_only` が v1 の `warnings` に出る、**ポートの読み手は `Serving` の 1 つ**（AST。除くのは「未決定」の 2 つの読みだけで、その 2 つがあることも見る）、`Serving()` は LAN の None を False（待ち受けの値でも設定でも）、LAN を保存した後・再起動前の `GetWebServerHost` は 127.0.0.1 で `LanOnAtRestart()` は True（保存がオフ / 未決定・LAN で待ち受け中・サーバーなしでは False）、3 つのガイドの LAN の注記（無効 → 保存して「更新」で「保存済み・再起動で有効」）、API ダイアログの「設定を開く」はダイアログを閉じてから開く
+  - `tests/test_hotkeys_enabled.py`: オン / オフが `ReloadHotkeys` で効く、`ApplyEnabledSetting` が無い
+  - `tests/test_headless.py`: import の検査の対象を `AutonaColorButton` から `AutonaSidebar` に
+  - `web/src/SettingsPage/SettingsPage.test.js`（37 件）: 表示と順・スイッチ / 色の保存とデフォルト・ポートの検証と保存と再起動の案内・LAN の未決定・言語の保存と案内（ページはそのまま）・ホットキーの組み立て（Shift を外し Alt と F5 → `Ctrl+Alt+F5`）・なし → `""`・デフォルト・重複の文・Shift だけの警告・有効のスイッチ・登録しないシェルの注記・THIS_PC の 403 とトークンの 401 の言い分け・`NOT_READY`・`loadFailed` / `movedAside` と保存後の読み直し・開いただけでは何も送らない・読み込みの失敗と再読み込み・分解 / 組み立ての単体・（レビューの修正）LAN の未決定で「デフォルト」が押せない・有効のスイッチの「デフォルト」は GET の `defaults.hotkeys` を送る・ある行の保存と有効の切り替えでほかの行の下書きが残る・文字列でない保存値に「登録されません」・綴りの違う保存値（`ctrl+shift+s` / `Shift+Ctrl+S`）は未編集で保存できない・読めない値（`Shift+!`）は触るまで保存できず、触って戻すと `""`。行の保存と文字列でない値の 2 件は修正前のコードで落ちることを確かめた
+  - `web/e2e/settings.spec.ts`（5 件。ヘッドレスの実サーバー）: 4 区画の表示と GET の値・ヘッドレスの注記、一般の保存（GET と再読み込みで残る）、言語の変更で再起動の案内が出てページが使える、ホットキーの組み立てと保存（GET）と重複の文、ショートカットでない値の 400（`Ctrl+Q+W` / `Ctrl+Esc` / `Ctrl+Ctrl+A` / `Ctrl+`）。変えたものは前後に既定へ戻す（全 spec が 1 つのサーバーを共有）
+  - `web/e2e/page-scroll.spec.ts`: `/web/settings` も狭い viewport でスクロールする
+- **golden**: `tests/fixtures/**` は差分なし
+- **検証**（sandbox の撤回とレビューの修正の後、最後のソースの編集の後に）: `python scripts/run_tests_parallel.py` 6152 passed / 2 skipped・直列（CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）6152 passed / 25 skipped／`npm run build` exit 0（警告は既存の `Header.jsx` だけ）／`CI=true npm test -- --watchAll=false` 38 suites / 1147 passed（その前の 2 回は負荷の高いときに触っていない `ScoreboardPage` / `ResultPage` の待ちで 1〜3 件落ち、単独と 3 回目の全量では通った）／`npm run test:e2e` 98 passed / 1 skipped（`page-scroll` の playerBrowser は viewport に収まるので skip。既存）。アプリの起動はしていない
+- **メインに実機で見てほしい操作**（隔離データの `python main.py`）
+  - 「Help & Settings」→「設定」で共有ビューに設定ページ。サイドバーのハイライトが消え、項目を押すとそのページへ。設定ページのまま終了 → 起動で前の項目
+  - 一般のスイッチ・色・「デフォルト」。言語を変えて案内が出てアプリが閉じない（再起動で反映）
+  - ホットキーを組み立てて保存 → すぐそのキーで動く・前のキーが他のアプリに届く。重複の snackbar。`Shift+A` の警告。有効のスイッチ
+  - ポートを変えて「変更」→ 再起動の案内。API 設定ウィンドウの URL は再起動まで今のポート。API 設定ウィンドウの「設定を開く」で API 設定ウィンドウが閉じ、設定ページが前に出る
+  - LAN のスイッチをオンにして保存（再起動しない）→ API 設定ウィンドウ・OBS ガイド・連携ガイドの「更新」で「有効として保存済み。再起動すると有効になります」の注記（日本語・英語）。新規データ（LAN 未決定）では LAN の「デフォルト」が押せない
+  - ホットキーのある行で組み立てたまま（保存しない）、別の行を保存する・有効のスイッチを切り替える → 最初の行の組み立てが残る
+  - ポートを他のアプリで塞いで起動 → 確認ダイアログと起動失敗のダイアログの文言（日本語・英語）。新規データの初回の LAN の確認の文言
 
 ### S4ac の設計（2026-11-11）
 

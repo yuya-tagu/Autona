@@ -8,8 +8,8 @@ AutonaHotkeys and Helpers/AutonaHotkeyValidator (deleted). Pinned:
   the vocabulary and the spellings Qt records (a copy of the old code
   below is the reference);
 - the duplicate check and the OS / OBS warnings answer as the validator
-  did; a warning is a code now, and the Qt settings window builds the same
-  words from it;
+  did; a warning is a code now, and the settings page words the two as the
+  Qt settings window (deleted in S4af) did;
 - what a client may compose (the vocabulary), and the spelling a saved
   shortcut gets;
 - Describe: a saved value the registration cannot read is `valid: false`;
@@ -21,6 +21,7 @@ Settings are a private copy here, never saved to disk.
 """
 import itertools
 import json
+import pathlib
 import threading
 
 import pytest
@@ -355,8 +356,9 @@ _OLD_OBS_KEYS = {_key_named(shortcut) for shortcut in _OLD_OBS_LIKELY}
 
 def _expected_warning(shortcut):
     """The rule: the validator's two lists, as the keys they name; a key
-    with no Ctrl / Alt / Shift but a function key is "no_modifier". What
-    names no key the parser knows: the lists by spelling, as before."""
+    with no Ctrl / Alt / Shift but a function key is "no_modifier", one
+    with Shift alone but a function key "shift_only" (S4af). What names no
+    key the parser knows: the lists by spelling, as before."""
     key = _key_named(shortcut)
     if key is None:
         old = _old_os_warning_for(shortcut)
@@ -368,9 +370,13 @@ def _expected_warning(shortcut):
     if key in _OLD_OBS_KEYS:
         return "obs_likely"
     modifiers, vk = key
-    if (not modifiers & (_OLD_MOD_CONTROL | _OLD_MOD_ALT | _OLD_MOD_SHIFT)
-            and not 0x70 <= vk <= 0x87):
+    if 0x70 <= vk <= 0x87:
+        return None
+    held = modifiers & (_OLD_MOD_CONTROL | _OLD_MOD_ALT | _OLD_MOD_SHIFT)
+    if not held:
         return "no_modifier"
+    if held == _OLD_MOD_SHIFT:
+        return "shift_only"
     return None
 
 
@@ -412,8 +418,17 @@ def test_every_warning_the_validator_gave_is_given_still():
     ("Return", "no_modifier"),
     ("Tab", "no_modifier"),
     ("Escape", "no_modifier"),
+    # Shift alone: typing a capital, a symbol or selecting text is taken
+    # from every app on this PC (S4af). Not a function key.
+    ("Shift+A", "shift_only"),
+    ("Shift+1", "shift_only"),
+    ("Shift+Space", "shift_only"),
+    ("Shift+Left", "shift_only"),
+    ("shift+a", "shift_only"),
+    ("Shift+F5", None),
+    ("Ctrl+Shift+A", None),
+    ("Alt+Shift+A", None),
     ("Ctrl+B", None),
-    ("Shift+A", None),
     ("Alt+Space", None),
     ("Ctrl+Shift+O", None),
     ("", None),
@@ -435,29 +450,45 @@ def test_a_function_key_alone_is_not_a_key_with_no_modifier(monkeypatch):
 
     assert HotkeyRules.WarningFor("F5") is None
     assert HotkeyRules.WarningFor("F12") is None
+    assert HotkeyRules.WarningFor("Shift+F5") is None
     assert HotkeyRules.WarningFor("A") == "no_modifier"
 
 
 def _old_words(kind, shortcut):
-    """The validator's text of each kind, for `shortcut`."""
+    """The validator's text of each kind, for `shortcut`. The OBS one less
+    the stray space its string literals' join left ("などに 割り当て"):
+    the page words it without (S4af review)."""
     sample = {"os_reserved": "ctrl+c", "obs_likely": "f1"}[kind]
-    return _old_os_warning_for(sample).replace(f"'{sample}'", f"'{shortcut}'")
+    return (_old_os_warning_for(sample)
+            .replace(f"'{sample}'", f"'{shortcut}'")
+            .replace("などに 割り当て", "などに割り当て"))
 
 
-def test_the_settings_window_shows_the_words_it_showed():
-    # The rules are core's; the window builds its old text from the code,
-    # and has none for "no_modifier" (no dialog: it goes in S4af).
-    from src.Settings.SettingsWidget import _HotkeyWarningText
+def _page_words():
+    """The settings page's Japanese words for each warning code."""
+    path = (pathlib.Path(__file__).resolve().parent.parent / "web" / "src"
+            / "i18n" / "locales" / "ja.json")
+    words = json.loads(path.read_text(encoding="utf-8"))
+    return {key[len("settings_hotkey_warning_"):]: value
+            for key, value in words.items()
+            if key.startswith("settings_hotkey_warning_")}
 
-    seen = set()
-    for shortcut in SHORTCUTS + ["Ctrl+S", "F5", "Alt+F4", "Ctrl+Shift+R"]:
-        code = HotkeyRules.WarningFor(shortcut)
-        seen.add(code)
-        expected = (_old_words(code, shortcut)
-                    if code in ("os_reserved", "obs_likely") else None)
-        assert _HotkeyWarningText(shortcut, code) == expected, shortcut
-    assert seen == {None, "os_reserved", "obs_likely", "no_modifier"}
-    assert _HotkeyWarningText("A", "a_code_from_later") is None
+
+def test_the_settings_page_shows_the_words_the_window_showed():
+    # The rules are core's; the page words the OS / OBS codes as the Qt
+    # settings window did (deleted in S4af), and has words of its own for
+    # the two the window had none for. Every code core gives has words.
+    words = _page_words()
+    for kind in ("os_reserved", "obs_likely"):
+        assert (words[kind].replace("{{shortcut}}", "Ctrl+S")
+                == _old_words(kind, "Ctrl+S")), kind
+    codes = {HotkeyRules.WarningFor(shortcut)
+             for shortcut in SHORTCUTS + ["Ctrl+S", "F5", "Shift+A"]}
+    assert codes - {None} == {
+        HotkeyRules.WARNING_OS_RESERVED, HotkeyRules.WARNING_OBS_LIKELY,
+        HotkeyRules.WARNING_NO_MODIFIER, HotkeyRules.WARNING_SHIFT_ONLY}
+    assert set(words) == codes - {None}
+    assert all("{{shortcut}}" in text for text in words.values())
 
 
 def test_the_validator_module_is_gone():
@@ -737,6 +768,17 @@ def test_a_key_with_no_modifier_is_saved_with_its_warning(settings):
     assert _described("load_set")["valid"] is True
 
 
+def test_a_key_with_shift_alone_is_saved_with_its_warning(settings):
+    # Warned, not refused, as a key with no modifier (S4af).
+    refusal, warnings, written = HotkeyRules.Update(
+        keys={"load_set": "shift+a"})
+
+    assert (refusal, written) == (None, True)
+    assert warnings == [{"action": "load_set", "code": "shift_only"}]
+    assert SettingsManager.settings["hotkeys"]["load_set"] == "Shift+A"
+    assert _described("load_set")["warning"] == "shift_only"
+
+
 @pytest.mark.parametrize("saved, asked", [
     # What Qt's recorder saved, and the page's spelling of the same key.
     ("Ctrl+Return", "Ctrl+Enter"),
@@ -892,121 +934,3 @@ def test_the_announcement_comes_after_the_lock_is_released(settings):
 
     assert held == [False]
 
-
-# ── the Qt settings window's save (until S4af) ───────────────────────────
-#
-# SettingsWidget's hotkey rows as AutonaSettingsWindow builds them, a key
-# recorded into one, through the real keySequenceChanged handler
-# (_makeHotkeyValidator). The window's dialogs are recorded, not shown.
-
-class _Window:
-    """The rows' widget, its capture fields by action, and what happened."""
-
-
-@pytest.fixture
-def window(autonaApp, settings, monkeypatch):
-    from qtpy.QtWidgets import QMessageBox
-
-    from src.Settings.SettingsWidget import HotkeyCaptureEdit, SettingsWidget
-
-    dialogs = []
-    monkeypatch.setattr(QMessageBox, "critical",
-                        lambda parent, title, text: dialogs.append(
-                            ("critical", text)))
-    monkeypatch.setattr(QMessageBox, "warning",
-                        lambda parent, title, text: dialogs.append(
-                            ("warning", text)))
-    reloads = []
-    widget = SettingsWidget("hotkeys", [
-        (action, action, "hotkey", default, lambda: reloads.append(1))
-        for action, default in HotkeyRules.DEFAULT_KEYS.items()])
-    result = _Window()
-    result.edits = dict(zip(HotkeyRules.DEFAULT_KEYS,
-                            widget.findChildren(HotkeyCaptureEdit)))
-    result.dialogs, result.reloads, result.saves = dialogs, reloads, settings
-    try:
-        yield result
-    finally:
-        widget.deleteLater()
-        autonaApp.settle()
-
-
-def _record(window, action, shortcut):
-    from qtpy.QtGui import QKeySequence
-
-    window.edits[action].setKeySequence(QKeySequence(shortcut))
-    return window.edits[action].keySequence().toString()
-
-
-def test_the_window_saves_a_recorded_key(window):
-    assert _record(window, "load_set", "Ctrl+Alt+O") == "Ctrl+Alt+O"
-
-    assert SettingsManager.settings["hotkeys"] == {"load_set": "Ctrl+Alt+O"}
-    assert window.dialogs == [] and window.reloads == [1]
-
-
-def test_the_window_refuses_a_never_saved_actions_default(window):
-    # A fresh install saves no hotkey: swap_teams takes its default
-    # (Ctrl+Shift+S), and a second action may not take it too.
-    shown = _record(window, "load_set", "Ctrl+Shift+S")
-
-    assert [kind for kind, _ in window.dialogs] == ["critical"]
-    assert "swap_teams" in window.dialogs[0][1]
-    assert shown == "Ctrl+Shift+O"
-    assert "hotkeys" not in SettingsManager.settings
-    assert window.saves == [] and window.reloads == []
-
-
-def test_the_window_refuses_the_same_key_spelled_otherwise(window):
-    # Qt records the main Enter key as "Return", the page saves "Enter":
-    # the same key (one Win32 registration).
-    SettingsManager.settings["hotkeys"] = {"swap_teams": "Ctrl+Return"}
-
-    shown = _record(window, "load_set", "Ctrl+Enter")
-
-    assert [kind for kind, _ in window.dialogs] == ["critical"]
-    assert "swap_teams" in window.dialogs[0][1]
-    assert shown == "Ctrl+Shift+O"
-    assert SettingsManager.settings["hotkeys"] == {"swap_teams": "Ctrl+Return"}
-
-
-def test_the_window_warns_with_its_old_words_and_saves(window):
-    _record(window, "load_set", "Ctrl+S")
-
-    assert window.dialogs == [("warning", _old_words("os_reserved", "Ctrl+S"))]
-    assert SettingsManager.settings["hotkeys"]["load_set"] == "Ctrl+S"
-    assert window.reloads == [1]
-
-
-def test_the_window_saves_a_key_with_no_modifier_without_a_dialog(window):
-    # "no_modifier" has no words here (the page tells it); no dialog, no
-    # error.
-    assert HotkeyRules.WarningFor("A") == "no_modifier"
-
-    _record(window, "load_set", "A")
-
-    assert window.dialogs == []
-    assert SettingsManager.settings["hotkeys"]["load_set"] == "A"
-    assert window.reloads == [1]
-
-
-def test_the_windows_port_stops_at_the_last_port(autonaApp, settings):
-    # 1-65535, as the page (core's AppSettings.PORT_RANGE). A port saved out
-    # of range is shown at the limit, and not written back.
-    from qtpy.QtWidgets import QSpinBox
-
-    from src.core.AppSettings import PORT_RANGE
-    from src.Settings.SettingsWidget import SettingsWidget
-
-    SettingsManager.settings["general"] = {"webserver_port": 70000}
-    widget = SettingsWidget("general", [
-        ("Port", "webserver_port", "spinbox", 5107)])
-    try:
-        spin = widget.findChild(QSpinBox)
-        assert (spin.minimum(), spin.maximum()) == PORT_RANGE
-        assert spin.value() == 65535
-        assert settings == []
-        assert SettingsManager.settings["general"]["webserver_port"] == 70000
-    finally:
-        widget.deleteLater()
-        autonaApp.settle()

@@ -225,7 +225,7 @@
 | `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。`?board=` は 2026-11-10。ボードのコンボと Web のスコアボードページが使う） | `get_match_name_candidates`（`core/MatchNameCandidates.Candidates`） | — |
 | `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
 | `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加。変わると Socket.IO の `battle_format` が出る: S4z） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
-| `GET /api/v1/settings` | 設定ウィンドウの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
+| `GET /api/v1/settings` | 設定ページの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加。`defaults` は 2026-11-13） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -653,9 +653,9 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 - `program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow` の後に送る。`scoreboard_follow` と同じく自分の間隔は持たない（開いている窓があれば合流し、無ければすぐ出る）。1 回の送信の間に何度切り替わっても 1 通で、delta の間隔は動かさない
 - 送信先は全接続（読みが READ で、通知は値を運ばない）
 
-### 5.22 `GET /api/v1/settings`（2026-11-11 追加・ADR-005 S4ae）
+### 5.22 `GET /api/v1/settings`（2026-11-11 追加・ADR-005 S4ae。`defaults` と `shift_only` は 2026-11-13・S4af）
 
-設定ウィンドウの設定（一般・ネットワーク・言語）とホットキー。**返すキーは許可リスト**（`core/AppSettings.SETTINGS` と `core/HotkeyRules.DEFAULT_KEYS`）で、アクセストークン・ペアリングコード・その他の settings.json のキーは返さない。だから READ。設定なので `revision` は付かない。最上位に `loadFailed`（`settings.json` を読めなかった起動か。起動時に 1 秒弱読み直してもまだ開けなかったときだけ真で、値は既定を返す。どこかの保存がファイルを読み直す・壊れたファイルを退避すると false に戻る: §6.44）と `movedAside`（壊れた `settings.json` をこの起動で退避した先のファイル名。`settings.json.unreadable-<日時>.bak`。パスは返さない。退避していなければ `null`。起動時の退避も保存のときの退避も。設定ページの案内用）が付く
+設定ページ（`/web/settings`。ADR-005 S4af。それまでは Qt の設定ウィンドウ）の設定（一般・ネットワーク・言語）とホットキー。**返すキーは許可リスト**（`core/AppSettings.SETTINGS` と `core/HotkeyRules.DEFAULT_KEYS`）で、アクセストークン・ペアリングコード・その他の settings.json のキーは返さない。だから READ。設定なので `revision` は付かない。最上位に `loadFailed`（`settings.json` を読めなかった起動か。起動時に 1 秒弱読み直してもまだ開けなかったときだけ真で、値は既定を返す。どこかの保存がファイルを読み直す・壊れたファイルを退避すると false に戻る: §6.44）と `movedAside`（壊れた `settings.json` をこの起動で退避した先のファイル名。`settings.json.unreadable-<日時>.bak`。パスは返さない。退避していなければ `null`。起動時の退避も保存のときの退避も。設定ページの案内用）が付く
 
 ```json
 {
@@ -684,6 +684,12 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
     "vocabulary": {"modifiers": ["Ctrl", "Alt", "Shift"],
                    "keys": ["A", "...", "Right"]},
     "applied": true
+  },
+  "defaults": {
+    "general": {"profanity_filter": true, "disable_autoupdate": true, "...": "..."},
+    "network": {"port": 5107, "listenLan": false},
+    "language": {"program": "default", "gameAsset": "default", "fgTerm": "default"},
+    "hotkeys": {"enabled": true}
   }
 }
 ```
@@ -691,8 +697,9 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 - `general`: settings.json の名前のまま。保存が無い・型が違うときは既定（読み手の既定と同じ。`disable_autoupdate` は true）
 - `network.port`: 保存値。範囲外の保存値（旧ウィンドウは 99999 まで許した）もそのまま返す。`listenLan`: 保存値。**null は未決定**（デスクトップが次の起動で聞く。サーバーはこの PC だけで待ち受ける）。`listening`: サーバーが実際に待ち受けているポートと LAN（無ければ null）。`restartPending`: 保存値が `listening`（無ければ起動時の値）と違う。LAN は null を false として比べる
 - `language`: `"default"` か `choices` の `code`。`restartPending`: 起動時の値と違う（言語は再起動で効く）
-- `hotkeys.keys`: 全アクション。`value` は保存値（無ければ既定。文字列でない保存値は null）、`valid` は登録が読めるか（`""` = ショートカットなしは true。旧ウィンドウの記録が作った `Esc` / `PgUp` などは false で、登録されていない）、`warning` は `os_reserved` / `obs_likely` / `no_modifier`（修飾キーなしの 1 キー。F1〜F24 は除く。Shift+文字は修飾キー付きなので出ない）/ null（優先順は os_reserved → obs_likely → no_modifier。警告は（修飾キー, VK）で引くので `Ctrl+Escape` も `os_reserved`）。文字列でない保存値でも落ちない。**オブジェクトのキーの順は保たれない**（JSON はソートされる）ので、表示順はクライアントが決める
+- `hotkeys.keys`: 全アクション。`value` は保存値（無ければ既定。文字列でない保存値は null）、`valid` は登録が読めるか（`""` = ショートカットなしは true。旧ウィンドウの記録が作った `Esc` / `PgUp` などは false で、登録されていない）、`warning` は `os_reserved` / `obs_likely` / `no_modifier`（修飾キーなしの 1 キー。F1〜F24 は除く）/ `shift_only`（修飾キーが Shift だけ。どのアプリで打った大文字・記号・Shift+矢印の選択も Autona に取られる。F1〜F24 は除く。2026-11-13）/ null（優先順は os_reserved → obs_likely → no_modifier / shift_only。警告は（修飾キー, VK）で引くので `Ctrl+Escape` も `os_reserved`）。文字列でない保存値でも落ちない。**オブジェクトのキーの順は保たれない**（JSON はソートされる）ので、表示順はクライアントが決める
 - `hotkeys.vocabulary`: PATCH が受けるショートカットの部品（Ctrl / Alt / Shift と、キー 1 つ）。`applied`: このシェルが OS に登録するか（デスクトップ true、ヘッドレス false）
+- `defaults`（2026-11-13）: 一般・ネットワーク・言語の各項目と、ホットキーの有効のスイッチの既定を、PATCH がそのまま受ける形で（`core/AppSettings.Defaults()` と `core/HotkeyRules.Defaults()` の `hotkeys.enabled`。設定ページの「デフォルト」が送る値）。`listenLan` の既定は false（保存が無い = null は「未決定」で、PATCH は真偽しか受けないため。設定ページは未決定をデフォルト扱いにし、「デフォルト」で false を書かない）。ショートカットの既定は `hotkeys.keys.<action>.default`
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -1131,10 +1138,10 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`、`NOT_READY` 409
 
 ### 6.47 ホットキーの設定 `PATCH /api/v1/settings/hotkeys`（2026-11-11 追加・ADR-005 S4ae）
-- body: `{ "enabled": true | false, "keys": { "<action>": "<shortcut>" } }` のどちらか 1 つ以上（`{"keys": {}}` は何も保存しない）。ショートカットは Ctrl / Alt / Shift（各 1 回まで）と §5.22 の語彙のキー 1 つを `+` でつないだもの（大文字小文字・並び・空白は問わない。`Ctrl+Alt+Shift+Key` の順で保存）。修飾キーなしの 1 キー（F キーを除く）も保存できるが `no_modifier` の警告が付く（拒否しない）。`""` はショートカットなし
+- body: `{ "enabled": true | false, "keys": { "<action>": "<shortcut>" } }` のどちらか 1 つ以上（`{"keys": {}}` は何も保存しない）。ショートカットは Ctrl / Alt / Shift（各 1 回まで）と §5.22 の語彙のキー 1 つを `+` でつないだもの（大文字小文字・並び・空白は問わない。`Ctrl+Alt+Shift+Key` の順で保存）。修飾キーなしの 1 キー（F キーを除く）も保存できるが `no_modifier` の警告が付く。修飾キーが Shift だけ（F キーを除く）は `shift_only`（2026-11-13）。どちらも拒否しない。`""` はショートカットなし
 - **全部を先に検証**し、1 つでも不正なら何も保存しない。今と同じショートカットは書かない
 - **保存の後の集合で、要求したアクションのショートカットが別のアクションと同じキーなら `409 CONFLICT`**（メッセージに相手のアクション）。「同じキー」は（修飾キー, VK）で比べる（`Return` = `Enter`、`Esc` = `Escape`、並び順は無関係: `A+Ctrl` と `Ctrl+A` は重複。読めない値どうしは正規化した文字列で比べる）。保存していない既定値とも比べる。何も保存しない。1 つの要求で 2 つのアクションの入れ替えはできる
-- OS / OBS と重なりがちなショートカットは保存し、`data.warnings`（`[{action, code: "os_reserved" | "obs_likely" | "no_modifier"}]`）で知らせる。**何も書かなかったとき**（今と同じ値だけの要求）も `warnings` は返る
+- OS / OBS と重なりがちなショートカットは保存し、`data.warnings`（`[{action, code: "os_reserved" | "obs_likely" | "no_modifier" | "shift_only"}]`）で知らせる。**何も書かなかったとき**（今と同じ値だけの要求）も `warnings` は返る
 - 応答: `data` は §5.22 の `hotkeys` + `warnings`
 - デスクトップは保存のあと、すぐ登録し直す（GUI スレッドで。`enabled: false` で全部外れる）。ヘッドレスは保存だけ（`applied: false`）
 - **`THIS_PC` 区分（§2.2）**

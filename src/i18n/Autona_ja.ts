@@ -188,7 +188,6 @@
 </context><context>
     <name>Settings</name>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="13" />
         <location filename="..\Autona.py" line="610" />
         <source>Settings</source>
         <translation>設定</translation>
@@ -215,24 +214,36 @@
         <translation>LAN 上の他のデバイスから状態を変更する操作（と選手リストの取得）には、アクセストークンが必要です。ヘッダ X-Autona-Token: &lt;トークン&gt; を付けて送ってください（Authorization: Bearer &lt;トークン&gt; や、URL 末尾の ?token=&lt;トークン&gt; でも可）。状態の読み取りとオーバーレイの表示にはトークンは不要です。</translation>
     </message>
     <message>
-        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</source>
-        <translation>LAN アクセスは無効です。API にはこの PC からのみ接続できます。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
+        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → Network (restart required).</source>
+        <translation>LAN アクセスは無効です。API にはこの PC からのみ接続できます。有効にするには 設定 → ネットワーク で設定してください（要再起動）。</translation>
+    </message>
+    <message>
+        <source>LAN access is saved as on and takes effect when Autona is restarted; until then the API is reachable from this PC only.</source>
+        <translation>LAN アクセスは有効として保存済みです。Autona を再起動すると有効になります（それまでは API にこの PC からのみ接続できます）。</translation>
     </message>
     <message>
         <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address and add ?token=&lt;access token&gt; to the end of the URL (&amp;token=&lt;access token&gt; if the URL already has a ?; copy the token from API Settings → Open reference &amp; tester).</source>
         <translation>OBS はこの PC で実行してください。同一 LAN 上の別 PC の OBS から使う場合は、127.0.0.1 をこの PC の IP アドレスに置き換え、URL の末尾に ?token=&lt;アクセストークン&gt; を付けてください（URL にすでに ? があるときは &amp;token=&lt;アクセストークン&gt;。トークンは API設定 → リファレンス・テスターを開く からコピーできます）。</translation>
     </message>
     <message>
-        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>
-        <translation>LAN アクセス: 無効 — OBS はこの PC で実行する必要があります。別 PC の OBS を使う場合は 設定 → 一般 で有効にしてください（要再起動）。</translation>
+        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → Network (restart required).</source>
+        <translation>LAN アクセス: 無効 — OBS はこの PC で実行する必要があります。別 PC の OBS を使う場合は 設定 → ネットワーク で有効にしてください（要再起動）。</translation>
+    </message>
+    <message>
+        <source>LAN access: saved as on, takes effect when Autona is restarted — until then OBS must run on this PC.</source>
+        <translation>LAN アクセス: 有効として保存済み（Autona を再起動すると有効になります）— それまでは OBS はこの PC で実行する必要があります。</translation>
     </message>
     <message>
         <source>This device must be on the same LAN as this PC.</source>
         <translation>このデバイスはこの PC と同一の LAN 上にある必要があります。</translation>
     </message>
     <message>
-        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
-        <translation>LAN アクセス: 無効 — 他のデバイスからは接続できません。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
+        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → Network (restart required).</source>
+        <translation>LAN アクセス: 無効 — 他のデバイスからは接続できません。有効にするには 設定 → ネットワーク で設定してください（要再起動）。</translation>
+    </message>
+    <message>
+        <source>LAN access: saved as on, takes effect when Autona is restarted — until then other devices cannot connect.</source>
+        <translation>LAN アクセス: 有効として保存済み（Autona を再起動すると有効になります）— それまでは他のデバイスからは接続できません。</translation>
     </message>
     <message>
         <source>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</source>
@@ -782,47 +793,6 @@
         <translation>ゲームアセットを追加</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="486" />
-        <source>Program language changed successfully.</source>
-        <translation>プログラムの表示言語を変更しました。</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="488" />
-        <source>Program Language</source>
-        <translation>プログラムの表示言語</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="492" />
-        <source>System language</source>
-        <translation>システムの表示言語と同じにする</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="512" />
-        <source>Game Asset Language changed successfully.</source>
-        <translation>ゲームアセットの言語を変更しました。</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="514" />
-        <source>Game Asset Language</source>
-        <translation>ゲームアセットの言語</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="544" />
-        <location filename="..\Autona.py" line="518" />
-        <source>Same as program language</source>
-        <translation>プログラムの表示言語と同じにする</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="538" />
-        <source>Tournament term language changed successfully.</source>
-        <translation>トーナメント用語の言語を変更しました</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="540" />
-        <source>Tournament term language</source>
-        <translation>トーナメント用語の言語</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="569" />
         <source>Check for updates</source>
         <translation>更新情報を調べる</translation>
@@ -1138,7 +1108,7 @@ If this is a stale Autona instance, the Web UI will appear blank because Windows
 
 Terminate the existing process(es) and continue?
 
-Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</source>
+Alternatively, choose No, then change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</source>
         <translation>ポート {port} は既に別のプロセスが使用しています:
 
 {details}
@@ -1147,7 +1117,7 @@ Alternatively, choose No and change the port under Settings → General → Webs
 
 既存のプロセスを終了して続行しますか？
 
-または「No」を選び、設定 → 一般 → Webサーバーポート でポートを変更してから Autona を再起動してください。</translation>
+または「No」を選び、user_data/settings.json の general.webserver_port を変更して Autona を再起動するか、ポートを使用しているアプリを終了してください。</translation>
     </message>
     <message>
         <source>LAN access</source>
@@ -1158,12 +1128,12 @@ Alternatively, choose No and change the port under Settings → General → Webs
 
 If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
 
-You can change this later under Settings → General.</source>
+You can change this later under Settings → Network.</source>
         <translation>セキュリティのため、Autona の Web サーバーは既定でこの PC 内（127.0.0.1）からのみ接続を受け付けるようになりました。
 
 LAN 上の他のデバイス（別 PC の OBS、スマートフォンからのリモート操作など）から接続する場合は、今すぐ LAN アクセスを有効にしてください。
 
-この設定は後から 設定 → 一般 で変更できます。</translation>
+この設定は後から 設定 → ネットワーク で変更できます。</translation>
     </message>
     <message>
         <source>Web server failed to start</source>
@@ -1175,13 +1145,13 @@ LAN 上の他のデバイス（別 PC の OBS、スマートフォンからの�
 {error}
 
 OBS browser sources and the Web UI will not work.
-Change the port under Settings → General → Webserver Port and restart Autona.</source>
+Change general.webserver_port in user_data/settings.json and restart Autona, or quit the application that is using the port.</source>
         <translation>ポート {port} で Web サーバーを起動できませんでした:
 
 {error}
 
 OBS のブラウザソースと Web UI は動作しません。
-設定 → 一般 → Webサーバーポート でポートを変更し、Autona を再起動してください。</translation>
+user_data/settings.json の general.webserver_port を変更して Autona を再起動するか、ポートを使用しているアプリを終了してください。</translation>
     </message>
     <message>
         <location filename="..\AutonaWebServer.py" line="831" />
@@ -1204,205 +1174,6 @@ OBS のブラウザソースと Web UI は動作しません。
         <location filename="..\Autona.py" line="865" />
         <source>)</source>
         <translation>)</translation>
-    </message>
-</context><context>
-    <name>settings</name>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="35" />
-        <source>Default</source>
-        <translation>デフォルト</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="129" />
-        <source>General</source>
-        <translation>一般</translation>
-    </message>
-    <message>
-        <source>Language</source>
-        <translation>言語</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="163" />
-        <source>Hotkeys</source>
-        <translation>ホットキー</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
-        <source>Bluesky</source>
-        <translation>Bluesky</translation>
-    </message>
-</context><context>
-    <name>settings.bsky</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="262" />
-        <source>Enable Bluesky Features</source>
-        <translation>Bluesky 機能を有効化</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="269" />
-        <source>Host server</source>
-        <translation>ホストサーバー</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="276" />
-        <source>Bluesky Handle</source>
-        <translation>Bluesky ハンドル</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="283" />
-        <source>Application Password</source>
-        <translation>アプリパスワード</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="289" />
-        <source>You can get an app password by going into your Bluesky settings -&gt; Privacy &amp; Security</source>
-        <translation>Bluesky の設定 → プライバシーとセキュリティ からアプリパスワードを取得できます</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="291" />
-        <source>Please note that said app password will be stored in plain text on your computer</source>
-        <translation>このアプリパスワードは平文でコンピュータに保存される点にご注意ください</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="293" />
-        <source>Do not use your regular account password!</source>
-        <translation>通常のアカウントパスワードは使用しないでください！</translation>
-    </message>
-</context><context>
-    <name>settings.disable_autoupdate</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="66" />
-        <source>Disable automatic set updating for the scoreboard</source>
-        <translation>スコアボードのセット自動更新を無効化</translation>
-    </message>
-</context><context>
-    <name>settings.disable_export</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="82" />
-        <source>Disable Autona file exporting</source>
-        <translation>Autona のファイル出力を無効化</translation>
-    </message>
-</context><context>
-    <name>settings.disable_overwrite</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="90" />
-        <source>Do not override existing values in the local player database (takes effect on next restart)</source>
-        <translation>ローカル選手 DB の既存値を上書きしない（再起動後に反映）</translation>
-    </message>
-</context><context>
-    <name>settings.disable_scoreupdate</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="74" />
-        <source>Disable automatic score updating for the scoreboard</source>
-        <translation>スコアボードのスコア自動更新を無効化</translation>
-    </message>
-</context><context>
-    <name>settings.disable_thumbnail_widget</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="58" />
-        <source>Disables the Thumbnail Widget from starting (takes effect on next restart)</source>
-        <translation>サムネイルウィジェットの起動を無効化（再起動後に反映）</translation>
-    </message>
-</context><context>
-    <name>settings.general</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="42" />
-        <source>Webserver Port (takes effect on next restart)</source>
-        <translation>Webサーバーポート（再起動後に反映）</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
-        <source>Enable profanity filter</source>
-        <translation>不適切語フィルタを有効化</translation>
-    </message>
-</context><context>
-    <name>settings.webserver_listen_lan</name>
-    <message>
-        <source>Allow access from other devices on the LAN (takes effect on next restart)</source>
-        <translation>LAN 上の他のデバイスからのアクセスを許可（再起動後に反映）</translation>
-    </message>
-</context><context>
-    <name>settings.hotkeys</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="136" />
-        <source>Enable hotkeys</source>
-        <translation>ホットキーを有効にする</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="143" />
-        <source>Load set</source>
-        <translation>セットデータをロードする</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="144" />
-        <source>Team 1 score up</source>
-        <translation>チーム1のスコアを上げる</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="145" />
-        <source>Team 1 score down</source>
-        <translation>チーム1のスコアを下げる</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="146" />
-        <source>Team 2 score up</source>
-        <translation>チーム2のスコアを上げる</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="147" />
-        <source>Team 2 score down</source>
-        <translation>チーム2のスコアを下げる</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="148" />
-        <source>Reset scores</source>
-        <translation>スコアをリセット</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="149" />
-        <source>Swap teams</source>
-        <translation>チームを入れ替え</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
-        <source>Reload Top 8 from Start.gg</source>
-        <translation>Top 8 を Start.gg から再読み込み</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="199" />
-        <source>Apply changes</source>
-        <translation>反映</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="147" />
-        <source>Hotkey conflict</source>
-        <translation>ホットキーの競合</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="149" />
-        <source>'{shortcut}' is already assigned to: {others}.
-Choose a different combination or clear the conflicting assignment first.</source>
-        <translation>'{shortcut}' は既に次へ割り当てられています: {others}。
-別の組み合わせを選ぶか、競合する割り当てを先に解除してください。</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\SettingsWidget.py" line="171" />
-        <source>Possible hotkey conflict</source>
-        <translation>ホットキー競合の可能性</translation>
-    </message>
-</context><context>
-    <name>settings.team_1_default_color</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
-        <source>Default Color of Team 1</source>
-        <translation>チーム1のデフォルトカラー</translation>
-    </message>
-</context><context>
-    <name>settings.team_2_default_color</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="122" />
-        <source>Default Color of Team 2</source>
-        <translation>チーム2のデフォルトカラー</translation>
     </message>
 </context><context>
     <name>thumb_app</name>

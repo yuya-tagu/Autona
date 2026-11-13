@@ -151,9 +151,14 @@ def test_the_read_answers_every_section(client, saves):
     data = _ok(client.get(SETTINGS))
 
     assert set(data) == {"general", "network", "language", "hotkeys",
-                         "loadFailed", "movedAside"}
+                         "defaults", "loadFailed", "movedAside"}
     assert data["loadFailed"] is False
     assert data["movedAside"] is None
+    # What the page's "Default" buttons send (S4af).
+    from src.core.AppSettings import Defaults
+    assert data["defaults"] == dict(Defaults(),
+                                    hotkeys={"enabled": HotkeyRules.DEFAULT_ENABLED})
+    assert data["defaults"]["hotkeys"] == {"enabled": True}
     assert data["general"]["profanity_filter"] is True
     assert data["general"]["disable_autoupdate"] is True
     assert data["network"] == {"port": DEFAULT_WEBSERVER_PORT,
@@ -185,7 +190,7 @@ def test_the_read_needs_no_token_and_never_carries_one(webApp, autonaApp, saves,
     assert PAIRING not in text
     assert "webserver_token" not in text
     assert set(data) == {"general", "network", "language", "hotkeys",
-                         "loadFailed", "movedAside"}
+                         "defaults", "loadFailed", "movedAside"}
     assert data["loadFailed"] is False
     assert data["movedAside"] is None
 
@@ -295,6 +300,18 @@ def test_a_key_with_no_modifier_is_saved_and_warned(client, saves):
     # A function key alone is the usual hotkey: the OBS warning, not this.
     data = _ok(client.patch(HOTKEYS, json={"keys": {"load_set": "F9"}}))
     assert data["warnings"] == [{"action": "load_set", "code": "obs_likely"}]
+
+
+def test_a_key_with_shift_alone_is_saved_and_warned(client, saves):
+    # S4af: typing a capital or a symbol in any app would go to Autona.
+    data = _ok(client.patch(HOTKEYS, json={"keys": {"load_set": "Shift+K"}}))
+
+    assert data["warnings"] == [{"action": "load_set", "code": "shift_only"}]
+    assert data["keys"]["load_set"]["warning"] == "shift_only"
+    assert SettingsManager.settings["hotkeys"]["load_set"] == "Shift+K"
+    # Not with a function key, nor with Ctrl / Alt too.
+    data = _ok(client.patch(HOTKEYS, json={"keys": {"load_set": "Ctrl+Shift+K"}}))
+    assert data["warnings"] == []
 
 
 @pytest.mark.parametrize("path, body", [
@@ -757,6 +774,184 @@ def test_the_reload_is_connected_once_whatever_applied_says(autonaApp,
 
 
 # ── the pages' port: the one the server is bound with ────────────────────
+
+def test_every_url_naming_the_server_reads_it_through_serving():
+    # ADR-005 S4af: one reader of what the server is reached at,
+    # WebServer.Serving() (bound with, else the settings). Only the server
+    # itself reads the settings' port (its bind, and Serving's fallback),
+    # and only Serving and AppSettings' injection ask Listening().
+    import ast
+
+    from tests.conftest import PROJECT_ROOT
+
+    # The two reads of the LAN switch for "not decided yet" (None: the
+    # desktop's first-launch question, the headless shell's log line), not
+    # to name the server: these functions, this key, the None default --
+    # and nothing else in the two files.
+    undecided = {("src/Autona.py", "_StartWebServer"),
+                 ("src/headless.py", "Assemble")}
+
+    def functions(tree):
+        """{call node: the innermost function it is in}."""
+        found = {}
+
+        def visit(node, function):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    visit(child, child.name)
+                else:
+                    if isinstance(child, ast.Call):
+                        found[child] = function
+                    visit(child, function)
+
+        visit(tree, None)
+        return found
+
+    src = PROJECT_ROOT / "src"
+    portReaders, listeners, undecidedReads = set(), set(), set()
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        name = path.relative_to(PROJECT_ROOT).as_posix()
+        for node, function in functions(tree).items():
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if (node.func.attr == "Get" and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value in ("general.webserver_port",
+                                               "general.webserver_listen_lan")):
+                if ((name, function) in undecided
+                        and node.args[0].value == "general.webserver_listen_lan"
+                        and len(node.args) == 2
+                        and isinstance(node.args[1], ast.Constant)
+                        and node.args[1].value is None):
+                    undecidedReads.add((name, function))
+                else:
+                    portReaders.add(name)
+            if node.func.attr == "Listening":
+                listeners.add(name)
+    assert portReaders == {"src/AutonaWebServer.py"}
+    assert undecidedReads == undecided
+    assert listeners == {"src/AutonaWebServer.py", "src/bootstrap.py"}
+
+
+def test_serving_says_lan_off_for_undecided(saves, monkeypatch):
+    # LAN access not decided (None) is off, whether the server runs or not.
+    SettingsManager.settings["general"].pop("webserver_listen_lan", None)
+    assert WebServer.Serving()[1] is False
+    SettingsManager.settings["general"]["webserver_listen_lan"] = None
+    assert WebServer.Serving()[1] is False
+
+    monkeypatch.setattr(WebServer, "_listening", ("127.0.0.1", 5107, None))
+    assert WebServer.Serving() == (5107, False)
+
+
+def test_lan_saved_before_the_restart_is_still_off(saves, monkeypatch):
+    # Saved on, the running server bound to this PC only: every address is
+    # still the loopback one, and the guides say a restart turns it on.
+    from src.Helpers import AutonaNetworkHelper
+
+    monkeypatch.setattr(AutonaNetworkHelper, "GetLocalIP",
+                        lambda: "192.168.0.20")
+    monkeypatch.setattr(WebServer, "_listening", ("127.0.0.1", 5107, False))
+    SettingsManager.settings["general"]["webserver_listen_lan"] = True
+
+    assert WebServer.Serving() == (5107, False)
+    assert AutonaNetworkHelper.GetWebServerHost() == "127.0.0.1"
+    assert WebServer.LanOnAtRestart() is True
+
+    # Saved off (or undecided): nothing waits for a restart.
+    SettingsManager.settings["general"]["webserver_listen_lan"] = False
+    assert WebServer.LanOnAtRestart() is False
+    SettingsManager.settings["general"]["webserver_listen_lan"] = None
+    assert WebServer.LanOnAtRestart() is False
+
+    # Bound to the LAN: it is on now, not at the restart.
+    monkeypatch.setattr(WebServer, "_listening", ("0.0.0.0", 5107, True))
+    SettingsManager.settings["general"]["webserver_listen_lan"] = True
+    assert AutonaNetworkHelper.GetWebServerHost() == "192.168.0.20"
+    assert WebServer.LanOnAtRestart() is False
+
+
+def test_with_no_server_the_saved_lan_names_the_address(saves, monkeypatch):
+    # Before start() (and in tests) the settings are what the next start
+    # binds; nothing is waiting for a restart.
+    from src.Helpers import AutonaNetworkHelper
+
+    monkeypatch.setattr(AutonaNetworkHelper, "GetLocalIP",
+                        lambda: "192.168.0.20")
+    monkeypatch.setattr(WebServer, "_listening", None)
+    SettingsManager.settings["general"]["webserver_listen_lan"] = True
+
+    assert AutonaNetworkHelper.GetWebServerHost() == "192.168.0.20"
+    assert WebServer.LanOnAtRestart() is False
+
+
+_GUIDE_TEXTS = {
+    "AutonaApiInfoWindow": ("warningLabel", "_refreshBaseUrl",
+        "LAN access is saved as on and takes effect when Autona is "
+        "restarted; until then the API is reachable from this PC only.",
+        "LAN access is disabled; the API is reachable from this PC only. "
+        "Enable it under Settings → Network (restart required)."),
+    "AutonaObsGuideWindow": ("lanNoteLabel", "_refresh",
+        "LAN access: saved as on, takes effect when Autona is "
+        "restarted — until then OBS must run on this PC.",
+        "LAN access: disabled — OBS must run on this PC. To use OBS on "
+        "another PC, enable it under Settings → Network (restart required)."),
+    "AutonaIntegrationGuideWindow": ("lanNoteLabel", "_refresh",
+        "LAN access: saved as on, takes effect when Autona is "
+        "restarted — until then other devices cannot connect.",
+        "LAN access: disabled — other devices cannot connect. "
+        "Enable it under Settings → Network (restart required)."),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_GUIDE_TEXTS))
+def test_the_guides_tell_lan_saved_for_the_restart(saves, monkeypatch, name):
+    # LAN access saved as on, the server still bound to this PC: the guides
+    # say a restart turns it on, not "enable it" (S4af review).
+    import importlib
+
+    module = importlib.import_module(f"src.{name}")
+    label, refresh, saved, disabled = _GUIDE_TEXTS[name]
+    monkeypatch.setattr(WebServer, "_listening", ("127.0.0.1", 5107, False))
+    SettingsManager.settings["general"]["webserver_listen_lan"] = False
+    window = getattr(module, name)()
+    try:
+        window.UiMounted()
+        assert getattr(window, label).text() == module._tr(disabled)
+
+        SettingsManager.settings["general"]["webserver_listen_lan"] = True
+        getattr(window, refresh)()
+        assert getattr(window, label).text() == module._tr(saved)
+    finally:
+        window.deleteLater()
+
+
+def test_opening_the_settings_from_the_api_window_closes_it(saves):
+    # It is not modal: left open, it would stay over the page it opened.
+    from qtpy.QtWidgets import QWidget
+
+    from src.AutonaApiInfoWindow import AutonaApiInfoWindow
+
+    opened = []
+
+    class Main(QWidget):
+        def OpenSettings(self):
+            opened.append(window.isVisible())
+
+    main = Main()
+    window = AutonaApiInfoWindow(main)
+    try:
+        window.UiMounted()
+        window.show()
+        window._openSettings()
+
+        assert opened == [False]
+        assert not window.isVisible()
+    finally:
+        window.deleteLater()
+        main.deleteLater()
+
 
 def test_local_pages_go_to_the_port_the_server_is_bound_with(saves,
                                                              monkeypatch):

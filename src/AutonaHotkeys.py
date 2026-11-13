@@ -271,7 +271,7 @@ class AutonaHotkeys(QObject):
         self._registered_ids = {}  # hotkey_id -> action_key
         self._next_id = 1
         self._filter = None
-        # True while a hotkey capture field (QKeySequenceEdit) has focus.
+        # True between SuspendCapture() and ResumeCapture().
         self._capture_suspended = False
         self.LoadUserHotkeys()
 
@@ -284,24 +284,28 @@ class AutonaHotkeys(QObject):
         self.SetupHotkeys()
 
     def ReloadHotkeys(self):
-        """Read the saved shortcuts again and register them. The settings
-        window calls it after a save; a save through the settings page
-        (core's HotkeyRules.Update, on a request thread) reaches it through
-        StateManagerBridge.hotkeys_changed, connected by bootstrap_gui():
-        this object lives on the GUI thread, so Qt queues the call there --
-        RegisterHotKey binds a hotkey to the calling thread's message
-        queue, the one the native filter reads (ADR-005 S4ae)."""
+        """Read the saved shortcuts again and register them -- or none,
+        with hotkeys turned off (SetupHotkeys). A save through the settings
+        page (core's HotkeyRules.Update, on a request thread) reaches it
+        through StateManagerBridge.hotkeys_changed, connected by
+        bootstrap_gui(): this object lives on the GUI thread, so Qt queues
+        the call there -- RegisterHotKey binds a hotkey to the calling
+        thread's message queue, the one the native filter reads (ADR-005
+        S4ae). It is the one way a save takes effect since the Qt settings
+        window went (S4af; it called this and ApplyEnabledSetting itself)."""
         self.LoadUserHotkeys()
         self.SetupHotkeys()
 
     def SuspendCapture(self):
-        """Release the OS hotkey registrations while the user records a key.
+        """Release the OS hotkey registrations until ResumeCapture().
 
-        RegisterHotKey grabs the combination system-wide, so pressing an
-        already-assigned shortcut inside a QKeySequenceEdit fires the action
-        instead of reaching the widget. Callers pair this with
-        ResumeCapture(); it is idempotent so nested/duplicate focus events
-        are harmless.
+        RegisterHotKey grabs the combination system-wide. The Qt settings
+        window's key recorder (a QKeySequenceEdit) held them off while it
+        had focus, so an assigned shortcut reached the field instead of
+        firing; the settings page composes a shortcut from lists and records
+        no key (ADR-005 S4af), so no window calls this any more. The test
+        session does (tests/conftest.py): its hotkeys stay off the OS while
+        saves still reload them. Idempotent, so a duplicate call is harmless.
         """
         if self._capture_suspended:
             return
@@ -324,26 +328,12 @@ class AutonaHotkeys(QObject):
     def _hotkeysEnabled(self):
         return SettingsManager.Get("hotkeys.hotkeys_enabled", True) != False
 
-    def ApplyEnabledSetting(self):
-        """Sync the OS registrations with hotkeys.hotkeys_enabled.
-
-        Called when the settings checkbox toggles. Enabling re-registers via
-        SetupHotkeys() (still a no-op while a capture field holds focus --
-        ResumeCapture() registers later, and SetupHotkeys() re-checks the
-        enabled flag itself). Disabling drops every Win32 grab immediately.
-        """
-        if self._hotkeysEnabled():
-            self.SetupHotkeys()
-        else:
-            self._unregisterAll()
-
     def SetupHotkeys(self):
         self._unregisterAll()
 
-        # ReloadHotkeys() runs on every successful save, i.e. while the
-        # capture field still has focus. Keep the freshly loaded keys but do
-        # not hand them back to the OS yet -- ResumeCapture() registers them
-        # once the field is done capturing.
+        # ReloadHotkeys() runs on every successful save, suspended or not.
+        # Keep the freshly loaded keys but do not hand them back to the OS
+        # yet -- ResumeCapture() registers them.
         if self._capture_suspended:
             logger.debug("Hotkey capture suspended; skipping registration")
             return
@@ -407,7 +397,7 @@ class AutonaHotkeys(QObject):
 
     def LoadUserHotkeys(self):
         # Core's merge of the saved shortcuts over the defaults, the one the
-        # settings page and the settings window check against. A saved value
+        # settings page checks against. A saved value
         # that is not a string, or a subtree that is not an object (a
         # hand-edited settings.json), no longer raises here, inside
         # UiMounted: SetupHotkeys skips the value as unreadable and

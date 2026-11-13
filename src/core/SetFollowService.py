@@ -174,8 +174,8 @@ class SetFollowService:
     def Polling() -> bool:
         """Whether a load starts polling: `general.disable_autoupdate` off.
         The desktop turns the setting on at every launch (TurnOffPolling;
-        a board's toggle left the UI), and the settings window's "Disable
-        automatic set updating" checkbox turns it off again until the next
+        a board's toggle left the UI), and the settings page's "Disable
+        automatic set updating" switch turns it off again until the next
         launch (the next board build until ADR-005 S4ac-1). A shell that
         never wrote the key does not poll: there is no web operation to stop
         it."""

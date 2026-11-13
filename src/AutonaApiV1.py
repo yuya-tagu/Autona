@@ -2008,8 +2008,10 @@ def settings_hotkeys_update():
     # shortcut is Ctrl / Alt / Shift and one key of the vocabulary (saved as
     # "Ctrl+Alt+Shift+Key"), "" for none. A shortcut another action has
     # (after this request) is 409 CONFLICT naming it, and nothing is saved.
-    # One that clashes with an OS / OBS binding is saved, and named in
-    # data.warnings ([{action, code: "os_reserved" | "obs_likely"}]).
+    # One that clashes with an OS / OBS binding, has no modifier or Shift
+    # alone (function keys excepted) is saved, and named in data.warnings
+    # ([{action, code: "os_reserved" | "obs_likely" | "no_modifier" |
+    # "shift_only"}]).
     body = _json_body()
     unknown = sorted(key for key in body if key not in ("enabled", "keys"))
     if unknown:

@@ -13,7 +13,7 @@ Extracted from the Qt overlay previews, which it outlived (ADR-005 S4s):
   discards it after a delay, and calls the owner back when it is Active
   again so the owner can bring it up to date.
 
-Import-light on purpose (qtpy / SettingsManager only): this module must not
+Import-light on purpose (qtpy only): this module must not
 pull the singleton chain, so it can sit anywhere in Autona.py's import
 order, and importing it creates nothing.
 """
@@ -22,8 +22,6 @@ import logging
 
 from qtpy.QtCore import QObject, QTimer, QUrl, Signal
 from qtpy.QtWebEngineCore import QWebEnginePage
-
-from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -87,18 +85,13 @@ def WhenWebServerReady(callback):
 
 def LocalUrl(path):
     """The URL of ``path`` (``/...``, query included) on the local web
-    server: at the port it really listens on (WebServer.Listening()), the
-    configured one only while none runs. The settings page saves a new port
-    for the next start (ADR-005 S4ae); a page loaded before then is still
-    on this one. The server is imported here, when asked: importing this
+    server: at the port it really listens on, the configured one only while
+    none runs (WebServer.Serving()). The settings page saves a new port for
+    the next start (ADR-005 S4ae); a page loaded before then is still on
+    this one. The server is imported here, when asked: importing this
     module pulls nothing in."""
     from .AutonaWebServer import WebServer
-    bound = WebServer.Listening()
-    if bound is not None:
-        port = bound[0]
-    else:
-        port = SettingsManager.Get("general.webserver_port",
-                                   DEFAULT_WEBSERVER_PORT)
+    port, _lan = WebServer.Serving()
     return f"http://127.0.0.1:{port}{path}"
 
 

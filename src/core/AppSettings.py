@@ -1,15 +1,16 @@
-"""The settings window's settings, for the settings page (ADR-005 S4ae).
+"""The settings page's settings (ADR-005 S4ae; the page is S4af's).
 
 settings.json holds them; what reads each one is all over core and the
 shells (the bad-word filter, the set follow, the player DB, the state's
 exports, the web server, the locale...). This is the one table of the ones
-the settings window shows -- the general switches and default colours, the
+the settings page shows -- the general switches and default colours, the
 web server's port and LAN access, the three languages -- with each one's
 key and default, and the page's read and write of them:
 
 - Describe(): an allow-list of exactly those (never the access token, nor
-  anything else settings.json holds), each with the value in effect, and
-  whether a restart is still to apply what is saved (network, language).
+  anything else settings.json holds), each with the value in effect,
+  whether a restart is still to apply what is saved (network, language),
+  and each one's default (what the page's reset sends: Defaults()).
 - UpdateGeneral / UpdateNetwork / UpdateLanguage: validate every field
   first, then write once (SettingsManager.SetMany); nothing when nothing
   changes. When the launch could not read settings.json
@@ -19,9 +20,10 @@ key and default, and the page's read and write of them:
   be opened (NOT_READY).
 
 The defaults here are the readers' (tests/test_app_settings.py pins that
-every reader passes the same one). The settings window keeps its own until
-S4af replaces it, and one differs: it shows disable_autoupdate unticked
-when nothing is saved, though the set follow reads it as on.
+every reader passes the same one). The Qt settings window, which the page
+replaced (S4af), kept its own, and one differed: it showed
+disable_autoupdate unticked when nothing was saved, though the set follow
+reads it as on. The page shows the table's.
 
 Hotkeys are core's HotkeyRules. Qt-free; what is the shell's comes in as a
 callable (the language list, what the web server listens on). Importing
@@ -51,7 +53,8 @@ Setting = namedtuple("Setting", ("group", "name", "key", "default", "kind"))
 
 # The page's names: a general setting keeps its settings.json name (the
 # precedent of /display-options and /thumbnail); network and language use
-# the API's camelCase names. The order is the settings window's.
+# the API's camelCase names. The order is the page's (the Qt settings
+# window's until S4af).
 SETTINGS = (
     Setting(GENERAL, "profanity_filter", "general.profanity_filter",
             True, BOOL),
@@ -110,6 +113,21 @@ def _Same(a, b):
 def _Language(value):
     # LoadLocale's reading: empty or "default" is the default.
     return value if isinstance(value, str) and value else DEFAULT_LANGUAGE
+
+
+def Defaults():
+    """{"general": {...}, "network": {...}, "language": {...}}: each
+    setting's default, as a save takes it -- what the page's "reset to
+    the default" sends. LAN access is off: its default, None (not decided:
+    the desktop asks at its next start), is what nothing saved means, and
+    a save is true or false."""
+    defaults = {}
+    for setting in SETTINGS:
+        value = setting.default
+        if setting.kind == LAN:
+            value = bool(value)
+        defaults.setdefault(setting.group, {})[setting.name] = value
+    return defaults
 
 
 class AppSettings:
@@ -197,7 +215,8 @@ class AppSettings:
         """{"general": {...}, "network": {port, listenLan, listening: {port,
         lan} | null, restartPending}, "language": {program, gameAsset,
         fgTerm, choices: [{code, name, englishName}], restartPending},
-        "loadFailed", "movedAside"}. Only what SETTINGS lists, and whether
+        "defaults": Defaults(), "loadFailed", "movedAside"}. Only what
+        SETTINGS lists, and whether
         settings.json could not be read (SettingsManager.loadFailed: the
         values shown are the defaults; a save reads it again first, and is
         refused while it still cannot be opened). False again once a write
@@ -227,7 +246,8 @@ class AppSettings:
         language["choices"] = self._Choices()
         language["restartPending"] = languagePending
         return {"general": general, "network": network, "language": language,
-                "loadFailed": loadFailed, "movedAside": movedAside}
+                "defaults": Defaults(), "loadFailed": loadFailed,
+                "movedAside": movedAside}
 
     # -- writing ----------------------------------------------------------
 

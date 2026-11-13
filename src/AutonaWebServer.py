@@ -991,6 +991,40 @@ class WebServer:
         bound = WebServer._listening
         return None if bound is None else (bound[1], bound[2])
 
+    @staticmethod
+    def Serving():
+        """(port, listen_lan) every URL and note that names this server
+        gives: what it is bound with (Listening()), the settings only while
+        none runs (what its next start binds). A port or LAN access saved in
+        the settings takes effect at the next start, so until then the
+        address is still the bound one.
+
+        The one reader (ADR-005 S4af): the shared view's browser scoreboard
+        URL, the Stats Display Settings page's Companion URL, LocalUrl, the
+        API / OBS / integration guides and GetWebServerHost read this. Until
+        then three had a copy of the fallback and the rest read the settings
+        alone, showing a saved port nothing listened on yet. LAN access
+        undecided (None: the desktop asks at its start) is off, bound or
+        not."""
+        bound = WebServer.Listening()
+        if bound is not None:
+            return (bound[0], bool(bound[1]))
+        return (SettingsManager.Get("general.webserver_port",
+                                    DEFAULT_WEBSERVER_PORT),
+                bool(SettingsManager.Get("general.webserver_listen_lan",
+                                         None)))
+
+    @staticmethod
+    def LanOnAtRestart():
+        """Whether LAN access is saved as on while the running server is not
+        exposed: it takes effect at the next start, and the guides say so
+        rather than "enable it" (ADR-005 S4af). False while none runs
+        (Serving() reads the saved value then)."""
+        bound = WebServer.Listening()
+        return (bound is not None and not bound[1]
+                and SettingsManager.Get("general.webserver_listen_lan",
+                                        None) is True)
+
     _delta_lock = threading.Lock()
     _delta_cond = threading.Condition(_delta_lock)
     _delta_pending = []          # list of merged delta-flat-dicts
@@ -1990,8 +2024,9 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
             "If this is a stale Autona instance, the Web UI will appear blank "
             "because Windows randomly routes connections to whichever process answers.\n\n"
             "Terminate the existing process(es) and continue?\n\n"
-            "Alternatively, choose No and change the port under "
-            "Settings → General → Webserver Port, then restart Autona.",
+            "Alternatively, choose No, then change general.webserver_port "
+            "in user_data/settings.json and restart Autona, or quit the "
+            "application that is using the port.",
         )
         .replace("{port}", str(port))
         .replace("{details}", details)

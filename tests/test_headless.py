@@ -324,7 +324,7 @@ def _widget_modules():
     """The src modules that define a QWidget subclass, by AST: a class
     whose base is one of PySide6.QtWidgets' widget classes, or (closed
     over) a src class that is one. A base is matched by its last name
-    (`QDialog`, `QtWidgets.QDialog`, `AutonaColorButton`)."""
+    (`QDialog`, `QtWidgets.QDialog`, a src widget class's)."""
     from PySide6 import QtWidgets
     widgets = {name for name in dir(QtWidgets)
                if isinstance(getattr(QtWidgets, name), type)
@@ -351,7 +351,7 @@ def _widget_modules():
         widgets |= {name for _, name in more}
     modules = {module for module, _ in found}
     # The derivation finds what is known to be a widget's module.
-    assert {"src.Autona", "src.AutonaApiInfoWindow", "src.AutonaColorButton",
+    assert {"src.Autona", "src.AutonaApiInfoWindow", "src.AutonaSidebar",
             "src.AutonaDesignerWindow"} <= modules, modules
     return modules
 

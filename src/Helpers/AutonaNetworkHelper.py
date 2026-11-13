@@ -44,9 +44,12 @@ def GetLocalIPs():
 
 def GetWebServerHost():
     """Host to advertise in user-facing URLs. Matches the server bind:
-    loopback unless LAN access is enabled (general.webserver_listen_lan).
+    loopback unless LAN access is on -- what the server is bound with, the
+    setting (general.webserver_listen_lan) only while none runs
+    (WebServer.Serving(), ADR-005 S4af).
     """
-    from ..core.SettingsManager import SettingsManager  # avoid import cycle at module load
-    if SettingsManager.Get("general.webserver_listen_lan", False):
+    from ..AutonaWebServer import WebServer  # avoid import cycle at module load
+    _port, lan = WebServer.Serving()
+    if lan:
         return GetLocalIP()
     return "127.0.0.1"
