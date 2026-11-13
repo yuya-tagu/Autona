@@ -434,12 +434,15 @@ def _gameLoaded():
     """What a game load runs: what the shared wiring writes (bootstrap.
     wire_game_roster -> ApplyGameRoster; it was the board's handler's until
     ADR-005 S3e-6, the set length until S4t) and the commit the asset
-    adapter runs after every slot. The board's own onLoad handler, which
+    adapter runs after every slot -- of what the load wrote, recorded (the
+    fix of 2026-11-12; nothing else is pending here, so it publishes what
+    the whole board's commit did). The board's own onLoad handler, which
     rendered and wrote nothing, ran in between until S4ac-3."""
     actions = AutonaActions.instance
-    actions.ApplyGameRoster()
-    actions.RepublishBestOfs()
-    actions.CommitGameLoad()
+    with StateManager.RecordHeldWrites() as written:
+        actions.ApplyGameRoster()
+        actions.RepublishBestOfs()
+        actions.CommitGameLoad(written)
 
 
 def _fillFrom(board, team, players):

@@ -232,15 +232,23 @@ paths:
   ADR-005 S4ac-4 でトラッカーごと削除）。
   0〜99 に丸め、値が変わらなければ何も書かない（旧 `valueChanged` と同じ）。
   ゲームのロードは `RepublishBestOfs()`（シードされた全ボードで文言を作り直す。変わらなければ書かない。呼ぶのは
-  `bootstrap.wire_game_roster` で、両シェルが同じ。ADR-005 S4t）。反映まで済ませるのは `CommitGameLoad()` で、
+  `bootstrap.wire_game_roster` で、両シェルが同じ。ADR-005 S4t）。反映まで済ませるのは `CommitGameLoad(written)` で、
   ADR-005 S4ad から `bootstrap.wire_game_roster` がロスター・`RepublishBestOfs` と同じ保存ブロックで、ボードホストの `Run` の中で呼ぶ
   （両シェル同じ。ヘッドレスは held が無いので何も起きない。ロスターか `RepublishBestOfs` が例外を出しても `finally` で必ず呼ぶ）。
-  ロードの保存サイクルの中の commit は積むだけで、サイクルを閉じるとき
-  （`onLoad` の後）に、そのとき未反映のものをまとめて公開するので、`onLoad` のスロットが書いたものも一緒に出る（それまではデスクトップの
-  アダプタの `_Publish` が `onLoad` の後に呼んでいた。Qt のカードの作り直しが onLoad の中で書いていたため。カードは S4ac-3 で消えた）。
-  デスクトップの `_Publish` はモデルの作り直しからサイクルを閉じるまで全体がボードホストの `Run` の中なので（S4ad のレビュー）、
-  その間に別スレッドのボードの操作（held の書き込み）が入って commit と一緒に反映なしで出ることは無い（S4ad までは GUI スレッドに並んでいた）。
-  core 直結の書き込み（`score:adjust` など）と、ローダーのスレッドが `SelectGame` している間（`_Publish` より前）の書き込みは、従来どおり一緒に出る。
+  ロードの commit は `CommitGameLoad(written)` で、**ロードが書いたキーだけ**を公開する（2026-11-12。`StateManager.RecordHeldWrites()` が
+  そのスレッドの held の書き込みを記録し、`CommitHeld(prefix, written)` がそれだけを出す。デスクトップの `_Publish` が作り直しからサイクルを
+  閉じるまでを記録し、結線の記録はそれに合流する）。ロードの前からの未反映・ローダーが `SelectGame` している間のボードの操作・core 直結の
+  書き込み（`score:adjust` など）は反映待ちのまま残り、ロードが書いたキーでもほかの書き手の未反映と重なる（同じ・祖先・子孫）ものは残る
+  （例: 反映していない BEST OF から作り直した文言）。ただし操作が `StateManager.HeldWriteGroup(authoritative=True)` の中で書いた
+  「誰の編集からも作っていない固定の値」（`SetRoster` が落とす選手枠・ゲーム切替の空のキャラと mains・空の選手枠のシード・空のチーム名）は、
+  それより前のほかの書き手の未反映（同じキーか子孫。祖先は除く）を上書きしたものとして重なっても出し、上書きされた未反映は反映待ちから外す。
+  held の書き込みは値が変わらなくても記録されるので、そういう値はライブがすでにその値でも、公開済み（`GetCommitted`）と違うか、そのキー以下に未反映（`StateManager.HasPendingAt`）があれば書く（`AutonaActions._SetDecided` / `_TrimPublished` / `_NothingToEmpty`。「同じなら書かない」で飛ばすと、反映していない編集が先にライブをその値にしたとき、ロードの commit が出さず公開済みの値が残る）。これはロードの記録の中（`StateManager.Recording()`）でだけ行い、ロードの外の `SetRoster` は今までどおり同じ値を書かない（反映が未反映を全部出すので書く理由が無く、書けば書き込みの列だけが変わる。`tests/test_set_follow_flow.py` の golden が見る）。
+  `HeldWriteGroup` の中で書いたキーは 1 グループとして一緒に出るか一緒に残る（1 人の `character` と `mains`:
+  `PlayerService.PublishCharacterSlots`）。判定はキーの位置とスレッドだけで、値の出どころは見ない。保存サイクルの中の commit は積むだけで、出すキーはサイクルを閉じるとき（`onLoad` の後）に
+  決まるので、`onLoad` のスロットが書いたものも一緒に出る（それまではデスクトップのアダプタの `_Publish` が `onLoad` の後に呼んでいた。
+  Qt のカードの作り直しが onLoad の中で書いていたため。カードは S4ac-3 で消えた）。デスクトップの `_Publish` は全体がボードホストの `Run` の中
+  （S4ad のレビュー）。held を「書いた分だけ」公開する操作を新しく足すなら `RecordHeldWrites` + `CommitHeld(prefix, written)` を使う
+  （`ApplyChanges` は全部を出す）。
   Qt のスピンボックスと行の描画（held サイクルの `_SyncBestOf`）は S4ac-3 で Qt の SCORE ごと削除した。
   入口はすべてこの操作: SCORE ページ（v1 `PATCH /scoreboards/{n}/match`）・セット読込（`SetLoadService.BestOfFromSetData`。
   0・空は運ばない）・Web `set_route` の bestOf（v1 `PATCH set` 含む）・`AutonaWebOperations._reset_match`・`ClearBoard`（最後に 0）

@@ -699,6 +699,13 @@ class _AutonaHarness:
             self.state._commitPrefixes.discard(prefix)
             self.state._heldTouched.discard(prefix)
             self.state._heldCommitted.discard(prefix)
+            # The partial commit's (StateManager.RecordHeldWrites): a commit
+            # queued, paths taken live, what the recordings noted there --
+            # thrown away as ReleaseSubtree would, without its publish.
+            self.state._commitWritten.pop(prefix, None)
+            self.state._takenLive.pop(prefix, None)
+            self.state._forgetRecordedKeys(prefix)
+            self.state._pruneRecords()
         if not (made or leftover):
             return
 

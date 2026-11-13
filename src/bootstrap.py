@@ -693,15 +693,17 @@ def wire_game_roster(game_loaded):
       baseline, not edits waiting behind 反映; ADR-005 S4ad -- the
       desktop's asset adapter committed after onLoad until then, because a
       Qt player card wrote its rows on onLoad, until S4ac-3), even when the
-      roster or the set length raises. Inside a game load's own save cycle
-      (the desktop's: opened on the loader thread, closed at the end of
-      _Publish) the commit only queues the boards, and the cycle's close
-      publishes everything pending on them -- what onLoad's slots wrote
-      after it included, and a core-direct write (score:adjust, a colour)
-      another thread made meanwhile, as before. No other thread's board
-      operation gets in between: _Publish holds the board host's lock from
-      the rebuild to the cycle's close. Headless nothing is held, so the
-      commit finds nothing.
+      roster or the set length raises. The commit publishes what the load
+      wrote and nothing else (StateManager.RecordHeldWrites: an edit
+      pending before the load, a request's while the loader selected the
+      game, a core-direct write such as score:adjust while it published,
+      all stay behind 反映; until the fix of 2026-11-12 they went out with
+      it). Inside a game load's own save cycle (the desktop's: opened on
+      the loader thread, closed at the end of _Publish) it only queues the
+      boards, and the cycle's close publishes what the load wrote by then
+      -- what onLoad's slots wrote after the commit included: _Publish
+      records from the rebuild to the close, and this joins it. Headless
+      nothing is held, so the commit finds nothing.
 
     The load's own snapshot, not the catalog's Current(): this slot runs on
     the main thread, which the load hands it to (the desktop's load job
@@ -728,16 +730,21 @@ def wire_game_roster(game_loaded):
         replaced = getattr(snapshot, "replaced", None)
 
         def run():
-            with StateManager.SaveBlock():
-                try:
-                    AutonaActions.instance.ApplyGameRoster(replaced)
-                    AutonaActions.instance.RepublishBestOfs()
-                finally:
-                    # Committed whatever the roster did: a load's writes
-                    # (the selection, what the roster wrote before failing)
-                    # are not left waiting behind 反映 (the asset adapter's
-                    # _Publish committed on every path until ADR-005 S4ad).
-                    AutonaActions.instance.CommitGameLoad()
+            # The load's writes, told apart from everyone else's: the
+            # desktop's _Publish records from the rebuild to the cycle's
+            # close, which this joins (onLoad's slots go with them).
+            with StateManager.RecordHeldWrites() as written:
+                with StateManager.SaveBlock():
+                    try:
+                        AutonaActions.instance.ApplyGameRoster(replaced)
+                        AutonaActions.instance.RepublishBestOfs()
+                    finally:
+                        # Committed whatever the roster did: a load's
+                        # writes (what the roster wrote before failing) are
+                        # not left waiting behind 反映 (the asset adapter's
+                        # _Publish committed on every path until ADR-005
+                        # S4ad).
+                        AutonaActions.instance.CommitGameLoad(written)
 
         AutonaWebOperations.boardHost.Run(run)
 

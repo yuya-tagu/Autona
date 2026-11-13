@@ -17,13 +17,15 @@ The assertions read StateManager, because StateManager is what OBS
 overlays and the Web UI actually consume.
 """
 import contextlib
+import json
+import threading
 from unittest.mock import patch
 
 import pytest
 
 from src.core.SettingsManager import SettingsManager
-from tests.conftest import (apply_set, clear_players, load_player,
-                            tournamentLoaded)
+from tests.conftest import (apply_set, clear_players, deliver_decodes,
+                            load_player, tournamentLoaded)
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.fixtures.write_recording import WriteRecorder
 
@@ -210,10 +212,12 @@ def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
     ReloadCharacters wrote what its rows picked as it rebound them, until
     ADR-005 S4ac-3): the commit, on gameLoaded with the roster since S4ad,
     only queues the boards inside the load's save cycle, and the cycle's
-    close -- after every onLoad slot -- publishes all that is pending then.
-    Were it published at the commit, the 反映 button would stay lit after a
-    load nobody edited (a held write after the commit raises the flag and
-    nothing lowers it)."""
+    close -- after every onLoad slot -- publishes what the load wrote by
+    then, its slots' writes included (_Publish records what the GUI thread
+    writes; another writer's pending edit waits for 反映:
+    test_a_game_load_publishes_only_what_it_wrote). Were it published at
+    the commit, the 反映 button would stay lit after a load nobody edited (a
+    held write after the commit raises the flag and nothing lowers it)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
 
@@ -338,52 +342,186 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
         signals.onLoad.disconnect(write)
 
 
-@contextlib.contextmanager
-def _writtenDuringTheLoad(write):
-    """`write` while a game load's save cycle is open, after the wiring's
-    roster and its commit (which only queues the boards; ADR-005 S4ad) and
-    ahead of the cycle's close: where a writer on another thread lands
-    while the load decodes its assets."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+def _onAnotherThread(write):
+    """`write()` on a thread of its own, waited for (a request thread)."""
+    errors = []
+
+    def run():
+        try:
+            write()
+        except BaseException as error:  # noqa: BLE001 -- re-raised below
+            errors.append(error)
+
+    worker = threading.Thread(target=run, name="a request")
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive(), "the other thread's write did not finish"
+    assert not errors, errors
+
+
+def _loadWithOtherWriters(app, selecting=None, publishing=None):
+    """A game load as the loader runs it, with another thread writing
+    meanwhile; returns the deltas it published.
+
+    The load's save cycle opened, as the loader opens it before it selects
+    the game, and `selecting` run on another thread while it would select:
+    a request's board operation, through the board host (whose lock nobody
+    holds yet: the S4ad ledger's remainder 5, the window seen on the real
+    window). Then the GUI thread's end (_Publish, under the board host's
+    lock), with `publishing` run on another thread from a gameLoaded slot --
+    after the wiring's roster and its commit, ahead of the cycle's close: a
+    core-direct write (score:adjust), which takes no board lock."""
+    from src.AutonaGameAssetManager import (AutonaGameAssetManager,
+                                            _SaveCycle)
+    from src.core.GameAssetCatalog import GameAssetCatalog
+
+    manager = AutonaGameAssetManager.instance
+    published = []
+
+    def onDelta(payload):
+        published.append(payload.get("delta"))
 
     def slot(_snapshot):
-        write()
+        if publishing is not None:
+            _onAnotherThread(publishing)
 
-    signal = AutonaGameAssetManager.instance.signals.gameLoaded
-    signal.connect(slot)
+    channel = app.state.observers.state_updated
+    channel.subscribe(onDelta)
+    manager.signals.gameLoaded.connect(slot)
     try:
-        yield
+        cycle = _SaveCycle()
+        cycle.Open()
+        try:
+            if selecting is not None:
+                _onAnotherThread(selecting)
+        except BaseException:
+            cycle.Release()
+            raise
+        decodes = []
+        manager._Publish(GameAssetCatalog.instance.Current(), cycle, decodes)
+        deliver_decodes(decodes)
+        app.settle()
     finally:
-        signal.disconnect(slot)
+        manager.signals.gameLoaded.disconnect(slot)
+        channel.unsubscribe(onDelta)
+    return published
 
 
-def test_a_game_load_publishes_what_was_written_during_it(autonaApp):
-    """The commit the load queues takes the held cycle with it, so nothing
-    else would publish a score or a set's fields that arrived in the load's
-    save cycle. They go out with it when the cycle closes (the Qt board
-    showed them from its onLoad handler until ADR-005 S4ac-3)."""
+def test_a_game_load_publishes_only_what_it_wrote(autonaApp, monkeypatch):
+    """Seen on the real window: a tag typed on the SCORE page while the game
+    switched reached OBS without 反映 -- a half-typed one (E10 / E12 of 40
+    writes against six switches). The load's commit published everything
+    pending on the board when the load's cycle closed, the operator's edits
+    with what the load wrote (the roster, the set length, onLoad's slots).
+    It publishes what the load wrote now: an edit pending before the load,
+    one a request made while the loader selected the game (a board
+    operation: the board host's lock is only taken in _Publish) and one
+    made while the load published (a core-direct write, which never takes
+    it) all stay behind 反映, and 反映 publishes them."""
+    from src import AutonaWebOperations as WebOps
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core import StateSchema as schema
 
     autonaApp.ready(1)
+    state = autonaApp.state
     actions = _actions()
+    tag = schema.PLAYER_TAG_KEY
+    first = f"score.1.team.1.player.1.{tag}"
+    second = f"score.1.team.2.player.1.{tag}"
+    _setPlayerName(1, 1, "PUBLISHED")
+    actions.ApplyChanges(1)
+    autonaApp.settle()
+    assert state.HasPendingChanges("score.1") is False
+    secondBefore = state.GetCommitted(second)
 
-    def write():
-        actions.SetScore(1, 1, 3)
-        actions.SetBestOf(1, 5)
-        actions.SetMatchField(1, schema.MATCH_KEY, "Grand Final")
-        actions.SetTeamLosers(1, 2, True)
-        actions.SetTeamName(1, 2, "Late")
+    # Waiting behind 反映 when the load starts.
+    assert WebOps.update_player_fields(1, 2, 1, {tag: "BEFORE"}) is None
+    autonaApp.settle()
 
-    with _writtenDuringTheLoad(write):
-        autonaApp.publishGameLoad()
+    realRoster = actions.ApplyGameRoster
 
-    committed = autonaApp.state.GetCommitted
+    def roster(replaced):
+        applied = realRoster(replaced)
+        actions.SetTeamName(1, 1, "THE LOAD")
+        return applied
+
+    def onLoad():
+        actions.SetTeamName(1, 2, "ON LOAD")
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+    signals = AutonaGameAssetManager.instance.signals
+    signals.onLoad.connect(onLoad)
+    try:
+        deltas = _loadWithOtherWriters(
+            autonaApp,
+            selecting=lambda: WebOps.update_player_fields(
+                1, 1, 1, {tag: "E10"}),
+            publishing=lambda: actions.SetScore(1, 1, 3))
+    finally:
+        signals.onLoad.disconnect(onLoad)
+
+    committed = state.GetCommitted
+    # What the load wrote went out with it ...
+    assert committed("score.1.team.1.teamName") == "THE LOAD"
+    assert committed("score.1.team.2.teamName") == "ON LOAD"
+    # ... and nothing of the operator's.
+    assert committed(first) == "PUBLISHED"
+    assert committed(second) == secondBefore
+    assert committed("score.1.team.1.score") == 0
+    published = json.dumps(deltas, default=repr)
+    assert "E10" not in published and "BEFORE" not in published
+    assert '"THE LOAD"' in published and '"ON LOAD"' in published
+    assert state.HasPendingChanges("score.1") is True
+    assert autonaApp.get(first) == "E10"
+
+    actions.ApplyChanges(1)
+    autonaApp.settle()
+    assert state.HasPendingChanges("score.1") is False
+    assert committed(first) == "E10"
+    assert committed(second) == "BEFORE"
     assert committed("score.1.team.1.score") == 3
+
+
+def test_a_load_s_write_over_a_pending_edit_waits_with_it(
+        autonaApp, monkeypatch):
+    """A key the load writes that another writer had pending -- before the
+    load or while it ran -- stays behind 反映 with that edit: published, it
+    would show what the load made of the edit (the set length's texts,
+    derived again by a game load that changed the locale, from a BEST OF
+    the operator had not applied). The load's other writes go out."""
+    autonaApp.ready(1)
+    state = autonaApp.state
+    actions = _actions()
+    actions.SetBestOf(1, 3)
+    actions.ApplyChanges(1)
+    autonaApp.settle()
+    textBefore = state.GetCommitted("score.1.best_of_text")
+
+    actions.SetBestOf(1, 5)                       # not applied
+    autonaApp.settle()
+    realRoster = actions.ApplyGameRoster
+
+    def roster(replaced):
+        applied = realRoster(replaced)
+        actions.SetTeamName(1, 1, "THE LOAD")
+        return applied
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+    monkeypatch.setattr(actions, "_formatMatchText",
+                        lambda key, n: f"another locale {n}")
+    _loadWithOtherWriters(autonaApp)
+
+    committed = state.GetCommitted
+    assert autonaApp.get("score.1.best_of_text") == "another locale 5"
+    assert committed("score.1.best_of_text") == textBefore
+    assert committed("score.1.best_of") == 3
+    assert committed("score.1.team.1.teamName") == "THE LOAD"
+    assert state.HasPendingChanges("score.1") is True
+
+    actions.ApplyChanges(1)
+    autonaApp.settle()
+    assert committed("score.1.best_of_text") == "another locale 5"
     assert committed("score.1.best_of") == 5
-    assert committed("score.1.match") == "Grand Final"
-    assert committed("score.1.team.2.losers") is True
-    assert committed("score.1.team.2.teamName") == "Late"
-    assert autonaApp.state.HasPendingChanges("score.1") is False
 
 
 def test_what_is_written_while_a_board_is_made_is_published(autonaApp):
@@ -482,6 +620,15 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
     assert autonaApp.web().set_route(1, bestOf=7) == "OK"
     autonaApp.settle()
     assert autonaApp.get("score.1.first_to_text") == "First to 4"
+
+    # The game load re-derives the text and goes on to commit it. 反映'd
+    # first, with a text of another locale: a load publishes what it wrote
+    # itself, and the set length chosen above would have waited for 反映
+    # with the text made from it (test_a_load_s_write_over_a_pending_edit_
+    # waits_with_it).
+    autonaApp.state.Set("score.1.best_of_text", "Bo7")
+    StateManager.CommitHeld("score.1")
+    autonaApp.settle()
 
     autonaApp.publishGameLoad()
 
@@ -747,8 +894,8 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
         state.Set("score.1.team.1.teamName", "THE LOAD")
         return result
 
-    def commit():
-        realCommit()
+    def commit(written):
+        realCommit(written)
         # The load's cycle and the wiring's own block are open: queued.
         calls.append(("commit", boardLock.held(),
                       state.saveBlocked - blocked,

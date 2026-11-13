@@ -274,7 +274,15 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
     assert "AutonaWebOperations.boardHost.Run(run)" in ast.unparse(apply)
     run = next(node for node in ast.walk(apply)
                if isinstance(node, ast.FunctionDef) and node.name == "run")
-    block, = run.body
+    # What the load writes, recorded around it, so that the commit publishes
+    # that and leaves everyone else's edits behind 反映 (the fix of
+    # 2026-11-12; its behaviour: test_scoreboard_operations'
+    # test_a_game_load_publishes_only_what_it_wrote).
+    recording, = run.body
+    assert isinstance(recording, ast.With)
+    assert [ast.unparse(item) for item in recording.items] == [
+        "StateManager.RecordHeldWrites() as written"]
+    block, = recording.body
     assert isinstance(block, ast.With)
     assert ast.unparse(block.items[0]) == "StateManager.SaveBlock()"
     # The commit in a finally: a roster that raises leaves nothing of the
@@ -287,10 +295,21 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
         "AutonaActions.instance.ApplyGameRoster(replaced)",
         "AutonaActions.instance.RepublishBestOfs()"]
     assert [ast.unparse(statement) for statement in guarded.finalbody] == [
-        "AutonaActions.instance.CommitGameLoad()"]
-    # Nothing else commits a load: not the desktop's asset adapter.
-    for path in ("src/AutonaGameAssetManager.py", "src/headless.py",
-                 "src/Autona.py"):
+        "AutonaActions.instance.CommitGameLoad(written)"]
+    # Nothing else commits an announced load: not the desktop's asset
+    # adapter, whose one commit is the settle of a load it does not announce
+    # (_SettleUnannounced: the shutdown came first, or the rebuild failed),
+    # of what that settle's roster wrote.
+    assert [call for call in _calls("src/AutonaGameAssetManager.py")
+            if "CommitGameLoad" in call] == [
+        "actions.CommitGameLoad(written)"]
+    adapter = ast.parse((PROJECT_ROOT / "src" / "AutonaGameAssetManager.py")
+                        .read_text(encoding="utf-8"))
+    settle = next(node for node in ast.walk(adapter)
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == "_SettleUnannounced")
+    assert "actions.CommitGameLoad(written)" in ast.unparse(settle)
+    for path in ("src/headless.py", "src/Autona.py"):
         assert not [call for call in _calls(path)
                     if "CommitGameLoad" in call], path
     counts = {shell: sum(call.startswith("wire_game_roster(")

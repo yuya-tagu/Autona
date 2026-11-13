@@ -372,6 +372,38 @@ def test_dropping_a_board_leaves_no_held_registration(autonaApp):
     assert [p for p in state.heldExempt if p.startswith("score.")] == []
     assert [p for p in state._commitPrefixes if p.startswith("score.")] == []
     assert [p for p in state._heldTouched if p.startswith("score.")] == []
+    assert [p for p in state._commitWritten if p.startswith("score.")] == []
+    assert [p for p in state._takenLive if p.startswith("score.")] == []
+
+
+def test_dropping_a_board_leaves_no_partial_commit_behind(autonaApp):
+    """The partial commit's ledgers (StateManager.RecordHeldWrites /
+    CommitHeld with `written`) are held state too: a board dropped with a
+    commit queued, paths taken live or a recording open on it leaves none
+    of them for the next test -- a queued commit would keep an ended
+    recording, and its next drain would ask about keys of a board that is
+    gone."""
+    autonaApp.ready(1)
+    state = autonaApp.state
+    with state.RecordHeldWrites() as written:
+        state.Set("score.1.phase", "Loaded")
+        with state.lock:
+            # As a commit inside an open block leaves them, and a failed
+            # publish its paths.
+            state._commitWritten.setdefault("score.1", []).append(written)
+            state._takenLive["score.1"] = ["score.1.phase"]
+            assert "score.1" in written.mine
+        autonaApp.dropAllBoards()
+        with state.lock:
+            assert [p for p in state._commitWritten
+                    if p.startswith("score.")] == []
+            assert [p for p in state._takenLive
+                    if p.startswith("score.")] == []
+            assert [p for writes in state._heldRecords
+                    for p in (*writes.mine, *writes.others)
+                    if p.startswith("score.")] == []
+    with state.lock:
+        assert state._heldRecords == []
 
 
 def test_a_readied_board_is_made_as_at_launch(autonaApp):

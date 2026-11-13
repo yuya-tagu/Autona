@@ -1540,10 +1540,12 @@ def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
         autonaApp, ownExecutor, boardLock, monkeypatch):
     """The asset adapter's _SettleUnannounced, on the loader's thread once
     the shutdown came after the selection (STOPPED): the roster and the
-    commit the load would have run, written there as one board operation
-    -- under the board host's lock -- which the host does not refuse as it
-    refuses a late request's (`atShutdown`; ADR-005 S4ad review). The pick
-    is persisted after it."""
+    commit the load would have run -- of what the roster wrote, inside its
+    recording (StateManager.RecordHeldWrites; the boards' ApplyChanges until
+    the fix of 2026-11-12) -- written there as one board operation -- under
+    the board host's lock -- which the host does not refuse as it refuses a
+    late request's (`atShutdown`; ADR-005 S4ad review). The pick is
+    persisted after it."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
     from src.core.GameAssetCatalog import GameAssetCatalog
@@ -1556,8 +1558,9 @@ def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
         actions, "ApplyGameRoster",
         lambda replaced: calls.append(("roster", boardLock.held())) or [1])
     monkeypatch.setattr(
-        actions, "ApplyChanges",
-        lambda board: calls.append(("commit", board, boardLock.held())))
+        actions, "CommitGameLoad",
+        lambda written: calls.append(
+            ("commit", written.open, boardLock.held())))
     monkeypatch.setattr(manager, "_PersistSelectedGame",
                         lambda: calls.append(("pick", boardLock.held())))
     ownExecutor.shutdown(WAIT)
@@ -1568,7 +1571,7 @@ def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
 
     assert not thread.is_alive()
     assert "error" not in outcome, outcome
-    assert calls == [("roster", True), ("commit", 1, True), ("pick", False)]
+    assert calls == [("roster", True), ("commit", True, True), ("pick", False)]
 
 
 # ── the start.gg character download ──────────────────────────────────────

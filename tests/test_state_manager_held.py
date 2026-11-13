@@ -701,3 +701,575 @@ def test_a_block_opened_on_one_thread_publishes_where_it_is_closed():
         SM.observers.state_updated.unsubscribe(onDelta)
     assert threads == [threading.current_thread().name]
     assert SM.saveBlocked == 0
+
+
+# ── A partial commit: what one operation wrote (S4ad remainder 5) ────────
+# CommitHeld(prefix, written) with the HeldWrites of a RecordHeldWrites
+# block: a game load's commit (AutonaActions.CommitGameLoad). It publishes
+# the keys the operation wrote and nobody else touched; the operator's
+# edits -- pending before it began, or written meanwhile on another thread
+# -- stay behind 反映.
+
+
+@pytest.fixture
+def _recordingBoard(_heldOnlyBoard):
+    yield _heldOnlyBoard
+    with SM.lock:
+        assert SM._heldRecords == [], "a recording outlived its commits"
+        assert SM._commitWritten == {}
+        assert SM._takenLive == {}, "a partial commit was not published"
+
+
+def _onAnotherThread(write):
+    worker = threading.Thread(target=write)
+    worker.start()
+    worker.join()
+
+
+class _Deltas:
+    """The delta rows published inside the block."""
+
+    def __init__(self):
+        self.payloads = []
+
+    def _on(self, payload):
+        self.payloads.append(payload)
+
+    def __enter__(self):
+        SM.observers.state_updated.subscribe(self._on)
+        return self
+
+    def __exit__(self, *exc):
+        SM.observers.state_updated.unsubscribe(self._on)
+
+    def text(self):
+        return str([payload["delta"] for payload in self.payloads])
+
+
+def test_a_partial_commit_publishes_only_what_the_operation_wrote(
+        _recordingBoard):
+    board = _recordingBoard
+    SM.Set(f"{board}.phase", "Before")          # pending before it began
+    with _Deltas() as deltas, _DirtyTold(board) as dirty:
+        with SM.RecordHeldWrites() as written:
+            with SM.SaveBlock():
+                SM.Set(f"{board}.match", "Loaded")
+                _onAnotherThread(lambda: SM.Set(f"{board}.pool", "Typed"))
+                SM.CommitHeld(board, written)
+                # Decided when it is drained: a write after the commit in
+                # the same cycle goes with it.
+                SM.Set(f"{board}.round", "After the commit")
+                assert _lastPublished(f"{board}.match") == "Baseline"
+
+    assert _lastPublished(f"{board}.match") == "Loaded"
+    assert _lastPublished(f"{board}.round") == "After the commit"
+    assert _lastPublished(f"{board}.phase") is None
+    assert _lastPublished(f"{board}.pool") is None
+    assert "Before" not in deltas.text() and "Typed" not in deltas.text()
+    assert "Loaded" in deltas.text()
+    assert SM.GetFullState()["state"]["score"]["9"].get("pool") is None
+    # Still pending: no False, and the live state has everything.
+    assert SM.HasPendingChanges(board)
+    assert dirty.told == []
+    assert SM.Get(f"{board}.pool") == "Typed"
+
+    with _DirtyTold(board) as dirty:
+        SM.CommitHeld(board)
+    assert dirty.told == [(False, False)]
+    assert _lastPublished(f"{board}.phase") == "Before"
+    assert _lastPublished(f"{board}.pool") == "Typed"
+
+
+def test_a_partial_commit_of_everything_pending_lowers_the_flag(
+        _recordingBoard):
+    board = _recordingBoard
+    with _DirtyTold(board) as dirty:
+        with SM.RecordHeldWrites() as written:
+            with SM.SaveBlock():
+                SM.Set(f"{board}.match", "Loaded")
+                SM.CommitHeld(board, written)
+    assert dirty.told == [(True, True), (False, False)]
+    assert _lastPublished(f"{board}.match") == "Loaded"
+
+
+def test_a_nested_recording_is_the_outer_one(_recordingBoard):
+    board = _recordingBoard
+    with SM.RecordHeldWrites() as outer:
+        with SM.SaveBlock():
+            with SM.RecordHeldWrites() as inner:
+                SM.Set(f"{board}.match", "Inner")
+            assert inner is outer
+            SM.Set(f"{board}.phase", "Outer")
+            SM.CommitHeld(board, outer)
+    assert _lastPublished(f"{board}.match") == "Inner"
+    assert _lastPublished(f"{board}.phase") == "Outer"
+    assert not SM.HasPendingChanges(board)
+
+
+@pytest.mark.parametrize("theirs, mine", [
+    ("team.1.score", "team.1.score"),     # the same key
+    ("team.1", "team.1.score"),           # above it
+    ("team.1.score", "team.1"),           # below it
+], ids=["same", "above", "below"])
+def test_a_key_someone_else_wrote_too_stays_pending(
+        _recordingBoard, theirs, mine):
+    """Published, it would carry their edit, or a value made from it (the
+    BEST OF text re-derived over the operator's set length)."""
+    board = _recordingBoard
+    SM.Set(f"{board}.team", {"1": {"score": 0}})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.{theirs}",
+           {"score": 3} if theirs == "team.1" else 3)
+
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Set(f"{board}.{mine}",
+                   {"score": 5} if mine == "team.1" else 5)
+            SM.Set(f"{board}.phase", "Loaded")
+            SM.CommitHeld(board, written)
+
+    assert _lastPublished(f"{board}.team") == {"1": {"score": 0}}
+    assert _lastPublished(f"{board}.phase") == "Loaded"
+    assert SM.HasPendingChanges(board)
+    SM.CommitHeld(board)
+    assert _lastPublished(f"{board}.team") == {"1": {"score": 5}}
+
+
+def test_a_write_after_the_recording_ended_is_someone_else_s(
+        _recordingBoard):
+    """Until its commit is drained: here the cycle it was queued in is
+    still open when the recording ends."""
+    board = _recordingBoard
+    with SM.SaveBlock():
+        with SM.RecordHeldWrites() as written:
+            SM.Set(f"{board}.match", "Loaded")
+            SM.CommitHeld(board, written)
+        SM.Set(f"{board}.match", "Typed after it")
+    assert _lastPublished(f"{board}.match") == "Baseline"
+    assert SM.Get(f"{board}.match") == "Typed after it"
+    assert SM.HasPendingChanges(board)
+
+
+def test_a_subtree_new_to_the_published_view_goes_whole_in_live_order(
+        _recordingBoard):
+    board = _recordingBoard
+    SM.Set(f"{board}.phase", "Before")          # keeps the board pending
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Set(f"{board}.team.2.name", "A")
+            SM.Set(f"{board}.team.2.score", 1)
+            SM.CommitHeld(board, written)
+    published = _lastPublished(f"{board}.team.2")
+    assert published == {"name": "A", "score": 1}
+    assert list(published) == list(SM.Get(f"{board}.team.2"))
+    assert _lastPublished(f"{board}.phase") is None
+
+
+def test_a_new_subtree_someone_else_wrote_in_is_not_published_in_part(
+        _recordingBoard):
+    """A key at a time would make it in another key order than the live
+    state's, and could publish a part of what someone else is making."""
+    board = _recordingBoard
+    SM.Set(f"{board}.team.2.color", "#fff")     # theirs, pending
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Set(f"{board}.team.2.name", "A")
+            SM.Set(f"{board}.match", "Loaded")
+            SM.CommitHeld(board, written)
+    assert _lastPublished(f"{board}.team") is None
+    assert _lastPublished(f"{board}.match") == "Loaded"
+    SM.CommitHeld(board)
+    assert list(_lastPublished(f"{board}.team.2")) == ["color", "name"]
+
+
+def test_a_commit_after_the_recording_ended_publishes_nothing(
+        _recordingBoard):
+    from loguru import logger
+
+    board = _recordingBoard
+    with SM.RecordHeldWrites() as written:
+        SM.Set(f"{board}.match", "Loaded")
+    messages = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        SM.CommitHeld(board, written)
+    finally:
+        logger.remove(sink)
+    assert any("the recording is over" in m for m in messages)
+    assert _lastPublished(f"{board}.match") == "Baseline"
+    assert SM.HasPendingChanges(board)
+
+
+def test_a_release_drops_the_partial_commit(_recordingBoard):
+    board = _recordingBoard
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Set(f"{board}.match", "Loaded")
+            SM.CommitHeld(board, written)
+            SM.ReleaseSubtree(board)
+            with SM.lock:
+                assert board not in SM._commitWritten
+    assert _lastPublished(f"{board}.match") == "Loaded"
+    assert not SM.HasPendingChanges(board)
+
+
+def test_a_release_drops_an_ended_recording_at_once(_recordingBoard):
+    """Its only commit dropped, nothing will ask it anything: not kept for
+    the next save cycle."""
+    board = _recordingBoard
+    with SM.SaveBlock():
+        with SM.RecordHeldWrites() as written:
+            SM.Set(f"{board}.match", "Loaded")
+            SM.CommitHeld(board, written)
+        SM.ReleaseSubtree(board)
+        with SM.lock:
+            assert SM._heldRecords == []
+
+
+def test_a_drain_that_raises_still_drops_the_ended_recordings(
+        monkeypatch, _recordingBoard):
+    """Ended before its commit is drained (kept for it), then the drain
+    fails: dropped all the same."""
+    board = _recordingBoard
+
+    def boom(*args):
+        raise RuntimeError("the drain failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(SM, "_publishedUnits", staticmethod(boom))
+        with pytest.raises(RuntimeError):
+            with SM.SaveBlock():
+                with SM.RecordHeldWrites() as written:
+                    SM.Set(f"{board}.match", "Loaded")
+                    SM.CommitHeld(board, written)
+                with SM.lock:
+                    assert len(SM._heldRecords) == 1
+    with SM.lock:
+        assert SM._heldRecords == []
+    # Not published, and still pending: 反映 has it.
+    assert _lastPublished(f"{board}.match") == "Baseline"
+    SM.CommitHeld(board)
+    assert _lastPublished(f"{board}.match") == "Loaded"
+
+
+# ── HeldWriteGroup: what goes together, what the operation decided ───────
+# Review of the partial commit (2026-11-12): a game load that switched games
+# published a slot's blank mains while its characters waited with a pick
+# not applied -- OBS showed the previous game's characters beside blank
+# mains -- and a reload of the same game published mains it had made from
+# such a pick.
+
+
+@pytest.mark.parametrize("theirs, mine, superseded", [
+    ("team.1.score", "team.1.score", True),     # at it, written before it
+    ("team.1.score", "team.1", True),           # below it
+    ("team.1", "team.1.score", False),          # above it
+], ids=["at", "below", "above"])
+def test_an_authoritative_write_supersedes_an_edit_it_overwrote(
+        _recordingBoard, theirs, mine, superseded):
+    """The live value is the operation's: the edit is gone from it. So the
+    key goes out, and the edit is no longer pending -- not one above it,
+    which still holds what the operation did not write."""
+    board = _recordingBoard
+    SM.Set(f"{board}.team", {"1": {"score": 0}})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.{theirs}", {"score": 3} if theirs == "team.1" else 3)
+    SM.Set(f"{board}.phase", "Theirs")          # keeps the board pending
+
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            with SM.HeldWriteGroup(authoritative=True):
+                SM.Set(f"{board}.{mine}",
+                       {"score": 5} if mine == "team.1" else 5)
+            SM.CommitHeld(board, written)
+
+    assert _lastPublished(f"{board}.phase") is None
+    assert SM.HasPendingChanges(board)
+    with SM.lock:
+        teamPending = [key for key in SM.heldKeys[board] if "team" in key]
+    if superseded:
+        assert _lastPublished(f"{board}.team") == {"1": {"score": 5}}
+        assert teamPending == []
+    else:
+        assert _lastPublished(f"{board}.team") == {"1": {"score": 0}}
+        assert teamPending
+
+
+def test_an_edit_after_the_authoritative_write_is_not_superseded(
+        _recordingBoard):
+    board = _recordingBoard
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            with SM.HeldWriteGroup(authoritative=True):
+                SM.Set(f"{board}.match", "Loaded")
+            _onAnotherThread(lambda: SM.Set(f"{board}.match", "Typed"))
+            SM.CommitHeld(board, written)
+    assert _lastPublished(f"{board}.match") == "Baseline"
+    assert SM.HasPendingChanges(board)
+
+
+def test_an_authoritative_write_back_to_the_published_value_lowers_the_flag(
+        _recordingBoard):
+    """An edit the operation overwrote with what is published already: the
+    flag would stay up with nothing to apply."""
+    board = _recordingBoard
+    SM.Set(f"{board}.match", "Typed")
+    with _DirtyTold(board) as dirty:
+        with SM.RecordHeldWrites() as written:
+            with SM.SaveBlock():
+                with SM.HeldWriteGroup(authoritative=True):
+                    SM.Set(f"{board}.match", "Baseline")
+                SM.CommitHeld(board, written)
+    assert not SM.HasPendingChanges(board)
+    assert dirty.told == [(False, False)]
+
+
+@pytest.mark.parametrize("authoritative", [False, True],
+                         ids=["made-from-it", "its-own"])
+def test_a_group_goes_out_together_or_waits_together(
+        _recordingBoard, authoritative):
+    """A player's characters and mains, made from one read: one held back
+    by someone's pending key holds the other back, unless the operation's
+    values are its own (then both go, over the edit)."""
+    board = _recordingBoard
+    SM.Set(f"{board}.player", {"character": "A", "mains": "A"})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.player.character", "Picked")   # not applied
+    SM.Set(f"{board}.phase", "Theirs")
+
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            with SM.HeldWriteGroup(authoritative=authoritative):
+                # A nested group is the outer one.
+                with SM.HeldWriteGroup():
+                    SM.Set(f"{board}.player.character", "New")
+                    SM.Set(f"{board}.player.mains", "New")
+            SM.Set(f"{board}.match", "Loaded")      # in no group
+            SM.CommitHeld(board, written)
+
+    assert _lastPublished(f"{board}.match") == "Loaded"
+    assert _lastPublished(f"{board}.player") == (
+        {"character": "New", "mains": "New"} if authoritative
+        else {"character": "A", "mains": "A"})
+
+
+def test_a_group_outside_a_recording_does_nothing(_recordingBoard):
+    board = _recordingBoard
+    with SM.HeldWriteGroup(authoritative=True):
+        SM.Set(f"{board}.match", "Typed")
+    with SM.lock:
+        assert getattr(SM._recording, "group", None) is None
+    assert SM.HasPendingChanges(board)
+
+
+@pytest.mark.parametrize("meanwhile", [False, True],
+                         ids=["retried", "written-into-meanwhile"])
+def test_a_partial_commit_whose_publish_failed_goes_with_the_next_one(
+        monkeypatch, _recordingBoard, meanwhile):
+    """As a full commit's keys do: drained, and left in changedKeys for the
+    next save cycle. Not with a write into it since: that one waits for
+    反映, and the path with it."""
+    import src.core.StateManager as module
+
+    board = _recordingBoard
+    SM.Set(f"{board}.phase", "Theirs")          # stays pending
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("the diff failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(module, "DeepDiff", boom)
+        with pytest.raises(RuntimeError):
+            with SM.RecordHeldWrites() as written:
+                with SM.SaveBlock():
+                    SM.Set(f"{board}.match", "Loaded")
+                    SM.CommitHeld(board, written)
+    assert _lastPublished(f"{board}.match") == "Baseline"
+    if meanwhile:
+        SM.Set(f"{board}.match", "Typed")
+
+    SM.SaveState()
+
+    assert _lastPublished(f"{board}.match") == (
+        "Baseline" if meanwhile else "Loaded")
+    assert _lastPublished(f"{board}.phase") is None
+    assert SM.HasPendingChanges(board)
+    SM.CommitHeld(board)
+    assert _lastPublished(f"{board}.match") == (
+        "Typed" if meanwhile else "Loaded")
+
+
+def test_two_recordings_at_once_each_publish_their_own(_recordingBoard):
+    """Each is the other's someone else: a key both wrote waits."""
+    board = _recordingBoard
+    started, wrote = threading.Event(), threading.Event()
+
+    def theirs():
+        with SM.RecordHeldWrites() as written:
+            started.set()
+            SM.Set(f"{board}.pool", "Theirs")
+            SM.Set(f"{board}.round", "Theirs")
+            SM.CommitHeld(board, written)
+            wrote.wait(10)
+
+    with SM.SaveBlock():
+        worker = threading.Thread(target=theirs)
+        with SM.RecordHeldWrites() as written:
+            worker.start()
+            assert started.wait(10)
+            SM.Set(f"{board}.match", "Mine")
+            SM.Set(f"{board}.round", "Mine")
+            SM.CommitHeld(board, written)
+            wrote.set()
+            worker.join(10)
+            assert not worker.is_alive()
+
+    assert _lastPublished(f"{board}.match") == "Mine"
+    assert _lastPublished(f"{board}.pool") == "Theirs"
+    assert _lastPublished(f"{board}.round") is None
+    with SM.lock:
+        assert SM.heldKeys[board] == ["root['score']['9']['round']"] * 2
+
+
+def test_a_recording_that_ended_is_drained_by_another_thread(
+        _recordingBoard):
+    """Its commit queued in a cycle another thread closes (the loader opens
+    the load's cycle; the GUI thread closes it): drained there, and dropped
+    then."""
+    board = _recordingBoard
+    SM.Set(f"{board}.phase", "Theirs")
+    SM.BlockSaving()
+    try:
+        def load():
+            with SM.RecordHeldWrites() as written:
+                SM.Set(f"{board}.match", "Loaded")
+                SM.CommitHeld(board, written)
+
+        _onAnotherThread(load)
+        with SM.lock:
+            assert len(SM._heldRecords) == 1
+    finally:
+        SM.ReleaseSaving()
+    assert _lastPublished(f"{board}.match") == "Loaded"
+    assert _lastPublished(f"{board}.phase") is None
+
+
+def test_what_a_partial_commit_publishes_takes_its_live_place(
+        _recordingBoard):
+    """In its dict, where the live state has it: removed and written again,
+    a key goes last there, not where it was."""
+    board = _recordingBoard
+    SM.Set(f"{board}.team", {"1": {"name": "A", "score": 0}})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.phase", "Theirs")
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Unset(f"{board}.team.1.name")
+            SM.Set(f"{board}.team.1.color", "#fff")
+            SM.Set(f"{board}.team.1.name", "B")
+            SM.CommitHeld(board, written)
+    published = _lastPublished(f"{board}.team.1")
+    assert published == {"score": 0, "color": "#fff", "name": "B"}
+    assert list(published) == list(SM.Get(f"{board}.team.1"))
+
+
+def test_a_partial_commit_of_a_change_to_none_alone_stays_published(
+        monkeypatch, _recordingBoard):
+    """What a partial commit publishes is a change to None, and nothing
+    else, and DeepDiff leaves it out (exclude_types), so the cycle has no
+    delta. It is published all the same -- the published view has it, and
+    the next cycle does not rewind it. The re-review of 2026-11-12: with no
+    delta, the paths taken live were dropped while lastSavedState kept the
+    old value, so the value came back.
+
+    DeepDiff 8.1.1 does report such a change once include_paths is given
+    (its include filter is an if ahead of the exclude_types elif), and
+    SaveState always gives it: the DeepDiff here is one that leaves the
+    change out, as exclude_types says -- what the published view keeps must
+    not hang on that."""
+    import src.core.StateManager as module
+
+    real = module.DeepDiff
+
+    def noneBlind(t1, t2, **kwargs):
+        diff = real(t1, t2, **kwargs)
+        rows = diff.get("type_changes", {})
+        if rows and set(diff) == {"type_changes"} and all(
+                row["new_value"] is None for row in rows.values()):
+            return real(t1, t1, **kwargs)
+        return diff
+
+    board = _recordingBoard
+    SM.Set(f"{board}.team", {"name": "A", "logo": "crest.png"})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.phase", "Theirs")          # stays pending
+
+    monkeypatch.setattr(module, "DeepDiff", noneBlind)
+    with _Deltas() as deltas:
+        with SM.RecordHeldWrites() as written:
+            with SM.SaveBlock():
+                SM.Set(f"{board}.team.logo", None)
+                SM.CommitHeld(board, written)
+    assert deltas.payloads == []
+
+    assert SM.HasPendingChanges(board)
+    published = {"name": "A", "logo": None}
+    assert SM.GetCommitted(f"{board}.team") == published
+    assert _lastPublished(f"{board}.team") == published
+    # The next publish (a write outside the board) keeps it.
+    SM.Set("held_none_probe", 1)
+    try:
+        assert _lastPublished(f"{board}.team") == published
+        assert _lastPublished(f"{board}.phase") is None
+    finally:
+        SM.Unset("held_none_probe")
+
+
+def test_groups_and_units_held_back_are_closed_transitively(_recordingBoard):
+    """A key held back holds back its group, whatever shares a unit with
+    it, the groups of those, and so on: here someone's pending key holds
+    back group A; A's other key shares a unit (a subtree new to the
+    published view) with group B's key; B's other key waits too. Under the
+    re-review's finding the closure stopped after one step, and B's other
+    key went out without the half of B that waited."""
+    board = _recordingBoard
+    SM.Set(f"{board}.player", {"character": "A", "mains": "A"})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.player.character", "Picked")   # not applied
+
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            with SM.HeldWriteGroup():
+                SM.Set(f"{board}.player.character", "A2")
+                SM.Set(f"{board}.extra.one", "A2")
+            with SM.HeldWriteGroup():
+                SM.Set(f"{board}.extra.two", "B")
+                SM.Set(f"{board}.match", "B")
+            SM.CommitHeld(board, written)
+
+    assert _lastPublished(f"{board}.player") == {
+        "character": "A", "mains": "A"}
+    assert _lastPublished(f"{board}.extra") is None
+    assert _lastPublished(f"{board}.match") == "Baseline"
+
+
+def test_a_unit_held_back_holds_back_the_units_above_it(_recordingBoard):
+    """A key in a group held back, below a key the operation wrote whole
+    (no group): published, the one above would carry the held-back value
+    in its live subtree, so it waits too."""
+    board = _recordingBoard
+    SM.Set(f"{board}.team", {"name": "A", "score": 0})
+    SM.CommitHeld(board)
+    SM.Set(f"{board}.phase", "Theirs")          # not applied
+
+    with SM.RecordHeldWrites() as written:
+        with SM.SaveBlock():
+            SM.Set(f"{board}.team", {"name": "A", "score": 1})
+            with SM.HeldWriteGroup():
+                SM.Set(f"{board}.team.name", "B")
+                SM.Set(f"{board}.phase", "Made from it")
+            SM.Set(f"{board}.match", "Loaded")
+            SM.CommitHeld(board, written)
+
+    assert _lastPublished(f"{board}.team") == {"name": "A", "score": 0}
+    assert _lastPublished(f"{board}.match") == "Loaded"
