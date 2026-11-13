@@ -3,8 +3,9 @@
 ADR-005 S1a. Everything the app knows about the installed games and the
 selected one -- characters, skins, variants, preset colours, stages, asset
 file paths, the Start.gg id tables -- lives here as plain dicts. The Qt side
-(`src/AutonaGameAssetManager.py`) only turns a snapshot into
-QStandardItemModels for the combos; it no longer holds any of the data.
+(`src/AutonaGameAssetManager.py`) only runs the loads as jobs and announces
+them; it holds none of the data (it turned a snapshot into the Qt combos'
+QStandardItemModels until the Qt model clean-up's PR4).
 
 Snapshots
 ---------
@@ -21,7 +22,7 @@ treat them as read-only.
 
 `generation` identifies the asset set the snapshot was built from. Every
 load gets a new one; `ForgetSelection()` keeps it, because it changes the
-selection and not the assets (the Qt models stay valid).
+selection and not the assets.
 
 Locking rules
 -------------
@@ -143,7 +144,8 @@ class GameAssetSnapshot:
     # No rows: the per-game tracker's stage combos were their only reader
     # (gone in ADR-005 S4ac-4). The table is start.gg's (StageFromStartGGId).
     stages: dict = field(default_factory=dict)
-    # {en_name: {skin: path}} -- decoded into QIcons by the adapter.
+    # {en_name: {skin: path}} (the Qt adapter decoded them into QIcons for
+    # its models until the Qt model clean-up's PR4).
     stockIconPaths: dict = field(default_factory=dict)
     # {codename: {asset pack: [filename, ...]}}: the one directory scan per
     # load that CharacterAssets() reads instead of the filesystem.

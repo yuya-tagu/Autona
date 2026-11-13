@@ -23,7 +23,7 @@ globs:
 旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` に**明示的な生成順として集約**されている。import 順序は順序を決めない。生成は 2 段:
 
 - `bootstrap_core()` — どのシェルにも要るもの（設定・state 層と Bridge・`AutonaActions`・Qt 非依存カタログ・大会 provider・`TournamentInfoService` 等）。**`QCoreApplication` だけで動くこと**（QtGui / QtWidgets のオブジェクトを作らない）。ヘッドレス起動はここで止まる
-- `bootstrap_gui()` — デスクトップの Qt アダプタ（ホットキー・ゲームアセット／国モデル・PlayerDB のモデル結線・Alert / Updater・スコアボード dock）。先頭で `bootstrap_core()` を呼ぶ。`src/Autona.py` が両方をこの順で呼ぶ。テストハーネス（`tests/conftest.py`）も両方呼ぶ
+- `bootstrap_gui()` — デスクトップの Qt アダプタ（ホットキー・ゲームアセットのアダプタ（ロードのジョブと通知。Qt のモデルは Qt モデルの整理 PR2〜PR4 で削除）・PlayerDB の正規化の結線・Alert / Updater）。先頭で `bootstrap_core()` を呼ぶ。`src/Autona.py` が両方をこの順で呼ぶ。テストハーネス（`tests/conftest.py`）も両方呼ぶ
 
 - 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある。各段の手順（生成・結線・`Initialize()`・Designer の移行）とその順は `tests/test_bootstrap_split.py` が AST で、`onLoadAssets` のスロット順（provider → アダプタの `_RestoreSelectedGame`）は実際の emit で pin している
 - **絶対に守る**: `GameAssetCatalog`（core）を生成して `ResetGameState()` してから、それを包む `AutonaGameAssetManager`（`bootstrap_gui()`）を作る（ADR-005 S1a）。`AutonaTournamentDataProvider` はもうアダプタに connect しない: ゲーム選択のフック `selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider` の結線はシェル側（`bootstrap_gui()`）が行う。ボードの作成 `AutonaActions.MakeBoards(panel=True)`（ADR-005 S4ac-1: `ResetBoards` → `ResetScoreRoot` と、3 ボードの `EnsureBoard`。ボード 1 / 2 は起動時から held。それまでは `ResetBoards` が Qt のスコアボードのマネージャの `__init__` にあり、ボードはウィジェットの構築で作っていた）とシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y）は `bootstrap_gui()` の最後で、Window より前（`Window._SeedPanelState` / Web サーバーより前）。`MakeBoards` は起動 1 回だけ（作成済みのボードがあれば 2 回目は警告して何も書かずに False。ガードが無ければ held のボードのシードが保留される）。生きているボードに `SeedBoard` を呼ばない（作ったボードをスケルトンで上書きする。S4ac-1 まではボードのウィジェットの構築 `CreateScoreboard` が呼んでいた。Qt の SCORE とマネージャ `AutonaScoreboardManager` は S4ac-3 で削除）
@@ -176,6 +176,12 @@ Python が古い .pyc を使い続けて修正が反映されない。
 
 ## 13. 共有 QAbstractItemModel の再構築は「旧世代を retire」してから
 
+**今、`src/` に共有したり差し替えたりする Qt のモデルは無い（実例なし。Qt の一般則として残す）**（Qt のウィジェットが自分の中に持つモデル、
+たとえば `AutonaGameAssetGuideWindow` の編集可能な `QComboBox` とその `QCompleter` の内部のモデルはある。差し替えないので対象外）: アセットのモデル群
+（`AutonaGameAssetManager` の `characterModel` / `skinModels` / `variantModel` / `colorModel` と退避の `_retiredModels`）を
+Qt モデルの整理 PR4 で、選手の Qt モデルを PR3 で、国モデルを PR2 で削除した（どれも消費者の Qt のコンボが無くなっていた。
+React のページはカタログを Web の操作で読む）。Qt のモデルを新しく書くことがあれば、以下に従う。
+
 PySide6 の `QSortFilterProxyModel.setSourceModel()` / `QComboBox.setModel()` /
 `QCompleter.setModel()` は **ソースモデルへの Python 参照を保持しない**。
 `self.model = QStandardItemModel()` のような再代入で旧モデルの最後の参照を
@@ -184,9 +190,9 @@ PySide6 の `QSortFilterProxyModel.setSourceModel()` / `QComboBox.setModel()` /
 access violation を起こす（2026-07-11 起動クラッシュ:
 `AutonaPlayerDB.SetupModel` の `setSourceModel` で発生）。
 
-- 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**:
-  `AutonaGameAssetManager._retiredModels` が実例（`AutonaPlayerDB._retiredModel` も実例だったが、
-  選手の Qt モデルごと Qt モデルの整理 PR3 で削除した。モデルが行っていた mains の正規化は core の `PlayerDB.NormaliseMains`）
+- 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**（実例だった
+  `AutonaGameAssetManager._retiredModels` は Qt モデルの整理 PR4 で、`AutonaPlayerDB._retiredModel` は PR3 で、
+  モデルごと削除した。選手のモデルが行っていた mains の正規化は core の `PlayerDB.NormaliseMains`）
 - 新モデルへの `setSourceModel()` / `setModel()` の付け替えが完了するまで
   旧モデルを削除しない。全消費者が onLoad 等の後続ハンドラで付け替える場合は
   ハンドラ完了まで（= 次回再構築まで）保持する
@@ -215,6 +221,9 @@ Qt モデルの整理 PR2 で削除した。今、この形の実例は無い（
   国 A → 国 B の直接切替では再現しなかった。同じ形のコンボを Qt に書くことがあれば、テストは実際の読込の形で書く
 
 ## 13b. `QStandardItem.appendRows()` は追加した item の wrapper を解放しない（2026-08-21 実測）
+
+**実例なし（Qt の一般則）**: #13 のとおり、今の `src/` に共有したり差し替えたりする Qt のモデルは無い（最後のアセットのモデル群は
+`appendRow` のループで作り直していた。Qt モデルの整理 PR4 で削除）。
 
 親 item 経由の一括追加（`model.invisibleRootItem().appendRows(items)`）は、
 追加した item を **root item の wrapper に登録したまま解放しない**。モデルを

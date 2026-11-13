@@ -46,7 +46,7 @@ from src.core.SettingsManager import SettingsManager
 from tests.conftest import load_player
 # goldenGames / onLoadCount are fixtures: the S1a fixture games installed
 # into the harness, and the count of onLoad emissions.
-from tests.test_game_asset_manager_models import (
+from tests.test_game_asset_manager_load import (
     GOLDEN, SCENARIOS, _load, _waitForLoader, goldenGames, onLoadCount)
 from tests.test_scoreboard_operations import (
     _restoredDisplayOption, _setPlayerName)

@@ -8430,3 +8430,60 @@ ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消した�
   - 選手リスト（PLAYERS）で、旧形式の mains（`local_players.json` の `["mario","2"]` のようにスキンが文字列・バリアントの枠が無いもの）の選手を表示する → 編集する → 保存する。キャラとスキンが崩れない。保存後の `local_players.json` のその選手の今のゲームの mains が `["mario", 2, ""]` の形になり、他のゲームの mains は元のまま
   - ゲームを切り替えた後に、SCORE で選手を読み込む（タグの検索・選手リストから）。キャラ・スキン・バリアントが今のゲームのもので出る
   - 起動直後（前回のゲームの復元）に `main.log` に `Error loading player from local DB` / `Local DB error` が想定外に増えていない（壊れた mains の選手が DB にいれば以前と同じ行が出る。長さ 1 / 4 のリストだけの選手でアイコンの検索が出していた行は出なくなる）
+
+##### PR4
+
+- **変更**
+  - `src/AutonaGameAssetManager.py`（1034 → 592 行）: Qt のモデル群（`characterModel` / `skinModels` / `variantModel` / `colorModel`、退避の `_retiredModels`、`_modelGeneration`、`_RebuildModels`、`Update{Character,Skin,Variant,Color}Model`）、アイコンのデコード（`_DecodeIcons` / `LoadSkinImages` / `LoadSkinImagesComplete` / `_skinIconGeneration` / `_WaitForDecodes`、`_Load` / `_Publish` の `decodes` 引数、`_HasGame`）、`GetStockIcon` / `_StockIcon` / `_iconCache` / `_iconCacheGeneration`、プロパティ `characters` / `skins` / `variants` / `colors` / `biggestCompletePack`、`GetCharacterAssets`、`_Publish` の作り直しの失敗の分岐（GUI スレッドで `_SettleUnannounced` して FAILED）を削除した。import は QtCore の `QObject` / `Signal` だけ（QtGui と PIL を外した）。削除の前に grep で、src に受け手が無いことを確かめた（`GetStockIcon` の最後の呼び手は PR3 で消えた `_BuildModel`、プロパティ 5 つと `GetCharacterAssets` は呼び手 0）
+  - 残したもの: `_SaveCycle`・`StateManager.RecordHeldWrites`・`CommitHeld`（`CommitGameLoad`）・`boardHost.Run`・`run_sync`・`_SettleUnannounced`（STOPPED の経路）、ローダー（`_LoaderJob` / `_RunLoad`。最新の依頼が勝つ）・スキャン・選んだゲームの保存と起動時の復元、シグナル `gameLoaded` / `onLoad` / `onLoadAssets`、プロパティ `games` / `selectedGame` / `has_modded_content`、フッターの進捗（`_StatusProgress`）。`run_sync` の見直しは範囲外（S-final）
+  - `src/core/GameAssetCatalog.py`: コメントだけ（アダプタの説明、「Qt のモデルは有効なまま」の削除、`stockIconPaths` の消費者）
+  - `src/bootstrap.py`: コメントと docstring だけ（「空の Qt モデルを作る」「asset / player のモデルは QtGui」を直した）。生成順は変えていない
+  - コメントの追従（独立レビューの指摘）: 記録の範囲を「作り直しからサイクルを閉じるまで」と書いていた `src/bootstrap.py` の `wire_game_roster`（docstring と `run` の中）と `src/core/Actions.py` の `CommitGameLoad` の docstring を「`gameLoaded` の emit からサイクルを閉じるまで」に。対比が意味を失った `src/headless.py` の `HeadlessGames` の docstring（「no Qt models」）と `_Load` の相当部分のコメント、事実と逆になった `tests/test_objectname_keypath_contract.py` の書き手台帳のコメント（「アダプタはモデルを作るだけ」）、PR2 の取り残しの `src/core/CountryCatalog.py` の docstring（国の `QStandardItemModel` を作る Qt のアダプタの記述 3 か所）を直した
+- **`_Publish` の構造の差分**
+  - 前: `boardHost.Run(publish)` → `RecordHeldWrites()` → `try { try { _RebuildModels(decodes) } except { _SettleUnannounced(); raise }; gameLoaded; onLoad } finally { cycle.Release() }`。ローダーは `run_sync` から戻った後に `_WaitForDecodes(decodes)` でアイコンのデコードを待ってから終わっていた
+  - 後: `boardHost.Run(publish)` → `RecordHeldWrites()` → `try { gameLoaded; onLoad } finally { cycle.Release() }`。ローダーは `run_sync` から戻ったら終わる
+  - ロックの範囲と順序: ボードのロックは今までどおり一番外（GUI スレッドで、`run_sync` の中から `Run` が取る。そのとき `StateManager.lock` は持っていない）。中に足したものは無く、外したのは作り直しだけ（ロックを取らず、デコードを submit するだけで何も待たなかった）なので、ボードのロックを持つ時間が短くなるだけで、順序（ボード → `StateManager.lock`、ボード → 設定・DB）は変わらない。`_Publish` の中で別スレッドを待たないのも同じ（pitfalls #17）
+  - commit の範囲: 記録（`RecordHeldWrites`）は `gameLoaded` の前に開き、サイクルを閉じた後に閉じる（前は作り直しの前に開いていた）。作り直しは state を書かなかったので、記録に入るキー（ロスターとロードの書き込み）も `CommitGameLoad` が公開する範囲も同じ。結線（`wire_game_roster`）の記録はこれに合流する
+  - 消えた経路は FAILED（作り直しの失敗）。スロットの例外は emit が報告して先へ進むので `_Publish` まで届かない。それ以外の例外（emit の外、記録やサイクルの扱いで起きたもの）は今までどおり `finally` でサイクルを閉じ、ローダーは FAILED を返す。未通知のロードを揃える（`_SettleUnannounced`）経路は、終了中の 1 つ（STOPPED。`_Load` が `GuiMarshalAborted` を受けたとき）だけになった
+  - **設計上の注記（HEAD から変わっていない）**: `_Publish` がアナウンスの前にスロット以外の例外で止まると（ボードの操作の中・記録を開くところ）、`_Load` の `finally` がサイクルを閉じて選択（`game.*`）だけが公開され、ロスターも選んだゲームの保存も走らない。state は新しいゲームと前のゲームのキャラになり、「1 つのゲーム」に揃わない（次の起動は前のゲームを復元する）。HEAD でも、作り直し以外の例外ではこの形だった（`_SettleUnannounced` で揃えていたのは作り直しの失敗と終了中だけ）。今、アナウンスの前に例外を出しうるのはボードの操作の入口（メインスレッドは終了中も断られない）と記録の開始（lock を取ってリストに足すだけ）で、どちらも通常は出さない（サイクルを閉じる公開の失敗はアナウンスの後なので、state は 1 つのゲームのまま）。揃えるなら、`_Load` が `run_sync` の例外を受けたときに `_SettleUnannounced` を呼ぶ形になるが、`_Publish` の途中で止まった（アナウンスの一部が走った）ときに二重に書きうるので、今回は入れていない
+- **テスト**
+  - 削除: `tests/test_game_asset_icon_threading.py`（4 本: デコードが GUI スレッドの外で pixmap を作らない・payload が QImage・退避したモデルの結果を捨てる・アセットの無いスキンのフォールバック）。`test_asset_jobs.py` の `test_icon_decodes_run_on_the_fan_out_lane` と `test_a_rebuild_that_fails_part_way_still_waits_for_its_decodes`、`test_roster_flow.py` の `test_a_load_whose_models_fail_keeps_one_game`（FAILED の経路ごと消えた。リードの付け替えの指示の行 `test_asset_jobs.py` 1212-1235・`test_roster_flow.py` 1286 はこの 2 本の中だった）。conftest の `deliver_decodes`
+  - 改名: `tests/test_game_asset_manager_models.py` → `tests/test_game_asset_manager_load.py`。モデルを見る `test_every_model_of_the_previous_generation_is_retired`・`test_reloading_the_same_generation_rebuilds_nothing`・`test_a_model_takes_icons_and_pack_from_its_own_snapshot` を削除し、`test_the_models_match_the_recording` は state と Web のリーダーの比較を残して `test_a_load_matches_the_recording` にした。Web のリーダー（2 本）・フッターの進捗（2 本）・保存と復元（2 本）・URL のクリアの 7 本は残し、中のモデルの確認を「ロードした `game` が golden の state と一致」「`ForgetSelection` の後もスナップショットの世代が変わらない」「同じゲームの選び直しで `onLoad` が 1 回」に置き換えた。golden（`tests/fixtures/game_assets/golden.json`）は変えていない（`models` 節は `test_game_asset_catalog.py` がカタログの行と比べている）。import の付け替え: `test_api_v1` / `test_api_v1_score_fields` / `test_asset_jobs` / `test_top8_refresh`
+  - 付け替え（順序の意味を保つ）:
+
+    | テスト | 前のフック | 後のフック |
+    |---|---|---|
+    | `test_asset_jobs.py::test_a_load_selects_on_a_job_and_announces_on_the_gui_thread` | `_RebuildModels` を記録、`done` の時点でデコード済み | `_Publish` の入口を記録（`_recordPublish`）。順序 `select → publish → gameLoaded → onLoad → done`、publish / gameLoaded / onLoad が GUI スレッド |
+    | `test_asset_jobs.py::test_a_load_job_waiting_on_the_gui_thread_is_released_by_the_shutdown` | 終了の後に作り直しが走らない | 終了の後に `_Publish` が走らない（`published == []`） |
+    | `test_scoreboard_operations.py::test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock` | 先頭が `("rebuild", True)` | `_Publish` の入口と出口（`("publish", False)` … `("published", False)`）。間の roster / commit / onLoad / close がボードのロックの下なのは同じで、ロックは `_Publish` が自分で取って返すことも見る |
+    | `test_scoreboard_operations.py::_loadWithOtherWriters`、conftest の `publishGameLoad` | `_Publish(snapshot, cycle, decodes)` + `deliver_decodes` | `_Publish(snapshot, cycle)` |
+    | conftest の `loadCharacters` / `_restoreAssets`、`test_player_slot_publish.py` の teardown | `_RebuildModels()` | 呼ばない（カタログの `SelectGame` / `ResetGameState` だけ） |
+
+  - STOPPED の経路は `test_roster_flow.py::test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game[desktop/headless]`（新しいゲームのロスターで前のゲームのキャラが空になって公開され、選んだゲームが保存される）・`test_asset_jobs.py::test_a_load_s_settle_at_shutdown_runs_under_the_board_lock`・`test_asset_jobs.py::test_a_load_job_waiting_on_the_gui_thread_is_released_by_the_shutdown` が引き続き見る（中身は変えていない。前者の docstring に、FAILED の経路が消えたので今はこれが settle の pin だと書いた）
+  - 追加: `test_asset_jobs.py::test_a_load_whose_publication_raises_fails_and_leaves_nothing_open`（3 通り: ボードの操作の中・記録を開くところ・記録を閉じるところで、スロット以外の例外を `_Publish` に入れる）。`_RunLoad` が FAILED（`done()` 1 回）・`StateManager.saveBlocked == 0`・`StateManager.Recording()` が False で `_heldRecords` が空・ボード 1 に未反映が残らない・ボードホストのロックが別スレッドから取れる・アナウンスの回数（前の 2 つは 0、最後は 1）・次のロードが LOADED で `game.codename` が変わる、を見る。削除した作り直しの失敗の 2 本がついでに見ていた不変条件（pitfalls #6 の BlockSaving の均衡）の代わり。`_Load` の `finally` の `cycle.Release()` を外すと 3 通りとも落ちることを確かめた
+  - S4ad と残置 5 の pin（`test_scoreboard_operations` / `test_roster_flow` / `test_asset_jobs` / `test_state_manager_held` / `test_set_follow_flow` / `test_player_slot_publish` ほか）は、上の付け替え以外は変えずに緑
+- **pin**: `tests/test_web_panel_host.py::test_the_unused_qt_model_leftovers_are_gone`
+  - 上の削除した 22 個の名前（`QT_ASSET_MODEL_NAMES`）が、`src/AutonaGameAssetManager.py` とそれを import するモジュール（今は `src/Autona.py`・`src/AutonaGameAssetGuideWindow.py`・`src/bootstrap.py`。検出が空にならないことも見る）のコードに無いこと。アダプタ固有の名前なので、無関係なモジュールの `_iconCache` / `_HasGame` で落ちないよう `src` 全体ではなくこの範囲で見る（独立レビューの指摘。PR1〜PR3 の名前表は `src` 全体のまま）
+  - プロパティ `characters` / `skins` / `variants` / `colors` / `biggestCompletePack`（`QT_ASSET_MODEL_PROPERTIES`。一般語なのでアダプタの属性としてだけ見る）が、クラスに無く、アダプタの AST に `self.<名前> =`（代入・注釈つき代入・累算代入。タプルの中も）が無いこと。`_Publish` の引数が `(self, snapshot, cycle)` であること
+  - `src/AutonaGameAssetManager.py` が `qtpy.QtGui` / `qtpy.QtWidgets` / `PIL` を import せず、QtGui の型の名前（`QStandardItemModel` / `QStandardItem` / `QIcon` / `QPixmap` / `QImage` / `QColor`）をコードに持たないこと
+  - 名前が `_SettleUnannounced` の呼び出し（受け手を問わない属性の呼び出しと、名前だけの呼び出し）が `_Load` の中だけにあること（未通知のロードを揃える経路は終了中の 1 つ）
+  - pin が落ちることを確かめた変更: アダプタに `self.characters = []`、`_Publish` に別の受け手の `manager._SettleUnannounced(...)`、`src/bootstrap.py` に `_iconCache`。無関係なモジュール（`src/core/ColorService.py`）の `_iconCache` では落ちない
+- **文書**: pitfalls #13 / #13b を「実例なし（Qt の一般則）」に（#2 の括弧書きも）、`state-and-webserver.md`（GameAssetCatalog の行と best_of の記録の記述）・`Design.md`・`python-widgets.md`・`external-control-api.md`（§2.12 とロードの節のモデルの作り直しの記述）・`docs/changes/test-automation-strategy.md`（ハーネスのアセットの読み込みの記述。`loadCharacters()` が出さない GUI スレッドの側は `publishGameLoad()` が受け持つこと、ロスターを見せる Qt のコンボもウィジェットも無いこと）の現役扱いの記述を直した（過去の節は歴史なので触らない）。pitfalls は独立レビューの指摘で、#2 の `bootstrap_gui()` の行末の「スコアボード dock」（S4ac-3 で削除済み）を消し、#13 / #13b の「Qt のモデルは無い」を「共有したり差し替えたりする Qt のモデルは無い」に直した（`AutonaGameAssetGuideWindow` の編集可能な `QComboBox` と `QCompleter` の内部のモデルがあるため）
+- **範囲外（後で削除。記録のみ）**: core の `GameAssetCatalog` に、消費者の居ないものが残っている（Qt のモデルとアイコンのためのもの）。`GameAssetSnapshot.stockIconPaths` / `StockIconPath()`、`colorRows` / `PresetColor()`、スナップショットの `biggestCompletePack`、スナップショットの docstring のコンボを前提にした記述。src での参照は `GameAssetCatalog.py` の中だけ（アダプタには削除の経緯のコメントだけ）。golden の `models` 節を照合する `tests/test_game_asset_catalog.py` が行を読むので、消すときはそちらと一緒に
+- **検証**
+  - 影響範囲（`test_game_asset_manager_load` / `test_asset_jobs` / `test_scoreboard_operations` / `test_roster_flow` / `test_player_slot_publish` / `test_web_panel_host` / `test_bootstrap_split`）: **367 passed**。独立レビューの修正の後（同じ 7 ファイルに `test_objectname_keypath_contract` / `test_headless` / `test_country_helper_model` / `test_country_helper_flags` / `test_import_side_effects` / `test_core_qt_free` を足して）: **413 passed**
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6198 passed / 0 failed / 2 skipped**（PR3 の 6208 から、削除したテストの分が減った）。独立レビューの修正の後: **6201 passed / 0 failed / 2 skipped**（追加したテストの 3 通り）
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6198 passed / 25 skipped / 0 failed**（golden の `test_game_asset_catalog` / `test_scoreboard_operations` / `test_set_follow_flow` は緑のまま）。独立レビューの修正の後: **6201 passed / 25 skipped / 0 failed**
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない
+- **目に見える変化**
+  - ゲームのロードが軽くなる: キャラ・スキン・バリアント・色の `QStandardItem` を作らず、スキンのアイコンを PIL でデコードしない（fan-out のレーンの仕事が無くなる）。ローダーはサイクルを閉じたら終わるので、連打したときの次のロードとフッターの進捗の消去が早くなる
+  - FAILED の経路（モデルの作り直しの失敗）が消える。それ以外のロードの結果（LOADED / SKIPPED / SUPERSEDED / STOPPED、`_Publish` のそれ以外の例外での FAILED）は変わらない
+- **実機で見ること（メイン）**
+  - サイドバーでゲームを連打で切り替える（最後に選んだゲームで終わる。SCORE のページのキャラの一覧が今のゲームのものになる）
+  - mods のチェックを切り替える（mods の有無でキャラの一覧が変わる）
+  - start.gg の大会を読み込むと、ゲームが自動で選ばれる
+  - ゲームを切り替えると、キャラが空で公開される（OBS の出力）。反映待ちの編集は反映待ちのまま残る
+  - ロード中に v1 で `POST /api/v1/game` を送る（最新の依頼が勝つ。応答が返る）
+  - ロード中にアプリを終了する（固まらずに終わる。次の起動で 1 つのゲームに揃っている）
+  - 起動時に前回のゲームが戻る
+  - フッターの進捗が出て、ロードの後に消える

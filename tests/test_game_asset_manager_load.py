@@ -1,19 +1,19 @@
-"""The Qt adapter's models, against the pre-S1a recording (ADR-005 S1a).
+"""The Qt adapter's game load, against the pre-S1a recording (ADR-005 S1a).
 
-Since S1a AutonaGameAssetManager builds its QStandardItemModels from the
-catalog's snapshot rows instead of sorting its own items. These tests load
-the golden fixture games through the load job every load takes (ADR-005
-S3f-4: the GUI thread's synchronous path it had until then had no
-production caller left, and is gone) and read the models back the way the
-recording did -- DisplayRole text plus UserRole data, row by row -- and the
-payloads through the WebServerActions readers. Those walked the models (on
-the GUI thread) until S1b; they read the catalog now, on whatever thread
-asks, and the same recording pins that their output did not move.
+These tests load the golden fixture games through the load job every load
+takes (ADR-005 S3f-4: the GUI thread's synchronous path it had until then
+had no production caller left, and is gone) and check what the load
+publishes (`game`) and the payloads of the web readers against the
+recording. The readers walked the adapter's Qt models (on the GUI thread)
+until S1b; they read the catalog now, on whatever thread asks, and the same
+recording pins that their output did not move.
 
-They also pin the lifetime rule of the rebuild: every model of the previous
-generation is retired rather than dropped (agent-pitfalls #13). The
-recording's `stage` / `stageWithBlank` models were the per-game tracker's
-combos; they went with it in ADR-005 S4ac-4 and are no longer read.
+The file was test_game_asset_manager_models.py, which also read the
+adapter's QStandardItemModels back row by row against the recording's
+`models` section and pinned their retirement (agent-pitfalls #13). The
+models went in the Qt model clean-up's PR4 (no combo was left to bind to
+them); the recording keeps that section, which
+tests/test_game_asset_catalog.py still compares the catalog's rows with.
 
 The last block drives the load job (a TaskExecutor job since ADR-005 S3f-4;
 a QThread until then) -- the path every pick in the UI takes -- and what
@@ -27,8 +27,6 @@ from pathlib import Path
 
 import pytest
 
-from qtpy.QtCore import Qt
-
 from tests.conftest import copy_trees, drain_tasks, remove_tree
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
@@ -36,16 +34,10 @@ GOLDEN = json.loads((FIXTURE / "golden.json").read_text(encoding="utf-8"))
 GAMES = [p.name for p in (FIXTURE / "games").iterdir() if p.is_dir()]
 
 
-def _rows(model):
-    return [[model.item(row).data(Qt.ItemDataRole.DisplayRole),
-             model.item(row).data(Qt.ItemDataRole.UserRole)]
-            for row in range(model.rowCount())]
-
-
 @pytest.fixture
 def goldenGames(autonaApp, monkeypatch):
     """The fixture games installed into the harness, under the recording's
-    locale. Uninstalled afterwards, back to the no-game models."""
+    locale. Uninstalled afterwards, back to no game loaded."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
@@ -71,14 +63,13 @@ def goldenGames(autonaApp, monkeypatch):
         remove_tree(games / name)
     catalog.ScanGames()
     catalog.ResetGameState()
-    manager._RebuildModels()
     SettingsManager.Set("SELECTED_GAME_CODENAME", persisted)
     autonaApp.settle()
 
 
 def _load(manager, codename, modsActive=False, reload=False):
     # The load job, run to the end with this (the GUI) thread pumped: it
-    # marshals the models onto it.
+    # marshals the load's announcement onto it.
     manager.LoadGameByCodename(codename, mods_active=modsActive,
                                mods_reload_mode=reload)
     drain_tasks()
@@ -92,19 +83,15 @@ SCENARIOS = {
 
 
 @pytest.mark.parametrize("label", list(SCENARIOS))
-def test_the_models_match_the_recording(goldenGames, autonaApp, label):
+def test_a_load_matches_the_recording(goldenGames, autonaApp, label):
     manager = goldenGames
     codename, modsActive, reload = SCENARIOS[label]
     golden = GOLDEN["scenarios"][label]
 
     _load(manager, codename, modsActive, reload)
 
-    models = golden["models"]
-    assert _rows(manager.characterModel) == models["character"]
-    assert _rows(manager.variantModel) == models["variant"]
-    assert _rows(manager.colorModel) == models["color"]
-    assert {en: _rows(model) for en, model in manager.skinModels.items()} \
-        == models["skins"]
+    # (The adapter's Qt models were compared with golden["models"] here
+    # until the Qt model clean-up's PR4 removed them.)
     assert autonaApp.get("game") == golden["state"]
 
     # The Web readers (catalog-backed since S1b): what they send must not
@@ -173,73 +160,6 @@ def test_the_web_readers_answer_on_a_worker_thread(goldenGames, autonaApp):
         assert json.dumps(results[name]) == json.dumps(payloads[payload]), name
 
 
-def test_every_model_of_the_previous_generation_is_retired(goldenGames):
-    manager = goldenGames
-    _load(manager, "tgame")
-    previous = [manager.characterModel, manager.skinModels,
-                manager.variantModel, manager.colorModel]
-
-    _load(manager, "game2")
-
-    # Four (six until the tracker's two stage models went in ADR-005
-    # S4ac-4): a combo still bound to one of them until its onLoad handler
-    # rebinds must not see it deleted.
-    assert len(manager._retiredModels) == 4
-    assert all(old is kept
-               for old, kept in zip(previous, manager._retiredModels))
-    assert manager.colorModel is not previous[-1]
-
-
-def test_reloading_the_same_generation_rebuilds_nothing(goldenGames):
-    manager = goldenGames
-    _load(manager, "tgame")
-    model = manager.characterModel
-
-    # Same game, no reload: the catalog skips, so the models stay.
-    _load(manager, "tgame")
-    assert manager.characterModel is model
-    # An explicit rebuild of the generation already shown is a no-op too.
-    manager._RebuildModels()
-    assert manager.characterModel is model
-
-
-def test_a_model_takes_icons_and_pack_from_its_own_snapshot(
-        goldenGames, monkeypatch):
-    """Rows, stock icons and the skin icons' pack all come from the snapshot
-    the model is built from -- not from Current(), which a load landing
-    meanwhile may already have moved to another game."""
-    from src.core.GameAssetCatalog import GameAssetCatalog
-
-    manager = goldenGames
-    _load(manager, "tgame")
-    tgame = GameAssetCatalog.instance.Current()
-    _load(manager, "game2")
-    assert GameAssetCatalog.instance.Current().biggestCompletePack \
-        != tgame.biggestCompletePack
-
-    packs = []
-    decode = manager.LoadSkinImages
-
-    def recordPack(allAssetData, allItem, skinModel, generation, pack):
-        packs.append(pack)
-        return decode(allAssetData, allItem, skinModel, generation, pack)
-
-    monkeypatch.setattr(manager, "LoadSkinImages", recordPack)
-    decodes = manager.UpdateSkinModel(tgame)
-    manager.UpdateCharacterModel(tgame)
-    drain_tasks()
-
-    assert decodes and len(packs) == len(decodes)
-    assert all(pack == tgame.biggestCompletePack for pack in packs)
-    model = manager.characterModel
-    mario = next(
-        row for row in range(model.rowCount())
-        if (model.item(row).data(Qt.ItemDataRole.UserRole) or {}).get(
-            "en_name") == "Mario")
-    # game2 has no Mario: an icon looked up in Current() would be empty.
-    assert not model.item(mario).icon().isNull()
-
-
 # ── the threaded load ───────────────────────────────────────────────────
 
 LOADER_TIMEOUT_SECS = 30
@@ -248,10 +168,11 @@ LOADER_TIMEOUT_SECS = 30
 def _waitForLoader(manager=None):
     """Wait for the load job while pumping this (GUI) thread.
 
-    The job marshals the model rebuild (and the signals that follow it) onto
-    the GUI thread (run_sync), so blocking on its Future here would deadlock
-    it. drain_tasks also runs what the GUI thread is handed meanwhile (the
-    v1 route's dispatch, a scan's onLoadAssets slots, the icons)."""
+    The job marshals the load's announcement (gameLoaded / onLoad, and the
+    close of its save cycle) onto the GUI thread (run_sync), so blocking on
+    its Future here would deadlock it. drain_tasks also runs what the GUI
+    thread is handed meanwhile (the v1 route's dispatch, a scan's
+    onLoadAssets slots)."""
     drain_tasks(LOADER_TIMEOUT_SECS)
 
 
@@ -312,10 +233,7 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
     autonaApp.settle()
 
     assert len(onLoadCount) == 1
-    assert autonaApp.get("game.codename") == "tgame"
-    # Rebuilt on the GUI thread for this load.
-    assert _rows(manager.characterModel) \
-        == GOLDEN["scenarios"]["tgame"]["models"]["character"]
+    assert autonaApp.get("game") == GOLDEN["scenarios"]["tgame"]["state"]
 
     tokens = _loaderStatus(statusCalls, "tgame")
     assert len(tokens) == 1
@@ -360,7 +278,6 @@ def test_the_last_pick_is_persisted_and_restored(goldenGames, autonaApp):
     # Next launch: bootstrap clears the game, UiMounted arms the restore and
     # the scan's onLoadAssets runs it.
     GameAssetCatalog.instance.ResetGameState()
-    manager._RebuildModels()
     autonaApp.settle()
     assert autonaApp.get("game") == {}
     manager._pendingSelectedGameRestore = True
@@ -426,15 +343,24 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     # Runtime half: what that call does to the adapter.
     manager = goldenGames
     _load(manager, "tgame")
-    model = manager.characterModel
+    generation = GameAssetCatalog.instance.Current().generation
 
     GameAssetCatalog.instance.ForgetSelection()
 
     assert manager.selectedGame == {}
-    # Same assets, same generation: the combos keep their rows.
-    manager._RebuildModels()
-    assert manager.characterModel is model
+    # Same assets: the snapshot keeps its generation (the Qt combos kept
+    # their rows on it until the Qt model clean-up's PR4).
+    assert GameAssetCatalog.instance.Current().generation == generation
     # ...and picking the same game again is a load, not a skip.
-    _load(manager, "tgame")
+    loads = []
+
+    def loaded():
+        loads.append(1)
+
+    manager.signals.onLoad.connect(loaded)
+    try:
+        _load(manager, "tgame")
+    finally:
+        manager.signals.onLoad.disconnect(loaded)
     assert manager.selectedGame["codename"] == "tgame"
-    assert manager.characterModel is not model
+    assert loads == [1]

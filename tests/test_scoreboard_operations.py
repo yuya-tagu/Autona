@@ -24,7 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.SettingsManager import SettingsManager
-from tests.conftest import (apply_set, clear_players, deliver_decodes,
+from tests.conftest import (apply_set, clear_players,
                             load_player, tournamentLoaded)
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.fixtures.write_recording import WriteRecorder
@@ -397,9 +397,7 @@ def _loadWithOtherWriters(app, selecting=None, publishing=None):
         except BaseException:
             cycle.Release()
             raise
-        decodes = []
-        manager._Publish(GameAssetCatalog.instance.Current(), cycle, decodes)
-        deliver_decodes(decodes)
+        manager._Publish(GameAssetCatalog.instance.Current(), cycle)
         app.settle()
     finally:
         manager.signals.gameLoaded.disconnect(slot)
@@ -863,9 +861,12 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
     cycle it only queues the board: what the load wrote is still pending
     after it and through onLoad, and goes out, with what onLoad's slots
     wrote, when _Publish closes the cycle. All of it under the board host's
-    lock, from the rebuild to the close (the review: a board operation of
-    another thread landing before the close would go out with the commit,
-    without 反映)."""
+    lock, from the announcement to the close (the review: a board operation
+    of another thread landing before the close would go out with the commit,
+    without 反映) -- a lock _Publish takes itself, and gives back when it
+    returns. (The Qt models' rebuild was the first step under it until the
+    Qt model clean-up's PR4; _Publish's entry and exit are recorded in its
+    place.)"""
     from src.AutonaGameAssetManager import (AutonaGameAssetManager,
                                             _SaveCycle)
     from src.core.Actions import AutonaActions
@@ -878,12 +879,15 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
     calls = []
     realCommit = actions.CommitGameLoad
     realRoster = actions.ApplyGameRoster
-    realRebuild = manager._RebuildModels
+    realPublish = manager._Publish
     realRelease = _SaveCycle.Release
 
-    def rebuild(*args):
-        calls.append(("rebuild", boardLock.held()))
-        return realRebuild(*args)
+    def publish(*args):
+        calls.append(("publish", boardLock.held()))
+        try:
+            return realPublish(*args)
+        finally:
+            calls.append(("published", boardLock.held()))
 
     def roster(replaced):
         # The host's lock is the outer one: never taken inside the state's
@@ -910,7 +914,7 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
         calls.append(("close", boardLock.held()))
         return realRelease(cycle)
 
-    monkeypatch.setattr(manager, "_RebuildModels", rebuild)
+    monkeypatch.setattr(manager, "_Publish", publish)
     monkeypatch.setattr(actions, "ApplyGameRoster", roster)
     monkeypatch.setattr(actions, "CommitGameLoad", commit)
     monkeypatch.setattr(_SaveCycle, "Release", release)
@@ -921,9 +925,9 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
     finally:
         signals.onLoad.disconnect(onLoad)
 
-    assert calls == [("rebuild", True), ("roster", True, False),
+    assert calls == [("publish", False), ("roster", True, False),
                      ("commit", True, 2, True), ("onLoad", True, True),
-                     ("close", True)]
+                     ("close", True), ("published", False)]
     # The close published both, with nothing left behind 反映.
     assert state.HasPendingChanges("score.1") is False
     assert state.GetCommitted("score.1.team.1.teamName") == "THE LOAD"

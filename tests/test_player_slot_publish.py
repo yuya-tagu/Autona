@@ -157,7 +157,6 @@ def slotEnv(autonaApp):
             remove_tree(games / name)
         catalog.ScanGames()
         catalog.ResetGameState()
-        manager._RebuildModels()
         SettingsManager.Set("SELECTED_GAME_CODENAME", persisted)
         for name in CUSTOM_FLAGS:
             (flags / name).unlink(missing_ok=True)
@@ -225,7 +224,8 @@ def _repicked(path, index, **picked):
 
 def _comboRow(rows, row):
     """The data of row `row` of a card's character / variant combo: a blank
-    row first, then the catalog's rows (AutonaGameAssetManager's models)."""
+    row first, then the catalog's rows (as AutonaGameAssetManager's models
+    laid them out, until the Qt model clean-up's PR4)."""
     return rows[row - 1][1]
 
 

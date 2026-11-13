@@ -13,12 +13,13 @@ src/Workers.py was their last user. Pinned here:
   once the app is shutting down or the event loop has exited (the call then
   never runs), and still waits for one already running; a job blocked in
   it no longer holds up the interpreter's exit (subprocess);
-- a load is a job: the selection on a job-lane thread, the model rebuild
-  and its announcement (gameLoaded, then onLoad) on the GUI thread, once
-  each, and the load is over (done()) only after its icon decodes, which
-  run on the fan-out lane -- also those a rebuild started before it failed
-  part-way; a synchronous load from the GUI thread is refused (every load
-  is the job);
+- a load is a job: the selection on a job-lane thread, its publication
+  (_Publish) and announcement (gameLoaded, then onLoad) on the GUI thread,
+  once each, and the load is over (done()) after them; a synchronous load
+  from the GUI thread is refused (every load is the job). (Until the Qt
+  model clean-up's PR4 the GUI thread rebuilt the Qt models first, and the
+  load was over only after their icon decodes on the fan-out lane -- also
+  those a rebuild started before it failed part-way.);
 - the latest request wins, on one loader job (S3f-4 reviews): rapid A, B,
   C take one job lane and end on C, A and B selecting nothing; a superseded
   synchronous load answers once the newer one is in; a request the loader
@@ -28,10 +29,10 @@ src/Workers.py was their last user. Pinned here:
   request starts another; a reload an onLoad slot asks for is served by the
   loader running; an empty codename is SKIPPED at once;
 - a load waiting on the GUI thread is released by the shutdown, with
-  nothing rebuilt or announced afterwards (its selection published with
-  what goes with it: tests/test_roster_flow.py, also for a failed model
-  rebuild); one still waiting for the loader writes nothing at all, nor
-  does one whose loader the shutdown cancelled while it was queued;
+  nothing published or announced afterwards (its selection published with
+  what goes with it: tests/test_roster_flow.py); one still waiting for the
+  loader writes nothing at all, nor does one whose loader the shutdown
+  cancelled while it was queued;
 - the headless loader takes the desktop's design (S3f-6): the start.gg
   download, the scan and the loads are jobs, with no thread of its own;
   rapid requests take one job and end on the last one; a superseded
@@ -56,6 +57,7 @@ src/Workers.py was their last user. Pinned here:
 """
 import ast
 import os
+import contextlib
 import subprocess
 import sys
 import threading
@@ -67,12 +69,11 @@ from qtpy.QtWidgets import QApplication
 
 from src.AutonaGameAssetManager import (
     FAILED, LOADED, SKIPPED, STOPPED, SUPERSEDED)
-from src.core.TaskExecutor import (
-    FANOUT_THREAD_PREFIX, JOB_THREAD_PREFIX, TaskExecutor)
+from src.core.TaskExecutor import JOB_THREAD_PREFIX, TaskExecutor
 from src.Helpers import AutonaQtHelper
 from src.Helpers.AutonaQtHelper import GuiMarshalAborted
 from tests.conftest import drain_tasks
-from tests.test_game_asset_manager_models import (  # noqa: F401  (fixtures)
+from tests.test_game_asset_manager_load import (  # noqa: F401  (fixtures)
     goldenGames, onLoadCount, statusCalls)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -296,11 +297,23 @@ def _record(signal, events, tag):
     return lambda: signal.disconnect(slot)
 
 
+def _recordPublish(manager, monkeypatch, events):
+    """The GUI thread's end of a load (_Publish), recorded as it starts --
+    where the model rebuild was recorded until the Qt model clean-up's PR4
+    (it was _Publish's first step)."""
+    realPublish = manager._Publish
+
+    def publish(*args):
+        events.append(("publish", threading.current_thread().name))
+        return realPublish(*args)
+
+    monkeypatch.setattr(manager, "_Publish", publish)
+
+
 def test_a_load_selects_on_a_job_and_announces_on_the_gui_thread(
         goldenGames, autonaApp, monkeypatch):
     manager = goldenGames
     events = []
-    decodes = []
 
     realSelect = manager.catalog.SelectGame
 
@@ -308,20 +321,11 @@ def test_a_load_selects_on_a_job_and_announces_on_the_gui_thread(
         events.append(("select", threading.current_thread().name))
         return realSelect(*args, **kwargs)
 
-    realRebuild = manager._RebuildModels
-
-    def rebuild(started=None):
-        events.append(("rebuild", threading.current_thread().name))
-        started = realRebuild(started)
-        decodes.extend(started)
-        return started
-
     def done():
         events.append(("done", threading.current_thread().name))
-        events.append(("decoded", all(f.done() for f in decodes)))
 
     monkeypatch.setattr(manager.catalog, "SelectGame", select)
-    monkeypatch.setattr(manager, "_RebuildModels", rebuild)
+    _recordPublish(manager, monkeypatch, events)
     undo = [_record(manager.signals.gameLoaded, events, "gameLoaded"),
             _record(manager.signals.onLoad, events, "onLoad")]
     try:
@@ -333,47 +337,30 @@ def test_a_load_selects_on_a_job_and_announces_on_the_gui_thread(
             disconnect()
 
     assert [event[0] for event in events] == [
-        "select", "rebuild", "gameLoaded", "onLoad", "done", "decoded"]
+        "select", "publish", "gameLoaded", "onLoad", "done"]
     threads = dict(events)
     assert threads["select"].startswith(JOB_THREAD_PREFIX)
     assert threads["done"] == threads["select"]
-    assert threads["rebuild"] == threads["gameLoaded"] == threads["onLoad"] \
+    assert threads["publish"] == threads["gameLoaded"] == threads["onLoad"] \
         == _main()
-    # Over only once its icon decodes were.
-    assert decodes and threads["decoded"] is True
     assert autonaApp.get("game.codename") == "tgame"
-
-
-def test_icon_decodes_run_on_the_fan_out_lane(goldenGames, monkeypatch):
-    manager = goldenGames
-    threads = []
-    realDecode = manager.LoadSkinImages
-
-    def decode(*args):
-        threads.append(threading.current_thread().name)
-        return realDecode(*args)
-
-    monkeypatch.setattr(manager, "LoadSkinImages", decode)
-    manager.LoadGameByCodename("tgame")
-    drain_tasks()
-
-    assert threads
-    assert all(name.startswith(FANOUT_THREAD_PREFIX) for name in threads)
 
 
 def test_a_load_job_waiting_on_the_gui_thread_is_released_by_the_shutdown(
         goldenGames, ownExecutor, autonaApp, statusCalls, onLoadCount,
         monkeypatch):
     """The desktop's close: the window shuts the executor down on the GUI
-    thread while a load job waits there for its models. The job gives up;
-    nothing is rebuilt or announced, not even once the GUI thread runs
-    again. Its selection is in the state and published with its cycle, so
-    the pick that goes with it is persisted too (from the job's thread)."""
+    thread while a load job waits there for its publication (_Publish). The
+    job gives up; nothing is published or announced by the GUI thread, not
+    even once it runs again. Its selection is in the state and published
+    with its cycle, so the pick that goes with it is persisted too (from
+    the job's thread)."""
     from src.core.SettingsManager import SettingsManager
     from src.core.StateManager import StateManager
 
     manager = goldenGames
-    generation = manager._modelGeneration
+    published = []
+    _recordPublish(manager, monkeypatch, published)
     selected = threading.Event()
     realSelect = manager.catalog.SelectGame
 
@@ -405,7 +392,7 @@ def test_a_load_job_waiting_on_the_gui_thread_is_released_by_the_shutdown(
                           for token in tokens)
     QApplication.processEvents()
     QApplication.processEvents()
-    assert manager._modelGeneration == generation
+    assert published == []
     assert onLoadCount == []
 
 
@@ -1200,47 +1187,118 @@ def test_a_headless_loader_the_shutdown_cancels_while_queued_ends_its_request(
 # ── the load's save cycle and what reads it ──────────────────────────────
 
 
-def test_a_rebuild_that_fails_part_way_still_waits_for_its_decodes(
-        goldenGames, autonaApp, monkeypatch):
-    """The skin decodes are started, then a model fails: the load is over
-    (done()) only once those decodes are, and its save cycle is closed."""
-    from src.AutonaGameAssetManager import FAILED
+# Where _Publish raises outside the announcement's slots (whose exceptions
+# emit reports and goes on): inside its board operation before the
+# recording opens, as the recording opens, and as it closes -- after
+# gameLoaded, onLoad and the save cycle's close.
+PUBLISH_FAILURES = {
+    "in the board operation": 0,
+    "opening the recording": 0,
+    "closing the recording": 1,
+}
+
+
+@pytest.mark.parametrize("where", list(PUBLISH_FAILURES))
+def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
+        goldenGames, autonaApp, onLoadCount, monkeypatch, where):
+    """_Publish raises on the GUI thread, not in a slot: the attempt is
+    FAILED (done() once), its save cycle closed once (no BlockSaving left:
+    agent-pitfalls #6), no recording of held writes left open or kept
+    (StateManager.RecordHeldWrites), the board host's lock given back, and
+    the next load goes through. What the two tests of a failing Qt model
+    rebuild checked on the way, until the Qt model clean-up's PR4 removed
+    the rebuild (and its FAILED settle). Raised before the announcement, the
+    selection still goes out without the roster, as it did at HEAD for any
+    exception but the rebuild's: the ledger's PR4 notes it."""
+    from src import AutonaWebOperations
+    from src.AutonaWebOperations import BoardHost
     from src.core.StateManager import StateManager
 
     manager = goldenGames
-    started = []
-    realDecodeIcons = manager._DecodeIcons
-    realSkins = manager.LoadSkinImages
+    autonaApp.ready(1)  # held: what the load writes waits for its commit
+    assert not StateManager.HasPendingChanges("score.1")
+    armed = [where]
 
-    def decodeIcons(*args, **kwargs):
-        future = realDecodeIcons(*args, **kwargs)
-        started.append(future)
-        return future
+    def fromPublish(name):
+        # _Publish's board operation (AutonaGameAssetManager._Publish's
+        # nested `publish`), the load's own; not another caller's.
+        return name.endswith("_Publish.<locals>.publish")
 
-    def slowSkins(*args):
-        time.sleep(0.2)
-        return realSkins(*args)
+    def take():
+        if not armed:
+            return False
+        armed.clear()
+        return True
 
-    realVariants = manager.UpdateVariantModel
-    failures = []
+    if where == "in the board operation":
+        realRun = BoardHost.Run
 
-    def failing(snapshot=None):
-        if not failures:  # the load's rebuild; not the fixture's teardown
-            failures.append(1)
-            raise RuntimeError("a model failed")
-        return realVariants(snapshot)
+        def run(self, op, *args, **kwargs):
+            if fromPublish(op.__qualname__) and take():
+                def failing():
+                    raise RuntimeError("the board operation failed")
+                return realRun(self, failing, *args, **kwargs)
+            return realRun(self, op, *args, **kwargs)
 
-    monkeypatch.setattr(manager, "_DecodeIcons", decodeIcons)
-    monkeypatch.setattr(manager, "LoadSkinImages", slowSkins)
-    monkeypatch.setattr(manager, "UpdateVariantModel", failing)
-    seen = []
-    future = manager.LoadGameByCodename("tgame", done=lambda: seen.append(
-        bool(started) and all(decode.done() for decode in started)))
+        host = AutonaWebOperations.boardHost
+        if "Run" in vars(host):  # an earlier test's patch left one there
+            hostRun = vars(host)["Run"]
+            monkeypatch.setattr(
+                host, "Run",
+                lambda op, *a, **k: run(host, op, *a, **k)
+                if fromPublish(op.__qualname__) else hostRun(op, *a, **k))
+        monkeypatch.setattr(BoardHost, "Run", run)
+    else:
+        realRecord = StateManager.RecordHeldWrites
+
+        @contextlib.contextmanager
+        def closingFails(recording):
+            with recording as written:
+                yield written
+            raise RuntimeError("the recording failed as it closed")
+
+        def record():
+            if fromPublish(sys._getframe(1).f_code.co_qualname) and take():
+                if where == "opening the recording":
+                    raise RuntimeError("the recording failed as it opened")
+                return closingFails(realRecord())
+            return realRecord()
+
+        monkeypatch.setattr(StateManager, "RecordHeldWrites", record)
+
+    done = []
+    future = manager.LoadGameByCodename(
+        "tgame", done=lambda: done.append(1))
     drain_tasks()
 
-    assert future.result(0) == FAILED
-    assert seen == [True]
+    assert not armed, "the failure was not injected"
+    assert future.result(0) == FAILED and done == [1]
     assert StateManager.saveBlocked == 0
+    assert StateManager.Recording() is False
+    assert StateManager._heldRecords == []
+    assert not StateManager.HasPendingChanges("score.1")
+    assert len(onLoadCount) == PUBLISH_FAILURES[where]
+    # The board host's lock was given back: another thread takes it.
+    lock = AutonaWebOperations.boardHost._lock
+    taken = []
+
+    def probe():
+        taken.append(lock.acquire(timeout=WAIT))
+        if taken[-1]:
+            lock.release()
+
+    thread = threading.Thread(target=probe)
+    thread.start()
+    thread.join(WAIT)
+    assert taken == [True]
+
+    after = manager.LoadGameByCodename("game2")
+    drain_tasks()
+    assert after.result(0) == LOADED
+    assert autonaApp.get("game.codename") == "game2"
+    assert len(onLoadCount) == PUBLISH_FAILURES[where] + 1
+    assert StateManager.saveBlocked == 0
+    assert StateManager._heldRecords == []
 
 
 @pytest.fixture

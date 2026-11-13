@@ -158,7 +158,7 @@ class _LoadRequest:
 
 
 class HeadlessGames:
-    """The games, through GameAssetCatalog directly (no Qt models).
+    """The games, through GameAssetCatalog directly (no Qt adapter).
 
     The headless counterpart of the asset adapter (AutonaGameAssetManager):
     the startup scan and start.gg character download, the load by codename
@@ -415,8 +415,10 @@ class HeadlessGames:
         if reason is not None:
             logger.info(f"Game load of {codename} not run: {reason}")
             return
-        # The adapter's _Load without the Qt models: the start.gg character
-        # table re-read, then the selection in one save cycle. Skipped
+        # The adapter's _Load without the GUI thread's end (_Publish): the
+        # start.gg character table re-read, then the selection in one save
+        # cycle. (The adapter rebuilt its Qt models there too until the Qt
+        # model clean-up's PR4; this never had them.) Skipped
         # (None) for an unknown codename or the same game again without
         # reload.
         self.catalog.ReloadStartGGCharacters()

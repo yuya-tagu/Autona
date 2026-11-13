@@ -4,8 +4,11 @@ ADR-005 S1c. Everything the app knows about countries -- the standard list
 with its localized names, each country's regions ("states"), the custom
 flags a user dropped into ./user_data/additional_flag, and the city -> region
 table the Start.gg auto-fill resolves against -- lives here as plain dicts.
-The Qt side (`src/Helpers/AutonaCountryHelper.py`) only turns the rows into
-the shared country QStandardItemModel; it no longer holds any of the data.
+There is no Qt side: the shells call `Load()` themselves (the desktop's
+Window, src/headless.py), and every reader reads the catalog. (The Qt
+adapter `src/Helpers/AutonaCountryHelper.py`, which only turned the rows
+into a shared country QStandardItemModel, went in the Qt model clean-up's
+PR2.)
 
 Snapshots
 ---------
@@ -30,11 +33,12 @@ Locking rules
   under StateManager.lock (ADR-005 S3e-3). A lookup in a catalog nothing
   loaded still reads it then (a Start.gg worker and the GUI thread may get
   there at once).
-- No observer channel and no callbacks: the Qt adapter's `countriesUpdated`
-  signal is the notification.
+- No observer channel and no callbacks: nothing is told of a load (the Qt
+  adapter's `countriesUpdated` signal was, until the Qt model clean-up's
+  PR2; it had no receiver left).
 
 Construction is side-effect free; bootstrap_core() creates the instance, and
-the Qt adapter drives `Load()` (after the per-run locale is known).
+the shell drives `Load()` (after the per-run locale is known).
 """
 import os
 import re
