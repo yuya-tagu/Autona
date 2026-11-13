@@ -8596,3 +8596,25 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
 - テスト: 新規 tests/test_api_v1_guides.py、test_web_access（/connection の許可表・トークンのルートが無いこと・通知の配信先）、test_webserver_delta_debounce（9 件）、test_webserver_routes、test_bootstrap_split、test_api_v1_crew
 - 持ち越し: /connection の outDir（ユーザー名を含む絶対パス）は同一オリジンのレイアウトから読める（obs-path と同程度）。SF-4a で同じ秘密で包むか判断。起動前に終わったスキャンは通知なし（接続時に GET /games）
 - 独立レビュー済み（中 1: トークン持ち出し → ルート削除で対応。低 6: スレッド記述・コメント・拒否 parametrize・ホスト決定の一本化を反映。Qt 窓の表示が v1 再発行で古くなる件はルート削除で消滅）
+
+##### SF-6（詳細設計・2026-11-14・基点 96baf8c9）
+- 結論: core に `src/core/GameLoader.py` を置き両シェルで共有。ロード後処理（ロスター・commit・選んだゲームの保存・通知）はローダーのスレッドで直接走らせ run_sync を使わない。メインスレッドへの移動はスキャン後処理の fire-and-forget `later` 注入だけ。`AutonaGameAssetManager`・`HeadlessGames`・`HeadlessSignals`・`wire_game_roster` は削除。通知は core の `GameLoader.loaded`（ObserverChannel）→ Bridge の `game_loaded`。3 PR 直列（SF-6a → 6b → 6c、すべて区分「高」、6b・6c は独立レビュー必須）
+- API: `GameLoader(catalog, *, runOnBoard, later, unavailable, isMainThread, progress=None, afterScan=None)`、`Start` / `Scan` / `LoadGameByCodename(codename, async_mode, mods_active, mods_reload_mode, done) -> Future` / `SelectGameFromStartGGId`。1 回のロード（ローダーのスレッド）: unavailable なら STOPPED → ReloadStartGGCharacters → BlockSaving（1 回だけの closer）→ SelectGame（None なら SKIPPED）→ runOnBoard(publish: RecordHeldWrites → ApplyGameLoad → 選んだゲームの保存 → unavailable() が None なら loaded.notify → finally 閉じる)。ボードロック下で catalog writer を呼ばない
+- 今の 2 実装の差: デスクトップは 1 ロード 1 サイクル（選択・ロスター・commit・onLoad、公開 1 回、Future を返す、終了中は `_SettleUnannounced`）。ヘッドレスは選択が単独で公開され、ロスターは別サイクル、保存がロスターより先、None を返す、orphan で "not run" ログ、終了中は `_SettleStopped`
+- SF-6a: テストだけ（今の挙動を記録）。SF-6b: core へ統合（スレッドは変えず一時的に `marshal=run_sync` を注入。デスクトップ golden 不変、ヘッドレス golden は意図して変わる）。SF-6c: run_sync をやめる（settle 2 つ・_SaveCycle の lock・アダプタ 2 つ・HeadlessSignals 削除、Bridge に game_loaded。pin は golden の書き込み列が 6b と同じ／publish がローダーのスレッド／run_sync・gui_thread_sync の呼び手は AutonaShellOperations だけ／終了中 publish でも state が 1 ゲーム）
+- 仮定（SF-5b 次第）: A1 Window は onLoad/onLoadAssets/selectedGame/games に繋がない／A2 全量送信の源は Window.GameChanged から外れ、tournament_changed での全量送信は無くなる／A3 起動時は Window.UiMounted が Start() を 1 回／A4 SF-3b の取り込み後の再スキャンは GameLoader.Scan()／A5 SF-2 で AutonaStatusManager が Qt から外れる（SF-2 で済み）／A6 LoadGameAssets はメニューだけなので消す
+- 実機で確認: 起動時の復元／切り替えで React のヘッダ・SCORE・OBS のキャラが追従／未反映編集ありで切り替え／mods 切替／ロード中に閉じる → 次回 1 ゲーム／ヘッドレスでロード中 Ctrl+C／フッター進捗
+
+##### SF-6a
+
+- **変更（テストのみ。src/ は変えていない）**
+  - `tests/test_asset_jobs.py`: デスクトップ（`AutonaGameAssetManager`）とヘッドレス（`src/headless.HeadlessGames`）で重複していたローダーテストを、`shell` fixture（`params=["desktop","headless"]`）で両シェルに流す契約テスト P1〜P19 にまとめた。シェルの違い（Future か None か、ヘッドレスの orphan ログ 3 種、フッターの進捗、shutdown で止めたロードの settle の中身、各部品の名前）は `SHELL_DIFFERENCES` にパラメータごとの期待値として集約した。旧 46 関数（assert 218）→ 新 39 関数（assert 224）。旧名が消えた 19 本はすべて合流先があり、各 assert の和集合を残している。各シェル固有の 4 本はそのまま残した
+  - 新規 P20 `test_a_load_commits_what_it_wrote_and_leaves_the_rest_pending`、P21 `test_every_way_a_load_ends_gives_the_save_block_back`（両シェル × 8 経路: skipped / SelectGame raises / the publication raises / not run: the main thread is gone / stopped after the selection / orphan の 3 種。BlockSaving と ReleaseSaving の対称と `saveBlocked == 0` を pin。pitfalls #6）
+  - 新規 `tests/test_game_loader_golden.py` + `tests/fixtures/game_loader/<shell>_<scenario>.json`（10 本: restore / switch / mods / burst / shutdown）。Set / Unset の順序、公開（相対 revision・役割・delta）、commit されたパス、設定の書き込み、通知の順序（スレッドの役割付き）、答え、残った pending と saveBlocked を記録する。正規化は実行時ディレクトリ・フッターのトークン・隣り合う held dirty 通知の並び（`_heldCommitted` が set なので PYTHONHASHSEED で順が変わる）。再生成は `AUTONA_RECORD_GAME_LOADER=1`
+- **golden に出た 2 シェルの違い（SF-6b / 6c で揃える対象）**
+  - デスクトップ: 1 ロード 1 サイクル。選択はローダーで、ロスター・commit・onLoad は main で、公開は 1 回（announced の後）
+  - ヘッドレス: 選択がローダーで単独公開され、ロスターは main の別サイクルで gameLoaded の前に公開。設定の保存がロスターより先
+  - shutdown: デスクトップはローダーで roster → commit → 保存 → 公開まで済ませる。ヘッドレスは commit が無いので、held ボードでは空にした pick が pending のまま公開されない（ハーネスはヘッドレスでも held ボード）
+- **検証**: 直列 3 回 97 passed、PYTHONHASHSEED 8 通りで golden 10 passed、並列ランナー全量 6247 passed / 0 failed（基点 96baf8c9 での値）
+- **持ち越し**: デスクトップの `Window.SetGame` の全状態送出はハーネスで録れないので、P16 は ws_game_changed を手で結線している（SF-6b で core に寄せれば両シェル同じ経路で検査できる）。golden 実行中は StreamService を fixture 内で止めている
+- **SF-1〜SF-3a への追従**（取り込み時）: SF-2 の `AutonaStatusManager` 削除に合わせ、golden の status スパイと `SHELL_DIFFERENCES["footerStatus"]` の説明を `StatusService.Push/Pop`（フッターの表示文は `AutonaLocaleHelper.StatusText`）に変更。SF-1（進捗の総数がキャラ数に）と SF-3a（`wire_web_server` の第 3 引数・`gamesScanned`）は golden に影響せず、再記録しても 10 本とも内容差分なし。取り込み後の検証: 直列 3 回 97 passed、PYTHONHASHSEED 0 / 12345 で golden 10 passed、並列ランナー全量 6337 passed / 0 failed / 2 skipped

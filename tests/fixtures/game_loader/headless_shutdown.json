@@ -1,0 +1,130 @@
+{
+ "about": "headless: the shutdown comes after a switch's selection (tgame to game2, tgame picks applied), while the load waits for the main thread",
+ "writes": [
+  [
+   "loader",
+   "set",
+   "game",
+   "{\"name\":\"Second Game\",\"abbreviation\":\"SG\",\"smashgg_id\":43868,\"codename\":\"game2\",\"logo\":\"./user_data/games/game2//base_files/logo.png\",\"defaults\":null,\"mods_active\":false,\"has_stages\":false,\"has_variants\":false,\"has_colors\":false}"
+  ],
+  [
+   "loader",
+   "set",
+   "game.has_modded_content",
+   "false"
+  ],
+  [
+   "loader",
+   "set",
+   "score.1.team.1.player.1.character",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "loader",
+   "set",
+   "score.1.team.1.player.1.mains",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "loader",
+   "set",
+   "score.2.team.1.player.1.character",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "loader",
+   "set",
+   "score.2.team.1.player.1.mains",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ]
+ ],
+ "published": [
+  {
+   "revision": 1,
+   "role": "loader",
+   "delta": "[{\"path\": [\"game\", \"defaults\"], \"action\": \"type_changes\", \"value\": null, \"old_value\": \"unknown___\", \"type\": \"<class 'NoneType'>\", \"old_type\": \"<class 'dict'>\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"name\"], \"action\": \"values_changed\", \"value\": \"Second Game\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"abbreviation\"], \"action\": \"values_changed\", \"value\": \"SG\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"smashgg_id\"], \"action\": \"values_changed\", \"value\": 43868, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"codename\"], \"action\": \"values_changed\", \"value\": \"game2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"logo\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/game2//base_files/logo.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_stages\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_variants\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_colors\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_modded_content\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  }
+ ],
+ "committed": [
+  {
+   "revision": 1,
+   "paths": []
+  }
+ ],
+ "settings": [
+  [
+   "loader",
+   "SELECTED_GAME_CODENAME",
+   "game2"
+  ]
+ ],
+ "events": [
+  [
+   "main",
+   "request",
+   "game2",
+   false,
+   false,
+   true
+  ],
+  [
+   "loader",
+   "select",
+   "game2",
+   false,
+   false
+  ],
+  [
+   "loader",
+   "published",
+   1
+  ],
+  [
+   "loader",
+   "roster",
+   "tgame"
+  ],
+  [
+   "loader",
+   "held dirty",
+   "score.1",
+   true
+  ],
+  [
+   "loader",
+   "held dirty",
+   "score.2",
+   true
+  ],
+  [
+   "loader",
+   "settings",
+   "SELECTED_GAME_CODENAME",
+   "game2"
+  ],
+  [
+   "loader",
+   "done",
+   "game2"
+  ]
+ ],
+ "answers": [
+  [
+   "game2",
+   null
+  ]
+ ],
+ "after": {
+  "pending": {
+   "score.1": [
+    "root['score']['1']['team']['1']['player']['1']['character']",
+    "root['score']['1']['team']['1']['player']['1']['mains']"
+   ],
+   "score.2": [
+    "root['score']['2']['team']['1']['player']['1']['character']",
+    "root['score']['2']['team']['1']['player']['1']['mains']"
+   ]
+  },
+  "saveBlocked": 0
+ }
+}
