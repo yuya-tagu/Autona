@@ -8341,3 +8341,35 @@ Qt の SCORE（スコアボードの dock・1v1 / チーム / クルーのボー
 - **pin**: `tests/test_title_bar.py`（属性番号と COLORREF・Window / Dialog には当て Popup / ToolTip には当てない・同じウィンドウに二度当てない・キャプション失敗時に残りを呼ばない・例外を握りつぶす・非 Windows で呼ばない）。実機でのタイトルバーの色はメインが確認する。
 - **スクロールバー**: スクロールできるようになった共有ビューのページに、Chromium の標準の明るいスクロールバーが出て配色から浮いた。`web/src/PanelShell/panelScrollbar.css`（Designer の `styles.css` と同じ規則の複製。Designer 側は変えない）を `html.panel-shell` 配下だけに当てる（`PanelShell` がマウント中だけ `<html>` にクラスとテーマの文字色を付け、アンマウントで戻す）。色は `currentColor`（テーマの `text.primary`）の 28%（hover 45%）で、新しい色は決めていない。OBS 用のページは PanelShell を通らないので変わらない。pin は `page-scroll.spec.ts` の 2 本（`/web/stream?desktop=1` で `scrollbar-width: thin` と `scrollbar-color` が auto でない、`/scoreboard` では auto のまま）
 - **実機（メイン、隔離データの `python main.py`、2026-11-12）**: タイトルバーの色はサイドバーと同じ (25,27,32) を画面上で計測。小さいウィンドウで SCORE ページにダークのスクロールバーが出る。オーナーが実機で見て「問題なし」（スクロール・スクロールバー・タイトルバー・設定ウィンドウのタイトルバー）
+
+
+#### Qt モデルの整理（設計・2026-11-13）
+
+ADR-005 S4ac-3 で Qt の SCORE を、S4i までで Qt のパネルを消したので、Qt のモデル（`QAbstractItemModel` 系・provider アダプタの読み込み）の消費者は大半が無くなった。残りを 4 段（直列。スタック PR は使わない）で片付ける。
+
+- **判定**
+  - 削除（PR1）: provider アダプタ（`src/AutonaTournamentDataProvider.py`）の set / station の読み込み（`LoadSets` / `CancelSetLoad` / `_OnSetsProgress` / `_OnSetsLoaded` / `LoadStations` / `_OnStationsLoaded` / `_setLoadGeneration` / `_setLoadCancel`）と、未使用のシグナル 4 本（`get_sets_finished` / `get_stations_finished` / `sets_data_updated` / `twitch_username_updated`。`UiMounted` の emit も）。`PlayerService.SetSeed` / `SetPlayerId` の `announce=`。`AutonaQtHelper.NoIconProxyModel`
+  - 残す: `tournament_phases_updated` / `GetTournamentPhases` / `stream_queue_loaded` / `tournament_changed` / `tournament_url_update` / `game_changed`（受け手がいる）
+  - `AutonaCountryHelper` 全体を削除する（PR2）。Window は `CountryCatalog.instance.Load()` を直接呼ぶ
+  - `AutonaPlayerDB` の Qt モデルは、正規化を core の `PlayerDB.NormaliseMains(codename)` に**忠実に移植**（HEAD の癖ごと。特性テストで固定）してから削除する（PR3）。**リード決定: 両シェル（デスクトップ・ヘッドレス）で正規化する**（デスクトップだけに残す案 A・正規化をやめる案 B は採らない）
+  - `AutonaGameAssetManager` のモデル群・アイコンデコード・`GetStockIcon`・プロパティ 5・`GetCharacterAssets` は PR3 の後に削除する（PR4）。`run_sync` は残す
+- **段**
+  - PR1（通常）: provider の残り + `announce=` + `NoIconProxyModel` の削除、削除した名前の pin
+  - PR2（通常）: `AutonaCountryHelper` の削除、i18n の文脈の削除と `.qm` の再生成、pitfalls #15・`state-and-webserver.md` の更新
+  - PR3（通常）: `NormaliseMains` を core に、`AutonaPlayerDB` の model 系の削除、ヘッドレスとの一致テスト
+  - PR4（高）: `AutonaGameAssetManager` のモデル群の削除、pitfalls #13 / #13b の更新。S4ad・残置 5 の pin が全緑なのが条件
+- **範囲外（記録のみ）**: `run_sync` の見直し（S-final）、デスクトップのローダーと `HeadlessGames` の統合、golden の `game_assets` のモデル節と countries の `modelRows`（fixture は残す）
+
+##### PR1
+
+- **変更**
+  - `src/AutonaTournamentDataProvider.py`: 上の判定の名前を削除（-78 行）。削除の前に grep で、受け手が src にもテストの本体にも無いことを確認した（`LoadStations` / `LoadSets` / `CancelSetLoad` と 4 つのシグナルの参照は `tests/test_provider_jobs.py` だけ）。`threading` / `_OnGuiThread` は他の取得が使うので import・定義は残した
+  - `src/core/PlayerService.py`: `SetSeed(value)` / `SetPlayerId(value)` から `announce=` を削除。呼び手のテストは同じ中身の明示的な呼び出しにした。`SetPlayerId`: `if svc.SetPlayerId(v): svc.Announce(SlotChange(idChanged=True))`（変わったときだけ依頼）、`SetSeed`: `SetSeed(v)` の後に `Announce(SlotChange(seedChanged=True))`（常に依頼）。`Actions.py` の `ClearSlot(..., announce=False)` は別物で触っていない
+  - `src/Helpers/AutonaQtHelper.py`: `NoIconProxyModel` を削除（消費者 0）
+  - テスト: `tests/conftest.py`（`edit_tag`）・`test_player_load.py`・`test_stats_flow.py`（`_seed_and_announce`）・`test_stats_service.py`（`_announce_id`）を明示の `Announce` に置換。`tests/test_provider_jobs.py` から set list / stations の取得の 3 本の対象（パラメータと 2 本のテスト）を削除
+  - 文書: `.claude/rules/agent-pitfalls.md` #7 と `state-and-webserver.md` の `announce=True` の記述を直した（`known-smells.md` の `NoIconProxyModel` は削除済みのカードの相違の記録なので残した）
+- **pin**: `tests/test_web_panel_host.py::test_the_unused_qt_model_leftovers_are_gone`（削除した 13 個の名前が `src/**/*.py` のコードに無いこと。`SetSeed` / `SetPlayerId` の引数に `announce` が無いこと）
+- **検証**
+  - 全量（並列ランナー `python scripts/run_tests_parallel.py`）: **6149 passed / 0 failed / 2 skipped**
+  - 全量（直列。CI と同じ `QTWEBENGINE_DISABLE_SANDBOX=1 QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu python -m pytest -q -ra -p no:cacheprovider`）: **6149 passed / 25 skipped / 0 failed**（golden の `test_stats_flow` / `test_stats_service` / `test_board_operations` は緑のまま）
+  - `web/` は変えていないので `npm run build` / jest / e2e は回していない。アプリ本体は起動していない

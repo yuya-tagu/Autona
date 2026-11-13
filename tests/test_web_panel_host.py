@@ -2806,6 +2806,34 @@ def _codeNames(path):
     return names
 
 
+# What the Qt model cleanup (ADR-005, PR1) removed: the provider adapter's set /
+# station loads and signals (their only consumers, the Qt set selection and
+# station windows, went in S4ac-3), and the proxy model that stripped icons for
+# the Qt combos.
+QT_MODEL_CLEANUP_NAMES = (
+    "LoadSets", "CancelSetLoad", "_OnSetsProgress", "_OnSetsLoaded",
+    "LoadStations", "_OnStationsLoaded", "_setLoadGeneration",
+    "_setLoadCancel", "get_sets_finished", "get_stations_finished",
+    "sets_data_updated", "twitch_username_updated", "NoIconProxyModel")
+
+
+def test_the_unused_qt_model_leftovers_are_gone():
+    import inspect
+
+    from src.core.PlayerService import PlayerService
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    users = {str(path.relative_to(PROJECT_ROOT)):
+             sorted(_codeNames(path) & set(QT_MODEL_CLEANUP_NAMES))
+             for path in sorted(src.rglob("*.py"))}
+    assert {path: names for path, names in users.items() if names} == {}
+
+    # The statistics are asked for by an explicit Announce, not by a flag.
+    for method in (PlayerService.SetSeed, PlayerService.SetPlayerId):
+        assert "announce" not in inspect.signature(method).parameters
+
+
 def test_the_qt_settings_window_is_gone():
     # ADR-005 S4af (the owner's go-ahead: no way back): the React page
     # (/web/settings, the menu's Window.OpenSettings) is the only settings

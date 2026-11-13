@@ -231,21 +231,6 @@ def assert_gui_thread(fn=None):
         return _assert()
 
 
-class NoIconProxyModel(QSortFilterProxyModel):
-    """Proxy model that strips icons (DecorationRole) from the source model.
-
-    One definition for every combo that lists a shared asset model as text
-    only (the player card and the RESULT panel; the TOP 8 panel's too until
-    it became a React page, ADR-005 S4i). It lives here rather
-    than in one of those widget modules so that using it never means
-    importing another panel.
-    """
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DecorationRole:
-            return None
-        return super().data(index, role)
-
-
 def ShowComboText(combo, text):
     """Show `text` in editable combo `combo` with the row that has it
     selected -- or no row (index -1) and the text alone when the list has

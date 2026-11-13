@@ -78,13 +78,9 @@ class _UnlessStopping:
 class AutonaTournamentDataProviderSignals(QObject):
     tournament_changed = Signal()
     tournament_data_updated = Signal(dict)
-    twitch_username_updated = Signal()
-    get_sets_finished = Signal(list)
-    get_stations_finished = Signal(list)
     tournament_phases_updated = Signal(list)
     game_changed = Signal(int)
     stream_queue_loaded = Signal(dict)
-    sets_data_updated = Signal(dict)
     tournament_url_update = Signal(str)
 
 
@@ -105,12 +101,6 @@ class AutonaTournamentDataProvider(QObject):
         # one (ADR-005 S3c).
         self.selectGameFromStartGGId = None
 
-        # The set list load (LoadSets): only the newest one answers. Its
-        # number, and the event that tells the one before it to stop. GUI
-        # thread only (the window that asks for the list and the delivery
-        # of the answers).
-        self._setLoadGeneration = 0
-        self._setLoadCancel = None
         # The entrants fetch of the tournament loaded now: the event that
         # tells it to stop once another tournament (or none, or the same
         # one again) is loaded. GUI thread only (Load / UnloadTournament).
@@ -478,73 +468,6 @@ class AutonaTournamentDataProvider(QObject):
             run, task_name="tournament provider job")
         return not future.cancelled()
 
-    def LoadSets(self, showFinished, phaseGroupIds=None):
-        """Load the set list (the set selection window). Only the newest
-        load answers: asking again tells the one before it to stop (its
-        cancel event, which GetMatches checks between pages) and drops
-        whatever it still delivers -- its progress and its list -- on the
-        GUI thread, by the load's number. Until ADR-005 S3f-2 the previous
-        Worker's signals were blocked instead, which let an answer already
-        queued through. GUI thread."""
-        if self.provider is None:
-            return
-        if self._setLoadCancel is not None:
-            self._setLoadCancel.set()
-        self._setLoadGeneration += 1
-        generation = self._setLoadGeneration
-        cancel = self._setLoadCancel = threading.Event()
-
-        def progress(n, t):
-            # From the job's thread, page by page: delivered in order, ahead
-            # of the list (one queue, the GUI executor's).
-            _OnGuiThread(self._OnSetsProgress, generation, n, t)
-
-        self._Fetch("set list", self.provider.GetMatches,
-                    lambda data: self._OnSetsLoaded(generation, data),
-                    getFinished=showFinished, phaseGroupIds=phaseGroupIds,
-                    progress_callback=progress, cancel_event=cancel)
-
-    def CancelSetLoad(self):
-        """Stop the set list load still running, if any, and drop whatever
-        it still delivers (the set selection window, once a set is picked).
-        GUI thread."""
-        if self._setLoadCancel is not None:
-            self._setLoadCancel.set()
-            self._setLoadCancel = None
-        self._setLoadGeneration += 1
-
-    def _OnSetsProgress(self, generation, n, t):
-        if generation != self._setLoadGeneration:
-            return
-        logger.info(f"SetDataUpdated: {n}/{t}")
-        self.signals.sets_data_updated.emit({
-            "progress": n,
-            "totalPages": t,
-            "sets": []
-        })
-
-    def _OnSetsLoaded(self, generation, data):
-        if generation != self._setLoadGeneration:
-            logger.info("Sets loaded by a superseded load: dropped")
-            return
-        logger.info(f"Sets loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
-        self.signals.get_sets_finished.emit(data)
-        self.signals.sets_data_updated.emit({
-            "progress": 0,
-            "totalPages": 0,
-            "sets": data
-        })
-
-    def LoadStations(self):
-        if self.provider is None:
-            return
-        self._Fetch("stations", self.provider.GetStations,
-                    self._OnStationsLoaded)
-
-    def _OnStationsLoaded(self, data):
-        logger.info(f"Stations loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
-        self.signals.get_stations_finished.emit(data)
-
     def GetRecentSets(self, callback, id1, id2, videogame):
         # The provider answers through `callback` itself (the statistics'
         # relay, which hands it to the GUI thread).
@@ -585,7 +508,6 @@ class AutonaTournamentDataProvider(QObject):
         shells), through TournamentService like every other load."""
         if TournamentService.TournamentUrl():
             TournamentService.instance.Restore()
-            self.signals.twitch_username_updated.emit()
 
     def GetProvider(self):
         return self.provider

@@ -14,7 +14,7 @@ consume.
 """
 import pytest
 
-from src.core.PlayerService import PlayerService
+from src.core.PlayerService import PlayerService, SlotChange
 from src.core.StateManager import StateManager
 from tests.conftest import load_player
 
@@ -514,7 +514,8 @@ def _editSponsor(path, text):
     name = StateManager.Get(player.Key("name")) or ""
     player.PublishMergedName(text, name)
     player.PublishImages(text, name)
-    player.SetPlayerId(None, announce=True)
+    if player.SetPlayerId(None):
+        player.Announce(SlotChange(idChanged=True))
 
 
 def test_a_load_publishes_the_online_avatar(autonaApp):

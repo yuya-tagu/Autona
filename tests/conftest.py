@@ -472,7 +472,7 @@ def edit_tag(path, text):
     edit (PlayerService.Edit) makes the same writes and asks for the same
     statistics in one save cycle, so the recordings made through the card
     (tests/test_stats_flow.py, tests/test_board_operations.py) replay this."""
-    from src.core.PlayerService import PlayerService
+    from src.core.PlayerService import PlayerService, SlotChange
     from src.core.StateManager import StateManager
 
     player = PlayerService(path)
@@ -481,7 +481,8 @@ def edit_tag(path, text):
     sponsor = StateManager.Get(player.Key("team")) or ""
     player.PublishMergedName(sponsor, text)
     player.PublishImages(sponsor, text)
-    player.SetPlayerId(None, announce=True)
+    if player.SetPlayerId(None):
+        player.Announce(SlotChange(idChanged=True))
 
 
 def clear_players(board, no_mains=False):

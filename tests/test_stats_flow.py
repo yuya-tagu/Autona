@@ -29,7 +29,7 @@ is the one thing it adds (_ADDED_RESPONSES).
 The recording's steps on the Qt board and its player cards (they went in
 ADR-005 S4ac-3) call what those ran: the tag field's edit its PlayerService
 calls (conftest.edit_tag), a card's pick and clear its PlayerService's
-ApplyData / ClearSlot, the seed spinbox SetSeed(announce=True), the board's
+ApplyData / ClearSlot, the seed spinbox SetSeed + Announce, the board's
 SWAP / move / すべての入力値をリセット AutonaActions.SwapTeams / SwapPlayers and v1's
 :reset-all. Their fetches, writes and deltas are the recording's.
 
@@ -439,6 +439,13 @@ def _player(path):
     return PlayerService(path)
 
 
+def _seed_and_announce(path, value):
+    from src.core.PlayerService import SlotChange
+    player = _player(path)
+    player.SetSeed(value)
+    player.Announce(SlotChange(seedChanged=True))
+
+
 def _statsPageRefresh(http, recorder):
     # The Statistics page's 「統計情報を取得する」 (ADR-005 S4k): v1's
     # stats:refresh for board 1. Until S4k this step was the Qt STATS panel's
@@ -486,8 +493,7 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
         rec.step("card pick", lambda: load_player(
             board, 1, _entrant("GGG", 77, 6)))
         rec.step("card clear", lambda: _player(two).ClearSlot())
-        rec.step("card seed spinbox",
-                 lambda: _player(one).SetSeed(12, announce=True))
+        rec.step("card seed spinbox", lambda: _seed_and_announce(one, 12))
         rec.step("card pick again", lambda: load_player(
             board, 2, _entrant("HHH", 88, 1)))
         rec.step("answer all", lambda: startgg.answer(autonaApp))
