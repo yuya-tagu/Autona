@@ -326,11 +326,11 @@ def bootstrap_core():
     # restore. The set / clear runs
     # on the main thread through the GUI executor, read when one is
     # applied (both shells make it before calling this). A tournament newly
-    # loaded asks for the selected game again with its mods off (ADR-005
-    # S-final SF-5b-1; the Qt window did it until then): through the web
-    # operations' load_game, which reads the loader the shell registers
-    # (bootstrap_gui() / src/headless.Assemble, both after this) when it is
-    # called -- before that, none is registered and it logs.
+    # loaded turns the mods off (ADR-005 S-final SF-5b-1; the Qt window did
+    # it until then): through the web operations' turn_mods_off, which reads
+    # the loader's TurnModsOff the shell registers (bootstrap_gui() /
+    # src/headless.Assemble, both after this) when it is called -- before
+    # that, none is registered and it logs.
     from .Helpers import AutonaQtHelper
     from .core.TournamentMediaService import TournamentMediaService
     from .core.TournamentService import TournamentService
@@ -341,8 +341,7 @@ def bootstrap_core():
         TournamentService.instance = TournamentService(
             provider=AutonaTournamentDataProvider.instance,
             onMain=lambda fn: AutonaQtHelper.gui_executor(fn),
-            loadGame=lambda codename, modsActive: AutonaWebOperations
-            .load_game(codename, mods_active=modsActive))
+            turnModsOff=lambda: AutonaWebOperations.turn_mods_off())
 
     # ORDER CONSTRAINT: the 配信設定 operations (ADR-005 S4d) after what
     # they write through and read -- the state layer and AutonaActions (the
@@ -625,6 +624,8 @@ def bootstrap_gui():
     from . import AutonaWebOperations
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
+    AutonaWebOperations.turnModsOff = (
+        AutonaGameAssetManager.instance.TurnModsOff)
     AutonaWebOperations.openSetSelection = (
         AutonaShellOperations.instance.OpenSetSelection)
     AutonaWebOperations.renderThumbnail = (

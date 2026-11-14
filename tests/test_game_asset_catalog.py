@@ -22,12 +22,14 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.core.DictHelper import deep_clone, qvariantmap_copy
 from src.core.GameAssetCatalog import (
-    GameAssetCatalog, GameAssetSnapshot, _utf16_sorted)
+    MODS_OFF_RELOAD, MODS_OFF_WAITING, GameAssetCatalog, GameAssetSnapshot,
+    PlanModsOff, _utf16_sorted)
 from src.core.StateManager import StateManager as SM
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
@@ -660,3 +662,51 @@ def test_an_unreadable_start_gg_table_is_logged_not_raised(_isolated):
 def test_the_snapshot_type_is_frozen():
     assert dataclasses.is_dataclass(GameAssetSnapshot)
     assert GameAssetSnapshot.__dataclass_params__.frozen
+
+
+# ── what turning the mods off asks of a loader (ADR-005 S-final SF-5b-1) ─
+#
+# GameAssetCatalog.PlanModsOff, which both shells' loaders run under their
+# request lock (TurnModsOff; the loads it asks for are
+# tests/test_game_selected.py's). A request: (codename, modsActive, reload).
+
+def _request(codename, modsActive, reload):
+    return SimpleNamespace(codename=codename, modsActive=modsActive,
+                           reload=reload)
+
+
+@pytest.mark.parametrize("waiting, running, current, plan", [
+    # Nothing waits or runs: the selected game again, when its mods are on.
+    (None, None, ("x", True), (MODS_OFF_RELOAD, "x")),
+    (None, None, ("x", False), None),
+    (None, None, (None, False), None),          # no game (a clear)
+    # A waiting request for another game is not replaced: it loads without
+    # the mods it asked for, or as it is when it asked for none.
+    (("y", False, False), None, ("x", True), None),
+    (("y", True, True), None, ("x", True), (MODS_OFF_WAITING, False)),
+    # One for the same game: a reload without them when they are on (the
+    # tournament's game, no reload, would be skipped as the same game).
+    (("x", False, False), None, ("x", True), (MODS_OFF_WAITING, True)),
+    (("x", False, False), None, ("x", False), None),
+    (("x", True, True), None, ("x", False), (MODS_OFF_WAITING, False)),
+    # Another game running: nothing (the previous game is not loaded after
+    # it), unless it asked for its mods -- then it, again, without them.
+    (None, ("y", False, False), ("x", True), None),
+    (None, ("y", True, True), ("x", False), (MODS_OFF_RELOAD, "y")),
+    # The same game running, turning the mods on: again, without them,
+    # after it. A plain re-pick (no reload) is skipped: the catalog's mods.
+    (None, ("x", True, True), ("x", False), (MODS_OFF_RELOAD, "x")),
+    (None, ("x", False, False), ("x", True), (MODS_OFF_RELOAD, "x")),
+    # ...read the same once its SelectGame has swapped the snapshot in.
+    (None, ("y", False, False), ("y", False), None),
+    # A request waiting behind a running one: against the game that one
+    # ends on.
+    (("y", False, False), ("y", True, True), ("x", False),
+     (MODS_OFF_WAITING, True)),
+    (("x", False, False), ("y", False, False), ("x", True), None),
+])
+def test_turning_the_mods_off_asks_for_the_game_the_loader_ends_on(
+        waiting, running, current, plan):
+    snapshot = GameAssetSnapshot(codename=current[0], modsActive=current[1])
+    assert PlanModsOff(waiting and _request(*waiting),
+                       running and _request(*running), snapshot) == plan

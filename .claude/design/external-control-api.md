@@ -897,6 +897,7 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 ### 5.31 state の `game.selected`（2026-11-15 追加・ADR-005 S-final SF-5b-1）
 
 ゲームが選ばれているか（bool）。state の `game` の下に追加したキーで、Socket.IO（`program_state` / `program_state_update`）・`GET /api/v1/state`・`GET /api/v1/games/current`・`out/program_state.json` にそのまま出る（追加だけ。ほかの `game.*` の形・順は変わらない）。
+`out/` のテキスト出力にも、ほかの state の値と同じ規則で `out/game/selected.txt` が増える（中身は `True` / `False`。`out/game/mods_active.txt` と同じ書き方）。
 
 - `true`: ゲームのロード（`POST /game`・大会のゲーム・起動時の復元・ゲームのメニュー）。`game` の 1 回の書き込みの中で `has_colors` の後ろに入る
 - `false`: 起動直後（`game` は `{"selected": false}` だけ）と、**大会の解除**（§7.3 `DELETE /tournament`・`POST /tournament` の空の `url`・サイドバーの解除）
@@ -1481,9 +1482,18 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - 実行中フラグは `load_tournament` を GUI スレッドで走らせたタスクの終了時に解除する（2026-10-21 修正）。
     以前は `tournament_changed` を待っていたが、読込済みと同じ URL では早期 return でこれが出ず、
     最大 120 秒（ガードの TTL）409 を返し続けていた。
-  - **大会を新しく読み込むと MOD（modded content）がオフになる**（2026-11-15・ADR-005 S-final SF-5b-1）: 選んでいるゲームが
-    `game.mods_active: true` なら、読み込みの直後に同じゲームを MOD なしで読み直す（非同期。`POST /game` の
-    `modsActive: false` と同じロード）。読み込み済みと同じ URL（取得し直さない）・ゲーム未選択・MOD がオフのときは何もしない。
+  - **大会を新しく読み込むと MOD（modded content）がオフになる**（2026-11-15・ADR-005 S-final SF-5b-1）。新しい URL の読み込みと、
+    読み込み済みと同じ URL を `force: true` で取得し直したときの両方。読み込み済みと同じ URL（`force` なしで取得し直さない）・
+    読み込みの失敗では何もしない。読み込みの直後に、ゲームのローダーが最後に読むゲームを MOD なしにする（非同期・待たない。
+    何を頼むかはローダーの要求の lock の中で 1 回で決めるので、間にほかの要求は入らない）:
+    - **待っているゲームの要求がある**（`POST /game`・大会のゲーム・ゲームのメニュー。まだ始まっていないもの）: その要求を
+      MOD なしにする（`modsActive: false` で読む。同じゲームの読み直しとして飛ばされる要求なら、MOD がオンのときだけ読み直しにする）。
+      **頼まれたゲームはそのまま読まれ、その前後に別のゲームを読まない**（前のゲームを後から読み直さない）
+    - **待っている要求が無い**: 最後に読むゲーム（読み込み中のロードがあればそのゲーム、無ければ選んでいるゲーム）の
+      MOD がオンのときだけ、そのゲームを MOD なしで読み直す（`POST /game` の `modsActive: false` と同じロード）。
+      読み込み中のロードが MOD ありなら、それが終わった後に MOD なしでもう 1 回読む。ゲーム未選択・MOD がオフなら何もしない
+    - 大会のゲーム（start.gg の videogame）が MOD をオフにする読み直しの後から同じゲームで届いても、読み直しは残る
+      （同じゲームの待っている要求を後の要求が置き換えるとき、読み直しかどうかは前の要求からも引き継ぐ。MOD の有無は後の要求のもの）
     それまではデスクトップのサイドバーのチェックボックスだけがしていた（ヘッドレスではオフにならなかった）。今は両方の起動形態で同じ
 - `DELETE /api/v1/tournament`: body なし。大会を解除する（URL を空・`tournamentInfo` を空・選択中のゲームも外す（state の
   `game.selected` が `false` になる。§5.31）。ゲームは読み直さない。`POST` の空の `url` と同じ）。GUI executor で `POST` の読み込みと来た順に走り、`202`（`data: {"accepted": true, "operation":

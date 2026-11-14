@@ -223,6 +223,10 @@ def test_bootstrap_gui_steps_and_their_order():
         # the board operations on the GUI thread): the web layer's one.
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
+        # A tournament newly loaded turns the mods off through the same
+        # loader (ADR-005 S-final SF-5b-1).
+        "AutonaWebOperations.turnModsOff"
+        " = AutonaGameAssetManager.instance.TurnModsOff",
         "AutonaWebOperations.openSetSelection"
         " = AutonaShellOperations.instance.OpenSetSelection",
         "AutonaWebOperations.renderThumbnail"
@@ -527,6 +531,7 @@ report({
         is not None,
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename is not None,
+    "mods_off": AutonaWebOperations.turnModsOff is not None,
     "shell_operations": [AutonaWebOperations.openSetSelection is not None,
                          AutonaWebOperations.renderThumbnail is not None,
                          AutonaWebOperations.startImageRender is not None],
@@ -564,6 +569,7 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     # ADR-005 S3e-9).
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is False
+    assert result["mods_off"] is False
     assert result["shell_operations"] == [False, False, False]
     # The core bad-word filter got AutonaLocaleHelper's locale and country
     # tables (ADR-005 S3e-1), and the player DB its db_updated relay.
@@ -658,6 +664,7 @@ report({
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename
         == adapter.LoadGameByCodename,
+    "mods_off": AutonaWebOperations.turnModsOff == adapter.TurnModsOff,
     # The desktop's shell operations are AutonaShellOperations' (ADR-005 S4y:
     # the dock's until then). It holds no window since ADR-005 S4ac-3 (the
     # Qt set selection / station windows went with the Qt SCORE).
@@ -704,6 +711,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     # The web layer's own board host, as headless (ADR-005 S4ad).
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is True
+    assert result["mods_off"] is True
     assert result["shell_operations"] == [True, True, True]
     assert result["boards_ensured"] == [True, True, True]
     assert result["state_subscribers"] == STATE_SUBSCRIBERS

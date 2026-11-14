@@ -152,8 +152,9 @@ def _is_newer(remote_tag: str, local_ver: str) -> bool:
 # UpdateProcedure (launch external helper) + leftover cleanup
 # ---------------------------------------------------------------------------
 
-def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
-    mb = QMessageBox()
+def _generate_restart_messagebox(main_txt: str, parent=None) -> QMessageBox:
+    # Over `parent`, the main window (ADR-005 S-final SF-5b-1 review).
+    mb = QMessageBox(parent)
     mb.setWindowTitle(QApplication.translate("app", "Warning"))
     mb.setText(
         main_txt + "\n" +
@@ -163,12 +164,16 @@ def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
     return mb
 
 
-def UpdateProcedure():
+def UpdateProcedure(parent=None):
     """Launch the external update helper, then close the app.
 
     The helper waits for this process to exit, extracts update.zip over the
     install dir, and relaunches the new exe. Install is frozen-only; in dev the
     dialog already disables the install button before we get here.
+
+    `parent`: the main window, which the restart message box and the retry
+    dialog open over (AutonaUpdater.SetParent; ADR-005 S-final SF-5b-1
+    review). None: no parent, as before.
     """
     try:
         if not _is_frozen():
@@ -212,7 +217,8 @@ def UpdateProcedure():
                 "updater",
                 "Update downloaded. The app will close, install the update, "
                 "and restart automatically.")
-            + "\n"
+            + "\n",
+            parent,
         )
         mb.exec()
 
@@ -221,7 +227,7 @@ def UpdateProcedure():
     except Exception as e:
         logger.error(traceback.format_exc())
 
-        retry = QDialog()
+        retry = QDialog(parent)
         retry.setWindowTitle(QApplication.translate("app", "Warning"))
         vbox = QVBoxLayout()
         retry.setLayout(vbox)
@@ -236,7 +242,8 @@ def UpdateProcedure():
         btCancel = QPushButton(QApplication.translate("updater", "Cancel"))
         hbox.addWidget(btCancel)
 
-        btRetry.clicked.connect(lambda: [retry.close(), UpdateProcedure()])
+        btRetry.clicked.connect(
+            lambda: [retry.close(), UpdateProcedure(parent)])
         btCancel.clicked.connect(lambda: retry.close())
         retry.exec()
 
@@ -811,8 +818,9 @@ class _UpdateDialog(QDialog):
                 "updater", "Download complete. Preparing install..."))
         # Close this dialog before UpdateProcedure's modal message box.
         self.accept()
-        # Hand off to the original install flow.
-        UpdateProcedure()
+        # Hand off to the original install flow, its boxes over the window
+        # this dialog opened over (AutonaUpdater.SetParent).
+        UpdateProcedure(self.parentWidget())
 
     def _OnError(self, msg):
         self.progress.setVisible(False)
@@ -857,9 +865,9 @@ class AutonaUpdater(QObject):
         SF-5b-1): with no parent they could open behind a window that is
         always on top. Window._BuildUi hands itself over once it is built
         (this object is bootstrap_gui()'s, made before the window). The
-        restart message box of the install (_generate_restart_messagebox) is
-        not one of them. Nothing else changes: the check and the update are
-        the same."""
+        install's restart message box and retry dialog (UpdateProcedure)
+        open over it too, handed on by the new version's dialog. Nothing
+        else changes: the check and the update are the same."""
         self._parent = window
 
     def CheckForUpdates(self, silent: bool = False):

@@ -683,12 +683,7 @@ class Window(QMainWindow):
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._ShowModdedContent)
-        self.moddedContentCheck.stateChanged.connect(lambda x=None: [
-            AutonaGameAssetManager.instance.LoadGameAssets(
-                self._currentGameIndex,
-                mods_active=self.moddedContentCheck.isChecked(),
-                mods_reload_mode=True)
-        ])
+        self.moddedContentCheck.stateChanged.connect(self._ToggleMods)
         # A tournament newly loaded turns the mods off in core since ADR-005
         # S-final SF-5b-1 (TournamentService asks for the game again without
         # them, both shells); the checkbox follows that load on onLoad. It
@@ -1272,11 +1267,27 @@ class Window(QMainWindow):
             self._statusProgress.setVisible(False)
 
     def _pickGame(self, idx):
-        # User chose a game from the menu — mirror the former combo 'activated'
-        # behavior: load the game's assets, then clear the modded toggle.
+        # User chose a game from the menu: one load of it, without its mods
+        # -- as a reload when the checkbox has them on, or the same game
+        # again would be skipped with them left on. The checkbox is
+        # unchecked with its signals blocked (ADR-005 S-final SF-5b-1
+        # review): unblocked, its stateChanged asked for a second load
+        # (_ToggleMods). onLoad draws it from the state again.
         self._currentGameIndex = idx
-        AutonaGameAssetManager.instance.LoadGameAssets(idx)
-        self.moddedContentCheck.setChecked(False)
+        modsOn = self.moddedContentCheck.isChecked()
+        with QSignalBlocker(self.moddedContentCheck):
+            self.moddedContentCheck.setChecked(False)
+        AutonaGameAssetManager.instance.LoadGameAssets(
+            idx, mods_active=False, mods_reload_mode=modsOn)
+
+    def _ToggleMods(self, _state=None):
+        # The mods checkbox clicked (stateChanged; every drawing of it is
+        # done with its signals blocked): the game again, with or without
+        # them.
+        AutonaGameAssetManager.instance.LoadGameAssets(
+            self._currentGameIndex,
+            mods_active=self.moddedContentCheck.isChecked(),
+            mods_reload_mode=True)
 
     def _ShowModdedContent(self):
         # The mods checkbox shows the loaded game (onLoad): shown when it
