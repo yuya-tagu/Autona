@@ -19,6 +19,7 @@ from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO, emit
 import orjson
 from loguru import logger
+from werkzeug.serving import WSGIRequestHandler
 
 from .core.StateManager import StateManager
 from .core.StatusService import StatusService
@@ -921,6 +922,61 @@ class PreviewGate:
     @staticmethod
     def Marked(environ):
         return environ.get(PreviewGate.ENVIRON_KEY) is True
+
+
+class WebSocketHandover:
+    """Both listeners' WSGI app around the server's own: when a Socket.IO
+    WebSocket has taken werkzeug's connection over and ended, werkzeug is
+    told the connection is gone instead of answering HTTP on it.
+
+    In threading mode python-engineio upgrades the WebSocket transport with
+    simple-websocket on werkzeug's own socket (environ["werkzeug.socket"]):
+    the 101 and every frame go out on that socket directly, never through
+    start_response. When the WebSocket ends, the app returns [] without
+    having called start_response (engineio tells only gunicorn, with
+    StopIteration). werkzeug then asserted "write() before start_response"
+    (logged as an error at every disconnect) and wrote a 500 response onto
+    the same TCP connection, after the WebSocket's close frame: a browser
+    still reading it fails the socket with "Invalid frame header". Raising
+    one of werkzeug's connection-dropped errors makes it write nothing --
+    what Flask-Sock does on werkzeug -- and WebServerRequestHandler then
+    closes the connection.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        started = False
+
+        def recording_start_response(status, headers, exc_info=None):
+            nonlocal started
+            started = True
+            return start_response(status, headers, exc_info)
+
+        result = self.app(environ, recording_start_response)
+        if (not started and "werkzeug.socket" in environ
+                and environ.get("HTTP_UPGRADE", "").lower() == "websocket"):
+            close = getattr(result, "close", None)
+            if close is not None:
+                close()
+            raise ConnectionError("the WebSocket ended on this connection")
+        return result
+
+
+class WebServerRequestHandler(WSGIRequestHandler):
+    """werkzeug's request handler for both listeners, closing a connection
+    that was dropped (WebSocketHandover's end of a WebSocket among them).
+
+    werkzeug leaves close_connection as the request set it, and an upgrade
+    request is HTTP/1.1 without "Connection: close": the handler would wait
+    for another request on a socket the WebSocket has finished with (its own
+    close is deferred while werkzeug's reader holds it), and the client
+    would get no FIN until it gave up waiting for one.
+    """
+
+    def connection_dropped(self, error, environ=None):
+        self.close_connection = True
 
 
 class WebServer:
@@ -2061,14 +2117,17 @@ class WebServer:
         # run_simple() -> make_server(threaded=True).serve_forever(). The
         # Socket.IO middleware is already wrapped around app.wsgi_app, and
         # simple-websocket upgrades the WebSocket transport on this server,
-        # so the wire behaviour is the same. Building the server ourselves is
-        # what makes it stoppable: serve_forever() returns on shutdown().
+        # so the wire behaviour is the same -- but for the end of a
+        # WebSocket, which socketio.run() let werkzeug answer with a 500 on
+        # the WebSocket's own connection (_MakeListener). Building the server
+        # ourselves is what makes it stoppable: serve_forever() returns on
+        # shutdown().
         from werkzeug.serving import make_server
         preview = None
         try:
             try:
-                server = make_server(
-                    self.host_name, self.port, self.app, threaded=True)
+                server = WebServer._MakeListener(
+                    make_server, self.host_name, self.port, self.app)
             except SystemExit as exit_:
                 # werkzeug reports a bind failure by printing the OSError to
                 # stderr and calling sys.exit(1) -- from this thread that
@@ -2120,6 +2179,16 @@ class WebServer:
                 logger.opt(exception=True).error(
                     "web server start-failure callback raised")
 
+    @staticmethod
+    def _MakeListener(make_server, host, port, app):
+        """werkzeug's threaded server for the WSGI app ``app`` on
+        ``host``:``port`` -- this server's and the preview listener's alike,
+        so the two serve the WebSocket transport the same way: through
+        WebSocketHandover and WebServerRequestHandler, which end a WebSocket
+        without werkzeug writing a 500 onto its connection."""
+        return make_server(host, port, WebSocketHandover(app), threaded=True,
+                           request_handler=WebServerRequestHandler)
+
     def _MakePreviewServer(self, make_server):
         """The preview listener's server (ADR-005 S-final SF-8a), or None.
 
@@ -2129,8 +2198,8 @@ class WebServer:
         server's own origin -- a warning, not a start failure.
         """
         try:
-            return make_server(
-                self.host_name, 0, PreviewGate(self.app), threaded=True)
+            return WebServer._MakeListener(
+                make_server, self.host_name, 0, PreviewGate(self.app))
         except (Exception, SystemExit) as error:
             # werkzeug's bind failure is a SystemExit (see _Serve).
             reason = error.__context__ or error
