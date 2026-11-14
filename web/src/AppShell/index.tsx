@@ -2,12 +2,14 @@ import React from "react";
 import {
     Alert,
     Box,
+    Button,
     Divider,
     Drawer,
     IconButton,
     Snackbar,
     useMediaQuery,
 } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 import {ThemeProvider, useTheme} from "@mui/material/styles";
 import i18n from "../i18n/config";
 import {DARK_TOKENS, themeBeside} from "../themes";
@@ -15,7 +17,7 @@ import {PanelShellContext} from "../PanelShell/context";
 import {PanelContent, usePanelShellSetup} from "../PanelShell";
 import {navigateToPanel} from "../PanelShell/hostApi";
 import {useShellAccess} from "../PanelShell/useShellAccess";
-import {Header} from "./Header";
+import {Header, TournamentDialog, newOwnLoads, useTournamentInfo} from "./Header";
 import {Nav} from "./Nav";
 import {Footer, StatusLine} from "./Footer";
 import {iconUrl} from "./navTable";
@@ -41,16 +43,19 @@ interface Notice {
     message: string;
     severity: "error" | "info";
     key: number;
+    // A button of the notice (L2: the tournament dialog).
+    action?: {label: string; run: () => void};
 }
 
 function Sidebar({panel, go, report, tell, shellAccess, onCollapse,
-                  collapseRef, withStatus}: {
+                  onOpenTournament, collapseRef, withStatus}: {
     panel: string;
     go: (panel: string) => void;
     report: ReturnType<typeof useReport>;
     tell: Tell;
     shellAccess: ReturnType<typeof useShellAccess>;
     onCollapse: () => void;
+    onOpenTournament: () => void;
     collapseRef: React.Ref<HTMLButtonElement>;
     withStatus: boolean;
 }) {
@@ -62,6 +67,7 @@ function Sidebar({panel, go, report, tell, shellAccess, onCollapse,
                   bgcolor: DARK_TOKENS.bgSecondary,
                   borderRight: "1px solid", borderColor: "divider"}}>
             <Header go={go} report={report} onCollapse={onCollapse}
+                    onOpenTournament={onOpenTournament}
                     collapseRef={collapseRef}/>
             <Divider/>
             <Nav panel={panel} go={go}/>
@@ -107,6 +113,39 @@ export default function AppShell() {
         navigateToPanel(panel);
     }, []);
 
+    // The tournament dialog is the AppShell's, so the notice below can open
+    // it whether or not the sidebar is on screen.
+    const tournament = useTournamentInfo();
+    const [tournamentDialog, setTournamentDialog] = React.useState(false);
+    const openTournament = React.useCallback(
+        () => setTournamentDialog(true), []);
+    const closeTournament = React.useCallback(
+        () => setTournamentDialog(false), []);
+    const own = React.useRef(newOwnLoads()).current;
+
+    // A tournament load that failed (L2) is told here -- at launch (the
+    // restore), from the Event page, from anywhere -- except a load the open
+    // dialog sent (or has out, its revision not known yet), which it tells
+    // itself in its own words. Once per revision.
+    const {status: loadStatus, revision: loadRevision} = tournament.load;
+    const told = React.useRef<number | null>(null);
+    React.useEffect(() => {
+        if (loadStatus !== "error" || told.current === loadRevision) {
+            return;
+        }
+        told.current = loadRevision;
+        if (own.open && (own.pending > 0 || own.sent.has(loadRevision))) {
+            return;
+        }
+        setNotice({
+            message: i18n.t("app_tournament_load_failed"),
+            severity: "error",
+            key: Date.now(),
+            action: {label: i18n.t("app_set_tournament"),
+                     run: openTournament},
+        });
+    }, [loadStatus, loadRevision, own, openTournament]);
+
     // Hidden or back, the focus goes to the button that undoes it. (The
     // drawer gives it back to its opener when it closes.)
     const collapseButton = React.useRef<HTMLButtonElement>(null);
@@ -126,6 +165,7 @@ export default function AppShell() {
     const sidebar = (
         <Sidebar panel={value.panel} go={go} report={report} tell={tell}
                  shellAccess={shellAccess}
+                 onOpenTournament={openTournament}
                  collapseRef={collapseButton}
                  withStatus={beside}
                  onCollapse={() => {
@@ -210,6 +250,11 @@ export default function AppShell() {
                     <StatusLine place="corner"/>
                 </>
             )}
+            {tournamentDialog && (
+                <TournamentDialog url={tournament.url} load={tournament.load}
+                                  onClose={closeTournament} report={report}
+                                  own={own}/>
+            )}
             <Snackbar
                 key={notice?.key}
                 open={notice !== null}
@@ -223,7 +268,23 @@ export default function AppShell() {
             >
                 {notice ? (
                     <Alert severity={notice.severity} variant="filled"
-                           onClose={() => setNotice(null)}>
+                           onClose={() => setNotice(null)}
+                           action={notice.action ? (
+                               <>
+                                   <Button color="inherit" size="small"
+                                           onClick={() => {
+                                               notice.action?.run();
+                                               setNotice(null);
+                                           }}>
+                                       {notice.action.label}
+                                   </Button>
+                                   <IconButton color="inherit" size="small"
+                                               aria-label="Close"
+                                               onClick={() => setNotice(null)}>
+                                       <CloseIcon fontSize="small"/>
+                                   </IconButton>
+                               </>
+                           ) : undefined}>
                         {notice.message}
                     </Alert>
                 ) : undefined}

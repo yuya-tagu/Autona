@@ -61,6 +61,10 @@ interface HeaderState {
         codename?: unknown;
         mods_active?: unknown;
         has_modded_content?: unknown;
+        // Whether a game is selected (SF-5b-1, external-control-api 5.31):
+        // false after the tournament is unset although `codename` stays.
+        // Missing on an older server.
+        selected?: unknown;
     };
 }
 
@@ -75,6 +79,29 @@ function readLoad(raw: Partial<TournamentLoad> | undefined): TournamentLoad {
         error: typeof load.error === "string" ? load.error : "",
         revision: typeof load.revision === "number" ? load.revision : 0,
     };
+}
+
+// The tournament as the header and the AppShell read it.
+export function useTournamentInfo(): {name: string; url: string;
+                                      load: TournamentLoad} {
+    const info = useSelector((root: ReduxState) =>
+        (root.autonaState.autonaState as unknown as HeaderState)
+            .tournamentInfo) ?? {};
+    return {name: text(info.tournamentName).trim(), url: text(info.url),
+            load: readLoad(info.load)};
+}
+
+// What the tournament dialog has sent, for the AppShell's notice of a load
+// that failed (L2): the notice leaves a failure the open dialog tells itself
+// (a set it sent, or one it has out and has no revision for yet).
+export interface OwnLoads {
+    open: boolean;
+    pending: number;
+    sent: Set<number>;
+}
+
+export function newOwnLoads(): OwnLoads {
+    return {open: false, pending: 0, sent: new Set()};
 }
 
 // What PUT /battle-format takes, and the Qt segment's labels (not
@@ -152,11 +179,12 @@ function useNoticedList<T>(path: string, event: string, extra: unknown):
 // It stays open while the set resolves and loads, saying how it goes (the
 // Event page's words), and closes once it has loaded; a refusal or a failed
 // load is said in it.
-function TournamentDialog({url, load, onClose, report}: {
+export function TournamentDialog({url, load, onClose, report, own}: {
     url: string;
     load: TournamentLoad;
     onClose: () => void;
     report: Report;
+    own: OwnLoads;
 }) {
     const [shown, type] = useUrlField(url);
     const [requesting, setRequesting] = React.useState(false);
@@ -175,10 +203,12 @@ function TournamentDialog({url, load, onClose, report}: {
 
     React.useEffect(() => {
         mounted.current = true;
+        own.open = true;
         return () => {
             mounted.current = false;
+            own.open = false;
         };
-    }, []);
+    }, [own]);
 
     React.useEffect(() => {
         if (sent === null || !awaiting) {
@@ -203,7 +233,11 @@ function TournamentDialog({url, load, onClose, report}: {
         }
     }, [loaded, onClose]);
 
-    const busy = requesting || awaiting || BUSY_STATUSES.has(load.status);
+    // Busy for the load this dialog sent only (L4): another's load running
+    // does not hold OK; the server replaces the older one.
+    const busy = requesting || awaiting
+        || (sent !== null && load.revision === sent
+            && BUSY_STATUSES.has(load.status));
     const typed = shown.trim();
     const reached = sent !== null && load.revision >= sent;
     const told = retyped ? ""
@@ -218,14 +252,19 @@ function TournamentDialog({url, load, onClose, report}: {
         setRetyped(false);
         setLate(false);
         setRequesting(true);
+        own.pending += 1;
         apiPost("/api/v1/tournament", {url: typed, force: true},
                 WRITE_OPTIONS).then((answer) => {
+            own.pending -= 1;
+            const revision = (JSON.parse(answer) as
+                Envelope<{loadRevision?: unknown}>).data?.loadRevision;
+            if (typeof revision === "number") {
+                own.sent.add(revision);
+            }
             if (!mounted.current) {
                 return;
             }
             setRequesting(false);
-            const revision = (JSON.parse(answer) as
-                Envelope<{loadRevision?: unknown}>).data?.loadRevision;
             if (typeof revision === "number") {
                 setSent(revision);
                 setAwaiting(true);
@@ -233,6 +272,7 @@ function TournamentDialog({url, load, onClose, report}: {
                 onClose();
             }
         }, (error: unknown) => {
+            own.pending -= 1;
             if (!mounted.current) {
                 return;
             }
@@ -297,18 +337,16 @@ function TournamentDialog({url, load, onClose, report}: {
     );
 }
 
-function TournamentControl({report}: {report: Report}) {
-    const info = useSelector((root: ReduxState) =>
-        (root.autonaState.autonaState as unknown as HeaderState)
-            .tournamentInfo) ?? {};
-    const name = text(info.tournamentName).trim();
-    const url = text(info.url);
-    const load = readLoad(info.load);
+// The dialog itself is the AppShell's (so a notice can open it with the
+// header hidden): `onOpen` asks for it.
+function TournamentControl({report, onOpen}: {
+    report: Report;
+    onOpen: () => void;
+}) {
+    const {name} = useTournamentInfo();
     const [anchor, setAnchor] = React.useState<HTMLButtonElement | null>(null);
     const [menu, setMenu] = React.useState(false);
-    const [dialog, setDialog] = React.useState(false);
     const [confirming, setConfirming] = React.useState(false);
-    const closeDialog = React.useCallback(() => setDialog(false), []);
 
     return (
         <>
@@ -326,7 +364,7 @@ function TournamentControl({report}: {report: Report}) {
                   open={menu} onClose={() => setMenu(false)}>
                 <MenuItem onClick={() => {
                     setMenu(false);
-                    setDialog(true);
+                    onOpen();
                 }}>
                     {i18n.t("app_set_tournament")}
                 </MenuItem>
@@ -337,10 +375,6 @@ function TournamentControl({report}: {report: Report}) {
                     {i18n.t("app_unset_tournament")}
                 </MenuItem>
             </Menu>
-            {dialog && (
-                <TournamentDialog url={url} load={load} onClose={closeDialog}
-                                  report={report}/>
-            )}
             <ConfirmDialog
                 open={confirming}
                 title={i18n.t("app_confirm")}
@@ -366,9 +400,10 @@ const gameRefusal: Refusal = (status) => (
 
 // The state's game, as the Event page reads it: a codename the list does
 // not have (a rescan dropped it) is none. After the tournament is unset the
-// desktop's selection is forgotten but the state's `game` stays (core's
-// GameAssetCatalog.ForgetSelection), so the game is still named here, as on
-// the Event page (the Qt button says "Select game title" then). Before the
+// selection is forgotten but the state's `game.codename` stays (core's
+// GameAssetCatalog.ForgetSelection), and `game.selected` is false: then it
+// is none here, the call to select outlined, as the Qt button (M3). A state
+// without `selected` (an older server) is judged by the codename. Before the
 // list is read nothing is called missing: the state's codename, or the
 // loading word; the list not read, the codename stays.
 function GameControl({go, report}: {
@@ -377,9 +412,11 @@ function GameControl({go, report}: {
 }) {
     const game = useSelector((root: ReduxState) =>
         (root.autonaState.autonaState as unknown as HeaderState).game) ?? {};
-    const codename = text(game.codename);
+    const stateCodename = text(game.codename);
+    const none = game.selected === false;
+    const codename = none ? "" : stateCodename;
     const [games, , failed] = useNoticedList<Record<string, GameEntry>>(
-        "/api/v1/games", "games_changed", codename);
+        "/api/v1/games", "games_changed", stateCodename);
     const [anchor, setAnchor] = React.useState<HTMLButtonElement | null>(null);
     const [menu, setMenu] = React.useState(false);
     const list = games ?? {};
@@ -388,7 +425,7 @@ function GameControl({go, report}: {
     // Missing: the list (read) does not have it, or there is none at all
     // and the read failed.
     const unread = games === null;
-    const missing = unread ? failed && !codename : !known;
+    const missing = none || (unread ? failed && !codename : !known);
     const shown = known ? (list[codename]?.name || codename)
         : missing ? i18n.t("app_select_game")
             : codename || i18n.t("event_loading");
@@ -629,10 +666,12 @@ function FormatSegment({report}: {report: Report}) {
 
 // ── the band ────────────────────────────────────────────────────────────
 
-export function Header({go, report, onCollapse, collapseRef}: {
+export function Header({go, report, onCollapse, onOpenTournament,
+                       collapseRef}: {
     go: (panel: string) => void;
     report: Report;
     onCollapse: () => void;
+    onOpenTournament: () => void;
     // The collapse button, for the focus once the sidebar is back.
     collapseRef?: React.Ref<HTMLButtonElement>;
 }) {
@@ -648,7 +687,7 @@ export function Header({go, report, onCollapse, collapseRef}: {
                          sx={{width: 16, height: 16}}/>
                 </IconButton>
             </Box>
-            <TournamentControl report={report}/>
+            <TournamentControl report={report} onOpen={onOpenTournament}/>
             <GameControl go={go} report={report}/>
             <FormatSegment report={report}/>
             <ModsSwitch report={report}/>

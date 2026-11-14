@@ -1096,3 +1096,130 @@ test("the outside addresses are src/AutonaExternalLinks.py's", () => {
     expect(BUSINESS_INQUIRY_EMAIL).toBe(value("BUSINESS_INQUIRY_EMAIL"));
     expect(BUSINESS_INQUIRY_URL).toBe(`mailto:${value("BUSINESS_INQUIRY_EMAIL")}`);
 });
+
+// ── SF-5b-2: M3 (game.selected), L2 (a failed load told), L4 (busy for its own) ──
+
+test.each([
+    ["selected", {codename: "sf6", selected: true}, "Street Fighter 6", "false"],
+    ["not selected (the tournament was unset)",
+     {codename: "sf6", selected: false}, null, "true"],
+    ["no `selected` (an older server)", {codename: "sf6"}, "Street Fighter 6", "false"],
+])("the game button, %s", async (_name, game, name, attention) => {
+    setState({}, game);
+    await renderAt("/web/app/event?lng=en");
+
+    const button = screen.getByTestId("app-game");
+    expect(button).toHaveTextContent(name ?? i18n.t("app_select_game"));
+    expect(button).toHaveAttribute("data-attention", attention);
+    if (name === null) {
+        await openMenu("app-game");
+        expect(screen.queryByTestId("CheckIcon")).not.toBeInTheDocument();
+    }
+});
+
+function failedAt(revision) {
+    setState({load: {status: "error", error: "load_failed", revision}},
+             {codename: "sf6"});
+}
+
+test("a load that failed somewhere else is told, with a way to the dialog", async () => {
+    await renderAt("/web/app/event?lng=en");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    failedAt(7);
+    await settle();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(i18n.t("app_tournament_load_failed"));
+    fireEvent.click(within(alert).getByRole("button",
+                                           {name: i18n.t("app_set_tournament")}));
+    await settle();
+    expect(screen.getByRole("dialog", {name: i18n.t("app_set_tournament_url")}))
+        .toBeInTheDocument();
+});
+
+test("a load that failed before the page opened is told once per revision", async () => {
+    failedAt(7);
+    await renderAt("/web/app/event?lng=en");
+    expect(screen.getByRole("alert"))
+        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+
+    // The same revision again (another state push): not told again.
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button",
+                                                               {name: "Close"}));
+    await settle();
+    failedAt(7);
+    await settle();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+async function sendFromDialog() {
+    const dialog = await openTournamentDialog();
+    fireEvent.change(within(dialog).getByRole("textbox"),
+                     {target: {value: "https://www.start.gg/tournament/x/event/y"}});
+    fireEvent.click(okButton(dialog));
+    await settle();
+    return dialog;
+}
+
+test("a failure of the open dialog's own load is not told twice", async () => {
+    await renderAt("/web/app/event?lng=en");
+    const dialog = await sendFromDialog();
+
+    failedAt(4);
+    await settle();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("status"))
+        .toHaveTextContent(i18n.t("event_status_load_failed"));
+});
+
+test("another's failure is told even while the dialog is open", async () => {
+    await renderAt("/web/app/event?lng=en");
+    await sendFromDialog();
+
+    failedAt(9);
+    await settle();
+
+    // The dialog is modal: the page behind it is aria-hidden.
+    expect(screen.getByRole("alert", {hidden: true}))
+        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+});
+
+test("the dialog's load that fails after the dialog was closed is told by the notice", async () => {
+    await renderAt("/web/app/event?lng=en");
+    const dialog = await sendFromDialog();
+    fireEvent.click(within(dialog).getByRole("button", {name: i18n.t("stream_cancel")}));
+    await settle();
+
+    failedAt(4);
+    await settle();
+
+    expect(screen.getByRole("alert"))
+        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+});
+
+test("OK waits for the dialog's own load only; another's load running does not hold it", async () => {
+    await renderAt("/web/app/event?lng=en");
+    const dialog = await openTournamentDialog();
+    fireEvent.change(within(dialog).getByRole("textbox"),
+                     {target: {value: "https://www.start.gg/tournament/x/event/y"}});
+
+    // Another's load running when the dialog opened (or a restore).
+    setState({load: {status: "loading", error: "", revision: 2}});
+    await settle();
+    expect(okButton(dialog)).toBeEnabled();
+
+    fireEvent.click(okButton(dialog));
+    await settle();
+    expect(calls("POST", "/api/v1/tournament")).toHaveLength(1);
+    expect(okButton(dialog)).toBeDisabled();
+
+    // Its own (revision 4) is running: held; another's after it: not.
+    setState({load: {status: "loading", error: "", revision: 4}});
+    await settle();
+    expect(okButton(dialog)).toBeDisabled();
+    setState({load: {status: "loading", error: "", revision: 11}});
+    await settle();
+    expect(okButton(dialog)).toBeEnabled();
+});
