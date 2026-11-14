@@ -287,6 +287,8 @@ assert set_follow.boardHost is None,     "import registered the set follow's boa
 assert (set_follow._polls, set_follow._stations, set_follow._lookups,
         set_follow._loads) == ({}, {}, {}, {}),     "import started following a set"
 assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
+assert web_operations.turnModsOff is None, \
+    "import registered the game loader's mods-off for the web operations"
 assert web_operations.openSetSelection is None,     "import registered a shell operation (the set selection window)"
 assert web_operations.renderThumbnail is None,     "import registered a shell operation (the thumbnail)"
 assert web_operations.startImageRender is None,     "import registered a shell operation (the image renderer)"
@@ -452,7 +454,7 @@ game_catalog.instance = game_catalog()
 assert not os.path.exists("./user_data/games"), \
     "GameAssetCatalog() created ./user_data/games"
 game_catalog.instance.ResetGameState()
-assert core_state.Get("game") == {}, \
+assert core_state.Get("game") == {"selected": False}, \
     "GameAssetCatalog.ResetGameState() did not publish an empty game"
 game_assets.instance = game_assets(game_catalog.instance)
 assert not os.path.exists("./user_data/games"), \

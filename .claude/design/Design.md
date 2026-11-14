@@ -353,6 +353,7 @@ board1/2 と同じくシードは書かず、一度もスワップしていな�
 
 ```
 game
+├── selected            （ゲームが選ばれているか。ロードで true、起動時と大会の解除で false。S-final SF-5b-1）
 ├── name, smashgg_id, codename, logo
 ├── defaults
 │   ├── players_per_team

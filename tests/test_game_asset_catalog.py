@@ -22,12 +22,14 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.core.DictHelper import deep_clone, qvariantmap_copy
 from src.core.GameAssetCatalog import (
-    GameAssetCatalog, GameAssetSnapshot, _utf16_sorted)
+    MODS_OFF_RELOAD, MODS_OFF_WAITING, GameAssetCatalog, GameAssetSnapshot,
+    PlanModsOff, _utf16_sorted)
 from src.core.StateManager import StateManager as SM
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
@@ -172,7 +174,11 @@ def test_a_load_matches_the_recording(catalog, label):
         # QVariantMap order, having been read back out of the Qt models.
         assert json.dumps(actual) == json.dumps(payloads[name]), name
 
-    state = SM.Get(PREFIX)
+    state = dict(SM.Get(PREFIX))
+    # The one key the recording has not: the load selects the game
+    # (ADR-005 S-final SF-5b-1), in the same write, after has_colors.
+    assert list(state).index("selected") == list(state).index("has_colors") + 1
+    assert state.pop("selected") is True
     assert state == golden["state"]
     assert list(state) == list(golden["state"])
     assert sorted(os.listdir("./out/css")) == golden["css"]
@@ -287,9 +293,84 @@ def test_reset_publishes_an_empty_game(catalog):
     loaded = catalog.SelectGame("tgame")
     catalog.ResetGameState()
 
-    assert SM.Get(PREFIX) == {}
+    # Empty but for the selection flag (ADR-005 S-final SF-5b-1).
+    assert SM.Get(PREFIX) == {"selected": False}
     assert catalog.Current().codename is None
     assert catalog.Current().generation > loaded.generation
+
+
+# ── game.selected (ADR-005 S-final SF-5b-1) ─────────────────────────────
+
+def test_a_load_selects_and_forgetting_unselects_the_rest_staying(catalog):
+    """The state says whether a game is picked: a load says True, a cleared
+    tournament (ForgetSelection) False -- while the rest of `game` (the last
+    game's codename, name, mods) stays, which is why a reader cannot tell
+    from `codename`."""
+    assert SM.Get(f"{PREFIX}.selected") is False             # the launch's
+    catalog.SelectGame("tgame", modsActive=True)
+    assert SM.Get(f"{PREFIX}.selected") is True
+    loaded = deep_clone(SM.Get(PREFIX))
+
+    catalog.ForgetSelection()
+
+    assert SM.Get(f"{PREFIX}.selected") is False
+    assert {**SM.Get(PREFIX), "selected": True} == loaded
+    # Picked again: a load, selected again.
+    catalog.SelectGame("tgame")
+    assert SM.Get(f"{PREFIX}.selected") is True
+
+
+def test_forgetting_writes_the_flag_outside_the_writer_lock_once(catalog,
+                                                                 monkeypatch):
+    """agent-pitfalls #16: with no save block open the write publishes at
+    once, and its observers must not run under the catalog's writer lock.
+    Forgetting again (nothing selected) writes nothing."""
+    catalog.SelectGame("tgame")
+    writes = []
+    realSet = SM.Set
+
+    def spy(key, value):
+        if key.startswith(PREFIX):
+            writes.append((key, value, catalog._lock.locked()))
+        return realSet(key, value)
+
+    monkeypatch.setattr(SM, "Set", staticmethod(spy))
+    catalog.ForgetSelection()
+    catalog.ForgetSelection()
+
+    assert writes == [(f"{PREFIX}.selected", False, False)]
+
+
+def test_forgetting_leaves_the_flag_to_a_load_that_swapped_in_first(
+        catalog, monkeypatch):
+    """A load that took the writer lock right after the forgetting's has
+    swapped its snapshot in before it publishes (which waits for
+    StateManager.lock): the forgetting, finding a game selected again,
+    leaves the flag to that load instead of saying "not selected" over
+    it."""
+    catalog.SelectGame("tgame")
+    loaded = catalog.Current()
+    realLock = catalog._lock
+
+    class _SwapOnRelease:
+        """The writer lock, as a SelectGame that was waiting on it sees it:
+        the moment the forgetting releases it, the load swaps in."""
+
+        def __enter__(self):
+            realLock.acquire()
+
+        def __exit__(self, *exc):
+            realLock.release()
+            catalog._current = loaded
+
+        def locked(self):
+            return realLock.locked()
+
+    monkeypatch.setattr(catalog, "_lock", _SwapOnRelease())
+    catalog.ForgetSelection()
+
+    assert catalog.Current() is loaded
+    assert SM.Get(f"{PREFIX}.selected") is True
 
 
 # ── a switch to another game empties the Top 8 characters (S3e-8) ───────
@@ -337,7 +418,7 @@ def test_the_first_load_of_a_session_keeps_the_top8_characters(catalog):
     pick restores a game, it does not switch away from one, and the Top 8
     saved with its characters keeps them."""
     _top8WithCharacters()
-    assert SM.Get(PREFIX) == {}
+    assert SM.Get(PREFIX) == {"selected": False}
     catalog.SelectGame("tgame")
     assert _top8Characters() == TOP8_CHARACTERS
 
@@ -581,3 +662,51 @@ def test_an_unreadable_start_gg_table_is_logged_not_raised(_isolated):
 def test_the_snapshot_type_is_frozen():
     assert dataclasses.is_dataclass(GameAssetSnapshot)
     assert GameAssetSnapshot.__dataclass_params__.frozen
+
+
+# ── what turning the mods off asks of a loader (ADR-005 S-final SF-5b-1) ─
+#
+# GameAssetCatalog.PlanModsOff, which both shells' loaders run under their
+# request lock (TurnModsOff; the loads it asks for are
+# tests/test_game_selected.py's). A request: (codename, modsActive, reload).
+
+def _request(codename, modsActive, reload):
+    return SimpleNamespace(codename=codename, modsActive=modsActive,
+                           reload=reload)
+
+
+@pytest.mark.parametrize("waiting, running, current, plan", [
+    # Nothing waits or runs: the selected game again, when its mods are on.
+    (None, None, ("x", True), (MODS_OFF_RELOAD, "x")),
+    (None, None, ("x", False), None),
+    (None, None, (None, False), None),          # no game (a clear)
+    # A waiting request for another game is not replaced: it loads without
+    # the mods it asked for, or as it is when it asked for none.
+    (("y", False, False), None, ("x", True), None),
+    (("y", True, True), None, ("x", True), (MODS_OFF_WAITING, False)),
+    # One for the same game: a reload without them when they are on (the
+    # tournament's game, no reload, would be skipped as the same game).
+    (("x", False, False), None, ("x", True), (MODS_OFF_WAITING, True)),
+    (("x", False, False), None, ("x", False), None),
+    (("x", True, True), None, ("x", False), (MODS_OFF_WAITING, False)),
+    # Another game running: nothing (the previous game is not loaded after
+    # it), unless it asked for its mods -- then it, again, without them.
+    (None, ("y", False, False), ("x", True), None),
+    (None, ("y", True, True), ("x", False), (MODS_OFF_RELOAD, "y")),
+    # The same game running, turning the mods on: again, without them,
+    # after it. A plain re-pick (no reload) is skipped: the catalog's mods.
+    (None, ("x", True, True), ("x", False), (MODS_OFF_RELOAD, "x")),
+    (None, ("x", False, False), ("x", True), (MODS_OFF_RELOAD, "x")),
+    # ...read the same once its SelectGame has swapped the snapshot in.
+    (None, ("y", False, False), ("y", False), None),
+    # A request waiting behind a running one: against the game that one
+    # ends on.
+    (("y", False, False), ("y", True, True), ("x", False),
+     (MODS_OFF_WAITING, True)),
+    (("x", False, False), ("y", False, False), ("x", True), None),
+])
+def test_turning_the_mods_off_asks_for_the_game_the_loader_ends_on(
+        waiting, running, current, plan):
+    snapshot = GameAssetSnapshot(codename=current[0], modsActive=current[1])
+    assert PlanModsOff(waiting and _request(*waiting),
+                       running and _request(*running), snapshot) == plan

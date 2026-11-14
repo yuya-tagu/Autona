@@ -70,9 +70,9 @@ PROCESS_WIDE_SENDERS = (
 ALLOWED_LAMBDA_CONNECTIONS = {
     ("Autona.py",
      "AutonaTournamentDataProvider.instance.signals.tournament_url_update"),
-    ("Autona.py",
-     "AutonaTournamentDataProvider.instance.signals.tournament_changed"),
-    ("Autona.py", "AutonaGameAssetManager.instance.signals.onLoad"),
+    # The window's lambdas on tournament_changed (the mods checkbox
+    # unchecked) and onLoad (the checkbox drawn) went in ADR-005 S-final
+    # SF-5b-1: core turns the mods off, and the drawing is a bound method.
 }
 
 # The one Qt-side module allowed to subscribe to a core channel: the adapter

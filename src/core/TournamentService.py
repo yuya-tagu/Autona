@@ -22,11 +22,16 @@ are arguments: ``SetTournament(url, force, fetchMedia)`` and
    request), never on the caller's thread; an event URL is normalised
    (``/events/`` -> ``/event/``, anything after the event slug dropped);
 2. on the main thread (the injected ``onMain``): the URL is saved
-   (settings.json ``TOURNAMENT_URL``), the provider adapter loads it -- or
+   (settings.json ``TOURNAMENT_URL``), the provider adapter loads it -- and
+   a tournament newly loaded (a re-fetch with ``force`` too) turns the
+   modded content off: the game loader is asked to load the game it ends
+   on without them (the injected ``turnModsOff``; ADR-005 S-final SF-5b-1,
+   the Qt window's mods checkbox did it until then, the desktop only) -- or
    the selected game is forgotten (``GameAssetCatalog.ForgetSelection``:
-   owner's decision 2, every clear) and the adapter unloads the tournament
-   (its ``tournament_changed`` then shows no game) -- and the adapter
-   announces the URL to the shell (the sidebar's buttons);
+   owner's decision 2, every clear; ``game.selected`` goes False) and the
+   adapter unloads the tournament (its ``tournament_changed`` then shows no
+   game), with no game loaded again, all in one save cycle -- and the
+   adapter announces the URL to the shell (the sidebar's buttons);
 3. with ``fetchMedia``, the tournament's icon and banner are fetched
    (``TournamentMediaService.FetchMedia``).
 
@@ -56,8 +61,10 @@ held only around its own fields -- nothing is called with it held.
 The provider adapter is injected (``provider``: an object with
 ``LoadTournament(url, initialLoading, force)``, ``UnloadTournament()``,
 ``AnnounceUrl(url)`` and a blocking ``ResolveEventUrl(url)``), because core
-may not import it. ``TournamentService.instance`` is built by
-``bootstrap_core()``. Import side effects: none (agent-pitfalls #1).
+may not import it; so is the mods' turning off (``turnModsOff()``: the
+shell's game loader, asked and not waited for). ``TournamentService
+.instance`` is built by ``bootstrap_core()``. Import side effects: none
+(agent-pitfalls #1).
 """
 import re
 import threading
@@ -129,12 +136,19 @@ class TournamentService:
 
     instance: "TournamentService" = None
 
-    def __init__(self, provider, onMain):
+    def __init__(self, provider, onMain, turnModsOff=None):
         """`provider`: the tournament provider adapter (see the module
         docstring). `onMain(fn)` runs `fn` on the main thread: right away
-        when called there, queued otherwise (the GUI executor)."""
+        when called there, queued otherwise (the GUI executor).
+        `turnModsOff()` asks the shell's game loader to load the game it
+        ends on without its modded content, and returns without waiting
+        for it (bootstrap_core() passes the web operations' turn_mods_off,
+        which reaches the loader both shells register: its TurnModsOff
+        decides what to ask, GameAssetCatalog.PlanModsOff); None: a
+        tournament newly loaded leaves the mods as they are."""
         self._provider = provider
         self._onMain = onMain
+        self._turnModsOff = turnModsOff
         # Every SetTournament / ClearTournament takes the next generation;
         # an apply that is not the newest one's is dropped.
         self._lock = threading.Lock()
@@ -311,6 +325,12 @@ class TournamentService:
             self._SetStatus(generation, ERROR, LOAD_FAILED)
             self._provider.AnnounceUrl(url)
             return
+        if reloaded:
+            # Where the window's mods checkbox was unchecked until SF-5b-1
+            # (on tournament_changed, emitted inside the load): after the
+            # load -- a new tournament, or the same one re-fetched with
+            # `force` -- ahead of the announcement.
+            self._TurnModsOff()
         with self._lock:
             if not reloaded and self._data == (LOADING, ""):
                 # The loaded URL again, not re-fetched: what its data did.
@@ -323,20 +343,56 @@ class TournamentService:
             if media is not None:
                 media.FetchMedia()
 
+    def _TurnModsOff(self):
+        """A tournament newly loaded turns the modded content off (ADR-005
+        S-final SF-5b-1): the game loader is asked to load the game it ends
+        on without them (game.mods_active False). Both shells, through the
+        injected `turnModsOff`; until SF-5b-1 the Qt window unchecked its
+        mods checkbox on tournament_changed, which reloaded the game -- the
+        desktop only. Asked, not waited for (the loader is a job).
+
+        What is asked is the loader's (its TurnModsOff, under its request
+        lock: GameAssetCatalog.PlanModsOff): the request waiting for it
+        loads without the mods -- a game the operator asked for is not
+        dropped -- or, with none waiting, the game it ends on is asked for
+        again without them when they are on; nothing when no game is
+        selected (after a clear: the tournament's own game comes with its
+        data, mods off). The game the tournament's data selects comes to
+        this thread later (queued), and as a request for the same game
+        keeps the reload it supersedes, it does not undo this. A failed
+        request is logged: the tournament is loaded all the same."""
+        if self._turnModsOff is None:
+            return
+        try:
+            self._turnModsOff()
+        except Exception:
+            logger.opt(exception=True).error(
+                "Tournament: could not turn the modded content off")
+
     def _ApplyClear(self, generation):
         if not self._IsCurrent(generation):
             return
-        SettingsManager.Set(URL_SETTING, "")
-        self._PublishUrl()
-        # Ahead of the unload, whose empty payload waits for nothing.
-        with self._lock:
-            self._data = (IDLE, "")
-        # Every clear forgets the selected game (owner's decision 2, S4f):
-        # the next tournament's game is picked from it, not from the last
-        # one's leftovers. Ahead of the unload, whose tournament_changed the
-        # sidebar's game button re-reads the selection on, and of the
-        # announcement.
-        if GameAssetCatalog.instance is not None:
-            GameAssetCatalog.instance.ForgetSelection()
-        self._provider.UnloadTournament()
-        self._provider.AnnounceUrl("")
+        # One save cycle for the clear's writes (ADR-005 S-final SF-5b-1
+        # review): the URL, game.selected, the unload's (the tournament
+        # info emptied, the match list and the set selection forgotten).
+        # Readers in between read the live state, which each write sets at
+        # once.
+        with StateManager.SaveBlock():
+            SettingsManager.Set(URL_SETTING, "")
+            self._PublishUrl()
+            # Ahead of the unload, whose empty payload waits for nothing.
+            with self._lock:
+                self._data = (IDLE, "")
+            # Every clear forgets the selected game (owner's decision 2,
+            # S4f): the next tournament's game is picked from it, not from
+            # the last one's leftovers. Ahead of the unload, whose
+            # tournament_changed the sidebar's game button re-reads the
+            # selection on, and of the announcement. The state's
+            # game.selected goes False there (ADR-005 S-final SF-5b-1), and
+            # no game is loaded again: until SF-5b-1 the window's mods
+            # checkbox, unchecked on that tournament_changed, asked for a
+            # reload of "no game" (skipped).
+            if GameAssetCatalog.instance is not None:
+                GameAssetCatalog.instance.ForgetSelection()
+            self._provider.UnloadTournament()
+            self._provider.AnnounceUrl("")

@@ -5,7 +5,7 @@
    "loader",
    "set",
    "game",
-   "{\"name\":\"測試遊戲\",\"abbreviation\":\"TG\",\"smashgg_id\":1386,\"codename\":\"tgame\",\"logo\":\"./user_data/games/tgame//base_files/logo.png\",\"defaults\":{\"best_of\":3},\"mods_active\":true,\"has_stages\":true,\"has_variants\":true,\"has_colors\":true}"
+   "{\"name\":\"測試遊戲\",\"abbreviation\":\"TG\",\"smashgg_id\":1386,\"codename\":\"tgame\",\"logo\":\"./user_data/games/tgame//base_files/logo.png\",\"defaults\":{\"best_of\":3},\"mods_active\":true,\"has_stages\":true,\"has_variants\":true,\"has_colors\":true,\"selected\":true}"
   ],
   [
    "loader",

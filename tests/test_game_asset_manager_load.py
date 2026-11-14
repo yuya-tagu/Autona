@@ -67,6 +67,14 @@ def goldenGames(autonaApp, monkeypatch):
     autonaApp.settle()
 
 
+def _game(autonaApp):
+    """The state's `game` as the recording has it: without `selected`,
+    which a load says True (ADR-005 S-final SF-5b-1; checked here)."""
+    game = dict(autonaApp.get("game"))
+    assert game.pop("selected") is True
+    return game
+
+
 def _load(manager, codename, modsActive=False, reload=False):
     # The load job, run to the end with this (the GUI) thread pumped: it
     # marshals the load's announcement onto it.
@@ -92,7 +100,7 @@ def test_a_load_matches_the_recording(goldenGames, autonaApp, label):
 
     # (The adapter's Qt models were compared with golden["models"] here
     # until the Qt model clean-up's PR4 removed them.)
-    assert autonaApp.get("game") == golden["state"]
+    assert _game(autonaApp) == golden["state"]
 
     # The Web readers (catalog-backed since S1b): what they send must not
     # move.
@@ -241,7 +249,7 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
     autonaApp.settle()
 
     assert len(onLoadCount) == 1
-    assert autonaApp.get("game") == GOLDEN["scenarios"]["tgame"]["state"]
+    assert _game(autonaApp) == GOLDEN["scenarios"]["tgame"]["state"]
 
     tokens = _loaderStatus(statusCalls, "tgame")
     assert len(tokens) == 1
@@ -295,7 +303,7 @@ def test_the_last_pick_is_persisted_and_restored(goldenGames, autonaApp):
     # the scan's onLoadAssets runs it.
     GameAssetCatalog.instance.ResetGameState()
     autonaApp.settle()
-    assert autonaApp.get("game") == {}
+    assert autonaApp.get("game") == {"selected": False}
     manager._pendingSelectedGameRestore = True
     manager._RestoreSelectedGame()
     _waitForLoader(manager)

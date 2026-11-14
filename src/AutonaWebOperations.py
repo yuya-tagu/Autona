@@ -317,6 +317,12 @@ def current_board_host():
 # (bootstrap_gui()), the headless shell its catalog-only loader
 # (src/headless.py). None: nothing can load a game.
 loadGameByCodename = None
+# Have the game the loader ends on loaded without its modded content: () ->
+# None, asked and not waited for (a tournament newly loaded: core's
+# TournamentService through turn_mods_off; ADR-005 S-final SF-5b-1). The
+# same loader's TurnModsOff, registered beside loadGameByCodename by each
+# shell. None: the mods stay as they are.
+turnModsOff = None
 
 # The shell operations (ADR-005 S3e-9; see open_sets / get_thumbnail): the
 # desktop registers its AutonaShellOperations' (bootstrap_gui(); the
@@ -1324,6 +1330,19 @@ def load_game(codename, mods_active=False, done=None):
     loadGameByCodename(
         codename, async_mode=True, mods_active=mods_active,
         mods_reload_mode=True, done=done)
+
+
+def turn_mods_off():
+    """Have the game the loader ends on loaded without its modded content,
+    without waiting for it (a tournament newly loaded: what bootstrap_core()
+    hands core's TournamentService; ADR-005 S-final SF-5b-1). The loader
+    decides what to ask (its TurnModsOff: GameAssetCatalog.PlanModsOff).
+    Read when called, as load_game reads its loader: the shells register it
+    after bootstrap_core()."""
+    if turnModsOff is None:
+        logger.warning("no game loader registered; the mods stay as they are")
+        return
+    turnModsOff()
 
 
 # ── the battle format (ADR-005 S4x) ──────────────────────────────────────
