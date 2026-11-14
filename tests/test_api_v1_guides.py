@@ -11,9 +11,10 @@ pages that replace them in SF-4a:
 
 Not the access token (the API window shows and replaces it): a page of this
 origin -- any layout/ page, in OBS or a browser -- passes as this PC's own
-request, THIS_PC or not, so a route would hand it to whatever layout is
-loaded. Its route is SF-4a's, behind a secret the shell gives only the
-shared view's main frame.
+request, THIS_PC or not, so a THIS_PC route would hand it to whatever
+layout is loaded. Its routes (SF-4a-1) are WebAccess.SHELL, behind a secret
+the shell adds only to the shared view's main frame's fetches: pinned in
+tests/test_web_access.py and tests/test_web_panel_host.py.
 
 Who may call which is tests/test_web_access.py's (the guard: LAN, a foreign
 page, a rebound host or a relayed request is 403, token or not); here the
@@ -82,7 +83,8 @@ def test_each_rows_id_is_the_route_its_example_reaches(server):
 
 
 def test_the_catalog_lists_no_token_route():
-    # The window's token row is its own; v1 serves no token (SF-4a's).
+    # The window's token row is its own; the token's routes are the shell's
+    # (SF-4a-1), not for a person to call by hand.
     assert not [entry for entry in ApiCatalog.ENDPOINTS
                 if "token" in entry.path or "token" in entry.id]
 

@@ -51,8 +51,14 @@
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
 - **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a）と、§5.27 / §5.28 のゲームアセットのパックの一覧とジョブの状態（ADR-005 S-final SF-3b））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
-  - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンはどの v1 ルートも返さない**（表示・再発行は API 設定ウィンドウだけ。ページ向けの経路は SF-4a で、共有ビューのメインフレームにだけシェルが渡す秘密を求める形で設計する）
+  - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンは `THIS_PC` のルートでは返さない**（下の `SHELL`）
   - 同じ理由で、**ゲームアセットの書き込み（インストール・ZIP / フォルダの取り込み・キャンセル）は v1 に出していない**（導入済みのゲームの置き換え・確認なしの上書きと大きなダウンロード・この PC のフォルダのコピーと有無の探査ができてしまう）。SF-4b でシェルの秘密の下に出す（ADR-005 S-final SF-3b）
+- **アプリ自身のウィンドウ（デスクトップの共有ビューの中の、本体のサーバーのオリジンの文書）からの要求だけ**（`SHELL` 区分。2026-11-14・ADR-005 S-final SF-4a-1）: §5.29 のアクセストークンの読み取りと §7 の `POST /access-token:regenerate`。通すのは次の 3 つを**すべて**満たす要求だけで、ほかは**トークンの有無によらず** `403 FORBIDDEN`（`only the Autona app's own window may ask this`。1 つの答え。ログには何が欠けたかだけを出し、ヘッダの値は出さない）
+  - `THIS_PC` と同じ、トークンなしで通れるこの PC の要求（トークンでは開かない。LAN の他端末は秘密があっても断る）
+  - `Sec-Fetch-Site` がちょうど `same-origin`（`none`・無い・`same-site`・`cross-site` は断る。共有ビューの fetch は必ず送る）
+  - `X-Autona-Shell` ヘッダがシェルの秘密と一致（定数時間の比較。空・128 文字超・ASCII 以外・前後の空白・大文字小文字の違いは不一致）。秘密はデスクトップのシェルが最初に必要になったときにプロセスで 1 回作り、メモリにだけ持つ（`settings.json` に入れない・ログに出さない）。付けるのは**共有ビューのページ自身のリクエストインターセプタ**（プロファイルのではない: Designer のビューが同じ既定プロファイルを使う）で、メインフレームが Web UI（本体のサーバーの `/web` の配下で `view=designer` でない）を出している間に、そのページの中の本体のサーバーのオリジン（`127.0.0.1:<待ち受けポート>`）の文書が出す、本体の `/api/v1/` への fetch / XHR に付ける。その文書はメインフレームと同じオリジンのフレームで、about:blank・srcdoc・blob: のフレームは作った文書のオリジンを継ぐので含まれる（だから Web UI はそこへ第三者の HTML を sandbox なしで入れない。sandbox のフレームは opaque origin で付かない）。Web UI のスクリプトが出す fetch / XHR には付き、`<script>`・画像の読み込みとナビゲーションには付かない。別オリジンのフレーム（プレビュー）・ほかのビュー・ほかのページの要求には付かない。付いた要求がほかへリダイレクトされたら止め、付けてはいけない要求が秘密を持っているか確かめられなければその要求を止める。ヘッドレスは秘密を作らないので、`SHELL` のルートは常に `403`
+  - プレビュー用のリスナーは `SHELL` を出さない（READ だけ。下の項）。Socket.IO のイベントに `SHELL` は無い
+  - 判定は `src/core/WebAccess.ShellRefusalReason`、付ける側は `src/AutonaWebPanelHost.ShellHeaderWanted`
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -62,7 +68,7 @@
 - 判定の正本は `src/core/WebAccess.py`（ルート・イベントの分類表 `ROUTE_ACCESS` / `EVENT_ACCESS`。分類のない endpoint は書き込み扱い）。
   legacy ルートも同じ判定を通り、拒否時だけ v1 と同じエラーエンベロープを返す（成功時の `"OK"` 等は不変）
 - CORS（`Access-Control-Allow-Origin: *`）は残る。読み取りは別オリジンのページからも読める（OBS の file:// オーバーレイのため）
-- **プレビュー用のリスナー**（2026-11-14・ADR-005 S-final SF-8a）: 同じバインド先の別のポート（OS が選ぶ。`GET /health` の `previewPort`、§5.1）で、ページのレイアウトのプレビューだけが読む。出すのはレイアウトが読むもの（`layout/`・`assets/`・`user_data/` の画像・`out/program_state.json`・v1 の READ・Socket.IO の読み取り）だけで、`WRITE` / `PLAYERDB` / `THIS_PC` / `DESIGNER`・`/web`・legacy のルート・`out/` のほかのファイルは**トークンがあっても、この PC からでも** `403 FORBIDDEN`（Socket.IO は接続を受けて state を配り、書き込みイベントは同じ ack で断る。信頼済みの room に入れない）。判定は Authorize に入る前（そのポートのページを「自分のオリジン」にしないため）。そのポートのページ（オリジン `http://<ホスト>:<previewPort>`）からこのサーバー自身のポートへの書き込みも、自分のオリジンではない（`Sec-Fetch-Site: same-site`）ので上の CSRF 対策で `403`
+- **プレビュー用のリスナー**（2026-11-14・ADR-005 S-final SF-8a）: 同じバインド先の別のポート（OS が選ぶ。`GET /health` の `previewPort`、§5.1）で、ページのレイアウトのプレビューだけが読む。出すのはレイアウトが読むもの（`layout/`・`assets/`・`user_data/` の画像・`out/program_state.json`・v1 の READ・Socket.IO の読み取り）だけで、`WRITE` / `PLAYERDB` / `THIS_PC` / `SHELL` / `DESIGNER`・`/web`・legacy のルート・`out/` のほかのファイルは**トークンがあっても、この PC からでも** `403 FORBIDDEN`（Socket.IO は接続を受けて state を配り、書き込みイベントは同じ ack で断る。信頼済みの room に入れない）。判定は Authorize に入る前（そのポートのページを「自分のオリジン」にしないため）。そのポートのページ（オリジン `http://<ホスト>:<previewPort>`）からこのサーバー自身のポートへの書き込みも、自分のオリジンではない（`Sec-Fetch-Site: same-site`）ので上の CSRF 対策で `403`
 - **別のページのフレームには出さない**（2026-11-14・SF-8a のレビュー）: このサーバー自身のポート（プレビュー用のリスナーではない方）は、`Sec-Fetch-Dest` がフレーム（`iframe` / `frame` / `embed` / `object` / `fencedframe`）で `Sec-Fetch-Site` が `same-origin` / `none` 以外（`same-site`・`cross-site`）の要求を、何を頼んだかによらず（`layout/`・`/web`・静的ファイル・v1・legacy）**トークンがあっても** `403 FORBIDDEN` で断る（判定は Authorize の前。拒否の応答自身は `Content-Security-Policy: sandbox; frame-ancestors 'none'`）。応答はすべて `Content-Security-Policy: frame-ancestors 'self'` を持つ。プレビューのレイアウトが自分のフレームや作ったフレームをこのポートへ送り、このサーバーのページとして動くのを止めるため。このサーバーのページが自分のページを枠に入れる（`same-origin`）・直接開く（OBS のブラウザソース・リンク。`Sec-Fetch-Dest: document`）・ヘッダを付けないクライアントは影響しない。`file://` などほかのページがこのサーバーのページを iframe に入れる使い方は出なくなる。規則は `src/core/WebAccess.FramedElsewhere`
 - ⚠️ 上の CSRF 対策とこのフレームの判定は、`Sec-Fetch-*` を送るブラウザが前提。送らない古いブラウザでは、ほかのページからの no-cors の GET（legacy の GET の書き込み）がこの PC の要求として通りうる
 - ⚠️ トークンは平文 HTTP で流れ、全端末で 1 つを共有する。緩和は confirm（§7）・操作ログ（§2.7）・再発行。LAN 外運用が発生したら ADR-001 を Revisit。
@@ -114,7 +120,7 @@
 |------|------|-----------|
 | `INVALID_ARGUMENT` | 400 | パラメータ不正（範囲外の team/scoreboard、型不一致 等） |
 | `UNAUTHENTICATED` | 401 | 書き込みにトークンが要るのに、無い・誤り（LAN の他端末・転送ヘッダ付きの中継・このサーバーの名前以外の `Host` 宛て。§2.2。ADR-005 S3a） |
-| `FORBIDDEN` | 403 | トークンなしの書き込みが、別サイト・同一サイトの別オリジン・別オリジンのブラウザページから来た（§2.2 CSRF 対策） |
+| `FORBIDDEN` | 403 | トークンなしの書き込みが、別サイト・同一サイトの別オリジン・別オリジンのブラウザページから来た（§2.2 CSRF 対策）。`THIS_PC` / `SHELL` のルートを LAN・転送ヘッダ付き・（`SHELL` は）アプリ自身のウィンドウ以外から頼んだ（トークンがあっても。§2.2） |
 | `NOT_FOUND` | 404 | 存在しないリソース（未知の set ID 等） |
 | `CONFIRMATION_REQUIRED` | 409 | 破壊的操作で `confirm:true` が無い（§7.2） |
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8）。選手 DB への保存（§6.26）では、mains のゲームが今のゲームと違う / もっと新しい保存に負けた |
@@ -233,6 +239,7 @@
 | `GET /api/v1/settings` | 設定ページの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加。`defaults` は 2026-11-13） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
 | `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
 | `GET /api/v1/connection` | Web サーバーの URL（LAN / ループバック）・ポート・`out/` の絶対パス（§5.25。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_connection`（`WebServer.Serving` / `LanOnAtRestart`） | — |
+| `GET /api/v1/access-token` | アクセストークン（§5.29。**アプリ自身のウィンドウからだけ**（`SHELL`）。2026-11-14 追加） | `get_access_token`（`core/WebAccess.Token`） | — |
 | `GET /api/v1/api-catalog` | API 設定ウィンドウのエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
 | `GET /api/v1/assets/packs` | ゲームアセットのパックの一覧（上流の索引・インストール済み・版。§5.27。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_asset_packs`（`core/AssetPackService.Packs`） | — |
 | `GET /api/v1/assets/job` | ゲームアセットの取り込みのジョブの状態（§5.28。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_assets_job`（`core/AssetPackService.Job`） | — |
@@ -794,7 +801,7 @@ API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web
 - `port` / `lan`: `WebServer.Serving()`（待ち受けている値。サーバーが無いときだけ設定）。`lanAtRestart`: LAN 接続を有効で保存したが、走っているサーバーはこの PC だけ（再起動で効く。`WebServer.LanOnAtRestart()`。ウィンドウの「保存済み・再起動で有効」）
 - `baseUrl`: 利用者に案内する API の URL（LAN 接続なら この PC の LAN IP、無ければループバック。API・Companion のウィンドウの値）。`localBaseUrl`: ループバックの URL（OBS のウィンドウの値。OBS は同じ PC で動く）
 - `outDir`: Autona が出力する `out/` の絶対パス（Advanced Scene Switcher のファイル条件が監視するファイルはこの下。`out/score/1/match.txt` なら `outDir` + `pathSeparator` + `score` + … ）。`pathSeparator`: その OS の区切り文字
-- 秘密は含まない（アクセストークンは返さない: §2.2 の `THIS_PC` の注記）。ただし `THIS_PC` は同じオリジンのレイアウトからの要求も通すので、`outDir` はそれらにも読める（`GET /layouts/selected/board/obs-path` と同じ程度の露出）
+- 秘密は含まない（アクセストークンは返さない: §2.2 の `THIS_PC` の注記。トークンは §5.29 の `SHELL` のルートだけが返す）。ただし `THIS_PC` は同じオリジンのレイアウトからの要求も通すので、`outDir` はそれらにも読める（`GET /layouts/selected/board/obs-path` と同じ程度の露出）
 
 ### 5.26 通知 `games_changed`（Socket.IO。2026-11-14 追加・ADR-005 S-final SF-3a）
 
@@ -843,6 +850,18 @@ API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web
 - `imported`: 置いたゲーム（インストールはそのゲーム）。`skipped`: インストール済みで置き換えなかったゲーム。`skippedEntries`: ZIP の取り込みで飛ばしたエントリの名前（フォルダの外を指さないが Windows で使えない名前。先頭 100 件。それを超えた数は `skippedEntriesMore`）。`failed`: `[{name, message}]`（ゲームごとの失敗。ほかのゲームは続ける）
 - `error`（`status` が `error`）: `bad_index` / `download_failed` / `extract_failed` / `unsafe_archive` / `too_large` / `not_a_zip` / `disk_full` / `stopped`（終了中）/ `failed` ほか（`core/AssetPackService` の定数）。`message` は英語の理由
 - 読み方: `revision` が始めたときのものと同じで、`status` が `running` でなくなったら結果（`revision` が進んでいれば、そのジョブは終わっていて結果はもう読めない）。走っている間はフッター（§5.23 の `status` の `assets_load`）にも出る。終わったジョブは `status` の通知より先に結果になっている（通知のあとに読めば結果）
+
+### 5.29 `GET /api/v1/access-token`（2026-11-14 追加・ADR-005 S-final SF-4a-1）
+
+LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに使うアクセストークン（§2.2）。今は API 設定ウィンドウが表示・コピーしていて、SF-4a-2 で `/web/api` のページがこれを読む。**`SHELL` 区分**（§2.2: デスクトップの共有ビューが Web UI を出している間の、本体のサーバーのオリジンの文書（メインフレームと同じオリジンのフレーム）の fetch / XHR だけ。トークンでは開かない・LAN・同じオリジンのレイアウト・OBS・curl・ヘッドレスは `403 FORBIDDEN`）。`Cache-Control: no-store`
+
+```json
+{ "ok": true, "data": { "token": "…", "available": true } }
+```
+
+- `token`: `WebAccess.Token()`（初回に読み、無ければ発行してメモリに持つ）。settings.json を読めなかった・値が壊れているときは発行せず `""`、`available` は `false`（そのあいだ LAN の書き込みは全部 `401`）
+- 再発行は §7 の `POST /api/v1/access-token:regenerate`
+- `GET /api/v1/settings`（§5.22）・`GET /api/v1/connection`（§5.25）・API 一覧（§5.24。ガイドのページ自身のルートは載せない）はトークンを返さない
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -1327,6 +1346,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/result:loadStandings` | 入力があれば confirm・実行中フラグ | `load_result_standings`（`ResultService.LoadStandings`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:preview` | なし（実行中の要求は最後の 1 件にまとめる） | `preview_result`（`ResultService.Preview`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
+| `POST /api/v1/access-token:regenerate` | confirm・`SHELL` 区分 | `regenerate_access_token`（`core/WebAccess.RegenerateToken`。2026-11-14 追加・ADR-005 S-final SF-4a-1） | — |
 
 - **board 3 の `:clear` / `:reset-players` / `:reset-match`**（ADR-005 S4w で開いた。Qt のクルーボード（S4ac-3 で削除）にボタンは無く、legacy と同じ操作）: `:reset-match` は全メンバーを既定のストックに戻して出場中を無しにし（名前は残す）、`phase` / `pool` / `match` と `best_of` を空にする（match バーの欄はボードにあるものだけ。クルーボードのシードに `pool` は無く、`PATCH set` で書くまで足さない。ADR-005 S4ac-1 の検収レビュー。それまでは `pool: ""` を足していた）。`:reset-players` は全メンバーの行を空にする（名前も。チーム名・色・人数は残す。入力中の欄を先に確定する）。`:clear` は `:reset-match` + 人数 1 + `:reset-players`（チーム名・色は残る）。即時公開で、同じことをもう一度送っても書かない。スワップのフラグは戻らない。未構築のボードの扱いは §2.12
 - `:reset-all`: デスクトップの「すべての入力値をリセット」と同じ（`AutonaActions.ClearBoard`。1 保存サイクル）。選手・スコア・match バー・チーム名とロゴ・best of を空にし、**人数・キャラ数は残す**。入力中の欄を先に確定し、最後に読んだセットを忘れる（同じセットを読み直せる）。**`:clear` とは別の動作**: `:clear` はチーム名を残し（人数が 1 人になるときを除く）、人数・キャラ数を既定に戻す。board 3 は `400`。held 対象
@@ -1350,9 +1370,14 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `:stop-follow`（ADR-005 S4v）: body なし。タイマー行のキャンセルボタンと同じ `StopFollowing(forget=True)`: 取り直しの時計を止め、配信台と追従中のセットを忘れる（同じセットをもう一度読める）。**ボードに出ている選手とスコアは残す**。大会が無くても答える（`200`）。board 3 は `400`
   - 止めるものが無ければ何も書かない（書くのは変わるキーだけなので、反映ボタンを点けない。`scoreboard_follow` も出ない）。追従中のセットを忘れる書き込みは held 対象
   - デスクトップの未構築のボードは**構築せず、何も書かずに `200`**（読み込みが必ず構築するので、未構築のボードに止める追従は無い。構築するとシードで state が消え、ポーリングの設定も切れる）
+- `access-token:regenerate`（ADR-005 S-final SF-4a-1）: API 設定ウィンドウの「再発行」と同じ `WebAccess.RegenerateToken()`。body は `{ "confirm": true }`。**`SHELL` 区分**（§2.2。アプリ自身のウィンドウからだけ。トークンでは開かない）
+  - 応答: `data` は §5.29 と同じ `{ "token": "<新しいトークン>", "available": true }`、`Cache-Control: no-store`
+  - 古いトークンはすぐ使えなくなる: LAN の HTTP の書き込みは `401`、古いトークンで入った Socket.IO の接続の書き込みイベントは `401 UNAUTHENTICATED`（`the token was regenerated; reconnect with the new one`）の ack で断る（接続と state の配信は続く。新しいトークンで接続し直す。この PC のトークンなしの接続は影響しない）
+  - settings.json を読めず保存できないときは発行せず **`409 NOT_READY`**（`settings.json could not be read: no new token was issued`。今のトークンのまま）
+  - 操作ログは `access-token.regenerate`（body のキー名だけ。トークンは出さない）
 
 ### 7.2 確認フラグ（C-2 / D7）
-- **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`）は body に **`"confirm": true` 必須（MUST）**。
+- **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`・`POST /access-token:regenerate`）は body に **`"confirm": true` 必須（MUST）**。
   無い/false なら **`409 CONFIRMATION_REQUIRED`**（状態は変更しない）。
 - `POST /players:delete`: body は `{ "key": "SP Alpha", "confirm": true }`（`key` は §5.11 の行の DB キー。タグだけでは一致しない）。文字列でない `key` は `INVALID_ARGUMENT`、DB に無い `key` は `404 NOT_FOUND`（保存も通知もしない）。選手 DB なので応答に `revision` は付かない。操作ログは `player.delete`（キー名のみ）
 - 「配信中」自動ブロックは**初回は設けない**（Autona に配信状態判定手段が無いため）。confirm のみで担保。

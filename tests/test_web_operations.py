@@ -2391,6 +2391,11 @@ _NOT_200 = {
     ("api_v1.select_layout", None): 400,
     # No target: nothing is shown (never a real file manager in this walk).
     ("api_v1.reveal_board_file", None): 400,
+    # The access token is the desktop's shared view's alone (SHELL, ADR-005
+    # S-final SF-4a-1): headless makes no shell secret, so nothing reaches
+    # them -- the guard's 403, before any operation.
+    ("api_v1.get_access_token", None): 403,
+    ("api_v1.access_token_regenerate", None): 403,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the

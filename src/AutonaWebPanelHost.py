@@ -12,10 +12,23 @@ The page is the Web UI's ``/web/<panel>`` on the app's own web server
 a browser needs) and ``lng=`` the Qt UI language. It is opened from this
 PC, so it writes without the LAN token, like any of this server's own pages
 here; there is no privileged channel (no QWebChannel) -- the page uses the
-same API as a browser. Besides navigating and the full state, the host asks
-a page for one thing through the panel shell: SCORE's set selection dialog,
-for the load_set hotkey and the legacy open-set route (OpenScoreSets,
-ADR-005 S4ab-2). It writes nothing; the page opens it as its own button.
+same API as a browser. One request header tells its fetches from every
+other page of this origin (ADR-005 S-final SF-4a): the shell's secret
+(core.WebAccess.SHELL_HEADER), which a request interceptor of the page's own
+(_ShellRequestInterceptor; not the profile's, which the Designer's view
+shares) adds to the fetches to /api/v1/ that a document of this server's
+origin in the page makes while the main frame is the Web UI: the main
+frame's, and a frame's of the same origin -- an about:blank, srcdoc or blob:
+frame the Web UI made inherits it, so the Web UI never puts another party's
+HTML into one unsandboxed. No other origin's frame (the design previews), no
+other view and no page elsewhere (a layout in OBS or a browser) carries it.
+The Web UI's own script reads the token through it: that is the page the
+token is shown on. The server's SHELL routes (the access token) take
+nothing else. Besides navigating and the full state, the
+host asks a page for one thing through the panel shell: SCORE's set
+selection dialog, for the load_set hotkey and the legacy open-set route
+(OpenScoreSets, ADR-005 S4ab-2). It writes nothing; the page opens it as
+its own button.
 
 Built lazily: constructing the host costs a plain QWidget; the view is
 created the first time the host is on screen with a panel to show, once
@@ -79,12 +92,13 @@ Importing it creates nothing.
 
 import json
 import logging
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 
 from qtpy.QtCore import Qt, QTimer, QUrl, Signal
 from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import (
-    QWebEnginePage, QWebEngineProfile, QWebEngineSettings)
+    QWebEnginePage, QWebEngineProfile, QWebEngineSettings,
+    QWebEngineUrlRequestInterceptor)
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
@@ -294,6 +308,141 @@ def _IsDesignerUrl(url, pageUrl):
             and not url.userInfo())
 
 
+def _NamesDesigner(url):
+    """Whether ``url``'s query asks the Web UI for the Designer instead of
+    the panels: a ``view`` of ``designer`` (web/src/index.js reads the first
+    one with URLSearchParams, on any /web path; any one of them counts
+    here), the name and value decoded as URLSearchParams decodes them."""
+    query = url.query(QUrl.ComponentFormattingOption.FullyEncoded)
+    return any(name == "view" and value == "designer"
+               for name, value in parse_qsl(query, keep_blank_values=True))
+
+
+# ── The shell's secret (ADR-005 S-final SF-4a) ─────────────────────────
+# Which of the page's requests carry core.WebAccess.SHELL_HEADER. fetch()
+# and XMLHttpRequest both come as ResourceTypeXhr (measured on PySide6 6.11:
+# GET and POST alike; an <img>, a <script>, a frame and a navigation each
+# come as their own type). The name of the QWebEngineUrlRequestInfo.
+# ResourceType member, as CLIPBOARD_PERMISSION is the permission's, so that
+# the decision takes no Qt object but QUrl values.
+SHELL_RESOURCE_TYPE = "ResourceTypeXhr"
+_API_V1_PATH = "/api/v1/"
+_SHELL_HEADER_NAME = WebAccess.SHELL_HEADER.encode("ascii")
+
+
+def ShellHeaderWanted(requestUrl, initiator, firstPartyUrl, resourceType,
+                      serverUrl):
+    """Whether a request of the shared view's page carries the shell's
+    secret: only a fetch / XHR (``resourceType`` SHELL_RESOURCE_TYPE) to
+    this server's /api/v1/ (``requestUrl`` on the origin of ``serverUrl`` --
+    _ServerUrl: 127.0.0.1 at its port -- scheme, host and port alike),
+    started by a document of that origin (``initiator``: the main frame or a
+    frame of the same origin, which an about:blank, srcdoc or blob: frame
+    inherits from the document that made it -- not the design previews'
+    frames, on the preview listener's port) while the page is the Web UI
+    there (``firstPartyUrl``, the main frame's URL, a frame's request
+    included: on that origin, in /web, _InWebUi, and not the Designer's
+    view, _NamesDesigner).
+
+    Not the loading of the page's pictures, scripts or documents (another
+    type: the secret is for the API's routes alone) -- a fetch that a script
+    of the Web UI makes is one -- not a fetch of this server's from a
+    preview's frame or from another origin's page, not another name of this
+    PC at the server's port (the main frame never goes there, _PanelPage).
+    Another view -- the Designer's, on the same profile -- never asks: the
+    interceptor is the page's own.
+
+    QUrl values only, as ClipboardPermitted (no QApplication, no WebEngine
+    object, no settings: the server's URL is passed)."""
+    if resourceType != SHELL_RESOURCE_TYPE:
+        return False
+    server = _HttpOrigin(serverUrl)
+    if server is None or _HttpOrigin(requestUrl) != server:
+        return False
+    path = requestUrl.adjusted(_NORMALIZED_PATH).path(
+        QUrl.ComponentFormattingOption.FullyDecoded)
+    return (path.startswith(_API_V1_PATH)
+            and _HttpOrigin(initiator) == server
+            and _HttpOrigin(firstPartyUrl) == server
+            and _InWebUi(firstPartyUrl)
+            and not _NamesDesigner(firstPartyUrl))
+
+
+def _CarriesShellHeader(info):
+    return any(bytes(name).lower() == _SHELL_HEADER_NAME.lower()
+               for name in info.httpHeaders())
+
+
+# The interceptor's failures, a warning for the first of each kind and debug
+# after (as the web server's refusals, WebAccess.RefusalLog): Qt asks for
+# every request of the page, so one that keeps failing would fill the log.
+_shellFailures = WebAccess.RefusalLog(limit=16)
+
+
+def _ShellFailure(kind, message):
+    level = logging.WARNING if _shellFailures.First(kind) else logging.DEBUG
+    logger.log(level, message, exc_info=True)
+
+
+class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
+    """The shared view's page's request interceptor (ADR-005 S-final
+    SF-4a): adds the shell's secret to the requests ShellHeaderWanted names.
+
+    The page's own (QWebEnginePage.setUrlRequestInterceptor), never the
+    profile's: the Designer's view and the off-screen renderers share the
+    default profile, and none of their requests is to carry it. Qt calls
+    interceptRequest on the UI thread (measured on PySide6 6.11), for every
+    request of the page -- its frames' included: a frame of this server's
+    origin (about:blank, srcdoc and blob: frames inherit it) gets the secret
+    as the main frame does -- and a redirect's next hop, with the headers
+    added so far, which a redirect carries along wherever it goes (measured:
+    to another origin too). So a request that already carries the header
+    and is not one to carry it (a redirect away from /api/v1/) is blocked,
+    whoever set it. The server never redirects there today.
+
+    The secret is made on the first request that carries it
+    (WebAccess.IssueShellSecret, the only caller). A decision that raises
+    adds nothing: the request goes on without the secret (the SHELL route
+    refuses it), the page's other requests unaffected. Failing to tell
+    whether a request not to carry it does carry it, or to stop one that
+    does, blocks it if Qt lets it (the safe side). Each logged once
+    (_ShellFailure)."""
+
+    def interceptRequest(self, info):
+        try:
+            wanted = ShellHeaderWanted(
+                info.requestUrl(), info.initiator(), info.firstPartyUrl(),
+                info.resourceType().name, _ServerUrl())
+        except Exception:
+            _ShellFailure("decision", "The web panel view could not tell "
+                          "whether a request is the shell's")
+            wanted = False
+        if wanted:
+            try:
+                info.setHttpHeader(
+                    _SHELL_HEADER_NAME,
+                    WebAccess.IssueShellSecret().encode("ascii"))
+            except Exception:
+                _ShellFailure("add", "The web panel view could not add the "
+                              "shell's secret to a request")
+            return
+        try:
+            if _CarriesShellHeader(info):
+                info.block(True)
+                # The host only: the value is never logged.
+                logger.warning("The web panel view blocked a request that "
+                               "carried the shell's secret to %s",
+                               info.requestUrl().host())
+        except Exception:
+            _ShellFailure("check", "The web panel view could not keep the "
+                          "shell's secret off a request; blocking it")
+            try:
+                info.block(True)
+            except Exception:
+                _ShellFailure("block", "The web panel view could not block "
+                              "a request")
+
+
 # The browser version of the scoreboards the SCORE page opens (S4aa): the
 # paths the Qt boards' "ブラウザ版を開く" opened (board 2 "team", board 1
 # "scoreboard"; the Qt boards went in ADR-005 S4ac-3).
@@ -405,7 +554,13 @@ class _PanelPage(QWebEnginePage):
     The off-screen renderers use the default profile as well, but load
     file:// pages, another origin, so no grant of this one ever reached
     them. A copy command in a click (document.execCommand("copy")) is no
-    permission and writes the clipboard from any frame, as on the web."""
+    permission and writes the clipboard from any frame, as on the web.
+
+    The page's requests pass its own interceptor (_ShellRequestInterceptor;
+    ADR-005 S-final SF-4a), which adds the shell's secret to the main
+    frame's fetches to /api/v1/ while the page is the Web UI and not the
+    Designer's view of it -- which the main frame is never let go to, so
+    the Designer keeps to its own window."""
 
     designerRequested = Signal()
 
@@ -418,6 +573,11 @@ class _PanelPage(QWebEnginePage):
         self.profile().setPersistentPermissionsPolicy(
             QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
         self.permissionRequested.connect(self._AnswerPermission)
+        # The page's own, before it loads anything (ADR-005 S-final SF-4a):
+        # never the profile's, which the Designer's view shares. Kept here
+        # as well as parented: Qt holds no reference to it.
+        self._shellInterceptor = _ShellRequestInterceptor(self)
+        self.setUrlRequestInterceptor(self._shellInterceptor)
 
     def _AnswerPermission(self, permission):
         # Answered at once: nothing here waits or shows a dialog.
@@ -473,9 +633,13 @@ class _PanelPage(QWebEnginePage):
         # origin, that of the URL it shows or, before its first document
         # (url() still empty), of the one the host's load asked for
         # (requestedUrl). So both are this server's /web from then on, which
-        # ClipboardPermitted relies on.
+        # ClipboardPermitted relies on. Never the Designer's view of it
+        # (/web?view=designer, of any kind: the host loads none), which the
+        # shell's secret is not added to (ShellHeaderWanted; ADR-005 S-final
+        # SF-4a): the Designer opens in its own window.
         target = _HttpOrigin(url)
         if (_InWebUi(url) and target is not None
+                and not _NamesDesigner(url)
                 and target == _HttpOrigin(_ServerUrl())
                 and (navigationType in _HOST_NAVIGATIONS or target in (
                     _HttpOrigin(self.url()), _HttpOrigin(self.requestedUrl())))):

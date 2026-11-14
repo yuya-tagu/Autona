@@ -3,7 +3,7 @@
 The web server (src/AutonaWebServer.py, src/AutonaApiV1.py) used to serve
 every file below the working directory and accept every operation from
 anyone who could reach the port. This module is the policy that closes that
-surface; the server only asks it questions. It decides five things:
+surface; the server only asks it questions. It decides six things:
 
 * **Which files are served** (StaticPath). Only what the overlays, the Web UI
   and the state's image paths load: layout/, assets/, web/build/, out/ and
@@ -26,6 +26,11 @@ surface; the server only asks it questions. It decides five things:
   ``Sec-Fetch-Site`` other than ``same-origin`` / ``none`` and a foreign
   ``Origin`` are refused (CSRF). Non-browser clients (Companion, Stream
   Deck, curl, requests) send neither header and are unaffected.
+* **Which requests are the desktop's shared view's own** (SHELL, ADR-005
+  S-final SF-4a): this PC's own request that also carries the secret the
+  shell adds to the shared view's fetches (IssueShellSecret). Every page of
+  this origin passes as this PC's own request, so only that secret keeps
+  the access token from them.
 * **What the preview listener serves** (PreviewServes, ADR-005 S-final
   SF-8a): the second port the shared view's design previews load from
   serves only what a layout reads, and never writes -- decided before any
@@ -48,6 +53,7 @@ they are classified DESIGNER here and left alone.
 Core module: no Qt (tests/test_core_qt_free.py), no Flask, and nothing
 happens at import time -- the token is read, or issued and saved, on first
 use (Token()), and then kept in memory: only RegenerateToken() changes it.
+The shell's secret is made on the shell's first ask (IssueShellSecret()).
 """
 
 import hmac
@@ -72,9 +78,15 @@ STATIC = "static"        # files: StaticPath()'s allowlist
 # Opens something on this PC's screen (the Board page's "show in Explorer"):
 # only this PC's own requests, the token does not open it (THIS_PC_ONLY).
 THIS_PC = "this_pc"
+# Only the desktop's shared view (ADR-005 S-final SF-4a): a THIS_PC request
+# that also carries the shell's secret (SHELL_HEADER), which the shell adds
+# to the shared view's own fetches only. THIS_PC alone cannot keep a secret
+# -- every same-origin page (a layout/ page, in OBS or a browser) passes as
+# this PC's own request -- so the access token is served here.
+SHELL = "shell"
 
 # The classes Authorize() guards.
-GUARDED = frozenset({WRITE, PLAYERDB, THIS_PC})
+GUARDED = frozenset({WRITE, PLAYERDB, THIS_PC, SHELL})
 
 # Every Flask endpoint, by its endpoint name. tests/test_webserver_routes.py
 # checks that this table and the route ledger name the same endpoints, so a
@@ -287,11 +299,13 @@ ROUTE_ACCESS = {
     # The guides' (ADR-005 S-final SF-3a; the API / Companion / OBS windows,
     # React pages in SF-4a). The catalogue is the reference anyone may read.
     # The connection names the install folder (out/) and is for the guides
-    # on this PC, as the windows were. (The access token is not served: a
-    # same-origin page -- any layout/ page, in OBS or a browser -- would
-    # pass as this PC's own request; its route is SF-4a's.)
+    # on this PC, as the windows were. The access token is SHELL (SF-4a-1):
+    # as THIS_PC a same-origin page -- any layout/ page, in OBS or a browser
+    # -- would pass as this PC's own request and read it.
     "api_v1.get_api_catalog": READ,
     "api_v1.get_connection": THIS_PC,
+    "api_v1.get_access_token": SHELL,
+    "api_v1.access_token_regenerate": SHELL,
     # The game asset packs (ADR-005 S-final SF-3b; the "Add game assets"
     # window, a React page in SF-4b). The list -- the upstream index and
     # what is installed -- names no local path, but reading it may fetch
@@ -757,6 +771,49 @@ def TokenMatches(supplied):
     return matched
 
 
+# ── The shell's secret (ADR-005 S-final SF-4a) ─────────────────────────
+# What tells the desktop's shared view from every other page of this
+# origin. The shell (src/AutonaWebPanelHost.py) adds it as a request header
+# to the shared view's own fetches to /api/v1/ -- the main frame's, on the
+# Web UI -- from a page-level request interceptor, so no page script, frame
+# or other view ever holds it. Issued once per process on the shell's first
+# ask, kept in memory only (not in settings.json, never logged), never at
+# import: a shell that never asks (headless) has none, and every SHELL
+# request is refused there.
+SHELL_HEADER = "X-Autona-Shell"
+# A supplied value longer than this is not compared (bounded work; the
+# secret is 43 characters).
+_SHELL_SECRET_MAX_INPUT = 128
+
+_shellLock = threading.Lock()
+_shellSecret = None
+
+
+def IssueShellSecret():
+    """The shell's secret: made on the first call, the same for the rest of
+    the process. Only the shared view's request interceptor calls this
+    (tests/test_web_panel_host.py pins it)."""
+    global _shellSecret
+    with _shellLock:
+        if _shellSecret is None:
+            _shellSecret = secrets.token_urlsafe(32)
+        return _shellSecret
+
+
+def ShellSecretMatches(value):
+    """Whether ``value`` (the SHELL_HEADER as received) is the shell's
+    secret. False when none was issued, and for anything but a non-empty
+    ASCII str within the bound. Constant-time."""
+    expected = _shellSecret
+    if not expected:
+        return False
+    if (not isinstance(value, str) or not value
+            or len(value) > _SHELL_SECRET_MAX_INPUT or not value.isascii()):
+        return False
+    # Bytes, as TokenMatches: compare_digest refuses non-ASCII str.
+    return hmac.compare_digest(value.encode("ascii"), expected.encode("ascii"))
+
+
 # ── Origins ─────────────────────────────────────────────────────────────
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -874,6 +931,13 @@ THIS_PC_ONLY = Refusal(
     403, FORBIDDEN, "this request is only taken from this computer",
     "this_pc_only")
 
+# A SHELL route asked by anything but the shared view's own fetch
+# (ShellRefusalReason): another computer, the token, a page of this origin
+# without the shell's secret.
+SHELL_ONLY = Refusal(
+    403, FORBIDDEN, "only the Autona app's own window may ask this",
+    "shell_only")
+
 # Whatever the preview listener does not serve (PreviewServes), and every
 # write of a Socket.IO connection made there -- token or not: the port is a
 # layout's, never this server's own page (ADR-005 S-final SF-8a).
@@ -953,6 +1017,28 @@ def _AmbientRefusal(remoteAddr, origin, fetchSite, host, ownOrigins,
         return Refusal(
             403, FORBIDDEN, "requests from other pages are not allowed",
             "foreign_origin")
+    return None
+
+
+def ShellRefusalReason(grant, refusal, fetchSite, secret):
+    """None when a SHELL request may go ahead, else why not (short, for the
+    log; the server answers SHELL_ONLY whatever it is).
+
+    ``grant`` / ``refusal`` are Authorize()'s, ``fetchSite`` the
+    ``Sec-Fetch-Site`` header and ``secret`` the SHELL_HEADER (None when
+    absent). All three hold or it is refused: this PC's own request
+    (GRANT_AMBIENT -- the token does not open it, and a LAN device is
+    refused even with the secret), a fetch of this origin's own page
+    (``same-origin`` exactly: not ``none``, not absent -- the shared view's
+    fetches always send it), and the shell's secret.
+    """
+    if grant != GRANT_AMBIENT:
+        return refusal.reason if refusal else "token"
+    if not isinstance(fetchSite, str) or (
+            fetchSite.strip().lower() != "same-origin"):
+        return "fetch_site"
+    if not ShellSecretMatches(secret):
+        return "no_secret" if not secret else "secret"
     return None
 
 

@@ -108,8 +108,13 @@ EXPECTED_ROUTES = [
 # Top 8 page (S4i); analysis* for the Statistics page's match list (S4k);
 # stats/overlays* for the Stats Display Settings page (S4l); players* and
 # players/<p>:load for the player list (S4m); api-catalog and connection for
-# the guides (ADR-005 S-final SF-3a); assets* for the asset packs (SF-3b).
+# the guides (ADR-005 S-final SF-3a); assets* for the asset packs (SF-3b);
+# access-token* for the API guide's token, the shared view's alone (SF-4a-1).
 EXPECTED_API_V1_ROUTES = [
+    # The access token: the shared view's own fetches only (ADR-005 S-final
+    # SF-4a-1, WebAccess.SHELL).
+    ('/api/v1/access-token', 'api_v1.get_access_token', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/access-token:regenerate', 'api_v1.access_token_regenerate', 'OPTIONS,POST'),
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
     # The API guide's catalogue (ADR-005 S-final SF-3a).
@@ -553,14 +558,23 @@ def test_the_classification_follows_the_rules():
               # from GitHub (SF-3b).
               "api_v1.get_assets_job",
               "api_v1.get_asset_packs"}
+    # The access token, read and replaced: this PC's own request carrying
+    # the secret the shell adds to the shared view's fetches (SF-4a-1).
+    shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
             expected = WebAccess.PLAYERDB
         if endpoint in thisPc:
             expected = WebAccess.THIS_PC
+        if endpoint in shell:
+            expected = WebAccess.SHELL
         assert access[endpoint] == expected, endpoint
     assert WebAccess.THIS_PC in WebAccess.GUARDED
+    assert WebAccess.SHELL in WebAccess.GUARDED
+    # No Socket.IO event is the shell's (a connection's grant is not a
+    # request's header).
+    assert WebAccess.SHELL not in WebAccess.EVENT_ACCESS.values()
     # A legacy route that takes a body changes something.
     for _rule, endpoint, methods in EXPECTED_ROUTES:
         if "POST" in methods.split(",") and not endpoint.startswith("designer_"):
@@ -601,7 +615,9 @@ def test_the_classification_follows_the_rules():
     # with it (S4ac-4: v1 76 of 118), the status' read (S-final SF-2: v1 76 of
     # 119), and the guides' catalogue read and their connection's this-PC read
     # (S-final SF-3a: v1 76 of 121), and the asset packs' list read and the
-    # job's this-PC read (S-final SF-3b: v1 76 of 123).
+    # job's this-PC read (S-final SF-3b: v1 76 of 123), and the access
+    # token's read and regeneration, the shell's (S-final SF-4a-1: v1 76 of
+    # 125).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -611,7 +627,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 123
+    assert len(EXPECTED_API_V1_ROUTES) == 125
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

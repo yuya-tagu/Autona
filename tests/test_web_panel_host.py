@@ -36,9 +36,11 @@ import logging
 import socket
 import threading
 import time
+from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer, QUrl
@@ -122,12 +124,70 @@ def _pageJs(page, expr):
     return reply["value"]
 
 
+# Every request the two servers below took, with the shell's header
+# (ADR-005 S-final SF-4a) and the headers the server's guard reads with it
+# (src/AutonaWebServer.py's _authorize: Sec-Fetch-Site, Host, Origin; None
+# when absent). "panel" is the shared view's server (_ServerUrl points at
+# it), "frame" another origin's (the design previews' stand-in).
+Seen = namedtuple("Seen", "server method path shell site host origin")
+SEEN = []
+
+
+def _record(server, handler):
+    headers = handler.headers
+    SEEN.append(Seen(server, handler.command, handler.path,
+                     headers.get(WebAccess.SHELL_HEADER),
+                     headers.get("Sec-Fetch-Site"), headers.get("Host"),
+                     headers.get("Origin")))
+
+
+# The panel server hands the access token's routes to the real app when a
+# test puts its Flask test client here (test_the_guard_takes_the_shared_
+# views_fetch_as_the_shells): the engine's own request, through the real
+# _guard_http_request.
+RELAY = {}
+RELAY_PREFIX = "/api/v1/access-token"
+
+
+def _relayed(handler, body=b""):
+    client = RELAY.get("client")
+    if client is None or not handler.path.startswith(RELAY_PREFIX):
+        return False
+    port = handler.server.server_address[1]
+    headers = [(name, value) for name, value in handler.headers.items()
+               if name.lower() not in ("host", "content-length")]
+    # As werkzeug's server makes the environ: SERVER_PORT the port it
+    # listens on, the Host header as the client sent it.
+    answer = client.open(
+        handler.path, method=handler.command, headers=headers, data=body,
+        environ_overrides={"REMOTE_ADDR": handler.client_address[0],
+                           "SERVER_PORT": str(port),
+                           "HTTP_HOST": handler.headers.get("Host", "")})
+    payload = answer.get_data()
+    handler.send_response(answer.status_code)
+    handler.send_header("Content-Type", answer.headers.get(
+        "Content-Type", "application/json"))
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+    return True
+
+
+# What the panel server redirects (SF-4a: the header goes along with a
+# redirect, so the shell blocks a hop away from /api/v1/).
+REDIRECT_AWAY = "/api/v1/redirect-away?to="
+REDIRECT_HERE = "/api/v1/redirect-here"
+
+
 @pytest.fixture(scope="module")
 def panelServer():
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            _record("panel", self)
+            if _relayed(self) or self._Redirected():
+                return
             if not self.path.startswith("/favicon"):
                 requests.append(self.path)
             self.send_response(200)
@@ -136,6 +196,30 @@ def panelServer():
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(PAGE)
+
+        def do_POST(self):
+            _record("panel", self)
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            if _relayed(self, body):
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def _Redirected(self):
+            if self.path.startswith(REDIRECT_AWAY):
+                location = unquote(self.path[len(REDIRECT_AWAY):])
+            elif self.path == REDIRECT_HERE:
+                location = "/api/v1/landing-here"
+            else:
+                return False
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
 
         def log_message(self, *args):
             pass
@@ -205,6 +289,10 @@ class _Rig:
 def buildHost(qapp, panelServer, monkeypatch):
     port, requests = panelServer
     requests.clear()
+    SEEN.clear()
+    # Each test sees the interceptor's first failure of a kind as a warning.
+    monkeypatch.setattr(HostModule, "_shellFailures",
+                        WebAccess.RefusalLog(limit=16))
     # The gate is open, the port lookup is answered without the settings
     # file (rig.usePort() points it elsewhere), the Qt language is
     # Japanese, and there is a second panel to switch to -- and SCORE, whose
@@ -424,6 +512,7 @@ if (q.get('clip')) {
                function (e) { parent.postMessage('clip ' + e.name, '*'); });
   });
 }
+if (q.get('fetch')) { fetch(q.get('fetch'), {mode: 'no-cors'}); }
 </script></body></html>"""
 
 
@@ -433,6 +522,7 @@ def frameServer():
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            _record("frame", self)
             if not self.path.startswith("/favicon"):
                 requests.append(self.path)
             self.send_response(200)
@@ -899,6 +989,480 @@ def test_a_preview_frame_is_refused_the_clipboard(buildHost, frameServer,
                 assert f"refused {CLIPBOARD_PERMISSION}" in caplog.text
             else:
                 assert asked == [], use
+
+
+# ── the shell's secret (ADR-005 S-final SF-4a-1) ────────────────────────
+# The server's SHELL routes (the access token) take only a request that
+# carries core.WebAccess.SHELL_HEADER (tests/test_web_access.py). The page's
+# own request interceptor adds it to the fetch / XHR to /api/v1/ of this
+# server made by a document of this server's origin -- the main frame, and a
+# frame that inherits its origin (srcdoc, about:blank) -- while the main
+# frame is the Web UI there; not to its pictures, scripts or navigations, not
+# to a design preview's fetch, not to a fetch of another origin's, never in
+# another view on the same profile (the Designer's); and blocks a request
+# that carries it anywhere else (a redirect away).
+
+def _seen(path, server="panel"):
+    """The shell's header of each request of `path` the server took."""
+    return [s.shell for s in _records(path, server)]
+
+
+def _records(path, server="panel"):
+    return [s for s in SEEN if s.server == server and s.path == path]
+
+
+def _waitSeen(*paths, server="panel"):
+    assert _waitUntil(lambda: all(_seen(p, server) for p in paths)), (
+        [p for p in paths if not _seen(p, server)], SEEN)
+
+
+def test_the_secret_goes_with_the_main_frames_fetches_only(buildHost,
+                                                           frameServer):
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    framePort, _ = frameServer
+    rig.js("fetch('/api/v1/fetch-get'),"
+           " fetch('/api/v1/fetch-post', {method: 'POST', body: '{}'}),"
+           " (function () { var x = new XMLHttpRequest();"
+           "   x.open('GET', '/api/v1/xhr'); x.send(); })(),"
+           " (function () { var i = new Image(); i.src = '/api/v1/img';"
+           "   document.body.appendChild(i); })(),"
+           " (function () { var s = document.createElement('script');"
+           "   s.src = '/api/v1/script.js'; document.body.appendChild(s); })(),"
+           " fetch('/web/not-the-api'),"
+           f" fetch('http://127.0.0.1:{framePort}/api/v1/to-another-origin',"
+           "   {mode: 'no-cors'}), 0")
+    # A design preview's frame (another origin) fetching this server's API.
+    _frame(rig, f"http://127.0.0.1:{framePort}/frame?fetch=" + quote(
+        f"http://127.0.0.1:{port}/api/v1/from-a-preview", safe=""))
+    _waitSeen("/api/v1/fetch-get", "/api/v1/fetch-post", "/api/v1/xhr",
+              "/api/v1/img", "/api/v1/script.js", "/web/not-the-api",
+              "/api/v1/from-a-preview")
+    _waitSeen("/api/v1/to-another-origin", server="frame")
+    secret = WebAccess._shellSecret
+    assert secret and WebAccess.ShellSecretMatches(secret)
+
+    for path in ("/api/v1/fetch-get", "/api/v1/fetch-post", "/api/v1/xhr"):
+        assert _seen(path) == [secret], path
+    for path in ("/api/v1/img", "/api/v1/script.js", "/web/not-the-api",
+                 "/api/v1/from-a-preview",
+                 "/web/shell-check?desktop=1&lng=ja"):   # the navigation
+        assert _seen(path) == [None], path
+    assert _seen("/api/v1/to-another-origin", "frame") == [None]
+    # Nothing the frame server took carried it.
+    assert not [s for s in SEEN if s.server == "frame" and s.shell is not None]
+
+    # And what carries it is what the server's guard takes as the shell's
+    # (WebAccess.ShellRefusalReason / _AmbientRefusal): a same-origin fetch,
+    # Host this server's name and port, Origin absent or this server's.
+    own = f"http://127.0.0.1:{port}"
+    for path in ("/api/v1/fetch-get", "/api/v1/fetch-post", "/api/v1/xhr"):
+        (record,) = _records(path)
+        assert record.site == "same-origin", path
+        assert record.host == f"127.0.0.1:{port}", path
+        assert record.origin in (None, own), path
+    # Chromium sends Origin with a POST.
+    assert _records("/api/v1/fetch-post")[0].origin == own
+
+
+def _otherView(url):
+    # As AutonaDesignerWindow builds its own: a view on the default profile.
+    view = QWebEngineView()
+    loads = []
+    view.loadFinished.connect(loads.append)
+    view.resize(400, 300)
+    view.load(QUrl(url))
+    view.show()
+    assert _waitUntil(lambda: loads) and loads[-1] is True
+    return view
+
+
+def test_another_view_on_the_same_profile_never_gets_the_secret(buildHost):
+    # The interceptor is the page's, not the profile's: the Designer's view
+    # (/web?view=designer) and any other view of this server's Web UI on the
+    # default profile fetch without it.
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    rig.js("fetch('/api/v1/shared-view'), 0")
+    _waitSeen("/api/v1/shared-view")
+    assert _seen("/api/v1/shared-view") == [WebAccess._shellSecret]
+
+    for url, path in ((f"http://127.0.0.1:{port}/web?view=designer",
+                       "/api/v1/designer-view"),
+                      (f"http://127.0.0.1:{port}/web/second?desktop=1",
+                       "/api/v1/another-view")):
+        other = _otherView(url)
+        try:
+            assert other.page().profile() == rig.page.profile()
+            _pageJs(other.page(), f"fetch({json.dumps(path)}), 0")
+            _waitSeen(path)
+            assert _seen(path) == [None], url
+        finally:
+            other.close()
+            other.deleteLater()
+            QCoreApplication.sendPostedEvents(other, QEvent.Type.DeferredDelete)
+
+
+def test_the_secret_goes_on_after_the_page_is_discarded_and_reloaded(
+        buildHost):
+    rig = _shown(buildHost, discardAfterMs=200)
+    document = rig.js("window.__loadId")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == DISCARDED)
+    rig.reveal()
+    rig.waitLoaded(count=2)
+    assert rig.js("window.__loadId") != document
+
+    rig.js("fetch('/api/v1/after-the-reload'), 0")
+    _waitSeen("/api/v1/after-the-reload")
+    assert _seen("/api/v1/after-the-reload") == [WebAccess._shellSecret]
+
+
+def test_a_request_goes_on_without_the_secret_when_the_decision_raises(
+        buildHost, monkeypatch, caplog):
+    rig = _shown(buildHost)
+
+    def broken(*args):
+        raise RuntimeError("the decision broke")
+    monkeypatch.setattr(HostModule, "ShellHeaderWanted", broken)
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        for path in ("/api/v1/still-sent", "/api/v1/still-sent-again"):
+            rig.js(f"window.__answered = null, fetch({json.dumps(path)})"
+                   ".then(function (r) { window.__answered = r.status; }), 0")
+            assert _waitUntil(lambda: rig.js("window.__answered") == 200)
+    assert _seen("/api/v1/still-sent") == [None]
+    assert _seen("/api/v1/still-sent-again") == [None]
+    # One warning, however many requests it fails for (Qt asks for each).
+    assert _warnings(caplog, "could not tell whether a request is the "
+                             "shell's") == 1
+
+
+def _warnings(caplog, text):
+    return len([r for r in caplog.records
+                if r.levelno == logging.WARNING and text in r.getMessage()])
+
+
+def test_a_request_is_blocked_when_telling_whether_it_carries_the_secret_fails(
+        buildHost, monkeypatch, caplog):
+    # The safe side: a request not to carry the secret, which the shell
+    # cannot tell is free of it, does not go out. One wanted still carries
+    # it (that path never asks).
+    rig = _shown(buildHost)
+
+    def broken(info):
+        raise RuntimeError("the check broke")
+    monkeypatch.setattr(HostModule, "_CarriesShellHeader", broken)
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        rig.js("window.__failed = [],"
+               " ['/web/blocked-one', '/web/blocked-two'].forEach("
+               "   function (p) { fetch(p).catch(function (e) {"
+               "     window.__failed.push(p); }); }),"
+               " fetch('/api/v1/still-carried'), 0")
+        _waitSeen("/api/v1/still-carried")
+        assert _waitUntil(lambda: rig.js("window.__failed.length") == 2)
+    assert _seen("/api/v1/still-carried") == [WebAccess._shellSecret]
+    _waitUntil(lambda: False, timeout=0.5)
+    assert _seen("/web/blocked-one") == [] and _seen("/web/blocked-two") == []
+    assert _warnings(caplog, "could not keep the shell's secret off a "
+                             "request; blocking it") == 1
+
+
+def test_the_interceptor_runs_on_the_ui_thread(buildHost, monkeypatch):
+    # Measured on PySide6 6.11 and relied on: nothing in it waits or locks.
+    rig = _shown(buildHost)
+    real = HostModule.ShellHeaderWanted
+    onMain = []
+
+    def recorded(*args):
+        onMain.append(threading.current_thread() is threading.main_thread())
+        return real(*args)
+    monkeypatch.setattr(HostModule, "ShellHeaderWanted", recorded)
+    rig.js("fetch('/api/v1/on-which-thread'), fetch('/web/also-asked'), 0")
+    _waitSeen("/api/v1/on-which-thread", "/web/also-asked")
+    assert len(onMain) >= 2 and all(onMain), onMain
+    assert _seen("/api/v1/on-which-thread") == [WebAccess._shellSecret]
+
+
+def _fetchIn(path):
+    return f"<script>fetch({json.dumps(path)})</script>"
+
+
+def test_a_frame_of_this_origin_gets_the_secret_too(buildHost):
+    # Recorded, not wished for: a frame that inherits the page's origin --
+    # srcdoc, the initial about:blank -- is a document of this server's
+    # origin, and its fetch carries the secret as the main frame's does (Qt
+    # does not say which frame asks; the initiator is that origin). So the
+    # Web UI never puts another party's HTML into one unsandboxed
+    # (.claude/rules/state-and-webserver.md). A sandboxed srcdoc (an opaque
+    # origin) gets none, and its fetch is not a same-origin one either.
+    rig = _shown(buildHost)
+    rig.js("(function (open, closed) {"
+           " var a = document.createElement('iframe'); a.srcdoc = open;"
+           " document.body.appendChild(a);"
+           " var s = document.createElement('iframe');"
+           " s.setAttribute('sandbox', 'allow-scripts'); s.srcdoc = closed;"
+           " document.body.appendChild(s);"
+           " var b = document.createElement('iframe');"
+           " document.body.appendChild(b);"
+           " b.contentWindow.eval(\"fetch('/api/v1/blank-child')\");"
+           " return 1; })("
+           f"{json.dumps(_fetchIn('/api/v1/srcdoc-child'))},"
+           f" {json.dumps(_fetchIn('/api/v1/sandboxed-child'))})")
+    _waitSeen("/api/v1/srcdoc-child", "/api/v1/sandboxed-child",
+              "/api/v1/blank-child")
+    secret = WebAccess._shellSecret
+    assert _seen("/api/v1/srcdoc-child") == [secret]
+    assert _seen("/api/v1/blank-child") == [secret]
+    (sandboxed,) = _records("/api/v1/sandboxed-child")
+    assert sandboxed.shell is None
+    assert sandboxed.site != "same-origin"
+
+
+def test_the_guard_takes_the_shared_views_fetch_as_the_shells(buildHost,
+                                                              monkeypatch):
+    # The engine's own requests through the real guard and routes
+    # (_guard_http_request, api_v1's access-token routes; the panel server
+    # relays them, as werkzeug would serve them on that port): the shared
+    # view reads the token and regenerates it; another view on the same
+    # profile is refused.
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaWebServer import WebServer, _build_web_app
+
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
+    monkeypatch.setattr(SettingsManager, "loadFailed", False)
+    monkeypatch.setattr(WebAccess, "_token", None)
+    monkeypatch.setattr(WebServer, "_lan_hosts", ("192.0.2.10",))
+    monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
+    app, socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    monkeypatch.setattr(WebServer, "socketio", socketio)
+    monkeypatch.setitem(RELAY, "client", app.test_client())
+
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    rig.js("window.__answers = [], (function () {"
+           " function ask(path, init) {"
+           "   return fetch(path, init).then(function (r) {"
+           "     return r.json().then(function (b) {"
+           "       window.__answers.push({status: r.status,"
+           "         token: b.data ? b.data.token : null}); }); }); }"
+           " ask('/api/v1/access-token').then(function () {"
+           "   return ask('/api/v1/access-token:regenerate', {method: 'POST',"
+           "     headers: {'Content-Type': 'application/json'},"
+           "     body: JSON.stringify({confirm: true})}); });"
+           " })(), 0")
+    assert _waitUntil(lambda: rig.js("window.__answers.length") == 2)
+    assert rig.js("window.__answers.map(function (a) { return a.status; })"
+                  ) == [200, 200]
+    assert rig.js("!!window.__answers[0].token && window.__answers[0].token"
+                  " !== window.__answers[1].token") is True
+    assert rig.js("window.__answers[1].token") == WebAccess.Token()
+
+    other = _otherView(f"http://127.0.0.1:{port}/web/second?desktop=1")
+    try:
+        _pageJs(other.page(),
+                "window.__refused = null, fetch('/api/v1/access-token')"
+                ".then(function (r) { return r.json().then(function (b) {"
+                " window.__refused = [r.status, b.error.code]; }); }), 0")
+        assert _waitUntil(lambda: _pageJs(other.page(), "window.__refused"))
+        assert _pageJs(other.page(), "window.__refused") == [403, "FORBIDDEN"]
+    finally:
+        other.close()
+        other.deleteLater()
+        QCoreApplication.sendPostedEvents(other, QEvent.Type.DeferredDelete)
+    assert _seen("/api/v1/access-token") == [WebAccess._shellSecret, None]
+
+
+def test_a_redirect_away_does_not_carry_the_secret(buildHost, frameServer,
+                                                   caplog):
+    # Measured on PySide6 6.11: a header the interceptor added follows a
+    # redirect, to another origin as well. A hop that is not one to carry it
+    # is blocked; one that is (this server's /api/v1/) carries it again.
+    rig = _shown(buildHost)
+    framePort, frameRequests = frameServer
+    frameRequests.clear()
+    away = f"http://127.0.0.1:{framePort}/api/v1/landing-away"
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        rig.js("window.__failed = null,"
+               f" fetch({json.dumps(REDIRECT_AWAY + quote(away, safe=''))},"
+               "   {mode: 'no-cors'}).catch(function (e) {"
+               "   window.__failed = String(e); }),"
+               f" fetch({json.dumps(REDIRECT_HERE)}), 0")
+        _waitSeen("/api/v1/landing-here")
+        assert _waitUntil(lambda: rig.js("window.__failed"))
+        assert "blocked a request that carried the shell's secret" in (
+            caplog.text)
+    secret = WebAccess._shellSecret
+    assert _seen(REDIRECT_AWAY + quote(away, safe="")) == [secret]
+    assert _seen(REDIRECT_HERE) == [secret]
+    assert _seen("/api/v1/landing-here") == [secret]
+    _waitUntil(lambda: False, timeout=0.5)
+    assert "/api/v1/landing-away" not in frameRequests
+    assert secret not in caplog.text
+
+
+def test_the_main_frame_does_not_go_to_the_designers_view(buildHost):
+    # The Designer opens in its own window (a click: designerRequested); the
+    # shared view's main frame never shows it, so the secret never goes
+    # with its fetches.
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    served = len(rig.requests)
+    port = rig.servingPort
+    rig.js("void (location.href = '/web?view=designer')")
+    _waitUntil(lambda: False, timeout=1.0)
+    assert rig.js("window.__loadId") == document
+    assert len(rig.requests) == served
+    assert rig.page.refusedLast
+
+    N = QWebEnginePage.NavigationType
+    kinds = (N.NavigationTypeLinkClicked, N.NavigationTypeOther,
+             N.NavigationTypeRedirect, N.NavigationTypeFormSubmitted,
+             N.NavigationTypeBackForward, N.NavigationTypeTyped,
+             N.NavigationTypeReload)
+    for kind in kinds:
+        for path in ("/web?view=designer", "/web/board?view=designer",
+                     "/web/x?desktop=1&view=designer", "/web?vi%65w=designer",
+                     "/web?view=designer#x", "/web?view=other&view=designer"):
+            assert rig.page.acceptNavigationRequest(
+                QUrl(f"http://127.0.0.1:{port}{path}"), kind, True) is False, (
+                    path, kind)
+        for path in ("/web?view=other", "/web/board?desktop=1&lng=ja",
+                     "/web?viewer=designer"):
+            assert rig.page.acceptNavigationRequest(
+                QUrl(f"http://127.0.0.1:{port}{path}"), kind, True) is True, (
+                    path, kind)
+
+
+SHELL_SERVER = QUrl("http://127.0.0.1:5107/")
+WEB_UI = "http://127.0.0.1:5107/web/board?desktop=1&lng=ja"
+OWN = "http://127.0.0.1:5107"
+
+
+def _wanted(request, initiator=OWN, firstParty=WEB_UI,
+            kind=HostModule.SHELL_RESOURCE_TYPE, server=SHELL_SERVER):
+    return HostModule.ShellHeaderWanted(
+        QUrl(request), QUrl(initiator), QUrl(firstParty), kind, server)
+
+
+def test_the_secret_is_wanted_for_this_servers_api_fetches_only():
+    api = "http://127.0.0.1:5107/api/v1/access-token"
+    assert _wanted(api) is True
+    assert _wanted("http://127.0.0.1:5107/api/v1/access-token:regenerate")
+    assert _wanted(api, firstParty="http://127.0.0.1:5107/web") is True
+    assert _wanted(api, firstParty="http://127.0.0.1:5107/web?view=other")
+    # The default port is no port.
+    assert _wanted("http://127.0.0.1/api/v1/x", initiator="http://127.0.0.1:80",
+                   firstParty="http://127.0.0.1/web/board",
+                   server=QUrl("http://127.0.0.1:80/")) is True
+
+    # Only a fetch / XHR.
+    for kind in ("ResourceTypeMainFrame", "ResourceTypeSubFrame",
+                 "ResourceTypeImage", "ResourceTypeScript",
+                 "ResourceTypeStylesheet", "ResourceTypePing",
+                 "ResourceTypeServiceWorker", "ResourceTypeUnknown", ""):
+        assert _wanted(api, kind=kind) is False, kind
+    # Only this server's origin, as the host loads it, and its /api/v1/.
+    for request in ("http://localhost:5107/api/v1/x",
+                    "http://192.168.1.5:5107/api/v1/x",
+                    "http://127.0.0.1:5108/api/v1/x",
+                    "https://127.0.0.1:5107/api/v1/x",
+                    "http://evil.example/api/v1/x",
+                    "http://127.0.0.1:5107/api/v1",
+                    "http://127.0.0.1:5107/api/v2/x",
+                    "http://127.0.0.1:5107/api/v1/../../layout/a.js",
+                    "http://127.0.0.1:5107/layout/a/index.html",
+                    "http://127.0.0.1:5107/web/board",
+                    "http://127.0.0.1:5107/",
+                    "file:///C:/api/v1/x", "data:text/plain,a", ""):
+        assert _wanted(request) is False, request
+    # Started by a document of this origin: not a preview's frame.
+    for initiator in ("http://127.0.0.1:5108", "http://localhost:5107",
+                      "https://127.0.0.1:5107", "null", "", "about:blank"):
+        assert _wanted(api, initiator=initiator) is False, initiator
+    # While the main frame is the Web UI on this origin, not the Designer.
+    for firstParty in ("http://127.0.0.1:5107/layout/a/index.html",
+                       "http://127.0.0.1:5107/",
+                       "http://127.0.0.1:5107/webx",
+                       "http://127.0.0.1:5107/web/%2e%2e/layout/a.html",
+                       "http://127.0.0.1:5107/web?view=designer",
+                       "http://127.0.0.1:5107/web/board?a=1&view=designer",
+                       "http://127.0.0.1:5107/web?vi%65w=design%65r",
+                       "http://127.0.0.1:5108/web/board",
+                       "http://localhost:5107/web/board",
+                       "about:blank", ""):
+        assert _wanted(api, firstParty=firstParty) is False, firstParty
+    # No server to compare with: nothing.
+    assert _wanted(api, server=QUrl()) is False
+
+
+def _srcTrees():
+    root = Path(__file__).resolve().parent.parent / "src"
+    for path in sorted(root.rglob("*.py")):
+        yield path.relative_to(root.parent).as_posix(), ast.parse(
+            path.read_text(encoding="utf-8"))
+
+
+def _calledName(call):
+    func = call.func
+    return func.attr if isinstance(func, ast.Attribute) else (
+        func.id if isinstance(func, ast.Name) else None)
+
+
+def test_only_the_shared_views_interceptor_issues_the_secret():
+    # Headless never imports the shared view, so it never issues one and
+    # every SHELL request is refused there (tests/test_web_access.py).
+    callers = set()
+    for path, tree in _srcTrees():
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and _calledName(node) == "IssueShellSecret"):
+                callers.add(path)
+    assert callers == {"src/AutonaWebPanelHost.py"}
+    # ... from the interceptor alone.
+    tree = ast.parse(Path(HostModule.__file__).read_text(encoding="utf-8"))
+    owners = set()
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
+        for node in ast.walk(cls):
+            if (isinstance(node, ast.Call)
+                    and _calledName(node) == "IssueShellSecret"):
+                owners.add(cls.name)
+    assert owners == {"_ShellRequestInterceptor"}
+
+
+def test_the_interceptor_is_the_pages_and_nothing_injects_script():
+    # The page's own (self.setUrlRequestInterceptor in _PanelPage), never a
+    # profile's -- the Designer's view shares the default profile -- and no
+    # QWebEngineScript hands a page anything (SF-4a's rejected way).
+    setters = []
+    for path, tree in _srcTrees():
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            for node in ast.walk(cls):
+                if (isinstance(node, ast.Call) and _calledName(node)
+                        == "setUrlRequestInterceptor"):
+                    target = node.func.value
+                    setters.append((path, cls.name, isinstance(
+                        target, ast.Name) and target.id == "self"))
+        for node in ast.walk(tree):
+            assert not (isinstance(node, (ast.Name, ast.Attribute)) and (
+                getattr(node, "id", None) == "QWebEngineScript"
+                or getattr(node, "attr", None) == "QWebEngineScript")), path
+            assert not (isinstance(node, ast.alias)
+                        and node.name == "QWebEngineScript"), path
+    assert setters == [("src/AutonaWebPanelHost.py", "_PanelPage", True)]
+    for path, tree in _srcTrees():
+        for node in ast.walk(tree):
+            assert not (isinstance(node, ast.Call) and _calledName(node)
+                        == "setUrlRequestInterceptor"
+                        and not isinstance(node.func.value, ast.Name)), path
+
+
+def test_the_page_holds_its_interceptor(buildHost):
+    rig = _shown(buildHost)
+    interceptor = rig.page._shellInterceptor
+    assert isinstance(interceptor, HostModule._ShellRequestInterceptor)
+    assert interceptor.parent() is rig.page
 
 
 # ── a new window goes to the default browser (ADR-005 S4r) ──────────────
