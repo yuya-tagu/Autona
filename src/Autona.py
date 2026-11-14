@@ -186,7 +186,6 @@ bootstrap_core()
 bootstrap_gui()
 
 # autopep8: off
-from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .core.ColorService import SeedColorState
@@ -258,10 +257,11 @@ class Window(QMainWindow):
     STATE_VERSION = 22
     # The Help & Settings menu's pages (ADR-005 S4af: Settings; S-final
     # SF-4a-2: the API reference & tester, the Companion and OBS guides and
-    # About, the Qt windows until then): React panels in the shared view,
+    # About, the Qt windows until then; SF-4b-2: Add game assets, the Qt
+    # dialog until then): React panels in the shared view,
     # not sidebar items (OpenMenuPage). Stack pages after the items', in
     # this order: Settings first, so every page from it on is a menu page.
-    MENU_PAGES = ("settings", "api", "companion", "obs", "about")
+    MENU_PAGES = ("settings", "api", "companion", "obs", "about", "assets")
     signals = WindowSignals()
 
     def __init__(self):
@@ -569,14 +569,6 @@ class Window(QMainWindow):
         # Former Edit / API Settings / Help menus, merged into one dropdown.
         helpMenu = QMenu(self)
 
-        # Lazy dialog slot (startup Step 4a). The game asset guide window is
-        # not built during startup: its Ensure*Window() accessor constructs
-        # it on first open and keeps it afterwards, so state survives
-        # close/reopen. Settings (ADR-005 S4af), the API / Companion / OBS
-        # guides and About (S-final SF-4a-2) are React pages in the shared
-        # view (OpenMenuPage); their Qt windows were among these.
-        self._gameAssetGuideWindow = None
-
         action = helpMenu.addAction(
             QApplication.translate("Settings", "Settings"))
         action.setIcon(QIcon(UI.icon_path('settings.svg')))
@@ -589,12 +581,11 @@ class Window(QMainWindow):
 
         helpMenu.addSeparator()
 
-        # Guidance for obtaining game assets (not bundled — see A2/copyright).
-        # Built on first open (see EnsureGameAssetGuideWindow).
+        # Guidance for obtaining game assets (not bundled — see A2/copyright):
+        # the /web/assets page of the shared view (ADR-005 S-final SF-4b-2).
         action = helpMenu.addAction(
             QApplication.translate("app", "Add game assets"))
-        action.triggered.connect(
-            lambda: self.EnsureGameAssetGuideWindow().show())
+        action.triggered.connect(lambda: self.OpenMenuPage("assets"))
 
         # Program / game-asset / tournament-term language selectors moved to
         # the Settings page (Help & Settings → Settings → Language).
@@ -1249,35 +1240,6 @@ class Window(QMainWindow):
             self._EnsurePanelAt(current)
         return panel
 
-    # ── Lazy guide dialogs (startup Step 4a) ─────────────────────────────
-    # The game asset guide is only reachable from a menu entry, so building
-    # it during startup charged every launch for UI nobody had asked for. It
-    # is constructed on first access and reused from then on, which keeps
-    # the previous behaviour of a single long-lived instance (state survives
-    # close/reopen). The API / Companion / OBS guides were dialogs here too
-    # until ADR-005 S-final SF-4a-2 (menu pages now: OpenMenuPage).
-
-    def _EnsureLazyWindow(self, attr, factory):
-        """Build the dialog held in `attr` on first access; return it.
-
-        The slot is filled *before* UiMounted() runs so that a re-entrant
-        call during the build (nested event dispatch) reuses the same object
-        instead of constructing a second dialog (agent-pitfalls #9).
-        """
-        window = getattr(self, attr)
-        if window is None:
-            window = factory(self)
-            setattr(self, attr, window)
-            window.UiMounted()
-            # Startup applies the tab-bar policy to every child that exists
-            # at that point; dialogs born later need the same treatment.
-            self._ApplyTabBarPolicy(window)
-        return window
-
-    def EnsureGameAssetGuideWindow(self):
-        return self._EnsureLazyWindow(
-            "_gameAssetGuideWindow", AutonaGameAssetGuideWindow)
-
     def _ApplyTabBarPolicy(self, root):
         """Show full tab labels ("…" elision off) and scroll on overflow."""
         for bar in root.findChildren(QTabBar):
@@ -1531,12 +1493,12 @@ class Window(QMainWindow):
                 action.triggered.connect(
                     lambda _checked=False, g=idx: self._pickGame(g))
                 self._gameActions[idx] = action
-            # Shortcut to the same "Add game assets" guide as Help & Settings,
+            # Shortcut to the same "Add game assets" page as Help & Settings,
             # so assets can be added right where a game is picked.
             self.gameMenu.addSeparator()
             self.gameMenu.addAction(
                 QApplication.translate("app", "Add game assets")).triggered.connect(
-                lambda: self.EnsureGameAssetGuideWindow().show())
+                lambda: self.OpenMenuPage("assets"))
             self.SetGame()
 
     def ToggleAlwaysOnTop(self, checked):

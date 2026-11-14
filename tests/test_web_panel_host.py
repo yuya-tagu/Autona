@@ -3596,7 +3596,7 @@ class _FakeSidebar:
 
 
 (EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT,
- SETTINGS, API, COMPANION, OBS, ABOUT) = range(12)
+ SETTINGS, API, COMPANION, OBS, ABOUT, ASSETS) = range(13)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -3943,7 +3943,8 @@ def test_the_settings_page_asked_for_while_the_window_closes_does_nothing(qapp):
 
 @pytest.mark.parametrize("name, page", [("api", API),
                                         ("companion", COMPANION),
-                                        ("obs", OBS), ("about", ABOUT)])
+                                        ("obs", OBS), ("about", ABOUT),
+                                        ("assets", ASSETS)])
 def test_a_menu_page_shows_the_host_with_no_item_highlighted(qapp, name,
                                                              page):
     rig = _WindowRig()
@@ -4027,7 +4028,8 @@ def test_only_a_menu_page_is_opened_as_one(qapp):
     assert w._webPanelHost._panel == "stream"
 
 
-@pytest.mark.parametrize("name", ["api", "companion", "obs", "about"])
+@pytest.mark.parametrize("name", ["api", "companion", "obs", "about",
+                                  "assets"])
 def test_a_menu_page_asked_for_while_the_window_closes_does_nothing(
         qapp, name):
     rig = _WindowRig()
@@ -4050,7 +4052,8 @@ def test_the_menu_opens_its_pages():
     # (the rig above does what _BuildUi does) and none a sidebar item: the
     # saved sidebar index does not move, so STATE_VERSION stays.
     pages = _menuPages()
-    assert pages == ("settings", "api", "companion", "obs", "about")
+    assert pages == ("settings", "api", "companion", "obs", "about",
+                     "assets")
     assert all(WebAccess.IsWebPanel(name) for name in pages)
     source = _autonaSource()
     assert "for key in self.MENU_PAGES:" in source
@@ -4068,13 +4071,14 @@ def test_the_menu_opens_its_pages():
 
     # The menu's entries: each asks for its page by name (Settings through
     # OpenSettings), nothing else opens one.
+    # (Add game assets has two entries: Help & Settings and the game menu.)
     opened = sorted(
         node.args[0].value for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "OpenMenuPage"
         and node.args and isinstance(node.args[0], ast.Constant))
-    assert opened == sorted(pages), opened
+    assert opened == sorted([*pages, "assets"]), opened
     # The API Settings submenu's entries are the app's strings now (the
     # "api" context went with the API window).
     for text in ("API Settings", "Open reference & tester",
@@ -4385,16 +4389,19 @@ def test_the_qt_settings_window_is_gone():
 
 # The Qt guide windows (ADR-005 S-final SF-4a-2): the API reference &
 # tester, the Companion and OBS guides; and the About box. Pages now
-# (web/src/GuidePages/, the menu's Window.OpenMenuPage).
+# (web/src/GuidePages/, the menu's Window.OpenMenuPage). The Add game assets
+# dialog went the same way in SF-4b-2 (web/src/AssetsPage/, /web/assets).
 QT_GUIDE_MODULES = ("AutonaApiInfoWindow", "AutonaIntegrationGuideWindow",
-                    "AutonaObsGuideWindow")
+                    "AutonaObsGuideWindow", "AutonaGameAssetGuideWindow")
 # What went with them: the window's accessors and slots, the About box, and
 # the Settings page's own opener and memory (OpenMenuPage's now).
 QT_GUIDE_NAMES = (*QT_GUIDE_MODULES, "EnsureApiInfoWindow",
                   "EnsureCompanionGuideWindow", "EnsureObsGuideWindow",
                   "_apiInfoWindow", "_companionGuideWindow",
                   "_obsGuideWindow", "ShowAboutDialog",
-                  "_CreateSettingsPanel", "_navBeforeSettings")
+                  "_CreateSettingsPanel", "_navBeforeSettings",
+                  "EnsureGameAssetGuideWindow", "_gameAssetGuideWindow",
+                  "_EnsureLazyWindow")
 # The menu's API Settings entries, now the app context's (en, ja).
 GUIDE_MENU_STRINGS = {
     "Open reference & tester": "リファレンス・テスターを開く",
@@ -4423,9 +4430,9 @@ def test_the_qt_guide_windows_are_gone():
              sorted(_codeNames(path) & set(QT_GUIDE_NAMES))
              for path in sorted(src.rglob("*.py"))}
     assert {path: names for path, names in users.items() if names} == {}
-    # The game asset guide stays a lazy Qt window.
-    assert (src / "AutonaGameAssetGuideWindow.py").exists()
-    assert "EnsureGameAssetGuideWindow" in _codeNames(src / "Autona.py")
+    # Add game assets is a menu page now; the window's translations went
+    # with it, but the menu's two entries keep their app-context text.
+    assert "assets" in _menuPages()
 
     # The translations: no "api" context, nothing located in the windows'
     # files; the menu's entries in the app context, translated in ja.

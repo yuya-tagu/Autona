@@ -571,7 +571,8 @@ def FramedElsewhere(fetchDest, fetchSite):
 # "scoreboard" is スコアボード入力 (S4aa); "settings" is 設定 (S4af: the Help &
 # Settings menu's, not a sidebar item); "api" / "companion" / "obs" are the
 # API reference & tester and the Companion and OBS guides, "about" is About
-# Autona (S-final SF-4a-2: the menu's too, the Qt windows until then).
+# Autona (S-final SF-4a-2: the menu's too, the Qt windows until then); "assets" is
+# Add game assets (SF-4b-2: the menu's too).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -590,6 +591,7 @@ WEB_PANELS = frozenset({
     "companion",
     "obs",
     "about",
+    "assets",
 })
 
 

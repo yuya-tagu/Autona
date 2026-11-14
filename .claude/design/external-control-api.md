@@ -131,7 +131,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8）。選手 DB への保存（§6.26）では、mains のゲームが今のゲームと違う / もっと新しい保存に負けた。ゲームアセットのジョブ（§7）は別のジョブが走っている（`reason: "busy"`）。ZIP のアップロード（§6.48）は届いている最中に新しいアップロードに置き換えられた（`reason: "superseded"`） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3）。ゲームアセット: ZIP のアップロード（§6.48）でこの PC の空き容量が足りない（`reason: "disk_full"`）・インストール（§7）で索引が読み込まれていない（`index_unavailable`） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）とゲームアセットの ZIP のアップロード（下）だけ。画像: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ZIP のアップロード（§6.48。ADR-005 S-final SF-4b-1）: 8 GiB（`MAX_UPLOAD_BYTES`）で、`Content-Length` が上限を超えるとルートは本文を読まずに断る（`reason: "too_large"`）。werkzeug の開発サーバーは答えた後、本文が届き続けるあいだ読み捨てる（最大 10 GB。ディスクには書かない。その間は要求のスレッドを 1 本占有する）ので、クライアントには 413 が届く。ページが送る前に大きさを確かめるのは無駄な転送を省くため。空き容量の不足は `413` ではなく `409 NOT_READY`（`reason: "disk_full"`）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない。アップロードは要求ごとの `request.max_content_length`） |
+| `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）とゲームアセットの ZIP のアップロード（下）だけ。画像: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返しても werkzeug の開発サーバーが答えの後に、次のデータが 10 ms 以内に届き続ける限り最大 10 GB まで読み捨てるので、ふつうに送るクライアントには 413 が届く。送信の極端に遅いクライアントには接続のリセットが届く余地がある。ルートは最後まで読んでから断る）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ZIP のアップロード（§6.48。ADR-005 S-final SF-4b-1）: 8 GiB（`MAX_UPLOAD_BYTES`）で、`Content-Length` が上限を超えるとルートは本文を読まずに断る（`reason: "too_large"`）。werkzeug の開発サーバーは答えた後、本文が届き続けるあいだ読み捨てる（最大 10 GB。ディスクには書かない。その間は要求のスレッドを 1 本占有する）ので、クライアントには 413 が届く。ページが送る前に大きさを確かめるのは無駄な転送を省くため。空き容量の不足は `413` ではなく `409 NOT_READY`（`reason: "disk_full"`）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない。アップロードは要求ごとの `request.max_content_length`） |
 | `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）、v1 の試合サムネイルの描画（`POST /thumbnail:preview` / `:generate`。ADR-005 S4o。設定の読み書きと `GET /thumbnail/preview` は答える）。message は `not available in headless`。デスクトップでこれらに答えるのはシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y でスコアボード dock から移した）: legacy のサムネイルはボードを構築しない（`ThumbnailService.DrawBoard` を同期で呼ぶ。未構築のボードを state のまま描き、シード・反映待ち・取り直しの停止を起こさない。クルーボードは 500 のまま、ボード 3 も構築しなくなった）。**ADR-005 S4ab-2 から、セット選択を開く操作は Qt の窓ではなくページのセット選択のダイアログを開く**（Qt の窓と退路の設定 `general.qt_scoreboard_panel` は S4ac-3 で削除。それまでの退路の Qt モードでは窓を開き、未構築のボードを先に構築していた）: メインウィンドウを前に出して（最小化からも戻す。外部からの依頼では Windows がタスクバーの点滅で止めることがある）SCORE に切り替え、ページはボード 1 / 2 で大会があるときだけダイアログを開く（無ければページを見せるだけ）。ボードは構築しない（ダイアログからの読み込みは v1 の `:load-set` が準備する）。`n` が今の形式のボードでないとき（1v1 での `/scoreboard2-open-set` など）は何も開かずログだけ。どちらでも答えは今までどおり 200 `OK`（Socket.IO は `open_set` に `OK`）で、ダイアログが開いたかは答えに出ない（窓のころから出なかった）。クルーボード（`/scoreboard3-open-set`）は 500 のまま。メインウィンドウができる前の依頼は何も開かずログだけ（S4ac-3。それまでは Qt の窓を開いた）。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
@@ -819,7 +819,7 @@ API / Companion / OBS のガイドのページ（`/web/api`・`/web/companion`�
 
 ### 5.27 `GET /api/v1/assets/packs`（2026-11-14 追加・ADR-005 S-final SF-3b）
 
-「ゲームアセットを追加」ウィンドウ（SF-4b で `/web/assets` のページになる）が出すパックの一覧。上流（`joaorb64/StreamHelperAssets` の `assets.json`）の索引と、`user_data/games` にインストール済みのゲーム。**`THIS_PC` 区分**（ローカルのパスは含まないが、読むと GitHub から索引を取りにいくことがあるので、LAN の他端末やプレビューのリスナーからは起こさせない）
+「ゲームアセットを追加」のページ（`/web/assets`。ADR-005 S-final SF-4b-2 で Qt のウィンドウから置き換え）が出すパックの一覧。上流（`joaorb64/StreamHelperAssets` の `assets.json`）の索引と、`user_data/games` にインストール済みのゲーム。**`THIS_PC` 区分**（ローカルのパスは含まないが、読むと GitHub から索引を取りにいくことがあるので、LAN の他端末やプレビューのリスナーからは起こさせない）
 
 ```json
 { "ok": true, "data": {
@@ -839,7 +839,7 @@ API / Companion / OBS のガイドのページ（`/web/api`・`/web/companion`�
 
 ### 5.28 `GET /api/v1/assets/job`（2026-11-14 追加・ADR-005 S-final SF-3b）
 
-最後のゲームアセットのジョブの状態（ジョブを始めるのは「ゲームアセットを追加」ウィンドウと、§7 の `POST /assets:importZip` / `POST /assets/packs:install`。ADR-005 S-final SF-4b-1）。**`SHELL` 区分**（§2.2。メッセージがこの PC のパスを含みうる。SF-3b では `THIS_PC` で、SF-4b-1 でジョブの開始と一緒にシェルの秘密の下に移した。読み手は共有ビューのページだけ）。`Cache-Control: no-store`
+最後のゲームアセットのジョブの状態（ジョブを始めるのは §7 の `POST /assets:importZip` / `POST /assets/packs:install`。ADR-005 S-final SF-4b-1）。**`SHELL` 区分**（§2.2。メッセージがこの PC のパスを含みうる。SF-3b では `THIS_PC` で、SF-4b-1 でジョブの開始と一緒にシェルの秘密の下に移した。読み手は共有ビューのページだけ）。`Cache-Control: no-store`
 
 ```json
 { "ok": true, "data": {
@@ -1333,7 +1333,6 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.50 ゲームアセットのジョブのキャンセル `POST /api/v1/assets/job:cancel`（2026-11-14 追加・ADR-005 S-final SF-4b-1）
 - body: `{ "revision": <ジョブの revision> }`（§7 の開始の `data.job` か §5.28 の `revision`。1 以上の整数でなければ `400`。bool も不可）
 - そのジョブが走っていれば止めるよう頼み `{ "cancelled": true }`、走っていない（終わった・別のジョブが走っている）なら `{ "cancelled": false }`（別のジョブは止めない）。止まるのはジョブの次の区切り（チャンク・エントリ・ファイルの間）で、止まったかは §5.28 の `status: "cancelled"` で知る
-- 「ゲームアセットを追加」ウィンドウのキャンセルは今までどおり走っているジョブを止める（revision を問わない）
 - **`SHELL` 区分**・`no-store`
 
 ### 6.51 ゲームのフォルダを開く `POST /api/v1/assets/games-folder:reveal`（2026-11-14 追加・ADR-005 S-final SF-4b-1）
@@ -1408,11 +1407,11 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - 古いトークンはすぐ使えなくなる: LAN の HTTP の書き込みは `401`、古いトークンで入った Socket.IO の接続の書き込みイベントは `401 UNAUTHENTICATED`（`the token was regenerated; reconnect with the new one`）の ack で断る（接続と state の配信は続く。新しいトークンで接続し直す。この PC のトークンなしの接続は影響しない）
   - settings.json を読めず保存できないときは発行せず **`409 NOT_READY`**（`settings.json could not be read: no new token was issued`。今のトークンのまま）
   - 操作ログは `access-token.regenerate`（body のキー名だけ。トークンは出さない）
-- `assets:importZip`（ADR-005 S-final SF-4b-1）: §6.48 のアップロードを取り込むジョブを始める（ウィンドウの「ZIP から取り込む」と同じ `ImportZip`）。body: `{ "upload": "<id>", "overwrite": ["<置き換えるゲーム>"], "confirm": true }`。`overwrite` はアップロードの `conflicts` のうち置き換えるもの（無い・空なら、インストール済みのゲームは置き換えずに §5.28 の `skipped`）。`conflicts` に無い名前は `400`。`overwrite` が空でないときだけ `confirm: true` が要る（無ければ `409 CONFIRMATION_REQUIRED`）。**`SHELL` 区分**・`no-store`
+- `assets:importZip`（ADR-005 S-final SF-4b-1）: §6.48 のアップロードを取り込むジョブを始める（ページの「ZIP から取り込む」が呼ぶ `ImportZip`）。body: `{ "upload": "<id>", "overwrite": ["<置き換えるゲーム>"], "confirm": true }`。`overwrite` はアップロードの `conflicts` のうち置き換えるもの（無い・空なら、インストール済みのゲームは置き換えずに §5.28 の `skipped`）。`conflicts` に無い名前は `400`。`overwrite` が空でないときだけ `confirm: true` が要る（無ければ `409 CONFIRMATION_REQUIRED`）。**`SHELL` 区分**・`no-store`
   - 応答 `202`: `{ "accepted": true, "operation": "importZip", "job": <revision> }`（§2.8。結果は §5.28）。アップロードはジョブが取り出し、ジョブの終わり方によらずジョブが消す（同じ id でもう一度は取り込めない）。取り込みが始まらずに断られたとき（取り込みの前の検査で `not_a_zip` など）も消える。ジョブは書き込む前にもう一度、中央ディレクトリとエントリを検査する
   - エラー: `404 NOT_FOUND`（`reason: "unknown_upload"`: 取り込んだ・破棄した・置き換わった・期限切れ）、`409 CONFLICT`（`busy`。別のジョブが走っている。アップロードは同じ id で残る。取り込みの前の検査の間に別のジョブが始まったときも同じで、期限は延びない。その間に新しいアップロードが始まっていれば、それが置き換えたものとして消える）、`503 UNAVAILABLE`（`stopped`）
   - 操作ログはボディのキー名だけ（`assets.importZip`）
-- `assets/packs:install`（ADR-005 S-final SF-4b-1）: 上流の索引のゲームのパックを落として入れるジョブを始める（ウィンドウの「ダウンロード」と同じ `AssetPackService.Install`）。body: `{ "game": "<code>", "packs": ["full"], "confirm": true }`。`packs` が無い・null なら既定のパック（§5.27 の `default`）。**常に confirm**（ゲームのファイルを置き換え、GB 単位を落とすため）。**`SHELL` 区分**・`no-store`
+- `assets/packs:install`（ADR-005 S-final SF-4b-1）: 上流の索引のゲームのパックを落として入れるジョブを始める（ページの「ダウンロードして読み込む」が呼ぶ `AssetPackService.Install`）。body: `{ "game": "<code>", "packs": ["full"], "confirm": true }`。`packs` が無い・null なら既定のパック（§5.27 の `default`）。**常に confirm**（ゲームのファイルを置き換え、GB 単位を落とすため）。**`SHELL` 区分**・`no-store`
   - 索引はキャッシュにあるものだけを使い、この要求では取りにいかない。無ければ `409 NOT_READY`（`reason: "index_unavailable"`。先に §5.27 を読む）
   - 応答 `202`: `{ "accepted": true, "operation": "install", "job": <revision> }`
   - エラー: `400 INVALID_ARGUMENT`（`game` が空でない文字列でない・`packs` が文字列のリストでない・`reason` `unknown_pack` / `no_packs`）、`404 NOT_FOUND`（`unknown_game`）、`409 CONFLICT`（`busy`）、`409 NOT_READY`（`index_unavailable`）、`500 INTERNAL`（`bad_index`）

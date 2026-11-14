@@ -18,12 +18,16 @@ export interface ApiOptions {
     // Endpoints that proxy Start.gg (get-sets, load-set) can legitimately
     // take tens of seconds; pass a larger value there.
     timeoutMs?: number;
+    // Let the request outlive the page's unloading (a best-effort DELETE
+    // sent as the page goes away).
+    keepalive?: boolean;
 }
 
 async function request(path: string, init?: RequestInit, opts?: ApiOptions): Promise<Response> {
     const resp = await fetch(`${BASE_URL}${path}`, {
         signal: AbortSignal.timeout(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS),
         ...init,
+        ...(opts?.keepalive ? {keepalive: true} : {}),
         // The access token when this page was opened with one (ADR-005 S3a):
         // from another computer, writes need it. None on this PC. Merged
         // through Headers, so the caller's headers survive in any form.
@@ -35,22 +39,27 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
         // error code, for one whose refusals share a status (two 409s).
         throw Object.assign(
             new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${resp.status}`),
-            {status: resp.status, code: await errorCode(resp)});
+            {status: resp.status, ...await errorFields(resp)});
     }
     return resp;
 }
 
-// /api/v1's error envelope: {"ok": false, "error": {"code", "message"}}.
-async function errorCode(resp: Response): Promise<string | undefined> {
+// /api/v1's error envelope: {"ok": false, "error": {"code", "message",
+// "reason"?}}. `reason` is the finer fixed code some routes add (the game
+// asset routes: spec 2.5).
+async function errorFields(resp: Response): Promise<{code?: string; reason?: string}> {
     try {
-        const code = (await resp.json())?.error?.code;
-        return typeof code === "string" ? code : undefined;
+        const error = (await resp.json())?.error;
+        return {
+            code: typeof error?.code === "string" ? error.code : undefined,
+            reason: typeof error?.reason === "string" ? error.reason : undefined,
+        };
     } catch {
-        return undefined;
+        return {};
     }
 }
 
-export type ApiError = Error & {status?: number; code?: string};
+export type ApiError = Error & {status?: number; code?: string; reason?: string};
 
 export function apiErrorStatus(error: unknown): number | undefined {
     return (error as ApiError | null)?.status;
@@ -58,6 +67,10 @@ export function apiErrorStatus(error: unknown): number | undefined {
 
 export function apiErrorCode(error: unknown): string | undefined {
     return (error as ApiError | null)?.code;
+}
+
+export function apiErrorReason(error: unknown): string | undefined {
+    return (error as ApiError | null)?.reason;
 }
 
 export async function apiGetJson<T = unknown>(path: string, opts?: ApiOptions): Promise<T> {

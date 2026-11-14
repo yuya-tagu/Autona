@@ -51,7 +51,18 @@ export interface ShellAccessValue {
 export const ACCESS_TOKEN_PATH = "/api/v1/access-token";
 export const REGENERATE_PATH = "/api/v1/access-token:regenerate";
 
-export function useShellAccess(): ShellAccessValue {
+export interface ShellAccessOptions {
+    // Whether the hook keeps the access token (default true: the API
+    // page's). `false` is for a page that only needs to know it is the
+    // shared view (the game assets page, ADR-005 S-final SF-4b-2): the
+    // token the probe answers is dropped unread, so `token` is "" and
+    // `regenerate` refuses.
+    withToken?: boolean;
+}
+
+export function useShellAccess(
+    options: ShellAccessOptions = {}): ShellAccessValue {
+    const withToken = options.withToken !== false;
     const [access, setAccess] = React.useState<ShellAccess>("checking");
     const [answer, setAnswer] = React.useState<TokenAnswer>(
         {token: "", available: false});
@@ -71,8 +82,10 @@ export function useShellAccess(): ShellAccessValue {
         getWithRetry<Envelope<TokenAnswer>>(ACCESS_TOKEN_PATH, () => current)
             .then((body) => {
                 if (current) {
-                    setAnswer({token: body.data?.token ?? "",
-                               available: Boolean(body.data?.available)});
+                    setAnswer(withToken
+                        ? {token: body.data?.token ?? "",
+                           available: Boolean(body.data?.available)}
+                        : {token: "", available: false});
                     setAccess("shell");
                 }
             }, (error: unknown) => {
@@ -90,11 +103,14 @@ export function useShellAccess(): ShellAccessValue {
         return () => {
             current = false;
         };
-    }, [reads]);
+    }, [reads, withToken]);
 
     const retry = React.useCallback(() => setReads((count) => count + 1), []);
 
     const regenerate = React.useCallback(async () => {
+        if (!withToken) {
+            throw new Error("this page does not hold the access token");
+        }
         const text = await apiPost(REGENERATE_PATH, {confirm: true},
                                    WRITE_OPTIONS);
         const data = (JSON.parse(text) as Envelope<TokenAnswer>).data;
@@ -104,7 +120,7 @@ export function useShellAccess(): ShellAccessValue {
             setAnswer(next);
         }
         return next.token;
-    }, []);
+    }, [withToken]);
 
     return {access, token: answer.token, available: answer.available,
             retry, regenerate};

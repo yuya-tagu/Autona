@@ -8,8 +8,11 @@ Accepted
 
 Autona はゲームのキャラクター/ステージ画像を同梱しない（著作権のため。
 [user_data/games/README.md](../../user_data/games/README.md) / 公開準備時の判断）。
-代わりに「ゲームアセットを追加」ダイアログ
-（[src/AutonaGameAssetGuideWindow.py](../../src/AutonaGameAssetGuideWindow.py)）から、
+代わりに「ゲームアセットを追加」ページ
+（React の [web/src/AssetsPage/](../../web/src/AssetsPage/)、`/web/assets`。
+ADR-005 S-final SF-4b-2 で Qt のダイアログ `AutonaGameAssetGuideWindow` から置き換え。
+実体は [src/core/AssetPackService.py](../../src/core/AssetPackService.py)。
+フォルダの取り込みはページに無く、SF-5a のフォルダ選択まで一時的に無い。ZIP は取り込める）から、
 上流の公開ソース `joaorb64/StreamHelperAssets` の `assets.json` を参照して
 アセットパックをオンライン取得（または手持ちフォルダ/ZIP を取り込み）できる。
 

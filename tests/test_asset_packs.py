@@ -7,7 +7,6 @@ Every test runs in tmp_path (user_data/games is CWD-relative) on a stepped
 TaskExecutor of its own: a job runs when the test says (``run_next``).
 """
 import ast
-import concurrent.futures
 import json
 import os
 import shutil
@@ -1444,7 +1443,8 @@ def test_a_failed_download_installs_nothing(env, how):
 def test_a_cancel_during_the_download_installs_nothing(env):
     _upstream(env)
     env.net.pieces = 3
-    env.net.onChunk = lambda index: index == 1 and env.service.Cancel()
+    env.net.onChunk = lambda index: index == 1 and env.service.Cancel(
+        env.service.Job()["revision"])
 
     env.service.Install("ssbu", ["base_files", "full"])
     job = _run(env)
@@ -1454,7 +1454,7 @@ def test_a_cancel_during_the_download_installs_nothing(env):
     assert _staging(env.games) == []
     assert env.scans == []
     assert StatusService.Snapshot()["jobs"] == []
-    assert env.service.Cancel() is False        # nothing runs now
+    assert env.service.Cancel(env.service.Job()["revision"]) is False  # none runs
 
 
 def test_the_shutdown_during_a_job_stops_it_without_a_scan(env):
@@ -1683,15 +1683,6 @@ def test_callers_that_come_during_a_fetch_share_it(env):
     assert env.net.indexFetches() == 1
 
 
-def test_the_index_is_fetched_as_a_job_for_the_window(env):
-    _upstream(env)
-    future = env.service.FetchIndex()
-    assert env.net.indexFetches() == 0
-    assert env.executor.run_next(WAIT)
-    assert future.result(0) is True
-    assert env.net.indexFetches() == 1
-
-
 def test_the_list_offers_the_allowed_packs_and_the_installed_games(env):
     _upstream(env)
     env.net.index["aaa"] = {"name": "Zeta", "assets": {
@@ -1802,225 +1793,3 @@ def test_a_job_is_followed_through_v1(api, monkeypatch):
     assert data["revision"] == 1 and data["status"] == assets.DONE
     assert data["imported"] == ["ssbu"]
 
-
-# ── the window calls core ────────────────────────────────────────────────
-
-def test_the_window_has_no_thread_nor_network_of_its_own():
-    source = (Path(__file__).resolve().parent.parent / "src"
-              / "AutonaGameAssetGuideWindow.py").read_text(encoding="utf-8")
-    for gone in ("QThread", "import requests", "zipfile", "py7zr",
-                 "shutil", "tempfile", "_ALLOWED_PACKS"):
-        assert gone not in source, gone
-
-
-class _FakeService:
-    """What the window asks of AssetPackService, recorded."""
-
-    def __init__(self):
-        self.calls = []
-        self.future = concurrent.futures.Future()
-        self.job = {"revision": 0, "status": assets.IDLE}
-        self.payload = {"games": [
-            {"code": "ssbu", "name": "Smash", "available": True,
-             "installed": False, "packs": [
-                 {"name": "base_files", "size": 2048, "default": True},
-                 {"name": "full", "size": 4096, "default": True}]},
-            {"code": "local", "name": "Local", "available": False,
-             "installed": True, "packs": []}]}
-
-    def FetchIndex(self, refresh=False):
-        self.calls.append(("FetchIndex", refresh))
-        return self.future
-
-    def IndexState(self):
-        return {"status": assets.INDEX_READY, "error": None, "fetchedAt": 1}
-
-    def Packs(self, fetch=True, refresh=False):
-        self.calls.append(("Packs", fetch))
-        return self.payload
-
-    def Install(self, code, packs, fetch=True):
-        self.calls.append(("Install", code, list(packs), fetch))
-        return assets.STARTED, 1
-
-    def ImportFolder(self, path, overwrite=False):
-        self.calls.append(("ImportFolder", path, overwrite))
-        return assets.STARTED, 2
-
-    def ImportZip(self, path, overwrite=False, nameHint=None,
-                  removeAfter=False):
-        self.calls.append(("ImportZip", path, overwrite, removeAfter))
-        return assets.STARTED, 3
-
-    def Job(self):
-        return dict(self.job)
-
-    def Cancel(self):
-        self.calls.append(("Cancel",))
-        return True
-
-
-@pytest.fixture
-def window(qapp, monkeypatch, tmp_path):
-    from qtpy.QtWidgets import QMessageBox
-
-    from src.AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
-
-    monkeypatch.chdir(tmp_path)
-    fake = _FakeService()
-    monkeypatch.setattr(AssetPackService, "instance", fake)
-    shown = []
-    for kind in ("information", "warning"):
-        monkeypatch.setattr(
-            QMessageBox, kind,
-            lambda *args, _kind=kind, **kwargs: shown.append(
-                (_kind, args[2] if len(args) > 2 else "")))
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: QMessageBox.StandardButton.Yes)
-    w = AutonaGameAssetGuideWindow()
-    w.UiMounted()
-    w.fake, w.shown = fake, shown
-    try:
-        yield w
-    finally:
-        w._poll.stop()
-        if w._progressDialog is not None:
-            w._progressDialog.close()
-        w.deleteLater()
-
-
-def _finish(window, status=assets.DONE, **fields):
-    window.fake.job = {
-        "revision": window._jobRevision, "status": status,
-        "operation": None, "game": "ssbu", "stage": None, "pack": None,
-        "file": None, "done": 0, "total": 0, "imported": [], "skipped": [],
-        "failed": [], "error": None, "message": None} | fields
-    window._onPoll()
-
-
-def test_the_window_fetches_the_index_and_lists_it_from_core(window):
-    assert window.fake.calls == [("FetchIndex", False)]
-    window.fake.future.set_result(True)
-    window._onPoll()
-
-    assert ("Packs", False) in window.fake.calls       # never a fetch here
-    assert window._gameCombo.count() == 1              # available only
-    assert window._gameCombo.itemData(0) == "ssbu"
-    assert [cb.property("pack_name") for cb in window._packChecks] == [
-        "base_files", "full"]
-    assert window._indexFuture is None
-
-
-def test_the_window_downloads_through_core(window):
-    from qtpy.QtWidgets import QApplication
-
-    window.fake.future.set_result(True)
-    window._onPoll()
-    window._packChecks[0].setChecked(False)
-
-    window._startDownload()
-
-    assert window.fake.calls[-1] == ("Install", "ssbu", ["full"], False)
-    assert not window._btDownload.isEnabled()
-    assert not window._btImportFolder.isEnabled()
-    window.fake.job = window.fake.Job() | {
-        "revision": 1, "status": assets.RUNNING, "stage": assets.DOWNLOAD,
-        "game": "ssbu", "pack": "full", "file": "ssbu.full.7z.001",
-        "done": 2048, "total": 4096}
-    window._onPoll()
-    assert window._progressDialog.labelText() == \
-        "ssbu / full: ssbu.full.7z.001"
-    window._progressDialog.canceled.emit()
-    assert window.fake.calls[-1] == ("Cancel",)
-
-    _finish(window, assets.CANCELLED)
-    assert window._progressDialog is None
-    assert window._btImportZip.isEnabled()
-    QApplication.processEvents()
-
-
-def test_the_window_imports_a_folder_and_a_zip_through_core(
-        window, monkeypatch, tmp_path):
-    from qtpy.QtWidgets import QApplication, QFileDialog
-
-    _game(tmp_path / "user_data" / "games", "aaa")
-    _game(tmp_path / "src", "aaa")
-    _game(tmp_path / "src", "bbb")
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
-                        lambda *a, **k: str(tmp_path / "src"))
-
-    window._importFromFolder()
-
-    assert window.fake.calls[-1] == (
-        "ImportFolder", str(tmp_path / "src"), {"aaa"})
-    # A job: the buttons wait for it, the app keeps its cursor.
-    assert not window._btImportFolder.isEnabled()
-    assert QApplication.overrideCursor() is None
-    _finish(window, imported=["aaa", "bbb"])
-    assert window._btImportFolder.isEnabled()
-    assert window._importStatus.text().endswith("aaa, bbb")
-
-    path = _zip(tmp_path / "ccc.zip", _game_entries("x", prefix=""))
-    monkeypatch.setattr(QFileDialog, "getOpenFileName",
-                        lambda *a, **k: (path, "ZIP (*.zip)"))
-    window._importFromZip()
-    assert window.fake.calls[-1] == ("ImportZip", path, set(), False)
-    _finish(window, status=assets.ERROR, error=assets.NOT_A_ZIP,
-            message="broken")
-    assert QApplication.overrideCursor() is None
-    assert window.shown and window.shown[-1][0] == "warning"
-
-
-def test_the_window_asks_before_replacing_a_game_a_job_moved_aside(
-        window, monkeypatch, tmp_path):
-    from qtpy.QtWidgets import QFileDialog
-
-    # aaa is missing but moved aside: the job puts it back before it
-    # imports, so the window asks (the real ImportConflicts); bbb's copy is
-    # marked for removal, never put back.
-    games = tmp_path / "user_data" / "games"
-    _game(games / (assets.REPLACED_PREFIX + "aaa-x"), "aaa")
-    marked = games / (assets.REPLACED_PREFIX + "bbb-x")
-    _game(marked, "bbb")
-    _write(marked / assets.DISCARD_MARKER, b"")
-    for name in ("aaa", "bbb", "ccc"):
-        _game(tmp_path / "src", name)
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
-                        lambda *a, **k: str(tmp_path / "src"))
-
-    window._importFromFolder()
-
-    assert window.fake.calls[-1] == (
-        "ImportFolder", str(tmp_path / "src"), {"aaa"})
-    _finish(window, imported=["aaa", "bbb", "ccc"])
-
-
-@pytest.mark.parametrize("kind", ["download", "import"])
-def test_the_window_settles_its_job_when_a_newer_one_has_started(
-        window, monkeypatch, tmp_path, kind):
-    from qtpy.QtWidgets import QFileDialog
-
-    window.fake.future.set_result(True)
-    window._onPoll()
-    if kind == "download":
-        window._startDownload()
-        assert window._progressDialog is not None
-    else:
-        _game(tmp_path / "src", "aaa")
-        monkeypatch.setattr(QFileDialog, "getExistingDirectory",
-                            lambda *a, **k: str(tmp_path / "src"))
-        window._importFromFolder()
-    mine = window._jobRevision
-    # The window's job ended and another started between two polls.
-    window.fake.job = window.fake.Job() | {
-        "revision": mine + 1, "status": assets.RUNNING}
-    window._onPoll()
-
-    assert window._jobRevision is None and window._jobKind is None
-    assert window._progressDialog is None
-    assert window._btImportFolder.isEnabled()
-    status = window._onlineStatus if kind == "download" \
-        else window._importStatus
-    assert "unknown" in status.text()
-    window._onPoll()
-    assert not window._poll.isActive()             # no longer polled

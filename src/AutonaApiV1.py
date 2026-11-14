@@ -299,11 +299,12 @@ def _over_limit(max_body):
     """Whether the request's Content-Length is over `max_body`; if it is,
     the body is read to its end and dropped first.
 
-    Answering without reading it would leave the body unread on the socket:
-    werkzeug's server closes the connection after the answer, and a client
-    still sending then sees a connection reset instead of the 413 (the
-    server's own drain gives up after 10 ms of silence). werkzeug drains as
-    much on its own, so this costs no more than its policy, only reliably.
+    Answering without reading it would leave the body unread on the socket.
+    werkzeug's development server drains it on its own after the answer
+    (up to 10 GB, but only while the next data arrives within 10 ms), so a
+    client that sends steadily still gets the 413 and a very slow one may
+    see a connection reset instead; reading it here does that drain in the
+    route, to its end, rather than leaving it to the server's policy.
     A body without a Content-Length (chunked) is read as on every other
     route; the handler's own checks still refuse what is too large."""
     length = request.content_length

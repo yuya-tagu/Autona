@@ -177,7 +177,7 @@ Python が古い .pyc を使い続けて修正が反映されない。
 ## 13. 共有 QAbstractItemModel の再構築は「旧世代を retire」してから
 
 **今、`src/` に共有したり差し替えたりする Qt のモデルは無い（実例なし。Qt の一般則として残す）**（Qt のウィジェットが自分の中に持つモデル、
-たとえば `AutonaGameAssetGuideWindow` の編集可能な `QComboBox` とその `QCompleter` の内部のモデルはある。差し替えないので対象外）: アセットのモデル群
+たとえば編集可能な `QComboBox` とその `QCompleter` の内部のモデル（実例だった `AutonaGameAssetGuideWindow` は S-final SF-4b-2 で React のページ `/web/assets` になり削除した）は、差し替えなければ対象外）: アセットのモデル群
 （`AutonaGameAssetManager` の `characterModel` / `skinModels` / `variantModel` / `colorModel` と退避の `_retiredModels`）を
 Qt モデルの整理 PR4 で、選手の Qt モデルを PR3 で、国モデルを PR2 で削除した（どれも消費者の Qt のコンボが無くなっていた。
 React のページはカタログを Web の操作で読む）。Qt のモデルを新しく書くことがあれば、以下に従う。
