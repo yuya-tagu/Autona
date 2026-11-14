@@ -1386,3 +1386,131 @@ def test_a_new_start_starts_with_no_status_notice(flusher, monkeypatch):
     assert flusher.stop() is True
     assert _statusOnly(flusher) == []
 
+
+# ── the game list's notice (ADR-005 S-final SF-3a) ───────────────────────
+# A scan (the desktop's onLoadAssets, the headless loader's gamesScanned)
+# becomes one `games_changed` {}: no value (the client reads GET /games
+# again), to everyone (that GET is a READ), after the deltas and the other
+# notices of its flush, from the flusher -- the battle format's notice's
+# rules.
+
+GAMES = "games_changed"
+
+
+@pytest.fixture
+def scans(monkeypatch, debounce):
+    monkeypatch.setattr(WebServer, "_follow_notices", set())
+    monkeypatch.setattr(WebServer, "_battle_format_notice", False)
+    monkeypatch.setattr(WebServer, "_games_notice", False)
+    return debounce
+
+
+def _scannedAt(debounce, ms):
+    debounce._fireUntil(_at(ms))
+    debounce.clock.now = _at(ms)
+    WebServer.on_games_change()
+
+
+def test_a_games_notice_goes_out_at_once_to_everyone(scans):
+    _scannedAt(scans, 0)
+    scans._fireUntil(None)
+    assert scans.sent == [(0, GAMES, [{}], {})]
+
+
+def test_a_flush_tells_the_game_list_once(scans):
+    _scannedAt(scans, 0)
+    WebServer.on_games_change()
+    WebServer.on_games_change()
+    scans._fireUntil(None)
+    assert scans.sent == [(0, GAMES, [{}], {})]
+
+
+def test_a_games_notice_goes_after_the_deltas_and_the_other_notices(scans):
+    scans.arrive(0, _changes(1))
+    scans.arrive(10, _changes(2))
+    _scannedAt(scans, 20)
+    WebServer.on_battle_format_change("team")
+    WebServer.on_follow_change(1)
+    scans.arrive(30, _changes(3))
+    scans._fireUntil(None)
+
+    assert [(ms, event) for ms, event, _a, _k in scans.sent] == [
+        (0, "program_state_update"), (60, "program_state_update"),
+        (60, FOLLOW), (60, FORMAT), (60, GAMES)]
+
+
+def test_the_deltas_schedule_does_not_follow_a_games_notice(scans):
+    _scannedAt(scans, 0)
+    scans.arrive(10, _changes(1))
+    scans._fireUntil(None)
+    assert [(ms, event) for ms, event, _a, _k in scans.sent] == [
+        (0, GAMES), (10, "program_state_update")]
+
+
+def test_a_failed_games_notice_takes_nothing_with_it(scans):
+    scans.fail = RuntimeError("the socket said no")
+    _scannedAt(scans, 0)
+    scans._fireUntil(None)
+    scans.fail = None
+    # Not sent again: the next one is the next scan's.
+    scans._fireUntil(None)
+    assert scans.sent == []
+    _scannedAt(scans, 100)
+    scans._fireUntil(None)
+    assert scans.sent == [(100, GAMES, [{}], {})]
+
+
+def test_without_a_flusher_a_games_notice_is_not_kept(scans, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    WebServer.on_games_change()
+    assert WebServer._games_notice is False
+    assert scans.driver.due() is None
+
+
+def _gamesOnly(sends):
+    with sends.cond:
+        return [(event, payload) for _t, _at, event, payload in sends.sent
+                if event == GAMES]
+
+
+def test_the_flusher_sends_a_games_notice_on_its_own_thread(flusher):
+    flusher.start()
+    thread = WebServer._delta_thread
+
+    WebServer.on_games_change()
+
+    assert flusher.waitFor(1)
+    assert _gamesOnly(flusher) == [(GAMES, {})]
+    assert flusher.threads() == [thread]
+    assert flusher.stop() is True
+
+
+def test_a_new_start_starts_with_no_games_notice(flusher, monkeypatch):
+    flusher.start()
+    assert flusher.stop() is True
+    monkeypatch.setattr(WebServer, "_games_notice", True)
+
+    flusher.start()
+    WebServer.on_held_change("score.1")
+    assert flusher.waitFor(1)
+    assert flusher.stop() is True
+    assert _gamesOnly(flusher) == []
+
+
+def test_a_games_notice_is_queued_from_a_scan_thread(flusher):
+    # The shell's signal arrives on the main thread (queued from the scan
+    # job: tests/test_api_v1_guides.py), but the notice is only queued under
+    # _delta_cond, so a call from any thread is sent by the flusher alike.
+    flusher.start()
+    arrived = []
+
+    def scan():
+        WebServer.on_games_change()
+        arrived.append(flusher.waitFor(1, timeout=30))
+
+    thread = threading.Thread(target=scan, daemon=True)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive()
+    assert arrived == [True]
+    assert flusher.stop() is True

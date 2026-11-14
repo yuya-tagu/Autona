@@ -50,7 +50,8 @@
   - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
-- **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
+- **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
+  - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンはどの v1 ルートも返さない**（表示・再発行は API 設定ウィンドウだけ。ページ向けの経路は SF-4a で、共有ビューのメインフレームにだけシェルが渡す秘密を求める形で設計する）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -202,7 +203,7 @@
 
 ## 4. WebSocket 購読（既存を流用）
 
-- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 3 つ（`scoreboard_pending`（§5.15。ADR-005 S4u）・`scoreboard_follow`（§5.17。ADR-005 S4v）・`battle_format`（§5.21。ADR-005 S4z））と、アプリの実行中の仕事を運ぶ `status`（§5.23。ADR-005 S-final SF-2。state ではない）だけ。公開値の配信は変わらない。
+- 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。例外は値を運ばない通知 4 つ（`scoreboard_pending`（§5.15。ADR-005 S4u）・`scoreboard_follow`（§5.17。ADR-005 S4v）・`battle_format`（§5.21。ADR-005 S4z）・`games_changed`（§5.26。ADR-005 S-final SF-3a））と、アプリの実行中の仕事を運ぶ `status`（§5.23。ADR-005 S-final SF-2。state ではない）だけ。公開値の配信は変わらない。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
   - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
@@ -227,6 +228,8 @@
 | `GET /api/v1/battle-format` | 対戦形式と、それが表示するボード（§5.21。2026-11-10 追加。変わると Socket.IO の `battle_format` が出る: S4z） | `get_battle_format`（`AutonaActions.ResolveBattleFormat`） | — |
 | `GET /api/v1/settings` | 設定ページの設定とホットキー（§5.22。許可リストで、トークンは返さない。2026-11-11 追加。`defaults` は 2026-11-13） | `get_settings`（`core/AppSettings.Describe` + `core/HotkeyRules.Describe`） | — |
 | `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
+| `GET /api/v1/connection` | Web サーバーの URL（LAN / ループバック）・ポート・`out/` の絶対パス（§5.25。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_connection`（`WebServer.Serving` / `LanOnAtRestart`） | — |
+| `GET /api/v1/api-catalog` | API 設定ウィンドウのエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -741,6 +744,54 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 - 値は**送る時点の最新**: 1 回の送信の間に何度変わっても 1 通。`program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow`・`battle_format` の後に送る。`scoreboard_pending` と同じく自分の静かな間隔（50 ms）を持ち、続けて変わると窓ごとに 1 通（ロードの進み具合）。delta の間隔は動かさない
 - GET の答えと通知のうち `revision` の大きい方が新しい。再接続の後は（再起動で 0 から数え直すので）次に届いたものをそのまま使う（接続の直後に届く）
 - ヘッドレスでも出る（`StatusService.changes` → Bridge の `status_changed` → `WebServer.on_status_change`）。ヘッドレスのゲームのロードは進み具合を出さない（start.gg の取得と Top 8 / リザルトの取り込みは出る）
+
+### 5.24 `GET /api/v1/api-catalog`（2026-11-14 追加・ADR-005 S-final SF-3a）
+
+API 設定ウィンドウ（SF-4a で `/web/api` のページになる）が載せているエンドポイントの一覧とエラーコード。正本は `core/ApiCatalog.py`（ウィンドウもここを読む）。READ。設定でも state でもないので `revision` は付かない
+
+```json
+{
+  "endpoints": [
+    {"id": "score_adjust", "method": "POST",
+     "path": "/scoreboards/{n}/teams/{t}/score:adjust",
+     "example": "/scoreboards/1/teams/1/score:adjust",
+     "description": "Adjust score by delta", "body": {"delta": 1},
+     "destructive": false, "logged": true, "confirm": false}
+  ],
+  "errorCodes": [{"code": "INVALID_ARGUMENT", "status": 400,
+                  "description": "Bad parameter"}]
+}
+```
+
+- `id`: その行のルートの Flask の endpoint 名（`api_v1.` を除いたもの）。ルートが変わらない限り変わらないので、ページは文言の翻訳をこれで引く。一覧の中で重複しない
+- `path`: 表示用（`{n}` などの置き場所つき。クエリを含むことがある）。`example`: 置き場所を既定値（`{n}`→`1` など）にしたもの。ウィンドウの「Try it」と curl が送るパス
+- `description` / `errorCodes[].description`: ウィンドウが翻訳する前の英語の文言。`body`: 例の body（無ければ `null`）。`destructive` / `logged` / `confirm`: ウィンドウの表の列と同じ
+- 並びはウィンドウの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない（ウィンドウの表と同じ）
+
+### 5.25 `GET /api/v1/connection`（2026-11-14 追加・ADR-005 S-final SF-3a）
+
+API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web/companion`・`/web/obs` のページになる）が表示しているサーバーとファイルの場所。**`THIS_PC` 区分**（`out/` の絶対パスはユーザー名を含む）。`Cache-Control: no-store`
+
+```json
+{
+  "port": 5107, "lan": false, "lanAtRestart": false,
+  "baseUrl": "http://127.0.0.1:5107/api/v1",
+  "localBaseUrl": "http://127.0.0.1:5107/api/v1",
+  "outDir": "C:\\Autona\\out", "pathSeparator": "\\"
+}
+```
+
+- `port` / `lan`: `WebServer.Serving()`（待ち受けている値。サーバーが無いときだけ設定）。`lanAtRestart`: LAN 接続を有効で保存したが、走っているサーバーはこの PC だけ（再起動で効く。`WebServer.LanOnAtRestart()`。ウィンドウの「保存済み・再起動で有効」）
+- `baseUrl`: 利用者に案内する API の URL（LAN 接続なら この PC の LAN IP、無ければループバック。API・Companion のウィンドウの値）。`localBaseUrl`: ループバックの URL（OBS のウィンドウの値。OBS は同じ PC で動く）
+- `outDir`: Autona が出力する `out/` の絶対パス（Advanced Scene Switcher のファイル条件が監視するファイルはこの下。`out/score/1/match.txt` なら `outDir` + `pathSeparator` + `score` + … ）。`pathSeparator`: その OS の区切り文字
+- 秘密は含まない（アクセストークンは返さない: §2.2 の `THIS_PC` の注記）。ただし `THIS_PC` は同じオリジンのレイアウトからの要求も通すので、`outDir` はそれらにも読める（`GET /layouts/selected/board/obs-path` と同じ程度の露出）
+
+### 5.26 通知 `games_changed`（Socket.IO。2026-11-14 追加・ADR-005 S-final SF-3a）
+
+ゲームの一覧をスキャンし直すと（ゲームアセットの取り込みの後・起動時のスキャン。デスクトップはアセットアダプタの `onLoadAssets`、ヘッドレスはローダーの `gamesScanned`）`{}` を送る。**値は運ばない**ので、通知のあとに始めた `GET /games` の答えを使う。接続の直後は通知が来ないので最初に 1 回読む。
+
+- `program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow`・`battle_format` の後に送る。自分の間隔は持たず、1 回の送信の間に何度スキャンしても 1 通で、delta の間隔は動かさない
+- 送信先は全接続（`GET /games` が READ）。既存の `games` イベント（一覧の要求と答え）は変えていない
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 

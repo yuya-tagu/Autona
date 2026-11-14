@@ -9,8 +9,11 @@ things:
   - Tester: sends a real request to the locally hosted server and shows the
     raw response, so the operator can verify the API without external tooling.
 
-Endpoint metadata mirrors the implementation in ``AutonaApiV1.py`` (the source
-of truth); this window is purely descriptive and never duplicates state logic.
+The rows, the error codes and the path placeholders are core's
+(src/core/ApiCatalog.py, which GET /api/v1/api-catalog returns too; ADR-005
+S-final SF-3a -- they were this window's own until then), mirroring
+``AutonaApiV1.py`` (the source of truth); this window is purely descriptive
+and never duplicates state logic.
 Requests run as a TaskExecutor job (ADR-005 S3f-4; a Worker on a QThreadPool
 until then) because some endpoints (``/sets``, heavy ops) can block ~20s on a
 synchronous start.gg call (agent-pitfalls #11).
@@ -29,6 +32,7 @@ from qtpy.QtWidgets import *
 from shiboken6 import Shiboken
 
 from .AutonaWebServer import WebServer
+from .core import ApiCatalog
 from .core import WebAccess
 from .core.TaskExecutor import TaskExecutor
 from .Helpers import AutonaQtHelper
@@ -43,121 +47,6 @@ def _tr(text):
 # read endpoints that proxy a synchronous fetch don't get cut off early. Heavy
 # write ops answer 202 immediately, so they never approach this.
 _REQUEST_TIMEOUT = 25
-
-# Placeholder substitutions used when turning a template path into a concrete,
-# copy-pasteable curl / tester default.
-_PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{p}": "1", "{m}": "1", "{setId}": "12345",
-                  "{code}": "JP", "{slot}": "1", "{kind}": "commentary",
-                  "{feature}": "commentary"}
-
-
-# Endpoint catalogue. Mirrors AutonaApiV1.py route-by-route. `desc` is an
-# English source string translated at render time. `body` is an example
-# payload (dict) or None. `destructive` triggers a confirm dialog in the
-# tester. `confirm` means the API itself rejects the call without
-# {"confirm": true}. `logged` means the op is recorded by the write op-log.
-#   (method, path, desc, body, destructive, logged, confirm)
-_ENDPOINTS = [
-    # ── Read (GET, not op-logged) ──
-    ("GET", "/state", "Full state + revision", None, False, False, False),
-    ("GET", "/health", "Liveness / version / activeBoard", None, False, False, False),
-    ("GET", "/scoreboards/{n}", "Scoreboard n state (incl. swapped)", None, False, False, False),
-    ("GET", "/scoreboards/{n}/pending", "Scoreboard n live values, not applied yet: held, dirty, board (a token from another computer)", None, False, False, False),
-    ("GET", "/scoreboards/{n}/follow", "What scoreboard n follows: station, poll, pollingEnabled, setId", None, False, False, False),
-    ("GET", "/scoreboards/{n}/post", "Scoreboard n's X post: text, and what is missing for it (a token from another computer)", None, False, False, False),
-    ("GET", "/battle-format", "Battle format (singles | team | crew) and the board it shows", None, False, False, False),
-    ("GET", "/games", "Game list", None, False, False, False),
-    ("GET", "/games/current", "Current game", None, False, False, False),
-    ("GET", "/match-names", "Match / phase name candidates", None, False, False, False),
-    ("GET", "/match-names/candidates?board={n}", "What board n's phase, pool and match combos offer (boards 1/2: the tournament's names too)", None, False, False, False),
-    ("GET", "/characters", "Character list", None, False, False, False),
-    ("GET", "/variants", "Variant list", None, False, False, False),
-    ("GET", "/sets?finished=true", "Set list (synchronous start.gg call)", None, False, False, False),
-    ("GET", "/sets/{setId}", "Set detail (synchronous start.gg call)", None, False, False, False),
-    ("GET", "/tournament/phases", "The tournament's phases, as last fetched (never fetches)", None, False, False, False),
-    ("GET", "/tournament/sets", "The set list, as last fetched (never fetches)", None, False, False, False),
-    ("GET", "/tournament/stations", "Stations and streams, as last fetched (never fetches)", None, False, False, False),
-    ("GET", "/commentary", "Commentary state", None, False, False, False),
-    ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
-    ("GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
-    ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8|board)", None, False, False, False),
-    ("GET", "/layouts/selected/board/obs-path", "The Board's OBS files, as absolute paths (a token from another computer)", None, False, False, False),
-    ("GET", "/commentary/options", "Commentary role / icon candidates", None, False, False, False),
-    ("GET", "/settings", "Settings: general, network, language, hotkeys (never the access token)", None, False, False, False),
-    # ── Safe write (op-logged, no confirm) ──
-    ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
-    ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),
-    ("POST", "/scoreboards/{n}/score:set", "Set both scores (absolute)", {"team1": 2, "team2": 1}, False, True, False),
-    ("POST", "/scoreboards/{n}:apply", "Apply pending edits (反映)", None, False, True, False),
-    ("POST", "/scoreboards/{n}:swap-teams", "Swap teams", None, False, True, False),
-    ("POST", "/scoreboards/{n}/stats:refresh", "Refresh statistics (async fetch)", None, False, True, False),
-    ("POST", "/scoreboards/{n}/teams/{t}/color", "Set team color", {"color": "#FF0000"}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "pool": "Pool A1", "match": "Winners Finals"}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/match", "Set the match bar as its inputs do (partial; \"\" empties a field, match_en untouched)", {"phase": "Top 8", "pool": "", "match": "Winners Finals", "bestOf": 5}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/teams/{t}/players/{p}", "Update player fields (partial)", {"gamerTag": "Player", "twitter": "player_x"}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/teams/{t}/players/{p}/fields", "Write player fields as the card does (partial; \"\" empties a field)", {"prefix": "TM", "gamerTag": "Player", "country_code": "JP"}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/teams/{t}/players/{p}/characters/1", "Pick a player's character row (en_name \"\" empties it)", {"en_name": "Mario", "skin": 0}, False, True, False),
-    ("POST", "/scoreboards/{n}/teams/{t}/players/{p}:load", "Load a player DB entry into a slot by key (or tag); t is the set's team", {"key": "TM Player"}, False, True, False),
-    ("POST", "/scoreboards/{n}/teams/{t}/players:swap", "Exchange two players of a team", {"first": 1, "second": 2}, False, True, False),
-    ("PATCH", "/scoreboards/3/teams/{t}/members/{m}", "Update a crew member (partial): name, stock, active", {"name": "Player", "stock": 3, "active": True}, False, True, False),
-    ("POST", "/scoreboards/3/teams/{t}/members/{m}/stock:adjust", "Adjust a crew member's stock by delta", {"delta": -1}, False, True, False),
-    ("PATCH", "/tournament/info", "Update tournament fields (partial)", {"displayTournamentName": "Tournament"}, False, True, False),
-    ("PATCH", "/display-options", "Toggle display options (partial)", {"show_seed": False}, False, True, False),
-    ("PUT", "/battle-format", "Switch the battle format (the same one changes nothing)", {"format": "team"}, False, True, False),
-    ("PATCH", "/commentary/{slot}", "Update caster fields (partial; a 5th shown is 409)", {"name": "Caster", "display": True}, False, True, False),
-    ("POST", "/commentary/reorder", "Reorder casters (slot order)", {"order": ["2", "1", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]}, False, True, False),
-    ("POST", "/commentary/{slot}/player", "Fill a caster from a player DB entry", {"gamerTag": "Player", "prefix": "TM", "twitter": "player_x"}, False, True, False),
-    ("PUT", "/layouts/selected/{kind}", "Select a panel's layout", {"id": "commentators"}, False, True, False),
-    ("POST", "/layouts/selected/board:reveal", "Show a Board OBS file in Explorer (this PC only; a design no longer selected is 409)", {"target": "design", "designId": "scoreboard_simple"}, False, True, False),
-    ("PATCH", "/colors/{feature}", "Set a feature's colors", {"theme": "#112233", "accent": "#445566"}, False, True, False),
-    ("PATCH", "/settings/general", "Update general settings (partial)", {"profanity_filter": True}, False, True, False),
-    ("PATCH", "/settings/network", "Set the web server's port / LAN access (this PC only; applied by a restart)", {"port": 5107}, False, True, False),
-    ("PATCH", "/settings/language", "Set the languages (this PC only; applied by a restart)", {"program": "default"}, False, True, False),
-    ("PATCH", "/settings/hotkeys", "Set hotkeys (this PC only; a shortcut another action has is 409)", {"keys": {"load_set": "Ctrl+Shift+O"}}, False, True, False),
-    ("POST", "/scoreboards/{n}:stop-follow", "Stop following, forget the station and the followed set", None, False, True, False),
-    ("POST", "/tournament/sets:cancel", "Stop the set list's fetch (the rows stay)", None, False, True, False),
-    # ── Destructive (confirm required) ──
-    ("POST", "/scoreboards/{n}:clear", "Clear board (confirm required)", {"confirm": True}, True, True, True),
-    ("POST", "/scoreboards/{n}:reset-all", "Reset every input, team names too, keeping the counts (confirm required)", {"confirm": True}, True, True, True),
-    ("POST", "/scoreboards/{n}/teams/{t}/players/{p}:clear", "Clear one player (confirm required)", {"confirm": True}, True, True, True),
-    ("POST", "/scoreboards/{n}:reset-players", "Reset players (confirm required)", {"confirm": True}, True, True, True),
-    ("POST", "/scoreboards/{n}:reset-match", "Reset match (confirm required)", {"confirm": True}, True, True, True),
-    # ── Board overwrite (confirm recommended) ──
-    ("POST", "/scoreboards/{n}:load-set", "Load a set onto the board", {"setId": "12345"}, False, True, False),
-    ("POST", "/scoreboards/{n}:pull-stream", "Pull current stream set", None, False, True, False),
-    ("POST", "/scoreboards/{n}:follow", "Follow a station or stream: its current set is loaded", {"type": "stream", "identifier": "channel"}, False, True, False),
-    # ── Heavy (202 accepted + in-progress flag) ──
-    ("POST", "/tournament", "Load tournament (202, async)", {"url": "https://www.start.gg/tournament/.../event/..."}, False, True, False),
-    ("POST", "/game", "Set game (202, async)", {"codename": "ssbu", "modsActive": False}, False, True, False),
-    ("POST", "/bracket:refresh", "Refresh bracket (202, async)", None, False, True, False),
-    ("POST", "/tournament/phases:refresh", "Fetch the tournament's phases (202, async)", None, False, True, False),
-    ("POST", "/tournament/sets:refresh", "Fetch the set list of a phase (202, async; another query replaces the one running)", {"phase": "all", "finished": False}, False, True, False),
-    ("POST", "/tournament/stations:refresh", "Fetch the stations and streams (202, async)", None, False, True, False),
-]
-
-# Error-code legend (spec §2.6 / AutonaApiV1.py). (code, http, desc).
-_ERROR_CODES = [
-    ("INVALID_ARGUMENT", "400", "Bad parameter"),
-    ("NOT_FOUND", "404", "Unknown resource"),
-    ("CONFIRMATION_REQUIRED", "409", "Missing confirm:true"),
-    ("CONFLICT", "409", "Heavy operation already running"),
-    ("NOT_READY", "409", "Precondition unmet"),
-    ("UPSTREAM_TIMEOUT", "504", "Upstream (start.gg) timed out"),
-    ("INTERNAL", "500", "Unexpected internal error"),
-    # The access guard (ADR-005 S3a, src/core/WebAccess.py).
-    ("UNAUTHENTICATED", "401", "Token missing or wrong (writes from another device)"),
-    ("FORBIDDEN", "403", "Refused browser page (cross-site / another origin)"),
-    # A desktop shell operation in the headless shell (ADR-005 S3c / S3e-9).
-    ("UNAVAILABLE", "503", "Not available in headless (needs the desktop window)"),
-]
-
-
-def _concrete_path(path):
-    """Substitute {n}/{t}/{setId} placeholders with copy-pasteable defaults."""
-    for token, value in _PATH_DEFAULTS.items():
-        path = path.replace(token, value)
-    return path
-
 
 class AutonaApiInfoWindow(QDialog):
     def __init__(self, parent=None):
@@ -302,22 +191,21 @@ class AutonaApiInfoWindow(QDialog):
 
         headers = [_tr("Method"), _tr("Path"), _tr("Description"),
                    _tr("Confirm"), _tr("Logged")]
-        self.refTable = QTableWidget(len(_ENDPOINTS), len(headers))
+        self.refTable = QTableWidget(len(ApiCatalog.ENDPOINTS), len(headers))
         self.refTable.setHorizontalHeaderLabels(headers)
         self.refTable.verticalHeader().setVisible(False)
         self.refTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.refTable.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.refTable.setSelectionMode(QAbstractItemView.SingleSelection)
 
-        for row, ep in enumerate(_ENDPOINTS):
-            method, path, desc, body, destructive, logged, confirm = ep
-            self.refTable.setItem(row, 0, QTableWidgetItem(method))
-            self.refTable.setItem(row, 1, QTableWidgetItem(path))
-            self.refTable.setItem(row, 2, QTableWidgetItem(_tr(desc)))
+        for row, ep in enumerate(ApiCatalog.ENDPOINTS):
+            self.refTable.setItem(row, 0, QTableWidgetItem(ep.method))
+            self.refTable.setItem(row, 1, QTableWidgetItem(ep.path))
+            self.refTable.setItem(row, 2, QTableWidgetItem(_tr(ep.desc)))
             self.refTable.setItem(
-                row, 3, QTableWidgetItem("✓" if confirm else ""))
+                row, 3, QTableWidgetItem("✓" if ep.confirm else ""))
             self.refTable.setItem(
-                row, 4, QTableWidgetItem("✓" if logged else ""))
+                row, 4, QTableWidgetItem("✓" if ep.logged else ""))
 
         self.refTable.resizeColumnsToContents()
         self.refTable.horizontalHeader().setStretchLastSection(False)
@@ -366,8 +254,8 @@ class AutonaApiInfoWindow(QDialog):
         g.addWidget(envelope)
 
         codes = QLabel("\n".join(
-            f"{code}  ({http})  {_tr(desc)}"
-            for code, http, desc in _ERROR_CODES))
+            f"{error.code}  ({error.status})  {_tr(error.desc)}"
+            for error in ApiCatalog.ERROR_CODES))
         codes.setTextInteractionFlags(Qt.TextSelectableByMouse)
         codes.setStyleSheet("font-family: monospace;")
         g.addWidget(codes)
@@ -379,7 +267,7 @@ class AutonaApiInfoWindow(QDialog):
         row = self.refTable.currentRow()
         if row < 0:
             return None
-        return _ENDPOINTS[row]
+        return ApiCatalog.ENDPOINTS[row]
 
     def _copyCurlForSelected(self):
         ep = self._selectedEndpoint()
@@ -388,8 +276,8 @@ class AutonaApiInfoWindow(QDialog):
         QApplication.clipboard().setText(self._buildCurl(ep))
 
     def _buildCurl(self, ep):
-        method, path, _desc, body, _destructive, _logged, _confirm = ep
-        url = self._baseUrl() + _concrete_path(path)
+        method, body = ep.method, ep.body
+        url = self._baseUrl() + ApiCatalog.ConcretePath(ep.path)
         parts = [f'curl -X {method} "{url}"']
         # The Base URL is the LAN address when LAN access is on, i.e. the
         # command is meant for another device: give it the token a write
@@ -409,14 +297,13 @@ class AutonaApiInfoWindow(QDialog):
         self.tabs.setCurrentIndex(1)  # jump to the tester tab
 
     def _fillTester(self, ep):
-        method, path, _desc, body, _destructive, _logged, _confirm = ep
         # Method can carry a query string in the path (e.g. /sets?finished=true);
         # the combo only holds verbs, so set both independently.
-        verb = method if method in ("GET", "POST", "PATCH", "PUT") else "GET"
+        verb = ep.method if ep.method in ("GET", "POST", "PATCH", "PUT") else "GET"
         self.methodCombo.setCurrentText(verb)
-        self.pathField.setText(_concrete_path(path))
+        self.pathField.setText(ApiCatalog.ConcretePath(ep.path))
         self.bodyEdit.setPlainText(
-            json.dumps(body, ensure_ascii=False, indent=2) if body else "")
+            json.dumps(ep.body, ensure_ascii=False, indent=2) if ep.body else "")
 
     # ── Tester tab ───────────────────────────────────────────────────────
     def _buildTesterTab(self):
@@ -427,8 +314,8 @@ class AutonaApiInfoWindow(QDialog):
         presetRow.addWidget(QLabel(_tr("Preset") + ":"))
         self.presetCombo = QComboBox()
         self.presetCombo.addItem("—", -1)
-        for i, ep in enumerate(_ENDPOINTS):
-            self.presetCombo.addItem(f"{ep[0]}  {ep[1]}", i)
+        for i, ep in enumerate(ApiCatalog.ENDPOINTS):
+            self.presetCombo.addItem(f"{ep.method}  {ep.path}", i)
         self.presetCombo.activated.connect(self._applyPreset)
         presetRow.addWidget(self.presetCombo, 1)
         v.addLayout(presetRow)
@@ -472,7 +359,7 @@ class AutonaApiInfoWindow(QDialog):
         i = self.presetCombo.currentData()
         if i is None or i < 0:
             return
-        self._fillTester(_ENDPOINTS[i])
+        self._fillTester(ApiCatalog.ENDPOINTS[i])
 
     def _isDestructivePath(self, path):
         return any(marker in path for marker in

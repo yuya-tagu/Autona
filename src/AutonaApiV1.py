@@ -2049,6 +2049,42 @@ def settings_hotkeys_update():
     return ok(data=dict(WebOps.get_settings()["hotkeys"], warnings=warnings))
 
 
+# ── The guides (ADR-005 S-final SF-3a) ───────────────────────────────────
+# What the API / Companion / OBS guide windows read for themselves, for the
+# pages that replace them (SF-4a). The connection is WebAccess.THIS_PC:
+# refused (403, token or not) to anything but a request from this PC that
+# passes without a token -- it names this PC's folders. The access token is
+# not served here: a page of this origin (any layout/ page, in OBS or a
+# browser) passes as this PC's own request too; its route is SF-4a's.
+
+def _no_store(resp):
+    # This PC's paths: kept out of the browser's caches.
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@api_v1.route("/api-catalog")
+@api_handler
+def get_api_catalog():
+    # {"endpoints": [{id, method, path, example, description, body,
+    # destructive, logged, confirm}], "errorCodes": [{code, status,
+    # description}]}: the API window's reference (core's ApiCatalog). `id` is
+    # the row's route (its Flask endpoint name, stable: what a page keys its
+    # translations by); `description` the English text the window translates.
+    # Nothing but this module's own routes, so READ.
+    return ok(data=WebOps.get_api_catalog())
+
+
+@api_v1.route("/connection")
+@api_handler
+def get_connection():
+    # {"port", "lan", "lanAtRestart", "baseUrl", "localBaseUrl", "outDir",
+    # "pathSeparator"}: what the guide windows show of the server and its
+    # files (AutonaWebOperations.get_connection). THIS_PC: out/'s absolute
+    # path names this PC's folders.
+    return _no_store(ok(data=WebOps.get_connection()))
+
+
 @api_v1.route("/colors/<feature>", methods=["PATCH"])
 @write_op("colors.update")
 def colors_update(feature):

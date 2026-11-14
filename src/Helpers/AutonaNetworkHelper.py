@@ -42,14 +42,20 @@ def GetLocalIPs():
         ip for ip in found if ip and not ip.startswith("127.")))
 
 
-def GetWebServerHost():
+def GetWebServerHost(lan=None):
     """Host to advertise in user-facing URLs. Matches the server bind:
     loopback unless LAN access is on -- what the server is bound with, the
     setting (general.webserver_listen_lan) only while none runs
     (WebServer.Serving(), ADR-005 S4af).
+
+    `lan`: the LAN access of a WebServer.Serving() the caller already read,
+    so that its port and this host come from one reading (a server starting
+    or stopping in between would pair one's port with the other's host);
+    read here when not given.
     """
-    from ..AutonaWebServer import WebServer  # avoid import cycle at module load
-    _port, lan = WebServer.Serving()
+    if lan is None:
+        from ..AutonaWebServer import WebServer  # avoid import cycle at module load
+        _port, lan = WebServer.Serving()
     if lan:
         return GetLocalIP()
     return "127.0.0.1"

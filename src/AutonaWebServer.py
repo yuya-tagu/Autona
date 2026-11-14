@@ -1061,6 +1061,9 @@ class WebServer:
     # `status` (on_status_change).
     _status_notice = False
     _status_notice_ts = 0.0      # _delta_clock() of the last status sent
+    # Whether the game list was scanned since the last flush: its
+    # `games_changed` notice (on_games_change).
+    _games_notice = False
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -1097,6 +1100,7 @@ class WebServer:
             follows = WebServer._take_follow_notices()
             battleFormat = WebServer._take_battle_format_notice()
             status = WebServer._take_status_notice()
+            games = WebServer._take_games_notice()
         if payload is not None:
             WebServer._send_deltas(payload)
         WebServer._run_after_deltas(after)
@@ -1104,6 +1108,7 @@ class WebServer:
         WebServer._send_follow_notices(follows)
         WebServer._send_battle_format_notice(battleFormat)
         WebServer._send_status_notice(status)
+        WebServer._send_games_notice(games)
 
     @staticmethod
     def _after_pending_deltas(fn):
@@ -1419,6 +1424,50 @@ class WebServer:
         except Exception:
             logger.error(traceback.format_exc())
 
+    # ── The game list's notice (ADR-005 S-final SF-3a) ───────────────
+    # `games_changed` {}: the game list was scanned again (a game's assets
+    # imported, a rescan), so what GET /api/v1/games answers may have
+    # changed; a page that shows the list reads it again. `games` is taken
+    # (the request / answer event of the full list), hence the name. As the
+    # battle format's notice: no value, sent by the one flusher after the
+    # batch's deltas and the other notices, to everyone (the route is
+    # READ), not debounced, several scans in one flush are one notice. Told
+    # by the shell (bootstrap.wire_web_server: the desktop's onLoadAssets,
+    # the headless loader's gamesScanned): emitted from the scan job, a Qt
+    # signal connected to this plain function arrives queued on the main
+    # thread (the headless shell's too). Queued under _delta_cond, so it is
+    # safe on any thread.
+
+    @staticmethod
+    def on_games_change(*_args):
+        """The shell's "the games were scanned". Queues and notifies only,
+        like on_battle_format_change."""
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
+            WebServer._games_notice = True
+            if WebServer._delta_due is None:
+                WebServer._delta_due = WebServer._delta_clock()
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _take_games_notice():
+        """Whether to tell about the game list in this flush. Called
+        holding _delta_cond."""
+        notice = WebServer._games_notice
+        WebServer._games_notice = False
+        return notice
+
+    @staticmethod
+    def _send_games_notice(notice):
+        # Outside _delta_cond, like a send.
+        if not notice:
+            return
+        try:
+            WebServer.ws_emit('games_changed', {})
+        except Exception:
+            logger.error(traceback.format_exc())
+
     @staticmethod
     def _run_delta_flusher(generation):
         """The flusher thread: send each batch when it is due, and the one
@@ -1458,6 +1507,7 @@ class WebServer:
                 follows = WebServer._take_follow_notices()
                 battleFormat = WebServer._take_battle_format_notice()
                 status = WebServer._take_status_notice()
+                games = WebServer._take_games_notice()
             if payload is not None:
                 WebServer._send_deltas(payload)
             WebServer._run_after_deltas(after)
@@ -1465,6 +1515,7 @@ class WebServer:
             WebServer._send_follow_notices(follows)
             WebServer._send_battle_format_notice(battleFormat)
             WebServer._send_status_notice(status)
+            WebServer._send_games_notice(games)
             if not running:
                 return
 
@@ -1487,6 +1538,7 @@ class WebServer:
             WebServer._follow_notices = set()
             WebServer._battle_format_notice = False
             WebServer._status_notice = False
+            WebServer._games_notice = False
             WebServer._delta_due = (
                 WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()

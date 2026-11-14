@@ -1416,18 +1416,18 @@ def test_the_board_s_reset_button_twice_costs_one_cycle(autonaApp):
 # ── the catalogue a person reads ─────────────────────────────────────────
 
 def test_the_api_window_lists_the_routes_and_each_goes_where_it_says(webApp):
-    from src.AutonaApiInfoWindow import _ENDPOINTS, _PATH_DEFAULTS
+    # The window's rows are core's catalogue since ADR-005 S-final SF-3a.
+    from src.core.ApiCatalog import ENDPOINTS, ConcretePath
 
     routes = webApp.url_map.bind("localhost")
 
     def endpoint(method, path):
-        for token, value in _PATH_DEFAULTS.items():
-            path = path.replace(token, value)
+        path = ConcretePath(path)
         # The query is not the route's: matched with it, a row lands on the
         # static files' catch-all ('/<path:filename>').
         return routes.match(f"/api/v1{path.split('?')[0]}", method=method)[0]
 
-    listed = {endpoint(entry[0], entry[1]) for entry in _ENDPOINTS}
+    listed = {endpoint(entry.method, entry.path) for entry in ENDPOINTS}
     assert {"api_v1.crew_member_update", "api_v1.crew_member_stock_adjust",
             "api_v1.get_scoreboard_post",
             "api_v1.get_match_name_candidates",
@@ -1436,18 +1436,17 @@ def test_the_api_window_lists_the_routes_and_each_goes_where_it_says(webApp):
 
 
 def test_the_api_window_s_examples_are_accepted(autonaApp, client):
-    from src.AutonaApiInfoWindow import _ENDPOINTS, _PATH_DEFAULTS
+    from src.core.ApiCatalog import ENDPOINTS, ConcretePath
 
     autonaApp.ready(BOARD)
     # The crew board's own rows (its X post is every board's since ADR-005
     # S4x: "/scoreboards/{n}/post", read on board 1 by the walk above).
-    examples = [entry for entry in _ENDPOINTS
-                if entry[1].startswith("/scoreboards/3/")]
+    examples = [entry for entry in ENDPOINTS
+                if entry.path.startswith("/scoreboards/3/")]
     assert len(examples) >= 2
-    for method, path, _desc, body, *_rest in examples:
-        for token, value in _PATH_DEFAULTS.items():
-            path = path.replace(token, value)
-        response = getattr(client, method.lower())(
-            f"/api/v1{path}", json=body)
+    for entry in examples:
+        path = ConcretePath(entry.path)
+        response = getattr(client, entry.method.lower())(
+            f"/api/v1{path}", json=entry.body)
         assert response.status_code == 200, (
             path, response.get_data(as_text=True))

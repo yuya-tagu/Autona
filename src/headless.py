@@ -141,6 +141,11 @@ class HeadlessSignals(QObject):
     # bootstrap.wire_game_roster). Carried from the loader's thread: the
     # catalog's Current() can be a later load's by the time this runs.
     gameLoaded = Signal(object)
+    # The games were scanned (the desktop adapter's onLoadAssets, emitted
+    # from the scan job the same way): the web server tells the pages that
+    # GET /api/v1/games may have changed (bootstrap.wire_web_server;
+    # ADR-005 S-final SF-3a).
+    gamesScanned = Signal()
 
 
 class _LoadRequest:
@@ -214,6 +219,7 @@ class HeadlessGames:
         # is logged by the executor and asks for nothing.
         from .Helpers import AutonaQtHelper
         self.catalog.ScanGames()
+        self.signals.gamesScanned.emit()
         AutonaQtHelper.gui_executor(self.OnScanned)
 
     def OnScanned(self):
@@ -703,7 +709,8 @@ def Assemble(app, shell=None):
 
     webserver = WebServer(on_start_failed=onStartFailed)
     shell.webserver = webserver
-    wire_web_server(webserver, games.signals.gameChanged)
+    wire_web_server(webserver, games.signals.gameChanged,
+                    games.signals.gamesScanned)
 
     # The tournament URL and the games, restored as the window restores
     # them (its UiMounted calls).

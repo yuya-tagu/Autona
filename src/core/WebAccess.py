@@ -276,6 +276,14 @@ ROUTE_ACCESS = {
     "api_v1.settings_network_update": THIS_PC,
     "api_v1.settings_language_update": THIS_PC,
     "api_v1.settings_hotkeys_update": THIS_PC,
+    # The guides' (ADR-005 S-final SF-3a; the API / Companion / OBS windows,
+    # React pages in SF-4a). The catalogue is the reference anyone may read.
+    # The connection names the install folder (out/) and is for the guides
+    # on this PC, as the windows were. (The access token is not served: a
+    # same-origin page -- any layout/ page, in OBS or a browser -- would
+    # pass as this PC's own request; its route is SF-4a's.)
+    "api_v1.get_api_catalog": READ,
+    "api_v1.get_connection": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

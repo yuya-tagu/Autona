@@ -242,6 +242,8 @@ _SHARED_WIRING = {
     ],
     "wire_web_server": [
         "game_changed.connect(webserver.ws_game_changed)",
+        # The game list's notice (ADR-005 S-final SF-3a).
+        "games_scanned.connect(webserver.on_games_change)",
         "AutonaPlayerDB.signals.db_updated.connect(webserver.ws_playerdb)",
     ],
 }
