@@ -142,7 +142,10 @@
   [
    "loader",
    "status push",
-   "ゲームアセットを読み込み中... (game2)"
+   "assets_load",
+   {
+    "codename": "game2"
+   }
   ],
   [
    "main",
@@ -225,7 +228,10 @@
   [
    "loader",
    "status push",
-   "ゲームアセットを読み込み中... (tgame)"
+   "assets_load",
+   {
+    "codename": "tgame"
+   }
   ],
   [
    "main",

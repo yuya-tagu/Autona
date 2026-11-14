@@ -259,10 +259,9 @@ class _Recorder:
         realPush, realPop = StatusService.Push, StatusService.Pop
 
         def push(code, args=None, done=0, total=0):
-            # The footer's words (ADR-005 S-final SF-2: the job is a code
-            # and its args; the desktop footer translates them).
-            self.Event("status push", AutonaLocaleHelper.StatusText(
-                {"code": code, "args": args or {}}))
+            # The footer's job as its code and args (ADR-005 S-final SF-2),
+            # not the translated words: those follow the machine's locale.
+            self.Event("status push", code, dict(args or {}))
             return realPush(code, args, done, total)
 
         def pop(token):
