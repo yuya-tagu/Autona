@@ -1559,19 +1559,25 @@ def test_a_client_cannot_mark_itself_as_the_preview(server):
 
 
 def test_the_preview_server_binds_a_port_the_os_picks(server):
-    from src.AutonaWebServer import PreviewGate, WebServer
+    from src.AutonaWebServer import (PreviewGate, WebServer,
+                                     WebServerRequestHandler,
+                                     WebSocketHandover)
 
     made = []
 
-    def make_server(host, port, app, threaded):
-        made.append((host, port, app, threaded))
+    def make_server(host, port, app, threaded, request_handler):
+        made.append((host, port, app, threaded, request_handler))
         return "the server"
 
     shell = type("Shell", (), {"host_name": "0.0.0.0", "app": server.app})()
     assert WebServer._MakePreviewServer(shell, make_server) == "the server"
-    [(host, port, app, threaded)] = made
+    [(host, port, app, threaded, handler)] = made
     assert (host, port, threaded) == ("0.0.0.0", 0, True)
-    assert isinstance(app, PreviewGate) and app.app is server.app
+    # Served like this server's own listener (_MakeListener): the end of a
+    # WebSocket is werkzeug's dropped connection, not a 500 on it.
+    assert handler is WebServerRequestHandler
+    assert isinstance(app, WebSocketHandover)
+    assert isinstance(app.app, PreviewGate) and app.app.app is server.app
 
 
 def test_no_preview_server_when_its_port_cannot_be_bound(server, warnings):
@@ -1866,7 +1872,7 @@ def test_no_preview_listener_when_this_server_cannot_listen(monkeypatch):
 
     made = []
 
-    def make_server(host, port, app, threaded):
+    def make_server(host, port, app, **kwargs):
         made.append(port)
         try:
             raise OSError(10048, "address in use")
@@ -1916,6 +1922,154 @@ def test_a_failing_loop_leaves_the_preview_listener_to_a_stop_begun(
 
     assert preview.calls == []
     assert shell._preview_server is preview
+
+
+# ── The WebSocket transport on both listeners (the SF-8a follow-up) ──────
+# Real werkzeug servers, built as _Serve builds both (WebServer._MakeListener),
+# and a raw WebSocket client (wsproto, simple-websocket's own), so what
+# follows the close frame on the wire is seen. The end of a WebSocket --
+# the client's close or the server's -- used to make werkzeug assert
+# "write() before start_response" (an error in the log at every disconnect)
+# and write a 500 response onto the WebSocket's connection after the close
+# frame: a browser still reading failed the socket with "Invalid frame
+# header". Both listeners had it, the main one long before SF-8a.
+
+@pytest.fixture
+def listeners(server):
+    from werkzeug.serving import make_server
+
+    from src.AutonaWebServer import PreviewGate, WebServer
+
+    made = {
+        "main": WebServer._MakeListener(
+            make_server, "127.0.0.1", 0, server.app),
+        "preview": WebServer._MakeListener(
+            make_server, "127.0.0.1", 0, PreviewGate(server.app)),
+    }
+    threads = [threading.Thread(target=listener.serve_forever, daemon=True)
+               for listener in made.values()]
+    for thread in threads:
+        thread.start()
+    yield made
+    for listener in made.values():
+        listener.shutdown()
+        listener.server_close()
+    for thread in threads:
+        thread.join(5)
+
+
+class _WebSocketSession:
+    """One Socket.IO connection over the WebSocket transport, read frame by
+    frame: the texts received, what came after the close frame, and whether
+    the server closed the connection (EOF) within the timeout."""
+
+    TIMEOUT = 5
+
+    def __init__(self, port):
+        import socket
+
+        from wsproto import ConnectionType, WSConnection
+        from wsproto.events import Request
+
+        self.sock = socket.create_connection(("127.0.0.1", port),
+                                             timeout=self.TIMEOUT)
+        self.ws = WSConnection(ConnectionType.CLIENT)
+        self.texts = []
+        self.after_close = []
+        self.closed = False
+        self.eof = False
+        self.sock.sendall(self.ws.send(Request(
+            host=f"127.0.0.1:{port}",
+            target="/socket.io/?EIO=4&transport=websocket")))
+
+    def read_until(self, done):
+        import socket
+
+        from wsproto.connection import ConnectionState
+        from wsproto.events import CloseConnection, Ping, TextMessage
+
+        while not done() and not self.eof:
+            try:
+                data = self.sock.recv(65536)
+            except socket.timeout:
+                return
+            if not data:
+                self.eof = True
+                return
+            if self.closed:
+                self.after_close.append(data)
+                continue
+            self.ws.receive_data(data)
+            for event in self.ws.events():
+                if self.closed:
+                    # Parsed out of the same read as the close frame.
+                    self.after_close.append(repr(event))
+                elif isinstance(event, TextMessage):
+                    self.texts.append(event.data)
+                elif isinstance(event, Ping):
+                    self.sock.sendall(self.ws.send(event.response()))
+                elif isinstance(event, CloseConnection):
+                    self.closed = True
+                    # The server closed first: answer, as a browser does.
+                    if self.ws.state is ConnectionState.REMOTE_CLOSING:
+                        self.sock.sendall(self.ws.send(event.response()))
+
+    def events(self, name):
+        return [text for text in self.texts
+                if text.startswith(f'42["{name}"')]
+
+    def send(self, text):
+        from wsproto.events import TextMessage
+
+        self.sock.sendall(self.ws.send(TextMessage(text)))
+
+    def close(self):
+        from wsproto.events import CloseConnection
+
+        self.sock.sendall(self.ws.send(CloseConnection(code=1000)))
+
+    def engine_io_sid(self):
+        [opened] = [text for text in self.texts if text.startswith("0")]
+        return json.loads(opened[1:])["sid"]
+
+
+@pytest.mark.parametrize("closer", ["client", "server"])
+@pytest.mark.parametrize("which", ["main", "preview"])
+def test_a_websocket_ends_with_nothing_after_its_close_frame(
+        server, listeners, caplog, which, closer):
+    import logging
+
+    caplog.set_level(logging.ERROR, logger="werkzeug")
+    session = _WebSocketSession(listeners[which].server_port)
+    try:
+        session.read_until(lambda: any(t.startswith("0")
+                                       for t in session.texts))
+        session.send("40")
+        # The state, on connecting and on asking (a read event).
+        session.read_until(lambda: session.events("program_state"))
+        assert len(session.events("program_state")) == 1
+        session.send('42["program_state",{}]')
+        session.read_until(lambda: len(session.events("program_state")) == 2)
+        assert len(session.events("program_state")) == 2
+
+        if closer == "client":
+            session.close()
+        else:
+            server.socketio.server.eio.disconnect(session.engine_io_sid())
+        session.read_until(lambda: False)
+    finally:
+        session.sock.close()
+
+    assert session.closed
+    # Nothing after the close frame (it was "HTTP/1.1 500 INTERNAL SERVER
+    # ERROR..."), and the server closed the connection rather than waiting
+    # for another request on it.
+    assert session.after_close == []
+    assert session.eof
+    werkzeug_errors = [record.getMessage() for record in caplog.records
+                       if record.name == "werkzeug"
+                       and record.levelno >= logging.ERROR]
+    assert werkzeug_errors == []
 
 
 # ── The guides' routes (ADR-005 S-final SF-3a) ───────────────────────────
