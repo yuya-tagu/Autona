@@ -53,12 +53,13 @@
 - **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a）と、§5.27 のゲームアセットのパックの一覧（ADR-005 S-final SF-3b。ジョブの状態 §5.28 は SF-4b-1 で `SHELL` に移した））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
   - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンは `THIS_PC` のルートでは返さない**（下の `SHELL`）
   - 同じ理由で、**ゲームアセットの書き込みは `THIS_PC` にしない**（同じオリジンのレイアウトに、導入済みのゲームの置き換え・GB 単位のダウンロード・ディスクを埋めるアップロードをさせない）。ZIP のアップロードと破棄・ZIP の取り込み・インストール・キャンセル・ジョブの状態・ゲームのフォルダを開く操作は `SHELL`（下。ADR-005 S-final SF-4b-1。SF-3b では v1 に出していなかった）。**フォルダの取り込みは v1 に無い**（ページはこの PC のフォルダを名指せない。名指せるとこの PC のフォルダのコピーと有無の探査になる。SF-5a のフォルダ選択で戻す）
-- **アプリ自身のウィンドウ（デスクトップの共有ビューの中の、本体のサーバーのオリジンの文書）からの要求だけ**（`SHELL` 区分。2026-11-14・ADR-005 S-final SF-4a-1）: §5.29 のアクセストークンの読み取りと §7 の `POST /access-token:regenerate`、ゲームアセットのジョブの状態（§5.28）・ZIP のアップロードと破棄（§6.48 / §6.49）・ジョブのキャンセル（§6.50）・ゲームのフォルダを開く（§6.51）・ZIP の取り込みとインストール（§7。ADR-005 S-final SF-4b-1）。通すのは次の 3 つを**すべて**満たす要求だけで、ほかは**トークンの有無によらず** `403 FORBIDDEN`（`only the Autona app's own window may ask this`。1 つの答え。ログには何が欠けたかだけを出し、ヘッダの値は出さない）
+- **アプリ自身のウィンドウ（デスクトップの共有ビューの中の、本体のサーバーのオリジンの文書）からの要求だけ**（`SHELL` 区分。2026-11-14・ADR-005 S-final SF-4a-1）: §5.29 のアクセストークンの読み取りと §7 の `POST /access-token:regenerate`、ゲームアセットのジョブの状態（§5.28）・ZIP のアップロードと破棄（§6.48 / §6.49）・ジョブのキャンセル（§6.50）・ゲームのフォルダを開く（§6.51）・ZIP の取り込みとインストール（§7。ADR-005 S-final SF-4b-1）・シェル要求のチケット（§5.30。ADR-005 S-final SF-5a-1）。通すのは次の 3 つを**すべて**満たす要求だけで、ほかは**トークンの有無によらず** `403 FORBIDDEN`（`only the Autona app's own window may ask this`。1 つの答え。ログには何が欠けたかだけを出し、ヘッダの値は出さない）
   - `THIS_PC` と同じ、トークンなしで通れるこの PC の要求（トークンでは開かない。LAN の他端末は秘密があっても断る）
   - `Sec-Fetch-Site` がちょうど `same-origin`（`none`・無い・`same-site`・`cross-site` は断る。共有ビューの fetch は必ず送る）
   - `X-Autona-Shell` ヘッダがシェルの秘密と一致（定数時間の比較。空・128 文字超・ASCII 以外・前後の空白・大文字小文字の違いは不一致）。秘密はデスクトップのシェルが最初に必要になったときにプロセスで 1 回作り、メモリにだけ持つ（`settings.json` に入れない・ログに出さない）。付けるのは**共有ビューのページ自身のリクエストインターセプタ**（プロファイルのではない: Designer のビューが同じ既定プロファイルを使う）で、メインフレームが Web UI（本体のサーバーの `/web` の配下で `view=designer` でない）を出している間に、そのページの中の本体のサーバーのオリジン（`127.0.0.1:<待ち受けポート>`）の文書が出す、本体の `/api/v1/` への fetch / XHR に付ける。その文書はメインフレームと同じオリジンのフレームで、about:blank・srcdoc・blob: のフレームは作った文書のオリジンを継ぐので含まれる（だから Web UI はそこへ第三者の HTML を sandbox なしで入れない。sandbox のフレームは opaque origin で付かない）。Web UI のスクリプトが出す fetch / XHR には付き、`<script>`・画像の読み込みとナビゲーションには付かない。別オリジンのフレーム（プレビュー）・ほかのビュー・ほかのページの要求には付かない。付いた要求がほかへリダイレクトされたら止め、付けてはいけない要求が秘密を持っているか確かめられなければその要求を止める。ヘッドレスは秘密を作らないので、`SHELL` のルートは常に `403`
   - プレビュー用のリスナーは `SHELL` を出さない（READ だけ。下の項）。Socket.IO のイベントに `SHELL` は無い
   - 判定は `src/core/WebAccess.ShellRefusalReason`、付ける側は `src/AutonaWebPanelHost.ShellHeaderWanted`
+  - 秘密とは別に、**シェル要求のチケット**（§5.30。ADR-005 S-final SF-5a-1）がある。秘密はシェルが共有ビューの fetch に付けるもの（ページの JS からは読めない）、チケットは `GET /shell-session` を読めたページだけが URL に入れられるもの。共有ビューのページがデスクトップ自身に頼むこと（最前面表示・更新の確認・決まった外部アドレス）は、クリックの中で開く `/web/shell-request?verb=…&request=…&ticket=…` の新しいウィンドウで、共有ビューはそれを開かずに検査して実行する（`src/AutonaWebPanelHost.py` の `ParseShellRequest`）。これは HTTP のルートではない（サーバーには届かない）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -247,6 +248,7 @@
 | `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
 | `GET /api/v1/connection` | Web サーバーの URL（LAN / ループバック）・ポート・`out/` の絶対パス（§5.25。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_connection`（`WebServer.Serving` / `LanOnAtRestart`） | — |
 | `GET /api/v1/access-token` | アクセストークン（§5.29。**アプリ自身のウィンドウからだけ**（`SHELL`）。2026-11-14 追加） | `get_access_token`（`core/WebAccess.Token`） | — |
+| `GET /api/v1/shell-session` | シェル要求のチケット（§5.30。**アプリ自身のウィンドウからだけ**（`SHELL`）。2026-11-14 追加） | `get_shell_session`（`core/WebAccess.IssueShellTicket`） | — |
 | `GET /api/v1/api-catalog` | API 設定のページ（`/web/api`）のエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
 | `GET /api/v1/assets/packs` | ゲームアセットのパックの一覧（上流の索引・インストール済み・版。§5.27。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_asset_packs`（`core/AssetPackService.Packs`） | — |
 | `GET /api/v1/assets/job` | ゲームアセットの取り込みのジョブの状態（§5.28。**アプリ自身のウィンドウからだけ**（`SHELL`。SF-3b の `THIS_PC` から SF-4b-1 で移した）。2026-11-14 追加） | `get_assets_job`（`core/AssetPackService.Job`） | — |
@@ -790,7 +792,7 @@ API 設定のページ（`/web/api`。SF-4a-2 までは Qt の API 設定ウィ�
 - `id`: その行のルートの Flask の endpoint 名（`api_v1.` を除いたもの）。ルートが変わらない限り変わらないので、ページは文言の翻訳をこれで引く（i18next の `guide_api_endpoint_<id>`、エラーコードは `guide_api_error_<code>`。en / ja の全行に訳があることは `tests/test_api_v1_guides.py` が検査する）。一覧の中で重複しない
 - `path`: 表示用（`{n}` などの置き場所つき。クエリを含むことがある）。`example`: 置き場所を既定値（`{n}`→`1` など）にしたもの。ページのテスターに読み込むパスと curl が送るパス
 - `description` / `errorCodes[].description`: 英語の文言（ページは訳が無い行だけこれを出す）。`body`: 例の body（無ければ `null`）。`destructive` / `logged` / `confirm`: ページの表の列（`destructive` の行のアクション（`:clear` など）は、テスターが送る前に確認する）
-- 並びはページの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない。`SHELL` のルート（アクセストークンの §5.29・§7、ゲームアセットの §5.28・§6.48〜§6.51・§7。アプリ自身のウィンドウからしか呼べない）も載せない（`core/ApiCatalog.py` の docstring）
+- 並びはページの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない。`SHELL` のルート（アクセストークンの §5.29・§7、ゲームアセットの §5.28・§6.48〜§6.51・§7、シェル要求のチケットの §5.30。アプリ自身のウィンドウからしか呼べない）も載せない（`core/ApiCatalog.py` の docstring）
 
 ### 5.25 `GET /api/v1/connection`（2026-11-14 追加・ADR-005 S-final SF-3a）
 
@@ -869,6 +871,28 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 - `token`: `WebAccess.Token()`（初回に読み、無ければ発行してメモリに持つ）。settings.json を読めなかった・値が壊れているときは発行せず `""`、`available` は `false`（そのあいだ LAN の書き込みは全部 `401`）
 - 再発行は §7 の `POST /api/v1/access-token:regenerate`
 - `GET /api/v1/settings`（§5.22）・`GET /api/v1/connection`（§5.25）・API 一覧（§5.24。ガイドのページ自身のルートは載せない）はトークンを返さない
+
+### 5.30 `GET /api/v1/shell-session`（2026-11-14 追加・ADR-005 S-final SF-5a-1）
+
+共有ビューのページがデスクトップ自身に頼む「シェル要求」に入れるチケット。ページ（`web/src/PanelShell/hostApi.ts` の `loadShellSession`。`useShellAccess({withToken: false})` が開いたときに読む）がこれを読んでモジュールの中にだけ持ち（sessionStorage / localStorage・URL・BroadcastChannel には入れない）、クリックの中で `window.open("<このサーバーのオリジン>/web/shell-request?verb=…&request=<id>&ticket=<チケット>[&<引数>]", "_blank", "noopener")` を開く。共有ビュー（`_PanelPage._OpenOutside`）はそのウィンドウを作らず、次を**すべて**満たすときだけ動詞を実行して `window.autonaPanelShell.shellResult(id, 結果)` で答える。満たさないもの・シェル要求に見える URL（デコードしたパスに `shell-request` を含み、かつ本体のサーバーのオリジン（この PC の別名・LAN アドレスの同じポートも）か、クエリに `ticket` のキーがある（どのオリジン・スキームでも））は実行も既定のブラウザへの受け渡しもせず、ログには理由の語だけを出す（URL・チケットは出さない）。それ以外の、パスに `shell-request` を含むだけの外部のリンク（`https://github.com/x/shell-request-lib` など）は普通のリンクとして既定のブラウザへ渡す
+
+- ユーザーのクリックから開いた（`isUserInitiated`）
+- このサーバーのオリジン（`127.0.0.1:<待ち受けポート>`）・userinfo なし・パスがそのまま `/web/shell-request`・フラグメントなし
+- クエリがちょうど `verb` / `request` / `ticket` と動詞の引数を 1 回ずつ（512 文字まで）。`request` は `[A-Za-z0-9_-]{1,64}`、引数は決まった値のどれか
+- `ticket` がこのプロセスのチケットと一致（定数時間の比較）
+- 頼んだページが共有ビューの Web UI（`/web` の配下で `view=designer` でない）
+
+動詞（SF-5a-1）: `alwaysOnTop`（`on=0|1`。メニューの「常に最前面に表示」のチェックと同じ。結果に `alwaysOnTop`）・`checkUpdates`（メニューの「更新を確認」と同じく、結果はアップデータ自身のダイアログ。答えは始めたことだけ。アップデータの確認がまだ走っている間（起動時の確認・前に頼んだ確認）は何も始まらないので `busy`）・`openExternal`（`target=discord|inquiry`。決まった表 `src/AutonaExternalLinks.py` のキーだけで、URL は受け取らない）。結果は `{ "ok": true, … }` か `{ "ok": false, "error": "<code>" }`（`bad_argument` / `not_ready` / `busy` / `open_failed` / `unknown_verb` / `unavailable` / `failed`。`unknown_verb` はシェルが知らない動詞で、共有ビューの検査（`SHELL_VERBS`）を通った動詞では起きない）。ページは 10 秒待って答えが無ければ諦める。答えは頼んだ文書にだけ渡す（凍結中は解凍まで持ち、読み込み直し・破棄で捨てる。動詞ごとに最新の 1 つだけ）。デスクトップの状態（`{ "alwaysOnTop": … }`）は読み込みのたびと変わるたびに `window.autonaPanelShell.shellState(状態)` で知らせる
+
+**`SHELL` 区分**（§2.2。トークンでは開かない・LAN・同じオリジンのレイアウト・OBS・curl・プレビューのリスナー・別のページのフレーム・ヘッドレスは `403 FORBIDDEN`）。`Cache-Control: no-store`。API 一覧（§5.24）には載せない
+
+```json
+{ "ok": true, "data": { "ticket": "…" } }
+```
+
+- `ticket`: `WebAccess.IssueShellTicket()`。このルートの最初の答えで 1 回作り、プロセスのあいだ同じ値をメモリにだけ持つ（`settings.json` に入れない・ログに出さない・import では作らない）。シェルの秘密（§2.2）ともアクセストークンとも別の値
+- 断った要求ではチケットを作らない。チケットを作るのはこのルートだけ（`tests/test_web_access.py` が AST で pin）
+- 同じオリジンのフレーム（about:blank・srcdoc・blob:）は秘密を受け取るのでこれも読める。だから Web UI は第三者の HTML を sandbox なしのフレームに入れない（sandbox のフレームは opaque origin で `403`。`.claude/rules/state-and-webserver.md`）
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 

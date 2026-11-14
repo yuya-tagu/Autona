@@ -342,6 +342,15 @@ Web 版だけ（サイドバー Display の「統計情報表示設定」= 共�
 - [ ] フォルダの取り込みは無く、ZIP にしてから取り込む案内が出る
 - [ ] 幅 600 px 前後の共有ビューで、ゲーム名・パック名・ファイル名が長くても横にはみ出さない。日本語の UI で日本語が出る
 
+### シェル要求（S-final SF-5a-1。ページの呼び出し口は SF-5a-3 の AppShell まで無いので、CDP から）
+hostApi はバンドルの中にあって呼べないので、ページの外から同じ URL を組み立てて開く。隔離データで起動し、共有ビューに CDP（QtWebEngine のリモートデバッグ）でつなぐ。
+- [ ] 準備: 答えを見るために `Runtime.evaluate` で `["shellResult","shellState"].forEach(n => { const o = window.autonaPanelShell[n]; window.autonaPanelShell[n] = (...a) => { console.log(n, JSON.stringify(a)); return o(...a); }; })`（id はページの待ちに無いので hostApi 自身は捨てる）。チケットは `Runtime.evaluate`（`awaitPromise: true`）で `fetch('/api/v1/shell-session').then(r => r.json()).then(b => (window.__t = b.data.ticket, 'ok'))`（ブラウザで同じ URL を開くと 403）
+- [ ] `Runtime.evaluate` に `userGesture: true` を付けて `window.open(location.origin + '/web/shell-request?' + new URLSearchParams({verb: 'alwaysOnTop', on: '1', request: 'm1', ticket: window.__t}), '_blank', 'noopener')`: 窓が最前面になり（WS_EX_TOPMOST）、「Help & Settings」の「常に最前面に表示」にチェックが付く。コンソールに `shellResult ["m1",{"ok":true,"alwaysOnTop":true}]` と `shellState [{"alwaysOnTop":true}]`。`on: '0'` で両方外れる。メニューから切り替えても `shellState` が出る
+- [ ] 同じ形で `ticket` を違う値にする・`userGesture` を付けない: 何も起きない（前者は main.log に `refused a shell request (ticket)`）
+- [ ] `verb: 'checkUpdates'`（引数なし）: アップデータのダイアログが出る。確認がまだ走っている間（起動直後の確認の最中など）は `{"ok":false,"error":"busy"}` で、ダイアログは増えない。最前面がオンのとき、ダイアログがメインウィンドウの裏に隠れないか（隠れるなら SF-5a-3 で扱う）
+- [ ] `verb: 'openExternal', target: 'discord'`: 既定のブラウザで Discord が開く。`target: 'https://example.com'` は `refused a shell request (argument)` で何も開かない
+- [ ] どの手順でも、既定のブラウザに `/web/shell-request` が開かない。main.log にチケットも shell-request の URL も出ない
+
 ## 外部制御 API（`/api/v1/`・実装時に確認）
 
 > 仕様: [design/external-control-api.md](design/external-control-api.md)。自動テストは作らず本節を手動でなぞる。

@@ -23,7 +23,13 @@ Also here:
   and its way back;
 - **a board's thumbnail drawn now** (DrawThumbnail): core's
   ThumbnailService.DrawBoard with the renderer's synchronous draw, for the
-  legacy route and SCORE's X post.
+  legacy route and SCORE's X post;
+- **the shared view's shell requests** (ShellRequest / ShellState; ADR-005
+  S-final SF-5a-1): what a page asks of the desktop in a click -- the main
+  window's "always on top" (its Help & Settings menu's check follows), the
+  update check, one of the fixed outside addresses (AutonaExternalLinks.
+  EXTERNAL_LINKS). The shared view (AutonaWebPanelHost, given this instance
+  by the Window) decides a request is one and calls these.
 
 THREADING: the main window and the renderers are the GUI thread's. The web
 layer's operations are wrapped in gui_thread_sync (the request waits for the
@@ -33,9 +39,11 @@ Import side effects: none (agent-pitfalls #1).
 """
 import os
 
-from qtpy.QtCore import QBuffer, QIODevice
+from qtpy.QtCore import QBuffer, QIODevice, QUrl
+from qtpy.QtGui import QDesktopServices
 from loguru import logger
 
+from .AutonaExternalLinks import EXTERNAL_LINKS
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .core.Actions import AutonaActions
 from .core.ThumbnailService import ThumbnailService
@@ -170,6 +178,77 @@ class AutonaShellOperations:
         ThumbnailDataMissing with no match to draw, the renderer's failure.
         Needs no board widget (there are none since ADR-005 S4ac-3)."""
         return ThumbnailService.instance.DrawBoard(board, DrawThumbnailNow)
+
+    # ── The shared view's shell requests (ADR-005 S-final SF-5a-1) ───────
+    # AutonaWebPanelHost calls these on the GUI thread, from the event loop
+    # (not inside Chromium's new-window call), for a request it took
+    # (ParseShellRequest: the verb and its arguments are SHELL_VERBS'
+    # values). Each answer is handed to the page as it is (JSON):
+    # {"ok": True, ...} or {"ok": False, "error": <code>}.
+
+    def ShellState(self):
+        """What the pages show of the desktop: {"alwaysOnTop"} (False
+        before the main window is there)."""
+        window = self._parent
+        return {"alwaysOnTop": bool(window is not None
+                                    and window.IsAlwaysOnTop())}
+
+    def ShellRequest(self, verb, args):
+        """Run shell request `verb` with `args` (its arguments, str values):
+        its answer."""
+        if verb == "alwaysOnTop":
+            return self._AlwaysOnTop(args.get("on"))
+        if verb == "checkUpdates":
+            return self._CheckUpdates()
+        if verb == "openExternal":
+            return self._OpenExternal(args.get("target"))
+        logger.warning(f"Shell operations - Unknown shell request {verb!r}")
+        return {"ok": False, "error": "unknown_verb"}
+
+    def _AlwaysOnTop(self, on):
+        """The main window's "always on top", set to `on` ("0" / "1") as its
+        menu's check would be (Window.SetAlwaysOnTop: the check and the
+        window flag; the window is hidden and shown again by Qt): the state
+        it is in then."""
+        if on not in ("0", "1"):
+            return {"ok": False, "error": "bad_argument"}
+        window = self._parent
+        if window is None:
+            return {"ok": False, "error": "not_ready"}
+        window.SetAlwaysOnTop(on == "1")
+        return {"ok": True, "alwaysOnTop": bool(window.IsAlwaysOnTop())}
+
+    def _CheckUpdates(self):
+        """The update check, as the Help & Settings menu's "Check for
+        updates" starts it (not silent: the updater shows its answer in a
+        dialog of its own). Started, not waited for. While a check is still
+        running (the startup's silent one, or one asked before) the updater
+        starts nothing, so the answer says so ("busy") instead of "ok"."""
+        # Desktop-only, and nothing of it is needed before the first ask.
+        from .AutonaUpdater import AutonaUpdater
+        updater = AutonaUpdater.instance
+        if updater is None:
+            return {"ok": False, "error": "not_ready"}
+        # Read only: the updater's own guard in CheckForUpdates is the same
+        # test, and the updater is not changed for the page (SF-5a-1).
+        running = getattr(updater, "_check_thread", None)
+        if running is not None and running.isRunning():
+            return {"ok": False, "error": "busy"}
+        updater.CheckForUpdates(silent=False)
+        return {"ok": True}
+
+    def _OpenExternal(self, target):
+        """Open outside address `target` (a key of EXTERNAL_LINKS; never a
+        URL from the page) as the Help & Settings menu does: the default
+        browser, or the mail program for the inquiry address."""
+        address = EXTERNAL_LINKS.get(target)
+        if address is None:
+            return {"ok": False, "error": "bad_argument"}
+        if not QDesktopServices.openUrl(QUrl(address)):
+            logger.warning(f"Shell operations - The system could not open "
+                           f"the {target} address")
+            return {"ok": False, "error": "open_failed"}
+        return {"ok": True}
 
     # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
     # bootstrap_gui() registers them as AutonaWebOperations.openSetSelection

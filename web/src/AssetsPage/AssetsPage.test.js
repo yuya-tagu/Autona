@@ -12,15 +12,16 @@ import {
 import i18n from "../i18n/config";
 import {PANELS} from "../PanelShell/registry";
 import {useShellAccess} from "../PanelShell/useShellAccess";
+import {hasShellSession} from "../PanelShell/hostApi";
 import {PanelShellContext} from "../PanelShell/context";
 import AssetsPage from "./index";
 import {MAX_UPLOAD_BYTES, SOURCE_URL, humanSize} from "./assetsApi";
 
 // The game assets page (ADR-005 S-final SF-4b-2): the Qt dialog
 // AutonaGameAssetGuideWindow as /web/assets. In the desktop's shared view
-// (GET /api/v1/access-token answers 200; the token is dropped unread) it
-// lists the upstream packs, installs them and imports a ZIP as jobs; in a
-// browser (403) it only explains and links the source.
+// (GET /api/v1/shell-session answers 200, SF-5a-1; the access token is never
+// read) it lists the upstream packs, installs them and imports a ZIP as jobs;
+// in a browser (403) it only explains and links the source.
 
 jest.setTimeout(20000);
 
@@ -42,6 +43,7 @@ jest.mock("../websocketConnection", () => {
 });
 
 const TOKEN = "tok-never-kept-1234";
+const TICKET = "ticket-never-stored-5678";
 
 const PACKS = {
     source: {page: SOURCE_URL, index: "https://example.invalid/assets.json"},
@@ -133,6 +135,7 @@ function refuse(status, code, reason) {
 function freshServer() {
     return {
         token: ok(200, {token: TOKEN, available: true}),
+        session: ok(200, {ticket: TICKET}),
         packs: ok(200, PACKS),
         job: ok(200, job()),
         install: null,
@@ -166,6 +169,9 @@ beforeEach(() => {
         const {pathname} = new URL(url);
         if (method === "GET" && pathname === "/api/v1/access-token") {
             return server.token;
+        }
+        if (method === "GET" && pathname === "/api/v1/shell-session") {
+            return server.session;
         }
         if (method === "GET" && pathname === "/api/v1/assets/packs") {
             return server.packs;
@@ -306,7 +312,7 @@ test("it says it is checking until the probe answers", async () => {
 });
 
 test("elsewhere it explains and links the source, reading nothing", async () => {
-    server.token = refuse(403, "FORBIDDEN");
+    server.session = refuse(403, "FORBIDDEN");
     await renderPage();
 
     await screen.findByText(i18n.t("assets_elsewhere_title"));
@@ -328,22 +334,28 @@ test("elsewhere it explains and links the source, reading nothing", async () => 
 });
 
 test("a probe that fails says so and can be tried again", async () => {
-    server.token = refuse(500, "INTERNAL");
+    server.session = refuse(500, "INTERNAL");
     await renderPage();
     await screen.findByText(i18n.t("assets_failed"), {}, {timeout: 8000});
 
-    server.token = ok(200, {token: TOKEN, available: true});
+    server.session = ok(200, {ticket: TICKET});
     fireEvent.click(screen.getByRole("button", {name: i18n.t("assets_retry")}));
     await screen.findByText(i18n.t("assets_pick_game"));
 });
 
-test("in the shared view the page keeps no access token", async () => {
+test("in the shared view the page reads no access token", async () => {
     await renderShell();
 
-    expect(document.body.textContent).not.toContain(TOKEN);
-    expect(JSON.stringify({...sessionStorage})).not.toContain(TOKEN);
-    expect(JSON.stringify({...localStorage})).not.toContain(TOKEN);
-    expect(window.location.href).not.toContain(TOKEN);
+    // The probe is the shell session (SF-5a-1): the token is never asked.
+    expect(calls("GET", "/api/v1/shell-session")).toHaveLength(1);
+    expect(calls("GET", "/api/v1/access-token")).toHaveLength(0);
+    // The ticket is hostApi's alone: nowhere the page shows or keeps.
+    for (const secret of [TOKEN, TICKET]) {
+        expect(document.body.textContent).not.toContain(secret);
+        expect(JSON.stringify({...sessionStorage})).not.toContain(secret);
+        expect(JSON.stringify({...localStorage})).not.toContain(secret);
+        expect(window.location.href).not.toContain(secret);
+    }
 });
 
 test("useShellAccess({withToken: false}) answers shell with no token", async () => {
@@ -359,6 +371,38 @@ test("useShellAccess({withToken: false}) answers shell with no token", async () 
     expect(seen.available).toBe(false);
     await expect(seen.regenerate()).rejects.toThrow();
     expect(calls("POST", "/api/v1/access-token:regenerate")).toHaveLength(0);
+    // Its probe is the shell session; the token is never read (SF-5a-1).
+    expect(calls("GET", "/api/v1/shell-session")).toHaveLength(1);
+    expect(calls("GET", "/api/v1/access-token")).toHaveLength(0);
+    expect(hasShellSession()).toBe(true);
+});
+
+test("useShellAccess({withToken: false}) is elsewhere on a 403, ticket dropped", async () => {
+    server.session = refuse(403, "FORBIDDEN");
+    let seen;
+    function Probe() {
+        seen = useShellAccess({withToken: false});
+        return null;
+    }
+    render(<Probe/>);
+    await waitFor(() => expect(seen.access).toBe("elsewhere"));
+
+    expect(hasShellSession()).toBe(false);
+    expect(calls("GET", "/api/v1/access-token")).toHaveLength(0);
+});
+
+test("useShellAccess() (the API page's) still reads the token", async () => {
+    let seen;
+    function Probe() {
+        seen = useShellAccess();
+        return null;
+    }
+    render(<Probe/>);
+    await waitFor(() => expect(seen.access).toBe("shell"));
+
+    expect(seen.token).toBe(TOKEN);
+    expect(calls("GET", "/api/v1/access-token")).toHaveLength(1);
+    expect(calls("GET", "/api/v1/shell-session")).toHaveLength(0);
 });
 
 // ── the pack list ──────────────────────────────────────────────────────
@@ -1102,7 +1146,7 @@ test("the page opens itself in the default browser from the app", async () => {
 });
 
 test("the page in a browser has no browser to open", async () => {
-    server.token = refuse(403, "FORBIDDEN");
+    server.session = refuse(403, "FORBIDDEN");
     await renderPage();
 
     expect(screen.queryByRole("button", {

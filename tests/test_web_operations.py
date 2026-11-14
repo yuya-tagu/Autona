@@ -2396,6 +2396,9 @@ _NOT_200 = {
     # them -- the guard's 403, before any operation.
     ("api_v1.get_access_token", None): 403,
     ("api_v1.access_token_regenerate", None): 403,
+    # The shell request's ticket, likewise (SHELL, SF-5a-1): never issued
+    # headless.
+    ("api_v1.get_shell_session", None): 403,
     # The game asset routes but the list, likewise (SHELL, SF-4b-1): no
     # upload, job or reveal headless.
     ("api_v1.get_assets_job", None): 403,

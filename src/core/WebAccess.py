@@ -30,8 +30,8 @@ surface; the server only asks it questions. It decides six things:
   S-final SF-4a): this PC's own request that also carries the secret the
   shell adds to the shared view's fetches (IssueShellSecret). Every page of
   this origin passes as this PC's own request, so only that secret keeps
-  the access token -- and the game asset jobs and upload (SF-4b-1) -- from
-  them.
+  the access token -- and the game asset jobs and upload (SF-4b-1), and
+  the shell request's ticket (IssueShellTicket, SF-5a-1) -- from them.
 * **What the preview listener serves** (PreviewServes, ADR-005 S-final
   SF-8a): the second port the shared view's design previews load from
   serves only what a layout reads, and never writes -- decided before any
@@ -54,7 +54,9 @@ they are classified DESIGNER here and left alone.
 Core module: no Qt (tests/test_core_qt_free.py), no Flask, and nothing
 happens at import time -- the token is read, or issued and saved, on first
 use (Token()), and then kept in memory: only RegenerateToken() changes it.
-The shell's secret is made on the shell's first ask (IssueShellSecret()).
+The shell's secret is made on the shell's first ask (IssueShellSecret()),
+the shell request's ticket on GET /api/v1/shell-session's first answer
+(IssueShellTicket()).
 """
 
 import hmac
@@ -307,6 +309,10 @@ ROUTE_ACCESS = {
     "api_v1.get_connection": THIS_PC,
     "api_v1.get_access_token": SHELL,
     "api_v1.access_token_regenerate": SHELL,
+    # The shell request's ticket (ADR-005 S-final SF-5a-1): what the shared
+    # view's page puts in its window.open of /web/shell-request. SHELL for
+    # the token's reason: a same-origin layout/ page would pass THIS_PC.
+    "api_v1.get_shell_session": SHELL,
     # The game asset packs (ADR-005 S-final SF-3b; the "Add game assets"
     # window, a React page in SF-4b). The list -- the upstream index and
     # what is installed -- names no local path, but reading it may fetch
@@ -828,6 +834,44 @@ def ShellSecretMatches(value):
             or len(value) > _SHELL_SECRET_MAX_INPUT or not value.isascii()):
         return False
     # Bytes, as TokenMatches: compare_digest refuses non-ASCII str.
+    return hmac.compare_digest(value.encode("ascii"), expected.encode("ascii"))
+
+
+# ── The shell request's ticket (ADR-005 S-final SF-5a-1) ────────────────
+# What a shell request carries (src/AutonaWebPanelHost.py's
+# ParseShellRequest: the page's window.open of /web/shell-request in a
+# click). A value of its own, not the shell's secret: the page's script
+# holds it (GET /api/v1/shell-session hands it out, SHELL -- only the shared
+# view's own fetches reach it), while the secret never leaves the request
+# interceptor. Issued once per process by that route's first answer, kept in
+# memory only (not in settings.json, never logged), never at import: the
+# headless app never reaches the route (SHELL is always 403 there), so it
+# has none, and the shell compares nothing to a ticket never issued.
+_shellTicket = None
+
+
+def IssueShellTicket():
+    """The shell request's ticket: made on the first call, the same for the
+    rest of the process. Only GET /api/v1/shell-session calls this
+    (AutonaWebOperations.get_shell_session; tests/test_web_access.py
+    pins it)."""
+    global _shellTicket
+    with _shellLock:
+        if _shellTicket is None:
+            _shellTicket = secrets.token_urlsafe(32)
+        return _shellTicket
+
+
+def ShellTicketMatches(value):
+    """Whether ``value`` (a shell request's ``ticket``, decoded) is the
+    ticket. False when none was issued, and for anything but a non-empty
+    ASCII str within the bound (the secret's). Constant-time."""
+    expected = _shellTicket
+    if not expected:
+        return False
+    if (not isinstance(value, str) or not value
+            or len(value) > _SHELL_SECRET_MAX_INPUT or not value.isascii()):
+        return False
     return hmac.compare_digest(value.encode("ascii"), expected.encode("ascii"))
 
 

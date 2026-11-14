@@ -765,6 +765,34 @@ Qt モデルは Qt モデルの整理 PR4 でデスクトップからも無く�
 すべて動く（ADR-005 S3e-9・S4o）。終了の開始（バックグラウンドの仕事を止めた後・イベントループの終了後）からは、
 リクエストのボードの操作も何も書かずに 503 を返す（ボードホストの `Run`。両シェル同じ。S4ad のレビュー）。
 
+**シェル要求**（ADR-005 S-final SF-5a-1。デスクトップだけ・HTTP のルートではない）: 共有ビュー（`src/AutonaWebPanelHost.py`）のページがデスクトップ自身に頼むこと
+（動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`）の経路。特権のチャネル（QWebChannel・注入したスクリプト）は作らない。
+
+```
+React のページ（web/src/PanelShell/hostApi.ts）
+  1. マウント時: GET /api/v1/shell-session → チケット（SHELL 区分: 共有ビューの fetch だけが読める。モジュールの中にだけ持つ）
+  2. クリックの中: window.open("<本体のオリジン>/web/shell-request?verb=…&request=<id>&ticket=…[&引数]")
+        │
+        ▼
+_PanelPage._OpenOutside（ほかのどの分岐より先に IsShellRequestShaped で引き取る。既定のブラウザへは渡さない）
+  → クリックから（isUserInitiated）か・ParseShellRequest（オリジン・パス・キー・値・チケットの一致・頼んだページ）
+  → shellRequested → AutonaWebPanelHost が QTimer.singleShot(0) でイベントループに出てから
+        │
+        ▼
+AutonaShellOperations.ShellRequest(verb, args)（Window が _WebPanel で shell= に注入）
+  - alwaysOnTop: Window.SetAlwaysOnTop（メニューの「常に最前面に表示」のチェックが正本）
+  - checkUpdates: AutonaUpdater.CheckForUpdates(silent=False)（確認中なら busy）
+  - openExternal: src/AutonaExternalLinks.py の決まった表のキーだけ（URL は受けない。メニューも同じ表を読む）
+        │
+        ▼
+window.autonaPanelShell.shellResult(id, 結果)（頼んだ文書にだけ。json.dumps だけを入れる）
+window.autonaPanelShell.shellState(状態)（読み込みのたびと、ToggleAlwaysOnTop → PublishShellState で変わるたび）
+```
+
+チケットはシェルの秘密（共有ビューの fetch に付くヘッダ）とは別の値で、プロセスで 1 回作りメモリにだけ持つ（`core/WebAccess.IssueShellTicket`）。
+シェル要求の形の URL（パスに `shell-request` があり、本体のオリジンかクエリに `ticket` のキーがあるもの）は遷移でも行かせない（`acceptNavigationRequest`）。
+規則の詳細は [.claude/rules/state-and-webserver.md](../rules/state-and-webserver.md) の共有ビューの節と [external-control-api.md](external-control-api.md) §5.30。
+
 #### 3.2.2 書き込み規約
 
 | ルール | 内容 |

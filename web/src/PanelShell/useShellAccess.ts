@@ -1,18 +1,23 @@
 import React from "react";
 import {apiErrorStatus, apiPost} from "../api";
 import {WRITE_OPTIONS, getWithRetry} from "./requests";
+import {loadShellSession} from "./hostApi";
 
 // Whether this page is the desktop app's own window (ADR-005 S-final
 // SF-4a): the shared view adds the shell's secret to its own fetches to
 // /api/v1/ (src/AutonaWebPanelHost.py), which the SHELL routes ask for.
-// GET /api/v1/access-token is the probe: 200 in the shared view, 403
-// anywhere else -- a browser (this PC's too), OBS, another computer with
-// the token or not, the headless app.
+// A SHELL route is the probe: 200 in the shared view, 403 anywhere else --
+// a browser (this PC's too), OBS, another computer with the token or not,
+// the headless app.
 //
-// What it answers is the access token, and it is kept in this hook's
-// state only: never in sessionStorage / localStorage, a BroadcastChannel,
-// the URL or autonaToken.ts's store (the page's own token for its writes
-// from another computer), so it leaves with the page.
+// The API page's probe is GET /api/v1/access-token, whose answer is the
+// access token, kept in this hook's state only: never in sessionStorage /
+// localStorage, a BroadcastChannel, the URL or autonaToken.ts's store (the
+// page's own token for its writes from another computer), so it leaves with
+// the page. With `withToken: false` the probe is GET /api/v1/shell-session
+// instead (SF-5a-1): the token is never read, and the shell request's
+// ticket it answers is hostApi.ts's (loadShellSession), for the page's
+// shell requests.
 
 export type ShellAccess =
     // Reading.
@@ -54,9 +59,9 @@ export const REGENERATE_PATH = "/api/v1/access-token:regenerate";
 export interface ShellAccessOptions {
     // Whether the hook keeps the access token (default true: the API
     // page's). `false` is for a page that only needs to know it is the
-    // shared view (the game assets page, ADR-005 S-final SF-4b-2): the
-    // token the probe answers is dropped unread, so `token` is "" and
-    // `regenerate` refuses.
+    // shared view (the game assets page, ADR-005 S-final SF-4b-2): the probe
+    // is the shell session (SF-5a-1), the token is never read, so `token` is
+    // "" and `regenerate` refuses.
     withToken?: boolean;
 }
 
@@ -79,13 +84,17 @@ export function useShellAccess(
     React.useEffect(() => {
         let current = true;
         setAccess("checking");
-        getWithRetry<Envelope<TokenAnswer>>(ACCESS_TOKEN_PATH, () => current)
-            .then((body) => {
+        const probe: Promise<TokenAnswer> = withToken
+            ? getWithRetry<Envelope<TokenAnswer>>(
+                ACCESS_TOKEN_PATH, () => current).then((body) => (
+                {token: body.data?.token ?? "",
+                 available: Boolean(body.data?.available)}))
+            : loadShellSession(() => current).then(() => (
+                {token: "", available: false}));
+        probe
+            .then((next) => {
                 if (current) {
-                    setAnswer(withToken
-                        ? {token: body.data?.token ?? "",
-                           available: Boolean(body.data?.available)}
-                        : {token: "", available: false});
+                    setAnswer(next);
                     setAccess("shell");
                 }
             }, (error: unknown) => {

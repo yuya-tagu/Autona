@@ -735,6 +735,15 @@ def regenerate_access_token():
     return token, WebAccess.TokenGeneration() != before
 
 
+def get_shell_session():
+    """The shell request's ticket (ADR-005 S-final SF-5a-1): what the shared
+    view's page puts in its window.open of /web/shell-request
+    (WebAccess.IssueShellTicket; issued by the first call). Its route is
+    WebAccess.SHELL, so only the shared view's own fetches get here, and
+    the headless app never does."""
+    return WebAccess.IssueShellTicket()
+
+
 def get_connection():
     """What the guide pages show of the server and its files.
 

@@ -6,7 +6,7 @@ This test pins down what has already been migrated: importing
 SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
 AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider
-/ AutonaUpdater / AutonaShellOperations /
+/ AutonaUpdater / AutonaShellOperations / AutonaExternalLinks /
 AutonaWebServer must not build a QApplication, must not create any of those
 singleton instances, must not load any data file, and must not touch the
 filesystem below the current working directory (./out, ./user_data/games,
@@ -213,6 +213,9 @@ updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
 # the one instance, and it waits for the main window (UiMounted).
 shell_operations = importlib.import_module(
     "src.AutonaShellOperations").AutonaShellOperations
+# The addresses the desktop opens outside the app (ADR-005 S-final SF-5a-1:
+# the menu's and the shell request openExternal's). Constants only.
+external_links = importlib.import_module("src.AutonaExternalLinks")
 # WebServer additionally pulls in AutonaWebOperations / AutonaApiV1 /
 # AutonaDesignerService. None of those may build anything at module level
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
@@ -266,6 +269,15 @@ assert tdp.instance is None, \
 assert updater.instance is None, "import created AutonaUpdater.instance"
 assert shell_operations.instance is None, \
     "import created AutonaShellOperations.instance"
+assert ({name for name in vars(external_links) if not name.startswith("__")}
+        == {"DISCORD_URL", "BUSINESS_INQUIRY_EMAIL", "BUSINESS_INQUIRY_URL",
+            "EXTERNAL_LINKS"}), "AutonaExternalLinks holds more than constants"
+assert all(isinstance(value, str)
+           for value in external_links.EXTERNAL_LINKS.values()), (
+    "AutonaExternalLinks built something")
+assert web_access._shellSecret is None, "import issued the shell's secret"
+assert web_access._shellTicket is None, (
+    "import issued the shell request's ticket")
 assert bridge.instance is None, "import created StateManagerBridge.instance"
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
