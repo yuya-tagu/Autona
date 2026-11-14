@@ -1872,9 +1872,9 @@ class WebServer:
     def _guard_http_request():
         """None to let the request through, else the refusal to send.
 
-        Only WRITE / PLAYERDB / THIS_PC endpoints are checked. A preflight
-        (OPTIONS) passes: it carries no token and runs no handler. An unmatched
-        URL (endpoint None) is left to Flask's 404 / 405.
+        Only WRITE / PLAYERDB / THIS_PC / SHELL endpoints are checked. A
+        preflight (OPTIONS) passes: it carries no token and runs no handler.
+        An unmatched URL (endpoint None) is left to Flask's 404 / 405.
 
         The preview listener's requests come first and never reach
         Authorize (ADR-005 S-final SF-8a): served only when
@@ -1903,6 +1903,14 @@ class WebServer:
             # this PC's own request (or that a token let it past the rest).
             because = refusal.reason if refusal else "token"
             refusal = WebAccess.THIS_PC_ONLY
+        if access == WebAccess.SHELL:
+            # The same, and the shell's secret too (ADR-005 S-final SF-4a).
+            # The log names what was missing, never the header's value.
+            because = WebAccess.ShellRefusalReason(
+                grant, refusal, request.headers.get("Sec-Fetch-Site"),
+                request.headers.get(WebAccess.SHELL_HEADER))
+            if because is not None:
+                refusal = WebAccess.SHELL_ONLY
         if refusal is None:
             return None
         WebServer._log_refusal(

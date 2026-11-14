@@ -1382,7 +1382,8 @@ def test_every_route_on_the_preview_listener_serves_only_a_layouts_reads(
     # write kind refused (the static kind both ways).
     assert served == {WebAccess.READ, WebAccess.STATIC}
     assert refused == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
-                       WebAccess.THIS_PC, WebAccess.DESIGNER, WebAccess.STATIC}
+                       WebAccess.THIS_PC, WebAccess.SHELL, WebAccess.DESIGNER,
+                       WebAccess.STATIC}
 
 
 def test_every_row_of_the_route_ledger_is_judged_for_the_preview():
@@ -1740,7 +1741,8 @@ def test_every_route_refuses_another_pages_frame(server):
             assert response.get_json() == refusal, (method, path)
             kinds.add(WebAccess.RouteAccess(endpoint))
     assert kinds == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
-                     WebAccess.THIS_PC, WebAccess.DESIGNER, WebAccess.STATIC}
+                     WebAccess.THIS_PC, WebAccess.SHELL, WebAccess.DESIGNER,
+                     WebAccess.STATIC}
 
 
 @pytest.mark.parametrize("headers", [
@@ -2075,9 +2077,9 @@ def test_a_websocket_ends_with_nothing_after_its_close_frame(
 # ── The guides' routes (ADR-005 S-final SF-3a) ───────────────────────────
 # The connection is THIS_PC: this PC's own request only (loopback or its LAN
 # address, its own Host, no forwarding, no foreign page), token or not -- it
-# names this PC's folders. The catalogue is a READ. The access token has no
-# route (a same-origin layout/ page would pass as this PC's own request;
-# its route is SF-4a's).
+# names this PC's folders. The catalogue is a READ. The access token is not
+# THIS_PC (a same-origin layout/ page would pass as this PC's own request):
+# its routes are SHELL (SF-4a-1, below).
 
 CONNECTION_URL = "/api/v1/connection"
 CATALOG_URL = "/api/v1/api-catalog"
@@ -2144,8 +2146,9 @@ def test_only_this_pcs_own_request_gets_the_connection(
     "/api/v1/settings/access-token",
     "/api/v1/settings/access-token:regenerate",
 ])
-def test_the_access_token_has_no_route(server, url):
-    # Not even from this PC: a page of this origin would pass as its request.
+def test_the_access_token_is_not_under_the_settings(server, url):
+    # Its routes are the shell's, /api/v1/access-token* (SF-4a-1): nothing
+    # under /settings serves it.
     token = WebAccess.Token()
     client = _client(server)
     for response in (client.get(url), client.post(url, json={"confirm": True})):
@@ -2242,6 +2245,307 @@ def test_the_asset_jobs_are_not_in_v1_yet(server, assetOps):
                 "/api/v1/assets:importFolder", "/api/v1/assets/job:cancel"):
         assert client.post(url, json={}).status_code in (404, 405), url
     assert assetOps == []
+
+
+# ── The access token's routes (ADR-005 S-final SF-4a-1) ──────────────────
+# SHELL: this PC's own request (GRANT_AMBIENT) that is a fetch of this
+# origin's own page (Sec-Fetch-Site same-origin exactly) and carries the
+# secret the shell adds to the shared view's fetches (X-Autona-Shell). The
+# token does not open it, a LAN device is refused even with the secret, and
+# a shell that never issued one (headless) refuses them all. One answer to
+# all: 403 SHELL_ONLY. Which requests the shell adds the secret to is
+# tests/test_web_panel_host.py's.
+
+TOKEN_URL = "/api/v1/access-token"
+REGENERATE_URL = "/api/v1/access-token:regenerate"
+
+
+@pytest.fixture
+def shellSecret(monkeypatch):
+    """The shell's secret, issued afresh for the test (and forgotten
+    after)."""
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    return WebAccess.IssueShellSecret()
+
+
+def _shell_headers(secret, **extra):
+    # What the shared view's fetch carries: a same-origin fetch, the
+    # interceptor's header.
+    return dict({"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors",
+                 "Sec-Fetch-Dest": "empty", WebAccess.SHELL_HEADER: secret},
+                **extra)
+
+
+def test_the_secret_is_made_once_kept_in_memory_and_not_at_import(
+        settings, monkeypatch, tmp_path):
+    import importlib
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    first = WebAccess.IssueShellSecret()
+    assert first == WebAccess.IssueShellSecret()
+    assert len(first) == 43 and first.isascii()
+    # Not in settings.json.
+    assert first not in json.dumps(SettingsManager.settings)
+    assert importlib.import_module("src.core.WebAccess")._shellSecret == first
+    # A fresh process that imports it has none (the form of
+    # tests/test_core_qt_free.py: the project on PYTHONPATH, run from an
+    # empty directory, no bytecode written).
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    code = ("from src.core import WebAccess; "
+            "print(WebAccess._shellSecret is None)")
+    out = subprocess.run([sys.executable, "-B", "-c", code],
+                         cwd=str(tmp_path), env=env, capture_output=True,
+                         text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "True"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("value, matches", [
+    (None, False), ("", False), (0, False), (b"x", False),
+    (" ", False), ("x" * 43, False),
+    ("wrong", False),
+    ("ü" * 43, False),       # non-ASCII (a latin-1 header value)
+    ("x" * 129, False),      # over the bound
+])
+def test_only_the_secret_itself_matches(shellSecret, value, matches):
+    assert WebAccess.ShellSecretMatches(value) is matches
+    assert WebAccess.ShellSecretMatches(shellSecret) is True
+    assert WebAccess.ShellSecretMatches(shellSecret + "x") is False
+    assert WebAccess.ShellSecretMatches(shellSecret[:-1]) is False
+    assert WebAccess.ShellSecretMatches(shellSecret + "ü") is False
+    # Nothing trims or folds it: surrounding spaces and another case are
+    # another value.
+    for padded in (f" {shellSecret}", f"{shellSecret} ", f"\t{shellSecret}"):
+        assert WebAccess.ShellSecretMatches(padded) is False
+
+
+def test_the_secret_is_compared_case_sensitively(shellSecret, monkeypatch):
+    # A secret with letters for certain (token_urlsafe may, rarely, draw
+    # none in a stretch); the fixture puts the issued one back.
+    monkeypatch.setattr(WebAccess, "_shellSecret", "aB" + shellSecret[2:])
+    assert WebAccess.ShellSecretMatches("aB" + shellSecret[2:]) is True
+    assert WebAccess.ShellSecretMatches("Ab" + shellSecret[2:]) is False
+    assert WebAccess.ShellSecretMatches(
+        ("aB" + shellSecret[2:]).swapcase()) is False
+
+
+def test_nothing_matches_before_the_secret_is_issued(settings, monkeypatch):
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    for value in (None, "", "x" * 43, "anything"):
+        assert WebAccess.ShellSecretMatches(value) is False
+
+
+def test_the_shell_reads_the_token(server, shellSecret):
+    token = WebAccess.Token()
+    response = _client(server).get(TOKEN_URL,
+                                   headers=_shell_headers(shellSecret))
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["data"] == {"token": token, "available": True}
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_the_shell_under_this_pcs_lan_address_reads_the_token(
+        server, shellSecret):
+    response = _client(server, LAN_HOST).get(
+        TOKEN_URL, headers=_shell_headers(shellSecret, Host=LAN_HOST))
+    assert response.status_code == 200, response.get_json()
+
+
+def test_no_usable_token_is_said_so(server, shellSecret, monkeypatch, tmp_path):
+    # settings.json could not be read: there is none to show.
+    _unreadSettings(monkeypatch, tmp_path / "unread.json")
+    response = _client(server).get(TOKEN_URL,
+                                   headers=_shell_headers(shellSecret))
+    assert response.status_code == 200
+    assert response.get_json()["data"] == {"token": "", "available": False}
+
+
+def _refused_as_not_the_shell(response, token, secret):
+    assert response.status_code == 403, response.get_data(as_text=True)
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
+    assert token.encode() not in response.data
+    assert secret.encode() not in response.data
+
+
+@pytest.mark.parametrize("remote, headers", [
+    # No secret, or not the one.
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin"}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": ""}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin",
+                   "X-Autona-Shell": "x" * 43}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin",
+                   "X-Autona-Shell": "ü" * 43}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin",
+                   "X-Autona-Shell": "x" * 4096}),
+    # The secret, but not a fetch of this origin's own page: a typed URL /
+    # Companion / curl (none, absent), another port of this PC (same-site),
+    # a page elsewhere.
+    ("127.0.0.1", {"Sec-Fetch-Site": "none", "X-Autona-Shell": None}),
+    ("127.0.0.1", {"X-Autona-Shell": None}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-site", "X-Autona-Shell": None}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "cross-site", "X-Autona-Shell": None}),
+    # The secret and same-origin, but not this PC's own request: a foreign
+    # page, a rebound host name, a relayed request, another computer.
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": None,
+                   "Origin": "https://evil.example"}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": None,
+                   "Host": "evil.example"}),
+    ("127.0.0.1", {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": None,
+                   "X-Forwarded-For": "203.0.113.9"}),
+    (LAN_PEER, {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": None}),
+    (LAN_PEER, {"X-Autona-Shell": None}),
+])
+@pytest.mark.parametrize("withToken", [False, True])
+@pytest.mark.parametrize("method, url", [("GET", TOKEN_URL),
+                                         ("POST", REGENERATE_URL)])
+def test_only_the_shells_own_request_reaches_the_token(
+        server, shellSecret, warnings, remote, headers, withToken, method,
+        url):
+    token = WebAccess.Token()
+    generation = WebAccess.TokenGeneration()
+    sent = {name: (shellSecret if value is None else value)
+            for name, value in headers.items()}
+    if withToken:
+        sent[WebAccess.TOKEN_HEADER] = token
+    response = _client(server, remote).open(
+        url, method=method, headers=sent, json={"confirm": True})
+    _refused_as_not_the_shell(response, token, shellSecret)
+    assert WebAccess.Token() == token
+    assert WebAccess.TokenGeneration() == generation
+    # The log names the refusal, never the secret or the token.
+    assert any("shell_only" in m for m in warnings)
+    assert not any(shellSecret in m or token in m for m in warnings)
+
+
+@pytest.mark.parametrize("value", [None, "", "x" * 43])
+def test_a_shell_that_never_issued_the_secret_refuses_them_all(
+        server, monkeypatch, value):
+    # Headless: nothing issues it, so no request reaches the token.
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    headers = {"Sec-Fetch-Site": "same-origin"}
+    if value is not None:
+        headers[WebAccess.SHELL_HEADER] = value
+    token = WebAccess.Token()
+    for method, url in (("GET", TOKEN_URL), ("POST", REGENERATE_URL)):
+        response = _client(server).open(url, method=method, headers=headers,
+                                        json={"confirm": True})
+        assert response.status_code == 403
+        assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
+    assert WebAccess.Token() == token
+
+
+@pytest.mark.parametrize("site, refused", [
+    ("same-origin", False), ("Same-Origin", False), (" same-origin ", False),
+    ("none", True), (None, True), ("same-site", True), ("cross-site", True),
+    ("", True), ("same-origin, none", True),
+])
+def test_the_shell_rule_reads_the_fetch_site_exactly(shellSecret, site,
+                                                     refused):
+    because = WebAccess.ShellRefusalReason(WebAccess.GRANT_AMBIENT, None,
+                                           site, shellSecret)
+    assert (because == "fetch_site") is refused
+    assert (because is None) is not refused
+
+
+def test_the_shell_rule_is_not_opened_by_the_token(shellSecret):
+    tokenRefusal = WebAccess.Refusal(401, "UNAUTHENTICATED", "m", "token_required")
+    assert WebAccess.ShellRefusalReason(
+        WebAccess.GRANT_TOKEN, None, "same-origin", shellSecret) == "token"
+    assert WebAccess.ShellRefusalReason(
+        None, tokenRefusal, "same-origin", shellSecret) == "token_required"
+    assert WebAccess.ShellRefusalReason(
+        WebAccess.GRANT_AMBIENT, None, "same-origin", None) == "no_secret"
+    assert WebAccess.ShellRefusalReason(
+        WebAccess.GRANT_AMBIENT, None, "same-origin", "nope") == "secret"
+
+
+def test_regenerating_needs_confirm(server, shellSecret):
+    token = WebAccess.Token()
+    generation = WebAccess.TokenGeneration()
+    client = _client(server)
+    for body in ({}, {"confirm": False}):
+        response = client.post(REGENERATE_URL, json=body,
+                               headers=_shell_headers(shellSecret))
+        assert response.status_code == 409
+        assert response.get_json()["error"]["code"] == "CONFIRMATION_REQUIRED"
+        assert token.encode() not in response.data
+    assert WebAccess.Token() == token
+    assert WebAccess.TokenGeneration() == generation
+
+
+def test_regenerating_replaces_the_token_and_cuts_off_its_connections(
+        server, shellSecret):
+    old = WebAccess.Token()
+    generation = WebAccess.TokenGeneration()
+    lan = _ws(server, LAN_PEER, auth={"token": old})
+    assert _scoreup(lan) == []
+    messages = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="INFO")
+    try:
+        response = _client(server).post(
+            REGENERATE_URL, json={"confirm": True},
+            headers=_shell_headers(shellSecret, Origin="http://localhost"))
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 200, response.get_json()
+    assert response.headers["Cache-Control"] == "no-store"
+    new = response.get_json()["data"]["token"]
+    assert response.get_json()["data"]["available"] is True
+    assert new and new != old and new == WebAccess.Token()
+    assert WebAccess.TokenGeneration() == generation + 1
+    # The old token stops at once: a LAN write, and the connection it let in
+    # at its next event.
+    lanClient = _client(server, LAN_PEER)
+    assert lanClient.post(V1_WRITE, headers={"X-Autona-Token": old}
+                          ).status_code == 401
+    assert lanClient.post(V1_WRITE, headers={"X-Autona-Token": new}
+                          ).status_code == 200
+    assert _scoreup(lan) == WebAccess.ErrorBody(WebAccess.TOKEN_REPLACED)
+    # The op log keeps the body's keys only: no token, no secret.
+    oplog = [m for m in messages if "access-token.regenerate" in m]
+    assert oplog and "-> 200" in oplog[-1] and "['confirm']" in oplog[-1]
+    assert not any(old in m or new in m or shellSecret in m for m in messages)
+
+
+def test_no_new_token_while_settings_json_cannot_be_opened(
+        server, shellSecret, monkeypatch, tmp_path):
+    # It could not be saved: none is issued, and the answer says so -- the
+    # old one (none to use here) is still the one.
+    saved = _unreadSettings(monkeypatch, tmp_path / "unread.json")
+    generation = WebAccess.TokenGeneration()
+    response = _client(server).post(REGENERATE_URL, json={"confirm": True},
+                                    headers=_shell_headers(shellSecret))
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "NOT_READY"
+    assert WebAccess.TokenGeneration() == generation
+    assert saved == []
+
+
+def test_the_preview_listener_never_reaches_the_token(server, shellSecret):
+    # PreviewServes serves READ alone: SHELL is refused there before any of
+    # the above, secret or not.
+    for method in ("GET", "HEAD", "OPTIONS", "POST"):
+        for endpoint in ("api_v1.get_access_token",
+                         "api_v1.access_token_regenerate"):
+            assert WebAccess.PreviewServes(endpoint, method) is False
+    response = _PreviewClient(server).get(
+        TOKEN_URL, headers=_shell_headers(shellSecret))
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+
+
+def test_the_token_is_not_shown_in_another_pages_frame(server, shellSecret):
+    response = _client(server).get(TOKEN_URL, headers=dict(
+        _shell_headers(shellSecret), **FRAMED))
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(
+        WebAccess.FRAMED_ELSEWHERE)
 
 
 # ── The API settings window's token row ──────────────────────────────────

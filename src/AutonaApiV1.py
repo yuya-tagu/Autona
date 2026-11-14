@@ -2059,8 +2059,9 @@ def settings_hotkeys_update():
 # pages that replace them (SF-4a). The connection is WebAccess.THIS_PC:
 # refused (403, token or not) to anything but a request from this PC that
 # passes without a token -- it names this PC's folders. The access token is
-# not served here: a page of this origin (any layout/ page, in OBS or a
-# browser) passes as this PC's own request too; its route is SF-4a's.
+# WebAccess.SHELL (SF-4a-1): a page of this origin (any layout/ page, in OBS
+# or a browser) passes as this PC's own request too, so it also takes the
+# secret the shell adds to the shared view's own fetches.
 
 def _no_store(resp):
     # This PC's paths: kept out of the browser's caches.
@@ -2088,6 +2089,34 @@ def get_connection():
     # files (AutonaWebOperations.get_connection). THIS_PC: out/'s absolute
     # path names this PC's folders.
     return _no_store(ok(data=WebOps.get_connection()))
+
+
+@api_v1.route("/access-token")
+@api_handler
+def get_access_token():
+    # {"token", "available"}: the token another computer's requests carry
+    # (WebAccess.Token(); "" and available false when there is none to use
+    # -- settings.json unread, or a malformed one). SHELL: only the shared
+    # view's own fetches, never a LAN device, never with the token.
+    token = WebOps.get_access_token()
+    return _no_store(ok(data={"token": token, "available": bool(token)}))
+
+
+@api_v1.route("/access-token:regenerate", methods=["POST"])
+@write_op("access-token.regenerate", log_keys_only=True)
+def access_token_regenerate():
+    # {"confirm": true}: replace the token (WebAccess.RegenerateToken); the
+    # old one stops working at once, a Socket.IO connection it let in at its
+    # next event. 409 NOT_READY when none was issued (settings.json still
+    # cannot be opened): the old one is still the one. The op log keeps the
+    # body's keys only, and the answer is not cached.
+    _require_confirm(_json_body())
+    token, issued = WebOps.regenerate_access_token()
+    if not issued:
+        raise ApiError(
+            NOT_READY,
+            "settings.json could not be read: no new token was issued", 409)
+    return _no_store(ok(data={"token": token, "available": bool(token)}))
 
 
 # ── Game asset packs (ADR-005 S-final SF-3b) ──

@@ -13,6 +13,10 @@ the Qt window translates (``QApplication.translate("api", desc)``), so the
 window shows what it showed. tests/test_api_v1_guides.py checks that every
 row's method and example path reach the route its id names.
 
+The access token's routes (``/access-token``, ``/access-token:regenerate``;
+WebAccess.SHELL, SF-4a-1) are not listed: nothing but the app's own window
+may call them, so they are not for a person to operate by hand.
+
 Core module: pure data and a copy of it -- no Qt (tests/test_core_qt_free
 .py), nothing read or built at import time.
 """

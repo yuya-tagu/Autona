@@ -98,6 +98,7 @@ from .core import LayoutCatalog
 from .core import PlayerDirectory
 from .core import Top8Service
 from .core import StatsOverlays
+from .core import WebAccess
 from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
@@ -708,13 +709,29 @@ def update_hotkey_settings(enabled=None, keys=None):
 
 # ── The guides (ADR-005 S-final SF-3a) ───────────────────────────────────
 # What the API / Companion / OBS guide windows read for themselves, for the
-# pages that replace them (SF-4a): core's API catalogue and where the server
-# and its out/ files are. Both shells, the calling thread; nothing is
-# written. (Not the access token: the windows show and replace it, its route
-# is SF-4a's.)
+# pages that replace them (SF-4a): core's API catalogue, where the server
+# and its out/ files are, and the access token (SF-4a-1: its routes are
+# WebAccess.SHELL, the shared view's own fetches only). Both shells, the
+# calling thread.
 
 def get_api_catalog():
     return ApiCatalog.Payload()
+
+
+def get_access_token():
+    """The access token in use ("" when there is none to use), as the API
+    window shows it: WebAccess.Token()."""
+    return WebAccess.Token()
+
+
+def regenerate_access_token():
+    """Replace the access token, as the API window's button does:
+    ``(token, issued)``. ``issued`` is False when none was issued (settings
+    .json could not be read at launch and still cannot be opened) -- the
+    token is then the old one, still in use."""
+    before = WebAccess.TokenGeneration()
+    token = WebAccess.RegenerateToken()
+    return token, WebAccess.TokenGeneration() != before
 
 
 def get_connection():
