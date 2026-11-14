@@ -1314,7 +1314,7 @@ class StateManager:
         files would be overwritten before any reader could rely on them.
 
         program_state.json goes LAST, after every .txt of the batch. The OBS
-        guide (AutonaObsGuideWindow) tells operators to use "file was
+        guide (web/src/GuidePages/ObsPage.tsx) tells operators to use "file was
         modified" on program_state.json as the trigger to re-read the .txt
         exports, so the JSON must never announce a state whose text files
         are not on disk yet.

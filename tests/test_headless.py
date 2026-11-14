@@ -379,8 +379,8 @@ def _widget_modules():
         widgets |= {name for _, name in more}
     modules = {module for module, _ in found}
     # The derivation finds what is known to be a widget's module.
-    assert {"src.Autona", "src.AutonaApiInfoWindow", "src.AutonaSidebar",
-            "src.AutonaDesignerWindow"} <= modules, modules
+    assert {"src.Autona", "src.AutonaGameAssetGuideWindow",
+            "src.AutonaSidebar", "src.AutonaDesignerWindow"} <= modules, modules
     return modules
 
 

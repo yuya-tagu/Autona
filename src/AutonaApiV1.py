@@ -62,6 +62,7 @@ from .core.StatusService import StatusService
 # (`.instance`) are created by src/bootstrap.py and read per request.
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
+from .Helpers.AutonaDirHelper import AutonaResolve
 from . import AutonaWebOperations as WebOps
 from .AutonaWebOperations import NotAvailable
 
@@ -231,10 +232,14 @@ def current_revision():
 
 
 def _app_version():
+    # Through AutonaResolve, as the window title reads it: a release has
+    # assets/versions.json only under _internal/ (sys._MEIPASS), not next to
+    # the exe -- read from the working directory, /health said "?" there.
     global _version_cache
     if _version_cache is None:
         try:
-            with open("./assets/versions.json", encoding="utf-8") as f:
+            with open(AutonaResolve("./assets/versions.json"),
+                      encoding="utf-8") as f:
                 _version_cache = json.load(f).get("program", "?")
         except Exception:
             _version_cache = "?"
@@ -2055,9 +2060,10 @@ def settings_hotkeys_update():
 
 
 # ── The guides (ADR-005 S-final SF-3a) ───────────────────────────────────
-# What the API / Companion / OBS guide windows read for themselves, for the
-# pages that replace them (SF-4a). The connection is WebAccess.THIS_PC:
-# refused (403, token or not) to anything but a request from this PC that
+# What the API / Companion / OBS guide pages read (SF-4a-2: /web/api,
+# /web/companion, /web/obs; the Qt windows read it for themselves until
+# then). The connection is WebAccess.THIS_PC: refused (403, token or not)
+# to anything but a request from this PC that
 # passes without a token -- it names this PC's folders. The access token is
 # WebAccess.SHELL (SF-4a-1): a page of this origin (any layout/ page, in OBS
 # or a browser) passes as this PC's own request too, so it also takes the
@@ -2074,9 +2080,9 @@ def _no_store(resp):
 def get_api_catalog():
     # {"endpoints": [{id, method, path, example, description, body,
     # destructive, logged, confirm}], "errorCodes": [{code, status,
-    # description}]}: the API window's reference (core's ApiCatalog). `id` is
+    # description}]}: the API page's reference (core's ApiCatalog). `id` is
     # the row's route (its Flask endpoint name, stable: what a page keys its
-    # translations by); `description` the English text the window translates.
+    # translations by); `description` the English text (the page's fallback).
     # Nothing but this module's own routes, so READ.
     return ok(data=WebOps.get_api_catalog())
 
@@ -2085,7 +2091,7 @@ def get_api_catalog():
 @api_handler
 def get_connection():
     # {"port", "lan", "lanAtRestart", "baseUrl", "localBaseUrl", "outDir",
-    # "pathSeparator"}: what the guide windows show of the server and its
+    # "pathSeparator"}: what the guide pages show of the server and its
     # files (AutonaWebOperations.get_connection). THIS_PC: out/'s absolute
     # path names this PC's folders.
     return _no_store(ok(data=WebOps.get_connection()))

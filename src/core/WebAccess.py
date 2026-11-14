@@ -560,7 +560,9 @@ def FramedElsewhere(fetchDest, fetchSite):
 # "playerBrowser" is 選手リスト (S4n); "thumbnail" is サムネイル (S4p);
 # "result" is 大会リザルト (S4r); "board" is スコアボード設定 (S4s);
 # "scoreboard" is スコアボード入力 (S4aa); "settings" is 設定 (S4af: the Help &
-# Settings menu's, not a sidebar item).
+# Settings menu's, not a sidebar item); "api" / "companion" / "obs" are the
+# API reference & tester and the Companion and OBS guides, "about" is About
+# Autona (S-final SF-4a-2: the menu's too, the Qt windows until then).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -575,6 +577,10 @@ WEB_PANELS = frozenset({
     "board",
     "scoreboard",
     "settings",
+    "api",
+    "companion",
+    "obs",
+    "about",
 })
 
 

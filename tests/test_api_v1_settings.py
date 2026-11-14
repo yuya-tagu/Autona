@@ -886,71 +886,13 @@ def test_with_no_server_the_saved_lan_names_the_address(saves, monkeypatch):
     assert WebServer.LanOnAtRestart() is False
 
 
-_GUIDE_TEXTS = {
-    "AutonaApiInfoWindow": ("warningLabel", "_refreshBaseUrl",
-        "LAN access is saved as on and takes effect when Autona is "
-        "restarted; until then the API is reachable from this PC only.",
-        "LAN access is disabled; the API is reachable from this PC only. "
-        "Enable it under Settings → Network (restart required)."),
-    "AutonaObsGuideWindow": ("lanNoteLabel", "_refresh",
-        "LAN access: saved as on, takes effect when Autona is "
-        "restarted — until then OBS must run on this PC.",
-        "LAN access: disabled — OBS must run on this PC. To use OBS on "
-        "another PC, enable it under Settings → Network (restart required)."),
-    "AutonaIntegrationGuideWindow": ("lanNoteLabel", "_refresh",
-        "LAN access: saved as on, takes effect when Autona is "
-        "restarted — until then other devices cannot connect.",
-        "LAN access: disabled — other devices cannot connect. "
-        "Enable it under Settings → Network (restart required)."),
-}
-
-
-@pytest.mark.parametrize("name", sorted(_GUIDE_TEXTS))
-def test_the_guides_tell_lan_saved_for_the_restart(saves, monkeypatch, name):
-    # LAN access saved as on, the server still bound to this PC: the guides
-    # say a restart turns it on, not "enable it" (S4af review).
-    import importlib
-
-    module = importlib.import_module(f"src.{name}")
-    label, refresh, saved, disabled = _GUIDE_TEXTS[name]
-    monkeypatch.setattr(WebServer, "_listening", ("127.0.0.1", 5107, False))
-    SettingsManager.settings["general"]["webserver_listen_lan"] = False
-    window = getattr(module, name)()
-    try:
-        window.UiMounted()
-        assert getattr(window, label).text() == module._tr(disabled)
-
-        SettingsManager.settings["general"]["webserver_listen_lan"] = True
-        getattr(window, refresh)()
-        assert getattr(window, label).text() == module._tr(saved)
-    finally:
-        window.deleteLater()
-
-
-def test_opening_the_settings_from_the_api_window_closes_it(saves):
-    # It is not modal: left open, it would stay over the page it opened.
-    from qtpy.QtWidgets import QWidget
-
-    from src.AutonaApiInfoWindow import AutonaApiInfoWindow
-
-    opened = []
-
-    class Main(QWidget):
-        def OpenSettings(self):
-            opened.append(window.isVisible())
-
-    main = Main()
-    window = AutonaApiInfoWindow(main)
-    try:
-        window.UiMounted()
-        window.show()
-        window._openSettings()
-
-        assert opened == [False]
-        assert not window.isVisible()
-    finally:
-        window.deleteLater()
-        main.deleteLater()
+# What the guides say of LAN access saved for the restart (S4af review) and
+# the API guide's way to the settings are the guide pages' since ADR-005
+# S-final SF-4a-2 (web/src/GuidePages/GuidePages.test.js: the connection's
+# lanAtRestart, read through GET /api/v1/connection -- pinned in
+# tests/test_api_v1_guides.py -- picks the "takes effect when Autona is
+# restarted" note). The Qt API window's "Open settings" closed the window
+# and opened the page; the page says where the settings are instead.
 
 
 def test_local_pages_go_to_the_port_the_server_is_bound_with(saves,

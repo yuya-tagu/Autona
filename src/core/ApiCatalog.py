@@ -1,17 +1,18 @@
 """The External Control API's reference catalogue (ADR-005 S-final SF-3a).
 
-What the API Settings window (src/AutonaApiInfoWindow.py) lists, and what
-``GET /api/v1/api-catalog`` returns for the React page that replaces it
-(SF-4a): a curated row per route a person operates by hand, the error codes
-and the placeholders a copy-pasteable path fills in. Until SF-3a the rows
-were the window's own (``_ENDPOINTS``); one list now, read by both.
+What ``GET /api/v1/api-catalog`` returns for the API reference & tester
+page (web/src/GuidePages/ApiPage.tsx, /web/api; SF-4a-2): a curated row per
+route a person operates by hand, the error codes and the placeholders a
+copy-pasteable path fills in. Until SF-3a the rows were the Qt API Settings
+window's own (``_ENDPOINTS``); the window went in SF-4a-2.
 
 Each row's ``id`` is the name of its /api/v1 route (the Flask endpoint
-``api_v1.<id>``), a key that does not change with the wording: the React
-page translates by it (i18next, SF-4a). ``desc`` is the English source text
-the Qt window translates (``QApplication.translate("api", desc)``), so the
-window shows what it showed. tests/test_api_v1_guides.py checks that every
-row's method and example path reach the route its id names.
+``api_v1.<id>``), a key that does not change with the wording: the page
+translates by it (i18next: ``guide_api_endpoint_<id>``, the error codes'
+``guide_api_error_<code>``). ``desc`` is the English text, the page's when a
+row has no translation. tests/test_api_v1_guides.py checks that every row's
+method and example path reach the route its id names, and that every id
+and code has its translation in en and ja.
 
 The access token's routes (``/access-token``, ``/access-token:regenerate``;
 WebAccess.SHELL, SF-4a-1) are not listed: nothing but the app's own window
@@ -27,7 +28,7 @@ from typing import NamedTuple
 
 class Endpoint(NamedTuple):
     """One row. ``body`` is an example payload or None; ``destructive``
-    makes the window's tester ask first; ``logged`` is the write op-log's;
+    makes the page's tester ask first; ``logged`` is the write op-log's;
     ``confirm`` means the API itself refuses the call without
     {"confirm": true}."""
     id: str
@@ -47,7 +48,7 @@ class ErrorCode(NamedTuple):
 
 
 # Placeholder substitutions that turn a template path into a concrete,
-# copy-pasteable one (the window's curl and tester default).
+# copy-pasteable one (the page's curl and tester preset).
 PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{p}": "1", "{m}": "1",
                  "{setId}": "12345", "{code}": "JP", "{slot}": "1",
                  "{kind}": "commentary", "{feature}": "commentary"}
@@ -164,7 +165,7 @@ def Payload():
     path, example (the path with its placeholders filled in), description
     (the English source; a reader translates by id), body, destructive,
     logged, confirm}], "errorCodes": [{code, status, description}]}, in the
-    window's order. A copy: nothing a caller does to it reaches the
+    catalogue's order. A copy: nothing a caller does to it reaches the
     catalogue."""
     return {
         "endpoints": [

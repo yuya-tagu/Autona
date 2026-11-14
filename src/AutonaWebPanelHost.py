@@ -83,9 +83,10 @@ from the factory of the first React panel opened and calls ShowPanel() on every
 reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
 straight (S4e: several items, one host page). Every sidebar item is a React
 panel: the last Qt version kept behind a setting, SCORE's (S4aa), went with
-the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c). So is the Settings
-page (S4af), which is not a sidebar item: the Help & Settings menu opens it
-(Window.OpenSettings), as a page of its own after the items'.
+the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c). So are the menu's
+pages -- Settings (S4af), the API / Companion / OBS guides and About (S-final
+SF-4a-2) -- which are not sidebar items: the Help & Settings menu opens them
+(Window.OpenMenuPage), each a page of its own after the items'.
 
 Importing it creates nothing.
 """
@@ -686,9 +687,10 @@ class WebPanelPages:
     told which panel: the one the operator chose last (``selected``). The
     other React items' placeholders are never built (``HostBuilt``).
 
-    The Settings page (ADR-005 S4af) is kept the same way, though no
-    sidebar item opens it: its page comes after the items' (the menu's
-    Window.OpenSettings asks for it as a click asks for an item).
+    The menu's pages (ADR-005 S4af: Settings; S-final SF-4a-2: the API /
+    Companion / OBS guides and About) are kept the same way, though no
+    sidebar item opens them: their pages come after the items' (the menu's
+    Window.OpenMenuPage asks for one as a click asks for an item).
 
     Plain bookkeeping (no Qt): the Window asks it on every sidebar choice
     and every page reveal.

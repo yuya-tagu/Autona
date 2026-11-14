@@ -2548,69 +2548,10 @@ def test_the_token_is_not_shown_in_another_pages_frame(server, shellSecret):
         WebAccess.FRAMED_ELSEWHERE)
 
 
-# ── The API settings window's token row ──────────────────────────────────
-
-
-@pytest.fixture
-def apiWindow(qapp, settings, monkeypatch):
-    from src.AutonaApiInfoWindow import AutonaApiInfoWindow
-    from src.Helpers import AutonaNetworkHelper
-
-    monkeypatch.setattr(AutonaNetworkHelper, "GetLocalIP", lambda: LAN_HOST)
-    window = AutonaApiInfoWindow()
-    window.UiMounted()
-    try:
-        yield window
-    finally:
-        window.deleteLater()
-
-
-def test_the_api_window_shows_the_token_masked(apiWindow):
-    from qtpy.QtWidgets import QLineEdit, QPushButton
-
-    assert apiWindow.tokenField.text() == WebAccess.Token()
-    assert apiWindow.tokenField.echoMode() == QLineEdit.Password
-    show = next(b for b in apiWindow.findChildren(QPushButton)
-                if b.isCheckable())
-    show.setChecked(True)
-    assert apiWindow.tokenField.echoMode() == QLineEdit.Normal
-    show.setChecked(False)
-    assert apiWindow.tokenField.echoMode() == QLineEdit.Password
-
-
-def test_the_api_window_regenerates_only_when_confirmed(apiWindow,
-                                                       monkeypatch):
-    from qtpy.QtWidgets import QMessageBox
-
-    before = WebAccess.Token()
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: QMessageBox.No)
-    apiWindow._regenerateToken()
-    assert WebAccess.Token() == before
-    assert apiWindow.tokenField.text() == before
-
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: QMessageBox.Yes)
-    apiWindow._regenerateToken()
-    assert WebAccess.Token() != before
-    assert apiWindow.tokenField.text() == WebAccess.Token()
-
-
-def test_the_copied_curl_carries_the_token_only_for_a_lan_write(apiWindow,
-                                                               settings):
-    from src.core.ApiCatalog import Endpoint
-
-    write = Endpoint("score_increment", "POST",
-                     "/scoreboard/{n}/team/{t}/score:increment",
-                     "", None, False, True, False)
-    read = Endpoint("state", "GET", "/state", "", None, False, False, False)
-    header = f"{WebAccess.TOKEN_HEADER}: {WebAccess.Token()}"
-
-    assert header not in apiWindow._buildCurl(write)   # loopback: no token
-    settings.settings["general"]["webserver_listen_lan"] = True
-    assert header in apiWindow._buildCurl(write)
-    assert LAN_HOST in apiWindow._buildCurl(write)
-    assert header not in apiWindow._buildCurl(read)
+# The API settings window's token row (masked, shown, regenerated only when
+# confirmed) and its copied curl (the token only for a LAN write) are the
+# API page's since ADR-005 S-final SF-4a-2: web/src/GuidePages/
+# GuidePages.test.js.
 
 
 def _browserScoreboard(monkeypatch):

@@ -40,12 +40,15 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 
    - カテゴリ見出しはナビ index を消費しないため、ナビ index = stack ページ index は維持される
 3. `Window.STATE_VERSION` をインクリメント
 
-**サイドバーの項目でないページ**（設定。ADR-005 S4af）は、ナビ項目の後ろにスタックのページとして足す
-（`_lazyPanels` / `_panelIndexes` / `_webPanelPages.Add` に登録し、`_navSections` には入れない）。ナビ項目の
-nav index == stack index と保存済みのサイドバーの index は動かないので `STATE_VERSION` は上げない。開くのは
-`Window.OpenSettings`（サイドバーのハイライトを `AutonaSidebar.clearCurrent()` で消す。項目を押せばそのページに戻る）、
-終了時に覚える項目は `_NavToRemember`（設定ページの間はその前の項目）。起動時の復元は保存した index が
-ナビ項目の範囲（`0 <= index < _panelIndexes["settings"]`）のときだけ
+**サイドバーの項目でないページ**（メニューのページ: 設定（ADR-005 S4af）と API / Companion / OBS のガイドと
+About（S-final SF-4a-2））は、`Window.MENU_PAGES` に名前を足す（先頭は `settings` のまま）。`_BuildUi` がナビ項目の
+後ろにスタックのページとして足す（`_lazyPanels` / `_panelIndexes` / `_webPanelPages.Add` に登録し、`_navSections`
+には入れない。ファクトリは `functools.partial(self._WebPanel, 名前)`）。ナビ項目の nav index == stack index と保存済みの
+サイドバーの index は動かないので `STATE_VERSION` は上げない。開くのは `Window.OpenMenuPage(名前)`（`MENU_PAGES` に
+無い名前は `ValueError`。サイドバーのハイライトを `AutonaSidebar.clearCurrent()` で消す。項目を押せばそのページに戻る。
+`OpenSettings` は `OpenMenuPage("settings")` の別名）、終了時に覚える項目は `_NavToRemember`（メニューのページの間は
+その前の項目: `_navBeforeMenuPage`）。起動時の復元は保存した index がナビ項目の範囲（`0 <= index < _panelIndexes["settings"]`。
+設定が先頭なので、その後ろは全部メニューのページ）のときだけ。メニューの文言は `"app"` の翻訳コンテキストに置く
 
 パネルはすべて **遅延構築**（起動 Step 4b-2）: `_Create*Panel()` ファクトリを書いて
 `(self._CreateXxxPanel, 'icon.svg', ナビラベル, 'キー')` を `_navSections` に
