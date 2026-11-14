@@ -8666,3 +8666,50 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - e2e `preview-origin.spec.ts`: プレビューのフレームの自己ナビゲーション（A のレイアウトと GET の書き込み）と、プレビューが作る入れ子の iframe（同じ 2 つ）が A で 403（応答に `frame-ancestors 'none'`）、A のオリジンでレイアウトが動くフレームが無く、親から A の文書が見えず、スコア不変。ガードを外すと 2 本とも 200 で落ちることを確認
   - `tests/test_webserver_routes.py` の `EXPECTED_EXTRA`: `after_request_funcs` に `frame_ancestors`
 - **検証（レビューの修正）**: 並列ランナー全量 6460 passed / 1 failed / 2 skipped（落ちたのはルートの台帳 `EXPECTED_EXTRA` の 1 本だけ。直して単体 6 passed）、触ったテストの直列実行（`test_web_panel_host`・`test_web_access`・`test_webserver_routes`・`test_bootstrap_split`・`test_task_executor`・`test_import_side_effects`）642 passed、`_IsServerOrigin` の http(s) 先判定を足した後に `test_web_panel_host` 157 passed、`npm run build`、jest `DesignPane.test.js` 17 passed・全量は無関係の 3 スイートが機械の負荷で 5 秒のテストの期限切れ（単独で `v1Requests` は通り、`MatchInfoBar`・`ScoreboardDesigner` は `--testTimeout=60000` で 29 passed）、`npm run test:e2e` 105 passed / 1 skipped
+
+##### SF-8b 共有ビューのクリップボード（2026-11-14）
+
+区分は高（認証面）。SF-8 の spike の結論どおり、共有ビューのクリップボードを「設定で全フレームのスクリプトに」から「要求ごとに、ページ自身のオリジンにだけ」にした。web/ はコメント 1 か所（`web/src/PanelShell/clipboard.ts`）だけ。
+
+- **変更（`src/AutonaWebPanelHost.py`）**
+  - `acceptNavigationRequest`（レビューで追加）: メインフレームの遷移は、本体のサーバーのオリジン（`_ServerUrl()` = `QUrl(LocalUrl("/"))`。`127.0.0.1` と待ち受けのポート）で、ページのオリジン（`url()` か `requestedUrl()`）かつ `/web` の配下（`_InWebUi`）だけ通す。ホスト自身の読み込み（`Typed` / `Reload`）はページのオリジンを問わないが（最初の読み込みには守るオリジンが無い）、本体のサーバーのオリジンの `/web` の配下だけ（2 回目のレビューでサーバーのオリジンに絞った: ビューに落としたリンクも `Typed` で来うる）
+  - `_EnsureView`: `JavascriptCanAccessClipboard` を True にするのをやめ、`JavascriptCanAccessClipboard` / `JavascriptCanPaste` を明示的に False（プロファイルの既定で入らないように）
+  - `_PanelPage.__init__`: ページが何か読み込む前に、プロファイル（既定）の永続化ポリシーを `AskEveryTime` にし、`permissionRequested` を `_AnswerPermission` に繋ぐ。`_AnswerPermission` はその場で grant / deny する（待たない・ダイアログを出さない。deny は warning）
+  - `ClipboardPermitted(permissionType, origin, pageUrls, serverUrl)`（新規の純関数。`CLIPBOARD_PERMISSION = "ClipboardReadWrite"` は Qt の `PermissionType` の列挙子名。`_AnswerPermission` が `serverUrl` に `_ServerUrl()` を渡す）: 種類が `ClipboardReadWrite` で、origin（QUrl）が本体のサーバーのオリジン（`serverUrl` の scheme・host・port。2 回目のレビューで追加）ちょうどで、ページの `url()` と `requestedUrl()` のうち http(s) の文書を指すものすべてと scheme・host・port（`_Port` で既定ポートを補う・userinfo は無視）まで一致し、それらのパスが `/web` の配下（`_InWebUi`）のときだけ True（1 つは要る。about:blank・空は数えない）。http(s) 以外・不正な URL は False。QUrl の値だけを読む（QApplication も WebEngine も要らない。最初は urlsplit の文字列版で、レビューで `_Origin` / `_Port` と同じ QUrl の読み方に揃えた: パスの正規化を QUrl でするため）
+- **判断（エンジニアリード）**
+  1. 許すのはページ自身のオリジンちょうどで、それが本体のサーバーのオリジン（`_ServerUrl`）ちょうどのとき（後半は 2 回目のレビューで追加）。`_IsServerOrigin` の後半（ループバックの別名・この PC の LAN アドレスの本体のポート）は入れない。メインフレームはページのオリジンから出ず（`acceptNavigationRequest`）、フレームは本体のオリジンに入れない（SF-8a）ので、別名から要求が来ることは無く、広げる理由が無い
+  2. ポリシーは既定プロファイルに付ける（共有ビュー専用のプロファイルは作らない）。漏れ先は Designer（`AutonaDesignerWindow`）だけ: 既定プロファイルの `QWebEngineView` でこのサーバーの `/web`（同じオリジン）を出し、要求に答えない。オフスクリーン描画（`AutonaOffscreenRenderer`: サムネ・リザルト）も既定プロファイルだが `QUrl.fromLocalFile` の file:// のページ（別のオリジン）を読むので、もともと漏れ先ではない（最初の版はこれも漏れ先と書いていた。レビューで訂正）。専用のプロファイルは localStorage・キャッシュが Designer と分かれる（既定プロファイルは Qt 6 で off-the-record なので、どちらもプロセスの間だけ）割に得るものが無い
+  3. Designer にはハンドラを足さない。`web/src/ScoreboardDesigner` に `navigator.clipboard` は無い（ツールバーの複製はレイヤーの複製で OS のクリップボードを使わない）。要求は答えられないまま（今までと同じ）
+  4. Qt の `ClipboardReadWrite` は読みと書きを分けないので、ページ自身のスクリプトは `readText` もできるようになる（SF-8b より前は `JavascriptCanPaste` が False で `readText` は答えが無かった）。パネルは読まず、メインフレームはこのサーバーのページだけなので受け入れる
+- **クリップボードの利用箇所（`web/src` を grep）**: すべて `web/src/PanelShell/clipboard.ts` 経由
+  - `copyText`（`writeText`、断られたらクリックの中の `execCommand("copy")`）: BOARD の出力パス・実況の OBS URL・統計表示設定の URL・配信設定のタイトル・サムネイルの動画タイトル
+  - `copyImage`（クリックの中で `write([ClipboardItem])`、PNG は後から）: 配信設定のサムネ・サムネイル・リザルトの作成した画像
+  - `copyImageOnceMade`（クリックの中で頼み、画像は作成後。直後に既定のブラウザが前に出る）: SCORE とリザルトの X 投稿
+  - `canCopyImage`（`isSecureContext`・`ClipboardItem`・`navigator.clipboard.write` の有無だけ。権限は見ない）: 上のボタンの出し分け
+- **実測（PySide6 6.11・offscreen。spike の追試。A = ページのオリジン、B = 別ポートのフレーム）**
+
+  | 操作 | SF-8b より前（設定 True） | SF-8b |
+  |---|---|---|
+  | A のクリックで `writeText` / 画像の `write` | 通る | 要求（オリジン A）→ grant で通る。書くたびに要求が出る |
+  | A のクリックなしの `writeText` | 通る | 要求 → grant で通る（ページにフォーカスがあるとき） |
+  | A の `readText` | 答えが無い | 通る |
+  | A・B のクリックで `execCommand("copy")` | 通る | 通る（権限ではない。Web の標準） |
+  | B のフレーム（`allow` なし。`DesignPane` の形）の `writeText` / `readText` | Permissions Policy で拒否 | 同じ（要求は出ない） |
+  | B のフレーム（`allow="clipboard-read; clipboard-write"`） | `writeText` が通る | 要求（オリジン B。ページのオリジンではない）→ deny |
+  | 同じプロファイルの別ビュー（ハンドラなし）で A の `writeText` | 答えが無い | 要求が出て答えが無い。ポリシーが `StoreInMemory` のままだと、共有ビューの grant で黙って通った |
+  | A の画像の `write`、クリックの直後に別ウィンドウへフォーカス、画像はその後に作成 | 通る | 通る（要求がフォーカスの移った後に届いても通る） |
+
+- **pin（`tests/test_web_panel_host.py`）**
+  - `test_the_clipboard_is_granted_to_the_pages_own_origin_only`（純関数の表）: A・末尾スラッシュ・パス・大文字の scheme・userinfo は許可。プレビューのポート・別ポート・既定ポート・`localhost`・`[::1]`・LAN アドレス・https・外部・`about:` / `data:` / `file:` / `qrc:` / `chrome-error:`・空・壊れた URL・範囲外のポートは拒否。ほかの `PermissionType` 全部は拒否。ページの URL のどちらでも、ページにオリジンが無ければ拒否。名前が Qt の列挙子名と一致
+  - `test_the_clipboard_is_granted_on_this_servers_origin_only`（2 回目のレビューで追加。純関数の表）: ページも origin も同じ別オリジン（`http://evil.example/web/x`・`evil.example` の本体のポート・別ポート・プレビューのポート・`localhost`・`[::1]`・https・既定ポート）は、about:blank との組でも拒否。サーバーの URL はパスを見ずポートを見る（別ポート・`localhost`・https・空・about:blank・範囲外のポートのサーバーなら本体のページでも拒否、ポートが替わればページもそちらで許可）
+  - `test_the_clipboard_is_granted_only_while_the_page_is_in_the_web_ui`（レビューで追加。純関数の表）: `/web`・`/web/`・クエリ・フラグメント・`?view=designer`・`/web/./x`・`/web//x`・`/a/../web/x` は許可。空・`/`・`/layout/...`・`/layout/web/a`・`/api/v1/health`・`/out/...`・`/assets/...`・`/scoreboard`・`/webx`・`/web-ui/x`・`/WEB/x`・`/x/web/x`・`/web/../layout`（生・`%2e%2e`・`%2E%2E`・`.%2e`・`x/../..`）・`/web/..%2flayout`・`/web/%2e%2e%2flayout`・`/web\..\layout` は拒否。2 つの URL の組（片方が about:blank・空なら他方で決まる。片方が `/web` の外・別オリジンなら拒否・どちらも文書でなければ拒否）
+  - `test_no_setting_hands_script_the_clipboard`: 2 つの属性が False、プロファイルが既定でポリシーが `AskEveryTime`
+  - `test_the_page_answers_every_request_at_once`: 偽の要求に 1 回ずつ grant / deny（クリップボードのほかのオリジン・通知・位置・カメラ・画面・フォント）とログ。ログは自分の拒否のメッセージ（`record.msg`）だけを数える（レビューで変更）
+  - 実 QtWebEngine: `test_the_page_is_granted_the_clipboard`（クリックの `writeText` 2 回と画像。要求はページのオリジン、`listAllPermissions()` が空）、`test_an_image_asked_in_a_click_lands_after_another_window_took_the_focus`（X 投稿の形。画像を作る時点で `document.hasFocus()` が false）、`test_a_grant_is_not_kept_for_another_view`（Designer と同じ作りのビューで、要求が出て拒否・クリップボード不変）、`test_a_preview_frame_is_refused_the_clipboard`（別ポートのフレーム × `allow` の有無 × 書き / 読み）
+  - `test_the_page_does_not_leave_the_web_ui`（レビューで追加。実 QtWebEngine）: メインフレームの `location.href` とリンクのクリックで `/layout/...`・`/`・`/api/v1/health`・`/out/...`・`/webx`・`/web/../layout`・`/web/%2e%2e/layout` へ行けず、サーバーに要求が届かず、文書も読み込みの状態も変わらない。`acceptNavigationRequest` の表（ページの 5 種と ホストの 2 種 × `/web` の外 / 中 / 別オリジンの `/web`）。別オリジンの `/web`（別ポート・`http://evil.example/web/x`・`evil.example` の本体のポート・`localhost`・https・`file:`）はホストの `Typed` / `Reload` でも拒否（2 回目のレビューで「ホストの種類なら通す」から変えた）。`/web` の判定を外すと落ちることを確認
+  - 置き換えた pin: `test_the_page_may_write_the_clipboard`（属性が True であること）
+  - 変異で確認: ポリシーを `StoreInMemory` にすると別ビューの試験が `'ok'` で落ち、判定を常に True にすると偽の要求とフレームの試験が落ちる。2 回目のレビュー: `acceptNavigationRequest` のサーバーのオリジンの条件を外すと `test_the_page_does_not_leave_the_web_ui` が（ホストの `Typed` で別ポートの `/web` を通して）落ち、`ClipboardPermitted` のサーバーのオリジンの条件を外すと `test_the_clipboard_is_granted_on_this_servers_origin_only` が落ちる
+- **検収レビューの修正（2026-11-14）**: 独立レビューの指摘 6 点（中 1・低 5。上の各項に「レビューで」と書いた）。(中) メインフレームが同じオリジンの `/layout/...`（第三者製レイアウト）へ移れ、そこで `readText` まで grant された（理屈の上ではリンクのドラッグ＆ドロップ）→ `acceptNavigationRequest` と `ClipboardPermitted` の 2 層で `/web` の配下に絞った（`/webx`・`/web/../layout`・エンコードしたドット / スラッシュは QUrl で正規化したパスで外す）。(低) `requestedUrl()` を入れる理由と前提をコメントに（ホストは `/web` しか読まない・最初の文書の前は `url()` が空・`acceptNavigationRequest` と同じ）／判定を `_Origin` / `_Port` と同じ QUrl の読み方に／漏れ先の訂正（Designer だけ。オフスクリーン描画は file://）／ログを自分のメッセージで数える／残るリスクに子フレームと実機の未検証を追記。直さないもの: ポリシーの設定場所（`_PanelPage.__init__` のまま。bootstrap の順に触れない）、`execCommand` の件（既存）
+- **2 回目のレビューの修正（2026-11-14）**: 最初の修正の報告の残るリスク「別オリジンの `/web` へ `Typed` で来た場合（ビューに落としたリンク）はホストの読み込みと区別できない」を塞いだ。そのページは自分のオリジンでクリップボードを頼むので、ページとの一致だけでは grant されていた。ホスト自身の読み込みも本体のサーバーのオリジン（`_ServerUrl()`。ホストが読む `LocalUrl` と同じ読み方なので、ポートが替わってもホストの読み込みと食い違わない）の `/web` だけにし、`ClipboardPermitted` にもサーバーの URL を引数で渡して「本体のサーバーのオリジンちょうど」を足した（判断 1 の「A ちょうど」のまま）。テストでポートを替える経路（`_failedFirstLoad` の `rig.usePort`）は設定のポートを替えるので、ホストの読み込みと `_ServerUrl()` が同じポートになり、直す必要は無かった
+- **検証**: 触ったテストの直列実行（`test_web_panel_host`・`test_import_side_effects`）165 passed、並列ランナー全量 6467 passed / 0 failed / 2 skipped、`npm run build`、jest 全量 1173 passed（web/ はコメントだけ）。レビューの修正の後（src と tests だけ。web/ は触っていない）: 同じ 2 ファイルの直列実行 167 passed、並列ランナー全量 6469 passed / 0 failed / 2 skipped。2 回目のレビューの修正の後（同じく src・tests・docs だけ）: 同じ 2 ファイルの直列実行 168 passed、並列ランナー全量 6470 passed / 0 failed / 2 skipped。offscreen のクリップボードはプロセス内のもので、Windows の実クリップボードは通っていない。実機の確認はメインの隔離データで
+- **残るリスク**: ページ自身のスクリプトがクリップボードを読める（判断 4）／クリックの中の `execCommand("copy")` はプレビューのフレームからも書ける（読めない。Web の標準で、SF-8b より前も同じ）／Designer・オフスクリーン描画が将来 `navigator.clipboard` を使うと答えが無く止まる（使うならそのビューのページに同じ判定のハンドラを足す）／Qt の更新で `ClipboardReadWrite` の名前や要求の出方（フレームのオリジンで来ること）が変わると判定が外れる（列挙子名の一致とフレームの拒否を実 QtWebEngine で pin している）／子フレームの要求もオリジンだけで grant される（Qt は要求したフレームを渡さない。ページと同じオリジンの子フレームは `_PanelPage` が作らせない前提）／Windows の実クリップボードと実際のフォーカスの移り方は未検証（offscreen のクリップボードはプロセス内、フォーカスは別の Qt ウィンドウで代用）／リンクのドラッグ＆ドロップの遷移の種類は offscreen で再現できず未確認（どの種類で来ても、本体のサーバーのオリジンの `/web` の外は断る）

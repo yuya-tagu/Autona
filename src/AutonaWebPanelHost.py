@@ -51,9 +51,11 @@ navigating a page that has no panel shell.
 
 The right-click menu offers editing only (ContextActions): the view is a
 panel, not a browser, so Chromium's back / reload / view-source entries are
-not on it (S4b). Page script may write the clipboard (S4e: the Stream
-page's thumbnail copy), so the view shows this server's pages only: the
-page refuses to navigate itself anywhere else (_PanelPage). A panel links
+not on it (S4b). Page script may use the clipboard (S4e: the Stream
+page's thumbnail copy), granted per request to the page's own origin only
+(ADR-005 S-final SF-8b: not the design previews' frames, not another view),
+so the view shows this server's Web UI only (/web and under it): the page
+refuses to navigate itself anywhere else (_PanelPage). A panel links
 outside by a new window (target="_blank", window.open from a click): the view
 makes none, and hands an http(s) one to the default browser, the X post's
 composer among them (S4r). The one new window the view keeps to itself is the
@@ -81,13 +83,14 @@ from urllib.parse import quote, urlencode
 
 from qtpy.QtCore import Qt, QTimer, QUrl, Signal
 from qtpy.QtGui import QColor, QDesktopServices
-from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from qtpy.QtWebEngineCore import (
+    QWebEnginePage, QWebEngineProfile, QWebEngineSettings)
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaWebPageLifecycle import (
-    HiddenPageLifecycle, IsWebServerReady, LocalPageLoader,
+    HiddenPageLifecycle, IsWebServerReady, LocalPageLoader, LocalUrl,
     WhenWebServerReady)
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIP, GetLocalIPs
@@ -186,6 +189,101 @@ def _IsServerOrigin(url, pageUrls):
             in WebAccess.OwnOrigins(port, _LanHosts()))
 
 
+# The Web UI: the pages the shared view shows -- /web/<panel> (PanelPath; the
+# router moves between panels with history.replaceState, no navigation) --
+# and nothing else of this server's: not layout/ (third parties' layouts),
+# out/, assets/ or the API (ADR-005 S-final SF-8b review).
+_WEB_UI_PATH = "/web"
+
+# QUrl.adjusted() takes its options as ComponentFormattingOption flags in
+# PySide6: NormalizePathSegments (a UrlFormattingOption) with PrettyDecoded,
+# which is none.
+_NORMALIZED_PATH = (QUrl.ComponentFormattingOption.PrettyDecoded
+                    | QUrl.UrlFormattingOption.NormalizePathSegments)
+
+
+def _InWebUi(url):
+    """Whether ``url`` (a QUrl) is a page of the Web UI: its path, the dot
+    segments resolved, is /web or under it (not /webx), and once decoded has
+    no dot segment or backslash left -- what QUrl does not resolve across
+    (an encoded slash, /web/..%2flayout) and what Chromium reads as a slash.
+    Chromium hands its URLs resolved already; this does not rely on it."""
+    path = url.adjusted(_NORMALIZED_PATH).path(
+        QUrl.ComponentFormattingOption.FullyDecoded)
+    if path != _WEB_UI_PATH and not path.startswith(_WEB_UI_PATH + "/"):
+        return False
+    return "\\" not in path and not {".", ".."} & set(path.split("/"))
+
+
+# The one permission the shared view's page is given (ADR-005 S-final SF-8b):
+# the name of the QWebEnginePermission.PermissionType member, so that the
+# decision (ClipboardPermitted) takes no Qt object but QUrl values.
+CLIPBOARD_PERMISSION = "ClipboardReadWrite"
+
+
+def _HttpOrigin(url):
+    # (scheme, host, port) of a valid http(s) QUrl with a host, the scheme's
+    # default port spelled out (_Port) and no userinfo -- _Origin's, with the
+    # default port the same as none; None for any other (about:, data:,
+    # file:, a port out of range).
+    if (not url.isValid() or url.scheme() not in _OUTSIDE_SCHEMES
+            or not url.host()):
+        return None
+    return (url.scheme(), url.host(), _Port(url))
+
+
+def _ServerUrl():
+    """This server's root as the host loads its pages (LocalUrl: 127.0.0.1
+    at the port it listens on, the settings' only while none does), read
+    when asked: the origin the main frame and the clipboard keep to."""
+    return QUrl(LocalUrl("/"))
+
+
+def ClipboardPermitted(permissionType, origin, pageUrls, serverUrl):
+    """Whether the shared view grants a permission request (ADR-005 S-final
+    SF-8b): only the clipboard (``permissionType`` CLIPBOARD_PERMISSION),
+    asked by ``origin`` (a QUrl) when that is this server's origin -- that
+    of ``serverUrl`` (_ServerUrl: 127.0.0.1 at its port), scheme, host and
+    port alike -- and the page is a page of the Web UI there: every one of
+    ``pageUrls`` (QUrls: the URL the page shows and the one the host
+    loaded) that names an http(s) document is on that origin and in /web
+    (_InWebUi), and there is one.
+
+    Not the design previews (the preview listener's port: they would read
+    and write the operator's clipboard), not another name of this PC at the
+    server's port (localhost for 127.0.0.1, a LAN address: the main frame
+    never goes there, _PanelPage, and no frame does, _IsServerOrigin), not
+    another origin the page might be on (a URL dropped on the view: the
+    asking origin and the page's alike, so the page's origin alone would not
+    tell -- _PanelPage does not let the main frame go there either), not
+    this server's own origin while the page is off the Web UI (a layout of
+    layout/), and no other permission. Qt hands the origin of the frame that
+    asks, not the page's -- a preview's frame asks as its own origin
+    (measured on PySide6 6.11) -- but not which frame it is: a frame of the
+    page's own origin is granted as the page is, and _PanelPage lets none
+    be.
+
+    Both of the page's URLs, as in acceptNavigationRequest: the host loads
+    only this server's Web UI (PanelPath at LocalUrl), and every main-frame
+    navigation is held to this server's origin and /web, so both are that
+    once a document is there; before then (url() still empty) the requested
+    one says where the page goes. One that is not an http(s) URL (empty,
+    about:blank) names no document and is left out; one off the Web UI or on
+    another origin refuses.
+
+    QUrl values only, as _Origin / _Port read them (no QApplication, no
+    WebEngine object, no settings: the server's URL is passed): the path has
+    to be resolved as QUrl resolves it."""
+    if permissionType != CLIPBOARD_PERMISSION:
+        return False
+    asking = _HttpOrigin(origin)
+    documents = [page for page in pageUrls if _HttpOrigin(page) is not None]
+    return (asking is not None and asking == _HttpOrigin(serverUrl)
+            and bool(documents) and all(
+                _HttpOrigin(page) == asking and _InWebUi(page)
+                for page in documents))
+
+
 def _IsDesignerUrl(url, pageUrl):
     """Whether a new window asks for this server's Designer: exactly the URL the
     Board page opens (web/src/BoardPage), on the origin of the page asking."""
@@ -251,13 +349,24 @@ _OUTSIDE_SCHEMES = ("http", "https")
 class _PanelPage(QWebEnginePage):
     """The shared view's page: it stays on this server's pages.
 
-    The invariant the clipboard rests on (S4e): page script may write the
-    clipboard (JavascriptCanAccessClipboard), so the view must never show
-    a page that is not this server's. The panels keep to it -- an outside
+    The invariant the clipboard rests on (S4e): page script of the page's
+    own origin is granted the clipboard (ADR-005 S-final SF-8b: per request,
+    _AnswerPermission; until then JavascriptCanAccessClipboard let every
+    frame's script have it), so the view must never show a page that is not
+    this server's Web UI. The panels keep to it -- an outside
     link opens a new window, which the view does not make -- and this enforces
     it: a navigation the page starts itself (a link, a form, script, a
-    redirect) of the main frame is refused unless it stays on the page's own
-    origin (that of the URL the host loaded). The host's own loads go through.
+    redirect, a link dropped on it) of the main frame is refused unless it
+    stays on the page's own origin (that of the URL the page shows or the
+    one the host loaded), which is this server's (_ServerUrl: 127.0.0.1 at
+    its port), and in the Web UI, /web and under it (_InWebUi; ADR-005
+    S-final SF-8b review): not layout/, where a third party's layout would
+    run as the page, granted the clipboard. The host's own loads (load(),
+    Qt's reload of a discarded page: PanelPath, at LocalUrl) go through
+    whatever the page is on -- the first finds it on none yet -- but they
+    too only into this server's /web: Qt hands a URL dropped on the view as
+    one of their kinds, for all this can tell, and another origin's /web
+    would otherwise be the page's own origin, granted the clipboard.
 
     A new window goes to the default browser instead, when it is the web's
     (S4r), but for the Designer's URL, which is the host's (designerRequested,
@@ -281,7 +390,22 @@ class _PanelPage(QWebEnginePage):
     own origin, so every such navigation of a frame is refused. The server
     refuses it as well (WebAccess.FramedElsewhere, from Sec-Fetch-*), and
     that is what holds where this page is not the one framing (a browser's
-    Web UI)."""
+    Web UI).
+
+    A permission a frame asks for (ADR-005 S-final SF-8b) is granted only
+    when it is the clipboard, asked by the page's own origin while the page
+    is in the Web UI (ClipboardPermitted); every other request is denied.
+    Qt's ClipboardReadWrite does not tell reading from writing, so the
+    page's own script may read the clipboard too (the panels do not). A
+    grant is not kept: the profile -- the default one -- asks every time
+    (PersistentPermissionsPolicy.AskEveryTime). Kept (Qt's default for it,
+    StoreInMemory), a grant here would answer, unasked, the same origin's
+    requests in the Designer's window (measured on PySide6 6.11): it shows
+    this server's /web on the default profile too, and answers no request.
+    The off-screen renderers use the default profile as well, but load
+    file:// pages, another origin, so no grant of this one ever reached
+    them. A copy command in a click (document.execCommand("copy")) is no
+    permission and writes the clipboard from any frame, as on the web."""
 
     designerRequested = Signal()
 
@@ -289,6 +413,23 @@ class _PanelPage(QWebEnginePage):
         super().__init__(parent)
         self.refusedLast = False
         self.newWindowRequested.connect(self._OpenOutside)
+        # Before the page loads anything, so no grant is ever kept: the
+        # profile's policy is read as each request is answered.
+        self.profile().setPersistentPermissionsPolicy(
+            QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
+        self.permissionRequested.connect(self._AnswerPermission)
+
+    def _AnswerPermission(self, permission):
+        # Answered at once: nothing here waits or shows a dialog.
+        kind = permission.permissionType().name
+        origin = permission.origin()
+        if ClipboardPermitted(kind, origin, (self.url(), self.requestedUrl()),
+                              _ServerUrl()):
+            permission.grant()
+            return
+        logger.warning("The web panel view refused %s to %s", kind,
+                       origin.toString())
+        permission.deny()
 
     def _OpenOutside(self, request):
         # Not opened in the view: nothing calls request.openIn(), and the
@@ -323,13 +464,26 @@ class _PanelPage(QWebEnginePage):
             logger.warning("The web panel view refused a frame of this "
                            "server's own origin, %s", url.toDisplayString())
             return False
-        if navigationType in _HOST_NAVIGATIONS or _Origin(url) in (
-                _Origin(self.url()), _Origin(self.requestedUrl())):
+        # Only into this server's Web UI: its origin as the host loads it
+        # (_ServerUrl) and /web. The host's own loads (load(), Qt's reload of
+        # a discarded page) go there whatever the page is on -- the first
+        # finds it on none yet; a link dropped on the view may come as one of
+        # their kinds too, so they are held to this server's origin as well
+        # -- and the page's own navigations only while they stay on its
+        # origin, that of the URL it shows or, before its first document
+        # (url() still empty), of the one the host's load asked for
+        # (requestedUrl). So both are this server's /web from then on, which
+        # ClipboardPermitted relies on.
+        target = _HttpOrigin(url)
+        if (_InWebUi(url) and target is not None
+                and target == _HttpOrigin(_ServerUrl())
+                and (navigationType in _HOST_NAVIGATIONS or target in (
+                    _HttpOrigin(self.url()), _HttpOrigin(self.requestedUrl())))):
             self.refusedLast = False
             return True
         self.refusedLast = True
-        logger.warning("The web panel view refused to leave this server "
-                       "for %s", url.toDisplayString())
+        logger.warning("The web panel view refused to leave the Web UI of "
+                       "this server for %s", url.toDisplayString())
         return False
 
 
@@ -563,13 +717,17 @@ class AutonaWebPanelHost(QWidget):
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.
         page.setBackgroundColor(QColor(UI.palette()["canvas"]))
-        # The Stream page copies the made thumbnail to the clipboard
-        # (navigator.clipboard.write, an image -- what the Qt panel's copy
-        # button did, S4e). Qt refuses page script the clipboard by
-        # default, and the write then never settles. Safe as the view only
-        # ever shows this server's own pages (_PanelPage).
-        self.view.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
+        # The panels copy to the clipboard (navigator.clipboard: the Stream
+        # page's thumbnail, S4e; the OBS URLs; the post on X's image). Not
+        # through these, which would give it to every frame's script, the
+        # design previews' among them: the page grants it per request to its
+        # own origin (_PanelPage._AnswerPermission; ADR-005 S-final SF-8b).
+        # Off by default; said here so a profile's default cannot turn
+        # them on.
+        for attribute in (
+                QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard,
+                QWebEngineSettings.WebAttribute.JavascriptCanPaste):
+            self.view.settings().setAttribute(attribute, False)
         # On by default: script could then ask for new windows by itself, and
         # each would be a page of the default browser's (_PanelPage). From a
         # click it still may (measured on PySide6 6.11: window.open in a click

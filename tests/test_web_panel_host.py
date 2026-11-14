@@ -42,14 +42,19 @@ from urllib.parse import quote
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer, QUrl
+from qtpy.QtGui import QGuiApplication
 from qtpy.QtTest import QTest
-from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from qtpy.QtWebEngineCore import (
+    QWebEnginePage, QWebEnginePermission, QWebEngineProfile, QWebEngineSettings)
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWidgets import QDialog, QLabel, QStackedWidget, QVBoxLayout, QWidget
+from qtpy.QtWidgets import (
+    QDialog, QLabel, QLineEdit, QStackedWidget, QVBoxLayout, QWidget)
 
 from src import AutonaWebPageLifecycle as WPL
 from src import AutonaWebPanelHost as HostModule
-from src.AutonaWebPanelHost import AutonaWebPanelHost, PanelPath, WebPanelPages
+from src.AutonaWebPanelHost import (
+    CLIPBOARD_PERMISSION, AutonaWebPanelHost, ClipboardPermitted, PanelPath,
+    WebPanelPages)
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
 from src.core.SettingsManager import SettingsManager
@@ -99,6 +104,22 @@ def _waitUntil(predicate, timeout=WAIT_SECS):
         QTimer.singleShot(20, loop.quit)
         loop.exec()
     return predicate()
+
+
+def _pageJs(page, expr):
+    # Only on an Active page: a frozen one answers after it thaws. The value
+    # is round-tripped through JSON: PySide6 hands null, arrays and objects
+    # back as ''.
+    box = []
+    page.runJavaScript(
+        "(function(){try{var v=(" + expr + ");"
+        "return JSON.stringify({value:v===undefined?null:v});}"
+        "catch(e){return JSON.stringify({error:String(e)});}})()",
+        0, box.append)
+    assert _waitUntil(lambda: box), f"no reply to {expr!r}"
+    reply = json.loads(box[0])
+    assert "error" not in reply, f"{expr!r} threw {reply['error']}"
+    return reply["value"]
 
 
 @pytest.fixture(scope="module")
@@ -174,19 +195,7 @@ class _Rig:
         return url.path(), url.query()
 
     def js(self, expr):
-        # Only on an Active page: a frozen one answers after it thaws. The
-        # value is round-tripped through JSON: PySide6 hands null, arrays and
-        # objects back as ''.
-        box = []
-        self.page.runJavaScript(
-            "(function(){try{var v=(" + expr + ");"
-            "return JSON.stringify({value:v===undefined?null:v});}"
-            "catch(e){return JSON.stringify({error:String(e)});}})()",
-            0, box.append)
-        assert _waitUntil(lambda: box), f"no reply to {expr!r}"
-        reply = json.loads(box[0])
-        assert "error" not in reply, f"{expr!r} threw {reply['error']}"
-        return reply["value"]
+        return _pageJs(self.page, expr)
 
     def state(self):
         return self.page.lifecycleState()
@@ -299,19 +308,9 @@ def test_the_view_is_built_only_once_the_host_is_shown_with_a_panel(buildHost):
     assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
 
 
-def test_the_page_may_write_the_clipboard(buildHost):
-    # The Stream page copies the made thumbnail with
-    # navigator.clipboard.write (S4e). Off by default in Qt, and the write
-    # then never settles (measured on PySide6 6.11 with a click on
-    # 127.0.0.1: no answer either way; with the attribute, the image is on
-    # the clipboard).
-    rig = _shown(buildHost)
-    assert rig.host.view.settings().testAttribute(
-        QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard)
-
-
 def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
-    # What the clipboard permission above rests on (S4e review): a
+    # What the clipboard permission rests on (S4e review; granted to the
+    # page's own origin since SF-8b, below): a
     # navigation the page starts to another origin -- script, a link -- is
     # refused, and the page stays as it was. Another port is another
     # origin (here nothing listens there: let through, the view would show
@@ -345,6 +344,61 @@ def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
     assert not rig.host.view.page().refusedLast
 
 
+def test_the_page_does_not_leave_the_web_ui(buildHost):
+    # The review of SF-8b: this server's own origin serves third parties'
+    # layouts too (layout/), and a page there would be granted the clipboard
+    # as the panels are. The main frame stays in /web: script, a link -- or a
+    # link dropped on the view -- to the rest of the origin is refused, and
+    # the server never sees it.
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    served = len(rig.requests)
+    elsewhere = ("/layout/scoreboard/index.html", "/", "/api/v1/health",
+                 "/out/program_state.json", "/webx", "/web/../layout/a.html",
+                 "/web/%2e%2e/layout/a.html")
+
+    for path in elsewhere:
+        rig.js(f"void (location.href = {json.dumps(path)})")
+    rig.js("(function(u){var a=document.createElement('a');a.href=u;"
+           "document.body.appendChild(a);a.click();})("
+           "'/layout/scoreboard/index.html')")
+
+    _waitUntil(lambda: False, timeout=1.0)
+    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.js("window.__loadId") == document
+    assert len(rig.requests) == served
+    assert rig.page.refusedLast
+    assert rig.host._loaded
+
+    # What acceptNavigationRequest says, for each kind: off the Web UI never,
+    # in it on this server's origin always, on any other origin never -- not
+    # even for the host's own kinds (load(), the reload of a discarded page):
+    # a link dropped on the view arrives as Typed too (SF-8b's second review).
+    port = rig.servingPort
+    N = QWebEnginePage.NavigationType
+    pageKinds = (N.NavigationTypeLinkClicked, N.NavigationTypeOther,
+                 N.NavigationTypeRedirect, N.NavigationTypeFormSubmitted,
+                 N.NavigationTypeBackForward)
+    hostKinds = (N.NavigationTypeTyped, N.NavigationTypeReload)
+    for kind in pageKinds + hostKinds:
+        for path in elsewhere + ("/web/%2e%2e%2flayout/a.html",):
+            assert rig.page.acceptNavigationRequest(
+                QUrl(f"http://127.0.0.1:{port}{path}"), kind, True) is False, (
+                    path, kind)
+        for path in ("/web", "/web/second?desktop=1&lng=ja", "/web/board#x"):
+            assert rig.page.acceptNavigationRequest(
+                QUrl(f"http://127.0.0.1:{port}{path}"), kind, True) is True, (
+                    path, kind)
+        for url in (f"http://127.0.0.1:{port + 1}/web/second",
+                    "http://evil.example/web/x",
+                    f"http://evil.example:{port}/web/x",
+                    f"http://localhost:{port}/web/x",
+                    f"https://127.0.0.1:{port}/web/x",
+                    "file:///C:/web/x.html"):
+            assert rig.page.acceptNavigationRequest(
+                QUrl(url), kind, True) is False, (url, kind)
+
+
 # ── no frame of this server's own origin (ADR-005 S-final SF-8a review) ──
 # The design previews load from the preview listener (another port); a
 # layout's script there may navigate its frame -- or a frame it makes -- to
@@ -361,6 +415,14 @@ if (q.get('nest')) {
   var f = document.createElement('iframe');
   f.src = q.get('nest');
   document.body.appendChild(f);
+}
+if (q.get('clip')) {
+  document.addEventListener('click', function () {
+    var asked = q.get('clip') === 'read' ? navigator.clipboard.readText()
+      : navigator.clipboard.writeText('from the frame');
+    asked.then(function () { parent.postMessage('clip ok', '*'); },
+               function (e) { parent.postMessage('clip ' + e.name, '*'); });
+  });
 }
 </script></body></html>"""
 
@@ -463,6 +525,380 @@ def test_a_frame_sent_to_this_servers_own_origin_does_not_get_there(
     assert rig.loads == loads
     assert rig.host._loaded
     assert not rig.page.refusedLast
+
+
+# ── the clipboard: the page's own origin only (ADR-005 S-final SF-8b) ───
+# The panels copy with navigator.clipboard (the Stream / thumbnail images,
+# the OBS URLs, the post on X's image). No setting hands it to every frame's
+# script (JavascriptCanAccessClipboard did until SF-8b, the design previews'
+# included); the page grants Qt's ClipboardReadWrite per request to its own
+# origin while it is in the Web UI (/web), and the (default) profile keeps no
+# grant, so that none reaches the Designer's window, a view of the same origin
+# on the same profile. (The off-screen renderers are on it too, but load
+# file:// pages: another origin.)
+
+SERVER = "http://127.0.0.1:5107/"
+
+
+def _permitted(kind, origin, pages, server=SERVER):
+    return ClipboardPermitted(kind, QUrl(origin), tuple(map(QUrl, pages)),
+                              QUrl(server))
+
+
+def test_the_clipboard_is_granted_to_the_pages_own_origin_only():
+    page = "http://127.0.0.1:5107"
+    pages = (f"{page}/web/board?desktop=1&lng=ja", "about:blank")
+    granted = (page, page + "/", f"{page}/layout/a.html",
+               "HTTP://127.0.0.1:5107/", "http://x@127.0.0.1:5107/",
+               "http://127.0.0.1:5107/web/board")
+    refused = (
+        "http://127.0.0.1:61234/",    # the preview listener's port
+        "http://127.0.0.1:5108/",     # another port
+        "http://127.0.0.1/",          # http's default port
+        "http://localhost:5107/",     # another name for this PC
+        "http://[::1]:5107/",
+        "http://192.0.2.10:5107/",    # a LAN address of this PC's
+        "https://127.0.0.1:5107/",    # another scheme
+        "https://example.com/",
+        "about:blank", "about:srcdoc", "data:text/html,a",
+        "file:///C:/a.html", "qrc:/a.html", "chrome-error://chromewebdata/",
+        "", "not a url", "http://127.0.0.1:99999/")
+
+    for origin in granted:
+        assert _permitted(CLIPBOARD_PERMISSION, origin, pages), origin
+    for origin in refused:
+        assert not _permitted(CLIPBOARD_PERMISSION, origin, pages), origin
+    # No other permission, even to the page's own origin.
+    others = set(QWebEnginePermission.PermissionType.__members__) - {
+        CLIPBOARD_PERMISSION}
+    assert others
+    for name in others | {"", "clipboardreadwrite"}:
+        assert not _permitted(name, page, pages), name
+    # The name is Qt's (the page passes PermissionType's member name).
+    assert (QWebEnginePermission.PermissionType.ClipboardReadWrite.name
+            == CLIPBOARD_PERMISSION)
+
+
+def test_the_clipboard_is_granted_on_this_servers_origin_only():
+    # SF-8b's second review: a page of another origin in /web (a link dropped
+    # on the view arrives as the host's own Typed) asking for its own origin
+    # is not granted. The origin is this server's: A exactly.
+    for other in ("http://evil.example", "http://evil.example:5107",
+                  "http://127.0.0.1:5108", "http://127.0.0.1:61234",
+                  "http://localhost:5107", "http://[::1]:5107",
+                  "https://127.0.0.1:5107", "http://127.0.0.1"):
+        assert not _permitted(CLIPBOARD_PERMISSION, other,
+                              (f"{other}/web/x",)), other
+        assert not _permitted(CLIPBOARD_PERMISSION, other,
+                              (f"{other}/web/x", "about:blank")), other
+    # The server's URL is what LocalUrl gives (127.0.0.1 at the port it
+    # listens on); its path does not matter, its port does.
+    own = "http://127.0.0.1:5107"
+    for server in (own, own + "/", own + "/web/board"):
+        assert _permitted(CLIPBOARD_PERMISSION, own, (own + "/web/x",),
+                          server), server
+    for server in ("http://127.0.0.1:5108/", "http://localhost:5107/",
+                   "https://127.0.0.1:5107/", "", "about:blank",
+                   "http://127.0.0.1:99999/"):
+        assert not _permitted(CLIPBOARD_PERMISSION, own, (own + "/web/x",),
+                              server), server
+    # The page follows the server when its port changes.
+    moved = "http://127.0.0.1:5108"
+    assert _permitted(CLIPBOARD_PERMISSION, moved, (moved + "/web/x",),
+                      moved + "/")
+
+
+def test_the_clipboard_is_granted_only_while_the_page_is_in_the_web_ui():
+    # The review of SF-8b: the page's own origin also serves layout/ (third
+    # parties' layouts), out/, assets/ and the API. A page there is not one of
+    # the panels, and _PanelPage does not let the main frame go there either.
+    own = "http://127.0.0.1:5107"
+    for path in ("/web", "/web/", "/web/board?desktop=1&lng=ja",
+                 "/web/scoreboard#x", "/web?view=designer", "/web/./board",
+                 "/web//board", "/a/../web/board"):
+        assert _permitted(CLIPBOARD_PERMISSION, own, (own + path,)), path
+    for path in ("", "/", "/layout/scoreboard/index.html", "/layout/web/a",
+                 "/api/v1/health", "/out/program_state.json",
+                 "/assets/a.png", "/scoreboard", "/webx", "/web-ui/board",
+                 "/WEB/board", "/x/web/board",
+                 "/web/../layout/a.html", "/web/%2e%2e/layout/a.html",
+                 "/web/%2E%2E/layout/a.html", "/web/.%2e/layout/a.html",
+                 "/web/x/../../layout/a.html", "/web/..%2flayout/a.html",
+                 "/web/%2e%2e%2flayout/a.html", r"/web\..\layout/a.html"):
+        assert not _permitted(CLIPBOARD_PERMISSION, own, (own + path,)), path
+
+    board = f"{own}/web/board"
+    # Either of the page's URLs alone, while the other names no document
+    # (url() before the first commit, a requested about:blank)...
+    for pages in ((board, "about:blank"), ("about:blank", board),
+                  (board, ""), (board, board)):
+        assert _permitted(CLIPBOARD_PERMISSION, own, pages), pages
+    # ...but one off the Web UI or on another origin refuses, and none at all.
+    for pages in ((board, f"{own}/layout/a.html"),
+                  (f"{own}/layout/a.html", board),
+                  (board, "http://127.0.0.1:5108/web/board"),
+                  ("http://localhost:5107/web/board", board),
+                  (), ("about:blank",), ("about:blank", "")):
+        assert not _permitted(CLIPBOARD_PERMISSION, own, pages), pages
+
+
+def test_no_setting_hands_script_the_clipboard(buildHost):
+    rig = _shown(buildHost)
+    settings = rig.host.view.settings()
+
+    assert not settings.testAttribute(
+        QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard)
+    assert not settings.testAttribute(
+        QWebEngineSettings.WebAttribute.JavascriptCanPaste)
+    # No grant is kept, on the default profile: the one the Designer's window
+    # and the off-screen renderers use too (QWebEngineView() without one).
+    assert rig.page.profile() == QWebEngineProfile.defaultProfile()
+    assert rig.page.profile().persistentPermissionsPolicy() == (
+        QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
+
+
+class _Permission:
+    """A permission request as _AnswerPermission reads it."""
+
+    def __init__(self, kind, origin):
+        self._kind, self._origin = kind, origin
+        self.answers = []
+
+    def permissionType(self):
+        return SimpleNamespace(name=self._kind)
+
+    def origin(self):
+        return QUrl(self._origin)
+
+    def grant(self):
+        self.answers.append("grant")
+
+    def deny(self):
+        self.answers.append("deny")
+
+
+def test_the_page_answers_every_request_at_once(buildHost, caplog):
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    own = f"http://127.0.0.1:{port}/"
+
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        caplog.clear()
+        for kind, origin, answer in (
+                (CLIPBOARD_PERMISSION, own, "grant"),
+                (CLIPBOARD_PERMISSION, f"http://127.0.0.1:{port + 1}/", "deny"),
+                (CLIPBOARD_PERMISSION, f"http://localhost:{port}/", "deny"),
+                ("Notifications", own, "deny"),
+                ("Geolocation", own, "deny"),
+                ("MediaAudioVideoCapture", own, "deny"),
+                ("DesktopVideoCapture", own, "deny"),
+                ("LocalFontsAccess", own, "deny")):
+            request = _Permission(kind, origin)
+            rig.page._AnswerPermission(request)
+            assert request.answers == [answer], (kind, origin)
+
+    # Its own refusals (not the page's other warnings), one per denial.
+    refusals = [record.getMessage() for record in caplog.records
+                if record.name == HostModule.__name__
+                and record.msg == "The web panel view refused %s to %s"]
+    assert len(refusals) == 7
+    assert (f"The web panel view refused Notifications to {own}"
+            in refusals)
+    assert (f"The web panel view refused {CLIPBOARD_PERMISSION} to {own}"
+            not in refusals)
+
+
+def _askedOf(page):
+    # The requests the page is asked (after it has answered them).
+    asked = []
+    page.permissionRequested.connect(lambda permission: asked.append(
+        (permission.permissionType().name,
+         HostModule._HttpOrigin(permission.origin()))))
+    return asked
+
+
+def _clickRunning(view, call):
+    # Runs `call` -- script giving the clipboard's promise -- in a click on
+    # `view`, as the panels' buttons do: "ok", or the error's name. A click
+    # sent before the page's first frame is lost, so until the page has seen
+    # one (the listener runs once).
+    page = view.page()
+    _pageJs(page, "window.__clip = null, window.__clicks = 0,"
+                  " window.addEventListener('click', function () {"
+                  " window.__clicks += 1; (" + call + ").then("
+                  "function () { window.__clip = 'ok'; },"
+                  " function (e) { window.__clip = e.name; }); },"
+                  " {once: true}), 0")
+
+    def clicked():
+        QTest.mouseClick(view.focusProxy(), Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.NoModifier, QPoint(50, 50))
+        return _waitUntil(lambda: _pageJs(page, "window.__clicks") > 0,
+                          timeout=0.5)
+    assert _waitUntil(clicked), "the page saw no click"
+    assert _waitUntil(lambda: _pageJs(page, "window.__clip") is not None), \
+        "the clipboard did not answer"
+    return _pageJs(page, "window.__clip")
+
+
+def _imageWrite(later=False):
+    # An image the way the panels copy one: the clipboard asked with the PNG
+    # still to come. `later`: made once the test calls window.__makeImage()
+    # (the post on X's image, made after the click).
+    make = "window.__makeImage = make;" if later else "make();"
+    return ("navigator.clipboard.write([new ClipboardItem({'image/png':"
+            " new Promise(function (done) {"
+            " var canvas = document.createElement('canvas');"
+            " canvas.width = 4; canvas.height = 4;"
+            " function make() { window.__focusedAtImage = document.hasFocus();"
+            " canvas.toBlob(done, 'image/png'); } " + make + " })})])")
+
+
+def test_the_page_is_granted_the_clipboard(buildHost):
+    rig = _shown(buildHost)
+    own = HostModule._HttpOrigin(rig.host.view.url())
+    asked = _askedOf(rig.page)
+    clipboard = QGuiApplication.clipboard()
+
+    for text in ("first copy", "second copy"):
+        assert _clickRunning(
+            rig.host.view,
+            f"navigator.clipboard.writeText({json.dumps(text)})") == "ok"
+        assert clipboard.text() == text
+    assert _clickRunning(rig.host.view, _imageWrite()) == "ok"
+    assert clipboard.mimeData().hasImage()
+
+    # Through a request (no setting), of the page's origin; none kept.
+    assert asked
+    assert set(asked) == {(CLIPBOARD_PERMISSION, own)}
+    assert rig.page.profile().listAllPermissions() == []
+
+
+def test_an_image_asked_in_a_click_lands_after_another_window_took_the_focus(
+        buildHost):
+    # The post on X (S4r): the image is asked for in the click, the default
+    # browser takes the focus, and the image, made later, still lands.
+    rig = _shown(buildHost)
+    clipboard = QGuiApplication.clipboard()
+    clipboard.setText("before")
+    elsewhere = QLineEdit()
+    rig.js("window.__clip = null, window.__clicks = 0,"
+           " window.__focusedAtImage = null, window.__makeImage = null,"
+           " window.addEventListener('click', function () {"
+           " window.__clicks += 1; (" + _imageWrite(later=True) + ").then("
+           "function () { window.__clip = 'ok'; },"
+           " function (e) { window.__clip = e.name; }); },"
+           " {once: true}), 0")
+    try:
+        _clickView(rig)
+        # Another window takes the focus (what the browser does), and then
+        # the image is made.
+        elsewhere.show()
+        elsewhere.activateWindow()
+        elsewhere.setFocus()
+        assert _waitUntil(lambda: rig.js("document.hasFocus()") is False)
+        assert rig.js("window.__clip") is None
+        rig.js("window.__makeImage(), 0")
+
+        assert _waitUntil(lambda: rig.js("window.__clip") is not None)
+        assert rig.js("window.__clip") == "ok"
+        assert rig.js("window.__focusedAtImage") is False
+        assert clipboard.mimeData().hasImage()
+    finally:
+        elsewhere.close()
+        elsewhere.deleteLater()
+        QCoreApplication.sendPostedEvents(elsewhere, QEvent.Type.DeferredDelete)
+
+
+def test_a_grant_is_not_kept_for_another_view(buildHost):
+    # The Designer's window and the off-screen renderers are views on the
+    # same profile that answer no request: a grant kept from the shared view
+    # (Qt's StoreInMemory) would answer theirs, on the same origin.
+    rig = _shown(buildHost)
+    assert _clickRunning(rig.host.view,
+                         "navigator.clipboard.writeText('granted')") == "ok"
+    own = HostModule._HttpOrigin(rig.host.view.url())
+
+    other = QWebEngineView()    # as AutonaDesignerWindow builds its own
+    try:
+        assert other.page().profile() == rig.page.profile()
+        asked = []
+
+        def answer(permission):
+            asked.append((permission.permissionType().name,
+                          HostModule._HttpOrigin(permission.origin())))
+            permission.deny()
+        other.page().permissionRequested.connect(answer)
+        loads = []
+        other.loadFinished.connect(loads.append)
+        other.resize(400, 300)
+        other.load(rig.host.view.url())
+        other.show()
+        other.activateWindow()
+        assert _waitUntil(lambda: loads) and loads[-1] is True
+        QGuiApplication.clipboard().setText("before")
+
+        assert _clickRunning(
+            other, "navigator.clipboard.writeText('leaked')") == "NotAllowedError"
+        # Asked (not answered from a kept grant), and refused here.
+        assert asked == [(CLIPBOARD_PERMISSION, own)]
+        assert QGuiApplication.clipboard().text() == "before"
+    finally:
+        other.close()
+        other.deleteLater()
+        QCoreApplication.sendPostedEvents(other, QEvent.Type.DeferredDelete)
+
+
+def test_a_preview_frame_is_refused_the_clipboard(buildHost, frameServer,
+                                                  caplog):
+    # A design preview: a frame of the preview listener's origin. As
+    # DesignPane frames it (no allow=), Chromium's permissions policy refuses
+    # it before anything is asked; delegated (allow="clipboard-read;
+    # clipboard-write"), the request reaches the page, which refuses it.
+    rig = _shown(buildHost)
+    framePort, _ = frameServer
+    frameOrigin = ("http", "127.0.0.1", framePort)
+    asked = _askedOf(rig.page)
+    clipboard = QGuiApplication.clipboard()
+    rig.js("window.__messages = [], window.addEventListener('message',"
+           " function (e) { window.__messages.push(String(e.data)); }), 0")
+
+    for delegated in (False, True):
+        for use in ("write", "read"):
+            asked.clear()
+            clipboard.setText("before")
+            rig.js("document.querySelectorAll('iframe').forEach("
+                   "function (f) { f.remove(); }), window.__messages = [], 0")
+            rig.js("(function (u, allow) {"
+                   " var f = document.createElement('iframe'); f.src = u;"
+                   " f.setAttribute('sandbox', 'allow-scripts allow-same-origin');"
+                   " if (allow) { f.setAttribute('allow', allow); }"
+                   " f.style.cssText = 'position:fixed;left:0;top:0;"
+                   "width:400px;height:300px;border:0';"
+                   " document.body.appendChild(f); return 1; })("
+                   + json.dumps(f"http://127.0.0.1:{framePort}/frame?clip={use}")
+                   + ", " + json.dumps("clipboard-read; clipboard-write"
+                                       if delegated else "") + ")")
+
+            def answered():
+                QTest.mouseClick(
+                    rig.host.view.focusProxy(), Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier, QPoint(50, 50))
+                return _waitUntil(lambda: rig.js("window.__messages.length"),
+                                  timeout=0.5)
+            with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+                caplog.clear()
+                assert _waitUntil(answered), (delegated, use)
+
+            assert rig.js("window.__messages[0]") == "clip NotAllowedError", (
+                delegated, use)
+            assert clipboard.text() == "before", (delegated, use)
+            if delegated:
+                assert asked and set(asked) == {
+                    (CLIPBOARD_PERMISSION, frameOrigin)}, use
+                assert f"refused {CLIPBOARD_PERMISSION}" in caplog.text
+            else:
+                assert asked == [], use
 
 
 # ── a new window goes to the default browser (ADR-005 S4r) ──────────────

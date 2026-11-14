@@ -554,16 +554,46 @@ paths:
   - 第三者のレイアウトで本体のポート（`localhost:5107` など）の絶対 URL や legacy の読み取りルートを使うものは、プレビューでだけ崩れうる（OBS では今までどおり）
 - CORS は Flask-CORS で全オリジン許可のまま（読み取りは別オリジンからも読める）。**例外: `/api/designer/imports`** は Origin を `null` / figma.com に限定し、ペアリングコード（`X-Autona-Pairing` ヘッダ）が必須。
   `/api/designer/*` は Designer トークン（ループバック限定）とペアリングコードの独自ガードのままで、S3a の判定は通さない（DESIGNER）
-- **デスクトップの共有ビュー（`AutonaWebPanelHost`）にはこのサーバーのページしか載せない**（ADR-005 S4e）。ページのスクリプトに
-  クリップボードの書き込みを許しているため（`JavascriptCanAccessClipboard`。配信サムネの画像コピー）
+- **デスクトップの共有ビュー（`AutonaWebPanelHost`）にはこのサーバーの Web UI（`/web` とその配下）しか載せない**（ADR-005 S4e。`/web` に絞ったのは S-final SF-8b のレビュー）。
+  ページ自身のオリジンのスクリプトにクリップボードを許しているため（配信サムネ・サムネイル・リザルトの画像コピー、OBS の URL・タイトルのコピー、X 投稿の画像）。
+  同じオリジンは `layout/`（第三者製のレイアウト）・`out/`・`assets/`・API も出すので、オリジンだけでは足りない
+  - **クリップボードは設定で渡さない**（ADR-005 S-final SF-8b）: `JavascriptCanAccessClipboard` / `JavascriptCanPaste` は明示的に False。
+    `_PanelPage._AnswerPermission` が `permissionRequested` に答え、Qt の `ClipboardReadWrite` を `ClipboardPermitted` が許すときだけ grant する:
+    頼んだオリジンが本体のサーバーのオリジン（`_ServerUrl` = ホストが読む `LocalUrl` の `127.0.0.1` と待ち受けのポート）ちょうどで、
+    ページの URL とホストが読み込んだ URL（`url()` / `requestedUrl()`。http(s) の文書を指すものすべて。about:blank・空は数えない。1 つは要る）とも
+    scheme・host・port まで一致し、そのパスが `/web` の配下（`_InWebUi`）。ほかのオリジン（プレビューのフレーム・ループバックの別名やこの PC の LAN アドレスの本体のポート・
+    ビューに落とされたリンクで来た別オリジンのページが自分のオリジンで頼むもの）、`/web` の外にいるページ、ほかの権限は全部 deny（warning を出す）。
+    判定は QUrl の値だけを読む純関数（`_Origin` / `_Port` と同じ読み方。サーバーの URL は引数で渡す。QApplication も WebEngine も設定も要らない）。
+    Qt はフレームの要求をそのフレームのオリジンで渡す（PySide6 6.11 で実測）が、どのフレームかは渡さないので、ページと同じオリジンの子フレームはページと同じに grant される
+    （そういうフレームは下のフレームの遷移の規則で作れない）。SF-8b より前は設定で全フレームに渡していて、`allow` で委譲されたプレビューのレイアウトも読み書きできた
+  - **`/web` の判定**（`_InWebUi`）: QUrl の `NormalizePathSegments` でドットのセグメントを解いたパスが `/web` か `/web/` で始まり（`/webx` は外）、デコードした後にドットのセグメントと
+    バックスラッシュが残らない（QUrl が解かないエンコードされたスラッシュの `/web/..%2flayout`、Chromium がスラッシュと読む `\`）。Chromium は解いた URL を渡すが、それに頼らない
+  - **grant を持ち越さない**: 既定プロファイルの永続化ポリシーを `AskEveryTime` にする（`_PanelPage.__init__`。ページが何か読み込む前）。
+    Designer（`AutonaDesignerWindow`）は同じ既定プロファイルの `QWebEngineView` でこのサーバーの `/web` を出し、要求に答えない。
+    Qt の既定（`StoreInMemory`）のままだと、共有ビューの grant が Designer の同じオリジンの要求にも黙って効く（実測）。漏れ先は Designer だけ:
+    オフスクリーン描画（サムネ・リザルト）も既定プロファイルだが file:// のページ（別のオリジン）を読むので、もともと届かない。
+    Designer はクリップボードを JS で使わないので、ハンドラは足していない（要求は答えられず、今までどおり止まる）。
+    共有ビューを別のプロファイルに移すなら、そのプロファイルに同じポリシーを付ける
+  - 残るもの: `ClipboardReadWrite` は読みと書きを分けないので、ページ自身のスクリプトは読むこともできる（パネルは読まない。
+    テキスト欄の Ctrl+V・右クリックの貼り付けは編集コマンドで権限と関係ない）。クリックの中の `document.execCommand("copy")` は権限ではなく、
+    どのフレームからも書ける（Web の標準。読めない）。`DesignPane` の iframe は `allow` を付けないので、プレビューの `navigator.clipboard` は
+    Chromium の Permissions Policy が要求の前に断る（付けても上の判定で deny）
+  - クリップボード以外の権限（通知・カメラなど）を使うページを足すなら `ClipboardPermitted` を広げる（今は全部 deny）。
+    `tests/test_web_panel_host.py` が判定の表（オリジン・本体のサーバーのオリジン・パス・2 つの URL の組）・設定・ポリシー、実 QtWebEngine での grant・プレビューのフレームの拒否・
+    別のビューに grant が届かないこと・ほかのウィンドウにフォーカスが移った後の画像の書き込み（X 投稿の形）・メインフレームが `/web` の外へも別オリジンの `/web` へも移れないことを pin
   - React のパネルに外部へのリンクを置くなら `target="_blank"` にし、同じフレームで外へ遷移させない。ビューは新しいウィンドウを
     作らず、クリックからの（`isUserInitiated`）`http` / `https` の要求は既定のブラウザに渡す（`_PanelPage._OpenOutside`。ADR-005 S4r。X の投稿画面）。ほかは開かない。
     例外は Designer: クリックからの、ページと同じオリジンの `/web?view=designer` ちょうど（`_IsDesignerUrl`。パス・クエリ・フラグメント・userinfo まで見る）だけ、既定のブラウザへ渡さずホストが `AutonaDesignerWindow` を開く（ADR-005 S4s。トークンの発行と破棄は Qt 側のままで、ページにトークンを渡さない）。
     もう 1 つは SCORE ページの「ブラウザ版を開く」: クリックからの、ページと同じオリジンの `/scoreboard` / `/team` ちょうど（`_IsBrowserScoreboardUrl`。クエリ・フラグメント・userinfo が無いこと）だけ、ホストがクリックの時点で URL を組み直して既定のブラウザへ渡す（`BrowserScoreboardUrl`。S4ac-3 で削除した Qt のボードのボタンと同じ形: Web サーバーに届くアドレスと、LAN 接続でトークンがあるときだけ `?token=`。ADR-005 S4aa）。ページはトークンを持たず、ログにはホストだけを出す。
     クリックなしのスクリプトは `JavascriptCanOpenWindows=False` で届かず、Qt が知らないスキームを OS に渡す経路は
     `DisallowUnknownUrlSchemes` で閉じている（シェル操作は増やしていない。`tests/test_web_panel_host.py` が pin）
-  - 担保: `_PanelPage.acceptNavigationRequest` が、ページ自身が始めた別オリジンへのメインフレームの遷移（リンク・フォーム・
-    スクリプト・リダイレクト）を拒否する。ホスト自身の読み込み（`load()`・破棄されたページの再読み込み）は通す。
+  - 担保: `_PanelPage.acceptNavigationRequest` が、ページ自身が始めたメインフレームの遷移（リンク・フォーム・スクリプト・リダイレクト・
+    ビューに落としたリンク）のうち、本体のサーバーのオリジン（`_ServerUrl`）で、ページのオリジン（`url()` か、最初の文書の前は `requestedUrl()`）の
+    `/web` の配下（`_InWebUi`）でないものを拒否する（別オリジンは S4e から。同じオリジンの `layout/` ほかは SF-8b のレビューから）。
+    ホスト自身の読み込み（`load()`・破棄されたページの再読み込み）はページのオリジンを問わず通すが（最初の読み込みには守るオリジンがまだ無い）、
+    本体のサーバーのオリジンの `/web` の配下だけ（ホストが読むのは `LocalUrl(PanelPath)` だけ。ビューに落としたリンクも同じ種類の `Typed` で来うるので、
+    別オリジンの `/web` は種類を問わず断る。SF-8b の 2 回目のレビュー）。
+    パネルの切り替えは `history.replaceState` で遷移にならない。
     Qt は拒否した遷移を読み込みの失敗（`loadFinished(False)`）として出すが、文書は残っているので、ホストはそれで再読み込みしない
     （`refusedLast`。`tests/test_web_panel_host.py` が pin）
   - フレームの遷移は通すが、このサーバー自身のオリジン（http(s) のうち、ページのオリジンと、ループバック名・この PC の LAN アドレスの本体のポート =
