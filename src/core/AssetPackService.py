@@ -8,10 +8,9 @@ joaorb64/StreamHelperAssets: its index (assets.json) lists each game's
 packs, the binaries are split 7z files on the repository's latest Release
 -- or imported from a game folder / ZIP the operator already has. Until
 SF-3b all of it was the "Add game assets" window's own
-(src/AutonaGameAssetGuideWindow.py: two QThreads, the copy and the ZIP
-extraction on the GUI thread); here it is core's, so the React page that
-replaces the window (SF-4b, /web/assets) can do it in either shell, and the
-window calls this until then. v1 reads the list and the last job's state,
+(two QThreads, the copy and the ZIP extraction on the GUI thread); here it
+is core's, so the React page that replaced the window (SF-4b-2,
+/web/assets; the window is gone) does it through v1. v1 reads the list and the last job's state,
 and since SF-4b-1 starts and cancels the jobs and takes the ZIP upload (see
 Safety).
 
@@ -26,8 +25,7 @@ The index
 is not cached, older than ``INDEX_MAX_AGE_SECS`` or ``refresh`` is asked
 (at most once every ``INDEX_MIN_REFRESH_SECS``, failed tries included);
 callers that come while one fetch runs wait for it and share it.
-``FetchIndex`` does the same as a job (the window: never on the GUI
-thread). ``Packs`` is the list the page and the window show: every game of
+``Packs`` is the list the page shows: every game of
 the index with its allowed packs (size, version, installed version) and the
 installed games the index does not have.
 
@@ -135,7 +133,8 @@ Safety
   handed only to the shared view's main frame, so headless has none of
   them. The API answers a refusal's code, never its message.
 - A folder import is not in v1 (a page cannot name a folder; SF-5a's
-  folder picker brings it back): the window's alone until then.
+  folder picker brings it back; the window's folder import went with
+  the window in SF-4b-2, so nothing calls ``ImportFolder`` until then).
 
 Lock order: this service's ``_lock`` guards its own fields only; nothing is
 called with it held (no scan, no StatusService, no executor). The scan runs
@@ -318,7 +317,7 @@ _BAD_CHARS = frozenset('<>:"|?*\x00')
 class AssetPackError(Exception):
     """A start or a probe refused: ``code`` (the constants above), and
     ``names`` for NEEDS_CONFIRMATION (the installed games it would
-    replace). ``message`` is English, for the logs and the window; the API
+    replace). ``message`` is English, for the logs; the API
     answers the code (``error.reason``) and its own fixed words, never the
     message (it may name a path or the archive's entries)."""
 
@@ -991,13 +990,6 @@ class AssetPackService:
                     self._indexError = error
                 return self._index is not None
 
-    def FetchIndex(self, refresh=False):
-        """EnsureIndex as a job of the TaskExecutor (the window's: off the
-        GUI thread). Its Future (cancelled when the app is shutting down);
-        IndexState / Packs(fetch=False) read the result."""
-        return TaskExecutor.instance.submit(
-            self.EnsureIndex, refresh, task_name="asset index fetch")
-
     def Packs(self, fetch=True, refresh=False):
         """What can be installed and what is.
 
@@ -1008,7 +1000,7 @@ class AssetPackService:
         "version", "installedVersion" (the installed pack's config.json;
         None when it has none), "installed", "updateAvailable", "default"
         (offered checked)}]}]}. Only allowed packs. The games are sorted
-        as the window lists them ("name  (code)", case-insensitively).
+        as the page lists them ("name  (code)", case-insensitively).
 
         ``fetch``: EnsureIndex(refresh) first, on the calling thread (the
         network); off, the index as cached. No local path is in it."""
@@ -1098,16 +1090,15 @@ class AssetPackService:
         with self._lock:
             return self._job is not None and self._job.status == RUNNING
 
-    def Cancel(self, revision=None):
+    def Cancel(self, revision):
         """Ask the running job to stop (seen at its next step); False when
-        none runs. ``revision``: only when it is that job (v1's job:cancel:
-        the job the page shows, not one started since); None, whichever
-        runs (the window)."""
+        none runs or the running one is not ``revision`` (v1's job:cancel:
+        the job the page shows, not one started since)."""
         with self._lock:
             job = self._job
             if job is None or job.status != RUNNING:
                 return False
-            if revision is not None and job.revision != revision:
+            if job.revision != revision:
                 return False
             job.cancel.set()
         logger.info(f"Asset {job.operation} #{job.revision}: cancel asked")
@@ -1120,12 +1111,12 @@ class AssetPackService:
         or (BUSY, the running job's revision). ``fetch``: the index is
         fetched first when it is not cached or too old (EnsureIndex, the
         calling thread: the network); off, the cached one is used however
-        old (the window: the GUI thread). AssetPackError INDEX_UNAVAILABLE /
+        old (v1 passes False: the request never waits on the network). AssetPackError INDEX_UNAVAILABLE /
         UNKNOWN_GAME / BAD_NAME / NO_PACKS / UNKNOWN_PACK / STOPPED / FAILED.
         Everything is downloaded and extracted into a staging folder
         first; the last step merges it into user_data/games/<code> file by
         file (a file there already is replaced, the others stay -- what the
-        window's extraction over the folder did). That merge is not atomic:
+        old window's extraction over the folder did). That merge is not atomic:
         a failure inside it leaves the files it had moved."""
         if not isinstance(code, str) or not code:
             raise AssetPackError(UNKNOWN_GAME, "game is required")

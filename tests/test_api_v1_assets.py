@@ -686,12 +686,6 @@ def test_cancel_takes_a_revision(shell, revision):
            v1.INVALID_ARGUMENT)
 
 
-def test_the_window_still_cancels_whichever_job_runs(env):
-    other = _zip(env.root / "a.zip", _game_entries("aaa"))
-    env.service.ImportZip(other)
-    assert env.service.Cancel() is True
-
-
 # ── the games folder ─────────────────────────────────────────────────────
 
 EXPLORER = os.path.join(r"C:\Windows", "explorer.exe")

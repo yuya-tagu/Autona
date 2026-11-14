@@ -41,7 +41,7 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 
 3. `Window.STATE_VERSION` をインクリメント
 
 **サイドバーの項目でないページ**（メニューのページ: 設定（ADR-005 S4af）と API / Companion / OBS のガイドと
-About（S-final SF-4a-2））は、`Window.MENU_PAGES` に名前を足す（先頭は `settings` のまま）。`_BuildUi` がナビ項目の
+About（S-final SF-4a-2）と「ゲームアセットを追加」（SF-4b-2。`assets`。メニューの 2 か所（Help & Settings とゲームのメニュー）が `OpenMenuPage("assets")` を呼ぶ））は、`Window.MENU_PAGES` に名前を足す（先頭は `settings` のまま）。`_BuildUi` がナビ項目の
 後ろにスタックのページとして足す（`_lazyPanels` / `_panelIndexes` / `_webPanelPages.Add` に登録し、`_navSections`
 には入れない。ファクトリは `functools.partial(self._WebPanel, 名前)`）。ナビ項目の nav index == stack index と保存済みの
 サイドバーの index は動かないので `STATE_VERSION` は上げない。開くのは `Window.OpenMenuPage(名前)`（`MENU_PAGES` に

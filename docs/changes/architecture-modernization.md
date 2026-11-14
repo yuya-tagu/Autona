@@ -8528,7 +8528,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-8b | 共有ビューのクリップボード: `JavascriptCanAccessClipboard` を外し、`permissionRequested` で ClipboardReadWrite をページ自身のオリジンにだけ許す。既定プロファイルを `AskEveryTime` に（許可が別ビューへ漏れるため） | 高 | SF-8a |
   | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に | 通常 | SF-8b |
   | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
-  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除） | 通常 | SF-3b・SF-4a |
+  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） | 通常 | SF-3b・SF-4a |
   | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない | 通常 | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
@@ -8891,3 +8891,50 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - API 設定のページのテスター（SF-4a-2）は共有ビューの中なので、パスを打てばアセットの SHELL のルートも送れる（install は body の confirm が要る・importZip の上書きも）。テスターの確認の対象に足すかは SF-4b-2（web）で決める
   - `web/src` の `api.ts` の 10 秒のタイムアウト（大きなアップロードには短い）と、新しい status コード / `error.reason` の扱いは SF-4b-2
 - **SF-4b-2 でやること**: `/web/assets`（大きさの事前確認（無駄な転送を省くため。413 は届く）→ アップロード → `conflicts` の確認 → 取り込み、`data.job` で `/assets/job`、`skippedEntries`、進捗とキャンセル、`error.reason` と索引のエラーコードの訳、フォルダは「ZIP にしてから」の案内、`useShellAccess` はトークンを持たない判定に）・窓 `AutonaGameAssetGuideWindow` の削除・テスターの確認
+
+##### SF-4b-2 ゲームアセットを追加のページと窓の削除（2026-11-14）
+
+区分は通常（web とシェルの配線・削除。サーバーは SF-4b-1 で済み）。**フォルダの取り込みを一時的に外した**（オーナー承認 2026-11-14「外してよい」。ページは「ZIP にしてから取り込んでください（フォルダからの取り込みは今後のアップデートで戻ります）」と案内し、SF-5a のシェル要求のフォルダ選択で戻す）。
+
+- **変更**
+  - `web/src/AssetsPage/`（新規）: `/web/assets`。`index.tsx`（3 段のカード・ジョブの進捗と結果・ダイアログ）・`assetsApi.ts`（パス・型・`uploadZip`（XMLHttpRequest）・`errorText` / `describeFailure`・`MAX_UPLOAD_BYTES`）・`useAssetJob.ts`（ジョブの読み取り）・`AssetsPage.test.js`（jest 54 件）。`PanelShell/registry.tsx` に登録、`WebAccess.WEB_PANELS` に `assets`、`Window.MENU_PAGES` の末尾に `"assets"`（`STATE_VERSION` は不変）
+  - `PanelShell/useShellAccess.ts`: `useShellAccess({withToken: false})`（トークンの答えを読まずに捨て、`token` は常に `""`・`regenerate` は拒否。ページの state にトークンが残らない）
+  - `web/src/api.ts`: `ApiError` に `reason`（封筒の `error.reason`）と `apiErrorReason`、`ApiOptions.keepalive`（ページを離れるときの DELETE）。パック一覧は 120 秒（`PACKS_TIMEOUT_MS`。索引の取得はサーバー側で最大 30 秒）
+  - `src/Autona.py`: メニューの 2 か所（Help & Settings とゲームのメニュー）の "Add game assets" が `OpenMenuPage("assets")`。窓の import・`_gameAssetGuideWindow`・`_EnsureLazyWindow`・`EnsureGameAssetGuideWindow`・Lazy guide dialogs の節を削除（`_ApplyTabBarPolicy` は他で使うので残した）。`src/AutonaGameAssetGuideWindow.py` を削除
+  - 訳語は i18next のみ（`assets_*`、en / ja の各 80 キー）。`.ts` に窓の文言は元から無く（"Add game assets" だけがメニューの `app` 文脈）、`.qm` は作り直す差分が無い
+  - 文書: `external-control-api.md`（§2.6 の画像の説明）・`AutonaApiV1._over_limit` の docstring（SF-4b-1 で残った「読まずに返すと接続のリセットが届く」を、実際の werkzeug の動き（最大 10 GB まで読み捨て・413 は届く）に直した）・`AssetPackService` の docstring・agent-pitfalls・python-widgets・Design.md・ADR-002 の指し先・features.md・manual-test-checklist
+- **ページの設計（エンジニアリードの判断どおり）**
+  - 共有ビューかどうかは `useShellAccess({withToken: false})`（`GET /access-token` の 200 / 403）。`checking` → 読み込み表示、`failed` → 再試行、`elsewhere` → 案内文とソースのリンクだけ（一覧もジョブも読まない・ボタン無し）、`shell` → 本体
+  - アップロード: 送る前に `File.size` を `MAX_UPLOAD_BYTES` と比べる（超えたら何も送らない。`tests/test_assets_page.py` が Python の定数と式を突き合わせる）→ XHR（本文は `File` そのまま・`X-Autona-File-Name` はパーセントエンコード・`upload.onprogress` で % とバイト・`abort()` で中止）→ `conflicts` があれば 1 つのダイアログにチェックボックス（既定は全部外す。ZIP のゲームが全部導入済みで全部外したままなら取り込まずに破棄して「何も取り込みませんでした」。Qt のダイアログと同じ）→ `POST /assets:importZip`（`overwrite` が空でないときだけ `confirm: true`）。やめたとき・ダイアログのキャンセル・取り込みが始まらなかったとき・ページを離れたとき（アンマウントと `pagehide`）は `DELETE /assets/uploads/<id>`（離れるときは keepalive）。送信中に離れたら `abort()`
+  - install: 大きさの合計とゲーム名の確認ダイアログ → `{game, packs, confirm: true}`
+  - ジョブ: マウント時に読み、走っていれば自分のものとして引き継ぐ（終わった古いジョブは出さない）。走っていて表示中のとき約 1 秒ごと、Socket.IO の `status`・再接続・再表示でも読む。隠れている間は止める（`status` の通知でも読まない）。覚えた revision より新しいジョブが見えたら「結果は不明」（自分のジョブとして表示しない・新しい開始は走っているジョブがある間は無効）。`games_changed` と自分のジョブの終了でパック一覧を読み直す。進捗は 段階 / ゲーム / パック と done/total（ダウンロードはバイト、ほかは件数）、キャンセルは `job:cancel` に revision
+  - 結果: `error.reason` とジョブの `error` は core の固定コードを `assets_error_<code>` の訳に。英文の `message` と `failed[].message` は折りたたむ。`skippedEntries` は折りたたみで、`skippedEntriesMore` があれば件数を添える。描画は文字列だけ（`dangerouslySetInnerHTML` / `innerHTML` が無いことを jest が pin）
+  - 「ゲームのフォルダを開く」は `POST /assets/games-folder:reveal`（パスを渡さない）
+- **pin**
+  - `web/src/AssetsPage/AssetsPage.test.js`（jest 41 件）: checking / elsewhere（何も読まない・ボタン無し）/ failed と再試行 / shell・トークンをページにも Storage にも URL にも持たない・`useShellAccess({withToken: false})` / パック一覧の長い期限・既定のチェック・索引のエラー・再読み込み・`games_changed` / install の確認（大きさとゲーム名）・取り消し・拒否の `reason` の訳・引き継いだジョブのキャンセル（revision）/ 約 1 秒の再読み・`status` の通知・隠れている間の停止と再表示・結果不明・古いジョブを出さない / 結果（skippedEntries の折りたたみと `More`・error の訳と詳細の折りたたみ・キャンセル・何も取り込まない・失敗したゲーム）/ アップロード（本文・ヘッダ・進捗）・conflicts のダイアログ・全部断る・ダイアログのキャンセルで破棄・始まらなかった取り込みで破棄・送信を止める・離れたとき（中・保持）・上限超えは送らない・上限ちょうどは送る・拒否の `reason` の訳 / フォルダの取り込みが無い / 登録 / innerHTML が無い / en と ja のキーの一致
+  - `tests/test_assets_page.py`（新規 8 件）: core のコード（`_ASSET_REFUSALS` ∪ ジョブの失敗 3 つ）・stage・索引のエラーのそれぞれに en / ja の訳があり、訳に余分なコードも無い（`test_api_v1_guides` と同じ型）／`MAX_UPLOAD_BYTES` の式と `SOURCE_URL` が core と一致／ページの 7 本のパスとヘッダ名／ページが `WEB_PANELS`・registry・`MENU_PAGES` の末尾にあり、"Add game assets" の 2 か所が `OpenMenuPage("assets")`
+  - `tests/test_web_panel_host.py`: 窓のモジュールと名前（`EnsureGameAssetGuideWindow` ほか）が無いことを pin（`test_the_qt_guide_windows_are_gone`）・メニューのページの試験に `assets` を追加。`tests/test_headless.py`: ウィジェットのモジュールの集合から窓を外した。`tests/test_asset_packs.py`: 窓の試験（`the window ...` 7 件と `_FakeService` / fixture）を削除（core の試験は残す）
+  - e2e `web/e2e/assets.spec.ts`（10 件）: ヘッドレスのブラウザで `/web/assets` が elsewhere（`/access-token` が 403・アセットの API を 1 本も呼ばない・ボタン無し・ソースのリンク）／ジョブ・アップロード・フォルダを開くが 403／600 px と 860 px の en / ja で、elsewhere と、共有ビューの 3 つの読み取りを stub した本体（長いゲーム名・パック名）がはみ出さない
+- **独断で決めたこと（実装担当）**
+  - `useShellAccess` のトークンなしの判定は、既存のプローブ（`GET /access-token`）の答えを捨てる形にした（`/assets/job` を探りに使うと、フックがアセット専用になるため）。トークンは応答に載って届くが、フックの state・DOM・Storage・URL には入らない
+  - パック一覧の期限は打ち切りなしにせず 120 秒にした（サーバーの索引取得は最大 30 秒で、止まったままにしない）
+  - ダイアログの既定: 上書きのチェックは全部外す（Qt の「Overwrite?」の既定の答えは Yes を押すまで No。設計の「候補をチェックボックスで並べる」に合わせて上書きは明示にした）
+  - ページ名のタブのタイトルは "Autona Add game assets"（`GuideFrame` の規則。ガイドのページと同じ）
+  - 「既定のブラウザで開く」ボタンを付けた（オーナー承認 2026-11-14 の対象にアセットのページが含まれていたため。エンジニアリードの検収で付け忘れを直した。デスクトップだけで、ブラウザのページは elsewhere の案内になる。jest で pin）
+  - `.ts` / `.qm` は触っていない（窓の訳は元から無い）
+- **独立レビューの指摘への修正（同日）**
+  - 進捗の量は `operation === "install"` でバイト、取り込みは件数（段階では決めない）。`job.file` も表示
+  - 自分が始めたジョブの revision を `sessionStorage`（`autona.assets.job`。try/catch。トークンは入れない）に覚え、ページに戻ったとき revision が一致すれば結果を出す（別のページのジョブは出さない）
+  - 開始の POST から最初の読み取りまでと ZIP の送信・上書き確認の間は、ダウンロードと ZIP の両方のボタンを無効にする。取り込みの POST が出ている間は `held` を外す（離れても DELETE を送らない。始まらなかったときだけ破棄）
+  - 上書きのダイアログは背景のクリックと Esc で閉じない（アップロードを捨てない）。`expiresInSec` を過ぎたら閉じて破棄し「時間切れ」を出す。読み取りの失敗は再試行ボタン付き。ジョブの読み取りは setTimeout の連鎖で重ならない
+  - 進捗バーの aria-label は固定（値は `aria-valuenow`）。訳語: 件数の複数形は i18next の `_one/_other`、索引の失敗は GitHub に触れる文言、メニューの案内は「ヘルプ＆設定 → ゲームアセットを追加」
+  - core: 呼び手の無い `AssetPackService.FetchIndex` と `Cancel(revision=None)` の枝を削除（試験も追従）。`ImportFolder` / `ProbeFolder` は SF-5a のフォルダ選択で使うので残す
+  - ADR-002 に「フォルダの取り込みは一時的に無い」を追記。`_over_limit` と §2.6 に「10 ms 以内に届き続ける限り」を追記。jest 54 件・e2e 16 件（600 px の進捗カード・長い項目名の結果・2 つのダイアログを追加）
+  - **リリースノートへ持ち越し**: 「ゲームアセットを追加」が Web 画面になった。フォルダからの取り込みは一時的に無く、ZIP にしてから取り込む（今後のアップデートで戻る）
+- **検証**: 下の報告のとおり（触ったテストを直列 → jest 全量 → build → e2e 全量 → pytest 全量）
+- **残るリスク**
+  - 実機の共有ビューでのアップロード（QtWebEngine の XHR に秘密が付くことは SF-4b-1 の `test_web_panel_host` が pin 済み。数 GB の本文の実機の性能・進捗の見た目は未確認）
+  - 送信が終わる瞬間に中止すると、サーバーが枠に入れた ZIP の id がページに届かず、15 分（または次のアップロード・起動）まで残る（SF-4b-1 の期限と起動時の掃除が受ける）
+  - テスター（API 設定のページ）の確認の対象にアセットの SHELL のルートを足すかは決めていない（ページ自身が呼べるのと同じ権限なので増えない。SF-4b-1 の記録のまま）
+  - フォルダの取り込みは SF-5a まで無い
+- **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「ゲームアセットを追加」の節（メニューの 2 か所から開く・ダウンロードの確認と進捗とキャンセル・ZIP の送信の進捗と上書きのダイアログ・やめたあとに `user_data/.autona-uploads/` が空・ブラウザでは案内だけ・600 px で崩れない）

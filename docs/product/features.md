@@ -55,7 +55,7 @@
 ### Help & Settings メニュー
 - **Always on top** — ウィンドウを常に最前面に表示
 - **Settings** — 設定ダイアログ（General / Language / Hotkeys。言語設定は Language カテゴリ。§ 25・§ 26）
-- **Add game assets** — ゲームアセット入手ガイド
+- **Add game assets** — ゲームアセット入手ページ（共有ビューの `/web/assets`。上流の公開ソース `joaorb64/StreamHelperAssets` からパックをダウンロード、または手持ちの ZIP を取り込む。フォルダは ZIP にしてから取り込む（フォルダからの直接の取り込みは今後のアップデートで戻る）。ブラウザで開くと案内とソースへのリンクだけ）。ゲームのメニューの「Add game assets」も同じページを開く
 - **API Settings** — サブメニュー: 外部制御 API のリファレンス / テスター（Open reference & tester）、Companion settings（Bitfocus Companion / Stream Deck 接続ガイド）、OBS / Advanced Scene Switcher（OBS 側ツールから Autona API を叩くための接続ガイド）
 - **Check for updates** — 手動アップデート確認
 - **Join the Discord community** — Discord コミュニティ

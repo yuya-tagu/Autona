@@ -28,8 +28,8 @@ export function GuideFrame({panel, title, documentTitle, description,
     // already (About).
     documentTitle?: string;
     description?: string;
-    // The "open in the default browser" button (the API, Companion and OBS
-    // guides; not About).
+    // The "open in the default browser" button (the API, Companion, OBS and
+    // assets pages; not About).
     openInBrowser?: boolean;
     children: React.ReactNode;
 }) {
