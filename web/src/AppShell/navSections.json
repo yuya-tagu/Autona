@@ -1,0 +1,21 @@
+[
+    {"heading": "app_setup", "items": [
+        {"panel": "event", "icon": "tournament.svg", "label": "app_tournament_info"},
+        {"panel": "stream", "icon": "megaphone.svg", "label": "app_stream_settings"}
+    ]},
+    {"heading": "app_scoreboard_category", "items": [
+        {"panel": "scoreboard", "icon": "scoreboard.svg", "label": "app_scoreboard"},
+        {"panel": "board", "icon": "board.svg", "label": "app_board"}
+    ]},
+    {"heading": "app_display", "items": [
+        {"panel": "thumbnail", "icon": "thumbnail.svg", "label": "app_thumbnail_settings"},
+        {"panel": "result", "icon": "result.svg", "label": "app_result_settings"},
+        {"panel": "top8", "icon": "bracket.svg", "label": "app_top8_display_settings"},
+        {"panel": "commentary", "icon": "commentary.svg", "label": "app_commentary"},
+        {"panel": "statsPreview", "icon": "stats.svg", "label": "app_stats_display_settings"}
+    ]},
+    {"heading": "app_data", "items": [
+        {"panel": "stats", "icon": "stats.svg", "label": "app_statistics"},
+        {"panel": "playerBrowser", "icon": "players.svg", "label": "app_player_list"}
+    ]}
+]

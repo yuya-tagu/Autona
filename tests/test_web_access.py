@@ -828,6 +828,102 @@ def test_the_web_ui_entry_and_the_designer_are_unchanged(server):
     response.close()
 
 
+# ── The AppShell: /web/app/<panel> (ADR-005 S-final SF-5a-3) ────────────
+# The same pages inside the Web UI's navigation, header and footer: the same
+# names, the same page, the same endpoint (web_index, STATIC) -- and so the
+# same frame rule and the same refusals.
+
+def test_every_allowed_panel_is_the_web_ui_page_in_the_app_shell(server):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    for panel in sorted(WebAccess.WEB_PANELS):
+        for remote in ("127.0.0.1", LAN_PEER):
+            response = _client(server, remote).get(
+                f"/web/app/{panel}?desktop=1&lng=ja")
+            assert response.status_code == 200, (panel, remote)
+            assert response.data == WEB_UI_PAGE
+            response.close()
+
+
+def test_the_app_shell_is_the_entry_pages_endpoint(server):
+    from flask import request
+
+    for url in ("/web/app/event", "/web/app/unknown"):
+        with server.app.test_request_context(url):
+            endpoint = server.app.url_map.bind("localhost").match(url)[0]
+            assert endpoint == "web_index", url
+            assert WebAccess.RouteAccess(endpoint) == WebAccess.STATIC
+            assert request.path == url
+    # Not the preview listener's (no file of it): refused there.
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    assert not WebAccess.PreviewServes("web_index", "GET")
+    response = _PreviewClient(server).get("/web/app/event")
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+    assert WEB_UI_PAGE not in response.get_data()
+
+
+@pytest.mark.parametrize("url", [
+    "/web/app/unknown",
+    "/web/app/designer",
+    "/web/app/build",
+    "/web/app/Event",          # names are exact
+    "/web/app/event.html",
+    "/web/app/settings.json",
+    "/web/app/app",
+    "/web/app",                # "app" is no panel
+    "/web/app/",
+    "/web/app/event/more",     # one name only
+])
+def test_any_other_app_shell_url_is_not_found(server, url):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    _write(server.root, "web/build/settings.json", b'{"secret": 1}')
+    for remote in ("127.0.0.1", LAN_PEER):
+        response = _client(server, remote).get(url)
+        assert response.status_code == 404, (url, remote)
+        assert WEB_UI_PAGE not in response.data
+        assert b"secret" not in response.data
+
+
+def test_a_refused_app_shell_name_is_logged_by_its_url(server, warnings):
+    # One warning per URL, as /web/<panel>'s: the AppShell's is its own.
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    client = _client(server, LAN_PEER)
+    for _ in range(3):
+        assert client.get("/web/app/unknown").status_code == 404
+        assert client.get("/web/unknown").status_code == 404
+        assert client.get("/web/app/event").status_code == 200
+
+    refused = [m for m in warnings if "not serving" in m]
+    assert sum("'web/app/unknown'" in m for m in refused) == 1
+    assert sum("'web/unknown'" in m for m in refused) == 1
+    assert not any("event" in m for m in refused)
+
+
+def test_the_app_shell_shows_in_no_other_pages_frame(server):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    client = _client(server)
+    for site in ("same-site", "cross-site"):
+        response = client.get("/web/app/event", headers=dict(
+            FRAMED, **{"Sec-Fetch-Site": site}))
+        assert response.status_code == 403, site
+        assert response.get_json() == WebAccess.ErrorBody(
+            WebAccess.FRAMED_ELSEWHERE)
+        assert WebAccess.REFUSED_FRAME_POLICY in response.headers.getlist(
+            "Content-Security-Policy")
+        assert WEB_UI_PAGE not in response.get_data()
+    # Its own pages framing it, and the document itself: served, and said
+    # to be framed by this origin only.
+    for headers in ({"Sec-Fetch-Dest": "iframe",
+                     "Sec-Fetch-Site": "same-origin"},
+                    {"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "none"},
+                    {}):
+        response = client.get("/web/app/event", headers=headers)
+        assert response.status_code == 200, headers
+        assert response.data == WEB_UI_PAGE
+        assert WebAccess.FRAME_ANCESTORS in response.headers.getlist(
+            "Content-Security-Policy")
+        response.close()
+
+
 def test_the_panel_page_writes_from_this_pc_and_needs_the_token_from_another(
         server):
     headers = _panel_page_headers()

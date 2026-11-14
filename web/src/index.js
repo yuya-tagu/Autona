@@ -9,6 +9,7 @@ import {Provider} from "react-redux";
 import ThemeShell from "./ThemeShell";
 import ScoreboardDesigner from "./ScoreboardDesigner";
 import PanelShell from "./PanelShell";
+import AppShell from "./AppShell";
 import {installPanelShellApi} from "./PanelShell/hostApi";
 import {captureTokenFromUrl} from "./autonaToken";
 
@@ -46,6 +47,12 @@ root.render(
                       <Route
                           path="/web/:panel"
                           element={<PanelShell />}
+                      />
+                      {/* The same pages inside the AppShell (the navigation,
+                          the header and the footer; ADR-005 S-final SF-5a-3). */}
+                      <Route
+                          path="/web/app/:panel"
+                          element={<AppShell />}
                       />
                       <Route
                           path="/scoreboard"

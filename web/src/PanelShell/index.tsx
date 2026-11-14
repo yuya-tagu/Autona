@@ -3,7 +3,7 @@ import {Box, Typography, useTheme} from "@mui/material";
 import {useNavigate, useParams, useSearchParams} from "react-router-dom";
 import i18n from "../i18n/config";
 import websocketInit from "../ScoreboardPage/websocketInit";
-import {PanelShellContext} from "./context";
+import {PanelShellContext, PanelShellValue} from "./context";
 import {registerRouterNavigate} from "./hostApi";
 import {panelPage} from "./registry";
 import "./panelScrollbar.css";
@@ -19,6 +19,10 @@ import "./panelScrollbar.css";
 // - starts the Socket.IO state, like the scoreboard page.
 // Writes go through /api/v1 like any other page: from this PC without the
 // token, from another computer with it (?token=, autonaToken.ts).
+//
+// The same set-up (usePanelShellSetup) runs the AppShell at /web/app/:panel
+// (ADR-005 S-final SF-5a-3, ../AppShell): the same page (PanelContent),
+// inside the navigation, the header and the footer.
 
 function usePanelLanguage(lng: string | null): string {
     const [language, setLanguage] = React.useState(i18n.language);
@@ -52,7 +56,10 @@ function UnknownPanel({panel}: {panel: string}) {
     );
 }
 
-export default function PanelShell() {
+// What both shells do: the URL's panel, `desktop` and `lng`, the language,
+// the scrollbar, the router the desktop's view drives, the Socket.IO state.
+// Returns what the shell gives its page (PanelShellContext).
+export function usePanelShellSetup(): PanelShellValue {
     const {panel = ""} = useParams();
     const [searchParams] = useSearchParams();
     const desktop = searchParams.get("desktop") === "1";
@@ -81,13 +88,21 @@ export default function PanelShell() {
         websocketInit();
     }, []);
 
-    const value = React.useMemo(
+    return React.useMemo(
         () => ({panel, desktop, language}), [panel, desktop, language]);
-    const Page = panelPage(panel);
+}
 
+// The panel's page, or what says there is none by that name.
+export function PanelContent({panel}: {panel: string}) {
+    const Page = panelPage(panel);
+    return Page ? <Page/> : <UnknownPanel panel={panel}/>;
+}
+
+export default function PanelShell() {
+    const value = usePanelShellSetup();
     return (
         <PanelShellContext.Provider value={value}>
-            {Page ? <Page/> : <UnknownPanel panel={panel}/>}
+            <PanelContent panel={value.panel}/>
         </PanelShellContext.Provider>
     );
 }

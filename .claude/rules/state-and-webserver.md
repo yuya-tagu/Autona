@@ -565,6 +565,10 @@ paths:
   - 第三者のレイアウトで本体のポート（`localhost:5107` など）の絶対 URL や legacy の読み取りルートを使うものは、プレビューでだけ崩れうる（OBS では今までどおり）
 - CORS は Flask-CORS で全オリジン許可のまま（読み取りは別オリジンからも読める）。**例外: `/api/designer/imports`** は Origin を `null` / figma.com に限定し、ペアリングコード（`X-Autona-Pairing` ヘッダ）が必須。
   `/api/designer/*` は Designer トークン（ループバック限定）とペアリングコードの独自ガードのままで、S3a の判定は通さない（DESIGNER）
+- **`/web/app/<panel>`**（ADR-005 S-final SF-5a-3。Web UI の AppShell）は `/web/<panel>` と同じ endpoint `web_index` のもう 1 本のルール。
+  分類は endpoint の STATIC のまま（`ROUTE_ACCESS` は endpoint で引くので行は足していない）、返すのは `WebAccess.IsWebPanel` の名前だけ（ほかは 404。断ったログは要求のパスで出す）、
+  `FramedElsewhere` と `frame-ancestors 'self'` も同じく効き、プレビュー用のリスナーには出ない。共有ビューの `/web` の判定（`_InWebUi`）にもそのまま入る。
+  `tests/test_webserver_routes.py` の台帳の行と `tests/test_web_access.py` が pin。新しい枠のルートを足すときも別の endpoint にせず、同じ判定を通す
 - **デスクトップの共有ビュー（`AutonaWebPanelHost`）にはこのサーバーの Web UI（`/web` とその配下）しか載せない**（ADR-005 S4e。`/web` に絞ったのは S-final SF-8b のレビュー）。
   ページ自身のオリジンのスクリプトにクリップボードを許しているため（配信サムネ・サムネイル・リザルトの画像コピー、OBS の URL・タイトルのコピー、X 投稿の画像）。
   同じオリジンは `layout/`（第三者製のレイアウト）・`out/`・`assets/`・API も出すので、オリジンだけでは足りない

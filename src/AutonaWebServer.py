@@ -836,15 +836,21 @@ def _build_web_app():
     # any other is answered like a missing file -- and logged like one, as
     # file_request did for these URLs before the rule existed. /web?view=
     # designer is unchanged (a query on /web, not a panel).
+    # /web/app/<panel> (ADR-005 S-final SF-5a-3) is the same page in the
+    # AppShell (the navigation, the header and the footer around it): the
+    # same names, one more rule of this endpoint (STATIC, like /web/<panel>).
     @app.route('/')
     @app.route('/scoreboard')
     @app.route('/team')
     @app.route('/web')
     @app.route('/web/<panel>')
+    @app.route('/web/app/<panel>')
     @cross_origin()
     def web_index(panel=None):
         if panel is not None and not WebAccess.IsWebPanel(panel):
-            WebServer._log_static_refusal(f"web/{panel}")
+            # The URL as asked for (web/<panel> or web/app/<panel>), as
+            # file_request names a refused file.
+            WebServer._log_static_refusal(request.path.lstrip("/"))
             return "File not found", 404
         return send_file(os.path.join(os.path.abspath('.'), 'web/build/index.html'))
 

@@ -86,7 +86,8 @@ function Note({children}: {children: React.ReactNode}) {
 
 // ── start.gg の大会 ──────────────────────────────────────────────────────
 
-function statusText(status: TournamentLoad): string {
+// Also the AppShell's tournament dialog's (S-final SF-5a-3).
+export function statusText(status: TournamentLoad): string {
     switch (status.status) {
         case "resolving":
             return i18n.t("event_status_resolving");
@@ -112,7 +113,8 @@ function statusText(status: TournamentLoad): string {
 // send what is shown -- an old URL typed before another writer's set is
 // never set over it (S4g review M3). A set that changes nothing (refused,
 // an admin URL that stood for no event) leaves the typing to be corrected.
-function useUrlField(url: string): [string, (text: string | null) => void] {
+// Also the AppShell's tournament dialog's (S-final SF-5a-3).
+export function useUrlField(url: string): [string, (text: string | null) => void] {
     const [draft, setDraft] = React.useState<string | null>(null);
     const [seen, setSeen] = React.useState(url);
     if (url !== seen) {

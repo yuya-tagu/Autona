@@ -31,6 +31,7 @@ import {withToken} from "../autonaToken";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
 import {usePanelShell} from "../PanelShell/context";
+import {navigateToPanel, panelPath} from "../PanelShell/hostApi";
 import {getWithRetry} from "../PanelShell/requests";
 import {ShellAccessValue, useShellAccess} from "../PanelShell/useShellAccess";
 import ConnectionCard, {LanState, guideBaseUrl} from "./ConnectionCard";
@@ -210,7 +211,9 @@ function TokenRow({shell}: {shell: ShellAccessValue}) {
 
 // Where the port and LAN access are changed: the settings page. The
 // shared view shows one page at a time, so the desktop is told the way
-// there; a browser gets the page's link.
+// there; a browser gets the page's link. A click moves in the page's own
+// frame (navigateToPanel: inside the AppShell at /web/app/, S-final SF-5a-3,
+// the bare page at /web/), the link itself opening a new tab as any link.
 function SettingsHint() {
     const {desktop, language} = usePanelShell();
     if (desktop) {
@@ -218,7 +221,15 @@ function SettingsHint() {
     }
     return (
         <Typography variant="body2">
-            <Link href={`/web/settings?lng=${encodeURIComponent(language)}`}>
+            <Link href={`${panelPath("settings")}?lng=${encodeURIComponent(language)}`}
+                  onClick={(event: React.MouseEvent) => {
+                      if (event.button !== 0 || event.metaKey || event.ctrlKey
+                          || event.shiftKey || event.altKey) {
+                          return;
+                      }
+                      event.preventDefault();
+                      navigateToPanel("settings");
+                  }}>
                 {i18n.t("guide_api_open_settings")}
             </Link>
         </Typography>

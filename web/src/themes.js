@@ -64,14 +64,19 @@ const TYPOGRAPHY = {
     },
 };
 
-function buildTheme() {
+// `beside`: the width of what stands beside the page in the window (the
+// AppShell's sidebar, ADR-005 S-final SF-5a-3). The breakpoints move by it,
+// so a page's layout (its md two panes) follows the width the page has, as
+// it did in the desktop's view beside the Qt sidebar, not the window's.
+function buildTheme(beside = 0) {
     const t = DARK_TOKENS;
 
     const base = createTheme({ palette: { mode: 'dark' } });
 
     return responsiveFontSizes(createTheme({
         breakpoints: {
-            values: { xs: 0, sm: 600, md: 900, lg: 1100, xl: 1536 },
+            values: { xs: 0, sm: 600 + beside, md: 900 + beside,
+                      lg: 1100 + beside, xl: 1536 + beside },
         },
         palette: {
             mode: 'dark',
@@ -286,3 +291,8 @@ function buildTheme() {
 }
 
 export const darkTheme = buildTheme();
+
+// The theme of a page with `beside` px of the window beside it (above).
+export function themeBeside(beside) {
+    return buildTheme(beside);
+}

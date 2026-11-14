@@ -6031,9 +6031,17 @@ def test_the_about_page_names_the_inquiry_address_the_menu_mails():
         EXTERNAL_LINKS)
     from tests.conftest import PROJECT_ROOT
 
+    # The page's address is web/src/AppShell/externalLinks.ts's (the
+    # AppShell's Help menu's too, S-final SF-5a-3), which the page imports.
     page = (PROJECT_ROOT / "web" / "src" / "GuidePages" / "AboutPage.tsx"
             ).read_text(encoding="utf-8")
-    assert f'BUSINESS_INQUIRY_EMAIL = "{BUSINESS_INQUIRY_EMAIL}";' in page
+    links = (PROJECT_ROOT / "web" / "src" / "AppShell" / "externalLinks.ts"
+             ).read_text(encoding="utf-8")
+    assert ('import {BUSINESS_INQUIRY_EMAIL} from "../AppShell/externalLinks";'
+            in page)
+    assert "BUSINESS_INQUIRY_EMAIL =" not in page
+    assert (f'export const BUSINESS_INQUIRY_EMAIL = "{BUSINESS_INQUIRY_EMAIL}";'
+            in links)
     assert BUSINESS_INQUIRY_URL == f"mailto:{BUSINESS_INQUIRY_EMAIL}"
     assert EXTERNAL_LINKS == {"discord": DISCORD_URL,
                               "inquiry": BUSINESS_INQUIRY_URL}

@@ -17,7 +17,8 @@ import {PANELS} from "../PanelShell/registry";
 import ApiPage, {CATALOG_PATH, NARROW_REFERENCE} from "./ApiPage";
 import CompanionPage from "./CompanionPage";
 import ObsPage from "./ObsPage";
-import AboutPage, {BUSINESS_INQUIRY_EMAIL} from "./AboutPage";
+import AboutPage from "./AboutPage";
+import {BUSINESS_INQUIRY_EMAIL} from "../AppShell/externalLinks";
 import {PAGE_API_URL} from "./ConnectionCard";
 import {browserUrl} from "./OpenInBrowserButton";
 import {examplesOf} from "./examples";
@@ -509,6 +510,25 @@ test("a browser is told to open the page in the app for the token",
     // Its way to the settings is the settings page's link.
     expect(screen.getByRole("link", {name: i18n.t("guide_api_open_settings")}))
         .toHaveAttribute("href", "/web/settings?lng=en");
+});
+
+test("in the AppShell the settings link moves in its frame (S-final SF-5a-3)",
+     async () => {
+    server.token = {status: 403, code: "FORBIDDEN"};
+    window.history.replaceState(null, "", "/web/app/api?lng=en");
+    try {
+        await renderPage(ApiPage, "api", {desktop: false});
+        const link = screen.getByRole("link",
+                                      {name: i18n.t("guide_api_open_settings")});
+        expect(link).toHaveAttribute("href", "/web/app/settings?lng=en");
+
+        fireEvent.click(link);
+
+        expect(window.location.pathname).toBe("/web/app/settings");
+        expect(window.location.search).toBe("?lng=en");
+    } finally {
+        window.history.replaceState(null, "", "/");
+    }
 });
 
 test("the app's view is told where the settings are", async () => {
