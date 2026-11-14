@@ -1,0 +1,299 @@
+{
+ "about": "headless: game2 running, then A (tgame), B (game2), C (tgame with mods) asked for while it runs, from tgame with its picks applied",
+ "writes": [
+  [
+   "loader",
+   "set",
+   "game",
+   "{\"name\":\"Second Game\",\"abbreviation\":\"SG\",\"smashgg_id\":43868,\"codename\":\"game2\",\"logo\":\"./user_data/games/game2//base_files/logo.png\",\"defaults\":null,\"mods_active\":false,\"has_stages\":false,\"has_variants\":false,\"has_colors\":false}"
+  ],
+  [
+   "loader",
+   "set",
+   "game.has_modded_content",
+   "false"
+  ],
+  [
+   "main",
+   "set",
+   "score.1.team.1.player.1.character",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "main",
+   "set",
+   "score.1.team.1.player.1.mains",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "main",
+   "set",
+   "score.2.team.1.player.1.character",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "main",
+   "set",
+   "score.2.team.1.player.1.mains",
+   "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+  ],
+  [
+   "loader",
+   "set",
+   "game",
+   "{\"name\":\"測試遊戲\",\"abbreviation\":\"TG\",\"smashgg_id\":1386,\"codename\":\"tgame\",\"logo\":\"./user_data/games/tgame//base_files/logo.png\",\"defaults\":{\"best_of\":3},\"mods_active\":true,\"has_stages\":true,\"has_variants\":true,\"has_colors\":true}"
+  ],
+  [
+   "loader",
+   "set",
+   "game.has_modded_content",
+   "true"
+  ]
+ ],
+ "published": [
+  {
+   "revision": 1,
+   "role": "loader",
+   "delta": "[{\"path\": [\"game\", \"defaults\"], \"action\": \"type_changes\", \"value\": null, \"old_value\": \"unknown___\", \"type\": \"<class 'NoneType'>\", \"old_type\": \"<class 'dict'>\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"name\"], \"action\": \"values_changed\", \"value\": \"Second Game\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"abbreviation\"], \"action\": \"values_changed\", \"value\": \"SG\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"smashgg_id\"], \"action\": \"values_changed\", \"value\": 43868, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"codename\"], \"action\": \"values_changed\", \"value\": \"game2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"logo\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/game2//base_files/logo.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_stages\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_variants\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_colors\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_modded_content\"], \"action\": \"values_changed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  },
+  {
+   "revision": 2,
+   "role": "main",
+   "delta": "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"codename\"], \"action\": \"dictionary_item_removed\", \"value\": \"mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"display_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"瑪利歐\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"modded\"], \"action\": \"dictionary_item_removed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"codename\"], \"action\": \"dictionary_item_removed\", \"value\": \"mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"display_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"瑪利歐\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"en_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"modded\"], \"action\": \"dictionary_item_removed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"codename\"], \"action\": \"dictionary_item_removed\", \"value\": \"mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"display_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"瑪利歐\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"en_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"modded\"], \"action\": \"dictionary_item_removed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"codename\"], \"action\": \"dictionary_item_removed\", \"value\": \"mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"display_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"瑪利歐\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"en_name\"], \"action\": \"dictionary_item_removed\", \"value\": \"Mario\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"modded\"], \"action\": \"dictionary_item_removed\", \"value\": false, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 1, \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  },
+  {
+   "revision": 3,
+   "role": "loader",
+   "delta": "[{\"path\": [\"game\", \"defaults\"], \"action\": \"type_changes\", \"value\": {\"best_of\": 3}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"<class 'NoneType'>\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"name\"], \"action\": \"values_changed\", \"value\": \"測試遊戲\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"abbreviation\"], \"action\": \"values_changed\", \"value\": \"TG\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"smashgg_id\"], \"action\": \"values_changed\", \"value\": 1386, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"codename\"], \"action\": \"values_changed\", \"value\": \"tgame\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"logo\"], \"action\": \"values_changed\", \"value\": \"./user_data/games/tgame//base_files/logo.png\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"mods_active\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_stages\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_variants\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_colors\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"has_modded_content\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  }
+ ],
+ "committed": [
+  {
+   "revision": 1,
+   "paths": []
+  },
+  {
+   "revision": 2,
+   "paths": [
+    "score.1.team.1.player.1.character",
+    "score.1.team.1.player.1.mains",
+    "score.2.team.1.player.1.character",
+    "score.2.team.1.player.1.mains"
+   ]
+  },
+  {
+   "revision": 3,
+   "paths": []
+  }
+ ],
+ "settings": [
+  [
+   "main",
+   "SELECTED_GAME_CODENAME",
+   "game2"
+  ],
+  [
+   "main",
+   "SELECTED_GAME_CODENAME",
+   "tgame"
+  ]
+ ],
+ "events": [
+  [
+   "main",
+   "request",
+   "game2",
+   false,
+   false,
+   true
+  ],
+  [
+   "main",
+   "request",
+   "tgame",
+   false,
+   true,
+   true
+  ],
+  [
+   "main",
+   "request",
+   "game2",
+   false,
+   true,
+   true
+  ],
+  [
+   "main",
+   "done",
+   "A"
+  ],
+  [
+   "main",
+   "request",
+   "tgame",
+   true,
+   true,
+   true
+  ],
+  [
+   "main",
+   "done",
+   "B"
+  ],
+  [
+   "loader",
+   "select",
+   "game2",
+   false,
+   false
+  ],
+  [
+   "loader",
+   "published",
+   1
+  ],
+  [
+   "main",
+   "settings",
+   "SELECTED_GAME_CODENAME",
+   "game2"
+  ],
+  [
+   "main",
+   "roster",
+   "tgame"
+  ],
+  [
+   "main",
+   "held dirty",
+   "score.1",
+   true
+  ],
+  [
+   "main",
+   "held dirty",
+   "score.2",
+   true
+  ],
+  [
+   "main",
+   "best of"
+  ],
+  [
+   "main",
+   "commit"
+  ],
+  [
+   "main",
+   "published",
+   2
+  ],
+  [
+   "main",
+   "held dirty",
+   "score.1",
+   false
+  ],
+  [
+   "main",
+   "held dirty",
+   "score.2",
+   false
+  ],
+  [
+   "main",
+   "gameLoaded",
+   "game2",
+   "tgame"
+  ],
+  [
+   "main",
+   "player DB"
+  ],
+  [
+   "main",
+   "announced"
+  ],
+  [
+   "loader",
+   "done",
+   "running"
+  ],
+  [
+   "loader",
+   "select",
+   "tgame",
+   true,
+   true
+  ],
+  [
+   "loader",
+   "published",
+   3
+  ],
+  [
+   "main",
+   "settings",
+   "SELECTED_GAME_CODENAME",
+   "tgame"
+  ],
+  [
+   "main",
+   "roster",
+   "game2"
+  ],
+  [
+   "main",
+   "best of"
+  ],
+  [
+   "main",
+   "commit"
+  ],
+  [
+   "main",
+   "gameLoaded",
+   "tgame",
+   "game2"
+  ],
+  [
+   "main",
+   "player DB"
+  ],
+  [
+   "main",
+   "announced"
+  ],
+  [
+   "loader",
+   "done",
+   "C"
+  ]
+ ],
+ "answers": [
+  [
+   "running",
+   null
+  ],
+  [
+   "A",
+   null
+  ],
+  [
+   "B",
+   null
+  ],
+  [
+   "C",
+   null
+  ]
+ ],
+ "after": {
+  "pending": {
+   "score.1": [],
+   "score.2": []
+  },
+  "saveBlocked": 0
+ }
+}
