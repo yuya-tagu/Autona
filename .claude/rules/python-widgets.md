@@ -70,6 +70,11 @@ ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, 
 サムネイルの同期描画・`load_set` ホットキーから SCORE のページのセット選択を開く経路はシェルのアダプタ
 `src/AutonaShellOperations.py`（`bootstrap_gui()` が作り、Window が `UiMounted` で渡す）が持つ
 （Qt のセット選択 / 配信台のウィンドウも S4ac-3 まではここにあった）。
+共有ビューのページのシェル要求（ADR-005 S-final SF-5a-1。`alwaysOnTop` / `checkUpdates` / `openExternal`）を実行するのも同じアダプタ
+（`ShellRequest` / `ShellState`。Window が `_WebPanel` で `AutonaWebPanelHost(shell=AutonaShellOperations.instance)` と渡す）。
+最前面表示はメニューの「常に最前面に表示」のチェックが正本で、アダプタは `Window.SetAlwaysOnTop` / `IsAlwaysOnTop` でチェックを読み書きし、
+窓のフラグはチェックの `toggled` → `ToggleAlwaysOnTop` が変える（どちらから変えても `ToggleAlwaysOnTop` がホストの `PublishShellState` を呼んでページに知らせる）。
+メニューとシェル要求で同じ操作を別々に書かない（外部アドレスの表は `src/AutonaExternalLinks.py` に 1 つ。メニューも読む）
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
 `EnsureXxxPanel()` アクセサを足す。
 

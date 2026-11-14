@@ -111,7 +111,8 @@ EXPECTED_ROUTES = [
 # the guides (ADR-005 S-final SF-3a); assets* for the asset packs (SF-3b);
 # access-token* for the API guide's token, the shared view's alone (SF-4a-1);
 # the asset jobs, the ZIP upload and the games folder's reveal, the shared
-# view's alone too (SF-4b-1).
+# view's alone too (SF-4b-1); shell-session for the shell request's ticket,
+# the shared view's alone as well (SF-5a-1).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -200,6 +201,9 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/settings/network', 'api_v1.settings_network_update', 'OPTIONS,PATCH'),
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
+    # The shell request's ticket: the shared view's own fetches only
+    # (ADR-005 S-final SF-5a-1, WebAccess.SHELL).
+    ('/api/v1/shell-session', 'api_v1.get_shell_session', 'GET,HEAD,OPTIONS'),
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stats/overlays', 'api_v1.get_stats_overlays', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stats/overlays/selected', 'api_v1.select_stats_overlay', 'OPTIONS,PUT'),
@@ -568,12 +572,12 @@ def test_the_classification_follows_the_rules():
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
-    # likewise (SF-4b-1).
+    # likewise (SF-4b-1), and the shell request's ticket (SF-5a-1).
     shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
              "api_v1.get_assets_job", "api_v1.upload_assets_zip",
              "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
              "api_v1.install_asset_packs", "api_v1.cancel_assets_job",
-             "api_v1.reveal_games_folder"}
+             "api_v1.reveal_games_folder", "api_v1.get_shell_session"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -632,7 +636,8 @@ def test_the_classification_follows_the_rules():
     # token's read and regeneration, the shell's (S-final SF-4a-1: v1 76 of
     # 125), and the asset upload, its drop, the ZIP import, the install, the
     # job's cancel and the games folder's reveal, the shell's, with the
-    # job's read moved there (S-final SF-4b-1: v1 76 of 131).
+    # job's read moved there (S-final SF-4b-1: v1 76 of 131), and the shell
+    # request's ticket, the shell's (S-final SF-5a-1: v1 76 of 132).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -642,7 +647,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 131
+    assert len(EXPECTED_API_V1_ROUTES) == 132
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

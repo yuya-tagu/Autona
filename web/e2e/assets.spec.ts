@@ -77,8 +77,8 @@ async function stubShell(page: Page) {
     const json = (data: unknown) => ({
         status: 200, contentType: "application/json",
         body: JSON.stringify({ok: true, data})});
-    await page.route("**/api/v1/access-token", (route) =>
-        route.fulfill(json({token: "e2e-never-kept", available: true})));
+    await page.route("**/api/v1/shell-session", (route) =>
+        route.fulfill(json({ticket: "e2e-never-kept"})));
     await page.route("**/api/v1/assets/packs*", (route) =>
         route.fulfill(json(PACKS)));
     await page.route("**/api/v1/assets/job", (route) =>
@@ -94,7 +94,7 @@ test("in a browser the page explains and reads nothing", async ({page}) => {
         }
     });
     const probe = page.waitForResponse((response) =>
-        new URL(response.url()).pathname === "/api/v1/access-token");
+        new URL(response.url()).pathname === "/api/v1/shell-session");
     await page.goto(serverUrl("/web/assets"));
 
     expect((await probe).status()).toBe(403);

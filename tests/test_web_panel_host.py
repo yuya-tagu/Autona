@@ -19,14 +19,19 @@ for every panel moved to React. What has to hold:
   and shows the panel chosen meanwhile -- after a thaw and after the reload
   of a discarded page alike;
 * a load that failed for good does not leave the view blank for the rest
-  of the process: the next ShowPanel() or reveal loads the page again.
+  of the process: the next ShowPanel() or reveal loads the page again;
+* a shell request (ADR-005 S-final SF-5a-1) is run only when a click opens
+  exactly one with the ticket, never reaches the default browser, and its
+  answer reaches the page that asked (held while it is frozen, dropped with
+  its document).
 
 These drive a real QWebEngineView (offscreen) against a throwaway local
 HTTP server, because the behaviour under test is Qt's. The served page
 stands in for the Web UI's panel shell (``window.autonaPanelShell``,
 web/src/PanelShell/hostApi.ts): it records the navigations, full-state
 requests and SCORE set selections (S4ab-2, with the path the page was on
-then) the host makes, and navigates the way the shell does
+then) the host makes, and the shell requests' answers and the shell's state
+(SF-5a-1), and navigates the way the shell does
 (``history.replaceState``, keeping the query). The real shell is covered by
 the Web UI's own tests and by Playwright (web/e2e/panel-shell.spec.ts).
 """
@@ -57,7 +62,7 @@ from src import AutonaWebPageLifecycle as WPL
 from src import AutonaWebPanelHost as HostModule
 from src.AutonaWebPanelHost import (
     CLIPBOARD_PERMISSION, AutonaWebPanelHost, ClipboardPermitted, PanelPath,
-    WebPanelPages)
+    ShellRequest, WebPanelPages)
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
 from src.core.SettingsManager import SettingsManager
@@ -73,6 +78,8 @@ window.__loadId = Math.random();
 window.__navigations = [];
 window.__refreshes = 0;
 window.__scoreSets = [];
+window.__shellResults = [];
+window.__shellStates = [];
 window.autonaPanelShell = {
   navigate: function (p) {
     var target = '/web/' + encodeURIComponent(p);
@@ -83,7 +90,9 @@ window.autonaPanelShell = {
   refresh: function () { window.__refreshes += 1; },
   openScoreSets: function (b) {
     window.__scoreSets.push(b + '@' + location.pathname);
-  }
+  },
+  shellResult: function (i, r) { window.__shellResults.push([i, r]); },
+  shellState: function (v) { window.__shellStates.push(v); }
 };
 </script></body></html>"""
 
@@ -149,7 +158,8 @@ def _record(server, handler):
 # _guard_http_request. RELAY["sent"], when a test puts a list there: each
 # relayed request's (path, Content-Length, Transfer-Encoding) as it came.
 RELAY = {}
-RELAY_PREFIX = ("/api/v1/access-token", "/api/v1/assets/uploads")
+RELAY_PREFIX = ("/api/v1/access-token", "/api/v1/assets/uploads",
+                "/api/v1/shell-session")
 
 
 def _relayed(handler, body=b""):
@@ -243,11 +253,11 @@ class _Rig:
     """The host on page 0 of a stack inside its own top-level window, the
     stack showing another page (the host is not on screen yet)."""
 
-    def __init__(self):
-        self.window = QWidget()
+    def __init__(self, shell=None, windowClass=QWidget):
+        self.window = windowClass()
         self.stack = QStackedWidget(self.window)
         QVBoxLayout(self.window).addWidget(self.stack)
-        self.host = AutonaWebPanelHost()
+        self.host = AutonaWebPanelHost(shell=shell)
         self.stack.addWidget(self.host)
         self.stack.addWidget(QLabel("another panel"))
         self.stack.setCurrentIndex(1)
@@ -319,10 +329,10 @@ def buildHost(qapp, panelServer, monkeypatch):
                         frozenset({"shell-check", "second", "scoreboard"}))
     rigs = []
 
-    def build(discardAfterMs=60_000):
+    def build(discardAfterMs=60_000, shell=None, windowClass=QWidget):
         monkeypatch.setattr(AutonaWebPanelHost, "DISCARD_AFTER_MS",
                             discardAfterMs)
-        rig = _Rig()
+        rig = _Rig(shell, windowClass)
         rig.requests = requests
         rig.servingPort = port
         rig.usePort = lambda p: target.__setitem__("port", p)
@@ -1542,10 +1552,15 @@ PAGE_URL = "http://127.0.0.1:5107/web/board?desktop=1&lng=ja"
 DESIGNER_URL = "http://127.0.0.1:5107/web?view=designer"
 
 
-def _pageAsking():
-    page = SimpleNamespace(url=lambda: QUrl(PAGE_URL), designer=[])
+def _pageAsking(url=PAGE_URL):
+    page = SimpleNamespace(url=lambda: QUrl(url),
+                           requestedUrl=lambda: QUrl(url),
+                           designer=[], shell=[])
     page.designerRequested = SimpleNamespace(
         emit=lambda: page.designer.append(True))
+    page.shellRequested = SimpleNamespace(emit=page.shell.append)
+    page._TakeShellRequest = functools.partial(
+        HostModule._PanelPage._TakeShellRequest, page)
     return page
 
 
@@ -1700,6 +1715,1088 @@ def test_a_link_the_system_does_not_open_is_logged_without_its_text(
     assert "could not open" in caplog.text
     assert "example.test" in caplog.text
     assert "secret" not in caplog.text
+
+
+# ── shell requests (ADR-005 S-final SF-5a-1) ────────────────────────────
+#
+# A page asks the desktop itself by opening, in a click, a new window of this
+# server's /web/shell-request with the verb, an id and the ticket
+# (web/src/PanelShell/hostApi.ts). _PanelPage takes exactly that and nothing
+# else (ParseShellRequest), hands nothing shaped like one to the default
+# browser and logs no ticket; the host runs the verb from the event loop and
+# answers the page that asked (window.autonaPanelShell.shellResult). The
+# ticket's route is tests/test_web_access.py's.
+
+SHELL_TICKET = "Made_Up_Ticket_For_The_Test_0123456789abcde"
+SHELL_URL = "http://127.0.0.1:5107/web/shell-request"
+_T = SHELL_TICKET
+_B = "http://127.0.0.1:5107"
+_Q = f"verb=checkUpdates&request=r1&ticket={_T}"
+
+
+@pytest.fixture
+def issuedTicket(monkeypatch):
+    """The ticket this process issued (WebAccess.IssueShellTicket's)."""
+    monkeypatch.setattr(WebAccess, "_shellTicket", SHELL_TICKET)
+    return SHELL_TICKET
+
+
+@pytest.fixture
+def serverAt5107(monkeypatch):
+    # The server of PAGE_URL (_ServerUrl), for the page stand-ins.
+    monkeypatch.setattr(HostModule, "_ServerUrl",
+                        lambda: QUrl("http://127.0.0.1:5107/"))
+
+
+def _checkShellRequest(url, pages=(PAGE_URL, PAGE_URL)):
+    return HostModule.ParseShellRequest(
+        QUrl(url), tuple(QUrl(page) for page in pages), SHELL_SERVER,
+        lambda value: value == SHELL_TICKET)
+
+
+VALID_SHELL_REQUESTS = [
+    (_Q, ShellRequest("checkUpdates", "r1", {})),
+    (f"verb=alwaysOnTop&on=1&request=r1&ticket={_T}",
+     ShellRequest("alwaysOnTop", "r1", {"on": "1"})),
+    # Any order; the id's whole alphabet.
+    (f"on=0&ticket={_T}&request=A-z_09&verb=alwaysOnTop",
+     ShellRequest("alwaysOnTop", "A-z_09", {"on": "0"})),
+    (f"verb=openExternal&target=discord&request=r2&ticket={_T}",
+     ShellRequest("openExternal", "r2", {"target": "discord"})),
+    (f"verb=openExternal&target=inquiry&request={'x' * 64}&ticket={_T}",
+     ShellRequest("openExternal", "x" * 64, {"target": "inquiry"})),
+]
+
+
+REFUSED_SHELL_REQUESTS = [
+    # Not this server's origin: another name of this PC, another port, the
+    # default one, https, a LAN address, elsewhere, a file.
+    (f"http://localhost:5107/web/shell-request?{_Q}", "origin"),
+    (f"http://127.0.0.1:5108/web/shell-request?{_Q}", "origin"),
+    (f"http://127.0.0.1/web/shell-request?{_Q}", "origin"),
+    (f"https://127.0.0.1:5107/web/shell-request?{_Q}", "origin"),
+    (f"http://192.168.0.2:5107/web/shell-request?{_Q}", "origin"),
+    (f"https://evil.example/web/shell-request?{_Q}", "origin"),
+    (f"file:///web/shell-request?{_Q}", "origin"),
+    # Userinfo, an empty one too.
+    (f"http://a@127.0.0.1:5107/web/shell-request?{_Q}", "userinfo"),
+    (f"http://@127.0.0.1:5107/web/shell-request?{_Q}", "userinfo"),
+    (f"http://:@127.0.0.1:5107/web/shell-request?{_Q}", "userinfo"),
+    # Not the path as sent.
+    (f"{_B}/web/shell-request/?{_Q}", "path"),
+    (f"{_B}/web//shell-request?{_Q}", "path"),
+    (f"{_B}/web/./shell-request?{_Q}", "path"),
+    (f"{_B}/web/x/../shell-request?{_Q}", "path"),
+    (f"{_B}/web/shell-request%2F?{_Q}", "path"),
+    (f"{_B}/WEB/shell-request?{_Q}", "path"),
+    (f"{_B}/shell-request?{_Q}", "path"),
+    (f"{_B}/web/shell-requests?{_Q}", "path"),
+    # A fragment, an empty one too.
+    (f"{_B}/web/shell-request?{_Q}#", "fragment"),
+    (f"{_B}/web/shell-request?{_Q}#x", "fragment"),
+    # No query, a malformed one, a key twice, too long, too many fields.
+    (f"{_B}/web/shell-request", "query"),
+    (f"{_B}/web/shell-request?{_Q}&", "query"),
+    (f"{_B}/web/shell-request?{_Q}&verb=checkUpdates", "query"),
+    (f"{_B}/web/shell-request?{_Q}&ticket={_T}", "query"),
+    (f"{_B}/web/shell-request?{_Q}&pad={'x' * 512}", "query"),
+    (f"{_B}/web/shell-request?{_Q}&a=1&b=2", "query"),
+    # No verb, or not one of them.
+    (f"{_B}/web/shell-request?", "verb"),
+    (f"{_B}/web/shell-request?request=r1&ticket={_T}", "verb"),
+    (f"{_B}/web/shell-request?verb=pickFolder&request=r1&ticket={_T}", "verb"),
+    (f"{_B}/web/shell-request?verb=CheckUpdates&request=r1&ticket={_T}",
+     "verb"),
+    (f"{_B}/web/shell-request?verb=openUrl&url=https://evil.example"
+     f"&request=r1&ticket={_T}", "verb"),
+    # Not exactly the verb's keys.
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r1", "keys"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?{_Q}&on=1", "keys"),
+    (f"{_B}/web/shell-request?verb=alwaysOnTop&request=r1&ticket={_T}",
+     "keys"),
+    (f"{_B}/web/shell-request?verb=openExternal&url=https://evil.example"
+     f"&request=r1&ticket={_T}", "keys"),
+    # An id the answer's script could not carry as it is.
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=&ticket={_T}",
+     "request"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request={'x' * 65}"
+     f"&ticket={_T}", "request"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r.1&ticket={_T}",
+     "request"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r+1&ticket={_T}",
+     "request"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=%27%29%3B"
+     f"&ticket={_T}", "request"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=%C3%A9&ticket={_T}",
+     "request"),
+    # An argument off its values: never a URL.
+    (f"{_B}/web/shell-request?verb=alwaysOnTop&on=2&request=r1&ticket={_T}",
+     "argument"),
+    (f"{_B}/web/shell-request?verb=alwaysOnTop&on=true&request=r1"
+     f"&ticket={_T}", "argument"),
+    (f"{_B}/web/shell-request?verb=alwaysOnTop&on=&request=r1&ticket={_T}",
+     "argument"),
+    (f"{_B}/web/shell-request?verb=openExternal"
+     f"&target=https%3A%2F%2Fevil.example&request=r1&ticket={_T}",
+     "argument"),
+    (f"{_B}/web/shell-request?verb=openExternal&target=Discord&request=r1"
+     f"&ticket={_T}", "argument"),
+    # Not the ticket.
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r1&ticket=",
+     "ticket"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r1&ticket=wrong",
+     "ticket"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r1&ticket={_T}x",
+     "ticket"),
+    (f"{_B}/web/shell-request?verb=checkUpdates&request=r1&ticket=%20{_T}",
+     "ticket"),
+]
+
+
+@pytest.mark.parametrize("query, expected", VALID_SHELL_REQUESTS)
+def test_a_shell_request_is_its_verb_id_arguments_and_ticket(query, expected):
+    assert _checkShellRequest(f"{SHELL_URL}?{query}") == (expected, None)
+
+
+@pytest.mark.parametrize("url, reason", REFUSED_SHELL_REQUESTS)
+def test_anything_but_exactly_a_shell_request_is_refused(url, reason):
+    assert _checkShellRequest(url) == (None, reason)
+
+
+@pytest.mark.parametrize("pages", [
+    # Another origin's page, layout/, the Designer's view of the Web UI, no
+    # page at all, one of the two off the Web UI.
+    ("http://localhost:5107/web/board",) * 2,
+    ("http://127.0.0.1:5108/web/board",) * 2,
+    ("http://127.0.0.1:5107/layout/x/index.html",) * 2,
+    ("http://127.0.0.1:5107/web?view=designer",) * 2,
+    ("http://127.0.0.1:5107/web/board?desktop=1&view=designer",) * 2,
+    ("about:blank", ""),
+    (PAGE_URL, "http://127.0.0.1:5107/layout/x/index.html"),
+    ("http://127.0.0.1:5107/layout/x/index.html", PAGE_URL),
+])
+def test_a_shell_request_is_taken_from_this_servers_web_ui_only(pages):
+    assert _checkShellRequest(f"{SHELL_URL}?{_Q}", pages) == (None, "page")
+
+
+@pytest.mark.parametrize("pages", [
+    (PAGE_URL, PAGE_URL), (PAGE_URL, "about:blank"), ("", PAGE_URL),
+])
+def test_the_pages_document_is_what_the_page_shows_or_loads(pages):
+    request, reason = _checkShellRequest(f"{SHELL_URL}?{_Q}", pages)
+    assert (request.verb, reason) == ("checkUpdates", None)
+
+
+def test_the_ticket_is_checked_as_the_query_decodes_it():
+    seen = []
+    HostModule.ParseShellRequest(
+        QUrl(f"{SHELL_URL}?verb=checkUpdates&request=r1&ticket=a%2Db"),
+        (QUrl(PAGE_URL),), SHELL_SERVER, lambda value: seen.append(value))
+    assert seen == ["a-b"]
+
+
+SHAPED_SHELL_REQUESTS = [
+    # This server's own origin: as the host loads it, the page's, another
+    # name of this PC at its port; any case, the path encoded, no query.
+    (f"{SHELL_URL}?{_Q}", True),
+    ("http://127.0.0.1:5107/web/shell-request", True),
+    ("http://127.0.0.1:5107/WEB/Shell-Request", True),
+    ("http://127.0.0.1:5107/web/shell%2Drequest", True),
+    ("http://127.0.0.1:5107/web/x/shell-request-lib", True),
+    ("http://localhost:5107/web/shell-request", True),
+    ("http://[::1]:5107/web/shell-request", True),
+    # A ticket key, on any origin and scheme, however it is spelled.
+    ("https://evil.example/x/shell-request/y?ticket=t", True),
+    ("https://evil.example/shell-request?ticket", True),
+    ("https://evil.example/shell-request?a=1&TICKET=t", True),
+    ("https://evil.example/shell-request?%74icket=t", True),
+    ("https://evil.example/shell-request?a=1;ticket=t", True),
+    ("https://evil.example/shell-request?%20ticket%20=t", True),
+    ("http://127.0.0.1:5108/web/shell-request?ticket=t", True),
+    ("file:///c:/shell-request?ticket=t", True),
+    (f"javascript:void('/shell-request?{_Q}')", True),
+    # Elsewhere without one: an outside link as any.
+    ("https://github.com/x/shell-request-lib", False),
+    ("https://github.com/x/shell-request-lib?tab=readme", False),
+    ("https://example.test/shell-request?tickets=1", False),
+    ("https://example.test/shell-request?x=ticket", False),
+    ("https://example.test/shell-request#ticket=t", False),
+    ("http://127.0.0.1:5108/web/shell-request", False),
+    ("file:///c:/shell-request", False),
+    ("ms-calculator:shell-request", False),
+    # No shell-request in the path: never, a ticket key or not.
+    ("http://127.0.0.1:5107/web/board?x=shell-request", False),
+    ("http://127.0.0.1:5107/web/shellrequest", False),
+    ("https://example.test/post?text=shell-request", False),
+    ("https://example.test/post?ticket=t", False),
+]
+
+
+@pytest.mark.parametrize("url, shaped", SHAPED_SHELL_REQUESTS)
+def test_what_is_taken_as_a_shell_request(url, shaped):
+    # Kept from the default browser, refused or run.
+    assert HostModule.IsShellRequestShaped(
+        QUrl(url), (QUrl(PAGE_URL), QUrl(PAGE_URL)), SHELL_SERVER) is shaped
+
+
+def test_a_ticket_key_is_taken_before_the_lan_is_looked_up(monkeypatch):
+    # The origin is checked only without a ticket key, and only for a path
+    # naming shell-request: most URLs never cost the LAN's lookup.
+    asked = []
+    monkeypatch.setattr(HostModule, "_IsServerOrigin",
+                        lambda url, pages: asked.append(url) or False)
+    for url in ("https://evil.example/shell-request?ticket=t",
+                "https://example.test/post?text=a"):
+        HostModule.IsShellRequestShaped(QUrl(url), (QUrl(PAGE_URL),),
+                                        SHELL_SERVER)
+    assert asked == []
+    assert HostModule.IsShellRequestShaped(
+        QUrl("https://github.com/x/shell-request-lib"), (QUrl(PAGE_URL),),
+        SHELL_SERVER) is False
+    assert len(asked) == 1
+
+
+def _openedInClick(url, clicked=True, page=None):
+    page = _pageAsking() if page is None else page
+    HostModule._PanelPage._OpenOutside(
+        page, SimpleNamespace(requestedUrl=lambda: QUrl(url),
+                              isUserInitiated=lambda: clicked))
+    return page
+
+
+def test_a_shell_request_in_a_click_goes_to_the_host_not_the_browser(
+        monkeypatch, issuedTicket, serverAt5107, caplog):
+    opened = _handedOutside(monkeypatch)
+    url = (f"{SHELL_URL}?verb=openExternal&target=discord&request=r1"
+           f"&ticket={issuedTicket}")
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(url)
+
+    assert page.shell == [ShellRequest("openExternal", "r1",
+                                       {"target": "discord"})]
+    assert opened == [] and page.designer == []
+    assert "takes the shell request openExternal" in caplog.text
+    assert issuedTicket not in caplog.text
+    assert "request=r1" not in caplog.text
+
+
+@pytest.mark.parametrize("url, reason", REFUSED_SHELL_REQUESTS + [
+    (f"javascript:void('/shell-request?{_Q}')", "origin"),
+    ("https://evil.example/shell-request?ticket=t", "origin"),
+    ("http://localhost:5107/web/shell-request", "origin"),
+])
+def test_a_refused_shell_request_reaches_neither_the_browser_nor_the_log(
+        monkeypatch, issuedTicket, serverAt5107, caplog, url, reason):
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(url)
+
+    assert opened == [] and page.shell == [] and page.designer == []
+    assert f"refused a shell request ({reason})" in caplog.text
+    assert issuedTicket not in caplog.text
+    assert "shell-request" not in caplog.text
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/x/shell-request-lib",
+    "https://github.com/x/shell-request-lib/issues?q=is%3Aopen",
+])
+def test_an_outside_link_naming_shell_request_is_a_link_as_any(
+        monkeypatch, issuedTicket, serverAt5107, caplog, url):
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(url)
+
+    assert opened == [url] and page.shell == []
+    assert "refused a shell request" not in caplog.text
+
+
+def test_an_unknown_scheme_naming_shell_request_is_refused_as_any(
+        monkeypatch, issuedTicket, serverAt5107, caplog):
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick("ms-calculator:shell-request")
+
+    assert opened == [] and page.shell == []
+    assert "refused to open ms-calculator:" in caplog.text
+    assert "shell-request" not in caplog.text
+
+
+def test_a_shell_request_no_click_asked_for_is_refused(
+        monkeypatch, issuedTicket, serverAt5107, caplog):
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(f"{SHELL_URL}?{_Q}", clicked=False)
+
+    assert opened == [] and page.shell == []
+    assert "refused a shell request (click)" in caplog.text
+    assert issuedTicket not in caplog.text
+
+
+@pytest.mark.parametrize("pageUrl", [
+    "http://127.0.0.1:5107/web?view=designer",
+    "http://127.0.0.1:5107/layout/x/index.html",
+])
+def test_a_shell_request_of_a_page_off_the_web_ui_is_refused(
+        monkeypatch, issuedTicket, serverAt5107, caplog, pageUrl):
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(f"{SHELL_URL}?{_Q}", page=_pageAsking(pageUrl))
+
+    assert opened == [] and page.shell == []
+    assert "refused a shell request (page)" in caplog.text
+
+
+def test_no_ticket_issued_refuses_every_shell_request(
+        monkeypatch, serverAt5107, caplog):
+    # Headless, or before the page has read it: none matches.
+    monkeypatch.setattr(WebAccess, "_shellTicket", None)
+    opened = _handedOutside(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(f"{SHELL_URL}?{_Q}")
+
+    assert opened == [] and page.shell == []
+    assert "refused a shell request (ticket)" in caplog.text
+
+
+def test_a_check_that_raises_refuses_and_logs_no_message(
+        monkeypatch, issuedTicket, serverAt5107, caplog):
+    opened = _handedOutside(monkeypatch)
+
+    def raising(url, *args):
+        raise ValueError(url.toString())
+    monkeypatch.setattr(HostModule, "ParseShellRequest", raising)
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        page = _openedInClick(f"{SHELL_URL}?{_Q}")
+
+    assert opened == [] and page.shell == []
+    assert "refused a shell request (check failed: ValueError)" in caplog.text
+    assert issuedTicket not in caplog.text
+
+
+def test_no_navigation_goes_to_a_shell_request(buildHost, issuedTicket,
+                                               caplog):
+    # Only a new window in a click is one; the main frame (it is in /web,
+    # which would let it through) and a frame never go there.
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    served = len(rig.requests)
+    port = rig.servingPort
+    query = f"verb=checkUpdates&request=r1&ticket={issuedTicket}"
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        rig.js("void (location.href = "
+               + json.dumps(f"/web/shell-request?{query}") + ")")
+        _waitUntil(lambda: False, timeout=1.0)
+    assert rig.js("window.__loadId") == document
+    assert len(rig.requests) == served
+    assert rig.page.refusedLast
+    assert "refused a navigation to a shell request" in caplog.text
+    assert issuedTicket not in caplog.text
+    assert not [seen for seen in SEEN if "shell-request" in seen.path]
+
+    N = QWebEnginePage.NavigationType
+    kinds = (N.NavigationTypeLinkClicked, N.NavigationTypeOther,
+             N.NavigationTypeRedirect, N.NavigationTypeFormSubmitted,
+             N.NavigationTypeBackForward, N.NavigationTypeTyped,
+             N.NavigationTypeReload)
+    urls = (f"http://127.0.0.1:{port}/web/shell-request?{query}",
+            f"http://127.0.0.1:{port}/web/Shell-Request",
+            f"https://evil.example/shell-request?{query}")
+    for kind in kinds:
+        for url in urls:
+            rig.page.refusedLast = False
+            assert rig.page.acceptNavigationRequest(
+                QUrl(url), kind, True) is False, (url, kind)
+            assert rig.page.refusedLast
+            # A frame's: refused too, the main frame's document untouched.
+            rig.page.refusedLast = False
+            assert rig.page.acceptNavigationRequest(
+                QUrl(url), kind, False) is False, (url, kind)
+            assert not rig.page.refusedLast
+
+    # An outside page naming shell-request is not one (IsShellRequestShaped):
+    # a frame of it passes as any outside frame does, and the main frame
+    # keeps to the Web UI -- refused as leaving it, logged by its scheme and
+    # host only.
+    outside = "https://github.com/x/shell-request-lib?tab=readme"
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        assert rig.page.acceptNavigationRequest(
+            QUrl(outside), N.NavigationTypeLinkClicked, False) is True
+        assert rig.page.acceptNavigationRequest(
+            QUrl(outside), N.NavigationTypeLinkClicked, True) is False
+    assert "refused a navigation to a shell request" not in caplog.text
+    assert "the Web UI of this server for https://github.com" in caplog.text
+    assert "tab=readme" not in caplog.text
+    assert "shell-request" not in caplog.text
+
+
+def test_a_refused_url_is_logged_by_its_scheme_and_host_only(
+        monkeypatch, buildHost, caplog):
+    # Its query may carry a ticket, a token, the operator's text.
+    opened = _handedOutside(monkeypatch)
+    secret = "Not_For_The_Log_0123"
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        # No http(s): not opened.
+        _openedInClick(f"ms-settings:x?ticket={secret}")
+        _openedInClick(f"file:///c:/x/y.html?ticket={secret}")
+    assert opened == []
+    assert "refused to open ms-settings:" in caplog.text
+    assert "refused to open file:" in caplog.text
+
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    N = QWebEnginePage.NavigationType
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        # A frame of this server's own origin; the main frame off the Web UI.
+        assert rig.page.acceptNavigationRequest(
+            QUrl(f"http://127.0.0.1:{port}/layout/x.html?ticket={secret}"),
+            N.NavigationTypeLinkClicked, False) is False
+        assert rig.page.acceptNavigationRequest(
+            QUrl(f"https://example.test/a/b?ticket={secret}"),
+            N.NavigationTypeLinkClicked, True) is False
+    assert "server's own origin, http://127.0.0.1" in caplog.text
+    assert "this server for https://example.test" in caplog.text
+    assert secret not in caplog.text
+    assert "/layout/" not in caplog.text and "/a/b" not in caplog.text
+
+
+class _Shell:
+    """Stands in for AutonaShellOperations (the host's ``shell``): what it
+    was asked, in order; its answer and its state."""
+
+    def __init__(self):
+        self.asked = []
+        self.state = {"alwaysOnTop": False}
+        self.answer = None
+
+    def ShellRequest(self, verb, args):
+        self.asked.append((verb, args))
+        if self.answer is not None:
+            return self.answer
+        return {"ok": True, "verb": verb, **args}
+
+    def ShellState(self):
+        return dict(self.state)
+
+
+def _shellShown(buildHost, shell=None, **kwargs):
+    rig = buildHost(shell=_Shell() if shell is None else shell, **kwargs)
+    rig.shell = rig.host._shell
+    rig.host.ShowPanel("shell-check")
+    rig.reveal()
+    rig.waitLoaded()
+    return rig
+
+
+def _clickInto(view, page):
+    # _clickView's, for any view: until the page has seen a click.
+    def clicked():
+        QTest.mouseClick(view.focusProxy(), Qt.MouseButton.LeftButton,
+                         Qt.KeyboardModifier.NoModifier, QPoint(50, 50))
+        return _waitUntil(lambda: _pageJs(page, "window.__clicks") > 0,
+                          timeout=0.5)
+    assert _waitUntil(clicked), "the page saw no click"
+
+
+def test_a_click_runs_the_shell_request_once_and_answers_the_page(
+        buildHost, monkeypatch, issuedTicket, caplog):
+    opened = _handedOutside(monkeypatch)
+    rig = _shellShown(buildHost)
+    document = rig.js("window.__loadId")
+    served = len(rig.requests)
+    url = (f"http://127.0.0.1:{rig.servingPort}/web/shell-request"
+           f"?verb=alwaysOnTop&on=1&request=r1&ticket={issuedTicket}")
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        _clickOpening(rig, url)
+        assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+        _waitUntil(lambda: False, timeout=0.5)
+
+    assert rig.shell.asked == [("alwaysOnTop", {"on": "1"})]
+    assert rig.js("window.__shellResults") == [
+        ["r1", {"ok": True, "verb": "alwaysOnTop", "on": "1"}]]
+    # Nothing opened, loaded or asked of the server.
+    assert opened == []
+    assert rig.js("window.__loadId") == document
+    assert len(rig.requests) == served and rig.loads == [True]
+    assert not [seen for seen in SEEN if "shell-request" in seen.path]
+    assert issuedTicket not in caplog.text
+
+
+def test_script_alone_runs_no_shell_request(buildHost, monkeypatch,
+                                            issuedTicket):
+    opened = _handedOutside(monkeypatch)
+    rig = _shellShown(buildHost)
+    url = (f"http://127.0.0.1:{rig.servingPort}/web/shell-request"
+           f"?verb=checkUpdates&request=r1&ticket={issuedTicket}")
+
+    rig.js(f"void window.open({json.dumps(url)}, '_blank', 'noopener')")
+    rig.js(f"void window.open({json.dumps(url)})")
+    # The click after them says they have had their chance.
+    _clickOpening(rig, "https://example.test/clicked")
+
+    assert _waitUntil(lambda: opened)
+    assert opened == ["https://example.test/clicked"]
+    assert rig.shell.asked == []
+    assert rig.js("window.__shellResults") == []
+
+
+def test_a_click_without_the_ticket_runs_nothing_and_opens_nothing(
+        buildHost, monkeypatch, issuedTicket, caplog):
+    opened = _handedOutside(monkeypatch)
+    rig = _shellShown(buildHost)
+    port = rig.servingPort
+    asked = (
+        (f"http://127.0.0.1:{port}/web/shell-request"
+         "?verb=checkUpdates&request=r1", "keys"),
+        (f"http://127.0.0.1:{port}/web/shell-request"
+         "?verb=checkUpdates&request=r2&ticket=wrong", "ticket"),
+        (f"http://localhost:{port}/web/shell-request"
+         f"?verb=checkUpdates&request=r3&ticket={issuedTicket}", "origin"),
+    )
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        for url, _reason in asked:
+            _clickOpening(rig, url)
+        _clickOpening(rig, "https://example.test/clicked")
+        assert _waitUntil(lambda: opened)
+
+    assert opened == ["https://example.test/clicked"]
+    assert rig.shell.asked == []
+    assert rig.js("window.__shellResults") == []
+    for _url, reason in asked:
+        assert f"refused a shell request ({reason})" in caplog.text
+    assert issuedTicket not in caplog.text
+
+
+def _relayTheApp(monkeypatch):
+    # The real guard and routes behind the panel server's relayed paths
+    # (RELAY_PREFIX), as werkzeug would serve them on that port.
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaWebServer import WebServer, _build_web_app
+
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
+    monkeypatch.setattr(SettingsManager, "loadFailed", False)
+    monkeypatch.setattr(WebAccess, "_token", None)
+    monkeypatch.setattr(WebServer, "_lan_hosts", ("192.0.2.10",))
+    monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
+    app, socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    monkeypatch.setattr(WebServer, "socketio", socketio)
+    monkeypatch.setitem(RELAY, "client", app.test_client())
+
+
+def test_the_shared_view_reads_the_ticket_and_its_click_runs_the_verb(
+        buildHost, monkeypatch, caplog):
+    # The whole way, through the real guard: the shared view's fetch reads
+    # the ticket (issued then), the click's window carries it, the verb runs,
+    # the answer reaches the page. The Designer's view on the same profile
+    # reads none (403), and a click there opening a request -- the ticket and
+    # all -- is no window of the host's.
+    _relayTheApp(monkeypatch)
+    monkeypatch.setattr(WebAccess, "_shellTicket", None)
+    opened = _handedOutside(monkeypatch)
+    rig = _shellShown(buildHost)
+    port = rig.servingPort
+
+    rig.js("window.__session = null, fetch('/api/v1/shell-session')"
+           ".then(function (r) { return r.json().then(function (b) {"
+           " window.__session = [r.status, b.data ? b.data.ticket : null];"
+           " }); }), 0")
+    assert _waitUntil(lambda: rig.js("window.__session"))
+    status, ticket = rig.js("window.__session")
+    assert status == 200
+    assert WebAccess.ShellTicketMatches(ticket)
+    assert _seen("/api/v1/shell-session") == [WebAccess._shellSecret]
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        rig.js("window.__clicks = 0, window.addEventListener('click',"
+               " function () { window.__clicks += 1; window.open("
+               "location.origin + '/web/shell-request?' + new URLSearchParams("
+               "{verb: 'checkUpdates', request: 'e2e',"
+               " ticket: window.__session[1]}), '_blank', 'noopener'); },"
+               " {once: true}), 0")
+        _clickView(rig)
+        assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+    assert rig.shell.asked == [("checkUpdates", {})]
+    assert rig.js("window.__shellResults") == [
+        ["e2e", {"ok": True, "verb": "checkUpdates"}]]
+    assert ticket not in caplog.text
+
+    url = (f"http://127.0.0.1:{port}/web/shell-request"
+           f"?verb=openExternal&target=discord&request=d1&ticket={ticket}")
+    other = _otherView(f"http://127.0.0.1:{port}/web?view=designer")
+    try:
+        _pageJs(other.page(),
+                "window.__refused = null, fetch('/api/v1/shell-session')"
+                ".then(function (r) { window.__refused = r.status; }), 0")
+        assert _waitUntil(lambda: _pageJs(other.page(), "window.__refused"))
+        assert _pageJs(other.page(), "window.__refused") == 403
+        _pageJs(other.page(),
+                "window.__clicks = 0, window.addEventListener('click',"
+                " function () { window.__clicks += 1; window.open("
+                + json.dumps(url) + ", '_blank', 'noopener'); },"
+                " {once: true}), 0")
+        _clickInto(other, other.page())
+        _waitUntil(lambda: False, timeout=0.5)
+    finally:
+        other.close()
+        other.deleteLater()
+        QCoreApplication.sendPostedEvents(other, QEvent.Type.DeferredDelete)
+    assert _seen("/api/v1/shell-session") == [WebAccess._shellSecret, None]
+    assert rig.shell.asked == [("checkUpdates", {})]
+    assert opened == []
+
+
+def test_a_sandboxed_frame_reads_no_ticket_and_its_click_runs_nothing(
+        buildHost, monkeypatch, caplog):
+    # A frame the Web UI might make for another party's HTML, sandboxed:
+    # its fetch carries no secret (an opaque origin), so no ticket is
+    # issued, and the window its click opens is refused.
+    _relayTheApp(monkeypatch)
+    monkeypatch.setattr(WebAccess, "_shellTicket", None)
+    opened = _handedOutside(monkeypatch)
+    rig = _shellShown(buildHost)
+    target = (f"http://127.0.0.1:{rig.servingPort}/web/shell-request"
+              "?verb=checkUpdates&request=f1")
+    frame = ("<style>html,body{margin:0;height:100%}</style><script>"
+             "fetch('/api/v1/shell-session').catch(function () {});"
+             "document.addEventListener('click', function () {"
+             " parent.postMessage('clicked', '*');"
+             f" window.open({json.dumps(target)}, '_blank', 'noopener');"
+             " }, {once: true});</script>")
+
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        rig.js("window.__clicks = 0, window.addEventListener('message',"
+               " function (e) { if (e.data === 'clicked') {"
+               " window.__clicks += 1; } }),"
+               " (function (html) { var f = document.createElement('iframe');"
+               " f.setAttribute('sandbox', 'allow-scripts allow-popups');"
+               " f.style.cssText = 'position:fixed;left:0;top:0;width:100%;"
+               "height:100%;border:0'; f.srcdoc = html;"
+               " document.body.appendChild(f); return 0; })("
+               + json.dumps(frame) + ")")
+        _waitSeen("/api/v1/shell-session")
+        _clickView(rig)
+        assert _waitUntil(lambda: "refused a shell request" in caplog.text)
+
+    (record,) = _records("/api/v1/shell-session")
+    assert record.shell is None and record.site != "same-origin"
+    assert WebAccess._shellTicket is None
+    assert "refused a shell request (keys)" in caplog.text
+    assert rig.shell.asked == [] and opened == []
+
+
+def test_the_verb_is_run_from_the_event_loop(buildHost):
+    # Not inside Chromium's new-window call (agent-pitfalls #9).
+    rig = _shellShown(buildHost)
+
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
+
+    assert rig.shell.asked == []
+    assert _waitUntil(lambda: rig.shell.asked == [("checkUpdates", {})])
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+
+
+def test_the_answer_goes_into_the_page_as_data(buildHost):
+    rig = _shellShown(buildHost)
+    rig.shell.answer = {"ok": False,
+                        "error": "x'); window.__pwned = 1; ('</script>"}
+    odd = "a'b\"c</script>"
+
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", odd, {}))
+
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+    assert rig.js("window.__shellResults") == [[odd, rig.shell.answer]]
+    assert rig.js("window.__pwned === undefined") is True
+
+
+@pytest.mark.parametrize("answer, expected", [
+    (ValueError("x"), {"ok": False, "error": "failed"}),
+    ({"ok": True, "value": object()}, {"ok": False, "error": "failed"}),
+])
+def test_a_verb_that_fails_answers_that_it_failed(buildHost, answer,
+                                                  expected):
+    rig = _shellShown(buildHost)
+    if isinstance(answer, Exception):
+        def raising(verb, args):
+            raise answer
+        rig.shell.ShellRequest = raising
+    else:
+        rig.shell.answer = answer
+
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
+
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+    assert rig.js("window.__shellResults") == [["r1", expected]]
+
+
+def test_a_host_without_a_shell_answers_unavailable(buildHost):
+    rig = _shown(buildHost)
+
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
+
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+    assert rig.js("window.__shellResults") == [
+        ["r1", {"ok": False, "error": "unavailable"}]]
+    assert rig.js("window.__shellStates") == []
+
+
+def test_an_answer_for_a_frozen_page_is_held_until_it_thaws(buildHost):
+    rig = _shellShown(buildHost)
+    document = rig.js("window.__loadId")
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
+    # A newer one of the verb replaces it; another verb's stays.
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r2", {}))
+    rig.page.shellRequested.emit(
+        ShellRequest("openExternal", "r3", {"target": "discord"}))
+    assert _waitUntil(lambda: len(rig.shell.asked) == 3)
+    assert sorted(rig.host._shellResults) == ["checkUpdates", "openExternal"]
+    assert rig.state() == FROZEN
+
+    rig.reveal()
+
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length") == 2)
+    assert rig.js("window.__shellResults") == [
+        ["r2", {"ok": True, "verb": "checkUpdates"}],
+        ["r3", {"ok": True, "verb": "openExternal", "target": "discord"}]]
+    assert rig.js("window.__loadId") == document
+    assert rig.host._shellResults == {}
+
+
+def test_an_answer_held_for_a_discarded_page_is_dropped(buildHost):
+    rig = _shellShown(buildHost, discardAfterMs=1000)
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
+    assert _waitUntil(lambda: rig.shell.asked)
+    assert rig.host._shellResults
+
+    assert _waitUntil(lambda: rig.state() == DISCARDED)
+    assert rig.host._shellResults == {}
+    rig.reveal()
+    rig.waitLoaded(count=2)
+    _waitUntil(lambda: False, timeout=0.5)
+
+    assert rig.js("window.__shellResults") == []
+
+
+def test_an_answer_for_a_document_gone_since_is_dropped(buildHost):
+    rig = _shellShown(buildHost)
+    asked = rig.host._documents
+
+    rig.js("void location.reload()")
+    rig.waitLoaded(count=2)
+    rig.host._RunShellRequest(ShellRequest("checkUpdates", "r1", {}), asked)
+
+    assert rig.shell.asked == [("checkUpdates", {})]
+    assert rig.host._shellResults == {}
+    _waitUntil(lambda: False, timeout=0.3)
+    assert rig.js("window.__shellResults") == []
+
+
+def test_the_shells_state_reaches_the_page_on_its_load_and_each_change(
+        buildHost):
+    rig = _shellShown(buildHost)
+    assert _waitUntil(lambda: rig.js("window.__shellStates.length") == 1)
+    assert rig.js("window.__shellStates") == [{"alwaysOnTop": False}]
+
+    rig.shell.state = {"alwaysOnTop": True}
+    rig.host.PublishShellState()
+    assert _waitUntil(lambda: rig.js("window.__shellStates.length") == 2)
+
+    # While frozen: told once it thaws, once.
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.shell.state = {"alwaysOnTop": False}
+    rig.host.PublishShellState()
+    rig.host.PublishShellState()
+    rig.reveal()
+    assert _waitUntil(lambda: rig.js("window.__shellStates.length") == 3)
+    _waitUntil(lambda: False, timeout=0.3)
+    assert rig.js("window.__shellStates") == [
+        {"alwaysOnTop": False}, {"alwaysOnTop": True}, {"alwaysOnTop": False}]
+
+    # A new document is told again.
+    rig.js("void location.reload()")
+    rig.waitLoaded(count=2)
+    assert _waitUntil(lambda: rig.js("window.__shellStates.length") == 1)
+
+
+def test_a_state_the_shell_cannot_read_is_logged_and_not_told(
+        buildHost, caplog):
+    # The page hears nothing then (no made-up state), and is not stuck: its
+    # answers still reach it, and the next change is told.
+    shell = _Shell()
+    failing = {"now": True}
+    readable = shell.ShellState
+
+    def state():
+        if failing["now"]:
+            raise RuntimeError("not readable")
+        return readable()
+    shell.ShellState = state
+
+    with caplog.at_level(logging.ERROR, logger=HostModule.__name__):
+        rig = _shellShown(buildHost, shell=shell)
+        _waitUntil(lambda: False, timeout=0.3)
+    assert "The shell's state could not be read" in caplog.text
+    assert rig.js("window.__shellStates") == []
+
+    rig.host._RunShellRequest(ShellRequest("checkUpdates", "r1", {}),
+                              rig.host._documents)
+    assert _waitUntil(lambda: rig.js("window.__shellResults") == [
+        ["r1", {"ok": True, "verb": "checkUpdates"}]])
+
+    failing["now"] = False
+    rig.host.PublishShellState()
+    assert _waitUntil(lambda: rig.js("window.__shellStates") == [
+        {"alwaysOnTop": False}])
+
+
+def _alwaysOnTopWindowClass():
+    """A top-level QWidget with the Window's real always-on-top methods
+    (read out of src/Autona.py, which cannot be imported: agent-pitfalls
+    #1)."""
+    cls = ast.parse("class Window(QWidget):\n    pass\n").body[0]
+    cls.body = [_windowMethod(name) for name in
+                ("ToggleAlwaysOnTop", "SetAlwaysOnTop", "IsAlwaysOnTop")]
+    namespace = {"QWidget": QWidget, "Qt": Qt}
+    exec(compile(ast.fix_missing_locations(ast.Module(
+        body=[cls], type_ignores=[])), "src/Autona.py", "exec"), namespace)
+    return namespace["Window"]
+
+
+def test_always_on_top_asked_in_a_click_keeps_the_view_and_answers(
+        buildHost, monkeypatch, issuedTicket):
+    # The real shell adapter and the Window's own methods: the menu's check
+    # is set, Qt hides and shows the window for the flag, and the view --
+    # the same document -- gets the answer and the state.
+    from qtpy.QtGui import QAction
+
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    opened = _handedOutside(monkeypatch)
+    operations = AutonaShellOperations()
+    rig = buildHost(shell=operations, windowClass=_alwaysOnTopWindowClass())
+    window = rig.window
+    # As Window._BuildUi's Help & Settings check and Window.__init__.
+    action = QAction(window)
+    action.setCheckable(True)
+    action.toggled.connect(window.ToggleAlwaysOnTop)
+    window._alwaysOnTopAction = action
+    window._webPanelHost = rig.host
+    operations.UiMounted(window)
+    rig.host.ShowPanel("shell-check")
+    rig.reveal()
+    rig.waitLoaded()
+    document = rig.js("window.__loadId")
+    assert _waitUntil(lambda: rig.js("window.__shellStates") == [
+        {"alwaysOnTop": False}])
+
+    for on, expected in (("1", True), ("0", False)):
+        answered = rig.js("window.__shellResults.length")
+        _clickOpening(rig, f"http://127.0.0.1:{rig.servingPort}"
+                           f"/web/shell-request?verb=alwaysOnTop&on={on}"
+                           f"&request=t{on}&ticket={issuedTicket}")
+        assert _waitUntil(
+            lambda: rig.js("window.__shellResults.length") == answered + 1)
+        assert rig.js("window.__shellResults")[-1] == [
+            f"t{on}", {"ok": True, "alwaysOnTop": expected}]
+        assert action.isChecked() is expected
+        assert bool(window.windowFlags()
+                    & Qt.WindowType.WindowStaysOnTopHint) is expected
+        assert window.isVisible()
+        assert rig.js("window.__shellStates")[-1] == {"alwaysOnTop": expected}
+        assert rig.js("window.__loadId") == document
+        assert rig.state() == ACTIVE
+
+    # The menu's check tells the page too.
+    action.trigger()
+    assert _waitUntil(lambda: rig.js("window.__shellStates")[-1] == {
+        "alwaysOnTop": True})
+    assert rig.loads == [True]
+    assert opened == []
+
+
+class _WindowStandIn:
+    """The main window as AutonaShellOperations sees it."""
+
+    def __init__(self):
+        self.on = False
+        self.set = []
+
+    def SetAlwaysOnTop(self, on):
+        self.set.append(on)
+        self.on = on
+
+    def IsAlwaysOnTop(self):
+        return self.on
+
+
+def _operations(window=None):
+    from src.AutonaShellOperations import AutonaShellOperations
+
+    operations = AutonaShellOperations()
+    if window is not None:
+        operations.UiMounted(window)
+    return operations
+
+
+def test_the_shell_sets_always_on_top_as_the_menu_does():
+    window = _WindowStandIn()
+    operations = _operations(window)
+
+    assert operations.ShellState() == {"alwaysOnTop": False}
+    assert operations.ShellRequest("alwaysOnTop", {"on": "1"}) == {
+        "ok": True, "alwaysOnTop": True}
+    assert operations.ShellState() == {"alwaysOnTop": True}
+    assert operations.ShellRequest("alwaysOnTop", {"on": "0"}) == {
+        "ok": True, "alwaysOnTop": False}
+    for bad in ({}, {"on": "2"}, {"on": 1}, {"on": True}):
+        assert operations.ShellRequest("alwaysOnTop", bad) == {
+            "ok": False, "error": "bad_argument"}
+    assert window.set == [True, False]
+    # Before the main window: nothing to set or tell.
+    assert _operations().ShellRequest("alwaysOnTop", {"on": "1"}) == {
+        "ok": False, "error": "not_ready"}
+    assert _operations().ShellState() == {"alwaysOnTop": False}
+
+
+def test_the_shell_starts_the_update_check_as_the_menu_does(monkeypatch):
+    from src.AutonaUpdater import AutonaUpdater
+
+    checks = []
+    monkeypatch.setattr(AutonaUpdater, "instance", SimpleNamespace(
+        CheckForUpdates=lambda silent: checks.append(silent)))
+    assert _operations().ShellRequest("checkUpdates", {}) == {"ok": True}
+    # Not silent: the updater's own dialog answers the operator.
+    assert checks == [False]
+
+    monkeypatch.setattr(AutonaUpdater, "instance", None)
+    assert _operations().ShellRequest("checkUpdates", {}) == {
+        "ok": False, "error": "not_ready"}
+
+
+def test_a_check_still_running_answers_busy_and_starts_nothing(monkeypatch):
+    """The updater starts nothing while its check thread runs (the
+    startup's silent check, a menu check asked before). The shell reads that
+    thread and says so instead of "ok"; the updater is not changed."""
+    from src.AutonaUpdater import AutonaUpdater
+
+    thread = SimpleNamespace(running=True)
+    thread.isRunning = lambda: thread.running
+    checks = []
+    updater = AutonaUpdater()
+    # The attribute the shell reads is the updater's own (renaming it there
+    # would leave the shell reading nothing).
+    assert "_check_thread" in vars(updater)
+    updater._check_thread = thread
+    monkeypatch.setattr(updater, "CheckForUpdates",
+                        lambda silent: checks.append(silent))
+    monkeypatch.setattr(AutonaUpdater, "instance", updater)
+    operations = _operations()
+
+    assert operations.ShellRequest("checkUpdates", {}) == {
+        "ok": False, "error": "busy"}
+    assert checks == []
+
+    # Finished: the next ask starts a check.
+    thread.running = False
+    assert operations.ShellRequest("checkUpdates", {}) == {"ok": True}
+    assert checks == [False]
+
+
+def test_the_shell_opens_its_own_outside_addresses_only(monkeypatch):
+    from src import AutonaShellOperations as ShellModule
+    from src.AutonaExternalLinks import BUSINESS_INQUIRY_URL, DISCORD_URL
+
+    opened = []
+    works = {"value": True}
+    monkeypatch.setattr(ShellModule, "QDesktopServices", SimpleNamespace(
+        openUrl=lambda url: opened.append(url.toString()) or works["value"]))
+    operations = _operations()
+
+    assert operations.ShellRequest("openExternal", {"target": "discord"}) == {
+        "ok": True}
+    assert operations.ShellRequest("openExternal", {"target": "inquiry"}) == {
+        "ok": True}
+    assert opened == [DISCORD_URL, BUSINESS_INQUIRY_URL]
+    for bad in ({}, {"target": "https://evil.example"}, {"target": "Discord"},
+                {"target": ""}):
+        assert operations.ShellRequest("openExternal", bad) == {
+            "ok": False, "error": "bad_argument"}
+    assert len(opened) == 2
+
+    works["value"] = False
+    assert operations.ShellRequest("openExternal", {"target": "discord"}) == {
+        "ok": False, "error": "open_failed"}
+    assert operations.ShellRequest("pickFolder", {}) == {
+        "ok": False, "error": "unknown_verb"}
+
+
+def test_every_verb_the_view_takes_is_one_the_shell_runs(monkeypatch):
+    from src import AutonaShellOperations as ShellModule
+    from src.AutonaExternalLinks import EXTERNAL_LINKS
+    from src.AutonaUpdater import AutonaUpdater
+
+    monkeypatch.setattr(AutonaUpdater, "instance", SimpleNamespace(
+        CheckForUpdates=lambda silent: None))
+    monkeypatch.setattr(ShellModule, "QDesktopServices", SimpleNamespace(
+        openUrl=lambda url: True))
+    operations = _operations(_WindowStandIn())
+    for verb, arguments in HostModule.SHELL_VERBS.items():
+        for name, values in arguments.items():
+            for value in values:
+                assert operations.ShellRequest(verb, {name: value})["ok"], (
+                    verb, name, value)
+        if not arguments:
+            assert operations.ShellRequest(verb, {})["ok"], verb
+    assert HostModule.SHELL_VERBS["openExternal"] == {
+        "target": tuple(EXTERNAL_LINKS)}
+
+
+def test_the_page_and_the_view_agree_on_the_shell_requests():
+    import re
+
+    from tests.conftest import PROJECT_ROOT
+
+    source = (PROJECT_ROOT / "web" / "src" / "PanelShell" / "hostApi.ts"
+              ).read_text(encoding="utf-8")
+    assert (f'SHELL_REQUEST_PATH = "{HostModule.SHELL_REQUEST_PATH}";'
+            in source)
+    assert 'SHELL_SESSION_PATH = "/api/v1/shell-session";' in source
+    verbs = re.search(r"export type ShellVerb = ([^;]+);", source).group(1)
+    assert sorted(verb.strip().strip('"') for verb in verbs.split("|")) == (
+        sorted(HostModule.SHELL_VERBS))
+
+
+def test_the_window_gives_the_host_the_shell_adapter():
+    # Window._WebPanel builds the one host with AutonaShellOperations, and
+    # the menu's check tells the host's page.
+    built = [call for call in ast.walk(_windowMethod("_WebPanel"))
+             if isinstance(call, ast.Call)
+             and ast.unparse(call.func) == "AutonaWebPanelHost"]
+    assert [ast.unparse(keyword) for call in built
+            for keyword in call.keywords] == [
+                "shell=AutonaShellOperations.instance"]
+    assert ("self._webPanelHost.PublishShellState", []) in _calls(
+        _windowMethod("ToggleAlwaysOnTop"))
 
 
 # ── the Board page's Designer (ADR-005 S4s) ─────────────────────────────
@@ -3518,6 +4615,7 @@ class _WindowRig:
 
         namespace = {"QWidget": QWidget, "logger": logger,
                      "AutonaWebPanelHost": AutonaWebPanelHost,
+                     "AutonaShellOperations": SimpleNamespace(instance=None),
                      "functools": functools}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
@@ -4464,18 +5562,29 @@ def test_the_about_page_names_the_inquiry_address_the_menu_mails():
     # The About box showed BUSINESS_INQUIRY_EMAIL; the page writes it out
     # (a mailto link in the shared view would go nowhere: _OpenOutside hands
     # http(s) on only), and the Help menu's "Event support inquiries" still
-    # mails it.
+    # mails it. Its one place is src/AutonaExternalLinks.py since ADR-005
+    # S-final SF-5a-1 (the shell request openExternal's table too).
+    from src.AutonaExternalLinks import (
+        BUSINESS_INQUIRY_EMAIL, BUSINESS_INQUIRY_URL, DISCORD_URL,
+        EXTERNAL_LINKS)
     from tests.conftest import PROJECT_ROOT
 
-    tree = ast.parse(_autonaSource())
-    email = next(ast.literal_eval(node.value) for node in tree.body
-                 if isinstance(node, ast.Assign)
-                 and any(isinstance(target, ast.Name)
-                         and target.id == "BUSINESS_INQUIRY_EMAIL"
-                         for target in node.targets))
     page = (PROJECT_ROOT / "web" / "src" / "GuidePages" / "AboutPage.tsx"
             ).read_text(encoding="utf-8")
-    assert f'BUSINESS_INQUIRY_EMAIL = "{email}";' in page
+    assert f'BUSINESS_INQUIRY_EMAIL = "{BUSINESS_INQUIRY_EMAIL}";' in page
+    assert BUSINESS_INQUIRY_URL == f"mailto:{BUSINESS_INQUIRY_EMAIL}"
+    assert EXTERNAL_LINKS == {"discord": DISCORD_URL,
+                              "inquiry": BUSINESS_INQUIRY_URL}
+    # The menu opens the same two, defined nowhere else.
+    tree = ast.parse(_autonaSource())
+    assert not [node for node in tree.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name)
+                        and target.id in ("DISCORD_URL",
+                                          "BUSINESS_INQUIRY_EMAIL",
+                                          "BUSINESS_INQUIRY_URL")
+                        for target in node.targets)]
+    assert ("from .AutonaExternalLinks import BUSINESS_INQUIRY_URL, "
+            "DISCORD_URL") in _autonaSource()
 
 
 

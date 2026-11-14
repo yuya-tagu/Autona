@@ -57,8 +57,8 @@ import {useAssetJob} from "./useAssetJob";
 // The writes and the job are the shell's (SHELL routes: only the desktop's
 // shared view may call them), so anywhere else -- a browser, the headless
 // app -- the page says so and links the source, and reads nothing.
-// useShellAccess({withToken: false}) tells the two apart without keeping
-// the access token. A folder cannot be imported from a page (it cannot name
+// useShellAccess({withToken: false}) tells the two apart without reading
+// the access token (its probe is the shell session: SF-5a-1). A folder cannot be imported from a page (it cannot name
 // one): the ZIP route is the only one until the shell's folder picker
 // (SF-5a). Everything shown is text: nothing here renders HTML.
 

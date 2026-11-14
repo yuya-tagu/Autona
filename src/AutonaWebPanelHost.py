@@ -30,6 +30,18 @@ selection dialog, for the load_set hotkey and the legacy open-set route
 (OpenScoreSets, ADR-005 S4ab-2). It writes nothing; the page opens it as
 its own button.
 
+The other way, a page asks the desktop itself for a few things -- the
+window's "always on top", the update check, one of a fixed few outside
+addresses (ADR-005 S-final SF-5a-1) -- as shell requests: in a click, a
+window.open of this server's /web/shell-request with the verb, an id and
+the ticket only the shared view's own fetch can read (GET /api/v1/
+shell-session, SHELL). The page takes it instead of a new window when it is
+one exactly (ParseShellRequest), the host runs it from the event loop
+through the shell it was given (the Window's AutonaShellOperations), and the
+answer goes back through the panel shell (shellResult), as do the shell's
+state on each load and change (shellState). Anything that looks like one
+and is not is refused, never handed to the default browser.
+
 Built lazily: constructing the host costs a plain QWidget; the view is
 created the first time the host is on screen with a panel to show, once
 the web server is ready -- and then from the event loop, not inside the
@@ -91,8 +103,11 @@ SF-4a-2) -- which are not sidebar items: the Help & Settings menu opens them
 Importing it creates nothing.
 """
 
+import functools
 import json
 import logging
+import re
+from collections import namedtuple
 from urllib.parse import parse_qsl, quote, urlencode
 
 from qtpy.QtCore import Qt, QTimer, QUrl, Signal
@@ -104,6 +119,7 @@ from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from .AutonaDesignerWindow import AutonaDesignerWindow
+from .AutonaExternalLinks import EXTERNAL_LINKS
 from .AutonaWebPageLifecycle import (
     HiddenPageLifecycle, IsWebServerReady, LocalPageLoader, LocalUrl,
     WhenWebServerReady)
@@ -131,6 +147,14 @@ _OPEN_SCORE_SETS_JS = (
     "if(s&&s.openScoreSets){s.openScoreSets(b);return 'taken';}"
     "return '';})(%s)")
 _SCORE_SETS_TAKEN = "taken"
+# A shell request's answer and the shell's state (ADR-005 S-final SF-5a-1),
+# each argument a json.dumps: nothing else is put into the script.
+_SHELL_RESULT_JS = (
+    "(function(i,r){var s=window.autonaPanelShell;"
+    "if(s&&s.shellResult){s.shellResult(i,r);}})(%s,%s)")
+_SHELL_STATE_JS = (
+    "(function(v){var s=window.autonaPanelShell;"
+    "if(s&&s.shellState){s.shellState(v);}})(%s)")
 
 # The React panel whose set selection the desktop opens from outside the page
 # (the load_set hotkey, the legacy open-set route).
@@ -444,6 +468,137 @@ class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
                               "a request")
 
 
+# ── The shell requests (ADR-005 S-final SF-5a-1) ────────────────────────
+# What a page of the Web UI asks of the desktop itself -- the window's
+# "always on top", the update check, one of a fixed few outside addresses --
+# with no privileged channel (no QWebChannel, no script injected): in a click,
+# the page's script opens a new window of this server's /web/shell-request
+# (web/src/PanelShell/hostApi.ts, shellRequest), which the view never makes.
+# _PanelPage._OpenOutside takes it instead, as it takes the Designer's URL,
+# and only when it is one exactly (ParseShellRequest), carrying the ticket
+# that only the shared view's own fetch can read (GET /api/v1/shell-session,
+# SHELL: WebAccess.IssueShellTicket). The host runs the verb from the event
+# loop (_RunShellRequest) and hands the answer to the page that asked
+# (window.autonaPanelShell.shellResult); the shell's state goes to the page
+# on its load and on every change (shellState).
+SHELL_REQUEST_PATH = "/web/shell-request"
+# Verb -> {argument: the values it may take}. Nothing but these values gets
+# to a verb: openExternal names a key of EXTERNAL_LINKS, never a URL.
+SHELL_VERBS = {
+    "alwaysOnTop": {"on": ("0", "1")},
+    "checkUpdates": {},
+    "openExternal": {"target": tuple(EXTERNAL_LINKS)},
+}
+# What every request carries besides its verb's arguments.
+_SHELL_REQUEST_FIELDS = ("verb", "request", "ticket")
+_SHELL_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+# A query longer than this is not read (bounded work: the verbs' requests
+# take under 200 characters).
+_SHELL_QUERY_MAX = 512
+
+ShellRequest = namedtuple("ShellRequest", "verb id args")
+
+
+def IsShellRequestShaped(url, pageUrls, serverUrl):
+    """Whether ``url`` (a QUrl) is taken as a shell request -- run or
+    refused, never handed to the default browser, never navigated to, and
+    not logged but by the refusal's reason (_PanelPage): its path, decoded,
+    names shell-request anywhere (any case), and it is on this server's own
+    origin (that of ``serverUrl`` -- _ServerUrl -- or of one of
+    ``pageUrls``, the page's, under any name of this PC: _IsServerOrigin)
+    or its query has a ``ticket`` key (_NamesTicket: any origin, any
+    scheme -- a URL that may carry the ticket never leaves).
+
+    Anything else with shell-request in its path (a project's page,
+    ``https://github.com/x/shell-request-lib``) is an outside link as any."""
+    if "shell-request" not in url.path(
+            QUrl.ComponentFormattingOption.FullyDecoded).lower():
+        return False
+    return _NamesTicket(url) or _IsServerOrigin(url, (*pageUrls, serverUrl))
+
+
+def _NamesTicket(url):
+    # A key named ticket in the query, decoded, any case -- split on ";" as
+    # well as "&" (some servers do): wider than what the page writes
+    # (URLSearchParams), never narrower.
+    query = url.query(QUrl.ComponentFormattingOption.FullyDecoded)
+    return any(field.split("=", 1)[0].strip().lower() == "ticket"
+               for field in re.split(r"[&;]", query))
+
+
+def _LoggedTarget(url):
+    # What the log says of a URL refused: its scheme and host only (its
+    # query may carry a ticket, a token, the operator's text).
+    host = url.host()
+    return f"{url.scheme()}://{host}" if host else f"{url.scheme()}:"
+
+
+def ParseShellRequest(url, pageUrls, serverUrl, ticketMatches):
+    """A shell request: ``(ShellRequest, None)`` when ``url`` (a QUrl, the
+    new window a page asked for) is one exactly, else ``(None, reason)`` --
+    a fixed word for the log, nothing of the URL.
+
+    Exactly: on this server's origin (that of ``serverUrl`` -- _ServerUrl:
+    127.0.0.1 at its port -- scheme, host and port alike) with no userinfo
+    (an empty one included), the path SHELL_REQUEST_PATH as sent (no dot
+    segment, no doubled or trailing slash), no fragment (an empty one
+    included) and a query of exactly its verb's keys -- ``verb``,
+    ``request``, ``ticket`` and the verb's arguments (SHELL_VERBS), each
+    once -- with ``request`` an id (``[A-Za-z0-9_-]{1,64}``, what the answer
+    is put into the page's script with), each argument one of its values,
+    and ``ticket`` the one this process issued (``ticketMatches``:
+    WebAccess.ShellTicketMatches, constant-time). And the page asking is
+    this server's Web UI: every one of ``pageUrls`` (the URL the page shows
+    and the one the host loaded) that names an http(s) document is on that
+    origin, in /web (_InWebUi) and not the Designer's view of it
+    (_NamesDesigner), and there is one -- as ClipboardPermitted reads them.
+
+    Whether a click asked for it is the caller's to check (the request says
+    so). QUrl values only, as ClipboardPermitted (no QApplication, no
+    WebEngine object, no settings: the server's URL and the ticket's check
+    are passed)."""
+    encoded = QUrl.ComponentFormattingOption.FullyEncoded
+    server = _HttpOrigin(serverUrl)
+    if server is None or _HttpOrigin(url) != server:
+        return None, "origin"
+    if "@" in url.authority(encoded):
+        return None, "userinfo"
+    if url.path(encoded) != SHELL_REQUEST_PATH:
+        return None, "path"
+    if url.hasFragment():
+        return None, "fragment"
+    query = url.query(encoded)
+    if not url.hasQuery() or len(query) > _SHELL_QUERY_MAX:
+        return None, "query"
+    try:
+        pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True,
+                          max_num_fields=len(_SHELL_REQUEST_FIELDS) + 1)
+    except ValueError:
+        # Not its text: the message quotes the field, the ticket among them.
+        return None, "query"
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        return None, "query"   # a key given twice
+    arguments = SHELL_VERBS.get(fields.get("verb"))
+    if arguments is None:
+        return None, "verb"
+    if set(fields) != set(_SHELL_REQUEST_FIELDS) | set(arguments):
+        return None, "keys"
+    if not _SHELL_REQUEST_ID.fullmatch(fields["request"]):
+        return None, "request"
+    if any(fields[name] not in values for name, values in arguments.items()):
+        return None, "argument"
+    if not ticketMatches(fields["ticket"]):
+        return None, "ticket"
+    documents = [page for page in pageUrls if _HttpOrigin(page) is not None]
+    if not documents or not all(
+            _HttpOrigin(page) == server and _InWebUi(page)
+            and not _NamesDesigner(page) for page in documents):
+        return None, "page"
+    return ShellRequest(fields["verb"], fields["request"],
+                        {name: fields[name] for name in arguments}), None
+
+
 # The browser version of the scoreboards the SCORE page opens (S4aa): the
 # paths the Qt boards' "ブラウザ版を開く" opened (board 2 "team", board 1
 # "scoreboard"; the Qt boards went in ADR-005 S4ac-3).
@@ -561,9 +716,22 @@ class _PanelPage(QWebEnginePage):
     ADR-005 S-final SF-4a), which adds the shell's secret to the main
     frame's fetches to /api/v1/ while the page is the Web UI and not the
     Designer's view of it -- which the main frame is never let go to, so
-    the Designer keeps to its own window."""
+    the Designer keeps to its own window.
+
+    A shell request (ADR-005 S-final SF-5a-1) is a new window too, of this
+    server's /web/shell-request, and comes first: one asked for in a click
+    that is one exactly (ParseShellRequest: the ticket among the rest) is
+    handed to the host (shellRequested), and any other URL that looks like
+    one (IsShellRequestShaped: on this server's origin, or carrying a
+    ``ticket`` key on any) is refused -- neither ever goes to the default
+    browser, and the log says why without the URL (its query is the
+    ticket). No navigation goes there, of the main frame (it is in /web) or
+    of a frame. Any other URL is logged by its scheme and host only."""
 
     designerRequested = Signal()
+    # A shell request taken (a ShellRequest), from within Chromium's
+    # new-window call: the host runs it from the event loop.
+    shellRequested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -599,9 +767,15 @@ class _PanelPage(QWebEnginePage):
         # started by a script alone. The host only in the log: the query of the
         # post on X is the operator's text.
         url = request.requestedUrl()
-        if not (url.isValid() and url.scheme() in _OUTSIDE_SCHEMES):
+        if IsShellRequestShaped(url, (self.url(), self.requestedUrl()),
+                                _ServerUrl()):
+            # First (ADR-005 S-final SF-5a-1): run or refused here, never
+            # handed on to the default browser below, and never logged (its
+            # query is the ticket).
+            self._TakeShellRequest(url, request.isUserInitiated())
+        elif not (url.isValid() and url.scheme() in _OUTSIDE_SCHEMES):
             logger.warning("The web panel view refused to open %s",
-                           url.toDisplayString())
+                           _LoggedTarget(url))
         elif not request.isUserInitiated():
             logger.warning("The web panel view refused a window no click "
                            "asked for, of %s", url.host())
@@ -617,13 +791,46 @@ class _PanelPage(QWebEnginePage):
         elif not QDesktopServices.openUrl(url):
             logger.warning("The system could not open a link of %s", url.host())
 
+    def _TakeShellRequest(self, url, userInitiated):
+        # A click only, as every new window here; then the request itself
+        # (ParseShellRequest). A refusal is logged by its reason alone, and
+        # so is a check that raised (not its message, which may quote the
+        # query): the URL is never logged, nor handed on.
+        if not userInitiated:
+            parsed, reason = None, "click"
+        else:
+            try:
+                parsed, reason = ParseShellRequest(
+                    url, (self.url(), self.requestedUrl()), _ServerUrl(),
+                    WebAccess.ShellTicketMatches)
+            except Exception as error:
+                parsed, reason = None, f"check failed: {type(error).__name__}"
+        if parsed is None:
+            logger.warning("The web panel view refused a shell request (%s)",
+                           reason)
+            return
+        logger.info("The web panel view takes the shell request %s",
+                    parsed.verb)
+        self.shellRequested.emit(parsed)
+
     def acceptNavigationRequest(self, url, navigationType, isMainFrame):
+        if IsShellRequestShaped(url, (self.url(), self.requestedUrl()),
+                                _ServerUrl()):
+            # A shell request is a new window in a click (_OpenOutside),
+            # never a navigation: not of the main frame (it is in /web, which
+            # would let it through) nor of a frame. Not logged but by this
+            # (its query is the ticket).
+            if isMainFrame:
+                self.refusedLast = True
+            logger.warning("The web panel view refused a navigation to a "
+                           "shell request")
+            return False
         if not isMainFrame:
             if not _IsServerOrigin(url, (self.url(), self.requestedUrl())):
                 return True
             # Not refusedLast: the main frame's document is untouched.
             logger.warning("The web panel view refused a frame of this "
-                           "server's own origin, %s", url.toDisplayString())
+                           "server's own origin, %s", _LoggedTarget(url))
             return False
         # Only into this server's Web UI: its origin as the host loads it
         # (_ServerUrl) and /web. The host's own loads (load(), Qt's reload of
@@ -648,7 +855,7 @@ class _PanelPage(QWebEnginePage):
             return True
         self.refusedLast = True
         logger.warning("The web panel view refused to leave the Web UI of "
-                       "this server for %s", url.toDisplayString())
+                       "this server for %s", _LoggedTarget(url))
         return False
 
 
@@ -737,8 +944,22 @@ class AutonaWebPanelHost(QWidget):
 
     DISCARD_AFTER_MS = HiddenPageLifecycle.DISCARD_AFTER_MS
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, shell=None):
         super().__init__(parent)
+        # What answers the page's shell requests (ADR-005 S-final SF-5a-1),
+        # on this thread: ShellRequest(verb, args) -> the answer and
+        # ShellState() -> the state, each a JSON-able dict (the Window gives
+        # AutonaShellOperations.instance). None refuses every request.
+        self._shell = shell
+        # Each verb's newest answer not yet handed to the page (verb ->
+        # (request id, the answer as JSON)), and which document they are
+        # for: the one the page shows, counted by _documents (a load or a
+        # discard makes another, and what was held for the last goes).
+        self._shellResults = {}
+        self._documents = 0
+        # Whether the page is still to be told the shell's state: after
+        # each load and each change (PublishShellState).
+        self._shellStateDue = False
         # The panel the operator asked for last. The page catches up to it
         # whenever it can run script (see _Navigate).
         self._panel = None
@@ -816,6 +1037,88 @@ class AutonaWebPanelHost(QWidget):
                 and self._scoreSets[0] == asked):
             self._scoreSets = None
 
+    # ── The shell requests (ADR-005 S-final SF-5a-1) ─────────────────────
+    # _PanelPage takes them (ParseShellRequest); the shell runs them; the
+    # answer goes to the page as SCORE's set selection goes (_DeliverScore
+    # Sets): into an Active, loaded page now, else held -- while the page is
+    # frozen, until it thaws -- and dropped with the document that asked (a
+    # load, a discard). The newest of each verb only.
+
+    def _QueueShellRequest(self, request):
+        # Not inside Chromium's new-window call (agent-pitfalls #9): a verb
+        # may hide and show the window (alwaysOnTop's setWindowFlag) or start
+        # another application. For the document shown now, which asked.
+        QTimer.singleShot(0, self, functools.partial(
+            self._RunShellRequest, request, self._documents))
+
+    def _RunShellRequest(self, request, document):
+        if self._shell is None:
+            logger.warning("The shell request %s has nothing to run it",
+                           request.verb)
+            result = {"ok": False, "error": "unavailable"}
+        else:
+            try:
+                result = self._shell.ShellRequest(request.verb,
+                                                  dict(request.args))
+            except Exception:
+                logger.exception("The shell request %s failed", request.verb)
+                result = {"ok": False, "error": "failed"}
+        try:
+            answer = json.dumps(result)
+        except (TypeError, ValueError):
+            logger.exception("The shell request %s answered what JSON cannot "
+                             "carry", request.verb)
+            answer = json.dumps({"ok": False, "error": "failed"})
+        if document != self._documents:
+            # The page that asked is gone: its answer goes with it.
+            logger.info("The answer to the shell request %s is dropped: the "
+                        "page that asked is gone", request.verb)
+            return
+        self._shellResults[request.verb] = (request.id, answer)
+        self._DeliverShellResults(self._ScriptablePage())
+
+    def _DeliverShellResults(self, page):
+        # Into `page` (an Active, loaded page, or None: not now). Handed over
+        # once: a document going away meanwhile takes it along, as it would
+        # have taken the request's promise.
+        if page is None or not self._shellResults:
+            return
+        held, self._shellResults = self._shellResults, {}
+        for requestId, answer in held.values():
+            page.runJavaScript(
+                _SHELL_RESULT_JS % (json.dumps(requestId), answer))
+
+    def PublishShellState(self):
+        """Tell the page the shell's state changed (window.autonaPanelShell.
+        shellState with the shell's ShellState(): the window's "always on
+        top"; ADR-005 S-final SF-5a-1): now, into an Active, loaded page, or
+        when a thaw or a load lets it. The Window calls this on every change;
+        every load tells it anyway."""
+        self._shellStateDue = True
+        self._DeliverShellState(self._ScriptablePage())
+
+    def _DeliverShellState(self, page):
+        if page is None or self._shell is None or not self._shellStateDue:
+            return
+        self._shellStateDue = False
+        try:
+            state = json.dumps(self._shell.ShellState())
+        except Exception:
+            logger.exception("The shell's state could not be read")
+            return
+        page.runJavaScript(_SHELL_STATE_JS % state)
+
+    def _OnLifecycleStateChanged(self, state):
+        if state == QWebEnginePage.LifecycleState.Discarded:
+            # Its document is gone (Qt reloads a new one on reveal): what
+            # was held for it goes too.
+            self._NewDocument()
+
+    def _NewDocument(self):
+        self._documents += 1
+        self._shellResults = {}
+        self._shellStateDue = True
+
     def ShowPanel(self, panel):
         """Show React panel ``panel`` (a WebAccess.WEB_PANELS name).
 
@@ -879,6 +1182,8 @@ class AutonaWebPanelHost(QWidget):
         self.view = _PanelView(self)
         page = _PanelPage(self.view)
         page.designerRequested.connect(self._QueueDesigner)
+        page.shellRequested.connect(self._QueueShellRequest)
+        page.lifecycleStateChanged.connect(self._OnLifecycleStateChanged)
         self.view.setPage(page)
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.
@@ -954,12 +1259,16 @@ class AutonaWebPanelHost(QWidget):
     def _Navigate(self):
         # Only into an Active, loaded page (_ScriptablePage). The page skips a
         # navigation to the panel it already shows. SCORE's set selection
-        # asked for meanwhile follows the navigation (OpenScoreSets).
+        # asked for meanwhile follows the navigation (OpenScoreSets), and so
+        # do the shell's state and the shell requests' answers held for this
+        # document (ADR-005 S-final SF-5a-1).
         page = self._ScriptablePage()
         if page is None:
             return
         page.runJavaScript(_NAVIGATE_JS % json.dumps(self._panel))
         self._DeliverScoreSets(page)
+        self._DeliverShellState(page)
+        self._DeliverShellResults(page)
 
     def _ReloadIfBlank(self):
         # The last load failed for good (the loader gave up, or Qt's reload
@@ -983,9 +1292,11 @@ class AutonaWebPanelHost(QWidget):
         # Ours, or Qt's reload of a discarded page: that document may show
         # a panel other than the one asked for since. A new document: what
         # was run into the last one is not waited for (its answer may never
-        # come).
+        # come), nor is what was held for it (the shell requests' answers);
+        # the new one is told the shell's state.
         self._loaded = ok
         self._scoreSetsRunning = None
+        self._NewDocument()
         if ok:
             self._Navigate()
         else:

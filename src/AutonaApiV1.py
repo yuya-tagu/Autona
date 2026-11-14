@@ -2193,6 +2193,18 @@ def access_token_regenerate():
     return _no_store(ok(data={"token": token, "available": bool(token)}))
 
 
+@api_v1.route("/shell-session")
+@api_handler
+def get_shell_session():
+    # {"ticket"}: what the shared view's page puts in a shell request (its
+    # window.open of /web/shell-request in a click; ADR-005 S-final SF-5a-1;
+    # AutonaWebPanelHost.ParseShellRequest compares it). SHELL: only the
+    # shared view's own fetches -- never a LAN device, never with the token,
+    # never the headless app. Not cached, and not in core's ApiCatalog: it is
+    # not for a person to call.
+    return _no_store(ok(data={"ticket": WebOps.get_shell_session()}))
+
+
 # ── Game asset packs (ADR-005 S-final SF-3b / SF-4b-1) ──
 # What the "Add game assets" window shows and does, for the page that
 # replaces it (SF-4b): core's AssetPackService. The list is THIS_PC (it may

@@ -2627,6 +2627,168 @@ def test_the_token_is_not_shown_in_another_pages_frame(server, shellSecret):
         WebAccess.FRAMED_ELSEWHERE)
 
 
+# ── The shell request's ticket (ADR-005 S-final SF-5a-1) ─────────────────
+# GET /api/v1/shell-session: SHELL like the token's routes (the same
+# refusals, the same 403), answering the ticket a shell request carries
+# (src/AutonaWebPanelHost.py's ParseShellRequest checks it). The ticket is
+# not the secret: the secret is what the shell adds to every fetch of the
+# shared view, the ticket is what only a page that read this route can put
+# in a URL. Made on the first answer, the same for the process, in memory.
+
+SESSION_URL = "/api/v1/shell-session"
+
+
+@pytest.fixture
+def noTicket(monkeypatch):
+    """No ticket issued yet (and the test's forgotten after)."""
+    monkeypatch.setattr(WebAccess, "_shellTicket", None)
+
+
+def test_the_shell_reads_the_ticket(server, shellSecret, noTicket):
+    response = _client(server).get(SESSION_URL,
+                                   headers=_shell_headers(shellSecret))
+    assert response.status_code == 200, response.get_json()
+    ticket = response.get_json()["data"]["ticket"]
+    assert response.get_json()["data"] == {"ticket": ticket}
+    assert response.headers["Cache-Control"] == "no-store"
+    # Not the secret, not the token; the same on the next answer.
+    assert ticket not in (shellSecret, WebAccess.Token())
+    assert len(ticket) == 43 and ticket.isascii()
+    again = _client(server).get(SESSION_URL,
+                                headers=_shell_headers(shellSecret))
+    assert again.get_json()["data"]["ticket"] == ticket
+    assert WebAccess.ShellTicketMatches(ticket) is True
+
+
+def test_the_ticket_is_made_on_the_first_answer_only(
+        server, shellSecret, noTicket, tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # Nothing issued: nothing matches, not even an empty value.
+    assert WebAccess._shellTicket is None
+    for value in (None, "", "x" * 43):
+        assert WebAccess.ShellTicketMatches(value) is False
+    # A refused request issues none.
+    _client(server).get(SESSION_URL, headers={"Sec-Fetch-Site": "same-origin"})
+    assert WebAccess._shellTicket is None
+    _client(server).get(SESSION_URL, headers=_shell_headers(shellSecret))
+    assert WebAccess._shellTicket is not None
+    # Not in settings.json.
+    assert WebAccess._shellTicket not in json.dumps(SettingsManager.settings)
+    # A fresh process that imports it has none (as the secret's test).
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    code = ("from src.core import WebAccess; "
+            "print(WebAccess._shellTicket is None)")
+    out = subprocess.run([sys.executable, "-B", "-c", code],
+                         cwd=str(tmp_path), env=env, capture_output=True,
+                         text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "True"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("value, matches", [
+    (None, False), ("", False), (0, False), (b"x", False),
+    (" ", False), ("x" * 43, False),
+    ("wrong", False),
+    ("\u00fc" * 43, False),  # non-ASCII
+    ("x" * 129, False),       # over the bound
+])
+def test_only_the_ticket_itself_matches(noTicket, value, matches):
+    ticket = WebAccess.IssueShellTicket()
+    assert WebAccess.ShellTicketMatches(value) is matches
+    assert WebAccess.ShellTicketMatches(ticket) is True
+    for other in (ticket + "x", ticket[:-1], ticket + "\u00fc", f" {ticket}",
+                  f"{ticket} ", ticket.swapcase()):
+        assert WebAccess.ShellTicketMatches(other) is False
+
+
+def test_the_secret_is_not_the_ticket(shellSecret, noTicket):
+    WebAccess.IssueShellTicket()
+    assert WebAccess.ShellTicketMatches(shellSecret) is False
+    assert WebAccess.ShellSecretMatches(WebAccess._shellTicket) is False
+
+
+@pytest.mark.parametrize("remote, headers", NOT_THE_SHELLS)
+@pytest.mark.parametrize("withToken", [False, True])
+def test_only_the_shells_own_request_reaches_the_ticket(
+        server, shellSecret, noTicket, warnings, remote, headers, withToken):
+    token = WebAccess.Token()
+    sent = {name: (shellSecret if value is None else value)
+            for name, value in headers.items()}
+    if withToken:
+        sent[WebAccess.TOKEN_HEADER] = token
+    response = _client(server, remote).get(SESSION_URL, headers=sent)
+    _refused_as_not_the_shell(response, token, shellSecret)
+    # None issued by a refused request.
+    assert WebAccess._shellTicket is None
+    assert any("shell_only" in m for m in warnings)
+    assert not any(shellSecret in m or token in m for m in warnings)
+
+
+@pytest.mark.parametrize("value", [None, "", "x" * 43])
+def test_a_shell_without_the_secret_issues_no_ticket(
+        server, monkeypatch, noTicket, value):
+    # Headless: no secret, so the ticket is never issued.
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    headers = {"Sec-Fetch-Site": "same-origin"}
+    if value is not None:
+        headers[WebAccess.SHELL_HEADER] = value
+    response = _client(server).get(SESSION_URL, headers=headers)
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
+    assert WebAccess._shellTicket is None
+
+
+def test_the_preview_listener_never_reaches_the_ticket(
+        server, shellSecret, noTicket):
+    for method in ("GET", "HEAD", "OPTIONS", "POST"):
+        assert WebAccess.PreviewServes(
+            "api_v1.get_shell_session", method) is False
+    response = _PreviewClient(server).get(
+        SESSION_URL, headers=_shell_headers(shellSecret))
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+    assert WebAccess._shellTicket is None
+
+
+def test_the_ticket_is_not_shown_in_another_pages_frame(
+        server, shellSecret, noTicket):
+    response = _client(server).get(SESSION_URL, headers=dict(
+        _shell_headers(shellSecret), **FRAMED))
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(
+        WebAccess.FRAMED_ELSEWHERE)
+    assert WebAccess._shellTicket is None
+
+
+def test_only_the_shell_session_route_issues_the_ticket():
+    # The ticket leaves the process through that one answer: the one caller
+    # of IssueShellTicket in src/ is AutonaWebOperations.get_shell_session.
+    import ast
+    from pathlib import Path
+
+    callers = []
+    root = Path(__file__).resolve().parents[1] / "src"
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef,
+                                         ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(function):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "IssueShellTicket"):
+                    callers.append(
+                        (path.relative_to(root).as_posix(), function.name))
+    assert callers == [("AutonaWebOperations.py", "get_shell_session")]
+
+
 # The API settings window's token row (masked, shown, regenerated only when
 # confirmed) and its copied curl (the token only for a LAN write) are the
 # API page's since ADR-005 S-final SF-4a-2: web/src/GuidePages/

@@ -208,15 +208,10 @@ from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
 from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
 from .core import WebAccess
+# The Help menu's outside addresses, shared with the shell request
+# openExternal (ADR-005 S-final SF-5a-1) and the About page.
+from .AutonaExternalLinks import BUSINESS_INQUIRY_URL, DISCORD_URL
 # autopep8: on
-
-
-# Single source for the support inquiry contact, used by the Help menu and
-# (kept in sync by hand) the About page (web/src/GuidePages/AboutPage.tsx;
-# tests/test_web_panel_host.py compares the two) and TERMS.md §4.
-DISCORD_URL = "https://discord.gg/yAFAmhaUqn"
-BUSINESS_INQUIRY_EMAIL = "taguyangames@gmail.com"
-BUSINESS_INQUIRY_URL = f"mailto:{BUSINESS_INQUIRY_EMAIL}"
 
 
 class WindowSignals(QObject):
@@ -578,6 +573,9 @@ class Window(QMainWindow):
             QApplication.translate("app", "Always on top"))
         action.setCheckable(True)
         action.toggled.connect(self.ToggleAlwaysOnTop)
+        # Kept: the shared view's shell request alwaysOnTop sets it too
+        # (SetAlwaysOnTop; ADR-005 S-final SF-5a-1).
+        self._alwaysOnTopAction = action
 
         helpMenu.addSeparator()
 
@@ -1064,7 +1062,9 @@ class Window(QMainWindow):
             raise RuntimeError(
                 f"the web panel host is already a page; {panel!r} would "
                 "need a second one")
-        host = AutonaWebPanelHost()
+        # Its pages' shell requests are the shell adapter's to run (ADR-005
+        # S-final SF-5a-1: alwaysOnTop, checkUpdates, openExternal).
+        host = AutonaWebPanelHost(shell=AutonaShellOperations.instance)
         host.setObjectName("WebPanels")
         # Before the page is shown: the view is built, on this panel's page,
         # when the host first is.
@@ -1507,6 +1507,22 @@ class Window(QMainWindow):
         else:
             self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.show()
+        # The shared view's pages show it (shellState; ADR-005 S-final
+        # SF-5a-1), whichever way it was switched.
+        if self._webPanelHost is not None:
+            self._webPanelHost.PublishShellState()
+
+    def SetAlwaysOnTop(self, on):
+        """Set "Always on top" to `on` as a click on its Help & Settings
+        menu check would: the check, and through it the window
+        (ToggleAlwaysOnTop). Nothing when it is that already. The shell
+        request alwaysOnTop's (AutonaShellOperations; ADR-005 S-final
+        SF-5a-1)."""
+        self._alwaysOnTopAction.setChecked(bool(on))
+
+    def IsAlwaysOnTop(self):
+        """Whether "Always on top" is on (its menu check)."""
+        return self._alwaysOnTopAction.isChecked()
 
     @staticmethod
     def _resolveBattleFormat() -> str:
