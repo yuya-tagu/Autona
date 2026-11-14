@@ -2508,6 +2508,19 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
     # there.
     logo = Path(os.path.abspath("layout")) / "logo.png"
     hadLogo = logo.exists()
+    # The asset packs' list fetches the upstream index: offline here (a
+    # failed fetch is still 200), in a service of the walk's own, so the
+    # failure it remembers goes with it (ADR-005 S-final SF-3b).
+    import requests
+    from src.core import AssetPackService as assetPacks
+
+    def offline(*_args, **_kwargs):
+        raise requests.ConnectionError("offline in this walk")
+
+    monkeypatch.setattr(assetPacks, "requests", types.SimpleNamespace(
+        get=offline, RequestException=requests.RequestException))
+    monkeypatch.setattr(assetPacks.AssetPackService, "instance",
+                        assetPacks.AssetPackService())
     _goHeadless(autonaApp, monkeypatch)
     answers = []
     events = {}

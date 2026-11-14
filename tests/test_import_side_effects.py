@@ -164,6 +164,10 @@ hotkey_rules = importlib.import_module("src.core.HotkeyRules")
 # bootstrap_core()).
 status_service = importlib.import_module(
     "src.core.StatusService").StatusService
+# The game asset packs (ADR-005 S-final SF-3b): a singleton created by
+# bootstrap_core(); nothing fetched, scanned or written on import.
+asset_pack_service = importlib.import_module(
+    "src.core.AssetPackService").AssetPackService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -292,6 +296,8 @@ assert status_service.Snapshot() == {"revision": 0, "jobs": []}, \
     "import showed a status"
 assert status_service.changes.subscriber_count() == 0, \
     "import subscribed to the status' changes"
+assert asset_pack_service.instance is None, \
+    "import created AssetPackService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

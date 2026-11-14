@@ -2090,6 +2090,44 @@ def get_connection():
     return _no_store(ok(data=WebOps.get_connection()))
 
 
+# ── Game asset packs (ADR-005 S-final SF-3b) ──
+# What the "Add game assets" window shows, for the page that replaces it
+# (SF-4b): core's AssetPackService. The list is a READ (the upstream index
+# and what is installed, no local path); the last job's state is THIS_PC
+# (a job's messages may name this PC's paths). The window runs the jobs
+# through core. The jobs that write user_data/games (an install, a ZIP, a
+# folder of this PC) and their cancel are not here: THIS_PC also lets the
+# layout/ pages of this origin through, so they come with SF-4b under the
+# secret the shell hands only to the shared view's main frame.
+
+@api_v1.route("/assets/packs")
+@api_handler
+def get_asset_packs():
+    # {"source": {"page", "index"}, "index": {"status", "error",
+    # "fetchedAt"}, "games": [{"code", "name", "available", "installed",
+    # "packs": [{"name", "size", "version", "installedVersion",
+    # "installed", "updateAvailable", "default"}]}]}
+    # (AssetPackService.Packs). The index is fetched on this
+    # thread when it is not cached or older than 10 minutes, or
+    # `?refresh=true` (at most once every 5 seconds); a failed fetch is
+    # still 200, index.status "error", with the installed games.
+    refresh = _truthy(request.args.get("refresh", ""))
+    return ok(data=WebOps.get_asset_packs(refresh=refresh))
+
+
+@api_v1.route("/assets/job")
+@api_handler
+def get_assets_job():
+    # The last asset job's state: {"revision", "status" (idle | running |
+    # done | error | cancelled), "operation", "game", "stage" (download |
+    # extract | copy | scan), "pack", "file", "done", "total" (bytes for a
+    # download, entries / files for an import), "imported", "skipped",
+    # "skippedEntries", "skippedEntriesMore", "failed": [{"name",
+    # "message"}], "error" (core's reason), "message"}.
+    # THIS_PC: a message may name this PC's paths.
+    return _no_store(ok(data=WebOps.get_assets_job()))
+
+
 @api_v1.route("/colors/<feature>", methods=["PATCH"])
 @write_op("colors.update")
 def colors_update(feature):

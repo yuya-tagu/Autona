@@ -42,11 +42,14 @@ base_files, full, portrait, stage_icon, variant_icon
 これ以外のパック（logo / art / mural_art / vs_renders / render / poster / comic /
 cartoon / versus_screen* / webm / webp / website / banner / card / 音声系 など）は、
 オンライン取得の一覧に出さず、ダウンロードもせず、フォルダ/ZIP 取り込み時には
-取り込み後に該当パックフォルダ（`config.json` を持つ非許可サブフォルダ）を削除する。
+該当パックフォルダ（`config.json` を持つ非許可サブフォルダ）を置かない。
 
-実装: `_ALLOWED_PACKS` 定数
-（[src/AutonaGameAssetGuideWindow.py](../../src/AutonaGameAssetGuideWindow.py)）。
-オンライン一覧生成・ダウンロード対象選択・取り込み後クリーンアップの 3 箇所で参照する。
+実装: `ALLOWED_PACKS` 定数
+（[src/core/AssetPackService.py](../../src/core/AssetPackService.py)。2026-11-14 の
+ADR-005 S-final SF-3b で、ダイアログの `_ALLOWED_PACKS` から core へ移した。ダイアログと
+v1 の一覧 `GET /api/v1/assets/packs` が同じ core を呼ぶ）。一覧の生成・インストールするパックの検査・
+ダウンロードした 7z から置くフォルダの選別・取り込みでコピー / 展開するフォルダの選別で参照する
+（取り込みは、置いてから削除するのではなく、最初から置かない形に変えた）。
 
 ## Alternatives considered
 
@@ -82,7 +85,7 @@ cartoon / versus_screen* / webm / webp / website / banner / card / 音声系 な
 - 上流 `assets.json` にメーカー/ライセンス情報が追加され、タイトル単位での
   自動判別が可能になったとき（メーカー別ポリシーへ移行を検討）。
 - Autona が新たな機能で別のパック種別（例: 新しいアイコン種別）を使うようになったとき
-  （`_ALLOWED_PACKS` に追加）。
+  （`core/AssetPackService.ALLOWED_PACKS` に追加）。
 - 主要メーカーの大会ガイドラインが改定され、許可/禁止の線引きが変わったとき。
 - `full`/`portrait` の同梱・取得方針について、より保守的（スクリーンショットのみ）/
   より緩い方針に見直す必要が生じたとき。

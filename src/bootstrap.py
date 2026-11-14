@@ -441,6 +441,21 @@ def bootstrap_core():
             languages=lambda: AutonaLocaleHelper.languages,
             listening=listening)
 
+    # ORDER CONSTRAINT: the game asset packs -- the upstream index, the
+    # download and the imports (ADR-005 S-final SF-3b) -- after the executor
+    # its jobs run on and the game asset catalog it lists and scans into.
+    # Nothing is read or fetched here. The scan that follows an import is
+    # the shell's, set by each shell (bootstrap_gui() / src/headless.py)
+    # before anything can start a job: the guide window and the web server
+    # are both the shell's, after this function returns. The games a job
+    # moved aside and did not put back are put back by each shell's first
+    # scan job, before it scans (RestoreReplaced: the desktop adapter's
+    # UiMounted, HeadlessGames.Start), so after this; it does not wait
+    # for a job, which does the same at its start.
+    from .core.AssetPackService import AssetPackService
+    if AssetPackService.instance is None:
+        AssetPackService.instance = AssetPackService()
+
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
     # are switched to the stub + shared layout/designer_runtime/ before
     # anything can serve or list them -- the web server and the BOARD
@@ -609,6 +624,17 @@ def bootstrap_gui():
         AutonaShellOperations.instance.RenderThumbnail)
     AutonaWebOperations.startImageRender = (
         AutonaShellOperations.instance.StartImageRender)
+
+    # ORDER CONSTRAINT: the scan that follows an asset pack's install or
+    # import (ADR-005 S-final SF-3b) is the adapter's, so the game selector,
+    # the provider's game and the web server's games_changed follow it as
+    # they follow the startup scan (onLoadAssets). The bound method, not
+    # LoadGames(): it runs on the import's own job, which may not submit
+    # another (TaskExecutor's NestedSubmitError). After the adapter, before
+    # the window (the guide window) and the web server can start a job.
+    # SF-6 makes it the core GameLoader's scan.
+    from .core.AssetPackService import AssetPackService
+    AssetPackService.instance.scan = AutonaGameAssetManager.instance._Scan
 
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
     # per player), its set length and its commit, the wiring the headless

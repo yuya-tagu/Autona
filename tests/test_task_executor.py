@@ -912,14 +912,11 @@ THREADS_LEFT = {
     ("src/core/TaskExecutor.py", "TaskExecutor.__init__",
      "ThreadPoolExecutor"),
     ("src/core/TaskExecutor.py", "TaskExecutor._RunNextStep", "Thread"),
-    # The updater's (auto-update is not touched) and the asset guide's
-    # (a desktop window's own) QThreads.
+    # The updater's QThreads (auto-update is not touched). The asset
+    # guide's two (the index fetch, the download) went in ADR-005 S-final
+    # SF-3b: core's AssetPackService runs them as TaskExecutor jobs.
     ("src/AutonaUpdater.py", "_CheckThread", "class(QThread)"),
     ("src/AutonaUpdater.py", "_DownloadThread", "class(QThread)"),
-    ("src/AutonaGameAssetGuideWindow.py", "_IndexFetchThread",
-     "class(QThread)"),
-    ("src/AutonaGameAssetGuideWindow.py", "_AssetDownloadThread",
-     "class(QThread)"),
 }
 
 

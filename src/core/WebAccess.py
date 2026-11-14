@@ -292,6 +292,16 @@ ROUTE_ACCESS = {
     # pass as this PC's own request; its route is SF-4a's.)
     "api_v1.get_api_catalog": READ,
     "api_v1.get_connection": THIS_PC,
+    # The game asset packs (ADR-005 S-final SF-3b; the "Add game assets"
+    # window, a React page in SF-4b). The list -- the upstream index and
+    # what is installed -- names no local path, but reading it may fetch
+    # the index from GitHub, which a LAN device or the preview listener
+    # must not set off. The last job's state may name this PC's paths.
+    # (The jobs that write user_data/games are not in v1 yet: THIS_PC lets
+    # this origin's layout/ pages through, so they come with SF-4b under
+    # the secret the shell hands only to the shared view.)
+    "api_v1.get_asset_packs": THIS_PC,
+    "api_v1.get_assets_job": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,
