@@ -4,12 +4,14 @@ import {apiErrorReason, apiErrorStatus} from "../api";
 
 // What the game assets page (ADR-005 S-final SF-4b-2) asks of /api/v1:
 // the reads (the pack list THIS_PC, the job SHELL), the SHELL writes of
-// SF-4b-1 and the ZIP upload. Text only: nothing here renders HTML.
+// SF-4b-1, the ZIP upload and the picked folder's import (SF-5a-2). Text
+// only: nothing here renders HTML.
 
 export const PACKS_PATH = "/api/v1/assets/packs";
 export const JOB_PATH = "/api/v1/assets/job";
 export const UPLOADS_PATH = "/api/v1/assets/uploads";
 export const IMPORT_ZIP_PATH = "/api/v1/assets:importZip";
+export const IMPORT_FOLDER_PATH = "/api/v1/assets:importFolder";
 export const INSTALL_PATH = "/api/v1/assets/packs:install";
 export const CANCEL_PATH = "/api/v1/assets/job:cancel";
 export const REVEAL_PATH = "/api/v1/assets/games-folder:reveal";

@@ -2205,18 +2205,20 @@ def get_shell_session():
     return _no_store(ok(data={"ticket": WebOps.get_shell_session()}))
 
 
-# ── Game asset packs (ADR-005 S-final SF-3b / SF-4b-1) ──
+# ── Game asset packs (ADR-005 S-final SF-3b / SF-4b-1 / SF-5a-2) ──
 # What the "Add game assets" window shows and does, for the page that
 # replaces it (SF-4b): core's AssetPackService. The list is THIS_PC (it may
 # fetch from GitHub). Everything else is WebAccess.SHELL (SF-4b-1): the last
 # job's state (a job's messages may name this PC's paths), the ZIP upload,
 # the jobs that write user_data/games (an install, the uploaded ZIP's
-# import) and their cancel, and the games folder's reveal -- THIS_PC also
-# lets the layout/ pages of this origin through, which must not replace
-# installed games, download gigabytes or fill the disk. The secret is the
-# shell's, handed only to the shared view's main frame: headless answers
-# them all 403. A folder import is not here (a page cannot name a folder;
-# SF-5a's picker brings it back). Every answer is no-store, and a refusal
+# import, the picked folder's import) and their cancel, and the games
+# folder's reveal -- THIS_PC also lets the layout/ pages of this origin
+# through, which must not replace installed games, download gigabytes or
+# fill the disk. The secret is the shell's, handed only to the shared
+# view's main frame: headless answers them all 403. A folder is imported by
+# the id of the shell's pick only (SF-5a-2: the shared view's shell request
+# pickFolder, the native dialog; core holds the path) -- never a path a
+# request names. Every answer is no-store, and a refusal
 # answers core's code (error.reason) with the words of _ASSET_REFUSALS --
 # core's message, which may name a path or the archive's entries, goes to
 # the log alone. Not listed in the API catalog (the shared view's page
@@ -2281,6 +2283,9 @@ _ASSET_REFUSALS = {
     assets.UNKNOWN_UPLOAD: (
         NOT_FOUND,
         "no such upload (imported, dropped, replaced or expired)", 404),
+    assets.UNKNOWN_PICK: (
+        NOT_FOUND, "no such folder pick (imported, replaced or expired)",
+        404),
     assets.BUSY: (CONFLICT, "another asset job is running", 409),
     assets.STOPPED: (UNAVAILABLE, "the app is shutting down", 503),
     assets.FAILED: (INTERNAL, "the asset operation failed", 500),
@@ -2425,6 +2430,55 @@ def import_assets_zip():
     except assets.AssetPackError as error:
         raise _asset_refused("importZip", error.code, error.message)
     return _asset_job_started(assets.IMPORT_ZIP, answer)
+
+
+@api_v1.route("/assets:importFolder", methods=["POST"])
+@_no_store_answers
+@write_op("assets.importFolder", log_keys_only=True)
+def import_assets_folder():
+    # {"pick": the shell request pickFolder's id (the folder the operator
+    # picked in the desktop's dialog; core holds its path), "overwrite":
+    # [the installed games to replace -- each one of the pick's conflicts,
+    # else 400], "confirm": true when overwrite names any}: imports the
+    # folder (core takes the pick out) -> 202 {"accepted", "operation":
+    # "importFolder", "job": its revision}. 404 reason unknown_pick
+    # (imported, replaced or expired); 409 reason busy while a job runs
+    # (the pick stays). No path is taken or answered -- nor told by the
+    # job's state (GET /assets/job): a game it could not copy says how many
+    # files and the OS's reason, the rest goes to the debug log (core's
+    # _JobText). Logged by key: the body names the pick. The folder of
+    # Autona was refused when picked (no_game); user_data/games picked
+    # imports its games as they are; a game holding user_data/games inside
+    # is the job's failure for that game.
+    body = _json_body()
+    pick = body.get("pick")
+    if not isinstance(pick, str) or not pick:
+        raise ApiError(INVALID_ARGUMENT,
+                       "pick must be the shell request pickFolder's pick",
+                       400)
+    overwrite = body.get("overwrite")
+    if overwrite is None:
+        overwrite = []
+    if not isinstance(overwrite, list) or not all(
+            isinstance(name, str) and name for name in overwrite):
+        raise ApiError(INVALID_ARGUMENT,
+                       "overwrite must be a list of game names", 400)
+    try:
+        _games, conflicts = WebOps.asset_folder_pick_games(pick)
+    except assets.AssetPackError as error:
+        raise _asset_refused("importFolder", error.code, error.message)
+    if any(name not in conflicts for name in overwrite):
+        raise ApiError(
+            INVALID_ARGUMENT, "overwrite may name only the pick's conflicts "
+            "(the installed games it would replace)", 400)
+    if overwrite:
+        _require_confirm(body)
+    try:
+        answer = WebOps.import_asset_folder_pick(
+            pick, list(dict.fromkeys(overwrite)))
+    except assets.AssetPackError as error:
+        raise _asset_refused("importFolder", error.code, error.message)
+    return _asset_job_started(assets.IMPORT_FOLDER, answer)
 
 
 @api_v1.route("/assets/packs:install", methods=["POST"])

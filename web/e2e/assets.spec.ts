@@ -107,6 +107,9 @@ test("in a browser the page explains and reads nothing", async ({page}) => {
         .toHaveCount(0);
     await expect(page.getByRole("button", {name: "Import from ZIP"}))
         .toHaveCount(0);
+    // The folder import is the desktop's dialog (SF-5a-2): not offered.
+    await expect(page.getByRole("button", {name: "Import from folder"}))
+        .toHaveCount(0);
     await expect(page.getByRole("button", {name: "Open games folder"}))
         .toHaveCount(0);
     expect(asked).toEqual([]);
@@ -121,6 +124,10 @@ test("the asset routes the page uses are the shell's: 403 to a browser", async (
     const reveal = await request.post(
         serverUrl("/api/v1/assets/games-folder:reveal"), {data: {}});
     expect(reveal.status()).toBe(403);
+    // SF-5a-2: the picked folder's import, by its id alone.
+    const folder = await request.post(
+        serverUrl("/api/v1/assets:importFolder"), {data: {pick: "abcdefgh"}});
+    expect(folder.status()).toBe(403);
 });
 
 for (const width of [600, 860]) {
@@ -218,6 +225,39 @@ for (const lng of ["en", "ja"]) {
         await page.locator('input[type="file"]').setInputFiles({
             name: "game.zip", mimeType: "application/zip",
             buffer: Buffer.from("zip")});
+        await expect(page.getByRole("dialog")).toBeVisible();
+        expect(await overflow(page)).toEqual([]);
+    });
+
+    test(`the picked folder's overwrite dialog (${lng}) fits 600 px`, async ({page}) => {
+        // The folder button asks the desktop in a click (window.open of
+        // /web/shell-request, SF-5a-2): kept here, and the desktop's answer
+        // handed to the page as the shared view would.
+        await stubShell(page);
+        await page.addInitScript(() => {
+            (window as any).__opened = [];
+            window.open = ((url: string) => {
+                (window as any).__opened.push(url);
+                return null;
+            }) as typeof window.open;
+        });
+        await page.setViewportSize({width: 600, height: 900});
+        await page.goto(serverUrl(`/web/assets?lng=${lng}`));
+        await expect(page.getByRole("combobox")).toBeEnabled();
+
+        await page.getByRole("button", {
+            name: /^(Import from folder|フォルダから取り込む)$/}).click();
+        const opened: string[] = await page.evaluate(
+            () => (window as any).__opened);
+        expect(opened).toHaveLength(1);
+        const url = new URL(opened[0]);
+        expect(url.pathname).toBe("/web/shell-request");
+        expect(url.searchParams.get("verb")).toBe("pickFolder");
+        await page.evaluate(({id, games}) => {
+            window.autonaPanelShell!.shellResult(id, {
+                ok: true, status: "picked", pick: "e2e-pick", games,
+                conflicts: [games[0]], expiresInSec: 900});
+        }, {id: url.searchParams.get("request")!, games: [LONG, "other"]});
         await expect(page.getByRole("dialog")).toBeVisible();
         expect(await overflow(page)).toEqual([]);
     });

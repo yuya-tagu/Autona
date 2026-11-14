@@ -1246,6 +1246,413 @@ def test_a_folder_that_cannot_be_imported_says_why(env, make, code):
     assert env.executor.queued() == 0
 
 
+# ── the folder pick (SF-5a-2) ────────────────────────────────────────────
+# The folder the shell's native dialog picked (AutonaShellOperations'
+# pickFolder): held under an id, one at a time, for PICK_EXPIRY_SECS; the
+# page imports it by the id (v1 POST /assets:importFolder) and never sees the
+# path (tests/test_api_v1_assets.py).
+
+def _picked(env, *names, under="src"):
+    for name in names:
+        _game(env.root / under, name)
+    return env.service.HoldFolderPick(str(env.root / under))
+
+
+def _unknown_pick(env, pick):
+    with pytest.raises(AssetPackError) as refused:
+        env.service.FolderPickGames(pick)
+    assert refused.value.code == assets.UNKNOWN_PICK
+
+
+def test_a_folder_pick_is_held_under_an_id_and_imported_by_it(env):
+    pick, games, conflicts = _picked(env, "aaa", "bbb")
+
+    assert games == ["aaa", "bbb"] and conflicts == []
+    assert isinstance(pick, str) and len(pick) >= 16
+    assert assets._UPLOAD_ID.match(pick)
+    assert str(env.root) not in pick
+    assert env.service.FolderPickGames(pick) == (["aaa", "bbb"], [])
+
+    assert env.service.ImportFolderPick(pick, []) == (assets.STARTED, 1)
+    job = _run(env)
+    assert job["operation"] == assets.IMPORT_FOLDER
+    assert job["imported"] == ["aaa", "bbb"]
+    assert (env.games / "bbb" / "base_files" / "config.json").is_file()
+    # Taken: an id imports once.
+    _unknown_pick(env, pick)
+    with pytest.raises(AssetPackError) as refused:
+        env.service.ImportFolderPick(pick, [])
+    assert refused.value.code == assets.UNKNOWN_PICK
+
+
+def test_a_folder_picks_conflicts_are_read_now_and_overwritten_by_name(env):
+    pick, _games, conflicts = _picked(env, "aaa", "bbb")
+    assert conflicts == []
+    _game(env.games, "aaa", marker=b"old")
+    assert env.service.FolderPickGames(pick) == (["aaa", "bbb"], ["aaa"])
+
+    env.service.ImportFolderPick(pick, ["aaa"])
+    job = _run(env)
+    assert sorted(job["imported"]) == ["aaa", "bbb"]
+    assert (env.games / "aaa" / "full" / "a.png").read_bytes() == b"x"
+
+
+def test_a_folder_pick_expires_when_it_is_looked_at(env):
+    pick, _g, _c = _picked(env, "aaa")
+    env.clock[0] += assets.PICK_EXPIRY_SECS - 1
+    assert env.service.FolderPickGames(pick)[0] == ["aaa"]
+
+    env.clock[0] += 1
+    _unknown_pick(env, pick)
+    assert env.service._pick is None
+    assert assets.PICK_EXPIRY_SECS == 15 * 60
+
+
+def test_an_expired_pick_is_let_go_by_a_lookup_under_another_id(env):
+    _picked(env, "aaa")
+    env.clock[0] += assets.PICK_EXPIRY_SECS
+    _unknown_pick(env, "another-id-0123456789")
+    assert env.service._pick is None
+
+
+def test_a_new_pick_replaces_the_held_one_and_a_refused_one_does_not(env):
+    first, _g, _c = _picked(env, "aaa", under="one")
+    second, games, _c = _picked(env, "bbb", under="two")
+    assert games == ["bbb"] and first != second
+    _unknown_pick(env, first)
+
+    (env.root / "empty").mkdir()
+    with pytest.raises(AssetPackError) as refused:
+        env.service.HoldFolderPick(str(env.root / "empty"))
+    assert refused.value.code == assets.NO_GAME
+    assert env.service.FolderPickGames(second)[0] == ["bbb"]
+
+
+@pytest.mark.parametrize("make, code", [
+    (lambda root: root / "missing", assets.NOT_A_FOLDER),
+    (lambda root: (root / "empty").mkdir() or root / "empty",
+     assets.NO_GAME),
+    (lambda root: _game(root / "bad", ".hidden").parent, assets.BAD_NAME),
+])
+def test_a_folder_that_cannot_be_picked_holds_nothing(env, make, code):
+    with pytest.raises(AssetPackError) as refused:
+        env.service.HoldFolderPick(str(make(env.root)))
+    assert refused.value.code == code
+    assert env.service._pick is None
+
+
+def test_a_folder_pick_matches_its_id_exactly(env, monkeypatch):
+    pick, _g, _c = _picked(env, "aaa")
+    for other in (pick[:-1], pick + "x", pick.upper() if pick.upper() != pick
+                  else pick.lower(), "", " " + pick, None, 7, [pick],
+                  "../" + pick):
+        _unknown_pick(env, other)
+    assert env.service.FolderPickGames(pick)[0] == ["aaa"]
+
+    # The comparison is hmac.compare_digest's (the time it takes does not
+    # tell how much of an id matched).
+    compared = []
+
+    def compare(a, b):
+        compared.append((a, b))
+        return a == b
+
+    monkeypatch.setattr(assets, "hmac", SimpleNamespace(
+        compare_digest=compare))
+    assert env.service.FolderPickGames(pick)[0] == ["aaa"]
+    assert compared == [(pick, pick)]
+
+
+def test_a_pick_import_while_a_job_runs_is_busy_and_keeps_the_pick(env):
+    other = _zip(env.root / "other.zip", _game_entries("ccc"))
+    assert env.service.ImportZip(other)[0] == assets.STARTED
+    pick, _g, _c = _picked(env, "aaa")
+
+    assert env.service.ImportFolderPick(pick, []) == (assets.BUSY, 1)
+    assert env.service.FolderPickGames(pick)[0] == ["aaa"]
+    _run(env)
+    assert env.service.ImportFolderPick(pick, [])[0] == assets.STARTED
+    assert _run(env)["imported"] == ["aaa"]
+
+
+def test_a_job_that_starts_while_the_pick_is_probed_leaves_it_held(
+        env, monkeypatch):
+    # As the upload's M1 (SF-4b-1): ImportFolderPick's busy check passed,
+    # then another job started while ImportFolder probed the folder: held
+    # again under the same id, its expiry unchanged.
+    pick, _g, _c = _picked(env, "aaa")
+    expiresAt = env.service._pick["expiresAt"]
+    start = env.service._Start
+    monkeypatch.setattr(env.service, "_Start",
+                        lambda *args, **kwargs: (assets.BUSY, 7))
+
+    assert env.service.ImportFolderPick(pick, []) == (assets.BUSY, 7)
+    assert env.service._pick["expiresAt"] == expiresAt
+    assert env.service.FolderPickGames(pick)[0] == ["aaa"]
+
+    monkeypatch.setattr(env.service, "_Start", start)
+    assert env.service.ImportFolderPick(pick, [])[0] == assets.STARTED
+    assert _run(env)["imported"] == ["aaa"]
+
+
+def test_a_newer_pick_during_the_probe_replaces_the_one_a_job_beat(
+        env, monkeypatch):
+    old, _g, _c = _picked(env, "aaa", under="one")
+    _game(env.root / "two", "bbb")
+    held = {}
+
+    def busy(*args, **kwargs):
+        held["newer"] = env.service.HoldFolderPick(str(env.root / "two"))
+        return assets.BUSY, 7
+
+    monkeypatch.setattr(env.service, "_Start", busy)
+    assert env.service.ImportFolderPick(old, []) == (assets.BUSY, 7)
+    newer, games, _c = held["newer"]
+    assert games == ["bbb"]
+    assert env.service.FolderPickGames(newer)[0] == ["bbb"]
+    _unknown_pick(env, old)
+
+
+def test_a_pick_whose_folder_changed_is_refused_and_gone(env):
+    pick, _g, _c = _picked(env, "aaa")
+    shutil.rmtree(env.root / "src")
+    with pytest.raises(AssetPackError) as refused:
+        env.service.ImportFolderPick(pick, [])
+    assert refused.value.code == assets.NOT_A_FOLDER
+    _unknown_pick(env, pick)
+    assert env.executor.queued() == 0
+
+
+def test_a_pick_of_the_folder_holding_the_games_folder_copies_nothing(env):
+    # Picked, but the job does not copy user_data/games into itself.
+    _write(env.work / "base_files" / "config.json", _config(name="W"))
+    pick, games, _c = env.service.HoldFolderPick(str(env.work))
+    assert games == ["work"]
+    env.service.ImportFolderPick(pick, [])
+    job = _run(env)
+    assert job["imported"] == [] and [f["name"] for f in job["failed"]] == [
+        "work"]
+    assert not (env.games / "work").exists()
+
+
+def test_nothing_of_the_picked_folder_reaches_the_logs(env):
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="DEBUG")
+    try:
+        first, _g, _c = _picked(env, "aaa", under="private-folder-7Q")
+        second, _g, _c = _picked(env, "bbb", under="private-folder-7Q")
+        env.service.ImportFolderPick(second, [])
+        _run(env)
+        _picked(env, "ccc", under="private-folder-8Q")
+        env.clock[0] += assets.PICK_EXPIRY_SECS
+        _unknown_pick(env, first)
+    finally:
+        logger.remove(sink)
+
+    text = "\n".join(lines)
+    for secret in ("private-folder", str(env.root), first, second):
+        assert secret not in text, secret
+    assert "Asset folder pick: held" in text
+    assert "Asset folder pick: expired" in text
+
+
+def test_what_the_games_folder_itself_is_to_a_folder_import(env):
+    # The folder of Autona: its games are two levels down (user_data/games),
+    # so it holds none -- refused when picked, nothing held.
+    _game(env.games, "aaa")
+    _game(env.games, "bbb")
+    with pytest.raises(AssetPackError) as refused:
+        env.service.HoldFolderPick(str(env.work))
+    assert refused.value.code == assets.NO_GAME
+    # user_data/games itself: its games, each imported as it is (nothing
+    # copied, nothing to overwrite).
+    before = {name: _files(env.games / name) for name in ("aaa", "bbb")}
+    pick, games, conflicts = env.service.HoldFolderPick(str(env.games))
+    assert games == ["aaa", "bbb"] and conflicts == []
+    env.service.ImportFolderPick(pick, [])
+    job = _run(env)
+    assert job["status"] == assets.DONE
+    assert job["imported"] == ["aaa", "bbb"] and job["failed"] == []
+    assert {name: _files(env.games / name) for name in ("aaa", "bbb")} == \
+        before
+    assert _staging(env.games) == [] and _asides(env.games) == []
+
+
+def _junction(link, target):
+    """A junction (else a symbolic link) at ``link`` onto the folder
+    ``target``; False when neither can be made here."""
+    try:
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+        return True
+    except (ImportError, AttributeError, OSError):
+        pass
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+def test_a_picked_link_onto_an_installed_game_is_that_game(env):
+    # The folder picked is followed (a link or a junction): one onto an
+    # installed game is that game -- imported as it is, no conflict -- not
+    # a copy of it over itself.
+    _game(env.games, "aaa", marker=b"mine")
+    (env.root / "elsewhere").mkdir()
+    link = env.root / "elsewhere" / "aaa"
+    if not _junction(link, env.games / "aaa"):
+        pytest.skip("no junction nor symbolic link can be made here")
+    try:
+        pick, games, conflicts = env.service.HoldFolderPick(str(link))
+        assert games == ["aaa"] and conflicts == []
+        env.service.ImportFolderPick(pick, [])
+        job = _run(env)
+        assert job["imported"] == ["aaa"] and job["failed"] == []
+        assert job["total"] == 0          # nothing copied
+        assert (env.games / "aaa" / "full" / "a.png").read_bytes() == b"mine"
+        assert _asides(env.games) == []
+    finally:
+        os.rmdir(link)
+
+
+def test_a_picked_link_onto_a_game_holding_the_games_folder_is_not_copied(
+        env):
+    # Resolved, the game's folder holds user_data/games: not copied into
+    # itself (by its link's own path it would not seem to).
+    _write(env.work / "base_files" / "config.json", _config(name="W"))
+    link = env.root / "work-link"
+    if not _junction(link, env.work):
+        pytest.skip("no junction nor symbolic link can be made here")
+    try:
+        pick, games, _c = env.service.HoldFolderPick(str(link))
+        assert games == ["work-link"]
+        env.service.ImportFolderPick(pick, [])
+        job = _run(env)
+        assert job["imported"] == []
+        assert [f["name"] for f in job["failed"]] == ["work-link"]
+        assert not (env.games / "work-link").exists()
+        assert _staging(env.games) == []
+    finally:
+        os.rmdir(link)
+
+
+def _logs():
+    """Everything logged at DEBUG and up, and at INFO and up: (debug, info,
+    stop)."""
+    from loguru import logger
+
+    debug, info = [], []
+    sinks = [logger.add(lambda m: debug.append(str(m)), level="DEBUG"),
+             logger.add(lambda m: info.append(str(m)), level="INFO")]
+    return debug, info, lambda: [logger.remove(sink) for sink in sinks]
+
+
+LOCKED = ("The process cannot access the file because it is being used by "
+          "another process")
+
+
+def test_a_file_the_copy_cannot_read_fails_its_game_without_a_path(
+        env, monkeypatch):
+    # A locked file (Windows' sharing violation) in the folder picked: the
+    # game fails, its message says how many files and the OS's reason --
+    # never the folder's path nor a file's -- and so do the error lines;
+    # the whole failure goes to the debug log only.
+    source = env.root / "private-folder-7Q"
+    _game(source, "aaa")
+    _game(source, "bbb")
+    real = shutil.copy2
+
+    def copy2(src, dst, *args, **kwargs):
+        if os.path.basename(src) == "a.png" and os.sep + "aaa" + os.sep in src:
+            raise PermissionError(13, LOCKED, src)
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copy2", copy2)
+    debug, info, stop = _logs()
+    try:
+        pick, _g, _c = env.service.HoldFolderPick(str(source))
+        env.service.ImportFolderPick(pick, [])
+        job = _run(env)
+    finally:
+        stop()
+
+    assert job["status"] == assets.DONE
+    assert job["imported"] == ["bbb"]
+    assert job["failed"] == [{
+        "name": "aaa", "message": f"1 file(s) could not be copied ({LOCKED})"}]
+    assert not (env.games / "aaa").exists()
+    infoText = "\n".join(info)
+    for secret in ("private-folder", str(env.root), "a.png"):
+        assert secret not in json.dumps(job), secret
+        assert secret not in infoText, secret
+    assert "Game asset import failed for aaa: 1 file(s) could not be copied" \
+        in infoText
+    # The detail is the debug log's.
+    assert "private-folder" in "\n".join(debug)
+
+
+def test_a_folder_the_copy_cannot_open_fails_its_game_without_a_path(
+        env, monkeypatch):
+    source = env.root / "private-folder-7Q"
+    _game(source, "aaa")
+    real = shutil.copytree
+
+    def copytree(src, dst, *args, **kwargs):
+        raise PermissionError(13, "Access is denied", src)
+
+    monkeypatch.setattr(shutil, "copytree", copytree)
+    debug, info, stop = _logs()
+    try:
+        pick, _g, _c = env.service.HoldFolderPick(str(source))
+        env.service.ImportFolderPick(pick, [])
+        job = _run(env)
+    finally:
+        stop()
+        monkeypatch.setattr(shutil, "copytree", real)
+
+    assert job["failed"] == [{"name": "aaa", "message": "Access is denied"}]
+    assert "private-folder" not in json.dumps(job)
+    assert "private-folder" not in "\n".join(info)
+
+
+@pytest.mark.parametrize("failure, error, message", [
+    (lambda path: PermissionError(13, "Access is denied", path),
+     assets.FAILED, "Access is denied"),
+    (lambda path: OSError(28, "No space left on device", path),
+     assets.DISK_FULL, "No space left on device"),
+    (lambda path: ValueError(f"cannot read {path}"),
+     assets.FAILED, "unexpected error (ValueError)"),
+])
+def test_a_folder_job_that_fails_says_why_without_a_path(
+        env, monkeypatch, failure, error, message):
+    # The job's own failure (not a game's): its message in the job state
+    # and its error line name no path; the traceback is the debug log's.
+    source = env.root / "private-folder-7Q"
+    _game(source, "aaa")
+
+    def refuse(where, needed):
+        raise failure(str(source))
+
+    monkeypatch.setattr(assets, "_RequireSpace", refuse)
+    debug, info, stop = _logs()
+    try:
+        pick, _g, _c = env.service.HoldFolderPick(str(source))
+        env.service.ImportFolderPick(pick, [])
+        job = _run(env)
+    finally:
+        stop()
+
+    assert job["status"] == assets.ERROR
+    assert job["error"] == error and job["message"] == message
+    assert "private-folder" not in json.dumps(job)
+    assert "private-folder" not in "\n".join(info)
+    assert f"failed: {error}: {message}" in "\n".join(info)
+    assert "private-folder" in "\n".join(debug)
+
+
 # ── the install ──────────────────────────────────────────────────────────
 
 def _upstream(env):

@@ -18,7 +18,8 @@ The access token's routes (``/access-token``, ``/access-token:regenerate``;
 WebAccess.SHELL, SF-4a-1) are not listed: nothing but the app's own window
 may call them, so they are not for a person to operate by hand. Nor are the
 game asset routes (``/assets/job``, ``/assets/uploads``,
-``/assets:importZip``, ``/assets/packs:install``, ``/assets/job:cancel``,
+``/assets:importZip``, ``/assets:importFolder`` (SF-5a-2),
+``/assets/packs:install``, ``/assets/job:cancel``,
 ``/assets/games-folder:reveal``; SHELL, SF-4b-1) for the same reason, nor
 the shell request's ticket (``/shell-session``; SHELL, SF-5a-1).
 

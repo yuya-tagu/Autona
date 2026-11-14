@@ -2171,9 +2171,10 @@ def test_the_api_catalog_is_read_from_anywhere(server):
 # its read may fetch the index from GitHub -- not another computer's to set
 # off, token or not. The rest is SHELL (SF-4b-1; below, with the access
 # token's): the last job's state (its messages may name this PC's paths),
-# the ZIP upload, the jobs that write user_data/games, their cancel and the
-# games folder's reveal -- THIS_PC also lets this origin's layout/ pages
-# through. The folder import is not in v1 (a page cannot name a folder).
+# the ZIP upload, the jobs that write user_data/games (the picked folder's
+# import too, SF-5a-2), their cancel and the games folder's reveal --
+# THIS_PC also lets this origin's layout/ pages through. A folder is
+# imported by the shell's pick only (a page cannot name one).
 
 @pytest.fixture
 def assetOps(server, monkeypatch):
@@ -2196,6 +2197,8 @@ def assetOps(server, monkeypatch):
             ("asset_upload_games", (["aaa"], [])),
             ("drop_asset_upload", True),
             ("import_asset_upload", (assets.STARTED, 1)),
+            ("asset_folder_pick_games", (["aaa"], [])),
+            ("import_asset_folder_pick", (assets.STARTED, 1)),
             ("install_asset_packs", (assets.STARTED, 1)),
             ("cancel_assets_job", True),
             ("reveal_games_folder", True)):
@@ -2244,12 +2247,19 @@ def test_only_this_pcs_own_request_reads_the_assets(
     assert assetOps == []
 
 
-def test_the_folder_import_is_not_in_v1(server, assetOps):
-    # A page cannot name a folder of this PC; SF-5a's picker brings it back.
+def test_the_folder_import_is_the_shells_and_takes_a_pick_alone(
+        server, assetOps):
+    # SF-5a-2: a folder is imported by the id of the shell's pick (the
+    # native dialog) -- SHELL like every write of user_data/games, so this
+    # PC's own request without the shell's secret is refused, and no route
+    # takes a folder's path.
     client = _client(server)
-    assert client.post("/api/v1/assets:importFolder",
-                       json={}).status_code in (404, 405)
+    response = client.post("/api/v1/assets:importFolder",
+                           json={"pick": "abcdefgh"})
+    assert response.status_code == 403
     assert assetOps == []
+    assert WebAccess.ROUTE_ACCESS["api_v1.import_assets_folder"] == \
+        WebAccess.SHELL
 
 
 # ── The access token's routes (ADR-005 S-final SF-4a-1) ──────────────────
@@ -2459,6 +2469,8 @@ ASSET_SHELL_ROUTES = [
      200),
     ("POST", "/api/v1/assets:importZip", {"upload": "abcdefgh"},
      "import_asset_upload", 202),
+    ("POST", "/api/v1/assets:importFolder", {"pick": "abcdefgh"},
+     "import_asset_folder_pick", 202),
     ("POST", "/api/v1/assets/packs:install", {"game": "ssbu",
                                               "confirm": True},
      "install_asset_packs", 202),

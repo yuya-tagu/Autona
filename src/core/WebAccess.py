@@ -319,15 +319,17 @@ ROUTE_ACCESS = {
     # the index from GitHub, which a LAN device or the preview listener
     # must not set off. The rest is SHELL (SF-4b-1): the last job's state
     # (it may name this PC's paths), the ZIP upload (gigabytes onto this
-    # PC's disk), the jobs that write user_data/games and their cancel, and
-    # the games folder's reveal (a window on this PC) -- THIS_PC lets this
-    # origin's layout/ pages through, so they take the secret the shell
-    # hands only to the shared view (headless: 403).
+    # PC's disk), the jobs that write user_data/games (the picked folder's
+    # import too, SF-5a-2) and their cancel, and the games folder's reveal
+    # (a window on this PC) -- THIS_PC lets this origin's layout/ pages
+    # through, so they take the secret the shell hands only to the shared
+    # view (headless: 403).
     "api_v1.get_asset_packs": THIS_PC,
     "api_v1.get_assets_job": SHELL,
     "api_v1.upload_assets_zip": SHELL,
     "api_v1.drop_asset_upload": SHELL,
     "api_v1.import_assets_zip": SHELL,
+    "api_v1.import_assets_folder": SHELL,
     "api_v1.install_asset_packs": SHELL,
     "api_v1.cancel_assets_job": SHELL,
     "api_v1.reveal_games_folder": SHELL,

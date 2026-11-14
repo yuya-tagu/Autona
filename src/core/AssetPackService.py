@@ -99,6 +99,21 @@ removes what it wrote. What a process left there when it ended is removed
 by ``RemoveStaleUploads`` at each shell's first scan. Neither the path nor
 the client's file name is answered or logged.
 
+The folder pick
+---------------
+Nor can the page name a folder of this PC. The shell asks the operator for
+one in its native dialog (SF-5a-2: the shared view's shell request
+``pickFolder``, AutonaShellOperations) and hands it to ``HoldFolderPick``,
+which probes it as a folder import does and holds it -- one at a time, a
+new pick replacing it -- under an id (``secrets.token_urlsafe``) for
+``PICK_EXPIRY_SECS``, read off ``time.monotonic()`` when the slot is looked
+at (``_HeldPick``). The page gets the id, the games and the installed ones
+among them, never the path. ``ImportFolderPick`` (v1 POST
+/assets:importFolder) takes it out and hands it to ``ImportFolder``; a job
+running, or one started while the folder was probed again (BUSY), leaves
+it held under its id, its expiry unchanged (as the upload). Nothing is
+written for a pick, so nothing is removed when it goes.
+
 Safety
 ------
 - An archive is read before anything is extracted: every name must be a
@@ -117,8 +132,11 @@ Safety
   it is written. Names are matched case-insensitively, as Windows does
   (``Base_Files/Config.json``, a pack ``LOGO`` with ``CONFIG.JSON``); two
   games whose names differ only in case are refused.
-- A folder import copies no symbolic link or junction (a link to a file
-  outside would be copied as that file).
+- A folder import copies no symbolic link or junction inside the folder (a
+  link to a file outside would be copied as that file). The folder named
+  itself -- picked in the shell's dialog -- is followed when it is a link
+  or a junction: the folders it is compared with (user_data/games, a game's
+  installed folder) are compared resolved (``os.path.realpath``).
 - The free space is checked before a download, an extraction and a copy.
 - Game folder names and the index's file names are checked
   (``SafeName``; the index's file names are plain names, no leading dot,
@@ -126,15 +144,24 @@ Safety
 - Who may read what is the web layer's (src/core/WebAccess.py: the list is
   THIS_PC -- it may fetch from GitHub, which a LAN device or the preview
   listener must not set off; the index's error is a code, its text logged
-  alone). The jobs, their state (its messages may name a path), the upload
-  and the games folder's reveal are SHELL (SF-4b-1): THIS_PC also lets this
-  origin's layout/ pages through, which could replace or remove installed
-  games, download gigabytes or fill the disk; the secret is the shell's,
-  handed only to the shared view's main frame, so headless has none of
-  them. The API answers a refusal's code, never its message.
-- A folder import is not in v1 (a page cannot name a folder; SF-5a's
-  folder picker brings it back; the window's folder import went with
-  the window in SF-4b-2, so nothing calls ``ImportFolder`` until then).
+  alone). The jobs, their state (its messages name no path of the
+  imported folder nor of the PC -- an OSError's reason alone, _JobText --
+  but for a game a job moved aside and could not put back, which names
+  where in user_data/games it is kept: _MoveIn), the upload,
+  the folder pick's import (SF-5a-2) and the games folder's reveal are
+  SHELL (SF-4b-1): THIS_PC also lets this origin's layout/ pages through,
+  which could replace or remove installed games, download gigabytes or
+  fill the disk; the secret is the shell's, handed only to the shared
+  view's main frame, so headless has none of them. The API answers a
+  refusal's code, never its message.
+- A folder is imported from v1 by its pick only (SF-5a-2): the path a
+  shell request held, never one a request names. What user_data/games
+  itself is to the import: the folder of Autona (user_data/games two levels
+  down) holds no game at its top nor in its immediate subfolders, so it is
+  refused NO_GAME; user_data/games picked holds the installed games, each
+  imported as it is (nothing copied); a game's folder holding
+  user_data/games somewhere inside is not copied into itself (the job
+  fails that game).
 
 Lock order: this service's ``_lock`` guards its own fields only; nothing is
 called with it held (no scan, no StatusService, no executor). The scan runs
@@ -142,15 +169,17 @@ on the job's thread with no lock of ours but ``_filesLock``, which a job
 holds for its whole run (``_Run``) and ``RestoreReplaced`` takes without
 waiting (it never runs a scan); it is never taken with ``_lock`` held.
 An upload is received, probed and removed with no lock of ours (``_lock``
-only to read and swap the slot).
+only to read and swap the slot); so is a folder pick probed.
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
 (agent-pitfalls #1). ``AssetPackService.instance`` is built by
 ``bootstrap_core()``; the shells set its ``scan`` and call its
 ``RestoreReplaced`` and ``RemoveStaleUploads`` on their first scan job,
-before scanning. The upload's expiry is read off ``time.monotonic()`` when
-the slot is looked at (``_HeldUpload``); nothing runs when it passes.
+before scanning. The upload's and the folder pick's expiries are read off
+``time.monotonic()`` when the slot is looked at (``_HeldUpload`` /
+``_HeldPick``); nothing runs when they pass.
 """
+import errno
 import hmac
 import os
 import re
@@ -236,8 +265,12 @@ MAX_UPLOAD_BYTES = MAX_UNPACKED_BYTES
 UPLOAD_EXPIRY_SECS = 15 * 60
 UPLOAD_CHUNK = 1024 * 1024
 # An upload's id: secrets.token_urlsafe(16), checked by shape before it is
-# compared.
+# compared. A folder pick's id (below) has the same shape.
 _UPLOAD_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+# The folder pick (SF-5a-2): the folder the operator chose in the shell's
+# native dialog, held under an id until it is imported, replaced or expires.
+# One at a time: a new pick replaces the held one. Nothing is written for it.
+PICK_EXPIRY_SECS = 15 * 60
 STATUS_CODE = "assets_load"
 # A move's retries, as StatePersistence's (a reader without
 # FILE_SHARE_DELETE -- an antivirus scan, an indexer -- makes os.replace fail
@@ -303,6 +336,9 @@ FAILED = "failed"
 UNKNOWN_UPLOAD = "unknown_upload"
 INCOMPLETE = "incomplete"
 SUPERSEDED = "superseded"
+# The folder pick's: no pick held by that id (never picked, imported,
+# replaced by a newer one or expired).
+UNKNOWN_PICK = "unknown_pick"
 
 # The index's file names: plain names, nothing a path or a URL could read
 # more into (no leading dot: not "." nor "..").
@@ -423,12 +459,21 @@ def _Folded(parts):
 
 
 def _Within(root, path):
+    # Lexical (abspath): the staging folder's own targets, per entry. A
+    # folder the operator named is resolved first (_Resolved).
     root = os.path.normcase(os.path.abspath(root))
     path = os.path.normcase(os.path.abspath(path))
     try:
         return os.path.commonpath([root, path]) == root and path != root
     except ValueError:      # another drive
         return False
+
+
+def _Resolved(path):
+    # A folder as the file system resolves it: links and junctions followed
+    # (a picked folder may be one, onto user_data/games or a game in it),
+    # compared as Windows compares names.
+    return os.path.normcase(os.path.realpath(path))
 
 
 def _IsLink(path):
@@ -500,7 +545,8 @@ def _RequireSpace(path, needed):
 def _FolderGames(root):
     """(name, folder) of each game a folder holds: the folder itself when it
     has base_files/config.json, else its immediate subfolders that do (a
-    folder may hold one game or several). Links are not followed."""
+    folder may hold one game or several). A subfolder that is a link or a
+    junction is not followed; ``root`` itself is (the folder picked)."""
     if os.path.isfile(os.path.join(root, "base_files", "config.json")):
         return [(os.path.basename(os.path.normpath(root)), root)]
     found = []
@@ -536,7 +582,9 @@ def ProbeFolder(path):
     """The games a folder holds, as (name, folder) pairs. AssetPackError
     NOT_A_FOLDER (no such folder), NO_GAME (none) or BAD_NAME (a game's
     folder name cannot be one under user_data/games, or two differ only in
-    case)."""
+    case). ``path`` may be a link or a junction (followed: _FolderGames).
+    The folder of Autona is NO_GAME (its games are two levels down, in
+    user_data/games)."""
     if not isinstance(path, str) or not path or not os.path.isdir(path):
         raise AssetPackError(NOT_A_FOLDER, "no such folder")
     games = _FolderGames(path)
@@ -756,6 +804,17 @@ def _ErrorText(error):
     return str(error)
 
 
+def _JobText(error):
+    # What a job's failure says in its state (job.message: the page shows
+    # it) and in the error log: never a path -- the folder imported may be
+    # anywhere on this PC, and its name the user's. An OSError's reason
+    # (_ErrorText); anything else its type alone. The whole error goes to
+    # the debug log only.
+    if isinstance(error, OSError):
+        return _ErrorText(error)
+    return f"unexpected error ({type(error).__name__})"
+
+
 def ProbeZip(path, nameHint=None):
     """The game names a ZIP holds, checked as an import checks it (see
     _ZipPlan; its central directory first, _CheckCentralDirectory).
@@ -778,9 +837,10 @@ def ProbeZip(path, nameHint=None):
 def ImportConflicts(games):
     """Of ``games`` -- names, or (name, source folder) pairs -- the ones
     already installed under user_data/games, but for a source that is that
-    folder itself (nothing to replace). A game a job moved aside and did
-    not put back counts as installed: the job about to start puts it back
-    first (RestoreReplaced), and then replaces it only if asked."""
+    folder itself (nothing to replace; compared resolved, _Resolved, as the
+    folder import compares it). A game a job moved aside and did not put
+    back counts as installed: the job about to start puts it back first
+    (RestoreReplaced), and then replaces it only if asked."""
     root = _GamesRoot()
     asides = {child.casefold()
               for container, marked in _Containers(root) if not marked
@@ -794,9 +854,7 @@ def ImportConflicts(games):
             if name.casefold() in asides:
                 conflicts.append(name)
             continue
-        if source is not None and (
-                os.path.normcase(os.path.abspath(source))
-                == os.path.normcase(dest)):
+        if source is not None and _Resolved(source) == _Resolved(dest):
             continue
         conflicts.append(name)
     return conflicts
@@ -916,6 +974,12 @@ class AssetPackService:
         self._uploadGeneration = 0
         self._receiving = set()
         self._taken = set()
+        # The folder pick (HoldFolderPick): the one held -- {"id", "path",
+        # "games": (name, folder) pairs, "expiresAt"} -- or None; how many
+        # picks have been held (one taken and given back is not held again
+        # over a newer one).
+        self._pick = None
+        self._pickGeneration = 0
 
     # ── the index ────────────────────────────────────────────────────────
 
@@ -1187,8 +1251,9 @@ class AssetPackService:
     def ImportFolder(self, path, overwrite=False):
         """Copy the games a folder holds (ProbeFolder) into user_data/games;
         (STARTED, revision) or (BUSY, ...). ``overwrite`` as ImportZip's.
-        AssetPackError NOT_A_FOLDER / NO_GAME / BAD_NAME / STOPPED /
-        FAILED."""
+        ImportFolderPick calls it (v1's POST /assets:importFolder, the
+        folder the shell's dialog picked). AssetPackError NOT_A_FOLDER /
+        NO_GAME / BAD_NAME / STOPPED / FAILED."""
         games = ProbeFolder(path)
         return self._Start(
             IMPORT_FOLDER, None, ", ".join(name for name, _f in games),
@@ -1511,6 +1576,101 @@ class AssetPackService:
                 "removed")
             return 0
 
+    # ── the folder pick (SF-5a-2) ────────────────────────────────────────
+
+    def HoldFolderPick(self, path):
+        """Hold the folder ``path`` the operator chose in the shell's native
+        dialog (AutonaShellOperations' pickFolder), probed as an import
+        probes it (ProbeFolder): (its id, the games it holds, the installed
+        ones among them -- ImportConflicts). A new pick replaces the one
+        held. Held for PICK_EXPIRY_SECS, read when the slot is looked at
+        (_HeldPick); ImportFolderPick takes it before. The id is
+        secrets.token_urlsafe(16); the path is never answered or logged.
+        ProbeFolder's AssetPackError (NOT_A_FOLDER / NO_GAME / BAD_NAME):
+        nothing is held then, and the pick held before stays."""
+        games = ProbeFolder(path)
+        # Before it is held: nothing after the hold can fail.
+        conflicts = ImportConflicts(games)
+        pickId = secrets.token_urlsafe(16)
+        with self._lock:
+            replaced = self._pick is not None
+            self._pickGeneration += 1
+            self._pick = {"id": pickId, "path": path, "games": list(games),
+                          "expiresAt": time.monotonic() + PICK_EXPIRY_SECS}
+        if replaced:
+            logger.info("Asset folder pick: replaced by a newer one")
+        logger.info(f"Asset folder pick: held, {len(games)} game(s)")
+        return pickId, [name for name, _folder in games], conflicts
+
+    def FolderPickGames(self, pickId):
+        """(games, the installed ones among them -- read now) of the folder
+        pick held by that id. AssetPackError UNKNOWN_PICK when none is
+        (never picked, imported, replaced or expired)."""
+        with self._lock:
+            slot, expired = self._HeldPick(pickId)
+        if expired:
+            logger.info("Asset folder pick: expired")
+        if slot is None:
+            raise AssetPackError(UNKNOWN_PICK, "no such folder pick")
+        return ([name for name, _folder in slot["games"]],
+                ImportConflicts(slot["games"]))
+
+    def ImportFolderPick(self, pickId, overwrite):
+        """Import the folder pick held by that id (ImportFolder, which
+        probes the folder again); (STARTED, revision) or (BUSY, the running
+        job's revision) -- busy, the pick stays held under that id, its
+        expiry unchanged: a job that started while ImportFolder probed it as
+        well (held again, _HoldPickAgain; SF-4b-1's upload alike).
+        ``overwrite`` as ImportFolder's. AssetPackError UNKNOWN_PICK, and
+        ImportFolder's (the pick is then gone: the folder no longer holds
+        what was picked)."""
+        with self._lock:
+            if self._job is not None and self._job.status == RUNNING:
+                return BUSY, self._job.revision
+            slot, expired = self._HeldPick(pickId)
+            if slot is not None:
+                self._pick = None
+                generation = self._pickGeneration
+        if expired:
+            logger.info("Asset folder pick: expired")
+        if slot is None:
+            raise AssetPackError(UNKNOWN_PICK, "no such folder pick")
+        logger.info("Asset folder pick: taken for an import")
+        answer = self.ImportFolder(slot["path"], overwrite)
+        if answer[0] == BUSY:
+            self._HoldPickAgain(slot, generation)
+        return answer
+
+    def _HoldPickAgain(self, slot, generation):
+        # A taken pick whose import a job beat (BUSY): held again under its
+        # id, its expiry unchanged -- unless a newer pick was held since (one
+        # at a time), which replaced it.
+        with self._lock:
+            again = self._pick is None and \
+                generation == self._pickGeneration
+            if again:
+                self._pick = slot
+        if again:
+            logger.info("Asset folder pick: held again (another job started "
+                        "first)")
+        else:
+            logger.info("Asset folder pick: replaced by a newer one")
+
+    def _HeldPick(self, pickId):
+        # With _lock held: (the pick held by that id, or None; whether the
+        # pick held had expired -- let go then, whatever id was asked: no
+        # timer lets it go; it holds no file -- for the caller to log outside
+        # the lock).
+        slot = self._pick
+        if slot is not None and time.monotonic() >= slot["expiresAt"]:
+            self._pick = None
+            return None, True
+        if slot is None or not isinstance(pickId, str) or \
+                not _UPLOAD_ID.match(pickId) or \
+                not hmac.compare_digest(slot["id"], pickId):
+            return None, False
+        return slot, False
+
     # ── the games moved aside ────────────────────────────────────────────
 
     def RestoreReplaced(self):
@@ -1579,13 +1739,11 @@ class AssetPackService:
                 getattr(failure, "winerror", None) in (39, 112)
             status = ERROR
             error = DISK_FULL if full else FAILED
-            message = str(failure)
-            logger.opt(exception=True).error(
-                f"Asset {job.operation} #{job.revision} failed")
+            message = _JobText(failure)
+            self._LogFailure(job, error, message)
         except Exception as failure:
-            status, error, message = ERROR, FAILED, str(failure)
-            logger.opt(exception=True).error(
-                f"Asset {job.operation} #{job.revision} failed")
+            status, error, message = ERROR, FAILED, _JobText(failure)
+            self._LogFailure(job, error, message)
         try:
             with self._lock:
                 imported = list(job.imported)
@@ -1602,6 +1760,16 @@ class AssetPackService:
                 except Exception:
                     logger.opt(exception=True).error(
                         "Asset packs: the footer could not drop the job")
+
+    @staticmethod
+    def _LogFailure(job, error, message):
+        # Called in the except clause. The error line names no path (its
+        # message is _JobText's); the traceback, whose text may name the
+        # folder imported, goes to the debug log alone.
+        logger.error(f"Asset {job.operation} #{job.revision} failed: "
+                     f"{error}: {message}")
+        logger.opt(exception=True).debug(
+            f"Asset {job.operation} #{job.revision}: the failure in full")
 
     def _Scan(self):
         scan = self.scan
@@ -1844,11 +2012,15 @@ class AssetPackService:
         root = _GamesRoot()
         os.makedirs(root, exist_ok=True)
         wanted = []
+        # Resolved: the folder picked may be a link or a junction (followed,
+        # as the copy follows it), onto user_data/games or a game in it.
+        realRoot = _Resolved(root)
         for name, folder in games:
             dest = os.path.join(root, name)
-            if os.path.normcase(os.path.abspath(folder)) == \
-                    os.path.normcase(dest):
-                # The game's own folder: it is installed as it is.
+            realFolder = _Resolved(folder)
+            if realFolder == _Resolved(dest):
+                # The game's own folder (user_data/games itself picked, or
+                # one of its games): it is installed as it is.
                 with self._lock:
                     job.imported.append(name)
                 continue
@@ -1856,9 +2028,9 @@ class AssetPackService:
                 with self._lock:
                     job.skipped.append(name)
                 continue
-            if os.path.normcase(os.path.abspath(folder)) == \
-                    os.path.normcase(root) or _Within(folder, root):
-                # The staging folder would be inside what is copied.
+            if realFolder == realRoot or _Within(realFolder, realRoot):
+                # user_data/games inside the game's folder: the staging
+                # folder would be inside what is copied.
                 self._Failed(job, name, "user_data/games is inside this "
                              "folder; it cannot be imported into itself")
                 continue
@@ -1887,32 +2059,55 @@ class AssetPackService:
             os.makedirs(extracted)
             self._Set(job, stage=COPY)
             copied = [0]
+            # The reason of each file the copy could not copy (its OSError's
+            # reason, no path): copytree gathers the failures as text that
+            # names both files (shutil.Error), so they are told from here.
+            reasons = []
             self._Progress(job, 0, count, 0, count, force=True)
 
             def copy(source, target):
                 self._Check(job)
-                shutil.copy2(source, target)
+                try:
+                    shutil.copy2(source, target)
+                except OSError as error:
+                    reasons.append(_ErrorText(error))
+                    raise
                 copied[0] += 1
                 self._Progress(job, copied[0], count, copied[0], count)
 
             for name, folder in wanted:
                 self._Check(job)
                 staged = os.path.join(extracted, name)
+                del reasons[:]
                 try:
                     shutil.copytree(folder, staged, copy_function=copy,
                                     ignore=_CopyIgnore(folder))
                 except shutil.Error as failure:
-                    self._Failed(job, name, str(failure))
+                    # Per file (source, target, why): the paths are the
+                    # picked folder's. How many, and the first reason.
+                    failures = failure.args[0] if failure.args and \
+                        isinstance(failure.args[0], list) else []
+                    self._Failed(
+                        job, name,
+                        f"{len(failures) or 1} file(s) could not be copied"
+                        + (f" ({reasons[0]})" if reasons else ""),
+                        detail=failure)
                     continue
                 except OSError as failure:
-                    self._Failed(job, name, str(failure))
+                    self._Failed(job, name, _ErrorText(failure),
+                                 detail=failure)
                     continue
                 self._MoveIn(job, staged, os.path.join(root, name), name)
         finally:
             _RemoveStaging(staging)
 
-    def _Failed(self, job, name, message):
+    def _Failed(self, job, name, message, detail=None):
+        # ``message`` is the job state's (the page shows it) and the error
+        # log's. ``detail``: the failure in full, whose text may name the
+        # folder imported -- the debug log only.
         logger.error(f"Game asset import failed for {name}: {message}")
+        if detail is not None:
+            logger.debug(f"Game asset import: {name}: {detail}")
         with self._lock:
             job.failed.append({"name": name, "message": message})
 
@@ -1938,7 +2133,7 @@ class AssetPackService:
         try:
             if os.path.lexists(dest):
                 if _IsLink(dest) or not os.path.isdir(dest):
-                    raise OSError(f"{name} is not a folder")
+                    raise OSError(errno.ENOTDIR, f"{name} is not a folder")
                 container = tempfile.mkdtemp(
                     prefix=f"{REPLACED_PREFIX}{name}-",
                     dir=os.path.dirname(dest))
@@ -1957,18 +2152,22 @@ class AssetPackService:
                 try:
                     _Replace(aside, dest)
                 except OSError as restore:
+                    # Where it is kept is named (the operator puts it back
+                    # by hand, else the next job does); the errors' reasons
+                    # alone (their text names the files: _JobText).
                     logger.error(
                         f"Game asset import: {name} could not be put back "
-                        f"({restore}); the installed folder is kept at "
-                        f"{aside}")
+                        f"({_ErrorText(restore)}); the installed folder is "
+                        f"kept at {aside}")
                     self._Failed(
-                        job, name, f"{failure}; the installed folder could "
-                        f"not be put back and is kept at {aside}")
+                        job, name, f"{_ErrorText(failure)}; the installed "
+                        f"folder could not be put back and is kept at "
+                        f"{aside}", detail=failure)
                     return
                 _RemoveEmpty(container)
                 raise
         except OSError as failure:
-            self._Failed(job, name, str(failure))
+            self._Failed(job, name, _ErrorText(failure), detail=failure)
             return
         with self._lock:
             job.imported.append(name)

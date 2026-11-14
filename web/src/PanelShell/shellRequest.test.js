@@ -1,7 +1,8 @@
 // The page's shell requests (ADR-005 S-final SF-5a-1, hostApi.ts): the ticket
 // read before the click (GET /api/v1/shell-session) and kept in the module
 // only, the window opened in the click itself, the answer awaited by the
-// request's id for SHELL_ANSWER_TIMEOUT_MS, and the desktop's state heard.
+// request's id for its verb's deadline (SHELL_ANSWER_TIMEOUTS_MS; none for
+// pickFolder), and the desktop's state heard.
 // What the desktop does with the window is src/AutonaWebPanelHost.py's
 // (tests/test_web_panel_host.py).
 
@@ -142,6 +143,36 @@ test("no answer within the deadline rejects, and a late one is dropped", async (
     await settled;
     expect(host.SHELL_ANSWER_TIMEOUT_MS).toBe(10000);
     host.receiveShellResult(request, {ok: true});
+});
+
+test("the deadline is each verb's: the folder dialog has none", async () => {
+    // SF-5a-2: pickFolder answers when the operator closes the desktop's
+    // folder dialog, however long that takes.
+    expect(host.SHELL_ANSWER_TIMEOUTS_MS).toEqual({
+        alwaysOnTop: 10000, checkUpdates: 10000, openExternal: 10000,
+        pickFolder: null});
+    await host.loadShellSession();
+    jest.useFakeTimers();
+    const asked = host.shellRequest("pickFolder");
+    const query = openedQuery();
+    expect(Object.keys(query).sort()).toEqual(["request", "ticket", "verb"]);
+    expect(query.verb).toBe("pickFolder");
+
+    jest.advanceTimersByTime(60 * 60 * 1000);
+    const picked = {ok: true, status: "picked", pick: "p1", games: ["ssbu"],
+                    conflicts: [], expiresInSec: 900};
+    host.receiveShellResult(query.request, picked);
+    await expect(asked).resolves.toEqual(picked);
+});
+
+test("a newer folder request supersedes the one waiting", async () => {
+    await host.loadShellSession();
+    const first = host.shellRequest("pickFolder");
+    const second = host.shellRequest("pickFolder");
+    await expect(first).rejects.toMatchObject({code: "superseded"});
+    const {request} = openedQuery();
+    host.receiveShellResult(request, {ok: true, status: "cancelled"});
+    await expect(second).resolves.toEqual({ok: true, status: "cancelled"});
 });
 
 test("a newer request of a verb supersedes the older one", async () => {

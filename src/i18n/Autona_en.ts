@@ -11,6 +11,10 @@
 </context><context>
     <name>app</name>
     <message>
+        <source>Select a game folder to import</source>
+        <translation>Select a game folder to import</translation>
+    </message>
+    <message>
         <source>Open reference &amp; tester</source>
         <translation>Open reference &amp; tester</translation>
     </message>

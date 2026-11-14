@@ -52,14 +52,14 @@
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
 - **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a）と、§5.27 のゲームアセットのパックの一覧（ADR-005 S-final SF-3b。ジョブの状態 §5.28 は SF-4b-1 で `SHELL` に移した））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
   - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンは `THIS_PC` のルートでは返さない**（下の `SHELL`）
-  - 同じ理由で、**ゲームアセットの書き込みは `THIS_PC` にしない**（同じオリジンのレイアウトに、導入済みのゲームの置き換え・GB 単位のダウンロード・ディスクを埋めるアップロードをさせない）。ZIP のアップロードと破棄・ZIP の取り込み・インストール・キャンセル・ジョブの状態・ゲームのフォルダを開く操作は `SHELL`（下。ADR-005 S-final SF-4b-1。SF-3b では v1 に出していなかった）。**フォルダの取り込みは v1 に無い**（ページはこの PC のフォルダを名指せない。名指せるとこの PC のフォルダのコピーと有無の探査になる。SF-5a のフォルダ選択で戻す）
-- **アプリ自身のウィンドウ（デスクトップの共有ビューの中の、本体のサーバーのオリジンの文書）からの要求だけ**（`SHELL` 区分。2026-11-14・ADR-005 S-final SF-4a-1）: §5.29 のアクセストークンの読み取りと §7 の `POST /access-token:regenerate`、ゲームアセットのジョブの状態（§5.28）・ZIP のアップロードと破棄（§6.48 / §6.49）・ジョブのキャンセル（§6.50）・ゲームのフォルダを開く（§6.51）・ZIP の取り込みとインストール（§7。ADR-005 S-final SF-4b-1）・シェル要求のチケット（§5.30。ADR-005 S-final SF-5a-1）。通すのは次の 3 つを**すべて**満たす要求だけで、ほかは**トークンの有無によらず** `403 FORBIDDEN`（`only the Autona app's own window may ask this`。1 つの答え。ログには何が欠けたかだけを出し、ヘッダの値は出さない）
+  - 同じ理由で、**ゲームアセットの書き込みは `THIS_PC` にしない**（同じオリジンのレイアウトに、導入済みのゲームの置き換え・GB 単位のダウンロード・ディスクを埋めるアップロードをさせない）。ZIP のアップロードと破棄・ZIP の取り込み・フォルダの取り込み・インストール・キャンセル・ジョブの状態・ゲームのフォルダを開く操作は `SHELL`（下。ADR-005 S-final SF-4b-1 / SF-5a-2。SF-3b では v1 に出していなかった）。**フォルダはシェルの選択の id でだけ取り込む**（ページはこの PC のフォルダを名指せない。名指せるとこの PC のフォルダのコピーと有無の探査になる。ADR-005 S-final SF-5a-2: 共有ビューのシェル要求 `pickFolder`（§5.30）でデスクトップのネイティブのダイアログから選んだフォルダを core が持ち、ページには id だけを返す。取り込みは §7 の `POST /assets:importFolder`。パスを受け取るルートは無い）
+- **アプリ自身のウィンドウ（デスクトップの共有ビューの中の、本体のサーバーのオリジンの文書）からの要求だけ**（`SHELL` 区分。2026-11-14・ADR-005 S-final SF-4a-1）: §5.29 のアクセストークンの読み取りと §7 の `POST /access-token:regenerate`、ゲームアセットのジョブの状態（§5.28）・ZIP のアップロードと破棄（§6.48 / §6.49）・ジョブのキャンセル（§6.50）・ゲームのフォルダを開く（§6.51）・ZIP の取り込みとインストール（§7。ADR-005 S-final SF-4b-1）・フォルダの選択の取り込み（§7。ADR-005 S-final SF-5a-2）・シェル要求のチケット（§5.30。ADR-005 S-final SF-5a-1）。通すのは次の 3 つを**すべて**満たす要求だけで、ほかは**トークンの有無によらず** `403 FORBIDDEN`（`only the Autona app's own window may ask this`。1 つの答え。ログには何が欠けたかだけを出し、ヘッダの値は出さない）
   - `THIS_PC` と同じ、トークンなしで通れるこの PC の要求（トークンでは開かない。LAN の他端末は秘密があっても断る）
   - `Sec-Fetch-Site` がちょうど `same-origin`（`none`・無い・`same-site`・`cross-site` は断る。共有ビューの fetch は必ず送る）
   - `X-Autona-Shell` ヘッダがシェルの秘密と一致（定数時間の比較。空・128 文字超・ASCII 以外・前後の空白・大文字小文字の違いは不一致）。秘密はデスクトップのシェルが最初に必要になったときにプロセスで 1 回作り、メモリにだけ持つ（`settings.json` に入れない・ログに出さない）。付けるのは**共有ビューのページ自身のリクエストインターセプタ**（プロファイルのではない: Designer のビューが同じ既定プロファイルを使う）で、メインフレームが Web UI（本体のサーバーの `/web` の配下で `view=designer` でない）を出している間に、そのページの中の本体のサーバーのオリジン（`127.0.0.1:<待ち受けポート>`）の文書が出す、本体の `/api/v1/` への fetch / XHR に付ける。その文書はメインフレームと同じオリジンのフレームで、about:blank・srcdoc・blob: のフレームは作った文書のオリジンを継ぐので含まれる（だから Web UI はそこへ第三者の HTML を sandbox なしで入れない。sandbox のフレームは opaque origin で付かない）。Web UI のスクリプトが出す fetch / XHR には付き、`<script>`・画像の読み込みとナビゲーションには付かない。別オリジンのフレーム（プレビュー）・ほかのビュー・ほかのページの要求には付かない。付いた要求がほかへリダイレクトされたら止め、付けてはいけない要求が秘密を持っているか確かめられなければその要求を止める。ヘッドレスは秘密を作らないので、`SHELL` のルートは常に `403`
   - プレビュー用のリスナーは `SHELL` を出さない（READ だけ。下の項）。Socket.IO のイベントに `SHELL` は無い
   - 判定は `src/core/WebAccess.ShellRefusalReason`、付ける側は `src/AutonaWebPanelHost.ShellHeaderWanted`
-  - 秘密とは別に、**シェル要求のチケット**（§5.30。ADR-005 S-final SF-5a-1）がある。秘密はシェルが共有ビューの fetch に付けるもの（ページの JS からは読めない）、チケットは `GET /shell-session` を読めたページだけが URL に入れられるもの。共有ビューのページがデスクトップ自身に頼むこと（最前面表示・更新の確認・決まった外部アドレス）は、クリックの中で開く `/web/shell-request?verb=…&request=…&ticket=…` の新しいウィンドウで、共有ビューはそれを開かずに検査して実行する（`src/AutonaWebPanelHost.py` の `ParseShellRequest`）。これは HTTP のルートではない（サーバーには届かない）
+  - 秘密とは別に、**シェル要求のチケット**（§5.30。ADR-005 S-final SF-5a-1）がある。秘密はシェルが共有ビューの fetch に付けるもの（ページの JS からは読めない）、チケットは `GET /shell-session` を読めたページだけが URL に入れられるもの。共有ビューのページがデスクトップ自身に頼むこと（最前面表示・更新の確認・決まった外部アドレス・取り込むゲームのフォルダの選択（SF-5a-2））は、クリックの中で開く `/web/shell-request?verb=…&request=…&ticket=…` の新しいウィンドウで、共有ビューはそれを開かずに検査して実行する（`src/AutonaWebPanelHost.py` の `ParseShellRequest`）。これは HTTP のルートではない（サーバーには届かない）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -142,7 +142,7 @@
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
 - ⚠️ トークンは全端末で 1 つを共有するため、操作主体は **IP 粒度まで**（D5 の帰結。S3a 以降も同じ）。トークンはログに出さない（拒否のログもパスのみで、クエリ文字列を含めない）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
   - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）・`PATCH .../players/{p}/fields`（§6.41。ADR-005 S4z）・`PUT /players`（§6.26）・`POST .../players/{p}:load`（§6.27）・`POST /players:delete`（§7.2）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。エラーの `message` にも値を入れない。
-  - ゲームアセットのルート（ADR-005 S-final SF-4b-1）: ZIP のアップロード（§6.48）と破棄（§6.49）は本文を JSON として読まない（`write_op(body="none")`）ので、パラメータは受け取ったバイト数（`<N bytes>`）か `<no body>`。パスのアップロードの id は先頭 6 文字だけ（`/assets/uploads/abc123…`）。ファイル名（`X-Autona-File-Name`）はどのログにも出さない。`POST /assets:importZip` はボディのキー名だけ。断った答えの行には `error.reason` を ` (disk_full)` のように添え、core の理由の文（パスを含みうる）は別の INFO 行（`API v1: assets <操作> refused: <code>: <文>`）にだけ出す
+  - ゲームアセットのルート（ADR-005 S-final SF-4b-1）: ZIP のアップロード（§6.48）と破棄（§6.49）は本文を JSON として読まない（`write_op(body="none")`）ので、パラメータは受け取ったバイト数（`<N bytes>`）か `<no body>`。パスのアップロードの id は先頭 6 文字だけ（`/assets/uploads/abc123…`）。ファイル名（`X-Autona-File-Name`）はどのログにも出さない。`POST /assets:importZip` と `POST /assets:importFolder`（SF-5a-2）はボディのキー名だけ（選択の id もフォルダのパスも出さない）。断った答えの行には `error.reason` を ` (disk_full)` のように添え、core の理由の文（パスを含みうる）は別の INFO 行（`API v1: assets <操作> refused: <code>: <文>`）にだけ出す
 
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
@@ -158,7 +158,7 @@
   ```
   - `POST` / `DELETE /tournament` だけは `loadRevision`（その要求の `tournamentInfo.load.revision`。202 の前に state に
     出ている）を返す。クライアントは state の `load.revision` がそれに達してから `status` を自分の要求の結果として読む（§5.7）
-- **ゲームアセットのジョブ**（§7 の `POST /assets:importZip`・`POST /assets/packs:install`。ADR-005 S-final SF-4b-1）も 202 で、`data.job` にそのジョブの `revision` を返す（`{ "accepted": true, "operation": "importZip" | "install", "job": 4 }`）。完了は WS ではなく `GET /assets/job`（§5.28）で追う（`revision` が同じで `status` が `running` でなくなったら結果）。止めるのは `POST /assets/job:cancel`（§6.50）にその `revision` を渡す。1 度に 1 つで、走っている間の開始は `409 CONFLICT`（`reason: "busy"`）
+- **ゲームアセットのジョブ**（§7 の `POST /assets:importZip`・`POST /assets:importFolder`（SF-5a-2）・`POST /assets/packs:install`。ADR-005 S-final SF-4b-1）も 202 で、`data.job` にそのジョブの `revision` を返す（`{ "accepted": true, "operation": "importZip" | "importFolder" | "install", "job": 4 }`）。完了は WS ではなく `GET /assets/job`（§5.28）で追う（`revision` が同じで `status` が `running` でなくなったら結果）。止めるのは `POST /assets/job:cancel`（§6.50）にその `revision` を渡す。1 度に 1 つで、走っている間の開始は `409 CONFLICT`（`reason: "busy"`）
 - **多重起動ガード（B-1）**: 重い操作は**実行中フラグ**を持ち、実行中に同種要求が来たら
   **`409 CONFLICT`**（**MUST**）。202 で受け付けた処理が完了/失敗するまでフラグを保持する。
 - 実行失敗（外部タイムアウト等）は 202 後に起きるため**レスポンスでは返せない**。
@@ -792,7 +792,7 @@ API 設定のページ（`/web/api`。SF-4a-2 までは Qt の API 設定ウィ�
 - `id`: その行のルートの Flask の endpoint 名（`api_v1.` を除いたもの）。ルートが変わらない限り変わらないので、ページは文言の翻訳をこれで引く（i18next の `guide_api_endpoint_<id>`、エラーコードは `guide_api_error_<code>`。en / ja の全行に訳があることは `tests/test_api_v1_guides.py` が検査する）。一覧の中で重複しない
 - `path`: 表示用（`{n}` などの置き場所つき。クエリを含むことがある）。`example`: 置き場所を既定値（`{n}`→`1` など）にしたもの。ページのテスターに読み込むパスと curl が送るパス
 - `description` / `errorCodes[].description`: 英語の文言（ページは訳が無い行だけこれを出す）。`body`: 例の body（無ければ `null`）。`destructive` / `logged` / `confirm`: ページの表の列（`destructive` の行のアクション（`:clear` など）は、テスターが送る前に確認する）
-- 並びはページの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない。`SHELL` のルート（アクセストークンの §5.29・§7、ゲームアセットの §5.28・§6.48〜§6.51・§7、シェル要求のチケットの §5.30。アプリ自身のウィンドウからしか呼べない）も載せない（`core/ApiCatalog.py` の docstring）
+- 並びはページの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない。`SHELL` のルート（アクセストークンの §5.29・§7、ゲームアセットの §5.28・§6.48〜§6.51・§7（`POST /assets:importFolder` を含む）、シェル要求のチケットの §5.30。アプリ自身のウィンドウからしか呼べない）も載せない（`core/ApiCatalog.py` の docstring）
 
 ### 5.25 `GET /api/v1/connection`（2026-11-14 追加・ADR-005 S-final SF-3a）
 
@@ -841,7 +841,7 @@ API / Companion / OBS のガイドのページ（`/web/api`・`/web/companion`�
 
 ### 5.28 `GET /api/v1/assets/job`（2026-11-14 追加・ADR-005 S-final SF-3b）
 
-最後のゲームアセットのジョブの状態（ジョブを始めるのは §7 の `POST /assets:importZip` / `POST /assets/packs:install`。ADR-005 S-final SF-4b-1）。**`SHELL` 区分**（§2.2。メッセージがこの PC のパスを含みうる。SF-3b では `THIS_PC` で、SF-4b-1 でジョブの開始と一緒にシェルの秘密の下に移した。読み手は共有ビューのページだけ）。`Cache-Control: no-store`
+最後のゲームアセットのジョブの状態（ジョブを始めるのは §7 の `POST /assets:importZip` / `POST /assets:importFolder`（SF-5a-2） / `POST /assets/packs:install`。ADR-005 S-final SF-4b-1）。**`SHELL` 区分**（§2.2。この PC の構成を変えるジョブの状態。SF-3b では `THIS_PC` で、SF-4b-1 でジョブの開始と一緒にシェルの秘密の下に移した。読み手は共有ビューのページだけ）。`Cache-Control: no-store`
 
 ```json
 { "ok": true, "data": {
@@ -856,8 +856,8 @@ API / Companion / OBS のガイドのページ（`/web/api`・`/web/companion`�
 - `revision`: ジョブを始めるたびに増える（3 種類で 1 本）。プロセスごとに 0 から。最初のジョブの前は `revision: 0`・`status: "idle"`
 - `status`: `idle` / `running` / `done` / `error` / `cancelled`。`operation`: `install` / `importZip` / `importFolder`。`stage`（走っている間）: `download` / `extract` / `copy` / `scan`
 - `done` / `total`: ダウンロードはバイト、ZIP の取り込みはエントリの数、フォルダの取り込みはファイルの数
-- `imported`: 置いたゲーム（インストールはそのゲーム）。`skipped`: インストール済みで置き換えなかったゲーム。`skippedEntries`: ZIP の取り込みで飛ばしたエントリの名前（フォルダの外を指さないが Windows で使えない名前。先頭 100 件。それを超えた数は `skippedEntriesMore`）。`failed`: `[{name, message}]`（ゲームごとの失敗。ほかのゲームは続ける）
-- `error`（`status` が `error`）: `bad_index` / `download_failed` / `extract_failed` / `unsafe_archive` / `too_large` / `not_a_zip` / `disk_full` / `stopped`（終了中）/ `failed` ほか（`core/AssetPackService` の定数）。`message` は英語の理由。ZIP の取り込みは `zipfile` が読む前に中央ディレクトリを検査する（§6.48。件数・大きさ・ファイルの外を指す位置で `too_large` / `not_a_zip`）
+- `imported`: 置いたゲーム（インストールはそのゲーム）。`skipped`: インストール済みで置き換えなかったゲーム。`skippedEntries`: ZIP の取り込みで飛ばしたエントリの名前（フォルダの外を指さないが Windows で使えない名前。先頭 100 件。それを超えた数は `skippedEntriesMore`）。`failed`: `[{name, message}]`（ゲームごとの失敗。ほかのゲームは続ける。フォルダの取り込みのコピーの失敗は「`N file(s) could not be copied (<OS の理由>)`」で、取り込んだフォルダのパスもファイル名も入れない（SF-5a-2 の検収。詳細はデバッグのログにだけ出す））
+- `error`（`status` が `error`）: `bad_index` / `download_failed` / `extract_failed` / `unsafe_archive` / `too_large` / `not_a_zip` / `disk_full` / `stopped`（終了中）/ `failed` ほか（`core/AssetPackService` の定数）。`message` は英語の理由で、パスを入れない（`OSError` は OS の理由の文だけ、ほかの想定外の例外は `unexpected error (<型>)`。詳細はデバッグのログにだけ出す。SF-5a-2 の検収）。例外は置き換えで退避したゲームを戻せなかったときの `failed[].message` で、`user_data/games` の中の退避先を名指す（利用者が戻すため）。ZIP の取り込みは `zipfile` が読む前に中央ディレクトリを検査する（§6.48。件数・大きさ・ファイルの外を指す位置で `too_large` / `not_a_zip`）
 - 読み方: `revision` が始めたときのものと同じで、`status` が `running` でなくなったら結果（`revision` が進んでいれば、そのジョブは終わっていて結果はもう読めない）。走っている間はフッター（§5.23 の `status` の `assets_load`）にも出る。終わったジョブは `status` の通知より先に結果になっている（通知のあとに読めば結果）
 
 ### 5.29 `GET /api/v1/access-token`（2026-11-14 追加・ADR-005 S-final SF-4a-1）
@@ -882,7 +882,7 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 - `ticket` がこのプロセスのチケットと一致（定数時間の比較）
 - 頼んだページが共有ビューの Web UI（`/web` の配下で `view=designer` でない）
 
-動詞（SF-5a-1）: `alwaysOnTop`（`on=0|1`。メニューの「常に最前面に表示」のチェックと同じ。結果に `alwaysOnTop`）・`checkUpdates`（メニューの「更新を確認」と同じく、結果はアップデータ自身のダイアログ。答えは始めたことだけ。アップデータの確認がまだ走っている間（起動時の確認・前に頼んだ確認）は何も始まらないので `busy`）・`openExternal`（`target=discord|inquiry`。決まった表 `src/AutonaExternalLinks.py` のキーだけで、URL は受け取らない）。結果は `{ "ok": true, … }` か `{ "ok": false, "error": "<code>" }`（`bad_argument` / `not_ready` / `busy` / `open_failed` / `unknown_verb` / `unavailable` / `failed`。`unknown_verb` はシェルが知らない動詞で、共有ビューの検査（`SHELL_VERBS`）を通った動詞では起きない）。ページは 10 秒待って答えが無ければ諦める。答えは頼んだ文書にだけ渡す（凍結中は解凍まで持ち、読み込み直し・破棄で捨てる。動詞ごとに最新の 1 つだけ）。デスクトップの状態（`{ "alwaysOnTop": … }`）は読み込みのたびと変わるたびに `window.autonaPanelShell.shellState(状態)` で知らせる
+動詞（SF-5a-1）: `alwaysOnTop`（`on=0|1`。メニューの「常に最前面に表示」のチェックと同じ。結果に `alwaysOnTop`）・`checkUpdates`（メニューの「更新を確認」と同じく、結果はアップデータ自身のダイアログ。答えは始めたことだけ。アップデータの確認がまだ走っている間（起動時の確認・前に頼んだ確認）は何も始まらないので `busy`）・`openExternal`（`target=discord|inquiry`。決まった表 `src/AutonaExternalLinks.py` のキーだけで、URL は受け取らない）。SF-5a-2 で `pickFolder`（引数なし。ページはフォルダを名指せない）: 取り込むゲームのフォルダをデスクトップのネイティブのダイアログ（`QFileDialog.getExistingDirectory`。メインウィンドウの上・モーダル。Chromium の新しいウィンドウの呼び出しの中ではなくイベントループから開く）で選ばせ、core（`AssetPackService.HoldFolderPick`）が検査して id の下に持つ（1 つだけで、新しい選択が置き換える。15 分（`PICK_EXPIRY_SECS`）で使えなくなる。期限は照会のときに `time.monotonic()` で判定する）。結果は `{ "ok": true, "status": "picked", "pick": "<id>", "games": ["ssbu"], "conflicts": ["ssbu"], "expiresInSec": 900 }`（`pick` は `token_urlsafe(16)`、`conflicts` はインストール済みのもの。取り込みは §7 の `POST /assets:importFolder`）か、ダイアログを閉じたとき同じキーで `"status": "cancelled"`（`pick` は null。前の選択はそのまま）。**どちらにもパスは入れない**（ログにも出さない）。ダイアログは 1 度に 1 つで、開いている間の `pickFolder` は `busy`。メインウィンドウか core のサービスがまだ無ければ `not_ready`、ゲームの無いフォルダは core の理由（`no_game` / `not_a_folder` / `bad_name`）、それ以外の失敗は `failed`。結果は `{ "ok": true, … }` か `{ "ok": false, "error": "<code>" }`（`bad_argument` / `not_ready` / `busy` / `open_failed` / `unknown_verb` / `unavailable` / `failed`、`pickFolder` の core の理由。`unknown_verb` はシェルが知らない動詞で、共有ビューの検査（`SHELL_VERBS`）を通った動詞では起きない）。ページは 10 秒待って答えが無ければ諦める（`pickFolder` は期限なし: 操作者がダイアログを閉じるまで。同じ動詞の新しい要求・文書の入れ替わりで待つのをやめる。`hostApi.ts` の `SHELL_ANSWER_TIMEOUTS_MS`）。答えは頼んだ文書にだけ渡す（凍結中は解凍まで持ち、読み込み直し・破棄で捨てる。動詞ごとに最新の 1 つだけ）。デスクトップの状態（`{ "alwaysOnTop": … }`）は読み込みのたびと変わるたびに `window.autonaPanelShell.shellState(状態)` で知らせる
 
 **`SHELL` 区分**（§2.2。トークンでは開かない・LAN・同じオリジンのレイアウト・OBS・curl・プレビューのリスナー・別のページのフレーム・ヘッドレスは `403 FORBIDDEN`）。`Cache-Control: no-store`。API 一覧（§5.24）には載せない
 
@@ -1402,6 +1402,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/result:generate` | 実行中フラグ | `generate_result`（`ResultService.Generate`。2026-11-09 追加・ADR-005 S4q） | — |
 | `POST /api/v1/access-token:regenerate` | confirm・`SHELL` 区分 | `regenerate_access_token`（`core/WebAccess.RegenerateToken`。2026-11-14 追加・ADR-005 S-final SF-4a-1） | — |
 | `POST /api/v1/assets:importZip` | `overwrite` があれば confirm・1 度に 1 つ・`SHELL` 区分 | `import_asset_upload`（`AssetPackService.ImportUpload`。2026-11-14 追加・ADR-005 S-final SF-4b-1） | — |
+| `POST /api/v1/assets:importFolder` | `overwrite` があれば confirm・1 度に 1 つ・`SHELL` 区分 | `import_asset_folder_pick`（`AssetPackService.ImportFolderPick`。2026-11-14 追加・ADR-005 S-final SF-5a-2） | — |
 | `POST /api/v1/assets/packs:install` | confirm・1 度に 1 つ・`SHELL` 区分 | `install_asset_packs`（`AssetPackService.Install(fetch=False)`。2026-11-14 追加・ADR-005 S-final SF-4b-1） | — |
 
 - **board 3 の `:clear` / `:reset-players` / `:reset-match`**（ADR-005 S4w で開いた。Qt のクルーボード（S4ac-3 で削除）にボタンは無く、legacy と同じ操作）: `:reset-match` は全メンバーを既定のストックに戻して出場中を無しにし（名前は残す）、`phase` / `pool` / `match` と `best_of` を空にする（match バーの欄はボードにあるものだけ。クルーボードのシードに `pool` は無く、`PATCH set` で書くまで足さない。ADR-005 S4ac-1 の検収レビュー。それまでは `pool: ""` を足していた）。`:reset-players` は全メンバーの行を空にする（名前も。チーム名・色・人数は残す。入力中の欄を先に確定する）。`:clear` は `:reset-match` + 人数 1 + `:reset-players`（チーム名・色は残る）。即時公開で、同じことをもう一度送っても書かない。スワップのフラグは戻らない。未構築のボードの扱いは §2.12
@@ -1435,13 +1436,17 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - 応答 `202`: `{ "accepted": true, "operation": "importZip", "job": <revision> }`（§2.8。結果は §5.28）。アップロードはジョブが取り出し、ジョブの終わり方によらずジョブが消す（同じ id でもう一度は取り込めない）。取り込みが始まらずに断られたとき（取り込みの前の検査で `not_a_zip` など）も消える。ジョブは書き込む前にもう一度、中央ディレクトリとエントリを検査する
   - エラー: `404 NOT_FOUND`（`reason: "unknown_upload"`: 取り込んだ・破棄した・置き換わった・期限切れ）、`409 CONFLICT`（`busy`。別のジョブが走っている。アップロードは同じ id で残る。取り込みの前の検査の間に別のジョブが始まったときも同じで、期限は延びない。その間に新しいアップロードが始まっていれば、それが置き換えたものとして消える）、`503 UNAVAILABLE`（`stopped`）
   - 操作ログはボディのキー名だけ（`assets.importZip`）
+- `assets:importFolder`（ADR-005 S-final SF-5a-2）: シェル要求 `pickFolder`（§5.30）でデスクトップのダイアログから選んだフォルダを取り込むジョブを始める（ページの「フォルダから取り込む」）。body: `{ "pick": "<id>", "overwrite": ["<置き換えるゲーム>"], "confirm": true }`。**フォルダは `pick` でだけ名指す**（パスは受け取らない。パスを `pick` に入れても `404`、ほかのキーは無視）。`overwrite` は選択の `conflicts`（この要求のときに読み直す）のうち置き換えるもの（無い・空なら、インストール済みのゲームは置き換えずに §5.28 の `skipped`）。`conflicts` に無い名前は `400`。`overwrite` が空でないときだけ `confirm: true` が要る（無ければ `409 CONFIRMATION_REQUIRED`）。**`SHELL` 区分**・`no-store`。API 一覧（§5.24）には載せない
+  - 応答 `202`: `{ "accepted": true, "operation": "importFolder", "job": <revision> }`（§2.8。結果は §5.28）。選択はジョブが取り出す（同じ id でもう一度は取り込めない）。取り込みの前にフォルダをもう一度検査し、そこで断られたとき（フォルダが消えた `not_a_folder` など）も選択は無くなる。自分の中へはコピーしない: Autona のフォルダ自身はゲームを持たない（ゲームは 2 階層下の `user_data/games`）ので選択の時点で `no_game`、`user_data/games` そのもの（またはそのゲームのフォルダ）は何もコピーせずそのまま `imported`、`user_data/games` を下に持つゲームのフォルダ（`base_files/config.json` を置いた Autona のフォルダなど）はそのゲームだけジョブの `failed`。選んだフォルダ自身がリンク / ジャンクションなら辿った先で比べる（`os.path.realpath`。フォルダの中のリンク / ジャンクションはコピーしない）
+  - エラー: `400 INVALID_ARGUMENT`（`pick` が空でない文字列でない・`overwrite` が名前のリストでない・`reason` `not_a_folder` / `no_game` / `bad_name`）、`404 NOT_FOUND`（`reason: "unknown_pick"`: 取り込んだ・置き換わった・期限切れ・別のプロセスの id）、`409 CONFLICT`（`busy`。別のジョブが走っている。選択は同じ id で残り、期限は延びない。取り込みの前の検査の間に別のジョブが始まったときも同じ。その間に新しい選択があれば、それが置き換えたものとして無くなる）、`503 UNAVAILABLE`（`stopped`）。答えに core の理由の文（パスを含みうる）は入れない
+  - 操作ログはボディのキー名だけ（`assets.importFolder`）。選択を持つ・置き換える・取り出す・期限切れはパスなしの INFO 行（`Asset folder pick: …`）
 - `assets/packs:install`（ADR-005 S-final SF-4b-1）: 上流の索引のゲームのパックを落として入れるジョブを始める（ページの「ダウンロードして読み込む」が呼ぶ `AssetPackService.Install`）。body: `{ "game": "<code>", "packs": ["full"], "confirm": true }`。`packs` が無い・null なら既定のパック（§5.27 の `default`）。**常に confirm**（ゲームのファイルを置き換え、GB 単位を落とすため）。**`SHELL` 区分**・`no-store`
   - 索引はキャッシュにあるものだけを使い、この要求では取りにいかない。無ければ `409 NOT_READY`（`reason: "index_unavailable"`。先に §5.27 を読む）
   - 応答 `202`: `{ "accepted": true, "operation": "install", "job": <revision> }`
   - エラー: `400 INVALID_ARGUMENT`（`game` が空でない文字列でない・`packs` が文字列のリストでない・`reason` `unknown_pack` / `no_packs`）、`404 NOT_FOUND`（`unknown_game`）、`409 CONFLICT`（`busy`）、`409 NOT_READY`（`index_unavailable`）、`500 INTERNAL`（`bad_index`）
 
 ### 7.2 確認フラグ（C-2 / D7）
-- **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`・`POST /access-token:regenerate`・`POST /assets/packs:install`・`overwrite` が空でない `POST /assets:importZip`）は body に **`"confirm": true` 必須（MUST）**。
+- **破壊的操作**（`:clear`・`:reset-all`・`:reset-players`・`:reset-match`・`players/{p}:clear`・`POST /players:delete`・`POST /access-token:regenerate`・`POST /assets/packs:install`・`overwrite` が空でない `POST /assets:importZip` / `POST /assets:importFolder`）は body に **`"confirm": true` 必須（MUST）**。
   無い/false なら **`409 CONFIRMATION_REQUIRED`**（状態は変更しない）。
 - `POST /players:delete`: body は `{ "key": "SP Alpha", "confirm": true }`（`key` は §5.11 の行の DB キー。タグだけでは一致しない）。文字列でない `key` は `INVALID_ARGUMENT`、DB に無い `key` は `404 NOT_FOUND`（保存も通知もしない）。選手 DB なので応答に `revision` は付かない。操作ログは `player.delete`（キー名のみ）
 - 「配信中」自動ブロックは**初回は設けない**（Autona に配信状態判定手段が無いため）。confirm のみで担保。
