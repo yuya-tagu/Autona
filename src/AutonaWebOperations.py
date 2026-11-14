@@ -101,6 +101,7 @@ from .core import StatsOverlays
 from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
+from .core.AssetPackService import AssetPackService
 from .core import HotkeyRules
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
@@ -742,6 +743,20 @@ def get_connection():
         "outDir": os.path.normpath(os.path.abspath("./out")),
         "pathSeparator": os.sep,
     }
+
+
+# ── Game asset packs (ADR-005 S-final SF-3b) ─────────────────────────────
+# What the "Add game assets" window shows, for the page that replaces it
+# (SF-4b): core's AssetPackService, in both shells, on the calling thread
+# (the list may fetch the index there: the network). The jobs that write
+# user_data/games come to v1 with SF-4b (the window runs them through core).
+
+def get_asset_packs(refresh=False):
+    return AssetPackService.instance.Packs(fetch=True, refresh=refresh)
+
+
+def get_assets_job():
+    return AssetPackService.instance.Job()
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

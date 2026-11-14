@@ -50,8 +50,9 @@
   - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
-- **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
+- **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a）と、§5.27 / §5.28 のゲームアセットのパックの一覧とジョブの状態（ADR-005 S-final SF-3b））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
   - `THIS_PC` は秘密を守らない: このサーバーと同じオリジンのページ（`layout/` のレイアウト。OBS のブラウザソース・直接開いたブラウザ）の要求もトークンなしで通るので、第三者製のレイアウトも読める。そのため**アクセストークンはどの v1 ルートも返さない**（表示・再発行は API 設定ウィンドウだけ。ページ向けの経路は SF-4a で、共有ビューのメインフレームにだけシェルが渡す秘密を求める形で設計する）
+  - 同じ理由で、**ゲームアセットの書き込み（インストール・ZIP / フォルダの取り込み・キャンセル）は v1 に出していない**（導入済みのゲームの置き換え・確認なしの上書きと大きなダウンロード・この PC のフォルダのコピーと有無の探査ができてしまう）。SF-4b でシェルの秘密の下に出す（ADR-005 S-final SF-3b）
 - **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
   （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
   （`http://<PC 名>:5107` のようなホスト名も該当）
@@ -233,6 +234,8 @@
 | `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
 | `GET /api/v1/connection` | Web サーバーの URL（LAN / ループバック）・ポート・`out/` の絶対パス（§5.25。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_connection`（`WebServer.Serving` / `LanOnAtRestart`） | — |
 | `GET /api/v1/api-catalog` | API 設定ウィンドウのエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
+| `GET /api/v1/assets/packs` | ゲームアセットのパックの一覧（上流の索引・インストール済み・版。§5.27。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_asset_packs`（`core/AssetPackService.Packs`） | — |
+| `GET /api/v1/assets/job` | ゲームアセットの取り込みのジョブの状態（§5.28。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_assets_job`（`core/AssetPackService.Job`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -743,6 +746,8 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
   知らないコード（新しいアプリと古いクライアント）はコードそのものを出す
 
+  `assets_load` はゲームアセットのジョブ（§5.28。ADR-005 S-final SF-3b）も使う: `codename` はダウンロードならゲームの code、取り込みなら取り込むゲーム名（複数は `, ` でつなぐ）。`done` / `total` はダウンロードなら KiB、取り込みならエントリ / ファイルの数（専用のコードは Web の訳語が要るので SF-4b で足す）
+
 **通知 `status`（Socket.IO。2026-11-14 追加・ADR-005 S-final SF-2）**: 上と同じ `{revision, jobs}` を運ぶ（ほかの通知と違って**値を運ぶ**: 進み具合は短い間隔で変わり、通知のたびに全クライアントが GET すると無駄なため）。
 
 - **接続の直後に 1 回**、その接続にだけ送る（`program_state` の後）。以後は変わるたびに全接続へ
@@ -797,6 +802,47 @@ API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web
 
 - `program_state_update` と同じ flusher が、同じ送信の delta・`scoreboard_pending`・`scoreboard_follow`・`battle_format` の後に送る。自分の間隔は持たず、1 回の送信の間に何度スキャンしても 1 通で、delta の間隔は動かさない
 - 送信先は全接続（`GET /games` が READ）。既存の `games` イベント（一覧の要求と答え）は変えていない
+
+### 5.27 `GET /api/v1/assets/packs`（2026-11-14 追加・ADR-005 S-final SF-3b）
+
+「ゲームアセットを追加」ウィンドウ（SF-4b で `/web/assets` のページになる）が出すパックの一覧。上流（`joaorb64/StreamHelperAssets` の `assets.json`）の索引と、`user_data/games` にインストール済みのゲーム。**`THIS_PC` 区分**（ローカルのパスは含まないが、読むと GitHub から索引を取りにいくことがあるので、LAN の他端末やプレビューのリスナーからは起こさせない）
+
+```json
+{ "ok": true, "data": {
+  "source": {"page": "https://github.com/joaorb64/TournamentStreamHelper", "index": "https://raw.githubusercontent.com/joaorb64/StreamHelperAssets/main/assets.json"},
+  "index": {"status": "ready", "error": null, "fetchedAt": 1763100000},
+  "games": [
+    {"code": "ssbu", "name": "Super Smash Bros. Ultimate", "available": true, "installed": true, "packs": [
+      {"name": "full", "size": 123456789, "version": "2", "installedVersion": "1", "installed": true, "updateAvailable": true, "default": true}
+    ]}
+  ]
+} }
+```
+
+- 索引はこの要求のスレッドで取る（キャッシュが無い・10 分より古い・`?refresh=true`。取り直しは 5 秒に 1 回まで、失敗も数える。取得中に来た要求はその結果を使う）。取れなくても `200` で、`index.status` が `"error"`（`error` は固定のコード: `fetch_failed` = 応答が無い・HTTP のエラー、`bad_index` = JSON のオブジェクトでない。例外の文はログにだけ出す）。前に取れた索引があればそれを出し続ける。`index.status` は `idle` / `loading` / `ready` / `error`
+- `games`: 索引のゲーム（`available: true`）と、索引に無いインストール済みのゲーム（`available: false`。`size` / `version` は null）。並びは `"name  (code)"` の大文字小文字を区別しない順（ウィンドウと同じ）
+- `packs`: **アプリが使うパックだけ**（`base_files` / `full` / `portrait` / `stage_icon` / `variant_icon`。ADR-002）。`size` は落とすバイト数（分割ファイルの合計）、`installedVersion` はインストール済みのパックの `config.json` の `version`、`updateAvailable` は両方の版があって違うとき、`default` はダウンロードで最初からチェックされるもの
+
+### 5.28 `GET /api/v1/assets/job`（2026-11-14 追加・ADR-005 S-final SF-3b）
+
+最後のゲームアセットのジョブの状態（今はジョブを始めるのは「ゲームアセットを追加」ウィンドウだけ。v1 の開始は SF-4b。§2.2）。**`THIS_PC` 区分**（メッセージがこの PC のパスを含みうる）。`Cache-Control: no-store`
+
+```json
+{ "ok": true, "data": {
+  "revision": 3, "status": "running", "operation": "install", "game": "ssbu",
+  "stage": "download", "pack": "full", "file": "ssbu.full.7z.001",
+  "done": 52428800, "total": 123456789,
+  "imported": [], "skipped": [], "skippedEntries": [], "skippedEntriesMore": 0,
+  "failed": [], "error": null, "message": null
+} }
+```
+
+- `revision`: ジョブを始めるたびに増える（3 種類で 1 本）。プロセスごとに 0 から。最初のジョブの前は `revision: 0`・`status: "idle"`
+- `status`: `idle` / `running` / `done` / `error` / `cancelled`。`operation`: `install` / `importZip` / `importFolder`。`stage`（走っている間）: `download` / `extract` / `copy` / `scan`
+- `done` / `total`: ダウンロードはバイト、ZIP の取り込みはエントリの数、フォルダの取り込みはファイルの数
+- `imported`: 置いたゲーム（インストールはそのゲーム）。`skipped`: インストール済みで置き換えなかったゲーム。`skippedEntries`: ZIP の取り込みで飛ばしたエントリの名前（フォルダの外を指さないが Windows で使えない名前。先頭 100 件。それを超えた数は `skippedEntriesMore`）。`failed`: `[{name, message}]`（ゲームごとの失敗。ほかのゲームは続ける）
+- `error`（`status` が `error`）: `bad_index` / `download_failed` / `extract_failed` / `unsafe_archive` / `too_large` / `not_a_zip` / `disk_full` / `stopped`（終了中）/ `failed` ほか（`core/AssetPackService` の定数）。`message` は英語の理由
+- 読み方: `revision` が始めたときのものと同じで、`status` が `running` でなくなったら結果（`revision` が進んでいれば、そのジョブは終わっていて結果はもう読めない）。走っている間はフッター（§5.23 の `status` の `assets_load`）にも出る。終わったジョブは `status` の通知より先に結果になっている（通知のあとに読めば結果）
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 

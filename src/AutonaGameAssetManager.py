@@ -154,7 +154,9 @@ class AutonaGameAssetManager(QObject):
         self.DownloadStartGGCharacters()
         self._pendingSelectedGameRestore = True
         self.signals.onLoadAssets.connect(self._RestoreSelectedGame)
-        self.LoadGames()
+        # The startup scan, as LoadGames()'s, with the games an asset job
+        # moved aside put back first (_FirstScan).
+        TaskExecutor.instance.submit(self._FirstScan, task_name="game scan")
 
     def _PersistSelectedGame(self):
         # The selected game used to live only in memory (reset every launch)
@@ -210,6 +212,19 @@ class AutonaGameAssetManager(QObject):
     def _Scan(self):
         self.catalog.ScanGames()
         self.signals.onLoadAssets.emit()
+
+    def _FirstScan(self):
+        # A process that died between an asset job's two moves left an
+        # installed game moved aside (user_data/games/.autona-replaced-*);
+        # it is put back before the first scan lists the games
+        # (AssetPackService.RestoreReplaced, ADR-005 S-final SF-3b; it never
+        # waits for a running job, which does it itself, and logs its own
+        # failures). The service is bootstrap_core()'s, built before this
+        # adapter.
+        from .core.AssetPackService import AssetPackService
+        if AssetPackService.instance is not None:
+            AssetPackService.instance.RestoreReplaced()
+        self._Scan()
 
     # ── game load ───────────────────────────────────────────────────────
 

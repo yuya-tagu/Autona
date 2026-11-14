@@ -2009,6 +2009,87 @@ def test_the_api_catalog_is_read_from_anywhere(server):
         assert response.get_json()["data"]["endpoints"]
 
 
+# ── The game asset packs' routes (ADR-005 S-final SF-3b) ─────────────────
+# The last job's state is THIS_PC: its messages may name this PC's paths --
+# not another computer's to read, token or not. The list (the upstream index
+# and what is installed, no path) is a READ. The jobs that write
+# user_data/games are not in v1 (SF-4b, under the shell's secret).
+
+@pytest.fixture
+def assetOps(server, monkeypatch):
+    """The asset web operations faked; the names of those called."""
+    from src import AutonaWebOperations
+
+    calls = []
+
+    def recorded(name, answer):
+        def op(*args, **kwargs):
+            calls.append(name)
+            return answer
+        return op
+
+    for name, answer in (
+            ("get_asset_packs", {"games": []}),
+            ("get_assets_job", {"revision": 0, "status": "idle"})):
+        monkeypatch.setattr(AutonaWebOperations, name, recorded(name, answer))
+    return calls
+
+
+# Both reads are this PC's alone: the job's state may name this PC's paths,
+# and the list's read may fetch the index from GitHub (SF-3b review).
+ASSET_READS = [("/api/v1/assets/job", "get_assets_job",
+                {"revision": 0, "status": "idle"}),
+               ("/api/v1/assets/packs", "get_asset_packs", {"games": []})]
+
+
+@pytest.mark.parametrize("url, op, answer", ASSET_READS)
+def test_this_pc_reads_the_assets_with_no_token(
+        server, assetOps, url, op, answer):
+    response = _client(server).get(url)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["data"] == answer
+    assert assetOps == [op]
+
+
+@pytest.mark.parametrize("url, op, answer", ASSET_READS)
+@pytest.mark.parametrize("withToken", [False, True])
+def test_another_computer_cannot_read_the_assets_even_with_the_token(
+        server, assetOps, withToken, url, op, answer):
+    token = WebAccess.Token()
+    headers = {WebAccess.TOKEN_HEADER: token} if withToken else {}
+    response = _client(server, LAN_PEER).get(url, headers=headers)
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.THIS_PC_ONLY)
+    assert assetOps == []
+
+
+@pytest.mark.parametrize("url, op, answer", ASSET_READS)
+@pytest.mark.parametrize("headers", [
+    {"Origin": "null"},
+    {"Origin": "https://evil.example"},
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Host": "evil.example"},
+    {"X-Forwarded-For": "203.0.113.9"},
+])
+def test_only_this_pcs_own_request_reads_the_assets(
+        server, assetOps, headers, url, op, answer):
+    sent = dict(headers, **{WebAccess.TOKEN_HEADER: WebAccess.Token()})
+    response = _client(server).get(url, headers=sent)
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.THIS_PC_ONLY)
+    assert assetOps == []
+
+
+def test_the_asset_jobs_are_not_in_v1_yet(server, assetOps):
+    # SF-4b brings them under the secret the shell hands only to the shared
+    # view: THIS_PC also lets this origin's layout/ pages through.
+    client = _client(server)
+    for url in ("/api/v1/assets/packs:install", "/api/v1/assets:importZip",
+                "/api/v1/assets:importFolder", "/api/v1/assets/job:cancel"):
+        assert client.post(url, json={}).status_code in (404, 405), url
+    assert assetOps == []
+
+
 # ── The API settings window's token row ──────────────────────────────────
 
 

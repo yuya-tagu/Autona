@@ -108,12 +108,16 @@ EXPECTED_ROUTES = [
 # Top 8 page (S4i); analysis* for the Statistics page's match list (S4k);
 # stats/overlays* for the Stats Display Settings page (S4l); players* and
 # players/<p>:load for the player list (S4m); api-catalog and connection for
-# the guides (ADR-005 S-final SF-3a).
+# the guides (ADR-005 S-final SF-3a); assets* for the asset packs (SF-3b).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
     # The API guide's catalogue (ADR-005 S-final SF-3a).
     ('/api/v1/api-catalog', 'api_v1.get_api_catalog', 'GET,HEAD,OPTIONS'),
+    # The game asset packs: the list and the last job's state (ADR-005
+    # S-final SF-3b; the jobs come with SF-4b).
+    ('/api/v1/assets/job', 'api_v1.get_assets_job', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/assets/packs', 'api_v1.get_asset_packs', 'GET,HEAD,OPTIONS'),
     ('/api/v1/battle-format', 'api_v1.get_battle_format', 'GET,HEAD,OPTIONS'),
     ('/api/v1/battle-format', 'api_v1.battle_format_set', 'OPTIONS,PUT'),
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
@@ -544,7 +548,11 @@ def test_the_classification_follows_the_rules():
               "api_v1.settings_network_update",
               "api_v1.settings_language_update",
               "api_v1.settings_hotkeys_update",
-              "api_v1.get_connection"}
+              "api_v1.get_connection",
+              # The asset job's state, and the list, whose read may fetch
+              # from GitHub (SF-3b).
+              "api_v1.get_assets_job",
+              "api_v1.get_asset_packs"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -592,7 +600,8 @@ def test_the_classification_follows_the_rules():
     # (S4ae: v1 77 of 120), less the game tracker's write and read, removed
     # with it (S4ac-4: v1 76 of 118), the status' read (S-final SF-2: v1 76 of
     # 119), and the guides' catalogue read and their connection's this-PC read
-    # (S-final SF-3a: v1 76 of 121).
+    # (S-final SF-3a: v1 76 of 121), and the asset packs' list read and the
+    # job's this-PC read (S-final SF-3b: v1 76 of 123).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -602,7 +611,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 121
+    assert len(EXPECTED_API_V1_ROUTES) == 123
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

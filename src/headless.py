@@ -212,7 +212,17 @@ class HeadlessGames:
         executor.submit(self.catalog.DownloadStartGGCharacters,
                         task_name="start.gg characters download")
         self._pendingRestore = True
-        executor.submit(self._Scan, task_name="game scan")
+        executor.submit(self._FirstScan, task_name="game scan")
+
+    def _FirstScan(self):
+        # The games an asset job moved aside and did not put back -- a
+        # process that died between its two moves -- go back before the
+        # first scan lists the games, as on the desktop
+        # (AutonaGameAssetManager._FirstScan; ADR-005 S-final SF-3b).
+        from .core.AssetPackService import AssetPackService
+        if AssetPackService.instance is not None:
+            AssetPackService.instance.RestoreReplaced()
+        self._Scan()
 
     def _Scan(self):
         # The scan job; what follows it, on the main thread. A failed scan
@@ -664,6 +674,7 @@ def Assemble(app, shell=None):
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from .AutonaWebServer import WebServer, log_webserver_port
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    from .core.AssetPackService import AssetPackService
     from .core.CountryCatalog import CountryCatalog
     from .core.GameAssetCatalog import GameAssetCatalog
     from .core.SettingsManager import SettingsManager
@@ -685,6 +696,12 @@ def Assemble(app, shell=None):
     # without it the provider logs that the game was not applied.
     provider.selectGameFromStartGGId = games.SelectGameFromStartGGId
     AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename
+    # The scan that follows an asset pack's install or import (ADR-005
+    # S-final SF-3b) is this loader's, as the desktop's is its adapter's:
+    # gamesScanned (games_changed) and the provider's game follow it. Run
+    # on the import's job, which may not submit another; SF-6 makes it the
+    # core GameLoader's.
+    AssetPackService.instance.scan = games._Scan
     # The player DB follows a game load, as it follows the adapter's onLoad
     # on the desktop: the loaded game's mains normalised in place
     # (PlayerDB.NormaliseMains) -- since the Qt model clean-up's PR3, which

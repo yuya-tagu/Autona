@@ -172,6 +172,10 @@ def test_bootstrap_core_steps_and_their_order():
         # run starts with, before either shell reads it (the locale, the web
         # server).
         "AppSettings()",
+        # The game asset packs (ADR-005 S-final SF-3b): after the executor
+        # and the catalog; the shells set its scan before anything can
+        # start a job.
+        "AssetPackService()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
 
@@ -225,6 +229,10 @@ def test_bootstrap_gui_steps_and_their_order():
         " = AutonaShellOperations.instance.RenderThumbnail",
         "AutonaWebOperations.startImageRender"
         " = AutonaShellOperations.instance.StartImageRender",
+        # An asset pack's install / import re-scans with the adapter's scan
+        # (onLoadAssets), on the import's job (ADR-005 S-final SF-3b).
+        "AssetPackService.instance.scan"
+        " = AutonaGameAssetManager.instance._Scan",
         "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
