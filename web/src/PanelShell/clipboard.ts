@@ -31,7 +31,9 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 // How long an image copy may take: a page refused the clipboard may never
-// hear back from it (QtWebEngine without JavascriptCanAccessClipboard).
+// hear back from it (a QtWebEngine view that answers no permission request;
+// the desktop's shared view grants it to its own origin, ADR-005 S-final
+// SF-8b).
 export const IMAGE_COPY_TIMEOUT_MS = 10000;
 
 // Whether this page can put an image on the clipboard: the async clipboard
