@@ -152,8 +152,9 @@ def _is_newer(remote_tag: str, local_ver: str) -> bool:
 # UpdateProcedure (launch external helper) + leftover cleanup
 # ---------------------------------------------------------------------------
 
-def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
-    mb = QMessageBox()
+def _generate_restart_messagebox(main_txt: str, parent=None) -> QMessageBox:
+    # Over `parent`, the main window (ADR-005 S-final SF-5b-1 review).
+    mb = QMessageBox(parent)
     mb.setWindowTitle(QApplication.translate("app", "Warning"))
     mb.setText(
         main_txt + "\n" +
@@ -163,12 +164,16 @@ def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
     return mb
 
 
-def UpdateProcedure():
+def UpdateProcedure(parent=None):
     """Launch the external update helper, then close the app.
 
     The helper waits for this process to exit, extracts update.zip over the
     install dir, and relaunches the new exe. Install is frozen-only; in dev the
     dialog already disables the install button before we get here.
+
+    `parent`: the main window, which the restart message box and the retry
+    dialog open over (AutonaUpdater.SetParent; ADR-005 S-final SF-5b-1
+    review). None: no parent, as before.
     """
     try:
         if not _is_frozen():
@@ -212,16 +217,20 @@ def UpdateProcedure():
                 "updater",
                 "Update downloaded. The app will close, install the update, "
                 "and restart automatically.")
-            + "\n"
+            + "\n",
+            parent,
         )
         mb.exec()
+        # Owned by the window when it has one: freed once shown, or every
+        # retry would leave one more on it (the SF-5b-1 re-review).
+        mb.deleteLater()
 
         _LaunchHelper(script, zip_path, install_dir, staging, exe_name)
         QApplication.exit()
     except Exception as e:
         logger.error(traceback.format_exc())
 
-        retry = QDialog()
+        retry = QDialog(parent)
         retry.setWindowTitle(QApplication.translate("app", "Warning"))
         vbox = QVBoxLayout()
         retry.setLayout(vbox)
@@ -236,9 +245,14 @@ def UpdateProcedure():
         btCancel = QPushButton(QApplication.translate("updater", "Cancel"))
         hbox.addWidget(btCancel)
 
-        btRetry.clicked.connect(lambda: [retry.close(), UpdateProcedure()])
+        btRetry.clicked.connect(
+            lambda: [retry.close(), UpdateProcedure(parent)])
         btCancel.clicked.connect(lambda: retry.close())
         retry.exec()
+        # Freed once over, as the restart box is: the window owns it. After
+        # exec, so a Retry (which runs the install again inside it) is
+        # over first.
+        retry.deleteLater()
 
 
 def _ExtractHelperFromZip(zip_path: Path, dest: Path) -> bool:
@@ -811,8 +825,9 @@ class _UpdateDialog(QDialog):
                 "updater", "Download complete. Preparing install..."))
         # Close this dialog before UpdateProcedure's modal message box.
         self.accept()
-        # Hand off to the original install flow.
-        UpdateProcedure()
+        # Hand off to the original install flow, its boxes over the window
+        # this dialog opened over (AutonaUpdater.SetParent).
+        UpdateProcedure(self.parentWidget())
 
     def _OnError(self, msg):
         self.progress.setVisible(False)
@@ -847,6 +862,20 @@ class AutonaUpdater(QObject):
         self._check_thread = None
         self._silent = False
         self._dialog = None
+        # The window the dialogs below open over (SetParent); None until it
+        # is there.
+        self._parent = None
+
+    def SetParent(self, window):
+        """The main window, which the check's answers -- "up to date", the
+        error, the new version's dialog -- open over (ADR-005 S-final
+        SF-5b-1): with no parent they could open behind a window that is
+        always on top. Window._BuildUi hands itself over once it is built
+        (this object is bootstrap_gui()'s, made before the window). The
+        install's restart message box and retry dialog (UpdateProcedure)
+        open over it too, handed on by the new version's dialog. Nothing
+        else changes: the check and the update are the same."""
+        self._parent = window
 
     def CheckForUpdates(self, silent: bool = False):
         """
@@ -875,14 +904,15 @@ class AutonaUpdater(QObject):
         # app has fully exited, so even the memory-mapped WebEngine resources
         # are free to replace. Any release - including a Qt bump - applies
         # cleanly.
-        self._dialog = _UpdateDialog(current, latest, release_url, asset_url, body)
+        self._dialog = _UpdateDialog(current, latest, release_url, asset_url,
+                                     body, parent=self._parent)
         self._dialog.show()
 
     def _OnNoUpdate(self):
         if self._silent:
             return
         QMessageBox.information(
-            None,
+            self._parent,
             QApplication.translate("updater", "Check for updates"),
             QApplication.translate("updater", "You are on the latest version."),
         )
@@ -891,7 +921,7 @@ class AutonaUpdater(QObject):
         if self._silent:
             return
         QMessageBox.warning(
-            None,
+            self._parent,
             QApplication.translate("updater", "Check for updates"),
             QApplication.translate(
                 "updater", "Update check failed:\n{0}"

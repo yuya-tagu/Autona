@@ -135,6 +135,9 @@ result = {
     "selector": provider.selectGameFromStartGGId
         == games.SelectGameFromStartGGId,
     "loader": WebOps.loadGameByCodename == games.LoadGameByCodename,
+    # A tournament newly loaded turns the mods off through the same loader
+    # (ADR-005 S-final SF-5b-1).
+    "mods_off": WebOps.turnModsOff == games.TurnModsOff,
     "board_host": type(WebOps.boardHost).__name__,
     # The shell operations (ADR-005 S3e-9): the desktop's alone.
     "shell_operations": [WebOps.openSetSelection is not None,
@@ -316,6 +319,7 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     # The registrations (S3c-1 review: the selector's must not go missing).
     assert result["selector"] is True
     assert result["loader"] is True
+    assert result["mods_off"] is True
     assert result["board_host"] == "BoardHost"
     assert result["shell_operations"] == [False, False, False]
     assert result["desktop"] == []
@@ -445,6 +449,7 @@ def test_the_registrations_come_before_anything_can_use_them():
     steps = _assemble_steps()
     for registration in ("provider.selectGameFromStartGGId =",
                          "AutonaWebOperations.loadGameByCodename =",
+                         "AutonaWebOperations.turnModsOff =",
                          "wire_tournament_data()"):
         for user in ("provider.UiMounted()", "games.Start()",
                      "webserver.start()"):

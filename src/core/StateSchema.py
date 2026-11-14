@@ -347,6 +347,13 @@ SCORE_CREW_PLAYER_KEYS = (
 # the rest of `score` by ResetScoreRoot (once per launch).
 SCORE_SHARED_KEYS = ("bracket_type",)
 
+# Whether a game is selected (ADR-005 S-final SF-5b-1): True from a load
+# (GameAssetCatalog._Publish), False from ResetGameState and from a cleared
+# tournament (GameAssetCatalog.ForgetSelection). The rest of `game` outlives
+# a clear -- the last game's name and codename stay -- so a reader that asks
+# "is a game picked?" reads this, not `codename`.
+GAME_SELECTED_KEY = "selected"
+
 GAME_KEYS = (
     "name",
     "abbreviation",
@@ -359,6 +366,7 @@ GAME_KEYS = (
     "has_stages",
     "has_variants",
     "has_colors",
+    GAME_SELECTED_KEY,
     "has_modded_content",
 )
 

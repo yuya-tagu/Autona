@@ -194,10 +194,12 @@ class HeadlessGames:
         # the request waiting for the loader (None: none; a newer one
         # replaces it), whether a loader job is submitted and not over, that
         # job's Future (None before the first), and the generation of the
-        # latest request the loader is over with.
+        # latest request the loader is over with. And the request the loader
+        # is running (None: none), which TurnModsOff reads.
         self._requestLock = threading.Condition()
         self._loadGeneration = 0
         self._pendingLoad = None
+        self._runningLoad = None
         self._loaderRunning = False
         self._loadFuture = None
         self._finishedGeneration = 0
@@ -284,7 +286,9 @@ class HeadlessGames:
 
         The latest request wins: a request still waiting for the loader when
         a newer one comes is not loaded, so rapid requests A, B, C end on C;
-        a load already running when C comes finishes first. A synchronous
+        a load already running when C comes finishes first. A newer request
+        for the same game keeps the reload the one it supersedes asked for,
+        with the newer one's mods (ADR-005 S-final SF-5b-1). A synchronous
         request is over once the loader is over with it or with a request
         made after it, whatever that attempt's outcome (set_game's "OK").
 
@@ -319,6 +323,8 @@ class HeadlessGames:
             self._loadGeneration += 1
             request.generation = self._loadGeneration
             superseded, self._pendingLoad = self._pendingLoad, request
+            if superseded is not None and superseded.codename == codename:
+                request.reload = request.reload or superseded.reload
             if not self._loaderRunning:
                 # Cancelled as it was submitted (the executor has shut
                 # down): _LoaderEnded ran already, and nothing will take it.
@@ -333,6 +339,32 @@ class HeadlessGames:
             self._SettleAndFinish(orphan)
         if not async_mode:
             self._WaitForLoad(request.generation)
+
+    def TurnModsOff(self):
+        """Have the game the loader ends on loaded without its modded
+        content (ADR-005 S-final SF-5b-1): the desktop adapter's
+        TurnModsOff, which says it all -- GameAssetCatalog.PlanModsOff,
+        decided and asked under the request lock. Returns at once. Not
+        from a job lane (it may start the loader)."""
+        from .core.GameAssetCatalog import MODS_OFF_WAITING, PlanModsOff
+        with self._requestLock:
+            plan = PlanModsOff(self._pendingLoad, self._runningLoad,
+                               self.catalog.Current())
+            if plan is None:
+                return
+            kind, value = plan
+            if kind == MODS_OFF_WAITING:
+                waiting = self._pendingLoad
+                waiting.modsActive = False
+                waiting.reload = waiting.reload or value
+                logger.info(f"Game load of {waiting.codename} asked for "
+                            "without its modded content")
+                return
+            logger.info(f"{value} asked for again without its modded content")
+            # Nothing waits, so it supersedes nothing; asked under the lock
+            # (re-entered), so no request comes before it.
+            self.LoadGameByCodename(value, mods_active=False,
+                                    mods_reload_mode=True)
 
     def _StartLoader(self):
         # Under _requestLock, with no loader running. Raises what the
@@ -355,6 +387,7 @@ class HeadlessGames:
             if self._loadFuture is not job or not self._loaderRunning:
                 return
             self._loaderRunning = False
+            self._runningLoad = None
             orphan, self._pendingLoad = self._pendingLoad, None
         if orphan is not None:
             logger.info(f"Game load of {orphan.codename} not run: the "
@@ -405,12 +438,16 @@ class HeadlessGames:
                 if request is None:
                     self._loaderRunning = False
                     return
+                self._runningLoad = request
             try:
                 self._Load(request.codename, request.modsActive,
                            request.reload)
             except Exception:
                 logger.error(traceback.format_exc())
             finally:
+                # Not running any more: the catalog says what it did.
+                with self._requestLock:
+                    self._runningLoad = None
                 self._SettleAndFinish(request)
 
     def _Load(self, codename, modsActive, reload):
@@ -698,6 +735,9 @@ def Assemble(app, shell=None):
     # without it the provider logs that the game was not applied.
     provider.selectGameFromStartGGId = games.SelectGameFromStartGGId
     AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename
+    # A tournament newly loaded turns the mods off through it (ADR-005
+    # S-final SF-5b-1), as on the desktop.
+    AutonaWebOperations.turnModsOff = games.TurnModsOff
     # The scan that follows an asset pack's install or import (ADR-005
     # S-final SF-3b) is this loader's, as the desktop's is its adapter's:
     # gamesScanned (games_changed) and the provider's game follow it. Run

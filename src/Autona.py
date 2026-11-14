@@ -681,18 +681,14 @@ class Window(QMainWindow):
         self.moddedContentCheck.setVisible(False)
         self.moddedContentCheck.setChecked(False)
 
-        AutonaGameAssetManager.instance.signals.onLoad.connect(lambda x=None: [
-            self.moddedContentCheck.setVisible(AutonaGameAssetManager.instance.has_modded_content),
-            self.moddedContentCheck.setChecked(StateManager.Get("game").get("mods_active", False))
-        ])
-        self.moddedContentCheck.stateChanged.connect(lambda x=None: [
-            AutonaGameAssetManager.instance.LoadGameAssets(
-                self._currentGameIndex,
-                mods_active=self.moddedContentCheck.isChecked(),
-                mods_reload_mode=True)
-        ])
-        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
-            lambda x=None: self.moddedContentCheck.setChecked(False))
+        AutonaGameAssetManager.instance.signals.onLoad.connect(
+            self._ShowModdedContent)
+        self.moddedContentCheck.stateChanged.connect(self._ToggleMods)
+        # A tournament newly loaded turns the mods off in core since ADR-005
+        # S-final SF-5b-1 (TournamentService asks for the game again without
+        # them, both shells); the checkbox follows that load on onLoad. It
+        # was unchecked here on tournament_changed until then, which made
+        # its stateChanged above ask for the reload.
 
         self.sidebar.setGameSelect(self.gameSelect, self.moddedContentCheck)
 
@@ -763,6 +759,13 @@ class Window(QMainWindow):
         # the board the persisted battle format shows (CreateScoreboard /
         # SetBattleFormat); the boards are core's, made at launch.
         AutonaShellOperations.instance.UiMounted(self)
+        # The updater's dialogs ("up to date", the check's error, the new
+        # version's) open over this window (ADR-005 S-final SF-5b-1): with
+        # no parent they could open behind it while it is always on top.
+        # The updater is bootstrap_gui()'s, built before this window; its
+        # first check (the startup's silent one, further down) comes after
+        # this.
+        AutonaUpdater.instance.SetParent(self)
 
         self.ReloadGames()
 
@@ -1264,11 +1267,42 @@ class Window(QMainWindow):
             self._statusProgress.setVisible(False)
 
     def _pickGame(self, idx):
-        # User chose a game from the menu — mirror the former combo 'activated'
-        # behavior: load the game's assets, then clear the modded toggle.
+        # User chose a game from the menu: one load of it, without its mods
+        # -- as a reload when the checkbox has them on, or the same game
+        # again would be skipped with them left on. The checkbox is
+        # unchecked with its signals blocked (ADR-005 S-final SF-5b-1
+        # review): unblocked, its stateChanged asked for a second load
+        # (_ToggleMods). onLoad draws it from the state again.
         self._currentGameIndex = idx
-        AutonaGameAssetManager.instance.LoadGameAssets(idx)
-        self.moddedContentCheck.setChecked(False)
+        modsOn = self.moddedContentCheck.isChecked()
+        with QSignalBlocker(self.moddedContentCheck):
+            self.moddedContentCheck.setChecked(False)
+        AutonaGameAssetManager.instance.LoadGameAssets(
+            idx, mods_active=False, mods_reload_mode=modsOn)
+
+    def _ToggleMods(self, _state=None):
+        # The mods checkbox clicked (stateChanged; every drawing of it is
+        # done with its signals blocked): the game again, with or without
+        # them.
+        AutonaGameAssetManager.instance.LoadGameAssets(
+            self._currentGameIndex,
+            mods_active=self.moddedContentCheck.isChecked(),
+            mods_reload_mode=True)
+
+    def _ShowModdedContent(self):
+        # The mods checkbox shows the loaded game (onLoad): shown when it
+        # ships modded assets, checked as the state's game.mods_active.
+        # Drawn with its signals blocked, so following a load never asks for
+        # another one through stateChanged (ADR-005 S-final SF-5b-1: core's
+        # reload with the mods off, on a tournament newly loaded, would
+        # otherwise be asked for a second time from here). Until SF-5b-3
+        # removes the checkbox.
+        self.moddedContentCheck.setVisible(
+            AutonaGameAssetManager.instance.has_modded_content)
+        with QSignalBlocker(self.moddedContentCheck):
+            self.moddedContentCheck.setChecked(bool(
+                (StateManager.Get(schema.GAME_ROOT, {}) or {}).get(
+                    "mods_active", False)))
 
     def SetGame(self, mods_active=False):
         # Reflect the currently selected game on the button: check its menu

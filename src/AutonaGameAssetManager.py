@@ -26,6 +26,7 @@ from concurrent.futures import Future
 from loguru import logger
 from qtpy.QtCore import QObject, Signal
 
+from .core.GameAssetCatalog import MODS_OFF_WAITING, PlanModsOff
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
 from .core.StatusService import StatusService
@@ -113,10 +114,12 @@ class AutonaGameAssetManager(QObject):
         # next), the request waiting for the loader (None: none; a newer one
         # replaces it), whether a loader job is submitted and not over, that
         # job's Future (None before the first), and the generation of the
-        # latest request the loader is over with.
+        # latest request the loader is over with. And the request the loader
+        # is running (None: none), which TurnModsOff reads.
         self._requestLock = threading.Condition()
         self._loadGeneration = 0
         self._pendingLoad = None
+        self._runningLoad = None
         self._loaderRunning = False
         self._loadFuture = None
         self._finishedGeneration = 0
@@ -269,7 +272,12 @@ class AutonaGameAssetManager(QObject):
         The latest request wins: a request still waiting for the loader when
         a newer one comes is not loaded (SUPERSEDED, nothing selected), so
         rapid requests A, B, C end on C. A load already running when C comes
-        finishes first. A synchronous request is over once the loader is over
+        finishes first. A newer request for the same game keeps the reload
+        the one it supersedes asked for (its mods are the newer one's:
+        ADR-005 S-final SF-5b-1 -- the game a tournament's data selects,
+        asked for without reload, superseded the reload that turns the mods
+        off, and was then skipped as the same game, the mods left on). A
+        synchronous request is over once the loader is over
         with it, or with a request made after it -- whatever that attempt's
         outcome: set_game's "OK" means the attempt is over, as it did for a
         skipped or failed load (logged) when set_game loaded on the GUI
@@ -318,6 +326,8 @@ class AutonaGameAssetManager(QObject):
             self._loadGeneration += 1
             request.generation = self._loadGeneration
             superseded, self._pendingLoad = self._pendingLoad, request
+            if superseded is not None and superseded.codename == codename:
+                request.reload = request.reload or superseded.reload
             if not self._loaderRunning:
                 # Cancelled as it was submitted (the executor has shut
                 # down): _LoaderEnded ran already, and nothing will take it.
@@ -331,6 +341,35 @@ class AutonaGameAssetManager(QObject):
         if not async_mode:
             self._WaitForLoad(request.generation)
         return request.future
+
+    def TurnModsOff(self):
+        """Have the game the loader ends on loaded without its modded
+        content (ADR-005 S-final SF-5b-1: a tournament newly loaded --
+        TournamentService, through AutonaWebOperations.turnModsOff). What
+        it asks is GameAssetCatalog.PlanModsOff's, decided and asked under
+        the request lock, so no request comes in between: the waiting
+        request is made to load without them, or the game is asked for
+        again without them (a reload). Never a request ahead of one made
+        before it, nor a game loaded again after another one. Returns at
+        once. Not from a job lane (it may start the loader)."""
+        with self._requestLock:
+            plan = PlanModsOff(self._pendingLoad, self._runningLoad,
+                               self.catalog.Current())
+            if plan is None:
+                return
+            kind, value = plan
+            if kind == MODS_OFF_WAITING:
+                waiting = self._pendingLoad
+                waiting.modsActive = False
+                waiting.reload = waiting.reload or value
+                logger.info(f"Game load of {waiting.codename} asked for "
+                            "without its modded content")
+                return
+            logger.info(f"{value} asked for again without its modded content")
+            # Nothing waits (PlanModsOff), so it supersedes nothing; asked
+            # under the lock (re-entered), so no request comes before it.
+            self.LoadGameByCodename(value, mods_active=False,
+                                    mods_reload_mode=True)
 
     def _StartLoader(self):
         # Under _requestLock, with no loader running. Raises what the
@@ -352,6 +391,7 @@ class AutonaGameAssetManager(QObject):
             if self._loadFuture is not job or not self._loaderRunning:
                 return
             self._loaderRunning = False
+            self._runningLoad = None
             orphan, self._pendingLoad = self._pendingLoad, None
         if orphan is not None:
             self._SettleAndFinish(
@@ -410,10 +450,14 @@ class AutonaGameAssetManager(QObject):
                 if request is None:
                     self._loaderRunning = False
                     return
+                self._runningLoad = request
             outcome = FAILED
             try:
                 outcome = self._RunLoad(request)
             finally:
+                # Not running any more: the catalog says what it did.
+                with self._requestLock:
+                    self._runningLoad = None
                 # Finished whatever the settle did: a synchronous request
                 # waiting for this generation (or an older one) must not
                 # wait for ever (ADR-005 S3f-4 review: it did when a caller

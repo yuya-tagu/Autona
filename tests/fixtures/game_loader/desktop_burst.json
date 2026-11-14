@@ -5,7 +5,7 @@
    "loader",
    "set",
    "game",
-   "{\"name\":\"Second Game\",\"abbreviation\":\"SG\",\"smashgg_id\":43868,\"codename\":\"game2\",\"logo\":\"./user_data/games/game2//base_files/logo.png\",\"defaults\":null,\"mods_active\":false,\"has_stages\":false,\"has_variants\":false,\"has_colors\":false}"
+   "{\"name\":\"Second Game\",\"abbreviation\":\"SG\",\"smashgg_id\":43868,\"codename\":\"game2\",\"logo\":\"./user_data/games/game2//base_files/logo.png\",\"defaults\":null,\"mods_active\":false,\"has_stages\":false,\"has_variants\":false,\"has_colors\":false,\"selected\":true}"
   ],
   [
    "loader",
@@ -41,7 +41,7 @@
    "loader",
    "set",
    "game",
-   "{\"name\":\"測試遊戲\",\"abbreviation\":\"TG\",\"smashgg_id\":1386,\"codename\":\"tgame\",\"logo\":\"./user_data/games/tgame//base_files/logo.png\",\"defaults\":{\"best_of\":3},\"mods_active\":true,\"has_stages\":true,\"has_variants\":true,\"has_colors\":true}"
+   "{\"name\":\"測試遊戲\",\"abbreviation\":\"TG\",\"smashgg_id\":1386,\"codename\":\"tgame\",\"logo\":\"./user_data/games/tgame//base_files/logo.png\",\"defaults\":{\"best_of\":3},\"mods_active\":true,\"has_stages\":true,\"has_variants\":true,\"has_colors\":true,\"selected\":true}"
   ],
   [
    "loader",

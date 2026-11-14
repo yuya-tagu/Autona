@@ -41,7 +41,9 @@ Locking rules
   can never disagree, and the `StateManager.SaveBlock()` is opened *outside*
   it: the save cycle (and with it every observer) runs after the lock is
   released. Lock order is therefore catalog lock -> StateManager.lock; never
-  call a catalog writer from a state observer.
+  call a catalog writer from a state observer. The one write made after
+  the lock is released is `ForgetSelection`'s `game.selected` (ADR-005
+  S-final SF-5b-1; why it still agrees with the snapshot is said there).
 - The catalog has no observer channel of its own and must not grow one
   (core services are called, they do not subscribe or publish events --
   the Qt adapter's `onLoad` signal is the notification). What a switch to
@@ -159,6 +161,58 @@ class GameAssetSnapshot:
     # shell runs after the load with the snapshot that load returned --
     # never with a later Current()).
     replaced: Optional[str] = None
+
+
+# What turning the modded content off asks of a game loader (PlanModsOff).
+MODS_OFF_WAITING = "waiting"   # the request waiting for the loader, without
+MODS_OFF_RELOAD = "reload"     # a new request: the game again, without
+
+
+def PlanModsOff(waiting, running, current):
+    """What turning the modded content off asks of a game loader (ADR-005
+    S-final SF-5b-1: a tournament newly loaded -- TournamentService, through
+    the loader each shell registers), so that the game the loader ends on is
+    loaded without its mods, and nothing else changes: no request goes in
+    front of one made before it (a game the operator asked for is not
+    dropped), and no game is loaded again after another one.
+
+    `waiting` / `running`: the loader's request waiting for it and the one
+    it is running (None: none), each with `codename`, `modsActive` and
+    `reload`; `current`: this catalog's Current(). Called under the loader's
+    request lock, so neither request changes meanwhile; `current` may move
+    on under it (the running request's SelectGame), which the rules below
+    read the same either way.
+
+    Returns None (nothing to ask); (MODS_OFF_WAITING, reload): the waiting
+    request loads without the mods -- as a reload as well when `reload` (it
+    would be skipped otherwise: the same game without reload, SelectGame);
+    or (MODS_OFF_RELOAD, codename): a new request, `codename` again without
+    its mods (with nothing waiting, it supersedes nothing).
+
+    - The game the loader stands on when the waiting request (or a new one)
+      runs: the running request's -- unless SelectGame skips it (the
+      selected game again without reload) -- else the catalog's.
+    - A waiting request that will load (another game, or a reload) loads
+      without the mods, whatever game it is: it is not replaced.
+    - One that will be skipped is made a reload without them when that game
+      has them on.
+    - With nothing waiting, that game is asked for again without them when
+      they are on -- the running request's game when it asked for them (a
+      tournament set while the mods were being turned on), never the game
+      it replaces.
+    """
+    if running is not None and (running.reload
+                                or running.codename != current.codename):
+        codename, modsOn = running.codename, bool(running.modsActive)
+    else:
+        codename, modsOn = current.codename, bool(current.modsActive)
+    if waiting is not None:
+        if waiting.reload or waiting.codename != codename:
+            return (MODS_OFF_WAITING, False) if waiting.modsActive else None
+        return (MODS_OFF_WAITING, True) if modsOn else None
+    if codename and modsOn:
+        return (MODS_OFF_RELOAD, codename)
+    return None
 
 
 def _localized(table, locale, remap, split):
@@ -560,24 +614,42 @@ class GameAssetCatalog:
         return self._generation
 
     def ResetGameState(self):
-        """Drop the selection and publish an empty `game`."""
+        """Drop the selection and publish an empty `game`: nothing in it but
+        `selected` False (ADR-005 S-final SF-5b-1)."""
         with StateManager.SaveBlock():
             with self._lock:
                 self._current = GameAssetSnapshot(
                     generation=self._NextGeneration())
-                StateManager.Set(schema.GAME_ROOT, {})
+                StateManager.Set(schema.GAME_ROOT,
+                                 {schema.GAME_SELECTED_KEY: False})
 
     def ForgetSelection(self):
         """No game is selected any more (the tournament URL was cleared).
 
         Only the selection goes: the assets, the models built from them and
-        the `game` state stay, exactly as the old `selectedGame = {}` did.
-        A later SelectGame() of the same game therefore loads it again
-        instead of being skipped."""
+        the rest of the `game` state stay, exactly as the old
+        `selectedGame = {}` did. A later SelectGame() of the same game
+        therefore loads it again instead of being skipped. The state says
+        so in `game.selected` (False; ADR-005 S-final SF-5b-1), since its
+        codename and name are still the last game's."""
         with self._lock:
             # Nor is it a load: what the last one replaced goes with it.
             self._current = replace(self._current, game={}, codename=None,
                                     replaced=None)
+        # Written after the writer lock is released (agent-pitfalls #16:
+        # with no save block open, the write publishes at once, and its
+        # observers must not run under that lock), under StateManager.lock
+        # with the selection read again: a SelectGame that took the writer
+        # lock right after ours has swapped its snapshot in before it
+        # publishes `game` -- which waits for StateManager.lock. So either
+        # its codename is seen here and the flag is left to it, or its
+        # publish (selected True) comes after this write. The state cannot
+        # end up saying "not selected" over a loaded game. (Taking the
+        # writer lock here instead would turn the lock order round.)
+        with StateManager.lock:
+            if self._current.codename is None:
+                StateManager.SetIfChanged(
+                    f"{schema.GAME_ROOT}.{schema.GAME_SELECTED_KEY}", False)
 
     def ReloadStartGGCharacters(self):
         """Re-read the start.gg character table (runtime copy, else seed)."""
@@ -783,7 +855,10 @@ class GameAssetCatalog:
             "mods_active": snapshot.modsActive,
             "has_stages": bool(game.get("stage_to_codename")),
             "has_variants": bool(game.get("variant_to_codename")),
-            "has_colors": bool(game.get("preset_colors"))
+            "has_colors": bool(game.get("preset_colors")),
+            # A load selects the game (ADR-005 S-final SF-5b-1): in the
+            # same write, so `game` never shows a loaded game unselected.
+            schema.GAME_SELECTED_KEY: True,
         })
         StateManager.Set(f"{schema.GAME_ROOT}.has_modded_content",
                          snapshot.hasModdedContent)
