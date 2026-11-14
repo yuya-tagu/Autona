@@ -325,7 +325,12 @@ def bootstrap_core():
     # by the shells' launch seed (StateSchema.SeedPanelState), ahead of the
     # restore. The set / clear runs
     # on the main thread through the GUI executor, read when one is
-    # applied (both shells make it before calling this).
+    # applied (both shells make it before calling this). A tournament newly
+    # loaded asks for the selected game again with its mods off (ADR-005
+    # S-final SF-5b-1; the Qt window did it until then): through the web
+    # operations' load_game, which reads the loader the shell registers
+    # (bootstrap_gui() / src/headless.Assemble, both after this) when it is
+    # called -- before that, none is registered and it logs.
     from .Helpers import AutonaQtHelper
     from .core.TournamentMediaService import TournamentMediaService
     from .core.TournamentService import TournamentService
@@ -335,7 +340,9 @@ def bootstrap_core():
     if TournamentService.instance is None:
         TournamentService.instance = TournamentService(
             provider=AutonaTournamentDataProvider.instance,
-            onMain=lambda fn: AutonaQtHelper.gui_executor(fn))
+            onMain=lambda fn: AutonaQtHelper.gui_executor(fn),
+            loadGame=lambda codename, modsActive: AutonaWebOperations
+            .load_game(codename, mods_active=modsActive))
 
     # ORDER CONSTRAINT: the 配信設定 operations (ADR-005 S4d) after what
     # they write through and read -- the state layer and AutonaActions (the

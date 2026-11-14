@@ -172,7 +172,11 @@ def test_a_load_matches_the_recording(catalog, label):
         # QVariantMap order, having been read back out of the Qt models.
         assert json.dumps(actual) == json.dumps(payloads[name]), name
 
-    state = SM.Get(PREFIX)
+    state = dict(SM.Get(PREFIX))
+    # The one key the recording has not: the load selects the game
+    # (ADR-005 S-final SF-5b-1), in the same write, after has_colors.
+    assert list(state).index("selected") == list(state).index("has_colors") + 1
+    assert state.pop("selected") is True
     assert state == golden["state"]
     assert list(state) == list(golden["state"])
     assert sorted(os.listdir("./out/css")) == golden["css"]
@@ -287,9 +291,84 @@ def test_reset_publishes_an_empty_game(catalog):
     loaded = catalog.SelectGame("tgame")
     catalog.ResetGameState()
 
-    assert SM.Get(PREFIX) == {}
+    # Empty but for the selection flag (ADR-005 S-final SF-5b-1).
+    assert SM.Get(PREFIX) == {"selected": False}
     assert catalog.Current().codename is None
     assert catalog.Current().generation > loaded.generation
+
+
+# ── game.selected (ADR-005 S-final SF-5b-1) ─────────────────────────────
+
+def test_a_load_selects_and_forgetting_unselects_the_rest_staying(catalog):
+    """The state says whether a game is picked: a load says True, a cleared
+    tournament (ForgetSelection) False -- while the rest of `game` (the last
+    game's codename, name, mods) stays, which is why a reader cannot tell
+    from `codename`."""
+    assert SM.Get(f"{PREFIX}.selected") is False             # the launch's
+    catalog.SelectGame("tgame", modsActive=True)
+    assert SM.Get(f"{PREFIX}.selected") is True
+    loaded = deep_clone(SM.Get(PREFIX))
+
+    catalog.ForgetSelection()
+
+    assert SM.Get(f"{PREFIX}.selected") is False
+    assert {**SM.Get(PREFIX), "selected": True} == loaded
+    # Picked again: a load, selected again.
+    catalog.SelectGame("tgame")
+    assert SM.Get(f"{PREFIX}.selected") is True
+
+
+def test_forgetting_writes_the_flag_outside_the_writer_lock_once(catalog,
+                                                                 monkeypatch):
+    """agent-pitfalls #16: with no save block open the write publishes at
+    once, and its observers must not run under the catalog's writer lock.
+    Forgetting again (nothing selected) writes nothing."""
+    catalog.SelectGame("tgame")
+    writes = []
+    realSet = SM.Set
+
+    def spy(key, value):
+        if key.startswith(PREFIX):
+            writes.append((key, value, catalog._lock.locked()))
+        return realSet(key, value)
+
+    monkeypatch.setattr(SM, "Set", staticmethod(spy))
+    catalog.ForgetSelection()
+    catalog.ForgetSelection()
+
+    assert writes == [(f"{PREFIX}.selected", False, False)]
+
+
+def test_forgetting_leaves_the_flag_to_a_load_that_swapped_in_first(
+        catalog, monkeypatch):
+    """A load that took the writer lock right after the forgetting's has
+    swapped its snapshot in before it publishes (which waits for
+    StateManager.lock): the forgetting, finding a game selected again,
+    leaves the flag to that load instead of saying "not selected" over
+    it."""
+    catalog.SelectGame("tgame")
+    loaded = catalog.Current()
+    realLock = catalog._lock
+
+    class _SwapOnRelease:
+        """The writer lock, as a SelectGame that was waiting on it sees it:
+        the moment the forgetting releases it, the load swaps in."""
+
+        def __enter__(self):
+            realLock.acquire()
+
+        def __exit__(self, *exc):
+            realLock.release()
+            catalog._current = loaded
+
+        def locked(self):
+            return realLock.locked()
+
+    monkeypatch.setattr(catalog, "_lock", _SwapOnRelease())
+    catalog.ForgetSelection()
+
+    assert catalog.Current() is loaded
+    assert SM.Get(f"{PREFIX}.selected") is True
 
 
 # ── a switch to another game empties the Top 8 characters (S3e-8) ───────
@@ -337,7 +416,7 @@ def test_the_first_load_of_a_session_keeps_the_top8_characters(catalog):
     pick restores a game, it does not switch away from one, and the Top 8
     saved with its characters keeps them."""
     _top8WithCharacters()
-    assert SM.Get(PREFIX) == {}
+    assert SM.Get(PREFIX) == {"selected": False}
     catalog.SelectGame("tgame")
     assert _top8Characters() == TOP8_CHARACTERS
 

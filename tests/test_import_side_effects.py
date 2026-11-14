@@ -452,7 +452,7 @@ game_catalog.instance = game_catalog()
 assert not os.path.exists("./user_data/games"), \
     "GameAssetCatalog() created ./user_data/games"
 game_catalog.instance.ResetGameState()
-assert core_state.Get("game") == {}, \
+assert core_state.Get("game") == {"selected": False}, \
     "GameAssetCatalog.ResetGameState() did not publish an empty game"
 game_assets.instance = game_assets(game_catalog.instance)
 assert not os.path.exists("./user_data/games"), \

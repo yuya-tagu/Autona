@@ -847,6 +847,20 @@ class AutonaUpdater(QObject):
         self._check_thread = None
         self._silent = False
         self._dialog = None
+        # The window the dialogs below open over (SetParent); None until it
+        # is there.
+        self._parent = None
+
+    def SetParent(self, window):
+        """The main window, which the check's answers -- "up to date", the
+        error, the new version's dialog -- open over (ADR-005 S-final
+        SF-5b-1): with no parent they could open behind a window that is
+        always on top. Window._BuildUi hands itself over once it is built
+        (this object is bootstrap_gui()'s, made before the window). The
+        restart message box of the install (_generate_restart_messagebox) is
+        not one of them. Nothing else changes: the check and the update are
+        the same."""
+        self._parent = window
 
     def CheckForUpdates(self, silent: bool = False):
         """
@@ -875,14 +889,15 @@ class AutonaUpdater(QObject):
         # app has fully exited, so even the memory-mapped WebEngine resources
         # are free to replace. Any release - including a Qt bump - applies
         # cleanly.
-        self._dialog = _UpdateDialog(current, latest, release_url, asset_url, body)
+        self._dialog = _UpdateDialog(current, latest, release_url, asset_url,
+                                     body, parent=self._parent)
         self._dialog.show()
 
     def _OnNoUpdate(self):
         if self._silent:
             return
         QMessageBox.information(
-            None,
+            self._parent,
             QApplication.translate("updater", "Check for updates"),
             QApplication.translate("updater", "You are on the latest version."),
         )
@@ -891,7 +906,7 @@ class AutonaUpdater(QObject):
         if self._silent:
             return
         QMessageBox.warning(
-            None,
+            self._parent,
             QApplication.translate("updater", "Check for updates"),
             QApplication.translate(
                 "updater", "Update check failed:\n{0}"

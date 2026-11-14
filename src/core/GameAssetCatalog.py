@@ -41,7 +41,9 @@ Locking rules
   can never disagree, and the `StateManager.SaveBlock()` is opened *outside*
   it: the save cycle (and with it every observer) runs after the lock is
   released. Lock order is therefore catalog lock -> StateManager.lock; never
-  call a catalog writer from a state observer.
+  call a catalog writer from a state observer. The one write made after
+  the lock is released is `ForgetSelection`'s `game.selected` (ADR-005
+  S-final SF-5b-1; why it still agrees with the snapshot is said there).
 - The catalog has no observer channel of its own and must not grow one
   (core services are called, they do not subscribe or publish events --
   the Qt adapter's `onLoad` signal is the notification). What a switch to
@@ -560,24 +562,42 @@ class GameAssetCatalog:
         return self._generation
 
     def ResetGameState(self):
-        """Drop the selection and publish an empty `game`."""
+        """Drop the selection and publish an empty `game`: nothing in it but
+        `selected` False (ADR-005 S-final SF-5b-1)."""
         with StateManager.SaveBlock():
             with self._lock:
                 self._current = GameAssetSnapshot(
                     generation=self._NextGeneration())
-                StateManager.Set(schema.GAME_ROOT, {})
+                StateManager.Set(schema.GAME_ROOT,
+                                 {schema.GAME_SELECTED_KEY: False})
 
     def ForgetSelection(self):
         """No game is selected any more (the tournament URL was cleared).
 
         Only the selection goes: the assets, the models built from them and
-        the `game` state stay, exactly as the old `selectedGame = {}` did.
-        A later SelectGame() of the same game therefore loads it again
-        instead of being skipped."""
+        the rest of the `game` state stay, exactly as the old
+        `selectedGame = {}` did. A later SelectGame() of the same game
+        therefore loads it again instead of being skipped. The state says
+        so in `game.selected` (False; ADR-005 S-final SF-5b-1), since its
+        codename and name are still the last game's."""
         with self._lock:
             # Nor is it a load: what the last one replaced goes with it.
             self._current = replace(self._current, game={}, codename=None,
                                     replaced=None)
+        # Written after the writer lock is released (agent-pitfalls #16:
+        # with no save block open, the write publishes at once, and its
+        # observers must not run under that lock), under StateManager.lock
+        # with the selection read again: a SelectGame that took the writer
+        # lock right after ours has swapped its snapshot in before it
+        # publishes `game` -- which waits for StateManager.lock. So either
+        # its codename is seen here and the flag is left to it, or its
+        # publish (selected True) comes after this write. The state cannot
+        # end up saying "not selected" over a loaded game. (Taking the
+        # writer lock here instead would turn the lock order round.)
+        with StateManager.lock:
+            if self._current.codename is None:
+                StateManager.SetIfChanged(
+                    f"{schema.GAME_ROOT}.{schema.GAME_SELECTED_KEY}", False)
 
     def ReloadStartGGCharacters(self):
         """Re-read the start.gg character table (runtime copy, else seed)."""
@@ -783,7 +803,10 @@ class GameAssetCatalog:
             "mods_active": snapshot.modsActive,
             "has_stages": bool(game.get("stage_to_codename")),
             "has_variants": bool(game.get("variant_to_codename")),
-            "has_colors": bool(game.get("preset_colors"))
+            "has_colors": bool(game.get("preset_colors")),
+            # A load selects the game (ADR-005 S-final SF-5b-1): in the
+            # same write, so `game` never shows a loaded game unselected.
+            schema.GAME_SELECTED_KEY: True,
         })
         StateManager.Set(f"{schema.GAME_ROOT}.has_modded_content",
                          snapshot.hasModdedContent)

@@ -264,6 +264,121 @@ def test_a_clear_empties_the_url_forgets_the_game_then_unloads(env):
     assert env.calls == [("forget",), ("unload",), ("announce", "")]
 
 
+# ── the modded content off on a new tournament (ADR-005 S-final SF-5b-1) ─
+#
+# The Qt window unchecked its mods checkbox on tournament_changed, which
+# asked for the game again (the desktop only). Core asks for it now, after
+# a load that loaded (reloaded), both shells; never on a clear.
+
+@pytest.fixture
+def mods(env, monkeypatch):
+    """The service with a recorded game loader, and the catalog's selection
+    as a test sets it (`selection.codename` / `modsActive`)."""
+    from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
+
+    selection = SimpleNamespace(codename="tgame", modsActive=True)
+    monkeypatch.setattr(
+        GameAssetCatalog.instance, "Current",
+        lambda: GameAssetSnapshot(codename=selection.codename,
+                                  modsActive=selection.modsActive))
+
+    def loadGame(codename, modsActive):
+        env.calls.append(("loadGame", codename, modsActive))
+
+    env.service = TournamentService(provider=env.adapter,
+                                    onMain=env.queued.append,
+                                    loadGame=loadGame)
+    monkeypatch.setattr(TournamentService, "instance", env.service)
+    env.selection = selection
+    return env
+
+
+def test_a_new_tournament_asks_for_the_game_again_without_its_mods(mods):
+    mods.service.SetTournament(EVENT_URL, fetchMedia=True)
+    mods.run_queued()
+    # After the load (where tournament_changed unchecked the checkbox),
+    # ahead of the announcement.
+    assert mods.calls == [("load", EVENT_URL, False, False),
+                          ("loadGame", "tgame", False),
+                          ("announce", EVENT_URL), ("fetchMedia",)]
+
+
+@pytest.mark.parametrize("codename, modsActive", [
+    ("tgame", False),   # its mods are off already
+    (None, True),       # no game selected (a clear forgot it)
+])
+def test_a_new_tournament_asks_nothing_when_there_is_nothing_to_turn_off(
+        mods, codename, modsActive):
+    mods.selection.codename = codename
+    mods.selection.modsActive = modsActive
+    mods.service.SetTournament(EVENT_URL)
+    mods.run_queued()
+    assert mods.calls == [("load", EVENT_URL, False, False),
+                          ("announce", EVENT_URL)]
+
+
+def test_the_loaded_tournament_again_asks_nothing(mods, monkeypatch):
+    """Not re-fetched, no tournament_changed: the window did not uncheck
+    either."""
+    monkeypatch.setattr(mods.adapter, "LoadTournament",
+                        lambda url, initialLoading=False, force=False:
+                        mods.calls.append(("load", url)) or False)
+    mods.service.SetTournament(EVENT_URL)
+    mods.run_queued()
+    assert mods.calls == [("load", EVENT_URL), ("announce", EVENT_URL)]
+
+
+def test_a_failed_load_asks_nothing(mods, monkeypatch):
+    def fails(url, initialLoading=False, force=False):
+        raise RuntimeError("start.gg is down")
+
+    monkeypatch.setattr(mods.adapter, "LoadTournament", fails)
+    mods.service.SetTournament(EVENT_URL)
+    mods.run_queued()
+    assert mods.calls == [("announce", EVENT_URL)]
+
+
+def test_a_clear_asks_for_no_game(mods):
+    """A clear forgets the game (game.selected False) and loads nothing:
+    the operator picks the next one, or the next tournament's data does."""
+    mods.service.ClearTournament()
+    mods.run_queued()
+    assert mods.calls == [("forget",), ("unload",), ("announce", "")]
+
+
+def test_a_loader_that_raises_leaves_the_tournament_loaded(mods):
+    def raises(codename, modsActive):
+        raise RuntimeError("the executor is shut down")
+
+    mods.service._loadGame = raises
+    mods.service.SetTournament(EVENT_URL)
+    mods.run_queued()
+    assert mods.calls == [("load", EVENT_URL, False, False),
+                          ("announce", EVENT_URL)]
+    assert TournamentService.Load()["status"] == tournament.LOADING
+
+
+def test_the_shells_ask_the_web_operations_loader():
+    """bootstrap_core() hands the service the web operations' load_game,
+    which reads the loader each shell registers (the desktop's asset
+    adapter, the headless loader) when it is called."""
+    from pathlib import Path
+    import ast
+
+    root = Path(__file__).resolve().parent.parent
+    tree = ast.parse((root / "src" / "bootstrap.py").read_text(
+        encoding="utf-8"))
+    built = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and ast.unparse(node.func) == "TournamentService")
+    keywords = {keyword.arg: ast.unparse(keyword.value)
+                for keyword in built.keywords}
+    assert keywords["loadGame"] == (
+        "lambda codename, modsActive: AutonaWebOperations.load_game("
+        "codename, mods_active=modsActive)")
+
+
 # ── every clear entrance, through the real adapter ──────────────────────
 
 @pytest.fixture

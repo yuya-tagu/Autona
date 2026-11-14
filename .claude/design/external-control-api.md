@@ -239,7 +239,7 @@
 | `GET /api/v1/scoreboards/{n}/pending` | 反映前のライブ値・保留中か・未反映があるか（§5.15。反映前の編集を含むので **LAN からはトークン必須**。2026-11-09 追加） | `get_pending` | — |
 | `GET /api/v1/scoreboards/{n}/follow` | そのボードが追従している配信台・配信と取り直しの時計（§5.17。2026-11-09 追加） | `get_follow`（`core/SetFollowService.Snapshot`） | — |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
-| `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
+| `GET /api/v1/games/current` | 現在ゲーム（state の `game`。選ばれているかは `selected`: §5.31。2026-11-15 追加） | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase の用語（キーつき・テンプレートつきの dict。Web のページはコンボの候補にこれを使わない） | `get_match_names` | #17 |
 | `GET /api/v1/match-names/candidates` | コンボが出す候補（§5.20。2026-11-09 追加。`?board=` は 2026-11-10。ボードのコンボと Web のスコアボードページが使う） | `get_match_name_candidates`（`core/MatchNameCandidates.Candidates`） | — |
 | `GET /api/v1/scoreboards/{n}/post` | ボードの X 投稿文（§5.19。ボード 3 は 2026-11-09、ボード 1 / 2 は 2026-11-10 追加。反映前の値と選手の X ハンドルを含むので **LAN からはトークン必須**） | `get_board_post`（ボード 1 / 2 は `AutonaActions.PostText`、ボード 3 は `CrewBattleService.PostText`） | — |
@@ -894,6 +894,15 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 - 断った要求ではチケットを作らない。チケットを作るのはこのルートだけ（`tests/test_web_access.py` が AST で pin）
 - 同じオリジンのフレーム（about:blank・srcdoc・blob:）は秘密を受け取るのでこれも読める。だから Web UI は第三者の HTML を sandbox なしのフレームに入れない（sandbox のフレームは opaque origin で `403`。`.claude/rules/state-and-webserver.md`）
 
+### 5.31 state の `game.selected`（2026-11-15 追加・ADR-005 S-final SF-5b-1）
+
+ゲームが選ばれているか（bool）。state の `game` の下に追加したキーで、Socket.IO（`program_state` / `program_state_update`）・`GET /api/v1/state`・`GET /api/v1/games/current`・`out/program_state.json` にそのまま出る（追加だけ。ほかの `game.*` の形・順は変わらない）。
+
+- `true`: ゲームのロード（`POST /game`・大会のゲーム・起動時の復元・ゲームのメニュー）。`game` の 1 回の書き込みの中で `has_colors` の後ろに入る
+- `false`: 起動直後（`game` は `{"selected": false}` だけ）と、**大会の解除**（§7.3 `DELETE /tournament`・`POST /tournament` の空の `url`・サイドバーの解除）
+- 大会を解除しても `game` のほかのキー（前のゲームの `codename`・`name`・`mods_active` …）は残る。**「ゲームを選んだか」は `codename` ではなくこのキーで見る**（§5.11 の `game` と同じ理由）。解除ではゲームを読み直さない（選択を戻さない）
+- 両方の起動形態で同じ（書き手は core の `GameAssetCatalog`。解除は `TournamentService` → `ForgetSelection`）
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.37・§6.41〜6.43 および §7 の
@@ -1472,8 +1481,12 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - 実行中フラグは `load_tournament` を GUI スレッドで走らせたタスクの終了時に解除する（2026-10-21 修正）。
     以前は `tournament_changed` を待っていたが、読込済みと同じ URL では早期 return でこれが出ず、
     最大 120 秒（ガードの TTL）409 を返し続けていた。
-- `DELETE /api/v1/tournament`: body なし。大会を解除する（URL を空・`tournamentInfo` を空・選択中のゲームも外す。
-  `POST` の空の `url` と同じ）。GUI executor で `POST` の読み込みと来た順に走り、`202`（`data: {"accepted": true, "operation":
+  - **大会を新しく読み込むと MOD（modded content）がオフになる**（2026-11-15・ADR-005 S-final SF-5b-1）: 選んでいるゲームが
+    `game.mods_active: true` なら、読み込みの直後に同じゲームを MOD なしで読み直す（非同期。`POST /game` の
+    `modsActive: false` と同じロード）。読み込み済みと同じ URL（取得し直さない）・ゲーム未選択・MOD がオフのときは何もしない。
+    それまではデスクトップのサイドバーのチェックボックスだけがしていた（ヘッドレスではオフにならなかった）。今は両方の起動形態で同じ
+- `DELETE /api/v1/tournament`: body なし。大会を解除する（URL を空・`tournamentInfo` を空・選択中のゲームも外す（state の
+  `game.selected` が `false` になる。§5.31）。ゲームは読み直さない。`POST` の空の `url` と同じ）。GUI executor で `POST` の読み込みと来た順に走り、`202`（`data: {"accepted": true, "operation":
   "tournament.clear", "loadRevision": n}`。`load` は 202 の前に `idle` で出る）。解除は確認ダイアログの後に送るのがクライアントの責任（大会情報ページ・サイドバー）
 - `POST /api/v1/tournament/media/fetch`: body なし。読み込み中の大会のアイコン / バナーを start.gg から取る `TaskExecutor` の
   ジョブを積み、`202`（`data: {"accepted": true, "operation": "tournament.media.fetch", "queued": bool}`）。進捗と結果は
