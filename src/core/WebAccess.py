@@ -580,7 +580,9 @@ def FramedElsewhere(fetchDest, fetchSite):
 # Settings menu's, not a sidebar item); "api" / "companion" / "obs" are the
 # API reference & tester and the Companion and OBS guides, "about" is About
 # Autona (S-final SF-4a-2: the menu's too, the Qt windows until then); "assets" is
-# Add game assets (SF-4b-2: the menu's too).
+# Add game assets (SF-4b-2: the menu's too). /web/app/<panel> serves the same
+# names (S-final SF-5a-3: the page inside the Web UI's AppShell, its
+# navigation, header and footer): web_index's rule too, the same check.
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
@@ -604,7 +606,8 @@ WEB_PANELS = frozenset({
 
 
 def IsWebPanel(name):
-    """Whether /web/``name`` is a React panel's page."""
+    """Whether /web/``name`` (and /web/app/``name``) is a React panel's
+    page."""
     return isinstance(name, str) and name in WEB_PANELS
 
 

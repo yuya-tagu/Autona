@@ -3,6 +3,7 @@ import {Box, Card, CardContent, Link, Stack, Typography} from "@mui/material";
 import i18n from "../i18n/config";
 import {FeedbackProvider} from "../ScoreboardPage/Feedback";
 import {getWithRetry} from "../PanelShell/requests";
+import {BUSINESS_INQUIRY_EMAIL} from "../AppShell/externalLinks";
 import {Code, CopyButton, GuideFrame} from "./parts";
 
 // About Autona (ADR-005 S-final SF-4a-2), /web/about: the desktop's About
@@ -11,10 +12,6 @@ import {Code, CopyButton, GuideFrame} from "./parts";
 // in the system browser (the shared view hands a user-initiated http(s)
 // window to it); the e-mail address is shown with a copy button instead of
 // a mailto: link, which the shared view does not hand on.
-
-// Must be src/Autona.py's BUSINESS_INQUIRY_EMAIL (tests/test_web_panel_host
-// .py compares the two).
-export const BUSINESS_INQUIRY_EMAIL = "taguyangames@gmail.com";
 
 export const HEALTH_PATH = "/api/v1/health";
 

@@ -7,9 +7,13 @@ import {autonaStore} from "../redux/store";
 import PanelShell from "./index";
 import {BrowserOnly, usePanelShell} from "./context";
 import {
+    APP_PANEL_PREFIX,
+    PANEL_PREFIX,
     installPanelShellApi,
     navigateToPanel,
     openScoreSets,
+    panelPath,
+    panelPrefix,
     registerScoreSetsReceiver,
     requestFullState,
 } from "./hostApi";
@@ -165,6 +169,24 @@ test("navigate before the shell is mounted moves the URL it starts on", () => {
 
     expect(window.location.pathname).toBe("/web/second");
     expect(screen.getByText("probe second (second) desktop=true")).toBeInTheDocument();
+});
+
+test("navigate keeps the AppShell's /web/app/ (S-final SF-5a-3)", () => {
+    window.history.replaceState(null, "", "/web/app/first?desktop=1&lng=en");
+
+    navigateToPanel("second");
+
+    expect(window.location.pathname).toBe("/web/app/second");
+    expect(window.location.search).toBe("?desktop=1&lng=en");
+    expect(panelPrefix("/web/app/event")).toBe(APP_PANEL_PREFIX);
+    expect(panelPrefix("/web/event")).toBe(PANEL_PREFIX);
+    // A panel named "app" is not the AppShell.
+    expect(panelPrefix("/web/app")).toBe(PANEL_PREFIX);
+    expect(panelPath("a b", APP_PANEL_PREFIX)).toBe("/web/app/a%20b");
+
+    window.history.replaceState(null, "", "/web/first");
+    navigateToPanel("second");
+    expect(window.location.pathname).toBe("/web/second");
 });
 
 test("navigate to the panel already shown does nothing", () => {

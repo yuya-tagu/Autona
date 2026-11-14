@@ -1046,6 +1046,7 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
 | `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）と設定の `settings`（S4af。サイドバーの項目ではなく「Help & Settings」→「設定」が開く。スタックのページはナビ項目の後ろ）と API リファレンス & テスターの `api`・Companion のガイドの `companion`・OBS のガイドの `obs`・About の `about`（S-final SF-4a-2。設定と同じメニューのページ: `Window.MENU_PAGES` / `OpenMenuPage`）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/app/:panel` | `AppShell`（`web/src/AppShell/`） | `/web/:panel` と同じページを、Qt のメインウィンドウの枠（サイドバーのヘッダー・ナビ・フッター）の中に出す（ADR-005 S-final SF-5a-3）。サーバーの扱いは `/web/:panel` と同じ（`WebAccess.IsWebPanel` の名前だけ・STATIC・`FramedElsewhere` / `frame-ancestors`）。SF-5b まではデスクトップは `/web/<panel>` を出し、Qt の枠のまま。構成は 4.2.4 | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1081,6 +1082,27 @@ React Web UI の操作画面・外部制御 API の対象ではない。
 | `GameIcon.jsx` | ゲームアイコン表示 |
 | `ScoreboardPage/TextField.jsx` | カスタム MUI TextField（size 統一） |
 | `NoSleep.js` | 画面スリープ防止（import で発動） |
+
+#### 4.2.4 AppShell（`/web/app/:panel`。ADR-005 S-final SF-5a-3）
+
+`web/src/PanelShell/` の共通の準備（`usePanelShellSetup`: `desktop` / `lng` / Socket.IO / 状態）を `/web/:panel`（`PanelShell`。枠なし）と `/web/app/:panel`（`AppShell`）が共有し、ページの中身は同じ `PanelContent`。`hostApi.navigateToPanel` / `window.autonaPanelShell.navigate` は今の接頭辞（`/web/app/` か `/web/`）を保つ（`panelPrefix`）。
+
+```
+AppShell (web/src/AppShell/index.tsx)
+├── サイドバー（幅 196px。Qt の AutonaSidebar と同じ。ページの横で 100vh・sticky）
+│   ├── Header.tsx … 折りたたみ（menu.svg）／大会（名前か「大会を選ぶ」+ 注意の金枠。メニュー: 大会を選ぶ → URL のダイアログ（POST /tournament・force:true。読み込みが終わるまで開いたまま、拒否は中に出す）／解除 → 確認 → DELETE /tournament）
+│   │               ゲーム（名前順。無ければ「ゲームを選ぶ」+ 注意。/games を読むまでは state のコードネームか「読み込み中…」で注意なし。末尾に「ゲームアセットを追加」→ assets。選ぶと必ず POST /game {codename}）
+│   │               対戦形式（1v1 / Team / Crew。PUT /battle-format。選んだ値は答えの後の読み直しまで保ち、後から押した方が勝つ。Socket.IO の battle_format で追従）
+│   │               MOD コンテンツ（has_modded_content のゲームだけ。POST /game {codename, modsActive}。押した値はロード（assets_load のジョブ）が終わるまで保つ）
+│   ├── Nav.tsx … navSections.json（Qt の Window._navSections と同じ見出し・順・アイコン。tests/test_app_shell.py が pin）。今のページを aria-current でハイライト。メニューのページ（MENU_PAGES）はハイライトしない。押すと navigateToPanel（replace・クエリを保つ）
+│   └── Footer.tsx … Help & Settings（設定・常に手前に表示（シェルだけ）・ゲームアセットを追加・API 設定の 3 ページ・更新情報を調べる（シェルだけ）・Discord・ご相談・About）と、アプリの状態（StatusLine。useAppStatus。total > 0 なら進捗バー）
+└── ページ（PanelContent。/web/:panel と同じ。サイドバーが横にある間はブレークポイントをサイドバーの幅だけずらしたテーマ（themes.js の themeBeside）で描く）
+```
+
+- ページの 2 ペイン（`md` 以上）はビューポートの幅で切り替わるので、サイドバーが横にある間はページのテーマのブレークポイントを 196px ずらす（`themeBeside(SIDEBAR_WIDTH)`。`md` は 1096px）。ページの幅で見れば Qt のサイドバーの横の共有ビューと同じ切り替えになる。ThemeProvider は常に置き、テーマだけを替える（折りたたみでページを作り直さない）
+- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは保存しない（メモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
+- Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
+- 文言は i18next の `app_*`（Qt の `.ts` の `app` コンテキストの訳と一致。`tests/test_app_shell.py`）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
 
 ### 4.3 OBS テンプレ命名規約
 

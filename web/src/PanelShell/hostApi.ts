@@ -3,7 +3,9 @@
 // The desktop shows every panel moved to React in one shared web view
 // (src/AutonaWebPanelHost.py). Picking another of them in its sidebar does
 // not reload the view: it runs `window.autonaPanelShell.navigate(panel)`,
-// and this router moves to `/web/<panel>`. When the view is on screen again
+// and this router moves to `/web/<panel>` -- or `/web/app/<panel>` when the
+// page is the AppShell's (S-final SF-5a-3; its own navigation goes the same
+// way). When the view is on screen again
 // after being frozen, it runs `.refresh()`, which asks the server for the
 // full state (deltas broadcast meanwhile may be lost). The load_set hotkey
 // (Ctrl+Shift+O) and the legacy open-set route run `.openScoreSets(board)`
@@ -43,8 +45,18 @@ declare global {
 // The mounted panel shell's router navigate (PanelShell registers it).
 let routerNavigate: Navigate | null = null;
 
-export function panelPath(panel: string): string {
-    return `/web/${encodeURIComponent(panel)}`;
+// Where the panels are: /web/<panel> (the bare page, S4a) or /web/app/<panel>
+// (the page inside the AppShell, S-final SF-5a-3). A navigation keeps the one
+// the page was opened at.
+export const PANEL_PREFIX = "/web/";
+export const APP_PANEL_PREFIX = "/web/app/";
+
+export function panelPrefix(pathname: string = window.location.pathname): string {
+    return pathname.startsWith(APP_PANEL_PREFIX) ? APP_PANEL_PREFIX : PANEL_PREFIX;
+}
+
+export function panelPath(panel: string, prefix: string = panelPrefix()): string {
+    return `${prefix}${encodeURIComponent(panel)}`;
 }
 
 // Returns the unregister, for the effect's cleanup.

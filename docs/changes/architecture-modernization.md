@@ -8529,7 +8529,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に | 通常 | SF-8b |
   | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
   | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） | 通常 | SF-3b・SF-4a |
-  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
+  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI。**実施済み** 2026-11-14） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
   | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
@@ -9023,3 +9023,63 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - 戻せなかった退避の場所（`user_data/games/.autona-replaced-*`）だけはジョブの文とログに出る（選んだフォルダではなくアプリのデータの中。戻し方を伝えるため）
   - 検収の L6: pickFolder の答えは期限なしで待つので、答えの `runJavaScript` が遷移の途中で失われると、待っている要求（Promise と closure）が `pendingRequests` に残り続ける。ボタンは無効にしないので、もう一度押せば `superseded` で回復する（設計判断 3 のとおり受け入れる）
 - **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「ゲームアセットを追加」の「フォルダから取り込む」以下の 5 項目（ダイアログが 1 つだけメインウィンドウの上に出る・キャンセルで何も起きない・導入済みを含むフォルダの上書きのダイアログ・ゲームの無いフォルダのエラーとログにパスが無いこと・15 分の期限・自分の中へはコピーしない 3 通り・ロックしたファイルを含むフォルダの失敗の文とログにパスが無いこと）。ダイアログがドキュメントで開くこと。最前面をオンにした状態でも一度開く
+
+##### SF-5a-3 AppShell の UI（2026-11-14）
+
+区分は通常（Web の UI とルート 1 本。サーバーの操作は増やしていない）。SF-5a を 3 段に分けた最後の段で、`/web/:panel` と同じページを Qt のメインウィンドウの枠（サイドバーのヘッダー・ナビ・フッター）の中に出す `/web/app/:panel`。**デスクトップは SF-5b まで `/web/<panel>` を出し、Qt の枠のまま**（Qt 側は変えていない）。
+
+- **変更**
+  - `src/AutonaWebServer.py`: `web_index` に `@app.route('/web/app/<panel>')`（`IsWebPanel` の名前だけ、ほかは 404。断ったログは要求のパス）。`src/core/WebAccess.py` はコメントと `IsWebPanel` の docstring だけ（分類は endpoint の STATIC のまま）
+  - `web/src/PanelShell/`: `index.tsx` を共通の準備 `usePanelShellSetup()` とページの `PanelContent` に分け、`PanelShell`（枠なし）はそれを使うだけ。`hostApi.ts`: `APP_PANEL_PREFIX` / `panelPrefix(pathname)` / `panelPath(panel, prefix)`。`navigateToPanel`（= `window.autonaPanelShell.navigate`）は今の接頭辞（`/web/app/` か `/web/`）を保つ
+  - `web/src/AppShell/`（新規）: `index.tsx`（枠・折りたたみ・600 px 未満のドロワー・自前の Snackbar・`useShellAccess({withToken: false})`）、`Header.tsx`（大会のボタンとダイアログ・ゲーム・MOD・対戦形式）、`Nav.tsx`、`Footer.tsx`（Help & Settings と状態の表示）、`parts.tsx`（共通のプルダウンとエラーの伝え方 `useReport`）、`navSections.json` / `navTable.ts`（ナビの表と `MENU_PAGES`）、`externalLinks.ts`（Discord とご相談のアドレス）
+  - `web/src/EventPage/Cards.tsx`: `statusText` と `useUrlField` を export（大会のダイアログが同じ文言と既定の URL を使う）。`web/src/index.js`: ルート `/web/app/:panel`
+  - `web/src/i18n/locales/{en,ja}.json`: `app_*` 46 語（Qt の枠と同じ語は `.ts` の `app` コンテキストの訳と同じ）
+  - 検収で: `web/src/themes.js` に `themeBeside(width)`（ブレークポイントを `width` だけずらしたテーマ）、ご相談のメールアドレスを `web/src/AppShell/externalLinks.ts` へ移して `web/src/GuidePages/AboutPage.tsx` はそこから読む、`web/src/GuidePages/ApiPage.tsx` の設定へのリンクを `panelPath` / `navigateToPanel` 経由に
+- **判断（実装担当の独断を含む）**
+  1. 大会が無いときのボタンは Qt と同じ「大会を選ぶ」+ 金枠。ダイアログは Qt と同じく `force: true`・`fetchMedia` なしで送り、読み込みが終わる（`load.revision` が送った回になり `loaded`）まで開いたまま。拒否・失敗はダイアログの中に出す
+  2. サイドバーは Qt と同じ 196 px で、ヘッダー・ナビ・フッター（状態の表示も。折りたたみ中と 600 px 未満は判断 10）を全部その中に入れる（全幅のバーにしない。ページの 2 ペインの 100vh がそのまま収まる）
+  3. 折りたたみは保存しない（依頼どおり）。折りたたむとサイドバーを消し、左上の小さいボタンで戻す（Qt と同じくページの上に重なる）。600 px 未満はドロワー（開くボタンはページの上の行）
+  4. ナビはリンクでなくボタン + `navigateToPanel`（replace）。ブラウザの戻るでパネルを戻らない（共有ビューの navigate と同じ）
+  5. 通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
+  6. Discord のアドレスは TS に複製し（`externalLinks.ts`）、jest と `tests/test_app_shell.py` が `AutonaExternalLinks` との一致を pin。ご相談のメールも同じファイルに置き、About ページはそこから読む（検収 L18。`AutonaExternalLinks.BUSINESS_INQUIRY_EMAIL` との一致も `tests/test_app_shell.py` が pin）
+  7. ゲームを選ぶと今のゲームでも必ず POST（大会の解除の後、core が選択を忘れても state の `game` は残るので、選び直しで読み込み直せるように）
+  8. 対戦形式のラベル（1v1 / Team / Crew）は Qt と同じく訳さない。Qt の「API 設定」のサブメニューは見出し + 3 項目に平らにした
+  9. ページの 2 ペインの切り替えは、ページ側をコンテナの幅で判定し直すのではなく、AppShell がサイドバーが横にある間だけページのテーマのブレークポイントを 196 px ずらす（検収 M2）。サイドバーの幅は固定なので、ページの幅で見た切り替えと同じになり、ページは 1 行も変えない（どのページも `theme.breakpoints` / `sx` の `md` だけで判定していて、`innerWidth` や生の `@media` で幅を見ているページは無い）。ThemeProvider は常に置き、テーマだけを替える
+  10. 状態の表示はサイドバーのフッター / 折りたたみ中は左下の小さい箱（左上の戻すボタンと対）/ 600 px 未満はページの下の 1 行（sticky）。ライブ領域はどれか 1 つだけ（置き場所を移ると `useAppStatus` が読み直す）
+  11. 「答えが無い」（timeout）と「答えはあったができなかった」（`ok: false`）を分けた（`app_shell_failed` / 新しい `app_shell_not_done`）。大会の読み込みの結果が `WRITE_TIMEOUT_MS` 以内に届かないときの文言も新しく足した（`app_tournament_no_word`。既存の語に意味の合うものが無かった）
+- **検収の修正**（独立レビューの「直す」: M1・M2・L8〜L15・L17・L18・T1〜T3・T5・D1。記録の項は下の「SF-5b で決めること」）
+  - M1 折りたたみ中と 600 px 未満でも状態（文言と進捗）が見えるように: 上の判断 10（`StatusLine` の `place`: `footer` / `corner` / `bar`）。jest で「折りたたむと左下に出る・戻すとフッター・ライブ領域は 1 つ」「600 px 未満はページの下の 1 行」を pin
+  - M2 はみ出しの e2e を 2 ペインのページ（board・commentary・thumbnail・result・top8・statsPreview・stats・playerBrowser）× 800 / 900 / 1000 / 1096 px に広げ、横にスクロールする枠も数えるようにした。出たのは 2 つ: (1) result が 900 px（ページの幅 704 px）でプレビューの列が 184 px に潰れ、Alert の文が 52 px 幅になった（1000 px で 284 px）。原因は各ページの 2 ペインがビューポートの `md`（900 px）で切り替わり、左の列が固定幅（420〜520 px）なこと。判断 9 で直し、900 / 1000 px は 1 列、1096 px からは Qt の共有ビュー（ウィンドウ 1096 px）と同じ 2 列になった。(2) stats のタブの行が横にスクロールする: MUI の `variant="scrollable"`（矢印つき）でそういう作りなので、検査から外した（`.MuiTabs-scroller` の中）
+  - L8 MOD のスイッチ: 押した値をロードが終わるまで保つ（`useStateChoice` の 1 秒の猶予をやめ、`assets_load` のジョブを見て、見えて消えたら / state が変わったら / 書き込みが失敗したら / ジョブが見えないまま答えから `WRITE_TIMEOUT_MS` で戻す。後から押した方を保つ）
+  - L9 対戦形式: 選んだ値を答えの後の読み直しが返るまで保つ（読み直しが失敗しても `WRITE_TIMEOUT_MS` で戻す）。古い要求の答えは何もしない
+  - L10 大会のダイアログ: URL を打ち直したら言っていたこと（状態・期限切れの文言）を消す。結果が `WRITE_TIMEOUT_MS` 以内に届かなければ `app_tournament_no_word` を出し、OK を押せるように戻す
+  - L11 判定が `failed` ならメニューを開くたびに `retry`。共有ビュー（`desktop=1`）で `failed` のときのご相談はアドレスとコピー（About と同じ形。コピーの結果は AppShell の通知）
+  - L12 `ok: false` の答えは `app_shell_not_done`（en / ja を追加）
+  - L13 `/games` を読むまでは「ゲームを選ぶ」と金枠を出さない（state のコードネームか「読み込み中…」）。読めなかったときも state のコードネームを出し、ゲームが無いときだけ「ゲームを選ぶ」と金枠
+  - L14 API ページの設定へのリンク: `panelPath("settings")` の href と、ふつうのクリックは `navigateToPanel`（AppShell の中では `/web/app/settings` へ枠の中で移る）。修飾キーつきのクリックは新しいタブ
+  - L15 折りたたむ・戻すとフォーカスを反対側のボタンへ（a）。600 px 未満の開くボタンをページの上の行に入れ、本文に重ねない（b）。状態の表示は 1 つ（c、M1）
+  - L17 メニューの `anchorEl` を state（コールバック ref）で持ち、レンダー中に `ref.current` を読まない
+  - L18 ご相談のメールアドレスを `AppShell/externalLinks.ts` の 1 か所に（About ページはそこから import。`tests/test_web_panel_host.py` と `tests/test_app_shell.py` の pin を追従）
+  - T1〜T3 / T5 のテストを足した（下の pin）。D1 Design.md 4.2.4 の文言を「常に手前に表示」「更新情報を調べる」に揃えた
+- **pin**
+  - `tests/test_app_shell.py`（新規 10 件）: ナビの見出し・順・パネル・アイコンが `Window._navSections`（`src/Autona.py` を AST で読む）と同じ・ナビと枠の文言が ja / en とも Qt の `.ts` の訳と同じ・`app_*` が両言語にある・`MENU_PAGES` が Window と同じ・開くページはすべて `IsWebPanel`・アイコンが配信される・外部アドレスが `AutonaExternalLinks` と同じ
+  - `tests/test_web_access.py`（5 件）: 全パネルで 200・同じ endpoint でプレビューには出ない・ほかの名前は 404・断ったログは要求のパス・ほかのページの枠に出ない（`FramedElsewhere` と `frame-ancestors`）。`tests/test_webserver_routes.py`: 台帳に 1 行
+  - jest: `AppShell.test.js`（新規 37 件。検収で 12 件: 状態の置き場所とライブ領域 1 つ・フォーカス・600 px 未満のドロワー（上の行から開く・項目で閉じる・状態は下の 1 行）・シェル要求の superseded / timeout / no_session・判定中は外部リンクを押せない・`failed` で読み直しとご相談のコピー・大会のダイアログの 409 / revision の無い 202 / 送信中に閉じる / 結果が届かない・打ち直しで消える・`/games` を読む前と読めないとき・MOD をロード中に保つ・対戦形式は後の方が勝ち読み直しまで保つ。最初の 25 件: 枠・ナビの順と見出し・ハイライト・再読み込みなしの移動とクエリ・デスクトップの navigate・メニューのページはハイライトしない・折りたたみは保存しない・`lng=ja`・大会のダイアログ（拒否は中に・送る本文・読み込み中・`loaded` で閉じる・失敗で開いたまま）・解除の確認・トークンの案内は 1 回・ゲームの順と選択・必ず POST・409・ゲームが無いとき・`games_changed`・MOD・対戦形式・フッターの状態と進捗・シェルの Help（URL の動詞と引数・答え・`busy`）・ブラウザの Help のリンク・定数）、`PanelShell.test.js`（navigate が `/web/app/` を保つ・`panelPrefix` の表）、`GuidePages.test.js`（AppShell の中では設定へのリンクが `/web/app/settings` で枠の中で移る）
+  - e2e: `web/e2e/app-shell.spec.ts`（新規 15 件。はみ出しは 800 / 900 / 1000 / 1096 / 1280 px、2 ペインの 8 ページと横にスクロールする枠も。ヘッドレスで: 枠とハイライトと金枠・`lng=ja`・再読み込みなしの移動・設定のページ・大会のダイアログの拒否・解除・ゲーム一覧（`page.route` で差し替え）の順と POST・対戦形式の往復・フッターの状態（`routeWebSocket` で `status` を注入）・ブラウザの Help・800 / 1280 px ではみ出さない・ルートの 200 / 404）
+- **検証**: 検収の修正の後に、関係する pytest（`test_app_shell` / `test_web_panel_host` / `test_web_access` / `test_webserver_routes`）1239 passed、jest（AppShell / PanelShell / GuidePages）7 suites 186 passed、`tsc --noEmit` 0 件、`npm run build` 成功（警告は既存の `ScoreboardPage/Header.jsx` の exhaustive-deps 1 件だけ）、`npm run test:e2e` 155 passed / 1 skipped（`page-scroll.spec.ts` の、ビューポートに収まるパネルの条件つき skip）。pytest の全量は verify に任せる
+- **残るリスク**
+  - `useShellAccess` が `checking` の間（読み込み直後の一瞬）は Help の外部リンクが押せない
+  - 折りたたんだときの左上のボタンはページの見出しの頭に重なることがある（Qt と同じ）
+  - サイドバーを折りたたむ・戻すとページのテーマが替わり、ページのスタイルが付け直される（ページは作り直さない）
+  - バンドルが gzip で +12 kB
+  - 共有ビューでの Help（最前面・更新・外部）は jest と SF-5a-1 の試験だけで、本物のクリックは実機で未確認（SF-5b か、CDP で `/web/app/` に移して）
+- **SF-5b で決めること**（検収の記録。SF-5b で Window をホスト 1 枚にするときに扱う）
+  - M3 大会の解除の後の「ゲームの選択なし」: AppShell（と EVENT ページ）は state に残った `game` を出し続けるが、Qt のボタンは「ゲームを選ぶ」になる（core の `ForgetSelection` は state を変えず、Web からは見えない）。サーバー側で選択なしを読める形にする
+  - L1 大会が変わったときの MOD オフ（今は Qt の Window がスイッチを外す）を core へ移す
+  - L2 大会の読み込みの失敗の知らせ方（起動時の Restore を含む）: Qt の `QMessageBox`（`Window._ReportTournamentLoadFailure`）を消すか、Web の表示と二重に出さないか
+  - L3 折りたたみ状態の保存（Qt は `sidebarCollapsed_v{N}`。AppShell はメモリだけ）
+  - L4 読み込みが詰まったとき（`BUSY_STATUSES` のまま）の force の送り直し
+  - L5 同じゲームの再ロード（今は選び直すと必ず POST）、L6 確認のボタンの名前（Qt と Web の文言の差）、L7 対応プロバイダの列挙（ダイアログの案内は start.gg だけ）
+  - L16 トークンの案内が二重に出る（AppShell の通知とページの通知がそれぞれ 1 回）
+  - 最前面がオンのとき、Updater の「更新の確認」の `QMessageBox`（`src/AutonaUpdater.py` の 156 行目・`_OnNoUpdate`・`_OnError`）がメインウィンドウの裏に隠れる（実機で重なり順を確認済み）。SF-5a より前からあり、Qt のメニューから押しても同じ。SF-5b で Window を作り替えるときに親ウィンドウを渡して直す
+- **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「AppShell」の節（ブラウザで 800 / 900 / 1000 / 1096 / 1280 px・ナビ・折りたたみの状態とフォーカス・600 px 未満の上の行と下の 1 行・大会のダイアログと解除・ゲームと MOD（ロード中に戻らない）・対戦形式の追従と連打・アセットの読み込み中の状態・ブラウザの Help。共有ビューは CDP で移して Help の 3 つ）
