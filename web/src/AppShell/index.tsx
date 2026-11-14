@@ -17,7 +17,7 @@ import {PanelShellContext} from "../PanelShell/context";
 import {PanelContent, usePanelShellSetup} from "../PanelShell";
 import {navigateToPanel} from "../PanelShell/hostApi";
 import {useShellAccess} from "../PanelShell/useShellAccess";
-import {Header, TournamentDialog, newOwnLoads, useTournamentInfo} from "./Header";
+import {Header, TournamentDialog, useTournamentInfo} from "./Header";
 import {Nav} from "./Nav";
 import {Footer, StatusLine} from "./Footer";
 import {iconUrl} from "./navTable";
@@ -43,8 +43,6 @@ interface Notice {
     message: string;
     severity: "error" | "info";
     key: number;
-    // A button of the notice (L2: the tournament dialog).
-    action?: {label: string; run: () => void};
 }
 
 function Sidebar({panel, go, report, tell, shellAccess, onCollapse,
@@ -117,34 +115,65 @@ export default function AppShell() {
     // it whether or not the sidebar is on screen.
     const tournament = useTournamentInfo();
     const [tournamentDialog, setTournamentDialog] = React.useState(false);
+    // Opened from the load-failure notice: the focus goes back to the
+    // header's tournament button when it closes (the notice's button is gone).
+    const fromNotice = React.useRef(false);
     const openTournament = React.useCallback(
         () => setTournamentDialog(true), []);
-    const closeTournament = React.useCallback(
-        () => setTournamentDialog(false), []);
-    const own = React.useRef(newOwnLoads()).current;
+    const closeTournament = React.useCallback(() => {
+        setTournamentDialog(false);
+        if (fromNotice.current) {
+            fromNotice.current = false;
+            setTimeout(() => {
+                document.querySelector<HTMLElement>(
+                    "[data-testid=app-tournament]")?.focus();
+            }, 0);
+        }
+    }, []);
 
-    // A tournament load that failed (L2) is told here -- at launch (the
-    // restore), from the Event page, from anywhere -- except a load the open
-    // dialog sent (or has out, its revision not known yet), which it tells
-    // itself in its own words. Once per revision.
+    // A tournament load that failed (L2) is told here, once per revision --
+    // at launch (the restore), from another panel, from anywhere -- in its
+    // own notice (a button, kept until closed). Not told: (1) while a
+    // request of the dialog's is out (the failure may be its own: judged
+    // once it is answered); (2) a failure the dialog shows (the load it
+    // sent, not typed over again); (3) on the Event page, whose card says
+    // it (not marked told: it is told once the operator leaves the page).
+    // The dialog's report is a ref (its effect runs before this one's in the
+    // same commit) plus a tick to judge again.
     const {status: loadStatus, revision: loadRevision} = tournament.load;
+    const [loadNotice, setLoadNotice] = React.useState<number | null>(null);
     const told = React.useRef<number | null>(null);
+    const dialogReport = React.useRef<{showing: number | null;
+                                       sending: boolean}>(
+        {showing: null, sending: false});
+    const [reportTick, setReportTick] = React.useState(0);
+    const onShowing = React.useCallback(
+        (showing: number | null, sending: boolean) => {
+            const current = dialogReport.current;
+            if (current.showing !== showing || current.sending !== sending) {
+                dialogReport.current = {showing, sending};
+                setReportTick((tick) => tick + 1);
+            }
+        }, []);
+    const panelName = value.panel;
     React.useEffect(() => {
         if (loadStatus !== "error" || told.current === loadRevision) {
             return;
         }
-        told.current = loadRevision;
-        if (own.open && (own.pending > 0 || own.sent.has(loadRevision))) {
+        const dialog = dialogReport.current;
+        if (dialog.sending) {
             return;
         }
-        setNotice({
-            message: i18n.t("app_tournament_load_failed"),
-            severity: "error",
-            key: Date.now(),
-            action: {label: i18n.t("app_set_tournament"),
-                     run: openTournament},
-        });
-    }, [loadStatus, loadRevision, own, openTournament]);
+        if (dialog.showing === loadRevision) {
+            told.current = loadRevision;
+            return;
+        }
+        if (panelName === "event") {
+            return;
+        }
+        told.current = loadRevision;
+        setLoadNotice(Date.now());
+    }, [loadStatus, loadRevision, reportTick, panelName]);
 
     // Hidden or back, the focus goes to the button that undoes it. (The
     // drawer gives it back to its opener when it closes.)
@@ -253,8 +282,36 @@ export default function AppShell() {
             {tournamentDialog && (
                 <TournamentDialog url={tournament.url} load={tournament.load}
                                   onClose={closeTournament} report={report}
-                                  own={own}/>
+                                  onShowing={onShowing}/>
             )}
+            <Snackbar
+                key={loadNotice ?? 0}
+                open={loadNotice !== null}
+                // Kept until closed (a button on it): no timeout, and a click
+                // elsewhere does not close it.
+                anchorOrigin={{vertical: "top", horizontal: "center"}}
+            >
+                <Alert severity="error" variant="filled"
+                       action={(
+                           <>
+                               <Button color="inherit" size="small"
+                                       onClick={() => {
+                                           fromNotice.current = true;
+                                           setLoadNotice(null);
+                                           openTournament();
+                                       }}>
+                                   {i18n.t("app_set_tournament")}
+                               </Button>
+                               <IconButton color="inherit" size="small"
+                                           aria-label="Close"
+                                           onClick={() => setLoadNotice(null)}>
+                                   <CloseIcon fontSize="small"/>
+                               </IconButton>
+                           </>
+                       )}>
+                    {i18n.t("app_tournament_load_failed")}
+                </Alert>
+            </Snackbar>
             <Snackbar
                 key={notice?.key}
                 open={notice !== null}
@@ -268,23 +325,7 @@ export default function AppShell() {
             >
                 {notice ? (
                     <Alert severity={notice.severity} variant="filled"
-                           onClose={() => setNotice(null)}
-                           action={notice.action ? (
-                               <>
-                                   <Button color="inherit" size="small"
-                                           onClick={() => {
-                                               notice.action?.run();
-                                               setNotice(null);
-                                           }}>
-                                       {notice.action.label}
-                                   </Button>
-                                   <IconButton color="inherit" size="small"
-                                               aria-label="Close"
-                                               onClick={() => setNotice(null)}>
-                                       <CloseIcon fontSize="small"/>
-                                   </IconButton>
-                               </>
-                           ) : undefined}>
+                           onClose={() => setNotice(null)}>
                         {notice.message}
                     </Alert>
                 ) : undefined}

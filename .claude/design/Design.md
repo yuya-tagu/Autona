@@ -1092,7 +1092,7 @@ React Web UI の操作画面・外部制御 API の対象ではない。
 AppShell (web/src/AppShell/index.tsx)
 ├── サイドバー（幅 196px。Qt の AutonaSidebar と同じ。ページの横で 100vh・sticky）
 │   ├── Header.tsx … 折りたたみ（menu.svg）／大会（名前か「大会を選ぶ」+ 注意の金枠。メニュー: 大会を選ぶ → URL のダイアログ（POST /tournament・force:true。読み込みが終わるまで開いたまま、拒否は中に出す）／解除 → 確認 → DELETE /tournament）
-│   │               ゲーム（名前順。state の `game.selected` が false か、無ければ「ゲームを選ぶ」+ 注意。`selected` が無い古いサーバーは codename で判定。/games を読むまでは state のコードネームか「読み込み中…」で注意なし。末尾に「ゲームアセットを追加」→ assets。選ぶと必ず POST /game {codename}）
+│   │               ゲーム（名前順。state の `game.selected` が false か、無ければ「ゲームを選ぶ」+ 注意。`selected` が無い古いサーバーは codename で判定。`selected:false` でも /games を読むまでと assets_load の進捗が出ている間は中立（「読み込み中…」・注意なし。起動直後に保存したゲームの復元が済むまでのちらつき防止）。`selected:false` の間は MOD のスイッチを出さない。/games を読むまでは state のコードネームか「読み込み中…」で注意なし。末尾に「ゲームアセットを追加」→ assets。選ぶと必ず POST /game {codename}）
 │   │               対戦形式（1v1 / Team / Crew。PUT /battle-format。選んだ値は答えの後の読み直しまで保ち、後から押した方が勝つ。Socket.IO の battle_format で追従）
 │   │               MOD コンテンツ（has_modded_content のゲームだけ。POST /game {codename, modsActive}。押した値はロード（assets_load のジョブ）が終わるまで保つ）
 │   ├── Nav.tsx … navSections.json（Qt の Window._navSections と同じ見出し・順・アイコン。tests/test_app_shell.py が pin）。今のページを aria-current でハイライト。メニューのページ（MENU_PAGES）はハイライトしない。押すと navigateToPanel（replace・クエリを保つ）
@@ -1103,7 +1103,7 @@ AppShell (web/src/AppShell/index.tsx)
 - ページの 2 ペイン（`md` 以上）はビューポートの幅で切り替わるので、サイドバーが横にある間はページのテーマのブレークポイントを 196px ずらす（`themeBeside(SIDEBAR_WIDTH)`。`md` は 1096px）。ページの幅で見れば Qt のサイドバーの横の共有ビューと同じ切り替えになる。ThemeProvider は常に置き、テーマだけを替える（折りたたみでページを作り直さない）
 - 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは保存しない（メモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
 - Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
-- 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になり、その revision がダイアログの送った回でない（ダイアログが閉じている・起動時の復元・EVENT ページ）ときは、AppShell の Snackbar（`app_tournament_load_failed` +「大会を選ぶ」ボタン）で revision ごとに 1 回知らせる。ダイアログの回の失敗はダイアログの中だけ（二重に出さない）
+- 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す
 - 文言は i18next の `app_*`（Qt の `.ts` の `app` コンテキストの訳と一致。`tests/test_app_shell.py`）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
 
 ### 4.3 OBS テンプレ命名規約

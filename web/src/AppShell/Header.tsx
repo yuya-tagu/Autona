@@ -91,19 +91,6 @@ export function useTournamentInfo(): {name: string; url: string;
             load: readLoad(info.load)};
 }
 
-// What the tournament dialog has sent, for the AppShell's notice of a load
-// that failed (L2): the notice leaves a failure the open dialog tells itself
-// (a set it sent, or one it has out and has no revision for yet).
-export interface OwnLoads {
-    open: boolean;
-    pending: number;
-    sent: Set<number>;
-}
-
-export function newOwnLoads(): OwnLoads {
-    return {open: false, pending: 0, sent: new Set()};
-}
-
 // What PUT /battle-format takes, and the Qt segment's labels (not
 // translated there either: AutonaSidebar._FORMATS).
 export const FORMATS: [string, string][] = [
@@ -179,12 +166,17 @@ function useNoticedList<T>(path: string, event: string, extra: unknown):
 // It stays open while the set resolves and loads, saying how it goes (the
 // Event page's words), and closes once it has loaded; a refusal or a failed
 // load is said in it.
-export function TournamentDialog({url, load, onClose, report, own}: {
+export function TournamentDialog({url, load, onClose, report, onShowing}: {
     url: string;
     load: TournamentLoad;
     onClose: () => void;
     report: Report;
-    own: OwnLoads;
+    // What this dialog tells the AppShell, for the notice of a failed load
+    // (L2): the revision of the failure it is showing now (null: none) and
+    // whether a request of its is out (its revision is not known yet). The
+    // dialog shows only the failure of the load it sent, and not after a URL
+    // is typed again; closed, it says (null, false).
+    onShowing: (revision: number | null, sending: boolean) => void;
 }) {
     const [shown, type] = useUrlField(url);
     const [requesting, setRequesting] = React.useState(false);
@@ -203,12 +195,10 @@ export function TournamentDialog({url, load, onClose, report, own}: {
 
     React.useEffect(() => {
         mounted.current = true;
-        own.open = true;
         return () => {
             mounted.current = false;
-            own.open = false;
         };
-    }, [own]);
+    }, []);
 
     React.useEffect(() => {
         if (sent === null || !awaiting) {
@@ -240,6 +230,12 @@ export function TournamentDialog({url, load, onClose, report, own}: {
             && BUSY_STATUSES.has(load.status));
     const typed = shown.trim();
     const reached = sent !== null && load.revision >= sent;
+    const showing = sent !== null && load.revision === sent
+        && load.status === "error" && !retyped ? sent : null;
+    React.useEffect(() => {
+        onShowing(showing, requesting);
+    }, [showing, requesting, onShowing]);
+    React.useEffect(() => () => onShowing(null, false), [onShowing]);
     const told = retyped ? ""
         : reached ? statusText(load)
             : late ? i18n.t("app_tournament_no_word") : "";
@@ -252,15 +248,10 @@ export function TournamentDialog({url, load, onClose, report, own}: {
         setRetyped(false);
         setLate(false);
         setRequesting(true);
-        own.pending += 1;
         apiPost("/api/v1/tournament", {url: typed, force: true},
                 WRITE_OPTIONS).then((answer) => {
-            own.pending -= 1;
             const revision = (JSON.parse(answer) as
                 Envelope<{loadRevision?: unknown}>).data?.loadRevision;
-            if (typeof revision === "number") {
-                own.sent.add(revision);
-            }
             if (!mounted.current) {
                 return;
             }
@@ -272,7 +263,6 @@ export function TournamentDialog({url, load, onClose, report, own}: {
                 onClose();
             }
         }, (error: unknown) => {
-            own.pending -= 1;
             if (!mounted.current) {
                 return;
             }
@@ -425,7 +415,14 @@ function GameControl({go, report}: {
     // Missing: the list (read) does not have it, or there is none at all
     // and the read failed.
     const unread = games === null;
-    const missing = none || (unread ? failed && !codename : !known);
+    // Just after launch the state says "not selected" until the saved game
+    // is restored: while the list is not read or a game asset load runs,
+    // that is not called missing (neutral, no outline).
+    const {status} = useAppStatus();
+    const settling = none && (unread
+        || status.jobs.some((job) => job.code === "assets_load"));
+    const missing = none ? !settling
+        : (unread ? failed && !codename : !known);
     const shown = known ? (list[codename]?.name || codename)
         : missing ? i18n.t("app_select_game")
             : codename || i18n.t("event_loading");
@@ -482,7 +479,9 @@ function ModsSwitch({report}: {report: Report}) {
     const game = useSelector((root: ReduxState) =>
         (root.autonaState.autonaState as unknown as HeaderState).game) ?? {};
     const codename = text(game.codename);
-    if (game.has_modded_content !== true || !codename) {
+    // No game selected (the tournament was unset): no switch to show.
+    if (game.selected === false || game.has_modded_content !== true
+        || !codename) {
         return null;
     }
     return <ModsControl key={codename} codename={codename}

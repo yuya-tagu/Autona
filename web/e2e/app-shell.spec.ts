@@ -229,20 +229,6 @@ test("a game picked is POST /game; the games are by name", async ({page}) => {
     expect(new URL(page.url()).pathname).toBe("/web/app/assets");
 });
 
-test("after the tournament is unset the game button calls for a game (M3)", async ({page, request}) => {
-    await page.goto(serverUrl("/web/app/event"));
-    const button = page.getByTestId("app-game");
-
-    expect((await request.delete(serverUrl("/api/v1/tournament"))).ok()).toBe(true);
-
-    // The state's game.selected is false (or there is no game): the Qt
-    // button's "Select game title", outlined.
-    await expect(button).toHaveText("Select game title");
-    await expect(button).toHaveAttribute("data-attention", "true");
-    const state = await (await request.get(serverUrl("/api/v1/state"))).json();
-    expect(state.data?.game?.selected ?? false).toBe(false);
-});
-
 test("the battle format switched in the header is the app's", async ({page, request}) => {
     await page.goto(serverUrl("/web/app/event"));
     const group = page.getByRole("group", {name: "Battle format"});

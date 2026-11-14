@@ -1106,7 +1106,7 @@ test.each([
     ["no `selected` (an older server)", {codename: "sf6"}, "Street Fighter 6", "false"],
 ])("the game button, %s", async (_name, game, name, attention) => {
     setState({}, game);
-    await renderAt("/web/app/event?lng=en");
+    await renderAt("/web/app/top8?lng=en");
 
     const button = screen.getByTestId("app-game");
     expect(button).toHaveTextContent(name ?? i18n.t("app_select_game"));
@@ -1117,40 +1117,118 @@ test.each([
     }
 });
 
+test("not selected just after launch (the list unread, an asset load running) is neutral", async () => {
+    setState({}, {codename: "sf6", selected: false});
+    let release;
+    server.games = new Promise((resolve) => {
+        release = () => resolve(ok(200, GAMES));
+    });
+    server.status = ok(200, LOADING);
+    await renderAt("/web/app/top8?lng=en");
+
+    const button = screen.getByTestId("app-game");
+    expect(button).toHaveAttribute("data-attention", "false");
+    expect(button).toHaveTextContent(i18n.t("event_loading"));
+
+    // The list read, the asset load still running: still neutral.
+    release();
+    await settle();
+    expect(button).toHaveAttribute("data-attention", "false");
+
+    // The load over, still not selected: the call to select.
+    server.status = ok(200, {revision: 2, jobs: []});
+    emit("status", {revision: 2, jobs: []});
+    await settle();
+    expect(button).toHaveAttribute("data-attention", "true");
+    expect(button).toHaveTextContent(i18n.t("app_select_game"));
+});
+
+test("the modded content switch is not shown while no game is selected", async () => {
+    setState({}, {codename: "sf6", selected: false, has_modded_content: true});
+    await renderAt("/web/app/top8?lng=en");
+
+    expect(screen.queryByRole("checkbox", {name: i18n.t("app_modded_content")}))
+        .not.toBeInTheDocument();
+});
+
 function failedAt(revision) {
     setState({load: {status: "error", error: "load_failed", revision}},
              {codename: "sf6"});
 }
 
-test("a load that failed somewhere else is told, with a way to the dialog", async () => {
-    await renderAt("/web/app/event?lng=en");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+function told() {
+    return screen.queryByText(i18n.t("app_tournament_load_failed"));
+}
+
+test("a load that failed elsewhere is told, kept until closed, with a way to the dialog", async () => {
+    await renderAt("/web/app/top8?lng=en");
+    expect(told()).not.toBeInTheDocument();
 
     failedAt(7);
     await settle();
 
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(i18n.t("app_tournament_load_failed"));
+    expect(told()).toBeInTheDocument();
+    // Not on a timer (it has a button on it).
+    jest.useFakeTimers();
+    act(() => {
+        jest.advanceTimersByTime(60000);
+    });
+    jest.useRealTimers();
+    expect(told()).toBeInTheDocument();
+
+    const alert = screen.getByText(i18n.t("app_tournament_load_failed"))
+        .closest("[role=alert]");
+    fireEvent.click(within(alert).getByRole("button", {name: "Close"}));
+    await settle();
+    expect(told()).not.toBeInTheDocument();
+});
+
+test("the notice's button opens the dialog, and the focus goes back to the header's button", async () => {
+    await renderAt("/web/app/top8?lng=en");
+    failedAt(7);
+    await settle();
+
+    const alert = screen.getByText(i18n.t("app_tournament_load_failed"))
+        .closest("[role=alert]");
     fireEvent.click(within(alert).getByRole("button",
                                            {name: i18n.t("app_set_tournament")}));
     await settle();
-    expect(screen.getByRole("dialog", {name: i18n.t("app_set_tournament_url")}))
-        .toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", {name: i18n.t("app_set_tournament_url")});
+    fireEvent.click(within(dialog).getByRole("button", {name: i18n.t("stream_cancel")}));
+    await settle();
+    await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-tournament")).toHaveFocus();
 });
 
 test("a load that failed before the page opened is told once per revision", async () => {
     failedAt(7);
-    await renderAt("/web/app/event?lng=en");
-    expect(screen.getByRole("alert"))
-        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+    await renderAt("/web/app/top8?lng=en");
+    expect(told()).toBeInTheDocument();
 
-    // The same revision again (another state push): not told again.
-    fireEvent.click(within(screen.getByRole("alert")).getByRole("button",
-                                                               {name: "Close"}));
+    fireEvent.click(within(screen.getByText(i18n.t("app_tournament_load_failed"))
+        .closest("[role=alert]")).getByRole("button", {name: "Close"}));
     await settle();
     failedAt(7);
     await settle();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(told()).not.toBeInTheDocument();
+});
+
+test("on the Event page the card says it: told once the operator leaves", async () => {
+    await renderAt("/web/app/event?lng=en");
+
+    failedAt(7);
+    await settle();
+    expect(told()).not.toBeInTheDocument();
+
+    act(() => {
+        window.autonaPanelShell.navigate("top8");
+    });
+    await settle();
+    expect(told()).toBeInTheDocument();
 });
 
 async function sendFromDialog() {
@@ -1162,32 +1240,48 @@ async function sendFromDialog() {
     return dialog;
 }
 
-test("a failure of the open dialog's own load is not told twice", async () => {
-    await renderAt("/web/app/event?lng=en");
+test("the open dialog's own failure is said in it only (not twice, not after it closes)", async () => {
+    await renderAt("/web/app/top8?lng=en");
     const dialog = await sendFromDialog();
 
     failedAt(4);
     await settle();
 
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(told()).not.toBeInTheDocument();
     expect(within(dialog).getByRole("status"))
         .toHaveTextContent(i18n.t("event_status_load_failed"));
+    fireEvent.click(within(dialog).getByRole("button", {name: i18n.t("stream_cancel")}));
+    await settle();
+    expect(told()).not.toBeInTheDocument();
 });
 
-test("another's failure is told even while the dialog is open", async () => {
-    await renderAt("/web/app/event?lng=en");
-    await sendFromDialog();
+test("a failure the dialog no longer shows (a URL typed again) is told", async () => {
+    await renderAt("/web/app/top8?lng=en");
+    const dialog = await sendFromDialog();
+    fireEvent.change(within(dialog).getByRole("textbox"),
+                     {target: {value: "https://www.start.gg/tournament/x/event/z"}});
 
-    failedAt(9);
+    failedAt(4);
     await settle();
 
-    // The dialog is modal: the page behind it is aria-hidden.
-    expect(screen.getByRole("alert", {hidden: true}))
-        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+    expect(told()).toBeInTheDocument();
 });
 
-test("the dialog's load that fails after the dialog was closed is told by the notice", async () => {
-    await renderAt("/web/app/event?lng=en");
+test("a dialog opened again does not hold back the last one's revision", async () => {
+    await renderAt("/web/app/top8?lng=en");
+    const first = await sendFromDialog();
+    fireEvent.click(within(first).getByRole("button", {name: i18n.t("stream_cancel")}));
+    await settle();
+    await openTournamentDialog();
+
+    failedAt(4);
+    await settle();
+
+    expect(told()).toBeInTheDocument();
+});
+
+test("a failure of the dialog's load after the dialog was closed is told", async () => {
+    await renderAt("/web/app/top8?lng=en");
     const dialog = await sendFromDialog();
     fireEvent.click(within(dialog).getByRole("button", {name: i18n.t("stream_cancel")}));
     await settle();
@@ -1195,8 +1289,57 @@ test("the dialog's load that fails after the dialog was closed is told by the no
     failedAt(4);
     await settle();
 
-    expect(screen.getByRole("alert"))
-        .toHaveTextContent(i18n.t("app_tournament_load_failed"));
+    expect(told()).toBeInTheDocument();
+});
+
+test("another's failure is told while the dialog is open (not its revision)", async () => {
+    await renderAt("/web/app/top8?lng=en");
+    await sendFromDialog();
+
+    failedAt(9);
+    await settle();
+
+    expect(told()).toBeInTheDocument();
+});
+
+test("while a request of the dialog's is out the judgement waits for its answer", async () => {
+    let release;
+    server.tournament = () => new Promise((resolve) => {
+        release = () => resolve(ok(202, {accepted: true,
+                                         operation: "tournament.load",
+                                         loadRevision: 4}));
+    });
+    await renderAt("/web/app/top8?lng=en");
+    await sendFromDialog();
+
+    // Another's (9) arrives meanwhile: told once the answer is in.
+    failedAt(9);
+    await settle();
+    expect(told()).not.toBeInTheDocument();
+    release();
+    await settle();
+    expect(told()).toBeInTheDocument();
+});
+
+test("the dialog's own failure that arrives before its answer is not told", async () => {
+    let release;
+    server.tournament = () => new Promise((resolve) => {
+        release = () => resolve(ok(202, {accepted: true,
+                                         operation: "tournament.load",
+                                         loadRevision: 4}));
+    });
+    await renderAt("/web/app/top8?lng=en");
+    const dialog = await sendFromDialog();
+
+    failedAt(4);
+    await settle();
+    expect(told()).not.toBeInTheDocument();
+    release();
+    await settle();
+
+    expect(told()).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("status"))
+        .toHaveTextContent(i18n.t("event_status_load_failed"));
 });
 
 test("OK waits for the dialog's own load only; another's load running does not hold it", async () => {
