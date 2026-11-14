@@ -9083,3 +9083,57 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - L16 トークンの案内が二重に出る（AppShell の通知とページの通知がそれぞれ 1 回）
   - 最前面がオンのとき、Updater の「更新の確認」の `QMessageBox`（`src/AutonaUpdater.py` の 156 行目・`_OnNoUpdate`・`_OnError`）がメインウィンドウの裏に隠れる（実機で重なり順を確認済み）。SF-5a より前からあり、Qt のメニューから押しても同じ。SF-5b で Window を作り替えるときに親ウィンドウを渡して直す
 - **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「AppShell」の節（ブラウザで 800 / 900 / 1000 / 1096 / 1280 px・ナビ・折りたたみの状態とフォーカス・600 px 未満の上の行と下の 1 行・大会のダイアログと解除・ゲームと MOD（ロード中に戻らない）・対戦形式の追従と連打・アセットの読み込み中の状態・ブラウザの Help。共有ビューは CDP で移して Help の 3 つ）
+
+##### SF-5b-1 ゲームの選択なし・大会切替の MOD オフ・Updater の親（2026-11-15）
+
+区分は高（state の外部契約に `game.selected` を足す・ゲームのローダーの要求の規則を変える・自動更新のダイアログ）。SF-5b で Window をホスト 1 枚にする前に、Qt の Window にしか無かった振る舞いを core と Web から読める形にする最初の段。Window の見た目は変えていない（MOD のチェックボックスは SF-5b-3 で消えるまで残る）。
+
+- **SF-5a-3 の「SF-5b で決めること」のうち済んだもの**: M3（大会の解除の後の「ゲームの選択なし」: state の `game.selected`）・L1（大会が変わったときの MOD オフ: core の `TournamentService` から両シェルのローダーへ）・最前面がオンのときに Updater の `QMessageBox` が裏に隠れる件（親ウィンドウを渡す）。L2〜L7・L16 は残る
+- **変更**
+  - `src/core/GameAssetCatalog.py`: `game.selected`（`_Publish` が `game` の同じ書き込みで true、`ResetGameState` が `{"selected": false}`、大会の解除の `ForgetSelection` が false。`ForgetSelection` の書き込みは writer lock を離した後、`StateManager.lock` の中で選択が無いままのときだけ（pitfalls #16 のロック順を逆にせず、先に入ったロードを上書きしない））。純関数 `PlanModsOff(waiting, running, current)` と `MODS_OFF_WAITING` / `MODS_OFF_RELOAD`（下の判断 2）。`src/core/StateSchema.py`: `GAME_SELECTED_KEY`（`GAME_KEYS` に）
+  - `src/core/TournamentService.py`: `turnModsOff` の注入。読み込んだとき（新しい URL と、`force` の取り直し）に `_TurnModsOff`（待たない。例外はログだけで、大会は読み込んだまま）。`_ApplyClear` を 1 つの `SaveBlock` で包む（URL・`game.selected`・解除の書き込みを 1 保存サイクルに）
+  - `src/AutonaGameAssetManager.py` / `src/headless.py`（`HeadlessGames`）: 同じゲームの待っている要求を後の要求が置き換えるとき、reload を OR で引き継ぐ（MOD の有無は後の要求）。`TurnModsOff()`（要求の lock の中で `PlanModsOff` を引き、待っている要求を MOD なしに書き換えるか、MOD なしの読み直しを積む）。走っている要求 `_runningLoad`（ローダーが取ったときに立て、終わりに lock の中で外す）
+  - `src/AutonaWebOperations.py`: 登録 `turnModsOff` と `turn_mods_off()`（呼ぶ時に登録を読む。未登録は warning で MOD はそのまま）。`src/bootstrap.py`: `bootstrap_core()` が `TournamentService(turnModsOff=lambda: AutonaWebOperations.turn_mods_off())`、`bootstrap_gui()` がアダプタの `TurnModsOff` を登録（ヘッドレスは `Assemble` がローダーの `TurnModsOff`）
+  - `src/Autona.py`: `tournament_changed` でチェックを外していたラムダを削除。チェックボックスは onLoad で `_ShowModdedContent` が state の `game.mods_active` を `QSignalBlocker` の中で描くだけ。ゲームのメニューの `_pickGame` はチェックをブロッカーの中で外し、ロードは 1 回（チェックが付いていたら reload）。`stateChanged` は `_ToggleMods`（クリックだけがロードを頼む）。`_BuildUi` が起動時の確認より前に `AutonaUpdater.instance.SetParent(self)`
+  - `src/AutonaUpdater.py`: `SetParent`（「最新です」`_OnNoUpdate`・確認の失敗 `_OnError`・新しい版の `_UpdateDialog` の親）。`UpdateProcedure(parent=None)`: 再起動の確認（`_generate_restart_messagebox(main_txt, parent)`）と再試行の `QDialog` も親付き（新しい版のダイアログが `parentWidget()` を渡す。Retry も同じ親）で、どちらも `exec` の後で `deleteLater()`。更新の処理と順は変えていない
+  - docs: `.claude/design/external-control-api.md`（§5.31 `game.selected` と `out/game/selected.txt`・§7.3 の MOD オフの約束）・`.claude/design/Design.md`（`game` の木に `selected` だけ）・`.claude/rules/state-and-webserver.md`（`GameAssetCatalog` と `TournamentService` の行・登録の一覧）・`.claude/rules/agent-pitfalls.md` #2
+- **判断（実装担当の独断を含む）**
+  1. 「ゲームの選択なし」は state の `game.selected`（bool）で出す。解除で `game` のほかのキー（前のゲームの `codename`・`name`・`mods_active` …）は消さない（今の読み手の互換。「選んだか」は `codename` ではなくこのキーで読む。§5.31）。解除ではゲームを読み直さない（オーナー判断 2 のまま）
+  2. MOD オフは core の `TournamentService` から、シェルのローダーへの依頼 `turnModsOff()` で行う。何を頼むかは core の純関数 `PlanModsOff` が決め、ローダーが要求の lock の中で 1 回で実行する（間にほかの要求が入らない）: 待っている要求があればそれを MOD なしにする（同じゲームで飛ばされる要求なら、MOD がオンのときだけ読み直しにする。別のゲームの要求を捨てず、その前後に何も積まない）、無ければ最後に読むゲーム（reload か別のゲームの走っている要求のゲーム、無ければ今のゲーム）の MOD がオンのときだけ MOD なしの読み直しを積む。最初の実装は外から MOD なしの要求を足す形で、後から来た要求が勝つ規則のために、操作者が頼んだ別のゲームの要求を捨てるか、その後に前のゲームを読み直した（検収 2）
+  3. 同じゲームの待っている要求の置き換えでは reload を OR で引き継ぐ。大会のゲームの要求（reload なし）が MOD オフの読み直しを置き換え、「同じゲーム」として飛ばされて MOD が残っていた（検収 1）。キャッシュや個別の補正ではなく、置き換えの規則を直した
+  4. `force` で同じ大会を取り直したときも MOD をオフにする（新しく読み込んだ扱い）。読み込み済みと同じ URL（取り直さない）・読み込みの失敗では何もしない
+  5. シェルの登録を 1 つ足した（`AutonaWebOperations.turnModsOff`。`loadGameByCodename` の隣で同じローダーのメソッド。シェル操作ではない）
+  6. メニューの選択はチェックの意図から reload を決め（付いていたら reload）、それまでの「MOD オンで同じゲームを選び直すと MOD がオフになる」結果を保った
+  7. Updater の親は Window が `SetParent` で渡す（アップデータは `bootstrap_gui()` が Window より前に作る）。再起動の確認と再試行は親が持つので、`exec` の後で `deleteLater()` する（再レビュー: Retry のたびに溜まった）。`WA_DeleteOnClose` にしなかったのは、Retry が再試行の `exec` の中で入れ子にインストールをやり直すため（`exec` が戻ってから解放を頼む形の方が順が明らか）
+- **検収の修正**（独立レビュー 1 回目）
+  - 1 同じゲームの待っている要求の置き換えで reload を引き継ぐ（判断 3）。試験はジョブレーンを埋めた間に MOD オフの読み直しを待たせ、大会のゲームが届いても残ること
+  - 2 MOD オフの要求が、待っている / 走っている別のゲームの要求を捨てず、その後に前のゲームを読み直さない（判断 2）
+  - 3 `_pickGame` のブロックなしの `setChecked(False)` が 2 回目の `LoadGameAssets(reload=True)` を出していた: ブロッカーの中で外す（判断 6）
+  - 4 `_ApplyClear` を 1 つの `SaveBlock` に
+  - 5 再起動の確認と再試行のダイアログにも親を渡す（`test_updater_parent.py` の除外の pin を外した）
+  - 6 登録の試験をラムダのソースの文字列の比較から、登録したローダーが呼ばれる振る舞いに
+  - 7 Design.md の `game` の木・§5.31 の `out/game/selected.txt`・§7.3 の `force` と約束を実装に合わせた
+- **再レビュー（2 回目）**: 親付きになった再起動の確認と再試行のダイアログが `exec` の後も解放されず、Retry のたびに溜まる → `exec` の後で `deleteLater()`（判断 7。試験を足した）。ほかは下の残るリスクに記録（(a)〜(e)）
+- **pin**
+  - `tests/test_game_selected.py`（新規）: ロードで true・解除で false・新しい大会で MOD なしの読み直し・MOD がオフ / 解除では何もしない・置き換えの競合（ジョブレーンを埋めた間。両シェル）・待っている別のゲーム（MOD あり / なし）は MOD なしでそのまま・走っている別のゲームの後に前のゲームを読まない・MOD をオンにするロードの後に MOD なし。Window の本物の `_pickGame` / `_ToggleMods` / `_ShowModdedContent`（`src/Autona.py` を AST で取り出す）で、クリックはロード 1 回・描画はロードを頼まない・メニューの選択はロード 1 回、と `_BuildUi` の接続
+  - `tests/test_game_asset_catalog.py`: `game.selected` の書き手と `ForgetSelection` のロック順、`PlanModsOff` の表 16 件
+  - `tests/test_tournament_service.py`: 新しい大会と `force` の取り直しで `turnModsOff`・取り直さない / 失敗 / 解除では呼ばない・例外でも大会は読み込んだまま・シェルの登録を呼ぶ振る舞い・解除は 1 保存サイクル（`state_updated` が 1 回）
+  - `tests/test_updater_parent.py`: 確認の答え 2 つと新しい版の親・Window より前は親なし・`_BuildUi` が起動時の確認より前に渡す（AST）・新しい版から install へ親を渡す・再起動の確認の親と順（表示 → ヘルパー → 終了）・再試行の親と Retry が同じ親・Window が無ければ親なし・Retry の後に Window にダイアログが残らない（再レビュー）
+  - 登録: `tests/test_bootstrap_split.py`（手順の列と両プローブ）・`tests/test_headless.py`（結果と登録順）・`tests/test_import_side_effects.py`。`tests/test_signal_lifetime.py`（Window のラムダの許可を 2 つ外した）、`tests/fixtures/game_loader/*`（golden に `selected`）
+  - 変異の確認: OR の引き継ぎを外す（2 件落ちる）・`PlanModsOff` が待っている / 走っている要求を見ない（8 件）・`_ApplyClear` の `SaveBlock` を外す（1 件）・チェックボックスの 2 つのブロッカーをそれぞれ外す・`deleteLater` を 2 つそれぞれ外す、をそれぞれ入れると試験が落ちることを確かめて戻した
+- **検証**: 最初の実装で pytest 全量 7333 passed。検収の修正の後: 関係する試験 14 ファイル 402 passed、pytest 全量 7366 passed / 4 skipped。再レビューの修正の後: `test_updater_parent` 10 passed、アップデータに触れる試験（`test_apply_update_encoding` / `test_apply_update_robocopy` / `test_diff_update_contract` / `test_bootstrap_split` / `test_import_side_effects` / `test_task_executor` / `test_web_panel_host` と合わせて）482 passed（全量は回していない）
+- **実機の確認結果**（2026-11-15、隔離データ）
+  - 最前面がオンのとき、「更新チェック」の答え（最新です）がメインウィンドウの前に出た
+  - `DELETE /api/v1/tournament` で `game.selected` が false、`out/game/selected.txt` が `False` になり、ゲームの再ロードは走らなかった
+  - MOD のシナリオは、実機に MOD のあるゲームが無いため、自動テスト（`tests/test_game_selected.py`）で代えた
+- **残るリスク**
+  - (a) 待っている別のゲームの要求（MOD なしに書き換えたもの）を、元のゲームの後の要求が置き換えると、元のゲームは「同じゲーム」で飛ばされ、MOD がオンのまま残る（まれ）
+  - (b) 走っている要求が失敗すると、計画がずれる（`PlanModsOff` は走っている要求が自分のゲームに着いたものとして決める。不要な読み直しが出るか、要る読み直しが出ない）
+  - (c) `TurnModsOff` が 2 つのローダー（デスクトップのアダプタと `HeadlessGames`）で逐語の重複になっている
+  - (a)〜(c) は、SF-6 でローダーを統合するときに、「MOD オフの意図を保留フラグとして持ち、次に終わる読込に適用する」形で直す
+  - (d) `_pickGame` の reload の判定がチェックボックスの表示を見ている（state ではなく）。SF-5b-3 で `_pickGame` ごと消える
+  - (e) `_ApplyClear` が 1 保存サイクルになるのは、直接接続の書き手だけ（queued の接続やジョブから後で書くものは別のサイクル）。公開はブロックの終わりの 1 回で `AnnounceUrl` より後になる（間の読み手はライブの state を読む）
+  - 走っている MOD ありのロードの後には、MOD なしでもう 1 回読む（同じゲームを 2 回ロードする。正しさは保つ）
+  - OR の引き継ぎで、同じゲームの読み直しが余分に 1 回出ることがある（MOD のトグルを待つ間に provider の同じゲームの要求が来たとき。後の要求の MOD が勝つので、そのトグルが効かないのは前と同じ）
+  - アップデータが Window の参照を持つ（`SetParent`。Window とアップデータはプロセスと同じ寿命）
+  - インストールの再起動の確認と再試行の重なり順は、exe でしか通らないので実機では未確認（自動テストだけ）

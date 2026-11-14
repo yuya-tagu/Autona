@@ -7,8 +7,9 @@ no parent, so they could open behind a window that is always on top.
 Window._BuildUi hands itself over (AutonaUpdater.SetParent) once it is
 built. The install's restart message box and its retry dialog
 (UpdateProcedure) open over it too (the SF-5b-1 review), handed on by the
-new version's dialog; what the install does, and in what order, is left as
-it was, and so is the check.
+new version's dialog, and are freed once shown (the window owns them: the
+re-review); what the install does, and in what order, is left as it was,
+and so is the check.
 """
 import ast
 from pathlib import Path
@@ -207,6 +208,43 @@ def test_the_installs_retry_dialog_opens_over_the_window_and_keeps_it(
     retry.click()
     assert install.events == [("retry", window), ("box", window),
                               ("launch",)]
+
+
+def test_the_installs_boxes_are_freed_once_shown(install, window,
+                                                monkeypatch):
+    """Owned by the window, they would stay on it after exec -- one more
+    on every Retry (the SF-5b-1 re-review): a retry dialog whose Retry is
+    clicked while it is shown, then the restart box, leave none behind."""
+    from qtpy.QtCore import QCoreApplication, QEvent
+    from qtpy.QtWidgets import QDialog, QPushButton
+
+    failing = {"now": True}
+
+    def inFlight():
+        if failing["now"]:
+            failing["now"] = False  # the retry gets through
+            raise OSError("the workdir is locked")
+        return False
+
+    monkeypatch.setattr(install.module, "_UpdateInFlight", inFlight)
+    shown = install.module.QDialog
+
+    class ClickedRetry(shown):
+        def exec(self):
+            # Shown, and Retry clicked while it is: the install runs again
+            # inside this exec, as it does in the app.
+            super().exec()
+            next(button for button in self.findChildren(QPushButton)
+                 if button.text() == "Retry").click()
+            return 0
+
+    monkeypatch.setattr(install.module, "QDialog", ClickedRetry)
+    install.module.UpdateProcedure(window)
+    assert install.events == [("retry", window), ("box", window),
+                              ("launch",)]
+
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert window.findChildren(QDialog) == []
 
 
 def test_with_no_window_the_installs_boxes_have_no_parent(install):

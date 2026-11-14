@@ -221,6 +221,9 @@ def UpdateProcedure(parent=None):
             parent,
         )
         mb.exec()
+        # Owned by the window when it has one: freed once shown, or every
+        # retry would leave one more on it (the SF-5b-1 re-review).
+        mb.deleteLater()
 
         _LaunchHelper(script, zip_path, install_dir, staging, exe_name)
         QApplication.exit()
@@ -246,6 +249,10 @@ def UpdateProcedure(parent=None):
             lambda: [retry.close(), UpdateProcedure(parent)])
         btCancel.clicked.connect(lambda: retry.close())
         retry.exec()
+        # Freed once over, as the restart box is: the window owns it. After
+        # exec, so a Retry (which runs the install again inside it) is
+        # over first.
+        retry.deleteLater()
 
 
 def _ExtractHelperFromZip(zip_path: Path, dest: Path) -> bool:
