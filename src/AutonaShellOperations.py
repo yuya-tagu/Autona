@@ -28,23 +28,34 @@ Also here:
   S-final SF-5a-1): what a page asks of the desktop in a click -- the main
   window's "always on top" (its Help & Settings menu's check follows), the
   update check, one of the fixed outside addresses (AutonaExternalLinks.
-  EXTERNAL_LINKS). The shared view (AutonaWebPanelHost, given this instance
-  by the Window) decides a request is one and calls these.
+  EXTERNAL_LINKS), a game folder to import picked in the native dialog
+  (SF-5a-2: held by core's AssetPackService under an id, which the page
+  imports through v1; the path is never answered). The shared view
+  (AutonaWebPanelHost, given this instance by the Window) decides a request
+  is one and calls these.
 
 THREADING: the main window and the renderers are the GUI thread's. The web
 layer's operations are wrapped in gui_thread_sync (the request waits for the
-answer); the rest is called on the GUI thread.
+answer); the rest is called on the GUI thread. pickFolder's probe of the
+folder picked (core's HoldFolderPick: it lists the folder, which may be on a
+slow or network drive) is a TaskExecutor job, its answer handed back to the
+GUI thread (GuiExecutor.later).
 
 Import side effects: none (agent-pitfalls #1).
 """
+import functools
 import os
 
-from qtpy.QtCore import QBuffer, QIODevice, QUrl
+from qtpy.QtCore import QBuffer, QIODevice, QStandardPaths, QUrl
 from qtpy.QtGui import QDesktopServices
+from qtpy.QtWidgets import QApplication, QFileDialog
 from loguru import logger
 
 from .AutonaExternalLinks import EXTERNAL_LINKS
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
+from .core import AssetPackService as assets
+from .core.TaskExecutor import TaskExecutor
 from .core.Actions import AutonaActions
 from .core.ThumbnailService import ThumbnailService
 
@@ -107,6 +118,40 @@ def _SetBoard(board):
     return number
 
 
+def _StartFolder():
+    """Where pickFolder's dialog opens: the user's Documents folder, else
+    the home folder (not the working directory: Autona's own folder, which
+    holds no game to import -- its games are in user_data/games)."""
+    documents = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation)
+    if documents and os.path.isdir(documents):
+        return documents
+    return os.path.expanduser("~")
+
+
+def _ProbePicked(service, path):
+    """pickFolder's answer for the folder picked (a TaskExecutor job): held
+    by core (HoldFolderPick), never with its path. Not once the app is
+    shutting down (the executor stopping): the shell's answer then is
+    "unavailable" and nothing is held."""
+    if TaskExecutor.instance.stopping.is_set():
+        return {"ok": False, "error": "unavailable"}
+    try:
+        pick, games, conflicts = service.HoldFolderPick(path)
+    except assets.AssetPackError as refusal:
+        logger.info(f"Shell operations - The picked folder was refused: "
+                    f"{refusal.code}")
+        return {"ok": False, "error": refusal.code}
+    except Exception as error:
+        # Its text may name the path: the type only.
+        logger.error(f"Shell operations - The picked folder could not be "
+                     f"read: {type(error).__name__}")
+        return {"ok": False, "error": "failed"}
+    return {"ok": True, "status": "picked", "pick": pick,
+            "games": list(games), "conflicts": list(conflicts),
+            "expiresInSec": assets.PICK_EXPIRY_SECS}
+
+
 class AutonaShellOperations:
     """See the module docstring. One per process (bootstrap_gui())."""
 
@@ -115,6 +160,10 @@ class AutonaShellOperations:
     def __init__(self):
         # The main window, which does not exist yet (UiMounted).
         self._parent = None
+        # A pickFolder request is in hand (_PickFolder): its dialog is open,
+        # or the folder picked is being probed. One at a time, another
+        # request is answered "busy" meanwhile.
+        self._pickingFolder = False
 
     def UiMounted(self, window):
         """The main window is there (Window.__init__): what opens the SCORE
@@ -193,15 +242,20 @@ class AutonaShellOperations:
         return {"alwaysOnTop": bool(window is not None
                                     and window.IsAlwaysOnTop())}
 
-    def ShellRequest(self, verb, args):
+    def ShellRequest(self, verb, args, answer=None):
         """Run shell request `verb` with `args` (its arguments, str values):
-        its answer."""
+        its answer -- or None when it answers later, through `answer(the
+        answer)`, called once on the GUI thread (pickFolder, once the folder
+        picked is probed; not at all once the app shuts down meanwhile).
+        pickFolder needs `answer` (TypeError without it)."""
         if verb == "alwaysOnTop":
             return self._AlwaysOnTop(args.get("on"))
         if verb == "checkUpdates":
             return self._CheckUpdates()
         if verb == "openExternal":
             return self._OpenExternal(args.get("target"))
+        if verb == "pickFolder":
+            return self._PickFolder(answer)
         logger.warning(f"Shell operations - Unknown shell request {verb!r}")
         return {"ok": False, "error": "unknown_verb"}
 
@@ -249,6 +303,82 @@ class AutonaShellOperations:
                            f"the {target} address")
             return {"ok": False, "error": "open_failed"}
         return {"ok": True}
+
+    def _PickFolder(self, answer):
+        """Ask the operator for a game folder to import, in the native
+        dialog over the main window (QFileDialog.getExistingDirectory: a
+        modal loop of its own, so the host runs this from the event loop,
+        never inside Chromium's call -- agent-pitfalls #9; it opens on the
+        user's Documents folder, else the home folder, not the working
+        directory), and have core hold it (AssetPackService.HoldFolderPick:
+        probed, under an id) -- on the TaskExecutor's job lane (the folder
+        may be on a slow or network drive): None is returned then, and the
+        answer goes to `answer` on the GUI thread (_HoldPicked).
+
+        The answer never carries the path: {"ok": True, "status": "picked",
+        "pick": <id>, "games": [names], "conflicts": [the installed ones],
+        "expiresInSec"} -- v1's POST /assets:importFolder imports it by
+        "pick" -- or the same keys with "status": "cancelled" (nothing held,
+        a pick held before stays). One request at a time, from the dialog
+        to the probe's answer: another one meanwhile is "busy". "not_ready"
+        before the main window or the service is there; "unavailable" once
+        the app is shutting down (no dialog, no probe: GuiExecutor's
+        gui_unavailable_reason); a folder that holds no game is its
+        refusal's code (AssetPackError: "not_a_folder", "no_game",
+        "bad_name"), anything else "failed". Logged without the path, and
+        the import of the pick tells none either (the job's messages are an
+        OSError's reason: core's _JobText)."""
+        if answer is None:
+            raise TypeError("pickFolder answers later: pass `answer`")
+        if self._pickingFolder:
+            return {"ok": False, "error": "busy"}
+        window = self._parent
+        service = assets.AssetPackService.instance
+        if window is None or service is None:
+            return {"ok": False, "error": "not_ready"}
+        if AutonaQtHelper.gui_unavailable_reason() is not None:
+            return {"ok": False, "error": "unavailable"}
+        self._pickingFolder = True
+        handedOn = False
+        try:
+            path = QFileDialog.getExistingDirectory(
+                window, QApplication.translate(
+                    "app", "Select a game folder to import"),
+                _StartFolder())
+            if not path:
+                return {"ok": True, "status": "cancelled", "pick": None,
+                        "games": [], "conflicts": [], "expiresInSec": 0}
+            if AutonaQtHelper.gui_unavailable_reason() is not None:
+                # The shutdown began while the dialog was open: the probe
+                # does not start.
+                logger.info("Shell operations - The picked folder is not "
+                            "probed: the app is shutting down")
+                return {"ok": False, "error": "unavailable"}
+            TaskExecutor.instance.submit(
+                _ProbePicked, service, path, task_name="asset folder pick",
+                then=functools.partial(self._HoldPicked, answer),
+                on_error=functools.partial(self._PickProbeFailed, answer))
+            handedOn = True
+            return None
+        finally:
+            if not handedOn:
+                self._pickingFolder = False
+
+    def _HoldPicked(self, answer, result):
+        # On the job lane (the submit's `then`): the probe's answer goes to
+        # the GUI thread, where the request ends (another may come) and the
+        # host is answered. Nothing runs once the event loop has exited.
+        AutonaQtHelper.gui_executor.later(
+            functools.partial(self._PickAnswered, answer, result))
+
+    def _PickProbeFailed(self, answer, error):
+        # On the job lane: _ProbePicked raised (it answers its failures, so
+        # this is a bug; the executor logged it with its traceback).
+        self._HoldPicked(answer, {"ok": False, "error": "failed"})
+
+    def _PickAnswered(self, answer, result):
+        self._pickingFolder = False
+        answer(result)
 
     # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
     # bootstrap_gui() registers them as AutonaWebOperations.openSetSelection

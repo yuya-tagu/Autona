@@ -11,6 +11,10 @@
 </context><context>
     <name>app</name>
     <message>
+        <source>Select a game folder to import</source>
+        <translation>取り込むゲームのフォルダを選択</translation>
+    </message>
+    <message>
         <source>Open reference &amp; tester</source>
         <translation>リファレンス・テスターを開く</translation>
     </message>

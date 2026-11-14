@@ -7,6 +7,8 @@ and every answer no-store:
 - ``POST /api/v1/assets/uploads``           the ZIP's bytes -> 201 its id
 - ``DELETE /api/v1/assets/uploads/<id>``    drop it
 - ``POST /api/v1/assets:importZip``         import it (a job)
+- ``POST /api/v1/assets:importFolder``      import the folder the shell's
+                                            pickFolder held (SF-5a-2)
 - ``POST /api/v1/assets/packs:install``     install an index game's packs
 - ``POST /api/v1/assets/job:cancel``        stop the job by its revision
 - ``POST /api/v1/assets/games-folder:reveal`` open user_data/games
@@ -37,6 +39,7 @@ from tests.test_asset_packs import (  # noqa: F401
 
 UPLOADS = "/api/v1/assets/uploads"
 IMPORT = "/api/v1/assets:importZip"
+IMPORT_FOLDER = "/api/v1/assets:importFolder"
 INSTALL = "/api/v1/assets/packs:install"
 CANCEL = "/api/v1/assets/job:cancel"
 REVEAL = "/api/v1/assets/games-folder:reveal"
@@ -612,6 +615,158 @@ def test_an_import_names_an_upload(shell, body):
     assert response.headers["Cache-Control"] == "no-store"
 
 
+# ── importFolder (SF-5a-2) ───────────────────────────────────────────────
+# The folder the shell request pickFolder held (AutonaShellOperations, the
+# native dialog: tests/test_web_panel_host.py), imported by its id. No path
+# is taken, answered or logged.
+
+def _pick(api, *names, under="src"):
+    for name in names or ("aaa",):
+        _game(api.root / under, name)
+    pick, _games, _conflicts = api.service.HoldFolderPick(
+        str(api.root / under))
+    return pick
+
+
+def test_a_folder_pick_is_imported_as_a_job(shell):
+    pick = _pick(shell)
+
+    response = _post(shell, IMPORT_FOLDER, {"pick": pick})
+
+    assert response.status_code == 202
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.get_json()["data"] == {
+        "accepted": True, "operation": "importFolder", "job": 1}
+    job = _run(shell)
+    assert job["status"] == assets.DONE and job["imported"] == ["aaa"]
+    assert (shell.games / "aaa" / "base_files" / "config.json").is_file()
+    # Taken: not held any more.
+    _error(_post(shell, IMPORT_FOLDER, {"pick": pick}), 404, v1.NOT_FOUND,
+           assets.UNKNOWN_PICK)
+
+
+def test_a_picks_overwrite_names_only_its_conflicts_and_needs_confirm(shell):
+    _game(shell.games, "aaa", marker=b"old")
+    pick = _pick(shell, "aaa", "bbb")
+
+    _error(_post(shell, IMPORT_FOLDER, {"pick": pick, "overwrite": ["bbb"],
+                                        "confirm": True}),
+           400, v1.INVALID_ARGUMENT)
+    _error(_post(shell, IMPORT_FOLDER, {"pick": pick, "overwrite": ["aaa"]}),
+           409, v1.CONFIRMATION_REQUIRED)
+    for bad in ("aaa", [1], [""], {"aaa": True}):
+        _error(_post(shell, IMPORT_FOLDER, {"pick": pick, "overwrite": bad,
+                                            "confirm": True}),
+               400, v1.INVALID_ARGUMENT)
+    # None of those took it.
+    assert shell.service.FolderPickGames(pick) == (["aaa", "bbb"], ["aaa"])
+
+    response = _post(shell, IMPORT_FOLDER, {"pick": pick,
+                                            "overwrite": ["aaa"],
+                                            "confirm": True})
+    assert response.status_code == 202
+    job = _run(shell)
+    assert sorted(job["imported"]) == ["aaa", "bbb"]
+    assert (shell.games / "aaa" / "full" / "a.png").read_bytes() == b"x"
+
+
+def test_a_pick_without_overwrite_leaves_the_installed_games(shell):
+    _game(shell.games, "aaa", marker=b"old")
+    pick = _pick(shell, "aaa", "bbb")
+
+    assert _post(shell, IMPORT_FOLDER, {"pick": pick,
+                                        "overwrite": []}).status_code == 202
+    job = _run(shell)
+    assert job["imported"] == ["bbb"] and job["skipped"] == ["aaa"]
+    assert (shell.games / "aaa" / "full" / "a.png").read_bytes() == b"old"
+
+
+def test_a_pick_import_while_a_job_runs_is_busy_and_keeps_the_pick(shell):
+    other = _zip(shell.root / "other.zip", _game_entries("ccc"))
+    assert shell.service.ImportZip(other)[0] == assets.STARTED
+    pick = _pick(shell)
+
+    _error(_post(shell, IMPORT_FOLDER, {"pick": pick}), 409, v1.CONFLICT,
+           assets.BUSY)
+    _run(shell)
+    assert _post(shell, IMPORT_FOLDER, {"pick": pick}).status_code == 202
+    assert _run(shell)["imported"] == ["aaa"]
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"pick": 3}, {"pick": ""}, {"pick": None}, {"pick": ["x"]},
+    {"pick": "../x"}, {"pick": "abcdefghijklmnopqrstuv"},
+    {"path": "C:/Games"}, {"upload": "abcdefgh"}])
+def test_an_import_names_a_pick(shell, body):
+    held = _pick(shell)
+    response = _post(shell, IMPORT_FOLDER, body)
+    assert response.status_code in (400, 404), body
+    assert response.headers["Cache-Control"] == "no-store"
+    assert shell.executor.queued() == 0
+    # Not taken by a refusal.
+    assert shell.service.FolderPickGames(held)[0] == ["aaa"]
+
+
+def test_a_folders_path_is_not_a_pick(shell):
+    # A request names a folder by the pick alone: a path -- even the very
+    # folder that is held -- is no such pick.
+    pick = _pick(shell)
+    for path in (str(shell.root / "src"), str(shell.root / "src" / "aaa")):
+        _error(_post(shell, IMPORT_FOLDER, {"pick": path}), 404,
+               v1.NOT_FOUND, assets.UNKNOWN_PICK)
+    response = _post(shell, IMPORT_FOLDER, {
+        "pick": pick, "path": str(shell.root / "elsewhere")})
+    assert response.status_code == 202
+    assert _run(shell)["imported"] == ["aaa"]
+
+
+def test_an_expired_pick_is_not_found(shell):
+    pick = _pick(shell)
+    shell.clock[0] += assets.PICK_EXPIRY_SECS
+    _error(_post(shell, IMPORT_FOLDER, {"pick": pick}), 404, v1.NOT_FOUND,
+           assets.UNKNOWN_PICK)
+
+
+def test_a_picks_refusal_names_no_path(shell):
+    # The folder went since it was picked: core's refusal, in fixed words.
+    pick = _pick(shell, under="private-folder-7Q")
+    import shutil
+    shutil.rmtree(shell.root / "private-folder-7Q")
+
+    response = _post(shell, IMPORT_FOLDER, {"pick": pick})
+
+    error = _error(response, 400, v1.INVALID_ARGUMENT, assets.NOT_A_FOLDER)
+    assert set(error) == {"code", "message", "reason"}
+    text = response.get_data(as_text=True)
+    assert "private-folder" not in text and str(shell.root) not in text
+
+
+def test_nothing_of_the_picked_folder_reaches_the_api_logs(shell):
+    everything, info = [], []
+    sinks = [logger.add(lambda m: everything.append(str(m)), level="DEBUG"),
+             logger.add(lambda m: info.append(str(m)), level="INFO")]
+    try:
+        pick = _pick(shell, under="private-folder-7Q")
+        refused = _post(shell, IMPORT_FOLDER, {"pick": pick + "x"})
+        assert refused.status_code == 404
+        answer = _post(shell, IMPORT_FOLDER, {"pick": pick})
+        assert answer.status_code == 202
+        _run(shell)
+    finally:
+        for sink in sinks:
+            logger.remove(sink)
+
+    for text in (answer.get_data(as_text=True),
+                 refused.get_data(as_text=True)):
+        assert "private-folder" not in text and str(shell.root) not in text
+    everythingText = "\n".join(everything)
+    for secret in ("private-folder-7Q", str(shell.root)):
+        assert secret not in everythingText, secret
+    assert pick not in "\n".join(info)
+    assert any("op=assets.importFolder params=['pick']" in line
+               for line in info)
+
+
 # ── install ──────────────────────────────────────────────────────────────
 
 def test_an_install_needs_confirm_and_the_cached_index(shell):
@@ -717,7 +872,8 @@ def test_the_games_folder_is_shown_and_takes_no_path(shell, monkeypatch,
 
 ROUTES = [
     ("POST", UPLOADS), ("DELETE", f"{UPLOADS}/abcdefgh"), ("POST", IMPORT),
-    ("POST", INSTALL), ("POST", CANCEL), ("POST", REVEAL), ("GET", JOB)]
+    ("POST", IMPORT_FOLDER), ("POST", INSTALL), ("POST", CANCEL),
+    ("POST", REVEAL), ("GET", JOB)]
 
 
 @pytest.mark.parametrize("method, path", ROUTES)

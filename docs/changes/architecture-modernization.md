@@ -8529,7 +8529,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に | 通常 | SF-8b |
   | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
   | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） | 通常 | SF-3b・SF-4a |
-  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み）/ SF-5a-3（通常: AppShell の UI） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
+  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
   | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
@@ -8930,13 +8930,13 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - 進捗バーの aria-label は固定（値は `aria-valuenow`）。訳語: 件数の複数形は i18next の `_one/_other`、索引の失敗は GitHub に触れる文言、メニューの案内は「ヘルプ＆設定 → ゲームアセットを追加」
   - core: 呼び手の無い `AssetPackService.FetchIndex` と `Cancel(revision=None)` の枝を削除（試験も追従）。`ImportFolder` / `ProbeFolder` は SF-5a のフォルダ選択で使うので残す
   - ADR-002 に「フォルダの取り込みは一時的に無い」を追記。`_over_limit` と §2.6 に「10 ms 以内に届き続ける限り」を追記。jest 54 件・e2e 16 件（600 px の進捗カード・長い項目名の結果・2 つのダイアログを追加）
-  - **リリースノートへ持ち越し**: 「ゲームアセットを追加」が Web 画面になった。フォルダからの取り込みは一時的に無く、ZIP にしてから取り込む（今後のアップデートで戻る）
+  - **リリースノートへ持ち越し**: 「ゲームアセットを追加」が Web 画面になった。フォルダの取り込みは無くならない（SF-5a-2 で「フォルダから取り込む」= デスクトップのフォルダ選択のダイアログとして戻した。SF-4b-2 と同じリリースに入るので「一時的に無い」は書かない）
 - **検証**: 下の報告のとおり（触ったテストを直列 → jest 全量 → build → e2e 全量 → pytest 全量）
 - **残るリスク**
   - 実機の共有ビューでのアップロード（QtWebEngine の XHR に秘密が付くことは SF-4b-1 の `test_web_panel_host` が pin 済み。数 GB の本文の実機の性能・進捗の見た目は未確認）
   - 送信が終わる瞬間に中止すると、サーバーが枠に入れた ZIP の id がページに届かず、15 分（または次のアップロード・起動）まで残る（SF-4b-1 の期限と起動時の掃除が受ける）
   - テスター（API 設定のページ）の確認の対象にアセットの SHELL のルートを足すかは決めていない（ページ自身が呼べるのと同じ権限なので増えない。SF-4b-1 の記録のまま）
-  - フォルダの取り込みは SF-5a まで無い
+  - フォルダの取り込みは SF-5a まで無い（→ SF-5a-2 で戻した）
 - **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「ゲームアセットを追加」の節（メニューの 2 か所から開く・ダウンロードの確認と進捗とキャンセル・ZIP の送信の進捗と上書きのダイアログ・やめたあとに `user_data/.autona-uploads/` が空・ブラウザでは案内だけ・600 px で崩れない）
 
 ##### SF-5a-1 シェル要求の仕組み（2026-11-14）
@@ -8976,3 +8976,50 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - 防御はチケット 1 枚で、プロセスの間ローテートしない（検収レビューの 6）。読めるのは SHELL の判定を通る共有ビューの同じオリジンの文書だけなので、使い捨てのナンスは採らなかった
   - 最前面がオンのとき、アップデータの親なしの `QMessageBox`（`checkUpdates` の答えのダイアログ）がメインウィンドウの裏に隠れうる（検収レビューの 7）。アップデータには手を入れない方針のまま、SF-5a-3 の実機で確かめる
 - **実機で見てほしいこと**（ページの呼び出し口が無く、hostApi はバンドルの中なので呼べない。CDP から同じ URL を組み立てて開く。手順は `.claude/manual-test-checklist.md` の「シェル要求」）: 共有ビューに CDP でつなぎ、`Runtime.evaluate`（`awaitPromise`）で `fetch('/api/v1/shell-session')` のチケットを読み、`userGesture: true` の `Runtime.evaluate` で `window.open(location.origin + '/web/shell-request?' + new URLSearchParams({verb, request, ticket, ...引数}), '_blank', 'noopener')` を呼ぶ。`alwaysOnTop` の `on=1` / `on=0` で窓の WS_EX_TOPMOST とメニューのチェックが変わり、`shellResult` / `shellState` がページに届く（`window.autonaPanelShell` を包んで見る）。チケットが違えば `refused a shell request (ticket)` で何も起きない。`checkUpdates` でアップデータのダイアログ（確認中なら `busy`）。`openExternal` の `discord` で既定のブラウザ。どれも既定のブラウザに `/web/shell-request` が開かず、ログにチケットも URL も出ないこと。（エンジニアリードがこの方法で `alwaysOnTop` の on / off・チケット違いの拒否・`checkUpdates` のダイアログを確かめた。2026-11-14）
+
+##### SF-5a-2 フォルダの選択とフォルダの取り込み（2026-11-14）
+
+区分は高（ページがこの PC のフォルダを取り込ませる経路）。SF-5a を 3 段に分けた 2 段目で、シェル要求の動詞 `pickFolder` と v1 の `POST /api/v1/assets:importFolder`、アセットのページの「フォルダから取り込む」。SF-4b-2 で一時的に外したフォルダの取り込みを戻した。設計はエンジニアリードの設計メモ（選択は `QFileDialog`・1 度に 1 つ・パスは core の枠に持ち、ページには不透明な id）。
+
+- **変更**
+  - `src/core/AssetPackService.py`: フォルダの選択の枠。`HoldFolderPick(path)`（`ProbeFolder` + `ImportConflicts` してから 1 つの枠に入れ、`(id, games, conflicts)`。新しい選択が置き換え、断ったフォルダは前の枠を残す）、`FolderPickGames(id)`（conflicts は読み直す）、`ImportFolderPick(id, overwrite)`（走っているジョブがあれば `BUSY` で枠を残す。無ければ取り出して `ImportFolder`。その `_Start` が `BUSY` なら `_HoldPickAgain` で同じ id・同じ期限で戻す。その間の新しい選択が勝つ。SF-4b-1 の M1 と同じ）、`_HeldPick`（`_lock` の中で、期限 `PICK_EXPIRY_SECS` = 15 分を `time.monotonic()` で判定し、期限切れは id を問わず外す。id は `_UPLOAD_ID` の形と `hmac.compare_digest`）。`UNKNOWN_PICK`。ログは `_lock` の外でパスなし。自分の中へのコピーは 3 通り（検収の修正 M2）: Autona のフォルダ自身はゲームを持たないので選択の時点で `no_game`、`user_data/games` そのもの（とそのゲーム）は何もコピーせず `imported`、`user_data/games` を下に持つゲームのフォルダはそのゲームだけジョブの `failed`
+  - `src/AutonaShellOperations.py`: `_PickFolder`（`busy` の判定 → メインウィンドウか `AssetPackService.instance` が無ければ `not_ready` → `QFileDialog.getExistingDirectory(メインウィンドウ, "Select a game folder to import")` を `try/finally` のフラグの中で → 空なら `cancelled` → `HoldFolderPick`。`AssetPackError` はそのコードだけ、ほかの例外は型名だけをログに出して `failed`）。答え `{ok, status: "picked" | "cancelled", pick, games, conflicts, expiresInSec}`（パスなし）
+  - `src/AutonaWebPanelHost.py`: `SHELL_VERBS["pickFolder"] = {}`（引数なし）。docstring とコメント
+  - `src/AutonaApiV1.py` / `src/AutonaWebOperations.py`: `POST /api/v1/assets:importFolder {pick, overwrite, confirm}`（`write_op(log_keys_only=True)`・`no-store`。`pick` は空でない文字列、`overwrite` は名前のリストで選択の conflicts の部分集合、空でなければ confirm。`importZip` と同じ検査を複製した）、`_ASSET_REFUSALS` に `unknown_pick`（404）。`asset_folder_pick_games` / `import_asset_folder_pick`
+  - `src/core/WebAccess.py`: `api_v1.import_assets_folder: SHELL`。`src/core/ApiCatalog.py`: 載せないことを docstring に
+  - `src/i18n/Autona_{en,ja}.ts` / `.qm`: ダイアログの題 `Select a game folder to import`（「取り込むゲームのフォルダを選択」。`app` のコンテキスト。`compile_translations.ps1`）
+  - `web/src/PanelShell/hostApi.ts`: `ShellVerb` に `pickFolder`、待ち時間を動詞ごとに（`SHELL_ANSWER_TIMEOUTS_MS`: 3 動詞は 10 秒、`pickFolder` は `null` = 期限なし）、`ShellResult` に `status` / `pick` / `games` / `conflicts` / `expiresInSec`
+  - `web/src/AssetsPage/`: ZIP のカードに「フォルダから取り込む」。クリックの中で同期に `shellRequest("pickFolder")`。`picked` は ZIP と同じ流れ（conflicts が無ければすぐ取り込み、あれば同じ上書きのダイアログ。題は「このフォルダのゲーム」）で `IMPORT_FOLDER_PATH` へ `{pick}` / `{pick, overwrite, confirm: true}`。`cancelled` は何もしない。デスクトップの断り（`busy` = ダイアログが開いている・`not_ready` / `unavailable` / `no_session`）はページの文言、core の理由は `errorText`、`superseded` と古い要求の答えは捨てる。選択には破棄の要求が無い（デスクトップが 15 分か次の選択まで持つ。消すファイルも無い）。期限でダイアログを閉じて「選んだフォルダの期限が切れました」。ブラウザ・ヘッドレス（elsewhere）は今までどおり案内だけでボタンが無い。en / ja の文言（説明・カードの題と注記の「ZIP にしてから」を直した）
+- **判断（実装担当の独断を含む）**
+  1. 閉じたときの答えは選んだときと同じキー（`pick: null`・空のリスト・`expiresInSec: 0`）。閉じても前の選択は残す（何も持たない操作で前のものを消さない）
+  2. ダイアログの題は Qt の翻訳（`.ts` の手編集 → `.qm`）。ページの言語ではなくデスクトップの言語
+  3. ページはダイアログを待つ間ボタンを無効にしない（ネイティブのモーダルがメインウィンドウの入力を止める。もう一度押せば前の要求は `superseded`）。`pickFolder` の答えは期限なしで待つ
+  4. デスクトップの断りの `busy` は、ジョブの `busy`（`assets_error_busy`）と別の文言（「フォルダの選択画面がすでに開いています」）
+  5. `importFolder` の検査は `importZip` の複製（共通化はしない。依頼の範囲を広げない）。外部制御 API の文書では、確認の要る `importZip` と同じ §7 に載せた（依頼メモは §6 だったが、`overwrite` で confirm が要るので §7 の表と §7.2 の一覧に入れた）
+  6. 自分の中へのコピーは選択の時点では断らず、ジョブで断る（既存の `_Within`。選んだ時点でゲームが見えることは変わらない）
+- **検収の修正**（独立レビュー: 高なし。M2 件・L8 件）
+  - M1 フォルダの取り込みの失敗の文にパスが出た: `AssetPackService._JobText`（`OSError` は `_ErrorText` = OS の理由だけ、ほかは `unexpected error (<型名>)`）をジョブの `message` にし、error のログ行も同じ文（`_LogFailure`。例外の全文とトレースバックは debug だけ）。`_RunImportFolder` のコピーの失敗は `shutil.Error`（ファイルごとの (元, 先, 理由) の文で両方のパスを含む）を使わず、コピー関数が集めた理由から `"<件数> file(s) could not be copied (<最初の OS の理由>)"`、ほかの `OSError` は `_ErrorText`（どちらも全文は `_Failed(detail=)` で debug だけ）。`_MoveIn` の失敗も理由だけ（戻せなかった退避の場所だけは、`user_data/games` の中を指すので残す）
+  - M2 「Autona のフォルダ自身を選ぶとコピーできない」は誤り: 上の 3 通りにチェックリスト・外部制御 API §7・docstring を直した（`user_data/games` そのものはこの修正の前から `imported` だった。試験を足した）
+  - L1 `HoldFolderPick` の検査を GUI スレッドから `TaskExecutor` のジョブレーンへ（`_ProbePicked`）。`ShellRequest(verb, args, answer=None)` は `pickFolder` で `None` を返し、答えは `gui_executor.later` で GUI スレッドに戻ってから `answer`。`busy` はダイアログから検査の答えまで。終了の開始後はダイアログも検査も始めず `unavailable`（ダイアログの間に終了が始まったら検査を積まない）
+  - L2 ページがアンマウントされた後の `pickFolder` の答えでは何も始めない（`picking` の世代をアンマウントで進める）
+  - L3 ホストの `_AnswerShellRequest`: ビューが破棄された後（`shiboken.isValid`）・終了の開始後（`gui_unavailable_reason`）の答えは info のログだけで捨てる（RuntimeError を漏らさない）
+  - L4 自分の中との比較は辿った先で（`_Resolved` = `normcase(realpath)`）。選んだフォルダ自身がリンク / ジャンクションなら辿る（コピーも辿るので揃う）。フォルダの中のリンク / ジャンクションは今までどおりコピーしない。`_Within` 自体は字面の比較のまま（ZIP の展開でエントリごとに呼ぶので `realpath` を入れない。呼び出し側で解決してから渡す）。上書きの確認 `ImportConflicts` も同じ比較で、自分自身はぶつからない
+  - L5 デスクトップの断りの文言を場面ごとに: `not_ready`（起動中）は「まだ準備中です。少し待ってからもう一度お試しください。」、`unavailable`（終了中）は「デスクトップアプリが今はフォルダの選択画面を開けません（終了中など）。」、`no_session` / `unknown_verb` は今までの「デスクトップアプリで開いてください」
+  - L7 ダイアログはユーザーのドキュメント（`QStandardPaths.DocumentsLocation`、無ければホーム）で開く（作業ディレクトリではない）
+  - L8 `tests/test_web_access.py` の連結された assert の行を直した
+  - 試験: `tests/test_asset_packs.py` に 9 件（`user_data/games` そのものと Autona のフォルダ・ジャンクション 2 件（作れなければ symlink、どちらも無理なら skip）・ロックされたファイルを模したコピーの失敗で答えにも INFO 以上のログにもパスが無く debug にはある・フォルダを開けない失敗・ジョブ自体の失敗 3 種（`OSError` / ディスクフル / `ValueError`））。`tests/test_web_panel_host.py` は後で答えるシェルの答えがページに届く・ビューが無い / 終了中の答えは捨てる・検査がメインスレッドの外で走る・ドキュメントで開く・`answer` なしは TypeError・終了中はダイアログも検査も無い・実 QtWebEngine の試験は本物の `TaskExecutor` と `GuiExecutor` で。jest はアンマウント後の答えで取り込まない・断りの文言の表を直して `no_session` を足した
+- **pin**
+  - `tests/test_asset_packs.py`（新規 15 件）: id で持って取り込む（取り出した id は 2 度目に `unknown_pick`）・conflicts は読み直し名前で上書き・期限（14 分 59 秒は残り 15 分で無くなる）・別の id の照会でも期限切れを外す・新しい選択が置き換え、断ったフォルダは前を残す・持てないフォルダの 3 理由・id はちょうど一致（前後・大小・型・パス）と比較が `compare_digest`・ジョブ中は `busy` で残る・検査の間に始まったジョブで同じ期限のまま戻る・その間の新しい選択が勝つ・フォルダが消えたら断って無くなる・`user_data/games` を下に持つゲームのフォルダはコピーしない（ジョブの `failed`）・ログにパスも id も出ない
+  - `tests/test_api_v1_assets.py`（新規 16 件 + 共通の表に 1 行）: 202 と no-store と 2 度目の 404・overwrite は conflicts だけで confirm が要る・overwrite なしは導入済みを残す・ジョブ中の 409 で選択が残る・`pick` の形の表（断っても選択は残る・何も積まない）・パスは `pick` にならない（持っているフォルダそのものでも 404。ほかのキーのパスは無視）・期限切れ 404・断りの答えにパスが無い・答えとログにパスも id も無く、操作ログはキー名だけ。共通の 3 試験（シェルの秘密なしは 403・断る要求は本文を読まない・no-store）にも入れた
+  - `tests/test_web_panel_host.py`: `ParseShellRequest` の表（`pickFolder` の正しい形・引数を付けた 2 形は `keys`・`PickFolder` は `verb`）、`_PickFolder` の単体（パスなしの答えとダイアログの親と訳した題・閉じたとき・ウィンドウ / サービスが無いと `not_ready` でダイアログを開かない・core の 3 理由はコードだけでログにパスなし・読めないフォルダは `failed` で型名だけ・開いている間の `pickFolder` は `busy`（ダイアログの中から呼んで確かめる）・ダイアログが例外を出してもフラグが戻る）、`src/` の `QFileDialog` は `AutonaShellOperations._PickFolder` だけ（AST）、実 QtWebEngine（本物の `AutonaShellOperations` で、クリックの `window.open` → 差し替えた `getExistingDirectory` が 1 回・親はメインウィンドウ・スタックに `_RunShellRequest` があり `_OpenOutside` が無い → `shellResult` の答えにパスが無い）。`test_every_verb_the_view_takes_is_one_the_shell_runs` はダイアログとサービスを差し替えて回す。知らない動詞の試験は `openUrl` に
+  - `tests/test_web_access.py`（共通の SHELL の表に 1 行・`assetOps` に 2 つ・フォルダの取り込みはシェルのもので秘密なしは 403）、`tests/test_webserver_routes.py`（台帳に 1 行・SHELL の集合・v1 は 133 本・WRITE は 76 のまま）、`tests/test_web_operations.py`（ヘッドレスは 403）、`tests/test_assets_page.py`（ページのパスの表）
+  - jest: `shellRequest.test.js`（動詞ごとの待ち時間の表と `pickFolder` は 1 時間たっても待つ・`pickFolder` の新しい要求が前を `superseded` に）、`AssetsPage.test.js`（クリックの中で同期に開く・クエリのキーはちょうど 3 つ / conflicts なしはすぐ `{pick}` で取り込み破棄もアップロードもしない / 上書きのダイアログと `{pick, overwrite, confirm}` / キャンセルは何も送らない / 閉じたときは何もしない / 断りの 7 コードの文言 / `unknown_pick` / 古い要求の答えは使わない / 期限で閉じて DELETE を送らない / 注記に「今後のアップデート」が無い / elsewhere にボタンが無い）。e2e `assets.spec.ts`（ブラウザに「フォルダから取り込む」が無い・`importFolder` は 403・選択の上書きのダイアログが 600 px に収まる（en / ja））
+  - 変異の確認: 枠の id の比較（`compare_digest` の条件を外す）・期限の判定を外す・`BUSY` での戻しを外す・答えにパスを足す・1 度に 1 つの判定を外す・v1 の conflicts の部分集合の検査を外す・confirm を外す、をそれぞれ入れると上の試験が落ちることを確かめて戻した
+- **検証**: 触った試験を直列で（`test_asset_packs`・`test_api_v1_assets`・`test_web_panel_host`・`test_web_access`・`test_webserver_routes`・`test_web_operations`・`test_assets_page`・`test_import_side_effects`・`test_core_qt_free` で 1610 passed）、pytest 全量 7390 passed / 2 skipped、jest 44 suites / 1330 passed、`npm run build`（既存の Header.jsx の警告だけ）、e2e 全量 140 passed / 1 skipped（`assets.spec.ts` は 18 passed）。検収の修正の後: 触った試験を直列で 1623 passed、pytest 全量 7403 passed / 2 skipped、jest 44 suites / 1332 passed（全量の並走で時間切れになった ScorePage / ResultPage は単独で 199 passed）、`npm run build`（同じ警告だけ）、e2e 全量 140 passed / 1 skipped。変異の確認に M1（コピーの失敗の文を `str(failure)` に戻す・`_JobText` を `str(error)` に戻す・詳細の debug を info に上げる）と L2（アンマウントでの世代の更新を外す）を足し、どれも試験が落ちることを確かめて戻した
+- **残るリスク**
+  - 検査（ジョブレーン）の途中で終了が始まり executor がそのタスクを捨てると、`busy` のフラグが戻らない（終了の間だけのことで、答えも捨てられる）
+  - ダイアログを開いている間にページが読み直されると答えは捨てられ、選択は 15 分か次の選択まで core に残る（パスはメモリの中だけ。ディスクには何も無い）
+  - ネイティブのダイアログの見た目・親とモーダル（とくに最前面がオンのとき）・実際のフォルダの取り込みの通しは実機で未確認（オフスクリーンの実 QtWebEngine の試験はダイアログを差し替えている）
+  - 戻せなかった退避の場所（`user_data/games/.autona-replaced-*`）だけはジョブの文とログに出る（選んだフォルダではなくアプリのデータの中。戻し方を伝えるため）
+  - 検収の L6: pickFolder の答えは期限なしで待つので、答えの `runJavaScript` が遷移の途中で失われると、待っている要求（Promise と closure）が `pendingRequests` に残り続ける。ボタンは無効にしないので、もう一度押せば `superseded` で回復する（設計判断 3 のとおり受け入れる）
+- **実機で見てほしいこと**: `.claude/manual-test-checklist.md` の「ゲームアセットを追加」の「フォルダから取り込む」以下の 5 項目（ダイアログが 1 つだけメインウィンドウの上に出る・キャンセルで何も起きない・導入済みを含むフォルダの上書きのダイアログ・ゲームの無いフォルダのエラーとログにパスが無いこと・15 分の期限・自分の中へはコピーしない 3 通り・ロックしたファイルを含むフォルダの失敗の文とログにパスが無いこと）。ダイアログがドキュメントで開くこと。最前面をオンにした状態でも一度開く

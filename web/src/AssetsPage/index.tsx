@@ -22,6 +22,7 @@ import i18n from "../i18n/config";
 import {apiDelete, apiErrorStatus, apiGetJson, apiPost} from "../api";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
 import {WRITE_OPTIONS} from "../PanelShell/requests";
+import {ShellResult, shellRequest} from "../PanelShell/hostApi";
 import {useDocumentVisibility} from "../PanelShell/useDocumentVisibility";
 import {useShellAccess} from "../PanelShell/useShellAccess";
 import socketConnection from "../websocketConnection";
@@ -29,6 +30,7 @@ import {CardFrame, GuideFrame, Note} from "../GuidePages/parts";
 import {
     CANCEL_PATH,
     GameRow,
+    IMPORT_FOLDER_PATH,
     IMPORT_ZIP_PATH,
     INSTALL_PATH,
     JobState,
@@ -58,9 +60,12 @@ import {useAssetJob} from "./useAssetJob";
 // shared view may call them), so anywhere else -- a browser, the headless
 // app -- the page says so and links the source, and reads nothing.
 // useShellAccess({withToken: false}) tells the two apart without reading
-// the access token (its probe is the shell session: SF-5a-1). A folder cannot be imported from a page (it cannot name
-// one): the ZIP route is the only one until the shell's folder picker
-// (SF-5a). Everything shown is text: nothing here renders HTML.
+// the access token (its probe is the shell session: SF-5a-1). A page cannot
+// name a folder of the PC: the folder import asks the desktop for one
+// (SF-5a-2: the shell request pickFolder, the desktop's own folder dialog),
+// which holds it and answers an id -- never the path -- that
+// POST /api/v1/assets:importFolder imports. Everything shown is text:
+// nothing here renders HTML.
 
 type Notice = {severity: "success" | "info" | "warning" | "error";
     text: string};
@@ -298,21 +303,50 @@ function OnlineCard({packs, busy, onStart, onRefresh}: {
     );
 }
 
-// ── ZIP import ──────────────────────────────────────────────────────────
+// ── ZIP / folder import ─────────────────────────────────────────────────
 
 type Upload =
     | {phase: "idle"}
     | {phase: "sending"; name: string; sent: number; total: number};
 
-type Overwrite = {answer: UploadAnswer; selected: string[]};
+// What an import takes: an uploaded ZIP (POST /assets/uploads's id) or the
+// folder the desktop's dialog picked (pickFolder's id).
+type ImportSource = {kind: "upload" | "pick"; id: string};
+
+type Overwrite = {
+    source: ImportSource;
+    games: string[];
+    conflicts: string[];
+    expiresInSec: number;
+    selected: string[];
+};
+
+// pickFolder's refusals that are the desktop's, not core's: their own text
+// (core's codes -- no_game, not_a_folder, bad_name, failed -- are
+// errorText's). "busy" here is the folder dialog already open, not a job;
+// "not_ready" the desktop still starting (try again), "unavailable" it
+// closing; the others, no desktop that can open the dialog for this page.
+const PICK_FAILURES: Record<string, string> = {
+    busy: "assets_folder_busy",
+    not_ready: "assets_folder_not_ready",
+    unavailable: "assets_folder_closing",
+    unknown_verb: "assets_folder_unavailable",
+    no_session: "assets_folder_unavailable",
+};
+
+function pickFailureText(code: string | undefined): string {
+    const key = code ? PICK_FAILURES[code] : undefined;
+    return key ? i18n.t(key) : errorText(code);
+}
 
 function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
     busy: boolean;
     // Whether the card itself is busy (sending, or asking about
     // overwrites): the download waits for it as the ZIP waits for the job.
     onBusyChange: (busy: boolean) => void;
-    // Start the import job of an uploaded ZIP; resolves true when started.
-    onImport: (upload: string, overwrite: string[]) => Promise<boolean>;
+    // Start the import job of an uploaded ZIP or a picked folder; resolves
+    // true when started.
+    onImport: (source: ImportSource, overwrite: string[]) => Promise<boolean>;
     notice: Notice | null;
     setNotice: (notice: Notice | null) => void;
 }) {
@@ -321,6 +355,13 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
     const handle = React.useRef<UploadHandle | null>(null);
     const held = React.useRef<string | null>(null);
     const input = React.useRef<HTMLInputElement | null>(null);
+    // The newest folder request: an answer to an older one is not wanted,
+    // nor any once the page is gone (the dialog may outlive it: nothing is
+    // imported for a page no longer there).
+    const picking = React.useRef(0);
+    useUnmountCleanup(() => {
+        picking.current += 1;
+    });
 
     const cardBusy = upload.phase === "sending" || asking !== null;
     React.useEffect(() => {
@@ -395,24 +436,76 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
         handle.current = null;
         setUpload({phase: "idle"});
         held.current = answer.upload;
+        await offer({kind: "upload", id: answer.upload}, answer);
+    };
+
+    // An upload or a pick in hand: imported now, or after the overwrite
+    // dialog when it has installed games.
+    const offer = async (source: ImportSource, answer: {
+        games: string[]; conflicts: string[]; expiresInSec: number}) => {
         if (answer.conflicts.length === 0) {
-            await startImport(answer.upload, []);
+            await startImport(source, []);
         } else {
-            setAsking({answer, selected: []});
+            setAsking({source, games: answer.games,
+                       conflicts: answer.conflicts,
+                       expiresInSec: answer.expiresInSec, selected: []});
         }
     };
 
-    const startImport = async (id: string, overwrite: string[]) => {
+    // The desktop holds a pick (a path) for 15 minutes or until a newer
+    // one: there is nothing for the page to drop.
+    const release = (source: ImportSource) => {
+        if (source.kind === "upload") {
+            drop(source.id);
+        }
+    };
+
+    const startImport = async (source: ImportSource, overwrite: string[]) => {
         // While the request is out the job may already have taken the file:
         // the page no longer holds it (leaving now drops nothing), and drops
         // it itself only when the job did not start.
-        if (held.current === id) {
+        if (source.kind === "upload" && held.current === source.id) {
             held.current = null;
         }
-        const started = await onImport(id, overwrite);
+        const started = await onImport(source, overwrite);
         if (!started) {
-            drop(id);
+            release(source);
         }
+    };
+
+    // The folder import: the desktop's folder dialog (shell request
+    // pickFolder). Asked in the click itself -- the desktop takes a window
+    // opened by a click only -- and answered when the operator closes the
+    // dialog (no time limit), with the pick's id and its games, never the
+    // folder's path.
+    const pickFolder = () => {
+        setNotice(null);
+        const mine = ++picking.current;
+        const asked: Promise<ShellResult> = shellRequest("pickFolder");
+        asked.then(async (result) => {
+            if (mine !== picking.current) {
+                return;
+            }
+            if (!result.ok) {
+                setNotice({severity: "error",
+                           text: pickFailureText(result.error)});
+                return;
+            }
+            if (result.status !== "picked" || !result.pick) {
+                // The dialog was closed: nothing picked.
+                return;
+            }
+            await offer({kind: "pick", id: result.pick}, {
+                games: result.games ?? [],
+                conflicts: result.conflicts ?? [],
+                expiresInSec: result.expiresInSec ?? 0});
+        }, (error: {code?: string}) => {
+            if (mine !== picking.current || error?.code === "superseded") {
+                return;
+            }
+            console.error(error);
+            setNotice({severity: "error", text: pickFailureText(error?.code)});
+        });
     };
 
     const stopSending = () => {
@@ -425,37 +518,40 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
         if (!request) {
             return;
         }
-        const {answer, selected} = request;
+        const {source, games, conflicts, selected} = request;
         // Every game here is installed and every one declined: nothing to
         // import (as the Qt dialog said).
-        const nothing = answer.games.every(
-            (name) => answer.conflicts.includes(name)
-                && !selected.includes(name));
+        const nothing = games.every(
+            (name) => conflicts.includes(name) && !selected.includes(name));
         if (!go || nothing) {
-            drop(answer.upload);
+            release(source);
             setNotice({severity: "info", text: i18n.t(
                 "assets_nothing_imported")});
             return;
         }
-        void startImport(answer.upload, selected);
+        void startImport(source, selected);
     };
 
-    // The upload is held for `expiresInSec`: the dialog is closed when it
-    // is over (nothing to import any more).
-    const askedUpload = asking?.answer.upload ?? null;
-    const askedExpiry = asking?.answer.expiresInSec ?? 0;
+    // The upload or the pick is held for `expiresInSec`: the dialog is
+    // closed when it is over (nothing to import any more).
+    const askedKind = asking?.source.kind ?? null;
+    const askedId = asking?.source.id ?? null;
+    const askedExpiry = asking?.expiresInSec ?? 0;
     React.useEffect(() => {
-        if (askedUpload === null) {
+        if (askedId === null) {
             return undefined;
         }
         const timer = setTimeout(() => {
             setAsking(null);
-            drop(askedUpload);
-            setNotice({severity: "warning",
-                       text: i18n.t("assets_upload_expired")});
+            if (askedKind === "upload") {
+                drop(askedId);
+            }
+            setNotice({severity: "warning", text: i18n.t(
+                askedKind === "pick" ? "assets_folder_expired"
+                                     : "assets_upload_expired")});
         }, askedExpiry * 1000);
         return () => clearTimeout(timer);
-    }, [askedUpload, askedExpiry, drop, setNotice]);
+    }, [askedKind, askedId, askedExpiry, drop, setNotice]);
 
     const sending = upload.phase === "sending" ? upload : null;
     const percent = sending && sending.total > 0
@@ -469,6 +565,11 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
                         disabled={busy || sending !== null || asking !== null}
                         onClick={() => input.current?.click()}>
                     {i18n.t("assets_zip_choose")}
+                </Button>
+                <Button variant="outlined" size="small"
+                        disabled={busy || sending !== null || asking !== null}
+                        onClick={pickFolder}>
+                    {i18n.t("assets_folder_choose")}
                 </Button>
                 {sending ? (
                     <Button size="small" color="warning"
@@ -504,7 +605,8 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
                 <Alert severity={notice.severity} sx={WRAP}>{notice.text}</Alert>
             ) : null}
             {/* A click outside or Esc does not close it: the upload is only
-                dropped by the explicit Cancel (or when it expires). */}
+                dropped by the explicit Cancel (or when it expires). A pick
+                stays held on the desktop until it expires or is replaced. */}
             <Dialog open={asking !== null} fullWidth maxWidth="xs"
                     onClose={(_event, reason) => {
                         if (reason !== "backdropClick"
@@ -517,14 +619,16 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
                     {asking ? (
                         <Stack spacing={1}>
                             <DialogContentText sx={WRAP}>
-                                {i18n.t("assets_overwrite_games", {
-                                    games: asking.answer.games.join(", ")})}
+                                {i18n.t(asking.source.kind === "pick"
+                                    ? "assets_overwrite_folder_games"
+                                    : "assets_overwrite_games", {
+                                    games: asking.games.join(", ")})}
                             </DialogContentText>
                             <DialogContentText>
                                 {i18n.t("assets_overwrite_body")}
                             </DialogContentText>
                             <FormGroup>
-                                {asking.answer.conflicts.map((name) => (
+                                {asking.conflicts.map((name) => (
                                     <FormControlLabel
                                         key={name}
                                         control={<Checkbox
@@ -793,11 +897,15 @@ function AssetsContent() {
                     onBusyChange={setZipBusy}
                     notice={zipNotice}
                     setNotice={setZipNotice}
-                    onImport={(upload, overwrite) => started(
-                        IMPORT_ZIP_PATH,
-                        overwrite.length > 0
-                            ? {upload, overwrite, confirm: true}
-                            : {upload})}/>
+                    onImport={(source, overwrite) => {
+                        const id = source.kind === "pick"
+                            ? {pick: source.id} : {upload: source.id};
+                        return started(
+                            source.kind === "pick" ? IMPORT_FOLDER_PATH
+                                                   : IMPORT_ZIP_PATH,
+                            overwrite.length > 0
+                                ? {...id, overwrite, confirm: true} : id);
+                    }}/>
                 {startError ? (
                     <Alert severity="error" sx={WRAP}>{startError}</Alert>
                 ) : null}

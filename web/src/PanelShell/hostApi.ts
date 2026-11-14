@@ -125,7 +125,9 @@ export function requestFullState(): void {
 
 // ── Shell requests (ADR-005 S-final SF-5a-1) ────────────────────────────
 // What a page asks of the desktop itself: the window's "always on top", the
-// update check, one of a fixed few outside addresses. There is no privileged
+// update check, one of a fixed few outside addresses, a game folder to import
+// (SF-5a-2: the desktop's own folder dialog; the page gets an id for the
+// folder, never its path). There is no privileged
 // channel: in a click, the page opens a new window of this server's
 // /web/shell-request carrying the verb, an id and the ticket, which the
 // desktop's shared view takes instead of opening a window
@@ -146,7 +148,19 @@ export const SHELL_REQUEST_PATH = "/web/shell-request";
 // update check answers that it started; its result is its own dialog).
 export const SHELL_ANSWER_TIMEOUT_MS = 10000;
 
-export type ShellVerb = "alwaysOnTop" | "checkUpdates" | "openExternal";
+export type ShellVerb = "alwaysOnTop" | "checkUpdates" | "openExternal"
+    | "pickFolder";
+
+// Each verb's wait for its answer (ms), or null: none. pickFolder answers
+// when the operator closes the folder dialog, which takes as long as it
+// takes; a newer request of it (superseded) or the page going away ends
+// the wait instead.
+export const SHELL_ANSWER_TIMEOUTS_MS: Record<ShellVerb, number | null> = {
+    alwaysOnTop: SHELL_ANSWER_TIMEOUT_MS,
+    checkUpdates: SHELL_ANSWER_TIMEOUT_MS,
+    openExternal: SHELL_ANSWER_TIMEOUT_MS,
+    pickFolder: null,
+};
 
 // The desktop's answer as it sent it: ok, or the error's code.
 export interface ShellResult {
@@ -154,6 +168,14 @@ export interface ShellResult {
     error?: string;
     // alwaysOnTop's: the window's state after it.
     alwaysOnTop?: boolean;
+    // pickFolder's: "picked" (the desktop holds the folder under `pick`,
+    // for v1's POST /assets:importFolder, for `expiresInSec`) or
+    // "cancelled" (the dialog was closed; nothing held).
+    status?: "picked" | "cancelled";
+    pick?: string | null;
+    games?: string[];
+    conflicts?: string[];
+    expiresInSec?: number;
 }
 
 // What the desktop says of itself, on the page's load and every change.
@@ -176,7 +198,7 @@ interface PendingRequest {
     verb: ShellVerb;
     resolve: (result: ShellResult) => void;
     reject: (error: ShellRequestError) => void;
-    timer: ReturnType<typeof setTimeout>;
+    timer: ReturnType<typeof setTimeout> | null;
 }
 
 let shellTicket: string | null = null;
@@ -230,7 +252,9 @@ function settle(id: string): PendingRequest | undefined {
     const pending = pendingRequests.get(id);
     if (pending) {
         pendingRequests.delete(id);
-        clearTimeout(pending.timer);
+        if (pending.timer !== null) {
+            clearTimeout(pending.timer);
+        }
     }
     return pending;
 }
@@ -255,11 +279,12 @@ export function shellRequest(verb: ShellVerb,
         }
     }
     const answer = new Promise<ShellResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
+        const wait = SHELL_ANSWER_TIMEOUTS_MS[verb];
+        const timer = wait === null ? null : setTimeout(() => {
             if (settle(id)) {
                 reject(shellRequestError("timeout"));
             }
-        }, SHELL_ANSWER_TIMEOUT_MS);
+        }, wait);
         pendingRequests.set(id, {verb, resolve, reject, timer});
     });
     // This server's origin exactly, which the desktop checks. No reference

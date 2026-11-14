@@ -104,6 +104,7 @@ def test_the_page_calls_the_routes_core_serves():
         "JOB_PATH": "/api/v1/assets/job",
         "UPLOADS_PATH": "/api/v1/assets/uploads",
         "IMPORT_ZIP_PATH": "/api/v1/assets:importZip",
+        "IMPORT_FOLDER_PATH": "/api/v1/assets:importFolder",
         "INSTALL_PATH": "/api/v1/assets/packs:install",
         "CANCEL_PATH": "/api/v1/assets/job:cancel",
         "REVEAL_PATH": "/api/v1/assets/games-folder:reveal",

@@ -32,7 +32,8 @@ its own button.
 
 The other way, a page asks the desktop itself for a few things -- the
 window's "always on top", the update check, one of a fixed few outside
-addresses (ADR-005 S-final SF-5a-1) -- as shell requests: in a click, a
+addresses (ADR-005 S-final SF-5a-1), a game folder to import picked in the
+native dialog (SF-5a-2) -- as shell requests: in a click, a
 window.open of this server's /web/shell-request with the verb, an id and
 the ticket only the shared view's own fetch can read (GET /api/v1/
 shell-session, SHELL). The page takes it instead of a new window when it is
@@ -110,6 +111,7 @@ import re
 from collections import namedtuple
 from urllib.parse import parse_qsl, quote, urlencode
 
+from qtpy import shiboken
 from qtpy.QtCore import Qt, QTimer, QUrl, Signal
 from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import (
@@ -123,6 +125,7 @@ from .AutonaExternalLinks import EXTERNAL_LINKS
 from .AutonaWebPageLifecycle import (
     HiddenPageLifecycle, IsWebServerReady, LocalPageLoader, LocalUrl,
     WhenWebServerReady)
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIP, GetLocalIPs
 from .core import WebAccess
@@ -470,24 +473,29 @@ class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
 
 # ── The shell requests (ADR-005 S-final SF-5a-1) ────────────────────────
 # What a page of the Web UI asks of the desktop itself -- the window's
-# "always on top", the update check, one of a fixed few outside addresses --
-# with no privileged channel (no QWebChannel, no script injected): in a click,
+# "always on top", the update check, one of a fixed few outside addresses, a
+# game folder to import (SF-5a-2: the native dialog; core holds the path,
+# the page gets an id) -- with no privileged channel (no QWebChannel, no script injected): in a click,
 # the page's script opens a new window of this server's /web/shell-request
 # (web/src/PanelShell/hostApi.ts, shellRequest), which the view never makes.
 # _PanelPage._OpenOutside takes it instead, as it takes the Designer's URL,
 # and only when it is one exactly (ParseShellRequest), carrying the ticket
 # that only the shared view's own fetch can read (GET /api/v1/shell-session,
 # SHELL: WebAccess.IssueShellTicket). The host runs the verb from the event
-# loop (_RunShellRequest) and hands the answer to the page that asked
+# loop (_RunShellRequest) and hands the answer -- now, or when the shell
+# gives it later (pickFolder's probe: _AnswerShellRequest, dropped when the
+# view is gone or the app shutting down by then) -- to the page that asked
 # (window.autonaPanelShell.shellResult); the shell's state goes to the page
 # on its load and on every change (shellState).
 SHELL_REQUEST_PATH = "/web/shell-request"
 # Verb -> {argument: the values it may take}. Nothing but these values gets
-# to a verb: openExternal names a key of EXTERNAL_LINKS, never a URL.
+# to a verb: openExternal names a key of EXTERNAL_LINKS, never a URL;
+# pickFolder takes none (the operator names the folder in the dialog).
 SHELL_VERBS = {
     "alwaysOnTop": {"on": ("0", "1")},
     "checkUpdates": {},
     "openExternal": {"target": tuple(EXTERNAL_LINKS)},
+    "pickFolder": {},
 }
 # What every request carries besides its verb's arguments.
 _SHELL_REQUEST_FIELDS = ("verb", "request", "ticket")
@@ -947,9 +955,11 @@ class AutonaWebPanelHost(QWidget):
     def __init__(self, parent=None, shell=None):
         super().__init__(parent)
         # What answers the page's shell requests (ADR-005 S-final SF-5a-1),
-        # on this thread: ShellRequest(verb, args) -> the answer and
-        # ShellState() -> the state, each a JSON-able dict (the Window gives
-        # AutonaShellOperations.instance). None refuses every request.
+        # on this thread: ShellRequest(verb, args, answer) -> the answer, or
+        # None when it calls answer(the answer) later on this thread
+        # (pickFolder), and ShellState() -> the state, each a JSON-able dict
+        # (the Window gives AutonaShellOperations.instance). None refuses
+        # every request.
         self._shell = shell
         # Each verb's newest answer not yet handed to the page (verb ->
         # (request id, the answer as JSON)), and which document they are
@@ -1046,23 +1056,42 @@ class AutonaWebPanelHost(QWidget):
 
     def _QueueShellRequest(self, request):
         # Not inside Chromium's new-window call (agent-pitfalls #9): a verb
-        # may hide and show the window (alwaysOnTop's setWindowFlag) or start
-        # another application. For the document shown now, which asked.
+        # may hide and show the window (alwaysOnTop's setWindowFlag), start
+        # another application or run a modal dialog's loop (pickFolder's
+        # folder dialog). For the document shown now, which asked.
         QTimer.singleShot(0, self, functools.partial(
             self._RunShellRequest, request, self._documents))
 
     def _RunShellRequest(self, request, document):
+        answer = functools.partial(self._AnswerShellRequest, request,
+                                   document)
         if self._shell is None:
             logger.warning("The shell request %s has nothing to run it",
                            request.verb)
             result = {"ok": False, "error": "unavailable"}
         else:
             try:
-                result = self._shell.ShellRequest(request.verb,
-                                                  dict(request.args))
+                # None: it answers later, through `answer` (pickFolder, once
+                # the folder picked is probed).
+                result = self._shell.ShellRequest(
+                    request.verb, dict(request.args), answer)
             except Exception:
                 logger.exception("The shell request %s failed", request.verb)
                 result = {"ok": False, "error": "failed"}
+        if result is not None:
+            answer(result)
+
+    def _AnswerShellRequest(self, request, document, result):
+        # A verb may answer after the event loop ran meanwhile -- pickFolder's
+        # dialog and its probe -- by when the view may be gone (this host
+        # deleted with the main window) or the app shutting down: nothing is
+        # done then (no RuntimeError from the deleted widget's view).
+        if not shiboken.isValid(self) or \
+                AutonaQtHelper.gui_unavailable_reason() is not None:
+            logger.info("The answer to the shell request %s is dropped: the "
+                        "view is gone or the app is shutting down",
+                        request.verb)
+            return
         try:
             answer = json.dumps(result)
         except (TypeError, ValueError):

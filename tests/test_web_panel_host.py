@@ -1765,6 +1765,9 @@ VALID_SHELL_REQUESTS = [
      ShellRequest("openExternal", "r2", {"target": "discord"})),
     (f"verb=openExternal&target=inquiry&request={'x' * 64}&ticket={_T}",
      ShellRequest("openExternal", "x" * 64, {"target": "inquiry"})),
+    # SF-5a-2: no argument -- the operator names the folder in the dialog.
+    (f"verb=pickFolder&request=r3&ticket={_T}",
+     ShellRequest("pickFolder", "r3", {})),
 ]
 
 
@@ -1804,7 +1807,7 @@ REFUSED_SHELL_REQUESTS = [
     # No verb, or not one of them.
     (f"{_B}/web/shell-request?", "verb"),
     (f"{_B}/web/shell-request?request=r1&ticket={_T}", "verb"),
-    (f"{_B}/web/shell-request?verb=pickFolder&request=r1&ticket={_T}", "verb"),
+    (f"{_B}/web/shell-request?verb=PickFolder&request=r1&ticket={_T}", "verb"),
     (f"{_B}/web/shell-request?verb=CheckUpdates&request=r1&ticket={_T}",
      "verb"),
     (f"{_B}/web/shell-request?verb=openUrl&url=https://evil.example"
@@ -1817,6 +1820,11 @@ REFUSED_SHELL_REQUESTS = [
      "keys"),
     (f"{_B}/web/shell-request?verb=openExternal&url=https://evil.example"
      f"&request=r1&ticket={_T}", "keys"),
+    # A page never names the folder (SF-5a-2).
+    (f"{_B}/web/shell-request?verb=pickFolder&path=C%3A%5CGames"
+     f"&request=r1&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?verb=pickFolder&folder=..&request=r1"
+     f"&ticket={_T}", "keys"),
     # An id the answer's script could not carry as it is.
     (f"{_B}/web/shell-request?verb=checkUpdates&request=&ticket={_T}",
      "request"),
@@ -2179,9 +2187,16 @@ class _Shell:
         self.asked = []
         self.state = {"alwaysOnTop": False}
         self.answer = None
+        # True: it answers later, through the `answer` it was handed (kept
+        # in `answers`), as pickFolder does.
+        self.later = False
+        self.answers = []
 
-    def ShellRequest(self, verb, args):
+    def ShellRequest(self, verb, args, answer=None):
         self.asked.append((verb, args))
+        if self.later:
+            self.answers.append(answer)
+            return None
         if self.answer is not None:
             return self.answer
         return {"ok": True, "verb": verb, **args}
@@ -2510,6 +2525,65 @@ def test_an_answer_for_a_document_gone_since_is_dropped(buildHost):
     assert rig.js("window.__shellResults") == []
 
 
+def test_an_answer_the_shell_gives_later_reaches_the_page_that_asked(
+        buildHost):
+    # pickFolder answers once its dialog closed and the folder is probed:
+    # through the `answer` the host handed it, for the document that asked.
+    rig = _shellShown(buildHost)
+    rig.shell.later = True
+    rig.host._RunShellRequest(ShellRequest("pickFolder", "p1", {}),
+                              rig.host._documents)
+    assert len(rig.shell.answers) == 1
+    _waitUntil(lambda: False, timeout=0.2)
+    assert rig.js("window.__shellResults") == []
+
+    rig.shell.answers[0]({"ok": True, "status": "cancelled"})
+    assert _waitUntil(lambda: rig.js("window.__shellResults") == [
+        ["p1", {"ok": True, "status": "cancelled"}]])
+
+
+def test_a_later_answer_once_the_view_is_gone_or_the_app_stops_is_dropped(
+        qapp, monkeypatch, caplog):
+    # By the time pickFolder answers, the main window may have taken the
+    # host with it, or the shutdown begun: nothing is done (no RuntimeError
+    # from the deleted widget), nothing held.
+    from qtpy import shiboken
+
+    from src.Helpers import AutonaQtHelper
+
+    shell = _Shell()
+    shell.later = True
+    stopping = AutonaWebPanelHost(shell=shell)
+    stopping._RunShellRequest(ShellRequest("pickFolder", "p1", {}),
+                              stopping._documents)
+    gone = AutonaWebPanelHost(shell=shell)
+    gone._RunShellRequest(ShellRequest("pickFolder", "p2", {}),
+                          gone._documents)
+    alive = AutonaWebPanelHost(shell=shell)
+    alive._RunShellRequest(ShellRequest("pickFolder", "p3", {}),
+                           alive._documents)
+    later, lateGone, lateAlive = shell.answers
+
+    shiboken.delete(gone)
+    with caplog.at_level(logging.INFO, logger=HostModule.__name__):
+        lateGone({"ok": True, "status": "cancelled"})
+        monkeypatch.setattr(AutonaQtHelper, "gui_unavailable_reason",
+                            lambda: "the app is shutting down")
+        later({"ok": True, "status": "cancelled"})
+        monkeypatch.undo()
+    assert caplog.text.count("is dropped: the view is gone or the app is "
+                             "shutting down") == 2
+    assert stopping._shellResults == {}
+
+    # Alive and running: held for its page (no view yet to hand it to).
+    lateAlive({"ok": True, "status": "cancelled"})
+    assert alive._shellResults == {"pickFolder": (
+        "p3", json.dumps({"ok": True, "status": "cancelled"}))}
+    for host in (stopping, alive):
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(host, QEvent.Type.DeferredDelete)
+
+
 def test_the_shells_state_reaches_the_page_on_its_load_and_each_change(
         buildHost):
     rig = _shellShown(buildHost)
@@ -2634,6 +2708,61 @@ def test_always_on_top_asked_in_a_click_keeps_the_view_and_answers(
     assert opened == []
 
 
+def test_a_folder_picked_in_a_click_answers_the_page_without_its_path(
+        buildHost, monkeypatch, issuedTicket, tmp_path):
+    # The real shell adapter in the real view: the click's window.open is
+    # taken, the native dialog (patched) opened once over the main window
+    # from the event loop -- not inside Chromium's call (agent-pitfalls #9)
+    # -- and the page gets the pick, not the folder.
+    import inspect
+
+    from src.AutonaShellOperations import AutonaShellOperations
+    from src.core import AssetPackService as assets
+
+    folder = str(tmp_path / "private-folder-7Q")
+    stacks = []
+
+    def dialog():
+        stacks.append([frame.function for frame in inspect.stack()])
+        return folder
+
+    from src.Helpers import AutonaQtHelper
+    from src.core.TaskExecutor import TaskExecutor
+
+    # The probe's lane and the GUI thread's executor, as the app has them.
+    lane = TaskExecutor()
+    monkeypatch.setattr(TaskExecutor, "instance", lane)
+    monkeypatch.setattr(AutonaQtHelper, "gui_executor",
+                        AutonaQtHelper.GuiExecutor())
+    opened = _handedOutside(monkeypatch)
+    calls = _folderDialog(monkeypatch, dialog)
+    held = _pickService(monkeypatch)
+    operations = AutonaShellOperations()
+    rig = _shellShown(buildHost, shell=operations)
+    operations.UiMounted(rig.window)
+    document = rig.js("window.__loadId")
+
+    _clickOpening(rig, f"http://127.0.0.1:{rig.servingPort}"
+                       f"/web/shell-request?verb=pickFolder&request=p1"
+                       f"&ticket={issuedTicket}")
+    assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
+    _waitUntil(lambda: False, timeout=0.3)
+
+    assert [call[0] for call in calls] == [rig.window]
+    assert held == [folder]
+    assert held.threads[0] is not threading.main_thread()
+    assert lane.shutdown(WAIT_SECS)
+    assert "_RunShellRequest" in stacks[0]
+    assert "_OpenOutside" not in stacks[0]
+    results = rig.js("window.__shellResults")
+    assert results == [["p1", {
+        "ok": True, "status": "picked", "pick": PICK_ID, "games": ["aaa"],
+        "conflicts": [], "expiresInSec": assets.PICK_EXPIRY_SECS}]]
+    assert "private-folder" not in json.dumps(results)
+    assert opened == []
+    assert rig.js("window.__loadId") == document
+
+
 class _WindowStandIn:
     """The main window as AutonaShellOperations sees it."""
 
@@ -2746,7 +2875,7 @@ def test_the_shell_opens_its_own_outside_addresses_only(monkeypatch):
     works["value"] = False
     assert operations.ShellRequest("openExternal", {"target": "discord"}) == {
         "ok": False, "error": "open_failed"}
-    assert operations.ShellRequest("pickFolder", {}) == {
+    assert operations.ShellRequest("openUrl", {}) == {
         "ok": False, "error": "unknown_verb"}
 
 
@@ -2759,16 +2888,349 @@ def test_every_verb_the_view_takes_is_one_the_shell_runs(monkeypatch):
         CheckForUpdates=lambda silent: None))
     monkeypatch.setattr(ShellModule, "QDesktopServices", SimpleNamespace(
         openUrl=lambda url: True))
+    _folderDialog(monkeypatch, "")
+    _pickService(monkeypatch)
     operations = _operations(_WindowStandIn())
+    unused = []
     for verb, arguments in HostModule.SHELL_VERBS.items():
         for name, values in arguments.items():
             for value in values:
-                assert operations.ShellRequest(verb, {name: value})["ok"], (
+                assert operations.ShellRequest(
+                    verb, {name: value}, unused.append)["ok"], (
                     verb, name, value)
         if not arguments:
-            assert operations.ShellRequest(verb, {})["ok"], verb
+            assert operations.ShellRequest(verb, {}, unused.append)["ok"], \
+                verb
+    assert unused == []
     assert HostModule.SHELL_VERBS["openExternal"] == {
         "target": tuple(EXTERNAL_LINKS)}
+
+
+# ── pickFolder (SF-5a-2) ───────────────────────────────────────────────
+# The native folder dialog over the main window; core holds the folder
+# (AssetPackService.HoldFolderPick) and the page gets its id, never its path.
+
+PICK_ID = "pick-id-0123456789abcdef"
+
+
+def _folderDialog(monkeypatch, answer):
+    """QFileDialog as AutonaShellOperations sees it: getExistingDirectory
+    records its calls -- (parent, title, the folder it opens on) -- and
+    answers ``answer`` (or calls it, when callable)."""
+    from src import AutonaShellOperations as ShellModule
+
+    calls = []
+
+    def getExistingDirectory(parent, title, folder):
+        calls.append((parent, title, folder))
+        return answer() if callable(answer) else answer
+
+    monkeypatch.setattr(ShellModule, "QFileDialog", SimpleNamespace(
+        getExistingDirectory=getExistingDirectory))
+    return calls
+
+
+def _pickService(monkeypatch, hold=None):
+    """AssetPackService.instance standing in: HoldFolderPick records the
+    path and answers (PICK_ID, ["aaa"], []), or runs ``hold``. The threads
+    it ran on: ``held.threads``."""
+    from src.core import AssetPackService as assets
+
+    class Held(list):
+        threads = []
+
+    held = Held()
+    held.threads = []
+
+    def HoldFolderPick(path):
+        held.append(path)
+        held.threads.append(threading.current_thread())
+        if hold is not None:
+            return hold(path)
+        return PICK_ID, ["aaa"], []
+
+    monkeypatch.setattr(assets.AssetPackService, "instance",
+                        SimpleNamespace(HoldFolderPick=HoldFolderPick))
+    return held
+
+
+@pytest.fixture
+def pickLane(monkeypatch):
+    """pickFolder's probe on a stepped job lane, and what it hands to the
+    GUI thread (GuiExecutor.later) kept: ``settle()`` runs both."""
+    from src.Helpers import AutonaQtHelper
+    from src.core.TaskExecutor import TaskExecutor
+
+    executor = TaskExecutor(stepped=True)
+    monkeypatch.setattr(TaskExecutor, "instance", executor)
+    laters = []
+    monkeypatch.setattr(AutonaQtHelper, "gui_executor",
+                        SimpleNamespace(later=laters.append))
+
+    def settle():
+        while executor.queued():
+            assert executor.run_next(WAIT_SECS)
+        while laters:
+            laters.pop(0)()
+
+    try:
+        yield SimpleNamespace(executor=executor, laters=laters,
+                              settle=settle)
+    finally:
+        executor.shutdown(WAIT_SECS)
+
+
+def _pick(operations):
+    """pickFolder asked: (what ShellRequest returned, the answers given
+    later -- a list, filled once settled)."""
+    answers = []
+    return operations.ShellRequest("pickFolder", {}, answers.append), answers
+
+
+def _loguru(level="DEBUG"):
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda m: lines.append(str(m)), level=level)
+    return lines, lambda: logger.remove(sink)
+
+
+def test_a_picked_folder_is_held_and_answered_without_its_path(
+        qapp, monkeypatch, tmp_path, pickLane):
+    from src.core import AssetPackService as assets
+
+    folder = str(tmp_path / "private-folder-7Q")
+    window = _WindowStandIn()
+    calls = _folderDialog(monkeypatch, folder)
+    held = _pickService(monkeypatch)
+    lines, stop = _loguru()
+    try:
+        returned, answers = _pick(_operations(window))
+        # Probed on the job lane, not here (the folder may be on a slow
+        # drive): answered later.
+        assert returned is None and held == [] and answers == []
+        pickLane.settle()
+    finally:
+        stop()
+
+    assert answers == [{"ok": True, "status": "picked", "pick": PICK_ID,
+                        "games": ["aaa"], "conflicts": [],
+                        "expiresInSec": assets.PICK_EXPIRY_SECS}]
+    assert held == [folder]
+    assert held.threads[0] is not threading.main_thread()
+    # The dialog over the main window, once, with the translated title.
+    assert [call[:2] for call in calls] == [(window, QCoreApplication.translate(
+        "app", "Select a game folder to import"))]
+    assert "private-folder" not in json.dumps(answers)
+    assert "private-folder" not in "\n".join(lines)
+
+
+def test_the_folder_dialog_opens_on_the_documents_not_the_working_folder(
+        qapp, monkeypatch, tmp_path, pickLane):
+    from qtpy.QtCore import QStandardPaths
+
+    from src import AutonaShellOperations as ShellModule
+
+    monkeypatch.chdir(tmp_path)
+    calls = _folderDialog(monkeypatch, "")
+    _pickService(monkeypatch)
+    _pick(_operations(_WindowStandIn()))
+    documents = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation)
+    expected = documents if documents and Path(documents).is_dir() \
+        else str(Path.home())
+    assert [call[2] for call in calls] == [expected]
+    assert calls[0][2] != str(tmp_path)
+
+    # No Documents folder: the home folder.
+    monkeypatch.setattr(ShellModule, "QStandardPaths", SimpleNamespace(
+        StandardLocation=QStandardPaths.StandardLocation,
+        writableLocation=lambda where: ""))
+    _pick(_operations(_WindowStandIn()))
+    assert calls[1][2] == str(Path.home())
+
+
+def test_a_closed_folder_dialog_holds_nothing(qapp, monkeypatch, pickLane):
+    calls = _folderDialog(monkeypatch, "")
+    held = _pickService(monkeypatch)
+
+    returned, answers = _pick(_operations(_WindowStandIn()))
+
+    assert returned == {"ok": True, "status": "cancelled", "pick": None,
+                        "games": [], "conflicts": [], "expiresInSec": 0}
+    assert len(calls) == 1 and held == []
+    assert pickLane.executor.queued() == 0
+    pickLane.settle()
+    assert answers == []
+
+
+def test_no_folder_dialog_before_the_window_and_the_service(
+        qapp, monkeypatch, pickLane):
+    from src.core import AssetPackService as assets
+
+    calls = _folderDialog(monkeypatch, "C:/x")
+    _pickService(monkeypatch)
+    assert _pick(_operations())[0] == {"ok": False, "error": "not_ready"}
+    monkeypatch.setattr(assets.AssetPackService, "instance", None)
+    assert _pick(_operations(_WindowStandIn()))[0] == {
+        "ok": False, "error": "not_ready"}
+    assert calls == []
+
+
+def test_pick_folder_needs_somewhere_to_answer(qapp, monkeypatch):
+    calls = _folderDialog(monkeypatch, "C:/x")
+    with pytest.raises(TypeError):
+        _operations(_WindowStandIn()).ShellRequest("pickFolder", {})
+    assert calls == []
+
+
+def test_no_folder_dialog_nor_probe_once_the_app_is_shutting_down(
+        qapp, monkeypatch, tmp_path, pickLane):
+    # Not while it shuts down: no dialog; the shutdown begun while the
+    # dialog was open: no probe; begun before the probe ran: nothing held.
+    folder = str(tmp_path / "games")
+    operations = _operations(_WindowStandIn())
+    held = _pickService(monkeypatch)
+
+    pickLane.executor.stopping.set()
+    calls = _folderDialog(monkeypatch, folder)
+    assert _pick(operations)[0] == {"ok": False, "error": "unavailable"}
+    assert calls == []
+    pickLane.executor.stopping.clear()
+
+    def shutDownMeanwhile():
+        pickLane.executor.stopping.set()
+        return folder
+
+    _folderDialog(monkeypatch, shutDownMeanwhile)
+    assert _pick(operations)[0] == {"ok": False, "error": "unavailable"}
+    assert pickLane.executor.queued() == 0
+    pickLane.executor.stopping.clear()
+
+    calls = _folderDialog(monkeypatch, folder)
+    returned, answers = _pick(operations)
+    assert returned is None and pickLane.executor.queued() == 1
+    pickLane.executor.stopping.set()
+    pickLane.settle()
+    assert held == []
+    assert answers == [{"ok": False, "error": "unavailable"}]
+    # The request is over: the next one is not "busy".
+    pickLane.executor.stopping.clear()
+    _folderDialog(monkeypatch, "")
+    assert _pick(operations)[0]["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("code", ["no_game", "not_a_folder", "bad_name"])
+def test_a_folder_core_refuses_answers_its_code_alone(
+        qapp, monkeypatch, tmp_path, pickLane, code):
+    from src.core.AssetPackService import AssetPackError
+
+    folder = str(tmp_path / "private-folder-7Q")
+
+    def refuse(path):
+        raise AssetPackError(code, f"refused: {path}")
+
+    _folderDialog(monkeypatch, folder)
+    _pickService(monkeypatch, refuse)
+    lines, stop = _loguru()
+    try:
+        _returned, answers = _pick(_operations(_WindowStandIn()))
+        pickLane.settle()
+    finally:
+        stop()
+
+    assert answers == [{"ok": False, "error": code}]
+    assert "private-folder" not in "\n".join(lines)
+
+
+def test_a_folder_that_cannot_be_read_fails_without_its_path(
+        qapp, monkeypatch, tmp_path, pickLane):
+    folder = str(tmp_path / "private-folder-7Q")
+
+    def broken(path):
+        raise PermissionError(13, "denied", path)
+
+    _folderDialog(monkeypatch, folder)
+    _pickService(monkeypatch, broken)
+    lines, stop = _loguru()
+    try:
+        _returned, answers = _pick(_operations(_WindowStandIn()))
+        pickLane.settle()
+    finally:
+        stop()
+
+    assert answers == [{"ok": False, "error": "failed"}]
+    text = "\n".join(lines)
+    assert "private-folder" not in text and "PermissionError" in text
+
+
+def test_one_folder_request_at_a_time(qapp, monkeypatch, tmp_path,
+                                      pickLane):
+    # The dialog runs an event loop of its own: a pickFolder that reaches
+    # the shell meanwhile is answered busy and opens no second dialog; so
+    # is one while the folder picked is probed (two probes could hold the
+    # older pick last).
+    operations = _operations(_WindowStandIn())
+    inner = []
+
+    def whileOpen():
+        inner.append(_pick(operations)[0])
+        return str(tmp_path)
+
+    calls = _folderDialog(monkeypatch, whileOpen)
+    _pickService(monkeypatch)
+
+    returned, answers = _pick(operations)
+    assert returned is None
+    assert inner == [{"ok": False, "error": "busy"}]
+    assert _pick(operations)[0] == {"ok": False, "error": "busy"}
+    assert len(calls) == 1
+    pickLane.settle()
+    assert answers[0]["status"] == "picked"
+    # Answered: the next one opens.
+    _folderDialog(monkeypatch, "")
+    assert _pick(operations)[0]["status"] == "cancelled"
+
+
+def test_a_folder_dialog_that_raises_does_not_keep_the_shell_busy(
+        qapp, monkeypatch, pickLane):
+    operations = _operations(_WindowStandIn())
+
+    def broken():
+        raise RuntimeError("no dialog")
+
+    _folderDialog(monkeypatch, broken)
+    _pickService(monkeypatch)
+    with pytest.raises(RuntimeError):
+        _pick(operations)
+    _folderDialog(monkeypatch, "")
+    assert _pick(operations)[0]["status"] == "cancelled"
+
+
+def test_only_the_shells_pick_opens_a_native_folder_dialog():
+    # The one QFileDialog of src/ (ADR-005: new Qt UI is not added): the
+    # shell request pickFolder's, run from the event loop by the host.
+    from tests.conftest import PROJECT_ROOT
+
+    users = []
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == "QFileDialog" \
+                    and isinstance(node.ctx, ast.Load):
+                owner = node
+                while owner in parents and not isinstance(
+                        owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owner = parents[owner]
+                name = owner.name if isinstance(
+                    owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+                users.append((path.relative_to(PROJECT_ROOT).as_posix(),
+                              name))
+    assert users == [("src/AutonaShellOperations.py", "_PickFolder")]
 
 
 def test_the_page_and_the_view_agree_on_the_shell_requests():

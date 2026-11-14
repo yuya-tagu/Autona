@@ -12,7 +12,7 @@ import {
 import i18n from "../i18n/config";
 import {PANELS} from "../PanelShell/registry";
 import {useShellAccess} from "../PanelShell/useShellAccess";
-import {hasShellSession} from "../PanelShell/hostApi";
+import {hasShellSession, receiveShellResult} from "../PanelShell/hostApi";
 import {PanelShellContext} from "../PanelShell/context";
 import AssetsPage from "./index";
 import {MAX_UPLOAD_BYTES, SOURCE_URL, humanSize} from "./assetsApi";
@@ -20,8 +20,10 @@ import {MAX_UPLOAD_BYTES, SOURCE_URL, humanSize} from "./assetsApi";
 // The game assets page (ADR-005 S-final SF-4b-2): the Qt dialog
 // AutonaGameAssetGuideWindow as /web/assets. In the desktop's shared view
 // (GET /api/v1/shell-session answers 200, SF-5a-1; the access token is never
-// read) it lists the upstream packs, installs them and imports a ZIP as jobs;
-// in a browser (403) it only explains and links the source.
+// read) it lists the upstream packs, installs them and imports a ZIP -- or a
+// folder the desktop's dialog picked (SF-5a-2: the shell request
+// pickFolder) -- as jobs; in a browser (403) it only explains and links the
+// source.
 
 jest.setTimeout(20000);
 
@@ -140,6 +142,7 @@ function freshServer() {
         job: ok(200, job()),
         install: null,
         importZip: null,
+        importFolder: null,
         cancel: ok(200, {cancelled: true}),
         revision: 0,
     };
@@ -205,6 +208,17 @@ beforeEach(() => {
                     operation: "importZip", stage: "copy", done: 3,
                     total: 10});
             return ok(202, {accepted: true, operation: "importZip",
+                            job: server.revision});
+        }
+        if (method === "POST" && pathname === "/api/v1/assets:importFolder") {
+            if (server.importFolder) {
+                return server.importFolder;
+            }
+            server.revision += 1;
+            setJob({revision: server.revision, status: "running",
+                    operation: "importFolder", stage: "copy", done: 1,
+                    total: 4});
+            return ok(202, {accepted: true, operation: "importFolder",
                             job: server.revision});
         }
         if (method === "POST" && pathname === "/api/v1/assets/job:cancel") {
@@ -326,6 +340,9 @@ test("elsewhere it explains and links the source, reading nothing", async () => 
     expect(screen.queryByRole("button", {name: i18n.t("assets_open_folder")}))
         .toBeNull();
     expect(screen.queryByRole("button", {name: i18n.t("assets_zip_choose")}))
+        .toBeNull();
+    expect(screen.queryByRole("button",
+                              {name: i18n.t("assets_folder_choose")}))
         .toBeNull();
     // Nothing of the lists or the job is asked for.
     expect(calls("GET", "/api/v1/assets/packs")).toHaveLength(0);
@@ -875,12 +892,207 @@ test("a ZIP the server cannot read says so", async () => {
     expect(screen.getByText(i18n.t("assets_error_not_a_zip"))).toBeTruthy();
 });
 
-test("the folder import is gone and the page says to make a ZIP", async () => {
+// ── the folder import (SF-5a-2) ───────────────────────────────────────
+
+// The shell requests the page opened (window.open in the click).
+function spyOpen() {
+    const opened = [];
+    jest.spyOn(window, "open").mockImplementation((...args) => {
+        opened.push(args);
+        return null;
+    });
+    return opened;
+}
+
+function clickFolder() {
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("assets_folder_choose")}));
+}
+
+// The desktop's answer to the last pickFolder the page asked for.
+async function answerPick(opened, result) {
+    const [url] = opened[opened.length - 1];
+    const id = new URL(url).searchParams.get("request");
+    await act(async () => receiveShellResult(id, result));
+    await settle();
+}
+
+const PICKED = {ok: true, status: "picked", pick: "pick-1", games: ["ssbu"],
+                conflicts: [], expiresInSec: 900};
+
+test("the folder import asks the desktop in the click itself", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+
+    // Opened before anything is awaited: the desktop takes a window opened
+    // by a click only.
+    expect(opened).toHaveLength(1);
+    const [url, target, features] = opened[0];
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe(window.location.origin);
+    expect(parsed.pathname).toBe("/web/shell-request");
+    expect(Object.fromEntries(parsed.searchParams)).toEqual({
+        verb: "pickFolder", request: expect.any(String), ticket: TICKET});
+    expect(target).toBe("_blank");
+    expect(features).toBe("noopener");
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+});
+
+test("a picked folder with no installed game is imported by its pick", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, PICKED);
+
+    const [call] = calls("POST", "/api/v1/assets:importFolder");
+    expect(body(call)).toEqual({pick: "pick-1"});
+    await screen.findByRole("region", {name: i18n.t("assets_job_title")});
+    // Nothing to drop: the desktop holds the pick.
+    expect(calls("DELETE", "/api/v1/assets/uploads/pick-1")).toHaveLength(0);
+    expect(xhrs).toHaveLength(0);
+});
+
+test("a picked folder with installed games asks which to overwrite", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, {...PICKED, games: ["ssbu", "new"],
+                              conflicts: ["ssbu"]});
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(i18n.t("assets_overwrite_folder_games", {
+        games: "ssbu, new"}))).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", {name: "ssbu"}));
+    fireEvent.click(within(dialog).getByRole("button",
+                                             {name: i18n.t("assets_import")}));
+    await settle();
+
+    const [call] = calls("POST", "/api/v1/assets:importFolder");
+    expect(body(call)).toEqual({pick: "pick-1", overwrite: ["ssbu"],
+                                confirm: true});
+});
+
+test("declining the overwrite of a pick imports and drops nothing", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, {...PICKED, conflicts: ["ssbu"]});
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button",
+                                             {name: i18n.t("assets_cancel")}));
+    await settle();
+
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+    expect(global.fetch.mock.calls.filter(
+        ([, init]) => init?.method === "DELETE")).toHaveLength(0);
+    expect(screen.getByText(i18n.t("assets_nothing_imported"))).toBeTruthy();
+});
+
+test("a closed folder dialog does nothing", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, {ok: true, status: "cancelled", pick: null,
+                              games: [], conflicts: [], expiresInSec: 0});
+
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test.each([
+    ["busy", "assets_folder_busy"],
+    ["not_ready", "assets_folder_not_ready"],
+    ["unavailable", "assets_folder_closing"],
+    ["no_session", "assets_folder_unavailable"],
+    ["no_game", "assets_error_no_game"],
+    ["bad_name", "assets_error_bad_name"],
+    ["not_a_folder", "assets_error_not_a_folder"],
+    ["failed", "assets_error_failed"],
+])("the desktop's refusal %s says why", async (code, key) => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, {ok: false, error: code});
+
+    expect(screen.getByText(i18n.t(key))).toBeTruthy();
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+});
+
+test("a pick the desktop no longer holds says to choose again", async () => {
+    server.importFolder = refuse(404, "NOT_FOUND", "unknown_pick");
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, PICKED);
+
+    expect(await screen.findByText(i18n.t("assets_error_unknown_pick")))
+        .toBeTruthy();
+});
+
+test("the answer to an older folder request is not used", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    const [first] = opened[0];
+    clickFolder();
+    // The older one was superseded: its answer, if one came, is dropped.
+    const oldId = new URL(first).searchParams.get("request");
+    await act(async () => receiveShellResult(oldId, PICKED));
+    await settle();
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await answerPick(opened, {...PICKED, pick: "pick-2"});
+    const [call] = calls("POST", "/api/v1/assets:importFolder");
+    expect(body(call)).toEqual({pick: "pick-2"});
+});
+
+test("a folder picked once the page is gone imports nothing", async () => {
+    const view = await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+
+    // The page went away with the dialog still open; the operator picks.
+    view.unmount();
+    await answerPick(opened, PICKED);
+
+    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
+});
+
+test("the overwrite dialog of a pick closes when it expires", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    jest.useFakeTimers();
+    try {
+        await answerPick(opened, {...PICKED, conflicts: ["ssbu"],
+                                  expiresInSec: 30});
+        expect(screen.queryByRole("dialog")).not.toBeNull();
+
+        await act(async () => {
+            jest.advanceTimersByTime(31 * 1000);
+        });
+        await settle();
+
+        expect(screen.getByText(i18n.t("assets_folder_expired"))).toBeTruthy();
+        expect(global.fetch.mock.calls.filter(
+            ([, init]) => init?.method === "DELETE")).toHaveLength(0);
+    } finally {
+        jest.useRealTimers();
+    }
+});
+
+test("the note says a ZIP or a folder can be imported", async () => {
     await renderShell();
 
-    expect(screen.queryByRole("button", {name: /import from folder/i})).toBeNull();
     expect(screen.getByText(i18n.t("assets_zip_note"))).toBeTruthy();
-    expect(i18n.t("assets_zip_note")).toContain("ZIP");
+    for (const language of ["en", "ja"]) {
+        const note = i18n.getFixedT(language)("assets_zip_note");
+        expect(note).toContain("ZIP");
+        expect(note).not.toMatch(/future update|今後のアップデート/);
+    }
 });
 
 // ── the rest ───────────────────────────────────────────────────────────

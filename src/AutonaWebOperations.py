@@ -804,6 +804,15 @@ def import_asset_upload(uploadId, overwrite):
     return AssetPackService.instance.ImportUpload(uploadId, overwrite)
 
 
+# The folder the shell's pickFolder held (SF-5a-2): named by its id only.
+def asset_folder_pick_games(pick):
+    return AssetPackService.instance.FolderPickGames(pick)
+
+
+def import_asset_folder_pick(pick, overwrite):
+    return AssetPackService.instance.ImportFolderPick(pick, overwrite)
+
+
 def install_asset_packs(game, packs):
     # The cached index (the page has listed the packs from it): no fetch on
     # a write.

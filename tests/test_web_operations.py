@@ -2405,6 +2405,7 @@ _NOT_200 = {
     ("api_v1.upload_assets_zip", None): 403,
     ("api_v1.drop_asset_upload", None): 403,
     ("api_v1.import_assets_zip", None): 403,
+    ("api_v1.import_assets_folder", None): 403,
     ("api_v1.install_asset_packs", None): 403,
     ("api_v1.cancel_assets_job", None): 403,
     ("api_v1.reveal_games_folder", None): 403,
