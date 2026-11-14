@@ -1122,5 +1122,6 @@
     "app_shell_failed": "The desktop app did not answer. Try again.",
     "app_shell_unavailable": "This works only inside the Autona desktop app.",
     "app_shell_not_done": "The desktop app could not do it. Try again.",
-    "app_tournament_no_word": "The load was accepted, but no word of how it went has arrived. Check the connection and the Tournament Info page."
+    "app_tournament_no_word": "The load was accepted, but no word of how it went has arrived. Check the connection and the Tournament Info page.",
+    "app_tournament_load_failed": "The tournament could not be loaded. Set it again to retry."
 }

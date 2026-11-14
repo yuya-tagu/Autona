@@ -360,7 +360,8 @@ test("a set / clear of another writer's shows as it goes", async () => {
     expect(textbox("event_url")).toHaveValue(OTHER_URL);
     expect(within(card).getByRole("status"))
         .toHaveTextContent(i18n.t("event_status_resolving"));
-    expect(button(card, "event_set")).toBeDisabled();
+    // Not this page's: the buttons stay (the server replaces the older load).
+    expect(button(card, "event_set")).toBeEnabled();
 });
 
 test("another writer's URL drops what was typed over the old one", async () => {
@@ -586,6 +587,14 @@ test("a game is chosen by its codename", async () => {
     await settle();
 
     expect(writes("POST", "/api/v1/game")).toEqual([{codename: "sf6"}]);
+});
+
+test("a game not selected (the tournament unset) is shown as none", async () => {
+    setState({}, {codename: "ssbu", selected: false});
+    await renderPage();
+
+    expect(screen.getByRole("combobox", {name: i18n.t("event_game")}))
+        .toHaveTextContent(i18n.t("event_game_none"));
 });
 
 test("no game is shown as none", async () => {

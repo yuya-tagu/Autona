@@ -124,19 +124,25 @@ export function useUrlField(url: string): [string, (text: string | null) => void
     return [draft ?? url, setDraft];
 }
 
-export function TournamentCard({url, load, waiting, setTournament, clear}: {
+export function TournamentCard({url, load, waiting, sent, setTournament,
+                                clear}: {
     // tournamentInfo.url: the URL last set ("" none).
     url: string;
     load: TournamentLoad;
     // A set / clear of this page's not in the state yet.
     waiting: boolean;
+    // The revision of tournamentInfo.load this page's last set / clear was
+    // published at (null: none): only a load running at that revision holds
+    // the buttons; another's does not (the server replaces the older one).
+    sent: number | null;
     setTournament: (url: string, flags: {force?: boolean;
                                          fetchMedia?: boolean}) => void;
     clear: () => void;
 }) {
     const [shown, type] = useUrlField(url);
     const [confirming, setConfirming] = React.useState(false);
-    const busy = waiting || BUSY_STATUSES.has(load.status);
+    const busy = waiting || (sent !== null && load.revision === sent
+                             && BUSY_STATUSES.has(load.status));
     const typed = shown.trim();
     const text = statusText(load);
 

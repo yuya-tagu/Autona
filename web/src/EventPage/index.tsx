@@ -72,7 +72,9 @@ interface EventState {
         url?: unknown;
         load?: Partial<TournamentLoad>;
     };
-    game?: {codename?: string | null};
+    // selected: false once the tournament is unset (the codename stays);
+    // missing on an older server.
+    game?: {codename?: string | null; selected?: boolean};
 }
 
 function version(value: unknown): number {
@@ -127,6 +129,9 @@ function EventContent() {
     // never comes does not hold the buttons for ever).
     const [requesting, setRequesting] = React.useState(false);
     const [awaiting, setAwaiting] = React.useState<number | null>(null);
+    // The revision of the last one's answer (kept after the state reached
+    // it): the load the buttons stay busy for while it runs.
+    const [sent, setSent] = React.useState<number | null>(null);
     // A refusal for want of the access token (another computer opened the
     // page without it) is told once: every write after it is refused too.
     const toldToken = React.useRef(false);
@@ -254,6 +259,7 @@ function EventContent() {
             const revision = (JSON.parse(text) as
                 Envelope<{loadRevision?: unknown}>).data?.loadRevision;
             setAwaiting(typeof revision === "number" ? revision : null);
+            setSent(typeof revision === "number" ? revision : null);
             setRequesting(false);
         }, () => {
             if (mounted.current) {
@@ -400,13 +406,15 @@ function EventContent() {
                     url={url}
                     load={load}
                     waiting={requesting || awaiting !== null}
+                    sent={sent}
                     setTournament={setTournament}
                     clear={clearTournament}
                 />
                 <InfoCard
                     info={info}
                     games={games}
-                    game={game?.codename ?? ""}
+                    game={game?.selected === false ? ""
+                        : game?.codename ?? ""}
                     sendField={sendField}
                     chooseGame={chooseGame}
                     refuseEntrants={refuseEntrants}
