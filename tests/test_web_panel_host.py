@@ -142,18 +142,24 @@ def _record(server, handler):
                      headers.get("Origin")))
 
 
-# The panel server hands the access token's routes to the real app when a
-# test puts its Flask test client here (test_the_guard_takes_the_shared_
-# views_fetch_as_the_shells): the engine's own request, through the real
-# _guard_http_request.
+# The panel server hands the access token's routes and the asset upload to
+# the real app when a test puts its Flask test client here (test_the_guard_
+# takes_the_shared_views_fetch_as_the_shells, test_the_shared_views_xhr_
+# uploads_a_zip_as_its_bytes): the engine's own request, through the real
+# _guard_http_request. RELAY["sent"], when a test puts a list there: each
+# relayed request's (path, Content-Length, Transfer-Encoding) as it came.
 RELAY = {}
-RELAY_PREFIX = "/api/v1/access-token"
+RELAY_PREFIX = ("/api/v1/access-token", "/api/v1/assets/uploads")
 
 
 def _relayed(handler, body=b""):
     client = RELAY.get("client")
     if client is None or not handler.path.startswith(RELAY_PREFIX):
         return False
+    if "sent" in RELAY:
+        RELAY["sent"].append((handler.path,
+                              handler.headers.get("Content-Length"),
+                              handler.headers.get("Transfer-Encoding")))
     port = handler.server.server_address[1]
     headers = [(name, value) for name, value in handler.headers.items()
                if name.lower() not in ("host", "content-length")]
@@ -1273,6 +1279,69 @@ def test_the_guard_takes_the_shared_views_fetch_as_the_shells(buildHost,
         other.deleteLater()
         QCoreApplication.sendPostedEvents(other, QEvent.Type.DeferredDelete)
     assert _seen("/api/v1/access-token") == [WebAccess._shellSecret, None]
+
+
+def test_the_shared_views_xhr_uploads_a_zip_as_its_bytes(buildHost,
+                                                         monkeypatch,
+                                                         tmp_path):
+    # SF-4b-1: the page sends the ZIP as an XHR's Blob. It reaches the real
+    # route (the panel server relays it, as werkzeug would serve it) with a
+    # Content-Length -- the route refuses a chunked body unread -- and the
+    # shell's secret, its file name percent-encoded: held, 201.
+    import base64
+    import io
+    import zipfile
+
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaWebServer import WebServer, _build_web_app
+    from src.core.AssetPackService import AssetPackService
+
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
+    monkeypatch.setattr(SettingsManager, "loadFailed", False)
+    monkeypatch.setattr(WebAccess, "_token", None)
+    monkeypatch.setattr(WebServer, "_lan_hosts", ("192.0.2.10",))
+    monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
+    app, socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    monkeypatch.setattr(WebServer, "socketio", socketio)
+    monkeypatch.setitem(RELAY, "client", app.test_client())
+    monkeypatch.setitem(RELAY, "sent", [])
+    service = AssetPackService()
+    monkeypatch.setattr(AssetPackService, "instance", service)
+
+    rig = _shown(buildHost)
+    # The upload lands under user_data/ of the working directory.
+    monkeypatch.chdir(tmp_path)
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w") as z:
+        z.writestr("base_files/config.json", json.dumps({"name": "X"}))
+        z.writestr("full/config.json", "{}")
+    data = packed.getvalue()
+    rig.js("window.__upload = null, (function () {"
+           f" var raw = atob({json.dumps(base64.b64encode(data).decode())}),"
+           "   bytes = new Uint8Array(raw.length);"
+           " for (var i = 0; i < raw.length; i++)"
+           "   bytes[i] = raw.charCodeAt(i);"
+           " var x = new XMLHttpRequest();"
+           " x.open('POST', '/api/v1/assets/uploads');"
+           " x.setRequestHeader('X-Autona-File-Name',"
+           f"   encodeURIComponent({json.dumps('Ünï game.zip')}));"
+           " x.onload = function () {"
+           "   window.__upload = [x.status, JSON.parse(x.responseText)]; };"
+           " x.onerror = function () { window.__upload = ['error']; };"
+           " x.send(new Blob([bytes], {type: 'application/zip'}));"
+           " })(), 0")
+    assert _waitUntil(lambda: rig.js("window.__upload"))
+    status, body = rig.js("window.__upload")
+    assert status == 201, body
+    assert body["data"]["games"] == ["Ünï game"]
+    assert body["data"]["conflicts"] == []
+    assert RELAY["sent"] == [
+        ("/api/v1/assets/uploads", str(len(data)), None)]
+    assert _seen("/api/v1/assets/uploads") == [WebAccess._shellSecret]
+    assert len(list(
+        (tmp_path / "user_data" / ".autona-uploads").iterdir())) == 1
 
 
 def test_a_redirect_away_does_not_carry_the_secret(buildHost, frameServer,

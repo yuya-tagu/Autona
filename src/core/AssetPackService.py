@@ -11,8 +11,9 @@ SF-3b all of it was the "Add game assets" window's own
 (src/AutonaGameAssetGuideWindow.py: two QThreads, the copy and the ZIP
 extraction on the GUI thread); here it is core's, so the React page that
 replaces the window (SF-4b, /web/assets) can do it in either shell, and the
-window calls this until then. v1 reads the list and the last job's state;
-the jobs come to v1 with SF-4b (see Safety).
+window calls this until then. v1 reads the list and the last job's state,
+and since SF-4b-1 starts and cancels the jobs and takes the ZIP upload (see
+Safety).
 
 Only the packs the app uses are offered or installed (ADR-002):
 ``ALLOWED_PACKS``, the same rule for every title. A download fetches only
@@ -79,12 +80,37 @@ the headless loader's -- SF-6 makes it the core GameLoader's), which tells
 the game selector and the web server (``games_changed``) as the startup
 scan does.
 
+The upload
+----------
+The page cannot hand a path to the server (the browser does not give one),
+so it sends the ZIP's bytes (v1 POST /assets/uploads; SF-4b-1).
+``ReceiveUpload`` reads them on the web server's thread, a chunk at a time,
+into ``UPLOADS_DIR`` -- user_data/.autona-uploads, not served (the games
+folder is) -- after checking the free space, probes the file as an import
+does and holds it: one upload at a time, a new one replacing it (and one
+still arriving) at its start, under an id (``secrets.token_urlsafe``) for
+``UPLOAD_EXPIRY_SECS``. ``ImportUpload`` takes it out and hands it to
+``ImportZip(removeAfter=True)``, which removes it when the job ends (or
+when the import is refused); a job started while it was probed (BUSY)
+leaves it, and ``ImportUpload`` holds it again under its id, its expiry
+unchanged. ``DropUpload`` removes it. Past its expiry it is no longer answered, and
+is removed when the slot is next looked at (a newer upload, a lookup under
+any id) or at the next start: no timer thread (the threads beside the
+executor are a fixed list, tests/test_task_executor.py). A receive that fails
+removes what it wrote. What a process left there when it ended is removed
+by ``RemoveStaleUploads`` at each shell's first scan. Neither the path nor
+the client's file name is answered or logged.
+
 Safety
 ------
 - An archive is read before anything is extracted: every name must be a
   relative path below the staging folder (no absolute path, drive, ``..``
   or ``:``), no symbolic link or junction, at most ``MAX_ENTRIES`` entries
   and ``MAX_UNPACKED_BYTES`` unpacked; a refused archive writes nothing. A
+  ZIP's central directory is checked from its end records before zipfile
+  reads it (``_CheckCentralDirectory``: entries, at most
+  ``MAX_CENTRAL_DIRECTORY_BYTES``, inside the file), since zipfile reads it
+  whole and makes an object of every entry first. A
   7z (the upstream packs) is refused for any name Windows cannot write
   too; a ZIP entry that stays inside but is no such name (a refused or
   control character, a trailing dot / space, a device name) is left out
@@ -99,30 +125,41 @@ Safety
 - Game folder names and the index's file names are checked
   (``SafeName``; the index's file names are plain names, no leading dot,
   none named as a pack's merged ``<pack>.7z``).
-- Who may read what is the web layer's (src/core/WebAccess.py: the list
-  and the last job's state are THIS_PC -- the list may fetch from GitHub,
-  which a LAN device or the preview listener must not set off; the index's
-  error is a code, its text logged alone). The jobs are not in v1: THIS_PC also
-  lets this origin's layout/ pages through, which could replace or remove
-  installed games, download gigabytes and copy (or probe) this PC's folders
-  into the LAN-served user_data/games. SF-4b brings them under the secret
-  the shell hands only to the shared view's main frame.
+- Who may read what is the web layer's (src/core/WebAccess.py: the list is
+  THIS_PC -- it may fetch from GitHub, which a LAN device or the preview
+  listener must not set off; the index's error is a code, its text logged
+  alone). The jobs, their state (its messages may name a path), the upload
+  and the games folder's reveal are SHELL (SF-4b-1): THIS_PC also lets this
+  origin's layout/ pages through, which could replace or remove installed
+  games, download gigabytes or fill the disk; the secret is the shell's,
+  handed only to the shared view's main frame, so headless has none of
+  them. The API answers a refusal's code, never its message.
+- A folder import is not in v1 (a page cannot name a folder; SF-5a's
+  folder picker brings it back): the window's alone until then.
 
 Lock order: this service's ``_lock`` guards its own fields only; nothing is
 called with it held (no scan, no StatusService, no executor). The scan runs
 on the job's thread with no lock of ours but ``_filesLock``, which a job
 holds for its whole run (``_Run``) and ``RestoreReplaced`` takes without
 waiting (it never runs a scan); it is never taken with ``_lock`` held.
+An upload is received, probed and removed with no lock of ours (``_lock``
+only to read and swap the slot).
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
 (agent-pitfalls #1). ``AssetPackService.instance`` is built by
 ``bootstrap_core()``; the shells set its ``scan`` and call its
-``RestoreReplaced`` on their first scan job, before scanning.
+``RestoreReplaced`` and ``RemoveStaleUploads`` on their first scan job,
+before scanning. The upload's expiry is read off ``time.monotonic()`` when
+the slot is looked at (``_HeldUpload``); nothing runs when it passes.
 """
+import hmac
 import os
 import re
+import secrets
 import shutil
 import stat
+import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -170,6 +207,10 @@ INDEX_MIN_REFRESH_SECS = 5
 MAX_DOWNLOAD_BYTES = 8 * 1024 ** 3
 MAX_UNPACKED_BYTES = 8 * 1024 ** 3
 MAX_ENTRIES = 200_000
+# A ZIP's central directory is read whole by zipfile.ZipFile() (and each
+# entry becomes an object) before _ZipPlan can count the entries: it is
+# checked first, from the end records, against these (_CheckCentralDirectory).
+MAX_CENTRAL_DIRECTORY_BYTES = 64 * 1024 * 1024
 # Kept free on the disk on top of what a step writes.
 DISK_MARGIN_BYTES = 64 * 1024 * 1024
 # How many left-out ZIP entries a job lists by name (the rest are counted).
@@ -186,6 +227,18 @@ REPLACED_PREFIX = ".autona-replaced-"
 # never put back (it may be partly removed already); written before the
 # copy is removed and removed last, so what is left is removed again.
 DISCARD_MARKER = ".autona-discard"
+# The upload (SF-4b-1): the ZIP the shared view's page sends, held until it is
+# imported, dropped or expires. Outside user_data/games, which is served to
+# the LAN (WebAccess.STATIC_DIRECTORIES), and not a staging folder (a job's
+# start removes those). One at a time: a new upload replaces the held one.
+UPLOADS_DIR = "./user_data/.autona-uploads/"
+UPLOAD_PREFIX = "upload-"
+MAX_UPLOAD_BYTES = MAX_UNPACKED_BYTES
+UPLOAD_EXPIRY_SECS = 15 * 60
+UPLOAD_CHUNK = 1024 * 1024
+# An upload's id: secrets.token_urlsafe(16), checked by shape before it is
+# compared.
+_UPLOAD_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 STATUS_CODE = "assets_load"
 # A move's retries, as StatePersistence's (a reader without
 # FILE_SHARE_DELETE -- an antivirus scan, an indexer -- makes os.replace fail
@@ -244,6 +297,13 @@ EXTRACT_FAILED = "extract_failed"
 COPY_FAILED = "copy_failed"
 DISK_FULL = "disk_full"
 FAILED = "failed"
+# The upload's: no upload held by that id (never sent, imported, dropped,
+# replaced by a newer one or expired); one whose body did not arrive whole
+# (the client went away or sent less); one a newer upload replaced while it
+# arrived.
+UNKNOWN_UPLOAD = "unknown_upload"
+INCOMPLETE = "incomplete"
+SUPERSEDED = "superseded"
 
 # The index's file names: plain names, nothing a path or a URL could read
 # more into (no leading dot: not "." nor "..").
@@ -258,7 +318,9 @@ _BAD_CHARS = frozenset('<>:"|?*\x00')
 class AssetPackError(Exception):
     """A start or a probe refused: ``code`` (the constants above), and
     ``names`` for NEEDS_CONFIRMATION (the installed games it would
-    replace). ``message`` is English, for the logs and the API's error."""
+    replace). ``message`` is English, for the logs and the window; the API
+    answers the code (``error.reason``) and its own fixed words, never the
+    message (it may name a path or the archive's entries)."""
 
     def __init__(self, code, message, names=()):
         super().__init__(message)
@@ -379,6 +441,37 @@ def _IsLink(path):
 
 def _GamesRoot():
     return os.path.abspath(GAMES_DIR)
+
+
+def _UploadsRoot():
+    return os.path.abspath(UPLOADS_DIR)
+
+
+def RevealGamesFolder():
+    """Open user_data/games (made first when missing) in this PC's file
+    manager: v1's games-folder:reveal, which takes no path. False when it
+    is not shown (logged); a file manager that cannot be started raises
+    OSError. As LayoutCatalog.RevealBoardFile: explorer by its full path
+    (by name Windows looks in the working directory first), the path in
+    quotes (explorer splits its command line at commas), no shell."""
+    path = _GamesRoot()
+    os.makedirs(path, exist_ok=True)
+    if sys.platform.startswith("win"):
+        # NTFS refuses a double quote in a name; one here could close the
+        # quotes below.
+        if '"' in path:
+            logger.warning("Asset packs: the games folder is not shown")
+            return False
+        windows = os.environ.get("WINDIR")
+        if not windows:
+            raise OSError("WINDIR is not set")
+        explorer = os.path.join(windows, "explorer.exe")
+        subprocess.Popen(f'"{explorer}" "{path}"')
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+    return True
 
 
 def _Int(value):
@@ -523,20 +616,163 @@ def ZipNameHint(fileName):
     return stem or None
 
 
+# The ZIP end records, as zipfile reads them (APPNOTE 4.3.14-4.3.16): the
+# end of central directory record, the ZIP64 locator just before it and the
+# ZIP64 end record just before that.
+_EOCD = b"PK\x05\x06"
+_EOCD_FORMAT = "<4s4H2LH"
+_EOCD_SIZE = struct.calcsize(_EOCD_FORMAT)                      # 22
+_LOCATOR = b"PK\x06\x07"
+_LOCATOR_FORMAT = "<4sLQL"
+_LOCATOR_SIZE = struct.calcsize(_LOCATOR_FORMAT)                # 20
+_EOCD64 = b"PK\x06\x06"
+_EOCD64_FORMAT = "<4sQ2H2L4Q"
+_EOCD64_SIZE = struct.calcsize(_EOCD64_FORMAT)                  # 56
+_CENTRAL_HEADER = b"PK\x01\x02"
+_CENTRAL_HEADER_SIZE = 46
+# The name, extra field and comment lengths in a central header.
+_CENTRAL_LENGTHS_AT = 28
+_MAX_COMMENT = (1 << 16) - 1
+
+
+def _EndRecord(f, size):
+    """(entries, directory size, directory offset, where the record starts,
+    ZIP64) of a ZIP's end records, found where zipfile finds them
+    (zipfile._EndRecData / _EndRecData64, Python 3.12): the record in the
+    last 22 bytes when it has no comment, else the last signature in the
+    last 65,557 bytes (ZIP_MAX_COMMENT, 65,535, and the record's 22); the
+    ZIP64 record just before its locator. None when there is none;
+    AssetPackError NOT_A_ZIP where zipfile refuses (a ZIP split over disks,
+    a ZIP64 locator with no room for its record before it). The two are
+    compared on crafted ZIPs in tests/test_asset_packs.py."""
+    record = None
+    if size >= _EOCD_SIZE:
+        f.seek(size - _EOCD_SIZE)
+        data = f.read(_EOCD_SIZE)
+        if (len(data) == _EOCD_SIZE and data[:4] == _EOCD
+                and data[-2:] == b"\x00\x00"):
+            record = (data, size - _EOCD_SIZE)
+    if record is None:
+        start = max(size - _MAX_COMMENT - _EOCD_SIZE, 0)
+        f.seek(start)
+        data = f.read(_MAX_COMMENT + _EOCD_SIZE)
+        at = data.rfind(_EOCD)
+        if at < 0 or len(data) - at < _EOCD_SIZE:
+            return None
+        record = (data[at:at + _EOCD_SIZE], start + at)
+    data, location = record
+    (_sig, _disk, _diskStart, _here, entries, directorySize,
+     directoryOffset, _comment) = struct.unpack(_EOCD_FORMAT, data)
+    if location < _LOCATOR_SIZE:
+        return entries, directorySize, directoryOffset, location, False
+    f.seek(location - _LOCATOR_SIZE)
+    data = f.read(_LOCATOR_SIZE)
+    if len(data) != _LOCATOR_SIZE:
+        return entries, directorySize, directoryOffset, location, False
+    sig, diskNumber, _offset, disks = struct.unpack(_LOCATOR_FORMAT, data)
+    if sig != _LOCATOR:
+        return entries, directorySize, directoryOffset, location, False
+    if diskNumber != 0 or disks > 1:
+        raise AssetPackError(NOT_A_ZIP, "a ZIP split over several disks "
+                             "cannot be read")
+    if location < _LOCATOR_SIZE + _EOCD64_SIZE:
+        # zipfile seeks before the file's start for the record: OSError,
+        # which ZipFile() answers BadZipFile.
+        raise AssetPackError(NOT_A_ZIP, "not a ZIP: a ZIP64 locator with no "
+                             "room for its record")
+    f.seek(location - _LOCATOR_SIZE - _EOCD64_SIZE)
+    data = f.read(_EOCD64_SIZE)
+    if len(data) != _EOCD64_SIZE:
+        return entries, directorySize, directoryOffset, location, False
+    (sig, _size, _made, _needed, _disk, _diskStart, _here, entries64,
+     directorySize64, directoryOffset64) = struct.unpack(_EOCD64_FORMAT, data)
+    if sig != _EOCD64:
+        return entries, directorySize, directoryOffset, location, False
+    return entries64, directorySize64, directoryOffset64, location, True
+
+
+def _CheckCentralDirectory(path):
+    """Refuse a ZIP before zipfile.ZipFile() reads it: that reads the whole
+    central directory into memory and makes an object of each entry in it
+    -- however many the end record says -- before _ZipPlan can count them.
+    From the end records (read as zipfile reads them, with struct: no
+    private zipfile API): AssetPackError TOO_LARGE when it lists more than
+    MAX_ENTRIES entries or its directory is larger than
+    MAX_CENTRAL_DIRECTORY_BYTES, NOT_A_ZIP when there is no end record or
+    the directory lies outside the file. The directory (at most that size)
+    is then walked header by header as zipfile walks it -- zipfile stops at
+    the directory's size, not at the stated count -- and refused the same
+    way for more entries or a header that is not one. No message names the
+    path."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            record = _EndRecord(f, size)
+            if record is None:
+                raise AssetPackError(NOT_A_ZIP, "not a ZIP: no end of "
+                                     "central directory record")
+            entries, directorySize, directoryOffset, location, zip64 = record
+            if entries > MAX_ENTRIES:
+                raise AssetPackError(
+                    TOO_LARGE, f"the ZIP lists more than {MAX_ENTRIES} "
+                    "entries")
+            if directorySize > MAX_CENTRAL_DIRECTORY_BYTES:
+                raise AssetPackError(
+                    TOO_LARGE, "the ZIP's central directory is larger than "
+                    f"{MAX_CENTRAL_DIRECTORY_BYTES} bytes")
+            # Where zipfile reads the directory from: just before the end
+            # records (the stated offset only says how much was prepended).
+            start = location - directorySize - (
+                _EOCD64_SIZE + _LOCATOR_SIZE if zip64 else 0)
+            if start < 0 or directoryOffset > start:
+                raise AssetPackError(NOT_A_ZIP, "not a ZIP: its central "
+                                     "directory lies outside the file")
+            f.seek(start)
+            directory = f.read(directorySize)
+    except OSError as error:
+        raise AssetPackError(
+            NOT_A_ZIP, f"not a readable ZIP: {_ErrorText(error)}") from None
+    at = 0
+    count = 0
+    while at < directorySize:
+        if count >= MAX_ENTRIES:
+            raise AssetPackError(
+                TOO_LARGE, f"the ZIP has more than {MAX_ENTRIES} entries")
+        if (len(directory) - at < _CENTRAL_HEADER_SIZE
+                or directory[at:at + 4] != _CENTRAL_HEADER):
+            raise AssetPackError(NOT_A_ZIP, "not a ZIP: a bad central "
+                                 "directory header")
+        nameLength, extraLength, commentLength = struct.unpack_from(
+            "<3H", directory, at + _CENTRAL_LENGTHS_AT)
+        at += _CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength
+        count += 1
+
+
+def _ErrorText(error):
+    # An OSError's text names the file (its path: this PC's folders, the
+    # user's name); its reason alone does not.
+    if isinstance(error, OSError):
+        return error.strerror or type(error).__name__
+    return str(error)
+
+
 def ProbeZip(path, nameHint=None):
     """The game names a ZIP holds, checked as an import checks it (see
-    _ZipPlan). ``nameHint``: the name of a game at the ZIP's top (the file
-    name without its extension when None). AssetPackError NOT_A_ZIP when it
-    is not one."""
+    _ZipPlan; its central directory first, _CheckCentralDirectory).
+    ``nameHint``: the name of a game at the ZIP's top (the file name without
+    its extension when None). AssetPackError NOT_A_ZIP when it is not one.
+    No message names the path."""
     if nameHint is None:
         nameHint = ZipNameHint(path)
+    _CheckCentralDirectory(path)
     try:
         with zipfile.ZipFile(path) as z:
             games, _entries, _files = _ZipPlan(z, nameHint)
     except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError,
             ValueError, NotImplementedError) as error:
         raise AssetPackError(
-            NOT_A_ZIP, f"not a readable ZIP: {error}") from None
+            NOT_A_ZIP, f"not a readable ZIP: {_ErrorText(error)}") from None
     return list(games)
 
 
@@ -672,6 +908,15 @@ class AssetPackService:
         # on Windows).
         self._indexTries = 0
         self._indexFetch = threading.Lock()
+        # The upload (ReceiveUpload): the one held -- {"id", "path",
+        # "games", "nameHint", "expiresAt"} -- or None; how many
+        # uploads have started (a newer one replaces one still arriving);
+        # the files being received and the ones an import took
+        # (RemoveStaleUploads leaves them).
+        self._upload = None
+        self._uploadGeneration = 0
+        self._receiving = set()
+        self._taken = set()
 
     # ── the index ────────────────────────────────────────────────────────
 
@@ -853,12 +1098,16 @@ class AssetPackService:
         with self._lock:
             return self._job is not None and self._job.status == RUNNING
 
-    def Cancel(self):
+    def Cancel(self, revision=None):
         """Ask the running job to stop (seen at its next step); False when
-        none runs."""
+        none runs. ``revision``: only when it is that job (v1's job:cancel:
+        the job the page shows, not one started since); None, whichever
+        runs (the window)."""
         with self._lock:
             job = self._job
             if job is None or job.status != RUNNING:
+                return False
+            if revision is not None and job.revision != revision:
                 return False
             job.cancel.set()
         logger.info(f"Asset {job.operation} #{job.revision}: cancel asked")
@@ -922,24 +1171,27 @@ class AssetPackService:
         True, False or the names of the installed games to replace (the
         others are skipped). ``removeAfter``: the ZIP is the job's (an
         upload) and is removed when it ends, however it ends -- refused
-        here included. For SF-4b's upload (POST /assets:importZip); no
-        caller passes it yet. AssetPackError NOT_A_ZIP / UNSAFE_ARCHIVE /
+        here included, BUSY excepted: the caller keeps it (ImportUpload
+        holds it again). ImportUpload passes it (v1's POST
+        /assets:importZip). AssetPackError NOT_A_ZIP / UNSAFE_ARCHIVE /
         TOO_LARGE / NO_GAME / BAD_NAME / STOPPED / FAILED."""
         if nameHint is None:
             nameHint = ZipNameHint(path)
-        started = False
+        started = busy = False
         try:
             names = ProbeZip(path, nameHint)
             answer = self._Start(
                 IMPORT_ZIP, None, ", ".join(names),
                 lambda job: self._RunImportZip(
                     job, path, overwrite, nameHint, removeAfter),
-                cleanup=(lambda: _Remove(path)) if removeAfter else None)
+                cleanup=(lambda: self._ReleaseUpload(path))
+                if removeAfter else None)
             started = answer[0] == STARTED
+            busy = answer[0] == BUSY
             return answer
         finally:
-            if removeAfter and not started:
-                _Remove(path)
+            if removeAfter and not started and not busy:
+                self._ReleaseUpload(path)
 
     def ImportFolder(self, path, overwrite=False):
         """Copy the games a folder holds (ProbeFolder) into user_data/games;
@@ -992,6 +1244,281 @@ class AssetPackService:
 
         future.add_done_callback(settleCancelled)
         return STARTED, job.revision
+
+    # ── the upload (SF-4b-1) ─────────────────────────────────────────────
+
+    def ReceiveUpload(self, stream, length, fileName=None):
+        """Receive a ZIP of ``length`` bytes from ``stream`` (the request's
+        body: read UPLOAD_CHUNK at a time on the calling thread, the web
+        server's) into UPLOADS_DIR, probe it (ProbeZip) and hold it: (its
+        id, the games it holds, the installed ones among them --
+        ImportConflicts). A new upload replaces the one held -- and one
+        still arriving, which then fails SUPERSEDED -- at its start. The
+        free space is checked before anything is written (the held upload's
+        file, which this one replaces, counted as free), and the file is
+        removed however the receive fails -- the installed games read
+        (ImportConflicts) before it is held. The one held is removed when it
+        is dropped (DropUpload) or replaced; past UPLOAD_EXPIRY_SECS it is
+        no longer held, and removed when the slot is next looked at
+        (_HeldUpload) or at the next start (RemoveStaleUploads);
+        ImportUpload takes it before. ``fileName``: the name the client's
+        file had -- it names a game at the ZIP's top (ZipNameHint) -- never
+        logged. The path is never answered or logged. AssetPackError
+        NOT_A_ZIP (empty) / TOO_LARGE (over MAX_UPLOAD_BYTES) / INCOMPLETE
+        (less than ``length`` arrived, or the read failed) / SUPERSEDED (a
+        newer upload replaced it) / DISK_FULL / STOPPED / FAILED, and
+        ProbeZip's."""
+        if not isinstance(length, int) or isinstance(length, bool) or \
+                length <= 0:
+            raise AssetPackError(NOT_A_ZIP, "the upload is empty")
+        if length > MAX_UPLOAD_BYTES:
+            raise AssetPackError(
+                TOO_LARGE, f"an upload is at most {MAX_UPLOAD_BYTES} bytes")
+        executor = TaskExecutor.instance
+        if executor is not None and executor.stopping.is_set():
+            raise AssetPackError(STOPPED, "the app is shutting down")
+        folder = _UploadsRoot()
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as error:
+            raise AssetPackError(
+                FAILED, "the upload folder could not be made: "
+                f"{_ErrorText(error)}") from None
+        with self._lock:
+            replaced = self._upload
+        # The held upload's file goes when this one starts: its room counts
+        # (it is not removed first: a refusal here leaves it held).
+        reclaim = 0
+        if replaced is not None:
+            try:
+                reclaim = os.path.getsize(replaced["path"])
+            except OSError:
+                pass
+        free = _FreeBytes(folder)
+        if free is not None and free + reclaim < length + DISK_MARGIN_BYTES:
+            raise AssetPackError(
+                DISK_FULL, f"not enough free space: {length} bytes needed, "
+                f"{free} free" + (f" and {reclaim} the upload it replaces "
+                                  "frees" if reclaim else ""))
+        path = os.path.join(
+            folder, f"{UPLOAD_PREFIX}{secrets.token_hex(8)}.zip")
+        with self._lock:
+            previous, self._upload = self._upload, None
+            self._uploadGeneration += 1
+            generation = self._uploadGeneration
+            # Before the file exists: RemoveStaleUploads leaves it.
+            self._receiving.add(path)
+        if previous is not None:
+            logger.info("Asset upload: replaced by a newer one")
+            _DropSlot(previous)
+        held = False
+        try:
+            received = self._Receive(stream, length, path, generation)
+            nameHint = ZipNameHint(fileName) or ""
+            names = ProbeZip(path, nameHint)
+            # Before it is held: a failure here removes the file, and
+            # nothing after the hold can fail.
+            conflicts = ImportConflicts(names)
+            uploadId = secrets.token_urlsafe(16)
+            with self._lock:
+                if generation != self._uploadGeneration:
+                    raise AssetPackError(SUPERSEDED,
+                                         "a newer upload replaced it")
+                self._upload = {
+                    "id": uploadId, "path": path, "games": list(names),
+                    "nameHint": nameHint,
+                    "expiresAt": time.monotonic() + UPLOAD_EXPIRY_SECS}
+                held = True
+        finally:
+            with self._lock:
+                self._receiving.discard(path)
+            if not held:
+                _Remove(path)
+        logger.info(f"Asset upload: received {received} bytes, "
+                    f"{len(names)} game(s)")
+        return uploadId, list(names), conflicts
+
+    def _Receive(self, stream, length, path, generation):
+        # The body into ``path``, which this creates: exactly ``length``
+        # bytes, or AssetPackError. The bytes received. A read returns at
+        # most what it was asked for -- werkzeug's request.stream is a
+        # LimitedStream at the declared length: no more than ``length``
+        # ever arrives.
+        executor = TaskExecutor.instance
+        received = 0
+        try:
+            with open(path, "xb") as out:
+                while received < length:
+                    if executor is not None and executor.stopping.is_set():
+                        raise AssetPackError(STOPPED,
+                                             "the app is shutting down")
+                    with self._lock:
+                        superseded = generation != self._uploadGeneration
+                    if superseded:
+                        raise AssetPackError(SUPERSEDED,
+                                             "a newer upload replaced it")
+                    want = min(UPLOAD_CHUNK, length - received)
+                    try:
+                        chunk = stream.read(want)
+                    except Exception as error:
+                        # The client went away (werkzeug's
+                        # ClientDisconnected), the connection failed.
+                        raise AssetPackError(
+                            INCOMPLETE, f"the upload stopped after "
+                            f"{received} of {length} bytes "
+                            f"({type(error).__name__})") from None
+                    if not chunk:
+                        raise AssetPackError(
+                            INCOMPLETE, f"the upload ended after {received} "
+                            f"of {length} bytes")
+                    out.write(chunk)
+                    received += len(chunk)
+        except OSError as error:
+            full = getattr(error, "errno", None) == 28 or \
+                getattr(error, "winerror", None) in (39, 112)
+            raise AssetPackError(
+                DISK_FULL if full else FAILED,
+                f"the upload could not be written: {_ErrorText(error)}"
+            ) from None
+        return received
+
+    def UploadGames(self, uploadId):
+        """(games, the installed ones among them) of the upload held by
+        that id. AssetPackError UNKNOWN_UPLOAD when none is (never sent,
+        imported, dropped, replaced or expired)."""
+        with self._lock:
+            slot, expired = self._HeldUpload(uploadId)
+        if expired is not None:
+            _DropSlot(expired, "expired")
+        if slot is None:
+            raise AssetPackError(UNKNOWN_UPLOAD, "no such upload")
+        return list(slot["games"]), ImportConflicts(slot["games"])
+
+    def ImportUpload(self, uploadId, overwrite):
+        """Import the upload held by that id (ImportZip, which owns the file
+        from here: removed when the job ends, however it ends); (STARTED,
+        revision) or (BUSY, the running job's revision) -- busy, the upload
+        stays held under that id, its expiry unchanged: a job that started
+        while ImportZip probed it as well (held again, _HoldAgain).
+        ``overwrite`` as ImportZip's. AssetPackError UNKNOWN_UPLOAD, and
+        ImportZip's (the upload is then removed)."""
+        with self._lock:
+            if self._job is not None and self._job.status == RUNNING:
+                return BUSY, self._job.revision
+            slot, expired = self._HeldUpload(uploadId)
+            if slot is not None:
+                self._upload = None
+                self._taken.add(slot["path"])
+                generation = self._uploadGeneration
+        if expired is not None:
+            _DropSlot(expired, "expired")
+        if slot is None:
+            raise AssetPackError(UNKNOWN_UPLOAD, "no such upload")
+        logger.info("Asset upload: taken for an import")
+        answer = self.ImportZip(slot["path"], overwrite, slot["nameHint"],
+                                removeAfter=True)
+        if answer[0] == BUSY:
+            self._HoldAgain(slot, generation)
+        return answer
+
+    def _HoldAgain(self, slot, generation):
+        # A taken upload whose import a job beat (BUSY): held again under its
+        # id, its expiry unchanged -- unless a newer upload started since
+        # (one at a time), which replaced it.
+        with self._lock:
+            self._taken.discard(slot["path"])
+            again = self._upload is None and \
+                generation == self._uploadGeneration
+            if again:
+                self._upload = slot
+        if again:
+            logger.info("Asset upload: held again (another job started "
+                        "first)")
+        else:
+            _DropSlot(slot, "replaced by a newer one")
+
+    def _ReleaseUpload(self, path):
+        # An upload an import took, done with (its job ended or never ran,
+        # or the import was refused): its file removed, and no longer one
+        # RemoveStaleUploads leaves (what cannot be removed now, the next
+        # start's removes).
+        _Remove(path)
+        with self._lock:
+            self._taken.discard(path)
+
+    def DropUpload(self, uploadId):
+        """Remove the upload held by that id; whether one was."""
+        with self._lock:
+            slot, expired = self._HeldUpload(uploadId)
+            if slot is not None:
+                self._upload = None
+        if expired is not None:
+            _DropSlot(expired, "expired")
+        if slot is None:
+            return False
+        logger.info("Asset upload: dropped")
+        _DropSlot(slot)
+        return True
+
+    def _HeldUpload(self, uploadId):
+        # With _lock held: (the slot held by that id, or None; the slot
+        # held, taken out when it has expired -- whatever id was asked: no
+        # timer removes it -- for the caller to remove outside the lock).
+        slot = self._upload
+        if slot is not None and time.monotonic() >= slot["expiresAt"]:
+            self._upload = None
+            return None, slot
+        if slot is None or not isinstance(uploadId, str) or \
+                not _UPLOAD_ID.match(uploadId) or \
+                not hmac.compare_digest(slot["id"], uploadId):
+            return None, None
+        return slot, None
+
+    def RemoveStaleUploads(self):
+        """Remove what an earlier run left in UPLOADS_DIR (the process ended
+        while an upload was held or arriving, or an import's ZIP could not
+        be removed). Each shell calls it at the start of its first scan,
+        beside RestoreReplaced. Leaves the upload held, the ones arriving
+        and the ones an import took. How many files it removed; logs
+        (counts, no names) and returns 0 on an unexpected failure."""
+        try:
+            folder = _UploadsRoot()
+            try:
+                names = os.listdir(folder)
+            except FileNotFoundError:
+                return 0
+            # Listed first: a file listed was made before, so its receive
+            # had registered it by now (ReceiveUpload: before the file).
+            with self._lock:
+                keep = set(self._receiving) | set(self._taken)
+                if self._upload is not None:
+                    keep.add(self._upload["path"])
+            kept = {os.path.normcase(path) for path in keep}
+            removed = left = 0
+            for name in names:
+                path = os.path.join(folder, name)
+                if os.path.normcase(path) in kept or _IsLink(path) or \
+                        not os.path.isfile(path):
+                    continue
+                try:
+                    os.remove(path)
+                    removed += 1
+                except OSError:
+                    left += 1
+            gone = {path for path in keep if not os.path.exists(path)}
+            with self._lock:
+                self._taken -= gone
+            if removed or left:
+                logger.info(f"Asset upload: removed {removed} file(s) an "
+                            f"earlier run left" + (
+                                f", {left} could not be removed"
+                                if left else ""))
+            return removed
+        except Exception:
+            logger.opt(exception=True).error(
+                "Asset upload: the files an earlier run left could not be "
+                "removed")
+            return 0
 
     # ── the games moved aside ────────────────────────────────────────────
 
@@ -1232,10 +1759,13 @@ class AssetPackService:
         try:
             root = _GamesRoot()
             os.makedirs(root, exist_ok=True)
+            # Again here: the file may have changed since ImportZip probed it.
+            _CheckCentralDirectory(path)
             try:
                 z = zipfile.ZipFile(path)
             except (zipfile.BadZipFile, OSError, ValueError) as error:
-                raise _JobError(NOT_A_ZIP, f"not a readable ZIP: {error}")
+                raise _JobError(NOT_A_ZIP,
+                                f"not a readable ZIP: {_ErrorText(error)}")
             with z:
                 games, entries, files = _ZipPlan(z, nameHint)
                 staging = _NewStaging()
@@ -1316,7 +1846,7 @@ class AssetPackService:
             if staging is not None:
                 _RemoveStaging(staging)
             if removeAfter:
-                _Remove(path)
+                self._ReleaseUpload(path)
 
     def _RunImportFolder(self, job, path, overwrite):
         games = ProbeFolder(path)
@@ -1766,3 +2296,14 @@ def _Remove(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def _DropSlot(slot, why=None):
+    # An upload no longer held: its file removed (what cannot be is removed
+    # by the next start's RemoveStaleUploads). ``why``: logged first.
+    if why:
+        logger.info(f"Asset upload: {why}")
+    _Remove(slot["path"])
+    if os.path.exists(slot["path"]):
+        logger.warning("Asset upload: its file could not be removed; the "
+                       "next start removes it")

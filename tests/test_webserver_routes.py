@@ -109,7 +109,9 @@ EXPECTED_ROUTES = [
 # stats/overlays* for the Stats Display Settings page (S4l); players* and
 # players/<p>:load for the player list (S4m); api-catalog and connection for
 # the guides (ADR-005 S-final SF-3a); assets* for the asset packs (SF-3b);
-# access-token* for the API guide's token, the shared view's alone (SF-4a-1).
+# access-token* for the API guide's token, the shared view's alone (SF-4a-1);
+# the asset jobs, the ZIP upload and the games folder's reveal, the shared
+# view's alone too (SF-4b-1).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -120,9 +122,16 @@ EXPECTED_API_V1_ROUTES = [
     # The API guide's catalogue (ADR-005 S-final SF-3a).
     ('/api/v1/api-catalog', 'api_v1.get_api_catalog', 'GET,HEAD,OPTIONS'),
     # The game asset packs: the list and the last job's state (ADR-005
-    # S-final SF-3b; the jobs come with SF-4b).
+    # S-final SF-3b), the jobs, the ZIP upload and the games folder's
+    # reveal (SF-4b-1; all but the list WebAccess.SHELL).
+    ('/api/v1/assets/games-folder:reveal', 'api_v1.reveal_games_folder', 'OPTIONS,POST'),
     ('/api/v1/assets/job', 'api_v1.get_assets_job', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/assets/job:cancel', 'api_v1.cancel_assets_job', 'OPTIONS,POST'),
     ('/api/v1/assets/packs', 'api_v1.get_asset_packs', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/assets/packs:install', 'api_v1.install_asset_packs', 'OPTIONS,POST'),
+    ('/api/v1/assets/uploads', 'api_v1.upload_assets_zip', 'OPTIONS,POST'),
+    ('/api/v1/assets/uploads/<upload_id>', 'api_v1.drop_asset_upload', 'DELETE,OPTIONS'),
+    ('/api/v1/assets:importZip', 'api_v1.import_assets_zip', 'OPTIONS,POST'),
     ('/api/v1/battle-format', 'api_v1.get_battle_format', 'GET,HEAD,OPTIONS'),
     ('/api/v1/battle-format', 'api_v1.battle_format_set', 'OPTIONS,PUT'),
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
@@ -554,13 +563,17 @@ def test_the_classification_follows_the_rules():
               "api_v1.settings_language_update",
               "api_v1.settings_hotkeys_update",
               "api_v1.get_connection",
-              # The asset job's state, and the list, whose read may fetch
-              # from GitHub (SF-3b).
-              "api_v1.get_assets_job",
+              # The asset list, whose read may fetch from GitHub (SF-3b).
               "api_v1.get_asset_packs"}
     # The access token, read and replaced: this PC's own request carrying
-    # the secret the shell adds to the shared view's fetches (SF-4a-1).
-    shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate"}
+    # the secret the shell adds to the shared view's fetches (SF-4a-1). The
+    # asset job's state, the jobs, the upload and the games folder's reveal
+    # likewise (SF-4b-1).
+    shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
+             "api_v1.get_assets_job", "api_v1.upload_assets_zip",
+             "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
+             "api_v1.install_asset_packs", "api_v1.cancel_assets_job",
+             "api_v1.reveal_games_folder"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -617,7 +630,9 @@ def test_the_classification_follows_the_rules():
     # (S-final SF-3a: v1 76 of 121), and the asset packs' list read and the
     # job's this-PC read (S-final SF-3b: v1 76 of 123), and the access
     # token's read and regeneration, the shell's (S-final SF-4a-1: v1 76 of
-    # 125).
+    # 125), and the asset upload, its drop, the ZIP import, the install, the
+    # job's cancel and the games folder's reveal, the shell's, with the
+    # job's read moved there (S-final SF-4b-1: v1 76 of 131).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -627,7 +642,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 125
+    assert len(EXPECTED_API_V1_ROUTES) == 131
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

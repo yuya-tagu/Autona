@@ -2230,7 +2230,7 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
-               "game": 1, "row": 1}
+               "game": 1, "row": 1, "upload_id": "x" * 22}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2396,6 +2396,15 @@ _NOT_200 = {
     # them -- the guard's 403, before any operation.
     ("api_v1.get_access_token", None): 403,
     ("api_v1.access_token_regenerate", None): 403,
+    # The game asset routes but the list, likewise (SHELL, SF-4b-1): no
+    # upload, job or reveal headless.
+    ("api_v1.get_assets_job", None): 403,
+    ("api_v1.upload_assets_zip", None): 403,
+    ("api_v1.drop_asset_upload", None): 403,
+    ("api_v1.import_assets_zip", None): 403,
+    ("api_v1.install_asset_packs", None): 403,
+    ("api_v1.cancel_assets_job", None): 403,
+    ("api_v1.reveal_games_folder", None): 403,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the

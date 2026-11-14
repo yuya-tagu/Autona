@@ -218,10 +218,12 @@ class HeadlessGames:
         # The games an asset job moved aside and did not put back -- a
         # process that died between its two moves -- go back before the
         # first scan lists the games, as on the desktop
-        # (AutonaGameAssetManager._FirstScan; ADR-005 S-final SF-3b).
+        # (AutonaGameAssetManager._FirstScan; ADR-005 S-final SF-3b), and
+        # the upload an earlier run left is removed (SF-4b-1).
         from .core.AssetPackService import AssetPackService
         if AssetPackService.instance is not None:
             AssetPackService.instance.RestoreReplaced()
+            AssetPackService.instance.RemoveStaleUploads()
         self._Scan()
 
     def _Scan(self):

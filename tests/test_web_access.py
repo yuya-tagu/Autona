@@ -2166,16 +2166,20 @@ def test_the_api_catalog_is_read_from_anywhere(server):
         assert response.get_json()["data"]["endpoints"]
 
 
-# ── The game asset packs' routes (ADR-005 S-final SF-3b) ─────────────────
-# The last job's state is THIS_PC: its messages may name this PC's paths --
-# not another computer's to read, token or not. The list (the upstream index
-# and what is installed, no path) is a READ. The jobs that write
-# user_data/games are not in v1 (SF-4b, under the shell's secret).
+# ── The game asset packs' routes (ADR-005 S-final SF-3b / SF-4b-1) ───────
+# The list (the upstream index and what is installed, no path) is THIS_PC:
+# its read may fetch the index from GitHub -- not another computer's to set
+# off, token or not. The rest is SHELL (SF-4b-1; below, with the access
+# token's): the last job's state (its messages may name this PC's paths),
+# the ZIP upload, the jobs that write user_data/games, their cancel and the
+# games folder's reveal -- THIS_PC also lets this origin's layout/ pages
+# through. The folder import is not in v1 (a page cannot name a folder).
 
 @pytest.fixture
 def assetOps(server, monkeypatch):
     """The asset web operations faked; the names of those called."""
     from src import AutonaWebOperations
+    from src.core import AssetPackService as assets
 
     calls = []
 
@@ -2187,16 +2191,19 @@ def assetOps(server, monkeypatch):
 
     for name, answer in (
             ("get_asset_packs", {"games": []}),
-            ("get_assets_job", {"revision": 0, "status": "idle"})):
+            ("get_assets_job", {"revision": 0, "status": "idle"}),
+            ("upload_assets_zip", ("abcdefgh", ["aaa"], [])),
+            ("asset_upload_games", (["aaa"], [])),
+            ("drop_asset_upload", True),
+            ("import_asset_upload", (assets.STARTED, 1)),
+            ("install_asset_packs", (assets.STARTED, 1)),
+            ("cancel_assets_job", True),
+            ("reveal_games_folder", True)):
         monkeypatch.setattr(AutonaWebOperations, name, recorded(name, answer))
     return calls
 
 
-# Both reads are this PC's alone: the job's state may name this PC's paths,
-# and the list's read may fetch the index from GitHub (SF-3b review).
-ASSET_READS = [("/api/v1/assets/job", "get_assets_job",
-                {"revision": 0, "status": "idle"}),
-               ("/api/v1/assets/packs", "get_asset_packs", {"games": []})]
+ASSET_READS = [("/api/v1/assets/packs", "get_asset_packs", {"games": []})]
 
 
 @pytest.mark.parametrize("url, op, answer", ASSET_READS)
@@ -2237,13 +2244,11 @@ def test_only_this_pcs_own_request_reads_the_assets(
     assert assetOps == []
 
 
-def test_the_asset_jobs_are_not_in_v1_yet(server, assetOps):
-    # SF-4b brings them under the secret the shell hands only to the shared
-    # view: THIS_PC also lets this origin's layout/ pages through.
+def test_the_folder_import_is_not_in_v1(server, assetOps):
+    # A page cannot name a folder of this PC; SF-5a's picker brings it back.
     client = _client(server)
-    for url in ("/api/v1/assets/packs:install", "/api/v1/assets:importZip",
-                "/api/v1/assets:importFolder", "/api/v1/assets/job:cancel"):
-        assert client.post(url, json={}).status_code in (404, 405), url
+    assert client.post("/api/v1/assets:importFolder",
+                       json={}).status_code in (404, 405)
     assert assetOps == []
 
 
@@ -2373,7 +2378,8 @@ def _refused_as_not_the_shell(response, token, secret):
     assert secret.encode() not in response.data
 
 
-@pytest.mark.parametrize("remote, headers", [
+# What is not the shared view's own request: each refused, token or not.
+NOT_THE_SHELLS = [
     # No secret, or not the one.
     ("127.0.0.1", {"Sec-Fetch-Site": "same-origin"}),
     ("127.0.0.1", {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": ""}),
@@ -2400,7 +2406,10 @@ def _refused_as_not_the_shell(response, token, secret):
                    "X-Forwarded-For": "203.0.113.9"}),
     (LAN_PEER, {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": None}),
     (LAN_PEER, {"X-Autona-Shell": None}),
-])
+]
+
+
+@pytest.mark.parametrize("remote, headers", NOT_THE_SHELLS)
 @pytest.mark.parametrize("withToken", [False, True])
 @pytest.mark.parametrize("method, url", [("GET", TOKEN_URL),
                                          ("POST", REGENERATE_URL)])
@@ -2438,6 +2447,76 @@ def test_a_shell_that_never_issued_the_secret_refuses_them_all(
         assert response.status_code == 403
         assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
     assert WebAccess.Token() == token
+
+
+# The game asset routes (SF-4b-1): the same rule. (method, URL, body, the
+# operation it reaches, the status it answers the shell.)
+ASSET_SHELL_ROUTES = [
+    ("GET", "/api/v1/assets/job", None, "get_assets_job", 200),
+    ("POST", "/api/v1/assets/uploads", b"PK\x05\x06" + b"\x00" * 18,
+     "upload_assets_zip", 201),
+    ("DELETE", "/api/v1/assets/uploads/abcdefgh", None, "drop_asset_upload",
+     200),
+    ("POST", "/api/v1/assets:importZip", {"upload": "abcdefgh"},
+     "import_asset_upload", 202),
+    ("POST", "/api/v1/assets/packs:install", {"game": "ssbu",
+                                              "confirm": True},
+     "install_asset_packs", 202),
+    ("POST", "/api/v1/assets/job:cancel", {"revision": 1},
+     "cancel_assets_job", 200),
+    ("POST", "/api/v1/assets/games-folder:reveal", {}, "reveal_games_folder",
+     200),
+]
+
+
+def _asset_request(client, method, url, body, headers):
+    if isinstance(body, bytes):
+        return client.open(url, method=method, headers=headers, data=body)
+    return client.open(url, method=method, headers=headers, json=body)
+
+
+@pytest.mark.parametrize("method, url, body, op, status", ASSET_SHELL_ROUTES)
+def test_the_shell_reaches_the_asset_routes(server, shellSecret, assetOps,
+                                            method, url, body, op, status):
+    response = _asset_request(_client(server), method, url, body,
+                              _shell_headers(shellSecret))
+    assert response.status_code == status, response.get_json()
+    assert op in assetOps
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.parametrize("remote, headers", NOT_THE_SHELLS)
+@pytest.mark.parametrize("withToken", [False, True])
+@pytest.mark.parametrize("method, url, body, op, status", ASSET_SHELL_ROUTES)
+def test_only_the_shells_own_request_reaches_the_asset_routes(
+        server, shellSecret, assetOps, warnings, remote, headers, withToken,
+        method, url, body, op, status):
+    token = WebAccess.Token()
+    sent = {name: (shellSecret if value is None else value)
+            for name, value in headers.items()}
+    if withToken:
+        sent[WebAccess.TOKEN_HEADER] = token
+    response = _asset_request(_client(server, remote), method, url, body,
+                              sent)
+    _refused_as_not_the_shell(response, token, shellSecret)
+    assert assetOps == []
+    assert any("shell_only" in m for m in warnings)
+    assert not any(shellSecret in m or token in m for m in warnings)
+
+
+@pytest.mark.parametrize("value", [None, "", "x" * 43])
+def test_a_shell_that_never_issued_the_secret_refuses_the_asset_routes(
+        server, assetOps, monkeypatch, value):
+    # Headless: none of them answers.
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    headers = {"Sec-Fetch-Site": "same-origin"}
+    if value is not None:
+        headers[WebAccess.SHELL_HEADER] = value
+    for method, url, body, _op, _status in ASSET_SHELL_ROUTES:
+        response = _asset_request(_client(server), method, url, body, headers)
+        assert response.status_code == 403, url
+        assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
+    assert assetOps == []
 
 
 @pytest.mark.parametrize("site, refused", [

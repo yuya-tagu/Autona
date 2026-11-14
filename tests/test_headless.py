@@ -86,6 +86,11 @@ with open(os.path.join(sys.argv[1], "tests", "fixtures", "player_db",
     normalised = json.load(f)
 with open("user_data/local_players.json", "w", encoding="utf-8") as f:
     f.write(normalised["local_players"])
+# An asset upload an earlier run left (ADR-005 S-final SF-4b-1): the first
+# scan removes it.
+os.makedirs("user_data/.autona-uploads", exist_ok=True)
+with open("user_data/.autona-uploads/upload-left.zip", "wb") as f:
+    f.write(b"PK" * 64)
 
 from qtpy.QtCore import QCoreApplication
 app = QCoreApplication([])
@@ -150,6 +155,7 @@ result["restored"] = pump(
     and "db_updated" in events)
 result["persisted"] = SettingsManager.Get("SELECTED_GAME_CODENAME")
 result["events"] = events[:]
+result["uploads_after_scan"] = os.listdir("user_data/.autona-uploads")
 
 # The load's player DB refresh normalised the loaded game's mains, as the
 # desktop's does (the Qt model clean-up's PR3; the headless shell kept them
@@ -190,6 +196,30 @@ status, body = v1("PATCH", "/settings/hotkeys",
                   {"keys": {"load_set": "alt+ctrl+o"}})
 result["settings"]["hotkey_save"] = status
 result["settings"]["saved"] = SettingsManager.Get("hotkeys.load_set")
+
+# The game asset routes but the list are the desktop's shared view's alone
+# (SHELL, ADR-005 S-final SF-4b-1): no secret is issued headless, so this
+# PC's own request -- with a made-up secret, too -- is refused before a
+# byte of the upload is written.
+def refused(method, path, data, headers):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1{path}", method=method, data=data,
+        headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+shellLike = {"Sec-Fetch-Site": "same-origin", "X-Autona-Shell": "x" * 43}
+result["asset_routes"] = [
+    refused("POST", "/assets/uploads", b"PK" * 64,
+            dict(shellLike, **{"Content-Type": "application/zip"})),
+    refused("GET", "/assets/job", None, shellLike),
+    refused("POST", "/assets/job:cancel", b'{"revision": 1}',
+            {"Content-Type": "application/json"}),
+]
+result["uploads_after_refusal"] = os.listdir("user_data/.autona-uploads")
 
 # Every later scan re-applies the provider's game through the selector;
 # the last pick is restored on the first scan only.
@@ -294,6 +324,8 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     # The games: scanned, the last pick restored and loaded via the catalog.
     assert result["restored"] is True, result
     assert result["persisted"] == "probe_game"
+    # The upload an earlier run left, removed by the first scan (SF-4b-1).
+    assert result["uploads_after_scan"] == []
     assert "gameChanged" in result["events"]
     assert "db_updated" in result["events"]
     # ...and the player DB followed it as the desktop's does: the same
@@ -312,6 +344,10 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
         "status": 200, "applied": False,
         "listening": {"port": port, "lan": False}, "restartPending": False,
         "hotkey_save": 200, "saved": "Ctrl+Alt+O"}
+    # The asset routes but the list: the shell's alone (SF-4b-1), nothing
+    # written.
+    assert result["asset_routes"] == [403, 403, 403]
+    assert result["uploads_after_refusal"] == []
     # A rescan re-applies the provider's game, and only that.
     assert result["rescan_order"] == ["probe_game"]
 

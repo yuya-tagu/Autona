@@ -30,7 +30,8 @@ surface; the server only asks it questions. It decides six things:
   S-final SF-4a): this PC's own request that also carries the secret the
   shell adds to the shared view's fetches (IssueShellSecret). Every page of
   this origin passes as this PC's own request, so only that secret keeps
-  the access token from them.
+  the access token -- and the game asset jobs and upload (SF-4b-1) -- from
+  them.
 * **What the preview listener serves** (PreviewServes, ADR-005 S-final
   SF-8a): the second port the shared view's design previews load from
   serves only what a layout reads, and never writes -- decided before any
@@ -310,12 +311,20 @@ ROUTE_ACCESS = {
     # window, a React page in SF-4b). The list -- the upstream index and
     # what is installed -- names no local path, but reading it may fetch
     # the index from GitHub, which a LAN device or the preview listener
-    # must not set off. The last job's state may name this PC's paths.
-    # (The jobs that write user_data/games are not in v1 yet: THIS_PC lets
-    # this origin's layout/ pages through, so they come with SF-4b under
-    # the secret the shell hands only to the shared view.)
+    # must not set off. The rest is SHELL (SF-4b-1): the last job's state
+    # (it may name this PC's paths), the ZIP upload (gigabytes onto this
+    # PC's disk), the jobs that write user_data/games and their cancel, and
+    # the games folder's reveal (a window on this PC) -- THIS_PC lets this
+    # origin's layout/ pages through, so they take the secret the shell
+    # hands only to the shared view (headless: 403).
     "api_v1.get_asset_packs": THIS_PC,
-    "api_v1.get_assets_job": THIS_PC,
+    "api_v1.get_assets_job": SHELL,
+    "api_v1.upload_assets_zip": SHELL,
+    "api_v1.drop_asset_upload": SHELL,
+    "api_v1.import_assets_zip": SHELL,
+    "api_v1.install_asset_packs": SHELL,
+    "api_v1.cancel_assets_job": SHELL,
+    "api_v1.reveal_games_folder": SHELL,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,
