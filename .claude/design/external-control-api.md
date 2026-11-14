@@ -3,7 +3,7 @@
 > **ステータス: 実装済み。** 本書は ADR-001 で確定した方針に基づく I/F 仕様であり、
 > 実装（[../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)）の説明文書として扱う。実装と本書が乖離した場合は**実装を正**とし、本書を実装に追従させる。
 > 既存の HTTP/WS 制御面の事実は変更しない（本 API は別名前空間として**追加**済み）。
-> アプリ内導線: メニューバー「API設定」→ リファレンス・テスター（[../../src/AutonaApiInfoWindow.py](../../src/AutonaApiInfoWindow.py)）。
+> アプリ内導線: 「Help & Settings」→「API設定」→ リファレンス・テスター（React の `/web/api`。[../../web/src/GuidePages/ApiPage.tsx](../../web/src/GuidePages/ApiPage.tsx)。ADR-005 S-final SF-4a-2 で Qt のウィンドウから共有ビューのページになった。ブラウザでも開けるが、トークンの表示と再発行はアプリの中だけ）。
 
 - 決定根拠: [../../docs/decisions/ADR-001-external-control-api-boundary.md](../../docs/decisions/ADR-001-external-control-api-boundary.md)（D1〜D8）
 - 操作棚卸し・分類: [../../docs/architecture/external-control-api-candidates.md](../../docs/architecture/external-control-api-candidates.md)
@@ -47,7 +47,7 @@
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
-  - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
+  - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。アプリの API 設定のページ（`/web/api`）で表示・コピー・再発行）
   - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
   - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
 - **この PC のウィンドウを開く操作と、この PC の設定はこの PC からの要求だけ**（`THIS_PC` 区分。§6.35 のエクスプローラ（ADR-005 S4s）と、§6.45〜6.47 の待ち受け・言語・ホットキーの設定（ADR-005 S4ae）と、§5.25 の接続情報（ADR-005 S-final SF-3a）と、§5.27 / §5.28 のゲームアセットのパックの一覧とジョブの状態（ADR-005 S-final SF-3b））。トークンなしで通れる要求（下の DNS rebinding・CSRF の判定を含む）だけを通し、LAN の他端末・転送ヘッダ付きは**トークンの有無によらず** `403 FORBIDDEN`（トークンで開くものではないので 401 にしない）
@@ -240,7 +240,7 @@
 | `GET /api/v1/status` | アプリが実行中の仕事（デスクトップのフッターの源。§5.23。2026-11-14 追加。変わると Socket.IO の `status` が出る） | `get_status`（`core/StatusService.Snapshot`） | — |
 | `GET /api/v1/connection` | Web サーバーの URL（LAN / ループバック）・ポート・`out/` の絶対パス（§5.25。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_connection`（`WebServer.Serving` / `LanOnAtRestart`） | — |
 | `GET /api/v1/access-token` | アクセストークン（§5.29。**アプリ自身のウィンドウからだけ**（`SHELL`）。2026-11-14 追加） | `get_access_token`（`core/WebAccess.Token`） | — |
-| `GET /api/v1/api-catalog` | API 設定ウィンドウのエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
+| `GET /api/v1/api-catalog` | API 設定のページ（`/web/api`）のエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
 | `GET /api/v1/assets/packs` | ゲームアセットのパックの一覧（上流の索引・インストール済み・版。§5.27。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_asset_packs`（`core/AssetPackService.Packs`） | — |
 | `GET /api/v1/assets/job` | ゲームアセットの取り込みのジョブの状態（§5.28。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_assets_job`（`core/AssetPackService.Job`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
@@ -764,7 +764,7 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
 ### 5.24 `GET /api/v1/api-catalog`（2026-11-14 追加・ADR-005 S-final SF-3a）
 
-API 設定ウィンドウ（SF-4a で `/web/api` のページになる）が載せているエンドポイントの一覧とエラーコード。正本は `core/ApiCatalog.py`（ウィンドウもここを読む）。READ。設定でも state でもないので `revision` は付かない
+API 設定のページ（`/web/api`。SF-4a-2 までは Qt の API 設定ウィンドウ）が載せているエンドポイントの一覧とエラーコード。正本は `core/ApiCatalog.py`。READ。設定でも state でもないので `revision` は付かない
 
 ```json
 {
@@ -780,14 +780,14 @@ API 設定ウィンドウ（SF-4a で `/web/api` のページになる）が載�
 }
 ```
 
-- `id`: その行のルートの Flask の endpoint 名（`api_v1.` を除いたもの）。ルートが変わらない限り変わらないので、ページは文言の翻訳をこれで引く。一覧の中で重複しない
-- `path`: 表示用（`{n}` などの置き場所つき。クエリを含むことがある）。`example`: 置き場所を既定値（`{n}`→`1` など）にしたもの。ウィンドウの「Try it」と curl が送るパス
-- `description` / `errorCodes[].description`: ウィンドウが翻訳する前の英語の文言。`body`: 例の body（無ければ `null`）。`destructive` / `logged` / `confirm`: ウィンドウの表の列と同じ
-- 並びはウィンドウの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない（ウィンドウの表と同じ）
+- `id`: その行のルートの Flask の endpoint 名（`api_v1.` を除いたもの）。ルートが変わらない限り変わらないので、ページは文言の翻訳をこれで引く（i18next の `guide_api_endpoint_<id>`、エラーコードは `guide_api_error_<code>`。en / ja の全行に訳があることは `tests/test_api_v1_guides.py` が検査する）。一覧の中で重複しない
+- `path`: 表示用（`{n}` などの置き場所つき。クエリを含むことがある）。`example`: 置き場所を既定値（`{n}`→`1` など）にしたもの。ページのテスターに読み込むパスと curl が送るパス
+- `description` / `errorCodes[].description`: 英語の文言（ページは訳が無い行だけこれを出す）。`body`: 例の body（無ければ `null`）。`destructive` / `logged` / `confirm`: ページの表の列（`destructive` の行のアクション（`:clear` など）は、テスターが送る前に確認する）
+- 並びはページの表の順。ガイドのページ自身のルート（§5.24・§5.25）は載せていない
 
 ### 5.25 `GET /api/v1/connection`（2026-11-14 追加・ADR-005 S-final SF-3a）
 
-API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web/companion`・`/web/obs` のページになる）が表示しているサーバーとファイルの場所。**`THIS_PC` 区分**（`out/` の絶対パスはユーザー名を含む）。`Cache-Control: no-store`
+API / Companion / OBS のガイドのページ（`/web/api`・`/web/companion`・`/web/obs`。SF-4a-2 までは Qt のウィンドウ）が表示しているサーバーとファイルの場所。別の PC のページ（`403`）は、ページが届いた API の URL を出し、監視ファイルは `out/` からの相対で出す。**`THIS_PC` 区分**（`out/` の絶対パスはユーザー名を含む）。`Cache-Control: no-store`
 
 ```json
 {
@@ -798,8 +798,8 @@ API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web
 }
 ```
 
-- `port` / `lan`: `WebServer.Serving()`（待ち受けている値。サーバーが無いときだけ設定）。`lanAtRestart`: LAN 接続を有効で保存したが、走っているサーバーはこの PC だけ（再起動で効く。`WebServer.LanOnAtRestart()`。ウィンドウの「保存済み・再起動で有効」）
-- `baseUrl`: 利用者に案内する API の URL（LAN 接続なら この PC の LAN IP、無ければループバック。API・Companion のウィンドウの値）。`localBaseUrl`: ループバックの URL（OBS のウィンドウの値。OBS は同じ PC で動く）
+- `port` / `lan`: `WebServer.Serving()`（待ち受けている値。サーバーが無いときだけ設定）。`lanAtRestart`: LAN 接続を有効で保存したが、走っているサーバーはこの PC だけ（再起動で効く。`WebServer.LanOnAtRestart()`。ページの「保存済み・再起動で有効」）
+- `baseUrl`: 利用者に案内する API の URL（LAN 接続なら この PC の LAN IP、無ければループバック。API・Companion のページの値）。`localBaseUrl`: ループバックの URL（OBS のページの値。OBS は同じ PC で動く）
 - `outDir`: Autona が出力する `out/` の絶対パス（Advanced Scene Switcher のファイル条件が監視するファイルはこの下。`out/score/1/match.txt` なら `outDir` + `pathSeparator` + `score` + … ）。`pathSeparator`: その OS の区切り文字
 - 秘密は含まない（アクセストークンは返さない: §2.2 の `THIS_PC` の注記。トークンは §5.29 の `SHELL` のルートだけが返す）。ただし `THIS_PC` は同じオリジンのレイアウトからの要求も通すので、`outDir` はそれらにも読める（`GET /layouts/selected/board/obs-path` と同じ程度の露出）
 
@@ -853,7 +853,7 @@ API / Companion / OBS のガイドウィンドウ（SF-4a で `/web/api`・`/web
 
 ### 5.29 `GET /api/v1/access-token`（2026-11-14 追加・ADR-005 S-final SF-4a-1）
 
-LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに使うアクセストークン（§2.2）。今は API 設定ウィンドウが表示・コピーしていて、SF-4a-2 で `/web/api` のページがこれを読む。**`SHELL` 区分**（§2.2: デスクトップの共有ビューが Web UI を出している間の、本体のサーバーのオリジンの文書（メインフレームと同じオリジンのフレーム）の fetch / XHR だけ。トークンでは開かない・LAN・同じオリジンのレイアウト・OBS・curl・ヘッドレスは `403 FORBIDDEN`）。`Cache-Control: no-store`
+LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに使うアクセストークン（§2.2）。API 設定のページ（`/web/api`。SF-4a-2）がこれを読んで表示・コピーする（ページの state にだけ持ち、sessionStorage / localStorage・URL には入れない。ブラウザで開いたページは `403` を受けて「デスクトップアプリでこのページを開いてください」と案内する。テスターから呼んだ再発行は確認つきで、テスターの答えのトークンは伏せる）。**`SHELL` 区分**（§2.2: デスクトップの共有ビューが Web UI を出している間の、本体のサーバーのオリジンの文書（メインフレームと同じオリジンのフレーム）の fetch / XHR だけ。トークンでは開かない・LAN・同じオリジンのレイアウト・OBS・curl・ヘッドレスは `403 FORBIDDEN`）。`Cache-Control: no-store`
 
 ```json
 { "ok": true, "data": { "token": "…", "available": true } }
@@ -1370,7 +1370,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `:stop-follow`（ADR-005 S4v）: body なし。タイマー行のキャンセルボタンと同じ `StopFollowing(forget=True)`: 取り直しの時計を止め、配信台と追従中のセットを忘れる（同じセットをもう一度読める）。**ボードに出ている選手とスコアは残す**。大会が無くても答える（`200`）。board 3 は `400`
   - 止めるものが無ければ何も書かない（書くのは変わるキーだけなので、反映ボタンを点けない。`scoreboard_follow` も出ない）。追従中のセットを忘れる書き込みは held 対象
   - デスクトップの未構築のボードは**構築せず、何も書かずに `200`**（読み込みが必ず構築するので、未構築のボードに止める追従は無い。構築するとシードで state が消え、ポーリングの設定も切れる）
-- `access-token:regenerate`（ADR-005 S-final SF-4a-1）: API 設定ウィンドウの「再発行」と同じ `WebAccess.RegenerateToken()`。body は `{ "confirm": true }`。**`SHELL` 区分**（§2.2。アプリ自身のウィンドウからだけ。トークンでは開かない）
+- `access-token:regenerate`（ADR-005 S-final SF-4a-1）: API 設定のページ（`/web/api`）の「再発行」（確認つき）が呼ぶ `WebAccess.RegenerateToken()`。body は `{ "confirm": true }`。**`SHELL` 区分**（§2.2。アプリ自身のウィンドウからだけ。トークンでは開かない）
   - 応答: `data` は §5.29 と同じ `{ "token": "<新しいトークン>", "available": true }`、`Cache-Control: no-store`
   - 古いトークンはすぐ使えなくなる: LAN の HTTP の書き込みは `401`、古いトークンで入った Socket.IO の接続の書き込みイベントは `401 UNAUTHENTICATED`（`the token was regenerated; reconnect with the new one`）の ack で断る（接続と state の配信は続く。新しいトークンで接続し直す。この PC のトークンなしの接続は影響しない）
   - settings.json を読めず保存できないときは発行せず **`409 NOT_READY`**（`settings.json could not be read: no new token was issued`。今のトークンのまま）

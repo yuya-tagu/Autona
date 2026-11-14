@@ -1,25 +1,27 @@
 """The guides' /api/v1 routes (ADR-005 S-final SF-3a).
 
-What the API / Companion / OBS guide windows read for themselves, for the
-pages that replace them in SF-4a:
+What the API / Companion / OBS guide pages read (SF-4a-2: /web/api,
+/web/companion, /web/obs; the Qt windows read it for themselves until then):
 
-- ``GET /api/v1/api-catalog``  READ: core's ApiCatalog (the API window's
+- ``GET /api/v1/api-catalog``  READ: core's ApiCatalog (the API page's
   reference rows and error codes)
 - ``GET /api/v1/connection``   THIS_PC: the server's URLs and port, out/'s
   absolute path
 - Socket.IO ``games_changed`` {}: the game list was scanned again
 
-Not the access token (the API window shows and replaces it): a page of this
-origin -- any layout/ page, in OBS or a browser -- passes as this PC's own
-request, THIS_PC or not, so a THIS_PC route would hand it to whatever
-layout is loaded. Its routes (SF-4a-1) are WebAccess.SHELL, behind a secret
-the shell adds only to the shared view's main frame's fetches: pinned in
-tests/test_web_access.py and tests/test_web_panel_host.py.
+Not the access token (the API page shows and replaces it in the app): a
+page of this origin -- any layout/ page, in OBS or a browser -- passes as
+this PC's own request, THIS_PC or not, so a THIS_PC route would hand it to
+whatever layout is loaded. Its routes (SF-4a-1) are WebAccess.SHELL, behind
+a secret the shell adds only to the shared view's main frame's fetches:
+pinned in tests/test_web_access.py and tests/test_web_panel_host.py.
 
 Who may call which is tests/test_web_access.py's (the guard: LAN, a foreign
 page, a rebound host or a relayed request is 403, token or not); here the
-answers, the API window reading the catalogue from core, and the shells
-telling the web server about a scan.
+answers, the pages' own tables held to them (each catalogue row and error
+code translated, each Companion / OBS example a v1 route), and the shells
+telling the web server about a scan. The pages themselves are
+web/src/GuidePages/GuidePages.test.js's.
 """
 import ast
 import json
@@ -33,11 +35,20 @@ import pytest
 from src.core import ApiCatalog, WebAccess
 from src.core.SettingsManager import SettingsManager
 from tests.test_web_access import (  # noqa: F401
-    LAN_HOST, LAN_PEER, _client, apiWindow, server, settings)
+    LAN_HOST, LAN_PEER, _client, server, settings)
 
 CATALOG = "/api/v1/api-catalog"
 CONNECTION = "/api/v1/connection"
-SRC = Path(__file__).resolve().parents[1] / "src"
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+WEB = ROOT / "web" / "src"
+# The Companion and OBS guides' example requests (SF-4a-2).
+EXAMPLES = WEB / "GuidePages" / "examples.json"
+LOCALES = WEB / "i18n" / "locales"
+
+
+def _locale(lang):
+    return json.loads((LOCALES / f"{lang}.json").read_text(encoding="utf-8"))
 
 
 def _ok(response):
@@ -103,44 +114,67 @@ def test_a_payload_is_a_copy():
         if row["id"] == bodies[0]["id"])["body"]
 
 
-def test_the_api_window_reads_the_catalog_from_core(apiWindow):
-    from qtpy.QtWidgets import QLabel
-
-    from src import AutonaApiInfoWindow as windowModule
-
-    for name in ("_ENDPOINTS", "_ERROR_CODES", "_PATH_DEFAULTS",
-                 "_concrete_path"):
-        assert not hasattr(windowModule, name), name
-
-    table = apiWindow.refTable
-    assert table.rowCount() == len(ApiCatalog.ENDPOINTS)
-    for row, entry in enumerate(ApiCatalog.ENDPOINTS):
-        assert [table.item(row, column).text() for column in range(5)] == [
-            entry.method, entry.path, windowModule._tr(entry.desc),
-            "✓" if entry.confirm else "", "✓" if entry.logged else ""]
-
-    combo = apiWindow.presetCombo
-    assert [combo.itemText(i) for i in range(1, combo.count())] == [
-        f"{entry.method}  {entry.path}" for entry in ApiCatalog.ENDPOINTS]
-
-    legend = "\n".join(
-        f"{error.code}  ({error.status})  {windowModule._tr(error.desc)}"
-        for error in ApiCatalog.ERROR_CODES)
-    assert legend in [label.text() for label in apiWindow.findChildren(QLabel)]
+@pytest.mark.parametrize("lang", ["en", "ja"])
+def test_every_row_and_error_code_has_its_translation(lang):
+    # The API page shows guide_api_endpoint_<id> / guide_api_error_<code>
+    # (the catalogue's English only as a fallback); English is the
+    # catalogue's own text, so the two cannot drift apart.
+    strings = _locale(lang)
+    for entry in ApiCatalog.ENDPOINTS:
+        key = f"guide_api_endpoint_{entry.id}"
+        assert strings.get(key), (lang, key)
+        if lang == "en":
+            assert strings[key] == entry.desc, key
+    for error in ApiCatalog.ERROR_CODES:
+        key = f"guide_api_error_{error.code}"
+        assert strings.get(key), (lang, key)
+        if lang == "en":
+            assert strings[key] == error.desc, key
 
 
-def test_the_api_window_fills_its_tester_from_a_core_row(apiWindow):
-    row = next(i for i, entry in enumerate(ApiCatalog.ENDPOINTS)
-               if entry.method == "POST" and entry.body)
-    entry = ApiCatalog.ENDPOINTS[row]
+def _examples():
+    return json.loads(EXAMPLES.read_text(encoding="utf-8"))
 
-    apiWindow.presetCombo.setCurrentIndex(row + 1)   # after "—"
-    apiWindow._applyPreset(row + 1)
 
-    assert apiWindow.methodCombo.currentText() == "POST"
-    assert apiWindow.pathField.text() == ApiCatalog.ConcretePath(entry.path)
-    assert json.loads(apiWindow.bodyEdit.toPlainText()) == entry.body
-    assert ApiCatalog.ConcretePath(entry.path) in apiWindow._buildCurl(entry)
+def test_the_examples_are_one_table_for_both_guides():
+    rows = _examples()
+    ids = [row["id"] for row in rows]
+    assert len(set(ids)) == len(ids)
+    assert ids == [
+        "team1_score_up", "team1_score_down", "team2_score_up",
+        "team2_score_down", "reset_scores", "swap_teams", "apply_changes",
+        "pull_stream", "stats_refresh", "bracket_refresh"]
+    for row in rows:
+        assert set(row) == {"id", "method", "path", "body", "icon",
+                            "guides"}, row
+        assert row["guides"] and set(row["guides"]) <= {"companion", "obs"}
+        assert set(row["icon"]) == {"bg", "top", "main"}, row
+    # The OBS guide never listed the statistics (the window's table).
+    assert [row["id"] for row in rows if "obs" not in row["guides"]] == [
+        "stats_refresh"]
+    for lang in ("en", "ja"):
+        strings = _locale(lang)
+        for row in rows:
+            assert strings.get(f"guide_example_{row['id']}"), (lang, row)
+
+
+def test_every_example_is_a_v1_route(server):
+    # What the Companion / OBS guides tell an operator to send: each one's
+    # method and path reach a /api/v1 route (the URL map) that the
+    # catalogue lists with the same method, needs no {"confirm": true} and
+    # is a write the guard knows.
+    routes = server.app.url_map.bind("localhost")
+    for row in _examples():
+        endpoint, _args = routes.match(f"/api/v1{row['path']}",
+                                       method=row["method"])
+        assert endpoint.startswith("api_v1."), row
+        name = endpoint.split(".", 1)[1]
+        entry = next((entry for entry in ApiCatalog.ENDPOINTS
+                      if entry.id == name), None)
+        assert entry is not None, row
+        assert entry.method == row["method"]
+        assert not entry.confirm, row
+        assert WebAccess.RouteAccess(endpoint) == WebAccess.WRITE, row
 
 
 # ── the connection ───────────────────────────────────────────────────────
@@ -160,8 +194,6 @@ def test_the_api_window_fills_its_tester_from_a_core_row(apiWindow):
 ])
 def test_the_connection_is_what_the_guides_show(
         server, monkeypatch, listening, stored, expected):
-    from src import AutonaApiInfoWindow, AutonaIntegrationGuideWindow
-    from src import AutonaObsGuideWindow
     from src.AutonaWebServer import WebServer
     from src.Helpers import AutonaNetworkHelper
 
@@ -181,15 +213,9 @@ def test_the_connection_is_what_the_guides_show(
         "outDir": os.path.normpath(os.path.join(os.getcwd(), "out")),
         "pathSeparator": os.sep}
     assert response.headers["Cache-Control"] == "no-store"
-    # What each window shows (their own readers, not built).
-    assert data["baseUrl"] == AutonaApiInfoWindow.AutonaApiInfoWindow._baseUrl(
-        None)
-    assert data["baseUrl"] == (
-        AutonaIntegrationGuideWindow.AutonaIntegrationGuideWindow._baseUrl(
-            None))
-    obs = AutonaObsGuideWindow.AutonaObsGuideWindow
-    assert data["localBaseUrl"] == obs._baseUrl(None)
-    assert data["outDir"] == obs._outDir(None)
+    # What the windows showed until SF-4a-2 (GetWebServerHost and the port
+    # being served, the loopback for OBS, ./out made absolute) is the fixed
+    # expectation above.
     assert (data["lan"], data["lanAtRestart"]) == (
         WebServer.Serving()[1], WebServer.LanOnAtRestart())
     # Nothing secret in it.
@@ -198,7 +224,8 @@ def test_the_connection_is_what_the_guides_show(
 
 
 def test_a_watch_file_is_out_dir_joined_with_the_separator(server):
-    # What the OBS window's file table shows for out/score/1/match.txt.
+    # What the OBS page's file table shows for out/score/1/match.txt
+    # (web/src/GuidePages/format.ts's watchPath).
     data = _ok(_client(server).get(CONNECTION))
     joined = data["pathSeparator"].join(
         [data["outDir"], "score", "1", "match.txt"])
@@ -290,3 +317,64 @@ def test_the_desktop_scan_emits_after_scanning():
                 if isinstance(node, ast.FunctionDef) and node.name == "_Scan")
     assert [ast.unparse(statement) for statement in scan.body] == [
         "self.catalog.ScanGames()", "self.signals.onLoadAssets.emit()"]
+
+
+# ── The app's version (/api/v1/health; the About page shows it) ─────────
+
+def _versions(directory, program):
+    (directory / "assets").mkdir(parents=True)
+    (directory / "assets" / "versions.json").write_text(
+        json.dumps({"program": program}), encoding="utf-8")
+
+
+@pytest.fixture
+def version_dirs(monkeypatch, tmp_path):
+    """A working directory and a bundle (sys._MEIPASS) of their own, the
+    version read again."""
+    from src import AutonaApiV1
+    from src.Helpers import AutonaDirHelper
+
+    work, bundle = tmp_path / "work", tmp_path / "bundle"
+    work.mkdir()
+    bundle.mkdir()
+    monkeypatch.chdir(work)
+    monkeypatch.setattr(AutonaDirHelper, "current_dir", work)
+    monkeypatch.setattr(AutonaApiV1, "_version_cache", None)
+    return work, bundle
+
+
+def test_a_release_reads_its_version_from_the_bundle(version_dirs,
+                                                     monkeypatch):
+    # The exe's folder has no assets/versions.json: it is under _internal/
+    # (sys._MEIPASS). Read from the working directory, /health -- and the
+    # About page -- said "v?".
+    from src import AutonaApiV1
+    from src.Helpers import AutonaDirHelper
+
+    _work, bundle = version_dirs
+    _versions(bundle, "9.8.7")
+    monkeypatch.setattr(AutonaDirHelper, "is_in_bundle", True)
+    monkeypatch.setattr("sys._MEIPASS", str(bundle), raising=False)
+
+    assert AutonaApiV1._app_version() == "9.8.7"
+
+
+def test_a_checkout_reads_its_version_from_the_working_directory(
+        version_dirs, monkeypatch):
+    from src import AutonaApiV1
+    from src.Helpers import AutonaDirHelper
+
+    work, _bundle = version_dirs
+    _versions(work, "1.2.3")
+    monkeypatch.setattr(AutonaDirHelper, "is_in_bundle", False)
+
+    assert AutonaApiV1._app_version() == "1.2.3"
+
+
+def test_no_versions_file_is_a_question_mark(version_dirs, monkeypatch):
+    from src import AutonaApiV1
+    from src.Helpers import AutonaDirHelper
+
+    monkeypatch.setattr(AutonaDirHelper, "is_in_bundle", False)
+
+    assert AutonaApiV1._app_version() == "?"

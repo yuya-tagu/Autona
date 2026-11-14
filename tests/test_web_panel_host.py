@@ -31,6 +31,7 @@ then) the host makes, and navigates the way the shell does
 the Web UI's own tests and by Playwright (web/e2e/panel-shell.spec.ts).
 """
 import ast
+import functools
 import json
 import logging
 import socket
@@ -2570,6 +2571,16 @@ def _autonaSource():
     return (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
 
 
+def _menuPages():
+    """Window.MENU_PAGES, read out of src/Autona.py."""
+    for node in ast.walk(ast.parse(_autonaSource())):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "MENU_PAGES"):
+            return ast.literal_eval(node.value)
+    raise AssertionError("src/Autona.py: no MENU_PAGES")
+
+
 def _windowMethod(name):
     import ast
 
@@ -3405,7 +3416,9 @@ class _WindowRig:
     _BuildUi builds it, with a few sidebar items: six React ones and a
     made-up lazy Qt one (the sidebar has no Qt item left since S4aa, and the
     factories' path for a Qt panel is still there), in the real order, and
-    the Settings page after them (S4af). Off screen, so the host builds no
+    the menu's pages after them (MENU_PAGES: Settings, S4af; the API /
+    Companion / OBS guides and About, S-final SF-4a-2). Off screen, so the
+    host builds no
     view; what it was asked to show is its _panel. The sidebar is a stand-in
     (_FakeSidebar) that choose() highlights as a click does."""
 
@@ -3415,7 +3428,7 @@ class _WindowRig:
                "_CreateScoreboardPanel", "_CreateTop8Panel",
                "_CreateCommentaryPanel", "_CreateStatsPanel",
                "OpenScoreSets", "OpenSettings", "_NavToRemember",
-               "_CreateSettingsPanel")
+               "OpenMenuPage")
 
     def __init__(self):
         import ast
@@ -3431,9 +3444,12 @@ class _WindowRig:
             self.METHODS)
         window.body.append(ast.parse(
             "def _ApplyTabBarPolicy(self, panel):\n    pass\n").body[0])
+        window.body.append(ast.parse(
+            f"MENU_PAGES = {_menuPages()!r}\n").body[0])
 
         namespace = {"QWidget": QWidget, "logger": logger,
-                     "AutonaWebPanelHost": AutonaWebPanelHost}
+                     "AutonaWebPanelHost": AutonaWebPanelHost,
+                     "functools": functools}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
@@ -3468,12 +3484,13 @@ class _WindowRig:
             w._panelIndexes[key] = index
             if WebAccess.IsWebPanel(key):
                 w._webPanelPages.Add(index, key)
-        # As _BuildUi: the Settings page after the items, no item's.
-        index = w.stack.addWidget(QWidget())
-        w._lazyPanels[index] = (w._CreateSettingsPanel, "settings")
-        w._panelIndexes["settings"] = index
-        w._webPanelPages.Add(index, "settings")
-        w._navBeforeSettings = 0
+        # As _BuildUi: the menu's pages after the items, no item's.
+        for key in w.MENU_PAGES:
+            index = w.stack.addWidget(QWidget())
+            w._lazyPanels[index] = (functools.partial(w._WebPanel, key), key)
+            w._panelIndexes[key] = index
+            w._webPanelPages.Add(index, key)
+        w._navBeforeMenuPage = 0
         w.sidebar = _FakeSidebar()
         w.stack.currentChanged.connect(w._OnStackPageChanged)
         self.placeholders = [w.stack.widget(index)
@@ -3509,7 +3526,8 @@ class _FakeSidebar:
         self.current = -1
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT, SETTINGS = range(8)
+(EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT,
+ SETTINGS, API, COMPANION, OBS, ABOUT) = range(12)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -3850,6 +3868,153 @@ def test_the_settings_page_asked_for_while_the_window_closes_does_nothing(qapp):
     assert rig.hosts() == []
 
 
+# ── the menu's other pages (ADR-005 S-final SF-4a-2) ────────────────────
+# The API reference & tester, the Companion and OBS guides and About: Qt
+# windows (About a QMessageBox) until then, now pages as Settings is.
+
+@pytest.mark.parametrize("name, page", [("api", API),
+                                        ("companion", COMPANION),
+                                        ("obs", OBS), ("about", ABOUT)])
+def test_a_menu_page_shows_the_host_with_no_item_highlighted(qapp, name,
+                                                             page):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingSettings(rig)
+    rig.choose(SCOREBOARD)
+    host = w._webPanelHost
+
+    w.OpenMenuPage(name)
+
+    assert order == ["front"]
+    assert host._panel == name
+    assert w.stack.currentIndex() == SCOREBOARD
+    assert rig.hosts() == [SCOREBOARD]
+    assert w.stack.widget(page) is rig.placeholders[page]
+    assert page not in w._lazyPanels
+    assert w.sidebar.currentIndex() == -1
+    assert w._NavToRemember() == SCOREBOARD
+
+    assert rig.choose(STATS) == SCOREBOARD
+    assert host._panel == "stats"
+    assert w._NavToRemember() == STATS
+
+
+def test_a_menu_page_opened_first_builds_the_host_on_its_page(qapp):
+    rig = _WindowRig()
+    w = rig.window
+    _askingSettings(rig)
+    rig.choose(LAZY_QT)
+
+    w.OpenMenuPage("obs")
+
+    assert w.stack.currentIndex() == OBS
+    assert rig.hosts() == [OBS]
+    assert w._webPanelHost._panel == "obs"
+    assert w._NavToRemember() == LAZY_QT
+    # The other menu pages and the React items show it from then on.
+    assert SETTINGS not in w._lazyPanels
+    assert ABOUT not in w._lazyPanels
+    assert EVENT not in w._lazyPanels
+    w.OpenMenuPage("about")
+    assert w.stack.currentIndex() == OBS
+    assert w._webPanelHost._panel == "about"
+    assert w._NavToRemember() == LAZY_QT
+    assert rig.choose(EVENT) == OBS
+    assert w._webPanelHost._panel == "event"
+    assert rig.hosts() == [OBS]
+
+
+def test_going_from_one_menu_page_to_another_keeps_the_item_before_them(
+        qapp):
+    rig = _WindowRig()
+    w = rig.window
+    _askingSettings(rig)
+    rig.choose(TOP8)
+    w.OpenMenuPage("api")
+    host = w._webPanelHost
+
+    w.OpenSettings()
+    assert host._panel == "settings"
+    w.OpenMenuPage("companion")
+
+    assert host._panel == "companion"
+    assert w.sidebar.currentIndex() == -1
+    assert w._NavToRemember() == TOP8
+    assert rig.hosts() == [TOP8]
+
+
+def test_only_a_menu_page_is_opened_as_one(qapp):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingSettings(rig)
+    rig.choose(STREAM)
+
+    for name in ("stream", "lazyQt", "playerBrowser", "nope"):
+        with pytest.raises(ValueError):
+            w.OpenMenuPage(name)
+
+    assert order == []
+    assert w.sidebar.currentIndex() == STREAM
+    assert w._webPanelHost._panel == "stream"
+
+
+@pytest.mark.parametrize("name", ["api", "companion", "obs", "about"])
+def test_a_menu_page_asked_for_while_the_window_closes_does_nothing(
+        qapp, name):
+    rig = _WindowRig()
+    w = rig.window
+    order = _askingSettings(rig)
+    rig.choose(LAZY_QT)
+    w._shuttingDown = True
+
+    w.OpenMenuPage(name)
+
+    assert order == []
+    assert w.stack.currentIndex() == LAZY_QT
+    assert w.sidebar.currentIndex() == LAZY_QT
+    assert rig.hosts() == []
+
+
+def test_the_menu_opens_its_pages():
+    # Settings first (the restore's bound: every page from it on is a menu
+    # page), each a React panel, registered as a lazy page after the items
+    # (the rig above does what _BuildUi does) and none a sidebar item: the
+    # saved sidebar index does not move, so STATE_VERSION stays.
+    pages = _menuPages()
+    assert pages == ("settings", "api", "companion", "obs", "about")
+    assert all(WebAccess.IsWebPanel(name) for name in pages)
+    source = _autonaSource()
+    assert "for key in self.MENU_PAGES:" in source
+    assert "functools.partial(self._WebPanel, key), key)" in source
+    assert "    STATE_VERSION = 22\n" in source.replace("\r\n", "\n")
+    tree = ast.parse(source)
+    sections = next(
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Attribute)
+            and target.attr == "_navSections" for target in node.targets))
+    named = {node.value for node in ast.walk(sections)
+             if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+    assert named.isdisjoint(pages), named & set(pages)
+
+    # The menu's entries: each asks for its page by name (Settings through
+    # OpenSettings), nothing else opens one.
+    opened = sorted(
+        node.args[0].value for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "OpenMenuPage"
+        and node.args and isinstance(node.args[0], ast.Constant))
+    assert opened == sorted(pages), opened
+    # The API Settings submenu's entries are the app's strings now (the
+    # "api" context went with the API window).
+    for text in ("API Settings", "Open reference & tester",
+                 "Companion settings", "OBS / Advanced Scene Switcher",
+                 "About Autona"):
+        assert f'QApplication.translate("app", "{text}")' in source, text
+    assert 'translate("api"' not in source
+
+
 def test_the_sidebar_highlights_no_item_and_then_the_next_chosen(qapp):
     # AutonaSidebar.clearCurrent: an exclusive group never unchecks its
     # checked button; a click afterwards checks one item as usual.
@@ -4104,7 +4269,8 @@ def test_the_sf1_dead_code_is_gone():
 
 def test_the_qt_settings_window_is_gone():
     # ADR-005 S4af (the owner's go-ahead: no way back): the React page
-    # (/web/settings, the menu's Window.OpenSettings) is the only settings
+    # (/web/settings, the menu's Window.OpenSettings -> OpenMenuPage) is the
+    # only settings
     # UI. Neither the Qt window, its rows' widget, the colour button only it
     # used, the key recorder, the hotkeys' switch hook nor the window's
     # translations may come back.
@@ -4147,6 +4313,94 @@ def test_the_qt_settings_window_is_gone():
     spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
         encoding="utf-8")
     assert "src/Settings" not in spec and "src\\Settings" not in spec
+
+# The Qt guide windows (ADR-005 S-final SF-4a-2): the API reference &
+# tester, the Companion and OBS guides; and the About box. Pages now
+# (web/src/GuidePages/, the menu's Window.OpenMenuPage).
+QT_GUIDE_MODULES = ("AutonaApiInfoWindow", "AutonaIntegrationGuideWindow",
+                    "AutonaObsGuideWindow")
+# What went with them: the window's accessors and slots, the About box, and
+# the Settings page's own opener and memory (OpenMenuPage's now).
+QT_GUIDE_NAMES = (*QT_GUIDE_MODULES, "EnsureApiInfoWindow",
+                  "EnsureCompanionGuideWindow", "EnsureObsGuideWindow",
+                  "_apiInfoWindow", "_companionGuideWindow",
+                  "_obsGuideWindow", "ShowAboutDialog",
+                  "_CreateSettingsPanel", "_navBeforeSettings")
+# The menu's API Settings entries, now the app context's (en, ja).
+GUIDE_MENU_STRINGS = {
+    "Open reference & tester": "リファレンス・テスターを開く",
+    "Companion settings": "Companion の設定",
+    "OBS / Advanced Scene Switcher": "OBS / Advanced Scene Switcher",
+}
+
+
+def test_the_qt_guide_windows_are_gone():
+    import re
+    import xml.etree.ElementTree as ET
+
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    for module in QT_GUIDE_MODULES:
+        assert not (src / f"{module}.py").exists(), module
+    scanned = [*sorted(src.rglob("*.py")), PROJECT_ROOT / "main.py",
+               *sorted((PROJECT_ROOT / "tests").glob("*.py")),
+               *sorted((PROJECT_ROOT / "tests" / "live").glob("*.py"))]
+    importers = {str(path.relative_to(PROJECT_ROOT)):
+                 sorted(_importedModules(path) & set(QT_GUIDE_MODULES))
+                 for path in scanned}
+    assert {path: names for path, names in importers.items() if names} == {}
+    users = {str(path.relative_to(PROJECT_ROOT)):
+             sorted(_codeNames(path) & set(QT_GUIDE_NAMES))
+             for path in sorted(src.rglob("*.py"))}
+    assert {path: names for path, names in users.items() if names} == {}
+    # The game asset guide stays a lazy Qt window.
+    assert (src / "AutonaGameAssetGuideWindow.py").exists()
+    assert "EnsureGameAssetGuideWindow" in _codeNames(src / "Autona.py")
+
+    # The translations: no "api" context, nothing located in the windows'
+    # files; the menu's entries in the app context, translated in ja.
+    for name in ("Autona_en.ts", "Autona_ja.ts"):
+        path = src / "i18n" / name
+        text = path.read_text(encoding="utf-8")
+        assert "<name>api</name>" not in text, name
+        for module in QT_GUIDE_MODULES:
+            assert module not in text, (name, module)
+        app = next(context for context in ET.parse(path).getroot()
+                   .findall("context") if context.findtext("name") == "app")
+        messages = {message.findtext("source"):
+                    message.findtext("translation")
+                    for message in app.findall("message")}
+        for source, ja in GUIDE_MENU_STRINGS.items():
+            assert source in messages, (name, source)
+            if name == "Autona_ja.ts":
+                assert messages[source] == ja, (source, messages[source])
+        assert not re.search(r"<location[^>]*AutonaApiInfoWindow", text)
+
+    # The build collects none of it.
+    spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
+        encoding="utf-8")
+    for module in QT_GUIDE_MODULES:
+        assert module not in spec, module
+
+
+def test_the_about_page_names_the_inquiry_address_the_menu_mails():
+    # The About box showed BUSINESS_INQUIRY_EMAIL; the page writes it out
+    # (a mailto link in the shared view would go nowhere: _OpenOutside hands
+    # http(s) on only), and the Help menu's "Event support inquiries" still
+    # mails it.
+    from tests.conftest import PROJECT_ROOT
+
+    tree = ast.parse(_autonaSource())
+    email = next(ast.literal_eval(node.value) for node in tree.body
+                 if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name)
+                         and target.id == "BUSINESS_INQUIRY_EMAIL"
+                         for target in node.targets))
+    page = (PROJECT_ROOT / "web" / "src" / "GuidePages" / "AboutPage.tsx"
+            ).read_text(encoding="utf-8")
+    assert f'BUSINESS_INQUIRY_EMAIL = "{email}";' in page
+
 
 
 @pytest.mark.parametrize("state", ["minimized", "maximized-then-minimized",

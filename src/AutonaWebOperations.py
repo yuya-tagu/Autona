@@ -708,11 +708,11 @@ def update_hotkey_settings(enabled=None, keys=None):
 
 
 # ── The guides (ADR-005 S-final SF-3a) ───────────────────────────────────
-# What the API / Companion / OBS guide windows read for themselves, for the
-# pages that replace them (SF-4a): core's API catalogue, where the server
-# and its out/ files are, and the access token (SF-4a-1: its routes are
-# WebAccess.SHELL, the shared view's own fetches only). Both shells, the
-# calling thread.
+# What the API / Companion / OBS guide pages read (SF-4a-2; the Qt windows
+# read it for themselves until then): core's API catalogue, where the
+# server and its out/ files are, and the access token (SF-4a-1: its routes
+# are WebAccess.SHELL, the shared view's own fetches only). Both shells,
+# the calling thread.
 
 def get_api_catalog():
     return ApiCatalog.Payload()
@@ -720,12 +720,12 @@ def get_api_catalog():
 
 def get_access_token():
     """The access token in use ("" when there is none to use), as the API
-    window shows it: WebAccess.Token()."""
+    page shows it: WebAccess.Token()."""
     return WebAccess.Token()
 
 
 def regenerate_access_token():
-    """Replace the access token, as the API window's button does:
+    """Replace the access token, as the API page's button does:
     ``(token, issued)``. ``issued`` is False when none was issued (settings
     .json could not be read at launch and still cannot be opened) -- the
     token is then the old one, still in use."""
@@ -735,21 +735,21 @@ def regenerate_access_token():
 
 
 def get_connection():
-    """What the guide windows show of the server and its files.
+    """What the guide pages show of the server and its files.
 
     `port` / `lan` are WebServer.Serving() (what it is bound with; the
     settings while none runs) and `lanAtRestart` WebServer.LanOnAtRestart()
     (LAN access saved as on while the running server is this PC's only: the
-    windows' "takes effect after a restart"). `baseUrl` is the API's at the
+    pages' "takes effect after a restart"). `baseUrl` is the API's at the
     address user-facing URLs advertise (this PC's LAN IP with LAN access,
-    else the loopback; the API and Companion windows'), `localBaseUrl` the
-    loopback's (the OBS window's: OBS runs on this PC). `outDir` is out/'s
-    absolute path (the OBS window's watch files are below it) and
+    else the loopback; the API and Companion pages'), `localBaseUrl` the
+    loopback's (the OBS page's: OBS runs on this PC). `outDir` is out/'s
+    absolute path (the OBS page's watch files are below it) and
     `pathSeparator` the one to join them with."""
     from .Helpers.AutonaNetworkHelper import GetWebServerHost
     from .AutonaWebServer import WebServer
-    # One reading for the port and the host (the windows' GetWebServerHost,
-    # given this reading's LAN access).
+    # One reading for the port and the host (GetWebServerHost, given this
+    # reading's LAN access).
     port, lan = WebServer.Serving()
     return {
         "port": port,

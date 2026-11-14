@@ -12,6 +12,10 @@ import ResultPage from "../ResultPage";
 import BoardPage from "../BoardPage";
 import ScorePage from "../ScorePage";
 import SettingsPage from "../SettingsPage";
+import ApiPage from "../GuidePages/ApiPage";
+import CompanionPage from "../GuidePages/CompanionPage";
+import ObsPage from "../GuidePages/ObsPage";
+import AboutPage from "../GuidePages/AboutPage";
 
 // The React panels, by the name in their URL (/web/<panel>). Must name the
 // same panels as WEB_PANELS in src/core/WebAccess.py, which decides what the
@@ -23,7 +27,9 @@ import SettingsPage from "../SettingsPage";
 // "playerBrowser" 選手リスト (S4n); "thumbnail" サムネイル (S4p); "result"
 // 大会リザルト (S4r); "board" スコアボード設定 (S4s); "scoreboard" スコアボード入力
 // (S4aa); "settings" 設定 (S4af: the Help & Settings menu's, not a sidebar
-// item).
+// item); "api" / "companion" / "obs" the API reference & tester and the
+// Companion and OBS guides, "about" About Autona (S-final SF-4a-2: the
+// menu's too, the Qt windows until then).
 export const PANELS: Record<string, React.ComponentType> = {
     "shell-check": ShellCheckPage,
     "commentary": CommentaryPage,
@@ -38,6 +44,10 @@ export const PANELS: Record<string, React.ComponentType> = {
     "board": BoardPage,
     "scoreboard": ScorePage,
     "settings": SettingsPage,
+    "api": ApiPage,
+    "companion": CompanionPage,
+    "obs": ObsPage,
+    "about": AboutPage,
 };
 
 export function panelPage(panel: string): React.ComponentType | undefined {

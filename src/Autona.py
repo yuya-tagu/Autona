@@ -4,6 +4,7 @@ from .Helpers import AutonaQtHelper
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 import faulthandler
+import functools
 import shutil
 import qdarktheme
 from . import ui_constants as UI
@@ -185,9 +186,6 @@ bootstrap_core()
 bootstrap_gui()
 
 # autopep8: off
-from .AutonaApiInfoWindow import AutonaApiInfoWindow
-from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
-from .AutonaObsGuideWindow import AutonaObsGuideWindow
 from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -214,8 +212,9 @@ from .core import WebAccess
 # autopep8: on
 
 
-# Single source for the support inquiry contact, used by the Help menu, the
-# About dialog and (manually kept in sync) TERMS.md §4.
+# Single source for the support inquiry contact, used by the Help menu and
+# (kept in sync by hand) the About page (web/src/GuidePages/AboutPage.tsx;
+# tests/test_web_panel_host.py compares the two) and TERMS.md §4.
 DISCORD_URL = "https://discord.gg/yAFAmhaUqn"
 BUSINESS_INQUIRY_EMAIL = "taguyangames@gmail.com"
 BUSINESS_INQUIRY_URL = f"mailto:{BUSINESS_INQUIRY_EMAIL}"
@@ -257,6 +256,12 @@ class Window(QMainWindow):
     #      Settings in S4p and Result Settings in S4r, each in the same place:
     #      no bump.)
     STATE_VERSION = 22
+    # The Help & Settings menu's pages (ADR-005 S4af: Settings; S-final
+    # SF-4a-2: the API reference & tester, the Companion and OBS guides and
+    # About, the Qt windows until then): React panels in the shared view,
+    # not sidebar items (OpenMenuPage). Stack pages after the items', in
+    # this order: Settings first, so every page from it on is a menu page.
+    MENU_PAGES = ("settings", "api", "companion", "obs", "about")
     signals = WindowSignals()
 
     def __init__(self):
@@ -345,7 +350,6 @@ class Window(QMainWindow):
         except Exception as e:
             version = "?"
 
-        self.programVersion = version
         self.setGeometry(300, 300, 800, 100)
         self.setWindowTitle("Autona v"+version)
 
@@ -542,17 +546,19 @@ class Window(QMainWindow):
                 else:
                     index = self.stack.addWidget(page)
                 self.sidebar.addNavItem(QIcon(UI.icon_path(iconName)), label)
-        # The Settings page (ADR-005 S4af): a React panel the Help & Settings
-        # menu opens (OpenSettings), not a sidebar item. A lazy page after
-        # the items', so nav index == stack index still holds for every item
-        # and the saved sidebar index does not move (no STATE_VERSION bump).
-        index = self.stack.addWidget(QWidget())
-        self._lazyPanels[index] = (self._CreateSettingsPanel, "settings")
-        self._panelIndexes["settings"] = index
-        self._webPanelPages.Add(index, "settings")
-        # The item the window reopens on while the Settings page shows (no
-        # item is highlighted then): the one chosen before it.
-        self._navBeforeSettings = 0
+        # The menu's pages (MENU_PAGES): React panels the Help & Settings
+        # menu opens (OpenMenuPage), not sidebar items. Lazy pages after the
+        # items', so nav index == stack index still holds for every item and
+        # the saved sidebar index does not move (no STATE_VERSION bump).
+        for key in self.MENU_PAGES:
+            index = self.stack.addWidget(QWidget())
+            self._lazyPanels[index] = (
+                functools.partial(self._WebPanel, key), key)
+            self._panelIndexes[key] = index
+            self._webPanelPages.Add(index, key)
+        # The item the window reopens on while a menu page shows (no item is
+        # highlighted then): the one chosen before it.
+        self._navBeforeMenuPage = 0
         # Connected after the pages exist so the initial addWidget() cannot
         # trigger a build before _lazyPanels is complete.
         self.stack.currentChanged.connect(self._OnStackPageChanged)
@@ -563,16 +569,13 @@ class Window(QMainWindow):
         # Former Edit / API Settings / Help menus, merged into one dropdown.
         helpMenu = QMenu(self)
 
-        # Lazy dialog slots (startup Step 4a). The guide windows reachable
-        # from this menu are no longer built during startup: each one is
-        # constructed by its Ensure*Window() accessor on first open and kept
-        # afterwards, so state survives close/reopen exactly as before.
-        # Settings is a React page in the shared view since ADR-005 S4af
-        # (OpenSettings); the Qt settings window was one of these.
+        # Lazy dialog slot (startup Step 4a). The game asset guide window is
+        # not built during startup: its Ensure*Window() accessor constructs
+        # it on first open and keeps it afterwards, so state survives
+        # close/reopen. Settings (ADR-005 S4af), the API / Companion / OBS
+        # guides and About (S-final SF-4a-2) are React pages in the shared
+        # view (OpenMenuPage); their Qt windows were among these.
         self._gameAssetGuideWindow = None
-        self._apiInfoWindow = None
-        self._companionGuideWindow = None
-        self._obsGuideWindow = None
 
         action = helpMenu.addAction(
             QApplication.translate("Settings", "Settings"))
@@ -705,29 +708,27 @@ class Window(QMainWindow):
         self.sidebar.setGameSelect(self.gameSelect, self.moddedContentCheck)
 
         # ── API Settings (Help & Settings submenu) ──
-        # Entry point for the External Control API (/api/v1/) reference +
-        # tester window. The window itself is built on first open (see
-        # EnsureApiInfoWindow).
+        # The External Control API (/api/v1/) reference + tester and the
+        # connection guides: menu pages in the shared view (ADR-005 S-final
+        # SF-4a-2; Qt windows until then).
         helpMenu.addSeparator()
         apiMenu = helpMenu.addMenu(QApplication.translate("app", "API Settings"))
         action = apiMenu.addAction(
-            QApplication.translate("api", "Open reference & tester"))
-        action.triggered.connect(lambda: self.EnsureApiInfoWindow().show())
+            QApplication.translate("app", "Open reference & tester"))
+        action.triggered.connect(lambda: self.OpenMenuPage("api"))
 
         # Connection guide for Bitfocus Companion (which also covers Stream
-        # Deck). Built on first open.
+        # Deck).
         apiMenu.addSeparator()
         action = apiMenu.addAction(
-            QApplication.translate("api", "Companion settings"))
-        action.triggered.connect(
-            lambda: self.EnsureCompanionGuideWindow().show())
+            QApplication.translate("app", "Companion settings"))
+        action.triggered.connect(lambda: self.OpenMenuPage("companion"))
 
         # Connection guide for OBS Studio + Advanced Scene Switcher (ASS):
-        # (B) ASS drives /api/v1/ via curl, (D) ASS watches out/ files. Built
-        # on first open.
+        # (B) ASS drives /api/v1/ over HTTP, (D) ASS watches out/ files.
         action = apiMenu.addAction(
-            QApplication.translate("api", "OBS / Advanced Scene Switcher"))
-        action.triggered.connect(lambda: self.EnsureObsGuideWindow().show())
+            QApplication.translate("app", "OBS / Advanced Scene Switcher"))
+        action.triggered.connect(lambda: self.OpenMenuPage("obs"))
 
         # ── Help (updates + community) ──
         helpMenu.addSeparator()
@@ -754,10 +755,12 @@ class Window(QMainWindow):
 
         # About / license information. Serves double duty as the LGPL v3
         # "prominent notice" for Qt/PySide6 and the start.gg attribution
-        # required by the start.gg APIs Terms of Use.
+        # required by the start.gg APIs Terms of Use. A menu page since
+        # ADR-005 S-final SF-4a-2 (web/src/GuidePages/AboutPage.tsx; a
+        # QMessageBox until then).
         action = helpMenu.addAction(
             QApplication.translate("app", "About Autona"))
-        action.triggered.connect(lambda x=None: self.ShowAboutDialog())
+        action.triggered.connect(lambda x=None: self.OpenMenuPage("about"))
 
         # Attach the assembled menu to the sidebar footer button.
         self.sidebar.helpButton.setMenu(helpMenu)
@@ -784,8 +787,8 @@ class Window(QMainWindow):
             f"sidebarIndex_v{self.STATE_VERSION}", 0, type=int)
         if 0 <= savedIndex < self._panelIndexes["settings"]:
             # The saved index is the sidebar's (closeEvent: an item, never
-            # the Settings page after them); a React item's page is the
-            # shared view's, as on a click.
+            # a menu page after them -- Settings is the first of those); a
+            # React item's page is the shared view's, as on a click.
             self.sidebar.setCurrentIndex(savedIndex)
             self._OnNavSelected(savedIndex)
         if self.qtSettings.value(
@@ -1056,11 +1059,6 @@ class Window(QMainWindow):
         # ADR-005 S4n: the React page in the shared web view.
         return self._WebPanel("playerBrowser")
 
-    def _CreateSettingsPanel(self):
-        # ADR-005 S4af: the React page in the shared web view (not a sidebar
-        # item: OpenSettings).
-        return self._WebPanel("settings")
-
     def _WebPanel(self, panel):
         """The shared web view (AutonaWebPanelHost), built as the stack page
         of `panel`, the first React panel opened.
@@ -1096,8 +1094,8 @@ class Window(QMainWindow):
 
     def _OnNavSelected(self, nav):
         """Show sidebar item `nav`'s stack page: a sidebar click, and the
-        QSettings tab restore at the end of __init__ (and the Settings page,
-        a page of its own after the items': OpenSettings).
+        QSettings tab restore at the end of __init__ (and the menu's pages,
+        pages of their own after the items': OpenMenuPage).
 
         Its own page, but for a React item once the shared web view exists:
         that view's page (WebPanelPages). Going from one React item to
@@ -1138,34 +1136,40 @@ class Window(QMainWindow):
             return
         host.OpenScoreSets(board)
 
-    # ── The Settings page (ADR-005 S4af) ─────────────────────────────────
-    # The Help & Settings menu's "Settings" and the API window's "Open
-    # settings" (the Qt settings window, non-modal, until S4af).
+    # ── The menu's pages (ADR-005 S4af / S-final SF-4a-2) ────────────────
+    # The Help & Settings menu's "Settings", the API Settings submenu's
+    # three guides and "About Autona" (Qt windows until then).
 
-    def OpenSettings(self):
-        """Show the Settings page: a React panel in the shared view, as a
-        sidebar item's, but not one -- no item is highlighted while it
-        shows, and choosing one leaves it. The window comes to the front
-        first: the API window asks from a window of its own. Nothing once
-        the window is closing (a request then would build the host being
-        torn down)."""
+    def OpenMenuPage(self, name):
+        """Show menu page `name` (MENU_PAGES): a React panel in the shared
+        view, as a sidebar item's, but not one -- no item is highlighted
+        while it shows, and choosing one leaves it. The window comes to the
+        front first (the menu may be asked from elsewhere: the settings page
+        once came from the API window). Nothing once the window is closing
+        (a request then would build the host being torn down)."""
+        if name not in self.MENU_PAGES:
+            raise ValueError(f"not a menu page: {name!r}")
         if self._shuttingDown:
-            logger.info("The settings page was asked for while the window "
+            logger.info(f"The {name} page was asked for while the window "
                         "closes: nothing opened")
             return
         self._BringToFront()
         nav = self.sidebar.currentIndex()
         if nav >= 0:
-            self._navBeforeSettings = nav
+            self._navBeforeMenuPage = nav
         self.sidebar.clearCurrent()
-        self._OnNavSelected(self._panelIndexes["settings"])
+        self._OnNavSelected(self._panelIndexes[name])
+
+    def OpenSettings(self):
+        """Show the Settings page (OpenMenuPage)."""
+        self.OpenMenuPage("settings")
 
     def _NavToRemember(self):
         """The sidebar item the window reopens on (closeEvent): the one
-        highlighted, or, while the Settings page shows (none is), the one
-        chosen before it."""
+        highlighted, or, while a menu page shows (none is), the one chosen
+        before it."""
         nav = self.sidebar.currentIndex()
-        return self._navBeforeSettings if nav < 0 else nav
+        return self._navBeforeMenuPage if nav < 0 else nav
 
     def _BringToFront(self):
         """Show the window in front of the others, restored if it was
@@ -1246,11 +1250,12 @@ class Window(QMainWindow):
         return panel
 
     # ── Lazy guide dialogs (startup Step 4a) ─────────────────────────────
-    # Each of these four dialogs is only reachable from a menu entry, so
-    # building them during startup charged every launch for UI nobody had
-    # asked for. They are constructed on first access and reused from then
-    # on, which keeps the previous behaviour of a single long-lived instance
-    # (state survives close/reopen).
+    # The game asset guide is only reachable from a menu entry, so building
+    # it during startup charged every launch for UI nobody had asked for. It
+    # is constructed on first access and reused from then on, which keeps
+    # the previous behaviour of a single long-lived instance (state survives
+    # close/reopen). The API / Companion / OBS guides were dialogs here too
+    # until ADR-005 S-final SF-4a-2 (menu pages now: OpenMenuPage).
 
     def _EnsureLazyWindow(self, attr, factory):
         """Build the dialog held in `attr` on first access; return it.
@@ -1272,16 +1277,6 @@ class Window(QMainWindow):
     def EnsureGameAssetGuideWindow(self):
         return self._EnsureLazyWindow(
             "_gameAssetGuideWindow", AutonaGameAssetGuideWindow)
-
-    def EnsureApiInfoWindow(self):
-        return self._EnsureLazyWindow("_apiInfoWindow", AutonaApiInfoWindow)
-
-    def EnsureCompanionGuideWindow(self):
-        return self._EnsureLazyWindow(
-            "_companionGuideWindow", AutonaIntegrationGuideWindow)
-
-    def EnsureObsGuideWindow(self):
-        return self._EnsureLazyWindow("_obsGuideWindow", AutonaObsGuideWindow)
 
     def _ApplyTabBarPolicy(self, root):
         """Show full tab labels ("…" elision off) and scroll on overflow."""
@@ -1550,33 +1545,6 @@ class Window(QMainWindow):
         else:
             self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.show()
-
-    def ShowAboutDialog(self):
-        # Legal/attribution text is deliberately not translated: proper nouns
-        # and license names must stay verbatim.
-        box = QMessageBox(self)
-        box.setWindowTitle(QApplication.translate("app", "About Autona"))
-        box.setTextFormat(Qt.TextFormat.RichText)
-        box.setText(
-            f"<b>Autona v{self.programVersion}</b><br>"
-            "&copy; 2026 taguyan and Autona contributors. Released under the "
-            "MIT License.<br><br>"
-            "Based on <a href=\"https://github.com/joaorb64/TournamentStreamHelper\">"
-            "TournamentStreamHelper</a> (MIT License) by João Ribeiro Bezerra.<br><br>"
-            "Tournament data powered by <a href=\"https://www.start.gg/\">start.gg</a>. "
-            "Autona is an unofficial tool and is not affiliated with or endorsed by "
-            "Start.gg, Inc.<br><br>"
-            "Built with Qt / <a href=\"https://pypi.org/project/PySide6/\">PySide6</a> "
-            "under the GNU LGPL v3 (dynamically linked; the libraries in "
-            "<code>_internal/</code> can be replaced by the user).<br><br>"
-            "Setup and operation support for events is available: "
-            f"<a href=\"{BUSINESS_INQUIRY_URL}\">{BUSINESS_INQUIRY_EMAIL}</a>.<br><br>"
-            "License details: see <code>LICENSE</code>, <code>TERMS.md</code>, "
-            "<code>TRADEMARK.md</code>, "
-            "<code>THIRD-PARTY-NOTICES.md</code> and the <code>licenses/</code> "
-            "folder next to the executable.")
-        box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        box.exec()
 
     @staticmethod
     def _resolveBattleFormat() -> str:

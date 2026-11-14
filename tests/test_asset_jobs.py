@@ -1,13 +1,15 @@
-"""The game assets and the API window's requests as TaskExecutor work
-(ADR-005 S3f-4; the headless shell's loader, S3f-6; one contract for both
-loaders, S-final SF-6a).
+"""The game assets as TaskExecutor work (ADR-005 S3f-4; the headless
+shell's loader, S3f-6; one contract for both loaders, S-final SF-6a).
 
 Until S3f-4 the asset adapter (AutonaGameAssetManager) ran its scan, load
 and start.gg download on QThreads of its own and decoded its icons on a
 QThreadPool, and the API window sent its requests as a Worker on another;
-src/Workers.py was their last user. Pinned here:
+src/Workers.py was their last user. (The API window's requests were a job
+from S3f-4 until ADR-005 S-final SF-4a-2, which made the window a page:
+its tester sends from the page, web/src/GuidePages/GuidePages.test.js.)
+Pinned here:
 
-- the adapter and the API window start no thread (that nothing in src/
+- the adapter starts no thread (that nothing in src/
   has a Worker, a QRunnable or a pool, and Workers.py is gone, is
   tests/test_task_executor.py's since S3f-6);
 - GuiExecutor.run_sync gives up on a call the GUI thread has not started
@@ -62,9 +64,7 @@ src/Workers.py was their last user. Pinned here:
   settles before ./out and state.json are flushed;
 - the other requests that wait for the GUI thread answer 503 once the app
   is shutting down, logged at INFO;
-- the start.gg character download is a job and has a timeout;
-- the API window's request is a job whose answer lands on the GUI thread,
-  and on no window that has been destroyed meanwhile.
+- the start.gg character download is a job and has a timeout.
 """
 import ast
 import os
@@ -165,10 +165,8 @@ def _names(path):
     return used
 
 
-@pytest.mark.parametrize("path", ["src/AutonaGameAssetManager.py",
-                                  "src/AutonaApiInfoWindow.py"])
-def test_the_asset_manager_and_the_api_window_start_no_thread(path):
-    names = _names(PROJECT_ROOT / path)
+def test_the_asset_manager_starts_no_thread():
+    names = _names(PROJECT_ROOT / "src/AutonaGameAssetManager.py")
     assert not names & {"QThread", "Thread", "start_new_thread"}
 
 
@@ -1884,99 +1882,3 @@ def test_the_character_download_is_a_job_with_a_timeout(
     [(thread, kwargs)] = calls
     assert thread.startswith(JOB_THREAD_PREFIX)
     assert kwargs["timeout"] == catalogModule.STARTGG_CHARACTERS_TIMEOUT_SECS
-
-
-# ── the API window's request ─────────────────────────────────────────────
-
-
-@pytest.fixture
-def apiWindow(autonaApp):
-    from src.AutonaApiInfoWindow import AutonaApiInfoWindow
-
-    window = AutonaApiInfoWindow()
-    window.UiMounted()
-    window.pathField.setText("/health")
-    yield window
-    drain_tasks()
-    from shiboken6 import Shiboken
-    if Shiboken.isValid(window):
-        window.deleteLater()
-
-
-def _answering(monkeypatch, answer, gate=None):
-    """Stand in for the request: records its thread, then answers (or
-    raises) once `gate` is open."""
-    from src.AutonaApiInfoWindow import AutonaApiInfoWindow
-
-    calls = []
-
-    def request(method, url, body, headers):
-        calls.append(threading.current_thread().name)
-        if gate is not None:
-            assert gate.wait(WAIT)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    monkeypatch.setattr(AutonaApiInfoWindow, "_performRequest",
-                        staticmethod(request))
-    return calls
-
-
-def test_the_api_window_sends_on_a_job_and_answers_on_the_gui_thread(
-        apiWindow, monkeypatch):
-    calls = _answering(monkeypatch, "HTTP 200 OK\n\n{}")
-    shown = []
-    realShow = apiWindow._onResponse
-    monkeypatch.setattr(apiWindow, "_onResponse", lambda text: (
-        shown.append(threading.current_thread().name), realShow(text)))
-
-    apiWindow._sendRequest()
-    assert not apiWindow.sendBtn.isEnabled()
-    drain_tasks()
-
-    assert len(calls) == 1 and calls[0].startswith(JOB_THREAD_PREFIX)
-    assert shown == [_main()]
-    assert apiWindow.responseEdit.toPlainText() == "HTTP 200 OK\n\n{}"
-    assert apiWindow.sendBtn.isEnabled()
-
-
-def test_the_api_window_shows_a_failed_request(apiWindow, monkeypatch):
-    _answering(monkeypatch, ConnectionError("refused"))
-
-    apiWindow._sendRequest()
-    drain_tasks()
-
-    assert apiWindow.responseEdit.toPlainText().endswith(":\nrefused")
-    assert apiWindow.sendBtn.isEnabled()
-
-
-def test_an_answer_for_a_destroyed_api_window_is_dropped(
-        apiWindow, monkeypatch):
-    from shiboken6 import Shiboken
-
-    gate = threading.Event()
-    _answering(monkeypatch, "HTTP 200 OK\n\n{}", gate)
-    shown = []
-    monkeypatch.setattr(apiWindow, "_onResponse", shown.append)
-
-    apiWindow._sendRequest()
-    Shiboken.delete(apiWindow)  # closed while the request runs
-    gate.set()
-    drain_tasks()
-
-    assert shown == []
-
-
-def test_the_api_window_gives_the_button_back_after_the_shutdown(
-        apiWindow, ownExecutor, monkeypatch):
-    calls = _answering(monkeypatch, "HTTP 200 OK\n\n{}")
-    ownExecutor.shutdown(WAIT)
-
-    apiWindow._sendRequest()
-
-    assert calls == []
-    assert apiWindow.sendBtn.isEnabled()
-    # Through the window's translations (the harness runs in Japanese).
-    shuttingDown = QApplication.translate("api", "The app is shutting down")
-    assert shuttingDown in apiWindow.responseEdit.toPlainText()
