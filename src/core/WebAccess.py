@@ -3,7 +3,7 @@
 The web server (src/AutonaWebServer.py, src/AutonaApiV1.py) used to serve
 every file below the working directory and accept every operation from
 anyone who could reach the port. This module is the policy that closes that
-surface; the server only asks it questions. It decides three things:
+surface; the server only asks it questions. It decides five things:
 
 * **Which files are served** (StaticPath). Only what the overlays, the Web UI
   and the state's image paths load: layout/, assets/, web/build/, out/ and
@@ -26,6 +26,14 @@ surface; the server only asks it questions. It decides three things:
   ``Sec-Fetch-Site`` other than ``same-origin`` / ``none`` and a foreign
   ``Origin`` are refused (CSRF). Non-browser clients (Companion, Stream
   Deck, curl, requests) send neither header and are unaffected.
+* **What the preview listener serves** (PreviewServes, ADR-005 S-final
+  SF-8a): the second port the shared view's design previews load from
+  serves only what a layout reads, and never writes -- decided before any
+  of the above, token or not.
+* **That no other page frames this server's own** (FramedElsewhere,
+  FRAME_ANCESTORS; the SF-8a review): a preview's script would otherwise
+  navigate its frame -- or frame anew -- to this server's port, and run as
+  this server's page there.
 
 A request that carries the right token passes all of it: the token is never
 sent by a browser on its own (it is not a cookie), so a page that sends it
@@ -410,6 +418,108 @@ def StaticPath(filename):
     return None
 
 
+# ── The preview listener (ADR-005 S-final SF-8a) ────────────────────────
+# The shared view's design previews (web/src/CommentaryPage/DesignPane.tsx)
+# load the overlay from a second listener of the server, on a port of its
+# own: another origin, so a layout's script there is not this server's page
+# (it cannot reach the shared view's DOM, nor pass as this PC's own request
+# -- a same-origin frame did both). The server marks what arrives there
+# (AutonaWebServer.PreviewGate) and serves of it only what a layout reads,
+# refused before Authorize(): a request to that port would otherwise pass as
+# this server's own page (OwnOrigins() of the port it arrived on), token or
+# not. Nothing here is a second table: the routes are ROUTE_ACCESS's READ
+# ones of /api/v1, the files StaticPath()'s narrowed, the Socket.IO events
+# EVENT_ACCESS's READ ones (the connection is read-only).
+PREVIEW_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The /api/v1 blueprint's endpoints (src/AutonaApiV1.py's api_v1). The
+# legacy READ routes are not served there: deprecated, and no layout of the
+# app reads them.
+V1_ENDPOINT_PREFIX = "api_v1."
+# Of the served files, what a layout loads: its own folder and the state's
+# image paths -- not the Web UI (web/build/, the pages of the shared view)
+# and, of out/, only the state file the overlays read
+# (layout/include/globals.js's TSHProgramPath("out/program_state.json")).
+PREVIEW_STATIC_DIRECTORIES = tuple(
+    directory for directory in STATIC_DIRECTORIES
+    if directory.split("/")[0] in ("layout", "assets", "user_data"))
+PREVIEW_STATIC_FILES = STATIC_FILES + ("out/program_state.json",)
+
+_PREVIEW_DIRECTORY_PARTS = tuple(
+    tuple(d.split("/")) for d in PREVIEW_STATIC_DIRECTORIES)
+
+
+def PreviewStaticPath(filename):
+    """StaticPath(``filename``) when the preview listener serves it, else
+    None: in PREVIEW_STATIC_DIRECTORIES or one of PREVIEW_STATIC_FILES."""
+    served = StaticPath(filename)
+    if served is None:
+        return None
+    folded = tuple(served.lower().split("/"))
+    for directory in _PREVIEW_DIRECTORY_PARTS:
+        if len(folded) > len(directory) and folded[:len(directory)] == directory:
+            return served
+    if "/".join(folded) in PREVIEW_STATIC_FILES:
+        return served
+    return None
+
+
+def PreviewServes(endpoint, method, filename=None):
+    """Whether the preview listener serves a request: a read (GET / HEAD /
+    OPTIONS) of an /api/v1 READ endpoint, or of a file PreviewStaticPath()
+    serves (a STATIC endpoint with its ``filename``; the Web UI's entry
+    pages have none). Everything else -- GUARDED, DESIGNER, /web, the
+    legacy routes, an unmatched URL -- is not."""
+    if method not in PREVIEW_METHODS or not isinstance(endpoint, str):
+        return False
+    access = RouteAccess(endpoint)
+    if access == STATIC:
+        return filename is not None and PreviewStaticPath(filename) is not None
+    return endpoint.startswith(V1_ENDPOINT_PREFIX) and access == READ
+
+
+# ── No frame of another page's (ADR-005 S-final SF-8a review) ───────────
+# The preview's origin does not keep its script there: the sandbox
+# ("allow-scripts allow-same-origin") lets a frame navigate itself
+# (location.href) and frame anew (<iframe src>, a real origin too), and the
+# port of this server's own is in document.referrer. A layout's script that
+# reaches this server's port so runs as one of its pages: the shared view's
+# DOM next door, the writes without the token. So this server's port shows
+# its responses in no frame another page asked for: a request whose
+# Sec-Fetch-Dest is a frame (FRAME_DESTINATIONS) and whose Sec-Fetch-Site is
+# anything but same-origin / none is refused (FRAMED_ELSEWHERE) -- the
+# preview origin is same-site (another port of the same host), a LAN page's
+# preview same-site as well, a page elsewhere cross-site -- whatever it asks
+# for (a layout, the Web UI, a picture), before the access rules. The
+# preview listener itself is not held to it: its pages are what the shared
+# view frames. Unaffected: this server's own pages framing its own
+# (same-origin), a document opened directly (OBS's browser source, a link:
+# Sec-Fetch-Dest document), and every client that sends no Sec-Fetch-*
+# (Companion, curl, an older browser). Not the mode: an <object> / <embed>
+# may be fetched no-cors and still show a document of this origin.
+FRAME_DESTINATIONS = frozenset({
+    "iframe", "frame", "embed", "object", "fencedframe"})
+# What this server's responses carry (not the preview listener's), for
+# what FramedElsewhere cannot see: a browser that sends no Sec-Fetch-*, and
+# a frame inside a preview's frame, whose ancestors include the preview's
+# origin whatever it sent.
+FRAME_ANCESTORS = "frame-ancestors 'self'"
+# The refusal's own: shown in no frame at all (not even in the shared
+# view's, where frame-ancestors 'self' would let it), and in a sandbox, so
+# it never becomes a document of this server's origin in the frame.
+REFUSED_FRAME_POLICY = "sandbox; frame-ancestors 'none'"
+
+
+def FramedElsewhere(fetchDest, fetchSite):
+    """Whether a request asks for this server's response in another page's
+    frame: ``Sec-Fetch-Dest`` (``fetchDest``) one of FRAME_DESTINATIONS and
+    ``Sec-Fetch-Site`` (``fetchSite``) neither ``same-origin`` nor ``none``.
+    False when either header is absent."""
+    if not isinstance(fetchDest, str) or not isinstance(fetchSite, str):
+        return False
+    return (fetchDest.strip().lower() in FRAME_DESTINATIONS
+            and fetchSite.strip().lower() not in _AMBIENT_FETCH_SITES)
+
+
 # ── React panels (ADR-005 S4) ───────────────────────────────────────────
 # The desktop panels moved to React, served at /web/<panel>: web_index
 # answers these names with the Web UI's page and any other with 404. The
@@ -753,6 +863,20 @@ class Refusal(NamedTuple):
 THIS_PC_ONLY = Refusal(
     403, FORBIDDEN, "this request is only taken from this computer",
     "this_pc_only")
+
+# Whatever the preview listener does not serve (PreviewServes), and every
+# write of a Socket.IO connection made there -- token or not: the port is a
+# layout's, never this server's own page (ADR-005 S-final SF-8a).
+PREVIEW_ONLY = Refusal(
+    403, FORBIDDEN,
+    "the preview origin is read-only: it serves only what a layout reads",
+    "preview_origin")
+
+# A request for this server's response in another page's frame
+# (FramedElsewhere; the SF-8a review), token or not.
+FRAMED_ELSEWHERE = Refusal(
+    403, FORBIDDEN, "this server's pages are not shown in another page's frame",
+    "framed_elsewhere")
 
 # A Socket.IO connection let in with a token that has since been replaced.
 TOKEN_REPLACED = Refusal(

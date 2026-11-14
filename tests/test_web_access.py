@@ -16,6 +16,7 @@ tests/test_webserver_routes.py.
 """
 
 import json
+import threading
 
 import pytest
 from loguru import logger
@@ -1014,14 +1015,19 @@ class _Polling:
 
     PATH = "/socket.io/?EIO=4&transport=polling"
 
-    def __init__(self, server, remote_addr="127.0.0.1", headers=None):
-        self.client = _client(server, remote_addr)
+    def __init__(self, server, remote_addr="127.0.0.1", headers=None,
+                 client=None):
+        # `client`: another way in (the preview listener's, SF-8a).
+        self.client = client or _client(server, remote_addr)
         self.headers = dict(headers or {})
         opened = self.client.get(self.PATH, headers=self.headers)
         assert opened.status_code == 200, opened.data
         self.sid = json.loads(opened.get_data(as_text=True)[1:])["sid"]
         self.url = f"{self.PATH}&sid={self.sid}"
         self._ack = 0
+        # The Socket.IO session's id, once connected (its rooms are kept
+        # under it).
+        self.session = None
 
     def send(self, packet):
         response = self.client.post(self.url, data=packet, headers=self.headers)
@@ -1033,7 +1039,11 @@ class _Polling:
 
     def connect(self, auth=None):
         self.send("40" + (json.dumps(auth) if auth else ""))
-        return self.receive()
+        packets = self.receive()
+        for packet in packets:
+            if packet.startswith('40{"sid"'):
+                self.session = json.loads(packet[2:])["sid"]
+        return packets
 
     def emit(self, event, data):
         self._ack += 1
@@ -1262,6 +1272,650 @@ def test_the_games_notice_reaches_whoever_can_read_it(server):
     for ws in (local, with_token, without):
         assert [(packet["name"], packet["args"]) for packet in ws.get_received()] == [
             ("games_changed", [{}])]
+
+
+# ── The preview listener (ADR-005 S-final SF-8a) ─────────────────────────
+# The layout previews load from a second port, read-only: what a layout
+# reads (layout/, assets/, the user_data pictures, out/program_state.json,
+# the /api/v1 READ routes, the state over Socket.IO), nothing else, token or
+# not. Its requests are refused before Authorize: its SERVER_PORT would make
+# its own pages this server's (OwnOrigins).
+
+PREVIEW_PORT = 52345
+PREVIEW_ORIGIN = f"http://localhost:{PREVIEW_PORT}"
+# The static samples: what the preview listener serves, and what it does not
+# (served on this server's own port all the same).
+PREVIEW_FILES = (
+    "layout/scoreboard/index.html",
+    "assets/icons/mic.svg",
+    "user_data/games/ssbu/base_files/icon.png",
+    "user_data/team_logo/team.png",
+    "user_data/tournament_banner.png",
+    "out/program_state.json",
+)
+NOT_PREVIEW_FILES = (
+    "web/build/index.html",
+    "out/score.txt",
+    "out/thumbnails/thumb.png",
+    "user_data/settings.json",
+    "nowhere/at/all.txt",
+)
+
+
+class _PreviewClient:
+    """Requests through PreviewGate, as the preview listener takes them
+    (the real Flask app behind it, Socket.IO middleware included)."""
+
+    def __init__(self, server, remote_addr="127.0.0.1"):
+        from werkzeug.test import Client
+
+        from src.AutonaWebServer import PreviewGate
+
+        self._client = Client(PreviewGate(server.app))
+        self._environ = {"REMOTE_ADDR": remote_addr}
+
+    def open(self, *args, **kwargs):
+        kwargs.setdefault("environ_base", dict(self._environ))
+        return self._client.open(*args, **kwargs)
+
+    def get(self, *args, **kwargs):
+        return self.open(*args, method="GET", **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self.open(*args, method="POST", **kwargs)
+
+
+def _layout_reads(endpoint, method, filename):
+    """What the preview listener serves, as the spec says it (not through
+    WebAccess.PreviewServes)."""
+    if method not in ("GET", "HEAD", "OPTIONS"):
+        return False
+    access = WebAccess.RouteAccess(endpoint)
+    if access == WebAccess.STATIC:
+        return filename in PREVIEW_FILES
+    return endpoint.startswith("api_v1.") and access == WebAccess.READ
+
+
+def _rule_requests(app):
+    """(endpoint, method, path, filename) for every route and method of the
+    app; a filename route once per static sample."""
+    adapter = app.url_map.bind("localhost")
+    for rule in app.url_map.iter_rules():
+        filenames = ((PREVIEW_FILES + NOT_PREVIEW_FILES)
+                     if "filename" in rule.arguments else (None,))
+        for filename in filenames:
+            values = {argument: "1" for argument in rule.arguments}
+            if filename is not None:
+                values["filename"] = filename
+            for method in sorted(rule.methods):
+                yield (rule.endpoint, method,
+                       adapter.build(rule.endpoint, values, method=method),
+                       filename)
+
+
+def test_every_route_on_the_preview_listener_serves_only_a_layouts_reads(
+        server):
+    from flask import request
+
+    from src.AutonaWebServer import PreviewGate, WebServer
+
+    refusal = WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+    served, refused = set(), set()
+    for endpoint, method, path, filename in _rule_requests(server.app):
+        with server.app.test_request_context(
+                path, method=method,
+                environ_overrides={PreviewGate.ENVIRON_KEY: True}):
+            # Two routes of one URL (a GET and a DELETE) share its OPTIONS:
+            # judged as the one Flask routes it to.
+            routed = request.endpoint
+            assert routed == endpoint or method == "OPTIONS", path
+            response = WebServer._guard_http_request()
+            if _layout_reads(routed, method, filename):
+                assert response is None, (method, path)
+                served.add(WebAccess.RouteAccess(routed))
+            else:
+                assert response is not None, (method, path)
+                assert response.status_code == 403, (method, path)
+                assert response.get_json() == refusal, (method, path)
+                refused.add(WebAccess.RouteAccess(routed))
+    # Every kind was seen: the reads served, and every guarded / Designer /
+    # write kind refused (the static kind both ways).
+    assert served == {WebAccess.READ, WebAccess.STATIC}
+    assert refused == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
+                       WebAccess.THIS_PC, WebAccess.DESIGNER, WebAccess.STATIC}
+
+
+def test_every_row_of_the_route_ledger_is_judged_for_the_preview():
+    # The rule on WebAccess's side, from the ledger itself: no second table.
+    methods = ("GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE")
+    for endpoint, access in WebAccess.ROUTE_ACCESS.items():
+        for method in methods:
+            filenames = ((PREVIEW_FILES + NOT_PREVIEW_FILES + (None,))
+                         if access == WebAccess.STATIC else (None,))
+            for filename in filenames:
+                expected = _layout_reads(endpoint, method, filename)
+                assert WebAccess.PreviewServes(
+                    endpoint, method, filename) is expected, (
+                    endpoint, method, filename)
+                if access in WebAccess.GUARDED or access == WebAccess.DESIGNER:
+                    assert expected is False
+    # An endpoint nobody classified, and no endpoint at all (404 / 405).
+    assert WebAccess.PreviewServes("api_v1.no_such_route", "GET") is False
+    assert WebAccess.PreviewServes(None, "GET") is False
+
+
+def test_the_preview_listener_serves_what_a_layout_reads(server):
+    for relative in PREVIEW_FILES + NOT_PREVIEW_FILES:
+        _write(server.root, relative, b"a file")
+    client = _PreviewClient(server)
+
+    for relative in PREVIEW_FILES:
+        response = client.get("/" + relative)
+        assert response.status_code == 200, relative
+        assert response.get_data() == b"a file"
+    assert client.get("/api/v1/state").get_json()["ok"] is True
+    assert client.get("/api/v1/games").get_json()["data"] == {
+        "ssbu": {"name": "Smash"}}
+    # The same from another computer: the reads need nothing there either.
+    assert _PreviewClient(server, LAN_PEER).get(
+        "/layout/scoreboard/index.html").status_code == 200
+
+
+@pytest.mark.parametrize("headers", [
+    {},
+    # The preview's own page, as this server's own would be.
+    {"Host": f"localhost:{PREVIEW_PORT}", "Origin": PREVIEW_ORIGIN,
+     "Sec-Fetch-Site": "same-origin"},
+    {"Origin": "http://localhost"},
+    {"X-Autona-Token": "TOKEN"},
+    {"Authorization": "Bearer TOKEN"},
+])
+@pytest.mark.parametrize("method, url", [
+    ("GET", LEGACY_WRITE), ("POST", V1_WRITE), ("OPTIONS", V1_WRITE),
+    ("GET", "/playerdb"), ("GET", "/api/v1/players"),
+    ("GET", "/api/v1/connection"), ("GET", "/web"), ("GET", "/web/board"),
+    ("GET", "/api/designer/projects"), ("POST", "/api/designer/imports"),
+    # Reads too, outside a layout's: the legacy routes, the Web UI's files,
+    # the rest of out/, an unmatched URL.
+    ("GET", "/program-state"), ("GET", "/web/build/index.html"),
+    ("GET", "/out/score.txt"), ("GET", "/no/such/route"),
+])
+def test_the_preview_listener_refuses_everything_else_token_or_not(
+        server, headers, method, url):
+    for relative in NOT_PREVIEW_FILES:
+        _write(server.root, relative, b"a file")
+    headers = {key: value.replace("TOKEN", WebAccess.Token())
+               for key, value in headers.items()}
+    response = _PreviewClient(server).open(url, method=method, headers=headers)
+    assert response.status_code == 403
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+    assert b"A Real Name" not in response.get_data()
+    assert server.actions.calls == []
+    # And with the token in the query.
+    response = _PreviewClient(server).open(
+        url, method=method, query_string={"token": WebAccess.Token()})
+    assert response.status_code == 403
+    assert server.actions.calls == []
+
+
+def test_a_preview_refusal_is_logged_once(server, warnings):
+    client = _PreviewClient(server)
+    client.get(LEGACY_WRITE)
+    client.get(LEGACY_WRITE)
+    logged = [m for m in warnings if "on the preview listener" in m]
+    assert len(logged) == 1
+    assert "preview_origin" in logged[0]
+
+
+def test_a_preview_connection_reads_and_writes_nothing(polling):
+    from src.AutonaWebServer import WebServer
+
+    ws = _Polling(polling, client=_PreviewClient(polling),
+                  headers={"Origin": PREVIEW_ORIGIN})
+    packets = ws.connect(auth={"token": WebAccess.Token()})
+    assert any(p.startswith('42["program_state"') for p in packets)   # reads
+    assert ws.emit("program_state", {}) == []
+    refusal = WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+    for event in _guarded_events():
+        assert ws.emit(event, json.dumps({"scoreboardNumber": "1"})) == (
+            refusal), event
+    assert polling.actions.calls == []
+    # No trusted room: neither the player DB nor the pending notices.
+    rooms = polling.socketio.server.manager.get_rooms(ws.session, "/")
+    assert WebServer.WS_AMBIENT_ROOM not in rooms
+    assert not any(str(room).startswith("autona:token:") for room in rooms)
+
+
+def test_a_preview_connection_from_another_computer_is_read_only_too(polling):
+    ws = _Polling(polling, LAN_PEER, client=_PreviewClient(polling, LAN_PEER))
+    ws.connect(auth={"token": WebAccess.Token()})
+    assert ws.emit("team_scoreup", SCOREUP) == WebAccess.ErrorBody(
+        WebAccess.PREVIEW_ONLY)
+    assert polling.actions.calls == []
+
+
+@pytest.mark.parametrize("headers", [
+    {"Origin": PREVIEW_ORIGIN},
+    {"Origin": PREVIEW_ORIGIN, "Sec-Fetch-Site": "same-site"},
+    {"Sec-Fetch-Site": "same-site"},     # a no-cors GET carries no Origin
+])
+@pytest.mark.parametrize("method, url", [
+    ("GET", LEGACY_WRITE), ("POST", V1_WRITE), ("GET", "/playerdb"),
+    ("GET", "/api/v1/connection")])
+def test_a_preview_page_cannot_write_to_this_server(server, headers, method, url):
+    # A layout's script on the preview origin asking this server's own port:
+    # another origin of the same site, so no write without the token.
+    response = _client(server).open(url, method=method, headers=headers)
+    assert response.status_code == 403
+    assert _error(response) == "FORBIDDEN"
+    assert server.actions.calls == []
+    # Its reads are what any page may read.
+    assert _client(server).get(
+        "/api/v1/state", headers=headers).status_code == 200
+
+
+def test_a_preview_pages_connection_to_this_server_is_read_only(server):
+    ws = _ws(server, headers={"Origin": PREVIEW_ORIGIN,
+                              "Sec-Fetch-Site": "same-site"})
+    assert "program_state" in _names(ws)
+    assert _scoreup(ws)["error"]["code"] == "FORBIDDEN"
+    assert server.actions.calls == []
+
+
+def test_the_designer_guards_refuse_the_preview_listener(server, monkeypatch):
+    from werkzeug.exceptions import Forbidden
+
+    from src.AutonaWebServer import (AutonaDesignerService, PreviewGate,
+                                     WebServer)
+
+    # Even what the Designer's token would let in.
+    monkeypatch.setattr(AutonaDesignerService, "is_authorized",
+                        staticmethod(lambda token, remote: True))
+    preview = {PreviewGate.ENVIRON_KEY: True}
+    with server.app.test_request_context("/api/designer/projects",
+                                         environ_overrides=preview):
+        with pytest.raises(Forbidden):
+            WebServer._authorize_designer_request()
+    with server.app.test_request_context(
+            "/api/designer/imports", method="POST", environ_overrides=preview,
+            headers={"Origin": "https://www.figma.com"}):
+        response, status = WebServer._authorize_designer_import_request()
+        assert status == 403
+    # The Socket.IO verdict and Authorize itself, asked directly.
+    with server.app.test_request_context("/socket.io/",
+                                         environ_overrides=preview):
+        assert WebServer._authorize() == (None, WebAccess.PREVIEW_ONLY)
+
+
+def test_a_client_cannot_mark_itself_as_the_preview(server):
+    # The mark is the WSGI environ's, which a request's headers never set:
+    # this server's own port keeps its own rules.
+    from src.AutonaWebServer import PreviewGate
+
+    header = PreviewGate.ENVIRON_KEY.replace(".", "-")
+    response = _client(server).post(V1_WRITE, headers={header: "1"})
+    assert response.status_code == 200
+    assert server.actions.calls == [("reset_scores", 1)]
+
+
+def test_the_preview_server_binds_a_port_the_os_picks(server):
+    from src.AutonaWebServer import PreviewGate, WebServer
+
+    made = []
+
+    def make_server(host, port, app, threaded):
+        made.append((host, port, app, threaded))
+        return "the server"
+
+    shell = type("Shell", (), {"host_name": "0.0.0.0", "app": server.app})()
+    assert WebServer._MakePreviewServer(shell, make_server) == "the server"
+    [(host, port, app, threaded)] = made
+    assert (host, port, threaded) == ("0.0.0.0", 0, True)
+    assert isinstance(app, PreviewGate) and app.app is server.app
+
+
+def test_no_preview_server_when_its_port_cannot_be_bound(server, warnings):
+    import sys
+
+    from src.AutonaWebServer import WebServer
+
+    def make_server(*args, **kwargs):
+        # werkzeug's bind failure: the OSError printed, then sys.exit(1).
+        try:
+            raise OSError(10048, "address in use")
+        except OSError:
+            sys.exit(1)
+
+    shell = type("Shell", (), {"host_name": "127.0.0.1", "app": server.app})()
+    assert WebServer._MakePreviewServer(shell, make_server) is None
+    assert any("no preview listener" in m and "address in use" in m
+               for m in warnings)
+
+
+def test_health_names_the_preview_port(server, monkeypatch):
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.AutonaWebServer import WebServer
+    from src.core.Actions import AutonaActions
+
+    # What else /health reads, with nothing built here.
+    monkeypatch.setattr(AutonaTournamentDataProvider, "instance", type(
+        "Provider", (), {"GetProvider": lambda self: None})())
+    monkeypatch.setattr(AutonaActions, "instance", type(
+        "Actions", (), {"ActiveBoard": lambda self: 1})())
+    monkeypatch.setattr(WebServer, "_preview_port", None)
+    assert _client(server).get("/api/v1/health").get_json()[
+        "data"]["previewPort"] is None
+    monkeypatch.setattr(WebServer, "_preview_port", PREVIEW_PORT)
+    assert WebServer.PreviewPort() == PREVIEW_PORT
+    assert _client(server).get("/api/v1/health").get_json()[
+        "data"]["previewPort"] == PREVIEW_PORT
+    # And the preview listener answers it: the pages ask either.
+    assert _PreviewClient(server).get("/api/v1/health").get_json()[
+        "data"]["previewPort"] == PREVIEW_PORT
+
+
+# ── No frame of another page's (the SF-8a review) ────────────────────────
+# A preview's script can navigate its frame -- or a frame it makes -- to this
+# server's own port (the sandbox keeps neither), where it would be one of its
+# pages. So this server's port shows nothing in a frame another page asked
+# for: Sec-Fetch-Dest a frame, Sec-Fetch-Site neither same-origin nor none.
+# Every response of this port also says frame-ancestors 'self'. The preview
+# listener is not held to it: its pages are the shared view's frames.
+
+FRAMED = {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe",
+          "Sec-Fetch-Site": "same-site"}
+FETCH_MODES = ("navigate", "no-cors", "cors", "same-origin", None)
+FETCH_DESTS = ("iframe", "frame", "embed", "object", "fencedframe",
+               "document", "image", "script", "style", "empty", None)
+FETCH_SITES = ("same-origin", "none", "same-site", "cross-site", None)
+# What this server's port serves, the Web UI included.
+FRAMED_TARGETS = (
+    ("GET", "/layout/scoreboard/index.html"), ("GET", "/web"),
+    ("GET", "/web/board"), ("GET", "/web/build/index.html"),
+    ("GET", "/assets/icons/mic.svg"), ("GET", "/out/program_state.json"),
+    ("GET", "/user_data/team_logo/team.png"), ("GET", "/api/v1/state"),
+    ("GET", "/program-state"), ("GET", LEGACY_WRITE), ("POST", V1_WRITE),
+    ("GET", "/playerdb"), ("GET", "/api/v1/connection"),
+    ("GET", "/no/such/route"),
+)
+
+
+def _fetch_headers(mode, dest, site):
+    names = ("Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-Site")
+    return {name: value for name, value in zip(names, (mode, dest, site))
+            if value is not None}
+
+
+def _served_files(server):
+    for relative in ("layout/scoreboard/index.html", "web/build/index.html",
+                     "assets/icons/mic.svg", "out/program_state.json",
+                     "user_data/team_logo/team.png"):
+        _write(server.root, relative, b"a file")
+
+
+def test_the_frame_rule_is_the_fetch_dest_and_site_only():
+    # The table: refused exactly when the response would show in a frame
+    # (whatever the mode: an <object> may be fetched no-cors) another page
+    # asked for (same-site: the preview's port, a LAN page's; cross-site).
+    for mode in FETCH_MODES:
+        for dest in FETCH_DESTS:
+            for site in FETCH_SITES:
+                expected = (dest in ("iframe", "frame", "embed", "object",
+                                     "fencedframe")
+                            and site in ("same-site", "cross-site"))
+                assert WebAccess.FramedElsewhere(dest, site) is expected, (
+                    mode, dest, site)
+    # Spelled any way a header may be.
+    assert WebAccess.FramedElsewhere(" IFrame ", "Same-Site") is True
+    assert WebAccess.FramedElsewhere("iframe", " SAME-ORIGIN ") is False
+
+
+def test_this_servers_port_follows_the_frame_table(server):
+    _served_files(server)
+    client = _client(server)
+    for mode in FETCH_MODES:
+        for dest in FETCH_DESTS:
+            for site in FETCH_SITES:
+                response = client.get(
+                    "/layout/scoreboard/index.html",
+                    headers=_fetch_headers(mode, dest, site))
+                if WebAccess.FramedElsewhere(dest, site):
+                    assert response.status_code == 403, (mode, dest, site)
+                    assert response.get_json() == WebAccess.ErrorBody(
+                        WebAccess.FRAMED_ELSEWHERE)
+                else:
+                    assert response.status_code == 200, (mode, dest, site)
+                    assert response.get_data() == b"a file"
+
+
+@pytest.mark.parametrize("remote, host", [
+    ("127.0.0.1", None),
+    # The Web UI opened under this PC's LAN address (here, or a LAN
+    # browser): its preview frame is that address at another port.
+    (LAN_HOST, LAN_HOST), (LAN_PEER, LAN_HOST),
+])
+@pytest.mark.parametrize("extra", [
+    {}, {"Sec-Fetch-Site": "cross-site"}, {"Origin": PREVIEW_ORIGIN},
+    {"X-Autona-Token": "TOKEN"},
+])
+def test_nothing_of_this_server_shows_in_another_pages_frame(
+        server, remote, host, extra):
+    _served_files(server)
+    headers = dict(FRAMED, **extra)
+    if host is not None:
+        headers["Host"] = host
+    headers = {key: value.replace("TOKEN", WebAccess.Token())
+               for key, value in headers.items()}
+    for method, url in FRAMED_TARGETS:
+        response = _client(server, remote).open(url, method=method,
+                                                headers=headers)
+        assert response.status_code == 403, (method, url)
+        assert response.get_json() == WebAccess.ErrorBody(
+            WebAccess.FRAMED_ELSEWHERE), (method, url)
+        # The refusal itself shows in no frame, and is no document of this
+        # origin's: sandboxed.
+        policies = response.headers.getlist("Content-Security-Policy")
+        assert WebAccess.REFUSED_FRAME_POLICY in policies, (method, url)
+        assert b"A Real Name" not in response.get_data()
+    assert server.actions.calls == []
+
+
+def test_every_route_refuses_another_pages_frame(server):
+    from src.AutonaWebServer import WebServer
+
+    refusal = WebAccess.ErrorBody(WebAccess.FRAMED_ELSEWHERE)
+    kinds = set()
+    for endpoint, method, path, filename in _rule_requests(server.app):
+        with server.app.test_request_context(path, method=method,
+                                             headers=FRAMED):
+            response = WebServer._guard_http_request()
+            assert response is not None, (method, path)
+            assert response.status_code == 403, (method, path)
+            assert response.get_json() == refusal, (method, path)
+            kinds.add(WebAccess.RouteAccess(endpoint))
+    assert kinds == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
+                     WebAccess.THIS_PC, WebAccess.DESIGNER, WebAccess.STATIC}
+
+
+@pytest.mark.parametrize("headers", [
+    {},                                                       # Companion, curl
+    {"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "none"},    # OBS, typed
+    {"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "cross-site",
+     "Sec-Fetch-Mode": "navigate"},                           # a link to it
+    # Its own pages framing its own (the Designer's, a layout's).
+    {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "same-origin",
+     "Sec-Fetch-Mode": "navigate"},
+    # What a page of another port may read (the preview's script).
+    {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Site": "same-site",
+     "Sec-Fetch-Mode": "cors"},
+    {"Sec-Fetch-Dest": "image", "Sec-Fetch-Site": "cross-site",
+     "Sec-Fetch-Mode": "no-cors"},
+])
+def test_documents_reads_and_its_own_frames_are_served(server, headers):
+    _served_files(server)
+    for url in ("/layout/scoreboard/index.html", "/web/board",
+                "/assets/icons/mic.svg", "/api/v1/state"):
+        assert _client(server).get(url, headers=headers).status_code == 200, url
+
+
+def test_every_response_of_this_server_says_frame_ancestors_self(server):
+    _served_files(server)
+    client = _client(server, LAN_PEER)
+    for response in (client.get("/layout/scoreboard/index.html"),
+                     client.get("/web/board"), client.get("/api/v1/state"),
+                     client.get("/no/such/route"),
+                     client.post(V1_WRITE),                    # a refusal
+                     client.get("/user_data/settings.json")):  # not served
+        assert WebAccess.FRAME_ANCESTORS in response.headers.getlist(
+            "Content-Security-Policy"), response.request.path
+
+
+def test_the_preview_listener_is_what_the_shared_view_frames(server):
+    # Its frames load there from this server's page: same-site, a frame.
+    _served_files(server)
+    response = _PreviewClient(server).get("/layout/scoreboard/index.html",
+                                          headers=FRAMED)
+    assert response.status_code == 200
+    assert response.get_data() == b"a file"
+    assert "Content-Security-Policy" not in response.headers
+    # Its own refusals are its own (PREVIEW_ONLY), framed or not.
+    response = _PreviewClient(server).get("/web/board", headers=FRAMED)
+    assert response.get_json() == WebAccess.ErrorBody(WebAccess.PREVIEW_ONLY)
+
+
+def test_a_framed_refusal_is_logged_once(server, warnings):
+    _served_files(server)
+    client = _client(server)
+    client.get("/layout/scoreboard/index.html", headers=FRAMED)
+    client.get("/web/board", headers=FRAMED)
+    logged = [m for m in warnings if "in a frame" in m]
+    assert len(logged) == 1
+    assert "framed_elsewhere" in logged[0]
+    assert "same-site" in logged[0]
+
+
+# ── The preview listener's lifetime (the SF-8a review) ───────────────────
+# _Serve with werkzeug's make_server faked: the preview listener goes when
+# this server's own loop fails, is never made when this one cannot listen,
+# and is closed with it when stop() came first.
+
+class _FakeServer:
+    def __init__(self, port, fail_after=None):
+        self.server_port = port
+        self.calls = []
+        self.serving = threading.Event()
+        self._stop = threading.Event()
+        # Another server to wait for before failing (this server's loop).
+        self._fail_after = fail_after
+
+    def serve_forever(self):
+        self.calls.append("serve_forever")
+        self.serving.set()
+        if self._fail_after is not None:
+            assert self._fail_after.serving.wait(10)
+            raise RuntimeError("the loop broke")
+        self._stop.wait(10)
+
+    def shutdown(self):
+        self.calls.append("shutdown")
+        self._stop.set()
+
+    def server_close(self):
+        self.calls.append("server_close")
+
+
+def _serving_shell(monkeypatch, make_server):
+    import werkzeug.serving
+
+    from src.AutonaWebServer import WebServer
+
+    monkeypatch.setattr(werkzeug.serving, "make_server", make_server)
+    monkeypatch.setattr(WebServer, "_listening", None)
+    monkeypatch.setattr(WebServer, "_preview_port", None)
+    shell = WebServer.__new__(WebServer)
+    shell.failures = []
+    shell._on_start_failed = shell.failures.append
+    shell._serve_lock = threading.Lock()
+    shell._server = shell._thread = None
+    shell._preview_server = shell._preview_thread = None
+    shell._stopping = False
+    shell.host_name, shell.port, shell.listen_lan = "127.0.0.1", 5107, False
+    return shell
+
+
+def test_a_failing_loop_takes_the_preview_listener_down(monkeypatch):
+    from src.AutonaWebServer import WebServer
+
+    preview = _FakeServer(PREVIEW_PORT)
+    main = _FakeServer(5107, fail_after=preview)
+    servers = [main, preview]
+    shell = _serving_shell(monkeypatch, lambda *a, **k: servers.pop(0))
+
+    shell._Serve()
+
+    assert preview.calls == ["serve_forever", "shutdown", "server_close"]
+    assert WebServer.PreviewPort() is None
+    assert shell._preview_server is None and shell._preview_thread is None
+    assert shell.failures and "the loop broke" in shell.failures[0]
+
+
+def test_no_preview_listener_when_this_server_cannot_listen(monkeypatch):
+    import sys
+
+    from src.AutonaWebServer import WebServer
+
+    made = []
+
+    def make_server(host, port, app, threaded):
+        made.append(port)
+        try:
+            raise OSError(10048, "address in use")
+        except OSError:
+            sys.exit(1)
+
+    shell = _serving_shell(monkeypatch, make_server)
+    shell._Serve()
+
+    assert made == [5107]
+    assert WebServer.PreviewPort() is None
+    assert shell._preview_server is None
+    assert shell.failures and "could not listen" in shell.failures[0]
+
+
+def test_a_stop_during_the_start_closes_both_listeners(monkeypatch):
+    from src.AutonaWebServer import WebServer
+
+    main, preview = _FakeServer(5107), _FakeServer(PREVIEW_PORT)
+    servers = [main, preview]
+    shell = None
+
+    def make_server(*args, **kwargs):
+        if len(servers) == 1:
+            shell._stopping = True    # stop() came while the preview binds
+        return servers.pop(0)
+
+    shell = _serving_shell(monkeypatch, make_server)
+    shell._Serve()
+
+    assert main.calls == ["server_close"]
+    assert preview.calls == ["server_close"]
+    assert shell._preview_server is None and shell._server is None
+    assert WebServer.PreviewPort() is None
+    assert shell.failures == []
+
+
+def test_a_failing_loop_leaves_the_preview_listener_to_a_stop_begun(
+        monkeypatch):
+    # stop() took the listeners when it began: it closes them, not _Serve.
+    preview = _FakeServer(PREVIEW_PORT)
+    shell = _serving_shell(monkeypatch, None)
+    shell._preview_server = preview
+    shell._stopping = True
+
+    shell._DropPreview(preview)
+
+    assert preview.calls == []
+    assert shell._preview_server is preview
 
 
 # ── The guides' routes (ADR-005 S-final SF-3a) ───────────────────────────

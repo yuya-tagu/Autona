@@ -13,11 +13,25 @@ export function serverUrl(pathname: string): string {
     return new URL(pathname, base).toString();
 }
 
-// Only the headless app: the Web UI and the overlays also ask Google Fonts,
-// which a test must not depend on (offline runs, slow CI networks).
+// The headless app's preview listener, where the pages' layout previews load
+// from (ADR-005 S-final SF-8a): this host, the port /api/v1/health names.
+export async function previewOrigin(request: APIRequestContext): Promise<string> {
+    const response = await request.get(serverUrl("/api/v1/health"));
+    expect(response.ok()).toBe(true);
+    const port = (await response.json()).data?.previewPort;
+    expect(typeof port).toBe("number");
+    const base = new URL(serverUrl("/"));
+    return `${base.protocol}//${base.hostname}:${port}`;
+}
+
+// Only the headless app (its own port and its preview listener's): the Web UI
+// and the overlays also ask Google Fonts, which a test must not depend on
+// (offline runs, slow CI networks).
 export async function keepLocal(page: Page) {
     const base = new URL(serverUrl("/"));
-    await page.route((url) => url.host !== base.host, (route) => route.abort());
+    const preview = new URL(await previewOrigin(page.request));
+    await page.route((url) => url.host !== base.host && url.host !== preview.host,
+                     (route) => route.abort());
 }
 
 export async function boardScores(request: APIRequestContext, board = 1) {

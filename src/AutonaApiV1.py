@@ -476,6 +476,7 @@ def state():
 @api_v1.route("/health")
 @api_handler
 def health():
+    from .AutonaWebServer import WebServer
     provider = AutonaTournamentDataProvider.instance.GetProvider()
     game = StateManager.Get("game") or {}
     current_game = game.get("codename") if isinstance(game, dict) else None
@@ -497,6 +498,10 @@ def health():
         "activeBoard": active_board,
         "tournamentLoaded": provider is not None,
         "outLastWriteUnix": out_mtime,
+        # The read-only listener the pages' layout previews load from
+        # (ADR-005 S-final SF-8a); null when there is none -- the pages then
+        # show no preview, never one on this origin.
+        "previewPort": WebServer.PreviewPort(),
     }
     return ok(data=data, revision=StateManager.revision)
 

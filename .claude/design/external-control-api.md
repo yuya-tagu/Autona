@@ -61,6 +61,9 @@
 - 判定の正本は `src/core/WebAccess.py`（ルート・イベントの分類表 `ROUTE_ACCESS` / `EVENT_ACCESS`。分類のない endpoint は書き込み扱い）。
   legacy ルートも同じ判定を通り、拒否時だけ v1 と同じエラーエンベロープを返す（成功時の `"OK"` 等は不変）
 - CORS（`Access-Control-Allow-Origin: *`）は残る。読み取りは別オリジンのページからも読める（OBS の file:// オーバーレイのため）
+- **プレビュー用のリスナー**（2026-11-14・ADR-005 S-final SF-8a）: 同じバインド先の別のポート（OS が選ぶ。`GET /health` の `previewPort`、§5.1）で、ページのレイアウトのプレビューだけが読む。出すのはレイアウトが読むもの（`layout/`・`assets/`・`user_data/` の画像・`out/program_state.json`・v1 の READ・Socket.IO の読み取り）だけで、`WRITE` / `PLAYERDB` / `THIS_PC` / `DESIGNER`・`/web`・legacy のルート・`out/` のほかのファイルは**トークンがあっても、この PC からでも** `403 FORBIDDEN`（Socket.IO は接続を受けて state を配り、書き込みイベントは同じ ack で断る。信頼済みの room に入れない）。判定は Authorize に入る前（そのポートのページを「自分のオリジン」にしないため）。そのポートのページ（オリジン `http://<ホスト>:<previewPort>`）からこのサーバー自身のポートへの書き込みも、自分のオリジンではない（`Sec-Fetch-Site: same-site`）ので上の CSRF 対策で `403`
+- **別のページのフレームには出さない**（2026-11-14・SF-8a のレビュー）: このサーバー自身のポート（プレビュー用のリスナーではない方）は、`Sec-Fetch-Dest` がフレーム（`iframe` / `frame` / `embed` / `object` / `fencedframe`）で `Sec-Fetch-Site` が `same-origin` / `none` 以外（`same-site`・`cross-site`）の要求を、何を頼んだかによらず（`layout/`・`/web`・静的ファイル・v1・legacy）**トークンがあっても** `403 FORBIDDEN` で断る（判定は Authorize の前。拒否の応答自身は `Content-Security-Policy: sandbox; frame-ancestors 'none'`）。応答はすべて `Content-Security-Policy: frame-ancestors 'self'` を持つ。プレビューのレイアウトが自分のフレームや作ったフレームをこのポートへ送り、このサーバーのページとして動くのを止めるため。このサーバーのページが自分のページを枠に入れる（`same-origin`）・直接開く（OBS のブラウザソース・リンク。`Sec-Fetch-Dest: document`）・ヘッダを付けないクライアントは影響しない。`file://` などほかのページがこのサーバーのページを iframe に入れる使い方は出なくなる。規則は `src/core/WebAccess.FramedElsewhere`
+- ⚠️ 上の CSRF 対策とこのフレームの判定は、`Sec-Fetch-*` を送るブラウザが前提。送らない古いブラウザでは、ほかのページからの no-cors の GET（legacy の GET の書き込み）がこの PC の要求として通りうる
 - ⚠️ トークンは平文 HTTP で流れ、全端末で 1 つを共有する。緩和は confirm（§7）・操作ログ（§2.7）・再発行。LAN 外運用が発生したら ADR-001 を Revisit。
 
 ### 2.3 Content-Type
@@ -270,9 +273,11 @@
   "currentGame": "ssbu",
   "activeBoard": 1,
   "tournamentLoaded": true,
-  "outLastWriteUnix": 1718000000
+  "outLastWriteUnix": 1718000000,
+  "previewPort": 52345
 } }
 ```
+- `previewPort`（2026-11-14 追加・ADR-005 S-final SF-8a）: レイアウトのプレビュー用の読み取り専用リスナーのポート（同じホスト・同じバインド先。OS が起動ごとに選ぶ）。待ち受けていない（サーバーが無い・bind できなかった）ときは `null`。ページのプレビューの iframe は `http://<このホスト>:<previewPort>/layout/...` を読み、`null` ならプレビューを出さない（このサーバーのオリジンに代えない）。そのリスナーが出すのは、レイアウトが読むもの（`layout/`・`assets/`・`user_data/` の画像・`out/program_state.json`・v1 の READ・Socket.IO の読み取り）だけで、ほかは**トークンがあっても** 403 `FORBIDDEN`（Socket.IO の書き込みイベントも同じ ack）。legacy の読み取りルートと `out/` のほかのファイルも出さない。規則は `src/core/WebAccess.PreviewServes`
 - `activeBoard`: 現在表示中のボード番号（1/2/3）。外部コントローラが「表示中ボードを操作」する判断材料（§2.12）。`AutonaActions.ActiveBoard()`（`ResolveBattleFormat` の写像。§14.1）で、`GET /battle-format`（§5.21）の `board` と同じ値。
 - `outLastWriteUnix`: `out/` 配信ファイルの最終更新時刻（OBS 出力健全性の指標）。取得方法は `TBD`。
 - `tournamentLoaded`: provider 有無。
