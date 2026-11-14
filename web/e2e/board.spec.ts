@@ -210,6 +210,35 @@ test("a Designer project is listed and previewed, with the shared runtime", asyn
     await expect(shown.locator("#composer-error")).toBeEmpty();
 });
 
+test("a preview whose library and dictionary fail to load once still starts", async ({page}) => {
+    // A request of the overlay's that fails at the network level (it happened on
+    // the CI runner): the layout harness (layout/include/globals.js) tries it
+    // again. Before, the failed script's error event and the dictionary
+    // request's ProgressEvent were left as the overlay's uncaught rejection --
+    // the page errors "Event" / "ProgressEvent" -- and the overlay never started.
+    const failOnce = new Set([
+        "/layout/include/gsap.min.js",
+        "/layout/include/kuromoji/base.dat.gz",
+    ]);
+    // After keepLocal's route, so this one answers first; once failed, a request
+    // goes on to keepLocal's.
+    await page.route((url) => failOnce.has(url.pathname), async (route) => {
+        failOnce.delete(new URL(route.request().url()).pathname);
+        await route.abort("connectionreset");
+    });
+    await page.goto(serverUrl("/web/board"));
+    await expect(designSelect(page)).toHaveText("Crew Battle");
+
+    await expect.poll(() => failOnce.size).toBe(0);
+    // Started: the layout shows itself (its body is hidden until then), with the
+    // Japanese reading on (the dictionary was read on its next try).
+    const body = page.frameLocator('iframe[title="Preview"]').locator("body");
+    await expect(body).toHaveCSS("opacity", "1");
+    expect(await body.evaluate((element) =>
+        (element.ownerDocument.defaultView as Window & {kuroshiro?: unknown})
+            .kuroshiro != null)).toBe(true);
+});
+
 test("the preview stays in a short, wide window, the frame's size with it", async ({page}) => {
     await page.setViewportSize({width: 1400, height: 620});
     await page.goto(serverUrl("/web/board"));

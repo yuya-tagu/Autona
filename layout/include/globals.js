@@ -219,6 +219,49 @@ async function UpdateData_SocketIO() {
   }
 }
 
+// A layout's own loads (the libraries below and the Japanese dictionary) are
+// tried this many times, the wait growing by TSH_LOAD_RETRY_MS: a request that
+// failed is a passing network error far more often than a missing file, and
+// the page cannot start without its libraries. The Web UI tries the reads it
+// cannot work without the same way (web/src/PanelShell/requests.ts).
+var TSH_LOAD_ATTEMPTS = 3;
+var TSH_LOAD_RETRY_MS = 500;
+
+// Runs `load` (a function returning a promise) until it resolves, at most
+// `attempts` times, and rejects with the last failure.
+async function TSHRetryLoad(load, attempts = TSH_LOAD_ATTEMPTS,
+                            retryMs = TSH_LOAD_RETRY_MS) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await load();
+    } catch (error) {
+      if (attempt >= attempts) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryMs * attempt));
+    }
+  }
+}
+
+// Adds the script `src` to the page. A failed load rejects with an Error that
+// names the script, not with the element's error event, which says nothing of
+// what failed and, left uncaught, is all the browser reports ("Event"). The
+// failed element is taken out, so a retry adds a fresh one.
+function TSHLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const scriptElement = document.createElement("script");
+    scriptElement.src = src;
+    scriptElement.onload = resolve;
+    scriptElement.onerror = (event) => {
+      scriptElement.remove();
+      const error = new Error(`Could not load the script ${src}`);
+      error.cause = event;
+      reject(error);
+    };
+    document.head.appendChild(scriptElement);
+  });
+}
+
 // Load libraries sequentially (to respect dependencies)
 // Then call InitAll
 async function LoadEverything() {
@@ -252,15 +295,11 @@ async function LoadEverything() {
     const script = scripts[i];
     const src = libPath + script;
     try {
-      await new Promise((resolve, reject) => {
-        const scriptElement = document.createElement("script");
-        scriptElement.src = src;
-        scriptElement.onload = resolve;
-        scriptElement.onerror = reject;
-        document.head.appendChild(scriptElement);
-      });
+      await TSHRetryLoad(() => TSHLoadScript(src));
       console.log(`Loaded script: ${src}`);
     } catch (error) {
+      // Still failing after the retries: the layout cannot start. The
+      // rejection is the caller's (the Designer runtime shows it).
       console.error(`Error loading script: ${src}`, error);
       throw error;
     }
@@ -396,14 +435,27 @@ function FitText(target) {
   });
 }
 
-// Load Kuroshiro, the Japanese transcription library
+// Load Kuroshiro, the Japanese transcription library, with its dictionary (12
+// files, 17 MB, read by XMLHttpRequest: a failed one rejects with the request's
+// ProgressEvent). Tried again like the libraries; a page that still cannot read
+// it shows the names without their reading (window.kuroshiro stays null, and
+// Transcript() returns the text as it is). The overlay starts all the same:
+// the reading is an extra, not what it shows.
 async function LoadKuroshiro() {
-  window.kuroshiro = new Kuroshiro.default();
-  await window.kuroshiro.init(
-    new KuromojiAnalyzer({
-      dictPath: TSHLayoutPath("include/kuromoji"),
-    })
-  );
+  window.kuroshiro = null;
+  try {
+    const kuroshiro = new Kuroshiro.default();
+    // A failed init leaves the instance uninitialised: the next try gives it
+    // a fresh analyzer.
+    await TSHRetryLoad(() => kuroshiro.init(
+      new KuromojiAnalyzer({
+        dictPath: TSHLayoutPath("include/kuromoji"),
+      })
+    ));
+    window.kuroshiro = kuroshiro;
+  } catch (error) {
+    console.warn("Japanese transcription is off: its dictionary could not be loaded", error);
+  }
 }
 
 // Transcribes Japanese text to Roman characters using Kuroshiro
@@ -415,7 +467,8 @@ async function Transcript(text) {
     romajiSystem: "nippon",
   });
 
-  if (text == null || text.length == 0 || !settings.enabled) return text;
+  // No reading without the dictionary (LoadKuroshiro).
+  if (text == null || text.length == 0 || !settings.enabled || !window.kuroshiro) return text;
 
   try {
     if (window.Kuroshiro.default.Util.hasJapanese(text)) {
