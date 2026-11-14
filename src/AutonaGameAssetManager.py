@@ -219,11 +219,14 @@ class AutonaGameAssetManager(QObject):
         # it is put back before the first scan lists the games
         # (AssetPackService.RestoreReplaced, ADR-005 S-final SF-3b; it never
         # waits for a running job, which does it itself, and logs its own
-        # failures). The service is bootstrap_core()'s, built before this
-        # adapter.
+        # failures). The upload an earlier run left (user_data/
+        # .autona-uploads; SF-4b-1) is removed beside it
+        # (RemoveStaleUploads, which logs its own failures too). The service
+        # is bootstrap_core()'s, built before this adapter.
         from .core.AssetPackService import AssetPackService
         if AssetPackService.instance is not None:
             AssetPackService.instance.RestoreReplaced()
+            AssetPackService.instance.RemoveStaleUploads()
         self._Scan()
 
     # ── game load ───────────────────────────────────────────────────────

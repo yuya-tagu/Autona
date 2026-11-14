@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 from collections import OrderedDict
+from urllib.parse import unquote
 
 from flask import Blueprint, Response, jsonify, request
 from loguru import logger
@@ -35,6 +36,7 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import AnalysisService as analysis
 from .core import AppSettings
+from .core import AssetPackService as assets
 from .core import HotkeyRules
 from .core import StateSchema as schema
 from .core import ColorService
@@ -95,13 +97,16 @@ UNAVAILABLE = "UNAVAILABLE"                   # 503
 
 
 class ApiError(Exception):
-    """Raised by handlers; converted to an error envelope by the wrappers."""
+    """Raised by handlers; converted to an error envelope by the wrappers.
+    ``reason``: core's fixed code for the refusal (``error.reason``; the
+    asset routes', ADR-005 S-final SF-4b-1), None for none."""
 
-    def __init__(self, code, message, status):
+    def __init__(self, code, message, status, reason=None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
+        self.reason = reason
 
 
 # ── Response envelopes (spec §2.4 / §2.5) ────────────────────────────────
@@ -120,9 +125,14 @@ def ok(data=None, revision=None, status=200):
     return resp
 
 
-def err(code, message, status):
-    """Error envelope: ``{"ok": false, "error": {"code", "message"}}``."""
-    resp = jsonify({"ok": False, "error": {"code": code, "message": message}})
+def err(code, message, status, reason=None):
+    """Error envelope: ``{"ok": false, "error": {"code", "message"}}``, and
+    ``error.reason`` when given (core's fixed code: added, so a client that
+    reads only ``code`` reads the same)."""
+    error = {"code": code, "message": message}
+    if reason is not None:
+        error["reason"] = reason
+    resp = jsonify({"ok": False, "error": error})
     resp.status_code = status
     return resp
 
@@ -255,7 +265,7 @@ def api_handler(fn):
         try:
             return fn(*args, **kwargs)
         except ApiError as e:
-            return err(e.code, e.message, e.status)
+            return err(e.code, e.message, e.status, e.reason)
         except NotAvailable as e:
             return err(UNAVAILABLE, e.message, 503)
         except Exception:
@@ -310,67 +320,124 @@ def _over_limit(max_body):
     return True
 
 
-def write_op(operation, log_keys_only=False, max_body=None):
+# write_op's ``body``: the JSON body logged as params (read by _safe_params),
+# or none read at all (the route reads its raw body itself: an upload).
+BODY_JSON = "json"
+BODY_NONE = "none"
+
+# The view args the op log cuts to their first 6 characters (an upload's id
+# names what only the shared view's page may import or drop: the line keeps
+# enough to tell requests apart).
+_REDACTED_VIEW_ARGS = ("upload_id",)
+_REDACTED_KEEP = 6
+
+
+def _logged_path():
+    path = request.path
+    for name in _REDACTED_VIEW_ARGS:
+        value = (request.view_args or {}).get(name)
+        if isinstance(value, str) and len(value) > _REDACTED_KEEP:
+            path = path.replace(value, value[:_REDACTED_KEEP] + "…")
+    return path
+
+
+def _raw_params():
+    # A body the route reads itself: its size alone, never a byte of it.
+    length = request.content_length
+    return "<no body>" if length is None else f"<{length} bytes>"
+
+
+def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON):
     """Write endpoints: exception->envelope conversion plus an INFO op-log
     line recording IP / method / path / params / result (spec §2.7).
 
     ``max_body``: this route's request body limit in bytes, answered 413
     PAYLOAD_TOO_LARGE when the Content-Length is over it, the body dropped
     rather than parsed (_over_limit). The app sets no limit of its own (no
-    MAX_CONTENT_LENGTH), so the other routes are as they were."""
+    MAX_CONTENT_LENGTH), so the other routes are as they were.
+
+    ``body``: BODY_JSON (the default) logs the JSON body's params
+    (_safe_params, which reads the body). BODY_NONE reads no byte of it --
+    the route reads its raw body itself (the asset upload, ADR-005 S-final
+    SF-4b-1), or refuses it unread -- and logs its Content-Length alone.
+    An unread body is then werkzeug's: its server closes every connection
+    (it sends ``Connection: close`` on every answer) and, after the answer,
+    reads the rest of the body and drops it while it keeps arriving (up to
+    10 GB), so the client gets the answer rather than a reset -- nothing is
+    written, the request's thread is held that long. Every error answer
+    also says ``Connection: close`` itself: under werkzeug a repeat, for a
+    server that would keep the connection and read the unread body as the
+    next request. Every line cuts the path's _REDACTED_VIEW_ARGS to their
+    first 6 characters."""
+    if body not in (BODY_JSON, BODY_NONE):
+        raise ValueError(f"write_op body: {body!r}")
 
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            path = _logged_path()
             # Before anything reads the body: _safe_params below does (and
             # caches it for the handler's read).
             if max_body is not None and _over_limit(max_body):
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params=<over {max_body} bytes> -> 413 "
                     f"{PAYLOAD_TOO_LARGE}"
                 )
                 return err(PAYLOAD_TOO_LARGE,
                            f"the request body is over {max_body} bytes", 413)
-            params = _safe_params(keys_only=log_keys_only)
+            if body == BODY_NONE:
+                params = _raw_params()
+            else:
+                params = _safe_params(keys_only=log_keys_only)
+
+            def refused(resp):
+                # werkzeug's server says it on every answer already (a
+                # repeat there); for one that would read the unread body as
+                # the next request.
+                if body == BODY_NONE:
+                    resp.headers["Connection"] = "close"
+                return resp
+
             try:
                 resp = fn(*args, **kwargs)
                 status = getattr(resp, "status_code", 200)
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params={params} -> {status}"
                 )
                 return resp
             except ApiError as e:
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params={params} -> {e.status} {e.code}"
+                    + (f" ({e.reason})" if e.reason else "")
                 )
-                return err(e.code, e.message, e.status)
+                return refused(err(e.code, e.message, e.status, e.reason))
             except NotAvailable as e:
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params={params} -> 503 {UNAVAILABLE}"
                 )
-                return err(UNAVAILABLE, e.message, 503)
+                return refused(err(UNAVAILABLE, e.message, 503))
             except SettingsUnreadable:
                 # A core operation that changes what settings.json holds
                 # (PrepareWrite / SetMany) while it could not be read at
                 # launch and still cannot be opened: nothing was changed.
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params={params} -> 409 {NOT_READY}"
                 )
-                return err(NOT_READY,
-                           "settings.json could not be read: nothing was "
-                           "saved", 409)
+                return refused(err(NOT_READY,
+                                   "settings.json could not be read: nothing "
+                                   "was saved", 409))
             except Exception:
                 logger.error(traceback.format_exc())
                 _oplog.info(
-                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"{request.remote_addr} {request.method} {path} "
                     f"op={operation} params={params} -> 500 INTERNAL"
                 )
-                return err(INTERNAL, "internal error", 500)
+                return refused(err(INTERNAL, "internal error", 500))
 
         return wrapper
 
@@ -2125,15 +2192,22 @@ def access_token_regenerate():
     return _no_store(ok(data={"token": token, "available": bool(token)}))
 
 
-# ── Game asset packs (ADR-005 S-final SF-3b) ──
-# What the "Add game assets" window shows, for the page that replaces it
-# (SF-4b): core's AssetPackService. The list is a READ (the upstream index
-# and what is installed, no local path); the last job's state is THIS_PC
-# (a job's messages may name this PC's paths). The window runs the jobs
-# through core. The jobs that write user_data/games (an install, a ZIP, a
-# folder of this PC) and their cancel are not here: THIS_PC also lets the
-# layout/ pages of this origin through, so they come with SF-4b under the
-# secret the shell hands only to the shared view's main frame.
+# ── Game asset packs (ADR-005 S-final SF-3b / SF-4b-1) ──
+# What the "Add game assets" window shows and does, for the page that
+# replaces it (SF-4b): core's AssetPackService. The list is THIS_PC (it may
+# fetch from GitHub). Everything else is WebAccess.SHELL (SF-4b-1): the last
+# job's state (a job's messages may name this PC's paths), the ZIP upload,
+# the jobs that write user_data/games (an install, the uploaded ZIP's
+# import) and their cancel, and the games folder's reveal -- THIS_PC also
+# lets the layout/ pages of this origin through, which must not replace
+# installed games, download gigabytes or fill the disk. The secret is the
+# shell's, handed only to the shared view's main frame: headless answers
+# them all 403. A folder import is not here (a page cannot name a folder;
+# SF-5a's picker brings it back). Every answer is no-store, and a refusal
+# answers core's code (error.reason) with the words of _ASSET_REFUSALS --
+# core's message, which may name a path or the archive's entries, goes to
+# the log alone. Not listed in the API catalog (the shared view's page
+# alone may call them).
 
 @api_v1.route("/assets/packs")
 @api_handler
@@ -2159,8 +2233,241 @@ def get_assets_job():
     # download, entries / files for an import), "imported", "skipped",
     # "skippedEntries", "skippedEntriesMore", "failed": [{"name",
     # "message"}], "error" (core's reason), "message"}.
-    # THIS_PC: a message may name this PC's paths.
+    # SHELL (SF-4b-1; THIS_PC until then): a message may name this PC's
+    # paths, and the shared view's page is its one reader.
     return _no_store(ok(data=WebOps.get_assets_job()))
+
+
+# Core's refusal codes (AssetPackService.AssetPackError.code, and BUSY) ->
+# (code, fixed words, status). The answer's error.reason is core's code.
+_ASSET_REFUSALS = {
+    assets.UNKNOWN_GAME: (NOT_FOUND, "no such game in the asset index", 404),
+    assets.UNKNOWN_PACK: (INVALID_ARGUMENT,
+                          "not an offered pack of that game", 400),
+    assets.NO_PACKS: (INVALID_ARGUMENT, "select at least one pack", 400),
+    assets.INDEX_UNAVAILABLE: (
+        NOT_READY, "the asset index is not loaded: list the packs first",
+        409),
+    assets.BAD_INDEX: (INTERNAL, "the asset index could not be used", 500),
+    assets.NOT_A_ZIP: (INVALID_ARGUMENT, "not a readable ZIP", 400),
+    assets.NOT_A_FOLDER: (INVALID_ARGUMENT, "not a folder", 400),
+    assets.UNSAFE_ARCHIVE: (
+        INVALID_ARGUMENT,
+        "the ZIP has an entry that would be written outside its folder", 400),
+    assets.TOO_LARGE: (PAYLOAD_TOO_LARGE, "the ZIP is too large", 413),
+    assets.NO_GAME: (
+        INVALID_ARGUMENT,
+        "no game found: a game folder must contain base_files/config.json",
+        400),
+    assets.BAD_NAME: (INVALID_ARGUMENT,
+                      "a game's folder name cannot be used", 400),
+    assets.INCOMPLETE: (INVALID_ARGUMENT,
+                        "the upload did not arrive whole", 400),
+    assets.SUPERSEDED: (CONFLICT, "a newer upload replaced this one", 409),
+    assets.DISK_FULL: (NOT_READY, "not enough free space on this PC", 409),
+    assets.UNKNOWN_UPLOAD: (
+        NOT_FOUND,
+        "no such upload (imported, dropped, replaced or expired)", 404),
+    assets.BUSY: (CONFLICT, "another asset job is running", 409),
+    assets.STOPPED: (UNAVAILABLE, "the app is shutting down", 503),
+    assets.FAILED: (INTERNAL, "the asset operation failed", 500),
+}
+_ASSET_REFUSAL_OTHER = (INTERNAL, "the asset operation failed", 500)
+
+
+def _asset_refused(operation, code, message=None):
+    """The ApiError for core's refusal ``code``: _ASSET_REFUSALS' words, the
+    code as error.reason. Core's ``message`` is logged here, never answered
+    (it may name a path or the archive's entries)."""
+    if message is not None:
+        logger.info(f"API v1: assets {operation} refused: {code}: {message}")
+    api, words, status = _ASSET_REFUSALS.get(code, _ASSET_REFUSAL_OTHER)
+    return ApiError(api, words, status, reason=code)
+
+
+# The client's file name (X-Autona-File-Name, percent-encoded UTF-8: a
+# header carries latin-1 alone): it names a game at the ZIP's top.
+ASSET_FILE_NAME_HEADER = "X-Autona-File-Name"
+_ASSET_FILE_NAME_MAX = 255
+
+
+def _asset_file_name():
+    raw = request.headers.get(ASSET_FILE_NAME_HEADER)
+    if raw is None or raw == "":
+        return None
+    try:
+        name = unquote(raw, errors="strict")
+    except UnicodeDecodeError:
+        name = None
+    if (not name or len(name) > _ASSET_FILE_NAME_MAX
+            or any(ord(c) < 32 or ord(c) == 127 for c in name)):
+        raise ApiError(
+            INVALID_ARGUMENT, f"{ASSET_FILE_NAME_HEADER} must be the file's "
+            "name, percent-encoded UTF-8", 400)
+    return name
+
+
+def _asset_job_started(operation, answer):
+    # A job's start: (STARTED, revision) -> 202 with its revision in
+    # data.job (GET /assets/job follows it), or BUSY -> 409 reason "busy".
+    started, revision = answer
+    if started == assets.BUSY:
+        raise _asset_refused(operation, assets.BUSY)
+    return ok(data={"accepted": True, "operation": operation,
+                    "job": revision}, status=202)
+
+
+def _no_store_answers(fn):
+    # Every answer of the route no-store, its refusals included (outside
+    # write_op, which turns them into envelopes).
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return _no_store(fn(*args, **kwargs))
+
+    return wrapper
+
+
+@api_v1.route("/assets/uploads", methods=["POST"])
+@_no_store_answers
+@write_op("assets.upload", body=BODY_NONE)
+def upload_assets_zip():
+    # The ZIP's bytes as the body (not multipart), with a Content-Length
+    # (400 without: chunked is refused) of at most MAX_UPLOAD_BYTES (413
+    # over): both answered without this reading a byte (werkzeug then reads
+    # the rest and drops it: write_op's docstring). X-Autona-File-Name: the
+    # file's name, percent-encoded (it names a game at the ZIP's top; never
+    # logged). Core reads it to a file outside the served folders, probes it
+    # and holds it (one at a time, a new one replacing it; for
+    # UPLOAD_EXPIRY_SECS) -> 201 {"upload": its id, "games": the games it
+    # holds, "conflicts": the installed ones among them, "expiresInSec"}.
+    # The path is never answered.
+    request.max_content_length = assets.MAX_UPLOAD_BYTES
+    length = request.content_length
+    if length is None:
+        raise ApiError(
+            INVALID_ARGUMENT, "Content-Length is required: send the ZIP's "
+            "bytes as the body, not chunked", 400)
+    if length > assets.MAX_UPLOAD_BYTES:
+        raise ApiError(
+            PAYLOAD_TOO_LARGE,
+            f"an upload is at most {assets.MAX_UPLOAD_BYTES} bytes", 413,
+            reason=assets.TOO_LARGE)
+    fileName = _asset_file_name()
+    try:
+        uploadId, games, conflicts = WebOps.upload_assets_zip(
+            request.stream, length, fileName)
+    except assets.AssetPackError as error:
+        raise _asset_refused("upload", error.code, error.message)
+    return ok(data={"upload": uploadId, "games": games,
+                    "conflicts": conflicts,
+                    "expiresInSec": assets.UPLOAD_EXPIRY_SECS}, status=201)
+
+
+@api_v1.route("/assets/uploads/<upload_id>", methods=["DELETE"])
+@_no_store_answers
+@write_op("assets.upload.drop", body=BODY_NONE)
+def drop_asset_upload(upload_id):
+    # Remove the upload held by that id -> {"removed": whether one was}
+    # (not a 404: imported, replaced or expired is gone all the same).
+    return ok(data={"removed": bool(WebOps.drop_asset_upload(upload_id))})
+
+
+@api_v1.route("/assets:importZip", methods=["POST"])
+@_no_store_answers
+@write_op("assets.importZip", log_keys_only=True)
+def import_assets_zip():
+    # {"upload": POST /assets/uploads's id, "overwrite": [the installed
+    # games to replace -- each one of the upload's conflicts, else 400],
+    # "confirm": true when overwrite names any}: imports the upload (core
+    # takes it out: the job removes it however it ends) -> 202 {"accepted",
+    # "operation": "importZip", "job": its revision}. 404 reason
+    # unknown_upload; 409 reason busy while a job runs (the upload stays).
+    # Logged by key: the body names the upload.
+    body = _json_body()
+    uploadId = body.get("upload")
+    if not isinstance(uploadId, str) or not uploadId:
+        raise ApiError(INVALID_ARGUMENT,
+                       "upload must be POST /assets/uploads's data.upload",
+                       400)
+    overwrite = body.get("overwrite")
+    if overwrite is None:
+        overwrite = []
+    if not isinstance(overwrite, list) or not all(
+            isinstance(name, str) and name for name in overwrite):
+        raise ApiError(INVALID_ARGUMENT,
+                       "overwrite must be a list of game names", 400)
+    try:
+        _games, conflicts = WebOps.asset_upload_games(uploadId)
+    except assets.AssetPackError as error:
+        raise _asset_refused("importZip", error.code, error.message)
+    if any(name not in conflicts for name in overwrite):
+        raise ApiError(
+            INVALID_ARGUMENT, "overwrite may name only the upload's "
+            "conflicts (the installed games it would replace)", 400)
+    if overwrite:
+        _require_confirm(body)
+    try:
+        answer = WebOps.import_asset_upload(
+            uploadId, list(dict.fromkeys(overwrite)))
+    except assets.AssetPackError as error:
+        raise _asset_refused("importZip", error.code, error.message)
+    return _asset_job_started(assets.IMPORT_ZIP, answer)
+
+
+@api_v1.route("/assets/packs:install", methods=["POST"])
+@_no_store_answers
+@write_op("assets.packs.install")
+def install_asset_packs():
+    # {"game": an index game's code, "packs": [allowed pack names] (absent
+    # or null: the default ones it has), "confirm": true (always: it
+    # replaces the game's files and downloads up to gigabytes)} -> 202
+    # {"accepted", "operation": "install", "job": its revision}. The cached
+    # index (GET /assets/packs loads it): 409 NOT_READY reason
+    # index_unavailable when there is none; this write never fetches.
+    body = _json_body()
+    game = body.get("game")
+    if not isinstance(game, str) or not game:
+        raise ApiError(INVALID_ARGUMENT, "game must be an index game's code",
+                       400)
+    packs = body.get("packs")
+    if packs is not None and (not isinstance(packs, list) or not all(
+            isinstance(name, str) for name in packs)):
+        raise ApiError(INVALID_ARGUMENT, "packs must be a list of pack names",
+                       400)
+    _require_confirm(body)
+    try:
+        answer = WebOps.install_asset_packs(game, packs)
+    except assets.AssetPackError as error:
+        raise _asset_refused("install", error.code, error.message)
+    return _asset_job_started(assets.INSTALL, answer)
+
+
+@api_v1.route("/assets/job:cancel", methods=["POST"])
+@_no_store_answers
+@write_op("assets.job.cancel")
+def cancel_assets_job():
+    # {"revision": the job's (GET /assets/job / the start's data.job)}: asks
+    # that job to stop -> {"cancelled": false when it is not running (done,
+    # or another job runs)}. Seen at the job's next step: GET /assets/job
+    # tells when it has stopped.
+    body = _json_body()
+    revision = body.get("revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) or \
+            revision < 1:
+        raise ApiError(INVALID_ARGUMENT,
+                       "revision must be the job's revision", 400)
+    return ok(data={"cancelled": bool(WebOps.cancel_assets_job(revision))})
+
+
+@api_v1.route("/assets/games-folder:reveal", methods=["POST"])
+@_no_store_answers
+@write_op("assets.gamesFolder.reveal")
+def reveal_games_folder():
+    # Opens user_data/games in this PC's file manager (made first). Takes
+    # no path: the folder is core's.
+    if not WebOps.reveal_games_folder():
+        raise ApiError(INTERNAL, "the games folder could not be shown", 500)
+    return ok()
 
 
 @api_v1.route("/colors/<feature>", methods=["PATCH"])

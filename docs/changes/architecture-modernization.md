@@ -8528,7 +8528,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-8b | 共有ビューのクリップボード: `JavascriptCanAccessClipboard` を外し、`permissionRequested` で ClipboardReadWrite をページ自身のオリジンにだけ許す。既定プロファイルを `AskEveryTime` に（許可が別ビューへ漏れるため） | 高 | SF-8a |
   | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に | 通常 | SF-8b |
   | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
-  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除 | 通常 | SF-3b・SF-4a |
+  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除） | 通常 | SF-3b・SF-4a |
   | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない | 通常 | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
@@ -8828,3 +8828,66 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
 - **検証**: レビューの修正の後に、触ったテストの直列実行（`test_api_v1_guides` 21・`test_web_panel_host` 194・`test_web_access` 533・`test_api_v1_settings` 106・`test_asset_jobs` 82・`test_headless` 25・`test_import_side_effects` 2・`test_core_qt_free` 4、すべて passed）。並列ランナー全量 6765 passed / 2 skipped。狭い幅の修正の後に jest 全量 42 suites・1236 passed（`GuidePages.test.js` 55）、`npm run build` 成功（警告は既存の `ScoreboardPage/Header.jsx` の 1 件だけ）、`npm run test:e2e` 122 passed / 1 skipped（`page-scroll` のビューポートに収まるパネル）、`test_api_v1_guides` 21 passed（この修正で Python は触っていない）。デスクトップのアプリと exe は起動・ビルドしていない（実機の確認は下）
 - **残るリスク**: canvas の文字の描画（フォント・メトリクス）は Qt の `QPainter` と完全には同じでない（寸法と縮小の規則は同じ）／共有ビュー（QtWebEngine）での data: URL の画像の `copyImage`（fetch → PNG → クリップボード）は実機未確認（SF-8b の grant の範囲）／ja の訳のうち約 55 行の説明と 8 つのエラーコードは新しく書いた（窓は英語だった）／「既定のブラウザで開く」はシェルの `_OpenOutside` に依る（ユーザーの操作の http(s) の新しいウィンドウ。SF-8b の試験の範囲）／テスターが共有ビューから送る要求には秘密が付くので、テスターから SHELL のルートも呼べる（ページ自身がもともと呼べるので権限は増えない。再発行は確認つき・答えのトークンは伏せる）／About（LGPL の表示）とトークンの表示は、Web サーバーと WebEngine が動かないと見られない（設定ページと同じ。起動失敗時のエラーページは SF-5b で扱う）／Companion のアイコンの描き直しは `document.fonts.ready` の 1 回だけ（後から読み込まれるフォントは追わない）／exe の版の読み先の修正は pytest（`AutonaResolve` の `_MEIPASS` への fallback）でだけ確かめた（exe はビルドしていない）
 - **実機で見てほしいこと**: ヘルプ＆設定 → API Settings の 3 項目と About Autona が共有ビューにページを出し、サイドバーのハイライトが消え、項目を押せば戻る／終了・再起動で直前の項目に戻る（メニューのページでは戻らない）／API のページのトークンの表示・コピー・再発行（確認つき）／「既定のブラウザで開く」が既定のブラウザで同じページを開き、そこではトークンが「デスクトップアプリで開いてください」の案内になる／Companion のアイコンのクリックで画像がコピーされ Companion に貼れる／About のリンクが既定のブラウザで開き、メールアドレスがコピーできる／（レビューの修正）共有ビューの幅でリファレンスが 2 列になり、パスが 1 行・チップと行のボタンがパスの下の 2 行目で切れない（Companion・OBS の表とテスターも）／テスターの `POST /access-token:regenerate` が確認を出し、答えのトークンが伏せられ、トークン欄が新しいトークンになる／About のタブのタイトルが「Autona について」／exe の About の版が「v?」でない（exe のとき）
+
+##### SF-4b-1 ゲームアセットの書き込みの v1（サーバー側・2026-11-14）
+
+区分は高（この PC の `user_data/games` を書く・ディスクを埋めうる・認証面）。SF-4b の前半でサーバーだけ（web/ は触っていない。ページ `/web/assets` と窓の削除は SF-4b-2）。設計は Plan の案をエンジニアリードが検収したもの（判断 1〜5）。SF-3b で THIS_PC に出さなかった書き込みを、SF-4a-1 の `SHELL`（共有ビューのページ自身の要求にだけ付く秘密）の下に出した。
+
+- **変更**
+  - `src/core/AssetPackService.py`: アップロードの枠（`ReceiveUpload` / `UploadGames` / `ImportUpload` / `DropUpload` / `RemoveStaleUploads`。`UPLOADS_DIR = user_data/.autona-uploads/`（`StaticPath()` の外。`.autona-staging-*` は使わない）・`MAX_UPLOAD_BYTES = MAX_UNPACKED_BYTES`・`UPLOAD_EXPIRY_SECS = 15 分`・1 MiB ずつ・新しいコード `unknown_upload` / `incomplete` / `superseded`）、`zipfile` の前の中央ディレクトリの事前検査 `_CheckCentralDirectory`（`ProbeZip` と `_RunImportZip` の両方で `ZipFile()` の前）、`Cancel(revision=None)`、`RevealGamesFolder()`、`OSError` の文からパスを外す `_ErrorText`。docstring（アップロードの節・安全・ロック順・シェルの呼び出し）
+  - `src/AutonaApiV1.py`: 6 ルート（`POST /assets/uploads`・`DELETE /assets/uploads/<id>`・`POST /assets:importZip`・`POST /assets/packs:install`・`POST /assets/job:cancel`・`POST /assets/games-folder:reveal`）。封筒の `error.reason`（`ApiError(..., reason=)` / `err(..., reason=)`）、core のコード → 固定の文言の表 `_ASSET_REFUSALS`、`write_op(body="none")`（操作ログは `<N bytes>`・パスの id は先頭 6 文字・エラーの応答は `Connection: close`）、断る答えにも付く no-store の decorator
+  - `src/AutonaWebOperations.py`: 7 つの操作（core を呼ぶだけ。`install_asset_packs` は `Install(fetch=False)`）
+  - `src/core/WebAccess.py`: 6 ルートと `get_assets_job`（SF-3b では THIS_PC）を SHELL。`src/core/ApiCatalog.py`: 載せないことを docstring に
+  - `src/AutonaGameAssetManager.py`・`src/headless.py`: 最初の scan の前に `RemoveStaleUploads()`（`RestoreReplaced()` の隣）
+  - 窓（`AutonaGameAssetGuideWindow`）は変えていない: `Cancel()` は revision なしなら今までどおり走っているジョブを止め、`Install` / `ImportZip` / `ImportFolder` の呼び方も同じ
+- **判断（エンジニアリード。設計の検収）**
+  1. 封筒に `error.reason`（core の固定のコード）を足す。追加だけで後方互換。core の文は答えない（パス・アーカイブのエントリ名を含みうる）
+  2. `/assets/job` を SHELL に移す（ジョブの文はパスを含みうる。読み手はページだけ）
+  3. `games-folder:reveal` はパスを受けない
+  4. ApiCatalog に載せない（ページだけが呼ぶ）
+  5. フォルダの取り込みは v1 に出さない（オーナー承認 2026-11-14「外してよい」）。ページは SF-4b-2 で「ZIP にしてから」と案内し、SF-5a のフォルダ選択で戻す。窓のフォルダの取り込みは窓の削除（SF-4b-2）まで残る
+- **実装で決めたこと（実装担当の判断）**
+  - 枠は `AssetPackService` のメソッドにした（シングルトンを増やさない。bootstrap は不変）
+  - status の写し: `disk_full` → 409 `NOT_READY`（設計どおり。最初は「この PC には大きすぎる」として 413 に寄せたが、レビューでエンジニアリードが設計に戻した）、`superseded` → 409 `CONFLICT`、`incomplete` → 400、`busy` → 409 `CONFLICT`、`stopped` → 503、`index_unavailable` → 409 `NOT_READY`、`unknown_upload` / `unknown_game` → 404、`bad_index` / `failed` → 500。表に無いコードは 500
+  - 破棄は 404 にせず `removed: false`（取り込んだ・置き換わった・期限切れも「もう無い」で同じ）
+  - importZip の操作ログはキー名だけ（upload の id を出さない）。操作ログの行に ` (reason)` を添える
+  - 事前検査は件数と大きさだけでなく、中央ディレクトリのヘッダを歩き（件数の上限で止める）、ディレクトリの位置がファイルの外を指すものも断る（`zipfile` は件数の欄ではなく大きさの欄で歩くため）
+  - ZIP の最上位にゲームがあり、ファイル名のヘッダが無いものは `bad_name`（一時ファイルの名前でゲームを作らない。SF-3b で直した窓の不具合と同じ形）
+  - キャンセルの `revision` は 1 以上の整数（bool 不可）。`reveal` が開けなかったら 500
+  - `OSError` の文はパスを含めない（`strerror` か型名）。`AssetPackError.message` はログ用の英語のまま
+  - 期限切れは読むとき（`_HeldUpload`。`time.monotonic()`）に判定し、タイマーのスレッドを持たない。期限切れの枠は、どの id で照会されても取り出して消す（次の受信の置き換えと起動時の掃除も消す）。最初はアップロードごとの daemon の `threading.Timer` で書いたが、全量で `tests/test_task_executor.py` の `test_the_threads_left_are_the_documented_ones` が executor の外のスレッドとして検出した。`THREADS_LEFT` に足すより、S3f の「executor の外にスレッドを増やさない」（S3f-5 でバッチごとの `Timer` を 1 本の flusher にした）に合わせた
+- **独立レビューの指摘への対応**（高なし。2026-11-14）
+  - M1: `ImportUpload` が枠を取り出した後の `ProbeZip`（数秒かかりうる）の間に別のジョブが始まると、`_Start` の `BUSY` で `ImportZip` の `finally`（`removeAfter`）がファイルを消し、ルートの「409、アップロードは残る」が嘘になっていた → `BUSY` ではファイルを消さず、`ImportUpload` が同じ id・同じ期限で枠に戻す（`_HoldAgain`。その間に新しいアップロードが始まっていたら、それが置き換えたものとして消す）
+  - M2: werkzeug 3.1.8 の開発サーバーは、本文を読まずに答えた後も、10 ms 以内に次のデータが届く限り最大 10 GB まで読み捨てる（レビューの実測: 300 MiB が約 1 秒で全部受けられて捨てられ、413 は届いた）。「10 ms だけ」「1 バイトも読まずに」「`Connection: close` で閉じるから」の説明を、実際の動き（ディスクには書かないが全部受けて捨てる・要求のスレッドを占有する・413 は届く・`Connection: close` は werkzeug が付けるので重複）に直した（API 仕様 §2.6 / §6.48、`write_op` の docstring と `refused()`、rules）
+  - L1: 空き容量の検査で、置き換える前の枠のファイルの大きさを空きとして数える（先に消さない。断るときは前の枠が残る）
+  - L2: `disk_full` は 409 `NOT_READY`（設計どおり）
+  - L3: 申告より多い本文の分岐は werkzeug の `LimitedStream` があるので起きない → 分岐を消し、実在しないストリームで「多い」を通すテストを消して、申告を超えて送った分が core に届かないことを route で pin した
+  - L4: `_EndRecord` の探索の窓が zipfile より 1 バイト広かった（`size - 65558` から。zipfile 3.12 は `size - 65557` から 65,557 バイト）→ zipfile に合わせ、docstring を正確にした。ZIP64 のロケータの前に記録の入る余地が無いものは、zipfile が seek の `OSError` → `BadZipFile` で断るので同じく `not_a_zip`。細工した 15 種のファイル（コメントの中の偽の終端レコード・ZIP64・範囲外の位置・窓の境目ほか）で `zipfile._EndRecData` と突き合わせるテストを置いた（private の API はテストの中だけ）
+  - L5: 取り出したファイル（`_taken`）を、ジョブの終わり・走らなかったジョブ・断られた取り込み・`BUSY` で外す（`_ReleaseUpload`）
+  - L6: 枠に入れる前に `ImportConflicts` を読む（失敗すれば `finally` がファイルを消して 500。枠に入れた後に失敗しうる処理を残さない）
+  - L9: 届いている最中に新しいアップロードに置き換えられたものは `superseded`（409 `CONFLICT`）にして、本文が途中で切れた `incomplete` と分けた
+  - L10: SHELL の拒否で本文が読まれないこと（`_Unread`）と、`RemoveStaleUploads` が受信中・取り出し済みのファイルを残すことのテストを足した
+  - L7（DEBUG の id）と L8（受信が失敗しても前の枠は消えている）は直さず、下の残るリスクに書いた
+- **SF-3b の「SF-4b でやること」への答え**
+  - v1 の書き込み 4 本 → install / importZip / job:cancel を SHELL の下に出した（ZIP は 2 段: アップロード → 取り込み）。importFolder は出さない（判断 5）。一緒に挙げた 4 点: ZIP の中央ディレクトリ → `_CheckCentralDirectory`／アップロードの一時ファイル → `.autona-uploads` の枠（失敗はどれも `finally` で消す・15 分・起動時に掃除）／Flask の max_content_length → 要求ごとの `request.max_content_length`（アプリ全体には設定しない）、長さの無い要求は 400・上限超えは 413 をルートは本文を読まずに（werkzeug がその後に読み捨てる）／400 応答のパス → 固定の文言にして core の文はログだけ
+  - Web の status コードと索引のエラーコードの訳・`/web/assets`・窓の削除 → SF-4b-2
+  - ApiCatalog に載せるか → 載せない（判断 4）
+  - 「直さず記録」の更新: 「THIS_PC の失敗文言の絶対パス」→ ジョブの状態が SHELL になり、v1 の拒否は固定の文言になった（ジョブの `message` / `failed[].message` は今もパスを含みうるが、読めるのは共有ビューのページだけ）。「QTimer の中のモーダル」「窓の進捗とキャンセル」→ 窓の削除（SF-4b-2）で消える。ほかは変わらない（`?refresh=true` の外部取得は一覧が THIS_PC のまま）
+- **pin**
+  - `tests/test_api_v1_assets.py`（新規 82 件）: パスを返さずに枠に持つ・`conflicts`・ファイル名のヘッダ（Unicode・無いときの `bad_name`・デコードできない値）・長さが無い / 上限超え / 空き容量の不足は本文を読まずに `Connection: close`・空き容量は置き換える枠の分を数え、断るときは前の枠を残す・切れた / 足りない本文はファイルを残さない・申告を超えて送った分は core に届かない・1 MiB ずつ・固定の文言・置き換え（届いている最中のものも。受信の後と途中、`superseded`）・持つ前の失敗は 500 でファイルを残さない・期限切れ（時計の境目・別の id の照会でも消える・取り込みの直前に切れたもの）・破棄・起動時の掃除（受信中と取り出し済みは残す。取り出し済みはジョブの終わりで外れる）・ジョブとしての取り込み・取り込みの前の検査で断られたら消える・`overwrite` と confirm の規則・BUSY は枠を残す（取り出した後に始まったジョブでも同じ id・同じ期限で。その間の新しいアップロードが勝つ）・install の confirm とキャッシュの索引（取りにいかない）・install の reason・既定のパック・revision でのキャンセルと引数の検査・窓の `Cancel()`・reveal（win32 / darwin / linux。Popen を spy）・全ルートが秘密なしで 403（本文を読まずに）・全答えが no-store・core が送出するコードがすべて `_ASSET_REFUSALS` にあること（AST）・core の文を答えない・ログ（ファイル名・本文・作業パス・id 全体を INFO に出さない。`<N bytes>`・`/uploads/{id[:6]}…`・`params=['upload']`）・`write_op(body="none")` の単体
+  - `tests/test_asset_packs.py`: 事前検査の表（11 件。`ZipFile` を spy して呼ばれないこと）・正常な ZIP（素・ZIP64・前置き・コメント）・終端レコードの探し方を細工した 15 種で `zipfile._EndRecData` と突き合わせる・`ImportZip(removeAfter=True)` は終わり方によらずファイルを消すが `BUSY` は残す・ジョブも検査する・開けない ZIP の文にパスが無い・両シェルの最初の scan がアップロードの残りを消す・v1 のジョブの追跡はシェルのヘッダつきで、無ければ 403
+  - `tests/test_webserver_routes.py`: 台帳に 6 行（131）、`get_assets_job` を shell へ。`tests/test_web_access.py`: シェルの要求だけが 7 ルートに届く・それ以外の要求の表（`NOT_THE_SHELLS`。トークンのテストと共有）・秘密を発行していないシェルは断る・フォルダの取り込みが v1 に無い。`tests/test_web_operations.py`: ヘッドレスでは 7 ルートとも 403
+  - `tests/test_headless.py`: 隔離ヘッドレスで、起動前に置いたアップロードの残りが最初の scan で消え、アセットのルートが 403 で、断った後にファイルが残らない
+  - `tests/test_web_panel_host.py`（実 QtWebEngine）: 共有ビューの XHR が Blob を本文にパーセントエンコードの名前つきで送り 201（`Content-Length` がそのまま届き、秘密が付き、ファイルが 1 つ）
+- **変異で確認**（戻すとテストが落ちる。26 件）: SHELL の分岐（アップロード・ジョブの状態）／枠の置き換え・`finally` の削除・破棄・期限切れ（切れない・自分の id でだけ切れる・破棄 / 取り込みの照会が消さない）・起動時の掃除（core・ヘッドレスの `_FirstScan`（単体と隔離ヘッドレス）・デスクトップの `_FirstScan`）／事前検査（`ProbeZip`・ジョブ・ヘッダの歩き）／`body="none"`（ルート・`write_op` の実装）／レビューの後: 取り込みの `BUSY`（ファイルを消す・枠に戻さない・新しいアップロードに勝つ）・空き容量に置き換える枠を数えない・終端レコードの窓を 1 バイト広げる・ZIP64 のロケータの余地を見ない・`_taken` を外さない・受信の途中の `superseded` を `incomplete` にする
+- **検証**: 触ったテスト（`test_api_v1_assets` / `test_asset_packs` / `test_headless` / `test_web_access` / `test_web_operations` / `test_web_panel_host` / `test_webserver_routes` / `test_task_executor` / `test_import_side_effects` / `test_core_qt_free`）を直列で 1365 passed。全量 `python scripts/run_tests_parallel.py` は 7078 passed / 0 failed / 2 skipped（レビューの指摘を直した後）
+- **残るリスク・直さず記録**
+  - 上限を超えた本文: ルートは読まずに 413 を答えるが、werkzeug の開発サーバーはその後も届き続ける限り最大 10 GB まで読み捨てる（ディスクには書かない。その間 Flask のスレッドを 1 本占有する）。413 はクライアントに届く。ページ（SF-4b-2）が送る前に `File.size` で確かめるのは、無駄な転送を省くため
+  - アップロードの受信はジョブではなく要求のスレッドで走る（受信中は Flask のスレッドを 1 本占有する。ジョブレーンは使わない。`StateManager.lock` もサービスの lock も持たずに読む）
+  - 新しいアップロードは受信の開始で前の枠を置き換えるので、その受信が失敗しても前の枠は戻らない（設計どおり。空き容量の不足は置き換える前に断るので、そのときは前の枠が残る）（レビュー L8）
+  - 期限切れのファイル（最大 `MAX_UPLOAD_BYTES`）は、次のアップロード・次の照会（取り込み・破棄。id を問わない）・次の起動まで残る（タイマーのスレッドを持たないため）。ページ（SF-4b-2）はやめたときに破棄（`DELETE`）を送る
+  - ジョブのログはゲームのフォルダの名前を出す。ZIP の最上位のゲームはファイル名から拡張子を除いた名前になる（ファイル名そのものはログに出さない）
+  - DEBUG の `[FLASK]` 行（before / after_request）は DELETE のパスに id 全体を出す（ファイルの sink は INFO なので残らない。id は SHELL の秘密なしでは使えない）（レビュー L7）。`Connection: close` は werkzeug の開発サーバーもいつも付けるので二重になりうる（害は無い）
+  - API 設定のページのテスター（SF-4a-2）は共有ビューの中なので、パスを打てばアセットの SHELL のルートも送れる（install は body の confirm が要る・importZip の上書きも）。テスターの確認の対象に足すかは SF-4b-2（web）で決める
+  - `web/src` の `api.ts` の 10 秒のタイムアウト（大きなアップロードには短い）と、新しい status コード / `error.reason` の扱いは SF-4b-2
+- **SF-4b-2 でやること**: `/web/assets`（大きさの事前確認（無駄な転送を省くため。413 は届く）→ アップロード → `conflicts` の確認 → 取り込み、`data.job` で `/assets/job`、`skippedEntries`、進捗とキャンセル、`error.reason` と索引のエラーコードの訳、フォルダは「ZIP にしてから」の案内、`useShellAccess` はトークンを持たない判定に）・窓 `AutonaGameAssetGuideWindow` の削除・テスターの確認

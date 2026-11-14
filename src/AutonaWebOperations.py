@@ -103,6 +103,7 @@ from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
 from .core.AssetPackService import AssetPackService
+from .core import AssetPackService as assets
 from .core import HotkeyRules
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
@@ -762,11 +763,11 @@ def get_connection():
     }
 
 
-# ── Game asset packs (ADR-005 S-final SF-3b) ─────────────────────────────
-# What the "Add game assets" window shows, for the page that replaces it
-# (SF-4b): core's AssetPackService, in both shells, on the calling thread
-# (the list may fetch the index there: the network). The jobs that write
-# user_data/games come to v1 with SF-4b (the window runs them through core).
+# ── Game asset packs (ADR-005 S-final SF-3b / SF-4b-1) ───────────────────
+# What the "Add game assets" window shows and does, for the page that
+# replaces it (SF-4b): core's AssetPackService, in both shells, on the
+# calling thread (the list may fetch the index there: the network; an upload
+# is read there). The v1 routes validate and confirm; these call core.
 
 def get_asset_packs(refresh=False):
     return AssetPackService.instance.Packs(fetch=True, refresh=refresh)
@@ -774,6 +775,38 @@ def get_asset_packs(refresh=False):
 
 def get_assets_job():
     return AssetPackService.instance.Job()
+
+
+def upload_assets_zip(stream, length, fileName):
+    """(id, games, conflicts) of the ZIP read from ``stream``: core holds
+    it (AssetPackService.ReceiveUpload)."""
+    return AssetPackService.instance.ReceiveUpload(stream, length, fileName)
+
+
+def asset_upload_games(uploadId):
+    return AssetPackService.instance.UploadGames(uploadId)
+
+
+def drop_asset_upload(uploadId):
+    return AssetPackService.instance.DropUpload(uploadId)
+
+
+def import_asset_upload(uploadId, overwrite):
+    return AssetPackService.instance.ImportUpload(uploadId, overwrite)
+
+
+def install_asset_packs(game, packs):
+    # The cached index (the page has listed the packs from it): no fetch on
+    # a write.
+    return AssetPackService.instance.Install(game, packs, fetch=False)
+
+
+def cancel_assets_job(revision):
+    return AssetPackService.instance.Cancel(revision)
+
+
+def reveal_games_folder():
+    return assets.RevealGamesFolder()
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

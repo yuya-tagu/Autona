@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import stat
+import struct
 import sys
 import threading
 import time
@@ -387,6 +388,248 @@ def test_a_zip_over_the_limits_is_refused(env, monkeypatch):
     assert refused.value.code == assets.TOO_LARGE
 
 
+# The central directory, checked from the end records before zipfile reads
+# it (SF-4b-1): zipfile.ZipFile() reads the whole directory and makes an
+# object of every entry before _ZipPlan can count them.
+
+_EOCD_FIELDS = ("sig", "disk", "diskStart", "here", "entries", "size",
+                "offset", "comment")
+
+
+def _end_record(data):
+    # (where the end record starts, its fields) of a ZIP with no comment.
+    at = len(data) - 22
+    assert data[at:at + 4] == b"PK\x05\x06"
+    return at, dict(zip(_EOCD_FIELDS, struct.unpack("<4s4H2LH", data[at:])))
+
+
+def _patch_end(path, **fields):
+    data = Path(path).read_bytes()
+    at, record = _end_record(data)
+    record.update(fields)
+    Path(path).write_bytes(
+        data[:at] + struct.pack("<4s4H2LH", *record.values()))
+
+
+def _make_zip64(path, entries=None, size=None, offset=None, diskNumber=0,
+                disks=1):
+    """The ZIP rewritten with ZIP64 end records (zipfile writes them only
+    past 65535 entries or 4 GiB): its count, directory size and offset in
+    the ZIP64 record (or the ones given), the old record's at "see ZIP64"."""
+    data = Path(path).read_bytes()
+    at, record = _end_record(data)
+    count = record["entries"] if entries is None else entries
+    eocd64 = struct.pack(
+        "<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count,
+        record["size"] if size is None else size,
+        record["offset"] if offset is None else offset)
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", diskNumber, at, disks)
+    eocd = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0xFFFF, 0xFFFF,
+                       0xFFFFFFFF, 0xFFFFFFFF, 0)
+    Path(path).write_bytes(data[:at] + eocd64 + locator + eocd)
+
+
+def _spoil_first_header(path):
+    data = bytearray(Path(path).read_bytes())
+    _at, record = _end_record(bytes(data))
+    data[record["offset"]:record["offset"] + 4] = b"XXXX"
+    Path(path).write_bytes(bytes(data))
+
+
+def _with_comment(path, comment):
+    with zipfile.ZipFile(path, "a") as z:
+        z.comment = comment
+
+
+def _truncate_end(path):
+    data = Path(path).read_bytes()
+    at, _record = _end_record(data)
+    Path(path).write_bytes(data[:at])
+
+
+def _directory_size_over(path):
+    _patch_end(path, size=assets.MAX_CENTRAL_DIRECTORY_BYTES + 1)
+
+
+def _directory_before_the_file(path):
+    at, _record = _end_record(Path(path).read_bytes())
+    _patch_end(path, size=at + 1)
+
+
+def _offset_past_the_directory(path):
+    _at, record = _end_record(Path(path).read_bytes())
+    _patch_end(path, offset=record["offset"] + 1)
+
+
+@pytest.mark.parametrize("spoil, maxEntries, code", [
+    # The end record lists more entries than MAX_ENTRIES (4 here).
+    (lambda path: None, 3, assets.TOO_LARGE),
+    # It lists 1; the directory holds 4 (zipfile reads to its size).
+    (lambda path: _patch_end(path, entries=1, here=1), 3, assets.TOO_LARGE),
+    (_directory_size_over, None, assets.TOO_LARGE),
+    (_directory_before_the_file, None, assets.NOT_A_ZIP),
+    (_offset_past_the_directory, None, assets.NOT_A_ZIP),
+    (_spoil_first_header, None, assets.NOT_A_ZIP),
+    (_truncate_end, None, assets.NOT_A_ZIP),
+    (lambda path: _make_zip64(path, entries=assets.MAX_ENTRIES + 1), None,
+     assets.TOO_LARGE),
+    (lambda path: _make_zip64(path, size=2 ** 40), None, assets.TOO_LARGE),
+    (lambda path: _make_zip64(path, diskNumber=1), None, assets.NOT_A_ZIP),
+    (lambda path: _make_zip64(path, disks=2), None, assets.NOT_A_ZIP),
+], ids=["entries", "entries-walked", "directory-size", "before-the-file",
+        "offset-past-it", "bad-header", "no-end-record", "zip64-entries",
+        "zip64-directory-size", "zip64-disk", "zip64-disks"])
+def test_a_zips_central_directory_is_checked_before_zipfile_reads_it(
+        env, monkeypatch, spoil, maxEntries, code):
+    path = _zip(env.root / "aaa.zip", _game_entries("aaa"))
+    spoil(path)
+    if maxEntries is not None:
+        monkeypatch.setattr(assets, "MAX_ENTRIES", maxEntries)
+
+    def notRead(*args, **kwargs):
+        raise AssertionError("zipfile read a refused ZIP")
+
+    monkeypatch.setattr(assets.zipfile, "ZipFile", notRead)
+    with pytest.raises(AssetPackError) as refused:
+        assets.ProbeZip(path)
+    assert refused.value.code == code
+    assert str(env.root) not in refused.value.message
+    assert "aaa.zip" not in refused.value.message
+
+
+@pytest.mark.parametrize("make", [
+    lambda path: None,
+    _make_zip64,
+    # A stub before it (a self-extractor's): the offsets are its own.
+    lambda path: Path(path).write_bytes(b"stub" + Path(path).read_bytes()),
+    # The end record is then searched for (not in the last 22 bytes).
+    lambda path: _with_comment(path, b"notes"),
+], ids=["plain", "zip64", "prefixed", "comment"])
+def test_a_sound_zip_passes_the_central_directory_check(env, make):
+    path = _zip(env.root / "aaa.zip", _game_entries("aaa"))
+    make(path)
+    assert assets.ProbeZip(path, "aaa") == ["aaa"]
+
+
+# _EndRecord finds the end records where zipfile does (the SF-4b-1 review):
+# each crafted file read by zipfile._EndRecData (private: here only, to
+# compare) and by _EndRecord -- the same record, or refused by both.
+
+_FAKE_EOCD = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 7, 7, 99, 5, 0)
+_LOCATOR = struct.pack("<4sLQL", b"PK\x06\x07", 0, 0, 1)
+
+
+def _raw_comment(path, comment):
+    # The comment written after the record as is (its length set).
+    data = Path(path).read_bytes()
+    at, record = _end_record(data)
+    record["comment"] = len(comment)
+    Path(path).write_bytes(
+        data[:at] + struct.pack("<4s4H2LH", *record.values()) + comment)
+
+
+def _locator_alone(path):
+    # A ZIP64 locator before the record, no ZIP64 record before it.
+    data = Path(path).read_bytes()
+    at, _record = _end_record(data)
+    Path(path).write_bytes(data[:at] + _LOCATOR + data[at:])
+
+
+_END_CASES = {
+    "plain": (lambda path: None, "record"),
+    "comment": (lambda path: _raw_comment(path, b"notes"), "record"),
+    # A record's signature in the comment, after the real one: both take it.
+    "fake-in-comment": (
+        lambda path: _raw_comment(path, _FAKE_EOCD + b"tail"), "record"),
+    "fake-ends-comment": (
+        lambda path: _raw_comment(path, b"x" + _FAKE_EOCD), "record"),
+    "cut-in-comment": (
+        lambda path: _raw_comment(path, b"PK\x05\x06abc"), None),
+    "offset-out-of-range": (
+        lambda path: _patch_end(path, offset=2 ** 31), "record"),
+    "zip64": (_make_zip64, "record"),
+    "zip64-offset-out-of-range": (
+        lambda path: _make_zip64(path, offset=2 ** 40), "record"),
+    "zip64-locator-alone": (_locator_alone, "record"),
+    "zip64-locator-without-room": (
+        lambda path: Path(path).write_bytes(
+            b"x" * 10 + _LOCATOR + _FAKE_EOCD), "refused"),
+    "zip64-split": (lambda path: _make_zip64(path, disks=2), "refused"),
+    # The search window: the last 65,557 bytes. A signature 65,558 bytes
+    # from the end is outside it, 65,557 inside.
+    "window-edge": (
+        lambda path: Path(path).write_bytes(_FAKE_EOCD + b"\0" * 65536),
+        None),
+    "window-inside": (
+        lambda path: Path(path).write_bytes(_FAKE_EOCD + b"\0" * 65535),
+        "record"),
+    "short": (lambda path: Path(path).write_bytes(b"PK\x05\x06"), None),
+    "empty": (lambda path: Path(path).write_bytes(b""), None),
+}
+
+
+def _zipfiles_end(path):
+    with open(path, "rb") as f:
+        try:
+            record = zipfile._EndRecData(f)
+        except (OSError, zipfile.BadZipFile):
+            return "refused"
+    if record is None:
+        return None
+    return (record[zipfile._ECD_ENTRIES_TOTAL], record[zipfile._ECD_SIZE],
+            record[zipfile._ECD_OFFSET], record[zipfile._ECD_LOCATION],
+            record[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64)
+
+
+def _our_end(path):
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        try:
+            return assets._EndRecord(f, f.tell())
+        except AssetPackError as refused:
+            assert refused.code == assets.NOT_A_ZIP
+            return "refused"
+
+
+@pytest.mark.parametrize("case", list(_END_CASES))
+def test_the_end_records_are_found_where_zipfile_finds_them(env, case):
+    craft, kind = _END_CASES[case]
+    path = _zip(env.root / "aaa.zip", _game_entries("aaa"))
+    craft(path)
+    ours = _our_end(path)
+    assert ours == _zipfiles_end(path)
+    if kind == "record":
+        assert isinstance(ours, tuple)
+    else:
+        assert ours == kind
+
+
+def test_the_job_checks_the_central_directory_again(env, monkeypatch):
+    path = _zip(env.root / "aaa.zip", _game_entries("aaa"))
+    assert env.service.ImportZip(path)[0] == assets.STARTED
+    # Swapped between the start's check and the job.
+    _directory_size_over(path)
+
+    def notRead(*args, **kwargs):
+        raise AssertionError("zipfile read a refused ZIP")
+
+    monkeypatch.setattr(assets.zipfile, "ZipFile", notRead)
+    job = _run(env)
+
+    assert job["status"] == assets.ERROR
+    assert job["error"] == assets.TOO_LARGE
+    assert not (env.games / "aaa").exists()
+
+
+def test_a_zip_that_cannot_be_opened_is_refused_without_its_path(env):
+    path = env.root / "secret-folder" / "missing.zip"
+    with pytest.raises(AssetPackError) as refused:
+        assets.ProbeZip(str(path))
+    assert refused.value.code == assets.NOT_A_ZIP
+    assert "secret-folder" not in refused.value.message
+    assert "missing.zip" not in refused.value.message
+
+
 # ── importing a ZIP ──────────────────────────────────────────────────────
 
 def test_a_zip_import_moves_the_games_in_and_scans_once(env):
@@ -480,11 +723,13 @@ def test_an_uploaded_zip_is_removed_however_its_import_ends(env):
         env.service.ImportZip(bad, removeAfter=True)
     assert not os.path.exists(bad)
 
+    # BUSY excepted: the file stays the caller's (ImportUpload holds the
+    # upload again; the SF-4b-1 review's M1).
     first = _zip(env.root / "bbb.zip", _game_entries("bbb"))
     env.service.ImportZip(first)
     busy = _zip(env.root / "ccc.zip", _game_entries("ccc"))
     assert env.service.ImportZip(busy, removeAfter=True)[0] == assets.BUSY
-    assert not os.path.exists(busy)
+    assert os.path.exists(busy)
     _run(env)
 
 
@@ -808,13 +1053,17 @@ def test_each_shells_first_scan_puts_back_what_a_job_moved_aside(env, shell):
         from src.headless import HeadlessGames as owner
     left = env.games / (assets.REPLACED_PREFIX + "aaa-dead")
     _game(left, "aaa", marker=b"old")
+    # An upload an earlier run left (SF-4b-1).
+    uploads = env.work / "user_data" / ".autona-uploads"
+    _write(uploads / (assets.UPLOAD_PREFIX + "dead.zip"), b"PK" * 100)
     scanned = []
 
     owner._FirstScan(SimpleNamespace(_Scan=lambda: scanned.append(
-        sorted(p.name for p in env.games.iterdir()))))
+        (sorted(p.name for p in env.games.iterdir()),
+         sorted(p.name for p in uploads.iterdir())))))
 
-    # Put back before the scan lists the games.
-    assert scanned == [["aaa"]]
+    # Put back, and the upload removed, before the scan lists the games.
+    assert scanned == [(["aaa"], [])]
     assert (env.games / "aaa" / "full" / "a.png").read_bytes() == b"old"
 
 
@@ -1481,9 +1730,10 @@ def test_the_list_offers_the_allowed_packs_and_the_installed_games(env):
 
 
 # ── /api/v1 ──────────────────────────────────────────────────────────────
-# The list and the last job's state. The jobs are not in v1 until SF-4b
-# brings them under the shell's secret (tests/test_web_access.py pins that
-# they are absent); here they start through the service, as the window's.
+# The list and the last job's state. The jobs' routes, the upload and the
+# job's state under the shell's secret (SF-4b-1) are
+# tests/test_api_v1_assets.py's; here a job starts through the service, as
+# the window's.
 
 @pytest.fixture
 def api(env, monkeypatch):
@@ -1526,19 +1776,29 @@ def test_the_list_is_read_through_v1(api):
     assert index["error"] == assets.INDEX_FETCH_FAILED
 
 
-def test_a_job_is_followed_through_v1(api):
-    job = api.client.get("/api/v1/assets/job")
+def test_a_job_is_followed_through_v1(api, monkeypatch):
+    from src.core import WebAccess
+
+    # The shared view's fetch (SF-4b-1: SHELL).
+    monkeypatch.setattr(WebAccess, "_shellSecret", None)
+    shell = {"Sec-Fetch-Site": "same-origin",
+             WebAccess.SHELL_HEADER: WebAccess.IssueShellSecret()}
+    assert api.client.get("/api/v1/assets/job").status_code == 403
+
+    job = api.client.get("/api/v1/assets/job", headers=shell)
     assert job.headers["Cache-Control"] == "no-store"
     assert job.get_json()["data"]["status"] == assets.IDLE
 
     _upstream(api)
     started, revision = api.service.Install("ssbu", ["full"])
     assert started == assets.STARTED and revision == 1
-    data = api.client.get("/api/v1/assets/job").get_json()["data"]
+    data = api.client.get("/api/v1/assets/job",
+                          headers=shell).get_json()["data"]
     assert data["revision"] == 1 and data["status"] == assets.RUNNING
 
     assert api.executor.run_next(WAIT)
-    data = api.client.get("/api/v1/assets/job").get_json()["data"]
+    data = api.client.get("/api/v1/assets/job",
+                          headers=shell).get_json()["data"]
     assert data["revision"] == 1 and data["status"] == assets.DONE
     assert data["imported"] == ["ssbu"]
 

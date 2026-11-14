@@ -16,7 +16,10 @@ and code has its translation in en and ja.
 
 The access token's routes (``/access-token``, ``/access-token:regenerate``;
 WebAccess.SHELL, SF-4a-1) are not listed: nothing but the app's own window
-may call them, so they are not for a person to operate by hand.
+may call them, so they are not for a person to operate by hand. Nor are the
+game asset routes (``/assets/job``, ``/assets/uploads``,
+``/assets:importZip``, ``/assets/packs:install``, ``/assets/job:cancel``,
+``/assets/games-folder:reveal``; SHELL, SF-4b-1) for the same reason.
 
 Core module: pure data and a copy of it -- no Qt (tests/test_core_qt_free
 .py), nothing read or built at import time.
