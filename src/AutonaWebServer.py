@@ -133,6 +133,18 @@ def _build_web_app():
         logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
         return response
 
+    # Shown in no other page's frame (ADR-005 S-final SF-8a review;
+    # WebAccess.FRAME_ANCESTORS): every response of this server's own port,
+    # refusals included. Not the preview listener's: its pages are the frames
+    # the shared view shows. Added, never replacing: a route's own policy, if
+    # one ever sets it, is enforced beside it.
+    @app.after_request
+    def frame_ancestors(response):
+        if not WebServer._from_preview():
+            response.headers.add(
+                "Content-Security-Policy", WebAccess.FRAME_ANCESTORS)
+        return response
+
     # An operation this shell cannot run (ADR-005 S3c; a shell operation the
     # headless shell did not register, S3e-9): 503 in the /api/v1 error
     # shape, from every legacy route. /api/v1 answers it itself (its
@@ -884,6 +896,33 @@ def _build_web_app():
     return app, socketio
 
 
+class PreviewGate:
+    """The preview listener's WSGI app (ADR-005 S-final SF-8a): the server's
+    own app, with every request marked as having arrived there.
+
+    The shared view's design previews load the overlay from this second
+    port: another origin than the pages', so a layout's script cannot reach
+    the shared view nor pass as one of this server's own pages. The mark is
+    all the gate does; what the port serves is decided by the guards
+    (WebServer._guard_http_request, _authorize_ws_connection, the Designer's)
+    before anything else, from WebAccess.PreviewServes. A client cannot set
+    the mark: its headers reach the environ as HTTP_* keys only.
+    """
+
+    ENVIRON_KEY = "autona.preview"
+
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        environ[PreviewGate.ENVIRON_KEY] = True
+        return self.app(environ, start_response)
+
+    @staticmethod
+    def Marked(environ):
+        return environ.get(PreviewGate.ENVIRON_KEY) is True
+
+
 class WebServer:
     """The Flask/SocketIO server, served from a plain Python thread.
 
@@ -911,6 +950,9 @@ class WebServer:
         self._serve_lock = threading.Lock()
         self._server = None
         self._thread = None
+        # The preview listener (ADR-005 S-final SF-8a) and its thread.
+        self._preview_server = None
+        self._preview_thread = None
         self._stopping = False
 
         # Idempotent, same shape as the existing singleton guards: the Flask
@@ -997,6 +1039,20 @@ class WebServer:
         none runs (tests, before start())."""
         bound = WebServer._listening
         return None if bound is None else (bound[1], bound[2])
+
+    # The port of the preview listener while it serves (ADR-005 S-final
+    # SF-8a), else None.
+    _preview_port = None
+
+    @staticmethod
+    def PreviewPort():
+        """The port the design previews load from (the preview listener,
+        PreviewGate) while it serves, else None: no server runs, or that
+        port could not be bound -- the previews are then not shown, never
+        loaded from the pages' own origin. On the address the server is
+        bound to, which the OS picks at each start (/api/v1/health's
+        previewPort)."""
+        return WebServer._preview_port
 
     @staticmethod
     def Serving():
@@ -1698,8 +1754,20 @@ class WebServer:
         return WebServer._lan_hosts
 
     @staticmethod
+    def _from_preview():
+        """Whether the current request / connection arrived on the preview
+        listener (PreviewGate; ADR-005 S-final SF-8a)."""
+        return PreviewGate.Marked(request.environ)
+
+    @staticmethod
     def _authorize(auth=None):
         """WebAccess.Authorize() for the current request / connection."""
+        # Never for the preview listener's (ADR-005 S-final SF-8a): its
+        # SERVER_PORT is that port, and OwnOrigins() of it would make its
+        # pages this server's own. The guards refuse it before this; this
+        # keeps any other caller from asking.
+        if WebServer._from_preview():
+            return None, WebAccess.PREVIEW_ONLY
         localAddresses = WebServer._local_addresses()
         # SERVER_PORT is the port the server listens on (not the client's
         # Host header, which is checked against it): what this server's own
@@ -1751,7 +1819,22 @@ class WebServer:
         Only WRITE / PLAYERDB / THIS_PC endpoints are checked. A preflight
         (OPTIONS) passes: it carries no token and runs no handler. An unmatched
         URL (endpoint None) is left to Flask's 404 / 405.
+
+        The preview listener's requests come first and never reach
+        Authorize (ADR-005 S-final SF-8a): served only when
+        WebAccess.PreviewServes says so, every other one -- a preflight, an
+        unmatched URL, a write with the token -- refused.
+
+        Then, on this server's own port, a request for its response in
+        another page's frame (WebAccess.FramedElsewhere: a preview's frame
+        navigated here, a frame a layout made) is refused, whatever it asks
+        for -- a file, a page, an unmatched URL (the SF-8a review).
         """
+        if WebServer._from_preview():
+            return WebServer._guard_preview_request()
+        framed = WebServer._guard_framed_request()
+        if framed is not None:
+            return framed
         if request.method == "OPTIONS" or request.endpoint is None:
             return None
         access = WebAccess.RouteAccess(request.endpoint)
@@ -1776,6 +1859,47 @@ class WebServer:
         return response
 
     @staticmethod
+    def _guard_preview_request():
+        """None when the preview listener serves the current request, else
+        the 403 to send (WebAccess.PREVIEW_ONLY), token or not."""
+        filename = (request.view_args or {}).get("filename")
+        if WebAccess.PreviewServes(request.endpoint, request.method, filename):
+            return None
+        refusal = WebAccess.PREVIEW_ONLY
+        WebServer._log_refusal(
+            ("preview", request.endpoint, request.method),
+            f"{request.method} {request.path} on the preview listener",
+            refusal)
+        response = jsonify(WebAccess.ErrorBody(refusal))
+        response.status_code = refusal.status
+        return response
+
+    # The Sec-Fetch-Site values named in the log; anything else is "other".
+    _FETCH_SITES = ("same-site", "cross-site")
+
+    @staticmethod
+    def _guard_framed_request():
+        """None, else the 403 for a request asking for this server's response
+        in another page's frame (WebAccess.FRAMED_ELSEWHERE): token or not,
+        and itself shown in no frame (WebAccess.REFUSED_FRAME_POLICY)."""
+        site = request.headers.get("Sec-Fetch-Site")
+        if not WebAccess.FramedElsewhere(
+                request.headers.get("Sec-Fetch-Dest"), site):
+            return None
+        refusal = WebAccess.FRAMED_ELSEWHERE
+        site = site.strip().lower()
+        site = site if site in WebServer._FETCH_SITES else "other"
+        WebServer._log_refusal(
+            ("framed", request.remote_addr, site),
+            f"{request.method} {request.path} in a frame", refusal,
+            f"Sec-Fetch-Site {site}")
+        response = jsonify(WebAccess.ErrorBody(refusal))
+        response.status_code = refusal.status
+        response.headers["Content-Security-Policy"] = (
+            WebAccess.REFUSED_FRAME_POLICY)
+        return response
+
+    @staticmethod
     def _authorize_ws_connection(auth):
         """Record what a new Socket.IO connection may do (see ws_connect).
 
@@ -1783,6 +1907,16 @@ class WebServer:
         Authorize lets in also gets the guarded events and the player DB
         broadcast; any other is read-only, and _ws_guard refuses its writes.
         """
+        if WebServer._from_preview():
+            # A preview's layout (ADR-005 S-final SF-8a): it reads the state
+            # like any overlay, and writes nothing, token or not. No trusted
+            # room: neither the player DB nor the pending notices.
+            request.environ[WebServer.WS_GRANT_KEY] = None
+            request.environ[WebServer.WS_REFUSAL_KEY] = WebAccess.PREVIEW_ONLY
+            logger.debug(
+                f"webserver: Socket.IO connection from {request.remote_addr} "
+                "on the preview listener is read-only")
+            return
         # Read before authorizing: if the token is regenerated meanwhile, the
         # grant carries the old generation and fails closed. A connection that
         # qualifies without the token gets the ambient grant even when it
@@ -1829,6 +1963,10 @@ class WebServer:
     # class so the guard has one obvious home next to the rest of the state.
     @staticmethod
     def _authorize_designer_request():
+        # Not on the preview listener, whatever it carries (ADR-005 S-final
+        # SF-8a; _guard_http_request refuses it there first).
+        if WebServer._from_preview():
+            abort(403, "Desktop Designer authorization required")
         token = request.headers.get("X-Autona-Designer-Token")
         if not AutonaDesignerService.is_authorized(token, request.remote_addr):
             abort(403, "Desktop Designer authorization required")
@@ -1855,6 +1993,12 @@ class WebServer:
         A preflight carries no code, so it stops after the Origin check.
         Returned, not raised: see the comment on the import route.
         """
+        # Not on the preview listener (ADR-005 S-final SF-8a;
+        # _guard_http_request refuses it there first).
+        if WebServer._from_preview():
+            return jsonify({
+                "error": "Figma import is not allowed from this page"
+            }), 403
         if not AutonaDesignerService.is_loopback(request.remote_addr):
             return jsonify({
                 "error": "Figma import is only allowed from this computer"
@@ -1920,6 +2064,7 @@ class WebServer:
         # so the wire behaviour is the same. Building the server ourselves is
         # what makes it stoppable: serve_forever() returns on shutdown().
         from werkzeug.serving import make_server
+        preview = None
         try:
             try:
                 server = make_server(
@@ -1933,9 +2078,14 @@ class WebServer:
                 raise OSError(
                     f"could not listen on {self.host_name}:{self.port}: "
                     f"{reason}") from None
+            # The preview listener (ADR-005 S-final SF-8a), only once this
+            # one is up: a server that cannot listen shows no previews.
+            preview = self._MakePreviewServer(make_server)
             with self._serve_lock:
                 if self._stopping:
                     server.server_close()
+                    if preview is not None:
+                        preview.server_close()
                     return
                 self._server = server
                 # What is really bound (the settings take effect on the
@@ -1943,11 +2093,23 @@ class WebServer:
                 # URL is built from it (ADR-005 S4l).
                 WebServer._listening = (self.host_name, self.port,
                                         self.listen_lan)
+                if preview is not None:
+                    self._preview_server = preview
+                    self._preview_thread = threading.Thread(
+                        target=preview.serve_forever,
+                        name="AutonaWebServerPreview", daemon=True)
+                    self._preview_thread.start()
+                    WebServer._preview_port = preview.server_port
             logger.info(
                 f"Web server listening on {self.host_name}:{self.port}")
+            if preview is not None:
+                logger.info(
+                    f"Web server preview listener on "
+                    f"{self.host_name}:{preview.server_port} (read-only)")
             server.serve_forever()
         except Exception as e:
             logger.error(traceback.format_exc())
+            self._DropPreview(preview)
             with self._serve_lock:
                 stopping = self._stopping
             if stopping or self._on_start_failed is None:
@@ -1957,6 +2119,61 @@ class WebServer:
             except Exception:
                 logger.opt(exception=True).error(
                     "web server start-failure callback raised")
+
+    def _MakePreviewServer(self, make_server):
+        """The preview listener's server (ADR-005 S-final SF-8a), or None.
+
+        Same host as this server (the LAN setting decides both), a port the
+        OS picks, every request marked by PreviewGate. None when it cannot
+        bind: the pages then show no preview rather than one on this
+        server's own origin -- a warning, not a start failure.
+        """
+        try:
+            return make_server(
+                self.host_name, 0, PreviewGate(self.app), threaded=True)
+        except (Exception, SystemExit) as error:
+            # werkzeug's bind failure is a SystemExit (see _Serve).
+            reason = error.__context__ or error
+            logger.warning(
+                f"webserver: no preview listener on {self.host_name}: "
+                f"{reason}; the pages show no layout previews")
+            return None
+
+    # How long _DropPreview waits for the preview listener's thread.
+    PREVIEW_DROP_SEC = 5.0
+
+    def _DropPreview(self, preview):
+        """Stop and close the preview listener ``preview`` (_MakePreviewServer's,
+        or None) after this server's own loop failed: the previews are no use
+        without it (the pages, the API), and PreviewPort() must not name a
+        port nothing behind which answers for this server. stop() closes it
+        instead once it has begun (it took the listener then), so the two never
+        both do."""
+        if preview is None:
+            return
+        with self._serve_lock:
+            if self._stopping:
+                return
+            thread = None
+            if self._preview_server is preview:
+                thread = self._preview_thread
+                self._preview_server = None
+                self._preview_thread = None
+                WebServer._preview_port = None
+        # shutdown() waits for serve_forever() to return, so only on a
+        # listener whose loop runs (or is about to: its thread is alive).
+        if thread is not None and thread.is_alive():
+            try:
+                preview.shutdown()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "error stopping the preview listener")
+            thread.join(WebServer.PREVIEW_DROP_SEC)
+        try:
+            preview.server_close()
+        except Exception:
+            logger.opt(exception=True).warning(
+                "error closing the preview listener's socket")
 
     def stop(self, timeout: float = 10.0) -> bool:
         """Stop serving and wait up to `timeout` seconds for the threads.
@@ -1975,32 +2192,49 @@ class WebServer:
         can then take up to timeout + DELTA_STOP_MIN_SEC). Not to be called
         holding StateManager.lock (the flusher's full-state fallback reads
         the state).
+
+        The preview listener (ADR-005 S-final SF-8a) stops with it, in the
+        same timeout: both shutdowns run at once.
         """
         with self._serve_lock:
             self._stopping = True
             server = self._server
             thread = self._thread
+            preview = self._preview_server
+            previewThread = self._preview_thread
             if WebServer._listening is not None and server is not None:
                 WebServer._listening = None
+            if preview is not None:
+                WebServer._preview_port = None
         deadline = time.monotonic() + timeout
-        if server is not None:
-            # shutdown() blocks until serve_forever() has returned; run it
-            # on a helper so a wedged loop cannot hold the caller (the
-            # window's close) beyond the timeout.
+        # shutdown() blocks until serve_forever() has returned; run it on a
+        # helper so a wedged loop cannot hold the caller (the window's
+        # close) beyond the timeout.
+        stoppers = []
+        for running in (server, preview):
+            if running is None:
+                continue
             stopper = threading.Thread(
-                target=server.shutdown, name="AutonaWebServerStop",
+                target=running.shutdown, name="AutonaWebServerStop",
                 daemon=True)
             stopper.start()
-            stopper.join(timeout)
-        if thread is not None:
-            thread.join(max(0.0, deadline - time.monotonic()))
-        if server is not None:
+            stoppers.append(stopper)
+        for stopper in stoppers:
+            stopper.join(max(0.0, deadline - time.monotonic()))
+        for running in (thread, previewThread):
+            if running is not None:
+                running.join(max(0.0, deadline - time.monotonic()))
+        for running in (server, preview):
+            if running is None:
+                continue
             try:
-                server.server_close()
+                running.server_close()
             except Exception:
                 logger.opt(exception=True).warning(
                     "error closing the web server socket")
-        stopped = thread is None or not thread.is_alive()
+        stopped = all(
+            running is None or not running.is_alive()
+            for running in (thread, previewThread))
         if not stopped:
             logger.warning(f"web server thread still alive after {timeout}s")
         flushed = self._stop_delta_flusher(max(

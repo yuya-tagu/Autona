@@ -90,7 +90,7 @@ from .AutonaWebPageLifecycle import (
     HiddenPageLifecycle, IsWebServerReady, LocalPageLoader,
     WhenWebServerReady)
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .Helpers.AutonaNetworkHelper import GetLocalIP
+from .Helpers.AutonaNetworkHelper import GetLocalIP, GetLocalIPs
 from .core import WebAccess
 from . import ui_constants as UI
 
@@ -144,6 +144,46 @@ def ContextActions(editable, hasSelection):
 
 def _Origin(url):
     return (url.scheme(), url.host(), url.port())
+
+
+# This PC's LAN addresses, looked up on first use and kept (as the web server
+# keeps its own: WebServer._local_addresses).
+_lanHosts = None
+
+
+def _LanHosts():
+    global _lanHosts
+    if _lanHosts is None:
+        _lanHosts = GetLocalIPs()
+    return _lanHosts
+
+
+def _Port(url):
+    # The port, the scheme's default spelled out (-1 for one without).
+    return url.port({"http": 80, "https": 443}.get(url.scheme(), -1))
+
+
+def _IsServerOrigin(url, pageUrls):
+    """Whether ``url`` is on this server's own origin: that of one of
+    ``pageUrls`` (the page's), or the server's port under a loopback name or
+    this PC's LAN address (WebAccess.OwnOrigins) -- what passes as its own
+    page there."""
+    # Only http(s) is served (an about: / data: frame is never the server's,
+    # even while the page itself is still about:blank).
+    if url.scheme() not in _OUTSIDE_SCHEMES:
+        return False
+    if any(_Origin(url) == _Origin(page) for page in pageUrls):
+        return True
+    port = _Port(url)
+    if port <= 0 or port not in {_Port(page) for page in pageUrls}:
+        return False
+    # The origin alone: a userinfo ("x@127.0.0.1") does not make it another.
+    # The LAN addresses are looked up only for the server's port.
+    host = url.host()
+    if ":" in host:
+        host = f"[{host}]"
+    return (WebAccess.NormalizeOrigin(f"{url.scheme()}://{host}:{port}")
+            in WebAccess.OwnOrigins(port, _LanHosts()))
 
 
 def _IsDesignerUrl(url, pageUrl):
@@ -229,7 +269,19 @@ class _PanelPage(QWebEnginePage):
 
     Qt reports a refused navigation as a failed load (loadFinished(False))
     although the document stays: ``refusedLast`` tells the host so, until
-    the next main-frame navigation goes through."""
+    the next main-frame navigation goes through.
+
+    A frame's navigation goes through, except to this server's own origin
+    (ADR-005 S-final SF-8a review): the page's frames are the design
+    previews, on the preview listener's origin, and whatever a layout frames
+    of its own (a widget elsewhere). A layout's script there could navigate
+    its frame -- or a frame it makes -- to this server's port, and run as
+    one of its pages: the panels' DOM, the writes without the token. Qt does
+    not say which frame asks, and no page of the panels frames this server's
+    own origin, so every such navigation of a frame is refused. The server
+    refuses it as well (WebAccess.FramedElsewhere, from Sec-Fetch-*), and
+    that is what holds where this page is not the one framing (a browser's
+    Web UI)."""
 
     designerRequested = Signal()
 
@@ -265,7 +317,12 @@ class _PanelPage(QWebEnginePage):
 
     def acceptNavigationRequest(self, url, navigationType, isMainFrame):
         if not isMainFrame:
-            return True
+            if not _IsServerOrigin(url, (self.url(), self.requestedUrl())):
+                return True
+            # Not refusedLast: the main frame's document is untouched.
+            logger.warning("The web panel view refused a frame of this "
+                           "server's own origin, %s", url.toDisplayString())
+            return False
         if navigationType in _HOST_NAVIGATIONS or _Origin(url) in (
                 _Origin(self.url()), _Origin(self.requestedUrl())):
             self.refusedLast = False

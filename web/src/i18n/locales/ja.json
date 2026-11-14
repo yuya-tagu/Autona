@@ -116,6 +116,8 @@
     "commentary_obs_note": "Autona を起動したままにすると、実況・解説者の編集が OBS 上のオーバーレイへリアルタイムに反映されます。",
     "commentary_design": "実況・解説のデザインを選択",
     "commentary_preview": "プレビュー",
+    "commentary_preview_unavailable": "プレビューを表示できません。アプリがプレビュー用のポートを開けなかったか、アプリに接続できません。",
+    "commentary_preview_quarantined": "このデザインがキーボードの入力を奪ったため、プレビューを止めました。別のデザインを選ぶか、ページを開き直すと表示します。",
     "commentary_no_design": "実況・解説のデザインがありません",
 
     "stream_title": "配信設定",

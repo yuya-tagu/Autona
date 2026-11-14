@@ -726,6 +726,7 @@ report({
 _WEBSERVER_SCRIPT = _PRELUDE + r'''
 import socket
 import time
+import urllib.error
 import urllib.request
 
 port = int(sys.argv[2])
@@ -750,15 +751,34 @@ server = WebServer(on_start_failed=failures.append)
 server.start()
 
 health = None
+preview_port = None
 deadline = time.monotonic() + 30
 while time.monotonic() < deadline:
     try:
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{port}/api/v1/health", timeout=2) as resp:
-            health = (resp.status, json.loads(resp.read())["data"]["status"])
+            data = json.loads(resp.read())["data"]
+            health = (resp.status, data["status"])
+            preview_port = data["previewPort"]
             break
     except Exception:
         time.sleep(0.1)
+
+# The preview listener (ADR-005 S-final SF-8a): its own port, what a layout
+# reads, and a write refused there even from this PC.
+def preview_answer(path, method="GET"):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{preview_port}{path}", method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as resp:
+            return [resp.status, None]
+    except urllib.error.HTTPError as error:
+        return [error.code, json.loads(error.read())["error"]["code"]]
+
+preview_health = preview_answer("/api/v1/health")
+preview_write = preview_answer("/api/v1/scoreboards/1/score:reset", "POST")
+preview_threads = [t.name for t in threading.enumerate()
+                   if t.name == "AutonaWebServerPreview"]
 
 # The delta flusher runs beside the server (ADR-005 S3f-5).
 flusher_while_serving = [t.name for t in threading.enumerate()
@@ -799,6 +819,12 @@ try:
     after_stop = "accepted"
 except OSError:
     after_stop = "refused"
+try:
+    socket.create_connection(("127.0.0.1", preview_port), timeout=2).close()
+    preview_after_stop = "accepted"
+except OSError:
+    preview_after_stop = "refused"
+preview_port_after_stop = WebServer.PreviewPort()
 
 server.start()  # no restart after stop()
 time.sleep(0.3)
@@ -819,6 +845,12 @@ failing_thread_gone = failing.stop(5.0)
 
 report({
     "health": health,
+    "preview_port": preview_port,
+    "preview_health": preview_health,
+    "preview_write": preview_write,
+    "preview_threads": preview_threads,
+    "preview_after_stop": preview_after_stop,
+    "preview_port_after_stop": preview_port_after_stop,
     "flusher_while_serving": flusher_while_serving,
     "notices": notices,
     "status_snapshot": status_snapshot,
@@ -842,9 +874,19 @@ def _free_port():
 
 def test_web_server_thread_serves_stops_and_reports_a_failed_start(
         tmp_path):
-    result = _probe(tmp_path, _WEBSERVER_SCRIPT, str(_free_port()))
+    port = _free_port()
+    result = _probe(tmp_path, _WEBSERVER_SCRIPT, str(port))
 
     assert result["health"] == [200, "ok"]
+    # The preview listener (ADR-005 S-final SF-8a): another port, read-only,
+    # stopped with the server (its thread is in server_threads below).
+    assert isinstance(result["preview_port"], int)
+    assert result["preview_port"] != port
+    assert result["preview_health"] == [200, None]
+    assert result["preview_write"] == [403, "FORBIDDEN"]
+    assert result["preview_threads"] == ["AutonaWebServerPreview"]
+    assert result["preview_after_stop"] == "refused"
+    assert result["preview_port_after_stop"] is None
     assert result["flusher_while_serving"] == ["AutonaWebServerDeltas"]
     assert result["notices"] == [
         ["scoreboard_pending", {"board": 1, "dirty": False}],

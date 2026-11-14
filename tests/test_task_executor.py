@@ -896,8 +896,10 @@ THREAD_MODULES = {"asyncio", "qasync", "_thread"}
 # by file, the function or class they are started in and how. Adding one,
 # moving one or taking one away changes that list too.
 THREADS_LEFT = {
-    # The web server: the server, its stop helper, the delta flusher (S3f-5).
+    # The web server: the server, its stop helper, the delta flusher (S3f-5),
+    # the preview listener (S-final SF-8a; started once the server is bound).
     ("src/AutonaWebServer.py", "WebServer.start", "Thread"),
+    ("src/AutonaWebServer.py", "WebServer._Serve", "Thread"),
     ("src/AutonaWebServer.py", "WebServer.stop", "Thread"),
     ("src/AutonaWebServer.py", "WebServer._start_delta_flusher", "Thread"),
     # The ./out export writer and the image downloads (daemon).

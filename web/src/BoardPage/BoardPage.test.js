@@ -18,7 +18,7 @@ import BoardPage from "./index";
 jest.setTimeout(20000);
 
 jest.mock("../websocketConnection", () => {
-    const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
+    const socket = {connected: false, emit: jest.fn(), on: jest.fn(), off: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
 });
 
@@ -30,6 +30,8 @@ const MINE = {id: "custom/mine", kind: "designer", displayName: "Custom: 決勝"
               format: "<b>3v3</b>", game: "カスタム", entry: "index.html"};
 const NEW = {id: "custom/new", kind: "designer", displayName: "Custom: 新作",
              format: "1v1", game: "カスタム", entry: "index.html"};
+// Where the preview frames load from (GET /api/v1/health's previewPort).
+const PREVIEW_PORT = 52345;
 
 let designs;
 let selected;
@@ -212,6 +214,10 @@ beforeEach(() => {
                 design: selected ? `C:\\Autona\\layout\\${selected.id}\\${selected.entry}` : null,
                 winnerPopup: "C:\\Autona\\layout\\winner_popup\\index.html",
             }});
+        }
+        if (method === "GET" && path === "/api/v1/health") {
+            // The preview listener's port (ADR-005 S-final SF-8a).
+            return answer(200, {ok: true, data: {previewPort: PREVIEW_PORT}});
         }
         if (holdWrite && method !== "GET") {
             await holdWrite;

@@ -1,7 +1,10 @@
 import React from "react";
+import {flushSync} from "react-dom";
 import {Box, MenuItem, Stack, TextField, Typography} from "@mui/material";
 import i18n from "../i18n/config";
-import {BASE_URL} from "../env";
+import {BACKEND_PORT, BASE_URL} from "../env";
+import {getWithRetry} from "../PanelShell/requests";
+import socketConnection from "../websocketConnection";
 import {LayoutEntry} from "./SideCards";
 
 // The Commentary page's right pane (ADR-005 S4b): the design select and the
@@ -13,6 +16,25 @@ import {LayoutEntry} from "./SideCards";
 // page's too (S4s), with what only it has: controls above the preview, a picture
 // behind the overlay, a second overlay page on top, a way to load them again and
 // a preview that also keeps to the height left for it.
+//
+// The frames load from the server's preview listener (ADR-005 S-final SF-8a):
+// this host at the port /api/v1/health names, another origin than this page's,
+// where the server serves only what a layout reads and refuses every write, token
+// or not. A layout is anyone's script (a downloaded one too): there it can read
+// the state as OBS lets it, but not write through this page's origin nor reach
+// into this page. Sandboxed, but with its own (real) origin kept: an opaque one
+// broke the layouts (S4af: cssRules, toDataURL and localStorage throw). Without
+// a preview port there is no preview -- never one on this page's origin.
+//
+// What the origin does not stop is a frame taking the keyboard focus: the keys
+// typed then go to the layout. A frame found holding the focus -- as this window
+// loses it, or on a poll for when the window is not the active one -- is taken
+// out with a note, until another design (or a reload) is shown. The page listens
+// to no `message` from the frames.
+
+export const HEALTH_PATH = "/api/v1/health";
+export const PREVIEW_SANDBOX = "allow-scripts allow-same-origin";
+export const QUARANTINE_POLL_MS = 250;
 
 const OVERLAY_WIDTH = 1920;
 const OVERLAY_HEIGHT = 1080;
@@ -58,6 +80,111 @@ function usePreviewScale(
         return () => observer.disconnect();
     }, [frame, shown, fit]);
     return scale;
+}
+
+// The preview listener's origin for /api/v1/health's `previewPort`, or null: a
+// port that is not one, or this server's own (no preview on this origin).
+function previewOrigin(port: unknown): string | null {
+    if (typeof port !== "number" || !Number.isInteger(port)
+        || port < 1 || port > 65535 || String(port) === String(BACKEND_PORT)) {
+        return null;
+    }
+    return `http://${window.location.hostname}:${port}`;
+}
+
+// undefined while the server is first asked, then the origin or null. Asked
+// again on every (re)connect of the page's Socket.IO: a restarted app listens
+// for the previews on another port, and a health that failed is tried again.
+// Only the latest answer counts.
+function usePreviewOrigin(): string | null | undefined {
+    const [origin, setOrigin] = React.useState<string | null | undefined>(
+        undefined);
+    React.useEffect(() => {
+        let mounted = true;
+        let asked = 0;
+        const ask = () => {
+            const request = ++asked;
+            const current = () => mounted && request === asked;
+            getWithRetry<{data?: {previewPort?: unknown}}>(
+                HEALTH_PATH, current).then(
+                (body) => {
+                    if (current()) {
+                        setOrigin(previewOrigin(body?.data?.previewPort));
+                    }
+                },
+                (error) => {
+                    if (current()) {
+                        console.error(error);
+                        setOrigin(null);
+                    }
+                });
+        };
+        const socket = socketConnection.instance();
+        socket.on("connect", ask);
+        // The socket may have connected before this mounted: ask now too.
+        ask();
+        return () => {
+            mounted = false;
+            socket.off("connect", ask);
+        };
+    }, []);
+    return origin;
+}
+
+// Whether the frames of `shown` (a design and its reload) were taken out:
+// watched while they are shown, by the window's blur and a poll. Until
+// another document is shown: coming back to the one taken out (A, B, A)
+// shows it again. No document for a while (the preview port lost and found
+// again) is not another one.
+function useQuarantine(
+    container: React.RefObject<HTMLDivElement | null>,
+    shown: string | null,
+): boolean {
+    const [quarantined, setQuarantined] = React.useState<string | null>(null);
+    const taken = shown !== null && quarantined === shown;
+    React.useEffect(() => {
+        if (shown !== null) {
+            setQuarantined((out) => out === shown ? out : null);
+        }
+    }, [shown]);
+    React.useEffect(() => {
+        if (shown === null || taken) {
+            return undefined;
+        }
+        // What had the focus here last: given it back after.
+        const focused = document.activeElement;
+        let last = focused instanceof HTMLElement
+            && !(focused instanceof HTMLIFrameElement) ? focused : null;
+        const onFocusIn = (event: FocusEvent) => {
+            if (event.target instanceof HTMLElement
+                && !(event.target instanceof HTMLIFrameElement)) {
+                last = event.target;
+            }
+        };
+        const check = () => {
+            const holder = document.activeElement;
+            if (!(holder instanceof HTMLIFrameElement)
+                || !container.current?.contains(holder)) {
+                return;
+            }
+            // Out now, not at React's next render: every key until then is
+            // the layout's.
+            flushSync(() => setQuarantined(shown));
+            window.focus();
+            if (last?.isConnected) {
+                last.focus();
+            }
+        };
+        window.addEventListener("blur", check);
+        document.addEventListener("focusin", onFocusIn);
+        const poll = window.setInterval(check, QUARANTINE_POLL_MS);
+        return () => {
+            window.removeEventListener("blur", check);
+            document.removeEventListener("focusin", onFocusIn);
+            window.clearInterval(poll);
+        };
+    }, [container, shown, taken]);
+    return taken;
 }
 
 // The overlay pages lie on one another: one 1920x1080 frame each, scaled.
@@ -106,6 +233,15 @@ export default function DesignPane({
     const scale = usePreviewScale(frame, design !== null, fit);
     const heading = label ?? i18n.t("commentary_design");
     const shownKey = design ? selectKey(design) : "";
+    const origin = usePreviewOrigin();
+    // The document the frames show: a new one is watched afresh.
+    const documentKey = design
+        ? `${layoutPath(design)}#${reloadKey ?? 0}` : null;
+    const quarantined = useQuarantine(
+        frame, origin ? documentKey : null);
+    const note = origin === null
+        ? i18n.t("commentary_preview_unavailable")
+        : quarantined ? i18n.t("commentary_preview_quarantined") : null;
 
     const preview = design && (
         <Box
@@ -132,24 +268,44 @@ export default function DesignPane({
                 } : {}),
             }}
         >
-            <Box
-                component="iframe"
-                // A new design is a new document.
-                key={`${layoutPath(design)}#${reloadKey ?? 0}`}
-                title={i18n.t("commentary_preview")}
-                src={`${BASE_URL}${layoutPath(design)}`}
-                tabIndex={-1}
-                sx={frameSx(scale)}
-            />
-            {overlay && (
+            {origin && !quarantined && (
+                <Box
+                    component="iframe"
+                    // A new design is a new document.
+                    key={documentKey}
+                    title={i18n.t("commentary_preview")}
+                    src={`${origin}${layoutPath(design)}`}
+                    sandbox={PREVIEW_SANDBOX}
+                    tabIndex={-1}
+                    sx={frameSx(scale)}
+                />
+            )}
+            {origin && !quarantined && overlay && (
                 <Box
                     component="iframe"
                     key={`overlay#${reloadKey ?? 0}`}
                     title={overlay.title}
-                    src={`${BASE_URL}${overlay.src}`}
+                    src={`${origin}${overlay.src}`}
+                    sandbox={PREVIEW_SANDBOX}
                     tabIndex={-1}
                     sx={frameSx(scale)}
                 />
+            )}
+            {note && (
+                <Box sx={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    p: 2,
+                    bgcolor: "rgba(0, 0, 0, 0.6)",
+                }}>
+                    <Typography variant="body2" role="status"
+                                sx={{color: "common.white", textAlign: "center"}}>
+                        {note}
+                    </Typography>
+                </Box>
             )}
         </Box>
     );

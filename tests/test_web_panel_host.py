@@ -38,6 +38,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer, QUrl
@@ -342,6 +343,126 @@ def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
     assert rig.requests[-1] == "/web/second?desktop=1&lng=ja"
     assert rig.js("window.__loadId") != document
     assert not rig.host.view.page().refusedLast
+
+
+# ── no frame of this server's own origin (ADR-005 S-final SF-8a review) ──
+# The design previews load from the preview listener (another port); a
+# layout's script there may navigate its frame -- or a frame it makes -- to
+# this server's own port, where it would be one of its pages. The view lets
+# no frame onto that origin (Qt does not say which frame asks; no page of the
+# panels frames it). The server refuses it too (tests/test_web_access.py).
+
+# Stands in for a layout on the preview listener: it navigates itself to
+# ?go=, or frames ?nest=.
+FRAME_PAGE = b"""<!doctype html><html><body><script>
+var q = new URLSearchParams(location.search);
+if (q.get('go')) { location.href = q.get('go'); }
+if (q.get('nest')) {
+  var f = document.createElement('iframe');
+  f.src = q.get('nest');
+  document.body.appendChild(f);
+}
+</script></body></html>"""
+
+
+@pytest.fixture(scope="module")
+def frameServer():
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if not self.path.startswith("/favicon"):
+                requests.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(FRAME_PAGE)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(FRAME_PAGE)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server.server_address[1], requests
+    server.shutdown()
+    server.server_close()
+
+
+def _frame(rig, url):
+    rig.js("(function(u){var f=document.createElement('iframe');f.src=u;"
+           f"document.body.appendChild(f);return 1;}})({json.dumps(url)})")
+
+
+def test_no_frame_goes_to_this_servers_own_origin(buildHost, monkeypatch):
+    monkeypatch.setattr(HostModule, "_lanHosts", ("192.0.2.10",))
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    N = QWebEnginePage.NavigationType
+    kinds = (N.NavigationTypeLinkClicked, N.NavigationTypeOther,
+             N.NavigationTypeRedirect, N.NavigationTypeTyped,
+             N.NavigationTypeReload)
+
+    for url in (f"http://127.0.0.1:{port}/layout/scoreboard/index.html",
+                f"http://localhost:{port}/web/board",
+                f"http://x@127.0.0.1:{port}/layout/a.html",
+                f"http://192.0.2.10:{port}/layout/a.html"):   # this PC's LAN
+        for kind in kinds:
+            assert rig.page.acceptNavigationRequest(
+                QUrl(url), kind, False) is False, (url, kind)
+    # The main frame's document is untouched: no refusal of its own.
+    assert not rig.page.refusedLast
+
+    for url in (f"http://127.0.0.1:{port + 1}/layout/a.html",  # the previews'
+                f"http://192.0.2.10:{port + 1}/layout/a.html",
+                "https://example.com/widget", "about:blank", "about:srcdoc",
+                "data:text/html,a"):
+        assert rig.page.acceptNavigationRequest(
+            QUrl(url), N.NavigationTypeLinkClicked, False) is True, url
+    # Only http(s) is the server's: an about: frame of a page that is itself
+    # still about:blank is not "the page's own origin".
+    for url in ("about:blank", "about:srcdoc", "data:text/html,a"):
+        assert HostModule._IsServerOrigin(
+            QUrl(url), (QUrl("about:blank"), QUrl(url))) is False, url
+    # The main frame keeps its rule: its own origin goes through.
+    assert rig.page.acceptNavigationRequest(
+        QUrl(f"http://127.0.0.1:{port}/web/second"),
+        N.NavigationTypeLinkClicked, True) is True
+
+
+def test_a_frame_sent_to_this_servers_own_origin_does_not_get_there(
+        buildHost, frameServer, caplog):
+    # Chromium's own navigations of a frame: itself (location.href) and one
+    # it makes (<iframe src>). The server's port never sees them.
+    rig = _shown(buildHost)
+    port = rig.servingPort
+    framePort, frameRequests = frameServer
+    frameRequests.clear()
+    loads = list(rig.loads)
+    elsewhere = f"http://127.0.0.1:{framePort}/frame?"
+
+    # Control: a navigation of the frame on its own origin goes through.
+    _frame(rig, elsewhere + "go=" + quote(
+        f"http://127.0.0.1:{framePort}/second", safe=""))
+    assert _waitUntil(lambda: "/second" in frameRequests)
+
+    with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
+        _frame(rig, elsewhere + "go=" + quote(
+            f"http://127.0.0.1:{port}/from-frame", safe=""))
+        _frame(rig, elsewhere + "nest=" + quote(
+            f"http://127.0.0.1:{port}/nested", safe=""))
+        assert _waitUntil(
+            lambda: caplog.text.count("refused a frame of this server") >= 2)
+
+    _waitUntil(lambda: False, timeout=0.5)
+    assert "/from-frame" not in rig.requests
+    assert "/nested" not in rig.requests
+    # The page itself is as it was: loaded, no failed load reported.
+    assert rig.loads == loads
+    assert rig.host._loaded
+    assert not rig.page.refusedLast
 
 
 # ── a new window goes to the default browser (ADR-005 S4r) ──────────────

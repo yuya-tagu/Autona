@@ -16,7 +16,7 @@ import StatsPreviewPage from "./index";
 jest.setTimeout(20000);
 
 jest.mock("../websocketConnection", () => {
-    const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
+    const socket = {connected: false, emit: jest.fn(), on: jest.fn(), off: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
 });
 
@@ -97,6 +97,10 @@ beforeEach(() => {
         if (method === "GET" && path === "/api/v1/stats/overlays") {
             return answer(200, {ok: true, data: {
                 overlays: OVERLAYS, selected, refresh: REFRESH}});
+        }
+        if (method === "GET" && path === "/api/v1/health") {
+            // The preview listener's port (ADR-005 S-final SF-8a).
+            return answer(200, {ok: true, data: {previewPort: 52345}});
         }
         if (refuse && method !== "GET") {
             return answer(refuse, {ok: false,

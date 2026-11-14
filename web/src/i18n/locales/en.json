@@ -116,6 +116,8 @@
     "commentary_obs_note": "While Autona is running, edits to the casters show on the OBS overlay in real time.",
     "commentary_design": "Commentary design",
     "commentary_preview": "Preview",
+    "commentary_preview_unavailable": "The preview is not available: the app could not open its preview port, or cannot be reached.",
+    "commentary_preview_quarantined": "This design's preview was stopped because it took the keyboard focus. Choose another design or open the page again to show it.",
     "commentary_no_design": "No commentary design is installed",
 
     "stream_title": "Stream settings",

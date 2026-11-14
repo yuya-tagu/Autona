@@ -26,7 +26,7 @@ import table from "./characterPick.cases.json";
 jest.setTimeout(20000);
 
 jest.mock("../websocketConnection", () => {
-    const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
+    const socket = {connected: false, emit: jest.fn(), on: jest.fn(), off: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
 });
 
@@ -230,6 +230,10 @@ beforeEach(() => {
             }
             if (path === "/api/v1/layouts/selected/top8") {
                 return answer(200, {ok: true, data: BRACKET});
+            }
+            if (path === "/api/v1/health") {
+                // The preview listener's port (ADR-005 S-final SF-8a).
+                return answer(200, {ok: true, data: {previewPort: 52345}});
             }
             return answer(404, {ok: false});
         }
