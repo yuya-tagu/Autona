@@ -12,6 +12,7 @@ import {
 import i18n from "../i18n/config";
 import {PANELS} from "../PanelShell/registry";
 import {useShellAccess} from "../PanelShell/useShellAccess";
+import {PanelShellContext} from "../PanelShell/context";
 import AssetsPage from "./index";
 import {MAX_UPLOAD_BYTES, SOURCE_URL, humanSize} from "./assetsApi";
 
@@ -1079,4 +1080,31 @@ test("every english key of the page has a japanese one", () => {
         expect(ja[key] || ja[`${base(key)}_other`]).toBeTruthy();
     }
     expect(bases(ja)).toEqual(keys);
+});
+
+// ── "open in the default browser" (owner, 2026-11-14) ─────────────────────
+
+test("the page opens itself in the default browser from the app", async () => {
+    window.open = jest.fn();
+    render(
+        <PanelShellContext.Provider
+            value={{panel: "assets", desktop: true, language: "en"}}>
+            <AssetsPage/>
+        </PanelShellContext.Provider>,
+    );
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", {
+        name: i18n.t("guide_open_in_browser")}));
+
+    expect(window.open).toHaveBeenCalledWith(
+        `${window.location.origin}/web/assets?lng=en`, "_blank", "noopener");
+});
+
+test("the page in a browser has no browser to open", async () => {
+    server.token = refuse(403, "FORBIDDEN");
+    await renderPage();
+
+    expect(screen.queryByRole("button", {
+        name: i18n.t("guide_open_in_browser")})).toBeNull();
 });

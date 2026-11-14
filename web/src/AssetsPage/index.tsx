@@ -830,8 +830,7 @@ function AssetsContent() {
 
     return (
         <GuideFrame panel="assets" title={i18n.t("assets_title")}
-                    description={i18n.t("assets_description")}
-                    openInBrowser={false}>
+                    description={i18n.t("assets_description")}>
             {body}
         </GuideFrame>
     );
