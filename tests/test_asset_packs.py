@@ -1044,12 +1044,10 @@ def test_a_shells_restore_does_not_wait_for_a_running_job(env):
     assert (env.games / "zzz" / "full" / "a.png").exists()
 
 
-@pytest.mark.parametrize("shell", ["desktop", "headless"])
-def test_each_shells_first_scan_puts_back_what_a_job_moved_aside(env, shell):
-    if shell == "desktop":
-        from src.AutonaGameAssetManager import AutonaGameAssetManager as owner
-    else:
-        from src.headless import HeadlessGames as owner
+def test_the_loaders_first_scan_puts_back_what_a_job_moved_aside(env):
+    # Both shells' (core's GameLoader since ADR-005 S-final SF-6b; each
+    # shell had its own _FirstScan until then).
+    from src.core.GameLoader import GameLoader
     left = env.games / (assets.REPLACED_PREFIX + "aaa-dead")
     _game(left, "aaa", marker=b"old")
     # An upload an earlier run left (SF-4b-1).
@@ -1057,7 +1055,7 @@ def test_each_shells_first_scan_puts_back_what_a_job_moved_aside(env, shell):
     _write(uploads / (assets.UPLOAD_PREFIX + "dead.zip"), b"PK" * 100)
     scanned = []
 
-    owner._FirstScan(SimpleNamespace(_Scan=lambda: scanned.append(
+    GameLoader._FirstScan(SimpleNamespace(Scan=lambda: scanned.append(
         (sorted(p.name for p in env.games.iterdir()),
          sorted(p.name for p in uploads.iterdir())))))
 
@@ -1066,24 +1064,37 @@ def test_each_shells_first_scan_puts_back_what_a_job_moved_aside(env, shell):
     assert (env.games / "aaa" / "full" / "a.png").read_bytes() == b"old"
 
 
-@pytest.mark.parametrize("path, owner, method", [
-    ("AutonaGameAssetManager.py", "AutonaGameAssetManager", "UiMounted"),
-    ("headless.py", "HeadlessGames", "Start"),
-])
-def test_each_shells_startup_scan_is_its_first_scan(path, owner, method):
+def _method(path, owner, method):
     tree = ast.parse((Path(__file__).resolve().parent.parent / "src" / path)
                      .read_text(encoding="utf-8"))
     [cls] = [node for node in tree.body
              if isinstance(node, ast.ClassDef) and node.name == owner]
     [body] = [node for node in cls.body
               if isinstance(node, ast.FunctionDef) and node.name == method]
+    return body
+
+
+@pytest.mark.parametrize("path, owner, method", [
+    ("AutonaGameAssetManager.py", "AutonaGameAssetManager", "UiMounted"),
+    ("headless.py", "HeadlessGames", "Start"),
+])
+def test_each_shells_startup_scan_is_its_first_scan(path, owner, method):
+    # Each shell's startup starts the loader (ADR-005 S-final SF-6b), whose
+    # Start submits the first scan; neither scans on its own.
+    body = _method(path, owner, method)
+    calls = [ast.unparse(call.func) for call in ast.walk(body)
+             if isinstance(call, ast.Call)]
+    assert "self.loader.Start" in calls
+    assert not [call for call in calls if call.endswith(
+        ("._Scan", ".Scan", ".LoadGames", "._FirstScan"))]
+    start = _method("core/GameLoader.py", "GameLoader", "Start")
     submitted = [(ast.unparse(call.args[0]),
                   [ast.unparse(k.value) for k in call.keywords])
-                 for call in ast.walk(body) if isinstance(call, ast.Call)
+                 for call in ast.walk(start) if isinstance(call, ast.Call)
                  and ast.unparse(call.func).endswith(".submit")]
     assert ("self._FirstScan", ["'game scan'"]) in submitted
-    assert not [call for call in ast.walk(body) if isinstance(call, ast.Call)
-                and ast.unparse(call.func) in ("self._Scan", "self.LoadGames")]
+    assert not [call for call in ast.walk(start) if isinstance(call, ast.Call)
+                and ast.unparse(call.func) == "self.Scan"]
 
 
 def test_a_game_moved_aside_counts_as_installed_for_the_overwrite_question(

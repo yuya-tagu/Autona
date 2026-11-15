@@ -143,8 +143,8 @@ class TournamentService:
         `turnModsOff()` asks the shell's game loader to load the game it
         ends on without its modded content, and returns without waiting
         for it (bootstrap_core() passes the web operations' turn_mods_off,
-        which reaches the loader both shells register: its TurnModsOff
-        decides what to ask, GameAssetCatalog.PlanModsOff); None: a
+        which reaches the loader both shells register: core's GameLoader
+        .TurnModsOff decides what to ask); None: a
         tournament newly loaded leaves the mods as they are."""
         self._provider = provider
         self._onMain = onMain
@@ -351,15 +351,16 @@ class TournamentService:
         mods checkbox on tournament_changed, which reloaded the game -- the
         desktop only. Asked, not waited for (the loader is a job).
 
-        What is asked is the loader's (its TurnModsOff, under its request
-        lock: GameAssetCatalog.PlanModsOff): the request waiting for it
-        loads without the mods -- a game the operator asked for is not
-        dropped -- or, with none waiting, the game it ends on is asked for
-        again without them when they are on; nothing when no game is
-        selected (after a clear: the tournament's own game comes with its
-        data, mods off). The game the tournament's data selects comes to
-        this thread later (queued), and as a request for the same game
-        keeps the reload it supersedes, it does not undo this. A failed
+        What is asked is the loader's (GameLoader.TurnModsOff, under its
+        request lock): the selected game again without the mods when they
+        are on and nothing is loading, else an intent the loader applies to
+        what it loads next -- a game the operator asked for is not dropped
+        -- and, once nothing waits, to the game it ends on; nothing when no
+        game is selected (after a clear: the tournament's own game comes
+        with its data, mods off). The game the tournament's data selects
+        comes to this thread later (queued), as a request for the same game
+        without reload: it keeps the reload it supersedes, or the loader's
+        intent makes it one, so it does not undo this. A failed
         request is logged: the tournament is loaded all the same."""
         if self._turnModsOff is None:
             return

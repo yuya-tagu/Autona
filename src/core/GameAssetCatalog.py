@@ -2,9 +2,11 @@
 
 ADR-005 S1a. Everything the app knows about the installed games and the
 selected one -- characters, skins, variants, preset colours, stages, asset
-file paths, the Start.gg id tables -- lives here as plain dicts. The Qt side
-(`src/AutonaGameAssetManager.py`) only runs the loads as jobs and announces
-them; it holds none of the data (it turned a snapshot into the Qt combos'
+file paths, the Start.gg id tables -- lives here as plain dicts. The game
+loader (`src/core/GameLoader.py`, both shells' since ADR-005 S-final SF-6b;
+the desktop's Qt adapter `src/AutonaGameAssetManager.py` ran the loads
+until then) runs the loads as jobs and has them announced; it holds none of
+the data (the adapter turned a snapshot into the Qt combos'
 QStandardItemModels until the Qt model clean-up's PR4).
 
 Snapshots
@@ -34,7 +36,7 @@ Locking rules
   the writer lock: the GUI thread may be waiting on the very same lock
   (the synchronous load path, `ForgetSelection`), and that is a deadlock.
   The one callback invoked under the lock is `SelectGame`'s `progress`; it
-  must not block the calling thread (the Qt adapter passes the footer's
+  must not block the calling thread (the game loader passes the footer's
   `StatusService.Progress`, which records the job and tells a channel whose
   one subscriber -- StateManagerBridge -- queues a Qt signal).
 - `game.*` is published inside the lock, so the snapshot swap and the state
@@ -46,14 +48,15 @@ Locking rules
   S-final SF-5b-1; why it still agrees with the snapshot is said there).
 - The catalog has no observer channel of its own and must not grow one
   (core services are called, they do not subscribe or publish events --
-  the Qt adapter's `onLoad` signal is the notification). What a switch to
+  the game loader's announcement is the notification: the shells' onLoad /
+  gameChanged). What a switch to
   another game invalidates elsewhere in the state is called directly by
   `SelectGame`, outside the writer lock and inside its save block: the
   Top 8 players' and the result's characters (`Top8Service` /
   `ResultService.ForgetCharacters`).
 
 Construction is side-effect free; bootstrap_core() calls `ResetGameState()`
-to publish the empty `game` state, and the Qt adapter drives `ScanGames()`.
+to publish the empty `game` state, and the game loader drives `ScanGames()`.
 """
 import glob
 import os
@@ -161,58 +164,6 @@ class GameAssetSnapshot:
     # shell runs after the load with the snapshot that load returned --
     # never with a later Current()).
     replaced: Optional[str] = None
-
-
-# What turning the modded content off asks of a game loader (PlanModsOff).
-MODS_OFF_WAITING = "waiting"   # the request waiting for the loader, without
-MODS_OFF_RELOAD = "reload"     # a new request: the game again, without
-
-
-def PlanModsOff(waiting, running, current):
-    """What turning the modded content off asks of a game loader (ADR-005
-    S-final SF-5b-1: a tournament newly loaded -- TournamentService, through
-    the loader each shell registers), so that the game the loader ends on is
-    loaded without its mods, and nothing else changes: no request goes in
-    front of one made before it (a game the operator asked for is not
-    dropped), and no game is loaded again after another one.
-
-    `waiting` / `running`: the loader's request waiting for it and the one
-    it is running (None: none), each with `codename`, `modsActive` and
-    `reload`; `current`: this catalog's Current(). Called under the loader's
-    request lock, so neither request changes meanwhile; `current` may move
-    on under it (the running request's SelectGame), which the rules below
-    read the same either way.
-
-    Returns None (nothing to ask); (MODS_OFF_WAITING, reload): the waiting
-    request loads without the mods -- as a reload as well when `reload` (it
-    would be skipped otherwise: the same game without reload, SelectGame);
-    or (MODS_OFF_RELOAD, codename): a new request, `codename` again without
-    its mods (with nothing waiting, it supersedes nothing).
-
-    - The game the loader stands on when the waiting request (or a new one)
-      runs: the running request's -- unless SelectGame skips it (the
-      selected game again without reload) -- else the catalog's.
-    - A waiting request that will load (another game, or a reload) loads
-      without the mods, whatever game it is: it is not replaced.
-    - One that will be skipped is made a reload without them when that game
-      has them on.
-    - With nothing waiting, that game is asked for again without them when
-      they are on -- the running request's game when it asked for them (a
-      tournament set while the mods were being turned on), never the game
-      it replaces.
-    """
-    if running is not None and (running.reload
-                                or running.codename != current.codename):
-        codename, modsOn = running.codename, bool(running.modsActive)
-    else:
-        codename, modsOn = current.codename, bool(current.modsActive)
-    if waiting is not None:
-        if waiting.reload or waiting.codename != codename:
-            return (MODS_OFF_WAITING, False) if waiting.modsActive else None
-        return (MODS_OFF_WAITING, True) if modsOn else None
-    if codename and modsOn:
-        return (MODS_OFF_RELOAD, codename)
-    return None
 
 
 def _localized(table, locale, remap, split):

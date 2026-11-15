@@ -199,7 +199,6 @@ from . import AutonaWindowState as window_state
 
 class WindowSignals(QObject):
     UiMounted = Signal()
-    GameChanged = Signal()
 
 
 # A first launch's window (no geometry saved): the width the AppShell's
@@ -374,14 +373,6 @@ class Window(QMainWindow):
         # game on a clear is core's TournamentService: S4f.)
         wire_tournament_data()
 
-        # A game loaded: the web server pushes the full state and the
-        # characters (_StartWebServer's wire_web_server). Every load (the
-        # asset adapter's onLoad) since ADR-005 S-final SF-5b-3; until then
-        # the Qt game button's SetGame emitted this when it found the game in
-        # its menu, and on every tournament_changed as well.
-        AutonaGameAssetManager.instance.signals.onLoad.connect(
-            self.signals.GameChanged)
-
         # The shell operations' main window: what opens the SCORE page's set
         # selection for the load_set hotkey and the legacy open-set route
         # (ADR-005 S4ab-2; OpenPanel) and answers the shell requests.
@@ -554,8 +545,13 @@ class Window(QMainWindow):
                     self.webserver.port, parent=self,
                     host=self.webserver.host_name)
                 self.webserver.start()
-                # GameChanged -> program_state + characters, db_updated ->
-                # the player DB: the wiring the headless shell makes too.
+                # A game load (the asset adapter's onLoad) -> program_state
+                # + characters, a scan (onLoadAssets) -> games_changed,
+                # db_updated -> the player DB: the wiring the headless shell
+                # makes too, with the same loader's signals (ADR-005 S-final
+                # SF-6b; the window relayed onLoad through a GameChanged of
+                # its own until then -- the Qt game button's, until SF-5b-3,
+                # which also emitted it on every tournament_changed).
                 # Here, together with the server: at its old place in
                 # __init__ there is no webserver instance to bind to.
                 # Nothing is lost by connecting after LoadDB() — clients
@@ -563,7 +559,8 @@ class Window(QMainWindow):
                 # 'playerdb') and none can be connected before the server
                 # is listening anyway.
                 wire_web_server(
-                    self.webserver, self.signals.GameChanged,
+                    self.webserver,
+                    AutonaGameAssetManager.instance.signals.onLoad,
                     AutonaGameAssetManager.instance.signals.onLoadAssets)
             except Exception as error:
                 logger.opt(exception=True).error(

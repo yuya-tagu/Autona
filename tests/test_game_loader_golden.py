@@ -1,13 +1,16 @@
-"""The game loaders, recorded step by step (ADR-005 S-final SF-6a).
+"""The game loader, recorded step by step on each shell (ADR-005 S-final
+SF-6a; one loader since SF-6b).
 
-What each shell's game loader does today -- the desktop's asset adapter
-(AutonaGameAssetManager) and the headless loader (src/headless
-.HeadlessGames) -- recorded serially for five scenarios, before SF-6b puts
-one loader in core (the desktop's recordings are to stay as they are, the
-headless ones to change only where that step means them to: one save cycle,
-the desktop's order) and SF-6c stops handing what follows a load to the
-main thread (the writes to stay as 6b leaves them). The contract both
-loaders keep is tests/test_asset_jobs.py's; this is the detail.
+What each shell's game loader does -- core's GameLoader (SF-6b), as the
+desktop's asset adapter (AutonaGameAssetManager) and the headless shell
+(src/headless.HeadlessGames) each wrap it -- recorded serially for five
+scenarios. SF-6a recorded the two loaders each shell had then; SF-6b put
+one in core, which left the desktop's recordings as they were and changed
+the headless ones where it meant to (one save cycle, the desktop's order:
+each headless recording is now its desktop counterpart). SF-6c stops
+handing what follows a load to the main thread (the writes to stay as 6b
+leaves them). The contract both shells keep is tests/test_asset_jobs.py's;
+this is the detail.
 
 Recorded for each, into tests/fixtures/game_loader/<shell>_<scenario>.json:
 
@@ -26,17 +29,17 @@ Recorded for each, into tests/fixtures/game_loader/<shell>_<scenario>.json:
   slot connected after the wiring's, so after it), the settings writes,
   the player DB's refresh, the announcement (onLoad / gameChanged; a slot
   connected last), each request's done();
-- answers: what each request returned, read once it was over (the
-  desktop's Future; None headless);
+- answers: what each request returned, read once it was over (its
+  Future's outcome; until SF-6b the headless loader returned None);
 - after: what is left pending on the held boards, and the save block count.
 
-The two shells as they are today, held boards on both (the harness makes
-them as the desktop's launch does; a headless shell's boards are not held,
-so its commit finds nothing there): the desktop's load is one save cycle,
-opened on the loader's thread and closed on the main thread at the end of
-_Publish (the selection, the roster and its commit, the onLoad slots); the
-headless selection is published alone on the loader's thread and the
-roster in a cycle of its own on the main thread, before gameChanged.
+Held boards on both shells (the harness makes them as the desktop's launch
+does; a headless shell's boards are not held, so its commit finds nothing
+there): a load is one save cycle, opened on the loader's thread and closed
+on the main thread at the end of the loader's _Publish (the selection, the
+roster and its commit, the announcement's slots). Until SF-6b the headless
+selection was published alone on the loader's thread and the roster in a
+cycle of its own on the main thread, before gameChanged.
 
 Roles: main (the main / GUI thread), loader (the "game load" job), scan
 (the "game scan" job), job (another job), other. What is not deterministic
@@ -205,8 +208,8 @@ class _Recorder:
 
         monkeypatch.setattr(SettingsManager, "Set", settings)
 
-        games = self.shell.games
-        realLoad = games.LoadGameByCodename
+        loader = self.shell.loader
+        realLoad = loader.LoadGameByCodename
 
         def load(codename, async_mode=True, mods_active=False,
                  mods_reload_mode=False, done=None):
@@ -216,7 +219,7 @@ class _Recorder:
                             mods_active=mods_active,
                             mods_reload_mode=mods_reload_mode, done=done)
 
-        monkeypatch.setattr(games, "LoadGameByCodename", load)
+        monkeypatch.setattr(loader, "LoadGameByCodename", load)
 
         catalog = self.shell.catalog
         realSelect = catalog.SelectGame
@@ -445,17 +448,13 @@ def _restore(shell, rec, app, monkeypatch, ownExecutor):
                         lambda: None)  # the network
     _quiet(app)
     rec.Start()
+    # Each shell's start (the window's UiMounted, src/headless.Assemble):
+    # the loader's Start(), whose restore is armed for the one scan.
     if shell.name == "desktop":
-        manager = shell.games
-        try:
-            manager.UiMounted()
-            drain_tasks()
-        finally:
-            manager.signals.onLoadAssets.disconnect(
-                manager._RestoreSelectedGame)
+        shell.games.UiMounted()
     else:
         shell.games.Start()
-        drain_tasks()
+    drain_tasks()
 
 
 def _switch(shell, rec, app, monkeypatch, ownExecutor):
@@ -542,7 +541,7 @@ def test_the_game_loader_matches_its_recording(
     rec = _Recorder(shell, monkeypatch, autonaApp)
     try:
         RUNS[scenario](shell, rec, autonaApp, monkeypatch, ownExecutor)
-        _waitFor(lambda: not shell.games._loaderRunning)
+        _waitFor(lambda: not shell.loader._loaderRunning)
     finally:
         rec.Stop()
     _check(f"{shell.name}_{scenario}", rec.Result(scenario))

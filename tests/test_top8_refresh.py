@@ -738,16 +738,18 @@ def _top8Characters():
 
 
 def _loader(shell, manager):
-    """Load a game the way `shell` does: the desktop's asset adapter, or
-    the headless shell's catalog-direct loader (src/headless.py). Both are
-    a job of the task executor (ADR-005 S3f-4 / S3f-6)."""
+    """Load a game the way `shell` does: through the desktop's asset
+    adapter, or the headless shell's (src/headless.py) -- one loader, core's
+    GameLoader, since ADR-005 S-final SF-6b. A job of the task executor
+    (ADR-005 S3f-4 / S3f-6)."""
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from src.core.GameAssetCatalog import GameAssetCatalog
     from tests.conftest import drain_tasks
     if shell == "desktop":
         def load(codename, reload=False):
             # The load job, this (the GUI) thread pumped while it runs.
-            manager.LoadGameByCodename(codename, mods_reload_mode=reload)
+            manager.loader.LoadGameByCodename(codename,
+                                              mods_reload_mode=reload)
             drain_tasks()
         return load
 
@@ -757,7 +759,7 @@ def _loader(shell, manager):
 
     def load(codename, reload=False):
         # The load job and what follows it on this (the main) thread.
-        games.LoadGameByCodename(codename, mods_reload_mode=reload)
+        games.loader.LoadGameByCodename(codename, mods_reload_mode=reload)
         drain_tasks()
     return load
 

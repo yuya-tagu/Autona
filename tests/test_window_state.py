@@ -217,7 +217,8 @@ from src.AutonaGameAssetManager import AutonaGameAssetManager
 
 Autona.QSettings = lambda *args: QSettings(
     qtSettings, QSettings.Format.IniFormat)
-AutonaGameAssetManager.instance.DownloadStartGGCharacters = lambda: None
+AutonaGameAssetManager.instance.loader.DownloadStartGGCharacters = (
+    lambda: None)
 
 window = Autona.Window()
 host = window._webPanelHost

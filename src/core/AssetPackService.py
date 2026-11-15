@@ -73,10 +73,10 @@ never put back and is removed again later. Every removal clears the
 read-only attribute and tries again; what is left is logged.
 
 Once a job has moved a game in, it re-scans the games once on its own
-thread with ``scan``, the shell's scan (injected: the desktop adapter's,
-the headless loader's -- SF-6 makes it the core GameLoader's), which tells
-the game selector and the web server (``games_changed``) as the startup
-scan does.
+thread with ``scan``, the shell's scan (injected: the shell's core
+GameLoader's ``Scan`` since SF-6b; the desktop adapter's and the headless
+loader's own until then), which tells the game selector and the web server
+(``games_changed``) as the startup scan does.
 
 The upload
 ----------
@@ -173,9 +173,9 @@ only to read and swap the slot); so is a folder pick probed.
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
 (agent-pitfalls #1). ``AssetPackService.instance`` is built by
-``bootstrap_core()``; the shells set its ``scan`` and call its
-``RestoreReplaced`` and ``RemoveStaleUploads`` on their first scan job,
-before scanning. The upload's and the folder pick's expiries are read off
+``bootstrap_core()``; the shells set its ``scan``, and their loader (core's
+GameLoader) calls its ``RestoreReplaced`` and ``RemoveStaleUploads`` on its
+first scan job, before scanning. The upload's and the folder pick's expiries are read off
 ``time.monotonic()`` when the slot is looked at (``_HeldUpload`` /
 ``_HeldPick``); nothing runs when they pass.
 """

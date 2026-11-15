@@ -213,9 +213,10 @@ class BoardHost:
         # Taken by the web layer's request threads and by the main thread:
         # a game load's roster and commit (bootstrap.wire_game_roster,
         # ADR-005 S3e-6 / S4ad), the set follow's answers and poll
-        # (SetFollowService), the desktop's game load from its rebuild to
-        # its cycle's close (the asset adapter's _Publish, the roster and
-        # commit inside it), its board hotkeys (±1, reset, 反映, swap) and
+        # (SetFollowService), a game load's announcement to its cycle's
+        # close (core's GameLoader._Publish, the roster and commit inside
+        # it; both shells since ADR-005 S-final SF-6b), the desktop's board
+        # hotkeys (±1, reset, 反映, swap) and
         # format switch (ADR-005 S4ad: until then the desktop's operations
         # ran on its GUI thread, which serialized them with those). Not
         # fair: request threads may pass a waiting main thread over (RLock
@@ -247,8 +248,9 @@ class BoardHost:
         shells. Not refused: the main thread's (it ends the shutdown
         itself), an operation already running (checked on the outermost
         call, so one is not split), and `atShutdown` -- the shutdown's own
-        writes (a game load's settle: the asset adapter's
-        _SettleUnannounced, the headless _SettleStopped).
+        writes (a game load's settle: core's GameLoader._SettleStopped,
+        both shells'; the desktop's _SettleUnannounced until ADR-005
+        S-final SF-6b).
         """
         with self._lock:
             depth = getattr(self._depth, "value", 0)
@@ -311,11 +313,12 @@ def current_board_host():
     the operations a host of its own gives it to the set follow too."""
     return boardHost
 
-# How a game is loaded by codename, with the asset adapter's signature:
-# (codename, async_mode=True, mods_active=False, mods_reload_mode=False,
-# done=None). The desktop registers AutonaGameAssetManager.LoadGameByCodename
-# (bootstrap_gui()), the headless shell its catalog-only loader
-# (src/headless.py). None: nothing can load a game.
+# How a game is loaded by codename: (codename, async_mode=True,
+# mods_active=False, mods_reload_mode=False, done=None) -> a Future of the
+# attempt's outcome. Both shells register their GameLoader's
+# LoadGameByCodename (core's, ADR-005 S-final SF-6b: bootstrap_gui() the
+# asset adapter's loader, src/headless.py HeadlessGames'). None: nothing can
+# load a game.
 loadGameByCodename = None
 # Have the game the loader ends on loaded without its modded content: () ->
 # None, asked and not waited for (a tournament newly loaded: core's
@@ -1336,7 +1339,8 @@ def turn_mods_off():
     """Have the game the loader ends on loaded without its modded content,
     without waiting for it (a tournament newly loaded: what bootstrap_core()
     hands core's TournamentService; ADR-005 S-final SF-5b-1). The loader
-    decides what to ask (its TurnModsOff: GameAssetCatalog.PlanModsOff).
+    decides what to ask (its TurnModsOff: an intent it applies to what it
+    loads next, ADR-005 S-final SF-6b).
     Read when called, as load_game reads its loader: the shells register it
     after bootstrap_core()."""
     if turnModsOff is None:
