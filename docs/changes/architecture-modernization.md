@@ -8720,7 +8720,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   2. **唯一の違い**: `program_language` が "default" で OS の言語が en でも ja でもないとき、旧実装は `.qm` を読まず Qt の translate が原文を返していた。今は `programLocale` の既定 "en-US" で表の英語を返す。原文と英訳が違うのは `team_split` のレイアウト名だけで、v1 `GET /api/v1/result` の `layouts[].name` が「Team / Crew 縦並び (1920x1080)」→「Team / Crew vertical (1920x1080)」になる（英語の UI に日本語を出さない方向）。リザルトのページは自分の i18next の `result_layout_<id>` を先に出すので、ページの表示は変わらない（API の利用者だけに見える）
   3. golden（`tests/fixtures/thumbnail/golden.json` / `tests/fixtures/result/golden.json`）は旧コードを訳なし（translate が恒等）で録ったもので、英語の原文が入っている。programLocale が "ja_JP" のシナリオ（`preview_placeholder_base_locale` / `sample_base_locale`）は、旧コードが ja の `.qm` を入れて出していた語（`サンプル大会` / `チームA` / `チームB`）に置き換えて比べる（`IN_THE_LOCALES_LANGUAGE`。置き換える英語が録画にあることも確かめる）。再録画はしない
   4. AppShell の文言の照合（`tests/test_app_shell.py`）は `.ts` を読んでいた。`.ts` から消える Qt の画面の訳 35 件を `QT_WORDS` として凍結し、i18next の `app_*` をそれと比べる
-  5. src が訳を引くのに `.ts` に無い Updater の 2 件（"Error while preparing the update:" と "Update downloaded. The app will close, ..."）は、SF-7 以前から英語のまま。削るだけの段なので足さない（`TS_UNTRANSLATED` に明記）
+  5. src が訳を引くのに `.ts` に無い Updater の 2 件（"Error while preparing the update:" と "Update downloaded. The app will close, ..."）は、SF-7 以前から英語のまま。削るだけの段なので足さない（`TS_UNTRANSLATED` に明記）→ **レビュー対応 1 で足した**（`TS_UNTRANSLATED` は削除）
   6. `tests/test_core_words.py` の `.ts` の写し `TS_WORDS` は凍結（SF-7 以前の 12 語が英語・日本語を保つことだけを見る）。後でレイアウトやテンプレートを足すときは `WORDS` にだけ足す
 - **pin**
   - `tests/test_core_words.py`（新規）: 12 語が `.ts` にあった英語・日本語のまま、各語に両言語と同じ書式の欄、`Language` のパラメータ化、`Text`、表の語 = サービスが引く語（AST）、translate の注入が無い（両サービスの `__init__` に `translate` が無い・`bootstrap` に `translate=` が無い・src/core に `.translate` / `._translate` / `.tr` の属性が無い）
@@ -8730,9 +8730,16 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
 - **検証**: 並列ランナー全量 7471 passed / 0 failed / 2 skipped。影響範囲（`tests/test_web_panel_host.py`・`test_app_shell.py`・`test_core_words.py`・`test_status_service.py`・`test_thumbnail_service.py`・`test_result_service.py`）は直列で 1022 passed。`compile_translations.ps1` は en / ja とも 34 件 finished。web/ は触っていないので npm は回していない。アプリ本体は起動していない（実機は下）
 - **残るリスク**
   - 判断 2 の構成（OS の言語が en / ja 以外で言語の設定が "default"）の v1 の利用者には、`team_split` の名前が英語になる
-  - Updater の 2 件は英語のまま（判断 5。以前から）
-  - 実機未確認（メインセッションの確認待ち）: 下の「実機で見てほしい文言」
+  - Updater の 2 件は英語のまま（判断 5。以前から）→ レビュー対応 1 で訳を足して解消（実機では未表示: 更新のダウンロードの後と、その準備の失敗でだけ出る）
+  - 実機で確認済み（2026-11-15・メインセッション・隔離データ、日本語の設定で）: サムネイルのテンプレート名「標準」「中央パネル」、プレビュー画像の見本「チームA」「チームB」「サンプル大会」、リザルトのレイアウト一覧の名前が従来どおり。ログにエラーなし
+  - 英語の設定は実機未確認（pytest で pin: `tests/test_thumbnail_service.py` / `tests/test_result_service.py` の en-US の場合と `tests/test_core_words.py`）
   - 実機で見てほしい文言（ja / en それぞれ。言語の設定を切り替えて再起動）: サムネイルのページのプレビュー（対戦が空のときの見本: ja「サンプル大会」「チームA」「チームB」/ en「Sample Tournament」「Team A」「Team B」）とテンプレートの名前（ja「標準」「中央パネル」/ en「Standard」「Center Panel」。ページの i18next）、リザルトのページのプレビューの見本の大会名（ja「サンプル大会」/ en「Sample Tournament」）とレイアウトの一覧、AppShell のフッターの進捗（ゲームの読み込み）、ネイティブのダイアログ（ゲームアセットの追加のフォルダの選択の題 ja「取り込むゲームのフォルダを選択」、Updater の更新の確認、LAN の確認・ポートの競合は起こせれば）
+- **レビュー対応**（独立レビュー。指摘は全件 低。5・6 は上の判断のとおりで対応なし）
+  1. Updater の未訳 2 件を en / ja の `.ts` に足した（ja「アップデートをダウンロードしました。アプリを閉じてインストールし、自動で再起動します。」「アップデートの準備中にエラーが発生しました:」。既存の Updater の文言の口調に合わせた）。`.qm` は 36 件ずつ。`TS_UNTRANSLATED` は仕組みごと削除し、pin は「`.ts` の中身 = 引かれている組」の等式のまま
+  2. `.qm` の逆方向: SF-7 で消した 66 件の (文脈, 原文) を `SF7_REMOVED_TS_MESSAGES` に凍結し、en / ja の `.qm` が 1 件も訳さないことを見る（`test_the_qm_files_are_compiled_from_the_ts_files`）。66 件が重複なしでコードが再び引いていないことも（`test_the_sf7_removed_words_are_the_frozen_ones`）
+  3. AST の pin を受け手で絞った: 検出を `tests/test_core_words.py` の `translationCalls` 1 つにまとめ（`test_web_panel_host.py` の `_askedTranslations` と `test_no_translator_is_injected_or_asked` が使う）、`QCoreApplication` / `QGuiApplication` / `QApplication` の `translate`（`QtCore.` 経由も）・それを束ねた名前や `self` の属性・`QT_TRANSLATE_NOOP`・`self.tr`（文脈はクラス名）だけを拾う（`str.translate(table)` は拾わない）。定数でない文脈・原文、クラスの外の `self.tr`、translate を値として渡す形（注入）は落ちる。検出そのものをパラメータ化で pin（拾う 7 形・拾わない `str.translate` などの 1 形・落ちる 4 形）。走査対象に `main.py` を足した（`TS_CONTEXTS` の値はプロジェクト直下からのパスに）
+  4. `.ts` の `<location>`（29 行ずつ。行番号が古かった）を消した。手で編集する運用なので、ずれる情報を持たない。pin は `<location` が無いこと
+  - 検証: 並列ランナー全量 7484 passed / 0 failed / 2 skipped。影響範囲（`tests/test_web_panel_host.py`・`test_core_words.py`・`test_app_shell.py`・`test_thumbnail_service.py`・`test_result_service.py`・`test_status_service.py`）は直列で 1035 passed。`compile_translations.ps1` は en / ja とも 36 件 finished。web/ は触っていない
 
 ##### SF-8a プレビューを別オリジンに（2026-11-14）
 
