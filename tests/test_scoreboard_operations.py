@@ -367,13 +367,14 @@ def _loadWithOtherWriters(app, selecting=None, publishing=None):
     the game, and `selecting` run on another thread while it would select:
     a request's board operation, through the board host (whose lock nobody
     holds yet: the S4ad ledger's remainder 5, the window seen on the real
-    window). Then the GUI thread's end (_Publish, under the board host's
-    lock), with `publishing` run on another thread from a gameLoaded slot --
-    after the wiring's roster and its commit, ahead of the cycle's close: a
-    core-direct write (score:adjust), which takes no board lock."""
-    from src.AutonaGameAssetManager import (AutonaGameAssetManager,
-                                            _SaveCycle)
+    window). Then the GUI thread's end (the loader's _Publish, under the
+    board host's lock), with `publishing` run on another thread from a
+    gameLoaded slot -- after the wiring's roster and its commit, ahead of
+    the cycle's close: a core-direct write (score:adjust), which takes no
+    board lock."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import _SaveCycle
 
     manager = AutonaGameAssetManager.instance
     published = []
@@ -397,7 +398,7 @@ def _loadWithOtherWriters(app, selecting=None, publishing=None):
         except BaseException:
             cycle.Release()
             raise
-        manager._Publish(GameAssetCatalog.instance.Current(), cycle)
+        manager.loader._Publish(GameAssetCatalog.instance.Current(), cycle)
         app.settle()
     finally:
         manager.signals.gameLoaded.disconnect(slot)
@@ -866,10 +867,10 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
     without 反映) -- a lock _Publish takes itself, and gives back when it
     returns. (The Qt models' rebuild was the first step under it until the
     Qt model clean-up's PR4; _Publish's entry and exit are recorded in its
-    place.)"""
-    from src.AutonaGameAssetManager import (AutonaGameAssetManager,
-                                            _SaveCycle)
+    place. _Publish is core's GameLoader's since ADR-005 S-final SF-6b.)"""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
+    from src.core.GameLoader import _SaveCycle
 
     autonaApp.ready(1)
     state = autonaApp.state
@@ -879,7 +880,7 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
     calls = []
     realCommit = actions.CommitGameLoad
     realRoster = actions.ApplyGameRoster
-    realPublish = manager._Publish
+    realPublish = manager.loader._Publish
     realRelease = _SaveCycle.Release
 
     def publish(*args):
@@ -914,7 +915,7 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
         calls.append(("close", boardLock.held()))
         return realRelease(cycle)
 
-    monkeypatch.setattr(manager, "_Publish", publish)
+    monkeypatch.setattr(manager.loader, "_Publish", publish)
     monkeypatch.setattr(actions, "ApplyGameRoster", roster)
     monkeypatch.setattr(actions, "CommitGameLoad", commit)
     monkeypatch.setattr(_SaveCycle, "Release", release)
@@ -939,7 +940,8 @@ def test_a_game_load_whose_roster_raises_still_commits(
     """The wiring commits whatever the roster does (ADR-005 S4ad review:
     try / finally): a roster that wrote, then raised, leaves nothing of the
     load waiting behind 反映 once the cycle closes. The asset adapter's
-    _Publish committed on every path until S4ad. The exception is the
+    _Publish (the loader's since ADR-005 S-final SF-6b) committed on every
+    path until S4ad. The exception is the
     slot's: emit reports it and the load goes on (onLoad runs)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions

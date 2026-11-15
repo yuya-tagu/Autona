@@ -202,8 +202,8 @@ def loadGame(codename):
     thread pumped (ADR-005 S3f-4; it was the GUI thread's synchronous load
     here until the review)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    manager = AutonaGameAssetManager.instance
-    manager.LoadGameByCodename(codename, mods_reload_mode=True)
+    loader = AutonaGameAssetManager.instance.loader
+    loader.LoadGameByCodename(codename, mods_reload_mode=True)
     drain_tasks()
 
 
@@ -464,9 +464,9 @@ def _loadGameThreaded(codename):
     so blocking on its Future would deadlock."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
-    manager = AutonaGameAssetManager.instance
-    manager.LoadGameByCodename(codename, async_mode=True,
-                               mods_reload_mode=True)
+    loader = AutonaGameAssetManager.instance.loader
+    loader.LoadGameByCodename(codename, async_mode=True,
+                              mods_reload_mode=True)
     drain_tasks()
 
 
@@ -499,9 +499,10 @@ def test_a_threaded_game_load_publishes_the_recorded_roster(
 def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
         world, autonaApp, monkeypatch):
     """ADR-005 S3f-4 review: the load job opens the save cycle, the GUI
-    thread publishes it at the end of _Publish. The game's writes and the
-    roster's (board 2 to the game's two players, committed within the
-    load: AutonaActions.CommitGameLoad) go out as that one cycle's delta, published on the GUI
+    thread publishes it at the end of the loader's _Publish. The game's
+    writes and the roster's (board 2 to the game's two players, committed
+    within the load: AutonaActions.CommitGameLoad) go out as that one
+    cycle's delta, published on the GUI
     thread while the load is still publishing -- and the bridge delivers
     the cycle's notifications there, direct, not queued after it
     (agent-pitfalls #17: one cycle under one hold of the lock)."""
@@ -510,7 +511,7 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
 
     if RECORD:
         pytest.skip("not part of the recording")
-    manager = AutonaGameAssetManager.instance
+    loader = AutonaGameAssetManager.instance.loader
     autonaApp.ready(2)
     main = threading.main_thread().name
     cycles = []
@@ -524,7 +525,7 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
             cycles.append(threading.current_thread().name)
         return realSave()
 
-    realPublish = manager._Publish
+    realPublish = loader._Publish
 
     def publish(*args):
         publishing.append(1)
@@ -547,7 +548,7 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
         events.append(("bridge dirty", prefix, dirty) + here())
 
     monkeypatch.setattr(StateManager, "SaveState", saveState)
-    monkeypatch.setattr(manager, "_Publish", publish)
+    monkeypatch.setattr(loader, "_Publish", publish)
     observers = StateManager.observers
     observers.state_updated.subscribe(onDelta)
     bridge = StateManagerBridge.instance
@@ -1121,11 +1122,12 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
 
 def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
         world, autonaApp, monkeypatch):
-    """The same switch and reload, asked of the headless loader itself
-    (ADR-005 S3f-6): each load's follow-up runs on the main thread, which
-    the loader hands it to and waits for (run_sync -> _OnLoaded ->
-    gameLoaded -> bootstrap.wire_game_roster), the switch's roster with the
-    game it replaced. The reload may be selected after it or supersede it
+    """The same switch and reload, asked of the headless shell's loader
+    itself (ADR-005 S3f-6; core's GameLoader since S-final SF-6b): each
+    load's follow-up runs on the main thread, which the loader hands it to
+    and waits for (run_sync -> _Publish -> gameLoaded ->
+    bootstrap.wire_game_roster), the switch's roster with the game it
+    replaced. The reload may be selected after it or supersede it
     while queued (the latest request wins); either way the previous game's
     picks are gone and the pick is persisted."""
     from src import AutonaWebOperations as WebOps
@@ -1156,16 +1158,16 @@ def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
     # Where the follow-up runs: a function slot runs on the main thread
     # whoever emits, so the roster's thread alone would not tell.
     followUps = []
-    onLoaded = games._OnLoaded
+    publish = games.loader._Publish
 
-    def followUp(snapshot):
+    def followUp(snapshot, cycle):
         followUps.append(threading.current_thread() is threading.main_thread())
-        return onLoaded(snapshot)
+        return publish(snapshot, cycle)
 
-    monkeypatch.setattr(games, "_OnLoaded", followUp)
+    monkeypatch.setattr(games.loader, "_Publish", followUp)
 
-    games.LoadGameByCodename(TEAM_GAME)
-    games.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
+    games.loader.LoadGameByCodename(TEAM_GAME)
+    games.loader.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
     drain_tasks()
 
     assert followUps and all(followUps), followUps
@@ -1196,7 +1198,9 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
     (headless: neither ran). A desktop load whose Qt model rebuild failed
     (FAILED) was settled the same way, on the GUI thread, until the Qt model
     clean-up's PR4 removed the rebuild and its test: this one pins the
-    settle (_SettleUnannounced) now."""
+    settle (the loader's _SettleStopped since ADR-005 S-final SF-6b; the
+    desktop's _SettleUnannounced until then, and a headless settle that did
+    not commit, which the held boards of this test show) now."""
     from src import AutonaWebOperations as WebOps
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
@@ -1205,8 +1209,7 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
     catalog = GameAssetCatalog.instance
     actions = AutonaActions.instance
     assert StateManager.Get("game.codename") == "tgame"
-    if shell == "desktop":
-        autonaApp.ready(2)  # made: its writes are held until committed
+    autonaApp.ready(2)  # made: its writes are held until committed
     actions.SetRoster(2, 1, 3)
     _fillPicks()
     actions.ApplyChanges(2)
@@ -1230,10 +1233,10 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
         AutonaQtHelper, "gui_unavailable_reason",
         lambda: "the app is shutting down" if stopping else None)
 
+    from src.core.GameLoader import STOPPED
     if shell == "desktop":
-        from src.AutonaGameAssetManager import (STOPPED,
-                                                AutonaGameAssetManager)
-        future = AutonaGameAssetManager.instance.LoadGameByCodename(
+        from src.AutonaGameAssetManager import AutonaGameAssetManager
+        future = AutonaGameAssetManager.instance.loader.LoadGameByCodename(
             TEAM_GAME, mods_reload_mode=True)
         # This (the GUI) thread does not pump: the marshal is never started.
         assert future.result(10) == STOPPED
@@ -1244,11 +1247,14 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
         monkeypatch.setattr(WebOps, "boardHost", BoardHost())
         games = HeadlessGames(catalog, provider=None)
         wire_game_roster(games.signals.gameLoaded)
-        worker = threading.Thread(target=lambda: games.LoadGameByCodename(
-            TEAM_GAME, async_mode=False, mods_reload_mode=True))
+        answers = []
+        worker = threading.Thread(target=lambda: answers.append(
+            games.loader.LoadGameByCodename(
+                TEAM_GAME, async_mode=False, mods_reload_mode=True)))
         worker.start()
         worker.join(10)
         assert not worker.is_alive()
+        assert [answer.result(0) for answer in answers] == [STOPPED]
 
     assert stopping and StateManager.saveBlocked == 0
     assert StateManager.GetCommitted("game.codename") == TEAM_GAME
@@ -1322,8 +1328,8 @@ def test_the_same_roster_writes_nothing(world, autonaApp):
 def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
         world, autonaApp):
     """What raises in one of the load's onLoad slots is reported by the
-    emit, and the commit that follows the slots
-    (AutonaGameAssetManager._Publish) goes ahead. The board's card sync was
+    emit, and the commit that follows the slots (the loader's _Publish)
+    goes ahead. The board's card sync was
     the slot here until ADR-005 S4ac-3 removed it, with the cards'
     destruction that raised (a defence of the cards' lifecycle)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager

@@ -132,12 +132,14 @@ def pump(done, timeout=30):
 
 result = {
     "app_type": type(QCoreApplication.instance()).__name__,
+    # The loader is core's GameLoader (ADR-005 S-final SF-6b), as the
+    # desktop's adapter holds its own.
     "selector": provider.selectGameFromStartGGId
-        == games.SelectGameFromStartGGId,
-    "loader": WebOps.loadGameByCodename == games.LoadGameByCodename,
+        == games.loader.SelectGameFromStartGGId,
+    "loader": WebOps.loadGameByCodename == games.loader.LoadGameByCodename,
     # A tournament newly loaded turns the mods off through the same loader
     # (ADR-005 S-final SF-5b-1).
-    "mods_off": WebOps.turnModsOff == games.TurnModsOff,
+    "mods_off": WebOps.turnModsOff == games.loader.TurnModsOff,
     "board_host": type(WebOps.boardHost).__name__,
     # The shell operations (ADR-005 S3e-9): the desktop's alone.
     "shell_operations": [WebOps.openSetSelection is not None,
@@ -227,13 +229,13 @@ result["uploads_after_refusal"] = os.listdir("user_data/.autona-uploads")
 # Every later scan re-applies the provider's game through the selector;
 # the last pick is restored on the first scan only.
 order = []
-games.LoadGameByCodename = (
+games.loader.LoadGameByCodename = (
     lambda codename, **kwargs: order.append(codename))
 class FakeProvider:
     url = "https://www.start.gg/tournament/x/event/y"
     videogame = 1386
 provider.provider = FakeProvider()
-rescan = threading.Thread(target=games._Scan)
+rescan = threading.Thread(target=games.loader.Scan)
 rescan.start()
 rescan.join()
 pump(lambda: order)

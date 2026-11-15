@@ -23,9 +23,9 @@ What the window does at startup and this shell does too, in its own words:
   adapter);
 - the tournament provider's wiring (bootstrap.wire_tournament_data, the
   window's too) and the restore of the tournament URL;
-- the games: scanned and loaded through GameAssetCatalog directly -- no Qt
-  models (HeadlessGames) -- with the provider's game re-applied after the
-  scan and the last pick restored;
+- the games: scanned and loaded by core's GameLoader, the desktop's too
+  (HeadlessGames: this shell's signals; ADR-005 S-final SF-6b), with the
+  provider's game re-applied after the scan and the last pick restored;
 - the player DB, and the web server with the window's pushes
   (bootstrap.wire_web_server);
 - a game load's roster: the 1v1 / team boards go to the game's players per
@@ -133,13 +133,14 @@ def refuse_frozen_headless(message_box=None):
 
 
 class HeadlessSignals(QObject):
-    # A game was loaded (the headless counterpart of the window's
-    # GameChanged): the web server pushes the state and the characters.
+    # A game was loaded (the desktop adapter's onLoad): the pick persisted
+    # (first), the player DB's refresh, the web server's push of the state
+    # and the characters.
     gameChanged = Signal()
     # The GameAssetSnapshot that load published, emitted just before
     # gameChanged (the desktop adapter's gameLoaded; read by
-    # bootstrap.wire_game_roster). Carried from the loader's thread: the
-    # catalog's Current() can be a later load's by the time this runs.
+    # bootstrap.wire_game_roster). The load's own: the catalog's Current()
+    # can be a later load's by the time a slot reads it.
     gameLoaded = Signal(object)
     # The games were scanned (the desktop adapter's onLoadAssets, emitted
     # from the scan job the same way): the web server tells the pages that
@@ -148,383 +149,47 @@ class HeadlessSignals(QObject):
     gamesScanned = Signal()
 
 
-class _LoadRequest:
-    """One HeadlessGames.LoadGameByCodename call: what it asked for, its
-    done() and its generation (each request takes the next). The desktop
-    adapter's request without its Future: nobody reads what a headless
-    load returns."""
-
-    def __init__(self, codename, modsActive, reload, done):
-        self.codename = codename
-        self.modsActive = modsActive
-        self.reload = reload
-        self.done = done
-        self.generation = None
-
-
 class HeadlessGames:
-    """The games, through GameAssetCatalog directly (no Qt adapter).
+    """The headless shell's notifications of the game loader (no Qt
+    adapter): the counterpart of the desktop's AutonaGameAssetManager.
 
-    The headless counterpart of the asset adapter (AutonaGameAssetManager):
-    the startup scan and start.gg character download, the load by codename
-    (registered as AutonaWebOperations.loadGameByCodename, same signature),
-    the selector the tournament provider loads its game through
-    (selectGameFromStartGGId), the provider's game re-applied after the
-    scan, and the last pick persisted and restored
-    (SELECTED_GAME_CODENAME).
-
-    The download, the scan and the loads are jobs of the TaskExecutor
-    (ADR-005 S3f-6; each was a daemon thread of its own), so the shutdown
-    stops them and waits for them like any other job. The loads take the
-    desktop adapter's design (S3f-4): one loader job at most, which takes
-    the latest request until none waits -- the latest request wins. What
-    follows a load -- the pick persisted, `signals.gameLoaded` /
-    `gameChanged` -- runs on the main thread, where the adapter's onLoad
-    handlers run, and the loader waits for it there.
+    The startup scan and start.gg character download, the loads by codename,
+    the selector the tournament provider loads its game through, the
+    provider's game re-applied after a scan and the last pick persisted and
+    restored are core's GameLoader (`loader`), the desktop's too since
+    ADR-005 S-final SF-6b: one save cycle per load, the roster and its
+    commit inside it, the footer's progress, a Future for every request.
+    (Until SF-6b this class held its own copy of the loader, which had
+    drifted: the selection published alone, the roster in a cycle of its
+    own, the pick ahead of the roster, nothing committed by a load the
+    shutdown stopped.) What is left here is this shell's signals, emitted
+    as the desktop adapter emits its own.
     """
 
-    def __init__(self, catalog, provider):
-        self.catalog = catalog
-        self.provider = provider
-        self.signals = HeadlessSignals()
-        self._pendingRestore = False
-        # The loads (the desktop adapter's fields, same meaning). Under
-        # _requestLock -- a Condition, which a synchronous request waits
-        # on: the generation of the latest request (each takes the next),
-        # the request waiting for the loader (None: none; a newer one
-        # replaces it), whether a loader job is submitted and not over, that
-        # job's Future (None before the first), and the generation of the
-        # latest request the loader is over with. And the request the loader
-        # is running (None: none), which TurnModsOff reads.
-        self._requestLock = threading.Condition()
-        self._loadGeneration = 0
-        self._pendingLoad = None
-        self._runningLoad = None
-        self._loaderRunning = False
-        self._loadFuture = None
-        self._finishedGeneration = 0
+    def __init__(self, catalog, provider=None):
+        # The composition root's: what both shells give their loader.
+        from .bootstrap import make_game_loader
 
-    # ── startup ──────────────────────────────────────────────────────────
+        self.catalog = catalog
+        self.signals = HeadlessSignals()
+        self.loader = make_game_loader(
+            catalog, announce=self._Announce,
+            scanned=self.signals.gamesScanned.emit,
+            afterScan=provider.SetGameFromProvider if provider else None)
+        # First, so it runs ahead of the other slots on gameChanged
+        # (Assemble's): the next launch's pick.
+        self.signals.gameChanged.connect(self.loader.PersistSelectedGame)
 
     def Start(self):
-        """The startup scan (and the start.gg character table refresh), as
-        jobs. The download writes the file only; the next load reads it."""
-        from .core.TaskExecutor import TaskExecutor
-        executor = TaskExecutor.instance
-        executor.submit(self.catalog.DownloadStartGGCharacters,
-                        task_name="start.gg characters download")
-        self._pendingRestore = True
-        executor.submit(self._FirstScan, task_name="game scan")
+        """The startup's scan, restore and start.gg download (the
+        loader's)."""
+        self.loader.Start()
 
-    def _FirstScan(self):
-        # The games an asset job moved aside and did not put back -- a
-        # process that died between its two moves -- go back before the
-        # first scan lists the games, as on the desktop
-        # (AutonaGameAssetManager._FirstScan; ADR-005 S-final SF-3b), and
-        # the upload an earlier run left is removed (SF-4b-1).
-        from .core.AssetPackService import AssetPackService
-        if AssetPackService.instance is not None:
-            AssetPackService.instance.RestoreReplaced()
-            AssetPackService.instance.RemoveStaleUploads()
-        self._Scan()
-
-    def _Scan(self):
-        # The scan job; what follows it, on the main thread. A failed scan
-        # is logged by the executor and asks for nothing.
-        from .Helpers import AutonaQtHelper
-        self.catalog.ScanGames()
-        self.signals.gamesScanned.emit()
-        AutonaQtHelper.gui_executor(self.OnScanned)
-
-    def OnScanned(self):
-        """After a scan, on the main thread, in the order the desktop's
-        onLoadAssets slots run: the provider's game first (bootstrap_gui
-        connects it first there), then the last pick -- on the first scan
-        only, as the adapter's startup restore."""
-        self.provider.SetGameFromProvider()
-        if not self._pendingRestore:
-            return
-        self._pendingRestore = False
-
-        from .core.SettingsManager import SettingsManager
-        codename = SettingsManager.Get("SELECTED_GAME_CODENAME", "") or ""
-        if not codename:
-            return
-        if codename not in self.catalog.GameCodenames():
-            logger.info(
-                f"Last used game '{codename}' is not installed anymore - "
-                "skipping restore")
-            return
-        # Mods stay off on restore, as on the desktop.
-        self.LoadGameByCodename(codename)
-
-    # ── loading ──────────────────────────────────────────────────────────
-
-    def SelectGameFromStartGGId(self, gameid, done=None):
-        """The provider's selector: a start.gg videogame id -> the game.
-        `done()` as LoadGameByCodename has it: at once for a game that is not
-        one of ours, which asks the loader nothing."""
-        codename = self.catalog.GameFromStartGGId(gameid)
-        if codename or done is not None:
-            self.LoadGameByCodename(codename or "", done=done)
-
-    def LoadGameByCodename(self, codename, async_mode=True, mods_active=False,
-                           mods_reload_mode=False, done=None):
-        """Load `codename` on the loader, a job of the TaskExecutor -- one
-        at most, however many requests come (ADR-005 S3f-6: the desktop
-        adapter's LoadGameByCodename, S3f-4, which says it all; until S3f-6
-        each request was a daemon thread of its own, serialized by a lock
-        that is not FIFO, so rapid A, B could end on A).
-
-        `async_mode` (the default): returns at once. Off: returns once the
-        attempt is over -- from a thread other than the main one only (a web
-        request: AutonaWebOperations.set_game), since the loader hands what
-        follows the load to the main thread; on the main thread it raises
-        RuntimeError. Returns None either way. An empty codename ("no game":
-        the tournament URL cleared) asks the loader nothing: done() at once,
-        here.
-
-        The latest request wins: a request still waiting for the loader when
-        a newer one comes is not loaded, so rapid requests A, B, C end on C;
-        a load already running when C comes finishes first. A newer request
-        for the same game keeps the reload the one it supersedes asked for,
-        with the newer one's mods (ADR-005 S-final SF-5b-1). A synchronous
-        request is over once the loader is over with it or with a request
-        made after it, whatever that attempt's outcome (set_game's "OK").
-
-        `done()`, if given, is called once the attempt is over however it
-        went -- loaded, skipped by the catalog, failed (logged), not run
-        because the app is shutting down, or superseded (the adapter's
-        contract: /api/v1 releases its in-progress flag there). It runs on
-        whichever thread ends the attempt (the loader's, the superseding
-        request's, the shutdown's for a loader cancelled while queued, or
-        the calling one), so it must be quick and must not ask for another
-        load. A request the loader cannot be started for (the executor
-        refuses the job: NestedSubmitError on one of its lanes) raises, with
-        nothing recorded and no done().
-        """
-        from .Helpers.AutonaQtHelper import in_gui_thread
-        if not codename:
-            self._Settle(_LoadRequest(codename, mods_active,
-                                      mods_reload_mode, done))
-            return
-        if not async_mode and in_gui_thread():
-            raise RuntimeError(
-                "a synchronous game load waits for the loader, which hands "
-                "what follows the load to the main thread: it cannot be "
-                "made from the main thread")
-
-        request = _LoadRequest(codename, mods_active, mods_reload_mode, done)
-        orphan = None
-        with self._requestLock:
-            if not self._loaderRunning:
-                # First, so that a refused job leaves everything as it was.
-                self._StartLoader()
-            self._loadGeneration += 1
-            request.generation = self._loadGeneration
-            superseded, self._pendingLoad = self._pendingLoad, request
-            if superseded is not None and superseded.codename == codename:
-                request.reload = request.reload or superseded.reload
-            if not self._loaderRunning:
-                # Cancelled as it was submitted (the executor has shut
-                # down): _LoaderEnded ran already, and nothing will take it.
-                orphan, self._pendingLoad = request, None
-        if superseded is not None:
-            logger.info(f"Game load of {superseded.codename} skipped: "
-                        f"{codename} was asked for after it")
-            self._Settle(superseded)
-        if orphan is not None:
-            logger.info(f"Game load of {codename} not run: the app is "
-                        "shutting down")
-            self._SettleAndFinish(orphan)
-        if not async_mode:
-            self._WaitForLoad(request.generation)
-
-    def TurnModsOff(self):
-        """Have the game the loader ends on loaded without its modded
-        content (ADR-005 S-final SF-5b-1): the desktop adapter's
-        TurnModsOff, which says it all -- GameAssetCatalog.PlanModsOff,
-        decided and asked under the request lock. Returns at once. Not
-        from a job lane (it may start the loader)."""
-        from .core.GameAssetCatalog import MODS_OFF_WAITING, PlanModsOff
-        with self._requestLock:
-            plan = PlanModsOff(self._pendingLoad, self._runningLoad,
-                               self.catalog.Current())
-            if plan is None:
-                return
-            kind, value = plan
-            if kind == MODS_OFF_WAITING:
-                waiting = self._pendingLoad
-                waiting.modsActive = False
-                waiting.reload = waiting.reload or value
-                logger.info(f"Game load of {waiting.codename} asked for "
-                            "without its modded content")
-                return
-            logger.info(f"{value} asked for again without its modded content")
-            # Nothing waits, so it supersedes nothing; asked under the lock
-            # (re-entered), so no request comes before it.
-            self.LoadGameByCodename(value, mods_active=False,
-                                    mods_reload_mode=True)
-
-    def _StartLoader(self):
-        # Under _requestLock, with no loader running. Raises what the
-        # executor's submit raises.
-        from .core.TaskExecutor import TaskExecutor
-        job = TaskExecutor.instance.submit(self._LoaderJob,
-                                           task_name="game load")
-        self._loadFuture = job
-        self._loaderRunning = True
-        # Right here when the job is cancelled already (re-entering the
-        # Condition's RLock).
-        job.add_done_callback(self._LoaderEnded)
-
-    def _LoaderEnded(self, job):
-        # The loader job's Future is done. Normally the job ended itself
-        # (nothing left; _loaderRunning is already off). Otherwise it was
-        # cancelled while queued -- the shutdown -- or failed outside a load
-        # (logged by its lane): the request it would have taken is over.
-        with self._requestLock:
-            if self._loadFuture is not job or not self._loaderRunning:
-                return
-            self._loaderRunning = False
-            self._runningLoad = None
-            orphan, self._pendingLoad = self._pendingLoad, None
-        if orphan is not None:
-            logger.info(f"Game load of {orphan.codename} not run: the "
-                        "loader " + ("was cancelled" if job.cancelled()
-                                     else "failed"))
-            self._SettleAndFinish(orphan)
-
-    def _SettleAndFinish(self, request):
-        # A request nothing else will take, over: settled, then its
-        # generation finished, whatever the settle did.
-        try:
-            self._Settle(request)
-        finally:
-            with self._requestLock:
-                self._Finished(request.generation)
-
-    def _Finished(self, generation):
-        # Under _requestLock: the loader is over with `generation` (and so
-        # with every request before it).
-        if generation is not None and generation > self._finishedGeneration:
-            self._finishedGeneration = generation
-        self._requestLock.notify_all()
-
-    def _WaitForLoad(self, generation):
-        # A synchronous request's wait: until the loader is over with it or
-        # with a later request. Every way a request ends notifies.
-        with self._requestLock:
-            self._requestLock.wait_for(
-                lambda: self._finishedGeneration >= generation)
-
-    @staticmethod
-    def _Settle(request):
-        # The request is over: its done(), once. Never raises.
-        try:
-            if request.done is not None:
-                request.done()
-        except Exception:
-            logger.error(traceback.format_exc())
-
-    def _LoaderJob(self):
-        # The loader, on a job-lane thread: the latest request, until none
-        # is waiting. One at a time by construction (LoadGameByCodename
-        # starts it only when none runs), so a load is over -- the next may
-        # select a game -- once what follows it has run on the main thread.
-        while True:
-            with self._requestLock:
-                request, self._pendingLoad = self._pendingLoad, None
-                if request is None:
-                    self._loaderRunning = False
-                    return
-                self._runningLoad = request
-            try:
-                self._Load(request.codename, request.modsActive,
-                           request.reload)
-            except Exception:
-                logger.error(traceback.format_exc())
-            finally:
-                # Not running any more: the catalog says what it did.
-                with self._requestLock:
-                    self._runningLoad = None
-                self._SettleAndFinish(request)
-
-    def _Load(self, codename, modsActive, reload):
-        # One request's attempt, on the loader's thread. What follows the
-        # load runs on the main thread, and the loader waits for it there
-        # (run_sync) -- an asynchronous request's too: until ADR-005 S3f-6
-        # that one was queued unwaited after a check that the main thread
-        # still ran its calls, and an event loop ending between the two lost
-        # it (the selection in state.json, the pick not persisted). run_sync
-        # settles it by a claim: either the main thread starts the call, or
-        # the waiter gives it up (GuiMarshalAborted) and it never runs.
-        from .core.StateManager import StateManager
-        from .Helpers import AutonaQtHelper
-        from .Helpers.AutonaQtHelper import GuiMarshalAborted
-        # Not once the app is shutting down (the adapter's check, ADR-005
-        # S3f-4 review): what follows the load -- the pick persisted --
-        # would not run on the main thread, and the selection alone would
-        # reach state.json without it.
-        reason = AutonaQtHelper.gui_unavailable_reason()
-        if reason is not None:
-            logger.info(f"Game load of {codename} not run: {reason}")
-            return
-        # The adapter's _Load without the GUI thread's end (_Publish): the
-        # start.gg character table re-read, then the selection in one save
-        # cycle. (The adapter rebuilt its Qt models there too until the Qt
-        # model clean-up's PR4; this never had them.) Skipped
-        # (None) for an unknown codename or the same game again without
-        # reload.
-        self.catalog.ReloadStartGGCharacters()
-        with StateManager.SaveBlock():
-            snapshot = self.catalog.SelectGame(
-                codename, modsActive=modsActive, reload=reload)
-        if snapshot is None:
-            return
-        logger.info(f"Game loaded: {codename}")
-        try:
-            AutonaQtHelper.gui_executor.run_sync(
-                lambda: self._OnLoaded(snapshot))
-        except GuiMarshalAborted as aborted:
-            logger.info(f"Game load of {codename} stopped: {aborted}")
-            self._SettleStopped(snapshot)
-
-    def _OnLoaded(self, snapshot):
-        # The pick persisted (the adapter's _PersistSelectedGame), then the
-        # listeners: the boards' roster (the load's own snapshot), the
-        # player DB refresh and the web server's push.
-        self._PersistPick()
+    def _Announce(self, snapshot):
+        # The loader's announcement, inside its board operation on the main
+        # thread (GameLoader._Publish): gameLoaded ahead of gameChanged.
         self.signals.gameLoaded.emit(snapshot)
         self.signals.gameChanged.emit()
-
-    def _SettleStopped(self, snapshot):
-        # The shutdown -- or the end of the event loop -- came after the
-        # selection (published), and the main thread will not run what
-        # follows it (the marshal was given up): that is written here, on
-        # the loader's thread, so state.json
-        # holds one game -- the desktop adapter's _SettleUnannounced (ADR-005
-        # S3f-4 review). The roster the load asks for (gameLoaded ->
-        # bootstrap.wire_game_roster: the previous game's picks emptied),
-        # through the board host as there (`atShutdown`: the shutdown's own
-        # write, which the host does not refuse as it refuses a late
-        # request's), then the pick persisted. The web push and the player
-        # DB refresh are left: the app is going away.
-        from . import AutonaWebOperations
-        from .core.Actions import AutonaActions
-        replaced = getattr(snapshot, "replaced", None)
-        AutonaWebOperations.boardHost.Run(
-            lambda: AutonaActions.instance.ApplyGameRoster(replaced),
-            atShutdown=True)
-        self._PersistPick()
-
-    @staticmethod
-    def _PersistPick():
-        from .core.SettingsManager import SettingsManager
-        from .core.StateManager import StateManager
-        SettingsManager.Set(
-            "SELECTED_GAME_CODENAME",
-            StateManager.Get("game.codename", "") or "")
 
 
 class HeadlessShell:
@@ -576,13 +241,14 @@ class HeadlessShell:
         # cancelled at once, and a running one is told to stop. The game
         # loader is one (ADR-005 S3f-6; it was a daemon thread nothing
         # waited for): one waiting for the main thread gives up at once and
-        # writes what follows its selection itself (_SettleStopped), so the
-        # flush below holds one game. One still selecting past the wait is
-        # joined by the interpreter's exit after a Ctrl+C / Ctrl+Break /
-        # SIGTERM, whose state writer then stores the rest; a console close
-        # ends the process as soon as its handler sees this shutdown over
-        # (`stopped`, _InstallStopHandlers), so that load's settle may
-        # never reach state.json -- as when the loader was a daemon thread.
+        # writes what follows its selection itself (core's GameLoader
+        # ._SettleStopped), so the flush below holds one game. One still
+        # selecting past the wait is joined by the interpreter's exit after
+        # a Ctrl+C / Ctrl+Break / SIGTERM, whose state writer then stores
+        # the rest; a console close ends the process as soon as its handler
+        # sees this shutdown over (`stopped`, _InstallStopHandlers), so that
+        # load's settle may never reach state.json -- as when the loader was
+        # a daemon thread.
         if TaskExecutor.instance is not None:
             try:
                 if not TaskExecutor.instance.shutdown(1.0):
@@ -732,24 +398,25 @@ def Assemble(app, shell=None):
     # ORDER CONSTRAINT: both before the provider can load a tournament
     # (UiMounted below) and before the web server takes a request. The
     # selector is what a tournament's start.gg videogame id loads through;
-    # without it the provider logs that the game was not applied.
-    provider.selectGameFromStartGGId = games.SelectGameFromStartGGId
-    AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename
+    # without it the provider logs that the game was not applied. The
+    # loader's, as on the desktop (ADR-005 S-final SF-6b).
+    provider.selectGameFromStartGGId = games.loader.SelectGameFromStartGGId
+    AutonaWebOperations.loadGameByCodename = games.loader.LoadGameByCodename
     # A tournament newly loaded turns the mods off through it (ADR-005
     # S-final SF-5b-1), as on the desktop.
-    AutonaWebOperations.turnModsOff = games.TurnModsOff
+    AutonaWebOperations.turnModsOff = games.loader.TurnModsOff
     # The scan that follows an asset pack's install or import (ADR-005
-    # S-final SF-3b) is this loader's, as the desktop's is its adapter's:
-    # gamesScanned (games_changed) and the provider's game follow it. Run
-    # on the import's job, which may not submit another; SF-6 makes it the
-    # core GameLoader's.
-    AssetPackService.instance.scan = games._Scan
+    # S-final SF-3b) is the loader's, as the desktop's is: gamesScanned
+    # (games_changed) and the provider's game follow it. Run on the
+    # import's job, which may not submit another.
+    AssetPackService.instance.scan = games.loader.Scan
     # The player DB follows a game load, as it follows the adapter's onLoad
     # on the desktop: the loaded game's mains normalised in place
     # (PlayerDB.NormaliseMains) -- since the Qt model clean-up's PR3, which
     # moved that out of the desktop's Qt model build -- then the push
-    # (db_updated). On the main thread, once the load is over (_OnLoaded),
-    # outside the load's save block and any StateManager lock.
+    # (db_updated). On the main thread, inside the load's board operation
+    # and save cycle (GameLoader._Publish; ADR-005 S-final SF-6b -- after
+    # both until then), after the persisted pick.
     games.signals.gameChanged.connect(AutonaPlayerDB.SetupModel)
     # ...and so do the boards' rosters (the game's players per team), with
     # the desktop's wiring. Before games.Start() below restores a game.

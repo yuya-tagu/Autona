@@ -304,8 +304,9 @@ def test_a_clear_publishes_its_writes_in_one_save_cycle(env, monkeypatch):
 # asked for the game again (the desktop only). Core asks the game loader
 # now, after a load that loaded (reloaded), both shells; never on a clear.
 # What the loader asks then -- which game, whether at all -- is its own
-# (TurnModsOff: GameAssetCatalog.PlanModsOff; tests/test_game_selected.py,
-# tests/test_game_asset_catalog.py).
+# (core's GameLoader.TurnModsOff, an intent it holds while a load runs
+# since ADR-005 S-final SF-6b; GameAssetCatalog.PlanModsOff until then:
+# tests/test_game_selected.py).
 
 @pytest.fixture
 def mods(env, monkeypatch):

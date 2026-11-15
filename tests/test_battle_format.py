@@ -245,7 +245,8 @@ from src.core.SettingsManager import SettingsManager
 qtSettings = str(Path("qt_settings.ini").resolve())
 Autona.QSettings = lambda *args: QSettings(
     qtSettings, QSettings.Format.IniFormat)
-AutonaGameAssetManager.instance.DownloadStartGGCharacters = lambda: None
+AutonaGameAssetManager.instance.loader.DownloadStartGGCharacters = (
+    lambda: None)
 
 window = Autona.Window()
 

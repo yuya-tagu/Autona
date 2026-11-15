@@ -75,14 +75,17 @@ class AutonaPlayerDB:
         On the GUI thread, where the emit has always come from; a caller on
         another thread does not wait for it (see the class docstring).
         Reached from the core's change announcements (Attach) and from a game
-        load: the asset adapter's onLoad on the desktop, the headless
-        loader's gameChanged -- once the load is over, with the loaded game
+        load: the asset adapter's onLoad on the desktop, HeadlessGames'
+        gameChanged headless -- both inside the load's board operation and
+        save cycle (core's GameLoader._Publish; the headless shell's since
+        ADR-005 S-final SF-6b, after both until then), with the loaded game
         the catalog's selection. The name is the model's, kept for its
         callers.
         """
-        # The selection as the model build read it (the asset adapter's
-        # `selectedGame` is this snapshot's `game`), read once per refresh.
-        # A lock-free read of the catalog (pitfalls #16: no writer here).
+        # The selection as the model build read it (this snapshot's `game`;
+        # the asset adapter's `selectedGame` until ADR-005 S-final SF-6b),
+        # read once per refresh. A lock-free read of the catalog (pitfalls
+        # #16: no writer here).
         codename = GameAssetCatalog.instance.Current().game.get("codename")
         PlayerDB.instance.NormaliseMains(codename)
         # After the DB's lock: db_updated's slots (the web server's push

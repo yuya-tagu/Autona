@@ -144,8 +144,8 @@ def slotEnv(autonaApp):
     def load(label):
         codename, modsActive, reload = GAME_SCENARIOS[label]
         # The load job, this (the GUI) thread pumped while it runs.
-        manager.LoadGameByCodename(codename, mods_active=modsActive,
-                                   mods_reload_mode=reload)
+        manager.loader.LoadGameByCodename(codename, mods_active=modsActive,
+                                          mods_reload_mode=reload)
         drain_tasks()
 
     try:

@@ -42,7 +42,8 @@ def test_the_event_metadata_is_the_real_tournament(liveEvent):
 
     # Super Smash Bros. Ultimate. GetTournamentData hands the id back under
     # _videogame for the caller to emit game_changed from the GUI thread,
-    # and caches it on the provider for SetGameFromStartGGId.
+    # and caches it on the provider for the loader's
+    # SelectGameFromStartGGId.
     assert data.get("_videogame") == 1386
     assert liveEvent.provider.videogame == 1386
 

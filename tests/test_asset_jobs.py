@@ -16,15 +16,18 @@ Pinned here:
   once the app is shutting down or the event loop has exited (the call then
   never runs), and still waits for one already running; a job blocked in
   it no longer holds up the interpreter's exit (subprocess);
-- the game loader's contract, on both shells (SF-6a): each check runs on
-  the desktop's asset adapter and on the headless loader
+- the game loader's contract, on both shells (SF-6a; one loader, core's
+  GameLoader, held by each shell since SF-6b): each check runs on the
+  desktop's asset adapter and on the headless shell
   (src/headless.HeadlessGames), through the `shell` fixture; where the two
-  differ -- the desktop's Future, the headless log line for a request
-  nothing takes, the footer's status, what a load the shutdown stopped
-  writes -- is SHELL_DIFFERENCES, each parameter's expected value:
+  differ -- the names of the signals a shell announces a load and a scan
+  on -- is SHELL_DIFFERENCES, each parameter's expected value (until SF-6b
+  also the desktop's Future, the headless log line for a request nothing
+  takes, the footer's status and what a load the shutdown stopped writes):
   - a load is a job: the selection on a job-lane thread, what follows it
-    (the desktop's _Publish, the headless _OnLoaded) and its announcement
-    (gameLoaded, then onLoad / gameChanged) on the main thread, once each,
+    (the loader's _Publish; the desktop's _Publish and the headless
+    _OnLoaded until SF-6b) and its announcement (gameLoaded, then onLoad /
+    gameChanged) on the main thread, once each,
     and the load is over (done()) after them; a synchronous load from the
     main thread is refused (every load is the job); an empty codename is
     over at once. (Until the Qt model clean-up's PR4 the GUI thread rebuilt
@@ -57,8 +60,9 @@ Pinned here:
     run ("OK" also for a failed load, as before), and returns instead of
     hanging once the main thread is unavailable;
   (the same loads step by step, serially: tests/test_game_loader_golden.py);
-- the desktop's own: a request's Future cannot be cancelled; a publication
-  that raises fails the load and leaves nothing open;
+- a request's Future cannot be cancelled; a publication that raises fails
+  the load and leaves nothing open (the desktop's own until SF-6b, both
+  shells' since);
 - the headless loader's own: the start.gg download, the scan and the loads
   are jobs, with no thread of its own; the shutdown waits for a load, which
   settles before ./out and state.json are flushed;
@@ -78,14 +82,14 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QApplication
 
-from src.AutonaGameAssetManager import (
+from src.core.GameLoader import (
     FAILED, LOADED, SKIPPED, STOPPED, SUPERSEDED)
 from src.core.TaskExecutor import JOB_THREAD_PREFIX, TaskExecutor
 from src.Helpers import AutonaQtHelper
 from src.Helpers.AutonaQtHelper import GuiMarshalAborted
 from tests.conftest import drain_tasks
 from tests.test_game_asset_manager_load import (  # noqa: F401  (fixtures)
-    goldenGames, onLoadCount, statusCalls)
+    goldenGames, statusCalls)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -165,9 +169,13 @@ def _names(path):
     return used
 
 
-def test_the_asset_manager_starts_no_thread():
-    names = _names(PROJECT_ROOT / "src/AutonaGameAssetManager.py")
-    assert not names & {"QThread", "Thread", "start_new_thread"}
+def test_the_game_loader_starts_no_thread():
+    """The loader (core's since ADR-005 S-final SF-6b) and both shells'
+    notifications of it run on TaskExecutor jobs only."""
+    for path in ("src/core/GameLoader.py", "src/AutonaGameAssetManager.py",
+                 "src/headless.py"):
+        names = _names(PROJECT_ROOT / path)
+        assert not names & {"QThread", "Thread", "start_new_thread"}, path
 
 
 def test_set_game_does_not_hop_to_the_gui_thread():
@@ -298,127 +306,96 @@ def test_a_job_blocked_in_the_marshal_does_not_hold_up_the_exit(tmp_path):
 
 # ── the game loader's contract, on both shells (ADR-005 S-final SF-6a) ──
 #
-# The desktop's asset adapter (AutonaGameAssetManager) and the headless
-# loader (src/headless.HeadlessGames) take one design (S3f-4, S3f-6). Each
-# test below runs on both, through the `shell` fixture; where the two differ
-# today -- by design or by history, until SF-6b puts one loader in core --
-# the expected value is the parameter's, written down here.
+# One loader since SF-6b: core's GameLoader, which the desktop's asset
+# adapter (AutonaGameAssetManager) and the headless shell (src/headless
+# .HeadlessGames) each wrap with their own signals. Each test below runs on
+# both, through the `shell` fixture. Until SF-6b each shell had its own copy
+# and the two differed -- the headless loader returned None, logged the
+# requests nothing took, showed no footer progress and did not commit a load
+# the shutdown stopped -- which SHELL_DIFFERENCES wrote down per parameter;
+# what is left of it is the names of the shells' signals.
 
 SHELL_DIFFERENCES = {
     "desktop": {
-        # LoadGameByCodename returns a Future with the attempt's outcome
-        # (LOADED / SKIPPED / SUPERSEDED / STOPPED / FAILED).
-        "answers": True,
-        # A request nothing will take (asked for after the shutdown; left
-        # by a loader cancelled while queued or dead) is settled with no
-        # log line of its own.
-        "orphanLogs": None,
-        # The footer's progress (core's StatusService, SF-2): pushed on the
-        # selection's first progress call, popped once the attempt is over.
-        "footerStatus": True,
-        # What a load the shutdown stopped after its selection writes on the
-        # loader's thread (_SettleUnannounced), in order, with whether the
-        # board host's lock is held: the roster, its commit (inside the
-        # roster's recording: `written.open`), then the pick.
-        "settleCalls": [("roster", True), ("commit", True, True),
-                        ("pick", False)],
-        # The same parts' names.
+        # The announcement after gameLoaded, and the scan's notice.
         "announced": "onLoad",
-        "publish": "_Publish",
-        "settle": "_SettleUnannounced",
-        "pick": "_PersistSelectedGame",
-        "fromStartGG": "SetGameFromStartGGId",
+        "scanned": "onLoadAssets",
     },
     "headless": {
-        # Returns None: nobody reads what a headless load returns.
-        "answers": False,
-        "orphanLogs": {
-            "at submit": "Game load of {codename} not run: the app is "
-                         "shutting down",
-            "cancelled": "Game load of {codename} not run: the loader was "
-                         "cancelled",
-            "failed": "Game load of {codename} not run: the loader failed",
-        },
-        # No footer.
-        "footerStatus": False,
-        # _SettleStopped: the roster through the board host, no commit (the
-        # headless boards are not held), then the pick.
-        "settleCalls": [("roster", True), ("pick", False)],
         "announced": "gameChanged",
-        "publish": "_OnLoaded",
-        "settle": "_SettleStopped",
-        "pick": "_PersistPick",
-        "fromStartGG": "SelectGameFromStartGGId",
+        "scanned": "gamesScanned",
     },
 }
 
+# The log line a request nothing takes leaves (`why`: 'at submit',
+# 'cancelled' or 'failed'), on both shells since SF-6b (the headless
+# loader's; the desktop's logged none).
+ORPHAN_LOGS = {
+    "at submit": "Game load of {codename} not run: the app is shutting down",
+    "cancelled": "Game load of {codename} not run: the loader was cancelled",
+    "failed": "Game load of {codename} not run: the loader failed",
+}
+
+
+def _orphanLog(codename, why):
+    return [ORPHAN_LOGS[why].format(codename=codename)]
+
 
 class _Shell:
-    """One shell's game loader, as the contract tests drive it."""
+    """One shell's game loader, as the contract tests drive it: `games`
+    the shell's adapter (its signals), `loader` its core GameLoader."""
 
     def __init__(self, name, games):
         self.name = name
         self.games = games
+        self.loader = games.loader
         self.differs = SHELL_DIFFERENCES[name]
 
     @property
     def catalog(self):
-        return self.games.catalog
+        return self.loader.catalog
 
     @property
     def announced(self):
         """The announcement after gameLoaded: the desktop's onLoad, the
-        headless loader's gameChanged."""
+        headless shell's gameChanged."""
         return getattr(self.games.signals, self.differs["announced"])
 
+    @property
+    def scanned(self):
+        """A scan's notice: the desktop's onLoadAssets, the headless
+        shell's gamesScanned."""
+        return getattr(self.games.signals, self.differs["scanned"])
+
     def Load(self, codename, **kwargs):
-        return self.games.LoadGameByCodename(codename, **kwargs)
+        return self.loader.LoadGameByCodename(codename, **kwargs)
 
     def FromStartGG(self, gameid, **kwargs):
-        return getattr(self.games, self.differs["fromStartGG"])(
-            gameid, **kwargs)
+        return self.loader.SelectGameFromStartGGId(gameid, **kwargs)
 
-    def Answer(self, returned, timeout=0):
-        """What a LoadGameByCodename call returned, read: the desktop's
-        Future's outcome; None headless (checked)."""
-        if self.differs["answers"]:
-            return returned.result(timeout)
-        assert returned is None, returned
-        return None
-
-    def Said(self, outcome):
-        """The answer a load that ended so gives on this shell."""
-        return outcome if self.differs["answers"] else None
-
-    def Real(self, part):
-        return getattr(self.games, self.differs[part])
-
-    def Patch(self, monkeypatch, part, replacement):
-        monkeypatch.setattr(self.games, self.differs[part], replacement)
+    @staticmethod
+    def Answer(returned, timeout=0):
+        """What a LoadGameByCodename call returned, read: its Future's
+        outcome."""
+        return returned.result(timeout)
 
     def PatchSettle(self, monkeypatch, hook):
-        """Every request's settle (its done(), and the desktop's Future)
-        followed by `hook(request)`."""
-        real = self.games._Settle
+        """Every request's settle (its done() and its Future) followed by
+        `hook(request)`."""
+        real = self.loader._Settle
 
-        def settle(request, *outcome):
-            real(request, *outcome)
+        def settle(request, outcome):
+            real(request, outcome)
             hook(request)
 
-        monkeypatch.setattr(self.games, "_Settle", settle)
-
-    def OrphanLogs(self, codename, why):
-        """The log lines a request nothing takes leaves (`why`: 'at
-        submit', 'cancelled' or 'failed')."""
-        logs = self.differs["orphanLogs"]
-        return [] if logs is None else [logs[why].format(codename=codename)]
+        monkeypatch.setattr(self.loader, "_Settle", settle)
 
 
 @pytest.fixture(params=["desktop", "headless"])
 def shell(request, goldenGames, autonaApp, monkeypatch):
     """Each shell's game loader over the fixture games (goldenGames): the
     desktop's asset adapter as bootstrap_gui() wired it, or a headless
-    loader wired as src/headless.Assemble wires its own -- the player DB's
+    shell's wired as src/headless.Assemble wires its own -- the player DB's
     refresh on gameChanged and the boards' roster on gameLoaded
     (bootstrap.wire_game_roster), through a board host of its own."""
     if request.param == "desktop":
@@ -435,10 +412,10 @@ def shell(request, goldenGames, autonaApp, monkeypatch):
 
 
 def _headlessGames(monkeypatch, provider=None):
-    """A headless loader over the session's catalog, with a board host of
-    its own (what follows a load the shutdown stopped writes through it;
-    the one BoardHost of both shells since ADR-005 S4ad -- the harness had
-    registered the desktop's until then)."""
+    """A headless shell's games over the session's catalog, with a board
+    host of its own (what follows a load the shutdown stopped writes
+    through it; the one BoardHost of both shells since ADR-005 S4ad -- the
+    harness had registered the desktop's until then)."""
     from src import AutonaWebOperations as WebOps
     from src.AutonaWebOperations import BoardHost
     from src.core.GameAssetCatalog import GameAssetCatalog
@@ -456,17 +433,16 @@ def _record(signal, events, tag):
 
 
 def _recordPublish(shell, monkeypatch, events):
-    """The main thread's end of a load -- the desktop's _Publish, the
-    headless loader's _OnLoaded -- recorded as it starts (the desktop's
-    model rebuild was recorded there until the Qt model clean-up's PR4: it
-    was _Publish's first step)."""
-    real = shell.Real("publish")
+    """The main thread's end of a load -- the loader's _Publish (until
+    ADR-005 S-final SF-6b the desktop's _Publish and the headless loader's
+    _OnLoaded) -- recorded as it starts."""
+    real = shell.loader._Publish
 
     def publish(*args):
         events.append(("publish", threading.current_thread().name))
         return real(*args)
 
-    shell.Patch(monkeypatch, "publish", publish)
+    monkeypatch.setattr(shell.loader, "_Publish", publish)
 
 
 def _marshalEntered(monkeypatch):
@@ -538,13 +514,13 @@ def _jobsSubmitted(monkeypatch):
     return names
 
 
-def _waitingRequest(games, codename="tgame", done=None, **kwargs):
+def _waitingRequest(loader, codename="tgame", done=None, **kwargs):
     """A synchronous request (set_game's) made on another thread while a
     load runs, recorded and waiting for the loader; (thread, outcome)."""
-    generation = games._loadGeneration
-    thread, outcome = _onAnotherThread(lambda: games.LoadGameByCodename(
+    generation = loader._loadGeneration
+    thread, outcome = _onAnotherThread(lambda: loader.LoadGameByCodename(
         codename, async_mode=False, done=done, **kwargs))
-    _waitFor(lambda: games._loadGeneration > generation)
+    _waitFor(lambda: loader._loadGeneration > generation)
     return thread, outcome
 
 
@@ -569,10 +545,10 @@ def _rosterRuns(monkeypatch):
 
 def test_a_load_selects_on_a_job_and_announces_on_the_main_thread(
         shell, autonaApp, monkeypatch):
-    """The selection on a job-lane thread; what follows it (the desktop's
-    _Publish, the headless loader's _OnLoaded) and the announcement
-    (gameLoaded, then onLoad / gameChanged) on the main (GUI) thread, once
-    each; the load is over (done()) after them, on the loader's thread."""
+    """The selection on a job-lane thread; what follows it (the loader's
+    _Publish) and the announcement (gameLoaded, then onLoad / gameChanged)
+    on the main (GUI) thread, once each; the load is over (done()) after
+    them, on the loader's thread."""
     events = []
     realSelect = shell.catalog.SelectGame
 
@@ -590,7 +566,7 @@ def test_a_load_selects_on_a_job_and_announces_on_the_main_thread(
     try:
         returned = shell.Load("tgame", done=done)
         drain_tasks()
-        assert shell.Answer(returned) == shell.Said(LOADED)
+        assert shell.Answer(returned) == LOADED
     finally:
         for disconnect in undo:
             disconnect()
@@ -663,26 +639,25 @@ def test_a_load_waiting_for_the_main_thread_is_released_and_settles_its_game(
             exited.set()  # what aboutToQuit sets
             _waitFor(lambda: done)
 
-        assert shell.Answer(returned, WAIT) == shell.Said(STOPPED)
+        assert shell.Answer(returned, WAIT) == STOPPED
         assert len(done) == 1 and done[0].startswith(JOB_THREAD_PREFIX)
         assert rosters == done  # the roster, once, on the loader's thread
         assert StateManager.saveBlocked == 0
         assert StateManager.GetCommitted("game.codename") == codename
         assert SettingsManager.Get("SELECTED_GAME_CODENAME") == codename
+        # The footer's progress, popped (both shells since SF-6b: the
+        # headless loader showed none until then).
         tokens = [token for kind, token, message in statusCalls
                   if kind == "push" and f"({codename})" in message]
-        if shell.differs["footerStatus"]:
-            assert tokens and all(("pop", token, None) in statusCalls
-                                  for token in tokens)
-        else:
-            assert tokens == []
+        assert tokens and all(("pop", token, None) in statusCalls
+                              for token in tokens)
         QApplication.processEvents()
         QApplication.processEvents()
         assert published == [] and announced == []
     finally:
         for disconnect in undo:
             disconnect()
-    _waitFor(lambda: not games._loaderRunning)
+    _waitFor(lambda: not shell.loader._loaderRunning)
 
 
 def test_a_load_after_the_shutdown_is_over_at_once(shell, ownExecutor):
@@ -701,13 +676,13 @@ def test_a_load_after_the_shutdown_is_over_at_once(shell, ownExecutor):
     finally:
         stop()
 
-    assert shell.Answer(returned) == shell.Said(STOPPED)
+    assert shell.Answer(returned) == STOPPED
     assert not thread.is_alive() and "error" not in outcome
-    assert shell.Answer(outcome["result"]) == shell.Said(STOPPED)
+    assert shell.Answer(outcome["result"]) == STOPPED
     assert done == [1, 2]
-    assert _notRun(records) == shell.OrphanLogs("tgame", "at submit") * 2
-    assert not shell.games._loaderRunning
-    assert shell.games._pendingLoad is None
+    assert _notRun(records) == _orphanLog("tgame", "at submit") * 2
+    assert not shell.loader._loaderRunning
+    assert shell.loader._pendingLoad is None
 
 
 def test_a_synchronous_load_on_the_main_thread_is_refused(shell):
@@ -715,33 +690,31 @@ def test_a_synchronous_load_on_the_main_thread_is_refused(shell):
     to the waiting thread: nothing is asked for and nothing is done. (The
     desktop's inline load on the GUI thread, the tests' only caller, is
     gone: every load is the job.)"""
-    games = shell.games
-    generation = games._loadGeneration
+    generation = shell.loader._loadGeneration
     done = []
 
     with pytest.raises(RuntimeError):
         shell.Load("game2", async_mode=False, done=lambda: done.append(1))
 
-    assert done == [] and games._loadGeneration == generation
-    assert not games._loaderRunning
+    assert done == [] and shell.loader._loadGeneration == generation
+    assert not shell.loader._loaderRunning
 
 
 def test_an_empty_codename_is_over_at_once(shell, autonaApp):
     """'No game' (the tournament URL cleared) asks nothing of the loader:
     done() called once, here -- on the main thread too, synchronous or not
-    -- and the desktop's Future answered already (SKIPPED)."""
-    games = shell.games
-    generation = games._loadGeneration
+    -- and its Future answered already (SKIPPED)."""
+    generation = shell.loader._loadGeneration
     done = []
 
     returned = [shell.Load("", done=lambda: done.append(1)),
                 shell.Load("", async_mode=False, done=lambda: done.append(2))]
 
     assert [shell.Answer(each) for each in returned] == \
-        [shell.Said(SKIPPED)] * 2
+        [SKIPPED] * 2
     assert done == [1, 2]
-    assert games._loadGeneration == generation
-    assert not games._loaderRunning
+    assert shell.loader._loadGeneration == generation
+    assert not shell.loader._loaderRunning
 
 
 # ── the latest request wins, on one loader (ADR-005 S3f-4 review) ───────
@@ -758,7 +731,6 @@ def test_rapid_requests_take_one_job_and_end_on_the_last_one(
     any.)"""
     from src.core.StateManager import StateManager
 
-    games = shell.games
     entered, release = _holdTheLoader(shell.catalog, monkeypatch)
     jobs = _jobsSubmitted(monkeypatch)
     selections = _selections(shell.catalog, monkeypatch)
@@ -770,19 +742,19 @@ def test_rapid_requests_take_one_job_and_end_on_the_last_one(
                            done=lambda n=n: done.append(n))
                 for n, (codename, mods) in enumerate(requests)]
     assert [shell.Answer(each) for each in returned[:2]] == \
-        [shell.Said(SUPERSEDED)] * 2
+        [SUPERSEDED] * 2
     assert done == [0, 1]
     release.set()
     drain_tasks()
 
     assert jobs == ["game load"]
-    assert shell.Answer(running) == shell.Said(LOADED)
-    assert shell.Answer(returned[2]) == shell.Said(LOADED)
+    assert shell.Answer(running) == LOADED
+    assert shell.Answer(returned[2]) == LOADED
     assert selections == [("game2", False, False), ("tgame", True, True)]
     assert done == [0, 1, "running", 2]
     assert StateManager.Get("game.codename") == "tgame"
     assert StateManager.Get("game.mods_active") is True
-    assert not games._loaderRunning and games._pendingLoad is None
+    assert not shell.loader._loaderRunning and shell.loader._pendingLoad is None
 
 
 # The load running when a synchronous request (set_game's) is overtaken:
@@ -824,9 +796,9 @@ def test_a_superseded_synchronous_load_answers_once_the_newer_one_is_in(
     try:
         runningLoad = shell.Load(runningGame)
         assert entered.wait(WAIT)
-        generation = games._loadGeneration
+        generation = shell.loader._loadGeneration
         thread, outcome = _onAnotherThread(request)
-        _waitFor(lambda: games._loadGeneration > generation)
+        _waitFor(lambda: shell.loader._loadGeneration > generation)
         newer = shell.Load("tgame", mods_active=True, mods_reload_mode=True)
         assert done == ["sync"]  # superseded: over, its wait is not
         time.sleep(0.1)
@@ -843,10 +815,10 @@ def test_a_superseded_synchronous_load_answers_once_the_newer_one_is_in(
     assert selections == [(runningGame, False, False), ("tgame", True, True)]
     assert seen == [("gameLoaded", _main()), ("announced", _main())] * loads
     assert codename == "tgame"
-    assert shell.Answer(superseded) == shell.Said(SUPERSEDED)
-    assert shell.Answer(runningLoad) == shell.Said(
+    assert shell.Answer(superseded) == SUPERSEDED
+    assert shell.Answer(runningLoad) == (
         SKIPPED if loads == 1 else LOADED)
-    assert shell.Answer(newer) == shell.Said(LOADED)
+    assert shell.Answer(newer) == LOADED
 
 
 def test_a_request_the_loader_cannot_start_for_records_nothing(
@@ -858,8 +830,7 @@ def test_a_request_the_loader_cannot_start_for_records_nothing(
     loader."""
     from src.core.TaskExecutor import NestedSubmitError
 
-    games = shell.games
-    generation = games._loadGeneration
+    generation = shell.loader._loadGeneration
     executor = TaskExecutor.instance
     real = executor.submit
     refused = []
@@ -876,15 +847,15 @@ def test_a_request_the_loader_cannot_start_for_records_nothing(
         shell.Load("tgame", done=lambda: done.append(1))
 
     assert refused == ["game load"] and done == []
-    assert games._loadGeneration == generation
-    assert games._pendingLoad is None and not games._loaderRunning
+    assert shell.loader._loadGeneration == generation
+    assert shell.loader._pendingLoad is None and not shell.loader._loaderRunning
 
     thread, outcome = _onAnotherThread(
         lambda: shell.Load("tgame", async_mode=False))
     _pumpUntil(lambda: not thread.is_alive(), timeout=30)
     assert "error" not in outcome, outcome
-    assert shell.Answer(outcome["result"]) == shell.Said(LOADED)
-    assert games._loadGeneration == generation + 1
+    assert shell.Answer(outcome["result"]) == LOADED
+    assert shell.loader._loadGeneration == generation + 1
     assert autonaApp.get("game.codename") == "tgame"
 
 
@@ -895,7 +866,6 @@ def test_a_settle_that_raises_still_finishes_its_generation(
     synchronous request that newer one superseded returns all the same, the
     loader is over (its lane logs the failure) and the next request starts
     another."""
-    games = shell.games
     entered, release = _holdTheLoader(shell.catalog, monkeypatch)
     jobs = _jobsSubmitted(monkeypatch)
     failed = []
@@ -908,20 +878,20 @@ def test_a_settle_that_raises_still_finishes_its_generation(
     shell.PatchSettle(monkeypatch, hook)
     running = shell.Load("game2")
     assert entered.wait(WAIT)
-    thread, outcome = _waitingRequest(games)
+    thread, outcome = _waitingRequest(shell.loader)
     newer = shell.Load("tgame", mods_reload_mode=True)
     release.set()
     _pumpUntil(lambda: not thread.is_alive(), timeout=30)
 
     assert failed == ["tgame"]
     assert "error" not in outcome, outcome
-    assert shell.Answer(outcome["result"]) == shell.Said(SUPERSEDED)
-    assert shell.Answer(running) == shell.Said(LOADED)
-    assert shell.Answer(newer) == shell.Said(LOADED)
-    _waitFor(lambda: not games._loaderRunning)
+    assert shell.Answer(outcome["result"]) == SUPERSEDED
+    assert shell.Answer(running) == LOADED
+    assert shell.Answer(newer) == LOADED
+    _waitFor(lambda: not shell.loader._loaderRunning)
     after = shell.Load("game2")
     drain_tasks()
-    assert shell.Answer(after) == shell.Said(LOADED)
+    assert shell.Answer(after) == LOADED
     assert jobs == ["game load", "game load"]
 
 
@@ -929,10 +899,9 @@ def test_a_loader_that_dies_between_loads_ends_the_request_it_left(
         shell, autonaApp, monkeypatch):
     """The loader job dies outside a load (after one, before it takes the
     next): its lane logs it, and the request that was waiting for it is over
-    -- done() once, its synchronous waiter released (FAILED on the desktop;
-    a log line headless) -- nothing selected for it, and the next request
-    starts a new loader."""
-    games = shell.games
+    -- done() once, its synchronous waiter released (FAILED, and a log
+    line) -- nothing selected for it, and the next request starts a new
+    loader."""
     entered, release = _holdTheLoader(shell.catalog, monkeypatch)
     jobs = _jobsSubmitted(monkeypatch)
     selections = _selections(shell.catalog, monkeypatch)
@@ -948,22 +917,22 @@ def test_a_loader_that_dies_between_loads_ends_the_request_it_left(
     records, stop = _logRecords()
     try:
         thread, outcome = _waitingRequest(
-            games, done=lambda: done.append(1))
+            shell.loader, done=lambda: done.append(1))
         release.set()
         _pumpUntil(lambda: not thread.is_alive(), timeout=30)
     finally:
         stop()
 
-    assert shell.Answer(running) == shell.Said(LOADED)
+    assert shell.Answer(running) == LOADED
     assert "error" not in outcome, outcome
-    assert shell.Answer(outcome["result"]) == shell.Said(FAILED)
+    assert shell.Answer(outcome["result"]) == FAILED
     assert done == [1]
     assert selections == [("game2", False, False)]
-    assert _notRun(records) == shell.OrphanLogs("tgame", "failed")
-    assert not games._loaderRunning and games._pendingLoad is None
+    assert _notRun(records) == _orphanLog("tgame", "failed")
+    assert not shell.loader._loaderRunning and shell.loader._pendingLoad is None
     after = shell.Load("tgame")
     drain_tasks()
-    assert shell.Answer(after) == shell.Said(LOADED)
+    assert shell.Answer(after) == LOADED
     assert jobs == ["game load", "game load"]
 
 
@@ -974,7 +943,6 @@ def test_a_reload_an_announcement_slot_asks_for_is_served_by_the_same_loader(
     not deadlock (the loader holds no lock a request takes while it waits),
     and the loader running serves it once this load is over, with no job of
     its own."""
-    games = shell.games
     jobs = _jobsSubmitted(monkeypatch)
     selections = _selections(shell.catalog, monkeypatch)
     asked = []
@@ -993,11 +961,11 @@ def test_a_reload_an_announcement_slot_asks_for_is_served_by_the_same_loader(
 
     [(thread, second)] = asked
     assert thread == _main()
-    assert shell.Answer(first) == shell.Said(LOADED)
-    assert shell.Answer(second) == shell.Said(LOADED)
+    assert shell.Answer(first) == LOADED
+    assert shell.Answer(second) == LOADED
     assert selections == [("tgame", False, False), ("tgame", False, True)]
     assert jobs == ["game load"]
-    assert not games._loaderRunning
+    assert not shell.loader._loaderRunning
 
 
 def test_the_game_a_tournament_names_says_when_it_is_over(
@@ -1005,18 +973,17 @@ def test_the_game_a_tournament_names_says_when_it_is_over(
     """The standings' import waits for it (the provider's
     RefreshTournamentData). A game that is not one of ours asks nothing of
     the loader -- nor anything at all with nobody to tell."""
-    games = shell.games
-    generation = games._loadGeneration
+    generation = shell.loader._loadGeneration
     done = []
 
     shell.FromStartGG("no such game", done=lambda: done.append(1))
     assert done == [1]
-    assert games._loadGeneration == generation
+    assert shell.loader._loadGeneration == generation
 
     shell.FromStartGG("no such game")
     assert done == [1]
-    assert games._loadGeneration == generation
-    assert not games._loaderRunning
+    assert shell.loader._loadGeneration == generation
+    assert not shell.loader._loaderRunning
 
     monkeypatch.setattr(shell.catalog, "GameFromStartGGId",
                         lambda _gameid: "tgame")
@@ -1041,7 +1008,6 @@ def test_a_load_waiting_for_the_loader_does_not_run_once_stopping(
     from src.core.SettingsManager import SettingsManager
     from src.core.StateManager import StateManager
 
-    games = shell.games
     shell.Load("tgame")
     drain_tasks()
     entered, release = _holdTheLoader(shell.catalog, monkeypatch)
@@ -1058,7 +1024,7 @@ def test_a_load_waiting_for_the_loader_does_not_run_once_stopping(
             returned = shell.Load("game2", done=lambda: done.append(1))
         else:
             thread, outcome = _waitingRequest(
-                games, "game2", done=lambda: done.append(1))
+                shell.loader, "game2", done=lambda: done.append(1))
         ownExecutor.stopping.set()  # what the shutdown sets
         release.set()
         if waiting == "asynchronous":
@@ -1067,12 +1033,12 @@ def test_a_load_waiting_for_the_loader_does_not_run_once_stopping(
             thread.join(WAIT)  # this thread does not pump
             assert not thread.is_alive() and "error" not in outcome
             returned = outcome["result"]
-        assert shell.Answer(returned, WAIT) == shell.Said(STOPPED)
-        _waitFor(lambda: not games._loaderRunning)
+        assert shell.Answer(returned, WAIT) == STOPPED
+        _waitFor(lambda: not shell.loader._loaderRunning)
     finally:
         stop()
 
-    assert shell.Answer(running) == shell.Said(SKIPPED)
+    assert shell.Answer(running) == SKIPPED
     assert selections == [("tgame", False, False)] and done == [1]
     assert StateManager.Get("game") == game
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == pick
@@ -1086,9 +1052,8 @@ def test_a_loader_the_shutdown_cancels_while_queued_ends_its_request(
     """Every job lane is busy when a load is asked for, so the loader job is
     queued; the shutdown cancels it. The request it would have taken is
     over -- done() once (on the shutdown's thread), its synchronous waiter
-    released (STOPPED on the desktop; a log line headless) -- nothing was
-    selected, and no loader is left running."""
-    games = shell.games
+    released (STOPPED, and a log line) -- nothing was selected, and no
+    loader is left running."""
     selections = _selections(shell.catalog, monkeypatch)
     lanes = threading.Barrier(TaskExecutor.JOB_WORKERS + 1)
 
@@ -1101,10 +1066,10 @@ def test_a_loader_the_shutdown_cancels_while_queued_ends_its_request(
     lanes.wait(WAIT)  # every job lane runs a busy job now
     done = []
     thread, outcome = _waitingRequest(
-        games, codename="game2",
+        shell.loader, codename="game2",
         done=lambda: done.append(threading.current_thread().name))
-    loader = games._loadFuture
-    assert games._loaderRunning and not loader.running()
+    job = shell.loader._loadFuture
+    assert shell.loader._loaderRunning and not job.running()
     records, stop = _logRecords()
     try:
         assert ownExecutor.shutdown(WAIT)
@@ -1113,11 +1078,11 @@ def test_a_loader_the_shutdown_cancels_while_queued_ends_its_request(
         stop()
 
     assert not thread.is_alive() and "error" not in outcome
-    assert shell.Answer(outcome["result"]) == shell.Said(STOPPED)
-    assert loader.cancelled() and done == [_main()]
-    assert not games._loaderRunning and games._pendingLoad is None
+    assert shell.Answer(outcome["result"]) == STOPPED
+    assert job.cancelled() and done == [_main()]
+    assert not shell.loader._loaderRunning and shell.loader._pendingLoad is None
     assert selections == []
-    assert _notRun(records) == shell.OrphanLogs("game2", "cancelled")
+    assert _notRun(records) == _orphanLog("game2", "cancelled")
 
 
 # ── what a load writes, and the save block ──────────────────────────────
@@ -1191,14 +1156,14 @@ def _saveBlocks(monkeypatch):
     return counts
 
 
-# Each way a load ends: (the outcome its request is answered with on the
-# desktop, whether a save block was opened on the way).
+# Each way a load ends: (the outcome its request is answered with, whether
+# a save block was opened on the way).
 SAVE_BLOCK_PATHS = {
     # The same game again without reload: the catalog selects nothing.
     "skipped": (SKIPPED, True),
     "SelectGame raises": (FAILED, True),
-    # What follows the selection on the main thread raises (the desktop's
-    # _Publish, before its board operation; the headless _OnLoaded).
+    # What follows the selection on the main thread raises (the loader's
+    # _Publish, before its board operation).
     "the publication raises": (FAILED, True),
     # The loader takes the request once the event loop has ended.
     "not run: the main thread is gone": (STOPPED, False),
@@ -1220,7 +1185,6 @@ def test_every_way_a_load_ends_gives_the_save_block_back(
     away."""
     from src.core.StateManager import StateManager
 
-    games = shell.games
     outcome, opens = SAVE_BLOCK_PATHS[path]
     autonaApp.ready(1)  # held: what a load writes there waits for a commit
     shell.Load("tgame")
@@ -1242,7 +1206,7 @@ def test_every_way_a_load_ends_gives_the_save_block_back(
         returned = shell.Load("game2", done=finished)
         drain_tasks()
     elif path == "the publication raises":
-        shell.Patch(monkeypatch, "publish", broken)
+        monkeypatch.setattr(shell.loader, "_Publish", broken)
         returned = shell.Load("game2", done=finished)
         drain_tasks()
     elif path == "not run: the main thread is gone":
@@ -1272,7 +1236,7 @@ def test_every_way_a_load_ends_gives_the_save_block_back(
         for _ in range(TaskExecutor.JOB_WORKERS):
             ownExecutor.submit(busy, task_name="busy")
         lanes.wait(WAIT)
-        thread, waiting = _waitingRequest(games, "game2", done=finished)
+        thread, waiting = _waitingRequest(shell.loader, "game2", done=finished)
         assert ownExecutor.shutdown(WAIT)
         thread.join(WAIT)
         assert not thread.is_alive() and "error" not in waiting
@@ -1287,40 +1251,35 @@ def test_every_way_a_load_ends_gives_the_save_block_back(
         shell.PatchSettle(monkeypatch, dies)
         shell.Load("tgame", mods_reload_mode=True)
         assert entered.wait(WAIT)
-        thread, waiting = _waitingRequest(games, "game2", done=finished)
+        thread, waiting = _waitingRequest(shell.loader, "game2", done=finished)
         release.set()
         _pumpUntil(lambda: not thread.is_alive(), timeout=30)
         assert "error" not in waiting
         returned = waiting["result"]
-    _waitFor(lambda: not games._loaderRunning)
+    _waitFor(lambda: not shell.loader._loaderRunning)
 
     assert done == [1]
-    assert shell.Answer(returned, WAIT) == shell.Said(outcome)
+    assert shell.Answer(returned, WAIT) == outcome
     assert blocks["block"] == blocks["release"], blocks
     assert (blocks["block"] > 0) == opens, blocks
     assert StateManager.saveBlocked == 0
 
 
-# ── each shell's own ─────────────────────────────────────────────────────
-
-
-def test_a_caller_cannot_cancel_a_load_request(
-        goldenGames, autonaApp, monkeypatch):
-    """The desktop's: the Future a request returns is the attempt's answer,
-    not a handle on it: cancel() is False whether the request is running,
+def test_a_caller_cannot_cancel_a_load_request(shell, autonaApp, monkeypatch):
+    """The Future a request returns (on both shells since ADR-005 S-final
+    SF-6b; the desktop's alone until then) is the attempt's answer, not a
+    handle on it: cancel() is False whether the request is running,
     waiting for the loader, superseded or over. Cancelled, it made the
     loader's settle raise before the generation was finished, and the
     synchronous request it had superseded waited for ever (ADR-005 S3f-4
     review)."""
-    manager = goldenGames
-    entered, release = _holdTheLoader(manager.catalog, monkeypatch)
+    entered, release = _holdTheLoader(shell.catalog, monkeypatch)
     done = []
-    running = manager.LoadGameByCodename(
-        "game2", done=lambda: done.append("running"))
+    running = shell.Load("game2", done=lambda: done.append("running"))
     assert entered.wait(WAIT)
     thread, outcome = _waitingRequest(
-        manager, done=lambda: done.append("sync"))
-    newer = manager.LoadGameByCodename(
+        shell.loader, done=lambda: done.append("sync"))
+    newer = shell.Load(
         "tgame", mods_reload_mode=True, done=lambda: done.append("newer"))
     assert not running.cancel() and not newer.cancel()
     release.set()
@@ -1331,6 +1290,9 @@ def test_a_caller_cannot_cancel_a_load_request(
     assert running.result(0) == LOADED and newer.result(0) == LOADED
     assert not newer.cancel()
     assert done == ["sync", "running", "newer"]
+
+
+# ── each shell's own ─────────────────────────────────────────────────────
 
 
 def test_the_headless_download_scan_and_loads_are_jobs(
@@ -1354,13 +1316,13 @@ def test_the_headless_download_scan_and_loads_are_jobs(
 
     monkeypatch.setattr(games.catalog, "ScanGames", scan)
     games.Start()
-    games.LoadGameByCodename("game2")
+    games.loader.LoadGameByCodename("game2")
     drain_tasks()
 
     assert jobs[:2] == ["start.gg characters download", "game scan"]
     assert "game load" in jobs
     assert threads and threads[0].startswith(JOB_THREAD_PREFIX)
-    assert not games._loaderRunning
+    assert not games.loader._loaderRunning
     tree = ast.parse((PROJECT_ROOT / "src" / "headless.py")
                      .read_text(encoding="utf-8"))
     started = [ast.unparse(node.func) for node in ast.walk(tree)
@@ -1383,11 +1345,13 @@ def test_the_headless_shutdown_waits_for_a_load_and_settles_it_first(
     from src.core.StatePersistence import StatePersistence
 
     games = _headlessGames(monkeypatch)
-    games.LoadGameByCodename("tgame")
+    games.loader.LoadGameByCodename("tgame")
     drain_tasks()
     order = []
-    realPick = games._PersistPick
-    monkeypatch.setattr(games, "_PersistPick",
+    realPick = games.loader.PersistSelectedGame
+    # What the loader's _SettleStopped calls (the announcement's slot, on
+    # gameChanged, is not reached: the load is stopped).
+    monkeypatch.setattr(games.loader, "PersistSelectedGame",
                         lambda: (order.append("pick"), realPick()))
     realShutdown = ownExecutor.shutdown
 
@@ -1402,7 +1366,8 @@ def test_the_headless_shutdown_waits_for_a_load_and_settles_it_first(
     monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
         lambda timeout=None: order.append("state.json") or True))
 
-    games.LoadGameByCodename("game2", done=lambda: order.append("done"))
+    games.loader.LoadGameByCodename(
+        "game2", done=lambda: order.append("done"))
     _waitFor(lambda: StateManager.Get("game.codename") == "game2")
     time.sleep(4 * AutonaQtHelper.MARSHAL_POLL_SECS)  # in the marshal
     assert order == []
@@ -1412,7 +1377,7 @@ def test_the_headless_shutdown_waits_for_a_load_and_settles_it_first(
     assert time.monotonic() - started < 5
     assert order == ["pick", "done", ("tasks", True), "out", "state.json"]
     assert SettingsManager.Get("SELECTED_GAME_CODENAME") == "game2"
-    assert not games._loaderRunning
+    assert not games.loader._loaderRunning
 
 
 # ── the load's save cycle and what reads it ──────────────────────────────
@@ -1431,7 +1396,7 @@ PUBLISH_FAILURES = {
 
 @pytest.mark.parametrize("where", list(PUBLISH_FAILURES))
 def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
-        goldenGames, autonaApp, onLoadCount, monkeypatch, where):
+        shell, autonaApp, monkeypatch, where):
     """_Publish raises on the GUI thread, not in a slot: the attempt is
     FAILED (done() once), its save cycle closed once (no BlockSaving left:
     agent-pitfalls #6), no recording of held writes left open or kept
@@ -1440,19 +1405,22 @@ def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
     rebuild checked on the way, until the Qt model clean-up's PR4 removed
     the rebuild (and its FAILED settle). Raised before the announcement, the
     selection still goes out without the roster, as it did at HEAD for any
-    exception but the rebuild's: the ledger's PR4 notes it."""
+    exception but the rebuild's: the ledger's PR4 notes it. On both shells
+    since ADR-005 S-final SF-6b (the loader's _Publish; the desktop's alone
+    until then)."""
     from src import AutonaWebOperations
     from src.AutonaWebOperations import BoardHost
     from src.core.StateManager import StateManager
 
-    manager = goldenGames
+    announced = []
+    record = _record(shell.announced, announced, "announced")
     autonaApp.ready(1)  # held: what the load writes waits for its commit
     assert not StateManager.HasPendingChanges("score.1")
     armed = [where]
 
     def fromPublish(name):
-        # _Publish's board operation (AutonaGameAssetManager._Publish's
-        # nested `publish`), the load's own; not another caller's.
+        # _Publish's board operation (GameLoader._Publish's nested
+        # `publish`), the load's own; not another caller's.
         return name.endswith("_Publish.<locals>.publish")
 
     def take():
@@ -1498,18 +1466,34 @@ def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
         monkeypatch.setattr(StateManager, "RecordHeldWrites", record)
 
     done = []
-    future = manager.LoadGameByCodename(
-        "tgame", done=lambda: done.append(1))
-    drain_tasks()
+    try:
+        future = shell.Load("tgame", done=lambda: done.append(1))
+        drain_tasks()
 
-    assert not armed, "the failure was not injected"
-    assert future.result(0) == FAILED and done == [1]
-    assert StateManager.saveBlocked == 0
-    assert StateManager.Recording() is False
-    assert StateManager._heldRecords == []
-    assert not StateManager.HasPendingChanges("score.1")
-    assert len(onLoadCount) == PUBLISH_FAILURES[where]
-    # The board host's lock was given back: another thread takes it.
+        assert not armed, "the failure was not injected"
+        assert future.result(0) == FAILED and done == [1]
+        assert StateManager.saveBlocked == 0
+        assert StateManager.Recording() is False
+        assert StateManager._heldRecords == []
+        assert not StateManager.HasPendingChanges("score.1")
+        assert len(announced) == PUBLISH_FAILURES[where]
+        _theBoardLockIsFree()
+
+        after = shell.Load("game2")
+        drain_tasks()
+        assert after.result(0) == LOADED
+        assert autonaApp.get("game.codename") == "game2"
+        assert len(announced) == PUBLISH_FAILURES[where] + 1
+        assert StateManager.saveBlocked == 0
+        assert StateManager._heldRecords == []
+    finally:
+        record()
+
+
+def _theBoardLockIsFree():
+    """The board host's lock was given back: another thread takes it."""
+    from src import AutonaWebOperations
+
     lock = AutonaWebOperations.boardHost._lock
     taken = []
 
@@ -1522,14 +1506,6 @@ def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
     thread.start()
     thread.join(WAIT)
     assert taken == [True]
-
-    after = manager.LoadGameByCodename("game2")
-    drain_tasks()
-    assert after.result(0) == LOADED
-    assert autonaApp.get("game.codename") == "game2"
-    assert len(onLoadCount) == PUBLISH_FAILURES[where] + 1
-    assert StateManager.saveBlocked == 0
-    assert StateManager._heldRecords == []
 
 
 @pytest.fixture
@@ -1566,27 +1542,37 @@ def test_a_game_change_sends_the_full_state_after_the_loads_delta(
     and after its delta: the delta first, then a full state whose revision
     is the last delta's and whose content is that revision's -- not R's
     revision over R+1's content, ahead of the delta (ADR-005 S3f-4 review).
-    Then the characters. The desktop's window runs its GameChanged on
-    onLoad, inside the load's save cycle; the headless shell pushes on
-    gameChanged (bootstrap.wire_web_server), after the selection's cycle
-    and the roster's."""
+    Then the characters. Both shells push on the loader's announcement,
+    inside the load's save cycle, through bootstrap.wire_web_server -- the
+    wiring itself, as each shell calls it (the next test). (Until ADR-005
+    S-final SF-6b the desktop's window relayed onLoad through a GameChanged
+    of its own, and the headless announcement came after the selection's
+    cycle and the roster's; this test connected ws_game_changed by hand.)"""
+    from types import SimpleNamespace
+
+    from src.AutonaPlayerDB import AutonaPlayerDB
     from src.AutonaWebServer import WebServer
+    from src.bootstrap import wire_web_server
     from src.StateManagerBridge import StateManagerBridge
 
     bridge = StateManagerBridge.instance
     # What the shells wire: the bridge's deltas into the flusher (the
-    # server's construction), the game change on the announcement (the
-    # desktop's Window.SetGame -> GameChanged -> ws_game_changed; the
-    # headless shell's wire_web_server).
+    # server's construction), and wire_web_server -- here onto a stand-in
+    # whose game change is the server's own.
+    server = SimpleNamespace(ws_game_changed=WebServer.ws_game_changed,
+                             on_games_change=lambda: None,
+                             ws_playerdb=lambda: None)
     bridge.state_updated.connect(WebServer.on_program_state_update)
-    shell.announced.connect(WebServer.ws_game_changed)
+    wire_web_server(server, shell.announced, shell.scanned)
     try:
         shell.Load("game2")
         drain_tasks()
         # The flusher's step: the open batch, then what waited for it.
         WebServer._flush_pending_deltas()
     finally:
-        shell.announced.disconnect(WebServer.ws_game_changed)
+        shell.announced.disconnect(server.ws_game_changed)
+        shell.scanned.disconnect(server.on_games_change)
+        AutonaPlayerDB.signals.db_updated.disconnect(server.ws_playerdb)
         bridge.state_updated.disconnect(WebServer.on_program_state_update)
 
     kinds = [event for event, _payload in socketSends]
@@ -1600,6 +1586,64 @@ def test_a_game_change_sends_the_full_state_after_the_loads_delta(
     assert state["revision"] == deltas[-1]["revision"]
     assert state["state"]["game"]["codename"] == "game2"
     assert kinds[full + 1] == "characters"
+    # One load, one full state and one character list (SF-6b review: the
+    # desktop's window relay and the loader's own wiring are not both in).
+    assert kinds.count("program_state") == 1, kinds
+    assert kinds.count("characters") == 1, kinds
+
+
+def test_the_startup_restore_runs_when_the_provider_s_step_raises(
+        shell, autonaApp, monkeypatch):
+    """After a scan, the provider's game (`afterScan`) and then the startup
+    restore, on the main thread: the restore runs even when the provider's
+    step raises, which is logged (SF-6b review; each was a slot of its own
+    on the desktop until SF-6b, so one could not stop the other)."""
+    order = []
+
+    def afterScan():
+        order.append("provider")
+        raise RuntimeError("the provider's game failed")
+
+    monkeypatch.setattr(shell.loader, "_afterScan", afterScan)
+    monkeypatch.setattr(shell.loader, "_RestoreSelectedGame",
+                        lambda: order.append("restore"))
+    records, stop = _logRecords()
+    try:
+        shell.loader._OnScanned()
+    finally:
+        stop()
+
+    assert order == ["provider", "restore"]
+    assert [record["message"] for record in records
+            if record["level"].name == "ERROR"] == [
+        "The provider's game could not be applied after the scan"]
+
+
+# Where each shell calls bootstrap.wire_web_server: (the module, the
+# function the call is in).
+WEB_SERVER_WIRING = {
+    "desktop": ("src/Autona.py", "_StartWebServer"),
+    "headless": ("src/headless.py", "Assemble"),
+}
+
+
+@pytest.mark.parametrize("name", list(WEB_SERVER_WIRING))
+def test_each_shell_wires_the_web_server_to_its_loader_s_signals(name):
+    """What the previous test wires is what each shell wires: its loader
+    adapter's announcement and scan notice (SHELL_DIFFERENCES), once."""
+    path, function = WEB_SERVER_WIRING[name]
+    tree = ast.parse((PROJECT_ROOT / path).read_text(encoding="utf-8"))
+    owner = next(node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name == function)
+    calls = [node for node in ast.walk(owner) if isinstance(node, ast.Call)
+             and ast.unparse(node.func) == "wire_web_server"]
+    assert len(calls) == 1, (path, function)
+    _server, announced, scanned = [ast.unparse(arg)
+                                   for arg in calls[0].args]
+    differs = SHELL_DIFFERENCES[name]
+    assert announced.endswith(f".signals.{differs['announced']}"), announced
+    assert scanned.endswith(f".signals.{differs['scanned']}"), scanned
 
 
 # ── set_game, and a synchronous load's answer ───────────────────────────
@@ -1619,7 +1663,7 @@ def test_a_synchronous_load_answers_once_what_follows_it_ran(
     games = shell.games
     # The shell's registration (bootstrap_gui() / src/headless.Assemble).
     monkeypatch.setattr(WebOps, "loadGameByCodename",
-                        games.LoadGameByCodename)
+                        shell.loader.LoadGameByCodename)
     events = []
     undo = [_record(games.signals.gameLoaded, events, "gameLoaded"),
             _record(shell.announced, events, "announced")]
@@ -1646,7 +1690,7 @@ def test_a_synchronous_load_answers_once_what_follows_it_ran(
     if entry == "set_game":
         assert answer == "OK"
     else:
-        assert answer == shell.Said(LOADED) and done == [1]
+        assert answer == LOADED and done == [1]
     assert before == [("gameLoaded", _main()), ("announced", _main())]
     assert codename == "game2"
     assert requestThread != _main()
@@ -1661,7 +1705,7 @@ def test_set_game_answers_ok_once_a_failed_load_is_over(
     from src.core.StateManager import StateManager
 
     monkeypatch.setattr(WebOps, "loadGameByCodename",
-                        shell.games.LoadGameByCodename)
+                        shell.loader.LoadGameByCodename)
 
     def broken(*args, **kwargs):
         raise RuntimeError("a broken game")
@@ -1689,7 +1733,7 @@ def test_a_synchronous_load_returns_once_the_main_thread_is_unavailable(
 
     games = shell.games
     monkeypatch.setattr(WebOps, "loadGameByCodename",
-                        games.LoadGameByCodename)
+                        shell.loader.LoadGameByCodename)
     game = copy.deepcopy(StateManager.Get("game"))
     if cause == "the shutdown":
         ownExecutor.shutdown(WAIT)
@@ -1708,7 +1752,7 @@ def test_a_synchronous_load_returns_once_the_main_thread_is_unavailable(
         thread.join(WAIT)  # this thread does not pump
         assert not thread.is_alive()
         assert "error" not in outcome and done == [1]
-        assert shell.Answer(outcome["result"]) == shell.Said(STOPPED)
+        assert shell.Answer(outcome["result"]) == STOPPED
 
         thread, outcome = _onAnotherThread(
             lambda: web.set_game({"codename": "game2"}))
@@ -1827,10 +1871,11 @@ def test_a_board_operation_at_shutdown_writes_nothing_off_the_main_thread(
 
 def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
         shell, ownExecutor, autonaApp, boardLock, monkeypatch):
-    """The loader's settle once the shutdown came after the selection (the
-    desktop's _SettleUnannounced, STOPPED; the headless _SettleStopped), on
-    the loader's thread: the roster the load would have run -- and on the
-    desktop its commit, of what the roster wrote, inside its recording
+    """The loader's settle once the shutdown came after the selection
+    (GameLoader._SettleStopped, STOPPED; until ADR-005 S-final SF-6b the
+    desktop's _SettleUnannounced and the headless loader's own, which did
+    not commit), on the loader's thread: the roster the load would have
+    run and its commit, of what the roster wrote, inside its recording
     (StateManager.RecordHeldWrites; the boards' ApplyChanges until the fix
     of 2026-11-12) -- written there as one board operation, under the board
     host's lock, which the host does not refuse as it refuses a late
@@ -1849,17 +1894,18 @@ def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
         actions, "CommitGameLoad",
         lambda written: calls.append(
             ("commit", written.open, boardLock.held())))
-    shell.Patch(monkeypatch, "pick",
-                lambda: calls.append(("pick", boardLock.held())))
+    monkeypatch.setattr(shell.loader, "PersistSelectedGame",
+                        lambda: calls.append(("pick", boardLock.held())))
     ownExecutor.shutdown(WAIT)
 
-    thread, outcome = _onAnotherThread(lambda: shell.Real("settle")(
+    thread, outcome = _onAnotherThread(lambda: shell.loader._SettleStopped(
         GameAssetCatalog.instance.Current()))
     thread.join(WAIT)  # this thread does not pump
 
     assert not thread.is_alive()
     assert "error" not in outcome, outcome
-    assert calls == shell.differs["settleCalls"]
+    assert calls == [("roster", True), ("commit", True, True),
+                     ("pick", False)]
 
 
 # ── the start.gg character download ──────────────────────────────────────
@@ -1867,6 +1913,7 @@ def test_a_load_s_settle_at_shutdown_runs_under_the_board_lock(
 
 def test_the_character_download_is_a_job_with_a_timeout(
         goldenGames, monkeypatch):
+    """The loader's (both shells'), as the desktop adapter holds it."""
     import src.core.GameAssetCatalog as catalogModule
 
     calls = []
@@ -1876,7 +1923,7 @@ def test_the_character_download_is_a_job_with_a_timeout(
         raise catalogModule.requests.Timeout("no answer")
 
     monkeypatch.setattr(catalogModule.requests, "get", get)
-    goldenGames.DownloadStartGGCharacters()
+    goldenGames.loader.DownloadStartGGCharacters()
     drain_tasks()
 
     [(thread, kwargs)] = calls

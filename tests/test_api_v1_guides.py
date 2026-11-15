@@ -288,7 +288,13 @@ def test_a_scan_notice_arrives_on_the_main_thread(qapp, shell):
     assert ran == [threading.main_thread()]
 
 
-def test_the_headless_scan_tells_it_after_scanning(qapp, monkeypatch):
+def test_the_loader_s_scan_tells_it_after_scanning(qapp, monkeypatch):
+    """The loader's scan (core's GameLoader, both shells' since ADR-005
+    S-final SF-6b): the shell's signal emitted by the scan job right after
+    GameAssetCatalog.ScanGames (GET /games answers from that scan), and
+    what follows on the main thread after that."""
+    from types import SimpleNamespace
+
     from src import headless
     from src.Helpers import AutonaQtHelper
 
@@ -298,25 +304,30 @@ def test_the_headless_scan_tells_it_after_scanning(qapp, monkeypatch):
         def ScanGames(self):
             order.append("scan")
 
-    monkeypatch.setattr(AutonaQtHelper, "gui_executor",
-                        lambda fn: order.append("then on the main thread"))
+    monkeypatch.setattr(AutonaQtHelper, "gui_executor", SimpleNamespace(
+        later=lambda fn: order.append("then on the main thread")))
     games = headless.HeadlessGames(Catalog(), provider=None)
     games.signals.gamesScanned.connect(lambda: order.append("told"))
 
-    games._Scan()
+    games.loader.Scan()
 
     assert order == ["scan", "told", "then on the main thread"]
 
 
-def test_the_desktop_scan_emits_after_scanning():
-    # The signal the desktop passes: emitted by the scan job right after
-    # GameAssetCatalog.ScanGames (GET /games answers from that scan).
-    tree = ast.parse((SRC / "AutonaGameAssetManager.py").read_text(
-        encoding="utf-8"))
-    scan = next(node for node in ast.walk(tree)
-                if isinstance(node, ast.FunctionDef) and node.name == "_Scan")
-    assert [ast.unparse(statement) for statement in scan.body] == [
-        "self.catalog.ScanGames()", "self.signals.onLoadAssets.emit()"]
+@pytest.mark.parametrize("path, signal", [
+    ("AutonaGameAssetManager.py", "onLoadAssets"),
+    ("headless.py", "gamesScanned"),
+])
+def test_each_shell_hands_its_scan_signal_to_the_loader(path, signal):
+    # The signal each shell passes (bootstrap.wire_web_server connects it):
+    # the loader's `scanned`, which its scan calls (the test above).
+    tree = ast.parse((SRC / path).read_text(encoding="utf-8"))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and ast.unparse(node.func) == "make_game_loader"]
+    assert len(calls) == 1, path
+    scanned = {keyword.arg: ast.unparse(keyword.value)
+               for keyword in calls[0].keywords}["scanned"]
+    assert scanned == f"self.signals.{signal}.emit", scanned
 
 
 # ── The app's version (/api/v1/health; the About page shows it) ─────────

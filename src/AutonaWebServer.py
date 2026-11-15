@@ -1708,13 +1708,15 @@ class WebServer:
 
     def ws_game_changed(message=None):
         """A game was loaded: every client gets the full state and the new
-        character list, in that order. What the shells connect their
-        game-change signal to (bootstrap.wire_web_server): the window's
-        GameChanged on the desktop, the headless loader's (ADR-005 S3c).
+        character list, in that order. What the shells connect the loader's
+        announcement to (bootstrap.wire_web_server): the asset adapter's
+        onLoad on the desktop, the headless shell's gameChanged (ADR-005
+        S3c; the desktop relayed it through the window's GameChanged until
+        S-final SF-6b).
 
         Sent once the load is published, and after its delta (ADR-005 S3f-4
-        review). The desktop's GameChanged runs inside the load's save
-        cycle (an onLoad slot), where the full state would already hold the
+        review). The announcement runs inside the load's save cycle (the
+        loader's _Publish), where the full state would already hold the
         load's writes with the revision before them, and it would reach the
         clients ahead of the R+1 delta: WhenPublished waits for the cycle,
         _after_pending_deltas for the delta to go out first."""

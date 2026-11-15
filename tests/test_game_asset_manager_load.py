@@ -16,9 +16,10 @@ them); the recording keeps that section, which
 tests/test_game_asset_catalog.py still compares the catalog's rows with.
 
 The last block drives the load job (a TaskExecutor job since ADR-005 S3f-4;
-a QThread until then) -- the path every pick in the UI takes -- and what
-hangs off it: the footer status, the persisted pick and
-its restore at startup, and forgetting the pick when the URL is cleared.
+a QThread until then; core's GameLoader since S-final SF-6b, the adapter's
+`loader`) -- the path every pick in the UI takes -- and what hangs off it:
+the footer status, the persisted pick and its restore at startup, and
+forgetting the pick when the URL is cleared.
 """
 import ast
 import json
@@ -78,8 +79,8 @@ def _game(autonaApp):
 def _load(manager, codename, modsActive=False, reload=False):
     # The load job, run to the end with this (the GUI) thread pumped: it
     # marshals the load's announcement onto it.
-    manager.LoadGameByCodename(codename, mods_active=modsActive,
-                               mods_reload_mode=reload)
+    manager.loader.LoadGameByCodename(codename, mods_active=modsActive,
+                                      mods_reload_mode=reload)
     drain_tasks()
 
 
@@ -244,7 +245,7 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
     from src.core.StatusService import StatusService
 
     manager = goldenGames
-    manager.LoadGameByCodename("tgame", async_mode=True)
+    manager.loader.LoadGameByCodename("tgame", async_mode=True)
     _waitForLoader(manager)
     autonaApp.settle()
 
@@ -279,7 +280,7 @@ def test_a_skipped_threaded_load_shows_no_status(
     onLoadCount.clear()
 
     # Same game, no reload: the catalog skips it.
-    manager.LoadGameByCodename("tgame", async_mode=True)
+    manager.loader.LoadGameByCodename("tgame", async_mode=True)
     _waitForLoader(manager)
     autonaApp.settle()
 
@@ -293,45 +294,45 @@ def test_the_last_pick_is_persisted_and_restored(goldenGames, autonaApp):
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
 
-    manager = goldenGames
-    _load(manager, "game2")
+    loader = goldenGames.loader
+    _load(goldenGames, "game2")
     autonaApp.settle()
-    # onLoad -> _PersistSelectedGame.
+    # onLoad -> the loader's PersistSelectedGame.
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == "game2"
 
-    # Next launch: bootstrap clears the game, UiMounted arms the restore and
-    # the scan's onLoadAssets runs it.
+    # Next launch: bootstrap clears the game, UiMounted (the loader's
+    # Start) arms the restore and the scan's end runs it.
     GameAssetCatalog.instance.ResetGameState()
     autonaApp.settle()
     assert autonaApp.get("game") == {"selected": False}
-    manager._pendingSelectedGameRestore = True
-    manager._RestoreSelectedGame()
-    _waitForLoader(manager)
+    loader._pendingRestore = True
+    loader._RestoreSelectedGame()
+    _waitForLoader()
     autonaApp.settle()
 
     assert autonaApp.get("game.codename") == "game2"
-    assert manager.selectedGame["codename"] == "game2"
+    assert GameAssetCatalog.instance.Current().codename == "game2"
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == "game2"
 
     # Armed once: a later rescan ("Add game assets") keeps the user's pick.
-    generation = manager._loadGeneration
-    manager._RestoreSelectedGame()
-    assert manager._loadGeneration == generation  # nothing asked for
+    generation = loader._loadGeneration
+    loader._RestoreSelectedGame()
+    assert loader._loadGeneration == generation  # nothing asked for
 
 
 def test_a_last_pick_that_is_no_longer_installed_is_not_restored(
         goldenGames, autonaApp):
     from src.core.SettingsManager import SettingsManager
 
-    manager = goldenGames
+    loader = goldenGames.loader
     SettingsManager.Set("SELECTED_GAME_CODENAME", "uninstalled")
-    generation = manager._loadGeneration
+    generation = loader._loadGeneration
 
-    manager._pendingSelectedGameRestore = True
-    manager._RestoreSelectedGame()
+    loader._pendingRestore = True
+    loader._RestoreSelectedGame()
 
-    assert manager._loadGeneration == generation  # nothing asked for
-    assert manager._pendingSelectedGameRestore is False
+    assert loader._loadGeneration == generation  # nothing asked for
+    assert loader._pendingRestore is False
     assert not autonaApp.get("game.codename")
 
 
@@ -362,16 +363,17 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     window = (root / "src" / "Autona.py").read_text(encoding="utf-8")
     assert "Signal_GameChange" not in window
     assert "selectedGame" not in window, (
-        "the adapter's selectedGame is a read-only view since S1a")
+        "the adapter's selectedGame (a read-only view since S1a, gone in "
+        "S-final SF-6b) is back")
 
-    # Runtime half: what that call does to the adapter.
+    # Runtime half: what that call does to the selection.
     manager = goldenGames
     _load(manager, "tgame")
     generation = GameAssetCatalog.instance.Current().generation
 
     GameAssetCatalog.instance.ForgetSelection()
 
-    assert manager.selectedGame == {}
+    assert GameAssetCatalog.instance.Current().game == {}
     # Same assets: the snapshot keeps its generation (the Qt combos kept
     # their rows on it until the Qt model clean-up's PR4).
     assert GameAssetCatalog.instance.Current().generation == generation
@@ -386,5 +388,5 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
         _load(manager, "tgame")
     finally:
         manager.signals.onLoad.disconnect(loaded)
-    assert manager.selectedGame["codename"] == "tgame"
+    assert GameAssetCatalog.instance.Current().codename == "tgame"
     assert loads == [1]

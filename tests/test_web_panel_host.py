@@ -4332,14 +4332,16 @@ def test_the_window_is_the_shared_view_alone():
         members & set(GONE_WINDOW_MEMBERS))
     assert not [name for name in members
                 if name.startswith("_Create") and name.endswith("Panel")]
-    # The window's signals are the two something connects to; the timing
+    # The window's signals are the one something connects to (its
+    # GameChanged relay of the asset adapter's onLoad went in ADR-005 S-final
+    # SF-6b: the web server takes the adapter's signal itself); the timing
     # helper nothing called went with the rest.
     signals = next(node for node in ast.walk(tree)
                    if isinstance(node, ast.ClassDef)
                    and node.name == "WindowSignals")
     assert sorted(target.id for node in signals.body
                   if isinstance(node, ast.Assign)
-                  for target in node.targets) == ["GameChanged", "UiMounted"]
+                  for target in node.targets) == ["UiMounted"]
     assert not [node for node in ast.walk(tree)
                 if isinstance(node, ast.FunctionDef)
                 and node.name == "catchtime"]
@@ -5054,14 +5056,15 @@ class _WindowRig:
             "AutonaQtHelper": SimpleNamespace(gui_executor=lambda f: f()),
             "AutonaGameAssetManager": SimpleNamespace(
                 instance=SimpleNamespace(
-                    signals=SimpleNamespace(onLoadAssets=None)))}
+                    signals=SimpleNamespace(onLoad=None,
+                                            onLoadAssets=None)))}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
         self.window = w = namespace["Window"]()
         # As _BuildUi.
         w.SPINNER_CAP_MS = _windowClassConstant("SPINNER_CAP_MS")
-        w.signals = SimpleNamespace(GameChanged=None)
+        w.signals = SimpleNamespace(UiMounted=None)
         self.host = host = AutonaWebPanelHost()
         w._webPanelHost = host
         w.setCentralWidget(host)
@@ -5869,7 +5872,10 @@ def test_the_unused_qt_model_leftovers_are_gone():
         and isinstance(part.value, ast.Name) and part.value.id == "self"
         and part.attr in QT_ASSET_MODEL_PROPERTIES)
     assert assigned == [], assigned
-    assert list(inspect.signature(AutonaGameAssetManager._Publish)
+    # The load's GUI-thread end is the loader's (core's GameLoader, both
+    # shells' since ADR-005 S-final SF-6b; the adapter's until then).
+    from src.core.GameLoader import GameLoader
+    assert list(inspect.signature(GameLoader._Publish)
                 .parameters) == ["self", "snapshot", "cycle"]
     imported = {node.module for node in ast.walk(tree)
                 if isinstance(node, ast.ImportFrom)}
@@ -5880,16 +5886,21 @@ def test_the_unused_qt_model_leftovers_are_gone():
     # A load that is not announced is settled on one path only: the
     # shutdown's (STOPPED, in _Load). _Publish settled a failed model
     # rebuild (FAILED) too, until the models went. Every call of the name
-    # counts, whatever it is called on (self, the instance, a local).
+    # counts, whatever it is called on (self, the instance, a local). The
+    # settle is the loader's _SettleStopped since ADR-005 S-final SF-6b
+    # (the adapter's _SettleUnannounced until then, which is gone).
+    assert "_SettleUnannounced" not in _codeNames(adapter)
+    loader = ast.parse((src / "core" / "GameLoader.py").read_text(
+        encoding="utf-8"))
     settlers = sorted(
-        function.name for function in ast.walk(tree)
+        function.name for function in ast.walk(loader)
         if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
         and (isinstance(node.func, ast.Attribute)
-             and node.func.attr == "_SettleUnannounced"
+             and node.func.attr == "_SettleStopped"
              or isinstance(node.func, ast.Name)
-             and node.func.id == "_SettleUnannounced"))
+             and node.func.id == "_SettleStopped"))
     assert settlers == ["_Load"], settlers
 
 

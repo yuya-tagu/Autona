@@ -203,11 +203,13 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaHotkeys.ConnectReload("
         "StateManagerBridge.instance.hotkeys_changed)",
         "HotkeyRules.applied = True",
+        # The adapter builds the loader (core's GameLoader, ADR-005 S-final
+        # SF-6b) with the provider's SetGameFromProvider as what follows
+        # every scan (the probe below runs it), which was the first slot
+        # connected here on onLoadAssets until then.
         "AutonaGameAssetManager()",
         "AutonaTournamentDataProvider.instance.selectGameFromStartGGId"
-        " = AutonaGameAssetManager.instance.SetGameFromStartGGId",
-        "AutonaGameAssetManager.instance.signals.onLoadAssets.connect("
-        "AutonaTournamentDataProvider.instance.SetGameFromProvider)",
+        " = AutonaGameAssetManager.instance.loader.SelectGameFromStartGGId",
         # The player DB's refresh (the mains normalised, the push) follows a
         # load; its Qt model (EnableModel, before this) went in the Qt model
         # clean-up's PR3.
@@ -222,21 +224,21 @@ def test_bootstrap_gui_steps_and_their_order():
         # No board host of its own since ADR-005 S4ad (DesktopBoardHost ran
         # the board operations on the GUI thread): the web layer's one.
         "AutonaWebOperations.loadGameByCodename"
-        " = AutonaGameAssetManager.instance.LoadGameByCodename",
+        " = AutonaGameAssetManager.instance.loader.LoadGameByCodename",
         # A tournament newly loaded turns the mods off through the same
         # loader (ADR-005 S-final SF-5b-1).
         "AutonaWebOperations.turnModsOff"
-        " = AutonaGameAssetManager.instance.TurnModsOff",
+        " = AutonaGameAssetManager.instance.loader.TurnModsOff",
         "AutonaWebOperations.openSetSelection"
         " = AutonaShellOperations.instance.OpenSetSelection",
         "AutonaWebOperations.renderThumbnail"
         " = AutonaShellOperations.instance.RenderThumbnail",
         "AutonaWebOperations.startImageRender"
         " = AutonaShellOperations.instance.StartImageRender",
-        # An asset pack's install / import re-scans with the adapter's scan
+        # An asset pack's install / import re-scans with the loader's scan
         # (onLoadAssets), on the import's job (ADR-005 S-final SF-3b).
         "AssetPackService.instance.scan"
-        " = AutonaGameAssetManager.instance._Scan",
+        " = AutonaGameAssetManager.instance.loader.Scan",
         "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
@@ -309,21 +311,23 @@ def test_both_shells_follow_a_game_load_with_the_same_roster():
         "AutonaActions.instance.RepublishBestOfs()"]
     assert [ast.unparse(statement) for statement in guarded.finalbody] == [
         "AutonaActions.instance.CommitGameLoad(written)"]
-    # Nothing else commits an announced load: not the desktop's asset
-    # adapter, whose one commit is the settle of a load it does not announce
-    # (_SettleUnannounced: the shutdown came first; a failed Qt model
-    # rebuild too, until the Qt model clean-up's PR4), of what that settle's
-    # roster wrote.
-    assert [call for call in _calls("src/AutonaGameAssetManager.py")
+    # Nothing else commits an announced load: not the loader (core's
+    # GameLoader, both shells' since ADR-005 S-final SF-6b), whose one
+    # commit is the settle of a load it does not announce (_SettleStopped:
+    # the shutdown came first), of what that settle's roster wrote. (The
+    # desktop's adapter did it in its _SettleUnannounced until SF-6b; the
+    # headless loader's own settle did not commit.)
+    assert [call for call in _calls("src/core/GameLoader.py")
             if "CommitGameLoad" in call] == [
         "actions.CommitGameLoad(written)"]
-    adapter = ast.parse((PROJECT_ROOT / "src" / "AutonaGameAssetManager.py")
-                        .read_text(encoding="utf-8"))
-    settle = next(node for node in ast.walk(adapter)
+    loader = ast.parse((PROJECT_ROOT / "src" / "core" / "GameLoader.py")
+                       .read_text(encoding="utf-8"))
+    settle = next(node for node in ast.walk(loader)
                   if isinstance(node, ast.FunctionDef)
-                  and node.name == "_SettleUnannounced")
+                  and node.name == "_SettleStopped")
     assert "actions.CommitGameLoad(written)" in ast.unparse(settle)
-    for path in ("src/headless.py", "src/Autona.py"):
+    for path in ("src/headless.py", "src/Autona.py",
+                 "src/AutonaGameAssetManager.py"):
         assert not [call for call in _calls(path)
                     if "CommitGameLoad" in call], path
     counts = {shell: sum(call.startswith("wire_game_roster(")
@@ -629,29 +633,31 @@ with StateManager.lock:
                     for n in (1, 2, 3)],
     }
 
-# The provider re-applies its game on every scan (onLoadAssets), through
-# the selector the shell registered -- and it does so before the adapter's
-# own startup restore, which the adapter connects in UiMounted(), right
-# before the first scan. Both slots are the real connections; only what
-# they end up calling is recorded.
+# The provider re-applies its game on every scan, through the selector the
+# shell registered -- and it does so before the loader's startup restore,
+# which the loader's Start() (UiMounted) arms for the first scan. What the
+# scan's end runs on the main thread (the loader's _OnScanned, ADR-005
+# S-final SF-6b; until then the provider's and the adapter's slots on
+# onLoadAssets, in connection order) is the real one, with the provider's
+# SetGameFromProvider as bootstrap_gui() gave it; only what they end up
+# calling is recorded.
 order = []
 provider.selectGameFromStartGGId = (
     lambda videogame: order.append(f"provider:{videogame}"))
-restore = adapter._RestoreSelectedGame
+loader = adapter.loader
+restore = loader._RestoreSelectedGame
 def recordRestore():
     order.append("restore")
     restore()
-adapter._RestoreSelectedGame = recordRestore
-adapter.DownloadStartGGCharacters = lambda: None  # network
-adapter.LoadGames = lambda: None  # the scan; the emit below stands in for it
-adapter.UiMounted()
+loader._RestoreSelectedGame = recordRestore
+loader._pendingRestore = True  # what Start() arms
 
 class FakeProvider:
     url = "https://www.start.gg/tournament/x/event/y"
     videogame = 1386
 
 provider.provider = FakeProvider()
-adapter.signals.onLoadAssets.emit()
+loader._OnScanned()
 provider.provider = None
 
 report({
@@ -663,8 +669,8 @@ report({
     "slot_order": order,
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename
-        == adapter.LoadGameByCodename,
-    "mods_off": AutonaWebOperations.turnModsOff == adapter.TurnModsOff,
+        == adapter.loader.LoadGameByCodename,
+    "mods_off": AutonaWebOperations.turnModsOff == adapter.loader.TurnModsOff,
     # The desktop's shell operations are AutonaShellOperations' (ADR-005 S4y:
     # the dock's until then). It holds no window since ADR-005 S4ac-3 (the
     # Qt set selection / station windows went with the Qt SCORE).
@@ -730,7 +736,7 @@ from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 selector = AutonaTournamentDataProvider.instance.selectGameFromStartGGId
 report({
     "is_adapter_method": selector == (
-        AutonaGameAssetManager.instance.SetGameFromStartGGId),
+        AutonaGameAssetManager.instance.loader.SelectGameFromStartGGId),
 })
 '''
     assert _probe(tmp_path, script) == {"is_adapter_method": True}

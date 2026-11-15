@@ -1850,12 +1850,14 @@ class AutonaActions:
         Called with the roster and the set length the load writes, in their
         save block, under the board host's lock (bootstrap.wire_game_roster,
         in both shells since ADR-005 S4ad; even when they raise), and by the
-        desktop asset adapter's settle of a load it does not announce
-        (_SettleUnannounced). Inside the load's own save cycle it only
-        queues the boards: the cycle's close publishes what the load wrote
-        by then, onLoad's slots included (the desktop's _Publish records
-        from gameLoaded's emit to the close; from the Qt models' rebuild
-        until the Qt model clean-up's PR4). Until S4ad the desktop's asset
+        game loader's settle of a load it does not announce (GameLoader
+        ._SettleStopped; the desktop asset adapter's _SettleUnannounced
+        until S-final SF-6b, which gave the headless shell the commit too).
+        Inside the load's own save cycle it only queues the boards: the
+        cycle's close publishes what the load wrote by then, onLoad's slots
+        included (the loader's _Publish records from gameLoaded's emit to
+        the close; from the Qt models' rebuild until the Qt model clean-up's
+        PR4). Until S4ad the desktop's asset
         adapter called it after the load's onLoad slots
         (AutonaGameAssetManager._Publish), as a Qt player card's
         ReloadCharacters wrote what its rows picked on onLoad (until

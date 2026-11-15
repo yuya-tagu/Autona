@@ -748,20 +748,21 @@ class _AutonaHarness:
         return AutonaGameAssetManager.instance
 
     def publishGameLoad(self):
-        """The GUI thread's end of a game load, on the game loaded now:
-        AutonaGameAssetManager._Publish, with no loader thread -- the load's
-        save cycle opened here, as the loader opens it. Under the board
-        host's lock, gameLoaded (the shared wiring's roster, set length and
-        commit, queued in that cycle), onLoad (every slot connected to it,
-        in its real place) and the cycle closed, as in the app.
+        """The GUI thread's end of a game load, on the game loaded now: the
+        desktop loader's _Publish (core's GameLoader, the desktop adapter's
+        `loader`), with no loader thread -- the load's save cycle opened
+        here, as the loader opens it. Under the board host's lock,
+        gameLoaded (the shared wiring's roster, set length and commit,
+        queued in that cycle), onLoad (every slot connected to it, in its
+        real place) and the cycle closed, as in the app.
         """
-        from src.AutonaGameAssetManager import (AutonaGameAssetManager,
-                                                _SaveCycle)
+        from src.AutonaGameAssetManager import AutonaGameAssetManager
         from src.core.GameAssetCatalog import GameAssetCatalog
+        from src.core.GameLoader import _SaveCycle
 
         cycle = _SaveCycle()
         cycle.Open()
-        AutonaGameAssetManager.instance._Publish(
+        AutonaGameAssetManager.instance.loader._Publish(
             GameAssetCatalog.instance.Current(), cycle)
         self.settle()
 
