@@ -438,9 +438,11 @@ class StateManager:
         block's writes with the revision before them, and a client that
         then receives the block's delta (revision R+1) applies it on top of
         a state that already had it. The web server's game-change push is
-        one (ADR-005 S3f-4 review: a game load's onLoad slots run inside
-        the load's block); it queues for the delta flusher, sending in
-        place only while no flusher runs (no server started)."""
+        one (ADR-005 S3f-4 review: a game load's announcement ran inside
+        the load's block until ADR-005 S-final SF-6c, and a block another
+        thread holds open still delays the publish); it queues for the
+        delta flusher, sending in place only while no flusher runs (no
+        server started)."""
         with StateManager.lock:
             if StateManager.saveBlocked > 0:
                 StateManager._afterPublish.append(fn)

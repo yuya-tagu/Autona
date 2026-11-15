@@ -755,8 +755,8 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 
 **ヘッドレス起動**（`python main.py --headless`、ADR-005 S3c。`src/headless.py`）では、右下の PyQt UI が無い。
 QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（デスクトップと同じ core の
-`GameLoader`。ADR-005 S-final SF-6b。それまではヘッドレス専用の写し `HeadlessGames` のローダー。Qt モデルは Qt モデルの整理 PR4 で
-デスクトップからも無くなった）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
+`GameLoader`。`bootstrap_core()` が 1 つ作り、両シェルが共有する: ADR-005 S-final SF-6c。SF-6b まではヘッドレス専用の写し
+`HeadlessGames` のローダー。Qt モデルは Qt モデルの整理 PR4 でデスクトップからも無くなった）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
 `wire_web_server`。Web のボードの操作は両シェルとも同じボードホスト `AutonaWebOperations.boardHost`（`BoardHost`）を通り、
 呼び出し元のスレッドで 1 本の再入可能ロックの下で走る（ADR-005 S4ad。それまでデスクトップは `DesktopBoardHost` が GUI スレッドで走らせていた）。
 ボードは held にならず（`MakeBoards` を `panel` なしで呼ぶ。S4ac-1）、
@@ -816,7 +816,7 @@ window.autonaPanelShell.shellState(状態)（読み込みのたびと、SetAlway
 | **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
 | **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` 通知（core の observer 発火 → `StateManagerBridge` が同名 Qt シグナルを re-emit）。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
-| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される（デスクトップの起動時から、見せていない面も。`AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまではボードのウィジェットの構築で登録した。ヘッドレスは保留しない）。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`src/core/StateSchema.py` の `STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェットは `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
+| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される（デスクトップの起動時から、見せていない面も。`AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまではボードのウィジェットの構築で登録した。ヘッドレスは保留しない）。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込時は自動コミット（ローダーの `GameLoader._Publish` の `CommitGameLoad`。旧 `GameAssetManager.onLoad`）。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`src/core/StateSchema.py` の `STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェットは `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
 | **R-Sync-12** | **値を運ばない通知**（state の外のものと未公開のものを React のページに知らせる合図）: `scoreboard_pending`（`{board, dirty}`。未反映の編集。ADR-005 S4u）・`scoreboard_follow`（`{board}`。追従。S4v）・`battle_format`（`{}`。対戦形式。S4z）。どれも `program_state_update` と同じ flusher が、同じ送信の delta の後にこの順で送る。クライアントは通知の後に始めた GET（`/scoreboards/{n}/pending`・`/follow`・`/battle-format`）の答えを使い、接続の直後は 1 回読む。規則の詳細は [external-control-api.md](external-control-api.md) §4・§5.15・§5.17・§5.21 と [.claude/rules/state-and-webserver.md](../rules/state-and-webserver.md) の Web サーバーの節。**例外の `status`**（`{revision, jobs}`。アプリの実行中の仕事 = デスクトップのフッターの源 `core/StatusService`。ADR-005 S-final SF-2）は値を運び、接続の直後にも 1 回届く。同じ flusher が上の 3 つの後に送る（§5.23） |
 
 #### 3.2.4 同期遅延の上限
@@ -863,7 +863,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（ADR-005 S3e-1。選んでいるゲームの mains の正規化も `PlayerDB.NormaliseMains`。Qt 側の `AutonaPlayerDB` は変更を `db_updated` に中継するだけ: 補完モデルは Qt モデルの整理 PR3 で削除） | React の Player List（`/web/playerBrowser`。v1 `PUT /players`）+ 直接 JSON 編集 |
 | 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
-| ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（起動時のスキャン・ロードのジョブは両シェル共通の `core/GameLoader`（ADR-005 S-final SF-6b）。Qt 側の `AutonaGameAssetManager` はその通知の Qt シグナルだけ。Qt のモデル化は Qt モデルの整理 PR4 で削除。React のページは Web の操作でカタログを読む） | アセット追加時に手動編集 |
+| ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（起動時のスキャン・ロードのジョブは両シェル共通の `core/GameLoader`（ADR-005 S-final SF-6b。選択の後の処理までローダーのスレッドで走り、通知は `GameLoader.loaded` / `scanned` → Bridge の `game_loaded` / `games_scanned`: SF-6c。それまでは Qt 側の `AutonaGameAssetManager` がその通知の Qt シグナルを持っていた）。Qt のモデル化は Qt モデルの整理 PR4 で削除。React のページは Web の操作でカタログを読む） | アセット追加時に手動編集 |
 | 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog` | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
 | サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
 | OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
@@ -959,8 +959,9 @@ AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidge
   があり、過ぎたら warning を出して外し、再試行の表示を出す
 - **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。シェル要求 `alwaysOnTop` から）。起動をまたいで保存しない
 - **ゲームの変更の通知**: ウィンドウは中継しない。Web サーバーの全量の state とキャラの送信（`ws_game_changed`）は、`bootstrap.wire_web_server` が
-  アセットのアダプタの `onLoad`（ロードのたび）に直接繋ぐ（ヘッドレスはローダーの `gameChanged`。ADR-005 S-final SF-6b。それまでは
-  `WindowSignals.GameChanged` が `onLoad` を中継し、SF-5b-3 までは Qt のゲームのボタンの `SetGame` が出していた）
+  Bridge の `game_loaded`（core の `GameLoader.loaded`。ロードのたび、ローダーのスレッドから queued で main へ）に繋ぐ（両シェル同じ。ADR-005 S-final SF-6c。
+  それまではアセットのアダプタの `onLoad` とヘッドレスのローダーの `gameChanged`、SF-6b までは `WindowSignals.GameChanged` が `onLoad` を中継し、
+  SF-5b-3 までは Qt のゲームのボタンの `SetGame` が出していた）
 - **大会**: ウィンドウは大会を設定も解除もしない（AppShell のヘッダーと EVENT のページが v1 で core の `TournamentService` を呼ぶ）。
   読み込みの失敗は state の `tournamentInfo.load` からページが知らせる（SF-5b-2）。`bootstrap.wire_tournament_data()` は失敗の受け手なしで結線する
 

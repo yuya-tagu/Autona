@@ -896,7 +896,7 @@ def test_a_game_load_that_does_not_happen_releases_the_flag(
                 raise RuntimeError("the load failed")
 
             # The loader's (core's GameLoader since ADR-005 S-final SF-6b).
-            m.setattr(goldenGames.loader, "_Load", broken)
+            m.setattr(goldenGames, "_Load", broken)
             codename = "game2"
         response = client.post("/api/v1/game", json={"codename": codename})
         assert response.status_code == 202, response.get_data(as_text=True)

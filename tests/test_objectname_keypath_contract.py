@@ -186,9 +186,10 @@ def _source_files_outside_core():
 # publishes what it just loaded. The key family is not operator input, so
 # there is no operation to route through Actions. Adding a file here is a
 # design decision, not a bookkeeping one. (`game.*` left this ledger in
-# ADR-005 S1a: src/core/GameAssetCatalog.py publishes it now; the Qt
-# AutonaGameAssetManager runs the load job and announces the load, and
-# writes nothing itself -- its models went in the Qt model clean-up's PR4.)
+# ADR-005 S1a: src/core/GameAssetCatalog.py publishes it now; the load job
+# is core's GameLoader since ADR-005 S-final SF-6b, and the Qt
+# AutonaGameAssetManager that announced the load -- writing nothing itself
+# after its models went in the Qt model clean-up's PR4 -- went in SF-6c.)
 STATE_WRITERS_OUTSIDE_CORE = {
     # `provider_videogame` -- the Start.gg videogame id, mirrored from the
     # provider so overlays can tell which game a set belongs to.

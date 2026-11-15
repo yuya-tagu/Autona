@@ -46,6 +46,7 @@ from qtpy.QtCore import QObject, Signal
 
 from .core.Actions import AutonaActions
 from .core import HotkeyRules
+from .core.GameLoader import GameLoader
 from .core.SetFollowService import SetFollowService
 from .core.StateManager import StateManager
 from .core.StatusService import StatusService
@@ -97,6 +98,21 @@ class StateManagerBridge(QObject):
     # footer is the AppShell's, which reads that (the Qt status bar's
     # Window._on_status_changed was until ADR-005 S-final SF-5b-3).
     status_changed = Signal()
+    # A game load is published (core's GameLoader.loaded, ADR-005 S-final
+    # SF-6c; the shells' onLoad / gameChanged until then), with no value:
+    # the receivers read the catalog and the state. Emitted on the loader's
+    # thread once the load's save cycle is closed, so each receiver is
+    # queued to the main thread behind that cycle's delta: the player DB's
+    # refresh (AutonaPlayerDB.SetupModel, connected by bootstrap_core())
+    # and then the web server's full-state push (WebServer.ws_game_changed,
+    # by bootstrap.wire_web_server), in that order.
+    game_loaded = Signal()
+    # The games were scanned (core's GameLoader.scanned, ADR-005 S-final
+    # SF-6c; the shells' onLoadAssets / gamesScanned until then), with no
+    # value: emitted on the scan's job, the web server's games_changed
+    # (WebServer.on_games_change, by bootstrap.wire_web_server) is queued to
+    # the main thread.
+    games_scanned = Signal()
 
     def __init__(self, parent=None):
         # A second bridge would subscribe the same channels again and
@@ -125,6 +141,8 @@ class StateManagerBridge(QObject):
         AutonaActions.battleFormatChanges.subscribe(self._onBattleFormatChanged)
         HotkeyRules.changes.subscribe(self._onHotkeysChanged)
         StatusService.changes.subscribe(self._onStatusChanged)
+        GameLoader.loaded.subscribe(self._onGameLoaded)
+        GameLoader.scanned.subscribe(self._onGamesScanned)
 
     # -- channel callbacks: re-emit, nothing else --------------------------
 
@@ -151,3 +169,9 @@ class StateManagerBridge(QObject):
 
     def _onStatusChanged(self):
         self.status_changed.emit()
+
+    def _onGameLoaded(self, _snapshot):
+        self.game_loaded.emit()
+
+    def _onGamesScanned(self):
+        self.games_scanned.emit()

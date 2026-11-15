@@ -5,9 +5,10 @@ selected one -- characters, skins, variants, preset colours, stages, asset
 file paths, the Start.gg id tables -- lives here as plain dicts. The game
 loader (`src/core/GameLoader.py`, both shells' since ADR-005 S-final SF-6b;
 the desktop's Qt adapter `src/AutonaGameAssetManager.py` ran the loads
-until then) runs the loads as jobs and has them announced; it holds none of
-the data (the adapter turned a snapshot into the Qt combos'
-QStandardItemModels until the Qt model clean-up's PR4).
+until then, and held its signals until SF-6c) runs the loads as jobs and
+tells them (`GameLoader.loaded`); it holds none of the data (the adapter
+turned a snapshot into the Qt combos' QStandardItemModels until the Qt
+model clean-up's PR4).
 
 Snapshots
 ---------
@@ -48,8 +49,8 @@ Locking rules
   S-final SF-5b-1; why it still agrees with the snapshot is said there).
 - The catalog has no observer channel of its own and must not grow one
   (core services are called, they do not subscribe or publish events --
-  the game loader's announcement is the notification: the shells' onLoad /
-  gameChanged). What a switch to
+  the game loader's is the notification: `GameLoader.loaded`, which the Qt
+  bridge turns into game_loaded). What a switch to
   another game invalidates elsewhere in the state is called directly by
   `SelectGame`, outside the writer lock and inside its save block: the
   Top 8 players' and the result's characters (`Top8Service` /

@@ -527,13 +527,13 @@ def test_a_query_string_avatar_is_not_written_as_text(autonaApp, liveEvent,
 # ── T6: thumbnail ────────────────────────────────────────────────────────
 
 def _prepare(scoreboardNumber=1):
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    # The game catalog the service reads by default (GameAssetCatalog.
+    # instance; the desktop's asset adapter was passed for it until ADR-005
+    # S-final SF-6c removed the adapter).
     from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import prepare_data
 
-    return prepare_data(SettingsManager,
-                        gameAssetManager=AutonaGameAssetManager,
-                        scoreboardNumber=scoreboardNumber)
+    return prepare_data(SettingsManager, scoreboardNumber=scoreboardNumber)
 
 
 def test_prepare_data_builds_a_payload_from_the_live_set(autonaApp, liveEvent,
@@ -590,13 +590,10 @@ def test_generate_renders_a_full_size_thumbnail(autonaApp, liveEvent,
     """
     from PIL import Image
 
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import generate
 
-    saved = Path(generate(SettingsManager,
-                          gameAssetManager=AutonaGameAssetManager,
-                          scoreboardNumber=1)).resolve()
+    saved = Path(generate(SettingsManager, scoreboardNumber=1)).resolve()
 
     assert saved.is_relative_to(autonaApp.dir.resolve())
     with Image.open(saved) as image:

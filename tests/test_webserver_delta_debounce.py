@@ -1388,8 +1388,10 @@ def test_a_new_start_starts_with_no_status_notice(flusher, monkeypatch):
 
 
 # ── the game list's notice (ADR-005 S-final SF-3a) ───────────────────────
-# A scan (the desktop's onLoadAssets, the headless loader's gamesScanned)
-# becomes one `games_changed` {}: no value (the client reads GET /games
+# A scan (core's GameLoader.scanned through the bridge's games_scanned,
+# ADR-005 S-final SF-6c; the desktop's onLoadAssets and the headless
+# loader's gamesScanned until then) becomes one `games_changed` {}: no
+# value (the client reads GET /games
 # again), to everyone (that GET is a READ), after the deltas and the other
 # notices of its flush, from the flusher -- the battle format's notice's
 # rules.

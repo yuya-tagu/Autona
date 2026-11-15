@@ -178,7 +178,7 @@ bootstrap_gui()
 
 # autopep8: off
 from .AutonaHotkeys import AutonaHotkeys
-from .AutonaGameAssetManager import AutonaGameAssetManager
+from .core.GameLoader import GameLoader
 from .core.ColorService import SeedColorState
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
@@ -438,7 +438,11 @@ class Window(QMainWindow):
         # NOTE: countries are loaded once, early in __init__ (see
         # CountryCatalog.instance.Load() above); do not load them a second time.
         AutonaTournamentDataProvider.instance.UiMounted()
-        AutonaGameAssetManager.instance.UiMounted()
+        # The game loader's startup: the start.gg character table, the first
+        # scan and the last pick restored (core's GameLoader, built by
+        # bootstrap_core(); the asset adapter's UiMounted called it until
+        # ADR-005 S-final SF-6c).
+        GameLoader.instance.Start()
         # Silent startup check runs only for the frozen distribution — in
         # dev mode (python main.py) we can't self-install, so skip the
         # noise of a "can't auto-install" dialog at every launch.
@@ -545,23 +549,22 @@ class Window(QMainWindow):
                     self.webserver.port, parent=self,
                     host=self.webserver.host_name)
                 self.webserver.start()
-                # A game load (the asset adapter's onLoad) -> program_state
-                # + characters, a scan (onLoadAssets) -> games_changed,
-                # db_updated -> the player DB: the wiring the headless shell
-                # makes too, with the same loader's signals (ADR-005 S-final
-                # SF-6b; the window relayed onLoad through a GameChanged of
-                # its own until then -- the Qt game button's, until SF-5b-3,
-                # which also emitted it on every tournament_changed).
+                # A game load (the bridge's game_loaded: core's
+                # GameLoader.loaded) -> program_state + characters, a scan
+                # (games_scanned) -> games_changed, db_updated -> the player
+                # DB: the wiring the headless shell makes too (ADR-005
+                # S-final SF-6c; the asset adapter's onLoad / onLoadAssets
+                # until then, and the window relayed onLoad through a
+                # GameChanged of its own until SF-6b -- the Qt game
+                # button's, until SF-5b-3, which also emitted it on every
+                # tournament_changed).
                 # Here, together with the server: at its old place in
                 # __init__ there is no webserver instance to bind to.
                 # Nothing is lost by connecting after LoadDB() — clients
                 # pull the player DB on demand (GET /playerdb, socket
                 # 'playerdb') and none can be connected before the server
                 # is listening anyway.
-                wire_web_server(
-                    self.webserver,
-                    AutonaGameAssetManager.instance.signals.onLoad,
-                    AutonaGameAssetManager.instance.signals.onLoadAssets)
+                wire_web_server(self.webserver)
             except Exception as error:
                 logger.opt(exception=True).error(
                     "The web server could not be started")

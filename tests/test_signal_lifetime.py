@@ -1,8 +1,9 @@
 """Connections from process-wide signals must not outlive their receiver.
 
 Boards, player widgets and panels are torn down while the singletons they
-listen to (AutonaGameAssetManager, AutonaTournamentDataProvider,
-AutonaHotkeys, StateManager, AutonaPlayerDB) live for the whole process. A
+listen to (AutonaTournamentDataProvider, AutonaHotkeys, StateManager and its
+bridge, AutonaPlayerDB; the desktop's asset adapter AutonaGameAssetManager
+until ADR-005 S-final SF-6c) live for the whole process. A
 `connect(self.Method)` is safe there: PySide6 keeps a weak reference to the
 receiver and drops the connection when it dies. A `connect(lambda: ...)` is
 not -- Qt holds the callable, the closure holds the widget, and nothing ever
@@ -38,13 +39,14 @@ CORE_DIR = SRC_ROOT / "core"
 # Senders that live for the whole process. A connection made from one of
 # these is only as short-lived as Qt can prove the receiver to be.
 PROCESS_WIDE_SENDERS = (
-    "AutonaGameAssetManager.instance.signals",
     "AutonaTournamentDataProvider.instance.signals",
     "AutonaHotkeys.signals",
     "AutonaPlayerDB.signals",
     # The state layer's Qt signals live on the adapter now, not on
     # StateManager itself (headless core Step 1). Same four signals, same
-    # process lifetime -- the bridge is built once by bootstrap_core().
+    # process lifetime -- the bridge is built once by bootstrap_core(). The
+    # game loader's notifications are its too since ADR-005 S-final SF-6c
+    # (game_loaded / games_scanned: the asset adapter's signals until then).
     "StateManagerBridge.instance",
     # The application object itself (focusChanged, which the player cards
     # listen to since ADR-005 S2a, and the rest of its signals).

@@ -3263,8 +3263,8 @@ def game_set():
         # other two held it for the guard's full TTL (and a UI-started load
         # finishing meanwhile released it early).
         try:
-            # The shell's loader (ADR-005 S3c): core's GameLoader in both
-            # shells since S-final SF-6b.
+            # The loader (ADR-005 S3c): core's GameLoader, bootstrap_core()'s
+            # for both shells since S-final SF-6c.
             WebOps.load_game(codename, mods_active=mods_active, done=_release)
         except Exception:
             logger.error(traceback.format_exc())

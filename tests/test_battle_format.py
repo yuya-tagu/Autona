@@ -238,15 +238,14 @@ QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 app = QApplication([])
 
 from src import Autona
-from src.AutonaGameAssetManager import AutonaGameAssetManager
+from src.core.GameLoader import GameLoader
 from src.core.Actions import AutonaActions
 from src.core.SettingsManager import SettingsManager
 
 qtSettings = str(Path("qt_settings.ini").resolve())
 Autona.QSettings = lambda *args: QSettings(
     qtSettings, QSettings.Format.IniFormat)
-AutonaGameAssetManager.instance.loader.DownloadStartGGCharacters = (
-    lambda: None)
+GameLoader.instance.DownloadStartGGCharacters = lambda: None
 
 window = Autona.Window()
 

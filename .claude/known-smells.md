@@ -237,7 +237,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 **根拠**: singleton-init-order.md「暗黙の初期化順序リスク #2」
 
 **2026-06-24 検証**: `.instance =` パターンは記述の 8個 → **11クラス**に増えていた。
-- モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`（ADR-005 S4ac-3 で削除）, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`
+- モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`（ADR-005 S4ac-3 で削除）, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`（ADR-005 S-final SF-6c で削除。ゲームのロードは core の `GameLoader`）
 - `__init__` 内で `self` 代入（遅延割り当ての一種）: `AutonaAnalysisWidget`（S4k で削除）, `AutonaBracketWidget`
 
 **2026-07-30 解消確認**: 起動アーキテクチャ再設計 Step 3（`docs/changes/startup-architecture-redesign.md`）で

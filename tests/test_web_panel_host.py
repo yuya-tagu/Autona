@@ -4334,8 +4334,9 @@ def test_the_window_is_the_shared_view_alone():
                 if name.startswith("_Create") and name.endswith("Panel")]
     # The window's signals are the one something connects to (its
     # GameChanged relay of the asset adapter's onLoad went in ADR-005 S-final
-    # SF-6b: the web server takes the adapter's signal itself); the timing
-    # helper nothing called went with the rest.
+    # SF-6b: the web server took the adapter's signal itself, and takes the
+    # bridge's game_loaded since SF-6c); the timing helper nothing called
+    # went with the rest.
     signals = next(node for node in ast.walk(tree)
                    if isinstance(node, ast.ClassDef)
                    and node.name == "WindowSignals")
@@ -4861,12 +4862,12 @@ def test_the_game_tracker_and_its_switch_are_gone():
     # settings.json is never read, a stale `score.{n}.stages` in state.json
     # goes with the launch's ResetScoreRoot).
     from src.AutonaApiV1 import api_v1
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.AutonaWebServer import _build_web_app
     from src.core import AppSettings
     from src.core import StateSchema as schema
     from src.core.Actions import AutonaActions
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import GameLoader
     from tests.conftest import PROJECT_ROOT
 
     src = PROJECT_ROOT / "src"
@@ -4880,15 +4881,16 @@ def test_the_game_tracker_and_its_switch_are_gone():
     assert not hasattr(AutonaActions, "GameTracker")
 
     # The rows: no key of the board's, nothing that builds their combos
-    # (the asset adapter's models are instance attributes, so the source is
-    # read: no definition or attribute of those names).
+    # (the asset adapter's models were instance attributes, so the source is
+    # read: no definition or attribute of those names; the adapter itself
+    # went in ADR-005 S-final SF-6c, its loader is core's).
     assert [key for key in schema.SCORE_BOARD_KEYS
             if key.split(".")[0] == "stages"] == []
     gone = {"StagesPayload", "StageRow", "stageRows", "stageRowsSorted",
             "stageModel", "stageModelWithBlank", "UpdateStageModel",
             "LoadStageImage", "LoadStageImageComplete",
             "_stageIconGeneration"}
-    for module in (GameAssetCatalog, AutonaGameAssetManager):
+    for module in (GameAssetCatalog, GameLoader):
         path = PROJECT_ROOT / module.__module__.replace(".", "/")
         tree = ast.parse(path.with_suffix(".py").read_text(encoding="utf-8"))
         names = {node.name for node in ast.walk(tree)
@@ -5053,11 +5055,7 @@ class _WindowRig:
                 self._Step("check_webserver_port")),
             "wire_web_server": lambda *args: self._Step("wire_web_server"),
             "MarkWebServerReady": lambda: self._Step("MarkWebServerReady"),
-            "AutonaQtHelper": SimpleNamespace(gui_executor=lambda f: f()),
-            "AutonaGameAssetManager": SimpleNamespace(
-                instance=SimpleNamespace(
-                    signals=SimpleNamespace(onLoad=None,
-                                            onLoadAssets=None)))}
+            "AutonaQtHelper": SimpleNamespace(gui_executor=lambda f: f())}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
@@ -5840,68 +5838,51 @@ def test_the_unused_qt_model_leftovers_are_gone():
     assert not imported & {"qtpy.QtGui", "qtpy.QtWidgets",
                            "AutonaGameAssetManager"}, imported
 
-    # PR4: the asset adapter holds no Qt model, builds no icon and needs no
-    # QtGui (nor PIL, which decoded the icons): QtCore's QObject / Signal
-    # for its signals, and the loads.
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-    adapter = src / "AutonaGameAssetManager.py"
-    tree = ast.parse(adapter.read_text(encoding="utf-8"))
-    # Its names, in it and in the modules that import it.
-    scope = {str(path.relative_to(PROJECT_ROOT)): path
-             for path in sorted(src.rglob("*.py"))
-             if path == adapter or _importsTheAssetAdapter(
-                 ast.parse(path.read_text(encoding="utf-8")))}
-    # (Its importers today: the window, the asset guide, the composition
-    # root. A detection that found none would check nothing.)
-    assert {"src/AutonaGameAssetManager.py", "src/Autona.py",
-            "src/bootstrap.py"} <= {key.replace("\\", "/") for key in scope}
-    users = {key: sorted(_codeNames(path) & set(QT_ASSET_MODEL_NAMES))
-             for key, path in scope.items()}
-    assert {key: names for key, names in users.items() if names} == {}
-    # Its properties: neither on the class nor set on an instance
-    # (`self.characters = ...`) anywhere in it.
-    for name in QT_ASSET_MODEL_PROPERTIES:
-        assert not hasattr(AutonaGameAssetManager, name), name
-    assigned = sorted(
-        part.attr for node in ast.walk(tree)
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
-        for target in (node.targets if isinstance(node, ast.Assign)
-                       else [node.target])
-        for part in ast.walk(target)  # a, self.x = ...: the tuple's parts
-        if isinstance(part, ast.Attribute)
-        and isinstance(part.value, ast.Name) and part.value.id == "self"
-        and part.attr in QT_ASSET_MODEL_PROPERTIES)
-    assert assigned == [], assigned
-    # The load's GUI-thread end is the loader's (core's GameLoader, both
-    # shells' since ADR-005 S-final SF-6b; the adapter's until then).
+    # PR4: the asset adapter held no Qt model, built no icon and needed no
+    # QtGui (nor PIL, which decoded the icons) after it; ADR-005 S-final
+    # SF-6c removed the adapter itself (its loader is core's GameLoader,
+    # bootstrap_core()'s, and its notifications the bridge's). Neither the
+    # module nor an import of it may come back, nor its models' names
+    # anywhere in src.
+    assert not (src / "AutonaGameAssetManager.py").exists()
+    # (tests/fixtures' recorders run against an old checkout, which has it.)
+    scanned = [*sorted(src.rglob("*.py")), PROJECT_ROOT / "main.py",
+               *sorted((PROJECT_ROOT / "tests").glob("*.py")),
+               *sorted((PROJECT_ROOT / "tests" / "live").glob("*.py"))]
+    importers = [str(path.relative_to(PROJECT_ROOT)) for path in scanned
+                 if _importsTheAssetAdapter(
+                     ast.parse(path.read_text(encoding="utf-8")))]
+    assert importers == []
+    users = {str(path.relative_to(PROJECT_ROOT)):
+             sorted(_codeNames(path) & set(QT_ASSET_MODEL_NAMES))
+             for path in sorted(src.rglob("*.py"))}
+    assert {path: names for path, names in users.items() if names} == {}
     from src.core.GameLoader import GameLoader
+    for name in QT_ASSET_MODEL_PROPERTIES:
+        assert not hasattr(GameLoader, name), name
+    # What follows a load's selection is the loader's (core's GameLoader,
+    # both shells' since ADR-005 S-final SF-6b; the adapter's until then),
+    # on the loader's thread since SF-6c.
     assert list(inspect.signature(GameLoader._Publish)
                 .parameters) == ["self", "snapshot", "cycle"]
-    imported = {node.module for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom)}
-    imported |= {alias.name for node in ast.walk(tree)
-                 if isinstance(node, ast.Import) for alias in node.names}
-    assert not imported & {"qtpy.QtGui", "qtpy.QtWidgets", "PIL"}, imported
-    assert _codeNames(adapter) & set(QT_GUI_MODEL_TYPES) == set()
-    # A load that is not announced is settled on one path only: the
-    # shutdown's (STOPPED, in _Load). _Publish settled a failed model
-    # rebuild (FAILED) too, until the models went. Every call of the name
-    # counts, whatever it is called on (self, the instance, a local). The
-    # settle is the loader's _SettleStopped since ADR-005 S-final SF-6b
-    # (the adapter's _SettleUnannounced until then, which is gone).
-    assert "_SettleUnannounced" not in _codeNames(adapter)
-    loader = ast.parse((src / "core" / "GameLoader.py").read_text(
-        encoding="utf-8"))
-    settlers = sorted(
-        function.name for function in ast.walk(loader)
+    # A load the shutdown came to after its selection is published on the
+    # one path every load takes (_Publish, its board operation run
+    # atShutdown, telling no one): the separate settles are gone -- the
+    # loader's _SettleStopped (ADR-005 S-final SF-6b; SF-6c removed it),
+    # the adapter's _SettleUnannounced before it. Every call of the name
+    # counts, whatever it is called on.
+    loader = src / "core" / "GameLoader.py"
+    assert not _codeNames(loader) & {"_SettleStopped", "_SettleUnannounced",
+                                     "MarshalAborted", "_marshal"}
+    publishers = sorted(
+        function.name for function in ast.walk(ast.parse(
+            loader.read_text(encoding="utf-8")))
         if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
-        and (isinstance(node.func, ast.Attribute)
-             and node.func.attr == "_SettleStopped"
-             or isinstance(node.func, ast.Name)
-             and node.func.id == "_SettleStopped"))
-    assert settlers == ["_Load"], settlers
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_Publish")
+    assert publishers == ["_Load"], publishers
 
 
 # ADR-005 S-final SF-1: what the dead-code sweep removed. The Alert

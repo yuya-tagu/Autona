@@ -297,12 +297,14 @@ def drain_tasks(timeout=TASKS_TIMEOUT_SECS):
     the end -- in place of the QThreadPool.waitForDone() + processEvents()
     the asset tests used until ADR-005 S3f-4.
 
-    Pumps this (the GUI) thread while it waits: a game load job marshals its
-    announcement onto it (run_sync), so a plain drain() would wait for the
-    job that waits for us. Done once the executor is idle after the GUI
-    thread has run what the tasks queued there (the scan's onLoadAssets) --
-    which can submit more (the restore's load), so it looks again. Test
-    harness only: src never pumps the event loop (agent-pitfalls #9).
+    Pumps this (the GUI) thread while it waits: what the tasks queue there
+    (what follows a scan -- the provider's game, the startup restore; a
+    load's notification, through the bridge) runs here, and can submit more
+    (the restore's load), so it looks again once the executor is idle. (A
+    game load job marshalled what follows its selection onto this thread
+    until ADR-005 S-final SF-6c, so a plain drain() would have waited for
+    the job that waited for us.) Test harness only: src never pumps the
+    event loop (agent-pitfalls #9).
 
     Everything means everything: a stepped executor's queued jobs run too,
     still one at a time -- a step that is waiting for this thread (its
@@ -715,13 +717,13 @@ class _AutonaHarness:
         catalog's scan and load (and the Qt adapter's model rebuild, until
         the Qt model clean-up's PR4 removed the models).
 
-        What it leaves out is the GUI thread's end of a real load -- the
-        announcement and its commit (publishGameLoad() is that end) -- so
-        nothing connected to gameLoaded / onLoad reacts.
+        What it leaves out is what follows a real load's selection -- the
+        roster, its commit, the pick and the notification (publishGameLoad()
+        is that end) -- so nothing connected to GameLoader.loaded / the
+        bridge's game_loaded reacts.
         """
         from PIL import Image
 
-        from src.AutonaGameAssetManager import AutonaGameAssetManager
         from src.core.GameAssetCatalog import GameAssetCatalog
 
         game = self.dir / "user_data" / "games" / HARNESS_GAME
@@ -745,24 +747,22 @@ class _AutonaHarness:
         catalog.ScanGames()
         catalog.SelectGame(HARNESS_GAME, reload=True)
         self._gameInstalled = True
-        return AutonaGameAssetManager.instance
 
     def publishGameLoad(self):
-        """The GUI thread's end of a game load, on the game loaded now: the
-        desktop loader's _Publish (core's GameLoader, the desktop adapter's
-        `loader`), with no loader thread -- the load's save cycle opened
-        here, as the loader opens it. Under the board host's lock,
-        gameLoaded (the shared wiring's roster, set length and commit,
-        queued in that cycle), onLoad (every slot connected to it, in its
-        real place) and the cycle closed, as in the app.
+        """What follows a game load's selection, on the game loaded now: the
+        loader's _Publish (core's GameLoader.instance), on this thread
+        instead of the loader's -- the load's save cycle opened here, as the
+        loader opens it. Under the board host's lock, the roster, the set
+        length and their commit (queued in that cycle), the pick and the
+        cycle closed; then, outside it, GameLoader.loaded told (the bridge's
+        game_loaded, whose queued slots settle() runs), as in the app.
         """
-        from src.AutonaGameAssetManager import AutonaGameAssetManager
         from src.core.GameAssetCatalog import GameAssetCatalog
-        from src.core.GameLoader import _SaveCycle
+        from src.core.GameLoader import GameLoader, _SaveCycle
 
         cycle = _SaveCycle()
         cycle.Open()
-        AutonaGameAssetManager.instance.loader._Publish(
+        GameLoader.instance._Publish(
             GameAssetCatalog.instance.Current(), cycle)
         self.settle()
 

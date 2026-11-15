@@ -114,8 +114,8 @@ def slotEnv(autonaApp):
     games and flags are removed and both catalogs go back to the harness's
     own locale and data, so later tests see what they always saw.
     """
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import GameLoader
     from src.core.SettingsManager import SettingsManager
     from src.core.CountryCatalog import CountryCatalog
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -136,7 +136,7 @@ def slotEnv(autonaApp):
     games = autonaApp.dir / "user_data" / "games"
     copy_trees([(GAME_FIXTURE / "games" / name, games / name)
                 for name in GAMES])
-    manager = AutonaGameAssetManager.instance
+    loader = GameLoader.instance
     catalog = GameAssetCatalog.instance
     catalog.ScanGames()
     persisted = SettingsManager.Get("SELECTED_GAME_CODENAME", "")
@@ -144,8 +144,8 @@ def slotEnv(autonaApp):
     def load(label):
         codename, modsActive, reload = GAME_SCENARIOS[label]
         # The load job, this (the GUI) thread pumped while it runs.
-        manager.loader.LoadGameByCodename(codename, mods_active=modsActive,
-                                          mods_reload_mode=reload)
+        loader.LoadGameByCodename(codename, mods_active=modsActive,
+                                  mods_reload_mode=reload)
         drain_tasks()
 
     try:
@@ -224,8 +224,8 @@ def _repicked(path, index, **picked):
 
 def _comboRow(rows, row):
     """The data of row `row` of a card's character / variant combo: a blank
-    row first, then the catalog's rows (as AutonaGameAssetManager's models
-    laid them out, until the Qt model clean-up's PR4)."""
+    row first, then the catalog's rows (as the desktop's asset adapter's
+    models laid them out, until the Qt model clean-up's PR4)."""
     return rows[row - 1][1]
 
 

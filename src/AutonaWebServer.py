@@ -28,6 +28,7 @@ from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import (
     SettingsManager, SettingsUnreadable, DEFAULT_WEBSERVER_PORT)
 from .core import WebAccess
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
     AutonaDesignerService,
@@ -1550,11 +1551,11 @@ class WebServer:
     # battle format's notice: no value, sent by the one flusher after the
     # batch's deltas and the other notices, to everyone (the route is
     # READ), not debounced, several scans in one flush are one notice. Told
-    # by the shell (bootstrap.wire_web_server: the desktop's onLoadAssets,
-    # the headless loader's gamesScanned): emitted from the scan job, a Qt
-    # signal connected to this plain function arrives queued on the main
-    # thread (the headless shell's too). Queued under _delta_cond, so it is
-    # safe on any thread.
+    # by the bridge's games_scanned (core's GameLoader.scanned, connected by
+    # bootstrap.wire_web_server in both shells; the shells' onLoadAssets /
+    # gamesScanned until ADR-005 S-final SF-6c): emitted from the scan job,
+    # a Qt signal connected to this plain function arrives queued on the
+    # main thread. Queued under _delta_cond, so it is safe on any thread.
 
     @staticmethod
     def on_games_change(*_args):
@@ -1708,24 +1709,38 @@ class WebServer:
 
     def ws_game_changed(message=None):
         """A game was loaded: every client gets the full state and the new
-        character list, in that order. What the shells connect the loader's
-        announcement to (bootstrap.wire_web_server): the asset adapter's
-        onLoad on the desktop, the headless shell's gameChanged (ADR-005
-        S3c; the desktop relayed it through the window's GameChanged until
-        S-final SF-6b).
+        character list, in that order. On the bridge's game_loaded (core's
+        GameLoader.loaded; bootstrap.wire_web_server, both shells), queued
+        to the main thread (ADR-005 S-final SF-6c: the shells' onLoad /
+        gameChanged until then, and the desktop relayed it through the
+        window's GameChanged until SF-6b).
 
-        Sent once the load is published, and after its delta (ADR-005 S3f-4
-        review). The announcement runs inside the load's save cycle (the
-        loader's _Publish), where the full state would already hold the
-        load's writes with the revision before them, and it would reach the
-        clients ahead of the R+1 delta: WhenPublished waits for the cycle,
-        _after_pending_deltas for the delta to go out first."""
+        Sent once what is written is published, and after its delta
+        (ADR-005 S3f-4 review), which a full state carrying those writes
+        and revision R+1 must not overtake: WhenPublished waits for an open
+        cycle -- a cycle another thread holds open (the next load's, on rapid
+        switching) still delays the publish; the last block to close
+        publishes, on its thread -- and the push then goes back to the main
+        thread (GuiExecutor.later) before it queues for the flusher
+        (_after_pending_deltas, which sends it after the deltas queued so
+        far). A publish on another thread queues its delta to the main
+        thread too (the bridge's state_updated, emitted inside the publish,
+        before the WhenPublished callbacks run), so the push lands behind
+        it. Queued for the flusher straight from the closing thread, it went
+        out ahead of that delta: the full state at the new revision, then
+        its delta (ADR-005 S-final SF-6c review; until SF-6c the closing
+        thread was the main thread, where the delta was delivered directly).
+        Never waited for: the callback may run inside StateManager.lock
+        (agent-pitfalls #17)."""
         def push():
             WebServer.ws_program_state()
             WebServer.ws_get_characters(None)
 
+        def queue():
+            WebServer._after_pending_deltas(push)
+
         StateManager.WhenPublished(
-            lambda: WebServer._after_pending_deltas(push))
+            lambda: AutonaQtHelper.gui_executor.later(queue))
 
     def ws_playerdb(message):
         logger.debug("Emitting playerdb info.")

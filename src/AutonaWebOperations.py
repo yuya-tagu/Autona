@@ -210,18 +210,18 @@ class BoardHost:
         # them. Re-entrant: an operation run here runs others here (PATCH
         # set's task calls set_route).
         #
-        # Taken by the web layer's request threads and by the main thread:
-        # a game load's roster and commit (bootstrap.wire_game_roster,
-        # ADR-005 S3e-6 / S4ad), the set follow's answers and poll
-        # (SetFollowService), a game load's announcement to its cycle's
-        # close (core's GameLoader._Publish, the roster and commit inside
-        # it; both shells since ADR-005 S-final SF-6b), the desktop's board
-        # hotkeys (±1, reset, 反映, swap) and
-        # format switch (ADR-005 S4ad: until then the desktop's operations
-        # ran on its GUI thread, which serialized them with those). Not
-        # fair: request threads may pass a waiting main thread over (RLock
-        # is not FIFO); the operations are short, so it waits for a few
-        # (ADR-005 S4ad review, accepted). Never with StateManager.lock
+        # Taken by the web layer's request threads, by the game loader's
+        # thread -- what follows a load's selection, from the roster and its
+        # commit to its cycle's close (core's GameLoader._Publish; on the
+        # main thread, marshalled there, until ADR-005 S-final SF-6c, and
+        # the roster and commit were bootstrap.wire_game_roster's until
+        # then: ADR-005 S3e-6 / S4ad) -- and by the main thread: the set
+        # follow's answers and poll (SetFollowService), the desktop's board
+        # hotkeys (±1, reset, 反映, swap) and format switch (ADR-005 S4ad:
+        # until then the desktop's operations ran on its GUI thread, which
+        # serialized them with those). Not fair: request threads may pass a
+        # waiting main thread over (RLock is not FIFO); the operations are
+        # short, so it waits for a few (ADR-005 S4ad review, accepted). Never with StateManager.lock
         # held -- it is always the outermost lock, so it cannot close a
         # cycle with that one. INVARIANT: nothing run under
         # it waits for the main thread (a gui_thread_sync, a queued call
@@ -247,10 +247,11 @@ class BoardHost:
         thread), logged at INFO, and nothing written. The same in both
         shells. Not refused: the main thread's (it ends the shutdown
         itself), an operation already running (checked on the outermost
-        call, so one is not split), and `atShutdown` -- the shutdown's own
-        writes (a game load's settle: core's GameLoader._SettleStopped,
-        both shells'; the desktop's _SettleUnannounced until ADR-005
-        S-final SF-6b).
+        call, so one is not split), and `atShutdown` -- the writes of work
+        already under way that the shutdown lets finish (a game load past
+        its selection: core's GameLoader._Publish, so the state holds one
+        game; its _SettleStopped until ADR-005 S-final SF-6c, and the
+        desktop's _SettleUnannounced until SF-6b).
         """
         with self._lock:
             depth = getattr(self._depth, "value", 0)
@@ -315,16 +316,16 @@ def current_board_host():
 
 # How a game is loaded by codename: (codename, async_mode=True,
 # mods_active=False, mods_reload_mode=False, done=None) -> a Future of the
-# attempt's outcome. Both shells register their GameLoader's
-# LoadGameByCodename (core's, ADR-005 S-final SF-6b: bootstrap_gui() the
-# asset adapter's loader, src/headless.py HeadlessGames'). None: nothing can
-# load a game.
+# attempt's outcome. bootstrap_core() registers GameLoader.instance's
+# LoadGameByCodename, for both shells (ADR-005 S-final SF-6c; each shell
+# registered its adapter's loader until then). None: nothing can load a
+# game.
 loadGameByCodename = None
 # Have the game the loader ends on loaded without its modded content: () ->
 # None, asked and not waited for (a tournament newly loaded: core's
 # TournamentService through turn_mods_off; ADR-005 S-final SF-5b-1). The
-# same loader's TurnModsOff, registered beside loadGameByCodename by each
-# shell. None: the mods stay as they are.
+# same loader's TurnModsOff, registered beside loadGameByCodename. None:
+# the mods stay as they are.
 turnModsOff = None
 
 # The shell operations (ADR-005 S3e-9; see open_sets / get_thumbnail): the
@@ -1294,17 +1295,18 @@ def reset_top8_scores():
 
 def set_game(data):
     # The legacy route's answer is "OK" once the load's attempt is over: the
-    # game in the state and what follows a load (the roster, onLoad /
-    # gameChanged) run -- or the attempt skipped or failed (logged),
+    # game in the state with what follows it (the roster, its commit, the
+    # pick) published -- or the attempt skipped or failed (logged),
     # answered "OK" too when this ran on the GUI thread, or not run because
     # the app is shutting down (that wait used to hang). A newer request
     # overtaking it: once that one's attempt is over. The synchronous load
     # below waits on the calling thread (ADR-005 S3f-4; this ran on the GUI
-    # thread until then) for the shell's loader (core's GameLoader in both
-    # shells since S-final SF-6b), which hands what follows the selection
-    # to the main thread. Not serialized with the board operations: one can
-    # run between the selection and what follows it, as an async load
-    # always allowed.
+    # thread until then) for the loader (core's GameLoader), which does all
+    # of it on its own thread (ADR-005 S-final SF-6c); what the load's
+    # notification sets off on the main thread (the web push, the player
+    # DB's refresh) is queued there and may come after the answer. Not
+    # serialized with the board operations: one can run between the
+    # selection and what follows it, as an async load always allowed.
     set_codename = data.get("codename")
     if set_codename not in GameAssetCatalog.instance.GameCodenames():
         return f"Could not find game {set_codename}"

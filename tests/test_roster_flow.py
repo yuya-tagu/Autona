@@ -197,13 +197,14 @@ def world(slotEnv, autonaApp):
 
 
 def loadGame(codename):
-    """A game load through the desktop's adapter, as the GAME menu and the
-    Web's set_game run it: the load job, run to the end with this (the GUI)
-    thread pumped (ADR-005 S3f-4; it was the GUI thread's synchronous load
-    here until the review)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-    loader = AutonaGameAssetManager.instance.loader
-    loader.LoadGameByCodename(codename, mods_reload_mode=True)
+    """A game load through the loader (core's GameLoader, bootstrap_core()'s
+    for both shells since ADR-005 S-final SF-6c; the desktop's asset
+    adapter's until then), as the header's game menu and the Web's set_game
+    run it: the load job, run to the end with this (the main) thread pumped
+    (ADR-005 S3f-4; it was the GUI thread's synchronous load here until the
+    review)."""
+    from src.core.GameLoader import GameLoader
+    GameLoader.instance.LoadGameByCodename(codename, mods_reload_mode=True)
     drain_tasks()
 
 
@@ -455,18 +456,18 @@ def test_the_cards_follow_repeated_roster_changes(world, autonaApp):
 
 
 def _loadGameThreaded(codename):
-    """A game load as a job of the TaskExecutor, as the GAME menu runs it
-    (ADR-005 S3f-4; the asset loader's QThread until then): the roster
-    (gameLoaded) and the onLoad handlers run on the GUI thread (after the Qt
-    models' rebuild until the Qt model clean-up's PR4), marshalled from the
-    job while its save block is still open. This
-    thread is pumped while waiting -- the job marshals onto it (run_sync),
-    so blocking on its Future would deadlock."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    """A game load as a job of the TaskExecutor, as the game menu runs it
+    (ADR-005 S3f-4; the asset loader's QThread until then): the roster and
+    its commit run on the loader's thread, inside the load's save cycle
+    (ADR-005 S-final SF-6c; marshalled onto the GUI thread, run_sync, with
+    the onLoad handlers until then -- after the Qt models' rebuild until the
+    Qt model clean-up's PR4). This thread is pumped while waiting: the
+    load's notice reaches its receivers here (the bridge's game_loaded,
+    queued)."""
+    from src.core.GameLoader import GameLoader
 
-    loader = AutonaGameAssetManager.instance.loader
-    loader.LoadGameByCodename(codename, async_mode=True,
-                              mods_reload_mode=True)
+    GameLoader.instance.LoadGameByCodename(
+        codename, async_mode=True, mods_reload_mode=True)
     drain_tasks()
 
 
@@ -496,22 +497,25 @@ def test_a_threaded_game_load_publishes_the_recorded_roster(
         assert not differ, f"{actual['step']!r} differs in {differ}"
 
 
-def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
+def test_a_game_load_and_its_roster_are_one_save_cycle_on_its_thread(
         world, autonaApp, monkeypatch):
-    """ADR-005 S3f-4 review: the load job opens the save cycle, the GUI
-    thread publishes it at the end of the loader's _Publish. The game's
-    writes and the roster's (board 2 to the game's two players, committed
-    within the load: AutonaActions.CommitGameLoad) go out as that one
-    cycle's delta, published on the GUI
-    thread while the load is still publishing -- and the bridge delivers
-    the cycle's notifications there, direct, not queued after it
-    (agent-pitfalls #17: one cycle under one hold of the lock)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    """ADR-005 S3f-4 review: the load job opens the save cycle, and the end
+    of the loader's _Publish closes it -- on the loader's thread since
+    ADR-005 S-final SF-6c (the GUI thread's, marshalled, until then). The
+    game's writes and the roster's (board 2 to the game's two players,
+    committed within the load: AutonaActions.CommitGameLoad) go out as that
+    one cycle's delta, published while the load is still publishing; its
+    notifications run there, inside StateManager.lock (agent-pitfalls #17:
+    one cycle under one hold of the lock), and the bridge queues them to
+    the main thread's receivers (they were direct, on the GUI thread, until
+    SF-6c)."""
     from src.StateManagerBridge import StateManagerBridge
+    from src.core.GameLoader import GameLoader
+    from src.core.TaskExecutor import JOB_THREAD_PREFIX
 
     if RECORD:
         pytest.skip("not part of the recording")
-    loader = AutonaGameAssetManager.instance.loader
+    loader = GameLoader.instance
     autonaApp.ready(2)
     main = threading.main_thread().name
     cycles = []
@@ -565,13 +569,21 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
     deltas = [event for event in events if event[0] == "delta"]
     assert len(deltas) == 1, events
     _delta, cycle, thread, published, paths = deltas[0]
-    assert (thread, published) == (main, True)
-    assert cycles[cycle - 1] == main
+    assert thread.startswith(JOB_THREAD_PREFIX) and published, deltas
+    assert cycles[cycle - 1] == thread
     roots = {path[0] for path in paths}
     assert roots == {"game", "score"}, paths
     assert ("score", "2", "team", "1", "player") in paths
-    assert ("bridge delta", main, True) in events, events
-    assert ("bridge dirty", "score.2", False, main, True) in events, events
+    # Queued to the main thread: received there, never on the loader's. (Not
+    # necessarily after _Publish returned: the main thread is pumped while
+    # the load runs, and may take them while the loader's thread is still on
+    # its way out of _Publish, after the cycle's close.)
+    bridged = [event for event in events if event[0] == "bridge delta"]
+    assert bridged and all(event[1] == main for event in bridged), events
+    dirty = [event for event in events if event[0] == "bridge dirty"]
+    assert dirty and all(event[3] == main for event in dirty), events
+    assert [event[2] for event in dirty
+            if event[1] == "score.2"][-1:] == [False], events
     assert len(StateManager.Get("score.2.team.1.player")) == 2
     assert not StateManager.HasPendingChanges("score.2")
 
@@ -585,7 +597,13 @@ def test_a_load_that_changes_the_players_per_team_leaves_nothing_lit(
     load's commit is only queued there: it lowered the flag while the keys
     were still pending, so the board, asking HasPendingChanges, kept the
     button on; the drain said nothing, and a later 反映 had nothing pending to
-    say anything about. Nothing is wrong with the state or out/ meanwhile."""
+    say anything about. Nothing is wrong with the state or out/ meanwhile.
+
+    The notifications run where the load's cycle is closed -- the loader's
+    thread since ADR-005 S-final SF-6c -- each saying what HasPendingChanges
+    says there; the bridge queues them to the main thread, whose receivers
+    read the state when they run (a notification is a cue: the held
+    notifications' rule), so the first one there already reads clean."""
     from src.StateManagerBridge import StateManagerBridge
 
     if RECORD:
@@ -595,24 +613,33 @@ def test_a_load_that_changes_the_players_per_team_leaves_nothing_lit(
     autonaApp.settle()
     assert not StateManager.HasPendingChanges("score.2")
     told = []
+    received = []
 
     def onDirty(prefix, dirty):
         if prefix == "score.2":
             told.append((dirty, StateManager.HasPendingChanges(prefix)))
 
+    def onReceived(prefix, dirty):
+        if prefix == "score.2":
+            received.append((dirty, StateManager.HasPendingChanges(prefix)))
+
+    channel = StateManager.observers.held_dirty_changed
     bridge = StateManagerBridge.instance
-    bridge.held_dirty_changed.connect(onDirty)
+    channel.subscribe(onDirty)
+    bridge.held_dirty_changed.connect(onReceived)
     try:
         _loadGameThreaded(TEAM_GAME)
         autonaApp.settle()
     finally:
-        bridge.held_dirty_changed.disconnect(onDirty)
+        bridge.held_dirty_changed.disconnect(onReceived)
+        channel.unsubscribe(onDirty)
 
     assert len(StateManager.Get("score.2.team.1.player")) == 2
     assert not StateManager.HasPendingChanges("score.2")
     # What a 反映 button reads: the last word is "clean", and true then.
     # (The Qt board's button was checked here until ADR-005 S4ac-3.)
     assert told[0] == (True, True) and told[-1] == (False, False), told
+    assert received and received[-1] == (False, False), received
 
 
 # ── ADR-005 S3e-6 review ─────────────────────────────────────────────────
@@ -646,7 +673,10 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
     holding the lock never returns if the thread it waits on is the one
     that wants the lock. The roster's entry points -- a change under a
     caller's lock, the Web's, a threaded game load, a commit -- call none
-    from inside a notification or with the lock held, on any thread.
+    from inside a notification or with the lock held, on any thread: none
+    of them waits for the GUI thread at all since ADR-005 S-final SF-6c
+    (the threaded game load handed what follows its selection to it,
+    run_sync, outside the lock, until then).
 
     Until ADR-005 S4ac-3 the board built its cards there too, from 反映 on
     the GUI thread with a roster change pending it had not followed yet
@@ -717,8 +747,7 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
             StateManager.CommitHeld("score.2")
         assert AutonaActions.instance.RosterCount(2, 1) == players + 2
         autonaApp.settle()
-    assert waits, "no entry point waited on the GUI thread at all"
-    assert not [wait for wait in waits if wait[1] or wait[2]], waits
+    assert waits == [], waits
     _assertRosterWhole()
 
 
@@ -780,9 +809,10 @@ def test_a_game_switch_forgets_every_pick_a_reload_keeps_them(
     loaded changes to another one -- whatever the characters per player,
     the default three both before and after here -- and kept on the first
     load of a session and on a reload of the same game (the Top 8's rule,
-    from the same snapshot field). Core's, in both shells: run as the shell
-    runs it after a load (bootstrap.wire_game_roster), with no board built,
-    so no card's own rebind is in the way."""
+    from the same snapshot field). Core's, in both shells: run as the
+    loader runs it after a selection (GameLoader._Publish, ADR-005 S-final
+    SF-6c; bootstrap.wire_game_roster until then), with no board built, so
+    no card's own rebind is in the way."""
     from src.core.GameAssetCatalog import GameAssetCatalog
     catalog = GameAssetCatalog.instance
     actions = AutonaActions.instance
@@ -1066,23 +1096,21 @@ def test_a_reload_keeps_resized_characters_and_mains_back_with_a_pick(
     assert _picks(read=StateManager.GetCommitted) == live
 
 
-@pytest.mark.parametrize("shell", ["desktop", "headless"])
 def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
-        world, autonaApp, monkeypatch, shell):
-    """A switch to another game, then at once a reload of it (the GAME
-    menu, the Web's set_game, a tournament's game): the roster each load
-    asks for runs after the load is over, queued onto the main thread --
-    after the reload, here. Each runs with its own load's snapshot, so the
-    switch still empties the previous game's picks; read from the catalog
-    when it runs, both would see the reload ("no switch") and keep them.
-    Both shells' loaders' signals, through the shared wiring
-    (bootstrap.wire_game_roster). Both loaders now hand each load's
-    follow-up to the main thread before they select the next one (a
-    run_sync marshal: ADR-005 S3f-4 / S3f-6), so the two emits come from
-    the test, as from a loader's thread, with the snapshots the two loads
-    published (the headless loader itself: the next test)."""
-    from src import AutonaWebOperations as WebOps
+        world, autonaApp):
+    """A switch to another game, then at once a reload of it (the game
+    menu, the Web's set_game, a tournament's game): each load's roster runs
+    with its own load's snapshot (GameLoader._Publish(snapshot): its
+    `replaced`), so the switch empties the previous game's picks even when
+    the catalog already holds the reload's ("no switch") by then. The
+    loader publishes a load before it selects the next one since ADR-005
+    S3f-4 / S3f-6; until S-final SF-6c the roster ran on the main thread,
+    queued behind the loads (bootstrap.wire_game_roster on the shells'
+    gameLoaded), where a roster reading the catalog would have kept them.
+    Run here as a loader's thread would, after both selections."""
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import GameLoader, _SaveCycle
+
     catalog = GameAssetCatalog.instance
     actions = AutonaActions.instance
     actions.SetRoster(2, 2, 3)
@@ -1091,28 +1119,19 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
     assert all(all(names) for names in picked.values()), picked
     assert StateManager.Get("game.codename") == "tgame"
 
-    if shell == "desktop":
-        # The wiring bootstrap_gui() made is the one that runs.
-        from src.AutonaGameAssetManager import AutonaGameAssetManager
-        signals = AutonaGameAssetManager.instance.signals
-    else:
-        from src.AutonaWebOperations import BoardHost
-        from src.bootstrap import wire_game_roster
-        from src.headless import HeadlessGames
-        monkeypatch.setattr(WebOps, "boardHost", BoardHost())
-        signals = HeadlessGames(catalog, provider=None).signals
-        wire_game_roster(signals.gameLoaded)
     published = [catalog.SelectGame(TEAM_GAME),
                  catalog.SelectGame(TEAM_GAME, reload=True)]
+    assert catalog.Current().replaced is None   # the reload's
 
     def loads():
         for snapshot in published:
-            signals.gameLoaded.emit(snapshot)
+            cycle = _SaveCycle()
+            cycle.Open()
+            GameLoader.instance._Publish(snapshot, cycle)
 
     worker = threading.Thread(target=loads)
     worker.start()
     worker.join()
-    assert _picks() == picked, "the roster ran before both loads were over"
     autonaApp.settle()
     # TEAM_GAME's roster (two a team), every pick and main blank.
     assert _picks() == {f"{team}.{slot}.{group}": ["", "", ""]
@@ -1120,22 +1139,20 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
                         for group in ("character", "mains")}
 
 
-def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
+def test_the_loader_runs_a_switch_s_and_a_reload_s_roster_on_its_thread(
         world, autonaApp, monkeypatch):
-    """The same switch and reload, asked of the headless shell's loader
-    itself (ADR-005 S3f-6; core's GameLoader since S-final SF-6b): each
-    load's follow-up runs on the main thread, which the loader hands it to
-    and waits for (run_sync -> _Publish -> gameLoaded ->
-    bootstrap.wire_game_roster), the switch's roster with the game it
-    replaced. The reload may be selected after it or supersede it
-    while queued (the latest request wins); either way the previous game's
-    picks are gone and the pick is persisted."""
-    from src import AutonaWebOperations as WebOps
-    from src.AutonaWebOperations import BoardHost
-    from src.bootstrap import wire_game_roster
-    from src.core.GameAssetCatalog import GameAssetCatalog
+    """The same switch and reload, asked of the loader itself (ADR-005
+    S3f-6; core's GameLoader since S-final SF-6b, one for both shells since
+    SF-6c): each load's roster runs on the loader's thread, in _Publish
+    (SF-6c; on the main thread, which the loader handed it to and waited
+    for, until then: run_sync -> _Publish -> gameLoaded ->
+    bootstrap.wire_game_roster), the switch's with the game it replaced.
+    The reload may be selected after it or supersede it while queued (the
+    latest request wins); either way the previous game's picks are gone and
+    the pick is persisted."""
+    from src.core.GameLoader import GameLoader
     from src.core.SettingsManager import SettingsManager
-    from src.headless import HeadlessGames
+    from src.core.TaskExecutor import JOB_THREAD_PREFIX
 
     actions = AutonaActions.instance
     actions.SetRoster(2, 2, 3)
@@ -1143,36 +1160,34 @@ def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
     assert all(all(names) for names in _picks().values()), _picks()
     assert StateManager.Get("game.codename") == "tgame"
 
-    monkeypatch.setattr(WebOps, "boardHost", BoardHost())
-    games = HeadlessGames(GameAssetCatalog.instance, provider=None)
-    wire_game_roster(games.signals.gameLoaded)
+    loader = GameLoader.instance
     rosters = []
     applyRoster = actions.ApplyGameRoster
 
+    def onTheLoader():
+        return threading.current_thread().name.startswith(JOB_THREAD_PREFIX)
+
     def recorded(replaced):
-        rosters.append((threading.current_thread() is threading.main_thread(),
-                        replaced))
+        rosters.append((onTheLoader(), replaced))
         return applyRoster(replaced)
 
     monkeypatch.setattr(actions, "ApplyGameRoster", recorded)
-    # Where the follow-up runs: a function slot runs on the main thread
-    # whoever emits, so the roster's thread alone would not tell.
     followUps = []
-    publish = games.loader._Publish
+    publish = loader._Publish
 
     def followUp(snapshot, cycle):
-        followUps.append(threading.current_thread() is threading.main_thread())
+        followUps.append(onTheLoader())
         return publish(snapshot, cycle)
 
-    monkeypatch.setattr(games.loader, "_Publish", followUp)
+    monkeypatch.setattr(loader, "_Publish", followUp)
 
-    games.loader.LoadGameByCodename(TEAM_GAME)
-    games.loader.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
+    loader.LoadGameByCodename(TEAM_GAME)
+    loader.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
     drain_tasks()
 
     assert followUps and all(followUps), followUps
     assert len(rosters) == len(followUps), (rosters, followUps)
-    assert all(onMain for onMain, _ in rosters), rosters
+    assert all(onLoader for onLoader, _ in rosters), rosters
     # The switch replaced the session's game; a reload after it replaced
     # nothing.
     assert rosters[0][1] == "tgame", rosters
@@ -1184,25 +1199,26 @@ def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
                         for group in ("character", "mains")}
 
 
-@pytest.mark.parametrize("shell", ["desktop", "headless"])
+@pytest.mark.parametrize("asked", ["async", "sync"])
 def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
-        world, autonaApp, monkeypatch, shell):
-    """The shutdown comes after a switch's selection, before the main
-    thread runs what follows it (the marshal is abandoned). The selection
-    is published -- and so is what goes with it, written from the loader's
-    thread: the previous game's picks emptied with the new game's roster
-    (committed, on the desktop's held board) and the pick persisted
-    (ADR-005 S3f-4 review). Without it the next launch restored the new
-    game over the old game's characters (desktop: the pick was persisted,
-    the roster never ran) or the old game over the new one's state
-    (headless: neither ran). A desktop load whose Qt model rebuild failed
-    (FAILED) was settled the same way, on the GUI thread, until the Qt model
-    clean-up's PR4 removed the rebuild and its test: this one pins the
-    settle (the loader's _SettleStopped since ADR-005 S-final SF-6b; the
-    desktop's _SettleUnannounced until then, and a headless settle that did
-    not commit, which the held boards of this test show) now."""
-    from src import AutonaWebOperations as WebOps
+        world, autonaApp, monkeypatch, asked):
+    """The shutdown comes after a switch's selection, before what follows
+    it. The selection is published -- and so is what goes with it, on the
+    loader's thread: the previous game's picks emptied with the new game's
+    roster (committed, on the desktop's held board) and the pick persisted
+    (ADR-005 S3f-4 review) -- and the load is STOPPED, told to no one.
+    Without it the next launch restored the new game over the old game's
+    characters (desktop: the pick was persisted, the roster never ran) or
+    the old game over the new one's state (headless: neither ran). It is
+    the one path every load takes (_Publish, its board operation run
+    atShutdown) since ADR-005 S-final SF-6c; a copy of it settled a load
+    whose marshal onto the main thread the shutdown gave up until then (the
+    loader's _SettleStopped since SF-6b; the desktop's _SettleUnannounced,
+    and a headless settle that did not commit, before that). Asked as the
+    header's game menu (async) and a web request (sync, from its thread)
+    ask; this (the main) thread does not pump -- nothing waits for it."""
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import GameLoader
     from src.core.SettingsManager import SettingsManager
     from src.Helpers import AutonaQtHelper
 
@@ -1217,8 +1233,8 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
     picked = _picks(read=StateManager.GetCommitted)
     assert all(all(names) for names in picked.values()), picked
 
-    # The shutdown, from right after the selection: what run_sync gives up
-    # on, and what a load checks before it starts.
+    # The shutdown, from right after the selection: what the load checks
+    # before it starts and once its board operation is over.
     stopping = []
     realSelect = catalog.SelectGame
 
@@ -1234,27 +1250,26 @@ def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
         lambda: "the app is shutting down" if stopping else None)
 
     from src.core.GameLoader import STOPPED
-    if shell == "desktop":
-        from src.AutonaGameAssetManager import AutonaGameAssetManager
-        future = AutonaGameAssetManager.instance.loader.LoadGameByCodename(
-            TEAM_GAME, mods_reload_mode=True)
-        # This (the GUI) thread does not pump: the marshal is never started.
-        assert future.result(10) == STOPPED
-    else:
-        from src.AutonaWebOperations import BoardHost
-        from src.bootstrap import wire_game_roster
-        from src.headless import HeadlessGames
-        monkeypatch.setattr(WebOps, "boardHost", BoardHost())
-        games = HeadlessGames(catalog, provider=None)
-        wire_game_roster(games.signals.gameLoaded)
-        answers = []
-        worker = threading.Thread(target=lambda: answers.append(
-            games.loader.LoadGameByCodename(
-                TEAM_GAME, async_mode=False, mods_reload_mode=True)))
-        worker.start()
-        worker.join(10)
-        assert not worker.is_alive()
-        assert [answer.result(0) for answer in answers] == [STOPPED]
+    told = []
+    GameLoader.loaded.subscribe(told.append)
+    try:
+        if asked == "async":
+            future = GameLoader.instance.LoadGameByCodename(
+                TEAM_GAME, mods_reload_mode=True)
+            assert future.result(10) == STOPPED
+        else:
+            answers = []
+            worker = threading.Thread(target=lambda: answers.append(
+                GameLoader.instance.LoadGameByCodename(
+                    TEAM_GAME, async_mode=False, mods_reload_mode=True)))
+            worker.start()
+            worker.join(10)
+            assert not worker.is_alive()
+            assert [answer.result(0) for answer in answers] == [STOPPED]
+    finally:
+        GameLoader.loaded.unsubscribe(told.append)
+
+    assert told == []
 
     assert stopping and StateManager.saveBlocked == 0
     assert StateManager.GetCommitted("game.codename") == TEAM_GAME
@@ -1325,14 +1340,18 @@ def test_the_same_roster_writes_nothing(world, autonaApp):
     assert actions.RosterCount(2, 2) == 2
 
 
-def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
+def test_a_subscriber_that_raises_on_a_load_leaves_it_published(
         world, autonaApp):
-    """What raises in one of the load's onLoad slots is reported by the
-    emit, and the commit that follows the slots (the loader's _Publish)
-    goes ahead. The board's card sync was
-    the slot here until ADR-005 S4ac-3 removed it, with the cards'
-    destruction that raised (a defence of the cards' lifecycle)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    """What raises where the load is told (GameLoader.loaded, after its
+    cycle) is reported by the channel, which goes on to the next subscriber
+    (the bridge, subscribed at the start, still tells the main thread), and
+    the load is published and committed all the same. It was an onLoad slot
+    until ADR-005 S-final SF-6c, ahead of the commit that followed the
+    slots (the loader's _Publish); the board's card sync was the slot here
+    until ADR-005 S4ac-3 removed it, with the cards' destruction that
+    raised (a defence of the cards' lifecycle)."""
+    from src.StateManagerBridge import StateManagerBridge
+    from src.core.GameLoader import GameLoader
 
     autonaApp.ready(2)
     # A roster of two 反映'd, which the load (tgame: one a team) trims: the
@@ -1344,15 +1363,23 @@ def test_an_onload_slot_that_raises_does_not_stop_the_load_s_commit(
     assert sorted(StateManager.GetCommitted("score.2.team.1.player")) == [
         "1", "2"]
 
-    def _raise():
-        raise RuntimeError("a slot failed")
+    def _raise(_snapshot):
+        raise RuntimeError("a subscriber failed")
 
-    signals = AutonaGameAssetManager.instance.signals
-    signals.onLoad.connect(_raise)
+    announced = []
+
+    def onAnnounced():
+        announced.append(1)
+
+    bridge = StateManagerBridge.instance
+    GameLoader.loaded.subscribe(_raise)
+    bridge.game_loaded.connect(onAnnounced)
     try:
         autonaApp.publishGameLoad()
     finally:
-        signals.onLoad.disconnect(_raise)
+        bridge.game_loaded.disconnect(onAnnounced)
+        GameLoader.loaded.unsubscribe(_raise)
+    assert announced == [1]
     assert not StateManager.HasPendingChanges("score.2"), (
         "the load's commit did not run")
     assert sorted(StateManager.GetCommitted("score.2.team.1.player")) == ["1"]

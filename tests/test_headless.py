@@ -104,15 +104,20 @@ shell = headless.Assemble(app)
 from src import AutonaWebOperations as WebOps
 from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from src.StateManagerBridge import StateManagerBridge
+from src.core.GameLoader import GameLoader
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from src.core.StatePersistence import StatePersistence
 
 provider = AutonaTournamentDataProvider.instance
-games = shell.games
+# bootstrap_core()'s, the desktop's too (ADR-005 S-final SF-6c; the shell's
+# HeadlessGames held one until then).
+loader = GameLoader.instance
 catalog = GameAssetCatalog.instance
 events = []
-games.signals.gameChanged.connect(lambda: events.append("gameChanged"))
+StateManagerBridge.instance.game_loaded.connect(
+    lambda: events.append("game_loaded"))
 AutonaPlayerDB.signals.db_updated.connect(lambda: events.append("db_updated"))
 
 def built(module, name):
@@ -132,22 +137,22 @@ def pump(done, timeout=30):
 
 result = {
     "app_type": type(QCoreApplication.instance()).__name__,
-    # The loader is core's GameLoader (ADR-005 S-final SF-6b), as the
-    # desktop's adapter holds its own.
+    # The loader is core's GameLoader (ADR-005 S-final SF-6b), registered by
+    # bootstrap_core() (SF-6c).
     "selector": provider.selectGameFromStartGGId
-        == games.loader.SelectGameFromStartGGId,
-    "loader": WebOps.loadGameByCodename == games.loader.LoadGameByCodename,
+        == loader.SelectGameFromStartGGId,
+    "loader": WebOps.loadGameByCodename == loader.LoadGameByCodename,
     # A tournament newly loaded turns the mods off through the same loader
     # (ADR-005 S-final SF-5b-1).
-    "mods_off": WebOps.turnModsOff == games.loader.TurnModsOff,
+    "mods_off": WebOps.turnModsOff == loader.TurnModsOff,
     "board_host": type(WebOps.boardHost).__name__,
     # The shell operations (ADR-005 S3e-9): the desktop's alone.
     "shell_operations": [WebOps.openSetSelection is not None,
                          WebOps.renderThumbnail is not None,
                          WebOps.startImageRender is not None],
     "desktop": [name for module, name in (
-        ("src.AutonaGameAssetManager", "AutonaGameAssetManager"),
-        ("src.AutonaHotkeys", "AutonaHotkeys"))
+        ("src.AutonaHotkeys", "AutonaHotkeys"),
+        ("src.AutonaUpdater", "AutonaUpdater"))
         if built(module, name)],
     "seeded": {key: isinstance(StateManager.Get(key), dict)
                for key in ("score.1", "score.2", "score.3",
@@ -229,13 +234,13 @@ result["uploads_after_refusal"] = os.listdir("user_data/.autona-uploads")
 # Every later scan re-applies the provider's game through the selector;
 # the last pick is restored on the first scan only.
 order = []
-games.loader.LoadGameByCodename = (
+loader.LoadGameByCodename = (
     lambda codename, **kwargs: order.append(codename))
 class FakeProvider:
     url = "https://www.start.gg/tournament/x/event/y"
     videogame = 1386
 provider.provider = FakeProvider()
-rescan = threading.Thread(target=games.loader.Scan)
+rescan = threading.Thread(target=loader.Scan)
 rescan.start()
 rescan.join()
 pump(lambda: order)
@@ -332,8 +337,12 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["persisted"] == "probe_game"
     # The upload an earlier run left, removed by the first scan (SF-4b-1).
     assert result["uploads_after_scan"] == []
-    assert "gameChanged" in result["events"]
+    # Told through the bridge (ADR-005 S-final SF-6c; the shell's
+    # gameChanged until then), the player DB's refresh first.
+    assert "game_loaded" in result["events"]
     assert "db_updated" in result["events"]
+    assert result["events"].index("db_updated") < result["events"].index(
+        "game_loaded")
     # ...and the player DB followed it as the desktop's does: the same
     # normalised mains in /playerdb, its push and local_players.json, key
     # order included (the golden is the desktop's model build's).
@@ -447,17 +456,20 @@ def test_the_registrations_come_before_anything_can_use_them():
     # The provider loads a tournament from UiMounted() (its game through the
     # selector), the scan's re-apply goes through the selector too, and the
     # web server takes requests once started: each registration must be in
-    # place first.
+    # place first. The game loader's (the selector, the loads, the mods-off,
+    # the scan) are bootstrap_core()'s since ADR-005 S-final SF-6c
+    # (tests/test_bootstrap_split.py; this shell made them here for its
+    # HeadlessGames until then).
     steps = _assemble_steps()
-    for registration in ("provider.selectGameFromStartGGId =",
-                         "AutonaWebOperations.loadGameByCodename =",
-                         "AutonaWebOperations.turnModsOff =",
-                         "wire_tournament_data()"):
-        for user in ("provider.UiMounted()", "games.Start()",
+    for registration in ("bootstrap_core()", "wire_tournament_data()"):
+        for user in ("provider.UiMounted()", "GameLoader.instance.Start()",
                      "webserver.start()"):
             assert steps.index(registration) < steps.index(user), (
                 registration, user, steps)
     assert steps.index("wire_web_server()") < steps.index("webserver.start()")
+    # Nothing registered here: what Assemble assigns is its own.
+    assert [step for step in steps if step.endswith(" =")] == [
+        "provider =", "webserver =", "shell.webserver ="], steps
 
 
 # ── stopping ─────────────────────────────────────────────────────────────

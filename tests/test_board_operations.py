@@ -431,12 +431,13 @@ TEAM_LOGO = Path("user_data") / "team_logo" / "alpha.png"
 
 
 def _gameLoaded():
-    """What a game load runs: what the shared wiring writes (bootstrap.
-    wire_game_roster -> ApplyGameRoster; it was the board's handler's until
-    ADR-005 S3e-6, the set length until S4t) and the commit the asset
-    adapter runs after every slot -- of what the load wrote, recorded (the
-    fix of 2026-11-12; nothing else is pending here, so it publishes what
-    the whole board's commit did). The board's own onLoad handler, which
+    """What a game load runs after its selection (the loader's _Publish,
+    ADR-005 S-final SF-6c; the shared wiring bootstrap.wire_game_roster on
+    the shells' gameLoaded until then): the roster (ApplyGameRoster; it was
+    the board's handler's until ADR-005 S3e-6), the set length (since S4t)
+    and the commit -- of what the load wrote, recorded (the fix of
+    2026-11-12; nothing else is pending here, so it publishes what the
+    whole board's commit did). The board's own onLoad handler, which
     rendered and wrote nothing, ran in between until S4ac-3."""
     actions = AutonaActions.instance
     with StateManager.RecordHeldWrites() as written:
@@ -1901,8 +1902,9 @@ S2E_CHANGES = {
 S2E_SINGLES_CHANGES = dict(S2E_CHANGES)
 
 # ADR-005 S3e-6. The counts in one cycle (S3E6_CHANGES), and the game load:
-# its roster is the shared wiring's now (bootstrap.wire_game_roster ->
-# AutonaActions.ApplyGameRoster, _gameLoaded), written ahead of the board's
+# its roster is the loader's now (GameLoader._Publish ->
+# AutonaActions.ApplyGameRoster, _gameLoaded; the shared wiring's until
+# ADR-005 S-final SF-6c), written ahead of the board's
 # onLoad handler instead of from it, in one cycle with its slot-count
 # change. What it writes is the recording's: the same game again (the
 # load the recording ran), so the resized slots keep their first picks.

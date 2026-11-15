@@ -1,13 +1,14 @@
-"""The game loader both shells share (ADR-005 S-final SF-6b).
+"""The game loader both shells share (ADR-005 S-final SF-6b; on its own
+thread from end to end since SF-6c).
 
 Until SF-6b the desktop's asset adapter (src/AutonaGameAssetManager.py) and
 the headless loader (src/headless.HeadlessGames) each held a copy of the
-same design (S3f-4, S3f-6), and they had drifted apart: the headless load
-published its selection alone and its roster in a cycle of its own, wrote
-the pick ahead of the roster, did not commit a load the shutdown stopped,
-returned nothing and showed no footer progress. This is the desktop's, for
-both: the shells keep only their notifications (their Qt signals: the
-`announce` / `scanned` callables) and what they register.
+same design (S3f-4, S3f-6), and they had drifted apart. SF-6b made the
+desktop's the one loader of both; SF-6c removed the adapters with what they
+still did (their Qt signals and the marshal onto the main thread): the
+loader is bootstrap_core()'s (`GameLoader.instance`), and it tells what
+happened through core's channels (`loaded`, `scanned`), which the Qt bridge
+turns into signals (StateManagerBridge.game_loaded / games_scanned).
 
 What it does:
 
@@ -15,32 +16,32 @@ What it does:
   scan -- the games an asset job moved aside put back first -- and, once,
   the last pick restored after it (SELECTED_GAME_CODENAME);
 - the scan (Scan; AssetPackService's after an install or import): the
-  catalog's ScanGames on the calling job, the shell told (`scanned`), then
-  on the main thread the provider's game re-applied (`afterScan`) and the
-  startup restore;
+  catalog's ScanGames on the calling job, `scanned` told (the web server's
+  games_changed), then on the main thread the provider's game re-applied
+  (`afterScan`) and the startup restore;
 - the loads (LoadGameByCodename), on one TaskExecutor job at most -- the
   loader -- which takes the latest request until none waits: a request
   still waiting when a newer one comes is not loaded (SUPERSEDED);
-- one load: the selection in one save cycle opened on the loader's thread
-  (_SaveCycle), what follows it -- the announcement: the shell's gameLoaded
-  (bootstrap.wire_game_roster: the roster, the set length, the commit) and
-  its onLoad / gameChanged (the pick persisted, the player DB, the web
-  server's push) -- as one board operation, recorded (StateManager
-  .RecordHeldWrites), and the cycle closed at its end (_Publish);
+- one load, on the loader's thread: the selection in one save cycle
+  (_SaveCycle), then what follows it -- the roster, the set length and
+  their commit, the pick persisted -- as one board operation, recorded
+  (StateManager.RecordHeldWrites), the cycle closed at its end, and once
+  that operation is over `loaded` told (the player DB's refresh, the web
+  server's push) unless the app is going away (_Publish);
 - the modded content turned off when a tournament is loaded (TurnModsOff):
   an intent the loader holds and applies to the loads it takes next (below).
 
-The thread model is still the one SF-6b found: what follows a selection is
-handed to the main thread and waited for there (`marshal`: the shells'
-run_sync; MarshalAborted when the app goes away first, and the loader then
-writes it itself: _SettleStopped). SF-6c drops the marshal.
+Nothing here waits for the main thread (SF-6c): what follows a selection
+ran there, handed over and waited for (run_sync), until then, and a load
+the shutdown caught in that wait was settled by a copy of it
+(_SettleStopped). The one way onto the main thread is `later`, not waited
+for: what follows a scan.
 
 Injected (core imports no Qt and no web layer): `runOnBoard(op,
 atShutdown=False)` (the board host's Run), `later(fn)` (run on the main
 thread once its event loop is back, not waited for), `unavailable()` (why a
-call posted to the main thread now would not run, or None), `isMainThread()`,
-`marshal(fn)` (run on the main thread and wait; raises MarshalAborted),
-`announce(snapshot)`, and optionally `scanned()` and `afterScan()`.
+call posted to the main thread now would not run, or None: the app is going
+away), `isMainThread()`, and optionally `afterScan()`.
 bootstrap.make_game_loader builds one with the shells' common hooks.
 """
 import threading
@@ -49,6 +50,7 @@ from concurrent.futures import Future
 
 from loguru import logger
 
+from .Observable import ObserverChannel
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StatusService import StatusService
@@ -65,13 +67,6 @@ FAILED = "failed"           # logged
 
 # Where the last pick is kept between launches.
 SELECTED_GAME_SETTING = "SELECTED_GAME_CODENAME"
-
-
-class MarshalAborted(RuntimeError):
-    """The injected `marshal` gave up on a call the main thread had not
-    started, because it never would (the app is shutting down; the event
-    loop has exited). The call never runs. (SF-6b only: SF-6c drops the
-    marshal.)"""
 
 
 class _LoadRequest:
@@ -96,11 +91,15 @@ class _LoadRequest:
 
 class _SaveCycle:
     """The one save cycle of a game load, opened on the loader's thread and
-    closed at the end of _Publish (on the main thread while the loader
-    marshals it there): one BlockSaving, then one ReleaseSaving, whichever
-    thread gets to it first (agent-pitfalls #6). The close publishes --
-    unless another thread's SaveBlock is open then: the last block to close
-    publishes, on its thread."""
+    closed there too: at the end of _Publish, or by the load when _Publish
+    did not get to it (skipped, failed first). One BlockSaving, then one
+    ReleaseSaving (agent-pitfalls #6), whichever caller gets to it first --
+    under a lock, so two closes never both release (one thread closes it
+    since ADR-005 S-final SF-6c, when the main thread stopped closing it in
+    the marshalled _Publish; the lock costs nothing and keeps the close
+    safe for a caller on another thread: SF-6c review). The close
+    publishes -- unless another thread's SaveBlock is open then: the last
+    block to close publishes, on its thread."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -121,17 +120,35 @@ class _SaveCycle:
 
 
 class GameLoader:
+    # bootstrap_core()'s, for both shells (ADR-005 S-final SF-6c; each
+    # shell's adapter held its own until then).
+    instance = None
+
+    # Core's notifications (ADR-005 S-final SF-6c; the shells' Qt signals
+    # until then), class channels as AutonaActions.battleFormatChanges: the
+    # Qt bridge subscribes when it is built, before the loader is, and turns
+    # them into StateManagerBridge.game_loaded / games_scanned.
+    #
+    # `loaded(snapshot)`: a load is published -- the selection, the roster
+    # and its commit, the pick persisted, the save cycle closed -- on the
+    # loader's thread, outside the board host's lock and the load's
+    # recording (what a subscriber writes is not the load's); not told for a
+    # load the shutdown came to first (STOPPED). The snapshot is the load's own
+    # GameAssetSnapshot (the catalog's Current() can be a later load's by
+    # the time a subscriber reads it).
+    loaded = ObserverChannel("game_loaded")
+    # `scanned()`: the games were scanned, on the scan's job, ahead of the
+    # provider's game and the startup restore (the web server's
+    # games_changed: ADR-005 S-final SF-3a).
+    scanned = ObserverChannel("games_scanned")
+
     def __init__(self, catalog, *, runOnBoard, later, unavailable,
-                 isMainThread, marshal, announce, scanned=None,
-                 afterScan=None):
+                 isMainThread, afterScan=None):
         self.catalog = catalog
         self._runOnBoard = runOnBoard
         self._later = later
         self._unavailable = unavailable
         self._isMainThread = isMainThread
-        self._marshal = marshal
-        self._announce = announce
-        self._scanned = scanned
         self._afterScan = afterScan
 
         # The loads (ADR-005 S3f-4 review): one loader job at most, taking
@@ -162,7 +179,8 @@ class GameLoader:
     def Start(self):
         """The startup's, once (the window's UiMounted, the headless
         Assemble): the start.gg character table refreshed, the first scan,
-        and the last pick restored after it."""
+        and the last pick restored after it. Not from a job lane (it
+        submits the scan)."""
         self.DownloadStartGGCharacters()
         self._pendingRestore = True
         TaskExecutor.instance.submit(self._FirstScan, task_name="game scan")
@@ -177,14 +195,14 @@ class GameLoader:
     def Scan(self):
         """The scan, on the calling thread -- a job: the startup's, or an
         asset job's (AssetPackService.scan; a job may not submit another,
-        so it scans on its own). The shell is told from here (`scanned`:
-        the web server's games_changed), then the main thread re-applies
-        the provider's game (`afterScan`) and, after the first scan, the
-        last pick -- in that order, so the restore wins. A scan that raises
-        is logged by its job and asks for nothing."""
+        so it scans on its own). `scanned` is told from here (the web
+        server's games_changed; the shells' onLoadAssets / gamesScanned
+        until ADR-005 S-final SF-6c), then the main thread re-applies the
+        provider's game (`afterScan`) and, after the first scan, the last
+        pick -- in that order, so the restore wins. A scan that raises is
+        logged by its job and asks for nothing."""
         self.catalog.ScanGames()
-        if self._scanned is not None:
-            self._scanned()
+        self.scanned.notify()
         self._later(self._OnScanned)
 
     def _FirstScan(self):
@@ -240,10 +258,11 @@ class GameLoader:
 
     @staticmethod
     def PersistSelectedGame():
-        """The loaded game as the next launch's pick. Connected first to
-        the shell's announcement (onLoad / gameChanged), so it runs inside
-        the load's board operation, ahead of the other slots; called by
-        _SettleStopped otherwise (SettingsManager takes its own lock)."""
+        """The loaded game as the next launch's pick: written by every
+        published load, inside its board operation after the roster's
+        commit, on the loader's thread (_Publish; the first slot of the
+        shells' announcement until ADR-005 S-final SF-6c). SettingsManager
+        takes its own lock, after the board host's."""
         SettingsManager.Set(
             SELECTED_GAME_SETTING,
             StateManager.Get("game.codename", "") or "")
@@ -270,9 +289,19 @@ class GameLoader:
         game": the tournament URL cleared, which keeps what is loaded) is
         SKIPPED at once, done() and all, on the calling thread. Off: returns
         once the attempt is over (below) -- from a thread other than the
-        main one only (a web request: AutonaWebOperations.set_game), since
-        the loader hands what follows the selection to the main thread; on
-        the main thread it raises RuntimeError.
+        main one only (a web request: AutonaWebOperations.set_game); on the
+        main thread it raises RuntimeError: its event loop would stop for
+        the whole load, and a caller inside a board operation would wait
+        for a loader waiting for its lock. Never make one from inside a
+        board operation (the board host's Run) on any thread, nor holding
+        StateManager.lock: it waits for the loader, whose _Publish waits
+        for those locks -- a deadlock the guard does not catch, as it looks
+        at the main thread only (ADR-005 S-final SF-6c review). Over means
+        published: the game, its roster and the pick are in by then; what
+        `loaded` sets off on the main thread (the web push, the player DB's
+        refresh) is queued there and may still be to come (ADR-005 S-final
+        SF-6c; it had run too until then, when the main thread ran what
+        follows a load).
 
         The latest request wins: a request still waiting for the loader when
         a newer one comes is not loaded (SUPERSEDED, nothing selected), so
@@ -303,9 +332,9 @@ class GameLoader:
             return request.future
         if not async_mode and self._isMainThread():
             raise RuntimeError(
-                "a synchronous game load waits for the loader, which hands "
-                "what follows the selection to the main thread: it cannot "
-                "be made from the main thread")
+                "a synchronous game load waits for the loader: it cannot be "
+                "made from the main thread, whose event loop would stop for "
+                "the whole load")
 
         request = _LoadRequest(codename, mods_active, mods_reload_mode, done)
         orphan = None
@@ -531,12 +560,11 @@ class GameLoader:
         progress = StatusService.Progress(
             "assets_load", {"codename": request.codename}, every=5)
         try:
-            # Checked before anything is written. Once the app is shutting
-            # down, a load that waited for the loader would publish its
-            # selection to state.json without what goes with it -- the pick,
-            # the roster -- which the main thread would no longer run: the
-            # next launch would restore the previous game over picks this
-            # one forgot.
+            # Checked before anything is written: once the app is shutting
+            # down, a load that waited for the loader is not started (the
+            # shutdown is waiting for the loader to end; the load would only
+            # hold it up). One the shutdown comes to after its selection is
+            # finished and published all the same, unannounced (_Publish).
             reason = self._unavailable()
             if reason is not None:
                 logger.info(
@@ -552,26 +580,29 @@ class GameLoader:
             progress.Close()
 
     def _Load(self, codename, mods_active, mods_reload_mode, progress):
-        # The loader's load: the selection here, what follows it on the main
-        # thread (_Publish, marshalled). Returns the outcome.
+        # The loader's load, all of it on the loader's thread (ADR-005
+        # S-final SF-6c; what follows the selection was marshalled onto the
+        # main thread until then): the selection, then _Publish. Returns the
+        # outcome.
         #
         # One save cycle for the whole load -- the selection's writes and
-        # those of the announcement's slots (the roster, onLoad's) -- opened
+        # those of what follows it (the roster and its commit) -- opened
         # here and closed at the end of _Publish, so the cycle normally
-        # publishes there and its notifications (state_updated, the held
-        # ones) run there, direct, inside StateManager.lock (agent-pitfalls
-        # #17). Not when another thread's SaveBlock is open at that moment:
-        # the last block to close publishes, on its own thread. One
+        # publishes there, on this thread, and its notifications
+        # (state_updated, the held ones) run there inside StateManager.lock
+        # (agent-pitfalls #17); the bridge queues them to the main thread's
+        # receivers. Not when another thread's SaveBlock is open at that
+        # moment: the last block to close publishes, on its own thread. One
         # BlockSaving, one ReleaseSaving on every path (agent-pitfalls #6):
-        # _SaveCycle releases once, from _Publish or, when it did not run
-        # (skipped, aborted, failed first), from here. Other threads' board
+        # _SaveCycle releases once, from _Publish or, when it did not get to
+        # it (skipped, failed first), from here. Other threads' board
         # operations wait while _Publish runs (it holds the board host's
-        # lock), and their core-direct writes meanwhile (score:adjust)
-        # land in the cycle; neither those nor what is written while this
-        # thread selects go out with the load: its commit publishes what the
-        # load wrote (_Publish records it). The catalog's writer lock is
-        # released by the time the main thread is waited on (SelectGame
-        # returned): no board operation is run under it.
+        # lock), and their core-direct writes meanwhile (score:adjust) land
+        # in the cycle; neither those nor what is written while this thread
+        # selects go out with the load: its commit publishes what the load
+        # wrote (_Publish records it). The catalog's writer lock is released
+        # by the time the board host's lock is taken (SelectGame returned):
+        # no board operation is run under it.
         self.catalog.ReloadStartGGCharacters()
         cycle = _SaveCycle()
         cycle.Open()
@@ -581,72 +612,91 @@ class GameLoader:
                 progress=progress)
             if snapshot is None:
                 return SKIPPED
-            try:
-                self._marshal(lambda: self._Publish(snapshot, cycle))
-            except MarshalAborted as aborted:
-                logger.info(f"Game load of {codename} stopped: {aborted}")
-                self._SettleStopped(snapshot)
+            stopped = self._Publish(snapshot, cycle)
+            if stopped is not None:
+                logger.info(f"Game load of {codename} stopped: {stopped}")
                 return STOPPED
             return LOADED
         finally:
             cycle.Release()
 
     def _Publish(self, snapshot, cycle):
-        # The load announced -- the shell's gameLoaded (the roster, the set
-        # length and the commit: bootstrap.wire_game_roster) ahead of its
-        # onLoad / gameChanged (the pick persisted, the player DB's refresh,
-        # the web server's push), each slot run here, in connection order --
-        # and last the load's save cycle closed, which publishes what the
-        # commit queued. So a load that returns has had all of them run:
-        # what set_game's "OK" means.
+        # What follows the selection, on the loader's thread, as one board
+        # operation (the board host's Run, under its lock; ADR-005 S4ad
+        # review), so no board operation of another thread lands between
+        # the roster, the commit and the close -- then, that operation over,
+        # the load told:
         #
-        # All of it one board operation (the board host's Run, under its
-        # lock; ADR-005 S4ad review): no board operation of another thread
-        # lands between the roster, the slots and the close. Nothing in here
-        # waits for another thread (the slots take the settings' / player
-        # DB's locks, which come after this one, and queue the rest). What
-        # another thread writes meanwhile all the same (a core-direct write:
-        # score:adjust), or wrote while the loader selected, is not the
-        # load's: the commit publishes what the load wrote -- recorded here
-        # from the announcement to the close (StateManager.RecordHeldWrites;
-        # the wiring's recording joins it) -- and leaves the rest behind 反映.
-        # The load's writes are told by thread: a slot that writes held keys
-        # from another thread is someone else to the commit.
+        # - the roster (AutonaActions.ApplyGameRoster: the boards to the
+        #   game's players per team, the previous game's picks emptied on a
+        #   switch -- `replaced`, the load's own: a later load's snapshot
+        #   could say "no switch") and the set length (RepublishBestOfs),
+        #   then their commit (CommitGameLoad), even when they raise -- what
+        #   bootstrap.wire_game_roster did on the shells' gameLoaded until
+        #   ADR-005 S-final SF-6c;
+        # - the pick persisted (the first slot of their onLoad /
+        #   gameChanged until then);
+        # - the save cycle closed, which publishes what the commit queued;
+        # - `loaded` told -- after the close, so the bridge queues the web
+        #   server's full-state push behind the load's delta (a push queued
+        #   first would reach the clients ahead of that delta), and outside
+        #   the board operation and its recording (a subscriber neither holds
+        #   the board host's lock nor writes as the load) -- unless the app
+        #   is going away (`unavailable()`): returned then, and the load is
+        #   STOPPED. A load the shutdown comes to after its selection is
+        #   published all the same, so the state -- and state.json -- holds
+        #   one game: the selection with its roster and pick (ADR-005 S3f-4
+        #   reviews; until SF-6c a copy of this wrote it when the marshal
+        #   gave the main thread's call up: _SettleStopped). `atShutdown`:
+        #   the board host refuses a board operation off the main thread
+        #   once the app is shutting down (the 503 a late request gets), and
+        #   this one is a load's that is under way.
+        #
+        # Returns the reason the load was not told (`unavailable()`'s), or
+        # None. The roster's steps and the pick are each isolated as the
+        # shells' slots were (emit reported a slot's exception and went
+        # on): logged, and the load goes on -- LOADED. What else raises in
+        # here fails the load (FAILED); the cycle is closed all the same.
+        #
+        # Nothing in here waits for another thread (the roster takes the
+        # state's lock, the pick the settings'; both come after the board
+        # host's). What another thread writes meanwhile (a core-direct
+        # write: score:adjust), or wrote while the loader selected, is not
+        # the load's: the commit publishes what the load wrote -- recorded
+        # here from the roster to the close (StateManager.RecordHeldWrites)
+        # -- and leaves the rest behind 反映. The load's writes are told by
+        # thread: a write from another thread is someone else's.
+        from .Actions import AutonaActions
+        actions = AutonaActions.instance
+        replaced = getattr(snapshot, "replaced", None)
+        stopped = []
+
         def publish():
-            with StateManager.RecordHeldWrites():
+            with StateManager.RecordHeldWrites() as written:
                 try:
-                    # A Qt signal's slots' exceptions do not reach here:
-                    # emit reports them and goes on.
-                    self._announce(snapshot)
+                    try:
+                        try:
+                            actions.ApplyGameRoster(replaced)
+                            actions.RepublishBestOfs()
+                        finally:
+                            # Committed whatever the roster did: a load's
+                            # writes are not left waiting behind 反映.
+                            actions.CommitGameLoad(written)
+                    except Exception:
+                        logger.exception(
+                            "The loaded game's roster could not be written")
+                    try:
+                        self.PersistSelectedGame()
+                    except Exception:
+                        logger.exception(
+                            "The loaded game could not be kept for the "
+                            "next launch")
                 finally:
                     cycle.Release()
 
-        self._runOnBoard(publish)
-
-    def _SettleStopped(self, snapshot):
-        # The selection is in the state and goes out with the load's cycle,
-        # but the load will not be announced: the shutdown (or the event
-        # loop's end) came first, and the marshal gave the call up (STOPPED;
-        # on the loader's thread). What the announcement's slots would have
-        # written after it is written here, in that cycle, so the state --
-        # and state.json -- holds one game (ADR-005 S3f-4 reviews): the
-        # roster the load asks for (the previous game's picks emptied),
-        # committed as an announced load commits it (what the roster wrote,
-        # recorded), then the pick persisted. Core's operations, through the
-        # board host as the announced load's (its lock, on this thread).
-        # `atShutdown`: the host refuses a board operation off the main
-        # thread once the app is shutting down (the 503 a late request
-        # gets), and this one is that shutdown's own write. The web push and
-        # the player DB refresh are left: the app is going away. (The
-        # headless loader did not commit here until SF-6b: on a held board
-        # the emptied picks stayed pending.)
-        from .Actions import AutonaActions
-        actions = AutonaActions.instance
-
-        def settle():
-            with StateManager.RecordHeldWrites() as written:
-                actions.ApplyGameRoster(getattr(snapshot, "replaced", None))
-                actions.CommitGameLoad(written)
-
-        self._runOnBoard(settle, atShutdown=True)
-        self.PersistSelectedGame()
+        self._runOnBoard(publish, atShutdown=True)
+        reason = self._unavailable()
+        if reason is not None:
+            return reason
+        self.loaded.notify(snapshot)
+        return None

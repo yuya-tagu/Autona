@@ -1,5 +1,5 @@
 {
- "about": "desktop: tgame reloaded with mods on, with tgame picks applied",
+ "about": "tgame reloaded with mods on, with tgame picks applied",
  "writes": [
   [
    "loader",
@@ -14,25 +14,25 @@
    "true"
   ],
   [
-   "main",
+   "loader",
    "set",
    "score.1.team.1.player.1.character",
    "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
   ],
   [
-   "main",
+   "loader",
    "set",
    "score.1.team.1.player.1.mains",
    "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
   ],
   [
-   "main",
+   "loader",
    "set",
    "score.2.team.1.player.1.character",
    "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
   ],
   [
-   "main",
+   "loader",
    "set",
    "score.2.team.1.player.1.mains",
    "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
@@ -41,7 +41,7 @@
  "published": [
   {
    "revision": 1,
-   "role": "main",
+   "role": "loader",
    "delta": "[{\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"character\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"team\", \"1\", \"player\", \"1\", \"mains\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"character\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 2], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"team\", \"1\", \"player\", \"1\", \"mains\", 3], \"action\": \"dictionary_item_added\", \"value\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"game\", \"mods_active\"], \"action\": \"values_changed\", \"value\": true, \"old_value\": \"unknown___\", \"type\": \"<class 'bool'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
   }
  ],
@@ -58,7 +58,7 @@
  ],
  "settings": [
   [
-   "main",
+   "loader",
    "SELECTED_GAME_CODENAME",
    "tgame"
   ]
@@ -88,66 +88,58 @@
    }
   ],
   [
-   "main",
+   "loader",
    "roster",
    null
   ],
   [
-   "main",
+   "loader",
    "held dirty",
    "score.1",
    true
   ],
   [
-   "main",
+   "loader",
    "held dirty",
    "score.2",
    true
   ],
   [
-   "main",
+   "loader",
    "best of"
   ],
   [
-   "main",
+   "loader",
    "commit"
   ],
   [
-   "main",
-   "gameLoaded",
-   "tgame",
-   null
-  ],
-  [
-   "main",
+   "loader",
    "settings",
    "SELECTED_GAME_CODENAME",
    "tgame"
   ],
   [
-   "main",
-   "player DB"
-  ],
-  [
-   "main",
-   "announced"
-  ],
-  [
-   "main",
+   "loader",
    "published",
    1
   ],
   [
-   "main",
+   "loader",
    "held dirty",
    "score.1",
    false
   ],
   [
-   "main",
+   "loader",
    "held dirty",
    "score.2",
    false
+  ],
+  [
+   "loader",
+   "loaded",
+   "tgame",
+   null
   ],
   [
    "loader",
@@ -157,6 +149,14 @@
    "loader",
    "done",
    "tgame with mods"
+  ],
+  [
+   "main",
+   "player DB"
+  ],
+  [
+   "main",
+   "game_loaded"
   ]
  ],
  "answers": [

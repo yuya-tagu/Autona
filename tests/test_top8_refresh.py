@@ -737,41 +737,28 @@ def _top8Characters():
             if player.get("characters")}
 
 
-def _loader(shell, manager):
-    """Load a game the way `shell` does: through the desktop's asset
-    adapter, or the headless shell's (src/headless.py) -- one loader, core's
-    GameLoader, since ADR-005 S-final SF-6b. A job of the task executor
-    (ADR-005 S3f-4 / S3f-6)."""
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    from src.core.GameAssetCatalog import GameAssetCatalog
+def _loader(loader):
+    """Load a game the way both shells do: through bootstrap_core()'s
+    loader (core's GameLoader; one for both shells since ADR-005 S-final
+    SF-6c, a copy each shell's adapter held until then, and each shell's own
+    design until SF-6b). A job of the task executor (ADR-005 S3f-4 /
+    S3f-6)."""
     from tests.conftest import drain_tasks
-    if shell == "desktop":
-        def load(codename, reload=False):
-            # The load job, this (the GUI) thread pumped while it runs.
-            manager.loader.LoadGameByCodename(codename,
-                                              mods_reload_mode=reload)
-            drain_tasks()
-        return load
-
-    from src.headless import HeadlessGames
-    games = HeadlessGames(GameAssetCatalog.instance,
-                          AutonaTournamentDataProvider.instance)
 
     def load(codename, reload=False):
-        # The load job and what follows it on this (the main) thread.
-        games.loader.LoadGameByCodename(codename, mods_reload_mode=reload)
+        # The load job, this (the main) thread pumped while it runs.
+        loader.LoadGameByCodename(codename, mods_reload_mode=reload)
         drain_tasks()
     return load
 
 
-@pytest.mark.parametrize("shell", ["desktop", "headless"])
-def test_a_game_switch_empties_the_characters(bracket, goldenGames, shell):
-    """Through each shell's own loader -- the catalog's SelectGame is the
-    one path they share: the first load of a session keeps the saved
-    characters, the same game again keeps them, another game empties them
-    (only the slots that had one, in the switch's own save cycle)."""
+def test_a_game_switch_empties_the_characters(bracket, goldenGames):
+    """Through the loader -- the catalog's SelectGame is the one path every
+    load takes: the first load of a session keeps the saved characters, the
+    same game again keeps them, another game empties them (only the slots
+    that had one, in the switch's own save cycle)."""
     from src.core.GameAssetCatalog import GameAssetCatalog
-    load = _loader(shell, goldenGames)
+    load = _loader(goldenGames)
     GameAssetCatalog.instance.ResetGameState()    # a session's start
     _reset(bracket)
     _seedCharacters()

@@ -75,12 +75,14 @@ class AutonaPlayerDB:
         On the GUI thread, where the emit has always come from; a caller on
         another thread does not wait for it (see the class docstring).
         Reached from the core's change announcements (Attach) and from a game
-        load: the asset adapter's onLoad on the desktop, HeadlessGames'
-        gameChanged headless -- both inside the load's board operation and
-        save cycle (core's GameLoader._Publish; the headless shell's since
-        ADR-005 S-final SF-6b, after both until then), with the loaded game
-        the catalog's selection. The name is the model's, kept for its
-        callers.
+        load: the bridge's game_loaded (core's GameLoader.loaded, connected
+        by bootstrap_core() for both shells), emitted on the loader's thread
+        once the load is published, so queued here behind the load's delta
+        and ahead of the web server's push (ADR-005 S-final SF-6c; the
+        shells' onLoad / gameChanged until then, run inside the load's board
+        operation and save cycle), with the loaded game the catalog's
+        selection -- or a later load's by then, whose own refresh follows.
+        The name is the model's, kept for its callers.
         """
         # The selection as the model build read it (this snapshot's `game`;
         # the asset adapter's `selectedGame` until ADR-005 S-final SF-6b),

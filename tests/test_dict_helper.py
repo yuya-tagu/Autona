@@ -182,7 +182,7 @@ class TestSetGetUnsetCycle:
 
     def test_game_state_cycle(self):
         state = {}
-        # AutonaGameAssetManager sets game
+        # The game catalog (GameAssetCatalog) sets game
         deep_set(state, "game", {
             "name": "Super Smash Bros. Ultimate",
             "codename": "ssbu",
