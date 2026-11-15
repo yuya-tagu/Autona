@@ -161,14 +161,6 @@ from autona_splash import (
     pick_splash_messages,
 )
 
-from contextlib import contextmanager
-@contextmanager
-def catchtime(msg = ''):
-    from time import perf_counter
-    start = perf_counter()
-    yield lambda: perf_counter() - start
-    logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
-
 # Explicit construction of the core singletons (composition root). This must
 # stay ABOVE the import block below: what is still built at import time there
 # (SettingsManager, LocaleHelper, StartGGDataProvider ...) reads StateManager
@@ -206,9 +198,6 @@ from . import AutonaWindowState as window_state
 
 
 class WindowSignals(QObject):
-    StopTimer = Signal()
-    DetectGame = Signal(int)
-    SetupAutocomplete = Signal()
     UiMounted = Signal()
     GameChanged = Signal()
 
@@ -231,6 +220,14 @@ class Window(QMainWindow):
     # the AppShell's (web/src/AppShell/navSections.json), and the window
     # keeps a page's name, not an index.
     signals = WindowSignals()
+
+    # The longest the loading spinner covers the window waiting for its
+    # first page (_spinnerCap), the operator's answers to the startup's
+    # dialogs and the web server's construction not counted: past it the
+    # spinner goes, with a warning, and the host offers to load the page
+    # again (_OnSpinnerCapReached). A first load on a busy machine takes a
+    # few seconds.
+    SPINNER_CAP_MS = 20_000
 
     def __init__(self):
         super().__init__()
@@ -263,10 +260,6 @@ class Window(QMainWindow):
         splash_msgs = pick_splash_messages()
         splash.set_message(splash_msgs[0], progress=0.05)
 
-        self.programState = {}
-        self.savedProgramState = {}
-        self.programStateDiff = {}
-
         self.setWindowIcon(QIcon(UI.icon_path('icon.ico')))
 
         if not os.path.exists("out/"):
@@ -298,13 +291,6 @@ class Window(QMainWindow):
                 f'./assets/font/LINESeedJP/LINESeedJP-{weight}.ttf')
         app_font = QFont(UI.FONT_FAMILY, UI.FONT_SM)
         QApplication.instance().setFont(app_font)
-
-        self.saveMutex = QMutex()
-
-        self.player_layouts = []
-
-        self.allplayers = None
-        self.local_players = None
 
         # Directly, as the headless shell does: the catalog is the whole
         # load now (no Qt country model to fill). After LoadLocale().
@@ -358,14 +344,24 @@ class Window(QMainWindow):
         host.setObjectName("WebPanels")
         self._webPanelHost = host
         self.setCentralWidget(host)
-        # The page the window reopens on (closeEvent): the one shown, or the
-        # one before a menu page (AutonaWindowState.RememberedPanel).
+        # The page the window reopens on: the one shown, or the one before a
+        # menu page (AutonaWindowState.RememberedPanel). Saved with whether
+        # the AppShell's sidebar is hidden as soon as either changes
+        # (_SaveWindowState) -- once the saved ones have been read, further
+        # on (_windowStateRestored) -- and on close (closeEvent).
         self._panelToRemember = window_state.DEFAULT_PANEL
+        self._windowStateRestored = False
         host.panelChanged.connect(self._OnPanelChanged)
+        host.navCollapsedChanged.connect(self._OnNavCollapsedChanged)
         # The first load's end takes the loading spinner away
-        # (_OnPageLoadFinished: STARTUP phase=panel-shown).
+        # (_OnPageLoadFinished: STARTUP phase=panel-shown), and so does
+        # its cap (SPINNER_CAP_MS), started with it further on.
         self._panelShown = False
         self._loading_overlay = None
+        self._spinnerCap = QTimer(self)
+        self._spinnerCap.setSingleShot(True)
+        self._spinnerCap.setInterval(self.SPINNER_CAP_MS)
+        self._spinnerCap.timeout.connect(self._OnSpinnerCapReached)
         host.pageLoadFinished.connect(self._OnPageLoadFinished)
 
         splash.set_message(splash_msgs[1], progress=0.85)
@@ -405,9 +401,13 @@ class Window(QMainWindow):
 
         # The page and the sidebar the window reopens on. Before the show:
         # the host's first load (once the web server is up) is on this page.
+        # Read before anything is saved (the old keys are read into the new
+        # ones here, only while those are absent): saving on each change
+        # starts after this.
         host.SetNavCollapsed(
             window_state.RestoreNavCollapsed(self.qtSettings))
         host.ShowPanel(window_state.RestorePanel(self.qtSettings))
+        self._windowStateRestored = True
 
         splash.set_message(splash_msgs[2], progress=1.0)
         splash.finish(self)
@@ -419,10 +419,13 @@ class Window(QMainWindow):
         # Cover the window with a spinner until its page is there: the web
         # server is built and started first (_StartWebServer), and the host
         # builds its view and loads its page after that. The spinner goes
-        # on the first load's end (_OnPageLoadFinished), or when the web
-        # server fails to start (OnWebServerStartFailed).
+        # on the first load's end (_OnPageLoadFinished; a view that could
+        # not be built is one), when the web server fails to start
+        # (OnWebServerStartFailed), or past its cap whatever holds it
+        # (_OnSpinnerCapReached).
         self._loading_overlay = LoadingOverlay(self)
         self._loading_overlay.start()
+        self._spinnerCap.start()
 
         # The web server is built once the window and the spinner are
         # painted (Step 4c; ADR-005 S-final SF-5b-3). Building the
@@ -486,79 +489,108 @@ class Window(QMainWindow):
         loading spinner are painted; the spinner stays up until the page has
         loaded (_OnPageLoadFinished). Everything below is the former
         __init__ block, in the same order.
+
+        A server that could not be built or started (an exception here: the
+        construction, the port guard, the start, the wiring) is shown as a
+        start failure, as the server thread's bind failure is
+        (OnWebServerStartFailed): nothing above this catches it, and the
+        spinner would stay up over a page that never comes.
+
+        The spinner's cap (SPINNER_CAP_MS) is held while this runs -- the
+        operator's answers to the LAN question and the port guard, and the
+        server's construction, which holds this thread -- and counts again
+        from its end, whatever happens in it, while the spinner is up.
         """
         if self._shuttingDown or self.webserver is not None:
             return
 
-        # One-time migration prompt: the bind default changed from 0.0.0.0 to
-        # 127.0.0.1, which would silently break LAN OBS setups
-        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
-        # Not while settings.json could not be read (even after the launch's
-        # retries): "not decided yet" is then the stand-in's, and the answer
-        # -- in effect for the run, put back over the file when it can be
-        # read -- would replace the one it holds. That run listens on this PC
-        # only (the default) and writes nothing; the next launch asks.
-        if (not SettingsManager.loadFailed
-                and SettingsManager.Get(
-                    "general.webserver_listen_lan", None) is None):
-            allow = QMessageBox.question(
-                self,
-                QApplication.translate("portguard", "LAN access"),
-                QApplication.translate(
-                    "portguard",
-                    "Autona's web server now listens only on this PC (127.0.0.1) "
-                    "by default for security.\n\n"
-                    "If you connect from other devices on your LAN (OBS on another PC, "
-                    "smartphone remote control), enable LAN access now.\n\n"
-                    "You can change this later under Settings → Network."),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes
-            SettingsManager.Set("general.webserver_listen_lan", allow)
-            # The dialog above ran a nested event loop; the window may have
-            # been closed while it was up.
-            if self._shuttingDown:
+        self._spinnerCap.stop()
+        try:
+            # One-time migration prompt: the bind default changed from
+            # 0.0.0.0 to 127.0.0.1, which would silently break LAN OBS setups
+            # (docs/operations/runtime-operations.md). Ask once, persist the
+            # answer. Not while settings.json could not be read (even after
+            # the launch's retries): "not decided yet" is then the
+            # stand-in's, and the answer -- in effect for the run, put back
+            # over the file when it can be read -- would replace the one it
+            # holds. That run listens on this PC only (the default) and
+            # writes nothing; the next launch asks.
+            if (not SettingsManager.loadFailed
+                    and SettingsManager.Get(
+                        "general.webserver_listen_lan", None) is None):
+                allow = QMessageBox.question(
+                    self,
+                    QApplication.translate("portguard", "LAN access"),
+                    QApplication.translate(
+                        "portguard",
+                        "Autona's web server now listens only on this PC (127.0.0.1) "
+                        "by default for security.\n\n"
+                        "If you connect from other devices on your LAN (OBS on another PC, "
+                        "smartphone remote control), enable LAN access now.\n\n"
+                        "You can change this later under Settings → Network."),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                ) == QMessageBox.StandardButton.Yes
+                SettingsManager.Set("general.webserver_listen_lan", allow)
+                # The dialog above ran a nested event loop; the window may
+                # have been closed while it was up.
+                if self._shuttingDown:
+                    return
+
+            try:
+                # The failure callback runs on the server thread; what it
+                # shows belongs on the GUI thread, which is where the old
+                # queued start_failed signal delivered it too. Nothing else
+                # to hand in: the desktop's side of the web operations (the
+                # game loader, the shell operations) was registered by
+                # bootstrap_gui() (ADR-005 S3e-9; the board host too until
+                # S4ad).
+                self.webserver = WebServer(
+                    on_start_failed=lambda error: AutonaQtHelper.gui_executor(
+                        lambda: self.OnWebServerStartFailed(error)))
+                # Probe the very interface the server will bind (LAN vs
+                # loopback).
+                check_webserver_port(
+                    self.webserver.port, parent=self,
+                    host=self.webserver.host_name)
+                self.webserver.start()
+                # GameChanged -> program_state + characters, db_updated ->
+                # the player DB: the wiring the headless shell makes too.
+                # Here, together with the server: at its old place in
+                # __init__ there is no webserver instance to bind to.
+                # Nothing is lost by connecting after LoadDB() — clients
+                # pull the player DB on demand (GET /playerdb, socket
+                # 'playerdb') and none can be connected before the server
+                # is listening anyway.
+                wire_web_server(
+                    self.webserver, self.signals.GameChanged,
+                    AutonaGameAssetManager.instance.signals.onLoadAssets)
+            except Exception as error:
+                logger.opt(exception=True).error(
+                    "The web server could not be started")
+                self.OnWebServerStartFailed(f"{type(error).__name__}: {error}")
                 return
 
-        # The failure callback runs on the server thread; what it shows
-        # belongs on the GUI thread, which is where the old queued
-        # start_failed signal delivered it too. Nothing else to hand in: the
-        # desktop's side of the web operations (the game loader, the shell
-        # operations) was registered by bootstrap_gui() (ADR-005 S3e-9; the
-        # board host too until S4ad).
-        self.webserver = WebServer(
-            on_start_failed=lambda error: AutonaQtHelper.gui_executor(
-                lambda: self.OnWebServerStartFailed(error)))
-        # Probe the very interface the server will bind (LAN vs loopback).
-        check_webserver_port(
-            self.webserver.port, parent=self, host=self.webserver.host_name)
-        self.webserver.start()
-        # GameChanged -> program_state + characters, db_updated -> the player
-        # DB: the wiring the headless shell makes too. Here, together with
-        # the server: at its old place in __init__ there is no webserver
-        # instance to bind to. Nothing is lost by connecting after LoadDB()
-        # — clients pull the player DB on demand (GET /playerdb, socket
-        # 'playerdb') and none can be connected before the server is
-        # listening anyway.
-        wire_web_server(self.webserver, self.signals.GameChanged,
-                        AutonaGameAssetManager.instance.signals.onLoadAssets)
+            # Release the embedded view that fetches its pages from this
+            # server (the React panel host): it does not even build its view
+            # before this point, and builds it from the event loop after
+            # this returns (ADR-005 S4g review M4).
+            MarkWebServerReady()
 
-        # Release the embedded view that fetches its pages from this server
-        # (the React panel host): it does not even build its view before this
-        # point, and builds it from the event loop after this returns (ADR-005
-        # S4g review M4).
-        MarkWebServerReady()
-
-        log_startup_phase("webserver-ready")
+            log_startup_phase("webserver-ready")
+        finally:
+            if self._loading_overlay is not None and not self._shuttingDown:
+                self._spinnerCap.start()
 
     def _OnPageLoadFinished(self, ok):
         """The shared view's first load is over (AutonaWebPanelHost.
         pageLoadFinished): the loading spinner goes, and STARTUP
         phase=panel-shown marks the page there. A first load that failed for
-        good (the loader's retries used up) takes the spinner away too: the
-        view shows Chromium's error page then, and the next page asked for
-        or the window's return loads it again (the host's _ReloadIfBlank).
-        Once."""
+        good (the loader's retries used up, or a view that could not be
+        built) takes the spinner away too: the host shows its retry view
+        then (AutonaWebPanelHost.ShowLoadFailure; the start failure's label
+        for a view not built). Once; logged even after the spinner's cap
+        took the spinner away."""
         if self._panelShown:
             return
         self._panelShown = True
@@ -568,7 +600,25 @@ class Window(QMainWindow):
         else:
             logger.warning("The window's first page did not load")
 
+    def _OnSpinnerCapReached(self):
+        """The spinner has covered the window SPINNER_CAP_MS (counted from
+        the web server's start, or from the window's show before that)
+        without the first page: whatever holds it -- a load that does not
+        end, a path nothing foresaw -- the operator is not left facing it.
+        It goes with a warning, and the host offers to load the page again
+        (AutonaWebPanelHost.ShowLoadFailure; nothing when the page loaded
+        meanwhile or never can). The first load's end, should it come, is
+        still logged (_OnPageLoadFinished)."""
+        if self._loading_overlay is None:
+            return
+        logger.warning(
+            f"The window's first page did not show within "
+            f"{self.SPINNER_CAP_MS // 1000} s: the loading spinner goes")
+        self._DismissLoadingOverlay()
+        self._webPanelHost.ShowLoadFailure()
+
     def _DismissLoadingOverlay(self):
+        self._spinnerCap.stop()
         overlay, self._loading_overlay = self._loading_overlay, None
         if overlay is not None:
             overlay.finish()
@@ -615,9 +665,38 @@ class Window(QMainWindow):
         """The host shows `panel` now (AutonaWebPanelHost.panelChanged): the
         page to reopen on, unless it is a menu page -- then the one before
         it stays (AutonaWindowState.RememberedPanel), as the Qt sidebar kept
-        its item while a menu page showed."""
+        its item while a menu page showed. Saved at once (_SaveWindowState:
+        nothing is written for a menu page, the page before it being saved
+        already)."""
         self._panelToRemember = window_state.RememberedPanel(
             panel, self._panelToRemember)
+        self._SaveWindowState()
+
+    def _OnNavCollapsedChanged(self, collapsed):
+        """The AppShell's sidebar was hidden or shown again
+        (AutonaWebPanelHost.navCollapsedChanged): saved at once."""
+        self._SaveWindowState()
+
+    def _SaveWindowState(self):
+        """Keep the page to reopen on and whether the AppShell's sidebar is
+        hidden as soon as either changes, so a crash or a forced end --
+        which skip closeEvent -- does not lose them: what differs from the
+        saved values is written (AutonaWindowState.SaveWindowState) and
+        flushed to disk (QSettings.sync). Nothing for the AppShell's other
+        state in its URL (the tournament load failure it told of: the host
+        tells no change for it). Nothing before the saved values -- the old
+        keys among them -- have been read (_windowStateRestored), nor once
+        the window closes (closeEvent saves them with the geometry)."""
+        if not self._windowStateRestored or self._shuttingDown:
+            return
+        try:
+            if window_state.SaveWindowState(
+                    self.qtSettings, self._panelToRemember,
+                    self._webPanelHost.NavCollapsed()):
+                self.qtSettings.sync()
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error saving the page the window reopens on")
 
     def OpenPanel(self, name):
         """Bring the window to the front on page `name` (a React panel's:
@@ -655,7 +734,11 @@ class Window(QMainWindow):
         host's local error view (AutonaWebPanelHost.ShowStartFailure: a
         label, no page) -- and the loading spinner goes. No dialog (ADR-005
         S-final SF-5b-3; a QMessageBox until then): the error view is what
-        the window shows."""
+        the window shows. Also for a server that could not be built or
+        started at all (_StartWebServer's exception): its port is then the
+        one it was to bind (WebServer.Serving)."""
+        port = (self.webserver.port if self.webserver is not None
+                else WebServer.Serving()[0])
         title = QApplication.translate(
             "portguard", "Web server failed to start")
         body = (QApplication.translate(
@@ -665,7 +748,7 @@ class Window(QMainWindow):
             "Change general.webserver_port in user_data/settings.json and "
             "restart Autona, or quit the application that is using the "
             "port.")
-            .replace("{port}", str(self.webserver.port))
+            .replace("{port}", str(port))
             .replace("{error}", error))
         self._webPanelHost.ShowStartFailure(f"{title}\n\n{body}")
         self._DismissLoadingOverlay()

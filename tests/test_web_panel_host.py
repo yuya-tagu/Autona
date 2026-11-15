@@ -24,7 +24,9 @@ for every panel moved to React. What has to hold:
   and shows the panel chosen meanwhile -- after a thaw and after the reload
   of a discarded page alike;
 * a load that failed for good does not leave the view blank for the rest
-  of the process: the next ShowPanel() or reveal loads the page again;
+  of the process: a retry view covers it, whose button -- as the next
+  ShowPanel() or reveal -- loads the page again; a view that cannot be built
+  is told as the start failure is;
 * a shell request (ADR-005 S-final SF-5a-1) is run only when a click opens
   exactly one with the ticket, never reaches the default browser, and its
   answer reaches the page that asked (held while it is frozen, dropped with
@@ -54,14 +56,17 @@ from types import SimpleNamespace
 from urllib.parse import quote, unquote
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QPoint, Qt, QTimer, QUrl
+from qtpy import shiboken
+from qtpy.QtCore import (
+    QCoreApplication, QEvent, QEventLoop, QPoint, QSettings, Qt, QTimer, QUrl)
 from qtpy.QtGui import QGuiApplication
 from qtpy.QtTest import QTest
 from qtpy.QtWebEngineCore import (
     QWebEnginePage, QWebEnginePermission, QWebEngineProfile, QWebEngineSettings)
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import (
-    QDialog, QLabel, QLineEdit, QStackedWidget, QVBoxLayout, QWidget)
+    QDialog, QLabel, QLineEdit, QPushButton, QStackedWidget, QVBoxLayout,
+    QWidget)
 
 from src import AutonaWebPageLifecycle as WPL
 from src import AutonaWebPanelHost as HostModule
@@ -4091,12 +4096,14 @@ def test_a_failed_load_is_loaded_again_on_the_next_panel_shown(
         buildHost, monkeypatch, refusedPort):
     rig = _failedFirstLoad(buildHost, monkeypatch, refusedPort)
     failures = len(rig.loads)
+    assert _loadFailure(rig.host) is not None
 
     rig.host.ShowPanel("second")
 
     # Loaded again, straight on the panel asked for: there was no page
-    # whose router could be told.
+    # whose router could be told. The retry view goes with the failure.
     rig.waitLoaded(count=failures + 1)
+    assert _loadFailure(rig.host) is None
     assert rig.requests == ["/web/app/second?desktop=1&lng=ja"]
     assert rig.path() == ("/web/app/second", "desktop=1&lng=ja")
     assert rig.js("window.__navigations.join()") == ""
@@ -4115,9 +4122,11 @@ def test_a_failed_load_is_loaded_again_when_the_host_comes_back(
     rig.hide()
     assert _waitUntil(lambda: rig.state() == FROZEN)
 
+    # The retry view over the view leaves its return to Active as it was.
     rig.reveal()
 
     rig.waitLoaded(count=failures + 1)
+    assert _loadFailure(rig.host) is None
     assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
     assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
 
@@ -4267,6 +4276,15 @@ def _calls(node):
             for call in ast.walk(node) if isinstance(call, ast.Call)]
 
 
+def _windowClassConstant(name):
+    for node in _windowClass().body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == name):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"src/Autona.py: Window has no {name}")
+
+
 # What the window lost to the AppShell (ADR-005 S-final SF-5b-3): the Qt
 # sidebar and its stack of pages, the menus (Help & Settings, the tournament
 # and game buttons with the mods switch, the battle format), the status bar,
@@ -4292,7 +4310,11 @@ GONE_WINDOW_MEMBERS = (
     "_panelIndexes", "_statusBar", "_webPanelPages", "_webserverErrorBox",
     "gameMenu", "gameSelect", "moddedContentCheck", "setTournamentAction",
     "sidebar", "sidebarExpandButton", "stack", "statusBar", "setStatusBar",
-    "menuBar", "setMenuBar")
+    "menuBar", "setMenuBar",
+    # what nothing read any more (the upstream's state-keeping, the player
+    # lists of the Qt panels)
+    "programState", "savedProgramState", "programStateDiff", "saveMutex",
+    "player_layouts", "allplayers", "local_players")
 
 
 def test_the_window_is_the_shared_view_alone():
@@ -4310,6 +4332,17 @@ def test_the_window_is_the_shared_view_alone():
         members & set(GONE_WINDOW_MEMBERS))
     assert not [name for name in members
                 if name.startswith("_Create") and name.endswith("Panel")]
+    # The window's signals are the two something connects to; the timing
+    # helper nothing called went with the rest.
+    signals = next(node for node in ast.walk(tree)
+                   if isinstance(node, ast.ClassDef)
+                   and node.name == "WindowSignals")
+    assert sorted(target.id for node in signals.body
+                  if isinstance(node, ast.Assign)
+                  for target in node.targets) == ["GameChanged", "UiMounted"]
+    assert not [node for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef)
+                and node.name == "catchtime"]
     # Its one widget is the host (built with the shell adapter:
     # test_the_window_gives_the_host_the_shell_adapter).
     assert [call for call in _calls(_windowMethod("_BuildUi"))
@@ -4402,12 +4435,20 @@ def test_the_window_starts_the_server_under_the_spinner_and_marks_the_page():
     load's end takes the spinner away (phase=panel-shown)."""
     tokens = "".join(_autonaSource().split())
     order = ["host.ShowPanel(window_state.RestorePanel(self.qtSettings))",
+             "self._windowStateRestored=True",
              "self.show()", 'log_startup_phase("core-shown")',
              "self._loading_overlay=LoadingOverlay(self)",
              "self._loading_overlay.start()",
+             # The spinner's cap, with it (_OnSpinnerCapReached).
+             "self._spinnerCap.start()",
              "self._loading_overlay.call_when_painted(self._StartWebServer)"]
     positions = [tokens.index(token) for token in order]
     assert positions == sorted(positions)
+    built = _calls(_windowMethod("_BuildUi"))
+    assert ("self._spinnerCap.setInterval", ["self.SPINNER_CAP_MS"]) in built
+    assert ("self._spinnerCap.timeout.connect",
+            ["self._OnSpinnerCapReached"]) in built
+    assert 0 < _windowClassConstant("SPINNER_CAP_MS") <= 30_000
     # The spinner no longer waits for the Qt panels' queue to drain.
     assert "finish_when_ready" not in tokens
     assert "call_when_finished" not in tokens
@@ -4928,19 +4969,44 @@ class _OverlayStandIn:
         self.finished += 1
 
 
-class _WindowRig:
-    """The Window's real page, startup and failure methods (read out of
-    src/Autona.py, which cannot be imported: agent-pitfalls #1) on a
-    QMainWindow whose one widget is a real host, wired as _BuildUi wires it.
-    Not shown, and the web server not ready: the host builds no view; what
-    it was asked to show is its CurrentPanel(). log_startup_phase records
-    the phases."""
+class _CountingQSettings(QSettings):
+    """The window's QSettings in an .ini file, recording each write and
+    each flush to disk (window_state.SaveWindowState and _SaveWindowState
+    call them from Python)."""
 
-    METHODS = ("_OnPanelChanged", "OpenPanel", "_BringToFront",
-               "_OnPageLoadFinished", "_DismissLoadingOverlay",
+    def __init__(self, path):
+        super().__init__(path, QSettings.Format.IniFormat)
+        self.writes = []
+        self.syncs = 0
+
+    def setValue(self, key, value):
+        self.writes.append((key, value))
+        super().setValue(key, value)
+
+    def sync(self):
+        self.syncs += 1
+        super().sync()
+
+
+class _WindowRig:
+    """The Window's real page, startup, saving and failure methods (read out
+    of src/Autona.py, which cannot be imported: agent-pitfalls #1) on a
+    QMainWindow whose one widget is a real host, wired as _BuildUi wires it,
+    after the saved state's restore (_windowStateRestored), its QSettings an
+    .ini file. Not shown, and the web server not ready: the host builds no
+    view; what it was asked to show is its CurrentPanel().
+    log_startup_phase records the phases; _StartWebServer's server, port
+    guard, wiring and readiness are stand-ins that record their calls into
+    ``calls`` (and raise what ``raises`` holds for their name), and the LAN
+    question is answered already."""
+
+    METHODS = ("_OnPanelChanged", "_OnNavCollapsedChanged",
+               "_SaveWindowState", "OpenPanel", "_BringToFront",
+               "_StartWebServer", "_OnPageLoadFinished",
+               "_OnSpinnerCapReached", "_DismissLoadingOverlay",
                "OnWebServerStartFailed")
 
-    def __init__(self):
+    def __init__(self, settingsPath):
         from loguru import logger
         from qtpy.QtWidgets import QApplication, QMainWindow
 
@@ -4953,36 +5019,91 @@ class _WindowRig:
         assert sorted(node.name for node in window.body) == sorted(
             self.METHODS)
         self.phases = []
-        # Only what the methods may use: a QMessageBox there would be a
-        # NameError.
-        namespace = {"QMainWindow": QMainWindow, "QApplication": QApplication,
-                     "Qt": Qt, "logger": logger,
-                     "window_state": AutonaWindowState,
-                     "log_startup_phase": self.phases.append}
+        self.calls = []
+        self.raises = {}
+        rig = self
+
+        class ServerStandIn:
+            port = 5107
+            host_name = "127.0.0.1"
+
+            def __init__(self, on_start_failed=None):
+                rig._Step("WebServer")
+
+            def start(self):
+                rig._Step("start")
+
+            @staticmethod
+            def Serving():
+                # The settings' port while no server runs.
+                return (5111, False)
+
+        # Only what the methods may use: a QMessageBox there (but for the
+        # LAN question, answered here) would be a NameError.
+        namespace = {
+            "QMainWindow": QMainWindow, "QApplication": QApplication,
+            "Qt": Qt, "logger": logger, "window_state": AutonaWindowState,
+            "log_startup_phase": self.phases.append,
+            "SettingsManager": SimpleNamespace(
+                loadFailed=False, Get=lambda key, default=None: False),
+            "WebServer": ServerStandIn,
+            "check_webserver_port": lambda port, parent=None, host=None: (
+                self._Step("check_webserver_port")),
+            "wire_web_server": lambda *args: self._Step("wire_web_server"),
+            "MarkWebServerReady": lambda: self._Step("MarkWebServerReady"),
+            "AutonaQtHelper": SimpleNamespace(gui_executor=lambda f: f()),
+            "AutonaGameAssetManager": SimpleNamespace(
+                instance=SimpleNamespace(
+                    signals=SimpleNamespace(onLoadAssets=None)))}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
         self.window = w = namespace["Window"]()
         # As _BuildUi.
+        w.SPINNER_CAP_MS = _windowClassConstant("SPINNER_CAP_MS")
+        w.signals = SimpleNamespace(GameChanged=None)
         self.host = host = AutonaWebPanelHost()
         w._webPanelHost = host
         w.setCentralWidget(host)
         w.webserver = SimpleNamespace(port=5107)
         w._shuttingDown = False
         w._panelToRemember = AutonaWindowState.DEFAULT_PANEL
+        w._windowStateRestored = False
         host.panelChanged.connect(w._OnPanelChanged)
+        host.navCollapsedChanged.connect(w._OnNavCollapsedChanged)
         w._panelShown = False
+        w._spinnerCap = QTimer(w)
+        w._spinnerCap.setSingleShot(True)
+        w._spinnerCap.setInterval(w.SPINNER_CAP_MS)
+        w._spinnerCap.timeout.connect(w._OnSpinnerCapReached)
+        host.pageLoadFinished.connect(w._OnPageLoadFinished)
+        self.settingsPath = settingsPath
+        w.qtSettings = self.settings = _CountingQSettings(settingsPath)
+        w._windowStateRestored = True
         self.overlay = _OverlayStandIn()
         w._loading_overlay = self.overlay
-        host.pageLoadFinished.connect(w._OnPageLoadFinished)
+        w._spinnerCap.start()
         # What _BringToFront would do to the window (shown, it would build
         # the host's view): recorded, with the page shown then.
         self.fronted = []
         w._BringToFront = lambda: self.fronted.append(host.CurrentPanel())
 
+    def _Step(self, name):
+        self.calls.append(name)
+        if name in self.raises:
+            raise self.raises[name]
+
+    def onDisk(self):
+        # The .ini file's own text: what was written and synced.
+        path = Path(self.settingsPath)
+        if not path.exists():
+            return {}
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return dict(line.split("=", 1) for line in lines if "=" in line)
+
 
 @pytest.fixture
-def windowRig(qapp, monkeypatch):
+def windowRig(qapp, monkeypatch, tmp_path):
     # The web server is not ready (a host asked for a page registers for the
     # readiness: the list is this test's).
     monkeypatch.setattr(WPL, "_webServerReady", False)
@@ -4991,13 +5112,14 @@ def windowRig(qapp, monkeypatch):
     rigs = []
 
     def build():
-        rig = _WindowRig()
+        rig = _WindowRig(str(tmp_path / f"qt{len(rigs)}.ini"))
         rigs.append(rig)
         return rig
 
     yield build
 
     for rig in rigs:
+        rig.window._spinnerCap.stop()
         rig.window.deleteLater()
         QCoreApplication.sendPostedEvents(rig.window, QEvent.Type.DeferredDelete)
 
@@ -5087,6 +5209,8 @@ def test_the_first_load_takes_the_spinner_away(windowRig, ok):
     assert rig.overlay.finished == 1
     assert rig.window._loading_overlay is None
     assert rig.phases == (["panel-shown"] if ok else [])
+    # The spinner's cap goes with it.
+    assert not rig.window._spinnerCap.isActive()
 
 
 def test_the_window_shows_a_start_failure_in_place_of_its_page(windowRig):
@@ -5104,6 +5228,266 @@ def test_the_window_shows_a_start_failure_in_place_of_its_page(windowRig):
     assert rig.overlay.finished == 1
     assert rig.window._loading_overlay is None
     assert rig.phases == []
+    assert not rig.window._spinnerCap.isActive()
+
+
+def _loadFailure(host):
+    # The retry view while it is the host's (ShowLoadFailure), else None.
+    return host._loadFailure
+
+
+@pytest.mark.parametrize("step, port", [
+    ("WebServer", "5111"),            # not even built: the settings' port
+    ("check_webserver_port", "5107"),
+    ("start", "5107"),
+    ("wire_web_server", "5107")])
+def test_a_web_server_that_cannot_be_started_is_shown_as_a_start_failure(
+        windowRig, step, port):
+    # Raised from the event loop (call_when_painted), nothing above would
+    # catch it: the spinner would stay over a page that never comes. It is
+    # the start failure the server thread's bind failure is.
+    rig = windowRig()
+    w = rig.window
+    w.webserver = None
+    rig.host.ShowPanel("event")
+    rig.raises[step] = OSError("the port guard broke")
+
+    w._StartWebServer()
+
+    label = rig.host.findChild(QLabel, "webPanelStartFailure")
+    assert label is not None
+    assert "OSError: the port guard broke" in label.text()
+    assert port in label.text()
+    assert rig.overlay.finished == 1
+    assert not w._spinnerCap.isActive()
+    assert "MarkWebServerReady" not in rig.calls
+    assert rig.phases == []
+
+
+def test_the_web_server_start_holds_the_spinners_cap_and_counts_it_again(
+        windowRig):
+    # The operator's answers to the startup's dialogs (the LAN question,
+    # the port guard's) and the server's construction are not the page's
+    # wait: the cap is held while they run, and counts from the server's
+    # readiness on.
+    rig = windowRig()
+    w = rig.window
+    w.webserver = None
+    held = []
+    rig.raises = {}
+    real = rig._Step
+
+    def step(name):
+        held.append((name, w._spinnerCap.isActive()))
+        real(name)
+    rig._Step = step
+
+    w._StartWebServer()
+
+    assert rig.calls == ["WebServer", "check_webserver_port", "start",
+                         "wire_web_server", "MarkWebServerReady"]
+    assert all(not active for _name, active in held), held
+    assert w._spinnerCap.isActive()
+    assert w._spinnerCap.remainingTime() > w.SPINNER_CAP_MS - 5_000
+    assert rig.phases == ["webserver-ready"]
+    assert rig.overlay.finished == 0
+    # Once only.
+    w._StartWebServer()
+    assert rig.calls.count("WebServer") == 1
+
+
+def test_the_spinners_cap_takes_it_away_and_offers_to_load_again(windowRig):
+    # Whatever holds the first page (a load that never ends, a path nothing
+    # foresaw): past SPINNER_CAP_MS the spinner goes and the host covers
+    # itself with the retry view. A first load that ends later is still
+    # logged (the host's own load end takes the retry view away:
+    # test_a_load_that_failed_for_good_offers_to_load_it_again).
+    rig = windowRig()
+    w, host = rig.window, rig.host
+    host.ShowPanel("event")
+
+    w._OnSpinnerCapReached()
+
+    assert rig.overlay.finished == 1
+    assert w._loading_overlay is None
+    cover = _loadFailure(host)
+    assert cover is not None and not cover.isHidden()
+    assert cover.findChild(QPushButton, "webPanelRetry") is not None
+    assert rig.phases == []
+    # No view to load again yet (the server is not ready here): its button
+    # has it built as soon as it can be.
+    scheduled = []
+    host._ScheduleView = lambda: scheduled.append(True)
+    cover.findChild(QPushButton, "webPanelRetry").click()
+    assert scheduled == [True]
+    assert host.view is None
+    # Twice: nothing more.
+    w._OnSpinnerCapReached()
+    assert rig.overlay.finished == 1
+    host.pageLoadFinished.emit(True)
+    assert rig.phases == ["panel-shown"]
+
+
+def test_the_spinners_cap_does_nothing_once_the_spinner_is_gone(windowRig):
+    rig = windowRig()
+    rig.host.ShowPanel("event")
+    rig.host.pageLoadFinished.emit(True)
+
+    rig.window._OnSpinnerCapReached()
+
+    assert _loadFailure(rig.host) is None
+    assert rig.overlay.finished == 1
+
+
+def test_the_retry_view_gives_way_to_a_start_failure(windowRig):
+    # Nothing to load again once the page can never load; and nothing to
+    # offer while a loaded page is there.
+    rig = windowRig()
+    host = rig.host
+    host.ShowLoadFailure()
+    cover = _loadFailure(host)
+    assert cover is not None
+    host.ShowLoadFailure()
+    assert _loadFailure(host) is cover
+
+    host.ShowStartFailure("Web server failed to start")
+
+    assert _loadFailure(host) is None
+    assert not shiboken.isValid(cover) or cover.isHidden()
+    host.ShowLoadFailure()
+    assert _loadFailure(host) is None
+    loaded = windowRig().host
+    loaded._loaded = True
+    loaded.ShowLoadFailure()
+    assert _loadFailure(loaded) is None
+
+
+def test_the_retry_and_failure_views_follow_the_programs_language(windowRig):
+    # The .qm the app loads holds the host's words (the .ts is edited by
+    # hand and compiled by scripts/compile_translations.ps1).
+    from qtpy.QtCore import QTranslator
+
+    from tests.conftest import PROJECT_ROOT
+    translator = QTranslator()
+    assert translator.load(str(PROJECT_ROOT / "src" / "i18n" / "Autona_ja.qm"))
+    # The last one installed is asked first, whatever the harness installed.
+    assert QCoreApplication.installTranslator(translator)
+    try:
+        host = windowRig().host
+        host.ShowLoadFailure()
+        cover = _loadFailure(host)
+        assert cover.findChild(QPushButton, "webPanelRetry").text() == "再試行"
+        assert cover.findChild(QLabel).text().startswith(
+            "ページを読み込めませんでした\n\n")
+        host._ViewNotBuilt(RuntimeError("x"))
+        label = host.findChild(QLabel, "webPanelStartFailure")
+        assert label.text().startswith("ページを表示できませんでした\n\n")
+        assert "RuntimeError: x" in label.text()
+        assert "Autona を再起動してください。" in label.text()
+    finally:
+        QCoreApplication.removeTranslator(translator)
+
+
+def test_the_window_saves_its_page_and_sidebar_as_they_change(windowRig):
+    # Not only on close (a crash or a forced end skips closeEvent): each
+    # change is written and flushed to disk at once -- what differs only.
+    rig = windowRig()
+    w, host, settings = rig.window, rig.host, rig.settings
+    page = "http://127.0.0.1:5107/web/app/"
+
+    host.ShowPanel("stream")
+    assert rig.onDisk() == {"lastPanel": "stream", "navCollapsed": "false"}
+    assert settings.syncs == 1
+
+    # A menu page: the page before it stays saved; nothing written.
+    host.ShowPanel("settings")
+    host._OnUrlChanged(QUrl(f"{page}about?desktop=1&lng=ja"))
+    # The tournament load failure the AppShell told of: not saved.
+    host._OnUrlChanged(QUrl(f"{page}about?desktop=1&lng=ja&told=5"))
+    assert settings.syncs == 1
+    assert len(settings.writes) == 2
+
+    # The AppShell's sidebar hidden (its URL): saved.
+    host._OnUrlChanged(QUrl(f"{page}about?desktop=1&lng=ja&nav=collapsed"
+                            "&told=5"))
+    assert rig.onDisk() == {"lastPanel": "stream", "navCollapsed": "true"}
+    assert settings.syncs == 2
+    # The saved page again: nothing written.
+    host.ShowPanel("stream")
+    assert settings.syncs == 2
+    host._OnUrlChanged(QUrl(f"{page}top8?desktop=1&lng=ja"))
+    assert rig.onDisk() == {"lastPanel": "top8", "navCollapsed": "false"}
+    assert settings.syncs == 3
+    assert settings.writes[2:] == [("navCollapsed", True),
+                                   ("lastPanel", "top8"),
+                                   ("navCollapsed", False)]
+
+    # Once the window closes, closeEvent saves (with the geometry): not
+    # here any more.
+    w._shuttingDown = True
+    host.ShowPanel("stats")
+    host.SetNavCollapsed(True)
+    assert settings.syncs == 3
+    assert rig.onDisk()["lastPanel"] == "top8"
+
+
+def test_the_window_saves_nothing_before_the_saved_state_is_read(windowRig):
+    # The old keys are read into the new ones only while those are absent
+    # (AutonaWindowState.RestorePanel): nothing may be written before.
+    rig = windowRig()
+    rig.window._windowStateRestored = False
+
+    rig.host.SetNavCollapsed(True)
+    rig.host.ShowPanel("stream")
+
+    assert rig.settings.writes == []
+    assert rig.settings.syncs == 0
+    assert rig.window._panelToRemember == "stream"
+
+
+def test_the_host_tells_when_the_sidebar_is_hidden_or_back(windowRig):
+    rig = windowRig()
+    host = rig.host
+    told = []
+    host.navCollapsedChanged.connect(told.append)
+    page = "http://127.0.0.1:5107/web/app/event?desktop=1&lng=ja"
+
+    host.SetNavCollapsed(True)
+    host.SetNavCollapsed(True)
+    host._OnUrlChanged(QUrl(f"{page}&nav=collapsed"))
+    host._OnUrlChanged(QUrl(f"{page}&nav=collapsed&told=3"))
+    assert told == [True]
+    host._OnUrlChanged(QUrl(page))
+    assert told == [True, False]
+    host.SetNavCollapsed(False)
+    assert told == [True, False]
+
+
+def test_the_window_saves_where_the_page_or_sidebar_changes_and_on_close():
+    # The call points (the rig above runs the methods; these are what
+    # _BuildUi and closeEvent wire).
+    built = _calls(_windowMethod("_BuildUi"))
+    assert ("host.panelChanged.connect", ["self._OnPanelChanged"]) in built
+    assert ("host.navCollapsedChanged.connect",
+            ["self._OnNavCollapsedChanged"]) in built
+    for handler in ("_OnPanelChanged", "_OnNavCollapsedChanged"):
+        assert ("self._SaveWindowState", []) in _calls(_windowMethod(handler))
+    saving = [call for call, _args in _calls(_windowMethod("_SaveWindowState"))]
+    assert "window_state.SaveWindowState" in saving
+    assert "self.qtSettings.sync" in saving
+    closing = _windowMethod("closeEvent")
+    assert "window_state.SaveWindowState" in [
+        call for call, _args in _calls(closing)]
+    # closeEvent saves itself, past _SaveWindowState's _shuttingDown guard.
+    tokens = "".join(ast.unparse(closing).split())
+    assert tokens.index("self._shuttingDown=True") < tokens.index(
+        "window_state.SaveWindowState(")
+    # No other writer of the saved page.
+    writers = {method.name for method in _windowClass().body
+               if isinstance(method, ast.FunctionDef)
+               and "window_state.SaveWindowState" in [
+                   call for call, _args in _calls(method)]}
+    assert writers == {"_SaveWindowState", "closeEvent"}
 
 
 def test_a_start_failure_shows_its_text_and_builds_no_view(buildHost,
@@ -5141,6 +5525,140 @@ def test_a_start_failure_after_the_view_was_built_hides_it(buildHost):
     # Nothing loaded again (_ReloadIfBlank).
     assert not _waitUntil(lambda: len(rig.requests) > 1, timeout=0.5)
     assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
+
+
+def _gone(widget):
+    # Taken away: hidden, or deleted already (deleteLater).
+    return not shiboken.isValid(widget) or widget.isHidden()
+
+
+def _hostWords(text):
+    # The host's words as the program's language says them: a run may have
+    # a translator installed by an earlier test (the .qm's own words:
+    # test_the_retry_and_failure_views_follow_the_programs_language).
+    return QCoreApplication.translate("webpanel", text)
+
+
+def test_a_load_that_failed_for_good_offers_to_load_it_again(
+        buildHost, monkeypatch, refusedPort):
+    # Chromium's error page has no navigation of the AppShell's to leave it
+    # by: the retry view covers it, and its button loads the page again --
+    # once per click, not in a loop -- until a load succeeds.
+    monkeypatch.setattr(WPL.LocalPageLoader, "LOAD_RETRY_MS", 50)
+    rig = buildHost()
+    finished = []
+    rig.host.pageLoadFinished.connect(finished.append)
+    rig.usePort(refusedPort)
+    rig.host.ShowPanel("shell-check")
+    rig.reveal()
+    attempts = 1 + WPL.LocalPageLoader.MAX_LOAD_RETRIES
+
+    assert _waitUntil(lambda: finished == [False])
+    cover = _loadFailure(rig.host)
+    assert cover is not None and cover.isVisible()
+    assert cover.geometry() == rig.host.rect()
+    # Over the view, which stays on screen (its return to Active loads it
+    # again too).
+    assert rig.host.view.isVisible()
+    text = "\n".join(label.text() for label in cover.findChildren(QLabel))
+    # In the program's language (whichever translator the run installed).
+    assert _hostWords("The page could not be loaded") in text
+    button = cover.findChild(QPushButton, "webPanelRetry")
+    assert button.text() == _hostWords("Retry")
+    assert not _waitUntil(lambda: len(rig.loads) > attempts, timeout=0.5)
+
+    # Still nothing listening: loaded again, failed again, still offered.
+    button.click()
+    assert _waitUntil(lambda: finished == [False, False])
+    assert rig.loads == [False] * (2 * attempts)
+    assert _loadFailure(rig.host) is cover and cover.isVisible()
+
+    # The server is back: the page is there and the retry view goes.
+    rig.usePort(rig.servingPort)
+    button.click()
+    assert _waitUntil(lambda: finished == [False, False, True])
+    assert rig.loads[-1] is True
+    assert _loadFailure(rig.host) is None
+    assert _gone(cover)
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
+
+
+def test_a_first_load_refused_is_a_load_that_failed_for_good(
+        buildHost, monkeypatch):
+    # The host's own load refused (its URL off the Web UI): no document is
+    # behind it, so it is not a page's navigation refused from a loaded
+    # document. The window's spinner must go (pageLoadFinished), and the
+    # retry view comes.
+    monkeypatch.setattr(WPL.LocalPageLoader, "LOAD_RETRY_MS", 50)
+    realPath = HostModule.PanelPath
+    monkeypatch.setattr(HostModule, "PanelPath",
+                        lambda *args, **kwargs: "/not-the-web-ui")
+    rig = buildHost()
+    finished = []
+    rig.host.pageLoadFinished.connect(finished.append)
+    rig.host.ShowPanel("shell-check")
+    rig.reveal()
+
+    assert _waitUntil(lambda: finished)
+    assert finished == [False]
+    assert rig.host.view.page().refusedLast
+    assert rig.requests == []
+    cover = _loadFailure(rig.host)
+    assert cover is not None and cover.isVisible()
+
+    monkeypatch.setattr(HostModule, "PanelPath", realPath)
+    cover.findChild(QPushButton, "webPanelRetry").click()
+    assert _waitUntil(lambda: finished == [False, True])
+    assert _loadFailure(rig.host) is None
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
+
+
+def test_a_page_navigation_refused_from_a_loaded_page_keeps_it(buildHost):
+    # The early return the refused first load no longer takes: the loaded
+    # document is still there, nothing is told and nothing offered.
+    rig = _shown(buildHost)
+    finished = []
+    rig.host.pageLoadFinished.connect(finished.append)
+    document = rig.js("window.__loadId")
+
+    rig.js("void (location.href = 'http://example.invalid/')")
+
+    assert _waitUntil(lambda: rig.host.view.page().refusedLast)
+    assert not _waitUntil(lambda: finished, timeout=0.5)
+    assert _loadFailure(rig.host) is None
+    assert rig.js("window.__loadId") == document
+
+
+def test_a_view_that_cannot_be_built_is_shown_as_a_start_failure(
+        buildHost, monkeypatch):
+    # Built from the event loop (_BuildQueuedView): nothing above would
+    # catch it, and the window's spinner would wait for a first load that
+    # never comes. The start failure's label says so, the first load's end
+    # is told as a failure, and no view is built again.
+    def broken(*args, **kwargs):
+        raise RuntimeError("no renderer")
+    monkeypatch.setattr(HostModule, "LocalPageLoader", broken)
+    rig = buildHost()
+    finished = []
+    rig.host.pageLoadFinished.connect(finished.append)
+    rig.host.ShowPanel("shell-check")
+    rig.stack.setCurrentIndex(0)
+
+    assert _waitUntil(lambda: finished)
+    assert finished == [False]
+    assert rig.host.view is None and rig.host._loader is None
+    label = rig.host.findChild(QLabel, "webPanelStartFailure")
+    assert label is not None and label.isVisible()
+    assert _hostWords("The page could not be shown") in label.text()
+    assert "RuntimeError: no renderer" in label.text()
+
+    rig.hide()
+    rig.host.ShowPanel("second")
+    rig.stack.setCurrentIndex(0)
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.5)
+    assert finished == [False]
+    assert rig.requests == []
 
 
 def test_the_host_follows_the_app_shells_router_and_reloads_on_it(buildHost):

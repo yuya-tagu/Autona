@@ -512,4 +512,34 @@ user_data/settings.json の general.webserver_port を変更して Autona を再
         <translation>更新の確認に失敗しました:
 {0}</translation>
     </message>
+</context><context>
+    <name>webpanel</name>
+    <message>
+        <source>The page could not be loaded</source>
+        <translation>ページを読み込めませんでした</translation>
+    </message>
+    <message>
+        <source>Autona's web server did not answer. Try again, or restart Autona if this keeps happening.</source>
+        <translation>Autona の Web サーバーが応答しませんでした。再試行するか、繰り返す場合は Autona を再起動してください。</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>再試行</translation>
+    </message>
+    <message>
+        <source>The page could not be shown</source>
+        <translation>ページを表示できませんでした</translation>
+    </message>
+    <message>
+        <source>The window's web view could not be created:
+
+{error}
+
+Restart Autona.</source>
+        <translation>ウィンドウの Web ビューを作成できませんでした:
+
+{error}
+
+Autona を再起動してください。</translation>
+    </message>
 </context></TS>

@@ -65,8 +65,10 @@ minimized builds it too (S4g review L14). The first load's end
 (pageLoadFinished) is when the window takes its spinner away (STARTUP
 phase=panel-shown). A web server that fails to start leaves the page
 nothing to load: the host then shows why, in a label of its own, and
-builds no view (ShowStartFailure). From then on it lives for the
-whole process. Through AutonaWebPageLifecycle, loads wait for the web server
+builds no view (ShowStartFailure) -- as it does when the view cannot be
+built (its first load's end is then told as a failure). Once built, the
+view lives for the whole process. Through AutonaWebPageLifecycle, loads
+wait for the web server
 and retry a refused connection, and while the host is off screen the page is
 frozen, then discarded after DISCARD_AFTER_MS. On reveal the page asks the
 server for the full state again; a discarded page is reloaded by Qt and
@@ -81,10 +83,14 @@ many panels moved, using no CPU while frozen; not measured yet, but less
 than an overlay's ~200 MB, most of which is the kuromoji dictionary the Web
 UI does not load. A page nobody typed into is discarded as above.
 
-A load that fails for good (the loader's retries used up, or Qt's reload of
-a discarded page refused) leaves the view on an error page. The next
-ShowPanel() or return to Active loads the panel's page again rather than
-navigating a page that has no panel shell.
+A load that fails for good (the loader's retries used up, or a load with no
+document behind it refused: _OnLoadFinished) leaves the view on an error
+page, with no navigation of the AppShell's to leave it by: the host covers
+it with a retry view of its own (ShowLoadFailure: why, and a button that
+loads the page again), which goes once a load succeeds. The next
+ShowPanel() or return to Active loads the panel's page again too, rather
+than navigating a page that has no panel shell. Not on a timer: a failing
+server is loaded again once per operator action, not in a loop.
 
 The right-click menu offers editing only (ContextActions): the view is a
 panel, not a browser, so Chromium's back / reload / view-source entries are
@@ -123,13 +129,13 @@ from collections import namedtuple
 from urllib.parse import parse_qsl, quote, urlencode
 
 from qtpy import shiboken
-from qtpy.QtCore import Qt, QTimer, QUrl, Signal
+from qtpy.QtCore import QCoreApplication, Qt, QTimer, QUrl, Signal
 from qtpy.QtGui import QColor, QDesktopServices
 from qtpy.QtWebEngineCore import (
     QWebEnginePage, QWebEngineProfile, QWebEngineSettings,
     QWebEngineUrlRequestInterceptor)
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaExternalLinks import EXTERNAL_LINKS
@@ -956,8 +962,13 @@ class AutonaWebPanelHost(QWidget):
     # for (ShowPanel), or the AppShell's own navigation followed
     # (_OnUrlChanged). The Window keeps the page to reopen on from it.
     panelChanged = Signal(str)
+    # Whether the AppShell's sidebar is hidden changed (NavCollapsed): the
+    # Window's saved state given (SetNavCollapsed), or the page's URL said
+    # so (_OnUrlChanged). The Window saves it.
+    navCollapsedChanged = Signal(bool)
     # A load of the view's is over and will not be retried (the loader's
-    # finished, a refused navigation's apart): whether the page is there.
+    # finished, a refused navigation of a loaded document's apart): whether
+    # the page is there. False as well when the view could not be built.
     # The Window takes its loading spinner away on the first.
     pageLoadFinished = Signal(bool)
 
@@ -969,9 +980,13 @@ class AutonaWebPanelHost(QWidget):
         # (SetNavCollapsed) -- and the tournament load failure it told of.
         self._navCollapsed = False
         self._told = None
-        # The web server did not start (ShowStartFailure): the label that
-        # says so is the host's content, and no view is built.
+        # The web server did not start, or the view could not be built
+        # (ShowStartFailure): the label that says so is the host's content,
+        # and no view is built.
         self._failure = None
+        # The last load failed for good (ShowLoadFailure): the retry view
+        # over the host, until a load succeeds.
+        self._loadFailure = None
         # What answers the page's shell requests (ADR-005 S-final SF-5a-1),
         # on this thread: ShellRequest(verb, args, answer) -> the answer, or
         # None when it calls answer(the answer) later on this thread
@@ -1023,7 +1038,11 @@ class AutonaWebPanelHost(QWidget):
         """Open the AppShell with its sidebar hidden or not: the Window's
         saved state, before the first load (the page's URL says it from
         then on: _OnUrlChanged)."""
-        self._navCollapsed = bool(collapsed)
+        collapsed = bool(collapsed)
+        if collapsed == self._navCollapsed:
+            return
+        self._navCollapsed = collapsed
+        self.navCollapsedChanged.emit(collapsed)
 
     def NavCollapsed(self):
         """Whether the AppShell's sidebar is hidden, as its URL last said
@@ -1031,14 +1050,18 @@ class AutonaWebPanelHost(QWidget):
         return self._navCollapsed
 
     def ShowStartFailure(self, text):
-        """The web server did not start: the page can never load, so the
-        host shows ``text`` -- why, and what to do -- in a label of its own
-        instead of the view, and builds no view from then on (one built
-        already is hidden; its loads end on their own). A label, not a page:
-        _PanelPage refuses every page but this server's Web UI (a data: URL
-        among them), and there is no server to serve one. Once."""
+        """The web server did not start (the Window's
+        OnWebServerStartFailed), or the view could not be built
+        (_BuildQueuedView): the page can never load, so the host shows
+        ``text`` -- why, and what to do -- in a label of its own instead of
+        the view, and builds no view from then on (one built already is
+        hidden; its loads end on their own). A label, not a page: _PanelPage
+        refuses every page but this server's Web UI (a data: URL among
+        them), and there is no server to serve one. It replaces the retry
+        view (ShowLoadFailure): there is nothing to load again. Once."""
         if self._failure is not None:
             return
+        self._HideLoadFailure()
         label = QLabel(text, self)
         label.setObjectName("webPanelStartFailure")
         label.setTextFormat(Qt.TextFormat.PlainText)
@@ -1054,8 +1077,85 @@ class AutonaWebPanelHost(QWidget):
         # A child added to a widget already on screen (the window is shown
         # before the server's failure comes) stays hidden until shown.
         label.show()
-        logger.warning("The web panel view shows that the web server did "
-                       "not start")
+        logger.warning("The web panel view shows that its page can never "
+                       "load")
+
+    def ShowLoadFailure(self):
+        """The last load failed for good (_OnLoadFinished), or the Window's
+        spinner waited too long for the first (Window._OnSpinnerCapReached):
+        the host covers itself -- Chromium's error page, or nothing yet --
+        with a retry view of its own: why, and a button that loads the page
+        again (_RetryLoad). There is no navigation of the AppShell's on an
+        error page to leave it by. Over the view, not instead of it: the
+        view stays on screen as before, so its return to Active still loads
+        it again too (_OnActive). It goes once a load succeeds. Nothing once
+        the page can never load (ShowStartFailure), or while a loaded page
+        is there; once while it shows."""
+        if (self._failure is not None or self._loadFailure is not None
+                or self._loaded):
+            return
+        cover = QWidget(self)
+        cover.setObjectName("webPanelLoadFailure")
+        # Opaque, in the Web UI's background (not the theme's QWidget
+        # paint): the error page beneath does not show through.
+        cover.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        cover.setStyleSheet("#webPanelLoadFailure { background: %s; }"
+                            % UI.palette()["canvas"])
+        layout = QVBoxLayout(cover)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.addStretch(1)
+        label = QLabel(
+            "%s\n\n%s" % (
+                QCoreApplication.translate(
+                    "webpanel", "The page could not be loaded"),
+                QCoreApplication.translate(
+                    "webpanel",
+                    "Autona's web server did not answer. Try again, or "
+                    "restart Autona if this keeps happening.")),
+            cover)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        button = QPushButton(
+            QCoreApplication.translate("webpanel", "Retry"), cover)
+        button.setObjectName("webPanelRetry")
+        button.clicked.connect(self._RetryLoad)
+        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(1)
+        # Not in the layout: over the view, as large as the host
+        # (resizeEvent).
+        cover.setGeometry(self.rect())
+        self._loadFailure = cover
+        cover.raise_()
+        cover.show()
+        # The failure itself is warned of where it is found.
+        logger.info("The web panel view offers to load its page again (%s)",
+                    self._panel)
+
+    def _HideLoadFailure(self):
+        cover, self._loadFailure = self._loadFailure, None
+        if cover is not None:
+            cover.hide()
+            cover.deleteLater()
+
+    def _RetryLoad(self):
+        # The retry view's button: the page loaded again, as the operator's
+        # next page or return would (_ReloadIfBlank: not while a load is
+        # under way); the view stays until one succeeds. Before the view is
+        # built (the Window's spinner gave up first) it is built as soon as
+        # it can be (_ScheduleView).
+        logger.info("Loading the web panel view again at the operator's "
+                    "request (%s)", self._panel)
+        if self.view is None:
+            self._ScheduleView()
+            return
+        self._ReloadIfBlank()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._loadFailure is not None:
+            self._loadFailure.setGeometry(self.rect())
 
     def OpenScoreSets(self, board):
         """Have the SCORE page open board ``board``'s set selection dialog
@@ -1250,13 +1350,17 @@ class AutonaWebPanelHost(QWidget):
         # own, a failed load's again (_ReloadIfBlank), would load the panel
         # asked for last instead -- and the AppShell's state that load
         # carries along (PanelPath). Another URL (an error page, a load not
-        # under way yet) says nothing.
+        # under way yet) says nothing. The sidebar hidden or back is told
+        # after the panel (the Window saves on either).
         shown = AppPanelOf(url)
         if shown is None:
             return
+        collapsedChanged = shown.navCollapsed != self._navCollapsed
         self._navCollapsed = shown.navCollapsed
         self._told = shown.told
         self._Follow(shown.panel)
+        if collapsedChanged:
+            self.navCollapsedChanged.emit(self._navCollapsed)
 
     def _Path(self):
         # What the host's own loads open: the panel shown, the AppShell's
@@ -1298,7 +1402,37 @@ class AutonaWebPanelHost(QWidget):
         self._viewPending = False
         if (self.view is None and self._panel is not None and self.isVisible()
                 and self._failure is None):
-            self._EnsureView()
+            try:
+                self._EnsureView()
+            except Exception as error:
+                # From the event loop: nothing above would catch it, and the
+                # Window's spinner would wait for a first load that never
+                # comes.
+                logger.exception("The web panel view could not be built")
+                self._ViewNotBuilt(error)
+
+    def _ViewNotBuilt(self, error):
+        # What _EnsureView built before it failed goes (a view without its
+        # loader is not one the host can drive), and the page can never be
+        # shown: the start failure's label says so (no view is built again),
+        # and the first load's end is told as a failure.
+        built = (self._lifecycle, self._loader, self.view)
+        self.view = self._loader = self._lifecycle = None
+        for part in built:
+            if part is None:
+                continue
+            if isinstance(part, QWidget):
+                part.hide()
+            part.deleteLater()
+        self.ShowStartFailure("%s\n\n%s" % (
+            QCoreApplication.translate(
+                "webpanel", "The page could not be shown"),
+            QCoreApplication.translate(
+                "webpanel",
+                "The window's web view could not be created:\n\n{error}\n\n"
+                "Restart Autona.").replace(
+                    "{error}", f"{type(error).__name__}: {error}")))
+        self.pageLoadFinished.emit(False)
 
     def _EnsureView(self):
         self.view = _PanelView(self)
@@ -1414,9 +1548,14 @@ class AutonaWebPanelHost(QWidget):
         return True
 
     def _OnLoadFinished(self, ok):
-        if not ok and self.view.page().refusedLast:
-            # A navigation the page started and _PanelPage refused: the
-            # document is still there, loaded (not to be reloaded).
+        if not ok and self._loaded and self.view.page().refusedLast:
+            # A navigation the page started from its loaded document and
+            # _PanelPage refused: that document is still there (not to be
+            # reloaded). With no loaded document behind it -- the host's own
+            # load refused, the first one at startup among them (its URL off
+            # the Web UI, a redirect away) -- it is a load that failed for
+            # good like any other: the Window's spinner must go, and the
+            # retry view comes.
             return
         # Ours, or Qt's reload of a discarded page: that document may show
         # a panel other than the one asked for since. A new document: what
@@ -1427,10 +1566,12 @@ class AutonaWebPanelHost(QWidget):
         self._scoreSetsRunning = None
         self._NewDocument()
         if ok:
+            self._HideLoadFailure()
             self._Navigate()
         else:
             logger.warning("The web panel view failed to load (%s)",
                            self._panel)
+            self.ShowLoadFailure()
             if self._scoreSets is not None:
                 # Not handed to a later load that succeeds for another
                 # reason (a reveal, another panel's click): the operator did

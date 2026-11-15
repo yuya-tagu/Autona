@@ -6,7 +6,8 @@ The window is the shared view alone (AutonaWebPanelHost, the AppShell's
 panel's name) with the AppShell's sidebar hidden or not as it was
 (``navCollapsed``). While a page of the Help & Settings menu shows, the page
 to reopen on is the one before it (RememberedPanel), as the Qt sidebar's
-highlight stayed on its item.
+highlight stayed on its item. The window saves both as soon as either
+changes, and again on close (SaveWindowState writes only what differs).
 
 Until SF-5b-3 the Qt sidebar kept its item's index (``sidebarIndex_v22``) and
 whether it was hidden (``sidebarCollapsed_v22``). Each is read once, into
@@ -27,6 +28,12 @@ from .core import WebAccess
 # Companion and OBS guides, About (S-final SF-4a-2) and Add game assets
 # (SF-4b-2). Never the page the window reopens on.
 MENU_PAGES = ("settings", "api", "companion", "obs", "about", "assets")
+
+# The panel shell's empty page (WebAccess.WEB_PANELS' "shell-check", which
+# checks the shell itself: the tests' and the e2e's page). No item or menu
+# opens it, so the operator never chose it: never the page the window
+# reopens on either.
+SHELL_CHECK_PAGE = "shell-check"
 
 # The page a first launch opens on: the navigation's first item (the Qt
 # sidebar's index 0).
@@ -50,8 +57,9 @@ LEGACY_SIDEBAR_PANELS = (
 
 def IsReopenable(panel):
     """Whether the window may reopen on ``panel``: a React panel's page that
-    is not one of the menu's."""
-    return WebAccess.IsWebPanel(panel) and panel not in MENU_PAGES
+    is not one of the menu's, nor the panel shell's empty page."""
+    return (WebAccess.IsWebPanel(panel) and panel not in MENU_PAGES
+            and panel != SHELL_CHECK_PAGE)
 
 
 def RememberedPanel(panel, previous):
@@ -116,7 +124,16 @@ def RestoreNavCollapsed(settings):
 
 def SaveWindowState(settings, panel, navCollapsed):
     """Keep the page to reopen on (one RestorePanel would take: anything
-    else leaves the saved one) and whether the sidebar is hidden."""
-    if IsReopenable(panel):
+    else leaves the saved one) and whether the sidebar is hidden. Only what
+    differs from the saved values is written (the window saves on each
+    change, and on close); returns whether anything was."""
+    wrote = False
+    if IsReopenable(panel) and settings.value(LAST_PANEL_KEY) != panel:
         settings.setValue(LAST_PANEL_KEY, panel)
-    settings.setValue(NAV_COLLAPSED_KEY, bool(navCollapsed))
+        wrote = True
+    collapsed = bool(navCollapsed)
+    if (not settings.contains(NAV_COLLAPSED_KEY)
+            or _Bool(settings.value(NAV_COLLAPSED_KEY)) != collapsed):
+        settings.setValue(NAV_COLLAPSED_KEY, collapsed)
+        wrote = True
+    return wrote

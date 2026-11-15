@@ -1,6 +1,3 @@
 {
-    "program": "1.8.1",
-    "supported_providers": [
-        "StartGG"
-    ]
+    "program": "1.8.1"
 }
