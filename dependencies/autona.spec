@@ -118,13 +118,15 @@ a = Analysis(
 #     QLocalSocket / QLocalServer (main.py), with no TLS, and QtWebEngine has
 #     its own. Python's ssl module loads libssl-3.dll / libcrypto-3.dll
 #     (_ssl.pyd's), which stay, as do the schannel / certonly TLS backends.
+#     Matched by file name in any folder: a hook update may place them
+#     elsewhere than the top level / plugins/tls.
 # validate_release_zip.ps1 forbids every one of these, and
 # tests/test_release_bundle.py holds the two lists to each other.
 _KEPT_WEBENGINE_LOCALES = ('en-US.pak', 'ja.pak')
-_DROPPED_FILES = (
+_DROPPED_NAMES = (
     'libssl-3-x64.dll',
     'libcrypto-3-x64.dll',
-    'PySide6/plugins/tls/qopensslbackend.dll',
+    'qopensslbackend.dll',
 )
 
 
@@ -132,13 +134,15 @@ def _unused_qt_file(dest_name):
     # TOC destinations use the OS separator; Windows names are case-blind.
     path = dest_name.replace('\\', '/').lower()
     folder, _, name = path.rpartition('/')
+    if name in {dropped.lower() for dropped in _DROPPED_NAMES}:
+        return True
     if folder == 'pyside6/resources':
         return '.debug.' in name
     if folder == 'pyside6/translations':
         return name.endswith('.qm')
     if folder == 'pyside6/translations/qtwebengine_locales':
         return name not in {kept.lower() for kept in _KEPT_WEBENGINE_LOCALES}
-    return path in {dropped.lower() for dropped in _DROPPED_FILES}
+    return False
 
 
 a.datas = [entry for entry in a.datas if not _unused_qt_file(entry[0])]

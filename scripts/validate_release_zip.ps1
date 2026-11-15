@@ -58,7 +58,10 @@ param(
 
 # Check 5 (a): files under _internal/ the runtime needs. The Qt DLLs are what
 # Qt6WebEngineCore.dll / Qt6WebEngineWidgets.dll link against: the spec
-# excludes the QtQuick / QtQml / ... Python modules, never these DLLs.
+# excludes the QtQuick / QtQml / ... Python modules, never these DLLs. Also
+# kept on purpose: the schannel TLS backend (Qt's TLS once the OpenSSL one is
+# dropped), opengl32sw.dll (the software OpenGL fallback, SF-9 decision G) and
+# the qt.conf PyInstaller writes (where Qt finds its plugins and resources).
 $qtRequired = @(
     "PySide6/Qt6Core.dll",
     "PySide6/Qt6Gui.dll",
@@ -97,13 +100,20 @@ $qtRequired = @(
     "PySide6/plugins/platforms/qwindows.dll",
     "PySide6/plugins/iconengines/qsvgicon.dll",
     "PySide6/plugins/imageformats/qsvg.dll",
+    "PySide6/plugins/tls/qschannelbackend.dll",
+    "PySide6/opengl32sw.dll",
+    "PySide6/qt.conf",
     "libssl-3.dll",
     "libcrypto-3.dll"
 )
 
 # Check 5 (b): what the spec keeps out, as case-insensitive regexes on the
-# path under _internal/ (the key) with the reason shown on failure.
+# path under _internal/ (the key) with the reason shown on failure. The first
+# two are the spec's excludes taking effect (the Python modules themselves);
+# the OpenSSL names match in any folder, as the spec's filter drops them.
 $qtForbidden = [ordered]@{
+    '^PySide6/Qt(Quick|Qml|QuickWidgets|Positioning|UiTools|DataVisualization|OpenGL|OpenGLWidgets)\.pyd$' = "Python modules the spec excludes"
+    '^PySide6/pyside6qml\.abi3\.dll$'                              = "PySide6.QtQml's runtime (the spec excludes PySide6.QtQml)"
     '^PySide6/qml/'                                                = "QML (the spec excludes PySide6.QtQuick / QtQml)"
     '^PySide6/plugins/qmltooling/'                                 = "QML debugger plugins (the spec excludes PySide6.QtQml)"
     '^PySide6/Qt6Quick3D'                                          = "Quick3D DLLs (QML plugins' dependencies)"
@@ -113,15 +123,15 @@ $qtForbidden = [ordered]@{
     '^PySide6/resources/[^/]+\.debug\.bin$'                        = "debug-build WebEngine resources"
     '^PySide6/translations/[^/]+\.qm$'                             = "Qt's own translations (the app loads src/i18n only)"
     '^PySide6/translations/qtwebengine_locales/(?!(en-US|ja)\.pak$)' = "WebEngine locales other than en-US / ja"
-    '^libssl-3-x64\.dll$'                                          = "Git for Windows' OpenSSL (Python's is libssl-3.dll)"
-    '^libcrypto-3-x64\.dll$'                                       = "Git for Windows' OpenSSL (Python's is libcrypto-3.dll)"
-    '^PySide6/plugins/tls/qopensslbackend\.dll$'                   = "Qt's OpenSSL TLS backend (needs the OpenSSL above)"
+    '(^|/)libssl-3-x64\.dll$'                                      = "Git for Windows' OpenSSL (Python's is libssl-3.dll)"
+    '(^|/)libcrypto-3-x64\.dll$'                                   = "Git for Windows' OpenSSL (Python's is libcrypto-3.dll)"
+    '(^|/)qopensslbackend\.dll$'                                   = "Qt's OpenSSL TLS backend (needs the OpenSSL above)"
 }
 
 # Check 5 (c): the uncompressed size of _internal/, the backstop for what (b)
-# does not name (a module a newer hook starts collecting). SF-9 estimated
-# ~345 MiB from the 2026-10-08 build (PySide6 6.11.0; 571 MiB before it).
-# Re-set it to the measured size plus headroom when a build moves it.
+# does not name (a module a newer hook starts collecting). Measured 344.4 MiB
+# on the 2026-11-16 build (PySide6 6.11.0; 571 MiB before SF-9). Re-set it to
+# the measured size plus headroom when a build moves it.
 $internalMaxMiB = 390
 
 # No global $ErrorActionPreference = "Stop": PS 5.1 would turn git's stderr
