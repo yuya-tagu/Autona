@@ -40,7 +40,9 @@ _TOP_LEVEL_TRY = re.compile(r"(?m)^try \{")
 
 
 def _helper_text() -> str:
-    return HELPER.read_bytes().decode("utf-8-sig")
+    # CI checks out with core.autocrlf=true (CRLF); the patterns anchor on
+    # "$", which does not match before "\r". Normalise line endings.
+    return HELPER.read_bytes().decode("utf-8-sig").replace("\r\n", "\n")
 
 
 def _main_start(helper: str) -> int:
