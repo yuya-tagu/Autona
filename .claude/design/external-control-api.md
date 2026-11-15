@@ -745,7 +745,7 @@ Qt のセット選択ウィンドウと配信台ウィンドウが出す一覧�
 
 - `jobs`: 始まった順。**最後の 1 つがフッターに出す仕事**。何も走っていなければ `[]`。`total` 0 は「進み具合を測れない」（文言だけ）、それ以外は `total` のうち `done` が済んだ
 - `revision`: 変わるたびに増える。プロセスごとに 0 から数え直す（再起動で戻る）
-- **文言はコードと引数**で、読み手が自分の言語に訳す（英語の UI に日本語を出さないため）。サーバーは文を返さない。コードと引数（`core/StatusService.CODES` が正本。デスクトップの訳は `AutonaLocaleHelper.STATUS_TEXT` と `src/i18n/*.ts` の `status` コンテキスト、Web は i18next の `status_<code>`。表のずれは `tests/test_status_service.py` が検査）:
+- **文言はコードと引数**で、読み手が自分の言語に訳す（英語の UI に日本語を出さないため）。サーバーは文を返さない。コードと引数（`core/StatusService.CODES` が正本。訳は Web（デスクトップのフッターも AppShell）の i18next の `status_<code>`。en / ja のずれは `tests/test_status_service.py` が検査。Qt のフッターの訳 `AutonaLocaleHelper.STATUS_TEXT` と `src/i18n/*.ts` の `status` コンテキストは ADR-005 S-final SF-7 で削除）:
 
 | `code` | `args` | 日本語 | English |
 |--------|--------|--------|---------|

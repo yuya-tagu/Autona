@@ -9,8 +9,10 @@ of the deleted Window._navSections: the sections, order, panels, icons and
 the words (as their Qt translations' (context, source)). The menu pages are
 src/AutonaWindowState.py's MENU_PAGES (the pages the window does not reopen
 at the next start). Every word the AppShell shares with the old Qt frame, in
-English and Japanese, is still the Qt .ts files' (i18next's app_* against
-them): the words the desktop showed stay. The outside addresses a browser
+English and Japanese, is still what the Qt frame showed (i18next's app_*
+against QT_WORDS: the frame's translations, frozen when ADR-005 S-final SF-7
+took them out of src/i18n/*.ts, which hold the native dialogs' words alone
+now): the words the desktop showed stay. The outside addresses a browser
 links are src/AutonaExternalLinks.py's.
 
 The route itself (/web/app/<panel>: STATIC, the same names, 404 otherwise,
@@ -18,7 +20,6 @@ no other page's frame) is tests/test_web_access.py's.
 """
 import json
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,6 @@ from src.core import WebAccess
 ROOT = Path(__file__).resolve().parent.parent
 APP_SHELL = ROOT / "web" / "src" / "AppShell"
 LOCALES = ROOT / "web" / "src" / "i18n" / "locales"
-TS_FILES = {"en": ROOT / "src" / "i18n" / "Autona_en.ts",
-            "ja": ROOT / "src" / "i18n" / "Autona_ja.ts"}
 
 # The AppShell's words that are the Qt frame's too: i18next key -> the Qt
 # translation (context, source). The navigation's headings and labels are
@@ -85,6 +84,54 @@ NAVIGATION = [
     ]),
 ]
 
+# What the deleted Qt frame showed for its words, frozen from
+# src/i18n/Autona_{en,ja}.ts before ADR-005 S-final SF-7 took them out:
+# (context, source) -> (English, Japanese).
+QT_WORDS = {
+    ("app", "Show sidebar"): ("Show sidebar", "サイドバーを表示"),
+    ("app", "Set tournament"): ("Set tournament", "大会を選ぶ"),
+    ("app", "Unset tournament"): ("Unset tournament", "大会の設定を解除"),
+    ("app", "Set tournament URL"): ("Set tournament URL", "大会のURLを貼る"),
+    ("app", "Confirm"): ("Confirm", "確認"),
+    ("app", "Start.gg との接続を解除します。よろしいですか？"): (
+        "Disconnect from Start.gg. Are you sure?",
+        "Start.gg との接続を解除します。よろしいですか？"),
+    ("app", "Select game title"): ("Select game title", "ゲームを選ぶ"),
+    ("app", "Add game assets"): ("Add game assets", "ゲームアセットを追加"),
+    ("app", "Modded content"): ("Modded content", "MODコンテンツ"),
+    ("app", "Help & Settings"): ("Help & Settings", "ヘルプ＆設定"),
+    ("Settings", "Settings"): ("Settings", "設定"),
+    ("app", "Always on top"): ("Always on top", "常に手前に表示"),
+    ("app", "API Settings"): ("API Settings", "API設定"),
+    ("app", "Open reference & tester"): (
+        "Open reference & tester", "リファレンス・テスターを開く"),
+    ("app", "Companion settings"): ("Companion settings", "Companion の設定"),
+    ("app", "OBS / Advanced Scene Switcher"): (
+        "OBS / Advanced Scene Switcher", "OBS / Advanced Scene Switcher"),
+    ("app", "Check for updates"): ("Check for updates", "更新情報を調べる"),
+    ("app", "Join the Discord community"): (
+        "Join the Discord community", "Discordコミュニティに参加する"),
+    ("app", "Event support inquiries"): (
+        "Event support inquiries", "イベント運営支援のご相談"),
+    ("app", "About Autona"): ("About Autona", "Autona について"),
+    ("app", "Setup"): ("Setup", "事前設定"),
+    ("app", "Tournament Info"): ("Tournament Info", "大会情報設定"),
+    ("app", "Stream Settings"): ("Stream Settings", "配信チャンネル設定"),
+    ("app", "ScoreboardCategory"): ("Scoreboard", "スコアボード"),
+    ("app", "Scoreboard"): ("Scoreboard", "スコアボード入力"),
+    ("app", "Board"): ("Board", "スコアボード設定"),
+    ("app", "Display"): ("Display", "表示設定"),
+    ("app", "Thumbnail Settings"): ("Thumbnail Settings", "対戦動画サムネイル"),
+    ("app", "Result Settings"): ("Result Settings", "大会リザルト"),
+    ("app", "Top 8 Display Settings"): ("Top 8 Display Settings", "TOP8表示設定"),
+    ("app", "Commentary"): ("Commentary", "実況・解説設定"),
+    ("app", "Stats Display Settings"): (
+        "Stats Display Settings", "統計情報表示設定"),
+    ("app", "Data"): ("Data", "各種データ"),
+    ("app", "Statistics"): ("Statistics", "統計情報"),
+    ("app", "Player List"): ("Player List", "選手一覧"),
+}
+
 # The deleted Window.MENU_PAGES, frozen (now AutonaWindowState.MENU_PAGES).
 MENU_PAGES = ["settings", "api", "companion", "obs", "about", "assets"]
 
@@ -100,17 +147,18 @@ def _locale(language):
 
 
 def _qt_translations(language):
-    """{(context, source): what the program shows} of the .ts file: the
-    translation, or the source where there is none."""
-    words = {}
-    for context in ET.parse(TS_FILES[language]).getroot().findall("context"):
-        name = context.findtext("name")
-        for message in context.findall("message"):
-            source = message.findtext("source")
-            translation = message.find("translation")
-            text = translation.text if translation is not None else None
-            words[(name, source)] = text or source
-    return words
+    """{(context, source): what the Qt frame showed} in `language` (en /
+    ja), from QT_WORDS."""
+    index = {"en": 0, "ja": 1}[language]
+    return {key: words[index] for key, words in QT_WORDS.items()}
+
+
+def test_the_frozen_words_are_every_shared_one():
+    shared = set(SHARED_WORDS.values())
+    for heading, items in NAVIGATION:
+        shared.add(heading)
+        shared.update(label for _key, _icon, label in items)
+    assert shared == set(QT_WORDS)
 
 
 def test_the_navigation_is_the_qt_sidebars():

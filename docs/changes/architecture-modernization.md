@@ -8532,7 +8532,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI。**実施済み** 2026-11-14） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除。3 段（SF-6a テスト / 6b core へ統合 / 6c `run_sync` をやめる）。**SF-6a〜6c 実施済み**（2026-11-15） | 高 | SF-5b |
-  | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
+  | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin。**実施済み**（2026-11-15） | 通常 | SF-6 |
   | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales） | 高 | SF-5b 以降・オーナー判断 |
   | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
 
@@ -8584,7 +8584,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - `tests/test_status_service.py`（新規）: core の単体（push / update / pop・最後が現在・`revision`・コピー・ロックの外の通知・購読者の例外・未知のコード・`Show`・`Progress` の間引き・多スレッド）、表の一致（`CODES` ↔ `STATUS_TEXT` ↔ `.ts` en / ja ↔ i18next en / ja。引数の名前・英語に日本語なし・ja の `.qm` に全訳）、フッターの訳（en / ja の `.qm` を入れて `StatusText`）、フッターが同じ源を読む（`src/Autona.py` の AST: `_on_status_changed` が `StatusService.Current` と `AutonaLocaleHelper.StatusText` を呼び、`StateManagerBridge.instance.status_changed` に繋ぐ）、旧モジュールの import が無い、v1 と接続時の `status`、src の報告がすべて既知のコードと引数で文を渡さない、Start.gg のファイルに日本語が無い
   - `tests/test_webserver_delta_debounce.py`（`status` の送信: すぐ出る・窓に 1 通で最新の値・delta と他の通知の後・delta の間隔を動かさない・失敗は持ち越さない・flusher の外では積まない・flusher のスレッドで送る・再 start で残さない）、`tests/test_bootstrap_split.py`（`WebServer.__init__` の結線に `status`）、`tests/test_import_side_effects.py`（import で仕事も購読も無い）、`tests/test_headless_smoke.py`（実ヘッドレスで接続時の `status` と GET）、`web/e2e/status.spec.ts`（新規）、`web/src/PanelShell/useAppStatus.test.js`（新規）
   - 直した pin: `tests/test_game_asset_manager_load.py`（フッターの呼び出しの記録を `StatusService` に）、`tests/test_provider_jobs.py`、`tests/test_startgg_parse.py`（スタブの `AutonaStatusManager` を外し、実クラスの `StatusService` を渡す）、`tests/test_top8_refresh.py`（遅延 import の失敗のケースは import が無くなったので外し、push の失敗だけ残した）
-- **SF-7 で**: フッター（SF-5b で消える）と一緒に `AutonaLocaleHelper.STATUS_TEXT` / `StatusText` と `.ts` の `status` 文脈を外す（Web の訳は残る）
+- **SF-7 で**: フッター（SF-5b で消える）と一緒に `AutonaLocaleHelper.STATUS_TEXT` / `StatusText` と `.ts` の `status` 文脈を外す（Web の訳は残る）。**SF-7 で実施**
 
 ##### SF-3a ガイドの v1（API カタログ・接続情報・ゲーム一覧の通知）
 - 目的: SF-4a の React ページ（/web/api・/web/companion・/web/obs）が Qt のガイド窓の読むものを v1 で読めるようにする。窓の削除は SF-4a
@@ -8706,6 +8706,40 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   4. （低）判断 3 の pin を足した: `test_a_load_whose_isolated_step_raises_is_loaded_and_closes_its_cycle`（`CommitGameLoad` / `PersistSelectedGame` が例外を出す 2 通り。ERROR のログがトレースバック付きで 1 回・LOADED・`saveBlocked` 0・記録が残らない・`loaded` が 1 回・ボードホストのロックが空く・次のロードが通る）
   5. （低）古い記述: `AutonaActions.ApplyGameRoster` の docstring（`replaced` を渡すのはシェルではなくローダーの `_Publish`）、`.claude/known-smells.md` S-10 の `AutonaGameAssetManager`（SF-6c で削除と注記）。あわせて `tests/test_asset_jobs.py` の `_recordLoaded` と再読込のテストの docstring（`loaded` はボード操作の中ではなく後）と、`.claude/rules/state-and-webserver.md` の全量送信の記述（main に戻してから積む）を直した
   - 検証: 並列ランナー全量 7455 passed / 0 failed / 2 skipped、`tests/test_asset_jobs.py` 直列 56 passed、PYTHONHASHSEED 0 で golden 5 passed（書き込み列は変わらない）
+
+##### SF-7 i18n の締め（2026-11-15）
+
+区分は通常。基点は SF-6c（PR #316 のマージ待ち。02593ace の前は dc119580）。
+
+- **変更**
+  - core の文言を Qt の translate の注入から core の表に: `src/core/CoreWords.py`（新規。Qt 非依存・import に副作用なし）が `WORDS`（キー → `{en, ja}`）と `Language(locale)`（ロケールの最初の subtag。`ja` 以外は `en`）・`Text(key, locale)` を持つ。`ThumbnailService` / `ResultService` は `translate` の引数をやめ、文言を `_Text(key)` で引く（テンプレート名 2・`ThumbnailDataMissing` の文 2・プレビューの見本の大会名とチーム名・リザルトのレイアウト名 6）。`TEMPLATE_NAMES` / `LAYOUT_NAMES` は id → 文言のキー。`bootstrap_core()` は `translate=QCoreApplication.translate` を渡さない
+  - Qt のフッターの訳を外した: `AutonaLocaleHelper.STATUS_TEXT` / `StatusText` と `.ts` の `status` 文脈（10 件）。Qt のフッターは SF-5b-3 で消えていて、読み手は AppShell とほかの Web クライアントの i18next の `status_<code>` だけ
+  - `.ts` を Qt に残った UI の文言だけに削った（各言語 100 件 → 34 件。`status` の 10 件とあわせて 66 件）: 文脈ごと消えたのは `status`・`Settings`・`punctuation`・`thumb_app` の 4 つ、`app` は 54 件 → 3 件（Qt のサイドバー・メニュー・大会 URL のダイアログ・core の旧文言）。残るのは `app` 3（フォルダの選択の題と Updater の「注意」「プログラムを閉じます」）・`portguard` 7・`updater` 19・`webpanel` 5。`.qm` は `scripts/compile_translations.ps1` で再生成（34 件ずつ）。削る組は src の `translate(` / `tr(` の全呼び出し（すべて定数の引数。動的な文脈は `StatusText` が最後で、上で消えた）と照合した
+- **判断**
+  1. **言語の源は今と同じ設定**: サービスに元から注入されている `locale`（`AutonaLocaleHelper.programLocale`。Web の i18next の `lng` と同じ）で表を引く。新しい注入は足さない。`programLocale` は `program_language`（"default" なら OS の uiLanguages）で `.qm` を選んだときに決まり、`.qm` を選んだ言語と常に同じなので、対応している構成（en / ja、または OS が en / ja の "default"）では文言は 1 文字も変わらない
+  2. **唯一の違い**: `program_language` が "default" で OS の言語が en でも ja でもないとき、旧実装は `.qm` を読まず Qt の translate が原文を返していた。今は `programLocale` の既定 "en-US" で表の英語を返す。原文と英訳が違うのは `team_split` のレイアウト名だけで、v1 `GET /api/v1/result` の `layouts[].name` が「Team / Crew 縦並び (1920x1080)」→「Team / Crew vertical (1920x1080)」になる（英語の UI に日本語を出さない方向）。リザルトのページは自分の i18next の `result_layout_<id>` を先に出すので、ページの表示は変わらない（API の利用者だけに見える）
+  3. golden（`tests/fixtures/thumbnail/golden.json` / `tests/fixtures/result/golden.json`）は旧コードを訳なし（translate が恒等）で録ったもので、英語の原文が入っている。programLocale が "ja_JP" のシナリオ（`preview_placeholder_base_locale` / `sample_base_locale`）は、旧コードが ja の `.qm` を入れて出していた語（`サンプル大会` / `チームA` / `チームB`）に置き換えて比べる（`IN_THE_LOCALES_LANGUAGE`。置き換える英語が録画にあることも確かめる）。再録画はしない
+  4. AppShell の文言の照合（`tests/test_app_shell.py`）は `.ts` を読んでいた。`.ts` から消える Qt の画面の訳 35 件を `QT_WORDS` として凍結し、i18next の `app_*` をそれと比べる
+  5. src が訳を引くのに `.ts` に無い Updater の 2 件（"Error while preparing the update:" と "Update downloaded. The app will close, ..."）は、SF-7 以前から英語のまま。削るだけの段なので足さない（`TS_UNTRANSLATED` に明記）→ **レビュー対応 1 で足した**（`TS_UNTRANSLATED` は削除）
+  6. `tests/test_core_words.py` の `.ts` の写し `TS_WORDS` は凍結（SF-7 以前の 12 語が英語・日本語を保つことだけを見る）。後でレイアウトやテンプレートを足すときは `WORDS` にだけ足す
+- **pin**
+  - `tests/test_core_words.py`（新規）: 12 語が `.ts` にあった英語・日本語のまま、各語に両言語と同じ書式の欄、`Language` のパラメータ化、`Text`、表の語 = サービスが引く語（AST）、translate の注入が無い（両サービスの `__init__` に `translate` が無い・`bootstrap` に `translate=` が無い・src/core に `.translate` / `._translate` / `.tr` の属性が無い）
+  - `tests/test_web_panel_host.py`: `test_the_ts_files_hold_the_native_dialogs_words_alone`（src の translate / tr はすべて定数の (文脈, 原文)、文脈ごとの呼び手のモジュール `TS_CONTEXTS`、en / ja の `.ts` の中身 = 呼ばれている組 − `TS_UNTRANSLATED`、訳が空でない）と `test_the_qm_files_are_compiled_from_the_ts_files`（`.qm` が `.ts` の訳をそのまま持ち、消した語は訳さない）。`.ts` に残ることを確かめていた Qt パネル削除の pin（サムネイル・リザルト・ボード・設定・ガイド）は、CoreWords / `QT_WORDS` を見るか「もう無い」を見る形にした。SF-1 の `SF1_REMOVED_TS_CONTEXTS` はそのまま
+  - `tests/test_thumbnail_service.py` / `tests/test_result_service.py`: 文言がプログラムのロケールに従う（Qt の translator を入れても読まない。ja-JP で日本語、en-US で英語。リザルトはレイアウト名 6 つも）。`tests/test_status_service.py`: Qt のフッターの表と `.ts` の `status` が無い（i18next の表の一致はそのまま）。`tests/test_game_asset_manager_load.py` / `tests/test_asset_jobs.py`: フッターの呼び出しの記録を (code, args) に
+- **文書**: `.claude/rules/build-and-release.md`（翻訳コンパイルの節: `.ts` に置くもの・文言の足し方・pin）、`CONTRIBUTING.md`（翻訳の更新。日英）、`.claude/design/Design.md`（AppShell の文言・リザルトの `LAYOUT_NAMES`・レイアウト / テンプレートの追加手順・言語の追加手順）、`.claude/rules/state-and-webserver.md`（2 サービスの注入）、`.claude/design/external-control-api.md`（`status` の訳は i18next だけ）
+- **検証**: 並列ランナー全量 7471 passed / 0 failed / 2 skipped。影響範囲（`tests/test_web_panel_host.py`・`test_app_shell.py`・`test_core_words.py`・`test_status_service.py`・`test_thumbnail_service.py`・`test_result_service.py`）は直列で 1022 passed。`compile_translations.ps1` は en / ja とも 34 件 finished。web/ は触っていないので npm は回していない。アプリ本体は起動していない（実機は下）
+- **残るリスク**
+  - 判断 2 の構成（OS の言語が en / ja 以外で言語の設定が "default"）の v1 の利用者には、`team_split` の名前が英語になる
+  - Updater の 2 件は英語のまま（判断 5。以前から）→ レビュー対応 1 で訳を足して解消（実機では未表示: 更新のダウンロードの後と、その準備の失敗でだけ出る）
+  - 実機で確認済み（2026-11-15・メインセッション・隔離データ、日本語の設定で）: サムネイルのテンプレート名「標準」「中央パネル」、プレビュー画像の見本「チームA」「チームB」「サンプル大会」、リザルトのレイアウト一覧の名前が従来どおり。ログにエラーなし
+  - 英語の設定は実機未確認（pytest で pin: `tests/test_thumbnail_service.py` / `tests/test_result_service.py` の en-US の場合と `tests/test_core_words.py`）
+  - 実機で見てほしい文言（ja / en それぞれ。言語の設定を切り替えて再起動）: サムネイルのページのプレビュー（対戦が空のときの見本: ja「サンプル大会」「チームA」「チームB」/ en「Sample Tournament」「Team A」「Team B」）とテンプレートの名前（ja「標準」「中央パネル」/ en「Standard」「Center Panel」。ページの i18next）、リザルトのページのプレビューの見本の大会名（ja「サンプル大会」/ en「Sample Tournament」）とレイアウトの一覧、AppShell のフッターの進捗（ゲームの読み込み）、ネイティブのダイアログ（ゲームアセットの追加のフォルダの選択の題 ja「取り込むゲームのフォルダを選択」、Updater の更新の確認、LAN の確認・ポートの競合は起こせれば）
+- **レビュー対応**（独立レビュー。指摘は全件 低。5・6 は上の判断のとおりで対応なし）
+  1. Updater の未訳 2 件を en / ja の `.ts` に足した（ja「アップデートをダウンロードしました。アプリを閉じてインストールし、自動で再起動します。」「アップデートの準備中にエラーが発生しました:」。既存の Updater の文言の口調に合わせた）。`.qm` は 36 件ずつ。`TS_UNTRANSLATED` は仕組みごと削除し、pin は「`.ts` の中身 = 引かれている組」の等式のまま
+  2. `.qm` の逆方向: SF-7 で消した 66 件の (文脈, 原文) を `SF7_REMOVED_TS_MESSAGES` に凍結し、en / ja の `.qm` が 1 件も訳さないことを見る（`test_the_qm_files_are_compiled_from_the_ts_files`）。66 件が重複なしでコードが再び引いていないことも（`test_the_sf7_removed_words_are_the_frozen_ones`）
+  3. AST の pin を受け手で絞った: 検出を `tests/test_core_words.py` の `translationCalls` 1 つにまとめ（`test_web_panel_host.py` の `_askedTranslations` と `test_no_translator_is_injected_or_asked` が使う）、`QCoreApplication` / `QGuiApplication` / `QApplication` の `translate`（`QtCore.` 経由も）・それを束ねた名前や `self` の属性・`QT_TRANSLATE_NOOP`・`self.tr`（文脈はクラス名）だけを拾う（`str.translate(table)` は拾わない）。定数でない文脈・原文、クラスの外の `self.tr`、translate を値として渡す形（注入）は落ちる。検出そのものをパラメータ化で pin（拾う 7 形・拾わない `str.translate` などの 1 形・落ちる 4 形）。走査対象に `main.py` を足した（`TS_CONTEXTS` の値はプロジェクト直下からのパスに）
+  4. `.ts` の `<location>`（29 行ずつ。行番号が古かった）を消した。手で編集する運用なので、ずれる情報を持たない。pin は `<location` が無いこと
+  - 検証: 並列ランナー全量 7484 passed / 0 failed / 2 skipped。影響範囲（`tests/test_web_panel_host.py`・`test_core_words.py`・`test_app_shell.py`・`test_thumbnail_service.py`・`test_result_service.py`・`test_status_service.py`）は直列で 1035 passed。`compile_translations.ps1` は en / ja とも 36 件 finished。web/ は触っていない
 
 ##### SF-8a プレビューを別オリジンに（2026-11-14）
 

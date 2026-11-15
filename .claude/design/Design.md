@@ -1112,7 +1112,7 @@ AppShell (web/src/AppShell/index.tsx)
 - 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは URL のクエリ `nav=collapsed` に replace で書く（履歴を増やさず読み込みもしない。ほかのページへ移っても `navigateToPanel` がクエリを保つ。localStorage には書かない）。デスクトップのホストは `urlChanged` でこれを読み、次の自分の読み込みの URL に入れ（`PanelPath`）、ウィンドウが変わるたびに QSettings の `navCollapsed` に保存して次の起動で戻す（S-final SF-5b-3。それまではメモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
 - Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
 - 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す。最後に知らせた（またはダイアログが見せた）回は URL のクエリ `told=<revision>` にも replace で書き、マウントのときにそこから始める（S-final SF-5b-3）: 共有ビューが捨てたページを読み直したとき・ビューが読み込み直したとき（ホストが今の URL の `told` を次の読み込みに入れる）に、同じ失敗を二度知らせない。数字（15 桁まで）でない値は無いものとして扱う
-- 文言は i18next の `app_*`（Qt の `.ts` の `app` コンテキストの訳と一致。`tests/test_app_shell.py`）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
+- 文言は i18next の `app_*`（Qt の画面が出していた訳と一致。`tests/test_app_shell.py` が、ADR-005 S-final SF-7 で `.ts` から外したときに凍結した写し `QT_WORDS` と照合する）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
 
 ### 4.3 OBS テンプレ命名規約
 
@@ -1288,7 +1288,7 @@ layout/result_{x}/            ← 新規追加
 
 ##### レイアウトの表の規約
 
-表の正本は `core/ResultService.py` の `LAYOUT_SUBDIRS`（id → `layout/` のフォルダ）/ `LAYOUT_SIZES`（幅 × 高さ）/ `LAYOUT_NAMES`（`.ts` の訳の source）で、
+表の正本は `core/ResultService.py` の `LAYOUT_SUBDIRS`（id → `layout/` のフォルダ）/ `LAYOUT_SIZES`（幅 × 高さ）/ `LAYOUT_NAMES`（id → `core/CoreWords` の文言のキー `result_layout_<id>`。ja / en の名前はその表。ADR-005 S-final SF-7）で、
 枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。レンダラー（`result/ResultPageRenderer.py`）はこの表を読む（ADR-005 S4r で表は 1 つになった）。
 ページの選択肢は `GET /api/v1/result` の `layouts` を描く（§7.3）。
 
@@ -1794,7 +1794,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | 3 | `layout/result_vertical_top32/result.css` | 新規 CSS |
 | 4 | `layout/result_vertical_top32/result.js` | 新規 JS（CSS-only テンプレなら省略可） |
 | 5 | `src/core/ResultService.py` の `SlotsFor()` と `SLOT_COUNTS` | TOP32 → 32 行の対応を追加（行の数はページも `layouts[].slots` で追う） |
-| 6 | `src/i18n/Autona_*.ts`（手動 + `compile_translations.ps1`）と `web/src/i18n/locales/{en,ja}.json` の `result_layout_<id>` | 表示名（ページの文言が無ければ `layouts[].name`） |
+| 6 | `src/core/CoreWords.py` の `WORDS` の `result_layout_<id>`（en / ja。`tests/test_core_words.py` の凍結した写し `TS_WORDS` は SF-7 以前の文言なので足さない）と `web/src/i18n/locales/{en,ja}.json` の `result_layout_<id>` | 表示名（ページの文言が無ければ `layouts[].name` = CoreWords の名前） |
 
 #### 触らない
 
@@ -1815,8 +1815,8 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | 3 | `layout/thumbnail_type_c/thumbnail.css` | 新規 CSS |
 | 4 | `layout/thumbnail_type_c/thumbnail.js` | 新規 JS |
 | 5 | `assets/thumbnail_base/thumbnail_types/type_c.json` | テンプレ固有設定（フォント・配置・色トーン等） |
-| 6 | `src/core/ThumbnailService.py` の `TEMPLATE_IDS` / `TEMPLATE_NAMES` | `"type_c"` と `"type_c": "Display Name"` を追加（`PATCH /api/v1/thumbnail` が受ける id と、`GET` の `templates` の名前） |
-| 7 | `web/src/i18n/locales/{en,ja}.json` の `thumbnail_template_type_c` | ページの表示名（無ければ `GET` の名前 = 6 の `TEMPLATE_NAMES` を "app" で訳したものを出す。ADR-005 S4p） |
+| 6 | `src/core/ThumbnailService.py` の `TEMPLATE_IDS` / `TEMPLATE_NAMES` と `src/core/CoreWords.py` の `WORDS` | `"type_c"` と `"type_c": "thumbnail_template_type_c"`、`WORDS` に en / ja の名前を追加（`PATCH /api/v1/thumbnail` が受ける id と、`GET` の `templates` の名前） |
+| 7 | `web/src/i18n/locales/{en,ja}.json` の `thumbnail_template_type_c` | ページの表示名（無ければ `GET` の名前 = 6 の CoreWords の名前をプログラムの言語で出す。ADR-005 S4p / S-final SF-7） |
 
 #### 触らない
 
@@ -1886,7 +1886,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/i18n/ko/...` | PyQt 側翻訳ファイル + `.qm` 生成 |
+| 1 | `src/i18n/Autona_ko.ts` + `.qm` 生成（`compile_translations.ps1`）と `src/core/CoreWords.py` | Qt に残ったネイティブのダイアログと Updater の文言（`.ts` は手で編集）と、core が返す文言の表（`LANGUAGES` と `WORDS` の各語に `ko`。ADR-005 S-final SF-7） |
 | 2 | `web/src/i18n/locales/ko.json` | React 側翻訳ファイル |
 | 3 | `web/src/i18n/config.js` | `resources` に `ko` を追加、`i18n.languages` リストに追加 |
 | 4 | `src/i18n/mapping.json` の `languages` | `"ko": ["한국어", "Korean"]` を追加（`AutonaLocaleHelper.languages`。設定ページの言語の選択肢は `GET /api/v1/settings` の `language.choices` で、ここから来る） |

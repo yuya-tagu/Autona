@@ -4667,13 +4667,13 @@ def test_the_qt_thumbnail_panel_is_gone():
                 if f"<source>{source}</source>" in text]
         assert back == [], path.name
 
-    # The translations core still uses stay. ("The thumbnail has been
-    # generated here:" was the Qt SCORE's GenerateThumbnail's, and went with
-    # it in ADR-005 S4ac-3.)
-    for path in (src / "i18n").glob("*.ts"):
-        text = path.read_text(encoding="utf-8")
-        for source in ("Standard", "Center Panel", "Thumbnail Settings"):
-            assert f"<source>{source}</source>" in text, (path.name, source)
+    # The words core still uses are core's own table since ADR-005 S-final
+    # SF-7 (core/CoreWords, not the .ts: test_the_ts_files_hold_the_native_
+    # dialogs_words_alone); the sidebar's label is the AppShell's.
+    from src.core import CoreWords
+    assert (CoreWords.WORDS["thumbnail_template_type_a"]["en"],
+            CoreWords.WORDS["thumbnail_template_type_b"]["en"]) == (
+        "Standard", "Center Panel")
 
 
 def test_the_qt_result_panel_is_gone():
@@ -4708,9 +4708,12 @@ def test_the_qt_result_panel_is_gone():
                     "Save player characters", "Autona - Result")
                 if f"<source>{source}</source>" in text]
         assert back == [], path.name
-        for source in ("Horizontal (1920x1080)", "Sample Tournament",
-                       "Result Settings"):
-            assert f"<source>{source}</source>" in text, (path.name, source)
+    # The layouts' names and the sample's are core's own table since ADR-005
+    # S-final SF-7 (core/CoreWords); the sidebar's label is the AppShell's.
+    from src.core import CoreWords
+    assert (CoreWords.WORDS["result_layout_horizontal"]["en"],
+            CoreWords.WORDS["sample_tournament"]["en"]) == (
+        "Horizontal (1920x1080)", "Sample Tournament")
 
 
 def test_the_qt_board_panel_is_gone():
@@ -4746,8 +4749,9 @@ def test_the_qt_board_panel_is_gone():
                      "AutonaFeatureColors", "LayoutOptions"):
             assert name not in text, (path.name, name)
         assert "<name>layout_options" not in text, path.name
-        # The sidebar's label is the Window's.
-        assert "<source>Board</source>" in text, path.name
+        # The sidebar's label is the AppShell's (i18next; the Qt frame's
+        # translation went from the .ts in ADR-005 S-final SF-7).
+        assert "<source>Board</source>" not in text, path.name
 
 
 def test_the_layout_catalog_has_no_watcher_to_serve():
@@ -5918,6 +5922,167 @@ def test_the_sf1_dead_code_is_gone():
             ts.name, contexts & set(SF1_REMOVED_TS_CONTEXTS))
 
 
+# ADR-005 S-final SF-7: what src/i18n/*.ts may hold. The Qt UI left is the
+# native dialogs (the LAN prompt, the port guard, the folder picker, the
+# shared view's retry and failure views) and the Updater's; every other word
+# is a page's (i18next) or core's (core/CoreWords). Each context, with the
+# modules that ask for it.
+TS_CONTEXTS = {
+    "app": ("src/AutonaShellOperations.py", "src/AutonaUpdater.py"),
+    "portguard": ("src/Autona.py", "src/AutonaWebServer.py"),
+    "updater": ("src/AutonaUpdater.py",),
+    "webpanel": ("src/AutonaWebPanelHost.py",),
+}
+# What SF-7 took out of both .ts files (66 each: the Qt frame's sidebar,
+# menus and tournament dialog, the Qt footer's "status", core's old words),
+# frozen: none of it may come back translated.
+SF7_REMOVED_TS_MESSAGES = (
+    ("Settings", "Settings"),
+    ("app", "Open reference & tester"),
+    ("app", "Companion settings"),
+    ("app", "OBS / Advanced Scene Switcher"),
+    ("app", "Top 8 Display Settings"),
+    ("app", "Help & Settings"),
+    ("app", "Show sidebar"),
+    ("app", "Select game title"),
+    ("app", "Set tournament"),
+    ("app", "Tournament Info"),
+    ("app", "Setup"),
+    ("app", "Display"),
+    ("app", "Data"),
+    ("app", "ScoreboardCategory"),
+    ("app", "Stream Settings"),
+    ("app", "Thumbnail Settings"),
+    ("app", "Result Settings"),
+    ("app", "Bracket"),
+    ("app", "Board"),
+    ("app", "Scoreboard"),
+    ("app", "Commentary"),
+    ("app", "Player List"),
+    ("app", "Statistics"),
+    ("app", "Always on top"),
+    ("app", "Add game assets"),
+    ("app", "Check for updates"),
+    ("app", "Join the Discord community"),
+    ("app", "Event support inquiries"),
+    ("app", "About Autona"),
+    ("app", "Unset tournament"),
+    ("app", "Modded content"),
+    ("app", "API Settings"),
+    ("app", "Team {0}"),
+    ("app", "Horizontal (1920x1080)"),
+    ("app", "Horizontal TOP16 (1920x1080)"),
+    ("app", "Vertical (960x1080)"),
+    ("app", "Vertical Dark Gold 激 (960x1080)"),
+    ("app", "Team / Crew (1920x1080)"),
+    ("app", "Team / Crew 縦並び (1920x1080)"),
+    ("app", "Stats Display Settings"),
+    ("app", "Standard"),
+    ("app", "Center Panel"),
+    ("app", "Paste the tournament URL."),
+    ("app", "For StartGG, the link must contain the /event/ part"),
+    ("app", "Supported providers:"),
+    ("app", "Set tournament URL"),
+    ("app", "Confirm"),
+    ("app", "Start.gg との接続を解除します。よろしいですか？"),
+    ("app", "Error"),
+    ("app", "The tournament URL could not be loaded."),
+    ("app", "Make sure that your tournament URL is correctly formatted and "
+            "points to an existing event, and try again."),
+    ("app", "Sample Tournament"),
+    ("punctuation", "("),
+    ("punctuation", ")"),
+    ("status", "Fetching bracket data from Start.gg..."),
+    ("status", "Fetching set data from Start.gg..."),
+    ("status", "Fetching the set list from Start.gg..."),
+    ("status", "Fetching the set list from Start.gg... ({page}/{pages})"),
+    ("status", "Some pages of the set list could not be fetched "
+               "({failed}/{pages})"),
+    ("status", "Fetching entrants from Start.gg..."),
+    ("status", "Fetching entrants from Start.gg... ({page}/{pages})"),
+    ("status", "Loading game assets... ({codename})"),
+    ("status", "Building the TOP 8..."),
+    ("status", "Fetching the results..."),
+    ("thumb_app", "Please select a game first"),
+    ("thumb_app", "Player {0} tag missing"),
+)
+
+
+def _askedTranslations():
+    """{(context, source): {module}} of every Qt translation src/ and main.py
+    ask for (tests/test_core_words.py's translationCalls: each names its
+    context and source as constants, so the .ts can be checked against it)."""
+    from tests.conftest import PROJECT_ROOT
+    from tests.test_core_words import translationCalls
+
+    asked = {}
+    for path in [*sorted((PROJECT_ROOT / "src").rglob("*.py")),
+                 PROJECT_ROOT / "main.py"]:
+        for _line, context, source in translationCalls(path):
+            asked.setdefault((context, source), set()).add(
+                path.relative_to(PROJECT_ROOT).as_posix())
+    return asked
+
+
+def _tsMessages(path):
+    """{(context, source): translation} of a .ts file."""
+    import xml.etree.ElementTree as ET
+
+    return {(context.findtext("name"), message.findtext("source")):
+            message.findtext("translation")
+            for context in ET.parse(path).getroot().findall("context")
+            for message in context.findall("message")}
+
+
+def test_the_ts_files_hold_the_native_dialogs_words_alone():
+    from tests.conftest import PROJECT_ROOT
+
+    asked = _askedTranslations()
+    contexts = {}
+    for (context, _source), modules in asked.items():
+        contexts.setdefault(context, set()).update(modules)
+    assert {context: tuple(sorted(modules))
+            for context, modules in contexts.items()} == TS_CONTEXTS
+
+    for language in ("en", "ja"):
+        path = PROJECT_ROOT / "src" / "i18n" / f"Autona_{language}.ts"
+        messages = _tsMessages(path)
+        # Exactly what the code asks for, every word translated: nothing the
+        # code stopped asking for stays (the .ts is edited by hand:
+        # pyside6-lupdate is not installed).
+        assert set(messages) == set(asked), path.name
+        assert all(messages.values()), path.name
+        # No <location>: kept by hand, it would only drift from the code.
+        assert "<location" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_the_qm_files_are_compiled_from_the_ts_files():
+    # The .qm the app loads (scripts/compile_translations.ps1) holds the .ts's
+    # words and no other: a word taken out of the .ts is not translated.
+    from qtpy.QtCore import QTranslator
+
+    from tests.conftest import PROJECT_ROOT
+
+    i18n = PROJECT_ROOT / "src" / "i18n"
+    for language in ("en", "ja"):
+        translator = QTranslator()
+        assert translator.load(str(i18n / f"Autona_{language}.qm")), language
+        for (context, source), translation in _tsMessages(
+                i18n / f"Autona_{language}.ts").items():
+            assert translator.translate(context, source) == translation, (
+                language, context, source)
+        translated = [(context, source)
+                      for context, source in SF7_REMOVED_TS_MESSAGES
+                      if translator.translate(context, source)]
+        assert translated == [], language
+
+
+def test_the_sf7_removed_words_are_the_frozen_ones():
+    # 66 distinct entries, none of them asked for by the code again.
+    assert len(set(SF7_REMOVED_TS_MESSAGES)) == len(SF7_REMOVED_TS_MESSAGES) == 66
+    assert set(SF7_REMOVED_TS_MESSAGES).isdisjoint(_askedTranslations())
+
+
 def test_the_qt_settings_window_is_gone():
     # ADR-005 S4af (the owner's go-ahead: no way back): the React page
     # (/web/settings; /web/app/settings from the AppShell's Help & Settings
@@ -5951,14 +6116,15 @@ def test_the_qt_settings_window_is_gone():
     assert {path: names for path, names in users.items() if names} == {}
 
     # The translations: none of the window's contexts, nothing located in
-    # its files. The menu's "Settings" (the app context) stays.
+    # its files. The menu's "Settings" is the AppShell's (i18next; the Qt
+    # frame's translation went from the .ts in ADR-005 S-final SF-7).
     for name in ("Autona_en.ts", "Autona_ja.ts"):
         text = (src / "i18n" / name).read_text(encoding="utf-8")
         contexts = set(re.findall(r"<name>([^<]+)</name>", text))
         assert contexts & set(QT_SETTINGS_CONTEXTS) == set(), name
         assert "Settings\\" not in text, name
         assert "AutonaColorButton" not in text, name
-        assert "<source>Settings</source>" in text, name
+        assert "<source>Settings</source>" not in text, name
 
     # The build collects nothing of it.
     spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
@@ -5982,7 +6148,10 @@ QT_GUIDE_NAMES = (*QT_GUIDE_MODULES, "EnsureApiInfoWindow",
                   "_CreateSettingsPanel", "_navBeforeSettings",
                   "EnsureGameAssetGuideWindow", "_gameAssetGuideWindow",
                   "_EnsureLazyWindow")
-# The menu's API Settings entries, now the app context's (en, ja).
+# The menu's API Settings entries (en, ja): the app context's in the Qt
+# frame, the AppShell's i18next app_* since SF-5b-3 (against the frame's
+# translations, frozen in tests/test_app_shell.py's QT_WORDS when ADR-005
+# S-final SF-7 took them out of the .ts).
 GUIDE_MENU_STRINGS = {
     "Open reference & tester": "リファレンス・テスターを開く",
     "Companion settings": "Companion の設定",
@@ -5992,9 +6161,9 @@ GUIDE_MENU_STRINGS = {
 
 def test_the_qt_guide_windows_are_gone():
     import re
-    import xml.etree.ElementTree as ET
 
     from tests.conftest import PROJECT_ROOT
+    from tests.test_app_shell import QT_WORDS
 
     src = PROJECT_ROOT / "src"
     for module in QT_GUIDE_MODULES:
@@ -6016,23 +6185,17 @@ def test_the_qt_guide_windows_are_gone():
     assert "assets" in AutonaWindowState.MENU_PAGES
 
     # The translations: no "api" context, nothing located in the windows'
-    # files; the menu's entries in the app context, translated in ja.
+    # files. The menu's entries keep the frame's words (the AppShell's
+    # test_the_shared_words_are_the_qt_frames holds it to them).
     for name in ("Autona_en.ts", "Autona_ja.ts"):
         path = src / "i18n" / name
         text = path.read_text(encoding="utf-8")
         assert "<name>api</name>" not in text, name
         for module in QT_GUIDE_MODULES:
             assert module not in text, (name, module)
-        app = next(context for context in ET.parse(path).getroot()
-                   .findall("context") if context.findtext("name") == "app")
-        messages = {message.findtext("source"):
-                    message.findtext("translation")
-                    for message in app.findall("message")}
-        for source, ja in GUIDE_MENU_STRINGS.items():
-            assert source in messages, (name, source)
-            if name == "Autona_ja.ts":
-                assert messages[source] == ja, (source, messages[source])
         assert not re.search(r"<location[^>]*AutonaApiInfoWindow", text)
+    for source, ja in GUIDE_MENU_STRINGS.items():
+        assert QT_WORDS[("app", source)] == (source, ja), source
 
     # The build collects none of it.
     spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(

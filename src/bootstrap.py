@@ -375,17 +375,18 @@ def bootstrap_core():
     # preview and what a crash left of its temporary files, in directories
     # that are its own. The shell's renderer is reached through the web
     # operations when a run starts, where the desktop has registered it
-    # (bootstrap_gui()) and the headless shell has not (503). The deferral,
-    # the translations and the locale's names are read when used; the two
-    # last are Qt's, and the output pruning and whether the GUI thread is gone
-    # are Helpers functions core may not import, hence injected.
-    from qtpy.QtCore import QCoreApplication
+    # (bootstrap_gui()) and the headless shell has not (503). The deferral
+    # and the locale and its names are read when used; the locale is the
+    # shell's (LoadLocale, after this function returns) and the language of
+    # the service's own words (core/CoreWords, ADR-005 S-final SF-7: Qt's
+    # translations until then), and the output pruning and whether the GUI
+    # thread is gone are Helpers functions core may not import, hence
+    # injected.
     from .core.ThumbnailService import ThumbnailService
     if ThumbnailService.instance is None:
         ThumbnailService.instance = ThumbnailService(
             later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
             render=AutonaWebOperations.start_image_render,
-            translate=QCoreApplication.translate,
             locale=lambda: (AutonaLocaleHelper.programLocale,
                             AutonaLocaleHelper.matchNames,
                             AutonaLocaleHelper.phaseNames),
@@ -404,7 +405,6 @@ def bootstrap_core():
         ResultService.instance = ResultService(
             later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
             render=AutonaWebOperations.start_image_render,
-            translate=QCoreApplication.translate,
             locale=lambda: AutonaLocaleHelper.programLocale,
             prune=PruneOutputFiles,
             shuttingDown=lambda:

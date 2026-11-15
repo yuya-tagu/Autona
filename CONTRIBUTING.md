@@ -38,7 +38,7 @@ cd web && npm test                            # Web UI (jest)
 
 ### 翻訳の更新
 
-UI 文言は `.ts` ファイルを**手で編集**してから、`scripts/compile_translations.ps1` を実行して `.qm` を生成します。`pyside6-lupdate` は使えません。Web UI の翻訳は `web/src/i18n/` にあります。
+画面の文言は Web UI の翻訳（`web/src/i18n/locales/`）にあります。サーバーが返す文言（サムネイルのテンプレート名・リザルトのレイアウト名など）は `src/core/CoreWords.py` の日英の表です。`src/i18n/*.ts` に残っているのは Qt のネイティブのダイアログと Updater の文言だけで、`.ts` ファイルを**手で編集**してから、`scripts/compile_translations.ps1` を実行して `.qm` を生成します。`pyside6-lupdate` は使えません。
 
 ### 設計資料への入口
 
@@ -90,7 +90,7 @@ Before writing widget tests, read [docs/changes/test-automation-strategy.md](doc
 
 ### Updating translations
 
-Edit the `.ts` files **by hand**, then run `scripts/compile_translations.ps1` to generate the `.qm` files. `pyside6-lupdate` cannot be used. Web UI translations live in `web/src/i18n/`.
+The UI's words are the Web UI translations (`web/src/i18n/locales/`). Words the server returns (thumbnail template names, result layout names and the like) are the English/Japanese table in `src/core/CoreWords.py`. `src/i18n/*.ts` holds only the words of Qt's native dialogs and the updater: edit the `.ts` files **by hand**, then run `scripts/compile_translations.ps1` to generate the `.qm` files. `pyside6-lupdate` cannot be used.
 
 ### Design documents
 

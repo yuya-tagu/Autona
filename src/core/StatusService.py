@@ -4,9 +4,11 @@ Qt-free (ADR-005 S-final SF-2). Until then this was the Qt-side
 ``Helpers/AutonaStatusManager`` -- a stack of ready-made Japanese messages
 behind a module-level QObject signal, read by the main window's
 ``QStatusBar`` alone. Here the jobs are words the reader translates: a
-``code`` from ``CODES`` and its ``args``. The desktop footer turns them into
-its Qt translation (``AutonaLocaleHelper.StatusText``), the web clients into
-their i18next one (``status_<code>``), so the English UI shows no Japanese.
+``code`` from ``CODES`` and its ``args``. The readers -- the desktop's footer
+(the AppShell's since ADR-005 S-final SF-5b-3) and the other web clients --
+turn them into their i18next words (``status_<code>``), so the English UI
+shows no Japanese. (The Qt footer's table, ``AutonaLocaleHelper.STATUS_TEXT``
+with the "status" context of src/i18n/*.ts, went in SF-7.)
 
 A job is one entry, in push order: ``{"id", "code", "args", "done",
 "total"}``. ``total`` 0 means "no measurable progress" (the message alone);
@@ -45,10 +47,9 @@ from .Observable import ObserverChannel
 
 
 # Every status the app reports: its code and the names of its args. The
-# readers translate the code (the Qt footer's table in AutonaLocaleHelper
-# with the "status" context of src/i18n/*.ts, the web's i18next keys
-# status_<code>); tests/test_status_service.py checks that every table has
-# every code with these args.
+# readers translate the code (the web's i18next keys status_<code>);
+# tests/test_status_service.py checks that both languages have every code
+# with these args.
 CODES = {
     # The start.gg fetches (StartGGDataProvider).
     "startgg_bracket": (),
