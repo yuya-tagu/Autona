@@ -9,7 +9,8 @@ of them). Pinned here:
 
 - the words are the ones the .ts files had, in English and Japanese
   (TS_WORDS: a frozen copy of the entries SF-7 took out of them, with the
-  key each one became), so no user sees a word change;
+  key each one became), so no user sees a word change (words added later
+  are the table's alone);
 - the language: the program locale's first subtag, English for anything but
   Japanese;
 - the table is the services' words and nothing else: every key they name is
@@ -77,8 +78,11 @@ def _fields(text):
 
 
 def test_the_words_are_the_ts_files():
-    assert {key: (words["en"], words["ja"])
-            for key, words in CoreWords.WORDS.items()} == {
+    # Each word the .ts files had keeps its English and Japanese. A word
+    # added after SF-7 (a new layout or template) is the table's alone: it
+    # is not added to the frozen copy.
+    assert {key: (CoreWords.WORDS[key]["en"], CoreWords.WORDS[key]["ja"])
+            for key in TS_WORDS} == {
         key: (en, ja) for key, (_context, _source, en, ja) in TS_WORDS.items()}
 
 
