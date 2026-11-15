@@ -8619,6 +8619,38 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
 - **持ち越し**: デスクトップの `Window.SetGame` の全状態送出はハーネスで録れないので、P16 は ws_game_changed を手で結線している（SF-6b で core に寄せれば両シェル同じ経路で検査できる）。golden 実行中は StreamService を fixture 内で止めている
 - **SF-1〜SF-3a への追従**（取り込み時）: SF-2 の `AutonaStatusManager` 削除に合わせ、golden の status スパイと `SHELL_DIFFERENCES["footerStatus"]` の説明を `StatusService.Push/Pop`（フッターの表示文は `AutonaLocaleHelper.StatusText`）に変更。SF-1（進捗の総数がキャラ数に）と SF-3a（`wire_web_server` の第 3 引数・`gamesScanned`）は golden に影響せず、再記録しても 10 本とも内容差分なし。取り込み後の検証: 直列 3 回 97 passed、PYTHONHASHSEED 0 / 12345 で golden 10 passed、並列ランナー全量 6337 passed / 0 failed / 2 skipped
 
+##### SF-6b ローダーを core に（2026-11-15）
+
+- **変更**
+  - `src/core/GameLoader.py`（新規）: デスクトップのアダプタ（`AutonaGameAssetManager`）とヘッドレスの `HeadlessGames` がそれぞれ持っていた同じ設計の写し（起動・スキャン・ロードのジョブ 1 本と世代・`_SaveCycle`・`_Publish`・終了中の settle・MOD オフ）を 1 つにして両シェルで共有する。基準はデスクトップの実装（デスクトップの golden は不変）。core なので Qt も web 層も import せず、`runOnBoard` / `later` / `unavailable` / `isMainThread` / `marshal` / `announce` / `scanned` / `afterScan` を注入する。組み立ては `bootstrap.make_game_loader`（両シェル共通のフック。`marshal` は今の `run_sync` で、`GuiMarshalAborted` を core の `MarshalAborted` に写す）
+  - アダプタ 2 つ（`AutonaGameAssetManager` / `HeadlessGames`）は、シェルの Qt シグナル（`gameLoaded` と `onLoad` / `gameChanged`、`onLoadAssets` / `gamesScanned`）と `loader` を持つだけになった。`announce` が `gameLoaded` → `onLoad` / `gameChanged` を出し、`onLoad` / `gameChanged` の最初のスロットが `loader.PersistSelectedGame`。アダプタの読み取り専用のプロパティ（`games` / `selectedGame` / `has_modded_content`）と `LoadGameAssets` / `LoadGames` は呼び手が無いので削除（SF-6 の仮定 A1・A6）
+  - 登録はローダーのメソッドに: `selectGameFromStartGGId` = `loader.SelectGameFromStartGGId`、`AutonaWebOperations.loadGameByCodename` / `turnModsOff` = `loader.LoadGameByCodename` / `TurnModsOff`、`AssetPackService.scan` = `loader.Scan`（両シェル）
+  - スキャンの後: provider の `SetGameFromProvider` は `onLoadAssets` のスロットではなく、アダプタがローダーに渡す `afterScan`。ローダーの `_OnScanned` が `afterScan` → 起動時の復元 `_RestoreSelectedGame` の順に呼ぶ（復元が勝つ順はそのまま。`tests/test_bootstrap_split.py` が実際の呼び出しで pin）
+  - `WindowSignals.GameChanged` を削除し、`_StartWebServer` は `wire_web_server(webserver, adapter.onLoad, adapter.onLoadAssets)`（ヘッドレスの `Assemble` と同じ形。仮定 A2）。**SF-6a の持ち越し（P16 の手結線）を解消**: P16 は両シェルとも本物の `WebServer.ws_game_changed` を `wire_web_server` で結線して検査し、各シェルが渡すシグナルが `SHELL_DIFFERENCES` のものであることを AST で pin する（`test_each_shell_wires_the_web_server_to_its_loader_s_signals`）
+  - リスク (c)（`TurnModsOff` の重複）: ローダーが 1 つになって解消。`GameAssetCatalog.PlanModsOff` は削除
+  - SF-2 の持ち越し（ヘッドレスのゲームのロードは進み具合を出さない）も解消: 進み具合はローダーが core の `StatusService` に直接出す（設計の `progress=` の注入は要らなかった）
+  - リスク (a)(b): 設計どおり **MOD オフの意図を保留フラグとして持ち、次に終わる読込に適用する**形で直した（下の判断 3）
+- **判断**
+  1. スレッドモデルは変えない: 選択の後の処理はまだ `marshal`（`run_sync`）でメインスレッドに渡して待つ。終了中に見捨てられたら（`MarshalAborted`）、ローダーのスレッドで `_SettleStopped`（ロスター・`CommitGameLoad`・選んだゲームの保存を `runOnBoard(op, atShutdown=True)` の中で）。SF-6c でやめる
+  2. ヘッドレスはデスクトップの振る舞いに揃える（golden が意図して変わる。下）。ヘッドレスに増えたのはフッターの進捗（`StatusService` の `assets_load`）・Future の答え・終了中の commit。デスクトップに増えたのは、走らなかった要求の INFO ログ（`Game load of X not run: ...`。ヘッドレスにだけあった）。機能の削除に当たる変化は無い
+  3. 意図のフラグ（`_modsOffGeneration`。要求の lock の中）: ローダーが走っていないときの `TurnModsOff` は今までどおり、今のゲームの MOD がオンなら MOD なしで読み直す。走っているときは、その時点の最新の要求の世代を意図として持ち、ローダーが要求を取るたびに当てる（`_ApplyModsOff`）: その世代以下の要求は MOD を求めていても MOD なし、後の要求は MOD を求めるなら勝ってフラグを捨て、求めないなら MOD なし。どちらも、今のゲームで MOD がオンのために `SelectGame` が飛ばす要求なら読み直しにする（リスク (a)）。待つ要求が無くなったら（`_ModsOffRequest`）、ローダーが終わるゲームの MOD がまだオンなら（最後のロードが失敗した・MOD 付きで読んだ）MOD なしの読み直しを 1 つ積み、どちらでもフラグを捨てる（リスク (b)。その読み直しが失敗しても積み直さない）。終了で取り消されたローダーもフラグを捨てる（`_LoaderEnded`）。要求を落とさず、別のゲームの前後に何も積まない
+  4. `afterScan` は注入の callable にした（core は provider を import しない）。provider の observer にはしない（pitfalls #16 の lock 順の問題を持ち込まない）
+- **golden の差分**（diff を確かめてから `AUTONA_RECORD_GAME_LOADER=1` で再記録。デスクトップ 5 本は内容差分なし）。ヘッドレス 5 本（restore / switch / mods / burst / shutdown）は `about` 以外がデスクトップと同じになった
+  - 不変: Set / Unset の列（`writes`）と設定の書き込み（`settings`）
+  - 公開: 選択だけのローダーの公開（revision 1）が無くなり、選択・ロスター・commit・選んだゲームの保存・通知が 1 サイクルで main から 1 回公開される（commit された pick のパスもその revision に）
+  - 通知の順: 選んだゲームの保存がロスターと `gameLoaded` の後（`gameChanged` の最初のスロット）に。フッターの `status push` / `status pop`（`assets_load`）がローダーのスレッドで出る
+  - 答え: `null` → Future の結果（`loaded` / `superseded` / `stopped` ほか）
+  - shutdown: ローダーのスレッドで roster → commit → 保存 → 公開。held の `character` / `mains` が反映待ちに残らない（state.json が 1 つのゲームに揃う）
+- **テスト**
+  - `tests/test_game_selected.py` に意図のテスト 5 本（両シェル）: 後から来た今のゲームの要求も MOD なしで読み直す (a) / 失敗したロードの後、終わるゲームの MOD がオンなら読み直す (b) / 後から MOD を求めた要求が勝つ / 先に MOD を求めた要求は MOD なし / 終了で取り消されたローダーと一緒に意図が消える。変異 6 種（`_ApplyModsOff` を無効・今のゲームの読み直しを外す・`_ModsOffRequest` を無効・`_LoaderEnded` でフラグを残す・後の MOD オンを勝たせない・走っている間の `TurnModsOff` を無視）で、それぞれ 1 本以上が落ちることを確かめた
+  - `tests/test_game_asset_catalog.py` の `PlanModsOff` の表は関数と一緒に削除（振る舞いは上の 5 本と SF-5b-1 の MOD オフのテストが pin）
+  - 既存のテストはローダーを `shell.loader` / `manager.loader` から駆動するように追従。`SHELL_DIFFERENCES` はシグナルの名前（`announced` / `scanned`）だけに縮み、Future・orphan のログ・フッター・終了中の settle の違いは両シェル共通の期待値になった。シェル固有の 2 本（ヘッドレスのジョブ・ヘッドレスの終了の待ち）は残した
+- **検証**: 並列ランナー全量 7510 passed / 0 failed / 2 skipped、PYTHONHASHSEED 0 / 12345 で golden 10 passed、`tests/test_asset_jobs.py` 直列 3 回とも 88 passed、`tests/test_game_selected.py` 31 passed、上の変異 6 種。web/ は触っていないので npm は回していない。実機は未確認（下）
+- **残るリスク / SF-6c へ**
+  - `marshal`（`run_sync`）・アダプタ 2 つ・`HeadlessSignals`・Bridge の `game_loaded` は SF-6c（ローダーの `announce` / `scanned` の注入が、そのまま core の通知に置き換わる場所）。`_SaveCycle` の lock も 6c で見直す
+  - ヘッドレスのロードがフッターの進捗を出すようになり、Socket.IO の `status` がロードのたびに最大 2 通増える（push と pop。50 ms の窓でまとまる。読み手は AppShell）
+  - 実機未確認: 起動時の復元／切り替えで React のヘッダ・SCORE・OBS のキャラが追従／未反映の編集がある状態で切り替え／MOD の切り替え／ロード中に閉じる → 次回 1 ゲーム／ヘッドレスでロード中に Ctrl+C／フッターの進捗
+
 ##### SF-8a プレビューを別オリジンに（2026-11-14）
 
 区分は高（認証面）。S4s 判断 9 の「同一オリジンのプレビューのレイアウトが共有ビューの中で動く」を、SF-8 の spike（推奨案 A）どおり閉じる。クリップボード（SF-8b）は触っていない。
