@@ -380,7 +380,7 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()`。Qt モデルの整理 PR4 まではアダプタの
 `_RebuildModels()` も）で読み込む（ADR-005 S1a 以降。旧版は属性を直接差し込んでいた）。
 本物のロードとの違いは GUI スレッドの側（`gameLoaded` とそのロスター・commit、`onLoad`）を出さないこと —
-それは `publishGameLoad()` が受け持つ（ロードの保存サイクルを開いて `AutonaGameAssetManager._Publish` を呼ぶ。
+それは `publishGameLoad()` が受け持つ（ロードの保存サイクルを開いて、アダプタのローダー（core の `GameLoader`。ADR-005 S-final SF-6b）の `_Publish` を呼ぶ。
 ボードホストのロックの下で `gameLoaded` → `onLoad` → サイクルを閉じる、本物と同じ順）。`gameLoaded` / `onLoad` に
 繋がったものを反応させたいテストは、`loadCharacters()` の後に `publishGameLoad()` を呼ぶ。今はロスターを見せる
 Qt のコンボもウィジェットも無い（PR4 までは既存のコンボが `onLoad` でしか再バインドしなかったので、それより先に呼んでいた）。

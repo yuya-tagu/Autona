@@ -1294,17 +1294,17 @@ def reset_top8_scores():
 
 def set_game(data):
     # The legacy route's answer is "OK" once the load's attempt is over: the
-    # game in the state, its models rebuilt and what follows a load
-    # (onLoad, the roster) run -- or the attempt skipped or failed (logged),
+    # game in the state and what follows a load (the roster, onLoad /
+    # gameChanged) run -- or the attempt skipped or failed (logged),
     # answered "OK" too when this ran on the GUI thread, or not run because
     # the app is shutting down (that wait used to hang). A newer request
-    # overtaking it: once that one's attempt is over. The synchronous load below waits on the calling thread (ADR-005
-    # S3f-4; this ran on the GUI thread until then): on the desktop the
-    # request thread waits for the asset adapter's loader, which marshals
-    # its models onto the GUI thread; headless the load runs here and hands
-    # what follows it to the main thread. Not serialized with the board
-    # operations any more: one can run between the selection and what
-    # follows it, as an async load (the GAME menu) always allowed.
+    # overtaking it: once that one's attempt is over. The synchronous load
+    # below waits on the calling thread (ADR-005 S3f-4; this ran on the GUI
+    # thread until then) for the shell's loader (core's GameLoader in both
+    # shells since S-final SF-6b), which hands what follows the selection
+    # to the main thread. Not serialized with the board operations: one can
+    # run between the selection and what follows it, as an async load
+    # always allowed.
     set_codename = data.get("codename")
     if set_codename not in GameAssetCatalog.instance.GameCodenames():
         return f"Could not find game {set_codename}"
@@ -1322,7 +1322,8 @@ def set_game(data):
 
 def load_game(codename, mods_active=False, done=None):
     """Start loading `codename` (reloading it if it is the loaded one) in
-    the background (the desktop's load job, the headless loader's thread).
+    the background (the shell's loader job: core's GameLoader, ADR-005
+    S-final SF-6b).
     `done()` is called once the attempt is over, whichever way it went
     (/api/v1's in-progress flag)."""
     if loadGameByCodename is None:

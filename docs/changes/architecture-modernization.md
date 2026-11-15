@@ -8635,6 +8635,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   2. ヘッドレスはデスクトップの振る舞いに揃える（golden が意図して変わる。下）。ヘッドレスに増えたのはフッターの進捗（`StatusService` の `assets_load`）・Future の答え・終了中の commit。デスクトップに増えたのは、走らなかった要求の INFO ログ（`Game load of X not run: ...`。ヘッドレスにだけあった）。機能の削除に当たる変化は無い
   3. 意図のフラグ（`_modsOffGeneration`。要求の lock の中）: ローダーが走っていないときの `TurnModsOff` は今までどおり、今のゲームの MOD がオンなら MOD なしで読み直す。走っているときは、その時点の最新の要求の世代を意図として持ち、ローダーが要求を取るたびに当てる（`_ApplyModsOff`）: その世代以下の要求は MOD を求めていても MOD なし、後の要求は MOD を求めるなら勝ってフラグを捨て、求めないなら MOD なし。どちらも、今のゲームで MOD がオンのために `SelectGame` が飛ばす要求なら読み直しにする（リスク (a)）。待つ要求が無くなったら（`_ModsOffRequest`）、ローダーが終わるゲームの MOD がまだオンなら（最後のロードが失敗した・MOD 付きで読んだ）MOD なしの読み直しを 1 つ積み、どちらでもフラグを捨てる（リスク (b)。その読み直しが失敗しても積み直さない）。終了で取り消されたローダーもフラグを捨てる（`_LoaderEnded`）。要求を落とさず、別のゲームの前後に何も積まない
   4. `afterScan` は注入の callable にした（core は provider を import しない）。provider の observer にはしない（pitfalls #16 の lock 順の問題を持ち込まない）
+  5. ヘッドレスの `Game loaded: X` の INFO ログは無くなった（デスクトップの形に揃えた。ロードの成否は Future の答えと、走らなかった要求の INFO 行で読める）。対応不要と判断
 - **golden の差分**（diff を確かめてから `AUTONA_RECORD_GAME_LOADER=1` で再記録。デスクトップ 5 本は内容差分なし）。ヘッドレス 5 本（restore / switch / mods / burst / shutdown）は `about` 以外がデスクトップと同じになった
   - 不変: Set / Unset の列（`writes`）と設定の書き込み（`settings`）
   - 公開: 選択だけのローダーの公開（revision 1）が無くなり、選択・ロスター・commit・選んだゲームの保存・通知が 1 サイクルで main から 1 回公開される（commit された pick のパスもその revision に）
@@ -8646,8 +8647,15 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - `tests/test_game_asset_catalog.py` の `PlanModsOff` の表は関数と一緒に削除（振る舞いは上の 5 本と SF-5b-1 の MOD オフのテストが pin）
   - 既存のテストはローダーを `shell.loader` / `manager.loader` から駆動するように追従。`SHELL_DIFFERENCES` はシグナルの名前（`announced` / `scanned`）だけに縮み、Future・orphan のログ・フッター・終了中の settle の違いは両シェル共通の期待値になった。シェル固有の 2 本（ヘッドレスのジョブ・ヘッドレスの終了の待ち）は残した
 - **検証**: 並列ランナー全量 7510 passed / 0 failed / 2 skipped、PYTHONHASHSEED 0 / 12345 で golden 10 passed、`tests/test_asset_jobs.py` 直列 3 回とも 88 passed、`tests/test_game_selected.py` 31 passed、上の変異 6 種。web/ は触っていないので npm は回していない。実機は未確認（下）
+- **レビュー対応**（同日・独立レビュー）
+  - ローダーが取った要求に `_ApplyModsOff` が例外を出すと、その要求が決着しなかった（Future・done が残り、v1 のフラグが TTL まで 409、同期の `set_game` が待ち続ける）→ 取った要求は FAILED（走らせない）で決着させ、ローダーは次へ進む（`tests/test_game_selected.py` が pin）
+  - スキャン後の `afterScan` の例外で起動時の復元が走らなかった（SF-6b 前のデスクトップは別のスロットで独立していた）→ `logger.exception` で受けて、復元は必ず走らせる（`tests/test_asset_jobs.py` が pin）
+  - P16 で、1 ロードで `program_state` と `characters` がちょうど 1 回ずつ出ることを数えて pin
+  - 古い記述の更新（`test-automation-strategy.md`・`AutonaPlayerDB.SetupModel`・`AutonaApiV1` の v1 のゲームのロード・`AutonaWebOperations.set_game` / `load_game`）
 - **残るリスク / SF-6c へ**
   - `marshal`（`run_sync`）・アダプタ 2 つ・`HeadlessSignals`・Bridge の `game_loaded` は SF-6c（ローダーの `announce` / `scanned` の注入が、そのまま core の通知に置き換わる場所）。`_SaveCycle` の lock も 6c で見直す
+  - ヘッドレスでも選手 DB の `SetupModel`（`NormaliseMains` と `db_updated` → `ws_playerdb`）が、ロードのボード操作と保存サイクルの中（`gameChanged` のスロット）で走るようになった（デスクトップは元からこの形）。ロック順はボードホスト → `PlayerDB.lock` の一方向で、逆向きは無い。ただし DB が大きいと、その間ほかのボード操作の待ちが延びうる
+  - アダプタ（`AutonaGameAssetManager` / `HeadlessGames`）が `bootstrap.make_game_loader` を遅延 import している依存の向き（シェル → composition root）は SF-6c で解消する（アダプタごと消す）
   - ヘッドレスのロードがフッターの進捗を出すようになり、Socket.IO の `status` がロードのたびに最大 2 通増える（push と pop。50 ms の窓でまとまる。読み手は AppShell）
   - 実機未確認: 起動時の復元／切り替えで React のヘッダ・SCORE・OBS のキャラが追従／未反映の編集がある状態で切り替え／MOD の切り替え／ロード中に閉じる → 次回 1 ゲーム／ヘッドレスでロード中に Ctrl+C／フッターの進捗
 

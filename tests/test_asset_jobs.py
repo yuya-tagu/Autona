@@ -1586,6 +1586,37 @@ def test_a_game_change_sends_the_full_state_after_the_loads_delta(
     assert state["revision"] == deltas[-1]["revision"]
     assert state["state"]["game"]["codename"] == "game2"
     assert kinds[full + 1] == "characters"
+    # One load, one full state and one character list (SF-6b review: the
+    # desktop's window relay and the loader's own wiring are not both in).
+    assert kinds.count("program_state") == 1, kinds
+    assert kinds.count("characters") == 1, kinds
+
+
+def test_the_startup_restore_runs_when_the_provider_s_step_raises(
+        shell, autonaApp, monkeypatch):
+    """After a scan, the provider's game (`afterScan`) and then the startup
+    restore, on the main thread: the restore runs even when the provider's
+    step raises, which is logged (SF-6b review; each was a slot of its own
+    on the desktop until SF-6b, so one could not stop the other)."""
+    order = []
+
+    def afterScan():
+        order.append("provider")
+        raise RuntimeError("the provider's game failed")
+
+    monkeypatch.setattr(shell.loader, "_afterScan", afterScan)
+    monkeypatch.setattr(shell.loader, "_RestoreSelectedGame",
+                        lambda: order.append("restore"))
+    records, stop = _logRecords()
+    try:
+        shell.loader._OnScanned()
+    finally:
+        stop()
+
+    assert order == ["provider", "restore"]
+    assert [record["message"] for record in records
+            if record["level"].name == "ERROR"] == [
+        "The provider's game could not be applied after the scan"]
 
 
 # Where each shell calls bootstrap.wire_web_server: (the module, the

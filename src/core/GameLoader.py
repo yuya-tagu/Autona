@@ -206,8 +206,14 @@ class GameLoader:
         # On the main thread after a scan: the provider's game first, then
         # the startup restore (the desktop's onLoadAssets slots ran in that
         # order until SF-6b: bootstrap_gui connected the provider first).
+        # The restore runs whatever the provider's step does, as it did when
+        # each was a slot of its own (SF-6b review).
         if self._afterScan is not None:
-            self._afterScan()
+            try:
+                self._afterScan()
+            except Exception:
+                logger.exception("The provider's game could not be applied "
+                                 "after the scan")
         self._RestoreSelectedGame()
 
     def _RestoreSelectedGame(self):
@@ -486,10 +492,17 @@ class GameLoader:
         # a lock: rapid switching could take all four lanes from the
         # provider's fetches; ADR-005 S3f-4 review).
         while True:
+            applied = True
             with self._requestLock:
                 request, self._pendingLoad = self._pendingLoad, None
                 if request is not None:
-                    self._ApplyModsOff(request)
+                    try:
+                        self._ApplyModsOff(request)
+                    except Exception:
+                        # Taken, so nothing else would settle it: FAILED,
+                        # not run, like a load that raises (SF-6b review).
+                        logger.error(traceback.format_exc())
+                        applied = False
                 else:
                     request = self._ModsOffRequest()
                     if request is None:
@@ -497,7 +510,8 @@ class GameLoader:
                         return
             outcome = FAILED
             try:
-                outcome = self._RunLoad(request)
+                if applied:
+                    outcome = self._RunLoad(request)
             finally:
                 # Finished whatever the settle did: a synchronous request
                 # waiting for this generation (or an older one) must not

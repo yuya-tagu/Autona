@@ -42,12 +42,13 @@ from pathlib import Path
 
 import pytest
 
-from src.core.GameLoader import FAILED, STOPPED
+from src.core.GameLoader import FAILED, LOADED, STOPPED
 from src.core.SettingsManager import SettingsManager
 from src.core.TaskExecutor import TaskExecutor
 from tests.conftest import drain_tasks
 from tests.test_asset_jobs import (  # noqa: F401  (fixtures)
-    WAIT, _holdTheLoader, _selections, _waitingRequest, ownExecutor, shell)
+    WAIT, _holdTheLoader, _pumpUntil, _selections, _waitFor, _waitingRequest,
+    ownExecutor, shell)
 from tests.test_game_asset_manager_load import goldenGames  # noqa: F401
 
 EVENT_URL = "https://www.start.gg/tournament/autona-cup/event/singles"
@@ -471,6 +472,42 @@ def test_the_intent_goes_with_a_loader_the_shutdown_cancels(
     assert not shell.loader._loaderRunning
     assert shell.loader._modsOffGeneration is None
     assert shell.catalog.Current().modsActive is True
+
+
+def test_a_request_the_intent_cannot_be_applied_to_is_settled_all_the_same(
+        shell, autonaApp, monkeypatch):  # noqa: F811
+    """Applying the intent as the loader takes a request raises (SF-6b
+    review): that request -- taken, so nothing else would settle it -- is
+    over all the same, FAILED and not run: done() once, its Future
+    answered, its synchronous waiter released. The loader then goes on, and
+    the next request loads."""
+    _load(shell, "tgame")
+    selections = _selections(shell.catalog, monkeypatch)
+    real = shell.loader._ApplyModsOff
+    raised = []
+
+    def apply(request):
+        if not raised:
+            raised.append(request.codename)
+            raise RuntimeError("the intent could not be applied")
+        return real(request)
+
+    monkeypatch.setattr(shell.loader, "_ApplyModsOff", apply)
+    done = []
+    thread, outcome = _waitingRequest(
+        shell.loader, "game2", done=lambda: done.append(1))
+    _pumpUntil(lambda: not thread.is_alive(), timeout=30)
+
+    assert raised == ["game2"]
+    assert "error" not in outcome, outcome
+    assert shell.Answer(outcome["result"]) == FAILED
+    assert done == [1]
+    assert selections == []
+    _waitFor(lambda: not shell.loader._loaderRunning)
+    after = shell.Load("game2")
+    drain_tasks()
+    assert shell.Answer(after) == LOADED
+    assert shell.catalog.Current().codename == "game2"
 
 
 # ── the window's mods checkbox (gone in SF-5b-3) ────────────────────────
