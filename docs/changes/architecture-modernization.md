@@ -8657,7 +8657,8 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - ヘッドレスでも選手 DB の `SetupModel`（`NormaliseMains` と `db_updated` → `ws_playerdb`）が、ロードのボード操作と保存サイクルの中（`gameChanged` のスロット）で走るようになった（デスクトップは元からこの形）。ロック順はボードホスト → `PlayerDB.lock` の一方向で、逆向きは無い。ただし DB が大きいと、その間ほかのボード操作の待ちが延びうる
   - アダプタ（`AutonaGameAssetManager` / `HeadlessGames`）が `bootstrap.make_game_loader` を遅延 import している依存の向き（シェル → composition root）は SF-6c で解消する（アダプタごと消す）
   - ヘッドレスのロードがフッターの進捗を出すようになり、Socket.IO の `status` がロードのたびに最大 2 通増える（push と pop。50 ms の窓でまとまる。読み手は AppShell）
-  - 実機未確認: 起動時の復元／切り替えで React のヘッダ・SCORE・OBS のキャラが追従／未反映の編集がある状態で切り替え／MOD の切り替え／ロード中に閉じる → 次回 1 ゲーム／ヘッドレスでロード中に Ctrl+C／フッターの進捗
+  - 実機で確認済み（2026-11-15・メインセッション・隔離データ）: 起動時の復元（`game.selected` true・MOD オフ）、`POST /api/v1/game` での切り替えで state・AppShell のヘッダ・`out/game/codename.txt` が追従しエラーなし、ロードの依頼の直後にウィンドウを閉じて正常終了（設定は直前のゲームのまま）
+  - 実機未確認（pytest で pin 済み）: 未反映の編集がある状態で切り替え／MOD の切り替え（実機に MOD のあるゲームが無い）／ロードの最中に閉じる（試験用のゲームはロードが一瞬で、途中を捉えられない）／ヘッドレスでロード中に Ctrl+C／フッターの進捗
 
 ##### SF-8a プレビューを別オリジンに（2026-11-14）
 
