@@ -8,6 +8,23 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 > 残りの候補は設計書 §3「今後の候補（未着手）」に切り出した。本 ADR の決定（D1〜D3）自体は
 > 実装で検証済み。
 
+> **2026-11-15 追記（ADR-005 S-final SF-5b-3）: `STARTUP phase=core-shown` の意味が変わった。**
+> ウィンドウは共有ビュー（`AutonaWebPanelHost`）1 枚になり、Qt のサイドバー・メニュー・ステータスバーが無くなったので、
+> `core-shown` は「Qt のパネルが見える」ではなく「**空のウィンドウ（ローディングのスピナーの直前）が出た**」時点。
+> 起動の順は `self.show()` → `core-shown` → `LoadingOverlay` → 初回の描画の後に `_StartWebServer`
+> （`LoadingOverlay.call_when_painted`。描画されない起動（最小化）でも最大 1.5 秒で走る。それまではスピナーが消えるのと
+> イベントキューが空くのを待っていた）→ `webserver-ready` → 共有ビューが建ってページを読む →
+> 最初の読み込みの終わりでスピナーを外して **`STARTUP phase=panel-shown`**（新設。操作できる画面が出た時点。
+> 最初の読み込みが失敗し切ったときはスピナーだけ外して warning、`panel-shown` は出さない）。
+> Flask の構築（GUI スレッドで数秒）の間はスピナーが止まって見える。過去の `core-shown` の値（10.95s など）と
+> 今の値は同じものを測っていないので、操作できるまでの時間は `panel-shown` で比べる。
+> Web サーバーの起動に失敗したら（サーバースレッドの bind 失敗、`_StartWebServer` の中の例外）、スピナーを外して共有ビューの
+> 中身を案内の文に置き換える（ダイアログは出さない）。最初の読み込みが失敗し切ったときは、スピナーを外して「再試行」のボタンを出す。
+> スピナーには上限（`Window.SPINNER_CAP_MS` = 20 秒）があり、過ぎたら warning を出して外し、同じ再試行の表示を出す。上限は
+> 起動時のダイアログ（LAN の確認・ポートの確認）とサーバーの構築の間は止め、`webserver-ready` から数え直す（ダイアログに答えている
+> 時間で外れないように）。上限で外れたあとでも、最初の読み込みが終われば `panel-shown` は出る。
+> 順序は `tests/test_web_panel_host.py`（`_BuildUi` のトークンの順と `_OnPageLoadFinished`）が pin する。
+
 > 設計詳細・移行ステップ・検証方法は
 > [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) を正とする。
 > 本 ADR は「なぜこの方針か」の記録のみを持つ。

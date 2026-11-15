@@ -44,9 +44,9 @@
 
 ## 1. メインメニュー
 
-[src/Autona.py](../../src/Autona.py) のサイドバー（`_navSections`）/ Help & Settings メニュー。
+[web/src/AppShell/](../../web/src/AppShell/) のサイドバー（`navSections.json`）/ Help & Settings メニュー（フッター）。メインウィンドウ（[src/Autona.py](../../src/Autona.py)）は AppShell を表示する共有ビュー 1 枚（ADR-005 S-final SF-5b-3。Qt のサイドバー・メニュー・ステータスバーは削除）。
 
-### サイドバー（`QStackedWidget` のページ切替）
+### サイドバー（AppShell のナビ。ページはルーターで切り替え、ビューは読み直さない）
 - **Setup** — Tournament Info / Stream Settings（配信設定）
 - **Scoreboard** — Scoreboard / Board（デザイン選択・ライブプレビュー・機能別カラー・Designer 起動。§ 31 参照）
 - **Display** — Thumbnail Settings / Result Settings / Top 8 Display Settings / Commentary / Stats Display Settings（統計表示設定）
@@ -62,11 +62,11 @@
 - **Event support inquiries** — イベント運営支援の問い合わせ
 - **About Autona** — アプリ情報・ライセンス表示
 
-### 大会メニュー（サイドバー上部の大会ボタン）
+### 大会メニュー（AppShell のヘッダーの大会）
 - **Set tournament** — Start.gg イベント URL を入力してロード
 - **Unset tournament** — 大会解除
 
-### ゲーム選択（サイドバー上部）
+### ゲーム選択（AppShell のヘッダー）
 - **ゲーム選択メニュー** — 対応ゲームから選択してアセットロード
 - **Modded content** — Mod コンテンツの有効化（対応ゲームのみ表示）
 
@@ -373,9 +373,9 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 ## 24. レイアウト・ウィンドウ操作
 
 ### 基本
-- 左サイドバー + `QStackedWidget` のページ切替（自由ドッキングは廃止。パネルは `QDockWidget` サブクラスだがドックしない）
-- 選択ページとサイドバー折りたたみ状態を `QSettings` に保存・復元（`STATE_VERSION` 管理）
-- 重いパネルは初回表示時に遅延構築
+- メインウィンドウは共有ビュー 1 枚で、AppShell（左サイドバー + ヘッダー + フッター）の中でページを切り替える（ADR-005 S-final SF-5b-3。Qt のサイドバー・`QStackedWidget`・ドックは無い）
+- 開いているページと AppShell のサイドバーの折りたたみを、変えるたびに `QSettings`（`lastPanel` / `navCollapsed`）に保存し、次の起動で復元（Help & Settings のメニューのページは覚えず、その前のページ。旧 `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す）
+- 起動はスピナーの下で Web サーバーを立ててから最初のページを読む。最初の読み込みが失敗し切ったら「再試行」のボタンを出す（Web サーバーが起動しなかったときは理由の文を出す）
 
 ### その他
 - **Always on top** トグル（Help & Settings メニュー）
@@ -553,6 +553,6 @@ React の `web/src/StatsPreviewPage/`（`/web/statsPreview`。Stats Display Sett
 3. 既存 HTTP/Socket.IO ルート群（`/score`・`/scoreboard<N>-*` 等）
 4. StateManager → WebSocket デルタ配信のリアルタイム性
 5. Start.gg ロード〜セット反映フロー
-6. レイアウト保存/復元（STATE_VERSION）と保存データ互換
+6. ウィンドウのページ・サイドバーの折りたたみの保存/復元（QSettings の `lastPanel` / `navCollapsed`）と保存データ互換
 
 手順は [../operations/runtime-operations.md](../operations/runtime-operations.md) と [../../.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) を参照。

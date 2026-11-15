@@ -1,19 +1,21 @@
-"""The AppShell's tables held to the Qt main window's (ADR-005 S-final SF-5a-3).
+"""The AppShell's tables held to what the Qt main window said (ADR-005 S-final
+SF-5a-3 / SF-5b-3).
 
-/web/app/<panel> (web/src/AppShell) draws the Qt window's frame in React: the
-sidebar's navigation, its operations header and its Help & Settings footer.
-Until SF-5b the desktop still shows the Qt frame, so the two must say the
-same: the navigation's sections, order, panels and icons
-(web/src/AppShell/navSections.json against Window._navSections, read from
-src/Autona.py's source -- importing it starts the app), the menu pages, and
-every word the AppShell shares with the Qt frame, in English and Japanese
-(i18next's app_* against the Qt .ts files). The outside addresses a browser
+/web/app/<panel> (web/src/AppShell) is the desktop's frame: the sidebar's
+navigation, its operations header and its Help & Settings footer. SF-5a-3
+held it to the Qt frame's; SF-5b-3 deleted the Qt frame (the window is one
+shared view showing /web/app/<panel>), so NAVIGATION below is the frozen copy
+of the deleted Window._navSections: the sections, order, panels, icons and
+the words (as their Qt translations' (context, source)). The menu pages are
+src/AutonaWindowState.py's MENU_PAGES (the pages the window does not reopen
+at the next start). Every word the AppShell shares with the old Qt frame, in
+English and Japanese, is still the Qt .ts files' (i18next's app_* against
+them): the words the desktop showed stay. The outside addresses a browser
 links are src/AutonaExternalLinks.py's.
 
 The route itself (/web/app/<panel>: STATIC, the same names, 404 otherwise,
 no other page's frame) is tests/test_web_access.py's.
 """
-import ast
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -21,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from src import AutonaExternalLinks
+from src import AutonaExternalLinks, AutonaWindowState
 from src.core import WebAccess
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +34,7 @@ TS_FILES = {"en": ROOT / "src" / "i18n" / "Autona_en.ts",
 
 # The AppShell's words that are the Qt frame's too: i18next key -> the Qt
 # translation (context, source). The navigation's headings and labels are
-# matched through _navSections below.
+# matched through NAVIGATION below.
 SHARED_WORDS = {
     "app_show_sidebar": ("app", "Show sidebar"),
     "app_set_tournament": ("app", "Set tournament"),
@@ -58,44 +60,33 @@ SHARED_WORDS = {
 }
 
 
-def _window_class():
-    tree = ast.parse((ROOT / "src" / "Autona.py").read_text(encoding="utf-8"))
-    return next(node for node in ast.walk(tree)
-                if isinstance(node, ast.ClassDef) and node.name == "Window")
+# The deleted Qt sidebar's navigation (Window._navSections up to SF-5b-3),
+# frozen: [(heading, [(panel, icon, label), ...]), ...], the heading and the
+# label as their QApplication.translate() calls' (context, source).
+NAVIGATION = [
+    (("app", "Setup"), [
+        ("event", "tournament.svg", ("app", "Tournament Info")),
+        ("stream", "megaphone.svg", ("app", "Stream Settings")),
+    ]),
+    (("app", "ScoreboardCategory"), [
+        ("scoreboard", "scoreboard.svg", ("app", "Scoreboard")),
+        ("board", "board.svg", ("app", "Board")),
+    ]),
+    (("app", "Display"), [
+        ("thumbnail", "thumbnail.svg", ("app", "Thumbnail Settings")),
+        ("result", "result.svg", ("app", "Result Settings")),
+        ("top8", "bracket.svg", ("app", "Top 8 Display Settings")),
+        ("commentary", "commentary.svg", ("app", "Commentary")),
+        ("statsPreview", "stats.svg", ("app", "Stats Display Settings")),
+    ]),
+    (("app", "Data"), [
+        ("stats", "stats.svg", ("app", "Statistics")),
+        ("playerBrowser", "players.svg", ("app", "Player List")),
+    ]),
+]
 
-
-def _translated(node):
-    """("context", "source") of a QApplication.translate(...) call."""
-    assert isinstance(node, ast.Call), ast.dump(node)
-    assert ast.unparse(node.func) == "QApplication.translate", ast.dump(node)
-    context, source = node.args
-    return context.value, source.value
-
-
-def _qt_nav_sections():
-    """Window._navSections as [(heading, [(key, icon, label), ...]), ...],
-    the heading and the label as their translate() calls' (context,
-    source)."""
-    for node in ast.walk(_window_class()):
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and ast.unparse(node.targets[0]) == "self._navSections"):
-            sections = []
-            for section in node.value.elts:
-                heading, items = section.elts
-                sections.append((_translated(heading), [
-                    (item.elts[3].value, item.elts[1].value,
-                     _translated(item.elts[2]))
-                    for item in items.elts]))
-            return sections
-    raise AssertionError("Window._navSections not found")
-
-
-def _qt_menu_pages():
-    for node in _window_class().body:
-        if (isinstance(node, ast.Assign)
-                and ast.unparse(node.targets[0]) == "MENU_PAGES"):
-            return [element.value for element in node.value.elts]
-    raise AssertionError("Window.MENU_PAGES not found")
+# The deleted Window.MENU_PAGES, frozen (now AutonaWindowState.MENU_PAGES).
+MENU_PAGES = ["settings", "api", "companion", "obs", "about", "assets"]
 
 
 def _nav_table():
@@ -123,17 +114,18 @@ def _qt_translations(language):
 
 
 def test_the_navigation_is_the_qt_sidebars():
-    qt = _qt_nav_sections()
     table = _nav_table()
     assert [[(item["panel"], item["icon"]) for item in section["items"]]
             for section in table] == [
-        [(key, icon) for key, icon, _label in items] for _heading, items in qt]
+        [(key, icon) for key, icon, _label in items]
+        for _heading, items in NAVIGATION]
 
 
 @pytest.mark.parametrize("language", ["en", "ja"])
 def test_the_navigations_words_are_the_qt_sidebars(language):
-    qt = _qt_nav_sections()
+    qt = NAVIGATION
     table = _nav_table()
+    assert len(table) == len(qt)
     words = _locale(language)
     translations = _qt_translations(language)
     for section, (heading, items) in zip(table, qt):
@@ -165,15 +157,26 @@ def test_the_menu_pages_are_the_windows():
     text = (APP_SHELL / "navTable.ts").read_text(encoding="utf-8")
     match = re.search(r"export const MENU_PAGES = \[([^\]]*)\]", text)
     assert match, "MENU_PAGES not found in navTable.ts"
-    assert re.findall(r'"([^"]+)"', match.group(1)) == _qt_menu_pages()
+    assert re.findall(r'"([^"]+)"', match.group(1)) == MENU_PAGES
+    assert list(AutonaWindowState.MENU_PAGES) == MENU_PAGES
 
 
 def test_every_page_the_app_shell_opens_is_a_web_panel():
     panels = [item["panel"] for section in _nav_table()
               for item in section["items"]]
     assert len(panels) == len(set(panels))
-    for panel in [*panels, *_qt_menu_pages()]:
+    for panel in [*panels, *MENU_PAGES]:
         assert WebAccess.IsWebPanel(panel), panel
+
+
+def test_the_legacy_index_table_is_the_deleted_sidebars():
+    # The legacy QSettings sidebarIndex_v22 counted the Qt sidebar's items
+    # in this order (AutonaWindowState migrates it once). Held to the frozen
+    # copy, not to navSections.json: the table reads what that sidebar
+    # saved, and stays as it is whatever the AppShell's navigation becomes.
+    assert list(AutonaWindowState.LEGACY_SIDEBAR_PANELS) == [
+        panel for _heading, items in NAVIGATION
+        for panel, _icon, _label in items]
 
 
 def test_every_icon_is_served():

@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import {ThemeProvider, useTheme} from "@mui/material/styles";
+import {useSearchParams} from "react-router-dom";
 import i18n from "../i18n/config";
 import {DARK_TOKENS, themeBeside} from "../themes";
 import {PanelShellContext} from "../PanelShell/context";
@@ -25,19 +26,37 @@ import {SIDEBAR_WIDTH, Tell, useReport} from "./parts";
 
 // The AppShell (ADR-005 S-final SF-5a-3), routed at /web/app/:panel: the
 // panel's page (the same page /web/:panel shows bare, PanelContent) inside
-// the Qt main window's frame -- the sidebar's header (tournament, game,
-// battle format, modded content), its navigation and its footer (Help &
-// Settings, what the app is busy with). Everything goes through /api/v1 and
-// the shell requests; the desktop still shows /web/<panel> until SF-5b.
+// the main window's frame -- the sidebar's header (tournament, game, battle
+// format, modded content), its navigation and its footer (Help & Settings,
+// what the app is busy with). Everything goes through /api/v1 and the shell
+// requests. It is the desktop's whole window since SF-5b-3 (the shared view
+// opens /web/app/<panel>; the Qt sidebar, menus and status bar went).
 //
-// Widths: the sidebar is the Qt one's 196 px, beside the page; the page
+// Widths: the sidebar is 196 px (the Qt one's), beside the page; the page
 // keeps the whole height (the panels' two-pane layouts take 100vh), and its
 // breakpoints move by the sidebar's width (themes.js's themeBeside), so its
-// layout follows the width it has, as beside the Qt sidebar. Hidden (the
-// collapse button; kept in memory only, not saved), a small button at the
-// top left brings it back, as in the Qt window, and the status is a small
-// box at the bottom left. Below 600 px the sidebar is a drawer over the
-// page, opened from a row above it, and the status a line below it.
+// layout follows the width it has. Hidden (the collapse button), a small
+// button at the top left brings it back, and the status is a small box at
+// the bottom left. Below 600 px the sidebar is a drawer over the page,
+// opened from a row above it, and the status a line below it.
+//
+// Two things are kept in the URL's query, replaced (no history entry, no
+// load), so that the page loaded again finds them -- the desktop's view
+// reads them back and puts them into its next load of its own
+// (src/AutonaWebPanelHost.py: AppPanelOf / PanelPath), the window keeps the
+// first between launches -- and a browser's reload as well:
+// - nav=collapsed: the sidebar hidden (SF-5b-3);
+// - told=<revision>: the tournament load failure told last, so an AppShell
+//   mounted again (a page discarded and loaded again, a load the view makes
+//   again) does not tell it twice (SF-5b-2's notice).
+export const NAV_QUERY = "nav";
+export const NAV_COLLAPSED = "collapsed";
+export const TOLD_QUERY = "told";
+
+function toldIn(params: URLSearchParams): number | null {
+    const value = params.get(TOLD_QUERY);
+    return value !== null && /^[0-9]{1,15}$/.test(value) ? Number(value) : null;
+}
 
 interface Notice {
     message: string;
@@ -89,7 +108,25 @@ export default function AppShell() {
     // The page's theme beside the sidebar: its breakpoints moved by it.
     const besideTheme = React.useMemo(() => themeBeside(SIDEBAR_WIDTH), []);
     const narrow = useMediaQuery(theme.breakpoints.down("sm"), {noSsr: true});
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+    // The URL's query, replaced: the router's location (and the desktop's
+    // view's URL) follows at once.
+    const setQuery = React.useCallback(
+        (name: string, value: string | null) => {
+            setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                if (value === null) {
+                    next.delete(name);
+                } else {
+                    next.set(name, value);
+                }
+                return next;
+            }, {replace: true});
+        }, [setSearchParams]);
+    const collapsed = searchParams.get(NAV_QUERY) === NAV_COLLAPSED;
+    const setCollapsed = React.useCallback(
+        (hidden: boolean) => setQuery(NAV_QUERY, hidden ? NAV_COLLAPSED : null),
+        [setQuery]);
     const [drawer, setDrawer] = React.useState(false);
     const [notice, setNotice] = React.useState<Notice | null>(null);
     // Whether this is the desktop's own window (the shell request's ticket
@@ -139,10 +176,16 @@ export default function AppShell() {
     // sent, not typed over again); (3) on the Event page, whose card says
     // it (not marked told: it is told once the operator leaves the page).
     // The dialog's report is a ref (its effect runs before this one's in the
-    // same commit) plus a tick to judge again.
+    // same commit) plus a tick to judge again. The revision told last starts
+    // from the URL's told= and is put back there (see TOLD_QUERY).
     const {status: loadStatus, revision: loadRevision} = tournament.load;
     const [loadNotice, setLoadNotice] = React.useState<number | null>(null);
-    const told = React.useRef<number | null>(null);
+    const [toldAtMount] = React.useState(() => toldIn(searchParams));
+    const told = React.useRef<number | null>(toldAtMount);
+    const markTold = React.useCallback((revision: number) => {
+        told.current = revision;
+        setQuery(TOLD_QUERY, String(revision));
+    }, [setQuery]);
     const dialogReport = React.useRef<{showing: number | null;
                                        sending: boolean}>(
         {showing: null, sending: false});
@@ -165,15 +208,15 @@ export default function AppShell() {
             return;
         }
         if (dialog.showing === loadRevision) {
-            told.current = loadRevision;
+            markTold(loadRevision);
             return;
         }
         if (panelName === "event") {
             return;
         }
-        told.current = loadRevision;
+        markTold(loadRevision);
         setLoadNotice(Date.now());
-    }, [loadStatus, loadRevision, reportTick, panelName]);
+    }, [loadStatus, loadRevision, reportTick, panelName, markTold]);
 
     // Hidden or back, the focus goes to the button that undoes it. (The
     // drawer gives it back to its opener when it closes.)

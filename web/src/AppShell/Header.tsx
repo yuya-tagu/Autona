@@ -92,12 +92,12 @@ export function useTournamentInfo(): {name: string; url: string;
 }
 
 // What PUT /battle-format takes, and the Qt segment's labels (not
-// translated there either: AutonaSidebar._FORMATS).
+// translated there either: AutonaSidebar._FORMATS, until SF-5b-3).
 export const FORMATS: [string, string][] = [
     ["singles", "1v1"], ["team", "Team"], ["crew", "Crew"]];
 
-// The games by name, as the Qt menu lists them (Window.ReloadGames: the
-// name or the codename, lower-cased).
+// The games by name, as the Qt menu listed them (Window.ReloadGames until
+// SF-5b-3: the name or the codename, lower-cased).
 export function gamesByName(games: Record<string, GameEntry>): string[] {
     const name = (codename: string) =>
         (games[codename]?.name || codename).toLowerCase();

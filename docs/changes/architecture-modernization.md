@@ -9173,3 +9173,74 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - 送信中に届いたほかの回の失敗は、答えが来るまで通知が遅れる。
   - Qt の `QMessageBox`（`Window._ReportTournamentLoadFailure`）は SF-5b-3 で消す。
 - **実機の確認（2026-11-15・隔離データ）**: 大会の解除の後、ヘッダが「ゲームを選ぶ」＋金枠になり MOD のスイッチが消えた。TOP8 のページで start.gg の取得を失敗させると（偽の start.gg の 500）上中央に通知が出て、「大会を選ぶ」でダイアログが開き（通知は閉じる）、Esc で閉じるとフォーカスがヘッダの大会のボタンへ戻った
+
+##### SF-5b-3 ウィンドウを共有ビュー 1 枚に・Qt のサイドバー / メニュー / ステータスバーの削除（2026-11-15）
+
+区分: 高。Window は共有ビュー `AutonaWebPanelHost` 1 枚になり、AppShell（`/web/app/<panel>`）がサイドバー・ヘッダー・フッター・Help を持つ。
+
+- **変更**
+  - 削除: `src/Autona.py` のナビ、スタック、メニュー、ステータスバー、`_Create*` 11 個、`ReloadGames` / `SetGame` / `Signal_GameChange` / `UpdateTournamentButton`、MOD のチェックボックスと `_pickGame` / `_ToggleMods` / `_ShowModdedContent`、`_ReportTournamentLoadFailure` の QMessageBox、`STATE_VERSION`。ほかに `src/AutonaSidebar.py`、`WebPanelPages`、`Helpers/AutonaVersionHelper.py`、provider の `SetStartggEventSlug` / `ConfirmClearTournament`。
+  - レビューの後に削除: 使われなくなった Window の属性（`programState` / `savedProgramState` / `programStateDiff` / `saveMutex` / `player_layouts` / `allplayers` / `local_players`）、シグナル（`StopTimer` / `DetectGame` / `SetupAutocomplete`）、`catchtime`。読み手の無い `assets/versions.json` の `supported_providers`。
+  - 開く経路: `Window.OpenPanel(name)`（前に出して `ShowPanel`、ホストを返す、終了中は None）。load_set と legacy の open-set は `OpenPanel("scoreboard")` → `host.OpenScoreSets`。
+  - ホスト:
+    - `PanelPath` は `/web/app/<panel>`。
+    - `urlChanged` を `AppPanelOf` で読み、ページ・`nav=collapsed`・`told=N` を覚えて `panelChanged` を出し、次の自分の読み込みに入れる。折りたたみが実際に変わったときは `navCollapsedChanged` を出す。
+    - `GameChanged` はアセットのアダプタの onLoad から出す。
+  - 起動:
+    - 順: show → `core-shown` → `LoadingOverlay` → 初回の描画の後（`call_when_painted`、最大 1.5 秒）に `_StartWebServer` → `webserver-ready` → 最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（新設）。LAN の確認はスピナーの上。
+    - スピナーの上限 `SPINNER_CAP_MS`（20 秒）。`_StartWebServer` の間（ダイアログとサーバーの構築）は止め、準備ができてから数え直す。時間が来たら warning を出してスピナーを外し、再試行の表示を出す。
+    - ADR-003 に追記。
+  - 起動失敗:
+    - ホストの中身を案内の文に置き換え（`ShowStartFailure`）、スピナーを外す。ダイアログは出さない。表示済みのホストでは文が見えなかったので `label.show()` を足した。
+    - `_StartWebServer` の中の例外（構築・ポートの確認・起動・結線）も起動失敗の表示へ送る。
+    - ホストがビューを建てられなかった場合（`_EnsureView` の例外）は `_ViewNotBuilt` で作りかけを捨て、同じ形の文を出して `pageLoadFinished(False)` を出す。
+  - 読み込みの失敗:
+    - 失敗し切ったら、ホストがビューの上に再試行の表示（文と「再試行」ボタン）を重ねる。成功した読み込みで外す。自動の再試行はしない。
+    - 拒否された遷移の早期 return は、読み込み済みの文書があるときだけ。文書の無い最初の読み込みの拒否は、失敗し切った読み込みとして扱う。
+  - QSettings:
+    - `lastPanel`（ページの名前）と `navCollapsed`。純関数のモジュール `src/AutonaWindowState.py`。
+    - 旧キー `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す（固定の 11 項目の表 `LEGACY_SIDEBAR_PANELS`）。
+    - メニューのページと `shell-check` の間は、その前のページを覚える。
+    - 保存は変わるたび（`panelChanged` / `navCollapsedChanged`。保存値と違うものだけ書いて sync）と終了時。読み替えより前、終了の開始後、`told` だけの変化では書かない。ジオメトリは終了時だけ。
+  - 最前面表示は Window の bool（保存しない）。
+  - AppShell: 折りたたみを `nav=collapsed`、通知済みの回を `told=N` として URL に replace で書く。作り直しで同じ失敗を二度知らせない（SF-5b-2 の残るリスクを解消）。
+  - テスト:
+    - 新設: `tests/test_window_state.py`（実ウィンドウの起動 → 移動 → 終了で、ディスクに書かれた値を ini の本文から読んで確かめる）、`tests/test_loading_overlay.py`（`call_when_painted` / `paintEvent`）。
+    - pin（前回まで）: QWidget のサブクラスの許可リスト、`Autona.py` に Qt の部品が無いこと、QMessageBox は LAN の確認だけ、`AutonaSidebar.py` が無いこと、`PanelPath` / 旧キーの表 / `urlChanged` の追従 / 起動の順 / 起動失敗でダイアログを出さないこと。
+    - pin（レビューの後に追加）:
+      - 起動失敗の経路を段階ごとに
+      - スピナーの上限（止める・数え直す・時間切れで再試行の表示）
+      - 再試行の表示（失敗し切った読み込み、文書の無い最初の読み込みの拒否、ビューを建てられない場合）
+      - 読み込み済みのページからの拒否で文書を保つこと（変異で確認）
+      - 変更ごとの保存（書き込みと sync の回数）
+      - 保存の呼び出し箇所（AST）
+      - 消えたメンバー
+    - サイドバー・スタック・STATE_VERSION の pin を削除し、消えた API を前提にしたテストを書き直した。旧 index の表は、削除したサイドバーの凍結した写しと照合する。
+  - docs: Design.md（§3.3.5・§4.1・§4.1.1・§4.2.4・§7.5）、ADR-003、rules（python-widgets / state-and-webserver）、手動テスト、`autona_splash.py` の docstring、runtime-operations / features / review-pr / known-smells S-03 の古い記述。
+- **判断**
+  - 折りたたみと通知済みの回は URL のクエリで運ぶ（ストレージは使わない）。
+  - 最前面表示は保存しない（旧 Qt のチェックと同じ）。
+  - 初回起動の大きさは 1096×720 で中央。
+  - 最初の読み込みが失敗し切ってもスピナーは外す（`panel-shown` は出さず warning）。退路は再試行の表示。
+  - 自動の再試行はしない（操作 1 回につき 1 回の既存の方針）。
+  - 再試行の表示はビューの上に重ねる（見えたときの読み直しを残す）。
+  - スピナーの上限はダイアログとサーバーの構築の間を数えない。
+  - ビューを建てられないのは起動失敗として扱う。
+  - 起動時の旧キーの読み替えは、最初の変更か終了まで sync しない。
+  - `.ts` の死んだコンテキストは SF-7 まで残す。
+- **検証**: pytest 全量 7505 passed / 0 failed / 4 skipped（レビュー対応の後）。jest 1400 passed、build OK、e2e 155 passed / 1 skipped（web はレビュー対応で変えていない）。
+- **残るリスク**
+  - `core-shown` の意味が変わった（比較は `panel-shown` で行う）。
+  - Flask の構築中はスピナーが止まって見える。
+  - Windows がフォアグラウンドを拒むと、`OpenPanel` はタスクバーの点滅で終わりうる。
+  - ブラウザで開いた AppShell の URL に `nav` / `told` が残る。
+  - 読み込み中に遅れて届いた `urlChanged` が `_panel` を戻しうる（起こりにくい）。
+  - `GameChanged` を出すのは onLoad だけ。
+  - 最小化で起動すると、Web サーバーの構築が初回の描画より前に走りうる。
+  - `access` が確認中か失敗のとき、Footer に「常に手前に表示」「更新を確認」が出ない（Qt の代わりの表示は無い）。
+  - 古い版に戻すと新しいキーは読まれず、旧キーも戻らない。
+  - `_loaded` が True のまま、捨てられたページを Qt が読み直して拒否された場合は早期 return を通る（以前から）。
+  - 読み込みが返らないまま止まっているあいだは「再試行」を押しても何も起きない（上限のタイマーが退路）。
+- **実機の確認**
+  - 確認済み（2026-11-15・メインセッション・隔離データ）: 起動中に Qt の UI が出ないこと、旧 index 10 → playerBrowser、lastPanel と折りたたみの復元、load_set のホットキー、最前面表示のまま更新のダイアログが裏に隠れないこと、ポートの衝突。レビュー対応の後: リザルトへ移ってサイドバーを隠した直後にレジストリへ `lastPanel=result` / `navCollapsed=true` が書かれ、プロセスを強制終了（closeEvent なし）しても残った。
+  - 未: 再試行の表示、20 秒の上限（LAN の確認の最中には時間切れにならないこと）、メニューのページでの保存、日本語の文言（どれも pytest で pin 済み）。

@@ -15,8 +15,9 @@ Also here:
 - **a board's set selection asked for from outside the SCORE page**: the
   load_set hotkey (AutonaHotkeys, the active board's) and the legacy
   open-set route open the SCORE page's set selection dialog (ADR-005
-  S4ab-2): the main window is brought to the front on SCORE and its shared
-  view asked to (Window.OpenScoreSets). The page shows the board of the
+  S4ab-2): the main window is brought to the front on SCORE (Window.
+  OpenPanel) and its shared view asked to (AutonaWebPanelHost.
+  OpenScoreSets). The page shows the board of the
   battle format only, so a board other than that one opens nothing. The Qt
   set selection and station windows of boards 1 and 2 were here (and each
   board's before S4y) until ADR-005 S4ac-3 removed them with the Qt SCORE
@@ -26,7 +27,7 @@ Also here:
   legacy route and SCORE's X post;
 - **the shared view's shell requests** (ShellRequest / ShellState; ADR-005
   S-final SF-5a-1): what a page asks of the desktop in a click -- the main
-  window's "always on top" (its Help & Settings menu's check follows), the
+  window's "always on top" (Window.SetAlwaysOnTop: its own state), the
   update check, one of the fixed outside addresses (AutonaExternalLinks.
   EXTERNAL_LINKS), a game folder to import picked in the native dialog
   (SF-5a-2: held by core's AssetPackService under an id, which the page
@@ -58,6 +59,11 @@ from .core import AssetPackService as assets
 from .core.TaskExecutor import TaskExecutor
 from .core.Actions import AutonaActions
 from .core.ThumbnailService import ThumbnailService
+
+# The React panel whose set selection the load_set hotkey opens
+# (AutonaWebPanelHost.SCORE_PANEL; not imported from there: that pulls
+# QtWebEngine into bootstrap_gui()'s imports).
+SCORE_PANEL = "scoreboard"
 
 
 # The preview's PNG (ADR-005 S4o judgment 23). Qt maps a PNG quality to the
@@ -166,8 +172,8 @@ class AutonaShellOperations:
         self._pickingFolder = False
 
     def UiMounted(self, window):
-        """The main window is there (Window.__init__): what opens the SCORE
-        page's set selection (Window.OpenScoreSets). Until ADR-005 S4ac-3 the
+        """The main window is there (Window.__init__): what shows the SCORE
+        page for its set selection (Window.OpenPanel). Until ADR-005 S4ac-3 the
         Qt set windows were built here too, parented to it, so that they
         followed the tournament's phases from the start."""
         self._parent = window
@@ -203,12 +209,15 @@ class AutonaShellOperations:
                 "did not open")
 
     def _OpenOnPage(self, board):
-        """Have the main window show SCORE and its page open board `board`'s
-        set selection dialog (Window.OpenScoreSets): only for the board of
-        the battle format, the one the page shows. Another one -- the legacy
-        /scoreboard2-open-set in 1v1 -- opens nothing and is logged (the
-        owner's call, 2026-11-11): the page would not show it, and switching
-        the format is not the route's to do."""
+        """Have the main window show SCORE, brought to the front
+        (Window.OpenPanel), and its page open board `board`'s set selection
+        dialog (the host's OpenScoreSets: it hands it to the page once it
+        can): only for the board of the battle format, the one the page
+        shows. Another one -- the legacy /scoreboard2-open-set in 1v1 --
+        opens nothing and is logged (the owner's call, 2026-11-11): the page
+        would not show it, and switching the format is not the route's to
+        do. Nothing is asked of a window that is closing (OpenPanel answers
+        no host then)."""
         active = AutonaActions.instance.ActiveBoard()
         if board != active:
             logger.info(
@@ -216,7 +225,9 @@ class AutonaShellOperations:
                 f"was asked for while SCORE shows scoreboard {active}: "
                 "nothing opened")
             return
-        self._parent.OpenScoreSets(board)
+        host = self._parent.OpenPanel(SCORE_PANEL)
+        if host is not None:
+            host.OpenScoreSets(board)
 
     # ── a board's thumbnail ──────────────────────────────────────────────
 
@@ -260,10 +271,9 @@ class AutonaShellOperations:
         return {"ok": False, "error": "unknown_verb"}
 
     def _AlwaysOnTop(self, on):
-        """The main window's "always on top", set to `on` ("0" / "1") as its
-        menu's check would be (Window.SetAlwaysOnTop: the check and the
-        window flag; the window is hidden and shown again by Qt): the state
-        it is in then."""
+        """The main window's "always on top", set to `on` ("0" / "1")
+        (Window.SetAlwaysOnTop: its state and the window flag; the window is
+        hidden and shown again by Qt): the state it is in then."""
         if on not in ("0", "1"):
             return {"ok": False, "error": "bad_argument"}
         window = self._parent

@@ -193,8 +193,7 @@ class AutonaGameAssetManager(QObject):
             return
 
         # Mods stay off on restore, unchanged from the previous startup
-        # behaviour: the sidebar checkbox re-syncs itself from
-        # game.mods_active on onLoad.
+        # behaviour: the AppShell's mods switch shows game.mods_active.
         self.LoadGameByCodename(codename)
 
     def DownloadStartGGCharacters(self):

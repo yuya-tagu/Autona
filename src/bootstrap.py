@@ -272,13 +272,13 @@ def bootstrap_core():
 
     # ORDER CONSTRAINT: the tournament metadata writer must exist before the
     # provider above ever emits tournament_data_updated, and before anything
-    # that *reads* tournamentInfo.* connects to that signal -- the sidebar
-    # tournament button (Window.UpdateTournamentButton) is one such reader,
-    # and it used to be correct only because the EVENT panel happened to be
-    # constructed earlier in Window.__init__ than the button. The panel is
-    # lazy since headless core Step 4b, so the writer lives here instead.
-    # Window.__init__ makes the actual connection (the failure path is a
-    # dialog); this only has to exist first. The date format is injected
+    # that *reads* tournamentInfo.* connects to that signal -- the Qt
+    # sidebar's tournament button was one such reader (until ADR-005 S-final
+    # SF-5b-3), and it used to be correct only because the EVENT panel
+    # happened to be constructed earlier in Window.__init__ than the button.
+    # The panel is lazy since headless core Step 4b, so the writer lives here
+    # instead. The shells make the actual connection (wire_tournament_data);
+    # this only has to exist first. The date format is injected
     # because core may not import Qt (tests/test_core_qt_free.py) -- see
     # AutonaLocaleHelper.FormatExportDate.
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -542,12 +542,11 @@ def bootstrap_gui():
     # start.gg videogame id loads through it (so the load is announced:
     # gameLoaded, onLoad), and every scan re-applies the provider's game. The
     # connection used to be made in the provider's __init__; making it here
-    # keeps it the first slot on onLoadAssets, ahead of everything the
-    # Window connects: Window.ReloadGames (Window.__init__), the EVENT
-    # panel's combo when that page is built at startup, and last the
-    # adapter's own startup restore (_RestoreSelectedGame, connected in its
-    # UiMounted() right before the first scan). The restore therefore still
-    # runs after the provider has re-applied its game, as before.
+    # keeps it the first slot on onLoadAssets, ahead of the adapter's own
+    # startup restore (_RestoreSelectedGame, connected in its UiMounted()
+    # right before the first scan) and, once the server is up, its
+    # games_changed (wire_web_server). The restore therefore still runs
+    # after the provider has re-applied its game, as before.
     # tests/test_bootstrap_split.py pins that order on a real emit.
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     AutonaTournamentDataProvider.instance.selectGameFromStartGGId = (
@@ -661,9 +660,10 @@ def wire_tournament_data(on_failure=None):
 
     - tournament_data_updated -> TournamentInfoService.ApplyProviderPayload,
       the tournamentInfo.* writer. `on_failure(data)` is called when a
-      payload did not apply: the desktop shows a dialog, the headless shell
-      logs. The caller decides where in its own wiring this goes -- the
-      window connects the readers of tournamentInfo.* after it.
+      payload did not apply: the headless shell logs; the desktop passes
+      none (the pages tell it from the state's tournamentInfo.load: the
+      AppShell's notice, the Event page's card -- ADR-005 S-final SF-5b-2;
+      the window's dialog went in SF-5b-3).
     - the same payload settles the set's status (TournamentService.
       PayloadApplied, ADR-005 S4g): loaded, or the load failed.
 

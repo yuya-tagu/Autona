@@ -512,4 +512,34 @@ Change general.webserver_port in user_data/settings.json and restart Autona, or 
         <translation>Update check failed:
 {0}</translation>
     </message>
+</context><context>
+    <name>webpanel</name>
+    <message>
+        <source>The page could not be loaded</source>
+        <translation>The page could not be loaded</translation>
+    </message>
+    <message>
+        <source>Autona's web server did not answer. Try again, or restart Autona if this keeps happening.</source>
+        <translation>Autona's web server did not answer. Try again, or restart Autona if this keeps happening.</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Retry</translation>
+    </message>
+    <message>
+        <source>The page could not be shown</source>
+        <translation>The page could not be shown</translation>
+    </message>
+    <message>
+        <source>The window's web view could not be created:
+
+{error}
+
+Restart Autona.</source>
+        <translation>The window's web view could not be created:
+
+{error}
+
+Restart Autona.</translation>
+    </message>
 </context></TS>

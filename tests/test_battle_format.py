@@ -4,10 +4,11 @@ The sidebar's 1v1 / Team / Crew segment was the window's SetBattleFormat:
 it wrote the settings, showed the format's board and told the result's
 layout. The switch is core's now (AutonaActions.SetBattleFormat) and the
 desktop follows it from its notice (battleFormatChanges ->
-StateManagerBridge.battle_format_changed -> Window._ShowBattleFormat: the
-segment; the Qt SCORE's board too until ADR-005 S4ac-3, the React SCORE page
-following the web server's `battle_format`), so the same switch is
-reachable without the window:
+StateManagerBridge.battle_format_changed -> the web server's
+`battle_format`: the React SCORE page and the AppShell's segment, which
+replaced the sidebar's in ADR-005 S-final SF-5b-3; Window._ShowBattleFormat
+set the Qt segment until then, and the Qt SCORE's board until S4ac-3), so
+the same switch is reachable without the window:
 
 - ``GET /api/v1/battle-format``  ``{"format", "board"}`` (READ)
 - ``PUT /api/v1/battle-format``  ``{"format"}`` -> ``+ "changed"`` (WRITE)
@@ -215,7 +216,7 @@ def test_core_refuses_what_is_not_a_format(settings, told, settingWrites):
 # As tests/test_bootstrap_split.py's probes: a throwaway working directory
 # shaped like the app's, offscreen, the result as one JSON line. What the
 # window would reach out to is kept in: no global hotkeys, no start.gg
-# character download, Qt's own settings (geometry, the sidebar's page) in a
+# character download, Qt's own settings (geometry, the page it reopens on) in a
 # file there instead of this PC's, and the event loop is never run -- so the
 # web server it starts once the window is painted is never built (its port
 # and the LAN answer are given all the same).
@@ -247,14 +248,12 @@ Autona.QSettings = lambda *args: QSettings(
 AutonaGameAssetManager.instance.DownloadStartGGCharacters = lambda: None
 
 window = Autona.Window()
-segment = window.sidebar._fmtButtons
 
 def shown():
-    """The segment's checked format and the format in force (the Qt SCORE's
-    shown and built boards too until ADR-005 S4ac-3)."""
+    """The format in force and its board (the sidebar's segment too until
+    ADR-005 S-final SF-5b-3, the Qt SCORE's shown and built boards until
+    S4ac-3)."""
     return {
-        "segment": sorted(fmt for fmt, button in segment.items()
-                          if button.isChecked()),
         "format": SettingsManager.Get("scoreboard.battle_format"),
         "active": AutonaActions.instance.ActiveBoard(),
     }
@@ -284,18 +283,18 @@ with StateManager.lock:
         "pending": pending(),
     }])
 
-# The sidebar's own segment: a click is core's switch, and the window
-# follows its notice.
-segment["crew"].click()
-steps.append(["segment crew", shown()])
-
-# A click on the format in force: nothing to switch, nothing told.
-segment["crew"].click()
-steps.append(["segment crew again", shown()])
+# Core's switch on the GUI thread (the window's notice handlers ran here
+# until SF-5b-3: the sidebar's segment), and again to the format in force:
+# nothing to switch.
+AutonaActions.instance.SetBattleFormat("crew")
+app.processEvents()
+steps.append(["core crew", shown()])
+AutonaActions.instance.SetBattleFormat("crew")
+app.processEvents()
+steps.append(["core crew again", shown()])
 
 # From elsewhere -- v1's PUT, through the real route table (on this
-# thread, under the board host's lock) -- and core
-# directly: the segment follows as the board does.
+# thread, under the board host's lock) -- and core directly.
 from src.AutonaApiV1 import api_v1
 from src.AutonaWebServer import _build_web_app
 
@@ -308,11 +307,10 @@ steps.append(["v1 singles", dict(shown(), status=answer.status_code)])
 AutonaActions.instance.SetBattleFormat("team")
 steps.append(["core team", shown()])
 
-# v1's PUT from a request thread, the operator's click right after it
+# v1's PUT from a request thread, a switch on the GUI thread right after it
 # (ADR-005 S4ad: the board operations run on the calling thread). The
-# request's notice reaches the window queued, the click's at once, so the
-# request's comes in last: the segment shows the format in force, not the
-# format that notice carries.
+# request's notice reaches the GUI thread queued, the switch's at once, so
+# the request's comes in last: what is in force is the last switch's.
 import threading
 answers = []
 request = threading.Thread(target=lambda: answers.append(
@@ -324,9 +322,9 @@ request.join()
 # is still queued.
 steps.append(["v1 from a thread", {"status": answers,
                                    "format": shown()["format"]}])
-segment["singles"].click()
+AutonaActions.instance.SetBattleFormat("singles")
 app.processEvents()
-steps.append(["v1 from a thread, then the segment", shown()])
+steps.append(["v1 from a thread, then core", shown()])
 
 # The switches wrote to no held board either (each built the format's
 # board's widgets until ADR-005 S4ac-3).
@@ -342,29 +340,25 @@ window.close()
 '''
 
 
-def test_the_real_window_s_segment_follows_every_switch(tmp_path):
+def test_the_real_window_takes_every_switch_and_writes_no_board(tmp_path):
     steps = dict(_probe(tmp_path, _WINDOW_SCRIPT, str(_free_port())))
 
-    # The launch shows the persisted format.
-    assert steps["launch"] == {"segment": ["team"], "format": "team",
-                               "active": 2}
+    # The launch is in the persisted format.
+    assert steps["launch"] == {"format": "team", "active": 2}
     # ...on boards core made at launch, all three, whole, 1 / 2 held
     # (ADR-005 S4ac-1). The window writes over none of them.
     assert steps["launch boards"] == {
         "made": [True, True, True], "held": ["score.1", "score.2"],
         "whole": [True, True, True], "colours": [True, True, True],
         "pending": [False, False, False]}
-    assert steps["segment crew"] == {"segment": ["crew"], "format": "crew",
-                                     "active": 3}
-    assert steps["segment crew again"] == steps["segment crew"]
-    assert steps["v1 singles"] == {"segment": ["singles"],
-                                   "format": "singles", "active": 1,
+    assert steps["core crew"] == {"format": "crew", "active": 3}
+    assert steps["core crew again"] == steps["core crew"]
+    assert steps["v1 singles"] == {"format": "singles", "active": 1,
                                    "status": 200}
-    assert steps["core team"] == {"segment": ["team"], "format": "team",
-                                  "active": 2}
+    assert steps["core team"] == {"format": "team", "active": 2}
     assert steps["v1 from a thread"] == {"status": [200], "format": "crew"}
-    assert steps["v1 from a thread, then the segment"] == {
-        "segment": ["singles"], "format": "singles", "active": 1}
+    assert steps["v1 from a thread, then core"] == {
+        "format": "singles", "active": 1}
     assert steps["pending after the switches"] == [False, False, False]
 
 

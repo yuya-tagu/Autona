@@ -27,7 +27,6 @@ from .core.StateManager import StateManager
 from .core.StatusService import StatusService
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
-from .core import TournamentService as tournament_service
 from .core.TournamentService import TournamentService
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers import AutonaQtHelper
@@ -35,7 +34,6 @@ from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvide
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .TournamentDataProvider.StartGGDataProvider import (
     ResolveEventUrl as ResolveStartGGEventUrl)
-from .Helpers.AutonaVersionHelper import get_supported_providers
 from loguru import logger
 
 
@@ -133,13 +131,14 @@ class AutonaTournamentDataProvider(QObject):
 
     # ── the tournament's set / clear (core/TournamentService.py, S4f) ────
     #
-    # Every entrance -- the sidebar's URL dialog and confirmation below,
-    # /api/v1 (the Event page's, ADR-005 S4g), the legacy route, Socket.IO
+    # Every entrance -- /api/v1 (the AppShell's tournament dialog and the
+    # Event page's, ADR-005 S4g / S-final SF-5a-3; the Qt sidebar's URL
+    # dialog and confirmation went in SF-5b-3), the legacy route, Socket.IO
     # and the launch's restore -- goes through TournamentService, which
     # saves the URL, resolves an admin URL in a job and forgets the selected
     # game on every clear. These are what it asks this adapter for, on the
     # main thread. tournament_url_update is the announcement it makes (no
-    # longer a command): the sidebar's buttons follow it.
+    # longer a command).
 
     def LoadTournament(self, url, initialLoading=False, force=False):
         """Load the start.gg event at `url` (already resolved and saved by
@@ -245,74 +244,6 @@ class AutonaTournamentDataProvider(QObject):
         if provider is None:
             return None
         return provider.GetBannerURL()
-
-    def SetStartggEventSlug(self, mainWindow):
-        """The tournament URL dialog (the sidebar's "Set tournament"),
-        prefilled with the URL set last. Accepted, it hands the URL to
-        TournamentService -- re-fetched even when it is the loaded one. True
-        when accepted."""
-        inp = QDialog(mainWindow)
-
-        layout = QVBoxLayout()
-        inp.setLayout(layout)
-
-        inp.layout().addWidget(QLabel(
-            QApplication.translate("app", "Paste the tournament URL.")+ "\n" + QApplication.translate("app", "For StartGG, the link must contain the /event/ part") + "\n" + QApplication.translate("app", "Supported providers:") + " " + ", ".join(get_supported_providers())
-
-        ))
-
-        lineEdit = QLineEdit()
-        okButton = QPushButton("OK")
-
-        def validateText():
-            # The forms core takes (TournamentService.UrlKind): the event
-            # URL, or the admin/brackets one, resolved by core.
-            okButton.setDisabled(
-                tournament_service.UrlKind(lineEdit.text()) is None)
-
-        lineEdit.textEdited.connect(validateText)
-
-        # Prefill with the currently selected tournament URL (if any) so the
-        # operator can just press OK to re-fetch, or edit to switch events.
-        lineEdit.setText(TournamentService.TournamentUrl())
-
-        inp.layout().addWidget(lineEdit)
-
-        okButton.clicked.connect(inp.accept)
-        validateText()
-        inp.layout().addWidget(okButton)
-
-        inp.setWindowTitle(QApplication.translate("app", "Set tournament URL"))
-        inp.resize(600, 10)
-
-        accepted = inp.exec() == QDialog.Accepted
-        url = lineEdit.text()
-        inp.deleteLater()
-        if not accepted:
-            return False
-        # force=True so re-selecting the same tournament still re-fetches.
-        return TournamentService.instance.SetTournament(
-            url, force=True) == (
-            tournament_service.STARTED)
-
-    @staticmethod
-    def ConfirmClearTournament(parent):
-        """Ask before unsetting the tournament (the sidebar's "Unset
-        tournament": owner's decision 2, S4f -- the Event page asks its own),
-        then hand it to TournamentService, which also forgets the selected
-        game. Call from a click / a menu action, never from a state or a
-        value signal (the modal rule). True when cleared."""
-        answer = QMessageBox.question(
-            parent,
-            QApplication.translate("app", "Confirm"),
-            QApplication.translate(
-                "app", "Start.gg との接続を解除します。よろしいですか？"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes:
-            return False
-        TournamentService.instance.ClearTournament()
-        return True
 
     @staticmethod
     def _Fetch(taskName, fetch, then=None, **kwargs):

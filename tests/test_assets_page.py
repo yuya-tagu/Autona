@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from src import AutonaApiV1 as v1
+from src import AutonaWindowState
 from src.core import AssetPackService as assets
 from src.core import WebAccess
 
@@ -118,19 +119,13 @@ def test_the_page_is_a_web_panel_and_a_menu_page():
     registry = (WEB / "PanelShell" / "registry.tsx").read_text(
         encoding="utf-8")
     assert '"assets": AssetsPage' in registry
-    source = (ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    pages = next(ast.literal_eval(node.value) for node in ast.walk(tree)
-                 if isinstance(node, ast.Assign)
-                 and any(isinstance(t, ast.Name) and t.id == "MENU_PAGES"
-                         for t in node.targets))
-    assert pages[-1] == "assets"
-    # Both "Add game assets" entries (Help & Settings and the game menu)
-    # open it.
-    opened = [node for node in ast.walk(tree)
-              if isinstance(node, ast.Call)
-              and isinstance(node.func, ast.Attribute)
-              and node.func.attr == "OpenMenuPage"
-              and node.args and isinstance(node.args[0], ast.Constant)
-              and node.args[0].value == "assets"]
-    assert len(opened) == 2
+    # A menu page: the window does not reopen on it (ADR-005 S-final
+    # SF-5b-3: src/AutonaWindowState.py).
+    assert AutonaWindowState.MENU_PAGES[-1] == "assets"
+    # Both "Add game assets" entries (the AppShell's Help & Settings menu and
+    # its game menu) open it.
+    shell = WEB / "AppShell"
+    footer = (shell / "Footer.tsx").read_text(encoding="utf-8")
+    header = (shell / "Header.tsx").read_text(encoding="utf-8")
+    assert footer.count('open("assets")') == 1
+    assert header.count('go("assets")') == 1

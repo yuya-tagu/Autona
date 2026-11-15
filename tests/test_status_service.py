@@ -369,22 +369,27 @@ def _calls(node):
 
 
 def test_the_desktop_footer_reads_the_status_service():
-    tree = _tree("src/Autona.py")
-    [slot] = [node for node in ast.walk(tree)
-              if isinstance(node, ast.FunctionDef)
-              and node.name == "_on_status_changed"]
-    calls = _calls(slot)
-    assert "StatusService.Current" in calls
-    assert "AutonaLocaleHelper.StatusText" in calls
-    # Told by the bridge (the one subscriber of the core channel), and read
-    # once when built: a job pushed before the footer existed is shown.
-    connects = [call for call in ast.walk(tree)
-                if isinstance(call, ast.Call)
-                and _dotted(call.func)
-                == "StateManagerBridge.instance.status_changed.connect"]
-    assert [_dotted(call.args[0]) for call in connects] == [
-        "self._on_status_changed"]
-    assert "self._on_status_changed" in _calls(tree)
+    # The desktop's footer is the AppShell's since ADR-005 S-final SF-5b-3
+    # (web/src/AppShell/Footer.tsx through useAppStatus: GET /api/v1/status,
+    # then Socket.IO `status`); the Qt status bar it replaced
+    # (Window._on_status_changed: StatusService.Current, the .ts words)
+    # went. The bridge's signal has one receiver, the web server's notice.
+    window = _tree("src/Autona.py")
+    assert "_on_status_changed" not in {
+        node.name for node in ast.walk(window)
+        if isinstance(node, ast.FunctionDef)}
+    assert not [call for call in _calls(window) if "Status" in call]
+    receivers = []
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        for call in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(call, ast.Call) and _dotted(call.func)
+                    == "StateManagerBridge.instance.status_changed.connect"):
+                receivers.append((path.name, _dotted(call.args[0])))
+    assert receivers == [("AutonaWebServer.py", "WebServer.on_status_change")]
+    footer = (ROOT / "web" / "src" / "AppShell" / "Footer.tsx").read_text(
+        encoding="utf-8")
+    assert ('import {statusText, useAppStatus} from '
+            '"../PanelShell/useAppStatus";') in footer
 
 
 def test_the_qt_status_source_is_gone():

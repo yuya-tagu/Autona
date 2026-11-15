@@ -28,12 +28,16 @@ Startup instrumentation:
 Overlay:
   * `LoadingOverlay` — a child widget that covers the main window with
     a dim backdrop + rotating spinner, shown immediately after
-    `QMainWindow.show()` so the user doesn't see the half-rendered UI
-    settle during the first paint/layout passes. Call
-    `.finish_when_ready()` to let it dismiss itself as soon as that first
-    pass is done, or `.finish()` to drop it immediately.
-    `.call_when_finished(fn)` queues work for the moment the overlay is
-    gone (used to start the web server off the startup path).
+    `QMainWindow.show()` and kept up until the window's page is there
+    (ADR-005 S-final SF-5b-3: the window is the shared web view alone, and
+    has nothing to show before the web server is up and its first load has
+    ended). `.call_when_painted(fn)` runs `fn` once the overlay has been
+    painted, from the event loop, leaving it up (the window builds its web
+    server there, which holds the GUI thread for a few seconds); a window
+    never painted (started minimized) runs it past a longest wait anyway.
+    `.finish()` drops it; the window calls it on the first load's end, on
+    the web server's start failure, or past its own cap
+    (Window.SPINNER_CAP_MS). tests/test_loading_overlay.py pins this.
 """
 
 from __future__ import annotations
@@ -513,8 +517,10 @@ OVERLAY_BLADE_COLOR = QColor("#F0C45A")
 
 class LoadingOverlay(QWidget):
     """Full-window child widget that paints a dim backdrop + rotating
-    spinner. Used to hide the main window's first-paint jank while
-    initial layout and lazy widgets settle.
+    spinner. Covers the main window from its show until its page is there
+    (ADR-005 S-final SF-5b-3: the shared view's first load, after the web
+    server's start), so the operator sees a spinner instead of an empty
+    window.
 
     The overlay auto-resizes with its parent (it installs an event
     filter on the parent to catch Resize events). Call `finish()` to
@@ -537,8 +543,7 @@ class LoadingOverlay(QWidget):
         parent.installEventFilter(self)
         self._finished = False
         self._painted_at: float | None = None
-        self._min_ms = 0
-        self._finished_callbacks: list = []
+        self._painted_callbacks: list = []
 
     # ── Public API ─────────────────────────────────────────
 
@@ -547,61 +552,41 @@ class LoadingOverlay(QWidget):
         self.raise_()
         self._timer.start()
 
-    def finish_when_ready(self, min_ms: int = 250, max_ms: int = 1500) -> None:
-        """Dismiss once Qt has actually finished the first layout + paint
-        pass, instead of after a fixed delay.
+    def call_when_painted(self, callback, max_ms: int = 1500) -> None:
+        """Run `callback` once the overlay has been painted, leaving it up.
 
-        The zero-delay timer fires after everything already queued (that
-        first pass) has been dispatched, so it is a real "the window is
-        drawn" signal rather than a guess. Note this must NOT be done with
-        processEvents(): re-entering the event loop while widgets are still
-        being built crashes at the C++ level (agent-pitfalls #9).
+        The window's first paint pass (the overlay is painted in it, over
+        the window) is what is waited for, so `callback` may block the GUI
+        thread without the operator facing an unpainted window (see
+        Window._StartWebServer: the web server's build). It is dispatched
+        through a zero-delay timer after that paint, never from inside the
+        paint event: it runs from the event loop, where a modal dialog is
+        an ordinary top-level one and not a nested one (agent-pitfalls #9).
+        Not with processEvents() either: re-entering the event loop while
+        widgets are still being built crashes at the C++ level (#9).
 
-        `min_ms` is measured from the overlay's own first paint so the
-        spinner never flashes; `max_ms` caps the wait for the case where
-        deferred work keeps the queue busy indefinitely.
+        A window that is never painted -- started minimized -- does not
+        hold it back: past `max_ms` it runs anyway. Once only, whichever
+        comes first; right away (through the event loop) when the overlay
+        was painted already or is gone.
         """
-        self._min_ms = min_ms
-        QTimer.singleShot(0, self._finish_when_idle)
-        QTimer.singleShot(max_ms, self.finish)
+        done = []
 
-    def call_when_finished(self, callback) -> None:
-        """Run `callback` once the overlay has been dismissed.
+        def run():
+            if done:
+                return
+            done.append(True)
+            callback()
 
-        Registered callbacks are never invoked from inside finish() itself:
-        each one is dispatched through a zero-delay timer, so it runs from
-        the event loop with the overlay already hidden and deleted, and with
-        the window underneath repainted. That keeps a slow or modal callback
-        (see Window._StartWebServer) out of the finish path and off the
-        re-entrant-dispatch rule (agent-pitfalls #9).
-
-        Registering after the overlay has already finished is allowed — the
-        callback is queued straight away, so callers never have to reason
-        about the race with the `_finished` guard.
-        """
-        if self._finished:
-            QTimer.singleShot(0, callback)
+        if self._painted_at is not None or self._finished:
+            QTimer.singleShot(0, run)
             return
-        self._finished_callbacks.append(callback)
-
-    def _finish_when_idle(self) -> None:
-        if self._finished:
-            return
-        if self._painted_at is None:
-            # Queue drained before the overlay itself was painted — retry on
-            # the next frame rather than spinning on a 0 ms timer.
-            QTimer.singleShot(SPINNER_INTERVAL_MS, self._finish_when_idle)
-            return
-        remaining = self._min_ms - int(
-            (time.monotonic() - self._painted_at) * 1000)
-        if remaining > 0:
-            QTimer.singleShot(remaining, self.finish)
-            return
-        self.finish()
+        self._painted_callbacks.append(run)
+        QTimer.singleShot(max_ms, run)
 
     def finish(self) -> None:
-        # Idempotent: finish_when_ready() arms both an idle and a cap timer,
-        # and the loser must not touch an already-deleted widget.
+        # Idempotent: the window may be asked to dismiss it more than once
+        # (the first page loaded, the web server failed to start).
         if self._finished:
             return
         self._finished = True
@@ -611,13 +596,6 @@ class LoadingOverlay(QWidget):
             p.removeEventFilter(self)
         self.hide()
         self.deleteLater()
-        # Hand the callbacks to the event loop rather than calling them here:
-        # this method runs from a timer while the widget is mid-teardown, and
-        # the deferred delete + the parent's repaint are still queued behind
-        # us. See call_when_finished().
-        callbacks, self._finished_callbacks = self._finished_callbacks, []
-        for callback in callbacks:
-            QTimer.singleShot(0, callback)
 
     # ── Qt overrides ───────────────────────────────────────
 
@@ -633,6 +611,10 @@ class LoadingOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         if self._painted_at is None:
             self._painted_at = time.monotonic()
+            # After this paint pass, from the event loop (call_when_painted).
+            callbacks, self._painted_callbacks = self._painted_callbacks, []
+            for callback in callbacks:
+                QTimer.singleShot(0, callback)
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

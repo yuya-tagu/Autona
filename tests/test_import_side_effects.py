@@ -7,6 +7,7 @@ SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
 AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider
 / AutonaUpdater / AutonaShellOperations / AutonaExternalLinks /
+AutonaWindowState /
 AutonaWebServer must not build a QApplication, must not create any of those
 singleton instances, must not load any data file, and must not touch the
 filesystem below the current working directory (./out, ./user_data/games,
@@ -216,6 +217,9 @@ shell_operations = importlib.import_module(
 # The addresses the desktop opens outside the app (ADR-005 S-final SF-5a-1:
 # the menu's and the shell request openExternal's). Constants only.
 external_links = importlib.import_module("src.AutonaExternalLinks")
+# What the main window keeps between launches (ADR-005 S-final SF-5b-3):
+# plain functions over the settings object handed in, and constants.
+window_state = importlib.import_module("src.AutonaWindowState")
 # WebServer additionally pulls in AutonaWebOperations / AutonaApiV1 /
 # AutonaDesignerService. None of those may build anything at module level
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
@@ -275,6 +279,10 @@ assert ({name for name in vars(external_links) if not name.startswith("__")}
 assert all(isinstance(value, str)
            for value in external_links.EXTERNAL_LINKS.values()), (
     "AutonaExternalLinks built something")
+assert all(isinstance(value, (str, tuple, type(len), type(lambda: 0),
+                              type(importlib)))
+           for name, value in vars(window_state).items()
+           if not name.startswith("__")), "AutonaWindowState built something"
 assert web_access._shellSecret is None, "import issued the shell's secret"
 assert web_access._shellTicket is None, (
     "import issued the shell request's ticket")

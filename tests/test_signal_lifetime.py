@@ -54,12 +54,11 @@ PROCESS_WIDE_SENDERS = (
 )
 
 # The exceptions, listed as (module, full sender expression). Every receiver
-# here is built once and lives as long as the application does, so the
-# connection can never outlive it:
-#
-# - Autona.py            -- Window, the QMainWindow itself.
-#
-# (The Qt thumbnail panel was the other one; it went in ADR-005 S4p.)
+# here would have to be built once and live as long as the application does,
+# so the connection could never outlive it. There are none left: the Qt
+# thumbnail panel's went in ADR-005 S4p; the main window's -- its tournament
+# button's lambda on tournament_url_update -- went with the button in S-final
+# SF-5b-3, and its lambdas on tournament_changed / onLoad in SF-5b-1.
 #
 # Do not extend this list for a widget that can be destroyed. Convert the
 # lambda into a bound method instead; if it captured a value, put that value
@@ -67,13 +66,7 @@ PROCESS_WIDE_SENDERS = (
 # worked example -- they started as lambdas capturing (team, delta), became
 # bound methods on the board, and are static hotkey slots on a
 # process-lifetime object now that the write itself moved to core).
-ALLOWED_LAMBDA_CONNECTIONS = {
-    ("Autona.py",
-     "AutonaTournamentDataProvider.instance.signals.tournament_url_update"),
-    # The window's lambdas on tournament_changed (the mods checkbox
-    # unchecked) and onLoad (the checkbox drawn) went in ADR-005 S-final
-    # SF-5b-1: core turns the mods off, and the drawing is a bound method.
-}
+ALLOWED_LAMBDA_CONNECTIONS = set()
 
 # The one Qt-side module allowed to subscribe to a core channel: the adapter
 # whose entire job is to turn those channels into Qt signals. It is built

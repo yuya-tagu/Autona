@@ -996,22 +996,30 @@ def test_the_load_set_hotkey_opens_the_active_boards_window_only(
 
 def test_the_load_set_hotkey_opens_the_score_pages_dialog(
         autonaApp, monkeypatch):
-    """ADR-005 S4ab-2: Ctrl+Shift+O has the main window show SCORE and its
-    page open the active board's dialog (Window.OpenScoreSets). The way
-    back to the Qt window (general.qt_scoreboard_panel) went in S4ac-3. The
-    main window is stood in for (src/Autona.py cannot be imported)."""
+    """ADR-005 S4ab-2: Ctrl+Shift+O has the main window show SCORE
+    (Window.OpenPanel, which hands back the shared view's host) and its page
+    open the active board's dialog (the host's OpenScoreSets). The way back
+    to the Qt window (general.qt_scoreboard_panel) went in S4ac-3. The main
+    window is stood in for (src/Autona.py cannot be imported)."""
     from types import SimpleNamespace
 
+    from src import AutonaWebPanelHost
     from src.AutonaHotkeys import AutonaHotkeys
-    from src.AutonaShellOperations import AutonaShellOperations
+    from src.AutonaShellOperations import SCORE_PANEL, AutonaShellOperations
     from src.core.Actions import AutonaActions
 
     shell = AutonaShellOperations.instance
     autonaApp.ready(1)
     autonaApp.ready(2)
-    asked = []
-    monkeypatch.setattr(shell, "_parent",
-                        SimpleNamespace(OpenScoreSets=asked.append))
+    opened, asked = [], []
+    host = SimpleNamespace(OpenScoreSets=asked.append)
+    window = SimpleNamespace(closing=False)
+
+    def openPanel(name):
+        opened.append(name)
+        return None if window.closing else host
+    window.OpenPanel = openPanel
+    monkeypatch.setattr(shell, "_parent", window)
 
     AutonaHotkeys.signals.load_set.emit()
     autonaApp.settle()
@@ -1019,6 +1027,17 @@ def test_the_load_set_hotkey_opens_the_score_pages_dialog(
         AutonaHotkeys.signals.load_set.emit()
         autonaApp.settle()
 
+    assert opened == ["scoreboard", "scoreboard"]
+    assert asked == [1, 2]
+    # The page's name is the host's (the shell operations do not import the
+    # host's module, which pulls in QtWebEngine, to read it).
+    assert SCORE_PANEL == AutonaWebPanelHost.SCORE_PANEL
+
+    # A window that is closing hands back no host: nothing is asked.
+    window.closing = True
+    AutonaHotkeys.signals.load_set.emit()
+    autonaApp.settle()
+    assert opened == ["scoreboard"] * 3
     assert asked == [1, 2]
 
 
@@ -1040,7 +1059,7 @@ def test_the_load_set_hotkey_on_the_score_page_does_not_raise(
     def fail(*args):
         raise RuntimeError("the window failed")
 
-    monkeypatch.setattr(shell, "_parent", SimpleNamespace(OpenScoreSets=fail))
+    monkeypatch.setattr(shell, "_parent", SimpleNamespace(OpenPanel=fail))
     hooked = []
     monkeypatch.setattr(sys, "excepthook",
                         lambda kind, error, trace: hooked.append(error))

@@ -7,9 +7,9 @@ import {iconUrl} from "./navTable";
 // sidebar's measures and its pulldown button, and how a refused request is
 // told.
 
-// The Qt sidebar's (src/AutonaSidebar.py): its width, the height of every
-// row (nav item, pulldown, format segment) and the gold outline of a pick
-// still missing (the tournament, the game).
+// The Qt sidebar's (src/AutonaSidebar.py until ADR-005 S-final SF-5b-3):
+// its width, the height of every row (nav item, pulldown, format segment)
+// and the gold outline of a pick still missing (the tournament, the game).
 export const SIDEBAR_WIDTH = 196;
 export const ROW_HEIGHT = 26;
 export const ATTENTION_COLOR = "#f0a500";

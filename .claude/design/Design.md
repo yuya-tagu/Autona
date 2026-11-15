@@ -124,7 +124,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-PyQt-1** | UI の構築は `.ui` ファイル（Qt Designer）を優先し、複雑な動的構造のみ Python で組む |
 | **R-PyQt-2** | 状態の編集は `StateManager.Set()` 直接呼び出しで反映し、`SaveBlock()` でバッチ化する |
 | **R-PyQt-3** | スタイルは `ui_constants.py` の関数（`readonly_style()`, `score_display_style(scale)` 等）経由で適用し、インラインの `setStyleSheet` には色のハードコードを書かない |
-| **R-PyQt-4** | 全ドックウィジェットは `objectName` を持ち、`STATE_VERSION` で管理する |
+| **R-PyQt-4** | （退役）全ドックウィジェットは `objectName` を持ち、`STATE_VERSION` で管理する。ADR-005 S-final SF-5b-3 でウィンドウは共有ビュー 1 枚になり、`STATE_VERSION` も削除した（ウィンドウが覚えるのはページの名前 `lastPanel`。§3.3.5） |
 | **R-PyQt-5** | QSpinBox.valueChanged 等のシグナル内から QMessageBox.exec() を呼ばない（C++ クラッシュ事例あり） |
 | **R-PyQt-6** | カスタム描画（paintEvent）は QPainter / QPainterPath のみ使用、QGraphicsScene.clear() の連続呼び出し禁止 |
 
@@ -780,14 +780,14 @@ _PanelPage._OpenOutside（ほかのどの分岐より先に IsShellRequestShaped
   → shellRequested → AutonaWebPanelHost が QTimer.singleShot(0) でイベントループに出てから
         │
         ▼
-AutonaShellOperations.ShellRequest(verb, args)（Window が _WebPanel で shell= に注入）
-  - alwaysOnTop: Window.SetAlwaysOnTop（メニューの「常に最前面に表示」のチェックが正本）
+AutonaShellOperations.ShellRequest(verb, args)（Window が AutonaWebPanelHost(shell=...) で注入）
+  - alwaysOnTop: Window.SetAlwaysOnTop（Window の bool `_alwaysOnTop` が正本。起動をまたいで保存しない。SF-5b-3 まではメニューのチェック）
   - checkUpdates: AutonaUpdater.CheckForUpdates(silent=False)（確認中なら busy）
-  - openExternal: src/AutonaExternalLinks.py の決まった表のキーだけ（URL は受けない。メニューも同じ表を読む）
+  - openExternal: src/AutonaExternalLinks.py の決まった表のキーだけ（URL は受けない。AppShell の externalLinks.ts が同じアドレスの写し。SF-5b-3 まではメニューもこの表を読んだ）
         │
         ▼
 window.autonaPanelShell.shellResult(id, 結果)（頼んだ文書にだけ。json.dumps だけを入れる）
-window.autonaPanelShell.shellState(状態)（読み込みのたびと、ToggleAlwaysOnTop → PublishShellState で変わるたび）
+window.autonaPanelShell.shellState(状態)（読み込みのたびと、SetAlwaysOnTop → PublishShellState で変わるたび）
 ```
 
 チケットはシェルの秘密（共有ビューの fetch に付くヘッダ）とは別の値で、プロセスで 1 回作りメモリにだけ持つ（`core/WebAccess.IssueShellTicket`）。
@@ -858,7 +858,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | React の設定ページのホットキー区画（ADR-005 S4af） |
 | ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
-| サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
+| 開いていたページ・サイドバーの折りたたみ | QSettings（`lastPanel` = ページの名前 / `navCollapsed`。ADR-005 S-final SF-5b-3。読み書きは `src/AutonaWindowState.py`。旧 `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す） | 文字列 / bool | `Window` | 変わるたびに保存（`sync`）＋終了時 |
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（ADR-005 S3e-1。選んでいるゲームの mains の正規化も `PlayerDB.NormaliseMains`。Qt 側の `AutonaPlayerDB` は変更を `db_updated` に中継するだけ: 補完モデルは Qt モデルの整理 PR3 で削除） | React の Player List（`/web/playerBrowser`。v1 `PUT /players`）+ 直接 JSON 編集 |
 | 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
@@ -916,15 +916,14 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 新規キーは原則ネームスペース付きで作成し、トップレベルは増やさない。
 
-#### 3.3.5 STATE_VERSION とマイグレーション
+#### 3.3.5 ウィンドウの保存とマイグレーション
 
-- `sidebarIndex_v{N}` / `sidebarCollapsed_v{N}` のキー名は `Window.STATE_VERSION`（現在 22）に依存（`src/Autona.py`）。旧 `windowState_v{N}`（`QMainWindow.saveState`）はナビ刷新で不使用
-- `STATE_VERSION` をインクリメントすると既存ユーザーのサイドバー選択状態が初期化される
-- インクリメントが必要なケース:
-  - パネル（ナビ項目）の追加・削除・並び順変更
-  - `.ui` ファイルの `objectName` 変更（state 互換が壊れる時）
-- 同 `STATE_VERSION` 内では既存 state との互換性を維持する
-- **state のスキーマ版（`state_version`、ADR-005 S3b）は `Window.STATE_VERSION` とは別物**。`user_data/state.json` の封筒に入る版で、`src/core/StateMigrations.CURRENT_VERSION`（現在 2）が正本
+- **`Window.STATE_VERSION` は ADR-005 S-final SF-5b-3 で削除した**。ウィンドウは共有ビュー 1 枚で、覚えるのはページの名前（QSettings の `lastPanel`）とサイドバーの折りたたみ（`navCollapsed`）だけ。名前なのでナビの項目の追加・削除・並べ替えで読み替えが要らない（版を上げる手順も無い）。読み書きは Qt-free の純関数 `src/AutonaWindowState.py`（`RestorePanel` / `RestoreNavCollapsed` / `SaveWindowState`）
+  - `lastPanel` に入れるのはサイドバーの項目のページだけ（`IsReopenable`: `WebAccess.WEB_PANELS` の名前で `MENU_PAGES` でも、パネルシェルの空のページ `shell-check` でもないもの）。Help & Settings のメニューのページ（設定・API・Companion・OBS・About・ゲームアセットを追加）の間は、その前に開いていたページを覚える（`RememberedPanel`）。保存はページか折りたたみが変わるたび（`Window._SaveWindowState`: 保存値と違うものだけ書いて `sync`。起動時の読み込みより前と終了の開始後は書かない）と終了時（`closeEvent`）
+  - 旧キー（Qt のサイドバーの `sidebarIndex_v22` / `sidebarCollapsed_v22`）は、新しいキーが無いときに 1 回だけ読み替えて消す。index は固定の表 `LEGACY_SIDEBAR_PANELS`（v22 のナビの 11 項目。ナビが変わっても変えない）で引き、範囲外・数でない値は `event`。新しいキーがあれば旧キーの値は使わずに消すだけ
+  - 復元した値はホストの最初の読み込みの URL に入る（`AutonaWebPanelHost.ShowPanel` / `SetNavCollapsed` → `PanelPath` = `/web/app/<panel>`、折りたたみは `?nav=collapsed`）。AppShell が折りたたみを URL に replace で書き、ホストが `urlChanged` で読み取る（`NavCollapsed()`）
+  - pin: `tests/test_window_state.py`（純関数と、実ウィンドウの起動 → 移動 → 終了の保存を subprocess で）
+- **state のスキーマ版（`state_version`、ADR-005 S3b）はウィンドウの保存とは別物**。`user_data/state.json` の封筒に入る版で、`src/core/StateMigrations.CURRENT_VERSION`（現在 2）が正本
   - 保存済み state のキー名・形を変えるときは、移行 step（前方一方向・出荷後は凍結）を足して `CURRENT_VERSION` を上げる。v0（S3b 前の `out/program_state.json`）→ v1 は `RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`。v1 → v2 は `result_players` の団体の行（`members` を持つ行。枠 1〜8）を `result_teams` へ移す（ADR-005 S4q）
   - 版は state の木に入れない（Socket.IO の payload と `out/program_state.json` に漏れるため）
   - 移行 step は冪等（すでに移行先の形のデータを受けても壊さない）。`out/program_state.json` は版を持たないので常に v0 として移行されるが、中身は書いたビルドの形になっているため
@@ -937,7 +936,31 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 ### 4.1 PyQt パネル一覧と責務
 
-`Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 22`）が以下のパネルを管理する。
+`Autona.py` の `Window`（QMainWindow）の中身は**共有ビュー `AutonaWebPanelHost` 1 枚**（ADR-005 S-final SF-5b-3）。
+ホストは AppShell（`/web/app/<panel>`。§4.2.4）を読み、サイドバー・ヘッダー（大会・ゲーム・MOD・対戦形式）・フッター（Help & Settings・実行中の仕事）は
+AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidget`・メニューバー・ステータスバー・MOD のチェックボックス・
+大会ボタンと URL ダイアログ・ゲームのメニューは SF-5b-3 で削除した。下の表の「パネル」はどれも AppShell のナビの項目（ページ）で、
+「objectName」列の `WebPanels` はホストの objectName。
+
+- **ページの切り替え**: ページの中のナビは `history.replaceState`（遷移にならない）。ホストは `urlChanged` でどのページかを読み
+  （`AppPanelOf`）、`panelChanged(名前)` を出す（折りたたみが変われば `navCollapsedChanged`）。ウィンドウはそれで覚えるページを決めて、その場で保存する（`AutonaWindowState.RememberedPanel`。§3.3.5）
+- **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None）。呼ぶのは `load_set` の
+  ホットキーと legacy の open-set（`AutonaShellOperations.ShowSetSelection` / `OpenSetSelection` → `OpenPanel("scoreboard")` →
+  ホストの `OpenScoreSets(board)`）
+- **起動**: `show()` → `STARTUP phase=core-shown` → ローディングのスピナー（`LoadingOverlay`）→ 初回の描画の後に `_StartWebServer` →
+  `webserver-ready` → ホストがビューを建てて読む → 最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。
+  初回起動の LAN の確認（`QMessageBox.question`。ウィンドウで使う唯一の QMessageBox）はスピナーの上に出る
+- **Web サーバーの起動失敗**: ホストの中身を案内の文（`ShowStartFailure`。QLabel）に置き換え、スピナーを外す。ダイアログは出さない。
+  サーバースレッドの bind 失敗も、`_StartWebServer` の中の例外（構築・ポートの確認・起動・結線）も同じ。ホストがビューを建てられなかったときも
+  同じ形の文（最初の読み込みの失敗として知らせ、スピナーが外れる）
+- **読み込みの失敗とスピナーの上限**: 失敗し切った読み込みのあと、ホストは再試行の表示（`ShowLoadFailure`。文と「再試行」のボタンをビューの上に
+  重ねる）を出し、成功した読み込みで外す。スピナーには上限（`Window.SPINNER_CAP_MS` = 20 秒。起動時のダイアログとサーバーの構築の間は止める）
+  があり、過ぎたら warning を出して外し、再試行の表示を出す
+- **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。シェル要求 `alwaysOnTop` から）。起動をまたいで保存しない
+- **ゲームの変更の通知** `WindowSignals.GameChanged` は、アセットのアダプタの `onLoad`（ロードのたび）が出す（Web サーバーが全量の state とキャラを送る）。
+  SF-5b-3 までは Qt のゲームのボタンの `SetGame` が出していた
+- **大会**: ウィンドウは大会を設定も解除もしない（AppShell のヘッダーと EVENT のページが v1 で core の `TournamentService` を呼ぶ）。
+  読み込みの失敗は state の `tournamentInfo.load` からページが知らせる（SF-5b-2）。`bootstrap.wire_tournament_data()` は失敗の受け手なしで結線する
 
 **構築タイミング**: **パネルはすべて初回表示時にファクトリで構築**される（どれも共有ビューの React のページ）。
 ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format` の board 1 面。S4aa からは退路のときだけサイドバーのページ）を起動時に建てていた。ボード（state）は core が起動時に 3 つとも作る（下記・S4ac-1）
@@ -957,15 +980,15 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | 2 | `WebPanels`（共有ホスト。ナビの文言は `Thumbnail Settings`、ナビのキーは `thumbnail`） | React の `ThumbnailPage`（`/web/thumbnail`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4p）。Qt 版（`AutonaThumbnailSettingsWidget` と `.ui`）は S4p で削除済み | テンプレート・背景（既定 / 大会バナー / アップロードした画像）・表示する項目・今のゲームのキャラ画像の配置・機能別カラー・既定に戻す（確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび）、サムネイルの作成（`out/thumbnails/`）と作成した画像のコピー、動画タイトル。**処理の正本は `src/core/ThumbnailService.py`**（ADR-005 S4o）で、ページは `/api/v1/thumbnail*`・`colors/thumbnail` を呼んで `thumbnail.render` を描画するだけ。SCORE の生成・X 投稿と legacy の get-thumbnail も同じ `RenderPayload()`（読み済みの設定）で描く | `thumbnail_config.*`（settings.json。core 経由） | `thumbnail.render`、ボード 1 の `score.1.*`、`tournamentInfo.*`、`game`、`colors.thumbnail.*`、`GET /api/v1/thumbnail` | ✓ |
 | 3 | `WebPanels`（共有ホスト。ナビの文言は `Result Settings`、ナビのキーは `result`） | React の `ResultPage`（`/web/result`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4r）。Qt 版（`AutonaResultSettingsWidget` と `.ui`、`result/main_generate_result.py`、`result/ResultRenderer.py`）は S4r で削除済み | レイアウト選択（対戦形式に追従）、単独の行（順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ・スコアボードから補完の表示）と団体の行（順位・チーム名・メンバー 5 人）の編集、並べ替え（上下ボタン + ドラッグ）、大会結果の読み込み（確認つき）、すべてクリア（今の種類だけ・確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび。サンプルの表示つき）、作成（`out/results/`）と作成した画像のコピー、1 クリックの X 投稿（作成 + クリップボード + 既定のブラウザで投稿画面）、選手を DB に保存、機能別カラー。**処理の正本は `src/core/ResultService.py`**（ADR-005 S4q）で、ページは `/api/v1/result*`・`colors/result` を呼んで state を描画するだけ | `result_players` / `result_teams`、`result_config.layout`（settings.json）（core 経由） | `GET /api/v1/result`・`GET /api/v1/result/post`、`result_render`、`result_standings`、`result_layout`、`score.*`（補完）、`tournamentInfo.*`、`game`、`colors.result.*` | ✓ |
 | 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
-| 5 | `WebPanels`（共有ホスト。ナビの文言は `Scoreboard`、ナビのキーは `scoreboard`） | React の `ScorePage`（`/web/scoreboard`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4aa）。ボードは 3 つとも core が起動時に作り、ボード 1 / 2 を held にする（`bootstrap_gui()` の `AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまでは held の登録が Qt のボードの構築にあり、見せていない面は held でなかった）。Qt 版（`AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の dock）と退路の設定 `general.qt_scoreboard_panel`・Qt のセット選択 / 配信台のウィンドウは ADR-005 S4ac-3 で削除した（古い `settings.json` に残ったキーは読まない） | 形式のボード（board1=1v1、board2=team、board3=crew）のスコア入力・選手編集（欄・詳細・キャラ行・補完の読込・上下移動）・match バー・反映（held のボード）・X 投稿・ブラウザ版を開く。ボード 1 / 2 は大会があれば「大会の試合を選ぶ」でページのセット選択のダイアログ（フェーズ・取得・完了したセット / ペア・検索・並べ替え・進み具合。行を選ぶと `:load-set`）と、そこから配信台のダイアログ（`:follow`）を開き、追従中はタイマー行（自動更新のラベル・次の更新までの秒・キャンセル `:stop-follow`）を出す（ADR-005 S4ab。デスクトップに限らない）。**Ctrl+Shift+O と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）も、このダイアログを開く**（ADR-005 S4ab-2）: シェルのアダプタ `AutonaShellOperations` が `Window.OpenScoreSets` を呼び、メインウィンドウを前に出して（最小化からも戻す）サイドバーを SCORE にし、共有ビューに `window.autonaPanelShell.openScoreSets(board)` を流す（ビューの構築・読み込み・凍結からの復帰の後に届け、パネル シェルが受け取るまで保留。1 つの文書には答えが来るまで 1 回だけ流す。先に別のパネルを開いたら・読み込みが失敗したら捨てる。終了処理中は何もしない）。ページは依頼の後に読んだ形式のボードを描いてから、そのボードで「大会の試合を選ぶ」が出る条件（ボード 1 / 2・大会あり）のときだけ開き、ほかはページを見せるだけ。legacy の `n` が形式のボードと違うとき（1v1 での `/scoreboard2-open-set`）は何もせずログだけで、答えは今までどおり `OK`。メインウィンドウができる前の依頼もログだけで何も開かない（S4ac-3 までは Qt の窓を開いていた）。何も書かない。ページは `/api/v1`（`scoreboards/{n}/*`・`battle-format`・`match-names/candidates`・`tournament/info`・`tournament/{phases,sets,stations}`・`display-options`・`thumbnail:generate`）を呼び、held のボードは `GET .../pending`、ほかは state を描画するだけ | `score.{N}.*`（core 経由） | `score.{N}.*`、`GET .../pending`（held のボード）、`GET .../post`、`GET .../follow`（`scoreboard_follow` で読み直す）、`set_selection.*`、`tournamentInfo.*`、`display_options.*`、`game.*` | ✓ |
+| 5 | `WebPanels`（共有ホスト。ナビの文言は `Scoreboard`、ナビのキーは `scoreboard`） | React の `ScorePage`（`/web/scoreboard`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4aa）。ボードは 3 つとも core が起動時に作り、ボード 1 / 2 を held にする（`bootstrap_gui()` の `AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまでは held の登録が Qt のボードの構築にあり、見せていない面は held でなかった）。Qt 版（`AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の dock）と退路の設定 `general.qt_scoreboard_panel`・Qt のセット選択 / 配信台のウィンドウは ADR-005 S4ac-3 で削除した（古い `settings.json` に残ったキーは読まない） | 形式のボード（board1=1v1、board2=team、board3=crew）のスコア入力・選手編集（欄・詳細・キャラ行・補完の読込・上下移動）・match バー・反映（held のボード）・X 投稿・ブラウザ版を開く。ボード 1 / 2 は大会があれば「大会の試合を選ぶ」でページのセット選択のダイアログ（フェーズ・取得・完了したセット / ペア・検索・並べ替え・進み具合。行を選ぶと `:load-set`）と、そこから配信台のダイアログ（`:follow`）を開き、追従中はタイマー行（自動更新のラベル・次の更新までの秒・キャンセル `:stop-follow`）を出す（ADR-005 S4ab。デスクトップに限らない）。**Ctrl+Shift+O と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）も、このダイアログを開く**（ADR-005 S4ab-2）: シェルのアダプタ `AutonaShellOperations` が `Window.OpenPanel("scoreboard")` を呼び（S-final SF-5b-3 まではその場所に `Window.OpenScoreSets`）、メインウィンドウを前に出して（最小化からも戻す）ページを SCORE にし、返ったホストの `OpenScoreSets(board)` で、共有ビューに `window.autonaPanelShell.openScoreSets(board)` を流す（ビューの構築・読み込み・凍結からの復帰の後に届け、パネル シェルが受け取るまで保留。1 つの文書には答えが来るまで 1 回だけ流す。先に別のパネルを開いたら・読み込みが失敗したら捨てる。終了処理中は何もしない）。ページは依頼の後に読んだ形式のボードを描いてから、そのボードで「大会の試合を選ぶ」が出る条件（ボード 1 / 2・大会あり）のときだけ開き、ほかはページを見せるだけ。legacy の `n` が形式のボードと違うとき（1v1 での `/scoreboard2-open-set`）は何もせずログだけで、答えは今までどおり `OK`。メインウィンドウができる前の依頼もログだけで何も開かない（S4ac-3 までは Qt の窓を開いていた）。何も書かない。ページは `/api/v1`（`scoreboards/{n}/*`・`battle-format`・`match-names/candidates`・`tournament/info`・`tournament/{phases,sets,stations}`・`display-options`・`thumbnail:generate`）を呼び、held のボードは `GET .../pending`、ほかは state を描画するだけ | `score.{N}.*`（core 経由） | `score.{N}.*`、`GET .../pending`（held のボード）、`GET .../post`、`GET .../follow`（`scoreboard_follow` で読み直す）、`set_selection.*`、`tournamentInfo.*`、`display_options.*`、`game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `WebPanels`（共有ホスト。ナビの文言は `Statistics`、ナビのキーは `stats`） | React の `StatsPage`（`/web/stats`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4k）。Qt 版（`AutonaStatsWidget` と、そのサブタブの `AutonaAnalysisWidget`）は S4k で削除済み | ボード 1 の統計の取得（`POST /api/v1/scoreboards/1/stats:refresh`）と、アップセット係数・対戦カードの 1 行、4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧。下記 §4.1.0）。統計の書き手は core の `StatsService`、試合一覧は core の `AnalysisService`（ADR-005 S4j）で、ページは state を描画するだけ（read-only） | （なし。取得の依頼だけ） | `score.1.{recent_sets,last_sets,history_sets,upset_factor}`、反映済みの選手名、`analysis.*`、`GET /api/v1/analysis` | ✓ |
 | 7.5 | `WebPanels`（共有ホスト。ナビの文言は `Stats Display Settings`、ナビのキーは `statsPreview`） | React の `StatsPreviewPage`（`/web/statsPreview`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4l）。Qt 版（`AutonaStatsPreviewWidget`）は S4l で削除済み | 統計オーバーレイ 7 種（`core/StatsOverlays` の固定表。`last_sets` / `tournament_history` は player1 / player2 の 2 項目）から 1 つを選び、プレビュー（オーバーレイ自体の縮小表示）・OBS 用 URL・機能別カラー（`stats`）・Companion マクロ（`stats:refresh` のメソッド・パス・URL）を出す。選択は `settings.json` の `stats_preview.selected_type`（`GET /api/v1/stats/overlays` / `PUT .../selected`）。state を書くのは色カード（`PATCH /api/v1/colors/stats`）だけ | `colors.stats.*` | `colors.stats.*`, `tournamentInfo.*` | ✓ |
 | 8 | `WebPanels`（共有ホスト。ナビの文言は `Player List`、ナビのキーは `playerBrowser`） | React の `PlayerBrowserPage`（`/web/playerBrowser`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4n）。Qt 版（`AutonaPlayerBrowserWidget` と、選手カードの `player_editor` 向けの分岐）は S4n で削除済み | 選手一覧（2タブ）: トーナメント出場選手（`core/PlayerDirectory.Entrants`: `StreamService.TopEntrants` ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット = v1 `:load`）／登録済み選手（`core/PlayerDirectory.Registered`。検索・ソート・100 行ごとのページ分割・新規登録・編集・削除 = v1 `PUT /players` / `POST /players:delete`）。編集の下書きはページのローカルで、保存のときだけ送る | なし（state に書かない。`player_editor` は古い `state.json` の掃除だけ残る） | `PlayerDB.instance`（core）, `StreamService.TopEntrants`（state 非依存）。再読込は Socket.IO `autonaPlayers.players`・`tournamentInfo.load`・`game` | ✓ |
 
-> **設定**（サイドバー下部「Help & Settings」の「設定」）は React の `SettingsPage`（`/web/settings`。ADR-005 S4af）で、共有ビュー `AutonaWebPanelHost` に表示する。サイドバーの項目ではなく、スタックのナビ項目の後ろのページ（メニューのページ。`Window.OpenMenuPage("settings")`、`OpenSettings` はその別名。開いている間はサイドバーのどの項目もハイライトしない。終了時はその前に開いていた項目を覚える）。4 区画: 一般（運用のスイッチ 5 つと既定のチームカラー。WRITE・すぐ効く）・ネットワーク（ポートと LAN。THIS_PC・再起動で反映）・言語（3 つ。THIS_PC・再起動で反映。アプリは閉じない）・ホットキー（Ctrl / Alt / Shift とキーの組み立て。THIS_PC・保存したらすぐ効く）。書き込みは `GET` / `PATCH /api/v1/settings*`（core の `AppSettings` / `HotkeyRules`。`external-control-api.md` §5.22）。Qt の設定ウィンドウ（`AutonaSettingsWindow` / `SettingsWidget`）は S4af で削除済み
-> **API 設定のガイドと About**（「Help & Settings」→「API Settings」の「Open reference & tester」「Companion settings」「OBS / Advanced Scene Switcher」と「About Autona」）も、設定と同じメニューのページ（`Window.MENU_PAGES` = settings / api / companion / obs / about の順。`Window.OpenMenuPage(名前)`。ADR-005 S-final SF-4a-2）で、React の `web/src/GuidePages/`（`/web/api` / `/web/companion` / `/web/obs` / `/web/about`）。API のページは接続（`GET /api/v1/connection`。THIS_PC）・アクセストークン（`GET /api/v1/access-token` と `:regenerate`。SHELL: 共有ビューのページだけが読め、ブラウザでは「デスクトップアプリでこのページを開いてください」と案内する。トークンはページの state にだけ持つ）・リファレンス（`GET /api/v1/api-catalog`。curl のコピーとテスターへの読み込み）・エンベロープとエラーコード・テスター（ページのオリジンから送る。破壊的な操作とトークンの再発行は確認つき・答えのトークンは伏せる・25 秒で打ち切り）。表は共有ビューの幅（実機は約 600 CSS px。表の入れ物は約 530 px）に収める（パスは入るなら 1 行、入らなければ `/` の後でだけ折り返す・確認とログ記録はチップ・行の操作はアイコンのボタン。リファレンスは表の入れ物が 720 px 未満ならチップとボタンをパスと説明のセルの 2 行目に回して 2 列にする）。接続を読めない間（読込中・失敗）はベース URL を出さず、curl と URL のコピーを無効にする。Companion のページは接続・手順・ボタンの割り当て例（`GuidePages/examples.json`。OBS と共有）とキーのアイコン（canvas で描いた PNG を画像としてコピー）、OBS のページは HTTP アクション（ループバックの URL）と監視ファイル（`out/` の絶対パスをこの PC の区切りで）。API / Companion / OBS のページはデスクトップでだけ「既定のブラウザで開く」を出す（別ウィンドウのころのように横に開いておくため。URL に `desktop` もトークンも付けない）。Qt のウィンドウ（`AutonaApiInfoWindow` / `AutonaIntegrationGuideWindow` / `AutonaObsGuideWindow`）と About の `QMessageBox`（`ShowAboutDialog`）は SF-4a-2 で削除済み
-> **ゲームアセットを追加**（「Help & Settings」→「Add game assets」とゲームのメニューの同名の項目）も同じメニューのページ（`Window.MENU_PAGES` の末尾 `assets`。ADR-005 S-final SF-4b-2）で、React の `web/src/AssetsPage/`（`/web/assets`）。3 段（説明／オンラインからダウンロード／ZIP・フォルダから取り込む）と進捗・結果。共有ビューかどうかは `useShellAccess({withToken: false})`（トークンを持たない判定）で見て、ブラウザ・ヘッドレスでは案内とソースのリンクだけを出して何も読まない。書き込みとジョブ（`GET /assets/job`・アップロード・取り込み・インストール・キャンセル・フォルダを開く）は SHELL の v1、パック一覧（`GET /assets/packs`。索引の取得で長くかかるので 120 秒）は THIS_PC。ZIP は XMLHttpRequest で本文そのままを送る（`upload.onprogress` で進捗・`abort()` で中止・送る前に `File.size` を上限（`MAX_UPLOAD_BYTES` と一致）と比べる・やめたときとページを離れたときは `DELETE /assets/uploads/<id>`）。上書きは 1 つのダイアログでチェックボックス、インストールは大きさの合計とゲーム名の確認。ジョブはマウント時と約 1 秒ごと（走っていて表示中のとき。前の読み込みが返ってから次を予約する）・Socket.IO の `status`・再接続・再表示で読み（`games_changed` はパックの一覧を読み直す）、始めた revision は sessionStorage にも持って戻ったときに結果を出し、覚えた revision より新しいジョブが見えたら「結果は不明」。結果の文言は core の固定コード（`error.reason` / ジョブの `error` / `stage` / 索引の `error`）を `assets_*` の訳語にし、英文の詳細は折りたたむ（`tests/test_assets_page.py` が core のコードと訳語の一致を pin）。フォルダの取り込み（ADR-005 S-final SF-5a-2）は「フォルダから取り込む」がクリックの中でシェル要求 `pickFolder` を出し、デスクトップのネイティブのダイアログで選んだフォルダを core が持って id だけを答える（パスはページに来ない。期限なしで待つ）。その id を `POST /assets:importFolder` に渡し、上書きは ZIP と同じダイアログ。Qt のダイアログ `AutonaGameAssetGuideWindow` は SF-4b-2 で削除済み
+> **設定**（サイドバー下部「Help & Settings」の「設定」）は React の `SettingsPage`（`/web/settings`。ADR-005 S4af）で、共有ビュー `AutonaWebPanelHost` に表示する。サイドバーの項目ではないページ（メニューのページ。AppShell の Help & Settings が開く。`AutonaWindowState.MENU_PAGES` と `web/src/AppShell/navTable.ts` の `MENU_PAGES`（`tests/test_app_shell.py` が一致を pin）。開いている間はサイドバーのどの項目もハイライトしない。終了時はその前に開いていたページを覚える。S-final SF-5b-3 までは Qt のスタックのナビ項目の後ろのページで、`Window.OpenMenuPage("settings")` が開いた）。4 区画: 一般（運用のスイッチ 5 つと既定のチームカラー。WRITE・すぐ効く）・ネットワーク（ポートと LAN。THIS_PC・再起動で反映）・言語（3 つ。THIS_PC・再起動で反映。アプリは閉じない）・ホットキー（Ctrl / Alt / Shift とキーの組み立て。THIS_PC・保存したらすぐ効く）。書き込みは `GET` / `PATCH /api/v1/settings*`（core の `AppSettings` / `HotkeyRules`。`external-control-api.md` §5.22）。Qt の設定ウィンドウ（`AutonaSettingsWindow` / `SettingsWidget`）は S4af で削除済み
+> **API 設定のガイドと About**（「Help & Settings」→「API Settings」の「Open reference & tester」「Companion settings」「OBS / Advanced Scene Switcher」と「About Autona」）も、設定と同じメニューのページ（`MENU_PAGES` = settings / api / companion / obs / about / assets の順。ADR-005 S-final SF-4a-2。SF-5b-3 までは `Window.MENU_PAGES` / `Window.OpenMenuPage(名前)`）で、React の `web/src/GuidePages/`（`/web/api` / `/web/companion` / `/web/obs` / `/web/about`）。API のページは接続（`GET /api/v1/connection`。THIS_PC）・アクセストークン（`GET /api/v1/access-token` と `:regenerate`。SHELL: 共有ビューのページだけが読め、ブラウザでは「デスクトップアプリでこのページを開いてください」と案内する。トークンはページの state にだけ持つ）・リファレンス（`GET /api/v1/api-catalog`。curl のコピーとテスターへの読み込み）・エンベロープとエラーコード・テスター（ページのオリジンから送る。破壊的な操作とトークンの再発行は確認つき・答えのトークンは伏せる・25 秒で打ち切り）。表は共有ビューの幅（実機は約 600 CSS px。表の入れ物は約 530 px）に収める（パスは入るなら 1 行、入らなければ `/` の後でだけ折り返す・確認とログ記録はチップ・行の操作はアイコンのボタン。リファレンスは表の入れ物が 720 px 未満ならチップとボタンをパスと説明のセルの 2 行目に回して 2 列にする）。接続を読めない間（読込中・失敗）はベース URL を出さず、curl と URL のコピーを無効にする。Companion のページは接続・手順・ボタンの割り当て例（`GuidePages/examples.json`。OBS と共有）とキーのアイコン（canvas で描いた PNG を画像としてコピー）、OBS のページは HTTP アクション（ループバックの URL）と監視ファイル（`out/` の絶対パスをこの PC の区切りで）。API / Companion / OBS のページはデスクトップでだけ「既定のブラウザで開く」を出す（別ウィンドウのころのように横に開いておくため。URL に `desktop` もトークンも付けない）。Qt のウィンドウ（`AutonaApiInfoWindow` / `AutonaIntegrationGuideWindow` / `AutonaObsGuideWindow`）と About の `QMessageBox`（`ShowAboutDialog`）は SF-4a-2 で削除済み
+> **ゲームアセットを追加**（「Help & Settings」→「Add game assets」とゲームのメニューの同名の項目）も同じメニューのページ（`MENU_PAGES` の末尾 `assets`。ADR-005 S-final SF-4b-2）で、React の `web/src/AssetsPage/`（`/web/assets`）。3 段（説明／オンラインからダウンロード／ZIP・フォルダから取り込む）と進捗・結果。共有ビューかどうかは `useShellAccess({withToken: false})`（トークンを持たない判定）で見て、ブラウザ・ヘッドレスでは案内とソースのリンクだけを出して何も読まない。書き込みとジョブ（`GET /assets/job`・アップロード・取り込み・インストール・キャンセル・フォルダを開く）は SHELL の v1、パック一覧（`GET /assets/packs`。索引の取得で長くかかるので 120 秒）は THIS_PC。ZIP は XMLHttpRequest で本文そのままを送る（`upload.onprogress` で進捗・`abort()` で中止・送る前に `File.size` を上限（`MAX_UPLOAD_BYTES` と一致）と比べる・やめたときとページを離れたときは `DELETE /assets/uploads/<id>`）。上書きは 1 つのダイアログでチェックボックス、インストールは大きさの合計とゲーム名の確認。ジョブはマウント時と約 1 秒ごと（走っていて表示中のとき。前の読み込みが返ってから次を予約する）・Socket.IO の `status`・再接続・再表示で読み（`games_changed` はパックの一覧を読み直す）、始めた revision は sessionStorage にも持って戻ったときに結果を出し、覚えた revision より新しいジョブが見えたら「結果は不明」。結果の文言は core の固定コード（`error.reason` / ジョブの `error` / `stage` / 索引の `error`）を `assets_*` の訳語にし、英文の詳細は折りたたむ（`tests/test_assets_page.py` が core のコードと訳語の一致を pin）。フォルダの取り込み（ADR-005 S-final SF-5a-2）は「フォルダから取り込む」がクリックの中でシェル要求 `pickFolder` を出し、デスクトップのネイティブのダイアログで選んだフォルダを core が持って id だけを答える（パスはページに来ない。期限なしで待つ）。その id を `POST /assets:importFolder` に渡し、上書きは ZIP と同じダイアログ。Qt のダイアログ `AutonaGameAssetGuideWindow` は SF-4b-2 で削除済み
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。旧 `ANLYSE`（`AutonaAnalysisWidget`）は `Statistics` パネルのサブタブだったが、ADR-005 S4k で React の統計情報ページの 4 つ目のタブ「この大会の試合一覧」になり、Qt 版は削除済み。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
 > スコアボードの人数と「1選手あたりのキャラ数」は state が正本（スロット数とスロットの `character` の数。`AutonaActions.SetRoster`、ADR-005 S3e-6）。SCORE ページの人数・キャラ数の欄は v1 で変更を依頼し、state を表示するだけ（キャラ数の初期値 3）。人数 0 のボードは次の選手のキャラ数を覚えておく（core の `AutonaActions`。ADR-005 S4x から両シェルで 1 つ。Qt のボードの隠しスピン `charNumber` は S4ac-3 で削除）。ゲームのロードが別のゲームへの切り替えなら、全スロットのキャラと mains を空にする（起動時の復元・同じゲームの再ロードでは空にしない。Top 8 と同じ規則）。
@@ -986,47 +1009,27 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | 大会履歴（Tournament History） | `score.1.history_sets.{1,2}`（read-only） |
 | この大会の試合一覧 | 取得・行の計算・大会切替での破棄は core の `AnalysisService`（ADR-005 S4j。全 phase group を同時 2 本で取得し、ヘッドレスでも動く）。ページは「start.gg からデータを取得」で `POST /api/v1/analysis:refresh` を呼び、`analysis.*`（進み具合）の 1 行と、`GET /api/v1/analysis` の行（タブを開いたときと、`analysis` が done / error / idle に変わったときだけ読む。描くのは今の `analysis` のために読んだ行だけで、取得中は直前に読んだ行を残し、idle では描かない）を描く。行の文言・既定の並び・絞り込みは `analysisRows.ts`（表 `analysisRows.cases.json` を pytest と jest の両方が読む）。並べ替えは `TableSortLabel` でクライアント側（read-only） |
 
-#### 4.1.1 パネル（ナビ）の追加・削除規約
+#### 4.1.1 ページ（ナビ）の追加・削除規約
 
-> **NOTE（ナビゲーション刷新 / STATE_VERSION 13）**: タブ化 Dock + `QMenuBar` は廃止。
-> 各パネルは依然 `QDockWidget` サブクラスだが**ドックせず**、左サイドバー
-> （`AutonaSidebar`）＋中央 `QStackedWidget` のページとして表示する（当時の記述。Qt のパネルは
-> ADR-005 S4ac-3 で無くなり、ページはすべて共有ビューの React。`ui_constants` の `QDockWidget` の QSS は S4ad で削除）。自前描画タブバー
-> `AutonaDockTabTheme` は削除。運用操作（大会選択 / ゲーム選択 / 1v1·Team·Crew 形式）は
-> サイドバー上部、設定・ヘルプは下部「Help & Settings」ボタンに集約。サイドバー地は
-> ダークで、**選択中ナビのみブランド赤でハイライト**する（全面赤にはしない）。
-> `QMainWindow.saveState/restoreState` は不使用。サイドバー選択 index と折りたたみ状態を
-> `QSettings`（`sidebarIndex_v{N}` / `sidebarCollapsed_v{N}`）に保存する。
+**ADR-005 S-final SF-5b-3 から、ナビは AppShell のもの**（Qt のサイドバー・`QStackedWidget`・`Window._navSections`・
+`_Create*Panel` ファクトリ・`WebPanelPages`・`Window.STATE_VERSION` は削除した）。新規の Qt パネルは足さない（ADR-005）。
+ページを足すときは次を揃える（Python の Window は触らない）:
 
-- 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
-- **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
-- objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する（state は `src/core/StateMigrations.py` に移行 step を足す。§3.3.5）
-- `Autona.py` の `self._navSections` に `(panel, 'icon.svg')` を表示順で追加する
-  （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
-  - `_navSections` はカテゴリ付き構造 `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`。
-    既存カテゴリ（Setup / ScoreboardCategory / Display / Data）に足す場合は該当セクションの
-    パネルリストへ挿入し、新カテゴリを作る場合は `(translate 済み見出し, [パネルリスト])` を追加する
-  - カテゴリ見出しはナビ index を消費しないため、ナビ index = `QStackedWidget` のページ index は保たれる
-
-#### 4.1.2 ドック内の標準パターン
-- `Autona.py` の `self._navSections`（カテゴリ単位のリスト）に
-  `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加する（アイコンは `assets/icons/`）
-- **重いパネルは遅延構築**（起動再設計 Step 4b）: `panel` の代わりに `self._CreateXxxPanel`
-  ファクトリと lazy キーを渡す（`(self._CreateXxxPanel, 'icon.svg', ラベル, 'キー')`）。stack には
-  プレースホルダが入り、初回表示時に `_EnsurePanelAt` が差し替える（ナビ index == stack index を維持）。
-  外部から構築を強制する経路（ホットキー・外部制御 API 等）には `EnsureXxxPanel()` アクセサを足す
-- **パネル未構築でも成立させる**: 起動時に必要な state のシード・正規化・廃止キー掃除は
-  パネルの `__init__` ではなく **`src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）**
-  に置く。`Window._SeedPanelState()` はその起動時の呼び出し口（SaveBlock で 1 サイクルに束ねる）で、
-  Qt 依存で core に置けない `SeedColorState()` だけがここに残る。新しいボードの中身（スケルトン `SeedBoard()` から）は
-  `AutonaActions.SeedFreshBoard()` が両シェルで書く（ADR-005 S4t）。ボードを作る入口は `AutonaActions.EnsureBoard()`
-  （S4y。シード・デスクトップだけの表示トグルの書き直し・取り直しの停止・反映ボタンの held 登録を 1 回だけ）で、
-  **両シェルとも起動時に 3 つとも作る**（`AutonaActions.MakeBoards()`。ADR-005 S4ac-1: `ResetBoards` → 各ボードの
-  `EnsureBoard` を 1 サイクルで。デスクトップは `bootstrap_gui()` が `panel=True` で Window より前に、ヘッドレスは
-  `_SeedBoards` が `panel` なしで）。それまではデスクトップがボードのウィジェットの構築でボードを作り、
-  `CreateScoreboard()` が見せないボードにスケルトンを置いていた（Qt のボードのウィジェットと `CreateScoreboard()` は S4ac-3 で削除）
-  グローバルシグナルへの接続も Window 側に置く
-- 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「パネル登録」
+- `src/core/WebAccess.py` の `WEB_PANELS` に名前を足す（サーバーが `/web/<名前>` と `/web/app/<名前>` で返す名前）
+- `web/src/PanelShell/registry`（`PANELS`）にページのコンポーネントを足す
+- サイドバーの項目なら `web/src/AppShell/navSections.json` の該当セクションに `{panel, icon, label}` を表示順で足す
+  （アイコンは `assets/icons/`、`label` と見出しは i18next の `app_*` キー。en / ja の両方）。
+  `tests/test_app_shell.py` の `NAVIGATION` は削除した Qt のサイドバーの凍結した写しで、今のナビと照合している:
+  ナビを変えるなら、この照合を「今のナビの表」に書き直すかを判断してから直す（`LEGACY_SIDEBAR_PANELS` との照合は凍結した写しの方で、ナビを変えても動かさない）
+- Help & Settings のメニューから開くページなら、`navTable.ts` の `MENU_PAGES` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す
+  （`tests/test_app_shell.py` が一致を pin。メニューのページはナビをハイライトせず、ウィンドウが次の起動で開き直さない）
+- 版を上げる手順は無い: ウィンドウが覚えるのはページの名前（`lastPanel`。§3.3.5）なので、項目の追加・削除・並べ替えで読み替えは要らない。
+  ページを消すときは、保存された `lastPanel` がその名前でも `RestorePanel` が `WEB_PANELS` に無い名前を既定（`event`）に倒す
+- **ページを開いていなくても成立させる**: 起動時に必要な state のシード・正規化・廃止キー掃除は
+  ページではなく **`src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）** に置く。`Window._SeedPanelState()` はその起動時の
+  呼び出し口（SaveBlock で 1 サイクルに束ねる）。新しいボードの中身は `AutonaActions.SeedFreshBoard()` が両シェルで書き、
+  **両シェルとも起動時に 3 つとも作る**（`AutonaActions.MakeBoards()`。ADR-005 S4ac-1）。書き込みは core の操作（v1 / Web の操作）
+- 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「ページの登録」
 
 #### 4.1.2 パネル内の標準パターン
 
@@ -1046,8 +1049,8 @@ ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）と設定の `settings`（S4af。サイドバーの項目ではなく「Help & Settings」→「設定」が開く。スタックのページはナビ項目の後ろ）と API リファレンス & テスターの `api`・Companion のガイドの `companion`・OBS のガイドの `obs`・About の `about`（S-final SF-4a-2。設定と同じメニューのページ: `Window.MENU_PAGES` / `OpenMenuPage`）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
-| `/web/app/:panel` | `AppShell`（`web/src/AppShell/`） | `/web/:panel` と同じページを、Qt のメインウィンドウの枠（サイドバーのヘッダー・ナビ・フッター）の中に出す（ADR-005 S-final SF-5a-3）。サーバーの扱いは `/web/:panel` と同じ（`WebAccess.IsWebPanel` の名前だけ・STATIC・`FramedElsewhere` / `frame-ancestors`）。SF-5b まではデスクトップは `/web/<panel>` を出し、Qt の枠のまま。構成は 4.2.4 | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）と設定の `settings`（S4af。サイドバーの項目ではなく「Help & Settings」→「設定」が開く）と API リファレンス & テスターの `api`・Companion のガイドの `companion`・OBS のガイドの `obs`・About の `about`（S-final SF-4a-2。設定と同じメニューのページ: `MENU_PAGES`）とゲームアセットを追加の `assets`（SF-4b-2。同じメニューのページ）。デスクトップの共有ビューは S-final SF-5b-3 から `/web/app/<panel>`（AppShell）を出し、`/web/<panel>`（枠なし）はブラウザとプレビュー向け（S4e〜SF-5b-3 は Qt のサイドバーの各項目がスタックページを持ち、最初に開いた項目のページにビューが建った: `WebPanelPages`） | Socket.IO + REST |
+| `/web/app/:panel` | `AppShell`（`web/src/AppShell/`） | `/web/:panel` と同じページを、Qt のメインウィンドウの枠（サイドバーのヘッダー・ナビ・フッター）の中に出す（ADR-005 S-final SF-5a-3）。サーバーの扱いは `/web/:panel` と同じ（`WebAccess.IsWebPanel` の名前だけ・STATIC・`FramedElsewhere` / `frame-ancestors`）。S-final SF-5b-3 からデスクトップのウィンドウはこの 1 枚（共有ビュー `AutonaWebPanelHost` が `/web/app/<panel>` を読む。ホストの `PanelPath`）。構成は 4.2.4 | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1086,24 +1089,26 @@ React Web UI の操作画面・外部制御 API の対象ではない。
 
 #### 4.2.4 AppShell（`/web/app/:panel`。ADR-005 S-final SF-5a-3）
 
+S-final SF-5b-3 から**デスクトップのウィンドウの全体**（共有ビュー `AutonaWebPanelHost` がこれを読む。Qt のサイドバー・メニュー・ステータスバーは削除）。
+
 `web/src/PanelShell/` の共通の準備（`usePanelShellSetup`: `desktop` / `lng` / Socket.IO / 状態）を `/web/:panel`（`PanelShell`。枠なし）と `/web/app/:panel`（`AppShell`）が共有し、ページの中身は同じ `PanelContent`。`hostApi.navigateToPanel` / `window.autonaPanelShell.navigate` は今の接頭辞（`/web/app/` か `/web/`）を保つ（`panelPrefix`）。
 
 ```
 AppShell (web/src/AppShell/index.tsx)
-├── サイドバー（幅 196px。Qt の AutonaSidebar と同じ。ページの横で 100vh・sticky）
+├── サイドバー（幅 196px。削除した Qt の AutonaSidebar と同じ。ページの横で 100vh・sticky）
 │   ├── Header.tsx … 折りたたみ（menu.svg）／大会（名前か「大会を選ぶ」+ 注意の金枠。メニュー: 大会を選ぶ → URL のダイアログ（POST /tournament・force:true。読み込みが終わるまで開いたまま、拒否は中に出す）／解除 → 確認 → DELETE /tournament）
 │   │               ゲーム（名前順。state の `game.selected` が false か、無ければ「ゲームを選ぶ」+ 注意。`selected` が無い古いサーバーは codename で判定。`selected:false` でも /games を読むまでと assets_load の進捗が出ている間は中立（「読み込み中…」・注意なし。起動直後に保存したゲームの復元が済むまでのちらつき防止）。`selected:false` の間は MOD のスイッチを出さない。/games を読むまでは state のコードネームか「読み込み中…」で注意なし。末尾に「ゲームアセットを追加」→ assets。選ぶと必ず POST /game {codename}）
 │   │               対戦形式（1v1 / Team / Crew。PUT /battle-format。選んだ値は答えの後の読み直しまで保ち、後から押した方が勝つ。Socket.IO の battle_format で追従）
 │   │               MOD コンテンツ（has_modded_content のゲームだけ。POST /game {codename, modsActive}。押した値はロード（assets_load のジョブ）が終わるまで保つ）
-│   ├── Nav.tsx … navSections.json（Qt の Window._navSections と同じ見出し・順・アイコン。tests/test_app_shell.py が pin）。今のページを aria-current でハイライト。メニューのページ（MENU_PAGES）はハイライトしない。押すと navigateToPanel（replace・クエリを保つ）
+│   ├── Nav.tsx … navSections.json（削除した Qt の Window._navSections と同じ見出し・順・アイコン。tests/test_app_shell.py が凍結した写しと照合）。今のページを aria-current でハイライト。メニューのページ（MENU_PAGES）はハイライトしない。押すと navigateToPanel（replace・クエリを保つ）
 │   └── Footer.tsx … Help & Settings（設定・常に手前に表示（シェルだけ）・ゲームアセットを追加・API 設定の 3 ページ・更新情報を調べる（シェルだけ）・Discord・ご相談・About）と、アプリの状態（StatusLine。useAppStatus。total > 0 なら進捗バー）
 └── ページ（PanelContent。/web/:panel と同じ。サイドバーが横にある間はブレークポイントをサイドバーの幅だけずらしたテーマ（themes.js の themeBeside）で描く）
 ```
 
 - ページの 2 ペイン（`md` 以上）はビューポートの幅で切り替わるので、サイドバーが横にある間はページのテーマのブレークポイントを 196px ずらす（`themeBeside(SIDEBAR_WIDTH)`。`md` は 1096px）。ページの幅で見れば Qt のサイドバーの横の共有ビューと同じ切り替えになる。ThemeProvider は常に置き、テーマだけを替える（折りたたみでページを作り直さない）
-- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは保存しない（メモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
+- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは URL のクエリ `nav=collapsed` に replace で書く（履歴を増やさず読み込みもしない。ほかのページへ移っても `navigateToPanel` がクエリを保つ。localStorage には書かない）。デスクトップのホストは `urlChanged` でこれを読み、次の自分の読み込みの URL に入れ（`PanelPath`）、ウィンドウが変わるたびに QSettings の `navCollapsed` に保存して次の起動で戻す（S-final SF-5b-3。それまではメモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
 - Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
-- 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す
+- 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す。最後に知らせた（またはダイアログが見せた）回は URL のクエリ `told=<revision>` にも replace で書き、マウントのときにそこから始める（S-final SF-5b-3）: 共有ビューが捨てたページを読み直したとき・ビューが読み込み直したとき（ホストが今の URL の `told` を次の読み込みに入れる）に、同じ失敗を二度知らせない。数字（15 桁まで）でない値は無いものとして扱う
 - 文言は i18next の `app_*`（Qt の `.ts` の `app` コンテキストの訳と一致。`tests/test_app_shell.py`）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
 
 ### 4.3 OBS テンプレ命名規約
@@ -1825,7 +1830,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |---|---------|------|
 | 1 | `web/src/MatchTimerPage/`（新規）と `web/src/PanelShell/registry.tsx` | ページのコンポーネントと、共有ビューのページ名への登録 |
 | 2 | `src/core/WebAccess.py` の `WEB_PANELS` | ページ名 `"matchTimer"` を足す（共有ビューが開いてよいページの許可リスト） |
-| 3 | `src/Autona.py` | `_CreateMatchTimerPanel` ファクトリ（`return self._WebPanel("matchTimer")`）と `_navSections` への登録、`STATE_VERSION` インクリメント |
+| 3 | `web/src/AppShell/navSections.json` | サイドバーの項目（`{panel, icon, label}`。見出しと文言は `app_*` キー）。`src/Autona.py` は触らない（S-final SF-5b-3 から Window は共有ビュー 1 枚で、ナビは AppShell のもの。版を上げる手順も無い。§4.1.1） |
 | 4 | `Design.md` §4.1 の表 | パネル一覧に追加 |
 
 #### 触るファイル（任意）
@@ -1838,12 +1843,10 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 #### 注意
 
-- `setObjectName()` は **Autona.py 側で設定**する（ウィジェット自身では設定しない、`.claude/rules/python-widgets.md`）
-- `STATE_VERSION` インクリメント忘れで既存ユーザーが新ウィジェットを見られなくなる
-- `signals` への `connect` は `__init__` 内で行う
-- 遅延構築にする場合、パネル未構築でも成立させるべき初期化は `__init__` に置かない（§4.1.1）。
-  state のシード・正規化は `src/core/StateSchema.py` の `SeedPanelState()` / `SeedBoard()` に、
-  グローバルシグナル接続は Window 側に置く（`Window._SeedPanelState()` は前者の呼び出し口）
+- メニューのページ（サイドバーの項目でない）なら、`navTable.ts` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す（§4.1.1）
+- ページを開いていなくても成立させるべき初期化はページに置かない（§4.1.1）。
+  state のシード・正規化は `src/core/StateSchema.py` の `SeedPanelState()` / `SeedBoard()` に置く
+  （`Window._SeedPanelState()` はその呼び出し口）
 
 ### 7.6 新 State キーパスの追加
 
