@@ -43,6 +43,15 @@ WAIT = 30.0
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "result"
                      / "golden.json").read_text(encoding="utf-8"))
 
+# The scenarios whose recorded words are in another language now: the
+# recording was made with no translator (its words are the English sources),
+# and since ADR-005 S-final SF-7 the service's own words are core's in the
+# program locale's language (core/CoreWords) -- what the old code said with
+# the Japanese .qm installed. {scenario: {recorded: said now}}.
+IN_THE_LOCALES_LANGUAGE = {
+    "sample_base_locale": {"Sample Tournament": "サンプル大会"},
+}
+
 # What the service answers differently from the recording, on purpose. Each is
 # asserted to differ (when the difference goes, so must its line) and what it
 # answers now is pinned by a test of its own below.
@@ -340,6 +349,12 @@ def _payloadOf(env, scenario):
 def test_the_payload_is_what_the_old_code_built(env, scenario):
     data, config = _payloadOf(env, scenario)
     expected = GOLDEN["payloads"][scenario["name"]]
+    for english, said in IN_THE_LOCALES_LANGUAGE.get(
+            scenario["name"], {}).items():
+        recorded = json.dumps(expected, ensure_ascii=False)
+        assert json.dumps(english) in recorded, english
+        expected = json.loads(recorded.replace(
+            json.dumps(english), json.dumps(said, ensure_ascii=False)))
     # As text: the key order is kept too, and is what a template iterates.
     same = json.dumps({"data": data, "config": config}, ensure_ascii=False) \
         == json.dumps(expected, ensure_ascii=False)
@@ -513,12 +528,34 @@ def test_the_sample_is_only_for_a_preview(env):
         == ""
 
 
-def test_the_sample_words_are_translated(env):
-    env.service._translate = lambda context, text: f"{context}:{text}"
-
+def test_the_sample_words_follow_the_program_locale(env):
+    # Core's words in the locale's language (core/CoreWords, ADR-005 S-final
+    # SF-7; Qt's translations until then), the locale read when used.
+    env.locale["value"] = "ja-JP"
     data = env.service.BuildPayload(preview=True, games=env.catalog)[0]
+    assert data["tournamentName"] == "サンプル大会"
+    assert {layout["id"]: layout["name"]
+            for layout in env.service.Layouts()} == {
+        "horizontal": "横向き (1920x1080)",
+        "horizontal_16": "横向き TOP16 (1920x1080)",
+        "vertical": "縦向き (960x1080)",
+        "vertical_geki": "縦向き Dark Gold 激 (960x1080)",
+        "team": "チーム / クルー (1920x1080)",
+        "team_split": "Team / Crew 縦並び (1920x1080)",
+    }
 
-    assert data["tournamentName"] == "app:Sample Tournament"
+    env.locale["value"] = "en-US"
+    data = env.service.BuildPayload(preview=True, games=env.catalog)[0]
+    assert data["tournamentName"] == "Sample Tournament"
+    assert {layout["id"]: layout["name"]
+            for layout in env.service.Layouts()} == {
+        "horizontal": "Horizontal (1920x1080)",
+        "horizontal_16": "Horizontal TOP16 (1920x1080)",
+        "vertical": "Vertical (960x1080)",
+        "vertical_geki": "Vertical Dark Gold 激 (960x1080)",
+        "team": "Team / Crew (1920x1080)",
+        "team_split": "Team / Crew vertical (1920x1080)",
+    }
 
 
 # ── the rows ─────────────────────────────────────────────────────────────

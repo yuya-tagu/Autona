@@ -43,6 +43,17 @@ GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "thumbnail"
 PLAYERS = copy.deepcopy(world.WITH_PLAYERS)
 KNOWN_GAMES = ("ssbu", "sf6", "new", "g", "a", "b")
 
+# The scenarios whose recorded words are in another language now: the
+# recording was made with no translator (its words are the English sources),
+# and since ADR-005 S-final SF-7 the service's own words are core's in the
+# program locale's language (core/CoreWords) -- what the old code said with
+# the Japanese .qm installed. {scenario: {recorded: said now}}.
+IN_THE_LOCALES_LANGUAGE = {
+    "preview_placeholder_base_locale": {
+        "Sample Tournament": "サンプル大会", "Team A": "チームA",
+        "Team B": "チームB"},
+}
+
 
 class _Catalog:
     """What a placeholder preview reads of the game asset catalog."""
@@ -201,10 +212,15 @@ def test_the_payload_is_what_the_old_code_built(env, scenario):
 
     data, config, template = env.service.BuildPayload(
         preview=scenario["preview"], games=games, board=scenario["board"])
+    recorded = json.dumps(expected, ensure_ascii=False)
+    for english, said in IN_THE_LOCALES_LANGUAGE.get(
+            scenario["name"], {}).items():
+        assert json.dumps(english) in recorded, english
+        recorded = recorded.replace(json.dumps(english),
+                                    json.dumps(said, ensure_ascii=False))
     # As text: the key order is kept too.
     assert json.dumps({"data": data, "config": config, "template": template},
-                      ensure_ascii=False) \
-        == json.dumps(expected, ensure_ascii=False)
+                      ensure_ascii=False) == recorded
 
 
 def test_the_recording_covers_every_scenario():
@@ -2344,12 +2360,14 @@ def test_no_half_result_is_ever_seen(match, executor):
         assert (render["status"] == "done") == bool(render["path"])
 
 
-# ── the shell's half of the words ────────────────────────────────────────
+# ── the words: core's, in the locale's language ──────────────────────────
 
-def test_the_session_services_words_are_qt_translations(autonaApp, tmp_path,
-                                                        monkeypatch):
-    """What bootstrap_core() injects: the same context and text the old code
-    gave QApplication.translate, the locale's names read when used."""
+def test_the_session_services_words_follow_the_program_locale(
+        autonaApp, tmp_path, monkeypatch):
+    """What bootstrap_core() injects: the locale and its names, read when
+    used. The service's own words are core's in the locale's language
+    (core/CoreWords, ADR-005 S-final SF-7), whatever Qt translator is
+    installed: Qt's translations until then."""
     from qtpy.QtCore import QCoreApplication, QTranslator
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
@@ -2359,7 +2377,7 @@ def test_the_session_services_words_are_qt_translations(autonaApp, tmp_path,
 
     translator = Marking()
     assert QCoreApplication.installTranslator(translator)
-    monkeypatch.setattr(AutonaLocaleHelper, "programLocale", "ja")
+    monkeypatch.setattr(AutonaLocaleHelper, "programLocale", "ja-JP")
     monkeypatch.setattr(AutonaLocaleHelper, "matchNames",
                         {"winners_final": "WF"})
     monkeypatch.setattr(AutonaLocaleHelper, "phaseNames", {"group": "G{0}"})
@@ -2372,9 +2390,9 @@ def test_the_session_services_words_are_qt_translations(autonaApp, tmp_path,
         SettingsManager.settings = {}
         data, _config, _template = service.BuildPayload(
             preview=True, games=_Catalog(world.GAMES))
-        assert data["tournamentInfo"]["tournamentName"] \
-            == "app/Sample Tournament"
-        assert data["score"]["1"]["team"]["1"]["teamName"] == "app/Team A"
+        assert data["tournamentInfo"]["tournamentName"] == "サンプル大会"
+        assert data["score"]["1"]["team"]["1"]["teamName"] == "チームA"
+        assert data["score"]["1"]["team"]["2"]["teamName"] == "チームB"
         assert data["score"]["1"]["match"] == "WF"
         assert data["score"]["1"]["phase"] == "GA"
         assert {name for name in (
@@ -2384,24 +2402,36 @@ def test_the_session_services_words_are_qt_translations(autonaApp, tmp_path,
             <= {"マリオ", "Link", "Kirby", "Pikachu"}
 
         data, _config, _template = service.BuildPayload(preview=True)
-        assert data["tournamentInfo"]["tournamentName"] \
-            == "app/Sample Tournament"
+        assert data["tournamentInfo"]["tournamentName"] == "サンプル大会"
 
         assert service.Templates() == [
-            {"id": "type_a", "name": "app/Standard"},
-            {"id": "type_b", "name": "app/Center Panel"}]
+            {"id": "type_a", "name": "標準"},
+            {"id": "type_b", "name": "中央パネル"}]
 
         (tmp_path / "out").mkdir()
         (tmp_path / "out" / "program_state.json").write_text("{}")
         with pytest.raises(thumbnails.ThumbnailDataMissing) as raised:
             service.BuildPayload()
-        assert str(raised.value) == "thumb_app/Please select a game first"
+        assert str(raised.value) == "ゲームを選んで下さい"
 
         (tmp_path / "out" / "program_state.json").write_text(json.dumps(
             {"game": {"codename": "x"}}))
         with pytest.raises(thumbnails.ThumbnailDataMissing) as raised:
             service.BuildPayload()
-        assert str(raised.value) == "thumb_app/Player 1 tag missing"
+        assert str(raised.value) == "プレイヤー1のタグがありません"
+
+        # The locale is read when used: English for any other language.
+        monkeypatch.setattr(AutonaLocaleHelper, "programLocale", "en-US")
+        with pytest.raises(thumbnails.ThumbnailDataMissing) as raised:
+            service.BuildPayload()
+        assert str(raised.value) == "Player 1 tag missing"
+        assert service.Templates() == [
+            {"id": "type_a", "name": "Standard"},
+            {"id": "type_b", "name": "Center Panel"}]
+        data, _config, _template = service.BuildPayload(
+            preview=True, games=_Catalog(world.GAMES))
+        assert data["tournamentInfo"]["tournamentName"] == "Sample Tournament"
+        assert data["score"]["1"]["team"]["2"]["teamName"] == "Team B"
     finally:
         QCoreApplication.removeTranslator(translator)
         SM.state, SettingsManager.settings = state, settings

@@ -34,9 +34,11 @@ match to save (NO_GAME / NO_PLAYER) is followed by the preview it stood in
 for, which draws a placeholder.
 
 ``ThumbnailService.instance`` is built by ``bootstrap_core()``; the deferral,
-the shell's renderer, the translations, the locale's names and the output
-pruning are injected there, because core may not import them
-(tests/test_core_qt_free.py). Import side effects: none (agent-pitfalls #1).
+the shell's renderer, the locale and its names and the output pruning are
+injected there, because core may not import them
+(tests/test_core_qt_free.py). The service's own words are core's
+(core/CoreWords, in the locale's language; Qt's translations until ADR-005
+S-final SF-7). Import side effects: none (agent-pitfalls #1).
 """
 import copy
 import datetime
@@ -50,6 +52,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from . import CoreWords
 from . import ImageImport
 from . import StateSchema as schema
 from .ColorService import FEATURE_THUMBNAIL, GetFeatureColors
@@ -70,8 +73,9 @@ RENDER_PATH = f"{schema.THUMBNAIL_ROOT}.{schema.THUMBNAIL_RENDER_KEY}"
 # Two templates, each a subdirectory under layout/ (ThumbnailRenderer).
 TEMPLATE_IDS = ("type_a", "type_b")
 DEFAULT_TEMPLATE_ID = "type_a"
-# id -> its name in the "app" translation context.
-TEMPLATE_NAMES = {"type_a": "Standard", "type_b": "Center Panel"}
+# id -> its name's key in core's words (core/CoreWords).
+TEMPLATE_NAMES = {"type_a": "thumbnail_template_type_a",
+                  "type_b": "thumbnail_template_type_b"}
 TEMPLATE_DIRECTORY = "./assets/thumbnail_base/thumbnail_types"
 
 # ── the background ───────────────────────────────────────────────────────
@@ -444,13 +448,13 @@ class ThumbnailService(RenderLane):
     LEFTOVERS = (f"{BACKGROUND_DIRECTORY}/{BACKGROUND_PREFIX}*.png",)
     MISSING_CODES = (NO_GAME, NO_PLAYER)
 
-    def __init__(self, later, render=None, translate=None, locale=None,
-                 prune=None, shuttingDown=None):
+    def __init__(self, later, render=None, locale=None, prune=None,
+                 shuttingDown=None):
         """`later`, `render`, `prune` and `shuttingDown` as RenderLane takes
-        them; `render` is given (data, config, template). `translate(context,
-        text)` and `locale()` -> (program locale, match names, phase names) are
-        what a placeholder's words come from."""
-        self._translate = translate or (lambda _context, text: text)
+        them; `render` is given (data, config, template). `locale()` ->
+        (program locale, match names, phase names) is what a placeholder's
+        words come from, and the language of the service's own words
+        (core/CoreWords)."""
         self._locale = locale or (lambda: ("en", {}, {}))
 
         # The uploaded background: one import or reset at a time, so the
@@ -531,8 +535,13 @@ class ThumbnailService(RenderLane):
 
     def Templates(self) -> list:
         return [{"id": templateId,
-                 "name": self._translate("app", TEMPLATE_NAMES[templateId])}
+                 "name": self._Text(TEMPLATE_NAMES[templateId])}
                 for templateId in TEMPLATE_IDS]
+
+    def _Text(self, key):
+        """Core's words for `key` in the program locale's language
+        (core/CoreWords), the locale read now."""
+        return CoreWords.Text(key, self._locale()[0])
 
     def Describe(self) -> dict:
         """What a page shows of the thumbnail: the settings, the game they
@@ -764,12 +773,12 @@ class ThumbnailService(RenderLane):
             code = NO_PLAYER if self._CurrentGame().get("codename") else NO_GAME
             raise ThumbnailDataMissing(code, str(error)) from error
         if not hasGame:
-            raise ThumbnailDataMissing(NO_GAME, self._translate(
-                "thumb_app", "Please select a game first"))
+            raise ThumbnailDataMissing(NO_GAME,
+                                       self._Text("thumbnail_no_game"))
         for team, hasPlayer in zip((1, 2), hasPlayers):
             if not hasPlayer:
-                raise ThumbnailDataMissing(NO_PLAYER, self._translate(
-                    "thumb_app", "Player {0} tag missing").format(team))
+                raise ThumbnailDataMissing(NO_PLAYER, self._Text(
+                    "thumbnail_no_player").format(team))
         return data
 
     def _PlaceholderData(self, games, usedAssets):
@@ -779,7 +788,7 @@ class ThumbnailService(RenderLane):
         snapshot = games.Current() if games else None
         characters = snapshot.characters if snapshot else {}
         selected = snapshot.game if snapshot else {}
-        tournamentName = self._translate("app", "Sample Tournament")
+        tournamentName = self._Text("sample_tournament")
         # Characters without a selected game: the catalog keeps them when the
         # selection is forgotten (a tournament cleared).
         if not characters or not selected.get("codename"):
@@ -855,16 +864,16 @@ class ThumbnailService(RenderLane):
                         "losers": False,
                         "player": {"1": player(chars[0], chars[1])},
                         "score": 0,
-                        "teamName": self._translate(
-                            "app", "Team {0}").format("A"),
+                        "teamName": self._Text(
+                            "sample_team").format("A"),
                     },
                     "2": {
                         "losers": False,
                         "player": {"1": player(chars[2]),
                                    "2": player(chars[3])},
                         "score": 0,
-                        "teamName": self._translate(
-                            "app", "Team {0}").format("B"),
+                        "teamName": self._Text(
+                            "sample_team").format("B"),
                     },
                 },
             }},

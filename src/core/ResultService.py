@@ -41,9 +41,11 @@ The lock order is StateManager.lock -> the lane's lock -> the import's lock.
 PlayerDB is called with no lock held: its change relay reaches the main thread.
 
 ``ResultService.instance`` is built by ``bootstrap_core()``; the deferral, the
-shell's renderer, the translations, the locale, the output pruning and the way
-to the provider are injected there, because core may not import them
-(tests/test_core_qt_free.py). Import side effects: none (agent-pitfalls #1).
+shell's renderer, the locale, the output pruning and the way to the provider
+are injected there, because core may not import them
+(tests/test_core_qt_free.py). The service's own words are core's
+(core/CoreWords, in the locale's language; Qt's translations until ADR-005
+S-final SF-7). Import side effects: none (agent-pitfalls #1).
 """
 import copy
 import datetime
@@ -53,6 +55,7 @@ from collections import namedtuple
 
 from loguru import logger
 
+from . import CoreWords
 from . import StateSchema as schema
 from . import ThumbnailService as thumbnails
 from . import Top8Service
@@ -89,14 +92,14 @@ LAYOUT_SIZES = {
     "team": (1920, 1080),
     "team_split": (1920, 1080),
 }
-# id -> its name in the "app" translation context.
+# id -> its name's key in core's words (core/CoreWords).
 LAYOUT_NAMES = {
-    "horizontal": "Horizontal (1920x1080)",
-    "horizontal_16": "Horizontal TOP16 (1920x1080)",
-    "vertical": "Vertical (960x1080)",
-    "vertical_geki": "Vertical Dark Gold 激 (960x1080)",
-    "team": "Team / Crew (1920x1080)",
-    "team_split": "Team / Crew 縦並び (1920x1080)",
+    "horizontal": "result_layout_horizontal",
+    "horizontal_16": "result_layout_horizontal_16",
+    "vertical": "result_layout_vertical",
+    "vertical_geki": "result_layout_vertical_geki",
+    "team": "result_layout_team",
+    "team_split": "result_layout_team_split",
 }
 DEFAULT_LAYOUT = "horizontal"
 DEFAULT_TEAM_LAYOUT = "team"
@@ -816,13 +819,14 @@ class ResultService(RenderLane):
     PREVIEW_PATH = PREVIEW_PATH
     MISSING_CODES = (NO_DATA,)
 
-    def __init__(self, later, render=None, translate=None, locale=None,
-                 prune=None, shuttingDown=None, fetcher=None,
-                 refreshTournament=None, currentProvider=None):
+    def __init__(self, later, render=None, locale=None, prune=None,
+                 shuttingDown=None, fetcher=None, refreshTournament=None,
+                 currentProvider=None):
         """`later`, `render`, `prune` and `shuttingDown` as RenderLane takes
-        them; `render` is given (data, config, layout). `translate(context,
-        text)` and `locale()` -> the program's locale are what the sample's
-        words come from. `fetcher(job, status)` runs job(provider) on the
+        them; `render` is given (data, config, layout). `locale()` -> the
+        program's locale is the language of the service's own words
+        (core/CoreWords) and of the sample's characters' names.
+        `fetcher(job, status)` runs job(provider) on the
         provider's worker thread and returns True, or returns False, running
         nothing, when no tournament is loaded (Top8Service.fetcher);
         `refreshTournament(done)` asks for the tournament's data again, as
@@ -831,7 +835,6 @@ class ResultService(RenderLane):
         tournament is loaded; `done()` once the data is in and the game it names
         loaded, however that went. `currentProvider()` says which provider is
         loaded now: an import from one that is not any more is dropped."""
-        self._translate = translate or (lambda _context, text: text)
         self._locale = locale or (lambda: "en")
         self._fetcher = fetcher
         self._refreshTournament = refreshTournament
@@ -862,7 +865,7 @@ class ResultService(RenderLane):
 
     def Layouts(self) -> list:
         return [{"id": layout,
-                 "name": self._translate("app", LAYOUT_NAMES[layout]),
+                 "name": self._Text(LAYOUT_NAMES[layout]),
                  "width": LAYOUT_SIZES[layout][0],
                  "height": LAYOUT_SIZES[layout][1],
                  "slots": SlotsFor(layout),
@@ -1036,6 +1039,11 @@ class ResultService(RenderLane):
         # Out of the lock: it looks at the game's files, character by character.
         return self._SampleData(games, count, kind), config, layout
 
+    def _Text(self, key):
+        """Core's words for `key` in the program locale's language
+        (core/CoreWords), the locale read now."""
+        return CoreWords.Text(key, self._locale())
+
     def _CharacterName(self, key, character):
         """A character's name in the program's locale, its key without one."""
         names = character.get("locale")
@@ -1064,7 +1072,7 @@ class ResultService(RenderLane):
         characters = snapshot.characters if snapshot else {}
         selected = snapshot.game if snapshot else {}
         data = {
-            "tournamentName": self._translate("app", "Sample Tournament"),
+            "tournamentName": self._Text("sample_tournament"),
             "eventName": f"Top {count}",
             "players": [],
         }
