@@ -28,12 +28,16 @@ Startup instrumentation:
 Overlay:
   * `LoadingOverlay` — a child widget that covers the main window with
     a dim backdrop + rotating spinner, shown immediately after
-    `QMainWindow.show()` so the user doesn't see the half-rendered UI
-    settle during the first paint/layout passes. Call
-    `.finish_when_ready()` to let it dismiss itself as soon as that first
-    pass is done, or `.finish()` to drop it immediately.
-    `.call_when_finished(fn)` queues work for the moment the overlay is
-    gone (used to start the web server off the startup path).
+    `QMainWindow.show()` and kept up until the window's page is there
+    (ADR-005 S-final SF-5b-3: the window is the shared web view alone, and
+    has nothing to show before the web server is up and its first load has
+    ended). `.call_when_painted(fn)` runs `fn` once the overlay has been
+    painted, from the event loop, leaving it up (the window builds its web
+    server there, which holds the GUI thread for a few seconds); a window
+    never painted (started minimized) runs it past a longest wait anyway.
+    `.finish()` drops it; the window calls it on the first load's end, on
+    the web server's start failure, or past its own cap
+    (Window.SPINNER_CAP_MS). tests/test_loading_overlay.py pins this.
 """
 
 from __future__ import annotations

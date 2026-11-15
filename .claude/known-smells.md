@@ -86,13 +86,21 @@
   Tournament Info も headless core Step 4b で遅延構築に移行
 - WebServer 構築・起動は `_StartWebServer()` に分離（Step 4c）
 
-**残る対策案**: サイドバーのナビ/メニュー組み立て（`helpMenu` / `startggMenu` / ゲームセレクタ）と
-ステータスバー構築を `_BuildHelpMenu()` / `_BuildOperationsHeader()` / `_BuildStatusBar()` 等へ分割。
+**2026-11-15 再検証（ADR-005 S-final SF-5b-3 後）**: ウィンドウの中身は共有ビュー `AutonaWebPanelHost` 1 枚になり、
+上記の内訳のサイドバー（`AutonaSidebar`）・`QStackedWidget`・Help & Settings / 大会 / ゲームのメニュー・ステータスバー・
+`_Create*Panel` / `_EnsurePanelAt`・`sidebarIndex_v{N}`（`STATE_VERSION`）は**すべて削除**した（AppShell が持つ）。
+`Window.__init__` は SaveBlock で `_BuildUi()`（`src/Autona.py` 約 220 行）を包むだけで、`_BuildUi` に残るのは
+ロケール・テーマ・フォント・既定アイコンの用意、state のシード、ホストの組み立てと結線、保存したページの復元
+（`AutonaWindowState`）、`show()` → スピナー → `_StartWebServer` の起動順、各シングルトンの `UiMounted`。
+
+**残る対策案**: 前回の案（メニュー / ヘッダー / ステータスバーの組み立ての分割）は対象が無くなった。残りは「起動前の
+ファイル準備（`out/`・`user_data/games`・`layout/logo.png` の種）」「フォント・テーマ」「起動順」の塊で、分けるなら
+`_PrepareFiles()` / `_LoadFonts()` 程度。優先度は低い。
 
 **影響範囲**: `Autona.py` のみ。
 
-**リスク**: `_navSections` の構築順（ナビ index == stack index）と QSettings 復元・`_EnsurePanelAt` の
-呼び出し順に依存があるため、分割時は順序を保つこと。
+**リスク**: 起動順（ホストの組み立て → 保存したページの復元 → `show()` → `core-shown` → スピナーとその上限 →
+`call_when_painted(_StartWebServer)`）は `tests/test_web_panel_host.py` が pin している。分割時はこの順を保つこと。
 
 ---
 
@@ -440,7 +448,7 @@ objectName → 明示的なキー名マッピング＋`program_state.json` の�
 ### Wave 4（長期）
 | ID | 対象 | 理由 | 状態 |
 |----|------|------|------|
-| S-03 | Window __init__ | 影響範囲広い。慎重に | 🔴 未着手 |
+| S-03 | Window __init__ | ADR-005 S-final SF-5b-3 でメニュー・サイドバー・ステータスバーの組み立てが消え、`_BuildUi` 約 220 行 | 🟡 一部改善（残りは優先度低） |
 | S-10 | シングルトン遅延初期化 | 全ファイルに影響（11クラス）。フェーズ3以降 | 🔴 未着手 |
 | S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（2026-06-27）→ Headless Core Step 5 で 4 族すべて静的化 → ADR-005 S3b でスキーマ版（`user_data/state.json` の `state_version`）と移行層（`StateMigrations`） | ✅ 解消（2026-09-02 動的生成、2026-10-25 スキーマ版。objectName ↔ キー名の一致要件は継続） |
 

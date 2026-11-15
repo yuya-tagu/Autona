@@ -56,14 +56,26 @@ ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, 
 - **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None で何もしない）。呼ぶのは
   シェルのアダプタ `src/AutonaShellOperations.py`（`bootstrap_gui()` が作り、Window が `UiMounted` で渡す）の `load_set` のホットキーと legacy の
   open-set だけで、返ったホストの `OpenScoreSets(board)` で SCORE のページのセット選択を開く（ADR-005 S4ab-2）
-- **保存**: 終了時に QSettings の `lastPanel`（ページの名前）と `navCollapsed`（AppShell のサイドバーの折りたたみ。AppShell が URL の
-  `nav=collapsed` に replace で書き、ホストが `urlChanged` で読む）を保存する。起動時は `RestorePanel` / `RestoreNavCollapsed` で読み、
+- **保存**: QSettings の `lastPanel`（ページの名前）と `navCollapsed`（AppShell のサイドバーの折りたたみ。AppShell が URL の
+  `nav=collapsed` に replace で書き、ホストが `urlChanged` で読んで `navCollapsedChanged` を出す）を、**変わるたびに**保存する
+  （`Window._SaveWindowState`: `panelChanged` / `navCollapsedChanged` から。保存値と違うものだけ書いて `QSettings.sync()`。メニューのページ・
+  URL の `told=` の変化では書かない。起動時の読み込み（旧キーの読み替え）より前と `_shuttingDown` の後は書かない）。終了時（`closeEvent`）にも
+  ジオメトリと一緒に保存する。クラッシュ・強制終了で `closeEvent` が走らなくても、次の起動は最後のページで開く。起動時は `RestorePanel` / `RestoreNavCollapsed` で読み、
   ホストの最初の読み込みの URL（`PanelPath`）に入れる。読み書きは Qt-free の純関数 `src/AutonaWindowState.py`。旧キー
   （`sidebarIndex_v22` / `sidebarCollapsed_v22`）は 1 回だけ読み替えて消す（index は固定の表 `LEGACY_SIDEBAR_PANELS`）。
   `QMainWindow.saveState/restoreState` は使わない（ジオメトリは `saveGeometry` / `restoreGeometry`）
 - **起動の順**: `show()` → `STARTUP phase=core-shown` → `LoadingOverlay` → 初回の描画の後に `_StartWebServer`（`call_when_painted`。
   イベントループから呼ばれるので、中の `QMessageBox.question` / `exec` は入れ子のモーダルにならない: pitfalls #9）→ `webserver-ready` →
   最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。順は `tests/test_web_panel_host.py` が pin
+- **スピナーが外れない経路を作らない**: スピナーを外すのは、最初の読み込みの終わり（失敗し切ったとき・ビューを建てられなかったときを含む）・
+  Web サーバーの起動失敗（サーバースレッドの bind 失敗も、`_StartWebServer` の中の例外も `OnWebServerStartFailed`）・上限
+  （`Window.SPINNER_CAP_MS` = 20 秒。LAN の確認やポートの確認のダイアログとサーバーの構築の間は止め、サーバーの準備ができてから数え直す。
+  過ぎたら warning を出して外し、ホストの再試行の表示 `ShowLoadFailure` を出す）。イベントループから呼ばれる処理（`call_when_painted` の
+  コールバック、ホストの `_BuildQueuedView`）で例外を素通しにしない（上で受けるものが無く、スピナーが残る）
+- **読み込みの失敗**: 失敗し切った読み込み（ローダーの再試行の使い切り、文書の無い状態での拒否された遷移）のあとは、ホストが Chromium の
+  エラーページを再試行の表示（`ShowLoadFailure`。QLabel と「再試行」の `QPushButton` をビューの上に重ねる。ビューは見えたままなので
+  復帰時の読み直しもそのまま）で覆い、成功した読み込みで外す。タイマーでの自動の再試行はしない（操作 1 回につき 1 回）。ビューを
+  建てられなかったときは起動失敗と同じ文（`ShowStartFailure`）にして、それ以上建てない
 - **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。起動をまたいで保存しない）。シェル要求 `alwaysOnTop` から
   `AutonaShellOperations` が呼び、`SetAlwaysOnTop` が窓のフラグを変えてホストの `PublishShellState` でページに知らせる
 - **共有ビューのページのシェル要求**（ADR-005 S-final SF-5a-1。`alwaysOnTop` / `checkUpdates` / `openExternal`、SF-5a-2 の `pickFolder`

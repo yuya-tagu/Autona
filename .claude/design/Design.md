@@ -858,7 +858,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | React の設定ページのホットキー区画（ADR-005 S4af） |
 | ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
-| 開いていたページ・サイドバーの折りたたみ | QSettings（`lastPanel` = ページの名前 / `navCollapsed`。ADR-005 S-final SF-5b-3。読み書きは `src/AutonaWindowState.py`。旧 `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す） | 文字列 / bool | `Window` | 終了時に保存 |
+| 開いていたページ・サイドバーの折りたたみ | QSettings（`lastPanel` = ページの名前 / `navCollapsed`。ADR-005 S-final SF-5b-3。読み書きは `src/AutonaWindowState.py`。旧 `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す） | 文字列 / bool | `Window` | 変わるたびに保存（`sync`）＋終了時 |
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（ADR-005 S3e-1。選んでいるゲームの mains の正規化も `PlayerDB.NormaliseMains`。Qt 側の `AutonaPlayerDB` は変更を `db_updated` に中継するだけ: 補完モデルは Qt モデルの整理 PR3 で削除） | React の Player List（`/web/playerBrowser`。v1 `PUT /players`）+ 直接 JSON 編集 |
 | 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
@@ -919,7 +919,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 #### 3.3.5 ウィンドウの保存とマイグレーション
 
 - **`Window.STATE_VERSION` は ADR-005 S-final SF-5b-3 で削除した**。ウィンドウは共有ビュー 1 枚で、覚えるのはページの名前（QSettings の `lastPanel`）とサイドバーの折りたたみ（`navCollapsed`）だけ。名前なのでナビの項目の追加・削除・並べ替えで読み替えが要らない（版を上げる手順も無い）。読み書きは Qt-free の純関数 `src/AutonaWindowState.py`（`RestorePanel` / `RestoreNavCollapsed` / `SaveWindowState`）
-  - `lastPanel` に入れるのはサイドバーの項目のページだけ（`IsReopenable`: `WebAccess.WEB_PANELS` の名前で `MENU_PAGES` でないもの）。Help & Settings のメニューのページ（設定・API・Companion・OBS・About・ゲームアセットを追加）の間は、その前に開いていたページを覚える（`RememberedPanel`）。保存は終了時（`closeEvent`）
+  - `lastPanel` に入れるのはサイドバーの項目のページだけ（`IsReopenable`: `WebAccess.WEB_PANELS` の名前で `MENU_PAGES` でも、パネルシェルの空のページ `shell-check` でもないもの）。Help & Settings のメニューのページ（設定・API・Companion・OBS・About・ゲームアセットを追加）の間は、その前に開いていたページを覚える（`RememberedPanel`）。保存はページか折りたたみが変わるたび（`Window._SaveWindowState`: 保存値と違うものだけ書いて `sync`。起動時の読み込みより前と終了の開始後は書かない）と終了時（`closeEvent`）
   - 旧キー（Qt のサイドバーの `sidebarIndex_v22` / `sidebarCollapsed_v22`）は、新しいキーが無いときに 1 回だけ読み替えて消す。index は固定の表 `LEGACY_SIDEBAR_PANELS`（v22 のナビの 11 項目。ナビが変わっても変えない）で引き、範囲外・数でない値は `event`。新しいキーがあれば旧キーの値は使わずに消すだけ
   - 復元した値はホストの最初の読み込みの URL に入る（`AutonaWebPanelHost.ShowPanel` / `SetNavCollapsed` → `PanelPath` = `/web/app/<panel>`、折りたたみは `?nav=collapsed`）。AppShell が折りたたみを URL に replace で書き、ホストが `urlChanged` で読み取る（`NavCollapsed()`）
   - pin: `tests/test_window_state.py`（純関数と、実ウィンドウの起動 → 移動 → 終了の保存を subprocess で）
@@ -943,14 +943,19 @@ AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidge
 「objectName」列の `WebPanels` はホストの objectName。
 
 - **ページの切り替え**: ページの中のナビは `history.replaceState`（遷移にならない）。ホストは `urlChanged` でどのページかを読み
-  （`AppPanelOf`）、`panelChanged(名前)` を出す。ウィンドウはそれで終了時に覚えるページを決める（`AutonaWindowState.RememberedPanel`。§3.3.5）
+  （`AppPanelOf`）、`panelChanged(名前)` を出す（折りたたみが変われば `navCollapsedChanged`）。ウィンドウはそれで覚えるページを決めて、その場で保存する（`AutonaWindowState.RememberedPanel`。§3.3.5）
 - **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None）。呼ぶのは `load_set` の
   ホットキーと legacy の open-set（`AutonaShellOperations.ShowSetSelection` / `OpenSetSelection` → `OpenPanel("scoreboard")` →
   ホストの `OpenScoreSets(board)`）
 - **起動**: `show()` → `STARTUP phase=core-shown` → ローディングのスピナー（`LoadingOverlay`）→ 初回の描画の後に `_StartWebServer` →
   `webserver-ready` → ホストがビューを建てて読む → 最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。
   初回起動の LAN の確認（`QMessageBox.question`。ウィンドウで使う唯一の QMessageBox）はスピナーの上に出る
-- **Web サーバーの起動失敗**: ホストの中身を案内の文（`ShowStartFailure`。QLabel）に置き換え、スピナーを外す。ダイアログは出さない
+- **Web サーバーの起動失敗**: ホストの中身を案内の文（`ShowStartFailure`。QLabel）に置き換え、スピナーを外す。ダイアログは出さない。
+  サーバースレッドの bind 失敗も、`_StartWebServer` の中の例外（構築・ポートの確認・起動・結線）も同じ。ホストがビューを建てられなかったときも
+  同じ形の文（最初の読み込みの失敗として知らせ、スピナーが外れる）
+- **読み込みの失敗とスピナーの上限**: 失敗し切った読み込みのあと、ホストは再試行の表示（`ShowLoadFailure`。文と「再試行」のボタンをビューの上に
+  重ねる）を出し、成功した読み込みで外す。スピナーには上限（`Window.SPINNER_CAP_MS` = 20 秒。起動時のダイアログとサーバーの構築の間は止める）
+  があり、過ぎたら warning を出して外し、再試行の表示を出す
 - **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。シェル要求 `alwaysOnTop` から）。起動をまたいで保存しない
 - **ゲームの変更の通知** `WindowSignals.GameChanged` は、アセットのアダプタの `onLoad`（ロードのたび）が出す（Web サーバーが全量の state とキャラを送る）。
   SF-5b-3 までは Qt のゲームのボタンの `SetGame` が出していた
@@ -1101,7 +1106,7 @@ AppShell (web/src/AppShell/index.tsx)
 ```
 
 - ページの 2 ペイン（`md` 以上）はビューポートの幅で切り替わるので、サイドバーが横にある間はページのテーマのブレークポイントを 196px ずらす（`themeBeside(SIDEBAR_WIDTH)`。`md` は 1096px）。ページの幅で見れば Qt のサイドバーの横の共有ビューと同じ切り替えになる。ThemeProvider は常に置き、テーマだけを替える（折りたたみでページを作り直さない）
-- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは URL のクエリ `nav=collapsed` に replace で書く（履歴を増やさず読み込みもしない。ほかのページへ移っても `navigateToPanel` がクエリを保つ。localStorage には書かない）。デスクトップのホストは `urlChanged` でこれを読み、次の自分の読み込みの URL に入れ（`PanelPath`）、ウィンドウが終了時に QSettings の `navCollapsed` に保存して次の起動で戻す（S-final SF-5b-3。それまではメモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
+- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは URL のクエリ `nav=collapsed` に replace で書く（履歴を増やさず読み込みもしない。ほかのページへ移っても `navigateToPanel` がクエリを保つ。localStorage には書かない）。デスクトップのホストは `urlChanged` でこれを読み、次の自分の読み込みの URL に入れ（`PanelPath`）、ウィンドウが変わるたびに QSettings の `navCollapsed` に保存して次の起動で戻す（S-final SF-5b-3。それまではメモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
 - Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
 - 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す。最後に知らせた（またはダイアログが見せた）回は URL のクエリ `told=<revision>` にも replace で書き、マウントのときにそこから始める（S-final SF-5b-3）: 共有ビューが捨てたページを読み直したとき・ビューが読み込み直したとき（ホストが今の URL の `told` を次の読み込みに入れる）に、同じ失敗を二度知らせない。数字（15 桁まで）でない値は無いものとして扱う
 - 文言は i18next の `app_*`（Qt の `.ts` の `app` コンテキストの訳と一致。`tests/test_app_shell.py`）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）

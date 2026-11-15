@@ -13,8 +13,8 @@ description: PR の変更をレビューし、設計・保守性の観点で問�
 ## レビュー観点
 
 ### デスクトップアプリ (PySide6)
-- QDockWidget に `setWindowTitle()` が設定されているか
-- `STATE_VERSION` の更新が必要なレイアウト変更がないか
+- 新しい Qt のパネル・ウィジェットを足していないか（ADR-005: 新しい UI は React。`src/` の QWidget のサブクラスは `tests/test_web_panel_host.py` の許可リストの中だけ）
+- ページの追加・変更が `.claude/rules/python-widgets.md` の「ページの登録」の手順に沿っているか（ウィンドウはページの名前を覚えるので版を上げる手順は無い）
 - `objectName` が既存ウィジェットと重複していないか
 - シグナル接続が適切か（メモリリークの可能性）
 
