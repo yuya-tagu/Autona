@@ -10,10 +10,11 @@ each reader translates. Pinned here:
 - the service: push / update / pop, the last job is the current one, a
   revision that grows on every change, copies to the readers, the channel
   told after every change outside the lock, the asset load's progress;
-- the words: every code has its words in every table (the footer's
-  AutonaLocaleHelper.STATUS_TEXT and the "status" context of src/i18n/*.ts,
-  the web's i18next status_<code>), with the same args, and no Japanese in
-  the English ones; the footer's words follow the program's language;
+- the words: every code has its words in the web's i18next status_<code>
+  (en and ja), with the same args, and no Japanese in the English ones. The
+  Qt footer's table (AutonaLocaleHelper.STATUS_TEXT / StatusText) and the
+  "status" context of src/i18n/*.ts went with the Qt footer (ADR-005 S-final
+  SF-5b-3 removed it, SF-7 its words);
 - who reads it: the desktop footer reads this source (Window is never
   built in the tests: src/Autona.py is the startup itself, so it is pinned
   by its code), and the web gets it on GET /api/v1/status and on connect;
@@ -27,7 +28,6 @@ browser E2E (web/e2e/status.spec.ts).
 import ast
 import json
 import re
-import string
 import threading
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -254,46 +254,11 @@ def test_many_threads_push_and_pop(told):
 
 # ── the words ────────────────────────────────────────────────────────────
 
-def _fields(text):
-    return sorted(name for _lit, name, _spec, _conv
-                  in string.Formatter().parse(text) if name)
-
-
-def _tsStatus(language):
-    tree = ET.parse(ROOT / "src" / "i18n" / f"Autona_{language}.ts")
-    [context] = [context for context in tree.getroot().iter("context")
-                 if context.findtext("name") == "status"]
-    return {message.findtext("source"): message.findtext("translation")
-            for message in context.iter("message")}
-
-
 def _webWords(language):
     path = ROOT / "web" / "src" / "i18n" / "locales" / f"{language}.json"
     table = json.loads(path.read_text(encoding="utf-8"))
     return {key[len("status_"):]: words for key, words in table.items()
             if key.startswith("status_")}
-
-
-def test_every_code_has_the_footers_words_with_its_args():
-    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    table = AutonaLocaleHelper.STATUS_TEXT
-    assert set(table) == set(CODES)
-    for code, args in CODES.items():
-        assert (code, _fields(table[code])) == (code, sorted(args))
-        assert not JAPANESE.search(table[code]), code
-
-
-@pytest.mark.parametrize("language", ["en", "ja"])
-def test_the_footers_words_are_translated(language):
-    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    messages = _tsStatus(language)
-    assert set(messages) == set(AutonaLocaleHelper.STATUS_TEXT.values())
-    for source, translation in messages.items():
-        assert (source, _fields(translation)) == (source, _fields(source))
-        if language == "en":
-            assert translation == source
-        else:
-            assert JAPANESE.search(translation), source
 
 
 @pytest.mark.parametrize("language", ["en", "ja"])
@@ -306,45 +271,18 @@ def test_every_code_has_the_webs_words_with_its_args(language):
         assert bool(JAPANESE.search(words[code])) == (language == "ja"), code
 
 
-def _translated(path, job):
-    from qtpy.QtCore import QCoreApplication, QTranslator
+def test_the_qt_footers_words_are_gone():
+    # The Qt status bar went in ADR-005 S-final SF-5b-3 (the AppShell's
+    # footer reads i18next's status_<code>); its table and the .ts context
+    # went in SF-7. The .ts files' contexts are pinned as a whole by
+    # tests/test_web_panel_host.py.
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    translator = QTranslator()
-    assert translator.load(str(path))
-    # The last one installed is asked first, whatever the harness installed.
-    assert QCoreApplication.installTranslator(translator)
-    try:
-        return AutonaLocaleHelper.StatusText(job)
-    finally:
-        QCoreApplication.removeTranslator(translator)
-
-
-def test_the_footers_words_follow_the_programs_language(qapp):
-    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    i18n = ROOT / "src" / "i18n"
-    pages = _job(1, "startgg_sets_page", {"page": 2, "pages": 5}, 2, 5)
-    load = _job(2, "assets_load", {"codename": "ssbu"}, 10, 80)
-
-    assert _translated(i18n / "Autona_en.qm", pages) == (
-        "Fetching the set list from Start.gg... (2/5)")
-    assert _translated(i18n / "Autona_en.qm", load) == (
-        "Loading game assets... (ssbu)")
-    assert _translated(i18n / "Autona_ja.qm", pages) == (
-        "Start.gg からセット一覧を取得中... (2/5)")
-    assert _translated(i18n / "Autona_ja.qm", load) == (
-        "ゲームアセットを読み込み中... (ssbu)")
-    assert AutonaLocaleHelper.StatusText(None) == ""
-    # A code this build does not know shows as itself.
-    assert AutonaLocaleHelper.StatusText(_job(3, "something_new")) == (
-        "something_new")
-
-
-def test_every_ja_word_is_compiled():
-    """The .qm the app loads holds every status translation (the .ts is
-    edited by hand and compiled by scripts/compile_translations.ps1)."""
-    data = (ROOT / "src" / "i18n" / "Autona_ja.qm").read_bytes()
-    for translation in _tsStatus("ja").values():
-        assert translation.encode("utf-16-be") in data, translation
+    assert not hasattr(AutonaLocaleHelper, "STATUS_TEXT")
+    assert not hasattr(AutonaLocaleHelper, "StatusText")
+    for language in ("en", "ja"):
+        tree = ET.parse(ROOT / "src" / "i18n" / f"Autona_{language}.ts")
+        assert "status" not in {context.findtext("name")
+                                for context in tree.getroot().iter("context")}
 
 
 # ── who reads it ─────────────────────────────────────────────────────────

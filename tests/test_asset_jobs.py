@@ -681,8 +681,9 @@ def test_a_load_stopped_after_its_selection_is_published_but_not_told(
         assert StateManager.GetCommitted("game.codename") == codename
         assert SettingsManager.Get("SELECTED_GAME_CODENAME") == codename
         # The footer's progress, popped.
-        tokens = [token for kind, token, message in statusCalls
-                  if kind == "push" and f"({codename})" in message]
+        tokens = [token for kind, token, words in statusCalls
+                  if kind == "push"
+                  and words == ("assets_load", {"codename": codename})]
         assert tokens and all(("pop", token, None) in statusCalls
                               for token in tokens)
         QApplication.processEvents()

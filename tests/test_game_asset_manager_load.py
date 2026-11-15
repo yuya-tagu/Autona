@@ -191,10 +191,9 @@ def _waitForLoader(loader=None):
 def statusCalls(monkeypatch):
     """The footer's calls (core's StatusService, ADR-005 S-final SF-2),
     recorded and passed through, as (kind, token, words): a job's words as
-    the desktop footer shows them (AutonaLocaleHelper.StatusText of the
-    code and args it was given -- an unknown code shows as itself)."""
+    its code and args (each reader translates them: the AppShell's footer
+    and the web through i18next's status_<code>)."""
     from src.core.StatusService import StatusService
-    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
     calls = []
     realPush = StatusService.Push
@@ -202,8 +201,7 @@ def statusCalls(monkeypatch):
     realPop = StatusService.Pop
 
     def words(code, args):
-        return AutonaLocaleHelper.StatusText({"code": code,
-                                              "args": args or {}})
+        return (code, dict(args or {}))
 
     def push(code, args=None, done=0, total=0):
         token = realPush(code, args, done, total)
@@ -243,8 +241,9 @@ def onLoadCount(goldenGames):
 
 
 def _loaderStatus(calls, codename):
-    return [token for kind, token, message in calls
-            if kind == "push" and f"({codename})" in message]
+    return [token for kind, token, words in calls
+            if kind == "push"
+            and words == ("assets_load", {"codename": codename})]
 
 
 def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
@@ -270,9 +269,7 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
     assert token not in StatusService._jobs
     # Its words are the load's code with the game (the footer and the web
     # translate them), never a sentence of the loader's own.
-    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    loading = AutonaLocaleHelper.StatusText(
-        {"code": "assets_load", "args": {"codename": "tgame"}})
+    loading = ("assets_load", {"codename": "tgame"})
     said = [words for kind, tok, words in statusCalls
             if tok == token and kind != "pop"]
     assert said and all(words == loading for words in said)
