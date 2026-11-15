@@ -1,15 +1,23 @@
-"""The desktop's page for the panels moved to React (ADR-005 S4).
+"""The desktop's window content: the panels moved to React (ADR-005 S4).
 
-One QWebEngineView, shared by every React panel, as one page of the main
-window's QStackedWidget. Showing another React panel does not reload the
-view: the Web UI's router is told to navigate (``window.autonaPanelShell``,
-web/src/PanelShell/hostApi.ts), so however many panels move, there is one
-renderer process -- the shape S-final (the window as a single web view)
-grows into.
+One QWebEngineView, shared by every React panel, as the main window's one
+widget (ADR-005 S-final SF-5b-3: until then one page of the main window's
+QStackedWidget, beside the Qt sidebar). Showing another React panel does not
+reload the view: the Web UI's router is told to navigate
+(``window.autonaPanelShell``, web/src/PanelShell/hostApi.ts), so however many
+panels move, there is one renderer process.
 
-The page is the Web UI's ``/web/<panel>`` on the app's own web server
-(core.WebAccess.WEB_PANELS), with ``desktop=1`` (the Web UI hides what only
-a browser needs) and ``lng=`` the Qt UI language. It is opened from this
+The page is the Web UI's AppShell, ``/web/app/<panel>`` on the app's own web
+server (core.WebAccess.WEB_PANELS; PanelPath): the panel's page inside the
+navigation, the operations header and the Help & Settings footer the Qt
+sidebar, menus and status bar were (web/src/AppShell). The AppShell moves its
+router itself as well (its navigation: history.replaceState, no load), and
+keeps two things of its own in its URL's query -- its sidebar hidden, the
+tournament load failure it told of last -- so the host follows the URL
+(AppPanelOf, from urlChanged): the panel it shows, which the next load of the
+host's own loads again, and those two, which that load carries along. With
+``desktop=1`` (the Web UI hides what only a browser needs) and ``lng=`` the
+Qt UI language. It is opened from this
 PC, so it writes without the LAN token, like any of this server's own pages
 here; there is no privileged channel (no QWebChannel) -- the page uses the
 same API as a browser. One request header tells its fetches from every
@@ -48,13 +56,16 @@ created the first time the host is on screen with a panel to show, once
 the web server is ready -- and then from the event loop, not inside the
 show or the readiness call that allows it (_ScheduleView; ADR-005 S4g
 review M4). Its page cannot be shown before the server is up anyway, and
-the view's construction is Chromium's start-up: the sidebar's default item
-is the Event page, so a fresh install's window is shown with the host as
-its current page, and a view built then would hold up the window's first
+the view's construction is Chromium's start-up: the window is shown with the
+host as its content, and a view built then would hold up the window's first
 paint, the loading spinner and the web server's start (_StartWebServer,
 which marks the server ready: STARTUP phase=webserver-ready is logged
 before the view is built). Nothing waits for a paint, so a window started
-minimized builds it too (S4g review L14). From then on it lives for the
+minimized builds it too (S4g review L14). The first load's end
+(pageLoadFinished) is when the window takes its spinner away (STARTUP
+phase=panel-shown). A web server that fails to start leaves the page
+nothing to load: the host then shows why, in a label of its own, and
+builds no view (ShowStartFailure). From then on it lives for the
 whole process. Through AutonaWebPageLifecycle, loads wait for the web server
 and retry a refused connection, and while the host is off screen the page is
 frozen, then discarded after DISCARD_AFTER_MS. On reveal the page asks the
@@ -92,14 +103,14 @@ the page and there is no shell operation for it. The SCORE page's "ブラウザ�
 goes to the default browser as the Qt board's button opened it -- the address
 other devices reach and, with LAN access on, the token -- built here at the
 click, so the token does not reach the page either. The Window builds the host
-from the factory of the first React panel opened and calls ShowPanel() on every
-reveal of a React panel's sidebar item; WebPanelPages keeps the items' pages
-straight (S4e: several items, one host page). Every sidebar item is a React
-panel: the last Qt version kept behind a setting, SCORE's (S4aa), went with
-the Qt boards in ADR-005 S4ac-3 (Commentary's in S4c). So are the menu's
-pages -- Settings (S4af), the API / Companion / OBS guides and About (S-final
-SF-4a-2) -- which are not sidebar items: the Help & Settings menu opens them
-(Window.OpenMenuPage), each a page of its own after the items'.
+as its central widget and opens it on the page it reopens on (ShowPanel, before
+its show); after that the AppShell's own navigation moves between the pages,
+the menu's included (Settings, the guides, About, Add game assets), and the
+Window asks for one only from outside the page (Window.OpenPanel: the
+load_set hotkey's SCORE). Every page is a React panel: the last Qt version
+kept behind a setting, SCORE's (S4aa), went with the Qt boards in ADR-005
+S4ac-3 (Commentary's in S4c), and the Qt sidebar with its menus in S-final
+SF-5b-3.
 
 Importing it creates nothing.
 """
@@ -118,7 +129,7 @@ from qtpy.QtWebEngineCore import (
     QWebEnginePage, QWebEngineProfile, QWebEngineSettings,
     QWebEngineUrlRequestInterceptor)
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QLabel, QMenu, QVBoxLayout, QWidget
 
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaExternalLinks import EXTERNAL_LINKS
@@ -164,11 +175,57 @@ _SHELL_STATE_JS = (
 SCORE_PANEL = "scoreboard"
 
 
-def PanelPath(panel):
-    """The path + query the host opens for ``panel``."""
-    query = urlencode({"desktop": "1",
-                       "lng": AutonaLocaleHelper.programLocale})
-    return f"/web/{quote(panel, safe='')}?{query}"
+# The AppShell's route (web/src/index.js: /web/app/:panel; ADR-005 S-final
+# SF-5a-3), which the host opens since SF-5b-3.
+APP_PANEL_PREFIX = "/web/app/"
+# What the AppShell keeps in its URL's query (web/src/AppShell/index.tsx;
+# replaced, never navigated): its sidebar hidden (nav=collapsed), and the
+# revision of the tournament load failure it told of last (told=<n>), so
+# that an AppShell mounted again -- a page loaded again -- does not tell it
+# twice (SF-5b-2's notice).
+NAV_QUERY, NAV_COLLAPSED = "nav", "collapsed"
+TOLD_QUERY = "told"
+_TOLD_VALUE = re.compile(r"[0-9]{1,15}")
+
+AppPanel = namedtuple("AppPanel", "panel navCollapsed told")
+
+
+def PanelPath(panel, navCollapsed=False, told=None):
+    """The path + query the host opens for ``panel``: the AppShell on it,
+    with its sidebar hidden when ``navCollapsed``, and ``told`` the
+    tournament load failure it told of last (a revision, or None)."""
+    query = {"desktop": "1", "lng": AutonaLocaleHelper.programLocale}
+    if navCollapsed:
+        query[NAV_QUERY] = NAV_COLLAPSED
+    if told is not None:
+        query[TOLD_QUERY] = str(told)
+    return f"{APP_PANEL_PREFIX}{quote(panel, safe='')}?{urlencode(query)}"
+
+
+def AppPanelOf(url):
+    """What the AppShell at ``url`` (a QUrl, the page's) shows:
+    AppPanel(its panel, whether its sidebar is hidden, the revision of the
+    tournament load failure it told of last or None) -- or None when
+    ``url`` is not the AppShell on a React panel (WebAccess.IsWebPanel):
+    another page, the error page of a load that failed, nothing yet.
+
+    Each key read as the AppShell reads it (URLSearchParams.get: the first
+    of its name). The page's main frame never leaves this server's Web UI
+    (_PanelPage), so the URL's origin is the server's."""
+    path = url.path(QUrl.ComponentFormattingOption.FullyDecoded)
+    if not path.startswith(APP_PANEL_PREFIX):
+        return None
+    panel = path[len(APP_PANEL_PREFIX):]
+    if not WebAccess.IsWebPanel(panel):
+        return None
+    query = {}
+    for name, value in parse_qsl(
+            url.query(QUrl.ComponentFormattingOption.FullyEncoded),
+            keep_blank_values=True):
+        query.setdefault(name, value)
+    told = query.get(TOLD_QUERY, "")
+    return AppPanel(panel, query.get(NAV_QUERY) == NAV_COLLAPSED,
+                    int(told) if _TOLD_VALUE.fullmatch(told) else None)
 
 
 def ContextActions(editable, hasSelection):
@@ -890,70 +947,31 @@ class _PanelView(QWebEngineView):
         menu.popup(event.globalPos())
 
 
-class WebPanelPages:
-    """Which stack page each sidebar item shows, when several items are
-    React panels sharing the one host (ADR-005 S4e; S4a decision 1).
-
-    Every sidebar item keeps a stack page of its own -- nav index == stack
-    index, as for every Qt panel, so the saved sidebar index and the item
-    count do not change. The React items' pages are placeholders, and the
-    first one opened becomes the host's page (its factory builds the host
-    there). From then on every React item shows that page, and the host is
-    told which panel: the one the operator chose last (``selected``). The
-    other React items' placeholders are never built (``HostBuilt``).
-
-    The menu's pages (ADR-005 S4af: Settings; S-final SF-4a-2: the API /
-    Companion / OBS guides and About) are kept the same way, though no
-    sidebar item opens them: their pages come after the items' (the menu's
-    Window.OpenMenuPage asks for one as a click asks for an item).
-
-    Plain bookkeeping (no Qt): the Window asks it on every sidebar choice
-    and every page reveal.
-    """
-
-    def __init__(self):
-        self._panels = {}       # nav index -> WebAccess.WEB_PANELS name
-        self.hostIndex = None   # the host's stack page, once it is built
-        self.selected = None    # the React panel chosen last
-
-    def Add(self, index, panel):
-        """Sidebar item / stack page `index` is React panel `panel`."""
-        if not WebAccess.IsWebPanel(panel):
-            raise ValueError(f"not a React panel: {panel!r}")
-        self._panels[index] = panel
-
-    def StackIndex(self, nav):
-        """The stack page that shows sidebar item `nav`: its own, but for a
-        React item once the host is built (the host's). Choosing a React
-        item records it as the panel to show."""
-        panel = self._panels.get(nav)
-        if panel is None:
-            return nav
-        self.selected = panel
-        return nav if self.hostIndex is None else self.hostIndex
-
-    def HostBuilt(self, index):
-        """The host was built on stack page `index`: the other React items'
-        pages, which are never to be built (a second host)."""
-        self.hostIndex = index
-        return sorted(other for other in self._panels if other != index)
-
-    def Shown(self, index):
-        """The React panel stack page `index` shows: the one chosen last on
-        the host's page (that page's own before any choice), None on any
-        other page."""
-        if index != self.hostIndex:
-            return None
-        return self.selected or self._panels.get(index)
-
-
 class AutonaWebPanelHost(QWidget):
-    """The shared web view for the React panels, as a stack page."""
+    """The shared web view for the React panels: the main window's content."""
 
     DISCARD_AFTER_MS = HiddenPageLifecycle.DISCARD_AFTER_MS
 
+    # The panel the host shows changed (a WebAccess.WEB_PANELS name): asked
+    # for (ShowPanel), or the AppShell's own navigation followed
+    # (_OnUrlChanged). The Window keeps the page to reopen on from it.
+    panelChanged = Signal(str)
+    # A load of the view's is over and will not be retried (the loader's
+    # finished, a refused navigation's apart): whether the page is there.
+    # The Window takes its loading spinner away on the first.
+    pageLoadFinished = Signal(bool)
+
     def __init__(self, parent=None, shell=None):
         super().__init__(parent)
+        # The AppShell's state the host carries into its own loads
+        # (PanelPath), as the page's URL last said it (_OnUrlChanged): its
+        # sidebar hidden -- the Window's saved one before any page
+        # (SetNavCollapsed) -- and the tournament load failure it told of.
+        self._navCollapsed = False
+        self._told = None
+        # The web server did not start (ShowStartFailure): the label that
+        # says so is the host's content, and no view is built.
+        self._failure = None
         # What answers the page's shell requests (ADR-005 S-final SF-5a-1),
         # on this thread: ShellRequest(verb, args, answer) -> the answer, or
         # None when it calls answer(the answer) later on this thread
@@ -996,10 +1014,51 @@ class AutonaWebPanelHost(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
 
+    def CurrentPanel(self):
+        """The panel the host shows (asked for last, or the AppShell's
+        navigation followed), or None before any."""
+        return self._panel
+
+    def SetNavCollapsed(self, collapsed):
+        """Open the AppShell with its sidebar hidden or not: the Window's
+        saved state, before the first load (the page's URL says it from
+        then on: _OnUrlChanged)."""
+        self._navCollapsed = bool(collapsed)
+
+    def NavCollapsed(self):
+        """Whether the AppShell's sidebar is hidden, as its URL last said
+        (what the Window saves)."""
+        return self._navCollapsed
+
+    def ShowStartFailure(self, text):
+        """The web server did not start: the page can never load, so the
+        host shows ``text`` -- why, and what to do -- in a label of its own
+        instead of the view, and builds no view from then on (one built
+        already is hidden; its loads end on their own). A label, not a page:
+        _PanelPage refuses every page but this server's Web UI (a data: URL
+        among them), and there is no server to serve one. Once."""
+        if self._failure is not None:
+            return
+        label = QLabel(text, self)
+        label.setObjectName("webPanelStartFailure")
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setContentsMargins(32, 32, 32, 32)
+        self._failure = label
+        if self.view is not None:
+            self.view.hide()
+        self._layout.addWidget(label)
+        logger.warning("The web panel view shows that the web server did "
+                       "not start")
+
     def OpenScoreSets(self, board):
         """Have the SCORE page open board ``board``'s set selection dialog
         (ADR-005 S4ab-2: the load_set hotkey and the legacy open-set route,
-        through Window.OpenScoreSets, which shows SCORE first).
+        through AutonaShellOperations, which has the Window show SCORE
+        first: Window.OpenPanel).
 
         Handed to the page's panel shell (``window.autonaPanelShell.
         openScoreSets``, web/src/PanelShell/hostApi.ts) as a navigation is:
@@ -1156,20 +1215,50 @@ class AutonaWebPanelHost(QWidget):
         server is ready (from the event loop: _ScheduleView). Afterwards
         the Web UI's router navigates to it; the view is not reloaded --
         unless it holds no loaded page (a load that failed), which is then
-        loaded again, on this panel.
+        loaded again, on this panel. Once the web server failed to start
+        (ShowStartFailure), only recorded.
         """
         if not WebAccess.IsWebPanel(panel):
             raise ValueError(f"not a React panel: {panel!r}")
-        self._panel = panel
-        if panel != SCORE_PANEL:
-            # The operator went elsewhere before SCORE's set selection got
-            # to the page: not to be opened later (OpenScoreSets).
-            self._scoreSets = None
+        self._Follow(panel)
         if self.view is None:
             self._ScheduleView()
             return
         if not self._ReloadIfBlank():
             self._Navigate()
+
+    def _Follow(self, panel):
+        # `panel` is the one shown from now on (asked for, or the AppShell's
+        # navigation followed): told when it is another.
+        if panel != SCORE_PANEL:
+            # The operator went elsewhere before SCORE's set selection got
+            # to the page: not to be opened later (OpenScoreSets).
+            self._scoreSets = None
+        if panel == self._panel:
+            return
+        self._panel = panel
+        self.panelChanged.emit(panel)
+
+    def _OnUrlChanged(self, url):
+        # The page's URL changed: a load, or the AppShell moving its router
+        # (its navigation, its sidebar hidden or back, a failure told:
+        # history.replaceState, no load). The host follows what it says
+        # (AppPanelOf): the panel shown -- else the next load of the host's
+        # own, a failed load's again (_ReloadIfBlank), would load the panel
+        # asked for last instead -- and the AppShell's state that load
+        # carries along (PanelPath). Another URL (an error page, a load not
+        # under way yet) says nothing.
+        shown = AppPanelOf(url)
+        if shown is None:
+            return
+        self._navCollapsed = shown.navCollapsed
+        self._told = shown.told
+        self._Follow(shown.panel)
+
+    def _Path(self):
+        # What the host's own loads open: the panel shown, the AppShell's
+        # state as its URL last said it.
+        return PanelPath(self._panel, self._navCollapsed, self._told)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1186,7 +1275,7 @@ class AutonaWebPanelHost(QWidget):
         # build runs builds nothing, and queues anew on its next show.
         # (Pure scheduling: nothing here waits.)
         if (self.view is not None or self._panel is None
-                or self._viewPending):
+                or self._viewPending or self._failure is not None):
             return
         if not IsWebServerReady():
             if not self._awaitingServer:
@@ -1204,7 +1293,8 @@ class AutonaWebPanelHost(QWidget):
 
     def _BuildQueuedView(self):
         self._viewPending = False
-        if self.view is None and self._panel is not None and self.isVisible():
+        if (self.view is None and self._panel is not None and self.isVisible()
+                and self._failure is None):
             self._EnsureView()
 
     def _EnsureView(self):
@@ -1214,6 +1304,9 @@ class AutonaWebPanelHost(QWidget):
         page.shellRequested.connect(self._QueueShellRequest)
         page.lifecycleStateChanged.connect(self._OnLifecycleStateChanged)
         self.view.setPage(page)
+        # The AppShell moves its router itself (_OnUrlChanged); a URL
+        # change of the same document is told as well (history.replaceState).
+        self.view.urlChanged.connect(self._OnUrlChanged)
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.
         page.setBackgroundColor(QColor(UI.palette()["canvas"]))
@@ -1250,7 +1343,7 @@ class AutonaWebPanelHost(QWidget):
             discardAfterMs=self.DISCARD_AFTER_MS,
             parent=self)
         logger.debug("Built the web panel view (%s)", self._panel)
-        self._loader.load(PanelPath(self._panel))
+        self._loader.load(self._Path())
 
     def _QueueDesigner(self):
         # Not inside Chromium's new-window call: building the window starts a
@@ -1307,10 +1400,14 @@ class AutonaWebPanelHost(QWidget):
         # failing server is retried once per operator action, not in a
         # loop. While a load is parked behind the readiness gate this only
         # updates the path it will load.
+        # Nor once the web server failed to start (ShowStartFailure): there
+        # is nothing to load, and nothing to navigate either.
+        if self._failure is not None:
+            return True
         if self._loaded or self._loader.IsLoading():
             return False
         logger.info("Reloading the web panel view (%s)", self._panel)
-        self._loader.load(PanelPath(self._panel))
+        self._loader.load(self._Path())
         return True
 
     def _OnLoadFinished(self, ok):
@@ -1340,6 +1437,7 @@ class AutonaWebPanelHost(QWidget):
                                self._scoreSets[1])
                 self._scoreSets = None
         self._lifecycle.ScheduleFreeze()
+        self.pageLoadFinished.emit(ok)
 
     def _OnActive(self):
         # Back on screen. From Frozen, the deltas broadcast meanwhile were

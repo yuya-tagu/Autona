@@ -3,10 +3,11 @@ import {BASE_URL} from "../env";
 
 // The AppShell's navigation (ADR-005 S-final SF-5a-3): the Qt sidebar's
 // items, in its sections and order, with its icons (Window._navSections in
-// src/Autona.py). navSections.json is the one table: tests/test_app_shell.py
-// holds it to _navSections (the panels, the icons and the translations of
-// the headings and the labels -- i18next's app_* against the Qt .ts files'
-// "app" context) and every panel to WebAccess.WEB_PANELS.
+// src/Autona.py until SF-5b-3, when the AppShell became the whole window).
+// navSections.json is the one table: tests/test_app_shell.py holds it to the
+// sidebar it replaced (the panels, the icons and the translations of the
+// headings and the labels -- i18next's app_* against the Qt .ts files' "app"
+// context) and every panel to WebAccess.WEB_PANELS.
 
 export interface NavItem {
     panel: string;
@@ -25,8 +26,9 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = sections;
 
 // The pages the Help & Settings menu opens, not sidebar items: none of the
-// navigation is highlighted while one shows (Window.MENU_PAGES; the Qt
-// sidebar's clearCurrent).
+// navigation is highlighted while one shows, and the desktop does not reopen
+// on one (src/AutonaWindowState.py's MENU_PAGES, held to this by
+// tests/test_app_shell.py).
 export const MENU_PAGES = ["settings", "api", "companion", "obs", "about",
                            "assets"];
 
