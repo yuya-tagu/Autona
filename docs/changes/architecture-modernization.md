@@ -8521,20 +8521,20 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
 
   | 段 | 内容 | 区分 | 依存 |
   |---|---|---|---|
-  | SF-1 | 死んだコードの掃除: `AutonaAlertNotification`（bootstrap の手順と pin ごと）・`ui_layout.py`・`ShowComboText`・`.ts` の死んだ文脈（`.qm` 再生成）・`GameAssetCatalog` の未使用フィールド（`colorRows` / `stockIconPaths` / `biggestCompletePack` / `PresetColor` / `StockIconPath`。golden の `models` 節も合わせる） | 通常 | なし |
-  | SF-2 | フッター進捗を Qt から外す: `AutonaStatusManager` を Qt 非依存の observer に、Socket.IO `status` と v1 `GET /status`（追加のみ）。文言はコード＋引数。Qt のフッターは当面同じ源を読む | 通常 | SF-1 |
-  | SF-3a | ガイド類のための v1: `out/` の絶対パスと接続情報（THIS_PC）、API カタログを `core/ApiCatalog.py`（純データ）に移して GET、ゲーム一覧の変更通知（Socket.IO `games_changed`）。トークンのルートは作らない（SF-4a） | 高 | SF-2 |
-  | SF-8a | プレビューを別オリジンに（S4s 判断 9）: 読み取り専用のプレビュー用リスナーを別ポートに立て（そこから来た要求は Authorize の前に拒否）、DesignPane の iframe をそこから `sandbox="allow-scripts allow-same-origin"` で読み、フォーカスを奪った iframe を外す。`/health` に `previewPort`（追加）。今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスクがあるため、SF-4a より前に入れる | 高 | SF-3a |
-  | SF-8b | 共有ビューのクリップボード: `JavascriptCanAccessClipboard` を外し、`permissionRequested` で ClipboardReadWrite をページ自身のオリジンにだけ許す。既定プロファイルを `AskEveryTime` に（許可が別ビューへ漏れるため） | 高 | SF-8a |
-  | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に | 通常 | SF-8b |
-  | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 | 高 | SF-3a・SF-8b・オーナー確認 |
-  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） | 通常 | SF-3b・SF-4a |
-  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI。**実施済み** 2026-11-14） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
-  | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
-  | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除。3 段（SF-6a テスト / 6b core へ統合 / 6c `run_sync` をやめる）。**SF-6a〜6c 実施済み**（2026-11-15） | 高 | SF-5b |
-  | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin。**実施済み**（2026-11-15） | 通常 | SF-6 |
-  | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales）。**実施**（2026-11-15。オーナー承認の A〜D） | 高 | SF-5b 以降・オーナー判断 |
-  | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
+  | SF-1 | 死んだコードの掃除: `AutonaAlertNotification`（bootstrap の手順と pin ごと）・`ui_layout.py`・`ShowComboText`・`.ts` の死んだ文脈（`.qm` 再生成）・`GameAssetCatalog` の未使用フィールド（`colorRows` / `stockIconPaths` / `biggestCompletePack` / `PresetColor` / `StockIconPath`。golden の `models` 節も合わせる） **【完了: PR #296】** | 通常 | なし |
+  | SF-2 | フッター進捗を Qt から外す: `AutonaStatusManager` を Qt 非依存の observer に、Socket.IO `status` と v1 `GET /status`（追加のみ）。文言はコード＋引数。Qt のフッターは当面同じ源を読む **【完了: PR #297】** | 通常 | SF-1 |
+  | SF-3a | ガイド類のための v1: `out/` の絶対パスと接続情報（THIS_PC）、API カタログを `core/ApiCatalog.py`（純データ）に移して GET、ゲーム一覧の変更通知（Socket.IO `games_changed`）。トークンのルートは作らない（SF-4a） **【完了: PR #298】** | 高 | SF-2 |
+  | SF-8a | プレビューを別オリジンに（S4s 判断 9）: 読み取り専用のプレビュー用リスナーを別ポートに立て（そこから来た要求は Authorize の前に拒否）、DesignPane の iframe をそこから `sandbox="allow-scripts allow-same-origin"` で読み、フォーカスを奪った iframe を外す。`/health` に `previewPort`（追加）。今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスクがあるため、SF-4a より前に入れる **【完了: PR #300】** | 高 | SF-3a |
+  | SF-8b | 共有ビューのクリップボード: `JavascriptCanAccessClipboard` を外し、`permissionRequested` で ClipboardReadWrite をページ自身のオリジンにだけ許す。既定プロファイルを `AskEveryTime` に（許可が別ビューへ漏れるため） **【完了: PR #301】** | 高 | SF-8a |
+  | SF-3b | アセット取り込みを core へ: DL・展開を TaskExecutor のジョブに。v1 は一覧とジョブの状態の読み取りだけ（THIS_PC）。書き込みは SF-4b でシェルの秘密の下に **【完了: PR #303】** | 通常 | SF-8b |
+  | SF-4a | React の `/web/api`・`/web/companion`・`/web/obs`・`/web/about`。トークンの表示・再発行（シェルが共有ビューのメインフレームにだけ渡す秘密を要求する経路を設計）。Qt メニューからページを開き、Qt の 3 窓と About と api 文脈を削除 **【完了: PR #305（4a-1）・#306（4a-2）】** | 高 | SF-3a・SF-8b・オーナー確認 |
+  | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） **【完了: PR #307（4b-1）・#308（4b-2）】** | 通常 | SF-3b・SF-4a |
+  | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI。**実施済み** 2026-11-14） **【完了: PR #309（5a-1）・#310（5a-2）・#311（5a-3）】** | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
+  | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin **【完了: PR #312（5b-1）・#313（5b-2）・#314（5b-3）】** | 高 | SF-5a・オーナー確認 |
+  | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除。3 段（SF-6a テスト / 6b core へ統合 / 6c `run_sync` をやめる）。**SF-6a〜6c 実施済み**（2026-11-15） **【完了: PR #299（6a）・#315（6b）・#316（6c）】** | 高 | SF-5b |
+  | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin。**実施済み**（2026-11-15） **【完了: PR #317】** | 通常 | SF-6 |
+  | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales）。**実施**（2026-11-15。オーナー承認の A〜D） **【完了: PR #318】** | 高 | SF-5b 以降・オーナー判断 |
+  | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 **【完了: PR このコミット（PR 番号は付与後）】** | 軽微 | 全部 |
 
 - **順序の変更（2026-11-14 SF-3a のレビュー・SF-8 の spike の後）**: SF-1 → SF-2 → SF-3a → SF-8a → SF-8b → SF-3b → SF-4a → …。SF-8a / 8b を SF-4a より前に入れる（今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスク）。トークンの表示・再発行のルートは SF-3a から外して SF-4a へ。SF-6a（テストだけ）は空いた所で
 
@@ -9439,3 +9439,35 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   7. Runbook 手順 9 に SF-9 固有の 1 項目を足した: 更新後の `_internal` に `qml/`・debug の pak・`libssl-3-x64.dll` が無いこと、共有ビューの描画とサムネイルのプレビューが動くこと。
   8. OpenSSL のパターンをフォルダに縛らない形にした: spec は `_DROPPED_FILES`（パス）を `_DROPPED_NAMES`（ファイル名）に替え、どのフォルダでも先に判定する。validator は `(^|/)libssl-3-x64\.dll$`・`(^|/)libcrypto-3-x64\.dll$`・`(^|/)qopensslbackend\.dll$`。テストは 3 つの名前がどのフォルダでも落とされ禁止され、Python の OpenSSL と schannel / certonly のバックエンドは残ることを pin する。
   - 検証: `tests/test_release_bundle.py` 11 passed（`tests/test_apply_update_robocopy.py` と合わせて 17 passed）。変異 8 件（検査 5 の禁止・必須・上限の throw をそれぞれ外す、`$qtRequired` に読めない行を足す、`.pyd` のパターンから UiTools を消す、validator の libssl を直下に限る、spec の名前の判定を消す、`qt.conf` を必須から消す）はどれも該当のテストが落ちた。`'` の必須の行は通る（引用符に依らない）。新しい validator を 2026-11-16 のビルドの zip に当てて OK（`_internal 344.4 MiB`）: プロジェクト直下の `release-windows.zip` は残っていなかったので、`gen_release.ps1` と同じ手順でプロジェクト直下の `Autona.exe` / `_internal`（dist と同じビルド）から一時フォルダに組み直した（4564 エントリ・216.9 MiB。直下の `_internal` は dist と同じ 346 MB）。並列ランナー全量 7495 passed / 0 failed / 2 skipped。
+
+##### SF-10 文書の締め・S-final の完了（2026-11-16）
+
+区分: 軽微（docs のみ。コードは変えない）。
+
+- **変更**
+  - ADR-005: D5 に「WebView2 化しない・QtWebEngine を継続」の決定と理由（上の判断 2）、トレイを作らないこと、「S-final の完了」の節（Qt Widgets のパネル 0・残る Qt・core への統合・SF-9 の配布物の削減）を追記。Consequences と Revisit conditions のサイズの記述を実測に合わせた。
+  - `CLAUDE.md`: `src/Autona.py` の説明（サイドバー + `QStackedWidget` → 共有ビュー 1 枚）と「遅延構築」の段落（`_Create*Panel` / `Ensure*Window` / サイドバー index 0）を「UI の構成」の短い段落に置き換え、詳細は Design.md §4.1.1・ADR-003 へ誘導した（行数は増やしていない）。
+  - `.claude/design/Design.md`: §4.1 の「構築タイミング」を、ファクトリ・遅延構築が無い今の形に書き直した。
+  - `.claude/known-smells.md`: S-04 に `AutonaGameAssetManager` の削除（SF-6c）の注記。`assets/characters.json` の読み手を `GameAssetCatalog` に直した。
+  - 直さなかったもの（履歴として「SF-5b-3 まで」「SF-6c まで」と書いてあるもの）: Design.md・`python-widgets.md`・`agent-pitfalls.md`・`state-and-webserver.md` の、消えた `AutonaGameAssetManager` / `HeadlessGames` / `run_sync` / `STATE_VERSION` / Qt のサイドバーへの言及。`.claude/README.md` と `docs/README.md` は S-final で消えたものを今の形で書いている箇所が無かった。
+- **S-final 全体の完了（2026-11-16）**
+  - 完了条件を満たした: Qt Widgets のパネルは 0。Window は共有ビュー（`AutonaWebPanelHost`）1 枚で、ナビ・ヘッダー・フッター・全ページは React の AppShell。残る Qt は Window・ホスト・Designer の窓・Updater のダイアログ・ネイティブのダイアログ・Win32 ホットキーだけ（AST の pin が許可リストで守る）。トレイは作らない（判断 1）。WebView2 化しない（判断 2。ADR-005 D5）。
+  - core に統合したもの: ゲームのローダー（`GameLoader`・両シェル共通・`run_sync` をやめた）、フッターの進捗（`StatusService`）、ガイド類の v1、アセットの取り込み（`AssetPackService`）、i18n（アプリ UI は i18next が唯一の正本。Qt の `.ts` はネイティブのダイアログと Updater だけ）。
+  - 外部契約（D4）は追加のみ: `/api/v1` はルートを足した（S-final の途中で 132 本。`tests/test_webserver_routes.py` の台帳が正本）が既存の名前とペイロードは変えていない。Socket.IO の `status` / `games_changed` を追加。onedir・zip 構造・更新ヘルパーは変えていない。
+  - 配布物: `_internal` 571 → 344.4 MiB、zip 282.7 → 216.9 MiB（SF-9）。
+- **リリース後に必須**
+  - **Runbook 手順 9（アプリ内のアップデータ経由の旧版からの自動更新 E2E。全量・差分）**。SF-9 で `_internal` の中身が減ったので、更新後に `qml/`・debug の pak・`libssl-3-x64.dll` が無いこと、共有ビューの描画とサムネイルのプレビューが動くことを確かめる（SF-9 節の「残るリスク」）。更新ヘルパー単体は SF-9 で確認済みだが、アップデータは公開リリースからしか取らないので公開後にしかできない。
+  - SF-9 で未確認のもの: Designer の窓、英語の設定での表示、HTTPS の取得（start.gg・アセットの DL・更新確認）、en / ja 以外の地域設定の端末。
+- **リリースノートへ持ち越し**（台帳の各節から）
+  - ウィンドウが共有ビュー 1 枚になった: サイドバー・ヘッダー・フッターは React の見た目になり、大会 URL の入力はページ内のダイアログ、MOD・ゲームの選択は AppShell のヘッダー。起動時は Web サーバーが立つまでスピナー、起動に失敗したときはダイアログでなくエラーのページ（SF-5b）。
+  - ガイド（API・Companion・OBS・About）と「ゲームアセットを追加」が別ウィンドウからメインのページになった。横に並べて開けなくなる代わりに「既定のブラウザで開く」がある（SF-4a・4b。オーナー承認 2026-11-14）。
+  - アセットのフォルダからの取り込みは残した（「フォルダから取り込む」= ネイティブのフォルダ選択。SF-5a-2）。「一時的に無い」とは書かない。
+  - 配布物が小さくなった（zip 約 283 → 217 MiB）。OS の言語が en / ja 以外のとき、Chromium の内部の文言（標準のコンテキストメニューなど）は英語になる（SF-9 判断 6）。
+  - 旧バージョンに戻すと、最後に開いたページの保存（`lastPanel`）は読まれず、旧キーも戻らない（SF-5b-3 の残るリスク）。
+  - Alert 通知（見た目の変化なし）と、Qt の死んだコードの削除は書かなくてよい。
+- **残るリスク（S-final 全体。段ごとの詳細は各節）**
+  - SF-5b-3: `access` が確認中か失敗のとき Footer に「常に手前に表示」「更新を確認」が出ない。Windows がフォアグラウンドを拒むと `OpenPanel` はタスクバーの点滅で終わりうる。読み込みが返らないまま止まると「再試行」は効かない（スピナーの上限のタイマーが退路）。
+  - SF-9: 実際のビルドでの確認は済んだが、PyInstaller / PySide6 を上げるとフックの集めるものが変わりうる（validator の検査 5 が止める。上限 390 MiB は実測で付け直す）。CI の `build_release.yml` でのビルドは以前から未検証。
+  - トークンの表示・再発行は共有ビューのメインフレームにだけ渡す秘密に限った（SF-4a-1）。同じオリジンのレイアウトのページは THIS_PC を通るので、THIS_PC は秘密を守る区分ではない。
+  - DeepDiff の `threshold_to_diff_deeper` は S-final の範囲外（Socket.IO の外部契約 D4。別タスク）。
+- **検証**: 並列ランナー全量 7495 passed / 0 failed / 2 skipped（4 ワーカー）。

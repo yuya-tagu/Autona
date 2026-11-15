@@ -965,16 +965,12 @@ AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidge
 - **大会**: ウィンドウは大会を設定も解除もしない（AppShell のヘッダーと EVENT のページが v1 で core の `TournamentService` を呼ぶ）。
   読み込みの失敗は state の `tournamentInfo.load` からページが知らせる（SF-5b-2）。`bootstrap.wire_tournament_data()` は失敗の受け手なしで結線する
 
-**構築タイミング**: **パネルはすべて初回表示時にファクトリで構築**される（どれも共有ビューの React のページ）。
-ADR-005 S4ac-3 までは Qt の `Scoreboard`（アクティブな `battle_format` の board 1 面。S4aa からは退路のときだけサイドバーのページ）を起動時に建てていた。ボード（state）は core が起動時に 3 つとも作る（下記・S4ac-1）
-（起動再設計 Step 4b + headless core Step 4b。§4.1.1）。`Tournament Info` も
-2026-08-31 に遅延構築へ移行した — `tournamentInfo.*` の書き手が
-`src/core/TournamentInfoService.py`（`bootstrap_core()` 生成）になり、パネル不在でも
-大会データが state に入るようになったため。ADR-005 S4g で React のページになり、
-先頭ページ（最後に EVENT を開いていた／新規インストールの起動）では共有ビューの
-ホストが起動時に建つ。ビュー（QtWebEngine）の生成はホストの最初の描画の後
-（`paintEvent` → `QTimer.singleShot(0)`）へ遅らせるので、ウィンドウが先に出る。
-「デフォルト表示」列は QSettings に保存された最後の選択に依存し、初期値は先頭ページ。
+**構築タイミング**: パネルはすべて共有ビュー 1 枚の中の React のページで、Qt のパネルのファクトリ・遅延構築は無い
+（ADR-005 S-final SF-5b-3 で `_Create*Panel` / `Ensure*Window` を削除。ADR-005 S4ac-3 までは Qt の `Scoreboard` を起動時に建てていた）。
+ボード（state）は core が起動時に 3 つとも作る（下記・S4ac-1）。`tournamentInfo.*` の書き手は `src/core/TournamentInfoService.py`
+（`bootstrap_core()` 生成）で、ページが無くても大会データは state に入る。共有ビューのホストはウィンドウが先に出てから建つ
+（ビュー（QtWebEngine）の生成はホストの最初の描画の後。`paintEvent` → `QTimer.singleShot(0)`）。最初に開くページは QSettings の `lastPanel`
+（初期値は先頭ページ）。起動順は §4.1.1。
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|

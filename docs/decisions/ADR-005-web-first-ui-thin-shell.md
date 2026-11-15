@@ -62,6 +62,20 @@ legacy REST / Socket.IO は告知どおり v2.0 で削除する。
 - LAN 公開時のトークン認証は **S3 と同時に導入する**（ヘッドレス起動で LAN 越しの操作が
   現実的になり、UI = API になるため）。実装設計は S3 着手時に提示する
 - シェルの WebView 技術（QtWebEngine を続けるか WebView2 にするか）は S-final で判断する
+  - **決定（2026-11-14 S-final。2026-11-16 追記）: WebView2 化しない。QtWebEngine を継続する**。別 ADR は書かない。理由:
+    - オフスクリーン描画（サムネイル・リザルト）が QtWebEngine に残る限り、WebEngine 本体（約 340MB）は減らない。WebView2 に実用的なオフスクリーン描画が無い
+    - zip と `_internal` の構造が変わり、自動更新ヘルパーへの制約（D4・台帳 §4.4 末尾の「外部契約の守り方」）に反する
+    - PySide6 はホットキー・ダイアログ・Updater のためにどのみち残る
+    - サイズの削減は WebView2 化ではなく、使っていない同梱物を外す（SF-9。下の「S-final の完了」）で行った
+  - トレイ（D1 の記述）は実装されたことが無く、需要の記録も無いので作らず、S-final の完了条件から外した
+
+### S-final の完了（2026-11-16）
+
+- **Qt Widgets のパネルは 0**。Window は共有ビュー（`AutonaWebPanelHost`）1 枚だけを中央に持ち、ナビ・ヘッダー・フッター・全ページは React の AppShell（`/web/app/<panel>`）。`QStackedWidget`・サイドバー・メニュー・ステータスバー・ガイド類や入力用の `QDialog` は無い
+- **残る Qt**: Window、共有ビューのホスト、Designer の窓（`AutonaDesignerWindow`）、Updater のダイアログ、ネイティブのダイアログ（LAN の初回確認・ポート競合・起動失敗・フォルダ選択）、Win32 ホットキー・タイトルバー色。QtCore のアダプタとヘッドレスは core 側。許可リストは AST の pin（`tests/test_web_panel_host.py`）
+- **core への統合**: ゲームのローダーは両シェル共通の core `GameLoader`（`run_sync` をやめ、ローダーのスレッドで最後まで走る）。フッターの進捗は core の `StatusService`。アプリ UI の文言は i18next が唯一の正本で、Qt の `.ts` はネイティブのダイアログと Updater の分だけ
+- **配布物の削減（SF-9）**: 未使用の Qt モジュール（QML 一式・debug の pak・Qt の翻訳・en / ja 以外の WebEngine locale・Git 由来の OpenSSL の DLL）を外し、`_internal` 571 → 344.4 MiB、zip 282.7 → 216.9 MiB（実測）。D4 の構造（onedir・zip・更新ヘルパー）は変えていない。リリース時は Runbook 手順 9（旧版からの自動更新 E2E）で確かめる
+- 段ごとの内容・PR・残るリスクは [../changes/architecture-modernization.md](../changes/architecture-modernization.md) の S-final の節
 
 ## Alternatives considered
 
@@ -97,6 +111,7 @@ legacy REST / Socket.IO は告知どおり v2.0 で削除する。
 - WebEngine 上での日本語 IME・Tab フォーカス・貼り付けの挙動差。**S4 の最初のパネル
   （Commentary）で実機確認し、オペレーターの入力速度を落とさないことを続行条件にする**
 - WebEngine は当面残るため、配布サイズ（`_internal` 約 580MB）は S-final まで減らない
+  （S-final で WebEngine は継続と決定。サイズは SF-9 で未使用の同梱物を外して 344.4 MiB になった）
 - 移行期間中に Qt 側への機能追加要求が来ると二重実装が再発する（D2 で防ぐ）
 - S2 はエコーループが起きやすい（ADR-004 と同じ「1 操作で delta 1 回」の検証を必須にする）
 
@@ -105,4 +120,4 @@ legacy REST / Socket.IO は告知どおり v2.0 で削除する。
 - S4 の IME 実機ゲートで入力体験の劣化が解消できない場合、UI の着地点を (1) に戻す
   （S0〜S3 の成果はそのまま有効）
 - 複数マシン・複数オペレーターの同時運用が実要件になった場合、core の別プロセス化を再検討する
-- S-final 時点で配布サイズが運用上の問題になっている場合、WebView2 化を別 ADR で判断する
+- 配布サイズが SF-9 の後でも運用上の問題になる場合、WebView2 化を別 ADR で判断する（S-final では継続を決定。D5）

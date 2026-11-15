@@ -64,10 +64,10 @@ cp dist/Autona/Autona.exe ./Autona.exe
 読み始める場所:
 
 - `src/bootstrap.py` — composition root。**シングルトン生成順の正本**（全シェル共通の `bootstrap_core()` ＋ デスクトップの Qt アダプタを足す `bootstrap_gui()`）
-- `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
+- `src/Autona.py` — QMainWindow。中央は共有ビュー（`AutonaWebPanelHost`）1 枚だけで、ナビ・ヘッダー・フッターと全ページは React（AppShell）。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
 - `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。
 
-**遅延構築**: サイドバーのパネルはすべて共有ビュー（`AutonaWebPanelHost`）の React のページで、設定/ガイドウィンドウと同じく初回アクセス時にファクトリで構築する（`_Create*Panel` / `Ensure*Window`）。SCORE も ADR-005 S4ac-3 で Qt 版を削除してこの形になった。ボードの state は core が起動時に 3 つとも作る（`AutonaActions.MakeBoards`、`bootstrap_gui()`）。**サイドバーの既定 index 0 = EVENT** なので、そこを最後に開いていた／新規インストールでは共有ビューが起動時に建つ。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
+**UI の構成**: Qt Widgets のパネルは無い（ADR-005 S-final で 0 になった）。残る Qt は Window・共有ビューのホスト・Designer の窓・Updater のダイアログ・ネイティブのダイアログ（LAN の確認・フォルダ選択ほか）だけ。ボードの state は core が起動時に 3 つとも作る（`AutonaActions.MakeBoards`、`bootstrap_gui()`）。保存したページの復元・起動順・`STARTUP phase=...` ログは [Design.md](.claude/design/Design.md) §4.1.1 と [ADR-003](docs/decisions/ADR-003-startup-architecture.md)。
 
 ## ハーネス挙動の注意
 
