@@ -131,6 +131,128 @@ def test_the_table_is_the_services_words():
     assert set(results.LAYOUT_NAMES) == set(results.LAYOUT_SUBDIRS)
 
 
+# The receivers of Qt's translate (QtCore's, QtGui's and QtWidgets' app).
+QT_APPLICATIONS = ("QCoreApplication", "QGuiApplication", "QApplication")
+
+
+def _isQtTranslate(node):
+    """`QCoreApplication.translate` (or the other apps', also through their
+    module: `QtCore.QCoreApplication.translate`). Not `str.translate`."""
+    if not (isinstance(node, ast.Attribute) and node.attr == "translate"):
+        return False
+    receiver = node.value
+    name = (receiver.id if isinstance(receiver, ast.Name)
+            else receiver.attr if isinstance(receiver, ast.Attribute)
+            else None)
+    return name in QT_APPLICATIONS
+
+
+def _isNoop(node):
+    return ((isinstance(node, ast.Name) and node.id == "QT_TRANSLATE_NOOP")
+            or (isinstance(node, ast.Attribute)
+                and node.attr == "QT_TRANSLATE_NOOP"))
+
+
+def _selfAttribute(node):
+    """X of `self.X`, else None."""
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id == "self"):
+        return node.attr
+    return None
+
+
+def _withClass(node, cls=None):
+    """Every node under `node`, with the name of the class it is in."""
+    for child in ast.iter_child_nodes(node):
+        inner = child.name if isinstance(child, ast.ClassDef) else cls
+        yield child, inner
+        yield from _withClass(child, inner)
+
+
+def translationCalls(path):
+    """Every Qt translation a module asks for: [(line, context, source)].
+
+    Picked up: `QCoreApplication.translate(context, source)` (and the other
+    apps'), a name or `self` attribute bound to it
+    (`translate = QCoreApplication.translate`), `QT_TRANSLATE_NOOP(context,
+    source)` and `self.tr(source)` (the context is its class's name). Other
+    receivers (`str.translate(table)`) are not Qt's. Fails at what could not
+    be checked against the .ts files: a context or source that is not a
+    constant string, `self.tr` outside a class, or Qt's translate handed on
+    as a value (an injection: `translate=QCoreApplication.translate`)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names, selfNames, bound = set(), set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _isQtTranslate(node.value):
+            bound.add(id(node.value))
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+                else:
+                    assert _selfAttribute(target), f"{path.name}:{node.lineno}"
+                    selfNames.add(_selfAttribute(target))
+
+    asked, called = [], set()
+    for node, cls in _withClass(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        where = f"{path.name}:{node.lineno}"
+        if (_isQtTranslate(func) or _isNoop(func)
+                or (isinstance(func, ast.Name) and func.id in names)
+                or _selfAttribute(func) in selfNames):
+            called.add(id(func))
+            words = node.args[:2]
+            assert len(words) == 2, where
+        elif _selfAttribute(func) == "tr":
+            assert cls is not None, where
+            words = [ast.Constant(cls), *node.args[:1]]
+            assert len(words) == 2, where
+        else:
+            continue
+        assert all(isinstance(word, ast.Constant)
+                   and isinstance(word.value, str) for word in words), where
+        asked.append((node.lineno, words[0].value, words[1].value))
+
+    handedOn = [node.lineno for node in ast.walk(tree)
+                if _isQtTranslate(node)
+                and id(node) not in called and id(node) not in bound]
+    assert handedOn == [], (path.name, handedOn)
+    return asked
+
+
+@pytest.mark.parametrize("code, asked", [
+    ('QCoreApplication.translate("c", "s")', [("c", "s")]),
+    ('QtCore.QCoreApplication.translate("c", "s")', [("c", "s")]),
+    ('QApplication.translate("c", "s")', [("c", "s")]),
+    ('t = QCoreApplication.translate\nt("c", "s")', [("c", "s")]),
+    ('class A:\n    def f(self):\n'
+     '        self._t = QCoreApplication.translate\n'
+     '        self._t("c", "s")', [("c", "s")]),
+    ('QT_TRANSLATE_NOOP("c", "s")', [("c", "s")]),
+    ('class Box:\n    def f(self):\n        self.tr("s")', [("Box", "s")]),
+    ('"abc".translate(table)\nname.translate({1: 2})\nother.tr("s")', []),
+])
+def test_the_translation_calls_are_qts(tmp_path, code, asked):
+    path = tmp_path / "module.py"
+    path.write_text(code, encoding="utf-8")
+    assert [(context, source)
+            for _line, context, source in translationCalls(path)] == asked
+
+
+@pytest.mark.parametrize("code", [
+    'QCoreApplication.translate(context, "s")',
+    'QCoreApplication.translate("c")',
+    'make(translate=QCoreApplication.translate)',
+    'def f(self):\n    self.tr("s")',
+])
+def test_what_cannot_be_checked_fails(tmp_path, code):
+    path = tmp_path / "module.py"
+    path.write_text(code, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        translationCalls(path)
+
+
 def test_no_translator_is_injected_or_asked():
     import inspect
 
@@ -142,8 +264,4 @@ def test_no_translator_is_injected_or_asked():
             if isinstance(node, ast.Call) for keyword in node.keywords
             if keyword.arg == "translate"] == []
     for path in sorted((ROOT / "src" / "core").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        asked = [node.attr for node in ast.walk(tree)
-                 if isinstance(node, ast.Attribute)
-                 and node.attr in ("translate", "_translate", "tr")]
-        assert asked == [], path.name
+        assert translationCalls(path) == [], path.name

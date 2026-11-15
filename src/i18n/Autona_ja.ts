@@ -8,23 +8,16 @@
         <translation>取り込むゲームのフォルダを選択</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="140" />
-        <location filename="..\AutonaUpdater.py" line="104" />
-        <location filename="..\Autona.py" line="579" />
-        <location filename="..\Autona.py" line="170" />
         <source>Warning</source>
         <translation>注意</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="107" />
-        <location filename="..\Autona.py" line="172" />
         <source>The program will now close.</source>
         <translation>プログラムを閉じます。</translation>
     </message>
 </context><context>
     <name>portguard</name>
     <message>
-        <location filename="..\AutonaWebServer.py" line="821" />
         <source>Port {port} is already in use by another process:
 
 {details}
@@ -79,110 +72,96 @@ OBS のブラウザソースと Web UI は動作しません。
 user_data/settings.json の general.webserver_port を変更して Autona を再起動するか、ポートを使用しているアプリを終了してください。</translation>
     </message>
     <message>
-        <location filename="..\AutonaWebServer.py" line="831" />
         <source>Port conflict</source>
         <translation>ポートの競合</translation>
     </message>
     <message>
-        <location filename="..\AutonaWebServer.py" line="861" />
         <source>Failed to free port {port}. Please terminate the conflicting process manually.</source>
         <translation>ポート {port} を解放できませんでした。競合するプロセスを手動で終了してください。</translation>
     </message>
 </context><context>
     <name>updater</name>
     <message>
-        <location filename="..\AutonaUpdater.py" line="149" />
         <source>Retry</source>
         <translation>再試行</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="151" />
         <source>Cancel</source>
         <translation>キャンセル</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="437" />
         <source>A new version is available</source>
         <translation>新しいバージョンが利用可能です</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="449" />
         <source>A new version v{0} is available (current v{1}).</source>
         <translation>新しいバージョン v{0} が利用可能です（現在 v{1}）。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="459" />
         <source>Open the release page</source>
         <translation>リリースページを開く</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="486" />
         <source>Download and install</source>
         <translation>ダウンロードしてインストール</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="493" />
         <source>Skip this version</source>
         <translation>このバージョンをスキップ</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="498" />
         <source>Later</source>
         <translation>後で</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="505" />
         <source>{0} is not attached to this release. Please download it manually from the release page.</source>
         <translation>このリリースには {0} が添付されていません。リリースページから手動で取得してください。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="516" />
         <source>Auto-install is not available in dev mode (python main.py). Only the distributed exe can self-update.</source>
         <translation>開発実行（python main.py）では自動インストールできません。配布版 exe でのみ動作します。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="532" />
         <source>Downloading...</source>
         <translation>ダウンロード中…</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="525" />
         <source>An update is already being installed. Close Autona and it will restart automatically when the install finishes.</source>
         <translation>アップデートは既に適用中です。Autona を閉じると、インストール完了後に自動で再起動します。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="500" />
         <source>Comparing files with the new version...</source>
         <translation>新しいバージョンとの差分を確認しています…</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="548" />
         <source>Downloading... {0:.1f} / {1:.1f} MB</source>
         <translation>ダウンロード中… {0:.1f} / {1:.1f} MB</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="558" />
         <source>Download complete. Preparing install...</source>
         <translation>ダウンロード完了。インストール準備中…</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="570" />
+        <source>Update downloaded. The app will close, install the update, and restart automatically.</source>
+        <translation>アップデートをダウンロードしました。アプリを閉じてインストールし、自動で再起動します。</translation>
+    </message>
+    <message>
+        <source>Error while preparing the update:</source>
+        <translation>アップデートの準備中にエラーが発生しました:</translation>
+    </message>
+    <message>
         <source>Download failed: {0}</source>
         <translation>ダウンロードに失敗しました: {0}</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="674" />
-        <location filename="..\AutonaUpdater.py" line="665" />
         <source>Check for updates</source>
         <translation>更新チェック</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="666" />
         <source>You are on the latest version.</source>
         <translation>お使いのバージョンが最新です。</translation>
     </message>
     <message>
-        <location filename="..\AutonaUpdater.py" line="675" />
         <source>Update check failed:
 {0}</source>
         <translation>更新の確認に失敗しました:
