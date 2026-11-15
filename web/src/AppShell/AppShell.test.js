@@ -304,20 +304,60 @@ test("a menu page highlights no item", async () => {
     }
 });
 
-test("the sidebar hides and comes back (not saved)", async () => {
-    await renderAt("/web/app/event?lng=en");
+function query(name) {
+    return new URLSearchParams(window.location.search).get(name);
+}
+
+test("the sidebar hides and comes back, kept in the URL (replaced, no storage)", async () => {
+    // SF-5b-3: nav=collapsed, which the desktop's view reads back into its
+    // next load and the window saves between launches.
+    await renderAt("/web/app/event?desktop=1&lng=en");
     const stored = () => JSON.stringify([{...localStorage}, {...sessionStorage}]);
     const before = stored();
+    const entries = window.history.length;
 
     fireEvent.click(screen.getByRole("button", {name: i18n.t("app_hide_sidebar")}));
     await settle();
     expect(screen.queryByTestId("app-sidebar")).not.toBeInTheDocument();
-    expect(screen.getByText("page event (event) desktop=false")).toBeInTheDocument();
+    expect(screen.getByText("page event (event) desktop=true")).toBeInTheDocument();
+    expect(query("nav")).toBe("collapsed");
+    expect(query("desktop")).toBe("1");
+    expect(query("lng")).toBe("en");
+    expect(window.history.length).toBe(entries);
+
+    // Another page keeps it.
+    act(() => {
+        window.autonaPanelShell.navigate("top8");
+    });
+    await settle();
+    expect(window.location.pathname).toBe("/web/app/top8");
+    expect(query("nav")).toBe("collapsed");
+    expect(screen.queryByTestId("app-sidebar")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", {name: i18n.t("app_show_sidebar")}));
     await settle();
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
+    expect(query("nav")).toBeNull();
+    expect(query("desktop")).toBe("1");
+    expect(window.history.length).toBe(entries);
     expect(stored()).toBe(before);
+});
+
+test.each([
+    ["nav=collapsed", false],
+    ["nav=open", true],
+    ["nav=", true],
+    ["nav=COLLAPSED", true],
+])("a page loaded with %s", async (search, shown) => {
+    await renderAt(`/web/app/event?${search}&lng=en`);
+
+    if (shown) {
+        expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
+    } else {
+        expect(screen.queryByTestId("app-sidebar")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", {name: i18n.t("app_show_sidebar")}))
+            .toBeInTheDocument();
+    }
 });
 
 test("the words follow lng=ja", async () => {
@@ -1215,6 +1255,55 @@ test("a load that failed before the page opened is told once per revision", asyn
     failedAt(7);
     await settle();
     expect(told()).not.toBeInTheDocument();
+});
+
+test("the failure told is kept in the URL, replaced", async () => {
+    await renderAt("/web/app/top8?desktop=1&lng=en");
+    const entries = window.history.length;
+
+    failedAt(7);
+    await settle();
+
+    expect(told()).toBeInTheDocument();
+    expect(query("told")).toBe("7");
+    expect(query("desktop")).toBe("1");
+    expect(window.history.length).toBe(entries);
+});
+
+test("an AppShell mounted again does not tell the same failure again", async () => {
+    // A page the desktop's view discarded and loaded again, a load it makes
+    // again: the URL it loads keeps told= (SF-5b-3).
+    failedAt(7);
+    const first = await renderAt("/web/app/top8?lng=en");
+    expect(told()).toBeInTheDocument();
+    first.unmount();
+
+    await renderAt(window.location.pathname + window.location.search);
+    expect(told()).not.toBeInTheDocument();
+
+    // The next failure is told.
+    failedAt(8);
+    await settle();
+    expect(told()).toBeInTheDocument();
+    expect(query("told")).toBe("8");
+});
+
+test.each([
+    ["told=7", false],
+    ["told=6", true],
+    ["told=abc", true],
+    ["told=-7", true],
+    ["told=", true],
+])("a page loaded with %s and the failure of revision 7", async (search, shown) => {
+    failedAt(7);
+    await renderAt(`/web/app/top8?${search}&lng=en`);
+
+    if (shown) {
+        expect(told()).toBeInTheDocument();
+        expect(query("told")).toBe("7");
+    } else {
+        expect(told()).not.toBeInTheDocument();
+    }
 });
 
 test("on the Event page the card says it: told once the operator leaves", async () => {
