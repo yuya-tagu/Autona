@@ -53,6 +53,11 @@ cp dist/Autona/Autona.exe ./Autona.exe
   - リポジトリに直接同梱している（約 11 MB）。PySide6 / PyQt6 のインストールに依存しない
   - PyInstaller ビルドには含まれない（spec の datas に含めていない）
 - `.ts` を編集したら `.qm` を再コンパイルして commit する。ランタイムは `.qm` のみ読む
+- `.ts` は**手で編集**する（`pyside6-lupdate` は入っていない。`scripts/gen_translation_files.py` は無言で失敗する）
+- **`.ts` に置くのは Qt に残った UI の文言だけ**（ADR-005 S-final SF-7）: ネイティブのダイアログ（LAN の確認・ポートの競合・Web サーバーの起動失敗・フォルダの選択の題・共有ビューの再試行 / 失敗の表示）と Updater のダイアログ。文脈は `app` / `portguard` / `updater` / `webpanel` の 4 つ
+  - 画面の文言は React のページの i18next（`web/src/i18n/locales/{en,ja}.json`）。core が返す文言（サムネイルのテンプレート名・リザルトのレイアウト名・プレビューの見本の大会名など）は `src/core/CoreWords.py` の ja / en の表で、言語は `program_language` に従う（`AutonaLocaleHelper.programLocale`。Qt の translate は注入しない）
+  - 文言を足すとき: コードで `QCoreApplication.translate("<文脈>", "<原文>")` を**定数の引数**で呼び、en / ja の両方の `.ts` に `<message>` を手で足して `.qm` を再コンパイルする。文言を消したら `.ts` からも消す
+  - pin: `tests/test_web_panel_host.py` の `test_the_ts_files_hold_the_native_dialogs_words_alone`（`.ts` の中身 = src の translate / tr の呼び出しの (文脈, 原文)。文脈ごとの呼び手のモジュールは `TS_CONTEXTS`、元から訳の無い Updater の 2 件は `TS_UNTRANSLATED`。動的な文脈は不可）と `test_the_qm_files_are_compiled_from_the_ts_files`（`.qm` の再コンパイル漏れ）
 
 ## リリース
 
