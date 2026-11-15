@@ -9424,4 +9424,8 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - en / ja 以外の OS の言語では、Chromium の内部の文言が英語（判断 6）。
   - CI の `build_release.yml` でのビルドは以前から未検証のまま。
 - **実機の確認**（メインセッションがビルドと隔離データの起動で確かめて追記する）
-  - 未: `pyinstaller dependencies/autona.spec --noconfirm` が通り、`dist/Autona/_internal` に必須（validator の `$qtRequired`）があり禁止が無いこと（`scripts/gen_release.ps1` を通せば検査 5 が走る）、`_internal` と zip の実測（validator の上限と Runbook 手順 7 の帯を書き換える）、起動して共有ビュー（AppShell）・Designer の窓・サムネイル / リザルトのプレビューと生成・DevTools 以外の WebEngine の動き、ログに Qt / WebEngine の警告（QML のモジュールが無い・locale が無いなど）が出ないこと、英語の設定での表示。
+  - 確認済み（2026-11-16・メインセッション）:
+    - ビルド: `pyinstaller dependencies/autona.spec --noconfirm` が通り、`scripts/gen_release.ps1` の検査 5 が OK（`Qt bundle as trimmed (_internal 344.4 MiB)`）。WebEngine のリンク依存の DLL（Qt6Quick / Qml / QmlMeta / QmlModels / QuickWidgets / OpenGL / WebChannel / Positioning / PrintSupport / Network / Svg）・`QtWebEngineProcess.exe`・resources の 6 つ・locale の en-US / ja・Python の `libssl-3.dll` / `libcrypto-3.dll` が残り、`PySide6/qml/`・`*.debug.*`・`libssl-3-x64.dll` は無い
+    - 実測: `dist/Autona/_internal` 346 MB（du）、`release-windows.zip` 216.9 MiB（SF-9 前は 282.7 MiB）。validator の上限 390 MiB はそのまま
+    - 更新ヘルパーの確認: 2026-10-08 ビルドの v1.8.1 一式（`qml/` あり・debug の pak 5 つあり）の写しに、新しい zip の `assets/apply_update.ps1` を直接当てた（終わったプロセスの PID で）。`robocopy ok (3) [_internal]` → `update complete`、更新後の `_internal` に `qml/`・debug の pak・`libssl-3-x64.dll` が無く、locale は 2 つ、`_internal` 347 MB。ヘルパーが起こした exe が Web サーバーを立て（`GET /api/v1/state` 200、リザルトのレイアウト名は日本語）、共有ビュー（AppShell の EVENT ページ）が描かれ、オフスクリーンのサムネイルのプレビュー（`POST /thumbnail:preview`）が PNG を返した。ログに Qt / WebEngine の警告・エラーなし
+  - 未: Designer の窓、英語の設定での表示、HTTPS の取得（start.gg・アセットの DL・更新確認。Python の ssl は残した DLL を使う）、地域設定が日英以外の端末。**アプリ内のアップデータ経由の旧版からの自動更新 E2E（全量・差分）は Runbook 手順 9 として公開後に必ず行う**（アップデータは公開リリースからしか取らない）
