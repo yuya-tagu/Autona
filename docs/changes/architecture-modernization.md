@@ -8531,7 +8531,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-4b | React の `/web/assets`（フォルダ選択は SF-5a のシェル要求で。それまで ZIP のみ）。`AutonaGameAssetGuideWindow` を削除。2 段に分けた: SF-4b-1（高・サーバー: アセットの書き込みの v1 を SHELL に）/ SF-4b-2（通常: ページ・窓の削除）。**SF-4b-1・SF-4b-2 とも実施済み**（2026-11-14。フォルダの取り込みは SF-5a まで一時的に無い） | 通常 | SF-3b・SF-4a |
   | SF-5a | React の AppShell（`/web/app/:panel`）: ナビ・ヘッダ（大会ダイアログ・ゲームと mods・対戦形式）・フッター（Help メニュー・進捗）。シェル要求は Designer と同じ横取り形（同オリジン・ユーザー操作のみ。動詞 `alwaysOnTop` / `checkUpdates` / `pickFolder` / `openExternal`。結果は `runJavaScript`）。Qt 側は変えない。3 段に分けた: SF-5a-1（高: シェル要求の仕組みとチケット・動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`。**実施済み** 2026-11-14）/ SF-5a-2（高: `pickFolder` とフォルダの取り込み。**実施済み** 2026-11-14）/ SF-5a-3（通常: AppShell の UI。**実施済み** 2026-11-14） | 高（5a-1・5a-2）・通常（5a-3） | SF-4b |
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
-  | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除 | 高 | SF-5b |
+  | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除。3 段（SF-6a テスト / 6b core へ統合 / 6c `run_sync` をやめる）。**SF-6a〜6c 実施済み**（2026-11-15） | 高 | SF-5b |
   | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin | 通常 | SF-6 |
   | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales） | 高 | SF-5b 以降・オーナー判断 |
   | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
@@ -8659,6 +8659,44 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   - ヘッドレスのロードがフッターの進捗を出すようになり、Socket.IO の `status` がロードのたびに最大 2 通増える（push と pop。50 ms の窓でまとまる。読み手は AppShell）
   - 実機で確認済み（2026-11-15・メインセッション・隔離データ）: 起動時の復元（`game.selected` true・MOD オフ）、`POST /api/v1/game` での切り替えで state・AppShell のヘッダ・`out/game/codename.txt` が追従しエラーなし、ロードの依頼の直後にウィンドウを閉じて正常終了（設定は直前のゲームのまま）
   - 実機未確認（pytest で pin 済み）: 未反映の編集がある状態で切り替え／MOD の切り替え（実機に MOD のあるゲームが無い）／ロードの最中に閉じる（試験用のゲームはロードが一瞬で、途中を捉えられない）／ヘッドレスでロード中に Ctrl+C／フッターの進捗
+
+##### SF-6c ローダーのスレッドで最後まで（2026-11-15）
+
+区分は高。基点は SF-6b（140363f8）。
+
+- **変更**
+  - `run_sync` をやめた: 選択の後の処理（ロスター `ApplyGameRoster`・`RepublishBestOfs`・その commit `CommitGameLoad`・選んだゲームの保存 `PersistSelectedGame`・保存サイクルを閉じる）は、ローダーのスレッドで 1 つのボード操作（`runOnBoard(publish, atShutdown=True)`。ボードホストのロックの下）として走る（`GameLoader._Publish`）。`marshal` / `announce` / `scanned` の注入・`MarshalAborted`・終了中の settle `_SettleStopped`・`_SaveCycle` の lock（main とローダーの 2 つのスレッドが閉じうるための lock だった）を削除。`bootstrap.wire_game_roster` は `_Publish` に吸収して削除
+  - 通知は core の channel に: `GameLoader.loaded(snapshot)`（ロードを公開した後）と `GameLoader.scanned()`（スキャンの後。スキャンのジョブで）。クラスの `ObserverChannel`（`AutonaActions.battleFormatChanges` と同じ形）で、Bridge が `game_loaded` / `games_scanned`（`Signal()`。値なし）に変換する。Qt 側は Bridge に繋ぐ（core の channel を直接購読しない規則のまま）
+  - アダプタ 2 つ（`src/AutonaGameAssetManager.py`・`src/headless.HeadlessGames`）と `HeadlessSignals` を削除。ローダーは `bootstrap_core()` が 1 つ作る（`GameLoader.instance`）。登録（`selectGameFromStartGGId`・`AutonaWebOperations.loadGameByCodename` / `turnModsOff`・`AssetPackService.scan`）も `bootstrap_core()` で両シェル共通。シェルは `GameLoader.instance.Start()` を呼ぶだけ（デスクトップは `Window.UiMounted`、ヘッドレスは `Assemble`）
+  - 消費者の結線: `wire_web_server(webserver)`（引数は 1 つに）が Bridge の `game_loaded` → `ws_game_changed`、`games_scanned` → `on_games_change`、`db_updated` → `ws_playerdb`。選手 DB の `SetupModel` は `bootstrap_core()` が `game_loaded` に繋ぐ（`ws_game_changed` より先に繋ぐので、6b と同じく正規化 → 全量送信の順）。provider の `SetGameFromProvider` は `afterScan`（6b のまま）。`AssetPackService` はスキャンを呼ぶ側（`scan = GameLoader.instance.Scan`）。Socket.IO の `program_state` / `characters` は 1 ロードに 1 回ずつ（P16）、`games_changed` は 1 スキャンに 1 回のまま
+  - `make_game_loader` の遅延 import の向き（シェル → composition root）は、呼び手が `bootstrap_core()` だけになって解消
+- **判断**
+  1. **`loaded` はボード操作（ボードホストのロックとロードの記録）の外で、サイクルを閉じた後に通知する**（設計の「publish の中で `unavailable()` が None なら notify → finally で閉じる」からの逸脱）。理由: (i) Bridge は main へ queued で届けるので、サイクルを閉じる前に通知すると、全量送信（`ws_game_changed`）の予約がロードの delta より先に main のキューに入りうる（クライアントに全量 → それより古い delta の順で届く）。閉じた後なら delta の後ろに並ぶ。(ii) 購読者の書き込みがロードの記録に入らない（ロードの commit で一緒に公開されず、反映待ちに残る）。(iii) 購読者がボードホストのロックを持たない。記録を閉じるところで例外が出たロードは FAILED で、通知しない
+  2. 終了中の経路を `_Publish(atShutdown=True)` に一本化した: 6b の `_SettleStopped` は `RepublishBestOfs` を呼ばず、選んだゲームの保存もボード操作の外だった。今は普段のロードと同じ手順をボードのロックの下で走らせ、通知だけしない（STOPPED）。golden の shutdown に `best of` のイベントが 1 つ増える（書き込みは無い）
+  3. ロスター・commit と、選んだゲームの保存の例外は、それぞれログに出してロードは LOADED（シェルのスロットだった頃、emit が例外を報告して次のスロットへ進んだのと同じ隔離）。ロードの始めの `unavailable()` の確認と、メインスレッドからの同期ロードの拒否は残した
+  4. 6b の結線にあった記録の中の内側の `SaveBlock` は外した（ロードのサイクルが開いている間は効果が無い。golden は同じ）
+  5. スキャンの通知を足した（`GameLoader.scanned` / Bridge の `games_scanned`。設計は `loaded` だけだったが、`games_changed` の源だった Qt シグナル（`onLoadAssets` / `gamesScanned`）がアダプタと一緒に消えるため）
+- **挙動の変化**（機能の削除に当たるものは無い）
+  - 同期の `set_game` の "OK" は、ロードが公開された時点で返る。main で走る通知（全量送信・`SetupModel`）は queued なので答えより後に届きうる（6b までは答えの前に終わっていた）
+  - ロードの held / `state_updated` の通知はローダーのスレッドで出て、Bridge 経由で main に queued で届く。受け手は届いた時点の state を読む（Web サーバーは送るときの dirty を読む）
+  - SF-6b の残るリスク（ヘッドレスでも `SetupModel` がロードのボード操作と保存サイクルの中で走る）は解消: 両シェルとも main のイベントループで、ボードホストのロックの外
+- **golden の差分**（diff を確かめてから `AUTONA_RECORD_GAME_LOADER=1` で再記録。シェルの違いが無くなったので 1 シナリオ 1 本: `tests/fixtures/game_loader/{restore,switch,mods,burst,shutdown}.json`。旧 `desktop_*` / `headless_*` の 10 本は削除）
+  - 不変（スレッドの役割を除く）: 5 本とも `writes`・`published`・`committed`・`settings`・`answers`・`after` が 6b のデスクトップ・ヘッドレスの両方と同じ
+  - 役割: 書き込み・公開・設定の保存が main → loader（shutdown は 6b からローダー）
+  - 通知の順: ロスター → `best of` → commit → 設定の保存 → `published` → held dirty の解除までローダーのスレッドで、続けて `loaded`（ローダー）、`done` の後に main で `player DB`（`SetupModel`）と `game_loaded`（Bridge）。`gameLoaded` / `announced` は無くなった
+  - shutdown: `best of` が増える（判断 2）
+- **テスト**
+  - `tests/test_asset_jobs.py`: `shell` fixture をローダー 1 つ（と Bridge の信号）に縮めた。publish・`loaded` がローダーのスレッドで 1 回ずつ、`game_loaded` が main へ 1 回。新規 `test_only_the_shell_operations_wait_for_the_gui_thread`（`run_sync` の参照は `gui_thread_sync` の中だけ、`gui_thread_sync` の利用者は `AutonaShellOperations` だけ。AST）
+  - `tests/test_roster_flow.py`: 1 ロード 1 サイクルがローダーのスレッドで / held サイクルの中で何も待たない / 切り替えと再読込のロスターがローダーのスレッドで / 終了中の publish（非同期・同期）で state が 1 ゲームで通知なし / 購読者が例外を出してもロードは公開済み
+  - `tests/test_scoreboard_operations.py`: ロードは書いたものを公開してから通知する（ボードホストのロックの外）/ 購読者の書き込みは反映待ちに残る / サイクル・ロック・通知の順
+  - `tests/test_bootstrap_split.py`: core の手順（`GameLoader()`・登録・`game_loaded` → `SetupModel`）、gui の手順からアダプタと登録を外した、`wire_web_server` の結線、`_Publish` の形（AST: 記録の中のロスターと保存、通知はボード操作の後）、スキャンの後の順（provider → 復元）を実際のスキャンで
+  - 追従: `tests/test_api_v1_guides.py`（スキャンの通知が Bridge 経由で main に）・`tests/test_headless.py`・`tests/test_import_side_effects.py`（import でローダーも購読も無い）・`tests/test_web_panel_host.py`（アダプタのファイル・importer・settle の名前が無い。`_Publish` の呼び手は `_Load` だけ）・`tests/test_top8_refresh.py`・`tests/test_player_slot_publish.py` ほか
+- **検証**: 並列ランナー全量 7452 passed / 0 failed / 2 skipped、PYTHONHASHSEED 0 / 12345 で golden 5 passed、`tests/test_asset_jobs.py` 直列 3 回とも 53 passed、`tests/test_roster_flow.py` 直列 3 回とも 31 passed。web/ は触っていないので npm は回していない。1 回目の全量で `test_a_game_load_and_its_roster_are_one_save_cycle_on_its_thread` が 1 度落ちた: Bridge の queued の受け手が「`_Publish` を抜けた後に」main で走ることを見ていたが、待つ間 main は pump されるので、ローダーのスレッドがサイクルを閉じて `_Publish` を抜ける前に取ることがある（テストの前提の誤り）。受け手が main で走ってローダーのスレッドでは走らないこと・最後の dirty が False であることを見る形に直した。実機は未確認（下）
+- **残るリスク**
+  - ロードの held の通知が queued になった: 受け手は通知の時点の最新を読むので、続けて届いた通知が同じ値を読むことがある（Web サーバーの `scoreboard_pending` は送るときの dirty を読むので、最後の値は正しい）。held を描く Qt のウィジェットは無い（S4ac-3）
+  - 全量送信と `SetupModel` が同期の答えより後になりうる: v1 のクライアントが答えの直後に GET すれば state は新しいゲーム（公開済み）。Socket.IO の `program_state` は少し後に届く
+  - ボードホストのロックを持つ時間は 6b の main と同じ（ロスター・commit・保存）。選手 DB の正規化はロックの外に出た
+  - 実機未確認（pytest で pin 済み）: 起動時の復元／AppShell のヘッダでの切り替えで state・ヘッダ・SCORE・OBS のキャラ一覧が追従／未反映の編集が無い状態で切り替えて反映ボタンが点かない（ある状態ならその編集だけ残る）／ロード後に選手 DB の mains が新しいゲームで正規化される／アセットの取り込みの後にゲーム一覧が更新される／ロードの最中に閉じて次回 1 ゲーム／ヘッドレスでロード中に Ctrl+C
 
 ##### SF-8a プレビューを別オリジンに（2026-11-14）
 

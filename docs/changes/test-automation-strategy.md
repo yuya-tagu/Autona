@@ -379,11 +379,13 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 キャラ × スキンごとに 1 枚のアイコン PNG）をランタイムの `user_data/games` に書き出し、
 production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()`。Qt モデルの整理 PR4 まではアダプタの
 `_RebuildModels()` も）で読み込む（ADR-005 S1a 以降。旧版は属性を直接差し込んでいた）。
-本物のロードとの違いは GUI スレッドの側（`gameLoaded` とそのロスター・commit、`onLoad`）を出さないこと —
-それは `publishGameLoad()` が受け持つ（ロードの保存サイクルを開いて、アダプタのローダー（core の `GameLoader`。ADR-005 S-final SF-6b）の `_Publish` を呼ぶ。
-ボードホストのロックの下で `gameLoaded` → `onLoad` → サイクルを閉じる、本物と同じ順）。`gameLoaded` / `onLoad` に
-繋がったものを反応させたいテストは、`loadCharacters()` の後に `publishGameLoad()` を呼ぶ。今はロスターを見せる
-Qt のコンボもウィジェットも無い（PR4 までは既存のコンボが `onLoad` でしか再バインドしなかったので、それより先に呼んでいた）。
+本物のロードとの違いは選択の後の処理（ロスター・commit・選んだゲームの保存と、ロードの通知）を走らせないこと —
+それは `publishGameLoad()` が受け持つ（ロードの保存サイクルを開いて、ローダー `GameLoader.instance`（core。ADR-005 S-final SF-6c からは
+`bootstrap_core()` のもの）の `_Publish` をテストのスレッドで呼ぶ。ボードホストのロックの下でロスター → commit → 保存 → サイクルを閉じる、
+その後に `GameLoader.loaded`（Bridge の `game_loaded`。queued のスロットは `settle()` で走らせる）、本物と同じ順。SF-6c までは
+`gameLoaded` → `onLoad` → サイクルを閉じる）。ロードの通知に繋がったものを反応させたいテストは、`loadCharacters()` の後に
+`publishGameLoad()` を呼ぶ。今はロスターを見せる Qt のコンボもウィジェットも無い（PR4 までは既存のコンボが `onLoad` でしか
+再バインドしなかったので、それより先に呼んでいた）。
 テスト後（`dropAllBoards()`）はパックを削除して
 `ResetGameState()` で空に戻す（PR4 まではアイコンのデコードをその場で待ち合わせ、空モデルへ戻して旧世代を
 `agent-pitfalls #13` に従い 1 世代 retire していた）。

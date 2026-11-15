@@ -150,7 +150,6 @@ Autona/
 │   ├── StateManager.py            # グローバル状態管理
 │   ├── SettingsManager.py         # ユーザー設定
 │   ├── AutonaTournamentDataProvider.py  # トーナメントデータ取得
-│   ├── AutonaGameAssetManager.py     # ゲームアセット管理
 │   ├── AutonaPlayerDB.py             # ローカル選手データベース
 │   ├── AutonaWebServer.py            # Flask Web サーバー
 │   ├── AutonaHotkeys.py              # グローバルホットキー

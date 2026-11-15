@@ -82,9 +82,9 @@ ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, 
   （`QFileDialog` のフォルダ選択。選んだフォルダは core の `AssetPackService.HoldFolderPick` が持ち、ページには id だけ））を実行するのも
   同じアダプタ（`ShellRequest` / `ShellState`。Window が `AutonaWebPanelHost(shell=AutonaShellOperations.instance)` と渡す）。
   外部アドレスの表は `src/AutonaExternalLinks.py` に 1 つ（AppShell の `externalLinks.ts` が同じアドレスの写し）
-- グローバルシグナル接続は Window 側に寄せる（例: Web サーバーをアセットのアダプタの `onLoad` / `onLoadAssets` に繋ぐ `_StartWebServer` の
-  `bootstrap.wire_web_server`。ADR-005 S-final SF-6b まではウィンドウが `onLoad` を `WindowSignals.GameChanged` で中継していた。
-  中継のシグナルを Window に足さない: 繋ぐ先のシグナルをそのまま渡す）
+- グローバルシグナル接続は Window 側に寄せる（例: Web サーバーを Bridge の `game_loaded` / `games_scanned` に繋ぐ `_StartWebServer` の
+  `bootstrap.wire_web_server`（ADR-005 S-final SF-6c。それまではアセットのアダプタの `onLoad` / `onLoadAssets` で、SF-6b まではウィンドウが
+  `onLoad` を `WindowSignals.GameChanged` で中継していた）。中継のシグナルを Window に足さない: 繋ぐ先のシグナルをそのまま使う）
 
 ## 入力ウィジェットの objectName は StateManager キーパス（後方互換に直結）
 
