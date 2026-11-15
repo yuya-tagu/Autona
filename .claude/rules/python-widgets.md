@@ -7,82 +7,70 @@ paths:
 
 Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 配布と両立しないため使用禁止（build-and-release.md 参照）。import は `from qtpy...`、シグナルは `Signal` / `Slot`（`pyqtSignal` / `pyqtSlot` は書かない）。
 
-## パネル（旧 Dock）
+## ウィンドウとページ（ADR-005 S-final SF-5b-3）
 
-**ADR-005 S4ac-3 で最後の Qt パネル（SCORE）を削除し、サイドバーの項目はすべて共有ビュー
-（`AutonaWebPanelHost`）の React のページになった**（`Autona.py` の `_Create*Panel` → `_WebPanel(名前)`）。
-**新規の Qt パネルは足さない**（ADR-005。新しい UI は React で作る）。以下の手順は、ページを足すときの
-ナビへの登録と、Qt のパネルがあったころの規約の記録。
-左サイドバー（`AutonaSidebar`）＋中央 `QStackedWidget` のページとして表示する
-（`Autona.py` の「Sidebar navigation」ブロック）。
+**メインウィンドウ（`src/Autona.py` の `Window`）の中身は共有ビュー `AutonaWebPanelHost` 1 枚**。ホストは AppShell
+（`/web/app/<panel>`。`web/src/AppShell/`）を読み、サイドバー・ヘッダー（大会・ゲーム・MOD・対戦形式）・フッター
+（Help & Settings・実行中の仕事）は AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidget`・メニューバー・
+ステータスバー・MOD のチェックボックス・大会ボタン・`_Create*Panel` ファクトリ・`WebPanelPages`・`Window.STATE_VERSION` は
+SF-5b-3 で削除した。**新規の Qt パネル・Qt のウィジェットは足さない**（ADR-005。新しい UI は React で作る）。
 
-- パネルを新規作成する場合、`__init__` 内で必ず `self.setWindowTitle()` を呼ぶこと
-  - サイドバーのナビ項目ラベルは `panel.windowTitle()` を使う。空だとラベルが出ない
-- `setObjectName()` は `Autona.py` 側で設定する（ウィジェット自身では設定しない）
-- `objectName` は一度設定したら変更しない（入力欄の objectName は StateManager
-  キーパスに直結していた。下記「入力ウィジェットの objectName」参照）
+`tests/test_web_panel_host.py` が pin していること（戻さない）:
+- `src/` の QWidget のサブクラスは許可リスト（`Window` / `AutonaWebPanelHost` / `_PanelView` / `AutonaDesignerWindow` / `_UpdateDialog`）の中だけ
+  （基底は推移的に解決する）。足すなら許可リストを広げる前に React で作れないかを判断する
+- `Autona.py` に `QStackedWidget` / `QToolButton` / `QStatusBar` / `QMenuBar` / `QMenu` を使わない。`QMessageBox` は初回起動の LAN の確認
+  （`_StartWebServer` の `QMessageBox.question`）だけ。Web サーバーの起動失敗はダイアログではなく、ホストの中身を案内の文に置き換える
+  （`ShowStartFailure`）
+- `src/AutonaSidebar.py` は無い・どこからも import しない。消した Window のメソッド・属性（`GONE_WINDOW_MEMBERS`）を戻さない
 
-## パネル登録（Autona.py）
+### ページの登録
 
-新しいパネルを追加する場合、以下を全て行う:
+新しいページは React で書き、次を揃える（**`src/Autona.py` は触らない**）:
 
-1. React のページを `WebAccess.WEB_PANELS` と `web/src/PanelShell/` に足し、`_Create*Panel()` ファクトリ
-   （`return self._WebPanel("名前")`）を書く（下記「遅延構築」。Qt のパネルのインスタンス生成・`setObjectName` /
-   `setWindowTitle` と `self.dockWidgets`・`_PreparePanel` は ADR-005 S4ac-3 で無くなった）
-2. `self._navSections` の該当カテゴリに
-   `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加
-   （`assets/icons/` のアイコン。`stack.addWidget` とナビ項目生成に使われる）
-   - 構造はカテゴリ付き: `[(カテゴリ見出し or None, [(パネルまたはファクトリ, アイコン名, ナビラベル, キー or None), ...]), ...]`
-     （見出しは `QApplication.translate("app", ...)`。`None` なら見出しなしで並ぶ）
-   - 既存カテゴリ（Setup / ScoreboardCategory / Display / Data）に追加する場合は、
-     該当セクションのパネルリストに表示順でタプルを挿入するだけでよい
-   - 新カテゴリを作る場合は `(translate 済み見出し, [パネルリスト])` のタプルを追加する
-   - カテゴリ見出しはナビ index を消費しないため、ナビ index = stack ページ index は維持される
-3. `Window.STATE_VERSION` をインクリメント
+1. `src/core/WebAccess.py` の `WEB_PANELS` に名前を足す（サーバーが `/web/<名前>` と `/web/app/<名前>` で返す名前）
+2. `web/src/PanelShell/registry`（`PANELS`）にページのコンポーネントを足す
+3. サイドバーの項目なら `web/src/AppShell/navSections.json` の該当セクションに `{panel, icon, label}` を表示順で足す
+   （アイコンは `assets/icons/`。見出しと文言は i18next の `app_*` キーで en / ja の両方）。`tests/test_app_shell.py` の `NAVIGATION` は
+   削除した Qt のサイドバーの凍結した写しで、今のナビと照合している。ナビを変えるなら、その照合を今のナビの表に書き直すかを判断してから直す
+   （`AutonaWindowState.LEGACY_SIDEBAR_PANELS` は凍結した写しと照合し、ナビを変えても動かさない）
+4. Help & Settings のメニューから開くページ（今は settings / api / companion / obs / about / assets）なら、`web/src/AppShell/navTable.ts` の
+   `MENU_PAGES` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す（`tests/test_app_shell.py` が一致を pin）。メニューのページは
+   ナビをハイライトせず、ウィンドウが次の起動で開き直さない（その前に開いていたページを覚える）
 
-**サイドバーの項目でないページ**（メニューのページ: 設定（ADR-005 S4af）と API / Companion / OBS のガイドと
-About（S-final SF-4a-2）と「ゲームアセットを追加」（SF-4b-2。`assets`。メニューの 2 か所（Help & Settings とゲームのメニュー）が `OpenMenuPage("assets")` を呼ぶ））は、`Window.MENU_PAGES` に名前を足す（先頭は `settings` のまま）。`_BuildUi` がナビ項目の
-後ろにスタックのページとして足す（`_lazyPanels` / `_panelIndexes` / `_webPanelPages.Add` に登録し、`_navSections`
-には入れない。ファクトリは `functools.partial(self._WebPanel, 名前)`）。ナビ項目の nav index == stack index と保存済みの
-サイドバーの index は動かないので `STATE_VERSION` は上げない。開くのは `Window.OpenMenuPage(名前)`（`MENU_PAGES` に
-無い名前は `ValueError`。サイドバーのハイライトを `AutonaSidebar.clearCurrent()` で消す。項目を押せばそのページに戻る。
-`OpenSettings` は `OpenMenuPage("settings")` の別名）、終了時に覚える項目は `_NavToRemember`（メニューのページの間は
-その前の項目: `_navBeforeMenuPage`）。起動時の復元は保存した index がナビ項目の範囲（`0 <= index < _panelIndexes["settings"]`。
-設定が先頭なので、その後ろは全部メニューのページ）のときだけ。メニューの文言は `"app"` の翻訳コンテキストに置く
+版を上げる手順は無い（`STATE_VERSION` は削除した）。ウィンドウが覚えるのはページの名前なので、項目の追加・削除・並べ替えで読み替えは要らない。
 
-パネルはすべて **遅延構築**（起動 Step 4b-2）: `_Create*Panel()` ファクトリを書いて
-`(self._CreateXxxPanel, 'icon.svg', ナビラベル, 'キー')` を `_navSections` に
-追加する。stack にはプレースホルダが入り、初回表示時に `_EnsurePanelAt` が
-差し替える（nav index == stack index は維持）。パネル未構築でも動く必要がある
-処理は `__init__` に置かない。**state のシード実体は `src/core/StateSchema.py`
-（`SeedPanelState()` / `SeedBoard()`）に置く**（Qt 非依存なので headless でも同じ
-state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
-（`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` /
-`core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
+**state のシード実体は `src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）に置く**（Qt 非依存なので headless でも同じ
+state になる。ページを開いていなくても成り立つ）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
+（`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` / `core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
 新しいボードの中身（選手スロット・既定色・スコア・`best_of`・クルーボードまで）は、両シェルとも
-`AutonaActions.SeedFreshBoard(board)` が書く（ADR-005 S4t。それまではボードのウィジェットが publish していた。既定の人数・キャラ数は
-`PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本で、ボードもこれを読む）。
+`AutonaActions.SeedFreshBoard(board)` が書く（ADR-005 S4t。既定の人数・キャラ数は
+`PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本）。
 ADR-005 S4y から両シェルとも入口は `AutonaActions.EnsureBoard(board, panel)`（1 回だけ作る。デスクトップの `panel=True`
-は表示トグルの書き直し・取り直しの停止・反映ボタンの held 登録もここで行う）で、ボードのウィジェットは state を
-書かず held 登録もしない。S4ac-1 から両シェルとも**起動時に 3 つとも作る**（`AutonaActions.MakeBoards`。デスクトップは
-`bootstrap_gui()` が Window より前に `panel=True` で、ヘッドレスは `_SeedBoards` が `panel` なしで）。デスクトップの
-ボードのウィジェット（`CreateScoreboard` / `EnsureScoreboard`）は S4ac-3 で Qt の SCORE ごと削除した。
-サムネイルの同期描画・`load_set` ホットキーから SCORE のページのセット選択を開く経路はシェルのアダプタ
-`src/AutonaShellOperations.py`（`bootstrap_gui()` が作り、Window が `UiMounted` で渡す）が持つ
-（Qt のセット選択 / 配信台のウィンドウも S4ac-3 まではここにあった）。
-共有ビューのページのシェル要求（ADR-005 S-final SF-5a-1。`alwaysOnTop` / `checkUpdates` / `openExternal`、SF-5a-2 の `pickFolder`（`QFileDialog` のフォルダ選択。選んだフォルダは core の `AssetPackService.HoldFolderPick` が持ち、ページには id だけ））を実行するのも同じアダプタ
-（`ShellRequest` / `ShellState`。Window が `_WebPanel` で `AutonaWebPanelHost(shell=AutonaShellOperations.instance)` と渡す）。
-最前面表示はメニューの「常に最前面に表示」のチェックが正本で、アダプタは `Window.SetAlwaysOnTop` / `IsAlwaysOnTop` でチェックを読み書きし、
-窓のフラグはチェックの `toggled` → `ToggleAlwaysOnTop` が変える（どちらから変えても `ToggleAlwaysOnTop` がホストの `PublishShellState` を呼んでページに知らせる）。
-メニューとシェル要求で同じ操作を別々に書かない（外部アドレスの表は `src/AutonaExternalLinks.py` に 1 つ。メニューも読む）
-グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
-`EnsureXxxPanel()` アクセサを足す。
+は表示トグルの書き直し・取り直しの停止・反映ボタンの held 登録もここで行う）。S4ac-1 から両シェルとも**起動時に 3 つとも作る**
+（`AutonaActions.MakeBoards`。デスクトップは `bootstrap_gui()` が Window より前に `panel=True` で、ヘッドレスは `_SeedBoards` が `panel` なしで）。
 
-## STATE_VERSION
+### ウィンドウの仕事
 
-- `Window.STATE_VERSION` はナビ（パネル）の追加・削除・並び順変更時にインクリメントする
-- `QMainWindow.saveState/restoreState` は使わない。サイドバーの選択 index と
-  折りたたみ状態を `QSettings`（`sidebarIndex_v{N}` / `sidebarCollapsed_v{N}`）に保存する
+- **ページの切り替え**: AppShell のナビは `history.replaceState`（遷移にならない）。ホストは `urlChanged` でどのページかを読み（`AppPanelOf`）、
+  `panelChanged(名前)` を出す。ウィンドウはそれで終了時に覚えるページを決める（`AutonaWindowState.RememberedPanel`）
+- **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None で何もしない）。呼ぶのは
+  シェルのアダプタ `src/AutonaShellOperations.py`（`bootstrap_gui()` が作り、Window が `UiMounted` で渡す）の `load_set` のホットキーと legacy の
+  open-set だけで、返ったホストの `OpenScoreSets(board)` で SCORE のページのセット選択を開く（ADR-005 S4ab-2）
+- **保存**: 終了時に QSettings の `lastPanel`（ページの名前）と `navCollapsed`（AppShell のサイドバーの折りたたみ。AppShell が URL の
+  `nav=collapsed` に replace で書き、ホストが `urlChanged` で読む）を保存する。起動時は `RestorePanel` / `RestoreNavCollapsed` で読み、
+  ホストの最初の読み込みの URL（`PanelPath`）に入れる。読み書きは Qt-free の純関数 `src/AutonaWindowState.py`。旧キー
+  （`sidebarIndex_v22` / `sidebarCollapsed_v22`）は 1 回だけ読み替えて消す（index は固定の表 `LEGACY_SIDEBAR_PANELS`）。
+  `QMainWindow.saveState/restoreState` は使わない（ジオメトリは `saveGeometry` / `restoreGeometry`）
+- **起動の順**: `show()` → `STARTUP phase=core-shown` → `LoadingOverlay` → 初回の描画の後に `_StartWebServer`（`call_when_painted`。
+  イベントループから呼ばれるので、中の `QMessageBox.question` / `exec` は入れ子のモーダルにならない: pitfalls #9）→ `webserver-ready` →
+  最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。順は `tests/test_web_panel_host.py` が pin
+- **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。起動をまたいで保存しない）。シェル要求 `alwaysOnTop` から
+  `AutonaShellOperations` が呼び、`SetAlwaysOnTop` が窓のフラグを変えてホストの `PublishShellState` でページに知らせる
+- **共有ビューのページのシェル要求**（ADR-005 S-final SF-5a-1。`alwaysOnTop` / `checkUpdates` / `openExternal`、SF-5a-2 の `pickFolder`
+  （`QFileDialog` のフォルダ選択。選んだフォルダは core の `AssetPackService.HoldFolderPick` が持ち、ページには id だけ））を実行するのも
+  同じアダプタ（`ShellRequest` / `ShellState`。Window が `AutonaWebPanelHost(shell=AutonaShellOperations.instance)` と渡す）。
+  外部アドレスの表は `src/AutonaExternalLinks.py` に 1 つ（AppShell の `externalLinks.ts` が同じアドレスの写し）
+- グローバルシグナル接続は Window 側に寄せる（例: アセットのアダプタの `onLoad` → `WindowSignals.GameChanged`）
 
 ## 入力ウィジェットの objectName は StateManager キーパス（後方互換に直結）
 

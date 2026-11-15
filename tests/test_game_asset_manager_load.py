@@ -341,8 +341,10 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     # Source-level half: the forgetting is core's
     # TournamentService.ClearTournament since ADR-005 S4f, for every clear
     # (it was a slot of tournament_url_update in bootstrap's wiring, which
-    # only the web clears emitted; tests/test_tournament_service.py runs it),
-    # and the window's Signal_GameChange only resets its game button.
+    # only the web clears emitted; tests/test_tournament_service.py runs it).
+    # The window's Signal_GameChange, which only reset its game button, went
+    # with the button in ADR-005 S-final SF-5b-3 (the AppShell's reads
+    # game.selected); the window writes no selection.
     root = Path(__file__).resolve().parent.parent
     service = ast.parse((root / "src" / "core" / "TournamentService.py")
                         .read_text(encoding="utf-8"))
@@ -357,11 +359,9 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     bootstrap = (root / "src" / "bootstrap.py").read_text(encoding="utf-8")
     assert "forget_cleared" not in bootstrap, (
         "a second forgetting path is back; the clear is core's alone")
-    tree = ast.parse((root / "src" / "Autona.py").read_text(encoding="utf-8"))
-    handler = next(node for node in ast.walk(tree)
-                   if isinstance(node, ast.FunctionDef)
-                   and node.name == "Signal_GameChange")
-    assert "selectedGame" not in ast.unparse(handler), (
+    window = (root / "src" / "Autona.py").read_text(encoding="utf-8")
+    assert "Signal_GameChange" not in window
+    assert "selectedGame" not in window, (
         "the adapter's selectedGame is a read-only view since S1a")
 
     # Runtime half: what that call does to the adapter.

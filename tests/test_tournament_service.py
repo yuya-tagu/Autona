@@ -449,22 +449,16 @@ def test_v1_clears_through_core(autonaApp, forgets):
     assert TournamentService.TournamentUrl() == ""
 
 
-@pytest.mark.parametrize("answer, cleared", [("Yes", True), ("No", False)])
-def test_the_shared_confirmation_clears_through_core(
-        autonaApp, forgets, monkeypatch, answer, cleared):
-    """What the EVENT panel's button and the sidebar's "Unset tournament"
-    call (the sidebar used to clear without asking, and kept the game)."""
-    from qtpy.QtWidgets import QMessageBox
+def test_the_qt_entry_points_to_the_tournament_are_gone():
+    """The sidebar's URL dialog and its "Unset tournament" confirmation
+    (AutonaTournamentDataProvider.SetStartggEventSlug / ConfirmClearTournament)
+    went with the Qt sidebar in ADR-005 S-final SF-5b-3: the AppShell's
+    header sets and clears through v1 (POST / DELETE /tournament, the route
+    above), which is core's TournamentService."""
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 
-    monkeypatch.setattr(
-        QMessageBox, "question",
-        lambda *args, **kwargs: getattr(QMessageBox.StandardButton, answer))
-    assert AutonaTournamentDataProvider.ConfirmClearTournament(None) is (
-        cleared)
-    autonaApp.settle()
-    assert forgets == ([True] if cleared else [])
-    assert TournamentService.TournamentUrl() == ("" if cleared else EVENT_URL)
+    for name in ("SetStartggEventSlug", "ConfirmClearTournament"):
+        assert not hasattr(AutonaTournamentDataProvider, name), name
 
 
 def test_an_unsupported_legacy_url_changes_nothing(autonaApp, forgets):
@@ -758,14 +752,16 @@ def _windowTokens():
 
 
 def test_the_window_wires_the_tournament_writer():
-    # Through the wiring the headless shell makes too (ADR-005 S3c): the
-    # window hands it the failure dialog, and the wiring connects the
-    # payload writer.
-    assert ("wire_tournament_data(on_failure=self."
-            "_ReportTournamentLoadFailure)") in _windowTokens(), (
+    # Through the wiring the headless shell makes too (ADR-005 S3c), and
+    # with no failure dialog since ADR-005 S-final SF-5b-3: the pages tell a
+    # payload that did not load from the state's tournamentInfo.load (the
+    # AppShell's notice, the Event page's card -- SF-5b-2).
+    tokens = _windowTokens()
+    assert "wire_tournament_data()" in tokens, (
         "Window no longer routes tournament_data_updated into "
         "TournamentInfoService; tournamentInfo.* would stop being written "
         "whenever the Event page is not built")
+    assert "_ReportTournamentLoadFailure" not in tokens
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     wiring = "".join(
@@ -780,11 +776,13 @@ def test_the_window_seeds_the_tournament_service():
         "display name and the logo version would be missing at launch")
 
 
-def test_the_sidebar_unset_asks_and_clears_through_core():
-    """Owner's decision 2 (S4f): the sidebar's "Unset tournament" asks
-    first, through the shared helper (which hands the clear to core's
-    TournamentService) -- the Event page asks with its own dialog."""
+def test_the_window_sets_and_clears_no_tournament_itself():
+    """Owner's decision 2 (S4f) -- clearing asks first -- is the pages' now:
+    the AppShell's header and the Event page ask with their own dialog and
+    clear through v1 (ADR-005 S-final SF-5b-3 took the Qt sidebar's "Unset
+    tournament" and its URL dialog away). The window neither asks nor
+    writes the tournament."""
     tokens = _windowTokens()
-    assert "AutonaTournamentDataProvider.ConfirmClearTournament(self)" in (
-        tokens)
-    assert ".SetTournament(None)" not in tokens
+    for gone in ("ConfirmClearTournament", "SetStartggEventSlug",
+                 ".SetTournament(", ".ClearTournament(", "QInputDialog"):
+        assert gone not in tokens, gone

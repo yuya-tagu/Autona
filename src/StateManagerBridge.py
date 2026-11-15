@@ -92,9 +92,10 @@ class StateManagerBridge(QObject):
     # value -- the receivers read StatusService.Current() / Snapshot().
     # Emitted on the reporting thread: a start.gg worker, the game loader
     # (under the game catalog's writer lock, so nothing here may block --
-    # it is queued to the GUI thread off it). The desktop's footer
-    # (Window._on_status_changed) and the web server's `status` notice
-    # (WebServer.on_status_change) are connected to it.
+    # it is queued to the GUI thread off it). The web server's `status`
+    # notice (WebServer.on_status_change) is connected to it: the desktop's
+    # footer is the AppShell's, which reads that (the Qt status bar's
+    # Window._on_status_changed was until ADR-005 S-final SF-5b-3).
     status_changed = Signal()
 
     def __init__(self, parent=None):

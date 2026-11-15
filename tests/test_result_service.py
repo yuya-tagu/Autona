@@ -2192,27 +2192,16 @@ def test_the_window_leaves_the_layout_to_the_switch():
     assert "SetBattleFormat" not in methods
     assert "FollowBattleFormat" not in "".join(methods.values())
 
-    # What _BuildUi connects the two signals to, compared as expressions
-    # (ast.unparse), not as text: the layout of the call is free, the
-    # signal and the slot are not, and neither signal has another slot.
-    buildUi = next(node for node in window.body
-                   if isinstance(node, ast.FunctionDef)
-                   and node.name == "_BuildUi")
-    slots = {}
-    for call in ast.walk(buildUi):
-        if (isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and call.func.attr == "connect"):
-            slots.setdefault(ast.unparse(call.func.value), []).append(
-                [ast.unparse(arg) for arg in call.args]
-                + [ast.unparse(keyword) for keyword in call.keywords])
-    # The sidebar's switch goes through the web layer's operation, under the
-    # board host's lock, as v1's PUT does (ADR-005 S4ad: core's operation
-    # directly until then, kept apart from the web's by the GUI thread).
-    assert slots["self.sidebar.formatSelected"] == [
-        ["AutonaWebOperations.set_battle_format"]]
-    assert slots["StateManagerBridge.instance.battle_format_changed"] == [
-        ["self._ShowBattleFormat"]]
+    # The window has no switch of its own since ADR-005 S-final SF-5b-3:
+    # the AppShell's segment is v1's PUT /api/v1/battle-format (the web
+    # layer's operation, under the board host's lock), and follows the web
+    # server's `battle_format` notice. Until then the sidebar's segment ran
+    # AutonaWebOperations.set_battle_format and Window._ShowBattleFormat
+    # followed StateManagerBridge.battle_format_changed.
+    assert "_ShowBattleFormat" not in methods
+    for name in ("set_battle_format", "battle_format_changed",
+                 "formatSelected"):
+        assert name not in source, name
 
 
 # ── the real provider ────────────────────────────────────────────────────

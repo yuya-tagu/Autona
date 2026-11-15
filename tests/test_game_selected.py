@@ -30,10 +30,8 @@ import ast
 import contextlib
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-from qtpy.QtCore import QSignalBlocker
 
 from src.core.SettingsManager import SettingsManager
 from src.core.TaskExecutor import TaskExecutor
@@ -292,110 +290,23 @@ def test_a_load_turning_the_mods_on_is_followed_by_one_turning_them_off(
     assert autonaApp.get("game.mods_active") is False
 
 
-# ── the window's mods checkbox (until SF-5b-3) ──────────────────────────
+# ── the window's mods checkbox (gone in SF-5b-3) ────────────────────────
 #
-# Drawn with its signals blocked -- following a load (_ShowModdedContent)
-# and unchecked on a pick from the GAME menu (_pickGame) -- so that its
-# stateChanged (_ToggleMods) asks for a load only when it is clicked.
-# Unblocked, both asked for a second load (the SF-5b-1 review). The
-# window's real methods, read out of src/Autona.py (which cannot be
-# imported: agent-pitfalls #1).
+# The Qt window's mods checkbox (_ShowModdedContent drawing it from a load,
+# _pickGame unchecking it on a pick from the GAME menu, _ToggleMods asking
+# for the load on a click) went with the Qt sidebar in ADR-005 S-final
+# SF-5b-3: the AppShell's header has the switch (web/src/AppShell/
+# Header.tsx, PUT /api/v1/game with the mods; its tests are
+# web/src/AppShell/AppShell.test.js's). Read out of src/Autona.py, which
+# cannot be imported (agent-pitfalls #1).
 
-WINDOW_METHODS = ("_pickGame", "_ToggleMods", "_ShowModdedContent")
-
-
-def _autonaTree():
-    return ast.parse((ROOT / "src" / "Autona.py").read_text(
+def test_the_window_has_no_mods_checkbox_any_more():
+    tree = ast.parse((ROOT / "src" / "Autona.py").read_text(
         encoding="utf-8"))
-
-
-def _checkboxWindow(loads, state):
-    """A QWidget with the window's mods checkbox methods, over a stand-in
-    asset adapter (whose LoadGameAssets calls are recorded in `loads` as
-    (game, mods_active, mods_reload_mode)) and the state's `game` read from
-    `state`. The checkbox's stateChanged is connected as Window._BuildUi
-    connects it."""
-    from qtpy.QtWidgets import QCheckBox, QWidget
-
-    from src.core import StateSchema
-
-    cls = ast.parse("class Window(QWidget):\n    pass\n").body[0]
-    cls.body = [node for node in ast.walk(_autonaTree())
-                if isinstance(node, ast.FunctionDef)
-                and node.name in WINDOW_METHODS]
-    assert sorted(node.name for node in cls.body) == sorted(WINDOW_METHODS)
-
-    def LoadGameAssets(game=0, async_mode=True, mods_active=False,
-                       mods_reload_mode=False):
-        loads.append((game, mods_active, mods_reload_mode))
-
-    adapter = SimpleNamespace(LoadGameAssets=LoadGameAssets,
-                              has_modded_content=True)
-    namespace = {
-        "QWidget": QWidget, "QSignalBlocker": QSignalBlocker,
-        "AutonaGameAssetManager": SimpleNamespace(instance=adapter),
-        "StateManager": SimpleNamespace(
-            Get=lambda key, default=None: state.get(key, default)),
-        "schema": StateSchema,
-    }
-    exec(compile(ast.fix_missing_locations(ast.Module(
-        body=[cls], type_ignores=[])), "src/Autona.py", "exec"), namespace)
-    window = namespace["Window"]()
-    window._currentGameIndex = 1
-    window.moddedContentCheck = QCheckBox(window)
-    window.moddedContentCheck.stateChanged.connect(window._ToggleMods)
-    return window
-
-
-def test_the_window_connects_its_checkbox_to_the_toggle():
-    """What _checkboxWindow wires, as Window._BuildUi wires it."""
-    build = next(node for node in ast.walk(_autonaTree())
-                 if isinstance(node, ast.FunctionDef)
-                 and node.name == "_BuildUi")
-    assert "self.moddedContentCheck.stateChanged.connect(self._ToggleMods)" \
-        in {ast.unparse(node) for node in ast.walk(build)
-            if isinstance(node, ast.Call)}
-
-
-def test_a_click_on_the_checkbox_loads_the_game_again(autonaApp):
-    loads = []
-    window = _checkboxWindow(loads, {})
-    try:
-        window.moddedContentCheck.setChecked(True)
-        window.moddedContentCheck.setChecked(False)
-        assert loads == [(1, True, True), (1, False, True)]
-    finally:
-        window.deleteLater()
-
-
-def test_following_a_load_asks_for_no_load(autonaApp):
-    state = {"game": {"mods_active": True}}
-    loads = []
-    window = _checkboxWindow(loads, state)
-    try:
-        window._ShowModdedContent()
-        assert window.moddedContentCheck.isChecked()
-        state["game"] = {"mods_active": False}
-        window._ShowModdedContent()
-        assert not window.moddedContentCheck.isChecked()
-        assert loads == []
-    finally:
-        window.deleteLater()
-
-
-@pytest.mark.parametrize("checked, reload", [(True, True), (False, False)])
-def test_a_pick_from_the_game_menu_is_one_load(autonaApp, checked, reload):
-    """The game without its mods -- a reload when they were on (the same
-    game would be skipped otherwise) -- and the checkbox unchecked, with no
-    second load from it."""
-    loads = []
-    window = _checkboxWindow(loads, {})
-    try:
-        with QSignalBlocker(window.moddedContentCheck):
-            window.moddedContentCheck.setChecked(checked)
-        window._pickGame(2)
-        assert loads == [(2, False, reload)]
-        assert not window.moddedContentCheck.isChecked()
-        assert window._currentGameIndex == 2
-    finally:
-        window.deleteLater()
+    names = {node.name for node in ast.walk(tree)
+             if isinstance(node, (ast.FunctionDef, ast.ClassDef))}
+    for gone in ("_pickGame", "_ToggleMods", "_ShowModdedContent"):
+        assert gone not in names, gone
+    attributes = {node.attr for node in ast.walk(tree)
+                  if isinstance(node, ast.Attribute)}
+    assert "moddedContentCheck" not in attributes

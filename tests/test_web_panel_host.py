@@ -6,14 +6,19 @@ for every panel moved to React. What has to hold:
 * the view is not built until the host is on screen with a panel to show
   and the web server is ready (startup does not pay for it), and then from
   the event loop, not inside the show or the readiness call that allows it
-  (S4g review M4: the Event page is the sidebar's default item, so at
-  startup the host is shown by the main window's self.show(), ahead of
-  STARTUP phase=core-shown, and the server is marked ready inside
+  (S4g review M4: the host is the main window's one widget since S-final
+  SF-5b-3, so at startup it is shown by the main window's self.show(),
+  ahead of STARTUP phase=core-shown, and the server is marked ready inside
   _StartWebServer(), ahead of phase=webserver-ready); no paint is waited
   for (S4g review L14: a window started minimized is not painted);
-* it opens ``/web/<panel>?desktop=1&lng=<Qt language>`` once the web server
-  is up, and showing another panel navigates the page's router instead of
-  reloading the view;
+* it opens ``/web/app/<panel>?desktop=1&lng=<Qt language>`` (the AppShell,
+  ADR-005 S-final SF-5b-3: the host is the main window's one widget) once the
+  web server is up, and showing another panel navigates the page's router
+  instead of reloading the view; the panel the page's router moves to
+  (``/web/app/<panel>``, the AppShell's sidebar) is the panel the host
+  follows: it is the one a reload opens and the one panelChanged names, with
+  the URL's ``nav`` (the sidebar collapsed) and ``told`` (the tournament load
+  failure the page has told);
 * off screen it is frozen / discarded (AutonaWebPageLifecycle), and on reveal
   it asks for the full state
   and shows the panel chosen meanwhile -- after a thaw and after the reload
@@ -62,7 +67,7 @@ from src import AutonaWebPageLifecycle as WPL
 from src import AutonaWebPanelHost as HostModule
 from src.AutonaWebPanelHost import (
     CLIPBOARD_PERMISSION, AutonaWebPanelHost, ClipboardPermitted, PanelPath,
-    ShellRequest, WebPanelPages)
+    ShellRequest)
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
 from src.core.SettingsManager import SettingsManager
@@ -82,7 +87,9 @@ window.__shellResults = [];
 window.__shellStates = [];
 window.autonaPanelShell = {
   navigate: function (p) {
-    var target = '/web/' + encodeURIComponent(p);
+    var prefix = location.pathname.indexOf('/web/app/') === 0
+      ? '/web/app/' : '/web/';
+    var target = prefix + encodeURIComponent(p);
     if (location.pathname === target) { return; }
     window.__navigations.push(p);
     history.replaceState(null, '', target + location.search);
@@ -393,7 +400,40 @@ def _shown(buildHost, **kwargs):
 
 def test_the_panel_url_carries_desktop_and_the_qt_language(monkeypatch):
     monkeypatch.setattr(AutonaLocaleHelper, "programLocale", "en-US")
-    assert PanelPath("shell-check") == "/web/shell-check?desktop=1&lng=en-US"
+    assert PanelPath("shell-check") == "/web/app/shell-check?desktop=1&lng=en-US"
+    # The AppShell's sidebar collapsed, and the tournament load failure it
+    # has told (SF-5b-3): carried to the page a reload opens.
+    assert PanelPath("shell-check", navCollapsed=True) == (
+        "/web/app/shell-check?desktop=1&lng=en-US&nav=collapsed")
+    assert PanelPath("event", navCollapsed=True, told=12) == (
+        "/web/app/event?desktop=1&lng=en-US&nav=collapsed&told=12")
+    assert PanelPath("event", told=0) == (
+        "/web/app/event?desktop=1&lng=en-US&told=0")
+
+
+def test_the_followed_panel_is_the_app_shells(monkeypatch):
+    AppPanel = HostModule.AppPanel
+    monkeypatch.setattr(WebAccess, "WEB_PANELS",
+                        frozenset({"shell-check", "event"}))
+    page = "http://127.0.0.1:5107"
+    assert HostModule.AppPanelOf(QUrl(
+        f"{page}/web/app/event?desktop=1&lng=ja")) == AppPanel(
+            "event", False, None)
+    assert HostModule.AppPanelOf(QUrl(
+        f"{page}/web/app/event?desktop=1&nav=collapsed&told=7")) == AppPanel(
+            "event", True, 7)
+    # The first value of each; another value of nav is not collapsed; a told
+    # that is not a revision is none.
+    assert HostModule.AppPanelOf(QUrl(
+        f"{page}/web/app/event?nav=collapsed&nav=open&told=a&told=2"
+    )) == AppPanel("event", True, None)
+    assert HostModule.AppPanelOf(QUrl(
+        f"{page}/web/app/event?nav=open")) == AppPanel("event", False, None)
+    # Not the AppShell's page, or not a panel: not followed.
+    for path in ("/web/event", "/web/app/", "/web/app/unknown",
+                 "/web/app/event/x", "/web/appx/event", "/layout/app/event",
+                 "/web/app/shell-check%2Fx"):
+        assert HostModule.AppPanelOf(QUrl(page + path)) is None, path
 
 
 def test_the_view_is_built_only_once_the_host_is_shown_with_a_panel(buildHost):
@@ -409,8 +449,8 @@ def test_the_view_is_built_only_once_the_host_is_shown_with_a_panel(buildHost):
     assert rig.host.view is None
     assert _waitUntil(lambda: rig.host.view is not None)
     rig.waitLoaded()
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
 
 
 def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
@@ -429,7 +469,7 @@ def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
            f"document.body.appendChild(a);a.click();}})({json.dumps(elsewhere)})")
 
     _waitUntil(lambda: False, timeout=1.0)
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     # Qt reports a refused navigation as a failed load; the host knows the
     # page is still loaded, and does not reload it on the next reveal.
@@ -469,7 +509,7 @@ def test_the_page_does_not_leave_the_web_ui(buildHost):
            "'/layout/scoreboard/index.html')")
 
     _waitUntil(lambda: False, timeout=1.0)
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     assert len(rig.requests) == served
     assert rig.page.refusedLast
@@ -1063,7 +1103,7 @@ def test_the_secret_goes_with_the_main_frames_fetches_only(buildHost,
         assert _seen(path) == [secret], path
     for path in ("/api/v1/img", "/api/v1/script.js", "/web/not-the-api",
                  "/api/v1/from-a-preview",
-                 "/web/shell-check?desktop=1&lng=ja"):   # the navigation
+                 "/web/app/shell-check?desktop=1&lng=ja"):   # the navigation
         assert _seen(path) == [None], path
     assert _seen("/api/v1/to-another-origin", "frame") == [None]
     # Nothing the frame server took carried it.
@@ -1603,7 +1643,7 @@ def test_a_click_gives_a_web_link_to_the_default_browser(buildHost, monkeypatch)
 
     assert _waitUntil(lambda: opened)
     assert opened == [url]
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     assert len(rig.loads) == 1
 
@@ -1626,7 +1666,7 @@ def test_a_click_on_a_real_link_goes_to_the_default_browser(buildHost, monkeypat
 
     assert _waitUntil(lambda: opened)
     assert opened == [url]
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     assert len(rig.loads) == 1
 
@@ -2649,7 +2689,7 @@ def _alwaysOnTopWindowClass():
     #1)."""
     cls = ast.parse("class Window(QWidget):\n    pass\n").body[0]
     cls.body = [_windowMethod(name) for name in
-                ("ToggleAlwaysOnTop", "SetAlwaysOnTop", "IsAlwaysOnTop")]
+                ("SetAlwaysOnTop", "IsAlwaysOnTop")]
     namespace = {"QWidget": QWidget, "Qt": Qt}
     exec(compile(ast.fix_missing_locations(ast.Module(
         body=[cls], type_ignores=[])), "src/Autona.py", "exec"), namespace)
@@ -2658,22 +2698,18 @@ def _alwaysOnTopWindowClass():
 
 def test_always_on_top_asked_in_a_click_keeps_the_view_and_answers(
         buildHost, monkeypatch, issuedTicket):
-    # The real shell adapter and the Window's own methods: the menu's check
-    # is set, Qt hides and shows the window for the flag, and the view --
-    # the same document -- gets the answer and the state.
-    from qtpy.QtGui import QAction
-
+    # The real shell adapter and the Window's own methods: the window's bool
+    # is set (the state since SF-5b-3: no Qt menu check), Qt hides and shows
+    # the window for the flag, and the view -- the same document -- gets the
+    # answer and the state.
     from src.AutonaShellOperations import AutonaShellOperations
 
     opened = _handedOutside(monkeypatch)
     operations = AutonaShellOperations()
     rig = buildHost(shell=operations, windowClass=_alwaysOnTopWindowClass())
     window = rig.window
-    # As Window._BuildUi's Help & Settings check and Window.__init__.
-    action = QAction(window)
-    action.setCheckable(True)
-    action.toggled.connect(window.ToggleAlwaysOnTop)
-    window._alwaysOnTopAction = action
+    # As Window._BuildUi sets them.
+    window._alwaysOnTop = False
     window._webPanelHost = rig.host
     operations.UiMounted(window)
     rig.host.ShowPanel("shell-check")
@@ -2692,7 +2728,7 @@ def test_always_on_top_asked_in_a_click_keeps_the_view_and_answers(
             lambda: rig.js("window.__shellResults.length") == answered + 1)
         assert rig.js("window.__shellResults")[-1] == [
             f"t{on}", {"ok": True, "alwaysOnTop": expected}]
-        assert action.isChecked() is expected
+        assert window.IsAlwaysOnTop() is expected
         assert bool(window.windowFlags()
                     & Qt.WindowType.WindowStaysOnTopHint) is expected
         assert window.isVisible()
@@ -2700,10 +2736,15 @@ def test_always_on_top_asked_in_a_click_keeps_the_view_and_answers(
         assert rig.js("window.__loadId") == document
         assert rig.state() == ACTIVE
 
-    # The menu's check tells the page too.
-    action.trigger()
+    # Set from the window itself, the page is told too; set to what it is
+    # already, nothing is told again.
+    window.SetAlwaysOnTop(True)
     assert _waitUntil(lambda: rig.js("window.__shellStates")[-1] == {
         "alwaysOnTop": True})
+    told = rig.js("window.__shellStates.length")
+    window.SetAlwaysOnTop(True)
+    assert not _waitUntil(
+        lambda: rig.js("window.__shellStates.length") > told, timeout=0.5)
     assert rig.loads == [True]
     assert opened == []
 
@@ -3249,16 +3290,17 @@ def test_the_page_and_the_view_agree_on_the_shell_requests():
 
 
 def test_the_window_gives_the_host_the_shell_adapter():
-    # Window._WebPanel builds the one host with AutonaShellOperations, and
-    # the menu's check tells the host's page.
-    built = [call for call in ast.walk(_windowMethod("_WebPanel"))
-             if isinstance(call, ast.Call)
-             and ast.unparse(call.func) == "AutonaWebPanelHost"]
-    assert [ast.unparse(keyword) for call in built
+    # Window._BuildUi builds the one host with AutonaShellOperations, and
+    # SetAlwaysOnTop tells the host's page.
+    def built(node):
+        return [call for call in ast.walk(node) if isinstance(call, ast.Call)
+                and ast.unparse(call.func) == "AutonaWebPanelHost"]
+    assert [ast.unparse(keyword) for call in built(_windowClass())
             for keyword in call.keywords] == [
                 "shell=AutonaShellOperations.instance"]
+    assert len(built(_windowMethod("_BuildUi"))) == 1
     assert ("self._webPanelHost.PublishShellState", []) in _calls(
-        _windowMethod("ToggleAlwaysOnTop"))
+        _windowMethod("SetAlwaysOnTop"))
 
 
 # ── the Board page's Designer (ADR-005 S4s) ─────────────────────────────
@@ -3298,7 +3340,7 @@ def test_a_click_on_the_designer_url_opens_its_window_on_the_main_window(
     assert built[0].fronted == 1
     # Not the default browser's, and the view stayed on its page.
     assert opened == []
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     assert len(rig.loads) == 1
 
@@ -3589,14 +3631,15 @@ def test_a_host_shown_without_a_panel_builds_nothing(buildHost):
 def test_the_view_waits_for_the_web_server(buildHost, monkeypatch):
     """What STARTUP phase=core-shown and phase=webserver-ready are logged
     after (S4g review M4). At startup the window is shown with the host as
-    its current page -- the Event page, the sidebar's default item -- before
-    the web server is started: no view is built then, nor queued
+    its one widget (ADR-005 S-final SF-5b-3), on the page it reopens on,
+    before the web server is started: no view is built then, nor queued
     (core-shown follows self.show()). _StartWebServer() marks the server
     ready and logs webserver-ready once that returns: no view is built
     inside it either. It is built from the event loop afterwards, so
     Chromium's start-up holds up neither the window's first paint and the
     loading spinner nor the server's start (the page could not be shown
-    before the server anyway)."""
+    before the server anyway); its first load's end is phase=panel-shown
+    (the host's pageLoadFinished)."""
     monkeypatch.setattr(WPL, "_webServerReady", False)
     rig = buildHost()
     rig.window.hide()
@@ -3616,7 +3659,7 @@ def test_the_view_waits_for_the_web_server(buildHost, monkeypatch):
     assert rig.host.view is None and rig.host._viewPending
     assert _waitUntil(lambda: rig.host.view is not None)
     rig.waitLoaded()
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
 
 def test_the_view_is_built_without_a_paint(buildHost, monkeypatch):
@@ -3676,7 +3719,7 @@ def test_a_host_hidden_before_the_queued_build_builds_on_its_next_show(
     rig.reveal()
 
     rig.waitLoaded()
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
 
 def test_an_unknown_panel_is_refused(buildHost):
@@ -3694,15 +3737,15 @@ def test_another_panel_is_navigated_to_without_a_reload(buildHost):
     rig.host.ShowPanel("second")
 
     assert _waitUntil(lambda: rig.js("window.__navigations.join()") == "second")
-    assert rig.path() == ("/web/second", "desktop=1&lng=ja")
+    assert rig.path() == ("/web/app/second", "desktop=1&lng=ja")
     assert rig.js("window.__loadId") == document
     assert rig.loads == [True]
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
     # Back, and the same panel twice: the page skips the second.
     rig.host.ShowPanel("shell-check")
     rig.host.ShowPanel("shell-check")
-    assert _waitUntil(lambda: rig.path()[0] == "/web/shell-check")
+    assert _waitUntil(lambda: rig.path()[0] == "/web/app/shell-check")
     assert rig.js("window.__navigations.join()") == "second,shell-check"
     assert rig.js("window.__loadId") == document
 
@@ -3722,7 +3765,7 @@ def test_the_host_waits_for_the_web_server(buildHost, monkeypatch):
 
     assert _waitUntil(lambda: rig.host.view is not None)
     rig.waitLoaded()
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
 
 def test_a_hidden_host_is_frozen_and_asks_for_the_full_state_on_reveal(
@@ -3791,7 +3834,7 @@ def test_a_load_on_a_hidden_host_shows_its_page_and_freezes_again(buildHost):
 
     rig.host._loader.load(PanelPath("second"))
 
-    assert _waitUntil(lambda: rig.path()[0] == "/web/second")
+    assert _waitUntil(lambda: rig.path()[0] == "/web/app/second")
     assert _waitUntil(lambda: rig.state() == FROZEN)
 
 
@@ -3805,7 +3848,7 @@ def test_a_panel_chosen_while_frozen_is_shown_on_reveal(buildHost):
     rig.reveal()
 
     assert _waitUntil(lambda: rig.js("window.__navigations.join()") == "second")
-    assert rig.path()[0] == "/web/second"
+    assert rig.path()[0] == "/web/app/second"
     assert rig.js("window.__loadId") == document
 
 
@@ -3823,7 +3866,7 @@ def test_a_discarded_host_reloads_on_reveal_with_the_panel_chosen_meanwhile(
     rig.waitLoaded(count=2)
     # A new document (Qt reloaded the page it had), then the router is
     # told about the panel chosen while it was discarded.
-    assert _waitUntil(lambda: rig.path()[0] == "/web/second")
+    assert _waitUntil(lambda: rig.path()[0] == "/web/app/second")
     assert rig.js("window.__loadId") != document
     assert rig.js("window.__navigations.join()") == "second"
     assert rig.path()[1] == "desktop=1&lng=ja"
@@ -3831,7 +3874,8 @@ def test_a_discarded_host_reloads_on_reveal_with_the_panel_chosen_meanwhile(
 
 # ── SCORE's set selection from the hotkey / legacy route (ADR-005 S4ab-2) ─
 #
-# Window.OpenScoreSets shows SCORE (ShowPanel) and then asks the host, which
+# AutonaShellOperations has the Window show SCORE (Window.OpenPanel:
+# ShowPanel) and then asks the host it returns (OpenScoreSets), which
 # hands the request to the page's panel shell after the navigation, when the
 # page can take script -- now, or after the view's first load, a thaw, the
 # reload of a discarded page -- and holds it until a panel shell has it.
@@ -3857,7 +3901,7 @@ def test_the_score_sets_reach_the_page_shown_once(buildHost):
 
     rig.host.OpenScoreSets(2)
 
-    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/app/scoreboard")
     assert _taken(rig)
     # Taken: not handed again by a later reveal or a click on SCORE.
     rig.hide()
@@ -3865,7 +3909,7 @@ def test_the_score_sets_reach_the_page_shown_once(buildHost):
     rig.reveal()
     rig.host.ShowPanel("scoreboard")
     assert _waitUntil(lambda: rig.js("window.__refreshes") > 0)
-    assert not _waitUntil(lambda: _scoreSets(rig) != "2@/web/scoreboard",
+    assert not _waitUntil(lambda: _scoreSets(rig) != "2@/web/app/scoreboard",
                           timeout=0.5)
 
 
@@ -3877,7 +3921,7 @@ def test_the_score_sets_follow_the_navigation_to_score(buildHost):
     rig.host.OpenScoreSets(1)
 
     # On SCORE when the page has it: the same document, navigated first.
-    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/app/scoreboard")
     assert rig.js("window.__navigations.join()") == "scoreboard"
     assert rig.js("window.__loadId") == document
     assert _taken(rig)
@@ -3896,8 +3940,8 @@ def test_the_score_sets_asked_before_the_view_is_built_reach_its_first_load(
     rig.reveal()
     rig.waitLoaded()
 
-    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
-    assert rig.requests == ["/web/scoreboard?desktop=1&lng=ja"]
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/app/scoreboard")
+    assert rig.requests == ["/web/app/scoreboard?desktop=1&lng=ja"]
     assert _taken(rig)
 
 
@@ -3913,7 +3957,7 @@ def test_the_score_sets_asked_while_frozen_reach_the_page_on_reveal(buildHost):
     assert rig.host._scoreSets is not None
     rig.reveal()
 
-    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/app/scoreboard")
     assert rig.js("window.__loadId") == document
     assert _taken(rig)
 
@@ -3929,7 +3973,7 @@ def test_the_score_sets_asked_while_discarded_reach_the_reloaded_page(
     rig.reveal()
 
     rig.waitLoaded(count=2)
-    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/scoreboard")
+    assert _waitUntil(lambda: _scoreSets(rig) == "2@/web/app/scoreboard")
     assert rig.js("window.__loadId") != document
     assert _taken(rig)
 
@@ -3959,7 +4003,7 @@ def test_the_score_sets_are_not_asked_of_another_panel(buildHost):
 
     assert rig.host._scoreSets is None
     assert not _waitUntil(lambda: _scoreSets(rig) != "", timeout=0.5)
-    assert rig.path()[0] == "/web/shell-check"
+    assert rig.path()[0] == "/web/app/shell-check"
 
 
 def test_the_score_sets_wait_for_a_page_that_can_take_them(buildHost):
@@ -3977,7 +4021,7 @@ def test_the_score_sets_wait_for_a_page_that_can_take_them(buildHost):
     assert _waitUntil(lambda: rig.state() == FROZEN)
     rig.reveal()
 
-    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/scoreboard")
+    assert _waitUntil(lambda: _scoreSets(rig) == "1@/web/app/scoreboard")
     assert _taken(rig)
 
 
@@ -3991,7 +4035,7 @@ def test_the_score_sets_are_run_into_a_document_once_until_answered(buildHost):
     rig.host.ShowPanel("scoreboard")
 
     assert _taken(rig)
-    assert _scoreSets(rig) == "1@/web/scoreboard"
+    assert _scoreSets(rig) == "1@/web/app/scoreboard"
 
 
 def test_a_late_answer_to_an_older_request_leaves_the_newer_one(buildHost):
@@ -4009,7 +4053,7 @@ def test_a_late_answer_to_an_older_request_leaves_the_newer_one(buildHost):
 
     # Both answers back: request 2's ("") clears what was running.
     assert _waitUntil(lambda: rig.host._scoreSetsRunning is None)
-    assert _scoreSets(rig) == "1@/web/scoreboard"
+    assert _scoreSets(rig) == "1@/web/app/scoreboard"
     assert rig.host._scoreSets is not None
     assert rig.host._scoreSets[1] == 2
 
@@ -4019,7 +4063,7 @@ def test_a_late_answer_to_an_older_request_leaves_the_newer_one(buildHost):
     rig.reveal()
 
     assert _waitUntil(
-        lambda: _scoreSets(rig) == "1@/web/scoreboard,2@/web/scoreboard")
+        lambda: _scoreSets(rig) == "1@/web/app/scoreboard,2@/web/app/scoreboard")
     assert _taken(rig)
 
 
@@ -4038,8 +4082,8 @@ def test_the_score_sets_are_dropped_when_the_view_fails_to_load(
     rig.host.ShowPanel("scoreboard")
 
     rig.waitLoaded(count=failures + 1)
-    assert rig.requests == ["/web/scoreboard?desktop=1&lng=ja"]
-    assert rig.path()[0] == "/web/scoreboard"
+    assert rig.requests == ["/web/app/scoreboard?desktop=1&lng=ja"]
+    assert rig.path()[0] == "/web/app/scoreboard"
     assert not _waitUntil(lambda: _scoreSets(rig) != "", timeout=0.5)
 
 
@@ -4053,14 +4097,14 @@ def test_a_failed_load_is_loaded_again_on_the_next_panel_shown(
     # Loaded again, straight on the panel asked for: there was no page
     # whose router could be told.
     rig.waitLoaded(count=failures + 1)
-    assert rig.requests == ["/web/second?desktop=1&lng=ja"]
-    assert rig.path() == ("/web/second", "desktop=1&lng=ja")
+    assert rig.requests == ["/web/app/second?desktop=1&lng=ja"]
+    assert rig.path() == ("/web/app/second", "desktop=1&lng=ja")
     assert rig.js("window.__navigations.join()") == ""
 
     # From then on it navigates as usual, without a reload.
     rig.host.ShowPanel("shell-check")
-    assert _waitUntil(lambda: rig.path()[0] == "/web/shell-check")
-    assert rig.requests == ["/web/second?desktop=1&lng=ja"]
+    assert _waitUntil(lambda: rig.path()[0] == "/web/app/shell-check")
+    assert rig.requests == ["/web/app/second?desktop=1&lng=ja"]
     assert rig.loads == [False] * failures + [True]
 
 
@@ -4074,8 +4118,8 @@ def test_a_failed_load_is_loaded_again_when_the_host_comes_back(
     rig.reveal()
 
     rig.waitLoaded(count=failures + 1)
-    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
-    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
+    assert rig.path() == ("/web/app/shell-check", "desktop=1&lng=ja")
 
 
 def test_a_refused_load_is_retried_then_given_up(qapp, monkeypatch,
@@ -4199,14 +4243,11 @@ def _autonaSource():
     return (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
 
 
-def _menuPages():
-    """Window.MENU_PAGES, read out of src/Autona.py."""
+def _windowClass():
     for node in ast.walk(ast.parse(_autonaSource())):
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id == "MENU_PAGES"):
-            return ast.literal_eval(node.value)
-    raise AssertionError("src/Autona.py: no MENU_PAGES")
+        if isinstance(node, ast.ClassDef) and node.name == "Window":
+            return node
+    raise AssertionError("src/Autona.py: no class Window")
 
 
 def _windowMethod(name):
@@ -4226,287 +4267,163 @@ def _calls(node):
             for call in ast.walk(node) if isinstance(call, ast.Call)]
 
 
-def test_the_commentary_item_opens_the_react_page():
-    import ast
-    factory = _windowMethod("_CreateCommentaryPanel")
-    calls = _calls(factory)
-
-    # The React page is the only Commentary panel (the Qt one and its
-    # settings switch were removed in ADR-005 S4c).
-    assert ("self._WebPanel", ["'commentary'"]) in calls
-    assert not [c for c, _ in calls if c == "UsesQtPanel"
-                or c.startswith("AutonaCommentary")]
-
-    # The sidebar item is still the lazy factory, keyed by the React
-    # panel's name (_WebPanel finds the page by it).
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateCommentaryPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[-1]) == "'commentary'"
-    assert "commentary" in WebAccess.WEB_PANELS
-
-
-def test_the_event_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateEventPanel"))
-
-    # The React page is the only 大会情報 panel (ADR-005 S4g).
-    assert calls == [("self._WebPanel", ["'event'"])]
-
-    # Still the lazy factory leading Setup (the sidebar's default item),
-    # keyed by the React panel's name.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateEventPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'tournament.svg'"
-    assert ast.unparse(entries[0].elts[-1]) == "'event'"
-    assert "event" in WebAccess.WEB_PANELS
+# What the window lost to the AppShell (ADR-005 S-final SF-5b-3): the Qt
+# sidebar and its stack of pages, the menus (Help & Settings, the tournament
+# and game buttons with the mods switch, the battle format), the status bar,
+# the tournament load failure's QMessageBox -- and the page bookkeeping that
+# came with them (a page's index, STATE_VERSION, MENU_PAGES: the window keeps
+# a page's name now, src/AutonaWindowState.py).
+GONE_WINDOW_NAMES = (
+    "QStackedWidget", "QToolButton", "QStatusBar", "QMenuBar", "QMenu",
+    "QTabBar", "QCheckBox", "QProgressBar", "AutonaSidebar", "WebPanelPages",
+    "StatusService", "MENU_PAGES", "STATE_VERSION")
+GONE_WINDOW_MEMBERS = (
+    # methods
+    "HideSidebar", "ShowSidebar", "OpenMenuPage", "OpenScoreSets",
+    "OpenSettings", "ReloadGames", "SetGame", "Signal_GameChange",
+    "ToggleAlwaysOnTop", "UpdateTournamentButton", "_AdoptWebPanelHost",
+    "_ApplyTabBarPolicy", "_EnsurePanelAt", "_NavToRemember",
+    "_OnNavSelected", "_OnStackPageChanged", "_ReportTournamentLoadFailure",
+    "_SetPulldownAttention", "_ShowBattleFormat", "_ShowModdedContent",
+    "_ToggleMods", "_WebPanel", "_on_status_changed", "_pickGame",
+    "_resolveBattleFormat",
+    # attributes, and QMainWindow's bars
+    "_alwaysOnTopAction", "_lazyPanels", "_navBeforeMenuPage", "_navSections",
+    "_panelIndexes", "_statusBar", "_webPanelPages", "_webserverErrorBox",
+    "gameMenu", "gameSelect", "moddedContentCheck", "setTournamentAction",
+    "sidebar", "sidebarExpandButton", "stack", "statusBar", "setStatusBar",
+    "menuBar", "setMenuBar")
 
 
-def test_the_top8_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateTop8Panel"))
+def test_the_window_is_the_shared_view_alone():
+    from tests.conftest import PROJECT_ROOT
 
-    # The React page is the only Top 8 panel (ADR-005 S4i).
-    assert calls == [("self._WebPanel", ["'top8'"])]
-
-    # Still the lazy factory in Display, keyed by the React panel's name,
-    # with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateTop8Panel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'bracket.svg'"
-    assert "Top 8 Display Settings" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'top8'"
-    assert "top8" in WebAccess.WEB_PANELS
-
-
-def test_the_stats_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateStatsPanel"))
-
-    # The React page is the only Statistics panel, the match list its
-    # fourth tab (ADR-005 S4k).
-    assert calls == [("self._WebPanel", ["'stats'"])]
-
-    # Still the lazy factory in Data, keyed by the React panel's name,
-    # with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateStatsPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'stats.svg'"
-    assert "Statistics" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'stats'"
-    assert "stats" in WebAccess.WEB_PANELS
-
-
-def test_the_stats_preview_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateStatsPreviewPanel"))
-
-    # The React page is the only Stats Display Settings panel (ADR-005 S4l).
-    assert calls == [("self._WebPanel", ["'statsPreview'"])]
-
-    # Still the lazy factory in Display, keyed by the React panel's name,
-    # with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateStatsPreviewPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'stats.svg'"
-    assert "Stats Display Settings" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'statsPreview'"
-    assert "statsPreview" in WebAccess.WEB_PANELS
-
-
-def test_the_player_list_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreatePlayerBrowserPanel"))
-
-    # The React page is the only Player List (ADR-005 S4n).
-    assert calls == [("self._WebPanel", ["'playerBrowser'"])]
-
-    # Still the lazy factory in Data, keyed by the React panel's name, with
-    # its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreatePlayerBrowserPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'players.svg'"
-    assert "Player List" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'playerBrowser'"
-    assert "playerBrowser" in WebAccess.WEB_PANELS
-
-
-def test_the_thumbnail_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateThumbnailPanel"))
-
-    # The React page is the only Thumbnail Settings panel (ADR-005 S4p).
-    assert calls == [("self._WebPanel", ["'thumbnail'"])]
-
-    # Still the lazy factory in Display, keyed by the React panel's name,
-    # with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateThumbnailPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'thumbnail.svg'"
-    assert "Thumbnail Settings" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'thumbnail'"
-    assert "thumbnail" in WebAccess.WEB_PANELS
-    # The battle format no longer reaches a thumbnail panel: the page shows
-    # the team-name toggle in every format.
+    tree = ast.parse(_autonaSource())
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert names.isdisjoint(GONE_WINDOW_NAMES), names & set(GONE_WINDOW_NAMES)
+    window = _windowClass()
+    members = {node.name for node in window.body
+               if isinstance(node, ast.FunctionDef)}
+    members |= {node.attr for node in ast.walk(window)
+                if isinstance(node, ast.Attribute)}
+    assert members.isdisjoint(GONE_WINDOW_MEMBERS), (
+        members & set(GONE_WINDOW_MEMBERS))
+    assert not [name for name in members
+                if name.startswith("_Create") and name.endswith("Panel")]
+    # Its one widget is the host (built with the shell adapter:
+    # test_the_window_gives_the_host_the_shell_adapter).
+    assert [call for call in _calls(_windowMethod("_BuildUi"))
+            if call[0] == "self.setCentralWidget"] == [
+                ("self.setCentralWidget", ["host"])]
+    # The sidebar's module went, and nothing imports it.
+    assert not (PROJECT_ROOT / "src" / "AutonaSidebar.py").exists()
+    for path in [*sorted((PROJECT_ROOT / "src").rglob("*.py")),
+                 PROJECT_ROOT / "main.py"]:
+        assert "AutonaSidebar" not in _importedModules(path), path
+    assert not hasattr(HostModule, "WebPanelPages")
+    # What earlier steps took out stays out: the battle format reaching a
+    # thumbnail panel (S4p), the boards' dock (S4ac-3), SCORE's way back to
+    # the Qt panel (S4aa).
     source = _autonaSource()
     assert "thumbnailSetting" not in source
-
-
-def test_the_scoreboard_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateScoreboardPanel"))
-
-    # The React page is the only SCORE panel (ADR-005 S4aa; the way back to
-    # the Qt panel went with the Qt boards in S4ac-3).
-    assert calls == [("self._WebPanel", ["'scoreboard'"])]
-
-    # A lazy factory where the eager dock was, keyed by the React panel's
-    # name, with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateScoreboardPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'scoreboard.svg'"
-    assert "Scoreboard" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'scoreboard'"
-    assert "scoreboard" in WebAccess.WEB_PANELS
+    assert "self.scoreboard" not in source
     assert not hasattr(HostModule, "QT_FALLBACK_SETTINGS")
-    # No dock of the boards left on the window.
-    assert "self.scoreboard" not in _autonaSource()
 
 
-def test_the_board_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateBoardPanel"))
+def test_the_windows_one_message_box_is_the_lan_question():
+    # The tournament load failure's (the pages tell it since SF-5b-2) and
+    # the web server start failure's (the host's error view) went in
+    # SF-5b-3: the LAN opt-in, asked once before the server starts, is the
+    # window's one dialog. (The port guard's and the updater's are their own
+    # modules'.)
+    window = _windowClass()
+    used = [method.name for method in window.body
+            if isinstance(method, ast.FunctionDef)
+            for node in ast.walk(method)
+            if isinstance(node, ast.Name) and node.id == "QMessageBox"]
+    assert set(used) == {"_StartWebServer"}
+    assert [call for call, _args in _calls(_windowMethod("_StartWebServer"))
+            if call.startswith("QMessageBox.")] == ["QMessageBox.question"]
+    # None outside the window's methods either.
+    assert len([node for node in ast.walk(ast.parse(_autonaSource()))
+                if isinstance(node, ast.Name)
+                and node.id == "QMessageBox"]) == len(used)
 
-    # The React page is the only Board panel (ADR-005 S4s).
-    assert calls == [("self._WebPanel", ["'board'"])]
 
-    # Still the lazy factory after the scoreboard, keyed by the React panel's
-    # name, with its icon and label.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateBoardPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[1]) == "'board.svg'"
-    assert "Board" in ast.unparse(entries[0].elts[2])
-    assert ast.unparse(entries[0].elts[-1]) == "'board'"
-    assert "board" in WebAccess.WEB_PANELS
+# The Qt widgets src/ defines (ADR-005: no new Qt UI; S-final SF-5b-3: the
+# window is the shared view alone): the main window, the shared view's host
+# and its view, the Designer's window, the updater's dialog.
+QT_WIDGET_CLASSES = {"Window", "AutonaWebPanelHost", "_PanelView",
+                     "AutonaDesignerWindow", "_UpdateDialog"}
 
 
-def test_the_restored_page_is_built_before_the_window_is_shown():
-    """STARTUP phase=core-shown is logged right after self.show(), with the
-    restored page built before it (_EnsurePanelAt). For the Event page --
-    the default item -- that page is the shared view's host, whose view is
-    built from the event loop once the web server is ready, after
-    phase=webserver-ready (test_the_view_waits_for_the_web_server): the
-    server's readiness comes before that phase is logged."""
+def test_the_only_qt_widgets_are_the_shells():
+    from qtpy import QtWebEngineWidgets, QtWidgets
+
+    from tests.conftest import PROJECT_ROOT
+
+    # Every class of src/ by name, with its bases' names: a base defined in
+    # src/ is followed to its own bases.
+    bases = {}
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ClassDef):
+                bases.setdefault(node.name, set()).update(
+                    ast.unparse(base).rsplit(".", 1)[-1]
+                    for base in node.bases)
+
+    def qtWidget(name):
+        for module in (QtWidgets, QtWebEngineWidgets):
+            cls = getattr(module, name, None)
+            if isinstance(cls, type) and issubclass(cls, QWidget):
+                return True
+        return False
+
+    def isWidget(name, seen=frozenset()):
+        if qtWidget(name):
+            return True
+        return name not in seen and any(
+            isWidget(base, seen | {name}) for base in bases.get(name, ()))
+
+    widgets = {name for name, named in bases.items()
+               if any(isWidget(base, frozenset({name})) for base in named)}
+    assert widgets <= QT_WIDGET_CLASSES, widgets - QT_WIDGET_CLASSES
+    # The check sees a widget at all (the window's, a QMainWindow).
+    assert "Window" in widgets
+
+
+def test_the_window_starts_the_server_under_the_spinner_and_marks_the_page():
+    """STARTUP (ADR-003; ADR-005 S-final SF-5b-3): phase=core-shown right
+    after self.show(), with the page to reopen on given to the host before
+    it; the loading spinner over the window then; the web server built once
+    that is painted (_StartWebServer: phase=webserver-ready after the
+    readiness that releases the host's view, whose build and first load come
+    after -- test_the_view_waits_for_the_web_server); and the host's first
+    load's end takes the spinner away (phase=panel-shown)."""
     tokens = "".join(_autonaSource().split())
-    ensure = tokens.index("self._EnsurePanelAt(self.stack.currentIndex())")
-    show = tokens.index("self.show()", ensure)
-    shown = tokens.index('log_startup_phase("core-shown")', show)
-    assert ensure < show < shown
-    # And the overlay's dismissal (the queue drained) still gates the web
-    # server, whose readiness releases the view's first load.
-    assert tokens.index("self._loading_overlay.finish_when_ready()") < \
-        tokens.index("self._loading_overlay.call_when_finished("
-                     "self._StartWebServer)")
-    start = _windowMethod("_StartWebServer")
-    names = [call for call, _args in _calls(start)]
-    assert names.index("MarkWebServerReady") < names.index(
-        "log_startup_phase")
-
-
-def test_the_stream_item_opens_the_react_page():
-    import ast
-    calls = _calls(_windowMethod("_CreateStreamPanel"))
-
-    # The React page is the only 配信設定 panel (ADR-005 S4e).
-    assert calls == [("self._WebPanel", ["'stream'"])]
-
-    # Still the lazy factory in Setup, right after the Event page, keyed by
-    # the React panel's name.
-    build = _windowMethod("_BuildUi")
-    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
-               and node.elts
-               and ast.unparse(node.elts[0]) == "self._CreateStreamPanel"]
-    assert len(entries) == 1
-    assert ast.unparse(entries[0].elts[-1]) == "'stream'"
-    assert "stream" in WebAccess.WEB_PANELS
-
-
-def test_the_sidebar_items_are_the_ones_they_were():
-    """The nav items' number and order (and so the saved sidebar index,
-    QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
-    panels (Stream S4e, Event S4g -- its key is the React page's name now
-    --, Top 8 S4i, Statistics S4k, the Player List S4n, Thumbnail S4p, Board
-    S4s and SCORE S4aa -- its key is the React page's name now): no
-    STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
-    import ast
-    build = _windowMethod("_BuildUi")
-    keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
-            if isinstance(node, ast.Tuple) and len(node.elts) == 4
-            and ast.unparse(node.elts[1]).endswith(".svg'")]
-    assert keys == [
-        "'event'", "'stream'", "'scoreboard'", "'board'", "'thumbnail'",
-        "'result'", "'top8'", "'commentary'", "'statsPreview'", "'stats'",
-        "'playerBrowser'"]
-    version = next(node for node in ast.walk(ast.parse(
-        _autonaSource())) if isinstance(node, ast.Assign)
-        and [ast.unparse(t) for t in node.targets] == ["STATE_VERSION"])
-    assert ast.unparse(version.value) == "22"
-
-
-def test_every_reveal_of_a_react_item_tells_the_host():
-    calls = _calls(_windowMethod("_OnStackPageChanged"))
-    assert ("self._EnsurePanelAt", ["index"]) in calls
-    assert ("self._webPanelPages.Shown", ["index"]) in calls
-    assert ("page.ShowPanel", ["panel"]) in calls
-    # The host is told its panel before it is first shown.
-    assert ("host.ShowPanel", ["panel"]) in _calls(_windowMethod("_WebPanel"))
-
-
-def test_a_sidebar_choice_and_the_restore_go_through_the_nav_mapping():
-    import ast
-    build = _windowMethod("_BuildUi")
-    connects = [(ast.unparse(call.func), [ast.unparse(a) for a in call.args])
-                for call in ast.walk(build) if isinstance(call, ast.Call)
-                and ast.unparse(call.func).endswith(".connect")]
-    assert ("self.sidebar.navSelected.connect", ["self._OnNavSelected"]) \
-        in connects
-    assert not [c for c in connects
-                if c == ("self.sidebar.navSelected.connect",
-                         ["self.stack.setCurrentIndex"])]
-    # The React items are registered with the mapping as they are added.
-    assert ("self._webPanelPages.Add", ["index", "key"]) in _calls(build)
-    # The restore of the saved sidebar index takes the same way as a click
-    # (a saved React item lands on the shared view's page).
-    assert ("self._OnNavSelected", ["savedIndex"]) in _calls(build)
-    assert ("self.stack.setCurrentIndex", ["savedIndex"]) not in _calls(build)
-    assert ("self._webPanelPages.StackIndex", ["nav"]) in _calls(
-        _windowMethod("_OnNavSelected"))
+    order = ["host.ShowPanel(window_state.RestorePanel(self.qtSettings))",
+             "self.show()", 'log_startup_phase("core-shown")',
+             "self._loading_overlay=LoadingOverlay(self)",
+             "self._loading_overlay.start()",
+             "self._loading_overlay.call_when_painted(self._StartWebServer)"]
+    positions = [tokens.index(token) for token in order]
+    assert positions == sorted(positions)
+    # The spinner no longer waits for the Qt panels' queue to drain.
+    assert "finish_when_ready" not in tokens
+    assert "call_when_finished" not in tokens
+    names = [call for call, _args in _calls(_windowMethod("_StartWebServer"))]
+    assert names.index("MarkWebServerReady") < names.index("log_startup_phase")
+    assert ("host.pageLoadFinished.connect", ["self._OnPageLoadFinished"]) in (
+        _calls(_windowMethod("_BuildUi")))
+    loaded = _calls(_windowMethod("_OnPageLoadFinished"))
+    assert ("log_startup_phase", ["'panel-shown'"]) in loaded
+    assert ("self._DismissLoadingOverlay", []) in loaded
+    # The start failure: the host's error view and the spinner away, no
+    # dialog (test_the_windows_one_message_box_is_the_lan_question).
+    failed = _calls(_windowMethod("OnWebServerStartFailed"))
+    assert "self._webPanelHost.ShowStartFailure" in [
+        call for call, _args in failed]
+    assert ("self._DismissLoadingOverlay", []) in failed
 
 
 def test_no_page_is_a_dock():
@@ -4998,694 +4915,285 @@ def test_the_qt_score_s_leftovers_are_gone():
             if "QDockWidget" in value] == []
 
 
-# ── several React items, one host page (ADR-005 S4e) ────────────────────
+# ── the window: the shared view alone (ADR-005 S-final SF-5b-3) ─────────
 
-def test_a_react_item_shows_its_own_page_until_the_host_is_built():
-    pages = WebPanelPages()
-    pages.Add(1, "stream")
-    pages.Add(7, "commentary")
+class _OverlayStandIn:
+    """The loading spinner (autona_splash.LoadingOverlay) as the window
+    takes it away."""
 
-    # A Qt item: its own page, and the choice of panel stays.
-    assert pages.StackIndex(3) == 3
-    assert pages.selected is None
-    # No host yet: the React item's own page (where the host is built).
-    assert pages.StackIndex(7) == 7
-    assert pages.selected == "commentary"
-    assert pages.Shown(7) is None
+    def __init__(self):
+        self.finished = 0
 
-    assert pages.HostBuilt(7) == [1]
-    assert pages.Shown(7) == "commentary"
-    # Every React item shows the host's page from then on.
-    assert pages.StackIndex(1) == 7
-    assert pages.selected == "stream"
-    assert pages.Shown(7) == "stream"
-    assert pages.StackIndex(3) == 3
-    assert pages.selected == "stream"
-    assert pages.Shown(3) is None
-    assert pages.StackIndex(7) == 7
-    assert pages.Shown(7) == "commentary"
-
-
-def test_the_host_page_shows_its_own_panel_before_any_choice():
-    pages = WebPanelPages()
-    pages.Add(1, "stream")
-    pages.HostBuilt(1)
-    assert pages.Shown(1) == "stream"
-
-
-def test_only_react_panels_are_mapped():
-    with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "lazyQt")
+    def finish(self):
+        self.finished += 1
 
 
 class _WindowRig:
-    """The Window's real page-switching methods (read out of src/Autona.py,
-    which cannot be imported: agent-pitfalls #1) on a stack built the way
-    _BuildUi builds it, with a few sidebar items: six React ones and a
-    made-up lazy Qt one (the sidebar has no Qt item left since S4aa, and the
-    factories' path for a Qt panel is still there), in the real order, and
-    the menu's pages after them (MENU_PAGES: Settings, S4af; the API /
-    Companion / OBS guides and About, S-final SF-4a-2). Off screen, so the
-    host builds no
-    view; what it was asked to show is its _panel. The sidebar is a stand-in
-    (_FakeSidebar) that choose() highlights as a click does."""
+    """The Window's real page, startup and failure methods (read out of
+    src/Autona.py, which cannot be imported: agent-pitfalls #1) on a
+    QMainWindow whose one widget is a real host, wired as _BuildUi wires it.
+    Not shown, and the web server not ready: the host builds no view; what
+    it was asked to show is its CurrentPanel(). log_startup_phase records
+    the phases."""
 
-    METHODS = ("_OnNavSelected", "_OnStackPageChanged",
-               "_EnsurePanelAt", "_WebPanel", "_AdoptWebPanelHost",
-               "_CreateEventPanel", "_CreateStreamPanel",
-               "_CreateScoreboardPanel", "_CreateTop8Panel",
-               "_CreateCommentaryPanel", "_CreateStatsPanel",
-               "OpenScoreSets", "OpenSettings", "_NavToRemember",
-               "OpenMenuPage")
+    METHODS = ("_OnPanelChanged", "OpenPanel", "_BringToFront",
+               "_OnPageLoadFinished", "_DismissLoadingOverlay",
+               "OnWebServerStartFailed")
 
     def __init__(self):
-        import ast
-
         from loguru import logger
+        from qtpy.QtWidgets import QApplication, QMainWindow
 
-        tree = ast.parse(_autonaSource())
-        window = ast.parse("class Window:\n    pass\n").body[0]
-        window.body = [node for node in ast.walk(tree)
+        from src import AutonaWindowState
+
+        window = ast.parse("class Window(QMainWindow):\n    pass\n").body[0]
+        window.body = [node for node in _windowClass().body
                        if isinstance(node, ast.FunctionDef)
                        and node.name in self.METHODS]
         assert sorted(node.name for node in window.body) == sorted(
             self.METHODS)
-        window.body.append(ast.parse(
-            "def _ApplyTabBarPolicy(self, panel):\n    pass\n").body[0])
-        window.body.append(ast.parse(
-            f"MENU_PAGES = {_menuPages()!r}\n").body[0])
-
-        namespace = {"QWidget": QWidget, "logger": logger,
-                     "AutonaWebPanelHost": AutonaWebPanelHost,
-                     "AutonaShellOperations": SimpleNamespace(instance=None),
-                     "functools": functools}
+        self.phases = []
+        # Only what the methods may use: a QMessageBox there would be a
+        # NameError.
+        namespace = {"QMainWindow": QMainWindow, "QApplication": QApplication,
+                     "Qt": Qt, "logger": logger,
+                     "window_state": AutonaWindowState,
+                     "log_startup_phase": self.phases.append}
         exec(compile(ast.fix_missing_locations(ast.Module(
             body=[window], type_ignores=[])), "src/Autona.py", "exec"),
             namespace)
         self.window = w = namespace["Window"]()
-        self.built = []
-
-        def qtPanel(name):
-            def factory():
-                self.built.append(name)
-                return QLabel(name)
-            return factory
-
-        w.stack = QStackedWidget()
-        w._lazyPanels = {}
-        w._panelIndexes = {}
-        w._webPanelHost = None
-        w._webPanelPages = WebPanelPages()
-        w._buildingPanel = False
+        # As _BuildUi.
+        self.host = host = AutonaWebPanelHost()
+        w._webPanelHost = host
+        w.setCentralWidget(host)
+        w.webserver = SimpleNamespace(port=5107)
         w._shuttingDown = False
-        # As _BuildUi: event, stream, scoreboard, ..., top8, commentary, ...,
-        # stats. (The lazy Qt item is last here so the indexes below stay one
-        # per kind of item.)
-        for page, key in ((w._CreateEventPanel, "event"),
-                          (w._CreateStreamPanel, "stream"),
-                          (w._CreateScoreboardPanel, "scoreboard"),
-                          (w._CreateTop8Panel, "top8"),
-                          (w._CreateCommentaryPanel, "commentary"),
-                          (w._CreateStatsPanel, "stats"),
-                          (qtPanel("lazyQt"), "lazyQt")):
-            index = w.stack.addWidget(QWidget())
-            w._lazyPanels[index] = (page, key)
-            w._panelIndexes[key] = index
-            if WebAccess.IsWebPanel(key):
-                w._webPanelPages.Add(index, key)
-        # As _BuildUi: the menu's pages after the items, no item's.
-        for key in w.MENU_PAGES:
-            index = w.stack.addWidget(QWidget())
-            w._lazyPanels[index] = (functools.partial(w._WebPanel, key), key)
-            w._panelIndexes[key] = index
-            w._webPanelPages.Add(index, key)
-        w._navBeforeMenuPage = 0
-        w.sidebar = _FakeSidebar()
-        w.stack.currentChanged.connect(w._OnStackPageChanged)
-        self.placeholders = [w.stack.widget(index)
-                             for index in range(w.stack.count())]
-
-    def choose(self, nav):
-        # What a sidebar click does (the item highlighted, navSelected ->
-        # _OnNavSelected).
-        if isinstance(self.window.sidebar, _FakeSidebar):
-            self.window.sidebar.setCurrentIndex(nav)
-        self.window._OnNavSelected(nav)
-        return self.window.stack.currentIndex()
-
-    def hosts(self):
-        return [index for index in range(self.window.stack.count())
-                if isinstance(self.window.stack.widget(index),
-                              AutonaWebPanelHost)]
+        w._panelToRemember = AutonaWindowState.DEFAULT_PANEL
+        host.panelChanged.connect(w._OnPanelChanged)
+        w._panelShown = False
+        self.overlay = _OverlayStandIn()
+        w._loading_overlay = self.overlay
+        host.pageLoadFinished.connect(w._OnPageLoadFinished)
+        # What _BringToFront would do to the window (shown, it would build
+        # the host's view): recorded, with the page shown then.
+        self.fronted = []
+        w._BringToFront = lambda: self.fronted.append(host.CurrentPanel())
 
 
-class _FakeSidebar:
-    """AutonaSidebar's highlight: the item checked, -1 for none."""
+@pytest.fixture
+def windowRig(qapp, monkeypatch):
+    # The web server is not ready (a host asked for a page registers for the
+    # readiness: the list is this test's).
+    monkeypatch.setattr(WPL, "_webServerReady", False)
+    monkeypatch.setattr(WPL, "_pendingLoaders", [])
+    monkeypatch.setattr(WPL, "_readyCallbacks", [])
+    rigs = []
 
-    def __init__(self):
-        self.current = -1
+    def build():
+        rig = _WindowRig()
+        rigs.append(rig)
+        return rig
 
-    def currentIndex(self):
-        return self.current
+    yield build
 
-    def setCurrentIndex(self, nav):
-        self.current = nav
-
-    def clearCurrent(self):
-        self.current = -1
-
-
-(EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, LAZY_QT,
- SETTINGS, API, COMPANION, OBS, ABOUT, ASSETS) = range(13)
-
-
-def test_every_react_item_shows_the_one_host(qapp):
-    rig = _WindowRig()
-    w = rig.window
-
-    # Stream first: the host is built on its page.
-    assert rig.choose(STREAM) == STREAM
-    assert rig.hosts() == [STREAM]
-    host = w._webPanelHost
-    assert host._panel == "stream"
-    # The other React items' placeholders are never to be built (a second
-    # host).
-    assert COMMENTARY not in w._lazyPanels
-    assert EVENT not in w._lazyPanels
-    assert TOP8 not in w._lazyPanels
-    assert STATS not in w._lazyPanels
-
-    # Commentary: the same page, told the other panel (the stack did not
-    # move, so this is not currentChanged's).
-    assert rig.choose(COMMENTARY) == STREAM
-    assert host._panel == "commentary"
-    assert rig.hosts() == [STREAM]
-    assert w.stack.widget(COMMENTARY) is rig.placeholders[COMMENTARY]
-
-    # Away and back: each React item brings its own panel back.
-    assert rig.choose(LAZY_QT) == LAZY_QT
-    assert rig.choose(STREAM) == STREAM
-    assert host._panel == "stream"
-    assert rig.choose(LAZY_QT) == LAZY_QT
-    assert rig.choose(COMMENTARY) == STREAM
-    assert host._panel == "commentary"
-    assert w._webPanelHost is host and rig.hosts() == [STREAM]
-    # The SCORE page too (S4aa), its placeholder never built.
-    assert rig.choose(SCOREBOARD) == STREAM
-    assert host._panel == "scoreboard"
-    assert w.stack.widget(SCOREBOARD) is rig.placeholders[SCOREBOARD]
-    assert SCOREBOARD not in w._lazyPanels
-    # The Event page too (S4g): the same page, its own panel.
-    assert rig.choose(EVENT) == STREAM
-    assert host._panel == "event"
-    assert w.stack.widget(EVENT) is rig.placeholders[EVENT]
-    # The Top 8 page too (S4i).
-    assert rig.choose(TOP8) == STREAM
-    assert host._panel == "top8"
-    assert w.stack.widget(TOP8) is rig.placeholders[TOP8]
-    # The Statistics page too (S4k).
-    assert rig.choose(STATS) == STREAM
-    assert host._panel == "stats"
-    assert w.stack.widget(STATS) is rig.placeholders[STATS]
-    # The Qt item was built once.
-    assert rig.choose(LAZY_QT) == LAZY_QT
-    assert rig.built == ["lazyQt"]
+    for rig in rigs:
+        rig.window.deleteLater()
+        QCoreApplication.sendPostedEvents(rig.window, QEvent.Type.DeferredDelete)
 
 
-def test_the_host_is_built_where_the_first_react_item_is_opened(qapp):
-    rig = _WindowRig()
-    w = rig.window
+def test_the_window_reopens_on_the_page_shown_not_a_menu_page(windowRig):
+    # closeEvent saves _panelToRemember (AutonaWindowState.SaveWindowState).
+    rig = windowRig()
+    w, host = rig.window, rig.host
+    assert w._panelToRemember == "event"
 
-    assert rig.choose(COMMENTARY) == COMMENTARY
-    assert rig.hosts() == [COMMENTARY]
-    assert w._webPanelHost._panel == "commentary"
-    assert STREAM not in w._lazyPanels
-
-    assert rig.choose(STREAM) == COMMENTARY
-    assert w._webPanelHost._panel == "stream"
-    assert w.stack.widget(STREAM) is rig.placeholders[STREAM]
-
-
-def test_choosing_the_shown_react_item_again_tells_the_host_again(
-        qapp, monkeypatch):
-    # A reveal is how a view whose load failed is loaded again (S4a
-    # decision 11): a second click on the item shown is one.
-    rig = _WindowRig()
-    rig.choose(STREAM)
-    asked = []
-    monkeypatch.setattr(rig.window._webPanelHost, "ShowPanel", asked.append)
-
-    rig.choose(STREAM)
-    rig.choose(COMMENTARY)
-    rig.choose(COMMENTARY)
-
-    assert asked == ["stream", "commentary", "commentary"]
+    host.ShowPanel("stream")
+    assert w._panelToRemember == "stream"
+    # The AppShell's Help & Settings menu's pages: the page before them
+    # stays, as the Qt sidebar kept its item while a menu page showed.
+    for menu in ("settings", "api", "assets"):
+        host.ShowPanel(menu)
+        assert host.CurrentPanel() == menu
+        assert w._panelToRemember == "stream"
+    host.ShowPanel("top8")
+    assert w._panelToRemember == "top8"
 
 
-def test_a_restored_react_item_builds_the_host_on_its_page(qapp):
-    # The restore at startup: the sidebar's saved index, through the same
-    # _OnNavSelected (the stack starts on page 0).
-    rig = _WindowRig()
-    assert rig.window.stack.currentIndex() == 0
+def test_the_window_follows_the_app_shells_own_navigation(windowRig):
+    # The AppShell moves its router itself (its sidebar, its menu): the
+    # host follows the URL (AutonaWebPanelHost._OnUrlChanged), and the
+    # window with it. The real view: test_the_host_follows_the_app_shells_
+    # router_and_reloads_on_it.
+    rig = windowRig()
+    w, host = rig.window, rig.host
+    page = "http://127.0.0.1:5107/web/app/"
+    host.ShowPanel("event")
 
-    assert rig.choose(COMMENTARY) == COMMENTARY
-    assert rig.window._webPanelHost._panel == "commentary"
-    assert rig.built == []
-    # Restored on page 0, the Event page -- the default, so a fresh
-    # install's start (the stack is there already): built all the same.
-    rig = _WindowRig()
-    assert rig.choose(EVENT) == EVENT
-    assert rig.hosts() == [EVENT]
-    assert rig.window._webPanelHost._panel == "event"
-    assert STREAM not in rig.window._lazyPanels
-    assert rig.built == []
+    host._OnUrlChanged(QUrl(f"{page}stats?desktop=1&lng=ja&nav=collapsed"
+                            "&told=4"))
+    assert host.CurrentPanel() == "stats"
+    assert w._panelToRemember == "stats"
+    assert host.NavCollapsed() is True
+    assert host._Path() == PanelPath("stats", navCollapsed=True, told=4)
 
-
-def test_a_host_that_fails_to_be_built_is_built_by_the_next_react_item(qapp):
-    # A failure between the factory and the stack (S4e review): nothing is
-    # recorded, so the next React item opened builds the host -- the host
-    # used to be recorded, and the other items' placeholders dropped, before
-    # the page was on the stack, which left no React panel to open.
-    rig = _WindowRig()
-    w = rig.window
-
-    def failing(page):
-        raise RuntimeError("injected")
-
-    # The host is made (the factory returned), then the swap fails before
-    # the stack changes.
-    w.stack.removeWidget = failing
-    assert rig.choose(STREAM) == STREAM
-    assert w._webPanelHost is None
-    assert w._webPanelPages.hostIndex is None
-    assert COMMENTARY in w._lazyPanels
-    assert rig.hosts() == []
-    assert w.stack.widget(STREAM) is rig.placeholders[STREAM]
-
-    del w.stack.removeWidget
-    assert rig.choose(COMMENTARY) == COMMENTARY
-    assert rig.hosts() == [COMMENTARY]
-    assert w._webPanelHost._panel == "commentary"
-    # The item whose build failed shows the host from then on.
-    assert rig.choose(STREAM) == COMMENTARY
-    assert w._webPanelHost._panel == "stream"
-    assert rig.hosts() == [COMMENTARY]
+    host._OnUrlChanged(QUrl(f"{page}about?desktop=1&lng=ja"))
+    assert host.CurrentPanel() == "about"
+    assert w._panelToRemember == "stats"
+    assert host.NavCollapsed() is False
+    # Not the AppShell on a panel (an error page): nothing follows.
+    host._OnUrlChanged(QUrl("chrome-error://chromewebdata/"))
+    host._OnUrlChanged(QUrl("http://127.0.0.1:5107/web/stats"))
+    assert host.CurrentPanel() == "about"
 
 
-# ── SCORE, a React item like the others (ADR-005 S4aa / S4ac-3) ─────────
+def test_a_page_asked_for_from_outside_fronts_the_window_on_it(windowRig):
+    # The load_set hotkey and the legacy open-set route (AutonaShellOperations
+    # asks the host it gets for SCORE's set selection).
+    rig = windowRig()
+    w, host = rig.window, rig.host
+    host.ShowPanel("stream")
 
-def test_the_scoreboard_item_opened_first_builds_the_host_on_its_page(qapp):
-    rig = _WindowRig()
-    w = rig.window
+    assert w.OpenPanel("scoreboard") is host
 
-    assert rig.choose(SCOREBOARD) == SCOREBOARD
-    assert rig.hosts() == [SCOREBOARD]
-    assert w._webPanelHost._panel == "scoreboard"
-    assert STREAM not in w._lazyPanels
-    # The other React items show it from then on, and SCORE its panel again.
-    assert rig.choose(STREAM) == SCOREBOARD
-    assert w._webPanelHost._panel == "stream"
-    assert rig.choose(SCOREBOARD) == SCOREBOARD
-    assert w._webPanelHost._panel == "scoreboard"
+    assert rig.fronted == ["stream"]
+    assert host.CurrentPanel() == "scoreboard"
+    assert w._panelToRemember == "scoreboard"
 
 
-def test_a_host_built_on_another_item_takes_the_scoreboard_item_with_it(qapp):
-    # No way back to settle on the first choice since S4ac-3: SCORE's
-    # placeholder leaves _lazyPanels with the other React items' when the
-    # host is built (it used to wait for the item's first choice).
-    rig = _WindowRig()
-    w = rig.window
-    rig.choose(STREAM)
-    assert SCOREBOARD not in w._lazyPanels
-
-    assert rig.choose(SCOREBOARD) == STREAM
-    assert w._webPanelHost._panel == "scoreboard"
-    assert w.stack.widget(SCOREBOARD) is rig.placeholders[SCOREBOARD]
-    assert rig.hosts() == [STREAM]
-
-
-# ── SCORE's set selection asked for from outside (ADR-005 S4ab-2) ───────
-
-def _askingScoreSets(rig, monkeypatch):
-    """What OpenScoreSets does, in order: the window brought to the front,
-    the sidebar's item, the host asked (with the panel it shows then)."""
-    order = []
-    w = rig.window
-    w._BringToFront = lambda: order.append("front")
-    w.sidebar = SimpleNamespace(
-        setCurrentIndex=lambda nav: order.append(("sidebar", nav)))
-    monkeypatch.setattr(
-        AutonaWebPanelHost, "OpenScoreSets",
-        lambda host, board: order.append(("asked", host._panel, board)))
-    return order
-
-
-def test_the_set_selection_asked_for_shows_score_and_asks_its_page(
-        qapp, monkeypatch):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingScoreSets(rig, monkeypatch)
-    rig.choose(STREAM)
-
-    w.OpenScoreSets(2)
-
-    # As a click on SCORE (the same host page, told SCORE), then the host.
-    assert order == ["front", ("sidebar", SCOREBOARD),
-                     ("asked", "scoreboard", 2)]
-    assert w.stack.currentIndex() == STREAM
-    assert rig.hosts() == [STREAM]
-    assert SCOREBOARD not in w._lazyPanels
-
-
-def test_the_set_selection_asked_for_first_builds_the_host_on_score(
-        qapp, monkeypatch):
-    # The hotkey before any React item was opened (EVENT restored on a Qt
-    # item): the host is built on SCORE's page, then asked.
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingScoreSets(rig, monkeypatch)
-    rig.choose(LAZY_QT)
-
-    w.OpenScoreSets(1)
-
-    assert order == ["front", ("sidebar", SCOREBOARD),
-                     ("asked", "scoreboard", 1)]
-    assert w.stack.currentIndex() == SCOREBOARD
-    assert rig.hosts() == [SCOREBOARD]
-
-
-def test_the_set_selection_asked_for_without_a_host_asks_nothing(
-        qapp, monkeypatch):
-    # The host failed to be built (logged by _EnsurePanelAt): no page to ask,
-    # and nothing raised to the hotkey or the route.
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingScoreSets(rig, monkeypatch)
-
-    def failing(page):
-        raise RuntimeError("injected")
-
-    w.stack.removeWidget = failing
-
-    w.OpenScoreSets(1)
-
-    assert order == ["front", ("sidebar", SCOREBOARD)]
-    assert w._webPanelHost is None
-
-
-def test_the_set_selection_asked_for_while_the_window_closes_does_nothing(
-        qapp, monkeypatch):
-    # closeEvent has begun the teardown: not shown again, no host built for
-    # the request.
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingScoreSets(rig, monkeypatch)
-    rig.choose(LAZY_QT)
+def test_a_page_asked_for_while_the_window_closes_does_nothing(windowRig):
+    # closeEvent has begun the teardown: not shown again, nothing to ask.
+    rig = windowRig()
+    w, host = rig.window, rig.host
+    host.ShowPanel("stream")
     w._shuttingDown = True
 
-    w.OpenScoreSets(1)
+    assert w.OpenPanel("scoreboard") is None
 
-    assert order == []
-    assert w.stack.currentIndex() == LAZY_QT
-    assert rig.hosts() == []
-
-
-# ── the Settings page (ADR-005 S4af) ────────────────────────────────────
-
-def _askingSettings(rig):
-    """What OpenSettings does to the window: brought to the front."""
-    order = []
-    rig.window._BringToFront = lambda: order.append("front")
-    return order
+    assert rig.fronted == []
+    assert host.CurrentPanel() == "stream"
 
 
-def test_the_settings_page_shows_the_host_with_no_item_highlighted(qapp):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingSettings(rig)
-    rig.choose(STREAM)
-    host = w._webPanelHost
+@pytest.mark.parametrize("ok", [True, False])
+def test_the_first_load_takes_the_spinner_away(windowRig, ok):
+    # STARTUP phase=panel-shown on the page there; a first load that failed
+    # for good takes the spinner away too (the view shows its error page,
+    # loaded again on the next page asked for), unlogged. Once.
+    rig = windowRig()
 
-    w.OpenSettings()
+    rig.host.pageLoadFinished.emit(ok)
+    rig.host.pageLoadFinished.emit(True)
 
-    # The same host page, told the Settings panel; no item highlighted.
-    assert order == ["front"]
-    assert host._panel == "settings"
-    assert w.stack.currentIndex() == STREAM
-    assert rig.hosts() == [STREAM]
-    assert w.stack.widget(SETTINGS) is rig.placeholders[SETTINGS]
-    assert SETTINGS not in w._lazyPanels
-    assert w.sidebar.currentIndex() == -1
-    # The window reopens on the item chosen before.
-    assert w._NavToRemember() == STREAM
-
-    # An item chosen leaves it, and is the one to reopen on.
-    assert rig.choose(COMMENTARY) == STREAM
-    assert host._panel == "commentary"
-    assert w._NavToRemember() == COMMENTARY
+    assert rig.overlay.finished == 1
+    assert rig.window._loading_overlay is None
+    assert rig.phases == (["panel-shown"] if ok else [])
 
 
-def test_the_settings_page_opened_first_builds_the_host_on_its_page(qapp):
-    rig = _WindowRig()
-    w = rig.window
-    _askingSettings(rig)
-    rig.choose(LAZY_QT)
+def test_the_window_shows_a_start_failure_in_place_of_its_page(windowRig):
+    # No dialog over the spinner (a QMessageBox until SF-5b-3): the host's
+    # error view says why, and the spinner goes.
+    rig = windowRig()
+    rig.host.ShowPanel("event")
 
-    w.OpenSettings()
+    rig.window.OnWebServerStartFailed("[Errno 10048] address in use")
 
-    assert w.stack.currentIndex() == SETTINGS
-    assert rig.hosts() == [SETTINGS]
-    assert w._webPanelHost._panel == "settings"
-    assert w._NavToRemember() == LAZY_QT
-    # The React items show it from then on.
-    assert STREAM not in w._lazyPanels
-    assert rig.choose(STREAM) == SETTINGS
-    assert w._webPanelHost._panel == "stream"
-    assert rig.choose(LAZY_QT) == LAZY_QT
-    assert rig.built == ["lazyQt"]
+    label = rig.host.findChild(QLabel, "webPanelStartFailure")
+    assert label is not None
+    assert "5107" in label.text()
+    assert "[Errno 10048] address in use" in label.text()
+    assert rig.overlay.finished == 1
+    assert rig.window._loading_overlay is None
+    assert rig.phases == []
 
 
-def test_opening_the_settings_page_again_keeps_the_item_before_it(qapp):
-    # The second request (the menu while it shows): no item is highlighted
-    # then, so the one chosen before stays the one to reopen on.
-    rig = _WindowRig()
-    w = rig.window
-    _askingSettings(rig)
-    rig.choose(TOP8)
-    w.OpenSettings()
-    asked = []
-    w._webPanelHost.ShowPanel = asked.append
+def test_a_start_failure_shows_its_text_and_builds_no_view(buildHost,
+                                                           monkeypatch):
+    # The page can never load: the label in the view's place (plain text,
+    # once), and no view built for a page asked for afterwards or the
+    # readiness that would release it.
+    monkeypatch.setattr(WPL, "_webServerReady", False)
+    rig = buildHost()
+    rig.host.ShowPanel("shell-check")
+    rig.host.ShowStartFailure("Web server failed to start\n\n<b>5107</b>")
+    rig.host.ShowStartFailure("again")
+    rig.stack.setCurrentIndex(0)
 
-    w.OpenSettings()
+    WPL.MarkWebServerReady()
+    rig.host.ShowPanel("second")
 
-    assert asked == ["settings"]
-    assert w._NavToRemember() == TOP8
-
-
-def test_the_settings_page_asked_for_while_the_window_closes_does_nothing(qapp):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingSettings(rig)
-    rig.choose(LAZY_QT)
-    w._shuttingDown = True
-
-    w.OpenSettings()
-
-    assert order == []
-    assert w.stack.currentIndex() == LAZY_QT
-    assert w.sidebar.currentIndex() == LAZY_QT
-    assert rig.hosts() == []
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.5)
+    labels = rig.host.findChildren(QLabel, "webPanelStartFailure")
+    assert [label.text() for label in labels] == [
+        "Web server failed to start\n\n<b>5107</b>"]
+    assert labels[0].textFormat() == Qt.TextFormat.PlainText
+    assert labels[0].isVisible()
+    assert rig.requests == []
 
 
-# ── the menu's other pages (ADR-005 S-final SF-4a-2) ────────────────────
-# The API reference & tester, the Companion and OBS guides and About: Qt
-# windows (About a QMessageBox) until then, now pages as Settings is.
+def test_a_start_failure_after_the_view_was_built_hides_it(buildHost):
+    rig = _shown(buildHost)
 
-@pytest.mark.parametrize("name, page", [("api", API),
-                                        ("companion", COMPANION),
-                                        ("obs", OBS), ("about", ABOUT),
-                                        ("assets", ASSETS)])
-def test_a_menu_page_shows_the_host_with_no_item_highlighted(qapp, name,
-                                                             page):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingSettings(rig)
-    rig.choose(SCOREBOARD)
-    host = w._webPanelHost
+    rig.host.ShowStartFailure("Web server failed to start")
+    rig.host.ShowPanel("second")
 
-    w.OpenMenuPage(name)
-
-    assert order == ["front"]
-    assert host._panel == name
-    assert w.stack.currentIndex() == SCOREBOARD
-    assert rig.hosts() == [SCOREBOARD]
-    assert w.stack.widget(page) is rig.placeholders[page]
-    assert page not in w._lazyPanels
-    assert w.sidebar.currentIndex() == -1
-    assert w._NavToRemember() == SCOREBOARD
-
-    assert rig.choose(STATS) == SCOREBOARD
-    assert host._panel == "stats"
-    assert w._NavToRemember() == STATS
+    assert not rig.host.view.isVisible()
+    assert rig.host.findChild(QLabel, "webPanelStartFailure").isVisible()
+    # Nothing loaded again (_ReloadIfBlank).
+    assert not _waitUntil(lambda: len(rig.requests) > 1, timeout=0.5)
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
 
-def test_a_menu_page_opened_first_builds_the_host_on_its_page(qapp):
-    rig = _WindowRig()
-    w = rig.window
-    _askingSettings(rig)
-    rig.choose(LAZY_QT)
+def test_the_host_follows_the_app_shells_router_and_reloads_on_it(buildHost):
+    rig = _shown(buildHost)
+    followed = []
+    rig.host.panelChanged.connect(followed.append)
+    document = rig.js("window.__loadId")
 
-    w.OpenMenuPage("obs")
+    # The AppShell's sidebar: its router moves (history.replaceState, no
+    # load), its sidebar hidden and the failure it told in the query.
+    rig.js("void history.replaceState(null, '',"
+           " '/web/app/second?desktop=1&lng=ja&nav=collapsed&told=9')")
 
-    assert w.stack.currentIndex() == OBS
-    assert rig.hosts() == [OBS]
-    assert w._webPanelHost._panel == "obs"
-    assert w._NavToRemember() == LAZY_QT
-    # The other menu pages and the React items show it from then on.
-    assert SETTINGS not in w._lazyPanels
-    assert ABOUT not in w._lazyPanels
-    assert EVENT not in w._lazyPanels
-    w.OpenMenuPage("about")
-    assert w.stack.currentIndex() == OBS
-    assert w._webPanelHost._panel == "about"
-    assert w._NavToRemember() == LAZY_QT
-    assert rig.choose(EVENT) == OBS
-    assert w._webPanelHost._panel == "event"
-    assert rig.hosts() == [OBS]
+    assert _waitUntil(lambda: rig.host.CurrentPanel() == "second")
+    assert followed == ["second"]
+    assert rig.host.NavCollapsed() is True
+    assert rig.js("window.__loadId") == document
+    assert rig.requests == ["/web/app/shell-check?desktop=1&lng=ja"]
 
+    # The host's own next load opens that page in that state (as after a
+    # load that failed for good: _ReloadIfBlank on the next ask).
+    rig.host._loaded = False
+    rig.host.ShowPanel("second")
+    rig.waitLoaded(count=2)
+    assert rig.requests[-1] == (
+        "/web/app/second?desktop=1&lng=ja&nav=collapsed&told=9")
+    assert followed == ["second"]
 
-def test_going_from_one_menu_page_to_another_keeps_the_item_before_them(
-        qapp):
-    rig = _WindowRig()
-    w = rig.window
-    _askingSettings(rig)
-    rig.choose(TOP8)
-    w.OpenMenuPage("api")
-    host = w._webPanelHost
-
-    w.OpenSettings()
-    assert host._panel == "settings"
-    w.OpenMenuPage("companion")
-
-    assert host._panel == "companion"
-    assert w.sidebar.currentIndex() == -1
-    assert w._NavToRemember() == TOP8
-    assert rig.hosts() == [TOP8]
+    # Not the AppShell (another of this server's paths): not followed.
+    rig.js("void history.replaceState(null, '', '/web/shell-check')")
+    assert not _waitUntil(lambda: rig.host.CurrentPanel() != "second",
+                          timeout=0.5)
+    assert followed == ["second"]
 
 
-def test_only_a_menu_page_is_opened_as_one(qapp):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingSettings(rig)
-    rig.choose(STREAM)
+def test_a_discarded_page_reloads_in_the_app_shells_state(buildHost):
+    # Qt reloads the URL it had: the AppShell's sidebar stays hidden and the
+    # failure it told is not told again.
+    rig = _shown(buildHost, discardAfterMs=200)
+    rig.js("void history.replaceState(null, '',"
+           " '/web/app/shell-check?desktop=1&lng=ja&nav=collapsed&told=3')")
+    assert _waitUntil(lambda: rig.host.NavCollapsed())
 
-    for name in ("stream", "lazyQt", "playerBrowser", "nope"):
-        with pytest.raises(ValueError):
-            w.OpenMenuPage(name)
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == DISCARDED)
+    rig.reveal()
+    rig.waitLoaded(count=2)
 
-    assert order == []
-    assert w.sidebar.currentIndex() == STREAM
-    assert w._webPanelHost._panel == "stream"
-
-
-@pytest.mark.parametrize("name", ["api", "companion", "obs", "about",
-                                  "assets"])
-def test_a_menu_page_asked_for_while_the_window_closes_does_nothing(
-        qapp, name):
-    rig = _WindowRig()
-    w = rig.window
-    order = _askingSettings(rig)
-    rig.choose(LAZY_QT)
-    w._shuttingDown = True
-
-    w.OpenMenuPage(name)
-
-    assert order == []
-    assert w.stack.currentIndex() == LAZY_QT
-    assert w.sidebar.currentIndex() == LAZY_QT
-    assert rig.hosts() == []
-
-
-def test_the_menu_opens_its_pages():
-    # Settings first (the restore's bound: every page from it on is a menu
-    # page), each a React panel, registered as a lazy page after the items
-    # (the rig above does what _BuildUi does) and none a sidebar item: the
-    # saved sidebar index does not move, so STATE_VERSION stays.
-    pages = _menuPages()
-    assert pages == ("settings", "api", "companion", "obs", "about",
-                     "assets")
-    assert all(WebAccess.IsWebPanel(name) for name in pages)
-    source = _autonaSource()
-    assert "for key in self.MENU_PAGES:" in source
-    assert "functools.partial(self._WebPanel, key), key)" in source
-    assert "    STATE_VERSION = 22\n" in source.replace("\r\n", "\n")
-    tree = ast.parse(source)
-    sections = next(
-        node.value for node in ast.walk(tree)
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Attribute)
-            and target.attr == "_navSections" for target in node.targets))
-    named = {node.value for node in ast.walk(sections)
-             if isinstance(node, ast.Constant) and isinstance(node.value, str)}
-    assert named.isdisjoint(pages), named & set(pages)
-
-    # The menu's entries: each asks for its page by name (Settings through
-    # OpenSettings), nothing else opens one.
-    # (Add game assets has two entries: Help & Settings and the game menu.)
-    opened = sorted(
-        node.args[0].value for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "OpenMenuPage"
-        and node.args and isinstance(node.args[0], ast.Constant))
-    assert opened == sorted([*pages, "assets"]), opened
-    # The API Settings submenu's entries are the app's strings now (the
-    # "api" context went with the API window).
-    for text in ("API Settings", "Open reference & tester",
-                 "Companion settings", "OBS / Advanced Scene Switcher",
-                 "About Autona"):
-        assert f'QApplication.translate("app", "{text}")' in source, text
-    assert 'translate("api"' not in source
-
-
-def test_the_sidebar_highlights_no_item_and_then_the_next_chosen(qapp):
-    # AutonaSidebar.clearCurrent: an exclusive group never unchecks its
-    # checked button; a click afterwards checks one item as usual.
-    from qtpy.QtGui import QIcon
-
-    from src.AutonaSidebar import AutonaSidebar
-
-    sidebar = AutonaSidebar()
-    try:
-        for title in ("A", "B", "C"):
-            sidebar.addNavItem(QIcon(), title)
-        sidebar.setCurrentIndex(1)
-
-        sidebar.clearCurrent()
-        assert sidebar.currentIndex() == -1
-        sidebar.clearCurrent()
-        assert sidebar.currentIndex() == -1
-
-        sidebar._navButtons[2].click()
-        assert sidebar.currentIndex() == 2
-        sidebar._navButtons[0].click()
-        assert [button.isChecked() for button in sidebar._navButtons] == [
-            True, False, False]
-    finally:
-        sidebar.deleteLater()
-
-
-def test_the_settings_page_is_no_sidebar_item_to_reopen_on():
-    # The window remembers an item, never the Settings page (closeEvent
-    # saves _NavToRemember), and restores an item only.
-    tree = ast.parse(_autonaSource())
-    close = next(node for node in ast.walk(tree)
-                 if isinstance(node, ast.FunctionDef)
-                 and node.name == "closeEvent")
-    assert any(isinstance(node, ast.Attribute)
-               and node.attr == "_NavToRemember" for node in ast.walk(close))
-    assert 'savedIndex < self._panelIndexes["settings"]' in _autonaSource()
-    assert "settings" in WebAccess.WEB_PANELS
+    assert rig.requests[-1] == (
+        "/web/app/shell-check?desktop=1&lng=ja&nav=collapsed&told=3")
+    assert rig.host.NavCollapsed() is True
+    assert rig.host._told == 3
+    assert rig.host.CurrentPanel() == "shell-check"
 
 
 # The Qt settings window's modules (ADR-005 S4af) and the colour button only
@@ -5902,8 +5410,8 @@ def test_the_sf1_dead_code_is_gone():
 
 def test_the_qt_settings_window_is_gone():
     # ADR-005 S4af (the owner's go-ahead: no way back): the React page
-    # (/web/settings, the menu's Window.OpenSettings -> OpenMenuPage) is the
-    # only settings
+    # (/web/settings; /web/app/settings from the AppShell's Help & Settings
+    # menu since S-final SF-5b-3) is the only settings
     # UI. Neither the Qt window, its rows' widget, the colour button only it
     # used, the key recorder, the hotkeys' switch hook nor the window's
     # translations may come back.
@@ -5949,12 +5457,14 @@ def test_the_qt_settings_window_is_gone():
 
 # The Qt guide windows (ADR-005 S-final SF-4a-2): the API reference &
 # tester, the Companion and OBS guides; and the About box. Pages now
-# (web/src/GuidePages/, the menu's Window.OpenMenuPage). The Add game assets
-# dialog went the same way in SF-4b-2 (web/src/AssetsPage/, /web/assets).
+# (web/src/GuidePages/, the AppShell's menu pages since SF-5b-3). The Add
+# game assets dialog went the same way in SF-4b-2 (web/src/AssetsPage/,
+# /web/assets).
 QT_GUIDE_MODULES = ("AutonaApiInfoWindow", "AutonaIntegrationGuideWindow",
                     "AutonaObsGuideWindow", "AutonaGameAssetGuideWindow")
 # What went with them: the window's accessors and slots, the About box, and
-# the Settings page's own opener and memory (OpenMenuPage's now).
+# the Settings page's own opener and memory (OpenMenuPage's then, the
+# AppShell's since SF-5b-3).
 QT_GUIDE_NAMES = (*QT_GUIDE_MODULES, "EnsureApiInfoWindow",
                   "EnsureCompanionGuideWindow", "EnsureObsGuideWindow",
                   "_apiInfoWindow", "_companionGuideWindow",
@@ -5992,7 +5502,8 @@ def test_the_qt_guide_windows_are_gone():
     assert {path: names for path, names in users.items() if names} == {}
     # Add game assets is a menu page now; the window's translations went
     # with it, but the menu's two entries keep their app-context text.
-    assert "assets" in _menuPages()
+    from src import AutonaWindowState
+    assert "assets" in AutonaWindowState.MENU_PAGES
 
     # The translations: no "api" context, nothing located in the windows'
     # files; the menu's entries in the app context, translated in ja.
@@ -6045,7 +5556,9 @@ def test_the_about_page_names_the_inquiry_address_the_menu_mails():
     assert BUSINESS_INQUIRY_URL == f"mailto:{BUSINESS_INQUIRY_EMAIL}"
     assert EXTERNAL_LINKS == {"discord": DISCORD_URL,
                               "inquiry": BUSINESS_INQUIRY_URL}
-    # The menu opens the same two, defined nowhere else.
+    # Defined nowhere else: the window has no menu of its own since S-final
+    # SF-5b-3 (the AppShell's Help menu opens them through the shell request
+    # openExternal, which reads the table).
     tree = ast.parse(_autonaSource())
     assert not [node for node in tree.body if isinstance(node, ast.Assign)
                 and any(isinstance(target, ast.Name)
@@ -6053,8 +5566,10 @@ def test_the_about_page_names_the_inquiry_address_the_menu_mails():
                                           "BUSINESS_INQUIRY_EMAIL",
                                           "BUSINESS_INQUIRY_URL")
                         for target in node.targets)]
-    assert ("from .AutonaExternalLinks import BUSINESS_INQUIRY_URL, "
-            "DISCORD_URL") in _autonaSource()
+    assert "AutonaExternalLinks" not in _autonaSource()
+    shell = (PROJECT_ROOT / "src" / "AutonaShellOperations.py").read_text(
+        encoding="utf-8")
+    assert "from .AutonaExternalLinks import EXTERNAL_LINKS" in shell
 
 
 

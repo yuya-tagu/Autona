@@ -1051,6 +1051,9 @@ class AutonaWebPanelHost(QWidget):
         if self.view is not None:
             self.view.hide()
         self._layout.addWidget(label)
+        # A child added to a widget already on screen (the window is shown
+        # before the server's failure comes) stays hidden until shown.
+        label.show()
         logger.warning("The web panel view shows that the web server did "
                        "not start")
 

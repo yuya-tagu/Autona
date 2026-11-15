@@ -2047,20 +2047,27 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
 # ── on the SCORE page, its dialog (ADR-005 S4ab-2) ───────────────────────
 #
 # The legacy open-set opens the SCORE page's set selection dialog
-# (Window.OpenScoreSets: the window brought to the front on SCORE, its view
-# asked) -- for the board of the format only (the page shows no other; the
-# owner's call, 2026-11-11). The answer is the "OK" of before. The Qt
-# window it opened instead on the way back to the Qt panel went in ADR-005
-# S4ac-3.
+# (Window.OpenPanel: the window brought to the front on SCORE; then the
+# host it hands back is asked, OpenScoreSets) -- for the board of the format
+# only (the page shows no other; the owner's call, 2026-11-11). The answer
+# is the "OK" of before. The Qt window it opened instead on the way back to
+# the Qt panel went in ADR-005 S4ac-3.
 
 class _MainWindow:
     """What the shell asks of the main window (src/Autona.py's Window, which
-    cannot be imported: agent-pitfalls #1)."""
+    cannot be imported: agent-pitfalls #1) and of the shared view's host it
+    hands back: the page shown, then the set selection asked, each with
+    whether it ran on the GUI thread."""
 
     def __init__(self):
         from src.Helpers.AutonaQtHelper import in_gui_thread
         self.asked = []
+        self.opened = []
         self._inGui = in_gui_thread
+
+    def OpenPanel(self, name):
+        self.opened.append((name, self._inGui()))
+        return self
 
     def OpenScoreSets(self, board):
         self.asked.append((board, self._inGui()))
@@ -2086,6 +2093,7 @@ def test_on_the_score_page_the_legacy_open_set_asks_the_page(
 
     assert (response.status_code, response.get_data(as_text=True)) == (
         200, "OK")
+    assert main.opened == [("scoreboard", True)]
     assert main.asked == [(1, True)]
 
     ws = socketio.test_client(app, flask_test_client=client)
