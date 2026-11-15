@@ -9388,7 +9388,7 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
     - validator の必須がフィルタにも禁止にも掛からず、インストール済みの PySide6 にある（Qt の更新で名前が変わればビルドの前に落ちる）。サイズの上限が SF-9 より前の 571 MiB より小さい。
     - Python の `_ssl.pyd` が `libssl-3.dll` / `libcrypto-3.dll` を読み、`-x64` の名前を読まない（外す OpenSSL が Python のものでない）。
     - フィルタが `a.datas` と `a.binaries` の両方に、Analysis の後・COLLECT の前に掛かる。
-  - 文書: `.claude/rules/build-and-release.md`（サイズ・SF-9 の削減の節・validator の検査・robocopy の 2 段（`_internal` は `/MIR`）の記述を実装に合わせた）、`.claude/release-runbook.md` 手順 7（OK の行・検証内容 ④・zip のサイズの見込み 約 215 MiB。実測で確定する）、`scripts/README.md`。
+  - 文書: `.claude/rules/build-and-release.md`（サイズ・SF-9 の削減の節・validator の検査・robocopy の 2 段（`_internal` は `/MIR`）の記述を実装に合わせた）、`.claude/release-runbook.md` 手順 7（OK の行・検証内容 ④・zip のサイズ 約 217 MiB（実測 216.9 MiB））、`scripts/README.md`。
 - **外したもの（2026-10-08 ビルドでの大きさ）**
   - A: `PySide6/resources/*.debug.pak` と `v8_context_snapshot.debug.bin`（77.2 MiB）。Release の `Qt6WebEngineCore.dll` は debug の名前を持たない（DLL の文字列で確認。持つのは `qtwebengine_resources(_100p/_200p).pak`・`qtwebengine_devtools_resources.pak`・`v8_context_snapshot.bin`・`icudtl.dat`・`qtwebengine_locales`）。
   - B: QML 一式。`qml/`・`plugins/qmltooling`・`plugins/position` と 8 つの `.pyd`（34.0 MiB）、それらにしか使われない DLL 102 個（Quick3D・3D・Graphs・Charts・Location・Multimedia・QuickControls2・Scxml・Sensors・WebEngineQuick・WebView・RemoteObjects・Test・Sql・`pyside6qml.abi3.dll` ほか。約 77 MiB）。DLL の数と大きさは、残る `.pyd` / exe / プラグインからリンクを辿って届かないものを数えた見積もり。
@@ -9406,7 +9406,7 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   4. **qtpy は落ちない**: `qtpy.QtGui` は `PySide6.QtOpenGL`、`qtpy.QtWidgets` は `PySide6.QtOpenGLWidgets` を try / except ImportError で、`qtpy/__init__` は `QtDataVisualization` を `contextlib.suppress(ImportError, PythonQtError)` で試すだけ（qtpy 2.4.3 のコードで確認。subprocess の pin がこの振る舞いを見る）。`QtUiTools` は `qtpy.uic` からで、誰も import しない。
   5. **OpenSSL**: アプリの QtNetwork は `QLocalSocket` / `QLocalServer`（`main.py` の単一インスタンス）だけで TLS を使わない。QtWebEngine の TLS は Chromium の自前。`qopensslbackend.dll` を外すと Qt の TLS の既定は schannel になる（使っていない）。Python の `ssl` / `hashlib` は `libssl-3.dll` / `libcrypto-3.dll` で、validator の必須に入れた。
   6. **locale**: OS の言語が en / ja 以外のとき、Chromium の内部の文言（標準のコンテキストメニュー・フォームの検証の吹き出しなど）は en-US.pak の英語になる。ページの文言は i18next なので変わらない。
-  7. **サイズの上限は 390 MiB**: 名前の禁止（(b)）が知らないもの（新しいフックが集め始めたモジュール）の受け皿。見込み 約 345 MiB に 45 MiB の余裕。ビルドの実測で詰める。
+  7. **サイズの上限は 390 MiB**: 名前の禁止（(b)）が知らないもの（新しいフックが集め始めたモジュール）の受け皿。2026-11-16 の実測 344.4 MiB に約 45 MiB の余裕（実測の後もそのまま）。
   8. **pin は静的**: CI（windows-latest）は PyInstaller を入れていないので、spec は AST で読み、フィルタの関数だけを compile して当てる。PowerShell の validator は pytest で走らせず、テキストで突き合わせる（`tests/test_apply_update_robocopy.py` と同じ形）。
 - **検証**
   - `tests/test_release_bundle.py` 8 passed（`tests/test_apply_update_robocopy.py` と合わせて 14 passed）。
@@ -9425,7 +9425,17 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
   - CI の `build_release.yml` でのビルドは以前から未検証のまま。
 - **実機の確認**（メインセッションがビルドと隔離データの起動で確かめて追記する）
   - 確認済み（2026-11-16・メインセッション）:
-    - ビルド: `pyinstaller dependencies/autona.spec --noconfirm` が通り、`scripts/gen_release.ps1` の検査 5 が OK（`Qt bundle as trimmed (_internal 344.4 MiB)`）。WebEngine のリンク依存の DLL（Qt6Quick / Qml / QmlMeta / QmlModels / QuickWidgets / OpenGL / WebChannel / Positioning / PrintSupport / Network / Svg）・`QtWebEngineProcess.exe`・resources の 6 つ・locale の en-US / ja・Python の `libssl-3.dll` / `libcrypto-3.dll` が残り、`PySide6/qml/`・`*.debug.*`・`libssl-3-x64.dll` は無い
+    - ビルド: `pyinstaller dependencies/autona.spec --noconfirm` が通り、`scripts/gen_release.ps1` の検査 5 が OK（`Qt bundle as trimmed (_internal 344.4 MiB)`）。WebEngine のリンク依存の DLL（Qt6Quick / Qml / QmlMeta / QmlModels / QuickWidgets / OpenGL / WebChannel / Positioning / PrintSupport / Network）と qdarktheme が引く Qt6Svg・`QtWebEngineProcess.exe`・resources の 6 つ・locale の en-US / ja・Python の `libssl-3.dll` / `libcrypto-3.dll` が残り、`PySide6/qml/`・`*.debug.*`・`libssl-3-x64.dll` は無い
     - 実測: `dist/Autona/_internal` 346 MB（du）、`release-windows.zip` 216.9 MiB（SF-9 前は 282.7 MiB）。validator の上限 390 MiB はそのまま
     - 更新ヘルパーの確認: 2026-10-08 ビルドの v1.8.1 一式（`qml/` あり・debug の pak 5 つあり）の写しに、新しい zip の `assets/apply_update.ps1` を直接当てた（終わったプロセスの PID で）。`robocopy ok (3) [_internal]` → `update complete`、更新後の `_internal` に `qml/`・debug の pak・`libssl-3-x64.dll` が無く、locale は 2 つ、`_internal` 347 MB。ヘルパーが起こした exe が Web サーバーを立て（`GET /api/v1/state` 200、リザルトのレイアウト名は日本語）、共有ビュー（AppShell の EVENT ページ）が描かれ、オフスクリーンのサムネイルのプレビュー（`POST /thumbnail:preview`）が PNG を返した。ログに Qt / WebEngine の警告・エラーなし
   - 未: Designer の窓、英語の設定での表示、HTTPS の取得（start.gg・アセットの DL・更新確認。Python の ssl は残した DLL を使う）、地域設定が日英以外の端末。**アプリ内のアップデータ経由の旧版からの自動更新 E2E（全量・差分）は Runbook 手順 9 として公開後に必ず行う**（アップデータは公開リリースからしか取らない）
+- **レビュー対応**（2026-11-16。独立レビューの指摘 8 件、全件 低・ブロッカーなし）
+  1. `$qtForbidden` に excludes の効き目の検査を足した: excludes のモジュールの `.pyd` そのもの（`^PySide6/Qt(Quick|Qml|QuickWidgets|Positioning|UiTools|DataVisualization|OpenGL|OpenGLWidgets)\.pyd$`）と `^PySide6/pyside6qml\.abi3\.dll$`（`QtQml.pyd` の実行時。名前はインストール済みの PySide6 で確認。2026-11-16 の dist には無い）。テストは `.pyd` のパターンの選択肢 = spec の PySide6 の excludes、当たるファイル = その `.pyd` だけを pin し、`pyside6qml` は QML の族（`EXCLUDED_WITH_MODULE`）に足した。
+  2. `$qtRequired` に `PySide6/opengl32sw.dll`（判断 G で残すもの）・`PySide6/qt.conf`（PyInstaller が書く。インストール済みの PySide6 には無いのでテストは `WRITTEN_BY_PYINSTALLER` として扱う）・`PySide6/plugins/tls/qschannelbackend.dll`（OpenSSL のバックエンドを外した後の Qt の TLS）を足した。3 つとも dist に実在。
+  3. テストの `_validator_required` / `_validator_forbidden` は引用符の種類（`'` / `"`）に依らず拾い、ブロック内のコメントと空行以外の行数と拾えた件数が一致することを assert する（読めない行は落ちる）。
+  4. top-level の照合（`TOP_LEVEL_DLLS` は自分で書いた名前なので、照合は常に通る）は「インストール済みの PySide6 で実在するグループ」の照合から外した。代わりに「フィルタは Git の 2 つを落とし Python の 2 つを残す」という答えだけを pin する assert にし、そう書いた但し書きを付けた（ビルドが Python の 2 つを持ち Git の 2 つを持たないことは検査 5 の仕事）。
+  5. 検査 5 を実際に走らせるテスト `test_check_5_of_the_validator_on_synthetic_zips` を足した（Windows のみ・`powershell` が無ければ skip）。1 つの PowerShell で合成の zip を順に validator に当てる: 正常 1 件は OK。必須の欠け 1 件・禁止の混入（パターンごとに 1 件、14 件）・上限超え 1 件は、それぞれの理由で throw する（数秒）。
+  6. 古い値を実測に: `build-and-release.md` の `_internal` を 344.4 MiB（2026-11-16）、validator の上限のコメント、台帳のこの節の「変更」の Runbook の項（約 217 MiB（実測 216.9 MiB））と判断 7。実機の確認の DLL の列挙は、Svg を「qdarktheme が引く」として WebEngine のリンク依存と分けた。
+  7. Runbook 手順 9 に SF-9 固有の 1 項目を足した: 更新後の `_internal` に `qml/`・debug の pak・`libssl-3-x64.dll` が無いこと、共有ビューの描画とサムネイルのプレビューが動くこと。
+  8. OpenSSL のパターンをフォルダに縛らない形にした: spec は `_DROPPED_FILES`（パス）を `_DROPPED_NAMES`（ファイル名）に替え、どのフォルダでも先に判定する。validator は `(^|/)libssl-3-x64\.dll$`・`(^|/)libcrypto-3-x64\.dll$`・`(^|/)qopensslbackend\.dll$`。テストは 3 つの名前がどのフォルダでも落とされ禁止され、Python の OpenSSL と schannel / certonly のバックエンドは残ることを pin する。
+  - 検証: `tests/test_release_bundle.py` 11 passed（`tests/test_apply_update_robocopy.py` と合わせて 17 passed）。変異 8 件（検査 5 の禁止・必須・上限の throw をそれぞれ外す、`$qtRequired` に読めない行を足す、`.pyd` のパターンから UiTools を消す、validator の libssl を直下に限る、spec の名前の判定を消す、`qt.conf` を必須から消す）はどれも該当のテストが落ちた。`'` の必須の行は通る（引用符に依らない）。新しい validator を 2026-11-16 のビルドの zip に当てて OK（`_internal 344.4 MiB`）: プロジェクト直下の `release-windows.zip` は残っていなかったので、`gen_release.ps1` と同じ手順でプロジェクト直下の `Autona.exe` / `_internal`（dist と同じビルド）から一時フォルダに組み直した（4564 エントリ・216.9 MiB。直下の `_internal` は dist と同じ 346 MB）。並列ランナー全量 7495 passed / 0 failed / 2 skipped。

@@ -39,7 +39,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 - **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)）が
   QtWebEngine（`PySide6-Addons` に含まれる）を使用。`dependencies/requirements.txt` に含まれ `pip install -r` で自動導入される。
-  `_internal/` 全体は約 345 MiB（ADR-005 S-final SF-9 で未使用の Qt の同梱物を外した後の見込み。**実測で確定する**。
+  `_internal/` 全体は約 344 MiB（ADR-005 S-final SF-9 で未使用の Qt の同梱物を外した後。2026-11-16 のビルドの実測 344.4 MiB。
   SF-9 より前は 571 MiB）。うち `Qt6WebEngineCore.dll` が約 196 MB
 - **Qt の同梱物の削減（ADR-005 S-final SF-9）**: PyInstaller の Qt のフックが集めるがアプリが開かないものを
   `dependencies/autona.spec` が外す。外し方は 2 つ:
@@ -52,14 +52,16 @@ cp dist/Autona/Autona.exe ./Autona.exe
   - `Analysis` の後の `a.datas` / `a.binaries` のフィルタ（宛先パス）: debug 版の WebEngine リソース（`*.debug.pak` /
     `v8_context_snapshot.debug.bin`）、Qt 自身の翻訳（`translations/*.qm`。アプリは `src/i18n/Autona_*.qm` だけを読む）、
     en-US / ja 以外の `qtwebengine_locales`（他の言語は en-US.pak にフォールバック）、Git for Windows の mingw64 から PATH 経由で
-    混入する `libssl-3-x64.dll` / `libcrypto-3-x64.dll` と `plugins/tls/qopensslbackend.dll`（アプリの QtNetwork は
-    `QLocalSocket` / `QLocalServer` だけで TLS を使わない。Python の `ssl` は `libssl-3.dll` / `libcrypto-3.dll` で、こちらは残す）
+    混入する `libssl-3-x64.dll` / `libcrypto-3-x64.dll` と Qt の OpenSSL の TLS バックエンド `qopensslbackend.dll`（この 3 つは
+    ファイル名で、どのフォルダにあっても外す。アプリの QtNetwork は `QLocalSocket` / `QLocalServer` だけで TLS を使わない。
+    Python の `ssl` は `libssl-3.dll` / `libcrypto-3.dll` で、こちらは残す）
   - 外さないもの: `qtwebengine_devtools_resources.pak`・`Qt6Pdf.dll`・`opengl32sw.dll`・小さなプラグイン類（理由は台帳
     `docs/changes/architecture-modernization.md` の SF-9 節）
   - Qt モジュールを新しく import するとき: `tests/test_release_bundle.py` の `APP_QT_MODULES`（アプリが import する Qt モジュールの
     許可リスト。AST で pin）に足す前に、spec の excludes に入っていないこと・`validate_release_zip.ps1` の `$qtRequired` に要るものを足す
   - pin: `tests/test_release_bundle.py`（許可リスト・excludes を塞いだ状態での src / qtpy / qdarktheme の import・spec のフィルタと
-    validator の禁止パターン / 必須リストの突き合わせ・外す OpenSSL が Python のものでないこと）。ゲートは `validate_release_zip.ps1` の検査 5
+    validator の禁止パターン / 必須リストの突き合わせ・validator が excludes のモジュールの `.pyd` そのものを禁止すること・外す OpenSSL が
+    Python のものでないこと・検査 5 を合成の zip で実際に走らせること（Windows のみ））。ゲートは `validate_release_zip.ps1` の検査 5
 - **Qt binding は PySide6 固定（LGPL）**: PyQt6 (GPL v3) は MIT 配布と両立しないため使用禁止。
   環境に PyQt6 が同居していると qtpy の自動検出が PyQt を優先して混在事故になるため、必ずアンインストールする
 - **フォント**: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
