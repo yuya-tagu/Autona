@@ -178,9 +178,11 @@ release だけを publish し、アップデーターはそちらを参照する
   **何も掃除せず即 exit 0**、(2) `_UpdateDialog._StartDownload` はロック検出時に
   ダウンロード自体を拒否（DL先も共有 workdir のため）、(3) `UpdateProcedure()` 入口でも
   ロック検出時はヘルパーを spawn しない
-- **進行中アップデートの保護（2026-07-15 追加 / 2026-07-16 改訂）**: ヘルパーは実行中
+- **進行中アップデートの保護（2026-07-15 追加 / 2026-07-16 改訂）**: ヘルパーは
   `%TEMP%\autona_update\update_in_progress.lock` を排他モード（FileShare.None）で
-  保持する。アプリはこのロックを検出すると (1) main.py の起動ゲートで
+  保持する（2026-11-16 改訂: 保持するのは robocopy が終わるまで。exe を起動する前に必ず手放す。
+  起動の後まで握っていたため、新しい exe がゲートで黙って終了し、再起動しなかった。v1.8.1→v2.0.0 の E2E で発覚。
+  `tests/test_apply_update_relaunch.py` が順序を pin）。アプリはこのロックを検出すると (1) main.py の起動ゲートで
   **何も表示せず即 `sys.exit(0)`**（インストール画面を前面に出すだけ）し、
   (2) `CleanupUpdateLeftovers()` は workdir 掃除をスキップする。
   **ゲートでモーダルを出してはいけない**: そのプロセス自身が `Autona.exe` であり、

@@ -75,9 +75,11 @@ _CREATE_NO_WINDOW = 0x08000000
 _LEGACY_RENAME_SUFFIX = ".autona_old"
 
 # Lock file the external helper (apply_update.ps1) holds with an exclusive
-# share mode for its entire run. While held, a freshly started app must not
-# purge the workdir (CleanupUpdateLeftovers below) and refuses to start at all
-# (gate in main.py — duplicated there because importing src boots Qt).
+# share mode until the mirror is done; it releases the lock right before it
+# relaunches the app (tests/test_apply_update_relaunch.py). While held, a
+# freshly started app must not purge the workdir (CleanupUpdateLeftovers
+# below) and refuses to start at all (gate in main.py — duplicated there
+# because importing src boots Qt).
 _UPDATE_LOCK_NAME = "update_in_progress.lock"
 
 # Held by _DownloadThread while a diff download is building the staging dir
