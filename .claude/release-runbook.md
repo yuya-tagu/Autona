@@ -92,9 +92,12 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 旧 staging `Autona/` と旧 zip はスクリプト冒頭で自動削除される（`Compress-Archive -Update` の
 残留事故はスクリプト側で根絶済み）。zip は .NET ZipArchive で **エントリ名を `/` 区切り**で
 生成し、末尾で `scripts/validate_release_zip.ps1` により自己検証する
-（`OK: N entries, all '/' separators, runtime trees contain tracked files only` が出ること）。
+（`OK: N entries, all '/' separators, runtime trees contain tracked files only, Qt bundle as trimmed (_internal X MiB)` が出ること）。
 検証内容は ① 区切り文字 ② **assets/layout/user_data に git 管理外ファイルが混入していないこと**
-（テスト大会アイコン等の開発時データ遮断。v1.3.0 差し替えアセットで実際に混入）。
+（テスト大会アイコン等の開発時データ遮断。v1.3.0 差し替えアセットで実際に混入）③ 保存済み state が入っていないこと
+④ **Qt の同梱物**（ADR-005 S-final SF-9: WebEngine とそのリンク先の Qt DLL などの必須ファイルがあること・spec が外した QML / debug
+リソース / Qt の翻訳 / 日英以外の locale / Git の OpenSSL が無いこと・`_internal` が上限以下）。④ で落ちたら PyInstaller / PySide6 の
+更新でフックの集めるものが変わった疑い。`dependencies/autona.spec` を直す（zip を手で直さない）。
 **`Compress-Archive` に戻してはならない**: PS 5.1 では `\` 区切りエントリになり、インストール済み
 ヘルパー apply_update.ps1 が 1 ファイルも展開できず自動更新が無音で不発になる（v1.3.0 で実際に発生）。
 
@@ -102,7 +105,7 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 cd <プロジェクトルート>
 .\scripts\gen_release.ps1
 Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging 掃除
-"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 280〜290 MiB 前後が正常（v1.5.0 の PyInstaller excludes 適用後の実績: v1.5.1 / v1.6.0 とも 282.7 MiB。大きく外れたら同梱物を確認）
+"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 約 215 MiB 前後が正常の見込み（ADR-005 S-final SF-9 で Qt の同梱物を削減。SF-9 で更新、最初のビルドの実測で確定して書き換える。SF-9 より前の実績は v1.5.1 / v1.6.0 とも 282.7 MiB。大きく外れたら同梱物を確認）
 ```
 
 ### 8. リリースノートを作成して publish

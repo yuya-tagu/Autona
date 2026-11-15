@@ -8515,7 +8515,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
 - **オーナー確認が要るもの（SF-4a / SF-5b の前まで）**
   - ガイド類（API・Companion・OBS・アセット・About）が別ウィンドウからメインビューのページになる（並べて見られなくなる）
   - SF-5b: サイドバー・ヘッダ・フッターが React の見た目になる／大会 URL 入力がページ内ダイアログになる／起動時は Web サーバー起動までオーバーレイ、起動失敗時はエラーページだけになる
-  - SF-9（同梱物の削減）をやるか（配布物が変わる）
+  - SF-9（同梱物の削減）をやるか（配布物が変わる）→ 2026-11-15 オーナー承認（調査結果の A〜D を外す。E〜H は外さない。SF-9 節）
   - SF-8 の spike が失敗したとき残るリスクを受け入れるか
 - **段**
 
@@ -8533,7 +8533,7 @@ S-final（§4.2 の最終段）を 10 段（SF-1〜SF-10。すべて直列・ス
   | SF-5b | Window をホスト 1 枚に: `QStackedWidget`・`AutonaSidebar`・メニュー・ステータスバー・大会 `QDialog`・ゲームメニュー削除。`sidebarIndex_v22` → 最後のページ名（旧キー 1 回読み替え）。`OpenScoreSets` / `OpenSettings` はナビゲーションに。初回描画まで LoadingOverlay。Web サーバー起動失敗はローカルのエラーページ。完了 pin | 高 | SF-5a・オーナー確認 |
   | SF-6 | `run_sync` の見直しとローダー統合: core の `GameLoader` を両シェルで共有。メインスレッド移動は注入に（不要なら外す）。`HeadlessGames` とアダプタの重複削除。3 段（SF-6a テスト / 6b core へ統合 / 6c `run_sync` をやめる）。**SF-6a〜6c 実施済み**（2026-11-15） | 高 | SF-5b |
   | SF-7 | i18n の締め: core の translate 注入（`ThumbnailService:453` / `ResultService:834`）をコード＋core の小さな ja/en 表に。`.ts` を許可リストまで削って pin。**実施済み**（2026-11-15） | 通常 | SF-6 |
-  | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales） | 高 | SF-5b 以降・オーナー判断 |
+  | SF-9（任意） | 同梱物の削減（未使用 Qt モジュール・WebEngine locales）。**実施**（2026-11-15。オーナー承認の A〜D） | 高 | SF-5b 以降・オーナー判断 |
   | SF-10 | 文書の締め: ADR-005 追記（WebView2 判断・完了）、Design.md・CLAUDE.md・python-widgets.md・pitfalls・台帳 | 軽微 | 全部 |
 
 - **順序の変更（2026-11-14 SF-3a のレビュー・SF-8 の spike の後）**: SF-1 → SF-2 → SF-3a → SF-8a → SF-8b → SF-3b → SF-4a → …。SF-8a / 8b を SF-4a より前に入れる（今の main で同一オリジンのプレビューが Designer・既定ブラウザを開ける実在のリスク）。トークンの表示・再発行のルートは SF-3a から外して SF-4a へ。SF-6a（テストだけ）は空いた所で
@@ -9366,3 +9366,62 @@ SF-4a の後半。Qt の 3 窓（API 設定 = リファレンス & テスター�
 - **実機の確認**
   - 確認済み（2026-11-15・メインセッション・隔離データ）: 起動中に Qt の UI が出ないこと、旧 index 10 → playerBrowser、lastPanel と折りたたみの復元、load_set のホットキー、最前面表示のまま更新のダイアログが裏に隠れないこと、ポートの衝突。レビュー対応の後: リザルトへ移ってサイドバーを隠した直後にレジストリへ `lastPanel=result` / `navCollapsed=true` が書かれ、プロセスを強制終了（closeEvent なし）しても残った。
   - 未: 再試行の表示、20 秒の上限（LAN の確認の最中には時間切れにならないこと）、メニューのページでの保存、日本語の文言（どれも pytest で pin 済み）。
+
+##### SF-9 同梱物の削減（2026-11-15）
+
+区分: 高（ビルド / リリース設定）。基点 ef98e310。オーナーが調査結果の A〜D を外すことを承認（E〜H は外さない）。基準は既存の `dist/Autona/_internal`（2026-10-08 ビルド、PySide6 6.11.0 / PyInstaller 6.19.0、571 MiB）。
+
+- **変更**
+  - `dependencies/autona.spec`:
+    - excludes に `PySide6.QtQuick` / `QtQml` / `QtQuickWidgets` / `QtPositioning` / `QtUiTools` / `QtDataVisualization` / `QtOpenGL` / `QtOpenGLWidgets` を追加（B）。
+    - `Analysis` の後に `a.datas` / `a.binaries` を宛先パスでフィルタする `_unused_qt_file`（A・C・D）。区切りは `/` に揃え、大文字小文字を区別しない。残す locale は `_KEPT_WEBENGINE_LOCALES`、外す個別のファイルは `_DROPPED_FILES`。
+  - `scripts/validate_release_zip.ps1`: 検査 5（Qt の同梱物）を追加。
+    - (a) 必須 `$qtRequired`: WebEngine とそのリンク先の Qt DLL 16 個・`QtWebEngineProcess.exe`・Python の Qt モジュール 9 個（アプリの 6 個と、WebEngine が import する QtPrintSupport / QtWebChannel、qdarktheme の QtSvg）・resources の 6 ファイル・locale の en-US / ja・`qwindows` / `qsvgicon` / `qsvg` のプラグイン・Python の `libssl-3.dll` / `libcrypto-3.dll`。大文字小文字を区別しない。
+    - (b) 禁止 `$qtForbidden`（正規表現と理由）: `PySide6/qml/`・`plugins/qmltooling/`・`Qt6Quick3D*`・`Qt63D*`・`Qt6Graphs*`・`*.debug.pak`・`*.debug.bin`・`translations/*.qm`・日英以外の locale・`libssl-3-x64.dll`・`libcrypto-3-x64.dll`・`qopensslbackend.dll`。
+    - (c) `_internal` の展開後の合計が `$internalMaxMiB`（390 MiB）以下。
+    - OK の行に `Qt bundle as trimmed (_internal X MiB)` を足した（読む側は無い）。
+  - `tests/test_release_bundle.py`（新規）:
+    - アプリ（src・`main.py`・`autona_splash.py`）が import する Qt モジュールの許可リスト `APP_QT_MODULES` を AST で pin（関数の中の import・文字列のモジュール名・`from qtpy import <小文字の名前>`（`shiboken` を除く）も拾う）。
+    - spec の excludes に、アプリと WebEngine / qdarktheme が import する Qt モジュールが無いこと。validator の必須の `.pyd` がちょうどそれ。
+    - subprocess で spec の excludes 全部の import を失敗させ、src の全モジュール（`src.Autona` を除く 85 個）・qtpy の Qt モジュール・qdarktheme を import する。全部通り、読み込まれる PySide6 の Qt モジュールが許可リストと依存の 3 つの中。
+    - インストール済みの PySide6 の全ファイル（と top-level の DLL 名）で、spec のフィルタと validator の禁止パターンが一致する（フィルタの範囲の中で、落とす = 禁止。範囲の外は落とさない）。フィルタで説明できない禁止パターンは QML の族だけで、それを集めるモジュールが excludes にある。どのパターンもインストール済みのファイルに当たる（死んだパターンが無い）。
+    - validator の必須がフィルタにも禁止にも掛からず、インストール済みの PySide6 にある（Qt の更新で名前が変わればビルドの前に落ちる）。サイズの上限が SF-9 より前の 571 MiB より小さい。
+    - Python の `_ssl.pyd` が `libssl-3.dll` / `libcrypto-3.dll` を読み、`-x64` の名前を読まない（外す OpenSSL が Python のものでない）。
+    - フィルタが `a.datas` と `a.binaries` の両方に、Analysis の後・COLLECT の前に掛かる。
+  - 文書: `.claude/rules/build-and-release.md`（サイズ・SF-9 の削減の節・validator の検査・robocopy の 2 段（`_internal` は `/MIR`）の記述を実装に合わせた）、`.claude/release-runbook.md` 手順 7（OK の行・検証内容 ④・zip のサイズの見込み 約 215 MiB。実測で確定する）、`scripts/README.md`。
+- **外したもの（2026-10-08 ビルドでの大きさ）**
+  - A: `PySide6/resources/*.debug.pak` と `v8_context_snapshot.debug.bin`（77.2 MiB）。Release の `Qt6WebEngineCore.dll` は debug の名前を持たない（DLL の文字列で確認。持つのは `qtwebengine_resources(_100p/_200p).pak`・`qtwebengine_devtools_resources.pak`・`v8_context_snapshot.bin`・`icudtl.dat`・`qtwebengine_locales`）。
+  - B: QML 一式。`qml/`・`plugins/qmltooling`・`plugins/position` と 8 つの `.pyd`（34.0 MiB）、それらにしか使われない DLL 102 個（Quick3D・3D・Graphs・Charts・Location・Multimedia・QuickControls2・Scxml・Sensors・WebEngineQuick・WebView・RemoteObjects・Test・Sql・`pyside6qml.abi3.dll` ほか。約 77 MiB）。DLL の数と大きさは、残る `.pyd` / exe / プラグインからリンクを辿って届かないものを数えた見積もり。
+  - C: `PySide6/translations/*.qm`（157 個）と、en-US / ja 以外の `qtwebengine_locales`（51 個）（合計 51.2 MiB）。
+  - D: `libssl-3-x64.dll` / `libcrypto-3-x64.dll`（Git の mingw64 版。msvcrt にリンク）と `plugins/tls/qopensslbackend.dll`（6.8 MiB）。
+  - 見込み: `_internal` 571 → 約 345 MiB（A・C・D はフィルタを 2026-10-08 の木に当てて 135.2 MiB、B は上の見積もり。`opengl32sw.dll` はリンクされず QtGui のフックが直接集めるので残る）。zip は約 215 MiB の見込み。
+- **判断**
+  1. **外さないもの（E〜H）**:
+     - E: `qtwebengine_devtools_resources.pak`（11.1 MiB）。Release の `Qt6WebEngineCore.dll` が名前で持つリソースで、読むのが DevTools だけだと言い切れない。WebEngine の起動と引き換えにしない。
+     - F: `Qt6Pdf.dll`（4.4 MiB）。`plugins/imageformats/qpdf.dll` のリンク先。外すにはプラグインを個別に落とす規則が要り、効果に見合わない。
+     - G: `opengl32sw.dll`（19.7 MiB）。ソフトウェア OpenGL。GPU ドライバが OpenGL を出せない環境（リモートデスクトップ・VM・古い GPU）での描画のフォールバックで、配信 PC の環境は選べない。
+     - H: 小さなプラグイン類（generic・platforminputcontexts（と `Qt6VirtualKeyboard.dll`）・styles・networkinformation・imageformats・platforms の qwindows 以外。合計 約 5 MiB）。1 つずつ使われないと確かめるコストに見合わない。
+  2. **spec の中で完結させる**: フックや hook ディレクトリは足さない。Python モジュールは excludes、データ・プラグイン・混入した DLL は `Analysis` の後の TOC のフィルタ（excludes では届かない）。
+  3. **必須の C++ DLL を `binaries` で足していない**: excludes は Python モジュールだけを外し、PyInstaller のバイナリ依存解析は Qt6WebEngineCore.dll（Qt6Quick・Qt6Qml・Qt6WebChannel・Qt6Positioning・Qt6Network）・Qt6WebEngineWidgets.dll（Qt6QuickWidgets・Qt6PrintSupport）・Qt6Quick.dll（Qt6QmlMeta・Qt6QmlModels・Qt6OpenGL）の import table から集める（インストール済みの DLL で PyInstaller の `bindepend.get_imports` を使って静的に確認）。落ちていれば validator の (a) がリリースを止める。
+  4. **qtpy は落ちない**: `qtpy.QtGui` は `PySide6.QtOpenGL`、`qtpy.QtWidgets` は `PySide6.QtOpenGLWidgets` を try / except ImportError で、`qtpy/__init__` は `QtDataVisualization` を `contextlib.suppress(ImportError, PythonQtError)` で試すだけ（qtpy 2.4.3 のコードで確認。subprocess の pin がこの振る舞いを見る）。`QtUiTools` は `qtpy.uic` からで、誰も import しない。
+  5. **OpenSSL**: アプリの QtNetwork は `QLocalSocket` / `QLocalServer`（`main.py` の単一インスタンス）だけで TLS を使わない。QtWebEngine の TLS は Chromium の自前。`qopensslbackend.dll` を外すと Qt の TLS の既定は schannel になる（使っていない）。Python の `ssl` / `hashlib` は `libssl-3.dll` / `libcrypto-3.dll` で、validator の必須に入れた。
+  6. **locale**: OS の言語が en / ja 以外のとき、Chromium の内部の文言（標準のコンテキストメニュー・フォームの検証の吹き出しなど）は en-US.pak の英語になる。ページの文言は i18next なので変わらない。
+  7. **サイズの上限は 390 MiB**: 名前の禁止（(b)）が知らないもの（新しいフックが集め始めたモジュール）の受け皿。見込み 約 345 MiB に 45 MiB の余裕。ビルドの実測で詰める。
+  8. **pin は静的**: CI（windows-latest）は PyInstaller を入れていないので、spec は AST で読み、フィルタの関数だけを compile して当てる。PowerShell の validator は pytest で走らせず、テキストで突き合わせる（`tests/test_apply_update_robocopy.py` と同じ形）。
+- **検証**
+  - `tests/test_release_bundle.py` 8 passed（`tests/test_apply_update_robocopy.py` と合わせて 14 passed）。
+  - 突き合わせの pin の変異 9 件（残す locale に fr を足す・`.qm` を落とさない・validator の libcrypto のパターンを消す・excludes に QtNetwork を足す・excludes から QtQml を消す・存在しない必須の DLL・ja を禁止・フィルタを datas だけに・上限を 600 に）は、どれも該当のテストが落ちた。
+  - validator を合成の zip 18 件で Windows PowerShell 5.1 から実行: 正常の 2 件（大文字小文字違いの `JA.pak` を含む）は OK、禁止の 13 件・必須の欠け 2 件・391 MiB の `_internal` 1 件はそれぞれの理由で throw。
+  - 既存の `release-windows.zip`（SF-9 より前・2026-10-08）に必須と禁止のリストを当てた: 必須は全部ある（名前が正しい）、禁止はどのパターンも当たる。validator 自体はこの zip を検査 2（git 管理外のファイル。その後に git から消えたもの）で先に落とす。
+  - spec のフィルタを 2026-10-08 の `_internal` の木に当てた: A・C・D の 216 ファイル・135.2 MiB を落とし、ほかは落とさない。
+  - 並列ランナー全量 7492 passed / 0 failed / 2 skipped（123 ファイル・4 ワーカー）。
+  - exe はビルドしていない・アプリは起動していない（メインセッションが行う）。
+- **残るリスク**
+  - 実際のビルドで確かめていない: PyInstaller 6.19 の TOC の宛先の形（フィルタは区切りと大文字小文字を揃えて見る）、excludes の下で Qt のフックが QML 一式を集めないこと、必須の DLL がバイナリ依存解析で残ること。どれも validator の検査 5 がリリースで止める。
+  - `qml/` の無い QtWebEngine: `QWebEngineView` は C++ の item で描き QML を読まない前提。共有ビュー・Designer の窓・オフスクリーンの描画（サムネイル・リザルト）を実機で確かめる。
+  - 自動更新: `_internal` は `/MIR` なので外したファイルは更新で消え、差分ダウンロードの staging も新しい zip のエントリだけで組む。v1.5.0 の教訓（excludes を足したら旧版からの自動更新で確かめる）どおり、次のリリースで Runbook 手順 9 を必ず行う。
+  - PyInstaller / PySide6 を上げると、フックの集めるものが変わりうる（validator が止める。上限は実測で付け直す）。
+  - en / ja 以外の OS の言語では、Chromium の内部の文言が英語（判断 6）。
+  - CI の `build_release.yml` でのビルドは以前から未検証のまま。
+- **実機の確認**（メインセッションがビルドと隔離データの起動で確かめて追記する）
+  - 未: `pyinstaller dependencies/autona.spec --noconfirm` が通り、`dist/Autona/_internal` に必須（validator の `$qtRequired`）があり禁止が無いこと（`scripts/gen_release.ps1` を通せば検査 5 が走る）、`_internal` と zip の実測（validator の上限と Runbook 手順 7 の帯を書き換える）、起動して共有ビュー（AppShell）・Designer の窓・サムネイル / リザルトのプレビューと生成・DevTools 以外の WebEngine の動き、ログに Qt / WebEngine の警告（QML のモジュールが無い・locale が無いなど）が出ないこと、英語の設定での表示。
