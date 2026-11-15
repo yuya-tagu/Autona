@@ -441,8 +441,8 @@ def _record(signal, events, tag):
 
 def _recordLoaded(events, tag="loaded"):
     """GameLoader.loaded's notifications, recorded as they are made -- on
-    the loader's thread, inside the load's board operation, after its save
-    cycle's close; the unsubscribe."""
+    the loader's thread, after the load's board operation and its save
+    cycle's close (GameLoader._Publish); the unsubscribe."""
     from src.core.GameLoader import GameLoader
 
     def told(_snapshot):
@@ -975,7 +975,7 @@ def test_a_loader_that_dies_between_loads_ends_the_request_it_left(
 
 def test_a_reload_asked_for_on_the_load_s_notification_is_served_by_the_same_loader(
         shell, autonaApp, monkeypatch):
-    """An observer of `loaded` -- on the loader's thread, inside the load's
+    """An observer of `loaded` -- on the loader's thread, after the load's
     board operation -- asks for another load: it does not deadlock (the
     loader holds no lock a request takes while it publishes), and the
     loader running serves it once this load is over, with no job of its
@@ -1556,6 +1556,74 @@ def _theBoardLockIsFree():
     assert taken == [True]
 
 
+# The steps _Publish isolates, as the shells' slots were (emit reported a
+# slot's exception and went on): where each is patched, and what it logs.
+ISOLATED_PUBLISH_STEPS = {
+    "the roster's commit": (
+        "actions", "CommitGameLoad",
+        "The loaded game's roster could not be written"),
+    "the pick": (
+        "loader", "PersistSelectedGame",
+        "The loaded game could not be kept for the next launch"),
+}
+
+
+@pytest.mark.parametrize("step", list(ISOLATED_PUBLISH_STEPS))
+def test_a_load_whose_isolated_step_raises_is_loaded_and_closes_its_cycle(
+        shell, autonaApp, monkeypatch, step):
+    """The roster's commit (AutonaActions.CommitGameLoad) or the pick
+    (GameLoader.PersistSelectedGame) raises inside the load's board
+    operation: logged with its traceback, and the load goes on -- LOADED,
+    its save cycle closed (no BlockSaving left: agent-pitfalls #6), no
+    recording of held writes left open or kept, `loaded` told once, the
+    board host's lock given back, and the next load goes through. (Until
+    ADR-005 S-final SF-6c the pick ran after the board operation, on the
+    main thread; the review of SF-6c asked for this pin.)"""
+    from src.core.Actions import AutonaActions
+    from src.core.StateManager import StateManager
+
+    where, name, message = ISOLATED_PUBLISH_STEPS[step]
+    target = AutonaActions.instance if where == "actions" else shell.loader
+    real = getattr(target, name)
+    raised = []
+
+    def failing(*args):
+        if raised:  # the next load's: the real step
+            return real(*args)
+        raised.append(threading.current_thread().name)
+        raise RuntimeError(f"{name} failed")
+
+    monkeypatch.setattr(target, name, failing)
+    told = []
+    undo = _recordLoaded(told)
+    records, stop = _logRecords()
+    try:
+        returned = shell.Load("game2")
+        drain_tasks()
+    finally:
+        stop()
+        undo()
+
+    assert shell.Answer(returned) == LOADED
+    assert len(raised) == 1 and raised[0] != _main()
+    logged = [record for record in records if record["message"] == message]
+    assert len(logged) == 1
+    assert logged[0]["level"].name == "ERROR"
+    assert logged[0]["exception"] is not None
+    assert len(told) == 1
+    assert autonaApp.get("game.codename") == "game2"
+    assert StateManager.saveBlocked == 0
+    assert StateManager.Recording() is False
+    assert StateManager._heldRecords == []
+    _theBoardLockIsFree()
+
+    after = shell.Load("tgame")
+    drain_tasks()
+    assert shell.Answer(after) == LOADED
+    assert autonaApp.get("game.codename") == "tgame"
+    assert StateManager.saveBlocked == 0
+
+
 @pytest.fixture
 def socketSends(monkeypatch):
     """The web server's Socket.IO sends, recorded, with its delta flusher
@@ -1619,6 +1687,9 @@ def test_a_game_change_sends_the_full_state_after_the_loads_delta(
     try:
         shell.Load("game2")
         drain_tasks()
+        # The push goes back to the main thread before it queues for the
+        # flusher (GuiExecutor.later; SF-6c review: the next test).
+        QApplication.processEvents()
         # The flusher's step: the open batch, then what waited for it.
         WebServer._flush_pending_deltas()
     finally:
@@ -1642,6 +1713,83 @@ def test_a_game_change_sends_the_full_state_after_the_loads_delta(
     # desktop's window relay and the loader's own wiring are not both in).
     assert kinds.count("program_state") == 1, kinds
     assert kinds.count("characters") == 1, kinds
+
+
+def test_a_game_change_s_full_state_waits_for_the_next_load_s_delta(
+        shell, autonaApp, socketSends, monkeypatch):
+    """Rapid switching (ADR-005 S-final SF-6c review): load A is told, and
+    the next load B opens its save cycle before the main thread gets to A's
+    game_loaded -- so A's push waits for that cycle (StateManager.
+    WhenPublished), and is let go on the loader's thread when B's close
+    publishes. B's delta is only queued to the main thread then (the
+    bridge's state_updated): a push that went to the flusher from there
+    sent the full state at B's revision ahead of B's delta. The push goes
+    back to the main thread first (GuiExecutor.later), behind that queued
+    delta. The flusher is stepped right after B's close, as a flusher
+    woken by the push would be, before the main thread runs a thing."""
+    from types import SimpleNamespace
+
+    from src.AutonaPlayerDB import AutonaPlayerDB
+    from src.AutonaWebServer import WebServer
+    from src.bootstrap import wire_web_server
+    from src.StateManagerBridge import StateManagerBridge
+
+    loader = shell.loader
+    entered, gate = threading.Event(), threading.Event()
+    realPublish = loader._Publish
+    publishes = []
+
+    def publish(*args):
+        publishes.append(1)
+        if len(publishes) == 2:
+            # B: its cycle open, its selection written.
+            entered.set()
+            assert gate.wait(WAIT)
+        return realPublish(*args)
+
+    monkeypatch.setattr(loader, "_Publish", publish)
+    bridge = StateManagerBridge.instance
+    server = SimpleNamespace(ws_game_changed=WebServer.ws_game_changed,
+                             on_games_change=lambda: None,
+                             ws_playerdb=lambda: None)
+    bridge.state_updated.connect(WebServer.on_program_state_update)
+    wire_web_server(server)
+    outcomes = []
+    try:
+        worker, outcome = _onAnotherThread(lambda: outcomes.extend([
+            loader._Load("game2", False, False, None),
+            loader._Load("tgame", False, False, None)]))
+        assert entered.wait(WAIT)
+        # A's delta and A's game_loaded reach the main thread; the push
+        # waits for B's open cycle.
+        for _ in range(3):
+            QApplication.processEvents()
+        gate.set()
+        worker.join(WAIT)
+        assert not worker.is_alive() and "error" not in outcome, outcome
+        WebServer._flush_pending_deltas()
+        for _ in range(3):
+            QApplication.processEvents()
+            WebServer._flush_pending_deltas()
+    finally:
+        gate.set()
+        bridge.game_loaded.disconnect(server.ws_game_changed)
+        bridge.games_scanned.disconnect(server.on_games_change)
+        AutonaPlayerDB.signals.db_updated.disconnect(server.ws_playerdb)
+        bridge.state_updated.disconnect(WebServer.on_program_state_update)
+
+    assert outcomes == [LOADED, LOADED]
+    sentRevision, fulls = -1, []
+    for event, payload in socketSends:
+        if event == "program_state_update":
+            assert payload["revision"] > sentRevision, socketSends
+            sentRevision = payload["revision"]
+        elif event == "program_state":
+            # Never ahead of the deltas sent before it.
+            assert payload["revision"] == sentRevision, socketSends
+            fulls.append(payload)
+    assert len(fulls) == 2, [event for event, _payload in socketSends]
+    assert fulls[-1]["state"]["game"]["codename"] == "tgame"
 
 
 def test_the_startup_restore_runs_when_the_provider_s_step_raises(

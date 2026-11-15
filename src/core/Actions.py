@@ -1340,8 +1340,11 @@ class AutonaActions:
 
         `replaced`: the game that load replaced -- the `replaced` of the
         snapshot the load itself returned (GameAssetSnapshot), which the
-        shell passes on. Not read here from the catalog's Current(): run
-        after the load is over (queued), that can be a later load's. When
+        game loader passes on (GameLoader._Publish). Not read here from the
+        catalog's Current(): the snapshot is the load's own, whatever the
+        catalog holds by then (the shells' slot ran after the load was
+        over, queued, and read a later load's that way, until ADR-005
+        S-final SF-6c moved this into the load's board operation). When
         it is set, every slot's characters and mains are emptied too,
         whatever their number (SetRoster's `forgetPicks`): the previous
         game's picks mean nothing in the new one, and left in the slots

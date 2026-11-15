@@ -28,6 +28,7 @@ from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import (
     SettingsManager, SettingsUnreadable, DEFAULT_WEBSERVER_PORT)
 from .core import WebAccess
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
     AutonaDesignerService,
@@ -1714,21 +1715,32 @@ class WebServer:
         gameChanged until then, and the desktop relayed it through the
         window's GameChanged until SF-6b).
 
-        Sent once the load is published, and after its delta (ADR-005 S3f-4
-        review), which a full state carrying the load's writes and revision
-        R+1 must not overtake. The loader tells the load once its save cycle
-        is closed, so the delta's own queued call (the bridge's
-        state_updated) reaches the flusher first, and _after_pending_deltas
-        sends the push after it. WhenPublished still waits for an open
-        cycle: until SF-6c the announcement ran inside the load's own, and a
-        cycle another thread holds open can still delay the publish -- the
-        last block to close publishes."""
+        Sent once what is written is published, and after its delta
+        (ADR-005 S3f-4 review), which a full state carrying those writes
+        and revision R+1 must not overtake: WhenPublished waits for an open
+        cycle -- a cycle another thread holds open (the next load's, on rapid
+        switching) still delays the publish; the last block to close
+        publishes, on its thread -- and the push then goes back to the main
+        thread (GuiExecutor.later) before it queues for the flusher
+        (_after_pending_deltas, which sends it after the deltas queued so
+        far). A publish on another thread queues its delta to the main
+        thread too (the bridge's state_updated, emitted inside the publish,
+        before the WhenPublished callbacks run), so the push lands behind
+        it. Queued for the flusher straight from the closing thread, it went
+        out ahead of that delta: the full state at the new revision, then
+        its delta (ADR-005 S-final SF-6c review; until SF-6c the closing
+        thread was the main thread, where the delta was delivered directly).
+        Never waited for: the callback may run inside StateManager.lock
+        (agent-pitfalls #17)."""
         def push():
             WebServer.ws_program_state()
             WebServer.ws_get_characters(None)
 
+        def queue():
+            WebServer._after_pending_deltas(push)
+
         StateManager.WhenPublished(
-            lambda: WebServer._after_pending_deltas(push))
+            lambda: AutonaQtHelper.gui_executor.later(queue))
 
     def ws_playerdb(message):
         logger.debug("Emitting playerdb info.")

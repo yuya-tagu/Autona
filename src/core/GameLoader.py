@@ -93,13 +93,16 @@ class _SaveCycle:
     """The one save cycle of a game load, opened on the loader's thread and
     closed there too: at the end of _Publish, or by the load when _Publish
     did not get to it (skipped, failed first). One BlockSaving, then one
-    ReleaseSaving (agent-pitfalls #6). The close publishes -- unless another
-    thread's SaveBlock is open then: the last block to close publishes, on
-    its thread. (It took a lock until ADR-005 S-final SF-6c, when the main
-    thread closed it in the marshalled _Publish while the loader's thread
-    could close it too.)"""
+    ReleaseSaving (agent-pitfalls #6), whichever caller gets to it first --
+    under a lock, so two closes never both release (one thread closes it
+    since ADR-005 S-final SF-6c, when the main thread stopped closing it in
+    the marshalled _Publish; the lock costs nothing and keeps the close
+    safe for a caller on another thread: SF-6c review). The close
+    publishes -- unless another thread's SaveBlock is open then: the last
+    block to close publishes, on its thread."""
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._open = False
 
     def Open(self):
@@ -109,9 +112,10 @@ class _SaveCycle:
     def Release(self):
         """Close the cycle (it publishes when it is the last open block);
         a no-op once it was closed."""
-        if not self._open:
-            return
-        self._open = False
+        with self._lock:
+            if not self._open:
+                return
+            self._open = False
         StateManager.ReleaseSaving()
 
 
@@ -288,11 +292,16 @@ class GameLoader:
         main one only (a web request: AutonaWebOperations.set_game); on the
         main thread it raises RuntimeError: its event loop would stop for
         the whole load, and a caller inside a board operation would wait
-        for a loader waiting for its lock. Over means published: the game,
-        its roster and the pick are in by then; what `loaded` sets off on
-        the main thread (the web push, the player DB's refresh) is queued
-        there and may still be to come (ADR-005 S-final SF-6c; it had run
-        too until then, when the main thread ran what follows a load).
+        for a loader waiting for its lock. Never make one from inside a
+        board operation (the board host's Run) on any thread, nor holding
+        StateManager.lock: it waits for the loader, whose _Publish waits
+        for those locks -- a deadlock the guard does not catch, as it looks
+        at the main thread only (ADR-005 S-final SF-6c review). Over means
+        published: the game, its roster and the pick are in by then; what
+        `loaded` sets off on the main thread (the web push, the player DB's
+        refresh) is queued there and may still be to come (ADR-005 S-final
+        SF-6c; it had run too until then, when the main thread ran what
+        follows a load).
 
         The latest request wins: a request still waiting for the loader when
         a newer one comes is not loaded (SUPERSEDED, nothing selected), so
