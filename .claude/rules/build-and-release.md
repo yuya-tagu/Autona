@@ -39,7 +39,29 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 - **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)）が
   QtWebEngine（`PySide6-Addons` に含まれる）を使用。`dependencies/requirements.txt` に含まれ `pip install -r` で自動導入される。
-  `Qt6WebEngineCore.dll` が約 196 MB あるため、`_internal/` 全体が 600 MB 超になるのは正常
+  `_internal/` 全体は約 344 MiB（ADR-005 S-final SF-9 で未使用の Qt の同梱物を外した後。2026-11-16 のビルドの実測 344.4 MiB。
+  SF-9 より前は 571 MiB）。うち `Qt6WebEngineCore.dll` が約 196 MB
+- **Qt の同梱物の削減（ADR-005 S-final SF-9）**: PyInstaller の Qt のフックが集めるがアプリが開かないものを
+  `dependencies/autona.spec` が外す。外し方は 2 つ:
+  - excludes（Python モジュール）: `PySide6.QtQuick` / `QtQml` / `QtQuickWidgets` / `QtPositioning` / `QtUiTools` /
+    `QtDataVisualization` / `QtOpenGL` / `QtOpenGLWidgets`。WebEngine のリンク依存から QtQuick が hidden import になり、
+    QtQml のフックが `qml/` 一式と QML プラグインとその DLL（Quick3D・3D・Graphs ほか）を集めていた。qtpy は QtOpenGL など
+    3 つを try で試すだけ。**C++ の DLL（Qt6Quick・Qt6Qml・Qt6QmlMeta・Qt6QmlModels・Qt6QuickWidgets・Qt6OpenGL・
+    Qt6WebChannel・Qt6Positioning・Qt6PrintSupport・Qt6Network）は外れない**（バイナリ依存解析が Qt6WebEngineCore.dll /
+    Qt6WebEngineWidgets.dll の import table から集める）
+  - `Analysis` の後の `a.datas` / `a.binaries` のフィルタ（宛先パス）: debug 版の WebEngine リソース（`*.debug.pak` /
+    `v8_context_snapshot.debug.bin`）、Qt 自身の翻訳（`translations/*.qm`。アプリは `src/i18n/Autona_*.qm` だけを読む）、
+    en-US / ja 以外の `qtwebengine_locales`（他の言語は en-US.pak にフォールバック）、Git for Windows の mingw64 から PATH 経由で
+    混入する `libssl-3-x64.dll` / `libcrypto-3-x64.dll` と Qt の OpenSSL の TLS バックエンド `qopensslbackend.dll`（この 3 つは
+    ファイル名で、どのフォルダにあっても外す。アプリの QtNetwork は `QLocalSocket` / `QLocalServer` だけで TLS を使わない。
+    Python の `ssl` は `libssl-3.dll` / `libcrypto-3.dll` で、こちらは残す）
+  - 外さないもの: `qtwebengine_devtools_resources.pak`・`Qt6Pdf.dll`・`opengl32sw.dll`・小さなプラグイン類（理由は台帳
+    `docs/changes/architecture-modernization.md` の SF-9 節）
+  - Qt モジュールを新しく import するとき: `tests/test_release_bundle.py` の `APP_QT_MODULES`（アプリが import する Qt モジュールの
+    許可リスト。AST で pin）に足す前に、spec の excludes に入っていないこと・`validate_release_zip.ps1` の `$qtRequired` に要るものを足す
+  - pin: `tests/test_release_bundle.py`（許可リスト・excludes を塞いだ状態での src / qtpy / qdarktheme の import・spec のフィルタと
+    validator の禁止パターン / 必須リストの突き合わせ・validator が excludes のモジュールの `.pyd` そのものを禁止すること・外す OpenSSL が
+    Python のものでないこと・検査 5 を合成の zip で実際に走らせること（Windows のみ））。ゲートは `validate_release_zip.ps1` の検査 5
 - **Qt binding は PySide6 固定（LGPL）**: PyQt6 (GPL v3) は MIT 配布と両立しないため使用禁止。
   環境に PyQt6 が同居していると qtpy の自動検出が PyQt を優先して混在事故になるため、必ずアンインストールする
 - **フォント**: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
@@ -85,7 +107,9 @@ release だけを publish し、アップデーターはそちらを参照する
   untracked / gitignored のため自動的に除外される。デフォルトは初回起動時に再生成される
   （ロゴ: `Window.__init__` が `assets/icons/icon.png` からシード）
 - **`scripts/validate_release_zip.ps1` が最終ゲート**: zip の区切り文字と
-  「assets/layout/user_data = git 管理ファイルのみ」を検証する。gen_release / publish_release の
+  「assets/layout/user_data = git 管理ファイルのみ」、保存済み state が入っていないこと、Qt の同梱物（検査 5。
+  WebEngine とそのリンク先の Qt DLL などの必須ファイルがあること・spec が外したものが無いこと・`_internal` の合計サイズの上限
+  `$internalMaxMiB`）を検証する。gen_release / publish_release の
   双方から自動で呼ばれ、手動 `gh release create` の前にも必ず単体実行する（Runbook 手順 8）。
   修復・手詰めした zip の publish は禁止（v1.3.0 差し替えアセットがこの経路でテスト大会
   アイコン等の開発時データを配布した）
@@ -120,8 +144,9 @@ release だけを publish し、アップデーターはそちらを参照する
    **親 Autona プロセス（PID）の完全終了を待つ**（= 全ファイルのロック解放）。
    `staging_prebuilt.marker` があれば展開をスキップ（**マーカー検査は zip 存在検査より
    前**が必須 — 差分DLでは zip が存在しない）。無ければ zip を staging に展開
-   （先頭 `Autona/` を strip・ZIP slip ガード）し、
-   `robocopy /E`（**`/PURGE` なし**）で install ディレクトリへ反映。新 `Autona.exe` を
+   （先頭 `Autona/` を strip・ZIP slip ガード）し、robocopy の 2 段で install ディレクトリへ反映する:
+   `_internal` は `/MIR`（リリースが 100% 所有。zip から外れたファイルは消える）、残りは `/E`（**`/PURGE` なし**・
+   `_internal` は `/XD`）。`tests/test_apply_update_robocopy.py` が pin。新 `Autona.exe` を
    起動して zip/staging/自分自身を後始末
 4. 失敗時（親 PID 残存・展開例外・robocopy `exit >= 8`）は**失敗ダイアログを出してから
    旧 exe を再起動**し `assets/update_log.txt` にログを残す（ユーザーを「何も起動しない」
@@ -131,9 +156,13 @@ release だけを publish し、アップデーターはそちらを参照する
 - アプリ終了後に動くため、ランチャ `Autona.exe`・ロード済み `_internal/*.dll`・
   mmap された WebEngine リソース（`v8_context_snapshot.bin`・`*.pak`・`icudtl.dat` 等）も
   **すべて置換可能**。旧来の in-place 上書き＋`.autona_old` リネーム退避は廃止
-- `robocopy /E`（PURGE なし）なので、release zip に含まれないユーザー資産
+- `_internal` 以外は `robocopy /E`（PURGE なし）なので、release zip に含まれないユーザー資産
   （`layout/game_images`・`user_data/` のアバター等）は**消えずに残る**。テンプレ
   layout は更新で上書きされる（期待動作）。旧来の `layout_backup_{time}` 退避は廃止
+- `_internal` は `/MIR` なので、PyInstaller の excludes や spec のフィルタで外したもの（v1.5.0 の numpy など、
+  ADR-005 S-final SF-9 の Qt の同梱物）は更新で消える。PURGE なしだった頃は、旧 `_internal` に残った numpy が namespace package
+  として import され、v1.4.1→v1.5.0 の自動更新後に起動できなくなった。**excludes / フィルタを変えたリリースは、Runbook 手順 9 の
+  「旧版からの自動更新」で確かめる**（フル zip の起動では見えない）
 - `CleanupUpdateLeftovers()`（`Autona.py` 冒頭・frozen のみ）は temp workdir 残骸と、
   旧版から移行したユーザーの legacy `Autona_old.exe` / `*.autona_old` を掃除する
 - **インストール中の画面（2026-07-16 追加）**: ヘルパーはスクリプト全体を通じて
