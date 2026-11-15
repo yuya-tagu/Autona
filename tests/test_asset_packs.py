@@ -1065,26 +1065,33 @@ def test_the_loaders_first_scan_puts_back_what_a_job_moved_aside(env):
 
 
 def _method(path, owner, method):
+    """`method` of class `owner` in src/`path` (a module function when
+    `owner` is None)."""
     tree = ast.parse((Path(__file__).resolve().parent.parent / "src" / path)
                      .read_text(encoding="utf-8"))
-    [cls] = [node for node in tree.body
-             if isinstance(node, ast.ClassDef) and node.name == owner]
-    [body] = [node for node in cls.body
+    scope = tree.body
+    if owner is not None:
+        [cls] = [node for node in tree.body
+                 if isinstance(node, ast.ClassDef) and node.name == owner]
+        scope = cls.body
+    [body] = [node for node in scope
               if isinstance(node, ast.FunctionDef) and node.name == method]
     return body
 
 
 @pytest.mark.parametrize("path, owner, method", [
-    ("AutonaGameAssetManager.py", "AutonaGameAssetManager", "UiMounted"),
-    ("headless.py", "HeadlessGames", "Start"),
+    ("Autona.py", "Window", "_BuildUi"),
+    ("headless.py", None, "Assemble"),
 ])
 def test_each_shells_startup_scan_is_its_first_scan(path, owner, method):
-    # Each shell's startup starts the loader (ADR-005 S-final SF-6b), whose
-    # Start submits the first scan; neither scans on its own.
+    # Each shell's startup starts the loader -- bootstrap_core()'s
+    # GameLoader.instance since ADR-005 S-final SF-6c (each shell's adapter
+    # started its own until then: the desktop's UiMounted, the headless
+    # Start) -- whose Start submits the first scan; neither scans on its own.
     body = _method(path, owner, method)
     calls = [ast.unparse(call.func) for call in ast.walk(body)
              if isinstance(call, ast.Call)]
-    assert "self.loader.Start" in calls
+    assert calls.count("GameLoader.instance.Start") == 1
     assert not [call for call in calls if call.endswith(
         ("._Scan", ".Scan", ".LoadGames", "._FirstScan"))]
     start = _method("core/GameLoader.py", "GameLoader", "Start")

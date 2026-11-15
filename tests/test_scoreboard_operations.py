@@ -207,38 +207,92 @@ def test_a_best_of_set_from_another_thread_reaches_the_board(autonaApp):
     assert autonaApp.get("score.1.best_of") == 5
 
 
-def test_a_game_load_publishes_what_its_slots_wrote(autonaApp):
-    """What an onLoad slot writes goes out with the load (a Qt player card's
-    ReloadCharacters wrote what its rows picked as it rebound them, until
-    ADR-005 S4ac-3): the commit, on gameLoaded with the roster since S4ad,
-    only queues the boards inside the load's save cycle, and the cycle's
-    close -- after every onLoad slot -- publishes what the load wrote by
-    then, its slots' writes included (_Publish records what the GUI thread
+def _rosterThatWrites(monkeypatch, team=1, name="THE LOAD"):
+    """The load's roster (AutonaActions.ApplyGameRoster), as it runs, plus a
+    write of a team name of board 1: something the load itself wrote."""
+    actions = _actions()
+    realRoster = actions.ApplyGameRoster
+
+    def roster(replaced):
+        applied = realRoster(replaced)
+        actions.SetTeamName(1, team, name)
+        return applied
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+
+
+def test_a_game_load_publishes_what_it_wrote_before_it_is_told(
+        autonaApp, monkeypatch):
+    """What the load writes goes out with it: the commit only queues the
+    boards inside the load's save cycle, and the cycle's close publishes
+    what the load wrote by then (_Publish records what the loader's thread
     writes; another writer's pending edit waits for 反映:
     test_a_game_load_publishes_only_what_it_wrote). Were it published at
     the commit, the 反映 button would stay lit after a load nobody edited (a
-    held write after the commit raises the flag and nothing lowers it)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.core.Actions import AutonaActions
+    held write after the commit raises the flag and nothing lowers it).
+    The load is told (GameLoader.loaded: the bridge's game_loaded) once all
+    of that is over -- the cycle closed, nothing of the load pending, the
+    board host's lock given back (ADR-005 S-final SF-6c). Until then the
+    announcement's slots ran inside the cycle (an onLoad slot's writes went
+    out with the load: a Qt player card's ReloadCharacters, until ADR-005
+    S4ac-3); a subscriber's write is someone else's now (the next test)."""
+    from src import AutonaWebOperations
+    from src.core.GameLoader import GameLoader
 
     autonaApp.ready(1)
+    state = autonaApp.state
+    _rosterThatWrites(monkeypatch)
+    told = []
 
-    def write():
-        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+    def loaded(_snapshot):
+        told.append((state.saveBlocked, state.HasPendingChanges("score.1"),
+                     state.GetCommitted("score.1.team.1.teamName"),
+                     AutonaWebOperations.boardHost._lock._is_owned()))
 
-    signals = AutonaGameAssetManager.instance.signals
-    signals.onLoad.connect(write)
+    GameLoader.loaded.subscribe(loaded)
     try:
         autonaApp.publishGameLoad()
     finally:
-        signals.onLoad.disconnect(write)
+        GameLoader.loaded.unsubscribe(loaded)
 
-    assert autonaApp.state.HasPendingChanges("score.1") is False
-    assert autonaApp.state.GetCommitted(
-        "score.1.team.1.teamName") == "written on onLoad"
+    assert told == [(0, False, "THE LOAD", False)]
+    assert state.HasPendingChanges("score.1") is False
 
 
-def test_a_game_load_that_wrote_the_board_leaves_nothing_pending(autonaApp):
+def test_what_a_subscriber_writes_on_a_load_waits_for_the_apply(
+        autonaApp, monkeypatch):
+    """A write made when the load is told is not the load's (ADR-005 S-final
+    SF-6c): told outside the load's recording and after its cycle, it waits
+    behind 反映 as any edit does, and 反映 publishes it. (Nothing in the app
+    writes the boards there: the bridge's receivers are the player DB's
+    refresh and the web server's push.)"""
+    from src.core.GameLoader import GameLoader
+
+    autonaApp.ready(1)
+    state = autonaApp.state
+    actions = _actions()
+    _rosterThatWrites(monkeypatch)
+
+    def loaded(_snapshot):
+        actions.SetTeamName(1, 2, "TOLD")
+
+    GameLoader.loaded.subscribe(loaded)
+    try:
+        autonaApp.publishGameLoad()
+    finally:
+        GameLoader.loaded.unsubscribe(loaded)
+
+    assert state.GetCommitted("score.1.team.1.teamName") == "THE LOAD"
+    assert state.GetCommitted("score.1.team.2.teamName") != "TOLD"
+    assert state.HasPendingChanges("score.1") is True
+    actions.ApplyChanges(1)
+    autonaApp.settle()
+    assert state.GetCommitted("score.1.team.2.teamName") == "TOLD"
+    assert state.HasPendingChanges("score.1") is False
+
+
+def test_a_game_load_that_wrote_the_board_leaves_nothing_pending(
+        autonaApp, monkeypatch):
     """The load's commit is queued inside its save cycle. The flag used to
     be lowered right there, with the keys still pending, so the board asked
     HasPendingChanges and kept the button lit; the drain that followed said
@@ -246,8 +300,6 @@ def test_a_game_load_that_wrote_the_board_leaves_nothing_pending(autonaApp):
     now comes from the drain: what the notifications last said is what
     HasPendingChanges says -- which is what lights the SCORE page's 反映
     (the Qt board's button, until ADR-005 S4ac-3)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-
     autonaApp.ready(1)
     actions = _actions()
     autonaApp.state.CommitHeld("score.1")
@@ -259,18 +311,13 @@ def test_a_game_load_that_wrote_the_board_leaves_nothing_pending(autonaApp):
         if prefix == "score.1":
             told.append((dirty, autonaApp.state.HasPendingChanges(prefix)))
 
-    def write():
-        actions.SetTeamName(1, 1, "written on onLoad")
-
-    signals = AutonaGameAssetManager.instance.signals
+    _rosterThatWrites(monkeypatch)
     channel = autonaApp.state.observers.held_dirty_changed
-    signals.onLoad.connect(write)
     channel.subscribe(onDirty)
     try:
         autonaApp.publishGameLoad()
     finally:
         channel.unsubscribe(onDirty)
-        signals.onLoad.disconnect(write)
 
     assert autonaApp.state.HasPendingChanges("score.1") is False
     assert told == [(True, True), (False, False)], (
@@ -290,7 +337,6 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
     the test above, through the Bridge as WebServer.__init__ connects it. The
     last thing a client hears is dirty: false, in whichever flushes the
     notices fell."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.AutonaWebServer import WebServer
     from src.core.Actions import AutonaActions
     from src.StateManagerBridge import StateManagerBridge
@@ -306,9 +352,7 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
         WebServer, "ws_emit",
         lambda event, *args, **kwargs: sent.append((event, args[0])))
     bridge = StateManagerBridge.instance
-
-    def write():
-        AutonaActions.instance.SetTeamName(1, 1, "written on onLoad")
+    _rosterThatWrites(monkeypatch)
 
     # A slot of this test's own: a server built earlier in the process has
     # WebServer.on_held_change connected too, and disconnecting that function
@@ -316,8 +360,6 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
     def told(prefix, dirty=None):
         WebServer.on_held_change(prefix, dirty)
 
-    signals = AutonaGameAssetManager.instance.signals
-    signals.onLoad.connect(write)
     bridge.held_state_updated.connect(told)
     bridge.held_dirty_changed.connect(told)
     try:
@@ -339,7 +381,6 @@ def test_after_a_game_load_the_clients_are_told_nothing_is_pending(
     finally:
         bridge.held_state_updated.disconnect(told)
         bridge.held_dirty_changed.disconnect(told)
-        signals.onLoad.disconnect(write)
 
 
 def _onAnotherThread(write):
@@ -367,28 +408,32 @@ def _loadWithOtherWriters(app, selecting=None, publishing=None):
     the game, and `selecting` run on another thread while it would select:
     a request's board operation, through the board host (whose lock nobody
     holds yet: the S4ad ledger's remainder 5, the window seen on the real
-    window). Then the GUI thread's end (the loader's _Publish, under the
-    board host's lock), with `publishing` run on another thread from a
-    gameLoaded slot -- after the wiring's roster and its commit, ahead of
-    the cycle's close: a core-direct write (score:adjust), which takes no
-    board lock."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    window). Then what follows the selection (the loader's _Publish, under
+    the board host's lock; run here on this thread, the loader's in the
+    app), with `publishing` run on another thread right after the roster's
+    commit, ahead of the cycle's close: a core-direct write (score:adjust),
+    which takes no board lock. (From a gameLoaded slot in that place, until
+    ADR-005 S-final SF-6c.)"""
+    from src.core.Actions import AutonaActions
     from src.core.GameAssetCatalog import GameAssetCatalog
-    from src.core.GameLoader import _SaveCycle
+    from src.core.GameLoader import GameLoader, _SaveCycle
 
-    manager = AutonaGameAssetManager.instance
+    actions = AutonaActions.instance
     published = []
 
     def onDelta(payload):
         published.append(payload.get("delta"))
 
-    def slot(_snapshot):
+    realCommit = actions.CommitGameLoad
+
+    def commit(written):
+        realCommit(written)
         if publishing is not None:
             _onAnotherThread(publishing)
 
     channel = app.state.observers.state_updated
     channel.subscribe(onDelta)
-    manager.signals.gameLoaded.connect(slot)
+    actions.CommitGameLoad = commit
     try:
         cycle = _SaveCycle()
         cycle.Open()
@@ -398,10 +443,11 @@ def _loadWithOtherWriters(app, selecting=None, publishing=None):
         except BaseException:
             cycle.Release()
             raise
-        manager.loader._Publish(GameAssetCatalog.instance.Current(), cycle)
+        GameLoader.instance._Publish(
+            GameAssetCatalog.instance.Current(), cycle)
         app.settle()
     finally:
-        manager.signals.gameLoaded.disconnect(slot)
+        del actions.CommitGameLoad
         channel.unsubscribe(onDelta)
     return published
 
@@ -411,15 +457,17 @@ def test_a_game_load_publishes_only_what_it_wrote(autonaApp, monkeypatch):
     switched reached OBS without 反映 -- a half-typed one (E10 / E12 of 40
     writes against six switches). The load's commit published everything
     pending on the board when the load's cycle closed, the operator's edits
-    with what the load wrote (the roster, the set length, onLoad's slots).
-    It publishes what the load wrote now: an edit pending before the load,
-    one a request made while the loader selected the game (a board
-    operation: the board host's lock is only taken in _Publish) and one
-    made while the load published (a core-direct write, which never takes
-    it) all stay behind 反映, and 反映 publishes them."""
+    with what the load wrote (the roster, the set length; the onLoad slots'
+    writes too until ADR-005 S-final SF-6c). It publishes what the load
+    wrote now: an edit pending before the load, one a request made while
+    the loader selected the game (a board operation: the board host's lock
+    is only taken in _Publish), one made while the load published (a
+    core-direct write, which never takes it) and one made when the load is
+    told (GameLoader.loaded, after the cycle) all stay behind 反映, and 反映
+    publishes them."""
     from src import AutonaWebOperations as WebOps
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core import StateSchema as schema
+    from src.core.GameLoader import GameLoader
 
     autonaApp.ready(1)
     state = autonaApp.state
@@ -444,12 +492,11 @@ def test_a_game_load_publishes_only_what_it_wrote(autonaApp, monkeypatch):
         actions.SetTeamName(1, 1, "THE LOAD")
         return applied
 
-    def onLoad():
-        actions.SetTeamName(1, 2, "ON LOAD")
+    def loaded(_snapshot):
+        actions.SetTeamName(1, 2, "TOLD")
 
     monkeypatch.setattr(actions, "ApplyGameRoster", roster)
-    signals = AutonaGameAssetManager.instance.signals
-    signals.onLoad.connect(onLoad)
+    GameLoader.loaded.subscribe(loaded)
     try:
         deltas = _loadWithOtherWriters(
             autonaApp,
@@ -457,19 +504,20 @@ def test_a_game_load_publishes_only_what_it_wrote(autonaApp, monkeypatch):
                 1, 1, 1, {tag: "E10"}),
             publishing=lambda: actions.SetScore(1, 1, 3))
     finally:
-        signals.onLoad.disconnect(onLoad)
+        GameLoader.loaded.unsubscribe(loaded)
 
     committed = state.GetCommitted
     # What the load wrote went out with it ...
     assert committed("score.1.team.1.teamName") == "THE LOAD"
-    assert committed("score.1.team.2.teamName") == "ON LOAD"
-    # ... and nothing of the operator's.
+    # ... and nothing of the operator's, nor what was written on its notice.
+    assert committed("score.1.team.2.teamName") != "TOLD"
     assert committed(first) == "PUBLISHED"
     assert committed(second) == secondBefore
     assert committed("score.1.team.1.score") == 0
     published = json.dumps(deltas, default=repr)
     assert "E10" not in published and "BEFORE" not in published
-    assert '"THE LOAD"' in published and '"ON LOAD"' in published
+    assert '"TOLD"' not in published
+    assert '"THE LOAD"' in published
     assert state.HasPendingChanges("score.1") is True
     assert autonaApp.get(first) == "E10"
 
@@ -479,6 +527,7 @@ def test_a_game_load_publishes_only_what_it_wrote(autonaApp, monkeypatch):
     assert committed(first) == "E10"
     assert committed(second) == "BEFORE"
     assert committed("score.1.team.1.score") == 3
+    assert committed("score.1.team.2.teamName") == "TOLD"
 
 
 def test_a_load_s_write_over_a_pending_edit_waits_with_it(
@@ -854,33 +903,32 @@ def test_a_board_hotkey_runs_under_the_board_host_s_lock(
 
 def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
         autonaApp, boardLock, monkeypatch):
-    """ADR-005 S4ad: the load's commit (AutonaActions.CommitGameLoad) is the
-    wiring's (bootstrap.wire_game_roster), in the save block of the roster
-    and the set length, once, on gameLoaded, ahead of every onLoad slot --
-    not the asset adapter's after onLoad, where it was while a Qt player
-    card wrote its rows on onLoad (until S4ac-3). Inside the load's own
-    cycle it only queues the board: what the load wrote is still pending
-    after it and through onLoad, and goes out, with what onLoad's slots
-    wrote, when _Publish closes the cycle. All of it under the board host's
-    lock, from the announcement to the close (the review: a board operation
-    of another thread landing before the close would go out with the commit,
-    without 反映) -- a lock _Publish takes itself, and gives back when it
-    returns. (The Qt models' rebuild was the first step under it until the
-    Qt model clean-up's PR4; _Publish's entry and exit are recorded in its
+    """ADR-005 S4ad: the load's commit (AutonaActions.CommitGameLoad), in
+    the save block of the roster and the set length, once. Inside the load's
+    own cycle it only queues the board: what the load wrote is still pending
+    after it, and goes out when _Publish closes the cycle. All of it under
+    the board host's lock (the review: a board operation of another thread
+    landing before the close would go out with the commit, without 反映) --
+    a lock _Publish takes itself, and gives back before the load is told
+    (GameLoader.loaded). The roster and the commit were the wiring's
+    (bootstrap.wire_game_roster, on gameLoaded, ahead of every onLoad slot,
+    whose writes went out at the close too) until ADR-005 S-final SF-6c,
+    which made them _Publish's own and tells the load after its operation.
+    (The Qt models' rebuild was the first step under the lock until the Qt
+    model clean-up's PR4; _Publish's entry and exit are recorded in its
     place. _Publish is core's GameLoader's since ADR-005 S-final SF-6b.)"""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.Actions import AutonaActions
-    from src.core.GameLoader import _SaveCycle
+    from src.core.GameLoader import GameLoader, _SaveCycle
 
     autonaApp.ready(1)
     state = autonaApp.state
     actions = AutonaActions.instance
-    manager = AutonaGameAssetManager.instance
+    loader = GameLoader.instance
     blocked = state.saveBlocked
     calls = []
     realCommit = actions.CommitGameLoad
     realRoster = actions.ApplyGameRoster
-    realPublish = manager.loader._Publish
+    realPublish = loader._Publish
     realRelease = _SaveCycle.Release
 
     def publish(*args):
@@ -901,50 +949,49 @@ def test_a_game_load_commits_inside_its_cycle_under_the_board_host_s_lock(
 
     def commit(written):
         realCommit(written)
-        # The load's cycle and the wiring's own block are open: queued.
+        # The load's cycle is open: queued. (The wiring opened a block of
+        # its own inside it too, until ADR-005 S-final SF-6c: 2.)
         calls.append(("commit", boardLock.held(),
                       state.saveBlocked - blocked,
-                      state.HasPendingChanges("score.1")))
-
-    def onLoad():
-        state.Set("score.1.team.2.teamName", "ON LOAD")
-        calls.append(("onLoad", boardLock.held(),
                       state.HasPendingChanges("score.1")))
 
     def release(cycle):
         calls.append(("close", boardLock.held()))
         return realRelease(cycle)
 
-    monkeypatch.setattr(manager.loader, "_Publish", publish)
+    def loaded(_snapshot):
+        calls.append(("told", boardLock.held(),
+                      state.HasPendingChanges("score.1")))
+
+    monkeypatch.setattr(loader, "_Publish", publish)
     monkeypatch.setattr(actions, "ApplyGameRoster", roster)
     monkeypatch.setattr(actions, "CommitGameLoad", commit)
     monkeypatch.setattr(_SaveCycle, "Release", release)
-    signals = manager.signals
-    signals.onLoad.connect(onLoad)
+    GameLoader.loaded.subscribe(loaded)
     try:
         autonaApp.publishGameLoad()
     finally:
-        signals.onLoad.disconnect(onLoad)
+        GameLoader.loaded.unsubscribe(loaded)
 
     assert calls == [("publish", False), ("roster", True, False),
-                     ("commit", True, 2, True), ("onLoad", True, True),
-                     ("close", True), ("published", False)]
-    # The close published both, with nothing left behind 反映.
+                     ("commit", True, 1, True), ("close", True),
+                     ("told", False, False), ("published", False)]
+    # The close published it, with nothing left behind 反映.
     assert state.HasPendingChanges("score.1") is False
     assert state.GetCommitted("score.1.team.1.teamName") == "THE LOAD"
-    assert state.GetCommitted("score.1.team.2.teamName") == "ON LOAD"
 
 
 def test_a_game_load_whose_roster_raises_still_commits(
         autonaApp, monkeypatch):
-    """The wiring commits whatever the roster does (ADR-005 S4ad review:
+    """The load commits whatever the roster does (ADR-005 S4ad review:
     try / finally): a roster that wrote, then raised, leaves nothing of the
     load waiting behind 反映 once the cycle closes. The asset adapter's
     _Publish (the loader's since ADR-005 S-final SF-6b) committed on every
-    path until S4ad. The exception is the
-    slot's: emit reports it and the load goes on (onLoad runs)."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    path until S4ad. The exception is logged, as a slot's was (the roster
+    was the wiring's gameLoaded slot until ADR-005 S-final SF-6c), and the
+    load goes on: it is told, with nothing pending."""
     from src.core.Actions import AutonaActions
+    from src.core.GameLoader import GameLoader
 
     autonaApp.ready(1)
     state = autonaApp.state
@@ -955,16 +1002,17 @@ def test_a_game_load_whose_roster_raises_still_commits(
         state.Set("score.1.team.1.teamName", "HALF A ROSTER")
         raise RuntimeError("the roster failed part-way")
 
+    def told(_snapshot):
+        loaded.append(state.HasPendingChanges("score.1"))
+
     monkeypatch.setattr(actions, "ApplyGameRoster", roster)
-    signals = AutonaGameAssetManager.instance.signals
-    onLoad = lambda: loaded.append(state.HasPendingChanges("score.1"))
-    signals.onLoad.connect(onLoad)
+    GameLoader.loaded.subscribe(told)
     try:
         autonaApp.publishGameLoad()
     finally:
-        signals.onLoad.disconnect(onLoad)
+        GameLoader.loaded.unsubscribe(told)
 
-    assert loaded == [True]
+    assert loaded == [False]
     assert state.HasPendingChanges("score.1") is False
     assert state.GetCommitted("score.1.team.1.teamName") == "HALF A ROSTER"
 

@@ -1550,11 +1550,11 @@ class WebServer:
     # battle format's notice: no value, sent by the one flusher after the
     # batch's deltas and the other notices, to everyone (the route is
     # READ), not debounced, several scans in one flush are one notice. Told
-    # by the shell (bootstrap.wire_web_server: the desktop's onLoadAssets,
-    # the headless loader's gamesScanned): emitted from the scan job, a Qt
-    # signal connected to this plain function arrives queued on the main
-    # thread (the headless shell's too). Queued under _delta_cond, so it is
-    # safe on any thread.
+    # by the bridge's games_scanned (core's GameLoader.scanned, connected by
+    # bootstrap.wire_web_server in both shells; the shells' onLoadAssets /
+    # gamesScanned until ADR-005 S-final SF-6c): emitted from the scan job,
+    # a Qt signal connected to this plain function arrives queued on the
+    # main thread. Queued under _delta_cond, so it is safe on any thread.
 
     @staticmethod
     def on_games_change(*_args):
@@ -1708,18 +1708,21 @@ class WebServer:
 
     def ws_game_changed(message=None):
         """A game was loaded: every client gets the full state and the new
-        character list, in that order. What the shells connect the loader's
-        announcement to (bootstrap.wire_web_server): the asset adapter's
-        onLoad on the desktop, the headless shell's gameChanged (ADR-005
-        S3c; the desktop relayed it through the window's GameChanged until
-        S-final SF-6b).
+        character list, in that order. On the bridge's game_loaded (core's
+        GameLoader.loaded; bootstrap.wire_web_server, both shells), queued
+        to the main thread (ADR-005 S-final SF-6c: the shells' onLoad /
+        gameChanged until then, and the desktop relayed it through the
+        window's GameChanged until SF-6b).
 
         Sent once the load is published, and after its delta (ADR-005 S3f-4
-        review). The announcement runs inside the load's save cycle (the
-        loader's _Publish), where the full state would already hold the
-        load's writes with the revision before them, and it would reach the
-        clients ahead of the R+1 delta: WhenPublished waits for the cycle,
-        _after_pending_deltas for the delta to go out first."""
+        review), which a full state carrying the load's writes and revision
+        R+1 must not overtake. The loader tells the load once its save cycle
+        is closed, so the delta's own queued call (the bridge's
+        state_updated) reaches the flusher first, and _after_pending_deltas
+        sends the push after it. WhenPublished still waits for an open
+        cycle: until SF-6c the announcement ran inside the load's own, and a
+        cycle another thread holds open can still delay the publish -- the
+        last block to close publishes."""
         def push():
             WebServer.ws_program_state()
             WebServer.ws_get_characters(None)

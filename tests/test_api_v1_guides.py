@@ -244,30 +244,25 @@ def _wire_web_server_call(path):
 
 
 def test_both_shells_tell_the_web_server_a_scan():
-    # The desktop's scan signal (the asset adapter's onLoadAssets, emitted
-    # by its scan job after ScanGames) and the headless loader's
-    # gamesScanned: bootstrap.wire_web_server connects either to
-    # WebServer.on_games_change (tests/test_bootstrap_split.py).
-    assert _wire_web_server_call(SRC / "Autona.py")[2] == (
-        "AutonaGameAssetManager.instance.signals.onLoadAssets")
-    assert _wire_web_server_call(SRC / "headless.py")[2] == (
-        "games.signals.gamesScanned")
+    # bootstrap.wire_web_server connects the bridge's games_scanned (core's
+    # GameLoader.scanned, told by the loader's scan) to
+    # WebServer.on_games_change (tests/test_bootstrap_split.py); each shell
+    # passes it its server alone (ADR-005 S-final SF-6c: and its loader
+    # adapter's scan signal -- the desktop's onLoadAssets, the headless
+    # gamesScanned -- until then).
+    assert _wire_web_server_call(SRC / "Autona.py") == ["self.webserver"]
+    assert _wire_web_server_call(SRC / "headless.py") == ["webserver"]
 
 
-@pytest.mark.parametrize("shell", ["desktop", "headless"])
-def test_a_scan_notice_arrives_on_the_main_thread(qapp, shell):
-    # The scan job emits from its own thread. WebServer.on_games_change is a
+def test_a_scan_notice_arrives_on_the_main_thread(autonaApp, qapp):
+    # The scan job tells core's GameLoader.scanned from its own thread, and
+    # the bridge re-emits it there. WebServer.on_games_change is a
     # staticmethod -- a plain function, no QObject to live in a thread -- so
-    # Qt queues the call to the main thread, the headless shell's too. (It
-    # only queues under _delta_cond, safe on any thread anyway.)
-    if shell == "desktop":
-        from src.AutonaGameAssetManager import AutonaGameAssetManagerSignals
-        signals = AutonaGameAssetManagerSignals()   # created on the main thread
-        signal = signals.onLoadAssets
-    else:
-        from src.headless import HeadlessSignals
-        signals = HeadlessSignals()
-        signal = signals.gamesScanned
+    # Qt queues the call to the main thread, in both shells. (It only
+    # queues under _delta_cond, safe on any thread anyway.)
+    from src.StateManagerBridge import StateManagerBridge
+    from src.core.GameLoader import GameLoader
+
     ran = []
 
     class Server:
@@ -275,28 +270,30 @@ def test_a_scan_notice_arrives_on_the_main_thread(qapp, shell):
         def on_games_change(*_args):
             ran.append(threading.current_thread())
 
-    signal.connect(Server().on_games_change)   # as bootstrap.wire_web_server
-    job = threading.Thread(target=signal.emit, name="scan job")
-    job.start()
-    job.join(30)
-    assert not job.is_alive()
-    assert ran == []        # not run on the scan job
+    signal = StateManagerBridge.instance.games_scanned
+    signal.connect(Server.on_games_change)   # as bootstrap.wire_web_server
+    try:
+        job = threading.Thread(target=GameLoader.scanned.notify,
+                               name="scan job")
+        job.start()
+        job.join(30)
+        assert not job.is_alive()
+        assert ran == []        # not run on the scan job
 
-    deadline = time.monotonic() + 30
-    while not ran and time.monotonic() < deadline:
-        qapp.processEvents()
-    assert ran == [threading.main_thread()]
+        deadline = time.monotonic() + 30
+        while not ran and time.monotonic() < deadline:
+            qapp.processEvents()
+        assert ran == [threading.main_thread()]
+    finally:
+        signal.disconnect(Server.on_games_change)
 
 
-def test_the_loader_s_scan_tells_it_after_scanning(qapp, monkeypatch):
+def test_the_loader_s_scan_tells_it_after_scanning(monkeypatch):
     """The loader's scan (core's GameLoader, both shells' since ADR-005
-    S-final SF-6b): the shell's signal emitted by the scan job right after
-    GameAssetCatalog.ScanGames (GET /games answers from that scan), and
-    what follows on the main thread after that."""
-    from types import SimpleNamespace
-
-    from src import headless
-    from src.Helpers import AutonaQtHelper
+    S-final SF-6b, one for both since SF-6c): `scanned` told by the scan
+    job right after GameAssetCatalog.ScanGames (GET /games answers from
+    that scan), and what follows on the main thread after that."""
+    from src.core.GameLoader import GameLoader
 
     order = []
 
@@ -304,30 +301,36 @@ def test_the_loader_s_scan_tells_it_after_scanning(qapp, monkeypatch):
         def ScanGames(self):
             order.append("scan")
 
-    monkeypatch.setattr(AutonaQtHelper, "gui_executor", SimpleNamespace(
-        later=lambda fn: order.append("then on the main thread")))
-    games = headless.HeadlessGames(Catalog(), provider=None)
-    games.signals.gamesScanned.connect(lambda: order.append("told"))
+    loader = GameLoader(
+        Catalog(), runOnBoard=None,
+        later=lambda fn: order.append("then on the main thread"),
+        unavailable=lambda: None, isMainThread=lambda: False)
 
-    games.loader.Scan()
+    def told():
+        order.append("told")
+
+    GameLoader.scanned.subscribe(told)
+    try:
+        loader.Scan()
+    finally:
+        GameLoader.scanned.unsubscribe(told)
 
     assert order == ["scan", "told", "then on the main thread"]
 
 
-@pytest.mark.parametrize("path, signal", [
-    ("AutonaGameAssetManager.py", "onLoadAssets"),
-    ("headless.py", "gamesScanned"),
-])
-def test_each_shell_hands_its_scan_signal_to_the_loader(path, signal):
-    # The signal each shell passes (bootstrap.wire_web_server connects it):
-    # the loader's `scanned`, which its scan calls (the test above).
-    tree = ast.parse((SRC / path).read_text(encoding="utf-8"))
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-             and ast.unparse(node.func) == "make_game_loader"]
-    assert len(calls) == 1, path
-    scanned = {keyword.arg: ast.unparse(keyword.value)
-               for keyword in calls[0].keywords}["scanned"]
-    assert scanned == f"self.signals.{signal}.emit", scanned
+def test_the_bridge_relays_the_loader_s_notifications():
+    # The loader's two channels reach the shells through the bridge alone
+    # (ADR-005 S-final SF-6c): it subscribes to both when it is built --
+    # before the loader is (bootstrap_core()) -- and re-emits them, with no
+    # value, as game_loaded / games_scanned.
+    tree = ast.parse((SRC / "StateManagerBridge.py")
+                     .read_text(encoding="utf-8"))
+    calls = {ast.unparse(node) for node in ast.walk(tree)
+             if isinstance(node, ast.Call)}
+    assert "GameLoader.loaded.subscribe(self._onGameLoaded)" in calls
+    assert "GameLoader.scanned.subscribe(self._onGamesScanned)" in calls
+    assert "self.game_loaded.emit()" in calls
+    assert "self.games_scanned.emit()" in calls
 
 
 # ── The app's version (/api/v1/health; the About page shows it) ─────────

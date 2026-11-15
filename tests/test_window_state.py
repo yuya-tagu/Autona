@@ -213,12 +213,11 @@ older.sync()
 del older
 
 from src import Autona
-from src.AutonaGameAssetManager import AutonaGameAssetManager
+from src.core.GameLoader import GameLoader
 
 Autona.QSettings = lambda *args: QSettings(
     qtSettings, QSettings.Format.IniFormat)
-AutonaGameAssetManager.instance.loader.DownloadStartGGCharacters = (
-    lambda: None)
+GameLoader.instance.DownloadStartGGCharacters = lambda: None
 
 window = Autona.Window()
 host = window._webPanelHost

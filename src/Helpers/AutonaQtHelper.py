@@ -36,10 +36,12 @@ _loopExited = threading.Event()
 def gui_unavailable_reason():
     """Why a call posted to the GUI thread now will not run, or None.
 
-    What run_sync gives up on (GuiMarshalAborted), and what a job about to
-    start work that ends in such a call checks first, so that it does not
-    begin -- write the state, say -- what it could not finish (the asset
-    adapter's game load, the headless loader; ADR-005 S3f-4 review)."""
+    What run_sync gives up on (GuiMarshalAborted), what the board host
+    refuses a late request on, and what the game loader reads: a load still
+    waiting for the loader is not started once the app is going away, and
+    one past its selection is published but not told (core's GameLoader;
+    ADR-005 S3f-4 review -- it waited for the GUI thread, which is why it
+    checked first, until ADR-005 S-final SF-6c)."""
     if _loopExited.is_set():
         return "the event loop has exited"
     if QCoreApplication.instance() is None:

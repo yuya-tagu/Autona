@@ -16,7 +16,7 @@ PlayerService.ApplyData since ADR-005 S3e-3, and the card went in S4ac-3).
 
 The fix isolates the custom-flag block in its own try/except and guarantees
 the directory with `os.makedirs(..., exist_ok=True)` first (the same pattern
-AutonaGameAssetManager uses for `./user_data/games`), so the standard flags
+the game catalog's scan uses for `./user_data/games`), so the standard flags
 load is never at the mercy of the optional add-on.
 """
 import shutil
@@ -46,7 +46,7 @@ def test_load_populates_the_catalog_without_additional_flag_dir(autonaApp):
 
 
 def test_load_countries_creates_the_missing_directory(autonaApp):
-    """Matches AutonaGameAssetManager's ./user_data/games pattern: the app
+    """Matches the game catalog's ./user_data/games pattern: the app
     guarantees its own optional data directories rather than erroring on a
     cleaned-out user_data."""
     _removeAdditionalFlagDir()

@@ -58,7 +58,8 @@ something that will not come once the event loop has stopped. A job must
 not do that: the one GUI-thread wait a job may make, the shell's marshal
 (GuiExecutor.run_sync, ADR-005 S3f-4), gives up once ``stopping`` is set or
 the event loop has exited, and a job that is about to start work ending in
-one checks for that first (the game load).
+one checks for that first. (The game load was that job until ADR-005
+S-final SF-6c; no job waits for the GUI thread now.)
 
 Waiting on the Futures: ``result()`` / ``exception()`` /
 ``add_done_callback`` and ``map_fanout`` see a cancellation at once.

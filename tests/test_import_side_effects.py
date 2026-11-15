@@ -3,7 +3,7 @@
 Step 3 of the startup redesign moves every singleton construction -- and
 every static data load -- out of module level and into src/bootstrap.py.
 This test pins down what has already been migrated: importing
-SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
+SettingsManager / StateManager / AutonaHotkeys / GameLoader /
 AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider
 / AutonaUpdater / AutonaShellOperations / AutonaExternalLinks /
@@ -105,8 +105,8 @@ core_state = importlib.import_module("src.core.StateManager").StateManager
 # importing the module must not.
 core_actions = importlib.import_module("src.core.Actions").AutonaActions
 # The game asset catalog (ADR-005 S1a): the Qt-free half of what used to be
-# AutonaGameAssetManager, a singleton created by bootstrap_core() as well
-# (the adapter itself by bootstrap_gui()).
+# the desktop's asset adapter (AutonaGameAssetManager, deleted in ADR-005
+# S-final SF-6c), a singleton created by bootstrap_core() as well.
 game_catalog = importlib.import_module(
     "src.core.GameAssetCatalog").GameAssetCatalog
 # The country catalog (ADR-005 S1c): the Qt-free half of what used to be
@@ -169,6 +169,11 @@ status_service = importlib.import_module(
 # bootstrap_core(); nothing fetched, scanned or written on import.
 asset_pack_service = importlib.import_module(
     "src.core.AssetPackService").AssetPackService
+# The game loader (ADR-005 S-final SF-6b; bootstrap_core()'s for both shells
+# since SF-6c, when each shell's adapter stopped building its own): nothing
+# scanned, loaded or submitted on import, and nobody told (only the bridge
+# subscribes, built by bootstrap_core()).
+game_loader = importlib.import_module("src.core.GameLoader").GameLoader
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -187,13 +192,12 @@ for _shim in ("src.SettingsManager", "src.StateManager",
     else:
         raise AssertionError(f"{_shim} compat shim is back")
 hotkeys = importlib.import_module("src.AutonaHotkeys").AutonaHotkeys
-game_assets = importlib.import_module(
-    "src.AutonaGameAssetManager").AutonaGameAssetManager
 # PlayerDB is imported explicitly, and before the provider that pulls it in
-# anyway, because its module tail used to reach into
-# AutonaGameAssetManager.instance.signals -- an import-time dependency on
-# another module's singleton. That wiring now lives in bootstrap_gui(), and
-# the relay to the core DB in bootstrap_core() (Attach).
+# anyway, because its module tail used to reach into the asset adapter's
+# signals (AutonaGameAssetManager.instance.signals) -- an import-time
+# dependency on another module's singleton. That wiring now lives in
+# bootstrap_core() (the bridge's game_loaded, ADR-005 S-final SF-6c), as
+# does the relay to the core DB (Attach).
 player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
 # The static-data modules. Their tails used to read the shipped
 # language/ngword/GraphQL files -- and, for the bad-word lists, to *create*
@@ -266,8 +270,11 @@ assert state_migrations.CURRENT_VERSION >= 1
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"
-assert game_assets.instance is None, \
-    "import created AutonaGameAssetManager.instance"
+assert game_loader.instance is None, "import created GameLoader.instance"
+assert game_loader.loaded.subscriber_count() == 0, \
+    "import subscribed to the game loads"
+assert game_loader.scanned.subscriber_count() == 0, \
+    "import subscribed to the game scans"
 assert tdp.instance is None, \
     "import created AutonaTournamentDataProvider.instance"
 assert updater.instance is None, "import created AutonaUpdater.instance"
@@ -453,7 +460,8 @@ assert state_persistence.Flush(30), "the store writer did not finish"
 assert os.path.isfile("./user_data/state.json"), \
     "a published save cycle did not write user_data/state.json"
 
-# Same for the game asset catalog and its Qt adapter (ADR-005 S1a). The
+# Same for the game asset catalog (ADR-005 S1a) and its loader (S-final
+# SF-6b; the Qt adapter that held the loader until SF-6c, likewise). The
 # ./user_data/games guarantee travels with the scan that lists it
 # (ScanGames()), and the empty "game" state is published by
 # ResetGameState() -- which is why StateManager.Initialize() has to run
@@ -464,9 +472,10 @@ assert not os.path.exists("./user_data/games"), \
 game_catalog.instance.ResetGameState()
 assert core_state.Get("game") == {"selected": False}, \
     "GameAssetCatalog.ResetGameState() did not publish an empty game"
-game_assets.instance = game_assets(game_catalog.instance)
+game_loader(game_catalog.instance, runOnBoard=None, later=None,
+            unavailable=None, isMainThread=None)
 assert not os.path.exists("./user_data/games"), \
-    "AutonaGameAssetManager() created ./user_data/games"
+    "GameLoader() created ./user_data/games"
 game_catalog.instance.ScanGames()
 assert os.path.isdir("./user_data/games"), \
     "GameAssetCatalog.ScanGames() did not create ./user_data/games"

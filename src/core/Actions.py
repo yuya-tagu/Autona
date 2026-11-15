@@ -1352,8 +1352,10 @@ class AutonaActions:
 
         What each built board did on the asset adapter's onLoad until ADR-005
         S3e-6, and what the headless shell did not do at all. Both shells run
-        it on a game load, through
-        the same wiring (bootstrap.wire_game_roster). A board without a
+        it on a game load: the game loader does, on its own thread, inside
+        the load's board operation (GameLoader._Publish; the shared wiring
+        bootstrap.wire_game_roster did on the shells' gameLoaded until
+        ADR-005 S-final SF-6c). A board without a
         roster -- one not made yet (every board is made at launch since
         ADR-005 S4ac-1; the desktop made a board as it built it until then)
         -- has nothing to follow: it gets the game's count when it is seeded.
@@ -1729,8 +1731,9 @@ class AutonaActions:
     def RepublishBestOfs(self) -> list:
         """A game load's `RepublishBestOf`, on every board that has a set
         length, in one save cycle; returns those boards. Both shells run it
-        with the load's roster (bootstrap.wire_game_roster); until ADR-005
-        S4t it was each built board's onLoad handler, so the headless shell
+        with the load's roster (GameLoader._Publish; bootstrap
+        .wire_game_roster until ADR-005 S-final SF-6c); until ADR-005 S4t it
+        was each built board's onLoad handler, so the headless shell
         did without it. A board not made yet has none, and gets one when it
         is made (`SeedFreshBoard`; every board at launch since ADR-005
         S4ac-1)."""
@@ -1847,17 +1850,20 @@ class AutonaActions:
         from the live state -- is no longer pending. Until the fix of
         2026-11-12 every pending key went out with the load.
 
-        Called with the roster and the set length the load writes, in their
-        save block, under the board host's lock (bootstrap.wire_game_roster,
-        in both shells since ADR-005 S4ad; even when they raise), and by the
-        game loader's settle of a load it does not announce (GameLoader
-        ._SettleStopped; the desktop asset adapter's _SettleUnannounced
-        until S-final SF-6b, which gave the headless shell the commit too).
-        Inside the load's own save cycle it only queues the boards: the
-        cycle's close publishes what the load wrote by then, onLoad's slots
-        included (the loader's _Publish records from gameLoaded's emit to
-        the close; from the Qt models' rebuild until the Qt model clean-up's
-        PR4). Until S4ad the desktop's asset
+        Called after the roster and the set length the load writes, even
+        when they raise, under the board host's lock, on the loader's thread
+        -- for a load the shutdown came to after its selection too (core's
+        GameLoader._Publish, both shells, since ADR-005 S-final SF-6c; until
+        then bootstrap.wire_game_roster on the shells' gameLoaded, in both
+        shells since ADR-005 S4ad, and the loader's settle of a load it did
+        not announce, _SettleStopped -- the desktop asset adapter's
+        _SettleUnannounced until S-final SF-6b, which gave the headless
+        shell the commit too). Inside the load's own save cycle it only
+        queues the boards: the cycle's close publishes what the load wrote
+        by then, the pick's included (the loader's _Publish records from the
+        roster to the close; from gameLoaded's emit until SF-6c, and from
+        the Qt models' rebuild until the Qt model clean-up's PR4). Until
+        S4ad the desktop's asset
         adapter called it after the load's onLoad slots
         (AutonaGameAssetManager._Publish), as a Qt player card's
         ReloadCharacters wrote what its rows picked on onLoad (until

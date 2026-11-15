@@ -23,13 +23,14 @@ What the window does at startup and this shell does too, in its own words:
   adapter);
 - the tournament provider's wiring (bootstrap.wire_tournament_data, the
   window's too) and the restore of the tournament URL;
-- the games: scanned and loaded by core's GameLoader, the desktop's too
-  (HeadlessGames: this shell's signals; ADR-005 S-final SF-6b), with the
-  provider's game re-applied after the scan and the last pick restored;
+- the games: scanned and loaded by core's GameLoader, bootstrap_core()'s
+  for both shells (ADR-005 S-final SF-6c; this shell's HeadlessGames held
+  its signals until then), with the provider's game re-applied after the
+  scan, the last pick restored, and a load's roster -- the 1v1 / team
+  boards go to the game's players per team (ADR-005 S3e-6) -- written by
+  the load itself;
 - the player DB, and the web server with the window's pushes
   (bootstrap.wire_web_server);
-- a game load's roster: the 1v1 / team boards go to the game's players per
-  team (bootstrap.wire_game_roster, the desktop's too; ADR-005 S3e-6);
 - the LAN exposure and the port check decided from settings.json and only
   logged: there is nobody to ask;
 - a stop on Ctrl+C / Ctrl+Break, on the console's close button and on
@@ -56,7 +57,7 @@ import traceback
 from pathlib import Path
 
 from loguru import logger
-from qtpy.QtCore import QMetaObject, QObject, Qt, QTimer, Signal
+from qtpy.QtCore import QMetaObject, Qt, QTimer
 
 
 # How long a console close waits for the shutdown before returning: Windows
@@ -132,74 +133,15 @@ def refuse_frozen_headless(message_box=None):
         pass
 
 
-class HeadlessSignals(QObject):
-    # A game was loaded (the desktop adapter's onLoad): the pick persisted
-    # (first), the player DB's refresh, the web server's push of the state
-    # and the characters.
-    gameChanged = Signal()
-    # The GameAssetSnapshot that load published, emitted just before
-    # gameChanged (the desktop adapter's gameLoaded; read by
-    # bootstrap.wire_game_roster). The load's own: the catalog's Current()
-    # can be a later load's by the time a slot reads it.
-    gameLoaded = Signal(object)
-    # The games were scanned (the desktop adapter's onLoadAssets, emitted
-    # from the scan job the same way): the web server tells the pages that
-    # GET /api/v1/games may have changed (bootstrap.wire_web_server;
-    # ADR-005 S-final SF-3a).
-    gamesScanned = Signal()
-
-
-class HeadlessGames:
-    """The headless shell's notifications of the game loader (no Qt
-    adapter): the counterpart of the desktop's AutonaGameAssetManager.
-
-    The startup scan and start.gg character download, the loads by codename,
-    the selector the tournament provider loads its game through, the
-    provider's game re-applied after a scan and the last pick persisted and
-    restored are core's GameLoader (`loader`), the desktop's too since
-    ADR-005 S-final SF-6b: one save cycle per load, the roster and its
-    commit inside it, the footer's progress, a Future for every request.
-    (Until SF-6b this class held its own copy of the loader, which had
-    drifted: the selection published alone, the roster in a cycle of its
-    own, the pick ahead of the roster, nothing committed by a load the
-    shutdown stopped.) What is left here is this shell's signals, emitted
-    as the desktop adapter emits its own.
-    """
-
-    def __init__(self, catalog, provider=None):
-        # The composition root's: what both shells give their loader.
-        from .bootstrap import make_game_loader
-
-        self.catalog = catalog
-        self.signals = HeadlessSignals()
-        self.loader = make_game_loader(
-            catalog, announce=self._Announce,
-            scanned=self.signals.gamesScanned.emit,
-            afterScan=provider.SetGameFromProvider if provider else None)
-        # First, so it runs ahead of the other slots on gameChanged
-        # (Assemble's): the next launch's pick.
-        self.signals.gameChanged.connect(self.loader.PersistSelectedGame)
-
-    def Start(self):
-        """The startup's scan, restore and start.gg download (the
-        loader's)."""
-        self.loader.Start()
-
-    def _Announce(self, snapshot):
-        # The loader's announcement, inside its board operation on the main
-        # thread (GameLoader._Publish): gameLoaded ahead of gameChanged.
-        self.signals.gameLoaded.emit(snapshot)
-        self.signals.gameChanged.emit()
-
-
 class HeadlessShell:
     """The running shell: what the stop handlers, the shutdown and the
     tests need. Made before the assembly (run() installs the stop handlers
-    on it first); Assemble() fills in the games and the web server."""
+    on it first); Assemble() fills in the web server. (It held this shell's
+    game loader adapter, HeadlessGames, until ADR-005 S-final SF-6c: the
+    loader is bootstrap_core()'s, GameLoader.instance.)"""
 
-    def __init__(self, app, games=None, webserver=None):
+    def __init__(self, app, webserver=None):
         self.app = app
-        self.games = games
         self.webserver = webserver
         # Set by the first stop request. One that comes while the shell is
         # being assembled finds no event loop to quit; run() looks at this
@@ -240,15 +182,17 @@ class HeadlessShell:
         # Short for the same reason as the server's: queued tasks are
         # cancelled at once, and a running one is told to stop. The game
         # loader is one (ADR-005 S3f-6; it was a daemon thread nothing
-        # waited for): one waiting for the main thread gives up at once and
-        # writes what follows its selection itself (core's GameLoader
-        # ._SettleStopped), so the flush below holds one game. One still
+        # waited for): a load past its selection finishes on its own thread
+        # -- the roster, the pick, its save cycle published, unannounced --
+        # without waiting for the main thread (core's GameLoader._Publish;
+        # ADR-005 S-final SF-6c: it waited for it until then, gave up here
+        # and settled), so the flush below holds one game. One still
         # selecting past the wait is joined by the interpreter's exit after
         # a Ctrl+C / Ctrl+Break / SIGTERM, whose state writer then stores
         # the rest; a console close ends the process as soon as its handler
         # sees this shutdown over (`stopped`, _InstallStopHandlers), so that
-        # load's settle may never reach state.json -- as when the loader was
-        # a daemon thread.
+        # load may never reach state.json -- as when the loader was a daemon
+        # thread.
         if TaskExecutor.instance is not None:
             try:
                 if not TaskExecutor.instance.shutdown(1.0):
@@ -365,23 +309,19 @@ def Assemble(app, shell=None):
         shell = HeadlessShell(app)
     from .Helpers import AutonaQtHelper
     from .bootstrap import (
-        bootstrap_core, wire_game_roster, wire_tournament_data,
-        wire_web_server)
+        bootstrap_core, wire_tournament_data, wire_web_server)
 
     # The main thread, before anything can marshal to it.
     if AutonaQtHelper.gui_executor is None:
         AutonaQtHelper.init_gui_executor()
     bootstrap_core()
 
-    from . import AutonaWebOperations
-    from .AutonaPlayerDB import AutonaPlayerDB
     from .core.PlayerDB import PlayerDB
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from .AutonaWebServer import WebServer, log_webserver_port
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-    from .core.AssetPackService import AssetPackService
     from .core.CountryCatalog import CountryCatalog
-    from .core.GameAssetCatalog import GameAssetCatalog
+    from .core.GameLoader import GameLoader
     from .core.SettingsManager import SettingsManager
 
     AutonaLocaleHelper.LoadLocale()
@@ -392,35 +332,13 @@ def Assemble(app, shell=None):
     CountryCatalog.instance.Load()
     _SeedState()
 
+    # The game loader, its registrations (the provider's selector, the web
+    # operations' loads and mods-off, the asset packs' scan) and the player
+    # DB's refresh after a load are bootstrap_core()'s, the desktop's too
+    # (ADR-005 S-final SF-6c; this shell built HeadlessGames and made them
+    # here until then): a load writes its roster itself, and a shell only
+    # starts the loader (below).
     provider = AutonaTournamentDataProvider.instance
-    games = HeadlessGames(GameAssetCatalog.instance, provider)
-    shell.games = games
-    # ORDER CONSTRAINT: both before the provider can load a tournament
-    # (UiMounted below) and before the web server takes a request. The
-    # selector is what a tournament's start.gg videogame id loads through;
-    # without it the provider logs that the game was not applied. The
-    # loader's, as on the desktop (ADR-005 S-final SF-6b).
-    provider.selectGameFromStartGGId = games.loader.SelectGameFromStartGGId
-    AutonaWebOperations.loadGameByCodename = games.loader.LoadGameByCodename
-    # A tournament newly loaded turns the mods off through it (ADR-005
-    # S-final SF-5b-1), as on the desktop.
-    AutonaWebOperations.turnModsOff = games.loader.TurnModsOff
-    # The scan that follows an asset pack's install or import (ADR-005
-    # S-final SF-3b) is the loader's, as the desktop's is: gamesScanned
-    # (games_changed) and the provider's game follow it. Run on the
-    # import's job, which may not submit another.
-    AssetPackService.instance.scan = games.loader.Scan
-    # The player DB follows a game load, as it follows the adapter's onLoad
-    # on the desktop: the loaded game's mains normalised in place
-    # (PlayerDB.NormaliseMains) -- since the Qt model clean-up's PR3, which
-    # moved that out of the desktop's Qt model build -- then the push
-    # (db_updated). On the main thread, inside the load's board operation
-    # and save cycle (GameLoader._Publish; ADR-005 S-final SF-6b -- after
-    # both until then), after the persisted pick.
-    games.signals.gameChanged.connect(AutonaPlayerDB.SetupModel)
-    # ...and so do the boards' rosters (the game's players per team), with
-    # the desktop's wiring. Before games.Start() below restores a game.
-    wire_game_roster(games.signals.gameLoaded)
 
     wire_tournament_data(on_failure=_OnTournamentLoadFailed)
 
@@ -435,13 +353,12 @@ def Assemble(app, shell=None):
 
     webserver = WebServer(on_start_failed=onStartFailed)
     shell.webserver = webserver
-    wire_web_server(webserver, games.signals.gameChanged,
-                    games.signals.gamesScanned)
+    wire_web_server(webserver)
 
     # The tournament URL and the games, restored as the window restores
     # them (its UiMounted calls).
     provider.UiMounted()
-    games.Start()
+    GameLoader.instance.Start()
 
     # Decided from settings.json, never asked (the desktop asks once).
     if SettingsManager.Get("general.webserver_listen_lan", None) is None:

@@ -1,18 +1,19 @@
-"""The game loader, recorded step by step on each shell (ADR-005 S-final
-SF-6a; one loader since SF-6b).
+"""The game loader, recorded step by step (ADR-005 S-final SF-6a; one
+loader since SF-6b, one for both shells since SF-6c).
 
-What each shell's game loader does -- core's GameLoader (SF-6b), as the
-desktop's asset adapter (AutonaGameAssetManager) and the headless shell
-(src/headless.HeadlessGames) each wrap it -- recorded serially for five
-scenarios. SF-6a recorded the two loaders each shell had then; SF-6b put
-one in core, which left the desktop's recordings as they were and changed
-the headless ones where it meant to (one save cycle, the desktop's order:
-each headless recording is now its desktop counterpart). SF-6c stops
-handing what follows a load to the main thread (the writes to stay as 6b
-leaves them). The contract both shells keep is tests/test_asset_jobs.py's;
-this is the detail.
+What the game loader does -- core's GameLoader, bootstrap_core()'s
+GameLoader.instance for both shells since SF-6c (the desktop's asset
+adapter, AutonaGameAssetManager, and the headless shell's HeadlessGames
+each held and wrapped one until then) -- recorded serially for five
+scenarios. SF-6a recorded the two loaders each shell had then, into
+<shell>_<scenario>.json; SF-6b put one in core, which left the desktop's
+recordings as they were and made each headless recording its desktop
+counterpart. SF-6c stopped handing what follows a load's selection to the
+main thread: the writes are 6b's, made on the loader's thread, and the
+recordings are one per scenario. The contract is tests/test_asset_jobs
+.py's; this is the detail.
 
-Recorded for each, into tests/fixtures/game_loader/<shell>_<scenario>.json:
+Recorded for each, into tests/fixtures/game_loader/<scenario>.json:
 
 - writes: every StateManager.Set / Unset, in order, with the role of the
   thread that made it and the value as program_state.json holds it;
@@ -25,21 +26,26 @@ Recorded for each, into tests/fixtures/game_loader/<shell>_<scenario>.json:
 - events: the order of what happened, each with its thread's role -- the
   requests, the scan, the selection, the footer's status, the held
   notifications, the publishes, the roster / set length / commit (the
-  roster's wiring, bootstrap.wire_game_roster), gameLoaded (recorded by a
-  slot connected after the wiring's, so after it), the settings writes,
-  the player DB's refresh, the announcement (onLoad / gameChanged; a slot
-  connected last), each request's done();
+  loader's _Publish), the settings writes, `loaded` (GameLoader.loaded, on
+  the loader's thread), the player DB's refresh and the bridge's
+  game_loaded (a slot connected last) on the main thread, each request's
+  done();
 - answers: what each request returned, read once it was over (its
-  Future's outcome; until SF-6b the headless loader returned None);
+  Future's outcome);
 - after: what is left pending on the held boards, and the save block count.
 
-Held boards on both shells (the harness makes them as the desktop's launch
-does; a headless shell's boards are not held, so its commit finds nothing
-there): a load is one save cycle, opened on the loader's thread and closed
-on the main thread at the end of the loader's _Publish (the selection, the
-roster and its commit, the announcement's slots). Until SF-6b the headless
-selection was published alone on the loader's thread and the roster in a
-cycle of its own on the main thread, before gameChanged.
+Held boards (the harness makes them as the desktop's launch does; a
+headless shell's boards are not held, so its commit finds nothing there):
+a load is one save cycle, opened and closed on the loader's thread -- the
+selection, the roster and its commit, the pick -- and told after it
+closes. Until SF-6c the cycle was closed on the main thread at the end of
+the loader's _Publish, with the announcement's slots inside it; until
+SF-6b the headless selection was published alone on the loader's thread
+and the roster in a cycle of its own on the main thread.
+
+The background work runs serially (_serially): the jobs to the end, with
+the main thread not pumping -- none waits for it -- then what they queued
+there, and again, so a queued slot never lands between a job's steps.
 
 Roles: main (the main / GUI thread), loader (the "game load" job), scan
 (the "game scan" job), job (another job), other. What is not deterministic
@@ -64,11 +70,10 @@ from qtpy.QtWidgets import QApplication
 
 from src.core.StateManager import StateManager
 from src.core.TaskExecutor import JOB_THREAD_PREFIX, TaskExecutor
-from src.Helpers import AutonaQtHelper
 from tests.conftest import drain_tasks
 from tests.fixtures.write_recording import encode, encodeDelta
 from tests.test_asset_jobs import (  # noqa: F401  (fixtures)
-    WAIT, _holdTheLoader, _marshalEntered, _waitFor, ownExecutor, shell)
+    WAIT, _afterTheSelection, _holdTheLoader, _waitFor, ownExecutor, shell)
 from tests.test_game_asset_manager_load import (  # noqa: F401  (fixtures)
     goldenGames)
 
@@ -316,31 +321,36 @@ class _Recorder:
     def _OnHeldDirty(self, prefix, dirty):
         self.Event("held dirty", prefix, dirty)
 
-    def _OnGameLoaded(self, snapshot):
-        self.Event("gameLoaded", getattr(snapshot, "codename", None),
+    def _OnLoaded(self, snapshot):
+        self.Event("loaded", getattr(snapshot, "codename", None),
                    getattr(snapshot, "replaced", None))
 
     def _OnPlayerDB(self, *_args):
         self.Event("player DB")
 
     def _OnAnnounced(self, *_args):
-        self.Event("announced")
+        self.Event("game_loaded")
 
     def _Connections(self):
+        # The main thread's receivers: the player DB's refresh (connected to
+        # the bridge's game_loaded by bootstrap_core()) and game_loaded
+        # itself, connected after it. (Until ADR-005 S-final SF-6c: the
+        # shell's gameLoaded and its announcement, onLoad / gameChanged.)
         from src.AutonaPlayerDB import AutonaPlayerDB
 
-        signals = self.shell.games.signals
-        return ((signals.gameLoaded, self._OnGameLoaded),
-                (AutonaPlayerDB.signals.db_updated, self._OnPlayerDB),
+        return ((AutonaPlayerDB.signals.db_updated, self._OnPlayerDB),
                 (self.shell.announced, self._OnAnnounced))
 
     def Start(self):
         """Record from here (the scenario's setup is done)."""
+        from src.core.GameLoader import GameLoader
+
         observers = StateManager.observers
         self._subscriptions = (
             (observers.state_updated, self._OnPublished),
             (observers.state_big_change, self._OnBigChange),
-            (observers.held_dirty_changed, self._OnHeldDirty))
+            (observers.held_dirty_changed, self._OnHeldDirty),
+            (GameLoader.loaded, self._OnLoaded))
         for channel, callback in self._subscriptions:
             channel.subscribe(callback)
         for signal, slot in self._Connections():
@@ -363,7 +373,7 @@ class _Recorder:
                        for prefix in HELD}
             saveBlocked = StateManager.saveBlocked
         result = {
-            "about": f"{self.shell.name}: {SCENARIOS[scenario]}",
+            "about": SCENARIOS[scenario],
             "writes": self.writes,
             "published": self.published,
             "committed": self.committed,
@@ -415,6 +425,27 @@ def _quiet(app):
     app.settle()
 
 
+def _serially():
+    """The background work to the end, the main thread's share after the
+    jobs': the jobs first, with this (the main) thread not pumping -- no job
+    waits for it since ADR-005 S-final SF-6c -- then what they queued here
+    (a load's notification through the bridge, what follows a scan), which
+    can submit more (the restore's load), so again until nothing is left.
+    The recorded order is then the same on every run: drain_tasks pumps
+    while the jobs run, so a queued slot could land between a job's last
+    steps."""
+    executor = TaskExecutor.instance
+    deadline = time.monotonic() + 3 * WAIT
+    while True:
+        assert executor.drain(WAIT), "the background tasks did not finish"
+        QApplication.processEvents()
+        if executor.drain(0):
+            QApplication.processEvents()
+            if executor.drain(0):
+                return
+        assert time.monotonic() < deadline, "the work did not settle"
+
+
 # A character of each fixture game, picked on the boards before a scenario.
 PICKS = {"tgame": "Mario", "game2": "Ryu"}
 
@@ -450,11 +481,8 @@ def _restore(shell, rec, app, monkeypatch, ownExecutor):
     rec.Start()
     # Each shell's start (the window's UiMounted, src/headless.Assemble):
     # the loader's Start(), whose restore is armed for the one scan.
-    if shell.name == "desktop":
-        shell.games.UiMounted()
-    else:
-        shell.games.Start()
-    drain_tasks()
+    shell.loader.Start()
+    _serially()
 
 
 def _switch(shell, rec, app, monkeypatch, ownExecutor):
@@ -470,7 +498,7 @@ def _switch(shell, rec, app, monkeypatch, ownExecutor):
     _quiet(app)
     rec.Start()
     returned = shell.Load("game2", done=rec.Done("game2"))
-    drain_tasks()
+    _serially()
     rec.Answer("game2", returned)
 
 
@@ -479,7 +507,7 @@ def _mods(shell, rec, app, monkeypatch, ownExecutor):
     rec.Start()
     returned = shell.Load("tgame", mods_active=True, mods_reload_mode=True,
                           done=rec.Done("tgame with mods"))
-    drain_tasks()
+    _serially()
     rec.Answer("tgame with mods", returned)
 
 
@@ -496,19 +524,21 @@ def _burst(shell, rec, app, monkeypatch, ownExecutor):
             codename, mods_active=mods, mods_reload_mode=True,
             done=rec.Done(label))
     release.set()
-    drain_tasks()
+    _serially()
     for label, answer in returned.items():
         rec.Answer(label, answer)
 
 
 def _shutdown(shell, rec, app, monkeypatch, ownExecutor):
     _loaded(shell, app)
-    entered = _marshalEntered(monkeypatch)
+    # The load stops right after its selection until the shutdown begins
+    # (it stopped in the marshal, waiting for the main thread, until
+    # ADR-005 S-final SF-6c).
+    entered = _afterTheSelection(shell.catalog, monkeypatch,
+                                 ownExecutor.stopping)
     rec.Start()
     returned = shell.Load("game2", done=rec.Done("game2"))
     assert entered.wait(WAIT)
-    # In the marshal now, waiting for this thread, which does not pump.
-    time.sleep(4 * AutonaQtHelper.MARSHAL_POLL_SECS)
     assert ownExecutor.shutdown(WAIT)
     QApplication.processEvents()
     QApplication.processEvents()
@@ -526,8 +556,7 @@ SCENARIOS = {
     "burst": "game2 running, then A (tgame), B (game2), C (tgame with mods) "
              "asked for while it runs, from tgame with its picks applied",
     "shutdown": "the shutdown comes after a switch's selection (tgame to "
-                "game2, tgame picks applied), while the load waits for the "
-                "main thread",
+                "game2, tgame picks applied), before what follows it",
 }
 
 RUNS = {"restore": _restore, "switch": _switch, "mods": _mods,
@@ -544,4 +573,4 @@ def test_the_game_loader_matches_its_recording(
         _waitFor(lambda: not shell.loader._loaderRunning)
     finally:
         rec.Stop()
-    _check(f"{shell.name}_{scenario}", rec.Result(scenario))
+    _check(scenario, rec.Result(scenario))

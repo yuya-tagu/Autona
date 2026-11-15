@@ -17,7 +17,9 @@ tests/test_game_asset_catalog.py still compares the catalog's rows with.
 
 The last block drives the load job (a TaskExecutor job since ADR-005 S3f-4;
 a QThread until then; core's GameLoader since S-final SF-6b, the adapter's
-`loader`) -- the path every pick in the UI takes -- and what hangs off it:
+`loader` until SF-6c removed the adapter: GameLoader.instance, which the
+`goldenGames` fixture yields) -- the path every pick in the UI takes -- and
+what hangs off it:
 the footer status, the persisted pick and its restore at startup, and
 forgetting the pick when the URL is cleared.
 """
@@ -38,9 +40,11 @@ GAMES = [p.name for p in (FIXTURE / "games").iterdir() if p.is_dir()]
 @pytest.fixture
 def goldenGames(autonaApp, monkeypatch):
     """The fixture games installed into the harness, under the recording's
-    locale. Uninstalled afterwards, back to no game loaded."""
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    locale; yields the game loader (GameLoader.instance: the asset adapter
+    until ADR-005 S-final SF-6c). Uninstalled afterwards, back to no game
+    loaded."""
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.GameLoader import GameLoader
     from src.core.SettingsManager import SettingsManager
     from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
@@ -51,13 +55,12 @@ def goldenGames(autonaApp, monkeypatch):
 
     games = autonaApp.dir / "user_data" / "games"
     copy_trees([(FIXTURE / "games" / name, games / name) for name in GAMES])
-    manager = AutonaGameAssetManager.instance
     catalog = GameAssetCatalog.instance
     catalog.ScanGames()
-    # A real load ends in onLoad, which persists the pick.
+    # A real load persists the pick (GameLoader._Publish).
     persisted = SettingsManager.Get("SELECTED_GAME_CODENAME", "")
 
-    yield manager
+    yield GameLoader.instance
 
     drain_tasks()
     for name in GAMES:
@@ -76,11 +79,11 @@ def _game(autonaApp):
     return game
 
 
-def _load(manager, codename, modsActive=False, reload=False):
-    # The load job, run to the end with this (the GUI) thread pumped: it
-    # marshals the load's announcement onto it.
-    manager.loader.LoadGameByCodename(codename, mods_active=modsActive,
-                                      mods_reload_mode=reload)
+def _load(loader, codename, modsActive=False, reload=False):
+    # The load job, run to the end with this (the GUI) thread pumped: what
+    # the load's notification sets off here (the bridge's game_loaded) runs.
+    loader.LoadGameByCodename(codename, mods_active=modsActive,
+                              mods_reload_mode=reload)
     drain_tasks()
 
 
@@ -93,11 +96,10 @@ SCENARIOS = {
 
 @pytest.mark.parametrize("label", list(SCENARIOS))
 def test_a_load_matches_the_recording(goldenGames, autonaApp, label):
-    manager = goldenGames
     codename, modsActive, reload = SCENARIOS[label]
     golden = GOLDEN["scenarios"][label]
 
-    _load(manager, codename, modsActive, reload)
+    _load(goldenGames, codename, modsActive, reload)
 
     # (The adapter's Qt models were compared with golden["models"] here
     # until the Qt model clean-up's PR4 removed them.)
@@ -174,14 +176,14 @@ def test_the_web_readers_answer_on_a_worker_thread(goldenGames, autonaApp):
 LOADER_TIMEOUT_SECS = 30
 
 
-def _waitForLoader(manager=None):
+def _waitForLoader(loader=None):
     """Wait for the load job while pumping this (GUI) thread.
 
-    The job marshals the load's announcement (gameLoaded / onLoad, and the
-    close of its save cycle) onto the GUI thread (run_sync), so blocking on
-    its Future here would deadlock it. drain_tasks also runs what the GUI
-    thread is handed meanwhile (the v1 route's dispatch, a scan's
-    onLoadAssets slots)."""
+    drain_tasks runs what the GUI thread is handed meanwhile (the load's
+    notification through the bridge, what follows a scan, the v1 route's
+    dispatch). (The job marshalled what follows the selection onto the GUI
+    thread until ADR-005 S-final SF-6c, so blocking on its Future here would
+    have deadlocked it.)"""
     drain_tasks(LOADER_TIMEOUT_SECS)
 
 
@@ -224,15 +226,20 @@ def statusCalls(monkeypatch):
 
 @pytest.fixture
 def onLoadCount(goldenGames):
-    """How many times signals.onLoad fired (from whichever thread)."""
+    """How many times a load was told: the bridge's game_loaded (core's
+    GameLoader.loaded; the asset adapter's signals.onLoad until ADR-005
+    S-final SF-6c, whose name this keeps), queued to this thread."""
+    from src.StateManagerBridge import StateManagerBridge
+
     emitted = []
 
     def count():
         emitted.append(1)
 
-    goldenGames.signals.onLoad.connect(count)
+    bridge = StateManagerBridge.instance
+    bridge.game_loaded.connect(count)
     yield emitted
-    goldenGames.signals.onLoad.disconnect(count)
+    bridge.game_loaded.disconnect(count)
 
 
 def _loaderStatus(calls, codename):
@@ -244,9 +251,8 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
         goldenGames, autonaApp, statusCalls, onLoadCount):
     from src.core.StatusService import StatusService
 
-    manager = goldenGames
-    manager.loader.LoadGameByCodename("tgame", async_mode=True)
-    _waitForLoader(manager)
+    goldenGames.LoadGameByCodename("tgame", async_mode=True)
+    _waitForLoader(goldenGames)
     autonaApp.settle()
 
     assert len(onLoadCount) == 1
@@ -274,14 +280,13 @@ def test_a_threaded_load_emits_on_load_once_and_clears_its_status(
 
 def test_a_skipped_threaded_load_shows_no_status(
         goldenGames, autonaApp, statusCalls, onLoadCount):
-    manager = goldenGames
-    _load(manager, "tgame")
+    _load(goldenGames, "tgame")
     statusCalls.clear()
     onLoadCount.clear()
 
     # Same game, no reload: the catalog skips it.
-    manager.loader.LoadGameByCodename("tgame", async_mode=True)
-    _waitForLoader(manager)
+    goldenGames.LoadGameByCodename("tgame", async_mode=True)
+    _waitForLoader(goldenGames)
     autonaApp.settle()
 
     assert onLoadCount == []
@@ -294,10 +299,10 @@ def test_the_last_pick_is_persisted_and_restored(goldenGames, autonaApp):
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
 
-    loader = goldenGames.loader
-    _load(goldenGames, "game2")
+    loader = goldenGames
+    _load(loader, "game2")
     autonaApp.settle()
-    # onLoad -> the loader's PersistSelectedGame.
+    # The load's publication -> the loader's PersistSelectedGame.
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == "game2"
 
     # Next launch: bootstrap clears the game, UiMounted (the loader's
@@ -324,7 +329,7 @@ def test_a_last_pick_that_is_no_longer_installed_is_not_restored(
         goldenGames, autonaApp):
     from src.core.SettingsManager import SettingsManager
 
-    loader = goldenGames.loader
+    loader = goldenGames
     SettingsManager.Set("SELECTED_GAME_CODENAME", "uninstalled")
     generation = loader._loadGeneration
 
@@ -367,8 +372,9 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
         "S-final SF-6b) is back")
 
     # Runtime half: what that call does to the selection.
-    manager = goldenGames
-    _load(manager, "tgame")
+    from src.StateManagerBridge import StateManagerBridge
+
+    _load(goldenGames, "tgame")
     generation = GameAssetCatalog.instance.Current().generation
 
     GameAssetCatalog.instance.ForgetSelection()
@@ -383,10 +389,11 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     def loaded():
         loads.append(1)
 
-    manager.signals.onLoad.connect(loaded)
+    bridge = StateManagerBridge.instance
+    bridge.game_loaded.connect(loaded)
     try:
-        _load(manager, "tgame")
+        _load(goldenGames, "tgame")
     finally:
-        manager.signals.onLoad.disconnect(loaded)
+        bridge.game_loaded.disconnect(loaded)
     assert GameAssetCatalog.instance.Current().codename == "tgame"
     assert loads == [1]

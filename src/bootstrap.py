@@ -12,16 +12,18 @@ Two stages (ADR-005 S3c):
 
 - bootstrap_core(): what every shell needs -- the settings, the state layer
   and its Qt bridge, the domain operations, the Qt-free catalogs, the
-  tournament provider. Nothing here needs a QGuiApplication: the Qt objects
-  it builds are QtCore ones (QObject), which a QCoreApplication serves.
-  The headless shell (main.py --headless) stops here.
+  tournament provider, the game loader with its registrations and the
+  player DB's refresh after a load (both shells' since ADR-005 S-final
+  SF-6c). Nothing here needs a QGuiApplication: the Qt objects it builds
+  are QtCore ones (QObject), which a QCoreApplication serves. The headless
+  shell (main.py --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
-  hotkeys, the game asset loader adapter, the player DB refresh wiring, the
-  alert and updater objects, the boards made and held at launch, the shell
-  operations, and the registrations that make the web operations run on the
+  hotkeys, the updater, the boards made and held at launch, the shell
+  operations, and their registrations, which the web operations run on the
   GUI thread (the scoreboard dock, through which they ran, went with the Qt
-  SCORE in ADR-005 S4ac-3). src/Autona.py runs both, in that order, before
-  the Window is built.
+  SCORE in ADR-005 S4ac-3; the game asset loader adapter went in S-final
+  SF-6c). src/Autona.py runs both, in that order, before the Window is
+  built.
 
 Below them, the wiring both shells make once their own pieces exist
 (wire_tournament_data / wire_web_server): the window and src/headless.py
@@ -451,16 +453,63 @@ def bootstrap_core():
     # download and the imports (ADR-005 S-final SF-3b) -- after the executor
     # its jobs run on and the game asset catalog it lists and scans into.
     # Nothing is read or fetched here. The scan that follows an import is
-    # the shell's, set by each shell (bootstrap_gui() / src/headless.py)
-    # before anything can start a job: the guide window and the web server
-    # are both the shell's, after this function returns. The games a job
-    # moved aside and did not put back are put back by each shell's first
-    # scan job, before it scans (RestoreReplaced: the desktop adapter's
-    # UiMounted, HeadlessGames.Start), so after this; it does not wait
-    # for a job, which does the same at its start.
+    # the game loader's, set right below, before anything can start a job
+    # (the web server is the shell's, after this function returns). The
+    # games a job moved aside and did not put back are put back by the
+    # loader's first scan job, before it scans (RestoreReplaced; the loader
+    # is started by each shell: the window's UiMounted, src/headless
+    # .Assemble), so after this; it does not wait for a job, which does the
+    # same at its start.
     from .core.AssetPackService import AssetPackService
     if AssetPackService.instance is None:
         AssetPackService.instance = AssetPackService()
+
+    # ORDER CONSTRAINT: the game loader -- the scans, the loads, the last
+    # pick restored (core's GameLoader) -- one for both shells (ADR-005
+    # S-final SF-6c; each shell's adapter built its own, around its Qt
+    # signals, until then: bootstrap_gui()'s AutonaGameAssetManager and
+    # src/headless's HeadlessGames). After the catalog it loads, the
+    # provider whose game it re-applies after every scan (`afterScan`, on
+    # the main thread ahead of the startup restore, so the restore wins:
+    # tests/test_bootstrap_split.py pins it on a real scan), the bridge
+    # that turns its notifications into signals (game_loaded,
+    # games_scanned) and the asset packs whose scan it is. Nothing runs
+    # until a shell starts it (GameLoader.Start).
+    from .core.GameLoader import GameLoader
+    if GameLoader.instance is None:
+        GameLoader.instance = make_game_loader(
+            GameAssetCatalog.instance,
+            afterScan=AutonaTournamentDataProvider.instance.SetGameFromProvider)
+
+    # The loader's registrations, the same in both shells (each shell made
+    # them for its adapter's loader until ADR-005 S-final SF-6c): the
+    # selector a tournament's start.gg videogame id loads through (without
+    # it the provider logs that the game was not applied), the web
+    # operations' loads and the mods turned off when a tournament is newly
+    # loaded (ADR-005 S-final SF-5b-1), and the scan that follows an asset
+    # pack's install or import -- run on the import's own job, which may
+    # not submit another (TaskExecutor's NestedSubmitError). Before the
+    # provider can load a tournament and before the web server takes a
+    # request (both the shells', after this function returns).
+    AutonaTournamentDataProvider.instance.selectGameFromStartGGId = (
+        GameLoader.instance.SelectGameFromStartGGId)
+    AutonaWebOperations.loadGameByCodename = (
+        GameLoader.instance.LoadGameByCodename)
+    AutonaWebOperations.turnModsOff = GameLoader.instance.TurnModsOff
+    AssetPackService.instance.scan = GameLoader.instance.Scan
+
+    # The player DB's refresh follows a game load: SetupModel normalises the
+    # loaded game's mains (PlayerDB.NormaliseMains) and pushes the DB
+    # (db_updated), on the main thread (gui_thread_async), queued behind
+    # the load's delta: the bridge's game_loaded is emitted on the loader's
+    # thread. ORDER CONSTRAINT: connected before the web server's push
+    # (bootstrap.wire_web_server, the shells' later), which ran after it on
+    # the shells' announcement too; and before a shell starts the loader,
+    # so the first load normalises and pushes as every later one does.
+    # (The adapter's onLoad / HeadlessGames' gameChanged until ADR-005
+    # S-final SF-6c; bootstrap_gui() connected the desktop's, inside the
+    # load's board operation and save cycle.)
+    StateManagerBridge.instance.game_loaded.connect(AutonaPlayerDB.SetupModel)
 
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
     # are switched to the stub + shared layout/designer_runtime/ before
@@ -528,48 +577,6 @@ def bootstrap_gui():
     AutonaHotkeys.ConnectReload(StateManagerBridge.instance.hotkeys_changed)
     HotkeyRules.applied = True
 
-    # ORDER CONSTRAINT: the desktop's notifications of the game loader,
-    # around core's GameLoader (ADR-005 S-final SF-6b; the adapter held its
-    # own loader until then), over the game asset catalog and with the
-    # tournament provider (both bootstrap_core()'s). Its construction builds
-    # no Qt model (it built the empty asset models here until the Qt model
-    # clean-up's PR4): its signals and the loader's bookkeeping.
-    from .core.GameAssetCatalog import GameAssetCatalog
-    from .AutonaGameAssetManager import AutonaGameAssetManager
-    from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    if AutonaGameAssetManager.instance is None:
-        AutonaGameAssetManager.instance = AutonaGameAssetManager(
-            GameAssetCatalog.instance,
-            provider=AutonaTournamentDataProvider.instance)
-
-    # The provider's game follows through the loader: a start.gg videogame
-    # id loads through it (so the load is announced: gameLoaded, onLoad),
-    # and every scan re-applies the provider's game -- the loader's
-    # `afterScan`, on the main thread ahead of its startup restore, so the
-    # restore runs after the provider has re-applied its game, as before
-    # (until SF-6b this was the first slot connected here on onLoadAssets,
-    # ahead of the adapter's restore). tests/test_bootstrap_split.py pins
-    # that order on a real scan.
-    AutonaTournamentDataProvider.instance.selectGameFromStartGGId = (
-        AutonaGameAssetManager.instance.loader.SelectGameFromStartGGId)
-
-    # The player DB's refresh follows a game load: SetupModel normalises the
-    # loaded game's mains (PlayerDB.NormaliseMains) and pushes the DB
-    # (db_updated). This used to be an import-time side effect at the bottom
-    # of AutonaPlayerDB, which silently required GameAssetManager.instance to
-    # exist before *anything* imported PlayerDB -- including
-    # TournamentDataProvider and StartGGDataProvider, which both do. The data
-    # and its change relay are bootstrap_core()'s (core/PlayerDB +
-    # AutonaPlayerDB.Attach, ADR-005 S3e-1); the Qt adapter is a static
-    # class, so there is no instance to create here, only this wiring. (Its
-    # Qt model, switched on here until the Qt model clean-up's PR3, is gone:
-    # both shells normalise, the headless one on its loader's gameChanged.)
-    # ORDER CONSTRAINT: connected before the first UiMounted() load, so that
-    # load normalises and pushes as every later one does.
-    from .AutonaPlayerDB import AutonaPlayerDB
-    AutonaGameAssetManager.instance.signals.onLoad.connect(
-        AutonaPlayerDB.SetupModel)
-
     # The Updater depends on nothing constructed above: its __init__ only
     # builds the object itself. It is the desktop's: it replaces the
     # installed exe. (AutonaAlertNotification, which was built right before
@@ -607,49 +614,26 @@ def bootstrap_gui():
         AutonaShellOperations.instance = AutonaShellOperations()
 
     # ORDER CONSTRAINT: the web operations' desktop registrations, after the
-    # objects they point at (the shell operations and the asset adapter,
-    # both above). A game is loaded through the adapter's loader, so its
-    # announcement (gameLoaded / onLoad) follows. The shell operations (the set selection, the thumbnail,
-    # ADR-005 S3e-9; the image renderer, S4o) are AutonaShellOperations'
-    # (the dock's until S4y), run on the GUI thread. The defaults are the
-    # headless shell's (no loader until it registers its own; no shell
-    # operation: 503). Before the web server exists
+    # objects they point at (the shell operations, above). The shell
+    # operations (the set selection, the thumbnail, ADR-005 S3e-9; the
+    # image renderer, S4o) are AutonaShellOperations' (the dock's until
+    # S4y), run on the GUI thread. The defaults are the headless shell's (no
+    # shell operation: 503). Before the web server exists
     # (Window._StartWebServer), so no request can reach the defaults on the
-    # desktop (ADR-005 S3c). The board operations are not registered: they
-    # run on the calling thread under the board host's lock in both shells
+    # desktop (ADR-005 S3c). The game loader's registrations are
+    # bootstrap_core()'s, the same in both shells (ADR-005 S-final SF-6c;
+    # this shell registered its adapter's loader here until then). The
+    # board operations are not registered: they run on the calling thread
+    # under the board host's lock in both shells
     # (AutonaWebOperations.boardHost, ADR-005 S4ad; the desktop registered
     # DesktopBoardHost, which ran them on the GUI thread, until then).
     from . import AutonaWebOperations
-    AutonaWebOperations.loadGameByCodename = (
-        AutonaGameAssetManager.instance.loader.LoadGameByCodename)
-    AutonaWebOperations.turnModsOff = (
-        AutonaGameAssetManager.instance.loader.TurnModsOff)
     AutonaWebOperations.openSetSelection = (
         AutonaShellOperations.instance.OpenSetSelection)
     AutonaWebOperations.renderThumbnail = (
         AutonaShellOperations.instance.RenderThumbnail)
     AutonaWebOperations.startImageRender = (
         AutonaShellOperations.instance.StartImageRender)
-
-    # ORDER CONSTRAINT: the scan that follows an asset pack's install or
-    # import (ADR-005 S-final SF-3b) is the loader's (SF-6b; the adapter's
-    # until then), so the provider's game and the web server's
-    # games_changed follow it as they follow the startup scan. It scans on
-    # the calling thread: the import's own job, which may not submit
-    # another (TaskExecutor's NestedSubmitError). After the adapter, before
-    # the window and the web server can start a job.
-    from .core.AssetPackService import AssetPackService
-    AssetPackService.instance.scan = (
-        AutonaGameAssetManager.instance.loader.Scan)
-
-    # ORDER CONSTRAINT: a game load's roster (players per team, characters
-    # per player), its set length and its commit, the wiring the headless
-    # shell makes too. On gameLoaded, which the adapter emits just before
-    # onLoad, so it runs ahead of every slot on onLoad (the player cards'
-    # ReloadCharacters and the boards' _onGameAssetsLoaded were among them
-    # until ADR-005 S4ac-3, which is why the adapter committed after onLoad
-    # until S4ad).
-    wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)
 
     logger.debug("bootstrap_gui complete")
 
@@ -694,31 +678,24 @@ def wire_tournament_data(on_failure=None):
     signals.tournament_data_updated.connect(apply)
 
 
-def make_game_loader(catalog, announce, scanned=None, afterScan=None):
-    """The game loader of a shell (core's GameLoader, ADR-005 S-final
-    SF-6b), with the hooks both shells give it: the board host (read when
-    used, so a test that gives the operations a host of its own gives it to
-    the loads too), the main thread's event loop (GuiExecutor's later), why
-    it would not run a call (gui_unavailable_reason), whether this is it,
-    and -- until SF-6c -- the marshal onto it that what follows a selection
-    still takes (run_sync; its GuiMarshalAborted as core's MarshalAborted).
-    `announce(snapshot)` / `scanned()` are the shell's notifications (its
-    Qt signals), `afterScan()` the provider's game re-applied after a scan.
+def make_game_loader(catalog, afterScan=None):
+    """The game loader (core's GameLoader, ADR-005 S-final SF-6b), with the
+    hooks both shells give it: the board host (read when used, so a test
+    that gives the operations a host of its own gives it to the loads too),
+    the main thread's event loop (GuiExecutor's later: what follows a scan),
+    why it would not run a call (gui_unavailable_reason: the app is going
+    away), and whether this is it. `afterScan()`: the provider's game
+    re-applied after a scan.
 
-    Called by each shell's adapter when it is built (bootstrap_gui()'s
-    AutonaGameAssetManager, src/headless's HeadlessGames), after
-    bootstrap_core(). Builds the loader only: nothing runs until Start().
+    Called by bootstrap_core() for GameLoader.instance (each shell's adapter
+    called it until ADR-005 S-final SF-6c, importing it lazily from this
+    module; until then it also took the shell's notifications and a marshal
+    onto the main thread, run_sync). Builds the loader only: nothing runs
+    until Start().
     """
     from . import AutonaWebOperations
     from .Helpers import AutonaQtHelper
-    from .Helpers.AutonaQtHelper import GuiMarshalAborted
-    from .core.GameLoader import GameLoader, MarshalAborted
-
-    def marshal(fn):
-        try:
-            return AutonaQtHelper.gui_executor.run_sync(fn)
-        except GuiMarshalAborted as aborted:
-            raise MarshalAborted(str(aborted)) from aborted
+    from .core.GameLoader import GameLoader
 
     return GameLoader(
         catalog,
@@ -727,105 +704,24 @@ def make_game_loader(catalog, announce, scanned=None, afterScan=None):
         later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
         unavailable=lambda: AutonaQtHelper.gui_unavailable_reason(),
         isMainThread=lambda: AutonaQtHelper.in_gui_thread(),
-        marshal=marshal, announce=announce, scanned=scanned,
         afterScan=afterScan)
 
 
-def wire_game_roster(game_loaded):
-    """Give the 1v1 / team boards a loaded game's roster, as both shells
-    need it.
-
-    - `game_loaded` (a Qt signal with the load's GameAssetSnapshot: the
-      asset adapter's gameLoaded on the desktop, HeadlessGames' headless;
-      both emitted by core's GameLoader, ADR-005 S-final SF-6b) ->
-      AutonaActions.ApplyGameRoster: each board with a roster goes to the
-      game's players per team and the default characters per player, its
-      picks emptied when that load replaced another game. In one save cycle
-      with AutonaActions.RepublishBestOfs: each board's set length again
-      (ADR-005 S4t: it was each built board's onLoad handler, so the
-      headless shell did without; the game tracker's rows started over with
-      it until ADR-005 S4ac-4). And, in the same save block, the commit of
-      both boards (AutonaActions.CommitGameLoad: a load is the fresh
-      baseline, not edits waiting behind 反映; ADR-005 S4ad -- the
-      desktop's asset adapter committed after onLoad until then, because a
-      Qt player card wrote its rows on onLoad, until S4ac-3), even when the
-      roster or the set length raises. The commit publishes what the load
-      wrote and nothing else (StateManager.RecordHeldWrites: an edit
-      pending before the load, a request's while the loader selected the
-      game, a core-direct write such as score:adjust while it published,
-      all stay behind 反映; until the fix of 2026-11-12 they went out with
-      it). Inside a game load's own save cycle (opened on the loader
-      thread, closed at the end of GameLoader._Publish; both shells since
-      SF-6b -- the headless selection was published alone until then, and
-      this ran in a cycle of its own) it only queues the boards, and the
-      cycle's close publishes what the load wrote by then -- what onLoad's
-      slots wrote after the commit included: _Publish records from
-      gameLoaded's emit to the close, and this joins it (from the Qt
-      models' rebuild until the Qt model clean-up's PR4). Headless nothing
-      is held, so the commit finds nothing.
-
-    The load's own snapshot, not the catalog's Current(): this slot runs on
-    the main thread, which the load hands it to (the desktop's load job
-    marshals it there since ADR-005 S3f-4, the headless loader since
-    S3f-6; one loader since SF-6b), and by the time it runs a later load
-    may have replaced the snapshot --
-    a switch followed at once by a reload of the new game would read "no
-    switch" twice and keep the previous game's picks.
-
-    One board operation (AutonaWebOperations.boardHost: under its lock, on
-    the main thread this runs on, in both shells since ADR-005 S4ad -- the
-    desktop's ran on its GUI thread, which is the main thread, under no
-    lock until then; inside the load's own operation, GameLoader._Publish,
-    on both since SF-6b), so
-    no other board operation lands between the roster and the commit. Until ADR-005 S3e-6 it was each built board's onLoad
-    handler, so the headless shell's boards never followed a game load.
-    bootstrap_gui() makes it for the desktop, src/headless.py for its
-    shell.
-    """
-    from . import AutonaWebOperations
-    from .core.Actions import AutonaActions
-    from .core.StateManager import StateManager
-
-    def apply(snapshot):
-        replaced = getattr(snapshot, "replaced", None)
-
-        def run():
-            # The load's writes, told apart from everyone else's: the
-            # loader's _Publish records from gameLoaded's emit to the
-            # cycle's close, which this joins (onLoad's slots go with them).
-            # (From the Qt models' rebuild until the Qt model clean-up's
-            # PR4.)
-            with StateManager.RecordHeldWrites() as written:
-                with StateManager.SaveBlock():
-                    try:
-                        AutonaActions.instance.ApplyGameRoster(replaced)
-                        AutonaActions.instance.RepublishBestOfs()
-                    finally:
-                        # Committed whatever the roster did: a load's
-                        # writes (what the roster wrote before failing) are
-                        # not left waiting behind 反映 (the asset adapter's
-                        # _Publish committed on every path until ADR-005
-                        # S4ad).
-                        AutonaActions.instance.CommitGameLoad(written)
-
-        AutonaWebOperations.boardHost.Run(run)
-
-    game_loaded.connect(apply)
-
-
-def wire_web_server(webserver, game_changed, games_scanned):
+def wire_web_server(webserver):
     """Connect what the web server pushes on its own, as both shells need it.
 
-    - `game_changed` (a Qt signal: the loader's announcement -- the asset
-      adapter's onLoad, HeadlessGames' gameChanged; the window relayed
-      onLoad through a GameChanged of its own until ADR-005 S-final SF-6b)
-      -> webserver.ws_game_changed: the full state and the new character
-      list to every client, after the load's delta.
-    - `games_scanned` (a Qt signal: the asset adapter's onLoadAssets,
-      HeadlessGames' gamesScanned; the loader's `scanned`) ->
-      webserver.on_games_change: the
-      `games_changed` notice, GET /api/v1/games may answer otherwise
-      (ADR-005 S-final SF-3a).
+    - StateManagerBridge.game_loaded (core's GameLoader.loaded: a load is
+      published; the shells passed their loader adapter's onLoad /
+      gameChanged until ADR-005 S-final SF-6c, and the window relayed onLoad
+      through a GameChanged of its own until SF-6b) ->
+      webserver.ws_game_changed: the full state and the new character list
+      to every client, after the load's delta. Emitted on the loader's
+      thread, so queued to the main thread (after the player DB's refresh,
+      connected by bootstrap_core()).
+    - StateManagerBridge.games_scanned (core's GameLoader.scanned; the
+      shells' onLoadAssets / gamesScanned until SF-6c) ->
+      webserver.on_games_change: the `games_changed` notice, GET
+      /api/v1/games may answer otherwise (ADR-005 S-final SF-3a).
     - AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb: the player
       DB to the connections allowed to read it.
 
@@ -834,7 +730,9 @@ def wire_web_server(webserver, game_changed, games_scanned):
     ADR-005 S3c.
     """
     from .AutonaPlayerDB import AutonaPlayerDB
+    from .StateManagerBridge import StateManagerBridge
 
-    game_changed.connect(webserver.ws_game_changed)
-    games_scanned.connect(webserver.on_games_change)
+    bridge = StateManagerBridge.instance
+    bridge.game_loaded.connect(webserver.ws_game_changed)
+    bridge.games_scanned.connect(webserver.on_games_change)
     AutonaPlayerDB.signals.db_updated.connect(webserver.ws_playerdb)

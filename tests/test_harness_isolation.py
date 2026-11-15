@@ -303,22 +303,20 @@ def test_finished_image_downloads_are_not_kept_forever(autonaApp, monkeypatch):
 def test_dropped_boards_stop_reacting_to_global_signals(autonaApp):
     """A dropped board must not be written by what follows a game load.
 
-    The game load's wiring (AutonaActions.ApplyGameRoster on the asset
-    manager's onLoad, bootstrap.wire_game_roster) writes the boards core has
-    made; a board dropped at the end of one test must not answer the next
-    test's emit and rewrite score.{n}: invisible state in tests that never
-    made a board, and writes into the developer's real ./out once the CWD is
-    restored. (The Qt boards wired lambdas of their own into the same
-    signal until ADR-005 S4ac-3, which only destroying the C++ object
-    disconnected.)
+    A game load writes the roster of the boards core has made (core's
+    GameLoader._Publish -> AutonaActions.ApplyGameRoster, ADR-005 S-final
+    SF-6c; bootstrap.wire_game_roster on the shells' gameLoaded until then)
+    and then tells the bridge's game_loaded; a board dropped at the end of
+    one test must not answer the next test's load and rewrite score.{n}:
+    invisible state in tests that never made a board, and writes into the
+    developer's real ./out once the CWD is restored. (The Qt boards wired
+    lambdas of their own into the asset adapter's onLoad until ADR-005
+    S4ac-3, which only destroying the C++ object disconnected.)
     """
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
-
     autonaApp.readyAll()
     autonaApp.dropAllBoards()
 
-    AutonaGameAssetManager.instance.signals.onLoad.emit()
-    autonaApp.settle()
+    autonaApp.publishGameLoad()   # the roster, then game_loaded's slots
 
     for number in (1, 2, 3):
         assert autonaApp.get(f"score.{number}") is None, (
