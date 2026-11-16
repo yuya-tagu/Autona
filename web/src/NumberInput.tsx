@@ -25,10 +25,10 @@ export function NumberInput(props: NumberInputProps) {
     const min = props.min ?? Number.MIN_SAFE_INTEGER;
     const max = props.max ?? Number.MAX_SAFE_INTEGER;
 
-    // Touch devices (pointer: coarse) get wider tap targets, matching the
-    // small-TextField height (40px); mouse keeps the compact desktop
-    // density. The wing width is a CSS variable so the buttons, the input
-    // margins and the absolute positioning stay in sync across both modes.
+    // Touch devices (pointer: coarse) get wider wing buttons; the height
+    // stays the compact input height (the theme's) in both modes. The wing
+    // width is a CSS variable so the buttons, the input margins and the
+    // absolute positioning stay in sync across both modes.
     const containerSx = {
         '--wing-w': `${wingButtonWidth}px`,
         '@media (pointer: coarse)': {
@@ -55,11 +55,6 @@ export function NumberInput(props: NumberInputProps) {
                             marginX: 0,
                             borderRadius: 0,
                             justifyContent: 'space-between',
-                        },
-                        '@media (pointer: coarse)': {
-                            '& .MuiInputBase-root': {
-                                minHeight: 40,
-                            },
                         },
                         '& .MuiOutlinedInput-notchedOutline': {
                             borderLeft: 0,

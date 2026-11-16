@@ -9,7 +9,9 @@
  */
 import fs from 'fs';
 import path from 'path';
-import {DARK_TOKENS, PLAYER_COLORS} from './themes';
+import {render} from '@testing-library/react';
+import {TextField, ThemeProvider} from '@mui/material';
+import {DARK_TOKENS, PLAYER_COLORS, darkTheme} from './themes';
 
 const TOKENS_PATH = path.join(
     __dirname, '..', '..', 'assets', 'design-tokens.json');
@@ -29,5 +31,19 @@ describe('design token contract (assets/design-tokens.json)', () => {
 
     it('PLAYER_COLORS matches player_colors', () => {
         expect(PLAYER_COLORS).toEqual(tokens.player_colors);
+    });
+});
+
+describe('compact inputs', () => {
+    it('a TextField with no size is small', () => {
+        render(
+            <ThemeProvider theme={darkTheme}>
+                <TextField label="x" />
+            </ThemeProvider>
+        );
+        expect(document.querySelector('.MuiInputBase-root'))
+            .toHaveClass('MuiInputBase-sizeSmall');
+        expect(document.querySelector('input'))
+            .toHaveClass('MuiInputBase-inputSizeSmall');
     });
 });
