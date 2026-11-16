@@ -183,6 +183,11 @@ game_loader = importlib.import_module("src.core.GameLoader").GameLoader
 archive_job_service = importlib.import_module(
     "src.core.ArchiveJobService").ArchiveJobService
 archive_worker = importlib.import_module("src.core.ArchiveWorker")
+# The match log (ADR-006 A2): a singleton created and started by
+# bootstrap_core(); no subscription, no writer thread, no directory on
+# import.
+match_log_service = importlib.import_module(
+    "src.core.MatchLogService").MatchLogService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -344,6 +349,8 @@ assert asset_pack_service.instance is None, \
 assert archive_job_service.instance is None, \
     "import created ArchiveJobService.instance"
 assert archive_worker._kernel32 is None, "import loaded kernel32"
+assert match_log_service.instance is None, \
+    "import created MatchLogService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \
@@ -359,6 +366,8 @@ def lane_threads():
 
 
 assert lane_threads() == [], f"import started task threads: {lane_threads()}"
+assert not any(t.name == "AutonaMatchLog" for t in threading.enumerate()), \
+    "import started the match log's writer"
 
 # The web server's delta flusher (ADR-005 S3f-5) starts with the server, in
 # WebServer.start(), never on import.

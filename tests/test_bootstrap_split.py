@@ -205,6 +205,10 @@ def test_bootstrap_core_steps_and_their_order():
         # The archive clipper's jobs (ADR-006 A1): after the settings,
         # before the shells' web server; nothing read or probed here.
         "ArchiveJobService()",
+        # The match log (ADR-006 A2): a state observer, after the state
+        # layer's Initialize; started before the shells' launch seed.
+        "MatchLogService()",
+        "MatchLogService.instance.Start()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
 
@@ -489,6 +493,7 @@ from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.GameLoader import GameLoader
+from src.core.MatchLogService import MatchLogService
 from src.core.PlayerDB import PlayerDB
 from src.core.SetSelectionService import SetSelectionService
 from src.core.StateManager import StateManager
@@ -571,6 +576,7 @@ report({
         "AppSettings": AppSettings.instance is not None,
         "GameLoader": GameLoader.instance is not None,
         "ArchiveJobService": ArchiveJobService.instance is not None,
+        "MatchLogService": MatchLogService.instance is not None,
     },
     "registrations": registrations,
     "slot_order": order,
@@ -607,14 +613,17 @@ report({
 
 # Everything that follows the state's publishes once the shells are built:
 # the Qt adapter (every widget connects to it, never to the channels), and
-# the one core service allowed to subscribe (ADR-005 S4d: process-long,
-# with Stop(), and it only reads and queues inside the observer -- see
-# .claude/rules/state-and-webserver.md). A new subscriber is a decision to
-# make there, not here.
+# the core services allowed to subscribe (ADR-005 S4d: process-long, with
+# Stop(), and they only read and queue inside the observer -- see
+# .claude/rules/state-and-webserver.md): the stream title's and the match
+# log's (ADR-006 A2). A new subscriber is a decision to make there, not
+# here.
 STATE_SUBSCRIBERS = {
-    "state_updated": ["StateManagerBridge._onStateUpdated",
+    "state_updated": ["MatchLogService._OnStatePublished",
+                      "StateManagerBridge._onStateUpdated",
                       "StreamService._OnStatePublished"],
-    "state_big_change": ["StateManagerBridge._onStateBigChange",
+    "state_big_change": ["MatchLogService._OnStatePublished",
+                         "StateManagerBridge._onStateBigChange",
                          "StreamService._OnStatePublished"],
 }
 

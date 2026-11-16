@@ -3852,7 +3852,7 @@ Start.gg provider（`StartGGDataProvider`）が 1 回の取得の中で並列に
   5. **executor 以外の仕組みの pin を 1 か所にまとめた**（`tests/test_task_executor.py`。レビューで 2 本に強めた）
      - 対象は `src/**/*.py`・`main.py`・`main.py` が import するルートのモジュール（今は `autona_splash.py`。`main.py` の import から導出する）
      - 名前の pin（`test_nothing_runs_work_but_the_executor`）: `Worker` / `Workers` / `WorkerSignals` / `QRunnable` / `QThreadPool` / `waitForDone` / `wait_for_all` / `qasync`（AST の名前・属性・import。コメントと docstring は数えない）。`src/Workers.py` が無いことも。`Timer` / `threadpool` の名前は誤検出しうるので外し、下の呼び出しの形で見る
-     - スレッドの pin（`test_the_threads_left_are_the_documented_ones`）: `Thread(` / `Timer(` / `ThreadPoolExecutor(` / `ProcessPoolExecutor(` / `QThread(` / `start_new_thread(` の呼び出し（`threading.Thread(...)` も `Thread(...)` も）・`Thread` / `QThread` を継承するクラス・`asyncio` / `qasync` / `_thread` の import を、（ファイル・始める関数かクラス・形）で集め、`THREADS_LEFT`（完了報告の「S3f の後に残る並行処理」の 12 か所）と**一致**すること。増えても、消えても・移っても落ちる（一覧と pin が食い違わない）。`QTimer` や `threadpool` という名前は拾わない
+     - スレッドの pin（`test_the_threads_left_are_the_documented_ones`）: `Thread(` / `Timer(` / `ThreadPoolExecutor(` / `ProcessPoolExecutor(` / `QThread(` / `start_new_thread(` の呼び出し（`threading.Thread(...)` も `Thread(...)` も）・`Thread` / `QThread` を継承するクラス・`asyncio` / `qasync` / `_thread` の import を、（ファイル・始める関数かクラス・形）で集め、`THREADS_LEFT`（完了報告の「S3f の後に残る並行処理」の 13 か所）と**一致**すること。増えても、消えても・移っても落ちる（一覧と pin が食い違わない）。`QTimer` や `threadpool` という名前は拾わない
      - S3f-3 / S3f-4 の 3 本（src 全体・アダプタと EVENT パネル・Window の未使用のプール）はこれに含まれるので削除した。provider のパッケージだけの禁止（`ThreadPoolExecutor` / `as_completed` / `getStationMatchesThreadPool`）は残した（executor 自身が `ThreadPoolExecutor` なので、src 全体には掛けられない）
      - `asyncio` の import もスレッドの pin が禁じる（src・スプラッシュに使う箇所は無い。`main.py` の qasync とともに消えた）
   6. **リリースノート: なし**（デスクトップの起動・終了の見た目は変わらない。ヘッドレスはソース実行専用（`Autona.exe` は `--headless` を断る））
@@ -3935,7 +3935,7 @@ S3f（Executor 1 本化）の 6 PR が揃った。設計表の完了条件の確
 この一覧のスレッドと QThread は、`tests/test_task_executor.py` の `THREADS_LEFT`（ファイル・始める関数かクラス・形）と一致することを pin している。増やす・消すときは両方を直す
 
 - `TaskExecutor`: ジョブ用 4 本（`AutonaJob_*`）・fan-out 用 8 本（`AutonaFanout_*`）。段階実行（テスト用）のときは、ジョブを 1 本ずつ走らせるスレッド（`AutonaJobStep`）
-- 専用のスレッド（設計どおり対象外）: Web サーバー 4 本（サーバー・停止のヘルパー・delta の flusher `AutonaWebServerDeltas`。S3f-5 で 2 → 3。プレビュー用のリスナー `AutonaWebServerPreview`。S-final SF-8a で 3 → 4。停止のヘルパーはサーバーごとに 1 本）・export の書き手（`AutonaStateExport`）・永続化の書き手（`AutonaStatePersist`）・画像 DL（daemon・セマフォ 3）・アーカイブ切り抜きのワーカーの読み手 2 本（stdout の進捗と終わりの `AutonaArchiveWorker`・stderr を worker.log に書く `AutonaArchiveWorkerLog`。daemon・1 回の実行に 1 組。`ArchiveJobService._Start`。ADR-006 A1。ワーカーは子プロセスで、ジョブは TaskExecutor に載せない）
+- 専用のスレッド（設計どおり対象外）: Web サーバー 4 本（サーバー・停止のヘルパー・delta の flusher `AutonaWebServerDeltas`。S3f-5 で 2 → 3。プレビュー用のリスナー `AutonaWebServerPreview`。S-final SF-8a で 3 → 4。停止のヘルパーはサーバーごとに 1 本）・export の書き手（`AutonaStateExport`）・永続化の書き手（`AutonaStatePersist`）・画像 DL（daemon・セマフォ 3）・アーカイブ切り抜きのワーカーの読み手 2 本（stdout の進捗と終わりの `AutonaArchiveWorker`・stderr を worker.log に書く `AutonaArchiveWorkerLog`。daemon・1 回の実行に 1 組。`ArchiveJobService._Start`。ADR-006 A1。ワーカーは子プロセスで、ジョブは TaskExecutor に載せない）・試合の記録の書き手 1 本（`AutonaMatchLog`。daemon・`MatchLogService.Start` が起こす。`MatchLogService._StartWriter`。ADR-006 A2。state の observer が `StateManager.lock` の中で行をキューに積み、これがファイルに追記する）
 - `QThread`: アップデーター 2 本（自動更新には触らない）・アセットガイド 2 本（デスクトップのウィンドウ専用）
 - イベントループの時計: 追従の 5 秒タイマー・250 ms のハートビート（ヘッドレスと、Windows 以外のデスクトップ）。thumbnail / result の同期描画の `QEventLoop`（シェル操作 ①）
 

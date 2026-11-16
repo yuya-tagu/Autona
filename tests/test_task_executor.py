@@ -916,6 +916,9 @@ THREADS_LEFT = {
     # progress, then the job's end) and its stderr's (worker.log), daemon,
     # one pair per run; a job's run is the worker process, not a task.
     ("src/core/ArchiveJobService.py", "ArchiveJobService._Start", "Thread"),
+    # The match log's writer (ADR-006 A2): one, daemon, started with the
+    # service; the observer hands it lines inside StateManager.lock.
+    ("src/core/MatchLogService.py", "MatchLogService._StartWriter", "Thread"),
     # The updater's QThreads (auto-update is not touched). The asset
     # guide's two (the index fetch, the download) went in ADR-005 S-final
     # SF-3b: core's AssetPackService runs them as TaskExecutor jobs.

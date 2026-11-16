@@ -831,6 +831,18 @@ class Window(QMainWindow):
             logger.opt(exception=True).error(
                 "Error stopping background tasks on shutdown")
 
+        # The match log (ADR-006 A2): after the web server and the tasks,
+        # which can still publish a change it records. Closes the open
+        # record and lets its writer finish (a daemon thread the
+        # interpreter's exit would not wait for).
+        try:
+            from .core.MatchLogService import MatchLogService
+            if MatchLogService.instance is not None:
+                MatchLogService.instance.Shutdown(2.0)
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error closing the match log on shutdown")
+
         try:
             # allWindows() returns QWindow, not QWidget: comparing against
             # `self` was always true. Compare with our own window handle.
