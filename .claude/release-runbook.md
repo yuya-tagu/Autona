@@ -142,13 +142,14 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
   数分かかる。特に OneDrive 配下のインストール先は同期フックで大幅に遅い）。
   v1.2.x 以前の世代には進行中ロック保護が無く、途中起動すると起動時掃除が
   staging を削除して更新が失われる（v1.3.0 E2E で発生。v1.3.1+ は main.py の
-  起動ゲートが「適用中」メッセージを出して保護する）
+  起動ゲートが保護する。今のゲートは何も表示せずに終了し、インストール画面を前面に出すだけ）
 - 成功判定: **再起動後にバージョン表記が新版になっていること**（これが最終判定。ログの
   `update complete` だけでは不十分 — v1.3.0 では zip エントリ名が `\` 区切りだったため
   展開 0 件のまま robocopy が exit 0 で「成功」し、`update complete` が記録されつつ
   旧バージョンが再起動された）。加えて `assets/update_log.txt` の末尾に
   `waiting for pid → robocopy ok → update complete` が記録されていること
 - `update_log.txt` にヘルパーのログ行が 1 行も増えていない場合、ヘルパー（apply_update.ps1）自体が起動していない（v1.1.0 で踏んだ DETACHED_PROCESS 事故のパターン）
+- `update_log.txt` に `robocopy ok` → `update complete` まで出ていて、インストール先も新版に入れ替わっているのに**アプリが再起動しない**（`logs/autona.log` に再起動の時刻の行が 1 行も無い）場合、新しい exe が main.py の起動ゲートでヘルパーの `update_in_progress.lock` を見て黙って終了している（v1.8.1→v2.0.0 E2E で発生。ヘルパーがロックを exe の起動の 1.5 秒後に手放していた）。手動で起動すれば新版で立ち上がる。ヘルパーは新しい zip 側のものが使われるので、修正版ヘルパー（exe の起動の前に `Remove-UpdateLock`）を含むリリースへの更新から直る
 - **差分ダウンロードの確認（v1.3.3 実装。効き始めは v1.3.3→v1.3.4 以降**、DL ロジックは
   インストール済み旧版側で走るため）: 差分経路が使われた場合、アプリログに
   `diff download ok: N changed + M reused entries, X of Y MB fetched`、
@@ -185,3 +186,4 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 | 配布物にテスト大会アイコン等の開発時データが残存 | v1.3.0 の区切り文字事故対応で「旧 zip を修復して差し替え」たため、生成時の git 管理ファイル限定ガード（c80fc937）を迂回。旧 zip には一括コピー時代の `layout/logo.png`（テスト大会アイコン）・`layout/custom/`・`assets/rulesets.json` が同梱されていた | `scripts/validate_release_zip.ps1` を新設し、生成時（gen_release）・publish 時（publish_release / 手動 gh の手順 8）の両方で「assets/layout/user_data は git 管理ファイルのみ」を機械検証。**zip は必ず再生成する。修復・手詰めした zip を publish しない** |
 | gen_release.ps1 が新規 PowerShell セッションで型エラー | `[ZipArchiveMode]` / `[CompressionLevel]` リテラルの解決に必要な `System.IO.Compression` アセンブリを Add-Type しておらず、PS 5.1 は遷移ロードしない | gen_release.ps1 で両アセンブリを明示 Add-Type（2026-07-16 修正） |
 | v1.4.1→v1.5.0 自動更新後に起動不能（`AttributeError: module 'numpy' has no attribute 'array'`。フル zip 展開は正常） | v1.5.0 で PyInstaller excludes に numpy 等を追加したが、ヘルパーの robocopy `/E`（パージなし）が旧 `_internal` のバイナリ残骸ディレクトリを残す → Python が namespace package として import 成功 → deepdiff の `except ImportError` フォールバックが不発 | apply_update.ps1 の robocopy を 2 段化: `_internal` は `/MIR`（リリース 100% 所有・ユーザー資産は install ルート直下のみが前提）、残りは従来どおり `/E` パージなし。`tests/test_apply_update_robocopy.py` が構成を pin（2026-07-30・PR #164）。**教訓: excludes へパッケージを追加したら、必ず「旧版からの自動更新」E2E で確認する（フル zip 起動確認では検出できない）** |
+| v1.8.1→v2.0.0 自動更新で新版に入れ替わったのに再起動しない（`update complete` は出る・`logs/autona.log` に新しい行が無い） | ヘルパーが新 exe を `Start-Process` してから 1.5 秒ウィンドウを保ち、その後の `Invoke-Cleanup` で初めて `update_in_progress.lock` を手放していた。温まった exe は約 0.25 秒で main.py の起動ゲートに届き、ロックを見て `sys.exit(0)`。v2.0.0 起因ではない以前からの競合で、差分 DL で exe が温まっていると出やすい | apply_update.ps1 で exe を起動するすべての `Start-Process`（手順 4・`Stop-UpdateAndExit` の戻し）の直前に `Remove-UpdateLock`。`tests/test_apply_update_relaunch.py` が順序と「ロックは robocopy の後まで握る」を pin（2026-11-16。手順 9） |

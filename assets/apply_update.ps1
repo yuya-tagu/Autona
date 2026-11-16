@@ -32,12 +32,14 @@ $Log = Join-Path $InstallDir "assets\update_log.txt"
 # with FindWindowW to foreground it, so the two must stay in sync.
 $UI_TITLE = "Autona Updater"
 
-# Hold an exclusive lock for the entire install run. A freshly started Autona
-# checks this lock (startup gate in main.py + CleanupUpdateLeftovers in
-# AutonaUpdater.py): while it is held the app neither starts over the
-# half-mirrored install dir nor purges this workdir. Without it, an app
-# launched mid-robocopy deletes the staging dir out from under us (v1.3.0
-# E2E: robocopy failed with exit 11 and the update was silently lost).
+# Hold an exclusive lock from here until the mirror is done and we are about to
+# launch the app again. A freshly started Autona checks this lock (startup gate
+# in main.py + CleanupUpdateLeftovers in AutonaUpdater.py): while it is held the
+# app neither starts over the half-mirrored install dir nor purges this workdir.
+# Without it, an app launched mid-robocopy deletes the staging dir out from
+# under us (v1.3.0 E2E: robocopy failed with exit 11 and the update was
+# silently lost). It must be released BEFORE every launch of $ExePath - see
+# Remove-UpdateLock.
 $LockPath = Join-Path $PSScriptRoot "update_in_progress.lock"
 
 # Written by the app's diff download after it fully assembles $Staging itself
@@ -190,13 +192,34 @@ function Show-Failure([string]$userMessage) {
     } catch {}
 }
 
-function Invoke-Cleanup() {
-    # Release the exclusive lock first so the workdir (which contains the lock
-    # file) can actually be deleted, and so a starting app is unblocked.
+# Release the exclusive lock. Call this right BEFORE every Start-Process of
+# $ExePath, never after: main.py's startup gate sees a held lock and exits
+# silently (sys.exit(0)), and a warm exe reaches that gate in ~0.25 s (~1.6 s
+# cold). Until 2026-11 the lock was only released in Invoke-Cleanup, after the
+# 1.5 s window hold in step 4, so the relaunched exe met our lock and quit:
+# the v1.8.1 -> v2.0.0 E2E logged "robocopy ok" and "update complete" with
+# 2.0.0 installed, yet the app never came back and wrote no log line. Not a
+# 2.0.0 regression: the v1.8.1 exe reaches the gate just as fast. A warm file
+# cache (e.g. after a diff download) makes it near-certain, but the race had
+# been there all along, on the fallback relaunch in Stop-UpdateAndExit too.
+# Safe to call more than once (Invoke-Cleanup calls it again as a backstop).
+function Remove-UpdateLock() {
     try {
         if ($script:LockStream) { $script:LockStream.Dispose(); $script:LockStream = $null }
         if (Test-Path -LiteralPath $script:LockPath) { Remove-Item -LiteralPath $script:LockPath -Force -ErrorAction SilentlyContinue }
     } catch {}
+}
+
+function Invoke-Cleanup() {
+    # Release the exclusive lock first so the workdir (which contains the lock
+    # file) can actually be deleted. Every caller has normally released it
+    # already, right before launching the app; this is the backstop.
+    Remove-UpdateLock
+    # With the lock gone, the app we just launched may be running
+    # CleanupUpdateLeftovers (shutil.rmtree of this whole workdir, errors
+    # ignored) at the same time as the deletes below. Both sides ignore every
+    # failure, so whichever reaches a file first simply wins - keep each delete
+    # here wrapped and error-tolerant.
     try { if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $MarkerPath) { Remove-Item -LiteralPath $MarkerPath -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
@@ -220,6 +243,14 @@ function Invoke-Cleanup() {
 # is what made the whole thing read as a deliberate rollback.
 function Stop-UpdateAndExit([string]$reason, [string]$userMessage) {
     Write-Log "FAILED: $reason -> keeping the current version"
+    # Release BEFORE the relaunch below, or the exe quits at main.py's startup
+    # gate (see Remove-UpdateLock). We are giving up, so nothing is left for
+    # the lock to protect. Released before Show-Failure too: the install window
+    # is already closed, so a user who starts Autona by hand while reading the
+    # failure dialog would otherwise hit the gate and see nothing at all (the
+    # gate only foregrounds "Autona Updater"). The running-instance check below
+    # then skips our own relaunch.
+    Remove-UpdateLock
     Show-Failure $userMessage
     try {
         # Don't stack a second instance on top of one the user already
@@ -441,8 +472,13 @@ try {
     #    app's splash isn't stuck behind this window, and hold the window until
     #    the splash has had a moment to appear - otherwise we reintroduce the
     #    blank-screen gap that started this whole problem.
+    #    The lock goes BEFORE Start-Process: the new exe reaches main.py's
+    #    startup gate in ~0.25 s, well inside the 1.5 s hold below, and quits
+    #    if we still hold it (see Remove-UpdateLock). Both robocopy passes are
+    #    done, so the half-mirrored install the lock guarded no longer exists.
     Set-Step "Autona を起動しています..." 100
     try { $script:Form.TopMost = $false } catch {}
+    Remove-UpdateLock
     Start-Process -FilePath $ExePath -WorkingDirectory $InstallDir
     $until = (Get-Date).AddMilliseconds(1500)
     while ((Get-Date) -lt $until) { Update-UI; Start-Sleep -Milliseconds 100 }
