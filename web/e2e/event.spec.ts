@@ -58,7 +58,7 @@ test("the Event page opens with its four cards", async ({page}) => {
     await page.goto(serverUrl("/web/event"));
 
     await expect(page).toHaveTitle("Autona Tournament info");
-    for (const name of ["start.gg tournament", "Tournament details",
+    for (const name of ["Tournament (start.gg / Hivee)", "Tournament details",
                         "Tournament colors", "Tournament icon / banner"]) {
         await expect(page.getByRole("region", {name, exact: true})).toBeVisible();
     }
@@ -143,8 +143,8 @@ test("a URL that is no start.gg event's is refused; disconnecting asks first", a
                                 {data: {tournamentName: "E2E Cup"}})).ok())
         .toBe(true);
     await page.goto(serverUrl("/web/event"));
-    const card = page.getByRole("region", {name: "start.gg tournament",
-                                           exact: true});
+    const card = page.getByRole("region", {
+        name: "Tournament (start.gg / Hivee)", exact: true});
     const url = card.getByRole("textbox", {name: "Tournament URL"});
 
     await url.fill("https://example.invalid/not-an-event");
@@ -175,8 +175,8 @@ test("the tournament is the state's: a clear is not polled for", async ({page, r
         }
     });
     await page.goto(serverUrl("/web/event"));
-    const card = page.getByRole("region", {name: "start.gg tournament",
-                                           exact: true});
+    const card = page.getByRole("region", {
+        name: "Tournament (start.gg / Hivee)", exact: true});
     const url = card.getByRole("textbox", {name: "Tournament URL"});
     const disconnect = card.getByRole("button", {name: "Disconnect",
                                                  exact: true});
@@ -198,7 +198,8 @@ test("as the desktop's view opens it: in its language", async ({page}) => {
     await page.goto(serverUrl("/web/event?desktop=1&lng=ja"));
 
     await expect(page).toHaveTitle("Autona 大会情報");
-    await expect(page.getByRole("region", {name: "start.gg の大会", exact: true}))
+    await expect(page.getByRole("region", {name: "大会（start.gg / Hivee）",
+                                           exact: true}))
         .toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");
 });

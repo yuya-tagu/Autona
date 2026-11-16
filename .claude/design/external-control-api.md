@@ -255,7 +255,7 @@
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
-| `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
+| `GET /api/v1/sets/{setId}` | セット詳細（`setId` は start.gg のセットの番号か、Hivee の試合の id（uuid。2026-11-16 追加）。どちらでもなければ `400 INVALID_ARGUMENT`） | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
 | `GET /api/v1/countries/{code}/states` | 国の州・地域一覧（未知の国は `404 NOT_FOUND`。2026-10-21 追加） | `get_states` | #45 |
 | `GET /api/v1/countries` | 国の一覧（カスタム国旗を含む。§5.8。2026-11-04 追加） | `get_countries`（`core/CountryCatalog.CountriesPayload`） | — |
@@ -379,6 +379,9 @@ Board / Commentary / Top 8 のページと Designer の「開く」一覧が使�
   "loaded": true, "status": "loaded", "error": "", "revision": 3 }, "revision": 1234 }
 ```
 - `url`: 最後に設定した大会の URL（`settings.json` の `TOURNAMENT_URL`。無ければ `""`）。state の `tournamentInfo.url` と同じ
+  - Hivee の URL（2026-11-16 追加。§7.3）は、トークン（`token=` の値）を `***` に伏せた形で返す。state の `tournamentInfo.url`
+    （`out/`・Socket.IO にも出る）と §5.9 / §5.18 の `url` も同じ。本物の URL を持つのは `settings.json` と provider だけ。
+    伏せた URL をそのまま §7.3 `POST /tournament` に送り返すと、保存した URL として扱う
 - `loaded`: **provider があるか**（「読み込めた」ではない。読み込みに失敗した大会でも `true`。読み込めたかは `status` で見る。
   S4g レビュー L6）
 - `status`: 最新の設定 / 解除の進み具合。`idle`（何も設定していない・解除した・起動直後）/ `resolving`（admin の URL からイベントを
@@ -1473,6 +1476,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
     S4g レビュー L3）。
   - ADR-005 S4g から、管理画面のブラケットの URL（`start.gg/admin/tournament/<大会>/brackets/<id>`）も受け付ける（ジョブで
     イベントの URL に解決してから読み込む）。それ以外の URL は受付前に `400 INVALID_ARGUMENT`（何も変えない）。
+  - 2026-11-16 から、Hivee のイベントの配信オーバーレイの URL も受け付ける（`core/HiveeUrl.py`）: OBS のブラウザソースの URL
+    （`{origin}/overlay/<イベント>/scoreboard?token=…` か `/top8`）と API の URL（`{origin}/api/events/<イベント>/overlay?token=…`）。
+    どちらも API の URL に正規化して保存する。`http` はこの PC（`localhost` / `127.0.0.1` / `::1` / `*.localhost`）だけで、ほかは `https`。
+    上の 400 のメッセージは `url must be a start.gg tournament event URL, an admin brackets URL or a Hivee overlay URL`
+    - トークンは秘密: state・READ の API・`out/` には `token=***` に伏せた URL が出る（§5.7）。送られた URL が、保存した URL を伏せたものと
+      一致すれば、保存した URL として受け付ける（大会情報ページは表示している URL を送り返す。`force` の取得し直しも同じ）。
+      ほかの伏せた URL（別のイベントのもの・何も保存していないとき）は 400
   - `force`（bool。既定 false）: 読み込み済みと同じ URL でも取得し直す。`fetchMedia`（bool。既定 false）: 読み込めたら
     大会のアイコン / バナーも取得する（下の `media/fetch` と同じジョブ）。既定値は今までの挙動。bool でなければ 400。
   - 外部通信を伴う。受付は 202（`data: {"accepted": true, "operation": "tournament.load", "loadRevision": n}`）。

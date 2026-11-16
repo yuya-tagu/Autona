@@ -148,6 +148,9 @@ tournament_media = importlib.import_module(
     "src.core.TournamentMediaService").TournamentMediaService
 tournament_service = importlib.import_module(
     "src.core.TournamentService").TournamentService
+# A Hivee overlay URL (pure functions; its token is a secret): nothing read
+# or remembered on import.
+importlib.import_module("src.core.HiveeUrl")
 # The tournament's match list (ADR-005 S4j): a singleton created by
 # bootstrap_core(), never on import.
 analysis_service = importlib.import_module(
@@ -210,6 +213,9 @@ startgg = importlib.import_module(
     "src.TournamentDataProvider.StartGGDataProvider").StartGGDataProvider
 tdp = importlib.import_module(
     "src.AutonaTournamentDataProvider").AutonaTournamentDataProvider
+# The Hivee provider: no event's matches remembered, no request made.
+hivee_provider = importlib.import_module(
+    "src.TournamentDataProvider.HiveeDataProvider").HiveeDataProvider
 updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
 # (AutonaScoreboardManager stood here, dragging in the whole Qt scoreboard
 # widget tree; it went with the Qt SCORE in ADR-005 S4ac-3.)
@@ -277,6 +283,8 @@ assert game_loader.scanned.subscriber_count() == 0, \
     "import subscribed to the game scans"
 assert tdp.instance is None, \
     "import created AutonaTournamentDataProvider.instance"
+assert len(hivee_provider._memories) == 0, \
+    "import remembered a Hivee event's matches"
 assert updater.instance is None, "import created AutonaUpdater.instance"
 assert shell_operations.instance is None, \
     "import created AutonaShellOperations.instance"

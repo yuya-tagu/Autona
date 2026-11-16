@@ -52,6 +52,7 @@ from .core import StreamService as streams
 from .core import ThumbnailService as thumbnails
 from .core import Top8Model as top8
 from .core import Top8Service
+from .core import HiveeUrl
 from .core import TournamentMediaService as tournamentMedia
 from .core import TournamentService as tournaments
 from .core.CrewBattleService import CrewBattleService
@@ -287,7 +288,9 @@ def _safe_params(keys_only=False):
         if isinstance(body, dict):
             return repr(sorted(body.keys()))
         return "<non-object body>"
-    text = repr(body)
+    # A Hivee tournament URL's token is a secret (core/HiveeUrl.py): masked
+    # before the cut, which could leave half of it.
+    text = HiveeUrl.Mask(repr(body))
     return text if len(text) <= 300 else text[:300] + "…"
 
 
@@ -761,7 +764,13 @@ def get_sets():
 @api_v1.route("/sets/<setId>")
 @api_handler
 def get_match(setId):
-    sid = _require_int(setId, "setId")  # int() failure -> 400
+    # A start.gg set id (a number) or a Hivee match id (a uuid).
+    try:
+        sid = WebOps.SetId(setId)
+    except ValueError:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "setId must be an integer or a Hivee match id", 400) from None
     provider = AutonaTournamentDataProvider.instance.GetProvider()
     if provider is None:
         raise ApiError(NOT_READY, "no tournament loaded", 409)
@@ -3167,7 +3176,8 @@ def stop_follow(n):
 def tournament_load():
     # {"url": str | null, "force": bool, "fetchMedia": bool}. A start.gg
     # event URL or, since ADR-005 S4g, an admin/brackets one (resolved to
-    # its event by a background job); empty (or null, or none) clears the
+    # its event by a background job), or a Hivee overlay URL (its token is
+    # masked in the op log: _safe_params); empty (or null, or none) clears the
     # tournament; anything else is refused (S4g review L3: any false value
     # used to clear). The loaded URL again is not re-fetched unless
     # "force"; "fetchMedia" fetches the tournament's icon and banner once
@@ -3181,11 +3191,14 @@ def tournament_load():
     url = body.get("url")
     if url is None:
         url = ""
+    # The masked Hivee URL the state shows (the Event page sends it back)
+    # stands for the saved one; any other masked URL is refused below.
+    url = tournaments.TournamentService.UnmaskUrl(url)
     if not isinstance(url, str) or (url and tournaments.UrlKind(url) is None):
         raise ApiError(
             INVALID_ARGUMENT,
-            "url must be a start.gg tournament event URL or an admin "
-            "brackets URL", 400
+            "url must be a start.gg tournament event URL, an admin "
+            "brackets URL or a Hivee overlay URL", 400
         )
     flags = {}
     for name in ("force", "fetchMedia"):

@@ -496,6 +496,25 @@ def test_the_post_is_in_the_order_of_the_ranks(env):
         == ["1/ First", "2/ Second", "3/ Third", "4/ Fourth"]
 
 
+def test_a_hivee_url_never_goes_in_the_post(env):
+    """A Hivee overlay URL carries its secret token (core/HiveeUrl.py): the
+    post names no tournament URL then. A start.gg one is posted as before."""
+    scenario = next(s for s in world.POST_SCENARIOS
+                    if s["name"] == "ranks_by_hand")
+    SM.state = copy.deepcopy(scenario["state"])
+    token = "0123456789abcdef" * 4
+    SettingsManager.settings = {"TOURNAMENT_URL": (
+        "https://hivee.example.com/api/events/"
+        f"0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b/overlay?token={token}")}
+    text = env.service.PostText()
+    assert token not in text
+    assert "■Startgg" not in text
+
+    startgg = "https://www.start.gg/tournament/a/event/b"
+    SettingsManager.settings = {"TOURNAMENT_URL": startgg}
+    assert env.service.PostText().split("\n")[-2:] == ["■Startgg", startgg]
+
+
 def test_a_nameless_tournament_has_a_file_name_that_says_what_it_is():
     now = datetime.datetime(*world.NOW, tzinfo=datetime.timezone.utc)
 

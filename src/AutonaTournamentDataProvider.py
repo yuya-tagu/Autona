@@ -27,10 +27,11 @@ from .core.StateManager import StateManager
 from .core.StatusService import StatusService
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
-from .core.TournamentService import TournamentService
+from .core.TournamentService import HIVEE, TournamentService, UrlKind
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers import AutonaQtHelper
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
+from .TournamentDataProvider.HiveeDataProvider import HiveeDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .TournamentDataProvider.StartGGDataProvider import (
     ResolveEventUrl as ResolveStartGGEventUrl)
@@ -116,7 +117,10 @@ class AutonaTournamentDataProvider(QObject):
         if not self.provider or not self.provider.videogame:
             return
 
-        if "start.gg" in self.provider.url:
+        # A Hivee event is Super Smash Bros. Ultimate, named by its start.gg
+        # videogame id (HiveeDataProvider.SSBU_STARTGG_ID).
+        if ("start.gg" in self.provider.url
+                or isinstance(self.provider, HiveeDataProvider)):
             if self.selectGameFromStartGGId is None:
                 # A shell that loads tournaments must register one; silence
                 # here would mean "the tournament's game never loads" with
@@ -142,14 +146,18 @@ class AutonaTournamentDataProvider(QObject):
 
     def LoadTournament(self, url, initialLoading=False, force=False):
         """Load the start.gg event at `url` (already resolved and saved by
-        TournamentService): its data, phases and entrants are fetched, and
-        tournament_changed is emitted. The loaded URL again does nothing
-        unless `force` (a re-fetch on demand). True when it (re)loaded.
-        Main thread."""
+        TournamentService) -- or the Hivee event, when `url` is a Hivee
+        overlay URL (HiveeDataProvider) -- its data, phases and entrants are
+        fetched, and tournament_changed is emitted. The loaded URL again
+        does nothing unless `force` (a re-fetch on demand). True when it
+        (re)loaded. Main thread."""
         if not force and self.provider and self.provider.url == url:
             return False
         self._CancelEntrants()
-        self.provider = StartGGDataProvider(url, self)
+        if UrlKind(url) == HIVEE:
+            self.provider = HiveeDataProvider(url, self)
+        else:
+            self.provider = StartGGDataProvider(url, self)
         # The match list is the tournament's (ADR-005 S4j): dropped once
         # the new provider is in place -- a Refresh made before this (on
         # any thread, from the provider replaced) is dropped with it, and
