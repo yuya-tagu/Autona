@@ -39,11 +39,18 @@ export function videoLength(sets: SetsJson): number {
     return Math.max(end, 1);
 }
 
-// The range the timeline shows: the whole video, or the selected set.
+// The range the timeline shows: the whole video, or the selected set with
+// `margin` seconds around it (where its IN / OUT can be dragged out of it),
+// within the video.
 export function timelineRange(sets: SetsJson, view: TimelineView,
-                              row: SetRow | null): Range {
+                              row: SetRow | null, margin = 0): Range {
     if (view === "set" && row && finite(row.start) && finite(row.end)) {
-        return {start: row.start, end: Math.max(row.end, row.start + 1)};
+        const end = Math.max(row.end, row.start + 1);
+        if (!(margin > 0)) {
+            return {start: row.start, end};
+        }
+        return {start: Math.max(0, row.start - margin),
+                end: Math.min(Math.max(videoLength(sets), end), end + margin)};
     }
     return {start: 0, end: videoLength(sets)};
 }

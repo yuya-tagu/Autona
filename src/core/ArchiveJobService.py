@@ -26,6 +26,12 @@ default, never under user_data/: the videos are large and the operator's):
   and its analysis cache ``.cache``);
 - ``<work>/<id>/worker.log``: the worker's stderr and what it printed on
   stdout that is not a JSON line, appended by this process alone;
+- ``<work>/<id>/review.json``: the operator's review of the sets (ADR-006
+  A4: confirmed, IN / OUT, which result; core/ArchiveReview.py), written
+  whole when the page saves it;
+- ``<work>/<id>/export_request.json`` and ``<work>/<id>/clips/``: the last
+  export's request and what the worker cut (the clips, their text files and
+  its ``export.json``);
 - ``<work>/downloads/``: the downloaded videos, shared by the jobs (two
   jobs on one VOD download it once).
 
@@ -63,6 +69,24 @@ worker and every process it started (the job object). A job a previous
 Autona left ``running`` (it ended without its close: a crash, a kill) is
 rewritten ``cancelled`` the first time the work folder is used.
 
+The export (ADR-006 A4)
+-----------------------
+A done job's confirmed sets are cut by the worker's ``export``: the same
+run of the worker as the analysis (one at a time with it -- a start of
+either while the other runs is ``busy`` --, the progress, the cancel, the
+shutdown, below the normal priority), started with ``export
+<job>/export_request.json --out <job>/clips --progress json
+--cancel-on-stdin``. The request is made from the job's out/sets.json and
+review.json (ArchiveReview.ExportSets) and the video the preview plays
+(``VideoFile``'s rule); the worker reads nothing else (the event and the
+video's id from sets.json, the bracket URL and the date from results.json,
+as ``run`` takes them). job.json keeps the job's analysis as it was and the
+last export under ``export`` (its state, outcome, logs, warnings and the
+counts of its ``done`` line); ``Job`` shows the clips of export.json
+when no export runs (the worker rewrites the file while it runs). The
+worker skips the clips it already cut from the same range, so running the
+export again after a cancel or a failure goes on where it stopped.
+
 What the page plays (ADR-006 A3, D7)
 ------------------------------------
 The preview's video and a set's background frame are files this service
@@ -81,8 +105,9 @@ Anything else is ``not_found``.
 
 Threads and locks: the request threads and the two reader threads.
 ``_lock`` holds the run in memory, the probe's cache and the swept work
-folders; ``_filesLock`` every read and write of a job.json (on Windows an
-os.replace fails while another thread has the file open); taken in that
+folders; ``_filesLock`` every read and write of a job.json and a
+review.json (on Windows an os.replace fails while another thread has the
+file open); taken in that
 order. The version probe (up to ``ArchiveWorker.PROBE_TIMEOUT_SECS``) runs
 under its own lock, never under ``_lock``; a request waits for one probe at
 most (the web client's timeout is 10 s). Nothing here touches the
@@ -107,7 +132,7 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from . import ArchiveWorker
+from . import ArchiveReview, ArchiveWorker
 from .SettingsManager import SettingsManager
 
 WORK_DIR_KEY = "archive.work_dir"
@@ -118,6 +143,15 @@ LOG_FILE = "worker.log"
 OUT_DIR = "out"
 SETS_FILE = "sets.json"
 DOWNLOADS_DIR = "downloads"
+REVIEW_FILE = ArchiveReview.FILE
+EXPORT_REQUEST_FILE = "export_request.json"
+CLIPS_DIR = "clips"
+EXPORT_FILE = "export.json"
+
+# What a run of the worker is: a job's analysis (``run``) or the export of
+# its confirmed sets (``export``, ADR-006 A4).
+ANALYSIS = "analysis"
+EXPORT = "export"
 
 STATES = ("running", "done", "error", "cancelled", "failed")
 # What a job.json written by a run that never ended can say.
@@ -168,6 +202,8 @@ FRAME_TYPE = "image/jpeg"
 
 STALE_NOTE = ("前回の Autona の終了時に実行中だったため、中断として扱いました。"
               "「再開」で続きから実行できます。")
+STALE_EXPORT_NOTE = ("前回の Autona の終了時に書き出し中だったため、中断として扱いました。"
+                     "もう一度「確定分を書き出し」で続きから書き出せます。")
 
 # ArchiveError codes (the v1 routes answer them: AutonaApiV1).
 INVALID = "invalid"
@@ -188,6 +224,9 @@ UNREADABLE = "unreadable"
 # video of _VIDEO_SUFFIXES not in _VIDEO_TYPES): the sets and the timeline
 # still work.
 NOT_PREVIEWABLE = "not_previewable"
+# A review or an export of a job whose analysis is not done (no sets to
+# review, or a sets.json of an earlier run).
+NOT_DONE = "not_done"
 
 # The preview's refusals' words (VideoFile / FrameFile, and v1 when the
 # file is gone by the time it opens it).
@@ -195,6 +234,9 @@ VIDEO_MISSING = "この切り抜きジョブの動画が見つかりません。
 VIDEO_NOT_PREVIEWABLE = ("この形式の動画は画面でプレビューできません。"
                          "セットの一覧・タイムラインは使えます。")
 FRAME_MISSING = "このセットの画像はありません。"
+# An export that failed on a file it could not write (PermissionError).
+EXPORT_LOCKED_HINT = ("書き出し先のクリップ（前回の書き出し）を動画プレイヤーなどで開いていると"
+                      "上書きできません。閉じてから、もう一度「確定分を書き出し」を押してください。")
 FILE_UNREADABLE = ("ファイルを開けません。ほかのアプリが使っていないか、"
                    "読む権限があるかを確かめてください。")
 
@@ -401,29 +443,52 @@ def _Count(value):
     return value
 
 
+def _State(value):
+    return value if value in STATES or value in _UNFINISHED else "failed"
+
+
+def _Error(value):
+    if not isinstance(value, dict):
+        return None
+    return {"code": _Text(value.get("code")),
+            "message": _Text(value.get("message")),
+            "hint": _Text(value.get("hint"))}
+
+
+def _Strings(value):
+    return ([item for item in value if isinstance(item, str)]
+            if isinstance(value, list) else [])
+
+
+def _NormalizedExport(raw):
+    """job.json's ``export`` (the job's last export, ADR-006 A4) as this
+    service uses it, or None when there was none."""
+    if not isinstance(raw, dict):
+        return None
+    progress = raw.get("progress")
+    return {
+        "state": _State(raw.get("state")),
+        "started_at": _Text(raw.get("started_at")),
+        "finished_at": _Text(raw.get("finished_at")),
+        "exit_code": _Count(raw.get("exit_code")),
+        "error": _Error(raw.get("error")),
+        "warnings": _Strings(raw.get("warnings"))[-WARNING_LINES:],
+        "logs": _Strings(raw.get("logs"))[-LOG_LINES:],
+        "progress": dict(progress) if isinstance(progress, dict) else None,
+        # The worker's done line: the clips of this export, the ones it
+        # skipped (already cut from the same range).
+        "clips": _Count(raw.get("clips")),
+        "skipped": _Count(raw.get("skipped")),
+    }
+
+
 def _Normalized(raw, jobId):
     """A job.json as this service uses it (every field there, of its type),
     or None when it is not this job's."""
     if not isinstance(raw, dict) or raw.get("id") != jobId:
         return None
-    state = raw.get("state")
-    if state not in STATES and state not in _UNFINISHED:
-        state = "failed"
-    error = raw.get("error")
-    if isinstance(error, dict):
-        error = {"code": _Text(error.get("code")),
-                 "message": _Text(error.get("message")),
-                 "hint": _Text(error.get("hint"))}
-    else:
-        error = None
     progress = raw.get("progress")
     progress = dict(progress) if isinstance(progress, dict) else None
-
-    def strings(key):
-        value = raw.get(key)
-        return ([item for item in value if isinstance(item, str)]
-                if isinstance(value, list) else [])
-
     return {
         "id": jobId,
         "created_at": _Text(raw.get("created_at")) or "",
@@ -431,15 +496,16 @@ def _Normalized(raw, jobId):
         "source": _Text(raw.get("source")) or "",
         "event": _Text(raw.get("event")),
         "has_results": bool(raw.get("has_results")),
-        "state": state,
+        "state": _State(raw.get("state")),
         "exit_code": _Count(raw.get("exit_code")),
         "sets": _Count(raw.get("sets")),
         "needs_review": _Count(raw.get("needs_review")),
-        "error": error,
-        "warnings": strings("warnings")[-WARNING_LINES:],
-        "logs": strings("logs")[-LOG_LINES:],
+        "error": _Error(raw.get("error")),
+        "warnings": _Strings(raw.get("warnings"))[-WARNING_LINES:],
+        "logs": _Strings(raw.get("logs"))[-LOG_LINES:],
         "progress": progress,
         "worker_version": _Text(raw.get("worker_version")),
+        "export": _NormalizedExport(raw.get("export")),
     }
 
 
@@ -449,8 +515,9 @@ def _Summary(record):
             "sets": record["sets"], "needs_review": record["needs_review"]}
 
 
-def _View(record, progress=None, logs=None, warnings=None):
-    """The Job of the v1 answers."""
+def _View(record, progress=None, logs=None, warnings=None, export=None):
+    """The Job of the v1 answers (`export`: the view of its last export,
+    ``_ExportView``)."""
     state = record["state"]
     if state not in STATES:
         state = "cancelled"
@@ -464,18 +531,36 @@ def _View(record, progress=None, logs=None, warnings=None):
                       else record["warnings"]),
         error=record["error"],
         exit_code=record["exit_code"],
-        has_results=record["has_results"])
+        has_results=record["has_results"],
+        export=export)
     return view
+
+
+def _Clip(item):
+    """A clip of the worker's export.json as the page shows it, or None."""
+    if not isinstance(item, dict) or type(item.get("no")) is not int:
+        return None
+    name = _FileName(item.get("file"))
+    if name is None:
+        return None
+    return {"no": item["no"], "file": name, "title": _Text(item.get("title")),
+            "start": _Number(item.get("start")),
+            "end": _Number(item.get("end")),
+            "exported": item.get("exported") is True,
+            "skipped": item.get("skipped") is True}
 
 
 class _Run:
     """The job the worker runs now: its record and what the readers
-    gathered since it started."""
+    gathered since it started. `kind`: ANALYSIS (the job's ``run``) or
+    EXPORT (the export of its confirmed sets: its end goes to the record's
+    ``export``)."""
 
-    def __init__(self, record, jobDir, workDir):
+    def __init__(self, record, jobDir, workDir, kind=ANALYSIS):
         self.record = record
         self.jobDir = jobDir
         self.workDir = workDir
+        self.kind = kind
         self.worker = None
         self.progress = None
         self.logs = deque(maxlen=LOG_LINES)
@@ -572,12 +657,17 @@ class ArchiveJobService:
     def _WriteRecord(self, jobDir, record):
         """Write `record` to job.json whole (temp file + os.replace).
         Raises OSError."""
-        data = json.dumps({"version": 1, **record}, ensure_ascii=False,
-                          indent=2)
-        path = os.path.join(jobDir, JOB_FILE)
+        self._WriteFile(jobDir, JOB_FILE, {"version": 1, **record})
+
+    def _WriteFile(self, jobDir, name, content):
+        """Write `content` as JSON to the job's file `name` whole (temp
+        file + os.replace). Raises OSError."""
+        data = json.dumps(content, ensure_ascii=False, indent=2)
+        path = os.path.join(jobDir, name)
         with self._filesLock:
-            fd, tmp = tempfile.mkstemp(dir=jobDir, prefix="job.",
-                                       suffix=".tmp")
+            fd, tmp = tempfile.mkstemp(
+                dir=jobDir, prefix=os.path.splitext(name)[0] + ".",
+                suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as file:
                     file.write(data)
@@ -614,10 +704,21 @@ class ArchiveJobService:
                     or entry.name == current or not entry.is_dir()):
                 continue
             record = self._ReadRecord(entry.path, entry.name)
-            if record is None or record["state"] not in _UNFINISHED:
+            if record is None:
                 continue
-            record["state"] = "cancelled"
-            record["logs"] = (record["logs"] + [STALE_NOTE])[-LOG_LINES:]
+            export = record["export"]
+            stale = record["state"] in _UNFINISHED
+            staleExport = export is not None \
+                and export["state"] in _UNFINISHED
+            if not stale and not staleExport:
+                continue
+            if stale:
+                record["state"] = "cancelled"
+                record["logs"] = (record["logs"] + [STALE_NOTE])[-LOG_LINES:]
+            if staleExport:
+                export["state"] = "cancelled"
+                export["logs"] = (export["logs"]
+                                  + [STALE_EXPORT_NOTE])[-LOG_LINES:]
             try:
                 self._WriteRecord(entry.path, record)
                 logger.info(f"Archive: job {entry.name} was left running by "
@@ -679,15 +780,18 @@ class ArchiveJobService:
     # ── what the page reads ────────────────────────────────────────────
 
     def Status(self, refresh=False):
-        """{available, version, format, reason, work_dir, running_job}.
-        Probes the worker on this thread the first time (and when
-        `refresh`)."""
+        """{available, version, format, reason, work_dir, running_job,
+        running_kind (ANALYSIS / EXPORT, or None)}. Probes the worker on
+        this thread the first time (and when `refresh`)."""
         probe = self._Probe(refresh=refresh, since=self._probeCount)
         with self._lock:
-            running = self._run.record["id"] if self._run is not None else None
+            run = self._run
+            running = run.record["id"] if run is not None else None
+            kind = run.kind if run is not None else None
         return {"available": probe.available, "version": probe.version,
                 "format": probe.format, "reason": probe.reason,
-                "work_dir": self.WorkDir(), "running_job": running}
+                "work_dir": self.WorkDir(), "running_job": running,
+                "running_kind": kind}
 
     def Jobs(self):
         """Every job of the work folder, newest first (JobSummary)."""
@@ -712,55 +816,137 @@ class ArchiveJobService:
 
     def Job(self, jobId):
         """(Job, the parsed out/sets.json or None). The sets are None while
-        the job runs: a resumed job's sets.json is the previous run's until
-        the worker writes its own at the end. Raises
-        ArchiveError(NOT_FOUND)."""
+        the job's analysis runs: a resumed job's sets.json is the previous
+        run's until the worker writes its own at the end (an export does not
+        touch it). Raises ArchiveError(NOT_FOUND)."""
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
             self._Sweep(workDir)
             view = self._RunView(jobId)
             if view is not None:
-                return view, None
-            record = self._DiskRecord(jobDir, jobId)
-            if record is None:
-                raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-            view = _View(record)
+                if self._run.kind == ANALYSIS:
+                    return view, None
+            else:
+                record = self._DiskRecord(jobDir, jobId)
+                if record is None:
+                    raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+                view = _View(record, export=self._ExportView(record, jobDir))
         return view, self._ReadSets(jobDir)
 
     def _DiskRecord(self, jobDir, jobId):
         """Job `jobId`'s job.json when it is not the running job (under
-        _lock): one that says it is running is not (this process runs
-        ``_run`` alone) and reads as cancelled."""
+        _lock): one that says it (or its export) is running is not (this
+        process runs ``_run`` alone) and reads as cancelled."""
         record = self._ReadRecord(jobDir, jobId)
-        if record is not None and record["state"] in _UNFINISHED:
-            record["state"] = "cancelled"
+        if record is not None:
+            if record["state"] in _UNFINISHED:
+                record["state"] = "cancelled"
+            export = record["export"]
+            if export is not None and export["state"] in _UNFINISHED:
+                export["state"] = "cancelled"
         return record
 
+    def _CurrentRecord(self, jobDir, jobId):
+        """(job `jobId`'s record, the kind of its run or None) under _lock:
+        the running one's, else its job.json. Raises
+        ArchiveError(NOT_FOUND)."""
+        run = self._run
+        if run is not None and run.record["id"] == jobId:
+            return dict(run.record), run.kind
+        record = self._DiskRecord(jobDir, jobId)
+        if record is None:
+            raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+        return record, None
+
     def _RunView(self, jobId):
-        """The running job's view when it is `jobId` (under _lock)."""
+        """The running job's view when it is `jobId` (under _lock): an
+        analysis' progress is the job's, an export's its ``export``'s."""
         run = self._run
         if run is None or run.record["id"] != jobId:
             return None
+        if run.kind == EXPORT:
+            return _View(run.record,
+                         export=self._ExportView(run.record, run.jobDir, run))
         return _View(run.record,
                      progress=dict(run.progress) if run.progress else None,
-                     logs=run.logs, warnings=run.warnings)
+                     logs=run.logs, warnings=run.warnings,
+                     export=self._ExportView(run.record, run.jobDir))
+
+    def _ExportView(self, record, jobDir, run=None):
+        """The view of job `record`'s last export, or None: its record, the
+        clips folder (``out_dir``) and the clips of the folder's
+        export.json (``files``; None while `run` -- the export running --
+        rewrites it: on Windows an open file cannot be replaced)."""
+        export = record.get("export")
+        if export is None:
+            return None
+        view = dict(export, out_dir=os.path.join(jobDir, CLIPS_DIR))
+        if run is not None:
+            view.update(progress=dict(run.progress) if run.progress else None,
+                        logs=list(run.logs), warnings=list(run.warnings),
+                        files=None)
+        else:
+            view["files"] = self._ReadClips(jobDir)
+        return view
+
+    @staticmethod
+    def _ReadClips(jobDir):
+        """The clips the job's clips/export.json lists, or None."""
+        path = os.path.join(jobDir, CLIPS_DIR, EXPORT_FILE)
+        try:
+            with open(path, encoding="utf-8") as file:
+                data = json.load(file)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as error:
+            logger.warning(f"Archive: {path} could not be read: {error}")
+            return None
+        clips = data.get("clips") if isinstance(data, dict) else None
+        if not isinstance(clips, list):
+            return None
+        return [clip for clip in map(_Clip, clips) if clip is not None]
 
     # ── what the preview plays (ADR-006 A3, D7) ────────────────────────
 
     def _Served(self, jobId):
         """(work folder, job folder, job.json, running) of job `jobId` for
-        the preview's files. Raises ArchiveError(NOT_FOUND)."""
+        the preview's files: `running` while its analysis runs (an export
+        only reads them). Raises ArchiveError(NOT_FOUND)."""
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
             run = self._run
             if run is not None and run.record["id"] == jobId:
-                return workDir, jobDir, dict(run.record), True
+                return (workDir, jobDir, dict(run.record),
+                        run.kind == ANALYSIS)
         record = self._ReadRecord(jobDir, jobId)
         if record is None:
             raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
         return workDir, jobDir, record, False
+
+    def _VideoPath(self, workDir, jobDir, record, sets=None):
+        """The video job `record` was run on, by VideoFile's rule (not
+        checked to be there or to be a video): the file of this PC its
+        job.json names, or the download sets.json (`sets`, read when None)
+        names in this work folder's downloads/. Raises
+        ArchiveError(NOT_FOUND, VIDEO_MISSING)."""
+        missing = ArchiveError(NOT_FOUND, VIDEO_MISSING)
+        source = record["source"]
+        if re.match(r"https?://", source):
+            if sets is None:
+                sets = self._ReadSets(jobDir)
+            name = _FileName((sets or {}).get("source"))
+            if name is None:
+                raise missing
+            path = os.path.join(workDir, DOWNLOADS_DIR, name)
+            if not _Under(workDir, path):
+                raise missing
+            return path
+        try:
+            return CheckSource(source)
+        except ArchiveError:
+            raise missing from None
 
     def VideoFile(self, jobId):
         """(path, type) of the video job `jobId` was run on: the file of this
@@ -776,20 +962,7 @@ class ArchiveJobService:
         workDir, jobDir, record, running = self._Served(jobId)
         if running:
             raise missing
-        source = record["source"]
-        if re.match(r"https?://", source):
-            sets = self._ReadSets(jobDir) or {}
-            name = _FileName(sets.get("source"))
-            if name is None:
-                raise missing
-            path = os.path.join(workDir, DOWNLOADS_DIR, name)
-            if not _Under(workDir, path):
-                raise missing
-        else:
-            try:
-                path = CheckSource(source)
-            except ArchiveError:
-                raise missing from None
+        path = self._VideoPath(workDir, jobDir, record)
         # CheckSource has refused a share's path before touching the disk.
         suffix = os.path.splitext(path)[1].lower()
         if suffix not in _VIDEO_SUFFIXES or not os.path.isfile(path):
@@ -842,6 +1015,184 @@ class ArchiveJobService:
             return None
         return sets if isinstance(sets, dict) else None
 
+    @staticmethod
+    def _ReadResults(jobDir):
+        """The results the job was given (results.json), or None."""
+        try:
+            with open(os.path.join(jobDir, RESULTS_FILE),
+                      encoding="utf-8") as file:
+                results = json.load(file)
+        except (OSError, ValueError):
+            return None
+        return results if isinstance(results, dict) else None
+
+    # ── the review and the export (ADR-006 A4) ─────────────────────────
+
+    @staticmethod
+    def _DoneSets(jobDir, jobId):
+        """The out/sets.json of a done job, for its review and its export.
+        Raises ArchiveError(UNREADABLE) when it cannot be read: a done job
+        has one, and the review is made against it (an empty one in its
+        place would let a save write over the operator's review)."""
+        path = os.path.join(jobDir, OUT_DIR, SETS_FILE)
+        try:
+            with open(path, encoding="utf-8") as file:
+                sets = json.load(file)
+        except (OSError, ValueError) as error:
+            logger.warning(f"Archive: {SETS_FILE} of {jobId} could not be "
+                           f"read: {error}")
+            sets = None
+        if not isinstance(sets, dict):
+            raise ArchiveError(UNREADABLE, (
+                "このジョブのセットの一覧（out/sets.json）が読めません。"
+                "ほかのアプリが使っていないか確かめて、ページを読み直してください。"))
+        return sets
+
+    def _ReadReview(self, jobDir, jobId, sets):
+        """The job's review.json as it applies to `sets`
+        (ArchiveReview.Normalize): none when there is none or it is not a
+        review of this format (not JSON, another shape: the next save
+        writes over it). Raises ArchiveError(UNREADABLE) when it is there
+        but cannot be read (another app holds it, no permission): an empty
+        review in its place would let the page's next save write over it."""
+        path = os.path.join(jobDir, REVIEW_FILE)
+        with self._filesLock:
+            try:
+                with open(path, encoding="utf-8") as file:
+                    raw = json.load(file)
+            except FileNotFoundError:
+                return ArchiveReview.Empty()
+            except ValueError as error:     # not JSON, not UTF-8
+                logger.warning(f"Archive: {REVIEW_FILE} of {jobId} is not "
+                               f"JSON ({error}); ignored")
+                return ArchiveReview.Empty()
+            except OSError as error:
+                logger.warning(f"Archive: {REVIEW_FILE} of {jobId} could not "
+                               f"be read: {error}")
+                raise ArchiveError(UNREADABLE, (
+                    "このジョブのレビュー（review.json）が読めません。"
+                    "ほかのアプリが使っていないか確かめて、ページを読み直してください。"))
+        if not isinstance(raw, dict) \
+                or raw.get("format") != ArchiveReview.FORMAT:
+            logger.warning(f"Archive: {REVIEW_FILE} of {jobId} is not of "
+                           f"format {ArchiveReview.FORMAT}; ignored")
+        return ArchiveReview.Normalize(raw, sets)
+
+    def Review(self, jobId):
+        """Job `jobId`'s review ({"format", "sets": {no: entry}}: what of
+        its review.json still fits its out/sets.json). Empty for a job whose
+        analysis is not done or runs (no sets to review). Raises
+        ArchiveError: NOT_FOUND, UNREADABLE (its review.json or sets.json is
+        there but cannot be read)."""
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            self._Sweep(workDir)
+            record, kind = self._CurrentRecord(jobDir, jobId)
+        if kind == ANALYSIS or record["state"] != "done":
+            return ArchiveReview.Empty()
+        return self._ReadReview(jobDir, jobId, self._DoneSets(jobDir, jobId))
+
+    def SaveReview(self, jobId, review):
+        """Replace job `jobId`'s review with `review` ({"sets": {no:
+        {"confirmed"?, "start"?, "end"?, "set"?}}}, ArchiveReview.Check) ->
+        the review saved. Refused while the job's analysis runs and for one
+        whose analysis is not done; taken while it exports (the export runs
+        on the request it started with). Raises ArchiveError: NOT_FOUND,
+        BUSY, NOT_DONE, UNREADABLE (its sets.json), INVALID,
+        WORK_DIR_UNUSABLE."""
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            self._Sweep(workDir)
+            record, kind = self._CurrentRecord(jobDir, jobId)
+            if kind == ANALYSIS:
+                raise ArchiveError(BUSY, "このジョブは解析の実行中です。")
+            if record["state"] != "done":
+                raise ArchiveError(NOT_DONE, "解析が完了したジョブだけ編集できます。")
+            sets = self._DoneSets(jobDir, jobId)
+            try:
+                checked = ArchiveReview.Check(review, sets)
+            except ArchiveReview.ReviewError as error:
+                raise ArchiveError(INVALID, str(error))
+            try:
+                self._WriteFile(jobDir, REVIEW_FILE,
+                                ArchiveReview.Stored(checked, sets))
+            except OSError as error:
+                raise ArchiveError(WORK_DIR_UNUSABLE,
+                                   f"作業フォルダに書けません: {error}")
+        return checked
+
+    def _ExportRequest(self, workDir, jobDir, record):
+        """The export request (vodsplit export.validate_edits) of job
+        `record`: its confirmed sets as reviewed, the video it was run on,
+        and what ``run`` gave the titles (sets.json's event and video id,
+        results.json's bracket URL and date). Raises ArchiveError: NOT_DONE,
+        UNREADABLE (its sets.json or review.json), INVALID (nothing
+        confirmed), SOURCE_UNUSABLE (the video is gone)."""
+        if record["state"] != "done":
+            raise ArchiveError(NOT_DONE, "解析が完了したジョブだけ書き出せます。")
+        sets = self._DoneSets(jobDir, record["id"])
+        review = self._ReadReview(jobDir, record["id"], sets)
+        chosen = ArchiveReview.ExportSets(review, sets)
+        if not chosen:
+            raise ArchiveError(INVALID, (
+                "確定したセットがありません。書き出すセットを確定してください。"))
+        try:
+            path = self._VideoPath(workDir, jobDir, record, sets)
+        except ArchiveError:
+            path = None
+        if path is None or not os.path.isfile(path):
+            raise ArchiveError(SOURCE_UNUSABLE, (
+                "元動画が見つからないため書き出せません。"
+                "動画を移動・削除していないか確かめてください。"))
+        results = self._ReadResults(jobDir) or {}
+        return {"source": path,
+                "source_id": _Text(sets.get("source_id")),
+                "event": _Text(sets.get("event")),
+                "bracket_url": _Text(results.get("bracket_url")),
+                "date": _Text(results.get("date")),
+                "sets": chosen}
+
+    def StartExport(self, jobId):
+        """Cut job `jobId`'s confirmed sets with the worker's ``export``
+        into <job>/clips/ -> its Job (its ``export`` running). Raises
+        ArchiveError: NOT_FOUND, BUSY (a job or an export runs), NOT_DONE,
+        INVALID (nothing confirmed), SOURCE_UNUSABLE, UNAVAILABLE /
+        STOPPING, WORK_DIR_UNUSABLE."""
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            self._Sweep(workDir)
+            record, kind = self._CurrentRecord(jobDir, jobId)
+            if kind is not None:
+                self._Refuse(export=True)
+        # The request's refusals come before the probe (up to 8 s).
+        self._ExportRequest(workDir, jobDir, record)
+        probe = self._Available()
+        with self._lock:
+            self._Refuse(export=True)
+            record = self._DiskRecord(jobDir, jobId)
+            if record is None:
+                raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+            request = self._ExportRequest(workDir, jobDir, record)
+            record["export"] = {
+                "state": "running", "started_at": _Now(), "finished_at": None,
+                "exit_code": None, "error": None, "warnings": [], "logs": [],
+                "progress": None, "clips": None, "skipped": None}
+            try:
+                os.makedirs(os.path.join(jobDir, CLIPS_DIR), exist_ok=True)
+                self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
+                self._WriteRecord(jobDir, record)
+            except OSError as error:
+                raise ArchiveError(WORK_DIR_UNUSABLE,
+                                   f"作業フォルダに書けません: {error}")
+            logger.info(f"Archive: job {jobId} export started "
+                        f"({len(request['sets'])} sets)")
+            run = _Run(record, jobDir, workDir, kind=EXPORT)
+            self._Start(run, probe)
+            return self._RunView(jobId)
+
     # ── starting, cancelling, resuming ─────────────────────────────────
 
     def Create(self, source, results=None, event=None):
@@ -868,7 +1219,7 @@ class ArchiveJobService:
                 "has_results": results is not None, "state": "running",
                 "exit_code": None, "sets": None, "needs_review": None,
                 "error": None, "warnings": [], "logs": [], "progress": None,
-                "worker_version": probe.version,
+                "worker_version": probe.version, "export": None,
             }
             try:
                 os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
@@ -928,8 +1279,9 @@ class ArchiveJobService:
             return self._RunView(jobId)
 
     def Cancel(self, jobId):
-        """Ask the running job `jobId` to stop -> its Job (still running:
-        the worker ends it). Raises ArchiveError: NOT_FOUND, NOT_RUNNING."""
+        """Ask the running job `jobId` -- its analysis or its export -- to
+        stop -> its Job (still running: the worker ends it). Raises
+        ArchiveError: NOT_FOUND, NOT_RUNNING."""
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
@@ -954,11 +1306,17 @@ class ArchiveJobService:
                 f"このジョブの元動画を使えないため再開できません（{reason}）。"
                 "新しいジョブとして始め直してください。"))
 
-    def _Refuse(self):
-        """Refuse a start while the app closes or a job runs (under
-        _lock)."""
+    def _Refuse(self, export=False):
+        """Refuse a start (`export`: an export's) while the app closes or
+        a job runs its analysis or its export (under _lock)."""
         if self._stopping:
             raise ArchiveError(STOPPING, "Autona の終了中です。")
+        if self._run is not None and self._run.kind == EXPORT:
+            raise ArchiveError(BUSY, (
+                "書き出しの実行中です。終わるか中止してから始めてください。"))
+        if self._run is not None and export:
+            raise ArchiveError(BUSY, (
+                "切り抜きジョブの解析が実行中です。終わるか中止してから書き出してください。"))
         if self._run is not None:
             raise ArchiveError(BUSY, (
                 "別の切り抜きジョブが実行中です。終わるか中止してから始めてください。"))
@@ -981,6 +1339,12 @@ class ArchiveJobService:
         raise ArchiveError(WORK_DIR_UNUSABLE, "ジョブのフォルダを作れません。")
 
     def _Arguments(self, run):
+        if run.kind == EXPORT:
+            # The request names the video and the sets; clips/ has no
+            # sets.json (the worker refuses a run's output folder).
+            return ["export", os.path.join(run.jobDir, EXPORT_REQUEST_FILE),
+                    "--out", os.path.join(run.jobDir, CLIPS_DIR),
+                    "--progress", "json", "--cancel-on-stdin"]
         record = run.record
         arguments = ["run", record["source"],
                      "--out", os.path.join(run.jobDir, OUT_DIR),
@@ -1006,7 +1370,8 @@ class ArchiveJobService:
         try:
             run.logFile = open(os.path.join(run.jobDir, LOG_FILE), "a",
                                encoding="utf-8")
-            run.logFile.write(f"--- {_Now()} start ---\n")
+            what = "export start" if run.kind == EXPORT else "start"
+            run.logFile.write(f"--- {_Now()} {what} ---\n")
             run.logFile.flush()
         except OSError:
             logger.opt(exception=True).warning(
@@ -1017,7 +1382,7 @@ class ArchiveJobService:
         except Exception as error:
             self._Forget()
             message = f"切り抜きワーカーを起動できません: {error}"
-            run.record.update(state="failed", finished_at=_Now(), error={
+            self._Settle(run, state="failed", finished_at=_Now(), error={
                 "code": "launch", "message": message, "hint": None})
             self._CloseLog(run)
             try:
@@ -1039,12 +1404,25 @@ class ArchiveJobService:
                          name="AutonaArchiveWorker").start()
 
     @staticmethod
+    def _Settle(run, **end):
+        """Write a run's end (its state, outcome, logs ...) where its kind
+        keeps it: the job's own fields for an analysis, its ``export`` for
+        an export."""
+        (run.record["export"] if run.kind == EXPORT else run.record).update(
+            end)
+
+    @staticmethod
     def _AskCancel(run):
-        """Write ``cancel`` to the worker's stdin and close it (once)."""
+        """Write ``cancel`` to the worker's stdin and close it (once), after
+        giving the worker its normal priority back (a below-normal worker on
+        a busy machine reads the line only when the CPU is given to it)."""
         if run.cancelRequested:
             return
         run.cancelRequested = True
-        stdin = run.worker.proc.stdin if run.worker is not None else None
+        if run.worker is None:
+            return
+        run.worker.RaisePriority()
+        stdin = run.worker.proc.stdin
         if stdin is None:
             return
         try:
@@ -1175,9 +1553,18 @@ class ArchiveJobService:
         if tail:
             message += f"\n--- worker.log ---\n{tail}"
         code = (_Text(final.get("code")) if kind == "error" else None)
-        return "failed", {
-            "code": code or "crashed", "message": message,
-            "hint": "「再開」で続きから実行できます。詳しくは作業フォルダの worker.log を見てください。"}
+        if run.kind != EXPORT:
+            hint = ("「再開」で続きから実行できます。詳しくは作業フォルダの worker.log を見てください。")
+        elif kind == "error" and "PermissionError" in (
+                _Text(final.get("message")) or ""):
+            # vodsplit's internal error for a clip it cannot replace: the
+            # earlier export's file, open in a player (Windows' sharing).
+            hint = EXPORT_LOCKED_HINT
+        else:
+            hint = ("もう一度「確定分を書き出し」を押すと、書き出し済みのクリップを飛ばして続きから書き出します。"
+                    "詳しくは作業フォルダの worker.log を見てください。")
+        return "failed", {"code": code or "crashed", "message": message,
+                          "hint": hint}
 
     @staticmethod
     def _LogTail(run):
@@ -1214,16 +1601,21 @@ class ArchiveJobService:
             state, error = self._EndState(run, exitCode)
             with self._lock:
                 record = run.record
-                record.update(
+                end = dict(
                     state=state, finished_at=_Now(), exit_code=exitCode,
                     error=error, logs=list(run.logs),
                     warnings=list(run.warnings),
                     progress=dict(run.progress) if run.progress else None)
                 if state == "done":
                     final = run.final or {}
-                    record.update(sets=_Count(final.get("sets")),
-                                  needs_review=_Count(
-                                      final.get("needs_review")))
+                    if run.kind == EXPORT:
+                        end.update(clips=_Count(final.get("clips")),
+                                   skipped=_Count(final.get("skipped")))
+                    else:
+                        end.update(sets=_Count(final.get("sets")),
+                                   needs_review=_Count(
+                                       final.get("needs_review")))
+                self._Settle(run, **end)
                 try:
                     self._WriteRecord(run.jobDir, record)
                 except OSError:
@@ -1231,7 +1623,8 @@ class ArchiveJobService:
                         f"Archive: job {record['id']} could not be written")
                 if self._run is run:
                     self._run = None
-            logger.info(f"Archive: job {record['id']} {state} (exit "
+            what = "export " if run.kind == EXPORT else ""
+            logger.info(f"Archive: job {record['id']} {what}{state} (exit "
                         f"{exitCode})")
         finally:
             with self._lock:
@@ -1258,9 +1651,10 @@ class ArchiveJobService:
     # ── the shells' close ──────────────────────────────────────────────
 
     def Shutdown(self, timeout=5.0):
-        """Refuse new jobs, cancel the running one and wait up to `timeout`
-        seconds for it to end; then end the worker and every process it
-        started. Its job.json is written cancelled (resumable)."""
+        """Refuse new jobs, cancel the running one (an analysis or an
+        export) and wait up to `timeout` seconds for it to end; then end the
+        worker and every process it started. Its job.json is written
+        cancelled (resumable; an export goes on with the next one)."""
         with self._lock:
             self._stopping = True
             run = self._run

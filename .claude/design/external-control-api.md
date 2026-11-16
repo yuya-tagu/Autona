@@ -258,6 +258,7 @@
 | `GET /api/v1/archive/jobs/{id}` | ジョブの進捗・結果と `out/sets.json`（§5.32。`THIS_PC`。2026-11-16 追加） | `get_archive_job`（`core/ArchiveJobService.Job`） | — |
 | `GET /api/v1/archive/jobs/{id}/video` | ジョブの元動画（プレビュー。`Range` で `206`。§5.32。`THIS_PC`。2026-11-16 追加・ADR-006 A3） | `get_archive_video`（`core/ArchiveJobService.VideoFile`） | — |
 | `GET /api/v1/archive/jobs/{id}/frames/{no}` | セットの背景フレーム（JPEG。§5.32。`THIS_PC`。2026-11-16 追加・A3） | `get_archive_frame`（`core/ArchiveJobService.FrameFile`） | — |
+| `GET /api/v1/archive/jobs/{id}/review` | ジョブのレビューの編集（確定・IN / OUT・割り当て。§5.32。`THIS_PC`。2026-11-16 追加・ADR-006 A4） | `get_archive_review`（`core/ArchiveJobService.Review`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -915,22 +916,26 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 
 ### 5.32 アーカイブ切り抜き `/api/v1/archive/*`（2026-11-16 追加・ADR-006 A1）
 
-アーカイブ切り抜きのページ（`/web/archive`）だけが呼ぶ。書き込み（§6.52）もここにまとめる。**読み取り（status・ジョブの一覧と取得・動画と背景フレーム（A3））は `THIS_PC` 区分、書き込み（作業フォルダの変更・ジョブの作成・中止・再開）は `SHELL` 区分**（2026-11-16 A1 の検収で変更。答えはこの PC のパスを含み、書き込みはこの PC で子プロセスを動かして任意の URL をこの PC のディスクに落とす。LAN の他端末はトークンがあっても `403`。`THIS_PC` は同じオリジンのレイアウト（OBS のブラウザソース）も通すので、書き込みはゲームアセットのジョブと同じくデスクトップの共有ビューの fetch（シェルの秘密付き）だけ。ヘッドレスと素のブラウザからはジョブを作れない: `403 FORBIDDEN`）・`Cache-Control: no-store`（core が断る答えも）。API 一覧（§5.24）には載せない。state には載せず（Socket.IO でも配らない）、ページは `GET /archive/jobs/{id}` を 1 秒ごとに読む。断るときは core の日本語の文を `error.message`（ページがそのまま出す）、core のコードを `error.reason` に入れる
+アーカイブ切り抜きのページ（`/web/archive`）だけが呼ぶ。書き込み（§6.52）もここにまとめる。**読み取り（status・ジョブの一覧と取得・動画と背景フレーム（A3）・レビュー（A4））は `THIS_PC` 区分、書き込み（作業フォルダの変更・ジョブの作成・中止・再開・レビューの保存と書き出し（A4））は `SHELL` 区分**（2026-11-16 A1 の検収で変更。答えはこの PC のパスを含み、書き込みはこの PC で子プロセスを動かして任意の URL をこの PC のディスクに落とす。LAN の他端末はトークンがあっても `403`。`THIS_PC` は同じオリジンのレイアウト（OBS のブラウザソース）も通すので、書き込みはゲームアセットのジョブと同じくデスクトップの共有ビューの fetch（シェルの秘密付き）だけ。ヘッドレスと素のブラウザからはジョブを作れない: `403 FORBIDDEN`）・`Cache-Control: no-store`（core が断る答えも）。API 一覧（§5.24）には載せない。state には載せず（Socket.IO でも配らない）、ページは `GET /archive/jobs/{id}` を 1 秒ごとに読む。断るときは core の日本語の文を `error.message`（ページがそのまま出す）、core のコードを `error.reason` に入れる
 
 | メソッド・パス | body | `data` | 断る |
 |---|---|---|---|
-| `GET /archive/status`（`?refresh=true` で聞き直す） | — | `{available, version, format, reason, work_dir, running_job}`（`reason` は使えない理由。`running_job` は実行中のジョブの id か null） | — |
+| `GET /archive/status`（`?refresh=true` で聞き直す） | — | `{available, version, format, reason, work_dir, running_job, running_kind}`（`reason` は使えない理由。`running_job` は実行中のジョブの id か null、`running_kind` はその解析（`analysis`）か書き出し（`export`）か null: A4） | — |
 | `PATCH /archive/settings` | `{work_dir}`（絶対パス。無ければ作る） | status と同じ | 空・相対・作れない `400`（`invalid`）、実行中 `409 CONFLICT`（`busy`） |
 | `GET /archive/jobs` | — | `{jobs: [JobSummary]}`（新しい順） | — |
 | `POST /archive/jobs` | `{source, results, event}`（`source`: `http(s)://` の URL か、この PC のドライブにある動画ファイルのフルパス。ネットワークの共有（`\\host\share\...`・`//host/...`・`\\?\UNC\...`）など `\\` で始まるパスはファイルを見る前に `400`（存在の確認で SMB 接続と NTLM 認証を起こさないため）。`results`: `{"sets": [{"p1","p2","s1","s2","round"?}]}` か null。`event`: 題名に使う大会名か null） | `201` `{job: Job}` | 中身 `400`（`invalid`）→ ワーカーが無い・終了中 `503 UNAVAILABLE`（`unavailable` / `stopping`）→ 実行中 `409 CONFLICT`（`busy`）の順。作業フォルダに書けない `409 NOT_READY`（`work_dir`）。本文は 2MB まで（超えると `413`） |
-| `GET /archive/jobs/{id}` | — | `{job: Job, sets: out/sets.json の中身か null}`（実行中は null。再開したジョブのファイルは前回の実行のもののため） | 無い・形式違い `404`（`not_found`） |
+| `GET /archive/jobs/{id}` | — | `{job: Job, sets: out/sets.json の中身か null}`（解析の実行中は null。再開したジョブのファイルは前回の実行のもののため。書き出しの実行中は返す） | 無い・形式違い `404`（`not_found`） |
 | `GET /archive/jobs/{id}/video`（A3） | — | 封筒ではなく動画のバイト列（`send_file(conditional=True)`: `Range` で `206`、範囲外は `416`、`HEAD` も可）。ジョブが決める 1 本だけ（パスは受け取らない）: URL のジョブはワーカーが落としたファイル（`out/sets.json` の `source` のファイル名を今の作業フォルダの `downloads/` で探す）、ローカルのジョブは `job.json` の `source`（作成と同じ検査。作業フォルダの外でもよい）。返すのはブラウザが再生する拡張子の固定の表（`.mp4` / `.m4v` / `.webm` / `.mkv` / `.mov`）のものだけで、種類はその表から付ける・`X-Content-Type-Options: nosniff` | 無い・形式違いのジョブ、`\\` で始まるパス（ファイルを見ずに）、まだ落としていない、作業フォルダの外に解決する（リンクを辿って）、動画の拡張子でない（`.txt` / `.json` / 拡張子なし / `.part` など。動画の拡張子は、vodsplit が FFmpeg で読むよくあるコンテナ: 上の 5 つと `.ts` / `.m2ts` / `.mts` / `.flv` / `.avi` / `.wmv` / `.mpg` / `.mpeg` / `.3gp` / `.ogv`）、実行中のジョブ（再開したジョブのワーカーが書き直しうる）、消えた: `404`（`not_found`）。動画はあるがプレビューできない形式（上の 5 つ以外の動画の拡張子。OBS の `.flv` / `.ts` など）: `415 UNSUPPORTED_MEDIA_TYPE`（`not_previewable`。`HEAD` も同じ状態で、ページはそれで見分けて「セットの一覧・タイムラインは使えます」と言う）。ほかの理由で開けない（ほかのアプリが掴んでいる・読む権限が無い）: `409 CONFLICT`（`unreadable`） |
 | `GET /archive/jobs/{id}/frames/{no}`（A3） | — | セット `no` の背景フレーム（`out/sets.json` の行の `thumb`。ジョブの `out/` の JPEG。ワーカーの `--thumbs`）。`image/jpeg`・`nosniff` | 実行中のジョブ、無いセット・`thumb` の無い行、`.jpg` でない名前、ジョブの `out/` の外に解決する（リンクを辿って。別のジョブのファイル）、消えた: `404`（`not_found`）。ほかの理由で開けない: `409 CONFLICT`（`unreadable`） |
-| `POST /archive/jobs/{id}:cancel` | — | `{job}`（ワーカーが止まるまで `running`） | `404`、実行中でない `409`（`not_running`） |
+| `GET /archive/jobs/{id}/review`（A4） | — | `{review: {format: 1, sets: {"<no>": {confirmed?, start?, end?, set?}}}}`（そのセットについて変えたものだけ。書かないキーはワーカーの値。`job.json` の隣の `review.json` のうち今の `out/sets.json` に合うもの。壊れた・別の形式のファイルは空として扱う。合わなくなった区間は確定も一緒に捨てる）。解析が完了していない・実行中のジョブは空 | あるのに開けない review.json（ほかのアプリが使っている・権限）か、完了したジョブの読めない `out/sets.json`: `409 CONFLICT`（`unreadable`。空として答えると、ページの次の保存がレビューを上書きする）、`404`（`not_found`） |
+| `PUT /archive/jobs/{id}/review`（A4） | `{sets: {"<no>": {confirmed?: bool, start?: 秒, end?: 秒, set?: 結果か null}}}`（レビュー全体を置き換える。`start` / `end` は 0.01 秒単位で、`end - start` が 1 秒以上（vodsplit と同じ厳格な比較: 浮動小数で 1 秒にわずかに足りない `0.13`〜`1.13` は断る）、動画の長さ（sets.json の `duration`）から 0.05 秒を引いた所までにも 1 秒以上（終わりを越える `end` はワーカーが終わりで切る）。`set` はそのセットの `set` か sets.json の `unused_sets` のどれかか null（結果なし）で、1 つの結果は 1 セットだけ。結果の同一はキーの順と整数の書き方（`3` と `3.0`）によらない） | `{review}`（保存したもの） | 合わない `400`（`invalid`。どの項目かを日本語で）、解析の実行中 `409`（`busy`）、解析が完了していない `409`（`not_done`）、完了したジョブの `out/sets.json` が読めない `409`（`unreadable`）、作業フォルダに書けない `409 NOT_READY`（`work_dir`）、`404`。本文は 2MB まで。書き出しの実行中は受ける（走っている書き出しは始めたときの要求で切る）。操作ログは本文のキーだけ |
+| `POST /archive/jobs/{id}:export`（A4） | — | `{job}`（`job.export.state` が `running`）。確定したセットをワーカーの `export` で `<作業フォルダ>/<id>/clips/` に切り出す（入力は `<id>/export_request.json`。タイトル・概要欄はワーカーがテンプレートから作る。元動画は `GET .../video` と同じ決め方） | 確定が無い `400`（`invalid`）、解析が完了していない `409`（`not_done`）、`out/sets.json` か review.json が読めない `409`（`unreadable`）、元動画が無い `409`（`source`）、解析か書き出しの実行中 `409`（`busy`。別のジョブの解析中は書き出し用の文言）、`503` は開始と同じ、`404` |
+| `POST /archive/jobs/{id}:cancel` | — | `{job}`（ワーカーが止まるまで `running`。書き出しの実行中はそれを止める: A4） | `404`、実行中でない `409`（`not_running`） |
 | `POST /archive/jobs/{id}:resume` | — | `{job}`（同じ引数でもう一度。ワーカーがキャッシュから続ける） | `404`、完了済み `409`（`done`）、実行中 `409`（`busy`）、`job.json` の `source` が作成と同じ検査を通らない（手で書き換えた・動画を動かした / 消した）`409 CONFLICT`（`source`）、`503` は開始と同じ |
 
 - JobSummary: `{id, created_at（ISO 8601・ローカルのタイムゾーン）, source, state, sets（int か null）, needs_review（int か null）}`。`id` は `YYYYMMDD-HHMMSS-xxxx`（`^[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$`）
 - Job: JobSummary ＋ `{finished_at, progress: {stage, label, index, count, fraction, overall, eta} か null, logs（最後の 50 行）, warnings, error: {code, message, hint} か null, exit_code, has_results}`。`state` は `running` / `done` / `error`（ワーカーが利用者の直せる誤りを返した。終了コード 2）/ `cancelled` / `failed`（それ以外の終わり方。`message` に worker.log の末尾）
+- Job の `export`（A4）: 最後の書き出しか null。`{state（Job と同じ値）, started_at, finished_at, exit_code, error, warnings, logs, progress, clips（要求のクリップの数。飛ばした分を含む: 書き出した数は `clips - skipped`）, skipped（同じ区間で切り出し済みのため飛ばした数）, out_dir（`clips/` の絶対パス）, files: [{no, file, title, start, end, exported, skipped}] か null}`。`files` は `clips/export.json` のクリップで、実行中は null。中止した書き出しは `:export` をもう一度送ると続きから（切り出し済みを飛ばす）。書き出し先のクリップを置き換えられずに（前回のクリップをプレイヤーで開いている。vodsplit の `PermissionError`）失敗したときは、`error.hint` が閉じてから送り直すよう言う。前回の Autona が書き出し中のまま終わったジョブは、最初に使うときに `cancelled` に書き直す
 - ワーカーへは大会名を `--event=<名前>` の 1 語で渡す（`-` で始まる名前もそのまま値になる）。版の確認（最大 8 秒）は 1 リクエストにつき 1 回まで（Web のクライアントの待ち時間 10 秒に収める）
 - 実装は Design.md §4.2.5（`core/ArchiveJobService` / `core/ArchiveWorker`）
 
@@ -1404,7 +1409,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - **`SHELL` 区分**（`THIS_PC` の §6.35 と違い、同じオリジンのレイアウトからは開かせない）・`no-store`
 
 ### 6.52 アーカイブ切り抜きの書き込み（2026-11-16 追加・ADR-006 A1）
-- `PATCH /api/v1/archive/settings`・`POST /api/v1/archive/jobs`・`POST /api/v1/archive/jobs/{id}:cancel`・`POST /api/v1/archive/jobs/{id}:resume`。区分は `SHELL`（デスクトップの共有ビューだけ。ヘッドレスは `403`）。仕様は §5.32（読み取りとまとめた）。操作ログは本文のキーだけ（パス・URL を残さない）
+- `PATCH /api/v1/archive/settings`・`POST /api/v1/archive/jobs`・`POST /api/v1/archive/jobs/{id}:cancel`・`POST /api/v1/archive/jobs/{id}:resume`・`PUT /api/v1/archive/jobs/{id}/review`・`POST /api/v1/archive/jobs/{id}:export`（後の 2 つは A4）。区分は `SHELL`（デスクトップの共有ビューだけ。ヘッドレスは `403`）。仕様は §5.32（読み取りとまとめた）。操作ログは本文のキーだけ（パス・URL を残さない）
 
 ---
 

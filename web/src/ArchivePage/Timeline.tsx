@@ -18,12 +18,15 @@ import {
     toPercent,
     toTime,
 } from "./archiveTimeline";
+import {pointerTime} from "./archiveReview";
 
 // The archive page's timeline (ADR-006 A3, the mock's bottom band): the
 // sets, the games (scoreboard corrections marked), the names read off the
 // scoreboard (collapsed at first) and the playhead, over the whole video or
-// the selected set. A click seeks (and picks the set under it); nothing is
-// dragged (boundaries are edited in a later stage).
+// the selected set. A click seeks (and picks the set under it). Where the
+// review can be edited (A4) the selected set's IN / OUT are dragged by their
+// handles (pointer events): the range shown stays as it was when the drag
+// began, so the scale does not move under the pointer.
 
 const LABEL_WIDTH = 110;
 const RULER = 20;
@@ -67,7 +70,7 @@ function Lane({height, range, time, onPoint, children, label, testId}: {
                 {label}
             </Box>
             <svg width="100%" height={height} onClick={click}
-                 data-testid={testId}
+                 data-testid={testId} data-timeline-lane=""
                  style={{display: "block", cursor: "pointer",
                          overflow: "hidden"}}>
                 {children}
@@ -81,8 +84,17 @@ function Lane({height, range, time, onPoint, children, label, testId}: {
     );
 }
 
+type Edge = "start" | "end";
+
+interface Drag {
+    edge: Edge;
+    range: Range;
+    left: number;
+    width: number;
+}
+
 export default function Timeline({sets, rows, selected, view, onView, time,
-                                  onSeek, onPick, range}: {
+                                  onSeek, onPick, onEdge, range: given}: {
     sets: SetsJson;
     rows: SetRow[];
     selected: SetRow | null;
@@ -91,9 +103,15 @@ export default function Timeline({sets, rows, selected, view, onView, time,
     time: number;
     onSeek: (t: number) => void;
     onPick: (no: number, t: number) => void;
+    // Move the selected set's IN ("start") / OUT to a time; absent where the
+    // review cannot be edited (no handles).
+    onEdge?: (edge: Edge, t: number) => void;
     range: Range;
 }) {
     const [playersOpen, setPlayersOpen] = React.useState(false);
+    const [drag, setDrag] = React.useState<Drag | null>(null);
+    const dragRef = React.useRef<Drag | null>(null);
+    const range = drag?.range ?? given;
     const listed = new Set(rows.map((row) => row.no));
     const marks = gameMarks(sets);
     const lanes = playerLanes(sets);
@@ -115,6 +133,62 @@ export default function Timeline({sets, rows, selected, view, onView, time,
             onSeek(t);
         }
     };
+    const grab = (edge: Edge) => (event: React.PointerEvent<SVGRectElement>) => {
+        if (event.button !== 0) {
+            return;
+        }
+        const box = event.currentTarget.closest("[data-timeline-lane]")
+            ?.getBoundingClientRect();
+        if (!box) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+            // No capture (a test's DOM): the moves still come to the handle.
+        }
+        dragRef.current = {edge, range, left: box.left, width: box.width};
+        setDrag(dragRef.current);
+    };
+    // The edge dragged to the pointer.
+    const moveTo = (event: React.PointerEvent<SVGRectElement>) => {
+        const current = dragRef.current;
+        if (current && onEdge) {
+            onEdge(current.edge, pointerTime(event.clientX, current.left,
+                                             current.width, current.range));
+        }
+    };
+    // A drag ends without moving the edge where its end was not heard: the
+    // browser took it over (a touch scroll), the handle lost the pointer, or
+    // another set was selected.
+    const drop = () => {
+        dragRef.current = null;
+        setDrag(null);
+    };
+    const pull = (event: React.PointerEvent<SVGRectElement>) => {
+        if (!dragRef.current) {
+            return;
+        }
+        // The button went up where the handle did not hear it.
+        if ((event.buttons & 1) === 0) {
+            drop();
+            return;
+        }
+        moveTo(event);
+    };
+    const release = (event: React.PointerEvent<SVGRectElement>) => {
+        if (dragRef.current) {
+            moveTo(event);
+            drop();
+        }
+    };
+    const selectedNo = selected?.no;
+    React.useEffect(() => {
+        dragRef.current = null;
+        setDrag(null);
+    }, [selectedNo]);
     const noMatch = i18n.t("archive_no_match");
     const legend: [string, string][] = [
         [TIMELINE_COLORS.matched, "archive_legend_matched"],
@@ -207,6 +281,32 @@ export default function Timeline({sets, rows, selected, view, onView, time,
                             </svg>
                         );
                     })}
+                    {onEdge && selected ? (["start", "end"] as Edge[]).map((edge) => {
+                        const x = playheadPercent(selected[edge], range);
+                        return x === null ? null : (
+                            <svg key={edge} x={`${x}%`} y={0} width={1}
+                                 height={SETS} overflow="visible">
+                                <rect x={-1.5} y={1} width={3} height={SETS - 2}
+                                      rx={1} fill={TIMELINE_COLORS.selected}
+                                      pointerEvents="none"/>
+                                <rect x={-6} y={0} width={12} height={SETS}
+                                      fill="transparent"
+                                      data-testid={edge === "start"
+                                          ? "archive-handle-in"
+                                          : "archive-handle-out"}
+                                      style={{cursor: "ew-resize",
+                                              touchAction: "none"}}
+                                      onPointerDown={grab(edge)}
+                                      onPointerMove={pull}
+                                      onPointerUp={release}
+                                      onPointerCancel={drop}
+                                      onLostPointerCapture={drop}
+                                      onClick={(event) => event.stopPropagation()}>
+                                    <title>{edge === "start" ? "IN" : "OUT"}</title>
+                                </rect>
+                            </svg>
+                        );
+                    }) : null}
                 </Lane>
                 <Lane height={GAMES} range={range} time={time} onPoint={point}
                       label={i18n.t("archive_lane_games")}

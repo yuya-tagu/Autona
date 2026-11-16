@@ -46,7 +46,8 @@ export function jobFromQuery(search: string): string | null {
     return job !== null && JOB_ID.test(job) ? job : null;
 }
 
-export type KeyAction = "togglePlay" | "previousSet" | "nextSet" | "nextReview";
+export type KeyAction = "togglePlay" | "previousSet" | "nextSet" | "nextReview"
+    | "setIn" | "setOut" | "confirm";
 
 // What a key's target is to the page's keys: typed into ("text": no key of
 // the page), a control that takes Space itself ("control"), or anything else
@@ -84,17 +85,27 @@ export interface KeyLike {
     ctrlKey?: boolean;
     altKey?: boolean;
     metaKey?: boolean;
+    shiftKey?: boolean;
+    // Held down (the key's auto-repeat).
+    repeat?: boolean;
     isComposing?: boolean;
     defaultPrevented?: boolean;
 }
 
 // The page's keys: Space plays / pauses, Up / Down move between the listed
-// sets, N goes to the next one to review. Not while typing, not with a
-// modifier, not Space on a button (it presses it). I / O / Enter are left
-// alone (later stages).
+// sets, N goes to the next one to review; I / O put the selected set's IN /
+// OUT at the current position and Enter confirms it and moves on (ADR-006
+// A4: the page acts on these only where it can edit). Not while typing or
+// composing, not with a modifier, not Space or Enter on a button or a link
+// (it presses it). The review's keys not with Shift either, and Enter not
+// held down (its repeat would confirm set after set).
 export function keyAction(event: KeyLike, target: KeyTarget): KeyAction | null {
     if (event.defaultPrevented || event.isComposing || event.ctrlKey
         || event.altKey || event.metaKey || target === "text") {
+        return null;
+    }
+    const review = ["i", "I", "o", "O", "Enter"].includes(event.key);
+    if (review && (event.shiftKey || (event.key === "Enter" && event.repeat))) {
         return null;
     }
     switch (event.key) {
@@ -108,6 +119,14 @@ export function keyAction(event: KeyLike, target: KeyTarget): KeyAction | null {
         case "n":
         case "N":
             return "nextReview";
+        case "i":
+        case "I":
+            return "setIn";
+        case "o":
+        case "O":
+            return "setOut";
+        case "Enter":
+            return target === "control" ? null : "confirm";
         default:
             return null;
     }

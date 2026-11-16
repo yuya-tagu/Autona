@@ -899,6 +899,20 @@ def get_archive_frame(jobId, number):
     return ArchiveJobService.instance.FrameFile(jobId, number)
 
 
+def get_archive_review(jobId):
+    """The job's review (ADR-006 A4: confirmed, IN / OUT, which result)."""
+    return ArchiveJobService.instance.Review(jobId)
+
+
+def save_archive_review(jobId, review):
+    return ArchiveJobService.instance.SaveReview(jobId, review)
+
+
+def export_archive_job(jobId):
+    """Cut the job's confirmed sets (the worker's export, ADR-006 A4)."""
+    return ArchiveJobService.instance.StartExport(jobId)
+
+
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────
 # The Stream page's: core's StreamService (and AutonaActions for the two
 # state fields), in both shells, on the calling thread -- there is no board.

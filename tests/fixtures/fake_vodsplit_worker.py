@@ -59,6 +59,39 @@ The CLI
     arguments it was given as JSON, and prints one line that is not JSON on
     stdout and one on stderr (they go to worker.log).
 
+``export <edits.json> --out DIR [--progress json] [--cancel-on-stdin]``
+    vodsplit's ``export`` (ADR-006 A4), by ``FAKE_VODSPLIT_MODE``:
+
+    ``ok``
+        Reads the request (vodsplit export.validate_edits' shape). A source
+        that is not a file is ``{"type": "error", "code": "source"}`` and a
+        DIR with a sets.json ``{"type": "error", "code": "edits"}`` (exit
+        2), as vodsplit's. Else prints the ``export`` stage (``書き出し``,
+        1 of 1) and, per set (``FAKE_VODSPLIT_DELAY`` apart: a cancel ends
+        the wait), writes ``DIR/NN_<title>.mp4`` (CLIP_BYTES)
+        and ``NN_<title>.txt`` -- the title made as the template would
+        (``<event> <round> <p1> vs <p2>``, spaces as ``_`` in the file
+        name), ``NN_unmatched.mp4`` with no text for a set with no result
+        -- and a progress line, rewriting ``DIR/export.json`` after each
+        (vodsplit's shape: ``clips`` of ``no / start / end / title /
+        description / file / text / exported / reencode / skipped``). A
+        clip the folder's export.json says was cut from the same source and
+        range is skipped (``skipped``). Then ``{"type": "done", "out_dir",
+        "export_json", "clips", "skipped"}``; exit 0.
+    ``error``
+        Prints the stage, then ``{"type": "error", "code": "source"}``;
+        exit 2.
+    ``locked``
+        Prints the stage, then vodsplit's internal error for a clip it
+        cannot replace (``{"type": "error", "code": "internal", "message":
+        "PermissionError: ..."}``: the earlier clip open in a player); exit
+        1.
+    ``crash`` / ``slow`` / ``hang``
+        As ``run``'s.
+
+    It writes ``FAKE_VODSPLIT_ARGV`` as ``run`` does (the arguments after
+    ``export``).
+
 The delay between lines is ``FAKE_VODSPLIT_DELAY`` seconds (0 by default;
 ``slow`` uses at least 0.05).
 """
@@ -72,6 +105,7 @@ import time
 # not media (the tests read them back).
 VIDEO_BYTES = bytes(range(256)) * 64
 FRAME_BYTES = b"\xff\xd8\xff\xe0fake frame\xff\xd9"
+CLIP_BYTES = b"fake clip"
 
 STAGES = [
     ("download", "ダウンロード"),
@@ -163,28 +197,11 @@ def download(source, folder):
 def run(argv):
     mode = os.environ.get("FAKE_VODSPLIT_MODE", "ok")
     delay = float(os.environ.get("FAKE_VODSPLIT_DELAY", "0") or 0)
-    record = os.environ.get("FAKE_VODSPLIT_ARGV")
-    if record:
-        with open(record, "w", encoding="utf-8") as file:
-            json.dump(argv, file)
+    cancel = _start(argv, mode)
     source = argv[0] if argv else ""
     out = option(argv, "--out")
     results_path = option(argv, "--results")
     event = option(argv, "--event")
-    print("fake worker: starting (not a JSON line)", flush=True)
-    print("fake worker: stderr line", file=sys.stderr, flush=True)
-
-    cancel = threading.Event()
-    if "--cancel-on-stdin" in argv and mode != "hang":
-        def watch():
-            try:
-                for line in sys.stdin:
-                    if line.strip() == "cancel":
-                        break
-            except (OSError, ValueError):
-                pass
-            cancel.set()
-        threading.Thread(target=watch, daemon=True).start()
 
     stage(0)
     if mode == "error":
@@ -282,12 +299,147 @@ def run(argv):
     return 0
 
 
+def _start(argv, mode):
+    """What run and export do first: write FAKE_VODSPLIT_ARGV, the two
+    lines for worker.log, and watch stdin for a cancel -> the Event it
+    sets."""
+    record = os.environ.get("FAKE_VODSPLIT_ARGV")
+    if record:
+        with open(record, "w", encoding="utf-8") as file:
+            json.dump(argv, file)
+    print("fake worker: starting (not a JSON line)", flush=True)
+    print("fake worker: stderr line", file=sys.stderr, flush=True)
+    cancel = threading.Event()
+    if "--cancel-on-stdin" in argv and mode != "hang":
+        def watch():
+            try:
+                for line in sys.stdin:
+                    if line.strip() == "cancel":
+                        break
+            except (OSError, ValueError):
+                pass
+            cancel.set()
+        threading.Thread(target=watch, daemon=True).start()
+    return cancel
+
+
+def export(argv):
+    mode = os.environ.get("FAKE_VODSPLIT_MODE", "ok")
+    delay = float(os.environ.get("FAKE_VODSPLIT_DELAY", "0") or 0)
+    cancel = _start(argv, mode)
+    out = option(argv, "--out")
+    emit({"type": "stage", "stage": "export", "label": "書き出し",
+          "index": 1, "count": 1})
+    if mode == "crash":
+        print("Traceback (most recent call last):\nRuntimeError: fake crash",
+              file=sys.stderr, flush=True)
+        return 1
+    if mode == "locked":
+        emit({"type": "error", "code": "internal",
+              "message": "PermissionError: [WinError 32] プロセスはファイルに"
+                         "アクセスできません。別のプロセスが使用中です。"})
+        return 1
+    if mode == "hang":
+        while True:
+            time.sleep(1)
+    if mode == "slow":
+        done = 0
+        while not cancel.wait(max(delay, 0.05)):
+            done += 1
+            emit({"type": "progress", "stage": "export", "done": done,
+                  "total": 1000, "fraction": min(1.0, done / 1000),
+                  "overall": min(1.0, done / 1000), "eta": 3.0})
+        emit({"type": "cancelled"})
+        return 130
+    with open(argv[0], encoding="utf-8") as file:
+        request = json.load(file)
+    source = request.get("source")
+    if mode == "error" or not isinstance(source, str) \
+            or not os.path.isfile(source):
+        emit({"type": "error", "code": "source",
+              "message": f"動画ファイルが見つかりません: {source}",
+              "hint": "解析した動画が移動・削除されていないか確認してください。"})
+        return 2
+    if os.path.exists(os.path.join(out, "sets.json")):
+        emit({"type": "error", "code": "edits",
+              "message": f"書き出し先が run の出力フォルダです: {out}",
+              "hint": None})
+        return 2
+    os.makedirs(out, exist_ok=True)
+    listed = os.path.join(out, "export.json")
+    previous = {}
+    try:
+        with open(listed, encoding="utf-8") as file:
+            earlier = json.load(file)
+        if earlier.get("source") == source:
+            previous = {clip["no"]: clip for clip in earlier["clips"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        previous = {}
+    rows = []
+    for item in request["sets"]:
+        played = item.get("set")
+        title = item.get("title")
+        if title is None and played:
+            title = (f"{request.get('event') or 'Fake Cup'} "
+                     f"{played.get('round') or ''} {played['p1']} vs "
+                     f"{played['p2']}")
+        name = title.replace(" ", "_") if title else "unmatched"
+        base = f"{item['no']:02d}_{name}"
+        old = previous.get(item["no"], {})
+        skipped = (old.get("file") == base + ".mp4"
+                   and (old.get("start"), old.get("end"))
+                   == (item["start"], item["end"])
+                   and os.path.exists(os.path.join(out, base + ".mp4")))
+        rows.append({"no": item["no"], "start": item["start"],
+                     "end": item["end"], "title": title,
+                     "description": item.get("description"),
+                     "file": base + ".mp4",
+                     "text": base + ".txt" if title else None,
+                     "exported": skipped, "reencode": False,
+                     "skipped": skipped})
+
+    def save():
+        mine = {row["no"] for row in rows}
+        kept = [clip for no, clip in previous.items() if no not in mine]
+        with open(listed, "w", encoding="utf-8") as file:
+            json.dump({"version": "0.0.0-fake", "format": 1,
+                       "source": source, "event": request.get("event"),
+                       "template": "default",
+                       "clips": sorted(kept + rows,
+                                       key=lambda clip: clip["no"])},
+                      file, ensure_ascii=False, indent=1)
+
+    save()
+    for done, row in enumerate(rows, 1):
+        # The delay comes between the clips, and a cancel cuts it short: a
+        # test cancels after the first clip, whatever the load.
+        if cancel.is_set() or (done > 1 and cancel.wait(delay)):
+            emit({"type": "cancelled"})
+            return 130
+        if not row["skipped"]:
+            with open(os.path.join(out, row["file"]), "wb") as file:
+                file.write(CLIP_BYTES)
+            if row["text"]:
+                with open(os.path.join(out, row["text"]), "w",
+                          encoding="utf-8") as file:
+                    file.write(row["title"] + "\n")
+            row["exported"] = True
+            save()
+        emit({"type": "progress", "stage": "export", "done": done,
+              "total": len(rows), "fraction": done / len(rows),
+              "overall": done / len(rows), "eta": None})
+    emit({"type": "done", "out_dir": out, "export_json": listed,
+          "clips": len(rows),
+          "skipped": sum(1 for row in rows if row["skipped"])})
+    return 0
+
+
 def main(argv):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     if not argv:
-        print("usage: fake_vodsplit_worker.py version | run ...",
+        print("usage: fake_vodsplit_worker.py version | run ... | export ...",
               file=sys.stderr)
         return 2
     if argv[0] == "version":
@@ -300,6 +452,8 @@ def main(argv):
         return 0
     if argv[0] == "run":
         return run(argv[1:])
+    if argv[0] == "export":
+        return export(argv[1:])
     print(f"unknown command: {argv[0]}", file=sys.stderr)
     return 2
 
