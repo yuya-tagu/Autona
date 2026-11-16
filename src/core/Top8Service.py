@@ -607,7 +607,20 @@ def ImportFromProvider(provider) -> bool:
     it can come back short -- no phases, no such group, an empty or
     unmappable group (agent-pitfalls #11: a failed request is an empty
     result) -- writes nothing.
+
+    A provider with a Top 8 of its own (``GetTop8()``: the Hivee provider,
+    whose overlay hands the eleven matches out already placed) is asked for
+    it instead: ``(players, matches)`` in ``Top8Model.FromBracket``'s
+    shapes, or None (nothing written).
     """
+    getTop8 = getattr(provider, "GetTop8", None)
+    if getTop8 is not None:
+        extracted = getTop8()
+        if extracted is None:
+            logger.info("Top8: the provider has no Top 8 to import, skipping")
+            return False
+        players, matches = extracted
+        return ImportExtracted(players, matches)
     group = TargetPhaseGroup(provider.GetTournamentPhases())
     if group is None:
         logger.info("Top8: no double elimination phase found, skipping")
@@ -635,6 +648,13 @@ def ImportPhaseGroup(phaseGroupData, games=None, countries=None) -> bool:
         logger.warning("Top8: could not extract a Top 8 from the phase group")
         return False
     players, matches = extracted
+    return ImportExtracted(players, matches, games, countries)
+
+
+def ImportExtracted(players, matches, games=None, countries=None) -> bool:
+    """Import an extracted Top 8 -- ``FromBracket``'s ``(players,
+    matches)``, or a provider's ``GetTop8()`` in the same shapes: each
+    player resolved, then ``ImportBracket``. True."""
     games = games or GameAssetCatalog.instance
     countries = countries or CountryCatalog.instance
     # Resolved and written under the state lock, against the game loaded at

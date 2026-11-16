@@ -478,6 +478,7 @@ tournamentInfo
 │   │                                `superseded` / `cancelled`）
 │   └── revision                   取得を始めるたびに 1 増える（予約された次の取得も 1 回と数える）
 ├── url                            最後に設定した大会の URL（`TOURNAMENT_URL` の写し。無ければ ""）
+│                                  ※Hivee の URL はトークンを伏せた形（`token=***`。§7.10 の Hivee）
 ├── load                           大会の設定 / 解除の進み具合（`media` と同じ形。ADR-005 S4g レビュー M1）
 │   ├── status                     idle | resolving | loading | loaded | error（起動のたびに idle へ戻る）
 │   ├── error                      error の理由（`unresolved` / `load_failed`）
@@ -1919,6 +1920,35 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 - 外部 API のレスポンス構造を UI に直接漏らさない
 - StateManager には Autona 共通モデルに正規化して入れる
 - API 認証情報は **StateManager ではなく SettingsManager 側に保存**する（§3.3.2）
+
+#### 実装例: Hivee（2026-11-16 追加）
+
+Hivee（兄弟のイベントアプリ）のイベントを、配信オーバーレイの読み取り専用の JSON（`GET {origin}/api/events/{eventId}/overlay?token=…`）から
+読む provider（`src/TournamentDataProvider/HiveeDataProvider.py`。URL は `src/core/HiveeUrl.py`）。大会の URL の欄に Hivee の OBS 用の URL か
+API の URL を入れると、`core/TournamentService.UrlKind` が `HIVEE` と判定し、provider のアダプタ（`AutonaTournamentDataProvider.LoadTournament`）が
+この provider を作る。Hivee には何も書き戻さない。
+
+- 読むもの: 配信中の試合（`current`）・配信待ちの試合（`queue`）・Top 8（`view=top8`。ダブルエリミの 11 試合）。イベント全体を 1 つの配信として扱い、
+  配信の追従（`SetFollowService`）は配信中の試合（無ければ待ちの先頭）を追う。配信待ちは `streamQueue.hivee`（固定のキー。イベント名は state のキーにしない）。
+  セットの id は Hivee の試合の uuid（文字列）で、legacy の `/get-match`・Socket.IO の `get_match`・v1 の `GET /sets/{id}` が受け付ける
+  （start.gg の id は int のまま。`AutonaWebOperations.SetId`）
+- 無いもの: エントラント・フェーズ・順位・選手の対戦履歴は空で答える。前回の対戦（`GetLastSets`）は要求せずに空。「未定」「（不明）」は名前なし
+- ゲームは SSBU だけ（start.gg の SSBU の id 1386 として選ぶ）。キャラは Hivee の SSBU のコードをアセットのキーに写す（`HIVEE_TO_SSBU`。知らないコードの
+  警告はコードごとに 1 回）。codename は読み込み中のゲームが SSBU 系（1386）ならその codename、でなければ最初にスキャンした SSBU のゲーム
+- 試合の記憶（イベントごと・provider の外に持つので、強制の読み直しで provider を作り直しても残る。新しい 32 試合）: 試合の左右（Hivee の表示だけの
+  左右入れ替えを試合の中では戻す。名前の無かった側は名前が来たら埋める）・最後に読んだ中身（配信からも待ちからも外れた試合は最後の中身を答える）・
+  選手ごとの最後に渡したキャラと seed / X / アバター。追従の更新（上書きしない読み）は、変わったキャラ（`selection_changed`）と、埋まった
+  seed / X / アバター（`filled_in`）だけを書く（`SetFollowService._PlayerUpdate`。キャラを書き直して操作者が選んだスキンを戻さない。start.gg は
+  どちらのキーも渡さないので今までどおり）。「前回から」は provider 全体で 1 つで、ボードごとではない（同じ試合を追う 2 つのボードや間に挟まった
+  v1 の GET は、1 つの変化をどちらか一方でしか見ない）
+- 読みは view ごとに 1 本（読んでいる間に来た同じ view の読みはその答えを待つ）。HTTP の間はロックを持たない。答えは 2 秒（`CACHE_SECS`）、
+  失敗は 5 秒（`FAILURE_SECS`）持つ
+- **トークンは秘密**（持っていればイベントのオーバーレイを読める）: 本物の URL を持つのは `settings.json`（`TOURNAMENT_URL`）と provider だけ。
+  ログ・例外のメッセージには出さず（`HiveeUrl.Mask`）、state（`tournamentInfo.url`。`out/`・Socket.IO・`state.json` に出る）と READ の API
+  （`GET /tournament`・`/analysis`・`/tournament/{phases,sets,stations}` の `url`）には `token=***` に伏せた URL を出す（`TournamentService.PublishedUrl`）。
+  送り返された URL は、保存した URL を伏せたものと一致するときだけ保存した URL として扱う（`TournamentService.UnmaskUrl`。ほかの伏せた URL は
+  大会の URL ではないので 400）。`http` はこの PC だけ（ほかはトークンが平文で流れるので `https`）
+- テスト: `tests/test_hivee_provider.py`・`tests/test_api_v1_tournament.py`（トークンが state と READ に出ない・伏せた URL の送り返し）
 
 ### 7.11 新統計指標 / 分析項目の追加
 

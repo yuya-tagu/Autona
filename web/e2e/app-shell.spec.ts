@@ -102,8 +102,8 @@ test("the page shows inside the frame, the item highlighted", async ({page}) => 
     await page.goto(serverUrl("/web/app/event"));
 
     await expect(page).toHaveTitle("Autona Tournament info");
-    await expect(page.getByRole("region", {name: "start.gg tournament",
-                                           exact: true})).toBeVisible();
+    await expect(page.getByRole("region", {
+        name: "Tournament (start.gg / Hivee)", exact: true})).toBeVisible();
     const current = navigation(page).getByRole("button", {name: "Tournament Info"});
     await expect(current).toHaveAttribute("aria-current", "page");
     await expect(page.getByTestId("app-tournament")).toHaveText("Set tournament");

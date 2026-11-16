@@ -48,6 +48,10 @@ from tests.test_tournament_media_service import (  # noqa: F401
 
 EVENT_URL = "https://www.start.gg/tournament/autona-cup/event/singles"
 ADMIN_URL = "https://www.start.gg/admin/tournament/autona-cup/brackets/123"
+# A Hivee event's overlay API URL; its token is a secret (core/HiveeUrl.py).
+HIVEE_TOKEN = "0123456789abcdef" * 4
+HIVEE_URL = ("https://hivee.example.com/api/events/"
+             f"0f8e2a4c-1b3d-4e5f-8a9b-0c1d2e3f4a5b/overlay?token={HIVEE_TOKEN}")
 
 
 def _ok(response, status=200):
@@ -350,6 +354,55 @@ def test_a_bad_load_is_rejected_and_changes_nothing(tournaments, client,
     _assertRejected(client.post("/api/v1/tournament", json=body))
     assert tournaments.calls == []
     assert not AutonaApiV1._heavy._inflight
+
+
+def test_a_hivee_url_s_token_stays_out_of_the_state_and_the_read(
+        tournaments, client):
+    """Only settings.json (and the provider) hold the real URL: the state
+    -- which goes to out/, Socket.IO and state.json -- and GET /tournament
+    carry it masked, from the set and from the launch's seed alike."""
+    from src.core import HiveeUrl
+
+    masked = HiveeUrl.Mask(HIVEE_URL)
+    assert HIVEE_TOKEN not in masked
+    _ok(client.post("/api/v1/tournament", json={"url": HIVEE_URL}), 202)
+    assert tournaments.calls == [("load", HIVEE_URL, False)]
+    assert SettingsManager.Get(schema.TOURNAMENT_URL_SETTING) == HIVEE_URL
+    assert SM.Get("tournamentInfo.url") == masked
+    assert _ok(client.get("/api/v1/tournament"))["data"]["url"] == masked
+    tournaments.service.PayloadApplied({"tournamentName": "Cup"}, True)
+    assert SM.Get("tournamentInfo.url") == masked
+
+    SM.Set(tournament.URL_PATH, "")
+    schema.SeedPanelState()
+    assert SM.Get("tournamentInfo.url") == masked
+    assert HIVEE_TOKEN not in repr(SM.Get(schema.TOURNAMENT_INFO_ROOT))
+
+
+def test_the_masked_url_sent_back_is_the_saved_one(tournaments, client):
+    """The Event page sends back the URL it shows (the masked one): that is
+    the saved URL. Another masked URL is no tournament URL."""
+    from src.core import HiveeUrl
+
+    _ok(client.post("/api/v1/tournament", json={"url": HIVEE_URL}), 202)
+    masked = SM.Get("tournamentInfo.url")
+    _ok(client.post("/api/v1/tournament",
+                    json={"url": f" {masked} ", "force": True}), 202)
+    assert tournaments.calls[-1] == ("load", HIVEE_URL, True)
+    # The legacy route and Socket.IO take it the same way.
+    WebOps.load_tournament(masked)
+    assert tournaments.calls[-1] == ("load", HIVEE_URL, False)
+
+    other = HiveeUrl.Mask(HIVEE_URL.replace("0f8e2a4c", "1f8e2a4c"))
+    calls = list(tournaments.calls)
+    response = client.post("/api/v1/tournament", json={"url": other})
+    _assertRejected(response)
+    assert "Hivee overlay URL" in response.get_json()["error"]["message"]
+    assert tournaments.calls == calls
+
+    # Nothing saved: the masked URL stands for nothing.
+    _ok(client.delete("/api/v1/tournament"), 202)
+    _assertRejected(client.post("/api/v1/tournament", json={"url": masked}))
 
 
 @pytest.mark.parametrize("body", [{"url": ""}, {"url": None}, {}])

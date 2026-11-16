@@ -50,6 +50,7 @@ from typing import NamedTuple
 # into core next). Importing a Qt-dependent module from here would make core
 # unusable headless -- tests/test_core_qt_free.py detects it.
 from . import CommentaryModel as comms
+from . import HiveeUrl
 from . import Top8Model as top8
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
@@ -1098,11 +1099,13 @@ def SeedPanelState():
     # idle -- a set does not outlive the process. The revision goes on from
     # the previous session's, so a client still waiting on one of its
     # revisions (a browser kept open across the restart) is not left behind
-    # by a count started again. Guarded like the rest.
+    # by a count started again. Guarded like the rest. A Hivee URL's token
+    # is masked (TournamentService.PublishedUrl): the state is exported to
+    # out/ and served to every client.
     url = SettingsManager.Get(TOURNAMENT_URL_SETTING, "")
     StateManager.SetIfChanged(
         f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_URL_KEY}",
-        url if isinstance(url, str) else "")
+        HiveeUrl.Mask(url) if isinstance(url, str) else "")
     StateManager.SetIfChanged(
         f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_LOAD_KEY}",
         {"status": "idle", "error": "",

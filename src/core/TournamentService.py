@@ -20,7 +20,8 @@ are arguments: ``SetTournament(url, force, fetchMedia)`` and
 1. an admin/brackets URL (``start.gg/admin/tournament/<t>/brackets/<id>``)
    is resolved to its event URL by a job of the task executor (a start.gg
    request), never on the caller's thread; an event URL is normalised
-   (``/events/`` -> ``/event/``, anything after the event slug dropped);
+   (``/events/`` -> ``/event/``, anything after the event slug dropped),
+   and so is a Hivee overlay URL (to its API URL, core/HiveeUrl.py);
 2. on the main thread (the injected ``onMain``): the URL is saved
    (settings.json ``TOURNAMENT_URL``), the provider adapter loads it -- and
    a tournament newly loaded (a re-fetch with ``force`` too) turns the
@@ -42,7 +43,9 @@ How the newest set / clear is going is published in the state (ADR-005
 S4g; S4g review M1), so that every client sees it without asking:
 ``tournamentInfo.load`` -- ``{status, error, revision}``, shaped like
 ``tournamentInfo.media`` -- with ``tournamentInfo.url``, the URL set last,
-beside it. status: ``idle`` (none set), ``resolving`` (an admin URL),
+beside it (a Hivee URL's token masked: core/HiveeUrl.py; only settings.json
+and the provider hold the real URL, and a masked URL sent back is taken for
+the saved one it masks -- ``UnmaskUrl``). status: ``idle`` (none set), ``resolving`` (an admin URL),
 ``loading`` (the tournament's data being fetched), ``loaded``, or ``error``
 with what went wrong -- ``unresolved`` (the admin URL stood for no event:
 nothing changed) or ``load_failed`` (the data did not come: start.gg did not
@@ -71,6 +74,7 @@ import threading
 
 from loguru import logger
 
+from . import HiveeUrl
 from . import StateSchema as schema
 from .GameAssetCatalog import GameAssetCatalog
 from .SettingsManager import SettingsManager
@@ -91,6 +95,10 @@ _URL_FORMS = (
     (ADMIN, re.compile(r"start.gg/admin/tournament/[^/]+/brackets/[^/]+")),
 )
 _EVENT_PREFIX = re.compile(r"(.*start.gg/tournament/[^/]*/event[s]?/[^/]*)")
+# A Hivee event's stream overlay URL (core/HiveeUrl.py): loaded as it is,
+# like an event URL, by the Hivee provider. Its token is a secret: every
+# log line here that shows a URL masks it (HiveeUrl.Mask).
+HIVEE = "hivee"
 
 # What SetTournament answers.
 STARTED = "started"
@@ -109,20 +117,25 @@ LOAD_FAILED = "load_failed"
 
 
 def UrlKind(url):
-    """EVENT or ADMIN when `url` is a start.gg URL of that form, else
-    None."""
+    """EVENT or ADMIN when `url` is a start.gg URL of that form, HIVEE when
+    it is a Hivee overlay URL, else None."""
     if not isinstance(url, str):
         return None
     for kind, pattern in _URL_FORMS:
         if pattern.search(url):
             return kind
+    if HiveeUrl.IsHiveeUrl(url):
+        return HIVEE
     return None
 
 
 def NormalizeEventUrl(url):
     """An event URL up to its event slug, with start.gg's "/events/" made
     "/event/" (the API does not take the plural) -- what the dialog and the
-    web operation each did. Anything else is returned as it is."""
+    web operation each did. A Hivee overlay URL becomes its API URL
+    (HiveeUrl.Normalize). Anything else is returned as it is."""
+    if UrlKind(url) == HIVEE:
+        return HiveeUrl.Normalize(url)
     if not isinstance(url, str) or "start.gg" not in url:
         return url
     match = _EVENT_PREFIX.match(url)
@@ -169,6 +182,20 @@ class TournamentService:
         return url if isinstance(url, str) else ""
 
     @staticmethod
+    def PublishedUrl() -> str:
+        """The tournament URL as the state, the READ APIs and out/ show it:
+        TournamentUrl() with a Hivee URL's token masked (HiveeUrl.Mask)."""
+        return HiveeUrl.Mask(TournamentService.TournamentUrl())
+
+    @staticmethod
+    def UnmaskUrl(url):
+        """`url`, or the saved tournament URL when `url` is what
+        PublishedUrl() shows of it (the Event page sends back the URL it
+        shows): a masked URL that is not the saved one's stays masked, and
+        is refused as no tournament URL."""
+        return HiveeUrl.Unmask(url, TournamentService.TournamentUrl())
+
+    @staticmethod
     def Load() -> dict:
         """How the newest set / clear is going, as published:
         tournamentInfo.load's {"status", "error", "revision"} (see the
@@ -180,20 +207,24 @@ class TournamentService:
     def SetTournament(self, url, force=False, fetchMedia=False,
                       initialLoading=False) -> str:
         """Load the tournament at `url`, a start.gg event or admin/brackets
-        URL; STARTED. The loaded URL again is not re-fetched unless `force`.
+        URL or a Hivee overlay URL; STARTED. The loaded URL again is not
+        re-fetched unless `force`.
         With `fetchMedia`, the tournament's icon and banner are fetched once
-        it is loaded. INVALID_URL (nothing changes) when `url` is neither
-        form. Any thread; the load itself runs on the main thread (right
-        away when called there with an event URL). Started, its status
-        (resolving / loading) is published at the next revision before
-        this returns."""
+        it is loaded. INVALID_URL (nothing changes) when `url` is none of
+        these. Any thread; the load itself runs on the main thread (right
+        away when called there with an event or Hivee URL). Started, its
+        status (resolving / loading) is published at the next revision
+        before this returns. The masked form of the saved URL (what the
+        state shows of it) stands for the saved URL (UnmaskUrl)."""
+        url = self.UnmaskUrl(url)
         kind = UrlKind(url)
         if kind is None:
-            logger.warning(f"Tournament: refusing the URL {url!r}")
+            logger.warning(
+                f"Tournament: refusing the URL {HiveeUrl.Mask(repr(url))}")
             return INVALID_URL
         generation = self._NextGeneration(
-            LOADING if kind == EVENT else RESOLVING)
-        if kind == EVENT:
+            RESOLVING if kind == ADMIN else LOADING)
+        if kind in (EVENT, HIVEE):
             self._onMain(lambda: self._Apply(
                 generation, NormalizeEventUrl(url), force, fetchMedia,
                 initialLoading))
@@ -212,7 +243,8 @@ class TournamentService:
             # Told to whoever asked through the status, not only logged
             # (S4f review L14).
             logger.error(
-                f"Tournament: {url} could not be resolved to an event")
+                f"Tournament: {HiveeUrl.Mask(url)} could not be resolved "
+                "to an event")
             self._SetStatus(generation, ERROR, UNRESOLVED)
 
         TaskExecutor.instance.submit(
@@ -272,7 +304,7 @@ class TournamentService:
             "status": status, "error": error, "revision": revision})
 
     def _PublishUrl(self):
-        StateManager.SetIfChanged(URL_PATH, self.TournamentUrl())
+        StateManager.SetIfChanged(URL_PATH, self.PublishedUrl())
 
     def _NextGeneration(self, status):
         """The next generation, its status published at the next revision
@@ -301,7 +333,8 @@ class TournamentService:
 
     def _Apply(self, generation, url, force, fetchMedia, initialLoading):
         if not self._IsCurrent(generation):
-            logger.info(f"Tournament: {url} was superseded before it loaded")
+            logger.info(f"Tournament: {HiveeUrl.Mask(url)} was superseded "
+                        "before it loaded")
             return
         SettingsManager.Set(URL_SETTING, url)
         self._PublishUrl()
@@ -318,7 +351,7 @@ class TournamentService:
             # No payload is coming for it (S4g review L2): a failed load,
             # not one left loading.
             logger.opt(exception=True).error(
-                f"Tournament: {url} could not be loaded")
+                f"Tournament: {HiveeUrl.Mask(url)} could not be loaded")
             with self._lock:
                 if self._dataGeneration == generation:
                     self._data = (ERROR, LOAD_FAILED)

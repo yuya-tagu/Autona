@@ -56,6 +56,7 @@ from collections import namedtuple
 from loguru import logger
 
 from . import CoreWords
+from . import HiveeUrl
 from . import StateSchema as schema
 from . import ThumbnailService as thumbnails
 from . import Top8Service
@@ -1262,7 +1263,9 @@ class ResultService(RenderLane):
             lines.append(f"{rank}/ {line}")
             emitted += 1
 
-        if tournamentUrl:
+        # A Hivee overlay URL carries its secret token (core/HiveeUrl.py):
+        # never in a post.
+        if tournamentUrl and not HiveeUrl.IsHiveeUrl(tournamentUrl):
             lines += ["", "■Startgg", tournamentUrl]
         if stream:
             lines += ["", "■Stream", stream]

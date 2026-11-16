@@ -683,14 +683,33 @@ class SetFollowService:
                         # mains-only load is for the non-overwrite case.
                         change = self._ApplyPlayer(
                             stateTeam, p + 1, player, True, True, noMains)
-                    elif data.get("has_selection_data") and noMains != True:
-                        change = self._ApplyPlayer(
-                            stateTeam, p + 1,
-                            {"mains": player.get("mains")}, False, False)
+                    else:
+                        update = self._PlayerUpdate(data, player, noMains)
+                        if update:
+                            change = self._ApplyPlayer(
+                                stateTeam, p + 1, update, False, False)
                     seedMoved = seedMoved or change.seedChanged
         except Exception as e:
             logger.error(f"Error while setting entrants: {e}")
         return singlesChanged and not seedMoved
+
+    @staticmethod
+    def _PlayerUpdate(data, player, noMains):
+        """What an update (not a full load) writes of one entrant's player:
+        its `mains` when the set brings a selection -- unless the provider
+        says this player's did not change (`selection_changed` False: Hivee,
+        whose every read carries the characters; writing them again would
+        put back the skin the operator picked) -- and the fields a provider
+        filled in since the set was loaded (`filled_in`: Hivee hands out the
+        seed, the X handle and the avatar of the match on stream only, so a
+        queued match loaded first gets them when it goes on stream). {}:
+        nothing to write. start.gg sends neither key: its mains whenever the
+        set has a selection, as before."""
+        update = dict(player.get("filled_in") or {})
+        if (data.get("has_selection_data") and noMains != True
+                and player.get("selection_changed", True)):
+            update["mains"] = player.get("mains")
+        return update
 
     def _ApplySinglePlayer(self, data):
         """A one-player payload (POST /score's `team` / `player` / `data`):

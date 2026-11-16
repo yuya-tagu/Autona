@@ -124,6 +124,7 @@ from .core.StreamService import StreamService
 from .core.ThumbnailService import ThumbnailService
 from .core.TournamentInfoService import TournamentInfoService
 from .core.TournamentMediaService import TournamentMediaService
+from .core import HiveeUrl
 from .core.TournamentService import TournamentService
 from .core import StateSchema as schema
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -501,7 +502,17 @@ def get_sets(args):
 
 def get_match(setId=None):
     provider = AutonaTournamentDataProvider.instance.GetProvider()
-    return provider.GetMatch(setId=int(setId))
+    return provider.GetMatch(setId=SetId(setId))
+
+
+def SetId(setId):
+    """A set id as the provider takes it: start.gg's are numbers (an int,
+    as they always were), a Hivee match's a uuid string (lower case).
+    ValueError for anything else."""
+    text = str(setId).strip()
+    if HiveeUrl.IsMatchId(text):
+        return text.lower()
+    return int(text)
 
 
 def get_playerdb():
@@ -1025,7 +1036,8 @@ def load_tournament(url=None):
     changes nothing (it used to be saved and then load no tournament).
     "OK" whichever it was, as it always answered; on the GUI thread the
     load is done when this returns."""
-    logger.info(f"Tournament URL requested: {url}")
+    # A Hivee URL carries a secret token (core/HiveeUrl.py).
+    logger.info(f"Tournament URL requested: {HiveeUrl.Mask(url)}")
     if url is None or url == "":
         TournamentService.instance.ClearTournament()
         return "OK"
@@ -1042,7 +1054,8 @@ def set_tournament(url, force=False, fetchMedia=False):
     (the load itself runs on the main thread). Its revision -- or a later
     request's, when another one came in between: the one whose result the
     state then shows anyway."""
-    logger.info(f"Tournament URL requested: {url}")
+    # A Hivee URL carries a secret token (core/HiveeUrl.py).
+    logger.info(f"Tournament URL requested: {HiveeUrl.Mask(url)}")
     if not url:
         TournamentService.instance.ClearTournament()
     else:
@@ -1064,9 +1077,10 @@ def get_tournament():
     the newest set / clear is going: tournamentInfo.url / load as published
     (TournamentService.Load()). `loaded` is the provider's presence, not a
     load that worked (S4g review L6): a tournament whose load failed has
-    one too -- `status` tells how it went."""
+    one too -- `status` tells how it went. A Hivee URL's token is masked
+    (TournamentService.PublishedUrl)."""
     return {
-        "url": TournamentService.TournamentUrl(),
+        "url": TournamentService.PublishedUrl(),
         "loaded": AutonaTournamentDataProvider.instance.GetProvider()
         is not None,
         **TournamentService.Load(),
@@ -1175,7 +1189,9 @@ def get_analysis():
         status = AnalysisService.Progress()["status"]
     if not result["url"] or result["url"] != current:
         result = {"url": "", "rows": []}
-    return {"status": status, "url": result["url"], "rows": result["rows"]}
+    # Compared as the provider's own URL; shown with a Hivee token masked.
+    return {"status": status, "url": HiveeUrl.Mask(result["url"]),
+            "rows": result["rows"]}
 
 
 # ── the set selection's lists (ADR-005 S4v) ──────────────────────────────
@@ -1232,7 +1248,8 @@ def _get_selection_list(kind):
     if result is None or not result["url"] or result["url"] != current:
         return {"status": status, "url": "", "fetchedAt": None, "rows": [],
                 "query": None}
-    return {"status": status, "url": result["url"],
+    # Compared as the provider's own URL; shown with a Hivee token masked.
+    return {"status": status, "url": HiveeUrl.Mask(result["url"]),
             "fetchedAt": result["fetchedAt"], "rows": result["rows"],
             "query": result["query"]}
 
