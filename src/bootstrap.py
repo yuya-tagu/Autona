@@ -523,6 +523,21 @@ def bootstrap_core():
     if ArchiveJobService.instance is None:
         ArchiveJobService.instance = ArchiveJobService()
 
+    # ORDER CONSTRAINT: the match log (ADR-006 A2), a state observer, after
+    # StateManager.Initialize(): LoadState's big change is not seen (the
+    # board restored is last session's, and both shells' launch seed resets
+    # it -- that reset is the first publish it follows), and its directory
+    # is fixed against the working directory the store's is. Started here,
+    # i.e. following board 1's publishes, before the shells' launch seed,
+    # tournament restore and web server, headless too. It reads and queues
+    # inside the observer and writes on a thread of its own; each shell's
+    # close stops it (Shutdown, after the web server and the executor, which
+    # can still publish). Nothing reads or writes through it.
+    from .core.MatchLogService import MatchLogService
+    if MatchLogService.instance is None:
+        MatchLogService.instance = MatchLogService()
+        MatchLogService.instance.Start()
+
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
     # are switched to the stub + shared layout/designer_runtime/ before
     # anything can serve or list them -- the web server and the BOARD

@@ -558,9 +558,23 @@ class _FakeExecutor:
         return self.finished
 
 
+class _FakeMatchLog:
+    """MatchLogService.instance, recording its close (the session's real
+    one must keep following for the tests after this one)."""
+
+    def __init__(self, order):
+        self.order = order
+
+    def Shutdown(self, timeout):
+        self.order.append(("match log", timeout))
+        return True
+
+
 def _record_the_flush(monkeypatch, order):
+    from src.core.MatchLogService import MatchLogService
     from src.core.StateManager import StateManager
     from src.core.StatePersistence import StatePersistence
+    monkeypatch.setattr(MatchLogService, "instance", _FakeMatchLog(order))
     monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
         lambda timeout=None: order.append("out") or True))
     monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
@@ -587,9 +601,10 @@ def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
 
     # The background tasks after the server (no request can queue one any
     # more) and before the flush (ADR-005 S3f-1), with a short wait: a
-    # console close leaves about five seconds in all.
-    assert order == ["server", ("tasks", 1.0), "out", "state.json",
-                     ("handler removed", False)]
+    # console close leaves about five seconds in all. The match log after
+    # both, which can still publish a change it records (ADR-006 A2).
+    assert order == ["server", ("tasks", 1.0), ("match log", 1.0), "out",
+                     "state.json", ("handler removed", False)]
     assert shell.stopped.is_set()
     assert shell._removeConsoleHandler is None
 
@@ -605,7 +620,7 @@ def test_a_shutdown_before_the_web_server_was_made_still_writes(monkeypatch):
     shell = headless.HeadlessShell(app=None)
     shell.Shutdown()
 
-    assert order == [("tasks", 1.0), "out", "state.json"]
+    assert order == [("tasks", 1.0), ("match log", 1.0), "out", "state.json"]
     assert shell.stopped.is_set()
 
 

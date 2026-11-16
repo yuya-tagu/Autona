@@ -1385,9 +1385,11 @@ def test_the_headless_shutdown_waits_for_a_load_and_publishes_it_first(
     flushed. (Until ADR-005 S-final SF-6c the stop released the loader
     waiting for the main thread, which then settled the load itself.)"""
     from src import headless
+    from src.core.MatchLogService import MatchLogService
     from src.core.SettingsManager import SettingsManager
     from src.core.StateManager import StateManager
     from src.core.StatePersistence import StatePersistence
+    from tests.test_headless import _FakeMatchLog
 
     loader = goldenGames
     loader.LoadGameByCodename("tgame")
@@ -1406,6 +1408,10 @@ def test_the_headless_shutdown_waits_for_a_load_and_publishes_it_first(
         return finished
 
     monkeypatch.setattr(ownExecutor, "shutdown", shutdown)
+    # The session's match log keeps following for the tests after this one
+    # (the shutdown would close it for good): a stand-in, as in
+    # tests/test_headless.py.
+    monkeypatch.setattr(MatchLogService, "instance", _FakeMatchLog([]))
     monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
         lambda timeout=None: order.append("out") or True))
     monkeypatch.setattr(StatePersistence, "Flush", staticmethod(

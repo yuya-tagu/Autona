@@ -665,7 +665,8 @@ def test_the_singles_losers_box_outlives_the_players(world, autonaApp):
                 f"players {players}: the flag was not written")
 
 
-def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
+def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp,
+                                                    tmp_path):
     """The held notifications -- and, for a write on the GUI thread, the
     handlers on them, direct -- run inside StateManager.lock (SaveState's,
     or a caller's around it). So nothing there waits on another thread
@@ -680,14 +681,28 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
 
     Until ADR-005 S4ac-3 the board built its cards there too, from 反映 on
     the GUI thread with a roster change pending it had not followed yet
-    (the commit's False comes from the drain, S4u): checked here then."""
+    (the commit's False comes from the drain, S4u): checked here then.
+
+    The match log (ADR-006 A2) follows board 1's publishes from inside them
+    (state_updated / state_big_change) and calls no GameAssetCatalog writer
+    there (agent-pitfalls #16). A log of the test's own, on board 1's
+    operations, its commits and the threaded game load (a partial commit of
+    both boards). That it waits on nothing there -- its writer held inside a
+    write, the publishes still end -- is tests/test_match_log.py's
+    test_a_publish_does_not_wait_for_the_writer."""
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.MatchLogService import MatchLogService
     from src.Helpers import AutonaQtHelper
     web = autonaApp.web()
+    autonaApp.ready(1)
     autonaApp.ready(2)
     executor = AutonaQtHelper.gui_executor
     runSync = executor.run_sync
     inside = threading.local()
     waits = []
+    matchLog = MatchLogService(directory=str(tmp_path / "match_log"))
+    matchLog.Start()
+    catalog = GameAssetCatalog.instance
 
     def _counted(channel):
         notify = channel.notify
@@ -709,6 +724,19 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                       getattr(inside, "depth", 0)))
         return runSync(fn)
 
+    def _catalogWriter(name):
+        writer = getattr(catalog, name)
+
+        def _writer(*args, **kwargs):
+            if getattr(inside, "depth", 0):
+                waits.append((name, threading.current_thread().name))
+            return writer(*args, **kwargs)
+        return _writer
+
+    def _board1():
+        # What the match log records: a game ended on board 1.
+        AutonaActions.instance.AdjustScore(1, 1, 1)
+
     def _rosterFromAnotherThread(players):
         # Its held cycle is queued for this thread, which is not back in the
         # event loop before the commit.
@@ -724,7 +752,23 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
                          _counted(observers.held_dirty_changed)), \
             patch.object(observers.state_updated, "notify",
                          _counted(observers.state_updated)), \
-            patch.object(executor, "run_sync", _runSync):
+            patch.object(observers.state_big_change, "notify",
+                         _counted(observers.state_big_change)), \
+            patch.object(executor, "run_sync", _runSync), \
+            patch.object(catalog, "SelectGame",
+                         _catalogWriter("SelectGame")), \
+            patch.object(catalog, "ForgetSelection",
+                         _catalogWriter("ForgetSelection")), \
+            patch.object(catalog, "ScanGames", _catalogWriter("ScanGames")):
+        with StateManager.lock:
+            with StateManager.SaveBlock():
+                for team, tag in ((1, "ALPHA"), (2, "BRAVO")):
+                    PlayerService(f"score.1.team.{team}.player.1").Edit(
+                        {"name": tag})
+            StateManager.CommitHeld("score.1")
+        with StateManager.lock:
+            _board1()
+            StateManager.CommitHeld("score.1")
         with StateManager.lock:
             AutonaActions.instance.SetRoster(2, 3, 2)
         with StateManager.lock:
@@ -747,8 +791,24 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp):
             StateManager.CommitHeld("score.2")
         assert AutonaActions.instance.RosterCount(2, 1) == players + 2
         autonaApp.settle()
-    assert waits == [], waits
-    _assertRosterWhole()
+
+        worker = threading.Thread(target=lambda: (
+            _board1(), StateManager.CommitHeld("score.1")))
+        worker.start()
+        worker.join()
+        with StateManager.SaveBlock():
+            _board1()
+            StateManager.CommitHeld("score.1")
+        autonaApp.settle()
+    try:
+        assert waits == [], waits
+        _assertRosterWhole()
+        # It followed board 1 all the way: the names, then three games.
+        assert (matchLog._seen.p1, matchLog._seen.p2) == ("ALPHA", "BRAVO")
+        assert matchLog._seen.score == (3, 0)
+        assert len(matchLog._record.games) == 3
+    finally:
+        matchLog.Shutdown(5)
 
 
 def test_a_commit_inside_another_save_block_leaves_no_card_behind(

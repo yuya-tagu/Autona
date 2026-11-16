@@ -166,8 +166,10 @@ class HeadlessShell:
 
     def Shutdown(self):
         """Stop serving, stop the archive worker and the background tasks,
-        then let ./out and user_data/state.json finish."""
+        close the match log, then let ./out and user_data/state.json
+        finish."""
         from .core.ArchiveJobService import ArchiveJobService
+        from .core.MatchLogService import MatchLogService
         from .core.StateManager import StateManager
         from .core.StatePersistence import StatePersistence
         from .core.TaskExecutor import TaskExecutor
@@ -209,6 +211,15 @@ class HeadlessShell:
                 if not TaskExecutor.instance.shutdown(1.0):
                     logger.warning(
                         "headless: background tasks were still running")
+            except Exception:
+                logger.error(traceback.format_exc())
+        # The match log (ADR-006 A2): after the server and the tasks, which
+        # can still publish a change it records; before the flush. Closes
+        # the open record and lets its writer (a daemon thread) finish.
+        if MatchLogService.instance is not None:
+            try:
+                if not MatchLogService.instance.Shutdown(1.0):
+                    logger.warning("headless: the match log was not written")
             except Exception:
                 logger.error(traceback.format_exc())
         if not StateManager.JoinExports(10):

@@ -14,6 +14,9 @@ user_data/alerts_red.json
 # (scripts/validate_release_zip.ps1 rejects a zip that carries one).
 user_data/state.json
 user_data/state.json.*.bak
+# The match log (ADR-006 A2): players' names, one file a day. Never tracked:
+# it is the operator's record, not a shipped file.
+user_data/match_log/
 user_data/player_avatar/*
 !user_data/player_avatar/*.txt
 user_data/sponsor_logo/*
