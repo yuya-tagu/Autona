@@ -3935,7 +3935,7 @@ S3f（Executor 1 本化）の 6 PR が揃った。設計表の完了条件の確
 この一覧のスレッドと QThread は、`tests/test_task_executor.py` の `THREADS_LEFT`（ファイル・始める関数かクラス・形）と一致することを pin している。増やす・消すときは両方を直す
 
 - `TaskExecutor`: ジョブ用 4 本（`AutonaJob_*`）・fan-out 用 8 本（`AutonaFanout_*`）。段階実行（テスト用）のときは、ジョブを 1 本ずつ走らせるスレッド（`AutonaJobStep`）
-- 専用のスレッド（設計どおり対象外）: Web サーバー 4 本（サーバー・停止のヘルパー・delta の flusher `AutonaWebServerDeltas`。S3f-5 で 2 → 3。プレビュー用のリスナー `AutonaWebServerPreview`。S-final SF-8a で 3 → 4。停止のヘルパーはサーバーごとに 1 本）・export の書き手（`AutonaStateExport`）・永続化の書き手（`AutonaStatePersist`）・画像 DL（daemon・セマフォ 3）
+- 専用のスレッド（設計どおり対象外）: Web サーバー 4 本（サーバー・停止のヘルパー・delta の flusher `AutonaWebServerDeltas`。S3f-5 で 2 → 3。プレビュー用のリスナー `AutonaWebServerPreview`。S-final SF-8a で 3 → 4。停止のヘルパーはサーバーごとに 1 本）・export の書き手（`AutonaStateExport`）・永続化の書き手（`AutonaStatePersist`）・画像 DL（daemon・セマフォ 3）・アーカイブ切り抜きのワーカーの読み手 2 本（stdout の進捗と終わりの `AutonaArchiveWorker`・stderr を worker.log に書く `AutonaArchiveWorkerLog`。daemon・1 回の実行に 1 組。`ArchiveJobService._Start`。ADR-006 A1。ワーカーは子プロセスで、ジョブは TaskExecutor に載せない）
 - `QThread`: アップデーター 2 本（自動更新には触らない）・アセットガイド 2 本（デスクトップのウィンドウ専用）
 - イベントループの時計: 追従の 5 秒タイマー・250 ms のハートビート（ヘッドレスと、Windows 以外のデスクトップ）。thumbnail / result の同期描画の `QEventLoop`（シェル操作 ①）
 

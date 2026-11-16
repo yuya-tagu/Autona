@@ -165,8 +165,9 @@ class HeadlessShell:
             self.app, "quit", Qt.ConnectionType.QueuedConnection)
 
     def Shutdown(self):
-        """Stop serving, stop the background tasks, then let ./out and
-        user_data/state.json finish."""
+        """Stop serving, stop the archive worker and the background tasks,
+        then let ./out and user_data/state.json finish."""
+        from .core.ArchiveJobService import ArchiveJobService
         from .core.StateManager import StateManager
         from .core.StatePersistence import StatePersistence
         from .core.TaskExecutor import TaskExecutor
@@ -175,6 +176,16 @@ class HeadlessShell:
             try:
                 # Short: a console close leaves about five seconds in all.
                 self.webserver.stop(2.0)
+            except Exception:
+                logger.error(traceback.format_exc())
+        # The archive clipper's worker (ADR-006 A1), after the server (no
+        # request can start a job any more): a running job is cancelled and
+        # its worker ended if it has not stopped. Short for the console
+        # close; a process ended before it is done still ends the worker
+        # (the job object closes with the process).
+        if ArchiveJobService.instance is not None:
+            try:
+                ArchiveJobService.instance.Shutdown(2.0)
             except Exception:
                 logger.error(traceback.format_exc())
         # After the server (no request can queue a task any more), before

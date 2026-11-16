@@ -30,8 +30,9 @@ surface; the server only asks it questions. It decides six things:
   S-final SF-4a): this PC's own request that also carries the secret the
   shell adds to the shared view's fetches (IssueShellSecret). Every page of
   this origin passes as this PC's own request, so only that secret keeps
-  the access token -- and the game asset jobs and upload (SF-4b-1), and
-  the shell request's ticket (IssueShellTicket, SF-5a-1) -- from them.
+  the access token -- and the game asset jobs and upload (SF-4b-1), the
+  shell request's ticket (IssueShellTicket, SF-5a-1) and the archive
+  clipper's writes (ADR-006 A1) -- from them.
 * **What the preview listener serves** (PreviewServes, ADR-005 S-final
   SF-8a): the second port the shared view's design previews load from
   serves only what a layout reads, and never writes -- decided before any
@@ -333,6 +334,21 @@ ROUTE_ACCESS = {
     "api_v1.install_asset_packs": SHELL,
     "api_v1.cancel_assets_job": SHELL,
     "api_v1.reveal_games_folder": SHELL,
+    # The archive clipper (ADR-006 A1, D7). The answers name this PC's
+    # paths and files: never a LAN device, not with the token, not the
+    # preview listener. The reads (the status, the jobs, a job) are
+    # THIS_PC. The writes are SHELL, as the asset jobs are: a job
+    # downloads any URL onto this PC's disk and runs a process, the work
+    # folder moves where it writes -- not for this origin's layout/ pages,
+    # which THIS_PC lets through. So headless and a plain browser start no
+    # job (403); the desktop's shared view does.
+    "api_v1.get_archive_status": THIS_PC,
+    "api_v1.archive_settings_update": SHELL,
+    "api_v1.get_archive_jobs": THIS_PC,
+    "api_v1.archive_job_create": SHELL,
+    "api_v1.get_archive_job": THIS_PC,
+    "api_v1.archive_job_cancel": SHELL,
+    "api_v1.archive_job_resume": SHELL,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,
@@ -580,7 +596,9 @@ def FramedElsewhere(fetchDest, fetchSite):
 # Settings menu's, not a sidebar item); "api" / "companion" / "obs" are the
 # API reference & tester and the Companion and OBS guides, "about" is About
 # Autona (S-final SF-4a-2: the menu's too, the Qt windows until then); "assets" is
-# Add game assets (SF-4b-2: the menu's too). /web/app/<panel> serves the same
+# Add game assets (SF-4b-2: the menu's too); "archive" is the archive
+# clipper (ADR-006 A1: a sidebar item shown only while its worker is there).
+# /web/app/<panel> serves the same
 # names (S-final SF-5a-3: the page inside the Web UI's AppShell, its
 # navigation, header and footer): web_index's rule too, the same check.
 WEB_PANELS = frozenset({
@@ -602,6 +620,7 @@ WEB_PANELS = frozenset({
     "obs",
     "about",
     "assets",
+    "archive",
 })
 
 

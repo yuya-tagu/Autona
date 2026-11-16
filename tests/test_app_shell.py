@@ -84,6 +84,16 @@ NAVIGATION = [
     ]),
 ]
 
+# The items the AppShell's navigation has that the deleted Qt sidebar had
+# not: {section index: [(panel, icon, label key, what it requires), ...]},
+# after the frozen copy's items of that section. They have no Qt words to
+# match (their labels are i18next's alone: both languages, below).
+# "archive" is the archive clipper (ADR-006 A1), shown only while its
+# worker is there ("requires": the AppShell asks /api/v1/archive/status).
+ADDED_ITEMS = {
+    3: [("archive", "scissors.svg", "app_archive", "archive")],
+}
+
 # What the deleted Qt frame showed for its words, frozen from
 # src/i18n/Autona_{en,ja}.ts before ADR-005 S-final SF-7 took them out:
 # (context, source) -> (English, Japanese).
@@ -162,11 +172,22 @@ def test_the_frozen_words_are_every_shared_one():
 
 
 def test_the_navigation_is_the_qt_sidebars():
+    # The frozen copy's items, in its order, then the ones added since.
     table = _nav_table()
     assert [[(item["panel"], item["icon"]) for item in section["items"]]
             for section in table] == [
         [(key, icon) for key, icon, _label in items]
-        for _heading, items in NAVIGATION]
+        + [(key, icon) for key, icon, _label, _requires
+           in ADDED_ITEMS.get(index, [])]
+        for index, (_heading, items) in enumerate(NAVIGATION)]
+    added = {(item["panel"], item["icon"], item["label"],
+              item.get("requires"))
+             for section in table for item in section["items"]
+             if "requires" in item or item["panel"] not in {
+                 key for _heading, items in NAVIGATION
+                 for key, _icon, _label in items}}
+    assert added == {item for items in ADDED_ITEMS.values()
+                     for item in items}
 
 
 @pytest.mark.parametrize("language", ["en", "ja"])

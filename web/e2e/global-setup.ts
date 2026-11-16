@@ -124,6 +124,11 @@ export default async function globalSetup() {
             + "before `npm run test:e2e` (the headless app serves the built UI).");
     }
 
+    // The archive clipper's worker (ADR-006): a fake one, so the Archive page
+    // is available (the helper's headless process inherits this environment).
+    process.env.AUTONA_VODSPLIT_CMD =
+        `"${python()}" "${path.join(__dirname, "fake_worker.py")}"`;
+
     const helper = new Helper(spawn(
         python(),
         [

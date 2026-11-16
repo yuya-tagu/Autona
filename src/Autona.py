@@ -804,6 +804,18 @@ class Window(QMainWindow):
         except Exception:
             logger.opt(exception=True).error("Error stopping web server on shutdown")
 
+        # The archive clipper's worker (ADR-006 A1): after the web server, so
+        # no request can start or resume a job any more. A running job is
+        # cancelled (resumable) and its worker -- with the yt-dlp / ffmpeg it
+        # started -- ended if it has not stopped in 5 seconds.
+        try:
+            from .core.ArchiveJobService import ArchiveJobService
+            if ArchiveJobService.instance is not None:
+                ArchiveJobService.instance.Shutdown(5.0)
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error stopping the archive worker on shutdown")
+
         # The background tasks (ADR-005 S3f): after the web server, so no
         # request can queue one any more; before the interpreter's exit join
         # flushes ./out and user_data/state.json, so a task that finishes in

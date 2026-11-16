@@ -252,6 +252,9 @@
 | `GET /api/v1/api-catalog` | API 設定のページ（`/web/api`）のエンドポイント一覧とエラーコード（§5.24。2026-11-14 追加） | `get_api_catalog`（`core/ApiCatalog.Payload`） | — |
 | `GET /api/v1/assets/packs` | ゲームアセットのパックの一覧（上流の索引・インストール済み・版。§5.27。**この PC からだけ**（`THIS_PC`）。2026-11-14 追加） | `get_asset_packs`（`core/AssetPackService.Packs`） | — |
 | `GET /api/v1/assets/job` | ゲームアセットの取り込みのジョブの状態（§5.28。**アプリ自身のウィンドウからだけ**（`SHELL`。SF-3b の `THIS_PC` から SF-4b-1 で移した）。2026-11-14 追加） | `get_assets_job`（`core/AssetPackService.Job`） | — |
+| `GET /api/v1/archive/status` | アーカイブ切り抜きのワーカーの有無・版・作業フォルダ・実行中のジョブ（§5.32。**この PC からだけ**（`THIS_PC`）。2026-11-16 追加・ADR-006 A1） | `get_archive_status`（`core/ArchiveJobService.Status`） | — |
+| `GET /api/v1/archive/jobs` | アーカイブ切り抜きのジョブの一覧（§5.32。`THIS_PC`。2026-11-16 追加） | `get_archive_jobs`（`core/ArchiveJobService.Jobs`） | — |
+| `GET /api/v1/archive/jobs/{id}` | ジョブの進捗・結果と `out/sets.json`（§5.32。`THIS_PC`。2026-11-16 追加） | `get_archive_job`（`core/ArchiveJobService.Job`） | — |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
@@ -907,6 +910,25 @@ LAN の他端末（Companion・ASS・別 PC のブラウザ）が書き込みに
 - 大会を解除しても `game` のほかのキー（前のゲームの `codename`・`name`・`mods_active` …）は残る。**「ゲームを選んだか」は `codename` ではなくこのキーで見る**（§5.11 の `game` と同じ理由）。解除ではゲームを読み直さない（選択を戻さない）
 - 両方の起動形態で同じ（書き手は core の `GameAssetCatalog`。解除は `TournamentService` → `ForgetSelection`）
 
+### 5.32 アーカイブ切り抜き `/api/v1/archive/*`（2026-11-16 追加・ADR-006 A1）
+
+アーカイブ切り抜きのページ（`/web/archive`）だけが呼ぶ。書き込み（§6.52）もここにまとめる。**読み取り（status・ジョブの一覧と取得）は `THIS_PC` 区分、書き込み（作業フォルダの変更・ジョブの作成・中止・再開）は `SHELL` 区分**（2026-11-16 A1 の検収で変更。答えはこの PC のパスを含み、書き込みはこの PC で子プロセスを動かして任意の URL をこの PC のディスクに落とす。LAN の他端末はトークンがあっても `403`。`THIS_PC` は同じオリジンのレイアウト（OBS のブラウザソース）も通すので、書き込みはゲームアセットのジョブと同じくデスクトップの共有ビューの fetch（シェルの秘密付き）だけ。ヘッドレスと素のブラウザからはジョブを作れない: `403 FORBIDDEN`）・`Cache-Control: no-store`（core が断る答えも）。API 一覧（§5.24）には載せない。state には載せず（Socket.IO でも配らない）、ページは `GET /archive/jobs/{id}` を 1 秒ごとに読む。断るときは core の日本語の文を `error.message`（ページがそのまま出す）、core のコードを `error.reason` に入れる
+
+| メソッド・パス | body | `data` | 断る |
+|---|---|---|---|
+| `GET /archive/status`（`?refresh=true` で聞き直す） | — | `{available, version, format, reason, work_dir, running_job}`（`reason` は使えない理由。`running_job` は実行中のジョブの id か null） | — |
+| `PATCH /archive/settings` | `{work_dir}`（絶対パス。無ければ作る） | status と同じ | 空・相対・作れない `400`（`invalid`）、実行中 `409 CONFLICT`（`busy`） |
+| `GET /archive/jobs` | — | `{jobs: [JobSummary]}`（新しい順） | — |
+| `POST /archive/jobs` | `{source, results, event}`（`source`: `http(s)://` の URL か、この PC のドライブにある動画ファイルのフルパス。ネットワークの共有（`\\host\share\...`・`//host/...`・`\\?\UNC\...`）など `\\` で始まるパスはファイルを見る前に `400`（存在の確認で SMB 接続と NTLM 認証を起こさないため）。`results`: `{"sets": [{"p1","p2","s1","s2","round"?}]}` か null。`event`: 題名に使う大会名か null） | `201` `{job: Job}` | 中身 `400`（`invalid`）→ ワーカーが無い・終了中 `503 UNAVAILABLE`（`unavailable` / `stopping`）→ 実行中 `409 CONFLICT`（`busy`）の順。作業フォルダに書けない `409 NOT_READY`（`work_dir`）。本文は 2MB まで（超えると `413`） |
+| `GET /archive/jobs/{id}` | — | `{job: Job, sets: out/sets.json の中身か null}`（実行中は null。再開したジョブのファイルは前回の実行のもののため） | 無い・形式違い `404`（`not_found`） |
+| `POST /archive/jobs/{id}:cancel` | — | `{job}`（ワーカーが止まるまで `running`） | `404`、実行中でない `409`（`not_running`） |
+| `POST /archive/jobs/{id}:resume` | — | `{job}`（同じ引数でもう一度。ワーカーがキャッシュから続ける） | `404`、完了済み `409`（`done`）、実行中 `409`（`busy`）、`job.json` の `source` が作成と同じ検査を通らない（手で書き換えた・動画を動かした / 消した）`409 CONFLICT`（`source`）、`503` は開始と同じ |
+
+- JobSummary: `{id, created_at（ISO 8601・ローカルのタイムゾーン）, source, state, sets（int か null）, needs_review（int か null）}`。`id` は `YYYYMMDD-HHMMSS-xxxx`（`^[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$`）
+- Job: JobSummary ＋ `{finished_at, progress: {stage, label, index, count, fraction, overall, eta} か null, logs（最後の 50 行）, warnings, error: {code, message, hint} か null, exit_code, has_results}`。`state` は `running` / `done` / `error`（ワーカーが利用者の直せる誤りを返した。終了コード 2）/ `cancelled` / `failed`（それ以外の終わり方。`message` に worker.log の末尾）
+- ワーカーへは大会名を `--event=<名前>` の 1 語で渡す（`-` で始まる名前もそのまま値になる）。版の確認（最大 8 秒）は 1 リクエストにつき 1 回まで（Web のクライアントの待ち時間 10 秒に収める）
+- 実装は Design.md §4.2.5（`core/ArchiveJobService` / `core/ArchiveWorker`）
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5・§6.37・§6.41〜6.43 および §7 の
@@ -1375,6 +1397,9 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.51 ゲームのフォルダを開く `POST /api/v1/assets/games-folder:reveal`（2026-11-14 追加・ADR-005 S-final SF-4b-1）
 - `user_data/games` をこの PC のファイルマネージャで開く（無ければ作る）。**パスを受け取らない**（フォルダは core が決める）。Windows は `%WINDIR%\explorer.exe` を引用符つきの 1 つの引数で（シェルを通さない。§6.35 と同じ考え方）、macOS は `open`、ほかは `xdg-open`。開けなければ `500 INTERNAL`
 - **`SHELL` 区分**（`THIS_PC` の §6.35 と違い、同じオリジンのレイアウトからは開かせない）・`no-store`
+
+### 6.52 アーカイブ切り抜きの書き込み（2026-11-16 追加・ADR-006 A1）
+- `PATCH /api/v1/archive/settings`・`POST /api/v1/archive/jobs`・`POST /api/v1/archive/jobs/{id}:cancel`・`POST /api/v1/archive/jobs/{id}:resume`。区分は `SHELL`（デスクトップの共有ビューだけ。ヘッドレスは `403`）。仕様は §5.32（読み取りとまとめた）。操作ログは本文のキーだけ（パス・URL を残さない）
 
 ---
 

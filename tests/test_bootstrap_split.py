@@ -202,6 +202,9 @@ def test_bootstrap_core_steps_and_their_order():
         # push (bootstrap.wire_web_server, the shells'), which follows it.
         "StateManagerBridge.instance.game_loaded.connect("
         "AutonaPlayerDB.SetupModel)",
+        # The archive clipper's jobs (ADR-006 A1): after the settings,
+        # before the shells' web server; nothing read or probed here.
+        "ArchiveJobService()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
 
@@ -479,6 +482,7 @@ from src.StateManagerBridge import StateManagerBridge
 from src.core.Actions import AutonaActions
 from src.core.AnalysisService import AnalysisService
 from src.core.AppSettings import AppSettings
+from src.core.ArchiveJobService import ArchiveJobService
 from src.core import HotkeyRules
 from src.core.AssetPackService import AssetPackService
 from src.core.BadWordFilter import BadWordFilter
@@ -566,6 +570,7 @@ report({
         "SetSelectionService": SetSelectionService.instance is not None,
         "AppSettings": AppSettings.instance is not None,
         "GameLoader": GameLoader.instance is not None,
+        "ArchiveJobService": ArchiveJobService.instance is not None,
     },
     "registrations": registrations,
     "slot_order": order,

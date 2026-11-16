@@ -511,6 +511,18 @@ def bootstrap_core():
     # load's board operation and save cycle.)
     StateManagerBridge.instance.game_loaded.connect(AutonaPlayerDB.SetupModel)
 
+    # ORDER CONSTRAINT: the archive clipper's jobs (ADR-006 A1), after
+    # SettingsManager (its work folder is archive.work_dir) and before the
+    # web server that starts and reads them (the shells', after this
+    # function returns); each shell's close stops its worker (Shutdown,
+    # before the executor's shutdown). Depends on nothing else and nothing
+    # depends on it: not in the state (D6). Nothing is read, swept or
+    # probed here -- the work folder at the first job request, the worker
+    # at the first status.
+    from .core.ArchiveJobService import ArchiveJobService
+    if ArchiveJobService.instance is None:
+        ArchiveJobService.instance = ArchiveJobService()
+
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
     # are switched to the stub + shared layout/designer_runtime/ before
     # anything can serve or list them -- the web server and the BOARD

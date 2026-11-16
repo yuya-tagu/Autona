@@ -66,6 +66,10 @@ These kinds live here:
   settings, their defaults, the uploaded background, the preview's file -- in
   both shells, on the calling thread. Starting a render (`preview_thumbnail`
   / `generate_thumbnail`) needs the shell's image renderer, below.
+- the archive clipper's (ADR-006 A1): core's ArchiveJobService -- the
+  worker's status, the work folder, the jobs (start, cancel, resume, read)
+  -- in both shells, on the calling thread. Not in the state (D6): the page
+  polls a job.
 - the shell operations (ADR-005 S3e-9): opening a board's set selection (the
   SCORE page's dialog in the desktop's window; S4ab-2 -- the Qt window on
   the way back to the Qt panel until S4ac-3), rendering its thumbnail (the legacy route,
@@ -102,6 +106,7 @@ from .core import WebAccess
 from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
+from .core.ArchiveJobService import ArchiveJobService
 from .core.AssetPackService import AssetPackService
 from .core import AssetPackService as assets
 from .core import HotkeyRules
@@ -846,6 +851,42 @@ def cancel_assets_job(revision):
 
 def reveal_games_folder():
     return assets.RevealGamesFolder()
+
+
+# ── The archive clipper (ADR-006 A1) ────────────────────────────────────
+# Its jobs: core's ArchiveJobService, in both shells, on the calling thread
+# (the status and a start may probe the worker there: a child process, one
+# probe of up to 8 s at most). Not the StateManager's (ADR-006 D6). The v1
+# routes map its refusals.
+
+def get_archive_status(refresh=False):
+    return ArchiveJobService.instance.Status(refresh=refresh)
+
+
+def update_archive_settings(workDir):
+    ArchiveJobService.instance.SetWorkDir(workDir)
+    return ArchiveJobService.instance.Status()
+
+
+def get_archive_jobs():
+    return ArchiveJobService.instance.Jobs()
+
+
+def create_archive_job(source, results, event):
+    return ArchiveJobService.instance.Create(source, results, event)
+
+
+def get_archive_job(jobId):
+    """(Job, the parsed out/sets.json or None)."""
+    return ArchiveJobService.instance.Job(jobId)
+
+
+def cancel_archive_job(jobId):
+    return ArchiveJobService.instance.Cancel(jobId)
+
+
+def resume_archive_job(jobId):
+    return ArchiveJobService.instance.Resume(jobId)
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

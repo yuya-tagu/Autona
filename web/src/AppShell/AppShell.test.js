@@ -197,6 +197,8 @@ beforeEach(() => {
                         : ok(200, server.format);
                 case "/api/v1/status":
                     return server.status;
+                case "/api/v1/archive/status":
+                    return server.archive ?? refuse(404, "NOT_FOUND");
                 default:
                     return refuse(404, "NOT_FOUND");
             }
@@ -251,12 +253,20 @@ test("the navigation is the Qt sidebar's: its headings and items in order", asyn
         expect(document.getElementById(`app-nav-${section.heading}`))
             .toHaveTextContent(i18n.t(section.heading));
         expect(within(list).getAllByRole("button").map((item) => item.textContent))
-            .toEqual(section.items.map((item) => i18n.t(item.label)));
+            .toEqual(section.items.filter((item) => !item.requires)
+                .map((item) => i18n.t(item.label)));
     });
     expect(NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.panel)))
         .toEqual(["event", "stream", "scoreboard", "board", "thumbnail",
                   "result", "top8", "commentary", "statsPreview", "stats",
-                  "playerBrowser"]);
+                  "playerBrowser", "archive"]);
+});
+
+test("the archive item shows only while the clipper worker is available", async () => {
+    server.archive = ok(200, {available: true});
+    await renderAt("/web/app/event?lng=en");
+    expect(await screen.findByRole("button", {name: i18n.t("app_archive")}))
+        .toBeInTheDocument();
 });
 
 test("the page shown is the highlighted item", async () => {

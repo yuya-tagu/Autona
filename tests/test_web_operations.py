@@ -2238,7 +2238,8 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
-               "game": 1, "row": 1, "upload_id": "x" * 22}
+               "game": 1, "row": 1, "upload_id": "x" * 22,
+               "job_id": "20261116-000000-zzzz"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2417,6 +2418,14 @@ _NOT_200 = {
     ("api_v1.install_asset_packs", None): 403,
     ("api_v1.cancel_assets_job", None): 403,
     ("api_v1.reveal_games_folder", None): 403,
+    # The archive clipper's writes, likewise (SHELL, ADR-006 A1): headless
+    # starts no job and moves no work folder. Its reads answer (THIS_PC):
+    # the URL's job id names none.
+    ("api_v1.archive_settings_update", None): 403,
+    ("api_v1.archive_job_create", None): 403,
+    ("api_v1.archive_job_cancel", None): 403,
+    ("api_v1.archive_job_resume", None): 403,
+    ("api_v1.get_archive_job", None): 404,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the
@@ -2547,6 +2556,20 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         get=offline, RequestException=requests.RequestException))
     monkeypatch.setattr(assetPacks.AssetPackService, "instance",
                         assetPacks.AssetPackService())
+    # The archive clipper's jobs (ADR-006 A1): a service of the walk's own,
+    # on the fake worker (the status probes it), its work folder under
+    # tmp_path (the writes are the shell's: refused headless).
+    from src.core import ArchiveWorker
+    from src.core.ArchiveJobService import ArchiveJobService
+    fakeWorker = (Path(__file__).resolve().parent / "fixtures"
+                  / "fake_vodsplit_worker.py")
+    monkeypatch.setenv(ArchiveWorker.ENV_COMMAND,
+                       f'"{sys.executable}" "{fakeWorker}"')
+    monkeypatch.setenv("FAKE_VODSPLIT_MODE", "ok")
+    SettingsManager.settings["archive"] = {
+        "work_dir": str(tmp_path / "archive")}
+    archiveJobs = ArchiveJobService()
+    monkeypatch.setattr(ArchiveJobService, "instance", archiveJobs)
     _goHeadless(autonaApp, monkeypatch)
     answers = []
     events = {}
@@ -2589,6 +2612,7 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         # put back.
         from tests.conftest import drain_tasks
         drain_tasks()
+        archiveJobs.Shutdown(5.0)
         shutil.rmtree(web)
         if not hadLogo and logo.exists():
             logo.unlink()
