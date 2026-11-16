@@ -1084,7 +1084,6 @@ function ScoreContent() {
     // edits waiting, as their notices told: offered to apply.
     const otherDirty = [1, 2].filter((n) => n !== board
         && dirtyByBoard[n] === true);
-    const apply = held ? {run: () => applyBoard(board), enabled: dirty} : null;
     const slots1 = numbered(team1.player);
     const slots2 = numbered(team2.player);
     const perTeam = Math.max(slots1.length, slots2.length);
@@ -1106,7 +1105,6 @@ function ScoreContent() {
                 characters={characters}
                 game={codename}
                 actions={actions}
-                apply={apply}
             />
         ));
 

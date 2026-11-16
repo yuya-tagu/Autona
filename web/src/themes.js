@@ -162,12 +162,12 @@ function buildTheme(beside = 0) {
                     root: {
                         fontWeight: 700,
                         textTransform: 'none',
-                        // Touch devices get taller tap targets, capped at the
-                        // small-TextField height (40px) so buttons line up
-                        // with the inputs. Mouse keeps the compact density
-                        // (Designer unaffected).
+                        // Coarse pointers get no taller than the compact
+                        // input height (34px): buttons share rows with the
+                        // inputs, and the desktop WebView reports coarse on
+                        // touchscreen laptops.
                         '@media (pointer: coarse)': {
-                            minHeight: 40,
+                            minHeight: 34,
                         },
                     },
                     // Primary action: near-white surface, near-black label
@@ -197,11 +197,53 @@ function buildTheme(beside = 0) {
             MuiIconButton: {
                 styleOverrides: {
                     root: {
-                        // Match the small-TextField height (40px), same as
-                        // MuiButton above.
+                        // Same as MuiButton above: the compact input height.
                         '@media (pointer: coarse)': {
-                            minHeight: 40,
-                            minWidth: 40,
+                            minHeight: 34,
+                            minWidth: 34,
+                        },
+                    },
+                },
+            },
+            // Inputs are compact everywhere: TextField / FormControl /
+            // Autocomplete default to "small" (fields that say so
+            // themselves are unchanged), and small is tightened one step
+            // below MUI's (40px): 14px font, 7px 10px padding = about 34px
+            // tall. The padding rules sit in the input slot (specificity of
+            // MUI's own), so a field's own sx / CSS still wins.
+            MuiTextField: { defaultProps: { size: 'small' } },
+            MuiFormControl: { defaultProps: { size: 'small' } },
+            MuiAutocomplete: {
+                defaultProps: { size: 'small' },
+                styleOverrides: {
+                    // Same specificity as MUI's own small rules, applied
+                    // after them. Only top/bottom/left are set on the input:
+                    // the right side is the clear / popup icons' room.
+                    root: {
+                        '& .MuiOutlinedInput-root.MuiInputBase-sizeSmall': {
+                            paddingTop: 4,
+                            paddingBottom: 4,
+                            paddingLeft: 4,
+                            '& .MuiAutocomplete-input': {
+                                padding: '3px 4px 3px 6px',
+                            },
+                        },
+                    },
+                },
+            },
+            MuiInputLabel: {
+                styleOverrides: {
+                    root: {
+                        // Same font as the input (14px), so the shrunk label
+                        // (x0.75) matches the notch, whose legend is 0.75em of
+                        // the input's font. Resting label: centred in the
+                        // 34px field (inputs start 10px in). Shrunk labels
+                        // keep MUI's position (on the border, over the notch).
+                        '&.MuiInputLabel-sizeSmall.MuiInputLabel-outlined': {
+                            fontSize: '0.875rem',
+                        },
+                        '&.MuiInputLabel-sizeSmall.MuiInputLabel-outlined:not(.MuiInputLabel-shrink)': {
+                            transform: 'translate(10px, 7px) scale(1)',
                         },
                     },
                 },
@@ -209,6 +251,7 @@ function buildTheme(beside = 0) {
             MuiOutlinedInput: {
                 styleOverrides: {
                     root: {
+                        fontSize: '0.875rem',
                         backgroundColor: t.bgSecondary,
                         '& .MuiOutlinedInput-notchedOutline': {
                             borderColor: t.borderDefault,
@@ -219,6 +262,19 @@ function buildTheme(beside = 0) {
                         '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                             borderColor: t.accent,
                         },
+                    },
+                    // Compact paddings (the Select's right padding for its
+                    // arrow is left alone). Later keys win, as MUI resolves
+                    // them in this order: start adornment 0, multiline 0.
+                    inputSizeSmall: {
+                        paddingTop: 7,
+                        paddingBottom: 7,
+                        paddingLeft: 10,
+                    },
+                    inputMultiline: { padding: 0 },
+                    inputAdornedStart: { paddingLeft: 0 },
+                    multiline: {
+                        '&.MuiInputBase-sizeSmall': { padding: '7px 10px' },
                     },
                 },
             },

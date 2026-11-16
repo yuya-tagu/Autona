@@ -240,11 +240,16 @@ async function type(input, value) {
 }
 
 async function openDetails(team) {
-    fireEvent.click(within(card(team)).getByRole("button",
-                                                 {name: i18n.t("score_details")}));
+    fireEvent.click(detailsToggle(team));
     await settle();
     await settle();
-    return screen.getByRole("dialog");
+    // The details open inside the card (an accordion, not a dialog).
+    return card(team);
+}
+
+function detailsToggle(team) {
+    return within(card(team)).getByRole("button",
+                                        {name: i18n.t("score_details")});
 }
 
 beforeEach(() => {
@@ -806,6 +811,84 @@ test("the details send the real name, X, the note and the country as a code", as
         {name: "Taro"}, {twitter: "taro_x"}, {custom_textbox: "line 1\nline 2"},
         {country_code: "JP"},
     ]);
+});
+
+test("the details are closed by default and open under the name field", async () => {
+    await renderPage();
+    const toggle = detailsToggle(1);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(card(1)).queryByRole("textbox",
+                                       {name: i18n.t("score_real_name")})).toBeNull();
+
+    fireEvent.click(toggle);
+    await settle();
+    await settle();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const region = document.getElementById(toggle.getAttribute("aria-controls"));
+    expect(region).not.toBeNull();
+    expect(card(1)).toContainElement(region);
+    expect(within(region).getByRole("textbox",
+                                    {name: i18n.t("score_real_name")})).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Another card's details stay closed.
+    expect(within(card(2)).queryByRole("textbox",
+                                       {name: i18n.t("score_real_name")})).toBeNull();
+
+    fireEvent.click(toggle);
+    // The collapse unmounts once its exit transition has run.
+    await settle(1000);
+    await settle();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(card(1)).queryByRole("textbox",
+                                       {name: i18n.t("score_real_name")})).toBeNull();
+});
+
+test("the details have no 反映 of their own: the board's is the only one", async () => {
+    await renderPage();
+    const board = button("score_apply");
+    const region = document.getElementById(
+        (await openDetails(1), detailsToggle(1)).getAttribute("aria-controls"));
+    expect(within(region).queryByRole("button",
+                                      {name: i18n.t("score_apply")})).toBeNull();
+    expect(within(region).getByRole("button",
+                                    {name: i18n.t("score_clear_player")}))
+        .toBeInTheDocument();
+    // Still exactly one 反映 on the page.
+    expect(button("score_apply")).toBe(board);
+});
+
+test("a note typed and the details closed before the debounce is still sent", async () => {
+    await renderPage();
+    await openDetails(1);
+    const note = within(card(1)).getByRole("textbox", {name: i18n.t("score_note")});
+
+    fireEvent.focus(note);
+    fireEvent.change(note, {target: {value: "memo"}});
+    fireEvent.click(detailsToggle(1));
+    await settle(STATE_FIELD_DEBOUNCE_MS);
+    await settle(1000);
+    await settle();
+
+    expect(writes("PATCH", `${BOARD}/1/teams/1/players/1/fields`))
+        .toEqual([{custom_textbox: "memo"}]);
+});
+
+test("the country list is read only while the details are open", async () => {
+    await renderPage();
+    expect(reads("/api/v1/countries")).toBe(0);
+
+    await openDetails(1);
+    const opened = reads("/api/v1/countries");
+    expect(opened).toBeGreaterThan(0);
+
+    fireEvent.click(detailsToggle(1));
+    await settle();
+    await settle();
+    expect(reads("/api/v1/countries")).toBe(opened);
+
+    await openDetails(1);
+    expect(reads("/api/v1/countries")).toBe(opened + 1);
 });
 
 test("a region is sent as its code", async () => {

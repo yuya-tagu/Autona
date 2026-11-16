@@ -8,6 +8,7 @@ import {
     CardContent,
     Checkbox,
     Chip,
+    Collapse,
     Dialog,
     DialogActions,
     DialogContent,
@@ -23,6 +24,7 @@ import {
 import {
     ArrowDownward,
     ArrowUpward,
+    ExpandMore,
     RadioButtonChecked,
     RadioButtonUnchecked,
 } from "@mui/icons-material";
@@ -43,7 +45,7 @@ import {
 import {ColorRow} from "../CommentaryPage/SideCards";
 
 // The SCORE page's cards (ADR-005 S4aa): the Qt SCORE panel's player cards
-// with their details dialog, the team cards, the score panel and the crew
+// with their details (an accordion in the card), the team cards, the score panel and the crew
 // board's team columns. They render the board as the page draws it (the
 // unapplied values of a held board, else the state) and hand every edit to
 // the page, which writes it through /api/v1. Every choice goes as an
@@ -310,7 +312,7 @@ function NameField({label, value, send, players, onPick}: {
     );
 }
 
-// ── the details dialog ──
+// ── the player details ──
 
 interface RegionEntry {
     code: string;
@@ -327,7 +329,7 @@ interface Envelope<T> {
     data: T;
 }
 
-// A list the dialog reads each time it opens; null while it is read, or when
+// A list read each time the details open; null while it is read, or when
 // it cannot be (`unavailable` decides which refusals mean "none"). `key`
 // names what the list is of (a country's regions, a game's variants): read
 // again when it changes, and a list of another key is not shown.
@@ -495,18 +497,18 @@ function CharacterRow({row, rows, value, characters, variants, game, send}: {
     );
 }
 
-export function DetailsDialog({open, onClose, team, slot, player, characters,
-                               game, actions, apply}: {
+// The player's details, opened under the name field (an accordion in the
+// card). Closed by default; the lists are read only while it is open.
+export function PlayerDetails({open, onToggle, team, slot, player, characters,
+                               game, actions}: {
     open: boolean;
-    onClose: () => void;
+    onToggle: () => void;
     team: number;
     slot: number;
     player: Fields;
     characters: CharacterList;
     game: string;
     actions: PlayerActions;
-    // The board's 反映 (a held board), and whether it has anything to apply.
-    apply: {run: () => void; enabled: boolean} | null;
 }) {
     const countries = useOpenRead<CountryEntry[]>(
         "/api/v1/countries", "", open, readCountries, noList);
@@ -526,18 +528,28 @@ export function DetailsDialog({open, onClose, team, slot, player, characters,
         (row: number, sent: CharacterSent) =>
             actions.sendCharacter(team, slot, row, sent),
         [actions, team, slot]);
-    const tag = text(player.name);
     const seed = count(player.seed);
     const rows = numbered(player.character);
+    const regionId = `score-details-${team}-${slot}`;
 
     return (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm"
-                aria-labelledby={`score-details-${team}-${slot}`}>
-            <DialogTitle id={`score-details-${team}-${slot}`}>
-                {tag || i18n.t("score_details_title")}
-            </DialogTitle>
-            <DialogContent>
-                <Stack spacing={1.5} sx={{pt: 1}}>
+        <Box>
+            <Button
+                size="small"
+                color="inherit"
+                onClick={onToggle}
+                aria-expanded={open}
+                aria-controls={regionId}
+                endIcon={<ExpandMore sx={{
+                    transform: open ? "rotate(180deg)" : "none",
+                    transition: "transform 0.2s",
+                }}/>}
+                sx={{px: 0.5, minWidth: 0, color: "text.secondary"}}
+            >
+                {i18n.t("score_details")}
+            </Button>
+            <Collapse in={open} unmountOnExit>
+                <Stack id={regionId} spacing={1.5} sx={{pt: 1}}>
                     {seed > 0 && (
                         <Box>
                             <Chip size="small" label={i18n.t("score_seed", {seed})}/>
@@ -597,29 +609,22 @@ export function DetailsDialog({open, onClose, team, slot, player, characters,
                         send={(value) => send({custom_textbox: value})}
                         multiline
                     />
+                    <Stack direction="row" alignItems="center">
+                        <Button color="error" size="small"
+                                onClick={() => actions.clear(team, slot)}>
+                            {i18n.t("score_clear_player")}
+                        </Button>
+                    </Stack>
                 </Stack>
-            </DialogContent>
-            <DialogActions>
-                <Button color="error" onClick={() => actions.clear(team, slot)}>
-                    {i18n.t("score_clear_player")}
-                </Button>
-                <Box sx={{flex: 1}}/>
-                {apply && (
-                    <Button variant="contained" disabled={!apply.enabled}
-                            onClick={apply.run}>
-                        {i18n.t("score_apply")}
-                    </Button>
-                )}
-                <Button onClick={onClose}>{i18n.t("close")}</Button>
-            </DialogActions>
-        </Dialog>
+            </Collapse>
+        </Box>
     );
 }
 
 // ── the player card ──
 
 export function PlayerCard({team, slot, slots, player, showSponsor, players,
-                            characters, game, actions, apply}: {
+                            characters, game, actions}: {
     // The state team (the column), and the slot in it.
     team: number;
     slot: number;
@@ -632,7 +637,6 @@ export function PlayerCard({team, slot, slots, player, showSponsor, players,
     characters: CharacterList;
     game: string;
     actions: PlayerActions;
-    apply: {run: () => void; enabled: boolean} | null;
 }) {
     const [details, setDetails] = React.useState(false);
     const send = React.useCallback(
@@ -696,24 +700,17 @@ export function PlayerCard({team, slot, slots, player, showSponsor, players,
                         </Typography>
                     )}
                 </Stack>
-                <Box>
-                    <Button size="small" sx={{px: 0, minWidth: 0}}
-                            onClick={() => setDetails(true)}>
-                        {i18n.t("score_details")}
-                    </Button>
-                </Box>
+                <PlayerDetails
+                    open={details}
+                    onToggle={() => setDetails((value) => !value)}
+                    team={team}
+                    slot={slot}
+                    player={player}
+                    characters={characters}
+                    game={game}
+                    actions={actions}
+                />
             </Stack>
-            <DetailsDialog
-                open={details}
-                onClose={() => setDetails(false)}
-                team={team}
-                slot={slot}
-                player={player}
-                characters={characters}
-                game={game}
-                actions={actions}
-                apply={apply}
-            />
         </Card>
     );
 }
