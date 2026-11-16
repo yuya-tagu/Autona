@@ -912,6 +912,10 @@ THREADS_LEFT = {
     ("src/core/TaskExecutor.py", "TaskExecutor.__init__",
      "ThreadPoolExecutor"),
     ("src/core/TaskExecutor.py", "TaskExecutor._RunNextStep", "Thread"),
+    # The archive clipper's worker (ADR-006 A1): its stdout's reader (the
+    # progress, then the job's end) and its stderr's (worker.log), daemon,
+    # one pair per run; a job's run is the worker process, not a task.
+    ("src/core/ArchiveJobService.py", "ArchiveJobService._Start", "Thread"),
     # The updater's QThreads (auto-update is not touched). The asset
     # guide's two (the index fetch, the download) went in ADR-005 S-final
     # SF-3b: core's AssetPackService runs them as TaskExecutor jobs.

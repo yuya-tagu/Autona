@@ -16,6 +16,7 @@
     ]},
     {"heading": "app_data", "items": [
         {"panel": "stats", "icon": "stats.svg", "label": "app_statistics"},
-        {"panel": "playerBrowser", "icon": "players.svg", "label": "app_player_list"}
+        {"panel": "playerBrowser", "icon": "players.svg", "label": "app_player_list"},
+        {"panel": "archive", "icon": "scissors.svg", "label": "app_archive", "requires": "archive"}
     ]}
 ]

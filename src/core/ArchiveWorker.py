@@ -1,0 +1,361 @@
+"""The archive clipper's worker: where it is, which version it is and how it
+is started (ADR-006 D1).
+
+The clipping (download, analysis, segmentation, later the cut) is not done
+in Autona's process. It is vodsplit (the SmashVodSplitter repository), run
+as a child process: its CLI ``run`` prints one JSON object per line
+(``--progress json``) and stops on a ``cancel`` line or the end of its
+stdin (``--cancel-on-stdin``). This module only finds it, asks its version
+and starts it; what a job is, is core/ArchiveJobService.py's.
+
+Where it is (``Locate``), in this order:
+
+- ``AUTONA_VODSPLIT_CMD``: a whole command line, for development
+  (``python -m vodsplit``; the cwd and PYTHONPATH are Autona's, which the
+  child inherits). Split like a Windows command line: double quotes group,
+  backslashes are kept (``SplitCommand``);
+- ``vodsplit-worker/vodsplit-worker.exe`` under the current directory (the
+  folder Autona.exe runs in; the separately distributed worker, D5).
+
+Its version (``Probe``): ``<command> version`` prints one JSON line
+``{"version", "format"}``; only ``SUPPORTED_FORMAT`` is accepted (the
+sets.json format this Autona reads). A worker that is missing, cannot be
+started, does not answer in ``PROBE_TIMEOUT_SECS`` or answers something
+else is unavailable, with the reason in Japanese (the page shows it).
+
+How it is started (``Launch``): stdin, stdout and stderr are pipes (stdout
+is read as UTF-8 text by line: vodsplit reconfigures its stdout to UTF-8
+and writes ``ensure_ascii=False``). On Windows it gets no console window
+and the below-normal priority class (the analysis must not take the CPU
+from OBS), and it is put in a job object with
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: closing the job's handle (``Close``),
+or Autona's process ending for any reason, ends the worker with every
+process it started (yt-dlp, ffmpeg). The job object is made after the
+process starts, so a process the worker starts in that instant is not in
+it (accepted: the worker's first work is reading its arguments). Elsewhere
+there is no job object; ``Kill`` ends the worker only.
+
+The probe and the run both get Autona's environment with
+``PYTHONIOENCODING=utf-8`` and ``PYINSTALLER_RESET_ENVIRONMENT=1`` (a frozen
+Autona must not hand its PyInstaller state to a frozen worker;
+``_ChildEnvironment``).
+
+Qt-free; imports on every OS (the Windows API is loaded at first use).
+Nothing is made at import.
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+import threading
+from dataclasses import dataclass
+from typing import Optional
+
+from loguru import logger
+
+ENV_COMMAND = "AUTONA_VODSPLIT_CMD"
+# The distributed worker, under the folder Autona runs in (D5).
+DEFAULT_EXECUTABLE = os.path.join("vodsplit-worker", "vodsplit-worker.exe")
+# The sets.json format this Autona reads (vodsplit export.FORMAT).
+SUPPORTED_FORMAT = 1
+# Below the web client's 10 s request timeout: the nav asks /archive/status at startup
+PROBE_TIMEOUT_SECS = 8
+
+_WINDOWS = sys.platform == "win32"
+_CREATE_NO_WINDOW = 0x08000000
+_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+
+
+def SplitCommand(text):
+    """`text` as an argument list. On Windows, like a command line there:
+    double quotes group and are removed, backslashes are kept
+    (``"C:\\Program Files\\Python\\python.exe" -m vodsplit``). Elsewhere,
+    POSIX shell words."""
+    if not _WINDOWS:
+        return shlex.split(text, posix=True)
+    words = []
+    for word in shlex.split(text, posix=False):
+        if len(word) >= 2 and word[0] == word[-1] and word[0] in "\"'":
+            word = word[1:-1]
+        words.append(word)
+    return words
+
+
+def Locate():
+    """(command, reason): the worker's command as a list, or None and why
+    not (Japanese). ``AUTONA_VODSPLIT_CMD`` first, then the distributed
+    executable under the current directory."""
+    text = os.environ.get(ENV_COMMAND, "").strip()
+    if text:
+        try:
+            command = SplitCommand(text)
+        except ValueError as error:
+            return None, (f"{ENV_COMMAND} を読めません（{error}）。")
+        if not command:
+            return None, f"{ENV_COMMAND} が空です。"
+        return command, None
+    executable = os.path.abspath(DEFAULT_EXECUTABLE)
+    if os.path.isfile(executable):
+        return [executable], None
+    return None, ("切り抜きワーカーが見つかりません。Autona のフォルダの "
+                  "vodsplit-worker フォルダに vodsplit-worker.exe を置いてください。")
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """What ``Probe`` found. ``command`` is set only when it is usable."""
+    available: bool
+    version: Optional[str]
+    format: Optional[int]
+    reason: Optional[str]
+    command: Optional[tuple]
+
+
+def _ChildEnvironment():
+    env = dict(os.environ)
+    # A Python worker (the development command) writes its stdio in UTF-8
+    # even before vodsplit reconfigures it (an early traceback).
+    env["PYTHONIOENCODING"] = "utf-8"
+    # A frozen Autona starting a frozen worker: the worker is another
+    # PyInstaller program, which must not take this one's _PYI_* state
+    # (its bootloader would read it as its own: the parent's _MEIPASS).
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def _CreationFlags(background):
+    if not _WINDOWS:
+        return 0
+    flags = _CREATE_NO_WINDOW
+    if background:
+        flags |= _BELOW_NORMAL_PRIORITY_CLASS
+    return flags
+
+
+def _ReadVersion(stdout):
+    """The {"version", "format"} object of `stdout` (the first line that is
+    one), or None."""
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            answer = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(answer, dict) and "format" in answer:
+            return answer
+    return None
+
+
+def Probe(timeout=PROBE_TIMEOUT_SECS):
+    """Find the worker and ask its version (``<command> version``), on the
+    calling thread (it waits up to `timeout` seconds). Never raises."""
+    command, reason = Locate()
+    if command is None:
+        return ProbeResult(False, None, None, reason, None)
+    fromEnv = bool(os.environ.get(ENV_COMMAND, "").strip())
+    try:
+        done = subprocess.run(
+            [*command, "version"], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, env=_ChildEnvironment(),
+            creationflags=_CreationFlags(background=False))
+    except subprocess.TimeoutExpired:
+        return ProbeResult(False, None, None, (
+            f"切り抜きワーカーが応答しません（{timeout} 秒待ちました）。"), None)
+    except OSError as error:
+        where = f"{ENV_COMMAND} のコマンド" if fromEnv else "vodsplit-worker.exe"
+        return ProbeResult(False, None, None, (
+            f"切り抜きワーカーを起動できません（{where}: {error}）。"), None)
+    answer = _ReadVersion(done.stdout)
+    if done.returncode != 0 or answer is None:
+        detail = (done.stderr or "").strip().splitlines()[-1:] or [""]
+        logger.warning(
+            f"Archive worker: the version probe failed (exit "
+            f"{done.returncode}): {detail[0][:300]}")
+        if done.returncode != 0:
+            return ProbeResult(False, None, None, (
+                f"切り抜きワーカーの確認に失敗しました（終了コード "
+                f"{done.returncode}）。"), None)
+        return ProbeResult(False, None, None, (
+            "切り抜きワーカーの応答を読めません（version の出力が想定と違います）。"),
+            None)
+    version = answer.get("version")
+    version = version if isinstance(version, str) else None
+    fmt = answer.get("format")
+    if isinstance(fmt, bool) or not isinstance(fmt, int):
+        return ProbeResult(False, version, None, (
+            "切り抜きワーカーの応答を読めません（format がありません）。"), None)
+    if fmt != SUPPORTED_FORMAT:
+        return ProbeResult(False, version, fmt, (
+            f"この切り抜きワーカーの形式（format {fmt}）には対応していません。"
+            f"format {SUPPORTED_FORMAT} の版に入れ替えてください。"), None)
+    return ProbeResult(True, version, fmt, None, tuple(command))
+
+
+# The Windows job object -------------------------------------------------
+
+_kernel32 = None
+
+
+def _Kernel32():
+    """kernel32 with the signatures this module calls (loaded once)."""
+    global _kernel32
+    if _kernel32 is None:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID,
+                                              wintypes.LPCWSTR)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE,
+                                                      wintypes.HANDLE)
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE,
+                                                wintypes.UINT)
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        _kernel32 = kernel32
+    return _kernel32
+
+
+def _ExtendedLimits():
+    """A JOBOBJECT_EXTENDED_LIMIT_INFORMATION with KILL_ON_JOB_CLOSE."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD)]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount",
+            "OtherOperationCount", "ReadTransferCount",
+            "WriteTransferCount", "OtherTransferCount")]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", BasicLimits),
+                    ("IoInfo", IoCounters),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    limits = ExtendedLimits()
+    limits.BasicLimitInformation.LimitFlags = (
+        _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    return limits
+
+
+def _MakeJobObject(proc):
+    """A job object holding `proc` that ends it (and what it starts) when
+    its handle is closed; None when it could not be made (logged: the
+    worker still runs, ``Kill`` then ends the worker alone)."""
+    import ctypes
+
+    kernel32 = _Kernel32()
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        logger.warning(f"Archive worker: no job object (CreateJobObject "
+                       f"error {ctypes.get_last_error()})")
+        return None
+    limits = _ExtendedLimits()
+    if not kernel32.SetInformationJobObject(
+            job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits), ctypes.sizeof(limits)):
+        logger.warning(f"Archive worker: no job object (SetInformation "
+                       f"error {ctypes.get_last_error()})")
+        kernel32.CloseHandle(job)
+        return None
+    if not kernel32.AssignProcessToJobObject(job, int(proc._handle)):
+        logger.warning(f"Archive worker: no job object (AssignProcess "
+                       f"error {ctypes.get_last_error()})")
+        kernel32.CloseHandle(job)
+        return None
+    return job
+
+
+class WorkerProcess:
+    """A started worker: its Popen and, on Windows, its job object.
+
+    ``Kill`` and ``Close`` may run at once on two threads (the shells' close
+    and the reader ending the job): ``_lock`` keeps the handle from being
+    closed twice or terminated once closed."""
+
+    def __init__(self, proc, job):
+        self.proc = proc
+        self._job = job
+        self._lock = threading.Lock()
+
+    @property
+    def pid(self):
+        return self.proc.pid
+
+    @property
+    def hasJobObject(self):
+        return self._job is not None
+
+    def Kill(self):
+        """End the worker now, with every process it started when there is
+        a job object (else the worker alone). Never raises."""
+        with self._lock:
+            if self._job is not None:
+                try:
+                    _Kernel32().TerminateJobObject(self._job, 1)
+                except OSError:
+                    logger.opt(exception=True).warning(
+                        "Archive worker: TerminateJobObject failed")
+        try:
+            self.proc.kill()
+        except OSError:
+            pass
+
+    def Close(self):
+        """Close the job object's handle: what is still in it ends
+        (KILL_ON_JOB_CLOSE). Called once the worker has ended, which also
+        ends a process it left behind. Idempotent; never raises."""
+        with self._lock:
+            job, self._job = self._job, None
+            if job is not None:
+                try:
+                    _Kernel32().CloseHandle(job)
+                except OSError:
+                    logger.opt(exception=True).warning(
+                        "Archive worker: closing the job object failed")
+
+
+def Launch(command, args):
+    """Start `command` + `args` with stdin, stdout and stderr as pipes
+    (UTF-8 text, by line), in the background on Windows (no window, the
+    below-normal priority class, a job object). Raises OSError when it
+    cannot be started."""
+    proc = subprocess.Popen(
+        [*command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        errors="replace", bufsize=1, env=_ChildEnvironment(),
+        creationflags=_CreationFlags(background=True))
+    job = None
+    if _WINDOWS:
+        try:
+            job = _MakeJobObject(proc)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "Archive worker: no job object")
+    return WorkerProcess(proc, job)

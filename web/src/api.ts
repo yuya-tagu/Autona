@@ -47,19 +47,21 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
 // /api/v1's error envelope: {"ok": false, "error": {"code", "message",
 // "reason"?}}. `reason` is the finer fixed code some routes add (the game
 // asset routes: spec 2.5).
-async function errorFields(resp: Response): Promise<{code?: string; reason?: string}> {
+async function errorFields(resp: Response): Promise<{code?: string; reason?: string; detail?: string}> {
     try {
         const error = (await resp.json())?.error;
         return {
             code: typeof error?.code === "string" ? error.code : undefined,
             reason: typeof error?.reason === "string" ? error.reason : undefined,
+            // The server's own message (the archive page shows it as is).
+            detail: typeof error?.message === "string" ? error.message : undefined,
         };
     } catch {
         return {};
     }
 }
 
-export type ApiError = Error & {status?: number; code?: string; reason?: string};
+export type ApiError = Error & {status?: number; code?: string; reason?: string; detail?: string};
 
 export function apiErrorStatus(error: unknown): number | undefined {
     return (error as ApiError | null)?.status;

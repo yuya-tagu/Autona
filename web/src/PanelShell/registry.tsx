@@ -17,6 +17,7 @@ import CompanionPage from "../GuidePages/CompanionPage";
 import ObsPage from "../GuidePages/ObsPage";
 import AboutPage from "../GuidePages/AboutPage";
 import AssetsPage from "../AssetsPage";
+import ArchivePage from "../ArchivePage";
 
 // The React panels, by the name in their URL (/web/<panel>). Must name the
 // same panels as WEB_PANELS in src/core/WebAccess.py, which decides what the
@@ -50,6 +51,7 @@ export const PANELS: Record<string, React.ComponentType> = {
     "obs": ObsPage,
     "about": AboutPage,
     "assets": AssetsPage,
+    "archive": ArchivePage,
 };
 
 export function panelPage(panel: string): React.ComponentType | undefined {

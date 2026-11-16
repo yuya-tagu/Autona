@@ -36,6 +36,7 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import AnalysisService as analysis
 from .core import AppSettings
+from .core import ArchiveJobService as archive
 from .core import AssetPackService as assets
 from .core import HotkeyRules
 from .core import StateSchema as schema
@@ -2544,6 +2545,140 @@ def reveal_games_folder():
     if not WebOps.reveal_games_folder():
         raise ApiError(INTERNAL, "the games folder could not be shown", 500)
     return ok()
+
+
+# ── The archive clipper (ADR-006 A1) ──
+# The page /web/app/archive: the worker's status and the work folder, the
+# jobs (start, list, read, cancel, resume). Core's ArchiveJobService; not in
+# the state (D6: the page polls GET /archive/jobs/<id>). The reads are
+# WebAccess.THIS_PC and the writes WebAccess.SHELL (D7: they name this PC's
+# paths and files, never for a LAN device, not with the token; a write
+# starts a process or moves the work folder, the shared view's alone -- a
+# same-origin layout/ page passes THIS_PC). Every answer is no-store. A
+# refusal answers core's Japanese message as error.message (the page shows
+# it as it is) and core's code as error.reason. Not in the API catalog (the
+# page alone calls them).
+
+# Core's refusal codes -> (code, status).
+_ARCHIVE_REFUSALS = {
+    archive.INVALID: (INVALID_ARGUMENT, 400),
+    archive.NOT_FOUND: (NOT_FOUND, 404),
+    archive.BUSY: (CONFLICT, 409),
+    archive.NOT_RUNNING: (CONFLICT, 409),
+    archive.ALREADY_DONE: (CONFLICT, 409),
+    archive.SOURCE_UNUSABLE: (CONFLICT, 409),
+    archive.WORK_DIR_UNUSABLE: (NOT_READY, 409),
+    archive.UNAVAILABLE: (UNAVAILABLE, 503),
+    archive.STOPPING: (UNAVAILABLE, 503),
+}
+
+
+def _archive_refused(error):
+    code, status = _ARCHIVE_REFUSALS.get(error.code, (INTERNAL, 500))
+    return ApiError(code, error.message, status, reason=error.code)
+
+
+# A job's body: the source, the results (the sets of a tournament: a few
+# hundred at most) and the event name.
+ARCHIVE_JOB_MAX_BODY = 2 * 1024 * 1024
+
+
+@api_v1.route("/archive/status")
+@_no_store_answers
+@api_handler
+def get_archive_status():
+    # {"available", "version", "format", "reason" (why not, Japanese),
+    # "work_dir", "running_job" (its id or null)}. The worker is probed on
+    # this thread the first time (`<worker> version`, up to 8 s: below the
+    # web client's 10 s) and with `?refresh=true`; an unavailable one is
+    # probed again after 30 s.
+    refresh = _truthy(request.args.get("refresh", ""))
+    return ok(data=WebOps.get_archive_status(refresh=refresh))
+
+
+@api_v1.route("/archive/settings", methods=["PATCH"])
+@_no_store_answers
+@write_op("archive.settings", log_keys_only=True)
+def archive_settings_update():
+    # {"work_dir": an absolute path} (made when it is not there; 400 when it
+    # is empty, relative or cannot be made; 409 while a job runs) -> the
+    # status. Logged by key: the path names this PC's user.
+    body = _json_body()
+    try:
+        data = WebOps.update_archive_settings(body.get("work_dir"))
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data=data)
+
+
+@api_v1.route("/archive/jobs")
+@_no_store_answers
+@api_handler
+def get_archive_jobs():
+    # {"jobs": [{"id", "created_at", "source", "state", "sets",
+    # "needs_review"}]}, newest first.
+    return ok(data={"jobs": WebOps.get_archive_jobs()})
+
+
+@api_v1.route("/archive/jobs", methods=["POST"])
+@_no_store_answers
+@write_op("archive.jobs.create", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_job_create():
+    # {"source": a http(s) URL or a video file's full path, "results": the
+    # tournament's sets ({"sets": [{"p1", "p2", "s1", "s2", "round"?}]}) or
+    # null, "event": the name for the titles or null} -> 201 {"job"}. 400
+    # (the request), 503 (no worker, or the app is closing), 409 (a job
+    # runs). Logged by key: the body names a path or a URL.
+    body = _json_body()
+    try:
+        job = WebOps.create_archive_job(
+            body.get("source"), body.get("results"), body.get("event"))
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job}, status=201)
+
+
+@api_v1.route("/archive/jobs/<job_id>")
+@_no_store_answers
+@api_handler
+def get_archive_job(job_id):
+    # {"job": the job (its progress while it runs), "sets": its
+    # out/sets.json, or null while it runs (a resumed job's file is the
+    # previous run's) or when there is none}. 404 for an unknown id.
+    try:
+        job, sets = WebOps.get_archive_job(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job, "sets": sets})
+
+
+@api_v1.route("/archive/jobs/<job_id>:cancel", methods=["POST"])
+@_no_store_answers
+@write_op("archive.job.cancel")
+def archive_job_cancel(job_id):
+    # Asks the running job to stop -> {"job"} (still running until the
+    # worker stops: the page follows it). 409 when it is not running.
+    try:
+        job = WebOps.cancel_archive_job(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job})
+
+
+@api_v1.route("/archive/jobs/<job_id>:resume", methods=["POST"])
+@_no_store_answers
+@write_op("archive.job.resume")
+def archive_job_resume(job_id):
+    # Runs the job again with the same arguments (the worker resumes from
+    # its caches) -> {"job"}. 409 while a job runs, when it is done, or when
+    # its job.json's source would not pass a start's checks (reason
+    # "source"); 503 as a start.
+    try:
+        job = WebOps.resume_archive_job(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job})
 
 
 @api_v1.route("/colors/<feature>", methods=["PATCH"])

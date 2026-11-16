@@ -21,7 +21,9 @@ game asset routes (``/assets/job``, ``/assets/uploads``,
 ``/assets:importZip``, ``/assets:importFolder`` (SF-5a-2),
 ``/assets/packs:install``, ``/assets/job:cancel``,
 ``/assets/games-folder:reveal``; SHELL, SF-4b-1) for the same reason, nor
-the shell request's ticket (``/shell-session``; SHELL, SF-5a-1).
+the shell request's ticket (``/shell-session``; SHELL, SF-5a-1), nor the
+archive clipper's (``/archive/*``; the reads THIS_PC, the writes SHELL,
+ADR-006 A1: its page alone calls them).
 
 Core module: pure data and a copy of it -- no Qt (tests/test_core_qt_free
 .py), nothing read or built at import time.

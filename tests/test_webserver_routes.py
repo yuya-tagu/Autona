@@ -115,7 +115,9 @@ EXPECTED_ROUTES = [
 # access-token* for the API guide's token, the shared view's alone (SF-4a-1);
 # the asset jobs, the ZIP upload and the games folder's reveal, the shared
 # view's alone too (SF-4b-1); shell-session for the shell request's ticket,
-# the shared view's alone as well (SF-5a-1).
+# the shared view's alone as well (SF-5a-1); archive* for the archive
+# clipper's page, its reads this PC's alone, its writes the shared view's
+# (ADR-006 A1).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -125,6 +127,16 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
     # The API guide's catalogue (ADR-005 S-final SF-3a).
     ('/api/v1/api-catalog', 'api_v1.get_api_catalog', 'GET,HEAD,OPTIONS'),
+    # The archive clipper (ADR-006 A1): the worker's status, the work
+    # folder, the jobs (the reads WebAccess.THIS_PC, the writes
+    # WebAccess.SHELL).
+    ('/api/v1/archive/jobs', 'api_v1.get_archive_jobs', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/jobs', 'api_v1.archive_job_create', 'OPTIONS,POST'),
+    ('/api/v1/archive/jobs/<job_id>', 'api_v1.get_archive_job', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/jobs/<job_id>:cancel', 'api_v1.archive_job_cancel', 'OPTIONS,POST'),
+    ('/api/v1/archive/jobs/<job_id>:resume', 'api_v1.archive_job_resume', 'OPTIONS,POST'),
+    ('/api/v1/archive/settings', 'api_v1.archive_settings_update', 'OPTIONS,PATCH'),
+    ('/api/v1/archive/status', 'api_v1.get_archive_status', 'GET,HEAD,OPTIONS'),
     # The game asset packs: the list and the last job's state (ADR-005
     # S-final SF-3b), the jobs, the ZIP upload and the games folder's
     # reveal (SF-4b-1; all but the list WebAccess.SHELL), the picked
@@ -575,18 +587,26 @@ def test_the_classification_follows_the_rules():
               "api_v1.settings_hotkeys_update",
               "api_v1.get_connection",
               # The asset list, whose read may fetch from GitHub (SF-3b).
-              "api_v1.get_asset_packs"}
+              "api_v1.get_asset_packs",
+              # The archive clipper's reads (ADR-006 A1, D7): the answers
+              # name this PC's paths.
+              "api_v1.get_archive_status", "api_v1.get_archive_jobs",
+              "api_v1.get_archive_job"}
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
-    # likewise (SF-4b-1), the shell request's ticket (SF-5a-1) and the
-    # picked folder's import (SF-5a-2).
+    # likewise (SF-4b-1), the shell request's ticket (SF-5a-1), the
+    # picked folder's import (SF-5a-2) and the archive clipper's writes
+    # (ADR-006 A1: a job runs a process and downloads onto this PC, the
+    # work folder moves where it writes).
     shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
              "api_v1.get_assets_job", "api_v1.upload_assets_zip",
              "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
              "api_v1.import_assets_folder",
              "api_v1.install_asset_packs", "api_v1.cancel_assets_job",
-             "api_v1.reveal_games_folder", "api_v1.get_shell_session"}
+             "api_v1.reveal_games_folder", "api_v1.get_shell_session",
+             "api_v1.archive_settings_update", "api_v1.archive_job_create",
+             "api_v1.archive_job_cancel", "api_v1.archive_job_resume"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -648,7 +668,8 @@ def test_the_classification_follows_the_rules():
     # job's read moved there (S-final SF-4b-1: v1 76 of 131), and the shell
     # request's ticket, the shell's (S-final SF-5a-1: v1 76 of 132), and
     # the picked folder's import, the shell's (S-final SF-5a-2: v1 76 of
-    # 133).
+    # 133), and the archive clipper's 3 reads, this PC's, and 4 writes, the
+    # shell's (ADR-006 A1: v1 76 of 140).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -658,7 +679,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 133
+    assert len(EXPECTED_API_V1_ROUTES) == 140
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

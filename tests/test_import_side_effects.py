@@ -177,6 +177,12 @@ asset_pack_service = importlib.import_module(
 # scanned, loaded or submitted on import, and nobody told (only the bridge
 # subscribes, built by bootstrap_core()).
 game_loader = importlib.import_module("src.core.GameLoader").GameLoader
+# The archive clipper's jobs (ADR-006 A1): a singleton created by
+# bootstrap_core(); no work folder read, no worker probed or started, and
+# no Windows API loaded on import.
+archive_job_service = importlib.import_module(
+    "src.core.ArchiveJobService").ArchiveJobService
+archive_worker = importlib.import_module("src.core.ArchiveWorker")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -335,6 +341,9 @@ assert status_service.changes.subscriber_count() == 0, \
     "import subscribed to the status' changes"
 assert asset_pack_service.instance is None, \
     "import created AssetPackService.instance"
+assert archive_job_service.instance is None, \
+    "import created ArchiveJobService.instance"
+assert archive_worker._kernel32 is None, "import loaded kernel32"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \
