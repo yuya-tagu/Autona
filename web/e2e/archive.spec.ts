@@ -7,8 +7,10 @@ import {keepLocal, serverUrl} from "./server";
 // cancel, resume, work folder) are the desktop shared view's (SHELL routes:
 // 403 to a browser), and there is no desktop here to give the shell's secret,
 // so they and the job reads are stubbed with page.route (as assets.spec.ts
-// does) to cover the UI flow; the real write routes are only checked to answer
-// 403. Checked through text and the DOM, never screenshots.
+// does) to cover the UI flow -- the shell probe (GET /api/v1/shell-session)
+// too where a scenario writes, else the page knows it is a browser and only
+// reads; the real write routes are only checked to answer 403. Checked
+// through text and the DOM, never screenshots.
 //
 // Not covered: the nav item hidden without a worker -- the app is started once
 // for the whole run, with the fake worker (tests/test_archive_jobs.py and
@@ -48,7 +50,9 @@ const envelope = (data: unknown, status = 200) => ({
     body: JSON.stringify({ok: true, data})});
 
 // The archive's job routes, stubbed. `detail` is what GET of the job answers
-// (it changes as the scenario moves); `posts` records the writes.
+// (it changes as the scenario moves); `posts` records the writes. The job's
+// video is bytes that are no video (the page then says why it does not play)
+// and it has no frames.
 async function stubJobs(page: Page, scenario: {
     detail: () => object;
     posts: string[];
@@ -57,6 +61,14 @@ async function stubJobs(page: Page, scenario: {
     await page.route("**/api/v1/archive/jobs**", (route) => {
         const request = route.request();
         const {pathname} = new URL(request.url());
+        if (pathname.endsWith("/video")) {
+            return route.fulfill({status: 200, contentType: "video/mp4",
+                                  body: "not a video"});
+        }
+        if (pathname.includes("/frames/")) {
+            return route.fulfill({status: 404, contentType: "application/json",
+                                  body: JSON.stringify({ok: false})});
+        }
         if (request.method() === "POST") {
             const action = pathname.includes(":")
                 ? pathname.split(":").pop()! : "create";
@@ -69,6 +81,13 @@ async function stubJobs(page: Page, scenario: {
         }
         return route.fulfill(envelope(scenario.detail()));
     });
+}
+
+// The page as the desktop's shared view sees itself: the shell probe answers
+// (its writes are on). Without it the page is a browser's: read-only.
+async function stubShell(page: Page) {
+    await page.route("**/api/v1/shell-session", (route) =>
+        route.fulfill(envelope({ticket: "e2e-never-kept"})));
 }
 
 async function startJob(page: Page, source: string) {
@@ -87,6 +106,7 @@ test("the nav shows the archive item (the real status read)", async ({page}) => 
 test("a started job shows its progress and then its sets", async ({page}) => {
     let state = "running";
     const posts: string[] = [];
+    await stubShell(page);
     await stubJobs(page, {
         posts,
         detail: () => state === "running"
@@ -122,9 +142,107 @@ test("a started job shows its progress and then its sets", async ({page}) => {
     await expect(first).toBeVisible();
 });
 
+// The review screen (ADR-006 A3): ?job= opens a finished job, as the
+// preview's "open in browser" does, on the bare page that link opens.
+const REVIEW_SETS = {
+    duration: 600, event: "Fake Cup", source_id: "abcDEF12345",
+    games: [[70, 130], [140, 170], [210, 250]],
+    games_ocr: [{samples: 10, names: {Alpha: 1}},
+                {samples: 10, names: {Alpha: 0.9, Beta: 0.5}},
+                {samples: 10, names: {Gamma: 0.4}}],
+    sets: [
+        {no: 1, start: 60, end: 180, matched: true, title: "Winners Final",
+         set: {round: "Winners Final", p1: "Alpha", s1: 2, p2: "Beta", s2: 0},
+         games: 2, game_spans: [[70, 130], [140, 170]], corrected_games: [2],
+         thumb: "01_x_bg.jpg"},
+        {no: 2, start: 200, end: 260, matched: false, needs_review: true,
+         reason: "name mismatch", game_spans: [[210, 250]]},
+    ],
+};
+
+test("a finished job shows its preview, timeline and details", async ({page, request}) => {
+    await stubJobs(page, {posts: [],
+                          detail: () => ({job: job("done"), sets: REVIEW_SETS})});
+    await page.goto(serverUrl(`/web/archive?job=${JOB_ID}`));
+
+    const video = page.getByTestId("archive-video");
+    await expect(video).toBeVisible({timeout: 15_000});
+    expect(await video.getAttribute("src"))
+        .toMatch(new RegExp(`/api/v1/archive/jobs/${JOB_ID}/video$`));
+    const timeline = page.getByRole("region", {name: "Timeline"});
+    await expect(timeline).toBeVisible();
+    await expect(page.getByTestId("archive-timeline-sets")
+        .locator("[data-timeline-set]")).toHaveCount(2);
+    await expect(page.getByTestId("archive-timeline-games")
+        .locator("rect")).toHaveCount(3);
+    await expect(page.getByTestId("archive-timeline-games")
+        .locator("rect[data-corrected]")).toHaveCount(1);
+    // The names read off the scoreboard: collapsed until opened.
+    await expect(page.getByTestId("archive-timeline-player")).toHaveCount(0);
+    await timeline.getByRole("button", {name: "Players (OCR)"}).click();
+    await expect(page.getByTestId("archive-timeline-player")).toHaveCount(3);
+    // Only Space, Up / Down and N are hinted (I / O / Enter come later).
+    await expect(page.getByTestId("archive-key-hints")).toHaveText(
+        /Space.*Play.*↑.*↓.*Set.*N.*Next to review/);
+
+    // The keys work within the page.
+    await page.getByTestId("archive-review").focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("archive-set-1")).toHaveAttribute("aria-current", "true");
+    const details = page.getByTestId("archive-details");
+    await expect(details).toContainText("Alpha vs Beta");
+    await expect(details).toContainText("Fake Cup · Winners Final");
+    await expect(page.getByTestId("archive-timecode")).toHaveText(/^0:01:00/);
+    await page.keyboard.press("n");
+    await expect(page.getByTestId("archive-set-2")).toHaveAttribute("aria-current", "true");
+    await expect(details).toContainText("name mismatch");
+
+    // A click on the timeline picks the set under it and seeks there.
+    const lane = page.getByTestId("archive-timeline-sets");
+    const box = (await lane.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.2, box.y + box.height / 2);
+    await expect(page.getByTestId("archive-set-1")).toHaveAttribute("aria-current", "true");
+    // 20% of 10:00, give or take a pixel.
+    await expect(page.getByTestId("archive-timecode")).toHaveText(/^0:0(1:5\d|2:0\d)/);
+    // The set view zooms the timeline to the selected set.
+    await timeline.getByRole("button", {name: "Set", exact: true}).click();
+    await expect(page.getByTestId("archive-timeline-sets")
+        .locator("[data-timeline-set]")).toHaveCount(1);
+
+    // The stub's bytes are no video: the page says why. A browser without
+    // H.264 (Playwright's Chromium, like Autona's window) offers this page in
+    // the PC's browser.
+    const h264 = await page.evaluate(() => document.createElement("video")
+        .canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'));
+    const problem = page.getByTestId("archive-video-problem");
+    await expect(problem).toBeVisible({timeout: 15_000});
+    if (h264 === "") {
+        const open = problem.getByRole("link", {name: "Open in browser"});
+        await expect(open).toHaveAttribute("target", "_blank");
+        expect(await open.getAttribute("href"))
+            .toMatch(new RegExp(`/web/archive\\?job=${JOB_ID}$`));
+        // Where it goes the page only reads (said next to the button).
+        await expect(problem.getByTestId("archive-browser-note"))
+            .toContainText("only reads");
+    } else {
+        await expect(problem).toContainText("This video cannot be played.");
+    }
+
+    // This is a browser (the real shell probe: 403): the page says it only
+    // reads.
+    await expect(page.getByTestId("archive-read-only")).toBeVisible();
+
+    // The real routes: this PC reads them (no job of that id here: 404,
+    // not a refusal).
+    const base = serverUrl(`/api/v1/archive/jobs/${JOB_ID}`);
+    expect((await request.get(`${base}/video`)).status()).toBe(404);
+    expect((await request.get(`${base}/frames/1`)).status()).toBe(404);
+});
+
 test("a running job can be stopped and then resumed", async ({page}) => {
     let state = "running";
     const posts: string[] = [];
+    await stubShell(page);
     await stubJobs(page, {
         posts,
         detail: () => ({job: job(state), sets: null}),
@@ -158,8 +276,20 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     // Reads stay open to this PC.
     expect((await request.get(`${base}/status`)).ok()).toBe(true);
 
-    // The page shows the server's own refusal text, not its generic one.
+    // A browser (the real shell probe): the page only reads, and says so.
     await page.goto(serverUrl("/web/app/archive"));
+    await expect(page.getByTestId("archive-read-only")).toBeVisible();
+    await page.getByRole("textbox", {name: /^Source video/}).fill("C:/vods/x.mp4");
+    await expect(page.getByRole("button", {name: "Start", exact: true}))
+        .toBeDisabled();
+    await expect(page.getByRole("button", {name: "Change", exact: true}))
+        .toBeDisabled();
+
+    // Told it is the shell (stubbed probe), it writes: the server refuses,
+    // and the page shows the server's own refusal text, not its generic one.
+    await stubShell(page);
+    await page.reload();
+    await expect(page.getByTestId("archive-read-only")).toHaveCount(0);
     const refusal = page.waitForResponse((response) =>
         new URL(response.url()).pathname === "/api/v1/archive/jobs"
         && response.request().method() === "POST");

@@ -117,7 +117,7 @@ EXPECTED_ROUTES = [
 # view's alone too (SF-4b-1); shell-session for the shell request's ticket,
 # the shared view's alone as well (SF-5a-1); archive* for the archive
 # clipper's page, its reads this PC's alone, its writes the shared view's
-# (ADR-006 A1).
+# (ADR-006 A1), and the job's video and a set's frame, this PC's (A3).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -133,6 +133,10 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/archive/jobs', 'api_v1.get_archive_jobs', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs', 'api_v1.archive_job_create', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>', 'api_v1.get_archive_job', 'GET,HEAD,OPTIONS'),
+    # The preview's files (ADR-006 A3): the job's video and a set's frame,
+    # THIS_PC as the job.
+    ('/api/v1/archive/jobs/<job_id>/frames/<no>', 'api_v1.get_archive_frame', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/jobs/<job_id>/video', 'api_v1.get_archive_video', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs/<job_id>:cancel', 'api_v1.archive_job_cancel', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:resume', 'api_v1.archive_job_resume', 'OPTIONS,POST'),
     ('/api/v1/archive/settings', 'api_v1.archive_settings_update', 'OPTIONS,PATCH'),
@@ -591,7 +595,9 @@ def test_the_classification_follows_the_rules():
               # The archive clipper's reads (ADR-006 A1, D7): the answers
               # name this PC's paths.
               "api_v1.get_archive_status", "api_v1.get_archive_jobs",
-              "api_v1.get_archive_job"}
+              "api_v1.get_archive_job",
+              # The job's video and a set's frame (A3), as the job.
+              "api_v1.get_archive_video", "api_v1.get_archive_frame"}
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
@@ -669,7 +675,8 @@ def test_the_classification_follows_the_rules():
     # request's ticket, the shell's (S-final SF-5a-1: v1 76 of 132), and
     # the picked folder's import, the shell's (S-final SF-5a-2: v1 76 of
     # 133), and the archive clipper's 3 reads, this PC's, and 4 writes, the
-    # shell's (ADR-006 A1: v1 76 of 140).
+    # shell's (ADR-006 A1: v1 76 of 140), and the preview's video and frame
+    # reads, this PC's (A3: v1 76 of 142).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -679,7 +686,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 140
+    assert len(EXPECTED_API_V1_ROUTES) == 142
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

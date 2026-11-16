@@ -13,6 +13,7 @@ the ledger and the classification are tests/test_webserver_routes.py's.
 import contextlib
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -25,6 +26,7 @@ from src.core import ArchiveWorker as worker
 from src.core import WebAccess
 from src.core.ArchiveJobService import ArchiveError, ArchiveJobService
 from src.core.SettingsManager import SettingsManager
+from tests.fixtures import fake_vodsplit_worker as fake_worker
 from tests.test_web_access import (  # noqa: F401
     LAN_PEER, _client, _shell_headers, server, settings, shellSecret)
 
@@ -41,8 +43,16 @@ RESULTS = {"event": "Fake Cup", "sets": [
 
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
-    """The fake worker as AUTONA_VODSPLIT_CMD, in mode ``ok``; cwd tmp."""
+    """The fake worker as AUTONA_VODSPLIT_CMD, in mode ``ok``; cwd tmp.
+
+    It runs at the normal priority class, not the worker's below-normal
+    one (pinned by test_the_worker_runs_below_normal_without_a_window):
+    the parallel runner keeps every core busy at the normal priority, and
+    Windows then runs a below-normal process only when a starved thread
+    is boosted (seconds apart) -- a fake that needs a fraction of a second
+    took more than 30 s to start, and its kill outlived Shutdown's wait."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "_BELOW_NORMAL_PRIORITY_CLASS", 0)
     monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
     monkeypatch.setenv("FAKE_VODSPLIT_MODE", "ok")
     for name in ("FAKE_VODSPLIT_FORMAT", "FAKE_VODSPLIT_VERSION_EXIT",
@@ -212,6 +222,30 @@ def test_the_probe_and_the_run_reset_pyinstallers_environment(fake,
     assert "PYINSTALLER_RESET_ENVIRONMENT" not in os.environ
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows' flags")
+def test_the_worker_runs_below_normal_without_a_window(monkeypatch):
+    # The analysis must not take the CPU from OBS (ADR-006 D1): the run is
+    # below normal, the probe (a few lines) is not. No console window
+    # either. (The fake fixture runs the fake at the normal class.)
+    given = []
+
+    def run(*_args, **kwargs):
+        given.append(("probe", kwargs["creationflags"]))
+        raise OSError("not started in this test")
+
+    def popen(*_args, **kwargs):
+        given.append(("run", kwargs["creationflags"]))
+        raise OSError("not started in this test")
+
+    monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    monkeypatch.setattr(worker.subprocess, "Popen", popen)
+    assert worker.Probe().available is False
+    with pytest.raises(OSError):
+        worker.Launch(["worker"], ["run", SOURCE])
+    assert given == [("probe", 0x08000000), ("run", 0x08000000 | 0x00004000)]
+
+
 class _Kernel:
     """kernel32's two job object calls, recorded (with a pause in each, so
     two threads overlap in them)."""
@@ -352,6 +386,24 @@ def test_a_start_takes_the_probe_another_request_was_waiting_for(fake, work):
     status.start()
     assert entered.wait(WAIT)
     refusals = []
+    waiting = threading.Event()
+
+    class Watched:
+        """The probe lock, telling when the start reaches it (it read
+        ``_probeCount`` before: the probe it waits for is its own)."""
+
+        def __init__(self, lock):
+            self.lock = lock
+
+        def __enter__(self):
+            if threading.current_thread() is not status:
+                waiting.set()
+            return self.lock.__enter__()
+
+        def __exit__(self, *exc):
+            return self.lock.__exit__(*exc)
+
+    service._probeLock = Watched(service._probeLock)
 
     def create():
         try:
@@ -361,7 +413,7 @@ def test_a_start_takes_the_probe_another_request_was_waiting_for(fake, work):
 
     start = threading.Thread(target=create)
     start.start()
-    time.sleep(0.2)                     # the start waits for the probe
+    assert waiting.wait(WAIT)           # the start waits for the probe
     release.set()
     status.join(WAIT)
     start.join(WAIT)
@@ -395,7 +447,15 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert done["logs"] == ["fake log line"]
     assert done["warnings"] == ["fake warning"]
     assert done["has_results"] is False
-    assert done["progress"]["stage"] == "segment"
+    # --thumbs: vodsplit's export stage (the background frames) ends the
+    # run, its last progress line the job's.
+    assert {key: done["progress"][key] for key in (
+        "stage", "label", "index", "count", "fraction")} == {
+        "stage": "export", "label": "書き出し", "index": 5, "count": 5,
+        "fraction": 1.0}
+    assert done["progress"]["overall"] > 0.8
+    assert [row["thumb"] for row in service.Job(job["id"])[1]["sets"]] == [
+        "01_fake_bg.jpg", "02_fake_bg.jpg"]
     assert set(done) == {
         "id", "created_at", "source", "state", "sets", "needs_review",
         "finished_at", "progress", "logs", "warnings", "error", "exit_code",
@@ -410,7 +470,7 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert json.loads(argv.read_text(encoding="utf-8")) == [
         SOURCE, "--out", str(jobDir / "out"),
         "--download-dir", str(work / "downloads"),
-        "--no-cut", "--progress", "json", "--cancel-on-stdin"]
+        "--no-cut", "--thumbs", "--progress", "json", "--cancel-on-stdin"]
     log = (jobDir / "worker.log").read_text(encoding="utf-8")
     assert "[stdout] fake worker: starting (not a JSON line)" in log
     assert "fake worker: stderr line" in log
@@ -548,8 +608,12 @@ def test_the_shutdown_kills_a_worker_that_does_not_stop(
         service.Shutdown(0.5)
         assert time.monotonic() - started < 0.5 + 3
 
-        assert run.worker.proc.poll() is not None
+        # Shutdown waits a bounded time for the end once it killed; under
+        # load the kill and the reader's end can take longer than that.
+        _until(lambda: run.worker.proc.poll() is not None,
+               "the worker to end")
         _until(lambda: not _alive(grandchild), "the grandchild to end")
+        assert run.finished.wait(WAIT)
         record = _disk(work, job["id"])
         assert record["state"] == "cancelled"
     finally:
@@ -783,12 +847,54 @@ def test_a_resumed_job_shows_no_sets_while_it_runs(service, work, fake):
     {"sets": [{"p1": "A", "p2": "B", "s1": -1, "s2": 0}]},
     {"sets": [{"p1": "A", "p2": "B", "s1": "1", "s2": 0}]},
     {"sets": [{"p1": "A", "p2": "B", "s1": True, "s2": 0}]},
+    # the worker's validate_set refuses these too
+    {"sets": [{"p1": "", "p2": "B", "s1": 1, "s2": 0}]},
+    {"sets": [{"p1": "A", "p2": "  ", "s1": 1, "s2": 0}]},
+    {"sets": [{"p1": 1, "p2": "B", "s1": 1, "s2": 0}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "c1": 3}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "c2": []}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "char_source": 1}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "id": True}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "id": 1.5}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "games": "x"}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "games": ["x"]}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0,
+               "games": [{"c1": 1}]}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0,
+               "games": [{"c2": {}}]}]},
+    {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, "round": 3}]},
 ])
 def test_results_that_are_not_a_tournaments_sets_are_refused(
         service, results):
     with pytest.raises(ArchiveError) as refused:
         service.Create(SOURCE, results)
     assert refused.value.code == archive.INVALID
+
+
+@pytest.mark.parametrize("item, says", [
+    ({"p1": "", "p2": "B", "s1": -1, "s2": 0, "c1": 3}, "選手名（p1, p2）"),
+    ({"p1": "A", "p2": "B", "s1": -1, "s2": 0, "c1": 3}, "スコア（s1, s2）"),
+    ({"p1": "A", "p2": "B", "s1": 1, "s2": 0, "c1": 3, "round": 3}, "の c1 "),
+])
+def test_results_are_checked_in_the_workers_order(item, says):
+    # vodsplit's validate_set: the names, the scores, then the optional
+    # fields -- a set with several faults gets the worker's message.
+    with pytest.raises(ArchiveError) as refused:
+        archive.CheckResults({"sets": [item]})
+    assert says in refused.value.message
+
+
+@pytest.mark.parametrize("extra", [
+    {}, {"round": None}, {"round": "Grand Final"},
+    {"c1": None, "c2": None, "char_source": None, "id": None, "games": None},
+    {"c1": "ホムラ/ヒカリ", "c2": "マリオ", "char_source": "report"},
+    {"id": "abc"}, {"id": 12},
+    {"games": []}, {"games": [{}, {"c1": None, "c2": "リンク"}]},
+])
+def test_optional_set_fields_of_the_right_type_are_accepted(
+        service, extra):
+    sets = {"sets": [{"p1": "A", "p2": "B", "s1": 1, "s2": 0, **extra}]}
+    assert archive.CheckResults(sets) is sets
 
 
 def test_the_work_folder_is_saved_absolute(service, tmp_path):
@@ -981,10 +1087,374 @@ def test_the_work_folder_is_changed_through_the_route(page, service,
     assert SettingsManager.Get(archive.WORK_DIR_KEY) == str(target)
 
 
+# ── the preview's files (ADR-006 A3, D7) ────────────────────────────────
+
+def _link(target, link):
+    """Folder `link` leading to folder `target` (a symlink, else a
+    junction); skips the test where neither can be made."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        except (ImportError, AttributeError, OSError):
+            pytest.skip("no symlink or junction here")
+
+
+def _sets(work, jobId, jobSource=SOURCE, **fields):
+    """A finished job (its job.json's source `jobSource`) whose
+    out/sets.json is `fields` -> its out/."""
+    _stored(work, jobId, source=jobSource, state="done")
+    out = work / jobId / "out"
+    out.mkdir(exist_ok=True)
+    (out / "sets.json").write_text(json.dumps(dict(
+        {"format": 1, "sets": []}, **fields)), encoding="utf-8")
+    return out
+
+
+def _not_found(call, *args):
+    with pytest.raises(ArchiveError) as refused:
+        call(*args)
+    assert refused.value.code == archive.NOT_FOUND
+
+
+def test_the_page_plays_a_url_jobs_download_and_shows_its_frames(
+        page, service, work):
+    jobId = _data(page.post(f"{BASE}/jobs", json={"source": SOURCE}),
+                  201)["job"]["id"]
+    assert _route_ended(page, jobId)["state"] == "done"
+    sets = _data(page.get(f"{BASE}/jobs/{jobId}"))["sets"]
+    downloaded = work / "downloads" / "fakevideo01.open.mp4"
+    assert sets["source"] == str(downloaded)
+    assert [row["thumb"] for row in sets["sets"]] == [
+        "01_fake_bg.jpg", "02_fake_bg.jpg"]
+
+    video = page.get(f"{BASE}/jobs/{jobId}/video")
+    assert video.status_code == 200
+    assert video.data == downloaded.read_bytes()
+    assert video.mimetype == "video/mp4"
+    assert video.headers["Accept-Ranges"] == "bytes"
+    assert video.headers["Cache-Control"] == "no-store"
+    assert video.headers["X-Content-Type-Options"] == "nosniff"
+
+    # The <video> seeks with ranges.
+    size = len(fake_worker.VIDEO_BYTES)
+    part = page.client.get(f"{BASE}/jobs/{jobId}/video",
+                           headers={"Range": "bytes=256-511"})
+    assert part.status_code == 206
+    assert part.headers["Content-Range"] == f"bytes 256-511/{size}"
+    assert part.data == fake_worker.VIDEO_BYTES[256:512]
+    assert part.headers["Cache-Control"] == "no-store"
+    tail = page.client.get(f"{BASE}/jobs/{jobId}/video",
+                           headers={"Range": "bytes=-10"})
+    assert tail.status_code == 206
+    assert tail.data == fake_worker.VIDEO_BYTES[-10:]
+    beyond = page.client.get(f"{BASE}/jobs/{jobId}/video",
+                             headers={"Range": f"bytes={size}-"})
+    assert beyond.status_code == 416
+    assert beyond.headers["Content-Range"] == f"bytes */{size}"
+    head = page.client.head(f"{BASE}/jobs/{jobId}/video")
+    assert head.status_code == 200 and head.data == b""
+    assert int(head.headers["Content-Length"]) == size
+
+    for number in ("1", "2"):
+        frame = page.get(f"{BASE}/jobs/{jobId}/frames/{number}")
+        assert frame.status_code == 200
+        assert frame.mimetype == "image/jpeg"
+        assert frame.data == fake_worker.FRAME_BYTES
+        assert frame.headers["Cache-Control"] == "no-store"
+        assert frame.headers["X-Content-Type-Options"] == "nosniff"
+    for number in ("3", "0", "01x", "-1", "1.0"):
+        _refusal(page.get(f"{BASE}/jobs/{jobId}/frames/{number}"), 404,
+                 "NOT_FOUND", archive.NOT_FOUND)
+
+
+def test_a_local_source_is_served_where_job_json_names_it(
+        page, service, work, tmp_path):
+    # A file of this PC, outside the work folder: the operator picked it.
+    video = tmp_path / "vods" / "match.webm"
+    video.parent.mkdir()
+    video.write_bytes(b"webm bytes")
+    jobId = "20261116-100000-loca"
+    _sets(work, jobId, jobSource=str(video), source=str(video))
+    answer = page.get(f"{BASE}/jobs/{jobId}/video")
+    assert answer.status_code == 200 and answer.data == b"webm bytes"
+    assert answer.mimetype == "video/webm"
+    for name, kind in (("a.MP4", "video/mp4"), ("a.m4v", "video/mp4"),
+                       ("a.mkv", "video/x-matroska"),
+                       ("a.mov", "video/quicktime")):
+        (tmp_path / "vods" / name).write_bytes(b"v")
+        _stored(work, jobId, source=str(tmp_path / "vods" / name),
+                state="done")
+        assert service.VideoFile(jobId)[1] == kind
+    # A video the worker reads but a browser does not play (OBS' .flv / .ts
+    # ...): there, but not previewable -- 415 with its own reason (the page
+    # says the sets and the timeline still work), never "not found". HEAD
+    # too: the page asks that way when the <video> fails.
+    for name in ("match.ts", "match.FLV", "match.avi", "match.m2ts",
+                 "match.wmv", "match.mpg"):
+        other = tmp_path / "vods" / name
+        other.write_bytes(b"x")
+        _stored(work, jobId, source=str(other), state="done")
+        with pytest.raises(ArchiveError) as refused:
+            service.VideoFile(jobId)
+        assert (refused.value.code, refused.value.message) == (
+            archive.NOT_PREVIEWABLE, archive.VIDEO_NOT_PREVIEWABLE)
+        assert _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), 415,
+                        "UNSUPPORTED_MEDIA_TYPE", archive.NOT_PREVIEWABLE
+                        ) == archive.VIDEO_NOT_PREVIEWABLE
+        assert page.client.head(f"{BASE}/jobs/{jobId}/video"
+                                ).status_code == 415
+        # Gone, it is not found as any other video.
+        other.unlink()
+        _not_found(service.VideoFile, jobId)
+        _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), 404, "NOT_FOUND",
+                 archive.NOT_FOUND)
+    # Not a video at all (anything the operator typed, the worker's own
+    # partial download): not found, there or not.
+    for name in ("notes.txt", "sets.json", "match", "match.mp4.part"):
+        other = tmp_path / "vods" / name
+        other.write_bytes(b"x")
+        _stored(work, jobId, source=str(other), state="done")
+        _not_found(service.VideoFile, jobId)
+        _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), 404, "NOT_FOUND",
+                 archive.NOT_FOUND)
+    # Gone since: not found.
+    gone = tmp_path / "vods" / "gone.mp4"
+    gone.write_bytes(b"v")
+    _stored(work, jobId, source=str(gone), state="done")
+    assert service.VideoFile(jobId)[1] == "video/mp4"
+    gone.unlink()
+    _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), 404, "NOT_FOUND",
+             archive.NOT_FOUND)
+
+
+@pytest.mark.parametrize("source", NETWORK_SOURCES + [
+    "\\\\fileserver\\share\\vod.flv", "//fileserver/share/vod.ts",
+    "", "vod.mp4", "ftp://example.com/vod.mp4", "C:\\no\\such\\video.mp4",
+    "C:\\no\\such\\video.flv"])
+def test_a_source_a_start_would_refuse_is_not_served(
+        page, service, work, monkeypatch, source):
+    jobId = "20261116-100000-shar"
+    _sets(work, jobId, jobSource=source, source=source)
+    looked = []
+    real = {name: getattr(archive.os.path, name)
+            for name in ("isfile", "exists", "isdir", "realpath")}
+
+    def guard(name):
+        def look(path, *args, **kwargs):
+            text = str(path).strip()
+            if archive._IsNetworkPath(text) or "fileserver" in text:
+                looked.append(path)
+                raise OSError("a share was asked")
+            return real[name](path, *args, **kwargs)
+        return look
+
+    with monkeypatch.context() as patch:
+        for name in real:
+            patch.setattr(archive.os.path, name, guard(name))
+        _not_found(service.VideoFile, jobId)
+        _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), 404, "NOT_FOUND",
+                 archive.NOT_FOUND)
+    assert looked == []
+
+
+def test_a_url_jobs_video_is_only_its_download_in_the_work_folder(
+        fake, work, tmp_path):
+    service = ArchiveJobService()
+    jobId = "20261116-100000-down"
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "x.open.mp4").write_bytes(b"not the work folder's")
+    # No sets.json yet (the worker never ended): nothing to play.
+    _stored(work, jobId, source=SOURCE, state="cancelled")
+    _not_found(service.VideoFile, jobId)
+    # sets.json names a file elsewhere: only its name is looked for, in
+    # downloads/ -- not there.
+    _sets(work, jobId, source=str(outside / "x.open.mp4"))
+    _not_found(service.VideoFile, jobId)
+    for name in (None, 5, "", "..", "downloads\\", "x.mp4:stream",
+                 "C:\\x\\..", "a\x00.mp4"):
+        _sets(work, jobId, source=name)
+        _not_found(service.VideoFile, jobId)
+    # A download that is not a video (yt-dlp's part file, a stray file) is
+    # not found; a video of a type the browser does not play is there but
+    # not previewable, as a local file's.
+    (work / "downloads").mkdir()
+    for name in ("x.open.mp4.part", "x.json"):
+        (work / "downloads" / name).write_bytes(b"x")
+        _sets(work, jobId, source=name)
+        _not_found(service.VideoFile, jobId)
+    (work / "downloads" / "x.flv").write_bytes(b"x")
+    _sets(work, jobId, source="x.flv")
+    with pytest.raises(ArchiveError) as refused:
+        service.VideoFile(jobId)
+    assert refused.value.code == archive.NOT_PREVIEWABLE
+    (work / "downloads" / "x.open.mp4").write_bytes(b"v")
+    _sets(work, jobId, source="x.open.mp4")
+    assert service.VideoFile(jobId)[1] == "video/mp4"
+    shutil.rmtree(work / "downloads")
+    # A downloads/ that leads outside the work folder serves nothing.
+    _link(outside, work / "downloads")
+    _sets(work, jobId, source="D:\\moved\\x.open.mp4")
+    assert (work / "downloads" / "x.open.mp4").is_file()
+    _not_found(service.VideoFile, jobId)
+
+
+def test_the_download_is_found_after_the_work_folder_moved(fake, work):
+    jobId = "20261116-100000-move"
+    _sets(work, jobId, source="C:\\old\\work\\downloads\\vid.open.mp4")
+    (work / "downloads").mkdir()
+    (work / "downloads" / "vid.open.mp4").write_bytes(b"v")
+    path, kind = ArchiveJobService().VideoFile(jobId)
+    assert path == str(work / "downloads" / "vid.open.mp4")
+    assert kind == "video/mp4"
+
+
+def test_a_frame_is_the_sets_thumb_in_the_jobs_out_folder(fake, work,
+                                                         tmp_path):
+    service = ArchiveJobService()
+    jobId = "20261116-100000-fram"
+    out = _sets(work, jobId, sets=[
+        {"no": 1, "thumb": "01_a_bg.jpg"},
+        {"no": 2, "thumb": "..\\..\\job.json"},
+        {"no": 3, "thumb": "../../secret.jpg"},
+        {"no": 4},
+        {"no": True, "thumb": "01_a_bg.jpg"},
+        {"no": 6, "thumb": 7},
+        {"no": 7, "thumb": "07_b_bg.jpg"},
+    ])
+    (out / "01_a_bg.jpg").write_bytes(b"jpg")
+    (tmp_path / "secret.jpg").write_bytes(b"outside")
+    assert service.FrameFile(jobId, "1") == (str(out / "01_a_bg.jpg"),
+                                             "image/jpeg")
+    # 5 is a bool's "no"; 7 is named but not written (the worker stopped).
+    for number in ("2", "3", "4", "5", "6", "7", "8", "", "x", "1 ", None,
+                   1):
+        _not_found(service.FrameFile, jobId, number)
+    # An out/ that leads outside the work folder serves nothing.
+    linked = "20261116-100000-fral"
+    _stored(work, linked, source=SOURCE, state="done")
+    elsewhere = tmp_path / "elsewhere-out"
+    elsewhere.mkdir()
+    (elsewhere / "sets.json").write_text(json.dumps(
+        {"sets": [{"no": 1, "thumb": "01_a_bg.jpg"}]}), encoding="utf-8")
+    (elsewhere / "01_a_bg.jpg").write_bytes(b"jpg")
+    _link(elsewhere, work / linked / "out")
+    _not_found(service.FrameFile, linked, "1")
+
+
+def test_a_frame_is_never_another_jobs(fake, work):
+    # An out/ leading to another job's out/ (inside the work folder): the
+    # frame must resolve inside this job's own out/.
+    service = ArchiveJobService()
+    own = "20261116-100000-owna"
+    out = _sets(work, own, sets=[{"no": 1, "thumb": "01_a_bg.jpg"}])
+    (out / "01_a_bg.jpg").write_bytes(b"jpg")
+    assert service.FrameFile(own, "1")[0] == str(out / "01_a_bg.jpg")
+    other = "20261116-100000-othr"
+    _stored(work, other, source=SOURCE, state="done")
+    _link(out, work / other / "out")
+    assert (work / other / "out" / "01_a_bg.jpg").is_file()
+    _not_found(service.FrameFile, other, "1")
+
+
+def test_a_running_jobs_files_are_not_served(page, service, fake, work):
+    # As its sets (null while it runs): a resumed job's sets.json and
+    # download are the previous run's until the worker ends.
+    _mode(fake, "slow")
+    jobId = _data(page.post(f"{BASE}/jobs", json={"source": SOURCE}),
+                  201)["job"]["id"]
+    out = work / jobId / "out"
+    (work / "downloads").mkdir(exist_ok=True)
+    download = work / "downloads" / "fakevideo01.open.mp4"
+    download.write_bytes(b"v")
+    (out / "sets.json").write_text(json.dumps(
+        {"source": str(download),
+         "sets": [{"no": 1, "thumb": "01_a_bg.jpg"}]}), encoding="utf-8")
+    (out / "01_a_bg.jpg").write_bytes(b"jpg")
+    _not_found(service.VideoFile, jobId)
+    _not_found(service.FrameFile, jobId, "1")
+    for url in (f"{BASE}/jobs/{jobId}/video",
+                f"{BASE}/jobs/{jobId}/frames/1"):
+        _refusal(page.get(url), 404, "NOT_FOUND", archive.NOT_FOUND)
+    # Once it ended: both served (the slow fake writes no sets.json).
+    _data(page.post(f"{BASE}/jobs/{jobId}:cancel"))
+    assert _route_ended(page, jobId)["state"] == "cancelled"
+    assert page.get(f"{BASE}/jobs/{jobId}/video").data == b"v"
+    assert page.get(f"{BASE}/jobs/{jobId}/frames/1").data == b"jpg"
+
+
+@pytest.mark.parametrize("error, status, code, reason", [
+    (FileNotFoundError(2, "gone"), 404, "NOT_FOUND", archive.NOT_FOUND),
+    (PermissionError(13, "held"), 409, "CONFLICT", archive.UNREADABLE),
+    (OSError(22, "invalid"), 409, "CONFLICT", archive.UNREADABLE),
+])
+def test_a_file_that_cannot_be_opened_is_refused(page, service, work,
+                                                 tmp_path, monkeypatch,
+                                                 error, status, code,
+                                                 reason):
+    # Gone between core's look and send_file's open (deleted, moved), or
+    # there but not to be opened (another app holds it, no permission):
+    # core's words, never the path, never a 500.
+    from src import AutonaApiV1
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"v")
+    jobId = "20261116-100000-open"
+    out = _sets(work, jobId, jobSource=str(video), source=str(video),
+                sets=[{"no": 1, "thumb": "01_a_bg.jpg"}])
+    (out / "01_a_bg.jpg").write_bytes(b"jpg")
+
+    def refuse(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(AutonaApiV1, "send_file", refuse)
+    gone = status == 404
+    assert _refusal(page.get(f"{BASE}/jobs/{jobId}/video"), status, code,
+                    reason) == (archive.VIDEO_MISSING if gone
+                                else archive.FILE_UNREADABLE)
+    assert _refusal(page.get(f"{BASE}/jobs/{jobId}/frames/1"), status,
+                    code, reason) == (archive.FRAME_MISSING if gone
+                                      else archive.FILE_UNREADABLE)
+
+
+@pytest.mark.parametrize("jobId", [
+    "x", "20261116-000000-ABCD", "20261116-000000-abcde",
+    "20261116-000000-zzzz",
+])
+def test_an_unknown_or_malformed_jobs_files_are_not_found(page, service,
+                                                          jobId):
+    _not_found(service.VideoFile, jobId)
+    _not_found(service.FrameFile, jobId, "1")
+    for url in (f"{BASE}/jobs/{jobId}/video",
+                f"{BASE}/jobs/{jobId}/frames/1"):
+        _refusal(page.get(url), 404, "NOT_FOUND", archive.NOT_FOUND)
+
+
+def test_a_job_folder_outside_the_work_folder_serves_no_file(fake, work,
+                                                             tmp_path):
+    jobId = "20261116-000000-link"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "job.json").write_text(json.dumps(
+        {"id": jobId, "source": str(tmp_path / "v.mp4"), "state": "done"}),
+        encoding="utf-8")
+    (tmp_path / "v.mp4").write_bytes(b"v")
+    work.mkdir()
+    _link(outside, work / jobId)
+    service = ArchiveJobService()
+    _not_found(service.VideoFile, jobId)
+    _not_found(service.FrameFile, jobId, "1")
+
+
 READS = [
     ("get", f"{BASE}/status", None),
     ("get", f"{BASE}/jobs", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz", None),
+    ("get", f"{BASE}/jobs/20261116-000000-zzzz/video", None),
+    ("get", f"{BASE}/jobs/20261116-000000-zzzz/frames/1", None),
 ]
 WRITES = [
     ("patch", f"{BASE}/settings", {"work_dir": "C:\\x"}),
@@ -998,6 +1468,8 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
     endpoints = {"get_archive_status": WebAccess.THIS_PC,
                  "get_archive_jobs": WebAccess.THIS_PC,
                  "get_archive_job": WebAccess.THIS_PC,
+                 "get_archive_video": WebAccess.THIS_PC,
+                 "get_archive_frame": WebAccess.THIS_PC,
                  "archive_settings_update": WebAccess.SHELL,
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,

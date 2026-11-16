@@ -2239,7 +2239,7 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
                "game": 1, "row": 1, "upload_id": "x" * 22,
-               "job_id": "20261116-000000-zzzz"}
+               "job_id": "20261116-000000-zzzz", "no": "1"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2426,6 +2426,8 @@ _NOT_200 = {
     ("api_v1.archive_job_cancel", None): 403,
     ("api_v1.archive_job_resume", None): 403,
     ("api_v1.get_archive_job", None): 404,
+    ("api_v1.get_archive_video", None): 404,
+    ("api_v1.get_archive_frame", None): 404,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the
