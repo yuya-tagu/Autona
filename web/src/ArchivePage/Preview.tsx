@@ -56,8 +56,9 @@ function Kbd({children}: {children: React.ReactNode}) {
 }
 
 export default function Preview({jobId, extension, row, videoRef, time,
-                                 duration, playing, onTogglePlay, onPrevious,
-                                 onNext, onTime, onDuration, onPlaying}: {
+                                 duration, playing, editable, onTogglePlay,
+                                 onPrevious, onNext, onTime, onDuration,
+                                 onPlaying}: {
     jobId: string;
     // The video's extension (".flv"), or null: named when the preview
     // cannot play its format.
@@ -67,6 +68,8 @@ export default function Preview({jobId, extension, row, videoRef, time,
     time: number;
     duration: number;
     playing: boolean;
+    // The review can be edited here (A4): I / O / Enter are hinted.
+    editable: boolean;
     onTogglePlay: () => void;
     onPrevious: () => void;
     onNext: () => void;
@@ -204,6 +207,12 @@ export default function Preview({jobId, extension, row, videoRef, time,
                     <span><Kbd>Space</Kbd>{i18n.t("archive_key_play")}</span>
                     <span><Kbd>↑</Kbd><Kbd>↓</Kbd>{i18n.t("archive_key_sets")}</span>
                     <span><Kbd>N</Kbd>{i18n.t("archive_key_review")}</span>
+                    {editable ? (
+                        <>
+                            <span><Kbd>I</Kbd><Kbd>O</Kbd>{i18n.t("archive_key_in_out")}</span>
+                            <span><Kbd>Enter</Kbd>{i18n.t("archive_key_confirm")}</span>
+                        </>
+                    ) : null}
                 </Box>
             </Box>
         </Box>

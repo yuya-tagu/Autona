@@ -2573,6 +2573,7 @@ _ARCHIVE_REFUSALS = {
     archive.WORK_DIR_UNUSABLE: (NOT_READY, 409),
     archive.UNREADABLE: (CONFLICT, 409),
     archive.NOT_PREVIEWABLE: (UNSUPPORTED_MEDIA_TYPE, 415),
+    archive.NOT_DONE: (CONFLICT, 409),
     archive.UNAVAILABLE: (UNAVAILABLE, 503),
     archive.STOPPING: (UNAVAILABLE, 503),
 }
@@ -2593,7 +2594,8 @@ ARCHIVE_JOB_MAX_BODY = 2 * 1024 * 1024
 @api_handler
 def get_archive_status():
     # {"available", "version", "format", "reason" (why not, Japanese),
-    # "work_dir", "running_job" (its id or null)}. The worker is probed on
+    # "work_dir", "running_job" (its id or null), "running_kind" ("analysis"
+    # / "export" / null, ADR-006 A4)}. The worker is probed on
     # this thread the first time (`<worker> version`, up to 8 s: below the
     # web client's 10 s) and with `?refresh=true`; an unavailable one is
     # probed again after 30 s.
@@ -2722,8 +2724,9 @@ def get_archive_frame(job_id, no):
 @_no_store_answers
 @write_op("archive.job.cancel")
 def archive_job_cancel(job_id):
-    # Asks the running job to stop -> {"job"} (still running until the
-    # worker stops: the page follows it). 409 when it is not running.
+    # Asks the running job -- its analysis or its export (ADR-006 A4) --
+    # to stop -> {"job"} (still running until the worker stops: the page
+    # follows it). 409 when it is not running.
     try:
         job = WebOps.cancel_archive_job(job_id)
     except archive.ArchiveError as error:
@@ -2741,6 +2744,58 @@ def archive_job_resume(job_id):
     # "source"); 503 as a start.
     try:
         job = WebOps.resume_archive_job(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job})
+
+
+@api_v1.route("/archive/jobs/<job_id>/review")
+@_no_store_answers
+@api_handler
+def get_archive_review(job_id):
+    # {"review": {"format": 1, "sets": {"<no>": {"confirmed"?, "start"?,
+    # "end"?, "set"?}}}} (ADR-006 A4): what the operator changed about the
+    # job's sets -- what of its review.json still fits its out/sets.json.
+    # Empty for a job whose analysis is not done or runs. 404 for an
+    # unknown id.
+    try:
+        review = WebOps.get_archive_review(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"review": review})
+
+
+@api_v1.route("/archive/jobs/<job_id>/review", methods=["PUT"])
+@_no_store_answers
+@write_op("archive.job.review", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_review_update(job_id):
+    # {"sets": {"<no>": {"confirmed": bool, "start": s, "end": s, "set": a
+    # result of the job's (a set's own or one of its unused_sets) or null}}}
+    # -- the whole review, each key optional (left out: the worker's) ->
+    # {"review"} as saved. 400 for what does not fit the job's sets (a
+    # range under 1 s or outside the video, a result it does not have, one
+    # result given twice); 409 while its analysis runs or when it is not
+    # done. Logged by key: the results name players.
+    body = _json_body()
+    try:
+        review = WebOps.save_archive_review(job_id, body)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"review": review})
+
+
+@api_v1.route("/archive/jobs/<job_id>:export", methods=["POST"])
+@_no_store_answers
+@write_op("archive.job.export")
+def archive_job_export(job_id):
+    # Cuts the job's confirmed sets (its review) with the worker's export
+    # into <job>/clips/ -> {"job"} (its "export" running; the page follows
+    # it and cancels it with :cancel). 400 when nothing is confirmed; 409
+    # while a job or an export runs, when the job is not done (reason
+    # "not_done") or its video is gone (reason "source"); 503 as a start.
+    try:
+        job = WebOps.export_archive_job(job_id)
     except archive.ArchiveError as error:
         raise _archive_refused(error)
     return ok(data={"job": job})

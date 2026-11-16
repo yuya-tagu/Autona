@@ -35,6 +35,11 @@ process starts, so a process the worker starts in that instant is not in
 it (accepted: the worker's first work is reading its arguments). Elsewhere
 there is no job object; ``Kill`` ends the worker only.
 
+Before a stop is asked (the ``cancel`` line), ``RaisePriority`` gives the
+worker and every process in its job the normal priority class again: a
+below-normal process the CPU is not given to (a busy machine) reads its
+stdin's cancel only when it runs, which made a stop take over a minute.
+
 The probe and the run both get Autona's environment with
 ``PYTHONIOENCODING=utf-8`` and ``PYINSTALLER_RESET_ENVIRONMENT=1`` (a frozen
 Autona must not hand its PyInstaller state to a frozen worker;
@@ -65,8 +70,14 @@ PROBE_TIMEOUT_SECS = 8
 _WINDOWS = sys.platform == "win32"
 _CREATE_NO_WINDOW = 0x08000000
 _BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+_NORMAL_PRIORITY_CLASS = 0x00000020
+_PROCESS_SET_INFORMATION = 0x0200
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
+# The ids a job's process list is read with (the worker, yt-dlp, ffmpeg).
+_JOB_PROCESS_IDS_MAX = 256
+_ERROR_MORE_DATA = 234
 
 
 def SplitCommand(text):
@@ -224,6 +235,16 @@ def _Kernel32():
         kernel32.TerminateJobObject.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.QueryInformationJobObject.argtypes = (
+            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+            wintypes.LPDWORD)
+        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
+                                         wintypes.DWORD)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE,
+                                              wintypes.DWORD)
+        kernel32.SetPriorityClass.restype = wintypes.BOOL
         _kernel32 = kernel32
     return _kernel32
 
@@ -292,6 +313,30 @@ def _MakeJobObject(proc):
     return job
 
 
+def _JobProcessIds(job):
+    """The ids of the processes in job object `job` (at most
+    _JOB_PROCESS_IDS_MAX); [] when they cannot be read (logged)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessIdList(ctypes.Structure):
+        _fields_ = [("NumberOfAssignedProcesses", wintypes.DWORD),
+                    ("NumberOfProcessIdsInList", wintypes.DWORD),
+                    ("ProcessIdList", ctypes.c_size_t * _JOB_PROCESS_IDS_MAX)]
+
+    ids = ProcessIdList()
+    if not _Kernel32().QueryInformationJobObject(
+            job, _JOB_OBJECT_BASIC_PROCESS_ID_LIST, ctypes.byref(ids),
+            ctypes.sizeof(ids), None):
+        error = ctypes.get_last_error()
+        if error != _ERROR_MORE_DATA:  # more data: the first ones are read
+            logger.warning(f"Archive worker: the job's processes cannot be "
+                           f"read (QueryInformationJobObject error {error})")
+            return []
+    count = min(ids.NumberOfProcessIdsInList, _JOB_PROCESS_IDS_MAX)
+    return [int(pid) for pid in ids.ProcessIdList[:count]]
+
+
 class WorkerProcess:
     """A started worker: its Popen and, on Windows, its job object.
 
@@ -311,6 +356,40 @@ class WorkerProcess:
     @property
     def hasJobObject(self):
         return self._job is not None
+
+    def RaisePriority(self):
+        """Give the worker and every process in its job (yt-dlp, ffmpeg)
+        the normal priority class: called before a stop is asked, which a
+        below-normal process reads only when the CPU is given to it.
+        Windows only; never raises."""
+        if not _WINDOWS:
+            return
+        import ctypes
+
+        with self._lock:
+            try:
+                kernel32 = _Kernel32()
+                if not kernel32.SetPriorityClass(int(self.proc._handle),
+                                                 _NORMAL_PRIORITY_CLASS):
+                    logger.warning(f"Archive worker: SetPriorityClass error "
+                                   f"{ctypes.get_last_error()}")
+                if self._job is None:
+                    return
+                for pid in _JobProcessIds(self._job):
+                    if pid == self.proc.pid:
+                        continue
+                    handle = kernel32.OpenProcess(_PROCESS_SET_INFORMATION,
+                                                  False, pid)
+                    if not handle:  # it has ended since
+                        continue
+                    try:
+                        kernel32.SetPriorityClass(handle,
+                                                  _NORMAL_PRIORITY_CLASS)
+                    finally:
+                        kernel32.CloseHandle(handle)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Archive worker: raising the priority failed")
 
     def Kill(self):
         """End the worker now, with every process it started when there is

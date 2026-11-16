@@ -4,13 +4,15 @@ import {keepLocal, serverUrl} from "./server";
 // The Archive Clipper page (ADR-006 A1): /web/app/archive on the headless app,
 // with the fake worker (e2e/fake_worker.py, set up by global-setup.ts through
 // AUTONA_VODSPLIT_CMD), so the status read is the real one. The writes (start,
-// cancel, resume, work folder) are the desktop shared view's (SHELL routes:
-// 403 to a browser), and there is no desktop here to give the shell's secret,
-// so they and the job reads are stubbed with page.route (as assets.spec.ts
-// does) to cover the UI flow -- the shell probe (GET /api/v1/shell-session)
-// too where a scenario writes, else the page knows it is a browser and only
-// reads; the real write routes are only checked to answer 403. Checked
-// through text and the DOM, never screenshots.
+// cancel, resume, work folder, and A4's review save and export) are the
+// desktop shared view's (SHELL routes: 403 to a browser), and there is no
+// desktop here to give the shell's secret, so they and the job reads are
+// stubbed with page.route (as assets.spec.ts does) to cover the UI flow -- the
+// shell probe (GET /api/v1/shell-session) too where a scenario writes, else
+// the page knows it is a browser and only reads; the real write routes are
+// only checked to answer 403 (the real export with the fake worker is
+// tests/test_archive_jobs.py's). Checked through text and the DOM, never
+// screenshots.
 //
 // Not covered: the nav item hidden without a worker -- the app is started once
 // for the whole run, with the fake worker (tests/test_archive_jobs.py and
@@ -52,15 +54,25 @@ const envelope = (data: unknown, status = 200) => ({
 // The archive's job routes, stubbed. `detail` is what GET of the job answers
 // (it changes as the scenario moves); `posts` records the writes. The job's
 // video is bytes that are no video (the page then says why it does not play)
-// and it has no frames.
+// and it has no frames. Its review (A4) is empty and `puts` records the
+// bodies saved.
 async function stubJobs(page: Page, scenario: {
     detail: () => object;
     posts: string[];
     afterPost?: (action: string) => void;
+    puts?: any[];
 }) {
     await page.route("**/api/v1/archive/jobs**", (route) => {
         const request = route.request();
         const {pathname} = new URL(request.url());
+        if (pathname.endsWith("/review")) {
+            if (request.method() === "PUT") {
+                const body = request.postDataJSON();
+                scenario.puts?.push(body);
+                return route.fulfill(envelope({review: {format: 1, ...body}}));
+            }
+            return route.fulfill(envelope({review: {format: 1, sets: {}}}));
+        }
         if (pathname.endsWith("/video")) {
             return route.fulfill({status: 200, contentType: "video/mp4",
                                   body: "not a video"});
@@ -181,7 +193,8 @@ test("a finished job shows its preview, timeline and details", async ({page, req
     await expect(page.getByTestId("archive-timeline-player")).toHaveCount(0);
     await timeline.getByRole("button", {name: "Players (OCR)"}).click();
     await expect(page.getByTestId("archive-timeline-player")).toHaveCount(3);
-    // Only Space, Up / Down and N are hinted (I / O / Enter come later).
+    // Only Space, Up / Down and N are hinted: I / O / Enter edit the review
+    // (A4), which a browser does not.
     await expect(page.getByTestId("archive-key-hints")).toHaveText(
         /Space.*Play.*↑.*↓.*Set.*N.*Next to review/);
 
@@ -237,6 +250,72 @@ test("a finished job shows its preview, timeline and details", async ({page, req
     const base = serverUrl(`/api/v1/archive/jobs/${JOB_ID}`);
     expect((await request.get(`${base}/video`)).status()).toBe(404);
     expect((await request.get(`${base}/frames/1`)).status()).toBe(404);
+    expect((await request.get(`${base}/review`)).status()).toBe(404);
+});
+
+// The review's edits and the export (ADR-006 A4), in the desktop's window
+// (stubbed probe; the review save and the export stubbed too).
+test("a finished job's sets are confirmed, IN dragged, and exported", async ({page}) => {
+    let exported: object | null = null;
+    const posts: string[] = [];
+    const puts: any[] = [];
+    await stubShell(page);
+    await stubJobs(page, {
+        posts, puts,
+        detail: () => ({job: job("done", {export: exported}), sets: REVIEW_SETS}),
+        afterPost: (action) => {
+            if (action === "export") {
+                exported = {state: "running", progress: {overall: 0.5}};
+            }
+        },
+    });
+    await page.goto(serverUrl(`/web/archive?job=${JOB_ID}`));
+    const first = page.getByTestId("archive-set-1");
+    await expect(first).toBeVisible({timeout: 15_000});
+    const exportButton = page.getByRole("button", {name: "Export confirmed"});
+    await expect(exportButton).toBeDisabled();
+
+    await first.click();
+    await expect(page.getByTestId("archive-confirm")).toBeVisible();
+    await expect(page.getByTestId("archive-key-hints")).toContainText("Confirm & next");
+
+    // The IN handle dragged on the timeline, from 1:00 (10% of 10:00) to 15%.
+    const lane = (await page.getByTestId("archive-timeline-sets").boundingBox())!;
+    const handle = (await page.getByTestId("archive-handle-in").boundingBox())!;
+    const y = handle.y + handle.height / 2;
+    await page.mouse.move(handle.x + handle.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(lane.x + lane.width * 0.15, y, {steps: 5});
+    await page.mouse.up();
+    await expect(page.getByTestId("archive-detected-range")).toContainText("1:00");
+    await expect(first).toHaveAttribute("aria-current", "true");
+
+    // Enter confirms it and moves on.
+    await page.keyboard.press("Enter");
+    await expect(first).toHaveAttribute("data-confirmed", "true");
+    await expect(page.getByTestId("archive-set-2")).toHaveAttribute("aria-current", "true");
+    await expect(page.getByTestId("archive-confirmed-count")).toHaveText("Confirmed 1 / 2");
+    // Saved once the edits stop, as a whole.
+    await expect(page.getByTestId("archive-save-state")).toHaveText("Saved");
+    const entry = puts[puts.length - 1].sets["1"];
+    expect(entry.confirmed).toBe(true);
+    // 15% of 10:00, give or take a pixel.
+    expect(Math.abs(entry.start - 90)).toBeLessThan(2);
+    expect(entry.end).toBeUndefined();
+
+    await exportButton.click();
+    await expect(page.getByTestId("archive-export-progress")).toBeVisible();
+    expect(posts).toEqual(["export"]);
+    exported = {state: "done", clips: 1, skipped: 0,
+                out_dir: `C:/work/${JOB_ID}/clips`,
+                files: [{no: 1, file: "01_Winners_Final_Alpha_vs_Beta.mp4",
+                         exported: true}]};
+    const result = page.getByTestId("archive-export-result");
+    await expect(result).toBeVisible({timeout: 15_000});
+    await expect(result).toContainText("Exported 1 clip.");
+    await expect(page.getByTestId("archive-export-dir"))
+        .toContainText(`C:/work/${JOB_ID}/clips`);
+    await expect(page.getByTestId("archive-export-progress")).toHaveCount(0);
 });
 
 test("a running job can be stopped and then resumed", async ({page}) => {
@@ -272,6 +351,10 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     expect((await request.post(`${base}/jobs/${JOB_ID}:cancel`,
                                {data: {}})).status()).toBe(403);
     expect((await request.post(`${base}/jobs/${JOB_ID}:resume`,
+                               {data: {}})).status()).toBe(403);
+    expect((await request.put(`${base}/jobs/${JOB_ID}/review`,
+                              {data: {sets: {}}})).status()).toBe(403);
+    expect((await request.post(`${base}/jobs/${JOB_ID}:export`,
                                {data: {}})).status()).toBe(403);
     // Reads stay open to this PC.
     expect((await request.get(`${base}/status`)).ok()).toBe(true);

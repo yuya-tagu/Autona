@@ -37,6 +37,13 @@ test("the range is the whole video or the selected set", () => {
     expect(timelineRange(SETS, "all", SETS.sets[0])).toEqual({start: 0, end: 3600});
     expect(timelineRange(SETS, "set", SETS.sets[1])).toEqual({start: 390, end: 510});
     expect(timelineRange(SETS, "set", null)).toEqual({start: 0, end: 3600});
+    // Where it can be edited: room around the set, within the video.
+    expect(timelineRange(SETS, "set", SETS.sets[1], 30))
+        .toEqual({start: 360, end: 540});
+    expect(timelineRange(SETS, "set", {no: 9, start: 10, end: 3590}, 30))
+        .toEqual({start: 0, end: 3600});
+    expect(timelineRange(SETS, "all", SETS.sets[1], 30))
+        .toEqual({start: 0, end: 3600});
 });
 
 test("without a duration the video ends at the last thing on it", () => {

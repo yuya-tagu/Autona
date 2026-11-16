@@ -1,6 +1,7 @@
 """The archive clipper's jobs (ADR-006 A1): core/ArchiveWorker.py (where the
 worker is, its version, how it is started), core/ArchiveJobService.py (one
-job at a time, its progress, its end state, job.json) and the v1 routes the
+job at a time, its progress, its end state, job.json; A4: the review and the
+export of the confirmed sets, core/ArchiveReview.py) and the v1 routes the
 page calls (/api/v1/archive/*: the reads THIS_PC, the writes SHELL -- the
 shared view's fetch with the shell's secret, as the asset jobs').
 
@@ -22,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from src.core import ArchiveJobService as archive
+from src.core import ArchiveReview as review
 from src.core import ArchiveWorker as worker
 from src.core import WebAccess
 from src.core.ArchiveJobService import ArchiveError, ArchiveJobService
@@ -315,6 +317,133 @@ def test_the_job_object_is_closed_once_and_never_terminated_closed(
     assert proc.kills == 9
 
 
+class _PriorityKernel:
+    """kernel32's priority calls, recorded; the processes in `ended` have
+    ended (OpenProcess fails)."""
+
+    def __init__(self, ended=()):
+        self.calls = []
+        self.ended = set(ended)
+
+    def SetPriorityClass(self, handle, priority):
+        self.calls.append(("priority", handle, priority))
+        return True
+
+    def OpenProcess(self, access, inherit, pid):
+        self.calls.append(("open", access, inherit, pid))
+        return 0 if pid in self.ended else 1000 + pid
+
+    def CloseHandle(self, handle):
+        self.calls.append(("close", handle))
+        return True
+
+
+def test_raising_the_priority_takes_the_worker_and_its_jobs_processes(
+        monkeypatch):
+    # A stop is read from the worker's stdin; a below-normal worker on a
+    # busy machine reads it only when the CPU is given to it (a stop took
+    # 81 s under load). So the worker and every process in its job (yt-dlp,
+    # ffmpeg) get the normal class first.
+    kernel = _PriorityKernel(ended={43})
+    monkeypatch.setattr(worker, "_WINDOWS", True)
+    monkeypatch.setattr(worker, "_kernel32", kernel)
+    monkeypatch.setattr(worker, "_JobProcessIds",
+                        lambda job: [1, 42, 43, 44] if job == 77 else [])
+    proc = _Proc()
+    proc._handle = 500
+    worker.WorkerProcess(proc, 77).RaisePriority()
+    assert kernel.calls == [
+        ("priority", 500, 0x20),                # the worker (pid 1) itself
+        ("open", 0x0200, False, 42), ("priority", 1042, 0x20),
+        ("close", 1042),
+        ("open", 0x0200, False, 43),            # ended since: skipped
+        ("open", 0x0200, False, 44), ("priority", 1044, 0x20),
+        ("close", 1044)]
+
+    # No job object: the worker alone. Not Windows: nothing.
+    kernel.calls.clear()
+    worker.WorkerProcess(proc, None).RaisePriority()
+    assert kernel.calls == [("priority", 500, 0x20)]
+    kernel.calls.clear()
+    monkeypatch.setattr(worker, "_WINDOWS", False)
+    worker.WorkerProcess(proc, 77).RaisePriority()
+    assert kernel.calls == []
+
+    # It never raises (a stop must still be asked).
+    class Failing(_PriorityKernel):
+        def SetPriorityClass(self, handle, priority):
+            raise OSError("access denied")
+
+    monkeypatch.setattr(worker, "_WINDOWS", True)
+    monkeypatch.setattr(worker, "_kernel32", Failing())
+    worker.WorkerProcess(proc, 77).RaisePriority()
+
+
+def _priority(pid):
+    """Process `pid`'s priority class (Windows: GetPriorityClass)."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
+                                     wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetPriorityClass.argtypes = (wintypes.HANDLE,)
+    kernel32.GetPriorityClass.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    assert handle, f"process {pid} cannot be opened"
+    try:
+        return kernel32.GetPriorityClass(handle)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the priority classes")
+def test_the_priority_of_a_real_worker_and_its_child_is_raised(tmp_path):
+    # A started worker is below normal, and so is what it starts (yt-dlp
+    # and ffmpeg inherit the class); RaisePriority gives both the normal
+    # class. The worker starts its child only once it was raised (a
+    # below-normal process may not run for seconds under the parallel
+    # runner), and starts it below normal explicitly.
+    script = tmp_path / "parent.py"
+    script.write_text(
+        "import subprocess, sys\n"
+        "sys.stdin.readline()\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(120)'], creationflags=0x08004000)\n"
+        "print(child.pid, flush=True)\n"
+        "sys.stdin.readline()\n", encoding="utf-8")
+    process = worker.Launch([sys.executable, str(script)], [])
+    lines = []
+    reader = threading.Thread(
+        target=lambda: lines.append(process.proc.stdout.readline()),
+        daemon=True)
+    try:
+        assert process.hasJobObject
+        assert _priority(process.pid) == 0x4000
+        process.RaisePriority()
+        assert _priority(process.pid) == 0x20
+
+        reader.start()
+        process.proc.stdin.write("go\n")
+        process.proc.stdin.flush()
+        reader.join(WAIT)
+        assert lines and lines[0].strip(), "the child's pid was not printed"
+        child = int(lines[0])
+        assert _priority(child) == 0x4000
+        process.RaisePriority()
+        assert _priority(child) == 0x20
+    finally:
+        process.Kill()
+        process.proc.wait(WAIT)
+        process.Close()
+        for stream in (process.proc.stdin, process.proc.stdout,
+                       process.proc.stderr):
+            with contextlib.suppress(OSError, ValueError):
+                stream.close()
+
+
 def test_the_status_says_why_there_is_no_worker(fake, work):
     fake.delenv(worker.ENV_COMMAND)
     status = ArchiveJobService().Status()
@@ -459,7 +588,8 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert set(done) == {
         "id", "created_at", "source", "state", "sets", "needs_review",
         "finished_at", "progress", "logs", "warnings", "error", "exit_code",
-        "has_results"}
+        "has_results", "export"}
+    assert done["export"] is None
     assert set(done["progress"]) == {
         "stage", "label", "index", "count", "fraction", "overall", "eta"}
 
@@ -588,6 +718,58 @@ def test_the_shutdown_cancels_a_running_job(service, work, fake):
     with pytest.raises(ArchiveError) as refused:
         service.Create(SOURCE)
     assert refused.value.code == archive.STOPPING
+
+
+class _RecordedStream:
+    """A worker's stdin, recording what is done to it in `events`."""
+
+    def __init__(self, stream, events):
+        self.stream, self.events = stream, events
+
+    def write(self, text):
+        self.events.append(("write", text))
+        return self.stream.write(text)
+
+    def flush(self):
+        return self.stream.flush()
+
+    def close(self):
+        self.events.append(("close",))
+        return self.stream.close()
+
+
+@pytest.mark.parametrize("stop", ["cancel", "shutdown"])
+@pytest.mark.parametrize("kind", ["analysis", "export"])
+def test_a_stop_raises_the_workers_priority_before_the_cancel_line(
+        service, work, fake, tmp_path, stop, kind):
+    events = []
+    raise_priority = worker.WorkerProcess.RaisePriority
+
+    def recorded(process):
+        events.append(("raise",))
+        raise_priority(process)
+
+    fake.setattr(worker.WorkerProcess, "RaisePriority", recorded)
+    _mode(fake, "slow")
+    if kind == "export":
+        _done(work, tmp_path)
+        service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+        jobId = DONE_ID
+        service.StartExport(jobId)
+        _until(lambda: (service.Job(jobId)[0].get("export") or {}).get(
+            "progress"), "the export's progress")
+    else:
+        jobId = service.Create(SOURCE)["id"]
+        _running_with_progress(service, jobId)
+    run = service._run
+    run.worker.proc.stdin = _RecordedStream(run.worker.proc.stdin, events)
+    if stop == "cancel":
+        service.Cancel(jobId)
+        _until(run.finished.is_set, "the worker to stop")
+    else:
+        service.Shutdown(5.0)
+    # (The end closes the stream once more.)
+    assert events[:3] == [("raise",), ("write", "cancel\n"), ("close",)]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the job object")
@@ -964,6 +1146,9 @@ class _Page:
     def patch(self, url, **kwargs):
         return self.client.patch(url, headers=self.shell, **kwargs)
 
+    def put(self, url, **kwargs):
+        return self.client.put(url, headers=self.shell, **kwargs)
+
 
 @pytest.fixture
 def page(server, shellSecret):  # noqa: F811
@@ -975,7 +1160,7 @@ def test_the_page_runs_a_job_through_the_routes(page, service, work):
     assert status == {"available": True, "version": "0.0.0-fake",
                       "format": 1, "reason": None,
                       "work_dir": os.path.normpath(str(work)),
-                      "running_job": None}
+                      "running_job": None, "running_kind": None}
 
     created = _data(page.post(f"{BASE}/jobs", json={
         "source": SOURCE, "results": RESULTS, "event": None}), 201)
@@ -1003,7 +1188,9 @@ def test_a_running_job_is_cancelled_and_resumed_through_the_routes(
     _mode(fake, "slow")
     jobId = _data(page.post(f"{BASE}/jobs", json={"source": SOURCE}),
                   201)["job"]["id"]
-    assert _data(page.get(f"{BASE}/status"))["running_job"] == jobId
+    status = _data(page.get(f"{BASE}/status"))
+    assert (status["running_job"], status["running_kind"]) == (
+        jobId, archive.ANALYSIS)
     assert _data(page.get(f"{BASE}/jobs/{jobId}"))["sets"] is None
     _refusal(page.post(f"{BASE}/jobs", json={"source": SOURCE}), 409,
              "CONFLICT", archive.BUSY)
@@ -1449,18 +1636,658 @@ def test_a_job_folder_outside_the_work_folder_serves_no_file(fake, work,
     _not_found(service.FrameFile, jobId, "1")
 
 
+# ── the review and the export (ADR-006 A4) ──────────────────────────────
+
+KAPPA = {"round": "Winners Final", "p1": "Kappa", "s1": 3, "p2": "Lambda",
+         "s2": 1}
+MU = {"round": "Grand Final", "p1": "Kappa", "s1": 2, "p2": "Mu", "s2": 3}
+UNUSED = {"round": "Losers Final", "p1": "Mu", "s1": 3, "p2": "Lambda",
+          "s2": 0}
+REVIEW_SETS = {
+    "format": 1, "duration": 3600.0, "source_id": "fakevideo01",
+    "event": "Fake Cup",
+    "sets": [
+        {"no": 1, "start": 120.0, "end": 720.0, "set": KAPPA,
+         "game_starts": [130.0, 300.0]},
+        {"no": 2, "start": 780.0, "end": 1380.0, "set": None,
+         "needs_review": True, "game_starts": [790.0, "x"]},
+        {"no": 3, "start": 1400.0, "end": 2000.0, "set": MU},
+    ],
+    "unused_sets": [UNUSED],
+}
+
+
+def test_a_review_keeps_what_the_operator_changed():
+    checked = review.Check({"sets": {
+        "1": {"confirmed": True},
+        # The worker's own values are no change: left out.
+        "2": {"confirmed": True, "start": 775.123, "end": 1380.0,
+              "set": UNUSED},
+        "3": {"confirmed": False, "set": MU},
+    }}, REVIEW_SETS)
+    assert checked == {"format": 1, "sets": {
+        "1": {"confirmed": True},
+        "2": {"confirmed": True, "start": 775.12, "set": UNUSED}}}
+    stored = review.Stored(checked, REVIEW_SETS)
+    assert stored == {"format": 1, "sets": {
+        "1": {"base": [120.0, 720.0], "confirmed": True},
+        "2": {"base": [780.0, 1380.0], "confirmed": True, "start": 775.12,
+              "set": UNUSED}}}
+    assert review.Normalize(json.loads(json.dumps(stored)),
+                            REVIEW_SETS) == checked
+    # A result taken from one set to another, the first given none.
+    moved = review.Check({"sets": {"1": {"set": None}, "3": {"set": KAPPA}}},
+                         REVIEW_SETS)
+    assert moved["sets"] == {"1": {"set": None}, "3": {"set": KAPPA}}
+
+
+@pytest.mark.parametrize("body, says", [
+    (None, '"sets"'),
+    ({"sets": []}, '"sets"'),
+    ({"sets": {"9": {}}}, "セット 9 はこのジョブにありません"),
+    ({"sets": {"01": {}}}, "セット 01 は"),
+    ({"sets": {"0": {}}}, "セット 0 は"),
+    ({"sets": {"1": True}}, "オブジェクトではありません"),
+    ({"sets": {"1": {"base": [1, 2]}}}, "使えない項目があります: base"),
+    ({"sets": {"1": {"confirmed": "yes"}}}, "confirmed は true か false"),
+    ({"sets": {"1": {"start": "1:00"}}}, "start は秒数"),
+    ({"sets": {"1": {"end": True}}}, "end は秒数"),
+    ({"sets": {"1": {"start": float("nan")}}}, "start は秒数"),
+    ({"sets": {"1": {"start": -1}}}, "1 秒以上"),
+    ({"sets": {"1": {"start": 719.5}}}, "1 秒以上"),
+    ({"sets": {"1": {"start": 800}}}, "1 秒以上"),
+    ({"sets": {"3": {"start": 3600, "end": 3700}}}, "1 秒以上"),
+    ({"sets": {"3": {"start": 3599.5, "end": 3700}}}, "1 秒以上"),
+    # Less than 1 s before the video's end less END_MARGIN.
+    ({"sets": {"3": {"start": 3599.0, "end": 3700}}}, "1 秒以上"),
+    # 1.13 - 0.13 is a hair under 1 in floats: refused as the worker does.
+    ({"sets": {"1": {"start": 0.13, "end": 1.13}}}, "1 秒以上"),
+    ({"sets": {"1": {"set": {"p1": "Someone"}}}}, "このジョブの結果にありません"),
+    ({"sets": {"1": {"set": "Kappa"}}}, "このジョブの結果にありません"),
+    # The result set 1 keeps, given to set 2 too.
+    ({"sets": {"2": {"set": KAPPA}}}, "同じ結果を 2 つのセット"),
+    ({"sets": {"2": {"set": UNUSED}, "3": {"set": UNUSED}}},
+     "割り当てています（#2・#3）"),
+])
+def test_a_review_that_does_not_fit_the_sets_is_refused(body, says):
+    with pytest.raises(review.ReviewError) as refused:
+        review.Check(body, REVIEW_SETS)
+    assert says in str(refused.value)
+
+
+@pytest.mark.parametrize("start, end, fits", [
+    # Two decimals do not make an exact length in floats: what the worker
+    # checks (end - start < MIN_CLIP) is what is checked, and the page moves
+    # the OUT a hundredth further when a rounded range falls short.
+    (0.13, 1.13, False), (0.13, 1.14, True),
+    (15.06, 16.06, False), (15.06, 16.07, True),
+    (14.06, 15.06, True), (15.08, 16.08, False),
+])
+def test_a_range_is_checked_as_the_worker_checks_it(start, end, fits):
+    body = {"sets": {"1": {"start": start, "end": end}}}
+    if fits:
+        assert review.Check(body, REVIEW_SETS)["sets"]["1"] == {
+            "start": start, "end": end}
+    else:
+        with pytest.raises(review.ReviewError):
+            review.Check(body, REVIEW_SETS)
+
+
+@pytest.mark.parametrize("start, fits", [
+    # 1 s up to the video's end (3600) less END_MARGIN (0.05).
+    (3598.95, True), (3598.96, False), (3599.0, False)])
+def test_a_range_at_the_videos_end_keeps_a_margin(start, fits):
+    body = {"sets": {"3": {"start": start, "end": 3600.0}}}
+    if fits:
+        assert review.Check(body, REVIEW_SETS)["sets"]["3"]["start"] == start
+    else:
+        with pytest.raises(review.ReviewError):
+            review.Check(body, REVIEW_SETS)
+
+
+def test_results_are_the_same_whatever_their_numbers_look_like():
+    # One comparison for every check (ResultKey): JSON with sorted keys and
+    # whole numbers as integers, as the page's canonical makes it.
+    assert review.ResultKey({"b": 1.0, "a": [2.0, True, None, 2.5]}) == (
+        '{"a":[2,true,null,2.5],"b":1}')
+    assert review.ResultKey(None) == "null"
+    # KAPPA as the page sends it back (3.0 is 3) is KAPPA, held by set 1.
+    with pytest.raises(review.ReviewError) as refused:
+        review.Check({"sets": {"2": {"set": dict(KAPPA, s1=3.0)}}},
+                     REVIEW_SETS)
+    assert "同じ結果" in str(refused.value)
+    # Set 1's own, written another way, is no change.
+    assert review.Check({"sets": {"1": {"set": dict(KAPPA, s1=3.0)}}},
+                        REVIEW_SETS)["sets"] == {}
+    assert review.Normalize({"format": 1, "sets": {"1": {
+        "base": [120.0, 720.0], "set": dict(KAPPA, s1=3.0)}}},
+        REVIEW_SETS)["sets"] == {}
+    twice = dict(REVIEW_SETS, unused_sets=[UNUSED, dict(UNUSED, s1=3.0)])
+    assert review.Candidates(twice) == [KAPPA, MU, UNUSED]
+
+
+def test_an_end_past_the_video_is_the_workers_to_cut():
+    # vodsplit cuts an end past the video at its end (with a warning).
+    assert review.Check({"sets": {"3": {"end": 4000}}}, REVIEW_SETS)[
+        "sets"] == {"3": {"end": 4000}}
+
+
+def test_reading_keeps_what_still_fits_the_sets():
+    def read(sets, **entries):
+        return review.Normalize({"format": 1, "sets": entries}, REVIEW_SETS)[
+            "sets"] if sets is None else review.Normalize(sets, REVIEW_SETS)
+
+    for broken in (None, [], "x", {"format": 2, "sets": {}},
+                   {"format": 1, "sets": []}, {"sets": {}}):
+        assert review.Normalize(broken, REVIEW_SETS) == {"format": 1,
+                                                         "sets": {}}
+    base1, base2 = [120.0, 720.0], [780.0, 1380.0]
+    assert read(None, **{
+        # A set that moved since (another sets.json): dropped whole.
+        "1": {"base": [100.0, 720.0], "confirmed": True},
+        # No base: not one this review wrote.
+        "3": {"confirmed": True},
+        "9": {"base": base1, "confirmed": True},
+        "x": {"base": base1, "confirmed": True},
+        # A range that no longer fits goes with its confirmation: an
+        # export must not cut the worker's range in its place unasked.
+        "2": {"base": base2, "confirmed": True, "start": 1379.9,
+              "set": UNUSED, "note": "kept out"},
+    }) == {"2": {"set": UNUSED}}
+    # A result that is not the job's goes alone.
+    assert read(None, **{"2": {"base": base2, "confirmed": True,
+                               "start": 775.5, "set": {"p1": "gone"}}}) == {
+        "2": {"confirmed": True, "start": 775.5}}
+    # Two sets given one result: the review's assignment goes.
+    assert read(None, **{"2": {"base": base2, "set": KAPPA}}) == {}
+    assert read(None, **{"1": {"base": base1, "set": UNUSED},
+                         "2": {"base": base2, "set": UNUSED,
+                               "confirmed": True}}) == {
+        "2": {"confirmed": True}}
+    assert read(None, **{"1": {"base": base1, "set": None},
+                         "3": {"base": [1400, 2000], "set": KAPPA}}) == {
+        "1": {"set": None}, "3": {"set": KAPPA}}
+
+
+def test_the_export_takes_the_confirmed_sets_as_reviewed():
+    checked = review.Check({"sets": {
+        "2": {"confirmed": True, "start": 770, "set": UNUSED},
+        "1": {"confirmed": True, "set": None},
+        "3": {"end": 2100},
+    }}, REVIEW_SETS)
+    assert review.ExportSets(checked, REVIEW_SETS) == [
+        {"no": 1, "start": 120.0, "end": 720.0, "title": None,
+         "description": None, "set": None, "game_starts": [130.0, 300.0]},
+        {"no": 2, "start": 770, "end": 1380.0, "title": None,
+         "description": None, "set": UNUSED, "game_starts": [790.0]},
+    ]
+    assert review.ExportSets(review.Empty(), REVIEW_SETS) == []
+
+
+DONE_ID = "20261116-120000-ab12"
+
+
+def _done(work, tmp_path, sets=None, **record):
+    """A finished job on a local video (vod.mp4) with `sets` as its
+    out/sets.json and `record`'s fields in its job.json -> the video."""
+    video = tmp_path / "vod.mp4"
+    video.write_bytes(b"video")
+    _sets(work, DONE_ID, jobSource=str(video),
+          **dict(sets or REVIEW_SETS, source=str(video)))
+    if record:
+        _stored(work, DONE_ID, source=str(video), state="done", **record)
+    return video
+
+
+def _export_ended(service, jobId):
+    return _until(lambda: (lambda export: export if export
+                           and export["state"] != "running" else None)(
+        service.Job(jobId)[0]["export"]), f"job {jobId}'s export to end")
+
+
+def _refused(code, call, *args):
+    with pytest.raises(ArchiveError) as refused:
+        call(*args)
+    assert refused.value.code == code
+    return refused.value.message
+
+
+def test_a_review_is_saved_whole_and_read_back(fake, work, tmp_path):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    assert service.Review(DONE_ID) == {"format": 1, "sets": {}}
+    saved = service.SaveReview(DONE_ID, {"sets": {
+        "1": {"confirmed": True}, "2": {"set": UNUSED}}})
+    assert saved == {"format": 1, "sets": {
+        "1": {"confirmed": True}, "2": {"set": UNUSED}}}
+    assert json.loads((work / DONE_ID / "review.json").read_text(
+        encoding="utf-8")) == {"format": 1, "sets": {
+            "1": {"base": [120.0, 720.0], "confirmed": True},
+            "2": {"base": [780.0, 1380.0], "set": UNUSED}}}
+    assert service.Review(DONE_ID) == saved
+    # A save replaces the whole review; nothing is left behind.
+    assert service.SaveReview(DONE_ID, {"sets": {"3": {"confirmed": True}}})[
+        "sets"] == {"3": {"confirmed": True}}
+    assert service.Review(DONE_ID)["sets"] == {"3": {"confirmed": True}}
+    assert sorted(p.name for p in (work / DONE_ID).iterdir()) == [
+        "job.json", "out", "review.json"]
+    # A refused save writes nothing.
+    message = _refused(archive.INVALID, service.SaveReview, DONE_ID,
+                       {"sets": {"1": {"start": 719.9}}})
+    assert "1 秒以上" in message
+    assert service.Review(DONE_ID)["sets"] == {"3": {"confirmed": True}}
+
+
+@pytest.mark.parametrize("content", [
+    b"{not json", b"\xff\xfe", json.dumps({"format": 2, "sets": {
+        "1": {"base": [120.0, 720.0], "confirmed": True}}}).encode(),
+    json.dumps([1, 2]).encode()])
+def test_a_broken_review_is_none_and_the_next_save_replaces_it(
+        fake, work, tmp_path, content):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    (work / DONE_ID / "review.json").write_bytes(content)
+    assert service.Review(DONE_ID) == {"format": 1, "sets": {}}
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    assert service.Review(DONE_ID)["sets"] == {"1": {"confirmed": True}}
+
+
+def test_a_review_or_sets_that_cannot_be_read_is_refused_not_empty(
+        fake, work, tmp_path):
+    # A file that is there but cannot be read (another app holds it, no
+    # permission) is not "no review": the page would show none and its next
+    # save would write over the operator's review.
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    reviewFile = work / DONE_ID / "review.json"
+    kept = reviewFile.read_bytes()
+    reviewFile.unlink()
+    reviewFile.mkdir()                  # opening it fails, not as missing
+    assert "review.json" in _refused(archive.UNREADABLE, service.Review,
+                                     DONE_ID)
+    _refused(archive.UNREADABLE, service.StartExport, DONE_ID)
+    reviewFile.rmdir()
+    reviewFile.write_bytes(kept)
+
+    # A done job's sets.json: missing, unreadable or not JSON.
+    setsFile = work / DONE_ID / "out" / "sets.json"
+    sets = setsFile.read_bytes()
+    for broken in ("missing", "unreadable", "not json"):
+        setsFile.unlink()
+        if broken == "unreadable":
+            setsFile.mkdir()
+        elif broken == "not json":
+            setsFile.write_text("{x", encoding="utf-8")
+        for call, args in ((service.Review, ()),
+                           (service.SaveReview, ({"sets": {}},)),
+                           (service.StartExport, ())):
+            message = _refused(archive.UNREADABLE, call, DONE_ID, *args)
+            assert "sets.json" in message, broken
+        if setsFile.is_dir():
+            setsFile.rmdir()
+        setsFile.write_bytes(sets)
+    assert service.Review(DONE_ID)["sets"] == {"1": {"confirmed": True}}
+    assert reviewFile.read_bytes() == kept
+
+
+def test_the_page_is_told_a_review_cannot_be_read(page, service, work,
+                                                  tmp_path):
+    _done(work, tmp_path)
+    (work / DONE_ID / "review.json").mkdir()
+    message = _refusal(page.get(f"{BASE}/jobs/{DONE_ID}/review"), 409,
+                       "CONFLICT", archive.UNREADABLE)
+    assert "読み直して" in message
+
+
+def test_a_review_made_against_another_sets_json_is_dropped(fake, work,
+                                                           tmp_path):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True},
+                                          "2": {"confirmed": True}}})
+    moved = dict(REVIEW_SETS, sets=[dict(REVIEW_SETS["sets"][0], end=730.0),
+                                    REVIEW_SETS["sets"][1]])
+    _done(work, tmp_path, moved)
+    assert service.Review(DONE_ID)["sets"] == {"2": {"confirmed": True}}
+
+
+def test_a_job_not_done_has_no_review(service, work, fake, tmp_path):
+    _stored(work, DONE_ID, state="cancelled", source=SOURCE)
+    assert service.Review(DONE_ID) == {"format": 1, "sets": {}}
+    _refused(archive.NOT_DONE, service.SaveReview, DONE_ID, {"sets": {}})
+    _refused(archive.NOT_FOUND, service.Review, "20261116-000000-zzzz")
+    _refused(archive.NOT_FOUND, service.SaveReview, "nope", {"sets": {}})
+    # While its analysis runs: no review, no save.
+    _mode(fake, "slow")
+    job = service.Create(SOURCE)
+    assert service.Review(job["id"]) == {"format": 1, "sets": {}}
+    _refused(archive.BUSY, service.SaveReview, job["id"], {"sets": {}})
+    service.Cancel(job["id"])
+    _ended(service, job["id"])
+
+
+def test_an_export_cuts_the_confirmed_sets(service, work, fake, tmp_path):
+    argv = tmp_path / "argv.json"
+    fake.setenv("FAKE_VODSPLIT_ARGV", str(argv))
+    video = _done(work, tmp_path)
+    jobDir = work / DONE_ID
+    (jobDir / "results.json").write_text(json.dumps(
+        {"sets": [KAPPA], "bracket_url": "https://start.gg/x",
+         "date": "2026-11-16"}), encoding="utf-8")
+    service.SaveReview(DONE_ID, {"sets": {
+        "1": {"confirmed": True},
+        "2": {"confirmed": True, "start": 775.5, "end": 1390.25,
+              "set": UNUSED},
+        "3": {"set": None}}})
+
+    started = service.StartExport(DONE_ID)
+    assert started["state"] == "done"
+    assert started["export"]["state"] == "running"
+    assert started["export"]["files"] is None
+    export = _export_ended(service, DONE_ID)
+
+    assert json.loads(argv.read_text(encoding="utf-8")) == [
+        str(jobDir / "export_request.json"), "--out", str(jobDir / "clips"),
+        "--progress", "json", "--cancel-on-stdin"]
+    assert json.loads((jobDir / "export_request.json").read_text(
+        encoding="utf-8")) == {
+        "source": str(video), "source_id": "fakevideo01",
+        "event": "Fake Cup", "bracket_url": "https://start.gg/x",
+        "date": "2026-11-16", "sets": [
+            {"no": 1, "start": 120.0, "end": 720.0, "title": None,
+             "description": None, "set": KAPPA,
+             "game_starts": [130.0, 300.0]},
+            {"no": 2, "start": 775.5, "end": 1390.25, "title": None,
+             "description": None, "set": UNUSED, "game_starts": [790.0]}]}
+    assert export["state"] == "done" and export["exit_code"] == 0
+    assert (export["clips"], export["skipped"]) == (2, 0)
+    assert export["out_dir"] == str(jobDir / "clips")
+    assert export["error"] is None and export["started_at"] \
+        and export["finished_at"]
+    assert export["progress"]["stage"] == "export"
+    assert export["files"] == [
+        {"no": 1, "file": "01_Fake_Cup_Winners_Final_Kappa_vs_Lambda.mp4",
+         "title": "Fake Cup Winners Final Kappa vs Lambda", "start": 120.0,
+         "end": 720.0, "exported": True, "skipped": False},
+        {"no": 2, "file": "02_Fake_Cup_Losers_Final_Mu_vs_Lambda.mp4",
+         "title": "Fake Cup Losers Final Mu vs Lambda", "start": 775.5,
+         "end": 1390.25, "exported": True, "skipped": False}]
+    assert (jobDir / "clips" / export["files"][0]["file"]).read_bytes() \
+        == fake_worker.CLIP_BYTES
+    # The job is its analysis as it was, its export beside it.
+    job, sets = service.Job(DONE_ID)
+    assert job["state"] == "done" and sets["sets"][0]["no"] == 1
+    disk = _disk(work, DONE_ID)
+    assert disk["state"] == "done" and disk["export"]["state"] == "done"
+    assert service.Status()["running_job"] is None
+    assert "export start" in (jobDir / "worker.log").read_text(
+        encoding="utf-8")
+
+    # Again: the worker keeps what it cut from the same range.
+    service.StartExport(DONE_ID)
+    again = _export_ended(service, DONE_ID)
+    assert (again["state"], again["clips"], again["skipped"]) == (
+        "done", 2, 2)
+
+
+def test_an_export_needs_a_done_job_a_confirmed_set_and_its_video(
+        work, fake, tmp_path):
+    asked = []
+    service = ArchiveJobService(probe=lambda: asked.append(1))
+    video = _done(work, tmp_path)
+    message = _refused(archive.INVALID, service.StartExport, DONE_ID)
+    assert "確定したセットがありません" in message
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    video.unlink()
+    message = _refused(archive.SOURCE_UNUSABLE, service.StartExport, DONE_ID)
+    assert "元動画が見つからない" in message
+    _stored(work, DONE_ID, state="error", source=str(video))
+    _refused(archive.NOT_DONE, service.StartExport, DONE_ID)
+    _refused(archive.NOT_FOUND, service.StartExport, "20261116-000000-zzzz")
+    # Refused before the worker was asked about, and nothing was written.
+    assert asked == []
+    assert _disk(work, DONE_ID).get("export") is None
+    assert not (work / DONE_ID / "export_request.json").exists()
+
+
+def test_a_url_jobs_export_cuts_its_download(service, work, fake):
+    job = service.Create(SOURCE)
+    _ended(service, job["id"])
+    service.SaveReview(job["id"], {"sets": {"1": {"confirmed": True}}})
+    service.StartExport(job["id"])
+    assert _export_ended(service, job["id"])["state"] == "done"
+    request = json.loads((work / job["id"] / "export_request.json")
+                         .read_text(encoding="utf-8"))
+    assert request["source"] == str(work / "downloads"
+                                    / "fakevideo01.open.mp4")
+    assert [row["no"] for row in request["sets"]] == [1]
+
+
+def test_an_export_and_an_analysis_run_one_at_a_time(
+        service, work, fake, tmp_path):
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    _mode(fake, "slow")
+    service.StartExport(DONE_ID)
+    _until(lambda: (service.Job(DONE_ID)[0]["export"] or {}).get("progress"),
+           "the export's progress")
+    for refusal in (lambda: service.Create(SOURCE),
+                    lambda: service.StartExport(DONE_ID),
+                    lambda: service.Resume(DONE_ID),
+                    lambda: service.SetWorkDir(str(work / "other"))):
+        with pytest.raises(ArchiveError) as refused:
+            refusal()
+        assert refused.value.code == archive.BUSY
+    assert "書き出し" in _refused(archive.BUSY, service.Create, SOURCE)
+    # The sets, the video and the review go on while it exports: it only
+    # reads them.
+    job, sets = service.Job(DONE_ID)
+    assert job["export"]["state"] == "running" and sets is not None
+    assert service.VideoFile(DONE_ID)[0] == str(tmp_path / "vod.mp4")
+    service.SaveReview(DONE_ID, {"sets": {"2": {"confirmed": True}}})
+
+    asked = service.Cancel(DONE_ID)
+    assert asked["export"]["state"] == "running"
+    export = _export_ended(service, DONE_ID)
+    assert export["state"] == "cancelled" and export["exit_code"] == 130
+    assert _disk(work, DONE_ID)["export"]["state"] == "cancelled"
+    _refused(archive.NOT_RUNNING, service.Cancel, DONE_ID)
+
+    # An analysis now runs, and the export waits for it (in its words).
+    job = service.Create(SOURCE)
+    assert service.Status()["running_kind"] == archive.ANALYSIS
+    message = _refused(archive.BUSY, service.StartExport, DONE_ID)
+    assert message == ("切り抜きジョブの解析が実行中です。"
+                       "終わるか中止してから書き出してください。")
+    service.Cancel(job["id"])
+    _ended(service, job["id"])
+
+
+def test_a_cancelled_export_goes_on_where_it_stopped(
+        service, work, fake, tmp_path):
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True},
+                                          "3": {"confirmed": True}}})
+    # Long between the clips: cancelled after the first, whatever the load.
+    fake.setenv("FAKE_VODSPLIT_DELAY", "60")
+    service.StartExport(DONE_ID)
+    _until(lambda: ((service.Job(DONE_ID)[0]["export"] or {}).get(
+        "progress") or {}).get("fraction") == 0.5, "the first clip")
+    service.Cancel(DONE_ID)
+    assert _export_ended(service, DONE_ID)["state"] == "cancelled"
+
+    fake.setenv("FAKE_VODSPLIT_DELAY", "0")
+    service.StartExport(DONE_ID)
+    export = _export_ended(service, DONE_ID)
+    assert (export["state"], export["clips"], export["skipped"]) == (
+        "done", 2, 1)
+    assert [(f["no"], f["skipped"]) for f in export["files"]] == [
+        (1, True), (3, False)]
+
+
+def test_the_shutdown_cancels_a_running_export(service, work, fake,
+                                               tmp_path):
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    _mode(fake, "slow")
+    service.StartExport(DONE_ID)
+    _until(lambda: (service.Job(DONE_ID)[0]["export"] or {}).get("progress"),
+           "the export's progress")
+    started = time.monotonic()
+    service.Shutdown(5.0)
+    assert time.monotonic() - started < 5.0
+    disk = _disk(work, DONE_ID)
+    assert disk["state"] == "done" and disk["export"]["state"] == "cancelled"
+    _refused(archive.STOPPING, service.StartExport, DONE_ID)
+
+
+@pytest.mark.parametrize("mode, state, code, says", [
+    ("crash", "failed", "crashed", "確定分を書き出し"),
+    ("error", "error", "source", "移動・削除"),
+    # The earlier clip open in a player: vodsplit cannot replace it.
+    ("locked", "failed", "internal", "閉じてから"),
+])
+def test_an_export_that_fails_says_how_to_go_on(
+        service, work, fake, tmp_path, mode, state, code, says):
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    _mode(fake, mode)
+    service.StartExport(DONE_ID)
+    export = _export_ended(service, DONE_ID)
+    assert export["state"] == state and export["error"]["code"] == code
+    assert says in (export["error"]["hint"] or "")
+    assert service.Job(DONE_ID)[0]["state"] == "done"
+
+
+def _vodsplit_export():
+    """vodsplit's export module (the worker's own validate_edits):
+    installed, else the SmashVodSplitter checkout beside this repository;
+    None when there is neither (CI)."""
+    try:
+        from vodsplit import export
+        return export
+    except ImportError:
+        pass
+    checkout = Path(__file__).resolve().parents[2] / "SmashVodSplitter"
+    if not (checkout / "vodsplit" / "export.py").is_file():
+        return None
+    sys.path.insert(0, str(checkout))
+    try:
+        from vodsplit import export
+        return export
+    except ImportError:
+        return None
+    finally:
+        sys.path.remove(str(checkout))
+
+
+def test_the_export_request_passes_the_workers_own_check(fake, work,
+                                                        tmp_path):
+    # The request Autona writes is what vodsplit's `export` reads: its
+    # validate_edits takes it as it is (the shapes, the results, the ranges
+    # at the boundary). Skipped where vodsplit is not there (CI).
+    export = _vodsplit_export()
+    if export is None:
+        pytest.skip("vodsplit is not installed nor checked out beside")
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {
+        "1": {"confirmed": True, "start": 0.13, "end": 1.14},
+        "2": {"confirmed": True, "set": UNUSED, "start": 775.5},
+        "3": {"confirmed": True, "set": None, "start": 3598.95,
+              "end": 3700}}})
+    request = service._ExportRequest(
+        service.WorkDir(), str(work / DONE_ID), _disk(work, DONE_ID))
+    checked = export.validate_edits(json.loads(json.dumps(request)))
+    assert [(row["no"], row["start"], row["end"], row["set"])
+            for row in checked["sets"]] == [
+        (1, 0.13, 1.14, KAPPA), (2, 775.5, 1380.0, UNUSED),
+        (3, 3598.95, 3700, None)]
+    assert checked["source"] == request["source"]
+    assert export.MIN_CLIP == review.MIN_CLIP
+    # What Autona refuses, vodsplit refuses.
+    with pytest.raises(export.EditsError):
+        export.validate_edits(dict(request, sets=[dict(
+            request["sets"][0], start=0.13, end=1.13)]))
+
+
+def test_an_export_left_running_by_a_previous_run_is_cancelled(
+        fake, work, tmp_path):
+    _done(work, tmp_path, export={"state": "running", "logs": ["clip 1"],
+                                  "started_at": "x"})
+    service = ArchiveJobService()
+    export = service.Job(DONE_ID)[0]["export"]
+    assert export["state"] == "cancelled"
+    assert export["logs"] == ["clip 1", archive.STALE_EXPORT_NOTE]
+    disk = _disk(work, DONE_ID)
+    assert disk["state"] == "done" and disk["export"]["state"] == "cancelled"
+
+
+def test_the_page_reviews_and_exports_through_the_routes(
+        page, service, work, fake, tmp_path):
+    _done(work, tmp_path)
+    url = f"{BASE}/jobs/{DONE_ID}"
+    assert _data(page.get(f"{url}/review")) == {
+        "review": {"format": 1, "sets": {}}}
+    _refusal(page.post(f"{url}:export"), 400, "INVALID_ARGUMENT",
+             archive.INVALID)
+    saved = _data(page.put(f"{url}/review", json={"sets": {
+        "1": {"confirmed": True, "end": 700}, "2": {"set": UNUSED}}}))
+    assert saved == {"review": {"format": 1, "sets": {
+        "1": {"confirmed": True, "end": 700}, "2": {"set": UNUSED}}}}
+    assert _data(page.get(f"{url}/review")) == saved
+    message = _refusal(page.put(f"{url}/review", json={"sets": {
+        "2": {"set": KAPPA}}}), 400, "INVALID_ARGUMENT", archive.INVALID)
+    assert "同じ結果" in message
+    _refusal(page.put(f"{url}/review", data="not json"), 400,
+             "INVALID_ARGUMENT", archive.INVALID)
+
+    _mode(fake, "slow")
+    job = _data(page.post(f"{url}:export"))["job"]
+    assert job["export"]["state"] == "running"
+    status = _data(page.get(f"{BASE}/status"))
+    assert (status["running_job"], status["running_kind"]) == (
+        DONE_ID, archive.EXPORT)
+    _refusal(page.post(f"{url}:export"), 409, "CONFLICT", archive.BUSY)
+    _data(page.post(f"{url}:cancel"))
+    assert _export_ended(service, DONE_ID)["state"] == "cancelled"
+
+    _mode(fake, "ok")
+    _data(page.post(f"{url}:export"))
+    detail = _until(lambda: (lambda data: data if data["job"]["export"][
+        "state"] != "running" else None)(_data(page.get(url))),
+        "the export to end")
+    assert detail["job"]["export"]["state"] == "done"
+    assert [clip["no"] for clip in detail["job"]["export"]["files"]] == [1]
+    assert detail["sets"]["sets"][0]["no"] == 1
+
+    other = f"{BASE}/jobs/20261116-000000-zzzz"
+    for response in (page.get(f"{other}/review"),
+                     page.put(f"{other}/review", json={"sets": {}}),
+                     page.post(f"{other}:export")):
+        _refusal(response, 404, "NOT_FOUND", archive.NOT_FOUND)
+    _stored(work, DONE_ID, state="cancelled", source=SOURCE)
+    _refusal(page.put(f"{url}/review", json={"sets": {}}), 409, "CONFLICT",
+             archive.NOT_DONE)
+    _refusal(page.post(f"{url}:export"), 409, "CONFLICT", archive.NOT_DONE)
+
+
 READS = [
     ("get", f"{BASE}/status", None),
     ("get", f"{BASE}/jobs", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/video", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/frames/1", None),
+    ("get", f"{BASE}/jobs/20261116-000000-zzzz/review", None),
 ]
 WRITES = [
     ("patch", f"{BASE}/settings", {"work_dir": "C:\\x"}),
     ("post", f"{BASE}/jobs", {"source": SOURCE}),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:cancel", None),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:resume", None),
+    ("put", f"{BASE}/jobs/20261116-000000-zzzz/review", {"sets": {}}),
+    ("post", f"{BASE}/jobs/20261116-000000-zzzz:export", None),
 ]
 
 
@@ -1470,10 +2297,13 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "get_archive_job": WebAccess.THIS_PC,
                  "get_archive_video": WebAccess.THIS_PC,
                  "get_archive_frame": WebAccess.THIS_PC,
+                 "get_archive_review": WebAccess.THIS_PC,
                  "archive_settings_update": WebAccess.SHELL,
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,
-                 "archive_job_resume": WebAccess.SHELL}
+                 "archive_job_resume": WebAccess.SHELL,
+                 "archive_review_update": WebAccess.SHELL,
+                 "archive_job_export": WebAccess.SHELL}
     assert {name: WebAccess.ROUTE_ACCESS[f"api_v1.{name}"]
             for name in endpoints} == endpoints
 

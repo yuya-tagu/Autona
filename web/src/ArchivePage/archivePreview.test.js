@@ -93,7 +93,7 @@ test("the page's keys: Space, Up / Down and N", () => {
 });
 
 test("no key of the page while typing, composing or with a modifier", () => {
-    for (const key of [" ", "ArrowUp", "ArrowDown", "n"]) {
+    for (const key of [" ", "ArrowUp", "ArrowDown", "n", "i", "o", "Enter"]) {
         expect(keyAction({key}, "text")).toBeNull();
         expect(keyAction({key, isComposing: true}, "other")).toBeNull();
         expect(keyAction({key, ctrlKey: true}, "other")).toBeNull();
@@ -103,10 +103,44 @@ test("no key of the page while typing, composing or with a modifier", () => {
     }
 });
 
-test("I, O and Enter are not the page's (a later stage's)", () => {
-    for (const key of ["i", "I", "o", "O", "Enter", "j", "l"]) {
+test("I / O set IN / OUT and Enter confirms (ADR-006 A4)", () => {
+    expect(keyAction({key: "i"}, "other")).toBe("setIn");
+    expect(keyAction({key: "I"}, "other")).toBe("setIn");
+    expect(keyAction({key: "o"}, "control")).toBe("setOut");
+    expect(keyAction({key: "O"}, "other")).toBe("setOut");
+    expect(keyAction({key: "Enter"}, "other")).toBe("confirm");
+    // Enter presses a button or follows a link itself.
+    expect(keyAction({key: "Enter"}, "control")).toBeNull();
+    for (const key of ["j", "l", "Escape", "Tab"]) {
         expect(keyAction({key}, "other")).toBeNull();
     }
+    // Not with Shift (a capital I / O by Caps Lock still is), and Enter not
+    // held down: its repeat would confirm set after set.
+    for (const key of ["i", "I", "o", "O", "Enter"]) {
+        expect(keyAction({key, shiftKey: true}, "other")).toBeNull();
+    }
+    expect(keyAction({key: "Enter", repeat: true}, "other")).toBeNull();
+    expect(keyAction({key: "i", repeat: true}, "other")).toBe("setIn");
+    // The other keys keep Shift (N is Shift+n) and their repeat.
+    expect(keyAction({key: "N", shiftKey: true}, "other")).toBe("nextReview");
+    expect(keyAction({key: "ArrowDown", repeat: true}, "other")).toBe("nextSet");
+});
+
+test("an open list's options are typed into: no key of the page", () => {
+    // MUI's Select puts its listbox in a portal; React still bubbles its keys
+    // to the review screen.
+    document.body.innerHTML = `<ul role="listbox"><li role="option" id="o">x</li></ul>
+        <div role="combobox" id="c"></div>`;
+    for (const id of ["o", "c"]) {
+        const kind = keyTargetKind(document.getElementById(id));
+        expect(kind).toBe("text");
+        for (const key of ["i", "o", "Enter"]) {
+            expect(keyAction({key}, kind)).toBeNull();
+        }
+    }
+    expect(keyTargetKind(document.querySelector('[role="listbox"]')))
+        .toBe("text");
+    document.body.innerHTML = "";
 });
 
 test("Up / Down step through the listed sets and stop at the ends", () => {

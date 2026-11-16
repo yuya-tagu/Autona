@@ -354,6 +354,13 @@ ROUTE_ACCESS = {
     # browser (a video the shared view cannot play: H.264) plays them too.
     "api_v1.get_archive_video": THIS_PC,
     "api_v1.get_archive_frame": THIS_PC,
+    # The review and the export (ADR-006 A4): the review is read as the
+    # job is (THIS_PC); saving it and starting the export (the worker cuts
+    # files into the job's folder) are the shell's, as the job's writes.
+    # The export's cancel is the job's (archive_job_cancel).
+    "api_v1.get_archive_review": THIS_PC,
+    "api_v1.archive_review_update": SHELL,
+    "api_v1.archive_job_export": SHELL,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

@@ -23,13 +23,15 @@ import {
 import i18n from "../i18n/config";
 import {BASE_URL} from "../env";
 import {DARK_TOKENS as tokens} from "../themes";
-import {apiGetJson, apiPatch, apiPost, ApiError} from "../api";
+import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut, ApiError} from "../api";
 import {FeedbackProvider} from "../ScoreboardPage/Feedback";
 import {
     ArchiveStatus,
     Job,
+    JobExport,
     JobSummary,
     SetFilter,
+    SetResult,
     SetRow,
     SetsJson,
     etaParts,
@@ -63,23 +65,52 @@ import {
     timelineRange,
     videoLength,
 } from "./archiveTimeline";
+import {
+    EMPTY_REVIEW,
+    Review,
+    ReviewSaver,
+    ReviewedRow,
+    SaveState,
+    canonical,
+    candidates,
+    confirmedCount,
+    holders,
+    nextUnconfirmed,
+    readReview,
+    reviewedRows,
+    sameResult,
+    withConfirmed,
+    withEdge,
+    withRangeReset,
+    withResult,
+} from "./archiveReview";
 import Preview from "./Preview";
 import Timeline from "./Timeline";
 
 // The Archive Clipper page (ADR-006 A1), /web/app/archive: starts a worker
 // job on a VOD, shows its progress and the sets it found. State is the
-// page's own (no Redux / StateManager, ADR-006 D6); a running job is polled
-// every second through GET /api/v1/archive/jobs/<id>. A job with sets shows
-// the mock's review screen (A3): the set list, the preview of the job's own
-// video, the set's details (read-only) and the timeline. ?job=<id> opens a
-// job (the preview's "open in browser"). The writes are SHELL routes (D7):
-// outside the desktop's own window (this PC's browser) the page only reads,
-// and says so.
+// page's own (no Redux / StateManager, ADR-006 D6); a running job (or its
+// export) is polled every second through GET /api/v1/archive/jobs/<id>. A
+// job with sets shows the mock's review screen (A3): the set list, the
+// preview of the job's own video, the set's details and the timeline. A
+// finished job's review is edited there (A4: IN / OUT, the result given,
+// confirmed; saved to its review.json as it changes) and its confirmed sets
+// exported to clips. ?job=<id> opens a job (the preview's "open in
+// browser"). The writes are SHELL routes (D7): outside the desktop's own
+// window (this PC's browser) the page only reads, and says so.
 
 const BASE = "/api/v1/archive";
 const POLL_MS = 1000;
 const LIST_WIDTH = 320;
 const DETAIL_WIDTH = 300;
+// The set view's room around the set where it can be edited (seconds): an
+// edge dragged out of the set has somewhere to go.
+const SET_VIEW_MARGIN = 30;
+
+// The saves a job's review left going when its view closed (the saver's
+// dispose): a view opened on the job again reads the review after them, so
+// its GET never overtakes the last PUT.
+const pendingSaves = new Map<string, Promise<unknown>>();
 
 interface Detail {
     job: Job;
@@ -135,7 +166,7 @@ function TimeLink({source, sourceId, seconds}: {source?: string | null;
 }
 
 function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
-    row: SetRow;
+    row: ReviewedRow;
     jobId: string;
     source?: string | null;
     sourceId?: string | null;
@@ -147,16 +178,18 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
     const score = scoreText(row);
     const path = row.thumb && !noFrame ? framePath(jobId, row.no) : null;
     return (
-        // Enter picks the row (a button); Space is the page's (play / pause).
+        // Enter picks the row (a button); on the selected one it is the
+        // page's (confirm), as Space is (play / pause).
         <Box role="button" tabIndex={0} onClick={onSelect}
              onKeyDown={(event) => {
-                 if (event.key === "Enter") {
+                 if (event.key === "Enter" && !selected) {
                      event.preventDefault();
                      onSelect();
                  }
              }}
              data-testid={`archive-set-${row.no}`}
              data-archive-set={row.no}
+             data-confirmed={row.confirmed || undefined}
              aria-current={selected || undefined}
              sx={{display: "flex", gap: 1, p: 1, cursor: "pointer",
                   borderBottom: "1px solid", borderColor: "divider",
@@ -192,6 +225,12 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
                                           seconds={row.start}/>
                     {" · "}{formatDuration(row.end - row.start)}
                     {score ? ` · ${score}` : ""}
+                    {row.confirmed ? (
+                        <Box component="span"
+                             sx={{color: tokens.positive, fontWeight: 700, ml: 1}}>
+                            ✓ {i18n.t("archive_confirmed_badge")}
+                        </Box>
+                    ) : null}
                     {row.needs_review ? (
                         <Tooltip title={row.reason ?? ""}>
                             <Box component="span"
@@ -210,7 +249,7 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
 function SetList({sets, rows, jobId, source, filter, onFilter, selectedNo,
                   onSelect}: {
     sets: SetsJson;
-    rows: SetRow[];
+    rows: ReviewedRow[];
     jobId: string;
     source?: string | null;
     filter: SetFilter;
@@ -325,13 +364,61 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
     );
 }
 
-// The selected set, read-only (the mock's right pane without its edits:
-// assigning a result and confirming are a later stage).
-function SetDetails({row, sets, source, onSeek}: {
-    row: SetRow | null;
+// What the details edit (A4), where the review can be edited: IN / OUT at
+// the current position or back to the worker's, the result given (one of
+// the job's, each to one set: the others' are disabled) and confirmed.
+interface DetailEdits {
+    onEdge: (edge: "start" | "end") => void;
+    onResetRange: () => void;
+    onAssign: (result: SetResult | null) => void;
+    onConfirm: () => void;
+    candidates: SetResult[];
+    // canonical(result) -> the set that holds it.
+    held: Map<string, number>;
+}
+
+function AssignSelect({row, edit}: {row: ReviewedRow; edit: DetailEdits}) {
+    const index = row.set ? edit.candidates.findIndex(
+        (c) => sameResult(c, row.set)) : -1;
+    const label = i18n.t("archive_detail_assign");
+    return (
+        <FormControl size="small" fullWidth sx={{mt: 1}}>
+            <InputLabel id="archive-assign-label">{label}</InputLabel>
+            <Select labelId="archive-assign-label" label={label}
+                    data-testid="archive-assign"
+                    value={index >= 0 ? String(index) : "none"}
+                    onChange={(event) => {
+                        const value = String(event.target.value);
+                        edit.onAssign(value === "none" ? null
+                            : edit.candidates[Number(value)] ?? null);
+                    }}>
+                <MenuItem value="none">{i18n.t("archive_detail_assign_none")}</MenuItem>
+                {edit.candidates.map((candidate, i) => {
+                    const holder = edit.held.get(canonical(candidate));
+                    return (
+                        <MenuItem key={i} value={String(i)}
+                                  disabled={holder !== undefined}>
+                            {unusedText(candidate)}
+                            {holder !== undefined
+                                ? ` ${i18n.t("archive_detail_assign_taken",
+                                             {no: holder})}` : ""}
+                        </MenuItem>
+                    );
+                })}
+            </Select>
+        </FormControl>
+    );
+}
+
+// The selected set as reviewed (`original`: as the worker found it). Read
+// only without `edit` (a job not done, this PC's browser).
+function SetDetails({row, original, sets, source, onSeek, edit}: {
+    row: ReviewedRow | null;
+    original: SetRow | null;
     sets: SetsJson;
     source?: string | null;
     onSeek: (t: number) => void;
+    edit?: DetailEdits;
 }) {
     if (row === null) {
         return (
@@ -370,7 +457,22 @@ function SetDetails({row, sets, source, onSeek}: {
                     {sub}
                 </Typography>
             ) : null}
-            {row.title ? (
+            {edit ? (
+                <Box>
+                    <Button size="small" data-testid="archive-confirm"
+                            variant={row.confirmed ? "outlined" : "contained"}
+                            onClick={edit.onConfirm}>
+                        {row.confirmed ? i18n.t("archive_detail_unconfirm")
+                            : i18n.t("archive_detail_confirm")}
+                    </Button>
+                </Box>
+            ) : row.confirmed ? (
+                <Typography variant="body2" sx={{color: tokens.positive}}>
+                    ✓ {i18n.t("archive_confirmed_badge")}
+                </Typography>
+            ) : null}
+            {edit ? <AssignSelect row={row} edit={edit}/> : null}
+            {row.title && !row.setEdited ? (
                 <Field label={i18n.t("archive_detail_title")}>
                     <Box sx={{wordBreak: "break-word"}}>{row.title}</Box>
                 </Field>
@@ -397,6 +499,31 @@ function SetDetails({row, sets, source, onSeek}: {
                             </Box>
                         </SeekRow>
                     ))}
+                {row.rangeEdited && original ? (
+                    <Box data-testid="archive-detected-range"
+                         sx={{color: tokens.textMuted, fontSize: "0.75rem"}}>
+                        {i18n.t("archive_detail_detected", {
+                            start: formatClock(original.start),
+                            end: formatClock(original.end)})}
+                    </Box>
+                ) : null}
+                {edit ? (
+                    <Stack direction="row" spacing={0.5} sx={{mt: 0.5}}>
+                        <Button size="small" variant="outlined"
+                                onClick={() => edit.onEdge("start")}>
+                            {i18n.t("archive_detail_set_in")}
+                        </Button>
+                        <Button size="small" variant="outlined"
+                                onClick={() => edit.onEdge("end")}>
+                            {i18n.t("archive_detail_set_out")}
+                        </Button>
+                        {row.rangeEdited ? (
+                            <Button size="small" onClick={edit.onResetRange}>
+                                {i18n.t("archive_detail_reset_range")}
+                            </Button>
+                        ) : null}
+                    </Stack>
+                ) : null}
             </Field>
             <Field label={i18n.t("archive_detail_result")}>
                 <Box component="dl" sx={{m: 0, display: "grid", gap: "2px 8px",
@@ -468,24 +595,232 @@ function SetDetails({row, sets, source, onSeek}: {
     );
 }
 
+// The review's save and the export (A4), over the review screen: how many
+// sets are confirmed, whether the review is saved, the export of the
+// confirmed ones (its progress, its stop, what it cut and where).
+function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
+                    save, reviewError, onExport, onCancel}: {
+    exported: JobExport | null;
+    total: number;
+    confirmed: number;
+    canExport: boolean;
+    readOnly: boolean;
+    starting: boolean;
+    save: SaveState;
+    reviewError: string;
+    onExport: () => void;
+    onCancel: () => void;
+}) {
+    const running = exported?.state === "running";
+    const saveText = save.status === "pending" || save.status === "saving"
+        ? i18n.t("archive_review_saving")
+        : save.status === "saved" ? i18n.t("archive_review_saved") : "";
+    const progress = exported?.progress;
+    const files = exported?.files ?? [];
+    const failure = exported && (exported.state === "error"
+                                 || exported.state === "failed")
+        ? exported.error?.message ?? i18n.t("archive_export_failed_unknown")
+        : null;
+    return (
+        <Stack spacing={1} data-testid="archive-export"
+               sx={{px: 2, py: 1, borderBottom: "1px solid",
+                    borderColor: "divider"}}>
+            <Stack direction="row" spacing={1.5} alignItems="center"
+                   sx={{flexWrap: "wrap"}}>
+                <Chip size="small" data-testid="archive-confirmed-count"
+                      label={i18n.t("archive_export_count",
+                                    {confirmed, total})}/>
+                <Button variant="contained" size="small"
+                        disabled={!canExport || confirmed === 0 || running
+                                  || starting}
+                        onClick={onExport}>
+                    {i18n.t("archive_export")}
+                </Button>
+                <Typography variant="caption" data-testid="archive-save-state"
+                            sx={{color: tokens.textMuted}}>
+                    {saveText}
+                </Typography>
+            </Stack>
+            {reviewError ? (
+                <Alert severity="warning">
+                    {i18n.t("archive_review_load_failed", {message: reviewError})}
+                </Alert>
+            ) : null}
+            {save.status === "error" ? (
+                <Alert severity="error" data-testid="archive-save-error">
+                    {i18n.t("archive_review_save_failed",
+                            {message: messageOf(save.error)})}
+                </Alert>
+            ) : null}
+            {running ? (
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Box sx={{flex: 1}}>
+                        <Typography variant="body2">
+                            {i18n.t("archive_export_running", {
+                                percent: Math.round((progress?.overall ?? 0) * 100)})}
+                        </Typography>
+                        <LinearProgress variant="determinate"
+                                        data-testid="archive-export-progress"
+                                        value={Math.round((progress?.overall ?? 0) * 100)}/>
+                    </Box>
+                    <Button color="error" variant="outlined" size="small"
+                            disabled={readOnly} onClick={onCancel}>
+                        {i18n.t("archive_abort")}
+                    </Button>
+                </Stack>
+            ) : null}
+            {exported?.state === "done" ? (
+                <Alert severity="success" data-testid="archive-export-result">
+                    <Typography variant="body2">
+                        {i18n.t("archive_export_done", {count: Math.max(
+                            0, (exported.clips ?? 0) - (exported.skipped ?? 0))})}
+                        {exported.skipped
+                            ? ` ${i18n.t("archive_export_skipped",
+                                         {skipped: exported.skipped})}` : ""}
+                    </Typography>
+                    {exported.out_dir ? (
+                        <Typography variant="body2"
+                                    data-testid="archive-export-dir"
+                                    sx={{wordBreak: "break-all"}}>
+                            {i18n.t("archive_export_out_dir",
+                                    {path: exported.out_dir})}
+                        </Typography>
+                    ) : null}
+                    {files.length > 0 ? (
+                        <Box component="details" sx={{mt: 0.5}}>
+                            <Box component="summary" sx={{cursor: "pointer"}}>
+                                {i18n.t("archive_export_files")} ({files.length})
+                            </Box>
+                            {files.map((clip) => (
+                                <Typography key={`${clip.no}-${clip.file}`}
+                                            variant="caption" component="div"
+                                            sx={{wordBreak: "break-all"}}>
+                                    #{clip.no} {clip.file}
+                                </Typography>
+                            ))}
+                        </Box>
+                    ) : null}
+                </Alert>
+            ) : null}
+            {exported?.state === "cancelled" ? (
+                <Alert severity="info">{i18n.t("archive_export_cancelled")}</Alert>
+            ) : null}
+            {failure !== null ? (
+                <Alert severity="error" data-testid="archive-export-failure">
+                    {failure}
+                    {exported?.error?.hint ? (
+                        <Typography variant="body2">{exported.error.hint}</Typography>
+                    ) : null}
+                </Alert>
+            ) : null}
+        </Stack>
+    );
+}
+
 // The review screen of a job with sets (ADR-006 A3): the mock's grid -- the
 // set list, the preview and the details over the timeline. Its keys work
-// within it, not while typing (archivePreview.keyAction).
-function SetsView({job, sets, setNo, onSetNo}: {
+// within it, not while typing (archivePreview.keyAction). A finished job's
+// review (A4) is read with it and, in the desktop's window, edited there:
+// each change is saved (ReviewSaver: one PUT of the whole review after the
+// edits stop) and the export saves what is pending first.
+function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
     job: Job;
     sets: SetsJson;
     setNo: number | null;
     onSetNo: (no: number) => void;
+    readOnly: boolean;
+    onAct: (action: string) => Promise<void>;
 }) {
     const [filter, setFilter] = React.useState<SetFilter>("all");
     const [view, setView] = React.useState<TimelineView>("all");
     const [time, setTime] = React.useState(0);
     const [duration, setDuration] = React.useState(0);
     const [playing, setPlaying] = React.useState(false);
+    const [review, setReview] = React.useState<Review | null>(null);
+    const [reviewError, setReviewError] = React.useState("");
+    const [save, setSave] = React.useState<SaveState>({status: "idle"});
+    const [starting, setStarting] = React.useState(false);
     const videoRef = React.useRef<HTMLVideoElement>(null);
     const root = React.useRef<HTMLDivElement>(null);
-    const rows = filterSets(sets.sets, filter);
-    const row = sets.sets.find((r) => r.no === setNo) ?? null;
+    const saver = React.useRef<ReviewSaver<Review> | null>(null);
+    // A key moved the selection from a focused set row: the focus follows
+    // (Enter on the next row confirms it, not picks the last one again).
+    const followFocus = React.useRef(false);
+    const done = job.state === "done";
+    const editable = !readOnly && done && review !== null;
+
+    const shown = React.useMemo(() => {
+        const reviewed = reviewedRows(sets.sets, review ?? EMPTY_REVIEW);
+        return {...sets, sets: reviewed};
+    }, [sets, review]);
+    const rows = filterSets(shown.sets, filter) as ReviewedRow[];
+    const row = shown.sets.find((r) => r.no === setNo) ?? null;
+    const original = sets.sets.find((r) => r.no === setNo) ?? null;
+    const videoEnd = typeof sets.duration === "number"
+        && Number.isFinite(sets.duration) && sets.duration > 0
+        ? sets.duration : null;
+
+    // The job's review, saved as it changes (the saver is this job's: the
+    // view is keyed by job). A save the server refuses (400: it no longer
+    // fits the job's sets) is dropped and the server's review shown again.
+    // Closing the view still sends what is waiting (pendingSaves).
+    React.useEffect(() => {
+        const path = `${BASE}/jobs/${encodeURIComponent(job.id)}/review`;
+        let live = true;
+        const made = new ReviewSaver<Review>(
+            (value, options) => apiPut(path, {sets: value.sets}, options),
+            (state) => {
+                setSave(state);
+                if (state.status === "error"
+                    && apiErrorStatus(state.error) === 400) {
+                    made.forget();
+                    getData<{review: unknown}>(path).then((data) => {
+                        // Not over an edit made since (it is being saved).
+                        if (live && made.idle()) {
+                            setReview(readReview(data.review));
+                        }
+                    }, () => undefined);
+                }
+            });
+        saver.current = made;
+        return () => {
+            live = false;
+            const settled = made.dispose();
+            pendingSaves.set(job.id, settled);
+            settled.then(() => {
+                if (pendingSaves.get(job.id) === settled) {
+                    pendingSaves.delete(job.id);
+                }
+            });
+            if (saver.current === made) {
+                saver.current = null;
+            }
+        };
+    }, [job.id]);
+    React.useEffect(() => {
+        setReview(null);
+        setReviewError("");
+        if (!done) {
+            return undefined;
+        }
+        let live = true;
+        const path = `${BASE}/jobs/${encodeURIComponent(job.id)}/review`;
+        // After the saves the job's last view left going.
+        (pendingSaves.get(job.id) ?? Promise.resolve()).then(
+            () => getData<{review: unknown}>(path)).then(
+            (data) => live && setReview(readReview(data.review)),
+            (e) => live && setReviewError(messageOf(e)));
+        return () => {
+            live = false;
+        };
+    }, [job.id, done]);
+    // Leaving the page (a reload, the window closing) sends what is waiting,
+    // in a request that outlives the page.
+    React.useEffect(() => {
+        const leave = () => saver.current?.sendOnUnload();
+        window.addEventListener("beforeunload", leave);
+        return () => window.removeEventListener("beforeunload", leave);
+    }, []);
 
     // Opening the job hands the keys to it (Space / arrows / N), without
     // scrolling the page to it.
@@ -496,9 +831,15 @@ function SetsView({job, sets, setNo, onSetNo}: {
     // set number goes into the selector.
     React.useEffect(() => {
         const number = setNumber(setNo);
+        const follow = followFocus.current;
+        followFocus.current = false;
         if (number !== null) {
-            root.current?.querySelector(`[data-archive-set="${number}"]`)
-                ?.scrollIntoView?.({block: "nearest"});
+            const element = root.current?.querySelector<HTMLElement>(
+                `[data-archive-set="${number}"]`);
+            element?.scrollIntoView?.({block: "nearest"});
+            if (follow) {
+                element?.focus({preventScroll: true});
+            }
         }
     }, [setNo, filter]);
 
@@ -513,19 +854,20 @@ function SetsView({job, sets, setNo, onSetNo}: {
         }
         setTime(t);
     };
-    // Pick set `no` and play from `at` (its start by default). A set the
-    // filter hides (picked on the timeline) shows all the sets again, so the
-    // list shows what is selected.
-    const choose = (no: number | null, at?: number) => {
-        const next = sets.sets.find((r) => r.no === no);
+    // Pick set `no` and play from `at` (its start by default) -> the set
+    // picked, or null. A set the filter hides (picked on the timeline) shows
+    // all the sets again, so the list shows what is selected.
+    const choose = (no: number | null, at?: number): number | null => {
+        const next = shown.sets.find((r) => r.no === no);
         if (!next) {
-            return;
+            return null;
         }
         if (!rows.some((r) => r.no === next.no)) {
             setFilter("all");
         }
         onSetNo(next.no);
         seek(at ?? next.start);
+        return next.no;
     };
     const togglePlay = () => {
         const video = videoRef.current;
@@ -542,57 +884,150 @@ function SetsView({job, sets, setNo, onSetNo}: {
             // A video that cannot play: the preview says why.
         }
     };
+
+    // A change of the selected set's review: shown now, saved soon.
+    const change = (make: (current: Review, set: SetRow) => Review) => {
+        if (!editable || review === null || original === null) {
+            return null;
+        }
+        const next = make(review, original);
+        setReview(next);
+        saver.current?.push(next);
+        return next;
+    };
+    // The position the preview is at: the video's own time when it has one.
+    const position = () => {
+        const current = videoRef.current?.currentTime;
+        return typeof current === "number" && Number.isFinite(current)
+            ? current : time;
+    };
+    const setEdge = (edge: "start" | "end", t: number) => {
+        change((current, set) => withEdge(current, set, edge, t, videoEnd));
+    };
+    // Confirm the selected set and go to the next one not confirmed; or
+    // take a confirmation back (staying there) -> the set picked, or null.
+    const confirm = (): number | null => {
+        if (row === null) {
+            return null;
+        }
+        const next = change((current, set) =>
+            withConfirmed(current, set, !row.confirmed));
+        if (next !== null && !row.confirmed) {
+            const listed = filterSets(reviewedRows(sets.sets, next), filter);
+            return choose(nextUnconfirmed(listed as ReviewedRow[], row.no));
+        }
+        return null;
+    };
+    const exportConfirmed = async () => {
+        setStarting(true);
+        try {
+            // What is not saved yet goes first: the export cuts the review
+            // the server has.
+            if (await (saver.current?.flush() ?? Promise.resolve(true))) {
+                await onAct("export");
+            }
+        } finally {
+            setStarting(false);
+        }
+    };
+
     const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
         const action = keyAction({
             key: event.key, ctrlKey: event.ctrlKey, altKey: event.altKey,
-            metaKey: event.metaKey, defaultPrevented: event.defaultPrevented,
+            metaKey: event.metaKey, shiftKey: event.shiftKey,
+            repeat: event.repeat, defaultPrevented: event.defaultPrevented,
             isComposing: event.nativeEvent.isComposing,
         }, keyTargetKind(event.target));
         if (action === null) {
             return;
         }
+        const editing = action === "setIn" || action === "setOut"
+            || action === "confirm";
+        // The review's keys only where it can be edited, on a selected set:
+        // else Enter keeps its own meaning.
+        if (editing && (!editable || original === null)) {
+            return;
+        }
         event.preventDefault();
+        const fromRow = Boolean(
+            (event.target as HTMLElement | null)?.closest?.("[data-archive-set]"));
+        let picked: number | null = null;
         if (action === "togglePlay") {
             togglePlay();
         } else if (action === "previousSet") {
-            choose(stepSet(rows, setNo, -1));
+            picked = choose(stepSet(rows, setNo, -1));
         } else if (action === "nextSet") {
-            choose(stepSet(rows, setNo, 1));
+            picked = choose(stepSet(rows, setNo, 1));
+        } else if (action === "nextReview") {
+            picked = choose(nextReviewSet(rows, setNo));
+        } else if (action === "setIn") {
+            setEdge("start", position());
+        } else if (action === "setOut") {
+            setEdge("end", position());
         } else {
-            choose(nextReviewSet(rows, setNo));
+            picked = confirm();
         }
+        // The focus follows a set the key picked from a row. A key that left
+        // the selection where it was (the last row, nothing more to confirm)
+        // has nothing to follow: a later pick by the mouse must not take it.
+        followFocus.current = fromRow && picked !== null && picked !== setNo;
     };
+    const edit: DetailEdits | undefined = editable ? {
+        onEdge: (edge) => setEdge(edge, position()),
+        onResetRange: () => change(withRangeReset),
+        onAssign: (result) => change((current, set) =>
+            withResult(current, set, result)),
+        onConfirm: confirm,
+        candidates: candidates(sets),
+        held: holders(shown.sets, setNo),
+    } : undefined;
     const shownView = row === null ? "all" : view;
     return (
         <Box ref={root} tabIndex={-1} onKeyDown={onKeyDown}
              data-testid="archive-review"
-             sx={{flex: 1, minHeight: 0, display: "grid", outline: "none",
-                  gridTemplateColumns:
-                      `${LIST_WIDTH}px minmax(0, 1fr) ${DETAIL_WIDTH}px`,
-                  gridTemplateRows: "minmax(0, 1fr) auto"}}>
-            <SetList sets={sets} rows={rows} jobId={job.id} source={job.source}
-                     filter={filter} onFilter={setFilter} selectedNo={setNo}
-                     onSelect={(no) => choose(no)}/>
-            <Preview jobId={job.id}
-                     extension={videoExtension(job.source, sets.source)}
-                     row={row} videoRef={videoRef} time={time}
-                     duration={Number.isFinite(duration) && duration > 0
-                         ? duration : videoLength(sets)}
-                     playing={playing} onTogglePlay={togglePlay}
-                     onPrevious={() => choose(stepSet(rows, setNo, -1))}
-                     onNext={() => choose(stepSet(rows, setNo, 1))}
-                     onTime={setTime} onDuration={setDuration}
-                     onPlaying={setPlaying}/>
-            <Box sx={{overflowY: "auto", minHeight: 0, borderLeft: "1px solid",
-                      borderColor: "divider"}}>
-                <SetDetails row={row} sets={sets} source={job.source}
-                            onSeek={seek}/>
-            </Box>
-            <Box sx={{gridColumn: "1 / -1", minWidth: 0}}>
-                <Timeline sets={sets} rows={rows} selected={row}
-                          view={shownView} onView={setView} time={time}
-                          onSeek={seek} onPick={(no, t) => choose(no, t)}
-                          range={timelineRange(sets, shownView, row)}/>
+             sx={{flex: 1, minHeight: 0, display: "flex",
+                  flexDirection: "column", outline: "none"}}>
+            {done ? (
+                <ExportBar exported={job.export ?? null} total={shown.sets.length}
+                           confirmed={confirmedCount(shown.sets)}
+                           canExport={editable} readOnly={readOnly}
+                           starting={starting} save={save}
+                           reviewError={reviewError}
+                           onExport={exportConfirmed}
+                           onCancel={() => onAct("cancel")}/>
+            ) : null}
+            <Box sx={{flex: 1, minHeight: 0, display: "grid",
+                      gridTemplateColumns:
+                          `${LIST_WIDTH}px minmax(0, 1fr) ${DETAIL_WIDTH}px`,
+                      gridTemplateRows: "minmax(0, 1fr) auto"}}>
+                <SetList sets={shown} rows={rows} jobId={job.id}
+                         source={job.source} filter={filter}
+                         onFilter={setFilter} selectedNo={setNo}
+                         onSelect={(no) => choose(no)}/>
+                <Preview jobId={job.id}
+                         extension={videoExtension(job.source, sets.source)}
+                         row={row} videoRef={videoRef} time={time}
+                         duration={Number.isFinite(duration) && duration > 0
+                             ? duration : videoLength(sets)}
+                         playing={playing} editable={editable}
+                         onTogglePlay={togglePlay}
+                         onPrevious={() => choose(stepSet(rows, setNo, -1))}
+                         onNext={() => choose(stepSet(rows, setNo, 1))}
+                         onTime={setTime} onDuration={setDuration}
+                         onPlaying={setPlaying}/>
+                <Box sx={{overflowY: "auto", minHeight: 0, borderLeft: "1px solid",
+                          borderColor: "divider"}}>
+                    <SetDetails row={row} original={original} sets={shown}
+                                source={job.source} onSeek={seek} edit={edit}/>
+                </Box>
+                <Box sx={{gridColumn: "1 / -1", minWidth: 0}}>
+                    <Timeline sets={shown} rows={rows} selected={row}
+                              view={shownView} onView={setView} time={time}
+                              onSeek={seek} onPick={(no, t) => choose(no, t)}
+                              onEdge={editable ? setEdge : undefined}
+                              range={timelineRange(shown, shownView, row,
+                                                   editable ? SET_VIEW_MARGIN : 0)}/>
+                </Box>
             </Box>
         </Box>
     );
@@ -803,6 +1238,11 @@ function Ended({job, readOnly, onAct}: {
     );
 }
 
+// A job runs its analysis or its export (A4): either is followed.
+function isBusy(job: Job): boolean {
+    return job.state === "running" || job.export?.state === "running";
+}
+
 function jobLabel(job: JobSummary): string {
     return `${job.created_at.replace("T", " ").slice(0, 16)}  ${sourceName(job.source)}`;
 }
@@ -884,7 +1324,7 @@ function ArchiveContent() {
         };
     }, [selected, loadDetail]);
 
-    const running = !pollFailed && detail?.job.state === "running"
+    const running = !pollFailed && detail && isBusy(detail.job)
         ? detail.job.id : null;
     React.useEffect(() => {
         if (running === null) {
@@ -892,7 +1332,7 @@ function ArchiveContent() {
         }
         const timer = setInterval(() => {
             loadDetail(running).then((data) => {
-                if (data !== null && data.job.state !== "running") {
+                if (data !== null && !isBusy(data.job)) {
                     loadJobs().catch(() => undefined);
                 }
             }, (e) => {
@@ -1014,7 +1454,8 @@ function ArchiveContent() {
                     {sets ? (
                         <SetsView key={detail.job.id} job={detail.job}
                                   sets={sets} setNo={setNo}
-                                  onSetNo={setSetNo}/>
+                                  onSetNo={setSetNo} readOnly={readOnly}
+                                  onAct={act}/>
                     ) : null}
                 </Box>
             )}

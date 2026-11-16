@@ -79,6 +79,35 @@ export interface JobSummary {
     needs_review?: unknown;
 }
 
+// A clip of the export's clips/export.json (ADR-006 A4).
+export interface ClipFile {
+    no: number;
+    file: string;
+    title?: string | null;
+    start?: number | null;
+    end?: number | null;
+    exported?: boolean;
+    skipped?: boolean;
+}
+
+// The job's last export of its confirmed sets (ADR-006 A4): its state as a
+// job's, the clips cut and skipped (already cut from the same range), the
+// folder they are in and the clips listed there (null while it runs).
+export interface JobExport {
+    state: JobState;
+    started_at?: string | null;
+    finished_at?: string | null;
+    exit_code?: number | null;
+    error?: JobError | null;
+    warnings?: string[];
+    logs?: string[];
+    progress?: JobProgress | null;
+    clips?: number | null;
+    skipped?: number | null;
+    out_dir?: string | null;
+    files?: ClipFile[] | null;
+}
+
 export interface Job extends JobSummary {
     finished_at?: string | null;
     progress?: JobProgress | null;
@@ -87,6 +116,7 @@ export interface Job extends JobSummary {
     error?: JobError | null;
     exit_code?: number | null;
     has_results?: boolean;
+    export?: JobExport | null;
 }
 
 export interface ArchiveStatus {
@@ -96,6 +126,8 @@ export interface ArchiveStatus {
     reason?: string | null;
     work_dir?: string | null;
     running_job?: string | null;
+    // What it runs: the job's analysis or the export of its sets (A4).
+    running_kind?: "analysis" | "export" | null;
 }
 
 export type SetFilter = "all" | "matched" | "review";
