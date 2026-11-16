@@ -889,6 +889,16 @@ def resume_archive_job(jobId):
     return ArchiveJobService.instance.Resume(jobId)
 
 
+def get_archive_video(jobId):
+    """(path, type) of the video the job was run on (ADR-006 A3)."""
+    return ArchiveJobService.instance.VideoFile(jobId)
+
+
+def get_archive_frame(jobId, number):
+    """(path, type) of set `number`'s background frame (ADR-006 A3)."""
+    return ArchiveJobService.instance.FrameFile(jobId, number)
+
+
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────
 # The Stream page's: core's StreamService (and AutonaActions for the two
 # state fields), in both shells, on the calling thread -- there is no board.

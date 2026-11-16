@@ -15,15 +15,24 @@ The CLI
     instead (a broken worker).
 
 ``run <source> --out DIR [--results FILE] [--event NAME | --event=NAME]
-[--download-dir DIR] [--no-cut] [--progress json] [--cancel-on-stdin]``
+[--download-dir DIR] [--no-cut] [--thumbs] [--progress json]
+[--cancel-on-stdin]``
     What it does depends on ``FAKE_VODSPLIT_MODE``:
 
     ``ok`` (the default)
         Prints a ``stage`` and ``progress`` line for each of vodsplit's
         stages, a ``log`` and a ``warning`` line, writes ``DIR/sets.json``
         (the shape of vodsplit ``export.save()``: two sets, the second one
-        needing review; with ``--results``, the sets take its players and
-        scores) and prints ``done``; exit 0.
+        needing review, with ``games_ocr``; with ``--results``, the sets
+        take its players and scores) and prints ``done``; exit 0. A URL
+        source with ``--download-dir`` is "downloaded" as vodsplit names it
+        (``<dir>/fakevideo01.open.mp4``, VIDEO_BYTES), and sets.json's
+        ``source`` is that file, as vodsplit's is. With ``--thumbs``, as
+        vodsplit's export.py: sets.json is written first without frames,
+        then the ``export`` stage (``書き出し``, the 5th of 5) prints a
+        progress line per set as it writes its background frame
+        (``DIR/NN_fake_bg.jpg``, FRAME_BYTES), and sets.json is written again
+        with each set's ``thumb`` / ``thumb_time``.
     ``error``
         Prints a stage, then ``{"type": "error", "code": "download",
         "message", "hint"}``; exit 2 (an error the operator can fix).
@@ -59,12 +68,21 @@ import sys
 import threading
 import time
 
+# What the fake writes for the downloaded video and a set's frame: bytes,
+# not media (the tests read them back).
+VIDEO_BYTES = bytes(range(256)) * 64
+FRAME_BYTES = b"\xff\xd8\xff\xe0fake frame\xff\xd9"
+
 STAGES = [
     ("download", "ダウンロード"),
     ("decode", "映像を解析（試合中の判定）"),
     ("ocr", "スコアボードを読み取り（OCR）"),
     ("segment", "セットに分割"),
+    ("export", "書き出し"),
 ]
+# vodsplit's export stage runs only when there is something to write (the
+# frames: --thumbs; the cuts: not with --no-cut).
+EXPORT = len(STAGES) - 1
 
 
 def emit(event):
@@ -74,7 +92,7 @@ def emit(event):
 def stage(index):
     key, label = STAGES[index]
     emit({"type": "stage", "stage": key, "label": label, "index": index + 1,
-          "count": len(STAGES) + 1})
+          "count": len(STAGES)})
 
 
 def option(argv, name, default=None):
@@ -88,7 +106,7 @@ def option(argv, name, default=None):
     return default
 
 
-def sets_json(source, results, event):
+def sets_json(source, results, event, thumbs=False):
     played = (results or {}).get("sets") or [
         {"round": "Winners Round 1", "p1": "Alpha", "s1": 2, "p2": "Beta",
          "s2": 1},
@@ -114,6 +132,9 @@ def sets_json(source, results, event):
             "needs_review": review,
             "reason": "名前の読み取りが合いません" if review else "",
         })
+        if thumbs:
+            rows[-1]["thumb_time"] = start + 30.0
+            rows[-1]["thumb"] = f"{number:02d}_fake_bg.jpg"
         start = end + 60.0
     return {
         "version": "0.0.0-fake", "format": 1, "source": source,
@@ -121,8 +142,22 @@ def sets_json(source, results, event):
         "template": "default", "duration": 3600.0, "video": None,
         "scoreboard": None,
         "games": [game for row in rows for game in row["game_spans"]],
+        "games_ocr": [{"samples": 20, "names": {
+            row["set"]["p1"]: 1.0, row["set"]["p2"]: 0.5}} for row in rows],
         "warnings": ["fake warning"], "unused_sets": [], "sets": rows,
     }
+
+
+def download(source, folder):
+    """vodsplit's download: the file it would write for a URL (VP9 offered:
+    ``<id>.open.mp4``), or the source itself for a file."""
+    if not source.startswith(("http://", "https://")) or not folder:
+        return source
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "fakevideo01.open.mp4")
+    with open(path, "wb") as file:
+        file.write(VIDEO_BYTES)
+    return path
 
 
 def run(argv):
@@ -201,7 +236,7 @@ def run(argv):
     emit({"type": "log", "message": "fake log line"})
     emit({"type": "warning", "message": "fake warning"})
     overall = 0.0
-    for index in range(len(STAGES)):
+    for index in range(EXPORT):
         if index:
             stage(index)
         for step in (1, 2):
@@ -214,9 +249,31 @@ def run(argv):
                   "done": step, "total": 2, "fraction": step / 2,
                   "overall": overall, "eta": 1.0 if step == 1 else None})
     os.makedirs(out, exist_ok=True)
-    data = sets_json(source, results, event)
-    with open(os.path.join(out, "sets.json"), "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=1)
+    video = download(source, option(argv, "--download-dir"))
+
+    def save(data):
+        with open(os.path.join(out, "sets.json"), "w",
+                  encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=1)
+
+    data = sets_json(video, results, event)
+    save(data)
+    if "--thumbs" in argv:
+        stage(EXPORT)
+        data = sets_json(video, results, event, thumbs=True)
+        steps = len(data["sets"])
+        for done, row in enumerate(data["sets"], 1):
+            time.sleep(delay)
+            if cancel.is_set():
+                emit({"type": "cancelled"})
+                return 130
+            with open(os.path.join(out, row["thumb"]), "wb") as file:
+                file.write(FRAME_BYTES)
+            overall = round(overall + 0.1 / steps, 4)
+            emit({"type": "progress", "stage": "export", "done": done,
+                  "total": steps, "fraction": done / steps,
+                  "overall": overall, "eta": None})
+        save(data)
     review = sum(1 for row in data["sets"] if row["needs_review"])
     emit({"type": "done", "out_dir": out,
           "sets_json": os.path.join(out, "sets.json"),

@@ -349,6 +349,11 @@ ROUTE_ACCESS = {
     "api_v1.get_archive_job": THIS_PC,
     "api_v1.archive_job_cancel": SHELL,
     "api_v1.archive_job_resume": SHELL,
+    # The preview's files (ADR-006 A3): the job's video and a set's frame,
+    # THIS_PC as the job they belong to -- the page opened in this PC's
+    # browser (a video the shared view cannot play: H.264) plays them too.
+    "api_v1.get_archive_video": THIS_PC,
+    "api_v1.get_archive_frame": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

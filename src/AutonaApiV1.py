@@ -28,9 +28,9 @@ import traceback
 from collections import OrderedDict
 from urllib.parse import unquote
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_file
 from loguru import logger
-from werkzeug.exceptions import ClientDisconnected
+from werkzeug.exceptions import ClientDisconnected, RequestedRangeNotSatisfiable
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
@@ -91,6 +91,9 @@ INTERNAL = "INTERNAL"                         # 500
 # A request body over its route's limit (write_op's max_body: the image
 # uploads, the stream org's (ADR-005 S4e) and the tournament's (S4g)).
 PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"       # 413
+# A file there is but of a type the route does not serve (ADR-006 A3: an
+# archive job's video the preview cannot play -- .flv / .ts and the like).
+UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"  # 415
 # An operation this shell cannot run (ADR-005 S3c): the server runs, the
 # operation needs what the shell does not have. Not retryable. In v1, only
 # starting a match thumbnail's render does (ADR-005 S4o): the off-screen view
@@ -2568,6 +2571,8 @@ _ARCHIVE_REFUSALS = {
     archive.ALREADY_DONE: (CONFLICT, 409),
     archive.SOURCE_UNUSABLE: (CONFLICT, 409),
     archive.WORK_DIR_UNUSABLE: (NOT_READY, 409),
+    archive.UNREADABLE: (CONFLICT, 409),
+    archive.NOT_PREVIEWABLE: (UNSUPPORTED_MEDIA_TYPE, 415),
     archive.UNAVAILABLE: (UNAVAILABLE, 503),
     archive.STOPPING: (UNAVAILABLE, 503),
 }
@@ -2651,6 +2656,66 @@ def get_archive_job(job_id):
     except archive.ArchiveError as error:
         raise _archive_refused(error)
     return ok(data={"job": job, "sets": sets})
+
+
+def _archive_file(found, missing):
+    # One of a job's files (ADR-006 A3, D7): core names it from the job
+    # alone (the request never names a path). Ranges (206: the <video>
+    # seeks) and HEAD; the type core's, not sniffed (nosniff), and no-store
+    # (outside the route's decorator: a video kept out of the browser's
+    # disk cache too). A range past the end answers werkzeug's 416 (with
+    # its "Content-Range: bytes */<size>"), not api_handler's 500. The file
+    # gone since core looked (deleted, moved) is a 404 with `missing`, core's
+    # words; one that cannot be opened (held by another app, no permission)
+    # a 409 -- as the other refusals, never the path.
+    path, kind = found
+    try:
+        resp = send_file(path, mimetype=kind, conditional=True)
+    except RequestedRangeNotSatisfiable as error:
+        resp = error.get_response()
+    except FileNotFoundError:
+        raise _archive_refused(archive.ArchiveError(archive.NOT_FOUND,
+                                                    missing)) from None
+    except OSError as error:
+        logger.warning(f"Archive: a preview file could not be opened "
+                       f"({type(error).__name__}, errno {error.errno})")
+        raise _archive_refused(archive.ArchiveError(
+            archive.UNREADABLE, archive.FILE_UNREADABLE)) from None
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@api_v1.route("/archive/jobs/<job_id>/video")
+@_no_store_answers
+@api_handler
+def get_archive_video(job_id):
+    # The video the job was run on: the file of this PC its job.json names,
+    # or (a URL) the one the worker downloaded into the work folder's
+    # downloads/. 404 for an unknown or running job, a share's path, a file
+    # outside the work folder, not a video (archive._VIDEO_SUFFIXES) or one
+    # that is gone; 415 for a video there is that the preview cannot play
+    # (.flv / .ts ...: only .mp4 / .m4v / .webm / .mkv / .mov are served);
+    # 409 when it cannot be opened.
+    try:
+        return _archive_file(WebOps.get_archive_video(job_id),
+                             archive.VIDEO_MISSING)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+
+
+@api_v1.route("/archive/jobs/<job_id>/frames/<no>")
+@_no_store_answers
+@api_handler
+def get_archive_frame(job_id, no):
+    # Set `no`'s background frame (a JPEG the worker wrote into the job's
+    # out/, sets.json's "thumb"). 404 when there is none (the worker was not
+    # run with --thumbs, the job runs, no such set); 409 when it cannot be
+    # opened.
+    try:
+        return _archive_file(WebOps.get_archive_frame(job_id, no),
+                             archive.FRAME_MISSING)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
 
 
 @api_v1.route("/archive/jobs/<job_id>:cancel", methods=["POST"])

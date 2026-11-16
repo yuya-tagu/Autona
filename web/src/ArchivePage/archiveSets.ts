@@ -27,13 +27,26 @@ export interface SetRow {
     corrected_games?: unknown;
     needs_review?: boolean;
     reason?: string | null;
+    // The set's background frame in the job's out/ (vodsplit --thumbs; the
+    // page reads it through /frames/<no>) and its time.
+    thumb?: string | null;
+    thumb_time?: number | null;
+}
+
+// Names read off the scoreboard in one detected game (sets.json "games_ocr",
+// parallel to "games"): name -> share of the game's OCR samples showing it.
+export interface GameOcr {
+    samples?: number;
+    names?: Record<string, number>;
 }
 
 export interface SetsJson {
+    source?: string | null;
     source_id?: string | null;
     event?: string | null;
     duration?: number | null;
     games?: number[][];
+    games_ocr?: GameOcr[];
     warnings?: string[];
     unused_sets?: SetResult[];
     sets: SetRow[];

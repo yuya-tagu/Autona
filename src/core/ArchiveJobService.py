@@ -21,7 +21,9 @@ default, never under user_data/: the videos are large and the operator's):
   state changes -- at the start and at the end, not on every progress line;
 - ``<work>/<id>/results.json``: the results it was given, when it was;
 - ``<work>/<id>/out/``: the worker's output (``sets.json`` -- A1 runs with
-  ``--no-cut``, so no clips yet -- and its analysis cache ``.cache``);
+  ``--no-cut``, so no clips yet --, each set's background frame
+  ``NN_<title>_bg.jpg`` (``--thumbs``, ADR-006 A3; sets.json's ``thumb``)
+  and its analysis cache ``.cache``);
 - ``<work>/<id>/worker.log``: the worker's stderr and what it printed on
   stdout that is not a JSON line, appended by this process alone;
 - ``<work>/downloads/``: the downloaded videos, shared by the jobs (two
@@ -36,7 +38,7 @@ The run
 -------
 The worker is started with ``run <source> --out <job>/out --download-dir
 <work>/downloads [--results <job>/results.json] [--event=<name>] --no-cut
---progress json --cancel-on-stdin``. The source is a URL or a file on a
+--thumbs --progress json --cancel-on-stdin``. The source is a URL or a file on a
 drive of this PC (a share's path is refused unread: ``CheckSource``),
 checked again on a resume. Two threads of this service read it
 (``_Start``): one its stdout's JSON lines into the progress held in memory
@@ -60,6 +62,22 @@ previous run's until the worker writes its own). ``Shutdown`` (the shells' close
 worker and every process it started (the job object). A job a previous
 Autona left ``running`` (it ended without its close: a crash, a kill) is
 rewritten ``cancelled`` the first time the work folder is used.
+
+What the page plays (ADR-006 A3, D7)
+------------------------------------
+The preview's video and a set's background frame are files this service
+names from the job alone (``VideoFile`` / ``FrameFile``); a request names
+the job (and the set's number), never a path. The video is the source
+job.json names when it is a file of this PC (checked as a start checks it:
+a share's path refused unread), else -- a URL -- the file the worker
+downloaded for it. job.json does not name that one (the worker picks it:
+``<id>.open.mp4``, or ``<id>.mp4`` when no VP9 / AV1 was offered); the
+worker's out/sets.json does (``source``), and it is looked for by its name
+in this work folder's downloads/ (the folder may have been moved since).
+A frame is the ``thumb`` sets.json names for the set, in the job's out/.
+The download and the frame must resolve under the work folder (links
+followed); the operator's own file may be anywhere on this PC's drives.
+Anything else is ``not_found``.
 
 Threads and locks: the request threads and the two reader threads.
 ``_lock`` holds the run in memory, the probe's cache and the swept work
@@ -130,6 +148,24 @@ _REPLACE_BACKOFF = 0.05
 
 _ID_CHARACTERS = string.ascii_lowercase + string.digits
 
+# What the preview serves (VideoFile / FrameFile): a video a browser can
+# play, of these extensions only, its type from this fixed table (not the
+# registry's); a set's number in a URL; a frame is a JPEG.
+_VIDEO_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4",
+                ".webm": "video/webm", ".mkv": "video/x-matroska",
+                ".mov": "video/quicktime"}
+# The videos a job may have been run on: vodsplit has no list of its own
+# (api.run takes any file there is and opens it with cv2.VideoCapture, i.e.
+# FFmpeg), so this is the common containers FFmpeg reads -- OBS records .flv
+# / .ts too. One of them that is not in _VIDEO_TYPES is a video the preview
+# cannot play (NOT_PREVIEWABLE); any other file is not a video (NOT_FOUND).
+_VIDEO_SUFFIXES = frozenset(_VIDEO_TYPES) | {
+    ".ts", ".m2ts", ".mts", ".flv", ".avi", ".wmv", ".mpg", ".mpeg",
+    ".3gp", ".ogv"}
+SET_NUMBER_PATTERN = re.compile(r"[0-9]{1,6}")
+_FRAME_SUFFIXES = (".jpg", ".jpeg")
+FRAME_TYPE = "image/jpeg"
+
 STALE_NOTE = ("前回の Autona の終了時に実行中だったため、中断として扱いました。"
               "「再開」で続きから実行できます。")
 
@@ -145,6 +181,22 @@ WORK_DIR_UNUSABLE = "work_dir"
 # A resume whose job.json names a source a start would refuse (edited by
 # hand, the video moved or deleted since).
 SOURCE_UNUSABLE = "source"
+# A preview file that is there but cannot be opened (another app holds it,
+# no permission): v1 raises it when send_file's open fails (AutonaApiV1).
+UNREADABLE = "unreadable"
+# A job's video that is there but of a format the preview cannot play (a
+# video of _VIDEO_SUFFIXES not in _VIDEO_TYPES): the sets and the timeline
+# still work.
+NOT_PREVIEWABLE = "not_previewable"
+
+# The preview's refusals' words (VideoFile / FrameFile, and v1 when the
+# file is gone by the time it opens it).
+VIDEO_MISSING = "この切り抜きジョブの動画が見つかりません。"
+VIDEO_NOT_PREVIEWABLE = ("この形式の動画は画面でプレビューできません。"
+                         "セットの一覧・タイムラインは使えます。")
+FRAME_MISSING = "このセットの画像はありません。"
+FILE_UNREADABLE = ("ファイルを開けません。ほかのアプリが使っていないか、"
+                   "読む権限があるかを確かめてください。")
 
 
 class ArchiveError(Exception):
@@ -184,6 +236,27 @@ def _IsNetworkPath(path):
     ``//host/share``) or a device path (``\\\\?\\UNC\\...``, ``\\\\?\\C:\\``,
     ``\\\\.\\pipe\\...``). Read from the text alone."""
     return len(path) >= 2 and path[0] in "\\/" and path[1] in "\\/"
+
+
+def _FileName(value):
+    """The last part of a path sets.json names (either separator), or None
+    for what names no file in a folder (".", "..", a stream: ":")."""
+    if not isinstance(value, str) or _HasControl(value):
+        return None
+    name = re.split(r"[\\/]", value)[-1]
+    if name in ("", ".", "..") or ":" in name:
+        return None
+    return name
+
+
+def _Under(base, path):
+    """Whether `path` resolves (links followed) inside folder `base`."""
+    root = os.path.realpath(base)
+    real = os.path.realpath(path)
+    try:
+        return os.path.commonpath([root, real]) == root and real != root
+    except ValueError:
+        return False
 
 
 def CheckSource(source):
@@ -238,12 +311,51 @@ def CheckResults(results):
         if missing:
             raise ArchiveError(INVALID, (
                 f"結果データの {index} 件目のセットに {', '.join(missing)} がありません。"))
+        # vodsplit's order (results.validate_set): the names, the scores,
+        # then the optional fields -- the same set gets the same message.
+        if not all(isinstance(item[key], str) and item[key].strip()
+                   for key in ("p1", "p2")):
+            raise ArchiveError(INVALID, (
+                f"結果データの {index} 件目のセットの選手名（p1, p2）は空でない文字列にしてください。"))
         if not all(isinstance(item[key], int)
                    and not isinstance(item[key], bool) and item[key] >= 0
                    for key in ("s1", "s2")):
             raise ArchiveError(INVALID, (
                 f"結果データの {index} 件目のセットのスコア（s1, s2）は 0 以上の整数にしてください。"))
+        _CheckSetOptionals(item, f"結果データの {index} 件目のセット")
     return results
+
+
+def _CheckSetOptionals(item, where):
+    """The rest of vodsplit's results.validate_set (optional
+    c1 / c2 / char_source / id / games, round), in its order. Same wording,
+    so a set Autona accepts is never refused by the worker later. `round`
+    is not rewritten here: the worker turns null into "" itself."""
+    for key in ("c1", "c2", "char_source"):
+        if item.get(key) is not None and not isinstance(item[key], str):
+            raise ArchiveError(INVALID, (
+                f"{where}の {key} は文字列か null にしてください。"))
+    ident = item.get("id")
+    if ident is not None and (isinstance(ident, bool)
+                              or not isinstance(ident, (str, int))):
+        raise ArchiveError(INVALID, f"{where}の id は文字列か整数にしてください。")
+    games = item.get("games")
+    if games is not None:
+        if not isinstance(games, list) or not all(
+                isinstance(game, dict) for game in games):
+            raise ArchiveError(INVALID, (
+                f"{where}の games はゲームごとのオブジェクトの配列にしてください。"
+                '例: "games": [{"c1": "マリオ", "c2": "リンク"}, '
+                '{"c1": "マリオ", "c2": "ピカチュウ"}]'))
+        for number, game in enumerate(games, 1):
+            for key in ("c1", "c2"):
+                if game.get(key) is not None and not isinstance(game[key], str):
+                    raise ArchiveError(INVALID, (
+                        f"{where}の games の {number} 件目の {key} は"
+                        "文字列か null にしてください。"))
+    if item.get("round") is not None and not isinstance(item["round"], str):
+        raise ArchiveError(INVALID, (
+            f"{where}の round（ラウンド名）は文字列か null にしてください。"))
 
 
 def CheckEvent(event):
@@ -634,6 +746,89 @@ class ArchiveJobService:
                      progress=dict(run.progress) if run.progress else None,
                      logs=run.logs, warnings=run.warnings)
 
+    # ── what the preview plays (ADR-006 A3, D7) ────────────────────────
+
+    def _Served(self, jobId):
+        """(work folder, job folder, job.json, running) of job `jobId` for
+        the preview's files. Raises ArchiveError(NOT_FOUND)."""
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            run = self._run
+            if run is not None and run.record["id"] == jobId:
+                return workDir, jobDir, dict(run.record), True
+        record = self._ReadRecord(jobDir, jobId)
+        if record is None:
+            raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+        return workDir, jobDir, record, False
+
+    def VideoFile(self, jobId):
+        """(path, type) of the video job `jobId` was run on: the file of this
+        PC its job.json names, or -- a URL -- the one the worker downloaded
+        for it (out/sets.json's ``source``, looked for by its name in this
+        work folder's downloads/). Raises ArchiveError(NOT_FOUND): no such
+        job, a running one (as FrameFile: the page shows no sets then), a
+        share's path (refused unread), no download (yet), a file outside the
+        work folder, not a video (``_VIDEO_SUFFIXES``), or gone;
+        ArchiveError(NOT_PREVIEWABLE): a video that is there but not one
+        the preview plays (not of ``_VIDEO_TYPES``)."""
+        missing = ArchiveError(NOT_FOUND, VIDEO_MISSING)
+        workDir, jobDir, record, running = self._Served(jobId)
+        if running:
+            raise missing
+        source = record["source"]
+        if re.match(r"https?://", source):
+            sets = self._ReadSets(jobDir) or {}
+            name = _FileName(sets.get("source"))
+            if name is None:
+                raise missing
+            path = os.path.join(workDir, DOWNLOADS_DIR, name)
+            if not _Under(workDir, path):
+                raise missing
+        else:
+            try:
+                path = CheckSource(source)
+            except ArchiveError:
+                raise missing from None
+        # CheckSource has refused a share's path before touching the disk.
+        suffix = os.path.splitext(path)[1].lower()
+        if suffix not in _VIDEO_SUFFIXES or not os.path.isfile(path):
+            raise missing
+        kind = _VIDEO_TYPES.get(suffix)
+        if kind is None:
+            raise ArchiveError(NOT_PREVIEWABLE, VIDEO_NOT_PREVIEWABLE)
+        return path, kind
+
+    def FrameFile(self, jobId, number):
+        """(path, type) of set `number`'s background frame (out/sets.json's
+        ``thumb``, a JPEG in the job's out/; the worker writes it with
+        ``--thumbs``). None of a running job (its sets.json is the previous
+        run's, as Job), nor one resolving outside the job's out/. Raises
+        ArchiveError(NOT_FOUND)."""
+        missing = ArchiveError(NOT_FOUND, FRAME_MISSING)
+        if not isinstance(number, str) \
+                or not SET_NUMBER_PATTERN.fullmatch(number):
+            raise missing
+        _workDir, jobDir, _record, running = self._Served(jobId)
+        if running:
+            raise missing
+        sets = (self._ReadSets(jobDir) or {}).get("sets")
+        row = next((item for item in sets if isinstance(item, dict)
+                    and type(item.get("no")) is int
+                    and item["no"] == int(number)), None) \
+            if isinstance(sets, list) else None
+        name = _FileName(row.get("thumb")) if row is not None else None
+        if name is None or not name.lower().endswith(_FRAME_SUFFIXES):
+            raise missing
+        # Resolved (links followed) inside this job's out/, itself inside
+        # the job's folder: not another job's file, not a download.
+        out = os.path.join(jobDir, OUT_DIR)
+        path = os.path.join(out, name)
+        if (not _Under(jobDir, out) or not _Under(out, path)
+                or not os.path.isfile(path)):
+            raise missing
+        return path, FRAME_TYPE
+
     @staticmethod
     def _ReadSets(jobDir):
         path = os.path.join(jobDir, OUT_DIR, SETS_FILE)
@@ -798,7 +993,9 @@ class ArchiveJobService:
             # One word: a name starting with "-" is the value, not an
             # option (argparse reads "--event -x" as a missing value).
             arguments.append(f"--event={record['event']}")
-        return arguments + ["--no-cut", "--progress", "json",
+        # --thumbs: each set's background frame, the set list's and the
+        # preview's picture (FrameFile; ADR-006 A3).
+        return arguments + ["--no-cut", "--thumbs", "--progress", "json",
                             "--cancel-on-stdin"]
 
     def _Start(self, run, probe):
