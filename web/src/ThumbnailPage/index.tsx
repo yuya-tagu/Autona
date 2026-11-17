@@ -21,6 +21,11 @@ import {
     withDeadline,
 } from "../PanelShell/requests";
 import {
+    TemplateChoice,
+    templateLabel,
+    useTemplatePackages,
+} from "../PanelShell/templatePackages";
+import {
     IMAGE_UPLOAD_MAX_BYTES,
     UPLOAD_TIMEOUT_MS,
     readDataUrl,
@@ -197,6 +202,18 @@ function ThumbnailContent() {
     const [loads, setLoads] = React.useState(0);
     const [settings, setSettings] = React.useState<ThumbnailSettings | null>(null);
     const [templates, setTemplates] = React.useState<ThumbnailTemplate[]>([]);
+    // The templates to choose from: the catalog's thumbnail packages
+    // (ADR-007 T1), or the description's until (unless) they are read.
+    const packages = useTemplatePackages("thumbnail", loads);
+    const choices: TemplateChoice[] = React.useMemo(() => (packages
+        ? packages.map((entry) => ({
+            id: entry.id,
+            label: templateLabel(entry, "thumbnail_template_", language)}))
+        : templates.map((entry) => ({
+            id: entry.id,
+            label: i18n.t(`thumbnail_template_${entry.id}`,
+                          {defaultValue: entry.name})}))),
+    [packages, templates, language]);
     const [game, setGame] = React.useState<ThumbnailGame | null>(null);
     const [videoTitle, setVideoTitle] = React.useState("");
     const [canRender, setCanRender] = React.useState(true);
@@ -624,7 +641,7 @@ function ThumbnailContent() {
             <Box sx={{width: {md: 440}, flexShrink: 0, overflowY: {md: "auto"},
                       p: 2}}>
                 <Stack spacing={2}>
-                    <DesignCard settings={settings} templates={templates}
+                    <DesignCard settings={settings} choices={choices}
                                 change={change} upload={upload}/>
                     <ItemsCard settings={settings} change={change}/>
                     <CharactersCard

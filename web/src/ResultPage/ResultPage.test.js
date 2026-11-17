@@ -62,8 +62,19 @@ function team(slot, fields = {}) {
     return {slot, rank: slot, name: "", members: [], ...fields};
 }
 
+// GET /api/v1/layouts?kind=result: the shipped layouts above, as the catalog
+// lists them (ADR-007 T1). Their names on the page are the page's own words.
+function catalogOf(layouts) {
+    return layouts.map((entry) => ({
+        id: entry.id, kind: "result", bundled: true,
+        displayName: `${entry.name} en`,
+        displayNames: {ja: `${entry.name} ja`, en: `${entry.name} en`},
+        size: [entry.width, entry.height]}));
+}
+
 function freshWorld() {
     return {
+        catalog: catalogOf(LAYOUTS),
         layout: "horizontal",
         players: Array.from({length: 16}, (_unused, index) => player(index + 1)),
         teams: Array.from({length: 8}, (_unused, index) => team(index + 1)),
@@ -344,6 +355,9 @@ beforeEach(() => {
             if (path === "/api/v1/characters") {
                 return answer(200, {ok: true, data: table.characters});
             }
+            if (path === "/api/v1/layouts") {
+                return answer(200, {ok: true, data: world.catalog});
+            }
             if (path.startsWith("/out/")) {
                 return {ok: true, status: 200, blob: async () => new Blob(["x"])};
             }
@@ -444,6 +458,51 @@ test("the layout chosen is saved, and says how many rows and of what kind",
     expect(screen.getByRole("region", {
         name: i18n.t("result_rows_teams", {count: 8})})).toBeInTheDocument();
     expect(field(1, "result_team_name")).toBeInTheDocument();
+});
+
+test("the layouts offered are the catalog's, a package placed by hand too",
+     async () => {
+    // A package's id is its folder's name: "field" is not taken for the page's
+    // result_layout_field, it shows its own name.
+    // Named by displayNames in the page's language; "plain" has none, and is
+    // named by displayName (the app's language).
+    world.catalog = [...catalogOf(LAYOUTS),
+        {id: "field", kind: "result", bundled: false, displayName: "フィールド",
+         displayNames: {ja: "フィールド", en: "Field Day"}, size: [1280, 720]},
+        {id: "plain", kind: "result", bundled: false, displayName: "Plain",
+         displayNames: {}, size: [1920, 1080]}];
+    await renderPage();
+
+    expect(global.fetch.mock.calls.map(([url]) => url).filter(
+        (url) => new URL(url).pathname === "/api/v1/layouts")
+        .map((url) => new URL(url).search)).toEqual(["?kind=result"]);
+    fireEvent.mouseDown(screen.getByRole("combobox",
+                                         {name: i18n.t("result_layout_field")}));
+    const options = (await screen.findAllByRole("option"))
+        .map((option) => option.textContent);
+    expect(options).toEqual([
+        ...LAYOUTS.map((entry) => i18n.t(`result_layout_${entry.id}`)),
+        "Field Day", "Plain"]);
+
+    fireEvent.click(screen.getByRole("option", {name: "Field Day"}));
+    await settle();
+
+    expect(writes("PATCH", RESULT)).toEqual([{layout: "field"}]);
+});
+
+test("without the catalog, the description's layouts are offered", async () => {
+    world.catalog = null;
+    const answering = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, init) => (
+        new URL(url).pathname === "/api/v1/layouts"
+            ? refusal(404) : answering(url, init)));
+    await renderPage();
+
+    fireEvent.mouseDown(screen.getByRole("combobox",
+                                         {name: i18n.t("result_layout_field")}));
+    expect((await screen.findAllByRole("option"))
+        .map((option) => option.textContent)).toEqual(
+        LAYOUTS.map((entry) => i18n.t(`result_layout_${entry.id}`)));
 });
 
 test("a layout changed elsewhere (the sidebar's battle format) is followed",

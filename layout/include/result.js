@@ -2,9 +2,10 @@
  * result: Top 8 result image layout.
  *
  * Called from Python via page().runJavaScript("initResult(payload)").
- * payload = { data, config }
+ * payload = { data, config, layout }
  *   data.players = [{ rank, name, sponsor, character: { assets, ... } }, ...]
  *   data.tournamentName, data.eventName, data.startAt, data.numEntrants
+ *   data.rows: "players" / "teams" (the layout's manifest's rows)
  *   config.main_icon_path, config.background_path, config.accent_color
  */
 
@@ -20,9 +21,13 @@ async function initResult(payload) {
     applyConfig(config);
     setBackground(config);
     setHeader(data, config);
-    // Team / Crew layouts (team, team_split, ...): each rank slot holds a
-    // roster of main fighters. Grid arrangement differs per layout (CSS).
-    if (layout.startsWith("team")) {
+    // Team / Crew layouts (data.rows "teams"; a payload without rows, by the
+    // id: team, team_split, ...): each rank slot holds a roster of main
+    // fighters. Grid arrangement differs per layout (CSS).
+    const teams = data && data.rows
+      ? data.rows === "teams"
+      : layout.startsWith("team");
+    if (teams) {
       await placeTeams(data, config, layout);
     } else {
       await placePlayers(data, config);
@@ -238,7 +243,7 @@ async function placePlayers(data, config) {
  * Team / Crew standings: each rank slot is a team card whose members each show
  * a single main fighter with a name caption, anchored by the team name plate.
  * Reuses the base Top-8 grid (slot-N classes) and rank auras from result.css;
- * the per-member arrangement lives in result_team/result.css.
+ * the per-member arrangement lives in include/result_team.css.
  */
 async function placeTeams(data, config, layout) {
   const teams = data.players || [];

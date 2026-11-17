@@ -16,6 +16,7 @@ import json
 import os
 import random
 import re
+import shutil
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from loguru import logger
 from PIL import Image
 
 from src.core import ImageImport
+from src.core import LayoutCatalog
 from src.core import StateSchema as schema
 from src.core import ThumbnailService as thumbnails
 from src.core.DictHelper import deep_clone
@@ -134,6 +136,10 @@ def env(autonaApp, tmp_path, monkeypatch):
     os.chdir(tmp_path)
     for directory in ("out", "user_data", "layout"):
         (tmp_path / directory).mkdir(exist_ok=True)
+    # The templates are the catalog's thumbnail packages (ADR-007 T1), in this
+    # directory's layout/ (world.FILES; the catalog's folder follows the app's
+    # directory, not the working one).
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(tmp_path / "layout"))
     if SM._export_thread is not None:
         SM._export_thread.join()
     with SM.lock:
@@ -155,8 +161,11 @@ def env(autonaApp, tmp_path, monkeypatch):
                         locale["phaseNames"]),
         prune=PruneOutputFiles)
     monkeypatch.setattr(ThumbnailService, "instance", service)
-    # The game list the tests' updates are for.
-    monkeypatch.setattr(GameAssetCatalog.instance, "GameCodenames",
+    # The game list the tests' updates are for. On the instance's own dict:
+    # setattr's undo would put the bound method back as an attribute of the
+    # instance, which hides a later test's patch of the class
+    # (tests/test_api_v1.py's game load that does not happen).
+    monkeypatch.setitem(vars(GameAssetCatalog.instance), "GameCodenames",
                         lambda: list(KNOWN_GAMES))
     try:
         environment = _Env(service=service, queued=queued, locale=locale,
@@ -567,7 +576,8 @@ def test_before_the_list_is_read_only_the_game_in_the_state_is_taken(
     if nothing == "no catalog":
         monkeypatch.setattr(GameAssetCatalog, "instance", None)
     else:
-        monkeypatch.setattr(GameAssetCatalog.instance, "GameCodenames",
+        # As the env's (setitem: nothing is left on the instance).
+        monkeypatch.setitem(vars(GameAssetCatalog.instance), "GameCodenames",
                             lambda: [])
 
     # No game is on offer yet.
@@ -1925,14 +1935,82 @@ def test_a_generate_with_no_match_says_why_whatever_the_file_is(
 
 def test_a_payload_that_cannot_be_built_says_so(env, executor):
     SM.state = copy.deepcopy(PLAYERS)
-    os.remove(env.dir / "assets" / "thumbnail_base" / "thumbnail_types"
-              / "type_a.json")
+    os.remove(env.dir / world.DEFAULT_TEMPLATE_FILE)
 
     env.service.Preview()
 
     assert env.render()["status"] == "error"
     assert env.render()["error"] == thumbnails.PAYLOAD_FAILED
     assert env.service.Preview() == 2
+
+
+# ── the templates are the catalog's thumbnail packages (ADR-007 T1) ─────
+
+def _placeTemplate(env, name, layout=None, displayName=None, raw=None):
+    """A thumbnail package placed by hand in the env's layout/: its page, its
+    template file (`layout`, or the text `raw`) and its manifest."""
+    directory = env.dir / "layout" / name
+    directory.mkdir()
+    (directory / "thumbnail.html").write_text("", encoding="utf-8")
+    (directory / "layout.json").write_text(
+        raw if raw is not None
+        else json.dumps({"name": name} if layout is None else layout),
+        encoding="utf-8")
+    block = {"kind": "thumbnail", "contract": 1, "size": [1920, 1080],
+             "template": "layout.json"}
+    if displayName is not None:
+        block["displayName"] = displayName
+    (directory / "settings.json").write_text(json.dumps({"autona": block}),
+                                             encoding="utf-8")
+    return directory
+
+
+def test_a_template_placed_by_hand_is_offered_and_drawn(env):
+    _placeTemplate(env, "neon", {"name": "Neon", "base_ratio": {"x": 1}},
+                   displayName={"ja": "ネオン", "en": "Neon"})
+
+    assert env.service.Templates() == [
+        {"id": "type_a", "name": "Standard"},
+        {"id": "type_b", "name": "Center Panel"},
+        {"id": "neon", "name": "Neon"}]
+    assert env.service.Update({"template_id": "neon"})["template_id"] == "neon"
+    SM.state = copy.deepcopy(PLAYERS)
+    _data, _config, template = env.service.RenderPayload()
+    assert template == {"name": "Neon", "base_ratio": {"x": 1},
+                        "template_id": "neon"}
+
+
+def test_a_saved_template_whose_package_is_gone_is_drawn_on_the_default(env):
+    directory = _placeTemplate(env, "neon")
+    env.service.Update({"template_id": "neon"})
+
+    shutil.rmtree(directory)
+
+    assert env.service.Settings()["template_id"] == "type_a"
+    _data, _config, template = env.service.RenderPayload(preview=True)
+    assert (template["template_id"], template["name"]) == ("type_a",
+                                                            "Fixture A")
+    # What the operator chose stays saved, and is refused while it is gone.
+    assert env.config()["template_id"] == "neon"
+    assert env.service.Update({"template_id": "neon"}) is None
+
+
+@pytest.mark.parametrize("raw", [
+    "[1, 2]",
+    "{not json",
+    # json.load raises RecursionError, not ValueError, on deep nesting.
+    "[" * 100_000 + "]" * 100_000,
+], ids=["a list", "not json", "nested to death"])
+def test_a_template_file_that_cannot_be_read_is_a_value_error(env, raw):
+    # What the callers take (RenderLane's payload failure, the archive
+    # clipper's "no template"), whatever reading it raised.
+    _placeTemplate(env, "broken", raw=raw)
+    env.service.Update({"template_id": "broken"})
+
+    with pytest.raises(ValueError):
+        env.service.RenderPayload(preview=True)
+    with pytest.raises(ValueError):
+        env.service.SetPayload(copy.deepcopy(PLAYERS))
 
 
 def test_a_missing_match_in_a_preview_is_still_a_placeholder(env, executor):
@@ -2385,6 +2463,7 @@ def test_the_session_services_words_follow_the_program_locale(
     state, settings = SM.state, SettingsManager.settings
     os.chdir(tmp_path)
     world.Install(tmp_path, world._scenario("files"))
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(tmp_path / "layout"))
     try:
         SM.state = {}
         SettingsManager.settings = {}

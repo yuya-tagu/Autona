@@ -17,12 +17,14 @@ import datetime
 import json
 import os
 import re
+import shutil
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from src.core import LayoutCatalog
 from src.core import ResultService as results
 from src.core import StateMigrations
 from src.core import StateSchema as schema
@@ -37,9 +39,12 @@ from src.core.SettingsManager import SettingsManager, SettingsUnreadable
 from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.Helpers.AutonaOutputRetention import PruneOutputFiles
+from tests.fixtures import template_packages
 from tests.fixtures.result import scenarios as world
 
 WAIT = 30.0
+# The recording, with one key added since: each payload's data.rows, the
+# layout's manifest's rows (ADR-007 T1; a key added to contract 1).
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "result"
                      / "golden.json").read_text(encoding="utf-8"))
 
@@ -201,6 +206,12 @@ def env(autonaApp, tmp_path, monkeypatch):
     os.chdir(tmp_path)
     for directory in ("out", "user_data", "layout"):
         (tmp_path / directory).mkdir(exist_ok=True)
+    # The layouts are the catalog's result packages (ADR-007 T1): the shipped
+    # manifests, with stand-in pages, in this directory's layout/ (the
+    # catalog's folder follows the app's directory, not the working one).
+    template_packages.Install(tmp_path / "layout",
+                              template_packages.RESULT_FOLDERS)
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(tmp_path / "layout"))
     if SM._export_thread is not None:
         SM._export_thread.join()
     with SM.lock:
@@ -990,7 +1001,7 @@ def test_describe_fills_every_slot(env):
     assert described["sample"] is True
     assert described["layout"] == "horizontal"
     assert [layout["id"] for layout in described["layouts"]] \
-        == list(results.LAYOUT_SUBDIRS)
+        == list(template_packages.BUNDLED["result"])
     assert described["render"] == schema.DefaultResultRender()
     assert described["standings"] == schema.DefaultResultStandings()
 
@@ -1542,6 +1553,90 @@ def test_the_seed_empties_the_layouts_echo(env):
 
     assert SM.Get(schema.RESULT_LAYOUT_ROOT) == ""
     assert env.service.Layout() == "vertical"
+
+
+# ── the layouts are the catalog's result packages (ADR-007 T1) ──────────
+
+def _placeLayout(env, name, rows="players", displayName=None,
+                 size=(1280, 720)):
+    """A result package placed by hand in the env's layout/."""
+    directory = env.dir / "layout" / name
+    directory.mkdir()
+    (directory / "result.html").write_text("", encoding="utf-8")
+    block = {"kind": "result", "contract": 1, "size": list(size),
+             "rows": rows}
+    if displayName is not None:
+        block["displayName"] = displayName
+    (directory / "settings.json").write_text(json.dumps({"autona": block}),
+                                             encoding="utf-8")
+    return directory
+
+
+@pytest.mark.parametrize("layout", list(template_packages.BUNDLED["result"]))
+def test_a_saved_shipped_layout_reads_as_it_was(env, layout):
+    _setLayout(layout)
+    assert env.service.Layout() == layout
+    assert env.service.BuildPayload()[2] == layout
+
+
+def test_a_layout_placed_by_hand_is_offered_and_drawn(env):
+    _placeLayout(env, "neon", displayName={"ja": "ネオン", "en": "Neon"})
+    _placeLayout(env, "crew_board", rows="teams", displayName="Crew Board",
+                 size=(1920, 1080))
+    env.locale["value"] = "ja-JP"
+
+    layouts = env.service.Layouts()
+
+    # After the shipped ones, in folder order; a players' layout is given all
+    # sixteen rows, a teams' eight.
+    assert [layout["id"] for layout in layouts] == [
+        *template_packages.BUNDLED["result"], "crew_board", "neon"]
+    assert layouts[-1] == {"id": "neon", "name": "ネオン", "width": 1280,
+                           "height": 720, "slots": 16, "team": False}
+    assert layouts[-2] == {"id": "crew_board", "name": "Crew Board",
+                           "width": 1920, "height": 1080, "slots": 8,
+                           "team": True}
+    env.locale["value"] = "en-US"
+    assert env.service.Layouts()[-1]["name"] == "Neon"
+
+    assert env.service.SetLayout("neon")
+    assert env.service.Layout() == "neon"
+    assert SM.Get(schema.RESULT_LAYOUT_ROOT) == "neon"
+    results.UpdatePlayer(16, {"name": "Sixteenth"})
+    data, _config, layout = env.service.BuildPayload()
+    assert layout == "neon"
+    assert len(data["players"]) == 16
+    assert data["players"][15]["name"] == "Sixteenth"
+    # What the rows are, from the manifest: a template need not tell it by
+    # the id (the shipped result.js reads it first).
+    assert data["rows"] == "players"
+    assert env.service.Describe()["sample"] is False
+
+    assert env.service.SetLayout("crew_board")
+    data, _config, layout = env.service.BuildPayload(preview=True)
+    assert (layout, len(data["players"]), data["rows"]) \
+        == ("crew_board", 8, "teams")
+    assert results.KindOf("crew_board") == results.TEAMS
+
+
+def test_a_saved_layout_whose_package_is_gone_is_drawn_on_the_default(env):
+    directory = _placeLayout(env, "neon")
+    assert env.service.SetLayout("neon")
+
+    shutil.rmtree(directory)
+
+    assert env.service.Layout() == results.DEFAULT_LAYOUT
+    assert env.service.BuildPayload()[2] == results.DEFAULT_LAYOUT
+    assert env.service.Describe()["layout"] == results.DEFAULT_LAYOUT
+    # What the operator chose stays saved, and is refused while it is gone.
+    assert SettingsManager.settings[results.CONFIG_SETTING]["layout"] == "neon"
+    assert not env.service.SetLayout("neon")
+    SettingsManager.settings["scoreboard"] = {"battle_format": "team"}
+    assert env.service.Layout() == results.DEFAULT_TEAM_LAYOUT
+
+    # Back with its folder, it is the layout again.
+    _placeLayout(env, "neon")
+    assert env.service.Layout() == "neon"
 
 
 # ── the configuration of a render ────────────────────────────────────────

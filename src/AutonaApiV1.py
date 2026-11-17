@@ -68,6 +68,7 @@ from .core.StatusService import StatusService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from . import AutonaWebOperations as WebOps
 from .AutonaWebOperations import NotAvailable
 
@@ -843,7 +844,10 @@ def get_layouts():
             f"(expected one of: {', '.join(LayoutCatalog.KINDS)})",
             400,
         )
-    return ok(data=LayoutCatalog.Layouts(kinds))
+    # A template package's displayName in the program's language (its
+    # displayNames carry both, ADR-007 T1); the other kinds' as they are.
+    return ok(data=LayoutCatalog.Layouts(
+        kinds, locale=AutonaLocaleHelper.programLocale))
 
 
 @api_v1.route("/commentary/options")
@@ -3370,7 +3374,7 @@ def thumbnail_update():
         raise ApiError(
             INVALID_ARGUMENT,
             "the settings are template_id ("
-            f"{' | '.join(thumbnails.TEMPLATE_IDS)}), background_source ("
+            f"{' | '.join(thumbnails.TemplateEntries())}), background_source ("
             f"{' | '.join(thumbnails.BACKGROUND_SOURCES)}), display_phase, "
             "use_team_names and use_sponsors (true / false) and game: "
             "{<codename, of a game in the list>: {flip_p1, flip_p2, "
@@ -4275,7 +4279,7 @@ def result_update():
     if not WebOps.set_result_layout(body["layout"]):
         raise ApiError(
             INVALID_ARGUMENT,
-            f"layout must be {' | '.join(results.LAYOUT_SUBDIRS)}", 400)
+            f"layout must be {' | '.join(results.LayoutEntries())}", 400)
     return ok(data={"layout": WebOps.get_result_layout()},
               revision=current_revision())
 

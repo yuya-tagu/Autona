@@ -1,0 +1,10 @@
+{
+  "autona": {
+    "kind": "result",
+    "contract": 1,
+    "entry": "result.html",
+    "size": [960, 1080],
+    "rows": "players",
+    "license": "MIT"
+  }
+}

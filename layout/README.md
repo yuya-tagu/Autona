@@ -5,7 +5,8 @@ HTML/CSS/JS ベースのアニメーション付きオーバーレイテンプ�
 OBS 等のブラウザソースで読み込んで使用します。
 
 `/include/` には各テンプレート共通で使うユーティリティ（`globals.js`）と、
-利用ライブラリ（`gsap`・`jquery`）を同梱しています。
+利用ライブラリ（`gsap`・`jquery`）を同梱しています。リザルト画像・サムネイルの同梱テンプレートが共有する
+`thumbnail_assets.js`・`result.js`・`result.css`・`result_team.css` もここにあります。
 
 ### ローカルでのテスト・デバッグ（Chrome）
 
@@ -36,7 +37,7 @@ BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は�
 
 | キー | 必須 | 内容 |
 |---|---|---|
-| `kind` | ○ | `scoreboard`（BOARD）/ `commentary`（実況）/ `top8`（TOP 8）。`designer` は `layout/custom/` 専用で宣言できない。不正な値・壊れたブロックは警告ログを出し、ブロック無しとして扱う |
+| `kind` | ○ | `scoreboard`（BOARD）/ `commentary`（実況）/ `top8`（TOP 8）/ `result`（リザルト画像）/ `thumbnail`（サムネイル）。`designer` は `layout/custom/` 専用で宣言できない。不正な値・壊れたブロックは警告ログを出し、ブロック無しとして扱う。`result` / `thumbnail` は下の「テンプレートパッケージ」の規則に従う |
 | `displayName` | | 一覧の表示名。省略時はフォルダ名から作る（下記） |
 | `format` | | 対戦形式（BOARD のメタ欄）。省略時は「—」 |
 | `game` | | 対応ゲーム（BOARD のメタ欄）。省略時は「—」 |
@@ -57,6 +58,69 @@ BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は�
   （`id` は `layout/` からの相対パス。例: フォルダを複製した `scoreboard_simple - コピー` があると
   `Simple (scoreboard_simple)` と `Simple (scoreboard_simple - コピー)`）。重なりが無くなれば元に戻る。
   `kind` が違えば同名でもそのまま（実況と TOP 8 の「標準」など）
+
+### リザルト画像・サムネイルのテンプレートパッケージ（`kind`: `result` / `thumbnail`）
+
+リザルト画像のレイアウトとサムネイルのテンプレートは、`layout/` 直下の 1 フォルダ（テンプレートパッケージ）です。
+フォルダを置くと、リザルト / サムネイルのページの選択肢と `GET /api/v1/layouts?kind=result`（`thumbnail`）に出て、
+そのデザインで画像を作れます（アプリの再起動は要りません。ページを開き直すと一覧が更新されます）。
+
+```json
+{
+  "autona": {
+    "kind": "result",
+    "contract": 1,
+    "displayName": {"ja": "ネオン TOP8", "en": "Neon TOP 8"},
+    "entry": "result.html",
+    "size": [1920, 1080],
+    "rows": "players",
+    "author": "your-name",
+    "license": "MIT"
+  }
+}
+```
+
+| キー | 必須 | 内容 |
+|---|---|---|
+| `kind` | ○ | `result` / `thumbnail` |
+| `contract` | ○ | テンプレートの契約の番号。今は `1` だけ（下記）。知らない番号のパッケージは一覧に出ない |
+| `size` | ○ | 出力画像の `[幅, 高さ]`（px の整数。各 1〜4096） |
+| `rows` | result で ○ | `players`（単独。16 行まで渡る）/ `teams`（団体。8 行渡る） |
+| `template` | thumbnail で ○ | 配置の数値の JSON（フォルダ内のファイル名だけ）。payload の `template` として渡る |
+| `entry` | | 入口の HTML（フォルダ内のファイル名だけ）。省略時は `result.html` / `thumbnail.html` |
+| `displayName` | | 一覧の表示名。文字列か `{"ja": ..., "en": ...}`（アプリの言語で選び、無ければもう一方）。省略時はフォルダ名から作る |
+| `author` / `license` | | 作者とライセンス |
+
+- **id はフォルダ名**（`settings.json` の保存値・`PATCH /api/v1/result` の `layout`・`PATCH /api/v1/thumbnail` の `template_id`）。
+  同梱の 8 種だけは昔からの id（`horizontal` → `result/`、`horizontal_16` → `result_top16/`、`vertical` → `result_vertical/`、
+  `vertical_geki` → `result_vertical_geki/`、`team` → `result_team/`、`team_split` → `result_team_split/`、`type_a` → `thumbnail/`、
+  `type_b` → `thumbnail_type_b/`）で、表示名もアプリの文言です。同梱の id と同じ名前のフォルダ（例: `layout/horizontal/` に result）は
+  一覧に出ません（同梱が優先。警告ログ）
+- **マニフェストが必須**: フォルダ名の規約へのフォールバックはありません。必須のキーが欠けた・値が不正・入口や `template` の
+  ファイルが無いパッケージは、警告ログを出してそのフォルダだけ一覧に出ません
+- 選んでいたパッケージのフォルダを消すと、既定（`horizontal`、団体の対戦形式では `team`、サムネイルは `type_a`）で描きます。
+  選んだ値は設定に残り、フォルダを戻すと戻ります
+- **フォルダの外で読んでよいのは `../include/` だけ**（ほかのテンプレートのフォルダを読まない）。アプリの `assets/`
+  （フォント）と payload が渡すパスは `../../` から読めます。`include/` のファイルはパッケージに入れない
+  （特に `gsap.min.js` は再配布に条件があります）。`include/` に無いライブラリ・フォントはパッケージの中に入れ、ライセンスの文書も入れる
+- サムネイルの `template` の JSON の中の画像（`default_background` など）は、パッケージの中か `assets/` の相対パスにする
+- 今は手で置いたフォルダを、自分で置いたものとして信頼して描きます（描画は file:// で、テンプレートの JavaScript は
+  この PC のファイルを読めます）。信頼できる配布元のものだけを置いてください
+
+#### テンプレートの契約（contract 1）
+
+- 入口のページは `initResult(payload)`（サムネイルは `initThumbnail(payload)`）を定義する。アプリはページを読み込んでから
+  これを呼び、描き終えたら `document.title = "RENDER_READY"` にする（同梱のテンプレートと同じ合図）。撮るタイミングはアプリが決める
+- `payload` の形は同梱のテンプレートが受け取っているもの（リザルト: `{data, config, layout}`、サムネイル:
+  `{data, config, template}`）。`layout` はレイアウトの id（第三者のパッケージはフォルダ名）、リザルトの `data.rows` は
+  `players` / `teams`（マニフェストの `rows`。団体として描くかはこれで決める）、`template` はマニフェストの `template` の JSON に
+  `template_id` を足したもの。キーは今後**足すだけ**で、改名・削除・意味の変更は `contract` を上げる
+- payload の中のパス（キャラの絵・背景・アイコン）は、多くはアプリのフォルダからの相対パス（`./assets/...`・`user_data/...` など）だが、
+  file の URL（`file:///...`。アーカイブ切り抜きの背景など）や絶対パス（設定ファイルに書かれた背景など）のこともある。同梱のテンプレートは
+  相対パスを `"../../" + path`、絶対パスを `"file:///" + path` にして読んでいる。描画を隔離する段階（ADR-007 T2）で、描画の文書から
+  読める URL に揃える予定（変え方は契約に書く）
+- 同梱のリザルトの描画を流用するなら `../include/result.js`（`data.rows` が `teams` なら団体として描く。`rows` の無い payload では
+  従来どおり `layout` が `team` で始まるとき）と `../include/result.css` を読む
 
 > **Note:** 現行テンプレートは前身プロジェクトのデザインを引き継いでいます。
 > 今後 Autona 版として順次リデザインを進める予定です。

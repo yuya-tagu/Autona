@@ -23,6 +23,7 @@ import {BASE_URL} from "../env";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {canCopyImage, copyImage, copyText} from "../PanelShell/clipboard";
 import {IMAGE_UPLOAD_ACCEPT} from "../PanelShell/imageUpload";
+import {TemplateChoice} from "../PanelShell/templatePackages";
 import {showSnackbar} from "../ScoreboardPage/Feedback";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
 
@@ -73,9 +74,11 @@ export interface SettingsChange {
     }>;
 }
 
+// One of GET /api/v1/thumbnail's templates. The name is the server's
+// (translated by the app); the choices are GET /api/v1/layouts' (ADR-007 T1),
+// these only until it answers.
 export interface ThumbnailTemplate {
     id: string;
-    // The server's (translated by the app); the page's own words first.
     name: string;
 }
 
@@ -191,9 +194,10 @@ function SettingCheckbox({label, value, send, note}: {
 
 // ── デザイン ─────────────────────────────────────────────────────────────
 
-export function DesignCard({settings, templates, change, upload}: {
+export function DesignCard({settings, choices, change, upload}: {
     settings: ThumbnailSettings;
-    templates: ThumbnailTemplate[];
+    // The templates to choose from (GET /api/v1/layouts?kind=thumbnail).
+    choices: TemplateChoice[];
     change: (next: SettingsChange) => Promise<unknown>;
     upload: (file: File) => void;
 }) {
@@ -224,14 +228,13 @@ export function DesignCard({settings, templates, change, upload}: {
                 select
                 size="small"
                 label={i18n.t("thumbnail_template")}
-                value={templates.some((entry) => entry.id === template)
+                value={choices.some((entry) => entry.id === template)
                     ? template : ""}
                 onChange={(event) => chooseTemplate(event.target.value)}
             >
-                {templates.map((entry) => (
+                {choices.map((entry) => (
                     <MenuItem key={entry.id} value={entry.id}>
-                        {i18n.t(`thumbnail_template_${entry.id}`,
-                                {defaultValue: entry.name})}
+                        {entry.label}
                     </MenuItem>
                 ))}
             </TextField>

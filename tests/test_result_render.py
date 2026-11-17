@@ -13,6 +13,7 @@ script drew in the document, and the order of the waits by a stand-in for
 grab(). As tests/test_thumbnail_render.py, no test depends on how long anything
 takes.
 """
+import json
 import shutil
 from io import BytesIO
 from pathlib import Path
@@ -35,6 +36,7 @@ from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.result.ResultPageRenderer import ResultPageRenderer
 from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
+from tests.fixtures import template_packages
 from tests.fixtures.result import scenarios as world
 from tests.test_api_v1 import client, webApp  # noqa: F401
 from tests.test_result_service import _Catalog
@@ -42,6 +44,15 @@ from tests.test_thumbnail_render import (
     LONG_TIMEOUT_MS, WAIT_SECS, _destroy, _evaluate, _waitUntil)
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# The shipped layouts' folders (ADR-007 T1: the catalog's result packages).
+FOLDERS = template_packages.BUNDLED["result"]
+
+
+def _size(layout):
+    """The shipped layout's picture, as its manifest declares it."""
+    return tuple(template_packages.Manifest(FOLDERS[layout])["size"])
+
 
 RED = "#ff0000"
 GREEN = "#00ff00"
@@ -62,13 +73,10 @@ function initResult(payload) {
 
 @pytest.fixture
 def pages(autonaApp):
-    """The stand-in page for every layout, in the runtime's layout/."""
-    created = []
-    for name in results.LAYOUT_SUBDIRS.values():
-        directory = autonaApp.dir / "layout" / name
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "result.html").write_text(PAGE, encoding="utf-8")
-        created.append(directory)
+    """The stand-in page for every layout, in the runtime's layout/, with the
+    shipped manifest (the catalog's result packages, ADR-007 T1)."""
+    created = template_packages.Install(
+        autonaApp.dir / "layout", template_packages.RESULT_FOLDERS, page=PAGE)
     yield
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -105,11 +113,11 @@ def test_a_layout_is_drawn_on_its_page_at_its_size(renderer, layout):
     pixmap, error = _render(renderer, layout, {"color": GREEN})
 
     assert error == ""
-    assert (pixmap.width(), pixmap.height()) == results.LAYOUT_SIZES[layout]
+    assert (pixmap.width(), pixmap.height()) == _size(layout)
     assert renderer._template_id == layout
-    assert (renderer._view.width(), renderer._view.height()) \
-        == results.LAYOUT_SIZES[layout]
-    assert results.LAYOUT_SUBDIRS[layout] in renderer._view.url().path()
+    assert (renderer._view.width(), renderer._view.height()) == _size(layout)
+    assert f"/layout/{FOLDERS[layout]}/result.html" \
+        in renderer._view.url().path()
     assert _evaluate(renderer, "window.lastPayload.layout") == layout
 
 
@@ -256,12 +264,14 @@ def test_a_page_that_never_loads_fails_its_render_and_the_next_one_tries(pages):
     made = ResultPageRenderer()
     made.STAGE_TIMEOUT_MS = 500
     try:
-        (Path("layout") / results.LAYOUT_SUBDIRS["team"] / "result.html").unlink()
+        # Listed when the renderer was made: its page is looked for, and is
+        # not there.
+        (Path("layout") / FOLDERS["team"] / "result.html").unlink()
 
         assert _render(made, "team") == (None, "the render timed out")
 
         made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-        (Path("layout") / results.LAYOUT_SUBDIRS["team"] / "result.html") \
+        (Path("layout") / FOLDERS["team"] / "result.html") \
             .write_text(PAGE, encoding="utf-8")
         made.FRESH_FRAME_WAIT_MS = 0
         assert _render(made, "team")[1] == ""
@@ -311,22 +321,22 @@ def test_the_shell_hands_on_a_failed_result(renderer, monkeypatch):
 def shippedPages(autonaApp):
     """The templates as shipped in the runtime's layout/. Copies, as in
     tests/test_thumbnail_render.py: layout/include/ is 19 MB, of which the pages
-    only want the two scripts, and of layout/thumbnail/ one."""
+    only want what they share (ADR-007 D2: a package reads nothing outside its
+    folder but include/)."""
     created = []
     layout = autonaApp.dir / "layout"
-    for name in results.LAYOUT_SUBDIRS.values():
+    for name in FOLDERS.values():
         directory = layout / name
         assert not directory.exists()
         shutil.copytree(PROJECT_ROOT / "layout" / name, directory)
         created.append(directory)
-    for name, files in (("include", ("jquery-3.7.1.min.js", "lodash.min.js")),
-                        ("thumbnail", ("thumbnail_assets.js",))):
-        directory = layout / name
-        assert not directory.exists()
-        directory.mkdir()
-        created.append(directory)
-        for file in files:
-            shutil.copy(PROJECT_ROOT / "layout" / name / file, directory)
+    include = layout / "include"
+    assert not include.exists()
+    include.mkdir()
+    created.append(include)
+    for file in ("jquery-3.7.1.min.js", "lodash.min.js", "thumbnail_assets.js",
+                 "result.js", "result.css", "result_team.css"):
+        shutil.copy(PROJECT_ROOT / "layout" / "include" / file, include)
     try:
         yield
     finally:
@@ -349,7 +359,7 @@ CHARACTER = {"assets": {"full": {"asset": "./missing/full.png"}},
 
 
 def _awkwardData(layout):
-    if results.IsTeamLayout(layout):
+    if layout in world.TEAM_LAYOUTS:
         rows = [{"rank": 1, "name": AWKWARD, "sponsor": "", "character": {},
                  "characters": [],
                  "members": [{"name": AWKWARD, "character": CHARACTER},
@@ -389,7 +399,7 @@ def test_a_shipped_page_draws_what_it_is_given(shipped, layout):
         logger.remove(sink)
 
     assert error == ""
-    assert (pixmap.width(), pixmap.height()) == results.LAYOUT_SIZES[layout]
+    assert (pixmap.width(), pixmap.height()) == _size(layout)
     assert errors == []
     # Twice at least: in the header, and in the row. As text: none of it ran.
     assert text.count("\"</script>${b}`'") >= 2
@@ -416,7 +426,84 @@ def test_a_shipped_page_draws_the_sample(shipped, layout, autonaApp):
     assert error == ""
     assert errors == []
     assert "Sample Tournament" in text
-    assert ("Team 1" if results.IsTeamLayout(layout) else "Mario") in text
+    assert ("Team 1" if layout in world.TEAM_LAYOUTS else "Mario") in text
+
+
+def test_a_teams_package_not_named_team_is_drawn_as_teams(
+        shipped, autonaApp):
+    """A package placed by hand that reuses the shipped team design: its id
+    is its folder's name, which does not start with "team"; the payload's
+    data.rows ("teams", its manifest's) is what makes include/result.js draw
+    the members (ADR-007 T1)."""
+    folder = autonaApp.dir / "layout" / "crew_board"
+    shutil.copytree(PROJECT_ROOT / "layout" / FOLDERS["team"], folder)
+    service = ResultService(later=lambda _fn: None)
+    settings = SettingsManager.settings
+    SettingsManager.settings = {}
+    try:
+        data, config, layout = service.BuildPayload(
+            preview=True, games=_Catalog(), layout="crew_board")
+        assert (layout, data["rows"]) == ("crew_board", "teams")
+        _pixmap, error = _render(shipped, "crew_board", config, data)
+        members = _evaluate(
+            shipped, "document.querySelectorAll('.member-cell').length")
+    finally:
+        SettingsManager.settings = settings
+        shutil.rmtree(folder, ignore_errors=True)
+
+    assert error == ""
+    assert members > 0
+    assert shipped._view.url().path().endswith("/layout/crew_board/result.html")
+
+
+# ── a package placed by hand, and a manifest changed meanwhile ───────────
+
+def _placeLayout(root, name, size, rows="players", entry="index.html"):
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / entry).write_text(PAGE, encoding="utf-8")
+    (directory / "settings.json").write_text(json.dumps({"autona": {
+        "kind": "result", "contract": 1, "size": list(size), "rows": rows,
+        "entry": entry}}), encoding="utf-8")
+    return directory
+
+
+def test_a_package_placed_by_hand_is_drawn_from_its_folder_at_its_size(
+        renderer, autonaApp):
+    directory = _placeLayout(autonaApp.dir / "layout", "neon_board",
+                             (1280, 720))
+    try:
+        pixmap, error = _render(renderer, "neon_board", {"color": GREEN})
+
+        assert error == ""
+        assert renderer._template_id == "neon_board"
+        assert (pixmap.width(), pixmap.height()) == (1280, 720)
+        assert (renderer._view.width(), renderer._view.height()) \
+            == (1280, 720)
+        assert Path(renderer._view.url().toLocalFile()) \
+            == autonaApp.dir / "layout" / "neon_board" / "index.html"
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_a_size_changed_in_the_manifest_is_drawn_at_not_stretched_to(
+        renderer, autonaApp):
+    assert _render(renderer, "horizontal", {"color": GREEN})[1] == ""
+    loads = renderer._load_number
+    manifest = autonaApp.dir / "layout" / FOLDERS["horizontal"] \
+        / "settings.json"
+    block = json.loads(manifest.read_text(encoding="utf-8"))
+    block["autona"]["size"] = [1000, 1000]
+    manifest.write_text(json.dumps(block), encoding="utf-8")
+
+    pixmap, error = _render(renderer, "horizontal", {"color": GREEN})
+
+    assert error == ""
+    # The same page, at the new size: the view was resized, not the picture
+    # scaled (KeepAspectRatio would have made it 1000 x 562).
+    assert renderer._load_number == loads
+    assert (renderer._view.width(), renderer._view.height()) == (1000, 1000)
+    assert (pixmap.width(), pixmap.height()) == (1000, 1000)
 
 
 def _writeImage(path, size):
@@ -527,7 +614,7 @@ def test_every_layouts_preview_is_its_size(service, client, layout):
     assert _waitUntil(lambda: _rendered(revision))
     image = client.get(f"/api/v1/result/preview?v={revision}")
     assert Image.open(BytesIO(image.get_data())).size \
-        == results.LAYOUT_SIZES[layout]
+        == _size(layout)
 
 
 def test_a_generate_through_the_route_saves_a_png(service, client, autonaApp):

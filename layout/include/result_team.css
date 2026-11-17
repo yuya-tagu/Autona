@@ -1,12 +1,14 @@
 /* result_team: TEAM / Crew standings with per-member fighters.
 
    Reuses the base horizontal standings layout (Top-8 grid, header, rank
-   badges, accent bars, rank auras) and the shared ../result/result.js
+   badges, accent bars, rank auras) and the shared include/result.js
    renderer (placeTeams). Each rank slot becomes a team card: the members'
    main fighters sit side by side, each with a name caption, and the team name
-   anchors the bottom plate. Replaces the previous text-only roster layout. */
+   anchors the bottom plate. Replaces the previous text-only roster layout.
+   Shared (include/) because result_team_split builds on it: a template
+   package reads nothing outside its folder but include/ (ADR-007 D2). */
 
-@import url("../result/result.css");
+@import url("./result.css");
 
 /* Give the podium row (1st-3rd) a bit more height, taking it from the lower
    row (4th-8th). Scoped to the team layout — this stylesheet is only loaded by

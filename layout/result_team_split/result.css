@@ -5,7 +5,7 @@
    Inherits all member/fighter/name/fade styling from result_team and only
    re-defines the grid + per-slot sizing for the new arrangement. */
 
-@import url("../result_team/result.css");
+@import url("../include/result_team.css");
 
 /* 12x12 grid: wide left column (1st over 2nd), narrow right column (3rd-8th).
    Overrides the result_team 560/360 two-row split. */

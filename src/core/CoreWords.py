@@ -31,7 +31,8 @@ LANGUAGES = (ENGLISH, JAPANESE)
 
 # key -> {language: words}. A "{0}" is filled by the caller (.format).
 WORDS = {
-    # The thumbnail's templates (ThumbnailService.TEMPLATE_NAMES).
+    # The shipped thumbnail templates' names, by their frozen id
+    # (LayoutCatalog.BundledNameKey, ADR-007 T1).
     "thumbnail_template_type_a": {ENGLISH: "Standard", JAPANESE: "標準"},
     "thumbnail_template_type_b": {ENGLISH: "Center Panel",
                                   JAPANESE: "中央パネル"},
@@ -44,7 +45,8 @@ WORDS = {
     "sample_tournament": {ENGLISH: "Sample Tournament",
                           JAPANESE: "サンプル大会"},
     "sample_team": {ENGLISH: "Team {0}", JAPANESE: "チーム{0}"},
-    # The result's layouts (ResultService.LAYOUT_NAMES).
+    # The shipped result layouts' names, by their frozen id
+    # (LayoutCatalog.BundledNameKey, ADR-007 T1).
     "result_layout_horizontal": {ENGLISH: "Horizontal (1920x1080)",
                                  JAPANESE: "横向き (1920x1080)"},
     "result_layout_horizontal_16": {ENGLISH: "Horizontal TOP16 (1920x1080)",

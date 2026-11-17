@@ -1,0 +1,10 @@
+{
+  "autona": {
+    "kind": "thumbnail",
+    "contract": 1,
+    "entry": "thumbnail.html",
+    "size": [1920, 1080],
+    "template": "type_b.json",
+    "license": "MIT"
+  }
+}

@@ -44,6 +44,7 @@ import pytest
 
 from src import AutonaWebOperations as WebOps
 from src.AutonaWebOperations import BoardHost, NotAvailable
+from tests.fixtures import template_packages
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.test_designer_service import make_project
 from tests.test_webserver_routes import (
@@ -2019,6 +2020,10 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
 
     monkeypatch.setattr(shellModule, "DrawThumbnailNow", draw)
     output = autonaApp.dir / "out" / "thumbnails"
+    # The templates are the catalog's thumbnail packages (ADR-007 T1): the
+    # shipped ones, in the runtime's layout/ for this test.
+    packages = template_packages.Install(autonaApp.dir / "layout",
+                                         template_packages.THUMBNAIL_FOLDERS)
     try:
         path = WebOps.get_thumbnail("2", "png")
         jpg = WebOps.get_thumbnail("2", "jpg")
@@ -2035,6 +2040,8 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
     finally:
         SettingsManager.Set("general.disable_autoupdate", polling)
         shutil.rmtree(output, ignore_errors=True)
+        for folder in packages:
+            shutil.rmtree(folder, ignore_errors=True)
         with _state().SaveBlock():
             _state().Unset("score.2")
             if game is None:
@@ -2395,8 +2402,8 @@ _NOT_200 = {
     ("api_v1.get_result_preview", None): 404,
     # No tournament is loaded in this walk.
     ("api_v1.result_load_standings", None): 409,
-    # The test runtime's layout/ is empty: no commentary design to show or
-    # to pick (the catalog was read).
+    # The test runtime's layout/ has no commentary design to show or to pick
+    # (the catalog was read; the walk puts in the template packages only).
     ("api_v1.get_selected_layout", None): 404,
     ("api_v1.select_layout", None): 400,
     # No target: nothing is shown (never a real file manager in this walk).
@@ -2599,6 +2606,10 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
     monkeypatch.setattr(workerInstall.ArchiveWorkerInstaller, "instance",
                         workerInstall.ArchiveWorkerInstaller())
     _goHeadless(autonaApp, monkeypatch)
+    # The shipped template packages (ADR-007 T1), in the runtime's layout/
+    # for the walk: the result's layout the walk saves is one of them.
+    packages = template_packages.Install(autonaApp.dir / "layout",
+                                         template_packages.FOLDERS)
     answers = []
     events = {}
     try:
@@ -2642,6 +2653,8 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         drain_tasks()
         archiveJobs.Shutdown(5.0)
         shutil.rmtree(web)
+        for folder in packages:
+            shutil.rmtree(folder, ignore_errors=True)
         if not hadLogo and logo.exists():
             logo.unlink()
         _dropHeadlessBoards(autonaApp)

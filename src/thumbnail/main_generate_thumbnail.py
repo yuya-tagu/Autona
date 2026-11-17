@@ -16,7 +16,8 @@ from loguru import logger
 from src.core import ThumbnailService as service
 from src.Helpers.AutonaOutputRetention import PruneOutputFiles
 
-SUPPORTED_TEMPLATE_IDS = service.TEMPLATE_IDS
+# The templates are the layout catalog's thumbnail packages (ADR-007 T1):
+# service.TemplateEntries().
 DEFAULT_TEMPLATE_ID = service.DEFAULT_TEMPLATE_ID
 BANNER_PATH = service.BANNER_PATH
 DEFAULT_BANNER_PATH = service.DEFAULT_BANNER_PATH

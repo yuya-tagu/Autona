@@ -231,7 +231,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -471,7 +472,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -551,7 +553,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -661,7 +664,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -723,7 +727,8 @@
       "sponsor": "",
       "character": {}
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -1027,7 +1032,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -1331,7 +1337,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -1475,7 +1482,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -1681,7 +1689,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -1791,7 +1800,8 @@
       "sponsor": "",
       "character": {}
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2031,7 +2041,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2271,7 +2282,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2351,7 +2363,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2461,7 +2474,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2523,7 +2537,8 @@
       "sponsor": "",
       "character": {}
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -2763,7 +2778,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3003,7 +3019,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3083,7 +3100,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3193,7 +3211,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3255,7 +3274,8 @@
       "sponsor": "",
       "character": {}
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3583,7 +3603,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3911,7 +3932,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -3991,7 +4013,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -4341,7 +4364,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -4523,7 +4547,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -4851,7 +4876,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -5179,7 +5205,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -5259,7 +5286,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -5609,7 +5637,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -5791,7 +5820,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6255,7 +6285,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6495,7 +6526,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6575,7 +6607,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6695,7 +6728,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6775,7 +6809,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6875,7 +6910,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -6995,7 +7031,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7109,7 +7146,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7200,7 +7238,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7310,7 +7349,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7390,7 +7430,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7740,7 +7781,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -7838,7 +7880,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8078,7 +8121,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8318,7 +8362,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8428,7 +8473,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8538,7 +8584,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8648,7 +8695,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8742,7 +8790,8 @@
        "name": "Pikachu"
       }
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -8804,7 +8853,8 @@
       "sponsor": "",
       "character": {}
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -9154,7 +9204,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -9336,7 +9387,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -9576,7 +9628,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -9904,7 +9957,8 @@
        }
       ]
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10144,7 +10198,8 @@
       ],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10224,7 +10279,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10304,7 +10360,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10384,7 +10441,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10464,7 +10522,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10544,7 +10603,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10624,7 +10684,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10704,7 +10765,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10784,7 +10846,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10864,7 +10927,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -10944,7 +11008,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11024,7 +11089,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/own_logo.png",
@@ -11104,7 +11170,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "background_path": "",
@@ -11184,7 +11251,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "logo_path": "./layout/unused.png",
@@ -11328,7 +11396,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11432,7 +11501,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11526,7 +11596,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11617,7 +11688,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11829,7 +11901,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "players"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -11954,7 +12027,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
@@ -12096,7 +12170,8 @@
       "characters": [],
       "members": []
      }
-    ]
+    ],
+    "rows": "teams"
    },
    "config": {
     "main_icon_path": "./layout/logo.png",
