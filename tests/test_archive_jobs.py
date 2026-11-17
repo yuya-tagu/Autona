@@ -61,7 +61,7 @@ def fake(monkeypatch, tmp_path):
     for name in ("FAKE_VODSPLIT_FORMAT", "FAKE_VODSPLIT_VERSION_EXIT",
                  "FAKE_VODSPLIT_DELAY", "FAKE_VODSPLIT_ARGV",
                  "FAKE_VODSPLIT_CHILD_PID", "FAKE_VODSPLIT_NO_TITLES",
-                 "FAKE_VODSPLIT_INPUTS",
+                 "FAKE_VODSPLIT_INPUTS", "FAKE_VODSPLIT_H264",
                  "PYINSTALLER_RESET_ENVIRONMENT"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
@@ -629,9 +629,10 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert [row["no"] for row in sets["sets"]] == [1, 2]
     assert _disk(work, job["id"])["state"] == "done"
     assert service.Status()["running_job"] is None
+    # The fake is a worker from before "h264": the download's codec is any.
     assert json.loads(argv.read_text(encoding="utf-8")) == [
         SOURCE, "--out", str(jobDir / "out"),
-        "--download-dir", str(work / "downloads"),
+        "--download-dir", str(work / "downloads"), "--codec", "any",
         "--no-cut", "--thumbs", "--progress", "json", "--cancel-on-stdin"]
     log = (jobDir / "worker.log").read_text(encoding="utf-8")
     assert "[stdout] fake worker: starting (not a JSON line)" in log
@@ -659,6 +660,8 @@ def test_the_results_and_the_event_are_handed_on(service, work, tmp_path,
     assert args[0] == str(video)
     assert args[args.index("--results") + 1] == str(jobDir / "results.json")
     assert "--event=雷影杯" in args and "--event" not in args
+    # The codec as a URL's (a file's run downloads nothing).
+    assert args[args.index("--codec") + 1] == "any"
     _job, sets = service.Job(job["id"])
     assert sets["sets"][0]["set"]["p1"] == "Kappa"
     assert sets["event"] == "雷影杯"
@@ -675,6 +678,42 @@ def test_an_event_name_starting_with_a_dash_is_the_value(service, tmp_path,
     args = json.loads(argv.read_text(encoding="utf-8"))
     assert "--event=-x --no-cut" in args
     assert service.Job(job["id"])[1]["event"] == "-x --no-cut"
+
+
+@pytest.mark.parametrize("h264, codec", [(False, "any"), (True, "h264")])
+def test_the_download_codec_follows_the_workers_features(
+        service, work, tmp_path, fake, h264, codec):
+    # H.264 + AAC from a worker whose features name "h264" (vodsplit 0.4.0:
+    # the analysis decodes it about twice as fast, and a livestream's
+    # archive may offer VP9 at 360p only); "any" from one before -- the
+    # highest resolution, not its own default "open" -- which refuses
+    # "h264" (the fake as argparse: the run would fail). Either is saved
+    # as <id>.mp4, found by its name as the old <id>.open.mp4 was.
+    argv = tmp_path / "argv.json"
+    fake.setenv("FAKE_VODSPLIT_ARGV", str(argv))
+    if h264:
+        fake.setenv("FAKE_VODSPLIT_H264", "1")
+    assert (worker.H264_FEATURE in service.Status()["features"]) is h264
+
+    job = service.Create(SOURCE)
+    assert _ended(service, job["id"])["state"] == "done"
+    args = json.loads(argv.read_text(encoding="utf-8"))
+    assert args[args.index("--codec") + 1] == codec
+    download = work / "downloads" / "fakevideo01.mp4"
+    assert service.Job(job["id"])[1]["source"] == str(download)
+    assert service.VideoFile(job["id"]) == (str(download), "video/mp4")
+    assert not (work / "downloads" / "fakevideo01.open.mp4").exists()
+
+    # A resume asks the same of the worker it runs on.
+    _mode(fake, "error")
+    failed = service.Create(SOURCE)
+    assert _ended(service, failed["id"])["state"] == "error"
+    argv.unlink()
+    _mode(fake, "ok")
+    service.Resume(failed["id"])
+    assert _ended(service, failed["id"])["state"] == "done"
+    args = json.loads(argv.read_text(encoding="utf-8"))
+    assert args[args.index("--codec") + 1] == codec
 
 
 def test_an_error_the_operator_can_fix(service, work, fake):
@@ -1369,7 +1408,7 @@ def test_the_page_plays_a_url_jobs_download_and_shows_its_frames(
                   201)["job"]["id"]
     assert _route_ended(page, jobId)["state"] == "done"
     sets = _data(page.get(f"{BASE}/jobs/{jobId}"))["sets"]
-    downloaded = work / "downloads" / "fakevideo01.open.mp4"
+    downloaded = work / "downloads" / "fakevideo01.mp4"
     assert sets["source"] == str(downloaded)
     assert [row["thumb"] for row in sets["sets"]] == [
         "01_fake_bg.jpg", "02_fake_bg.jpg"]
@@ -1546,13 +1585,17 @@ def test_a_url_jobs_video_is_only_its_download_in_the_work_folder(
     _not_found(service.VideoFile, jobId)
 
 
-def test_the_download_is_found_after_the_work_folder_moved(fake, work):
+@pytest.mark.parametrize("name", [
+    "vid.mp4",          # --codec h264 / any
+    "vid.open.mp4",     # a job an older worker ran with its default open
+])
+def test_the_download_is_found_after_the_work_folder_moved(fake, work, name):
     jobId = "20261116-100000-move"
-    _sets(work, jobId, source="C:\\old\\work\\downloads\\vid.open.mp4")
+    _sets(work, jobId, source=f"C:\\old\\work\\downloads\\{name}")
     (work / "downloads").mkdir()
-    (work / "downloads" / "vid.open.mp4").write_bytes(b"v")
+    (work / "downloads" / name).write_bytes(b"v")
     path, kind = ArchiveJobService().VideoFile(jobId)
-    assert path == str(work / "downloads" / "vid.open.mp4")
+    assert path == str(work / "downloads" / name)
     assert kind == "video/mp4"
 
 
@@ -2116,8 +2159,7 @@ def test_a_url_jobs_export_cuts_its_download(service, work, fake):
     assert _export_ended(service, job["id"])["state"] == "done"
     request = json.loads((work / job["id"] / "export_request.json")
                          .read_text(encoding="utf-8"))
-    assert request["source"] == str(work / "downloads"
-                                    / "fakevideo01.open.mp4")
+    assert request["source"] == str(work / "downloads" / "fakevideo01.mp4")
     assert [row["no"] for row in request["sets"]] == [1]
 
 

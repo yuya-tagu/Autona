@@ -49,10 +49,12 @@ against it, and the folder it names must resolve under the work folder
 The run
 -------
 The worker is started with ``run <source> --out <job>/out --download-dir
-<work>/downloads [--results <job>/results.json] [--event=<name>] --no-cut
---thumbs [--template <job>/templates/NN.json ...] --progress json
---cancel-on-stdin`` (the title templates the worker can take, as
-core/ArchiveTemplates.py's WorkerTemplates checks and orders them, written
+<work>/downloads --codec h264|any [--results <job>/results.json]
+[--event=<name>] --no-cut --thumbs [--template <job>/templates/NN.json ...]
+--progress json --cancel-on-stdin`` (``h264`` when the worker's features
+name it, else ``any``: ``_Arguments``; the title templates the worker can
+take, as core/ArchiveTemplates.py's WorkerTemplates checks and orders them,
+written
 into the job's templates/ before job.json says it runs: the worker picks the
 one for the event, ADR-006 A6). The source is a URL or a file on a
 drive of this PC (a share's path is refused unread: ``CheckSource``),
@@ -105,9 +107,12 @@ the job (and the set's number), never a path. The video is the source
 job.json names when it is a file of this PC (checked as a start checks it:
 a share's path refused unread), else -- a URL -- the file the worker
 downloaded for it. job.json does not name that one (the worker picks it:
-``<id>.open.mp4``, or ``<id>.mp4`` when no VP9 / AV1 was offered); the
-worker's out/sets.json does (``source``), and it is looked for by its name
-in this work folder's downloads/ (the folder may have been moved since).
+``<id>.mp4`` for ``--codec h264`` / ``any``, ``<id>.open.mp4`` for a job a
+worker ran with its old default ``open``); the worker's out/sets.json does
+(``source``), and it is looked for by its name in this work folder's
+downloads/ (the folder may have been moved since). The page plays a
+YouTube job (its id known: sets.json's ``source_id``) in YouTube's embedded
+player instead (ADR-006 D7); this file is what it plays for any other job.
 A frame is the ``thumb`` sets.json names for the set, in the job's out/.
 The download and the frame must resolve under the work folder (links
 followed); the operator's own file may be anywhere on this PC's drives.
@@ -2123,7 +2128,8 @@ class ArchiveJobService:
                     # Before job.json says it runs: what fails here leaves no
                     # job that runs without a worker.
                     arguments = self._Arguments(
-                        run, self._WriteTemplates(jobDir, templates))
+                        run, self._WriteTemplates(jobDir, templates),
+                        probe.features)
                     self._WriteRecord(jobDir, record)
                 except OSError as error:
                     raise ArchiveError(WORK_DIR_UNUSABLE,
@@ -2171,7 +2177,8 @@ class ArchiveJobService:
                 try:
                     os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
                     arguments = self._Arguments(
-                        run, self._WriteTemplates(jobDir, templates))
+                        run, self._WriteTemplates(jobDir, templates),
+                        probe.features)
                     self._WriteRecord(jobDir, record)
                 except OSError as error:
                     raise ArchiveError(WORK_DIR_UNUSABLE,
@@ -2263,9 +2270,10 @@ class ArchiveJobService:
         return paths
 
     @staticmethod
-    def _Arguments(run, templateFiles):
+    def _Arguments(run, templateFiles, features=()):
         """The worker's arguments for `run` with the templates' snapshot
-        `templateFiles` (_WriteTemplates')."""
+        `templateFiles` (_WriteTemplates') and, for an analysis, the
+        `features` of the worker that runs it (its probe's)."""
         # In ArchiveTemplates' order: the worker takes the first whose match
         # is in the event name (ADR-006 A6).
         templates = [word for path in templateFiles
@@ -2277,10 +2285,18 @@ class ArchiveJobService:
                     "--out", os.path.join(run.jobDir, CLIPS_DIR),
                     *templates, "--progress", "json", "--cancel-on-stdin"]
         record = run.record
+        # The download's codec: H.264 + AAC (the analysis decodes it about
+        # twice as fast, and a livestream's archive may offer VP9 at 360p
+        # only); a worker from before ``h264`` gets ``any`` -- the highest
+        # resolution whatever the codec -- not its own default ``open``.
+        # The preview of a YouTube job is the embedded player (ADR-006 D7),
+        # not this file. A local file's run ignores it.
+        codec = "h264" if ArchiveWorker.H264_FEATURE in features else "any"
         arguments = ["run", record["source"],
                      "--out", os.path.join(run.jobDir, OUT_DIR),
                      "--download-dir", os.path.join(run.workDir,
-                                                    DOWNLOADS_DIR)]
+                                                    DOWNLOADS_DIR),
+                     "--codec", codec]
         results = os.path.join(run.jobDir, RESULTS_FILE)
         if os.path.isfile(results):
             arguments += ["--results", results]
