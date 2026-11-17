@@ -608,7 +608,7 @@
     "score_player_name": "{{team}}Pプレイヤー名",
     "score_details": "詳細",
     "score_seed": "シード {{seed}}",
-    "score_real_name": "本名",
+    "score_seed_field": "シード",
     "score_twitter": "X（Twitter）",
     "score_country": "国",
     "score_region": "地域",

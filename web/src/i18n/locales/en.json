@@ -608,7 +608,7 @@
     "score_player_name": "{{team}}P player name",
     "score_details": "Details",
     "score_seed": "Seed {{seed}}",
-    "score_real_name": "Real name",
+    "score_seed_field": "Seed",
     "score_twitter": "X (Twitter)",
     "score_country": "Country",
     "score_region": "Region",

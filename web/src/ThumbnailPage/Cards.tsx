@@ -333,9 +333,12 @@ export function parseRange(text: string, min: number, max: number): number | nul
 // it just shows it again. While the field has focus, the saved value does
 // not overwrite what is typed. A percentage with its range under it, unless
 // told otherwise (the Result page's ranks). With a `step`, the arrow keys go up
-// and down by it, as a spin box's do, and it is sent as typing is.
+// and down by it, as a spin box's do, and it is sent as typing is. With
+// `emptyAs`, that number is what an empty field stands for (the SCORE page's
+// seed: none is 0): it is shown as an empty field, and an emptied field is
+// sent as it.
 export function RangeField({label, value, range, send, percent = true,
-                            width = 150, step, readOnly}: {
+                            width = 150, step, readOnly, emptyAs}: {
     label: string;
     value: number;
     range: [number, number];
@@ -344,9 +347,15 @@ export function RangeField({label, value, range, send, percent = true,
     width?: number;
     step?: number;
     readOnly?: boolean;
+    emptyAs?: number;
 }) {
     const [min, max] = range;
-    const [text, setText] = React.useState(String(value));
+    const shown = (number: number) => (
+        number === emptyAs ? "" : String(number));
+    const parse = (typed: string) => (
+        emptyAs !== undefined && typed.trim() === ""
+            ? emptyAs : parseRange(typed, min, max));
+    const [text, setText] = React.useState(shown(value));
     const focused = React.useRef(false);
     const edited = React.useRef(false);
     // Sent and not answered yet: shown meanwhile, not the old value.
@@ -356,8 +365,10 @@ export function RangeField({label, value, range, send, percent = true,
 
     React.useEffect(() => {
         if (!focused.current) {
-            setText(String(value));
+            setText(shown(value));
         }
+        // `shown` reads `emptyAs`, a constant of the caller's.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [value]);
 
     const confirm = () => {
@@ -365,16 +376,16 @@ export function RangeField({label, value, range, send, percent = true,
             return;
         }
         edited.current = false;
-        const number = parseRange(text, min, max);
+        const number = parse(text);
         if (number === null) {
             if (text.trim() !== "") {
                 showSnackbar(i18n.t("thumbnail_out_of_range", {min, max}),
                              "error");
             }
-            setText(String(saved.current));
+            setText(shown(saved.current));
             return;
         }
-        setText(String(number));
+        setText(shown(number));
         if (number === saved.current) {
             return;
         }
@@ -384,12 +395,12 @@ export function RangeField({label, value, range, send, percent = true,
         }, () => {
             sending.current = false;
             if (!focused.current) {
-                setText(String(saved.current));
+                setText(shown(saved.current));
             }
         });
     };
 
-    const invalid = text.trim() !== "" && parseRange(text, min, max) === null;
+    const invalid = text.trim() !== "" && parse(text) === null;
     return (
         <TextField
             size="small"
@@ -416,7 +427,7 @@ export function RangeField({label, value, range, send, percent = true,
                 if (edited.current) {
                     confirm();
                 } else if (!sending.current) {
-                    setText(String(saved.current));
+                    setText(shown(saved.current));
                 }
             }}
             onKeyDown={(event) => {
@@ -427,9 +438,9 @@ export function RangeField({label, value, range, send, percent = true,
                            && (event.key === "ArrowUp"
                                || event.key === "ArrowDown")) {
                     event.preventDefault();
-                    const from = parseRange(text, min, max) ?? saved.current;
+                    const from = parse(text) ?? saved.current;
                     const change = event.key === "ArrowUp" ? step : -step;
-                    setText(String(Math.min(max, Math.max(min, from + change))));
+                    setText(shown(Math.min(max, Math.max(min, from + change))));
                     edited.current = true;
                 }
             }}

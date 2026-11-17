@@ -20,7 +20,7 @@ import socketConnection from "../websocketConnection";
 import table from "../Top8Page/characterPick.cases.json";
 import setCases from "./setRows.cases.json";
 import ScorePage, {POST_READ_DEBOUNCE_MS, runOutcome} from "./index";
-import {loadBody} from "./Cards";
+import {SEED_MAX, loadBody} from "./Cards";
 
 // The SCORE page in React (ADR-005 S4aa): the board of the battle format in
 // force (GET /battle-format, read again on `battle_format`), a held board
@@ -789,12 +789,10 @@ test("a card's fields are sent field by field", async () => {
     expect(tagField(1)).toHaveAttribute("maxLength", "256");
 });
 
-test("the details send the real name, X, the note and the country as a code", async () => {
+test("the details send X, the note and the country as a code", async () => {
     await renderPage();
     const dialog = await openDetails(1);
 
-    await type(within(dialog).getByRole("textbox",
-                                        {name: i18n.t("score_real_name")}), "Taro");
     await type(within(dialog).getByRole("textbox",
                                         {name: i18n.t("score_twitter")}), "taro_x");
     const note = within(dialog).getByRole("textbox", {name: i18n.t("score_note")});
@@ -808,9 +806,96 @@ test("the details send the real name, X, the note and the country as a code", as
     await settle();
 
     expect(writes("PATCH", `${BOARD}/1/teams/1/players/1/fields`)).toEqual([
-        {name: "Taro"}, {twitter: "taro_x"}, {custom_textbox: "line 1\nline 2"},
+        {twitter: "taro_x"}, {custom_textbox: "line 1\nline 2"},
         {country_code: "JP"},
     ]);
+});
+
+test("the details have no real name field: X and the seed share its row", async () => {
+    server.pending[1].board = board({players: [[slot({real_name: "Taro Yamada"})],
+                                               [slot()]]});
+    await renderPage();
+    await openDetails(1);
+    // The details alone (the card has the sponsor field too).
+    const details = document.getElementById(
+        detailsToggle(1).getAttribute("aria-controls"));
+
+    // The text fields are X, the seed and the note: none is the real name,
+    // nor shows it.
+    const boxes = within(details).getAllByRole("textbox");
+    expect(boxes).toHaveLength(3);
+    const twitter = within(details).getByRole("textbox",
+                                              {name: i18n.t("score_twitter")});
+    const seed = within(details).getByRole("textbox",
+                                           {name: i18n.t("score_seed_field")});
+    expect(boxes).toEqual(expect.arrayContaining([
+        twitter, seed,
+        within(details).getByRole("textbox", {name: i18n.t("score_note")})]));
+    expect(boxes.map((box) => box.value)).not.toContain("Taro Yamada");
+    // The seed is beside X, where the real name was.
+    expect(seed.closest(".MuiStack-root"))
+        .toBe(twitter.closest(".MuiStack-root"));
+});
+
+async function confirmSeed(field, value, key = "Enter") {
+    fireEvent.focus(field);
+    fireEvent.change(field, {target: {value}});
+    if (key === "Enter") {
+        fireEvent.keyDown(field, {key: "Enter"});
+    }
+    fireEvent.blur(field);
+    await settle();
+    await settle();
+}
+
+test("the seed is sent on Enter or leaving the field, a whole number, empty as 0",
+     async () => {
+    server.pending[1].board = board({players: [[slot({seed: 3})], [slot()]]});
+    await renderPage();
+    const details = await openDetails(1);
+    const seed = within(details).getByRole("textbox",
+                                           {name: i18n.t("score_seed_field")});
+    expect(seed).toHaveValue("3");
+
+    // Typing alone sends nothing (each pause would be another seed).
+    fireEvent.focus(seed);
+    fireEvent.change(seed, {target: {value: "1"}});
+    await settle(STATE_FIELD_DEBOUNCE_MS * 2);
+    expect(writes("PATCH", `${BOARD}/1/teams/1/players/1/fields`)).toEqual([]);
+    fireEvent.change(seed, {target: {value: "12"}});
+    fireEvent.keyDown(seed, {key: "Enter"});
+    await settle();
+    fireEvent.blur(seed);
+    await settle();
+
+    // Emptied: no seed, which is 0. Leaving the field sends it too.
+    await confirmSeed(seed, "", "blur");
+    await confirmSeed(seed, "0");
+    // Not a seed: refused here, nothing sent, the board's shown again.
+    await confirmSeed(seed, "-1");
+    await confirmSeed(seed, "2.5");
+    await confirmSeed(seed, "abc");
+    await confirmSeed(seed, "100001");
+    expect(seed).toHaveValue("3");
+    // The seed it has already: nothing sent.
+    await confirmSeed(seed, "3");
+    await confirmSeed(seed, "100000", "blur");
+
+    expect(writes("PATCH", `${BOARD}/1/teams/1/players/1/fields`)).toEqual([
+        {seed: 12}, {seed: 0}, {seed: 0}, {seed: 100000},
+    ]);
+});
+
+test("a slot without a seed shows an empty seed field", async () => {
+    await renderPage();
+    const details = await openDetails(1);
+    const seed = within(details).getByRole("textbox",
+                                           {name: i18n.t("score_seed_field")});
+    expect(seed).toHaveValue("");
+    // Emptied again, or 0: the seed it has already.
+    await confirmSeed(seed, "0");
+    await confirmSeed(seed, "", "blur");
+    expect(writes("PATCH", `${BOARD}/1/teams/1/players/1/fields`)).toEqual([]);
 });
 
 test("the details are closed by default and open under the name field", async () => {
@@ -819,7 +904,7 @@ test("the details are closed by default and open under the name field", async ()
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(within(card(1)).queryByRole("textbox",
-                                       {name: i18n.t("score_real_name")})).toBeNull();
+                                       {name: i18n.t("score_twitter")})).toBeNull();
 
     fireEvent.click(toggle);
     await settle();
@@ -829,11 +914,11 @@ test("the details are closed by default and open under the name field", async ()
     expect(region).not.toBeNull();
     expect(card(1)).toContainElement(region);
     expect(within(region).getByRole("textbox",
-                                    {name: i18n.t("score_real_name")})).toBeInTheDocument();
+                                    {name: i18n.t("score_twitter")})).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     // Another card's details stay closed.
     expect(within(card(2)).queryByRole("textbox",
-                                       {name: i18n.t("score_real_name")})).toBeNull();
+                                       {name: i18n.t("score_twitter")})).toBeNull();
 
     fireEvent.click(toggle);
     // The collapse unmounts once its exit transition has run.
@@ -841,7 +926,7 @@ test("the details are closed by default and open under the name field", async ()
     await settle();
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(within(card(1)).queryByRole("textbox",
-                                       {name: i18n.t("score_real_name")})).toBeNull();
+                                       {name: i18n.t("score_twitter")})).toBeNull();
 });
 
 test("the details have no 反映 of their own: the board's is the only one", async () => {
@@ -1086,11 +1171,24 @@ test("a card shows its seed, as the Qt card's badge", async () => {
     server.pending[1].board = board({players: [[slot({seed: 3})], [slot()]]});
     await renderPage();
 
+    // Beside the name, with the details closed.
     expect(within(card(1)).getByText(i18n.t("score_seed", {seed: 3})))
         .toBeInTheDocument();
     // None without one.
     const anySeed = new RegExp(i18n.t("score_seed", {seed: "@"}).replace("@", "\\d+"));
     expect(within(card(2)).queryByText(anySeed)).toBeNull();
+
+    // Open, the details show it in their seed field, not as a badge of their
+    // own: still once beside the name.
+    const details = await openDetails(1);
+    expect(within(details).getByRole("textbox", {name: i18n.t("score_seed_field")}))
+        .toHaveValue("3");
+    expect(within(card(1)).getAllByText(anySeed)).toHaveLength(1);
+});
+
+test("the seed field takes what core takes", () => {
+    // PlayerService.SEED_MAX, pinned equal by tests/test_api_v1_score_fields.py.
+    expect(SEED_MAX).toBe(100000);
 });
 
 test("the singles board names its teams when team 1 has more than one player",

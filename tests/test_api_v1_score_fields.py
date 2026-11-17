@@ -331,12 +331,158 @@ def test_a_field_already_shown_writes_nothing(
 @pytest.mark.parametrize("body", [
     {}, {"gamerTag": 1}, {"gamerTag": None}, {"prefix": ["SP"]},
     {"twitter": {"x": 1}}, {"country_code": None}, {"state_code": 13},
-    {"seed": 3}, {"id": 1}, {"real_name": "x"}, {"team": "x"},
+    {"id": 1}, {"real_name": "x"}, {"team": "x"},
     {"gamerTag": "OK", "city": "x"}])
 def test_a_bad_body_is_400_and_writes_nothing(
         autonaApp, client, shell, countries, body):
     _load_start(autonaApp)
     _assertRejected(_nothingWritten(autonaApp, lambda: _fields(client, body)))
+
+
+# ── the seed ─────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def statsAsked(monkeypatch):
+    """What the statistics were asked for (StatsService.PlayerChanged):
+    (board, team, change), in order. Nothing is fetched."""
+    from src.core.StatsService import StatsService
+    asked = []
+    monkeypatch.setattr(
+        StatsService, "PlayerChanged",
+        lambda self, team, change: asked.append(
+            (self.scoreboardNumber, team, change)))
+    return asked
+
+
+def test_a_seed_is_written_as_a_number_and_asks_for_the_upset_factor(
+        autonaApp, client, shell, statsAsked):
+    _load_start(autonaApp)
+    before = _slot()
+    statsAsked.clear()
+
+    with WriteRecorder() as recorder:
+        _ok(_fields(client, {"seed": 5}))
+        autonaApp.settle()
+    # The seed alone: no id emptied, no display name or images re-derived.
+    assert [key for key, _value in recorder.sets] == [f"{SLOT}.seed"]
+    assert statsAsked == [(1, 1, players.SlotChange(seedChanged=True))]
+
+    _apply(client)
+    autonaApp.settle()
+    after = _slot()
+    assert after["seed"] == 5 and type(after["seed"]) is int
+    assert {key: value for key, value in after.items() if key != "seed"} \
+        == {key: value for key, value in before.items() if key != "seed"}
+
+
+def test_a_seed_of_0_is_no_seed(autonaApp, client, shell, statsAsked):
+    _load_start(autonaApp)
+    statsAsked.clear()
+
+    _ok(_fields(client, {"seed": 0}))
+    _apply(client)
+    autonaApp.settle()
+    assert _slot()["seed"] == 0
+    assert statsAsked == [(1, 1, players.SlotChange(seedChanged=True))]
+
+
+def test_the_seed_already_shown_writes_nothing_and_asks_for_nothing(
+        autonaApp, client, shell, statsAsked):
+    """Not even the same number again: on the desktop it would light 反映
+    for nothing, and ask for an upset factor that has not changed."""
+    _load_start(autonaApp)
+    statsAsked.clear()
+    for body in ({"seed": 3}, {"seed": 3, "gamerTag": "ALPHA"}):
+        _ok(_nothingWritten(autonaApp, lambda: _fields(client, body)))
+    assert statsAsked == []
+
+
+def test_a_seed_recalculates_the_upset_factor(autonaApp, client, shell):
+    # The upset factor is local (no fetch): |placement(seed 1) -
+    # placement(seed 5)| on the board's bracket (4 on a double elimination
+    # one). Exempt from 反映 (STATS_KEYS).
+    from src.core.StatsService import StatsService
+    _load_start(autonaApp)
+    PlayerService("score.1.team.2.player.1").SetSeed(1)
+    AutonaActions.instance.ApplyChanges(1)
+    autonaApp.settle()
+    bracket = StateManager.Get("score.bracket_type", "DOUBLE_ELIMINATION")
+    expected = StatsService.CalculatePlacementMath(bracket, 5)
+    assert expected > 0, f"no upset factor on a {bracket!r} bracket"
+
+    _ok(_fields(client, {"seed": 5}))
+    autonaApp.settle()
+    assert StateManager.Get("score.1.upset_factor") == expected
+    _ok(_fields(client, {"seed": 0}))
+    autonaApp.settle()
+    # One seed missing: none.
+    assert StateManager.Get("score.1.upset_factor") == 0
+
+
+def test_a_seed_with_other_fields_is_one_save_cycle(
+        autonaApp, client, shell, statsAsked):
+    _load_start(autonaApp)
+    statsAsked.clear()
+
+    with _cycles() as told:
+        _ok(_fields(client, {"seed": 9, "gamerTag": "BRAVO", "twitter": "b"}))
+        autonaApp.settle()
+    _oneCycle(told)
+    # One request for both: another player and another seed.
+    assert statsAsked == [
+        (1, 1, players.SlotChange(idChanged=True, seedChanged=True))]
+    _apply(client)
+    autonaApp.settle()
+    slot = _slot()
+    assert (slot["seed"], slot["name"], slot["twitter"], slot["id"]) == (
+        9, "BRAVO", "b", None)
+
+
+def test_the_seed_is_held_until_apply(autonaApp, client, desktopBoards):
+    _load_start(autonaApp)
+    published = copy.deepcopy(_published(client))
+
+    _ok(_fields(client, {"seed": 12}))
+    autonaApp.settle()
+    assert _published(client) == published
+    pending = _pending(client)
+    assert pending["dirty"] is True
+    assert pending["board"]["team"]["1"]["player"]["1"]["seed"] == 12
+
+    _apply(client)
+    autonaApp.settle()
+    assert _published(client)["team"]["1"]["player"]["1"]["seed"] == 12
+
+
+def test_the_largest_seed_is_taken(autonaApp, client, shell):
+    _load_start(autonaApp)
+    _ok(_fields(client, {"seed": players.SEED_MAX}))
+    _apply(client)
+    autonaApp.settle()
+    assert _slot()["seed"] == players.SEED_MAX
+
+
+# No value in the message (the route logs keys only: player data, §2.7).
+@pytest.mark.parametrize("body", [
+    {"seed": -1}, {"seed": players.SEED_MAX + 1}, {"seed": True},
+    {"seed": False}, {"seed": 3.0}, {"seed": 2.5}, {"seed": "3"},
+    {"seed": ""}, {"seed": None}, {"seed": [3]}, {"seed": {"value": 3}},
+    {"twitter": "OK", "seed": -1}, {"seed": -1, "twitter": "OK"}])
+def test_a_seed_that_is_not_one_is_400_and_writes_nothing(
+        autonaApp, client, shell, statsAsked, body):
+    _load_start(autonaApp)
+    statsAsked.clear()
+    response = _nothingWritten(autonaApp, lambda: _fields(client, body))
+    _assertRejected(response)
+    assert response.get_json()["error"]["message"] \
+        == f"seed must be an integer from 0 to {players.SEED_MAX}"
+    assert statsAsked == []
+
+
+def test_the_seed_limit_is_the_pages():
+    page = (Path(__file__).resolve().parents[1] / "web" / "src"
+            / "ScorePage" / "Cards.tsx").read_text(encoding="utf-8")
+    assert f"export const SEED_MAX = {players.SEED_MAX};" in page
 
 
 # PUT /players' rule for a player's texts (S4z review): no line break outside
@@ -614,6 +760,13 @@ def test_the_refusals_are_core_s(autonaApp, game):
     assert service.Edit({}, region="13") == players.UNKNOWN_REGION
     with pytest.raises(ValueError):
         service.Edit({"seed": "3"})
+    # A seed is not a text field, and not a number outside IsSeed: raised
+    # before anything is written (the route refuses it first).
+    before = _slot()
+    for seed in (-1, players.SEED_MAX + 1, True, 3.0, "3", None):
+        with pytest.raises(ValueError):
+            service.Edit({schema.PLAYER_TWITTER_KEY: "changed"}, seed=seed)
+    assert _slot() == before
 
 
 def test_a_slot_with_no_character_rows_has_no_row_to_pick_on(
