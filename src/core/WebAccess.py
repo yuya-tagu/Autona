@@ -361,6 +361,12 @@ ROUTE_ACCESS = {
     "api_v1.get_archive_review": THIS_PC,
     "api_v1.archive_review_update": SHELL,
     "api_v1.archive_job_export": SHELL,
+    # The results (ADR-006 A5): their preparation is the shell's, as the
+    # job's start it comes before (it asks start.gg for any event); the
+    # match log's days (dates, tournament names, counts) are THIS_PC, as
+    # the archive's other reads.
+    "api_v1.archive_results_prepare": SHELL,
+    "api_v1.get_archive_match_logs": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

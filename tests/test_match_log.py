@@ -33,8 +33,8 @@ from tests.test_task_executor import _calls_in_order, _function
 JST = timezone(timedelta(hours=9))
 
 LINE_KEYS = ["id", "board", "started_at", "updated_at", "closed",
-             "tournament", "set_id", "phase", "round", "p1", "p2", "c1",
-             "c2", "score", "games"]
+             "tournament", "set_id", "phase", "round", "p1", "p2", "game",
+             "c1", "c2", "score", "games"]
 
 NO_CHARACTERS = {"c1": "", "c2": ""}
 
@@ -468,24 +468,61 @@ def test_a_character_the_catalog_does_not_know_is_its_name(board, log):
         "Guest Fighter", "Guest Fighter")
 
 
+def _switchGame(codename):
+    # A game load: the board's characters go with it.
+    with StateManager.SaveBlock():
+        StateManager.Set("game.codename", codename)
+        for team in (1, 2):
+            StateManager.Set(f"score.1.team.{team}.player.1.character", {})
+
+
 def test_another_game_clears_the_characters(board, log):
     codename = StateManager.Get("game.codename")
     _match()
     try:
         # A game switch clears the board's characters: the record's are
-        # not this game's either.
-        with StateManager.SaveBlock():
-            StateManager.Set("game.codename", "anothergame")
-            for team in (1, 2):
-                StateManager.Set(
-                    f"score.1.team.{team}.player.1.character", {})
+        # not this game's either. Before its first game, the record is the
+        # new game's.
+        _switchGame("anothergame")
         _game(1)
+        # Read before the game is put back (another switch).
+        [record] = log.records()
     finally:
         StateManager.Set("game.codename", codename)
 
-    [record] = log.records()
+    assert record["game"] == "anothergame"
     assert (record["c1"], record["c2"]) == ("", "")
     assert record["games"] == [dict(NO_CHARACTERS, at=log.clock.stamp())]
+
+
+def test_a_record_with_a_game_keeps_its_game(board, log):
+    codename = StateManager.Get("game.codename")
+    _match()
+    _game(1)
+    at = log.clock.stamp()
+    try:
+        # The set is over; the next set's game is loaded before it is.
+        _switchGame("anothergame")
+        [record] = log.records()
+    finally:
+        StateManager.Set("game.codename", codename)
+
+    assert codename and record["game"] == codename
+    assert (record["c1"], record["c2"]) == ("", "")
+    assert record["games"] == [{"c1": "mario", "c2": "luigi", "at": at}]
+
+
+def test_a_record_with_no_game_loaded_names_none(board, log):
+    codename = StateManager.Get("game.codename")
+    StateManager.Set("game.codename", "")
+    try:
+        _match()
+        _game(1)
+        [record] = log.records()
+    finally:
+        StateManager.Set("game.codename", codename)
+
+    assert record["game"] is None
 
 
 # ── a set loaded from the tournament ─────────────────────────────────────

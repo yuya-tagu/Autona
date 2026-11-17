@@ -3,6 +3,7 @@ import functools
 import queue
 import re
 import requests
+import threading
 import time
 import traceback
 from loguru import logger
@@ -37,6 +38,7 @@ class StartGGDataProvider(TournamentDataProvider):
     AnalysisPhaseGroupQuery = None
     TournamentStandingsQuery = None
     TournamentSlugQuery = None
+    ArchiveSetsQuery = None
     _request_timeout_secs = 20.0
     _initialized = False
 
@@ -89,6 +91,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "TournamentStandings")
         StartGGDataProvider.TournamentSlugQuery = readQueryFile(
             "TournamentSlug")
+        StartGGDataProvider.ArchiveSetsQuery = readQueryFile("ArchiveSets")
 
     def __init__(self, url, tshTdp) -> None:
         super().__init__(url, tshTdp)
@@ -154,7 +157,8 @@ class StartGGDataProvider(TournamentDataProvider):
     _SETS_FETCH_WORKERS = 4
 
     @staticmethod
-    def _FetchPages(executor, pages, fetch, onPage, cancel_event, task_name):
+    def _FetchPages(executor, pages, fetch, onPage, cancel_event, task_name,
+                    deadline=None):
         """Request `fetch(page)` for every page of `pages` on `executor`'s
         fan-out lane, at most _SETS_FETCH_WORKERS at a time, and hand each answer to
         `onPage(page, answer)` on this thread as it lands (in the order
@@ -163,6 +167,9 @@ class StartGGDataProvider(TournamentDataProvider):
         answer: nothing more is requested, and the requests in flight are
         abandoned (their answers dropped) rather than waited for -- one deep
         in its retry backoff would hold this thread for tens of seconds.
+        With a `deadline` (a time.monotonic() value), no answer is waited
+        for past it: it sets `cancel_event` (when there is one) and returns,
+        the requests in flight abandoned the same way.
 
         A sliding window, not map_fanout over every page: the progress
         moves page by page and a cancel is seen at the next page, as with
@@ -184,7 +191,16 @@ class StartGGDataProvider(TournamentDataProvider):
                 inFlight += 1
             if inFlight == 0:
                 return
-            page, future = landed.get()
+            if deadline is None:
+                page, future = landed.get()
+            else:
+                try:
+                    page, future = landed.get(
+                        timeout=max(0.0, deadline - time.monotonic()))
+                except queue.Empty:
+                    if cancel_event is not None:
+                        cancel_event.set()
+                    return
             inFlight -= 1
             failed = future.cancelled() or future.exception() is not None
             onPage(page, None if failed else future.result())
@@ -2389,11 +2405,13 @@ class StartGGDataProvider(TournamentDataProvider):
         return teams
 
 
-def _QueryRequests(url, type, headers, jsonParams, params, timeout):
+def _QueryRequests(url, type, headers, jsonParams, params, timeout,
+                   cancel_event=None):
     """StartGGDataProvider.QueryRequests: `url` asked with `type`
     (requests.post / get) until it answers 200 -- its JSON -- retried with
     exponential backoff; {} once the retries are spent or the app is
-    stopping. A function, so a request needs no provider (a QObject):
+    stopping, or `cancel_event` is set (seen between attempts, and within
+    the backoff). A function, so a request needs no provider (a QObject):
     ResolveEventUrl."""
     headers.update({
         "client-version": "20",
@@ -2416,6 +2434,9 @@ def _QueryRequests(url, type, headers, jsonParams, params, timeout):
         if stopping is not None and stopping.is_set():
             logger.info("QueryRequests: shutting down, request skipped")
             return {}
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("QueryRequests: cancelled, request skipped")
+            return {}
         try:
             data = type(
                 url,
@@ -2434,14 +2455,28 @@ def _QueryRequests(url, type, headers, jsonParams, params, timeout):
 
         if attempt < max_attempts - 1:
             # 1s, 2s, 4s, 8s — doubles each retry (cut short by a
-            # shutdown, which the next attempt then sees).
-            if stopping is not None:
+            # shutdown or a cancel, which the next attempt then sees).
+            if cancel_event is not None:
+                _WaitUnless(2 ** attempt, stopping, cancel_event)
+            elif stopping is not None:
                 stopping.wait(2 ** attempt)
             else:
                 time.sleep(2 ** attempt)
 
     logger.error("QueryRequests: all retries exhausted")
     return {}
+
+
+def _WaitUnless(seconds, stopping, cancel_event):
+    """Wait `seconds`, cut short once `cancel_event` or `stopping` (when
+    there is one) is set; `stopping` is looked at every quarter second."""
+    end = time.monotonic() + seconds
+    while True:
+        remaining = end - time.monotonic()
+        if remaining <= 0 or cancel_event.wait(min(remaining, 0.25)):
+            return
+        if stopping is not None and stopping.is_set():
+            return
 
 
 _ADMIN_URL = re.compile(".*start.gg/admin/tournament/[^/]*/brackets/([^/]*)")
@@ -2457,14 +2492,7 @@ def ResolveEventUrl(url):
     if not matches:
         return url
     try:
-        data = _QueryRequests(
-            "https://www.start.gg/api/-/gql", requests.post, {},
-            {
-                "operationName": "TournamentSlugQuery",
-                "variables": {"id": matches.group(1)},
-                "query": StartGGDataProvider.TournamentSlugQuery,
-            },
-            None, StartGGDataProvider._request_timeout_secs)
+        data = _BracketsSlugAnswer(matches.group(1))
     except Exception:
         logger.error(traceback.format_exc())
         return url
@@ -2475,3 +2503,275 @@ def ResolveEventUrl(url):
             f"{matches.group(1)} in {url}")
         return url
     return "https://www.start.gg/" + slug
+
+
+def _BracketsSlugAnswer(bracketsId, cancel_event=None):
+    """start.gg's answer to the event slug of an admin / brackets id
+    (QueryRequests': {} when it did not answer). The cancel is passed only
+    when there is one: ResolveEventUrl asks as it always has."""
+    cancel = {} if cancel_event is None else {"cancel_event": cancel_event}
+    return _QueryRequests(
+        "https://www.start.gg/api/-/gql", requests.post, {},
+        {
+            "operationName": "TournamentSlugQuery",
+            "variables": {"id": bracketsId},
+            "query": StartGGDataProvider.TournamentSlugQuery,
+        },
+        None, StartGGDataProvider._request_timeout_secs, **cancel)
+
+
+# ── An event's completed sets, for the archive clipper (ADR-006 A5) ──────
+#
+# Functions, as ResolveEventUrl: the request's thread asks (the v1 route
+# results:prepare, through core's ArchiveResults.Prepare) and builds no
+# QObject. Any event, not the loaded tournament's.
+
+_EVENT_SLUG = re.compile(r"(tournament/[^/?#]+/event/[^/?#]+)")
+
+# A page of an event's sets: about 27 objects a set with its games and their
+# selections, under start.gg's 1000 objects a query.
+ARCHIVE_SETS_PER_PAGE = 32
+# The whole fetch of an event's sets, at most (seconds): well under the
+# page's wait for the answer (ArchivePage's PREPARE_TIMEOUT_MS), so the page
+# hears start.gg failed rather than giving up on its own.
+ARCHIVE_FETCH_DEADLINE_SECS = 120
+# start.gg's selection type of a character (a game's selection may be
+# something else).
+CHARACTER_SELECTION = "CHARACTER"
+
+
+def _StripSponsor(name):
+    # start.gg entrant names may carry a sponsor prefix: "TEAM | name"
+    # (vodsplit's results._strip_sponsor).
+    return name.split(" | ")[-1].strip()
+
+
+def _ArchiveSetNodes(answer):
+    """A page's sets, or None when the page did not answer (QueryRequests'
+    {} once its retries are spent, a GraphQL error, no event)."""
+    if not isinstance(answer, dict) or answer.get("errors"):
+        return None
+    nodes = deep_get(answer, "data.event.sets.nodes", None)
+    return nodes if isinstance(nodes, list) else None
+
+
+def _ArchiveSet(node):
+    """One completed set as the archive's results take it, or None: not
+    completed, a DQ or a score not reported (a score null or below 0), not
+    two entrants with a name."""
+    if not isinstance(node, dict) or node.get("state") not in (3, None):
+        return None
+    ident = node.get("id")
+    if isinstance(ident, bool) or not isinstance(ident, (int, str)):
+        return None
+    scores = (node.get("entrant1Score"), node.get("entrant2Score"))
+    if not all(isinstance(score, int) and not isinstance(score, bool)
+               and score >= 0 for score in scores):
+        return None
+    slots = node.get("slots")
+    if not isinstance(slots, list) or len(slots) != 2:
+        return None
+    entrants = [slot.get("entrant") if isinstance(slot, dict) else None
+                for slot in slots]
+    if not all(isinstance(entrant, dict)
+               and isinstance(entrant.get("name"), str)
+               and _StripSponsor(entrant["name"]) for entrant in entrants):
+        return None
+    sides = {str(entrant.get("id")): side
+             for side, entrant in enumerate(entrants, 1)
+             if entrant.get("id") is not None}
+    games = [game for game in node.get("games") or []
+             if isinstance(game, dict)]
+    # In the order played; a game with no number keeps its place after the
+    # numbered ones.
+    games.sort(key=lambda game: (not isinstance(game.get("orderNum"), int),
+                                 game.get("orderNum")
+                                 if isinstance(game.get("orderNum"), int)
+                                 else 0))
+    picked = []
+    for game in games:
+        chosen = {1: None, 2: None}
+        for selection in game.get("selections") or []:
+            if not isinstance(selection, dict):
+                continue
+            if selection.get("selectionType") != CHARACTER_SELECTION:
+                continue
+            side = sides.get(str(deep_get(selection, "entrant.id", None)))
+            value = selection.get("selectionValue")
+            # The first character selection of each entrant (a 1on1's one
+            # character).
+            if side and chosen[side] is None and isinstance(value, int) \
+                    and not isinstance(value, bool):
+                chosen[side] = value
+        picked.append({"c1": chosen[1], "c2": chosen[2]})
+    round_ = node.get("fullRoundText")
+    return {
+        "id": ident,
+        "round": round_ if isinstance(round_, str) else "",
+        "p1": _StripSponsor(entrants[0]["name"]), "s1": scores[0],
+        "p2": _StripSponsor(entrants[1]["name"]), "s2": scores[1],
+        "games": picked,
+    }
+
+
+def ParseEventResults(pages, url):
+    """The event the ArchiveSetsQuery answers `pages` (in page order) say:
+    {"tournament", "event" (its name), "url", "videogame" (start.gg's id or
+    None), "startAt", "endAt" (unix seconds or None), "sets": [{"id",
+    "round", "p1", "s1", "p2", "s2", "games": [{"c1", "c2"}: start.gg
+    character ids (the CHARACTER selections) or None, in the order
+    played]}]} -- the completed sets
+    (_ArchiveSet), each once (by id), the names without their sponsor."""
+    event = deep_get(pages[0] if pages else {}, "data.event", None)
+    event = event if isinstance(event, dict) else {}
+    sets, seen = [], set()
+    for answer in pages:
+        for node in _ArchiveSetNodes(answer) or []:
+            item = _ArchiveSet(node)
+            if item is None or item["id"] in seen:
+                continue
+            seen.add(item["id"])
+            sets.append(item)
+
+    def number(value):
+        return value if isinstance(value, (int, float)) \
+            and not isinstance(value, bool) else None
+
+    tournament = deep_get(event, "tournament.name", None)
+    name = event.get("name")
+    return {
+        "tournament": tournament if isinstance(tournament, str) else "",
+        "event": name if isinstance(name, str) else "",
+        "url": url,
+        "videogame": deep_get(event, "videogame.id", None),
+        "startAt": number(event.get("startAt")),
+        "endAt": number(event.get("endAt")),
+        "sets": sets,
+    }
+
+
+def FetchEventResults(url):
+    """A start.gg event's completed sets with each game's characters
+    (ParseEventResults' shape), from its URL (an admin / brackets URL is
+    resolved first). Blocking: the request's thread waits for the requests
+    on the fan-out lane (_FetchPages) -- the resolve, the first page, then
+    the others; each of those is asked once more if it failed. Results must
+    be whole, so it raises rather than answer part: ValueError for a URL
+    naming no event, LookupError when start.gg has no such event (also an
+    answer with errors), RuntimeError when start.gg did not answer the
+    resolve or a page (or there is no task executor), TimeoutError past
+    ARCHIVE_FETCH_DEADLINE_SECS for the whole fetch (the requests still out
+    are cancelled: they stop between attempts). The footer shows it as the
+    set list's fetch (StatusService ``startgg_sets``)."""
+    admin = _ADMIN_URL.match(url) if isinstance(url, str) else None
+    match = None
+    if admin is None:
+        match = _EVENT_SLUG.search(url) if isinstance(url, str) else None
+        if not match:
+            raise ValueError("not a start.gg event URL")
+    executor = StartGGDataProvider._FanOut()
+    deadline_secs = ARCHIVE_FETCH_DEADLINE_SECS
+    deadline = time.monotonic() + deadline_secs
+    cancel = threading.Event()
+    status_token = StatusService.Push("startgg_sets")
+    try:
+        def checkTime():
+            if cancel.is_set():
+                raise TimeoutError(
+                    f"start.gg did not answer within {deadline_secs} s")
+
+        def ask(fetch, arg, task_name):
+            """`fetch(arg)` on the fan-out lane, waited for until the
+            deadline: its answer, {} when it raised."""
+            answers = {}
+            StartGGDataProvider._FetchPages(
+                executor, [arg], fetch,
+                lambda _arg, answer: answers.update(answer=answer), cancel,
+                task_name, deadline=deadline)
+            checkTime()
+            answer = answers.get("answer")
+            return answer if isinstance(answer, dict) else {}
+
+        def noEvent(answer):
+            # start.gg's answer for an event it does not have: no event in
+            # the data, with or without errors.
+            return isinstance(answer.get("data"), dict) \
+                and answer["data"].get("event") is None
+
+        if admin is not None:
+            answer = ask(lambda bracketsId: _BracketsSlugAnswer(
+                bracketsId, cancel), admin.group(1), "start.gg brackets slug")
+            if noEvent(answer):
+                raise LookupError(
+                    f"start.gg has no event for the brackets id "
+                    f"{admin.group(1)}")
+            slug = deep_get(answer, "data.event.slug", None)
+            match = _EVENT_SLUG.search(slug) if isinstance(slug, str) \
+                else None
+            if not match:
+                raise RuntimeError(
+                    f"start.gg did not answer the event of the brackets id "
+                    f"{admin.group(1)}")
+        slug = match.group(1)
+
+        def fetchPage(page):
+            return _QueryRequests(
+                "https://www.start.gg/api/-/gql", requests.post, {},
+                {
+                    "operationName": "ArchiveSetsQuery",
+                    "variables": {"eventSlug": slug, "page": page,
+                                  "perPage": ARCHIVE_SETS_PER_PAGE},
+                    "query": StartGGDataProvider.ArchiveSetsQuery,
+                },
+                None, StartGGDataProvider._request_timeout_secs,
+                cancel_event=cancel)
+
+        def report(done, pages):
+            StatusService.Update(
+                status_token, "startgg_sets_page",
+                {"page": done, "pages": pages}, done=done, total=pages)
+
+        first = ask(fetchPage, 1, "start.gg archive sets page")
+        if noEvent(first):
+            raise LookupError(f"start.gg has no event {slug}")
+        # The first page is not asked again: QueryRequests has retried it
+        # (the others are, once: a throttle during the burst).
+        if _ArchiveSetNodes(first) is None:
+            raise RuntimeError(
+                "start.gg did not answer the first page of the sets")
+        pages = deep_get(first, "data.event.sets.pageInfo.totalPages", 1)
+        pages = pages if isinstance(pages, int) and pages > 0 else 1
+        answers = {1: first}
+        report(1, pages)
+        if pages > 1:
+            done = 1
+
+            def landed(page, answer):
+                nonlocal done
+                answers[page] = answer
+                done += 1
+                report(done, pages)
+
+            def retried(page, answer):
+                answers[page] = answer
+
+            StartGGDataProvider._FetchPages(
+                executor, range(2, pages + 1), fetchPage, landed, cancel,
+                "start.gg archive sets page", deadline=deadline)
+            checkTime()
+            failed = [page for page in range(2, pages + 1)
+                      if _ArchiveSetNodes(answers.get(page)) is None]
+            if failed:
+                StartGGDataProvider._FetchPages(
+                    executor, failed, fetchPage, retried, cancel,
+                    "start.gg archive sets page", deadline=deadline)
+                checkTime()
+        missing = [page for page in range(1, pages + 1)
+                   if _ArchiveSetNodes(answers.get(page)) is None]
+        if missing:
+            raise RuntimeError(
+                f"start.gg did not answer pages {missing} of {pages}")
+        return ParseEventResults([answers[page] for page in sorted(answers)],
+                                 "https://www.start.gg/" + slug)
+    finally:
+        StatusService.Pop(status_token)

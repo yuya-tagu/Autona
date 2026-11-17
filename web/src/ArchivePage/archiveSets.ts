@@ -8,6 +8,15 @@ export interface SetResult {
     s1?: number | null;
     p2?: string | null;
     s2?: number | null;
+    // The characters (ADR-006 A5, vodsplit's optional fields): the display
+    // names ("/" between two), each game's, where they came from, the set's
+    // id in its source, and Autona's own key (setCharacters).
+    c1?: string | null;
+    c2?: string | null;
+    games?: {c1?: string | null; c2?: string | null}[] | null;
+    char_source?: string | null;
+    id?: string | number | null;
+    autona?: unknown;
 }
 
 export interface SetRow {
@@ -253,4 +262,112 @@ export function correctedText(value: unknown): string | null {
         return null;
     }
     return `Game ${value.join(", ")}`;
+}
+
+// ── The results' characters (ADR-006 A5) ─────────────────────────────────
+
+// Where a set's characters came from (POST results:prepare's char_source and
+// summary): the match log's record, start.gg's report, the player's main in
+// the player database (an estimate), a JSON file's own, none.
+export const CHARACTER_SOURCES = ["scoreboard", "report", "mains", "given",
+                                  "none"] as const;
+export type CharacterSource = typeof CHARACTER_SOURCES[number];
+
+// What POST /api/v1/archive/results:prepare answers besides the results.
+export interface PrepareSummary {
+    sets: number;
+    game: string | null;
+    records: number;
+    sources: Partial<Record<CharacterSource, number>>;
+}
+
+// A day of GET /api/v1/archive/match-logs.
+export interface MatchLogDay {
+    date: string;
+    records: number;
+    tournaments: {name: string; records: number}[];
+}
+
+// The codenames behind a set's c1 / c2, their game and their icons (the
+// "autona" key Autona puts in a result set; vodsplit keeps it in sets.json):
+// an icon is its file in the game's folder, as the game's icon pack names it
+// (codename -> "base_files/icon/<file>"; a codename with none is not in it).
+export interface SetCharacters {
+    game: string;
+    c1: string[];
+    c2: string[];
+    icons: Record<string, string>;
+}
+
+// A game's or a character's codename, or a file's name, as it may name a
+// file: nothing that leaves its folder.
+const ASSET_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+
+function assetName(value: unknown): value is string {
+    return typeof value === "string" && ASSET_NAME.test(value)
+        && !value.includes("..");
+}
+
+// A file's path in a game's folder: names as assetName takes them, "/"
+// between.
+function assetPath(value: unknown): value is string {
+    return typeof value === "string"
+        && value.split("/").every((part) => assetName(part));
+}
+
+// The set's codenames, or null when it has none (a set with no character,
+// a JSON file's set, a malformed key). An icon that may leave the game's
+// folder is left out.
+export function setCharacters(set: SetResult | null | undefined):
+    SetCharacters | null {
+    const key = set?.autona as {
+        game?: unknown; c1?: unknown; c2?: unknown; icons?: unknown;
+    } | null | undefined;
+    if (!key || typeof key !== "object" || !assetName(key.game)) {
+        return null;
+    }
+    const side = (value: unknown) => Array.isArray(value)
+        ? value.filter(assetName) : [];
+    const icons: Record<string, string> = {};
+    if (key.icons && typeof key.icons === "object"
+        && !Array.isArray(key.icons)) {
+        for (const [codename, file] of Object.entries(key.icons)) {
+            if (assetName(codename) && assetPath(file)) {
+                icons[codename] = file;
+            }
+        }
+    }
+    const found = {game: key.game, c1: side(key.c1), c2: side(key.c2), icons};
+    return found.c1.length > 0 || found.c2.length > 0 ? found : null;
+}
+
+// A character's icon, the server's path (as framePath: after BASE_URL):
+// `file` (setCharacters' icons) in the game's folder; null when there is no
+// file or a name may not name one. The page hides an icon that does not
+// load.
+export function characterIcon(game: string, file: string | null | undefined):
+    string | null {
+    if (!assetName(game) || !assetPath(file)) {
+        return null;
+    }
+    return `/user_data/games/${game}/${file}`;
+}
+
+// Whether the set's characters are (partly) an estimate: a player's main.
+export function isEstimate(set: SetResult | null | undefined): boolean {
+    return set?.char_source === "mains";
+}
+
+// The summary's counts that are not 0, in CHARACTER_SOURCES' order.
+export function sourceCounts(summary: PrepareSummary):
+    [CharacterSource, number][] {
+    return CHARACTER_SOURCES
+        .map((key): [CharacterSource, number] => [key, summary.sources?.[key] ?? 0])
+        .filter(([, n]) => n > 0);
+}
+
+// YYYYMMDD as YYYY-MM-DD.
+export function dayText(date: string): string {
+    return /^[0-9]{8}$/.test(date)
+        ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : date;
 }

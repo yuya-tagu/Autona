@@ -206,6 +206,352 @@ test("in the desktop's window the writes are on", async () => {
     expect(screen.queryByTestId("archive-read-only")).toBeNull();
 });
 
+// The results a job is given (ADR-006 A5): prepared before the job starts
+// (POST results:prepare, its own long timeout), summed up, then handed to
+// the job's creation as they are.
+describe("the results of a new job", () => {
+    const PREPARE = "/api/v1/archive/results:prepare";
+    const RESULTS = {event: "Fake Cup", sets: [
+        {p1: "Kappa", s1: 3, p2: "Lambda", s2: 1, c1: "マリオ",
+         char_source: "scoreboard",
+         autona: {game: "tgame", c1: ["mario"], c2: []}}]};
+    const SUMMARY = {sets: 3, game: "tgame", records: 2,
+                     sources: {scoreboard: 1, report: 1, mains: 0, given: 0,
+                               none: 1}};
+    let posts;
+
+    const answer = (summary = SUMMARY) => JSON.stringify(
+        {data: {results: RESULTS, summary}});
+
+    beforeEach(() => {
+        posts = [];
+        apiPost.mockImplementation((path, body, opts) => {
+            posts.push([path, body, opts]);
+            if (path === PREPARE) {
+                return Promise.resolve(answer());
+            }
+            if (path === "/api/v1/archive/jobs") {
+                return Promise.resolve(JSON.stringify(
+                    {data: {job: job("J", "failed")}}));
+            }
+            return Promise.reject(new Error(`unexpected ${path}`));
+        });
+    });
+
+    afterEach(() => {
+        apiPost.mockReset();
+    });
+
+    const shell = (extra = {}) => install({handlers: {
+        "/api/v1/archive/jobs": () => Promise.resolve({data: {jobs: []}}),
+        "/api/v1/archive/jobs/J": () => Promise.resolve(
+            {data: {job: job("J", "failed"), sets: null}}),
+        "/api/v1/archive/match-logs": () => Promise.resolve({data: {days: [
+            {date: "20261115", records: 3, tournaments: [
+                {name: "Fake Cup", records: 2}, {name: "", records: 1}]},
+            {date: "20261114", records: 1, tournaments: [
+                {name: "Other Cup", records: 1}]},
+        ]}}),
+        ...extra,
+    }});
+    const startButton = () => screen.getByRole("button",
+                                               {name: i18n.t("archive_start")});
+    const typeSource = async () => {
+        fireEvent.change(await screen.findByLabelText(i18n.t("archive_source")),
+                         {target: {value: "https://youtu.be/x"}});
+        await waitFor(() => expect(count("/api/v1/shell-session")).toBe(1));
+    };
+
+    test("start.gg's sets are fetched, summed up and given to the job",
+         async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_startgg")));
+        expect(startButton()).toBeDisabled();
+        const fetch = screen.getByRole("button",
+                                       {name: i18n.t("archive_results_fetch")});
+        expect(fetch).toBeDisabled();
+        fireEvent.change(screen.getByLabelText(
+            i18n.t("archive_results_startgg_url")),
+            {target: {value: " https://www.start.gg/tournament/x/event/y "}});
+        fireEvent.click(fetch);
+
+        const summary = await screen.findByTestId("archive-results-summary");
+        expect(posts[0]).toEqual([PREPARE, {
+            kind: "startgg", url: "https://www.start.gg/tournament/x/event/y"},
+            {timeoutMs: 150000}]);
+        expect(summary.textContent).toContain(
+            i18n.t("archive_results_summary", {count: 3}));
+        expect(summary.textContent).toContain(
+            `${i18n.t("archive_char_source_scoreboard")} 1`);
+        expect(summary.textContent).toContain(
+            `${i18n.t("archive_char_source_none")} 1`);
+        // A count of 0 is not said; nothing is estimated.
+        expect(summary.textContent).not.toContain(
+            i18n.t("archive_char_source_mains"));
+        expect(summary.textContent).toContain(
+            i18n.t("archive_results_records", {count: 2}));
+        expect(startButton()).toBeEnabled();
+
+        fireEvent.click(startButton());
+        await waitFor(() => expect(posts).toHaveLength(2));
+        expect(posts[1][0]).toBe("/api/v1/archive/jobs");
+        expect(posts[1][1]).toEqual({source: "https://youtu.be/x",
+                                     results: RESULTS, event: null});
+    });
+
+    test("another URL asks again: the earlier results are not the job's",
+         async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_startgg")));
+        const url = screen.getByLabelText(i18n.t("archive_results_startgg_url"));
+        fireEvent.change(url, {target: {value: "https://www.start.gg/a"}});
+        fireEvent.click(screen.getByRole("button",
+                                         {name: i18n.t("archive_results_fetch")}));
+        await screen.findByTestId("archive-results-summary");
+        fireEvent.change(url, {target: {value: "https://www.start.gg/b"}});
+        expect(screen.queryByTestId("archive-results-summary")).toBeNull();
+        expect(startButton()).toBeDisabled();
+    });
+
+    test("a day of the match log is picked by its tournament", async () => {
+        apiPost.mockImplementation((path, body, opts) => {
+            posts.push([path, body, opts]);
+            return Promise.resolve(answer(
+                {...SUMMARY, sources: {scoreboard: 2, mains: 1}}));
+        });
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_matchlog")));
+
+        // The newest day, the whole day, at first.
+        const date = await screen.findByLabelText(
+            i18n.t("archive_results_matchlog_date"));
+        expect(date.textContent).toBe("2026-11-15 (3)");
+        const tournament = screen.getByLabelText(
+            i18n.t("archive_results_matchlog_tournament"));
+        expect(tournament.textContent).toBe(
+            `${i18n.t("archive_results_matchlog_all")} (3)`);
+        fireEvent.mouseDown(tournament);
+        fireEvent.click(within(await screen.findByRole("listbox")).getByText(
+            `${i18n.t("archive_results_matchlog_unnamed")} (1)`));
+        fireEvent.click(screen.getByRole("button",
+                                         {name: i18n.t("archive_results_load")}));
+
+        const summary = await screen.findByTestId("archive-results-summary");
+        expect(posts[0][1]).toEqual({kind: "matchlog", date: "20261115",
+                                     tournament: ""});
+        expect(summary.textContent).toContain(
+            `${i18n.t("archive_char_source_mains")} 1`);
+        expect(summary.textContent).toContain(
+            i18n.t("archive_results_estimate_note"));
+        // Not a start.gg event: no records to check against.
+        expect(summary.textContent).not.toContain(
+            i18n.t("archive_results_records", {count: 2}));
+
+        // The whole of another day: null.
+        fireEvent.mouseDown(date);
+        fireEvent.click(within(await screen.findByRole("listbox")).getByText(
+            "2026-11-14 (1)"));
+        expect(screen.queryByTestId("archive-results-summary")).toBeNull();
+        fireEvent.click(screen.getByRole("button",
+                                         {name: i18n.t("archive_results_load")}));
+        await screen.findByTestId("archive-results-summary");
+        expect(posts[1][1]).toEqual({kind: "matchlog", date: "20261114",
+                                     tournament: null});
+    });
+
+    test("an empty match log says so", async () => {
+        shell({"/api/v1/archive/match-logs": () => Promise.resolve(
+            {data: {days: []}})});
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_matchlog")));
+        expect((await screen.findByTestId("archive-matchlog-empty")).textContent)
+            .toBe(i18n.t("archive_results_matchlog_empty"));
+        expect(startButton()).toBeDisabled();
+    });
+
+    const pick = (text) => fireEvent.change(
+        screen.getByLabelText(i18n.t("archive_results_pick")),
+        {target: {files: [{text: () => Promise.resolve(text)}]}});
+
+    test("a JSON file is prepared as it is picked", async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        pick(JSON.stringify({sets: [{p1: "A", s1: 1, p2: "B", s2: 0}]}));
+
+        await screen.findByTestId("archive-results-summary");
+        expect(posts[0].slice(0, 2)).toEqual([PREPARE, {kind: "json",
+            results: {sets: [{p1: "A", s1: 1, p2: "B", s2: 0}]}}]);
+        expect(startButton()).toBeEnabled();
+    });
+
+    // A file read while the form moves on (8): another file, another kind.
+    const deferredFile = () => {
+        const file = {};
+        file.text = () => new Promise((resolve) => {
+            file.release = resolve;
+        });
+        return file;
+    };
+    const pickFile = (file) => fireEvent.change(
+        screen.getByLabelText(i18n.t("archive_results_pick")),
+        {target: {files: [file]}});
+    const GOOD = JSON.stringify({sets: [{p1: "A", s1: 1, p2: "B", s2: 0}]});
+    const parseError = () => {
+        const said = i18n.t("archive_results_parse_error", {message: "@"})
+            .split("@")[0];
+        return screen.queryByText((text) => text.startsWith(said));
+    };
+
+    test("a file still being read when another is picked is dropped",
+         async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        const first = deferredFile();
+        pickFile(first);
+        pick(GOOD);
+        await screen.findByTestId("archive-results-summary");
+
+        // The first file's late text: neither its error nor its results.
+        await act(async () => {
+            first.release("not json");
+            await sleep(50);
+        });
+        expect(posts).toHaveLength(1);
+        expect(parseError()).toBeNull();
+        expect(screen.getByTestId("archive-results-summary")).toBeTruthy();
+    });
+
+    test("a file still being read when another kind is chosen is dropped",
+         async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        const good = deferredFile();
+        pickFile(good);
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_startgg")));
+        await act(async () => {
+            good.release(GOOD);
+            await sleep(50);
+        });
+        expect(posts).toEqual([]);
+        expect(screen.queryByTestId("archive-results-summary")).toBeNull();
+
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        const bad = deferredFile();
+        pickFile(bad);
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_none")));
+        await act(async () => {
+            bad.release("not json");
+            await sleep(50);
+        });
+        expect(parseError()).toBeNull();
+    });
+
+    // The match log's days (9): only the latest list asked is shown.
+    test("an earlier list of days answering late is dropped", async () => {
+        const lists = [];
+        shell({"/api/v1/archive/match-logs": () => new Promise((resolve) => {
+            lists.push(resolve);
+        })});
+        const day = (date) => ({data: {days: [
+            {date, records: 1, tournaments: [{name: "Fake Cup", records: 1}]}]}});
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_matchlog")));
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_matchlog")));
+        await waitFor(() => expect(lists).toHaveLength(2));
+
+        await act(async () => {
+            lists[1](day("20261115"));
+            await sleep(20);
+        });
+        await act(async () => {
+            lists[0](day("20261101"));
+            await sleep(50);
+        });
+        expect(screen.getByLabelText(i18n.t("archive_results_matchlog_date"))
+            .textContent).toBe("2026-11-15 (1)");
+    });
+
+    test("a list of days answering after the page is gone sets nothing",
+         async () => {
+        const lists = [];
+        shell({"/api/v1/archive/match-logs": () => new Promise((resolve) => {
+            lists.push(resolve);
+        })});
+        const errors = jest.spyOn(console, "error");
+        try {
+            const {unmount} = render(<ArchivePage/>);
+            await typeSource();
+            fireEvent.click(screen.getByLabelText(
+                i18n.t("archive_results_matchlog")));
+            await waitFor(() => expect(lists).toHaveLength(1));
+            unmount();
+            await act(async () => {
+                lists[0]({data: {days: []}});
+                await sleep(50);
+            });
+            expect(errors).not.toHaveBeenCalled();
+        } finally {
+            errors.mockRestore();
+        }
+    });
+
+    test("results the server refuses say why and start nothing", async () => {
+        apiPost.mockImplementation((path, body, opts) => {
+            posts.push([path, body, opts]);
+            return Promise.reject(Object.assign(new Error("refused"), {
+                status: 400, detail: "結果データにセットが1件もありません。"}));
+        });
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        pick(JSON.stringify({sets: []}));
+
+        expect(await screen.findByText("結果データにセットが1件もありません。"))
+            .toBeTruthy();
+        expect(screen.queryByTestId("archive-results-summary")).toBeNull();
+        expect(startButton()).toBeDisabled();
+    });
+
+    test("outside the desktop's window nothing is prepared", async () => {
+        shell({"/api/v1/shell-session": forbidden});
+        render(<ArchivePage/>);
+        await screen.findByTestId("archive-read-only");
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_startgg")));
+        fireEvent.change(screen.getByLabelText(
+            i18n.t("archive_results_startgg_url")),
+            {target: {value: "https://www.start.gg/a"}});
+        expect(screen.getByRole("button", {name: i18n.t("archive_results_fetch")}))
+            .toBeDisabled();
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_json")));
+        pick(JSON.stringify({sets: [{p1: "A", s1: 1, p2: "B", s2: 0}]}));
+        await act(async () => {
+            await sleep(50);
+        });
+        expect(posts).toEqual([]);
+        // The match log is this PC's read: it is listed.
+        fireEvent.click(screen.getByLabelText(i18n.t("archive_results_matchlog")));
+        await screen.findByLabelText(i18n.t("archive_results_matchlog_date"));
+        expect(screen.getByRole("button", {name: i18n.t("archive_results_load")}))
+            .toBeDisabled();
+    });
+});
+
 test("the closed players lane counts in the language's plural", () => {
     const en = i18n.getFixedT("en");
     const ja = i18n.getFixedT("ja");
@@ -900,6 +1246,63 @@ describe("the review screen", () => {
         expect(screen.getByTestId("archive-save-state").textContent).toBe("");
         expect(screen.getByTestId("archive-confirmed-count").textContent)
             .toBe(i18n.t("archive_export_count", {confirmed: 1, total: 3}));
+    });
+
+    // The characters of a set (ADR-006 A5): the icons by their codenames
+    // (Autona's key in the result set), 推定 for a player's main.
+    test("a set's characters show as icons, an estimate as such", async () => {
+        const characters = {...SETS, sets: [
+            {...SETS.sets[0], set: {...SETS.sets[0].set, c1: "マリオ/Bowser",
+                                    c2: "ルイージ", char_source: "scoreboard",
+                                    // Bowser has no icon file.
+                                    autona: {game: "tgame",
+                                             c1: ["mario", "koopa"],
+                                             c2: ["luigi"], icons: {
+                                                 mario: "base_files/icon/m_0.png",
+                                                 luigi: "base_files/icon/l_0.png",
+                                             }}}},
+            SETS.sets[1],
+            {...SETS.sets[2], set: {round: "GF", p1: "Gamma", s1: 3,
+                                    p2: "Delta", s2: 0, c1: "Zelda",
+                                    char_source: "mains",
+                                    autona: {game: "tgame",
+                                             c1: ["zelda", "peach", "../x"],
+                                             c2: [], icons: {
+                                                 zelda: "base_files/icon/z_0.png",
+                                                 peach: "../../p.png",
+                                                 "../x": "base_files/icon/x.png",
+                                             }}}},
+        ]};
+        installJob(characters);
+        render(<ArchivePage/>);
+
+        // The files the prepared results name, in the game's folder.
+        const first = await screen.findByTestId("archive-set-characters-1");
+        expect([...first.querySelectorAll("img")].map(
+            (img) => img.getAttribute("src"))).toEqual(
+            ["m_0", "l_0"].map((file) => expect.stringMatching(
+                `/user_data/games/tgame/base_files/icon/${file}\\.png$`)));
+        expect(within(first).queryByTestId("archive-estimate")).toBeNull();
+        expect(screen.queryByTestId("archive-set-characters-2")).toBeNull();
+        const third = screen.getByTestId("archive-set-characters-3");
+        // A name or a file that would leave the game's folder is no icon.
+        expect(third.querySelectorAll("img")).toHaveLength(1);
+        expect(within(third).getByTestId("archive-estimate").textContent)
+            .toBe(i18n.t("archive_char_estimate"));
+        // An icon the game's assets do not have is hidden.
+        fireEvent.error(within(first).getByTestId("archive-character-mario"));
+        expect(within(first).queryByTestId("archive-character-mario")).toBeNull();
+
+        fireEvent.click(screen.getByTestId("archive-set-1"));
+        const details = screen.getByTestId("archive-detail-characters");
+        expect(details.textContent).toContain("マリオ/Bowser");
+        expect(details.textContent).toContain("ルイージ");
+        expect(within(details).queryByTestId("archive-estimate")).toBeNull();
+        fireEvent.click(screen.getByTestId("archive-set-3"));
+        const guessed = screen.getByTestId("archive-detail-characters");
+        expect(guessed.textContent).toContain("Zelda");
+        expect(guessed.textContent).toContain("—");
+        expect(within(guessed).getByTestId("archive-estimate")).toBeTruthy();
     });
 
     test("a video that is gone says so", async () => {

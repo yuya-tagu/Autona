@@ -4,14 +4,15 @@ import {keepLocal, serverUrl} from "./server";
 // The Archive Clipper page (ADR-006 A1): /web/app/archive on the headless app,
 // with the fake worker (e2e/fake_worker.py, set up by global-setup.ts through
 // AUTONA_VODSPLIT_CMD), so the status read is the real one. The writes (start,
-// cancel, resume, work folder, and A4's review save and export) are the
-// desktop shared view's (SHELL routes: 403 to a browser), and there is no
-// desktop here to give the shell's secret, so they and the job reads are
-// stubbed with page.route (as assets.spec.ts does) to cover the UI flow -- the
-// shell probe (GET /api/v1/shell-session) too where a scenario writes, else
-// the page knows it is a browser and only reads; the real write routes are
-// only checked to answer 403 (the real export with the fake worker is
-// tests/test_archive_jobs.py's). Checked through text and the DOM, never
+// cancel, resume, work folder, A4's review save and export, and A5's results
+// preparation) are the desktop shared view's (SHELL routes: 403 to a
+// browser), and there is no desktop here to give the shell's secret, so they
+// and the job reads are stubbed with page.route (as assets.spec.ts does) to
+// cover the UI flow -- the shell probe (GET /api/v1/shell-session) too where
+// a scenario writes, else the page knows it is a browser and only reads; the
+// real write routes are only checked to answer 403 (the real export with the
+// fake worker is tests/test_archive_jobs.py's, the real preparation
+// tests/test_archive_results.py's). Checked through text and the DOM, never
 // screenshots.
 //
 // Not covered: the nav item hidden without a worker -- the app is started once
@@ -55,12 +56,13 @@ const envelope = (data: unknown, status = 200) => ({
 // (it changes as the scenario moves); `posts` records the writes. The job's
 // video is bytes that are no video (the page then says why it does not play)
 // and it has no frames. Its review (A4) is empty and `puts` records the
-// bodies saved.
+// bodies saved; `bodies`, the writes' (A5: the results a job is created with).
 async function stubJobs(page: Page, scenario: {
     detail: () => object;
     posts: string[];
     afterPost?: (action: string) => void;
     puts?: any[];
+    bodies?: any[];
 }) {
     await page.route("**/api/v1/archive/jobs**", (route) => {
         const request = route.request();
@@ -85,6 +87,7 @@ async function stubJobs(page: Page, scenario: {
             const action = pathname.includes(":")
                 ? pathname.split(":").pop()! : "create";
             scenario.posts.push(action);
+            scenario.bodies?.push(request.postDataJSON());
             scenario.afterPost?.(action);
             return route.fulfill(envelope({job: (scenario.detail() as any).job}, 201));
         }
@@ -342,6 +345,97 @@ test("a running job can be stopped and then resumed", async ({page}) => {
     expect(posts).toEqual(["create", "cancel"]);
 });
 
+// The results a job is given (ADR-006 A5): prepared before the job starts
+// (POST results:prepare, a SHELL route: stubbed here, its 403 is checked
+// below), summed up, handed to the job as they are; the job's sets then show
+// their characters' icons (the game's icon files, stubbed) and 推定.
+const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64");
+const PREPARED = {event: "Fake Cup", sets: [
+    {round: "Winners Final", p1: "Alpha", s1: 2, p2: "Beta", s2: 0,
+     c1: "Mario", c2: "Luigi", char_source: "scoreboard",
+     autona: {game: "ssbu", c1: ["mario"], c2: ["luigi"], icons: {
+         mario: "base_files/icon/chara_2_mario_00.png",
+         luigi: "base_files/icon/chara_2_luigi_00.png"}}},
+    {round: "Grand Final", p1: "Gamma", s1: 3, p2: "Delta", s2: 1,
+     c1: "Zelda", char_source: "mains",
+     autona: {game: "ssbu", c1: ["zelda"], c2: [], icons: {
+         zelda: "base_files/icon/chara_2_zelda_00.png"}}},
+]};
+
+test("a job's results come from the match log and its sets show their characters", async ({page}) => {
+    const posts: string[] = [];
+    const bodies: any[] = [];
+    const prepared: any[] = [];
+    let created = false;
+    await stubShell(page);
+    await page.route("**/api/v1/archive/match-logs", (route) =>
+        route.fulfill(envelope({days: [
+            {date: "20261115", records: 2,
+             tournaments: [{name: "Fake Cup", records: 2}]}]})));
+    await page.route("**/api/v1/archive/results:prepare", (route) => {
+        prepared.push(route.request().postDataJSON());
+        return route.fulfill(envelope({results: PREPARED, summary: {
+            sets: 2, game: "ssbu", records: 2,
+            sources: {scoreboard: 1, report: 0, mains: 1, given: 0,
+                      none: 0}}}));
+    });
+    await page.route("**/user_data/games/**", (route) =>
+        route.fulfill({status: 200, contentType: "image/png", body: PNG}));
+    await stubJobs(page, {
+        posts, bodies,
+        afterPost: () => {
+            created = true;
+        },
+        detail: () => created
+            ? {job: job("done"), sets: {source_id: "abcDEF12345", sets: [
+                {no: 1, start: 60, end: 180, matched: true,
+                 title: "Winners Final", set: PREPARED.sets[0]},
+                {no: 2, start: 200, end: 320, matched: true,
+                 title: "Grand Final", set: PREPARED.sets[1]}]}}
+            : {job: job("done"), sets: null},
+    });
+    await page.goto(serverUrl("/web/app/archive"));
+    await page.getByRole("textbox", {name: /^Source video/})
+        .fill("C:/vods/match.mp4");
+    const start = page.getByRole("button", {name: "Start", exact: true});
+
+    await page.getByLabel("Autona's match log").check();
+    await expect(page.getByRole("combobox", {name: "Date"}))
+        .toHaveText("2026-11-15 (2)");
+    await expect(page.getByRole("combobox", {name: "Tournament"}))
+        .toHaveText("The whole day (2)");
+    await expect(start).toBeDisabled();
+    await page.getByRole("button", {name: "Load", exact: true}).click();
+    const summary = page.getByTestId("archive-results-summary");
+    await expect(summary).toContainText("2 sets ready");
+    await expect(summary).toContainText("Characters: recorded 1 · estimated 1");
+    expect(prepared).toEqual([{kind: "matchlog", date: "20261115",
+                               tournament: null}]);
+
+    await start.click();
+    await expect.poll(() => posts).toEqual(["create"]);
+    expect(bodies[0]).toEqual({source: "C:/vods/match.mp4", results: PREPARED,
+                               event: null});
+
+    const first = page.getByTestId("archive-set-characters-1");
+    await expect(first.locator("img")).toHaveCount(2);
+    await expect(first.locator("img").first())
+        .toHaveAttribute("src",
+                         /\/user_data\/games\/ssbu\/base_files\/icon\/chara_2_mario_00\.png$/);
+    await expect(first.locator("img").first())
+        .toHaveJSProperty("naturalWidth", 1);
+    await expect(first.getByTestId("archive-estimate")).toHaveCount(0);
+    await expect(page.getByTestId("archive-set-characters-2")
+        .getByTestId("archive-estimate")).toHaveText("Estimated");
+
+    await page.getByTestId("archive-set-2").click();
+    const details = page.getByTestId("archive-detail-characters");
+    await expect(details).toContainText("Zelda");
+    await expect(details.getByTestId("archive-estimate")).toBeVisible();
+});
+
 test("the real write routes answer 403 to a browser, and the page says why", async ({page, request}) => {
     const base = serverUrl("/api/v1/archive");
     expect((await request.post(`${base}/jobs`,
@@ -356,8 +450,15 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
                               {data: {sets: {}}})).status()).toBe(403);
     expect((await request.post(`${base}/jobs/${JOB_ID}:export`,
                                {data: {}})).status()).toBe(403);
-    // Reads stay open to this PC.
+    // A5: the results' preparation, as the job's creation it feeds.
+    expect((await request.post(`${base}/results:prepare`,
+                               {data: {kind: "json", results: {sets: []}}}))
+        .status()).toBe(403);
+    // Reads stay open to this PC (the match log's days too, A5).
     expect((await request.get(`${base}/status`)).ok()).toBe(true);
+    const days = await request.get(`${base}/match-logs`);
+    expect(days.ok()).toBe(true);
+    expect(Array.isArray((await days.json()).data.days)).toBe(true);
 
     // A browser (the real shell probe): the page only reads, and says so.
     await page.goto(serverUrl("/web/app/archive"));

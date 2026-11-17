@@ -68,6 +68,13 @@ began with a set's load (or kept the set's id, below).
   bar), but the loaded game changing clears the characters (the last
   game's are not this one's). A board with both names empty changes
   nothing but a set change.
+- A line's ``game`` is the loaded game's codename (null when none is
+  loaded): the game its characters are of. A record takes the game loaded
+  when it began, and another game loaded before its first game is counted
+  (the game corrected); once it has a game, it keeps it (a set over, the
+  next game loaded before the next set is). Known limit: a game switched in
+  the middle of a set leaves the games counted after it named in the new
+  game, under the first.
 - ``teamsSwapped`` flipping swaps the record's sides (names, characters,
   score, every game's, a game set aside), so the swap the state makes is no
   change.
@@ -198,6 +205,8 @@ class _Record:
         self.startedAt = None
         self.updatedAt = None
         self.setId = setId
+        # The loaded game's codename: the one the characters are of.
+        self.game = shown.game
         # Began with a set's load: the score it came with is the reported
         # one, no games.
         self.loaded = bool(setId)
@@ -236,6 +245,15 @@ class _Record:
         for game in games:
             game["c1"], game["c2"] = game["c2"], game["c1"]
 
+    def ChangeGame(self, game):
+        """Another game loaded: the board's characters are not this game's.
+        A record with no game counted takes the new game (the game was
+        corrected before play); one with games keeps the game they were
+        played in (a set over, the next game loaded before the next set)."""
+        self.c1 = self.c2 = ""
+        if not self.games and self.setAside is None:
+            self.game = game
+
     def TakeIn(self, shown):
         """The board's non-empty names and held fields."""
         for field in ("p1", "p2") + HELD_FIELDS:
@@ -272,6 +290,7 @@ class _Record:
             "round": self.round,
             "p1": self.p1,
             "p2": self.p2,
+            "game": self.game or None,
             "c1": self.c1,
             "c2": self.c2,
             "score": list(self.score),
@@ -433,7 +452,7 @@ class MatchLogService:
         if shown.swapped != previous.swapped:
             record.SwapSides()
         if shown.game != previous.game:
-            record.c1 = record.c2 = ""
+            record.ChangeGame(shown.game)
         if self._Begins(record, shown, setChanged):
             self._Close(now)
             inherits = (not setChanged and bool(shown.setId)

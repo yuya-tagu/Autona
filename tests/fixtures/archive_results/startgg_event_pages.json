@@ -1,0 +1,326 @@
+[
+ {
+  "data": {
+   "event": {
+    "id": 5,
+    "name": "Ultimate Singles",
+    "slug": "tournament/fake-cup/event/ultimate-singles",
+    "startAt": 1794884400,
+    "endAt": 1794913200,
+    "videogame": {
+     "id": 1386
+    },
+    "tournament": {
+     "name": "Fake Cup"
+    },
+    "sets": {
+     "pageInfo": {
+      "totalPages": 2
+     },
+     "nodes": [
+      {
+       "id": 101,
+       "fullRoundText": "Winners Final",
+       "state": 3,
+       "entrant1Score": 3,
+       "entrant2Score": 1,
+       "slots": [
+        {
+         "entrant": {
+          "id": 11,
+          "name": "TEAM | Kappa"
+         }
+        },
+        {
+         "entrant": {
+          "id": 12,
+          "name": "Lambda"
+         }
+        }
+       ],
+       "games": [
+        {
+         "orderNum": 2,
+         "selections": [
+          {
+           "entrant": {
+            "id": 12
+           },
+           "selectionValue": 2,
+           "selectionType": "CHARACTER"
+          },
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 1,
+           "selectionType": "CHARACTER"
+          }
+         ]
+        },
+        {
+         "orderNum": 1,
+         "selections": [
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 9,
+           "selectionType": "STAGE"
+          },
+          {
+           "entrant": {
+            "id": 12
+           },
+           "selectionValue": 8
+          },
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 1,
+           "selectionType": "CHARACTER"
+          },
+          {
+           "entrant": {
+            "id": 12
+           },
+           "selectionValue": 3,
+           "selectionType": "CHARACTER"
+          }
+         ]
+        },
+        {
+         "orderNum": null,
+         "selections": [
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 4,
+           "selectionType": "CHARACTER"
+          },
+          {
+           "entrant": {
+            "id": 12
+           },
+           "selectionValue": 2,
+           "selectionType": "CHARACTER"
+          }
+         ]
+        },
+        {
+         "orderNum": 3,
+         "selections": [
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 3,
+           "selectionType": "CHARACTER"
+          },
+          {
+           "entrant": {
+            "id": 11
+           },
+           "selectionValue": 1,
+           "selectionType": "CHARACTER"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "id": 102,
+       "fullRoundText": "Winners Semi-Final",
+       "state": 3,
+       "entrant1Score": 0,
+       "entrant2Score": -1,
+       "slots": [
+        {
+         "entrant": {
+          "id": 13,
+          "name": "Mu"
+         }
+        },
+        {
+         "entrant": {
+          "id": 14,
+          "name": "Xi"
+         }
+        }
+       ],
+       "games": null
+      },
+      {
+       "id": 103,
+       "fullRoundText": "Losers Round 1",
+       "state": 3,
+       "entrant1Score": null,
+       "entrant2Score": null,
+       "slots": [
+        {
+         "entrant": {
+          "id": 15,
+          "name": "Omicron"
+         }
+        },
+        {
+         "entrant": {
+          "id": 16,
+          "name": "Pi"
+         }
+        }
+       ],
+       "games": []
+      },
+      {
+       "id": 104,
+       "fullRoundText": "Losers Round 2",
+       "state": 2,
+       "entrant1Score": 1,
+       "entrant2Score": 0,
+       "slots": [
+        {
+         "entrant": {
+          "id": 15,
+          "name": "Omicron"
+         }
+        },
+        {
+         "entrant": {
+          "id": 17,
+          "name": "Rho"
+         }
+        }
+       ],
+       "games": []
+      },
+      {
+       "id": 105,
+       "fullRoundText": "Winners Round 1",
+       "state": 3,
+       "entrant1Score": 0,
+       "entrant2Score": 0,
+       "slots": [
+        {
+         "entrant": {
+          "id": 18,
+          "name": "Sigma"
+         }
+        },
+        {
+         "entrant": null
+        }
+       ],
+       "games": []
+      },
+      {
+       "id": 106,
+       "fullRoundText": "Losers Final",
+       "state": 3,
+       "entrant1Score": 3,
+       "entrant2Score": 2,
+       "slots": [
+        {
+         "entrant": {
+          "id": 13,
+          "name": "Mu"
+         }
+        },
+        {
+         "entrant": {
+          "id": 19,
+          "name": "Nu"
+         }
+        }
+       ],
+       "games": null
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "data": {
+   "event": {
+    "id": 5,
+    "name": "Ultimate Singles",
+    "slug": "tournament/fake-cup/event/ultimate-singles",
+    "startAt": 1794884400,
+    "endAt": 1794913200,
+    "videogame": {
+     "id": 1386
+    },
+    "tournament": {
+     "name": "Fake Cup"
+    },
+    "sets": {
+     "pageInfo": {
+      "totalPages": 2
+     },
+     "nodes": [
+      {
+       "id": 106,
+       "fullRoundText": "Losers Final",
+       "state": 3,
+       "entrant1Score": 3,
+       "entrant2Score": 2,
+       "slots": [
+        {
+         "entrant": {
+          "id": 13,
+          "name": "Mu"
+         }
+        },
+        {
+         "entrant": {
+          "id": 19,
+          "name": "Nu"
+         }
+        }
+       ],
+       "games": null
+      },
+      {
+       "id": 107,
+       "fullRoundText": "Grand Final",
+       "state": 3,
+       "entrant1Score": 3,
+       "entrant2Score": 0,
+       "slots": [
+        {
+         "entrant": {
+          "id": 11,
+          "name": "TEAM | Kappa"
+         }
+        },
+        {
+         "entrant": {
+          "id": 13,
+          "name": "Mu"
+         }
+        }
+       ],
+       "games": [
+        {
+         "orderNum": 1,
+         "selections": [
+          {
+           "entrant": {
+            "id": 99
+           },
+           "selectionValue": 1,
+           "selectionType": "CHARACTER"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ }
+]

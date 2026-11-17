@@ -400,8 +400,9 @@ assert locale_helper.countryToContinent == {}, \
 # Every GraphQL query attribute, found by name so a newly added query is
 # covered without touching this test.
 queryAttrs = [n for n in vars(startgg) if n.endswith("Query")]
-assert len(queryAttrs) == 16, \
-    f"expected 16 StartGG query attributes, found {len(queryAttrs)}"
+# 17 since ADR-006 A5 (ArchiveSetsQuery: the archive clipper's results).
+assert len(queryAttrs) == 17, \
+    f"expected 17 StartGG query attributes, found {len(queryAttrs)}"
 for name in queryAttrs:
     assert getattr(startgg, name) is None, \
         f"import loaded StartGGDataProvider.{name}"

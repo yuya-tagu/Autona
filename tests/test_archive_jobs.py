@@ -2280,6 +2280,8 @@ READS = [
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/video", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/frames/1", None),
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/review", None),
+    # The match log's days (A5).
+    ("get", f"{BASE}/match-logs", None),
 ]
 WRITES = [
     ("patch", f"{BASE}/settings", {"work_dir": "C:\\x"}),
@@ -2288,6 +2290,8 @@ WRITES = [
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:resume", None),
     ("put", f"{BASE}/jobs/20261116-000000-zzzz/review", {"sets": {}}),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:export", None),
+    # The results' preparation (A5): it reaches start.gg for the job.
+    ("post", f"{BASE}/results:prepare", {"kind": "json", "results": RESULTS}),
 ]
 
 
@@ -2298,12 +2302,14 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "get_archive_video": WebAccess.THIS_PC,
                  "get_archive_frame": WebAccess.THIS_PC,
                  "get_archive_review": WebAccess.THIS_PC,
+                 "get_archive_match_logs": WebAccess.THIS_PC,
                  "archive_settings_update": WebAccess.SHELL,
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,
                  "archive_job_resume": WebAccess.SHELL,
                  "archive_review_update": WebAccess.SHELL,
-                 "archive_job_export": WebAccess.SHELL}
+                 "archive_job_export": WebAccess.SHELL,
+                 "archive_results_prepare": WebAccess.SHELL}
     assert {name: WebAccess.ROUTE_ACCESS[f"api_v1.{name}"]
             for name in endpoints} == endpoints
 
