@@ -1,0 +1,43 @@
+query ArchiveSetsQuery($eventSlug: String!, $page: Int = 1, $perPage: Int = 32) {
+	event(slug: $eventSlug) {
+		id
+		name
+		slug
+		startAt
+		endAt
+		videogame {
+			id
+		}
+		tournament {
+			name
+		}
+		sets(page: $page, perPage: $perPage, sortType: STANDARD, filters: {state: [3], hideEmpty: true}) {
+			pageInfo {
+				totalPages
+			}
+			nodes {
+				id
+				fullRoundText
+				state
+				entrant1Score
+				entrant2Score
+				slots {
+					entrant {
+						id
+						name
+					}
+				}
+				games {
+					orderNum
+					selections {
+						entrant {
+							id
+						}
+						selectionType
+						selectionValue
+					}
+				}
+			}
+		}
+	}
+}

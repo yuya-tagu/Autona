@@ -119,7 +119,8 @@ EXPECTED_ROUTES = [
 # clipper's page, its reads this PC's alone, its writes the shared view's
 # (ADR-006 A1), and the job's video and a set's frame, this PC's (A3),
 # and the review's read, this PC's, its save and the export, the shared
-# view's (A4).
+# view's (A4), and the match log's days, this PC's, and the results'
+# preparation, the shared view's (A5).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -146,6 +147,8 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/archive/jobs/<job_id>:cancel', 'api_v1.archive_job_cancel', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:export', 'api_v1.archive_job_export', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:resume', 'api_v1.archive_job_resume', 'OPTIONS,POST'),
+    ('/api/v1/archive/match-logs', 'api_v1.get_archive_match_logs', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/results:prepare', 'api_v1.archive_results_prepare', 'OPTIONS,POST'),
     ('/api/v1/archive/settings', 'api_v1.archive_settings_update', 'OPTIONS,PATCH'),
     ('/api/v1/archive/status', 'api_v1.get_archive_status', 'GET,HEAD,OPTIONS'),
     # The game asset packs: the list and the last job's state (ADR-005
@@ -606,7 +609,9 @@ def test_the_classification_follows_the_rules():
               # The job's video and a set's frame (A3), as the job.
               "api_v1.get_archive_video", "api_v1.get_archive_frame",
               # The review (A4): the results name players, as the job's.
-              "api_v1.get_archive_review"}
+              "api_v1.get_archive_review",
+              # The match log's days (ADR-006 A5): tournament names.
+              "api_v1.get_archive_match_logs"}
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
@@ -614,7 +619,8 @@ def test_the_classification_follows_the_rules():
     # picked folder's import (SF-5a-2) and the archive clipper's writes
     # (ADR-006 A1: a job runs a process and downloads onto this PC, the
     # work folder moves where it writes; A4: the review's save writes into
-    # the job's folder, the export cuts the video onto this PC).
+    # the job's folder, the export cuts the video onto this PC; A5: the
+    # results' preparation, as the job's creation it feeds).
     shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
              "api_v1.get_assets_job", "api_v1.upload_assets_zip",
              "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
@@ -623,7 +629,8 @@ def test_the_classification_follows_the_rules():
              "api_v1.reveal_games_folder", "api_v1.get_shell_session",
              "api_v1.archive_settings_update", "api_v1.archive_job_create",
              "api_v1.archive_job_cancel", "api_v1.archive_job_resume",
-             "api_v1.archive_review_update", "api_v1.archive_job_export"}
+             "api_v1.archive_review_update", "api_v1.archive_job_export",
+             "api_v1.archive_results_prepare"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -688,7 +695,9 @@ def test_the_classification_follows_the_rules():
     # 133), and the archive clipper's 3 reads, this PC's, and 4 writes, the
     # shell's (ADR-006 A1: v1 76 of 140), and the preview's video and frame
     # reads, this PC's (A3: v1 76 of 142), and the review's read, this PC's,
-    # its save and the export, the shell's (A4: v1 76 of 145).
+    # its save and the export, the shell's (A4: v1 76 of 145), and the
+    # match log's days, this PC's, and the results' preparation, the
+    # shell's (A5: v1 76 of 147).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -698,7 +707,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 145
+    assert len(EXPECTED_API_V1_ROUTES) == 147
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

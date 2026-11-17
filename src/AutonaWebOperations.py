@@ -69,7 +69,8 @@ These kinds live here:
 - the archive clipper's (ADR-006 A1): core's ArchiveJobService -- the
   worker's status, the work folder, the jobs (start, cancel, resume, read)
   -- in both shells, on the calling thread. Not in the state (D6): the page
-  polls a job.
+  polls a job. A job's results are prepared by core's ArchiveResults (A5:
+  start.gg's event, the match log's day, a JSON file, with characters).
 - the shell operations (ADR-005 S3e-9): opening a board's set selection (the
   SCORE page's dialog in the desktop's window; S4ab-2 -- the Qt window on
   the way back to the Qt panel until S4ac-3), rendering its thumbnail (the legacy route,
@@ -107,6 +108,7 @@ from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
 from .core.ArchiveJobService import ArchiveJobService
+from .core import ArchiveResults
 from .core.AssetPackService import AssetPackService
 from .core import AssetPackService as assets
 from .core import HotkeyRules
@@ -133,6 +135,7 @@ from .core import HiveeUrl
 from .core.TournamentService import TournamentService
 from .core import StateSchema as schema
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from .TournamentDataProvider.StartGGDataProvider import FetchEventResults
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaQtHelper import GuiMarshalAborted
@@ -911,6 +914,19 @@ def save_archive_review(jobId, review):
 def export_archive_job(jobId):
     """Cut the job's confirmed sets (the worker's export, ADR-006 A4)."""
     return ArchiveJobService.instance.StartExport(jobId)
+
+
+def prepare_archive_results(body):
+    """A job's results with their characters (ADR-006 A5): core's
+    ArchiveResults, given start.gg's fetch of an event's completed sets (the
+    provider's: core does not reach it). On the calling thread; a start.gg
+    event waits for start.gg there."""
+    return ArchiveResults.Prepare(body, fetchEvent=FetchEventResults)
+
+
+def get_archive_match_logs():
+    """The match log's days, their tournaments and records (ADR-006 A5)."""
+    return ArchiveResults.Days()
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

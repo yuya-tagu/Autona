@@ -2427,6 +2427,8 @@ _NOT_200 = {
     ("api_v1.archive_job_resume", None): 403,
     ("api_v1.archive_review_update", None): 403,
     ("api_v1.archive_job_export", None): 403,
+    # The results' preparation (SHELL, A5), as the job's creation it feeds.
+    ("api_v1.archive_results_prepare", None): 403,
     ("api_v1.get_archive_job", None): 404,
     ("api_v1.get_archive_review", None): 404,
     ("api_v1.get_archive_video", None): 404,

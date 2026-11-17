@@ -30,6 +30,9 @@ import {
     Job,
     JobExport,
     JobSummary,
+    MatchLogDay,
+    PrepareSummary,
+    SetCharacters,
     SetFilter,
     SetResult,
     SetRow,
@@ -46,6 +49,11 @@ import {
     sourceName,
     nameMatchText,
     correctedText,
+    characterIcon,
+    dayText,
+    isEstimate,
+    setCharacters,
+    sourceCounts,
 } from "./archiveSets";
 import {
     framePath,
@@ -165,6 +173,55 @@ function TimeLink({source, sourceId, seconds}: {source?: string | null;
     );
 }
 
+// A character's icon (ADR-006 A5): its file in the game's folder, as the
+// prepared results name it; hidden when there is none or it does not load.
+function CharacterIcon({game, codename, file, size}: {
+    game: string;
+    codename: string;
+    file?: string;
+    size: number;
+}) {
+    const [gone, setGone] = React.useState(false);
+    const path = characterIcon(game, file);
+    return path === null || gone ? null : (
+        <Box component="img" alt="" loading="lazy" src={`${BASE_URL}${path}`}
+             data-testid={`archive-character-${codename}`}
+             onError={() => setGone(true)}
+             sx={{width: size, height: size, flexShrink: 0,
+                  objectFit: "contain"}}/>
+    );
+}
+
+function SideIcons({characters, side, size}: {
+    characters: SetCharacters | null;
+    side: "c1" | "c2";
+    size: number;
+}) {
+    return characters === null ? null : (
+        <>
+            {characters[side].map((codename) => (
+                <CharacterIcon key={codename} game={characters.game}
+                               codename={codename}
+                               file={characters.icons[codename]} size={size}/>
+            ))}
+        </>
+    );
+}
+
+// 推定: the characters are (partly) a player's main, not a record of the set.
+function EstimateBadge() {
+    return (
+        <Tooltip title={i18n.t("archive_results_estimate_note")}>
+            <Box component="span" data-testid="archive-estimate"
+                 sx={{color: tokens.gold, fontSize: "0.7rem", fontWeight: 700,
+                      border: "1px solid", borderRadius: "2px", px: 0.5,
+                      lineHeight: 1.4, flexShrink: 0}}>
+                {i18n.t("archive_char_estimate")}
+            </Box>
+        </Tooltip>
+    );
+}
+
 function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
     row: ReviewedRow;
     jobId: string;
@@ -177,6 +234,7 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
     const text = rowText(row, i18n.t("archive_no_match"));
     const score = scoreText(row);
     const path = row.thumb && !noFrame ? framePath(jobId, row.no) : null;
+    const characters = setCharacters(row.set);
     return (
         // Enter picks the row (a button); on the selected one it is the
         // page's (confirm), as Space is (play / pause).
@@ -219,6 +277,18 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
                         {text}
                     </Typography>
                 </Tooltip>
+                {characters !== null ? (
+                    <Stack direction="row" spacing={0.5} alignItems="center"
+                           data-testid={`archive-set-characters-${row.no}`}>
+                        <SideIcons characters={characters} side="c1" size={20}/>
+                        <Typography variant="caption"
+                                    sx={{color: tokens.textMuted}}>
+                            vs
+                        </Typography>
+                        <SideIcons characters={characters} side="c2" size={20}/>
+                        {isEstimate(row.set) ? <EstimateBadge/> : null}
+                    </Stack>
+                ) : null}
                 <Typography variant="caption" component="div"
                             sx={{color: tokens.textMuted}}>
                     #{row.no} · <TimeLink source={source} sourceId={sourceId}
@@ -443,6 +513,7 @@ function SetDetails({row, original, sets, source, onSeek, edit}: {
     const correctedGames = new Set(Array.isArray(row.corrected_games)
         ? row.corrected_games : []);
     const games = row.game_spans ?? [];
+    const characters = setCharacters(result);
     return (
         <Stack spacing={0.5} sx={{p: 2}} data-testid="archive-details">
             <Typography variant="caption" sx={{color: tokens.textMuted}}>
@@ -534,6 +605,23 @@ function SetDetails({row, original, sets, source, onSeek, edit}: {
                         <>
                             <dt>{i18n.t("archive_detail_score")}</dt>
                             <dd>{`${result?.p1 ?? ""} ${score} ${result?.p2 ?? ""}`.trim()}</dd>
+                        </>
+                    ) : null}
+                    {result?.c1 || result?.c2 ? (
+                        <>
+                            <dt>{i18n.t("archive_detail_characters")}</dt>
+                            <dd data-testid="archive-detail-characters">
+                                {(["c1", "c2"] as const).map((side) => (
+                                    <Box key={side}
+                                         sx={{display: "flex", gap: 0.5,
+                                              alignItems: "center"}}>
+                                        <SideIcons characters={characters}
+                                                   side={side} size={24}/>
+                                        <span>{result?.[side] || "—"}</span>
+                                    </Box>
+                                ))}
+                                {isEstimate(result) ? <EstimateBadge/> : null}
+                            </dd>
                         </>
                     ) : null}
                     <dt>{i18n.t("archive_detail_games")}</dt>
@@ -1033,6 +1121,67 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
     );
 }
 
+type ResultsMode = "none" | "startgg" | "matchlog" | "json";
+
+// The results ready for the job (POST results:prepare, A5).
+interface Prepared {
+    results: object;
+    summary: PrepareSummary;
+}
+
+// The preparation reaches start.gg: an event of many pages, each retried
+// on a busy answer (the footer shows its pages). The server gives up after
+// 120 s (StartGGDataProvider.ARCHIVE_FETCH_DEADLINE_SECS) and says so; the
+// page waits a little longer, to hear it.
+const PREPARE_TIMEOUT_MS = 150000;
+// The match log's tournament picks: the whole day, or one name ("" is the
+// records with no tournament name, which a Select cannot take as a value).
+const WHOLE_DAY = "*";
+const NAMED = "=";
+
+async function prepareResults(body: object): Promise<Prepared> {
+    const text = await apiPost(`${BASE}/results:prepare`, body,
+                               {timeoutMs: PREPARE_TIMEOUT_MS});
+    return (JSON.parse(text) as {data: Prepared}).data;
+}
+
+// The prepared results' summary: how many sets, where their characters
+// came from (A5).
+function PreparedSummary({prepared, mode}: {
+    prepared: Prepared;
+    mode: ResultsMode;
+}) {
+    const {summary} = prepared;
+    const counts = sourceCounts(summary);
+    return (
+        <Alert severity="success" sx={{mt: 1}}
+               data-testid="archive-results-summary">
+            <Typography variant="body2" fontWeight={700}>
+                {i18n.t("archive_results_summary", {count: summary.sets})}
+            </Typography>
+            {counts.length > 0 ? (
+                <Typography variant="body2">
+                    {i18n.t("archive_results_characters")}:{" "}
+                    {counts.map(([key, n]) =>
+                        `${i18n.t(`archive_char_source_${key}`)} ${n}`)
+                        .join(" · ")}
+                </Typography>
+            ) : null}
+            {mode === "startgg" ? (
+                <Typography variant="body2">
+                    {i18n.t("archive_results_records",
+                            {count: summary.records})}
+                </Typography>
+            ) : null}
+            {summary.sources.mains ? (
+                <Typography variant="body2" sx={{color: tokens.textMuted}}>
+                    {i18n.t("archive_results_estimate_note")}
+                </Typography>
+            ) : null}
+        </Alert>
+    );
+}
+
 function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
     status: ArchiveStatus;
     readOnly: boolean;
@@ -1042,29 +1191,116 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
 }) {
     const [source, setSource] = React.useState("");
     const [event, setEvent] = React.useState("");
-    const [mode, setMode] = React.useState<"none" | "json">("none");
-    const [results, setResults] = React.useState<object | null>(null);
+    const [mode, setMode] = React.useState<ResultsMode>("none");
     const [fileError, setFileError] = React.useState("");
+    const [url, setUrl] = React.useState("");
+    const [days, setDays] = React.useState<MatchLogDay[] | null>(null);
+    const [daysError, setDaysError] = React.useState("");
+    const [date, setDate] = React.useState("");
+    const [tournament, setTournament] = React.useState(WHOLE_DAY);
+    const [prepared, setPrepared] = React.useState<Prepared | null>(null);
+    const [preparing, setPreparing] = React.useState(false);
+    const [prepareError, setPrepareError] = React.useState("");
     const [error, setError] = React.useState("");
     const [busy, setBusy] = React.useState(false);
     const [editing, setEditing] = React.useState(false);
     const [workDir, setWorkDir] = React.useState(status.work_dir ?? "");
+    // The latest preparation asked: an earlier one's late answer, or one
+    // the form stopped waiting for (another choice, unmounted), is dropped.
+    const asked = React.useRef(0);
+    // The latest list of days asked, the same way: one the form no longer
+    // waits for (another choice, unmounted) is dropped.
+    const daysAsked = React.useRef(0);
 
+    React.useEffect(() => () => {
+        asked.current += 1;
+        daysAsked.current += 1;
+    }, []);
+
+    // The results no longer answer what is picked: they are asked again.
+    const forget = () => {
+        asked.current += 1;
+        setPrepared(null);
+        setPrepareError("");
+        setPreparing(false);
+    };
+    const prepare = async (body: object) => {
+        asked.current += 1;
+        const mine = asked.current;
+        setPrepared(null);
+        setPrepareError("");
+        setPreparing(true);
+        try {
+            const answer = await prepareResults(body);
+            if (asked.current === mine) {
+                setPrepared(answer);
+            }
+        } catch (e) {
+            if (asked.current === mine) {
+                setPrepareError(messageOf(e));
+            }
+        } finally {
+            if (asked.current === mine) {
+                setPreparing(false);
+            }
+        }
+    };
+    const loadDays = async () => {
+        daysAsked.current += 1;
+        const mine = daysAsked.current;
+        setDaysError("");
+        try {
+            const found = (await getData<{days: MatchLogDay[]}>(
+                `${BASE}/match-logs`)).days;
+            if (daysAsked.current !== mine) {
+                return;
+            }
+            setDays(found);
+            setDate(found[0]?.date ?? "");
+            setTournament(WHOLE_DAY);
+        } catch (e) {
+            if (daysAsked.current === mine) {
+                setDaysError(messageOf(e));
+            }
+        }
+    };
+    const choose = (next: ResultsMode) => {
+        daysAsked.current += 1;
+        setMode(next);
+        setFileError("");
+        forget();
+        if (next === "matchlog") {
+            loadDays();
+        }
+    };
     const onFile = async (file: File | undefined) => {
-        setResults(null);
+        forget();
+        // Another choice (or file) while this one is read drops it.
+        const mine = asked.current;
         setFileError("");
         if (!file) {
             return;
         }
+        let parsed: unknown;
         try {
-            const parsed = JSON.parse(await file.text());
+            parsed = JSON.parse(await file.text());
             if (typeof parsed !== "object" || parsed === null) {
                 throw new Error("object expected");
             }
-            setResults(parsed);
         } catch (e) {
-            setFileError(i18n.t("archive_results_parse_error",
-                                {message: (e as Error).message}));
+            if (asked.current === mine) {
+                setFileError(i18n.t("archive_results_parse_error",
+                                    {message: (e as Error).message}));
+            }
+            return;
+        }
+        if (asked.current !== mine) {
+            return;
+        }
+        // Checked and given the characters it lacks (the players' mains);
+        // the browser cannot (SHELL), and cannot start the job either.
+        if (!readOnly) {
+            await prepare({kind: "json", results: parsed});
         }
     };
     const saveWorkDir = async () => {
@@ -1084,7 +1320,7 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
         try {
             onStarted(await postJob(`${BASE}/jobs`, {
                 source: source.trim(),
-                results: mode === "json" ? results : null,
+                results: mode === "none" ? null : prepared?.results ?? null,
                 event: event.trim() === "" ? null : event.trim(),
             }));
         } catch (e) {
@@ -1095,8 +1331,9 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
             setBusy(false);
         }
     };
+    const day = days?.find((each) => each.date === date) ?? null;
     const ready = source.trim() !== ""
-        && (mode === "none" || (results !== null && fileError === ""));
+        && (mode === "none" || (prepared !== null && !preparing));
     return (
         <Stack spacing={2} sx={{p: 2, maxWidth: 720}}>
             <TextField size="small" fullWidth value={source}
@@ -1109,12 +1346,104 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
                 </Typography>
                 <RadioGroup row value={mode}
                             onChange={(e) =>
-                                setMode(e.target.value as "none" | "json")}>
+                                choose(e.target.value as ResultsMode)}>
                     <FormControlLabel value="none" control={<Radio/>}
                                       label={i18n.t("archive_results_none")}/>
+                    <FormControlLabel value="startgg" control={<Radio/>}
+                                      label={i18n.t("archive_results_startgg")}/>
+                    <FormControlLabel value="matchlog" control={<Radio/>}
+                                      label={i18n.t("archive_results_matchlog")}/>
                     <FormControlLabel value="json" control={<Radio/>}
                                       label={i18n.t("archive_results_json")}/>
                 </RadioGroup>
+                {mode === "startgg" ? (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                        <TextField size="small" fullWidth value={url}
+                                   label={i18n.t("archive_results_startgg_url")}
+                                   onChange={(e) => {
+                                       setUrl(e.target.value);
+                                       forget();
+                                   }}/>
+                        <Button variant="outlined"
+                                disabled={readOnly || preparing
+                                          || url.trim() === ""}
+                                onClick={() => prepare(
+                                    {kind: "startgg", url: url.trim()})}>
+                            {i18n.t("archive_results_fetch")}
+                        </Button>
+                    </Stack>
+                ) : null}
+                {mode === "matchlog" ? (
+                    days === null ? (
+                        daysError ? (
+                            <Alert severity="error">
+                                {i18n.t("archive_results_matchlog_failed",
+                                        {message: daysError})}
+                            </Alert>
+                        ) : <LinearProgress/>
+                    ) : days.length === 0 ? (
+                        <Typography variant="body2"
+                                    data-testid="archive-matchlog-empty"
+                                    sx={{color: tokens.textMuted}}>
+                            {i18n.t("archive_results_matchlog_empty")}
+                        </Typography>
+                    ) : (
+                        <Stack direction="row" spacing={1} alignItems="center">
+                            <FormControl size="small" sx={{minWidth: 180}}>
+                                <InputLabel id="archive-matchlog-date">
+                                    {i18n.t("archive_results_matchlog_date")}
+                                </InputLabel>
+                                <Select labelId="archive-matchlog-date"
+                                        value={date}
+                                        label={i18n.t("archive_results_matchlog_date")}
+                                        onChange={(e) => {
+                                            setDate(String(e.target.value));
+                                            setTournament(WHOLE_DAY);
+                                            forget();
+                                        }}>
+                                    {days.map((each) => (
+                                        <MenuItem key={each.date} value={each.date}>
+                                            {`${dayText(each.date)} (${each.records})`}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <FormControl size="small" sx={{minWidth: 220}}>
+                                <InputLabel id="archive-matchlog-tournament">
+                                    {i18n.t("archive_results_matchlog_tournament")}
+                                </InputLabel>
+                                <Select labelId="archive-matchlog-tournament"
+                                        value={tournament}
+                                        label={i18n.t("archive_results_matchlog_tournament")}
+                                        onChange={(e) => {
+                                            setTournament(String(e.target.value));
+                                            forget();
+                                        }}>
+                                    <MenuItem value={WHOLE_DAY}>
+                                        {`${i18n.t("archive_results_matchlog_all")} (${day?.records ?? 0})`}
+                                    </MenuItem>
+                                    {(day?.tournaments ?? []).map((each) => (
+                                        <MenuItem key={each.name}
+                                                  value={NAMED + each.name}>
+                                            {`${each.name
+                                                || i18n.t("archive_results_matchlog_unnamed")} (${each.records})`}
+                                        </MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <Button variant="outlined"
+                                    disabled={readOnly || preparing || !date}
+                                    onClick={() => prepare({
+                                        kind: "matchlog", date,
+                                        tournament: tournament === WHOLE_DAY
+                                            ? null
+                                            : tournament.slice(NAMED.length),
+                                    })}>
+                                {i18n.t("archive_results_load")}
+                            </Button>
+                        </Stack>
+                    )
+                ) : null}
                 {mode === "json" ? (
                     <input type="file" accept=".json,application/json"
                            aria-label={i18n.t("archive_results_pick")}
@@ -1123,6 +1452,22 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
                 {fileError ? <Alert severity="error" sx={{mt: 1}}>
                     {fileError}
                 </Alert> : null}
+                {preparing ? (
+                    <Stack spacing={0.5} sx={{mt: 1}}
+                           data-testid="archive-results-preparing">
+                        <Typography variant="body2"
+                                    sx={{color: tokens.textMuted}}>
+                            {i18n.t("archive_results_preparing")}
+                        </Typography>
+                        <LinearProgress/>
+                    </Stack>
+                ) : null}
+                {prepareError ? <Alert severity="error" sx={{mt: 1}}>
+                    {prepareError}
+                </Alert> : null}
+                {prepared !== null && mode !== "none" ? (
+                    <PreparedSummary prepared={prepared} mode={mode}/>
+                ) : null}
             </FormControl>
             <TextField size="small" fullWidth value={event}
                        label={i18n.t("archive_event")}

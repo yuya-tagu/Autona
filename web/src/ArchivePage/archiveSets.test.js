@@ -12,6 +12,11 @@ import {
     sourceName,
     nameMatchText,
     correctedText,
+    characterIcon,
+    dayText,
+    isEstimate,
+    setCharacters,
+    sourceCounts,
 } from "./archiveSets";
 
 const NO_MATCH = "(結果に該当なし)";
@@ -99,4 +104,64 @@ test("corrected games list or null", () => {
     expect(correctedText([2, 3])).toBe("Game 2, 3");
     expect(correctedText([])).toBeNull();
     expect(correctedText(null)).toBeNull();
+});
+
+// The results' characters (ADR-006 A5).
+
+test("a set's codenames are Autona's key, only names that stay in their folder", () => {
+    const icons = {mario: "base_files/icon/chara_2_mario_00.png",
+                   luigi: "base_files/icon/chara_2_luigi_00.png"};
+    expect(setCharacters({autona: {game: "ssbu", c1: ["mario", "koopa"],
+                                   c2: ["luigi"], icons}}))
+        .toEqual({game: "ssbu", c1: ["mario", "koopa"], c2: ["luigi"],
+                  icons});
+    // An icon that may leave the game's folder is left out.
+    expect(setCharacters({autona: {game: "ssbu", c1: ["../x", "a/b", 3],
+                                   c2: ["pikachu"], icons: {
+                                       pikachu: "../../secret.png",
+                                       mario: "/etc/passwd",
+                                       luigi: "base_files/../x.png",
+                                       "a/b": "base_files/icon/a.png",
+                                       ness: 3}}}))
+        .toEqual({game: "ssbu", c1: [], c2: ["pikachu"], icons: {}});
+    expect(setCharacters({autona: {game: "ssbu", c1: ["mario"],
+                                   icons: ["base_files/icon/x.png"]}}))
+        .toEqual({game: "ssbu", c1: ["mario"], c2: [], icons: {}});
+    expect(setCharacters({autona: {game: "ssbu", c1: [], c2: []}})).toBeNull();
+    expect(setCharacters({autona: {game: "..", c1: ["mario"]}})).toBeNull();
+    expect(setCharacters({autona: "ssbu"})).toBeNull();
+    expect(setCharacters({c1: "マリオ"})).toBeNull();
+    expect(setCharacters(null)).toBeNull();
+});
+
+test("a character's icon is its file in the game's folder", () => {
+    expect(characterIcon("ssbu", "base_files/icon/chara_2_mario_00.png"))
+        .toBe("/user_data/games/ssbu/base_files/icon/chara_2_mario_00.png");
+    expect(characterIcon("game2", "base_files/icon/ryu_0.png"))
+        .toBe("/user_data/games/game2/base_files/icon/ryu_0.png");
+    expect(characterIcon("ssbu", "base_files/../../x.png")).toBeNull();
+    expect(characterIcon("ssbu", "/base_files/icon/x.png")).toBeNull();
+    expect(characterIcon("a/b", "base_files/icon/x.png")).toBeNull();
+    expect(characterIcon("ssbu", "")).toBeNull();
+    expect(characterIcon("ssbu", undefined)).toBeNull();
+});
+
+test("only a player's main is an estimate", () => {
+    expect(isEstimate({char_source: "mains"})).toBe(true);
+    expect(isEstimate({char_source: "scoreboard"})).toBe(false);
+    expect(isEstimate({})).toBe(false);
+    expect(isEstimate(null)).toBe(false);
+});
+
+test("the summary says the counts that are not 0, strongest first", () => {
+    expect(sourceCounts({sets: 6, game: "ssbu", records: 0, sources: {
+        none: 1, mains: 2, scoreboard: 3, report: 0}}))
+        .toEqual([["scoreboard", 3], ["mains", 2], ["none", 1]]);
+    expect(sourceCounts({sets: 0, game: null, records: 0, sources: {}}))
+        .toEqual([]);
+});
+
+test("a match log day reads as a date", () => {
+    expect(dayText("20261114")).toBe("2026-11-14");
+    expect(dayText("2026-11-14")).toBe("2026-11-14");
 });

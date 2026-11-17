@@ -227,6 +227,9 @@ NOT_PREVIEWABLE = "not_previewable"
 # A review or an export of a job whose analysis is not done (no sets to
 # review, or a sets.json of an earlier run).
 NOT_DONE = "not_done"
+# The results' preparation (core/ArchiveResults.py, ADR-006 A5): start.gg
+# did not answer (or answered an error) for an event's sets.
+FETCH_FAILED = "fetch_failed"
 
 # The preview's refusals' words (VideoFile / FrameFile, and v1 when the
 # file is gone by the time it opens it).

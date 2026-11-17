@@ -2576,6 +2576,7 @@ _ARCHIVE_REFUSALS = {
     archive.NOT_DONE: (CONFLICT, 409),
     archive.UNAVAILABLE: (UNAVAILABLE, 503),
     archive.STOPPING: (UNAVAILABLE, 503),
+    archive.FETCH_FAILED: (UNAVAILABLE, 503),
 }
 
 
@@ -2644,6 +2645,42 @@ def archive_job_create():
     except archive.ArchiveError as error:
         raise _archive_refused(error)
     return ok(data={"job": job}, status=201)
+
+
+@api_v1.route("/archive/results:prepare", methods=["POST"])
+@_no_store_answers
+@write_op("archive.results.prepare", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_results_prepare():
+    # A job's results with their characters (ADR-006 A5), before the job is
+    # made (Create takes them as they are): {"kind": "startgg", "url": the
+    # event's} / {"kind": "matchlog", "date": "YYYYMMDD", "tournament": a
+    # name or null (every record of the day)} / {"kind": "json", "results":
+    # the file's} -> {"results": vodsplit's results, "summary": {"sets",
+    # "game", "records", "sources": {"scoreboard", "report", "mains",
+    # "given", "none"}}}. 400 (the request), 404 (no such event, no set
+    # reported, no record of that day / tournament), 503 (start.gg did not
+    # answer, or not within the fetch's deadline). SHELL, as Create: it
+    # asks start.gg for any event. A start.gg event waits for start.gg on
+    # this thread. Logged by key: the body names players.
+    body = _json_body()
+    try:
+        data = WebOps.prepare_archive_results(body)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data=data)
+
+
+@api_v1.route("/archive/match-logs")
+@_no_store_answers
+@api_handler
+def get_archive_match_logs():
+    # The match log's days (ADR-006 A5: the page's choices for the results
+    # "Autona's log"): {"days": [{"date": "YYYYMMDD", "records",
+    # "tournaments": [{"name" ("" for none), "records"}]}]}, newest first,
+    # the records a matchlog prepare uses. THIS_PC, as the archive's other
+    # reads.
+    return ok(data={"days": WebOps.get_archive_match_logs()})
 
 
 @api_v1.route("/archive/jobs/<job_id>")

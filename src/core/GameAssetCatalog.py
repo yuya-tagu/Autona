@@ -97,6 +97,9 @@ STARTGG_CHARACTERS_TIMEOUT_SECS = 20
 # the image itself is decoded by the Qt adapter.
 CANCEL_ICON_PATH = './assets/icons/cancel.svg'
 
+# The asset pack of a game's character icons (GameCharacters' "icon").
+ICON_PACK = "base_files/icon"
+
 
 def _resolve_characters_path() -> str:
     if os.path.exists(CHARACTERS_RUNTIME_PATH):
@@ -544,6 +547,88 @@ class GameAssetCatalog:
         if stage:
             return (stage[0], deep_clone(stage[1]))
         return None
+
+    def GameCharacters(self, game):
+        """The scanned game `game`'s characters, for a reader that names
+        them without loading the game (the archive clipper's results,
+        ADR-006 A5: a start.gg event of another game than the loaded one):
+        {en_name: {"codename", "smashgg_name", "display_name", "icon"}}, the
+        display name in the program locale as a load names it (the
+        character's locale table, else its en_name); the icon the file of
+        its lowest skin in the game's ``ICON_PACK`` (named by the pack's
+        prefix and postfix, as a load names a skin's file), relative to the
+        game's folder ("base_files/icon/<file>"), None when there is no such
+        pack or file. {} for a game not scanned. Built from the scan and
+        one listing of the icon pack on each call: the caller's to keep."""
+        config = self._games.get(game) if isinstance(game, str) else None
+        characters = config.get("character_to_codename") \
+            if isinstance(config, dict) else None
+        if not isinstance(characters, dict):
+            return {}
+        icon = self._IconFinder(config)
+        programLocale = self._locales()[0]
+        table = {}
+        for en_name, character in characters.items():
+            if not isinstance(character, dict):
+                continue
+            display_name = en_name
+            locale = character.get("locale")
+            if isinstance(locale, dict) and locale:
+                value, found = _localized(
+                    locale, programLocale, self._remap, _split_any)
+                if found and isinstance(value, str) and value:
+                    display_name = value
+            codename = character.get("codename")
+            table[en_name] = {
+                "codename": codename,
+                "smashgg_name": character.get("smashgg_name"),
+                "display_name": display_name,
+                "icon": icon(codename),
+            }
+        return table
+
+    @staticmethod
+    def _IconFinder(config):
+        """codename -> the game's icon file of its lowest skin, relative to
+        the game's folder, or None (GameCharacters)."""
+        assets = config.get("assets")
+        pack = assets.get(ICON_PACK) if isinstance(assets, dict) else None
+        if not isinstance(pack, dict) or not isinstance(
+                config.get("path"), str):
+            return lambda _codename: None
+        try:
+            files = os.listdir(os.path.join(config["path"], ICON_PACK))
+        except OSError:
+            files = []
+        prefix = str(pack.get("prefix", ""))
+        postfix = str(pack.get("postfix", ""))
+
+        def find(codename):
+            if not isinstance(codename, str) or not codename:
+                return None
+            base = prefix + codename + postfix
+            lowest = None
+            for name in files:
+                if not name.startswith(base):
+                    continue
+                number = name[len(base):].rsplit(".", 1)[0]
+                try:
+                    # A skin's number as a load reads it ("" is skin 0).
+                    skin = int(number) if number else 0
+                except ValueError:
+                    continue
+                if lowest is None or skin < lowest[0]:
+                    lowest = (skin, name)
+            return f"{ICON_PACK}/{lowest[1]}" if lowest else None
+
+        return find
+
+    def StartGGCharacterName(self, smashgg_id):
+        """start.gg's name of a character id (the table
+        CharacterFromStartGGId matches against `smashgg_name`), or None."""
+        character = self._startggCharacters.get(str(smashgg_id))
+        name = character.get("name") if isinstance(character, dict) else None
+        return name if isinstance(name, str) and name else None
 
     def GameFromStartGGId(self, gameid):
         """Codename of the first scanned game matching a start.gg videogame
