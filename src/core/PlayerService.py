@@ -88,6 +88,23 @@ KEEP_ONLINE_AVATAR = object()
 # it is (ADR-005 S4z). Not None, which there means "none".
 NOT_SENT = object()
 
+# The largest seed Edit takes (v1's PATCH .../fields, the SCORE page's seed
+# field): what the Qt card's seed spin box went up to (AutonaScoreboardPlayer
+# .ui's maximum, gone with the Qt SCORE in ADR-005 S4ac-3), far over any
+# bracket's entrant count. The SCORE page's field takes the same (SEED_MAX in
+# web/src/ScorePage/Cards.tsx, pinned equal by tests/test_api_v1_score_fields
+# .py).
+SEED_MAX = 100000
+
+
+def IsSeed(value) -> bool:
+    """Whether Edit takes `value` as a seed: an int from 0 (no seed) to
+    SEED_MAX. Not a bool (an int to Python), a float (3.0 included), nor a
+    string."""
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and 0 <= value <= SEED_MAX)
+
+
 # What Edit / EditCharacter refuse, writing nothing (ADR-005 S4z; v1's
 # routes say what each one is answered with).
 UNKNOWN_COUNTRY = "unknown_country"
@@ -591,7 +608,7 @@ class PlayerService:
     # database is merged in, a new name empties the city): here a field is
     # what it is sent as, "" included, as the card's are.
 
-    def Edit(self, texts, country=NOT_SENT, region=NOT_SENT):
+    def Edit(self, texts, country=NOT_SENT, region=NOT_SENT, seed=NOT_SENT):
         """Some of the card's fields, as finishing them on the card writes
         them. One save cycle. Returns None, or -- having written nothing --
         UNKNOWN_COUNTRY / UNKNOWN_REGION.
@@ -608,6 +625,15 @@ class PlayerService:
           region (a pick publishes the blank region first, then the country),
           unless a region of it is sent too. The same country or region as
           shown writes nothing (a combo picked on its own row emits nothing).
+        - `seed` is a number of IsSeed (0: no seed), NOT_SENT to leave it;
+          anything else raises ValueError before anything is written, as an
+          unknown text field does (v1's route refuses it first). Written
+          when the slot does not hold that number already, as a number
+          (SetSeed), after the texts and the location. Another seed asks
+          for the statistics -- the upset factor (Announce, with the
+          seedChanged of ChangeSince below: SetSeed asks for none itself).
+          A seed names no other player: the id, the city, the display name
+          and the images stay.
         - a sponsor or a tag that changed does what the card's NameChanged
           does: the display name and the images re-derived (the online
           avatar kept: LIVE-BUG-1), the id emptied and the statistics asked
@@ -627,6 +653,8 @@ class PlayerService:
         for field in texts:
             if field not in schema.PLAYER_TEXT_KEYS:
                 raise ValueError(f"not a text field of a player: {field!r}")
+        if seed is not NOT_SENT and not IsSeed(seed):
+            raise ValueError(f"not a seed: {seed!r}")
         catalog = self._CountryCatalog()
         identity = None
         failed = False
@@ -683,6 +711,14 @@ class PlayerService:
                             self.SetCountry(target)
                         if targetRegion != shownRegion:
                             self.SetRegion(target, targetRegion)
+
+                        # Compared as stored, as a text is: a slot without
+                        # a seed of its own (or an older build's "0") is
+                        # written. The statistics come from ChangeSince in
+                        # the finally below.
+                        if seed is not NOT_SENT and StateManager.Get(
+                                self.Key(schema.PLAYER_SEED_KEY)) != seed:
+                            self.SetSeed(seed)
                     except BaseException:
                         failed = True
                         raise

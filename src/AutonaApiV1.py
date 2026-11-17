@@ -1429,6 +1429,8 @@ _PLAYER_FIELD_KEYS = {
     "custom_textbox": schema.PLAYER_NOTE_KEY,
 }
 _PLAYER_LOCATION_FIELDS = ("country_code", "state_code")
+# The seed: a number, not a text (PlayerService.IsSeed).
+_PLAYER_SEED_FIELD = "seed"
 
 
 def _player_slot(n, t, p):
@@ -1448,32 +1450,43 @@ def player_fields_update(n, t, p):
     # "custom_textbox": str ("" empties it; the note's line breaks are "\n"),
     # "country_code": a code of GET /countries ("" empties it), "state_code":
     # a region of that country -- the one sent, else the one the slot shows
-    # ("" empties it)}: the slot of state team `t` as the desktop card's
-    # inputs write it (PlayerService.Edit; ADR-005 S4z), in one save cycle.
-    # Not PATCH players, which loads what it is sent (a blank field is not
-    # carried, the local database is merged in, a new name empties the
+    # ("" empties it), "seed": an integer from 0 (no seed) to
+    # PlayerService.SEED_MAX}: the slot of state team `t` as the desktop
+    # card's inputs write it (PlayerService.Edit; ADR-005 S4z), in one save
+    # cycle. Not PATCH players, which loads what it is sent (a blank field is
+    # not carried, the local database is merged in, a new name empties the
     # city): here a field is what it is sent as, and a sponsor or tag that
     # changed re-derives the display name and the images (the online avatar
     # kept) and empties the id, as the card does -- the city and the seed
-    # stay. Nothing is written when a field is refused: 400 for an unknown
-    # key, a value that is not a string, a text that breaks PUT /players'
-    # rule (_player_text_rule: a line break outside the note, a length; not
-    # trimmed here -- the card does not trim), a country or a region the
-    # country data does not have; 409 NOT_READY for a country or a region
-    # before the country data is loaded; 404 for a slot the team does not
-    # have. On the desktop the board is held: the revision is the last
-    # published one.
+    # stay. Another seed asks for the upset factor again, and keeps the id
+    # and the name. Nothing is written when a field is refused: 400 for an
+    # unknown key, a value that is not a string (the seed: not an integer
+    # in its range -- a bool, a float and a string are not), a text that
+    # breaks PUT /players' rule (_player_text_rule: a line break outside the
+    # note, a length; not trimmed here -- the card does not trim), a country
+    # or a region the country data does not have; 409 NOT_READY for a
+    # country or a region before the country data is loaded; 404 for a slot
+    # the team does not have. On the desktop the board is held: the revision
+    # is the last published one.
     _player_slot(n, t, p)
     body = _json_body()
     if not body:
+        names = (*_PLAYER_FIELD_KEYS, *_PLAYER_LOCATION_FIELDS,
+                 _PLAYER_SEED_FIELD)
         raise ApiError(
-            INVALID_ARGUMENT,
-            "one of "
-            f"{', '.join((*_PLAYER_FIELD_KEYS, *_PLAYER_LOCATION_FIELDS))} "
-            "is required", 400)
+            INVALID_ARGUMENT, f"one of {', '.join(names)} is required", 400)
     texts = {}
     location = {}
+    seed = PlayerService.NOT_SENT
     for key, value in body.items():
+        if key == _PLAYER_SEED_FIELD:
+            if not PlayerService.IsSeed(value):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    f"seed must be an integer from 0 to "
+                    f"{PlayerService.SEED_MAX}", 400)
+            seed = value
+            continue
         if key not in _PLAYER_FIELD_KEYS and key not in _PLAYER_LOCATION_FIELDS:
             raise ApiError(
                 INVALID_ARGUMENT, f"unknown player field: {key}", 400)
@@ -1490,7 +1503,7 @@ def player_fields_update(n, t, p):
         refused = WebOps.update_player_fields(
             n, t, p, texts,
             location.get("country_code", PlayerService.NOT_SENT),
-            location.get("state_code", PlayerService.NOT_SENT))
+            location.get("state_code", PlayerService.NOT_SENT), seed)
     except WebOps.NoSuchSlot:
         raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
     # No value in the messages: the route logs keys only (player data), as

@@ -7,7 +7,6 @@ import {
     Card,
     CardContent,
     Checkbox,
-    Chip,
     Collapse,
     Dialog,
     DialogActions,
@@ -85,6 +84,12 @@ export function numbered(value: unknown): string[] {
 export const LINE_MAX = 256;
 export const NOTE_MAX = 4096;
 
+// The seeds the seed field takes: 0 (no seed, an empty field) to the Qt
+// card's spin box's maximum. Equal to PlayerService.SEED_MAX
+// (tests/test_api_v1_score_fields.py).
+export const SEED_MAX = 100000;
+const SEED_RANGE: [number, number] = [0, SEED_MAX];
+
 type InputChange = React.ChangeEvent<HTMLInputElement>;
 
 // PATCH .../players/{p}/fields: v1's names for the card's fields.
@@ -96,6 +101,7 @@ export interface PlayerFieldsSent {
     custom_textbox?: string;
     country_code?: string;
     state_code?: string;
+    seed?: number;
 }
 
 // PATCH .../players/{p}/characters/{row}, with the codename of the game whose
@@ -550,21 +556,27 @@ export function PlayerDetails({open, onToggle, team, slot, player, characters,
             </Button>
             <Collapse in={open} unmountOnExit>
                 <Stack id={regionId} spacing={1.5} sx={{pt: 1}}>
-                    {seed > 0 && (
-                        <Box>
-                            <Chip size="small" label={i18n.t("score_seed", {seed})}/>
-                        </Box>
-                    )}
+                    {/* No real name field: a loaded player still brings it
+                        into the state, and PATCH .../fields still takes
+                        `name`. */}
                     <Stack direction="row" spacing={1}>
-                        <StateLine
-                            label={i18n.t("score_real_name")}
-                            value={text(player.real_name)}
-                            send={(value) => send({name: value})}
-                        />
                         <StateLine
                             label={i18n.t("score_twitter")}
                             value={text(player.twitter)}
                             send={(value) => send({twitter: value})}
+                        />
+                        {/* Sent on Enter or leaving the field, as the score's:
+                            each pause in the typing would be another seed and
+                            another upset factor. Empty is no seed (0). */}
+                        <RangeField
+                            label={i18n.t("score_seed_field")}
+                            value={seed}
+                            range={SEED_RANGE}
+                            percent={false}
+                            step={1}
+                            width={112}
+                            emptyAs={0}
+                            send={(value) => send({seed: value})}
                         />
                     </Stack>
                     <CountryField
@@ -692,7 +704,8 @@ export function PlayerCard({team, slot, slots, player, showSponsor, players,
                         players={players}
                         onPick={onPick}
                     />
-                    {/* The Qt card's seedDisplay: shown, not edited here. */}
+                    {/* The Qt card's seedDisplay: shown with the details
+                        closed too. Edited in the details (the seed field). */}
                     {seed > 0 && (
                         <Typography variant="body2" color="text.secondary"
                                     sx={{flexShrink: 0}}>

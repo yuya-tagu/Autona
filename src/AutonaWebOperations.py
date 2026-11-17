@@ -2054,15 +2054,16 @@ def _edit_slot(scoreboard, team, player, edit):
 
 
 def update_player_fields(scoreboard, team, player, texts,
-                         country=NOT_SENT, region=NOT_SENT):
+                         country=NOT_SENT, region=NOT_SENT, seed=NOT_SENT):
     """/api/v1's PATCH .../teams/{t}/players/{p}/fields (ADR-005 S4z): some
     of the card's fields, written as the card writes them
     (PlayerService.Edit: `texts` by state key, the country / region codes,
-    NOT_SENT for one not sent). `team` is the state team. None, or Edit's
-    refusal (nothing written). One save cycle, held on the desktop: no load,
-    no database."""
-    return _edit_slot(scoreboard, team, player,
-                      lambda service: service.Edit(texts, country, region))
+    the seed, NOT_SENT for one not sent). `team` is the state team. None, or
+    Edit's refusal (nothing written). One save cycle, held on the desktop:
+    no load, no database."""
+    return _edit_slot(
+        scoreboard, team, player,
+        lambda service: service.Edit(texts, country, region, seed))
 
 
 def update_player_character(scoreboard, team, player, row,
