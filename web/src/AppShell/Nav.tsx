@@ -4,18 +4,19 @@ import i18n from "../i18n/config";
 import {DARK_TOKENS as tokens} from "../themes";
 import {NAV_SECTIONS, iconUrl} from "./navTable";
 import {ROW_HEIGHT} from "./parts";
-import {useArchiveAvailable} from "./useArchiveAvailable";
 
 // The AppShell's navigation (ADR-005 S-final SF-5a-3): the Qt sidebar's
 // items under their headings, the page shown highlighted (crimson tint,
 // brand text). A menu page (Settings, the guides, About, the game assets
 // page) is none of them: nothing is highlighted then. An item moves the
 // router (hostApi's navigateToPanel: no reload, the URL's query kept).
+// Every item always shows: the archive clipper's too, whose page installs
+// its worker (ADR-006 A7; until then it showed only while the worker was
+// there).
 export function Nav({panel, go}: {
     panel: string;
     go: (panel: string) => void;
 }) {
-    const archive = useArchiveAvailable();
     return (
         <Box component="nav" aria-label={i18n.t("app_navigation")}
              sx={{flex: 1, minHeight: 0, overflowY: "auto", px: 1,
@@ -40,7 +41,7 @@ export function Nav({panel, go}: {
                                   {i18n.t(section.heading)}
                               </ListSubheader>
                           )}>
-                        {section.items.filter((item) => item.requires !== "archive" || archive).map((item) => {
+                        {section.items.map((item) => {
                             const current = item.panel === panel;
                             return (
                                 <ListItemButton

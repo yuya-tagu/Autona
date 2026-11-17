@@ -127,10 +127,12 @@ cd <プロジェクトルート>
 
 ```bash
 # CWD: プロジェクトルート。notes ファイルはスクラッチパッドに UTF-8 で作成しておく
-gh release create v{X.Y.Z} release-windows.zip --repo yuya-tagu/Autona-releases --title v{X.Y.Z} --notes-file "{notes のフルパス}"   # 認証手順は CLAUDE.local.md 参照
+gh release create v{X.Y.Z} release-windows.zip --repo yuya-tagu/Autona-releases --title v{X.Y.Z} --notes-file "{notes のフルパス}" --latest   # 認証手順は CLAUDE.local.md 参照
 ```
 
 - publish 先は **公開リポ `yuya-tagu/Autona-releases`**（ソースリポは private のため updater が読めない）
+- **`--latest` を付ける**（`publish_release.ps1` も付ける）。同じリポにワーカーのリリース（`worker-v*`）があり、updater は `releases/latest` を読む。
+  どれを latest にするかを GitHub の判定に任せない
 - 同名タグが既にあると失敗する（`gh release create` のエラーに従う）
 
 ### 9. 自動更新の E2E 確認（必須）
@@ -170,6 +172,52 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 - [ ] `chore/release-v{X.Y.Z}` の PR が自動マージされたことを確認（`gh pr view <PR番号> --json state` が `MERGED`）
 - [ ] マージ後にローカル main を再同期（手順 1 と同じ。ブランチはマージ時に自動削除される）
 - [ ] リリース URL をユーザーに報告: `https://github.com/yuya-tagu/Autona-releases/releases/tag/v{X.Y.Z}`
+
+## ワーカーのリリース（アーカイブ切り抜き。ADR-006 A7）
+
+アーカイブ切り抜きのワーカー `vodsplit-worker` は Autona の zip に入れず、Autona-releases の別のリリース（タグ `worker-v{X.Y.Z}`）で配る。
+Autona のリリースとは別の周期で出してよい（YouTube の仕様変更で yt-dlp が壊れたときなど）。利用者はアーカイブのページのボタンで導入・更新する
+（自動更新はしない）。Autona は、下書き・プレリリースでなく、マニフェストの `sets_format` が読めて `min_autona` に届く最新の `worker-v` を選ぶ。
+
+1. **SmashVodSplitter で版を上げる**（`vodsplit/__init__.py` の `__version__` と `pyproject.toml` の `version`。同じ版の配布を差し替えない:
+   導入はマニフェストのサイズと SHA-256 で検査するので、同じタグの zip を置き換えると、マニフェストを読んだ後の利用者の導入が失敗する）。
+   yt-dlp の修正のためなら `pip install -U yt-dlp yt-dlp-ejs` を先に。`python -m pytest -q tests` が通ること
+2. **ビルド**（SmashVodSplitter のルートで。`pip install -e .[dev] pyinstaller` 済みの環境）:
+
+   ```bash
+   python packaging/build_worker.py                      # ワーカーが新しい Autona を要る（sets の形式・新しい v1 に頼る）なら --min-autona X.Y.Z
+   ```
+
+   `dist/vodsplit-worker-windows.zip`・`dist/vodsplit-worker.json`（マニフェスト）・`dist/ffmpeg-<版>-source.tar.gz`（同梱した FFmpeg の
+   ソース）ができる。スクリプトは、固定した LGPL の FFmpeg のビルドとそのソースの tarball を（初回だけ `build/worker/downloads/` に）取ってきて
+   SHA-256 を確かめ、ビルドした exe の `version` がソースの版・形式と同じことと、`deno.exe`・`ffmpeg/ffmpeg.exe`・`THIRD-PARTY-NOTICES.md`・
+   `licenses/ffmpeg/LICENSE.txt` があり imageio-ffmpeg の GPL の ffmpeg が入っていないことと、**自己診断（`vodsplit-worker.exe version --check`）が
+   通ること**を確かめ、zip のエントリ（`/` 区切り・`vodsplit-worker/` の下だけ）を検査する。自己診断が落ちると、動かない部品の名前を出して
+   止まる（公開しない）。末尾に出る `check <部品>: ...` の行、マニフェストの `version`・`sets_format`・`min_autona` と zip のサイズ（前の `worker-v` と大きく違わないこと）を確かめる。
+   FFmpeg の版を上げるときは `build_worker.py` の `FFMPEG_*`（ビルドの URL とソースの URL、2 つの SHA-256）と `packaging/THIRD-PARTY-NOTICES.md` の版を一緒に変える
+3. **`--min-autona` を付けたら、その Autona のリリースを先に publish する**（届かない Autona では選ばれないだけで壊れないが、利用者には
+   新しい版が見えない）。sets の形式（`sets_format`）を上げるワーカーは、それを読む Autona（`ArchiveWorker.SUPPORTED_FORMAT`）が出てから
+4. **publish**（認証手順は `CLAUDE.local.md`。notes ファイルはスクラッチパッドに UTF-8 で）:
+
+   ```bash
+   # CWD: SmashVodSplitter のルート
+   gh release create worker-v{X.Y.Z} dist/vodsplit-worker-windows.zip dist/vodsplit-worker.json dist/ffmpeg-n9.0.2-39-g7adfbe40dc-source.tar.gz --repo yuya-tagu/Autona-releases --title "vodsplit-worker {X.Y.Z}" --notes-file "{notes のフルパス}" --latest=false
+   gh api repos/yuya-tagu/Autona-releases/releases/latest --jq .tag_name   # v{Autona の版} のままであること
+   ```
+
+   - **`--latest=false` を必ず付ける**。Autona のアップデーターは `releases/latest` だけを読む: ワーカーのリリースが latest になると、
+     その間 Autona 本体の新しい版がどの Autona にも見えない（updater は `v` + 数字で始まらないタグを無視して「更新なし」と答えるので、
+     誤った更新には進まない。v2.0.1 以前の Autona は `worker-v` のタグも版として比べ、`release-windows.zip` の無いリリースを「更新あり」と判定する）。
+     誤って latest にしたら、Autona の最新のリリースを `gh release edit v{Autona の版} --repo yuya-tagu/Autona-releases --latest` で戻す
+   - アセットは 3 つ（名前を変えない。tarball の名前は `build_worker.py` の `FFMPEG_SOURCE_NAME` で、FFmpeg の版を上げたら変わる）。Autona が使うのは
+     zip とマニフェストで、自分のリリースのフォルダ（`releases/download/worker-v{X.Y.Z}/`）のものだけ。FFmpeg のソースの tarball は、
+     同梱した LGPL の FFmpeg の対応するソースとして同じリリースに置く（zip を配る間は消さない。`THIRD-PARTY-NOTICES.md` がここを指す）
+5. **確認**: Autona（隔離データの `python main.py` か配布版）のアーカイブのページで、配布中の版が新しいものになり、導入・更新ができて、
+   ヘッダーのワーカーの版が変わること（ページはリリースの一覧を 10 分ごとにしか読まないので、すぐ見たいときは導入のカードの
+   「もう一度確かめる」か `GET /api/v1/archive/worker?refresh=true`）
+
+Autona のリリース（手順 7）の zip に `vodsplit-worker/` が入っていたら `validate_release_zip.ps1` の検査 6 が止める
+（入れると、Autona の更新が導入済みのワーカーを上書きする）。Autona の自動更新は `vodsplit-worker/` に触れない（ルートのコピーは削除なし）。
 
 ## 過去に踏んだ地雷（再発防止）
 

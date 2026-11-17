@@ -16,16 +16,41 @@ import {keepLocal, serverUrl} from "./server";
 // tests/test_archive_results.py's). Checked through text and the DOM, never
 // screenshots.
 //
-// Not covered: the nav item hidden without a worker -- the app is started once
-// for the whole run, with the fake worker (tests/test_archive_jobs.py and
-// tests/test_webserver_routes.py cover the unavailable status).
+// The worker's install (ADR-006 A7): GET /api/v1/archive/worker is stubbed
+// for every test (the real one checks the releases on GitHub from the
+// server: never from a test run; tests/test_archive_worker_install.py reads
+// a local fake release server, tests/test_web_operations.py the real route
+// offline). The install flow stubs the status (no worker), the snapshots and
+// the install's write (SHELL: its real 403 is checked below). The nav item
+// always shows since A7 (no status read).
 
 let pageErrors: string[] = [];
+
+// A worker snapshot (core/ArchiveWorkerInstaller.py's): the latest release
+// and the worker the status probed, no install yet.
+function workerSnapshot(extra: object = {}) {
+    return {
+        installed: {available: true, version: "0.0.0-fake"},
+        env_command: true,
+        latest: {version: "0.3.0", size: 152950633,
+                 published_at: "2026-11-17T00:00:00Z"},
+        check: {status: "done", error: null, message: null, checked_at: 1},
+        update_available: false,
+        job: {revision: 0, status: "idle", stage: null, done: 0, total: 0,
+              version: null, error: null, message: null},
+        ...extra,
+    };
+}
+
+const isWorkerRead = (url: URL) => url.pathname === "/api/v1/archive/worker";
 
 test.beforeEach(async ({page}) => {
     pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(`${error}`));
     await keepLocal(page);
+    // Registered first: a test's own route for it runs before this one.
+    await page.route(isWorkerRead, (route) =>
+        route.fulfill(envelope(workerSnapshot())));
 });
 
 test.afterEach(() => {
@@ -111,7 +136,7 @@ async function startJob(page: Page, source: string) {
     await page.getByRole("button", {name: "Start", exact: true}).click();
 }
 
-test("the nav shows the archive item (the real status read)", async ({page}) => {
+test("the nav shows the archive item", async ({page}) => {
     await page.goto(serverUrl("/web/app/stats"));
     const nav = page.getByRole("navigation");
     await expect(nav.getByText("Archive Clipper")).toBeVisible();
@@ -470,6 +495,11 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     expect((await request.patch(`${base}/settings`,
                                 {data: {thumbnail_background: "settings"}}))
         .status()).toBe(403);
+    // A7: the worker's install and its cancel.
+    expect((await request.post(`${base}/worker:install`,
+                               {data: {version: "0.3.0"}})).status()).toBe(403);
+    expect((await request.post(`${base}/worker:cancel`,
+                               {data: {revision: 1}})).status()).toBe(403);
     // Reads stay open to this PC (the match log's days too, A5; the
     // templates and a thumbnail, A6: no job of that id, 404).
     expect((await request.get(`${base}/status`)).ok()).toBe(true);
@@ -604,4 +634,97 @@ test("a template is edited, previewed with the job's sets and saved; the job's t
 
     await page.getByRole("button", {name: /Back to the jobs/}).click();
     await expect(page.getByTestId("archive-review")).toBeVisible();
+});
+
+// The worker's install (ADR-006 A7): with no usable worker the page is the
+// install card. The status (no worker, then the installed one once the
+// install is done), the snapshots and the install's write are stubbed.
+test("with no worker the page installs the latest release and opens", async ({page}) => {
+    await stubShell(page);
+    const MB = 1024 * 1024;
+    const missing = {installed: {available: false, version: null},
+                     env_command: false};
+    const running = (extra: object) => ({revision: 1, status: "running",
+        version: "0.3.0", error: null, message: null, done: 0,
+        total: 152950633, stage: "download", ...extra});
+    // Before the install, then each read after it in turn (the last one
+    // repeats): the download, the new worker's check, done.
+    const after = [
+        workerSnapshot({...missing, job: running({done: 60 * MB})}),
+        workerSnapshot({...missing, job: running({stage: "probe"})}),
+        workerSnapshot({...missing, job: running({
+            status: "done", stage: null,
+            message: "切り抜きワーカー 0.3.0 を入れました。"})}),
+    ];
+    let started = false;
+    let installed = false;
+    const statusReads: string[] = [];
+    await page.route((url) => url.pathname === "/api/v1/archive/status",
+                     (route) => {
+        statusReads.push(new URL(route.request().url()).search);
+        return route.fulfill(envelope(installed
+            ? {available: true, version: "0.3.0", format: 1,
+               features: ["titles"], reason: null, work_dir: "C:/work",
+               running_job: null, running_kind: null}
+            : {available: false, version: null, format: null, features: [],
+               reason: "切り抜きワーカー（vodsplit-worker.exe）が入っていません。",
+               work_dir: "C:/work", running_job: null, running_kind: null}));
+    });
+    await page.route(isWorkerRead, (route) => {
+        if (!started) {
+            return route.fulfill(envelope(workerSnapshot(missing)));
+        }
+        const next = after.length > 1 ? after.shift() : after[0];
+        installed = after.length === 1;
+        return route.fulfill(envelope(next));
+    });
+    const bodies: unknown[] = [];
+    await page.route("**/api/v1/archive/worker:install", (route) => {
+        bodies.push(route.request().postDataJSON());
+        started = true;
+        return route.fulfill(envelope({job: running({})}, 202));
+    });
+    await page.route("**/api/v1/archive/jobs", (route) =>
+        route.fulfill(envelope({jobs: []})));
+
+    await page.goto(serverUrl("/web/app/archive"));
+    const card = page.getByTestId("archive-worker-card");
+    await expect(card).toContainText("Install the clip worker");
+    await expect(card).toContainText("vodsplit-worker.exe");
+    await expect(page.getByTestId("archive-worker-latest"))
+        .toHaveText("Available: 0.3.0 (145.9 MB)");
+    await page.getByTestId("archive-worker-install").click();
+    await expect.poll(() => bodies).toEqual([{version: "0.3.0"}]);
+    await expect(page.getByTestId("archive-worker-progress"))
+        .toContainText("Downloading");
+    // Done: the status is read again with a probe, and the page opens.
+    await expect(page.getByTestId("archive-worker-version"))
+        .toHaveText("Worker 0.3.0", {timeout: 10000});
+    await expect(card).toHaveCount(0);
+    await expect(page.getByRole("textbox", {name: /^Source video/})).toBeVisible();
+    expect(statusReads).toContain("?refresh=true");
+});
+
+// A newer worker than the installed one: the header says so and its card
+// updates it (the write stubbed).
+test("a newer worker is offered from the header", async ({page}) => {
+    await stubShell(page);
+    await page.route(isWorkerRead, (route) => route.fulfill(envelope(
+        workerSnapshot({update_available: true, env_command: false}))));
+    const bodies: unknown[] = [];
+    await page.route("**/api/v1/archive/worker:install", (route) => {
+        bodies.push(route.request().postDataJSON());
+        return route.fulfill(envelope({job: {revision: 1, status: "running",
+            stage: "download", done: 0, total: 1, version: "0.3.0",
+            error: null, message: null}}, 202));
+    });
+    await page.goto(serverUrl("/web/app/archive"));
+    await expect(page.getByTestId("archive-worker-version"))
+        .toHaveText("Worker 0.0.0-fake");
+    await page.getByTestId("archive-worker-update").click();
+    const card = page.getByTestId("archive-worker-card");
+    await expect(card).toContainText("Update the clip worker");
+    await expect(card).toContainText("Installed: 0.0.0-fake");
+    await page.getByTestId("archive-worker-install").click();
+    await expect.poll(() => bodies).toEqual([{version: "0.3.0"}]);
 });

@@ -83,9 +83,12 @@ Accepted（2026-11-16 オーナー承認。末尾の論点 1・2 はどちらも
   3. ワーカーは別の Python ランタイムを持つので、Autona の依存とぶつからない
 - 入手するときは SHA-256 を確かめ、Autona のフォルダの `vodsplit-worker/` に展開する
   （Autona のアップデーターと同じ置き場所の規則）
-- **ライセンス**: imageio-ffmpeg が同梱する ffmpeg は GPL のビルドだが、別の実行ファイルとして同梱するだけ
-  （mere aggregation）なので、Autona と vodsplit の MIT は変わらない。NOTICES に ffmpeg（GPL・ソースの入手先）・
-  deno（MIT）・yt-dlp（Unlicense）・OpenCV（Apache-2.0）・numpy（BSD）を足す
+- **ライセンス**: ワーカーの FFmpeg は LGPL v3 のビルド（BtbN の FFmpeg-Builds の `win64-lgpl-shared`。版と SHA-256 は
+  `build_worker.py` に固定）を別の実行ファイルとして同梱し、Autona と vodsplit の MIT は変わらない。NOTICES に FFmpeg（LGPL・
+  ソース）・deno（MIT）・yt-dlp（Unlicense）・OpenCV（Apache-2.0）・numpy（BSD）を足し、FFmpeg のソースの tarball をワーカーの
+  リリースに添付する。当初は imageio-ffmpeg が同梱する GPL のビルド（libx264 ほか）を入れる案だったが、A7 のレビューで替えた:
+  vodsplit が FFmpeg で行うのは復号・ストリームコピー・yt-dlp の結合だけで、GPL のエンコーダを使うのは `--reencode`（libx264。
+  Autona は使わない）だけだった。固めたワーカーの `--reencode` は libx264 が無いと言って失敗する
 - **ビルド時間への影響**: Autona のビルド時間は変わらない（ワーカーのビルドは 30 秒で、別に行う）
 
 ### D3: 配信中のスコアボード記録は core の `MatchLogService` が `state_updated` から作る
@@ -201,6 +204,8 @@ delta の行ではなく、通知のたびにボード 1 の公開済みの値�
 
 - ページは `archive`（ナビの「データ」セクション）。**ワーカーが見つからないときはナビに出さない**
   （入手の案内だけを出す）。機能フラグは作らない
+  - A7 で改めた: ナビにはいつも出し、ワーカーが無いときはページがワーカーの導入のカードになる
+    （ナビに出さないと、配布物にワーカーが無い利用者がページにたどり着けない）
 - **StateManager に載せない**。state は `user_data/state.json` と OBS 向けの `out/` に出るもので、
   進捗のような頻繁に変わる値や、配信と関係のないジョブの情報を入れると、OBS への出力と保存を無駄に揺らす
   - ジョブの情報は `<作業フォルダ>/<job_id>/job.json`、レビューの編集（確定・割り当ての変更・IN/OUT の調整）は
@@ -285,6 +290,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
 | **A7 ワーカーの配布** | ワーカーの spec とビルド、Autona-releases への公開、ページからの入手・更新（SHA-256 の検査・展開）、NOTICES、リリース Runbook の更新 | V1・V2・V8 | pytest: 入手処理（偽のサーバー・ハッシュ不一致・展開の中断）。実機: exe で入手から 1 本解析まで（オーナーの「exe で確認」の指示があるとき） | 中 |
 
 - A7 までは、ワーカーの無い配布物ではナビに出ないので、A1〜A6 を途中でリリースしても利用者からは見えない
+  （A7 からはいつもナビに出る）
 - A3（2026-11-16 実装）: D6 のタイムラインの「2 段」は、モックの「全体 / セット」の切り替えとして作った。ドラッグと
   I / O / Enter は A4 に残し、キーとヒントは Space・↑↓・N だけ。実装の要点は Design.md §4.2.5
 - A4（2026-11-16 実装）: 書き出しは解析と同じジョブの仕組み（1 度に 1 つ・進捗・中止・再開・終了の後始末・BELOW_NORMAL）で
@@ -310,6 +316,26 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   ワーカーには生のテンプレートのファイルではなく、検査済みの内容を `<job>/templates/` に書いたスナップショットを渡す（Autona とワーカーの読み違いと、実行中の削除との競合を無くす）。
   クリップの隣に置くのは、書き出しが走っておらず、`clips/export.json` の元動画がジョブの動画で、その番号のクリップが書き出し済みで残っていて、
   切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ。実装の要点は Design.md §4.2.5
+- A7（2026-11-17 実装）: ワーカーは SmashVodSplitter の `packaging/worker.spec`（onedir。videoio の DLL は 1 つ、GPL の mutagen は除外、
+  deno.exe は exe の隣）と `packaging/build_worker.py` で作り、zip（`vodsplit-worker/...`。imageio-ffmpeg の ffmpeg を入れていた 0.3.0 の最初のビルドで約 146 MiB、展開して約 365 MB）と
+  マニフェスト `vodsplit-worker.json`（`version` / `sets_format` / `zip` の名前・サイズ・SHA-256 / 任意の `min_autona`）を
+  Autona-releases の `worker-v<版>` に `--latest=false` で置く（Autona のアップデーターは `releases/latest` を読むので混ざらない）。
+  入手は core の `ArchiveWorkerInstaller`（`bootstrap_core()`。ヘッドレスでは確かめるだけ）: リリースの一覧（`per_page=100`。Autona の
+  リリースの間に挟まるため）から、下書き・プレリリースでなく、この Autona が読む sets の形式で `min_autona` に届く最新の `worker-v` を選び
+  （マニフェストは新しい順に 5 つまで読む。アセットはそのリリースのフォルダのものだけ）、ダウンロード（`.part`。進捗・中止）→ サイズと SHA-256 →
+  `vodsplit-worker.new/` に展開（`vodsplit-worker/` の外・フォルダを出る名前・リンク・大文字小文字で重なる名前があれば zip ごと断る）→
+  展開したワーカーの `version`（版がマニフェストと同じか）と自己診断（`version --check`。同梱の部品が全部動くか。ワーカーの `features` に
+  `check` があるときだけ）→ 入れ替え（`.old` に退避して新しいものを入れ、失敗したら戻す）。入れ替えの間は
+  `ArchiveJobService.ReserveSwap` でワーカーを使うもの（ジョブ・タイトルのプレビュー・版の確認）を止め、ジョブが走っていれば BUSY で断る
+  （数秒で終わる版の確認・プレビューは 10 秒まで待つ）。
+  一覧は 1 ページ（`per_page=100`）だけ読み、マニフェストは新しい順に 5 つまでしか読まない（設計判断: 使える版がその外にしか無いと
+  見つからないが、Autona のリリースは月に数回で 100 件は数年分あり、使えない版が 5 つ続くこともリリースの手順で起こさない。起きたら
+  古い `worker-v` を消すか版を出し直す）。
+  起動時とインストールの前に、落ちたときの残り（`.part` / `.new` / `.old`）を片付ける。自動更新はしない（ページを開いたときに確かめ、
+  新しい版があればヘッダーに出し、利用者がボタンで更新する）。v1 は `GET archive/worker`（THIS_PC）・`POST archive/worker:install` /
+  `:cancel`（SHELL）。Autona のアップデーターは `vodsplit-worker/` に触れない（ルートのコピーは削除なし。テストで固定）、
+  `validate_release_zip.ps1` は Autona の zip にワーカーが入ったら止める（検査 6）。vodsplit 側は V1・V2・V8 を 0.3.0 で入れた
+  （V1 は開発環境でもライブラリとして呼ぶ）。実装の要点は Design.md §4.2.5
 - YouTube への下書きアップロードは範囲外（必要になった時点で別の ADR にする）
 
 ### vodsplit 側の変更
@@ -362,7 +388,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
 - YouTube から VP9 / AV1 で取るので、解析が 1.5 倍ほど遅くなる（雷影杯#34 で約 3 分 → 約 4.5 分の見込み）
 - ローカルの H.264 ファイルは Autona の画面ではプレビューできない（ブラウザで開く）
 - start.gg は非公式の公開 API に頼る（Autona の既存機能と同じリスク）
-- ワーカーの配布物に GPL の ffmpeg（別の実行ファイル）が入る。NOTICES とソースの入手先の記載が要る
+- ワーカーの配布物に LGPL の FFmpeg（別の実行ファイルと DLL）が入る。NOTICES と、ワーカーのリリースごとにソースの tarball の添付が要る
 
 ## Revisit conditions
 

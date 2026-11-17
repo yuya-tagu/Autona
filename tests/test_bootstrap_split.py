@@ -205,6 +205,12 @@ def test_bootstrap_core_steps_and_their_order():
         # The archive clipper's jobs (ADR-006 A1): after the settings,
         # before the shells' web server; nothing read or probed here.
         "ArchiveJobService()",
+        # The archive worker's installer (ADR-006 A7): after the jobs it
+        # holds still for its swap and the executor its check and install
+        # run on; what a crashed install left is cleaned before anything can
+        # run the worker. Nothing fetched here.
+        "ArchiveWorkerInstaller()",
+        "ArchiveWorkerInstaller.instance.CleanLeftovers()",
         # The match log (ADR-006 A2): a state observer, after the state
         # layer's Initialize; started before the shells' launch seed.
         "MatchLogService()",
@@ -487,6 +493,7 @@ from src.core.Actions import AutonaActions
 from src.core.AnalysisService import AnalysisService
 from src.core.AppSettings import AppSettings
 from src.core.ArchiveJobService import ArchiveJobService
+from src.core.ArchiveWorkerInstaller import ArchiveWorkerInstaller
 from src.core import HotkeyRules
 from src.core.AssetPackService import AssetPackService
 from src.core.BadWordFilter import BadWordFilter
@@ -576,6 +583,8 @@ report({
         "AppSettings": AppSettings.instance is not None,
         "GameLoader": GameLoader.instance is not None,
         "ArchiveJobService": ArchiveJobService.instance is not None,
+        "ArchiveWorkerInstaller":
+            ArchiveWorkerInstaller.instance is not None,
         "MatchLogService": MatchLogService.instance is not None,
     },
     "registrations": registrations,

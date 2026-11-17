@@ -109,10 +109,27 @@ release だけを publish し、アップデーターはそちらを参照する
 - **`scripts/validate_release_zip.ps1` が最終ゲート**: zip の区切り文字と
   「assets/layout/user_data = git 管理ファイルのみ」、保存済み state が入っていないこと、Qt の同梱物（検査 5。
   WebEngine とそのリンク先の Qt DLL などの必須ファイルがあること・spec が外したものが無いこと・`_internal` の合計サイズの上限
-  `$internalMaxMiB`）を検証する。gen_release / publish_release の
+  `$internalMaxMiB`）、アーカイブ切り抜きのワーカー（`vodsplit-worker/`）が入っていないこと（検査 6。ADR-006 A7）を検証する。gen_release / publish_release の
   双方から自動で呼ばれ、手動 `gh release create` の前にも必ず単体実行する（Runbook 手順 8）。
   修復・手詰めした zip の publish は禁止（v1.3.0 差し替えアセットがこの経路でテスト大会
   アイコン等の開発時データを配布した）
+
+### アーカイブ切り抜きのワーカー（別配布。ADR-006 A7）
+
+- ワーカー `vodsplit-worker`（SmashVodSplitter の PyInstaller onedir。FFmpeg（LGPL のビルド。imageio-ffmpeg の GPL のビルドは入れない）・deno・yt-dlp を含む）は **Autona の zip にも
+  spec にも入れない**。Autona-releases の `worker-v{X.Y.Z}` のリリース（**`--latest=false`**。アップデーターは `releases/latest` を読む）に
+  zip とマニフェストを置き、利用者がアーカイブのページで導入すると core の `ArchiveWorkerInstaller` が Autona のフォルダの
+  `vodsplit-worker/` に入れる。手順は Runbook の「ワーカーのリリース」
+- **Autona の更新はワーカーに触れない**: `apply_update.ps1` の 2 段の robocopy のうち、`/MIR` は `_internal` だけで、ルートは `/E`（削除なし）。
+  `CleanupUpdateLeftovers()` もワーカーのフォルダ（と導入の途中の `.part` / `.new` / `.old`）を消さない。
+  `tests/test_archive_worker_install.py` が固定（ルートの段に `/MIR` / `/PURGE` / `/MOV` が無いこと・`Remove-Item` の対象・掃除の後もワーカーが残ること）。
+  ルートの段を削除ありに変えるときは、ワーカーのフォルダを外す
+- Autona の zip にワーカーを入れると、更新のたびに導入済みのワーカーを古いもので上書きする。`validate_release_zip.ps1` の検査 6 が止める
+- NOTICES: Autona の `THIRD-PARTY-NOTICES.md` §9 はワーカーが別配布であることと構成物を書くだけで、ワーカーの表示とライセンス全文は
+  ワーカーのフォルダの `THIRD-PARTY-NOTICES.md` / `licenses/`（SmashVodSplitter の `packaging/`）。FFmpeg のソースの tarball は
+  ワーカーのリリースの 3 つ目のアセット（`build_worker.py` が `dist/` に置く）
+- ワーカーのビルド（`build_worker.py`）は、ビルドした exe の自己診断（`version --check`。同梱の yt-dlp・OCR・OpenCV・FFmpeg・deno が動くか）が
+  通らなければ zip を作らない。Autona の導入も入れ替えの前に同じ自己診断を通す（ワーカーの `features` に `check` があるとき）
 
 ### アップデート挙動（外部ヘルパープロセス方式）
 

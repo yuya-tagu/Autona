@@ -2438,6 +2438,10 @@ _NOT_200 = {
     ("api_v1.archive_template_duplicate", None): 403,
     ("api_v1.archive_titles_preview", None): 403,
     ("api_v1.archive_thumbs_generate", None): 403,
+    # The worker's install and its cancel (SHELL, A7): headless installs
+    # nothing. Its read answers (THIS_PC), offline here.
+    ("api_v1.archive_worker_install", None): 403,
+    ("api_v1.archive_worker_cancel", None): 403,
     ("api_v1.get_archive_job", None): 404,
     ("api_v1.get_archive_review", None): 404,
     ("api_v1.get_archive_video", None): 404,
@@ -2587,6 +2591,13 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         "work_dir": str(tmp_path / "archive")}
     archiveJobs = ArchiveJobService()
     monkeypatch.setattr(ArchiveJobService, "instance", archiveJobs)
+    # The worker's install (ADR-006 A7): its read starts the release check
+    # in the background, offline here, in an installer of the walk's own.
+    from src.core import ArchiveWorkerInstaller as workerInstall
+    monkeypatch.setattr(workerInstall, "requests", types.SimpleNamespace(
+        get=offline, RequestException=requests.RequestException))
+    monkeypatch.setattr(workerInstall.ArchiveWorkerInstaller, "instance",
+                        workerInstall.ArchiveWorkerInstaller())
     _goHeadless(autonaApp, monkeypatch)
     answers = []
     events = {}

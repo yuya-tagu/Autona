@@ -463,7 +463,9 @@ def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
     Designer runtime and nothing else outside _internal/) and carry every
     required file under _internal/ (empty): one passes, and one lacking a
     required file, one per forbidden pattern and one over the size cap
-    each throw for that reason."""
+    each throw for that reason. Check 6 (ADR-006 A7) too: a zip carrying
+    the archive clipper's worker (installed by Autona, never shipped) or
+    its install's leftovers throws; a file merely named alike does not."""
     required = _validator_required()
     reasons = _validator_forbidden_reasons()
     cap = _validator_cap()
@@ -499,6 +501,15 @@ def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
         case(f"forbidden_{i:02d}", [*base, "Autona/_internal/" + sample],
              ("THROW", "keeps out (%s)" % reasons[first], sample))
     case("oversize", base, ("THROW", f"over the {cap} MiB cap"), big_mib=cap + 1)
+    for i, entry in enumerate((
+            "Autona/vodsplit-worker/vodsplit-worker.exe",
+            "Autona/VODSPLIT-WORKER/_internal/python312.dll",
+            "Autona/vodsplit-worker.part",
+            "Autona/vodsplit-worker.new/vodsplit-worker.exe",
+            "Autona/vodsplit-worker.old/deno.exe")):
+        case(f"worker_{i}", [*base, entry],
+             ("THROW", "archive clipper's worker", entry))
+    case("worker_named_alike", [*base, "Autona/vodsplit-worker.txt"], ("OK",))
 
     driver = tmp_path / "driver.ps1"
     driver.write_text(_CHECK_5_DRIVER, encoding="utf-8")

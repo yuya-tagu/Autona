@@ -98,6 +98,7 @@ import Preview from "./Preview";
 import Timeline from "./Timeline";
 import Templates, {TemplateLine} from "./Templates";
 import {Template, TemplateEntry} from "./archiveTemplates";
+import WorkerInstall, {WorkerChips} from "./WorkerInstall";
 
 // The Archive Clipper page (ADR-006 A1), /web/app/archive: starts a worker
 // job on a VOD, shows its progress and the sets it found. State is the
@@ -116,7 +117,8 @@ import {Template, TemplateEntry} from "./archiveTemplates";
 // a finished job's confirmed sets get thumbnails (its thumbs/, shown in the
 // set list and the details). The writes are SHELL routes (D7): outside the
 // desktop's own window (this PC's browser) the page only reads, and says
-// so.
+// so. With no usable worker the page is the worker's install card (A7:
+// WorkerInstall); the header shows the worker's version and a newer one.
 
 const BASE = "/api/v1/archive";
 const POLL_MS = 1000;
@@ -151,7 +153,9 @@ async function postJob(path: string, body: unknown): Promise<Job> {
     return (JSON.parse(text) as {data: {job: Job}}).data.job;
 }
 
-function Unavailable({status}: {status: ArchiveStatus | null}) {
+// The status could not be read (this page opened where the archive's reads
+// are refused): nothing to show. No worker is the install card's.
+function Unavailable() {
     return (
         <Box sx={{p: 3, maxWidth: 640}}>
             <Alert severity="info">
@@ -161,12 +165,6 @@ function Unavailable({status}: {status: ArchiveStatus | null}) {
                 <Typography variant="body2">
                     {i18n.t("archive_unavailable_body")}
                 </Typography>
-                {status?.reason ? (
-                    <Typography variant="body2" sx={{mt: 1}}>
-                        {i18n.t("archive_unavailable_reason",
-                                {reason: status.reason})}
-                    </Typography>
-                ) : null}
             </Alert>
         </Box>
     );
@@ -1771,6 +1769,8 @@ function ArchiveContent() {
     // outlive the template view.
     const [templateDrafts, setTemplateDrafts] =
         React.useState<Record<string, Template>>({});
+    // The worker's update card, opened from the header (A7).
+    const [updating, setUpdating] = React.useState(false);
     // Outside the desktop's window the writes (SHELL) are refused: only
     // reading here. Still checking or a failed probe leaves them on (the
     // server answers for itself).
@@ -1809,25 +1809,35 @@ function ArchiveContent() {
             b.created_at.localeCompare(a.created_at)));
     }, []);
 
+    const applyStatus = React.useCallback((data: ArchiveStatus) => {
+        setStatus(data);
+        if (data.available) {
+            loadJobs().catch(() => undefined);
+            loadTemplates();
+            // A reload while a job runs shows its progress.
+            if (data.running_job && selectedRef.current === "new") {
+                select(data.running_job);
+            }
+        }
+    }, [loadJobs, loadTemplates, select]);
+
     React.useEffect(() => {
         let live = true;
         getData<ArchiveStatus>(`${BASE}/status`).then((data) => {
             if (live) {
-                setStatus(data);
-                if (data.available) {
-                    loadJobs().catch(() => undefined);
-                    loadTemplates();
-                    // A reload while a job runs shows its progress.
-                    if (data.running_job && selectedRef.current === "new") {
-                        select(data.running_job);
-                    }
-                }
+                applyStatus(data);
             }
         }, () => live && setStatusFailed(true));
         return () => {
             live = false;
         };
-    }, [loadJobs, loadTemplates, select]);
+    }, [applyStatus]);
+
+    // A worker installed (A7): the status probes it again.
+    const reloadStatus = React.useCallback(() => {
+        getData<ArchiveStatus>(`${BASE}/status?refresh=true`)
+            .then(applyStatus, (e) => setError(messageOf(e)));
+    }, [applyStatus]);
 
     // Null when the answer is for a job that is no longer the selected one.
     const loadDetail = React.useCallback(async (id: string) => {
@@ -1903,10 +1913,18 @@ function ArchiveContent() {
     };
 
     if (status === null) {
-        return statusFailed ? <Unavailable status={null}/> : null;
+        return statusFailed ? <Unavailable/> : null;
     }
     if (!status.available) {
-        return <Unavailable status={status}/>;
+        return (
+            <>
+                {error ? <Alert severity="error" onClose={() => setError("")}>
+                    {error}
+                </Alert> : null}
+                <WorkerInstall update={false} reason={status.reason}
+                               readOnly={readOnly} onInstalled={reloadStatus}/>
+            </>
+        );
     }
 
     const sets = detail?.sets ?? null;
@@ -1957,7 +1975,15 @@ function ArchiveContent() {
                         <Chip label={`${i18n.t("archive_chip_games")} ${summary.games}`}/>
                     </Stack>
                 ) : null}
+                <Box sx={{flex: 1}}/>
+                <WorkerChips key={status.version ?? ""} version={status.version}
+                             onUpdate={() => setUpdating(true)}/>
             </Stack>
+            {updating ? (
+                <WorkerInstall update readOnly={readOnly}
+                               onInstalled={reloadStatus}
+                               onClose={() => setUpdating(false)}/>
+            ) : null}
             {readOnly ? (
                 <Alert severity="info" data-testid="archive-read-only">
                     {i18n.t("archive_read_only")}

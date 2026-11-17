@@ -122,7 +122,8 @@ EXPECTED_ROUTES = [
 # view's (A4), and the match log's days, this PC's, and the results'
 # preparation, the shared view's (A5), and the title templates' reads and a
 # set's thumbnail, this PC's, the templates' writes, the titles' preview and
-# the thumbnails' drawing, the shared view's (A6).
+# the thumbnails' drawing, the shared view's (A6), and the worker's install,
+# its read this PC's, the install and its cancel the shared view's (A7).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -165,6 +166,11 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/archive/templates/<template_id>', 'api_v1.archive_template_update', 'OPTIONS,PUT'),
     ('/api/v1/archive/templates/<template_id>', 'api_v1.archive_template_delete', 'DELETE,OPTIONS'),
     ('/api/v1/archive/templates/<template_id>:duplicate', 'api_v1.archive_template_duplicate', 'OPTIONS,POST'),
+    # The worker's install (ADR-006 A7): the read THIS_PC, the install and
+    # its cancel SHELL.
+    ('/api/v1/archive/worker', 'api_v1.get_archive_worker', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/worker:cancel', 'api_v1.archive_worker_cancel', 'OPTIONS,POST'),
+    ('/api/v1/archive/worker:install', 'api_v1.archive_worker_install', 'OPTIONS,POST'),
     # The game asset packs: the list and the last job's state (ADR-005
     # S-final SF-3b), the jobs, the ZIP upload and the games folder's
     # reveal (SF-4b-1; all but the list WebAccess.SHELL), the picked
@@ -629,7 +635,10 @@ def test_the_classification_follows_the_rules():
               # The title templates (A6): the aliases name players; a set's
               # thumbnail, as its frame.
               "api_v1.get_archive_templates", "api_v1.get_archive_template",
-              "api_v1.get_archive_thumb"}
+              "api_v1.get_archive_thumb",
+              # The worker's install (A7): what is installed, the latest
+              # release, the install's state.
+              "api_v1.get_archive_worker"}
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
@@ -640,7 +649,9 @@ def test_the_classification_follows_the_rules():
     # the job's folder, the export cuts the video onto this PC; A5: the
     # results' preparation, as the job's creation it feeds; A6: the
     # templates' writes go to user_data/, the titles' preview starts the
-    # worker, the thumbnails are drawn and written into the job's folder).
+    # worker, the thumbnails are drawn and written into the job's folder;
+    # A7: the worker's install downloads a program and replaces its folder
+    # in Autona's).
     shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
              "api_v1.get_assets_job", "api_v1.upload_assets_zip",
              "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
@@ -655,7 +666,9 @@ def test_the_classification_follows_the_rules():
              "api_v1.archive_template_delete",
              "api_v1.archive_template_duplicate",
              "api_v1.archive_titles_preview",
-             "api_v1.archive_thumbs_generate"}
+             "api_v1.archive_thumbs_generate",
+             "api_v1.archive_worker_install",
+             "api_v1.archive_worker_cancel"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -724,7 +737,9 @@ def test_the_classification_follows_the_rules():
     # match log's days, this PC's, and the results' preparation, the
     # shell's (A5: v1 76 of 147), and the title templates' 2 reads and a
     # set's thumbnail, this PC's, the templates' 3 writes, the titles'
-    # preview and the thumbnails' drawing, the shell's (A6: v1 76 of 155).
+    # preview and the thumbnails' drawing, the shell's (A6: v1 76 of 155),
+    # and the worker's install read, this PC's, its install and cancel, the
+    # shell's (A7: v1 76 of 158).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -734,7 +749,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 155
+    assert len(EXPECTED_API_V1_ROUTES) == 158
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

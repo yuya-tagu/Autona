@@ -83,8 +83,11 @@ try {
     # exists, so we rely on its exit code rather than a pre-check (a pre-check
     # with `gh release view` would emit "release not found" to stderr on the
     # normal first-publish path).
+    # --latest: the repo also holds the archive clipper's worker releases
+    # (worker-v*, published with --latest=false); Autona's updater reads
+    # releases/latest, which must be this one (not GitHub's own choice).
     Write-Host "Publishing release $tag to $Repo ..."
-    gh release create $tag "release-windows.zip" --repo $Repo --title $tag --notes $Notes
+    gh release create $tag "release-windows.zip" --repo $Repo --title $tag --notes $Notes --latest
     if ($LASTEXITCODE -ne 0) {
         throw "gh release create failed (exit $LASTEXITCODE). Ensure gh is authenticated with write access to $Repo, and that release $tag doesn't already exist (see CLAUDE.md)."
     }

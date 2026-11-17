@@ -15,9 +15,6 @@ export interface NavItem {
     icon: string;
     // The label's i18next key.
     label: string;
-    // Shown only while this feature is available (archive: the clipper
-    // worker is installed, ADR-006).
-    requires?: string;
 }
 
 export interface NavSection {

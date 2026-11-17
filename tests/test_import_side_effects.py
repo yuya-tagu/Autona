@@ -183,6 +183,11 @@ game_loader = importlib.import_module("src.core.GameLoader").GameLoader
 archive_job_service = importlib.import_module(
     "src.core.ArchiveJobService").ArchiveJobService
 archive_worker = importlib.import_module("src.core.ArchiveWorker")
+# The worker's installer (ADR-006 A7): a singleton created by
+# bootstrap_core(); no release fetched, no folder cleaned, nothing submitted
+# on import.
+archive_worker_installer = importlib.import_module(
+    "src.core.ArchiveWorkerInstaller").ArchiveWorkerInstaller
 # The title templates and a set's thumbnail data (ADR-006 A6): the
 # templates' folder is resolved when used (nothing read or made on import:
 # ./user_data is checked below); the data is pure.
@@ -354,6 +359,8 @@ assert asset_pack_service.instance is None, \
 assert archive_job_service.instance is None, \
     "import created ArchiveJobService.instance"
 assert archive_worker._kernel32 is None, "import loaded kernel32"
+assert archive_worker_installer.instance is None, \
+    "import created ArchiveWorkerInstaller.instance"
 assert match_log_service.instance is None, \
     "import created MatchLogService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \

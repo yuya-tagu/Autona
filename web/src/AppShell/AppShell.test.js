@@ -197,8 +197,6 @@ beforeEach(() => {
                         : ok(200, server.format);
                 case "/api/v1/status":
                     return server.status;
-                case "/api/v1/archive/status":
-                    return server.archive ?? refuse(404, "NOT_FOUND");
                 default:
                     return refuse(404, "NOT_FOUND");
             }
@@ -253,8 +251,7 @@ test("the navigation is the Qt sidebar's: its headings and items in order", asyn
         expect(document.getElementById(`app-nav-${section.heading}`))
             .toHaveTextContent(i18n.t(section.heading));
         expect(within(list).getAllByRole("button").map((item) => item.textContent))
-            .toEqual(section.items.filter((item) => !item.requires)
-                .map((item) => i18n.t(item.label)));
+            .toEqual(section.items.map((item) => i18n.t(item.label)));
     });
     expect(NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.panel)))
         .toEqual(["event", "stream", "scoreboard", "board", "thumbnail",
@@ -262,11 +259,12 @@ test("the navigation is the Qt sidebar's: its headings and items in order", asyn
                   "playerBrowser", "archive"]);
 });
 
-test("the archive item shows only while the clipper worker is available", async () => {
-    server.archive = ok(200, {available: true});
+test("the archive item shows without asking whether its worker is there", async () => {
+    // Its page installs the worker (ADR-006 A7): the navigation asks nothing.
     await renderAt("/web/app/event?lng=en");
-    expect(await screen.findByRole("button", {name: i18n.t("app_archive")}))
-        .toBeInTheDocument();
+    expect(navButton("app_archive")).toBeInTheDocument();
+    expect(global.fetch.mock.calls.map(([url]) => new URL(url).pathname))
+        .not.toContain("/api/v1/archive/status");
 });
 
 test("the page shown is the highlighted item", async () => {

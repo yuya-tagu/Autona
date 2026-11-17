@@ -14,7 +14,14 @@ The CLI
     number (an unsupported worker); ``FAKE_VODSPLIT_NO_TITLES`` leaves
     ``features`` out (a worker from before vodsplit V10);
     ``FAKE_VODSPLIT_VERSION_EXIT`` makes it exit with that code instead (a
-    broken worker).
+    broken worker); ``FAKE_VODSPLIT_VERSION_SLEEP`` (seconds) makes it wait
+    before it answers (a worker the antivirus holds).
+
+``version --check``
+    With ``FAKE_VODSPLIT_CHECK`` set (and only then is ``check`` among the
+    features): the version line with ``"check": {"ok", "items"}``, the
+    items ``FAKE_VODSPLIT_CHECK`` names (comma-separated) failing ("ok":
+    none), exit 1 when one fails.
 
 ``titles <edits.json> [--template FILE] [--format json]``
     vodsplit V10's (ADR-006 A6): reads the request (``source`` may be null)
@@ -513,13 +520,29 @@ def main(argv):
               "| titles ...", file=sys.stderr)
         return 2
     if argv[0] == "version":
+        time.sleep(float(os.environ.get("FAKE_VODSPLIT_VERSION_SLEEP", "0")
+                         or 0))
         code = os.environ.get("FAKE_VODSPLIT_VERSION_EXIT")
         if code:
             return int(code)
         fmt = int(os.environ.get("FAKE_VODSPLIT_FORMAT", "1"))
         answer = {"version": "0.0.0-fake", "format": fmt}
+        features = []
         if not os.environ.get("FAKE_VODSPLIT_NO_TITLES"):
-            answer["features"] = ["titles"]
+            features.append("titles")
+        check = os.environ.get("FAKE_VODSPLIT_CHECK")
+        if check:
+            features.append("check")
+        if features:
+            answer["features"] = features
+        if argv[1:] == ["--check"] and check:
+            failing = set() if check == "ok" else set(check.split(","))
+            items = [{"name": name, "ok": name not in failing,
+                      "detail": "broken" if name in failing else "ok"}
+                     for name in ("yt_dlp", "ffmpeg", "deno")]
+            answer["check"] = {"ok": not failing, "items": items}
+            print(json.dumps(answer), flush=True)
+            return 1 if failing else 0
         print(json.dumps(answer), flush=True)
         return 0
     if argv[0] == "run":
