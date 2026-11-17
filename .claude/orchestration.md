@@ -8,7 +8,12 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 - **メインセッションは常に 1 本**。複数の対話セッションで同じ作業ツリーを並行編集しない
   （`git status` の混合・push 時の巻き込みが起きるため）
 - **メインはタスク分解・委譲・検収・PR 作成・PdM との要件すり合わせに専念する**。
-  自明な 1〜2 行修正を除き自分でコードを書かない
+  自分でコードを書くのは次の場合だけ（2026-11-17 オーナー指示。委譲は文脈の読み直しから始まるので、小さい変更では遅い）:
+  - 自明な 1〜2 行修正
+  - **調査済みの小さい変更**: 直す場所と直し方がメインの手元で分かっていて、1 ページ（`web/src/<Page>/`）か 1 モジュールとそのテストに収まり、
+    設計判断が無いもの（欄の増減・文言・配置・既存パターンどおりの 1 フィールド追加など）
+  - 上に当てはまっても、Qt ライフサイクル・スレッド境界・`bootstrap.py` の生成順・state スキーマ・自動更新に触れるなら委譲する（impl）。
+    書いている途中で範囲が広がったら、そこで止めて委譲に切り替える
 - 修正は**基本直列**: ローカル `main` 直編集 → 検証 1 回 → PR 1 本
 
 ## 委譲先の選び方
@@ -30,10 +35,12 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 ## 標準フロー（1 タスク）
 
 1. **分解**: 台帳（下記）から次のタスクを取り、設計判断が要るかを決める
-2. **実装**: patch / impl に委譲。独立した部分は並列起動してよい（触るファイルが重ならない場合のみ）
+2. **実装**: patch / impl に委譲（基本形の「調査済みの小さい変更」はメインが書く）。独立した部分は並列起動してよい（触るファイルが重ならない場合のみ）
+   - **画面の変更は UI を先に出して見せる**（2026-11-17 オーナー指示）: 欄の配置など目で判断するものは、UI だけを先に直してオーナーに見せ、
+     サーバー側（core・v1・ドキュメント）は続けて足す。UI・API・core・テスト・ドキュメントを 1 つの依頼にまとめて、画面を見せるのを最後にしない
 3. **検収**: 差分が中規模以上、または Qt ライフサイクル・スレッド・state に触れたら **review** に回す。
    指摘はメインが取捨選択し、直すものは元の実装エージェント（SendMessage で継続）か patch に戻す
-4. **検証**: push 前に **verify** でフル検証（pytest 全量 + `web/` 変更時は build/test）
+4. **検証**: 影響範囲のテストを実施する。大規模な修正の場合は最後に **verify** でフル検証（pytest 全量 + `web/` 変更時は build/test）。範囲の決め方は下記「テストの範囲」
 5. **実機確認**: メインが隔離データで行う（下記「動作確認の分担」）。画面に影響しない変更では省く
 6. **PR**: オーナーに依頼されたら、メインがコミット → push → `gh pr create`（CLAUDE.local.md の認証手順）。コミット・push を依頼なしに行わない。ADR-005 のパネル移行は 2026-11-07 から依頼済みとして扱う
 7. **台帳更新**: 進捗を台帳に書く
@@ -44,6 +51,21 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 ## 動作確認の分担
 
 - **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が `python scripts/run_tests_parallel.py`（並列・約 3〜6 分、マシンの状態で変動。CI は直列のまま）で回す
+- **テストの範囲**（2026-11-17 オーナー指示）: **影響範囲のテストを実施する。大規模な修正の場合は最後に全量チェックする**。
+  委譲の brief に一律で「最後に pytest 全量」と書かない
+  - 影響範囲は「触ったモジュールのテスト」だけではない。この repo は横断の台帳・pin テストが変更箇所から離れたところで落ちるので、
+    変更の種類に応じて次も含める:
+
+    | 変更の種類 | 含める台帳・pin テスト |
+    |-----------|----------------------|
+    | ルート / Socket.IO イベントの増減、v1 のフィールドの増減 | `tests/test_webserver_routes.py`・`tests/test_web_access.py`・API 一覧（`core/ApiCatalog`）の pin |
+    | state のキー・書き手・書き込み列の変更 | `tests/test_state_schema.py`・`tests/test_objectname_keypath_contract.py`・書き込み列の golden（`tests/test_board_operations.py`・`tests/test_set_follow_flow.py`・`tests/test_player_apply.py` ほか該当するもの） |
+    | core の import・シングルトン・購読者の追加 | `tests/test_core_qt_free.py`・`tests/test_import_side_effects.py`・`tests/test_bootstrap_split.py` |
+    | Qt のウィジェット・シグナルの接続 | `tests/test_web_panel_host.py`・`tests/test_signal_lifetime.py` |
+    | `web/` | 該当ページの jest と `npm run build`（Python と表を共有する `*.cases.json` を触ったら読む側の pytest も） |
+  - 「大規模」は影響範囲を列挙し切れない変更: `bootstrap.py` の生成順・state スキーマと移行・スレッド境界・横断的な rename・
+    多数のモジュールにまたがる変更
+  - 漏れた分は PR の CI（全量・緑でないとマージされない）が拾う。失うのは push 前に気づけることだけ
 - **実機確認はメインセッションが PR の前に行う**（2026-11-07 オーナー承認）。サブエージェントはアプリを起動しない
   - **隔離データでだけ起動する**: tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`。
     開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動しない。
