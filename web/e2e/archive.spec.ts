@@ -4,8 +4,9 @@ import {keepLocal, serverUrl} from "./server";
 // The Archive Clipper page (ADR-006 A1): /web/app/archive on the headless app,
 // with the fake worker (e2e/fake_worker.py, set up by global-setup.ts through
 // AUTONA_VODSPLIT_CMD), so the status read is the real one. The writes (start,
-// cancel, resume, work folder, A4's review save and export, and A5's results
-// preparation) are the desktop shared view's (SHELL routes: 403 to a
+// cancel, resume, work folder, A4's review save and export, A5's results
+// preparation, and A6's template saves, titles preview, thumbnails and their
+// background) are the desktop shared view's (SHELL routes: 403 to a
 // browser), and there is no desktop here to give the shell's secret, so they
 // and the job reads are stubbed with page.route (as assets.spec.ts does) to
 // cover the UI flow -- the shell probe (GET /api/v1/shell-session) too where
@@ -454,11 +455,31 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     expect((await request.post(`${base}/results:prepare`,
                                {data: {kind: "json", results: {sets: []}}}))
         .status()).toBe(403);
-    // Reads stay open to this PC (the match log's days too, A5).
+    // A6: the templates' writes, the titles' preview (it starts the worker)
+    // and the thumbnails (the desktop's renderer), and their background.
+    expect((await request.put(`${base}/templates/default`,
+                              {data: {template: {}}})).status()).toBe(403);
+    expect((await request.delete(`${base}/templates/default`)).status())
+        .toBe(403);
+    expect((await request.post(`${base}/templates/default:duplicate`,
+                               {data: {}})).status()).toBe(403);
+    expect((await request.post(`${base}/jobs/${JOB_ID}/titles:preview`,
+                               {data: {template: {}}})).status()).toBe(403);
+    expect((await request.post(`${base}/jobs/${JOB_ID}/thumbs:generate`,
+                               {data: {}})).status()).toBe(403);
+    expect((await request.patch(`${base}/settings`,
+                                {data: {thumbnail_background: "settings"}}))
+        .status()).toBe(403);
+    // Reads stay open to this PC (the match log's days too, A5; the
+    // templates and a thumbnail, A6: no job of that id, 404).
     expect((await request.get(`${base}/status`)).ok()).toBe(true);
     const days = await request.get(`${base}/match-logs`);
     expect(days.ok()).toBe(true);
     expect(Array.isArray((await days.json()).data.days)).toBe(true);
+    expect((await request.get(`${base}/templates`)).ok()).toBe(true);
+    expect((await request.get(`${base}/templates/default`)).ok()).toBe(true);
+    expect((await request.get(`${base}/jobs/${JOB_ID}/thumbs/1`)).status())
+        .toBe(404);
 
     // A browser (the real shell probe): the page only reads, and says so.
     await page.goto(serverUrl("/web/app/archive"));
@@ -482,4 +503,105 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     const message = (await (await refusal).json()).error.message as string;
     expect(message).not.toBe("");
     await expect(page.getByRole("alert").filter({hasText: message})).toBeVisible();
+});
+
+// The title templates (ADR-006 A6): the archive page's own view, from the
+// job screen. The list is the real one (THIS_PC: the standard template, no
+// file yet) and the status the real one (the fake worker says "titles");
+// the save, the preview (SHELL routes: their 403 is checked above) and the
+// background's PATCH are stubbed, as the job is -- whose thumbnail (A6)
+// shows in its set list.
+test("a template is edited, previewed with the job's sets and saved; the job's thumbnail shows",
+     async ({page, request}) => {
+    const base = serverUrl("/api/v1/archive");
+    const real = (await (await request.get(`${base}/templates`)).json()).data;
+    expect(real.templates).toEqual([expect.objectContaining(
+        {id: "default", stored: false, role: "default"})]);
+    expect((await (await request.get(`${base}/status`)).json()).data.features)
+        .toEqual(["titles"]);
+    let store = real.templates;
+    const original: string = store[0].template.title;
+    const puts: any[] = [];
+    const previews: any[] = [];
+    const patches: any[] = [];
+    await stubShell(page);
+    await stubJobs(page, {posts: [], detail: () => ({
+        job: job("done", {thumbs: {state: "done", done: 1, total: 1,
+                                   failed: [], files: [1], revision: 2}}),
+        sets: REVIEW_SETS})});
+    // After stubJobs: these take their own paths first.
+    await page.route("**/api/v1/archive/jobs/*/thumbs/1**", (route) =>
+        route.fulfill({status: 200, contentType: "image/png", body: PNG}));
+    await page.route("**/api/v1/archive/jobs/*/titles:preview", (route) => {
+        const body = route.request().postDataJSON();
+        previews.push(body);
+        const winner = body.template.title.includes("{winner}") ? "Alpha " : "";
+        return route.fulfill(envelope({template: body.template.name, sets: [
+            {no: 1, title: `${winner}Fake Cup Winners Final Alpha vs Beta`,
+             description: "Fake Cup\n\n0:00 Game 1\n0:30 Game 2\n1:00 Game 3",
+             chapters: 3},
+            {no: 2, title: null, description: null, chapters: 0}]}));
+    });
+    await page.route("**/api/v1/archive/templates**", (route) => {
+        const asked = route.request();
+        if (asked.method() === "PUT") {
+            const body = asked.postDataJSON();
+            puts.push(body);
+            store = [{...store[0], stored: true, template: body.template}];
+            return route.fulfill(envelope({template: store[0]}));
+        }
+        return route.fulfill(envelope({templates: store}));
+    });
+    await page.route("**/api/v1/archive/settings", (route) => {
+        patches.push(route.request().postDataJSON());
+        return route.fulfill(envelope({available: true, work_dir: "w",
+                                       features: ["titles"],
+                                       thumbnail_background: "settings"}));
+    });
+    await page.goto(serverUrl(`/web/app/archive?job=${JOB_ID}`));
+
+    // The set's thumbnail, not its frame; the template the event takes.
+    await expect(page.getByTestId("archive-thumb-1"))
+        .toHaveJSProperty("naturalWidth", 1, {timeout: 15_000});
+    await expect(page.getByTestId("archive-template-line"))
+        .toContainText(store[0].template.name);
+
+    await page.getByTestId("archive-templates-button").click();
+    await expect(page.getByTestId("archive-template-default"))
+        .toContainText("Used for this job");
+    const title = page.getByTestId("archive-tpl-title");
+    await expect(title).toHaveValue(original);
+    // A variable put in at the caret.
+    await title.click();
+    await page.keyboard.press("Home");
+    await page.getByTestId("archive-tpl-var-winner").click();
+    await expect(title).toHaveValue(`{winner}${original}`);
+    await expect(page.getByTestId("archive-template-default"))
+        .toContainText("Unsaved");
+
+    // The preview: asked with the draft a moment after the edit.
+    await expect(page.getByTestId("archive-preview-title"))
+        .toHaveText("Alpha Fake Cup Winners Final Alpha vs Beta");
+    await expect(page.getByTestId("archive-preview-chapters"))
+        .toHaveText("3 chapters");
+    expect(previews[previews.length - 1].template.title)
+        .toBe(`{winner}${original}`);
+
+    await page.getByTestId("archive-tpl-save").click();
+    await expect(page.getByTestId("archive-tpl-notice")).toHaveText("Saved");
+    expect(puts).toHaveLength(1);
+    expect(puts[0].template.title).toBe(`{winner}${original}`);
+    await expect(page.getByTestId("archive-template-default"))
+        .not.toContainText("Unsaved");
+    await expect(page.getByTestId("archive-template-default"))
+        .not.toContainText("(as installed)");
+
+    // The thumbnail tab: the background of the job's thumbnails.
+    await page.getByRole("tab", {name: "Thumbnail"}).click();
+    await page.getByLabel("The thumbnail settings' background").check();
+    await expect.poll(() => patches)
+        .toEqual([{thumbnail_background: "settings"}]);
+
+    await page.getByRole("button", {name: /Back to the jobs/}).click();
+    await expect(page.getByTestId("archive-review")).toBeVisible();
 });

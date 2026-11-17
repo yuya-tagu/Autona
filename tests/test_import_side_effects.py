@@ -183,6 +183,11 @@ game_loader = importlib.import_module("src.core.GameLoader").GameLoader
 archive_job_service = importlib.import_module(
     "src.core.ArchiveJobService").ArchiveJobService
 archive_worker = importlib.import_module("src.core.ArchiveWorker")
+# The title templates and a set's thumbnail data (ADR-006 A6): the
+# templates' folder is resolved when used (nothing read or made on import:
+# ./user_data is checked below); the data is pure.
+importlib.import_module("src.core.ArchiveTemplates")
+importlib.import_module("src.core.ArchiveThumbnails")
 # The match log (ADR-006 A2): a singleton created and started by
 # bootstrap_core(); no subscription, no writer thread, no directory on
 # import.

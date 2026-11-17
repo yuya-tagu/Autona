@@ -2577,6 +2577,11 @@ _ARCHIVE_REFUSALS = {
     archive.UNAVAILABLE: (UNAVAILABLE, 503),
     archive.STOPPING: (UNAVAILABLE, 503),
     archive.FETCH_FAILED: (UNAVAILABLE, 503),
+    archive.UNSUPPORTED: (CONFLICT, 409),
+    archive.NO_SETS: (CONFLICT, 409),
+    archive.SUPERSEDED: (CONFLICT, 409),
+    archive.WORKER_FAILED: (UNAVAILABLE, 503),
+    archive.SAVE_FAILED: (NOT_READY, 409),
 }
 
 
@@ -2594,9 +2599,11 @@ ARCHIVE_JOB_MAX_BODY = 2 * 1024 * 1024
 @_no_store_answers
 @api_handler
 def get_archive_status():
-    # {"available", "version", "format", "reason" (why not, Japanese),
-    # "work_dir", "running_job" (its id or null), "running_kind" ("analysis"
-    # / "export" / null, ADR-006 A4)}. The worker is probed on
+    # {"available", "version", "format", "features" (what the worker does
+    # beyond its format: ["titles"], ADR-006 A6), "reason" (why not,
+    # Japanese), "work_dir", "thumbnail_background" ("frame" / "settings",
+    # A6), "running_job" (its id or null), "running_kind" ("analysis" /
+    # "export" / null, ADR-006 A4)}. The worker is probed on
     # this thread the first time (`<worker> version`, up to 8 s: below the
     # web client's 10 s) and with `?refresh=true`; an unavailable one is
     # probed again after 30 s.
@@ -2608,12 +2615,14 @@ def get_archive_status():
 @_no_store_answers
 @write_op("archive.settings", log_keys_only=True)
 def archive_settings_update():
-    # {"work_dir": an absolute path} (made when it is not there; 400 when it
-    # is empty, relative or cannot be made; 409 while a job runs) -> the
-    # status. Logged by key: the path names this PC's user.
+    # {"work_dir"?: an absolute path (made when it is not there; 400 when
+    # it is empty, relative or cannot be made; 409 while a job runs),
+    # "thumbnail_background"?: "frame" / "settings" (ADR-006 A6)}, one at
+    # least and nothing else (400) -> the status. Logged by key: the path
+    # names this PC's user.
     body = _json_body()
     try:
-        data = WebOps.update_archive_settings(body.get("work_dir"))
+        data = WebOps.update_archive_settings(body)
     except archive.ArchiveError as error:
         raise _archive_refused(error)
     return ok(data=data)
@@ -2836,6 +2845,136 @@ def archive_job_export(job_id):
     except archive.ArchiveError as error:
         raise _archive_refused(error)
     return ok(data={"job": job})
+
+
+@api_v1.route("/archive/templates")
+@_no_store_answers
+@api_handler
+def get_archive_templates():
+    # The title templates (ADR-006 A6), in the order the worker picks from:
+    # {"templates": [{"id" ("default" or the server's), "stored" (false: the
+    # standard one, no file yet), "role" ("match" / "default" / "unused"),
+    # "template": {"name", "match", "title", "title_team", "description",
+    # "chapter_format", "overflow", "round_map", "aliases", "order"}}]}.
+    return ok(data={"templates": WebOps.get_archive_templates()})
+
+
+@api_v1.route("/archive/templates/<template_id>")
+@_no_store_answers
+@api_handler
+def get_archive_template(template_id):
+    # {"template": one entry of the list}. 404 for an unknown id.
+    try:
+        entry = WebOps.get_archive_template(template_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"template": entry})
+
+
+@api_v1.route("/archive/templates/<template_id>", methods=["PUT"])
+@_no_store_answers
+@write_op("archive.template.update", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_template_update(template_id):
+    # {"template": the whole template (unknown keys dropped)} -> {"template":
+    # its entry} as saved (the standard one's file written the first time).
+    # 400 for what does not pass the checks (types, lengths, the chapter
+    # format, a match on the standard one), 404 for an unknown id, 409 when
+    # user_data/ cannot be written (reason "save_failed"). Logged by key:
+    # the aliases name players.
+    body = _json_body()
+    try:
+        entry = WebOps.save_archive_template(template_id,
+                                             body.get("template"))
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"template": entry})
+
+
+@api_v1.route("/archive/templates/<template_id>", methods=["DELETE"])
+@_no_store_answers
+@write_op("archive.template.delete")
+def archive_template_delete(template_id):
+    # Removes the template's file -> {"template": the standard one's entry
+    # when it was "default" (back to the standard), else null}. 404 for an
+    # unknown id.
+    try:
+        entry = WebOps.delete_archive_template(template_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"template": entry})
+
+
+@api_v1.route("/archive/templates/<template_id>:duplicate", methods=["POST"])
+@_no_store_answers
+@write_op("archive.template.duplicate")
+def archive_template_duplicate(template_id):
+    # A new template with its content, named "<name> のコピー" -> 201
+    # {"template": its entry}. 404 for an unknown id, 400 past 100 stored.
+    try:
+        entry = WebOps.duplicate_archive_template(template_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"template": entry}, status=201)
+
+
+@api_v1.route("/archive/jobs/<job_id>/titles:preview", methods=["POST"])
+@_no_store_answers
+@write_op("archive.titles.preview", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_titles_preview(job_id):
+    # {"template": a template as PUT takes it, saved or not} -> {"template":
+    # its name, "sets": [{"no", "title", "description", "chapters"}]}: what
+    # it makes for each of the job's sets as reviewed whose range is at
+    # least 1 s (title / description null for a set with no result), by
+    # the worker's `titles` on this thread (the probe and the run within
+    # 12 s; one at a time: a newer request kills the older one's worker).
+    # 400 (the template), 404, 409 while its analysis runs, when it is not
+    # done, when no set is left (reason "no_sets"), when the worker is from
+    # before `titles` (reason "unsupported") or for the request a newer one
+    # replaced (reason "superseded"); 503 (no worker, no time left, it
+    # failed: reason "worker_failed"). SHELL: it starts the worker. Logged
+    # by key.
+    body = _json_body()
+    try:
+        data = WebOps.preview_archive_titles(job_id, body.get("template"))
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data=data)
+
+
+@api_v1.route("/archive/jobs/<job_id>/thumbs:generate", methods=["POST"])
+@_no_store_answers
+@write_op("archive.thumbs.generate")
+def archive_thumbs_generate(job_id):
+    # Draws the job's confirmed sets' thumbnails (those with a result) one at
+    # a time into <job>/thumbs/<no>.png, with the match thumbnail's settings
+    # and the background archive.thumbnail_background says (ADR-006 A6;
+    # the thumbnails of the sets not drawn again and the copies beside the
+    # clips are removed first) -> {"job"} (its "thumbs" running; the page
+    # follows it, and shows the "files" still drawn as reviewed). 400 when no
+    # confirmed set has a result; 409 while thumbnails are drawn, its
+    # analysis runs or it is not done; 503 headless (no renderer) or while
+    # the app closes.
+    try:
+        job = WebOps.generate_archive_thumbs(job_id)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job})
+
+
+@api_v1.route("/archive/jobs/<job_id>/thumbs/<no>")
+@_no_store_answers
+@api_handler
+def get_archive_thumb(job_id, no):
+    # Set `no`'s thumbnail (a PNG in the job's thumbs/, ADR-006 A6). 404 when
+    # there is none (not drawn, the job's analysis runs); 409 when it cannot
+    # be opened.
+    try:
+        return _archive_file(WebOps.get_archive_thumb(job_id, no),
+                             archive.THUMB_MISSING)
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
 
 
 @api_v1.route("/colors/<feature>", methods=["PATCH"])

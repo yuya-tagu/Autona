@@ -58,6 +58,8 @@ export interface SetsJson {
     games_ocr?: GameOcr[];
     warnings?: string[];
     unused_sets?: SetResult[];
+    // The name of the template the worker made the titles with (A6).
+    template?: string | null;
     sets: SetRow[];
 }
 
@@ -117,6 +119,19 @@ export interface JobExport {
     files?: ClipFile[] | null;
 }
 
+// The job's thumbnails (ADR-006 A6): how far the drawing of the confirmed
+// sets' is ("running"), how this run of the app's last drawing of them ended
+// (or null), and the sets that have one in the job's thumbs/ ("revision"
+// moves with every thumbnail written: the page's cache-buster).
+export interface JobThumbs {
+    state: "running" | "done" | "cancelled" | "failed" | null;
+    done: number;
+    total: number;
+    failed: number[];
+    files: number[];
+    revision: number;
+}
+
 export interface Job extends JobSummary {
     finished_at?: string | null;
     progress?: JobProgress | null;
@@ -126,6 +141,7 @@ export interface Job extends JobSummary {
     exit_code?: number | null;
     has_results?: boolean;
     export?: JobExport | null;
+    thumbs?: JobThumbs | null;
 }
 
 export interface ArchiveStatus {
@@ -137,6 +153,10 @@ export interface ArchiveStatus {
     running_job?: string | null;
     // What it runs: the job's analysis or the export of its sets (A4).
     running_kind?: "analysis" | "export" | null;
+    // What the worker says it can do besides runs ("titles": the template
+    // page's preview, vodsplit V10) and the thumbnails' background (A6).
+    features?: string[];
+    thumbnail_background?: "frame" | "settings";
 }
 
 export type SetFilter = "all" | "matched" | "review";

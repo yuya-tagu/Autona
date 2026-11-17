@@ -516,6 +516,24 @@ class GameAssetCatalog:
             snap.game, snap.assetIndex, codename, skin, assetpack,
             self._locales()[1]))
 
+    def GameCharacterAssets(self, game, codename, skin=0) -> dict:
+        """CharacterAssets' for character `codename` of game `game`, which
+        need not be the loaded one (the archive clipper's thumbnails,
+        ADR-006 A6: a set's characters are its results' game): the loaded
+        game's from its load's index, a scanned one's from its folder. {}
+        for a game not scanned or no codename."""
+        snap = self._current
+        if isinstance(game, str) and game and snap.codename == game:
+            config, index = snap.game, snap.assetIndex
+        else:
+            config = self._games.get(game) if isinstance(game, str) else None
+            index = {}
+        if not isinstance(config, dict) or not isinstance(codename, str) \
+                or not codename:
+            return {}
+        return deep_clone(_CharacterAssets(
+            config, index, codename, skin, None, self._locales()[1]))
+
     def CharacterFromStartGGId(self, smashgg_id, snapshot=None):
         """(en_name, character) for a start.gg character id, or None.
 

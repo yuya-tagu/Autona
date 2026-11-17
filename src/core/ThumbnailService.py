@@ -26,7 +26,11 @@ panel) and it also answers in the headless shell:
   (``render``, injected; headless, AutonaWebOperations refuses first, 503);
 - **a board's thumbnail drawn now** (``DrawBoard``, ADR-005 S4y): the
   synchronous way the desktop's legacy route and SCORE's X post wait on, with
-  the shell's drawer given by the caller.
+  the shell's drawer given by the caller;
+- **a set that is not on a board** (``SetPayload`` / ``RenderSet``, ADR-006
+  A6): the archive clipper's thumbnails, data of the state's shape given by
+  the caller (core/ArchiveThumbnails) and its own background, drawn by the
+  same renderer outside the lane (core/ArchiveJobService runs them).
 
 The render lane is core/RenderLane's, shared with the tournament result
 (ADR-005 S4q), where the rules of a run are. A kept generate that finds no
@@ -226,6 +230,41 @@ def EffectiveBackgroundPath():
 def ResolveTemplateId(settings):
     templateId = (settings or {}).get("template_id", DEFAULT_TEMPLATE_ID)
     return templateId if templateId in TEMPLATE_IDS else DEFAULT_TEMPLATE_ID
+
+
+def _Template(settings):
+    """The template file `settings` names, with its id (the renderer picks
+    the template's page by it). Raises OSError / ValueError."""
+    templateId = ResolveTemplateId(settings)
+    with open(f"{TEMPLATE_DIRECTORY}/{templateId}.json", "rt",
+              encoding="utf-8") as file:
+        template = json.load(file)
+    template["template_id"] = templateId
+    return template
+
+
+def _Config(settings, board):
+    """The payload's config from `settings` (a copy, never the live one,
+    whose games it shares) for board `board`."""
+    config = dict(settings)
+    config["scoreboardNumber"] = board
+    config["background_path"] = ResolveBackgroundPath(config)
+    # The thumbnail's colors (colors.thumbnail.*), falling back to the
+    # tournament's and then the defaults. thumbnail.js injects them as CSS
+    # variables; the per-template JSON keys are untouched.
+    config["theme_color"], config["accent_color"] = GetFeatureColors(
+        FEATURE_THUMBNAIL)
+    return config
+
+
+def _SetColors():
+    """(theme, accent) of a set that is not the board's (SetPayload): the
+    thumbnail's own colors when set, else the defaults (GetFeatureColors
+    would fall back to the tournament's)."""
+    return (SettingsManager.Get(f"colors.{FEATURE_THUMBNAIL}.theme_color",
+                                None) or schema.DEFAULT_THEME_COLOR,
+            SettingsManager.Get(f"colors.{FEATURE_THUMBNAIL}.accent_color",
+                                None) or schema.DEFAULT_ACCENT_COLOR)
 
 
 def _WithBackgroundSource(config):
@@ -644,12 +683,7 @@ class ThumbnailService(RenderLane):
     def _Payload(self, settings, preview, games, board):
         """BuildPayload's, from `settings`: a copy of the config (never the
         live one), which the payload's config shares its games with."""
-        templateId = ResolveTemplateId(settings)
-        with open(f"{TEMPLATE_DIRECTORY}/{templateId}.json", "rt",
-                  encoding="utf-8") as file:
-            template = json.load(file)
-        # The renderer picks the template's page by it.
-        template["template_id"] = templateId
+        template = _Template(settings)
 
         data = None
         try:
@@ -683,15 +717,7 @@ class ThumbnailService(RenderLane):
                 data = self._PlaceholderData(games, deep_get(
                     settings, f"game.{codename}.asset_pack"))
 
-        config = dict(settings)
-        config["scoreboardNumber"] = board
-        config["background_path"] = ResolveBackgroundPath(config)
-        # The thumbnail's colors (colors.thumbnail.*), falling back to the
-        # tournament's and then the defaults. thumbnail.js injects them as CSS
-        # variables; the per-template JSON keys are untouched.
-        config["theme_color"], config["accent_color"] = GetFeatureColors(
-            FEATURE_THUMBNAIL)
-        return data, config, template
+        return data, _Config(settings, board), template
 
     def RenderPayload(self, preview=False, games=None, board=1):
         """What a render is given: BuildPayload's payload with the settings as
@@ -710,6 +736,47 @@ class ThumbnailService(RenderLane):
         settings = _WithBackgroundSource(_StoredConfig())
         data, config, template = self._Payload(settings, preview, games, board)
         return data, _AsRead(config, data), template
+
+    # ── a set that is not the board's (ADR-006 A6) ───────────────────────
+
+    def SetPayload(self, data, background=None):
+        """What a render of a set that is not on a board is given (the
+        archive clipper's thumbnails, ADR-006 A6): (`data`, config,
+        template), `data` of the state's shape (score.1, game,
+        tournamentInfo: core/ArchiveThumbnails.SetData), drawn with the
+        settings as RenderPayload reads them, but nothing of the tournament
+        loaded now (the set's is another): the colors are the thumbnail's
+        own (colors.thumbnail.*) when the operator set them, else the
+        defaults -- not the tournament's --, and the banner background is
+        the default banner. `background` (a file URL) is the background in
+        place of the settings' one; None: the settings'. Reads settings.json
+        and the template; writes nothing. Raises OSError / ValueError when
+        the template cannot be read."""
+        settings = _WithBackgroundSource(_StoredConfig())
+        template = _Template(settings)
+        config = _AsRead(_Config(settings, RENDER_BOARD), data)
+        config["theme_color"], config["accent_color"] = _SetColors()
+        if background is not None:
+            config["background_path"] = background
+        elif config.get("background_source") == BACKGROUND_BANNER:
+            config["background_path"] = DEFAULT_BANNER_PATH
+        return data, config, template
+
+    def RenderSet(self, payload, done):
+        """Start drawing SetPayload's `payload` with the shell's renderer, as
+        a run of the lane does (`render`: done(encode, error) on the main
+        thread, later). Not a run of the lane: thumbnail.render is not
+        published, and the renderer draws one image at a time whoever asks.
+        Raises what the shell's `render` raises (NotAvailable)."""
+        if self._render is None:
+            raise RuntimeError("no renderer")
+        self._render(self.RENDER_KIND, payload, done)
+
+    def Later(self, fn):
+        """`fn` on the main thread once its event loop is back (the
+        injected deferral): a job's thread may not wait for the GUI
+        thread, so a render after a render is started from there."""
+        self._later(fn)
 
     # ── a board's thumbnail, drawn now ───────────────────────────────────
 

@@ -32,6 +32,12 @@ default, never under user_data/: the videos are large and the operator's):
 - ``<work>/<id>/export_request.json`` and ``<work>/<id>/clips/``: the last
   export's request and what the worker cut (the clips, their text files and
   its ``export.json``);
+- ``<work>/<id>/thumbs/<no>.png``: each confirmed set's thumbnail (ADR-006
+  A6, below), with a copy beside its clip when that is certainly its clip,
+  and ``thumbs/thumbs.json``: the result and range each was drawn for and
+  the name of that copy;
+- ``<work>/<id>/templates/NN.json``: the title templates the last run or
+  export was given (ADR-006 A6: a snapshot, written before it starts);
 - ``<work>/downloads/``: the downloaded videos, shared by the jobs (two
   jobs on one VOD download it once).
 
@@ -44,7 +50,11 @@ The run
 -------
 The worker is started with ``run <source> --out <job>/out --download-dir
 <work>/downloads [--results <job>/results.json] [--event=<name>] --no-cut
---thumbs --progress json --cancel-on-stdin``. The source is a URL or a file on a
+--thumbs [--template <job>/templates/NN.json ...] --progress json
+--cancel-on-stdin`` (the title templates the worker can take, as
+core/ArchiveTemplates.py's WorkerTemplates checks and orders them, written
+into the job's templates/ before job.json says it runs: the worker picks the
+one for the event, ADR-006 A6). The source is a URL or a file on a
 drive of this PC (a share's path is refused unread: ``CheckSource``),
 checked again on a resume. Two threads of this service read it
 (``_Start``): one its stdout's JSON lines into the progress held in memory
@@ -75,8 +85,8 @@ A done job's confirmed sets are cut by the worker's ``export``: the same
 run of the worker as the analysis (one at a time with it -- a start of
 either while the other runs is ``busy`` --, the progress, the cancel, the
 shutdown, below the normal priority), started with ``export
-<job>/export_request.json --out <job>/clips --progress json
---cancel-on-stdin``. The request is made from the job's out/sets.json and
+<job>/export_request.json --out <job>/clips [--template
+<job>/templates/NN.json ...] --progress json --cancel-on-stdin``. The request is made from the job's out/sets.json and
 review.json (ArchiveReview.ExportSets) and the video the preview plays
 (``VideoFile``'s rule); the worker reads nothing else (the event and the
 video's id from sets.json, the bracket URL and the date from results.json,
@@ -103,15 +113,64 @@ The download and the frame must resolve under the work folder (links
 followed); the operator's own file may be anywhere on this PC's drives.
 Anything else is ``not_found``.
 
-Threads and locks: the request threads and the two reader threads.
-``_lock`` holds the run in memory, the probe's cache and the swept work
-folders; ``_filesLock`` every read and write of a job.json and a
-review.json (on Windows an os.replace fails while another thread has the
-file open); taken in that
-order. The version probe (up to ``ArchiveWorker.PROBE_TIMEOUT_SECS``) runs
-under its own lock, never under ``_lock``; a request waits for one probe at
-most (the web client's timeout is 10 s). Nothing here touches the
-StateManager or waits for the GUI thread.
+The titles and the thumbnails (ADR-006 A6)
+-------------------------------------------
+The title templates are core/ArchiveTemplates.py's (this service answers
+the v1 routes with its errors as ArchiveErrors). A run and an export are
+given a snapshot of them: ArchiveTemplates.WorkerTemplates (read and
+checked before _lock is taken) written into ``<job>/templates/`` -- the
+worker reads what Autona checked, and a template deleted meanwhile does not
+take a file from under it. ``PreviewTitles`` makes a done job's sets' titles
+with a template the page has not saved: the worker's ``titles`` (vodsplit
+V10, no video work) on the request of every reviewed set (confirmed or not)
+whose range the worker takes (``ArchiveReview.MIN_CLIP`` at least: one
+shorter would refuse the whole request; none left is NO_SETS), on the
+request's thread. The probe and the run end within ``TITLES_DEADLINE_SECS``
+(below the page's wait). Not a run (not counted as the one run), but one at
+a time: a newer preview kills the older one's worker, which answers
+SUPERSEDED. A worker whose version names no ``titles`` is refused
+(UNSUPPORTED) for this alone.
+
+``StartThumbs`` draws a done job's confirmed sets that have a result, one at
+a time, with the match thumbnail's renderer (ThumbnailService.SetPayload /
+RenderSet: the desktop's off-screen view; headless the web operations
+refuse first, 503) into ``<job>/thumbs/<no>.png``. One job's at a time
+(``_thumbRun``; not one of the worker's runs: an export may run meanwhile).
+A set's data is ArchiveThumbnails.SetData (its result and the event); its
+background its frame (FrameFile's file, as a file URL) when
+``archive.thumbnail_background`` is ``frame`` (the default) and it has one,
+else the thumbnail settings' own (ThumbnailService.SetPayload: never the
+tournament's colors or banner -- the archive's tournament is not the one
+loaded now). Before the first render the run removes the thumbnails of the
+sets it does not draw again and every PNG an earlier run put beside a clip
+(thumbs.json names them). The payloads are built on the request's
+thread, the first render started there; each render's ``done`` comes on the
+main thread, the PNG is encoded and written in a job of the task executor,
+and the next render is started from the main thread again
+(ThumbnailService.Later: a job's thread may not wait for it) -- RenderLane's
+way, without its lane. A thumbnail is copied beside its clip
+(``<clip>.png`` in clips/) only when the clip is certainly the set as drawn:
+no export of the job runs, clips/export.json's source is the job's video,
+its clip of that number was exported and is there, and the
+export_request.json it was cut from gave the set the same result and range
+as the review does now. ``Job`` says how far it is (``thumbs``) and which
+thumbnails still show their set as reviewed (``files``: thumbs.json drew it
+for the result and range the review gives it now); ``ThumbFile`` serves
+one (as FrameFile, PNG). The shutdown ends the run at its next set.
+
+Threads and locks: the request threads, the two reader threads, and for
+the thumbnails the main thread and the task executor's. ``_lock`` holds the
+runs in memory, the probe's cache and the swept work folders;
+``_filesLock`` every read and write of a job.json and a review.json (on
+Windows an os.replace fails while another thread has the file open); taken
+in that order. ArchiveTemplates' lock is never taken under them (the
+templates are read before), ``_titlesLock`` (the preview that runs) alone.
+The version probe (up to
+``ArchiveWorker.PROBE_TIMEOUT_SECS``) runs under its own lock, never under
+``_lock``; a request waits for one probe at most (the web client's timeout
+is 10 s). ``_lock`` is never held across a render or the titles' run, nor
+while ``Job`` reads which thumbnails there are.
+Nothing here touches the StateManager or waits for the GUI thread.
 
 Qt-free. Nothing is made, read or written at import or in the constructor:
 the work folder is read and swept at first use, the worker probed at the
@@ -132,10 +191,21 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from . import ArchiveReview, ArchiveWorker
+from . import (ArchiveReview, ArchiveTemplates, ArchiveThumbnails,
+               ArchiveWorker, ImageImport)
+from .GameAssetCatalog import GameAssetCatalog
 from .SettingsManager import SettingsManager
+from .TaskExecutor import TaskExecutor
+from .ThumbnailService import ThumbnailService
 
 WORK_DIR_KEY = "archive.work_dir"
+# Which background a set's thumbnail has (ADR-006 A6): its frame (the
+# worker's _bg.jpg) or the thumbnail settings' own.
+THUMBNAIL_BACKGROUND_KEY = "archive.thumbnail_background"
+FRAME_BACKGROUND = "frame"
+SETTINGS_BACKGROUND = "settings"
+THUMBNAIL_BACKGROUNDS = (FRAME_BACKGROUND, SETTINGS_BACKGROUND)
+SETTINGS_KEYS = frozenset({"work_dir", "thumbnail_background"})
 JOB_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[a-z0-9]{4}")
 JOB_FILE = "job.json"
 RESULTS_FILE = "results.json"
@@ -147,6 +217,18 @@ REVIEW_FILE = ArchiveReview.FILE
 EXPORT_REQUEST_FILE = "export_request.json"
 CLIPS_DIR = "clips"
 EXPORT_FILE = "export.json"
+THUMBS_DIR = "thumbs"
+# What each thumbnail was drawn for and the copy beside its clip (A6).
+THUMBS_FILE = "thumbs.json"
+THUMBS_FORMAT = 1
+# The title templates a run or an export is given (A6: a snapshot).
+TEMPLATES_DIR = "templates"
+# The titles' preview: the probe and the worker's run end within this (the
+# page waits 15 s); the worker is not started with less than the least.
+TITLES_DEADLINE_SECS = 12
+TITLES_LEAST_SECS = 1.5
+# How long a superseded preview's worker is waited for once killed.
+_TITLES_KILL_WAIT_SECS = 2
 
 # What a run of the worker is: a job's analysis (``run``) or the export of
 # its confirmed sets (``export``, ADR-006 A4).
@@ -199,6 +281,17 @@ _VIDEO_SUFFIXES = frozenset(_VIDEO_TYPES) | {
 SET_NUMBER_PATTERN = re.compile(r"[0-9]{1,6}")
 _FRAME_SUFFIXES = (".jpg", ".jpeg")
 FRAME_TYPE = "image/jpeg"
+# A set's thumbnail (ADR-006 A6): thumbs/<no>.png.
+_THUMB_NAME = re.compile(r"([0-9]{1,6})\.png")
+# A copy beside a clip: the clip's name (NN_<title>) with .png.
+_BESIDE_NAME = re.compile(r"[0-9]{2,6}_.+\.png")
+THUMB_TYPE = "image/png"
+# What a run of the thumbnails ended as (Job's ``thumbs.state``; "running"
+# while it runs).
+THUMBS_RUNNING = "running"
+THUMBS_DONE = "done"
+THUMBS_CANCELLED = "cancelled"
+THUMBS_FAILED = "failed"
 
 STALE_NOTE = ("前回の Autona の終了時に実行中だったため、中断として扱いました。"
               "「再開」で続きから実行できます。")
@@ -230,6 +323,16 @@ NOT_DONE = "not_done"
 # The results' preparation (core/ArchiveResults.py, ADR-006 A5): start.gg
 # did not answer (or answered an error) for an event's sets.
 FETCH_FAILED = "fetch_failed"
+# The titles' preview (ADR-006 A6): a worker whose version names no
+# ``titles`` (from before vodsplit V10); one that failed to make them.
+UNSUPPORTED = "unsupported"
+WORKER_FAILED = "worker_failed"
+# A preview with no set the worker takes (none of MIN_CLIP), and one a newer
+# preview replaced (its worker killed).
+NO_SETS = "no_sets"
+SUPERSEDED = "superseded"
+# A title template that could not be written (user_data/).
+SAVE_FAILED = ArchiveTemplates.SAVE_FAILED
 
 # The preview's refusals' words (VideoFile / FrameFile, and v1 when the
 # file is gone by the time it opens it).
@@ -242,6 +345,14 @@ EXPORT_LOCKED_HINT = ("書き出し先のクリップ（前回の書き出し）
                       "上書きできません。閉じてから、もう一度「確定分を書き出し」を押してください。")
 FILE_UNREADABLE = ("ファイルを開けません。ほかのアプリが使っていないか、"
                    "読む権限があるかを確かめてください。")
+THUMB_MISSING = "このセットのサムネイルはありません。"
+TITLES_UNSUPPORTED = ("この版の切り抜きワーカーではタイトルのプレビューは使えません。"
+                      "テンプレートの保存と書き出しは使えます。")
+TITLES_NO_SETS = ("プレビューできるセットがありません"
+                  f"（区間が {ArchiveReview.MIN_CLIP:g} 秒以上のセットがありません）。")
+TITLES_SUPERSEDED = "新しいプレビューの要求に置き換えました。"
+TITLES_OUT_OF_TIME = ("切り抜きワーカーの確認に時間がかかったため、タイトルを作れませんでした。"
+                      "もう一度試してください。")
 
 
 class ArchiveError(Exception):
@@ -576,6 +687,48 @@ class _Run:
         self.stderrThread = None
 
 
+class _ThumbRun:
+    """A job's thumbnails being drawn (StartThumbs), one set at a time:
+    `items` are (no, payload, the set as the review has it now)."""
+
+    def __init__(self, jobId, jobDir, workDir, items):
+        self.jobId = jobId
+        self.jobDir = jobDir
+        self.workDir = workDir
+        self.items = items
+        self.next = 0
+        self.done = 0
+        self.failed = []
+        self.ended = False
+
+
+def _SamePath(left, right):
+    """Whether two paths name one file (links followed, case as the OS
+    compares it)."""
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    return os.path.normcase(os.path.realpath(left)) \
+        == os.path.normcase(os.path.realpath(right))
+
+
+def _ReadJson(path):
+    """The JSON object at `path`, or None."""
+    try:
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _Numbered(items, no):
+    """The item of list `items` whose ``no`` is `no`, or None."""
+    if not isinstance(items, list):
+        return None
+    return next((item for item in items if isinstance(item, dict)
+                 and type(item.get("no")) is int and item["no"] == no), None)
+
+
 class ArchiveJobService:
     instance = None
 
@@ -594,6 +747,17 @@ class ArchiveJobService:
         self._run = None
         self._swept = set()
         self._stopping = False
+        # The thumbnails being drawn (one job's at a time), how the last run
+        # of each job ended, and a number that moves with every thumbnail
+        # written (the page's cache buster).
+        self._thumbRun = None
+        self._thumbsLast = {}
+        self._thumbRevision = 0
+        # The titles' preview that runs (one at a time, A6): its number and
+        # its worker's process (under _titlesLock).
+        self._titlesLock = threading.Lock()
+        self._titlesTicket = 0
+        self._titlesProcess = None
 
     # ── the work folder ────────────────────────────────────────────────
 
@@ -607,21 +771,81 @@ class ArchiveJobService:
         return DefaultWorkDir()
 
     def SetWorkDir(self, value):
-        """Save the work folder (made when it is not there). Refused while
-        a job runs: the job's folder is under the old one. Raises
-        ArchiveError, or SettingsUnreadable (nothing saved)."""
-        path = CheckWorkDir(value)
+        """Save the work folder: UpdateSettings' ``work_dir`` alone."""
+        self.UpdateSettings({"work_dir": value})
+
+    def _PrepareWorkDir(self, path):
+        """Make work folder `path` (CheckWorkDir's) when it is not there,
+        under _lock. Refused while a job runs: the job's folder is under the
+        old one. Raises ArchiveError."""
+        if self._run is not None:
+            raise ArchiveError(BUSY, "切り抜きの実行中は作業フォルダを変えられません。")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as error:
+            raise ArchiveError(INVALID, f"作業フォルダを作れません: {error}")
+        if not os.path.isdir(path):
+            raise ArchiveError(INVALID, "作業フォルダのパスにはファイルがあります。")
+
+    def ThumbnailBackground(self):
+        """What a set's thumbnail is drawn on (FRAME_BACKGROUND, the
+        default, or SETTINGS_BACKGROUND)."""
+        value = SettingsManager.Get(THUMBNAIL_BACKGROUND_KEY)
+        return value if value in THUMBNAIL_BACKGROUNDS else FRAME_BACKGROUND
+
+    def UpdateSettings(self, body):
+        """Save the page's settings, `body` {"work_dir"?,
+        "thumbnail_background"?} (one at least, nothing else): both checked,
+        then saved in one write (neither when one is refused or the write
+        fails). The work folder is made when it is not there, and refused
+        while a job runs. Raises ArchiveError, or SettingsUnreadable."""
+        if not isinstance(body, dict) or not body \
+                or not set(body) <= SETTINGS_KEYS:
+            raise ArchiveError(INVALID, (
+                "変える設定（work_dir / thumbnail_background）を指定してください。"))
+        background = body.get("thumbnail_background")
+        if "thumbnail_background" in body \
+                and background not in THUMBNAIL_BACKGROUNDS:
+            raise ArchiveError(INVALID, "サムネイルの背景の選び方が違います。")
+        path = CheckWorkDir(body["work_dir"]) if "work_dir" in body else None
+        changes = []
         with self._lock:
-            if self._run is not None:
-                raise ArchiveError(BUSY, "切り抜きの実行中は作業フォルダを変えられません。")
-            try:
-                os.makedirs(path, exist_ok=True)
-            except OSError as error:
-                raise ArchiveError(INVALID, f"作業フォルダを作れません: {error}")
-            if not os.path.isdir(path):
-                raise ArchiveError(INVALID, "作業フォルダのパスにはファイルがあります。")
-            SettingsManager.SetMany([(WORK_DIR_KEY, path)])
-        logger.info("Archive: the work folder was changed")
+            if path is not None:
+                self._PrepareWorkDir(path)
+                changes.append((WORK_DIR_KEY, path))
+            if "thumbnail_background" in body:
+                changes.append((THUMBNAIL_BACKGROUND_KEY, background))
+            SettingsManager.SetMany(changes)
+        if path is not None:
+            logger.info("Archive: the work folder was changed")
+        if "thumbnail_background" in body:
+            logger.info(f"Archive: the thumbnails' background is "
+                        f"{background}")
+
+    # ── the title templates (ADR-006 A6) ───────────────────────────────
+
+    @staticmethod
+    def _Templates(call, *args):
+        """ArchiveTemplates' `call`, its refusal as an ArchiveError."""
+        try:
+            return call(*args)
+        except ArchiveTemplates.TemplateError as error:
+            raise ArchiveError(error.code, error.message) from None
+
+    def Templates(self):
+        return self._Templates(ArchiveTemplates.List)
+
+    def Template(self, templateId):
+        return self._Templates(ArchiveTemplates.Get, templateId)
+
+    def SaveTemplate(self, templateId, template):
+        return self._Templates(ArchiveTemplates.Save, templateId, template)
+
+    def DuplicateTemplate(self, templateId):
+        return self._Templates(ArchiveTemplates.Duplicate, templateId)
+
+    def DeleteTemplate(self, templateId):
+        return self._Templates(ArchiveTemplates.Delete, templateId)
 
     def _JobDir(self, jobId, workDir=None):
         """The folder of job `jobId` under the work folder. Raises
@@ -783,18 +1007,21 @@ class ArchiveJobService:
     # ── what the page reads ────────────────────────────────────────────
 
     def Status(self, refresh=False):
-        """{available, version, format, reason, work_dir, running_job,
-        running_kind (ANALYSIS / EXPORT, or None)}. Probes the worker on
-        this thread the first time (and when `refresh`)."""
+        """{available, version, format, features (what the worker says it
+        does beyond its format: "titles", ADR-006 A6), reason, work_dir,
+        thumbnail_background, running_job, running_kind (ANALYSIS / EXPORT,
+        or None)}. Probes the worker on this thread the first time (and when
+        `refresh`)."""
         probe = self._Probe(refresh=refresh, since=self._probeCount)
         with self._lock:
             run = self._run
             running = run.record["id"] if run is not None else None
             kind = run.kind if run is not None else None
         return {"available": probe.available, "version": probe.version,
-                "format": probe.format, "reason": probe.reason,
-                "work_dir": self.WorkDir(), "running_job": running,
-                "running_kind": kind}
+                "format": probe.format, "features": list(probe.features),
+                "reason": probe.reason, "work_dir": self.WorkDir(),
+                "thumbnail_background": self.ThumbnailBackground(),
+                "running_job": running, "running_kind": kind}
 
     def Jobs(self):
         """Every job of the work folder, newest first (JobSummary)."""
@@ -821,21 +1048,24 @@ class ArchiveJobService:
         """(Job, the parsed out/sets.json or None). The sets are None while
         the job's analysis runs: a resumed job's sets.json is the previous
         run's until the worker writes its own at the end (an export does not
-        touch it). Raises ArchiveError(NOT_FOUND)."""
+        touch it). The Job has ``thumbs`` too (ADR-006 A6: ``_ThumbsState``
+        and ``files``, ``_ThumbFiles``: read outside _lock). Raises
+        ArchiveError(NOT_FOUND)."""
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
             self._Sweep(workDir)
             view = self._RunView(jobId)
-            if view is not None:
-                if self._run.kind == ANALYSIS:
-                    return view, None
-            else:
+            analysing = view is not None and self._run.kind == ANALYSIS
+            if view is None:
                 record = self._DiskRecord(jobDir, jobId)
                 if record is None:
                     raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
                 view = _View(record, export=self._ExportView(record, jobDir))
-        return view, self._ReadSets(jobDir)
+            view["thumbs"] = self._ThumbsState(jobId)
+        sets = None if analysing else self._ReadSets(jobDir)
+        view["thumbs"]["files"] = self._ThumbFiles(jobDir, jobId, sets)
+        return view, sets
 
     def _DiskRecord(self, jobDir, jobId):
         """Job `jobId`'s job.json when it is not the running job (under
@@ -988,22 +1218,46 @@ class ArchiveJobService:
         _workDir, jobDir, _record, running = self._Served(jobId)
         if running:
             raise missing
-        sets = (self._ReadSets(jobDir) or {}).get("sets")
-        row = next((item for item in sets if isinstance(item, dict)
-                    and type(item.get("no")) is int
-                    and item["no"] == int(number)), None) \
-            if isinstance(sets, list) else None
+        path = self._FramePath(jobDir, self._ReadSets(jobDir), int(number))
+        if path is None:
+            raise missing
+        return path, FRAME_TYPE
+
+    @staticmethod
+    def _FramePath(jobDir, sets, number):
+        """The file of set `number`'s frame sets.json (`sets`) names in the
+        job's out/ (FrameFile's checks), or None."""
+        row = _Numbered((sets or {}).get("sets"), number)
         name = _FileName(row.get("thumb")) if row is not None else None
         if name is None or not name.lower().endswith(_FRAME_SUFFIXES):
-            raise missing
+            return None
         # Resolved (links followed) inside this job's out/, itself inside
         # the job's folder: not another job's file, not a download.
         out = os.path.join(jobDir, OUT_DIR)
         path = os.path.join(out, name)
         if (not _Under(jobDir, out) or not _Under(out, path)
                 or not os.path.isfile(path)):
+            return None
+        return path
+
+    def ThumbFile(self, jobId, number):
+        """(path, type) of set `number`'s thumbnail (thumbs/<no>.png, ADR-006
+        A6), as FrameFile serves a frame: none while the job's analysis
+        runs, nor one resolving outside the job's thumbs/. Raises
+        ArchiveError(NOT_FOUND)."""
+        missing = ArchiveError(NOT_FOUND, THUMB_MISSING)
+        if not isinstance(number, str) \
+                or not SET_NUMBER_PATTERN.fullmatch(number):
             raise missing
-        return path, FRAME_TYPE
+        _workDir, jobDir, _record, running = self._Served(jobId)
+        if running:
+            raise missing
+        folder = os.path.join(jobDir, THUMBS_DIR)
+        path = os.path.join(folder, f"{int(number)}.png")
+        if (not _Under(jobDir, folder) or not _Under(folder, path)
+                or not os.path.isfile(path)):
+            raise missing
+        return path, THUMB_TYPE
 
     @staticmethod
     def _ReadSets(jobDir):
@@ -1173,6 +1427,7 @@ class ArchiveJobService:
         # The request's refusals come before the probe (up to 8 s).
         self._ExportRequest(workDir, jobDir, record)
         probe = self._Available()
+        templates = ArchiveTemplates.WorkerTemplates()
         with self._lock:
             self._Refuse(export=True)
             record = self._DiskRecord(jobDir, jobId)
@@ -1183,18 +1438,522 @@ class ArchiveJobService:
                 "state": "running", "started_at": _Now(), "finished_at": None,
                 "exit_code": None, "error": None, "warnings": [], "logs": [],
                 "progress": None, "clips": None, "skipped": None}
+            run = _Run(record, jobDir, workDir, kind=EXPORT)
             try:
                 os.makedirs(os.path.join(jobDir, CLIPS_DIR), exist_ok=True)
                 self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
+                # Before job.json says it runs: what fails here leaves no
+                # export that runs without a worker.
+                arguments = self._Arguments(
+                    run, self._WriteTemplates(jobDir, templates))
                 self._WriteRecord(jobDir, record)
             except OSError as error:
                 raise ArchiveError(WORK_DIR_UNUSABLE,
                                    f"作業フォルダに書けません: {error}")
             logger.info(f"Archive: job {jobId} export started "
                         f"({len(request['sets'])} sets)")
-            run = _Run(record, jobDir, workDir, kind=EXPORT)
-            self._Start(run, probe)
+            self._Start(run, probe, arguments)
             return self._RunView(jobId)
+
+    # ── the titles' preview (ADR-006 A6) ───────────────────────────────
+
+    def PreviewTitles(self, jobId, template):
+        """The titles `template` (a template the page has, saved or not:
+        ArchiveTemplates.Check) makes for job `jobId`'s sets as reviewed,
+        every one (confirmed or not) -> {"template": its name, "sets": [{no,
+        title, description, chapters}]} (title / description None for a set
+        with no result; chapters: how many chapter lines the description
+        got, 0 when YouTube would ignore them). Only the sets whose range
+        the worker takes (``_TitlesRequest``). The worker's ``titles`` on
+        this thread, the probe and the run within TITLES_DEADLINE_SECS; one
+        at a time (a newer preview kills this one's worker). Raises
+        ArchiveError: INVALID (the template), NOT_FOUND, STOPPING, BUSY (its
+        analysis runs), NOT_DONE, UNREADABLE, NO_SETS, UNAVAILABLE (no
+        worker, or no time left: it ran past it, or the probe took it),
+        UNSUPPORTED (a worker from before ``titles``), SUPERSEDED,
+        WORKER_FAILED."""
+        began = time.monotonic()
+        try:
+            checked = ArchiveTemplates.Check(template)
+        except ArchiveTemplates.TemplateError as error:
+            raise ArchiveError(INVALID, error.message) from None
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            if self._stopping:
+                raise ArchiveError(STOPPING, "Autona の終了中です。")
+            self._Sweep(workDir)
+            record, kind = self._CurrentRecord(jobDir, jobId)
+        if kind == ANALYSIS:
+            raise ArchiveError(BUSY, "このジョブは解析の実行中です。")
+        if record["state"] != "done":
+            raise ArchiveError(NOT_DONE, "解析が完了したジョブだけプレビューできます。")
+        request = self._TitlesRequest(jobDir, jobId)
+        probe = self._Available()
+        if ArchiveWorker.TITLES_FEATURE not in probe.features:
+            raise ArchiveError(UNSUPPORTED, TITLES_UNSUPPORTED)
+        # What is left of the deadline once the probe (up to 8 s) is done:
+        # the page gives up at 15 s.
+        left = TITLES_DEADLINE_SECS - (time.monotonic() - began)
+        if left < TITLES_LEAST_SECS:
+            raise ArchiveError(UNAVAILABLE, TITLES_OUT_OF_TIME)
+        timeout = round(min(ArchiveWorker.TITLES_TIMEOUT_SECS, left), 1)
+        # The worker selects by match: this one is the template asked for.
+        chosen = dict(checked, match=None)
+        ticket = self._ClaimTitles()
+        try:
+            answer = self._RunTitles(probe, request, chosen, ticket, timeout)
+        finally:
+            with self._titlesLock:
+                if ticket == self._titlesTicket:
+                    self._titlesProcess = None
+        rows = []
+        for row in answer.get("sets") if isinstance(
+                answer.get("sets"), list) else []:
+            if not isinstance(row, dict) or type(row.get("no")) is not int:
+                continue
+            rows.append({"no": row["no"], "title": _Text(row.get("title")),
+                         "description": _Text(row.get("description")),
+                         "chapters": _Count(row.get("chapters")) or 0})
+        return {"template": checked["name"], "sets": rows}
+
+    def _TitlesRequest(self, jobDir, jobId):
+        """The titles' request of done job `jobId`: its sets as reviewed
+        (ArchiveReview.ReviewedSets), only those whose range the worker
+        takes -- vodsplit's validate_edits refuses the whole request for one
+        shorter than MIN_CLIP (the review keeps sets.json's own range,
+        which may be) --, with what ``run`` gave the titles. Raises
+        ArchiveError: UNREADABLE, NO_SETS (none left)."""
+        sets = self._DoneSets(jobDir, jobId)
+        review = self._ReadReview(jobDir, jobId, sets)
+        rows = [item for item in ArchiveReview.ReviewedSets(review, sets)
+                if item["end"] - item["start"] >= ArchiveReview.MIN_CLIP]
+        if not rows:
+            raise ArchiveError(NO_SETS, TITLES_NO_SETS)
+        results = self._ReadResults(jobDir) or {}
+        return {"source": None,
+                "source_id": _Text(sets.get("source_id")),
+                "event": _Text(sets.get("event")),
+                "bracket_url": _Text(results.get("bracket_url")),
+                "date": _Text(results.get("date")),
+                "sets": rows}
+
+    def _ClaimTitles(self):
+        """Make this preview the one that runs: the older one's worker is
+        killed (its request answers SUPERSEDED) and waited for a moment, so
+        two do not run at once -> this preview's ticket. Raises
+        ArchiveError(STOPPING)."""
+        with self._titlesLock:
+            if self._stopping:
+                raise ArchiveError(STOPPING, "Autona の終了中です。")
+            self._titlesTicket += 1
+            ticket = self._titlesTicket
+            older, self._titlesProcess = self._titlesProcess, None
+        if older is not None:
+            logger.info("Archive: a newer titles' preview replaces the "
+                        "running one")
+            ArchiveWorker.StopTitles(older, _TITLES_KILL_WAIT_SECS)
+        return ticket
+
+    def _RunTitles(self, probe, request, template, ticket, timeout):
+        """The worker's ``titles`` of `request` with `template` (written to
+        a temporary folder) for the preview of `ticket` -> its done line.
+        Raises ArchiveError."""
+        def started(process):
+            with self._titlesLock:
+                if ticket == self._titlesTicket:
+                    self._titlesProcess = process
+                    return
+            # A newer preview, or the shutdown, came first.
+            ArchiveWorker.StopTitles(process)
+
+        with tempfile.TemporaryDirectory(prefix="autona-titles-") as folder:
+            requestPath = os.path.join(folder, "request.json")
+            templatePath = os.path.join(folder, "template.json")
+            try:
+                for path, content in ((requestPath, request),
+                                      (templatePath, template)):
+                    with open(path, "w", encoding="utf-8") as file:
+                        json.dump(content, file, ensure_ascii=False)
+            except OSError as error:
+                raise ArchiveError(WORKER_FAILED, (
+                    f"タイトルのプレビューを用意できません: {error}")) from None
+            try:
+                return ArchiveWorker.RunTitles(
+                    probe.command, requestPath, templatePath,
+                    timeout=timeout, started=started)
+            except ArchiveWorker.TitlesError as error:
+                with self._titlesLock:
+                    replaced = ticket != self._titlesTicket
+                if replaced and self._stopping:
+                    raise ArchiveError(STOPPING, "Autona の終了中です。") \
+                        from None
+                if replaced:
+                    raise ArchiveError(SUPERSEDED, TITLES_SUPERSEDED) \
+                        from None
+                raise ArchiveError(UNAVAILABLE if error.timeout
+                                   else WORKER_FAILED, error.message) from None
+
+    # ── the thumbnails (ADR-006 A6) ────────────────────────────────────
+
+    def _RefuseThumbs(self, kind):
+        """Refuse thumbnails while the app closes, other thumbnails are
+        drawn or the job's analysis runs (`kind`: _CurrentRecord's; under
+        _lock)."""
+        if self._stopping:
+            raise ArchiveError(STOPPING, "Autona の終了中です。")
+        if self._thumbRun is not None:
+            raise ArchiveError(BUSY, (
+                "サムネイルを作っているところです。終わってからもう一度押してください。"))
+        if kind == ANALYSIS:
+            raise ArchiveError(BUSY, "このジョブは解析の実行中です。")
+
+    def StartThumbs(self, jobId):
+        """Draw job `jobId`'s confirmed sets' thumbnails (the ones with a
+        result) one at a time into <job>/thumbs/<no>.png -> its Job (its
+        ``thumbs`` running). Raises ArchiveError: NOT_FOUND, STOPPING, BUSY,
+        NOT_DONE, UNREADABLE, INVALID (no confirmed set with a result),
+        UNAVAILABLE (the thumbnail's template cannot be read),
+        WORK_DIR_UNUSABLE; and what the shell's renderer raises when the
+        first render cannot start (NotAvailable: the app is closing)."""
+        workDir = self.WorkDir()
+        jobDir = self._JobDir(jobId, workDir)
+        with self._lock:
+            self._Sweep(workDir)
+            record, kind = self._CurrentRecord(jobDir, jobId)
+            self._RefuseThumbs(kind)
+        if record["state"] != "done":
+            raise ArchiveError(NOT_DONE, "解析が完了したジョブだけサムネイルを作れます。")
+        sets = self._DoneSets(jobDir, jobId)
+        review = self._ReadReview(jobDir, jobId, sets)
+        chosen = [item for item in ArchiveReview.ExportSets(review, sets)
+                  if item["set"] is not None]
+        if not chosen:
+            raise ArchiveError(INVALID, (
+                "結果のある確定したセットがありません。セットを確定してください。"))
+        thumbnails = ThumbnailService.instance
+        if thumbnails is None:
+            raise ArchiveError(UNAVAILABLE, "サムネイルを作れません。")
+        useFrame = self.ThumbnailBackground() == FRAME_BACKGROUND
+        event = _Text(sets.get("event"))
+        date = _Text((self._ReadResults(jobDir) or {}).get("date"))
+        cache = {}
+        items = []
+        try:
+            for item in chosen:
+                frame = self._FramePath(jobDir, sets, item["no"]) \
+                    if useFrame else None
+                data = ArchiveThumbnails.SetData(
+                    item["set"], event, GameAssetCatalog.instance,
+                    date=date, cache=cache)
+                # A file URL: the frame's name may hold "#" or spaces.
+                background = Path(os.path.realpath(frame)).as_uri() \
+                    if frame is not None else None
+                items.append((item["no"],
+                              thumbnails.SetPayload(data, background), item))
+        except (OSError, ValueError) as error:
+            logger.warning(f"Archive: job {jobId}'s thumbnails could not be "
+                           f"prepared: {error}")
+            raise ArchiveError(UNAVAILABLE, (
+                "サムネイルのテンプレートを読めません。")) from None
+        try:
+            os.makedirs(os.path.join(jobDir, THUMBS_DIR), exist_ok=True)
+        except OSError as error:
+            raise ArchiveError(WORK_DIR_UNUSABLE,
+                               f"作業フォルダに書けません: {error}") from None
+        run = _ThumbRun(jobId, jobDir, workDir, items)
+        with self._lock:
+            _record, kind = self._CurrentRecord(jobDir, jobId)
+            self._RefuseThumbs(kind)
+            self._thumbRun = run
+            self._thumbsLast.pop(jobId, None)
+        logger.info(f"Archive: job {jobId} thumbnails started "
+                    f"({len(items)} sets)")
+        self._ClearThumbs(run)
+        self._NextThumb(run, first=True)
+        return self.Job(jobId)[0]
+
+    def _NextThumb(self, run, first=False):
+        """Start drawing `run`'s next set, or end it when there is none (or
+        the app closes). The first on the request's thread (what the
+        renderer raises goes to it), the next ones on the main thread."""
+        with self._lock:
+            if run.ended:
+                return
+            if self._stopping or run.next >= len(run.items):
+                self._EndThumbs(run, THUMBS_CANCELLED if self._stopping
+                                else THUMBS_DONE)
+                return
+            no, payload, _item = run.items[run.next]
+            run.next += 1
+        # Taken once, by whichever comes first of the renderer's answer and
+        # its raising (as RenderLane's run).
+        answer = threading.Lock()
+
+        def done(encode, error):
+            if answer.acquire(blocking=False):
+                self._ThumbRendered(run, no, encode, error)
+
+        try:
+            ThumbnailService.instance.RenderSet(payload, done)
+        except BaseException:
+            if answer.acquire(blocking=False):
+                with self._lock:
+                    run.failed.append(no)
+                    self._EndThumbs(run, THUMBS_CANCELLED if self._stopping
+                                    else THUMBS_FAILED)
+            if first:
+                raise
+            logger.opt(exception=True).warning(
+                f"Archive: job {run.jobId}: a thumbnail render could not "
+                f"start")
+
+    def _ThumbRendered(self, run, no, encode, error):
+        """The renderer drew set `no` (on the main thread): the PNG is a
+        job's to encode and write."""
+        if encode is None:
+            logger.warning(f"Archive: job {run.jobId}: the thumbnail of set "
+                           f"{no} could not be drawn: {error}")
+            self._ThumbSaved(run, no, False)
+            return
+        try:
+            executor = TaskExecutor.instance
+            future = executor.submit(
+                self._SaveThumb, run, no, encode, executor.stopping,
+                task_name="archive thumbnail save",
+                then=lambda saved: self._ThumbSaved(run, no, saved),
+                on_error=lambda failure: self._ThumbFailed(run, no, failure))
+        except Exception as failure:
+            self._ThumbFailed(run, no, failure)
+            return
+        # A job the shutdown cancels runs neither `then` nor `on_error`.
+        future.add_done_callback(
+            lambda finished: finished.cancelled() and self._ThumbSaved(
+                run, no, None))
+
+    def _SaveThumb(self, run, no, encode, stopping):
+        """The job: True once thumbs/<no>.png is written, False when nothing
+        was drawn, None when the executor stops first. Raises OSError."""
+        if stopping.is_set():
+            return None
+        png = encode("PNG")
+        if not png:
+            return False
+        ImageImport.WriteFile(
+            os.path.join(run.jobDir, THUMBS_DIR, f"{no}.png"), png)
+        item = next(entry for number, _payload, entry in run.items
+                    if number == no)
+        target = self._ThumbBesideClip(run, item)
+        if target is not None:
+            try:
+                ImageImport.WriteFile(target, png)
+            except OSError:
+                logger.opt(exception=True).warning(
+                    f"Archive: job {run.jobId}: the thumbnail of set {no} "
+                    f"could not be copied beside its clip")
+                target = None
+        # What it was drawn for (Job shows it while the review still gives
+        # the set this result and range) and the copy (the next run removes
+        # it: a later export may name the clip otherwise).
+        drawn = self._ReadThumbsIndex(run.jobDir)
+        drawn[str(no)] = {
+            "start": item["start"], "end": item["end"], "set": item["set"],
+            "beside": os.path.basename(target) if target else None}
+        self._WriteThumbsIndex(run.jobDir, drawn)
+        return True
+
+    def _ThumbBesideClip(self, run, item):
+        """Where set `item`'s thumbnail goes beside its clip
+        (``<clip>.png`` in clips/), or None unless that clip is certainly
+        the set as drawn: no export of the job runs, clips/export.json's
+        source is the job's video, its clip of that number was exported and
+        is there (``NN_<title>.mp4``), and export_request.json gave the set
+        the result and range the review gives it now."""
+        with self._lock:
+            current = self._run
+            if current is not None and current.kind == EXPORT \
+                    and current.record["id"] == run.jobId:
+                return None
+        no = item["no"]
+        clips = os.path.join(run.jobDir, CLIPS_DIR)
+        listed = _ReadJson(os.path.join(clips, EXPORT_FILE))
+        record = self._ReadRecord(run.jobDir, run.jobId)
+        if listed is None or record is None:
+            return None
+        try:
+            video = self._VideoPath(run.workDir, run.jobDir, record)
+        except ArchiveError:
+            return None
+        if not _SamePath(listed.get("source"), video):
+            return None
+        clip = _Numbered(listed.get("clips"), no)
+        name = _FileName(clip.get("file")) if clip is not None else None
+        if clip is None or clip.get("exported") is not True or name is None \
+                or not re.fullmatch(re.escape(f"{no:02d}") + r"_.+\.mp4",
+                                    name):
+            return None
+        path = os.path.join(clips, name)
+        if not _Under(run.jobDir, clips) or not _Under(clips, path) \
+                or not os.path.isfile(path):
+            return None
+        asked = _Numbered((_ReadJson(os.path.join(
+            run.jobDir, EXPORT_REQUEST_FILE)) or {}).get("sets"), no)
+        if asked is None or asked.get("start") != item["start"] \
+                or asked.get("end") != item["end"] \
+                or ArchiveReview.ResultKey(asked.get("set")) \
+                != ArchiveReview.ResultKey(item["set"]):
+            return None
+        return os.path.splitext(path)[0] + ".png"
+
+    def _ThumbFailed(self, run, no, failure):
+        logger.opt(exception=failure).warning(
+            f"Archive: job {run.jobId}: the thumbnail of set {no} could not "
+            f"be saved")
+        self._ThumbSaved(run, no, False)
+
+    def _ThumbSaved(self, run, no, saved):
+        """Set `no` is done (`saved`: True written, False failed, None the
+        executor stopped): the next one is started from the main thread, or
+        the run ends."""
+        with self._lock:
+            if run.ended:
+                return
+            if saved:
+                run.done += 1
+                self._thumbRevision += 1
+            elif saved is False:
+                run.failed.append(no)
+            if saved is None or self._stopping:
+                self._EndThumbs(run, THUMBS_CANCELLED)
+                return
+            if run.next >= len(run.items):
+                self._EndThumbs(run, THUMBS_DONE)
+                return
+        try:
+            ThumbnailService.instance.Later(lambda: self._NextThumb(run))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"Archive: job {run.jobId}: the next thumbnail could not be "
+                f"queued")
+            with self._lock:
+                self._EndThumbs(run, THUMBS_FAILED)
+
+    def _EndThumbs(self, run, state):
+        """End `run` as `state` (under _lock)."""
+        run.ended = True
+        if self._thumbRun is run:
+            self._thumbRun = None
+        self._thumbsLast[run.jobId] = {
+            "state": state, "done": run.done, "total": len(run.items),
+            "failed": sorted(run.failed)}
+        logger.info(f"Archive: job {run.jobId} thumbnails {state} "
+                    f"({run.done} of {len(run.items)} written, "
+                    f"{len(run.failed)} failed)")
+
+    def _ThumbsState(self, jobId):
+        """How far job `jobId`'s thumbnails are (under _lock): {"state"
+        (THUMBS_RUNNING while they are drawn, how this process' last run of
+        them ended, or None), "done", "total", "failed" (the sets'
+        numbers), "revision" (moves with every thumbnail written)}. Job
+        adds "files" (``_ThumbFiles``)."""
+        run = self._thumbRun
+        if run is not None and run.jobId == jobId:
+            view = {"state": THUMBS_RUNNING, "done": run.done,
+                    "total": len(run.items), "failed": sorted(run.failed)}
+        else:
+            view = dict(self._thumbsLast.get(jobId) or {
+                "state": None, "done": 0, "total": 0, "failed": []})
+        view["revision"] = self._thumbRevision
+        return view
+
+    def _ThumbFiles(self, jobDir, jobId, sets):
+        """The numbers of the sets whose thumbnail (thumbs/<no>.png) still
+        shows them as reviewed: thumbs.json drew it for the result and the
+        range the review gives the set now. [] without `sets` (the job's
+        analysis runs, or no sets.json) or a review that cannot be read."""
+        drawn = self._ReadThumbsIndex(jobDir) if sets is not None else {}
+        if not drawn:
+            return []
+        try:
+            review = self._ReadReview(jobDir, jobId, sets)
+        except ArchiveError:
+            return []
+        folder = os.path.join(jobDir, THUMBS_DIR)
+        files = []
+        for item in ArchiveReview.ReviewedSets(review, sets):
+            entry = drawn.get(str(item["no"]))
+            if entry is not None and entry.get("start") == item["start"] \
+                    and entry.get("end") == item["end"] \
+                    and ArchiveReview.ResultKey(entry.get("set")) \
+                    == ArchiveReview.ResultKey(item["set"]) \
+                    and os.path.isfile(os.path.join(folder,
+                                                    f"{item['no']}.png")):
+                files.append(item["no"])
+        return sorted(files)
+
+    def _ReadThumbsIndex(self, jobDir):
+        """thumbs/thumbs.json's {no: {"start", "end", "set", "beside"}}, or
+        {} (none, or not of THUMBS_FORMAT)."""
+        with self._filesLock:
+            data = _ReadJson(os.path.join(jobDir, THUMBS_DIR, THUMBS_FILE))
+        drawn = data.get("sets") if data is not None \
+            and data.get("format") == THUMBS_FORMAT else None
+        if not isinstance(drawn, dict):
+            return {}
+        return {key: entry for key, entry in drawn.items()
+                if SET_NUMBER_PATTERN.fullmatch(key)
+                and isinstance(entry, dict)}
+
+    def _WriteThumbsIndex(self, jobDir, drawn):
+        """Write thumbs/thumbs.json whole. Raises OSError."""
+        self._WriteFile(os.path.join(jobDir, THUMBS_DIR), THUMBS_FILE,
+                        {"format": THUMBS_FORMAT, "sets": drawn})
+
+    def _ClearThumbs(self, run):
+        """Before `run`'s first render: remove the thumbnails of the sets it
+        does not draw again (no longer confirmed, or without a result) and
+        every PNG an earlier run put beside a clip (thumbs.json names them:
+        an export since may have named the clip otherwise); what
+        thumbs.json says of the sets drawn again stays until each is. Never
+        raises: what cannot be removed is logged (Job shows no thumbnail
+        thumbs.json does not name)."""
+        drawn = self._ReadThumbsIndex(run.jobDir)
+        clips = os.path.join(run.jobDir, CLIPS_DIR)
+        for entry in drawn.values():
+            name = _FileName(entry.get("beside"))
+            if name is None or not _BESIDE_NAME.fullmatch(name):
+                continue
+            path = os.path.join(clips, name)
+            if _Under(run.jobDir, clips) and _Under(clips, path) \
+                    and os.path.isfile(path):
+                self._RemoveThumb(run, path)
+        numbers = {no for no, _payload, _item in run.items}
+        folder = os.path.join(run.jobDir, THUMBS_DIR)
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            names = []
+        for name in names:
+            found = _THUMB_NAME.fullmatch(name)
+            if found and int(found.group(1)) not in numbers:
+                self._RemoveThumb(run, os.path.join(folder, name))
+        kept = {key: dict(entry, beside=None) for key, entry in drawn.items()
+                if int(key) in numbers}
+        try:
+            self._WriteThumbsIndex(run.jobDir, kept)
+        except OSError:
+            logger.opt(exception=True).warning(
+                f"Archive: job {run.jobId}: {THUMBS_FILE} could not be "
+                f"written")
+
+    @staticmethod
+    def _RemoveThumb(run, path):
+        try:
+            os.remove(path)
+        except OSError:
+            logger.opt(exception=True).warning(
+                f"Archive: job {run.jobId}: an old thumbnail could not be "
+                f"removed ({os.path.basename(path)})")
 
     # ── starting, cancelling, resuming ─────────────────────────────────
 
@@ -1206,6 +1965,7 @@ class ArchiveJobService:
         results = CheckResults(results)
         event = CheckEvent(event)
         probe = self._Available()
+        templates = ArchiveTemplates.WorkerTemplates()
         with self._lock:
             self._Refuse()
             workDir = self.WorkDir()
@@ -1224,6 +1984,7 @@ class ArchiveJobService:
                 "error": None, "warnings": [], "logs": [], "progress": None,
                 "worker_version": probe.version, "export": None,
             }
+            run = _Run(record, jobDir, workDir)
             try:
                 os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
                 if results is not None:
@@ -1231,13 +1992,16 @@ class ArchiveJobService:
                               encoding="utf-8") as file:
                         json.dump(results, file, ensure_ascii=False,
                                   indent=2)
+                # Before job.json says it runs: what fails here leaves no
+                # job that runs without a worker.
+                arguments = self._Arguments(
+                    run, self._WriteTemplates(jobDir, templates))
                 self._WriteRecord(jobDir, record)
             except OSError as error:
                 raise ArchiveError(WORK_DIR_UNUSABLE,
                                    f"作業フォルダに書けません: {error}")
             logger.info(f"Archive: job {jobId} created")
-            run = _Run(record, jobDir, workDir)
-            self._Start(run, probe)
+            self._Start(run, probe, arguments)
             return self._RunView(jobId)
 
     def Resume(self, jobId):
@@ -1258,6 +2022,7 @@ class ArchiveJobService:
             raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
         self._ResumableSource(record)
         probe = self._Available()
+        templates = ArchiveTemplates.WorkerTemplates()
         with self._lock:
             self._Refuse()
             record = self._DiskRecord(jobDir, jobId)
@@ -1270,15 +2035,17 @@ class ArchiveJobService:
                           sets=None, needs_review=None, error=None,
                           warnings=[], logs=[], progress=None,
                           worker_version=probe.version)
+            run = _Run(record, jobDir, workDir)
             try:
                 os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
+                arguments = self._Arguments(
+                    run, self._WriteTemplates(jobDir, templates))
                 self._WriteRecord(jobDir, record)
             except OSError as error:
                 raise ArchiveError(WORK_DIR_UNUSABLE,
                                    f"作業フォルダに書けません: {error}")
             logger.info(f"Archive: job {jobId} resumed")
-            run = _Run(record, jobDir, workDir)
-            self._Start(run, probe)
+            self._Start(run, probe, arguments)
             return self._RunView(jobId)
 
     def Cancel(self, jobId):
@@ -1341,13 +2108,39 @@ class ArchiveJobService:
             return jobId, jobDir
         raise ArchiveError(WORK_DIR_UNUSABLE, "ジョブのフォルダを作れません。")
 
-    def _Arguments(self, run):
+    def _WriteTemplates(self, jobDir, templates):
+        """Write `templates` (ArchiveTemplates.WorkerTemplates') into the
+        job's templates/ as 01.json, 02.json ... in their order, what an
+        earlier run left there removed first -> their paths (A6: the worker
+        reads this snapshot, not user_data/). Raises OSError."""
+        folder = os.path.join(jobDir, TEMPLATES_DIR)
+        if os.path.isdir(folder):
+            for name in os.listdir(folder):
+                if name.endswith(".json"):
+                    os.remove(os.path.join(folder, name))
+        elif templates:
+            os.makedirs(folder)
+        paths = []
+        for number, template in enumerate(templates, 1):
+            name = f"{number:02d}.json"
+            self._WriteFile(folder, name, template)
+            paths.append(os.path.join(folder, name))
+        return paths
+
+    @staticmethod
+    def _Arguments(run, templateFiles):
+        """The worker's arguments for `run` with the templates' snapshot
+        `templateFiles` (_WriteTemplates')."""
+        # In ArchiveTemplates' order: the worker takes the first whose match
+        # is in the event name (ADR-006 A6).
+        templates = [word for path in templateFiles
+                     for word in ("--template", path)]
         if run.kind == EXPORT:
             # The request names the video and the sets; clips/ has no
             # sets.json (the worker refuses a run's output folder).
             return ["export", os.path.join(run.jobDir, EXPORT_REQUEST_FILE),
                     "--out", os.path.join(run.jobDir, CLIPS_DIR),
-                    "--progress", "json", "--cancel-on-stdin"]
+                    *templates, "--progress", "json", "--cancel-on-stdin"]
         record = run.record
         arguments = ["run", record["source"],
                      "--out", os.path.join(run.jobDir, OUT_DIR),
@@ -1362,14 +2155,14 @@ class ArchiveJobService:
             arguments.append(f"--event={record['event']}")
         # --thumbs: each set's background frame, the set list's and the
         # preview's picture (FrameFile; ADR-006 A3).
-        return arguments + ["--no-cut", "--thumbs", "--progress", "json",
-                            "--cancel-on-stdin"]
+        return arguments + ["--no-cut", "--thumbs", *templates, "--progress",
+                            "json", "--cancel-on-stdin"]
 
-    def _Start(self, run, probe):
-        """Start the worker for `run` and its two readers (under _lock).
+    def _Start(self, run, probe, arguments):
+        """Start the worker for `run` with `arguments` (_Arguments', made
+        before job.json said it runs) and its two readers (under _lock).
         When it cannot be started the job ends failed and
         ArchiveError(UNAVAILABLE) is raised."""
-        arguments = self._Arguments(run)
         try:
             run.logFile = open(os.path.join(run.jobDir, LOG_FILE), "a",
                                encoding="utf-8")
@@ -1657,13 +2450,21 @@ class ArchiveJobService:
         """Refuse new jobs, cancel the running one (an analysis or an
         export) and wait up to `timeout` seconds for it to end; then end the
         worker and every process it started. Its job.json is written
-        cancelled (resumable; an export goes on with the next one)."""
+        cancelled (resumable; an export goes on with the next one). A
+        titles' preview's worker is killed (its request answers
+        STOPPING)."""
         with self._lock:
             self._stopping = True
             run = self._run
-            if run is None:
-                return
-            self._AskCancel(run)
+            if run is not None:
+                self._AskCancel(run)
+        with self._titlesLock:
+            self._titlesTicket += 1
+            preview, self._titlesProcess = self._titlesProcess, None
+        if preview is not None:
+            ArchiveWorker.StopTitles(preview)
+        if run is None:
+            return
         logger.info(f"Archive: stopping job {run.record['id']} for the "
                     f"shutdown")
         if not run.finished.wait(timeout):

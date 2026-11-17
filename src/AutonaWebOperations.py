@@ -71,6 +71,8 @@ These kinds live here:
   -- in both shells, on the calling thread. Not in the state (D6): the page
   polls a job. A job's results are prepared by core's ArchiveResults (A5:
   start.gg's event, the match log's day, a JSON file, with characters).
+  The title templates and the titles' preview (A6) too; drawing a job's
+  thumbnails (A6) needs the shell's image renderer, as a thumbnail's.
 - the shell operations (ADR-005 S3e-9): opening a board's set selection (the
   SCORE page's dialog in the desktop's window; S4ab-2 -- the Qt window on
   the way back to the Qt panel until S4ac-3), rendering its thumbnail (the legacy route,
@@ -866,8 +868,10 @@ def get_archive_status(refresh=False):
     return ArchiveJobService.instance.Status(refresh=refresh)
 
 
-def update_archive_settings(workDir):
-    ArchiveJobService.instance.SetWorkDir(workDir)
+def update_archive_settings(body):
+    """The page's settings, {"work_dir"?, "thumbnail_background"?} (ADR-006
+    A6: what a set's thumbnail is drawn on) -> the status."""
+    ArchiveJobService.instance.UpdateSettings(body)
     return ArchiveJobService.instance.Status()
 
 
@@ -927,6 +931,46 @@ def prepare_archive_results(body):
 def get_archive_match_logs():
     """The match log's days, their tournaments and records (ADR-006 A5)."""
     return ArchiveResults.Days()
+
+
+def get_archive_templates():
+    """The title templates, in the worker's order (ADR-006 A6)."""
+    return ArchiveJobService.instance.Templates()
+
+
+def get_archive_template(templateId):
+    return ArchiveJobService.instance.Template(templateId)
+
+
+def save_archive_template(templateId, template):
+    return ArchiveJobService.instance.SaveTemplate(templateId, template)
+
+
+def duplicate_archive_template(templateId):
+    return ArchiveJobService.instance.DuplicateTemplate(templateId)
+
+
+def delete_archive_template(templateId):
+    return ArchiveJobService.instance.DeleteTemplate(templateId)
+
+
+def preview_archive_titles(jobId, template):
+    """The titles a template makes for the job's sets (the worker's titles,
+    on the calling thread: within 12 s with the probe, one at a time)."""
+    return ArchiveJobService.instance.PreviewTitles(jobId, template)
+
+
+def generate_archive_thumbs(jobId):
+    """Draw the job's confirmed sets' thumbnails (ADR-006 A6) with the
+    shell's image renderer: only a shell with one can (NotAvailable: 503)."""
+    if startImageRender is None:
+        raise NotAvailable()
+    return ArchiveJobService.instance.StartThumbs(jobId)
+
+
+def get_archive_thumb(jobId, number):
+    """(path, type) of set `number`'s thumbnail (ADR-006 A6)."""
+    return ArchiveJobService.instance.ThumbFile(jobId, number)
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

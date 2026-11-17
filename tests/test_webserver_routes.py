@@ -120,7 +120,9 @@ EXPECTED_ROUTES = [
 # (ADR-006 A1), and the job's video and a set's frame, this PC's (A3),
 # and the review's read, this PC's, its save and the export, the shared
 # view's (A4), and the match log's days, this PC's, and the results'
-# preparation, the shared view's (A5).
+# preparation, the shared view's (A5), and the title templates' reads and a
+# set's thumbnail, this PC's, the templates' writes, the titles' preview and
+# the thumbnails' drawing, the shared view's (A6).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -143,6 +145,12 @@ EXPECTED_API_V1_ROUTES = [
     # the job, its save and the export SHELL.
     ('/api/v1/archive/jobs/<job_id>/review', 'api_v1.get_archive_review', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs/<job_id>/review', 'api_v1.archive_review_update', 'OPTIONS,PUT'),
+    # The thumbnails and the titles' preview (ADR-006 A6): a set's
+    # thumbnail THIS_PC as the job, the drawing and the preview (it starts
+    # the worker) SHELL.
+    ('/api/v1/archive/jobs/<job_id>/thumbs/<no>', 'api_v1.get_archive_thumb', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/jobs/<job_id>/thumbs:generate', 'api_v1.archive_thumbs_generate', 'OPTIONS,POST'),
+    ('/api/v1/archive/jobs/<job_id>/titles:preview', 'api_v1.archive_titles_preview', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>/video', 'api_v1.get_archive_video', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs/<job_id>:cancel', 'api_v1.archive_job_cancel', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:export', 'api_v1.archive_job_export', 'OPTIONS,POST'),
@@ -151,6 +159,12 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/archive/results:prepare', 'api_v1.archive_results_prepare', 'OPTIONS,POST'),
     ('/api/v1/archive/settings', 'api_v1.archive_settings_update', 'OPTIONS,PATCH'),
     ('/api/v1/archive/status', 'api_v1.get_archive_status', 'GET,HEAD,OPTIONS'),
+    # The title templates (ADR-006 A6): the reads THIS_PC, the writes SHELL.
+    ('/api/v1/archive/templates', 'api_v1.get_archive_templates', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/templates/<template_id>', 'api_v1.get_archive_template', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/archive/templates/<template_id>', 'api_v1.archive_template_update', 'OPTIONS,PUT'),
+    ('/api/v1/archive/templates/<template_id>', 'api_v1.archive_template_delete', 'DELETE,OPTIONS'),
+    ('/api/v1/archive/templates/<template_id>:duplicate', 'api_v1.archive_template_duplicate', 'OPTIONS,POST'),
     # The game asset packs: the list and the last job's state (ADR-005
     # S-final SF-3b), the jobs, the ZIP upload and the games folder's
     # reveal (SF-4b-1; all but the list WebAccess.SHELL), the picked
@@ -611,7 +625,11 @@ def test_the_classification_follows_the_rules():
               # The review (A4): the results name players, as the job's.
               "api_v1.get_archive_review",
               # The match log's days (ADR-006 A5): tournament names.
-              "api_v1.get_archive_match_logs"}
+              "api_v1.get_archive_match_logs",
+              # The title templates (A6): the aliases name players; a set's
+              # thumbnail, as its frame.
+              "api_v1.get_archive_templates", "api_v1.get_archive_template",
+              "api_v1.get_archive_thumb"}
     # The access token, read and replaced: this PC's own request carrying
     # the secret the shell adds to the shared view's fetches (SF-4a-1). The
     # asset job's state, the jobs, the upload and the games folder's reveal
@@ -620,7 +638,9 @@ def test_the_classification_follows_the_rules():
     # (ADR-006 A1: a job runs a process and downloads onto this PC, the
     # work folder moves where it writes; A4: the review's save writes into
     # the job's folder, the export cuts the video onto this PC; A5: the
-    # results' preparation, as the job's creation it feeds).
+    # results' preparation, as the job's creation it feeds; A6: the
+    # templates' writes go to user_data/, the titles' preview starts the
+    # worker, the thumbnails are drawn and written into the job's folder).
     shell = {"api_v1.get_access_token", "api_v1.access_token_regenerate",
              "api_v1.get_assets_job", "api_v1.upload_assets_zip",
              "api_v1.drop_asset_upload", "api_v1.import_assets_zip",
@@ -630,7 +650,12 @@ def test_the_classification_follows_the_rules():
              "api_v1.archive_settings_update", "api_v1.archive_job_create",
              "api_v1.archive_job_cancel", "api_v1.archive_job_resume",
              "api_v1.archive_review_update", "api_v1.archive_job_export",
-             "api_v1.archive_results_prepare"}
+             "api_v1.archive_results_prepare",
+             "api_v1.archive_template_update",
+             "api_v1.archive_template_delete",
+             "api_v1.archive_template_duplicate",
+             "api_v1.archive_titles_preview",
+             "api_v1.archive_thumbs_generate"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -697,7 +722,9 @@ def test_the_classification_follows_the_rules():
     # reads, this PC's (A3: v1 76 of 142), and the review's read, this PC's,
     # its save and the export, the shell's (A4: v1 76 of 145), and the
     # match log's days, this PC's, and the results' preparation, the
-    # shell's (A5: v1 76 of 147).
+    # shell's (A5: v1 76 of 147), and the title templates' 2 reads and a
+    # set's thumbnail, this PC's, the templates' 3 writes, the titles'
+    # preview and the thumbnails' drawing, the shell's (A6: v1 76 of 155).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -707,7 +734,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 147
+    assert len(EXPECTED_API_V1_ROUTES) == 155
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

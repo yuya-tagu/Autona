@@ -193,8 +193,8 @@ delta の行ではなく、通知のたびにボード 1 の公開済みの値�
 | キャラ | Autona | 結果 JSON を用意するとき、各セットに `c1` / `c2`（表示名。使った順に最大 2 体を「/」でつなぐ）・`games[].c1/c2`・`char_source`（`scoreboard` / `report` / `mains`）を入れる。優先順位は 記録 → start.gg の報告 → PlayerDB の mains。キャラのゲームは start.gg のイベントの videogame のゲーム（スキャンに無ければキャラ無し。videogame が無いときだけロード中のゲーム）、記録は行の `game`（イベントのゲームと違う記録・`game` の無い記録のキャラは使わない）。記録と結果のセットは、まず start.gg のセット id（記録の `set_id`）で、残りを正規化した選手名（＋スコア）で対応づける（左右が逆でもよい）。表示名の元のコードネーム・ゲーム・アイコンは名前空間付きのキー `"autona": {"game", "c1": [...], "c2": [...], "icons": {コードネーム: ゲームのフォルダからの相対パス}}` に残す（ページのアイコン用。ファイルから読んだ JSON のセットの `autona` は使わずに外す）。キャラのある JSON のセットはファイルのまま。vodsplit は受け取ったキャラをタイトルに使い、sets.json の `set` にそのまま残す（V6） |
 | PlayerDB | Autona | mains を引く（`char_source: "mains"`。画面では「推定」と表示） |
 | GameAssetCatalog | Autona | コードネームから表示名・アイコン（ゲームのアイコンパック `base_files/icon` の `config.json` の prefix / postfix で名前を組んだ、一番小さいスキンのファイル。`GameCharacters` の `icon`。既存の静的配信の範囲）を引く |
-| タイトル・概要欄 | ワーカー | vodsplit のテンプレートのまま。テンプレートは Autona の `user_data/archive_templates/*.json` に置き、`--template` で渡す |
-| サムネイル | 背景はワーカー、描画は Autona | 背景の候補フレーム（`_bg.jpg`）は vodsplit が選ぶ。描画は `ThumbnailService` で行う。任意のセットのデータ（state と同じ形の `score.1`）と背景を渡せる入口を足す。描画はデスクトップ専用（ヘッドレスは今と同じく 503） |
+| タイトル・概要欄 | ワーカー | vodsplit のテンプレートのまま。テンプレートは Autona の `user_data/archive_templates/<id>.json`（vodsplit の形式。`core/ArchiveTemplates`）に置き、解析・書き出しに全部を `--template` の繰り返しで渡す（ワーカーがイベント名で選ぶ: `match` を含む最初のもの → `match` の無い最初のもの）。ファイルが無くても「標準」（vodsplit の既定と同じ内容・id `default`・`match` は持てない）を一覧に出す。id はサーバーが決め、書き込みは検査してから一時ファイル → 置き換え。保存前のテンプレートのプレビューはワーカーの `titles`（V10。動画を読まない）を同期で呼ぶ（8 秒で打ち切り。古いワーカーではプレビューだけが使えない） |
+| サムネイル | 背景はワーカー、描画は Autona | 背景はセットの `_bg.jpg`（既定）かサムネイル設定の背景（`archive.thumbnail_background`）。描画は `ThumbnailService` の入口 `SetPayload` / `RenderSet`（任意のセットのデータ = state と同じ形の `score.1`・`game`・`tournamentInfo` を `core/ArchiveThumbnails` が結果から組む。背景も渡せる。レーンの外で 1 枚ずつ）で、確定したセットを `<job>/thumbs/<no>.png` に書く。クリップとの対応が確かなときだけクリップの隣にも置く。描画はデスクトップ専用（ヘッドレスは今と同じく 503） |
 | 解析・切り出し・ダウンロード | ワーカー | vodsplit |
 
 ### D6: 画面は React の 1 ページ。ページの state はページのローカルとジョブフォルダに置き、StateManager には載せない
@@ -281,7 +281,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
 | **A3 プレビューとタイムライン** | 動画と背景フレームの配信（D7）、プレビュー・タイムライン・詳細（読むだけ）・キーボード操作、H.264 のときの「ブラウザで開く」 | V3・V7 | pytest: Range で 206、範囲外のパス・不正な `job_id` が 404、THIS_PC の区分。E2E: ページの表示。実機: Autona の画面で VP9 が再生できること、シーク | 大 |
 | **A4 レビューの編集と書き出し** | 確定・割り当ての変更・IN / OUT の調整を `review.json` に保存、「確定分を書き出し」（ワーカーの `export`） | V5 | pytest: `review.json` の読み書き、`export` の引数の組み立て。実機: 2 セットを確定して書き出し、クリップの区間を確かめる | 大 |
 | **A5 キャラと結果の取得** | start.gg の任意のイベントの結果（ゲームごとのキャラ付き）、記録からの結果データ、キャラの合成（記録 → 報告 → mains「推定」）、一覧のキャラアイコン | V6 | pytest: 合成の優先順位、名前の正規化での対応づけ、start.gg の応答の変換（録画した応答で） | 中〜大 |
-| **A6 テンプレートとサムネイル** | テンプレートのページ（`templates.html` のとおり）、`ThumbnailService` に任意のセットを渡す入口、`_bg.jpg` を背景にした描画 | なし | pytest: 入口の payload。実機: 3 セット分のサムネを描画 | 大 |
+| **A6 テンプレートとサムネイル** | テンプレートのページ（`templates.html` のとおり）、`ThumbnailService` に任意のセットを渡す入口、`_bg.jpg` を背景にした描画 | V10 | pytest: 入口の payload。実機: 3 セット分のサムネを描画 | 大 |
 | **A7 ワーカーの配布** | ワーカーの spec とビルド、Autona-releases への公開、ページからの入手・更新（SHA-256 の検査・展開）、NOTICES、リリース Runbook の更新 | V1・V2・V8 | pytest: 入手処理（偽のサーバー・ハッシュ不一致・展開の中断）。実機: exe で入手から 1 本解析まで（オーナーの「exe で確認」の指示があるとき） | 中 |
 
 - A7 までは、ワーカーの無い配布物ではナビに出ないので、A1〜A6 を途中でリリースしても利用者からは見えない
@@ -302,6 +302,14 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   （無いアイコンは隠す）。start.gg の取得全体に 120 秒の期限を設け（過ぎたら 503）、ページはこの 1 本だけ 150 秒待つ。
   追補（同日、レビューの指摘）: 記録の行に `game` を足した（D3）。記録とセットはセット id を先に対応づける。
   `GET match-logs` は日ごとの数を (mtime, size) で覚える。実装の要点は Design.md §4.2.5
+- A6（2026-11-17 実装）: テンプレートのページはアーカイブのページの中の別の画面（ナビの項目は足さない）。モックのレイヤー編集は作らず、
+  サムネイルは既存のサムネイル設定のテンプレートで描き、テンプレートの画面にはサムネイルのページへのリンクと背景の選択だけを置く。
+  テンプレートの読みは THIS_PC、書き込み・タイトルのプレビュー・サムネイルの作成は SHELL。プレビューは V10 の `titles` で、
+  `status.features` に `titles` の無いワーカーではプレビューだけが「この版では使えません」。サムネイルは解析・書き出しとは別に
+  1 ジョブずつ走り（書き出し中も作れるが、そのときはクリップの隣に置かない）、進み具合はジョブの取得の `thumbs`（このプロセスのメモリと `thumbs/` の中身。job.json には書かない。出すのは描いたときの区間と結果（`thumbs/thumbs.json`）が今のレビューと同じセットだけ）。
+  ワーカーには生のテンプレートのファイルではなく、検査済みの内容を `<job>/templates/` に書いたスナップショットを渡す（Autona とワーカーの読み違いと、実行中の削除との競合を無くす）。
+  クリップの隣に置くのは、書き出しが走っておらず、`clips/export.json` の元動画がジョブの動画で、その番号のクリップが書き出し済みで残っていて、
+  切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ。実装の要点は Design.md §4.2.5
 - YouTube への下書きアップロードは範囲外（必要になった時点で別の ADR にする）
 
 ### vodsplit 側の変更
@@ -317,6 +325,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
 | V7 | sets.json に `format`（形式番号）と、ゲームごとの OCR の名前と出現率（`games_ocr`）を足す | 版の確認と、タイムラインの「選手（OCR）」の欄 | A3 |
 | V8 | ワーカーの PyInstaller spec（`packaging/worker.spec`）。cv2 の videoio の ffmpeg DLL が 2 つ入るので 1 つにする | 配布 | A7 |
 | V9 | `version` サブコマンド: `{"version": "0.2.0", "format": 1}` を出す | Autona が使える版かを確かめる | A1 |
+| V10 | `titles` サブコマンド: `export` の入力とテンプレート（`--template` の繰り返し）から、`export` と同じタイトル・概要欄を `{"type":"done","template","sets":[{"no","title","description","chapters"}]}` で出す（動画を読まない）。`version` に `features: ["titles"]` を足す | テンプレートの画面のプレビュー。古いワーカーかを `features` で見分ける | A6 |
 
 どれも既存のテスト（`python -m pytest -q tests`）を壊さず、変更ごとにテストを足す。
 

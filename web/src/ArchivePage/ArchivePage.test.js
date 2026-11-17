@@ -206,6 +206,27 @@ test("in the desktop's window the writes are on", async () => {
     expect(screen.queryByTestId("archive-read-only")).toBeNull();
 });
 
+// ADR-006 A6: the templates' view lies over the job's, which stays as it
+// was (hidden, not unmounted).
+test("the new job's form is as it was after the templates' view", async () => {
+    install({handlers: {
+        "/api/v1/archive/jobs": () => Promise.resolve({data: {jobs: []}}),
+        "/api/v1/archive/templates": () => Promise.resolve(
+            {data: {templates: []}}),
+    }});
+    render(<ArchivePage/>);
+    fireEvent.change(await screen.findByLabelText(i18n.t("archive_source")),
+                     {target: {value: "https://youtu.be/x"}});
+    fireEvent.click(screen.getByTestId("archive-templates-button"));
+    expect(await screen.findByTestId("archive-templates")).toBeTruthy();
+    expect(screen.getByTestId("archive-jobs-view")).not.toBeVisible();
+    fireEvent.click(screen.getByTestId("archive-templates-button"));
+    expect(screen.queryByTestId("archive-templates")).toBeNull();
+    expect(screen.getByTestId("archive-jobs-view")).toBeVisible();
+    expect(screen.getByLabelText(i18n.t("archive_source")).value)
+        .toBe("https://youtu.be/x");
+});
+
 // The results a job is given (ADR-006 A5): prepared before the job starts
 // (POST results:prepare, its own long timeout), summed up, then handed to
 // the job's creation as they are.
@@ -1313,5 +1334,123 @@ describe("the review screen", () => {
             .toBeTruthy();
         expect(screen.queryByRole("link", {
             name: i18n.t("archive_video_open_in_browser")})).toBeNull();
+    });
+
+    // ADR-006 A6: the confirmed sets' thumbnails, drawn on the desktop.
+    test("the confirmed sets' thumbnails are made after the save, followed and shown",
+         async () => {
+        let thumbs = null;
+        installJob(SETS, {
+            [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                job: {...JOB, thumbs}, sets: SETS}}),
+        });
+        apiPost.mockImplementation(() => {
+            thumbs = {state: "running", done: 0, total: 1, failed: [],
+                      files: [], revision: 0};
+            return Promise.resolve(JSON.stringify(
+                {data: {job: {...JOB, thumbs}}}));
+        });
+        try {
+            const review = await open(1);
+            const button = screen.getByTestId("archive-thumbs");
+            // Nothing confirmed: nothing to draw.
+            expect(button).toBeDisabled();
+            fireEvent.keyDown(review, {key: "Enter"});
+            expect(button).toBeEnabled();
+            fireEvent.click(button);
+            expect(await screen.findByTestId("archive-thumbs-running"))
+                .toBeTruthy();
+            expect(apiPost.mock.calls[0][0])
+                .toBe(`/api/v1/archive/jobs/${ID}/thumbs:generate`);
+            expect(apiPut.mock.invocationCallOrder[0])
+                .toBeLessThan(apiPost.mock.invocationCallOrder[0]);
+            expect(button).toBeDisabled();
+
+            // Followed (the poll) to the end; then shown in the list and
+            // the details, the frame as a fallback.
+            thumbs = {state: "done", done: 1, total: 1, failed: [],
+                      files: [1], revision: 3};
+            const result = await screen.findByTestId("archive-thumbs-result",
+                                                     {}, {timeout: 5000});
+            expect(result.textContent)
+                .toBe(i18n.t("archive_thumbs_done", {count: 1}));
+            const listed = screen.getByTestId("archive-thumb-1");
+            expect(listed.getAttribute("src"))
+                .toMatch(new RegExp(`/jobs/${ID}/thumbs/1\\?r=3$`));
+            expect(screen.queryByTestId("archive-frame-1")).toBeNull();
+            fireEvent.click(screen.getByTestId("archive-set-1"));
+            expect(screen.getByTestId("archive-detail-thumb").getAttribute("src"))
+                .toBe(listed.getAttribute("src"));
+            fireEvent.click(screen.getByTestId("archive-set-2"));
+            expect(screen.queryByTestId("archive-detail-thumb")).toBeNull();
+            fireEvent.error(listed);
+            expect(screen.getByTestId("archive-frame-1").getAttribute("src"))
+                .toMatch(new RegExp(`/jobs/${ID}/frames/1$`));
+        } finally {
+            apiPost.mockReset();
+        }
+    });
+
+    test("thumbnails that could not all be made say which", async () => {
+        installJob(SETS, {
+            [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                job: {...JOB, thumbs: {state: "done", done: 1, total: 3,
+                                       failed: [2, 3], files: [1],
+                                       revision: 1}},
+                sets: SETS}}),
+        });
+        render(<ArchivePage/>);
+        const result = await screen.findByTestId("archive-thumbs-result");
+        expect(result.textContent).toContain(
+            i18n.t("archive_thumbs_failed_sets", {sets: "#2, #3"}));
+    });
+
+    test("the job view names the template its event takes and opens the templates",
+         async () => {
+        const standard = {
+            name: "標準", match: null, title: "{event} {round}", title_team: "",
+            description: "", chapter_format: "{time} Game {n}",
+            overflow: "drop_characters", round_map: {}, aliases: {},
+            order: "result"};
+        installJob({...SETS, template: "標準"}, {
+            "/api/v1/archive/templates": () => Promise.resolve({data: {
+                templates: [
+                    {id: "20261117-100000-aaaa", stored: true, role: "match",
+                     template: {...standard, name: "Fake 用", match: "Fake"}},
+                    {id: "default", stored: false, role: "default",
+                     template: standard}]}}),
+        });
+        render(<ArchivePage/>);
+        await screen.findByTestId("archive-review");
+        const line = await screen.findByTestId("archive-template-line");
+        await waitFor(() => expect(line.textContent).toContain("Fake 用"));
+        expect(line.textContent).toContain(
+            i18n.t("archive_tpl_role_match", {match: "Fake"}));
+        expect(screen.getByTestId("archive-analysis-template").textContent)
+            .toBe(i18n.t("archive_tpl_analysis", {name: "標準"}));
+        fireEvent.click(screen.getByTestId("archive-set-2"));
+        expect(current()).toEqual(["archive-set-2"]);
+        pause.mockClear();
+        fireEvent.click(within(line).getByRole("button", {
+            name: i18n.t("archive_tpl_edit")}));
+        expect(await screen.findByTestId("archive-templates")).toBeTruthy();
+        // The job's view is hidden, its video paused (it would be heard).
+        expect(screen.getByTestId("archive-jobs-view")).not.toBeVisible();
+        expect(pause).toHaveBeenCalled();
+        // The job's template is the one open: edited, then back to the job.
+        expect(screen.getByTestId("archive-tpl-name").value).toBe("Fake 用");
+        fireEvent.change(screen.getByTestId("archive-tpl-name"),
+                         {target: {value: "Fake 用 改"}});
+        fireEvent.click(screen.getByTestId("archive-templates-button"));
+        expect(screen.queryByTestId("archive-templates")).toBeNull();
+        expect(screen.getByTestId("archive-jobs-view")).toBeVisible();
+        // The set picked is still the one.
+        expect(current()).toEqual(["archive-set-2"]);
+        // The edit not saved is there when the templates are open again.
+        fireEvent.click(screen.getByTestId("archive-templates-button"));
+        expect((await screen.findByTestId("archive-tpl-name")).value)
+            .toBe("Fake 用 改");
+        expect(within(screen.getByTestId("archive-template-20261117-100000-aaaa"))
+            .getByText(i18n.t("archive_tpl_unsaved"))).toBeTruthy();
     });
 });

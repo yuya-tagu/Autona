@@ -9,10 +9,26 @@ Used by tests/test_archive_jobs.py and meant for the web E2E too: point
 The CLI
 -------
 ``version``
-    Prints ``{"version": "0.0.0-fake", "format": 1}`` and exits 0.
-    ``FAKE_VODSPLIT_FORMAT`` changes the format number (an unsupported
-    worker); ``FAKE_VODSPLIT_VERSION_EXIT`` makes it exit with that code
-    instead (a broken worker).
+    Prints ``{"version": "0.0.0-fake", "format": 1, "features":
+    ["titles"]}`` and exits 0. ``FAKE_VODSPLIT_FORMAT`` changes the format
+    number (an unsupported worker); ``FAKE_VODSPLIT_NO_TITLES`` leaves
+    ``features`` out (a worker from before vodsplit V10);
+    ``FAKE_VODSPLIT_VERSION_EXIT`` makes it exit with that code instead (a
+    broken worker).
+
+``titles <edits.json> [--template FILE] [--format json]``
+    vodsplit V10's (ADR-006 A6): reads the request (``source`` may be null)
+    and the template, and prints ``{"type": "done", "template": its name,
+    "sets": [{"no", "title", "description", "chapters"}]}``; exit 0. A
+    set's title and description are the template's with ``{event}``,
+    ``{round}``, ``{p1}``, ``{p2}``, ``{c1}``, ``{c2}`` and ``{score}``
+    replaced (null for a set with no result); ``chapters`` is the number
+    of its game_starts when 3 or more, else 0. ``FAKE_VODSPLIT_MODE``
+    ``error``: ``{"type": "error", "code": "edits", "message"}``, exit 2;
+    ``hang``: sleeps (a worker past the preview's time). It writes
+    ``FAKE_VODSPLIT_ARGV`` as ``run`` does, and ``FAKE_VODSPLIT_INPUTS``
+    (a path) gets ``{"request", "template"}`` as it read them (the files
+    are the caller's temporary ones).
 
 ``run <source> --out DIR [--results FILE] [--event NAME | --event=NAME]
 [--download-dir DIR] [--no-cut] [--thumbs] [--progress json]
@@ -434,26 +450,84 @@ def export(argv):
     return 0
 
 
+def titles(argv):
+    mode = os.environ.get("FAKE_VODSPLIT_MODE", "ok")
+    record = os.environ.get("FAKE_VODSPLIT_ARGV")
+    if record:
+        with open(record, "w", encoding="utf-8") as file:
+            json.dump(argv, file)
+    if mode == "hang":
+        while True:
+            time.sleep(1)
+    if mode == "error":
+        emit({"type": "error", "code": "edits",
+              "message": "編集ファイルの形式が違います。", "hint": None})
+        return 2
+    with open(argv[0], encoding="utf-8") as file:
+        request = json.load(file)
+    template = {"name": "標準", "title": "{event} {round} {p1} vs {p2}",
+                "description": "{p1} vs {p2} {score}"}
+    given = None
+    path = option(argv, "--template")
+    if path:
+        with open(path, encoding="utf-8") as file:
+            given = json.load(file)
+        template.update(given)
+    inputs = os.environ.get("FAKE_VODSPLIT_INPUTS")
+    if inputs:
+        with open(inputs, "w", encoding="utf-8") as file:
+            json.dump({"request": request, "template": given}, file,
+                      ensure_ascii=False)
+    rows = []
+    for item in request["sets"]:
+        played = item.get("set")
+        if not played:
+            rows.append({"no": item["no"], "title": None,
+                         "description": None, "chapters": 0})
+            continue
+        values = {"event": request.get("event") or "",
+                  "round": played.get("round") or "",
+                  "p1": played["p1"], "p2": played["p2"],
+                  "c1": played.get("c1") or "", "c2": played.get("c2") or "",
+                  "score": f"{played['s1']}-{played['s2']}"}
+
+        def fill(text):
+            for key, value in values.items():
+                text = text.replace("{" + key + "}", value)
+            return text.strip()
+
+        starts = item.get("game_starts") or []
+        rows.append({"no": item["no"], "title": fill(template["title"]),
+                     "description": fill(template["description"]),
+                     "chapters": len(starts) if len(starts) >= 3 else 0})
+    emit({"type": "done", "template": template.get("name"), "sets": rows})
+    return 0
+
+
 def main(argv):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     if not argv:
-        print("usage: fake_vodsplit_worker.py version | run ... | export ...",
-              file=sys.stderr)
+        print("usage: fake_vodsplit_worker.py version | run ... | export ... "
+              "| titles ...", file=sys.stderr)
         return 2
     if argv[0] == "version":
         code = os.environ.get("FAKE_VODSPLIT_VERSION_EXIT")
         if code:
             return int(code)
         fmt = int(os.environ.get("FAKE_VODSPLIT_FORMAT", "1"))
-        print(json.dumps({"version": "0.0.0-fake", "format": fmt}),
-              flush=True)
+        answer = {"version": "0.0.0-fake", "format": fmt}
+        if not os.environ.get("FAKE_VODSPLIT_NO_TITLES"):
+            answer["features"] = ["titles"]
+        print(json.dumps(answer), flush=True)
         return 0
     if argv[0] == "run":
         return run(argv[1:])
     if argv[0] == "export":
         return export(argv[1:])
+    if argv[0] == "titles":
+        return titles(argv[1:])
     print(f"unknown command: {argv[0]}", file=sys.stderr)
     return 2
 
