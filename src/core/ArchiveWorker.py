@@ -18,10 +18,20 @@ Where it is (``Locate``), in this order:
   folder Autona.exe runs in; the separately distributed worker, D5).
 
 Its version (``Probe``): ``<command> version`` prints one JSON line
-``{"version", "format"}``; only ``SUPPORTED_FORMAT`` is accepted (the
-sets.json format this Autona reads). A worker that is missing, cannot be
-started, does not answer in ``PROBE_TIMEOUT_SECS`` or answers something
-else is unavailable, with the reason in Japanese (the page shows it).
+``{"version", "format", "features"?}``; only ``SUPPORTED_FORMAT`` is
+accepted (the sets.json format this Autona reads). A worker that is missing,
+cannot be started, does not answer in ``PROBE_TIMEOUT_SECS`` or answers
+something else is unavailable, with the reason in Japanese (the page shows
+it). ``features`` names what a worker of that format does beyond it (vodsplit
+V10: ``titles``); a worker from before says none, and only what needs the
+feature is refused (ADR-006 A6: the titles' preview).
+
+Its titles (``RunTitles``, ADR-006 A6): ``<command> titles <request>
+--template <file> --format json`` makes a request's titles and descriptions
+with no video work and prints one ``done`` line; run on the calling thread,
+up to the time the caller gives (``TITLES_TIMEOUT_SECS`` by default). The
+caller is handed the process as it starts (``started``), to kill it
+(``StopTitles``) when a newer preview supersedes it.
 
 How it is started (``Launch``): stdin, stdout and stderr are pipes (stdout
 is read as UTF-8 text by line: vodsplit reconfigures its stdout to UTF-8
@@ -66,6 +76,11 @@ DEFAULT_EXECUTABLE = os.path.join("vodsplit-worker", "vodsplit-worker.exe")
 SUPPORTED_FORMAT = 1
 # Below the web client's 10 s request timeout: the nav asks /archive/status at startup
 PROBE_TIMEOUT_SECS = 8
+# What a worker that can make titles alone says it does (vodsplit V10).
+TITLES_FEATURE = "titles"
+# The titles' run waits this long at most (ArchiveJobService gives it what
+# is left of its own deadline, which the probe shares).
+TITLES_TIMEOUT_SECS = 8
 
 _WINDOWS = sys.platform == "win32"
 _CREATE_NO_WINDOW = 0x08000000
@@ -117,12 +132,24 @@ def Locate():
 
 @dataclass(frozen=True)
 class ProbeResult:
-    """What ``Probe`` found. ``command`` is set only when it is usable."""
+    """What ``Probe`` found. ``command`` is set only when it is usable;
+    ``features`` what its version line names (strings only)."""
     available: bool
     version: Optional[str]
     format: Optional[int]
     reason: Optional[str]
     command: Optional[tuple]
+    features: tuple = ()
+
+
+class TitlesError(Exception):
+    """``RunTitles`` got no titles: the Japanese message the page shows;
+    `timeout` when the worker ran past the time."""
+
+    def __init__(self, message, timeout=False):
+        super().__init__(message)
+        self.message = message
+        self.timeout = timeout
 
 
 def _ChildEnvironment():
@@ -205,7 +232,85 @@ def Probe(timeout=PROBE_TIMEOUT_SECS):
         return ProbeResult(False, version, fmt, (
             f"この切り抜きワーカーの形式（format {fmt}）には対応していません。"
             f"format {SUPPORTED_FORMAT} の版に入れ替えてください。"), None)
-    return ProbeResult(True, version, fmt, None, tuple(command))
+    features = answer.get("features")
+    features = tuple(item for item in features if isinstance(item, str)) \
+        if isinstance(features, list) else ()
+    return ProbeResult(True, version, fmt, None, tuple(command), features)
+
+
+def RunTitles(command, requestPath, templatePath, timeout=None,
+              started=None):
+    """The worker's ``titles`` of the export request at `requestPath` with
+    the template at `templatePath`, on the calling thread (up to `timeout`
+    seconds, TITLES_TIMEOUT_SECS by default) -> its ``done`` line (a dict:
+    "template", "sets"). `started(process)` is called once the process runs
+    (the caller may kill it: it then ends as a failure). Raises
+    TitlesError."""
+    timeout = TITLES_TIMEOUT_SECS if timeout is None else timeout
+    try:
+        process = subprocess.Popen(
+            [*command, "titles", requestPath, "--template", templatePath,
+             "--format", "json"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace", env=_ChildEnvironment(),
+            creationflags=_CreationFlags(background=False))
+    except OSError as error:
+        raise TitlesError(f"切り抜きワーカーを起動できません: {error}") from None
+    try:
+        if started is not None:
+            started(process)
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise TitlesError((
+            f"切り抜きワーカーがタイトルを作り終えません（{timeout:g} 秒待ちました）。"),
+            timeout=True) from None
+    except BaseException:
+        process.kill()
+        process.communicate()
+        raise
+    done = subprocess.CompletedProcess(process.args, process.returncode,
+                                       stdout, stderr)
+    answer = failure = None
+    for line in (done.stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "done":
+            answer = event
+        elif isinstance(event, dict) and event.get("type") == "error":
+            failure = event
+    if done.returncode == 0 and answer is not None:
+        return answer
+    detail = (done.stderr or "").strip().splitlines()[-1:] or [""]
+    logger.warning(f"Archive worker: titles failed (exit {done.returncode}): "
+                   f"{detail[0][:300]}")
+    message = failure.get("message") if isinstance(failure, dict) else None
+    if isinstance(message, str) and message:
+        raise TitlesError(f"タイトルを作れませんでした: {message}")
+    raise TitlesError((
+        f"切り抜きワーカーがタイトルを作れませんでした（終了コード {done.returncode}）。"))
+
+
+def StopTitles(process, wait=0):
+    """Kill a ``titles`` run (the process RunTitles handed to `started`; its
+    thread then raises TitlesError), waiting up to `wait` seconds for it to
+    end. Never raises."""
+    try:
+        process.kill()
+    except OSError:
+        return  # it has ended
+    if wait:
+        try:
+            process.wait(wait)
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Archive worker: a killed titles' run did not end "
+                           f"in {wait}s")
 
 
 # The Windows job object -------------------------------------------------

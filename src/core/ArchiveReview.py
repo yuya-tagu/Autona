@@ -301,25 +301,33 @@ def Stored(review, sets):
         for key, entry in review["sets"].items()}}
 
 
+def _Reviewed(review, no, row):
+    """Set `row` as the export request has it (ExportSets' shape)."""
+    entry = review["sets"].get(str(no), {})
+    starts = row.get("game_starts")
+    return {
+        "no": no,
+        "start": entry.get("start", row["start"]),
+        "end": entry.get("end", row["end"]),
+        "title": None, "description": None,
+        "set": Assigned(review, row),
+        "game_starts": [t for t in starts if _Seconds(t)]
+        if isinstance(starts, list) else [],
+    }
+
+
+def ReviewedSets(review, sets):
+    """Every set that can be reviewed, confirmed or not, as ExportSets has
+    a confirmed one (ADR-006 A6: the titles' preview shows what an export
+    would name each set)."""
+    return [_Reviewed(review, no, row) for no, row in Rows(sets).items()]
+
+
 def ExportSets(review, sets):
     """The sets of the export request (vodsplit export.validate_edits): the
     confirmed ones in sets.json's order, with their range and result as
     reviewed. Titles and descriptions are null: the worker makes them from
     its template for the result and the range (a set with no result is
     ``NN_unmatched``, with no text)."""
-    chosen = []
-    for no, row in Rows(sets).items():
-        entry = review["sets"].get(str(no), {})
-        if not entry.get("confirmed"):
-            continue
-        starts = row.get("game_starts")
-        chosen.append({
-            "no": no,
-            "start": entry.get("start", row["start"]),
-            "end": entry.get("end", row["end"]),
-            "title": None, "description": None,
-            "set": Assigned(review, row),
-            "game_starts": [t for t in starts if _Seconds(t)]
-            if isinstance(starts, list) else [],
-        })
-    return chosen
+    return [_Reviewed(review, no, row) for no, row in Rows(sets).items()
+            if review["sets"].get(str(no), {}).get("confirmed")]

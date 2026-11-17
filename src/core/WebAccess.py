@@ -367,6 +367,19 @@ ROUTE_ACCESS = {
     # the archive's other reads.
     "api_v1.archive_results_prepare": SHELL,
     "api_v1.get_archive_match_logs": THIS_PC,
+    # The title templates and the thumbnails (ADR-006 A6): the templates
+    # and a set's thumbnail are read as the jobs are (THIS_PC); saving,
+    # duplicating, deleting a template (user_data/), the titles' preview
+    # (it runs the worker) and drawing the thumbnails (files into the job's
+    # folder) are the shell's, as the job's writes.
+    "api_v1.get_archive_templates": THIS_PC,
+    "api_v1.get_archive_template": THIS_PC,
+    "api_v1.archive_template_update": SHELL,
+    "api_v1.archive_template_delete": SHELL,
+    "api_v1.archive_template_duplicate": SHELL,
+    "api_v1.archive_titles_preview": SHELL,
+    "api_v1.archive_thumbs_generate": SHELL,
+    "api_v1.get_archive_thumb": THIS_PC,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

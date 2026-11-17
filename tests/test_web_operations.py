@@ -2239,7 +2239,8 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
                "game": 1, "row": 1, "upload_id": "x" * 22,
-               "job_id": "20261116-000000-zzzz", "no": "1"}
+               "job_id": "20261116-000000-zzzz", "no": "1",
+               "template_id": "default"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2429,10 +2430,19 @@ _NOT_200 = {
     ("api_v1.archive_job_export", None): 403,
     # The results' preparation (SHELL, A5), as the job's creation it feeds.
     ("api_v1.archive_results_prepare", None): 403,
+    # The title templates' writes, the titles' preview (it starts the
+    # worker) and the thumbnails' drawing (A6), likewise. The templates
+    # read (THIS_PC): the standard one is there with no file.
+    ("api_v1.archive_template_update", None): 403,
+    ("api_v1.archive_template_delete", None): 403,
+    ("api_v1.archive_template_duplicate", None): 403,
+    ("api_v1.archive_titles_preview", None): 403,
+    ("api_v1.archive_thumbs_generate", None): 403,
     ("api_v1.get_archive_job", None): 404,
     ("api_v1.get_archive_review", None): 404,
     ("api_v1.get_archive_video", None): 404,
     ("api_v1.get_archive_frame", None): 404,
+    ("api_v1.get_archive_thumb", None): 404,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the

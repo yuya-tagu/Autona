@@ -27,6 +27,17 @@ export function framePath(jobId: string, no: unknown): string | null {
         : `${API}/${encodeURIComponent(jobId)}/frames/${number}`;
 }
 
+// Set `no`'s thumbnail (A6), or null for what is not a set number; `revision`
+// (the job's thumbs.revision) makes a redrawn one a new URL.
+export function thumbPath(jobId: string, no: unknown,
+                          revision: unknown): string | null {
+    const number = setNumber(no);
+    const r = typeof revision === "number" && Number.isInteger(revision)
+        ? revision : 0;
+    return number === null ? null
+        : `${API}/${encodeURIComponent(jobId)}/thumbs/${number}?r=${r}`;
+}
+
 // `url` as a CSS url() value: quoted, with what would end the string or the
 // declaration escaped (CSS hex escapes).
 export function cssUrl(url: string): string {

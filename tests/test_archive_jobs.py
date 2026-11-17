@@ -24,6 +24,7 @@ import pytest
 
 from src.core import ArchiveJobService as archive
 from src.core import ArchiveReview as review
+from src.core import ArchiveTemplates as templates
 from src.core import ArchiveWorker as worker
 from src.core import WebAccess
 from src.core.ArchiveJobService import ArchiveError, ArchiveJobService
@@ -59,7 +60,9 @@ def fake(monkeypatch, tmp_path):
     monkeypatch.setenv("FAKE_VODSPLIT_MODE", "ok")
     for name in ("FAKE_VODSPLIT_FORMAT", "FAKE_VODSPLIT_VERSION_EXIT",
                  "FAKE_VODSPLIT_DELAY", "FAKE_VODSPLIT_ARGV",
-                 "FAKE_VODSPLIT_CHILD_PID", "PYINSTALLER_RESET_ENVIRONMENT"):
+                 "FAKE_VODSPLIT_CHILD_PID", "FAKE_VODSPLIT_NO_TITLES",
+                 "FAKE_VODSPLIT_INPUTS",
+                 "PYINSTALLER_RESET_ENVIRONMENT"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
 
@@ -588,8 +591,11 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert set(done) == {
         "id", "created_at", "source", "state", "sets", "needs_review",
         "finished_at", "progress", "logs", "warnings", "error", "exit_code",
-        "has_results", "export"}
+        "has_results", "export", "thumbs"}
     assert done["export"] is None
+    # No thumbnail drawn (A6): none is listed.
+    assert done["thumbs"] == {"state": None, "done": 0, "total": 0,
+                              "failed": [], "files": [], "revision": 0}
     assert set(done["progress"]) == {
         "stage", "label", "index", "count", "fraction", "overall", "eta"}
 
@@ -1160,7 +1166,9 @@ def test_the_page_runs_a_job_through_the_routes(page, service, work):
     assert status == {"available": True, "version": "0.0.0-fake",
                       "format": 1, "reason": None,
                       "work_dir": os.path.normpath(str(work)),
-                      "running_job": None, "running_kind": None}
+                      "running_job": None, "running_kind": None,
+                      "features": ["titles"],
+                      "thumbnail_background": archive.FRAME_BACKGROUND}
 
     created = _data(page.post(f"{BASE}/jobs", json={
         "source": SOURCE, "results": RESULTS, "event": None}), 201)
@@ -2282,6 +2290,10 @@ READS = [
     ("get", f"{BASE}/jobs/20261116-000000-zzzz/review", None),
     # The match log's days (A5).
     ("get", f"{BASE}/match-logs", None),
+    # The title templates and a set's thumbnail (A6).
+    ("get", f"{BASE}/templates", None),
+    ("get", f"{BASE}/templates/default", None),
+    ("get", f"{BASE}/jobs/20261116-000000-zzzz/thumbs/1", None),
 ]
 WRITES = [
     ("patch", f"{BASE}/settings", {"work_dir": "C:\\x"}),
@@ -2292,6 +2304,14 @@ WRITES = [
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:export", None),
     # The results' preparation (A5): it reaches start.gg for the job.
     ("post", f"{BASE}/results:prepare", {"kind": "json", "results": RESULTS}),
+    # The title templates' writes (they go to user_data/), the titles'
+    # preview (it starts the worker) and the thumbnails' drawing (A6).
+    ("put", f"{BASE}/templates/default", {"template": {}}),
+    ("delete", f"{BASE}/templates/default", None),
+    ("post", f"{BASE}/templates/default:duplicate", None),
+    ("post", f"{BASE}/jobs/20261116-000000-zzzz/titles:preview",
+     {"template": {}}),
+    ("post", f"{BASE}/jobs/20261116-000000-zzzz/thumbs:generate", None),
 ]
 
 
@@ -2303,13 +2323,21 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "get_archive_frame": WebAccess.THIS_PC,
                  "get_archive_review": WebAccess.THIS_PC,
                  "get_archive_match_logs": WebAccess.THIS_PC,
+                 "get_archive_templates": WebAccess.THIS_PC,
+                 "get_archive_template": WebAccess.THIS_PC,
+                 "get_archive_thumb": WebAccess.THIS_PC,
                  "archive_settings_update": WebAccess.SHELL,
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,
                  "archive_job_resume": WebAccess.SHELL,
                  "archive_review_update": WebAccess.SHELL,
                  "archive_job_export": WebAccess.SHELL,
-                 "archive_results_prepare": WebAccess.SHELL}
+                 "archive_results_prepare": WebAccess.SHELL,
+                 "archive_template_update": WebAccess.SHELL,
+                 "archive_template_delete": WebAccess.SHELL,
+                 "archive_template_duplicate": WebAccess.SHELL,
+                 "archive_titles_preview": WebAccess.SHELL,
+                 "archive_thumbs_generate": WebAccess.SHELL}
     assert {name: WebAccess.ROUTE_ACCESS[f"api_v1.{name}"]
             for name in endpoints} == endpoints
 
@@ -2329,6 +2357,7 @@ def test_another_computer_cannot_use_the_archive_even_with_the_token(
                else WebAccess.THIS_PC_ONLY)
     assert response.get_json() == WebAccess.ErrorBody(refusal)
     assert service.Jobs() == [] and not work.exists()
+    assert not os.path.exists(templates.DIRECTORY)
 
 
 @pytest.mark.parametrize("method, url, body", WRITES)
@@ -2356,6 +2385,7 @@ def test_only_the_shells_own_request_writes(
     assert response.status_code == 403
     assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
     assert service.Jobs() == [] and not work.exists()
+    assert not os.path.exists(templates.DIRECTORY)
 
 
 @pytest.mark.parametrize("method, url, body", WRITES)
@@ -2369,6 +2399,7 @@ def test_a_shell_that_never_issued_the_secret_writes_nothing(
     assert response.status_code == 403
     assert response.get_json() == WebAccess.ErrorBody(WebAccess.SHELL_ONLY)
     assert service.Jobs() == [] and not work.exists()
+    assert not os.path.exists(templates.DIRECTORY)
 
 
 @pytest.mark.parametrize("method, url, body", READS)

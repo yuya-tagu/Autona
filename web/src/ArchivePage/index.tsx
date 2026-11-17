@@ -30,6 +30,7 @@ import {
     Job,
     JobExport,
     JobSummary,
+    JobThumbs,
     MatchLogDay,
     PrepareSummary,
     SetCharacters,
@@ -63,6 +64,7 @@ import {
     nextReviewSet,
     setNumber,
     stepSet,
+    thumbPath,
     videoExtension,
 } from "./archivePreview";
 import {useShellAccess} from "../PanelShell/useShellAccess";
@@ -94,6 +96,8 @@ import {
 } from "./archiveReview";
 import Preview from "./Preview";
 import Timeline from "./Timeline";
+import Templates, {TemplateLine} from "./Templates";
+import {Template, TemplateEntry} from "./archiveTemplates";
 
 // The Archive Clipper page (ADR-006 A1), /web/app/archive: starts a worker
 // job on a VOD, shows its progress and the sets it found. State is the
@@ -104,8 +108,15 @@ import Timeline from "./Timeline";
 // finished job's review is edited there (A4: IN / OUT, the result given,
 // confirmed; saved to its review.json as it changes) and its confirmed sets
 // exported to clips. ?job=<id> opens a job (the preview's "open in
-// browser"). The writes are SHELL routes (D7): outside the desktop's own
-// window (this PC's browser) the page only reads, and says so.
+// browser"). The title templates have their own view (A6: Templates, the
+// header's button; the job view says which one the job's event takes): the
+// job's view stays under it, hidden (the new job's form, the review, the
+// selected set as they were), and the template edits not saved yet are the
+// page's (they outlive the template view), and
+// a finished job's confirmed sets get thumbnails (its thumbs/, shown in the
+// set list and the details). The writes are SHELL routes (D7): outside the
+// desktop's own window (this PC's browser) the page only reads, and says
+// so.
 
 const BASE = "/api/v1/archive";
 const POLL_MS = 1000;
@@ -222,18 +233,26 @@ function EstimateBadge() {
     );
 }
 
-function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
+function SetListRow({row, jobId, source, sourceId, thumb, selected,
+                     onSelect}: {
     row: ReviewedRow;
     jobId: string;
     source?: string | null;
     sourceId?: string | null;
+    // The set's thumbnail (A6), when it has one.
+    thumb: string | null;
     selected: boolean;
     onSelect: () => void;
 }) {
     const [noFrame, setNoFrame] = React.useState(false);
+    const [noThumb, setNoThumb] = React.useState(false);
+    // A thumbnail drawn again is tried again.
+    React.useEffect(() => setNoThumb(false), [thumb]);
     const text = rowText(row, i18n.t("archive_no_match"));
     const score = scoreText(row);
-    const path = row.thumb && !noFrame ? framePath(jobId, row.no) : null;
+    const shownThumb = thumb !== null && !noThumb ? thumb : null;
+    const path = shownThumb ?? (row.thumb && !noFrame
+        ? framePath(jobId, row.no) : null);
     const characters = setCharacters(row.set);
     return (
         // Enter picks the row (a button); on the selected one it is the
@@ -253,12 +272,15 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
                   borderBottom: "1px solid", borderColor: "divider",
                   bgcolor: selected ? tokens.bgTertiary : "transparent",
                   "&:hover": {bgcolor: tokens.bgTertiary}}}>
-            {/* The set's background frame (--thumbs), else a box. */}
+            {/* The set's thumbnail, else its background frame (--thumbs),
+                else a box. */}
             {path !== null ? (
                 <Box component="img" alt="" loading="lazy"
                      src={`${BASE_URL}${path}`}
-                     data-testid={`archive-frame-${row.no}`}
-                     onError={() => setNoFrame(true)}
+                     data-testid={shownThumb !== null
+                         ? `archive-thumb-${row.no}` : `archive-frame-${row.no}`}
+                     onError={() => (shownThumb !== null ? setNoThumb(true)
+                                     : setNoFrame(true))}
                      sx={{width: 48, height: 27, flexShrink: 0,
                           objectFit: "cover", borderRadius: "2px"}}/>
             ) : (
@@ -316,12 +338,20 @@ function SetListRow({row, jobId, source, sourceId, selected, onSelect}: {
     );
 }
 
-function SetList({sets, rows, jobId, source, filter, onFilter, selectedNo,
-                  onSelect}: {
+// The path of set `no`'s thumbnail when the job has one (A6).
+function thumbOf(jobId: string, thumbs: JobThumbs | null | undefined,
+                 no: number): string | null {
+    return thumbs?.files?.includes(no)
+        ? thumbPath(jobId, no, thumbs.revision) : null;
+}
+
+function SetList({sets, rows, jobId, source, thumbs, filter, onFilter,
+                  selectedNo, onSelect}: {
     sets: SetsJson;
     rows: ReviewedRow[];
     jobId: string;
     source?: string | null;
+    thumbs: JobThumbs | null;
     filter: SetFilter;
     onFilter: (filter: SetFilter) => void;
     selectedNo: number | null;
@@ -354,6 +384,7 @@ function SetList({sets, rows, jobId, source, filter, onFilter, selectedNo,
                 ) : rows.map((row) => (
                     <SetListRow key={row.no} row={row} jobId={jobId}
                                 source={source} sourceId={sets.source_id}
+                                thumb={thumbOf(jobId, thumbs, row.no)}
                                 selected={row.no === selectedNo}
                                 onSelect={() => onSelect(row.no)}/>
                 ))}
@@ -482,11 +513,25 @@ function AssignSelect({row, edit}: {row: ReviewedRow; edit: DetailEdits}) {
 
 // The selected set as reviewed (`original`: as the worker found it). Read
 // only without `edit` (a job not done, this PC's browser).
-function SetDetails({row, original, sets, source, onSeek, edit}: {
+function DetailThumb({path}: {path: string}) {
+    const [gone, setGone] = React.useState(false);
+    React.useEffect(() => setGone(false), [path]);
+    return gone ? null : (
+        <Box component="img" alt="" src={`${BASE_URL}${path}`}
+             data-testid="archive-detail-thumb"
+             onError={() => setGone(true)}
+             sx={{width: "100%", aspectRatio: "16 / 9", objectFit: "contain",
+                  borderRadius: 1, bgcolor: tokens.bgSecondary, mt: 0.5}}/>
+    );
+}
+
+function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
     row: ReviewedRow | null;
     original: SetRow | null;
     sets: SetsJson;
     source?: string | null;
+    // The set's thumbnail (A6), when it has one.
+    thumb?: string | null;
     onSeek: (t: number) => void;
     edit?: DetailEdits;
 }) {
@@ -528,6 +573,7 @@ function SetDetails({row, original, sets, source, onSeek, edit}: {
                     {sub}
                 </Typography>
             ) : null}
+            {thumb ? <DetailThumb path={thumb}/> : null}
             {edit ? (
                 <Box>
                     <Button size="small" data-testid="archive-confirm"
@@ -683,11 +729,58 @@ function SetDetails({row, original, sets, source, onSeek, edit}: {
     );
 }
 
+// The thumbnails of the confirmed sets (A6): how far their drawing is, how
+// it ended.
+function ThumbsState({thumbs}: {thumbs: JobThumbs | null}) {
+    if (thumbs === null || thumbs.state === null) {
+        return null;
+    }
+    const failed = thumbs.failed ?? [];
+    const failedText = failed.length > 0
+        ? ` ${i18n.t("archive_thumbs_failed_sets",
+                     {sets: failed.map((no) => `#${no}`).join(", ")})}` : "";
+    if (thumbs.state === "running") {
+        const finished = thumbs.done + failed.length;
+        return (
+            <Box data-testid="archive-thumbs-running">
+                <Typography variant="body2">
+                    {i18n.t("archive_thumbs_running",
+                            {done: finished, total: thumbs.total})}
+                </Typography>
+                <LinearProgress variant="determinate"
+                                value={thumbs.total > 0
+                                    ? Math.round(finished / thumbs.total * 100)
+                                    : 0}/>
+            </Box>
+        );
+    }
+    if (thumbs.state === "done") {
+        return (
+            <Alert severity={failed.length > 0 ? "warning" : "success"}
+                   data-testid="archive-thumbs-result">
+                {i18n.t("archive_thumbs_done", {count: thumbs.done})}
+                {failedText}
+            </Alert>
+        );
+    }
+    return (
+        <Alert severity={thumbs.state === "cancelled" ? "info" : "error"}
+               data-testid="archive-thumbs-result">
+            {thumbs.state === "cancelled" ? i18n.t("archive_thumbs_cancelled")
+                : i18n.t("archive_thumbs_failed")}
+            {failedText}
+        </Alert>
+    );
+}
+
 // The review's save and the export (A4), over the review screen: how many
 // sets are confirmed, whether the review is saved, the export of the
-// confirmed ones (its progress, its stop, what it cut and where).
+// confirmed ones (its progress, its stop, what it cut and where), the
+// template the export names them with and the confirmed sets' thumbnails
+// (A6).
 function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
-                    save, reviewError, onExport, onCancel}: {
+                    save, reviewError, onExport, onCancel, templates, event,
+                    analysisTemplate, onTemplates, thumbs, onThumbs}: {
     exported: JobExport | null;
     total: number;
     confirmed: number;
@@ -698,6 +791,13 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
     reviewError: string;
     onExport: () => void;
     onCancel: () => void;
+    templates: TemplateEntry[] | null;
+    event: string | null | undefined;
+    // sets.json's: the template the analysis named the sets with.
+    analysisTemplate: string | null | undefined;
+    onTemplates: () => void;
+    thumbs: JobThumbs | null;
+    onThumbs: () => void;
 }) {
     const running = exported?.state === "running";
     const saveText = save.status === "pending" || save.status === "saving"
@@ -724,11 +824,33 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                         onClick={onExport}>
                     {i18n.t("archive_export")}
                 </Button>
+                <Button variant="outlined" size="small"
+                        data-testid="archive-thumbs"
+                        disabled={!canExport || confirmed === 0 || starting
+                                  || thumbs?.state === "running"}
+                        onClick={onThumbs}>
+                    {i18n.t("archive_thumbs_make")}
+                </Button>
                 <Typography variant="caption" data-testid="archive-save-state"
                             sx={{color: tokens.textMuted}}>
                     {saveText}
                 </Typography>
             </Stack>
+            <Stack direction="row" spacing={1} alignItems="center"
+                   sx={{flexWrap: "wrap"}}>
+                <TemplateLine entries={templates} event={event}
+                              label={i18n.t("archive_tpl_export_line")}
+                              onEdit={onTemplates}/>
+                {analysisTemplate ? (
+                    <Typography variant="caption"
+                                data-testid="archive-analysis-template"
+                                sx={{color: tokens.textMuted}}>
+                        {i18n.t("archive_tpl_analysis",
+                                {name: analysisTemplate})}
+                    </Typography>
+                ) : null}
+            </Stack>
+            <ThumbsState thumbs={thumbs}/>
             {reviewError ? (
                 <Alert severity="warning">
                     {i18n.t("archive_review_load_failed", {message: reviewError})}
@@ -811,13 +933,18 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
 // review (A4) is read with it and, in the desktop's window, edited there:
 // each change is saved (ReviewSaver: one PUT of the whole review after the
 // edits stop) and the export saves what is pending first.
-function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
+function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
+                   onTemplates, hidden = false}: {
     job: Job;
     sets: SetsJson;
     setNo: number | null;
     onSetNo: (no: number) => void;
     readOnly: boolean;
     onAct: (action: string) => Promise<void>;
+    templates: TemplateEntry[] | null;
+    onTemplates: () => void;
+    // Under the templates' view: kept as it is, its video paused.
+    hidden?: boolean;
 }) {
     const [filter, setFilter] = React.useState<SetFilter>("all");
     const [view, setView] = React.useState<TimelineView>("all");
@@ -910,11 +1037,20 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
         return () => window.removeEventListener("beforeunload", leave);
     }, []);
 
-    // Opening the job hands the keys to it (Space / arrows / N), without
-    // scrolling the page to it.
+    // Opening the job (or coming back to it from the templates) hands the
+    // keys to it (Space / arrows / N), without scrolling the page to it. A
+    // hidden view's video does not play on (it would be heard).
     React.useEffect(() => {
-        root.current?.focus({preventScroll: true});
-    }, []);
+        if (!hidden) {
+            root.current?.focus({preventScroll: true});
+            return;
+        }
+        try {
+            videoRef.current?.pause();
+        } catch {
+            // A video that cannot play is not playing.
+        }
+    }, [hidden]);
     // Keep the selected set's row in view (after a filter reset too). Only a
     // set number goes into the selector.
     React.useEffect(() => {
@@ -1006,13 +1142,13 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
         }
         return null;
     };
-    const exportConfirmed = async () => {
+    // The export and the thumbnails take the review the server has: what is
+    // not saved yet goes first.
+    const afterSaving = async (action: string) => {
         setStarting(true);
         try {
-            // What is not saved yet goes first: the export cuts the review
-            // the server has.
             if (await (saver.current?.flush() ?? Promise.resolve(true))) {
-                await onAct("export");
+                await onAct(action);
             }
         } finally {
             setStarting(false);
@@ -1081,15 +1217,21 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
                            canExport={editable} readOnly={readOnly}
                            starting={starting} save={save}
                            reviewError={reviewError}
-                           onExport={exportConfirmed}
-                           onCancel={() => onAct("cancel")}/>
+                           onExport={() => afterSaving("export")}
+                           onCancel={() => onAct("cancel")}
+                           templates={templates} event={sets.event}
+                           analysisTemplate={sets.template}
+                           onTemplates={onTemplates}
+                           thumbs={job.thumbs ?? null}
+                           onThumbs={() => afterSaving("thumbs")}/>
             ) : null}
             <Box sx={{flex: 1, minHeight: 0, display: "grid",
                       gridTemplateColumns:
                           `${LIST_WIDTH}px minmax(0, 1fr) ${DETAIL_WIDTH}px`,
                       gridTemplateRows: "minmax(0, 1fr) auto"}}>
                 <SetList sets={shown} rows={rows} jobId={job.id}
-                         source={job.source} filter={filter}
+                         source={job.source} thumbs={job.thumbs ?? null}
+                         filter={filter}
                          onFilter={setFilter} selectedNo={setNo}
                          onSelect={(no) => choose(no)}/>
                 <Preview jobId={job.id}
@@ -1106,7 +1248,9 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct}: {
                 <Box sx={{overflowY: "auto", minHeight: 0, borderLeft: "1px solid",
                           borderColor: "divider"}}>
                     <SetDetails row={row} original={original} sets={shown}
-                                source={job.source} onSeek={seek} edit={edit}/>
+                                source={job.source} onSeek={seek} edit={edit}
+                                thumb={row === null ? null
+                                    : thumbOf(job.id, job.thumbs, row.no)}/>
                 </Box>
                 <Box sx={{gridColumn: "1 / -1", minWidth: 0}}>
                     <Timeline sets={shown} rows={rows} selected={row}
@@ -1182,12 +1326,15 @@ function PreparedSummary({prepared, mode}: {
     );
 }
 
-function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
+function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
+                     templates, onTemplates}: {
     status: ArchiveStatus;
     readOnly: boolean;
     onStatus: (status: ArchiveStatus) => void;
     onStarted: (job: Job) => void;
     onFailed: () => void;
+    templates: TemplateEntry[] | null;
+    onTemplates: () => void;
 }) {
     const [source, setSource] = React.useState("");
     const [event, setEvent] = React.useState("");
@@ -1334,6 +1481,12 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
     const day = days?.find((each) => each.date === date) ?? null;
     const ready = source.trim() !== ""
         && (mode === "none" || (prepared !== null && !preparing));
+    // The event the worker names the sets with: the one typed, else the
+    // results' (vodsplit run: --event, else the results' "event").
+    const resultsEvent = mode === "none" ? null
+        : (prepared?.results as {event?: unknown} | undefined)?.event;
+    const effectiveEvent = event.trim() !== "" ? event.trim()
+        : typeof resultsEvent === "string" ? resultsEvent : null;
     return (
         <Stack spacing={2} sx={{p: 2, maxWidth: 720}}>
             <TextField size="small" fullWidth value={source}
@@ -1469,9 +1622,14 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed}: {
                     <PreparedSummary prepared={prepared} mode={mode}/>
                 ) : null}
             </FormControl>
-            <TextField size="small" fullWidth value={event}
-                       label={i18n.t("archive_event")}
-                       onChange={(e) => setEvent(e.target.value)}/>
+            <Box>
+                <TextField size="small" fullWidth value={event}
+                           label={i18n.t("archive_event")}
+                           onChange={(e) => setEvent(e.target.value)}/>
+                <TemplateLine entries={templates} event={effectiveEvent}
+                              label={i18n.t("archive_tpl_job_line")}
+                              onEdit={onTemplates}/>
+            </Box>
             <Stack direction="row" spacing={1} alignItems="center">
                 {editing ? (
                     <>
@@ -1583,9 +1741,11 @@ function Ended({job, readOnly, onAct}: {
     );
 }
 
-// A job runs its analysis or its export (A4): either is followed.
+// A job runs its analysis or its export (A4), or its thumbnails are drawn
+// (A6): each is followed.
 function isBusy(job: Job): boolean {
-    return job.state === "running" || job.export?.state === "running";
+    return job.state === "running" || job.export?.state === "running"
+        || job.thumbs?.state === "running";
 }
 
 function jobLabel(job: JobSummary): string {
@@ -1603,6 +1763,14 @@ function ArchiveContent() {
     const [setNo, setSetNo] = React.useState<number | null>(null);
     const [error, setError] = React.useState("");
     const [pollFailed, setPollFailed] = React.useState(false);
+    // The job screen, or the title templates' (A6).
+    const [view, setView] = React.useState<"jobs" | "templates">("jobs");
+    const [templates, setTemplates] = React.useState<TemplateEntry[] | null>(null);
+    const [templatesError, setTemplatesError] = React.useState("");
+    // The template edits not saved yet, by id (Templates edits them): they
+    // outlive the template view.
+    const [templateDrafts, setTemplateDrafts] =
+        React.useState<Record<string, Template>>({});
     // Outside the desktop's window the writes (SHELL) are refused: only
     // reading here. Still checking or a failed probe leaves them on (the
     // server answers for itself).
@@ -1619,6 +1787,21 @@ function ArchiveContent() {
         setSelected(id);
     }, []);
 
+    // The templates (THIS_PC: readable in this PC's browser too) -> the list,
+    // or null when it could not be read (said on the template view).
+    const loadTemplates = React.useCallback(async () => {
+        try {
+            const data = await getData<{templates: TemplateEntry[]}>(
+                `${BASE}/templates`);
+            setTemplates(data.templates);
+            setTemplatesError("");
+            return data.templates;
+        } catch (e) {
+            setTemplatesError(messageOf(e));
+            return null;
+        }
+    }, []);
+
     const loadJobs = React.useCallback(async () => {
         const data = await getData<{jobs: JobSummary[]}>(`${BASE}/jobs`);
         // Newest first (the list is shown in this order whatever the server's).
@@ -1633,6 +1816,7 @@ function ArchiveContent() {
                 setStatus(data);
                 if (data.available) {
                     loadJobs().catch(() => undefined);
+                    loadTemplates();
                     // A reload while a job runs shows its progress.
                     if (data.running_job && selectedRef.current === "new") {
                         select(data.running_job);
@@ -1643,7 +1827,7 @@ function ArchiveContent() {
         return () => {
             live = false;
         };
-    }, [loadJobs, select]);
+    }, [loadJobs, loadTemplates, select]);
 
     // Null when the answer is for a job that is no longer the selected one.
     const loadDetail = React.useCallback(async (id: string) => {
@@ -1697,9 +1881,12 @@ function ArchiveContent() {
         }
         const id = detail.job.id;
         setError("");
+        // "thumbs" draws the confirmed sets' thumbnails (A6); the others are
+        // the job's own actions (:cancel, :resume, :export).
+        const path = action === "thumbs" ? "/thumbs:generate" : `:${action}`;
         try {
             const job = await postJob(
-                `${BASE}/jobs/${encodeURIComponent(id)}:${action}`, {});
+                `${BASE}/jobs/${encodeURIComponent(id)}${path}`, {});
             if (selectedRef.current === id) {
                 setPollFailed(false);
                 // A resumed job runs: its sets (and the preview's video, which
@@ -1749,10 +1936,19 @@ function ArchiveContent() {
                         ))}
                     </Select>
                 </FormControl>
-                <Button variant="outlined" onClick={() => select("new")}>
+                <Button variant="outlined" onClick={() => {
+                    setView("jobs");
+                    select("new");
+                }}>
                     {i18n.t("archive_new_job")}
                 </Button>
-                {selected !== "new" && sets ? (
+                <Button variant={view === "templates" ? "contained" : "outlined"}
+                        data-testid="archive-templates-button"
+                        onClick={() => setView(
+                            view === "templates" ? "jobs" : "templates")}>
+                    {i18n.t("archive_templates")}
+                </Button>
+                {view === "jobs" && selected !== "new" && sets ? (
                     <Stack direction="row" spacing={1}>
                         <Chip label={`${i18n.t("archive_chip_sets")} ${summary.sets}`}/>
                         <Chip label={`${i18n.t("archive_chip_matched")} ${summary.matched}`}/>
@@ -1770,40 +1966,62 @@ function ArchiveContent() {
             {error ? <Alert severity="error" onClose={() => setError("")}>
                 {error}
             </Alert> : null}
-            {selected === "new" ? (
-                <NewJobForm status={status} readOnly={readOnly}
-                            onStatus={setStatus}
-                            onStarted={(job) => {
-                                setJobs((known) => [job, ...known]);
-                                // Left for another job meanwhile: stay there.
-                                if (selectedRef.current === "new") {
-                                    select(job.id);
-                                }
-                            }}
-                            onFailed={() => {
-                                loadJobs().catch(() => undefined);
-                            }}/>
-            ) : detail === null ? null : (
-                <Box sx={{flex: 1, minHeight: 0, display: "flex",
-                          flexDirection: "column"}}>
-                    {detail.job.state === "running"
-                        ? <Progress job={detail.job} readOnly={readOnly}
-                                    onAct={act}/>
-                        : <Ended job={detail.job} readOnly={readOnly}
-                                 onAct={act}/>}
-                    {(detail.job.warnings ?? []).length > 0 ? (
-                        <Alert severity="warning" sx={{mx: 2}}>
-                            {(detail.job.warnings ?? []).join(" / ")}
-                        </Alert>
-                    ) : null}
-                    {sets ? (
-                        <SetsView key={detail.job.id} job={detail.job}
-                                  sets={sets} setNo={setNo}
-                                  onSetNo={setSetNo} readOnly={readOnly}
-                                  onAct={act}/>
-                    ) : null}
-                </Box>
-            )}
+            {view === "templates" ? (
+                <Templates entries={templates} loadError={templatesError}
+                           onReload={loadTemplates}
+                           drafts={templateDrafts}
+                           setDrafts={setTemplateDrafts} status={status}
+                           onStatus={setStatus} readOnly={readOnly}
+                           jobId={detail?.job.state === "done" && sets
+                               ? detail.job.id : null}
+                           sets={sets} setNo={setNo}
+                           onBack={() => setView("jobs")}/>
+            ) : null}
+            {/* Hidden, not unmounted, under the templates' view: the form's
+                input and the review screen are as they were on the way back. */}
+            <Box data-testid="archive-jobs-view"
+                 sx={{flex: 1, minHeight: 0, flexDirection: "column"}}
+                 style={{display: view === "templates" ? "none" : "flex"}}>
+                {selected === "new" ? (
+                    <NewJobForm status={status} readOnly={readOnly}
+                                templates={templates}
+                                onTemplates={() => setView("templates")}
+                                onStatus={setStatus}
+                                onStarted={(job) => {
+                                    setJobs((known) => [job, ...known]);
+                                    // Left for another job meanwhile: stay
+                                    // there.
+                                    if (selectedRef.current === "new") {
+                                        select(job.id);
+                                    }
+                                }}
+                                onFailed={() => {
+                                    loadJobs().catch(() => undefined);
+                                }}/>
+                ) : detail === null ? null : (
+                    <Box sx={{flex: 1, minHeight: 0, display: "flex",
+                              flexDirection: "column"}}>
+                        {detail.job.state === "running"
+                            ? <Progress job={detail.job} readOnly={readOnly}
+                                        onAct={act}/>
+                            : <Ended job={detail.job} readOnly={readOnly}
+                                     onAct={act}/>}
+                        {(detail.job.warnings ?? []).length > 0 ? (
+                            <Alert severity="warning" sx={{mx: 2}}>
+                                {(detail.job.warnings ?? []).join(" / ")}
+                            </Alert>
+                        ) : null}
+                        {sets ? (
+                            <SetsView key={detail.job.id} job={detail.job}
+                                      sets={sets} setNo={setNo}
+                                      onSetNo={setSetNo} readOnly={readOnly}
+                                      onAct={act} templates={templates}
+                                      onTemplates={() => setView("templates")}
+                                      hidden={view === "templates"}/>
+                        ) : null}
+                    </Box>
+                )}
+            </Box>
         </Box>
     );
 }
