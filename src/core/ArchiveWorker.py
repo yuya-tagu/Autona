@@ -23,8 +23,10 @@ accepted (the sets.json format this Autona reads). A worker that is missing,
 cannot be started, does not answer in ``PROBE_TIMEOUT_SECS`` or answers
 something else is unavailable, with the reason in Japanese (the page shows
 it). ``features`` names what a worker of that format does beyond it (vodsplit
-V10: ``titles``); a worker from before says none, and only what needs the
-feature is refused (ADR-006 A6: the titles' preview).
+V10: ``titles``; 0.4.0: ``h264``, ``run --codec h264``); a worker from before
+says none, and only what needs the feature is refused (ADR-006 A6: the
+titles' preview) or done another way (the download's codec:
+ArchiveJobService._Arguments).
 
 Its self-check (``CheckCommand``, ADR-006 A7): ``<command> version --check``
 of a worker whose features name ``CHECK_FEATURE`` runs every part the frozen
@@ -93,6 +95,10 @@ PROBE_TIMEOUT_SECS = 8
 TITLES_FEATURE = "titles"
 # What a worker with the self-check (``version --check``) says it does.
 CHECK_FEATURE = "check"
+# What a worker that downloads H.264 + AAC first (``run --codec h264``, its
+# default from vodsplit 0.4.0) says it does; one from before takes ``open``
+# (VP9 / AV1 + Opus, its default) or ``any``.
+H264_FEATURE = "h264"
 # How often a probe that can be stopped (``stop``) looks at it.
 _STOP_POLL_SECS = 0.2
 # The titles' run waits this long at most (ArchiveJobService gives it what

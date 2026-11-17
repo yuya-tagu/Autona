@@ -1453,4 +1453,242 @@ describe("the review screen", () => {
         expect(within(screen.getByTestId("archive-template-20261117-100000-aaaa"))
             .getByText(i18n.t("archive_tpl_unsaved"))).toBeTruthy();
     });
+
+    // A YouTube job (D7): its video plays in YouTube's embedded player, its
+    // frame spoken to over postMessage. jsdom loads nothing into the frame:
+    // the test records what the page posts to it and plays the frame's part.
+    describe("of a YouTube job", () => {
+        const VIDEO = "abcDEF12_-9";
+        const EMBED = "https://www.youtube-nocookie.com";
+        const YT_JOB = {...JOB, source: `https://www.youtube.com/watch?v=${VIDEO}`};
+
+        beforeEach(() => {
+            install({handlers: {
+                "/api/v1/archive/jobs": () => Promise.resolve(
+                    {data: {jobs: [YT_JOB]}}),
+                [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                    job: YT_JOB, sets: {...SETS, source_id: VIDEO}}}),
+            }});
+        });
+
+        afterEach(() => {
+            cleanup();
+        });
+
+        const PLAYING = 1;
+        const PAUSED = 2;
+        const timecode = () => screen.getByTestId("archive-timecode")
+            .textContent;
+        const watch = (s) => `https://www.youtube.com/watch?v=${VIDEO}&t=${s}s`;
+        // The player's frame: the commands the page posts to it from now on,
+        // and its voice.
+        const frame = async () => {
+            const host = await screen.findByTestId("archive-youtube");
+            const iframe = await waitFor(() => {
+                const found = host.querySelector("iframe");
+                expect(found).not.toBeNull();
+                return found;
+            });
+            const posts = jest.spyOn(iframe.contentWindow, "postMessage")
+                .mockImplementation(() => undefined);
+            const commands = () => posts.mock.calls.map(([data, target]) => {
+                expect(target).toBe(EMBED);
+                return JSON.parse(data);
+            }).filter((message) => message.event === "command")
+                .map((message) => [message.func, ...message.args]);
+            const say = (message) => act(() => {
+                window.dispatchEvent(new MessageEvent("message", {
+                    data: JSON.stringify(message), origin: EMBED,
+                    source: iframe.contentWindow}));
+            });
+            return {host, iframe, commands, say};
+        };
+        // The frame, once it said its player is ready.
+        const ready = async () => {
+            const played = await frame();
+            played.say({event: "onReady", info: null});
+            return played;
+        };
+
+        test("plays in YouTube's frame, driven by the page's keys", async () => {
+            render(<ArchivePage/>);
+            const review = await screen.findByTestId("archive-review");
+            expect(screen.queryByTestId("archive-video")).toBeNull();
+            const {iframe, commands, say} = await ready();
+            expect(iframe.getAttribute("src")).toBe(
+                `${EMBED}/embed/${VIDEO}?enablejsapi=1&origin=`
+                + `${encodeURIComponent(window.location.origin)}`
+                + "&playsinline=1&rel=0");
+            expect(iframe.title).toBe(i18n.t("archive_preview"));
+            // No script of YouTube's runs in the page.
+            expect([...document.scripts].filter((script) => script.src))
+                .toEqual([]);
+            expect(commands()).toEqual([["addEventListener", "onStateChange"],
+                                        ["addEventListener", "onError"]]);
+
+            // A set picked is cued at its start, not played.
+            fireEvent.keyDown(review, {key: "ArrowDown"});
+            expect(current()).toEqual(["archive-set-1"]);
+            expect(commands().at(-1)).toEqual(
+                ["cueVideoById", {videoId: VIDEO, startSeconds: 90}]);
+            expect(timecode()).toMatch(/^0:01:30/);
+            expect(screen.getByTestId("archive-youtube-link")
+                .getAttribute("href")).toBe(watch(90));
+
+            // Space plays it; the frame delivers where it is.
+            fireEvent.keyDown(review, {key: " "});
+            expect(commands().at(-1)).toEqual(["playVideo"]);
+            say({event: "onStateChange", info: PLAYING});
+            say({event: "infoDelivery",
+                 info: {currentTime: 95, duration: 3600, playerState: PLAYING}});
+            expect(timecode()).toMatch(/^0:01:35/);
+            say({event: "infoDelivery", info: {currentTime: 97.5}});
+            expect(timecode()).toMatch(/^0:01:37/);
+            fireEvent.keyDown(review, {key: " "});
+            expect(commands().at(-1)).toEqual(["pauseVideo"]);
+            say({event: "onStateChange", info: PAUSED});
+
+            // Started, a set picked is sought.
+            fireEvent.keyDown(review, {key: "n"});
+            expect(current()).toEqual(["archive-set-2"]);
+            expect(commands().at(-1)).toEqual(["seekTo", 290, true]);
+            // The transport links to the video on YouTube where it is.
+            const link = screen.getByTestId("archive-youtube-link");
+            expect(link.textContent).toBe(i18n.t("archive_youtube_open_here"));
+            expect(link.getAttribute("href")).toBe(watch(290));
+            expect(link.getAttribute("target")).toBe("_blank");
+            expect(link.getAttribute("rel")).toBe("noreferrer");
+        });
+
+        test("a set picked before the player is ready is where it starts",
+             async () => {
+            render(<ArchivePage/>);
+            const review = await screen.findByTestId("archive-review");
+            fireEvent.keyDown(review, {key: "ArrowDown"});
+            const {commands} = await ready();
+            expect(commands().at(-1)).toEqual(
+                ["cueVideoById", {videoId: VIDEO, startSeconds: 90}]);
+            expect(timecode()).toMatch(/^0:01:30/);
+        });
+
+        test("I / O take where the player is", async () => {
+            render(<ArchivePage/>);
+            const review = await screen.findByTestId("archive-review");
+            const {say} = await ready();
+            fireEvent.click(screen.getByTestId("archive-set-1"));
+            await screen.findByTestId("archive-confirm");
+            say({event: "infoDelivery",
+                 info: {currentTime: 100.456, playerState: PLAYING}});
+            say({event: "infoDelivery", info: {playerState: PAUSED}});
+            fireEvent.keyDown(review, {key: "i"});
+            say({event: "infoDelivery", info: {currentTime: 200.001}});
+            fireEvent.keyDown(review, {key: "o"});
+            fireEvent.keyDown(review, {key: "Enter"});
+            expect(current()).toEqual(["archive-set-2"]);
+            await saved();
+            expect(puts()).toEqual([
+                {sets: {1: {confirmed: true, start: 100.45, end: 200.01}}}]);
+        });
+
+        test("a click in the player gives the keys back to the page",
+             async () => {
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-review");
+            const {host, iframe, commands} = await ready();
+            // window.focus(): jsdom has none (it says so on the console).
+            const focusWindow = jest.spyOn(window, "focus")
+                .mockImplementation(() => undefined);
+            try {
+                iframe.focus();
+                expect(document.activeElement).toBe(iframe);
+                window.dispatchEvent(new Event("blur"));
+                await waitFor(() => expect(document.activeElement).toBe(host));
+                expect(focusWindow).toHaveBeenCalled();
+            } finally {
+                focusWindow.mockRestore();
+            }
+            fireEvent.keyDown(host, {key: " "});
+            expect(commands().at(-1)).toEqual(["playVideo"]);
+        });
+
+        test("a video YouTube will not embed plays as the downloaded file",
+             async () => {
+            render(<ArchivePage/>);
+            const review = await screen.findByTestId("archive-review");
+            const {say} = await ready();
+            fireEvent.keyDown(review, {key: "ArrowDown"});
+            say({event: "onError", info: 150});
+            const video = await screen.findByTestId("archive-video");
+            expect(video.getAttribute("src"))
+                .toContain(`/archive/jobs/${ID}/video`);
+            expect(screen.queryByTestId("archive-youtube")).toBeNull();
+            expect(document.querySelector("iframe")).toBeNull();
+            expect(screen.queryByTestId("archive-video-problem")).toBeNull();
+            // The transport links to YouTube all the same, following the sets.
+            const link = screen.getByTestId("archive-youtube-link");
+            expect(link.getAttribute("href")).toBe(watch(90));
+            fireEvent.keyDown(review, {key: "ArrowDown"});
+            expect(current()).toEqual(["archive-set-2"]);
+            expect(link.getAttribute("href")).toBe(watch(290));
+        });
+
+        test("a frame that errs before it is ready falls back the same",
+             async () => {
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-review");
+            const {say} = await frame();
+            say({event: "onError", info: 153});
+            expect(await screen.findByTestId("archive-video")).toBeTruthy();
+            expect(screen.queryByTestId("archive-youtube")).toBeNull();
+            expect(screen.getByTestId("archive-youtube-link")
+                .getAttribute("href")).toBe(watch(0));
+        });
+
+        test("the file that cannot play here offers the browser and YouTube",
+             async () => {
+            global.fetch = jest.fn(() => Promise.resolve({status: 206}));
+            const canPlay = jest.spyOn(window.HTMLMediaElement.prototype,
+                                       "canPlayType")
+                .mockImplementation(() => "");
+            try {
+                render(<ArchivePage/>);
+                const review = await screen.findByTestId("archive-review");
+                const {say} = await ready();
+                fireEvent.keyDown(review, {key: "ArrowDown"});
+                say({event: "onError", info: 150});
+                const video = await screen.findByTestId("archive-video");
+                Object.defineProperty(video, "error", {configurable: true,
+                                                       value: {code: 4}});
+                fireEvent.error(video);
+                const problem = await screen.findByTestId(
+                    "archive-video-problem");
+                expect(problem.textContent)
+                    .toContain(i18n.t("archive_video_open_in_browser_body"));
+                expect(within(problem).getByRole("link", {
+                    name: i18n.t("archive_video_open_in_browser")})).toBeTruthy();
+                const open = within(problem).getByRole("link", {
+                    name: i18n.t("archive_youtube_open")});
+                expect(open.getAttribute("href")).toBe(watch(90));
+                expect(open.getAttribute("target")).toBe("_blank");
+                expect(open.getAttribute("rel")).toBe("noreferrer");
+                expect(screen.getByTestId("archive-youtube-link")).toBeTruthy();
+            } finally {
+                canPlay.mockRestore();
+            }
+        });
+
+        test("its own video is played when its id is not YouTube's", async () => {
+            install({handlers: {
+                "/api/v1/archive/jobs": () => Promise.resolve(
+                    {data: {jobs: [YT_JOB]}}),
+                [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                    job: YT_JOB, sets: {...SETS, source_id: "x"}}}),
+            }});
+            render(<ArchivePage/>);
+            expect(await screen.findByTestId("archive-video")).toBeTruthy();
+            expect(screen.queryByTestId("archive-youtube")).toBeNull();
+            expect(screen.queryByTestId("archive-youtube-link")).toBeNull();
+            expect(document.querySelector("iframe")).toBeNull();
+        });
+    });
 });

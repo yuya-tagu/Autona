@@ -1219,6 +1219,8 @@
     "archive_video_unplayable": "This video cannot be played.",
     "archive_video_open_in_browser_body": "This video's format (H.264) cannot be played in the Autona window. Open this page in your browser to play it.",
     "archive_video_open_in_browser": "Open in browser",
+    "archive_youtube_open": "Open on YouTube",
+    "archive_youtube_open_here": "Open on YouTube at this time",
     "archive_browser_read_only": "In the browser this page only reads: starting, cancelling and resuming jobs, editing the review, exporting and changing the work folder stay in the Autona window.",
     "archive_read_only": "Only reading here: starting, cancelling and resuming jobs, editing the review, exporting and changing the work folder are done in the Autona window.",
     "archive_timeline": "Timeline",

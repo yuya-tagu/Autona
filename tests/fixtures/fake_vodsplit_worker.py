@@ -12,7 +12,11 @@ The CLI
     Prints ``{"version": "0.0.0-fake", "format": 1, "features":
     ["titles"]}`` and exits 0. ``FAKE_VODSPLIT_FORMAT`` changes the format
     number (an unsupported worker); ``FAKE_VODSPLIT_NO_TITLES`` leaves
-    ``features`` out (a worker from before vodsplit V10);
+    ``titles`` out (a worker from before vodsplit V10, ``features`` out
+    when it is the only one); ``FAKE_VODSPLIT_H264`` adds ``h264`` (vodsplit
+    0.4.0: ``run --codec h264``, its default; without it the fake is a
+    worker from before, whose ``--codec`` is ``open`` (the default) or
+    ``any``);
     ``FAKE_VODSPLIT_VERSION_EXIT`` makes it exit with that code instead (a
     broken worker); ``FAKE_VODSPLIT_VERSION_SLEEP`` (seconds) makes it wait
     before it answers (a worker the antivirus holds).
@@ -38,9 +42,12 @@ The CLI
     are the caller's temporary ones).
 
 ``run <source> --out DIR [--results FILE] [--event NAME | --event=NAME]
-[--download-dir DIR] [--no-cut] [--thumbs] [--progress json]
-[--cancel-on-stdin]``
-    What it does depends on ``FAKE_VODSPLIT_MODE``:
+[--download-dir DIR] [--codec h264|open|any] [--no-cut] [--thumbs]
+[--progress json] [--cancel-on-stdin]``
+    A ``--codec`` the worker does not take (``h264`` without
+    ``FAKE_VODSPLIT_H264``) is argparse's refusal: a usage line on stderr,
+    exit 2, nothing else. Otherwise what it does
+    depends on ``FAKE_VODSPLIT_MODE``:
 
     ``ok`` (the default)
         Prints a ``stage`` and ``progress`` line for each of vodsplit's
@@ -49,8 +56,9 @@ The CLI
         needing review, with ``games_ocr``; with ``--results``, the sets
         take its players and scores) and prints ``done``; exit 0. A URL
         source with ``--download-dir`` is "downloaded" as vodsplit names it
-        (``<dir>/fakevideo01.open.mp4``, VIDEO_BYTES), and sets.json's
-        ``source`` is that file, as vodsplit's is. With ``--thumbs``, as
+        (``<dir>/fakevideo01.mp4`` for ``h264`` / ``any``,
+        ``<dir>/fakevideo01.open.mp4`` for ``open``; VIDEO_BYTES), and
+        sets.json's ``source`` is that file, as vodsplit's is. With ``--thumbs``, as
         vodsplit's export.py: sets.json is written first without frames,
         then the ``export`` stage (``書き出し``, the 5th of 5) prints a
         progress line per set as it writes its background frame
@@ -205,13 +213,23 @@ def sets_json(source, results, event, thumbs=False):
     }
 
 
-def download(source, folder):
-    """vodsplit's download: the file it would write for a URL (VP9 offered:
-    ``<id>.open.mp4``), or the source itself for a file."""
+def codecs():
+    """The ``run --codec`` values this fake takes, its default first:
+    vodsplit 0.4.0's with FAKE_VODSPLIT_H264, else those from before."""
+    if os.environ.get("FAKE_VODSPLIT_H264"):
+        return ("h264", "open", "any")
+    return ("open", "any")
+
+
+def download(source, folder, codec):
+    """vodsplit's download: the file it would write for a URL
+    (``<id>.open.mp4`` for the open codecs, ``<id>.mp4`` for ``h264`` /
+    ``any``), or the source itself for a file."""
     if not source.startswith(("http://", "https://")) or not folder:
         return source
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "fakevideo01.open.mp4")
+    name = "fakevideo01.open.mp4" if codec == "open" else "fakevideo01.mp4"
+    path = os.path.join(folder, name)
     with open(path, "wb") as file:
         file.write(VIDEO_BYTES)
     return path
@@ -220,6 +238,12 @@ def download(source, folder):
 def run(argv):
     mode = os.environ.get("FAKE_VODSPLIT_MODE", "ok")
     delay = float(os.environ.get("FAKE_VODSPLIT_DELAY", "0") or 0)
+    codec = option(argv, "--codec", codecs()[0])
+    if codec not in codecs():
+        # argparse's: before anything is read or written.
+        print(f"usage: vodsplit run: error: argument --codec: invalid "
+              f"choice: {codec!r}", file=sys.stderr, flush=True)
+        return 2
     cancel = _start(argv, mode)
     source = argv[0] if argv else ""
     out = option(argv, "--out")
@@ -289,7 +313,7 @@ def run(argv):
                   "done": step, "total": 2, "fraction": step / 2,
                   "overall": overall, "eta": 1.0 if step == 1 else None})
     os.makedirs(out, exist_ok=True)
-    video = download(source, option(argv, "--download-dir"))
+    video = download(source, option(argv, "--download-dir"), codec)
 
     def save(data):
         with open(os.path.join(out, "sets.json"), "w",
@@ -533,6 +557,8 @@ def main(argv):
         check = os.environ.get("FAKE_VODSPLIT_CHECK")
         if check:
             features.append("check")
+        if "h264" in codecs():
+            features.append("h264")
         if features:
             answer["features"] = features
         if argv[1:] == ["--check"] and check:

@@ -336,7 +336,8 @@ def test_the_run_and_the_export_are_given_the_stored_templates(
              for name in ("01.json", "02.json")]
     assert json.loads(argv.read_text(encoding="utf-8")) == [
         SOURCE, "--out", str(jobDir / "out"),
-        "--download-dir", str(work / "downloads"), "--event=雷影杯 #1",
+        "--download-dir", str(work / "downloads"), "--codec", "any",
+        "--event=雷影杯 #1",
         "--no-cut", "--thumbs", "--template", paths[0], "--template",
         paths[1], "--progress", "json", "--cancel-on-stdin"]
     assert _snapshot(jobDir) == [dict(TEMPLATE), templates.Standard()]

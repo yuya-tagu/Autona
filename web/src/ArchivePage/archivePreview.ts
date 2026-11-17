@@ -1,6 +1,8 @@
 // The archive page's preview (ADR-006 A3): which job's video and frames it
-// asks for, what a key does there, which set comes next, and why a video does
-// not play. Pure helpers (the DOM only as far as a key's target).
+// asks for, what a key does there, which set comes next, why a video does
+// not play, and the player the page drives (the job's own <video>, or
+// YouTube's embedded player for a YouTube job: D7). Pure helpers (the DOM
+// only as far as a key's target and a <video>'s own calls).
 
 import {SetRow} from "./archiveSets";
 
@@ -171,8 +173,64 @@ export function nextReviewSet(rows: SetRow[],
     return null;
 }
 
-// H.264 / AAC: what YouTube's mp4 is when no VP9 / AV1 was offered, and what
-// Autona's window (QtWebEngine) cannot decode.
+// What the page plays and seeks, whichever player it is: the job's own
+// <video> (videoPlayer) or YouTube's embedded one (archiveEmbed). The time is
+// in seconds of the video; currentTime() is null when the player cannot say.
+export interface PreviewPlayer {
+    play(): void;
+    pause(): void;
+    paused(): boolean;
+    seek(t: number): void;
+    currentTime(): number | null;
+}
+
+// The job's own <video> as the page's player.
+export function videoPlayer(video: HTMLVideoElement): PreviewPlayer {
+    return {
+        play: () => {
+            video.play()?.catch(() => undefined);
+        },
+        pause: () => video.pause(),
+        paused: () => video.paused,
+        seek: (t) => {
+            video.currentTime = t;
+        },
+        currentTime: () => video.currentTime,
+    };
+}
+
+// A YouTube video id as the embed takes it; anything else is not put into
+// its URL.
+const EMBED_ID = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_HOSTS = ["youtube.com", "youtu.be", "youtube-nocookie.com"];
+
+// The YouTube video a job is of (D7: played in YouTube's embedded player),
+// or null to play its own video: the job's source is a YouTube URL and the
+// worker named its id (sets.json's source_id). Another site's URL is not
+// (vodsplit can read an 11-character id off its download's name).
+export function youtubeEmbedId(source: string | null | undefined,
+                               sourceId: unknown): string | null {
+    if (typeof source !== "string" || typeof sourceId !== "string"
+        || !EMBED_ID.test(sourceId)) {
+        return null;
+    }
+    let host: string;
+    try {
+        const url = new URL(source.trim());
+        if (url.protocol !== "https:" && url.protocol !== "http:") {
+            return null;
+        }
+        host = url.hostname.toLowerCase();
+    } catch {
+        return null;
+    }
+    return YOUTUBE_HOSTS.some((name) => host === name
+        || host.endsWith(`.${name}`)) ? sourceId : null;
+}
+
+// H.264 / AAC: what the worker downloads from YouTube (D7), and what
+// Autona's window (QtWebEngine) cannot decode -- a YouTube job plays in the
+// embedded player, a local H.264 file offers this PC's browser.
 export const H264_TYPE = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
 
 export function canPlayH264(video: {canPlayType(type: string): string} | null):
@@ -184,6 +242,7 @@ export function canPlayH264(video: {canPlayType(type: string): string} | null):
     }
 }
 
+// Why the preview does not play: playbackProblem's, for the job's own video.
 export type PlaybackProblem = "missing" | "notPreviewable" | "openInBrowser"
     | "unplayable" | "unreachable";
 

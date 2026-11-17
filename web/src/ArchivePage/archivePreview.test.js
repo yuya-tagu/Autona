@@ -18,6 +18,8 @@ import {
     stepSet,
     videoExtension,
     videoPath,
+    videoPlayer,
+    youtubeEmbedId,
 } from "./archivePreview";
 
 const ROWS = [
@@ -226,6 +228,63 @@ test("letting go of a video stops it and drops its source", () => {
     expect(() => releaseVideo({...video, load: () => {
         throw new Error("not implemented");
     }})).not.toThrow();
+});
+
+test("a YouTube job plays in the embed: its source is YouTube's, its id one",
+     () => {
+    const ID = "abcDEF12_-9";
+    for (const source of [
+        "https://www.youtube.com/watch?v=abcDEF12_-9",
+        "https://youtube.com/live/abcDEF12_-9",
+        "  https://m.youtube.com/watch?v=abcDEF12_-9 ",
+        "http://youtu.be/abcDEF12_-9",
+        "https://WWW.YouTube.com/watch?v=x",
+        "https://www.youtube-nocookie.com/embed/abcDEF12_-9",
+    ]) {
+        expect(youtubeEmbedId(source, ID)).toBe(ID);
+    }
+    // Not YouTube: another site's URL (vodsplit can read an id off its
+    // download's name), a local file, a look-alike host.
+    for (const source of ["https://www.twitch.tv/videos/123",
+                          "https://notyoutube.com/watch?v=x",
+                          "https://youtube.com.evil.example/watch",
+                          "C:\\vods\\abcDEF12_-9.mp4",
+                          "file:///C:/youtube.com/x.mp4",
+                          "javascript:alert(1)//youtube.com",
+                          "", null, undefined]) {
+        expect(youtubeEmbedId(source, ID)).toBeNull();
+    }
+    // Only an id of the embed's shape goes into its URL.
+    const url = "https://www.youtube.com/watch?v=x";
+    for (const id of ["abcDEF12_-", "abcDEF12_-90", "abc DEF12_-", "a&b=c#defgh",
+                      "abcDEF12_-\n", null, undefined, 12345678901]) {
+        expect(youtubeEmbedId(url, id)).toBeNull();
+    }
+});
+
+test("the job's own video as the page's player", () => {
+    const done = [];
+    const video = {
+        paused: true,
+        currentTime: 12.5,
+        play: () => {
+            done.push("play");
+            return Promise.reject(new Error("not allowed"));
+        },
+        pause: () => done.push("pause"),
+    };
+    const player = videoPlayer(video);
+    expect(player.paused()).toBe(true);
+    expect(player.currentTime()).toBe(12.5);
+    // A play the browser refuses is not thrown.
+    player.play();
+    player.pause();
+    player.seek(90);
+    expect(video.currentTime).toBe(90);
+    expect(done).toEqual(["play", "pause"]);
+    // A play that returns nothing (an older DOM) is fine too.
+    expect(() => videoPlayer({...video, play: () => undefined}).play())
+        .not.toThrow();
 });
 
 test("whether this browser decodes H.264", () => {

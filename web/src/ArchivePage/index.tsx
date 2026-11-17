@@ -57,6 +57,7 @@ import {
     sourceCounts,
 } from "./archiveSets";
 import {
+    PreviewPlayer,
     framePath,
     jobFromQuery,
     keyAction,
@@ -66,6 +67,7 @@ import {
     stepSet,
     thumbPath,
     videoExtension,
+    youtubeEmbedId,
 } from "./archivePreview";
 import {useShellAccess} from "../PanelShell/useShellAccess";
 import {
@@ -105,7 +107,8 @@ import WorkerInstall, {WorkerChips} from "./WorkerInstall";
 // page's own (no Redux / StateManager, ADR-006 D6); a running job (or its
 // export) is polled every second through GET /api/v1/archive/jobs/<id>. A
 // job with sets shows the mock's review screen (A3): the set list, the
-// preview of the job's own video, the set's details and the timeline. A
+// preview of the job's video (its own, or a YouTube job's in YouTube's
+// embedded player: D7), the set's details and the timeline. A
 // finished job's review is edited there (A4: IN / OUT, the result given,
 // confirmed; saved to its review.json as it changes) and its confirmed sets
 // exported to clips. ?job=<id> opens a job (the preview's "open in
@@ -953,7 +956,9 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
     const [reviewError, setReviewError] = React.useState("");
     const [save, setSave] = React.useState<SaveState>({status: "idle"});
     const [starting, setStarting] = React.useState(false);
-    const videoRef = React.useRef<HTMLVideoElement>(null);
+    // The preview's player (its <video>, or YouTube's embedded one), once
+    // it can be driven.
+    const playerRef = React.useRef<PreviewPlayer | null>(null);
     const root = React.useRef<HTMLDivElement>(null);
     const saver = React.useRef<ReviewSaver<Review> | null>(null);
     // A key moved the selection from a focused set row: the focus follows
@@ -1044,7 +1049,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
             return;
         }
         try {
-            videoRef.current?.pause();
+            playerRef.current?.pause();
         } catch {
             // A video that cannot play is not playing.
         }
@@ -1066,13 +1071,10 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
     }, [setNo, filter]);
 
     const seek = (t: number) => {
-        const video = videoRef.current;
-        if (video) {
-            try {
-                video.currentTime = t;
-            } catch {
-                // Not seekable yet: the time still shows where it was asked.
-            }
+        try {
+            playerRef.current?.seek(t);
+        } catch {
+            // Not seekable yet: the time still shows where it was asked.
         }
         setTime(t);
     };
@@ -1092,15 +1094,15 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         return next.no;
     };
     const togglePlay = () => {
-        const video = videoRef.current;
-        if (!video) {
+        const player = playerRef.current;
+        if (!player) {
             return;
         }
         try {
-            if (video.paused) {
-                video.play()?.catch(() => undefined);
+            if (player.paused()) {
+                player.play();
             } else {
-                video.pause();
+                player.pause();
             }
         } catch {
             // A video that cannot play: the preview says why.
@@ -1117,9 +1119,14 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         saver.current?.push(next);
         return next;
     };
-    // The position the preview is at: the video's own time when it has one.
+    // The position the preview is at: the player's own time when it has one.
     const position = () => {
-        const current = videoRef.current?.currentTime;
+        let current: number | null | undefined;
+        try {
+            current = playerRef.current?.currentTime();
+        } catch {
+            current = null;
+        }
         return typeof current === "number" && Number.isFinite(current)
             ? current : time;
     };
@@ -1234,7 +1241,9 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
                          onSelect={(no) => choose(no)}/>
                 <Preview jobId={job.id}
                          extension={videoExtension(job.source, sets.source)}
-                         row={row} videoRef={videoRef} time={time}
+                         row={row} source={job.source}
+                         youtubeId={youtubeEmbedId(job.source, sets.source_id)}
+                         playerRef={playerRef} time={time}
                          duration={Number.isFinite(duration) && duration > 0
                              ? duration : videoLength(sets)}
                          playing={playing} editable={editable}
