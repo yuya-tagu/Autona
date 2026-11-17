@@ -88,10 +88,12 @@ NAVIGATION = [
 # not: {section index: [(panel, icon, label key, what it requires), ...]},
 # after the frozen copy's items of that section. They have no Qt words to
 # match (their labels are i18next's alone: both languages, below).
-# "archive" is the archive clipper (ADR-006 A1), shown only while its
-# worker is there ("requires": the AppShell asks /api/v1/archive/status).
+# "archive" is the archive clipper (ADR-006 A1). It showed only while its
+# worker was there ("requires": "archive", the AppShell asked
+# /api/v1/archive/status) until A7, when its page began to install the
+# worker: it always shows, and no item requires anything.
 ADDED_ITEMS = {
-    3: [("archive", "scissors.svg", "app_archive", "archive")],
+    3: [("archive", "scissors.svg", "app_archive", None)],
 }
 
 # What the deleted Qt frame showed for its words, frozen from

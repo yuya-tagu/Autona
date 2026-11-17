@@ -37,6 +37,7 @@ from .core.Actions import AutonaActions
 from .core import AnalysisService as analysis
 from .core import AppSettings
 from .core import ArchiveJobService as archive
+from .core import ArchiveWorkerInstaller as workerInstall
 from .core import AssetPackService as assets
 from .core import HotkeyRules
 from .core import StateSchema as schema
@@ -2988,6 +2989,96 @@ def get_archive_thumb(job_id, no):
                              archive.THUMB_MISSING)
     except archive.ArchiveError as error:
         raise _archive_refused(error)
+
+
+# ── The archive clipper's worker (ADR-006 A7) ──
+# Its install and update from Autona-releases (core's
+# ArchiveWorkerInstaller): the read is WebAccess.THIS_PC, the install and
+# its cancel WebAccess.SHELL (they download and replace a program in
+# Autona's folder: the shared view's alone), as the section above. Headless
+# the read answers (no shell operation) and the install and its cancel are
+# 403 (SHELL: no shared view). A refusal answers core's Japanese message as
+# error.message and its code as error.reason.
+
+# Core's refusal codes -> (code, status).
+_WORKER_REFUSALS = {
+    workerInstall.INVALID: (INVALID_ARGUMENT, 400),
+    workerInstall.BUSY: (CONFLICT, 409),
+    workerInstall.NO_RELEASE: (NOT_READY, 409),
+    workerInstall.CHANGED: (CONFLICT, 409),
+    workerInstall.NOT_RUNNING: (CONFLICT, 409),
+    workerInstall.INSTALLED: (CONFLICT, 409),
+    workerInstall.STOPPING: (UNAVAILABLE, 503),
+}
+
+
+def _worker_refused(error):
+    code, status = _WORKER_REFUSALS.get(error.code, (INTERNAL, 500))
+    return ApiError(code, error.message, status, reason=error.code)
+
+
+@api_v1.route("/archive/worker")
+@_no_store_answers
+@api_handler
+def get_archive_worker():
+    # {"installed": {"available", "version"} of the status's last probe
+    # (null before one), "env_command": AUTONA_VODSPLIT_CMD is set (the
+    # installed folder is not the one used), "latest": {"version", "size",
+    # "published_at"} or null (none usable found / not checked yet),
+    # "check": {"status": "idle" / "checking" / "done" / "error", "error",
+    # "message", "checked_at"}, "update_available", "job": the install's
+    # {"revision", "status": "idle" / "running" / "done" / "error" /
+    # "cancelled", "stage": "download" / "verify" / "extract" / "probe" /
+    # "swap" / null, "done", "total", "version", "error", "message"}}. The
+    # releases are read in the background (at most every 10 minutes, a
+    # failure again after 30 s; with `?refresh=true` -- the page's "check
+    # again" -- at most every 3 s): the page polls while "check" is
+    # "checking".
+    refresh = _truthy(request.args.get("refresh", ""))
+    return ok(data=WebOps.get_archive_worker(refresh=refresh))
+
+
+@api_v1.route("/archive/worker:install", methods=["POST"])
+@_no_store_answers
+@write_op("archive.worker.install")
+def archive_worker_install():
+    # {"version": the latest's version the page shows} -> 202 {"job"}: the
+    # download, its size and SHA-256, the unpacking, the new worker's
+    # version and the swap run in the background (GET /archive/worker
+    # follows them). 400 without a version; 409 busy (an install runs, a
+    # job's analysis or export runs, or the worker is being replaced),
+    # installed (that version is in the folder), no_release (none known:
+    # the check has not found one) or changed (the latest is another
+    # version now); 503 while Autona closes. A probe or a titles' preview
+    # running when the download is done is waited for (up to 10 s); one
+    # still running then, or a job started meanwhile, ends the install as
+    # error "busy" (GET /archive/worker).
+    body = _json_body()
+    try:
+        job = WebOps.install_archive_worker(body.get("version"))
+    except workerInstall.InstallerError as error:
+        raise _worker_refused(error)
+    return ok(data={"job": job}, status=202)
+
+
+@api_v1.route("/archive/worker:cancel", methods=["POST"])
+@_no_store_answers
+@write_op("archive.worker.cancel")
+def archive_worker_cancel():
+    # {"revision": the install's} -> {"job"} (still running until its next
+    # step: GET /archive/worker tells when it has stopped; the swap itself
+    # is not stopped). 400 without a revision; 409 when it is not running.
+    body = _json_body()
+    revision = body.get("revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) \
+            or revision < 1:
+        raise ApiError(INVALID_ARGUMENT,
+                       "revision must be the install's revision", 400)
+    try:
+        job = WebOps.cancel_archive_worker_install(revision)
+    except workerInstall.InstallerError as error:
+        raise _worker_refused(error)
+    return ok(data={"job": job})
 
 
 @api_v1.route("/colors/<feature>", methods=["PATCH"])

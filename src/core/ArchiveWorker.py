@@ -26,6 +26,14 @@ it). ``features`` names what a worker of that format does beyond it (vodsplit
 V10: ``titles``); a worker from before says none, and only what needs the
 feature is refused (ADR-006 A6: the titles' preview).
 
+Its self-check (``CheckCommand``, ADR-006 A7): ``<command> version --check``
+of a worker whose features name ``CHECK_FEATURE`` runs every part the frozen
+worker bundles (yt-dlp and its JS solver, the OCR, OpenCV's video reader,
+ffmpeg, deno) and prints the version line with ``"check": {"ok", "items":
+[{"name", "ok", "detail"}]}``. The installer asks it of a worker it has
+unpacked; a worker from before has no such feature and only its
+``version`` is asked.
+
 Its titles (``RunTitles``, ADR-006 A6): ``<command> titles <request>
 --template <file> --format json`` makes a request's titles and descriptions
 with no video work and prints one ``done`` line; run on the calling thread,
@@ -64,20 +72,29 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
 
 ENV_COMMAND = "AUTONA_VODSPLIT_CMD"
-# The distributed worker, under the folder Autona runs in (D5).
-DEFAULT_EXECUTABLE = os.path.join("vodsplit-worker", "vodsplit-worker.exe")
+# The distributed worker, under the folder Autona runs in (D5; installed and
+# updated by core/ArchiveWorkerInstaller.py, ADR-006 A7).
+WORKER_DIR = "vodsplit-worker"
+WORKER_EXECUTABLE = "vodsplit-worker.exe"
+DEFAULT_EXECUTABLE = os.path.join(WORKER_DIR, WORKER_EXECUTABLE)
 # The sets.json format this Autona reads (vodsplit export.FORMAT).
 SUPPORTED_FORMAT = 1
-# Below the web client's 10 s request timeout: the nav asks /archive/status at startup
+# Below the web client's 10 s request timeout: the archive page's status
+# (GET /archive/status) waits for it.
 PROBE_TIMEOUT_SECS = 8
 # What a worker that can make titles alone says it does (vodsplit V10).
 TITLES_FEATURE = "titles"
+# What a worker with the self-check (``version --check``) says it does.
+CHECK_FEATURE = "check"
+# How often a probe that can be stopped (``stop``) looks at it.
+_STOP_POLL_SECS = 0.2
 # The titles' run waits this long at most (ArchiveJobService gives it what
 # is left of its own deadline, which the probe shares).
 TITLES_TIMEOUT_SECS = 8
@@ -110,6 +127,19 @@ def SplitCommand(text):
     return words
 
 
+def WorkerDir():
+    """The distributed worker's folder (an absolute path; it may not be
+    there): ``vodsplit-worker`` under the current directory, frozen or
+    not."""
+    return os.path.abspath(WORKER_DIR)
+
+
+def UsesEnvCommand():
+    """Whether ``AUTONA_VODSPLIT_CMD`` names the worker (the folder's is
+    then not used)."""
+    return bool(os.environ.get(ENV_COMMAND, "").strip())
+
+
 def Locate():
     """(command, reason): the worker's command as a list, or None and why
     not (Japanese). ``AUTONA_VODSPLIT_CMD`` first, then the distributed
@@ -123,11 +153,11 @@ def Locate():
         if not command:
             return None, f"{ENV_COMMAND} が空です。"
         return command, None
-    executable = os.path.abspath(DEFAULT_EXECUTABLE)
+    executable = os.path.join(WorkerDir(), WORKER_EXECUTABLE)
     if os.path.isfile(executable):
         return [executable], None
-    return None, ("切り抜きワーカーが見つかりません。Autona のフォルダの "
-                  "vodsplit-worker フォルダに vodsplit-worker.exe を置いてください。")
+    return None, ("切り抜きワーカー（vodsplit-worker.exe）が入っていません。"
+                  "デスクトップアプリのアーカイブ切り抜きのページから導入できます。")
 
 
 @dataclass(frozen=True)
@@ -140,6 +170,10 @@ class ProbeResult:
     reason: Optional[str]
     command: Optional[tuple]
     features: tuple = ()
+
+
+class ProbeStopped(Exception):
+    """A probe's `stop` said to stop: the worker's process was killed."""
 
 
 class TitlesError(Exception):
@@ -195,18 +229,54 @@ def Probe(timeout=PROBE_TIMEOUT_SECS):
     command, reason = Locate()
     if command is None:
         return ProbeResult(False, None, None, reason, None)
-    fromEnv = bool(os.environ.get(ENV_COMMAND, "").strip())
+    where = (f"{ENV_COMMAND} のコマンド" if UsesEnvCommand()
+             else WORKER_EXECUTABLE)
+    return ProbeCommand(command, timeout, where)
+
+
+def _Communicate(argv, timeout, stop=None):
+    """Run `argv` (stdin closed, no window) to its end, up to `timeout`
+    seconds -> its CompletedProcess (text). `stop()` (when given) is asked
+    every _STOP_POLL_SECS while it runs. Raises OSError (not started),
+    subprocess.TimeoutExpired or ProbeStopped (the process killed)."""
+    process = subprocess.Popen(
+        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+        env=_ChildEnvironment(), creationflags=_CreationFlags(background=False))
+    deadline = time.monotonic() + timeout
     try:
-        done = subprocess.run(
-            [*command, "version"], stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout, env=_ChildEnvironment(),
-            creationflags=_CreationFlags(background=False))
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=left if stop is None else min(left, _STOP_POLL_SECS))
+            except subprocess.TimeoutExpired:
+                if stop is not None and stop():
+                    raise ProbeStopped() from None
+                continue
+            return subprocess.CompletedProcess(argv, process.returncode,
+                                               stdout, stderr)
+    except BaseException:
+        process.kill()
+        process.communicate()
+        raise
+
+
+def ProbeCommand(command, timeout=PROBE_TIMEOUT_SECS,
+                 where=WORKER_EXECUTABLE, stop=None):
+    """``Probe`` of the worker `command` (a list), wherever it is: the
+    installer's check of a worker it has unpacked and not yet moved in
+    (ADR-006 A7) is the same as the use's. `where` names it in the reason
+    a start's failure gives. Raises nothing but ProbeStopped (`stop()`
+    became true: Autona is ending or the install was cancelled)."""
+    try:
+        done = _Communicate([*command, "version"], timeout, stop)
     except subprocess.TimeoutExpired:
         return ProbeResult(False, None, None, (
             f"切り抜きワーカーが応答しません（{timeout} 秒待ちました）。"), None)
     except OSError as error:
-        where = f"{ENV_COMMAND} のコマンド" if fromEnv else "vodsplit-worker.exe"
         return ProbeResult(False, None, None, (
             f"切り抜きワーカーを起動できません（{where}: {error}）。"), None)
     answer = _ReadVersion(done.stdout)
@@ -236,6 +306,46 @@ def Probe(timeout=PROBE_TIMEOUT_SECS):
     features = tuple(item for item in features if isinstance(item, str)) \
         if isinstance(features, list) else ()
     return ProbeResult(True, version, fmt, None, tuple(command), features)
+
+
+def CheckCommand(command, timeout, stop=None):
+    """The self-check of the worker `command` (``version --check``; ask it
+    only of a worker whose features name CHECK_FEATURE) -> None when every
+    part it bundles works, else why not (Japanese, naming the parts that do
+    not; their details are logged). Raises nothing but ProbeStopped."""
+    try:
+        done = _Communicate([*command, "version", "--check"], timeout, stop)
+    except subprocess.TimeoutExpired:
+        return f"切り抜きワーカーの自己診断が終わりません（{timeout} 秒待ちました）。"
+    except OSError as error:
+        return (f"切り抜きワーカーの自己診断を始められません"
+                f"（{error.strerror or type(error).__name__}）。")
+    answer = _ReadVersion(done.stdout)
+    check = answer.get("check") if answer is not None else None
+    items = check.get("items") if isinstance(check, dict) else None
+    if not isinstance(items, list):
+        detail = (done.stderr or "").strip().splitlines()[-1:] or [""]
+        logger.warning(f"Archive worker: the self-check gave no result (exit "
+                       f"{done.returncode}): {detail[0][:300]}")
+        return "切り抜きワーカーの自己診断の結果を読めません。"
+    failed = [item for item in items
+              if not isinstance(item, dict) or item.get("ok") is not True]
+    if done.returncode == 0 and check.get("ok") is True and not failed:
+        return None
+    names = []
+    for item in failed:
+        name = item.get("name") if isinstance(item, dict) else None
+        name = name if isinstance(name, str) and name else "?"
+        names.append(name)
+        detail = item.get("detail") if isinstance(item, dict) else None
+        logger.warning(f"Archive worker: the self-check's {name} failed: "
+                       f"{str(detail)[:300]}")
+    if not names:
+        logger.warning(f"Archive worker: the self-check failed (exit "
+                       f"{done.returncode}) with every part working")
+    return ("切り抜きワーカーに同梱のものが動きません（"
+            + ("、".join(names) if names else f"終了コード {done.returncode}")
+            + "）。")
 
 
 def RunTitles(command, requestPath, templatePath, timeout=None,

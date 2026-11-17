@@ -380,6 +380,13 @@ ROUTE_ACCESS = {
     "api_v1.archive_titles_preview": SHELL,
     "api_v1.archive_thumbs_generate": SHELL,
     "api_v1.get_archive_thumb": THIS_PC,
+    # The worker's install (ADR-006 A7): what is installed and the latest
+    # release are read as the status is (THIS_PC); the install (it
+    # downloads a program and replaces the worker's folder in Autona's) and
+    # its cancel are the shell's, as the job's writes.
+    "api_v1.get_archive_worker": THIS_PC,
+    "api_v1.archive_worker_install": SHELL,
+    "api_v1.archive_worker_cancel": SHELL,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,
@@ -628,7 +635,8 @@ def FramedElsewhere(fetchDest, fetchSite):
 # API reference & tester and the Companion and OBS guides, "about" is About
 # Autona (S-final SF-4a-2: the menu's too, the Qt windows until then); "assets" is
 # Add game assets (SF-4b-2: the menu's too); "archive" is the archive
-# clipper (ADR-006 A1: a sidebar item shown only while its worker is there).
+# clipper (ADR-006 A1; a sidebar item always since A7: the page installs
+# its worker).
 # /web/app/<panel> serves the same
 # names (S-final SF-5a-3: the page inside the Web UI's AppShell, its
 # navigation, header and footer): web_index's rule too, the same check.

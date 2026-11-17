@@ -24,6 +24,7 @@ explains why.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -142,7 +143,10 @@ def _local_version() -> str:
 
 
 def _is_newer(remote_tag: str, local_ver: str) -> bool:
-    if not remote_tag:
+    # Autona's own releases only (tag v<version>): Autona-releases also holds
+    # the archive clipper's worker (worker-v<version>, ADR-006 A7), which a
+    # release mistakenly marked latest must not offer as an Autona update.
+    if not remote_tag or not re.match(r"v[0-9]", remote_tag):
         return False
     try:
         return parse_version(remote_tag.lstrip("v")) > parse_version(local_ver)

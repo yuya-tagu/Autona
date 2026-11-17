@@ -158,6 +158,16 @@ thumbnails still show their set as reviewed (``files``: thumbs.json drew it
 for the result and range the review gives it now); ``ThumbFile`` serves
 one (as FrameFile, PNG). The shutdown ends the run at its next set.
 
+The worker's swap (ADR-006 A7)
+------------------------------
+core/ArchiveWorkerInstaller.py replaces the worker's folder with a newer
+one. It asks this service first (``ReserveSwap``): granted only when
+nothing of the worker runs -- no job's analysis or export, no titles'
+preview, no version probe --, and until ``ReleaseSwap`` nothing of it
+starts (a start, a resume, an export and a preview are BUSY, the status
+says the worker is being replaced, without probing). The release drops the
+cached probe, so the next status probes the new worker.
+
 Threads and locks: the request threads, the two reader threads, and for
 the thumbnails the main thread and the task executor's. ``_lock`` holds the
 runs in memory, the probe's cache and the swept work folders;
@@ -334,6 +344,15 @@ SUPERSEDED = "superseded"
 # A title template that could not be written (user_data/).
 SAVE_FAILED = ArchiveTemplates.SAVE_FAILED
 
+# While core/ArchiveWorkerInstaller.py replaces the worker's folder
+# (ReserveSwap .. ReleaseSwap, ADR-006 A7).
+SWAPPING = "切り抜きワーカーを入れ替えているところです。終わってからもう一度押してください。"
+SWAP_BUSY_JOB = ("切り抜きジョブの実行中は切り抜きワーカーを入れ替えられません。"
+                 "終わるか中止してから更新してください。")
+SWAP_BUSY_PROBE = "切り抜きワーカーを確認しているところです。少し待ってからもう一度押してください。"
+SWAP_BUSY_TITLES = ("タイトルのプレビューを作っているところです。"
+                    "終わってからもう一度押してください。")
+
 # The preview's refusals' words (VideoFile / FrameFile, and v1 when the
 # file is gone by the time it opens it).
 VIDEO_MISSING = "この切り抜きジョブの動画が見つかりません。"
@@ -357,12 +376,15 @@ TITLES_OUT_OF_TIME = ("切り抜きワーカーの確認に時間がかかった
 
 class ArchiveError(Exception):
     """A refusal: ``code`` (the constants above) and the Japanese
-    ``message`` the page shows as it is."""
+    ``message`` the page shows as it is. ``transient``: what refused it
+    ends by itself in a few seconds (ReserveSwap's probe and titles'
+    preview: the installer waits and asks again)."""
 
-    def __init__(self, code, message):
+    def __init__(self, code, message, transient=False):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.transient = transient
 
 
 def DefaultWorkDir():
@@ -758,6 +780,16 @@ class ArchiveJobService:
         self._titlesLock = threading.Lock()
         self._titlesTicket = 0
         self._titlesProcess = None
+        # Whether the newest preview is between its claim and its end (its
+        # worker may be starting: _titlesProcess is set once it runs).
+        self._titlesBusy = False
+        # Whether core/ArchiveWorkerInstaller.py is replacing the worker's
+        # folder (ReserveSwap .. ReleaseSwap; set under _lock and
+        # _titlesLock, read under either or _probeLock), and how many
+        # swaps have ended (a start compares it with what it read before
+        # its probe: _Swapped).
+        self._swapping = False
+        self._swaps = 0
 
     # ── the work folder ────────────────────────────────────────────────
 
@@ -966,6 +998,10 @@ class ArchiveJobService:
         ArchiveWorker.PROBE_TIMEOUT_SECS). A count, not the clock: Windows'
         monotonic clock moves in 15 ms steps."""
         with self._probeLock:
+            if self._swapping:
+                # Not run and not cached: the folder is being replaced.
+                return ArchiveWorker.ProbeResult(False, None, None, SWAPPING,
+                                                 None)
             cached = self._probed
             if cached is not None and since is not None \
                     and self._probeCount > since:
@@ -989,7 +1025,10 @@ class ArchiveJobService:
         """The probe of a worker that can be started, with one probe at
         most (a start must answer within the web client's 10 s): a cached
         usable one as it is, else one new probe -- the operator may have
-        put the worker in place since. Raises ArchiveError(UNAVAILABLE)."""
+        put the worker in place since. Raises ArchiveError(UNAVAILABLE), or
+        BUSY while the worker's folder is replaced."""
+        if self._swapping:
+            raise ArchiveError(BUSY, SWAPPING)
         since = self._probeCount
         cached = self._probed
         probe = self._Probe(refresh=cached is None or not cached.available,
@@ -1003,6 +1042,76 @@ class ArchiveJobService:
         under _probeLock: it is called under _lock, which must not wait for
         a probe."""
         self._probed = None
+
+    def CachedProbe(self):
+        """The last probe (ArchiveWorker.ProbeResult) without probing, or
+        None (none yet, or dropped). ArchiveWorkerInstaller reads the
+        installed version with it."""
+        return self._probed
+
+    # ── the worker's swap (ADR-006 A7) ─────────────────────────────────
+
+    def ReserveSwap(self):
+        """Hold the worker still for ArchiveWorkerInstaller's swap of its
+        folder: granted when no job's analysis or export, no titles'
+        preview and no probe runs; until ReleaseSwap none starts. Raises
+        ArchiveError: STOPPING, BUSY (transient: a probe or a titles'
+        preview runs)."""
+        with self._lock:
+            if self._stopping:
+                raise ArchiveError(STOPPING, "Autona の終了中です。")
+            if self._swapping:
+                raise ArchiveError(BUSY, SWAPPING)
+            if self._run is not None:
+                raise ArchiveError(BUSY, SWAP_BUSY_JOB)
+            # Not waited for: a probe takes up to 8 s and _lock must not
+            # wait for one (the probe never takes _lock).
+            if not self._probeLock.acquire(blocking=False):
+                raise ArchiveError(BUSY, SWAP_BUSY_PROBE, transient=True)
+            try:
+                with self._titlesLock:
+                    if self._titlesBusy or self._titlesProcess is not None:
+                        raise ArchiveError(BUSY, SWAP_BUSY_TITLES,
+                                           transient=True)
+                    self._swapping = True
+            finally:
+                self._probeLock.release()
+        logger.info("Archive: the worker is held for its swap")
+
+    def ReleaseSwap(self):
+        """End ReserveSwap's hold. The cached probe is dropped: the next
+        status probes the worker now in the folder."""
+        with self._lock:
+            with self._titlesLock:
+                self._swapping = False
+                self._swaps += 1
+            self._Forget()
+        logger.info("Archive: the worker's swap is over")
+
+    def _Swapped(self, swaps, again):
+        """Whether a swap ended since the caller read ``_swaps`` (`swaps`)
+        before its probe, which may then name the worker that was there
+        (under _lock or _titlesLock): True the first time (the caller
+        probes again), ArchiveError(BUSY) when it is `again`."""
+        if self._swaps == swaps:
+            return False
+        if again:
+            raise ArchiveError(BUSY, SWAPPING)
+        logger.info("Archive: the worker was replaced since its probe; "
+                    "probed again")
+        return True
+
+    def SwapBusy(self):
+        """Why a swap would be refused now (ReserveSwap's words), or None:
+        the installer's check before it downloads. Takes no hold."""
+        with self._lock:
+            if self._stopping:
+                return "Autona の終了中です。"
+            if self._swapping:
+                return SWAPPING
+            if self._run is not None:
+                return SWAP_BUSY_JOB
+        return None
 
     # ── what the page reads ────────────────────────────────────────────
 
@@ -1426,34 +1535,38 @@ class ArchiveJobService:
                 self._Refuse(export=True)
         # The request's refusals come before the probe (up to 8 s).
         self._ExportRequest(workDir, jobDir, record)
-        probe = self._Available()
-        templates = ArchiveTemplates.WorkerTemplates()
-        with self._lock:
-            self._Refuse(export=True)
-            record = self._DiskRecord(jobDir, jobId)
-            if record is None:
-                raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-            request = self._ExportRequest(workDir, jobDir, record)
-            record["export"] = {
-                "state": "running", "started_at": _Now(), "finished_at": None,
-                "exit_code": None, "error": None, "warnings": [], "logs": [],
-                "progress": None, "clips": None, "skipped": None}
-            run = _Run(record, jobDir, workDir, kind=EXPORT)
-            try:
-                os.makedirs(os.path.join(jobDir, CLIPS_DIR), exist_ok=True)
-                self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
-                # Before job.json says it runs: what fails here leaves no
-                # export that runs without a worker.
-                arguments = self._Arguments(
-                    run, self._WriteTemplates(jobDir, templates))
-                self._WriteRecord(jobDir, record)
-            except OSError as error:
-                raise ArchiveError(WORK_DIR_UNUSABLE,
-                                   f"作業フォルダに書けません: {error}")
-            logger.info(f"Archive: job {jobId} export started "
-                        f"({len(request['sets'])} sets)")
-            self._Start(run, probe, arguments)
-            return self._RunView(jobId)
+        for again in (False, True):
+            swaps = self._swaps
+            probe = self._Available()
+            templates = ArchiveTemplates.WorkerTemplates()
+            with self._lock:
+                if self._Swapped(swaps, again):
+                    continue
+                self._Refuse(export=True)
+                record = self._DiskRecord(jobDir, jobId)
+                if record is None:
+                    raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+                request = self._ExportRequest(workDir, jobDir, record)
+                record["export"] = {
+                    "state": "running", "started_at": _Now(), "finished_at": None,
+                    "exit_code": None, "error": None, "warnings": [], "logs": [],
+                    "progress": None, "clips": None, "skipped": None}
+                run = _Run(record, jobDir, workDir, kind=EXPORT)
+                try:
+                    os.makedirs(os.path.join(jobDir, CLIPS_DIR), exist_ok=True)
+                    self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
+                    # Before job.json says it runs: what fails here leaves no
+                    # export that runs without a worker.
+                    arguments = self._Arguments(
+                        run, self._WriteTemplates(jobDir, templates))
+                    self._WriteRecord(jobDir, record)
+                except OSError as error:
+                    raise ArchiveError(WORK_DIR_UNUSABLE,
+                                       f"作業フォルダに書けません: {error}")
+                logger.info(f"Archive: job {jobId} export started "
+                            f"({len(request['sets'])} sets)")
+                self._Start(run, probe, arguments)
+                return self._RunView(jobId)
 
     # ── the titles' preview (ADR-006 A6) ───────────────────────────────
 
@@ -1489,24 +1602,29 @@ class ArchiveJobService:
         if record["state"] != "done":
             raise ArchiveError(NOT_DONE, "解析が完了したジョブだけプレビューできます。")
         request = self._TitlesRequest(jobDir, jobId)
-        probe = self._Available()
-        if ArchiveWorker.TITLES_FEATURE not in probe.features:
-            raise ArchiveError(UNSUPPORTED, TITLES_UNSUPPORTED)
-        # What is left of the deadline once the probe (up to 8 s) is done:
-        # the page gives up at 15 s.
-        left = TITLES_DEADLINE_SECS - (time.monotonic() - began)
-        if left < TITLES_LEAST_SECS:
-            raise ArchiveError(UNAVAILABLE, TITLES_OUT_OF_TIME)
-        timeout = round(min(ArchiveWorker.TITLES_TIMEOUT_SECS, left), 1)
         # The worker selects by match: this one is the template asked for.
         chosen = dict(checked, match=None)
-        ticket = self._ClaimTitles()
+        for again in (False, True):
+            swaps = self._swaps
+            probe = self._Available()
+            if ArchiveWorker.TITLES_FEATURE not in probe.features:
+                raise ArchiveError(UNSUPPORTED, TITLES_UNSUPPORTED)
+            # What is left of the deadline once the probe (up to 8 s) is
+            # done: the page gives up at 15 s.
+            left = TITLES_DEADLINE_SECS - (time.monotonic() - began)
+            if left < TITLES_LEAST_SECS:
+                raise ArchiveError(UNAVAILABLE, TITLES_OUT_OF_TIME)
+            timeout = round(min(ArchiveWorker.TITLES_TIMEOUT_SECS, left), 1)
+            ticket = self._ClaimTitles(swaps, again)
+            if ticket is not None:
+                break
         try:
             answer = self._RunTitles(probe, request, chosen, ticket, timeout)
         finally:
             with self._titlesLock:
                 if ticket == self._titlesTicket:
                     self._titlesProcess = None
+                    self._titlesBusy = False
         rows = []
         for row in answer.get("sets") if isinstance(
                 answer.get("sets"), list) else []:
@@ -1538,17 +1656,23 @@ class ArchiveJobService:
                 "date": _Text(results.get("date")),
                 "sets": rows}
 
-    def _ClaimTitles(self):
+    def _ClaimTitles(self, swaps, again):
         """Make this preview the one that runs: the older one's worker is
         killed (its request answers SUPERSEDED) and waited for a moment, so
-        two do not run at once -> this preview's ticket. Raises
-        ArchiveError(STOPPING)."""
+        two do not run at once -> this preview's ticket, or None when a
+        swap ended since its probe (`swaps`, `again`: _Swapped). Raises
+        ArchiveError: STOPPING, BUSY (the worker's folder is replaced)."""
         with self._titlesLock:
             if self._stopping:
                 raise ArchiveError(STOPPING, "Autona の終了中です。")
+            if self._swapping:
+                raise ArchiveError(BUSY, SWAPPING)
+            if self._Swapped(swaps, again):
+                return None
             self._titlesTicket += 1
             ticket = self._titlesTicket
             older, self._titlesProcess = self._titlesProcess, None
+            self._titlesBusy = True
         if older is not None:
             logger.info("Archive: a newer titles' preview replaces the "
                         "running one")
@@ -1964,45 +2088,49 @@ class ArchiveJobService:
         source = CheckSource(source)
         results = CheckResults(results)
         event = CheckEvent(event)
-        probe = self._Available()
-        templates = ArchiveTemplates.WorkerTemplates()
-        with self._lock:
-            self._Refuse()
-            workDir = self.WorkDir()
-            try:
-                os.makedirs(workDir, exist_ok=True)
-            except OSError as error:
-                raise ArchiveError(WORK_DIR_UNUSABLE,
-                                   f"作業フォルダを作れません: {error}")
-            self._Sweep(workDir)
-            jobId, jobDir = self._MakeJobDir(workDir)
-            record = {
-                "id": jobId, "created_at": _Now(), "finished_at": None,
-                "source": source, "event": event,
-                "has_results": results is not None, "state": "running",
-                "exit_code": None, "sets": None, "needs_review": None,
-                "error": None, "warnings": [], "logs": [], "progress": None,
-                "worker_version": probe.version, "export": None,
-            }
-            run = _Run(record, jobDir, workDir)
-            try:
-                os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
-                if results is not None:
-                    with open(os.path.join(jobDir, RESULTS_FILE), "w",
-                              encoding="utf-8") as file:
-                        json.dump(results, file, ensure_ascii=False,
-                                  indent=2)
-                # Before job.json says it runs: what fails here leaves no
-                # job that runs without a worker.
-                arguments = self._Arguments(
-                    run, self._WriteTemplates(jobDir, templates))
-                self._WriteRecord(jobDir, record)
-            except OSError as error:
-                raise ArchiveError(WORK_DIR_UNUSABLE,
-                                   f"作業フォルダに書けません: {error}")
-            logger.info(f"Archive: job {jobId} created")
-            self._Start(run, probe, arguments)
-            return self._RunView(jobId)
+        for again in (False, True):
+            swaps = self._swaps
+            probe = self._Available()
+            templates = ArchiveTemplates.WorkerTemplates()
+            with self._lock:
+                if self._Swapped(swaps, again):
+                    continue
+                self._Refuse()
+                workDir = self.WorkDir()
+                try:
+                    os.makedirs(workDir, exist_ok=True)
+                except OSError as error:
+                    raise ArchiveError(WORK_DIR_UNUSABLE,
+                                       f"作業フォルダを作れません: {error}")
+                self._Sweep(workDir)
+                jobId, jobDir = self._MakeJobDir(workDir)
+                record = {
+                    "id": jobId, "created_at": _Now(), "finished_at": None,
+                    "source": source, "event": event,
+                    "has_results": results is not None, "state": "running",
+                    "exit_code": None, "sets": None, "needs_review": None,
+                    "error": None, "warnings": [], "logs": [], "progress": None,
+                    "worker_version": probe.version, "export": None,
+                }
+                run = _Run(record, jobDir, workDir)
+                try:
+                    os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
+                    if results is not None:
+                        with open(os.path.join(jobDir, RESULTS_FILE), "w",
+                                  encoding="utf-8") as file:
+                            json.dump(results, file, ensure_ascii=False,
+                                      indent=2)
+                    # Before job.json says it runs: what fails here leaves no
+                    # job that runs without a worker.
+                    arguments = self._Arguments(
+                        run, self._WriteTemplates(jobDir, templates))
+                    self._WriteRecord(jobDir, record)
+                except OSError as error:
+                    raise ArchiveError(WORK_DIR_UNUSABLE,
+                                       f"作業フォルダに書けません: {error}")
+                logger.info(f"Archive: job {jobId} created")
+                self._Start(run, probe, arguments)
+                return self._RunView(jobId)
 
     def Resume(self, jobId):
         """Run job `jobId` again (the worker resumes from its caches) ->
@@ -2021,32 +2149,36 @@ class ArchiveJobService:
         if record["state"] == "done":
             raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
         self._ResumableSource(record)
-        probe = self._Available()
-        templates = ArchiveTemplates.WorkerTemplates()
-        with self._lock:
-            self._Refuse()
-            record = self._DiskRecord(jobDir, jobId)
-            if record is None:
-                raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-            if record["state"] == "done":
-                raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
-            record["source"] = self._ResumableSource(record)
-            record.update(state="running", finished_at=None, exit_code=None,
-                          sets=None, needs_review=None, error=None,
-                          warnings=[], logs=[], progress=None,
-                          worker_version=probe.version)
-            run = _Run(record, jobDir, workDir)
-            try:
-                os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
-                arguments = self._Arguments(
-                    run, self._WriteTemplates(jobDir, templates))
-                self._WriteRecord(jobDir, record)
-            except OSError as error:
-                raise ArchiveError(WORK_DIR_UNUSABLE,
-                                   f"作業フォルダに書けません: {error}")
-            logger.info(f"Archive: job {jobId} resumed")
-            self._Start(run, probe, arguments)
-            return self._RunView(jobId)
+        for again in (False, True):
+            swaps = self._swaps
+            probe = self._Available()
+            templates = ArchiveTemplates.WorkerTemplates()
+            with self._lock:
+                if self._Swapped(swaps, again):
+                    continue
+                self._Refuse()
+                record = self._DiskRecord(jobDir, jobId)
+                if record is None:
+                    raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+                if record["state"] == "done":
+                    raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
+                record["source"] = self._ResumableSource(record)
+                record.update(state="running", finished_at=None, exit_code=None,
+                              sets=None, needs_review=None, error=None,
+                              warnings=[], logs=[], progress=None,
+                              worker_version=probe.version)
+                run = _Run(record, jobDir, workDir)
+                try:
+                    os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
+                    arguments = self._Arguments(
+                        run, self._WriteTemplates(jobDir, templates))
+                    self._WriteRecord(jobDir, record)
+                except OSError as error:
+                    raise ArchiveError(WORK_DIR_UNUSABLE,
+                                       f"作業フォルダに書けません: {error}")
+                logger.info(f"Archive: job {jobId} resumed")
+                self._Start(run, probe, arguments)
+                return self._RunView(jobId)
 
     def Cancel(self, jobId):
         """Ask the running job `jobId` -- its analysis or its export -- to
@@ -2077,10 +2209,13 @@ class ArchiveJobService:
                 "新しいジョブとして始め直してください。"))
 
     def _Refuse(self, export=False):
-        """Refuse a start (`export`: an export's) while the app closes or
-        a job runs its analysis or its export (under _lock)."""
+        """Refuse a start (`export`: an export's) while the app closes, the
+        worker's folder is replaced or a job runs its analysis or its
+        export (under _lock)."""
         if self._stopping:
             raise ArchiveError(STOPPING, "Autona の終了中です。")
+        if self._swapping:
+            raise ArchiveError(BUSY, SWAPPING)
         if self._run is not None and self._run.kind == EXPORT:
             raise ArchiveError(BUSY, (
                 "書き出しの実行中です。終わるか中止してから始めてください。"))
@@ -2423,10 +2558,13 @@ class ArchiveJobService:
             logger.info(f"Archive: job {record['id']} {what}{state} (exit "
                         f"{exitCode})")
         finally:
+            # Closed before the run is let go: a swap (ReserveSwap) is
+            # granted once _run is None, and must find nothing of the job
+            # left running.
+            run.worker.Close()
             with self._lock:
                 if self._run is run:
                     self._run = None
-            run.worker.Close()
             streams = [proc.stdin, proc.stdout]
             if run.stderrThread is not None and run.stderrThread.is_alive():
                 # Still blocked reading (no job object ended the process

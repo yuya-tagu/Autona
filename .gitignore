@@ -96,6 +96,12 @@ Autona.exe
 # onedir runtime folder placed next to Autona.exe at the project root
 # (PyInstaller COLLECT output: Python runtime + Qt/WebEngine binaries).
 _internal/
+# The archive clipper's worker, installed into Autona's folder by Autona
+# (ADR-006 A7), and what an unfinished install leaves next to it
+/vodsplit-worker/
+/vodsplit-worker.part
+/vodsplit-worker.new/
+/vodsplit-worker.old/
 Autona_old.exe
 TSH.exe
 TSH/

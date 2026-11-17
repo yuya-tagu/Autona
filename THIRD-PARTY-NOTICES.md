@@ -4,7 +4,7 @@ Autona の配布物には、以下の第三者ソフトウェア・素材が含�
 各ソフトウェアはそれぞれのライセンスに従って利用・再配布されます。
 ライセンス全文は本ファイルと同梱の `licenses/` ディレクトリを参照してください。
 
-最終更新: 2026-07-03
+最終更新: 2026-11-17
 
 ---
 
@@ -100,3 +100,22 @@ MIT ライブラリの著作権表示は各 `.min.js` ファイル先頭のヘ�
   API の利用は [start.gg APIs Terms of Use](https://www.start.gg/about/apitos) に従います。
 - ゲームのキャラクター・ステージ画像等のゲームアセットは各ゲームの権利者に
   著作権があり、**Autona には同梱されていません**（利用者が各自取得します）。
+
+## 9. アーカイブ切り抜きのワーカー（別配布）
+
+「アーカイブ切り抜き」が使う解析ワーカー `vodsplit-worker` は **Autona の配布物（zip）には含まれていません**。
+Autona-releases の `worker-v*` のリリース（`vodsplit-worker-windows.zip`）で別に配布され、利用者が
+アーカイブのページのボタンで導入・更新したときだけ、Autona のフォルダの `vodsplit-worker/` に入ります。
+ワーカーのフォルダには次の第三者ソフトウェアが含まれ、その表示とライセンス全文はワーカーのフォルダの
+`THIRD-PARTY-NOTICES.md` と `licenses/` にあります。
+
+| ソフトウェア | ライセンス | 備考 |
+|-------------|-----------|------|
+| [FFmpeg](https://ffmpeg.org/)（BtbN の FFmpeg-Builds の LGPL shared build） | LGPL v3 | 復号・切り出しに別プロセスで使用。対応するソースはワーカーと同じリリースに添付。ビルドの構成は https://github.com/BtbN/FFmpeg-Builds |
+| [OpenCV](https://github.com/opencv/opencv-python)（opencv_videoio_ffmpeg の DLL は FFmpeg の LGPL v2.1 ビルド） | Apache 2.0 / LGPL v2.1 | 動画の読み込み |
+| [Deno](https://github.com/denoland/deno) | MIT | yt-dlp が YouTube の取得に使う |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) / yt-dlp-ejs | Unlicense（ejs は Unlicense / MIT / ISC） | YouTube からの取得 |
+| NumPy / winrt / requests ほか | BSD / MIT / MPL 2.0 ほか | 一覧はワーカーの `THIRD-PARTY-NOTICES.md` |
+| Python / PyInstaller | PSF / GPL v2 + 例外 | 実行環境 |
+
+FFmpeg のバイナリに対応するソースコードの入手についての問い合わせは、[TERMS.md](TERMS.md) のお問い合わせ先へ。

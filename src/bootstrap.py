@@ -523,6 +523,21 @@ def bootstrap_core():
     if ArchiveJobService.instance is None:
         ArchiveJobService.instance = ArchiveJobService()
 
+    # ORDER CONSTRAINT: the archive worker's installer (ADR-006 A7), after
+    # ArchiveJobService (it reads the installed version from the jobs' last
+    # probe and holds them still while it swaps the worker's folder) and the
+    # executor (its release check and its install are jobs), before the web
+    # server (the shells'): the page reads and starts it. Not in the state.
+    # Nothing is fetched here: the releases are read when the page asks.
+    # What an install a crash ended left (the download, the unpacked
+    # folder, the old worker moved aside) is cleaned now, before anything
+    # can run the worker: a few existence checks when there is none.
+    from .core.ArchiveWorkerInstaller import ArchiveWorkerInstaller
+    if ArchiveWorkerInstaller.instance is None:
+        ArchiveWorkerInstaller.instance = ArchiveWorkerInstaller(
+            jobs=ArchiveJobService.instance, autonaVersion=_program_version)
+        ArchiveWorkerInstaller.instance.CleanLeftovers()
+
     # ORDER CONSTRAINT: the match log (ADR-006 A2), a state observer, after
     # StateManager.Initialize(): LoadState's big change is not seen (the
     # board restored is last session's, and both shells' launch seed resets
@@ -703,6 +718,22 @@ def wire_tournament_data(on_failure=None):
 
     signals = AutonaTournamentDataProvider.instance.signals
     signals.tournament_data_updated.connect(apply)
+
+
+def _program_version():
+    """Autona's version (assets/versions.json's "program", None when it
+    cannot be read): what a worker release's min_autona is compared with
+    (core/ArchiveWorkerInstaller.py). Through AutonaResolve, as the window
+    title and /health read it (a release has the file under _internal/)."""
+    import json
+
+    from .Helpers.AutonaDirHelper import AutonaResolve
+    try:
+        with open(AutonaResolve("./assets/versions.json"),
+                  encoding="utf-8") as f:
+            return json.load(f).get("program")
+    except (OSError, ValueError):
+        return None
 
 
 def make_game_loader(catalog, afterScan=None):

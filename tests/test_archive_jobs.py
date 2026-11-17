@@ -201,21 +201,51 @@ def test_a_command_that_cannot_start_is_unavailable(fake, tmp_path):
     assert worker.ENV_COMMAND in result.reason
 
 
+def test_a_probe_that_can_be_stopped_kills_the_worker(fake):
+    # The installer's probe of a worker it unpacked: Autona's end or a
+    # cancel kills it at once (ADR-006 A7).
+    fake.setenv("FAKE_VODSPLIT_VERSION_SLEEP", "30")
+    began = time.monotonic()
+    asked = []
+
+    def stop():
+        asked.append(1)
+        return time.monotonic() - began > 0.3
+
+    with pytest.raises(worker.ProbeStopped):
+        worker.ProbeCommand(worker.SplitCommand(COMMAND), 60, stop=stop)
+    assert time.monotonic() - began < 5 and asked
+    # Without `stop` it is the plain probe.
+    fake.delenv("FAKE_VODSPLIT_VERSION_SLEEP")
+    assert worker.ProbeCommand(worker.SplitCommand(COMMAND), 30,
+                               stop=lambda: False).available
+
+
+def test_the_self_check_names_the_parts_that_do_not_work(fake):
+    command = worker.SplitCommand(COMMAND)
+    fake.setenv("FAKE_VODSPLIT_CHECK", "ok")
+    probe = worker.Probe()
+    assert worker.CHECK_FEATURE in probe.features
+    assert worker.CheckCommand(command, 30) is None
+    fake.setenv("FAKE_VODSPLIT_CHECK", "ffmpeg,deno")
+    reason = worker.CheckCommand(command, 30)
+    assert "ffmpeg" in reason and "deno" in reason and "yt_dlp" not in reason
+    # A worker with no self-check answers no check: unreadable, not passed.
+    fake.delenv("FAKE_VODSPLIT_CHECK")
+    assert "読めません" in worker.CheckCommand(command, 30)
+
+
 def test_the_probe_and_the_run_reset_pyinstallers_environment(fake,
                                                               monkeypatch):
     # A frozen Autona starting a frozen worker must not hand it its _PYI_*
     # state: both the probe and the run ask PyInstaller to reset it.
     given = []
 
-    def run(*_args, **kwargs):
-        given.append(("probe", kwargs["env"]))
+    def popen(argv, **kwargs):
+        given.append(("probe" if argv[-1] == "version" else "run",
+                      kwargs["env"]))
         raise OSError("not started in this test")
 
-    def popen(*_args, **kwargs):
-        given.append(("run", kwargs["env"]))
-        raise OSError("not started in this test")
-
-    monkeypatch.setattr(worker.subprocess, "run", run)
     monkeypatch.setattr(worker.subprocess, "Popen", popen)
     assert worker.Probe().available is False
     with pytest.raises(OSError):
@@ -234,16 +264,12 @@ def test_the_worker_runs_below_normal_without_a_window(monkeypatch):
     # either. (The fake fixture runs the fake at the normal class.)
     given = []
 
-    def run(*_args, **kwargs):
-        given.append(("probe", kwargs["creationflags"]))
-        raise OSError("not started in this test")
-
-    def popen(*_args, **kwargs):
-        given.append(("run", kwargs["creationflags"]))
+    def popen(argv, **kwargs):
+        given.append(("probe" if argv[-1] == "version" else "run",
+                      kwargs["creationflags"]))
         raise OSError("not started in this test")
 
     monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
-    monkeypatch.setattr(worker.subprocess, "run", run)
     monkeypatch.setattr(worker.subprocess, "Popen", popen)
     assert worker.Probe().available is False
     with pytest.raises(OSError):
@@ -742,6 +768,29 @@ class _RecordedStream:
     def close(self):
         self.events.append(("close",))
         return self.stream.close()
+
+
+@pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_the_job_object_is_closed_before_the_job_is_let_go(service, fake):
+    # The worker's swap (ADR-006 A7) is granted once no job is held: by
+    # then nothing the job started may run -- even when its end failed.
+    held = []
+    close = worker.WorkerProcess.Close
+
+    def recorded(process):
+        held.append(service._run is not None)
+        close(process)
+
+    def broken(_run, _exitCode):
+        raise RuntimeError("the end state failed in this test")
+
+    fake.setattr(worker.WorkerProcess, "Close", recorded)
+    fake.setattr(service, "_EndState", broken)
+    service.Create(SOURCE)
+    _until(lambda: len(held) >= 2 and service._run is None,
+           "the job to be let go")
+    assert held == [True, True]
 
 
 @pytest.mark.parametrize("stop", ["cancel", "shutdown"])
@@ -2326,6 +2375,7 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "get_archive_templates": WebAccess.THIS_PC,
                  "get_archive_template": WebAccess.THIS_PC,
                  "get_archive_thumb": WebAccess.THIS_PC,
+                 "get_archive_worker": WebAccess.THIS_PC,
                  "archive_settings_update": WebAccess.SHELL,
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,
@@ -2337,7 +2387,9 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "archive_template_delete": WebAccess.SHELL,
                  "archive_template_duplicate": WebAccess.SHELL,
                  "archive_titles_preview": WebAccess.SHELL,
-                 "archive_thumbs_generate": WebAccess.SHELL}
+                 "archive_thumbs_generate": WebAccess.SHELL,
+                 "archive_worker_install": WebAccess.SHELL,
+                 "archive_worker_cancel": WebAccess.SHELL}
     assert {name: WebAccess.ROUTE_ACCESS[f"api_v1.{name}"]
             for name in endpoints} == endpoints
 

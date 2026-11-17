@@ -73,6 +73,9 @@ These kinds live here:
   start.gg's event, the match log's day, a JSON file, with characters).
   The title templates and the titles' preview (A6) too; drawing a job's
   thumbnails (A6) needs the shell's image renderer, as a thumbnail's.
+  The worker itself is installed and updated from Autona-releases by
+  core's ArchiveWorkerInstaller (A7), in both shells, on the calling thread
+  (the release check and the install are executor jobs).
 - the shell operations (ADR-005 S3e-9): opening a board's set selection (the
   SCORE page's dialog in the desktop's window; S4ab-2 -- the Qt window on
   the way back to the Qt panel until S4ac-3), rendering its thumbnail (the legacy route,
@@ -110,6 +113,7 @@ from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.AppSettings import AppSettings
 from .core.ArchiveJobService import ArchiveJobService
+from .core.ArchiveWorkerInstaller import ArchiveWorkerInstaller
 from .core import ArchiveResults
 from .core.AssetPackService import AssetPackService
 from .core import AssetPackService as assets
@@ -971,6 +975,23 @@ def generate_archive_thumbs(jobId):
 def get_archive_thumb(jobId, number):
     """(path, type) of set `number`'s thumbnail (ADR-006 A6)."""
     return ArchiveJobService.instance.ThumbFile(jobId, number)
+
+
+def get_archive_worker(refresh=False):
+    """The worker's install (ADR-006 A7): the installed version, the latest
+    release, the install's state (ArchiveWorkerInstaller.Snapshot; the
+    check runs in the background)."""
+    return ArchiveWorkerInstaller.instance.Snapshot(refresh=refresh)
+
+
+def install_archive_worker(version):
+    """Install the latest release, shown as `version` -> the install's
+    state. Raises ArchiveWorkerInstaller's InstallerError."""
+    return ArchiveWorkerInstaller.instance.Install(version)
+
+
+def cancel_archive_worker_install(revision):
+    return ArchiveWorkerInstaller.instance.Cancel(revision)
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

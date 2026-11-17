@@ -3,7 +3,7 @@
     Validate a release-windows.zip before it may be published.
 
 .DESCRIPTION
-    Five checks. The first three were each born from a shipped incident:
+    Six checks. The first three were each born from a shipped incident:
 
     1. Separator check: every zip entry name must contain '/' separators.
        The installed update helper (assets/apply_update.ps1) strips the
@@ -43,6 +43,14 @@
        (QtWebEngine and the Qt DLLs it links against, Python's OpenSSL),
        (b) a trimmed file is back, or (c) _internal grew past the size cap.
        tests/test_release_bundle.py holds these lists to the spec.
+
+    6. Worker check (ADR-006 A7): nothing under vodsplit-worker/ (nor its
+       install's leftovers vodsplit-worker.part / .new / .old). The archive
+       clipper's worker is distributed on its own (a worker-v release) and
+       installed into Autona's folder by Autona; the update helper copies
+       the zip over the install without asking, so a worker in it would
+       overwrite the one the operator installed (another version, maybe a
+       format this Autona's page no longer matches).
 
     Run automatically by gen_release.ps1 and publish_release.ps1. When
     publishing manually with `gh release create` (release runbook step 8),
@@ -171,6 +179,17 @@ try {
         if ($persisted.Count -gt 0) {
             $sample = ($persisted | Select-Object -First 5 | ForEach-Object { $_.FullName }) -join ", "
             throw ("release zip ships the persisted state (would overwrite every installation's saved state): {0}" `
+                -f $sample)
+        }
+
+        # Check 6: the worker is installed by Autona, never shipped in its
+        # zip (see the header). Case-insensitive, as Windows resolves it.
+        $worker = @($entries | Where-Object {
+                $_.FullName -match "^Autona/vodsplit-worker(/|\.(part|new|old)(/|$))"
+            })
+        if ($worker.Count -gt 0) {
+            $sample = ($worker | Select-Object -First 5 | ForEach-Object { $_.FullName }) -join ", "
+            throw ("release zip ships the archive clipper's worker (it is installed separately and would overwrite the installed one): {0}" `
                 -f $sample)
         }
 
