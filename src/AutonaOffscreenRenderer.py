@@ -2,10 +2,11 @@
 
 What the images the app generates have in common: the match thumbnail's
 (thumbnail/ThumbnailRenderer, S4o, where this was written) and the tournament
-result's (result/ResultPageRenderer). A subclass says which pages there are,
-how big, and which function of the page draws. One view per kind of image:
-their sizes differ, and the picture before a load is compared with the first
-one after it (_finalize_render).
+result's (result/ResultPageRenderer). A subclass says which kind of template
+package it draws (the layout catalog's, ADR-007 T1: a package's folder, entry
+page and size), its default, and which function of the page draws. One view
+per kind of image: their sizes differ, and the picture before a load is
+compared with the first one after it (_finalize_render).
 """
 import json
 import os
@@ -18,7 +19,7 @@ from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEngineLoadingInfo, QWebEnginePage
 from loguru import logger
 
-from .Helpers import AutonaDirHelper
+from .core import LayoutCatalog
 
 os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
@@ -134,16 +135,24 @@ class AutonaOffscreenRenderer(QObject):
       image new to the page, two in twenty-one. So every render is taken once
       two grabs in a row agree, for at most SETTLE_WAIT_MS (_settle_every).
 
+    - A template id is one of the layout catalog's packages of CATALOG_KIND,
+      read when a render is asked for (_template_for): its page is
+      layout/<folder>/<entry>, at its size. A package once listed keeps its
+      page: one whose files went missing since fails its load (and the next
+      render tries again) like a page that is not there always did. An id the
+      catalog never listed is drawn on the default; with no default either,
+      the render cannot start.
+
     A subclass gives the class attributes below and _resolve_template_id, and
     a way in that calls _submit(), all on the GUI thread.
     """
 
     # What the log calls this kind of image.
     LOG_NAME = ""
-    # Maps template id -> subdirectory under layout/ (each contains PAGE_FILE).
-    TEMPLATE_SUBDIRS = {}
+    # The layout catalog's kind of the templates (LayoutCatalog.TEMPLATE_KINDS)
+    # and the one drawn when the one asked for is not there.
+    CATALOG_KIND = None
     DEFAULT_TEMPLATE_ID = None
-    PAGE_FILE = ""
     # The page's function that draws: given the payload, it says RENDER_READY.
     INIT_FUNCTION = ""
     # A picture that came out another size is made the template's (a screen
@@ -253,6 +262,9 @@ class AutonaOffscreenRenderer(QObject):
 
         self._configure_view()
 
+        # The catalog's packages of CATALOG_KIND seen so far, by id
+        # (_refresh_pages).
+        self._pages = {}
         self._template_id = None       # Currently loaded template id
         self._page_loaded = False
         self._load_query = None        # The load on its way (None: none is)
@@ -272,38 +284,76 @@ class AutonaOffscreenRenderer(QObject):
         self._page.loadingChanged.connect(self._on_loading_changed)
         self._view.page().titleChanged.connect(self._on_title_changed)
 
+        self._refresh_pages()
         if self.LOAD_AT_START:
-            self._load_template(self.DEFAULT_TEMPLATE_ID)
+            if self.DEFAULT_TEMPLATE_ID in self._pages:
+                self._load_template(self.DEFAULT_TEMPLATE_ID)
+            else:
+                # The first render loads what it can, or fails to start.
+                logger.warning(f"{self.LOG_NAME}: the default template "
+                               f"'{self.DEFAULT_TEMPLATE_ID}' is not there")
 
     # ── what a subclass may say otherwise ────────────────────────────────
 
     def _configure_view(self):
         """Before the first page is loaded."""
 
-    def _size(self, _template_id) -> tuple:
-        """The template's picture, (width, height)."""
-        return 1920, 1080
+    def _size(self, template_id) -> tuple:
+        """The template's picture, (width, height): its package's size."""
+        page = self._pages.get(template_id)
+        return tuple(page["size"]) if page is not None else (1920, 1080)
 
     def _resolve_template_id(self, template) -> str:
         raise NotImplementedError
 
+    # ── the templates ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _layout_root():
+        # The catalog's folder (LayoutCatalog.Root), the one the services
+        # read: under the directory the app started in (AutonaDirHelper's,
+        # given by bootstrap_core() and read now: the tests point it at their
+        # runtime), not the process's current one, which nothing of ours
+        # changes and still was, for a moment, site-packages/PySide6 or the
+        # directory pytest started in (in test runs, near a first WebEngine
+        # page; what moves it is not known): the page looked up then was
+        # none, or the shipped one. Not AutonaResolve(): layout/ is not in
+        # the bundle, and resolve() would make the document's URL, which the
+        # page's relative references are read against, a link's target or a
+        # mapped drive's UNC path.
+        return LayoutCatalog.Root()
+
+    def _refresh_pages(self):
+        """What the catalog lists now, over what it listed before. A page
+        of a package whose manifest now says another size is drawn at it
+        (_fit_view resizes the view for it)."""
+        self._pages.update(LayoutCatalog.Templates(
+            self.CATALOG_KIND, self._layout_root()))
+
+    def _template_for(self, asked) -> str:
+        """The template a render of `asked` (an id) draws: itself when the
+        catalog lists it, or did; else the default; else `asked`, whose load
+        cannot start (_load_template)."""
+        self._refresh_pages()
+        if isinstance(asked, str) and asked in self._pages:
+            return asked
+        if self.DEFAULT_TEMPLATE_ID in self._pages:
+            return self.DEFAULT_TEMPLATE_ID
+        return asked
+
     # ── the renders ──────────────────────────────────────────────────────
 
     def _load_template(self, template_id: str):
-        """Load (or reload) the HTML for the given template id."""
-        subdir = self.TEMPLATE_SUBDIRS.get(
-            template_id, self.TEMPLATE_SUBDIRS[self.DEFAULT_TEMPLATE_ID])
-        # Under the directory the app started in (AutonaDirHelper's, read
-        # now: the tests point it at their runtime), not the process's current
-        # one, which nothing of ours changes and still was, for a moment,
-        # site-packages/PySide6 or the directory pytest started in (in test
-        # runs, near a first WebEngine page; what moves it is not known): the
-        # page looked up then was none, or the shipped one. Not
-        # AutonaResolve(): layout/ is not in the bundle, and resolve() would
-        # make the document's URL, which the page's relative references are
-        # read against, a link's target or a mapped drive's UNC path.
-        html_path = os.path.abspath(os.path.join(
-            AutonaDirHelper.current_dir, "layout", subdir, self.PAGE_FILE))
+        """Load (or reload) the HTML for the given template id. LookupError
+        when the catalog has never listed it."""
+        page = self._pages.get(template_id) \
+            if isinstance(template_id, str) else None
+        if page is None:
+            raise LookupError(
+                f"there is no {self.LOG_NAME.lower()} template "
+                f"{template_id!r}")
+        html_path = LayoutCatalog.TemplatePath(
+            page, page["entry"], self._layout_root())
         url = QUrl.fromLocalFile(html_path)
         # The page does not read it: it tells this load from the one it
         # replaces, which may be the same page.
@@ -358,11 +408,20 @@ class AutonaOffscreenRenderer(QObject):
         QTimer.singleShot(0, lambda: ticket is self._active and self._finish(
             ticket, None, "the render could not be started"))
 
+    def _fit_view(self, template_id):
+        """The view at the template's size: its manifest's may say another
+        one than when its page was loaded (_refresh_pages), and a picture of
+        another size would be scaled to it, not drawn at it."""
+        width, height = self._size(template_id)
+        if (self._view.width(), self._view.height()) != (width, height):
+            self._view.resize(width, height)
+
     def _start_render(self, ticket):
         ticket.started = True
         self._render_number += 1
         ticket.number = self._render_number
         self._watchdog.start(self.STAGE_TIMEOUT_MS)
+        self._fit_view(ticket.templateId)
 
         # JSON of a string is a JS string literal: nothing in a tag is code.
         # (It was a template literal, where "${...}" in a tag ran as script.)

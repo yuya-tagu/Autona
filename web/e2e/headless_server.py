@@ -7,7 +7,9 @@ _wait_until_serving(), in tests/test_bootstrap_split.py's throwaway working
 directory, on a free port, with its own AUTONA_INSTANCE_TAG -- so the
 developer's user_data/, out/, logs/ and running Autona are never touched.
 
-On top of that working directory the E2E needs what the browser loads: the
+That working directory has the shipped template packages of the result and
+the thumbnail already (tests/test_bootstrap_split.py's SHIPPED_TEMPLATE_LINKS,
+ADR-007 T1). On top of it the E2E needs what the browser loads: the
 built Web UI (web/build) and the overlays it opens (layout/OVERLAY, the
 commentators overlay of the Commentary panel, ADR-005 S4b, the Top 8
 bracket of the Top 8 panel, S4i, and the Board panel's default design, winner
@@ -45,7 +47,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.AutonaDesignerService import AutonaDesignerService  # noqa: E402
 from tests.conftest import _LINKED_TREES, _link_tree  # noqa: E402
-from tests.test_bootstrap_split import _free_port, _runtime  # noqa: E402
+from tests.test_bootstrap_split import (  # noqa: E402
+    SHIPPED_TEMPLATE_LINKS, _free_port, _runtime)
 from tests.test_headless_smoke import (  # noqa: E402
     _launch, _wait_until_serving)
 
@@ -144,7 +147,8 @@ def serve(console_copy=None):
         return 2
     directory = Path(tempfile.mkdtemp(prefix="autona-e2e-"))
     console_path = directory / "console.txt"
-    links = [directory / relative for relative in _LINKED_TREES + EXTRA_LINKS]
+    links = [directory / relative for relative
+             in _LINKED_TREES + SHIPPED_TEMPLATE_LINKS + EXTRA_LINKS]
     exit_code, killed = 1, False
     process = None
     try:

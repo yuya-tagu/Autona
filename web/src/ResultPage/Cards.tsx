@@ -21,6 +21,7 @@ import {ReduxState} from "../redux/store";
 import {usePanelShell} from "../PanelShell/context";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {canCopyImage} from "../PanelShell/clipboard";
+import {TemplateChoice} from "../PanelShell/templatePackages";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
 import {
     DropLine,
@@ -63,8 +64,9 @@ export interface ResultPick {
     skin: number;
 }
 
-// One of GET /api/v1/result's layouts. The name is the server's (translated by
-// the app); the page's own words first.
+// One of GET /api/v1/result's layouts: what the page reads of the one in
+// effect (its rows). The name is the server's (translated by the app); the
+// choices are GET /api/v1/layouts' (ADR-007 T1), these only until it answers.
 export interface ResultLayout {
     id: string;
     name: string;
@@ -238,10 +240,11 @@ function FromScoreboard({name}: {name: string | null}) {
 
 // ── レイアウト ───────────────────────────────────────────────────────────
 
-export function LayoutCard({layout, layouts, game, send, importing, importNote,
+export function LayoutCard({layout, choices, game, send, importing, importNote,
                             loadStandings, kind, clear}: {
     layout: string;
-    layouts: ResultLayout[];
+    // The layouts to choose from (GET /api/v1/layouts?kind=result).
+    choices: TemplateChoice[];
     game: {codename: string; name: string} | null;
     send: (layout: string) => Promise<unknown>;
     // The standings are on their way (from any client).
@@ -260,13 +263,12 @@ export function LayoutCard({layout, layouts, game, send, importing, importNote,
                 select
                 size="small"
                 label={i18n.t("result_layout_field")}
-                value={layouts.some((entry) => entry.id === shown) ? shown : ""}
+                value={choices.some((entry) => entry.id === shown) ? shown : ""}
                 onChange={(event) => choose(event.target.value)}
             >
-                {layouts.map((entry) => (
+                {choices.map((entry) => (
                     <MenuItem key={entry.id} value={entry.id}>
-                        {i18n.t(`result_layout_${entry.id}`,
-                                {defaultValue: entry.name})}
+                        {entry.label}
                     </MenuItem>
                 ))}
             </TextField>

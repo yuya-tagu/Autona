@@ -315,10 +315,28 @@
 Board / Commentary / Top 8 のページと Designer の「開く」一覧が使う**同じカタログ**（`src/core/LayoutCatalog.py`）を返す
 （[../../docs/changes/layout-custom-unification.md](../../docs/changes/layout-custom-unification.md) Step 1）。
 
-- `?kind=` で絞り込む。値は `scoreboard` / `designer` / `commentary` / `top8`。カンマ区切り（`?kind=scoreboard,designer`）・
-  パラメータの繰り返しのどちらでも複数指定できる。省略・空なら全件。未知の kind は `400 INVALID_ARGUMENT`
+- `?kind=` で絞り込む。値は `scoreboard` / `designer` / `commentary` / `top8` / `result` / `thumbnail`。カンマ区切り
+  （`?kind=scoreboard,designer`）・パラメータの繰り返しのどちらでも複数指定できる。省略・空なら全件。未知の kind は
+  `400 INVALID_ARGUMENT`
 - 状態ではないので `revision` は付かない。読み取りなので操作ログにも出ない（§2.7）
-- 並び順は旧来型（フォルダ名順）→ Designer プロジェクト（slug の大文字小文字無視順）。Board のページのプルダウンと同じ
+- 並び順は旧来型（フォルダ名順。テンプレートパッケージはその後ろで、同梱が先）→ Designer プロジェクト（slug の大文字小文字無視順）。
+  Board のページのプルダウンと同じ
+- **テンプレートパッケージ**（`result` = リザルト画像のレイアウト、`thumbnail` = サムネイルのテンプレート。2026-11-17 追加・
+  ADR-007 T1）: リザルト / サムネイルのページの選択肢。エントリは下の形に次を足したもの。
+  `displayNames`（`{"ja", "en"}` の、ある言語だけ。同梱は CoreWords の名前。文字列で宣言された名前は両方に同じ値）・
+  `folder`（`layout/` のフォルダ名。同梱の 8 種は `id` と違う: `horizontal` → `result` ほか）・`bundled`（同梱の 8 種）・`contract`
+  （テンプレートの契約の番号）・`size`（`[幅, 高さ]`）・`author` / `license`（無ければ `null`）・`rows`（result: `players` / `teams`）か
+  `template`（thumbnail: 配置の JSON のファイル名）。`displayName` はほかの kind と同じく**常に文字列**で、プログラムの言語で選んだ名前
+  （無い言語はもう一方。表示名の重複時の ` ({id})` は `displayNames` にも付く）。`id` は `PATCH /result` の `layout`・`PATCH /thumbnail` の
+  `template_id` に渡す値。配信 URL は `layout/{folder}/{entry}`。規約の正本は `layout/README.md`・Design.md §4.4.0。
+  ほかの kind のエントリは変わらない
+
+```json
+{ "id": "horizontal", "kind": "result", "displayName": "横向き (1920x1080)",
+  "displayNames": {"ja": "横向き (1920x1080)", "en": "Horizontal (1920x1080)"},
+  "format": null, "game": null, "entry": "result.html", "folder": "result", "bundled": true,
+  "contract": 1, "size": [1920, 1080], "rows": "players", "author": null, "license": "MIT" }
+```
 
 ```json
 { "ok": true, "data": [
@@ -518,6 +536,7 @@ Board / Commentary / Top 8 のページと Designer の「開く」一覧が使�
 - `settings.background_source` は `background_source` の無い古い設定でも読める値（パスから判定。書かない）。`background_name` はカスタム背景のファイル名だけ（パスは出さない。操作者のファイルの場所を LAN に出さないため）
 - `settings.game` は保存されたゲームと今のゲーム。古い読みの残骸（`game.None`）は出さない（ファイルからも消さない）
 - `game` は `null`（未選択）か `{codename, name}`。`templates[].name` は翻訳済み
+- `templates` はテンプレートのカタログ（§5.2 の `kind=thumbnail`。ADR-007 T1）。同梱の 2 種と `layout/` に置かれたパッケージ（`name` は同梱が CoreWords、ほかは `displayName`）。`PATCH /thumbnail` の `template_id` はこの `id` のどれか。`settings.template_id` は保存値のパッケージが無くなっていれば `type_a`（保存値は消さない）
 - `canRender` はこのシェルで描けるか（ヘッドレスは `false`）
 - **`settings` の値は描画に使う値と同じ**。`thumbnail.js` の読みと違う値も、この読みに揃えて描画に渡す: 無いときの `use_team_names` / `flip_p2` は `true`（js は `false`）、不正な形の保存値（`use_team_names: 0`、`zoom: 150.0`、範囲外など）は既定値、`align` の保存値 `0` は既定の 50 / 40（js が `|| 50` / `|| 40` と読むのでそう描かれる。旧 Qt パネルが保存できた値）。v1 の描画に加えて、SCORE の生成・X 投稿と legacy の `/scoreboard<N>-get-thumbnail-<png|jpg>` も同じ読みで描く（`ThumbnailService.RenderPayload`。ADR-005 S4p。それまでの SCORE / legacy は保存値をそのまま渡していた）。描画は `settings.json` を書かない（`background_source` の無い古い設定は、`GET` と同じく移行した値で描き、保存は次の `PATCH` / アップロードで行われる）
 - `GET /thumbnail/preview`: エンベロープではなく PNG の本体（`Cache-Control: no-store`）。**このセッションで最後に完了したボード 1 の描画**で、ボード 1 の生成（`:generate`）も更新する（生成の際にこの画像だけ書けなかったときは前の画像のまま）。**ボード 2 の生成はこの画像を書かない**（2026-11-10・ADR-005 S4z レビュー。プレビューはボード 1 の絵で、どの経路でも別のボードの絵で答えない。§7.3）。描画がまだなら `404 NOT_FOUND`（前回のセッションの画像は起動時に消す）。クライアントは `?v=<thumbnail.render.revision>` で URL を変える（値は見ない）。`tmp/` は静的配信しない
@@ -540,7 +559,8 @@ Board / Commentary / Top 8 のページと Designer の「開く」一覧が使�
   "canRender": true
 } }
 ```
-- `layout` は `settings.json` の `result_config.layout`。保存値が無いときは今の対戦形式から決める（Team / Crew は `team`、ほかは `horizontal`）。対戦形式を選ぶと追従する（`team_split` や `vertical` の手動選択は保つ）
+- `layout` は `settings.json` の `result_config.layout`。保存値が無いときは今の対戦形式から決める（Team / Crew は `team`、ほかは `horizontal`）。対戦形式を選ぶと追従する（`team_split` や `vertical` の手動選択は保つ）。保存された id のレイアウトのパッケージが `layout/` から無くなっていたら、同じく対戦形式の既定を描く（保存値は消さない。フォルダが戻れば戻る）
+- `layouts` はレイアウトのカタログ（§5.2 の `kind=result`。ADR-007 T1）。同梱の 6 種と `layout/` に置かれたパッケージ。`name` は同梱が CoreWords、ほかは `displayName` をプログラムの言語で。`slots` は描く行の数（同梱の `horizontal` / `vertical` / `vertical_geki` は 8、ほかの単独は 16、団体は 8）、`team` は `rows: "teams"`。`PATCH /result` の `layout` はこの `id` のどれか（ほかは `400`）
 - `players` は常に 16 行、`teams` は常に 8 行。`characters` は常に 3 要素で、`null` は空。読めない値・今のゲームのものでない値も `null`。**保存された別のゲームのキャラ**（再起動をまたいでゲームが変わった場合など）は state に残るが、読みでは無いものとして扱う（`null`・描かない・`fromScoreboard` の補完が効く・`sample` と `:loadStandings` の確認の判定でも入力に数えない）。絵のパスが `user_data/games/<codename>/` の下にあればそのゲームの値と見なし、絵が無ければ今のゲームの一覧にあるかで決める。ゲームが未選択のときは、その下の絵を持つ値を描かない
 - `fromScoreboard`: キャラ欄が空の選手に、スコアボードの同名の選手のキャラを描くとき、そのキャラの名前（描画のときに解決し、state には書かない）。無ければ `null`
 - `sample`: 今プレビューすると固定のサンプルを描くか（今のレイアウトの枠に描くものが無い）。このとき `:generate` は `400`
@@ -1675,7 +1695,7 @@ HTTP/1.1 409 Conflict
 > 自動で pin する（旧ルートと同じ状態になること、および §6 冒頭のチーム番号規約など意図的な差分）。
 > Web UI 側が状態側のチーム番号を送ることは `web/src/ScoreboardPage/v1Requests.test.js` が pin する。
 > §5.2 `layouts`（2026-10-22）はエンベロープと `?kind=` を `tests/test_api_v1.py`、カタログの発見規則を
-> `tests/test_layout_catalog.py` が pin する。
+> `tests/test_layout_catalog.py`（テンプレートパッケージの規則と同梱 8 種の凍結は `tests/test_template_packages.py`。ADR-007 T1）が pin する。
 > ルート一覧そのものは `tests/test_webserver_routes.py` の `EXPECTED_API_V1_ROUTES` が台帳。
 > §5.8 `countries` と §6.22〜6.24 の Top 8（2026-11-04・ADR-005 S4i）は `tests/test_api_v1_top8.py` が pin する。
 > §5.9 `analysis` と §7.3 `analysis:refresh`（2026-11-04・ADR-005 S4k）は `tests/test_api_v1_analysis.py` が pin し、

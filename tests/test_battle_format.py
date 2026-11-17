@@ -17,6 +17,7 @@ Through Flask's test client against the real route table, on both shells.
 An unchanged request writes and tells nothing.
 """
 import copy
+import shutil
 import threading
 
 import pytest
@@ -31,6 +32,7 @@ from src.StateManagerBridge import StateManagerBridge
 from tests.test_api_v1 import (  # noqa: F401
     _assertRejected, _requestOnWorkerThread, client, webApp)
 from tests.test_api_v1_score import _ok, lanServer  # noqa: F401
+from tests.fixtures import template_packages
 from tests.test_bootstrap_split import _PRELUDE, _free_port, _probe
 from tests.test_web_access import LAN_PEER
 from tests.test_web_operations import _goHeadless
@@ -165,9 +167,20 @@ def test_the_legacy_team_mode_in_force_is_unchanged_too(
     assert settingWrites == [] and told == []
 
 
+@pytest.fixture
+def resultLayouts(autonaApp):
+    """The shipped result layouts in the runtime's layout/ (the catalog's
+    result packages, ADR-007 T1), for the switch to follow."""
+    made = template_packages.Install(autonaApp.dir / "layout",
+                                     template_packages.RESULT_FOLDERS)
+    yield
+    for folder in made:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def test_the_switch_tells_the_result_s_layout(
-        autonaApp, client, shell):
-    ResultService.instance.SetLayout("horizontal")
+        autonaApp, client, shell, resultLayouts):
+    assert ResultService.instance.SetLayout("horizontal")
     _put(client, "crew")
     autonaApp.settle()
     assert ResultService.instance.Layout() == "team"

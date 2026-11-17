@@ -44,3 +44,4 @@ Proposed | Accepted | Superseded by ADR-XXX | Deprecated
 | [ADR-004-headless-core-write-path.md](ADR-004-headless-core-write-path.md) | Accepted | 書き込み経路アーキテクチャ（Headless Core / Actions 層への集約・移行専念） |
 | [ADR-005-web-first-ui-thin-shell.md](ADR-005-web-first-ui-thin-shell.md) | Accepted | Web-first UI と薄い Qt シェル（Headless Core の完成・UI 技術の一本化・新規 Qt パネル凍結） |
 | [ADR-006-archive-clipper-worker.md](ADR-006-archive-clipper-worker.md) | Accepted | アーカイブ切り抜き（vodsplit を別プロセスのワーカーとして組み込む・試合の記録・段階 A1〜A7） |
+| [ADR-007-template-packages.md](ADR-007-template-packages.md) | Accepted | テンプレートパッケージ（リザルト画像・サムネイル・OBS オーバーレイのデザインを zip で配布物にする・描画経路の隔離・段階 T1〜T4） |

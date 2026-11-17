@@ -3,11 +3,15 @@ from qtpy.QtGui import QPixmap
 from qtpy.QtWebEngineCore import QWebEngineSettings
 
 from ..AutonaOffscreenRenderer import AutonaOffscreenRenderer
+from ..core import LayoutCatalog
+from ..core.ThumbnailService import DEFAULT_TEMPLATE_ID
 
 
 class ThumbnailRenderer(AutonaOffscreenRenderer):
     """Renders thumbnail HTML templates to images: how, and in what order, is
     AutonaOffscreenRenderer's (split from here by ADR-005 S4q, for Result).
+    A template is one of the layout catalog's thumbnail packages (ADR-007 T1):
+    layout/<folder>/<entry> (thumbnail.html for the shipped ones) at its size.
 
     Two ways in, both on the GUI thread:
     - renderAsync(): core/ThumbnailService's. The result goes to its callback.
@@ -18,15 +22,8 @@ class ThumbnailRenderer(AutonaOffscreenRenderer):
     """
 
     LOG_NAME = "Thumbnail"
-    # Maps template id -> subdirectory under layout/ (each contains thumbnail.html).
-    # Both templates currently share the Center Panel design as a starting
-    # point; they are crafted into distinct designs over time.
-    TEMPLATE_SUBDIRS = {
-        "type_a": "thumbnail",
-        "type_b": "thumbnail_type_b",
-    }
-    DEFAULT_TEMPLATE_ID = "type_a"
-    PAGE_FILE = "thumbnail.html"
+    CATALOG_KIND = LayoutCatalog.KIND_THUMBNAIL
+    DEFAULT_TEMPLATE_ID = DEFAULT_TEMPLATE_ID
     INIT_FUNCTION = "initThumbnail"
 
     def _configure_view(self):
@@ -41,10 +38,7 @@ class ThumbnailRenderer(AutonaOffscreenRenderer):
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
     def _resolve_template_id(self, template: dict) -> str:
-        tid = (template or {}).get("template_id")
-        if tid not in self.TEMPLATE_SUBDIRS:
-            return self.DEFAULT_TEMPLATE_ID
-        return tid
+        return self._template_for((template or {}).get("template_id"))
 
     @staticmethod
     def _payload(data, config, template) -> dict:

@@ -41,8 +41,15 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from tests.fixtures import template_packages
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MARKER = "<<<AUTONA_BOOT_PROBE>>>"
+# The shipped template packages (ADR-007 T1), linked into _runtime()'s
+# layout/: the folders of the frozen ids (tests/test_template_packages.py
+# holds the copy to the catalog's table).
+SHIPPED_TEMPLATE_LINKS = [f"layout/{folder}"
+                          for folder in template_packages.FOLDERS]
 
 
 # ── The steps of each stage, read from the source ───────────────────────
@@ -121,6 +128,9 @@ def test_bootstrap_core_steps_and_their_order():
     # everything that can hand it work.
     assert _steps("bootstrap_core") == [
         "SettingsManager.Initialize()",
+        # The layout catalog's folder (ADR-007 T1): the directory the app
+        # started in, for the services and the renderers alike.
+        "LayoutCatalog.SetAppDirectory(...)",
         "AutonaLocaleHelper.Initialize()",
         "BadWordFilter()",
         "BadWordFilter.instance.Initialize()",
@@ -397,10 +407,16 @@ def test_both_shells_make_the_shared_wiring_and_only_through_it():
 
 @contextmanager
 def _runtime(tmp_path):
-    """A throwaway working directory shaped like the app's (see conftest)."""
+    """A throwaway working directory shaped like the app's (see conftest):
+    the isolated launch of the headless smoke test, the browser E2E
+    (web/e2e/headless_server.py) and the probes here. Its layout/ has the
+    shipped template packages, linked like assets/ (SHIPPED_TEMPLATE_LINKS):
+    an install always has them, and the result's and the thumbnail's lists
+    are the layout catalog's packages (ADR-007 T1)."""
     from tests.conftest import _LINKED_TREES, _RUNTIME_DIRS, _link_tree
 
-    for relative in _LINKED_TREES:
+    links = _LINKED_TREES + SHIPPED_TEMPLATE_LINKS
+    for relative in links:
         link = tmp_path / relative
         link.parent.mkdir(parents=True, exist_ok=True)
         _link_tree(link, PROJECT_ROOT / relative)
@@ -410,8 +426,9 @@ def _runtime(tmp_path):
         yield tmp_path
     finally:
         # Break the junctions before tmp cleanup can descend through them
-        # into the real assets/ and src/ trees (see tests/conftest.py).
-        for relative in reversed(_LINKED_TREES):
+        # into the real assets/, src/ and layout/ trees (see
+        # tests/conftest.py).
+        for relative in reversed(links):
             link = tmp_path / relative
             try:
                 if link.is_symlink():

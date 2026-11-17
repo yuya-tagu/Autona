@@ -212,7 +212,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 |------|------|
 | **R-Img-1** | レンダラーは Singleton（`ThumbnailRenderer.instance()`, `ResultPageRenderer.instance()`）として実装 |
 | **R-Img-2** | テンプレ選択は **プレビュー側**（プレビュー画像の直上）にコンボボックスを置く（#29 で確定済み） |
-| **R-Img-3** | テンプレ追加時は `TEMPLATE_SUBDIRS`（Thumbnail）/ `LAYOUT_SUBDIRS` ほか（Result。`core/ResultService.py`）への登録 + テンプレディレクトリ作成のみで完結する |
+| **R-Img-3** | テンプレ追加は `layout/` にテンプレートパッケージ（マニフェスト = `settings.json` の `autona` ブロック、`kind` が `result` / `thumbnail`）のフォルダを置くだけで完結する（ADR-007 T1。コードに表は無い。§4.4） |
 | **R-Img-4** | レンダリング完了は HTML 側で `document.title = "RENDER_READY"` に変更してシグナル化 |
 | **R-Img-5** | Python から HTML への入力は `initThumbnail(payload)` / `initResult(payload)` の関数経由で受け渡す |
 | **R-Img-5b** | 描画の土台は `src/AutonaOffscreenRenderer.py`（ADR-005 S4q で `ThumbnailRenderer` から切り出した。`ThumbnailRenderer` と `result/ResultPageRenderer` がサブクラスで、ビューはそれぞれ別）。描画は 1 度に 1 つ（チケット。ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は `renderAsync()`（core。結果はコールバックだけ）と、サムネイルだけの `renderSync()`（SCORE・legacy。入れ子のイベントループ）。段階ごとに 10 秒で失敗し、ページを読み直す（ADR-005 S4o） |
@@ -866,7 +866,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（起動時のスキャン・ロードのジョブは両シェル共通の `core/GameLoader`（ADR-005 S-final SF-6b。選択の後の処理までローダーのスレッドで走り、通知は `GameLoader.loaded` / `scanned` → Bridge の `game_loaded` / `games_scanned`: SF-6c。それまでは Qt 側の `AutonaGameAssetManager` がその通知の Qt シグナルを持っていた）。Qt のモデル化は Qt モデルの整理 PR4 で削除。React のページは Web の操作でカタログを読む） | アセット追加時に手動編集 |
 | 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog` | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
-| サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
+| サムネテンプレ定義 | `./layout/{パッケージのフォルダ}/{マニフェストの template}`（同梱は `layout/thumbnail/type_a.json`・`layout/thumbnail_type_b/type_b.json`。ADR-007 T1 で `assets/thumbnail_base/thumbnail_types/` から移した） | JSON | `core/ThumbnailService._Template`（`core/LayoutCatalog` が場所を決める） | テンプレートパッケージと一緒に置く（§4.4.1） |
 | アーカイブ切り抜きのジョブ（ADR-006 A1） | 作業フォルダ（`settings.json` の `archive.work_dir`。既定 `%USERPROFILE%\Videos\Autona`。`user_data/` の下には置かない）の `<job_id>/job.json` ほか（4.2.5） | JSON | `core/ArchiveJobService` | アーカイブ切り抜きのページ（`/web/archive`）。StateManager には載せない |
 | アーカイブ切り抜きのタイトルのテンプレート（ADR-006 A6） | `./user_data/archive_templates/<id>.json`（vodsplit のテンプレートの形式。`default` は標準を保存したもの）（4.2.5） | JSON | `core/ArchiveTemplates` | アーカイブ切り抜きのテンプレートの画面。解析・書き出しのワーカーに `--template` で渡す |
 | 試合の記録（ADR-006 A2） | `./user_data/match_log/YYYYMMDD.jsonl`（記録を最初に書いた日のローカル日付。1 行 = 記録全体で、同じ `id` は最後の行が正）（4.2.5） | JSON Lines | `core/MatchLogService` | 自動（ボード 1 の公開を追って追記する。自動では消さない）。読むのはアーカイブ切り抜き（A5） |
@@ -1204,7 +1204,7 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 
 | キー | 必須 | 内容 |
 |------|------|------|
-| `kind` | ○ | `scoreboard` / `commentary` / `top8`（`designer` は `layout/custom/` 専用で宣言不可）。不正・破損ブロックは警告ログを出してブロック無し扱い |
+| `kind` | ○ | `scoreboard` / `commentary` / `top8` / `result` / `thumbnail`（`designer` は `layout/custom/` 専用で宣言不可）。不正・破損ブロックは警告ログを出してブロック無し扱い。`result` / `thumbnail` はテンプレートパッケージで、キーと規則が別（§4.4.0） |
 | `displayName` | | 一覧の表示名。省略時はフォルダ名から生成 |
 | `format` / `game` | | BOARD のメタ欄（対戦形式・ゲーム）。省略時は `null`（画面は「—」） |
 | `entry` | | 入口 HTML のファイル名（フォルダ内のみ）。省略・フォルダ外指定は `index.html` |
@@ -1231,8 +1231,12 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 | `kuroshiro*.min.js` + `kuromoji/` | 日本語処理（読み仮名生成） |
 | `color-thief.min.js` | 画像から代表色抽出 |
 | 各種フォント | カスタムフォント定義用 |
+| `thumbnail_assets.js` | 同梱のサムネイル・リザルトのテンプレートが共有するキャラ画像のヘルパー（ADR-007 T1 で `layout/thumbnail/` から移した） |
+| `result.js` / `result.css` / `result_team.css` | 同梱のリザルトのテンプレートが共有する描画（`initResult`・`placeTeams()`）と土台のスタイル（ADR-007 T1 で `layout/result/`・`layout/result_team/` から移した） |
 
 `include/` 内のライブラリのバージョンを上げる時は、全テンプレで動作確認が必要。
+テンプレートパッケージ（§4.4.0）が自分のフォルダの外で読んでよいのは `../include/` だけ（ADR-007 D2。ほかは `../../assets/` と
+payload が渡すパス。pin: `tests/test_template_packages.py`）。`include/` のファイルをパッケージに同梱しない（特に `gsap.min.js`）。
 
 #### 4.3.5 main.css の利用規約
 
@@ -1256,6 +1260,43 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 
 ### 4.4 画像生成テンプレ命名規約
 
+#### 4.4.0 テンプレートパッケージ（ADR-007 T1）
+
+リザルト画像のレイアウトとサムネイルのテンプレートは、`layout/` 直下の 1 フォルダ = 1 **テンプレートパッケージ**。
+`core/LayoutCatalog.py` が `settings.json` の `autona` ブロック（マニフェスト）から見つける（コードに一覧の表は無い）。
+`ResultService` / `ThumbnailService` / 2 つのレンダラー / `GET /api/v1/layouts?kind=result|thumbnail` / リザルトとサムネイルの
+ページの選択肢は、すべてこのカタログを読む。利用者向けの説明は `layout/README.md`。
+
+| キー | 必須 | 内容 |
+|------|------|------|
+| `kind` | ○ | `result` / `thumbnail` |
+| `contract` | ○ | テンプレートの契約の番号（今は `1` だけ。`LayoutCatalog.TEMPLATE_CONTRACTS`）。知らない番号は載せない |
+| `size` | ○ | 出力の `[幅, 高さ]`（px の整数、各 1〜4096）。レンダラーのビューと画像の大きさ |
+| `rows` | result で ○ | `players`（単独。行は 16 まで渡る）/ `teams`（団体。8 行）。チーム用かどうかの判定 |
+| `template` | thumbnail で ○ | 配置の数値の JSON（フォルダ内のファイル名だけ）。payload の `template` になる |
+| `entry` | | 入口の HTML（フォルダ内のファイル名だけ）。省略時は `result.html` / `thumbnail.html` |
+| `displayName` | | 文字列か `{"ja", "en"}`。省略時はフォルダ名から作る。同梱の 8 種は使わず `CoreWords` の名前（一覧のエントリでの形は下記） |
+| `author` / `license` | | 一覧に添える（同梱は `license: "MIT"`） |
+
+- **フォルダ名へのフォールバックは無い**。必須のキーが欠けた・不正なマニフェスト、入口や `template` のファイルが無いものは
+  そのフォルダだけ警告を出して載せない（ほかの発見は止めない）
+- **id**: 同梱の 8 種は今までの id を変えない（凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES`: `horizontal` → `result` ほか、
+  `type_a` → `thumbnail`、`type_b` → `thumbnail_type_b`）。ほかのパッケージの id はフォルダ名。同じ kind の同梱の id と同じ名前の
+  フォルダ（大文字小文字は問わない: Windows のフォルダ名は区別しない）は載せない（同梱が勝つ）。保存値（`result_config.layout` /
+  `thumbnail_config.template_id` / state の `result_layout`）の移行は無い
+- 一覧の順: 同梱（凍結した表の順）→ ほか（フォルダ名順）。エントリは他の kind の形に `displayNames` / `folder` / `bundled` /
+  `contract` / `size` / `author` / `license` と `rows` か `template` を足したもの（`id` がフォルダと違いうるので、パスは `folder` から組む）。
+  `displayName` は他の kind と同じく文字列（`Layouts(locale=)` の言語。`GET /api/v1/layouts` はプログラムの言語）、`displayNames` は
+  `{"ja", "en"}` のある言語だけ（文字列で宣言された名前は両方に同じ値）
+- 一覧の場所はカタログの `Root()` 1 つ（`layout/` を、`bootstrap_core()` が渡すアプリのディレクトリ `AutonaDirHelper.current_dir` の下で
+  読む）。サービス・レンダラー・ルートが同じフォルダを読む。隔離起動（`tests/test_bootstrap_split._runtime`: ヘッドレスのスモーク・
+  ブラウザ E2E）の `layout/` には同梱のパッケージを `assets/` と同じく繋ぐ（`SHIPPED_TEMPLATE_LINKS`）
+- 保存された id のパッケージが無いときは既定（`horizontal` / 団体の対戦形式なら `team` / `type_a`）で描き、保存値は消さない。
+  レンダラーは一度見たパッケージのページを覚えていて、そのファイルが消えたら読み込みが失敗する（従来の「ページが無い」と同じ扱い）。
+  一度も載っていない id は既定で描き、既定も無ければ描画を始められない
+- payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。描画は今は file://（T2 で隔離の経路に移す）
+- pin: `tests/test_template_packages.py`（同梱 8 種の凍結・壊れたマニフェスト・id の衝突・パッケージ外の参照）
+
 #### 4.4.1 サムネイル
 
 ##### ディレクトリ命名
@@ -1263,47 +1304,35 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 ```
 layout/thumbnail/         ← 「Standard」テンプレ (template_id = "type_a")
 layout/thumbnail_type_b/  ← 「Center Panel」テンプレ (template_id = "type_b")
-layout/thumbnail_type_{x}/← 新規追加（任意の識別子）
+layout/{任意のフォルダ}/  ← 新規追加（id はフォルダ名。§4.4.0）
 ```
 
 `Standard` と `Center Panel` の 2 種類。両者とも Center Panel デザイン
 （左右キャラ＋中央パネル）を出発点として共有し、今後それぞれ別デザインに
-作り込んでいく。設定 UI の `templateSelect` で選択する。
+作り込んでいく。サムネイルのページの「テンプレート」で選択する（選択肢は `GET /api/v1/layouts?kind=thumbnail`）。
 
-##### `ThumbnailRenderer.TEMPLATE_SUBDIRS` の規約
-
-```python
-TEMPLATE_SUBDIRS = {
-    "type_a": "thumbnail",
-    "type_b": "thumbnail_type_b",
-    # 新規追加: "type_c": "thumbnail_type_c",
-}
-DEFAULT_TEMPLATE_ID = "type_a"
-```
-
-`template_id` は `SettingsManager.thumbnail_config.template_id` に保存される（§3.3.4）。
+`template_id` は `SettingsManager.thumbnail_config.template_id` に保存される（§3.3.4）。既定は `ThumbnailService.DEFAULT_TEMPLATE_ID`（`type_a`）。
 
 ##### ファイル構成
 
 ```
 layout/thumbnail*/
-├── thumbnail.html          ← entry（async function initThumbnail(payload) 必須）
+├── settings.json           ← マニフェスト（§4.4.0。kind: thumbnail・template: type_a.json）
+├── thumbnail.html          ← entry（async function initThumbnail(payload) 必須。共有のヘルパーは ../include/thumbnail_assets.js）
 ├── thumbnail.css           ← スタイル
 ├── thumbnail.js            ← initThumbnail + RENDER_READY シグナル
-└── thumbnail_assets.js     ← （任意）共通アセットヘルパー
+└── type_a.json             ← テンプレ定義 JSON（マニフェストの template）
 ```
 
 ##### テンプレ定義 JSON
 
-```
-assets/thumbnail_base/thumbnail_types/{template_id}.json
-```
-
-各テンプレ ID に対応する設定値（フォント・配置・色トーン等のテンプレ固有パラメータ）を定義。
+マニフェストの `template` が指すフォルダ内の JSON（同梱は `layout/thumbnail/type_a.json`・`layout/thumbnail_type_b/type_b.json`）。
+フォント・配置・色トーン等のテンプレ固有パラメータを定義する。中の画像（`default_background` など）はパッケージの中か `assets/` の
+相対パス（ADR-007 D2）。
 
 ##### 出力寸法
 
-固定 **1920×1080**（透過 PNG 対応）
+マニフェストの `size`（同梱は **1920×1080**。透過 PNG 対応）
 
 #### 4.4.2 リザルト
 
@@ -1316,34 +1345,37 @@ layout/result_vertical/       ← vertical
 layout/result_vertical_geki/  ← vertical_geki
 layout/result_team/           ← team / Crewbattle（各順位にチームの複数メンバーのメインファイターを配置）
 layout/result_team_split/     ← team_split（1位2位を縦並びで左に大きく、3-8位を右に縦並び）
-layout/result_{x}/            ← 新規追加
+layout/{任意のフォルダ}/      ← 新規追加（id はフォルダ名。§4.4.0）
 ```
 
-##### レイアウトの表の規約
+##### レイアウトの一覧の規約
 
-表の正本は `core/ResultService.py` の `LAYOUT_SUBDIRS`（id → `layout/` のフォルダ）/ `LAYOUT_SIZES`（幅 × 高さ）/ `LAYOUT_NAMES`（id → `core/CoreWords` の文言のキー `result_layout_<id>`。ja / en の名前はその表。ADR-005 S-final SF-7）で、
-枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。レンダラー（`result/ResultPageRenderer.py`）はこの表を読む（ADR-005 S4r で表は 1 つになった）。
-ページの選択肢は `GET /api/v1/result` の `layouts` を描く（§7.3）。
+一覧の正本はカタログの result パッケージ（§4.4.0。`ResultService.LayoutEntries()`）。大きさはマニフェストの `size`、チーム用かは `rows`。
+同梱の名前は `core/CoreWords` の `result_layout_<id>`（ja / en。`LayoutCatalog.BundledNameKey`。ADR-005 S-final SF-7）、ほかは `displayName`。
+枠の数は `SlotsFor()`（同梱の `horizontal` / `vertical` / `vertical_geki` は 8、ほかの単独は 16、団体は 8。8 行の同梱は凍結した表の隣の `LayoutCatalog.BUNDLED_EIGHT_ROW_RESULTS`）、
+既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。レンダラー（`result/ResultPageRenderer.py`）もカタログを読む。
+ページの選択肢は `GET /api/v1/layouts?kind=result`（読めなければ `GET /api/v1/result` の `layouts`。行の数と種類はいつも後者。§7.3）。
 
 ##### team レイアウト（チーム / Crewbattle）
 
-- 横向き Top-8 グリッド（`result/result.css`）を土台に、各順位枠を「チームカード」として描画する。`result/result.js` の `placeTeams()` が `payload.layout === "team"` のとき呼ばれ、枠ごとにチームのメンバー（2-5 人）のメインファイターを横並びに配置し、各ファイターの右下に選手名を反時計回り 90°回転（下→上読み）で重ね、枠下にチーム名プレートを置く。選手名は全角 5-10 文字を縦長に収める想定で、ファイター下部に暗いフェードを敷いて視認性を確保する。styling は `result_team/result.css`（base を `@import` してチーム枠を上書き）。
+- 横向き Top-8 グリッド（`include/result.css`）を土台に、各順位枠を「チームカード」として描画する。`include/result.js` の `placeTeams()` が `payload.layout` が `team` で始まるとき呼ばれ、枠ごとにチームのメンバー（2-5 人）のメインファイターを横並びに配置し、各ファイターの右下に選手名を反時計回り 90°回転（下→上読み）で重ね、枠下にチーム名プレートを置く。選手名は全角 5-10 文字を縦長に収める想定で、ファイター下部に暗いフェードを敷いて視認性を確保する。styling は `include/result_team.css`（base を `@import` してチーム枠を上書き）。同梱の各リザルトが共有するので `include/` にある（ADR-007 D2）。
 - データは `result_teams[N]` に `members: [{ name, twitter, character }, ...]` を持つ（行の `name` はチーム名。ADR-005 S4q で `result_players` から分けた）。`PATCH /api/v1/result/teams/{n}` で手入力でき、Start.gg のチーム standings からの自動取得にも対応する（ロスター全員 + mains）。React のページ（`/web/result`）では団体の行（順位・チーム名・最大 5 メンバー）がこれを編集する（S4r）。
 - 旧 team レイアウト（チーム名 + ロスター文字列のみのテキストプレート）はファイター版に置き換え済み。
-- `team_split` は `team` のバリアント。`result_team_split/result.css` が `result_team/result.css` を `@import` して **グリッド配置のみ** 差し替える（1位2位を左カラムの縦並び、3-8位を右カラムの縦並び）。メンバー横並び・回転名・下部フェード等の演出は `team` から継承。レンダラーは `placeTeams()` を共有（`layout` が `team` で始まれば team系扱い）。
+- `team_split` は `team` のバリアント。`result_team_split/result.css` が `include/result_team.css` を `@import` して **グリッド配置のみ** 差し替える（1位2位を左カラムの縦並び、3-8位を右カラムの縦並び）。メンバー横並び・回転名・下部フェード等の演出は `team` から継承。レンダラーは `placeTeams()` を共有（payload の `data.rows` が `teams` なら team系扱い。`rows` の無い payload では従来どおり `layout` が `team` で始まるとき。ADR-007 T1）。
 
 ##### ファイル構成
 
 ```
 layout/result*/
-├── result.html              ← entry（async function initResult(payload) 必須）
-├── result.css               ← スタイル
-└── result.js                ← initResult + RENDER_READY シグナル（CSS-only テンプレでは省略可）
+├── settings.json            ← マニフェスト（§4.4.0。kind: result・rows・size）
+├── result.html              ← entry（async function initResult(payload) 必須。同梱は ../include/result.js を読む）
+├── result.css               ← スタイル（同梱の result / result_team は ../include/ の土台をそのまま使う）
+└── result.js                ← initResult + RENDER_READY シグナル（同梱の多くは ../include/result.js を共有）
 ```
 
 ##### 出力寸法
 
-`LAYOUTS` で定義する。横版は 1920×1080、縦版は 960×1080 が標準。
+マニフェストの `size`。横版は 1920×1080、縦版は 960×1080 が標準。
 
 #### 4.4.3 ペイロード規約
 
@@ -1353,7 +1385,7 @@ layout/result*/
 async function initThumbnail({ data, config, template }) {
   // data:     score, game, tournamentInfo を含む state スナップショット
   // config:   thumbnail_config（display_phase, use_sponsors 等）
-  // template: { template_id, ...assets/thumbnail_base/thumbnail_types/{id}.json の内容 }
+  // template: { template_id, ...パッケージのマニフェストの template が指す JSON の内容 }
   // 描画完了後に document.title = "RENDER_READY"
 }
 ```
@@ -1362,13 +1394,15 @@ async function initThumbnail({ data, config, template }) {
 
 ```javascript
 async function initResult({ data, config, layout }) {
-  // data:   { tournamentName, eventName, startAt, numEntrants, players: [...] }
+  // data:   { tournamentName, eventName, startAt, numEntrants, players: [...], rows }
   //   players[N] = { rank, name, sponsor, character, characters: [...],
   //                  members: [{ name, character }, ...] }
   //                ※ members は team レイアウト専用（name = チーム名）
+  //   rows: "players" / "teams"（レイアウトのマニフェストの rows。ADR-007 T1 で足したキー）
   // config: { main_icon_path, background_path, accent_color, ... }
-  // layout: 現在のレイアウト名（"horizontal" / "team" 等）。"team" のとき
-  //         placeTeams() でメンバーのファイターを配置、それ以外は placePlayers()
+  // layout: 現在のレイアウトの id（"horizontal" / "team" 等。第三者のパッケージはフォルダ名）。
+  //         同梱の result.js は data.rows が "teams" のとき placeTeams() でメンバーのファイターを配置、それ以外は
+  //         placePlayers()（rows の無い payload では layout が "team" で始まるとき）
   // 描画完了後に document.title = "RENDER_READY"
 }
 ```
@@ -1816,44 +1850,53 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 ### 7.3 新リザルト画像レイアウトの追加
 
-例: TOP32 縦リザルト `result_vertical_top32` を追加する。
+例: 縦リザルト `result_vertical_neon` を追加する。テンプレートパッケージ（§4.4.0。ADR-007 T1）を置くだけで、
+リザルトのページの選択肢に出て描ける（id はフォルダ名の `result_vertical_neon`）。
 
 #### 触るファイル（必須）
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/core/ResultService.py` の `LAYOUT_SUBDIRS` / `LAYOUT_SIZES` / `LAYOUT_NAMES` | `"vertical_top32"` を追加（`result_vertical_top32`・960 × 1080・表示名） |
-| 2 | `layout/result_vertical_top32/result.html` | 新規 HTML（`async function initResult(payload)` 実装） |
-| 3 | `layout/result_vertical_top32/result.css` | 新規 CSS |
-| 4 | `layout/result_vertical_top32/result.js` | 新規 JS（CSS-only テンプレなら省略可） |
-| 5 | `src/core/ResultService.py` の `SlotsFor()` と `SLOT_COUNTS` | TOP32 → 32 行の対応を追加（行の数はページも `layouts[].slots` で追う） |
-| 6 | `src/core/CoreWords.py` の `WORDS` の `result_layout_<id>`（en / ja。`tests/test_core_words.py` の凍結した写し `TS_WORDS` は SF-7 以前の文言なので足さない）と `web/src/i18n/locales/{en,ja}.json` の `result_layout_<id>` | 表示名（ページの文言が無ければ `layouts[].name` = CoreWords の名前） |
+| 1 | `layout/result_vertical_neon/settings.json` | マニフェスト: `{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", "displayName": {"ja": "…", "en": "…"}, "license": "MIT"}}` |
+| 2 | `layout/result_vertical_neon/result.html` | 新規 HTML（`async function initResult(payload)` 実装。同梱の描画を流用するなら `../include/result.js`） |
+| 3 | `layout/result_vertical_neon/result.css` | 新規 CSS（土台を流用するなら `@import url("../include/result.css")`） |
+| 4 | `layout/result_vertical_neon/result.js` | 新規 JS（`include/result.js` を使う・CSS-only テンプレなら省略可） |
+
+- 自分のフォルダの外で読んでよいのは `../include/` だけ（ほかは `../../assets/` と payload のパス）
+- 行の数: `rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行（TOP32 など）は契約 1 に無い（`SLOT_COUNTS` と
+  state の行・payload の変更になる。`contract` を上げる話）
+- 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。
+  同梱でも id はフォルダ名・表示名は `displayName` でよい。凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES` と CoreWords の名前は、
+  id とフォルダ名が違う既存の 8 種のためのもので、足さない
 
 #### 触らない
 
 - StateManager
 - 既存 result テンプレ
-- React Web UI
+- Python（`core/ResultService.py`・レンダラー）・React Web UI（選択肢は `GET /api/v1/layouts?kind=result` から出る）
 
 ### 7.4 新サムネイルテンプレの追加
 
-例: `type_c` を追加する。
+例: `thumbnail_type_c` を追加する。テンプレートパッケージ（§4.4.0。ADR-007 T1）を置くだけで、サムネイルのページの
+選択肢に出て描ける（id はフォルダ名の `thumbnail_type_c`。`PATCH /api/v1/thumbnail` の `template_id` もこれ）。
 
 #### 触るファイル（必須）
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/thumbnail/ThumbnailRenderer.py` の `TEMPLATE_SUBDIRS` | `"type_c": "thumbnail_type_c"` を追加 |
-| 2 | `layout/thumbnail_type_c/thumbnail.html` | 新規 HTML（`async function initThumbnail(payload)` 実装） |
+| 1 | `layout/thumbnail_type_c/settings.json` | マニフェスト: `{"autona": {"kind": "thumbnail", "contract": 1, "size": [1920, 1080], "template": "type_c.json", "displayName": {"ja": "…", "en": "…"}, "license": "MIT"}}` |
+| 2 | `layout/thumbnail_type_c/thumbnail.html` | 新規 HTML（`async function initThumbnail(payload)` 実装。共有のヘルパーは `../include/thumbnail_assets.js`） |
 | 3 | `layout/thumbnail_type_c/thumbnail.css` | 新規 CSS |
 | 4 | `layout/thumbnail_type_c/thumbnail.js` | 新規 JS |
-| 5 | `assets/thumbnail_base/thumbnail_types/type_c.json` | テンプレ固有設定（フォント・配置・色トーン等） |
-| 6 | `src/core/ThumbnailService.py` の `TEMPLATE_IDS` / `TEMPLATE_NAMES` と `src/core/CoreWords.py` の `WORDS` | `"type_c"` と `"type_c": "thumbnail_template_type_c"`、`WORDS` に en / ja の名前を追加（`PATCH /api/v1/thumbnail` が受ける id と、`GET` の `templates` の名前） |
-| 7 | `web/src/i18n/locales/{en,ja}.json` の `thumbnail_template_type_c` | ページの表示名（無ければ `GET` の名前 = 6 の CoreWords の名前をプログラムの言語で出す。ADR-005 S4p / S-final SF-7） |
+| 5 | `layout/thumbnail_type_c/type_c.json` | テンプレ固有設定（フォント・配置・色トーン等）。中の画像はパッケージの中か `assets/` の相対パス |
+
+- 自分のフォルダの外で読んでよいのは `../include/` だけ（ほかは `../../assets/` と payload のパス）
+- 同梱として出すときは §7.3 の注意と同じ（`git add`・凍結した表と CoreWords には足さない）
 
 #### 触らない
 
 - StateManager
+- Python（`core/ThumbnailService.py`・レンダラー）・React Web UI（選択肢は `GET /api/v1/layouts?kind=thumbnail` から出る）
 
 ### 7.5 新パネルの追加
 

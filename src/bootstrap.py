@@ -76,6 +76,15 @@ def bootstrap_core():
     from .core.SettingsManager import SettingsManager
     SettingsManager.Initialize()
 
+    # The layout catalog's folder (core/LayoutCatalog.Root, ADR-007 T1):
+    # layout/ under the directory the app started in, read at each use --
+    # the one folder the result's and the thumbnail's services, their
+    # renderers and the routes read, whatever the working directory is a
+    # moment later. Depends on nothing; before anything can list a design.
+    from .core import LayoutCatalog
+    from .Helpers import AutonaDirHelper
+    LayoutCatalog.SetAppDirectory(lambda: AutonaDirHelper.current_dir)
+
     # Static asset data with no dependency on anything constructed here:
     # LocaleHelper reads the shipped language tables (src/i18n/mapping.json
     # and assets/data_countries.json), BadWordFilter the ngword lists. They

@@ -47,6 +47,7 @@ from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.core.ThumbnailService import ThumbnailService
 from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
+from tests.fixtures import template_packages
 from tests.fixtures.thumbnail import scenarios as world
 from tests.test_api_v1 import client, webApp  # noqa: F401
 
@@ -97,13 +98,12 @@ def _template(templateId="type_a"):
 
 @pytest.fixture
 def pages(autonaApp):
-    """The stand-in page for both templates, in the runtime's layout/."""
-    created = []
-    for name in ("thumbnail", "thumbnail_type_b"):
-        directory = autonaApp.dir / "layout" / name
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "thumbnail.html").write_text(PAGE, encoding="utf-8")
-        created.append(directory)
+    """The stand-in page for both templates, in the runtime's layout/, with the
+    shipped manifest and template file (the catalog's thumbnail packages,
+    ADR-007 T1)."""
+    created = template_packages.Install(
+        autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
+        page=PAGE)
     yield
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -690,7 +690,8 @@ def test_a_render_that_timed_out_while_settling_is_not_taken(renderer):
 def shippedPages(autonaApp):
     """The templates as shipped in the runtime's layout/. Copies: a link there
     would have a cleanup that goes wrong delete the project's. layout/include/
-    is 19 MB, of which the pages only want the two scripts."""
+    is 19 MB, of which the pages only want the three scripts they share
+    (ADR-007 D2: a package reads nothing outside its folder but include/)."""
     created = []
     for name in ("thumbnail", "thumbnail_type_b"):
         directory = autonaApp.dir / "layout" / name
@@ -701,7 +702,8 @@ def shippedPages(autonaApp):
     assert not include.exists()
     include.mkdir()
     created.append(include)
-    for script in ("jquery-3.7.1.min.js", "lodash.min.js"):
+    for script in ("jquery-3.7.1.min.js", "lodash.min.js",
+                   "thumbnail_assets.js"):
         shutil.copy(PROJECT_ROOT / "layout" / "include" / script, include)
     try:
         yield
@@ -715,9 +717,11 @@ def test_a_shipped_page_draws_what_it_is_given(shippedPages, templateId):
     """The real thumbnail.js, on a payload with what is awkward in it. Not its
     pixels, which the offscreen platform does not show. Its catch says
     RENDER_READY as well, so the name is what says it got to the end."""
+    folder = template_packages.BUNDLED["thumbnail"][templateId]
     template = json.loads(
-        (PROJECT_ROOT / "assets" / "thumbnail_base" / "thumbnail_types"
-         / f"{templateId}.json").read_text(encoding="utf-8"))
+        (PROJECT_ROOT / "layout" / folder
+         / template_packages.Manifest(folder)["template"])
+        .read_text(encoding="utf-8"))
     template["template_id"] = templateId
     data = copy.deepcopy(world.WITH_PLAYERS)
     data["score"]["1"]["team"]["1"]["player"]["1"]["name"] \
@@ -792,25 +796,29 @@ def test_a_sync_render_that_hangs_answers_with_nothing(renderer):
     assert pixmap.isNull()
 
 
-def test_a_page_that_never_loads_fails_its_render(autonaApp):
-    # No fixture page at all.
+def test_a_template_the_catalog_never_listed_cannot_start(autonaApp):
+    # No package at all (ADR-007 T1): there is no page to look for, so nothing
+    # is loaded at construction and the render fails at once, not a timeout
+    # later. A page listed and then gone is loaded and fails its load
+    # (test_a_failed_load_the_next_render_took_over_is_tried_again).
     layout = autonaApp.dir / "layout" / "thumbnail"
     assert not layout.exists()
     made = ThumbnailRenderer()
-    made.STAGE_TIMEOUT_MS = 500
+    made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
     results = []
     try:
+        assert made._load_query is None and made._load_number == 0
         made.renderAsync({}, {"color": GREEN}, _template(),
                          lambda p, e: results.append((p, e)))
         assert _waitUntil(lambda: results)
-        assert results == [(None, "the render timed out")]
+        assert results == [(None, "the render could not be started")]
     finally:
         _destroy(made)
 
 
 def test_the_next_render_loads_again_after_a_failed_load(autonaApp):
-    # A page that is not there, and then is: nothing is on its way any more,
-    # and waiting for it would fail every render from then on.
+    # A package that is not there, and then is: nothing is on its way any
+    # more, and waiting for it would fail every render from then on.
     layout = autonaApp.dir / "layout" / "thumbnail"
     assert not layout.exists()
     made = ThumbnailRenderer()
@@ -820,8 +828,8 @@ def test_the_next_render_loads_again_after_a_failed_load(autonaApp):
         assert _waitUntil(lambda: made._load_query is None)
         assert not made._page_loaded
 
-        layout.mkdir(parents=True)
-        (layout / "thumbnail.html").write_text(PAGE, encoding="utf-8")
+        template_packages.Install(autonaApp.dir / "layout", ("thumbnail",),
+                                  page=PAGE)
         made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
         made.renderAsync({}, {"color": GREEN}, _template(),
                          lambda p, e: results.append(e))

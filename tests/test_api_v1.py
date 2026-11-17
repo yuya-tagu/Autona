@@ -1158,7 +1158,42 @@ def test_layouts_rejects_an_unknown_kind(webApp, layoutTree, query):
     response = webApp.test_client().get(f"/api/v1/layouts{query}")
     _assertRejected(response)
     message = response.get_json()["error"]["message"]
-    assert "scoreboard, designer, commentary, top8" in message
+    assert "scoreboard, designer, commentary, top8, result, thumbnail" \
+        in message
+
+
+def test_layouts_lists_the_template_packages(webApp, monkeypatch):
+    # ADR-007 T1: the result's layouts and the thumbnail's templates, the
+    # shipped ones first in their frozen order, what the Result and Thumbnail
+    # pages offer. The catalog's rules are tests/test_template_packages.py's.
+    from pathlib import Path
+    from src.core import CoreWords, LayoutCatalog
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    from tests.fixtures import template_packages
+
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(
+        Path(__file__).resolve().parent.parent / "layout"))
+    for locale, language in (("ja-JP", "ja"), ("en-US", "en")):
+        monkeypatch.setattr(AutonaLocaleHelper, "programLocale", locale)
+        for kind, ids in template_packages.BUNDLED.items():
+            body = webApp.test_client().get(
+                f"/api/v1/layouts?kind={kind}").get_json()
+            assert body["ok"] is True
+            assert [entry["id"] for entry in body["data"]][:len(ids)] \
+                == list(ids)
+            for entry in body["data"][:len(ids)]:
+                assert (entry["kind"], entry["bundled"], entry["contract"],
+                        entry["folder"]) == (kind, True, 1, ids[entry["id"]])
+                # Always a string, in the program's language; both in
+                # displayNames.
+                words = CoreWords.WORDS[LayoutCatalog.BundledNameKey(
+                    kind, entry["id"])]
+                assert entry["displayName"].startswith(words[language])
+                assert set(entry["displayNames"]) == {"ja", "en"}
+    # The other kinds' entries are as they were: no displayNames.
+    body = webApp.test_client().get("/api/v1/layouts?kind=scoreboard").get_json()
+    assert all(isinstance(entry["displayName"], str)
+               and "displayNames" not in entry for entry in body["data"])
 
 
 def test_layouts_reads_the_shipped_tree_with_the_panel_labels(

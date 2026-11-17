@@ -2,10 +2,10 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <link rel="stylesheet" href="./result.css" />
+  <link rel="stylesheet" href="../include/result.css" />
   <script src="../include/jquery-3.7.1.min.js"></script>
   <script src="../include/lodash.min.js"></script>
-  <script src="../thumbnail/thumbnail_assets.js"></script>
+  <script src="../include/thumbnail_assets.js"></script>
 </head>
 <body>
   <div class="result" id="result">
@@ -25,6 +25,8 @@
     <div class="layer players" id="players"></div>
   </div>
 
-  <script src="./result.js"></script>
+  <!-- The standings renderer and its base styles are shared (include/): the
+       other result layouts build on them. -->
+  <script src="../include/result.js"></script>
 </body>
 </html>

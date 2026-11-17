@@ -31,7 +31,10 @@ S4r, which removed the Qt panel and src/result/main_generate_result.py):
   battle format (``FollowBattleFormat``). The state's ``result_layout`` says
   which one is in effect once it was chosen or followed, for a page to see the
   change: the sidebar's format is not a page's doing, and a layout not saved
-  changes with the format without being written;
+  changes with the format without being written. The layouts are the
+  catalog's result packages (core/LayoutCatalog, ADR-007 T1), read when asked:
+  their ids, sizes, and whether they draw teams (``rows``). A saved layout
+  whose package is gone is drawn on the default one, and stays saved;
 - **the standings' import** (``LoadStandings``), a job on the provider's worker
   whose progress is the state's ``result_standings``;
 - **the X post's text** (``PostText``), in the order of the ranks, and **the
@@ -57,6 +60,7 @@ from loguru import logger
 
 from . import CoreWords
 from . import HiveeUrl
+from . import LayoutCatalog
 from . import StateSchema as schema
 from . import ThumbnailService as thumbnails
 from . import Top8Service
@@ -76,35 +80,11 @@ CONFIG_SETTING = "result_config"
 
 # ── the layouts ──────────────────────────────────────────────────────────
 
-# Each a directory under layout/, with a result.html (src/result).
-LAYOUT_SUBDIRS = {
-    "horizontal": "result",
-    "horizontal_16": "result_top16",
-    "vertical": "result_vertical",
-    "vertical_geki": "result_vertical_geki",
-    "team": "result_team",
-    "team_split": "result_team_split",
-}
-LAYOUT_SIZES = {
-    "horizontal": (1920, 1080),
-    "horizontal_16": (1920, 1080),
-    "vertical": (960, 1080),
-    "vertical_geki": (960, 1080),
-    "team": (1920, 1080),
-    "team_split": (1920, 1080),
-}
-# id -> its name's key in core's words (core/CoreWords).
-LAYOUT_NAMES = {
-    "horizontal": "result_layout_horizontal",
-    "horizontal_16": "result_layout_horizontal_16",
-    "vertical": "result_layout_vertical",
-    "vertical_geki": "result_layout_vertical_geki",
-    "team": "result_layout_team",
-    "team_split": "result_layout_team_split",
-}
+# The layouts are the catalog's result packages (core/LayoutCatalog,
+# ADR-007 T1); the shipped ones' ids are frozen there (BUNDLED_TEMPLATES, and
+# the eight-row ones beside it, BUNDLED_EIGHT_ROW_RESULTS).
 DEFAULT_LAYOUT = "horizontal"
 DEFAULT_TEAM_LAYOUT = "team"
-TEAM_LAYOUTS = ("team", "team_split")
 # What the battle format's team layouts are for.
 TEAM_FORMATS = ("team", "crew")
 
@@ -167,17 +147,46 @@ POST_RANKS = 4
 
 # ── pure helpers ─────────────────────────────────────────────────────────
 
-def IsTeamLayout(layout) -> bool:
-    return layout in TEAM_LAYOUTS
+def LayoutEntries(root=None) -> dict:
+    """The catalog's result packages by id, in the order they are listed
+    (LayoutCatalog.Templates): read now, every call. The functions below take
+    it (`entries`) so that one answer reads the folders once."""
+    return LayoutCatalog.Templates(LayoutCatalog.KIND_RESULT, root)
 
 
-def KindOf(layout) -> str:
-    return TEAMS if IsTeamLayout(layout) else PLAYERS
+def _Entries(entries):
+    return LayoutEntries() if entries is None else entries
 
 
-def SlotsFor(layout) -> int:
-    """How many rows `layout` draws."""
-    return 16 if layout == "horizontal_16" else 8
+def _RowsOf(kind) -> str:
+    """The payload's `rows` of the rows of `kind`: a manifest's `rows`."""
+    return LayoutCatalog.ROWS_TEAMS if kind == TEAMS \
+        else LayoutCatalog.ROWS_PLAYERS
+
+
+def IsTeamLayout(layout, entries=None) -> bool:
+    """Whether `layout` draws teams: its package's `rows`. A layout the
+    catalog does not list draws players."""
+    entry = _Entries(entries).get(layout) if isinstance(layout, str) else None
+    return entry is not None and entry["rows"] == LayoutCatalog.ROWS_TEAMS
+
+
+def KindOf(layout, entries=None) -> str:
+    return TEAMS if IsTeamLayout(layout, entries) else PLAYERS
+
+
+def SlotsFor(layout, entries=None) -> int:
+    """How many rows `layout` draws: a teams' layout eight, a players' all
+    sixteen (ADR-007 D1: `rows: players`) but the shipped ones that always
+    drew eight (LayoutCatalog.BUNDLED_EIGHT_ROW_RESULTS), and a layout the
+    catalog does not list eight players', as an unknown one always was."""
+    entries = _Entries(entries)
+    kind = KindOf(layout, entries)
+    if kind == PLAYERS and (layout in LayoutCatalog.BUNDLED_EIGHT_ROW_RESULTS
+                            or not isinstance(layout, str)
+                            or layout not in entries):
+        return 8
+    return SLOT_COUNTS[kind]
 
 
 def RemoveSpecialChars(text):
@@ -691,14 +700,21 @@ def HasInput(kind) -> bool:
         return any(_RowHasInput(kind, row) for row in _Rows(kind).values())
 
 
-def HasData(layout) -> bool:
-    """Whether `layout` has anything to draw, in the rows it shows."""
-    kind = KindOf(layout)
+def HasData(layout, entries=None) -> bool:
+    """Whether `layout` has anything to draw, in the rows it shows. The
+    catalog is read before the state's lock is taken."""
+    entries = _Entries(entries)
+    kind, count = KindOf(layout, entries), SlotsFor(layout, entries)
     with StateManager.lock:
-        rows = _Rows(kind)
-        return any(_RowHasData(kind, rows[slot])
-                   for slot in map(str, range(1, SlotsFor(layout) + 1))
-                   if slot in rows)
+        return _HasData(kind, count)
+
+
+def _HasData(kind, count) -> bool:
+    """HasData's, under the state's lock: whether the first `count` rows of
+    `kind` have anything to draw."""
+    rows = _Rows(kind)
+    return any(_RowHasData(kind, rows[slot])
+               for slot in map(str, range(1, count + 1)) if slot in rows)
 
 
 def ForgetCharacters():
@@ -850,10 +866,13 @@ class ResultService(RenderLane):
 
     # ── the layout ───────────────────────────────────────────────────────
 
-    def Layout(self) -> str:
-        """The layout saved, else the one the battle format starts on."""
+    def Layout(self, entries=None) -> str:
+        """The layout saved, else the one the battle format starts on. A
+        saved layout the catalog does not list (its package was removed) is
+        not one: the default is drawn, and what is saved stays, so the
+        operator's choice comes back with its folder."""
         saved = _StoredConfig().get("layout")
-        if isinstance(saved, str) and saved in LAYOUT_SUBDIRS:
+        if isinstance(saved, str) and saved in _Entries(entries):
             return saved
         return DEFAULT_TEAM_LAYOUT if self._BattleFormat() in TEAM_FORMATS \
             else DEFAULT_LAYOUT
@@ -864,22 +883,32 @@ class ResultService(RenderLane):
         return actions.ResolveBattleFormat() if actions is not None \
             else "singles"
 
-    def Layouts(self) -> list:
+    def Layouts(self, entries=None) -> list:
+        """The catalog's result packages as GET /result lists them. A
+        shipped one is named in core's words, as it always was; another by
+        its displayName, in the program locale's language."""
+        entries = _Entries(entries)
         return [{"id": layout,
-                 "name": self._Text(LAYOUT_NAMES[layout]),
-                 "width": LAYOUT_SIZES[layout][0],
-                 "height": LAYOUT_SIZES[layout][1],
-                 "slots": SlotsFor(layout),
-                 "team": IsTeamLayout(layout)}
-                for layout in LAYOUT_SUBDIRS]
+                 "name": self._LayoutName(layout, entry),
+                 "width": entry["size"][0],
+                 "height": entry["size"][1],
+                 "slots": SlotsFor(layout, entries),
+                 "team": IsTeamLayout(layout, entries)}
+                for layout, entry in entries.items()]
+
+    def _LayoutName(self, layout, entry):
+        if entry["bundled"]:
+            return self._Text(LayoutCatalog.BundledNameKey(
+                LayoutCatalog.KIND_RESULT, layout))
+        return LayoutCatalog.DisplayText(entry["displayNames"], self._locale())
 
     def SetLayout(self, layout) -> bool:
-        """Save the layout. False, saving nothing, when it is not one.
-        The layout is set in the config as saved, so settings.json is
-        settled first (SettingsManager.PrepareWrite): SettingsUnreadable,
-        nothing saved, while it could not be read at launch and still cannot
-        be opened."""
-        if not isinstance(layout, str) or layout not in LAYOUT_SUBDIRS:
+        """Save the layout. False, saving nothing, when it is not one the
+        catalog lists. The layout is set in the config as saved, so
+        settings.json is settled first (SettingsManager.PrepareWrite):
+        SettingsUnreadable, nothing saved, while it could not be read at
+        launch and still cannot be opened."""
+        if not isinstance(layout, str) or layout not in LayoutEntries():
             logger.warning(f"Result: refusing the layout {layout!r}")
             return False
         with SettingsManager.lock:
@@ -981,7 +1010,8 @@ class ResultService(RenderLane):
         has handles from the player database: anyone on the network may read
         this."""
         catalog = GameAssetCatalog.instance
-        layout = self.Layout()
+        entries = LayoutEntries()
+        layout = self.Layout(entries)
         with StateManager.lock:
             snapshot = catalog.Current() if catalog is not None else None
             players = _Rows(PLAYERS)
@@ -999,10 +1029,10 @@ class ResultService(RenderLane):
             standings = schema.ReadResultStandings()
         return {
             "layout": layout,
-            "layouts": self.Layouts(),
+            "layouts": self.Layouts(entries),
             "players": describedPlayers,
             "teams": describedTeams,
-            "sample": not HasData(layout),
+            "sample": not HasData(layout, entries),
             "game": {"codename": game.get("codename"),
                      "name": game.get("name") or ""}
             if game.get("codename") else None,
@@ -1012,16 +1042,24 @@ class ResultService(RenderLane):
 
     # ── the payload ──────────────────────────────────────────────────────
 
-    def BuildPayload(self, preview=False, games=None, layout=None):
+    def BuildPayload(self, preview=False, games=None, layout=None,
+                     entries=None):
         """(data, config, layout) for result.html, of copies: nothing shares
         anything with the state. A preview with no row to draw draws the sample,
-        from `games` (a GameAssetCatalog; None: no characters)."""
-        layout = layout or self.Layout()
+        from `games` (a GameAssetCatalog; None: no characters). `entries`: the
+        catalog's layouts as read for this run (LayoutEntries), None to read
+        them now.
+
+        `data.rows` says what the rows are: ``players`` or ``teams``, the
+        layout's manifest's `rows` (ADR-007; added to contract 1, so a
+        template need not tell a teams' layout by its id)."""
+        entries = _Entries(entries)
+        layout = layout or self.Layout(entries)
         config = _Config()
-        count = SlotsFor(layout)
-        kind = KindOf(layout)
+        count = SlotsFor(layout, entries)
+        kind = KindOf(layout, entries)
         with StateManager.lock:
-            if not preview or HasData(layout):
+            if not preview or _HasData(kind, count):
                 info = schema.TOURNAMENT_INFO_ROOT
                 rows = _Rows(kind)
                 build = _PayloadPlayer if kind == PLAYERS else _PayloadTeam
@@ -1035,10 +1073,13 @@ class ResultService(RenderLane):
                         StateManager.Get(f"{info}.numEntrants", 0) or 0,
                     "players": [build(index, rows.get(str(index), {}))
                                 for index in range(1, count + 1)],
+                    "rows": _RowsOf(kind),
                 }
                 return deep_clone(data), config, layout
         # Out of the lock: it looks at the game's files, character by character.
-        return self._SampleData(games, count, kind), config, layout
+        data = self._SampleData(games, count, kind)
+        data["rows"] = _RowsOf(kind)
+        return data, config, layout
 
     def _Text(self, key):
         """Core's words for `key` in the program locale's language
@@ -1121,12 +1162,14 @@ class ResultService(RenderLane):
         return schema.ReadResultRender()
 
     def _RunPayload(self, kind):
-        layout = self.Layout()
-        if kind == GENERATE and not HasData(layout):
+        # The catalog read once for the run.
+        entries = LayoutEntries()
+        layout = self.Layout(entries)
+        if kind == GENERATE and not HasData(layout, entries):
             raise RenderDataMissing(NO_DATA, "no row has anything to draw")
         return self.BuildPayload(
             preview=kind == PREVIEW, games=GameAssetCatalog.instance,
-            layout=layout)
+            layout=layout, entries=entries)
 
     def _OutputStem(self, data):
         return OutputStem(data)
@@ -1137,12 +1180,14 @@ class ResultService(RenderLane):
         player database, as making the image always did: the revision of the
         run that will. BUSY (nothing changes) while one is on its way, NO_DATA
         (nothing changes) when there is nothing to draw."""
-        if not HasData(self.Layout()):
+        # The catalog read once for the request (the run reads it again).
+        entries = LayoutEntries()
+        if not HasData(self.Layout(entries), entries):
             return NO_DATA
         answer = super().Generate()
         if answer != BUSY:
             try:
-                self.SaveToDb()
+                self.SaveToDb(entries=entries)
             except Exception:
                 # A DB hiccup must not take the image with it.
                 logger.exception("Result: saving the players to the DB failed")
@@ -1194,11 +1239,14 @@ class ResultService(RenderLane):
                     records.append(record)
         return records
 
-    def SaveToDb(self, games=None) -> int:
+    def SaveToDb(self, games=None, entries=None) -> int:
         """Merge the current layout's rows into the player database (country,
         real name and other games' mains are kept: overwrite=False). The number
-        of players saved."""
-        records = self._Records(KindOf(self.Layout()), _Catalog(games))
+        of players saved. `entries`: the catalog's layouts as read (None:
+        read now)."""
+        entries = _Entries(entries)
+        records = self._Records(KindOf(self.Layout(entries), entries),
+                                _Catalog(games))
         if not records:
             return 0
         PlayerDB.instance.AddPlayers(records, overwrite=False)
@@ -1224,8 +1272,10 @@ class ResultService(RenderLane):
         """The X post's text for the standings `layout` draws, in the order of
         the ranks: the top POST_RANKS with anything in them, then the URLs. What
         is posted says what the picture says."""
-        layout = layout or self.Layout()
-        kind = KindOf(layout)
+        entries = LayoutEntries()
+        layout = layout or self.Layout(entries)
+        kind = KindOf(layout, entries)
+        count = SlotsFor(layout, entries)
         with StateManager.lock:
             info = schema.TOURNAMENT_INFO_ROOT
             tournament = StateManager.Get(f"{info}.tournamentName") or ""
@@ -1235,7 +1285,7 @@ class ResultService(RenderLane):
             rows = _Rows(kind)
             shown = sorted(
                 ((slot, deep_clone(rows[slot]))
-                 for slot in map(str, range(1, SlotsFor(layout) + 1))
+                 for slot in map(str, range(1, count + 1))
                  if slot in rows),
                 key=lambda item: _RankKey(item[1], item[0]))
             stream = StateManager.Get(f"{schema.STREAM_ROOT}.url", "") or ""
@@ -1304,8 +1354,10 @@ class ResultService(RenderLane):
         these three); else the revision of result_standings that says how it
         goes, published as "running" before this returns. Any thread but a
         job's."""
-        layout = self.Layout()
-        kind = KindOf(layout)
+        entries = LayoutEntries()
+        layout = self.Layout(entries)
+        kind = KindOf(layout, entries)
+        count = SlotsFor(layout, entries)
         with StateManager.lock:
             with self._importLock:
                 if self._importing:
@@ -1319,7 +1371,7 @@ class ResultService(RenderLane):
             # which case it has published this revision, and that stands.
             revision = schema.ReadResultStandings()["revision"] + 1
             began = self._fetcher is not None and self._RefreshThenFetch(
-                kind, SlotsFor(layout), revision)
+                kind, count, revision)
         except Exception:
             self._ReleaseImport()
             raise

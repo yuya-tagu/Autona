@@ -156,7 +156,7 @@ paths:
 | `MatchNameCandidates` | `.instance` | match バーの候補（state に入れない） |
 | `StreamService` | `.instance` | 配信設定のすべて |
 | `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2） |
-| `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト |
+| `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト（テンプレート・レイアウトの一覧は `LayoutCatalog` のテンプレートパッケージ。コードに表を持たない。ADR-007 T1） |
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
 | `PlayerDirectory` | モジュール関数 | 選手リストの行と記録の保存・削除（state は書かない） |
@@ -275,7 +275,11 @@ paths:
 - **シェル操作を増やさない**: 新しい操作は core に置き、どちらのシェルでも動かす（例外は `startImageRender` だけ。理由は台帳の S4o 節）。
   `@gui_thread_sync` もシェル操作以外に足さない
 - 新しいエンドポイントの操作は core に置いて `AutonaWebOperations` 経由で呼ぶ。例外: state を読み書きしない読み取り専用のカタログ
-  （`GET /api/v1/layouts` → `core/LayoutCatalog.py`）はルートから直接呼ぶ（ADR-001 Addendum）
+  （`GET /api/v1/layouts` → `core/LayoutCatalog.py`。kind `result` / `thumbnail` のテンプレートパッケージも。ADR-007 T1）はルートから
+  直接呼ぶ（ADR-001 Addendum）。カタログは呼ばれたときに `layout/` を読むので、`StateManager.lock` の中で呼ばない（`ResultService` は
+  レイアウトのエントリを lock の外で読んでから渡す: `LayoutEntries()` / `entries=`）。読むフォルダは `LayoutCatalog.Root()` の 1 つだけ
+  （`bootstrap_core()` が `SetAppDirectory` でアプリのディレクトリ `AutonaDirHelper.current_dir` を渡す）。サービス・レンダラー・ルートで
+  別のフォルダを組まない
 - v1 の拒否の `error.reason`（`external-control-api.md` §2.5）: ゲームアセットのルートは `AutonaApiV1._ASSET_REFUSALS` が core のコードを入れ、
   core の文はログにだけ出す（パスを含みうる）。core にコードを足したら表にも足す（pin: `tests/test_api_v1_assets.py`）
 - 本文を JSON として読まない書き込みは `write_op(..., body="none")`（操作ログが本文を読まない・`upload_id` はログで伏せる）。大きな本文を受ける

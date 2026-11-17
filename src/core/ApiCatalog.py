@@ -92,7 +92,7 @@ ENDPOINTS = (
     E("get_tournament_stations", "GET", "/tournament/stations", "Stations and streams, as last fetched (never fetches)", None, False, False, False),
     E("get_commentary", "GET", "/commentary", "Commentary state", None, False, False, False),
     E("get_country_states", "GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
-    E("get_layouts", "GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
+    E("get_layouts", "GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8|result|thumbnail)", None, False, False, False),
     E("get_selected_layout", "GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8|board)", None, False, False, False),
     E("get_board_files", "GET", "/layouts/selected/board/obs-path", "The Board's OBS files, as absolute paths (a token from another computer)", None, False, False, False),
     E("get_commentary_options", "GET", "/commentary/options", "Commentary role / icon candidates", None, False, False, False),

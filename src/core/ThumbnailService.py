@@ -58,6 +58,7 @@ from loguru import logger
 
 from . import CoreWords
 from . import ImageImport
+from . import LayoutCatalog
 from . import StateSchema as schema
 from .ColorService import FEATURE_THUMBNAIL, GetFeatureColors
 from .DictHelper import deep_get
@@ -74,13 +75,13 @@ RENDER_PATH = f"{schema.THUMBNAIL_ROOT}.{schema.THUMBNAIL_RENDER_KEY}"
 
 # ── the templates ────────────────────────────────────────────────────────
 
-# Two templates, each a subdirectory under layout/ (ThumbnailRenderer).
-TEMPLATE_IDS = ("type_a", "type_b")
+# The templates are the catalog's thumbnail packages (core/LayoutCatalog,
+# ADR-007 T1), each a folder under layout/ whose manifest names its page and
+# its template file (the layout's numbers, until then
+# assets/thumbnail_base/thumbnail_types/<id>.json). The shipped ones' ids are
+# frozen there (BUNDLED_TEMPLATES). A saved template whose package is gone is
+# drawn on the default one, and stays saved.
 DEFAULT_TEMPLATE_ID = "type_a"
-# id -> its name's key in core's words (core/CoreWords).
-TEMPLATE_NAMES = {"type_a": "thumbnail_template_type_a",
-                  "type_b": "thumbnail_template_type_b"}
-TEMPLATE_DIRECTORY = "./assets/thumbnail_base/thumbnail_types"
 
 # ── the background ───────────────────────────────────────────────────────
 
@@ -227,18 +228,44 @@ def EffectiveBackgroundPath():
     return path
 
 
-def ResolveTemplateId(settings):
+def TemplateEntries(root=None) -> dict:
+    """The catalog's thumbnail packages by id, in the order they are listed
+    (LayoutCatalog.Templates): read now, every call."""
+    return LayoutCatalog.Templates(LayoutCatalog.KIND_THUMBNAIL, root)
+
+
+def ResolveTemplateId(settings, entries=None):
+    """The template `settings` names when the catalog lists it, else the
+    default (whose package may be gone too: _Template says so)."""
+    entries = TemplateEntries() if entries is None else entries
     templateId = (settings or {}).get("template_id", DEFAULT_TEMPLATE_ID)
-    return templateId if templateId in TEMPLATE_IDS else DEFAULT_TEMPLATE_ID
+    return templateId if isinstance(templateId, str) and templateId in entries \
+        else DEFAULT_TEMPLATE_ID
 
 
 def _Template(settings):
-    """The template file `settings` names, with its id (the renderer picks
-    the template's page by it). Raises OSError / ValueError."""
-    templateId = ResolveTemplateId(settings)
-    with open(f"{TEMPLATE_DIRECTORY}/{templateId}.json", "rt",
+    """The template file `settings` names (its package's manifest's
+    `template`), with its id (the renderer picks the template's page by it).
+    Raises OSError when it cannot be opened (the catalog lists no package for
+    it), ValueError when it is not a JSON object: whatever reading it raises
+    (a decode error, RecursionError on absurd nesting) is that, as one
+    unreadable settings.json is to the catalog."""
+    entries = TemplateEntries()
+    templateId = ResolveTemplateId(settings, entries)
+    entry = entries.get(templateId)
+    if entry is None:
+        raise FileNotFoundError(f"no thumbnail template {templateId!r}")
+    with open(LayoutCatalog.TemplatePath(entry, entry["template"]), "rt",
               encoding="utf-8") as file:
-        template = json.load(file)
+        try:
+            template = json.load(file)
+        except Exception as error:
+            raise ValueError(
+                f"the thumbnail template {templateId!r} cannot be read: "
+                f"{type(error).__name__}") from error
+    if not isinstance(template, dict):
+        raise ValueError(f"the thumbnail template {templateId!r} is not an "
+                         "object")
     template["template_id"] = templateId
     return template
 
@@ -333,7 +360,7 @@ def _ValidGames(value):
 # the render read any local file. A background comes in as an upload.
 _CHECKS = {
     "template_id": lambda value: isinstance(value, str)
-    and value in TEMPLATE_IDS,
+    and value in TemplateEntries(),
     "background_source": lambda value: isinstance(value, str)
     and value in BACKGROUND_SOURCES,
     "display_phase": _IsBool,
@@ -504,17 +531,18 @@ class ThumbnailService(RenderLane):
 
     # ── the settings ─────────────────────────────────────────────────────
 
-    def Settings(self) -> dict:
+    def Settings(self, entries=None) -> dict:
         """The settings with their defaults filled in. Writes nothing:
         `background_source` is what a config from before the selector moves
         to, the path is not told (a name to show is), and `game` has every
         saved game plus the one in the state. A saved game the old Qt panel's reads
-        left behind (`game.None`) is skipped, not removed."""
+        left behind (`game.None`) is skipped, not removed. `entries`: the
+        catalog's templates as read (TemplateEntries; None: read now)."""
         config = _WithBackgroundSource(_StoredConfig())
         source = config.get("background_source")
         path = config.get("background_path")
         settings = {
-            "template_id": ResolveTemplateId(config),
+            "template_id": ResolveTemplateId(config, entries),
             "background_source": source if source in BACKGROUND_SOURCES
             else BACKGROUND_DEFAULT,
             "background_name": os.path.basename(path.replace("\\", "/"))
@@ -572,10 +600,21 @@ class ThumbnailService(RenderLane):
                 SettingsManager.Unset(CONFIG_SETTING)
             self._RemoveUploadedBackgrounds()
 
-    def Templates(self) -> list:
-        return [{"id": templateId,
-                 "name": self._Text(TEMPLATE_NAMES[templateId])}
-                for templateId in TEMPLATE_IDS]
+    def Templates(self, entries=None) -> list:
+        """The catalog's thumbnail packages as GET /thumbnail lists them. A
+        shipped one is named in core's words, as it always was; another by
+        its displayName, in the program locale's language. `entries`: as
+        Settings takes them."""
+        entries = TemplateEntries() if entries is None else entries
+        return [{"id": templateId, "name": self._TemplateName(templateId, entry)}
+                for templateId, entry in entries.items()]
+
+    def _TemplateName(self, templateId, entry):
+        if entry["bundled"]:
+            return self._Text(LayoutCatalog.BundledNameKey(
+                LayoutCatalog.KIND_THUMBNAIL, templateId))
+        return LayoutCatalog.DisplayText(entry["displayNames"],
+                                         self._locale()[0])
 
     def _Text(self, key):
         """Core's words for `key` in the program locale's language
@@ -587,11 +626,13 @@ class ThumbnailService(RenderLane):
         are for (None: no game), the templates and the video title."""
         game = self._CurrentGame()
         codename = game.get("codename")
+        # The catalog read once for the answer.
+        entries = TemplateEntries()
         return {
-            "settings": self.Settings(),
+            "settings": self.Settings(entries),
             "game": {"codename": codename, "name": game.get("name") or ""}
             if codename else None,
-            "templates": self.Templates(),
+            "templates": self.Templates(entries),
             "videoTitle": self.VideoTitle(),
         }
 

@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from src.core import CoreWords
+from src.core import LayoutCatalog
 from src.core import ResultService as results
 from src.core import ThumbnailService as thumbnails
 
@@ -122,13 +123,16 @@ def _namedKeys(path):
 
 
 def test_the_table_is_the_services_words():
-    named = (set(thumbnails.TEMPLATE_NAMES.values())
-             | set(results.LAYOUT_NAMES.values())
+    # The shipped template packages' names (ADR-007 T1: the catalog's frozen
+    # ids, named by LayoutCatalog.BundledNameKey), and the words the services
+    # name themselves.
+    shipped = {LayoutCatalog.BundledNameKey(kind, templateId)
+               for kind, ids in LayoutCatalog.BUNDLED_TEMPLATES.items()
+               for templateId in ids}
+    named = (shipped
              | _namedKeys(ROOT / "src" / "core" / "ThumbnailService.py")
              | _namedKeys(ROOT / "src" / "core" / "ResultService.py"))
     assert named == set(CoreWords.WORDS)
-    assert set(thumbnails.TEMPLATE_NAMES) == set(thumbnails.TEMPLATE_IDS)
-    assert set(results.LAYOUT_NAMES) == set(results.LAYOUT_SUBDIRS)
 
 
 # The receivers of Qt's translate (QtCore's, QtGui's and QtWidgets' app).

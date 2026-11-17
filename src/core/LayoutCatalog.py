@@ -34,13 +34,38 @@ show the same name (a copied ``scoreboard_simple - コピー`` next to
 web server URL. ``format`` / ``game`` are None when a built-in layout does not
 declare them.
 
-This is the single source the Board / Commentary / Top 8 pages, the Designer's
-"open" list (AutonaDesignerService.list_projects) and ``GET /api/v1/layouts``
-read; none of them keeps its own folder scan or display-name table any more.
+**Template packages** (ADR-007 T1) are built-in folders whose block says
+``kind`` ``result`` (the tournament result's layouts, core/ResultService) or
+``thumbnail`` (the match thumbnail's templates, core/ThumbnailService). They
+have no folder-name fallback: the block is their manifest, and one that does
+not hold what the template contract needs (``contract``, ``size``, ``rows`` /
+``template``; _TemplateEntry) is skipped with a warning. Their entry carries
+more (``folder``, ``bundled``, ``contract``, ``size``, ``author``,
+``license``, and ``rows`` or ``template``), and ``id`` is not always the
+folder: the shipped eight keep the ids settings.json and the state saved
+before (BUNDLED_TEMPLATES, frozen); any other package's id is its folder name.
+A folder named like a shipped id of its kind, in any case (Windows does not
+tell them apart), is not listed: the shipped one wins. Their names are
+``displayNames`` -- ``{"ja", "en"}``, the languages there are: a shipped
+package's core's words (CoreWords), another's its block's ``displayName`` (a
+string, which is the name in both, or ``{"ja", "en"}``) -- and
+``displayName``, as for every kind a string: the name in the language of the
+``locale`` the list is asked in (DisplayText). They are listed after the
+other built-in layouts, the shipped ones first in BUNDLED_TEMPLATES' order.
+
+This is the single source the Board / Commentary / Top 8 / Result / Thumbnail
+pages, the Designer's "open" list (AutonaDesignerService.list_projects), the
+result's and the thumbnail's services and renderers, and
+``GET /api/v1/layouts`` read; none of them keeps its own folder scan or
+display-name table any more.
 
 Core module: no Qt (tests/test_core_qt_free.py), and nothing happens at import
-time -- every function reads the filesystem when called, relative to the
-working directory unless a root is passed.
+time -- every function reads the filesystem when called. The folder is
+``Root()``, the one rule every reader goes through (the services, the
+renderers, the routes): LAYOUT_ROOT under the app's directory, which
+``bootstrap_core()`` gives (``SetAppDirectory``: the directory the app
+started in, the one its static files are served from), or the working
+directory before that. A function given a root reads that one instead.
 """
 
 import json
@@ -51,6 +76,7 @@ from collections import Counter
 
 from loguru import logger
 
+from . import CoreWords
 from .SettingsManager import SettingsManager
 
 LAYOUT_ROOT = "layout"
@@ -64,7 +90,54 @@ KIND_SCOREBOARD = "scoreboard"
 KIND_DESIGNER = "designer"
 KIND_COMMENTARY = "commentary"
 KIND_TOP8 = "top8"
-KINDS = (KIND_SCOREBOARD, KIND_DESIGNER, KIND_COMMENTARY, KIND_TOP8)
+KIND_RESULT = "result"
+KIND_THUMBNAIL = "thumbnail"
+KINDS = (KIND_SCOREBOARD, KIND_DESIGNER, KIND_COMMENTARY, KIND_TOP8,
+         KIND_RESULT, KIND_THUMBNAIL)
+
+# ── template packages (ADR-007) ──────────────────────────────────────────
+
+TEMPLATE_KINDS = (KIND_RESULT, KIND_THUMBNAIL)
+# The template contracts this Autona draws (ADR-007 D3): a package declaring
+# another is not listed.
+TEMPLATE_CONTRACTS = (1,)
+# A package's entry page when its block names none.
+TEMPLATE_DEFAULT_ENTRY = {KIND_RESULT: "result.html",
+                          KIND_THUMBNAIL: "thumbnail.html"}
+# The longest side a package's picture may declare (px).
+TEMPLATE_MAX_SIDE = 4096
+# What a result package draws (`rows`): players' rows (16 of them are kept)
+# or teams' (8).
+ROWS_PLAYERS = "players"
+ROWS_TEAMS = "teams"
+RESULT_ROWS = (ROWS_PLAYERS, ROWS_TEAMS)
+
+# The shipped template packages: kind -> {id: folder}, frozen (ADR-007 D1).
+# The ids are what settings.json (result_config.layout,
+# thumbnail_config.template_id), the state's result_layout and the v1 answers
+# have always held, so they never change; the order is the one the pages list
+# them in. tests/test_template_packages.py holds this to a copy.
+BUNDLED_TEMPLATES = {
+    KIND_RESULT: {
+        "horizontal": "result",
+        "horizontal_16": "result_top16",
+        "vertical": "result_vertical",
+        "vertical_geki": "result_vertical_geki",
+        "team": "result_team",
+        "team_split": "result_team_split",
+    },
+    KIND_THUMBNAIL: {
+        "type_a": "thumbnail",
+        "type_b": "thumbnail_type_b",
+    },
+}
+# The shipped result layouts of players that are given eight rows, as they
+# always were (the payload's golden); any other layout of players is given
+# all sixteen (ResultService.SlotsFor). Frozen with the ids above.
+BUNDLED_EIGHT_ROW_RESULTS = ("horizontal", "vertical", "vertical_geki")
+# A shipped package's name in core's words (CoreWords), by its id.
+_BUNDLED_NAME_KEYS = {KIND_RESULT: "result_layout_{}",
+                      KIND_THUMBNAIL: "thumbnail_template_{}"}
 
 # What a Designer project without meta.format / meta.game shows. Matches the
 # Board panel's former fixed text for every custom design.
@@ -83,7 +156,7 @@ _RESERVED_DIRS = frozenset({CUSTOM_DIRNAME, "designer_runtime", "include", "icon
 
 # Kinds a built-in settings.json may declare. "designer" is reserved for
 # layout/custom/ projects.
-_BUILTIN_KINDS = (KIND_SCOREBOARD, KIND_COMMENTARY, KIND_TOP8)
+_BUILTIN_KINDS = (KIND_SCOREBOARD, KIND_COMMENTARY, KIND_TOP8) + TEMPLATE_KINDS
 
 # Built-in folders without an autona block -- a layout the operator dropped
 # into layout/ before the block existed -- keep being found by the folder-name
@@ -131,23 +204,62 @@ class SelectionChanged(Exception):
     more: another client chose meanwhile."""
 
 
-def Layouts(kinds=None, root=None):
+def Layouts(kinds=None, root=None, locale=None):
     """Catalog entries whose kind is in ``kinds`` (all when None/empty):
-    built-in layouts (folder-name order), then Designer projects
+    built-in layouts (folder-name order; the template packages after the
+    others, the shipped ones first), then Designer projects
     (case-insensitive slug order).
 
     Designer projects are only read when ``designer`` is asked for, so the
     panels that list one built-in kind never parse project.json files.
     Names are made unique per kind, so filtering first gives the same names
-    as listing them all.
+    as listing them all. A template package's ``displayName`` is its name
+    in ``locale``'s language (a program locale; None: English).
     """
     wanted = set(kinds or KINDS)
     base = _Base(root)
-    layouts = [entry for entry in _BuiltinLayouts(base)
+    layouts = [_Named(entry, locale) for entry in _BuiltinLayouts(base)
                if entry["kind"] in wanted]
     if KIND_DESIGNER in wanted:
         layouts.extend(_DesignerLayouts(base))
     return _Disambiguate(layouts)
+
+
+def Templates(kind, root=None, locale=None):
+    """The template packages of ``kind`` (one of TEMPLATE_KINDS) by id, in
+    the order they are listed: what the result's and the thumbnail's services
+    and renderers draw from (ADR-007 D1). Read now, every call."""
+    return {entry["id"]: entry for entry in Layouts([kind], root, locale)}
+
+
+def TemplatePath(entry, name, root=None):
+    """The path of the file ``name`` (a file name the catalog checked: the
+    entry page, a thumbnail's template) in a template package's folder."""
+    return os.path.normpath(
+        os.path.join(_Base(root), *entry["folder"].split("/"), name))
+
+
+def BundledNameKey(kind, templateId):
+    """The key of a shipped template package's name in core's words
+    (CoreWords): what the services have always named it by."""
+    return _BUNDLED_NAME_KEYS[kind].format(templateId)
+
+
+def DisplayText(displayName, locale):
+    """A template package's display name (a string, or ``{"ja", "en"}``) in
+    program locale ``locale``'s language (CoreWords.Language), else in the
+    other one; "" for anything else."""
+    if isinstance(displayName, str):
+        return displayName
+    if not isinstance(displayName, dict):
+        return ""
+    language = CoreWords.Language(locale)
+    for candidate in (language,) + tuple(
+            other for other in _NAME_LANGUAGES if other != language):
+        text = displayName.get(candidate)
+        if isinstance(text, str) and text:
+            return text
+    return ""
 
 
 def SelectedLayout(kind, root=None):
@@ -280,9 +392,33 @@ def CustomLayouts(customRoot):
     return layouts
 
 
+# ── the folder ───────────────────────────────────────────────────────────
+
+# () -> the app's directory, which LAYOUT_ROOT is under; None: the working
+# directory. Given by the shell (SetAppDirectory).
+_appDirectory = None
+
+
+def SetAppDirectory(directory):
+    """``directory()`` -> the app's directory, read at every use: what
+    LAYOUT_ROOT is under for every reader (Root). bootstrap_core() gives the
+    directory the app started in (AutonaDirHelper.current_dir), so that the
+    services and the renderers read one folder, whatever the working
+    directory is a moment later. None: the working directory again."""
+    global _appDirectory
+    _appDirectory = directory
+
+
+def Root():
+    """The layout folder, as an absolute path: LAYOUT_ROOT under the app's
+    directory (an absolute LAYOUT_ROOT as it is)."""
+    base = _appDirectory() if _appDirectory is not None else os.getcwd()
+    return os.path.abspath(os.path.join(base, LAYOUT_ROOT))
+
+
 # ── internals ────────────────────────────────────────────────────────────
 def _Base(root):
-    return os.path.abspath(root or LAYOUT_ROOT)
+    return os.path.abspath(root) if root else Root()
 
 
 def _ExplorerSelect(path):
@@ -322,15 +458,33 @@ def _Disambiguate(layouts):
     Per kind because each kind is its own pulldown (the Board page lists
     scoreboard and designer together, but every designer name carries the prefix):
     the shipped commentators/ and bracket_top8/ are both "標準" and never
-    appear in the same list, so neither is renamed.
+    appear in the same list, so neither is renamed. A template package's
+    ``displayNames`` get the id with its ``displayName``.
     """
     counts = Counter(
         (entry["kind"], entry["displayName"]) for entry in layouts)
     return [
-        dict(entry, displayName=f"{entry['displayName']} ({entry['id']})")
+        _WithId(entry)
         if counts[(entry["kind"], entry["displayName"])] > 1 else entry
         for entry in layouts
     ]
+
+
+def _WithId(entry):
+    named = dict(entry, displayName=f"{entry['displayName']} ({entry['id']})")
+    if "displayNames" in entry:
+        named["displayNames"] = {
+            language: f"{text} ({entry['id']})"
+            for language, text in entry["displayNames"].items()}
+    return named
+
+
+def _Named(entry, locale):
+    """A template package's entry with its ``displayName`` in ``locale``'s
+    language; another kind's as it is."""
+    if "displayNames" not in entry:
+        return entry
+    return dict(entry, displayName=DisplayText(entry["displayNames"], locale))
 
 
 def _BuiltinLayouts(base):
@@ -350,11 +504,30 @@ def _BuiltinLayouts(base):
         entry = _BuiltinEntry(name, directory)
         if entry is not None:
             layouts.append(entry)
-    return layouts
+    return _TemplatesLast(layouts)
+
+
+def _TemplatesLast(layouts):
+    """The template packages after the other built-in layouts: per kind, the
+    shipped ones in BUNDLED_TEMPLATES' order (the order the services always
+    listed them in), then the others in folder order."""
+    ordered = [entry for entry in layouts
+               if entry["kind"] not in TEMPLATE_KINDS]
+    for kind in TEMPLATE_KINDS:
+        order = list(BUNDLED_TEMPLATES[kind])
+        ofKind = [entry for entry in layouts if entry["kind"] == kind]
+        ordered += sorted((entry for entry in ofKind if entry["bundled"]),
+                          key=lambda entry: order.index(entry["id"]))
+        ordered += [entry for entry in ofKind if not entry["bundled"]]
+    return ordered
 
 
 def _BuiltinEntry(name, directory):
     block = _MetadataBlock(name, directory)
+    if block is not None and block["kind"] in TEMPLATE_KINDS:
+        # A template package: the block is its manifest, with no folder-name
+        # fallback (ADR-007 D1).
+        return _TemplateEntry(name, directory, block)
     inferred = _InferFromName(name)
     if block is None and inferred is None:
         return None
@@ -383,6 +556,114 @@ def _BuiltinEntry(name, directory):
         "game": _Text(block.get("game")),
         "entry": entry,
     }
+
+
+def _TemplateEntry(name, directory, block):
+    """A template package's entry (ADR-007 D1), or None, with a warning, when
+    its manifest does not hold what the template contract needs: a known
+    ``contract``, a ``size`` within TEMPLATE_MAX_SIDE, a result's ``rows``, a
+    thumbnail's ``template`` file in the folder, and its entry page. One such
+    folder costs its own entry only."""
+    kind = block["kind"]
+
+    def refuse(why):
+        logger.warning(f"LayoutCatalog: {name}/{SETTINGS_FILE}: not listing "
+                       f"the {kind} template: {why}")
+        return None
+
+    contract = block.get("contract")
+    if not _IsInt(contract) or contract not in TEMPLATE_CONTRACTS:
+        return refuse(f"contract must be one of {TEMPLATE_CONTRACTS}, "
+                      f"got {contract!r}")
+    size = block.get("size")
+    if not (isinstance(size, list) and len(size) == 2 and all(
+            _IsInt(side) and 1 <= side <= TEMPLATE_MAX_SIDE for side in size)):
+        return refuse(f"size must be [width, height], each 1 to "
+                      f"{TEMPLATE_MAX_SIDE}, got {size!r}")
+    extra = {}
+    if kind == KIND_RESULT:
+        rows = block.get("rows")
+        if rows not in RESULT_ROWS:
+            return refuse(f"rows must be one of {RESULT_ROWS}, got {rows!r}")
+        extra["rows"] = rows
+    else:
+        template = block.get("template")
+        if not _IsFileName(template) \
+                or not os.path.isfile(os.path.join(directory, template)):
+            return refuse(f"template must name a file in the folder, "
+                          f"got {template!r}")
+        extra["template"] = template
+    entry = block.get("entry")
+    if entry is None:
+        entry = TEMPLATE_DEFAULT_ENTRY[kind]
+    if not _IsFileName(entry):
+        return refuse(f"entry must be a file name in the folder, "
+                      f"got {entry!r}")
+    if not os.path.isfile(os.path.join(directory, entry)):
+        return refuse(f"there is no {entry}")
+
+    # Folder names in any case: Windows does not tell them apart.
+    shipped = BUNDLED_TEMPLATES[kind]
+    folded = name.casefold()
+    shippedId = next((templateId for templateId, folder in shipped.items()
+                      if folder.casefold() == folded), None)
+    if shippedId is None and folded in {
+            templateId.casefold() for templateId in shipped}:
+        return refuse("a shipped template has this id; the shipped one is "
+                      "listed")
+    if shippedId is not None:
+        key = BundledNameKey(kind, shippedId)
+        displayNames = {language: CoreWords.WORDS[key][language]
+                        for language in _NAME_LANGUAGES}
+    else:
+        displayNames = _TemplateNames(block.get("displayName")) or {
+            language: _Prettify(name) for language in _NAME_LANGUAGES}
+    return {
+        "id": shippedId or name,
+        "kind": kind,
+        # In a language by Layouts (_Named).
+        "displayName": DisplayText(displayNames, None),
+        "displayNames": displayNames,
+        "format": None,
+        "game": None,
+        "entry": entry,
+        "folder": name,
+        "bundled": shippedId is not None,
+        "contract": contract,
+        "size": list(size),
+        **extra,
+        "author": _Text(block.get("author")),
+        "license": _Text(block.get("license")),
+    }
+
+
+# The languages a template package's displayName may be given in, in the
+# order an entry spells them.
+_NAME_LANGUAGES = (CoreWords.JAPANESE, CoreWords.ENGLISH)
+
+
+def _TemplateNames(value):
+    """A template package's displayName as declared, by language: ``{"ja",
+    "en"}`` of the non-empty ones, a non-empty string in both; None for
+    anything else."""
+    if isinstance(value, dict):
+        names = {language: _Text(value.get(language))
+                 for language in _NAME_LANGUAGES}
+        names = {language: text for language, text in names.items() if text}
+        return names or None
+    text = _Text(value)
+    return {language: text for language in _NAME_LANGUAGES} if text else None
+
+
+def _IsInt(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _IsFileName(value):
+    """A file's name in a folder: no separator, no drive, not "." or ".."."""
+    return isinstance(value, str) and value not in ("", ".", "..") \
+        and os.path.basename(value) == value and "/" not in value \
+        and "\\" not in value
 
 
 def _MetadataBlock(name, directory):

@@ -2,10 +2,10 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <link rel="stylesheet" href="./result.css" />
+  <link rel="stylesheet" href="../include/result_team.css" />
   <script src="../include/jquery-3.7.1.min.js"></script>
   <script src="../include/lodash.min.js"></script>
-  <script src="../thumbnail/thumbnail_assets.js"></script>
+  <script src="../include/thumbnail_assets.js"></script>
 </head>
 <body>
   <div class="result" id="result">
@@ -26,8 +26,9 @@
   </div>
 
   <!-- Shares the standings renderer (placeTeams, triggered when payload.layout
-       == "team"); team styling lives in result.css. The "name" field holds the
-       team name, "members" the roster of {name, character} shown as fighters. -->
-  <script src="../result/result.js"></script>
+       == "team"); team styling lives in include/result_team.css. The "name"
+       field holds the team name, "members" the roster of {name, character}
+       shown as fighters. -->
+  <script src="../include/result.js"></script>
 </body>
 </html>

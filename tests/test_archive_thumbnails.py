@@ -20,12 +20,14 @@ from src import AutonaWebOperations as WebOps
 from src.core import ArchiveJobService as archive
 from src.core import ArchiveResults
 from src.core import ArchiveThumbnails as thumbs
+from src.core import LayoutCatalog
 from src.core import StateSchema as schema
 from src.core import ThumbnailService as thumbnail_module
 from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
 from src.core.SettingsManager import SettingsManager
 from src.core.TaskExecutor import TaskExecutor
 from src.core.ThumbnailService import ThumbnailService
+from tests.fixtures import template_packages
 # fake, page, service, work, server, settings, shellSecret and assets: the
 # fixtures (pytest finds them by name).
 from tests.test_archive_jobs import (  # noqa: F401
@@ -192,8 +194,11 @@ def test_the_characters_are_a_scanned_games_whether_loaded_or_not(assets):
 def drawing(fake, work, tmp_path, monkeypatch):
     """The thumbnail service (its template in cwd tmp, a stand-in renderer,
     `later` queued for the test to run), the catalog and an executor."""
-    types = tmp_path / "assets" / "thumbnail_base" / "thumbnail_types"
-    types.mkdir(parents=True)
+    # The default template's package (the catalog's, ADR-007 T1), with a
+    # template file of the test's own.
+    template_packages.Install(tmp_path / "layout", ("thumbnail",))
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(tmp_path / "layout"))
+    types = tmp_path / "layout" / "thumbnail"
     (types / "type_a.json").write_text(json.dumps({"name": "A"}),
                                        encoding="utf-8")
     renderer = SimpleNamespace(asked=[], refuse=None)

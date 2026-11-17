@@ -869,7 +869,7 @@
     "guide_api_endpoint_get_tournament_stations": "配信台と配信（最後に取得したもの。取得はしない）",
     "guide_api_endpoint_get_commentary": "実況・解説の状態",
     "guide_api_endpoint_get_country_states": "国の州・地域一覧",
-    "guide_api_endpoint_get_layouts": "レイアウト一覧（?kind=scoreboard|designer|commentary|top8 で絞り込み）",
+    "guide_api_endpoint_get_layouts": "レイアウト一覧（?kind=scoreboard|designer|commentary|top8|result|thumbnail で絞り込み）",
     "guide_api_endpoint_get_selected_layout": "パネルが表示するレイアウト（kind=commentary|top8|board）",
     "guide_api_endpoint_get_board_files": "ボードの OBS 用ファイル（絶対パス。別の PC からはトークンが必要）",
     "guide_api_endpoint_get_commentary_options": "実況・解説の役割・アイコンの候補",

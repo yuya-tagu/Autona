@@ -31,6 +31,11 @@ import {
     getWithRetry,
     useSerialRequests,
 } from "../PanelShell/requests";
+import {
+    TemplateChoice,
+    templateLabel,
+    useTemplatePackages,
+} from "../PanelShell/templatePackages";
 import {ColorKind, FeatureColorCard} from "../CommentaryPage/SideCards";
 import {generatedUrl} from "../ThumbnailPage/Cards";
 import {useCharacters} from "../Top8Page";
@@ -848,6 +853,18 @@ function ResultContent() {
     const layoutId = description?.layout;
     const layout = layouts?.find((entry) => entry.id === layoutId);
     const kind: RowKind = layout?.team ? "teams" : "players";
+    // The layouts to choose from: the catalog's result packages (ADR-007 T1),
+    // or the description's until (unless) they are read.
+    const packages = useTemplatePackages("result", loads);
+    const choices: TemplateChoice[] = React.useMemo(() => (packages
+        ? packages.map((entry) => ({
+            id: entry.id,
+            label: templateLabel(entry, "result_layout_", language)}))
+        : (layouts ?? []).map((entry) => ({
+            id: entry.id,
+            label: i18n.t(`result_layout_${entry.id}`,
+                          {defaultValue: entry.name})}))),
+    [packages, layouts, language]);
 
     const reorder = React.useCallback((order: number[]) => {
         // What is being typed goes to the row it was typed into, ahead of it.
@@ -1122,7 +1139,7 @@ function ResultContent() {
                 <Stack spacing={2}>
                     <LayoutCard
                         layout={description.layout}
-                        layouts={description.layouts}
+                        choices={choices}
                         game={description.game}
                         send={sendLayout}
                         importing={standings.status === "running"}

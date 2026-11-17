@@ -15,7 +15,10 @@ A payload scenario is the world a call sees:
 - ``files``: {path relative to the working directory: text}, on top of the
   two fixture templates and the bundled default banner (FILES). The fixture
   templates stand in for the shipped ones so a design change of a template
-  does not touch the recording: only "the file, plus its id" is recorded;
+  does not touch the recording: only "the file, plus its id" is recorded.
+  They are in the shipped template packages' folders, with the shipped
+  manifests (ADR-007 T1 moved them there from
+  assets/thumbnail_base/thumbnail_types/, where they were recorded);
 - ``preview``, ``board``: the call's arguments;
 - ``games``: None (the call was given no game assets), or the game assets a
   placeholder preview draws from: its characters and selected game, and which
@@ -36,6 +39,8 @@ import json
 import os
 from pathlib import Path
 
+from tests.fixtures import template_packages
+
 SEED = 20261107
 
 LOCALE = {
@@ -44,15 +49,20 @@ LOCALE = {
     "phaseNames": {"group": "Group {0}"},
 }
 
+FIXTURE_TEMPLATES = {
+    "type_a.json": '{"name": "Fixture A", '
+                   '"default_background": "./assets/thumbnail_base/a.png"}',
+    "type_b.json": '{"name": "Fixture B", '
+                   '"default_background": "./assets/thumbnail_base/b.png"}',
+}
+
 FILES = {
-    "assets/thumbnail_base/thumbnail_types/type_a.json":
-        '{"name": "Fixture A", '
-        '"default_background": "./assets/thumbnail_base/a.png"}',
-    "assets/thumbnail_base/thumbnail_types/type_b.json":
-        '{"name": "Fixture B", '
-        '"default_background": "./assets/thumbnail_base/b.png"}',
+    **template_packages.Files(template_packages.THUMBNAIL_FOLDERS,
+                              templates=FIXTURE_TEMPLATES),
     "assets/thumbnail_base/default_banner.png": "default banner",
 }
+# Where the fixture template of the default template is.
+DEFAULT_TEMPLATE_FILE = "layout/thumbnail/type_a.json"
 
 BANNER_FILE = {"user_data/tournament_banner.png": "banner"}
 CUSTOM_BACKGROUND = "./user_data/custom background.png"

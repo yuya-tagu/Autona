@@ -28,7 +28,15 @@ const DEFAULTS = {
 };
 const TEMPLATES = [{id: "type_a", name: "Standard"},
                    {id: "type_b", name: "Center Panel"}];
+// GET /api/v1/layouts?kind=thumbnail: the shipped templates as the catalog
+// lists them (ADR-007 T1). Their names on the page are the page's own words.
+const SHIPPED = TEMPLATES.map((entry) => ({
+    id: entry.id, kind: "thumbnail", bundled: true,
+    displayName: `${entry.name} en`,
+    displayNames: {ja: `${entry.name} ja`, en: `${entry.name} en`},
+    size: [1920, 1080]}));
 
+let catalog;
 let settings;
 let videoTitle;
 let canRender;
@@ -169,6 +177,7 @@ function merge(target, change) {
 
 beforeEach(() => {
     jest.useFakeTimers();
+    catalog = SHIPPED;
     settings = JSON.parse(JSON.stringify(DEFAULTS));
     videoTitle = "Cup | Alpha vs Bravo | TG";
     canRender = true;
@@ -203,6 +212,9 @@ beforeEach(() => {
                 return answer(200, {ok: true, data: {
                     settings, game, templates: TEMPLATES, videoTitle,
                     canRender}});
+            }
+            if (path === "/api/v1/layouts" && catalog) {
+                return answer(200, {ok: true, data: catalog});
             }
             return answer(404, {ok: false});
         }
@@ -256,6 +268,52 @@ test("the cards come up with the saved settings, and one preview after the wait"
     await settle(PREVIEW_DEBOUNCE_MS);
 
     expect(previews()).toBe(1);
+});
+
+test("the templates offered are the catalog's, a package placed by hand too",
+     async () => {
+    catalog = [...SHIPPED,
+        {id: "neon", kind: "thumbnail", bundled: false, displayName: "ネオン",
+         displayNames: {ja: "ネオン"}, size: [1280, 720]}];
+    await renderPage();
+
+    expect(global.fetch.mock.calls.map(([url]) => url).filter(
+        (url) => new URL(url).pathname === "/api/v1/layouts")
+        .map((url) => new URL(url).search)).toEqual(["?kind=thumbnail"]);
+    fireEvent.mouseDown(screen.getByRole("combobox",
+                                         {name: i18n.t("thumbnail_template")}));
+    // Named in the other language when it has no English name.
+    expect((await screen.findAllByRole("option"))
+        .map((option) => option.textContent)).toEqual([
+        i18n.t("thumbnail_template_type_a"),
+        i18n.t("thumbnail_template_type_b"), "ネオン"]);
+
+    fireEvent.click(screen.getByRole("option", {name: "ネオン"}));
+    await settle();
+
+    expect(writes("PATCH", "/api/v1/thumbnail")).toEqual([{template_id: "neon"}]);
+});
+
+test.each([
+    ["no catalog", null],
+    ["an answer that is not a list", {neon: {}}],
+])("with %s, the description's templates are offered", async (_how, answer) => {
+    catalog = answer;
+    const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+        await renderPage();
+
+        fireEvent.mouseDown(screen.getByRole(
+            "combobox", {name: i18n.t("thumbnail_template")}));
+        expect((await screen.findAllByRole("option"))
+            .map((option) => option.textContent)).toEqual([
+            i18n.t("thumbnail_template_type_a"),
+            i18n.t("thumbnail_template_type_b")]);
+        // Told, not left as an unhandled rejection.
+        expect(logged).toHaveBeenCalled();
+    } finally {
+        logged.mockRestore();
+    }
 });
 
 test("a choice is saved at once and drawn once the changes stop", async () => {
