@@ -1941,7 +1941,7 @@ test("the phase shown first: the only one, else the one the rows were fetched wi
     expect(inDialog(dialog, "checkbox", "score_sets_finished")).toBeChecked();
 });
 
-test("fetching: the button waits for the answer and the fetch; 完了 fetches again, complete pairs filter",
+test("fetching: the button waits for the answer and the fetch; 完了 fetches again",
      async () => {
     server.sets = listOf(SET_ROWS, FETCHED);
     await selectionPage({sets: fetchState("done", {revision: 3})});
@@ -1972,13 +1972,6 @@ test("fetching: the button waits for the answer and the fetch; 完了 fetches ag
     await settle();
     expect(refreshes()).toEqual([{phase: 12, finished: false},
                                  {phase: 12, finished: true}]);
-
-    // The page's filter: nothing asked.
-    fireEvent.click(inDialog(dialog, "checkbox", "score_sets_complete_pairs"));
-    await settle();
-    expect(cellsOf(dialog)).toEqual(setCases.sets.filter((item) => item.complete)
-        .map((item) => item.cells));
-    expect(refreshes()).toHaveLength(2);
 });
 
 test("the progress and the status: busy, then the pages; what failed and no tournament",
@@ -2138,28 +2131,25 @@ test("the search reaches the hidden id; a header sorts, kept from one opening to
     expect(loads()).toEqual([]);
 });
 
-test("the set dialog's search and complete pairs are each board's, its order every board's",
+test("the set dialog's search is each board's, its order every board's",
      async () => {
     server.sets = listOf(SET_ROWS, FETCHED);
     await selectionPage();
     let dialog = await openSets();
     const player1 = () => cellsOf(dialog).map((cells) => cells[5]);
-    const pairs = () => inDialog(dialog, "checkbox", "score_sets_complete_pairs");
     const search = () => inDialog(dialog, "searchbox", "score_sets_filter");
-    fireEvent.change(search(), {target: {value: "a"}});
-    fireEvent.click(pairs());
+    fireEvent.change(search(), {target: {value: "alice"}});
     fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
     fireEvent.click(inDialog(dialog, "button", "score_sets_col_player", {n: 1}));
     const board1 = player1();
     expect(board1.length).toBeLessThan(SET_ROWS.length);
     await closeDialog(dialog);
 
-    // Board 2's window: nothing typed, no box ticked; the order the same.
+    // Board 2's window: nothing typed; the order the same.
     server.format = {format: "team", board: 2};
     await notify("battle_format");
     dialog = await openSets();
     expect(search()).toHaveValue("");
-    expect(pairs()).not.toBeChecked();
     expect(player1()).toEqual(SET_CELLS.map((cells) => cells[5]).sort().reverse());
     fireEvent.change(search(), {target: {value: "bravo"}});
     await closeDialog(dialog);
@@ -2168,8 +2158,7 @@ test("the set dialog's search and complete pairs are each board's, its order eve
     server.format = {format: "singles", board: 1};
     await notify("battle_format");
     dialog = await openSets();
-    expect(search()).toHaveValue("a");
-    expect(pairs()).toBeChecked();
+    expect(search()).toHaveValue("alice");
     expect(player1()).toEqual(board1);
 });
 

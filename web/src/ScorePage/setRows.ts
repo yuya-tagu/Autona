@@ -70,11 +70,6 @@ export function setCells(row: SetRow): string[] {
             sideCell(row, row.p2)];
 }
 
-// "Show complete pairs": both sides named.
-export function isCompletePair(row: SetRow): boolean {
-    return cell(row.p1?.name) !== "" && cell(row.p2?.name) !== "";
-}
-
 // Type, Id, Stream, Identifier.
 export function stationCells(row: StationRow): string[] {
     return [cell(row.type), cell(row.id), cell(row.stream),
