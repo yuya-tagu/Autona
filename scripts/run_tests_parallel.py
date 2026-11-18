@@ -15,8 +15,9 @@ seconds when some files are known). The cache is rewritten only by a full run
 (no extra pytest args) whose every worker wrote a readable JUnit XML; a partial
 run (-m / -k ...) never overwrites it. Every worker is an ordinary pytest process, so
 each one bootstraps on its own and Qt is never shared. This is NOT pytest-xdist
-(no new dependency). CI stays serial on purpose: it is the net for order
-dependence between files and for anything a split could hide.
+(no new dependency). CI runs this on pull requests too; on a push to main it also
+runs the serial command (job python-serial), the net for order dependence between
+files and for anything a split could hide.
 
 Output of each worker is captured and only printed at the end: a merged summary,
 the failed / errored test ids, and the full output of every failed worker.
