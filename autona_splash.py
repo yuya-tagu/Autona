@@ -80,9 +80,9 @@ def _icon_path(name: str) -> str:
 SPLASH_W, SPLASH_H = 520, 340
 
 COLOR_TEXT = QColor("#F0C45A")        # parchment gold
-COLOR_MSG = QColor("#E0D6B8")         # soft parchment
-COLOR_BG_TOP = QColor("#1C1610")
-COLOR_BG_BOTTOM = QColor("#0A0806")
+COLOR_MSG = QColor("#E9ECF1")         # text_primary
+COLOR_BG_TOP = QColor("#191B20")      # bg_secondary
+COLOR_BG_BOTTOM = QColor("#0A0B0D")   # canvas
 
 # Outer decorative frame uses the Autona-icon crimson → orange → gold
 # gradient. The inner 1px accent line is a darkened echo of the same
@@ -113,7 +113,7 @@ PROGRESS_BAR_H = 6
 PROGRESS_BAR_MARGIN_X = 60
 PROGRESS_BAR_Y = 290
 PROGRESS_BAR_RADIUS = 3
-COLOR_PROGRESS_TRACK = QColor("#2A2014")
+COLOR_PROGRESS_TRACK = QColor("#23262C")  # bg_tertiary
 COLOR_PROGRESS_FILL_A = QColor("#C41232")
 COLOR_PROGRESS_FILL_B = QColor("#F0C45A")
 # Progress bar: set_message() snaps to the new value and returns
@@ -248,7 +248,7 @@ class AutonaSplashScreen(QSplashScreen):
                 fill_rect, PROGRESS_BAR_RADIUS, PROGRESS_BAR_RADIUS)
 
         # Percentage text right-aligned below the bar
-        painter.setPen(QColor("#B5ADA0"))
+        painter.setPen(QColor("#AFB3BB"))
         small_font = QFont(FONT_FAMILY, 8)
         small_font.setBold(True)
         painter.setFont(small_font)
@@ -485,7 +485,7 @@ def _paint_title(painter: QPainter) -> None:
 
 
 def _paint_subtitle(painter: QPainter) -> None:
-    painter.setPen(QColor("#B5ADA0"))
+    painter.setPen(QColor("#AFB3BB"))
     font = QFont(FONT_FAMILY, 10)
     painter.setFont(font)
     painter.drawText(
@@ -511,7 +511,7 @@ SPINNER_BLADE_STEP = 360 // SPINNER_BLADES
 SPINNER_INNER_R = 14
 SPINNER_OUTER_R = 26
 SPINNER_BLADE_W = 3
-OVERLAY_BG = QColor(10, 8, 6, 235)
+OVERLAY_BG = QColor(10, 11, 13, 235)  # canvas
 OVERLAY_BLADE_COLOR = QColor("#F0C45A")
 
 
