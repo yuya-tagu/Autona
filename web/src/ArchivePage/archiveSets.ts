@@ -376,6 +376,54 @@ export function characterIcon(game: string, file: string | null | undefined):
     return `/user_data/games/${game}/${file}`;
 }
 
+// A game's characters' colours (GET /api/v1/archive/characters?game=, ADR-006
+// A6; core GameAssetCatalog.GameCharacterSkins): codename -> its skins in
+// ascending order, a skin being the number in its files' names (what the
+// review's skins name), its icon that skin's file in the game's folder (as
+// setCharacters' icons), null when it has none.
+export interface CharacterSkin {
+    skin: number;
+    icon: string | null;
+}
+export type GameSkins = Record<string, CharacterSkin[]>;
+
+// The skins of the server's answer that are one (a whole number >= 0, once
+// each; an icon that may leave the game's folder is none).
+export function readGameSkins(value: unknown): GameSkins {
+    const table: GameSkins = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return table;
+    }
+    for (const [codename, rows] of Object.entries(value)) {
+        if (!assetName(codename) || !Array.isArray(rows)) {
+            continue;
+        }
+        const seen = new Set<number>();
+        table[codename] = rows.flatMap((row) => {
+            const skin = (row as {skin?: unknown} | null)?.skin;
+            const icon = (row as {icon?: unknown} | null)?.icon;
+            if (typeof skin !== "number" || !Number.isInteger(skin) || skin < 0
+                || seen.has(skin)) {
+                return [];
+            }
+            seen.add(skin);
+            return [{skin, icon: assetPath(icon) ? icon : null}];
+        });
+    }
+    return table;
+}
+
+// The icon (a file in the game's folder, as setCharacters' icons) of
+// `codename` drawn in `skin` (the review's; 0 or none is its first colour):
+// that skin's icon in `table` when it has one, else the set's own.
+export function skinIcon(characters: SetCharacters, codename: string,
+                         skin: number | undefined,
+                         table: GameSkins | null | undefined): string | undefined {
+    const found = skin ? table?.[codename]?.find((row) => row.skin === skin)
+        : undefined;
+    return found?.icon ?? characters.icons[codename];
+}
+
 // Whether the set's characters are (partly) an estimate: a player's main.
 export function isEstimate(set: SetResult | null | undefined): boolean {
     return set?.char_source === "mains";

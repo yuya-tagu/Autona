@@ -10,8 +10,11 @@ codenames ArchiveResults keeps in the set's ``autona`` (A5), of its game
 (not necessarily the loaded one: GameAssetCatalog.GameCharacterAssets), as
 a character slot holds one (PlayerService.BuildCharacterValue's keys:
 ``name``, ``en_name``, ``display_name``, ``codename``, ``assets``, ``skin``,
-``variant``; skin 0). A set without them has no characters (the names are
-drawn). The state is neither read nor written.
+``variant``), in the colour the set's review gives it (ArchiveReview.Skins:
+the number of its skin's files, 0 by default; ``skin`` is that number, not
+a skin combo's row -- thumbnail.js reads the ``assets``). A set without
+them has no characters (the names are drawn). The state is neither read
+nor written.
 
 Pure apart from the catalog's reads (the game's folder for a game that is
 not loaded); nothing happens at import.
@@ -24,12 +27,14 @@ NAMESPACE = "autona"
 MAX_CHARACTERS = 2
 
 
-def _Characters(game, codenames, catalog, cache):
+def _Characters(game, codenames, catalog, cache, skins):
     """{"1": value, ...} of `codenames` (at most MAX_CHARACTERS) of game
-    `game`; the ones the game does not name are left out."""
+    `game`, each in its skin of `skins` ({codename: number}; 0 when it has
+    none); the ones the game does not name are left out."""
     if catalog is None or not isinstance(game, str) or not game or \
             not isinstance(codenames, list):
         return {}
+    skins = skins if isinstance(skins, dict) else {}
     names = cache.get(game)
     if names is None:
         names = cache[game] = {
@@ -44,11 +49,14 @@ def _Characters(game, codenames, catalog, cache):
         if not isinstance(codename, str) or codename not in names:
             continue
         en_name, display_name = names[codename]
+        skin = skins.get(codename, 0)
+        if type(skin) is not int or skin < 0:
+            skin = 0
         characters[str(len(characters) + 1)] = {
             "name": display_name, "en_name": en_name,
             "display_name": display_name, "codename": codename,
-            "assets": catalog.GameCharacterAssets(game, codename, 0),
-            "skin": 0, "variant": {}}
+            "assets": catalog.GameCharacterAssets(game, codename, skin),
+            "skin": skin, "variant": {}}
     return characters
 
 
@@ -61,14 +69,17 @@ def _Score(value):
         value, bool) else 0
 
 
-def SetData(result, event, catalog, date=None, cache=None):
+def SetData(result, event, catalog, date=None, cache=None, skins=None):
     """The data thumbnail.html draws result set `result` (a set of the
     job's results: p1 / p2, s1 / s2, round, ``autona``) with, under the
     event name `event` and the date `date` (results.json's, or None).
     `catalog`: a GameAssetCatalog (None: no game name, no characters).
     `cache`: a dict the caller keeps across the sets of one run (each
-    game's characters are listed once)."""
+    game's characters are listed once). `skins`: the set's colours
+    (ArchiveReview.Skins: {"c1" / "c2": {codename: number}}; None: each
+    character's skin 0)."""
     cache = {} if cache is None else cache
+    skins = skins if isinstance(skins, dict) else {}
     extra = result.get(NAMESPACE) if isinstance(result, dict) else None
     extra = extra if isinstance(extra, dict) else {}
     game = extra.get("game") if isinstance(extra.get("game"), str) else ""
@@ -84,7 +95,8 @@ def SetData(result, event, catalog, date=None, cache=None):
             "player": {"1": {
                 "name": name, "team": "", "mergedName": name,
                 "character": _Characters(game, extra.get(f"c{side}"),
-                                         catalog, cache),
+                                         catalog, cache,
+                                         skins.get(f"c{side}")),
                 "country": {}, "state": {}}}}
 
     return {

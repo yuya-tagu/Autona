@@ -2255,7 +2255,9 @@ _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 _QUERIES = {"set_route": "?match=Final", "load_set": "?set=1",
             "load_player_from_tag": "?tag=Nobody",
             "load_commentator_from_tag": "?tag=Nobody",
-            "get_states": "?countryCode=JP"}
+            "get_states": "?countryCode=JP",
+            # A game not scanned: no skins (the archive's colours, A6).
+            "api_v1.get_archive_characters": "?game=no_such_game"}
 _DISPLAY_OPTION = "show_real_name"
 _DESIGN = {"project": make_project("Walk", with_image=False), "assets": {}}
 _BODIES = {

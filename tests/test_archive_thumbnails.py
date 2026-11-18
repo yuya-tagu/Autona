@@ -11,6 +11,7 @@ tests/fixtures/fake_vodsplit_worker.py (tests/test_archive_jobs fixtures).
 """
 import json
 import os
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -126,6 +127,32 @@ def test_a_character_the_game_does_not_name_is_left_out_and_two_at_most():
     assert team["2"]["player"]["1"]["character"] == {}
 
 
+def test_a_sets_colours_are_the_skins_its_characters_are_drawn_in():
+    # The review's skins (A6): each side's codenames, skin 0 for the ones it
+    # leaves out or gives what is not a skin number.
+    data = thumbs.SetData(KAPPA_A, "", _Catalog(), skins={
+        "c1": {"luigi": 2, "mario": True}, "c2": {"peach": 1},
+        "c3": {"mario": 5}})
+    team = data["score"]["1"]["team"]
+    mario, luigi = team["1"]["player"]["1"]["character"].values()
+    peach = team["2"]["player"]["1"]["character"]["1"]
+    assert (mario["skin"], mario["assets"]) == (0, _assets("mario"))
+    assert (luigi["skin"], luigi["assets"]) == (
+        2, _Catalog().GameCharacterAssets("tgame", "luigi", 2))
+    assert (peach["skin"], peach["assets"]) == (
+        1, _Catalog().GameCharacterAssets("tgame", "peach", 1))
+    # A side's colours are its own: mario on both sides of a mirror match.
+    mirror = dict(KAPPA, autona={"game": "tgame", "c1": ["mario"],
+                                 "c2": ["mario"]})
+    team = thumbs.SetData(mirror, "", _Catalog(), skins={
+        "c2": {"mario": 1}})["score"]["1"]["team"]
+    assert [team[side]["player"]["1"]["character"]["1"]["skin"]
+            for side in ("1", "2")] == [0, 1]
+    for none in (None, {}, [], {"c1": ["mario"]}, {"c1": {"mario": -1}}):
+        assert thumbs.SetData(KAPPA_A, "", _Catalog(), skins=none) == \
+            thumbs.SetData(KAPPA_A, "", _Catalog())
+
+
 @pytest.mark.parametrize("result", [
     KAPPA, dict(KAPPA, autona=None), dict(KAPPA, autona={"c1": ["mario"]}),
     dict(KAPPA, autona={"game": "nogame", "c1": ["mario"]})])
@@ -186,6 +213,50 @@ def test_the_characters_are_a_scanned_games_whether_loaded_or_not(assets):
         assetIndex={"mario": {"full": ["mario_0.png"]}})
     assert catalog.GameCharacterAssets("tgame", "mario") == \
         catalog.CharacterAssets("mario", 0)
+
+
+def _skins(*numbers):
+    """tgame's mario skins `numbers`, each with its icon."""
+    return [{"skin": n, "icon": f"base_files/icon/chara_2_mario_0{n}.png"}
+            for n in numbers]
+
+
+def test_a_games_skins_are_its_character_files_numbers(assets):
+    games = assets / "user_data" / "games"
+    catalog = _scanned()
+    table = catalog.GameCharacterSkins("tgame")
+    # The numbers of its files in every character pack (full, portrait,
+    # the icons), each with its icon.
+    assert table["mario"] == _skins(0, 1, 2)
+    assert table["koopa"] == [
+        {"skin": 0, "icon": "base_files/icon/chara_2_koopa_00.png"},
+        {"skin": 1, "icon": "base_files/icon/chara_2_koopa_01.png"}]
+    assert table["zelda"] == [
+        {"skin": 0, "icon": "base_files/icon/chara_2_zelda_00.png"}]
+    # No file: no skin (not luigi's for waluigi, nor the reverse).
+    assert table["noart"] == []
+    assert [row["skin"] for row in table["waluigi"]] == [0]
+    assert set(table) == {"mario", "luigi", "peach", "koopa", "zelda",
+                          "ghost", "random", "waluigi", "noart"}
+    # Each is a skin the thumbnail draws from its own files.
+    for row in table["mario"]:
+        assert catalog.GameCharacterAssets("tgame", "mario", row["skin"])[
+            "full"]["asset"].endswith(f"/full/mario_{row['skin']}.png")
+    assert catalog.GameCharacterSkins("game2") == {"ryu": [
+        {"skin": 0, "icon": "base_files/icon/ryu_0.png"}]}
+    assert catalog.GameCharacterSkins("nogame") == {}
+    assert catalog.GameCharacterSkins(None) == {}
+
+    # A skin with no icon of its own; a stage's icon and a name that is no
+    # skin's are not skins; ascending, whatever the listing's order.
+    (games / "tgame" / "full" / "mario_10.png").write_bytes(b"png")
+    (games / "tgame" / "full" / "mario_x.png").write_bytes(b"png")
+    (games / "tgame" / "stage_icon" / "stage_mario7.png").write_bytes(b"png")
+    assert catalog.GameCharacterSkins("tgame")["mario"] == _skins(0, 1, 2) + [
+        {"skin": 10, "icon": None}]
+    # A game whose one character pack is gone: no skins.
+    shutil.rmtree(games / "game2" / "base_files" / "icon")
+    assert _scanned().GameCharacterSkins("game2") == {"ryu": []}
 
 
 # ── the match thumbnail's entry for a set ────────────────────────────────
@@ -465,6 +536,51 @@ def test_a_thumbnail_is_shown_while_the_review_is_what_it_was_drawn_for(
     assert shown() == []
 
 
+def test_a_sets_thumbnail_is_drawn_in_its_colours_and_a_new_one_is_stale(
+        service, work, fake, tmp_path, drawing):
+    _ready(work, tmp_path, service)
+    folder = work / DONE_ID / "thumbs"
+
+    def shown():
+        return service.Job(DONE_ID)[0]["thumbs"]["files"]
+
+    def review(skins):
+        service.SaveReview(DONE_ID, {"sets": {
+            "1": {"confirmed": True, **({"skins": skins} if skins else {})},
+            "3": {"confirmed": True}}})
+
+    # Drawn with no colour chosen: thumbs.json as it was before colours
+    # (no "skins": every character in skin 0).
+    service.StartThumbs(DONE_ID)
+    assert _thumbs_ended(service, drawing)["files"] == [1, 3]
+    drawn = json.loads((folder / "thumbs.json").read_text(encoding="utf-8"))
+    assert "skins" not in drawn["sets"]["1"]
+    # A colour chosen since: that thumbnail is not the set as reviewed.
+    review({"c1": {"luigi": 2}})
+    assert shown() == [3]
+
+    # Drawn in it; thumbs.json says so, and it is shown while the review
+    # gives the set that colour.
+    service.StartThumbs(DONE_ID)
+    assert drawing.renderer.asked[0].payload[0] == thumbs.SetData(
+        KAPPA_A, "Fake Cup", _Catalog(), date="2026-11-16",
+        skins={"c1": {"luigi": 2}})
+    assert _thumbs_ended(service, drawing)["files"] == [1, 3]
+    drawn = json.loads((folder / "thumbs.json").read_text(encoding="utf-8"))
+    assert drawn["format"] == 1
+    assert drawn["sets"]["1"] == {"start": 120.0, "end": 720.0,
+                                  "set": KAPPA_A,
+                                  "skins": {"c1": {"luigi": 2}},
+                                  "beside": None}
+    assert "skins" not in drawn["sets"]["3"]
+    review({"c1": {"luigi": 1}})
+    assert shown() == [3]
+    review(None)
+    assert shown() == [3]
+    review({"c1": {"luigi": 2, "mario": 0}})
+    assert shown() == [1, 3]
+
+
 def test_a_new_run_removes_the_thumbnails_of_the_sets_it_does_not_draw(
         service, work, fake, tmp_path, drawing):
     _ready(work, tmp_path, service)
@@ -733,6 +849,23 @@ def test_the_page_draws_and_shows_the_thumbnails_through_the_routes(
         _refused(archive.NOT_FOUND, service.ThumbFile, DONE_ID, no)
     # Leading zeros are the set's number.
     assert service.ThumbFile(DONE_ID, "0001")[0].endswith("1.png")
+
+
+def test_the_page_reads_a_games_skins_through_the_route(
+        page, assets, monkeypatch):
+    # The colours a set's characters may be drawn in (A6): a scanned game's,
+    # loaded or not; THIS_PC, as the archive's other reads.
+    catalog = _scanned()
+    monkeypatch.setattr(GameAssetCatalog, "instance", catalog)
+    answer = _data(page.get(f"{BASE}/characters?game=tgame"))
+    assert answer == {"characters": catalog.GameCharacterSkins("tgame")}
+    assert answer["characters"]["mario"] == _skins(0, 1, 2)
+    assert _data(page.get(f"{BASE}/characters?game=nogame")) == {
+        "characters": {}}
+    for asked in (f"{BASE}/characters", f"{BASE}/characters?game="):
+        response = page.get(asked)
+        assert response.status_code == 400
+        assert response.get_json()["error"]["code"] == "INVALID_ARGUMENT"
 
 
 def test_the_headless_shell_cannot_draw_a_jobs_thumbnails(

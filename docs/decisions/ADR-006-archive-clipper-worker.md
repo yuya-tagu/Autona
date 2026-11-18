@@ -210,7 +210,9 @@ delta の行ではなく、通知のたびにボード 1 の公開済みの値�
   進捗のような頻繁に変わる値や、配信と関係のないジョブの情報を入れると、OBS への出力と保存を無駄に揺らす
   - ジョブの情報は `<作業フォルダ>/<job_id>/job.json`、レビューの編集（確定・割り当ての変更・IN/OUT の調整）は
     `review.json`。どちらも v1 で読み書きする
-  - `review.json` の形（A4）: `{"format": 1, "sets": {"<no>": {"base": [start, end], "confirmed"?: true, "start"?: 秒, "end"?: 秒, "set"?: 結果 | null}}}`。
+  - `review.json` の形（A4）: `{"format": 1, "sets": {"<no>": {"base": [start, end], "confirmed"?: true, "start"?: 秒, "end"?: 秒, "set"?: 結果 | null, "skins"?: {"c1": {codename: 番号}, "c2": {...}}}}}`。
+    `skins`（A6 追補）はサムネイルで描くキャラのカラーで、割り当てた結果の `autona.c1` / `c2` にいる codename と、ゲームのスキンのファイル名の番号
+    （0 は既定で書かない）。読むのはサムネイルだけで、ワーカーへの要求（書き出し・タイトル）には入れない。結果が変わってそのキャラがいなくなると落とす。
     変えたセットだけを sets.json の `no` で持ち、書かないキーはワーカーの値。`set` は sets.json の結果（そのセットの `set` か `unused_sets`）か
     null（結果なし。`NN_unmatched` として書き出す）で、1 つの結果は 1 セットにだけ割り当てられる。切り抜き不要なセット（典型は結果に該当しない
     誤検出のブロック）は `{"base": [...], "removed": true}` だけのエントリ（`format` は 1 のまま。false は書かない）で、確定・区間・割り当ては捨てる。
@@ -347,6 +349,11 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   ワーカーには生のテンプレートのファイルではなく、検査済みの内容を `<job>/templates/` に書いたスナップショットを渡す（Autona とワーカーの読み違いと、実行中の削除との競合を無くす）。
   クリップの隣に置くのは、書き出しが走っておらず、`clips/export.json` の元動画がジョブの動画で、その番号のクリップが書き出し済みで残っていて、
   切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ。実装の要点は Design.md §4.2.5
+  追補（2026-11-18）: セットごと・キャラごとにサムネイルのカラーを選べる（それまではスキン 0 固定）。レビューの `skins`（D6）に持ち、
+  詳細のキャラの行に、スキンが 2 つ以上あるキャラだけカラーの選択（スキンのアイコン）を出す。一覧と詳細のアイコンも選んだカラーにする。
+  スキンの一覧は `GET archive/characters?game=<codename>`（THIS_PC。core の `GameAssetCatalog.GameCharacterSkins`。スキャン済みのゲームの
+  キャラごとのスキン番号とアイコン）。`thumbs.json` はカラーも記録し（既定だけなら書かない。古い記録は既定として読む）、カラーを変えたセットの
+  サムネイルは古いものとして出さない
 - A7（2026-11-17 実装）: ワーカーは SmashVodSplitter の `packaging/worker.spec`（onedir。videoio の DLL は 1 つ、GPL の mutagen は除外、
   deno.exe は exe の隣）と `packaging/build_worker.py` で作り、zip（`vodsplit-worker/...`。imageio-ffmpeg の ffmpeg を入れていた 0.3.0 の最初のビルドで約 146 MiB、展開して約 365 MB）と
   マニフェスト `vodsplit-worker.json`（`version` / `sets_format` / `zip` の名前・サイズ・SHA-256 / 任意の `min_autona`）を

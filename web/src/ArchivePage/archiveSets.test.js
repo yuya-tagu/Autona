@@ -15,7 +15,9 @@ import {
     characterIcon,
     dayText,
     isEstimate,
+    readGameSkins,
     setCharacters,
+    skinIcon,
     sourceCounts,
 } from "./archiveSets";
 
@@ -144,6 +146,42 @@ test("a character's icon is its file in the game's folder", () => {
     expect(characterIcon("a/b", "base_files/icon/x.png")).toBeNull();
     expect(characterIcon("ssbu", "")).toBeNull();
     expect(characterIcon("ssbu", undefined)).toBeNull();
+});
+
+// A game's skins (A6): the colours a set's characters can be drawn in.
+
+test("a game's skins are whole numbers once each, icons that stay in the folder", () => {
+    expect(readGameSkins({
+        mario: [{skin: 0, icon: "base_files/icon/m_00.png"},
+                {skin: 1, icon: "../../x.png"}, {skin: 1, icon: null},
+                {skin: -1}, {skin: 1.5}, {skin: "2"}, null,
+                {skin: 3, icon: "base_files/icon/m_03.png"}],
+        "../x": [{skin: 0}],
+        koopa: "base_files/icon/k_00.png",
+        ness: [],
+    })).toEqual({
+        mario: [{skin: 0, icon: "base_files/icon/m_00.png"},
+                {skin: 1, icon: null},
+                {skin: 3, icon: "base_files/icon/m_03.png"}],
+        ness: [],
+    });
+    expect(readGameSkins(null)).toEqual({});
+    expect(readGameSkins([{skin: 0}])).toEqual({});
+});
+
+test("a character's icon is its colour's, else the set's own", () => {
+    const characters = {game: "ssbu", c1: ["mario"], c2: ["luigi"],
+                        icons: {mario: "base_files/icon/m_00.png"}};
+    const table = {mario: [{skin: 0, icon: "base_files/icon/m_00.png"},
+                           {skin: 2, icon: "base_files/icon/m_02.png"},
+                           {skin: 3, icon: null}]};
+    expect(skinIcon(characters, "mario", 2, table)).toBe("base_files/icon/m_02.png");
+    // The default, a skin with no icon, one the files do not have, no table.
+    expect(skinIcon(characters, "mario", 0, table)).toBe("base_files/icon/m_00.png");
+    expect(skinIcon(characters, "mario", 3, table)).toBe("base_files/icon/m_00.png");
+    expect(skinIcon(characters, "mario", 7, table)).toBe("base_files/icon/m_00.png");
+    expect(skinIcon(characters, "mario", 2, null)).toBe("base_files/icon/m_00.png");
+    expect(skinIcon(characters, "luigi", undefined, table)).toBeUndefined();
 });
 
 test("only a player's main is an estimate", () => {

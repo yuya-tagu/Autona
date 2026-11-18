@@ -123,7 +123,8 @@ EXPECTED_ROUTES = [
 # preparation, the shared view's (A5), and the title templates' reads and a
 # set's thumbnail, this PC's, the templates' writes, the titles' preview and
 # the thumbnails' drawing, the shared view's (A6), and the worker's install,
-# its read this PC's, the install and its cancel the shared view's (A7).
+# its read this PC's, the install and its cancel the shared view's (A7), and
+# the skins a set's characters may be drawn in, this PC's (A6).
 EXPECTED_API_V1_ROUTES = [
     # The access token: the shared view's own fetches only (ADR-005 S-final
     # SF-4a-1, WebAccess.SHELL).
@@ -136,6 +137,9 @@ EXPECTED_API_V1_ROUTES = [
     # The archive clipper (ADR-006 A1): the worker's status, the work
     # folder, the jobs (the reads WebAccess.THIS_PC, the writes
     # WebAccess.SHELL).
+    # A game's skins and their icons (ADR-006 A6: a set's colours), THIS_PC
+    # as the archive's other reads.
+    ('/api/v1/archive/characters', 'api_v1.get_archive_characters', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs', 'api_v1.get_archive_jobs', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs', 'api_v1.archive_job_create', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>', 'api_v1.get_archive_job', 'GET,HEAD,OPTIONS'),
@@ -637,6 +641,8 @@ def test_the_classification_follows_the_rules():
               # thumbnail, as its frame.
               "api_v1.get_archive_templates", "api_v1.get_archive_template",
               "api_v1.get_archive_thumb",
+              # A game's skins (A6: a set's colours), as the other reads.
+              "api_v1.get_archive_characters",
               # The worker's install (A7): what is installed, the latest
               # release, the install's state.
               "api_v1.get_archive_worker"}
@@ -742,7 +748,8 @@ def test_the_classification_follows_the_rules():
     # preview and the thumbnails' drawing, the shell's (A6: v1 76 of 155),
     # and the worker's install read, this PC's, its install and cancel, the
     # shell's (A7: v1 76 of 158), and a job's reanalysis, the shell's (v1
-    # 76 of 159).
+    # 76 of 159), and a game's skins for a set's colours, this PC's (A6: v1
+    # 76 of 160).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -752,7 +759,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 159
+    assert len(EXPECTED_API_V1_ROUTES) == 160
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

@@ -101,6 +101,33 @@ CANCEL_ICON_PATH = './assets/icons/cancel.svg'
 ICON_PACK = "base_files/icon"
 
 
+def _SkinFiles(files, base):
+    """{skin number: file name} of the names in `files` that are a skin's
+    file for `base` (an asset pack's prefix + codename + postfix): the name
+    past `base` up to its extension a whole number >= 0, "" being 0, as
+    _CharacterAssets reads it. The first name of a number is kept."""
+    found = {}
+    for name in files:
+        if not name.startswith(base):
+            continue
+        number = name[len(base):].rsplit(".", 1)[0]
+        try:
+            skin = int(number) if number else 0
+        except ValueError:
+            continue
+        if skin >= 0:
+            found.setdefault(skin, name)
+    return found
+
+
+def _CharacterPack(pack):
+    """Whether asset pack config `pack` holds characters' files (not a
+    stage's or a variant's icons: _CharacterAssets skips those)."""
+    kind = pack.get("type")
+    kinds = kind if isinstance(kind, list) else [kind]
+    return not any(item in ("stage_icon", "variant_icon") for item in kinds)
+
+
 def _resolve_characters_path() -> str:
     if os.path.exists(CHARACTERS_RUNTIME_PATH):
         return CHARACTERS_RUNTIME_PATH
@@ -624,22 +651,60 @@ class GameAssetCatalog:
         def find(codename):
             if not isinstance(codename, str) or not codename:
                 return None
-            base = prefix + codename + postfix
-            lowest = None
-            for name in files:
-                if not name.startswith(base):
-                    continue
-                number = name[len(base):].rsplit(".", 1)[0]
-                try:
-                    # A skin's number as a load reads it ("" is skin 0).
-                    skin = int(number) if number else 0
-                except ValueError:
-                    continue
-                if lowest is None or skin < lowest[0]:
-                    lowest = (skin, name)
-            return f"{ICON_PACK}/{lowest[1]}" if lowest else None
+            # A skin's number as a load reads it ("" is skin 0).
+            found = _SkinFiles(files, prefix + codename + postfix)
+            return f"{ICON_PACK}/{found[min(found)]}" if found else None
 
         return find
+
+    def GameCharacterSkins(self, game):
+        """The skins of the scanned game `game`'s characters, for a reader
+        that picks one without loading the game (the archive clipper's
+        thumbnails, ADR-006 A6: a set's characters are its results' game):
+        {codename: [{"skin", "icon"}]}, a skin being a number of one of its
+        files in the game's character asset packs (as CharacterAssets reads
+        them: what GameCharacterAssets takes), in ascending order; its icon
+        that number's file in ``ICON_PACK``, relative to the game's folder
+        ("base_files/icon/<file>"), None when the pack has none. {} for a
+        game not scanned. Built from the scan and one listing of each pack
+        on each call (no lock: the scan is read once): the caller's to
+        keep."""
+        config = self._games.get(game) if isinstance(game, str) else None
+        characters = config.get("character_to_codename") \
+            if isinstance(config, dict) else None
+        if not isinstance(characters, dict) \
+                or not isinstance(config.get("path"), str):
+            return {}
+        assets = config.get("assets")
+        packs = []
+        for key, pack in (assets.items() if isinstance(assets, dict)
+                          else ()):
+            if not isinstance(pack, dict) or not _CharacterPack(pack):
+                continue
+            try:
+                files = os.listdir(os.path.join(config["path"], key))
+            except OSError:
+                files = []
+            packs.append((key, str(pack.get("prefix", "")),
+                          str(pack.get("postfix", "")), files))
+        table = {}
+        for character in characters.values():
+            codename = character.get("codename") \
+                if isinstance(character, dict) else None
+            if not isinstance(codename, str) or not codename \
+                    or codename in table:
+                continue
+            icons = {}
+            for key, prefix, postfix, files in packs:
+                for skin, name in _SkinFiles(
+                        files, prefix + codename + postfix).items():
+                    if key == ICON_PACK:
+                        icons[skin] = f"{ICON_PACK}/{name}"
+                    else:
+                        icons.setdefault(skin, None)
+            table[codename] = [{"skin": skin, "icon": icons[skin]}
+                               for skin in sorted(icons)]
+        return table
 
     def StartGGCharacterName(self, smashgg_id):
         """start.gg's name of a character id (the table
