@@ -1619,6 +1619,20 @@ describe("the review screen", () => {
             i18n.t("archive_thumbs_failed_sets", {sets: "#2, #3"}));
     });
 
+    test("the thumbnails' result can be closed", async () => {
+        installJob(SETS, {
+            [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                job: {...JOB, thumbs: {state: "done", done: 3, total: 3,
+                                       failed: [], files: [1, 2, 3],
+                                       revision: 1}},
+                sets: SETS}}),
+        });
+        render(<ArchivePage/>);
+        const result = await screen.findByTestId("archive-thumbs-result");
+        fireEvent.click(within(result).getByRole("button"));
+        expect(screen.queryByTestId("archive-thumbs-result")).toBeNull();
+    });
+
     test("the job view names the template its event takes and opens the templates",
          async () => {
         const standard = {

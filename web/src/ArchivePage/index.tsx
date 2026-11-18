@@ -786,7 +786,12 @@ function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
 
 // The thumbnails of the confirmed sets (A6): how far their drawing is, how
 // it ended.
-function ThumbsState({thumbs}: {thumbs: JobThumbs | null}) {
+function ThumbsState({thumbs, closed, onClose}: {
+    thumbs: JobThumbs | null;
+    // The result closed by the user (a new drawing shows its own again).
+    closed: boolean;
+    onClose: () => void;
+}) {
     if (thumbs === null || thumbs.state === null) {
         return null;
     }
@@ -810,9 +815,12 @@ function ThumbsState({thumbs}: {thumbs: JobThumbs | null}) {
         );
     }
     if (thumbs.state === "done") {
+        if (closed) {
+            return null;
+        }
         return (
             <Alert severity={failed.length > 0 ? "warning" : "success"}
-                   data-testid="archive-thumbs-result">
+                   data-testid="archive-thumbs-result" onClose={onClose}>
                 {i18n.t("archive_thumbs_done", {count: thumbs.done})}
                 {failedText}
             </Alert>
@@ -861,7 +869,21 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
     onReanalyze: (results: object) => void;
 }) {
     const [reanalyzing, setReanalyzing] = React.useState(false);
+    // The "done" results the user closed: a new run's result shows again.
+    const [exportClosed, setExportClosed] = React.useState(false);
+    const [thumbsClosed, setThumbsClosed] = React.useState(false);
     const running = exported?.state === "running";
+    const drawing = thumbs?.state === "running";
+    React.useEffect(() => {
+        if (running) {
+            setExportClosed(false);
+        }
+    }, [running]);
+    React.useEffect(() => {
+        if (drawing) {
+            setThumbsClosed(false);
+        }
+    }, [drawing]);
     // Not while the export or the thumbnails run (they read its sets).
     const busy = running || starting || thumbs?.state === "running";
     const saveText = save.status === "pending" || save.status === "saving"
@@ -930,7 +952,8 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                                 onRun={onReanalyze}
                                 onClose={() => setReanalyzing(false)}/>
             ) : null}
-            <ThumbsState thumbs={thumbs}/>
+            <ThumbsState thumbs={thumbs} closed={thumbsClosed}
+                         onClose={() => setThumbsClosed(true)}/>
             {reviewError ? (
                 <Alert severity="warning">
                     {i18n.t("archive_review_load_failed", {message: reviewError})}
@@ -959,8 +982,9 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                     </Button>
                 </Stack>
             ) : null}
-            {exported?.state === "done" ? (
-                <Alert severity="success" data-testid="archive-export-result">
+            {exported?.state === "done" && !exportClosed ? (
+                <Alert severity="success" data-testid="archive-export-result"
+                       onClose={() => setExportClosed(true)}>
                     <Typography variant="body2">
                         {i18n.t("archive_export_done", {count: Math.max(
                             0, (exported.clips ?? 0) - (exported.skipped ?? 0))})}
