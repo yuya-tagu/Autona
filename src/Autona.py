@@ -37,8 +37,9 @@ if parse(qtpy.QT_VERSION).major == 6:
 # (before this module is imported), so the taskbar groups the app under
 # our identity rather than the host python.exe.
 
-# main.py creates the QApplication before importing this module, so that the
-# splash can be painted while this import chain runs. The fallback is NOT for
+# main.py creates the QApplication before importing this module (its IPC
+# server needs one, and AA_ShareOpenGLContexts must be set before it; the
+# splash is a native window that needs none). The fallback is NOT for
 # the app itself: PyInstaller's binary-dependency analysis imports modules in
 # an isolated subprocess without main.py, and anything here that ends up
 # creating a QWidget hard-aborts the process when no QApplication exists.
@@ -158,7 +159,6 @@ from autona_splash import (
     LoadingOverlay,
     active_splash,
     log_startup_phase,
-    pick_splash_messages,
 )
 
 # Explicit construction of the core singletons (composition root). This must
@@ -253,11 +253,10 @@ class Window(QMainWindow):
 
         self.signals = WindowSignals()
 
-        # Created by main.py before this module was imported, so it has been
-        # on screen since a second or two after launch.
+        # Created by main.py right after its single-instance gate, so it has
+        # been on screen (and animating, on a thread of its own) since a
+        # fraction of a second after launch. Finished once this is shown.
         splash = active_splash()
-        splash_msgs = pick_splash_messages()
-        splash.set_message(splash_msgs[0], progress=0.05)
 
         self.setWindowIcon(QIcon(UI.icon_path('icon.ico')))
 
@@ -294,7 +293,6 @@ class Window(QMainWindow):
         # Directly, as the headless shell does: the catalog is the whole
         # load now (no Qt country model to fill). After LoadLocale().
         CountryCatalog.instance.Load()
-        splash.set_message(splash_msgs[0], progress=0.15)
 
         try:
             version = json.load(
@@ -305,13 +303,9 @@ class Window(QMainWindow):
         self._SetDefaultGeometry()
         self.setWindowTitle("Autona v"+version)
 
-        splash.set_message(splash_msgs[0], progress=0.25)
-
         # State the overlays / Web UI read from launch, seeded before any
         # page exists (startup Step 4b-2 / 4b-3).
         self._SeedPanelState()
-
-        splash.set_message(splash_msgs[1], progress=0.55)
 
         # The web server is NOT built here (startup Step 4c). Constructing the
         # Flask/SocketIO app and binding the port dominated the window-init ->
@@ -326,7 +320,6 @@ class Window(QMainWindow):
         # request alwaysOnTop's, the AppShell's Help & Settings menu). Not
         # kept between launches, as the Qt menu's check was not.
         self._alwaysOnTop = False
-        splash.set_message(splash_msgs[1], progress=0.70)
 
         self.setMinimumWidth(480)
 
@@ -363,8 +356,6 @@ class Window(QMainWindow):
         self._spinnerCap.timeout.connect(self._OnSpinnerCapReached)
         host.pageLoadFinished.connect(self._OnPageLoadFinished)
 
-        splash.set_message(splash_msgs[1], progress=0.85)
-
         # The tournamentInfo.* writer, the wiring the headless shell makes
         # too (ADR-005 S3c). A payload that does not load is told by the
         # pages (ADR-005 S-final SF-5b-2: the AppShell's notice, the Event
@@ -400,9 +391,10 @@ class Window(QMainWindow):
         host.ShowPanel(window_state.RestorePanel(self.qtSettings))
         self._windowStateRestored = True
 
-        splash.set_message(splash_msgs[2], progress=1.0)
-        splash.finish(self)
         self.show()
+        # Right after the show, so there is no gap between the two (it
+        # returns within autona_splash.FINISH_JOIN_S whatever happens).
+        splash.finish(self)
         # The main window may not take focus at launch; theme it explicitly.
         _titleBarThemer.Apply(self.windowHandle())
         log_startup_phase("core-shown")

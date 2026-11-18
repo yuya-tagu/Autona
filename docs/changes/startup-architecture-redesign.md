@@ -38,10 +38,11 @@
 ```
 [Stage 0] プロセスゲート        … named mutex による単一インスタンスガード
     ↓                            （2 個目は既存インスタンスへ前面化要求して即終了）
-[Stage 1] 早期フィードバック    … QApplication 生成 + スプラッシュ表示
-    ↓                            （`import src` より前。ダブルクリック後 1〜2 秒以内に必ず画面に出る）
+[Stage 1] 早期フィードバック    … スプラッシュ表示 + QApplication 生成
+    ↓                            （`import src` より前。ダブルクリック後 1〜2 秒以内に必ず画面に出る。
+                                  2026-11-19 からスプラッシュは専用スレッドのネイティブウィンドウで、PySide6 の import より前）
 [Stage 2] ブートストラップ      … src/bootstrap.py がシングルトンを明示順で生成
-    ↓                            （import 副作用ゼロが前提。進捗をスプラッシュへ通知）
+    ↓                            （import 副作用ゼロが前提。進捗のスプラッシュへの通知は 2026-11-19 に廃止）
 [Stage 3] 最小コア表示          … ウィンドウシェル + スコアボードのみ構築して show()
     ↓
 [Stage 4] 遅延・非同期初期化    … 残りパネル = 初回表示時に構築（lazy）
@@ -66,12 +67,17 @@
   - **実装結果**: リポジトリ直下の [autona_splash.py](../../autona_splash.py) へ移設。スプラッシュ本体に加えて
     起動フェーズ計測（`set_startup_t0()` / `log_startup_phase()` / `attach_startup_logger()`）と
     表示後の `LoadingOverlay` もここが持つ。
+  - **2026-11-19 変更**: `AutonaSplashScreen`（QSplashScreen。文言・進捗バー）は廃止。スプラッシュは Qt を使わない
+    Win32 の layered window を専用の daemon スレッドが持つ形（`autona_splash.NativeSplash`。ctypes + GDI+ で事前に描いたコマを送る）
+    になり、メインスレッドが import とウィンドウの構築で塞がっている間も動き続ける。Qt が要らないので単一インスタンスのゲートの
+    直後・PySide6 の import より前に出る。`QApplication` は今も main.py が `import src` の前に作る（IPC サーバーと
+    `AA_ShareOpenGLContexts` のため）。消すのは `Window._BuildUi` の `show()` の直後（ADR-003 の 2026-11-19 追記）。
 
 #### Stage 2: 明示的ブートストラップ（`src/bootstrap.py` — 新設）
 
 - 全シングルトンの生成を 1 ファイルに集約する。現行のモジュールレベル生成（例: `AutonaGameAssetManager.py:1453` の `instance = AutonaGameAssetManager()`、`StateManager.py:581-587` の static 初期化、`AutonaWebServer.py:56-64` のクラス本体での Flask/SocketIO 構築）はすべて廃止し、明示的な生成呼び出しに置き換える。
 - 順序制約はコメント付きでコードに明記する（例: 「GameAssetManager は TournamentDataProvider より先。後者の `__init__` が前者の signals に connect するため」— 現 [.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) #2 の内容がコードに移る）。
-- 各生成ステップからスプラッシュへ進捗を通知する。
+- 各生成ステップからスプラッシュへ進捗を通知する。（2026-11-19 に廃止: スプラッシュは進捗を出さない）
 - 移行完了後、`src/__init__.py` の import 副作用連鎖（`from .Autona import Window, App`）は廃止し、明示的なエントリに置き換える。
   - **実装結果（Step 3g）**: `src/__init__.py` は docstring のみの空 init。`main.py` が `from src import Autona` で組み立てモジュールを明示的に指名し、その import が `bootstrap_core()` を実行する（`create_app()` のような新エントリは設けなかった）。
 
@@ -192,7 +198,7 @@ Step 1 の中で、起動フェーズごとの経過時間を 1 行ずつ INFO �
 
 ```
 STARTUP phase=gate elapsed=0.02s          # 単一インスタンスガード通過
-STARTUP phase=splash elapsed=0.8s         # QApplication + スプラッシュ表示
+STARTUP phase=splash elapsed=0.8s         # スプラッシュ表示（2026-11-19 から QApplication より前）
 STARTUP phase=import-src elapsed=3.1s     # from src import Autona（bootstrap_core 完了）
 STARTUP phase=window-init elapsed=3.2s    # Window.__init__ 開始
 STARTUP phase=core-shown elapsed=4.9s     # show() 直後
