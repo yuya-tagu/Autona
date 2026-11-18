@@ -22,6 +22,7 @@ import {
     withRemoved,
     withRestored,
     withResult,
+    withSkin,
 } from "./archiveReview";
 
 // The archive page's review (ADR-006 A4): what the server keeps (only what
@@ -83,6 +84,59 @@ test("a set as reviewed", () => {
         {start: 780, end: 1380, rangeEdited: false, setEdited: false,
          confirmed: false});
     expect(confirmedCount(reviewedRows(SETS.sets, review))).toBe(1);
+});
+
+test("a confirmed set no longer asks for review", () => {
+    const doubted = {...TWO, needs_review: true, reason: "no result"};
+    expect(reviewedRow(doubted, {sets: {}}).needs_review).toBe(true);
+    expect(reviewedRow(doubted, {sets: {2: {confirmed: true}}}).needs_review)
+        .toBe(false);
+    // A removed set is not confirmed: it keeps the worker's doubt.
+    expect(reviewedRow(doubted, {sets: {2: {confirmed: true, removed: true}}})
+        .needs_review).toBe(true);
+});
+
+// Results with their characters (the "autona" key Autona puts in them).
+const DRAWN = {...KAPPA, autona: {game: "ssbu", c1: ["mario"],
+                                  c2: ["luigi", "peach"]}};
+const DRAWN_OTHER = {...UNUSED, autona: {game: "ssbu", c1: ["mario"],
+                                         c2: ["koopa"]}};
+const DRAWN_ROW = {...ONE, set: DRAWN};
+
+test("a colour is kept per side and character, the default never", () => {
+    let review = withSkin(EMPTY_REVIEW, DRAWN_ROW, "c2", "peach", 3);
+    expect(review.sets).toEqual({1: {skins: {c2: {peach: 3}}}});
+    review = withSkin(review, DRAWN_ROW, "c1", "mario", 1);
+    expect(review.sets[1].skins).toEqual({c1: {mario: 1}, c2: {peach: 3}});
+    expect(reviewedRow(DRAWN_ROW, review).skins)
+        .toEqual({c1: {mario: 1}, c2: {peach: 3}});
+    // Back to the default: its key goes, then the side, then the entry.
+    review = withSkin(review, DRAWN_ROW, "c2", "peach", 0);
+    expect(review.sets[1].skins).toEqual({c1: {mario: 1}});
+    review = withSkin(review, DRAWN_ROW, "c1", "mario", 0);
+    expect(review.sets).toEqual({});
+    expect(reviewedRow(DRAWN_ROW, review).skins).toEqual({});
+    // A character the set's result does not name on that side is not kept.
+    expect(withSkin(EMPTY_REVIEW, DRAWN_ROW, "c1", "peach", 2).sets).toEqual({});
+    // Other edits keep the colours.
+    review = withConfirmed(withSkin(EMPTY_REVIEW, DRAWN_ROW, "c2", "luigi", 2),
+                           DRAWN_ROW, true);
+    expect(review.sets[1]).toEqual({confirmed: true, skins: {c2: {luigi: 2}}});
+});
+
+test("another result keeps only the colours of its characters", () => {
+    let review = withSkin(withSkin(EMPTY_REVIEW, DRAWN_ROW, "c1", "mario", 1),
+                          DRAWN_ROW, "c2", "luigi", 2);
+    review = withResult(review, DRAWN_ROW, DRAWN_OTHER);
+    expect(review.sets[1]).toEqual({set: DRAWN_OTHER, skins: {c1: {mario: 1}}});
+    expect(reviewedRow(DRAWN_ROW, review).skins).toEqual({c1: {mario: 1}});
+    // No result: no characters, no colours.
+    expect(withResult(review, DRAWN_ROW, null).sets[1]).toEqual({set: null});
+    // Removed: they go with the rest.
+    expect(withRemoved(review, DRAWN_ROW).sets[1]).toEqual({removed: true});
+    expect(reviewedRow(DRAWN_ROW, {sets: {1: {removed: true,
+                                              skins: {c1: {mario: 1}}}}}).skins)
+        .toEqual({});
 });
 
 test("IN / OUT stay at least a second apart and inside the video", () => {

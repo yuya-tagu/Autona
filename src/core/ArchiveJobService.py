@@ -36,8 +36,8 @@ default, never under user_data/: the videos are large and the operator's):
   its ``export.json``);
 - ``<work>/<id>/thumbs/<no>.png``: each confirmed set's thumbnail (ADR-006
   A6, below), with a copy beside its clip when that is certainly its clip,
-  and ``thumbs/thumbs.json``: the result and range each was drawn for and
-  the name of that copy;
+  and ``thumbs/thumbs.json``: the result, range and colours each was drawn
+  for and the name of that copy;
 - ``<work>/<id>/templates/NN.json``: the title templates the last run or
   export was given (ADR-006 A6: a snapshot, written before it starts);
 - ``<work>/downloads/``: the downloaded videos, shared by the jobs (two
@@ -161,7 +161,8 @@ a time, with the match thumbnail's renderer (ThumbnailService.SetPayload /
 RenderSet: the desktop's off-screen view; headless the web operations
 refuse first, 503) into ``<job>/thumbs/<no>.png``. One job's at a time
 (``_thumbRun``; not one of the worker's runs: an export may run meanwhile).
-A set's data is ArchiveThumbnails.SetData (its result and the event); its
+A set's data is ArchiveThumbnails.SetData (its result, the event and the
+colours its review gives its characters, ArchiveReview.Skins); its
 background its frame (FrameFile's file, as a file URL) when
 ``archive.thumbnail_background`` is ``frame`` (the default) and it has one,
 else the thumbnail settings' own (ThumbnailService.SetPayload: never the
@@ -180,8 +181,9 @@ its clip of that number was exported and is there, and the
 export_request.json it was cut from gave the set the same result and range
 as the review does now. ``Job`` says how far it is (``thumbs``) and which
 thumbnails still show their set as reviewed (``files``: thumbs.json drew it
-for the result and range the review gives it now); ``ThumbFile`` serves
-one (as FrameFile, PNG). The shutdown ends the run at its next set.
+for the result, range and colours the review gives it now -- a colour
+changed is a thumbnail to draw again); ``ThumbFile`` serves one (as
+FrameFile, PNG). The shutdown ends the run at its next set.
 
 The worker's swap (ADR-006 A7)
 ------------------------------
@@ -745,7 +747,8 @@ class _Run:
 
 class _ThumbRun:
     """A job's thumbnails being drawn (StartThumbs), one set at a time:
-    `items` are (no, payload, the set as the review has it now)."""
+    `items` are (no, payload, the set as the review has it now: ExportSets'
+    with its ``skins``)."""
 
     def __init__(self, jobId, jobDir, workDir, items):
         self.jobId = jobId
@@ -1826,14 +1829,17 @@ class ArchiveJobService:
             for item in chosen:
                 frame = self._FramePath(jobDir, sets, item["no"]) \
                     if useFrame else None
+                # The colours: the review's, never the export request's.
+                skins = ArchiveReview.Skins(review, item["no"])
                 data = ArchiveThumbnails.SetData(
                     item["set"], event, GameAssetCatalog.instance,
-                    date=date, cache=cache)
+                    date=date, cache=cache, skins=skins)
                 # A file URL: the frame's name may hold "#" or spaces.
                 background = Path(os.path.realpath(frame)).as_uri() \
                     if frame is not None else None
                 items.append((item["no"],
-                              thumbnails.SetPayload(data, background), item))
+                              thumbnails.SetPayload(data, background),
+                              dict(item, skins=skins)))
         except (OSError, ValueError) as error:
             logger.warning(f"Archive: job {jobId}'s thumbnails could not be "
                            f"prepared: {error}")
@@ -1940,11 +1946,14 @@ class ArchiveJobService:
                     f"could not be copied beside its clip")
                 target = None
         # What it was drawn for (Job shows it while the review still gives
-        # the set this result and range) and the copy (the next run removes
-        # it: a later export may name the clip otherwise).
+        # the set this result, range and colours) and the copy (the next run
+        # removes it: a later export may name the clip otherwise). No
+        # "skins" is every character in skin 0 (an entry written before
+        # there were colours reads so too).
         drawn = self._ReadThumbsIndex(run.jobDir)
         drawn[str(no)] = {
             "start": item["start"], "end": item["end"], "set": item["set"],
+            **({"skins": item["skins"]} if item.get("skins") else {}),
             "beside": os.path.basename(target) if target else None}
         self._WriteThumbsIndex(run.jobDir, drawn)
         return True
@@ -2055,9 +2064,10 @@ class ArchiveJobService:
 
     def _ThumbFiles(self, jobDir, jobId, sets):
         """The numbers of the sets whose thumbnail (thumbs/<no>.png) still
-        shows them as reviewed: thumbs.json drew it for the result and the
-        range the review gives the set now. [] without `sets` (the job's
-        analysis runs, or no sets.json) or a review that cannot be read."""
+        shows them as reviewed: thumbs.json drew it for the result, the
+        range and the colours (none: all skin 0) the review gives the set
+        now. [] without `sets` (the job's analysis runs, or no sets.json) or
+        a review that cannot be read."""
         drawn = self._ReadThumbsIndex(jobDir) if sets is not None else {}
         if not drawn:
             return []
@@ -2073,14 +2083,16 @@ class ArchiveJobService:
                     and entry.get("end") == item["end"] \
                     and ArchiveReview.ResultKey(entry.get("set")) \
                     == ArchiveReview.ResultKey(item["set"]) \
+                    and (entry.get("skins") or {}) \
+                    == ArchiveReview.Skins(review, item["no"]) \
                     and os.path.isfile(os.path.join(folder,
                                                     f"{item['no']}.png")):
                 files.append(item["no"])
         return sorted(files)
 
     def _ReadThumbsIndex(self, jobDir):
-        """thumbs/thumbs.json's {no: {"start", "end", "set", "beside"}}, or
-        {} (none, or not of THUMBS_FORMAT)."""
+        """thumbs/thumbs.json's {no: {"start", "end", "set", "skins"?,
+        "beside"}}, or {} (none, or not of THUMBS_FORMAT)."""
         with self._filesLock:
             data = _ReadJson(os.path.join(jobDir, THUMBS_DIR, THUMBS_FILE))
         drawn = data.get("sets") if data is not None \

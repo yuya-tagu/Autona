@@ -510,6 +510,11 @@ test("the real write routes answer 403 to a browser, and the page says why", asy
     expect((await request.get(`${base}/templates/default`)).ok()).toBe(true);
     expect((await request.get(`${base}/jobs/${JOB_ID}/thumbs/1`)).status())
         .toBe(404);
+    // A6: a game's skins (no game here: none), the game asked.
+    const skins = await request.get(`${base}/characters?game=ssbu`);
+    expect(skins.ok()).toBe(true);
+    expect((await skins.json()).data).toEqual({characters: {}});
+    expect((await request.get(`${base}/characters`)).status()).toBe(400);
 
     // A browser (the real shell probe): the page only reads, and says so.
     await page.goto(serverUrl("/web/app/archive"));
@@ -634,6 +639,75 @@ test("a template is edited, previewed with the job's sets and saved; the job's t
 
     await page.getByRole("button", {name: /Back to the jobs/}).click();
     await expect(page.getByTestId("archive-review")).toBeVisible();
+});
+
+// A character's colour on the set's thumbnail (ADR-006 A6): picked among the
+// game's skins (GET /archive/characters: stubbed, the headless app has no
+// game; its real answer is checked above), saved with the review and then
+// drawn (thumbs:generate, the desktop's renderer: stubbed, its 403 is
+// checked above).
+test("a character's colour is picked, saved and then drawn on the thumbnail",
+     async ({page}) => {
+    const posts: string[] = [];
+    const puts: any[] = [];
+    const asked: string[] = [];
+    let thumbs: object | null = null;
+    let savedAtDraw: any = null;
+    await stubShell(page);
+    await stubJobs(page, {
+        posts, puts,
+        detail: () => ({job: job("done", {thumbs}), sets: {
+            duration: 600, source_id: "abcDEF12345", sets: [
+                {no: 1, start: 60, end: 180, matched: true,
+                 title: "Winners Final", set: PREPARED.sets[0]},
+                {no: 2, start: 200, end: 320, matched: true,
+                 title: "Grand Final", set: PREPARED.sets[1]}]}}),
+        afterPost: (action) => {
+            if (action === "generate") {
+                savedAtDraw = puts[puts.length - 1];
+                thumbs = {state: "done", done: 1, total: 1, failed: [],
+                          files: [1], revision: 1};
+            }
+        },
+    });
+    await page.route("**/api/v1/archive/characters**", (route) => {
+        asked.push(new URL(route.request().url()).searchParams.get("game")!);
+        return route.fulfill(envelope({characters: {
+            mario: [{skin: 0, icon: "base_files/icon/chara_2_mario_00.png"},
+                    {skin: 3, icon: "base_files/icon/chara_2_mario_03.png"}],
+            luigi: [{skin: 0, icon: "base_files/icon/chara_2_luigi_00.png"}],
+            zelda: [{skin: 0, icon: "base_files/icon/chara_2_zelda_00.png"}],
+        }}));
+    });
+    await page.route("**/user_data/games/**", (route) =>
+        route.fulfill({status: 200, contentType: "image/png", body: PNG}));
+    await page.route("**/api/v1/archive/jobs/*/thumbs/1**", (route) =>
+        route.fulfill({status: 200, contentType: "image/png", body: PNG}));
+    await page.goto(serverUrl(`/web/app/archive?job=${JOB_ID}`));
+
+    await page.getByTestId("archive-set-1").click({timeout: 15_000});
+    await expect(page.getByTestId("archive-confirm")).toBeVisible();
+    const select = page.getByTestId("archive-skin-c1-mario");
+    await expect(select).toBeVisible();
+    // Luigi has one colour: nothing to pick.
+    await expect(page.getByTestId("archive-skin-c2-luigi")).toHaveCount(0);
+    expect(asked).toEqual(["ssbu"]);
+    await select.getByRole("combobox").click();
+    await page.getByRole("option", {name: "2", exact: true}).click();
+    // The list draws the colour's icon.
+    await expect(page.getByTestId("archive-set-characters-1").locator("img").first())
+        .toHaveAttribute("src", /\/base_files\/icon\/chara_2_mario_03\.png$/);
+
+    // Confirmed, saved, and then drawn: the save goes first.
+    await page.getByTestId("archive-confirm").click();
+    await expect(page.getByTestId("archive-save-state")).toHaveText("Saved");
+    expect(puts[puts.length - 1].sets["1"])
+        .toEqual({confirmed: true, skins: {c1: {mario: 3}}});
+    await page.getByTestId("archive-thumbs").click();
+    await expect.poll(() => posts).toEqual(["generate"]);
+    expect(savedAtDraw.sets["1"].skins).toEqual({c1: {mario: 3}});
+    await expect(page.getByTestId("archive-thumb-1"))
+        .toHaveJSProperty("naturalWidth", 1, {timeout: 15_000});
 });
 
 // The worker's install (ADR-006 A7): with no usable worker the page is the

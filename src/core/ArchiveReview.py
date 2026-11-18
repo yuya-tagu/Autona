@@ -10,16 +10,28 @@ temp file + os.replace; not the StateManager, ADR-006 D6)::
 
     {"format": 1,
      "sets": {"2": {"base": [780.0, 1380.0], "confirmed": true,
-                    "start": 775.5, "end": 1384.0, "set": {...} | null},
+                    "start": 775.5, "end": 1384.0, "set": {...} | null,
+                    "skins": {"c1": {"mario": 3}, "c2": {"luigi": 1}}},
               "5": {"base": [2400.0, 2460.0], "removed": true}}}
 
 One entry per set the operator changed, keyed by the set's ``no`` in the
 job's out/sets.json. What an entry leaves out is the worker's: not
 confirmed, the set's own ``start`` / ``end``, the set's own result
-(``set``), not removed. ``set`` null is "no result" (the clip is
-``NN_unmatched``, with no text). ``base`` is the set's [start, end] in
-sets.json when the entry was written: an entry whose set has gone or moved
-since (a sets.json that is not the one it was made against) is dropped.
+(``set``), not removed, every character in its first colour. ``set`` null
+is "no result" (the clip is ``NN_unmatched``, with no text). ``base`` is
+the set's [start, end] in sets.json when the entry was written: an entry
+whose set has gone or moved since (a sets.json that is not the one it was
+made against) is dropped.
+
+``skins`` (ADR-006 A6) is the colour each character of the set's
+thumbnail is drawn in: per side (``c1`` / ``c2``), a codename of the
+result the set is given (its ``autona`` ``c1`` / ``c2``,
+ArchiveResults.NAMESPACE) and the number of its skin (the number in its
+asset files' names, as GameAssetCatalog.GameCharacterSkins lists them --
+not a skin combo's row). 0 is the default and is never kept, nor a side
+with none. Only the thumbnails read it (``Skins``): it is not in
+``ExportSets`` / ``ReviewedSets``, the worker's requests. A codename the
+result no longer names (the set given another result) goes with it.
 
 A removed set (``removed`` true: one the operator does not want, typically
 a block the worker found no result for) is ``{"removed": true}`` alone --
@@ -39,9 +51,10 @@ the end).
 
 Reading (``Normalize``) never fails: a file that is not this format is no
 review (the next save writes over it), and an entry keeps what still fits
-sets.json (a range and an assignment are dropped one by one; a range that
-no longer fits goes with the entry's confirmation, so an export never cuts
-the worker's range in its place unasked). A save (``Check``) is strict:
+sets.json (a range, an assignment and a skin are dropped one by one; a
+range that no longer fits goes with the entry's confirmation, so an export
+never cuts the worker's range in its place unasked). A save (``Check``) is
+strict:
 anything that does not fit is refused (ReviewError, Japanese) and nothing
 is written.
 
@@ -62,7 +75,13 @@ DECIMALS = 2
 # cuts an end past the end at the length it probes, which may differ from
 # sets.json's duration in the last digits (the page keeps to it too).
 END_MARGIN = 0.05
-ENTRY_KEYS = frozenset({"confirmed", "start", "end", "set", "removed"})
+ENTRY_KEYS = frozenset({"confirmed", "start", "end", "set", "removed",
+                        "skins"})
+# The sides of a result's characters (its autona's c1 / c2) and where the
+# codenames are (ArchiveResults.NAMESPACE: not imported -- ArchiveResults
+# imports the job service, which imports this module).
+SIDES = ("c1", "c2")
+NAMESPACE = "autona"
 _NUMBER = re.compile(r"[1-9][0-9]{0,5}")
 
 
@@ -178,6 +197,59 @@ def Assigned(review, row):
     return result if isinstance(result, dict) else None
 
 
+def _Codenames(result, side):
+    """The codenames result set `result` (or None) names on `side` (its
+    autona's c1 / c2)."""
+    extra = result.get(NAMESPACE) if isinstance(result, dict) else None
+    names = extra.get(side) if isinstance(extra, dict) else None
+    return {name for name in names if isinstance(name, str)} \
+        if isinstance(names, list) else set()
+
+
+def _Skins(raw, result, refuse=None):
+    """An entry's ``skins`` `raw` as kept for a set given result `result`:
+    {side: {codename: number}} -- a side of SIDES, a codename `result`
+    names on it, a whole number >= 0 (not a bool) --, 0 and an empty side
+    left out. What does not fit is dropped, or with `refuse` (the set's
+    "セット #N " of Check's messages) refused (ReviewError)."""
+    def bad(message):
+        if refuse is not None:
+            raise ReviewError(f"{refuse}{message}")
+
+    if not isinstance(raw, dict):
+        bad("の skins はオブジェクトにしてください。")
+        return {}
+    kept = {}
+    for side, chosen in raw.items():
+        if side not in SIDES:
+            bad(f"の skins に使えない側があります: {side}")
+            continue
+        if not isinstance(chosen, dict):
+            bad(f"の skins の {side} はオブジェクトにしてください。")
+            continue
+        names = _Codenames(result, side)
+        for codename, number in chosen.items():
+            if codename not in names:
+                bad(f"でカラーを選んだキャラクター（{codename}）は、"
+                    "割り当てた結果にいません。")
+                continue
+            if type(number) is not int or number < 0:
+                bad(f"のカラー（{codename}）は 0 以上の整数にしてください。")
+                continue
+            if number != 0:
+                kept.setdefault(side, {})[codename] = number
+    return {side: kept[side] for side in SIDES if side in kept}
+
+
+def Skins(review, no):
+    """The colours set `no`'s characters are drawn in in `review` (its
+    entry's ``skins``: {side: {codename: number}}, {} for none). What a
+    thumbnail draws (ADR-006 A6); never part of the worker's requests."""
+    skins = review["sets"].get(str(no), {}).get("skins")
+    return {side: dict(chosen) for side, chosen in skins.items()} \
+        if isinstance(skins, dict) else {}
+
+
 def _Twice(entries, rows):
     """The numbers of the sets whose result another set has too."""
     review = {"sets": entries}
@@ -208,6 +280,8 @@ def Normalize(raw, sets):
     duration = Duration(sets)
     candidates = Candidates(sets)
     entries = {}
+    # Each set's skins, kept once its result is known (below).
+    skins = {}
     for key, value in raw["sets"].items():
         row = _RowOf(rows, key)
         if row is None or not isinstance(value, dict) \
@@ -235,6 +309,8 @@ def Normalize(raw, sets):
             if _Candidate(result, candidates) \
                     and ResultKey(result) != ResultKey(row.get("set")):
                 entry["set"] = result
+        if "skins" in value:
+            skins[row["no"]] = value["skins"]
         if entry:
             entries[str(row["no"])] = entry
     # Two sets given one result: the review's assignments go (the sets keep
@@ -247,14 +323,20 @@ def Normalize(raw, sets):
             if not entry:
                 del entries[str(no)]
         changed = _Changed(entries, rows)
+    # The skins of the codenames the result each set ends up with names.
+    for no, raw in skins.items():
+        kept = _Skins(raw, Assigned({"sets": entries}, rows[no]))
+        if kept:
+            entries.setdefault(str(no), {})["skins"] = kept
     return {"format": FORMAT, "sets": entries}
 
 
 def Check(body, sets):
     """A save's review `body` ({"sets": {no: {"confirmed"?, "start"?,
-    "end"?, "set"?, "removed"?}}}) against sets.json `sets` -> the review
-    (as Normalize gives it: a removed set's entry is {"removed": true}
-    alone, what else it gave dropped unchecked). Raises ReviewError."""
+    "end"?, "set"?, "removed"?, "skins"?}}}) against sets.json `sets` ->
+    the review (as Normalize gives it: a removed set's entry is {"removed":
+    true} alone, what else it gave dropped unchecked; a skin 0 left out).
+    Raises ReviewError."""
     if not isinstance(body, dict) or not isinstance(body.get("sets"), dict):
         raise ReviewError(
             'レビューの形式が違います（"sets" のオブジェクトがありません）。')
@@ -305,6 +387,11 @@ def Check(body, sets):
                 raise ReviewError(f"{where}に割り当てた結果は、このジョブの結果にありません。")
             if ResultKey(result) != ResultKey(row.get("set")):
                 entry["set"] = result
+        if "skins" in value:
+            given = value["set"] if "set" in value else row.get("set")
+            skins = _Skins(value["skins"], given, refuse=where)
+            if skins:
+                entry["skins"] = skins
         if entry:
             entries[str(row["no"])] = entry
     changed = _Changed(entries, rows)
@@ -327,7 +414,9 @@ def Stored(review, sets):
 
 
 def _Reviewed(review, no, row):
-    """Set `row` as the export request has it (ExportSets' shape)."""
+    """Set `row` as the export request has it (ExportSets' shape: the
+    worker's, so without the set's ``skins`` -- the thumbnails read them
+    with ``Skins``)."""
     entry = review["sets"].get(str(no), {})
     starts = row.get("game_starts")
     return {

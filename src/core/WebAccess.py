@@ -383,6 +383,9 @@ ROUTE_ACCESS = {
     "api_v1.archive_titles_preview": SHELL,
     "api_v1.archive_thumbs_generate": SHELL,
     "api_v1.get_archive_thumb": THIS_PC,
+    # The colours a set's thumbnail may draw its characters in (a game's
+    # skins and their icons): read as the archive's other reads.
+    "api_v1.get_archive_characters": THIS_PC,
     # The worker's install (ADR-006 A7): what is installed and the latest
     # release are read as the status is (THIS_PC); the install (it
     # downloads a program and replaces the worker's folder in Autona's) and

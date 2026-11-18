@@ -10,6 +10,7 @@ import {
     InputLabel,
     LinearProgress,
     Link,
+    ListItemIcon,
     MenuItem,
     Radio,
     RadioGroup,
@@ -29,6 +30,7 @@ import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut, ApiError} from ".
 import {FeedbackProvider} from "../ScoreboardPage/Feedback";
 import {
     ArchiveStatus,
+    GameSkins,
     Job,
     JobExport,
     JobSummary,
@@ -55,7 +57,9 @@ import {
     characterIcon,
     dayText,
     isEstimate,
+    readGameSkins,
     setCharacters,
+    skinIcon,
     sourceCounts,
 } from "./archiveSets";
 import {
@@ -86,6 +90,8 @@ import {
     ReviewSaver,
     ReviewedRow,
     SaveState,
+    SetSkins,
+    Side,
     canonical,
     candidates,
     confirmedCount,
@@ -102,6 +108,7 @@ import {
     withRemoved,
     withRestored,
     withResult,
+    withSkin,
 } from "./archiveReview";
 import Preview from "./Preview";
 import Timeline from "./Timeline";
@@ -137,7 +144,7 @@ import WorkerInstall, {WorkerChips} from "./WorkerInstall";
 
 const BASE = "/api/v1/archive";
 const POLL_MS = 1000;
-const LIST_WIDTH = 320;
+const LIST_WIDTH = 380;
 const DETAIL_WIDTH = 300;
 // The set view's room around the set where it can be edited (seconds): an
 // edge dragged out of the set has somewhere to go.
@@ -198,7 +205,8 @@ function TimeLink({source, sourceId, seconds}: {source?: string | null;
 }
 
 // A character's icon (ADR-006 A5): its file in the game's folder, as the
-// prepared results name it; hidden when there is none or it does not load.
+// prepared results name it (or its colour's, A6); hidden when there is none
+// or it does not load.
 function CharacterIcon({game, codename, file, size}: {
     game: string;
     codename: string;
@@ -207,6 +215,8 @@ function CharacterIcon({game, codename, file, size}: {
 }) {
     const [gone, setGone] = React.useState(false);
     const path = characterIcon(game, file);
+    // Another colour's file is tried again.
+    React.useEffect(() => setGone(false), [path]);
     return path === null || gone ? null : (
         <Box component="img" alt="" loading="lazy" src={`${BASE_URL}${path}`}
              data-testid={`archive-character-${codename}`}
@@ -216,19 +226,80 @@ function CharacterIcon({game, codename, file, size}: {
     );
 }
 
-function SideIcons({characters, side, size}: {
+// A side's characters, each in the colour the set's review chose (`skins`,
+// its file in the game's `table`), else as the prepared results name it.
+function SideIcons({characters, side, size, skins, table}: {
     characters: SetCharacters | null;
-    side: "c1" | "c2";
+    side: Side;
     size: number;
+    skins?: SetSkins;
+    table?: GameSkins | null;
 }) {
     return characters === null ? null : (
         <>
             {characters[side].map((codename) => (
                 <CharacterIcon key={codename} game={characters.game}
                                codename={codename}
-                               file={characters.icons[codename]} size={size}/>
+                               file={skinIcon(characters, codename,
+                                              skins?.[side]?.[codename], table)}
+                               size={size}/>
             ))}
         </>
+    );
+}
+
+const SKIN_ICON = 24;
+
+// The colours `side`'s characters are drawn in on the set's thumbnail (A6):
+// a select for each character with more than one skin in the game's files
+// (`table`), showing their icons; disabled without `onSkin` (the review
+// cannot be edited). None while the game's skins are not read.
+function SkinSelects({characters, side, skins, table, onSkin}: {
+    characters: SetCharacters;
+    side: Side;
+    skins: SetSkins;
+    table: GameSkins | null;
+    onSkin?: (side: Side, codename: string, skin: number) => void;
+}) {
+    const pickable = characters[side].filter(
+        (codename) => (table?.[codename]?.length ?? 0) > 1);
+    if (table === null || pickable.length === 0) {
+        return null;
+    }
+    return (
+        <Box sx={{display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.5}}>
+            {pickable.map((codename) => {
+                const options = table[codename];
+                const chosen = skins[side]?.[codename] ?? 0;
+                return (
+                    <TextField key={codename} select size="small"
+                               label={i18n.t("top8_color")}
+                               data-testid={`archive-skin-${side}-${codename}`}
+                               disabled={!onSkin}
+                               value={options.some((row) => row.skin === chosen)
+                                   ? String(chosen) : ""}
+                               onChange={(event) => onSkin?.(
+                                   side, codename, Number(event.target.value))}
+                               sx={{width: 104}}>
+                        {options.map((row, index) => {
+                            const path = characterIcon(characters.game, row.icon);
+                            return (
+                                <MenuItem key={row.skin} value={String(row.skin)}>
+                                    <ListItemIcon sx={{minWidth: SKIN_ICON + 8}}>
+                                        {path !== null ? (
+                                            <img alt="" src={`${BASE_URL}${path}`}
+                                                 width={SKIN_ICON}
+                                                 height={SKIN_ICON}/>
+                                        ) : null}
+                                    </ListItemIcon>
+                                    {index + 1}
+                                </MenuItem>
+                            );
+                        })}
+                    </TextField>
+                );
+            })}
+        </Box>
     );
 }
 
@@ -246,7 +317,7 @@ function EstimateBadge() {
     );
 }
 
-function SetListRow({row, jobId, source, sourceId, thumb, selected,
+function SetListRow({row, jobId, source, sourceId, thumb, skinTables, selected,
                      onSelect}: {
     row: ReviewedRow;
     jobId: string;
@@ -254,6 +325,8 @@ function SetListRow({row, jobId, source, sourceId, thumb, selected,
     sourceId?: string | null;
     // The set's thumbnail (A6), when it has one.
     thumb: string | null;
+    // Each game's skins read so far (A6), by the game's codename.
+    skinTables: Record<string, GameSkins>;
     selected: boolean;
     onSelect: () => void;
 }) {
@@ -267,6 +340,7 @@ function SetListRow({row, jobId, source, sourceId, thumb, selected,
     const path = shownThumb ?? (row.thumb && !noFrame
         ? framePath(jobId, row.no) : null);
     const characters = setCharacters(row.set);
+    const table = characters ? skinTables[characters.game] ?? null : null;
     return (
         // Enter picks the row (a button); on the selected one it is the
         // page's (confirm), as Space is (play / pause).
@@ -305,7 +379,7 @@ function SetListRow({row, jobId, source, sourceId, thumb, selected,
                 <Tooltip title={text} enterDelay={600}>
                     <Typography variant="body2"
                                 sx={{display: "-webkit-box",
-                                     WebkitLineClamp: 2,
+                                     WebkitLineClamp: 3,
                                      WebkitBoxOrient: "vertical",
                                      overflow: "hidden",
                                      wordBreak: "break-all"}}>
@@ -315,12 +389,14 @@ function SetListRow({row, jobId, source, sourceId, thumb, selected,
                 {characters !== null ? (
                     <Stack direction="row" spacing={0.5} alignItems="center"
                            data-testid={`archive-set-characters-${row.no}`}>
-                        <SideIcons characters={characters} side="c1" size={20}/>
+                        <SideIcons characters={characters} side="c1" size={20}
+                                   skins={row.skins} table={table}/>
                         <Typography variant="caption"
                                     sx={{color: tokens.textMuted}}>
                             vs
                         </Typography>
-                        <SideIcons characters={characters} side="c2" size={20}/>
+                        <SideIcons characters={characters} side="c2" size={20}
+                                   skins={row.skins} table={table}/>
                         {isEstimate(row.set) ? <EstimateBadge/> : null}
                     </Stack>
                 ) : null}
@@ -358,8 +434,8 @@ function thumbOf(jobId: string, thumbs: JobThumbs | null | undefined,
         ? thumbPath(jobId, no, thumbs.revision) : null;
 }
 
-function SetList({sets, rows, removed, jobId, source, thumbs, filter, onFilter,
-                  selectedNo, onSelect, onRestore}: {
+function SetList({sets, rows, removed, jobId, source, thumbs, skinTables,
+                  filter, onFilter, selectedNo, onSelect, onRestore}: {
     sets: SetsJson;
     rows: ReviewedRow[];
     // The removed sets (A4), folded at the list's end.
@@ -367,6 +443,7 @@ function SetList({sets, rows, removed, jobId, source, thumbs, filter, onFilter,
     jobId: string;
     source?: string | null;
     thumbs: JobThumbs | null;
+    skinTables: Record<string, GameSkins>;
     filter: SetFilter;
     onFilter: (filter: SetFilter) => void;
     selectedNo: number | null;
@@ -402,6 +479,7 @@ function SetList({sets, rows, removed, jobId, source, thumbs, filter, onFilter,
                     <SetListRow key={row.no} row={row} jobId={jobId}
                                 source={source} sourceId={sets.source_id}
                                 thumb={thumbOf(jobId, thumbs, row.no)}
+                                skinTables={skinTables}
                                 selected={row.no === selectedNo}
                                 onSelect={() => onSelect(row.no)}/>
                 ))}
@@ -514,14 +592,15 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
 
 // What the details edit (A4), where the review can be edited: IN / OUT at
 // the current position or back to the worker's, the result given (one of
-// the job's, each to one set: the others' are disabled), confirmed, or the
-// set removed.
+// the job's, each to one set: the others' are disabled), confirmed, the
+// set removed, or a character's colour on its thumbnail (A6).
 interface DetailEdits {
     onEdge: (edge: "start" | "end") => void;
     onResetRange: () => void;
     onAssign: (result: SetResult | null) => void;
     onConfirm: () => void;
     onRemove: () => void;
+    onSkin: (side: Side, codename: string, skin: number) => void;
     candidates: SetResult[];
     // canonical(result) -> the set that holds it.
     held: Map<string, number>;
@@ -574,13 +653,15 @@ function DetailThumb({path}: {path: string}) {
     );
 }
 
-function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
+function SetDetails({row, original, sets, source, thumb, skinTables, onSeek,
+                     edit}: {
     row: ReviewedRow | null;
     original: SetRow | null;
     sets: SetsJson;
     source?: string | null;
     // The set's thumbnail (A6), when it has one.
     thumb?: string | null;
+    skinTables: Record<string, GameSkins>;
     onSeek: (t: number) => void;
     edit?: DetailEdits;
 }) {
@@ -608,6 +689,7 @@ function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
         ? row.corrected_games : []);
     const games = row.game_spans ?? [];
     const characters = setCharacters(result);
+    const table = characters ? skinTables[characters.game] ?? null : null;
     return (
         <Stack spacing={0.5} sx={{p: 2}} data-testid="archive-details">
             <Typography variant="caption" sx={{color: tokens.textMuted}}>
@@ -654,7 +736,7 @@ function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
                     {i18n.t("archive_detail_corrected")}: {corrected}
                 </Note>
             ) : null}
-            {row.reason ? (
+            {row.reason && !row.confirmed ? (
                 <Note color={tokens.gold}>
                     {i18n.t("archive_detail_reason")}: {row.reason}
                 </Note>
@@ -713,13 +795,23 @@ function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
                             <dt>{i18n.t("archive_detail_characters")}</dt>
                             <dd data-testid="archive-detail-characters">
                                 {(["c1", "c2"] as const).map((side) => (
-                                    <Box key={side}
-                                         sx={{display: "flex", gap: 0.5,
-                                              alignItems: "center"}}>
-                                        <SideIcons characters={characters}
-                                                   side={side} size={24}/>
-                                        <span>{result?.[side] || "—"}</span>
-                                    </Box>
+                                    <React.Fragment key={side}>
+                                        <Box sx={{display: "flex", gap: 0.5,
+                                                  alignItems: "center"}}>
+                                            <SideIcons characters={characters}
+                                                       side={side} size={24}
+                                                       skins={row.skins}
+                                                       table={table}/>
+                                            <span>{result?.[side] || "—"}</span>
+                                        </Box>
+                                        {characters !== null ? (
+                                            <SkinSelects characters={characters}
+                                                         side={side}
+                                                         skins={row.skins}
+                                                         table={table}
+                                                         onSkin={edit?.onSkin}/>
+                                        ) : null}
+                                    </React.Fragment>
                                 ))}
                                 {isEstimate(result) ? <EstimateBadge/> : null}
                             </dd>
@@ -1086,6 +1178,29 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         && Number.isFinite(sets.duration) && sets.duration > 0
         ? sets.duration : null;
 
+    // The skins of the games the job's results name (A6), by the game's
+    // codename (GET /archive/characters): the colours a set's characters can
+    // be drawn in. A game that cannot be read has none: no colour to pick.
+    const [skinTables, setSkinTables] =
+        React.useState<Record<string, GameSkins>>({});
+    const gamesKey = React.useMemo(() => Array.from(new Set(
+        candidates(sets).map((set) => setCharacters(set)?.game)
+            .filter((game): game is string => Boolean(game)))).sort().join("\n"),
+        [sets]);
+    React.useEffect(() => {
+        let live = true;
+        gamesKey.split("\n").filter(Boolean).forEach((game) => {
+            getData<{characters: unknown}>(
+                `${BASE}/characters?game=${encodeURIComponent(game)}`).then(
+                (data) => live && setSkinTables((now) => ({
+                    ...now, [game]: readGameSkins(data.characters)})),
+                () => undefined);
+        });
+        return () => {
+            live = false;
+        };
+    }, [gamesKey]);
+
     // The job's review, saved as it changes (the saver is this job's: the
     // view is keyed by job). A save the server refuses (400: it no longer
     // fits the job's sets) is dropped and the server's review shown again.
@@ -1252,8 +1367,22 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         const next = change((current, set) =>
             withConfirmed(current, set, !row.confirmed));
         if (next !== null && !row.confirmed) {
-            const listed = filterSets(reviewedRows(sets.sets, next), filter);
-            return choose(nextUnconfirmed(listed as ReviewedRow[], row.no));
+            // A confirmed set no longer asks for review, so the "review"
+            // filter drops it: the next one is looked for from its place
+            // (it is kept in the rows searched), not from the top.
+            const all = reviewedRows(sets.sets, next);
+            const listed = new Set(filterSets(all, filter).map((r) => r.no));
+            const picked = choose(nextUnconfirmed(
+                all.filter((r) => listed.has(r.no) || r.no === row.no),
+                row.no));
+            if (picked === null && !listed.has(row.no)) {
+                // The last one of the filter: all the sets are shown again
+                // (the list shows what is selected) and the keys stay with
+                // the view (the focused row is gone).
+                setFilter("all");
+                root.current?.focus({preventScroll: true});
+            }
+            return picked;
         }
         return null;
     };
@@ -1341,6 +1470,8 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
             withResult(current, set, result)),
         onConfirm: confirm,
         onRemove: remove,
+        onSkin: (side, codename, skin) => change((current, set) =>
+            withSkin(current, set, side, codename, skin)),
         candidates: candidates(sets),
         held: holders(shown.sets, setNo),
     } : undefined;
@@ -1375,6 +1506,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
                 <SetList sets={shown} rows={rows} removed={removed}
                          jobId={job.id}
                          source={job.source} thumbs={job.thumbs ?? null}
+                         skinTables={skinTables}
                          filter={filter}
                          onFilter={setFilter} selectedNo={setNo}
                          onSelect={(no) => choose(no)}
@@ -1396,6 +1528,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
                           borderColor: "divider"}}>
                     <SetDetails row={row} original={original} sets={shown}
                                 source={job.source} onSeek={seek} edit={edit}
+                                skinTables={skinTables}
                                 thumb={row === null ? null
                                     : thumbOf(job.id, job.thumbs, row.no)}/>
                 </Box>

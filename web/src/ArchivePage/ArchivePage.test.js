@@ -1084,6 +1084,27 @@ describe("the review screen", () => {
             {sets: {1: {start: 100.45, end: 200.01}, 2: {confirmed: true}}});
     });
 
+    test("confirming the last set of the review filter shows all the sets",
+         async () => {
+        const review = await open(2);
+        fireEvent.click(document.querySelector('button[value="review"]'));
+        expect(screen.getAllByTestId(/^archive-set-\d+$/)
+            .map((row) => row.dataset.testid)).toEqual(["archive-set-2"]);
+        const two = screen.getByTestId("archive-set-2");
+        two.focus();
+        fireEvent.keyDown(two, {key: "Enter"});
+        // Confirmed, it asks for no review: the filter would be empty, so
+        // every set is listed again, the confirmed one still selected.
+        expect(screen.getAllByTestId(/^archive-set-\d+$/)).toHaveLength(3);
+        expect(current()).toEqual(["archive-set-2"]);
+        expect(screen.getByTestId("archive-set-2").dataset.confirmed)
+            .toBe("true");
+        // The keys are still the page's.
+        expect(review.contains(document.activeElement)).toBe(true);
+        fireEvent.keyDown(document.activeElement, {key: "ArrowDown"});
+        expect(current()).toEqual(["archive-set-3"]);
+    });
+
     test("the details give another result and put IN / OUT back", async () => {
         const LF = {round: "LF", p1: "Gamma", s1: 3, p2: "Delta", s2: 0};
         installJob({...SETS, unused_sets: [LF]});
@@ -1538,6 +1559,85 @@ describe("the review screen", () => {
         expect(guessed.textContent).toContain("Zelda");
         expect(guessed.textContent).toContain("—");
         expect(within(guessed).getByTestId("archive-estimate")).toBeTruthy();
+    });
+
+    // ADR-006 A6: the colour a set's character is drawn in on its thumbnail,
+    // among the game's skins (GET /archive/characters).
+    const SKINS = "/api/v1/archive/characters?game=tgame";
+    const SKIN_SETS = {...SETS, sets: [
+        {...SETS.sets[0], set: {...SETS.sets[0].set, c1: "マリオ", c2: "ルイージ",
+                                autona: {game: "tgame", c1: ["mario"],
+                                         c2: ["luigi"], icons: {
+                                             mario: "base_files/icon/m_00.png",
+                                             luigi: "base_files/icon/l_00.png",
+                                         }}}},
+        SETS.sets[1], SETS.sets[2],
+    ]};
+    const skinTable = () => Promise.resolve({data: {characters: {
+        mario: [{skin: 0, icon: "base_files/icon/m_00.png"},
+                {skin: 2, icon: "base_files/icon/m_02.png"}],
+        luigi: [{skin: 0, icon: "base_files/icon/l_00.png"}],
+    }}});
+    const listIcon = () => within(screen.getByTestId("archive-set-characters-1"))
+        .getByTestId("archive-character-mario").getAttribute("src");
+
+    test("a character's colour is picked among its skins and saved", async () => {
+        installJob(SKIN_SETS, {[SKINS]: skinTable});
+        await open(1);
+        const select = await screen.findByTestId("archive-skin-c1-mario");
+        // One skin: nothing to pick.
+        expect(screen.queryByTestId("archive-skin-c2-luigi")).toBeNull();
+        fireEvent.mouseDown(within(select).getByRole("combobox"));
+        const options = within(await screen.findByRole("listbox"))
+            .getAllByRole("option");
+        expect(options.map((option) => option.textContent)).toEqual(["1", "2"]);
+        expect(options[1].querySelector("img").getAttribute("src"))
+            .toMatch(/\/user_data\/games\/tgame\/base_files\/icon\/m_02\.png$/);
+        fireEvent.click(options[1]);
+        // The list and the details draw the colour's icon.
+        await waitFor(() => expect(listIcon()).toMatch(/m_02\.png$/));
+        expect(within(screen.getByTestId("archive-detail-characters"))
+            .getByTestId("archive-character-mario").getAttribute("src"))
+            .toMatch(/m_02\.png$/);
+        await saved();
+        const sent = puts();
+        expect(sent[sent.length - 1]).toEqual({sets: {1: {skins: {c1: {mario: 2}}}}});
+        // The first colour again: nothing kept.
+        fireEvent.mouseDown(within(select).getByRole("combobox"));
+        fireEvent.click(within(await screen.findByRole("listbox"))
+            .getAllByRole("option")[0]);
+        await waitFor(() => expect(listIcon()).toMatch(/m_00\.png$/));
+        await waitFor(() => {
+            const all = puts();
+            expect(all[all.length - 1]).toEqual({sets: {}});
+        }, {timeout: 3000});
+    });
+
+    test("a colour is shown where the review cannot be edited", async () => {
+        installJob(SKIN_SETS, {
+            [SKINS]: skinTable,
+            "/api/v1/shell-session": forbidden,
+            [`/api/v1/archive/jobs/${ID}/review`]: () => Promise.resolve(
+                {data: {review: {format: 1, sets: {1: {
+                    skins: {c1: {mario: 2}}}}}}}),
+        });
+        render(<ArchivePage/>);
+        await waitFor(() => expect(listIcon()).toMatch(/m_02\.png$/));
+        fireEvent.click(screen.getByTestId("archive-set-1"));
+        const select = await screen.findByTestId("archive-skin-c1-mario");
+        expect(within(select).getByRole("combobox"))
+            .toHaveAttribute("aria-disabled", "true");
+    });
+
+    test("no colour to pick when the game's skins cannot be read", async () => {
+        installJob(SKIN_SETS);
+        await open(1);
+        await waitFor(() => expect(calls).toContain(SKINS));
+        await act(async () => {
+            await sleep(50);
+        });
+        expect(screen.queryByTestId("archive-skin-c1-mario")).toBeNull();
+        expect(listIcon()).toMatch(/m_00\.png$/);
     });
 
     test("a video that is gone says so", async () => {

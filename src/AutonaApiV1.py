@@ -2710,6 +2710,23 @@ def get_archive_match_logs():
     return ok(data={"days": WebOps.get_archive_match_logs()})
 
 
+@api_v1.route("/archive/characters")
+@_no_store_answers
+@api_handler
+def get_archive_characters():
+    # The colours a set's characters may be drawn in (ADR-006 A6: the
+    # review's "skins"): {"characters": {codename: [{"skin": the number in
+    # its files' names, "icon": that skin's icon in the game's folder
+    # ("base_files/icon/<file>") or null}]}} of the scanned game `?game=`
+    # (its codename: the set's game, not necessarily the loaded one), the
+    # skins in ascending order. {} for a game not scanned; 400 without
+    # one. THIS_PC, as the archive's other reads.
+    game = request.args.get("game", "")
+    if not game:
+        raise ApiError(INVALID_ARGUMENT, "game is required", 400)
+    return ok(data={"characters": WebOps.get_archive_characters(game)})
+
+
 @api_v1.route("/archive/jobs/<job_id>")
 @_no_store_answers
 @api_handler
@@ -2842,9 +2859,9 @@ def archive_job_reanalyze(job_id):
 @api_handler
 def get_archive_review(job_id):
     # {"review": {"format": 1, "sets": {"<no>": {"confirmed"?, "start"?,
-    # "end"?, "set"?} | {"removed": true}}}} (ADR-006 A4): what the operator
-    # changed about the job's sets -- what of its review.json still fits its
-    # out/sets.json.
+    # "end"?, "set"?, "skins"?} | {"removed": true}}}} (ADR-006 A4; skins,
+    # the thumbnail's colours, A6): what the operator changed about the
+    # job's sets -- what of its review.json still fits its out/sets.json.
     # Empty for a job whose analysis is not done or runs. 404 for an
     # unknown id.
     try:
@@ -2861,12 +2878,15 @@ def get_archive_review(job_id):
 def archive_review_update(job_id):
     # {"sets": {"<no>": {"confirmed": bool, "start": s, "end": s, "set": a
     # result of the job's (a set's own or one of its unused_sets) or null,
-    # "removed": bool}}} -- the whole review, each key optional (left out:
-    # the worker's; a removed set keeps nothing else, holds no result and
-    # is never exported) -> {"review"} as saved. 400 for what does not fit
-    # the job's sets (a range under 1 s or outside the video, a result it
-    # does not have, one result given twice); 409 while its analysis runs or
-    # when it is not done. Logged by key: the results name players.
+    # "removed": bool, "skins": {"c1" / "c2": {codename: skin number}} (the
+    # thumbnail's colours, A6: a codename of the set's result, 0 the
+    # default)}}} -- the whole review, each key optional (left out: the
+    # worker's; a removed set keeps nothing else, holds no result and is
+    # never exported) -> {"review"} as saved. 400 for what does not fit the
+    # job's sets (a range under 1 s or outside the video, a result it does
+    # not have, one result given twice, a colour for a character its result
+    # does not name); 409 while its analysis runs or when it is not done.
+    # Logged by key: the results name players.
     body = _json_body()
     try:
         review = WebOps.save_archive_review(job_id, body)

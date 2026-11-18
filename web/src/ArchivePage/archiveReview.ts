@@ -1,6 +1,7 @@
 // The archive page's review (ADR-006 A4): what the operator decides about the
 // sets the worker found -- which are confirmed, their IN / OUT, which result
-// each one is, which are removed -- as GET / PUT
+// each one is, which are removed, and (A6) the colours of the characters
+// their thumbnails draw -- as GET / PUT
 // /api/v1/archive/jobs/<id>/review carry it
 // (core/ArchiveReview.py: one entry per set changed, keyed by its number,
 // what an entry leaves out is the worker's), the sets as reviewed, and the
@@ -8,6 +9,14 @@
 
 import {SetResult, SetRow, SetsJson} from "./archiveSets";
 import {Range, toTime} from "./archiveTimeline";
+
+// The sides of a result's characters (its autona's c1 / c2).
+export const SIDES = ["c1", "c2"] as const;
+export type Side = typeof SIDES[number];
+// A set's colours (core ArchiveReview's "skins"): per side, a codename of
+// the set's result and the number of its skin (GET /archive/characters'
+// "skin"); 0, the default, is never kept.
+export type SetSkins = Partial<Record<Side, Record<string, number>>>;
 
 export interface ReviewEntry {
     confirmed?: boolean;
@@ -19,6 +28,8 @@ export interface ReviewEntry {
     // A set the operator does not want (an entry of this alone): not
     // listed, never confirmed, holding no result.
     removed?: boolean;
+    // The colours its thumbnail draws its characters in (A6).
+    skins?: SetSkins;
 }
 
 export interface Review {
@@ -37,17 +48,58 @@ export const MIN_CLIP = 1;
 export const END_MARGIN = 0.05;
 
 // A set as reviewed: its range and result, whether it is confirmed or
-// removed and what the review changed (the list, the details and the
-// timeline draw this).
+// removed, its characters' colours and what the review changed (the list,
+// the details and the timeline draw this).
 export interface ReviewedRow extends SetRow {
     confirmed: boolean;
     rangeEdited: boolean;
     setEdited: boolean;
     removed: boolean;
+    skins: SetSkins;
 }
 
 const finite = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+
+// The codenames result `set` names on `side` (its autona's c1 / c2).
+function codenamesOf(set: SetResult | null, side: Side): string[] {
+    const extra = set?.autona;
+    const names = isRecord(extra) ? extra[side] : undefined;
+    return Array.isArray(names)
+        ? names.filter((name): name is string => typeof name === "string")
+        : [];
+}
+
+// `raw` (an entry's skins) as the server keeps them for a set given result
+// `set` (core ArchiveReview._Skins): a codename `set` names on its side, a
+// whole number over 0; an empty side left out.
+function keptSkins(raw: unknown, set: SetResult | null): SetSkins {
+    const kept: SetSkins = {};
+    if (!isRecord(raw)) {
+        return kept;
+    }
+    for (const side of SIDES) {
+        const chosen = raw[side];
+        if (!isRecord(chosen)) {
+            continue;
+        }
+        const names = codenamesOf(set, side);
+        const sideKept: Record<string, number> = {};
+        for (const [codename, skin] of Object.entries(chosen)) {
+            if (names.includes(codename) && typeof skin === "number"
+                && Number.isInteger(skin) && skin > 0) {
+                sideKept[codename] = skin;
+            }
+        }
+        if (Object.keys(sideKept).length > 0) {
+            kept[side] = sideKept;
+        }
+    }
+    return kept;
+}
 
 // `value` as JSON with its keys sorted: two results are the same when this is
 // (core ArchiveReview.ResultKey makes the same string: whole numbers are
@@ -97,14 +149,19 @@ export function reviewedRow(row: SetRow, review: Review): ReviewedRow {
     const setEdited = "set" in entry;
     const set = setEdited ? entry.set ?? null : ownSet(row);
     const removed = entry.removed === true;
+    const confirmed = !removed && entry.confirmed === true;
     return {
         ...row, start, end,
         ...(setEdited ? {set, matched: set !== null,
                          title: set ? resultTitle(set) : null} : {}),
-        confirmed: !removed && entry.confirmed === true,
+        // Confirming a set answers the worker's doubt: it no longer asks
+        // for review (the list, the timeline, the filter and N follow).
+        ...(confirmed ? {needs_review: false} : {}),
+        confirmed,
         rangeEdited: start !== row.start || end !== row.end,
         setEdited,
         removed,
+        skins: removed ? {} : keptSkins(entry.skins, set),
     };
 }
 
@@ -122,6 +179,8 @@ export const removedRows = (rows: ReviewedRow[]): ReviewedRow[] =>
 // `review` with set `row`'s entry changed by `change` (undefined drops a
 // key), keeping only what differs from the worker's (as the server keeps it).
 // A removed set's entry is {removed: true} alone: what else it held goes.
+// Its colours are kept for the characters of the result it ends up with
+// (another result drops the others').
 export function withEntry(review: Review, row: SetRow,
                           change: Partial<Record<keyof ReviewEntry, unknown>>):
     Review {
@@ -142,6 +201,11 @@ export function withEntry(review: Review, row: SetRow,
         if ("set" in merged && merged.set !== undefined
             && !sameResult(merged.set as SetResult | null, ownSet(row))) {
             entry.set = (merged.set as SetResult | null) ?? null;
+        }
+        const skins = keptSkins(merged.skins,
+                                "set" in entry ? entry.set ?? null : ownSet(row));
+        if (Object.keys(skins).length > 0) {
+            entry.skins = skins;
         }
     }
     const sets = {...review.sets};
@@ -225,6 +289,22 @@ export function withConfirmed(review: Review, row: SetRow,
 export function withResult(review: Review, row: SetRow,
                            result: SetResult | null): Review {
     return withEntry(review, row, {set: result});
+}
+
+// `review` with set `row`'s character `codename` on `side` drawn in skin
+// `skin` (0, the default: its colour goes).
+export function withSkin(review: Review, row: SetRow, side: Side,
+                         codename: string, skin: number): Review {
+    const raw = entryOf(review, row).skins;
+    const current: SetSkins = isRecord(raw) ? raw : {};
+    const sideNow = current[side];
+    const chosen: Record<string, unknown> = {...(isRecord(sideNow) ? sideNow : {})};
+    if (skin > 0) {
+        chosen[codename] = skin;
+    } else {
+        delete chosen[codename];
+    }
+    return withEntry(review, row, {skins: {...current, [side]: chosen}});
 }
 
 // `review` with set `row` removed: its confirmation, range and result go,

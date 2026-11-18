@@ -943,6 +943,13 @@ def get_archive_match_logs():
     return ArchiveResults.Days()
 
 
+def get_archive_characters(game):
+    """The skins of scanned game `game`'s characters, each with its icon
+    (ADR-006 A6: the colours a set's thumbnail may draw them in; the set's
+    game, not necessarily the loaded one)."""
+    return GameAssetCatalog.instance.GameCharacterSkins(game)
+
+
 def get_archive_templates():
     """The title templates, in the worker's order (ADR-006 A6)."""
     return ArchiveJobService.instance.Templates()

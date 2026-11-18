@@ -1989,6 +1989,113 @@ def test_a_removed_set_keeps_nothing_else_and_holds_no_result():
         "4": {"removed": True}}
 
 
+# The results with their characters (ADR-006 A5's autona): set 1's KAPPA_C,
+# the unused UNUSED_C (mario on its other side); MU (set 3) names none.
+KAPPA_C = dict(KAPPA, autona={"game": "tgame", "c1": ["mario", "luigi"],
+                              "c2": ["peach"], "icons": {}})
+UNUSED_C = dict(UNUSED, autona={"game": "tgame", "c1": ["zelda"],
+                                "c2": ["mario"], "icons": {}})
+SKIN_SETS = dict(REVIEW_SETS, sets=[
+    dict(REVIEW_SETS["sets"][0], set=KAPPA_C), REVIEW_SETS["sets"][1],
+    REVIEW_SETS["sets"][2]], unused_sets=[UNUSED_C])
+EXPORT_KEYS = {"no", "start", "end", "title", "description", "set",
+               "game_starts"}
+
+
+def test_a_sets_colours_are_kept_for_its_results_characters():
+    # The thumbnail's colours (ADR-006 A6): per side, a codename of the
+    # result the set is given and its skin number; 0 (the default) and an
+    # empty side are no change.
+    checked = review.Check({"sets": {
+        "1": {"confirmed": True, "skins": {"c1": {"mario": 2, "luigi": 0},
+                                           "c2": {"peach": 1}}},
+        # The result given now names the codenames: mario on its c2.
+        "2": {"set": UNUSED_C, "skins": {"c2": {"mario": 3}, "c1": {}}},
+        "3": {"skins": {}},
+    }}, SKIN_SETS)
+    assert checked == {"format": 1, "sets": {
+        "1": {"confirmed": True, "skins": {"c1": {"mario": 2},
+                                           "c2": {"peach": 1}}},
+        "2": {"set": UNUSED_C, "skins": {"c2": {"mario": 3}}}}}
+    stored = review.Stored(checked, SKIN_SETS)
+    assert stored["sets"]["1"] == {"base": [120.0, 720.0], "confirmed": True,
+                                   "skins": {"c1": {"mario": 2},
+                                             "c2": {"peach": 1}}}
+    assert review.Normalize(json.loads(json.dumps(stored)),
+                            SKIN_SETS) == checked
+    # What the thumbnails read; nothing of it in the worker's requests.
+    assert review.Skins(checked, 1) == {"c1": {"mario": 2},
+                                        "c2": {"peach": 1}}
+    assert review.Skins(checked, 3) == {}
+    assert review.Skins(review.Empty(), 1) == {}
+    for item in review.ExportSets(checked, SKIN_SETS) + review.ReviewedSets(
+            checked, SKIN_SETS):
+        assert set(item) == EXPORT_KEYS
+    # Only 0s: no entry at all.
+    assert review.Check({"sets": {"1": {"skins": {"c1": {"mario": 0}}}}},
+                        SKIN_SETS)["sets"] == {}
+
+
+@pytest.mark.parametrize("body, says", [
+    ({"sets": {"1": {"skins": []}}}, "#1 の skins はオブジェクト"),
+    ({"sets": {"1": {"skins": {"c3": {}}}}}, "使えない側があります: c3"),
+    ({"sets": {"1": {"skins": {"c1": [1]}}}}, "skins の c1 はオブジェクト"),
+    # Peach is the result's other side.
+    ({"sets": {"1": {"skins": {"c1": {"peach": 1}}}}},
+     "#1 でカラーを選んだキャラクター（peach）は、割り当てた結果にいません"),
+    ({"sets": {"1": {"skins": {"c1": {"mario": -1}}}}},
+     "カラー（mario）は 0 以上の整数"),
+    ({"sets": {"1": {"skins": {"c1": {"mario": True}}}}}, "0 以上の整数"),
+    ({"sets": {"1": {"skins": {"c1": {"mario": 1.5}}}}}, "0 以上の整数"),
+    ({"sets": {"1": {"skins": {"c1": {"mario": "1"}}}}}, "0 以上の整数"),
+    # No result, a result naming no character, another result's codename.
+    ({"sets": {"1": {"set": None, "skins": {"c1": {"mario": 1}}}}},
+     "割り当てた結果にいません"),
+    ({"sets": {"3": {"skins": {"c1": {"mario": 1}}}}},
+     "#3 でカラーを選んだ"),
+    ({"sets": {"1": {"set": UNUSED_C, "skins": {"c1": {"mario": 1}}}}},
+     "（mario）は、割り当てた結果にいません"),
+])
+def test_a_colour_that_does_not_fit_the_sets_result_is_refused(body, says):
+    with pytest.raises(review.ReviewError) as refused:
+        review.Check(body, SKIN_SETS)
+    assert says in str(refused.value)
+
+
+def test_reading_keeps_the_colours_of_the_result_the_set_ends_up_with():
+    base1, base2 = [120.0, 720.0], [780.0, 1380.0]
+
+    def read(**entries):
+        return review.Normalize({"format": 1, "sets": entries},
+                                SKIN_SETS)["sets"]
+
+    # One by one: what does not fit goes, the rest stays.
+    assert read(**{"1": {"base": base1, "skins": {
+        "c1": {"mario": 2, "peach": 1, "luigi": "x", "koopa": 1},
+        "c3": {"mario": 1}, "c2": {"peach": 0}}}}) == {
+        "1": {"skins": {"c1": {"mario": 2}}}}
+    assert read(**{"1": {"base": base1, "skins": ["x"]}}) == {}
+    # Another result: the colours of its own characters only.
+    assert read(**{"1": {"base": base1, "set": UNUSED_C, "skins": {
+        "c1": {"mario": 2, "zelda": 1}}}}) == {
+        "1": {"set": UNUSED_C, "skins": {"c1": {"zelda": 1}}}}
+    # An assignment dropped (one result given twice): the colours are the
+    # worker's result's again -- set 1's KAPPA_C keeps mario's, set 2 (no
+    # result of its own) keeps none.
+    assert read(**{"1": {"base": base1, "set": UNUSED_C,
+                         "skins": {"c1": {"mario": 2, "zelda": 1}}},
+                   "2": {"base": base2, "set": UNUSED_C,
+                         "skins": {"c1": {"zelda": 4}}}}) == {
+        "1": {"skins": {"c1": {"mario": 2}}}}
+    # A removed set keeps nothing else.
+    assert read(**{"1": {"base": base1, "removed": True,
+                         "skins": {"c1": {"mario": 2}}}}) == {
+        "1": {"removed": True}}
+    # A set that moved since: dropped whole.
+    assert read(**{"1": {"base": [100.0, 720.0],
+                         "skins": {"c1": {"mario": 2}}}}) == {}
+
+
 DONE_ID = "20261116-120000-ab12"
 
 
@@ -2209,6 +2316,35 @@ def test_an_export_cuts_the_confirmed_sets(service, work, fake, tmp_path):
     again = _export_ended(service, DONE_ID)
     assert (again["state"], again["clips"], again["skipped"]) == (
         "done", 2, 2)
+
+
+def test_the_colours_are_saved_but_never_in_the_workers_requests(
+        service, work, fake, tmp_path):
+    # The thumbnail's colours (A6) are the review's: the export and the
+    # titles' preview ask the worker without them.
+    _done(work, tmp_path, SKIN_SETS)
+    jobDir = work / DONE_ID
+    saved = service.SaveReview(DONE_ID, {"sets": {
+        "1": {"confirmed": True, "skins": {"c1": {"mario": 2}}}}})
+    assert saved["sets"] == {"1": {"confirmed": True,
+                                   "skins": {"c1": {"mario": 2}}}}
+    assert json.loads((jobDir / "review.json").read_text(
+        encoding="utf-8"))["sets"]["1"]["skins"] == {"c1": {"mario": 2}}
+    assert service.Review(DONE_ID) == saved
+    titles = service._TitlesRequest(str(jobDir), DONE_ID)
+    assert [set(row) for row in titles["sets"]] == [EXPORT_KEYS] * 3
+
+    service.StartExport(DONE_ID)
+    assert _export_ended(service, DONE_ID)["state"] == "done"
+    assert json.loads((jobDir / "export_request.json").read_text(
+        encoding="utf-8"))["sets"] == [
+        {"no": 1, "start": 120.0, "end": 720.0, "title": None,
+         "description": None, "set": KAPPA_C,
+         "game_starts": [130.0, 300.0]}]
+    # A colour its result does not name is refused, nothing written.
+    _refused(archive.INVALID, service.SaveReview, DONE_ID,
+             {"sets": {"1": {"skins": {"c2": {"mario": 1}}}}})
+    assert service.Review(DONE_ID) == saved
 
 
 def test_an_export_needs_a_done_job_a_confirmed_set_and_its_video(
