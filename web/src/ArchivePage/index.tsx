@@ -1,4 +1,5 @@
 import React from "react";
+import {useSelector} from "react-redux";
 import {
     Alert,
     Box,
@@ -22,6 +23,7 @@ import {
 } from "@mui/material";
 import i18n from "../i18n/config";
 import {BASE_URL} from "../env";
+import {ReduxState} from "../redux/store";
 import {DARK_TOKENS as tokens} from "../themes";
 import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut, ApiError} from "../api";
 import {FeedbackProvider} from "../ScoreboardPage/Feedback";
@@ -63,6 +65,7 @@ import {
     keyAction,
     keyTargetKind,
     nextReviewSet,
+    setAfterRemoving,
     setNumber,
     stepSet,
     thumbPath,
@@ -87,13 +90,17 @@ import {
     candidates,
     confirmedCount,
     holders,
+    keptRows,
     nextUnconfirmed,
     readReview,
+    removedRows,
     reviewedRows,
     sameResult,
     withConfirmed,
     withEdge,
     withRangeReset,
+    withRemoved,
+    withRestored,
     withResult,
 } from "./archiveReview";
 import Preview from "./Preview";
@@ -104,14 +111,19 @@ import WorkerInstall, {WorkerChips} from "./WorkerInstall";
 
 // The Archive Clipper page (ADR-006 A1), /web/app/archive: starts a worker
 // job on a VOD, shows its progress and the sets it found. State is the
-// page's own (no Redux / StateManager, ADR-006 D6); a running job (or its
+// page's own (nothing of it in Redux / StateManager, ADR-006 D6; the
+// results' choice -- the new job's form, a job's reanalysis -- only reads the
+// loaded tournament's URL, tournamentInfo.url, for its default); a running
+// job (or its
 // export) is polled every second through GET /api/v1/archive/jobs/<id>. A
 // job with sets shows the mock's review screen (A3): the set list, the
 // preview of the job's video (its own, or a YouTube job's in YouTube's
 // embedded player: D7), the set's details and the timeline. A
 // finished job's review is edited there (A4: IN / OUT, the result given,
-// confirmed; saved to its review.json as it changes) and its confirmed sets
-// exported to clips. ?job=<id> opens a job (the preview's "open in
+// confirmed; saved to its review.json as it changes), its confirmed sets
+// exported to clips and its sets split again with results (a job made
+// without them: ReanalyzePanel, then followed as a run). ?job=<id> opens a
+// job (the preview's "open in
 // browser"). The title templates have their own view (A6: Templates, the
 // header's button; the job view says which one the job's event takes): the
 // job's view stays under it, hidden (the new job's form, the review, the
@@ -346,10 +358,12 @@ function thumbOf(jobId: string, thumbs: JobThumbs | null | undefined,
         ? thumbPath(jobId, no, thumbs.revision) : null;
 }
 
-function SetList({sets, rows, jobId, source, thumbs, filter, onFilter,
-                  selectedNo, onSelect}: {
+function SetList({sets, rows, removed, jobId, source, thumbs, filter, onFilter,
+                  selectedNo, onSelect, onRestore}: {
     sets: SetsJson;
     rows: ReviewedRow[];
+    // The removed sets (A4), folded at the list's end.
+    removed: ReviewedRow[];
     jobId: string;
     source?: string | null;
     thumbs: JobThumbs | null;
@@ -357,6 +371,8 @@ function SetList({sets, rows, jobId, source, thumbs, filter, onFilter,
     onFilter: (filter: SetFilter) => void;
     selectedNo: number | null;
     onSelect: (no: number) => void;
+    // Put a removed set back; absent where the review cannot be edited.
+    onRestore?: (no: number) => void;
 }) {
     const unused = sets.unused_sets ?? [];
     return (
@@ -400,6 +416,36 @@ function SetList({sets, rows, jobId, source, thumbs, filter, onFilter,
                                         sx={{color: tokens.textMuted}}>
                                 {unusedText(set)}
                             </Typography>
+                        ))}
+                    </Box>
+                ) : null}
+                {removed.length > 0 ? (
+                    <Box component="details" sx={{p: 1}}
+                         data-testid="archive-removed">
+                        <Box component="summary" sx={{cursor: "pointer"}}>
+                            {i18n.t("archive_removed")} ({removed.length})
+                        </Box>
+                        {removed.map((row) => (
+                            <Stack key={row.no} direction="row" spacing={1}
+                                   alignItems="center"
+                                   data-testid={`archive-removed-${row.no}`}>
+                                <Typography variant="caption" component="div"
+                                            sx={{color: tokens.textMuted,
+                                                 flex: 1, minWidth: 0,
+                                                 wordBreak: "break-all"}}>
+                                    #{row.no} · <TimeLink source={source}
+                                                          sourceId={sets.source_id}
+                                                          seconds={row.start}/>
+                                    {" · "}{rowText(row, i18n.t("archive_no_match"))}
+                                </Typography>
+                                {onRestore ? (
+                                    <Button size="small"
+                                            data-testid={`archive-restore-${row.no}`}
+                                            onClick={() => onRestore(row.no)}>
+                                        {i18n.t("archive_removed_restore")}
+                                    </Button>
+                                ) : null}
+                            </Stack>
                         ))}
                     </Box>
                 ) : null}
@@ -468,12 +514,14 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
 
 // What the details edit (A4), where the review can be edited: IN / OUT at
 // the current position or back to the worker's, the result given (one of
-// the job's, each to one set: the others' are disabled) and confirmed.
+// the job's, each to one set: the others' are disabled), confirmed, or the
+// set removed.
 interface DetailEdits {
     onEdge: (edge: "start" | "end") => void;
     onResetRange: () => void;
     onAssign: (result: SetResult | null) => void;
     onConfirm: () => void;
+    onRemove: () => void;
     candidates: SetResult[];
     // canonical(result) -> the set that holds it.
     held: Map<string, number>;
@@ -576,14 +624,20 @@ function SetDetails({row, original, sets, source, thumb, onSeek, edit}: {
             ) : null}
             {thumb ? <DetailThumb path={thumb}/> : null}
             {edit ? (
-                <Box>
+                <Stack direction="row" spacing={1}>
                     <Button size="small" data-testid="archive-confirm"
                             variant={row.confirmed ? "outlined" : "contained"}
                             onClick={edit.onConfirm}>
                         {row.confirmed ? i18n.t("archive_detail_unconfirm")
                             : i18n.t("archive_detail_confirm")}
                     </Button>
-                </Box>
+                    {/* No confirmation: the removed sets' fold puts it back. */}
+                    <Button size="small" color="error" variant="text"
+                            data-testid="archive-remove"
+                            onClick={edit.onRemove}>
+                        {i18n.t("archive_detail_remove")}
+                    </Button>
+                </Stack>
             ) : row.confirmed ? (
                 <Typography variant="body2" sx={{color: tokens.positive}}>
                     ✓ {i18n.t("archive_confirmed_badge")}
@@ -778,10 +832,12 @@ function ThumbsState({thumbs}: {thumbs: JobThumbs | null}) {
 // sets are confirmed, whether the review is saved, the export of the
 // confirmed ones (its progress, its stop, what it cut and where), the
 // template the export names them with and the confirmed sets' thumbnails
-// (A6).
+// (A6); by the analysis' template, the sets split again with results
+// (ReanalyzePanel, opened under it).
 function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                     save, reviewError, onExport, onCancel, templates, event,
-                    analysisTemplate, onTemplates, thumbs, onThumbs}: {
+                    analysisTemplate, onTemplates, thumbs, onThumbs,
+                    hasResults, cached, onReanalyze}: {
     exported: JobExport | null;
     total: number;
     confirmed: number;
@@ -799,8 +855,15 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
     onTemplates: () => void;
     thumbs: JobThumbs | null;
     onThumbs: () => void;
+    // The job's: made with results, and its analysis cache usable.
+    hasResults: boolean;
+    cached: boolean;
+    onReanalyze: (results: object) => void;
 }) {
+    const [reanalyzing, setReanalyzing] = React.useState(false);
     const running = exported?.state === "running";
+    // Not while the export or the thumbnails run (they read its sets).
+    const busy = running || starting || thumbs?.state === "running";
     const saveText = save.status === "pending" || save.status === "saving"
         ? i18n.t("archive_review_saving")
         : save.status === "saved" ? i18n.t("archive_review_saved") : "";
@@ -850,7 +913,23 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                                 {name: analysisTemplate})}
                     </Typography>
                 ) : null}
+                {reanalyzing ? null : (
+                    <Button size="small" data-testid="archive-reanalyze-open"
+                            variant={hasResults ? "text" : "outlined"}
+                            color={hasResults ? "primary" : "warning"}
+                            disabled={readOnly || busy}
+                            onClick={() => setReanalyzing(true)}>
+                        {i18n.t(hasResults ? "archive_reanalyze_replace"
+                            : "archive_reanalyze_add")}
+                    </Button>
+                )}
             </Stack>
+            {reanalyzing ? (
+                <ReanalyzePanel hasResults={hasResults} cached={cached}
+                                readOnly={readOnly} busy={busy}
+                                onRun={onReanalyze}
+                                onClose={() => setReanalyzing(false)}/>
+            ) : null}
             <ThumbsState thumbs={thumbs}/>
             {reviewError ? (
                 <Alert severity="warning">
@@ -933,7 +1012,9 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
 // within it, not while typing (archivePreview.keyAction). A finished job's
 // review (A4) is read with it and, in the desktop's window, edited there:
 // each change is saved (ReviewSaver: one PUT of the whole review after the
-// edits stop) and the export saves what is pending first.
+// edits stop) and the export saves what is pending first. A removed set is
+// out of the list, the timeline, the keys and the counts: it is in the
+// list's fold of removed sets, which puts it back.
 function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
                    onTemplates, hidden = false}: {
     job: Job;
@@ -941,7 +1022,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
     setNo: number | null;
     onSetNo: (no: number) => void;
     readOnly: boolean;
-    onAct: (action: string) => Promise<void>;
+    onAct: (action: string, body?: object) => Promise<void>;
     templates: TemplateEntry[] | null;
     onTemplates: () => void;
     // Under the templates' view: kept as it is, its video paused.
@@ -967,13 +1048,16 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
     const done = job.state === "done";
     const editable = !readOnly && done && review !== null;
 
-    const shown = React.useMemo(() => {
+    const {shown, removed} = React.useMemo(() => {
         const reviewed = reviewedRows(sets.sets, review ?? EMPTY_REVIEW);
-        return {...sets, sets: reviewed};
+        return {shown: {...sets, sets: keptRows(reviewed)},
+                removed: removedRows(reviewed)};
     }, [sets, review]);
     const rows = filterSets(shown.sets, filter) as ReviewedRow[];
+    // A removed set is not selected (nor edited).
     const row = shown.sets.find((r) => r.no === setNo) ?? null;
-    const original = sets.sets.find((r) => r.no === setNo) ?? null;
+    const original = row === null ? null
+        : sets.sets.find((r) => r.no === setNo) ?? null;
     const videoEnd = typeof sets.duration === "number"
         && Number.isFinite(sets.duration) && sets.duration > 0
         ? sets.duration : null;
@@ -1109,12 +1193,14 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         }
     };
 
-    // A change of the selected set's review: shown now, saved soon.
-    const change = (make: (current: Review, set: SetRow) => Review) => {
-        if (!editable || review === null || original === null) {
+    // A change of the selected set's review (or `set`'s): shown now, saved
+    // soon.
+    const change = (make: (current: Review, set: SetRow) => Review,
+                    set: SetRow | null = original) => {
+        if (!editable || review === null || set === null) {
             return null;
         }
-        const next = make(review, original);
+        const next = make(review, set);
         setReview(next);
         saver.current?.push(next);
         return next;
@@ -1147,13 +1233,34 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         }
         return null;
     };
-    // The export and the thumbnails take the review the server has: what is
-    // not saved yet goes first.
-    const afterSaving = async (action: string) => {
+    // Remove the selected set and go to the next listed one (else the one
+    // before) -> the set picked, or null.
+    const remove = (): number | null => {
+        if (row === null || change(withRemoved) === null) {
+            return null;
+        }
+        const picked = choose(setAfterRemoving(rows, row.no));
+        if (picked === null) {
+            // None left: the keys stay with the view (the focused row or
+            // button is gone).
+            root.current?.focus({preventScroll: true});
+        }
+        return picked;
+    };
+    // Put removed set `no` back: not confirmed, the worker's range and
+    // result (none when another set holds it now).
+    const restore = (no: number) => {
+        change((current, set) => withRestored(current, sets.sets, set),
+               sets.sets.find((r) => r.no === no) ?? null);
+    };
+    // The export and the thumbnails take the review the server has, and a
+    // reanalysis keeps what of it fits the new sets: what is not saved yet
+    // goes first.
+    const afterSaving = async (action: string, body?: object) => {
         setStarting(true);
         try {
             if (await (saver.current?.flush() ?? Promise.resolve(true))) {
-                await onAct(action);
+                await onAct(action, body);
             }
         } finally {
             setStarting(false);
@@ -1171,7 +1278,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
             return;
         }
         const editing = action === "setIn" || action === "setOut"
-            || action === "confirm";
+            || action === "confirm" || action === "remove";
         // The review's keys only where it can be edited, on a selected set:
         // else Enter keeps its own meaning.
         if (editing && (!editable || original === null)) {
@@ -1193,6 +1300,8 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
             setEdge("start", position());
         } else if (action === "setOut") {
             setEdge("end", position());
+        } else if (action === "remove") {
+            picked = remove();
         } else {
             picked = confirm();
         }
@@ -1207,6 +1316,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
         onAssign: (result) => change((current, set) =>
             withResult(current, set, result)),
         onConfirm: confirm,
+        onRemove: remove,
         candidates: candidates(sets),
         held: holders(shown.sets, setNo),
     } : undefined;
@@ -1228,17 +1338,23 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
                            analysisTemplate={sets.template}
                            onTemplates={onTemplates}
                            thumbs={job.thumbs ?? null}
-                           onThumbs={() => afterSaving("thumbs")}/>
+                           onThumbs={() => afterSaving("thumbs")}
+                           hasResults={job.has_results === true}
+                           cached={job.analysis_cached === true}
+                           onReanalyze={(results) =>
+                               afterSaving("reanalyze", {results})}/>
             ) : null}
             <Box sx={{flex: 1, minHeight: 0, display: "grid",
                       gridTemplateColumns:
                           `${LIST_WIDTH}px minmax(0, 1fr) ${DETAIL_WIDTH}px`,
                       gridTemplateRows: "minmax(0, 1fr) auto"}}>
-                <SetList sets={shown} rows={rows} jobId={job.id}
+                <SetList sets={shown} rows={rows} removed={removed}
+                         jobId={job.id}
                          source={job.source} thumbs={job.thumbs ?? null}
                          filter={filter}
                          onFilter={setFilter} selectedNo={setNo}
-                         onSelect={(no) => choose(no)}/>
+                         onSelect={(no) => choose(no)}
+                         onRestore={editable ? restore : undefined}/>
                 <Preview jobId={job.id}
                          extension={videoExtension(job.source, sets.source)}
                          row={row} source={job.source}
@@ -1290,6 +1406,22 @@ const PREPARE_TIMEOUT_MS = 150000;
 const WHOLE_DAY = "*";
 const NAMED = "=";
 
+// A start.gg event URL: the form TournamentService saves the tournament in
+// (start.gg/tournament/<t>/event/<e>), which FetchEventResults takes.
+const STARTGG_EVENT_URL = /start\.gg\/tournament\/[^/?#]+\/event\/[^/?#]+/;
+
+// The loaded tournament's URL (the state's tournamentInfo.url, the URL set
+// last) when it is a start.gg event; "" otherwise (none loaded, a Hivee
+// event): the new job's results default to it.
+function useLoadedEventUrl(): string {
+    return useSelector((state: ReduxState) => {
+        const url = (state.autonaState.autonaState as unknown as
+            {tournamentInfo?: {url?: unknown}}).tournamentInfo?.url;
+        return typeof url === "string" && STARTGG_EVENT_URL.test(url)
+            ? url : "";
+    });
+}
+
 async function prepareResults(body: object): Promise<Prepared> {
     const text = await apiPost(`${BASE}/results:prepare`, body,
                                {timeoutMs: PREPARE_TIMEOUT_MS});
@@ -1333,21 +1465,52 @@ function PreparedSummary({prepared, mode}: {
     );
 }
 
-function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
-                     templates, onTemplates}: {
-    status: ArchiveStatus;
-    readOnly: boolean;
-    onStatus: (status: ArchiveStatus) => void;
-    onStarted: (job: Job) => void;
-    onFailed: () => void;
-    templates: TemplateEntry[] | null;
-    onTemplates: () => void;
-}) {
-    const [source, setSource] = React.useState("");
-    const [event, setEvent] = React.useState("");
-    const [mode, setMode] = React.useState<ResultsMode>("none");
+// The results' choice of a job (A5): the kind (none, start.gg, Autona's
+// match log, a JSON file), what that kind needs and the results prepared
+// from it (POST results:prepare). The new job's form and the reanalysis of
+// a job already analysed share it. Until the results are touched (a kind
+// chosen, the URL typed, results asked for), they follow the loaded
+// tournament: a start.gg event's URL ready to fetch, else none (a job split
+// by the text on screen alone) -- or, where none cannot be chosen
+// (`allowNone` false), start.gg with no URL yet. Once touched, what the
+// owner picked stays.
+interface ResultsChoice {
+    mode: ResultsMode;
+    url: string;
+    fileError: string;
+    days: MatchLogDay[] | null;
+    daysError: string;
+    date: string;
+    tournament: string;
+    prepared: Prepared | null;
+    preparing: boolean;
+    prepareError: string;
+    choose: (next: ResultsMode) => void;
+    typeUrl: (next: string) => void;
+    pickDate: (next: string) => void;
+    pickTournament: (next: string) => void;
+    prepare: (body: object) => Promise<void>;
+    onFile: (file: File | undefined) => Promise<void>;
+}
+
+function useResultsChoice(readOnly: boolean,
+                          allowNone: boolean): ResultsChoice {
+    const loadedUrl = useLoadedEventUrl();
+    const unloaded: ResultsMode = allowNone ? "none" : "startgg";
+    const [touched, setTouched] = React.useState(false);
+    const [followed, setFollowed] = React.useState(loadedUrl);
+    const [mode, setMode] = React.useState<ResultsMode>(
+        loadedUrl ? "startgg" : unloaded);
     const [fileError, setFileError] = React.useState("");
-    const [url, setUrl] = React.useState("");
+    const [url, setUrl] = React.useState(loadedUrl);
+    // Untouched, nothing is asked for or read yet: the loaded tournament
+    // (it came with the state after the form opened, or changed) is taken
+    // as it is.
+    if (!touched && loadedUrl !== followed) {
+        setFollowed(loadedUrl);
+        setMode(loadedUrl ? "startgg" : unloaded);
+        setUrl(loadedUrl);
+    }
     const [days, setDays] = React.useState<MatchLogDay[] | null>(null);
     const [daysError, setDaysError] = React.useState("");
     const [date, setDate] = React.useState("");
@@ -1355,10 +1518,6 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
     const [prepared, setPrepared] = React.useState<Prepared | null>(null);
     const [preparing, setPreparing] = React.useState(false);
     const [prepareError, setPrepareError] = React.useState("");
-    const [error, setError] = React.useState("");
-    const [busy, setBusy] = React.useState(false);
-    const [editing, setEditing] = React.useState(false);
-    const [workDir, setWorkDir] = React.useState(status.work_dir ?? "");
     // The latest preparation asked: an earlier one's late answer, or one
     // the form stopped waiting for (another choice, unmounted), is dropped.
     const asked = React.useRef(0);
@@ -1379,6 +1538,7 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
         setPreparing(false);
     };
     const prepare = async (body: object) => {
+        setTouched(true);
         asked.current += 1;
         const mine = asked.current;
         setPrepared(null);
@@ -1419,6 +1579,7 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
         }
     };
     const choose = (next: ResultsMode) => {
+        setTouched(true);
         daysAsked.current += 1;
         setMode(next);
         setFileError("");
@@ -1457,6 +1618,194 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
             await prepare({kind: "json", results: parsed});
         }
     };
+    const typeUrl = (next: string) => {
+        setTouched(true);
+        setUrl(next);
+        forget();
+    };
+    const pickDate = (next: string) => {
+        setDate(next);
+        setTournament(WHOLE_DAY);
+        forget();
+    };
+    const pickTournament = (next: string) => {
+        setTournament(next);
+        forget();
+    };
+    return {mode, url, fileError, days, daysError, date, tournament, prepared,
+            preparing, prepareError, choose, typeUrl, pickDate, pickTournament,
+            prepare, onFile};
+}
+
+// The results' choice (useResultsChoice) as the new job's form and the
+// reanalysis show it: the kinds (none only where it may be chosen), what
+// the kind picked needs, and the results prepared or why not.
+function ResultsChoiceFields({choice, readOnly, allowNone}: {
+    choice: ResultsChoice;
+    readOnly: boolean;
+    allowNone: boolean;
+}) {
+    const {mode, url, days, date, tournament, prepared, preparing} = choice;
+    const day = days?.find((each) => each.date === date) ?? null;
+    return (
+        <FormControl>
+            <Typography variant="caption"
+                        sx={{color: tokens.textMuted}}>
+                {i18n.t("archive_results")}
+            </Typography>
+            <RadioGroup row value={mode}
+                        onChange={(e) =>
+                            choice.choose(e.target.value as ResultsMode)}>
+                {allowNone ? (
+                    <FormControlLabel value="none" control={<Radio/>}
+                                      label={i18n.t("archive_results_none")}/>
+                ) : null}
+                <FormControlLabel value="startgg" control={<Radio/>}
+                                  label={i18n.t("archive_results_startgg")}/>
+                <FormControlLabel value="matchlog" control={<Radio/>}
+                                  label={i18n.t("archive_results_matchlog")}/>
+                <FormControlLabel value="json" control={<Radio/>}
+                                  label={i18n.t("archive_results_json")}/>
+            </RadioGroup>
+            {mode === "none" ? (
+                <Alert severity="warning" sx={{mt: 1}}
+                       data-testid="archive-results-none-note">
+                    {i18n.t("archive_results_none_note")}
+                </Alert>
+            ) : null}
+            {mode === "startgg" ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                    <TextField size="small" fullWidth value={url}
+                               label={i18n.t("archive_results_startgg_url")}
+                               onChange={(e) => choice.typeUrl(e.target.value)}/>
+                    <Button variant="outlined"
+                            disabled={readOnly || preparing
+                                      || url.trim() === ""}
+                            onClick={() => choice.prepare(
+                                {kind: "startgg", url: url.trim()})}>
+                        {i18n.t("archive_results_fetch")}
+                    </Button>
+                </Stack>
+            ) : null}
+            {mode === "matchlog" ? (
+                days === null ? (
+                    choice.daysError ? (
+                        <Alert severity="error">
+                            {i18n.t("archive_results_matchlog_failed",
+                                    {message: choice.daysError})}
+                        </Alert>
+                    ) : <LinearProgress/>
+                ) : days.length === 0 ? (
+                    <Typography variant="body2"
+                                data-testid="archive-matchlog-empty"
+                                sx={{color: tokens.textMuted}}>
+                        {i18n.t("archive_results_matchlog_empty")}
+                    </Typography>
+                ) : (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                        <FormControl size="small" sx={{minWidth: 180}}>
+                            <InputLabel id="archive-matchlog-date">
+                                {i18n.t("archive_results_matchlog_date")}
+                            </InputLabel>
+                            <Select labelId="archive-matchlog-date"
+                                    value={date}
+                                    label={i18n.t("archive_results_matchlog_date")}
+                                    onChange={(e) =>
+                                        choice.pickDate(String(e.target.value))}>
+                                {days.map((each) => (
+                                    <MenuItem key={each.date} value={each.date}>
+                                        {`${dayText(each.date)} (${each.records})`}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <FormControl size="small" sx={{minWidth: 220}}>
+                            <InputLabel id="archive-matchlog-tournament">
+                                {i18n.t("archive_results_matchlog_tournament")}
+                            </InputLabel>
+                            <Select labelId="archive-matchlog-tournament"
+                                    value={tournament}
+                                    label={i18n.t("archive_results_matchlog_tournament")}
+                                    onChange={(e) => choice.pickTournament(
+                                        String(e.target.value))}>
+                                <MenuItem value={WHOLE_DAY}>
+                                    {`${i18n.t("archive_results_matchlog_all")} (${day?.records ?? 0})`}
+                                </MenuItem>
+                                {(day?.tournaments ?? []).map((each) => (
+                                    <MenuItem key={each.name}
+                                              value={NAMED + each.name}>
+                                        {`${each.name
+                                            || i18n.t("archive_results_matchlog_unnamed")} (${each.records})`}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        <Button variant="outlined"
+                                disabled={readOnly || preparing || !date}
+                                onClick={() => choice.prepare({
+                                    kind: "matchlog", date,
+                                    tournament: tournament === WHOLE_DAY
+                                        ? null
+                                        : tournament.slice(NAMED.length),
+                                })}>
+                            {i18n.t("archive_results_load")}
+                        </Button>
+                    </Stack>
+                )
+            ) : null}
+            {mode === "startgg" && prepared === null && !preparing ? (
+                <Typography variant="body2"
+                            data-testid="archive-results-fetch-hint"
+                            sx={{color: tokens.textMuted}}>
+                    {i18n.t("archive_results_fetch_hint")}
+                </Typography>
+            ) : null}
+            {mode === "json" ? (
+                <input type="file" accept=".json,application/json"
+                       aria-label={i18n.t("archive_results_pick")}
+                       onChange={(e) => choice.onFile(e.target.files?.[0])}/>
+            ) : null}
+            {choice.fileError ? <Alert severity="error" sx={{mt: 1}}>
+                {choice.fileError}
+            </Alert> : null}
+            {preparing ? (
+                <Stack spacing={0.5} sx={{mt: 1}}
+                       data-testid="archive-results-preparing">
+                    <Typography variant="body2"
+                                sx={{color: tokens.textMuted}}>
+                        {i18n.t("archive_results_preparing")}
+                    </Typography>
+                    <LinearProgress/>
+                </Stack>
+            ) : null}
+            {choice.prepareError ? <Alert severity="error" sx={{mt: 1}}>
+                {choice.prepareError}
+            </Alert> : null}
+            {prepared !== null && mode !== "none" ? (
+                <PreparedSummary prepared={prepared} mode={mode}/>
+            ) : null}
+        </FormControl>
+    );
+}
+
+function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
+                     templates, onTemplates}: {
+    status: ArchiveStatus;
+    readOnly: boolean;
+    onStatus: (status: ArchiveStatus) => void;
+    onStarted: (job: Job) => void;
+    onFailed: () => void;
+    templates: TemplateEntry[] | null;
+    onTemplates: () => void;
+}) {
+    const choice = useResultsChoice(readOnly, true);
+    const {mode, prepared, preparing} = choice;
+    const [source, setSource] = React.useState("");
+    const [event, setEvent] = React.useState("");
+    const [error, setError] = React.useState("");
+    const [busy, setBusy] = React.useState(false);
+    const [editing, setEditing] = React.useState(false);
+    const [workDir, setWorkDir] = React.useState(status.work_dir ?? "");
     const saveWorkDir = async () => {
         try {
             const text = await apiPatch(`${BASE}/settings`,
@@ -1485,7 +1834,6 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
             setBusy(false);
         }
     };
-    const day = days?.find((each) => each.date === date) ?? null;
     const ready = source.trim() !== ""
         && (mode === "none" || (prepared !== null && !preparing));
     // The event the worker names the sets with: the one typed, else the
@@ -1499,136 +1847,8 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
             <TextField size="small" fullWidth value={source}
                        label={i18n.t("archive_source")}
                        onChange={(e) => setSource(e.target.value)}/>
-            <FormControl>
-                <Typography variant="caption"
-                            sx={{color: tokens.textMuted}}>
-                    {i18n.t("archive_results")}
-                </Typography>
-                <RadioGroup row value={mode}
-                            onChange={(e) =>
-                                choose(e.target.value as ResultsMode)}>
-                    <FormControlLabel value="none" control={<Radio/>}
-                                      label={i18n.t("archive_results_none")}/>
-                    <FormControlLabel value="startgg" control={<Radio/>}
-                                      label={i18n.t("archive_results_startgg")}/>
-                    <FormControlLabel value="matchlog" control={<Radio/>}
-                                      label={i18n.t("archive_results_matchlog")}/>
-                    <FormControlLabel value="json" control={<Radio/>}
-                                      label={i18n.t("archive_results_json")}/>
-                </RadioGroup>
-                {mode === "startgg" ? (
-                    <Stack direction="row" spacing={1} alignItems="center">
-                        <TextField size="small" fullWidth value={url}
-                                   label={i18n.t("archive_results_startgg_url")}
-                                   onChange={(e) => {
-                                       setUrl(e.target.value);
-                                       forget();
-                                   }}/>
-                        <Button variant="outlined"
-                                disabled={readOnly || preparing
-                                          || url.trim() === ""}
-                                onClick={() => prepare(
-                                    {kind: "startgg", url: url.trim()})}>
-                            {i18n.t("archive_results_fetch")}
-                        </Button>
-                    </Stack>
-                ) : null}
-                {mode === "matchlog" ? (
-                    days === null ? (
-                        daysError ? (
-                            <Alert severity="error">
-                                {i18n.t("archive_results_matchlog_failed",
-                                        {message: daysError})}
-                            </Alert>
-                        ) : <LinearProgress/>
-                    ) : days.length === 0 ? (
-                        <Typography variant="body2"
-                                    data-testid="archive-matchlog-empty"
-                                    sx={{color: tokens.textMuted}}>
-                            {i18n.t("archive_results_matchlog_empty")}
-                        </Typography>
-                    ) : (
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <FormControl size="small" sx={{minWidth: 180}}>
-                                <InputLabel id="archive-matchlog-date">
-                                    {i18n.t("archive_results_matchlog_date")}
-                                </InputLabel>
-                                <Select labelId="archive-matchlog-date"
-                                        value={date}
-                                        label={i18n.t("archive_results_matchlog_date")}
-                                        onChange={(e) => {
-                                            setDate(String(e.target.value));
-                                            setTournament(WHOLE_DAY);
-                                            forget();
-                                        }}>
-                                    {days.map((each) => (
-                                        <MenuItem key={each.date} value={each.date}>
-                                            {`${dayText(each.date)} (${each.records})`}
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                            <FormControl size="small" sx={{minWidth: 220}}>
-                                <InputLabel id="archive-matchlog-tournament">
-                                    {i18n.t("archive_results_matchlog_tournament")}
-                                </InputLabel>
-                                <Select labelId="archive-matchlog-tournament"
-                                        value={tournament}
-                                        label={i18n.t("archive_results_matchlog_tournament")}
-                                        onChange={(e) => {
-                                            setTournament(String(e.target.value));
-                                            forget();
-                                        }}>
-                                    <MenuItem value={WHOLE_DAY}>
-                                        {`${i18n.t("archive_results_matchlog_all")} (${day?.records ?? 0})`}
-                                    </MenuItem>
-                                    {(day?.tournaments ?? []).map((each) => (
-                                        <MenuItem key={each.name}
-                                                  value={NAMED + each.name}>
-                                            {`${each.name
-                                                || i18n.t("archive_results_matchlog_unnamed")} (${each.records})`}
-                                        </MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                            <Button variant="outlined"
-                                    disabled={readOnly || preparing || !date}
-                                    onClick={() => prepare({
-                                        kind: "matchlog", date,
-                                        tournament: tournament === WHOLE_DAY
-                                            ? null
-                                            : tournament.slice(NAMED.length),
-                                    })}>
-                                {i18n.t("archive_results_load")}
-                            </Button>
-                        </Stack>
-                    )
-                ) : null}
-                {mode === "json" ? (
-                    <input type="file" accept=".json,application/json"
-                           aria-label={i18n.t("archive_results_pick")}
-                           onChange={(e) => onFile(e.target.files?.[0])}/>
-                ) : null}
-                {fileError ? <Alert severity="error" sx={{mt: 1}}>
-                    {fileError}
-                </Alert> : null}
-                {preparing ? (
-                    <Stack spacing={0.5} sx={{mt: 1}}
-                           data-testid="archive-results-preparing">
-                        <Typography variant="body2"
-                                    sx={{color: tokens.textMuted}}>
-                            {i18n.t("archive_results_preparing")}
-                        </Typography>
-                        <LinearProgress/>
-                    </Stack>
-                ) : null}
-                {prepareError ? <Alert severity="error" sx={{mt: 1}}>
-                    {prepareError}
-                </Alert> : null}
-                {prepared !== null && mode !== "none" ? (
-                    <PreparedSummary prepared={prepared} mode={mode}/>
-                ) : null}
-            </FormControl>
+            <ResultsChoiceFields choice={choice} readOnly={readOnly}
+                                 allowNone/>
             <Box>
                 <TextField size="small" fullWidth value={event}
                            label={i18n.t("archive_event")}
@@ -1669,6 +1889,66 @@ function NewJobForm({status, readOnly, onStatus, onStarted, onFailed,
                     {i18n.t("archive_start")}
                 </Button>
             </Box>
+        </Stack>
+    );
+}
+
+// Results given to a job already analysed -- one made without them, split by
+// the text on screen alone, or one whose results are replaced -- and its
+// sets split again with them (POST :reanalyze): the results chosen as a new
+// job's are (none is not a choice), what the run changes said before it is
+// asked for. In the review screen itself, not a dialog.
+function ReanalyzePanel({hasResults, cached, readOnly, busy, onRun, onClose}: {
+    hasResults: boolean;
+    // The job's analysis_cached: the run reuses the worker's analysis.
+    cached: boolean;
+    readOnly: boolean;
+    busy: boolean;
+    onRun: (results: object) => void;
+    onClose: () => void;
+}) {
+    const choice = useResultsChoice(readOnly, false);
+    const {prepared, preparing} = choice;
+    return (
+        <Stack spacing={1} data-testid="archive-reanalyze"
+               sx={{p: 1.5, border: "1px solid", borderColor: "divider",
+                    borderRadius: 1}}>
+            <Typography variant="body2" fontWeight={700}>
+                {i18n.t(hasResults ? "archive_reanalyze_replace"
+                    : "archive_reanalyze_add")}
+            </Typography>
+            <Typography variant="body2" sx={{color: tokens.textMuted}}>
+                {i18n.t(hasResults ? "archive_reanalyze_body_results"
+                    : "archive_reanalyze_body_none")}
+            </Typography>
+            <ResultsChoiceFields choice={choice} readOnly={readOnly}
+                                 allowNone={false}/>
+            <Alert severity="warning" data-testid="archive-reanalyze-note">
+                <Typography variant="body2">
+                    {i18n.t("archive_reanalyze_lost")}
+                </Typography>
+                <Typography variant="body2"
+                            data-testid="archive-reanalyze-interrupted">
+                    {i18n.t("archive_reanalyze_interrupted")}
+                </Typography>
+                <Typography variant="body2"
+                            data-testid="archive-reanalyze-cache">
+                    {i18n.t(cached ? "archive_reanalyze_cached"
+                        : "archive_reanalyze_uncached")}
+                </Typography>
+            </Alert>
+            <Stack direction="row" spacing={1}>
+                <Button variant="contained" size="small"
+                        data-testid="archive-reanalyze-run"
+                        disabled={readOnly || busy || preparing
+                                  || prepared === null}
+                        onClick={() => prepared && onRun(prepared.results)}>
+                    {i18n.t("archive_reanalyze_run")}
+                </Button>
+                <Button size="small" onClick={onClose}>
+                    {i18n.t("archive_close")}
+                </Button>
+            </Stack>
         </Stack>
     );
 }
@@ -1894,22 +2174,24 @@ function ArchiveContent() {
         return () => clearInterval(timer);
     }, [running, loadDetail, loadJobs]);
 
-    const act = async (action: string) => {
+    const act = async (action: string, body: object = {}) => {
         if (detail === null) {
             return;
         }
         const id = detail.job.id;
         setError("");
         // "thumbs" draws the confirmed sets' thumbnails (A6); the others are
-        // the job's own actions (:cancel, :resume, :export).
+        // the job's own actions (:cancel, :resume, :export, and :reanalyze
+        // with its results in `body`).
         const path = action === "thumbs" ? "/thumbs:generate" : `:${action}`;
         try {
             const job = await postJob(
-                `${BASE}/jobs/${encodeURIComponent(id)}${path}`, {});
+                `${BASE}/jobs/${encodeURIComponent(id)}${path}`, body);
             if (selectedRef.current === id) {
                 setPollFailed(false);
-                // A resumed job runs: its sets (and the preview's video, which
-                // the server no longer serves) go until it ends, as GET says.
+                // A resumed (or reanalysed) job runs: its sets (and the
+                // preview's video, which the server no longer serves) go
+                // until it ends, as GET says.
                 setDetail({job, sets: job.state === "running"
                     ? null : detail.sets});
             }

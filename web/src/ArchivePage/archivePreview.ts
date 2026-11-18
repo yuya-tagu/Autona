@@ -60,7 +60,7 @@ export function jobFromQuery(search: string): string | null {
 }
 
 export type KeyAction = "togglePlay" | "previousSet" | "nextSet" | "nextReview"
-    | "setIn" | "setOut" | "confirm";
+    | "setIn" | "setOut" | "confirm" | "remove";
 
 // What a key's target is to the page's keys: typed into ("text": no key of
 // the page), a control that takes Space itself ("control"), or anything else
@@ -107,18 +107,20 @@ export interface KeyLike {
 
 // The page's keys: Space plays / pauses, Up / Down move between the listed
 // sets, N goes to the next one to review; I / O put the selected set's IN /
-// OUT at the current position and Enter confirms it and moves on (ADR-006
-// A4: the page acts on these only where it can edit). Not while typing or
-// composing, not with a modifier, not Space or Enter on a button or a link
-// (it presses it). The review's keys not with Shift either, and Enter not
-// held down (its repeat would confirm set after set).
+// OUT at the current position, Enter confirms it and moves on and Delete
+// removes it (ADR-006 A4: the page acts on these only where it can edit).
+// Not while typing or composing, not with a modifier, not Space or Enter on
+// a button or a link (it presses it). The review's keys not with Shift
+// either, and Enter / Delete not held down (their repeat would confirm or
+// remove set after set).
 export function keyAction(event: KeyLike, target: KeyTarget): KeyAction | null {
     if (event.defaultPrevented || event.isComposing || event.ctrlKey
         || event.altKey || event.metaKey || target === "text") {
         return null;
     }
-    const review = ["i", "I", "o", "O", "Enter"].includes(event.key);
-    if (review && (event.shiftKey || (event.key === "Enter" && event.repeat))) {
+    const review = ["i", "I", "o", "O", "Enter", "Delete"].includes(event.key);
+    const once = event.key === "Enter" || event.key === "Delete";
+    if (review && (event.shiftKey || (once && event.repeat))) {
         return null;
     }
     switch (event.key) {
@@ -140,6 +142,10 @@ export function keyAction(event: KeyLike, target: KeyTarget): KeyAction | null {
             return "setOut";
         case "Enter":
             return target === "control" ? null : "confirm";
+        case "Delete":
+            // Not on a button or a summary: the set is not removed by a key
+            // meant for the control that has the focus.
+            return target === "control" ? null : "remove";
         default:
             return null;
     }
@@ -157,6 +163,18 @@ export function stepSet(rows: SetRow[], current: number | null,
         return (delta > 0 ? rows[0] : rows[rows.length - 1]).no;
     }
     return rows[Math.min(rows.length - 1, Math.max(0, index + delta))].no;
+}
+
+// The set to select once `current` is removed from `rows`: the next one,
+// else the one before; from one not listed, the first. Null when none is
+// left.
+export function setAfterRemoving(rows: SetRow[],
+                                 current: number | null): number | null {
+    const index = rows.findIndex((row) => row.no === current);
+    if (index < 0) {
+        return rows[0]?.no ?? null;
+    }
+    return (rows[index + 1] ?? rows[index - 1])?.no ?? null;
 }
 
 // The next set to review after `current` in `rows`, wrapping around (the

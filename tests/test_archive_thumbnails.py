@@ -513,6 +513,34 @@ def test_a_new_run_removes_the_copies_an_earlier_run_put_beside_the_clips(
     assert all((clips / name).exists() for name in files.values())
 
 
+def test_a_reanalysis_keeps_the_beside_record_for_the_next_drawing_to_remove(
+        service, work, fake, tmp_path, drawing):
+    clips = work / DONE_ID / "clips"
+    files = _exported(service, work, tmp_path)
+    beside = {no: clips / (os.path.splitext(files[no])[0] + ".png")
+              for no in (1, 3)}
+    service.StartThumbs(DONE_ID)
+    _thumbs_ended(service, drawing)
+    assert beside[1].exists() and beside[3].exists()
+
+    with service._lock:
+        service._ClearDerived(str(work / DONE_ID), DONE_ID)
+    folder = work / DONE_ID / "thumbs"
+    # Only the copies' record is left: no thumbnail reads as drawn.
+    assert sorted(os.listdir(folder)) == ["thumbs.json"]
+    assert json.loads((folder / "thumbs.json").read_text(
+        encoding="utf-8")) == {"format": 1, "sets": {
+            "1": {"beside": beside[1].name},
+            "3": {"beside": beside[3].name}}}
+    assert service.Job(DONE_ID)[0]["thumbs"]["files"] == []
+    assert beside[1].exists() and beside[3].exists()
+
+    # The next drawing removes the old copies before its first render.
+    service.StartThumbs(DONE_ID)
+    assert not beside[1].exists() and not beside[3].exists()
+    _thumbs_ended(service, drawing)
+
+
 def test_the_thumbnails_are_refused_before_anything_is_drawn(
         service, work, fake, tmp_path, drawing, monkeypatch):
     video = _done(work, tmp_path, THUMB_SETS)

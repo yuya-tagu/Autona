@@ -14,6 +14,7 @@ import {
     nextReviewSet,
     playbackProblem,
     releaseVideo,
+    setAfterRemoving,
     setNumber,
     stepSet,
     videoExtension,
@@ -95,7 +96,8 @@ test("the page's keys: Space, Up / Down and N", () => {
 });
 
 test("no key of the page while typing, composing or with a modifier", () => {
-    for (const key of [" ", "ArrowUp", "ArrowDown", "n", "i", "o", "Enter"]) {
+    for (const key of [" ", "ArrowUp", "ArrowDown", "n", "i", "o", "Enter",
+                       "Delete"]) {
         expect(keyAction({key}, "text")).toBeNull();
         expect(keyAction({key, isComposing: true}, "other")).toBeNull();
         expect(keyAction({key, ctrlKey: true}, "other")).toBeNull();
@@ -128,6 +130,17 @@ test("I / O set IN / OUT and Enter confirms (ADR-006 A4)", () => {
     expect(keyAction({key: "ArrowDown", repeat: true}, "other")).toBe("nextSet");
 });
 
+test("Delete removes the selected set, once a press, not with Shift", () => {
+    expect(keyAction({key: "Delete"}, "other")).toBe("remove");
+    // With the focus on a button or a summary, the set is left alone.
+    expect(keyAction({key: "Delete"}, "control")).toBeNull();
+    expect(keyAction({key: "Delete", shiftKey: true}, "other")).toBeNull();
+    // Held down, its repeat would remove set after set.
+    expect(keyAction({key: "Delete", repeat: true}, "other")).toBeNull();
+    // Backspace is not Delete.
+    expect(keyAction({key: "Backspace"}, "other")).toBeNull();
+});
+
 test("an open list's options are typed into: no key of the page", () => {
     // MUI's Select puts its listbox in a portal; React still bubbles its keys
     // to the review screen.
@@ -155,6 +168,17 @@ test("Up / Down step through the listed sets and stop at the ends", () => {
     // A set the filter hides: from the list's end.
     expect(stepSet(ROWS, 4, 1)).toBe(1);
     expect(stepSet([], 1, 1)).toBeNull();
+});
+
+test("a set removed hands the selection to the next listed one", () => {
+    expect(setAfterRemoving(ROWS, 2)).toBe(3);
+    expect(setAfterRemoving(ROWS, 1)).toBe(2);
+    // The last one: the one before.
+    expect(setAfterRemoving(ROWS, 5)).toBe(3);
+    // One the filter hides: the first listed.
+    expect(setAfterRemoving(ROWS, 4)).toBe(1);
+    expect(setAfterRemoving([ROWS[0]], 1)).toBeNull();
+    expect(setAfterRemoving([], 1)).toBeNull();
 });
 
 test("N goes to the next set to review, wrapping around", () => {

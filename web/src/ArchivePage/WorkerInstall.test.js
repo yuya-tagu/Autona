@@ -1,6 +1,8 @@
 import React from "react";
-import {act, cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {Provider} from "react-redux";
+import {act, cleanup, fireEvent, render as renderInto, screen, waitFor} from "@testing-library/react";
 import i18n from "../i18n/config";
+import {autonaStore} from "../redux/store";
 import ArchivePage from "./index";
 import {canCancel, isWorking, progressValue, sizeText} from "./archiveWorker";
 
@@ -29,6 +31,11 @@ import {apiGetJson, apiPost} from "../api";
 // release check or the install runs).
 
 jest.setTimeout(20000);
+
+// The new job's form reads the loaded tournament from the state: the page
+// is rendered under the store (no tournament in it here).
+const render = (ui) => renderInto(
+    <Provider store={autonaStore}>{ui}</Provider>);
 
 const MB = 1024 * 1024;
 

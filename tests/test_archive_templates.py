@@ -466,6 +466,21 @@ def test_the_preview_is_the_workers_titles_of_every_set_as_reviewed(
         "job.json", "out", "results.json", "review.json"]
 
 
+def test_a_removed_set_is_left_out_of_the_preview(service, work, fake,
+                                                  tmp_path):
+    _previewable(work, tmp_path, service)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"removed": True},
+                                          "2": {"set": KAPPA}}})
+    inputs = tmp_path / "inputs.json"
+    fake.setenv("FAKE_VODSPLIT_INPUTS", str(inputs))
+    answer = service.PreviewTitles(DONE_ID, dict(TEMPLATE))
+    assert [row["no"] for row in answer["sets"]] == [2, 3]
+    given = json.loads(inputs.read_text(encoding="utf-8"))
+    # Set 1's result, free once it was removed, is set 2's.
+    assert [(row["no"], row["set"]) for row in given["request"]["sets"]] == [
+        (2, KAPPA), (3, MU)]
+
+
 def test_a_set_with_no_result_has_no_title(service, work, fake, tmp_path):
     _done(work, tmp_path)
     rows = service.PreviewTitles(DONE_ID, dict(TEMPLATE))["sets"]

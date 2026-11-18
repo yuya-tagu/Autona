@@ -142,6 +142,9 @@ export interface Job extends JobSummary {
     has_results?: boolean;
     export?: JobExport | null;
     thumbs?: JobThumbs | null;
+    // Whether running its analysis again reuses the worker's cache (the
+    // video it was made from is still there): a reanalysis says so first.
+    analysis_cached?: boolean;
 }
 
 export interface ArchiveStatus {

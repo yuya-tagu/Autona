@@ -617,8 +617,11 @@ def test_a_job_runs_to_done(service, work, tmp_path, fake):
     assert set(done) == {
         "id", "created_at", "source", "state", "sets", "needs_review",
         "finished_at", "progress", "logs", "warnings", "error", "exit_code",
-        "has_results", "export", "thumbs"}
+        "has_results", "export", "thumbs", "analysis_cached"}
     assert done["export"] is None
+    # The fake writes no analysis cache (out/.cache): a run again would
+    # analyse from the start.
+    assert done["analysis_cached"] is False
     # No thumbnail drawn (A6): none is listed.
     assert done["thumbs"] == {"state": None, "done": 0, "total": 0,
                               "failed": [], "files": [], "revision": 0}
@@ -1808,6 +1811,9 @@ def test_a_review_keeps_what_the_operator_changed():
     ({"sets": {"2": {"set": KAPPA}}}, "同じ結果を 2 つのセット"),
     ({"sets": {"2": {"set": UNUSED}, "3": {"set": UNUSED}}},
      "割り当てています（#2・#3）"),
+    ({"sets": {"1": {"removed": "yes"}}}, "removed は true か false"),
+    ({"sets": {"1": {"removed": 1}}}, "removed は true か false"),
+    ({"sets": {"1": {"removed": True, "note": "x"}}}, "使えない項目があります: note"),
 ])
 def test_a_review_that_does_not_fit_the_sets_is_refused(body, says):
     with pytest.raises(review.ReviewError) as refused:
@@ -1924,6 +1930,65 @@ def test_the_export_takes_the_confirmed_sets_as_reviewed():
     assert review.ExportSets(review.Empty(), REVIEW_SETS) == []
 
 
+def test_a_removed_set_keeps_nothing_else_and_holds_no_result():
+    # Set 1 removed (its confirmation, range and result go); its result is
+    # free for set 2. Not removed is no change.
+    checked = review.Check({"sets": {
+        "1": {"removed": True, "confirmed": True, "start": 130.0,
+              "set": None},
+        "2": {"confirmed": True, "set": KAPPA},
+        "3": {"removed": False},
+    }}, REVIEW_SETS)
+    assert checked == {"format": 1, "sets": {
+        "1": {"removed": True}, "2": {"confirmed": True, "set": KAPPA}}}
+    stored = review.Stored(checked, REVIEW_SETS)
+    assert stored["sets"]["1"] == {"base": [120.0, 720.0], "removed": True}
+    assert review.Normalize(json.loads(json.dumps(stored)),
+                            REVIEW_SETS) == checked
+    # Never exported, left out of the titles' preview.
+    assert [item["no"] for item in review.ExportSets(checked, REVIEW_SETS)] \
+        == [2]
+    assert [item["no"] for item in review.ReviewedSets(checked, REVIEW_SETS)] \
+        == [2, 3]
+    assert review.Assigned(checked, REVIEW_SETS["sets"][0]) is None
+
+    base1, base2 = [120.0, 720.0], [780.0, 1380.0]
+
+    def read(**entries):
+        return review.Normalize({"format": 1, "sets": entries},
+                                REVIEW_SETS)["sets"]
+
+    # Read back as {"removed": true} alone, whatever else the file holds.
+    assert read(**{"1": {"base": base1, "removed": True, "confirmed": True,
+                         "end": 700.0, "set": UNUSED}}) == {
+        "1": {"removed": True}}
+    # A set removed against another sets.json is back, with its result: the
+    # review's assignment of that result goes.
+    assert read(**{"1": {"base": [100.0, 720.0], "removed": True},
+                   "2": {"base": base2, "set": KAPPA, "confirmed": True}}) \
+        == {"2": {"confirmed": True}}
+    assert read(**{"1": {"base": base1, "removed": True},
+                   "2": {"base": base2, "set": KAPPA}}) == {
+        "1": {"removed": True}, "2": {"set": KAPPA}}
+    # Only true removes.
+    assert read(**{"3": {"base": [1400.0, 2000.0], "removed": "yes",
+                         "confirmed": True}}) == {"3": {"confirmed": True}}
+
+    # What else a removed set's entry gives is not checked: its range is
+    # never cut -- a block the worker found shorter than MIN_CLIP is removed
+    # too.
+    short = dict(REVIEW_SETS, sets=REVIEW_SETS["sets"] + [
+        {"no": 4, "start": 2100.0, "end": 2100.5, "set": None}])
+    assert review.Check({"sets": {"4": {"removed": True},
+                                  "1": {"removed": True, "start": 719.5,
+                                        "set": {"p1": "gone"}}}},
+                        short)["sets"] == {"1": {"removed": True},
+                                           "4": {"removed": True}}
+    assert review.Normalize({"format": 1, "sets": {"4": {
+        "base": [2100.0, 2100.5], "removed": True}}}, short)["sets"] == {
+        "4": {"removed": True}}
+
+
 DONE_ID = "20261116-120000-ab12"
 
 
@@ -1976,6 +2041,21 @@ def test_a_review_is_saved_whole_and_read_back(fake, work, tmp_path):
                        {"sets": {"1": {"start": 719.9}}})
     assert "1 秒以上" in message
     assert service.Review(DONE_ID)["sets"] == {"3": {"confirmed": True}}
+
+
+def test_a_removed_set_is_saved_and_never_exported(fake, work, tmp_path):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    saved = service.SaveReview(DONE_ID, {"sets": {
+        "1": {"removed": True, "confirmed": True}}})
+    assert saved == {"format": 1, "sets": {"1": {"removed": True}}}
+    assert json.loads((work / DONE_ID / "review.json").read_text(
+        encoding="utf-8")) == {"format": 1, "sets": {
+            "1": {"base": [120.0, 720.0], "removed": True}}}
+    assert service.Review(DONE_ID) == saved
+    # Nothing confirmed but a removed set: nothing to export.
+    assert "確定したセットがありません" in _refused(
+        archive.INVALID, service.StartExport, DONE_ID)
 
 
 @pytest.mark.parametrize("content", [
@@ -2372,6 +2452,308 @@ def test_the_page_reviews_and_exports_through_the_routes(
     _refusal(page.post(f"{url}:export"), 409, "CONFLICT", archive.NOT_DONE)
 
 
+# ── the reanalysis: results given to a job already analysed ─────────────
+
+# What a reanalysis removes from a job's folder (the run makes it again, or
+# it was made from the sets it replaces) and what it leaves.
+DERIVED = ["out/03_Old_Cup_A_vs_B_bg.jpg", "out/01_Old_Cup_A_vs_B.txt",
+           "thumbs/1.png", "thumbs/thumbs.json"]
+KEPT = ["out/sets.json", "out/.cache/p1.npy", "out/.cache/meta.json",
+        "out/notes.md", "out/02_Cut.txt", "out/02_Cut.mp4",
+        "clips/01_Old_Cup_A_vs_B.mp4", "clips/01_Old_Cup_A_vs_B.png",
+        "clips/01_Old_Cup_A_vs_B.txt", "clips/export.json",
+        "export_request.json", "review.json"]
+
+
+def _derived(work, jobId):
+    """DERIVED and KEPT in job `jobId`'s folder (the ones not there yet)."""
+    for name in DERIVED + KEPT:
+        path = work / jobId / name
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+
+
+def _there(work, jobId, names):
+    return [name for name in names if (work / jobId / name).exists()]
+
+
+def test_a_done_job_is_analysed_again_with_results(service, work, fake,
+                                                   tmp_path):
+    # Made without results: the sets are split by the text on screen.
+    argv = tmp_path / "argv.json"
+    fake.setenv("FAKE_VODSPLIT_ARGV", str(argv))
+    jobId = service.Create(SOURCE)["id"]
+    assert _ended(service, jobId)["has_results"] is False
+    jobDir = work / jobId
+    (jobDir / "review.json").write_text(json.dumps({"format": 1, "sets": {
+        "1": {"base": [120.0, 720.0], "confirmed": True},
+        # Made against a set whose range the new split moves.
+        "2": {"base": [700.0, 1380.0], "confirmed": True}}}),
+        encoding="utf-8")
+    _derived(work, jobId)
+    service._thumbsLast[jobId] = {"state": "done", "done": 1, "total": 1,
+                                  "failed": []}
+    argv.unlink()
+
+    job = service.Reanalyze(jobId, RESULTS)
+    assert job["state"] == "running" and job["has_results"] is True
+    done = _ended(service, jobId)
+    assert done["state"] == "done" and done["has_results"] is True
+    assert (done["sets"], done["error"]) == (2, None)
+    assert _disk(work, jobId)["has_results"] is True
+    assert json.loads((jobDir / "results.json").read_text(
+        encoding="utf-8")) == RESULTS
+    # Resume's command, --results naming them.
+    assert json.loads(argv.read_text(encoding="utf-8")) == [
+        SOURCE, "--out", str(jobDir / "out"),
+        "--download-dir", str(work / "downloads"), "--codec", "any",
+        "--results", str(jobDir / "results.json"),
+        "--no-cut", "--thumbs", "--progress", "json", "--cancel-on-stdin"]
+    sets = service.Job(jobId)[1]
+    assert [row["set"]["p1"] for row in sets["sets"]] == ["Kappa", "Kappa"]
+    assert _there(work, jobId, DERIVED) == []
+    assert _there(work, jobId, KEPT) == KEPT
+    # The run wrote its frames again.
+    assert [row["thumb"] for row in sets["sets"]] == [
+        "01_fake_bg.jpg", "02_fake_bg.jpg"]
+    assert _there(work, jobId, ["out/01_fake_bg.jpg", "out/02_fake_bg.jpg"]) \
+        == ["out/01_fake_bg.jpg", "out/02_fake_bg.jpg"]
+    # The review keeps what still fits the new sets.
+    assert service.Review(jobId)["sets"] == {"1": {"confirmed": True}}
+    assert done["thumbs"]["state"] is None
+    assert service.Jobs()[0]["state"] == "done"
+
+
+def test_a_reanalysis_stopped_midway_resumes_with_its_results(
+        service, work, fake, tmp_path):
+    jobId = service.Create(SOURCE)["id"]
+    _ended(service, jobId)
+    # A set removed whose range the new split keeps.
+    (work / jobId / "review.json").write_text(json.dumps({"format": 1,
+        "sets": {"2": {"base": [780.0, 1380.0], "removed": True}}}),
+        encoding="utf-8")
+    _derived(work, jobId)
+    frames = ["out/01_fake_bg.jpg", "out/02_fake_bg.jpg"]
+    assert _there(work, jobId, frames) == frames
+
+    _mode(fake, "slow")
+    service.Reanalyze(jobId, RESULTS)
+    _until(lambda: (service.Job(jobId)[0]["progress"] or {}).get("eta"),
+           "a progress line")
+    # Removed before the worker started; no sets while it runs.
+    assert _there(work, jobId, DERIVED + frames) == []
+    assert _there(work, jobId, KEPT) == KEPT
+    assert service.Status()["running_job"] == jobId
+    job, sets = service.Job(jobId)
+    assert sets is None and job["analysis_cached"] is False
+    assert service.Review(jobId) == {"format": 1, "sets": {}}
+    _refused(archive.BUSY, service.SaveReview, jobId, {"sets": {}})
+    service.Cancel(jobId)
+    stopped = _ended(service, jobId)
+    assert stopped["state"] == "cancelled" and stopped["has_results"] is True
+
+    # The results are the job's now: a resume runs with them.
+    _mode(fake, "ok")
+    service.Resume(jobId)
+    assert _ended(service, jobId)["state"] == "done"
+    assert service.Job(jobId)[1]["sets"][0]["set"]["p1"] == "Kappa"
+    # Still removed (its range did not move), holding no result: the one
+    # the worker gave it now is free for another set.
+    reviewed = service.Review(jobId)
+    assert reviewed["sets"] == {"2": {"removed": True}}
+    rows = service.Job(jobId)[1]["sets"]
+    assert review.Assigned(reviewed, rows[1]) is None
+    assert [item["no"] for item in review.ReviewedSets(
+        reviewed, service.Job(jobId)[1])] == [1]
+
+
+@pytest.mark.parametrize("state", ["done", "error", "cancelled", "failed"])
+def test_any_job_that_does_not_run_is_analysed_again(service, work, fake,
+                                                     state):
+    # Resume's refusal of a done job is not the reanalysis': the results
+    # are what it runs for.
+    jobId = "20261101-120000-ab12"
+    _stored(work, jobId, source=SOURCE, state=state)
+    assert service.Reanalyze(jobId, RESULTS)["state"] == "running"
+    done = _ended(service, jobId)
+    assert done["state"] == "done" and done["has_results"] is True
+    assert service.Job(jobId)[1]["sets"][0]["set"]["p1"] == "Kappa"
+
+
+def test_what_a_reanalysis_refuses_changes_nothing(service, work, fake,
+                                                   tmp_path):
+    jobId = service.Create(SOURCE)["id"]
+    _ended(service, jobId)
+    jobDir = work / jobId
+    _derived(work, jobId)
+    before = {name: (jobDir / name).read_bytes() for name in DERIVED + KEPT}
+    record = (jobDir / "job.json").read_bytes()
+
+    # Results as Create checks them; none at all is refused.
+    for results, says in ((None, "結果データを指定"),
+                          # Not Create's "leave the results out".
+                          ({"sets": []}, "区切り直しに使う結果データにセットがありません"),
+                          ({"sets": [{"p1": "A", "p2": "B", "s1": 1}]}, "s2"),
+                          ("x", '"sets"')):
+        assert says in _refused(archive.INVALID, service.Reanalyze, jobId,
+                                results)
+    for unknown in ("20261116-000000-zzzz", "nope"):
+        _refused(archive.NOT_FOUND, service.Reanalyze, unknown, RESULTS)
+    # Its thumbnails being drawn (from the frames it would remove).
+    service._thumbRun = archive._ThumbRun(jobId, str(jobDir), str(work), [])
+    assert "サムネイル" in _refused(archive.BUSY, service.Reanalyze, jobId,
+                                RESULTS)
+    service._thumbRun = None
+    # While a job runs: another one.
+    _mode(fake, "slow")
+    other = service.Create(SOURCE)["id"]
+    _refused(archive.BUSY, service.Reanalyze, jobId, RESULTS)
+    _refused(archive.BUSY, service.Reanalyze, other, RESULTS)
+    service.Cancel(other)
+    _ended(service, other)
+    # A source a start would refuse (job.json is the operator's to edit).
+    stored = _disk(work, jobId)
+    (jobDir / "job.json").write_text(json.dumps(
+        dict(stored, source="\\\\fileserver\\share\\vod.mp4")),
+        encoding="utf-8")
+    assert _refused(archive.SOURCE_UNUSABLE, service.Reanalyze, jobId,
+                    RESULTS).startswith(
+        "このジョブの元動画を使えないため区切り直せません（")
+    (jobDir / "job.json").write_bytes(record)
+
+    assert not (jobDir / "results.json").exists()
+    assert {name: (jobDir / name).read_bytes()
+            for name in DERIVED + KEPT} == before
+    assert _disk(work, jobId)["has_results"] is False
+
+    # While its export runs.
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    service.StartExport(DONE_ID)
+    _refused(archive.BUSY, service.Reanalyze, DONE_ID, RESULTS)
+    service.Cancel(DONE_ID)
+    assert _export_ended(service, DONE_ID)["state"] == "cancelled"
+    assert not (work / DONE_ID / "results.json").exists()
+
+
+@pytest.mark.parametrize("failing", ["_WriteTemplates", "_WriteRecord"])
+@pytest.mark.parametrize("had", [True, False])
+def test_a_reanalysis_that_cannot_write_changes_nothing(
+        service, work, fake, monkeypatch, failing, had):
+    jobId = service.Create(SOURCE)["id"]
+    _ended(service, jobId)
+    jobDir = work / jobId
+    _derived(work, jobId)
+    if had:
+        (jobDir / "results.json").write_text('{"sets": []}', encoding="utf-8")
+    before = {name: (jobDir / name).read_bytes() for name in DERIVED + KEPT}
+    record = (jobDir / "job.json").read_bytes()
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service, failing, broken)
+    _refused(archive.WORK_DIR_UNUSABLE, service.Reanalyze, jobId, RESULTS)
+
+    # results.json as it was, the derived files still there, no leftover.
+    assert (jobDir / "results.json").exists() is had
+    if had:
+        assert (jobDir / "results.json").read_text(
+            encoding="utf-8") == '{"sets": []}'
+    assert not (jobDir / "results.json.new").exists()
+    assert not list(jobDir.glob("*.tmp"))
+    assert {name: (jobDir / name).read_bytes()
+            for name in DERIVED + KEPT} == before
+    assert (jobDir / "job.json").read_bytes() == record
+    assert service.Job(jobId)[0]["state"] == "done"
+
+
+def test_whether_the_analysis_cache_would_be_used_is_told(service, work,
+                                                          fake, tmp_path):
+    jobId = service.Create(SOURCE)["id"]
+    _ended(service, jobId)
+
+    def cached(job=jobId):
+        return service.Job(job)[0]["analysis_cached"]
+
+    assert cached() is False                    # no out/.cache
+    (work / jobId / "out" / ".cache").mkdir()
+    assert cached() is True
+    # The download gone (another download would be another file: the
+    # worker keys its cache on the video's path, size and mtime).
+    download = work / "downloads" / "fakevideo01.mp4"
+    moved = download.with_name("elsewhere.mp4")
+    download.rename(moved)
+    assert cached() is False
+    moved.rename(download)
+    assert cached() is True
+    # A download of the open codecs is not what a run downloads now.
+    setsFile = work / jobId / "out" / "sets.json"
+    kept = setsFile.read_text(encoding="utf-8")
+    opened = work / "downloads" / "fakevideo01.open.mp4"
+    opened.write_bytes(b"video")
+    setsFile.write_text(json.dumps(dict(json.loads(kept),
+                                        source=str(opened))),
+                        encoding="utf-8")
+    assert cached() is False
+    setsFile.write_text(kept, encoding="utf-8")
+
+    # A local file: while it is where job.json names it.
+    video = tmp_path / "vod.mp4"
+    video.write_bytes(b"video")
+    local = "20261101-120000-ab12"
+    _stored(work, local, source=str(video), state="done")
+    (work / local / "out" / ".cache").mkdir(parents=True)
+    assert cached(local) is True
+    video.unlink()
+    assert cached(local) is False
+
+    # Not while its analysis runs.
+    _mode(fake, "slow")
+    service.Reanalyze(jobId, RESULTS)
+    assert cached() is False
+    service.Cancel(jobId)
+    _ended(service, jobId)
+    assert cached() is True
+
+
+def test_the_page_analyses_a_job_again_through_the_route(page, service,
+                                                         work, fake):
+    jobId = _data(page.post(f"{BASE}/jobs", json={"source": SOURCE}),
+                  201)["job"]["id"]
+    assert _route_ended(page, jobId)["has_results"] is False
+    url = f"{BASE}/jobs/{jobId}:reanalyze"
+    assert "結果データ" in _refusal(page.post(url, json={}), 400,
+                                 "INVALID_ARGUMENT", archive.INVALID)
+    _refusal(page.post(url, json={"results": {"sets": []}}), 400,
+             "INVALID_ARGUMENT", archive.INVALID)
+    _refusal(page.post(url, data="not json"), 400, "INVALID_ARGUMENT",
+             archive.INVALID)
+    _refusal(page.post(f"{BASE}/jobs/20261116-000000-zzzz:reanalyze",
+                       json={"results": RESULTS}), 404, "NOT_FOUND",
+             archive.NOT_FOUND)
+    big = {"results": {"sets": [], "pad": "x" * (2 * 1024 * 1024)}}
+    response = page.post(url, json=big)
+    assert response.status_code == 413
+    assert response.get_json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+    job = _data(page.post(url, json={"results": RESULTS}))["job"]
+    assert job["state"] == "running" and job["has_results"] is True
+    done = _route_ended(page, jobId)
+    assert done["state"] == "done" and done["has_results"] is True
+    detail = _data(page.get(f"{BASE}/jobs/{jobId}"))
+    assert detail["sets"]["sets"][0]["set"]["p1"] == "Kappa"
+    assert detail["job"]["analysis_cached"] is False
+
+    _mode(fake, "slow")
+    _data(page.post(url, json={"results": RESULTS}))
+    _refusal(page.post(url, json={"results": RESULTS}), 409, "CONFLICT",
+             archive.BUSY)
+    _data(page.post(f"{BASE}/jobs/{jobId}:cancel"))
+    assert _route_ended(page, jobId)["state"] == "cancelled"
+
+
 READS = [
     ("get", f"{BASE}/status", None),
     ("get", f"{BASE}/jobs", None),
@@ -2391,6 +2773,9 @@ WRITES = [
     ("post", f"{BASE}/jobs", {"source": SOURCE}),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:cancel", None),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:resume", None),
+    # A job's analysis run again with results: it starts the worker.
+    ("post", f"{BASE}/jobs/20261116-000000-zzzz:reanalyze",
+     {"results": RESULTS}),
     ("put", f"{BASE}/jobs/20261116-000000-zzzz/review", {"sets": {}}),
     ("post", f"{BASE}/jobs/20261116-000000-zzzz:export", None),
     # The results' preparation (A5): it reaches start.gg for the job.
@@ -2422,6 +2807,7 @@ def test_the_reads_are_this_pcs_and_the_writes_the_shells():
                  "archive_job_create": WebAccess.SHELL,
                  "archive_job_cancel": WebAccess.SHELL,
                  "archive_job_resume": WebAccess.SHELL,
+                 "archive_job_reanalyze": WebAccess.SHELL,
                  "archive_review_update": WebAccess.SHELL,
                  "archive_job_export": WebAccess.SHELL,
                  "archive_results_prepare": WebAccess.SHELL,

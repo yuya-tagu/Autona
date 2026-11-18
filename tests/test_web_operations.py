@@ -2433,6 +2433,7 @@ _NOT_200 = {
     ("api_v1.archive_job_create", None): 403,
     ("api_v1.archive_job_cancel", None): 403,
     ("api_v1.archive_job_resume", None): 403,
+    ("api_v1.archive_job_reanalyze", None): 403,
     ("api_v1.archive_review_update", None): 403,
     ("api_v1.archive_job_export", None): 403,
     # The results' preparation (SHELL, A5), as the job's creation it feeds.

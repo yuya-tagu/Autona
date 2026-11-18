@@ -18,7 +18,7 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / マージ / ブラ�
 
 1. **最新化**: `git fetch origin && git reset --hard origin/main` でローカル `main` を最新にする
 2. **作業**: ローカル `main` 上で通常通り編集・コミットする（メッセージは日本語）
-3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → **`gh pr create` で PR 作成** → 自動マージ予約（手順 4）→ PR URL と変更概要の報告 までを実行する。タイトル・本文は日本語（本文の先頭にリスク区分、Summary / Test Plan 構成）。未実施の検証項目は Test Plan に未チェックで明記する。コミット・push・PR 作成は明示的に依頼されたときのみ
+3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → **`gh pr create` で PR 作成** → 自動マージ予約（手順 4）→ PR URL と変更概要の報告 までを実行する。タイトル・本文は日本語（本文の先頭にリスク区分、Summary / Test Plan 構成）。未実施の検証項目は Test Plan に未チェックで明記する。push 前のテストは影響範囲のものだけで、全量（verify）は大規模な修正のときに限る（[orchestration.md](orchestration.md)「テストの範囲」。全量は CI が回す）。コミット・push・PR 作成は明示的に依頼されたときのみ
 4. **自動マージを予約して報告する（「通常」「軽微」。2026-11-04 Hivee と同じ運用に変更）**: PR を作ったら続けて `gh pr merge <PR番号> --merge --auto` を予約し、CI の完了を待たずに **PR URL・リスク区分・自動マージ予約済み**を報告して次の作業に移る。「PR を出して」の依頼が予約の指示を兼ねる
    - 予約後は `gh pr checks <PR番号> --watch --fail-fast` をバックグラウンドで走らせ、完了を受けて次へ進む: 緑なら `gh pr view <PR番号> --json state` で `MERGED` を確かめて手順 5 へ、落ちたらローカル `main` で直して同じブランチへ push する（予約は残るので、緑になった時点でマージされる）
    - オーナーが止めたいときは `gh pr merge <PR番号> --disable-auto` で予約を外す

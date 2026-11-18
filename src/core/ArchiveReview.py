@@ -10,15 +10,22 @@ temp file + os.replace; not the StateManager, ADR-006 D6)::
 
     {"format": 1,
      "sets": {"2": {"base": [780.0, 1380.0], "confirmed": true,
-                    "start": 775.5, "end": 1384.0, "set": {...} | null}}}
+                    "start": 775.5, "end": 1384.0, "set": {...} | null},
+              "5": {"base": [2400.0, 2460.0], "removed": true}}}
 
 One entry per set the operator changed, keyed by the set's ``no`` in the
 job's out/sets.json. What an entry leaves out is the worker's: not
 confirmed, the set's own ``start`` / ``end``, the set's own result
-(``set``). ``set`` null is "no result" (the clip is ``NN_unmatched``, with
-no text). ``base`` is the set's [start, end] in sets.json when the entry was
-written: an entry whose set has gone or moved since (a sets.json that is not
-the one it was made against) is dropped.
+(``set``), not removed. ``set`` null is "no result" (the clip is
+``NN_unmatched``, with no text). ``base`` is the set's [start, end] in
+sets.json when the entry was written: an entry whose set has gone or moved
+since (a sets.json that is not the one it was made against) is dropped.
+
+A removed set (``removed`` true: one the operator does not want, typically
+a block the worker found no result for) is ``{"removed": true}`` alone --
+what else its entry held goes --, is never confirmed (no export, no
+thumbnail) and is left out of the titles' preview (``ReviewedSets``), and
+holds no result: its own may be given to another set.
 
 A set may be given its own result or one of sets.json's ``unused_sets``
 (``Candidates``: the results the worker found no set for), and two sets
@@ -55,7 +62,7 @@ DECIMALS = 2
 # cuts an end past the end at the length it probes, which may differ from
 # sets.json's duration in the last digits (the page keeps to it too).
 END_MARGIN = 0.05
-ENTRY_KEYS = frozenset({"confirmed", "start", "end", "set"})
+ENTRY_KEYS = frozenset({"confirmed", "start", "end", "set", "removed"})
 _NUMBER = re.compile(r"[1-9][0-9]{0,5}")
 
 
@@ -155,9 +162,17 @@ def _RangeFits(start, end, duration):
         min(end, duration - END_MARGIN) - start >= MIN_CLIP)
 
 
+def Removed(review, no):
+    """Whether set `no` is removed in `review`."""
+    return review["sets"].get(str(no), {}).get("removed") is True
+
+
 def Assigned(review, row):
     """The result set `row` (a sets.json row) is given in `review`: its
-    entry's, else its own; None for no result."""
+    entry's, else its own; None for no result, and for a removed set (it
+    holds none)."""
+    if Removed(review, row["no"]):
+        return None
     entry = review["sets"].get(str(row["no"]), {})
     result = entry["set"] if "set" in entry else row.get("set")
     return result if isinstance(result, dict) else None
@@ -198,6 +213,10 @@ def Normalize(raw, sets):
         if row is None or not isinstance(value, dict) \
                 or value.get("base") != [row["start"], row["end"]]:
             continue
+        # A removed set keeps nothing else (no confirmation, range, result).
+        if value.get("removed") is True:
+            entries[str(row["no"])] = {"removed": True}
+            continue
         entry = {}
         start = value.get("start", row["start"])
         end = value.get("end", row["end"])
@@ -233,8 +252,9 @@ def Normalize(raw, sets):
 
 def Check(body, sets):
     """A save's review `body` ({"sets": {no: {"confirmed"?, "start"?,
-    "end"?, "set"?}}}) against sets.json `sets` -> the review (as
-    Normalize gives it). Raises ReviewError."""
+    "end"?, "set"?, "removed"?}}}) against sets.json `sets` -> the review
+    (as Normalize gives it: a removed set's entry is {"removed": true}
+    alone, what else it gave dropped unchecked). Raises ReviewError."""
     if not isinstance(body, dict) or not isinstance(body.get("sets"), dict):
         raise ReviewError(
             'レビューの形式が違います（"sets" のオブジェクトがありません）。')
@@ -252,12 +272,17 @@ def Check(body, sets):
         unknown = sorted(str(name) for name in set(value) - ENTRY_KEYS)
         if unknown:
             raise ReviewError(f"{where}に使えない項目があります: {', '.join(unknown)}")
+        for flag in ("confirmed", "removed"):
+            if flag in value and not isinstance(value[flag], bool):
+                raise ReviewError(f"{where}の {flag} は true か false にしてください。")
+        if value.get("removed"):
+            # Nothing else of it is kept, nor checked: its range is never
+            # cut (the worker's own may be one too short to be).
+            entries[str(row["no"])] = {"removed": True}
+            continue
         entry = {}
-        if "confirmed" in value:
-            if not isinstance(value["confirmed"], bool):
-                raise ReviewError(f"{where}の confirmed は true か false にしてください。")
-            if value["confirmed"]:
-                entry["confirmed"] = True
+        if value.get("confirmed"):
+            entry["confirmed"] = True
         edges = {}
         for edge in ("start", "end"):
             given = value.get(edge, row[edge])
@@ -317,17 +342,19 @@ def _Reviewed(review, no, row):
 
 
 def ReviewedSets(review, sets):
-    """Every set that can be reviewed, confirmed or not, as ExportSets has
-    a confirmed one (ADR-006 A6: the titles' preview shows what an export
-    would name each set)."""
-    return [_Reviewed(review, no, row) for no, row in Rows(sets).items()]
+    """Every set that can be reviewed and is not removed, confirmed or not,
+    as ExportSets has a confirmed one (ADR-006 A6: the titles' preview shows
+    what an export would name each set)."""
+    return [_Reviewed(review, no, row) for no, row in Rows(sets).items()
+            if not Removed(review, no)]
 
 
 def ExportSets(review, sets):
     """The sets of the export request (vodsplit export.validate_edits): the
-    confirmed ones in sets.json's order, with their range and result as
-    reviewed. Titles and descriptions are null: the worker makes them from
-    its template for the result and the range (a set with no result is
-    ``NN_unmatched``, with no text)."""
+    confirmed ones (never a removed one) in sets.json's order, with their
+    range and result as reviewed. Titles and descriptions are null: the
+    worker makes them from its template for the result and the range (a set
+    with no result is ``NN_unmatched``, with no text)."""
     return [_Reviewed(review, no, row) for no, row in Rows(sets).items()
-            if review["sets"].get(str(no), {}).get("confirmed")]
+            if not Removed(review, no)
+            and review["sets"].get(str(no), {}).get("confirmed")]

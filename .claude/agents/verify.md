@@ -1,6 +1,6 @@
 ---
 name: verify
-description: 静的検証（pytest 全量 / Web UI の build・test）を実行して結果を整理する。push 前のフル検証や、変更後にテストがどこまで通るかを確認したいときに使う。修正はしない。
+description: 静的検証（pytest 全量 / Web UI の build・test）を実行して結果を整理する。大規模な修正（影響範囲を列挙し切れない変更）の最後の全量チェックに使う。push・PR の前に一律では使わない（影響範囲のテストが通っていれば全量は PR の CI が回す。.claude/orchestration.md「テストの範囲」）。修正はしない。
 model: haiku
 effort: low
 omitClaudeMd: true

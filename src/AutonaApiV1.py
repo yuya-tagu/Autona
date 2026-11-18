@@ -2813,13 +2813,38 @@ def archive_job_resume(job_id):
     return ok(data={"job": job})
 
 
+@api_v1.route("/archive/jobs/<job_id>:reanalyze", methods=["POST"])
+@_no_store_answers
+@write_op("archive.job.reanalyze", log_keys_only=True,
+          max_body=ARCHIVE_JOB_MAX_BODY)
+def archive_job_reanalyze(job_id):
+    # {"results": the tournament's sets, as results:prepare gives them} ->
+    # {"job"} (its analysis running again: the page follows it). Any job
+    # that is not running, done ones too: its results.json is replaced, what
+    # the run makes again removed (the frames and title files of out/, the
+    # thumbnails), and the worker runs as a resume does -- from its analysis
+    # cache while the video is there (the job's "analysis_cached"). The
+    # review keeps what still fits the new sets; the clips stay. 400 (the
+    # results: none, or not a tournament's sets), 404, 409 while a job runs
+    # or its thumbnails are drawn (reason "busy") or when its job.json's
+    # source would not pass a start's checks (reason "source"); 503 as a
+    # start. Logged by key: the results name players.
+    body = _json_body()
+    try:
+        job = WebOps.reanalyze_archive_job(job_id, body.get("results"))
+    except archive.ArchiveError as error:
+        raise _archive_refused(error)
+    return ok(data={"job": job})
+
+
 @api_v1.route("/archive/jobs/<job_id>/review")
 @_no_store_answers
 @api_handler
 def get_archive_review(job_id):
     # {"review": {"format": 1, "sets": {"<no>": {"confirmed"?, "start"?,
-    # "end"?, "set"?}}}} (ADR-006 A4): what the operator changed about the
-    # job's sets -- what of its review.json still fits its out/sets.json.
+    # "end"?, "set"?} | {"removed": true}}}} (ADR-006 A4): what the operator
+    # changed about the job's sets -- what of its review.json still fits its
+    # out/sets.json.
     # Empty for a job whose analysis is not done or runs. 404 for an
     # unknown id.
     try:
@@ -2835,12 +2860,13 @@ def get_archive_review(job_id):
           max_body=ARCHIVE_JOB_MAX_BODY)
 def archive_review_update(job_id):
     # {"sets": {"<no>": {"confirmed": bool, "start": s, "end": s, "set": a
-    # result of the job's (a set's own or one of its unused_sets) or null}}}
-    # -- the whole review, each key optional (left out: the worker's) ->
-    # {"review"} as saved. 400 for what does not fit the job's sets (a
-    # range under 1 s or outside the video, a result it does not have, one
-    # result given twice); 409 while its analysis runs or when it is not
-    # done. Logged by key: the results name players.
+    # result of the job's (a set's own or one of its unused_sets) or null,
+    # "removed": bool}}} -- the whole review, each key optional (left out:
+    # the worker's; a removed set keeps nothing else, holds no result and
+    # is never exported) -> {"review"} as saved. 400 for what does not fit
+    # the job's sets (a range under 1 s or outside the video, a result it
+    # does not have, one result given twice); 409 while its analysis runs or
+    # when it is not done. Logged by key: the results name players.
     body = _json_body()
     try:
         review = WebOps.save_archive_review(job_id, body)

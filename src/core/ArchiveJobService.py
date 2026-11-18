@@ -19,11 +19,13 @@ default, never under user_data/: the videos are large and the operator's):
 - ``<work>/<id>/job.json``: the job (its source, state, outcome, the last
   log lines and warnings), written whole (temp file + os.replace) when the
   state changes -- at the start and at the end, not on every progress line;
-- ``<work>/<id>/results.json``: the results it was given, when it was;
-- ``<work>/<id>/out/``: the worker's output (``sets.json`` -- A1 runs with
-  ``--no-cut``, so no clips yet --, each set's background frame
-  ``NN_<title>_bg.jpg`` (``--thumbs``, ADR-006 A3; sets.json's ``thumb``)
-  and its analysis cache ``.cache``);
+- ``<work>/<id>/results.json``: the results it was given, when it was (a
+  reanalysis replaces them: below);
+- ``<work>/<id>/out/``: the worker's output (``sets.json`` and
+  ``review.md`` -- A1 runs with ``--no-cut``, so no clips --, each set's
+  background frame ``NN_<title>_bg.jpg`` (``--thumbs``, ADR-006 A3;
+  sets.json's ``thumb``), a matched set's title and description
+  ``NN_<title>.txt``, and its analysis cache ``.cache``);
 - ``<work>/<id>/worker.log``: the worker's stderr and what it printed on
   stdout that is not a JSON line, appended by this process alone;
 - ``<work>/<id>/review.json``: the operator's review of the sets (ADR-006
@@ -81,6 +83,23 @@ worker and every process it started (the job object). A job a previous
 Autona left ``running`` (it ended without its close: a crash, a kill) is
 rewritten ``cancelled`` the first time the work folder is used.
 
+The reanalysis
+--------------
+``Reanalyze`` gives a job that is not running -- done, or ended any other
+way -- results (a job made without them is split by the text on screen
+alone) and runs its analysis again with Resume's command: the results are
+written to its results.json (whole), so ``--results`` names them, and
+job.json says it has results. The worker's analysis cache (out/.cache: the
+decoded video and its OCR, keyed by the video's path, size and mtime, not
+by the results) makes the run redo only the split and the output, while the
+video it was made from is there (``Job``'s ``analysis_cached``; else the
+analysis runs from the start). Before it starts, what the run makes again
+from the results and what was made from the sets it replaces are removed
+(``_ClearDerived``: the frames and title files of out/, the thumbnails);
+the review stays and keeps what still fits the new sets
+(ArchiveReview.Normalize: a set whose range moved loses its edits), the
+clips of an export stay.
+
 The export (ADR-006 A4)
 -----------------------
 A done job's confirmed sets are cut by the worker's ``export``: the same
@@ -127,10 +146,11 @@ checked before _lock is taken) written into ``<job>/templates/`` -- the
 worker reads what Autona checked, and a template deleted meanwhile does not
 take a file from under it. ``PreviewTitles`` makes a done job's sets' titles
 with a template the page has not saved: the worker's ``titles`` (vodsplit
-V10, no video work) on the request of every reviewed set (confirmed or not)
-whose range the worker takes (``ArchiveReview.MIN_CLIP`` at least: one
-shorter would refuse the whole request; none left is NO_SETS), on the
-request's thread. The probe and the run end within ``TITLES_DEADLINE_SECS``
+V10, no video work) on the request of every reviewed set (confirmed or not;
+not a removed one) whose range the worker takes (``ArchiveReview.MIN_CLIP``
+at least: one shorter would refuse the whole request; none left is
+NO_SETS), on the request's thread. The probe and the run end within
+``TITLES_DEADLINE_SECS``
 (below the page's wait). Not a run (not counted as the one run), but one at
 a time: a newer preview kills the older one's worker, which answers
 SUPERSEDED. A worker whose version names no ``titles`` is refused
@@ -227,6 +247,8 @@ RESULTS_FILE = "results.json"
 LOG_FILE = "worker.log"
 OUT_DIR = "out"
 SETS_FILE = "sets.json"
+# The worker's analysis cache in out/ (vodsplit's default for --cache).
+CACHE_DIR = ".cache"
 DOWNLOADS_DIR = "downloads"
 REVIEW_FILE = ArchiveReview.FILE
 EXPORT_REQUEST_FILE = "export_request.json"
@@ -300,6 +322,13 @@ FRAME_TYPE = "image/jpeg"
 _THUMB_NAME = re.compile(r"([0-9]{1,6})\.png")
 # A copy beside a clip: the clip's name (NN_<title>) with .png.
 _BESIDE_NAME = re.compile(r"[0-9]{2,6}_.+\.png")
+# What a run writes into out/ for a set besides sets.json (vodsplit
+# export.write_outputs: NN_<title>, "unmatched" for a set with no title): its
+# background frame, and a matched set's title and description.
+_OUT_FRAME_NAME = re.compile(r"[0-9]{2,6}_.+_bg\.jpg")
+_OUT_TEXT_NAME = re.compile(r"([0-9]{2,6}_.+)\.txt")
+# A download of the open codecs (vodsplit's name): a run downloads <id>.mp4.
+_OPEN_DOWNLOAD_SUFFIX = ".open.mp4"
 THUMB_TYPE = "image/png"
 # What a run of the thumbnails ended as (Job's ``thumbs.state``; "running"
 # while it runs).
@@ -1163,8 +1192,9 @@ class ArchiveJobService:
         the job's analysis runs: a resumed job's sets.json is the previous
         run's until the worker writes its own at the end (an export does not
         touch it). The Job has ``thumbs`` too (ADR-006 A6: ``_ThumbsState``
-        and ``files``, ``_ThumbFiles``: read outside _lock). Raises
-        ArchiveError(NOT_FOUND)."""
+        and ``files``, ``_ThumbFiles``: read outside _lock) and
+        ``analysis_cached`` (``_AnalysisCached``; False while its analysis
+        runs). Raises ArchiveError(NOT_FOUND)."""
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
@@ -1179,7 +1209,29 @@ class ArchiveJobService:
             view["thumbs"] = self._ThumbsState(jobId)
         sets = None if analysing else self._ReadSets(jobDir)
         view["thumbs"]["files"] = self._ThumbFiles(jobDir, jobId, sets)
+        view["analysis_cached"] = not analysing and self._AnalysisCached(
+            workDir, jobDir, view, sets)
         return view, sets
+
+    def _AnalysisCached(self, workDir, jobDir, record, sets):
+        """Whether running job `record`'s analysis again (a reanalysis, a
+        resume) would reuse the worker's cache: its out/.cache is there and
+        so is the video it was made from -- by VideoFile's rule, with
+        sets.json `sets` (None: no download is known), and for a URL not a
+        download of the open codecs (a run downloads <id>.mp4 now:
+        _Arguments). The worker keys the cache on the video's path, size and
+        mtime: a video moved or downloaded again is analysed from the
+        start. Read from the disk alone (outside _lock)."""
+        if not os.path.isdir(os.path.join(jobDir, OUT_DIR, CACHE_DIR)):
+            return False
+        try:
+            path = self._VideoPath(workDir, jobDir, record, sets or {})
+        except ArchiveError:
+            return False
+        if re.match(r"https?://", record["source"]) \
+                and path.lower().endswith(_OPEN_DOWNLOAD_SUFFIX):
+            return False
+        return os.path.isfile(path)
 
     def _DiskRecord(self, jobDir, jobId):
         """Job `jobId`'s job.json when it is not the running job (under
@@ -1466,7 +1518,8 @@ class ArchiveJobService:
 
     def SaveReview(self, jobId, review):
         """Replace job `jobId`'s review with `review` ({"sets": {no:
-        {"confirmed"?, "start"?, "end"?, "set"?}}}, ArchiveReview.Check) ->
+        {"confirmed"?, "start"?, "end"?, "set"?, "removed"?}}},
+        ArchiveReview.Check) ->
         the review saved. Refused while the job's analysis runs and for one
         whose analysis is not done; taken while it exports (the export runs
         on the request it started with). Raises ArchiveError: NOT_FOUND,
@@ -1642,10 +1695,11 @@ class ArchiveJobService:
 
     def _TitlesRequest(self, jobDir, jobId):
         """The titles' request of done job `jobId`: its sets as reviewed
-        (ArchiveReview.ReviewedSets), only those whose range the worker
-        takes -- vodsplit's validate_edits refuses the whole request for one
-        shorter than MIN_CLIP (the review keeps sets.json's own range,
-        which may be) --, with what ``run`` gave the titles. Raises
+        (ArchiveReview.ReviewedSets: not the removed ones), only those whose
+        range the worker takes -- vodsplit's validate_edits refuses the
+        whole request for one shorter than MIN_CLIP (the review keeps
+        sets.json's own range, which may be) --, with what ``run`` gave the
+        titles. Raises
         ArchiveError: UNREADABLE, NO_SETS (none left)."""
         sets = self._DoneSets(jobDir, jobId)
         review = self._ReadReview(jobDir, jobId, sets)
@@ -1792,8 +1846,12 @@ class ArchiveJobService:
                                f"作業フォルダに書けません: {error}") from None
         run = _ThumbRun(jobId, jobDir, workDir, items)
         with self._lock:
-            _record, kind = self._CurrentRecord(jobDir, jobId)
+            current, kind = self._CurrentRecord(jobDir, jobId)
             self._RefuseThumbs(kind)
+            # Looked at again: a reanalysis may have begun since the first.
+            if current["state"] != "done":
+                raise ArchiveError(NOT_DONE,
+                                   "解析が完了したジョブだけサムネイルを作れます。")
             self._thumbRun = run
             self._thumbsLast.pop(jobId, None)
         logger.info(f"Archive: job {jobId} thumbnails started "
@@ -2121,10 +2179,7 @@ class ArchiveJobService:
                 try:
                     os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
                     if results is not None:
-                        with open(os.path.join(jobDir, RESULTS_FILE), "w",
-                                  encoding="utf-8") as file:
-                            json.dump(results, file, ensure_ascii=False,
-                                      indent=2)
+                        self._WriteFile(jobDir, RESULTS_FILE, results)
                     # Before job.json says it runs: what fails here leaves no
                     # job that runs without a worker.
                     arguments = self._Arguments(
@@ -2142,19 +2197,39 @@ class ArchiveJobService:
         """Run job `jobId` again (the worker resumes from its caches) ->
         its Job. Its job.json's source passes a start's checks again (the
         file is the operator's to edit). Raises ArchiveError: NOT_FOUND,
-        ALREADY_DONE, BUSY, SOURCE_UNUSABLE, UNAVAILABLE / STOPPING."""
+        ALREADY_DONE, BUSY, SOURCE_UNUSABLE, UNAVAILABLE / STOPPING,
+        WORK_DIR_UNUSABLE."""
+        return self._RunAgain(jobId)
+
+    def Reanalyze(self, jobId, results):
+        """Run job `jobId`'s analysis again with `results` (as Create takes
+        them: CheckResults; none is refused) -> its Job. Any job that is not
+        running (done or ended otherwise; not while its thumbnails are
+        drawn): its results.json replaced, what the run makes again removed
+        (_ClearDerived), then Resume's command -- the worker reuses its
+        analysis cache while the video is there, and splits and names the
+        sets by the results. Raises ArchiveError: INVALID, NOT_FOUND, BUSY,
+        SOURCE_UNUSABLE, UNAVAILABLE / STOPPING, WORK_DIR_UNUSABLE."""
+        if isinstance(results, dict) and results.get("sets") == []:
+            raise ArchiveError(INVALID, (
+                "区切り直しに使う結果データにセットがありません。1 件以上のセットを含む結果を指定してください。"))
+        results = CheckResults(results)
+        if results is None:
+            raise ArchiveError(INVALID, "区切り直しに使う結果データを指定してください。")
+        return self._RunAgain(jobId, results)
+
+    def _RunAgain(self, jobId, results=None):
+        """Run job `jobId`'s analysis again with the command _Arguments
+        makes -> its Job: a resume (`results` None) or a reanalysis (its
+        results.json replaced by `results`, and _ClearDerived, once nothing
+        refuses it). Its job.json's source passes a start's checks again."""
+        reanalysis = results is not None
         workDir = self.WorkDir()
         jobDir = self._JobDir(jobId, workDir)
         with self._lock:
             self._Sweep(workDir)
-            if self._RunView(jobId) is not None:
-                raise ArchiveError(BUSY, "このジョブは実行中です。")
-            record = self._DiskRecord(jobDir, jobId)
-        if record is None:
-            raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-        if record["state"] == "done":
-            raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
-        self._ResumableSource(record)
+            record = self._Rerunnable(jobDir, jobId, reanalysis)
+        self._ResumableSource(record, reanalysis)
         for again in (False, True):
             swaps = self._swaps
             probe = self._Available()
@@ -2163,29 +2238,164 @@ class ArchiveJobService:
                 if self._Swapped(swaps, again):
                     continue
                 self._Refuse()
-                record = self._DiskRecord(jobDir, jobId)
-                if record is None:
-                    raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-                if record["state"] == "done":
-                    raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
-                record["source"] = self._ResumableSource(record)
+                record = self._Rerunnable(jobDir, jobId, reanalysis)
+                record["source"] = self._ResumableSource(record, reanalysis)
                 record.update(state="running", finished_at=None, exit_code=None,
                               sets=None, needs_review=None, error=None,
                               warnings=[], logs=[], progress=None,
                               worker_version=probe.version)
+                if reanalysis:
+                    record["has_results"] = True
                 run = _Run(record, jobDir, workDir)
+                pending = os.path.join(jobDir, RESULTS_FILE + ".new")
+                final = os.path.join(jobDir, RESULTS_FILE)
+                previous = None
+                swapped = False
                 try:
                     os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
-                    arguments = self._Arguments(
-                        run, self._WriteTemplates(jobDir, templates),
-                        probe.features)
+                    if reanalysis:
+                        # Written aside: results.json is replaced only once
+                        # what can fail before job.json is written has not.
+                        self._WriteFile(jobDir, RESULTS_FILE + ".new",
+                                        results)
+                    # Before job.json says it runs: what fails here leaves no
+                    # job that runs without a worker.
+                    templateFiles = self._WriteTemplates(jobDir, templates)
+                    if reanalysis:
+                        try:
+                            with open(final, "rb") as file:
+                                previous = file.read()
+                        except FileNotFoundError:
+                            previous = None
+                        os.replace(pending, final)
+                        swapped = True
+                    # After the replace: --results names the file.
+                    arguments = self._Arguments(run, templateFiles,
+                                                probe.features)
                     self._WriteRecord(jobDir, record)
                 except OSError as error:
+                    self._DiscardResultsSwap(jobDir, pending, final,
+                                             previous, swapped)
                     raise ArchiveError(WORK_DIR_UNUSABLE,
                                        f"作業フォルダに書けません: {error}")
-                logger.info(f"Archive: job {jobId} resumed")
+                if reanalysis:
+                    # job.json says it runs: what the new sets replace goes.
+                    self._ClearDerived(jobDir, jobId)
+                if reanalysis:
+                    logger.info(f"Archive: job {jobId} analysed again with "
+                                f"results ({len(results['sets'])} sets)")
+                else:
+                    logger.info(f"Archive: job {jobId} resumed")
                 self._Start(run, probe, arguments)
                 return self._RunView(jobId)
+
+    def _DiscardResultsSwap(self, jobDir, pending, final, previous, swapped):
+        """A reanalysis that failed before job.json was written: remove the
+        results written aside and, when results.json was already replaced,
+        put the earlier one back (or remove it when there was none). Never
+        raises."""
+        try:
+            if os.path.exists(pending):
+                os.remove(pending)
+            if swapped:
+                if previous is None:
+                    os.remove(final)
+                else:
+                    with open(final, "wb") as file:
+                        file.write(previous)
+        except OSError:
+            logger.opt(exception=True).warning(
+                f"Archive: {RESULTS_FILE} could not be restored")
+
+    def _Rerunnable(self, jobDir, jobId, reanalysis):
+        """Job `jobId`'s job.json when its analysis may run again (under
+        _lock): not while it runs (its analysis or its export); a resume's
+        not done; a reanalysis' not while its thumbnails are drawn (from the
+        sets and frames it replaces). Raises ArchiveError: BUSY, NOT_FOUND,
+        ALREADY_DONE."""
+        if self._RunView(jobId) is not None:
+            raise ArchiveError(BUSY, "このジョブは実行中です。")
+        record = self._DiskRecord(jobDir, jobId)
+        if record is None:
+            raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+        if not reanalysis and record["state"] == "done":
+            raise ArchiveError(ALREADY_DONE, "このジョブは完了しています。")
+        thumbs = self._thumbRun
+        if reanalysis and thumbs is not None and thumbs.jobId == jobId:
+            raise ArchiveError(BUSY, (
+                "このジョブのサムネイルを作っているところです。終わってからもう一度押してください。"))
+        return record
+
+    def _ClearDerived(self, jobDir, jobId):
+        """Before job `jobId`'s analysis runs again with other results
+        (Reanalyze; under _lock): remove what the run makes again and what
+        was made from the sets it replaces -- out/'s frames (NN_<title>_bg
+        .jpg: a set's title is in the name, so a renamed set's would stay)
+        and title files (NN_<title>.txt; not one beside a clip of its name,
+        which a run with --no-cut never cuts: not Autona's), the thumbnails
+        (thumbs/<no>.png, drawn for the sets replaced; thumbs.json keeps
+        only which clip each had a copy beside: the next drawing removes
+        those copies) and how this process' last drawing of them ended.
+        Left: out/sets.json
+        and review.md (the worker replaces them; until then sets.json names
+        the download), out/.cache (what makes the run quick), the download,
+        review.json (ArchiveReview.Normalize keeps what still fits the new
+        sets), the export (clips/, its request) and the copies of the
+        thumbnails beside its clips (they show those clips), and anything
+        else. Never raises: what cannot be removed is logged."""
+        out = os.path.join(jobDir, OUT_DIR)
+        try:
+            names = os.listdir(out) if _Under(jobDir, out) else []
+        except OSError:
+            names = []
+        for name in names:
+            text = _OUT_TEXT_NAME.fullmatch(name)
+            if _OUT_FRAME_NAME.fullmatch(name) or (
+                    text and not os.path.exists(
+                        os.path.join(out, text.group(1) + ".mp4"))):
+                self._RemoveDerived(jobId, os.path.join(out, name))
+        folder = os.path.join(jobDir, THUMBS_DIR)
+        try:
+            names = os.listdir(folder) if _Under(jobDir, folder) else []
+        except OSError:
+            names = []
+        for name in names:
+            if _THUMB_NAME.fullmatch(name):
+                self._RemoveDerived(jobId, os.path.join(folder, name))
+        if THUMBS_FILE in names:
+            # What the drawn thumbnails were drawn for goes (Job shows no
+            # thumbnail: no start / end / set to match); the copies beside
+            # clips stay named, for the next drawing to remove them.
+            besides = {key: {"beside": entry["beside"]}
+                       for key, entry in self._ReadThumbsIndex(jobDir).items()
+                       if entry.get("beside")}
+            if besides:
+                try:
+                    self._WriteThumbsIndex(jobDir, besides)
+                except OSError:
+                    logger.warning(
+                        f"Archive: job {jobId}: {THUMBS_FILE} could not be "
+                        f"rewritten before its reanalysis")
+            else:
+                # As _ReadThumbsIndex reads it: on Windows a file another
+                # thread has open cannot be removed.
+                with self._filesLock:
+                    self._RemoveDerived(jobId,
+                                        os.path.join(folder, THUMBS_FILE))
+        self._thumbsLast.pop(jobId, None)
+
+    @staticmethod
+    def _RemoveDerived(jobId, path):
+        """Remove `path`; a failure is logged by its folder alone (a file of
+        out/ is named after a set's players)."""
+        try:
+            os.remove(path)
+        except OSError as error:
+            logger.warning(
+                f"Archive: job {jobId}: a file of its "
+                f"{os.path.basename(os.path.dirname(path))}/ could not be "
+                f"removed before its reanalysis ({type(error).__name__}, "
+                f"errno {error.errno})")
 
     def Cancel(self, jobId):
         """Ask the running job `jobId` -- its analysis or its export -- to
@@ -2204,15 +2414,17 @@ class ArchiveJobService:
         raise ArchiveError(NOT_RUNNING, "このジョブは実行中ではありません。")
 
     @staticmethod
-    def _ResumableSource(record):
+    def _ResumableSource(record, reanalysis=False):
         """The source of job.json `record` as CheckSource reads it. Raises
-        ArchiveError(SOURCE_UNUSABLE) with CheckSource's reason."""
+        ArchiveError(SOURCE_UNUSABLE) with CheckSource's reason (`reanalysis`:
+        worded for Reanalyze)."""
         try:
             return CheckSource(record["source"])
         except ArchiveError as error:
             reason = error.message.rstrip("。")
+            what = "区切り直せません" if reanalysis else "再開できません"
             raise ArchiveError(SOURCE_UNUSABLE, (
-                f"このジョブの元動画を使えないため再開できません（{reason}）。"
+                f"このジョブの元動画を使えないため{what}（{reason}）。"
                 "新しいジョブとして始め直してください。"))
 
     def _Refuse(self, export=False):
