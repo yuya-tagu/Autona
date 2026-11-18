@@ -43,7 +43,6 @@ import {
     chosenRow,
     defaultPhase,
     filterShown,
-    isCompletePair,
     nextSort,
     phaseQuery,
     progressOf,
@@ -297,15 +296,14 @@ const SET_COLUMNS = [
 ];
 
 // The window's (board 1/2's "大会の試合を選ぶ"): the phase combo, the fetch
-// button, "Show completed sets" (asked of start.gg: a change fetches again)
-// and "Show complete pairs" (the page's filter), the table and its search,
-// the progress and the status. OK / Enter / a double click loads the row
+// button, "Show completed sets" (asked of start.gg: a change fetches again),
+// the table and its search, the progress and the status. OK / Enter / a double click loads the row
 // (chosenRow) and stops the fetch running; the station button opens the
 // station dialog in its place. Mounted as long as the page is: what the
-// operator set in it (the search, the boxes, the table's order -- the
+// operator set in it (the search, the box, the table's order -- the
 // window's _sortState) stays from one opening to the next, as the window's
-// did (it was hidden, not destroyed); the search and "Show complete pairs"
-// each board's, as each board had its window.
+// did (it was hidden, not destroyed); the search each board's, as each
+// board had its window.
 export function SetDialog({open, board, write, onClose, onTrack}: {
     open: boolean;
     board: number;
@@ -320,17 +318,14 @@ export function SetDialog({open, board, write, onClose, onTrack}: {
                                          phasesProgress);
     const sets = useListRead<SetRow>("/api/v1/tournament/sets", open,
                                      setsProgress);
-    // Each board's search and "Show complete pairs" (the window's, one per
-    // board); the order is every board's (the window's class-wide
-    // _sortState), as is "Show completed sets" (brought back from the rows'
-    // query at each opening, as the window does from its shared cache).
-    const [views, setViews] = React.useState<Record<number, {
-        filter: string; completePairs: boolean}>>({});
-    const filter = views[board]?.filter ?? "";
-    const completePairs = views[board]?.completePairs ?? false;
-    const setView = (change: {filter?: string; completePairs?: boolean}) =>
-        setViews((known) => ({...known,
-                              [board]: {filter, completePairs, ...change}}));
+    // Each board's search (the window's, one per board); the order is every
+    // board's (the window's class-wide _sortState), as is "Show completed
+    // sets" (brought back from the rows' query at each opening, as the window
+    // does from its shared cache).
+    const [filters, setFilters] = React.useState<Record<number, string>>({});
+    const filter = filters[board] ?? "";
+    const setFilter = (value: string) =>
+        setFilters((known) => ({...known, [board]: value}));
     const [finished, setFinished] = React.useState(false);
     // The phase the operator picked, for the phases of that revision (a
     // fetch of them, or a tournament change, starts over from the default).
@@ -461,12 +456,9 @@ export function SetDialog({open, board, write, onClose, onTrack}: {
     };
 
     const rows = React.useMemo(() => rowsOf(list), [list]);
-    const shown = React.useMemo(() => {
-        const all = setShown(rows);
-        const pairs = completePairs
-            ? all.filter((item) => isCompletePair(item.row)) : all;
-        return sortShown(filterShown(pairs, filter), sort);
-    }, [rows, completePairs, filter, sort]);
+    const shown = React.useMemo(
+        () => sortShown(filterShown(setShown(rows), filter), sort),
+        [rows, filter, sort]);
 
     const take = (item: Shown<SetRow> | null) => {
         onClose();
@@ -508,7 +500,7 @@ export function SetDialog({open, board, write, onClose, onTrack}: {
                         type="search"
                         label={i18n.t("score_sets_filter")}
                         value={filter}
-                        onChange={(event) => setView({filter: event.target.value})}
+                        onChange={(event) => setFilter(event.target.value)}
                     />
                     <Stack direction={{xs: "column", sm: "row"}} spacing={1}
                            alignItems={{sm: "center"}}>
@@ -552,35 +544,19 @@ export function SetDialog({open, board, write, onClose, onTrack}: {
                             {i18n.t("score_sets_fetch")}
                         </Button>
                     </Stack>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    size="small"
-                                    checked={finished}
-                                    onChange={(event) => {
-                                        setFinished(event.target.checked);
-                                        fetchSets(phase, event.target.checked);
-                                    }}
-                                />
-                            }
-                            label={i18n.t("score_sets_finished")}
-                        />
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    size="small"
-                                    checked={completePairs}
-                                    onChange={(event) => {
-                                        setView({completePairs:
-                                            event.target.checked});
-                                        setSelected(null);
-                                    }}
-                                />
-                            }
-                            label={i18n.t("score_sets_complete_pairs")}
-                        />
-                    </Stack>
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                size="small"
+                                checked={finished}
+                                onChange={(event) => {
+                                    setFinished(event.target.checked);
+                                    fetchSets(phase, event.target.checked);
+                                }}
+                            />
+                        }
+                        label={i18n.t("score_sets_finished")}
+                    />
                     {/* The phases not known, said (a fetch waits for them):
                         their fetch failed -- asked again -- or their list
                         could not be read -- read again. */}

@@ -1,5 +1,5 @@
 {
- "about": "The SCORE page's set selection (ADR-005 S4ab): what the Qt set and station windows show for a set or a station, one table for both -- core's rows (SetSelectionService.SetRow / StationRows, GET /api/v1/tournament/sets and /stations) and the windows' tables (tests/test_set_selection.py), and the page's setCells / stationCells / isCompletePair (web/src/ScorePage/setRows.ts, its jest test). `set` / `station`: what the provider answers; `row`: v1's row of it; `cells`: the window's columns (Stream, Station, Phase, Pool, Match, Player 1, Player 2 / Type, Id, Stream, Identifier); `complete`: kept by \"Show complete pairs\"; `windowCells`: what the window shows where it differs from the page (`cells`) -- the station window's str(None), which the page does not copy. Change a case here and all of them have to agree.",
+ "about": "The SCORE page's set selection (ADR-005 S4ab): what the Qt set and station windows show for a set or a station, one table for both -- core's rows (SetSelectionService.SetRow / StationRows, GET /api/v1/tournament/sets and /stations) and the windows' tables (tests/test_set_selection.py), and the page's setCells / stationCells / isCompletePair (web/src/ScorePage/setRows.ts, its jest test). `set` / `station`: what the provider answers; `row`: v1's row of it; `cells`: the window's columns (Stream, Station, Phase, Pool, Match, Player 1, Player 2 / Type, Id, Stream, Identifier); `windowCells`: what the window shows where it differs from the page (`cells`) -- the station window's str(None), which the page does not copy. Change a case here and all of them have to agree.",
  "sets": [
   {
    "why": "singles",
@@ -90,8 +90,7 @@
     "Winners Final",
     "ALPHA",
     "BRAVO"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "a stream, no station, no pool",
@@ -182,8 +181,7 @@
     "Winners Final",
     "ALPHA",
     "BRAVO"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "station 0 is a station",
@@ -274,8 +272,7 @@
     "Winners Final",
     "ALPHA",
     "BRAVO"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "a station given as text",
@@ -366,8 +363,7 @@
     "Winners Final",
     "ALPHA",
     "BRAVO"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "doubles: both teams get their members",
@@ -494,8 +490,7 @@
     "Grand Final",
     "ALPHA (ALPHA, ALICE)",
     "BRAVO (BRAVO, BOB)"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "doubles under a team name",
@@ -622,8 +617,7 @@
     "Winners Final",
     "Team A (A1, A2)",
     "Team B (B1, B2)"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "doubles with the other side unknown: an empty pair of brackets",
@@ -712,8 +706,7 @@
     "Winners Final",
     "ALPHA (ALPHA, ALICE)",
     " ()"
-   ],
-   "complete": false
+   ]
   },
   {
    "why": "the first side unknown: the rule looks at the first side only",
@@ -802,8 +795,7 @@
     "Winners Final",
     "",
     "BRAVO"
-   ],
-   "complete": false
+   ]
   },
   {
    "why": "nobody yet",
@@ -854,8 +846,7 @@
     "Winners Final",
     "",
     ""
-   ],
-   "complete": false
+   ]
   },
   {
    "why": "one side unknown, singles",
@@ -926,8 +917,7 @@
     "Winners Final",
     "ALPHA",
     ""
-   ],
-   "complete": false
+   ]
   },
   {
    "why": "names in Japanese",
@@ -1018,8 +1008,7 @@
     "勝者側決勝",
     "アルファ",
     "ブラボー"
-   ],
-   "complete": true
+   ]
   },
   {
    "why": "a team of three: every member in the brackets",
@@ -1182,8 +1171,7 @@
     "Grand Final",
     "Crew A (C1, C2, C3)",
     "Crew B (D1, D2, D3)"
-   ],
-   "complete": true
+   ]
   }
  ],
  "stations": [

@@ -7,7 +7,6 @@ import {
     clock,
     defaultPhase,
     filterShown,
-    isCompletePair,
     nextSort,
     phaseQuery,
     progressOf,
@@ -30,7 +29,6 @@ const STATION_ROWS = cases.stations.map((item) => item.row);
 describe("the windows' columns, one table for the page, core and the windows", () => {
     test.each(cases.sets.map((item) => [item.why, item]))("set: %s", (_why, item) => {
         expect(setCells(item.row)).toEqual(item.cells);
-        expect(isCompletePair(item.row)).toBe(item.complete);
     });
 
     test.each(cases.stations.map((item) => [item.why, item]))(
