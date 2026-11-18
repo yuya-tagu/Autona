@@ -50,7 +50,7 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 
 ## 動作確認の分担
 
-- **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が `python scripts/run_tests_parallel.py`（並列・約 3〜6 分、マシンの状態で変動。CI は直列のまま）で回す
+- **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が `python scripts/run_tests_parallel.py`（並列・約 3〜6 分、マシンの状態で変動。CI も PR では同じ並列ランナー。main への push では直列も走る）で回す
 - **テストの範囲**（2026-11-17 オーナー指示）: **影響範囲のテストを実施する。大規模な修正の場合は最後に全量チェックする**。
   委譲の brief に一律で「最後に pytest 全量」と書かない
   - 影響範囲は「触ったモジュールのテスト」だけではない。この repo は横断の台帳・pin テストが変更箇所から離れたところで落ちるので、

@@ -23,7 +23,7 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / マージ / ブラ�
    - 予約後は `gh pr checks <PR番号> --watch --fail-fast` をバックグラウンドで走らせ、完了を受けて次へ進む: 緑なら `gh pr view <PR番号> --json state` で `MERGED` を確かめて手順 5 へ、落ちたらローカル `main` で直して同じブランチへ push する（予約は残るので、緑になった時点でマージされる）
    - オーナーが止めたいときは `gh pr merge <PR番号> --disable-auto` で予約を外す
    - **リスク区分「高」は予約しない**。CI の緑を待って「マージ可」として PR URL・CI 結果・リスク区分を報告し、オーナーが差分を見てからマージする（オーナーに「マージして」と言われたら Claude が `gh pr merge <PR番号> --merge --auto` を実行する）
-   - main はブランチ保護で CI の 3 ジョブ（`Python tests` / `Web UI build and tests` / `Browser E2E (headless app)`）の成功が必須（管理者も迂回不可）。**マージ方式は merge commit**（`--merge`）。squash にするとローカル `main` のコミットが origin の祖先でなくなり、手順 5 の `merge --ff-only` 同期が成り立たないため Hivee と変えている
+   - main はブランチ保護で CI の 3 ジョブ（`Python tests` / `Web UI build and tests` / `Browser E2E (headless app)`）の成功が必須（管理者も迂回不可）。`Python tests` は並列ランナーで、main への push 後に走る直列の `Python tests (serial)` は必須ではない（落ちたら前進修正）。**マージ方式は merge commit**（`--merge`）。squash にするとローカル `main` のコミットが origin の祖先でなくなり、手順 5 の `merge --ff-only` 同期が成り立たないため Hivee と変えている
    - head ブランチはマージ時に自動削除される（リポジトリ設定 `delete_branch_on_merge`）
    - `gh` の操作は push と同じアカウント切替が必要（`CLAUDE.local.md` 参照）
 5. **マージ後の同期**: Claude がマージした（予約がマージされた）ときは同じセッションが続けてローカル `main` を再同期する。**先に `git status` で未コミット変更の有無を確認**し、無ければ `git fetch origin && git reset --hard origin/main`、有れば（別セッションの作業中ファイル等）作業ツリーに触れない `git fetch origin --prune && git merge --ff-only origin/main` を使う（2026-07-29 の消失事故を受けた手順）
