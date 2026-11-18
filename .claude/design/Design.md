@@ -953,6 +953,12 @@ AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidge
 - **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None）。呼ぶのは `load_set` の
   ホットキーと legacy の open-set（`AutonaShellOperations.ShowSetSelection` / `OpenSetSelection` → `OpenPanel("scoreboard")` →
   ホストの `OpenScoreSets(board)`）
+- **スプラッシュ**: `main.py` が単一インスタンスのゲートの直後（PySide6 の import より前）に出し、`show()` の直後に `_BuildUi` が
+  `finish` する（2026-11-19）。暗い角丸の板に Autona のアイコン（静止）と「Loading...」。アイコンの上を斜めの光の帯が通り過ぎ（アイコンの
+  不透明な画素だけを照らす。帯 0.7 秒 + 間 0.9 秒の周期）、ドットが周期に合わせて 0〜3 個に増える。進捗なし。その間メインスレッドは import とウィンドウの構築で
+  塞がっていてイベントループが無いので、Qt ではなく Win32 の layered window を専用スレッド（`autona_splash.NativeSplash`。ctypes +
+  GDI+）が持ち、コマを事前に描いておいて送る（ctypes の呼び出しはフレーム間の待ち以外 GIL を放さない）。最前面にしない・フォーカスを
+  取らない。Windows 以外・失敗時は出さない（`active_splash()` は no-op の代役を返す）。起動が例外で終わるときは `main.py` の atexit が消す
 - **起動**: `show()` → `STARTUP phase=core-shown` → ローディングのスピナー（`LoadingOverlay`）→ 初回の描画の後に `_StartWebServer` →
   `webserver-ready` → ホストがビューを建てて読む → 最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。
   初回起動の LAN の確認（`QMessageBox.question`。ウィンドウで使う唯一の QMessageBox）はスピナーの上に出る

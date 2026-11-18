@@ -245,30 +245,39 @@ if _HEADLESS:
     from src import headless
     sys.exit(headless.run(App))
 
+# Imports no Qt and starts nothing (autona_splash.py).
 import autona_splash
 
 autona_splash.set_startup_t0(_STARTUP_T0)
 autona_splash.log_startup_phase("gate")
 
 # ── Stage 1: early feedback ──────────────────────────────────────────────
-# QApplication and the splash are built HERE, before `from src import Autona`:
-# that import chain assembles the whole app (bootstrap_core() and
-# bootstrap_gui() construct every singleton) and takes tens of seconds, and until this change nothing at all
-# was drawn while it ran — the dead window after a double click is what drove
-# users to click again (and start a second process).
+# The splash goes up HERE, right after the gate and before even PySide6 is
+# imported: from now until the window is shown, this thread imports PySide6,
+# builds the QApplication and assembles the whole app (`from src import
+# Autona`: bootstrap_core() and bootstrap_gui() construct every singleton),
+# which takes seconds (tens of them on a cold start), and a dead screen after
+# a double click is what drove users to click again (and start a second
+# process). The splash is a native window animated by a thread of its own,
+# so it keeps moving while this one is busy. Windows only; it is kept alive
+# by autona_splash.ACTIVE_SPLASH, and Window._BuildUi finish()es it once the
+# window is shown.
+autona_splash.create_splash()
+autona_splash.log_startup_phase("splash")
+# A start that fails (`from src import Autona` or the window raising) leaves
+# no window to finish the splash: take it down on the way out rather than
+# leave it animating over the traceback. A no-op once finished.
+import atexit
+atexit.register(autona_splash.active_splash().finish)
+
+# The QApplication is built before `from src import Autona` too: the IPC
+# server below needs an application object, and QWebEngineView needs
+# AA_ShareOpenGLContexts set before the QApplication exists.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-# Must precede QApplication construction — the QWebEngineView instances
-# built later in startup require it.
 QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 App = QApplication(sys.argv)
-
-# The splash is kept alive by autona_splash.ACTIVE_SPLASH; Window.__init__
-# picks it up from there to push progress and finish() it.
-autona_splash.create_splash()
-App.processEvents()
-autona_splash.log_startup_phase("splash")
 
 # ── Stage 0 (cont.): activation, for the desktop ──────────────────────────
 _activationPending = False

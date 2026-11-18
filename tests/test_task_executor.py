@@ -924,6 +924,10 @@ THREADS_LEFT = {
     # SF-3b: core's AssetPackService runs them as TaskExecutor jobs.
     ("src/AutonaUpdater.py", "_CheckThread", "class(QThread)"),
     ("src/AutonaUpdater.py", "_DownloadThread", "class(QThread)"),
+    # The startup splash's (2026-11-19): one, daemon, from the gate until
+    # the window is shown; it owns the native splash window and animates it
+    # while the main thread is blocked importing and building the window.
+    ("autona_splash.py", "NativeSplash.start", "Thread"),
 }
 
 

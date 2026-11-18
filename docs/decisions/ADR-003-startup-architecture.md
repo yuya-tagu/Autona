@@ -25,6 +25,18 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 > 時間で外れないように）。上限で外れたあとでも、最初の読み込みが終われば `panel-shown` は出る。
 > 順序は `tests/test_web_panel_host.py`（`_BuildUi` のトークンの順と `_OnPageLoadFinished`）が pin する。
 
+> **2026-11-19 追記: Stage 1（早期フィードバック）の出し方を変えた。**
+> RPG 風の `QSplashScreen`（文言・進捗バー）をやめ、Autona のアイコンに斜めの光の帯が通り過ぎるアニメーションと「Loading...」だけの
+> 小さなスプラッシュにした（React 化で起動後の体験が十分に軽くなったため。オーナー依頼）。
+> **アニメーションは、メインスレッドが塞がっている間も動き続けなければならない**: スプラッシュの間メインスレッドは
+> PySide6 / `src` の import と `Window.__init__` で塞がっていてイベントループが無く、Qt のウィジェットを QTimer で動かすと止まって
+> 固まったように見える（QtQuick の Animator は spec で除外していて使えない）。そこで Qt を使わない Win32 の layered window を
+> 専用の daemon スレッドが持ち、ctypes + GDI+ で事前に描いたコマを送る（`autona_splash.NativeSplash`。最前面にはしない・
+> フォーカスを取らない。失敗したらスプラッシュなしで起動を続ける）。Qt が要らないので、**単一インスタンスのゲートの直後・
+> PySide6 の import より前**に出る（`STARTUP phase=splash` の位置。以前は `QApplication` の生成の後）。消すのは `show()` の直後の
+> `splash.finish()`（最大 0.5 秒で返る。起動が例外で終わるときは `main.py` の atexit が消す）。QApplication は今も `main.py` が
+> `import src` の前に作る（IPC サーバーと `AA_ShareOpenGLContexts` のため）。pin: `tests/test_splash.py`。
+
 > 設計詳細・移行ステップ・検証方法は
 > [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) を正とする。
 > 本 ADR は「なぜこの方針か」の記録のみを持つ。

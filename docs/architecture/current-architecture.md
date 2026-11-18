@@ -57,7 +57,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 | 段 | 何が起きるか | 変更時の含意 |
 |----|------------|------------|
 | ゲート | `main.py` の named mutex（`taguyan.Autona.SingleInstance`）で単一インスタンス化。2 個目は QLocalSocket で前面化要求して終了 | ポート・`out/`・ホットキーの多重占有は起こらない前提でよい |
-| 早期表示 | QApplication + スプラッシュを `import src` より前に生成 | `src` を import する新モジュールは副作用ゼロを守る（`bootstrap.py` 参照） |
+| 早期表示 | スプラッシュ（専用スレッドのネイティブウィンドウ。`autona_splash.py`）をゲートの直後・PySide6 の import より前に出し、QApplication を `import src` より前に生成 | `src` を import する新モジュールは副作用ゼロを守る（`bootstrap.py` 参照） |
 | ブートストラップ | `from src import Autona` → `bootstrap_core()` がシングルトンを明示順で生成 | 新サービスの生成は `bootstrap_core()` に追加する（モジュール末尾で作らない） |
 | 最小コア表示 | `Window.__init__` は Tournament Info + アクティブ `battle_format` の board 1 面のみ構築して `show()` | **他パネル・他 board は未構築のまま起動する** |
 | 表示後 | オーバーレイ消滅後に `Window._StartWebServer()` が Flask/SocketIO を構築・起動（`webserver-ready` フェーズ） | OBS ブラウザソースの取得開始は表示から数秒遅れる（ADR-003 で許容済み） |
