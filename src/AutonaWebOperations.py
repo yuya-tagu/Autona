@@ -900,6 +900,12 @@ def resume_archive_job(jobId):
     return ArchiveJobService.instance.Resume(jobId)
 
 
+def reanalyze_archive_job(jobId, results):
+    """Run the job's analysis again with `results` (results:prepare's): the
+    split and the names redone from the worker's cache."""
+    return ArchiveJobService.instance.Reanalyze(jobId, results)
+
+
 def get_archive_video(jobId):
     """(path, type) of the video the job was run on (ADR-006 A3)."""
     return ArchiveJobService.instance.VideoFile(jobId)

@@ -1,6 +1,9 @@
 import React from "react";
-import {act, cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
+import {Provider} from "react-redux";
+import {act, cleanup, fireEvent, render as renderInto, screen, waitFor, within} from "@testing-library/react";
 import i18n from "../i18n/config";
+import {autonaStore} from "../redux/store";
+import {autonaStateSlice} from "../redux/autonaState";
 import ArchivePage from "./index";
 
 jest.mock("../api", () => ({
@@ -28,12 +31,29 @@ jest.setTimeout(20000);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The new job's form reads the loaded tournament from the state (its
+// results' default): the page is rendered under the store.
+const render = (ui) => renderInto(
+    <Provider store={autonaStore}>{ui}</Provider>);
+
+// The state's tournamentInfo.url (null: no tournamentInfo at all).
+function setTournamentUrl(url) {
+    act(() => {
+        autonaStore.dispatch(autonaStateSlice.actions.overwrite({
+            state: url === null ? {} : {tournamentInfo: {url}},
+            revision: 0,
+        }));
+    });
+}
+
 // jsdom plays no media: the preview's pause / load (it lets go of its video
 // on unmount) are spies for every test.
 let pause;
 let load;
 
 beforeEach(() => {
+    // No tournament loaded unless a test loads one.
+    setTournamentUrl(null);
     pause = jest.spyOn(window.HTMLMediaElement.prototype, "pause")
         .mockImplementation(() => undefined);
     load = jest.spyOn(window.HTMLMediaElement.prototype, "load")
@@ -571,6 +591,108 @@ describe("the results of a new job", () => {
         expect(screen.getByRole("button", {name: i18n.t("archive_results_load")}))
             .toBeDisabled();
     });
+
+    // The results' default: the tournament loaded in Autona (the state's
+    // tournamentInfo.url) when it is a start.gg event, else none -- which
+    // says what a job without results gets.
+    const EVENT_URL = "https://www.start.gg/tournament/autona-cup/event/singles";
+    const OTHER_URL = "https://www.start.gg/tournament/other-cup/event/doubles";
+    const radio = (key) => screen.getByLabelText(i18n.t(key));
+    const urlField = () => screen.getByLabelText(
+        i18n.t("archive_results_startgg_url"));
+    const noneNote = () => screen.queryByTestId("archive-results-none-note");
+
+    test("a loaded start.gg tournament is the default, its URL ready to fetch",
+         async () => {
+        setTournamentUrl(EVENT_URL);
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        expect(radio("archive_results_startgg").checked).toBe(true);
+        expect(urlField().value).toBe(EVENT_URL);
+        expect(noneNote()).toBeNull();
+        // Still asked for and summed up before the job takes them.
+        expect(startButton()).toBeDisabled();
+        fireEvent.click(screen.getByRole("button",
+                                         {name: i18n.t("archive_results_fetch")}));
+        await screen.findByTestId("archive-results-summary");
+        expect(posts[0][1]).toEqual({kind: "startgg", url: EVENT_URL});
+        fireEvent.click(startButton());
+        await waitFor(() => expect(posts).toHaveLength(2));
+        expect(posts[1][1]).toEqual({source: "https://youtu.be/x",
+                                     results: RESULTS, event: null});
+    });
+
+    test("a tournament that comes with the state later is taken, untouched",
+         async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        expect(radio("archive_results_none").checked).toBe(true);
+        setTournamentUrl(EVENT_URL);
+        expect(radio("archive_results_startgg").checked).toBe(true);
+        expect(urlField().value).toBe(EVENT_URL);
+        // Unloaded again: back to none.
+        setTournamentUrl("");
+        expect(radio("archive_results_none").checked).toBe(true);
+        expect(noneNote()).toBeTruthy();
+    });
+
+    test("with no start.gg tournament the results stay none and say so",
+         async () => {
+        // A Hivee event (its token masked in the state) is not start.gg.
+        setTournamentUrl("https://hivee.example/overlay?token=***");
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        expect(radio("archive_results_none").checked).toBe(true);
+        expect(noneNote().textContent).toBe(
+            i18n.t("archive_results_none_note"));
+        // Nothing to ask for: the job starts without results.
+        expect(startButton()).toBeEnabled();
+        fireEvent.click(startButton());
+        await waitFor(() => expect(posts).toHaveLength(1));
+        expect(posts[0][1]).toEqual({source: "https://youtu.be/x",
+                                     results: null, event: null});
+    });
+
+    test("the note on no results goes with another kind", async () => {
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        expect(noneNote()).toBeTruthy();
+        fireEvent.click(radio("archive_results_matchlog"));
+        expect(noneNote()).toBeNull();
+    });
+
+    test("a URL typed over the loaded one is kept", async () => {
+        setTournamentUrl(EVENT_URL);
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.change(urlField(), {target: {value: "https://www.start.gg/a"}});
+        // Another tournament set, then none: what was typed stays.
+        setTournamentUrl(OTHER_URL);
+        expect(urlField().value).toBe("https://www.start.gg/a");
+        setTournamentUrl("");
+        expect(radio("archive_results_startgg").checked).toBe(true);
+        expect(urlField().value).toBe("https://www.start.gg/a");
+    });
+
+    test("another kind chosen over the default is kept", async () => {
+        setTournamentUrl(EVENT_URL);
+        shell();
+        render(<ArchivePage/>);
+        await typeSource();
+        fireEvent.click(radio("archive_results_none"));
+        expect(noneNote()).toBeTruthy();
+        setTournamentUrl(OTHER_URL);
+        expect(radio("archive_results_none").checked).toBe(true);
+        // Back to start.gg: the loaded URL it was given is still there
+        // (not the one set later: the form stopped following).
+        fireEvent.click(radio("archive_results_startgg"));
+        expect(urlField().value).toBe(EVENT_URL);
+    });
 });
 
 test("the closed players lane counts in the language's plural", () => {
@@ -1104,6 +1226,98 @@ describe("the review screen", () => {
         expect(review).toBeTruthy();
     });
 
+    // A set not wanted (A4: a block the worker found no result for) is
+    // removed: out of the list, the timeline and the counts, in the fold of
+    // removed sets, which puts it back.
+    test("a set is removed by its button or Delete and put back", async () => {
+        const review = await open(2);
+        fireEvent.click(screen.getByTestId("archive-remove"));
+        expect(screen.queryByTestId("archive-set-2")).toBeNull();
+        expect(timelineSet(2)).toBeNull();
+        // The next set is selected.
+        expect(current()).toEqual(["archive-set-3"]);
+        expect(screen.getByTestId("archive-confirmed-count").textContent)
+            .toBe(i18n.t("archive_export_count", {confirmed: 0, total: 2}));
+        const fold = screen.getByTestId("archive-removed");
+        expect(fold.textContent).toContain(`${i18n.t("archive_removed")} (1)`);
+        expect(within(fold).getByTestId("archive-removed-2").textContent)
+            .toContain("#2");
+
+        // Delete removes the selected one; the last listed hands over to
+        // the one before. Held down or with Shift it removes nothing.
+        fireEvent.keyDown(review, {key: "Delete"});
+        expect(current()).toEqual(["archive-set-1"]);
+        fireEvent.keyDown(review, {key: "Delete", repeat: true});
+        fireEvent.keyDown(review, {key: "Delete", shiftKey: true});
+        expect(current()).toEqual(["archive-set-1"]);
+        expect(screen.getAllByTestId(/^archive-set-\d+$/)
+            .map((row) => row.dataset.testid)).toEqual(["archive-set-1"]);
+        // Up / Down step over the removed ones.
+        fireEvent.keyDown(review, {key: "ArrowDown"});
+        expect(current()).toEqual(["archive-set-1"]);
+        await saved();
+        expect(puts()).toEqual([{sets: {2: {removed: true},
+                                        3: {removed: true}}}]);
+
+        // Put back: listed again, not confirmed, nothing else changed.
+        fireEvent.click(screen.getByTestId("archive-restore-2"));
+        expect(screen.getByTestId("archive-set-2")).toBeTruthy();
+        expect(screen.queryByTestId("archive-removed-2")).toBeNull();
+        expect(screen.getByTestId("archive-removed").textContent)
+            .toContain(`${i18n.t("archive_removed")} (1)`);
+        expect(current()).toEqual(["archive-set-1"]);
+        await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(2),
+                      {timeout: 3000});
+        expect(puts()[1]).toEqual({sets: {3: {removed: true}}});
+    });
+
+    test("a removed set's result is free, and it comes back without it",
+         async () => {
+        await open(1);
+        fireEvent.click(screen.getByTestId("archive-remove"));
+        expect(current()).toEqual(["archive-set-2"]);
+        fireEvent.mouseDown(within(screen.getByTestId("archive-assign"))
+            .getByRole("combobox"));
+        const options = within(await screen.findByRole("listbox"))
+            .getAllByRole("option");
+        // Set 1's result, set 1 removed: not held by any set.
+        expect(options[1].textContent).toBe("WR1: Alpha 1-0 Beta");
+        expect(options[1]).not.toHaveAttribute("aria-disabled", "true");
+        fireEvent.click(options[1]);
+        expect(screen.getByTestId("archive-set-2").textContent)
+            .toContain("WR1 Alpha vs Beta");
+        // Back, while set 2 holds its result: with none.
+        fireEvent.click(screen.getByTestId("archive-restore-1"));
+        expect(screen.getByTestId("archive-set-1").textContent)
+            .toContain(i18n.t("archive_no_match"));
+        await saved();
+        expect(puts().pop()).toEqual({sets: {
+            1: {set: null},
+            2: {set: {round: "WR1", p1: "Alpha", s1: 1, p2: "Beta", s2: 0}}}});
+    });
+
+    test("outside the desktop's window the removed sets are only listed",
+         async () => {
+        installJob(SETS, {
+            "/api/v1/shell-session": forbidden,
+            [`/api/v1/archive/jobs/${ID}/review`]: () => Promise.resolve(
+                {data: {review: {format: 1, sets: {2: {removed: true}}}}}),
+        });
+        render(<ArchivePage/>);
+        const review = await screen.findByTestId("archive-review");
+        await screen.findByTestId("archive-removed-2");
+        await screen.findByTestId("archive-read-only");
+        expect(screen.queryByTestId("archive-set-2")).toBeNull();
+        expect(screen.queryByTestId("archive-restore-2")).toBeNull();
+        expect(screen.getByTestId("archive-confirmed-count").textContent)
+            .toBe(i18n.t("archive_export_count", {confirmed: 0, total: 2}));
+        fireEvent.click(screen.getByTestId("archive-set-1"));
+        expect(screen.queryByTestId("archive-remove")).toBeNull();
+        fireEvent.keyDown(review, {key: "Delete"});
+        expect(screen.getByTestId("archive-set-1")).toBeTruthy();
+        expect(apiPut).not.toHaveBeenCalled();
+    });
+
     test("a key that leaves the selection where it was leaves the focus too",
          async () => {
         await open(3);
@@ -1452,6 +1666,183 @@ describe("the review screen", () => {
             .toBe("Fake 用 改");
         expect(within(screen.getByTestId("archive-template-20261117-100000-aaaa"))
             .getByText(i18n.t("archive_tpl_unsaved"))).toBeTruthy();
+    });
+
+    // Results given to a job already analysed (one made without them: its
+    // sets split by the text on screen alone), chosen as a new job's are --
+    // never none --, what the run changes said in the screen itself, then
+    // the run followed as a resume's.
+    describe("split again with results", () => {
+        const PREPARE = "/api/v1/archive/results:prepare";
+        const REANALYZE = `/api/v1/archive/jobs/${ID}:reanalyze`;
+        const EVENT_URL = "https://www.start.gg/tournament/autona-cup/event/singles";
+        const RESULTS = {event: "Fake Cup", sets: [
+            {p1: "Kappa", s1: 3, p2: "Lambda", s2: 1}]};
+        const SUMMARY = {sets: 1, game: null, records: 0,
+                         sources: {scoreboard: 0, report: 0, mains: 0,
+                                   given: 0, none: 1}};
+        let current;
+
+        const installCurrent = (handlers = {}) => installJob(SETS, {
+            [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve({data: {
+                job: current,
+                sets: current.state === "running" ? null : SETS}}),
+            ...handlers,
+        });
+
+        beforeEach(() => {
+            current = {...JOB, has_results: false, analysis_cached: true};
+            installCurrent();
+            apiPost.mockImplementation((path) => {
+                if (path === PREPARE) {
+                    return Promise.resolve(JSON.stringify(
+                        {data: {results: RESULTS, summary: SUMMARY}}));
+                }
+                if (path === REANALYZE) {
+                    current = {...current, state: "running",
+                               has_results: true, progress: null};
+                    return Promise.resolve(JSON.stringify(
+                        {data: {job: current}}));
+                }
+                return Promise.reject(new Error(`unexpected ${path}`));
+            });
+        });
+
+        afterEach(() => {
+            apiPost.mockReset();
+        });
+
+        const panel = () => screen.getByTestId("archive-reanalyze");
+        const openPanel = () => {
+            fireEvent.click(screen.getByTestId("archive-reanalyze-open"));
+            return panel();
+        };
+        const fetchResults = async () => {
+            fireEvent.click(within(panel()).getByRole("button", {
+                name: i18n.t("archive_results_fetch")}));
+            await within(panel()).findByTestId("archive-results-summary");
+        };
+
+        test("from the loaded tournament, the review saved first, then followed",
+             async () => {
+            setTournamentUrl(EVENT_URL);
+            const review = await open(1);
+            // An edit still waiting to be saved.
+            fireEvent.keyDown(review, {key: "Enter"});
+            const opener = screen.getByTestId("archive-reanalyze-open");
+            expect(opener.textContent).toBe(i18n.t("archive_reanalyze_add"));
+            const shown = openPanel();
+            expect(screen.queryByTestId("archive-reanalyze-open")).toBeNull();
+            expect(shown.textContent).toContain(
+                i18n.t("archive_reanalyze_body_none"));
+            // No "none"; the loaded start.gg event ready to fetch.
+            expect(within(shown).queryByLabelText(
+                i18n.t("archive_results_none"))).toBeNull();
+            expect(within(shown).getByLabelText(
+                i18n.t("archive_results_startgg")).checked).toBe(true);
+            expect(within(shown).getByLabelText(
+                i18n.t("archive_results_startgg_url")).value).toBe(EVENT_URL);
+            // What the run changes, said before it is asked for.
+            expect(screen.getByTestId("archive-reanalyze-note").textContent)
+                .toContain(i18n.t("archive_reanalyze_lost"));
+            expect(screen.getByTestId("archive-reanalyze-cache").textContent)
+                .toBe(i18n.t("archive_reanalyze_cached"));
+            expect(screen.getByTestId("archive-reanalyze-note").textContent)
+                .toContain(i18n.t("archive_reanalyze_interrupted"));
+            const run = screen.getByTestId("archive-reanalyze-run");
+            expect(run).toBeDisabled();
+            // Why it cannot be pressed yet, until the results are fetched.
+            expect(within(shown).getByTestId("archive-results-fetch-hint")
+                .textContent).toBe(i18n.t("archive_results_fetch_hint"));
+
+            await fetchResults();
+            expect(screen.queryByTestId("archive-results-fetch-hint")).toBeNull();
+            expect(apiPost.mock.calls[0]).toEqual([
+                PREPARE, {kind: "startgg", url: EVENT_URL},
+                {timeoutMs: 150000}]);
+            expect(run).toBeEnabled();
+            fireEvent.click(run);
+            // The run's progress in the review's place.
+            expect(await screen.findByRole("button", {
+                name: i18n.t("archive_abort")})).toBeTruthy();
+            expect(screen.queryByTestId("archive-review")).toBeNull();
+            expect(apiPost.mock.calls.filter(([path]) => path === REANALYZE))
+                .toEqual([[REANALYZE, {results: RESULTS}]]);
+            // The edit waiting went first.
+            expect(puts()).toEqual([{sets: {1: {confirmed: true}}}]);
+            expect(apiPut.mock.invocationCallOrder[0])
+                .toBeLessThan(apiPost.mock.invocationCallOrder[1]);
+
+            // Done (the poll): the sets are back, from the job's results.
+            current = {...current, state: "done"};
+            expect(await screen.findByTestId("archive-review", {},
+                                              {timeout: 5000})).toBeTruthy();
+            expect(screen.getByTestId("archive-reanalyze-open").textContent)
+                .toBe(i18n.t("archive_reanalyze_replace"));
+        });
+
+        test("a job's results replaced, its video gone: the analysis starts over",
+             async () => {
+            current = {...JOB, has_results: true, analysis_cached: false};
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-review");
+            expect(screen.getByTestId("archive-reanalyze-open").textContent)
+                .toBe(i18n.t("archive_reanalyze_replace"));
+            const shown = openPanel();
+            expect(shown.textContent).toContain(
+                i18n.t("archive_reanalyze_body_results"));
+            expect(screen.getByTestId("archive-reanalyze-cache").textContent)
+                .toBe(i18n.t("archive_reanalyze_uncached"));
+            // No tournament loaded: start.gg with no URL, nothing to fetch.
+            expect(within(shown).getByLabelText(
+                i18n.t("archive_results_startgg")).checked).toBe(true);
+            expect(within(shown).getByLabelText(
+                i18n.t("archive_results_startgg_url")).value).toBe("");
+            expect(within(shown).getByRole("button", {
+                name: i18n.t("archive_results_fetch")})).toBeDisabled();
+            expect(screen.getByTestId("archive-reanalyze-run")).toBeDisabled();
+            // Closed: nothing asked for.
+            fireEvent.click(within(shown).getByRole("button", {
+                name: i18n.t("archive_close")}));
+            expect(screen.queryByTestId("archive-reanalyze")).toBeNull();
+            expect(screen.getByTestId("archive-reanalyze-open")).toBeTruthy();
+            expect(apiPost).not.toHaveBeenCalled();
+        });
+
+        test("a refusal is said and the review stays", async () => {
+            setTournamentUrl(EVENT_URL);
+            apiPost.mockImplementation((path) => (path === PREPARE
+                ? Promise.resolve(JSON.stringify(
+                    {data: {results: RESULTS, summary: SUMMARY}}))
+                : Promise.reject(Object.assign(new Error("busy"), {
+                    status: 409, detail: "別の切り抜きジョブが実行中です。"}))));
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-review");
+            openPanel();
+            await fetchResults();
+            fireEvent.click(screen.getByTestId("archive-reanalyze-run"));
+            expect(await screen.findByText("別の切り抜きジョブが実行中です。"))
+                .toBeTruthy();
+            expect(screen.getByTestId("archive-review")).toBeTruthy();
+            expect(panel()).toBeTruthy();
+        });
+
+        test("not offered outside the desktop's window nor while the export runs",
+             async () => {
+            installCurrent({"/api/v1/shell-session": forbidden});
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-read-only");
+            await screen.findByTestId("archive-review");
+            expect(screen.getByTestId("archive-reanalyze-open")).toBeDisabled();
+            cleanup();
+
+            current = {...current, export: {state: "running",
+                                            progress: {overall: 0.2}}};
+            installCurrent();
+            render(<ArchivePage/>);
+            await screen.findByTestId("archive-export-progress");
+            expect(screen.getByTestId("archive-reanalyze-open")).toBeDisabled();
+        });
     });
 
     // A YouTube job (D7): its video plays in YouTube's embedded player, its

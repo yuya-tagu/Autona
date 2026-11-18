@@ -5,11 +5,13 @@ import {
     canonical,
     confirmedCount,
     holders,
+    keptRows,
     movedRange,
     nextUnconfirmed,
     pointerTime,
     rangeFits,
     readReview,
+    removedRows,
     reviewedRow,
     reviewedRows,
     sameResult,
@@ -17,6 +19,8 @@ import {
     withEdge,
     withEntry,
     withRangeReset,
+    withRemoved,
+    withRestored,
     withResult,
 } from "./archiveReview";
 
@@ -191,6 +195,48 @@ test("Enter's next set: the next one not confirmed, wrapping around", () => {
                                                 3: {confirmed: true}}});
     expect(nextUnconfirmed(all, 2)).toBeNull();
     expect(nextUnconfirmed(reviewedRows([ONE], EMPTY_REVIEW), 1)).toBeNull();
+    // A removed set is not one to confirm.
+    const gone = reviewedRows(SETS.sets, {sets: {2: {removed: true}}});
+    expect(nextUnconfirmed(gone, 1)).toBe(3);
+});
+
+test("a removed set keeps nothing else and holds no result", () => {
+    let review = withConfirmed(withEdge(EMPTY_REVIEW, ONE, "end", 700, 3600),
+                               ONE, true);
+    review = withRemoved(review, ONE);
+    expect(review.sets).toEqual({1: {removed: true}});
+    // An edit leaves it removed, as it was.
+    expect(withConfirmed(review, ONE, true).sets).toEqual({1: {removed: true}});
+    expect(withResult(review, ONE, UNUSED).sets).toEqual({1: {removed: true}});
+    const rows = reviewedRows(SETS.sets, review);
+    expect(rows[0]).toMatchObject({removed: true, confirmed: false,
+                                   start: 120, end: 720, set: KAPPA});
+    expect(rows[1].removed).toBe(false);
+    expect(keptRows(rows).map((row) => row.no)).toEqual([2, 3]);
+    expect(removedRows(rows).map((row) => row.no)).toEqual([1]);
+    expect(confirmedCount(rows)).toBe(0);
+    // Its result is free for another set.
+    expect(holders(rows, 2).has(canonical(KAPPA))).toBe(false);
+    expect(holders(rows, 2).get(canonical(MU))).toBe(3);
+    // What the server answers with it is read as it is.
+    expect(readReview({format: 1, sets: {1: {removed: true}}}).sets)
+        .toEqual({1: {removed: true}});
+});
+
+test("a removed set comes back unconfirmed, as the worker found it", () => {
+    const removed = withRemoved(withConfirmed(EMPTY_REVIEW, ONE, true), ONE);
+    expect(withRestored(removed, SETS.sets, ONE).sets).toEqual({});
+    // Its result given to another set meanwhile: back with none.
+    const taken = withResult(removed, TWO, KAPPA);
+    expect(withRestored(taken, SETS.sets, ONE).sets)
+        .toEqual({1: {set: null}, 2: {set: KAPPA}});
+    // A set with no result of its own comes back as it was.
+    expect(withRestored(withRemoved(EMPTY_REVIEW, TWO), SETS.sets, TWO).sets)
+        .toEqual({});
+    // Other sets' entries are left as they are.
+    const other = withRemoved(withConfirmed(EMPTY_REVIEW, THREE, true), TWO);
+    expect(withRestored(other, SETS.sets, TWO).sets)
+        .toEqual({3: {confirmed: true}});
 });
 
 test("a drag's time: the pointer over the lane, clamped to the range", () => {

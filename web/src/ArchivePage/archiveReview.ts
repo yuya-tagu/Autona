@@ -1,6 +1,7 @@
 // The archive page's review (ADR-006 A4): what the operator decides about the
 // sets the worker found -- which are confirmed, their IN / OUT, which result
-// each one is -- as GET / PUT /api/v1/archive/jobs/<id>/review carry it
+// each one is, which are removed -- as GET / PUT
+// /api/v1/archive/jobs/<id>/review carry it
 // (core/ArchiveReview.py: one entry per set changed, keyed by its number,
 // what an entry leaves out is the worker's), the sets as reviewed, and the
 // saver that sends it. Pure helpers but the saver's timer.
@@ -15,6 +16,9 @@ export interface ReviewEntry {
     // A result of the job's (a set's own or one of its unused_sets), or
     // null for none (the clip is exported without a title).
     set?: SetResult | null;
+    // A set the operator does not want (an entry of this alone): not
+    // listed, never confirmed, holding no result.
+    removed?: boolean;
 }
 
 export interface Review {
@@ -32,12 +36,14 @@ export const MIN_CLIP = 1;
 // it probes).
 export const END_MARGIN = 0.05;
 
-// A set as reviewed: its range and result, whether it is confirmed and what
-// the review changed (the list, the details and the timeline draw this).
+// A set as reviewed: its range and result, whether it is confirmed or
+// removed and what the review changed (the list, the details and the
+// timeline draw this).
 export interface ReviewedRow extends SetRow {
     confirmed: boolean;
     rangeEdited: boolean;
     setEdited: boolean;
+    removed: boolean;
 }
 
 const finite = (value: unknown): value is number =>
@@ -90,13 +96,15 @@ export function reviewedRow(row: SetRow, review: Review): ReviewedRow {
     const end = finite(entry.end) ? entry.end : row.end;
     const setEdited = "set" in entry;
     const set = setEdited ? entry.set ?? null : ownSet(row);
+    const removed = entry.removed === true;
     return {
         ...row, start, end,
         ...(setEdited ? {set, matched: set !== null,
                          title: set ? resultTitle(set) : null} : {}),
-        confirmed: entry.confirmed === true,
+        confirmed: !removed && entry.confirmed === true,
         rangeEdited: start !== row.start || end !== row.end,
         setEdited,
+        removed,
     };
 }
 
@@ -104,25 +112,37 @@ export function reviewedRows(rows: SetRow[], review: Review): ReviewedRow[] {
     return rows.map((row) => reviewedRow(row, review));
 }
 
+// The sets not removed (what the list, the timeline, the keys and the counts
+// go through) and the removed ones (their own fold of the list).
+export const keptRows = (rows: ReviewedRow[]): ReviewedRow[] =>
+    rows.filter((row) => !row.removed);
+export const removedRows = (rows: ReviewedRow[]): ReviewedRow[] =>
+    rows.filter((row) => row.removed);
+
 // `review` with set `row`'s entry changed by `change` (undefined drops a
 // key), keeping only what differs from the worker's (as the server keeps it).
+// A removed set's entry is {removed: true} alone: what else it held goes.
 export function withEntry(review: Review, row: SetRow,
                           change: Partial<Record<keyof ReviewEntry, unknown>>):
     Review {
     const merged: Record<string, unknown> = {...entryOf(review, row), ...change};
     const entry: ReviewEntry = {};
-    if (merged.confirmed === true) {
-        entry.confirmed = true;
-    }
-    if (finite(merged.start) && merged.start !== row.start) {
-        entry.start = merged.start;
-    }
-    if (finite(merged.end) && merged.end !== row.end) {
-        entry.end = merged.end;
-    }
-    if ("set" in merged && merged.set !== undefined
-        && !sameResult(merged.set as SetResult | null, ownSet(row))) {
-        entry.set = (merged.set as SetResult | null) ?? null;
+    if (merged.removed === true) {
+        entry.removed = true;
+    } else {
+        if (merged.confirmed === true) {
+            entry.confirmed = true;
+        }
+        if (finite(merged.start) && merged.start !== row.start) {
+            entry.start = merged.start;
+        }
+        if (finite(merged.end) && merged.end !== row.end) {
+            entry.end = merged.end;
+        }
+        if ("set" in merged && merged.set !== undefined
+            && !sameResult(merged.set as SetResult | null, ownSet(row))) {
+            entry.set = (merged.set as SetResult | null) ?? null;
+        }
     }
     const sets = {...review.sets};
     if (Object.keys(entry).length > 0) {
@@ -207,6 +227,24 @@ export function withResult(review: Review, row: SetRow,
     return withEntry(review, row, {set: result});
 }
 
+// `review` with set `row` removed: its confirmation, range and result go,
+// and its result is free for another set.
+export function withRemoved(review: Review, row: SetRow): Review {
+    return withEntry(review, row, {removed: true});
+}
+
+// `review` with removed set `row` back (`rows`: the job's sets): not
+// confirmed, the worker's range and result -- no result when another set
+// holds that one now (a result is given to one set at most).
+export function withRestored(review: Review, rows: SetRow[],
+                             row: SetRow): Review {
+    const back = withEntry(review, row, {removed: undefined});
+    const own = ownSet(row);
+    return own !== null
+        && holders(reviewedRows(rows, back), row.no).has(canonical(own))
+        ? withResult(back, row, null) : back;
+}
+
 // The results a set may be given (core ArchiveReview.Candidates): each set's
 // own and sets.json's unused_sets, once each.
 export function candidates(sets: SetsJson): SetResult[] {
@@ -227,26 +265,28 @@ export function candidates(sets: SetsJson): SetResult[] {
 }
 
 // The set (as reviewed) other than `except` that holds each result, by its
-// canonical JSON: a result is given to one set at most.
+// canonical JSON: a result is given to one set at most. A removed set holds
+// none.
 export function holders(rows: ReviewedRow[], except: number | null):
     Map<string, number> {
     const held = new Map<string, number>();
     for (const row of rows) {
-        if (row.no !== except && row.set) {
+        if (row.no !== except && !row.removed && row.set) {
             held.set(canonical(row.set), row.no);
         }
     }
     return held;
 }
 
-// The next set after `current` in `rows` that is not confirmed, wrapping
-// around, or null when every other one is (Enter confirms and moves on).
+// The next set after `current` in `rows` that is not confirmed (nor
+// removed), wrapping around, or null when every other one is (Enter confirms
+// and moves on).
 export function nextUnconfirmed(rows: ReviewedRow[],
                                 current: number | null): number | null {
     const index = rows.findIndex((row) => row.no === current);
     for (let k = 1; k < rows.length + (index < 0 ? 1 : 0); k += 1) {
         const row = rows[(index + k + rows.length) % rows.length];
-        if (!row.confirmed) {
+        if (!row.confirmed && !row.removed) {
             return row.no;
         }
     }

@@ -155,6 +155,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/archive/jobs/<job_id>/video', 'api_v1.get_archive_video', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/jobs/<job_id>:cancel', 'api_v1.archive_job_cancel', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:export', 'api_v1.archive_job_export', 'OPTIONS,POST'),
+    ('/api/v1/archive/jobs/<job_id>:reanalyze', 'api_v1.archive_job_reanalyze', 'OPTIONS,POST'),
     ('/api/v1/archive/jobs/<job_id>:resume', 'api_v1.archive_job_resume', 'OPTIONS,POST'),
     ('/api/v1/archive/match-logs', 'api_v1.get_archive_match_logs', 'GET,HEAD,OPTIONS'),
     ('/api/v1/archive/results:prepare', 'api_v1.archive_results_prepare', 'OPTIONS,POST'),
@@ -660,6 +661,7 @@ def test_the_classification_follows_the_rules():
              "api_v1.reveal_games_folder", "api_v1.get_shell_session",
              "api_v1.archive_settings_update", "api_v1.archive_job_create",
              "api_v1.archive_job_cancel", "api_v1.archive_job_resume",
+             "api_v1.archive_job_reanalyze",
              "api_v1.archive_review_update", "api_v1.archive_job_export",
              "api_v1.archive_results_prepare",
              "api_v1.archive_template_update",
@@ -739,7 +741,8 @@ def test_the_classification_follows_the_rules():
     # set's thumbnail, this PC's, the templates' 3 writes, the titles'
     # preview and the thumbnails' drawing, the shell's (A6: v1 76 of 155),
     # and the worker's install read, this PC's, its install and cancel, the
-    # shell's (A7: v1 76 of 158).
+    # shell's (A7: v1 76 of 158), and a job's reanalysis, the shell's (v1
+    # 76 of 159).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -749,7 +752,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 158
+    assert len(EXPECTED_API_V1_ROUTES) == 159
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():
