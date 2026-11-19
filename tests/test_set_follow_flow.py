@@ -59,6 +59,14 @@ recording holds them empty: a best of or a clear wrote `{}` to them (a
 write that is gone), and a board published whole carried them (a key that
 is gone). _withoutTheRows takes exactly those out of the recording;
 everything else is compared as before.
+
+The set follow's 5-second tick no longer rewrites `score.bracket_type` and
+`score.{n}.upset_factor` with the value they already hold (an identical Set
+still costs a save cycle, and a full-state diff when a held board is dirty).
+The recording has those writes; withoutNoOpWrites (tests/fixtures/write_recording.py) takes out exactly the ones
+that repeat the key's previous value (the fixture seeds bracket_type with
+DOUBLE_ELIMINATION; upset_factor has no seed, so its first write stays). Deltas are
+unchanged: an identical write never made one.
 """
 import copy
 import json
@@ -70,7 +78,8 @@ from unittest.mock import patch
 import pytest
 
 from tests.conftest import HARNESS_GAME
-from tests.fixtures.write_recording import encode, encodeDelta
+from tests.fixtures.write_recording import (
+    encode, encodeDelta, withoutNoOpWrites)
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "set_follow" / "golden.json"
 RECORD = os.environ.get("AUTONA_RECORD_SET_FOLLOW") == "1"
@@ -368,8 +377,8 @@ def _check(name, recorded):
             json.dumps(golden, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = _withoutTheRows(
-        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name])
+    golden = withoutNoOpWrites(_withoutTheRows(
+        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]))
     expectedSteps = golden["steps"]
     actualSteps = recorded["steps"]
     assert [s["step"] for s in actualSteps] == \

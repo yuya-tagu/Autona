@@ -37,12 +37,16 @@ export default function websocketInit() {
     });
 
     socket.on("program_state", data => {
-        console.log("Autona state received ", data);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("Autona state received ", data);
+        }
         autonaStore.dispatch(autonaStateSlice.actions.overwrite(data));
     });
 
     socket.on("games", data => {
-        console.log("Autona game info received ", data);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("Autona game info received ", data);
+        }
         autonaStore.dispatch(autonaGamesSlice.actions.overwrite(data));
     })
 
@@ -67,12 +71,16 @@ export default function websocketInit() {
     });
 
     socket.on("playerdb", data => {
-        console.log("Player data received", data);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("Player data received", data);
+        }
         autonaStore.dispatch(autonaPlayersSlice.actions.overwrite(data));
     })
 
     socket.on("characters", data => {
-        console.log("Character data received", data);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("Character data received", data);
+        }
         autonaStore.dispatch(autonaCharactersSlice.actions.overwrite(data));
     })
 
@@ -114,7 +122,9 @@ const loadCountriesFile = () => {
             json[key].code = key;
         }
 
-        console.log("Loaded countries json file", json);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("Loaded countries json file", json);
+        }
         autonaStore.dispatch(autonaCountriesSlice.actions.overwrite(json));
     }).catch((e) => {
         console.error("Failed to request countries file", e);

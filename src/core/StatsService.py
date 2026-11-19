@@ -431,25 +431,25 @@ class StatsService:
         """
         key = f"{self.prefix}.upset_factor"
         if not self.IsSingles():
-            StateManager.Set(key, 0)
+            StateManager.SetIfChanged(key, 0)
             return
 
         bracket_type = StateManager.Get(
             "score.bracket_type", "DOUBLE_ELIMINATION")
         p1 = StateManager.Get(f"{self.prefix}.team.1.player.1.seed")
-        logger.info(
+        logger.debug(
             f"Scoreboard {self.scoreboardNumber} - P1 Seed: " + str(p1))
         p2 = StateManager.Get(f"{self.prefix}.team.2.player.1.seed")
-        logger.info(
+        logger.debug(
             f"Scoreboard {self.scoreboardNumber} - P2 Seed: " + str(p2))
         if p1 and p2:
-            StateManager.Set(key, abs(
+            StateManager.SetIfChanged(key, abs(
                 self.CalculatePlacementMath(bracket_type, int(p1))
                 - self.CalculatePlacementMath(bracket_type, int(p2))))
         else:
             # One (or both) seeds missing: reset instead of leaving the
             # previous pairing's upset factor in state.
-            StateManager.Set(key, 0)
+            StateManager.SetIfChanged(key, 0)
 
     # Calculation of Seeding/Placement to determine
     # Upset Factor or Seeding Performance Rating

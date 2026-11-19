@@ -10,12 +10,12 @@ import {
     Stack,
     TextField,
     Typography,
-    createFilterOptions,
 } from "@mui/material";
 import {DragIndicator} from "@mui/icons-material";
 import i18n from "../i18n/config";
 import {BASE_URL} from "../env";
 import {AutonaPlayerDbEntry} from "../backendDataTypes";
+import {filterPlayers, playerLabel} from "../playerFilter";
 import {useStateField} from "../PanelShell/useStateField";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {usePanelShell} from "../PanelShell/context";
@@ -72,18 +72,6 @@ interface CasterCardProps {
 }
 
 const NARROW = 128;
-
-// A long player DB: the list shows the first matches only.
-const filterPlayers = createFilterOptions<AutonaPlayerDbEntry>({
-    limit: 50,
-    stringify: (player) => player.prefixed_tag ?? player.gamerTag ?? "",
-});
-
-function playerLabel(player: AutonaPlayerDbEntry | string): string {
-    return typeof player === "string"
-        ? player
-        : (player.prefixed_tag ?? player.gamerTag ?? "");
-}
 
 type InputChange = React.ChangeEvent<HTMLInputElement>;
 

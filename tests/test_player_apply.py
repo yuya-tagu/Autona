@@ -63,6 +63,7 @@ from tests.test_board_operations import _setCharacters, _setPlayers
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
 from tests.fixtures.player_slots.recording import digest, encode
 from tests.fixtures.stats.spies import StatsTriggers
+from tests.fixtures.write_recording import withoutNoOpCalls
 from tests.fixtures.player_apply.scenarios import (
     DB_PLAYERS, SCENARIOS, Cycles, Expected, Writes, byPlayer, collapsed,
     compact, normalise)
@@ -337,7 +338,6 @@ EXACT_OPS = ("typed", "chars", "swap")
 
 def _assertStep(name, index, actual, expected):
     where = (name, index, expected["op"])
-    expected = Expected(name, index, expected)
     if expected["op"] in EXACT_OPS:
         assert actual["calls"] == expected["calls"], where
     else:
@@ -366,8 +366,14 @@ def test_recorded_player_loads_publish_the_recorded_state(
     assert record["initial"] == initial, scenario["name"]
     assert [s["op"] for s in record["steps"]] \
         == [s["op"] for s in expected["steps"]]
+    # An unchanged upset_factor is no longer written
+    # (StateManager.SetIfChanged): the recording's repeats are taken out
+    # after the deliberate changes (CHANGES) are applied.
+    wantedSteps = withoutNoOpCalls([
+        Expected(scenario["name"], index, step)
+        for index, step in enumerate(expected["steps"])])
     for index, (actual, wanted) in enumerate(
-            zip(record["steps"], expected["steps"])):
+            zip(record["steps"], wantedSteps)):
         _assertStep(scenario["name"], index, actual, wanted)
 
 

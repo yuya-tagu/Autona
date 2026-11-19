@@ -37,6 +37,9 @@ function overlay({Kuroshiro, KuromojiAnalyzer} = {}) {
         var TSH_LOAD_ATTEMPTS = ${ATTEMPTS};
         var TSH_LOAD_RETRY_MS = 0;
         function TSHLayoutPath(path) { return "../" + path; }
+        // Transcript's cache lives beside it in globals.js.
+        const TRANSCRIPT_CACHE_MAX = 500;
+        const transcriptCache = new Map();
         ${declaration("TSHRetryLoad")}
         ${declaration("TSHLoadScript")}
         ${declaration("LoadKuroshiro")}
@@ -174,5 +177,19 @@ describe("Transcript", () => {
 
         await expect(Promise.resolve(Transcript("とうきょう"))).resolves.toBe(
             'とうきょう<span class="tsh_transcript">&nbsp;toukyou</span>');
+    });
+
+    it("converts a name once, and again after a failed conversion", async () => {
+        const {Transcript} = overlay();
+        window.Kuroshiro = {default: {Util: {hasJapanese: () => true}}};
+        const convert = jest.fn()
+            .mockReturnValueOnce(Promise.reject(new Error("analyzer")))
+            .mockReturnValue(Promise.resolve("toukyou"));
+        window.kuroshiro = {convert};
+
+        await expect(Transcript("とうきょう")).rejects.toThrow("analyzer");
+        await Transcript("とうきょう");
+        await Transcript("とうきょう");
+        expect(convert).toHaveBeenCalledTimes(2);
     });
 });

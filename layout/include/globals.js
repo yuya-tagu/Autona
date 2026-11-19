@@ -458,6 +458,11 @@ async function LoadKuroshiro() {
   }
 }
 
+// Converted results by text + effective settings. Promises are cached so
+// concurrent calls share one conversion; the oldest entries go past the cap.
+const TRANSCRIPT_CACHE_MAX = 500;
+const transcriptCache = new Map();
+
 // Transcribes Japanese text to Roman characters using Kuroshiro
 async function Transcript(text) {
   let settings = _.defaultsDeep(tsh_settings.japanese_transcription, {
@@ -472,15 +477,29 @@ async function Transcript(text) {
 
   try {
     if (window.Kuroshiro.default.Util.hasJapanese(text)) {
-      return window.kuroshiro
-        .convert(text, {
-          mode: settings.mode,
-          to: settings.to,
-          romajiSystem: settings.romajiSystem,
-        })
+      const convertOptions = {
+        mode: settings.mode,
+        to: settings.to,
+        romajiSystem: settings.romajiSystem,
+      };
+      const cacheKey = JSON.stringify([text, convertOptions]);
+      const cached = transcriptCache.get(cacheKey);
+      if (cached) return cached;
+
+      const promise = window.kuroshiro
+        .convert(text, convertOptions)
         .then((res) => {
           return `${text}<span class="tsh_transcript">&nbsp;${res}</span>`;
         });
+      transcriptCache.set(cacheKey, promise);
+      // A failed conversion must not stay cached.
+      promise.catch(() => {
+        if (transcriptCache.get(cacheKey) === promise) transcriptCache.delete(cacheKey);
+      });
+      if (transcriptCache.size > TRANSCRIPT_CACHE_MAX) {
+        transcriptCache.delete(transcriptCache.keys().next().value);
+      }
+      return promise;
     } else {
       return text;
     }

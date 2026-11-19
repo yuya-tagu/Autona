@@ -79,3 +79,53 @@ class WriteRecorder:
     def Result(self):
         return {"sets": self.sets, "deltas": self.deltas,
                 "bigChanges": self.bigChanges}
+
+
+NOOP_ELIDED = {"score.bracket_type": '"DOUBLE_ELIMINATION"'}
+
+
+def _isWatched(key):
+    """bracket_type, and a board's upset_factor (absolute or board-relative
+    key): what the set follow's tick used to rewrite with the same value."""
+    parts = key.split(".")
+    return key in NOOP_ELIDED or key == "upset_factor" or (
+        len(parts) == 3 and parts[0] == "score"
+        and parts[2] == "upset_factor")
+
+
+def _dropRepeats(writes, last, parse):
+    """`writes` without the watched sets that repeat the key's last value
+    (they are no longer made: StateManager.SetIfChanged). `parse(write)` is
+    (key, value, isUnset); `last` carries the values across steps."""
+    kept = []
+    for write in writes:
+        key, value, isUnset = parse(write)
+        if isUnset:
+            last.pop(key, None)
+        elif _isWatched(key):
+            if last.get(key) == value:
+                continue
+            last[key] = value
+        kept.append(write)
+    return kept
+
+
+def withoutNoOpWrites(recording):
+    """A recording of steps {"writes": [["set"|"unset", key, value?]]}
+    without the no-op writes of bracket_type / upset_factor."""
+    last = dict(NOOP_ELIDED)
+    steps = [dict(step, writes=_dropRepeats(
+        step["writes"], last,
+        lambda w: (w[1], w[2] if len(w) > 2 else None, w[0] == "unset")))
+        for step in recording["steps"]]
+    return dict(recording, steps=steps)
+
+
+def withoutNoOpCalls(steps):
+    """The same for steps {"calls": [[board-relative key, value]]} (the
+    player_apply recording; a None value is an unset). Only upset_factor is
+    on a board there."""
+    last = {}
+    return [dict(step, calls=_dropRepeats(
+        step["calls"], last, lambda c: (c[0], c[1], c[1] is None)))
+        for step in steps]
