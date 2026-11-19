@@ -63,7 +63,8 @@ from unittest.mock import patch
 import pytest
 
 from tests.conftest import apply_set, clear_players, edit_tag, load_player
-from tests.fixtures.write_recording import encode, encodeDelta
+from tests.fixtures.write_recording import (
+    encode, encodeDelta, withoutNoOpWrites)
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "stats" / "golden.json"
 RECORD = os.environ.get("AUTONA_RECORD_STATS") == "1"
@@ -295,8 +296,10 @@ def _check(name, recorded):
             json.dumps(golden, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = _withoutTheRows(
-        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name])
+    # An unchanged bracket_type / upset_factor is no longer written
+    # (StateManager.SetIfChanged): the recording's repeats are taken out.
+    golden = withoutNoOpWrites(_withoutTheRows(
+        json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]))
     expectedSteps = [
         dict(step, responses=step["responses"]
              + _ADDED_RESPONSES.get((name, step["step"]), []))

@@ -29,6 +29,7 @@ import {
 } from "@mui/icons-material";
 import i18n from "../i18n/config";
 import {AutonaPlayerDbEntry} from "../backendDataTypes";
+import {filterPlayers, playerLabel} from "../playerFilter";
 import {apiErrorStatus} from "../api";
 import {getWithRetry} from "../PanelShell/requests";
 import {useStateField} from "../PanelShell/useStateField";
@@ -231,18 +232,6 @@ export function MatchField({label, value, send, options, onOpen}: {
             )}
         />
     );
-}
-
-// A long player DB: the list shows the first matches only.
-const filterPlayers = createFilterOptions<AutonaPlayerDbEntry>({
-    limit: 50,
-    stringify: (player) => player.prefixed_tag ?? player.gamerTag ?? "",
-});
-
-function playerLabel(player: AutonaPlayerDbEntry | string): string {
-    return typeof player === "string"
-        ? player
-        : (player.prefixed_tag ?? player.gamerTag ?? "");
 }
 
 // What POST .../players/{p}:load takes for a candidate: its database key

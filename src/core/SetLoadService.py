@@ -346,17 +346,17 @@ class SetLoadService:
         (AutonaStatsUtil reads it for the upset-factor math), so it is
         outside every held prefix and publishes immediately.
 
-        Deliberately *not* _SetIfChanged: the return value is the caller's cue
-        to recalculate the upset factor, and that has to happen on every
+        The write is skipped when the value is unchanged (an identical Set
+        still runs a save cycle, and a full-state diff when a held board is
+        dirty), but the return value does not follow it: it is the caller's
+        cue to recalculate the upset factor, and that has to happen on every
         payload that carries a bracket type -- the factor also depends on the
-        seeds, which the same set load just rewrote. The unconditional write
-        is free anyway (no held prefix to dirty, and an identical value
-        yields no delta), so the two halves are kept in step by not being
-        conditional at all.
+        seeds, which the same set load just rewrote. So True whether or not
+        anything was written.
         """
         if not isinstance(data, dict) or not data.get("bracket_type"):
             return False
-        StateManager.Set("score.bracket_type", data.get("bracket_type"))
+        StateManager.SetIfChanged("score.bracket_type", data.get("bracket_type"))
         return True
 
     # ── set lifecycle (which set this board is following) ────────────────

@@ -18,7 +18,7 @@ import {useApiAction} from "./Feedback";
  * @param {AutonaTeamInfo} props.team
  * @param {number|string} props.scoreboardNumber
  */
-export default function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
+function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
     const [inLosers, setInLosers] = React.useState(team.losers);
     const [teamName, setTeamName] = React.useState(team.teamName ?? "");
     const {run} = useApiAction();
@@ -108,3 +108,5 @@ export default function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
         </Stack>
     </Paper>
 }
+
+export default React.memo(Team);

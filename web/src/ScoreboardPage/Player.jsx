@@ -25,6 +25,7 @@ import {CountryStateSelector} from "../CountryStateSelector";
 import {apiPatch} from "../api";
 import {useApiAction} from "./Feedback";
 import {DisplayOptionsMenuButton, useDisplayOptions} from "./displayOptions";
+import {filterPlayers} from "../playerFilter";
 
 /**
  * @typedef {{
@@ -120,7 +121,7 @@ function getMains(player, gameCodename, count) {
  * @param {number|string} scoreboardNumber
  * @param {string} autonaTeamId
  */
-export default function Player({teamId, teamKey, player, scoreboardNumber, autonaTeamId}) {
+function Player({teamId, teamKey, player, scoreboardNumber, autonaTeamId}) {
     const [
         /** @type {PlayerState} */ state,
         setState
@@ -149,9 +150,9 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
     const [detailsOpen, setDetailsOpen] = React.useState(false);
 
     const playerId = `${teamId}-p-${teamKey}`;
-    const autonaState = useSelector((s) => s.autonaState.autonaState);
-    const gameCodename = autonaState?.game?.codename;
+    const gameCodename = useSelector((s) => s.autonaState.autonaState?.game?.codename);
     /** @type AutonaPlayerDb */ const playerDb = useSelector(state => state.autonaPlayers.players);
+    const playerOptions = React.useMemo(() => Object.values(playerDb), [playerDb]);
     const show = useDisplayOptions();
     const {run} = useApiAction();
     const theme = useTheme();
@@ -398,7 +399,8 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
                                 key={idBase + "tag"}
                                 id={idBase + "tag"}
                                 size="small"
-                                options={Object.values(playerDb)}
+                                options={playerOptions}
+                                filterOptions={filterPlayers}
                                 value={state.name ?? ''}
                                 getOptionLabel={(/** AutonaPlayerDbEntry|string */ player) => {
                                     return player?.prefixed_tag ?? player;
@@ -558,6 +560,10 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
         </Card>
     )
 }
+
+// Props are primitives or immer-stable subtrees: a delta elsewhere leaves them
+// untouched, so the card skips re-rendering.
+export default React.memo(Player);
 
 /**
  *

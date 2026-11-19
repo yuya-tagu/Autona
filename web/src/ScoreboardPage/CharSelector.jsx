@@ -3,6 +3,7 @@ import TextField from "./TextField";
 import i18n from "i18next";
 import {BACKEND_PORT} from "../env";
 import {useSelector} from "react-redux";
+import {useMemo} from "react";
 
 /**
  * @typedef {{
@@ -45,6 +46,7 @@ export function CharSelector({
     compactSkin = false,
  }) {
     const /** @type {AutonaCharacterDb} */ characters = useSelector((state) => state.autonaCharacters.characters);
+    const characterOptions = useMemo(() => Object.values(characters), [characters]);
     const hasCharName = charName && charName !== '';
     const selected = characters?.[charName] ?? "";
 
@@ -54,7 +56,7 @@ export function CharSelector({
     <Stack {...stackProps} alignItems={"stretch"} justifyContent={"space-evenly"} sx={{height: 40}}>
         <Autocomplete
             id={id + "-name"}
-            options={Object.values(characters)}
+            options={characterOptions}
             value={selected}
             inputValue={nameText}
             onInputChange={onNameText

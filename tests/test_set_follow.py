@@ -1174,6 +1174,37 @@ def test_answers_apply_on_the_headless_host(autonaApp, headless,
     assert held == [True, True]
 
 
+def test_applying_the_same_payload_again_writes_no_bracket_type_or_upset_factor(
+        autonaApp, headless):
+    """The 5-second follow re-applies the set it already shows. An identical
+    Set still runs a save cycle (and a full-state diff when a held board is
+    dirty), so a value that did not change is not written."""
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+
+    data = AutonaTournamentDataProvider.instance.provider.GetMatch(1001)
+    service = _setFollow()
+    service.ApplySetPayload(copy.deepcopy(data))
+    _drain(autonaApp)
+    assert autonaApp.get("score.bracket_type") == "DOUBLE_ELIMINATION"
+    upset = autonaApp.get("score.1.upset_factor")
+
+    StateManager = _state()
+    real = StateManager.Set
+    writes = []
+
+    def spy(key, value=None, *args, **kwargs):
+        writes.append(key)
+        return real(key, value, *args, **kwargs)
+
+    with patch.object(StateManager, "Set", spy):
+        service.ApplySetPayload(copy.deepcopy(data))
+    _drain(autonaApp)
+
+    assert "score.bracket_type" not in writes
+    assert "score.1.upset_factor" not in writes
+    assert autonaApp.get("score.1.upset_factor") == upset
+
+
 def test_a_web_load_right_after_a_lookup_is_checked_replaces_it(
         autonaApp, headless, provider):
     """The stream lookup's answer is checked where the board's operations

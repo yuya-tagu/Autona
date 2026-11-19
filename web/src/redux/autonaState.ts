@@ -197,7 +197,9 @@ export const autonaCharactersSlice = createSlice({
             Object.values(action.payload).forEach((char: AutonaCharacterDbEntry) => {
                 enChars[char.en_name] = char;
             });
-            console.log("Character data set", enChars);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log("Character data set", enChars);
+            }
             state.characters = enChars;
             state.initializing = false;
         }

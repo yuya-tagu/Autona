@@ -15,7 +15,7 @@ import {ExpandMore} from "@mui/icons-material";
 import {useTheme} from "@mui/material/styles";
 import {apiPost} from "../api";
 import {useApiAction} from "./Feedback";
-import {useSelector} from "react-redux";
+import {useSelector, useStore} from "react-redux";
 import {Grid} from "@mui/system";
 
 /**
@@ -26,12 +26,13 @@ import {Grid} from "@mui/system";
 export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     const [expanded, setExpanded] = React.useState(true);
 
-    const autonaState = useSelector(state => state.autonaState.autonaState);
+    // Only the board's own score subtree is subscribed; the tournament name and
+    // stream url are read when "post to X" is clicked.
+    const store = useStore();
+    /** @type {AutonaScoreInfo} */
+    const score = useSelector(state => state.autonaState.autonaState?.score[scoreboardNumber]);
     const theme = useTheme();
     const isSmall = useMediaQuery(theme.breakpoints.down('lg'));
-
-    /** @type {AutonaScoreInfo} */
-    const score = autonaState?.score[scoreboardNumber];
 
     const {pending: resetPending, run: runReset} = useApiAction();
     const {pending: swapPending, run: runSwap} = useApiAction();
@@ -45,6 +46,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     }
 
     const postToX = () => {
+        const autonaState = store.getState().autonaState.autonaState;
         const tournamentName = autonaState?.tournamentInfo?.tournamentName || "";
         const phase = [score?.phase, score?.pool].filter(Boolean).join(" - ");
         const match = score?.match || "";
