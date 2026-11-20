@@ -147,7 +147,8 @@ SCORE ページの配信台のダイアログ（`web/src/ScorePage/SetSelection.
 
 #### 3-3-3. レイアウト・テンプレート共有
 
-- **レイアウトマーケットプレイス（Lite）** — GitHub リポ URL 指定で `layout/` パッケージを取り込める仕組み
+- **運営が AI でオーバーレイを作る仕組み** — オーバーレイ契約（`autona.js`）・AI に渡す作成キット・アプリ内のエラー表示とサンプルデータ（[ADR-008](../decisions/ADR-008-ai-assisted-layout-authoring.md)）
+- **レイアウトマーケットプレイス（Lite）** — GitHub リポ URL 指定で `layout/` パッケージを取り込める仕組み（まず zip の取り込みを [ADR-007](../decisions/ADR-007-template-packages.md) T3 で作る）
 - **サムネイルテンプレート自作 UI** — 背景・フォント・位置を GUI で編集、保存
 
 ---
