@@ -1,0 +1,53 @@
+{
+  "score": {
+    "1": {
+      "best_of": "3",
+      "phase": null,
+      "station": 7,
+      "team": {
+        "1": {
+          "score": "2",
+          "losers": "true",
+          "player": {
+            "1": {
+              "name": "Solo",
+              "twitter": "@@solo",
+              "seed": "0",
+              "country": {"code": "JP"},
+              "state": "Tokyo",
+              "sponsor_logo": "user_data\\sponsor_logo\\Team A.png",
+              "character": {
+                "1": {"name": "", "assets": {}},
+                "2": {
+                  "name": "Ken",
+                  "assets": {
+                    "portrait": {"asset": "./user_data/games/sf6//portrait/ken_00.png"},
+                    "alpha_pack": {"asset": "user_data/games/sf6/alpha_pack/ken.png"},
+                    "base_files/icon": {"asset": "C:\\abs\\icon.png"},
+                    "broken": "not a pack"
+                  }
+                },
+                "x": {"name": "not a slot"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tournamentInfo": {"tournamentName": "Only Name", "displayTournamentName": "", "logoVersion": 0},
+  "commentary": {
+    "1": {"name": "  ", "display": 1},
+    "2": {"name": "Legacy", "display": true, "twitter": "legacy"},
+    "3": {"name": "Hidden", "display": 0},
+    "x": {"name": "Not a slot", "display": 1}
+  },
+  "top8": {
+    "players": {"1": {"name": "P1", "country": {"code": "JP", "asset": "../outside.png"}}},
+    "matches": {
+      "gf": {"slots": [1, 9], "score": [2, 2], "finished": true},
+      "wf": {"slots": "broken", "score": null}
+    }
+  },
+  "display_options": {"show_sponsor": false, "show_name": "yes"}
+}

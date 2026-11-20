@@ -401,7 +401,7 @@ Help & Settings から開く**メニューのページ**（サイドバーの項
 
 #### 4.3.3 デザイン一覧のメタデータ
 
-BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて `src/core/LayoutCatalog.py` の 1 つのカタログを読む。旧来型のテンプレートのメタデータは `settings.json` の `autona` ブロック（キーは `kind` / `displayName` / `format` / `game` / `entry`。`LayoutCatalog` の docstring が正本）、Designer 製（`layout/custom/{slug}/`）は `project.json`。ブロックが無い・壊れたフォルダは旧来のフォルダ名の規約（`scoreboard*` / `commentators*` / `bracket_top8*`）で拾う。同じ kind で表示名が重なったら `{displayName} ({id})` にする。利用者向けの説明は `layout/README.md`。pin: `tests/test_layout_catalog.py`。
+BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて `src/core/LayoutCatalog.py` の 1 つのカタログを読む。旧来型のテンプレートのメタデータは `settings.json` の `autona` ブロック（キーは `kind` / `displayName` / `format` / `game` / `entry` / `contract`。`contract` はオーバーレイ契約の番号で省略は 1、知らない番号は載せない（ADR-008 D1）。`LayoutCatalog` の docstring が正本）、Designer 製（`layout/custom/{slug}/`）は `project.json`。ブロックが無い・壊れたフォルダは旧来のフォルダ名の規約（`scoreboard*` / `commentators*` / `bracket_top8*`）で拾う。同じ kind で表示名が重なったら `{displayName} ({id})` にする。利用者向けの説明は `layout/README.md`。pin: `tests/test_layout_catalog.py`。
 
 #### 4.3.4 共有リソース
 
@@ -586,6 +586,7 @@ OBS の標準ホットキーと被ると配信中に意図しない操作が走�
 ### 7.2 新 OBS スコアボードレイアウト
 
 `layout/{名前}/index.html`・`index.css`・`index.js`（`Start()` / `Update(event)`）・`*_preview.png`。命名は §4.3.1。Python・state・共通リソースは触らない（フォルダのスキャンで列挙される。一覧に載せるなら `settings.json` の `autona` ブロック。§4.3.3）。
+新しく書くなら `globals.js` の直後に `layout/include/autona.js` を読み、`Autona.onUpdate(view, prev)` の整えた形（キーの表は `layout/include/overlay_contract.json`。足すだけの契約 1）を使う（ADR-008 D1。書き方は `layout/README.md`）。
 
 ### 7.3 新リザルト画像レイアウト / 7.4 新サムネイルテンプレート
 

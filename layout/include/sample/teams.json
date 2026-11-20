@@ -1,0 +1,1212 @@
+{
+  "game": {
+    "name": "Sample Game",
+    "codename": "sample",
+    "selected": true,
+    "defaults": {
+      "players_per_team": 3,
+      "characters_per_player": 1
+    }
+  },
+  "tournamentInfo": {
+    "tournamentName": "Autona Cup 2026",
+    "displayTournamentName": "Autona Cup",
+    "eventName": "3on3 Teams",
+    "address": "",
+    "numEntrants": 128,
+    "startAt": "2026/11/21",
+    "startAtDate": "2026-11-21",
+    "themeColor": "#181B21",
+    "accentColor": "#f0a500",
+    "logoVersion": 1763683200000,
+    "bannerVersion": 0,
+    "shortLink": "",
+    "url": "",
+    "media": {
+      "status": "idle",
+      "error": "",
+      "revision": 0
+    },
+    "load": {
+      "status": "idle",
+      "error": "",
+      "revision": 0
+    }
+  },
+  "colors": {
+    "board": {
+      "themeColor": "#1f2937"
+    }
+  },
+  "display_options": {
+    "show_sponsor": false,
+    "show_name": true,
+    "show_seed": true,
+    "show_characters": true,
+    "show_social": true,
+    "show_real_name": false,
+    "show_location": true,
+    "show_additional": false
+  },
+  "score": {
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "1": {
+      "best_of": 3,
+      "best_of_short_text": "BO3",
+      "best_of_text": "Best of 3",
+      "first_to": 2,
+      "first_to_short_text": "FT2",
+      "first_to_text": "First to 2",
+      "phase": "Top 16",
+      "pool": "",
+      "match": "Losers Semi-Final",
+      "match_en": "Losers Semi-Final",
+      "set_id": null,
+      "auto_update": null,
+      "station": null,
+      "station_queue": {},
+      "teamsSwapped": false,
+      "last_sets": {
+        "1": {},
+        "2": {}
+      },
+      "history_sets": {
+        "1": {},
+        "2": {}
+      },
+      "team": {
+        "1": {
+          "teamName": "Team Alpha",
+          "score": 1,
+          "color": "#e5484d",
+          "logo": "",
+          "losers": true,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Alpha",
+              "team": "TEAM A",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "JP",
+                "name": "Japan",
+                "display_name": "日本",
+                "en_name": "Japan",
+                "asset": "./assets/country_flag/jp.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "TEAM A | Alpha",
+              "mergedOnlyName": "Alpha",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 1",
+                  "en_name": "Fighter 1",
+                  "display_name": "Fighter 1",
+                  "codename": "fighter_1",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            },
+            "2": {
+              "birthday": false,
+              "name": "Echo",
+              "team": "TEAM A",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "JP",
+                "name": "Japan",
+                "display_name": "日本",
+                "en_name": "Japan",
+                "asset": "./assets/country_flag/jp.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "TEAM A | Echo",
+              "mergedOnlyName": "Echo",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 2",
+                  "en_name": "Fighter 2",
+                  "display_name": "Fighter 2",
+                  "codename": "fighter_2",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            },
+            "3": {
+              "birthday": false,
+              "name": "Hotel",
+              "team": "TEAM A",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "JP",
+                "name": "Japan",
+                "display_name": "日本",
+                "en_name": "Japan",
+                "asset": "./assets/country_flag/jp.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "TEAM A | Hotel",
+              "mergedOnlyName": "Hotel",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 3",
+                  "en_name": "Fighter 3",
+                  "display_name": "Fighter 3",
+                  "codename": "fighter_3",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_3.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_3.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        },
+        "2": {
+          "teamName": "Team Bravo",
+          "score": 2,
+          "color": "#3e63dd",
+          "logo": "",
+          "losers": true,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Bravo",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "US",
+                "name": "United States",
+                "display_name": "アメリカ合衆国",
+                "en_name": "United States",
+                "asset": "./assets/country_flag/us.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "Bravo",
+              "mergedOnlyName": "Bravo",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 0",
+                  "en_name": "Fighter 0",
+                  "display_name": "Fighter 0",
+                  "codename": "fighter_0",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_0.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_0.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            },
+            "2": {
+              "birthday": false,
+              "name": "Foxtrot",
+              "team": "FX",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "US",
+                "name": "United States",
+                "display_name": "アメリカ合衆国",
+                "en_name": "United States",
+                "asset": "./assets/country_flag/us.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "FX | Foxtrot",
+              "mergedOnlyName": "Foxtrot",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 1",
+                  "en_name": "Fighter 1",
+                  "display_name": "Fighter 1",
+                  "codename": "fighter_1",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            },
+            "3": {
+              "birthday": false,
+              "name": "Golf",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {
+                "code": "KR",
+                "name": "South Korea",
+                "display_name": "韓国",
+                "en_name": "South Korea",
+                "asset": "./assets/country_flag/kr.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "Golf",
+              "mergedOnlyName": "Golf",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 2",
+                  "en_name": "Fighter 2",
+                  "display_name": "Fighter 2",
+                  "codename": "fighter_2",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        }
+      }
+    },
+    "3": {
+      "best_of": 0,
+      "phase": "Crew Battle",
+      "pool": "",
+      "match": "Final",
+      "teamsSwapped": false,
+      "team": {
+        "1": {
+          "teamName": "Team Alpha",
+          "score": 5,
+          "color": "#e5484d",
+          "logo": "",
+          "losers": false,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "A1",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "A1",
+              "mergedOnlyName": "A1",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 0
+            },
+            "2": {
+              "birthday": false,
+              "name": "A2",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "A2",
+              "mergedOnlyName": "A2",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 2
+            },
+            "3": {
+              "birthday": false,
+              "name": "A3",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "A3",
+              "mergedOnlyName": "A3",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "4": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "5": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "6": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "7": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "8": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "9": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            }
+          },
+          "memberNum": 3,
+          "activeMember": "2"
+        },
+        "2": {
+          "teamName": "Team Bravo",
+          "score": 9,
+          "color": "#3e63dd",
+          "logo": "",
+          "losers": false,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "B1",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "B1",
+              "mergedOnlyName": "B1",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "2": {
+              "birthday": false,
+              "name": "B2",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "B2",
+              "mergedOnlyName": "B2",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "3": {
+              "birthday": false,
+              "name": "B3",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "B3",
+              "mergedOnlyName": "B3",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "4": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "5": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "6": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "7": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "8": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            },
+            "9": {
+              "birthday": false,
+              "name": "",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 0,
+              "country": {},
+              "state": {},
+              "id": null,
+              "mergedName": "",
+              "mergedOnlyName": "",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "",
+                  "assets": {},
+                  "skin": -1,
+                  "variant": {}
+                }
+              },
+              "mains": {},
+              "stock": 3
+            }
+          },
+          "memberNum": 3,
+          "activeMember": "1"
+        }
+      }
+    }
+  },
+  "commentary": {
+    "1": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "2": {
+      "name": "Kilo",
+      "team": "KL",
+      "twitter": "kilo_cast",
+      "role": "実況",
+      "icon": "mic",
+      "note": "",
+      "display": 1
+    },
+    "3": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "4": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "5": {
+      "name": "Lima",
+      "team": "",
+      "twitter": "lima",
+      "role": "解説",
+      "icon": "",
+      "note": "",
+      "display": 2
+    },
+    "6": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "7": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "8": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "9": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "10": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "11": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "12": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    }
+  },
+  "top8": {
+    "phaseLabel": "TOP 8",
+    "players": {
+      "1": {
+        "name": "Alpha",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "2": {
+        "name": "Bravo",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "3": {
+        "name": "Charlie",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "4": {
+        "name": "Delta",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "5": {
+        "name": "Echo",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "6": {
+        "name": "Foxtrot",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "7": {
+        "name": "Golf",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      },
+      "8": {
+        "name": "Hotel",
+        "sponsor": "",
+        "country": {},
+        "characters": {}
+      }
+    },
+    "matches": {
+      "wsf1": {
+        "name": "Winners Semi-Final",
+        "slots": [
+          1,
+          2
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "wsf2": {
+        "name": "Winners Semi-Final",
+        "slots": [
+          3,
+          4
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lr1a": {
+        "name": "Losers Round 1",
+        "slots": [
+          5,
+          6
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lr1b": {
+        "name": "Losers Round 1",
+        "slots": [
+          7,
+          8
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "wf": {
+        "name": "Winners Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lqf1": {
+        "name": "Losers Quarter-Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lqf2": {
+        "name": "Losers Quarter-Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lsf": {
+        "name": "Losers Semi-Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lf": {
+        "name": "Losers Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "gf": {
+        "name": "Grand Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "gf_reset": {
+        "name": "Grand Final Reset",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      }
+    }
+  }
+}

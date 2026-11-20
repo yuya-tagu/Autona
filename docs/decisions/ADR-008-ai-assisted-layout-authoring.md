@@ -79,7 +79,7 @@ Accepted（2026-11-21 オーナー承認。末尾の論点は 1 = A・2 = A・3 
 - 値が無いときは空文字・空配列・`null` のどれかに決めて表に書く（`undefined` を出さない。AI が書く `if` を減らす）
 - **対応表の正本を 1 つにする**: `layout/include/overlay_contract.json`（ビューのキー・型・空のときの値・元の state のパス・説明 ja / en）。
   - pytest: 表の元のパスが全部 `KEY_CATALOG` にあること（state の改名で落ちる）
-  - jest: vm で `autona.js` を動かし、サンプルの state → ビューが期待値（`tests/fixtures/overlay/views.json`）と一致し、表のキーと型に合うこと
+  - pytest から node の `vm` で `autona.js` を本物の `globals.js` と動かし、サンプルの state → ビューが期待値（`tests/fixtures/overlay/views.json`）と一致し、表のキーと型に合うこと
   - キットの `CONTRACT.md`・`AI_PROMPT.md` はこの表から生成する（D2）
 - 約束の範囲: **キーの追加だけ**。改名・削除・意味の変更は contract を上げる（ADR-007 D3 と同じ規則）。
   マニフェストの `"contract"` はオーバーレイでは省略可（省略は 1）。**知らない番号は一覧に出さず理由を出す**（ADR-007 D1 と同じ扱い。理由は D3 で見えるようにする）
@@ -88,6 +88,43 @@ Accepted（2026-11-21 オーナー承認。末尾の論点は 1 = A・2 = A・3 
 - `autona.js` が読む URL のクエリは `autona` の接頭辞付き（`autonaSample` / `autonaPreview`）。`URLSearchParams` で読み、`window` の値には頼らない。
   キットに「トップレベルで使わない名前」（`scoreboardNumber`・`autona*`・`Start`・`Update`・`data`・`oldData`・`settings`）を書く
 - キットに `gsap` を使うなら最初の更新まで止まっていることを書く（`globals.js` の既存の挙動）
+- L1 の実装: ビューのキーの全量は `layout/include/overlay_contract.json`（この節の表は例のまま残す）。各選手は
+  `name`・`sponsor`・`sponsorLogo`・`realName`・`twitter`（先頭の `@` を除く）・`seed`・`country` / `region`（`{code, name, flag}`）・
+  `character`（`{name, icon, image, images[]}`。`characters[]` の先頭）・`characters[]`、`players[]` の要素はさらに `stock`・`active`
+  （クルーバトルだけが値を持つ）。`board.p1` / `p2` は `players[0]` と同じキー（`stock`・`active` を除く）にチームの `score`・`losers`・
+  `teamName`・`color`・`players` を足した形。`board` は `number`・`bestOf`・`phase`・`pool`・`round`・`station`。`top8` は `phaseLabel`・
+  `players[]`・`matches`（固定の 11 試合の id をキーにしたオブジェクトで、各試合は `name`・`p1` / `p2`（選手のキーに `slot`・`score`）・
+  `finished`・`active`・`winner`）。実況のアイコンは名前（`mic` など）なので `commentary[].iconName`（上の表の `icon`。画像の URL と取り違えないよう改名）
+- L1 の実装: 値が無いときの値は型で決める（文字列 `""`・数値 `null`・配列 `[]`・真偽値 `false`）。例外は `board.number`（URL が無ければ 1）と
+  `options`（`StateSchema.DISPLAY_OPTIONS` の既定値）。オブジェクトのキー（`country`・`character`・`top8.matches` の 11 試合）は常にある。
+  `board.bestOf` は state の 0（未設定。同梱の `scoreboard_simple` は 0 でゲームの枠を出さない）も `null`。TOP 8 の `slot` は未定か 8 人のどれでもない
+  番号なら `null`（選手のキーは全部空）。TOP 8 の state は国の名前を持たないので `top8` の `country.name` は今は常に空
+- L1 の実装: `character.image` は、レイアウトの `settings.json` の `assets.default.asset_key`（同梱が使うキー）→ `full` → アイコン以外でアセットの
+  名前順の先頭 → アイコン。`images[]` もアセットの名前順（state のキーの順に頼らない）
+- L1 の実装: `commentary[]` は `display` が 0 でなく**名前が空でない**人だけ（同梱の `commentators` と同じ。名前の無い欄を表示順に出しても
+  描くものが無い）。並びは `display`、同じなら欄の番号。件数の上限は core（表示は 4 人まで）に任せ、autona.js では切らない
+- L1 の実装: `tournament.name` は表示大会名、空なら大会名。`tournament.themeColor` / `accentColor` はレイアウトの種類の `colors.{feature}`
+  （`scoreboard` → `board`・`commentary`・`top8`）があればそれ、無ければ大会の色（同梱の 3 種と同じ解決）。種類は `settings.json` の
+  `autona.kind`、無い（または知らない値の）ときは URL のフォルダ名から `LayoutCatalog` と同じ接頭辞の規則で決める。`tournament.logo` は
+  `logoVersion` が 0 なら空
+- L1 の実装: `onUpdate` は**ビューが変わったときだけ**呼ぶ（統計など、ビューに出ない state の更新では呼ばない）。最初の更新の後に登録した関数は
+  その時点のビューで 1 回呼ぶ。`view` と `prev` は登録した関数のあいだで共有するので再帰的に凍結する。1 つの関数の例外（同期・非同期）は
+  `console.error` に出し（同じ関数は成功するまで 1 回だけ）、ほかの関数は呼ぶ
+- L1 の実装: 読む順番は **`globals.js` の直後、レイアウト自身のスクリプトより前**（キットにも書く）。`autona.js` は `LoadEverything()` を自分で呼ぶ
+  （ページの解析の後）。同梱をまねたレイアウトが自分でも呼ぶので、`LoadEverything` を「2 回目以降は 1 回目の Promise を返す」包みに差し替える
+  （上の最小例は `LoadEverything` を書かない）。読み込んだ時点で既に `LoadEverything()` が走っていた（`window.tshSocket` か、それが足す
+  `include/jquery-3.7.1.min.js` の `<script>` がある）ら `console.warn` を 1 回出し、自分では呼ばない
+- L1 の実装: `autonaSample` は `globals.js` の `getData`（ファイル経由の読み込みと、OBS がソースを再表示したときの読み直し）をサンプルを返す
+  関数に、`UpdateData_SocketIO` を「`tsh_init` の後に `UpdateData()` を 1 回呼ぶ」関数に差し替える（Socket.IO はつながない。
+  サンプルの名前は英数字・`_`・`-` だけ）。サンプルは `singles`（1on1 の 2 ボード・実況 3 人・TOP 8 の途中）・`teams`（3on3 とクルーバトル・
+  始まる前の TOP 8）・`empty`。キャラの画像は同梱の `assets/mock_data/` を指す。サンプルの葉のキーも `KEY_CATALOG` に収まることをテストで固定する
+- L1 の実装: `Autona` が出すのは `contract`（数値の 1）・`onUpdate`・`raw` だけ。対応づけは JS のコードで、表は実行時に読まない。
+  表との一致（キー・型・空の値）と元のパス（`KEY_CATALOG` のキー、または dict を持つキー（`country`・`character.{K}` など）の下だけ）は
+  `tests/test_overlay_contract.py` が固定する（`tests/test_designer_runtime_contract.py` と同じく pytest から node の `vm` で本物の
+  `globals.js` と動かす形）。期待値 `views.json` はケースごとに見るまとまりだけを持ち、空の state の期待値は表から作る
+- L1 の実装: マニフェストの `contract` はブロックがあるオーバーレイ（`scoreboard` / `commentary` / `top8`）で読み、省略は 1。
+  `LayoutCatalog.OVERLAY_CONTRACTS` に無い値（整数でないものを含む）は警告ログを出して、フォルダ名の規約でも拾わない。一覧の項目の形
+  （`GET /api/v1/layouts`）は変えない。配布 zip の必須の項目（`validate_release_zip.ps1`）に `autona.js` と `overlay_contract.json` を足した
 
 ### D2: 作成キットを「新しいデザインを作る」で `layout/` に直接作る【論点 2】
 
@@ -153,7 +190,7 @@ L2 と L3 はどちらもデザイン一覧の UI と SHELL のルートに触�
 
 | 段階 | 内容 | 検証 | 区分 |
 |------|------|------|------|
-| **L1 契約** | `autona.js`（ビュー・`onUpdate`・`Autona.raw`・`autonaSample`）、対応表 `overlay_contract.json`、サンプルの state `layout/include/sample/`、ビューの期待値、マニフェストの `contract`（オーバーレイ）、`layout/README.md` の更新 | jest: vm で state → ビュー（単独戦・団体戦・crew・値の欠け・ボード 2）、差分の更新で `onUpdate` が呼ばれること、`Update` を定義したレイアウトでも呼ばれること。pytest: 表の元のパスと `KEY_CATALOG`、知らない contract を一覧に出さないこと。実機: 隔離データで `autona.js` を使った試作レイアウトを OBS 用 URL で開き、スコアの変更が反映されること | 通常 |
+| **L1 契約** | `autona.js`（ビュー・`onUpdate`・`Autona.raw`・`autonaSample`）、対応表 `overlay_contract.json`、サンプルの state `layout/include/sample/`、ビューの期待値、マニフェストの `contract`（オーバーレイ）、`layout/README.md` の更新 | pytest（node の vm）: state → ビュー（単独戦・団体戦・crew・値の欠け・ボード 2）、差分の更新で `onUpdate` が呼ばれること、`Update` を定義したレイアウトでも呼ばれること。pytest: 表の元のパスと `KEY_CATALOG`、知らない contract を一覧に出さないこと。実機: 隔離データで `autona.js` を使った試作レイアウトを OBS 用 URL で開き、スコアの変更が反映されること | 通常 |
 | **L2 キット** | `layout/include/kit/`、生成スクリプト（`CONTRACT.md`・`AI_PROMPT.md`）、「新しいデザインを作る」（core の操作・SHELL のルート・ROUTE_ACCESS・v1）、フォルダを開く操作の一般化、「AI 用の説明をコピー」、`validate_release_zip.ps1` の必須エントリ | 生成物の差分なしのテスト、作る操作の pytest（既にある名前・予約名・不正な文字・ルート台帳とアクセス区分）、jest。**受け入れ: `AI_PROMPT.md` だけをチャットの AI に渡し、指定したデザインが手直しなしで動くこと**（3 種で試す） | 高（`layout/` への新しい書き込み口） |
 | **L3 アプリ内の確認** | 一覧から外れた理由（v1 の追加と文書）、`autona.js` のエラー捕捉と `postMessage`、`DesignPane` の受け方とエラーの欄・コピー、規則と固定のテストの差し替え、再読み込み・URL のコピー | jest: 送り元とオリジンの照合（別のフレーム・入れ子のフレーム・形の違うメッセージを捨てる）・長さと件数の上限・テキストとしてだけ描くこと・コピーの文。pytest: 外れた理由の各分類。E2E: エラーを起こす試作レイアウトでエラーの欄に出ること、`autona.js` を読まないレイアウトで「読めていない」が出ること、`autonaSample` でサンプルが出ること。実機: 隔離データで 3 ページを確かめる | 高（共有ビューの `message` の規則を変える） |
 | **L4 Designer の寄せ** | 21 語の golden、`resolveBinding()` をビュー経由に | 21 語の golden が変わらないこと、Designer 製デザインの表示が変わらないこと | 通常 |
