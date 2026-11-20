@@ -42,7 +42,7 @@ the shell's renderer, the locale and its names and the output pruning are
 injected there, because core may not import them
 (tests/test_core_qt_free.py). The service's own words are core's
 (core/CoreWords, in the locale's language; Qt's translations until ADR-005
-S-final SF-7). Import side effects: none (agent-pitfalls #1).
+S-final SF-7). Import side effects: none (pitfalls #1).
 """
 import copy
 import datetime

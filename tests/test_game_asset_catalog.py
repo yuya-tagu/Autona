@@ -320,7 +320,7 @@ def test_a_load_selects_and_forgetting_unselects_the_rest_staying(catalog):
 
 def test_forgetting_writes_the_flag_outside_the_writer_lock_once(catalog,
                                                                  monkeypatch):
-    """agent-pitfalls #16: with no save block open the write publishes at
+    """pitfalls #16: with no save block open the write publishes at
     once, and its observers must not run under the catalog's writer lock.
     Forgetting again (nothing selected) writes nothing."""
     catalog.SelectGame("tgame")

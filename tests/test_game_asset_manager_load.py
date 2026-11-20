@@ -10,7 +10,7 @@ recording pins that their output did not move.
 
 The file was test_game_asset_manager_models.py, which also read the
 adapter's QStandardItemModels back row by row against the recording's
-`models` section and pinned their retirement (agent-pitfalls #13). The
+`models` section and pinned their retirement (pitfalls #13). The
 models went in the Qt model clean-up's PR4 (no combo was left to bind to
 them); the recording keeps that section, which
 tests/test_game_asset_catalog.py still compares the catalog's rows with.
@@ -129,8 +129,7 @@ WEB_READERS = {
 
 
 def test_the_web_readers_read_the_catalog_without_a_gui_hop():
-    """S1's completion condition (docs/changes/architecture-modernization.md
-    §4.4): get_games / get_characters / get_variants carry no
+    """S1's completion condition (ADR-005 D3): get_games / get_characters / get_variants carry no
     @gui_thread_sync, and read the catalog rather than the Qt models."""
     # Web operations of both shells since ADR-005 S3c (module functions).
     root = Path(__file__).resolve().parent.parent

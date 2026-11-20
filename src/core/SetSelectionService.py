@@ -71,7 +71,7 @@ it released. Rows are never changed once made, so ``Result`` hands them over
 without copying (a reader only serializes them, inside no lock of ours).
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
-(agent-pitfalls #1). ``SetSelectionService.instance`` is built by
+(pitfalls #1). ``SetSelectionService.instance`` is built by
 ``bootstrap_core()``.
 """
 import collections

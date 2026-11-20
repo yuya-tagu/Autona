@@ -738,7 +738,7 @@ def test_the_shells_wiring_reports_the_payload():
 # when the Qt EVENT panel went, ADR-005 S4g) ─────────────────────────────
 #
 # Source-level, because Window cannot be built in this harness (importing
-# src/Autona.py *is* the startup sequence -- agent-pitfalls #1). Losing any
+# src/Autona.py *is* the startup sequence -- pitfalls #1). Losing any
 # of these lines would not fail a test anywhere else: the app would start,
 # the Event page would look fine, and tournamentInfo.* would simply never
 # be written for anyone who did not open it.

@@ -16,7 +16,7 @@ Autona（Python / PySide6 デスクトップ + React Web UI）の実装担当（
 - 指示に「触らない」と書かれたファイル（他作業の未コミット変更など）は編集しない。改行コードを変える一括置換（glob 指定の `sed -i` 等）をしない
 - commit / push はしない
 
-`src/**/*.py` を触るなら `.claude/rules/agent-pitfalls.md` を先に読む。
+`src/**/*.py` を触るなら `docs/development/pitfalls.md` を先に読む。
 
 途中で設計判断が必要になったら、判断せずにそこで止めて「何を判断する必要があるか」を報告する。
 

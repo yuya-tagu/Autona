@@ -428,7 +428,7 @@ class StateManager:
         state_updated / held handler, which runs inside the SaveState that
         delivers it); called "now", it runs wherever the caller is. So `fn`
         must not block: hand the work on (queue it and notify) and return --
-        never wait for another thread here (agent-pitfalls #17). Callbacks
+        never wait for another thread here (pitfalls #17). Callbacks
         run in the order they were registered on the thread that runs them;
         nothing orders them against another thread's publishes or
         callbacks.

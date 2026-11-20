@@ -83,7 +83,7 @@ thread, one at a time with the web's -- in both shells since ADR-005 S4ad;
 the desktop's ran it on the GUI thread until then), the fetcher's answers
 arrive on the main thread and go through it too, and
 nothing here waits for another thread: the fetches are started, never
-joined, and no lock of this module is held while calling out (agent-pitfalls
+joined, and no lock of this module is held while calling out (pitfalls
 #17).
 
 The fetcher's interface (``AutonaSetFollowUtil``): ``Available()`` says
@@ -98,7 +98,7 @@ tick, or None, from any thread. (``FollowChanged(board)``, which told the
 Qt board what it follows changed, went in ADR-005 S4ad: ``changes`` tells
 the web server.)
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import threading
 
@@ -133,7 +133,7 @@ class SetFollowService:
     # that failed, a station chosen afresh). A set the board writes is told by
     # its own state. Only for a change: a cancel with nothing to cancel is
     # silent. Told where the board's operations run, possibly with
-    # StateManager.lock held: a subscriber only takes note (agent-pitfalls
+    # StateManager.lock held: a subscriber only takes note (pitfalls
     # #17).
     changes = ObserverChannel("set_follow_changes")
 
@@ -322,7 +322,7 @@ class SetFollowService:
                 # score arrives as 0-0 until it is reported, and is not
                 # written as such (ClearScore, not ResetMatch: the round
                 # name / phase / pool stay until the new set brings its
-                # own, S-17). The clear forgets the set loaded last, which
+                # own). The clear forgets the set loaded last, which
                 # is why it is recorded after it.
                 host.ClearPlayers(board, no_mains=noMains)
                 AutonaActions.instance.ClearScore(board)

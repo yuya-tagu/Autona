@@ -29,7 +29,7 @@ import pytest
 # Keep test runs from writing __pycache__/*.pyc for src modules. main.py
 # sets this for the app, but pytest imports src files without it and the
 # leftover .pyc can mask source edits when Windows mtimes lag
-# (agent-pitfalls #12).
+# (pitfalls #12).
 sys.dont_write_bytecode = True
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -304,7 +304,7 @@ def drain_tasks(timeout=TASKS_TIMEOUT_SECS):
     game load job marshalled what follows its selection onto this thread
     until ADR-005 S-final SF-6c, so a plain drain() would have waited for
     the job that waited for us.) Test harness only: src never pumps the
-    event loop (agent-pitfalls #9).
+    event loop (pitfalls #9).
 
     Everything means everything: a stepped executor's queued jobs run too,
     still one at a time -- a step that is waiting for this thread (its
@@ -487,7 +487,7 @@ def clear_players(board, no_mains=False):
 # Everything below builds a real, bootstrapped Autona -- the same singletons
 # main.py gets, both bootstrap stages -- offscreen, so the boards, the routes
 # and core can be driven from tests instead of by hand. See
-# docs/changes/test-automation-strategy.md §4 for why this layer exists. It
+# docs/changes/test-automation-strategy.md for this layer. It
 # built the Qt SCORE's board widgets too until ADR-005 S4ac-3 removed them.
 #
 # Two rules keep it honest:
@@ -894,7 +894,7 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # Normally done by src/Autona.py at import time. The @gui_thread_sync
         # operations (the shell operations) and the game load job's model
         # marshal raise without it, and that module is
-        # the one thing tests must not import (agent-pitfalls #1).
+        # the one thing tests must not import (pitfalls #1).
         if AutonaQtHelper.gui_executor is None:
             AutonaQtHelper.init_gui_executor()
 

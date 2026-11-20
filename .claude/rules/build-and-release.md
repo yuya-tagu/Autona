@@ -55,8 +55,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
     混入する `libssl-3-x64.dll` / `libcrypto-3-x64.dll` と Qt の OpenSSL の TLS バックエンド `qopensslbackend.dll`（この 3 つは
     ファイル名で、どのフォルダにあっても外す。アプリの QtNetwork は `QLocalSocket` / `QLocalServer` だけで TLS を使わない。
     Python の `ssl` は `libssl-3.dll` / `libcrypto-3.dll` で、こちらは残す）
-  - 外さないもの: `qtwebengine_devtools_resources.pak`・`Qt6Pdf.dll`・`opengl32sw.dll`・小さなプラグイン類（理由は台帳
-    `docs/changes/architecture-modernization.md` の SF-9 節）
+  - 外さないもの: `qtwebengine_devtools_resources.pak`・`Qt6Pdf.dll`・`opengl32sw.dll`・小さなプラグイン類（SF-9 で外した同梱物の削減の根拠。ADR-005 の「結果」節）
   - Qt モジュールを新しく import するとき: `tests/test_release_bundle.py` の `APP_QT_MODULES`（アプリが import する Qt モジュールの
     許可リスト。AST で pin）に足す前に、spec の excludes に入っていないこと・`validate_release_zip.ps1` の `$qtRequired` に要るものを足す
   - pin: `tests/test_release_bundle.py`（許可リスト・excludes を塞いだ状態での src / qtpy / qdarktheme の import・spec のフィルタと

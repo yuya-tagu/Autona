@@ -48,7 +48,7 @@ Pinned here:
     it was queued, nor one asked for after the shutdown;
   - a load commits what it wrote on a held board and leaves the rest
     pending; every way a load ends gives the save block back
-    (saveBlocked == 0: agent-pitfalls #6);
+    (saveBlocked == 0: pitfalls #6);
   - the game change's full state goes out after the load's delta, with the
     revision of its content (the save cycle itself: tests/test_roster_flow
     .py); each shell wires the web server once, to the bridge;
@@ -195,7 +195,7 @@ def test_only_the_shell_operations_wait_for_the_gui_thread():
     marshal (what follows a load's selection, waited for on the main
     thread: `marshal=run_sync`) was the last other caller; a job or a
     request that waits for the GUI thread is the deadlock and shutdown
-    class S3f-4 dealt with (agent-pitfalls #17)."""
+    class S3f-4 dealt with (pitfalls #17)."""
     helper = "src/Helpers/AutonaQtHelper.py"
     reached, users = {}, set()
     for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
@@ -1222,7 +1222,7 @@ SAVE_BLOCK_PATHS = {
 def test_every_way_a_load_ends_gives_the_save_block_back(
         shell, ownExecutor, autonaApp, monkeypatch, path):
     """One ReleaseSaving for every BlockSaving, whichever way the attempt
-    ends, and saveBlocked back at 0 (agent-pitfalls #6): a block left open
+    ends, and saveBlocked back at 0 (pitfalls #6): a block left open
     holds every later publish back, a release too many makes SaveState run
     away."""
     from src.core.StateManager import StateManager
@@ -1454,7 +1454,7 @@ def test_a_load_whose_publication_raises_fails_and_leaves_nothing_open(
     """_Publish raises on the loader's thread (the GUI thread's until
     ADR-005 S-final SF-6c), not in a step it isolates: the attempt is
     FAILED (done() once), its save cycle closed once (no BlockSaving left:
-    agent-pitfalls #6), no recording of held writes left open or kept
+    pitfalls #6), no recording of held writes left open or kept
     (StateManager.RecordHeldWrites), the board host's lock given back, and
     the next load goes through. What the two tests of a failing Qt model
     rebuild checked on the way, until the Qt model clean-up's PR4 removed
@@ -1581,7 +1581,7 @@ def test_a_load_whose_isolated_step_raises_is_loaded_and_closes_its_cycle(
     """The roster's commit (AutonaActions.CommitGameLoad) or the pick
     (GameLoader.PersistSelectedGame) raises inside the load's board
     operation: logged with its traceback, and the load goes on -- LOADED,
-    its save cycle closed (no BlockSaving left: agent-pitfalls #6), no
+    its save cycle closed (no BlockSaving left: pitfalls #6), no
     recording of held writes left open or kept, `loaded` told once, the
     board host's lock given back, and the next load goes through. (Until
     ADR-005 S-final SF-6c the pick ran after the board operation, on the

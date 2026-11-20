@@ -33,7 +33,7 @@ thumbnail's and the result's previews).
 ``TournamentMediaService.instance`` is built by ``bootstrap_core()``; the
 loaded tournament's provider is injected there (``currentProvider``),
 because core may not import the adapter. Import side effects: none
-(agent-pitfalls #1).
+(pitfalls #1).
 """
 import os
 import threading

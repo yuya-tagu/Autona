@@ -11,7 +11,7 @@ from the Qt side, the localized round names GetRoundName falls back to
 (self.matchNames), is handed in by whoever builds the bracket
 (`matchNames=`); the Top 8 import never asks for a round name.
 
-Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
+Import side effects: none (pitfalls #1). Qt-free, like everything under
 ``src/core``.
 """
 from loguru import logger

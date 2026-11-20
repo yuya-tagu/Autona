@@ -7,7 +7,7 @@ any log message containing a character outside that codepage (e.g.
 "Pokémon Trainer") raised UnicodeEncodeError from inside loguru's handler and
 spammed "Logging error in Loguru Handler" for the rest of the run.
 
-src/Autona.py must not be imported here (see .claude/rules/agent-pitfalls.md
+src/Autona.py must not be imported here (see docs/development/pitfalls.md
 #1): importing it assembles and boots the whole application. This test
 therefore covers the fix two ways instead:
   - a static check that the sys.stdout.reconfigure guard is still present in

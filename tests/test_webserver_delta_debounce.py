@@ -25,7 +25,7 @@ threading.Timer per batch), pinned in real time with generous margins: it
 sends on its own thread and waits out the window; deltas are taken only
 between start() and stop(); stop() sends the open batch at once and joins
 the thread, giving up on a send that does not return; and a writer -- which
-may hold StateManager.lock (agent-pitfalls #17) -- never waits on it.
+may hold StateManager.lock (pitfalls #17) -- never waits on it.
 """
 import copy
 import threading
@@ -679,7 +679,7 @@ def test_what_waited_for_a_batch_a_stuck_flusher_left_runs_after_a_restart(
 
 def test_a_writer_holding_the_state_lock_never_waits_on_the_flusher(
         flusher):
-    # agent-pitfalls #17: on_program_state_update runs under
+    # pitfalls #17: on_program_state_update runs under
     # StateManager.lock when the write was on the GUI thread. Here the
     # flusher's send needs that lock (as its full-state fallback does): the
     # writer must still get through while the flusher is stuck behind it.
@@ -917,7 +917,7 @@ def test_stop_sends_the_notices_still_open(flusher, monkeypatch):
 
 
 def test_a_notice_goes_out_with_the_state_lock_held(flusher, monkeypatch):
-    # agent-pitfalls #17: both channels run under StateManager.lock when the
+    # pitfalls #17: both channels run under StateManager.lock when the
     # write was on the GUI thread, and a save cycle can keep it a while. This
     # flusher sends every client's deltas, so it peeks at the flag instead of
     # stopping behind the lock: each notice arrives with the writer still
@@ -1084,7 +1084,7 @@ def test_a_new_start_starts_with_no_follow_notice(flusher, monkeypatch):
 
 
 def test_a_follow_notice_goes_out_with_the_state_lock_held(flusher):
-    # agent-pitfalls #17: told where the board's operations run, which may hold
+    # pitfalls #17: told where the board's operations run, which may hold
     # StateManager.lock. Only queued there: it is the flusher that sends it.
     from src.core.StateManager import StateManager
 
@@ -1227,7 +1227,7 @@ def test_a_new_start_starts_with_no_format_notice(flusher, monkeypatch):
 
 
 def test_a_format_notice_is_queued_with_the_state_lock_held(flusher):
-    # agent-pitfalls #17: a switch may be told under StateManager.lock (a
+    # pitfalls #17: a switch may be told under StateManager.lock (a
     # board operation's thread). Only queued there: the flusher sends it.
     from src.core.StateManager import StateManager
 

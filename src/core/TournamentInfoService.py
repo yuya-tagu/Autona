@@ -12,8 +12,7 @@ button, the overlays and the thumbnail all read it from there.
 
 Since headless core Step 4b this class is the writer (ADR-004 D2) and the
 panel is a renderer, which is what let it join the other lazy pages
-(startup-architecture-redesign.md §3, "TournamentInfo のヘッドレスサービス
-抽出"). Step 5's third instalment brought the other direction here too: an
+(ADR-003). Step 5's third instalment brought the other direction here too: an
 operator typing in the EVENT tab calls ``SetTextField`` / ``SetNumberField``
 / ``SetDateField`` instead of writing ``tournamentInfo.{objectName}`` from a
 lambda, so ``tournamentInfo.*`` has exactly one writer whichever end the
@@ -33,7 +32,7 @@ The Qt side keeps two things and no more:
   (tests/test_core_qt_free.py). Without one the platform short date is used,
   so a headless run still publishes the key.
 
-Import side effects: none (agent-pitfalls #1). ``bootstrap_core()`` creates
+Import side effects: none (pitfalls #1). ``bootstrap_core()`` creates
 the single instance.
 """
 import datetime

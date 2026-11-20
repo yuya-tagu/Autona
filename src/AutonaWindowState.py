@@ -17,7 +17,7 @@ navigation.
 
 Plain functions over the settings object handed in (the window's QSettings,
 or anything with value / setValue / remove / contains): importing this
-creates nothing and needs no Qt (agent-pitfalls #1).
+creates nothing and needs no Qt (pitfalls #1).
 """
 
 from .core import WebAccess

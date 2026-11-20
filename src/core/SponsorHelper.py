@@ -13,7 +13,7 @@ It writes ``score.{N}.team.{T}.player.{M}.sponsor_logo`` /
 catalogs -- so it belongs in the same layer as the rest of the player subtree's
 writer.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import os
 import re

@@ -32,7 +32,7 @@ message queue); this module only decides.
   desktop sets it (bootstrap_gui()); the headless shell has no hotkeys, and
   a save there only reaches settings.json.
 
-Importing this module reads and writes nothing (agent-pitfalls #1).
+Importing this module reads and writes nothing (pitfalls #1).
 """
 from collections import namedtuple
 

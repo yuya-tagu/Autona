@@ -1060,8 +1060,8 @@ class WebServer:
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
         # routes/events are untouched (ADR-001 D3 /
-        # .claude/design/external-control-api.md §9). Imported lazily here to
-        # keep singleton init order intact (agent-pitfalls #2). Nothing to
+        # docs/architecture/external-control-api.md §9). Imported lazily here to
+        # keep singleton init order intact (pitfalls #2). Nothing to
         # hand it: it calls the operations the shell registered on, and no
         # request can reach it before start() (ADR-005 S3e-9).
         from .AutonaApiV1 import api_v1
@@ -1312,7 +1312,7 @@ class WebServer:
         rev = changes.get('revision', changes.get('delta_index', -1))
 
         # Queues and notifies only: this can run under StateManager.lock
-        # (agent-pitfalls #17), and the flusher never holds _delta_cond
+        # (pitfalls #17), and the flusher never holds _delta_cond
         # while it sends, so nothing here waits on another thread.
         with WebServer._delta_cond:
             if not WebServer._delta_running:
@@ -1365,7 +1365,7 @@ class WebServer:
     def on_held_change(prefix, dirty=None):
         """held_state_updated / held_dirty_changed of a board. Queues and
         notifies only, like on_program_state_update: both are told inside a
-        held cycle, under StateManager.lock (agent-pitfalls #17)."""
+        held cycle, under StateManager.lock (pitfalls #17)."""
         parts = str(prefix).split(".")
         if len(parts) != 2 or parts[0] != "score" or not parts[1].isdigit():
             return
@@ -1423,7 +1423,7 @@ class WebServer:
     def on_follow_change(board):
         """StateManagerBridge.follow_changed. Queues and notifies only: it can
         be told where the board's operations run, possibly under
-        StateManager.lock (agent-pitfalls #17)."""
+        StateManager.lock (pitfalls #17)."""
         with WebServer._delta_cond:
             if not WebServer._delta_running:
                 return
@@ -1731,7 +1731,7 @@ class WebServer:
         its delta (ADR-005 S-final SF-6c review; until SF-6c the closing
         thread was the main thread, where the delta was delivered directly).
         Never waited for: the callback may run inside StateManager.lock
-        (agent-pitfalls #17)."""
+        (pitfalls #17)."""
         def push():
             WebServer.ws_program_state()
             WebServer.ws_get_characters(None)
@@ -2441,7 +2441,7 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
     Shows a QMessageBox when another process is already listening so the user
     can choose to terminate it. Called on the GUI thread from the event loop
     (Window._StartWebServer), so the exec() below is an ordinary top-level
-    modal and not a nested one (agent-pitfalls #9).
+    modal and not a nested one (pitfalls #9).
 
     The common case (port free) costs a bind attempt; the netstat/tasklist
     subprocesses only run when something really holds the port. Since the

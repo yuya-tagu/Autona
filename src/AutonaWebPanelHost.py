@@ -1217,7 +1217,7 @@ class AutonaWebPanelHost(QWidget):
     # load, a discard). The newest of each verb only.
 
     def _QueueShellRequest(self, request):
-        # Not inside Chromium's new-window call (agent-pitfalls #9): a verb
+        # Not inside Chromium's new-window call (pitfalls #9): a verb
         # may hide and show the window (alwaysOnTop's setWindowFlag), start
         # another application or run a modal dialog's loop (pickFolder's
         # folder dialog). For the document shown now, which asked.

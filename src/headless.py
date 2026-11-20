@@ -42,7 +42,7 @@ built board's reaction, and a headless run has none. The players per team a
 game sets is not one any more (ADR-005 S3e-6): the boards seeded at launch,
 one player a team, follow the game restored after them.
 
-Importing this module does nothing (agent-pitfalls #1): main.py calls run(),
+Importing this module does nothing (pitfalls #1): main.py calls run(),
 and before its single-instance gate the launch checks (instance_tag,
 refuse_frozen_headless: Autona.exe does not run headless).
 """

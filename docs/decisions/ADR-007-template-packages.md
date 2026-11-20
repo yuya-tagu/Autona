@@ -234,3 +234,10 @@ TOP8 リザルト画像と試合サムネイルのデザインを、第三者が
    - **A（推奨・採用）: 全部止める**。描画はオフラインで完結し、選手名などを外へ送る経路が無い。Web フォントやライブラリは
      パッケージに入れてもらう
    - B: 止めない。CDN のフォントなどをそのまま使えるが、テンプレートが読んだものを外へ送れる
+
+## 付記: layout/custom の統合（旧 `docs/changes/layout-custom-unification.md`・完了）
+
+Designer 製の layout（`layout/custom/`）は他の layout と同じ `LayoutCatalog`（`autona` ブロック）で扱う。Designer 製の表示名は `Custom: {name}`、
+同じ `kind` 内で重複したら `{displayName} ({id})`。再走査で選択中のデザインが一時的に消えても `board.selected_design` は上書きしない。
+`layout/custom/` 配下のシンボリックリンク・ジャンクションは列挙しない。設計書の全文はコミット d4311f81 の `docs/changes/layout-custom-unification.md` を参照
+（Figma 取込のペアリングは `docs/architecture/Design.md` の `designer.*` 行）。

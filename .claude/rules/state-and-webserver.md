@@ -11,8 +11,7 @@ paths:
 
 # 状態管理・Web サーバー開発ルール
 
-今コードを書く人が従う規則だけを置く。経緯は git 履歴と台帳（`docs/changes/architecture-modernization.md`・
-`docs/changes/headless-core-redesign.md`）、各モジュールの詳細な挙動はその docstring が正本。
+今コードを書く人が従う規則だけを置く。経緯は git 履歴と ADR（`docs/decisions/`）、各モジュールの詳細な挙動はその docstring が正本。
 
 ## StateManager
 
@@ -23,7 +22,7 @@ paths:
 - 複数キーを 1 サイクルにまとめるときだけ `with StateManager.SaveBlock():`（単一キーなら不要。空の `changedKeys` は早期 return するので
   包んでも全量 diff にならない。pin: `tests/test_state_manager_held.py`）
 - `StateManager.lock`（RLock）で守る。state の dict を直接触らない。held 通知と `state_updated` のハンドラはこの lock の中で走るので、
-  その中で別スレッドを待たない（agent-pitfalls #17）
+  その中で別スレッドを待たない（pitfalls #17）
 - **core（`src/core`）は Qt も `src/core` 外の `src` モジュールも import しない**（pin: `tests/test_core_qt_free.py`。AST と subprocess の
   `sys.modules`）。core が使う部品は core に置き、Qt・ロケールなどシェルにしか無いものは `bootstrap_core()` から callable で注入する。
   Qt シグナルはアダプタ `src/StateManagerBridge.py` が出す
@@ -180,14 +179,14 @@ paths:
 - **サービスは observer を購読しない**（購読すると破棄済みの購読者が書き続けるゴースト問題を core に持ち込む）
   - **狭い例外**: (1) プロセスと同じ寿命のシングルトン、(2) `Stop()` で購読をやめられる、(3) observer の中では state を読んで処理を予約する
     だけ（`later` に積むか、自分の書き込みスレッドのキューに積む）を満たすものだけが `state_updated` / `state_big_change` を購読してよい。
-    state を書かない・待たない・`GameAssetCatalog` の writer を呼ばない（agent-pitfalls #16 #17）。書き込みスレッドを持つなら、キューの lock は
+    state を書かない・待たない・`GameAssetCatalog` の writer を呼ばない（pitfalls #16 #17）。書き込みスレッドを持つなら、キューの lock は
     末端・書き込みスレッドは `StateManager.lock` を取らない・書き込みを待つものを `StateManager.lock` を持ったまま呼ばない
   - 実例は `StreamService` と `MatchLogService`。購読者の集合は `tests/test_bootstrap_split.py` の `STATE_SUBSCRIBERS` が pin しているので、
     増やすならここで判断してから足す
 
 サービス固有で docstring の外にも効く規則:
 
-- `GameAssetCatalog`: ロック順は catalog lock → `StateManager.lock`（observer から writer を呼ばない: agent-pitfalls #16）。「選んだか」は
+- `GameAssetCatalog`: ロック順は catalog lock → `StateManager.lock`（observer から writer を呼ばない: pitfalls #16）。「選んだか」は
   `game.selected` で読む。Web のリーダー（`get_games` ほか）は `*Payload()` を返すだけ。ゲームの切り替えは codename で `LoadGameByCodename`
   （位置でロードしない）。ロードの終わりを待つ側は `done=` を使い、`loaded` / `game_loaded` で待たない
   - writer lock を持ったまま `run_sync`・Qt シグナル・observer を呼ばない。その中で呼ばれるのは `SelectGame` の `progress` だけなので、
@@ -247,7 +246,7 @@ paths:
 
 - delta（`program_state_update`）と下の通知は 1 本の flusher スレッド（`AutonaWebServerDeltas`）が送る。受け付けるのは `start()` から `stop()` の間だけ
 - 受け手（`on_program_state_update` / `on_held_change` / `on_follow_change` / `on_battle_format_change` / `on_status_change` / `on_games_change`）は
-  `StateManager.lock` や catalog の writer lock の中で走りうるので、`_delta_cond` の中で積むだけ。送出は flusher が lock の外で（agent-pitfalls #17）。
+  `StateManager.lock` や catalog の writer lock の中で走りうるので、`_delta_cond` の中で積むだけ。送出は flusher が lock の外で（pitfalls #17）。
   `stop()` を `StateManager.lock` を持ったまま呼ばない
 - delta の間隔（先頭 0・50 / 100 / 200 ms）と payload は外部契約（pin: `tests/test_webserver_delta_debounce.py`）。バッチの送信を待つもの
   （`_after_pending_deltas`）があれば開いているバッチをすぐ送る
@@ -272,7 +271,7 @@ paths:
 - **シェル操作** `openSetSelection` / `renderThumbnail` / `startImageRender` はデスクトップだけが `AutonaShellOperations` を登録する。ヘッドレスは
   503 `UNAVAILABLE`（legacy・Socket.IO の `_ws_unavailable`・v1 の `/thumbnail:*` / `/result:*` が同じ形）で、ヘッドレスで 503 になるのはこれら
   だけ（pin: `tests/test_web_operations.py` の `test_every_route_and_event_answers_headless_but_the_shell_operations`）
-- **シェル操作を増やさない**: 新しい操作は core に置き、どちらのシェルでも動かす（例外は `startImageRender` だけ。理由は台帳の S4o 節）。
+- **シェル操作を増やさない**: 新しい操作は core に置き、どちらのシェルでも動かす（例外は `startImageRender` だけ。理由はサムネイルの描画がデスクトップの Qt に残るため）。
   `@gui_thread_sync` もシェル操作以外に足さない
 - 新しいエンドポイントの操作は core に置いて `AutonaWebOperations` 経由で呼ぶ。例外: state を読み書きしない読み取り専用のカタログ
   （`GET /api/v1/layouts` → `core/LayoutCatalog.py`。kind `result` / `thumbnail` のテンプレートパッケージも。ADR-007 T1）はルートから
@@ -355,7 +354,7 @@ paths:
   `/web/shell-request?verb=…&request=<id>&ticket=…` を開く形だけ（`web/src/PanelShell/hostApi.ts` の `shellRequest`）
   - ホストはちょうどの形（`ParseShellRequest`）だけを受け、ほかのシェル要求に見える URL（`IsShellRequestShaped`）はブラウザへ渡さずに捨てる。
     ログに URL・クエリ・チケットを出さない
-  - 実行は `QTimer.singleShot(0)` でイベントループに出てから（agent-pitfalls #9）。答えは頼んだ文書にだけ、スクリプトに入れる値は `json.dumps`
+  - 実行は `QTimer.singleShot(0)` でイベントループに出てから（pitfalls #9）。答えは頼んだ文書にだけ、スクリプトに入れる値は `json.dumps`
     したものだけ。外部アドレスは `src/AutonaExternalLinks.py` の表のキーだけを受け、URL は受けない
   - 新しい動詞は `SHELL_VERBS`・`AutonaShellOperations.ShellRequest`・hostApi.ts の `ShellVerb` と `SHELL_ANSWER_TIMEOUTS_MS` を揃える
     （pin: `tests/test_web_panel_host.py`）

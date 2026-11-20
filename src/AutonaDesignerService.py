@@ -591,7 +591,7 @@ class AutonaDesignerService:
         the user saves it, through these checks again. So these checks must
         hold for any input on their own, never assuming model.ts has seen
         it. Revisit before these routes ever accept another computer
-        (docs/changes/layout-custom-unification.md section 6).
+        (see docs/decisions/ADR-001-external-control-api-boundary.md).
         """
         if not isinstance(project, dict):
             raise DesignerProjectError("project.jsonの形式が不正です。")

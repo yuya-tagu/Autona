@@ -469,7 +469,7 @@ def test_typing_in_the_crew_match_bar_reaches_the_state(autonaApp):
 
 @pytest.mark.parametrize("reset", ["reset_match", "clear_all"])
 def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
-    # S-17, board 3 half: the generic resets clear round / phase / pool here
+    # Board 3 half of the match-bar reset: the generic resets clear round / phase / pool here
     # too (tests/test_scoreboard_operations.py has boards 1/2).
     autonaApp.ready(BOARD)
     _typeMatchField("phase", "Pools")

@@ -3,8 +3,7 @@
 These are the four things a caster does to a scoreboard during a stream --
 change the score, swap sides, reset the score, clear the board -- driven
 through the same entry points the hotkeys, the Web UI and the external
-control API use. Every one of them had a shipped bug at some point (see
-docs/changes/test-automation-strategy.md §2), and none of them had a test.
+control API use. Every one of them had a shipped bug at some point, and none of them had a test.
 
 Nothing is stubbed: `autonaApp.ready(n)` makes the board in core as the
 desktop makes it at launch, and `autonaApp.web()` is the web operations
@@ -1418,8 +1417,7 @@ def test_team_color_action_reaches_the_state(autonaApp):
 # The score is written by AutonaActions and what shows it follows the state
 # (the Qt board did until ADR-005 S4ac-3, the SCORE page since), so the
 # thing that can go wrong is a reaction to a change writing it back (the
-# echo loop the design forbids -- Design.md §3, docs/changes/
-# headless-core-redesign.md §3).
+# echo loop the design forbids -- Design.md §3).
 
 def _heldUpdateSpy(prefix):
     """Collect held_state_updated notifications for one prefix.
@@ -1682,7 +1680,7 @@ def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
         f"one match-bar edit produced {len(seen)} save cycles instead of 1")
 
 
-# ── the match bar: an operator's reset vs. a set load's pre-pass (S-17) ──
+# ── the match bar: an operator's reset vs. a set load's pre-pass ──
 #
 # Two clears that used to be one function. The reset entry points -- the
 # すべての入力値をリセット button, and the web operations' reset_match /

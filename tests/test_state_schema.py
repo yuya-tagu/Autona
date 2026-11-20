@@ -337,7 +337,7 @@ def test_the_scoreboard_families_left_the_dynamic_key_inventory():
     assert schema.DYNAMIC_KEY_FAMILIES == (), (
         f"a key family is being derived from Qt objectNames again: "
         f"{schema.DYNAMIC_KEY_FAMILIES}. Name it in StateSchema and have the "
-        "widget look its inputs up by that name (S-14), the way the three "
+        "widget look its inputs up by that name, the way the three "
         "Step 5 instalments did.")
 
 
@@ -403,7 +403,7 @@ def test_display_options_match_the_web_ui_list():
 #
 # Both checks read source text instead of importing. src/Autona.py must never
 # be imported from a test -- that import *is* the app's startup sequence
-# (agent-pitfalls #1) -- and AutonaScoreboardWidget's labels dict is a local,
+# (pitfalls #1) -- and AutonaScoreboardWidget's labels dict is a local,
 # so it survives no further than __init__ and cannot be read off an instance.
 
 
@@ -765,7 +765,7 @@ def test_seed_panel_state_starts_a_missing_load_at_revision_zero(
 
 
 def test_seed_panel_state_is_idempotent_from_the_first_pass(_blank_settings):
-    """The fresh-install top8 seed is already Recompute-d (known-smells S-18).
+    """The fresh-install top8 seed is already Recompute-d.
 
     It used to carry unresolved [0, 0] slots until the second pass, which
     made the first 反映 on a new install drop its scores.

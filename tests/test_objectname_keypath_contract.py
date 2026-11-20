@@ -1,4 +1,4 @@
-"""Contract test for Qt objectName -> StateManager keypath stability (S-14).
+"""Contract test for Qt objectName -> StateManager keypath stability.
 
 A number of Qt ``objectName`` values are used *verbatim* as StateManager
 keypath segments (e.g. ``score.1.team.1.teamName``) or as ``findChild`` lookup
@@ -27,8 +27,8 @@ The test stays runtime-free: it reads source text. The one import it does
 make (inside the tests, not at collection) is ``src.core.StateSchema``, which
 is Qt-free and side-effect-free by construction --
 ``tests/test_core_qt_free.py`` and ``tests/test_import_side_effects.py`` pin
-both. ``src`` itself is still never imported wholesale (agent-pitfalls #1).
-See ``.claude/known-smells.md`` S-14 and ``.claude/rules/python-widgets.md``.
+both. ``src`` itself is still never imported wholesale (pitfalls #1).
+See ``docs/development/pitfalls.md`` #4.
 """
 import ast
 from pathlib import Path
@@ -179,8 +179,7 @@ def _source_files_outside_core():
 
 # ADR-004 D2's completion condition, as a ledger rather than a count: no Qt
 # widget writes StateManager, and the writers that remain outside core are
-# named, with a reason, in docs/changes/headless-core-redesign.md ("Step 5
-# 完了時点の書き手台帳").
+# named, with a reason, in the ledger below (ADR-004).
 #
 # The remaining entry is a provider-layer singleton, not a widget: it
 # publishes what it just loaded. The key family is not operator input, so
@@ -219,8 +218,7 @@ def test_the_state_writer_ledger_outside_core_is_the_documented_one():
         f"  removed (migrated -- update the ledger): "
         f"{sorted(STATE_WRITERS_OUTSIDE_CORE - actual)}\n"
         "Writes belong to a core service or AutonaActions. If a new writer "
-        "is genuinely provider-layer, add it here *and* to the ledger in "
-        "docs/changes/headless-core-redesign.md.")
+        "is genuinely provider-layer, add it here with a reason.")
 
 
 def test_no_qt_widget_writes_the_state():

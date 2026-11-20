@@ -3,8 +3,7 @@
 What the legacy routes, the Socket.IO events and /api/v1 call for every
 operation. They used to be methods of the web server's actions class, which
 needed the scoreboard dock to exist; ADR-005 S3c moved what was core's here,
-S3e-1..8 moved the rest as it became core's ("board-dependent" in
-docs/changes/architecture-modernization.md, S3c-2), and S3e-9 deleted the
+S3e-1..8 moved the rest as it became core's, and S3e-9 deleted the
 class. What is left of the desktop's is two shell operations, which the
 shell registers (the last item below).
 
@@ -88,7 +87,7 @@ These kinds live here:
   and they raise NotAvailable: 503. No other operation needs a shell.
 
 Imports nothing that builds anything; the registrations are plain module
-attributes, filled in by the shell (agent-pitfalls #1).
+attributes, filled in by the shell (pitfalls #1).
 """
 import copy
 import os
@@ -624,7 +623,7 @@ def update_caster(slot, fields):
     caster past MAX_DISPLAY others; True otherwise (an unchanged field is
     not written, as in the panel).
 
-    The lock is taken before the save block (agent-pitfalls #17): the
+    The lock is taken before the save block (pitfalls #17): the
     publish that closes the block then runs in the same hold, so no other
     thread's write joins this cycle between these writes and their
     publish. The check and the writes hold the lock together, so two
@@ -1015,7 +1014,7 @@ def cancel_archive_worker_install(revision):
 def update_stream(fields):
     """Write the stream destination and / or the broadcast title (`url` /
     `title` -> str, already validated) in one save cycle. The lock before
-    the save block, as update_caster takes it (agent-pitfalls #17)."""
+    the save block, as update_caster takes it (pitfalls #17)."""
     with StateManager.lock:
         with StateManager.SaveBlock():
             if "url" in fields:
@@ -1250,7 +1249,7 @@ def update_tournament_info(fields):
     """Write some of the six fields (v1 field name -> value, already
     validated: the three texts, numEntrants, startAtDate, and the 表示大会名)
     in one save cycle, through TournamentInfoService. The lock before the save
-    block, as update_stream takes it (agent-pitfalls #17). False, with nothing
+    block, as update_stream takes it (pitfalls #17). False, with nothing
     written, when the day cannot be made a time on this PC
     (TournamentInfoService.SetDate): checked first. The 表示大会名 goes last,
     whatever the request's order: a tournament name in the same request may
@@ -1801,7 +1800,7 @@ def reset_scores(scoreboard):
 def _reset_match(scoreboard):
     # The operator's reset (scores + losers flags + round name / phase /
     # pool, ADR-005 S2d), not the set-load pre-pass ClearScore, which keeps
-    # the match bar (S-17); then the best of, in a cycle of its own as the
+    # the match bar; then the best of, in a cycle of its own as the
     # spinbox's was. The crew board (3) answers False to the core operation:
     # its reset is full stocks and nobody playing plus the same match bar,
     # in one cycle, then its raw best of (S3e-2). The callers refused any

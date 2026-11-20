@@ -17,5 +17,5 @@
 
 ## 関連
 
-- [../../.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) — 動作確認手順
+- [../../docs/development/manual-test-checklist.md](../development/manual-test-checklist.md) — 動作確認手順
 - [../product/features.md](../product/features.md) — リグレッション禁止リスト

@@ -14,14 +14,14 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 | 入口 | 内容 |
 |------|------|
 | [.claude/README.md](.claude/README.md) | `.claude/` 全索引・記載ルール・Agents/Rules/Commands/Hooks 一覧 |
-| [.claude/design/Design.md](.claude/design/Design.md) | **正本**: UI 実装方式・データモデル・画面・テーマ・ホットキー・コンポーネント構成 |
-| [.claude/orchestration.md](.claude/orchestration.md) | **オーケストレータ運用**（委譲先の選び方・標準フロー・動作確認の分担・モデル運用・台帳と compact 区切り・worktree 並列の条件） |
+| [docs/architecture/Design.md](docs/architecture/Design.md) | **正本**: UI 実装方式・データモデル・画面・テーマ・ホットキー・コンポーネント構成 |
+| [.claude/orchestration.md](.claude/orchestration.md) | **オーケストレータ運用**（委譲先の選び方・標準フロー・動作確認の分担・モデル運用・記録の方針・worktree 並列の条件） |
 | [.claude/git-workflow.md](.claude/git-workflow.md) | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証） |
-| [.claude/known-smells.md](.claude/known-smells.md) / [.claude/manual-test-checklist.md](.claude/manual-test-checklist.md) | リファクタ候補 / 手動テスト手順 |
-| [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) | テスト自動化の層構成・実装順・既知バグ。**ウィジェットのテストを書く前に読む**（`autonaApp` fixture の使い方と制約） |
+| [docs/development/known-smells.md](docs/development/known-smells.md) / [docs/development/manual-test-checklist.md](docs/development/manual-test-checklist.md) | リファクタ候補 / 手動テスト手順 |
+| [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) | テストの層構成と `autonaApp` fixture の使い方・制約・E2E の走らせ方。**テストを書く前に読む** |
 | [docs/README.md](docs/README.md) | 運用・変更管理（既存仕様・運用制約・変更影響・ADR・調査タスク） |
 
-矛盾時の優先順位: **コードの実態 > `.claude/design/Design.md` > `CLAUDE.md` > その他 Markdown**。
+矛盾時の優先順位: **コードの実態 > `docs/architecture/Design.md` > `CLAUDE.md` > その他 Markdown**。
 
 ## 体制と作業分担
 
@@ -38,7 +38,7 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 2. **モーダル入れ子禁止** — `QSpinBox.valueChanged` 等のシグナル内から `QMessageBox.exec()` を呼ばない（過去に C++ クラッシュの事例あり）
 3. **慣れない機能はゼロから書かない** — まず GitHub でオープンソースプロジェクトを検索してアプローチを比較してから手を動かす。ライセンスを確認する（GPL・PyQt 系のコードは取り込まない）
 
-`src/**/*.py` を触るときの地雷は [.claude/rules/agent-pitfalls.md](.claude/rules/agent-pitfalls.md) に集約している（副作用ゼロ import / `bootstrap.py` の生成順 / モデル退避 / `processEvents()` 禁止など、実クラッシュを出したもの）。glob で自動ロードされる。
+`src/**/*.py` を触るときの地雷は [docs/development/pitfalls.md](docs/development/pitfalls.md) に集約している（副作用ゼロ import / `bootstrap.py` の生成順 / モデル退避 / `processEvents()` 禁止など、実クラッシュを出したもの）。`.claude/rules/agent-pitfalls.md`（スタブ）が glob で自動ロードする。
 
 ## ビルド
 
@@ -59,7 +59,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 ## アーキテクチャの入口
 
-コンポーネント一覧・データフロー・Redux slices の詳細は [.claude/design/Design.md](.claude/design/Design.md)（正本）。状態キーパスの正本は `src/core/StateSchema.py`（`KEY_CATALOG`）。
+コンポーネント一覧・データフロー・Redux slices の詳細は [docs/architecture/Design.md](docs/architecture/Design.md)（正本）。状態キーパスの正本は `src/core/StateSchema.py`（`KEY_CATALOG`）。
 
 読み始める場所:
 
@@ -67,7 +67,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 - `src/Autona.py` — QMainWindow。中央は共有ビュー（`AutonaWebPanelHost`）1 枚だけで、ナビ・ヘッダー・フッターと全ページは React（AppShell）。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
 - `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。
 
-**UI の構成**: Qt Widgets のパネルは無い（ADR-005 S-final で 0 になった）。残る Qt は Window・共有ビューのホスト・Designer の窓・Updater のダイアログ・ネイティブのダイアログ（LAN の確認・フォルダ選択ほか）だけ。ボードの state は core が起動時に 3 つとも作る（`AutonaActions.MakeBoards`、`bootstrap_gui()`）。保存したページの復元・起動順・`STARTUP phase=...` ログは [Design.md](.claude/design/Design.md) §4.1.1 と [ADR-003](docs/decisions/ADR-003-startup-architecture.md)。
+**UI の構成**: Qt Widgets のパネルは無い（ADR-005 S-final で 0 になった）。残る Qt は Window・共有ビューのホスト・Designer の窓・Updater のダイアログ・ネイティブのダイアログ（LAN の確認・フォルダ選択ほか）だけ。ボードの state は core が起動時に 3 つとも作る（`AutonaActions.MakeBoards`、`bootstrap_gui()`）。保存したページの復元・起動順・`STARTUP phase=...` ログは [Design.md](docs/architecture/Design.md) §4.1.1 と [ADR-003](docs/decisions/ADR-003-startup-architecture.md)。
 
 ## ハーネス挙動の注意
 
@@ -98,4 +98,4 @@ Edit/Write 後に出る「No preview server is running...（ブラウザプレ�
 - サブエージェントの報告原文（結論と検収結果だけ残す）
 - 読んだファイルの本文（パスと要点だけ残す）
 
-進捗の正本は台帳（[.claude/orchestration.md](.claude/orchestration.md) 参照）。コンテキストには台帳にまだ書いていない差分だけ残せばよい。
+進捗の正本は PR とコミット、複数 PR にまたがる作業では短命チェックリスト（`docs/changes/<topic>.md`。[.claude/orchestration.md](.claude/orchestration.md) 参照）。コンテキストにはそれらにまだ書いていない差分だけ残せばよい。

@@ -1255,7 +1255,7 @@ def test_no_thread_waits_for_the_gui_with_the_state_lock(
     board host's lock, and wait for nothing on the GUI thread (ADR-005
     S4ad: until then DesktopBoardHost.Run marshalled them onto it and
     waited). No wait for the GUI thread happens with StateManager.lock held
-    either (agent-pitfalls #17) -- on the GUI thread, where the answers and
+    either (pitfalls #17) -- on the GUI thread, where the answers and
     the clock's tick run, a run_sync runs at once."""
     from src.Helpers import AutonaQtHelper
 

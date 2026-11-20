@@ -33,7 +33,7 @@ written by ``AutonaActions.SetBestOf`` -- the operation every entry point of
 the set length shares since ADR-005 S2e (it was the BEST OF spinbox, which
 the board drove from a set load).
 
-Import side effects: none (agent-pitfalls #1). An instance is bound to one
+Import side effects: none (pitfalls #1). An instance is bound to one
 board and holds nothing of its own (the set loaded last is class-level, by
 board), so anyone may make one: the board, the web operations and the set
 follow (core/SetFollowService, ADR-005 S3e-7) do.

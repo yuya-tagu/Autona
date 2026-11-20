@@ -12,8 +12,7 @@ traceback does land in the log (the frozen build routes stderr to
 ./logs/tsh-error.log as ERROR), but nothing surfaces it to the GUI and no
 caller reacts to it: what the operator sees is a handful of ./out files that
 quietly never got written -- an OBS overlay stuck on the previous score. It
-was found the first time the widget harness ran (see
-docs/changes/test-automation-strategy.md §3).
+was found the first time the widget harness ran.
 
 The fix reads values out of the snapshot instead, by path. These tests pin
 that: the diff may describe *which* paths changed, never *what* they hold.

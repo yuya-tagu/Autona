@@ -13,7 +13,7 @@ Two properties get most of the attention:
 
 - **which path a write lands on.** A service is bound to one slot of one
   board (`score.{N}.team.{T}.player.{M}`), and a write landing anywhere else
-  would change a live scoreboard. agent-pitfalls #7 is about exactly this.
+  would change a live scoreboard. pitfalls #7 is about exactly this.
 - **which save cycle it lands in.** `mergedName` / `mergedOnlyName` are one
   fact and must not reach an overlay half-updated, and the two guarded
   writes (`city`, `id`) must not mark a held board dirty for a value it
@@ -111,7 +111,7 @@ def _heldSpy():
     return seen, lambda: SM.observers.held_state_updated.unsubscribe(onHeld)
 
 
-# ── the path shape (agent-pitfalls #7) ───────────────────────────────────
+# ── the path shape (pitfalls #7) ───────────────────────────────────
 #
 # What ships is a board slot: the commentary panel was a React page, the
 # `{base}.slot.{I}.player.{M}` roster editor was retired, and `player_editor.1`
@@ -1302,7 +1302,7 @@ def test_an_update_that_names_a_player_the_database_knows_takes_theirs(
 # added is "another player" too -- and LIVE-BUG-1 is that fixing a typo must
 # not cost the player a face. Only the id and the city are emptied, as the
 # desktop card's NameChanged does: both terminals end the same. Widening it
-# on both is the owner's call (docs/changes/architecture-modernization.md).
+# on both is the owner's call.
 
 OTHER_AVATAR = "https://cdn.example.invalid/avatar/def456"
 

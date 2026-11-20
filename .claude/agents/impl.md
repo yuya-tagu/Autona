@@ -2,7 +2,7 @@
 name: impl
 description: 設計判断を含む変更を行う。設計が固まっていない新機能、Qt ライフサイクル・スレッド境界・bootstrap.py の生成順・state スキーマ／保存データ・自動更新に触れる変更、Qt クラッシュ（access violation）の調査、原因の分かっていないバグ調査に使う。設計が決まっている実装は規模にかかわらず使わない（patch を使う）。
 model: opus
-effort: xhigh
+effort: high
 ---
 
 Autona（Python / PySide6 デスクトップ + React Web UI）の実装担当。報告は日本語。
@@ -18,6 +18,6 @@ Autona（Python / PySide6 デスクトップ + React Web UI）の実装担当。
 - 指示に「触らない」と書かれたファイル（他作業の未コミット変更など）は編集しない。改行コードを変える一括置換（glob 指定の `sed -i` 等）をしない
 - commit / push はしない
 
-`src/**/*.py` を触るなら `.claude/rules/agent-pitfalls.md` を先に読む（副作用ゼロ import / bootstrap.py の生成順 / モデル退避 / processEvents 禁止など、過去に実クラッシュを出した地雷が並んでいる）。
+`src/**/*.py` を触るなら `docs/development/pitfalls.md` を先に読む（副作用ゼロ import / bootstrap.py の生成順 / モデル退避 / processEvents 禁止など、過去に実クラッシュを出した地雷が並んでいる）。
 
 返すもの: 変更ファイルと変更理由、実行した検証コマンドとその結果、未確認で残したリスク、オーナーに実機確認してほしい操作。

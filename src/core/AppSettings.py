@@ -27,7 +27,7 @@ reads it as on. The page shows the table's.
 
 Hotkeys are core's HotkeyRules. Qt-free; what is the shell's comes in as a
 callable (the language list, what the web server listens on). Importing
-this module reads and writes nothing (agent-pitfalls #1).
+this module reads and writes nothing (pitfalls #1).
 """
 import os
 import re

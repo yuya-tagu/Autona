@@ -19,8 +19,7 @@ The ``tournamentInfo.themeColor`` / ``accentColor`` keys keep their names and
 their meaning (= the tournament colors) for backwards compatibility: existing
 templates and ``out/`` consumers are unaffected. They are *this* module's
 keys despite the prefix -- ``TournamentInfoService`` owns the EVENT tab's
-fields and the display-name rules, and never touches these two. The ledger in
-docs/changes/headless-core-redesign.md records that split.
+fields and the display-name rules, and never touches these two.
 
 Where this came from (headless core Step 5, instalment 5): all of the above
 lived in ``src/AutonaFeatureColors.py``, next to the Qt cards that drove it.
@@ -31,7 +30,7 @@ one subtree. Moving the family whole is what that note was waiting for. The
 cards went with the last Qt panel that had one (ADR-005 S4s): the Web UI's
 FeatureColorCard is the one left.
 
-Import side effects: none (agent-pitfalls #1). Every read and write happens
+Import side effects: none (pitfalls #1). Every read and write happens
 inside a call. Qt-free, like everything under ``src/core``.
 """
 from . import StateSchema as schema

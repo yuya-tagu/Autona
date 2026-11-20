@@ -1,9 +1,8 @@
 """Per-board statistics: when they are asked for, what is fetched, and what
 lands in the state (ADR-005 S3e-5).
 
-The stats are the textbook case of write category (b) in
-docs/changes/headless-core-redesign.md §2 -- "data-load results poured into
-the state". Nothing here is an operator edit: a fetch is triggered, a
+The stats are the textbook case of write category (b) of ADR-004 --
+"data-load results poured into the state". Nothing here is an operator edit: a fetch is triggered, a
 Start.gg worker answers some time later, and the answer is written under
 ``score.{n}.*`` for the overlays and the Web UI to render.
 
@@ -64,7 +63,7 @@ publishes as soon as it lands, because no operator would think to press
 own: what it writes joins the caller's cycle, or is a cycle of its own, as
 the Qt triggers' writes were.
 
-Import side effects: none (agent-pitfalls #1). Instances are cheap and
+Import side effects: none (pitfalls #1). Instances are cheap and
 stateless (``StatsService(n)``); the request numbers and the queued team
 refreshes are the class's.
 """
@@ -208,7 +207,7 @@ class StatsService:
         cycles of their own after the operation's, and once however many
         operations asked in between, as the board's deferred request did
         (it was emitted from the event loop, never from inside the state
-        notification that noticed the change; agent-pitfalls #9). The ids
+        notification that noticed the change; pitfalls #9). The ids
         are read then. Without a fetcher, now.
 
         A Later that raises takes the board's queue back (logged, not

@@ -47,7 +47,7 @@ nothing per-board (contrast ``SetLoadService``, one per board, or
 name). The only thing remembered between calls is whether an import is in
 progress. ``bootstrap_core()`` creates nothing; it registers the fetcher.
 
-Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
+Import side effects: none (pitfalls #1). Qt-free, like everything under
 ``src/core``.
 """
 import threading
@@ -162,7 +162,7 @@ def UpdatePlayer(slot, fields, games=None, countries=None):
     typo never shows another colour); a character without skins takes any.
     Else None.
 
-    The lock is taken before the save block (agent-pitfalls #17), and the
+    The lock is taken before the save block (pitfalls #17), and the
     game is read under it: a game switch empties the characters under the
     same lock after swapping its snapshot, so a pick checked against one
     game is never written after the switch to the next.
@@ -605,7 +605,7 @@ def ImportFromProvider(provider) -> bool:
     when it is asked for, so a switch of tournament or a new phase cannot
     leave a stale target behind (the panel used to cache them). Every way
     it can come back short -- no phases, no such group, an empty or
-    unmappable group (agent-pitfalls #11: a failed request is an empty
+    unmappable group (pitfalls #11: a failed request is an empty
     result) -- writes nothing.
 
     A provider with a Top 8 of its own (``GetTop8()``: the Hivee provider,

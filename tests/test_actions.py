@@ -396,7 +396,7 @@ def test_rewriting_an_unchanged_field_does_not_light_the_apply_button(
 
 def test_clear_match_info_blanks_the_bar_and_the_english_round_in_one_cycle(
         actions, heldBoard, spy):
-    # The match-bar half of an operator's reset (S-17).
+    # The match-bar half of an operator's reset.
     for field, value in (("phase", "Bracket"),
                          ("pool", "Pool A"),
                          ("match", "Winners Final")):
@@ -846,7 +846,7 @@ def test_clear_score_zeroes_the_scores_and_the_losers_in_one_cycle(
     assert SM.Get(f"{PREFIX}.team.2.losers") is False
     # The flag takes its " [L]" with it, in the same cycle.
     assert SM.Get(f"{one}.mergedName") == "DELTA"
-    # The set load's pre-pass: the round stays until the next set's (S-17).
+    # The set load's pre-pass: the round stays until the next set's.
     assert SM.Get(f"{PREFIX}.match") == "Grand Final"
     assert spy.held_updates_for(PREFIX) == [PREFIX]
     assert SM.HasPendingChanges(PREFIX) is True

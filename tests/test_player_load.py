@@ -6,7 +6,7 @@ seeds, avatars and character slots an overlay renders. It is core's
 the Qt player card's SetData until the card went in ADR-005 S4ac-3, and call
 what SetData ran now (`load_player` in conftest: ApplyData without the DB
 merge). The card's own wiring, its combos' models and its details dialog
-went with it (their tests: the leak pins of agent-pitfalls #13 / #13b, the
+went with it (their tests: the leak pins of pitfalls #13 / #13b, the
 construction-site pin of #7, the objectName pin of the player fields).
 
 Assertions read StateManager: state is what the OBS overlays and the Web UI
@@ -54,7 +54,7 @@ def test_a_load_publishes_the_tag_and_the_sponsor(autonaApp):
     autonaApp.settle()
 
     # The keys are StateSchema's PLAYER_INPUT_KEYS ("name" / "team"), which
-    # is the contract the overlays are written against (agent-pitfalls #4).
+    # is the contract the overlays are written against (pitfalls #4).
     # Note that the *input* field is "gamerTag" and the *published* key is
     # "name".
     assert autonaApp.get(f"{path}.name") == "TAG"
@@ -118,7 +118,7 @@ def test_a_region_resolves_after_another_country(autonaApp):
     """From one country to another, through the empty slot a set load
     leaves in between (the board's clear, then the load): the second
     country's region is published, not the first's or none. (The Qt card
-    refilled its region combo in place on that path, agent-pitfalls #13.)"""
+    refilled its region combo in place on that path, pitfalls #13.)"""
     path = _slot(autonaApp)
 
     PlayerService(path).ClearSlot()
