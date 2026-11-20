@@ -24,7 +24,10 @@
     3. Required-entry check: layout/designer_runtime/runtime.js and
        runtime.css must be in the zip. Every Designer design's index.html
        is a stub that loads them, so a release without them would render
-       every user design blank in OBS.
+       every user design blank in OBS. So must layout/include/autona.js and
+       its table overlay_contract.json (ADR-008 D1): every overlay written
+       against the overlay contract loads the first, and the kit reads the
+       second.
 
     4. Persisted-state check: user_data/state.json (the operator's saved
        state, ADR-005 S3b) and its set-aside copies (state.json.*.bak) must
@@ -209,10 +212,12 @@ try {
         $entries | ForEach-Object { [void]$entryNames.Add($_.FullName) }
         $missing = @(@(
                 "Autona/layout/designer_runtime/runtime.js",
-                "Autona/layout/designer_runtime/runtime.css"
+                "Autona/layout/designer_runtime/runtime.css",
+                "Autona/layout/include/autona.js",
+                "Autona/layout/include/overlay_contract.json"
             ) | Where-Object { -not $entryNames.Contains($_) })
         if ($missing.Count -gt 0) {
-            throw ("release zip is missing the shared Designer runtime (every custom design loads it): {0}" `
+            throw ("release zip is missing the shared Designer runtime or the overlay contract (custom designs and overlays load them): {0}" `
                 -f ($missing -join ", "))
         }
 

@@ -232,7 +232,7 @@ paths:
 - `web/src/stateDelta.cases.json` を `tests/test_state_delta_cases.py` と `web/src/stateDelta.test.js` の両方が読む（deepdiff を上げて行が
   変わったらここが落ちる）
 - `None` との間の変更は行に出ない（`exclude_types`）。state のリストや、ページに届けたい値に `None` を使わない
-- OBS オーバーレイの `layout/include/globals.js` は `iterable_item_removed` を処理していない（既知）
+- OBS オーバーレイの `layout/include/globals.js`（`applyDelta`）も同じ規則で行を適用する（`iterable_item_removed` はリストを縮める。`stateDelta.cases.json` が両方の照合の元）
 
 ## Web サーバー（Flask + SocketIO）
 

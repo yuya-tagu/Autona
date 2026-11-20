@@ -460,7 +460,8 @@ foreach ($zip in @(Get-ChildItem -LiteralPath $Dir -Filter *.zip | Sort-Object N
 @pytest.mark.skipif(shutil.which("powershell") is None, reason="no powershell")
 def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
     """Run validate_release_zip.ps1 on zips that pass checks 1-4 (the shared
-    Designer runtime and nothing else outside _internal/) and carry every
+    Designer runtime, the overlay contract's autona.js and table, and nothing
+    else outside _internal/) and carry every
     required file under _internal/ (empty): one passes, and one lacking a
     required file, one per forbidden pattern and one over the size cap
     each throw for that reason. Check 6 (ADR-006 A7) too: a zip carrying
@@ -472,6 +473,8 @@ def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
     paths = sorted(_bundle_paths())
     base = ["Autona/layout/designer_runtime/runtime.js",
             "Autona/layout/designer_runtime/runtime.css",
+            "Autona/layout/include/autona.js",
+            "Autona/layout/include/overlay_contract.json",
             *("Autona/_internal/" + p for p in required)]
     zips = tmp_path / "zips"
     zips.mkdir()

@@ -1,0 +1,907 @@
+{
+  "game": {
+    "name": "Sample Game",
+    "codename": "sample",
+    "selected": true,
+    "defaults": {
+      "players_per_team": 1,
+      "characters_per_player": 1
+    }
+  },
+  "tournamentInfo": {
+    "tournamentName": "Autona Cup 2026",
+    "displayTournamentName": "Autona Cup",
+    "eventName": "Singles",
+    "address": "",
+    "numEntrants": 128,
+    "startAt": "2026/11/21",
+    "startAtDate": "2026-11-21",
+    "themeColor": "#181B21",
+    "accentColor": "#f0a500",
+    "logoVersion": 0,
+    "bannerVersion": 0,
+    "shortLink": "",
+    "url": "",
+    "media": {
+      "status": "idle",
+      "error": "",
+      "revision": 0
+    },
+    "load": {
+      "status": "idle",
+      "error": "",
+      "revision": 0
+    }
+  },
+  "colors": {
+    "commentary": {
+      "themeColor": "#0b3d91",
+      "accentColor": "#ffd166"
+    }
+  },
+  "display_options": {
+    "show_sponsor": true,
+    "show_name": true,
+    "show_seed": true,
+    "show_characters": true,
+    "show_social": true,
+    "show_real_name": false,
+    "show_location": true,
+    "show_additional": false
+  },
+  "score": {
+    "bracket_type": "DOUBLE_ELIMINATION",
+    "1": {
+      "best_of": 5,
+      "best_of_short_text": "BO5",
+      "best_of_text": "Best of 5",
+      "first_to": 3,
+      "first_to_short_text": "FT3",
+      "first_to_text": "First to 3",
+      "phase": "TOP 8",
+      "pool": "",
+      "match": "Grand Final",
+      "match_en": "Grand Final",
+      "set_id": null,
+      "auto_update": null,
+      "station": 3,
+      "station_queue": {},
+      "teamsSwapped": false,
+      "last_sets": {
+        "1": {},
+        "2": {}
+      },
+      "history_sets": {
+        "1": {},
+        "2": {}
+      },
+      "team": {
+        "1": {
+          "teamName": "",
+          "score": 2,
+          "color": "#e5484d",
+          "logo": "",
+          "losers": false,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Alpha",
+              "team": "TEAM A",
+              "real_name": "Taro Yamada",
+              "twitter": "@alpha_fgc",
+              "custom_textbox": "",
+              "seed": 1,
+              "country": {
+                "code": "JP",
+                "name": "Japan",
+                "display_name": "日本",
+                "en_name": "Japan",
+                "asset": "./assets/country_flag/jp.png"
+              },
+              "state": {
+                "code": "13",
+                "original_code": "13",
+                "name": "東京都",
+                "asset": "./assets/state_flag/JP/13.png"
+              },
+              "id": null,
+              "mergedName": "TEAM A | Alpha",
+              "mergedOnlyName": "Alpha",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 1",
+                  "en_name": "Fighter 1",
+                  "display_name": "Fighter 1",
+                  "codename": "fighter_1",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        },
+        "2": {
+          "teamName": "",
+          "score": 1,
+          "color": "#3e63dd",
+          "logo": "",
+          "losers": true,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Bravo",
+              "team": "",
+              "real_name": "Bob Smith",
+              "twitter": "bravo",
+              "custom_textbox": "",
+              "seed": 4,
+              "country": {
+                "code": "US",
+                "name": "United States",
+                "display_name": "アメリカ合衆国",
+                "en_name": "United States",
+                "asset": "./assets/country_flag/us.png"
+              },
+              "state": {
+                "code": "CA",
+                "original_code": "CA",
+                "name": "California",
+                "asset": "./assets/state_flag/US/CA.png"
+              },
+              "id": null,
+              "mergedName": "Bravo",
+              "mergedOnlyName": "Bravo",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 2",
+                  "en_name": "Fighter 2",
+                  "display_name": "Fighter 2",
+                  "codename": "fighter_2",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        }
+      }
+    },
+    "2": {
+      "best_of": 3,
+      "best_of_short_text": "BO3",
+      "best_of_text": "Best of 3",
+      "first_to": 2,
+      "first_to_short_text": "FT2",
+      "first_to_text": "First to 2",
+      "phase": "Pools",
+      "pool": "A1",
+      "match": "Winners Round 1",
+      "match_en": "Winners Round 1",
+      "set_id": null,
+      "auto_update": null,
+      "station": 5,
+      "station_queue": {},
+      "teamsSwapped": false,
+      "last_sets": {
+        "1": {},
+        "2": {}
+      },
+      "history_sets": {
+        "1": {},
+        "2": {}
+      },
+      "team": {
+        "1": {
+          "teamName": "",
+          "score": 0,
+          "color": "#e5484d",
+          "logo": "",
+          "losers": false,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Charlie",
+              "team": "CX",
+              "real_name": "",
+              "twitter": "charlie",
+              "custom_textbox": "",
+              "seed": 9,
+              "country": {
+                "code": "KR",
+                "name": "South Korea",
+                "display_name": "韓国",
+                "en_name": "South Korea",
+                "asset": "./assets/country_flag/kr.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "CX | Charlie",
+              "mergedOnlyName": "Charlie",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 3",
+                  "en_name": "Fighter 3",
+                  "display_name": "Fighter 3",
+                  "codename": "fighter_3",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_3.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_3.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        },
+        "2": {
+          "teamName": "",
+          "score": 0,
+          "color": "#3e63dd",
+          "logo": "",
+          "losers": false,
+          "player": {
+            "1": {
+              "birthday": false,
+              "name": "Delta",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "custom_textbox": "",
+              "seed": 16,
+              "country": {
+                "code": "FR",
+                "name": "France",
+                "display_name": "フランス",
+                "en_name": "France",
+                "asset": "./assets/country_flag/fr.png"
+              },
+              "state": {},
+              "id": null,
+              "mergedName": "Delta",
+              "mergedOnlyName": "Delta",
+              "sponsor_logo": "",
+              "sponsor_logos": {},
+              "character": {
+                "1": {
+                  "name": "Fighter 0",
+                  "en_name": "Fighter 0",
+                  "display_name": "Fighter 0",
+                  "codename": "fighter_0",
+                  "assets": {
+                    "full": {
+                      "type": [
+                        "full"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_0.svg",
+                      "eyesight": {
+                        "x": 540,
+                        "y": 126
+                      }
+                    },
+                    "base_files/icon": {
+                      "type": [
+                        "icon"
+                      ],
+                      "asset": "./assets/mock_data/mock_asset/full_character_0.svg"
+                    }
+                  },
+                  "skin": 0,
+                  "variant": {}
+                }
+              },
+              "mains": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "commentary": {
+    "1": {
+      "name": "Kilo",
+      "team": "KL",
+      "twitter": "@kilo_cast",
+      "role": "実況",
+      "icon": "mic",
+      "note": "",
+      "display": 1
+    },
+    "2": {
+      "name": "Lima",
+      "team": "",
+      "twitter": "lima",
+      "role": "解説",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "3": {
+      "name": "Mike",
+      "team": "",
+      "twitter": "",
+      "role": "解説",
+      "icon": "megaphone",
+      "note": "初出演",
+      "display": 2
+    },
+    "4": {
+      "name": "November",
+      "team": "NV",
+      "twitter": "november",
+      "role": "ゲスト",
+      "icon": "phone",
+      "note": "",
+      "display": 3
+    },
+    "5": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "6": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "7": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "8": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "9": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "10": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "11": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    },
+    "12": {
+      "name": "",
+      "team": "",
+      "twitter": "",
+      "role": "",
+      "icon": "",
+      "note": "",
+      "display": 0
+    }
+  },
+  "top8": {
+    "phaseLabel": "TOP 8",
+    "players": {
+      "1": {
+        "name": "Alpha",
+        "sponsor": "TEAM A",
+        "country": {
+          "code": "JP",
+          "asset": "./assets/country_flag/jp.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 1",
+            "en_name": "Fighter 1",
+            "display_name": "Fighter 1",
+            "codename": "fighter_1",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "2": {
+        "name": "Bravo",
+        "sponsor": "",
+        "country": {
+          "code": "US",
+          "asset": "./assets/country_flag/us.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 2",
+            "en_name": "Fighter 2",
+            "display_name": "Fighter 2",
+            "codename": "fighter_2",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "3": {
+        "name": "Charlie",
+        "sponsor": "CX",
+        "country": {
+          "code": "KR",
+          "asset": "./assets/country_flag/kr.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 3",
+            "en_name": "Fighter 3",
+            "display_name": "Fighter 3",
+            "codename": "fighter_3",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_3.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_3.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "4": {
+        "name": "Delta",
+        "sponsor": "",
+        "country": {
+          "code": "FR",
+          "asset": "./assets/country_flag/fr.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 4",
+            "en_name": "Fighter 4",
+            "display_name": "Fighter 4",
+            "codename": "fighter_4",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_0.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_0.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "5": {
+        "name": "Echo",
+        "sponsor": "",
+        "country": {
+          "code": "JP",
+          "asset": "./assets/country_flag/jp.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 5",
+            "en_name": "Fighter 5",
+            "display_name": "Fighter 5",
+            "codename": "fighter_5",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "6": {
+        "name": "Foxtrot",
+        "sponsor": "FX",
+        "country": {
+          "code": "US",
+          "asset": "./assets/country_flag/us.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 6",
+            "en_name": "Fighter 6",
+            "display_name": "Fighter 6",
+            "codename": "fighter_6",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "7": {
+        "name": "Golf",
+        "sponsor": "",
+        "country": {
+          "code": "KR",
+          "asset": "./assets/country_flag/kr.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 7",
+            "en_name": "Fighter 7",
+            "display_name": "Fighter 7",
+            "codename": "fighter_7",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_3.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_3.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      },
+      "8": {
+        "name": "Hotel",
+        "sponsor": "",
+        "country": {
+          "code": "JP",
+          "asset": "./assets/country_flag/jp.png"
+        },
+        "characters": {
+          "1": {
+            "name": "Fighter 8",
+            "en_name": "Fighter 8",
+            "display_name": "Fighter 8",
+            "codename": "fighter_8",
+            "assets": {
+              "full": {
+                "type": [
+                  "full"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_0.svg",
+                "eyesight": {
+                  "x": 540,
+                  "y": 126
+                }
+              },
+              "base_files/icon": {
+                "type": [
+                  "icon"
+                ],
+                "asset": "./assets/mock_data/mock_asset/full_character_0.svg"
+              }
+            },
+            "skin": 0,
+            "variant": {}
+          }
+        }
+      }
+    },
+    "matches": {
+      "wsf1": {
+        "name": "Winners Semi-Final",
+        "slots": [
+          1,
+          2
+        ],
+        "score": [
+          3,
+          1
+        ],
+        "finished": true,
+        "active": false
+      },
+      "wsf2": {
+        "name": "Winners Semi-Final",
+        "slots": [
+          3,
+          4
+        ],
+        "score": [
+          2,
+          3
+        ],
+        "finished": true,
+        "active": false
+      },
+      "lr1a": {
+        "name": "Losers Round 1",
+        "slots": [
+          5,
+          6
+        ],
+        "score": [
+          2,
+          0
+        ],
+        "finished": true,
+        "active": false
+      },
+      "lr1b": {
+        "name": "Losers Round 1",
+        "slots": [
+          7,
+          8
+        ],
+        "score": [
+          1,
+          2
+        ],
+        "finished": true,
+        "active": false
+      },
+      "wf": {
+        "name": "Winners Final",
+        "slots": [
+          1,
+          4
+        ],
+        "score": [
+          1,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lqf1": {
+        "name": "Losers Quarter-Final",
+        "slots": [
+          5,
+          3
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lqf2": {
+        "name": "Losers Quarter-Final",
+        "slots": [
+          8,
+          2
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lsf": {
+        "name": "Losers Semi-Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "lf": {
+        "name": "Losers Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "gf": {
+        "name": "Grand Final",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      },
+      "gf_reset": {
+        "name": "Grand Final Reset",
+        "slots": [
+          0,
+          0
+        ],
+        "score": [
+          0,
+          0
+        ],
+        "finished": false,
+        "active": false
+      }
+    }
+  }
+}

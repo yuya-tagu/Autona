@@ -42,6 +42,7 @@ BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は�
 | `format` | | 対戦形式（BOARD のメタ欄）。省略時は「—」 |
 | `game` | | 対応ゲーム（BOARD のメタ欄）。省略時は「—」 |
 | `entry` | | 入口の HTML ファイル名（フォルダ内のファイル名のみ）。省略時は `index.html`。フォルダの外を指す値は無視して `index.html` |
+| `contract` | | BOARD / 実況 / TOP 8 で読むオーバーレイ契約の番号（下の「autona.js で作る」）。今は `1` だけで、省略は `1`。知らない番号のフォルダは警告ログを出して一覧に出ない（フォルダ名の規約でも拾わない） |
 
 - 入口ファイルが無いフォルダは一覧に出ない。`custom/` `designer_runtime/` `include/` `icons/` はデザインとして扱わない
 - **フォルダ名へのフォールバック**: ブロックが無い（または壊れている）フォルダは、従来のフォルダ名規約で拾う。
@@ -58,6 +59,65 @@ BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は�
   （`id` は `layout/` からの相対パス。例: フォルダを複製した `scoreboard_simple - コピー` があると
   `Simple (scoreboard_simple)` と `Simple (scoreboard_simple - コピー)`）。重なりが無くなれば元に戻る。
   `kind` が違えば同名でもそのまま（実況と TOP 8 の「標準」など）
+
+### autona.js で作る（BOARD / 実況 / TOP 8 のオーバーレイ契約 1）
+
+`../include/autona.js` を読むと、state の生の形ではなく整えた形（ビュー）でデータを受け取れます。
+キーは**足すだけ**の約束（契約 1）で、Autona の内部の state を整理しても、ビューだけを読むレイアウトは壊れません。
+
+**読む順番は `globals.js` の直後、自分の `<script>` より前に `autona.js`**（自分のスクリプトが先に `LoadEverything()` を呼んでいると、
+autona.js はコンソールに警告を 1 回出す）。
+
+`layout/my_overlay/settings.json`（一覧に載せるためのブロック。上の表）:
+
+```json
+{"autona": {"kind": "scoreboard", "contract": 1, "displayName": "My Overlay"}}
+```
+
+`layout/my_overlay/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="../include/globals.js"></script>
+    <script src="../include/autona.js"></script>
+  </head>
+  <body>
+    <div id="p1-name"></div><div id="p1-score"></div>
+    <script>
+      Autona.onUpdate((view, prev) => {
+        document.querySelector("#p1-name").textContent = view.board.p1.name;
+        document.querySelector("#p1-score").textContent = view.board.p1.score ?? 0;
+      });
+    </script>
+  </body>
+</html>
+```
+
+- `Autona.onUpdate((view, prev) => { ... })`: ビューが変わるたびに呼ばれる（最初は `prev` が `null`）。ビューに出ない state だけが変わったときは呼ばれない。
+  最初の更新の後に登録した関数も、すぐ今のビューで 1 回呼ばれる。戻り値は登録を外す関数。
+  `view` と `prev` は登録した関数のあいだで共有するので**書き換えられない**（凍結してある。並べ替えなどはコピーしてから）。
+  関数の中の例外はコンソールに出る（同じ関数が失敗し続けても、成功するまでは 1 回だけ）
+- **ビューのキーの表は [`include/overlay_contract.json`](include/overlay_contract.json)**（キー・型・値が無いときの値・元の state・説明 ja / en）。
+  まとまりは `view.board`（URL の `scoreboardNumber` のボード。`p1` / `p2` と各 `players[]`、`bestOf`・`phase`・`round` など）・
+  `view.tournament`・`view.commentary[]`（表示する人だけを表示順に）・`view.top8`・`view.options`（アプリの表示設定の素の値。ビューの値には
+  効かせていないので、スポンサーを出すか等はレイアウトが決める）
+- 値が無いときは文字列 `""`・数値 `null`・配列 `[]`・真偽値 `false`（`undefined` は出ない）
+- 画像の値はそのまま `<img src>` に入る URL（`/assets/...`・`/user_data/...` のようなオリジンからの絶対パス）。そのため
+  **autona.js は http で開いたときだけ対応**（アプリのプレビューと OBS 用 URL `http://127.0.0.1:5107/layout/<フォルダ>/index.html`。
+  file:// で開くと画像が出ない）。OBS にはローカルファイルではなく URL で登録する
+- `Autona.raw` は生の state（約束の外。版が変わると形が変わることがある）
+- `LoadEverything()` は autona.js が呼ぶので書かなくてよい（同梱のレイアウトのように書いても 1 回しか走らない）。
+  グローバルの `Start` / `Update` を定義しても `onUpdate` は止まらない
+- **サンプルで確かめる**: URL に `?autonaSample=singles`（`include/sample/` のファイル名。`singles`・`teams`・`empty`）を付けると、
+  アプリの state の代わりにサンプルを描く。ボード 3（クルーバトル）は `?autonaSample=teams&scoreboardNumber=3`
+- **トップレベルで使わない名前**: `scoreboardNumber`・`autona` で始まる名前・`Start`・`Update`・`data`・`oldData`・`settings`。
+  `globals.js` は URL のクエリを全部同じ名前のグローバル変数に代入し、ほかの名前は `globals.js` 自身が使っている
+- **gsap を使うなら**: `globals.js` は最初の更新が来るまで `gsap.globalTimeline` を止めている（`timeScale(0)`）。最初の `onUpdate` より前に
+  始めたアニメーションはそこまで動かない
+- 同梱のレイアウトは今までどおり `globals.js` の `data` / `Update` を直接使っている（autona.js への移行はしていない）
 
 ### リザルト画像・サムネイルのテンプレートパッケージ（`kind`: `result` / `thumbnail`）
 

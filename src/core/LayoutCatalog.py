@@ -11,7 +11,9 @@ Two kinds of layout folder live side by side (ADR-007):
                  "format": "1v1 / チーム", "game": "汎用（全ゲーム）"}
 
   ``kind`` is required; ``displayName`` / ``format`` / ``game`` / ``entry``
-  are optional.
+  are optional, and so is ``contract`` (the overlay contract the layout
+  reads, ADR-008 D1: 1 when left out; a folder declaring one not in
+  OVERLAY_CONTRACTS is not listed, with a warning).
 * **Designer projects** -- ``layout/custom/{slug}/`` with the stub
   ``index.html`` and a ``project.json``. Metadata is the project's ``name``
   and ``meta.format`` / ``meta.game``; unset fields take DESIGNER_DEFAULT_*.
@@ -152,6 +154,12 @@ DESIGNER_NAME_PREFIX = "Custom: "
 # Designer projects (scanned separately); designer_runtime/ is their shared
 # renderer; include/ and icons/ are shared assets.
 _RESERVED_DIRS = frozenset({CUSTOM_DIRNAME, "designer_runtime", "include", "icons"})
+
+# The overlay contracts this Autona serves (ADR-008 D1: the view
+# layout/include/autona.js hands a layout, its table
+# layout/include/overlay_contract.json). An overlay's block may leave
+# "contract" out (the first); one declaring another is not listed.
+OVERLAY_CONTRACTS = (1,)
 
 # Kinds a built-in settings.json may declare. "designer" is reserved for
 # layout/custom/ projects.
@@ -527,6 +535,8 @@ def _BuiltinEntry(name, directory):
         # A template package: the block is its manifest, with no folder-name
         # fallback (ADR-007 D1).
         return _TemplateEntry(name, directory, block)
+    if block is not None and not _KnownOverlayContract(name, block):
+        return None
     inferred = _InferFromName(name)
     if block is None and inferred is None:
         return None
@@ -555,6 +565,24 @@ def _BuiltinEntry(name, directory):
         "game": _Text(block.get("game")),
         "entry": entry,
     }
+
+
+def _KnownOverlayContract(name, block):
+    """Whether an overlay's block (kind scoreboard / commentary / top8)
+    declares a contract this Autona serves (ADR-008 D1): none (the first,
+    which every overlay written before the contract existed is) or one of
+    OVERLAY_CONTRACTS. Another is logged and the folder is not listed --
+    not even by its folder name: it was written for something this Autona
+    does not give it (ADR-007 D1's rule for the template packages)."""
+    if "contract" not in block:
+        return True
+    contract = block["contract"]
+    if _IsInt(contract) and contract in OVERLAY_CONTRACTS:
+        return True
+    logger.warning(f"LayoutCatalog: {name}/{SETTINGS_FILE}: not listing the "
+                   f"{block['kind']} layout: contract must be one of "
+                   f"{OVERLAY_CONTRACTS}, got {contract!r}")
+    return False
 
 
 def _TemplateEntry(name, directory, block):

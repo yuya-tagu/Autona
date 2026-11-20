@@ -344,6 +344,45 @@ def loggedWarnings():
         logger.remove(sink)
 
 
+# ── the overlay contract (ADR-008 D1) ────────────────────────────────────
+def test_an_overlay_may_declare_contract_1_or_leave_it_out(layoutRoot):
+    builtin(layoutRoot, "scoreboard_new", {
+        "kind": "scoreboard", "contract": 1, "displayName": "New"})
+    builtin(layoutRoot, "commentators_old", {"kind": "commentary"})
+    builtin(layoutRoot, "bracket_top8_x", {"kind": "top8", "contract": 1})
+
+    layouts = LayoutCatalog.Layouts(root=layoutRoot)
+    assert {e["id"]: (e["kind"], e["displayName"]) for e in layouts} == {
+        "bracket_top8_x": (KIND_TOP8, "X"),
+        "commentators_old": (KIND_COMMENTARY, "Old"),
+        "scoreboard_new": (KIND_SCOREBOARD, "New"),
+    }
+    # The entry's shape is unchanged (GET /api/v1/layouts).
+    assert all("contract" not in entry for entry in layouts)
+
+
+@pytest.mark.parametrize("contract", [2, 0, "1", 1.0, True, None, [1]])
+def test_an_overlay_of_a_contract_this_autona_does_not_serve_is_not_listed(
+        layoutRoot, loggedWarnings, contract):
+    # Not even by its folder name: it was written for another view.
+    builtin(layoutRoot, "scoreboard_future", {
+        "kind": "scoreboard", "contract": contract, "displayName": "Future"})
+    builtin(layoutRoot, "commentators_future", {
+        "kind": "commentary", "contract": contract})
+    builtin(layoutRoot, "scoreboard_simple", {"kind": "scoreboard"})
+
+    assert ids(LayoutCatalog.Layouts(root=layoutRoot)) == ["scoreboard_simple"]
+    assert sum("not listing" in line and "contract" in line
+               for line in loggedWarnings) == 2
+    assert any("scoreboard_future" in line for line in loggedWarnings)
+
+
+def test_the_overlay_contracts_are_the_tables():
+    table = json.loads((PROJECT_ROOT / "layout" / "include"
+                        / "overlay_contract.json").read_text(encoding="utf-8"))
+    assert LayoutCatalog.OVERLAY_CONTRACTS == (table["contract"],)
+
+
 def test_a_nested_to_death_project_is_skipped_alone(
         layoutRoot, loggedWarnings):
     project(layoutRoot, "deep", raw='{"name": ' + _TOO_DEEP + "}")
