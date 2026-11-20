@@ -81,8 +81,7 @@ GAMES_DIR = "./user_data/games/"
 
 # characters.json is shipped as a tracked seed in assets/ but is refreshed from
 # the start.gg API at every startup. Writing the runtime copy back into the
-# tracked seed dirties the working tree and risks committing API data (see
-# known-smells S-15). The runtime download targets user_data/ (gitignored),
+# tracked seed dirties the working tree and risks committing API data. The runtime download targets user_data/ (gitignored),
 # and reads prefer that copy, falling back to the tracked seed for a fresh
 # clone.
 CHARACTERS_SEED_PATH = './assets/characters.json'
@@ -756,7 +755,7 @@ class GameAssetCatalog:
             # Nor is it a load: what the last one replaced goes with it.
             self._current = replace(self._current, game={}, codename=None,
                                     replaced=None)
-        # Written after the writer lock is released (agent-pitfalls #16:
+        # Written after the writer lock is released (pitfalls #16:
         # with no save block open, the write publishes at once, and its
         # observers must not run under that lock), under StateManager.lock
         # with the selection read again: a SelectGame that took the writer
@@ -803,7 +802,7 @@ class GameAssetCatalog:
                 r.text), option=orjson.OPT_INDENT_2)
 
             # Write runtime copy into user_data/ (gitignored), never the
-            # tracked seed in assets/ (known-smells S-15)
+            # tracked seed in assets/
             os.makedirs(
                 os.path.dirname(CHARACTERS_RUNTIME_PATH), exist_ok=True)
             with open(tmp_path, 'wb') as f:

@@ -93,7 +93,7 @@ class _SaveCycle:
     """The one save cycle of a game load, opened on the loader's thread and
     closed there too: at the end of _Publish, or by the load when _Publish
     did not get to it (skipped, failed first). One BlockSaving, then one
-    ReleaseSaving (agent-pitfalls #6), whichever caller gets to it first --
+    ReleaseSaving (pitfalls #6), whichever caller gets to it first --
     under a lock, so two closes never both release (one thread closes it
     since ADR-005 S-final SF-6c, when the main thread stopped closing it in
     the marshalled _Publish; the lock costs nothing and keeps the close
@@ -590,10 +590,10 @@ class GameLoader:
         # here and closed at the end of _Publish, so the cycle normally
         # publishes there, on this thread, and its notifications
         # (state_updated, the held ones) run there inside StateManager.lock
-        # (agent-pitfalls #17); the bridge queues them to the main thread's
+        # (pitfalls #17); the bridge queues them to the main thread's
         # receivers. Not when another thread's SaveBlock is open at that
         # moment: the last block to close publishes, on its own thread. One
-        # BlockSaving, one ReleaseSaving on every path (agent-pitfalls #6):
+        # BlockSaving, one ReleaseSaving on every path (pitfalls #6):
         # _SaveCycle releases once, from _Publish or, when it did not get to
         # it (skipped, failed first), from here. Other threads' board
         # operations wait while _Publish runs (it holds the board host's

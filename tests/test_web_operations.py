@@ -1972,7 +1972,7 @@ def test_the_window_hands_itself_to_the_shell():
     Window hands itself over (UiMounted) once, as it builds. Until ADR-005
     S4ac-3 it did so before it built the board widgets it showed (pinned
     here then), when the Qt set windows parented to it were built there.
-    src/Autona.py is the app's start: read, not imported (agent-pitfalls
+    src/Autona.py is the app's start: read, not imported (pitfalls
     #1)."""
     import ast
 
@@ -2062,7 +2062,7 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
 
 class _MainWindow:
     """What the shell asks of the main window (src/Autona.py's Window, which
-    cannot be imported: agent-pitfalls #1) and of the shared view's host it
+    cannot be imported: pitfalls #1) and of the shared view's host it
     hands back: the page shown, then the set selection asked, each with
     whether it ran on the GUI thread."""
 
@@ -2488,8 +2488,7 @@ _EVENT_DEFAULT = {"scoreboardNumber": "1", "team": "1", "player": "1"}
 _EVENT_REPLIES = {
     "current_game": ["get_current_game"],
     "program-state-update": ["program_state_update"],
-    # An old slip, kept: the emitted name is the contract (the S3e residue
-    # in docs/changes/architecture-modernization.md).
+    # An old slip, kept: the emitted name is the contract.
     "team_color": ["team_scoredown"],
     # Answered as the ack instead.
     "open_set": [],

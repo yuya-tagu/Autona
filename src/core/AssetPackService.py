@@ -172,7 +172,7 @@ An upload is received, probed and removed with no lock of ours (``_lock``
 only to read and swap the slot); so is a folder pick probed.
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
-(agent-pitfalls #1). ``AssetPackService.instance`` is built by
+(pitfalls #1). ``AssetPackService.instance`` is built by
 ``bootstrap_core()``; the shells set its ``scan``, and their loader (core's
 GameLoader) calls its ``RestoreReplaced`` and ``RemoveStaleUploads`` on its
 first scan job, before scanning. The upload's and the folder pick's expiries are read off

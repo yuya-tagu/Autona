@@ -29,7 +29,7 @@ The lane, one run at a time:
 
 A run: the payload on the requester's thread (it reads files and the state,
 and waits for nobody); the render on the GUI thread, started by ``render`` and
-never waited for -- no nested event loop on this path (agent-pitfalls #9); the
+never waited for -- no nested event loop on this path (pitfalls #9); the
 encoding and the files in a job of the task executor, so that a PNG of
 1920x1080 does not stall the GUI thread. The result is published from whichever
 thread ended the run, and only then the next run is queued with ``later`` (the
@@ -38,7 +38,7 @@ GUI executor's: a job's thread may not wait for the GUI thread).
 The lock order is StateManager.lock -> the lane's lock: the lane's lock only
 guards the lane's own fields, and neither is held across a render or a job.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import threading
 import time

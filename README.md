@@ -87,6 +87,8 @@ scripts/gen_release.ps1
 
 ## アーキテクチャ
 
+コードベースの全体像は [ARCHITECTURE.md](ARCHITECTURE.md)（英語・1 ページ）、設計の正本は [docs/architecture/Design.md](docs/architecture/Design.md) を参照。
+
 ```
 ┌──────────────────────────────────────────────────────┐
 │                   main.py (Entry)                    │

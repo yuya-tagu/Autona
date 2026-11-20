@@ -8,5 +8,5 @@ QApplication (ADR-004 D1).
 
 Like `src/__init__.py`, this init is a docstring and nothing else: importing
 the package must build nothing, read nothing and write nothing
-(agent-pitfalls #1).
+(pitfalls #1).
 """

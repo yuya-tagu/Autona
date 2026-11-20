@@ -245,8 +245,8 @@ if _HEADLESS:
     from src import headless
     sys.exit(headless.run(App))
 
-# Imports no Qt and starts nothing (autona_splash.py).
-import autona_splash
+# Imports no Qt and starts nothing (src/autona_splash.py).
+from src import autona_splash
 
 autona_splash.set_startup_t0(_STARTUP_T0)
 autona_splash.log_startup_phase("gate")

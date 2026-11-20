@@ -1,4 +1,4 @@
-"""BUG-2 (docs/changes/test-automation-strategy.md §3): a missing
+"""BUG-2: a missing
 `./user_data/additional_flag` used to take every flag down with it.
 
 `AutonaCountryHelper.LoadCountries` (now `CountryCatalog.Load`) built the whole standard country list and

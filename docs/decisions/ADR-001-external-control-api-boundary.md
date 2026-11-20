@@ -4,11 +4,10 @@
 
 Accepted（2026-06-15・PdM 承認）
 
-> 責務境界・初回スコープ・認証方針・誤操作防止の方針を確定。実装 I/F の詳細仕様と
-> 実装チケットは次フェーズ（[../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md) の
-> 「次に作成すべき実装タスク」）。確定の根拠調査は
-> [../architecture/external-control-api-candidates.md](../architecture/external-control-api-candidates.md)、
-> 影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)。
+> 責務境界・初回スコープ・認証方針・誤操作防止の方針を確定。実装 I/F の詳細仕様は
+> [../architecture/external-control-api.md](../architecture/external-control-api.md)、確定の根拠調査は
+> [../architecture/external-control-api-candidates.md](../architecture/external-control-api-candidates.md)。
+> 影響分析・調査タスク・実装チケットは完了により削除した（コミット d4311f81 の `docs/changes/external-control-impact-analysis.md`・`docs/tasks/` を参照）。
 
 ## Context
 
@@ -103,7 +102,7 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 ## Alternatives considered
 
 - **境界**: (A) 既存ルートを外部にそのまま使わせる → レスポンス非構造化で成否判定しにくい（candidates §10）。
-  (C) 独立アダプタプロセス → 起動順・ポートが増え、シングルトン初期化の制約（agent-pitfalls #2）に抵触しやすい。
+  (C) 独立アダプタプロセス → 起動順・ポートが増え、シングルトン初期化の制約（pitfalls #2）に抵触しやすい。
   → **(B') を採用**（D3）。
 - **認証**: トークン認証を新 API のみに付与する案 / localhost バインドに絞る案も検討したが、
   LAN 上の別 PC（OBS 機・操作端末）からの利用を壊すため初回は見送り（D5）。
@@ -136,9 +135,9 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 
 ## Addendum (2026-10-22): `GET /api/v1/layouts` を追加（レイアウトカタログの読み取り）
 
-[layout/custom 統合設計書](../changes/layout-custom-unification.md) Step 1 で、`layout/` 配下の配信用レイアウト
+layout/custom の統合（[ADR-007](ADR-007-template-packages.md) の付記）で、`layout/` 配下の配信用レイアウト
 （旧来型テンプレート + Designer 生成の `layout/custom/{slug}/`）の一覧 `GET /api/v1/layouts`（`?kind=` で絞り込み）を
-追加した。I/F は [external-control-api.md](../../.claude/design/external-control-api.md) §5.2。D1〜D8 との関係:
+追加した。I/F は [external-control-api.md](../architecture/external-control-api.md) §5.2。D1〜D8 との関係:
 
 - **D3**: 委譲先は `WebServerActions` ではなく Qt 非依存の `src/core/LayoutCatalog.py`。D3 の「既存処理を唯一の実処理として
   再利用し二重化しない」は、ここでは Board / Commentary / Top 8 タブと Designer の「開く」が使う**同じ関数**を呼ぶことで満たす

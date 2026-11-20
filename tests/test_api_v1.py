@@ -1090,7 +1090,7 @@ def test_tournament_reload_releases_the_flag_asynchronously_off_thread(
 
 
 # ── GET /layouts (layout catalog) ────────────────────────────────────────
-# docs/changes/layout-custom-unification.md Step 1. A read of the layout
+# A read of the layout
 # catalog the Board / Commentary / Top 8 tabs and the Designer list from
 # (src/core/LayoutCatalog.py; its discovery rules are pinned in
 # tests/test_layout_catalog.py). Here: the envelope, the ?kind= filter and

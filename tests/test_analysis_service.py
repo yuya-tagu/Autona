@@ -726,7 +726,7 @@ def test_nothing_is_waited_on_inside_the_locks(service, analysis):  # noqa: F811
     """Lock order: StateManager.lock, then the service's, which is held
     only around its own fields -- never while the state is read or
     written, the fetcher or `later` is called. Nothing waits on another
-    thread (agent-pitfalls #17): no run_sync."""
+    thread (pitfalls #17): no run_sync."""
     from src.Helpers import AutonaQtHelper
     executor = AutonaQtHelper.gui_executor
     runSync = executor.run_sync

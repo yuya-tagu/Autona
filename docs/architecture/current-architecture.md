@@ -10,11 +10,11 @@
 | 知りたいこと | 参照先 |
 |-------------|--------|
 | レイヤー構成・主要モジュールと責務・データフロー・状態キーパス概観 | [../../CLAUDE.md](../../CLAUDE.md)「アーキテクチャ概要」「状態キーパス」 |
-| 実装仕様の正本（UI / データモデル / 画面 / テーマ / ホットキー） | [../../.claude/design/Design.md](../../.claude/design/Design.md) |
+| 実装仕様の正本（UI / データモデル / 画面 / テーマ / ホットキー） | [../../docs/architecture/Design.md](Design.md) |
 | 状態キーの正本 | [../../src/core/StateSchema.py](../../src/core/StateSchema.py)（`KEY_CATALOG`） |
 | シングルトン生成順の**正本** | [../../src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()`（`ORDER CONSTRAINT:` コメントに理由を併記） |
-| 起動パイプラインの設計・移行記録 | [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) / [../decisions/ADR-003-startup-architecture.md](../decisions/ADR-003-startup-architecture.md) |
-| エージェントが踏みやすい制約の一次情報 | [../../.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) |
+| 起動パイプラインの設計 | [../decisions/ADR-003-startup-architecture.md](../decisions/ADR-003-startup-architecture.md) |
+| エージェントが踏みやすい制約の一次情報 | [docs/development/pitfalls.md](../development/pitfalls.md) |
 
 > ステータス凡例: ✅ コード/CLAUDE.md 確認済 / 📄 既存ドキュメント由来 / ⚠️ 要確認 / `TBD`
 
@@ -57,7 +57,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 | 段 | 何が起きるか | 変更時の含意 |
 |----|------------|------------|
 | ゲート | `main.py` の named mutex（`taguyan.Autona.SingleInstance`）で単一インスタンス化。2 個目は QLocalSocket で前面化要求して終了 | ポート・`out/`・ホットキーの多重占有は起こらない前提でよい |
-| 早期表示 | スプラッシュ（専用スレッドのネイティブウィンドウ。`autona_splash.py`）をゲートの直後・PySide6 の import より前に出し、QApplication を `import src` より前に生成 | `src` を import する新モジュールは副作用ゼロを守る（`bootstrap.py` 参照） |
+| 早期表示 | スプラッシュ（専用スレッドのネイティブウィンドウ。`src/autona_splash.py`）をゲートの直後・PySide6 の import より前に出し、QApplication を `import src` より前に生成 | `src` を import する新モジュールは副作用ゼロを守る（`bootstrap.py` 参照） |
 | ブートストラップ | `from src import Autona` → `bootstrap_core()` がシングルトンを明示順で生成 | 新サービスの生成は `bootstrap_core()` に追加する（モジュール末尾で作らない） |
 | 最小コア表示 | `Window.__init__` は Tournament Info + アクティブ `battle_format` の board 1 面のみ構築して `show()` | **他パネル・他 board は未構築のまま起動する** |
 | 表示後 | オーバーレイ消滅後に `Window._StartWebServer()` が Flask/SocketIO を構築・起動（`webserver-ready` フェーズ） | OBS ブラウザソースの取得開始は表示から数秒遅れる（ADR-003 で許容済み） |
@@ -117,7 +117,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 
 ## 外部依存（連携追加で関わるもの）
 
-- **Start.gg API**（GraphQL、20 秒タイムアウト + 指数バックオフ）✅ — 重いクエリ追加で timeout しやすい（詳細は agent-pitfalls #11）
+- **Start.gg API**（GraphQL、20 秒タイムアウト + 指数バックオフ）✅ — 重いクエリ追加で timeout しやすい（詳細は pitfalls #11）
 - **X / BlueSky**（投稿、BlueSky は App Password 認証）📄
 - **GitHub Releases**（自動アップデート、PyInstaller 版のみ）📄
 - ⚠️ **Companion / Stream Deck は現状連携なし**（今回の拡張対象）
@@ -128,9 +128,8 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 
 1. **AutonaWebServer / AutonaApiV1 / AutonaWebOperations** — 既存制御面（ルートと Socket.IO・`/api/v1`・両シェル共通の Web 操作）。新 API はここに同居 or 競合する
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
-3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（agent-pitfalls #2）
+3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（pitfalls #2）
 4. **スレッド境界** — WebServer は専用の `threading.Thread`（ADR-005 S3c。旧 QThread）。外部 API も別スレッドなら StateManager のロックを尊重
 5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5107` の運用影響
 
-> 具体的な影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)、
 > 設計境界の決定は [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md) を参照。

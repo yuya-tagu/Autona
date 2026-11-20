@@ -4,7 +4,7 @@
 logic and the state schema. Its whole value rests on one property: it can be
 imported, exercised and tested without a Qt binding -- no QApplication, no
 GUI thread, none of the Shiboken wrapper-lifetime hazards
-(agent-pitfalls #13-#15). That property is invisible in review (one
+(pitfalls #13-#15). That property is invisible in review (one
 `from qtpy.QtCore import Signal` slipped into a core module breaks it and
 nothing else fails), so it is pinned here instead.
 

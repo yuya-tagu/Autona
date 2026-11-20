@@ -5,7 +5,7 @@
 > **Advanced Scene Switcher（ASS）** を Autona の「操作 API」として採用するための
 > **仕様調査と利用方法の整理**である。最終的な採否・設計境界は ADR で確定する（§6）。
 
-- 関連: 既存の外部制御 API I/F → [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)
+- 関連: 既存の外部制御 API I/F → [../../docs/architecture/external-control-api.md](external-control-api.md)
 - 関連: 既存制御面・OBS 連携の現状方針 → [current-architecture.md](current-architecture.md)（§「OBS 連携の方針」）
 - 関連: 操作棚卸し → [external-control-api-candidates.md](external-control-api-candidates.md)
 - 関連: 設計境界の決定 → [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)
@@ -310,7 +310,7 @@ Content-Type: application/json  ← デフォルトのまま
 - ASS の **HTTP action** で Autona の既存 `/api/v1/` を叩く（§3.6）。**Autona 側は実装済み API をそのまま使える**。
 - **ユースケース**: OBS 側の自動化トリガ（ゲームウィンドウ検出・特定シーン遷移・ホットキー）から、Autona の
   スコアリセット・swap・set 情報設定などを呼ぶ。
-- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](../../.claude/design/external-control-api.md) §7.2）。ボディに `"confirm":true` を入れる。
+- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](external-control-api.md) §7.2）。ボディに `"confirm":true` を入れる。
 - ⚠️ レイテンシ ~300ms 級。応答（status/body）は HTTP action の temp var で受けられる（§3.6）。
 
 ### 4.3 経路(C): Autona/外部 → ASS（`CallVendorRequest`）★ASS 起動の王道
@@ -350,7 +350,7 @@ Content-Type: application/json  ← デフォルトのまま
 | `out/` ファイル群 | (D) の入力源。出力契約は壊さない（既存ブラウザソースと共有） |
 | 信頼境界（LAN・無認証 API / OBS は password） | obs-websocket も LAN 前提。Autona API は無認証のまま、OBS は password 推奨で非対称な点に留意 |
 | StateManager 単一経路 | (B)/(C)/(D) いずれも最終的に `/api/v1/`→WebServerActions→StateManager を通す。**バイパス禁止**は維持 |
-| シングルトン初期化順 / スレッド境界 | (A)/(C) で OBS クライアントを足す場合、起動位置とスレッドに注意（agent-pitfalls #2、StateManager ロック尊重） |
+| シングルトン初期化順 / スレッド境界 | (A)/(C) で OBS クライアントを足す場合、起動位置とスレッドに注意（pitfalls #2、StateManager ロック尊重） |
 
 ---
 

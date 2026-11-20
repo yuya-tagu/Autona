@@ -14,8 +14,7 @@ out/program_state.json carry), values and key order both: the order is what
 a fresh program_state.json is written in. Each board is compared whole. Until
 S4t only the player slots and the crew board were: the board-level and
 team-level keys of boards 1 and 2 were written by the board's widgets, so a
-headless board had no colour, name, score or set length (ADR-005 S3d, decision
-9 in docs/changes/architecture-modernization.md, which S4t resolves).
+headless board had no colour, name, score or set length (ADR-005 S3d; resolved in S4t).
 """
 import copy
 import json

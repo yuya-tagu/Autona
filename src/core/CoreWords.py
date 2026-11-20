@@ -21,7 +21,7 @@ shows its own words first (i18next ``thumbnail_template_<id>`` /
 ``result_layout_<id>``, the server's name as the fallback); these are what
 the v1 answers carry and the previews draw.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import re
 

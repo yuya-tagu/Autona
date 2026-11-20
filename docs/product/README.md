@@ -19,4 +19,4 @@
 
 ## 参照元
 
-- [../../.claude/design/Design.md](../../.claude/design/Design.md) — 画面仕様の正本
+- [../../docs/architecture/Design.md](../architecture/Design.md) — 画面仕様の正本

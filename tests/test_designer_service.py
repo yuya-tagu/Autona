@@ -1417,7 +1417,7 @@ def test_pairing_codes_never_reach_the_log(
             assert not any(form in message for message in messages), form
 
 
-# --- Shared runtime (layout-custom-unification Step 2) ----------------------
+# --- Shared runtime (one runtime for every design) ----------------------
 
 
 def make_legacy_design(root, slug):

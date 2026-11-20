@@ -52,7 +52,7 @@ Tech stack: PySide6 (via qtpy), React 19 / TypeScript / Redux Toolkit / MUI, Fla
 
 Tests: `QT_QPA_PLATFORM=offscreen python -m pytest` (Python) and `cd web && npm test` (jest).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow. Design documents live in [.claude/design/Design.md](.claude/design/Design.md) and [docs/](docs/README.md) (mostly in Japanese).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [ARCHITECTURE.md](ARCHITECTURE.md) for a one-page map of the codebase. Design documents live in [docs/architecture/Design.md](docs/architecture/Design.md) and [docs/](docs/README.md) (mostly in Japanese).
 
 ## Community and support
 

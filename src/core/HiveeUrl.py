@@ -21,7 +21,7 @@ those carry the masked URL, and only settings.json and the provider hold the
 real one. A masked URL sent back (the Event page sends what it shows) is
 taken for the saved one it masks (``Unmask``).
 
-Pure functions; import side effects: none (agent-pitfalls #1).
+Pure functions; import side effects: none (pitfalls #1).
 """
 import re
 from collections import namedtuple

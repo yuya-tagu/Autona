@@ -8,7 +8,7 @@ What has to hold:
 
 * the callback waits for the overlay's first paint, and runs after it from
   the event loop -- never inside the paint event (a modal dialog there would
-  be a nested one: agent-pitfalls #9) nor synchronously in the call;
+  be a nested one: pitfalls #9) nor synchronously in the call;
 * a window that is never painted (started minimized) does not hold it back:
   past ``max_ms`` it runs anyway;
 * it runs once, whichever comes first;
@@ -26,7 +26,7 @@ from qtpy import shiboken
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QWidget
 
-from autona_splash import LoadingOverlay
+from src.autona_splash import LoadingOverlay
 
 
 def _waitUntil(predicate, timeout=10.0):

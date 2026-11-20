@@ -2331,7 +2331,7 @@ def test_the_battle_format_switch_tells_the_service(env):
 
 
 def test_the_window_leaves_the_layout_to_the_switch():
-    # src/Autona.py is the app's start: read, not imported (agent-pitfalls #1).
+    # src/Autona.py is the app's start: read, not imported (pitfalls #1).
     source = (Path(results.__file__).parents[1] / "Autona.py") \
         .read_text(encoding="utf-8")
     tree = ast.parse(source)

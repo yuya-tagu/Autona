@@ -27,7 +27,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest   # Python
 cd web && npm test                            # Web UI (jest)
 ```
 
-ウィジェットのテストを書く前に [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) を読んでください。
+テストを書く前に [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) を読んでください。
 
 ### ブランチ・PR の流れ
 
@@ -42,9 +42,10 @@ cd web && npm test                            # Web UI (jest)
 
 ### 設計資料への入口
 
-- [.claude/design/Design.md](.claude/design/Design.md) — 設計の正本（UI 実装方式・データモデル・コンポーネント構成）
+- [ARCHITECTURE.md](ARCHITECTURE.md) — コードベースの全体像（英語・1 ページ）
+- [docs/architecture/Design.md](docs/architecture/Design.md) — 設計の正本（UI 実装方式・データモデル・コンポーネント構成）
 - [docs/README.md](docs/README.md) — 運用・変更管理・ADR
-- [.claude/rules/agent-pitfalls.md](.claude/rules/agent-pitfalls.md) — 実際にクラッシュを起こした地雷集。`src/` を触る前に読んでください
+- [docs/development/pitfalls.md](docs/development/pitfalls.md) — 実際にクラッシュを起こした地雷集。`src/` を触る前に読んでください
 
 ### layout の自作・投稿
 
@@ -79,7 +80,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest   # Python
 cd web && npm test                            # Web UI (jest)
 ```
 
-Before writing widget tests, read [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) (Japanese).
+Before writing tests, read [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) (Japanese).
 
 ### Branches and pull requests
 
@@ -94,9 +95,10 @@ The UI's words are the Web UI translations (`web/src/i18n/locales/`). Words the 
 
 ### Design documents
 
-- [.claude/design/Design.md](.claude/design/Design.md) — the source of truth for design (UI approach, data model, components)
+- [ARCHITECTURE.md](ARCHITECTURE.md) — one-page overview of the codebase (English)
+- [docs/architecture/Design.md](docs/architecture/Design.md) — the source of truth for design (UI approach, data model, components)
 - [docs/README.md](docs/README.md) — operations, change management, ADRs
-- [.claude/rules/agent-pitfalls.md](.claude/rules/agent-pitfalls.md) — pitfalls that caused real crashes; read before touching `src/`
+- [docs/development/pitfalls.md](docs/development/pitfalls.md) — pitfalls that caused real crashes; read before touching `src/`
 
 These are mostly written in Japanese; feel free to ask on Discord or in an Issue if something is unclear.
 

@@ -16,7 +16,7 @@
 | `settings.json` | Hooks・権限設定 | 自動検証の定義 | ルールの説明（rules に書く） |
 | `plans/*.md` | フェーズ単位の作業計画 | 目的・原則・Step一覧・成果物・完了条件 | 1セッション分の具体指示（prompts に書く） |
 | `prompts/*.md` | 1セッション分の指示書 | 対象範囲・手順・制約・報告フォーマット | フェーズ全体のロードマップ（plans に書く） |
-| `architecture/*.md` | コードベース調査の成果物 | import 関係、状態キーパス、依存グラフ等の事実情報 | リファクタ方針・TODO（known-smells.md に書く） |
+| `architecture/*.md` | コードベース調査の成果物 | import 関係、状態キーパス、依存グラフ等の事実情報 | リファクタ方針・TODO（`docs/development/known-smells.md` に書く） |
 | `design/*.md` | 正本ドキュメント | あるべき姿の仕様（UI / データモデル / 画面 / テーマ / ホットキー / 拡張ガイド / 移行プラン） | 個別の調査ログ（architecture/ に書く） |
 
 ## Agents（サブエージェント定義）
@@ -50,7 +50,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | `rules/react-web-ui.md` | `web/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `*.spec`, `scripts/**` | ビルド・リリース手順（onedir/WebEngine/翻訳/配布） |
 | `rules/state-and-webserver.md` | `src/core/**`, `src/StateManager*.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理（正本は `src/core/StateManager.py`）・observer/Bridge 通知・Web サーバー・ヘルパーの作法 |
-| `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |
+| `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | スタブ。編集前に読む地雷集の正本 [docs/development/pitfalls.md](../docs/development/pitfalls.md) を `@` import で自動ロードする |
 
 ## Hooks（自動検証）
 
@@ -77,19 +77,20 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | `/build-all` | Web UI + exe 一括ビルド |
 | `/verify` | 静的検証（pytest 全量 / Web UI の build・test）の一括実行 |
 
-## Design（正本ドキュメント）
+## 正本ドキュメント（`docs/` に移動済み）
 
 | ファイル | 内容 |
 |---------|------|
-| `design/Design.md` | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の正本 |
-| `design/external-control-api.md` | External Control API（`/api/v1/`）の I/F 仕様正本（実装済み: `src/AutonaApiV1.py`。ADR-001 準拠） |
+| [docs/architecture/Design.md](../docs/architecture/Design.md) | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の正本 |
+| [docs/architecture/external-control-api.md](../docs/architecture/external-control-api.md) | External Control API（`/api/v1/`）の I/F 仕様正本（実装済み: `src/AutonaApiV1.py`。ADR-001 準拠） |
+| [docs/development/pitfalls.md](../docs/development/pitfalls.md) | `src/` `tests/` を触る人向けの地雷集（実クラッシュを出したもの） |
 
 ## その他
 
 | ファイル | 役割 |
 |---------|------|
-| `orchestration.md` | オーケストレータ運用（メイン 1 本・委譲先の選び方・標準フロー・動作確認の分担・compact 区切り・並列作業） |
+| `orchestration.md` | オーケストレータ運用（メイン 1 本・委譲先の選び方・標準フロー・動作確認の分担・並列作業） |
 | `git-workflow.md` | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証）。CLAUDE.md の Git 要点の詳細版 |
 | `release-runbook.md` | **リリース実行手順書**。「リリースして」と依頼されたら上から順になぞる（CWD 事故・アカウントダンス・zip 残留等の再発防止込み） |
-| `known-smells.md` | リファクタ候補リスト。コードベース調査を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
-| `manual-test-checklist.md` | 自動テストで守れない動作確認手順。朝の PR レビュー時になぞる |
+| [docs/development/known-smells.md](../docs/development/known-smells.md) | リファクタ候補リスト（未解決の項目だけ） |
+| [docs/development/manual-test-checklist.md](../docs/development/manual-test-checklist.md) | 自動テストで守れない動作確認手順。朝の PR レビュー時になぞる |

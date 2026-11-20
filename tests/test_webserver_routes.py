@@ -101,7 +101,7 @@ EXPECTED_ROUTES = [
 # The /api/v1 blueprint (src/AutonaApiV1.py, ADR-001). WebServer.__init__
 # registers it, not _build_web_app() -- hence "blueprints": [] below -- so it
 # is pinned separately by test_api_v1_route_ledger. Same rule: update only
-# with a documented API change (.claude/design/external-control-api.md).
+# with a documented API change (docs/architecture/external-control-api.md).
 # score:set / players/<p> / display-options / countries/<code>/states were
 # added for the Web UI's move off the legacy routes (ADR-001 Addendum
 # 2026-10-21); commentary/* / layouts/selected/<kind> / colors/<feature> for

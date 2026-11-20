@@ -71,7 +71,7 @@ down does not hold a job for every read), and reads that ask while a read
 of the same view is waiting for Hivee wait for its answer rather than ask
 again: the follow's 5-second tick -- the set, the stream queue, the
 stream's current set, each board -- makes one request. Import side effects:
-none (agent-pitfalls #1).
+none (pitfalls #1).
 """
 import re
 import threading

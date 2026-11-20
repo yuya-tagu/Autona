@@ -133,7 +133,7 @@ logger.add(
 # loguru is only configured now, so the STARTUP marks recorded before this
 # module was imported (gate / splash) have been buffered — replay them into
 # the log file and route the later phases straight to loguru.
-import autona_splash
+from src import autona_splash
 autona_splash.attach_startup_logger(logger)
 
 try:
@@ -155,7 +155,7 @@ logger.info("QApplication successfully initialized")
 from .Helpers.AutonaTitleBar import Install as _InstallTitleBarThemer
 _titleBarThemer = _InstallTitleBarThemer(App)
 
-from autona_splash import (
+from .autona_splash import (
     LoadingOverlay,
     active_splash,
     log_startup_phase,
@@ -237,7 +237,7 @@ class Window(QMainWindow):
         # a single save. This used to be a bare BlockSaving() ... 600 lines
         # ... ReleaseSaving() pair: anything raising in between left the
         # counter positive and silenced SaveState for the rest of the process
-        # (agent-pitfalls #6, the shape BUG-3 was). The body lives in a method
+        # (pitfalls #6, the shape BUG-3 was). The body lives in a method
         # of its own purely so the context manager has something to wrap.
         with StateManager.SaveBlock():
             self._BuildUi()
@@ -422,7 +422,7 @@ class Window(QMainWindow):
         # runs from the event loop and not from inside a Qt signal handler:
         # the LAN opt-in and port-conflict QMessageBox exec() calls made below
         # are ordinary top-level modals (over the spinner) and do not violate
-        # the no-nested-modal / no-reentrant-dispatch rule (agent-pitfalls
+        # the no-nested-modal / no-reentrant-dispatch rule (pitfalls
         # #9). A window never painted (started minimized) starts it after a
         # short wait anyway.
         self._loading_overlay.call_when_painted(self._StartWebServer)

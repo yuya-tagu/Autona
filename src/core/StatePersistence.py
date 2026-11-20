@@ -6,7 +6,7 @@ Advanced Scene Switcher read. That file belongs to its readers: its
 location, its shape and the ``timestamp`` / ``revision`` stamps are an
 external contract, ``out/`` is served over HTTP and is the folder an
 operator clears or points OBS at, and it carries no version -- so the shape
-of the state it held could never change (known-smells S-14).
+of the state it held could never change.
 
 This module is the store of record instead:
 
@@ -43,7 +43,7 @@ Only a process that loaded the store writes it (``Load()`` opens it), so a
 script that imports StateManager and writes state without ``Initialize()``
 cannot overwrite the operator's saved state with a partial one.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import datetime
 import os

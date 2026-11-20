@@ -67,7 +67,7 @@ The provider adapter is injected (``provider``: an object with
 may not import it; so is the mods' turning off (``turnModsOff()``: the
 shell's game loader, asked and not waited for). ``TournamentService
 .instance`` is built by ``bootstrap_core()``. Import side effects: none
-(agent-pitfalls #1).
+(pitfalls #1).
 """
 import re
 import threading

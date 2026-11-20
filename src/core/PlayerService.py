@@ -6,10 +6,9 @@ designer had named a widget. Every free-text field went through one
 ``{path}.{element.objectName()}``; the combos went through the matching
 ``findChildren(QComboBox)`` loop; and the derived values (the merged display
 name, the avatar, the sponsor crests, the character slots) were written from
-inside the widget methods that computed them. That is category (a) of
-docs/changes/headless-core-redesign.md §2 -- the last one, and the one the
-key catalog could never describe because the .ui file *was* the catalog
-(known-smells S-14).
+inside the widget methods that computed them. That was the last category of
+writer, and the one the key catalog could never describe because
+the .ui file *was* the catalog.
 
 Since headless core Step 5 (player instalment) the names live in
 ``StateSchema`` and the writes live here. Step 5 still had the card resolve
@@ -35,7 +34,7 @@ against a recording of the old path.
 
 One instance per player widget, bound to that widget's path, exactly as
 ``SetLoadService`` is bound to one board. The path is a board's slot,
-``score.{N}.team.{T}.player.{M}`` (agent-pitfalls #7: the ``commentary.{N}``
+``score.{N}.team.{T}.player.{M}`` (pitfalls #7: the ``commentary.{N}``
 and ``player_list.slot.{I}`` callers went with their panels, and the
 ``player_editor.1`` one with the Qt Player List, ADR-005 S4n).
 
@@ -52,7 +51,7 @@ load, which a guard would swallow. The two that *were* guarded in the widget
 skips what the card's SetData skipped -- a text, a location, a character
 row it would not have moved -- so it writes what SetData wrote.
 
-Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
+Import side effects: none (pitfalls #1). Qt-free, like everything under
 ``src/core`` -- including ``SponsorHelper``, which is imported for the crest
 lookup and which moved into core alongside this module's own instalment
 (Step 5-5) precisely because this was its only caller

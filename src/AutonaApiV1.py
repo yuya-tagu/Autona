@@ -8,12 +8,10 @@ of the two shell operations, which only the desktop registers, is a v1
 one). Existing routes (``/score``, ``/scoreboard<N>-...``) and Socket.IO
 events are left untouched.
 
-Spec (source of truth): ``.claude/design/external-control-api.md``.
+Spec (source of truth): ``docs/architecture/external-control-api.md``.
 
-Sections below mirror the implementation tickets:
-  - foundation + read endpoints  (docs/tasks/implement-external-control-api-readonly.md)
-  - safe write operations        (docs/tasks/implement-external-control-api-safe-ops.md)
-  - guarded operations           (docs/tasks/implement-external-control-api-guarded-ops.md)
+Sections below: foundation + read endpoints, safe write operations,
+guarded operations (see docs/architecture/external-control-api.md).
 """
 
 import base64
@@ -63,7 +61,7 @@ from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
 from .core.SettingsManager import SettingsUnreadable
 from .core.StatusService import StatusService
-# Importing these builds nothing (agent-pitfalls #1): their singletons
+# Importing these builds nothing (pitfalls #1): their singletons
 # (`.instance`) are created by src/bootstrap.py and read per request.
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
@@ -753,7 +751,7 @@ def get_variants():
 @api_handler
 def get_sets():
     # `get_sets` issues a synchronous start.gg call (GetMatches) that can hang
-    # or raise (agent-pitfalls #11); provider-null is already guarded to [].
+    # or raise (pitfalls #11); provider-null is already guarded to [].
     want_finished = request.args.get("finished") or request.args.get("getFinished")
     args = {}
     if want_finished is not None and str(want_finished).lower() not in ("0", "false", "no"):

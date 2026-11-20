@@ -7,7 +7,7 @@ on. `./out` stops updating and the WebSocket feed stops changing, with no
 error visible anywhere in the UI. During a stream that is the whole overlay
 frozen on the previous match.
 
-BUG-3 (docs/changes/test-automation-strategy.md §3) was exactly this: the
+BUG-3 was exactly this: the
 best_of handler chained BlockSaving() ... ReleaseSaving() as elements of a
 list built inside a lambda, so any exception in between skipped the release.
 It was reachable -- an unloaded locale makes matchNames.get("best_of") return
@@ -231,7 +231,7 @@ def test_best_of_reaches_both_scoreboards(autonaApp, boardNumber):
 #
 # src/Autona.py cannot be imported from a test: importing it IS the startup
 # sequence (logger setup -> bootstrap_core() -> Window definition), see
-# .claude/rules/agent-pitfalls.md #1. So this is read as source and checked
+# docs/development/pitfalls.md #1. So this is read as source and checked
 # with ast, the way tests/test_signal_lifetime.py does.
 
 AUTONA_PY = SRC_ROOT / "Autona.py"

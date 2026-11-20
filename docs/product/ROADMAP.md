@@ -244,6 +244,6 @@ SCORE ページの配信台のダイアログ（`web/src/ScorePage/SetSelection.
 
 ## 参考
 
-- [docs/product/features.md](docs/product/features.md) — 現状の機能一覧
-- [README.md](README.md) — インストール・ビルド
-- [CLAUDE.md](CLAUDE.md) — 開発者向けガイド
+- [docs/product/features.md](features.md) — 現状の機能一覧
+- [README.md](../../README.md) — インストール・ビルド
+- [CLAUDE.md](../../CLAUDE.md) — 開発者向けガイド

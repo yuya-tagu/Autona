@@ -1,6 +1,6 @@
 """Layout catalog (src/core/LayoutCatalog.py): one list of every overlay design.
 
-docs/changes/layout-custom-unification.md Step 1. The Board / Commentary /
+The Board / Commentary /
 Top 8 tabs, the Designer's "open" list and ``GET /api/v1/layouts`` all read
 this catalog, so what is pinned here is what every one of them shows:
 

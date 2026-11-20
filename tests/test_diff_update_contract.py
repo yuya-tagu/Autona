@@ -2,7 +2,7 @@
 helper (apply_update.ps1).
 
 Both sides are checked at TEXT level: importing AutonaUpdater boots Qt and
-every singleton (agent-pitfalls #1), and the helper is PowerShell anyway.
+every singleton (pitfalls #1), and the helper is PowerShell anyway.
 
 The invariants here are the ones whose breakage is silent in review and only
 explodes on an end user's machine mid-update:

@@ -96,7 +96,7 @@ The observer runs inside ``StateManager.lock`` (the publish that delivers
 it). There it reads, updates the record in memory and hands the line to a
 writer thread (``AutonaMatchLog``, daemon, started by ``Start``): it writes
 no state, waits for nothing and calls no ``GameAssetCatalog`` writer
-(agent-pitfalls #16 #17). The record is only touched with
+(pitfalls #16 #17). The record is only touched with
 ``StateManager.lock`` held (the observer, ``Start``, ``Shutdown``). The
 writer's queue has a lock of its own, a leaf: taken after
 ``StateManager.lock``, never the other way round, and held for no I/O and

@@ -1,7 +1,6 @@
 """Every overlay design under ``layout/`` as one normalized list.
 
-Two kinds of layout folder live side by side (docs/changes/
-layout-custom-unification.md §3):
+Two kinds of layout folder live side by side (ADR-007):
 
 * **Built-in (TSH-style) layouts** -- ``layout/{name}/`` with a hand-written
   ``index.html``. Their metadata is the ``autona`` block of the folder's own

@@ -3,9 +3,7 @@
 > 外部コントローラ（Companion / Stream Deck / その他薄いクライアント）から Autona を
 > 安全に操作するための **操作 API 候補の棚卸し・分類・設計案**。
 > **この段階で実装は確定しない。** 設計境界の決定は
-> [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)、
-> 影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)、
-> 調査タスクは [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md)。
+> [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)。
 
 > ステータス凡例:
 > - **Confirmed**: コードまたは既存ドキュメントから確認できた
@@ -51,7 +49,7 @@
 > 外部コントローラ追加を機に認証/バインド方針を見直すかは ADR-001 の論点。
 >
 > **（2026-10-25 追記）** 既定バインドは後に `127.0.0.1` へ変わり（LAN 公開はオプトイン）、ADR-005 S3a で
-> LAN の書き込みにトークン認証が入った。現行仕様は [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §2.2。
+> LAN の書き込みにトークン認証が入った。現行仕様は [../../docs/architecture/external-control-api.md](external-control-api.md) §2.2。
 
 ---
 
@@ -168,9 +166,9 @@ WS 列は対応する Socket.IO イベントの有無。
 | セットロード `load-set` / 配信セット取込 | #38 #24 #25 | 進行中の盤面を上書き |
 | ゲーム変更 `update-game` | #14 | アセット再ロードで重い・全 UI 影響 |
 | 大会 URL 設定 `set-tournament` | #44 | **コンテキスト総入替・Start.gg 通信・最重量** |
-| ブラケット再取得 `update-bracket` | #41 | Start.gg 通信・タイムアウトしうる（agent-pitfalls #11） |
+| ブラケット再取得 `update-bracket` | #41 | Start.gg 通信・タイムアウトしうる（pitfalls #11） |
 | ~~テーマ切替 `set-light-mode`~~ | #12 | **削除済み**。ダーク固定化により API 化対象外 |
-| サムネ生成 | #34 | WebEngine で重い・連打で競合（agent-pitfalls #10） |
+| サムネ生成 | #34 | WebEngine で重い・連打で競合（pitfalls #10） |
 
 ### C. 読み取り専用 API として先に提供
 
@@ -247,7 +245,7 @@ WS 列は対応する Socket.IO イベントの有無。
 
 ### 5.4 テーマ切替 `set-light-mode`（B）— ❌ 削除済み
 
-> テーマ切替機能は削除済み（ダーク固定、[Design.md §5.4](../../.claude/design/Design.md)）。
+> テーマ切替機能は削除済み（ダーク固定、[Design.md §5.4](Design.md)）。
 > 切替時に `qdarktheme.setup_theme()` が proxy 埋め込みブラケットを全再ポリッシュし、
 > GUI スレッドが 30s 以上フリーズしていたため。本候補は対象外。
 
@@ -359,7 +357,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - 破壊的操作（clear/reset-players/reset-match）は `confirm=true` 必須。
 - 重い/コンテキスト操作（set-tournament/update-game/update-bracket）は初回から提供済み。
   `202 Accepted` + 実行中フラグで多重起動を防ぐ。配信中/非配信中の自動判定は未実装。
-- レート制限 / デバウンス（同一操作の連打吸収）。サムネ・統計の連打は既存でも競合注意（agent-pitfalls #10/#11）。
+- レート制限 / デバウンス（同一操作の連打吸収）。サムネ・統計の連打は既存でも競合注意（pitfalls #10/#11）。
 
 ### 7.9 読み取り API と操作 API の分離
 
@@ -406,7 +404,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - **書き込みは必ず StateManager 経由**（Actions が emit する Qt Signal → widget → `StateManager.Set`）。外部 API も同じ経路を通す。
 - **GUI スレッド直列化**: 多くの Action が `@gui_thread_sync`。外部 API も別スレッド（QThread）からこの仕組みを尊重して呼ぶ。直接 widget を触らない。
 - **同時操作の競合（Confirmed の範囲 + Inferred）**: 手動 UI・ホットキー・Web・外部 API はいずれも最終的に GUI イベントループ上で直列処理される（Inferred: gui_thread_sync + signal emit のため）。結果は概ね「**処理順＝到着順、最後勝ち**」。明示的なロック/排他は無い → 重い操作中の割り込みは要検証（E）。
-- **SaveBlock の対称性**（agent-pitfalls #6）: 一括更新を外部 API でまとめる場合 `with StateManager.SaveBlock():` を使う。
+- **SaveBlock の対称性**（pitfalls #6）: 一括更新を外部 API でまとめる場合 `with StateManager.SaveBlock():` を使う。
 
 ---
 
@@ -414,7 +412,7 @@ WS 列は対応する Socket.IO イベントの有無。
 
 - 既存ルートは成功時 `"OK"`、失敗時も 200 で文字列を返すものが多い（Confirmed）。**外部クライアントは HTTP ステータスだけでは成否を判別できない** → 新 API は構造化レスポンス必須。
 - `get_match` / `update_bracket` は provider 前提で、**大会未ロード時に例外/空**になりうる（Inferred）→ `NOT_READY` で返す設計。
-- Start.gg 系（set-tournament/update-bracket/get-match）は **20 秒タイムアウト + 指数バックオフ**（agent-pitfalls #11）→ `UPSTREAM_TIMEOUT` を用意。
+- Start.gg 系（set-tournament/update-bracket/get-match）は **20 秒タイムアウト + 指数バックオフ**（pitfalls #11）→ `UPSTREAM_TIMEOUT` を用意。
 
 ---
 
@@ -446,13 +444,11 @@ WS 列は対応する Socket.IO イベントの有無。
 
 ## 14. 関連ドキュメント
 
-- **I/F 仕様（正本・計画）**: [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)
-- 影響分析: [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)
+- **I/F 仕様（正本・計画）**: [../../docs/architecture/external-control-api.md](external-control-api.md)
 - 設計境界 ADR: [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)
-- 調査タスク: [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md)
 - 現アーキ: [current-architecture.md](current-architecture.md)
 - プロダクト視点: [../product/features.md](../product/features.md)
-- 実装仕様の正本: [../../.claude/design/Design.md](../../.claude/design/Design.md)
-- 地雷集: [../../.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md)
+- 実装仕様の正本: [../../docs/architecture/Design.md](Design.md)
+- 地雷集: [../../docs/development/pitfalls.md](../development/pitfalls.md)
 </content>
 </invoke>

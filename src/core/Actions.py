@@ -29,9 +29,7 @@ operations of the panels that are not a scoreboard at all -- `SetLayoutOption`
 overlay read what it wrote), `SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
 core/CommentaryService.py by ADR-005 S3e-2) / `PublishResultPlayers` (gone with
 the Qt panel, ADR-005 S4r: core/ResultService.py writes the rows) -- which is
-what took the last `StateManager.Set` out of a Qt widget (the ledger of what
-remains is in
-docs/changes/headless-core-redesign.md). ADR-005 S2c then moved the swap
+what took the last `StateManager.Set` out of a Qt widget (ADR-004). ADR-005 S2c then moved the swap
 (`SwapTeams` / `SwapPlayers`): since S2a the player cards render their slot
 from the state, so a swap exchanges the slots here instead of copying field
 values from one card into another, and `score.{n}.teamsSwapped` became the
@@ -61,7 +59,7 @@ ready to be used (`EnsureBoard`, S4y: the launch write, and on the desktop the
 反映 hold the board widget's constructor registered) -- every board at launch
 since S4ac-1 (`MakeBoards`).
 
-Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
+Import side effects: none (pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
 
 THREADING: every method may be called from any thread. `StateManager` guards
@@ -676,7 +674,7 @@ class AutonaActions:
     #
     # Both keys were written by a `findChildren` loop that used each widget's
     # objectName as the final key segment, which is what made the .ui file
-    # the schema (S-14). The names are `StateSchema.SCORE_TEAM_INPUT_KEYS`
+    # the schema. The names are `StateSchema.SCORE_TEAM_INPUT_KEYS`
     # now and these are the operations behind them.
     #
     # `team` is the *display* team, i.e. the column the operator is looking
@@ -947,7 +945,7 @@ class AutonaActions:
         operator's reset (`ResetMatch`). It leaves the match bar alone:
         `SetLoadService.ApplyMatchInfo` keeps the round name for a payload
         that carries none, so blanking it here would wipe the round
-        mid-stream (S-17).
+        mid-stream.
 
         Only what changes is written, as the spinboxes and the checkboxes
         did (neither emits for its current value). A losers flag that goes
@@ -1545,7 +1543,7 @@ class AutonaActions:
         """Blank the match bar (round name / phase / pool). True if changed.
 
         The match-bar half of an operator's *reset* -- the すべての入力値を
-        リセット button, `reset_match` and `clear_all` (S-17). It is NOT part
+        リセット button, `reset_match` and `clear_all`. It is NOT part
         of the clear a set load runs first (`ClearScore`): SetLoadService's
         `ApplyMatchInfo` keeps the round name for a payload that carries
         none, so clearing ahead of it would blank the round mid-stream for
@@ -1763,7 +1761,7 @@ class AutonaActions:
         Anything else that raises does so inside the caller's block rather
         than around it, so a failure cannot leave `saveBlocked`
         positive -- which would freeze ./out and the WebSocket feed for the
-        rest of the session (agent-pitfalls #6).
+        rest of the session (pitfalls #6).
         """
         firstTo = math.ceil(value / 2)
         prefix = f"score.{board}"

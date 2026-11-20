@@ -54,7 +54,7 @@ change yet from writing its older rows back.
 What each publishes is the widget path's, recorded before the move
 (tests/fixtures/crew_operations/golden.json).
 
-Import side effects: none (agent-pitfalls #1). The service is cheap and
+Import side effects: none (pitfalls #1). The service is cheap and
 keeps nothing of its own -- the swap flag is ``score.{n}.teamsSwapped``, as on
 boards 1/2 (ADR-005 S4w) -- so the board's widget keeps one and the Web makes
 one per call.

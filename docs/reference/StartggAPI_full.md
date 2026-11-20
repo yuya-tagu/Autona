@@ -694,8 +694,8 @@ event(slug: $s) {
 | https://smashgg-schema.netlify.app/ | スキーマブラウザ（型定義） |
 | https://developer.start.gg/explorer | GraphiQL Explorer（要ログイン） |
 | https://developer.start.gg/docs/rate-limits | レート制限の正式仕様 |
-| [.claude/architecture/state-keys.md](.claude/architecture/state-keys.md) | 取得結果の StateManager マッピング |
-| [.claude/rules/agent-pitfalls.md](.claude/rules/agent-pitfalls.md) | Start.gg 関連の地雷 |
+| [.claude/architecture/state-keys.md](../../.claude/architecture/state-keys.md) | 取得結果の StateManager マッピング |
+| [docs/development/pitfalls.md](../development/pitfalls.md) | Start.gg 関連の地雷 |
 
 ---
 

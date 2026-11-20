@@ -18,7 +18,7 @@ operator picked or a tournament provided, in one place:
 Publishing the file's version (its mtime, ``StateSchema.PublishAssetVersion``)
 is the caller's, under its own lock, so a file and its version always belong
 together. Qt-free (tests/test_core_qt_free.py); import side effects: none
-(agent-pitfalls #1).
+(pitfalls #1).
 """
 import os
 import tempfile

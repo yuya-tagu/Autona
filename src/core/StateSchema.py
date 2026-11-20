@@ -31,7 +31,7 @@ widgets read them too -- the EVENT tab's until it became the React Event
 page in ADR-005 S4g, the board's and the player card's until the Qt SCORE
 went in S4ac-3.
 ``DYNAMIC_KEY_FAMILIES`` below -- the checklist that inventory shrank
-against -- is empty as a result (known-smells S-14).
+against -- is empty as a result.
 
 The final instalment added the **subtree roots** (``SCORE_ROOT`` and the rest,
 below ``COLORS_FEATURE_KEYS``). They are here for the same reason the leaves
@@ -39,7 +39,7 @@ are: every one of them is now written from outside this module -- a core
 service or ``AutonaActions`` -- and a root spelled at its write site drifts
 exactly the way a leaf did. ``KEY_CATALOG`` is keyed by them.
 
-Import side effects: none (agent-pitfalls #1). Every read and write happens
+Import side effects: none (pitfalls #1). Every read and write happens
 inside a call.
 """
 import os
@@ -166,7 +166,7 @@ STALE_KEYS = (
 # A transcription of Design.md §3.1.2, verified against the writers in src/.
 # Placeholders: {N} board 1..3, {T} team 1..2, {M} player index, {K}
 # character index, {I} a list index. Index segments are always *strings* in
-# the state ("1", not 1) -- agent-pitfalls #3.
+# the state ("1", not 1) -- pitfalls #3.
 
 # No BOARD/TEAM index tuples here on purpose: the board list already exists
 # as AutonaActions.BOARDS (ints, used to iterate boards) and a second,
@@ -184,7 +184,7 @@ TOP8_MATCH_IDS = tuple(top8.MATCH_IDS)
 #
 # Two of the board's key families used to be produced at runtime from Qt
 # objectNames -- `score.{N}.{combo.objectName()}` for the match bar and
-# `score.{N}.team.{T}.{widget.objectName()}` for the team cards (S-14). Since
+# `score.{N}.team.{T}.{widget.objectName()}` for the team cards. Since
 # headless core Step 5 the names live here: AutonaActions writes them, and
 # the Qt board (AutonaScoreboardWidget, until ADR-005 S4ac-3) looked its
 # widgets up *by* them instead of reading them back off the widgets.
@@ -836,7 +836,7 @@ KEY_CATALOG = {
 }
 
 # Key families whose final segment comes from a Qt objectName at runtime
-# instead of from this catalog (known-smells S-14). This was the Step 5
+# instead of from this catalog. This was the Step 5
 # inventory and it is **empty**: the Qt board's two families (the
 # team card and the match bar) came off when they became
 # SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, the player card's followed as
@@ -1050,7 +1050,7 @@ def SeedPanelState():
     if not isinstance(state, dict) or not state.get("matches"):
         # Recompute the fresh seed too: DefaultState() hands out TBD slots,
         # and the first ApplyScores would otherwise treat that as "the
-        # participants changed" and drop the score (known-smells S-18).
+        # participants changed" and drop the score.
         seed = top8.DefaultState()
         seed[TOP8_MATCHES_KEY] = top8.Recompute(seed[TOP8_MATCHES_KEY])
         StateManager.Set(TOP8_ROOT, seed)

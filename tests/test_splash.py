@@ -34,7 +34,7 @@ What has to hold:
 * the call sites: main.py puts it up right after the gate, before PySide6,
   takes it down at exit if the start fails, and the window finishes it
   right after its show(); no progress messages
-  and no processEvents() anywhere (agent-pitfalls #9).
+  and no processEvents() anywhere (pitfalls #9).
 
 The Windows test puts a real 220 px window on screen for a fraction of a
 second (not activated: it takes no focus).
@@ -48,8 +48,8 @@ import time
 
 import pytest
 
-import autona_splash
-from autona_splash import (
+from src import autona_splash
+from src.autona_splash import (
     CYCLE_FRAMES,
     DOT_FRAMES,
     FRAME_INTERVAL_MS,
@@ -176,7 +176,7 @@ def test_the_tick_for_a_time_is_rounded_and_wraps():
 def test_importing_it_starts_nothing_and_imports_no_qt():
     script = r"""
 import sys, threading
-import autona_splash
+from src import autona_splash
 assert threading.active_count() == 1, threading.enumerate()
 assert autona_splash.ACTIVE_SPLASH is None
 assert autona_splash._API is None
@@ -186,7 +186,7 @@ overlay = autona_splash.LoadingOverlay
 from PySide6.QtWidgets import QWidget
 assert issubclass(overlay, QWidget)
 assert autona_splash.LoadingOverlay is overlay
-from autona_splash import LoadingOverlay
+from src.autona_splash import LoadingOverlay
 assert LoadingOverlay is overlay
 try:
     autona_splash.NoSuchName
@@ -484,7 +484,7 @@ def test_main_puts_it_up_after_the_gate_before_pyside6():
     # After the gate and the headless shell (which shows no splash).
     order = ["ifnot_acquire_single_instance():",
              "sys.exit(headless.run(App))",
-             "importautona_splash",
+             "fromsrcimportautona_splash",
              'autona_splash.log_startup_phase("gate")',
              "autona_splash.create_splash()",
              'autona_splash.log_startup_phase("splash")',
@@ -510,7 +510,7 @@ def test_the_window_finishes_it_right_after_the_show():
 
 def test_nothing_pumps_the_event_loop_for_the_splash():
     names = set()
-    for path in (PROJECT_ROOT / "autona_splash.py", PROJECT_ROOT / "main.py"):
+    for path in (PROJECT_ROOT / "src" / "autona_splash.py", PROJECT_ROOT / "main.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Attribute):
                 names.add(node.attr)

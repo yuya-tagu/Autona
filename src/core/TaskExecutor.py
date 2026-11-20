@@ -94,7 +94,7 @@ by the constructor. ``TaskExecutor.instance`` is created by
 ``bootstrap_core()``.
 
 Qt-free (tests/test_core_qt_free.py). Import side effects: none
-(agent-pitfalls #1).
+(pitfalls #1).
 """
 import collections
 import functools

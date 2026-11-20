@@ -5,9 +5,8 @@
 Accepted（2026-10-23 PdM 承認。「現代的にアーキテクチャを抜本的に修正したい」方針を受け、
 現状棚卸し → Fable（外部レビュー）→ 再定義を経て案 2 を採用）
 
-> 棚卸し・レビュー・終着点・移行ステップの詳細は
-> [../changes/architecture-modernization.md](../changes/architecture-modernization.md) を正とする。
-> 本 ADR は「なぜこの方針か」の記録のみを持つ。
+> 本 ADR は「なぜこの方針か」と移行の結果を持つ。移行台帳（棚卸し・外部レビュー・段ごとの実施記録。9,473 行）は削除した。
+> 全文はコミット d4311f81 の `docs/changes/architecture-modernization.md` を参照（末尾の「結果」節に要約）。
 
 ## Context
 
@@ -24,7 +23,7 @@ ADR-004（2026-09-03 完了）で「Qt ウィジェットは `StateManager` を�
 - 外部入口が legacy REST 45 + Socket.IO 41 + `/api/v1` 31 の 3 系統。`@gui_thread_sync` 22 箇所が
   Flask スレッドから GUI を同期ブロックする
 - UI 技術が Qt Widgets（約 26k 行）/ React（13.5k 行）/ jQuery オーバーレイ（14.5k 行）の 3 種。
-  スコア入力は Qt と React で二重実装。PySide6 ネイティブクラッシュ地雷（agent-pitfalls #9〜#15）は
+  スコア入力は Qt と React で二重実装。PySide6 ネイティブクラッシュ地雷（pitfalls #9〜#15）は
   全て「データが Qt オブジェクトの寿命に乗っている」ことが原因
 
 一方、**Designer は既に「React を QWebEngineView で包む」構成で稼働しており**、
@@ -75,7 +74,7 @@ legacy REST / Socket.IO は告知どおり v2.0 で削除する。
 - **残る Qt**: Window、共有ビューのホスト、Designer の窓（`AutonaDesignerWindow`）、Updater のダイアログ、ネイティブのダイアログ（LAN の初回確認・ポート競合・起動失敗・フォルダ選択）、Win32 ホットキー・タイトルバー色。QtCore のアダプタとヘッドレスは core 側。許可リストは AST の pin（`tests/test_web_panel_host.py`）
 - **core への統合**: ゲームのローダーは両シェル共通の core `GameLoader`（`run_sync` をやめ、ローダーのスレッドで最後まで走る）。フッターの進捗は core の `StatusService`。アプリ UI の文言は i18next が唯一の正本で、Qt の `.ts` はネイティブのダイアログと Updater の分だけ
 - **配布物の削減（SF-9）**: 未使用の Qt モジュール（QML 一式・debug の pak・Qt の翻訳・en / ja 以外の WebEngine locale・Git 由来の OpenSSL の DLL）を外し、`_internal` 571 → 344.4 MiB、zip 282.7 → 216.9 MiB（実測）。D4 の構造（onedir・zip・更新ヘルパー）は変えていない。リリース時は Runbook 手順 9（旧版からの自動更新 E2E）で確かめる
-- 段ごとの内容・PR・残るリスクは [../changes/architecture-modernization.md](../changes/architecture-modernization.md) の S-final の節
+- 段ごとの内容・PR・残るリスクは末尾の「結果」節（全文はコミット d4311f81 の台帳）
 
 ## Alternatives considered
 
@@ -121,3 +120,43 @@ legacy REST / Socket.IO は告知どおり v2.0 で削除する。
   （S0〜S3 の成果はそのまま有効）
 - 複数マシン・複数オペレーターの同時運用が実要件になった場合、core の別プロセス化を再検討する
 - 配布サイズが SF-9 の後でも運用上の問題になる場合、WebView2 化を別 ADR で判断する（S-final では継続を決定。D5）
+
+## 結果（移行の完了・2026-11-16。移行台帳の要約）
+
+台帳全文はコミット d4311f81 の `docs/changes/architecture-modernization.md` を参照。
+
+### 何を終えたか
+
+| 段 | 内容 |
+|----|------|
+| S0 | 重複統合・依存定義の一本化・core から src への逆依存の解消 |
+| S1 | ゲームアセット・国・地域のカタログを core 化（`GameAssetCatalog`。Qt モデルはアダプタの一方向構築） |
+| S2 | 選手スロットの正本を state へ。swap・clear・best_of・losers の mergedName を core へ（`PlayerService`） |
+| S3 | ヘッドレス起動（`main.py --headless`）、永続化の分離（`user_data/state.json` が正本、`out/` は派生）、Web の公開面を締める（静的配信の許可リスト・LAN トークン認証）、`WebServerActions` の廃止、Executor 1 本化（`TaskExecutor`。QThreadPool・Worker・qasync・`threading.Timer` を廃止）、delta の debounce |
+| S4 | 全パネルの React 化と Qt 版の削除（Commentary → Stream → Event → Top 8 → Stats → 統計表示設定 → 選手 DB → サムネイル → リザルト → Board → SCORE → Settings）。各パネルは先に core（サービス + `/api/v1`）へ、次に React へ。ボードのライフサイクルとトラッカーも core へ移り、ボードホストの GUI スレッド marshal は無くなった |
+| S-final | Window を共有ビュー 1 枚にし、サイドバー・メニュー・ステータスバー・ガイド類を React の AppShell へ。ローダー（`GameLoader`）・フッターの進捗（`StatusService`）・アセット取り込み（`AssetPackService`）を core へ。i18n を i18next に一本化。同梱物を削減 |
+
+### 最終的な構成
+
+- Qt Widgets のパネルは 0。残る Qt は Window・共有ビューのホスト（`AutonaWebPanelHost`）・Designer の窓・Updater のダイアログ・ネイティブのダイアログ（LAN の初回確認・ポート競合・起動失敗・フォルダ選択）・Win32 ホットキーとタイトルバー色。許可リストは AST の pin（`tests/test_web_panel_host.py`）
+- core は Qt を import しない（`tests/test_core_qt_free.py`）。生成順は `src/bootstrap.py`（`bootstrap_core()` / `bootstrap_gui()`）が正本。ヘッドレスは `bootstrap_core()` で止まる
+- 外部契約（D4）は追加のみ: `/api/v1` は 132 本（S-final 時点。`tests/test_webserver_routes.py` の台帳が正本）、Socket.IO に `status` / `games_changed` を追加、onedir・zip 構造・更新ヘルパーは不変
+- 配布物: `_internal` 571 → 344.4 MiB、zip 282.7 → 216.9 MiB（SF-9。未使用の Qt モジュール・QML・debug の pak・en / ja 以外の WebEngine locale・OpenSSL の DLL を外した）
+- 長時間処理は `TaskExecutor` 1 つ（ジョブ用 4 本・fan-out 用 8 本）。残る専用スレッドは `tests/test_task_executor.py` の `THREADS_LEFT` が正本
+- トレイは作らない（実装されたことが無く需要の記録も無い）。WebView2 化はしない（D5）
+
+### 決定の経緯で残すもの
+
+- 移行中の独立レビューと実機確認は、各パネルで「core 化 → React 化 → Qt 版削除」の 2 PR に分けて通した。IME の実機ゲート（Commentary）は通過した
+- SCORE の React 化では legacy の退路（旧ページ）を残してから Qt 版を削除した。ステージ・ホットキーほか周辺の Qt も同じ順で削除した
+
+### 残った既知の課題
+
+- 旧バージョンに戻すと、最後に開いたページの保存（`lastPanel`）は読まれない
+- SF-9 の同梱物削減後の確認が未了: アプリ内アップデータ経由の旧版からの自動更新 E2E（リリース Runbook の手順 9。公開後にしかできない）、Designer の窓・英語の設定での表示・HTTPS の取得（start.gg・アセットの DL・更新確認）・en / ja 以外の地域設定の端末。PyInstaller / PySide6 を上げるとフックの集めるものが変わりうる（validator の検査 5 が止める）。OS の言語が en / ja 以外のとき、Chromium 内部の文言は英語になる
+- トークンの表示・再発行は共有ビューのメインフレームにだけ渡す秘密に限る。同じオリジンのレイアウトのページは THIS_PC を通るため、THIS_PC は秘密を守る区分ではない
+- ヘッドレスには、追従の取り直し（5 秒の自動更新）を止める Web 操作が無い。thumbnail / result のヘッドレス描画はしない（シェル操作 `renderThumbnail` / `startImageRender` はデスクトップだけ）
+- 終了時、`stopping` を見ない長い処理（start.gg のキャラ表の DL 最大 20 秒・API テスターの送信最大 25 秒・走っている provider のリクエスト最大 20 秒）はインタプリタ終了の join が待つ
+- ジョブレーン（4 本）は大会の読込が走っている間、セット一覧・追従・統計が後ろに並びうる。fan-out レーン（8 本）は見捨てた遅いリクエストで埋まると、ほかの並列リクエストが上限（60 秒）まで待ちうる
+- DeepDiff の `threshold_to_diff_deeper` の挙動（1 回の保存サイクルで新しいトップレベルのキーが 2 つ以上増えると root の `values_changed` が delta に出る）は Socket.IO の外部契約のため別タスク
+- 台帳に「報告のみ・未修正」と記録された既存の不具合（選手のクリアが city を消さない、`general.disable_overwrite` 時のセットの DB 照合がタグだけ・各 entrant の 1 人目だけで受け取ったペイロードを書き換える、Grand Final のリセットの選手が Start.gg の slot に `seedNum` が無いと解決されない、Socket.IO の `team_color` が `team_scoredown` の名前で emit する、大会未読込のセット照会が legacy で 500・Socket.IO で無応答）は、現行コードで再現するか確認してから扱う

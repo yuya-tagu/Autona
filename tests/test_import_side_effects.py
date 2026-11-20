@@ -39,7 +39,7 @@ The package itself is covered too: since Step 3g `src/__init__.py` is a
 docstring and nothing else, so `import src` must be inert as well. That is
 what keeps the init from silently growing a convenience re-export back into
 Autona.py, which would boot the whole app on any `from src.X import Y`
-(the old agent-pitfalls #1).
+(the old pitfalls #1).
 
 Everything runs in a subprocess because the checks are about a *fresh*
 interpreter: once any other test has imported these modules, the side effects

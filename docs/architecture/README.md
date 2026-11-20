@@ -21,6 +21,6 @@
 
 ## 正本・参照
 
-- [../../.claude/design/Design.md](../../.claude/design/Design.md) — 実装仕様の正本
+- [../../docs/architecture/Design.md](Design.md) — 実装仕様の正本
 - [../../src/core/StateSchema.py](../../src/core/StateSchema.py) — 状態キーパスの正本
 - [../../CLAUDE.md](../../CLAUDE.md) — アーキ概要

@@ -42,7 +42,7 @@ folder picked (core's HoldFolderPick: it lists the folder, which may be on a
 slow or network drive) is a TaskExecutor job, its answer handed back to the
 GUI thread (GuiExecutor.later).
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import functools
 import os
@@ -318,7 +318,7 @@ class AutonaShellOperations:
         """Ask the operator for a game folder to import, in the native
         dialog over the main window (QFileDialog.getExistingDirectory: a
         modal loop of its own, so the host runs this from the event loop,
-        never inside Chromium's call -- agent-pitfalls #9; it opens on the
+        never inside Chromium's call -- pitfalls #9; it opens on the
         user's Documents folder, else the home folder, not the working
         directory), and have core hold it (AssetPackService.HoldFolderPick:
         probed, under an id) -- on the TaskExecutor's job lane (the folder

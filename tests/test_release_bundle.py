@@ -10,7 +10,7 @@ file the runtime needs or ships a trimmed one.
 The build does not run here (it takes minutes), so this module pins the
 spec at TEXT level, like tests/test_apply_update_robocopy.py:
 
-- the Qt modules the app imports (src/, main.py, autona_splash.py) are the
+- the Qt modules the app imports (src/ incl. autona_splash.py, main.py) are the
   allowlist, and the spec excludes none of them nor what they import;
 - with every module of the spec's excludes absent, the app's modules, qtpy
   and qdarktheme still import (qtpy only tries QtOpenGL / QtOpenGLWidgets /
@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SPEC = PROJECT_ROOT / "dependencies" / "autona.spec"
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_release_zip.ps1"
 
-# The Qt modules the app imports: src/, main.py and autona_splash.py.
+# The Qt modules the app imports: src/ (incl. autona_splash.py) and main.py.
 APP_QT_MODULES = {"QtCore", "QtGui", "QtWidgets", "QtNetwork",
                   "QtWebEngineCore", "QtWebEngineWidgets"}
 # What those import of Qt themselves: QtWebEngineCore / QtWebEngineWidgets
@@ -225,7 +225,7 @@ def _qt_names_in(path):
 
 def _app_files():
     return [*sorted((PROJECT_ROOT / "src").rglob("*.py")),
-            PROJECT_ROOT / "main.py", PROJECT_ROOT / "autona_splash.py"]
+            PROJECT_ROOT / "main.py"]
 
 
 def test_the_app_imports_the_allowlisted_qt_modules_only():

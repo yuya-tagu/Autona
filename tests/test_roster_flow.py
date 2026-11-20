@@ -386,7 +386,7 @@ def test_the_boards_are_built_with_the_recorded_rosters(world, autonaApp):
 # of a slot that was gone, and these tests drove the cards' lifecycle (a
 # retired card writing its slot back, a teardown inside the notification
 # that noticed the change, QLayoutItem wrappers left registered:
-# agent-pitfalls #14). What is left of them is the state's half: the roster
+# pitfalls #14). What is left of them is the state's half: the roster
 # the entry points leave.
 
 def _assertRosterWhole(number=2):
@@ -505,7 +505,7 @@ def test_a_game_load_and_its_roster_are_one_save_cycle_on_its_thread(
     game's writes and the roster's (board 2 to the game's two players,
     committed within the load: AutonaActions.CommitGameLoad) go out as that
     one cycle's delta, published while the load is still publishing; its
-    notifications run there, inside StateManager.lock (agent-pitfalls #17:
+    notifications run there, inside StateManager.lock (pitfalls #17:
     one cycle under one hold of the lock), and the bridge queues them to
     the main thread's receivers (they were direct, on the GUI thread, until
     SF-6c)."""
@@ -670,7 +670,7 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp,
     """The held notifications -- and, for a write on the GUI thread, the
     handlers on them, direct -- run inside StateManager.lock (SaveState's,
     or a caller's around it). So nothing there waits on another thread
-    (agent-pitfalls #17): a run_sync (what a gui_thread_sync does) made
+    (pitfalls #17): a run_sync (what a gui_thread_sync does) made
     holding the lock never returns if the thread it waits on is the one
     that wants the lock. The roster's entry points -- a change under a
     caller's lock, the Web's, a threaded game load, a commit -- call none
@@ -685,7 +685,7 @@ def test_no_thread_is_waited_on_inside_a_held_cycle(world, autonaApp,
 
     The match log (ADR-006 A2) follows board 1's publishes from inside them
     (state_updated / state_big_change) and calls no GameAssetCatalog writer
-    there (agent-pitfalls #16). A log of the test's own, on board 1's
+    there (pitfalls #16). A log of the test's own, on board 1's
     operations, its commits and the threaded game load (a partial commit of
     both boards). That it waits on nothing there -- its writer held inside a
     write, the publishes still end -- is tests/test_match_log.py's

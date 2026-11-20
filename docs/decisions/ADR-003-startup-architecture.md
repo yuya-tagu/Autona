@@ -4,9 +4,10 @@
 
 Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-07-30（PR #144〜#161）**
 
-> 目標値 `core-shown ≤ 5s`（frozen・warm）は未達。dev warm で 10.95s（Step 4e 時点）まで短縮し、
-> 残りの候補は設計書 §3「今後の候補（未着手）」に切り出した。本 ADR の決定（D1〜D3）自体は
-> 実装で検証済み。
+> 目標値 `core-shown ≤ 5s`（frozen・warm）は未達。dev warm で 10.95s（Step 4e 時点）まで短縮した。
+> 残りの候補（未着手）: `src/Autona.py` の module-level import の遅延化（〜2.8s。`bootstrap_core()` 前提の順序に触るので要注意）、
+> PyInstaller 側の詰め（gate + splash 〜2.6s の大半は Qt DLL のロード。frozen 実測が前提）、
+> 選手 DB / ゲームアセットのワーカー化（「操作可能になるまで」の短縮）。本 ADR の決定（D1〜D3）自体は実装で検証済み。
 
 > **2026-11-15 追記（ADR-005 S-final SF-5b-3）: `STARTUP phase=core-shown` の意味が変わった。**
 > ウィンドウは共有ビュー（`AutonaWebPanelHost`）1 枚になり、Qt のサイドバー・メニュー・ステータスバーが無くなったので、
@@ -37,9 +38,9 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 > `splash.finish()`（最大 0.5 秒で返る。起動が例外で終わるときは `main.py` の atexit が消す）。QApplication は今も `main.py` が
 > `import src` の前に作る（IPC サーバーと `AA_ShareOpenGLContexts` のため）。pin: `tests/test_splash.py`。
 
-> 設計詳細・移行ステップ・検証方法は
-> [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) を正とする。
-> 本 ADR は「なぜこの方針か」の記録のみを持つ。
+> 設計書（移行 5 ステップ・検証チェックリスト）は削除した。全文はコミット d4311f81 の
+> `docs/changes/startup-architecture-redesign.md` を参照。決定事項: 2 個目の起動は前面化のみ、Web サーバーは表示後の非同期起動でよい、
+> 最小コアはアクティブな `battle_format` の board のみ（非アクティブは初回の形式切替時に構築）。
 
 ## Context
 
@@ -50,7 +51,7 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 - 単一インスタンスガードが存在しない（リポジトリ全域で確認）
 - `import src` 完了までスプラッシュを含め何も描画されない（無反応区間 → 連打 → 多重起動）
 - module import の副作用でシングルトンが生成され、**import 順序 = 初期化順序**になっている
-  （[.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) #1・#2 はこの設計の症状）
+  （[docs/development/pitfalls.md](../development/pitfalls.md) #1・#2 はこの設計の症状）
 - `Window.__init__` が全パネル・全ウィンドウ・WebEngine ×6・選手 DB 2937 件を同期構築する
 
 また Autona はポート・`out/` 状態ファイル・グローバルホットキー・OBS オーバーレイという
@@ -74,7 +75,7 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 
 シングルトン初期化順序は本リポジトリ最大の地雷原（C++ クラッシュ実績複数）のため、
 1 PR = 1〜2 シングルトンの粒度・毎ステップ検証・revert 可能な履歴を厳守する。
-ステップ定義と検証チェックリストは設計書（changes/）を正とする。
+ステップ定義と検証チェックリストは削除した設計書（コミット d4311f81）にある。
 
 ## Alternatives considered
 
@@ -91,7 +92,7 @@ Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-
 
 **良い影響:**
 - 多重起動が構造的に不可能になり、ポート競合・状態ファイル後勝ち上書き・誤 kill が消滅
-- 初期化順序が bootstrap 上で可視化され、agent-pitfalls #1・#2 が構造ごと消滅
+- 初期化順序が bootstrap 上で可視化され、pitfalls #1・#2 が構造ごと消滅
   （テストの `direct_import()` 回避策も不要になる）
 - パネルの lazy 化が一貫して可能になり、起動時間が「機能数に比例して伸びる」構造から脱却
 

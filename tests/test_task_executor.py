@@ -891,9 +891,7 @@ THREAD_CALLS = {"Thread", "Timer", "ThreadPoolExecutor",
 THREAD_BASES = {"Thread", "QThread"}
 THREAD_MODULES = {"asyncio", "qasync", "_thread"}
 
-# The threads left beside the executor -- the S3f completion report's list
-# (docs/changes/architecture-modernization.md, "S3f の後に残る並行処理"),
-# by file, the function or class they are started in and how. Adding one,
+# The threads left beside the executor, by file, the function or class they are started in and how. Adding one,
 # moving one or taking one away changes that list too.
 THREADS_LEFT = {
     # The web server: the server, its stop helper, the delta flusher (S3f-5),
@@ -927,7 +925,7 @@ THREADS_LEFT = {
     # The startup splash's (2026-11-19): one, daemon, from the gate until
     # the window is shown; it owns the native splash window and animates it
     # while the main thread is blocked importing and building the window.
-    ("autona_splash.py", "NativeSplash.start", "Thread"),
+    ("src/autona_splash.py", "NativeSplash.start", "Thread"),
 }
 
 
@@ -1001,7 +999,7 @@ def _names(path):
 def test_nothing_runs_work_but_the_executor():
     assert not (PROJECT_ROOT / "src" / "Workers.py").exists()
     paths = _scanned()
-    assert PROJECT_ROOT / "autona_splash.py" in paths
+    assert PROJECT_ROOT / "src" / "autona_splash.py" in paths
     found = {path.relative_to(PROJECT_ROOT).as_posix():
              sorted(_names(path) & NOT_THE_EXECUTOR) for path in paths}
     assert {path: names for path, names in found.items() if names} == {}

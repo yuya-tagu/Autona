@@ -693,7 +693,7 @@ def test_the_start_is_what_was_saved_when_it_was_built(saves):
 
 
 def test_import_builds_nothing():
-    # agent-pitfalls #1 (the subprocess check is tests/test_import_side_effects.py).
+    # pitfalls #1 (the subprocess check is tests/test_import_side_effects.py).
     source = (PROJECT_ROOT / "src" / "core" / "AppSettings.py").read_text(
         encoding="utf-8")
     assert "instance = AppSettings(" not in source

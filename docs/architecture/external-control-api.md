@@ -5,8 +5,8 @@
 > 既存の HTTP/WS 制御面の事実は変更しない（本 API は別名前空間として**追加**済み）。
 > アプリ内導線: 「Help & Settings」→「API設定」→ リファレンス・テスター（React の `/web/api`。[../../web/src/GuidePages/ApiPage.tsx](../../web/src/GuidePages/ApiPage.tsx)。ADR-005 S-final SF-4a-2 で Qt のウィンドウから共有ビューのページになった。ブラウザでも開けるが、トークンの表示と再発行はアプリの中だけ）。
 
-- 決定根拠: [../../docs/decisions/ADR-001-external-control-api-boundary.md](../../docs/decisions/ADR-001-external-control-api-boundary.md)（D1〜D8）
-- 操作棚卸し・分類: [../../docs/architecture/external-control-api-candidates.md](../../docs/architecture/external-control-api-candidates.md)
+- 決定根拠: [../../docs/decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)（D1〜D8）
+- 操作棚卸し・分類: [../../docs/architecture/external-control-api-candidates.md](external-control-api-candidates.md)
 - 同期/リビジョン規約の正本: [Design.md §3.2 同期経路の規約](Design.md)
 - API 実装本体: [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)
 - 既存ルート実装: [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [../../src/AutonaWebOperations.py](../../src/AutonaWebOperations.py)（両シェル共通の Web 操作。旧 `AutonaWebServerActions.py` は ADR-005 S3e-9 で削除）
@@ -131,7 +131,7 @@
 | `CONFIRMATION_REQUIRED` | 409 | 破壊的操作で `confirm:true` が無い（§7.2） |
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8）。選手 DB への保存（§6.26）では、mains のゲームが今のゲームと違う / もっと新しい保存に負けた。ゲームアセットのジョブ（§7）は別のジョブが走っている（`reason: "busy"`）。ZIP のアップロード（§6.48）は届いている最中に新しいアップロードに置き換えられた（`reason: "superseded"`） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3）。ゲームアセット: ZIP のアップロード（§6.48）でこの PC の空き容量が足りない（`reason: "disk_full"`）・インストール（§7）で索引が読み込まれていない（`index_unavailable`） |
-| `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
+| `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（pitfalls #11） |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | ファイルはあるが、ルートが返さない種類。今はアーカイブ切り抜きのジョブの動画（§5.32 `GET /archive/jobs/{id}/video`。ADR-006 A3）で、プレビューできない形式の動画（`.flv` / `.ts` など）だけ（`reason: "not_previewable"`） |
 | `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）とゲームアセットの ZIP のアップロード（下）だけ。画像: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返しても werkzeug の開発サーバーが答えの後に、次のデータが 10 ms 以内に届き続ける限り最大 10 GB まで読み捨てるので、ふつうに送るクライアントには 413 が届く。送信の極端に遅いクライアントには接続のリセットが届く余地がある。ルートは最後まで読んでから断る）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ZIP のアップロード（§6.48。ADR-005 S-final SF-4b-1）: 8 GiB（`MAX_UPLOAD_BYTES`）で、`Content-Length` が上限を超えるとルートは本文を読まずに断る（`reason: "too_large"`）。werkzeug の開発サーバーは答えた後、本文が届き続けるあいだ読み捨てる（最大 10 GB。ディスクには書かない。その間は要求のスレッドを 1 本占有する）ので、クライアントには 413 が届く。ページが送る前に大きさを確かめるのは無駄な転送を省くため。空き容量の不足は `413` ではなく `409 NOT_READY`（`reason: "disk_full"`）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない。アップロードは要求ごとの `request.max_content_length`） |
 | `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）、v1 の試合サムネイルの描画（`POST /thumbnail:preview` / `:generate`。ADR-005 S4o。設定の読み書きと `GET /thumbnail/preview` は答える）。message は `not available in headless`。デスクトップでこれらに答えるのはシェルのアダプタ `AutonaShellOperations`（ADR-005 S4y でスコアボード dock から移した）: legacy のサムネイルはボードを構築しない（`ThumbnailService.DrawBoard` を同期で呼ぶ。未構築のボードを state のまま描き、シード・反映待ち・取り直しの停止を起こさない。クルーボードは 500 のまま、ボード 3 も構築しなくなった）。**ADR-005 S4ab-2 から、セット選択を開く操作は Qt の窓ではなくページのセット選択のダイアログを開く**（Qt の窓と退路の設定 `general.qt_scoreboard_panel` は S4ac-3 で削除。それまでの退路の Qt モードでは窓を開き、未構築のボードを先に構築していた）: メインウィンドウを前に出して（最小化からも戻す。外部からの依頼では Windows がタスクバーの点滅で止めることがある）SCORE に切り替え、ページはボード 1 / 2 で大会があるときだけダイアログを開く（無ければページを見せるだけ）。ボードは構築しない（ダイアログからの読み込みは v1 の `:load-set` が準備する）。`n` が今の形式のボードでないとき（1v1 での `/scoreboard2-open-set` など）は何も開かずログだけ。どちらでも答えは今までどおり 200 `OK`（Socket.IO は `open_set` に `OK`）で、ダイアログが開いたかは答えに出ない（窓のころから出なかった）。クルーボード（`/scoreboard3-open-set`）は 500 のまま。メインウィンドウができる前の依頼は何も開かずログだけ（S4ac-3。それまでは Qt の窓を開いた）。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
@@ -314,7 +314,7 @@
 ### 5.2 `GET /api/v1/layouts`（2026-10-22 追加）
 `layout/` 配下の配信用レイアウト（旧来型テンプレート + Designer で作った `layout/custom/{slug}/`）の一覧。
 Board / Commentary / Top 8 のページと Designer の「開く」一覧が使う**同じカタログ**（`src/core/LayoutCatalog.py`）を返す
-（[../../docs/changes/layout-custom-unification.md](../../docs/changes/layout-custom-unification.md) Step 1）。
+（[ADR-007](../decisions/ADR-007-template-packages.md) の付記）。
 
 - `?kind=` で絞り込む。値は `scoreboard` / `designer` / `commentary` / `top8` / `result` / `thumbnail`。カンマ区切り
   （`?kind=scoreboard,designer`）・パラメータの繰り返しのどちらでも複数指定できる。省略・空なら全件。未知の kind は
@@ -1709,7 +1709,7 @@ HTTP/1.1 409 Conflict
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。
-- 手動確認項目は [../manual-test-checklist.md](../manual-test-checklist.md) の「外部制御 API」節になぞる:
+- 手動確認項目は [../manual-test-checklist.md](../development/manual-test-checklist.md) の「外部制御 API」節になぞる:
   - 既存 `/score`・`/scoreboard<N>-...` ルートと Web UI / OBS が従来通り動く（regression）。
   - `score:adjust` の delta 符号・冪等キー再送で二重加算しない。
   - 破壊的操作は confirm 無しで状態が変わらない。
@@ -1799,7 +1799,7 @@ HTTP/1.1 409 Conflict
 1. **最頻の失敗は `GetScoreboard(n)`=None 後の AttributeError**。→ `{1,2,3}` 事前検証（§2.12）で大半を予防できる。
 2. **`int()` パース**（bestOf/players/characters/setId/delta）は ValueError → API 層で型検証し `INVALID_ARGUMENT`。
 3. **`get_sets`/`get_match`/`update_bracket` は同期 Start.gg 呼び**。読み取りでも 20 秒級の遅延・例外があり得る
-   （agent-pitfalls #11）。→ 全て try/except で `UPSTREAM_TIMEOUT` に変換し、**読み取りでもタイムアウトしうる**旨を
+   （pitfalls #11）。→ 全て try/except で `UPSTREAM_TIMEOUT` に変換し、**読み取りでもタイムアウトしうる**旨を
    クライアントに通知。将来はキャッシュ/非同期化を検討（§12）。
 4. **エラー文字列を返す Action**（`set_game`=`"Could not find game X"`、`load_player_from_tag`=`"ERROR"`、
    `load_commentator_from_tag`=`"ERROR : ..."`、DB に無いタグは `"ERROR"`。成功時は ADR-005 S3e-2 から `"OK"`（それまでは None）・範囲は 1..12）。初回スコープでは `set_game` のみ該当 → ラッパで判定し `NOT_FOUND` に。

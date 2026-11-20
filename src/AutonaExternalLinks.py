@@ -10,7 +10,7 @@ BUSINESS_INQUIRY_EMAIL is the About page's too (web/src/GuidePages/
 AboutPage.tsx; tests/test_web_panel_host.py compares the two), and TERMS.md
 section 4's (kept in sync by hand). They were src/Autona.py's until SF-5a-1.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 
 DISCORD_URL = "https://discord.gg/yAFAmhaUqn"

@@ -68,7 +68,7 @@ fetcher / ``later`` called with it released.
 
 The round names are the program locale's, injected (``roundNames``, read
 at each build: core may not import the locale tables). Qt-free
-(tests/test_core_qt_free.py). Import side effects: none (agent-pitfalls
+(tests/test_core_qt_free.py). Import side effects: none (pitfalls
 #1). ``AnalysisService.instance`` is built by ``bootstrap_core()``.
 """
 import collections

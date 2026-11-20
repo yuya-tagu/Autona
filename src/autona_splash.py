@@ -1,13 +1,13 @@
 """Startup splash + post-show loading overlay for Autona.
 
-Lives at the project root, NOT under src/, and imports nothing from src.
+Lives in src/ but imports nothing from the rest of src (`src/__init__.py` is empty, so `from src import autona_splash` pulls in nothing heavy).
 main.py starts the splash right after its single-instance gate, before
 PySide6 is even imported: from there until the window is shown, the main
 thread imports PySide6, builds the QApplication, imports the application
 (`from src import Autona`: the logger, every singleton via bootstrap_core())
 and builds the window, which is exactly what the splash exists to cover.
 
-Importing this module starts nothing and imports no Qt (agent-pitfalls #1):
+Importing this module starts nothing and imports no Qt (pitfalls #1):
 main.py imports it before PySide6. The Qt half, `LoadingOverlay`, is defined
 on first access (PEP 562 `__getattr__` at the bottom), which src/Autona.py
 makes once PySide6 is loaded anyway.
@@ -1445,7 +1445,7 @@ def __getattr__(name: str):
     # PEP 562. LoadingOverlay is a QWidget, and defining it here at import
     # would import PySide6 before main.py has shown the splash -- the import
     # this module's splash exists to cover. src/Autona.py's
-    # `from autona_splash import LoadingOverlay` defines it, once.
+    # `from .autona_splash import LoadingOverlay` defines it, once.
     if name == "LoadingOverlay":
         cls = _define_loading_overlay()
         globals()["LoadingOverlay"] = cls
@@ -1507,7 +1507,7 @@ def _define_loading_overlay():
             Window._StartWebServer: the web server's build). It is dispatched
             through a zero-delay timer after that paint, never from inside the
             paint event: it runs from the event loop, where a modal dialog is
-            an ordinary top-level one and not a nested one (agent-pitfalls #9).
+            an ordinary top-level one and not a nested one (pitfalls #9).
             Not with processEvents() either: re-entering the event loop while
             widgets are still being built crashes at the C++ level (#9).
 

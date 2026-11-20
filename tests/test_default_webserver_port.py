@@ -19,7 +19,7 @@ greps ``src/**/*.py`` for a *numeric literal* default on that key.
 Runtime-free apart from importing ``src.core.SettingsManager`` (Qt-free and
 side-effect-free; ``tests/test_core_qt_free.py`` and
 ``tests/test_import_side_effects.py`` pin both). ``src`` is never imported
-wholesale (agent-pitfalls #1).
+wholesale (pitfalls #1).
 """
 import re
 from pathlib import Path

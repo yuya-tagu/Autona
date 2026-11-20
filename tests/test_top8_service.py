@@ -647,7 +647,7 @@ def test_applying_scores_is_one_save_cycle():
 
 
 def test_the_first_apply_on_a_fresh_install_seed_keeps_the_scores():
-    """Regression for known-smells S-18.
+    """Regression: the fresh-install seed dropped the first score.
 
     ``top8.DefaultState()`` hands out matches whose ``slots`` are all TBD.
     ``SeedPanelState`` used to write it verbatim on a first launch, so

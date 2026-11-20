@@ -2,7 +2,7 @@
 
 格闘ゲーム大会の配信オペレーションを支援するデスクトップアプリケーション。スコアボード管理を中核に、配信オーバーレイ出力・Web リモート操作・サムネイル生成・X 投稿までを統合する。
 
-本ドキュメントはコードベースと UI 定義（`.ui` ファイル・メニュー定義）をリバースエンジニアリングしてまとめたユーザー視点の機能一覧。実装詳細は [CLAUDE.md](../../CLAUDE.md) と [.claude/design/Design.md](../../.claude/design/Design.md) を参照。
+本ドキュメントはコードベースと UI 定義（`.ui` ファイル・メニュー定義）をリバースエンジニアリングしてまとめたユーザー視点の機能一覧。実装詳細は [CLAUDE.md](../../CLAUDE.md) と [docs/architecture/Design.md](../architecture/Design.md) を参照。
 
 ---
 
@@ -535,7 +535,7 @@ React の `web/src/StatsPreviewPage/`（`/web/statsPreview`。Stats Display Sett
 
 - [README.md](../../README.md) — インストール・ビルド手順
 - [CLAUDE.md](../../CLAUDE.md) — 開発者向けアーキテクチャ
-- [.claude/design/Design.md](../../.claude/design/Design.md) — 実装仕様の正本
+- [docs/architecture/Design.md](../architecture/Design.md) — 実装仕様の正本
 
 ---
 
@@ -555,4 +555,4 @@ React の `web/src/StatsPreviewPage/`（`/web/statsPreview`。Stats Display Sett
 5. Start.gg ロード〜セット反映フロー
 6. ウィンドウのページ・サイドバーの折りたたみの保存/復元（QSettings の `lastPanel` / `navCollapsed`）と保存データ互換
 
-手順は [../operations/runtime-operations.md](../operations/runtime-operations.md) と [../../.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) を参照。
+手順は [../operations/runtime-operations.md](../operations/runtime-operations.md) と [../../docs/development/manual-test-checklist.md](../development/manual-test-checklist.md) を参照。

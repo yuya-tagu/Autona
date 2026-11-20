@@ -300,4 +300,3 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
 
 > ⚠️ 外部制御 API / Companion / Stream Deck を入れる場合も、これらの**既存操作経路を
 > 置き換えず、追加の選択肢として**提供すること。既存の最短経路を壊すと現場が止まる。
-> 影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)。

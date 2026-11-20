@@ -26,7 +26,7 @@ overwrote the other slots.
 Stateless, so module functions (as ``Top8Service`` / ``ColorService``). The
 bad-word filter and the player DB are read at call time
 (``BadWordFilter.instance`` / ``PlayerDB.instance``, built by
-``bootstrap_core()``). Import side effects: none (agent-pitfalls #1).
+``bootstrap_core()``). Import side effects: none (pitfalls #1).
 """
 from loguru import logger
 

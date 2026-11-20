@@ -2460,7 +2460,7 @@ def test_a_sandboxed_frame_reads_no_ticket_and_its_click_runs_nothing(
 
 
 def test_the_verb_is_run_from_the_event_loop(buildHost):
-    # Not inside Chromium's new-window call (agent-pitfalls #9).
+    # Not inside Chromium's new-window call (pitfalls #9).
     rig = _shellShown(buildHost)
 
     rig.page.shellRequested.emit(ShellRequest("checkUpdates", "r1", {}))
@@ -2690,7 +2690,7 @@ def test_a_state_the_shell_cannot_read_is_logged_and_not_told(
 
 def _alwaysOnTopWindowClass():
     """A top-level QWidget with the Window's real always-on-top methods
-    (read out of src/Autona.py, which cannot be imported: agent-pitfalls
+    (read out of src/Autona.py, which cannot be imported: pitfalls
     #1)."""
     cls = ast.parse("class Window(QWidget):\n    pass\n").body[0]
     cls.body = [_windowMethod(name) for name in
@@ -2758,7 +2758,7 @@ def test_a_folder_picked_in_a_click_answers_the_page_without_its_path(
         buildHost, monkeypatch, issuedTicket, tmp_path):
     # The real shell adapter in the real view: the click's window.open is
     # taken, the native dialog (patched) opened once over the main window
-    # from the event loop -- not inside Chromium's call (agent-pitfalls #9)
+    # from the event loop -- not inside Chromium's call (pitfalls #9)
     # -- and the page gets the pick, not the folder.
     import inspect
 
@@ -4246,7 +4246,7 @@ def test_no_menu_where_there_is_nothing_to_edit_or_copy(
 
 
 # The Window (src/Autona.py) is read, not imported: that import is the
-# app's startup (agent-pitfalls #1).
+# app's startup (pitfalls #1).
 def _autonaSource():
     from tests.conftest import PROJECT_ROOT
     return (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
@@ -4388,9 +4388,11 @@ def test_the_windows_one_message_box_is_the_lan_question():
 
 # The Qt widgets src/ defines (ADR-005: no new Qt UI; S-final SF-5b-3: the
 # window is the shared view alone): the main window, the shared view's host
-# and its view, the Designer's window, the updater's dialog.
+# and its view, the Designer's window, the updater's dialog, and the loading
+# spinner over the window (src/autona_splash.py, which lived outside src/).
 QT_WIDGET_CLASSES = {"Window", "AutonaWebPanelHost", "_PanelView",
-                     "AutonaDesignerWindow", "_UpdateDialog"}
+                     "AutonaDesignerWindow", "_UpdateDialog",
+                     "LoadingOverlay"}
 
 
 def test_the_only_qt_widgets_are_the_shells():
@@ -4998,7 +5000,7 @@ class _CountingQSettings(QSettings):
 
 class _WindowRig:
     """The Window's real page, startup, saving and failure methods (read out
-    of src/Autona.py, which cannot be imported: agent-pitfalls #1) on a
+    of src/Autona.py, which cannot be imported: pitfalls #1) on a
     QMainWindow whose one widget is a real host, wired as _BuildUi wires it,
     after the saved state's restore (_windowStateRestored), its QSettings an
     .ini file. Not shown, and the web server not ready: the host builds no

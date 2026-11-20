@@ -518,7 +518,7 @@ def test_a_request_the_intent_cannot_be_applied_to_is_settled_all_the_same(
 # SF-5b-3: the AppShell's header has the switch (web/src/AppShell/
 # Header.tsx, PUT /api/v1/game with the mods; its tests are
 # web/src/AppShell/AppShell.test.js's). Read out of src/Autona.py, which
-# cannot be imported (agent-pitfalls #1).
+# cannot be imported (pitfalls #1).
 
 def test_the_window_has_no_mods_checkbox_any_more():
     tree = ast.parse((ROOT / "src" / "Autona.py").read_text(

@@ -28,7 +28,7 @@ and never in the headless shell. Now:
 - the tournament name and the game come from the state. A state observer
   (subscribed by ``Start()``) notices when either changes. It runs inside
   ``StateManager.lock`` (the publish that delivers it), so it writes
-  nothing there and waits for nothing (agent-pitfalls #16 #17): it only
+  nothing there and waits for nothing (pitfalls #16 #17): it only
   queues one refresh with the injected ``later`` (the GUI executor's
   ``later``: the main thread, once its event loop is back). A refresh
   written from inside the observer would publish a second delta in the
@@ -50,7 +50,7 @@ and never in the headless shell. Now:
 ``StreamService.instance`` is built and started by ``bootstrap_core()``;
 the banner lookup (the provider's), the deferral and the output pruning are
 injected there, because core may not import them (tests/test_core_qt_free).
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 import datetime
 import os

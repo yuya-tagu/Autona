@@ -37,7 +37,7 @@ S4n) wrote it into a v1 ``state.json``, which no v0 -> v1 step will ever see
 again. That cleanup stays in
 ``StateSchema.SeedPanelState()``, which runs at every launch.
 
-Import side effects: none (agent-pitfalls #1).
+Import side effects: none (pitfalls #1).
 """
 from . import CommentaryModel
 
