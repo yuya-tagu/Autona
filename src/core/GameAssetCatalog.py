@@ -241,10 +241,10 @@ def _CharacterAssets(game, assetIndex, characterCodename, skin, assetpack,
     for assetKey, asset in assetsPacks:
         try:
             # Skip stage icon asset packs
-            if type(asset.get("type")) == list:
+            if type(asset.get("type")) is list:
                 if "stage_icon" in asset.get("type") or "variant_icon" in asset.get("type"):
                     continue
-            elif type(asset.get("type")) == str:
+            elif type(asset.get("type")) is str:
                 if asset.get("type") in ["stage_icon", "variant_icon"]:
                     continue
 
@@ -370,7 +370,7 @@ def _CharacterAssets(game, assetIndex, characterCodename, skin, assetpack,
                         metadata_title_locale = asset.get("metadata", {})[
                             key].get("title", '')
                     charFiles[assetKey]['metadata'][f"{key}"]["title"] = metadata_title_locale
-                    charFiles[assetKey]['metadata'][f"{key}"][f"value_en"] = metadata[key]
+                    charFiles[assetKey]['metadata'][f"{key}"]["value_en"] = metadata[key]
                     if exportLocale in asset.get("metadata", {})[key]["values"].get(characterCodename, {}).get("locale", {}).keys() or exportLocale.split('-')[0] in asset.get("metadata", {})[key]["values"].get(characterCodename, {}).get("locale", {}).keys():
                         try:
                             metadata[key] = asset.get("metadata", {})[key]["values"].get(
@@ -378,7 +378,7 @@ def _CharacterAssets(game, assetIndex, characterCodename, skin, assetpack,
                         except KeyError:
                             metadata[key] = asset.get("metadata", {})[key]["values"].get(
                                 characterCodename, {}).get("locale", {})[exportLocale.split('-')[0]]
-                    charFiles[assetKey]['metadata'][f"{key}"][f"value"] = metadata[key]
+                    charFiles[assetKey]['metadata'][f"{key}"]["value"] = metadata[key]
 
             if asset.get("uncropped_edge"):
                 if assetKey in charFiles:

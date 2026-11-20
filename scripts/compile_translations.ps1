@@ -1,5 +1,6 @@
-# Compile Qt translation files (.ts -> .qm) using bundled lrelease.exe.
-# No PySide6 install required.
+# Compile Qt translation files (.ts -> .qm) using the lrelease.exe that ships
+# inside the PySide6 package (found through `python`, so the venv need not be
+# activated as long as the `python` on PATH has PySide6 installed).
 #
 # Usage:
 #   .\scripts\compile_translations.ps1           # Compile all .ts files
@@ -13,7 +14,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$lrelease = Join-Path $root "dependencies\tools\lrelease.exe"
+$pyside = (& python -c "import PySide6,os;print(os.path.dirname(PySide6.__file__))").Trim()
+if ($LASTEXITCODE -ne 0 -or -not $pyside) {
+    Write-Error "PySide6 not found via python. Run: pip install -r requirements.txt"
+    exit 1
+}
+$lrelease = Join-Path $pyside "lrelease.exe"
 $i18nDir = Join-Path $root "src\i18n"
 
 if (-not (Test-Path $lrelease)) {

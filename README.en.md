@@ -37,12 +37,14 @@ Unzip it and run `Autona.exe`. Please read [TERMS.md](TERMS.md) (notes on using 
 
 Prerequisites: Python 3.12 and Node.js 20+.
 
-```bash
-# Python dependencies
-pip install -r dependencies/requirements.txt
+```powershell
+# Python dependencies (in a venv)
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
 # Web UI dependencies
-cd web && npm ci
+cd web; npm ci; cd ..
 
 # Run in development mode
 python main.py
@@ -50,7 +52,7 @@ python main.py
 
 Tech stack: PySide6 (via qtpy), React 19 / TypeScript / Redux Toolkit / MUI, Flask-SocketIO, PyInstaller.
 
-Tests: `QT_QPA_PLATFORM=offscreen python -m pytest` (Python) and `cd web && npm test` (jest).
+Tests (PowerShell): `python -m pytest` (Python; `tests/conftest.py` defaults to the offscreen Qt platform), `python scripts/run_tests_parallel.py` (parallel), and `cd web; npm test` (jest).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [ARCHITECTURE.md](ARCHITECTURE.md) for a one-page map of the codebase. Design documents live in [docs/architecture/Design.md](docs/architecture/Design.md) and [docs/](docs/README.md) (mostly in Japanese).
 

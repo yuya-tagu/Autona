@@ -249,7 +249,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 data, "data.event.startAt", "")
             finalData["eventEndAt"] = deep_get(
                 data, "data.event.endAt", "")
-        except:
+        except Exception:
             logger.error(traceback.format_exc())
 
         return finalData
@@ -356,7 +356,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     })
 
                 phases.append(phaseObj)
-        except:
+        except Exception:
             if strict:
                 raise
             logger.error(traceback.format_exc())
@@ -509,7 +509,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             StartGGDataProvider._split_gf_reset(
                 finalData["sets"], finalData["progressionsOut"])
-        except:
+        except Exception:
             logger.error(traceback.format_exc())
         finally:
             StatusService.Pop(status_token)
@@ -622,7 +622,7 @@ class StartGGDataProvider(TournamentDataProvider):
             finalResult.update(result["new"])
             finalResult.update(result["old"])
 
-            if result.get("new", {}).get("isOnline") == False:
+            if result.get("new", {}).get("isOnline") == False:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
                 finalResult["bestOf"] = None
 
             finalResult["entrants"] = result.get("new", {}).get("entrants", [])
@@ -634,12 +634,12 @@ class StartGGDataProvider(TournamentDataProvider):
                             try:
                                 finalResult["entrants"][t][p]["mains"] = player["mains"]
                                 finalResult["has_selection_data"] = True
-                            except:
+                            except Exception:
                                 logger.debug(traceback.format_exc())
 
             logger.debug(f"Final result: {finalResult}")
 
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
         finally:
             StatusService.Pop(status_token)
@@ -661,7 +661,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 }
             )
             return self.ParseMatchDataOldApi(data)
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             return {}
 
@@ -680,7 +680,7 @@ class StartGGDataProvider(TournamentDataProvider):
             )
             logger.debug(data.get("data", {}).get("set", {}))
             return self.ParseMatchDataNewApi(data.get("data", {}).get("set", {}))
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             return {}
 
@@ -812,7 +812,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         seenIds.add(setId)
                     final_data.append(self.ParseMatchDataNewApi(_set))
             return final_data
-        except Exception as e:
+        except Exception:
             if strict:
                 raise
             logger.error(traceback.format_exc())
@@ -878,7 +878,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         })
 
             return (final_data)
-        except Exception as e:
+        except Exception:
             if strict:
                 raise
             logger.error(traceback.format_exc())
@@ -996,7 +996,7 @@ class StartGGDataProvider(TournamentDataProvider):
         become their honest TOP-N while the event's true finals land on the
         remap values and round-trip back to the conventional names. Grand
         Final (Reset) only exists in the last phase and stays named."""
-        if name == None:
+        if name is None:
             return ""
 
         roundMapping = {
@@ -1036,7 +1036,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 return AutonaLocaleHelper.matchNames.get("losers_round").format(roundNumber)
             elif name.startswith("Round "):
                 return AutonaLocaleHelper.matchNames.get("round").format(roundNumber)
-        except:
+        except Exception:
             logger.error(traceback.format_exc())
 
         return name
@@ -1084,12 +1084,12 @@ class StartGGDataProvider(TournamentDataProvider):
             "tournament_phase": phase_name,
             "tournament_pool": pool_name,
             "bracket_type": bracket_type,
-            "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") != None else "",
-            "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") != None else "",
+            "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") is not None else "",
+            "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") is not None else "",
             "p1_seed": p1.get("entrant", {}).get("initialSeedNum", None) if p1 and p1.get("entrant") else None,
             "p2_seed": p2.get("entrant", {}).get("initialSeedNum", None) if p2 and p2.get("entrant") else None,
             "stream": deep_get(_set, "stream.streamName") or "",
-            "station": _set.get("station", {}).get("number", "") if _set.get("station", {}) != None else "",
+            "station": _set.get("station", {}).get("number", "") if _set.get("station", {}) is not None else "",
             "isOnline": deep_get(_set, "event.isOnline"),
             "isPools": isPools,
             "round": _set.get("round")
@@ -1243,7 +1243,7 @@ class StartGGDataProvider(TournamentDataProvider):
             setData["entrants"] = players
 
             return setData
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             return {}
 
@@ -1420,7 +1420,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
                     if base.get("banList", None) is not None:
                         for stage_code in base.get("banList"):
-                            if stage_code == None:
+                            if stage_code is None:
                                 continue
                             stage = catalog.StageFromStartGGId(
                                 int(stage_code), snap)
@@ -1439,15 +1439,15 @@ class StartGGDataProvider(TournamentDataProvider):
                     currPlayer = lastLoserSlot
                 elif base.get("turn"):
                     for entrant, value in base.get("turn").items():
-                        if str(entrant) == entrant1Id and value == True:
+                        if str(entrant) == entrant1Id and value == True:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
                             currPlayer = 1
-                        if str(entrant) == entrant2Id and value == True:
+                        if str(entrant) == entrant2Id and value == True:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
                             currPlayer = 0
 
-                if allStages == None and strikedStages == None and selectedStage == None:
+                if allStages is None and strikedStages is None and selectedStage is None:
                     continue
 
-                if allStages == None:
+                if allStages is None:
                     continue
 
                 break
@@ -1498,7 +1498,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 "useDSR": dsr,
                 "useMDSR": mdsr,
             }
-        except:
+        except Exception:
             logger.info("No Stage Strike Info Found")
             strikedBy = [[], []]
             currPlayer = 0
@@ -1551,7 +1551,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         main = mainFor(char)
                         if main is not None:
                             entrants[i] = [{"mains": main}]
-                    except:
+                    except Exception:
                         logger.error(traceback.format_exc())
 
         return entrants
@@ -1736,7 +1736,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             return finalData
 
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
 
         return {}
@@ -1774,7 +1774,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         s, "event.id") == eventId]
                     if len(queueSets) > 0:
                         streamSet = queueSets[0]
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
 
         return streamSet
@@ -1804,7 +1804,7 @@ class StartGGDataProvider(TournamentDataProvider):
             sets = [s for s in sets if str(deep_get(
                 s, "station.id", "-1")) == str(stationId)]
 
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
 
         return sets
@@ -1891,7 +1891,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             callback.emit(
                 {"playerNumber": playerNumber, "last_sets": set_data})
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             callback.emit({"playerNumber": playerNumber, "last_sets": []})
 
@@ -1926,7 +1926,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 try:
                     tournamentPicture = tournament.get("images")[0].get("url")
-                except:
+                except Exception:
                     tournamentPicture = None
                     logger.error("Failed to get Event Logo for: " +
                                  tournament.get("name") + " - " + event.get("name"))
@@ -1944,7 +1944,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             callback.emit({"playerNumber": playerNumber,
                           "history_sets": set_data})
-        except Exception as e:
+        except Exception:
             callback.emit({"playerNumber": playerNumber, "history_sets": []})
 
     def GetRecentSets(self, id1, id2, videogame, callback, requestTime, progress_callback, cancel_event):
@@ -2007,7 +2007,7 @@ class StartGGDataProvider(TournamentDataProvider):
             recentSets.sort(key=lambda s: s.get("timestamp"), reverse=True)
             logger.info("Recent sets size: " + str(len(recentSets)))
             callback.emit({"sets": recentSets, "request_time": requestTime})
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             callback.emit({"sets": [], "request_time": requestTime})
 
@@ -2061,7 +2061,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     p1id = str(p1id)
                     p2id = str(p2id)
 
-                    if not p1id in [id1[0], id2[0]] or not p2id in [id1[0], id2[0]]:
+                    if p1id not in [id1[0], id2[0]] or p2id not in [id1[0], id2[0]]:
                         continue
 
                     if _set.get("entrant1Score") == -1 or _set.get("entrant2Score") == -1:
@@ -2081,7 +2081,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
                     score = [0, 0]
 
-                    if _set.get("entrant1Score") != None and _set.get("entrant2Score") != None:
+                    if _set.get("entrant1Score") is not None and _set.get("entrant2Score") is not None:
                         if p1id == id1[0]:
                             score = [_set.get("entrant1Score") if _set.get("entrant1Score") is not None else "0",
                                      _set.get("entrant2Score") if _set.get("entrant2Score") is not None else "0"]
@@ -2115,7 +2115,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     }
                     recentSets.append(entry)
             return recentSets
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
             return []
 
@@ -2236,7 +2236,7 @@ class StartGGDataProvider(TournamentDataProvider):
             # `playerdb` push this makes reads them (GET
             # /api/v1/players/entrants, ADR-005 S4m).
             PlayerDB.instance.NotifyChanged()
-        except Exception as e:
+        except Exception:
             logger.error(traceback.format_exc())
         finally:
             StatusService.Pop(status_token)

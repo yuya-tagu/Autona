@@ -61,7 +61,7 @@ interface HeaderState {
         codename?: unknown;
         mods_active?: unknown;
         has_modded_content?: unknown;
-        // Whether a game is selected (SF-5b-1, external-control-api 5.31):
+        // Whether a game is selected (SF-5b-1, `GET /games/current`):
         // false after the tournament is unset although `codename` stays.
         // Missing on an older server.
         selected?: unknown;

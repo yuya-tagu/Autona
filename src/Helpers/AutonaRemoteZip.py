@@ -29,7 +29,6 @@ import zlib
 from pathlib import Path
 
 import requests
-from loguru import logger
 
 # End Of Central Directory: sig, disk, cd_disk, n_disk, n_total, cd_size,
 # cd_offset, comment_len

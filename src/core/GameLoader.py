@@ -669,7 +669,6 @@ class GameLoader:
         from .Actions import AutonaActions
         actions = AutonaActions.instance
         replaced = getattr(snapshot, "replaced", None)
-        stopped = []
 
         def publish():
             with StateManager.RecordHeldWrites() as written:

@@ -1,0 +1,23 @@
+# https://editorconfig.org
+# Line endings are deliberately not set: the repository stores LF and Git
+# converts per machine, so forcing one here would cause mass conversions.
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{js,jsx,ts,tsx,css,json}]
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown.
+trim_trailing_whitespace = false
+
+[*.ps1]
+# Windows PowerShell 5.1 reads BOM-less files as ANSI; keep each file's
+# existing encoding (several carry a BOM).
+charset = unset

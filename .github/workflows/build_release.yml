@@ -38,7 +38,7 @@ jobs:
                   node-version: "20"
 
             - name: Install Python dependencies
-              run: pip install -r .\dependencies\requirements.txt pyinstaller
+              run: pip install -r requirements.txt pyinstaller
 
             # CI=false: Actions sets CI=true, which makes react-scripts fail
             # the build on ESLint warnings. The local release build (runbook
@@ -58,7 +58,7 @@ jobs:
             - name: Build Autona.exe
               shell: pwsh
               run: |
-                  pyinstaller --noconfirm .\dependencies\autona.spec
+                  pyinstaller --noconfirm packaging\autona.spec
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                   Remove-Item -Recurse -Force .\_internal -ErrorAction SilentlyContinue
                   Copy-Item -Recurse .\dist\Autona\_internal .\_internal

@@ -1107,7 +1107,7 @@ def _run(script, cwd):
     result = subprocess.run([sys.executable, "-B", "-c", script], cwd=cwd,
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr
-    line = next(l for l in result.stdout.splitlines() if l.startswith(MARKER))
+    line = next(ln for ln in result.stdout.splitlines() if ln.startswith(MARKER))
     return json.loads(line[len(MARKER):])
 
 

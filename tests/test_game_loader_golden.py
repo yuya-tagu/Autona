@@ -180,7 +180,6 @@ class _Recorder:
         from src.core.Actions import AutonaActions
         from src.core.SettingsManager import SettingsManager
         from src.core.StatusService import StatusService
-        from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
         realSet, realUnset = StateManager.Set, StateManager.Unset
 

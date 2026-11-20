@@ -589,7 +589,9 @@ def test_reset_all_empties_the_values_and_keeps_the_counts(
         crest.unlink(missing_ok=True)
 
     _oneCycle(told)
-    get = lambda key: StateManager.Get(f"score.2.{key}")
+    def get(key):
+        return StateManager.Get(f"score.2.{key}")
+
     assert (get("team.1.teamName"), get("team.2.teamName")) == ("", "")
     assert get("team.1.logo") is None
     assert get("team.1.player.1.name") == ""

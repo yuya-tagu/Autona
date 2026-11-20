@@ -7,11 +7,7 @@ import faulthandler
 import shutil
 import qdarktheme
 from . import ui_constants as UI
-import requests
 import json
-import orjson
-import traceback
-import time
 import os
 import sys
 import qtpy
@@ -55,7 +51,7 @@ fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
        "<yellow>{file}</yellow>:<blue>{function}</blue>:<cyan>{line}</cyan> " +
        "- <level>{message}</level>")
 
-if sys.stdout != None:
+if sys.stdout != None:  # noqa: E711 -- tests/test_console_encoding_guard.py finds this block by this exact text
     # Windows consoles default to the legacy ANSI code page (e.g. cp932),
     # which cannot encode many characters that show up in ordinary log
     # messages (e.g. accented Latin letters in character names such as
@@ -143,7 +139,7 @@ try:
     # falls back to the host python.exe icon. The .ico embeds 16/32/48/256
     # so the taskbar button picks up the Autona mark.
     App.setWindowIcon(QIcon(UI.icon_path("icon.ico")))
-except:
+except Exception:
     logger.opt(exception=True).warning("Could not set window icon for QApplication.")
 
 
@@ -297,7 +293,7 @@ class Window(QMainWindow):
         try:
             version = json.load(
                 open(AutonaResolve('./assets/versions.json'), encoding='utf-8')).get("program", "?")
-        except Exception as e:
+        except Exception:
             version = "?"
 
         self._SetDefaultGeometry()

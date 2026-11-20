@@ -47,7 +47,9 @@ from tests.conftest import load_player
 # goldenGames / onLoadCount are fixtures: the S1a fixture games installed
 # into the harness, and the count of onLoad emissions.
 from tests.test_game_asset_manager_load import (
-    GOLDEN, SCENARIOS, _load, _waitForLoader, goldenGames, onLoadCount)
+    GOLDEN, SCENARIOS, _load, _waitForLoader,
+    goldenGames,  # noqa: F401 -- fixture: pytest finds it by being imported here
+    onLoadCount)  # noqa: F401 -- fixture: same
 from tests.test_scoreboard_operations import (
     _restoredDisplayOption, _setPlayerName)
 
@@ -114,7 +116,9 @@ def _sameStateAsLegacy(app, n, legacy, v1, prepare=None, changes=True,
         results.append(after)
 
     legacyState, v1State = results
-    strip = lambda state: {k: v for k, v in state.items() if k not in ignore}
+    def strip(state):
+        return {k: v for k, v in state.items() if k not in ignore}
+
     assert strip(v1State) == strip(legacyState)
     return v1State
 

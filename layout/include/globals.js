@@ -80,7 +80,7 @@ async function UpdateWrapper(event) {
 // Gets current program state from the on-disk JSON snapshot,
 // Dispatch "tsh_update" event if data has changed.
 //
-// This is the **degraded** transport (Design.md §2.3 R-OBS-3 / §8 T-12):
+// This is the **degraded** transport (Design.md §2.3 R-OBS-3):
 // it only kicks in when (a) the page is opened with file:// or
 // host=='absolute' (no Socket.IO available), or (b) the Socket.IO
 // connection has failed after max retries. The full snapshot is the
@@ -176,8 +176,8 @@ async function UpdateData_SocketIO() {
     socket.io.on('reconnect_failed', () => {
       // reconnect_failed, if max retries are reached,
       // will fall back to file loading program_state.json.
-      // This is the degraded transport per Design.md §2.3 R-OBS-3 /
-      // §8 T-12 — Socket.IO is the standard path; this poll keeps the
+      // This is the degraded transport per Design.md §2.3 R-OBS-3 —
+      // Socket.IO is the standard path; this poll keeps the
       // overlay alive when the websocket truly cannot recover.
       console.warn('socket.io reconnect_failed — falling back to degraded file polling (64ms)');
       setInterval(async () => {

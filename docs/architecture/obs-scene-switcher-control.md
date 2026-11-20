@@ -310,7 +310,7 @@ Content-Type: application/json  ← デフォルトのまま
 - ASS の **HTTP action** で Autona の既存 `/api/v1/` を叩く（§3.6）。**Autona 側は実装済み API をそのまま使える**。
 - **ユースケース**: OBS 側の自動化トリガ（ゲームウィンドウ検出・特定シーン遷移・ホットキー）から、Autona の
   スコアリセット・swap・set 情報設定などを呼ぶ。
-- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](external-control-api.md) §7.2）。ボディに `"confirm":true` を入れる。
+- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](external-control-api.md) §2.11）。ボディに `"confirm":true` を入れる。
 - ⚠️ レイテンシ ~300ms 級。応答（status/body）は HTTP action の temp var で受けられる（§3.6）。
 
 ### 4.3 経路(C): Autona/外部 → ASS（`CallVendorRequest`）★ASS 起動の王道

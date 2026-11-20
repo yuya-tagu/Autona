@@ -26,7 +26,7 @@ Accepted（2026-11-16 オーナー承認。末尾の論点 1・2 はどちらも
 
 | 項目 | 事実 |
 |------|------|
-| Autona の配布 | `dependencies/autona.spec` は numpy を `excludes` に入れている。`_internal` は 344.4 MiB（zip 216.9 MiB）。`scripts/validate_release_zip.ps1` の上限は 390 MiB |
+| Autona の配布 | `packaging/autona.spec` は numpy を `excludes` に入れている。`_internal` は 344.4 MiB（zip 216.9 MiB）。`scripts/validate_release_zip.ps1` の上限は 390 MiB |
 | vodsplit を単体の onedir にした場合（試作） | ビルド 30 秒。288MB（cv2 139MB・ffmpeg.exe 101MB・numpy 27MB ほか）。deno.exe（98MB）を足すと約 386MB、zip にすると **150MB** |
 | 凍結した exe の動作 | 雷影杯#34 で `run --no-cut --progress json` が通った。OCR（winrt）の段も走り、結果は開発環境と同じ（10 セット・要確認 1）。キャッシュありの再実行は 8 秒 |
 | 凍結すると動かないところ | `media.download` が `sys.executable -m yt_dlp` で yt-dlp を起動している（凍結すると `sys.executable` は exe 自身になる）。yt-dlp が使う deno は PATH から探している |
@@ -325,13 +325,13 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
 - A7 までは、ワーカーの無い配布物ではナビに出ないので、A1〜A6 を途中でリリースしても利用者からは見えない
   （A7 からはいつもナビに出る）
 - A3（2026-11-16 実装）: D6 のタイムラインの「2 段」は、モックの「全体 / セット」の切り替えとして作った。ドラッグと
-  I / O / Enter は A4 に残し、キーとヒントは Space・↑↓・N だけ。実装の要点は Design.md §4.2.5
+  I / O / Enter は A4 に残し、キーとヒントは Space・↑↓・N だけ。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - A4（2026-11-16 実装）: 書き出しは解析と同じジョブの仕組み（1 度に 1 つ・進捗・中止・再開・終了の後始末・BELOW_NORMAL）で
   `export <job>/export_request.json --out <job>/clips --progress json --cancel-on-stdin` を動かす。解析と書き出しは排他で、
   どちらが走っているかは `status.running_kind`。入力 JSON のタイトル・概要欄は null で、ワーカーがテンプレートから作る（ページに題名の編集は無い）。
   中止した書き出しの再開は「確定分を書き出し」をもう一度押す（今のレビューから要求を作り直し、ワーカーが同じ動画・同じ区間で
   切り出し済みのクリップを飛ばす）。結果は job.json の `export`（クリップ数・飛ばした数）と
-  `clips/export.json`。ブラウザ（SHELL に届かない）では見るだけ。実装の要点は Design.md §4.2.5
+  `clips/export.json`。ブラウザ（SHELL に届かない）では見るだけ。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - A5（2026-11-17 実装）: 結果データの用意はジョブの作成と分けた（v1 `POST results:prepare`。SHELL）。種類は `startgg`（イベントの URL）・
   `matchlog`（日付と、任意の大会名）・`json`。記録の日付と大会の一覧は `GET match-logs`（THIS_PC）。合成は core の
   `ArchiveResults`（Qt を import しない）で、ゲームは start.gg のイベントの videogame のゲーム（スキャンに無ければキャラ無し。videogame が無いときだけロード中のゲーム）。記録は行の `game` のゲームで引く（追補）。
@@ -340,7 +340,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   ページはセット一覧と詳細に、結果の `autona.icons` が名指すアイコン（`user_data/games/<game>/` からの相対パス）を出す
   （無いアイコンは隠す）。start.gg の取得全体に 120 秒の期限を設け（過ぎたら 503）、ページはこの 1 本だけ 150 秒待つ。
   追補（同日、レビューの指摘）: 記録の行に `game` を足した（D3）。記録とセットはセット id を先に対応づける。
-  `GET match-logs` は日ごとの数を (mtime, size) で覚える。実装の要点は Design.md §4.2.5
+  `GET match-logs` は日ごとの数を (mtime, size) で覚える。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - A6（2026-11-17 実装）: テンプレートのページはアーカイブのページの中の別の画面（ナビの項目は足さない）。モックのレイヤー編集は作らず、
   サムネイルは既存のサムネイル設定のテンプレートで描き、テンプレートの画面にはサムネイルのページへのリンクと背景の選択だけを置く。
   テンプレートの読みは THIS_PC、書き込み・タイトルのプレビュー・サムネイルの作成は SHELL。プレビューは V10 の `titles` で、
@@ -348,7 +348,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   1 ジョブずつ走り（書き出し中も作れるが、そのときはクリップの隣に置かない）、進み具合はジョブの取得の `thumbs`（このプロセスのメモリと `thumbs/` の中身。job.json には書かない。出すのは描いたときの区間と結果（`thumbs/thumbs.json`）が今のレビューと同じセットだけ）。
   ワーカーには生のテンプレートのファイルではなく、検査済みの内容を `<job>/templates/` に書いたスナップショットを渡す（Autona とワーカーの読み違いと、実行中の削除との競合を無くす）。
   クリップの隣に置くのは、書き出しが走っておらず、`clips/export.json` の元動画がジョブの動画で、その番号のクリップが書き出し済みで残っていて、
-  切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ。実装の要点は Design.md §4.2.5
+  切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
   追補（2026-11-18）: セットごと・キャラごとにサムネイルのカラーを選べる（それまではスキン 0 固定）。レビューの `skins`（D6）に持ち、
   詳細のキャラの行に、スキンが 2 つ以上あるキャラだけカラーの選択（スキンのアイコン）を出す。一覧と詳細のアイコンも選んだカラーにする。
   スキンの一覧は `GET archive/characters?game=<codename>`（THIS_PC。core の `GameAssetCatalog.GameCharacterSkins`。スキャン済みのゲームの
@@ -373,10 +373,10 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   新しい版があればヘッダーに出し、利用者がボタンで更新する）。v1 は `GET archive/worker`（THIS_PC）・`POST archive/worker:install` /
   `:cancel`（SHELL）。Autona のアップデーターは `vodsplit-worker/` に触れない（ルートのコピーは削除なし。テストで固定）、
   `validate_release_zip.ps1` は Autona の zip にワーカーが入ったら止める（検査 6）。vodsplit 側は V1・V2・V8 を 0.3.0 で入れた
-  （V1 は開発環境でもライブラリとして呼ぶ）。実装の要点は Design.md §4.2.5
+  （V1 は開発環境でもライブラリとして呼ぶ）。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - D7 の改定（2026-11-17 実装）: 取得を H.264 にし（V3 の改定。vodsplit 0.4.0）、YouTube のジョブのプレビューを埋め込みプレーヤーに
   した（API のスクリプトは読まず、iframe と postMessage で話す）。ページはプレビューを `PreviewPlayer`（`<video>` と埋め込みの
-  2 つの実装）越しに動かす。実装の要点は Design.md §4.2.5
+  2 つの実装）越しに動かす。実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - 結果データを付けた区切り直し（2026-11-18 実装）: 結果データなしで作ったジョブは、ワーカーが映像の文字だけで区切るため 1 つの対戦が割れ、
   見出しがノイズになる。完了したジョブ（ほかの終わり方のジョブも）に後から結果データ（`results:prepare` の結果）を付け、
   `results.json` を置き換えて再開と同じ引数（`--results` 付き）でワーカーを動かす（v1 `POST archive/jobs/<id>:reanalyze`。SHELL）。
@@ -384,7 +384,7 @@ vodsplit 側の変更（下の「vodsplit 側の変更」）は、各段階の�
   （ジョブの取得の `analysis_cached` がそれを言い、ページは実行の前に伝える）。ジョブの記録を書いた後に作り直すもの（`out/` の `_bg.jpg` と `.txt`、`thumbs/<no>.png`。`thumbs.json` はクリップの隣のコピーの記録だけ残す）を消し、
   書き出したクリップ・`.cache`・ダウンロードは消さない。レビューは既存の規則（区間が変わったセットの編集は捨てる）に任せる。
   ページは完了したジョブのレビュー画面の「解析時: …」の行にボタンを出し、新規ジョブの結果データの選択を共用する（「なし」は出さない）。
-  実装の要点は Design.md §4.2.5
+  実装は `src/core/Archive*.py` と `web/src/ArchivePage/`（概要は Design.md §4.2.5）
 - YouTube への下書きアップロードは範囲外（必要になった時点で別の ADR にする）
 
 ### vodsplit 側の変更

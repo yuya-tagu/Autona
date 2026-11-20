@@ -1,0 +1,50 @@
+# Tooling config only (ruff). Autona is not packaged from here: the app is
+# built with PyInstaller (packaging/autona.spec) and dependencies live in
+# requirements.txt.
+#
+# `ruff check` is enforced over the whole tree (CI, pre-commit). `ruff format`
+# is configured but not enforced: the existing code has not been reformatted
+# yet (planned once, before the public release).
+
+[tool.ruff]
+target-version = "py312"
+# Existing code is mostly wrapped near 80 columns with long exceptions;
+# 100 is the closest setting to it that keeps new code readable.
+line-length = 100
+extend-exclude = [
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+    "out",
+    "_internal",
+    "user_data",
+    "logs",
+    "layout",
+    "assets",
+    "web",
+    "vodsplit-worker",
+    "tools",
+]
+
+[tool.ruff.lint]
+# Low-noise rules only: syntax errors (E9), statement-level slips (E7),
+# import-position mistakes (E4) and pyflakes (F: undefined names, unused
+# imports/variables).
+select = ["E4", "E7", "E9", "F"]
+
+# Ignored because they are structural in this codebase, not mistakes:
+#   E402  main.py / src/Autona.py set up sys / env before importing on purpose
+#   F403/F405  `from qtpy... import *` style star imports in the Qt shell
+ignore = ["E402", "F403", "F405"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are re-declared as test arguments, which pyflakes reads
+# as a redefinition.
+"tests/**" = ["F811"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+# Keep each file's line endings (the index is LF, working copies may be CRLF).
+line-ending = "auto"

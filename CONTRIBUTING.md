@@ -10,11 +10,13 @@ Autona への貢献（バグ報告・機能提案・layout 投稿・コード・
 
 ### 開発環境
 
-- Python 3.12 / Node.js 20 以降
+- Windows 10 / 11、Python 3.12、Node.js 20 以降（手順は PowerShell 前提）
 
-```bash
-pip install -r dependencies/requirements.txt
-cd web && npm ci
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt   # requirements.txt + 開発ツール
+cd web; npm ci; cd ..
 python main.py        # 開発時の起動（動作確認は基本これ）
 ```
 
@@ -22,12 +24,25 @@ exe のビルドは配布前の確認用です。通常の開発では不要で�
 
 ### テスト
 
-```bash
-QT_QPA_PLATFORM=offscreen python -m pytest   # Python
-cd web && npm test                            # Web UI (jest)
+```powershell
+python -m pytest                          # Python（tests/conftest.py が QT_QPA_PLATFORM=offscreen を既定にする）
+python scripts/run_tests_parallel.py      # 同じ全量を複数プロセスで並列実行（-n 3 でワーカー数、追加の引数は各 pytest に渡る）
+cd web; npm test                          # Web UI (jest)
+cd web; npm run build; npm run test:e2e   # ブラウザ E2E（要 build。初回は npx playwright install chromium）
 ```
 
 テストを書く前に [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) を読んでください。
+
+### コードスタイル
+
+```powershell
+pip install -r requirements-dev.txt       # ruff・pytest・pre-commit（バージョン固定）
+pre-commit install                        # 以後、コミット時に ruff check が走る
+```
+
+- **`ruff check` は CI で必須**です（リポジトリ全体が対象。設定は `pyproject.toml`）。手元では `ruff check .` で確認できます。
+- 整形（`ruff format` / `cd web; npm run format:check`）は任意です。既存コードはまだ一括整形しておらず、CI では確認しません（公開前に一度まとめて整形し、その後に CI で確認する予定です）。新しく書く部分は `pyproject.toml` / `web/.prettierrc` の設定に寄せてもらえると助かります。
+- Web UI の eslint は `cd web; npm run lint` で手動実行できます（CI の対象外。`npm run build` も同じルールで警告を出します）。
 
 ### ブランチ・PR の流れ
 
@@ -38,7 +53,7 @@ cd web && npm test                            # Web UI (jest)
 
 ### 翻訳の更新
 
-画面の文言は Web UI の翻訳（`web/src/i18n/locales/`）にあります。サーバーが返す文言（サムネイルのテンプレート名・リザルトのレイアウト名など）は `src/core/CoreWords.py` の日英の表です。`src/i18n/*.ts` に残っているのは Qt のネイティブのダイアログと Updater の文言だけで、`.ts` ファイルを**手で編集**してから、`scripts/compile_translations.ps1` を実行して `.qm` を生成します。`pyside6-lupdate` は使えません。
+画面の文言は Web UI の翻訳（`web/src/i18n/locales/`）にあります。サーバーが返す文言（サムネイルのテンプレート名・リザルトのレイアウト名など）は `src/core/CoreWords.py` の日英の表です。`src/i18n/*.ts` に残っているのは Qt のネイティブのダイアログと Updater の文言だけで、コード側で `QCoreApplication.translate("文脈", "原文")` を定数の引数で呼んだうえで、`scripts/update_translations.ps1`（PySide6 同梱の `lupdate.exe`）を実行して `.ts` に文言を取り込み、`Autona_en.ts` / `Autona_ja.ts` の訳を埋め、`scripts/compile_translations.ps1`（同梱の `lrelease.exe`）で `.qm` を生成します。
 
 ### 設計資料への入口
 
@@ -63,11 +78,13 @@ Contributions of all kinds are welcome: bug reports, feature requests, layouts, 
 
 ### Development setup
 
-- Python 3.12 and Node.js 20+
+- Windows 10 / 11, Python 3.12 and Node.js 20+ (the steps below assume PowerShell)
 
-```bash
-pip install -r dependencies/requirements.txt
-cd web && npm ci
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cd web; npm ci; cd ..
 python main.py        # run in development mode
 ```
 
@@ -75,12 +92,25 @@ Building the exe is only for pre-release checks and is not needed for normal dev
 
 ### Running tests
 
-```bash
-QT_QPA_PLATFORM=offscreen python -m pytest   # Python
-cd web && npm test                            # Web UI (jest)
+```powershell
+python -m pytest                          # Python (tests/conftest.py defaults QT_QPA_PLATFORM to offscreen)
+python scripts/run_tests_parallel.py      # the same full suite in parallel processes (-n 3 sets workers; extra args go to each pytest)
+cd web; npm test                          # Web UI (jest)
+cd web; npm run build; npm run test:e2e   # browser E2E (needs a build; first run: npx playwright install chromium)
 ```
 
 Before writing tests, read [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) (Japanese).
+
+### Code style
+
+```powershell
+pip install -r requirements-dev.txt       # ruff, pytest, pre-commit (pinned)
+pre-commit install                        # from now on, commits run ruff check
+```
+
+- **`ruff check` is required in CI** (over the whole repository; settings in `pyproject.toml`). Run `ruff check .` locally.
+- Formatting (`ruff format` / `cd web; npm run format:check`) is optional. The existing code has not been reformatted yet, so CI does not check it (we plan to reformat once before the public release and enable the check then). New code is welcome to follow the settings in `pyproject.toml` / `web/.prettierrc`.
+- Web UI eslint can be run by hand with `cd web; npm run lint` (not in CI; `npm run build` reports the same rules as warnings).
 
 ### Branches and pull requests
 
@@ -91,7 +121,7 @@ Before writing tests, read [docs/changes/test-automation-strategy.md](docs/chang
 
 ### Updating translations
 
-The UI's words are the Web UI translations (`web/src/i18n/locales/`). Words the server returns (thumbnail template names, result layout names and the like) are the English/Japanese table in `src/core/CoreWords.py`. `src/i18n/*.ts` holds only the words of Qt's native dialogs and the updater: edit the `.ts` files **by hand**, then run `scripts/compile_translations.ps1` to generate the `.qm` files. `pyside6-lupdate` cannot be used.
+The UI's words are the Web UI translations (`web/src/i18n/locales/`). Words the server returns (thumbnail template names, result layout names and the like) are the English/Japanese table in `src/core/CoreWords.py`. `src/i18n/*.ts` holds only the words of Qt's native dialogs and the updater: call `QCoreApplication.translate("context", "text")` with constant arguments in the code, run `scripts/update_translations.ps1` (PySide6's bundled `lupdate.exe`) to pull the words into the `.ts` files, fill in the translations in `Autona_en.ts` / `Autona_ja.ts`, then run `scripts/compile_translations.ps1` (the bundled `lrelease.exe`) to generate the `.qm` files.
 
 ### Design documents
 

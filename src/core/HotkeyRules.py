@@ -125,8 +125,7 @@ def _Parse(shortcut_str, warn):
     return (modifiers, vk)
 
 
-# ── The old validator's (Helpers/AutonaHotkeyValidator, Design.md §6.4.2 /
-# §8 T-17) ────────────────────────────────────────────────────────────────
+# ── The old validator's (Helpers/AutonaHotkeyValidator, Design.md §6.4.2) ──
 
 def NormalizeShortcut(shortcut):
     """Canonical form for comparing: modifiers sorted alphabetically,
@@ -365,7 +364,7 @@ Refusal = namedtuple("Refusal", ("code", "name", "detail"))
 def _Enabled(value):
     # What AutonaHotkeys does with the stored value: anything but False is
     # on.
-    return value != False
+    return value != False  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
 
 
 def CurrentKeys():

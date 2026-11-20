@@ -58,11 +58,11 @@ Do not import `src/Autona.py` from tests or scripts: importing it *is* the start
 | `src/i18n/` | Qt translation sources for native dialogs and the updater (the UI's words are in `web/src/i18n/`). |
 | `web/` | React / TypeScript / Redux Toolkit / MUI web UI (`web/src`), jest tests, Playwright e2e (`web/e2e`). Build output goes to `web/build`. |
 | `layout/` | Overlay and image-render templates served to OBS; user-made ones go in `layout/custom/`. |
-| `tests/` | pytest suite (`QT_QPA_PLATFORM=offscreen python -m pytest`). |
+| `tests/` | pytest suite (`python -m pytest`). |
 | `docs/` | Design docs, ADRs, operations and change records (Japanese). |
 | `scripts/` | Release, translation and data-generation scripts. |
 | `tools/` | Auxiliary tools (e.g. a Figma plugin for scoreboard design). |
-| `dependencies/` | `requirements.txt` and the PyInstaller spec. |
+| `packaging/` | The PyInstaller spec (`requirements.txt` is at the repo root). |
 
 Runtime data is kept outside the source tree's tracked files: `user_data/` (settings, state, player DB) and `out/` (state export read by overlays).
 

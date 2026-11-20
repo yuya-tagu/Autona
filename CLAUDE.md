@@ -49,7 +49,7 @@ python main.py                                        # 開発時の実行（Cla
 python main.py --headless                             # ウィンドウなし（state + Web サーバーのみ。exe は未対応）→ docs/operations/runtime-operations.md
 cd web && npm run build                              # Web UI（exe ビルド前に実行）
 cd web && npm run test:e2e                           # ブラウザ E2E（要 build。ヘッドレスを tmp で起動 → docs/changes/test-automation-strategy.md L6）
-pyinstaller dependencies/autona.spec --noconfirm     # exe（配布前のみ）→ dist/Autona/
+pyinstaller packaging/autona.spec --noconfirm     # exe（配布前のみ）→ dist/Autona/
 rm -rf ./_internal && cp -r dist/Autona/_internal ./_internal   # 成果物を直下へ
 cp dist/Autona/Autona.exe ./Autona.exe
 ```

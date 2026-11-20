@@ -163,7 +163,7 @@ STALE_KEYS = (
 
 # ── Keypath catalog ──────────────────────────────────────────────────────
 #
-# A transcription of Design.md §3.1.2, verified against the writers in src/.
+# The source of truth for the key tree (Design.md §3.1.2 keeps only the roots), verified against the writers in src/
 # Placeholders: {N} board 1..3, {T} team 1..2, {M} player index, {K}
 # character index, {I} a list index. Index segments are always *strings* in
 # the state ("1", not 1) -- pitfalls #3.

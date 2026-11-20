@@ -8,7 +8,7 @@ description: PR の変更内容からテストチェックリストを生成す�
 2. 変更内容を分析し、影響範囲を特定する:
    - デスクトップアプリ (`src/*.py`)
    - Web UI (`web/src/`)
-   - ビルド設定 (`dependencies/autona.spec`)
+   - ビルド設定 (`packaging/autona.spec`)
 3. 以下のフォーマットでチェックリストを生成する:
 
 ```markdown
@@ -16,7 +16,7 @@ description: PR の変更内容からテストチェックリストを生成す�
 
 ### ビルド
 - [ ] Web UI ビルド: `cd web && npm run build`
-- [ ] exe ビルド: `python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y`
+- [ ] exe ビルド: `python -m PyInstaller packaging/autona.spec --distpath . --workpath build -y`
 
 ### コア機能
 - [ ] {変更した機能の動作確認}

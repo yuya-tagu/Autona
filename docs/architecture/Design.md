@@ -1,22 +1,20 @@
 # Autona Design Document
 
 > **本書の位置づけ**
-> Autona の UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の「あるべき姿」を定義する正本。
-> 実装と乖離する場合は本書が優先される。差異は実装側または本書の更新で吸収する。
->
-
----
+> Autona の構造・データモデル・同期規約・画面構成・デザインシステム・ホットキー・拡張の手順を定める正本。
+> 本書は現在の設計だけを書く。経緯（いつ・どの工程で変えたか）は git 履歴と [../decisions/](../decisions/)（ADR）にある。
+> 定数・タイムアウト・正規表現・エンドポイントごとの引数などコードが正本のものは写さず、コードの場所を示す。
+> 矛盾したときの優先順位は「コードの実態 > 本書 > その他の Markdown」。
 
 ## 目次
 
 1. [設計原則](#1-設計原則)
-2. [UI レイヤー定義](#2-ui-レイヤー定義)
-3. [データモデル](#3-データモデル)
-4. [画面仕様](#4-画面仕様)
+2. [レイヤー定義](#2-レイヤー定義)
+3. [データモデルと同期](#3-データモデルと同期)
+4. [画面構成](#4-画面構成)
 5. [デザインシステム](#5-デザインシステム)
-6. [ホットキー仕様](#6-ホットキー仕様)
+6. [ホットキー](#6-ホットキー)
 7. [拡張ガイドライン](#7-拡張ガイドライン)
-8. [リファクタ移行プラン](#8-リファクタ移行プラン)
 
 ---
 
@@ -24,2148 +22,617 @@
 
 ### 1.1 アプリの性格
 
-Autona は「格闘ゲーム大会の配信支援ツール」である。利用シーンは大きく 2 つ:
+Autona は格闘ゲーム大会の配信支援ツール。利用シーンは 2 つで、**明確に分離する**。
 
-- **オペレーション**: スコア・選手情報・ゲーム情報を入力して即座に配信反映する（試合進行中）
-- **クリエイティブ**: 配信画面・サムネイル・リザルト画像のビジュアルを大会ブランドに合わせて自由にカスタマイズする
+- **オペレーション**: スコア・選手・ゲームの情報を入力して配信へ即反映する（試合進行中）。一貫性・速度・誤入力防止が最優先。
+- **クリエイティブ**: 配信画面・サムネイル・リザルト画像を大会ブランドに合わせて作る。自由度・表現力が最優先。
 
-この 2 つの性格は **明確に分離する**。前者は一貫性・速度・誤入力防止が最優先、後者は自由度・表現力が最優先。
+### 1.2 4 つの原則
 
-### 1.2 4 つの設計原則
+1. **単一の真実の源**: 状態は `StateManager`（`src/core/StateManager.py`）に集約する。各レイヤーは state を読むか、書き込み API 経由で書く。レイヤー間で状態を直接共有しない。
+2. **アプリ内部とクリエイティブの分離**: アプリ内部（デスクトップのシェルと React Web UI）は一貫したデザインシステムを持つ。クリエイティブ（OBS HTML レイアウト・画像生成テンプレート）はテンプレートごとに独自の配色・レイアウトを許す（§5.5）。互いの規約を持ち込まない。
+3. **レイヤーごとの責務**: 各レイヤーは自分の仕事だけをする（§2.5）。
+4. **拡張点の明示**: 新しいゲーム・レイアウト・ページなどを足すとき触るファイルは §7 に書く。書かれていない拡張点は、先に §7 を更新してから足す。
 
-#### 原則 1: 単一の真実の源（Single Source of Truth）
+### 1.3 上流（TournamentStreamHelper）との関係
 
-すべての状態は **`StateManager`**（Python グローバル状態辞書）に集約する。各 UI レイヤーは `StateManager` を読むか、書き込み API 経由で書く。**UI レイヤー間で直接状態を共有してはならない**。
-
-#### 原則 2: アプリ内部 vs クリエイティブの分離
-
-| 領域 | 対象 | 設計方針 |
-|------|------|---------|
-| **アプリ内部** | PyQt デスクトップ UI（`src/`）/ React Web UI（`web/src/`） | 一貫したデザインシステム、共通の色トークン、命名統一 |
-| **クリエイティブ** | OBS HTML レイアウト（`layout/scoreboard*` `bracket*` 等）/ 画像生成テンプレ（`layout/thumbnail*` `result*`） | テンプレートごとに独自配色・独自レイアウトを許容 |
-
-クリエイティブ領域には「アプリ内部のデザインシステム」を強制しない。逆に、アプリ内部にクリエイティブの自由度を持ち込まない。
-
-#### 原則 3: レイヤーごとの責務の明確化
-
-各 UI レイヤーは「自分が扱う仕事だけ」をする:
-
-| レイヤー | 責務 | 責務外（他レイヤーに任せる） |
-|---------|------|---------------------------|
-| PyQt デスクトップ UI | 入力・編集・運用操作・状態の正規化 | 配信向け表示・画像出力・リモート操作 |
-| React Web UI | リモート（手元デバイス）からの操作 | 配信向け表示・画像出力・運用 UI 全般 |
-| OBS HTML レイアウト | 配信画面への表示専用 | 状態の編集・永続化 |
-| WebEngine 画像生成 | サムネイル/リザルト画像の出力専用 | リアルタイム配信・状態の編集 |
-
-#### 原則 4: 拡張点の明示
-
-新しいゲーム・新しいレイアウト・新しい機能を追加するとき、**触るファイルが何で、なぜそれだけで済むか**を本書 §7 の拡張ガイドラインに記載する。記載されていない拡張点はそもそも追加しない（リファクタが必要）。
-
-### 1.3 既存上流（TournamentStreamHelper）との関係
-
-`web/`、`layout/` のディレクトリ名・構造は上流由来の歴史的経緯。**ディレクトリ構造はリネームしない**（影響範囲が大きい）が、本書では実態に即した役割名で参照する。
-
-例:
-- `web/src/` = React Web UI（ScoreboardPage は手元操作用、上流の OBS overlay とは別物）
-- `layout/scoreboard_*/` = OBS ブラウザソース用テンプレ（上流踏襲、Autona ではユーザーが OBS に貼って使う）
+`web/`・`layout/` のディレクトリ名と構造は上流由来の歴史的経緯でリネームしない。本書では実態に即した名前で呼ぶ: `web/src/` = React Web UI、`layout/` = OBS ブラウザソース用テンプレートと画像生成テンプレート。
 
 ---
 
-## 2. UI レイヤー定義
-
-Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立した実装言語・実装技術を持ち、`StateManager` を介してのみ連携する。
+## 2. レイヤー定義
 
 ```
-                         ┌──────────────────────────────┐
-                         │  StateManager (src/core, Qt-free) │
-                         │  単一の真実の源 / RLock 保護    │
-                         │  通知は StateManager.observers  │
-                         │  （素の callback、Qt 非依存）    │
-                         └──────────────┬───────────────┘
-                                        │
-                         ┌──────────────┴───────────────┐
-                         │ StateManagerBridge (Qt adapter)│
-                         │ core の observer を購読し同名の │
-                         │ Qt シグナル 4 本を re-emit      │
-                         └──────────────┬───────────────┘
-                                        │
-                ┌───────────────────────┼───────────────────────┐
-                │                       │                       │
-        書き込み│ + signal              │ broadcast             │ snapshot
-                │                       │                       │
-                ▼                       ▼                       ▼
-    ┌──────────────────┐   ┌──────────────────────┐  ┌──────────────────────┐
-    │ 2.1 PyQt         │   │ AutonaWebServer      │  │ 2.4 WebEngine        │
-    │   デスクトップ UI  │◄──┤ Flask + Socket.IO    │  │   画像生成           │
-    │   (操作・編集)     │   │ REST + WS            │  │   (成果物出力)         │
-    └──────────────────┘   └──┬───────────────┬───┘  └──────────────────────┘
-                              │               │
-                              ▼               ▼
-                  ┌──────────────────┐  ┌──────────────────┐
-                  │ 2.2 React Web UI │  │ 2.3 OBS HTML     │
-                  │   (リモート操作)   │  │   レイアウト        │
-                  └──────────────────┘  │   (配信表示)        │
-                                        └──────────────────┘
+                    ┌────────────────────────────────────┐
+                    │ StateManager (src/core, Qt 非依存)  │
+                    │ 単一の真実の源・RLock・observers     │
+                    └───────────────┬────────────────────┘
+        書き込み                     │ delta / snapshot / observer 通知
+ ┌────────────────────────┐         │
+ │ AutonaActions + ドメイン │         ▼
+ │ サービス (src/core)      │  ┌───────────────────────┐   ┌──────────────────────┐
+ │ AutonaWebOperations      │  │ AutonaWebServer       │   │ StateManagerBridge   │
+ │ (Web/外部の唯一の入口)   │  │ Flask + Socket.IO     │   │ (Qt アダプタ。同名の  │
+ └───────────▲────────────┘  └───┬───────────┬──────┘   │ Qt シグナルを re-emit)│
+             │                    │           │          └──────────┬───────────┘
+   REST / Socket.IO               ▼           ▼                     ▼
+   (React・外部連携)       React Web UI   OBS HTML レイアウト   デスクトップシェル
+                           (全ページ)      (配信表示)          (Window + 共有ビュー)
+                                          WebEngine 画像生成 ← state の snapshot
 ```
 
-### 2.1 PyQt デスクトップ UI
+- **core**（`src/core/`）は Qt も `src/core` 外の `src` モジュールも import しない（`tests/test_core_qt_free.py` が pin）。Qt が要るものは `bootstrap_core()` から callable で注入する。
+- **シェル**は 2 つ: デスクトップ（`python main.py`。`bootstrap_core()` + `bootstrap_gui()`）とヘッドレス（`--headless`。`src/headless.py`。`bootstrap_core()` までで QCoreApplication の上で動く）。ボードの state は両シェルとも core が起動時に 3 つ作る。生成順の正本は `src/bootstrap.py`。
+- デスクトップのウィンドウの中身は、AppShell（React）を表示する**共有ビュー 1 枚**。Qt Widgets のパネルは無く、新規の Qt パネルは足さない（ADR-005）。
 
-**目的**: オペレーターがアプリを起動して、状態を入力・編集・運用する画面。
+### 2.1 デスクトップシェル
 
-**技術スタック**:
-- PySide6（qtpy 抽象化レイヤー経由。QMainWindow + QDockWidget）。旧 PyQt6 から 2026-07 に移行（LGPL 対応）。本書の「PyQt UI」「R-PyQt-*」という呼称はレイヤー名・ルール ID として維持
-- `.ui` ファイル（Qt Designer XML）+ Python 動的構築の併用
-- `src/ui_constants.py` の中央集約スタイル + `setStyleSheet` での個別調整
-
-**設計ルール**:
+目的: オペレーターがアプリを起動して使うウィンドウ。構成と起動順は §4.1。
 
 | ルール | 内容 |
 |------|------|
-| **R-PyQt-1** | UI の構築は `.ui` ファイル（Qt Designer）を優先し、複雑な動的構造のみ Python で組む |
-| **R-PyQt-2** | 状態の編集は `StateManager.Set()` 直接呼び出しで反映し、`SaveBlock()` でバッチ化する |
-| **R-PyQt-3** | スタイルは `ui_constants.py` の関数（`readonly_style()`, `score_display_style(scale)` 等）経由で適用し、インラインの `setStyleSheet` には色のハードコードを書かない |
-| **R-PyQt-4** | （退役）全ドックウィジェットは `objectName` を持ち、`STATE_VERSION` で管理する。ADR-005 S-final SF-5b-3 でウィンドウは共有ビュー 1 枚になり、`STATE_VERSION` も削除した（ウィンドウが覚えるのはページの名前 `lastPanel`。§3.3.5） |
-| **R-PyQt-5** | QSpinBox.valueChanged 等のシグナル内から QMessageBox.exec() を呼ばない（C++ クラッシュ事例あり） |
-| **R-PyQt-6** | カスタム描画（paintEvent）は QPainter / QPainterPath のみ使用、QGraphicsScene.clear() の連続呼び出し禁止 |
-
-**パネル一覧** — 詳細は §4.1 参照。
-
-**使われない領域**:
-- 配信画面の表示（OBS HTML が担当）
-- リモート操作（React Web UI が担当）
-- 画像生成の HTML レンダリング（WebEngine が担当）
+| **R-Shell-1** | 新しい UI は React のページとして作る。Qt Widgets は `Window`・共有ビューのホスト・Designer の窓・Updater のダイアログ・起動スプラッシュと、ネイティブのダイアログだけ（許可リスト `tests/test_web_panel_host.py` の `QT_WIDGET_CLASSES`）。 |
+| **R-Shell-2** | Qt のウィジェットは state を書かない。書き込みは `AutonaActions` か core のドメインサービスを通す（§3.2.2）。 |
+| **R-Shell-3** | Qt のオブジェクトが state の通知を受けるときは `StateManagerBridge.instance` の同名シグナルに `connect` する。observer を直接 `subscribe` しない（破棄済みのウィジェットが書き続ける）。 |
+| **R-Shell-4** | `QSpinBox.valueChanged` 等のシグナルの中から `QMessageBox.exec()` や `processEvents()` を呼ばない。レイアウト解決後の処理は `QTimer.singleShot(0)` で defer する（`.claude/rules/agent-pitfalls.md` #9）。 |
+| **R-Shell-5** | スタイルは `src/ui_constants.py` のトークン経由。色をハードコードしない（§5.1.6）。 |
 
 ### 2.2 React Web UI
 
-**目的**: オペレーターが手元のスマホ・タブレット・別 PC からスコアボードを操作する画面。
+目的: アプリの全ページ。デスクトップの共有ビューが AppShell として表示し、ブラウザ（スマホ・別 PC）からも開ける。
 
-**技術スタック**:
-- React 19 + TypeScript 5
-- Redux Toolkit（slice 単位で分割）
-- MUI 7（Material UI）
-- Socket.IO クライアント + REST API
-- i18next（日英ローカライズ）
-
-**設計ルール**:
+技術: React 19 + TypeScript、Redux Toolkit、MUI、Socket.IO クライアント + REST、i18next（日英）。バージョンの正本は `web/package.json`。
 
 | ルール | 内容 |
 |------|------|
-| **R-React-1** | ページは React Router で定義し、新規ページは `web/src/{PageName}/index.tsx` パターンで作る |
-| **R-React-2** | サーバー同期対象のドメイン状態は Redux slice 経由で取得する。フォーム入力中の一時値・開閉状態などの transient UI state は `useState` を許容する |
-| **R-React-3** | 状態の変更は REST API または Socket.IO emit で AutonaWebServer 経由でのみ行う（Redux 側で直接書き換えしない） |
-| **R-React-4** | スタイルは MUI テーマ（`themes.js`）経由で適用、`sx` props は許容、`style={{}}` ハードコードは避ける |
-| **R-React-5** | フォーム要素は `size="small"` で統一し、密度を高める |
-| **R-React-6** | delta は**到着駆動**で即時適用する（`program_state_update` 受信ハンドラ内で `applySavedDeltas` を dispatch）。サーバー側で coalesce 済みのためクライアント側バッチは不要。**200ms の setInterval は安全網**（接続状態遷移中にキューへ残った delta の回収用）としてのみ残す。rAF は不採用（モバイルのバックグラウンドタブで停止するため） |
-| **R-React-7** | テーマは**ダーク固定**。React Web UI は `ThemeShell.tsx` で `darkTheme` を常用し、StateManager / SettingsManager とのライト/ダーク同期は行わない |
-| **R-React-8** | 楽観的スコアエコー（`useScoreSubmit.ts`）: スコア±はタップ即時にローカル表示を更新し、**絶対値**で `POST /api/v1/scoreboards/{n}/score:set` する（2026-10-21 に旧 `POST /score` から移行）。①サーバーデルタの値がローカル送信値と一致したら pending 解除 ②連打は in-flight 中最新値のみ保持し応答後に 1 回再送（シリアライズ）③失敗時はサーバー値へ revert + Snackbar ④3 秒でタイムアウトし pending 解除（サーバーが正）。R-Sync-4（後勝ち）の範囲内のため revision 突き合わせ・ロールバックログは持たない |
-| **R-React-9** | **即時反映モデル**: ScoreboardPage の全入力（選手情報・Phase/Match/Best Of・Losers・チーム名）は入力確定（blur / Enter / 選択）で即送信する。送信ボタンは置かない（デスクトップの `editingFinished` と同モデル）。サーバーエコーによるフォーム巻き戻りは「カード内にフォーカスがある間は表示フィールドを上書きしない」ガードで抑止する（`Player.jsx`） |
-| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `PATCH /api/v1/display-options`（2026-10-21 に旧 `POST /display-option` から移行。Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトの正本は `src/core/StateSchema.py` の `DISPLAY_OPTIONS`（デスクトップの eye アクションも `set_display_option` の受理キーもここを読む）。`web/src/ScoreboardPage/displayOptions.js` だけは言語が違うため写しが残り、`tests/test_state_schema.py` が両者の一致を検査する |
-
-**ページ一覧** — 詳細は §4.2 参照。
-
-**使われない領域**:
-- ブラケット表示（必要時に追加検討）
-- 画像生成の起動（PyQt から起動）
+| **R-React-1** | ページは `web/src/{PageName}/index.tsx`。ルートと登録は §7.5。 |
+| **R-React-2** | サーバー同期対象のドメイン状態は Redux slice 経由で取る。フォーム入力中の一時値・開閉状態は `useState` でよい。 |
+| **R-React-3** | 状態の変更は REST（`/api/v1`）か Socket.IO emit で AutonaWebServer 経由に限る。Redux 側を直接書き換えない。 |
+| **R-React-4** | スタイルは MUI テーマ（`web/src/themes.js`）経由。`sx` は可、`style={{}}` のハードコードは避ける。 |
+| **R-React-5** | フォーム要素は `size="small"` で統一する。 |
+| **R-React-6** | delta は**到着駆動**で適用する（`program_state_update` 受信ハンドラ内で `applySavedDeltas`）。サーバー側で coalesce 済みなのでクライアントのバッチは不要で、setInterval は接続遷移中に残った delta の回収用の安全網だけ。rAF は使わない（モバイルのバックグラウンドで止まる）。 |
+| **R-React-7** | テーマはダーク固定（§5.4）。 |
+| **R-React-8** | スコア ± の楽観的エコー（`web/src/ScoreboardPage/useScoreSubmit.ts`）: タップ即時にローカル表示を更新し、絶対値で `score:set` を送る。サーバーの値が一致したら pending 解除、連打は in-flight 中最新値だけ保持、失敗でサーバー値へ戻して通知、タイムアウトでサーバーが正。競合は後勝ち（R-Sync-4）なので revision の突き合わせは持たない。 |
+| **R-React-9** | 入力は確定（blur / Enter / 選択）で即送信し、送信ボタンは置かない。サーバーのエコーによる巻き戻りは「カード内にフォーカスがある間は表示欄を上書きしない」ガードで防ぐ。 |
+| **R-React-10** | 表示トグルは `display_options.show_*`（state）が正本で、Web は `PATCH /api/v1/display-options` で書く。キーとデフォルトの正本は `src/core/StateSchema.py` の `DISPLAY_OPTIONS`。`web/src/ScoreboardPage/displayOptions.js` は言語が違う写しで、`tests/test_state_schema.py` が一致を検査する。 |
 
 ### 2.3 OBS HTML レイアウト
 
-**目的**: 配信ソフト（OBS Studio など）の Browser Source として読み込まれ、配信画面に表示される。
-
-**技術スタック**:
-- 素の HTML / CSS / JS
-- jQuery + GSAP + lodash + Socket.IO（`layout/include/`）
-- `layout/main.css` を共通基盤として、各テンプレで上書き
-- 共通初期化スクリプト `layout/include/globals.js`
-
-**設計ルール**:
+目的: OBS Studio などのブラウザソースとして読み込まれる配信画面。素の HTML / CSS / JS（jQuery・GSAP・lodash・Socket.IO は `layout/include/`）で、共通基盤は `layout/main.css` と `layout/include/globals.js`。
 
 | ルール | 内容 |
 |------|------|
-| **R-OBS-1** | テンプレディレクトリは `layout/{用途}_{バリアント}/` の命名（例: `scoreboard_simple`, `result_vertical_geki`） |
-| **R-OBS-2** | 各テンプレは `Start()` と `Update(event)` を実装。`globals.js` の `tsh_update` イベントを購読する |
-| **R-OBS-3** | データ受信は Socket.IO を標準とする。旧 OBS / 古い CEF への第一級対応は不要。ファイルポーリングは degraded fallback として残す扱い |
-| **R-OBS-3a** | 更新イベント（`program_state_update`）には `revision`（単調増加の整数）を含める。クライアントは受信ごとに前回 `revision` との差分（+1）を検証する |
-| **R-OBS-3b** | reconnect 時、または `revision` の不連続（out-of-order / 欠落）を検知した時、クライアントは `program_state` の full snapshot を再取得して状態を再構築する |
-| **R-OBS-4** | テンプレごとに独自配色・独自レイアウトを許容（クリエイティブ領域） |
-| **R-OBS-5** | `layout/main.css` の CSS 変数（`--p1-score-bg-color` 等）はテンプレが上書きしてよい |
-| **R-OBS-6** | テンプレ内で状態を変更しない（read-only）。書き込みが必要な特殊ケースは事前合意 |
-| **R-OBS-7** | プレビュー画像は `*_preview.png` で同ディレクトリに置く |
-
-**テンプレ分類** — 詳細は §4.3 参照。
-
-**使われない領域**:
-- 状態の編集
-- 設定の永続化（テンプレ単位の `settings.json` のみ。実行時設定は `SettingsManager` 経由）
+| **R-OBS-1** | テンプレートのフォルダは `layout/{用途}_{バリアント}/`（§4.3）。 |
+| **R-OBS-2** | 各テンプレートは `Start()` と `Update(event)` を実装し、`globals.js` の `tsh_update` を購読する。 |
+| **R-OBS-3** | データ受信は Socket.IO が標準。ファイルポーリング（`out/program_state.json`）は degraded な代替。 |
+| **R-OBS-3a** | `program_state_update` は `revision` を持つ。クライアントは前回の revision との連続性を検証する（規約は §3.2.3）。 |
+| **R-OBS-3b** | reconnect 時と revision の不連続を検知した時、`program_state` の全量を取り直して再構築する。 |
+| **R-OBS-4** | 配色・レイアウトはテンプレートごとに自由（§5.5）。`layout/main.css` の CSS 変数は上書きしてよい。 |
+| **R-OBS-6** | テンプレートは状態を変更しない（read-only）。 |
+| **R-OBS-7** | プレビュー画像は同じフォルダの `*_preview.png`。 |
 
 ### 2.4 WebEngine 画像生成
 
-**目的**: サムネイル・リザルト画像を HTML テンプレ + Qt WebEngine でレンダリングして PNG/JPG として出力する。
-
-**技術スタック**:
-- Qt WebEngine（QWebEngineView オフスクリーン）
-- HTML テンプレ（`layout/thumbnail*`, `layout/result*`）
-- Python から JS 経由で JSON ペイロード注入
-
-**設計ルール**:
+目的: サムネイル・リザルトを HTML テンプレートと Qt WebEngine（オフスクリーン）で描いて PNG / JPG にする。Python から `initThumbnail(payload)` / `initResult(payload)` で JSON を渡す。
 
 | ルール | 内容 |
 |------|------|
-| **R-Img-1** | レンダラーは Singleton（`ThumbnailRenderer.instance()`, `ResultPageRenderer.instance()`）として実装 |
-| **R-Img-2** | テンプレ選択は **プレビュー側**（プレビュー画像の直上）にコンボボックスを置く（#29 で確定済み） |
-| **R-Img-3** | テンプレ追加は `layout/` にテンプレートパッケージ（マニフェスト = `settings.json` の `autona` ブロック、`kind` が `result` / `thumbnail`）のフォルダを置くだけで完結する（ADR-007 T1。コードに表は無い。§4.4） |
-| **R-Img-4** | レンダリング完了は HTML 側で `document.title = "RENDER_READY"` に変更してシグナル化 |
-| **R-Img-5** | Python から HTML への入力は `initThumbnail(payload)` / `initResult(payload)` の関数経由で受け渡す |
-| **R-Img-5b** | 描画の土台は `src/AutonaOffscreenRenderer.py`（ADR-005 S4q で `ThumbnailRenderer` から切り出した。`ThumbnailRenderer` と `result/ResultPageRenderer` がサブクラスで、ビューはそれぞれ別）。描画は 1 度に 1 つ（チケット。ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は `renderAsync()`（core。結果はコールバックだけ）と、サムネイルだけの `renderSync()`（SCORE・legacy。入れ子のイベントループ）。段階ごとに 10 秒で失敗し、ページを読み直す（ADR-005 S4o） |
-| **R-Img-6** | 出力先は非 Preview 時 `./out/{種別}/`、Preview 時 `AutonaResolve("tmp/{種別}")/` |
-| **R-Img-7** | 出力ファイル名は `{識別子}-{YYYYMMDDTHHmmssZ}.{ext}`（Windows ファイル名安全、UTC、`:` を含めない）、識別子の特殊文字は除去する |
-| **R-Img-8** | クリエイティブ領域なので独自配色・独自レイアウトを許容（`--accent-color: #f0a500` など PyQt/React と異なる値を持ってよい） |
+| **R-Img-1** | レンダラーは `src/AutonaOffscreenRenderer.py` の土台のサブクラス（`src/thumbnail/ThumbnailRenderer.py` / `src/result/ResultPageRenderer.py`）。描画は 1 度に 1 つ（ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は core の `renderAsync()`（結果はコールバック）と、サムネイルだけの `renderSync()`。段階ごとに期限があり、超えたらページを読み直す。 |
+| **R-Img-2** | テンプレートの選択はプレビューの直上のコンボボックスに置く。 |
+| **R-Img-3** | テンプレートの追加は `layout/` にテンプレートパッケージのフォルダを置くだけで完結する（§4.4.0）。 |
+| **R-Img-4** | HTML は描画完了で `document.title = "RENDER_READY"` にして合図する。 |
+| **R-Img-6** | 出力先は非 Preview 時 `./out/{種別}/`、Preview 時 `AutonaResolve("tmp/{種別}")`。ファイル名は §4.4.4。 |
+| **R-Img-8** | 独自の配色・レイアウトを許す（§5.5）。 |
 
-**テンプレ一覧** — 詳細は §4.4 参照。
+### 2.5 責務の境界
 
-**使われない領域**:
-- リアルタイム配信（OBS HTML が担当）
-- 状態の編集（PyQt の Settings Widget 経由）
-
-### 2.5 各レイヤーの責務境界
-
-#### マトリクス: 各概念をどのレイヤーが担うか
-
-| 概念 | PyQt | React | OBS HTML | WebEngine 画像 |
-|------|------|-------|---------|----------------|
-| 状態の編集（書き込み） | ◎ | ◎ | × | × |
-| 状態の運用表示（読み取り） | ◎ | ◎ | × | × |
+| 概念 | デスクトップシェル | React | OBS HTML | 画像生成 |
+|------|-------------------|-------|----------|---------|
+| 状態の編集 | 依頼のみ（React 経由） | ◎ | × | × |
+| 状態の運用表示 | ◎（React を表示） | ◎ | × | × |
 | 配信画面への描画 | × | × | ◎ | × |
-| 画像（PNG/JPG）出力 | × | × | × | ◎ |
-| 設定 UI | ◎ | × | × | × |
-| ホットキー受付 | ◎ | × | × | × |
-| Top 8 ブラケット編集 | × | ◎ | × | × |
-| Top 8 ブラケット表示（配信） | × | × | ◎ | × |
+| 画像出力 | 描画の実行（Qt） | 依頼 | × | ◎ |
+| 設定 UI・ホットキー受付 | ホットキーのみ | 設定 UI | × | × |
 
-◎ = 主担当 / △ = 任意 / × = 担当しない
-
-#### 禁止事項
-
-- **無秩序な機能重複は禁止**。両方で扱う場合は本書に「両方で扱う理由・正本となるレイヤー・競合時の優先順位」を明記する。例: トーナメント設定は PyQt 専有、スコア操作は両方（正本: StateManager、Web からの書き込みは AutonaWebOperations に集約、PyQt と React の同時操作時は最後の書き込みが勝つ）。
-- **OBS HTML から状態を書き換えない**。クリエイティブ領域は read-only。
-- **WebEngine 画像生成テンプレを OBS Browser Source として直接使わない**。配信用は OBS HTML、画像出力用は WebEngine と分ける（同じ HTML を兼用しない）。
+- **機能の重複は禁止**。両方で扱うなら、正本・競合時の優先順位を本書に書く（スコア操作は state が正本、書き込みは `AutonaWebOperations` に集約、同時操作は後勝ち）。
+- OBS HTML から状態を書き換えない。
+- 画像生成テンプレートを OBS のブラウザソースとして直接使わない（配信用と画像出力用の HTML は兼用しない）。
 
 ---
 
-## 3. データモデル
+## 3. データモデルと同期
 
-### 3.1 StateManager キーパス完全仕様
+### 3.1 StateManager
 
 #### 3.1.1 API 規約
 
-| メソッド | 用途 | スレッドセーフ |
-|---------|------|-------------|
-| `StateManager.Set(key, value)` | 状態書き込み（ドット区切りキーパス） | Yes (RLock) |
-| `StateManager.Get(key, default=None)` | 状態読み取り | Yes（経路: `deep_get`） |
-| `StateManager.Unset(key)` | キー削除 | Yes (RLock) |
-| `StateManager.SaveBlock()` | コンテキストマネージャ。バッチ書き込み中にファイル出力を抑制 | カウンタ式 |
-| `StateManager.GetFullState()` | スナップショット取得（**ロック取得**版） | Yes |
-| `StateManager.observers.<channel>.subscribe(cb)` | 変更通知の購読（`state_big_change` / `state_updated` / `held_dirty_changed` / `held_state_updated`）。Qt 非依存の素の callback 登録 | Yes |
+| メソッド | 用途 |
+|---------|------|
+| `Set(key, value)` / `Get(key, default)` / `Unset(key)` | ドット区切りキーパスで読み書き（RLock 保護） |
+| `with SaveBlock():` | 複数の書き込みを 1 保存サイクル（1 delta）にまとめる |
+| `GetFullState()` | ロックを取るスナップショット（既定では held を除く） |
+| `observers.<channel>.subscribe(cb)` | `state_big_change` / `state_updated` / `held_dirty_changed` / `held_state_updated` の購読（素の callback。Qt には Bridge 経由） |
 
-**規約**:
-- キーパスは **ドット区切り文字列**（例: `"score.1.team.1.player.1.gamerTag"`）
-- 数値添字も**文字列として扱う**（`"1"` であって `1` ではない）
-- `StateManager.state` への直接参照は **禁止**。必ず `Get` / `GetFullState()` 経由。
-- モジュールは `src/core/StateManager.py`（`src/StateManager.py` は headless core Step 1 の互換シム・1 世代で削除予定）。Qt シグナルが必要な場合は `src/StateManagerBridge.py` の `StateManagerBridge.instance` に接続する（core 側に Qt シグナルを追加しない）
+- キーパスは**ドット区切りの文字列**で、数値の添字も文字列（`"score.1.team.1.player.1.name"`）。
+- `StateManager.state` を直接参照しない。
+- キー名は**保存データ**（`user_data/state.json`）のキーなので変えない。変えるなら `core/StateMigrations` に移行 step を足す（§3.3.5）。キーの定義は `src/core/StateSchema.py`（`KEY_CATALOG`）が正本で、**新しいキーは `StateSchema` に定義してから使う**。`objectName` からキーを組まない（`DYNAMIC_KEY_FAMILIES` は空。pin: `tests/test_state_schema.py`・`tests/test_objectname_keypath_contract.py`）。
 
-#### 3.1.2 キーパスツリー（正本）
+#### 3.1.2 キーの構造
 
-凡例: **W** = Set / **R** = Get / **D** = Unset
+キーとシードの正本は `src/core/StateSchema.py`。ここでは構造と書き手だけを示す。値の形は書き手のモジュールの docstring が正本。
 
-##### `score.{N}` — スコアボード
+| ルート | 内容 | 書き手（core） | 永続 |
+|-------|------|---------------|------|
+| `score.{1,2,3}` | スコアボード。1 = 1v1、2 = チーム、3 = クルーバトル | ボード 1 / 2: `AutonaActions`・`PlayerService`・`SetLoadService`。ボード 3: `CrewBattleService` | 起動時に破棄 |
+| `game` | 選択中のゲーム（`selected` で選ばれているかが分かる） | `GameAssetCatalog` | 起動時に破棄 |
+| `tournamentInfo` | 大会の情報・大会カラー・アイコン / バナーの版・`media` / `load` の進み具合・`url` | `TournamentInfoService`・`TournamentMediaService`・`TournamentService` | ○ |
+| `colors.{feature}` | 機能別カラーの上書き（明示設定がある feature だけ現れる） | `ColorService` | ○ |
+| `stream` | 配信先・タイトル・団体素材の版・サムネ生成の状態 | `StreamService` | ○ |
+| `thumbnail.render` / `result_*` | 画像生成の状態（`status` / `path` / `error` / `revision`）とリザルトの行（`result_players` / `result_teams`）・`result_layout` | `ThumbnailService`・`ResultService` | 行は ○、状態は起動で idle |
+| `top8` | Top 8 の選手・試合 | `Top8Service`（トポロジーは `Top8Model`） | ○ |
+| `commentary.{1..12}` | 実況者 12 スロット固定 | `CommentaryService`（形は `CommentaryModel`） | ○ |
+| `analysis` / `set_selection` | 試合一覧・セット選択の取得の進み具合 | `AnalysisService`・`SetSelectionService` | 起動で idle |
+| `display_options` | 表示トグル | `AutonaActions` | ○ |
+| `provider_videogame` ほか | provider 由来 | `AutonaTournamentDataProvider`（`src/core` 外で state を書く唯一の例外） | |
 
-`{N}` は `"1"` / `"2"` / `"3"`。board1=1v1、board2=team、board3=crew battle。
-board3 はクルーバトル（`core/CrewBattleService`）であり、board1/2 用の通常スコア操作とは一部 API が異なる（Qt のクルーボード `AutonaCrewBattleWidget` は ADR-005 S4ac-3 で削除）。
+`score.{N}` の主なキー:
 
 ```
 score.{N}
-├── team.{1|2}
-│   ├── teamName                     W R
-│   ├── score                        W R
-│   ├── color                        W
-│   ├── logo                         W
-│   ├── losers                       W R
-│   └── player.{M}                   D
-│       ├── name                     W R  (プレイヤー名 = ゲーマータグ)
-│       ├── team                     W   (所属タグ。UI 表記は「所属タグ」に統一)
-│       ├── real_name                W
-│       ├── twitter                  W
-│       ├── custom_textbox           W
-│       ├── seed                     W R  (int。未シードは 0)
-│       ├── birthday                 W   (bool)
-│       ├── country                  W   (dict: code, name, display_name, en_name, asset)
-│       ├── state                    W   (dict: code, original_code, name, asset)
-│       ├── id                       W R
-│       ├── city                     W R
-│       ├── online_avatar            W R
-│       ├── avatar                   W
-│       ├── mergedName               W
-│       ├── mergedOnlyName           W
-│       ├── character.{K}            W R   (dict: name, en_name, assets, skin, variant)
-│       ├── mains                    W
-│       └── sponsor_logo(s)          W D
-├── best_of                          W R
-├── best_of_short_text               W
-├── best_of_text                     W
-├── first_to / _short_text / _text   W
-├── match                            W R
-├── phase                            W R
-├── pool                             W R (フェーズと分離したプール名。表示は overlay 側で "phase - pool" 合成)
-├── top_n                            W R
-├── set_id                           W
-├── auto_update                      W
-├── station                          W
-├── station_queue                    W
-├── teamsSwapped                     W
-├── stage_strike                     W D    (dict: currGame, strikedStages, gentlemans, canUndo, canRedo, ...)
-├── last_sets.{1|2}.{I}              W R
-├── history_sets.{1|2}.{I}           W R
-├── recent_sets                      W R    (dict: sets, request_time)
-└── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除済**（T-1 完了）
+├── team.{1|2}: teamName / score / color / logo / losers / player.{M}.{name, team(所属タグ), seed, country, state, id, city, character.{K}, ...}
+├── best_of / match / phase / pool / top_n / set_id / station
+├── teamsSwapped               スワップの正本（board1/2/3 共通。無ければ false）
+├── last_sets / history_sets / recent_sets / upset_factor   統計（held の exempt）
+└── board 3 のみ: team.{T}.memberNum / activeMember / player.{M}.{name, stock}
 ```
 
-board3（crew）のみ、上記に加えてクルー名簿のキーを持つ。書き手は
-`src/core/CrewBattleService.py`（board1/2 は一切書かない）:
+設計上の規則:
 
-```
-score.3
-├── teamsSwapped                     W R  (bool。board1/2 と同じキー。スワップするまで無い)
-└── team.{1|2}
-    ├── memberNum                    W R  (int。表示中のメンバー行数。両チーム共通)
-    ├── activeMember                 W R  (str。出場中メンバーの 1 始まり index。"0" = 不在)
-    ├── score                        W    (派生値: 名前が入った表示中メンバーの stock 合計)
-    └── player.{M}
-        ├── name                     W R  (board1/2 と同じキー = 同じ意味)
-        └── stock                    W R  (int。残ストック)
-```
+- **データ階層を混ぜない**: `tournamentInfo.*`（大会）・`stream.*`（配信）・`score.{N}.*`（試合）は別のライフサイクルを持つ。配信先を `score.{N}` に置くと、反映まで届かない・非表示ボードまで dirty になる・起動時の wipe で消える、の 3 つが同時に起きる。`stream.*` / `tournamentInfo.*` は非ゲート・ボード非依存・永続。
+- **進み具合の形**: 長い取得・描画は state に `{status: idle|running|done|error, error, revision, ...}` を置く。`revision` は要求を受け付けるたびに増え、再起動でも戻らない。202 で返す `*Revision` と照合して自分の要求の結果を読む。
+- **大きな行は state に入れない**: 試合一覧やセット選択の行は大会規模で数百〜千超になるので、サービスのメモリに大会 URL と組で持ち、`GET` で読む。
+- **大会カラー・機能別カラー**: 値の正本は `SettingsManager`（`general.theme_color` / `accent_color`、`colors.{feature}.*`）で、state はレイアウト互換の表示用キャッシュ（§5.5.3）。
+- **ボード 1 / 2 は held**（§3.2.3 の R-Sync-11）。ボード 3 と `score` 以外は即時公開。
+- 値を作る側が解決する: 国は code、キャラは `en_name` + スキンの行で依頼を受け、core がカタログから値を組む（`PlayerService.BuildCountryValue` / `BuildCharacterValue`）。1 リクエストは 1 つのスナップショットで解決し、1 つでも断れば何も書かない。
 
-クルーのスワップのフラグ（legacy の `get-swap`・v1 の `swapped`）は board1/2 と同じ `score.3.teamsSwapped`
-（ADR-005 S4w。React のページが delta で追従するため。それまでは state の外で、スワップに通知が無かった）。
-board1/2 と同じくシードは書かず、一度もスワップしていないボードにキーは無い（`false` と読む）。起動時の `ResetScoreRoot` で消える。
-ボードの操作はボードの入力欄も Web も `CrewBattleService` を呼び、ボードは state を描画するだけ。
-ページの操作は `/api/v1/scoreboards/3/...`（`external-control-api.md` §2.12）。
-
-##### `game` — 選択中ゲーム情報
-
-```
-game
-├── selected            （ゲームが選ばれているか。ロードで true、起動時と大会の解除で false。S-final SF-5b-1）
-├── name, smashgg_id, codename, logo
-├── defaults
-│   ├── players_per_team
-│   └── characters_per_player
-├── mods_active, has_stages, has_variants, has_colors
-└── has_modded_content
-```
-
-##### `top8` — Top 8 ブラケット
-
-旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。残留キーの掃除と `top8.*` の正規化は
-`Window._SeedPanelState()` が起動時に行う（パネルが lazy 構築のため、旧 `AutonaTop8Widget.__init__`
-から移動。§4.1.1）。トポロジーと進出伝播の正本は
-`src/core/Top8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
-**`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾）。
-Start.gg からの取り込み（大会の最後の phase のダブルエリミのグループ → `core/Bracket` → 選手の解決 →
-`ImportBracket`）も `Top8Service.RefreshFromProvider()` が行い、ページの「大会結果を読み込む」
-（`POST /api/v1/bracket:refresh`）・ホットキー・Web が同じ関数を呼ぶ（ADR-005 S3e-8。ヘッドレスでも動く）。
-パネルは ADR-005 S4i から React のページ（`/web/top8`、`web/src/Top8Page/`）で、`/api/v1/top8*` に
-操作を依頼し、state を描画するだけ（入力中の欄は飛ばす。スコアは「反映」まで画面の中だけで保つ）。
-ゲームが別のゲームに変わると、`GameAssetCatalog.SelectGame` が切り替えと同じ保存サイクルで
-`Top8Service.ForgetCharacters()` を呼び、`players.*.characters` を `{}` にする（キャラがある枠だけ。
-起動時の前回ゲームの復元・同じゲームの選び直しでは消さない。両シェル共通）。
-国とキャラは**識別子で受け取り core が値を組む**（ADR-005 S4h）: `SetPlayerCountry(slot, code)` /
-`SetPlayerCharacter(slot, en_name, skin)`。ページの選手の書き込みは `UpdatePlayer(slot, fields)` で、1 リクエストの
-欄を `StateManager.lock` の中でゲームのカタログの 1 つの snapshot と国の 1 回の参照で解決し、1 つでも断れば何も書かない
-（キャラに付いた `game` が読み込み中のゲームの codename と違うときも。S4i）。値はボードの選手スロットと同じ組み立て（`PlayerService.BuildCountryValue` /
-`BuildCharacterValue`）。Start.gg の取り込みのキャラは、従来どおりキャラの config のコピーに、パネルの値に
-しかないキー（`assets` ほか）を後ろに足したもの（`ImportedCharacterValue`。既存のキーと値は変えない）。
-state の値からパネルが示す選択への逆引きは `Top8Service.CharacterPick`（codename を優先。S4h より前の
-3 つの形も読む）。ページは同じ規則を `web/src/Top8Page/characterPick.ts` に持ち、両者を 1 つの表
-（`characterPick.cases.json`）で検査する（S4i）。反映 `ApplyScores` は渡された試合だけを更新するマージで、スコアは 0〜99 の int 2 つの
-list だけを受け付ける（それ以外は何も書かずに None）。選択中のデザインは `settings.json` の
-`top8.selected_design`（`LayoutCatalog.SELECTION_SETTINGS`。`GET|PUT /api/v1/layouts/selected/top8`）。
-
-```
-top8
-├── phaseLabel                       W R   (表示ラベル。既定 "TOP 8")
-├── players.{1..8}                   W R   (スロット位置固定: 1/2=WSF1, 3/4=WSF2,
-│   │                                       5/6=LR1A, 7/8=LR1B)
-│   ├── name / sponsor               W R
-│   ├── country                      W R   (国の行: code / name / en_name / display_name / asset /
-│   │                                       emoji / 座標。カスタム国旗も code で。パネルの値は選手
-│   │                                       カードの country と同じ形・キー順。取り込みは
-│   │                                       CountryCatalog.BasicCountryInfo の順)
-│   └── characters.1                 W R   (パネルの選択: ボードの選手スロットのキャラ 1 枠と同じ形 name /
-│                                           en_name / display_name / codename / modded / assets /
-│                                           skin（スキンの行）/ variant（常に {}）。取り込み: キャラの
-│                                           config のコピー（export_name / smashgg_name / locale /
-│                                           skin_name ほか）の後ろに modded / name / assets / skin /
-│                                           variant を足したもの。別キャラのスキンでは en_name が
-│                                           違う（パネル: スキンのキャラ、取り込み: config のキャラ）。
-│                                           オーバーレイは assets でアイコンを描く。別のゲームへの
-│                                           切り替えで {} になる。S4h より前の値（スキンの行 {assets} /
-│                                           キャラの行 / 取り込みの設定のコピー）が残っていることがある)
-└── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
-    ├── name                         W R   (ラウンド表示名)
-    ├── slots                        W R   ([int,int] 選手スロット 1..8 / 0=TBD。
-    │                                       core/Top8Model.Recompute が導出)
-    ├── score                        W R
-    ├── finished                     W R
-    └── active                       W R   (gf_reset のみ意味を持つ)
-```
-
-##### `commentary` — 実況・解説
-
-実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 12 名・
-欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
-正本は `src/core/CommentaryModel.py`。旧スキーマ（seed / country / character /
-mains / custom_textbox 等）は `NormalizeState` でマイグレーションされる
-（custom_textbox → note、その他は破棄）。呼び出しは保存済み state の v0 → v1 移行
-（`core/StateMigrations`。§3.3.5）と、起動ごとの `Window._SeedPanelState()`（シードを兼ねる。
-パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される（`user_data/state.json`）。
-
-```
-commentary
-└── {1..12}                          W R   (スロット固定・常時 12 エントリ)
-    ├── name                         W R   (ゲーマータグ)
-    ├── team                         W R   (チーム / 所属)
-    ├── twitter                      W R   (@ なし)
-    ├── role                         W R   (str 自由入力。補完候補は ROLES の 6 種:
-    │                                       "実況"|"解説"|"選手"|"主催"|"MC"|"スタッフ")
-    ├── icon                         W R   (str。""|"mic"|"megaphone"|"phone"。アイコン
-    │                                       プルダウンで選択、オーバーレイで SVG バッジ表示。
-    │                                       旧 role/roles のアイコンラベルは起動時に移行)
-    ├── note                         W R   (自由コメント。例: 本年度ランキング2位)
-    └── display                      W R   (int。0=非表示、1=表示。表示順はスロット順
-                                            （パネルのカード順。≡ ドラッグで並び替え、
-                                            ドロップでデータがスロット間を移動）。最大 4 名。
-                                            旧チェック順採番値(1..4)は起動時に 1 へ移行)
-```
-
-##### `tournamentInfo`
-
-```
-tournamentInfo
-├── tournamentName
-├── themeColor / accentColor       ※**大会共通カラー**（大会情報ページ「大会カラー」カードで編集。`PATCH /api/v1/colors/tournament`）。
-│                                    既存テンプレ互換のため StateManager に展開する表示用キャッシュで、
-│                                    永続化の正本ではない（正本は SettingsManager.general.theme_color / accent_color）。
-│                                    機能別に上書きしたい場合は下記 `colors.{feature}` を使う
-│                                    （キー名は後方互換のため変更しない）。
-├── displayTournamentName          ※編集 UI は SCORE タブ（と大会名の追従）。下記注記参照。
-├── eventName / address / numEntrants / startAt
-│                                  ※大会情報ページ（React `/web/event`）の入力欄。書き手は
-│                                    `core/TournamentInfoService.py` のみ（入力・provider 両方向）。
-│                                    ページは `PATCH /api/v1/tournament/info` で書く。その field 名は
-│                                    `StateSchema.TOURNAMENT_INPUT_KEYS`（3 つの文字列・`numEntrants`・
-│                                    `startAtDate`。ADR-005 S4g）。
-│                                    `startAt` は短縮日付文字列（ロケール依存の整形済み）
-├── startAtDate                    ※`startAt` の日（`YYYY-MM-DD`、PC のタイムゾーン。null と一緒に null）。
-│                                    日付の入力欄（`<input type="date">`）はこれを描き、
-│                                    `TournamentInfoService.SetDate` で書く
-│                                    （その日の 0 時の unix 秒への変換は core。ADR-005 S4f）
-├── endAt / eventStartAt / eventEndAt
-│                                  ※タブに入力欄を持たない provider 由来の日時。短縮日付文字列で公開
-├── logoVersion                    ※`./layout/logo.png` の mtime（OBS のキャッシュバスト用）
-├── bannerVersion                  ※`./user_data/tournament_banner.png` の mtime（0 = 未登録。既定のバナーを使う）
-├── media                          大会アイコン / バナーの取得の状態（起動のたびに idle へ戻る）
-│   ├── status                     idle | running | done | error
-│   ├── error                      error の理由（`no_media` / `fetch_failed` / `save_failed` /
-│   │                                `superseded` / `cancelled`）
-│   └── revision                   取得を始めるたびに 1 増える（予約された次の取得も 1 回と数える）
-├── url                            最後に設定した大会の URL（`TOURNAMENT_URL` の写し。無ければ ""）
-│                                  ※Hivee の URL はトークンを伏せた形（`token=***`。§7.10 の Hivee）
-├── load                           大会の設定 / 解除の進み具合（`media` と同じ形。ADR-005 S4g レビュー M1）
-│   ├── status                     idle | resolving | loading | loaded | error（起動のたびに idle へ戻る）
-│   ├── error                      error の理由（`unresolved` / `load_failed`）
-│   └── revision                   設定 / 解除のたびに 1 増える（進み具合では増えない。再起動でも戻らない）
-└── {provider 由来}                (`shortLink` 等。ペイロードの残りをそのまま透過)
-```
-
-大会アイコン / バナーのファイル（`./layout/logo.png` は長辺 512、`./user_data/tournament_banner.png`
-は長辺 1920 の PNG）と `logoVersion` / `bannerVersion` / `media` の書き手は
-`core/TournamentMediaService.py`（取り込み・取得のジョブ・既定に戻す。ADR-005 S4f）。画像の検証・縮小・
-原子的な書き込みは配信団体素材と共通の `core/ImageImport.py`。`bannerVersion` は state なので、React のページ（サムネイル /
-リザルトのプレビュー）はそれを見て描き直す。大会の設定・解除（`TOURNAMENT_URL`）は
-どの入口からでも `core/TournamentService.py` を通り、解除はゲーム選択も忘れる。`url` / `load` の書き手も
-`TournamentService`（設定 / 解除の受け付け時に、要求したスレッドで publish する。`POST` / `DELETE /api/v1/tournament` の
-202 はその後。起動時のシードは `StateSchema.SeedPanelState()`）。
-
-##### `colors` — 機能別カラーの上書き
-
-```
-colors
-└── {feature}                      board / thumbnail / result / top8 / commentary / stats
-    ├── themeColor                 ※表示用キャッシュ（正本は SettingsManager.colors.{feature}.theme_color）
-    └── accentColor                ※同上（正本は SettingsManager.colors.{feature}.accent_color）
-```
-
-- 各機能のページの「〜の色」カードで編集する（共通実装は Web の `FeatureColorCard`（`web/src/CommentaryPage/SideCards.tsx`）と `src/core/ColorService.py`）
-- **明示設定がある feature のみ**が state に現れる（`Window._SeedPanelState()` → `SeedColorState()`）。
-  未設定の feature はノードごと存在しないので、レイアウト JS 側の
-  `colors.{feature}` → `tournamentInfo` フォールバックが自然に効く（§5.5.3）
-
-##### `stream` — 配信単位の設定（配信設定ページ）
-
-```
-stream
-├── url                            配信先 URL（X 投稿・リザルトが参照）
-├── title                          配信タイトル
-├── titleAuto                      自動生成が最後に作ったタイトル（`title` がこれか空なら自動のタイトル）
-├── orgIconVersion                 layout/stream_org_icon.png の mtime（0 = 未登録）
-├── orgThumbVersion                layout/stream_org_thumbnail.png の mtime（0 = 未登録）
-└── thumbnail                      配信サムネ生成の状態（起動のたびに idle へ戻る）
-    ├── status                     idle | running | done | error
-    ├── path                       最後に生成できた画像（`out/stream/thumbnail_*.jpg`。error でも前回のまま）
-    ├── error                      error の理由（`no_org_thumbnail` / `no_banner` / 例外の文言）
-    └── revision                   生成を受け付けるたびに 1 増える
-```
-
-書き手はすべて core の `src/core/StreamService.py`（ADR-005 S4d。`url` / `title` は
-`AutonaActions.SetStreamUrl` / `SetStreamTitle` 経由）。`title` は大会名・ゲーム略称（state の
-observer）と上位の参加者（provider が `StreamService.SetTopEntrants` で渡す）から自動生成し、
-生成のたびに `titleAuto` に publish する。`title` は、それが前回の自動値（`titleAuto`）か空のときだけ
-上書きする（`TitleIsAuto`。手入力を守る）。`titleAuto` は state と一緒に永続化されるので、手入力の
-タイトルは再起動しても残る（`titleAuto` の無い S4d 前の state では、`title` を自動の値として扱う）。
-クライアントの入力欄は、打ちかけを送る前に `TypedTitleWins` で送るかを決める（打っている間に
-届いた自動のタイトルには打ちかけが勝ち、別の書き手のタイトルには負ける。React の配信設定ページは同じ規則の
-TypeScript 版 `web/src/StreamPage/titleRule.ts` を使い、両者は同じ表 `titleRule.cases.json` で照合する。
-ADR-005 S4e）。ページが開かれていなくても・ヘッドレスでも動く。
-
-**`thumbnail.*`（試合サムネイル。ADR-005 S4o）**
-
-```
-thumbnail
-└── render                         サムネイル描画の状態（起動のたびに idle へ戻る。revision は続く）
-    ├── status                     idle | running | done | error
-    ├── path                       最後に生成できた PNG（`out/thumbnails/*.png`。プレビューと error では前回のまま）
-    ├── error                      error の理由（`no_game` / `no_player` / `payload_failed` / `render_failed` / `save_failed` / `cancelled`）
-    └── revision                   run ごとに 1 増える（`POST /thumbnail:preview` / `:generate` の 202 の `renderRevision`）
-```
-
-書き手は core の `src/core/ThumbnailService.py` だけ。`stream.thumbnail` と同じ形で、SCORE の同期の生成と legacy の
-`get-thumbnail` は通らない（どちらも state を書かず、legacy は今までどおり画像のバイトを返す。内部では保存した PNG のパスを
-`send_file` に渡す）。その 2 つ（と X 投稿のクリップボードの画像）は
-ADR-005 S4y から `ThumbnailService.DrawBoard(board, draw)` を同期で呼ぶ（描き手はデスクトップのオフスクリーンの
-`AutonaShellOperations.DrawThumbnailNow`。ボードのウィジェットを通らず、legacy はボードを構築しない）。
-v1 の `POST /thumbnail:generate` は body の `board`（1 / 2。省略はボード 1）のボードを描き、そのボードの選手の名前で保存する
-（ADR-005 S4z。React の SCORE ページの生成ボタン用。preview はサムネイルのページの絵なのでボード 1 のまま）。
-プレビュー画像（`GET /thumbnail/preview`）はボード 1 の絵だけで、どの経路でも別のボードの絵で preview に答えない（S4z レビュー）:
-ボード 1 の generate はプレビュー画像も書き、予約の preview を兼ねる（今までどおり）。ボード 2 の generate はプレビュー画像を
-書かず、予約の preview を兼ねない（予約があれば generate の後に続けてボード 1 の preview を描く。`RenderLane._GenerateDrawsPreview`）。
-
-**`result_players` / `result_teams` / `result_render` / `result_standings` / `result_layout`（大会リザルト。ADR-005 S4q / S4r）**
-
-```
-result_players
-└── {1..16}                        単独のレイアウトの行
-    ├── rank / name / sponsor / twitter
-    ├── character                  1 体目（`Top8Service.CharacterValue` の形。空は {}）
-    └── characters                 欄の並び（最大 3。空の欄は {} で位置を保つ。末尾の空は持たない）
-result_teams
-└── {1..8}                         団体のレイアウトの行
-    ├── rank / name
-    └── members                    最大 5: {name, twitter, character}
-result_render                      描画の状態（thumbnail.render と同じ形）
-├── status                         idle | running | done | error
-├── path                           最後に作成できた PNG（`out/results/*.png`）
-├── error                          no_data / payload_failed / render_failed / save_failed / cancelled
-└── revision                       run ごとに 1 増える（`POST /result:preview` / `:generate` の 202 の `renderRevision`）
-result_standings                   standings の取り込みの状態
-├── status                         idle | running | done | error
-├── error                          fetch_failed / no_standings / changed / import_failed
-└── revision                       取り込みごとに 1 増える（`POST /result:loadStandings` の 202 の `standingsRevision`）
-result_layout                      今のレイアウトの写し（文字列。正本は settings.json の result_config.layout。選ばれるか対戦形式に追従するまで ""）
-```
-
-行の正本は state で、`state.json` に残る（「すべてクリア」= `POST /result:clear` まで消えない）。書き手は core の
-`src/core/ResultService.py` だけ（ADR-005 S4r で Qt パネルと `AutonaActions.PublishResultPlayers` を削除した）。パネルが
-`result_players` に残した団体の行（`members` を持つ行）は、起動のたびの `StateSchema.SeedPanelState()` が消す。`result_render` と
-`result_standings` は起動のたびに idle へ戻る（revision は続く）。行はシードしない（無い行は既定値で読む）。
-`result_layout` はページがレイアウトの変化を知るための写しで、起動のたびに `""` へ戻り、`ResultService.SetLayout` /
-`FollowBattleFormat` が書く（サイドバーの対戦形式の切り替えはページの操作ではなく、レイアウトが保存されていなければ設定にも書かれない）。
-保存された別のゲームのキャラ（再起動をまたいでゲームが変わった場合など）は state に残り、`ResultService` の読みで無いものとして
-扱う（描かない・スコアボードからの補完が効く・ページにも空で返す）。ゲームの切り替えで消す `ForgetCharacters` は今までどおり。
-
-> **データ階層を混ぜないこと**: `tournamentInfo.*`（大会: 名前・日付・会場・大会アイコン/バナー）、
-> `stream.*`（配信: 配信先・配信タイトル・配信団体素材）、`score.{N}.*`（試合: 選手・スコア・
-> ラウンド）はそれぞれ別のライフサイクルを持つ。配信先は「大会ごとに変わるとは限らない配信
-> チャンネル」なので `stream.*`。
->
-> **`score.{N}` に置いてはいけない理由**: `score.{N}` は 反映（held subtree, §3.2.x）で
-> ゲートされる。過去に配信先を `score.{N}.stream_url` に置いた結果、(1) 「反映」を押すまで
-> Web UI / OBS に届かない、(2) 全ボードへミラーすると非表示側のボードまで dirty になる、
-> (3) 起動時の score サブツリー wipe で消える、が同時に発生した。`stream.*` /
-> `tournamentInfo.*` は非ゲート・ボード非依存・永続。
->
-> `displayTournamentName` が `tournamentInfo` にあるのも同じ理由（編集 UI は SCORE タブだが
-> 大会単位のデータ）。
->
-> `orgIconVersion` / `orgThumbVersion` は `tournamentInfo.logoVersion` と同じキャッシュバスト
-> 用 mtime。素材を読むオーバーレイが `/layout/stream_org_icon.png?v={version}` の形で参照する
-> ための契約としてキーを残している（2026-10-31 時点で、同梱のオーバーレイにこれを読むものは無い）。
-
-##### `analysis` — この大会の試合一覧の取得（ADR-005 S4j）
-
-```
-analysis                           最新の取得の進み具合（1 つの dict をまとめて書く。起動のたびに idle へ戻る）
-├── status                         idle | running | done | error
-├── error                          error の理由（`no_phases` = 大会に phase group が無い /
-│                                    `fetch_failed` = フェーズの要求が失敗した・どの group の要求も失敗した。
-│                                    要求が通って sets が空の group は「答えた」と数える）。それ以外は ""
-├── done / total                   取得し終えた phase group の数 / 全数（フェーズの取得中は total 0）
-├── failed                         行を作れなかった group の数（答え無し・sets 無し・ブラケットを組めない）
-└── revision                       取得を受け付けるたび・結果を捨てるたびに 1 増える（再起動でも戻らない）
-```
-
-書き手は core の `src/core/AnalysisService.py` だけ。**行そのものは state に入れない**（大会規模で数百〜千超。
-delta・`program_state.json`・`out/` が膨らむ）: サービスのメモリに、取得した大会の URL と組で持ち、
-`AnalysisService.Result()` / `Rows()` で読む（`ResultRevision()` は行を写さずにどの行かだけを返す）。provider には
-strict で頼む（`StartGGDataProvider.GetTournamentPhases` / `GetAnalysisPhaseGroup` の `strict=True`。要求の失敗を
-空の答えにせず例外にする）。行は表示文字列ではなく構造（`round` と並べ替えキー `roundOrder`・
-`p1` / `p2` の `{seed, name}`・`score`（未完了は null）・`upset` / `losersRun` / `seedOver`）で、
-「TBD」「(seed N)」「-」は表示側の文言。大会を読み込み直す・解除すると、provider のアダプタ
-（`LoadTournament` / `UnloadTournament`）が provider を差し替えた直後に `Forget()` を直接呼び、取得の残りと
-行を捨てて idle にする（差し替えの前に捨てると、その間に別スレッドから来た取得が旧大会の行を新大会のものにしうる）。
-起動時のシード（`StateSchema.SeedPanelState()`）は idle で、revision は保存された値を引き継ぐ。
-外からは v1 の `POST /api/v1/analysis:refresh`（取得の開始。202 / 実行中は 409 `CONFLICT` / 大会なしは 409 `NOT_READY`）と
-`GET /api/v1/analysis`（`{status, url, rows}`。今読み込んでいる大会の行だけ。ADR-005 S4k）で使う。統計情報ページの
-「この大会の試合一覧」タブが読み手。
-
-##### `set_selection` — セット選択の一覧の取得（ADR-005 S4v）
-
-```
-set_selection                      リストごとの進み具合（起動のたびに idle へ戻る）
-├── phases                         大会のフェーズ
-├── sets                           セットの一覧
-└── stations                       配信台と配信
-    （それぞれ 1 つの dict をまとめて書く）
-    ├── status                     idle | running | done | error
-    ├── error                      error の理由（`fetch_failed` のみ）。それ以外は ""
-    ├── done / total               取得し終えたページ / 全ページ（`sets` のみ。total 0 はまだ分からない）
-    ├── failed                     done の答えから欠けているもの（取れなかったページと読めなかったセットの数）
-    └── revision                   取得を受け付けるたび・止めるたび・大会を変えるたびに 1 増える（再起動でも戻らない）
-```
-
-書き手は core の `src/core/SetSelectionService.py` だけ。**行そのものは state に入れない**（`analysis` と同じ理由）:
-サービスのメモリに、取得した大会の URL と組で持ち、`SetSelectionService.Result(kind)` で読む。provider には strict で頼む
-（`GetTournamentPhases` / `GetMatches` / `GetStations` の `strict=True`）ので、`error` は取得の失敗、行が空の `done` は
-「一覧に何も無い」。行は表示文字列ではなく決まったキーだけの構造で、実名・SNS・キャラを含まない（`SetRow` ほかのホワイトリスト。
-「 (A, B)」などの文言は表示側）。大会を読み込み直す・解除すると、provider のアダプタが provider を差し替えた直後に
-`Forget()` を直接呼び、走っている取得を捨てて全リストを次の revision の idle にする。`phases` / `stations` の行は捨て、
-`sets` の行は URL と組で残す（同じ大会を読み直すと戻る。ADR-005 S4ac-3 で削除した Qt のセット選択ウィンドウのキャッシュと同じ）。
-起動時のシード（`StateSchema.SeedPanelState()`）は idle で、revision は保存された値を引き継ぐ。
-外からは v1 の `POST /api/v1/tournament/{phases,stations,sets}:refresh`（取得の開始。202 / 実行中は 409 `CONFLICT` /
-大会なしは 409 `NOT_READY`）・`POST /api/v1/tournament/sets:cancel`・`GET /api/v1/tournament/{phases,sets,stations}` で使う
-（`docs/architecture/external-control-api.md` §5.18・§7.3）。Qt のセット選択・配信台ウィンドウ（この state を読まず、
-provider のアダプタと窓自身のキャッシュを通っていた）は ADR-005 S4ac-3 で削除した。React の SCORE ページのセット選択・配信台のダイアログ（ADR-005 S4ab。`web/src/ScorePage/SetSelection.tsx`）は
-この state を読む: 進み具合（`done` / `total`。total 0 は不定のバー）と状態の文言を描き、リストの `revision` / `status` が
-変わったとき（running へ変わったときを除く）とダイアログを開いたときに GET を読み直す。行の文字列の規則（ダブルス・完了したペア）は
-`web/src/ScorePage/setRows.ts` で、`setRows.cases.json` を jest と `tests/test_set_selection.py`（core。2 つの窓との照合は S4ac-3 で窓ごと削除）が読む。
-
-##### `ui` — UI 表示用キャッシュ
-
-旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。
-現在 `ui` 配下に broadcast 用キーは無い。
-
-##### `notes` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
-
-> `layout_options` は書き手も読み手も無い（オーバーレイにも Web UI にも読み手が無く、ADR-005 S4s で
-> `SetLayoutOption` と `LayoutOptionsManager` を削除）。古い `state.json` に残っていれば残ったままで、
-> `KEY_CATALOG` の名前も消していない（移行 step を足すほどの実害が無いため）。
->
-> 旧 `player_list.*`（PLAYERS 順位ロスター編集）は機能ごと廃止（layout/top_8 と共に削除、
-> Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。残留キー（`player_list` /
-> `player_editor`）は起動時に `Window._SeedPanelState()` が Unset する。
->
-> 旧 `team_battle.*`（チームバトル編集）は `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget`
-> の削除（2026-08-28）に伴い廃止。クルーバトル（board 3）は別キー `score.3.*` に統合済みで
-> `team_battle.*` を書き込むコードは存在しない（player_list と異なり自動 Unset 処理はなく、
-> 既存 `program_state.json` に残留する場合がある）。
-
-キー定義の正本は `src/core/StateSchema.py`（`KEY_CATALOG`）。
-
-#### 3.1.3 動的キーパスの規約
-
-かつては以下の 4 族が Qt の `objectName()` から動的に決まっていた。Headless Core
-Step 5（T-19）で順に静的化し、**全族が完了**（`StateSchema.DYNAMIC_KEY_FAMILIES`
-は空になった）:
-
-| 族 | 状態 |
-|----|------|
-| `score.{N}.team.{T}.{QCheckBox/QLineEdit.objectName}` | ✅ 静的化（`StateSchema.SCORE_TEAM_INPUT_KEYS` = `teamName` / `losers`。書き手は `AutonaActions`） |
-| `score.{N}.{QComboBox.objectName}` | ✅ 静的化（`StateSchema.SCORE_MATCH_FIELDS` = `phase` / `pool` / `match`。書き手は `AutonaActions`） |
-| `score.{N}.team.{T}.player.{M}.{objectName}` | ✅ 静的化（`StateSchema.PLAYER_INPUT_KEYS`。書き手は `core/PlayerService.py`） |
-| `tournamentInfo.{Q*.objectName}` | ✅ 静的化（`StateSchema.TOURNAMENT_{TEXT,NUMBER,DATE}_FIELDS` = `tournamentName` / `eventName` / `address` / `numEntrants` / `startAt`。書き手は `core/TournamentInfoService.py`。Qt の EVENT タブは ADR-005 S4g で React のページになり、`.ui` は削除済み） |
-
-**規約**:
-- **キー名は静的化後も不変**（`.ui` の `objectName` を変更するとキーパスが変わり、保存済み state と互換性が壊れる。静的化済みの族でも `StateSchema` の文字列と `objectName` が一致していなければ `findChild` が解決できず同じ結果になる）。やむを得ず変える場合は state のマイグレーション層が前提。
-- **新規追加は §3.1.2 に静的キーパスとして明記し、`StateSchema` に定数を置く**。動的キーパスの新規追加はしない。
-
-### 3.2 同期経路の規約
+### 3.2 同期経路
 
 #### 3.2.1 全体図
 
 ```
-┌────────────────────────┐
-│ ユーザー操作            │
-│  - PyQt UI             │
-│  - React Web UI        │
-│  - REST/Socket from OBS│ (運用上は read-only)
-└────────────┬───────────┘
-             │
-             ▼
-┌─────────────────────────────────┐
-│ AutonaActions (src/core, Qt-free)│
-│  移行済み操作の唯一の書き手      │
-│  (R-Sync-1b)                    │
-│ AutonaWebOperations             │
-│  Web/外部の唯一の入口            │
-│  （両シェル共通。S3e-9）         │
-│  シェルの違いは登録だけ:         │
-│  ゲームのローダー・              │
-│  シェル操作（ヘッドレス503）     │
-└────────────┬────────────────────┘
-             │ StateManager.Set / Unset / SaveBlock
-             ▼
-┌─────────────────────────────────┐
-│ StateManager (src/core, Qt-free)│
-│ - DeepDiff で delta 算出        │
-│ - revision を単調増加で付与      │
-│ - adaptive debounce (50/100/200ms)│
-│ - 通知は StateManager.observers │
-│   （素の callback、Qt 非依存）   │
-└──┬───────────┬───────────┬──────┘
-   │           │           │
-   │ delta     │ snapshot  │ observer 通知
-   ▼           ▼           ▼
-┌──────────┐ ┌────────────┐ ┌───────────────────────┐
-│ Socket.IO│ │./out/program│ │ StateManagerBridge     │
-│ broadcast│ │_state.json  │ │ (Qt adapter, 同名シグナル│
-│          │ │(degraded用) │ │  4本を re-emit)         │
-└──┬───────┘ └─────┬──────┘ └──────────┬─────────────┘
-   │               │                   │
-   ▼               ▼                   ▼
-OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
-(Socket.IO + revision 検証)                      (Bridge 経由で接続)
-```
-
-**ヘッドレス起動**（`python main.py --headless`、ADR-005 S3c。`src/headless.py`）では、右下の PyQt UI が無い。
-QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（デスクトップと同じ core の
-`GameLoader`。`bootstrap_core()` が 1 つ作り、両シェルが共有する: ADR-005 S-final SF-6c。SF-6b まではヘッドレス専用の写し
-`HeadlessGames` のローダー。Qt モデルは Qt モデルの整理 PR4 でデスクトップからも無くなった）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
-`wire_web_server`。Web のボードの操作は両シェルとも同じボードホスト `AutonaWebOperations.boardHost`（`BoardHost`）を通り、
-呼び出し元のスレッドで 1 本の再入可能ロックの下で走る（ADR-005 S4ad。それまでデスクトップは `DesktopBoardHost` が GUI スレッドで走らせていた）。
-ボードは held にならず（`MakeBoards` を `panel` なしで呼ぶ。S4ac-1）、
-書き込みは即時公開される。503 `UNAVAILABLE` を返すのは、デスクトップの画面が要るシェル操作（セット選択を
-開く `open_sets`（SCORE のページのダイアログ。S4ab-2。Qt の窓は S4ac-3 で削除）・サムネイル `get_thumbnail`・v1 の `POST /thumbnail:preview` / `:generate`。デスクトップは `bootstrap_gui()` が
-`AutonaWebOperations.openSetSelection` / `renderThumbnail` / `startImageRender` に、シェルのアダプタ
-`AutonaShellOperations`（S4y でスコアボード dock から移した）の同名の操作を登録する）だけで、ほかの Web 操作は
-すべて動く（ADR-005 S3e-9・S4o）。終了の開始（バックグラウンドの仕事を止めた後・イベントループの終了後）からは、
-リクエストのボードの操作も何も書かずに 503 を返す（ボードホストの `Run`。両シェル同じ。S4ad のレビュー）。
-
-**シェル要求**（ADR-005 S-final SF-5a-1。デスクトップだけ・HTTP のルートではない）: 共有ビュー（`src/AutonaWebPanelHost.py`）のページがデスクトップ自身に頼むこと
-（動詞 `alwaysOnTop` / `checkUpdates` / `openExternal`）の経路。特権のチャネル（QWebChannel・注入したスクリプト）は作らない。
-
-```
-React のページ（web/src/PanelShell/hostApi.ts）
-  1. マウント時: GET /api/v1/shell-session → チケット（SHELL 区分: 共有ビューの fetch だけが読める。モジュールの中にだけ持つ）
-  2. クリックの中: window.open("<本体のオリジン>/web/shell-request?verb=…&request=<id>&ticket=…[&引数]")
+ユーザー操作（React・外部連携・ホットキー）
         │
         ▼
-_PanelPage._OpenOutside（ほかのどの分岐より先に IsShellRequestShaped で引き取る。既定のブラウザへは渡さない）
-  → クリックから（isUserInitiated）か・ParseShellRequest（オリジン・パス・キー・値・チケットの一致・頼んだページ）
-  → shellRequested → AutonaWebPanelHost が QTimer.singleShot(0) でイベントループに出てから
-        │
+AutonaWebOperations（Web/外部の唯一の入口。両シェル共通）
+        │      ボードの操作は boardHost（1 本の RLock の下で 1 つずつ）
         ▼
-AutonaShellOperations.ShellRequest(verb, args)（Window が AutonaWebPanelHost(shell=...) で注入）
-  - alwaysOnTop: Window.SetAlwaysOnTop（Window の bool `_alwaysOnTop` が正本。起動をまたいで保存しない。SF-5b-3 まではメニューのチェック）
-  - checkUpdates: AutonaUpdater.CheckForUpdates(silent=False)（確認中なら busy）
-  - openExternal: src/AutonaExternalLinks.py の決まった表のキーだけ（URL は受けない。AppShell の externalLinks.ts が同じアドレスの写し。SF-5b-3 まではメニューもこの表を読んだ）
-        │
-        ▼
-window.autonaPanelShell.shellResult(id, 結果)（頼んだ文書にだけ。json.dumps だけを入れる）
-window.autonaPanelShell.shellState(状態)（読み込みのたびと、SetAlwaysOnTop → PublishShellState で変わるたび）
+AutonaActions / core のドメインサービス ──► StateManager.Set / Unset / SaveBlock
+                                              │ DeepDiff で delta・revision を単調増加で付与
+                  ┌───────────────────────────┼───────────────────────┐
+                  ▼                           ▼                       ▼
+          Socket.IO 配信              out/program_state.json      observers → Bridge → Qt
+        （React・OBS）                (degraded・外部契約)
 ```
 
-チケットはシェルの秘密（共有ビューの fetch に付くヘッダ）とは別の値で、プロセスで 1 回作りメモリにだけ持つ（`core/WebAccess.IssueShellTicket`）。
-シェル要求の形の URL（パスに `shell-request` があり、本体のオリジンかクエリに `ticket` のキーがあるもの）は遷移でも行かせない（`acceptNavigationRequest`）。
-規則の詳細は [.claude/rules/state-and-webserver.md](../../.claude/rules/state-and-webserver.md) の共有ビューの節と [external-control-api.md](external-control-api.md) §5.30。
+- 書き込みの入口は `AutonaWebOperations` 1 つ。デスクトップとヘッドレスの違いは、シェルが登録する操作だけ（デスクトップはシェル操作 3 本 `openSetSelection` / `renderThumbnail` / `startImageRender` を登録し、ヘッドレスは登録しないので 503 `UNAVAILABLE`）。
+- ヘッドレスは held にしない（書き込みは即時公開）。ボードの操作は両シェルともリクエストのスレッドで走り、終了の開始からはメインスレッド以外の `Run` を 503 で断る。
+- **共有ビューからのシェル要求**（デスクトップだけ・HTTP ルートではない）: 共有ビューのページがデスクトップに頼むこと（`alwaysOnTop` / `checkUpdates` / `openExternal` / `pickFolder`）は、`GET /api/v1/shell-session` のチケットを URL に入れた `/web/shell-request?verb=…` を開く形に限る。ホスト（`AutonaWebPanelHost`）が検査して `AutonaShellOperations.ShellRequest` を実行する。特権のチャネル（QWebChannel・注入スクリプト）は作らない。規則は `.claude/rules/state-and-webserver.md` の共有ビューの節。
 
 #### 3.2.2 書き込み規約
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず Web 操作経由**（`AutonaWebOperations`。ADR-005 S3c。ボード依存の `WebServerActions` は S3e-9 で削除）。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も Web 操作経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2。書き手台帳は `tests/test_objectname_keypath_contract.py`）。`src/core` 外に残る書き手は `AutonaTournamentDataProvider`（`provider_videogame`）の 1 つだけで、Qt ウィジェットではない provider 層（`game.*` は 2026-10-23 の ADR-005 S1a で `src/core/GameAssetCatalog.py` へ移動）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
-| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル（第 5 弾。同じ弾のリザルト順位は ADR-005 S4r で `core/ResultService` へ、実況スロットは ADR-005 S3e-2 で `core/CommentaryService` へ移った。下記）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴを 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOfs`）**（ADR-005 S2e。`best_of` の 6 キーを 1 保存サイクルで書く（ゲームトラッカーの行も同じサイクルで作り直していた。ADR-005 S4ac-4 でトラッカーごと削除）。BEST OF のスピンボックスは state を描画していた（ADR-005 S4ac-3 で Qt の SCORE ごと削除）。旧実装はスピンボックス主導だった）、**人数・キャラ数（`SetRoster` / ゲームのロードの `ApplyGameRoster`）**（ADR-005 S3e-6。選手スロットとキャラ枠の増減・1 人になるときのチーム名のクリアを 1 保存サイクルで書く。旧実装は Qt のボードの 2 つのスピンボックス（`playerNumber` / `charNumber`）とカードが書き、ヘッドレスでは変えられなかった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、REST v1（React の SCORE ページ）・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。Qt の SCORE（state 通知を受けて表示だけを更新していたボードのウィジェット）は ADR-005 S4ac-3 で削除した。<br>**ゲームトラッカーは削除した**（ADR-005 S4ac-4、2026-11-12。オーナー承認 2026-11-11）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合（core の `GameTrackerService`。Step 4a で Qt から core へ移していた）・v1 の `GET /stages` と `PATCH /scoreboards/{n}/stages/{game}`・設定 `general.disable_individual_game_tracker`。行のボタン（Qt の `AutonaIndividualGameTracker`）は S4ac-3 で Qt の SCORE ごと消えており、React の SCORE ページにも出していなかった。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードの操作（ストック・出場中のメンバー・人数・スワップ・リセット・クリア・`best_of`。チーム合計がメンバーストックの派生値なので Actions に載せず、ADR-005 S3e-2 から Web は `CrewBattleService` の操作を呼ぶ。Qt のクルーボードの入力欄も同じ操作を呼んでいた（S4ac-3 で削除））/ **実況の 12 スロット**（`commentary.*`。ADR-005 S3e-2 から書き手は `core/CommentaryService` で、パネルの入力欄も Web の `set_commentary_data` / `load_commentator_from_tag` も同じ関数を呼び、パネルは state を描画するだけ）/ **選手スロットの読込・クリア・DB 保存**（`score.{n}.team.{t}.player.{m}.*`。ADR-005 S3e-3 から `core/PlayerService` の `ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決まで）/ `ClearSlot` / `SavePlayerToDB` で、セットの entrants・Web の選手編集・タグからの読込・補完の選択・クリアが同じ操作を呼ぶ。React の SCORE ページの欄の編集のために、選手の欄（文字の欄・国・地域）とキャラ行の 3 コンボの書き込みを 1 回の lock と 1 保存サイクルで組む `Edit` / `EditCharacter` もある（v1 の `PATCH .../players/{p}/fields` / `.../characters/{row}`。ADR-005 S4z。欄ごとの操作を呼んでいた Qt のカードは S4ac-3 で削除。同じ match バーの v1 は `PATCH /scoreboards/{n}/match` で、`SetMatchField` / `SetBestOf` を呼ぶ）/ **スコア欄への数値の手入力**（v1 の `score:set` = `AutonaActions.SetScore`。ADR-005 S4x。Qt のスピンボックスの `valueChanged` も同じ操作を呼んでいた（S4ac-3 で削除）。それまでは `GameTrackerService.UpdateScore` を呼んでいた（削除済み）。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 2 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。2 者は state 経由でのみ噛み合う（3 系統目のステージ集計 `GameTrackerService.PublishStageResults` は ADR-005 S4ac-4 でトラッカーごと削除）。 |
-| **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
-| **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
-| **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
+| **R-Sync-1** | ① React / 外部からの書き込みは必ず `AutonaWebOperations` 経由。② OBS HTML は read-only。③ Qt のウィジェットは `StateManager.Set` / `Unset` を呼ばない。④ 複合操作・正規化を伴う操作は Actions 層（`src/core/Actions.py`）か core のドメインサービスに置く。⑤ `src/core` 外の書き手は `AutonaTournamentDataProvider` の 1 つだけ（台帳: `tests/test_objectname_keypath_contract.py`）。⑥ state の Qt シグナルは `StateManagerBridge.instance` が出し、core に Qt シグナルを足さない。 |
+| **R-Sync-1b** | `AutonaActions.instance` に移した操作（スコア・チームカラー・表示トグル・反映・match バー・チーム名 / LOSERS・best of・人数・スワップ・クリア・配信 URL / タイトル・対戦形式・ゲームのロードの commit ほか）はそこ以外が書かない。書き込みの実装が core にある操作でも、入口が Actions に一本化されていないものがある（クルーボード = `CrewBattleService`、実況 = `CommentaryService`、選手スロット = `PlayerService`、スコアの手入力 = `SetScore`）。`score.{n}.team.{t}.score` の core 内の書き手は `AutonaActions` と `SetLoadService.ApplyScores`。操作の一覧と規則は `.claude/rules/state-and-webserver.md`。 |
+| **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():`。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外で漏れる）。 |
+| **R-Sync-3** | 同一トランザクションの複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる。 |
+| **R-Sync-4** | 競合は**後勝ち**。同時操作の検出・拒否はしない。 |
 
 #### 3.2.3 配信規約（broadcast）
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-5** | StateManager は変更ごとに **`revision`**（単調増加の整数）を付与する |
-| **R-Sync-6** | `program_state_update` イベントには `{ revision, first_revision, delta }` を含める。サーバーの delta coalescing は複数の `state_updated` emit（= 複数 revision）を 1 メッセージへ結合するため、payload は連続区間 `[first_revision, revision]` を表す。`first_revision` 欠落時（旧 payload）はクライアントが `revision` 単一と見なす。同一 revision 内で複数 chunk に分けて送る必要がある場合は `{ revision, chunk_index, chunk_total, delta }` の形式で chunk 順序を保証する |
-| **R-Sync-6a** | `delta` の行は受信順に 1 行ずつ適用できる（結合された revision の区切りはメッセージに無い）。リストは位置ごとに比べるので、行は各位置の値と末尾の増減だけで、型の変更も値を省かない（`SaveState` のオプションと `web/src/stateDelta.cases.json`。詳細は `.claude/rules/state-and-webserver.md`） |
-| **R-Sync-7** | `program_state` イベント（full snapshot）には `{ revision, state }` を含める |
-| **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
-| **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
-| **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` 通知（core の observer 発火 → `StateManagerBridge` が同名 Qt シグナルを re-emit）。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
-| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される（デスクトップの起動時から、見せていない面も。`AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまではボードのウィジェットの構築で登録した。ヘッドレスは保留しない）。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込時は自動コミット（ローダーの `GameLoader._Publish` の `CommitGameLoad`。旧 `GameAssetManager.onLoad`）。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`src/core/StateSchema.py` の `STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェットは `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
-| **R-Sync-12** | **値を運ばない通知**（state の外のものと未公開のものを React のページに知らせる合図）: `scoreboard_pending`（`{board, dirty}`。未反映の編集。ADR-005 S4u）・`scoreboard_follow`（`{board}`。追従。S4v）・`battle_format`（`{}`。対戦形式。S4z）。どれも `program_state_update` と同じ flusher が、同じ送信の delta の後にこの順で送る。クライアントは通知の後に始めた GET（`/scoreboards/{n}/pending`・`/follow`・`/battle-format`）の答えを使い、接続の直後は 1 回読む。規則の詳細は [external-control-api.md](external-control-api.md) §4・§5.15・§5.17・§5.21 と [.claude/rules/state-and-webserver.md](../../.claude/rules/state-and-webserver.md) の Web サーバーの節。**例外の `status`**（`{revision, jobs}`。アプリの実行中の仕事 = デスクトップのフッターの源 `core/StatusService`。ADR-005 S-final SF-2）は値を運び、接続の直後にも 1 回届く。同じ flusher が上の 3 つの後に送る（§5.23） |
+| **R-Sync-5** | StateManager は変更ごとに `revision`（単調増加の整数）を付ける。 |
+| **R-Sync-6** | `program_state_update` は `{revision, first_revision, delta}`。delta coalescing が複数の revision を 1 メッセージに結合するので、payload は連続区間 `[first_revision, revision]` を表す。`first_revision` が無い旧 payload は単一 revision と見なす。 |
+| **R-Sync-6a** | `delta` の行は受信順に 1 行ずつ適用できる（結合の区切りはメッセージに無い）。リストは位置ごとに比べ、型の変更も値を省かない。成り立たせる `SaveState` のオプション（`DeepDiff(zip_ordered_iterables=True)` / `Delta(always_include_values=True)`）を外さない。pin: `web/src/stateDelta.cases.json`（pytest と jest が読む）。 |
+| **R-Sync-7** | `program_state`（全量）は `{revision, state}`。 |
+| **R-Sync-8** | クライアントは区間 `[first_revision, revision]` が「前回適用 + 1」を含むことを検証し、含まなければ `program_state` を再要求して全量で再構築する。 |
+| **R-Sync-9** | reconnect 時は必ず全量を取り直す。 |
+| **R-Sync-10** | adaptive debounce: delta が少ないほど短い窓（50 / 100 / 200 ms。大量なら `state_big_change` も通知）。**leading-edge flush**: 直近の flush から静かだったら最初の delta は即時送る。間隔と payload は外部契約（pin: `tests/test_webserver_delta_debounce.py`）。 |
+| **R-Sync-11** | **遅延反映（held）**: デスクトップでは `score.1` / `score.2` が `StateManager.HoldSubtree` で保留登録される（`AutonaActions.MakeBoards(panel=True)`）。書き込みはライブ state に即適用される（`Get()` は常にライブ値）が、delta 配信・全量（`GetFullState` の既定）・`out/` からは除外され、SCORE ページの「反映」（`CommitHeld`）が 1 保存サイクルで一括公開する。ゲームのロードは自動コミットする。**exempt**（`HoldSubtree(prefix, exempt=[...])`）は即時公開: 統計キー `STATS_KEYS`（`last_sets` / `history_sets` / `recent_sets` / `upset_factor`）。画像生成は `GetFullState(include_pending=True)` でライブ値を描く。ボード 3・`score` 以外のサブツリー・ヘッドレスは held にならない。held 配下は「同値なら書かない」（`SetIfChanged`）。 |
+| **R-Sync-12** | **値を運ばない通知**（state の外・未公開のものを React に知らせる合図）: `scoreboard_pending`・`scoreboard_follow`・`battle_format`・`games_changed`。読み手は通知の後に始めた GET の答えだけを使う。例外の `status`（アプリの実行中の仕事）は値を運ぶ。同じ送信の中の順は delta → pending → follow → battle_format → status → games_changed。詳細は [external-control-api.md](external-control-api.md) §4 と `.claude/rules/state-and-webserver.md`。 |
 
-#### 3.2.4 同期遅延の上限
+#### 3.2.4 スレッドと lock の不変条件
 
-ユーザー操作から各 UI に反映されるまでの遅延上限:
+- `held_state_updated` / `held_dirty_changed` / `state_updated` のハンドラは `StateManager.lock` の中で走る。その中で別スレッドを待たない（`gui_thread_sync` / `run_sync` / `QDialog.exec()` / `processEvents()` をしない。pitfalls #17）。受け手は積むだけにする。
+- ロック順は **catalog lock → `StateManager.lock`**。`StateManager.lock` 保持中の observer から `GameAssetCatalog` の writer を呼ばない（pitfalls #16）。保存側の lock は `StateManager.lock` の後（`StatePersistence`）。サービスの lock は自分のフィールドだけを守り、state・fetcher・`PlayerDB` は lock を離して呼ぶ。
+- サービスは observer を購読しない。例外は「プロセスと同じ寿命のシングルトン・`Stop()` で解除できる・observer の中では予約するだけ」を満たす `StreamService` と `MatchLogService`（購読者の集合は `tests/test_bootstrap_split.py` の `STATE_SUBSCRIBERS` が pin）。
+- ボードの操作は `boardHost.Run` の 1 本の RLock の下。ロックの中でメインスレッドを待たない。
+
+#### 3.2.5 同期遅延の目安
 
 | 経路 | 上限 |
 |-----|------|
-| PyQt → StateManager | < 1ms |
-| StateManager → OBS HTML（Socket.IO） | 200ms（debounce 上限） |
-| StateManager → OBS HTML（degraded poll） | 200ms（debounce）+ 64ms（poll 周期） |
-| StateManager → React Web UI | 単発操作: **~0ms**（leading-edge flush + 到着駆動適用）/ バースト: 200ms（debounce 上限） |
-| StateManager → WebEngine 画像生成 | 0ms（prepare_data 時の snapshot） |
-| React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebOperations → AutonaActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる。スコア±は楽観的更新（R-React-8）により**表示は 0ms** |
+| StateManager → React（単発） | ほぼ 0 ms（leading-edge + 到着駆動）。バーストは debounce の上限 200 ms |
+| StateManager → OBS（Socket.IO） | 200 ms。degraded poll はそれに poll 周期 |
+| スコア ± の表示 | 0 ms（楽観的更新。R-React-8） |
 
-**注**: 旧実装の React 側 100ms 固定バッチは到着駆動化により廃止（§2.2 R-React-6、2026-07 Web UI 刷新 Phase 3）。
+held のボードは「反映」を押すまで配信自体が保留されるので、OBS / React への反映は押下が起点になる。
 
-**注 2（遅延反映）**: 上表は「配信された変更」の伝搬遅延。`score.1` / `score.2` サブツリーへの編集は R-Sync-11 により「反映」ボタン押下まで配信自体が保留されるため、OBS / Web UI への反映はボタン押下が起点になる（押下後の遅延は上表どおり）。
+### 3.3 設定の永続化
 
-#### 3.2.5 既知の不整合 → 規約上の扱い
+#### 3.3.1 置き場所
 
-Phase B-b で検出された問題は、本書を正本として以下のように扱う:
+保存先は種別ごとに一意に定める。
 
-| 問題 | 規約上の扱い |
-|-----|------------|
-| `score.upset_factor`（番号なし）二重定義 | 番号なし版は **削除済**（§8 T-1 完了） |
-| `commentary.{N}` インデックス欠番 | スロット固定 12 名化（2026-07 リワーク）で欠番概念ごと消滅（旧: Unset 時に詰める） |
-| `StateManager.state` 直接参照 | `GetFullState()` に置き換え。直接参照は禁止（§3.1.1） |
-| OBS HTML poll の順序保証なし | revision 検証で full snapshot 再取得に統一（R-Sync-8） |
+| 種別 | 保存先 | 所有 |
+|------|------|------|
+| 一般設定・ホットキー上書き・各種 `*_config`・`TOURNAMENT_URL` | `./user_data/settings.json` | `core/SettingsManager`（編集は React の設定ページと各ページ） |
+| 前回の内容（state。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | `core/StatePersistence`（間引いて自動保存・終了時に書き切る） |
+| 選手 DB | `./user_data/local_players.json` | `core/PlayerDB` |
+| ゲームアセット | `./user_data/games/{game}/{asset_type}/config.json` | `core/GameAssetCatalog`（スキャン・ロードは `core/GameLoader`） |
+| 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | `core/CountryCatalog` |
+| テンプレートの定義・マニフェスト | `./layout/{フォルダ}/settings.json` ほか | `core/LayoutCatalog` |
+| アーカイブ切り抜き | 作業フォルダ（`archive.work_dir`）の `<job_id>/job.json` ほか / `./user_data/archive_templates/` / `./user_data/match_log/YYYYMMDD.jsonl` | `core/ArchiveJobService`・`ArchiveTemplates`・`MatchLogService`（state には載せない） |
+| ウィンドウ位置 | QSettings（Windows レジストリ） | `Window` |
+| 開いていたページ・サイドバーの折りたたみ | QSettings の `lastPanel`（ページの名前）/ `navCollapsed` | `src/AutonaWindowState.py`（Qt 非依存の純関数） |
+| OBS テンプレートの設定 | `./layout/settings.json`（グローバル）・`./layout/{template}/settings.json`（ローカル） | レイアウトの実行時 |
 
-### 3.3 設定永続化の規約
+`out/program_state.json` は永続化ではなく**出力**（OBS の file:// ポーリングと外部の契約。場所・形式・`timestamp` / `revision`・書き込み順は不変）。
 
-#### 3.3.1 設定の置き場所マトリクス
+#### 3.3.2 正本
 
-設定の種別ごとに **保存先を一意**に定める。
+- ユーザー設定の正本は `SettingsManager`。state に展開してよいが、それは**キャッシュで正本ではない**（`tournamentInfo.themeColor` / `colors.{feature}.themeColor` など）。
+- API トークン・認証情報は `SettingsManager` に置き、state に置かない。
+- ホットキーの有効値は `core/HotkeyRules.DEFAULT_KEYS` に `settings.json` の `hotkeys` を重ねた結果（`HotkeyRules.CurrentKeys()`）。
+- OBS レイアウトの設定は `_.defaultsDeep(URL クエリ, ./settings.json, ../settings.json)`（クエリが最優先）。
 
-| 設定種別 | 保存先 | 形式 | 所有 | 編集経路 |
-|---------|------|------|------|--------|
-| 一般設定（言語、テーマ色、Web ポート、表示オプション、Bluesky アカウント、Twitch アカウント等） | `./user_data/settings.json` | JSON | `SettingsManager` | React の設定ページ（`/web/settings`。ADR-005 S4af）と各ページ |
-| ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | React の設定ページのホットキー区画（ADR-005 S4af） |
-| ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
-| ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
-| 開いていたページ・サイドバーの折りたたみ | QSettings（`lastPanel` = ページの名前 / `navCollapsed`。ADR-005 S-final SF-5b-3。読み書きは `src/AutonaWindowState.py`。旧 `sidebarIndex_v22` / `sidebarCollapsed_v22` は 1 回だけ読み替えて消す） | 文字列 / bool | `Window` | 変わるたびに保存（`sync`）＋終了時 |
-| 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（ADR-005 S3e-1。選んでいるゲームの mains の正規化も `PlayerDB.NormaliseMains`。Qt 側の `AutonaPlayerDB` は変更を `db_updated` に中継するだけ: 補完モデルは Qt モデルの整理 PR3 で削除） | React の Player List（`/web/playerBrowser`。v1 `PUT /players`）+ 直接 JSON 編集 |
-| 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
-| ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
-| ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（起動時のスキャン・ロードのジョブは両シェル共通の `core/GameLoader`（ADR-005 S-final SF-6b。選択の後の処理までローダーのスレッドで走り、通知は `GameLoader.loaded` / `scanned` → Bridge の `game_loaded` / `games_scanned`: SF-6c。それまでは Qt 側の `AutonaGameAssetManager` がその通知の Qt シグナルを持っていた）。Qt のモデル化は Qt モデルの整理 PR4 で削除。React のページは Web の操作でカタログを読む） | アセット追加時に手動編集 |
-| 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog` | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
-| サムネテンプレ定義 | `./layout/{パッケージのフォルダ}/{マニフェストの template}`（同梱は `layout/thumbnail/type_a.json`・`layout/thumbnail_type_b/type_b.json`。ADR-007 T1 で `assets/thumbnail_base/thumbnail_types/` から移した） | JSON | `core/ThumbnailService._Template`（`core/LayoutCatalog` が場所を決める） | テンプレートパッケージと一緒に置く（§4.4.1） |
-| アーカイブ切り抜きのジョブ（ADR-006 A1） | 作業フォルダ（`settings.json` の `archive.work_dir`。既定 `%USERPROFILE%\Videos\Autona`。`user_data/` の下には置かない）の `<job_id>/job.json` ほか（4.2.5） | JSON | `core/ArchiveJobService` | アーカイブ切り抜きのページ（`/web/archive`）。StateManager には載せない |
-| アーカイブ切り抜きのタイトルのテンプレート（ADR-006 A6） | `./user_data/archive_templates/<id>.json`（vodsplit のテンプレートの形式。`default` は標準を保存したもの）（4.2.5） | JSON | `core/ArchiveTemplates` | アーカイブ切り抜きのテンプレートの画面。解析・書き出しのワーカーに `--template` で渡す |
-| 試合の記録（ADR-006 A2） | `./user_data/match_log/YYYYMMDD.jsonl`（記録を最初に書いた日のローカル日付。1 行 = 記録全体で、同じ `id` は最後の行が正）（4.2.5） | JSON Lines | `core/MatchLogService` | 自動（ボード 1 の公開を追って追記する。自動では消さない）。読むのはアーカイブ切り抜き（A5） |
-| OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
-| OBS テンプレのローカル設定 | `./layout/{template}/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
+#### 3.3.3 キーの命名
 
-> `out/program_state.json` は永続化ではなく**出力**（OBS の file:// ポーリングと ASS の契約。場所・形式・`timestamp` / `revision`・書き込み順は不変）。S3b 以降、起動時に読むのは `user_data/state.json` が無い・使えない・それより新しいときの移行だけ（§3.3.5）。
+`SettingsManager` のキーはネームスペース付きで作り、トップレベルは増やさない。主な接頭辞: `general.*`（`theme_color` / `accent_color` は大会共通カラー）、`colors.{feature}.*`、`hotkeys.*`、`display_options.*`、`thumbnail_config.*`、`result_config.*`、`archive.*`、`designer.*`、`{board,commentary,top8}.selected_design`（`core/LayoutCatalog.SELECTION_SETTINGS`）、`stream_channels` / `stream_thumbnail_options`。読み書きは各サービスのモジュール（`ThumbnailService`・`ResultService`・`StreamService`・`ColorService`・`ArchiveJobService`・`AppSettings`）が持つ。
 
-#### 3.3.2 設定の正本（Single Source of Truth）
+読めなかった起動の扱いは `.claude/rules/state-and-webserver.md` の SettingsManager の節（`loadFailed`・`SettingsUnreadable`・書き込みの 2 種類）。
 
-| カテゴリ | 正本 | キャッシュ可能な経路 |
-|---------|-----|------------------|
-| ユーザー設定全般 | `SettingsManager` (`./user_data/settings.json`) | StateManager に展開してよい（`tournamentInfo.themeColor` / `colors.{feature}.themeColor` 等） |
-| ホットキー有効値 | `AutonaHotkeys.LoadUserHotkeys()` の結果（`core/HotkeyRules.DEFAULT_KEYS` + 上書きをマージ。合成は `HotkeyRules.CurrentKeys()`） | — |
-| トーナメント URL（最後に開いた） | `SettingsManager.Get("TOURNAMENT_URL")` | メモリキャッシュ可 |
-| ウィンドウ状態 | QSettings | — |
+#### 3.3.4 state の版と移行
 
-#### 3.3.3 マージ規則
-
-##### ホットキー
-```
-有効なホットキー = HotkeyRules.DEFAULT_KEYS（デフォルト。AutonaHotkeys.keys はそのコピー） |> deep_clone |> update(SettingsManager.Get("hotkeys"))
-```
-
-##### OBS layout 設定
-```
-有効な settings = _.defaultsDeep(
-    window.settings,                          // URL クエリパラメータ（最優先）
-    fetch("./settings.json"),                 // テンプレローカル
-    fetch("../settings.json")                 // グローバル（最低優先）
-)
-```
-
-#### 3.3.4 設定キーの命名規約
-
-`SettingsManager` のキーパスは以下のネームスペースに従う:
-
-| プレフィックス | 用途 |
-|--------------|------|
-| `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等）。`theme_color` / `accent_color` は**大会共通カラー** |
-| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（読み書き・シードは `src/core/ColorService.py`。カードは Web の `FeatureColorCard`） |
-| `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
-| `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
-| `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等）。読み書きは `src/core/ThumbnailService.py`（ADR-005 S4o。読みは既定値を書かない）。v1 で取り込んだ背景は `user_data/thumbnail_background_<ハッシュ>.*` |
-| `result_config.*` | リザルト生成設定（layout, logo_path 等）。`layout` は `core/ResultService.py` が読み書きする（`PATCH /api/v1/result`）。`main_icon_path` / `background_path` は読むだけで、クライアントからは書けない。色は保持しない — `ResultService` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
-| `archive.*` | アーカイブ切り抜き（ADR-006）。`work_dir` は作業フォルダの絶対パス（無い・相対なら既定の `%USERPROFILE%\Videos\Autona`）。読み書きは `src/core/ArchiveJobService.py`（`PATCH /api/v1/archive/settings`。両方を検査してから 1 回で書く。ジョブの実行中は変えられない） |
-| `bsky_account.*` | Bluesky 連携 |
-| `update.*` | アップデーター（skipped_version 等） |
-| `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消。照合は NFKC・大文字化・英数字以外の除去の後に `hmac.compare_digest`。ヘッダ欠落は 401 `pairing_required`、不一致は 401 `pairing_invalid`、連続 5 回の不一致で 60 秒ロック（以後倍、最長 3600 秒。ロック中は 429 と `Retry-After`。メモリのみ）、再生成で旧コードは即無効。`settings.json` を読めなかった起動では 409 `pairing_unavailable`。ログにコードの値は出さない。pin: `tests/test_designer_service.py`） |
-| `{board,commentary,top8}.selected_design` | ページが選んでいるデザイン（レイアウトの id）。正本は `core/LayoutCatalog.SELECTION_SETTINGS`（`SelectedLayout` / `SelectLayout`。`GET|PUT /api/v1/layouts/selected/{kind}`。top8 は ADR-005 S4h から、board は S4s から。board の一覧は `scoreboard` と `designer` を合わせたもの） |
-| `stream_channels` / `stream_thumbnail_options` | 配信設定（トップレベル）。チャンネル一覧 `[{name, url}]` と、配信サムネ生成のオプション `{source: banner\|org, style: center\|netflix, overlayOrgIcon: bool}`。読み書きは `src/core/StreamService.py`（後者は ADR-005 S4d で追加。前者に揃えてトップレベルに置いた） |
-| その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
-
-新規キーは原則ネームスペース付きで作成し、トップレベルは増やさない。
-
-#### 3.3.5 ウィンドウの保存とマイグレーション
-
-- **`Window.STATE_VERSION` は ADR-005 S-final SF-5b-3 で削除した**。ウィンドウは共有ビュー 1 枚で、覚えるのはページの名前（QSettings の `lastPanel`）とサイドバーの折りたたみ（`navCollapsed`）だけ。名前なのでナビの項目の追加・削除・並べ替えで読み替えが要らない（版を上げる手順も無い）。読み書きは Qt-free の純関数 `src/AutonaWindowState.py`（`RestorePanel` / `RestoreNavCollapsed` / `SaveWindowState`）
-  - `lastPanel` に入れるのはサイドバーの項目のページだけ（`IsReopenable`: `WebAccess.WEB_PANELS` の名前で `MENU_PAGES` でも、パネルシェルの空のページ `shell-check` でもないもの）。Help & Settings のメニューのページ（設定・API・Companion・OBS・About・ゲームアセットを追加）の間は、その前に開いていたページを覚える（`RememberedPanel`）。保存はページか折りたたみが変わるたび（`Window._SaveWindowState`: 保存値と違うものだけ書いて `sync`。起動時の読み込みより前と終了の開始後は書かない）と終了時（`closeEvent`）
-  - 旧キー（Qt のサイドバーの `sidebarIndex_v22` / `sidebarCollapsed_v22`）は、新しいキーが無いときに 1 回だけ読み替えて消す。index は固定の表 `LEGACY_SIDEBAR_PANELS`（v22 のナビの 11 項目。ナビが変わっても変えない）で引き、範囲外・数でない値は `event`。新しいキーがあれば旧キーの値は使わずに消すだけ
-  - 復元した値はホストの最初の読み込みの URL に入る（`AutonaWebPanelHost.ShowPanel` / `SetNavCollapsed` → `PanelPath` = `/web/app/<panel>`、折りたたみは `?nav=collapsed`）。AppShell が折りたたみを URL に replace で書き、ホストが `urlChanged` で読み取る（`NavCollapsed()`）
-  - pin: `tests/test_window_state.py`（純関数と、実ウィンドウの起動 → 移動 → 終了の保存を subprocess で）
-- **state のスキーマ版（`state_version`、ADR-005 S3b）はウィンドウの保存とは別物**。`user_data/state.json` の封筒に入る版で、`src/core/StateMigrations.CURRENT_VERSION`（現在 2）が正本
-  - 保存済み state のキー名・形を変えるときは、移行 step（前方一方向・出荷後は凍結）を足して `CURRENT_VERSION` を上げる。v0（S3b 前の `out/program_state.json`）→ v1 は `RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`。v1 → v2 は `result_players` の団体の行（`members` を持つ行。枠 1〜8）を `result_teams` へ移す（ADR-005 S4q）
-  - 版は state の木に入れない（Socket.IO の payload と `out/program_state.json` に漏れるため）
-  - 移行 step は冪等（すでに移行先の形のデータを受けても壊さない）。`out/program_state.json` は版を持たないので常に v0 として移行されるが、中身は書いたビルドの形になっているため
-  - 新しい版の `state.json` を古いビルドで開くと `state.json.v{N}.<日時>.bak` に退避し、`out/program_state.json` から移行して起動する。壊れた `state.json` は `state.json.corrupt-<日時>.bak` に退避して同じく移行する（どちらも上書きしない。退避できなければ触らず、その起動は保存しない）
-  - `out/program_state.json` が `state.json` より新しい（mtime）ときもそちらから移行する（クラッシュで間引き中の変更を失わない・旧版を使った後の復帰）
+- 保存済み state のキー名・形を変えるときは、`core/StateMigrations` に移行 step を足して `CURRENT_VERSION` を上げる（前方一方向・出荷した step は凍結・冪等）。版は封筒（`state.json`）にだけ持ち、state の木に入れない（Socket.IO と `out/` に漏れる）。同じ版に残りうるものの起動ごとの掃除は `StateSchema.SeedPanelState()`。
+- 新しい版の `state.json` を古いビルドで開く・壊れた `state.json` は、`.bak` に退避して `out/program_state.json` から移行して起動する（上書きしない）。`out/program_state.json` のほうが新しいときもそちらから移行する。
+- ウィンドウが覚えるのはページの名前だけなので、ナビの追加・削除・並べ替えで読み替えは要らない（§4.1）。
 
 ---
 
-## 4. 画面仕様
+## 4. 画面構成
 
-### 4.1 PyQt パネル一覧と責務
+### 4.1 デスクトップのウィンドウ
 
-`Autona.py` の `Window`（QMainWindow）の中身は**共有ビュー `AutonaWebPanelHost` 1 枚**（ADR-005 S-final SF-5b-3）。
-ホストは AppShell（`/web/app/<panel>`。§4.2.4）を読み、サイドバー・ヘッダー（大会・ゲーム・MOD・対戦形式）・フッター（Help & Settings・実行中の仕事）は
-AppShell のもの。Qt のサイドバー（`AutonaSidebar`）・`QStackedWidget`・メニューバー・ステータスバー・MOD のチェックボックス・
-大会ボタンと URL ダイアログ・ゲームのメニューは SF-5b-3 で削除した。下の表の「パネル」はどれも AppShell のナビの項目（ページ）で、
-「objectName」列の `WebPanels` はホストの objectName。
+`src/Autona.py` の `Window`（QMainWindow）の中身は**共有ビュー `AutonaWebPanelHost` 1 枚**。ホストは AppShell（`/web/app/<panel>`）を読み、サイドバー・ヘッダー（大会・ゲーム・MOD・対戦形式）・フッター（Help & Settings・実行中の仕事）は AppShell のもの。
 
-- **ページの切り替え**: ページの中のナビは `history.replaceState`（遷移にならない）。ホストは `urlChanged` でどのページかを読み
-  （`AppPanelOf`）、`panelChanged(名前)` を出す（折りたたみが変われば `navCollapsedChanged`）。ウィンドウはそれで覚えるページを決めて、その場で保存する（`AutonaWindowState.RememberedPanel`。§3.3.5）
-- **外から開く**: `Window.OpenPanel(名前)`（ウィンドウを前に出して `ShowPanel`。ホストを返す。終了中は None）。呼ぶのは `load_set` の
-  ホットキーと legacy の open-set（`AutonaShellOperations.ShowSetSelection` / `OpenSetSelection` → `OpenPanel("scoreboard")` →
-  ホストの `OpenScoreSets(board)`）
-- **スプラッシュ**: `main.py` が単一インスタンスのゲートの直後（PySide6 の import より前）に出し、`show()` の直後に `_BuildUi` が
-  `finish` する（2026-11-19）。暗い角丸の板に Autona のアイコン（静止）と「Loading...」。アイコンの上を斜めの光の帯が通り過ぎ（アイコンの
-  不透明な画素だけを照らす。帯 0.7 秒 + 間 0.9 秒の周期）、ドットが周期に合わせて 0〜3 個に増える。進捗なし。その間メインスレッドは import とウィンドウの構築で
-  塞がっていてイベントループが無いので、Qt ではなく Win32 の layered window を専用スレッド（`autona_splash.NativeSplash`。ctypes +
-  GDI+）が持ち、コマを事前に描いておいて送る（ctypes の呼び出しはフレーム間の待ち以外 GIL を放さない）。最前面にしない・フォーカスを
-  取らない。Windows 以外・失敗時は出さない（`active_splash()` は no-op の代役を返す）。起動が例外で終わるときは `main.py` の atexit が消す
-- **起動**: `show()` → `STARTUP phase=core-shown` → ローディングのスピナー（`LoadingOverlay`）→ 初回の描画の後に `_StartWebServer` →
-  `webserver-ready` → ホストがビューを建てて読む → 最初の読み込みの終わりでスピナーを外して `STARTUP phase=panel-shown`（ADR-003 の追記）。
-  初回起動の LAN の確認（`QMessageBox.question`。ウィンドウで使う唯一の QMessageBox）はスピナーの上に出る
-- **Web サーバーの起動失敗**: ホストの中身を案内の文（`ShowStartFailure`。QLabel）に置き換え、スピナーを外す。ダイアログは出さない。
-  サーバースレッドの bind 失敗も、`_StartWebServer` の中の例外（構築・ポートの確認・起動・結線）も同じ。ホストがビューを建てられなかったときも
-  同じ形の文（最初の読み込みの失敗として知らせ、スピナーが外れる）
-- **読み込みの失敗とスピナーの上限**: 失敗し切った読み込みのあと、ホストは再試行の表示（`ShowLoadFailure`。文と「再試行」のボタンをビューの上に
-  重ねる）を出し、成功した読み込みで外す。スピナーには上限（`Window.SPINNER_CAP_MS` = 20 秒。起動時のダイアログとサーバーの構築の間は止める）
-  があり、過ぎたら warning を出して外し、再試行の表示を出す
-- **常に最前面**: Window の bool（`SetAlwaysOnTop` / `IsAlwaysOnTop`。シェル要求 `alwaysOnTop` から）。起動をまたいで保存しない
-- **ゲームの変更の通知**: ウィンドウは中継しない。Web サーバーの全量の state とキャラの送信（`ws_game_changed`）は、`bootstrap.wire_web_server` が
-  Bridge の `game_loaded`（core の `GameLoader.loaded`。ロードのたび、ローダーのスレッドから queued で main へ）に繋ぐ（両シェル同じ。ADR-005 S-final SF-6c。
-  それまではアセットのアダプタの `onLoad` とヘッドレスのローダーの `gameChanged`、SF-6b までは `WindowSignals.GameChanged` が `onLoad` を中継し、
-  SF-5b-3 までは Qt のゲームのボタンの `SetGame` が出していた）
-- **大会**: ウィンドウは大会を設定も解除もしない（AppShell のヘッダーと EVENT のページが v1 で core の `TournamentService` を呼ぶ）。
-  読み込みの失敗は state の `tournamentInfo.load` からページが知らせる（SF-5b-2）。`bootstrap.wire_tournament_data()` は失敗の受け手なしで結線する
+- **ページの切り替え**: AppShell のナビは `history.replaceState`（遷移にならない）。ホストは `urlChanged` でページを読み（`AppPanelOf`）、ウィンドウは覚えるページを変わるたびに保存する（`AutonaWindowState`）。外から開くのは `Window.OpenPanel(名前)`。
+- **起動**: `main.py` が起動直後にネイティブのスプラッシュを出し（`src/autona_splash.py`。Windows の layered window を専用スレッドが持つ。出せなければ no-op）、`show()` → ローディングのスピナー → 初回の描画の後に Web サーバー起動 → ホストがビューを建てて読み込み、最初の読み込みの終わりでスピナーを外す。順序とログ（`STARTUP phase=...`）は [ADR-003](../decisions/ADR-003-startup-architecture.md)。スピナーが外れない経路を作らない（外すのは最初の読み込みの終わり・Web サーバーの起動失敗・上限 `Window.SPINNER_CAP_MS`）。
+- **失敗の表示**: Web サーバーの起動失敗はホストの案内文（`ShowStartFailure`）、読み込みの失敗は再試行の表示（`ShowLoadFailure`）。ダイアログは出さない。`QMessageBox` は初回起動の LAN の確認だけ。
+- **ウィンドウが持つもの**: 常に最前面（Window の bool。保存しない）、ゲーム変更の通知は中継しない（`bootstrap.wire_web_server` が Bridge の `game_loaded` に繋ぐ）、大会の設定 / 解除はしない（AppShell と EVENT ページが v1 で `TournamentService` を呼ぶ）。
 
-**構築タイミング**: パネルはすべて共有ビュー 1 枚の中の React のページで、Qt のパネルのファクトリ・遅延構築は無い
-（ADR-005 S-final SF-5b-3 で `_Create*Panel` / `Ensure*Window` を削除。ADR-005 S4ac-3 までは Qt の `Scoreboard` を起動時に建てていた）。
-ボード（state）は core が起動時に 3 つとも作る（下記・S4ac-1）。`tournamentInfo.*` の書き手は `src/core/TournamentInfoService.py`
-（`bootstrap_core()` 生成）で、ページが無くても大会データは state に入る。共有ビューのホストはウィンドウが先に出てから建つ
-（ビュー（QtWebEngine）の生成はホストの最初の描画の後。`paintEvent` → `QTimer.singleShot(0)`）。最初に開くページは QSettings の `lastPanel`
-（初期値は先頭ページ）。起動順は §4.1.1。
+#### 4.1.1 ページ一覧
 
-| # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
-|---|------------|-------|---------|------------|------------|--------------|
-| 1 | `WebPanels`（共有ホスト。ナビの文言は `Tournament Info`、ナビのキーは `event`） | React の `EventPage`（`/web/event`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4g）。Qt 版（`AutonaTournamentInfoWidget` と `.ui`）は S4g で削除済み | 大会の設定・再取得・解除（確認つき）と状態の表示、大会名・イベント名・場所・参加人数・開催日の編集、ゲームの選択、大会カラー、大会アイコン / バナー（取り込み・大会から取得・既定に戻す）。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・日付）、アイコン / バナーは `src/core/TournamentMediaService.py`、大会の設定・解除は `src/core/TournamentService.py`（ADR-005 S4f）、カラーは `src/core/ColorService.py` で、ページは `/api/v1`（`tournament*`・`colors/tournament`・`game`）を呼んで state を描画するだけ | `tournamentInfo.*`（core 経由） | `tournamentInfo.*`（URL と状態の `url` / `load` を含む）、`game`、`GET /api/v1/games`（`game` の変化とページの再表示で読み直す） | ✓（最初に表示） |
-| 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
-| 2 | `WebPanels`（共有ホスト。ナビの文言は `Thumbnail Settings`、ナビのキーは `thumbnail`） | React の `ThumbnailPage`（`/web/thumbnail`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4p）。Qt 版（`AutonaThumbnailSettingsWidget` と `.ui`）は S4p で削除済み | テンプレート・背景（既定 / 大会バナー / アップロードした画像）・表示する項目・今のゲームのキャラ画像の配置・機能別カラー・既定に戻す（確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび）、サムネイルの作成（`out/thumbnails/`）と作成した画像のコピー、動画タイトル。**処理の正本は `src/core/ThumbnailService.py`**（ADR-005 S4o）で、ページは `/api/v1/thumbnail*`・`colors/thumbnail` を呼んで `thumbnail.render` を描画するだけ。SCORE の生成・X 投稿と legacy の get-thumbnail も同じ `RenderPayload()`（読み済みの設定）で描く | `thumbnail_config.*`（settings.json。core 経由） | `thumbnail.render`、ボード 1 の `score.1.*`、`tournamentInfo.*`、`game`、`colors.thumbnail.*`、`GET /api/v1/thumbnail` | ✓ |
-| 3 | `WebPanels`（共有ホスト。ナビの文言は `Result Settings`、ナビのキーは `result`） | React の `ResultPage`（`/web/result`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4r）。Qt 版（`AutonaResultSettingsWidget` と `.ui`、`result/main_generate_result.py`、`result/ResultRenderer.py`）は S4r で削除済み | レイアウト選択（対戦形式に追従）、単独の行（順位・所属タグ・名前・X ハンドル・キャラとカラー 3 つ・スコアボードから補完の表示）と団体の行（順位・チーム名・メンバー 5 人）の編集、並べ替え（上下ボタン + ドラッグ）、大会結果の読み込み（確認つき）、すべてクリア（今の種類だけ・確認つき）、実描画のプレビュー（表示中だけ・変更の 300 ms 後・表示に戻るたび。サンプルの表示つき）、作成（`out/results/`）と作成した画像のコピー、1 クリックの X 投稿（作成 + クリップボード + 既定のブラウザで投稿画面）、選手を DB に保存、機能別カラー。**処理の正本は `src/core/ResultService.py`**（ADR-005 S4q）で、ページは `/api/v1/result*`・`colors/result` を呼んで state を描画するだけ | `result_players` / `result_teams`、`result_config.layout`（settings.json）（core 経由） | `GET /api/v1/result`・`GET /api/v1/result/post`、`result_render`、`result_standings`、`result_layout`、`score.*`（補完）、`tournamentInfo.*`、`game`、`colors.result.*` | ✓ |
-| 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
-| 5 | `WebPanels`（共有ホスト。ナビの文言は `Scoreboard`、ナビのキーは `scoreboard`） | React の `ScorePage`（`/web/scoreboard`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4aa）。ボードは 3 つとも core が起動時に作り、ボード 1 / 2 を held にする（`bootstrap_gui()` の `AutonaActions.MakeBoards(panel=True)`。ADR-005 S4ac-1。それまでは held の登録が Qt のボードの構築にあり、見せていない面は held でなかった）。Qt 版（`AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` の dock）と退路の設定 `general.qt_scoreboard_panel`・Qt のセット選択 / 配信台のウィンドウは ADR-005 S4ac-3 で削除した（古い `settings.json` に残ったキーは読まない） | 形式のボード（board1=1v1、board2=team、board3=crew）のスコア入力・選手編集（欄・詳細・キャラ行・補完の読込・上下移動）・match バー・反映（held のボード）・X 投稿・ブラウザ版を開く。ボード 1 / 2 は大会があれば「大会の試合を選ぶ」でページのセット選択のダイアログ（フェーズ・取得・完了したセット / ペア・検索・並べ替え・進み具合。行を選ぶと `:load-set`）と、そこから配信台のダイアログ（`:follow`）を開き、追従中はタイマー行（自動更新のラベル・次の更新までの秒・キャンセル `:stop-follow`）を出す（ADR-005 S4ab。デスクトップに限らない）。**Ctrl+Shift+O と legacy の open-set（`/scoreboard<n>-open-set`・Socket.IO `open_set`）も、このダイアログを開く**（ADR-005 S4ab-2）: シェルのアダプタ `AutonaShellOperations` が `Window.OpenPanel("scoreboard")` を呼び（S-final SF-5b-3 まではその場所に `Window.OpenScoreSets`）、メインウィンドウを前に出して（最小化からも戻す）ページを SCORE にし、返ったホストの `OpenScoreSets(board)` で、共有ビューに `window.autonaPanelShell.openScoreSets(board)` を流す（ビューの構築・読み込み・凍結からの復帰の後に届け、パネル シェルが受け取るまで保留。1 つの文書には答えが来るまで 1 回だけ流す。先に別のパネルを開いたら・読み込みが失敗したら捨てる。終了処理中は何もしない）。ページは依頼の後に読んだ形式のボードを描いてから、そのボードで「大会の試合を選ぶ」が出る条件（ボード 1 / 2・大会あり）のときだけ開き、ほかはページを見せるだけ。legacy の `n` が形式のボードと違うとき（1v1 での `/scoreboard2-open-set`）は何もせずログだけで、答えは今までどおり `OK`。メインウィンドウができる前の依頼もログだけで何も開かない（S4ac-3 までは Qt の窓を開いていた）。何も書かない。ページは `/api/v1`（`scoreboards/{n}/*`・`battle-format`・`match-names/candidates`・`tournament/info`・`tournament/{phases,sets,stations}`・`display-options`・`thumbnail:generate`）を呼び、held のボードは `GET .../pending`、ほかは state を描画するだけ | `score.{N}.*`（core 経由） | `score.{N}.*`、`GET .../pending`（held のボード）、`GET .../post`、`GET .../follow`（`scoreboard_follow` で読み直す）、`set_selection.*`、`tournamentInfo.*`、`display_options.*`、`game.*` | ✓ |
-| 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
-| 7 | `WebPanels`（共有ホスト。ナビの文言は `Statistics`、ナビのキーは `stats`） | React の `StatsPage`（`/web/stats`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4k）。Qt 版（`AutonaStatsWidget` と、そのサブタブの `AutonaAnalysisWidget`）は S4k で削除済み | ボード 1 の統計の取得（`POST /api/v1/scoreboards/1/stats:refresh`）と、アップセット係数・対戦カードの 1 行、4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧。下記 §4.1.0）。統計の書き手は core の `StatsService`、試合一覧は core の `AnalysisService`（ADR-005 S4j）で、ページは state を描画するだけ（read-only） | （なし。取得の依頼だけ） | `score.1.{recent_sets,last_sets,history_sets,upset_factor}`、反映済みの選手名、`analysis.*`、`GET /api/v1/analysis` | ✓ |
-| 7.5 | `WebPanels`（共有ホスト。ナビの文言は `Stats Display Settings`、ナビのキーは `statsPreview`） | React の `StatsPreviewPage`（`/web/statsPreview`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4l）。Qt 版（`AutonaStatsPreviewWidget`）は S4l で削除済み | 統計オーバーレイ 7 種（`core/StatsOverlays` の固定表。`last_sets` / `tournament_history` は player1 / player2 の 2 項目）から 1 つを選び、プレビュー（オーバーレイ自体の縮小表示）・OBS 用 URL・機能別カラー（`stats`）・Companion マクロ（`stats:refresh` のメソッド・パス・URL）を出す。選択は `settings.json` の `stats_preview.selected_type`（`GET /api/v1/stats/overlays` / `PUT .../selected`）。state を書くのは色カード（`PATCH /api/v1/colors/stats`）だけ | `colors.stats.*` | `colors.stats.*`, `tournamentInfo.*` | ✓ |
-| 8 | `WebPanels`（共有ホスト。ナビの文言は `Player List`、ナビのキーは `playerBrowser`） | React の `PlayerBrowserPage`（`/web/playerBrowser`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4n）。Qt 版（`AutonaPlayerBrowserWidget` と、選手カードの `player_editor` 向けの分岐）は S4n で削除済み | 選手一覧（2タブ）: トーナメント出場選手（`core/PlayerDirectory.Entrants`: `StreamService.TopEntrants` ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット = v1 `:load`）／登録済み選手（`core/PlayerDirectory.Registered`。検索・ソート・100 行ごとのページ分割・新規登録・編集・削除 = v1 `PUT /players` / `POST /players:delete`）。編集の下書きはページのローカルで、保存のときだけ送る | なし（state に書かない。`player_editor` は古い `state.json` の掃除だけ残る） | `PlayerDB.instance`（core）, `StreamService.TopEntrants`（state 非依存）。再読込は Socket.IO `autonaPlayers.players`・`tournamentInfo.load`・`game` | ✓ |
+ページはすべて React（`web/src/<Page>/`）で、ナビの項目は `web/src/AppShell/navSections.json`。state の書き手とページ固有の仕様はそれぞれのサービスの docstring と ADR。
 
-> **設定**（サイドバー下部「Help & Settings」の「設定」）は React の `SettingsPage`（`/web/settings`。ADR-005 S4af）で、共有ビュー `AutonaWebPanelHost` に表示する。サイドバーの項目ではないページ（メニューのページ。AppShell の Help & Settings が開く。`AutonaWindowState.MENU_PAGES` と `web/src/AppShell/navTable.ts` の `MENU_PAGES`（`tests/test_app_shell.py` が一致を pin）。開いている間はサイドバーのどの項目もハイライトしない。終了時はその前に開いていたページを覚える。S-final SF-5b-3 までは Qt のスタックのナビ項目の後ろのページで、`Window.OpenMenuPage("settings")` が開いた）。4 区画: 一般（運用のスイッチ 5 つと既定のチームカラー。WRITE・すぐ効く）・ネットワーク（ポートと LAN。THIS_PC・再起動で反映）・言語（3 つ。THIS_PC・再起動で反映。アプリは閉じない）・ホットキー（Ctrl / Alt / Shift とキーの組み立て。THIS_PC・保存したらすぐ効く）。書き込みは `GET` / `PATCH /api/v1/settings*`（core の `AppSettings` / `HotkeyRules`。`external-control-api.md` §5.22）。Qt の設定ウィンドウ（`AutonaSettingsWindow` / `SettingsWidget`）は S4af で削除済み
-> **API 設定のガイドと About**（「Help & Settings」→「API Settings」の「Open reference & tester」「Companion settings」「OBS / Advanced Scene Switcher」と「About Autona」）も、設定と同じメニューのページ（`MENU_PAGES` = settings / api / companion / obs / about / assets の順。ADR-005 S-final SF-4a-2。SF-5b-3 までは `Window.MENU_PAGES` / `Window.OpenMenuPage(名前)`）で、React の `web/src/GuidePages/`（`/web/api` / `/web/companion` / `/web/obs` / `/web/about`）。API のページは接続（`GET /api/v1/connection`。THIS_PC）・アクセストークン（`GET /api/v1/access-token` と `:regenerate`。SHELL: 共有ビューのページだけが読め、ブラウザでは「デスクトップアプリでこのページを開いてください」と案内する。トークンはページの state にだけ持つ）・リファレンス（`GET /api/v1/api-catalog`。curl のコピーとテスターへの読み込み）・エンベロープとエラーコード・テスター（ページのオリジンから送る。破壊的な操作とトークンの再発行は確認つき・答えのトークンは伏せる・25 秒で打ち切り）。表は共有ビューの幅（実機は約 600 CSS px。表の入れ物は約 530 px）に収める（パスは入るなら 1 行、入らなければ `/` の後でだけ折り返す・確認とログ記録はチップ・行の操作はアイコンのボタン。リファレンスは表の入れ物が 720 px 未満ならチップとボタンをパスと説明のセルの 2 行目に回して 2 列にする）。接続を読めない間（読込中・失敗）はベース URL を出さず、curl と URL のコピーを無効にする。Companion のページは接続・手順・ボタンの割り当て例（`GuidePages/examples.json`。OBS と共有）とキーのアイコン（canvas で描いた PNG を画像としてコピー）、OBS のページは HTTP アクション（ループバックの URL）と監視ファイル（`out/` の絶対パスをこの PC の区切りで）。API / Companion / OBS のページはデスクトップでだけ「既定のブラウザで開く」を出す（別ウィンドウのころのように横に開いておくため。URL に `desktop` もトークンも付けない）。Qt のウィンドウ（`AutonaApiInfoWindow` / `AutonaIntegrationGuideWindow` / `AutonaObsGuideWindow`）と About の `QMessageBox`（`ShowAboutDialog`）は SF-4a-2 で削除済み
-> **ゲームアセットを追加**（「Help & Settings」→「Add game assets」とゲームのメニューの同名の項目）も同じメニューのページ（`MENU_PAGES` の末尾 `assets`。ADR-005 S-final SF-4b-2）で、React の `web/src/AssetsPage/`（`/web/assets`）。3 段（説明／オンラインからダウンロード／ZIP・フォルダから取り込む）と進捗・結果。共有ビューかどうかは `useShellAccess({withToken: false})`（トークンを持たない判定）で見て、ブラウザ・ヘッドレスでは案内とソースのリンクだけを出して何も読まない。書き込みとジョブ（`GET /assets/job`・アップロード・取り込み・インストール・キャンセル・フォルダを開く）は SHELL の v1、パック一覧（`GET /assets/packs`。索引の取得で長くかかるので 120 秒）は THIS_PC。ZIP は XMLHttpRequest で本文そのままを送る（`upload.onprogress` で進捗・`abort()` で中止・送る前に `File.size` を上限（`MAX_UPLOAD_BYTES` と一致）と比べる・やめたときとページを離れたときは `DELETE /assets/uploads/<id>`）。上書きは 1 つのダイアログでチェックボックス、インストールは大きさの合計とゲーム名の確認。ジョブはマウント時と約 1 秒ごと（走っていて表示中のとき。前の読み込みが返ってから次を予約する）・Socket.IO の `status`・再接続・再表示で読み（`games_changed` はパックの一覧を読み直す）、始めた revision は sessionStorage にも持って戻ったときに結果を出し、覚えた revision より新しいジョブが見えたら「結果は不明」。結果の文言は core の固定コード（`error.reason` / ジョブの `error` / `stage` / 索引の `error`）を `assets_*` の訳語にし、英文の詳細は折りたたむ（`tests/test_assets_page.py` が core のコードと訳語の一致を pin）。フォルダの取り込み（ADR-005 S-final SF-5a-2）は「フォルダから取り込む」がクリックの中でシェル要求 `pickFolder` を出し、デスクトップのネイティブのダイアログで選んだフォルダを core が持って id だけを答える（パスはページに来ない。期限なしで待つ）。その id を `POST /assets:importFolder` に渡し、上書きは ZIP と同じダイアログ。Qt のダイアログ `AutonaGameAssetGuideWindow` は SF-4b-2 で削除済み
-> **NOTE タブ（`AutonaNotesWidget`）は廃止**。旧 `ANLYSE`（`AutonaAnalysisWidget`）は `Statistics` パネルのサブタブだったが、ADR-005 S4k で React の統計情報ページの 4 つ目のタブ「この大会の試合一覧」になり、Qt 版は削除済み。
-> 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
-> スコアボードの人数と「1選手あたりのキャラ数」は state が正本（スロット数とスロットの `character` の数。`AutonaActions.SetRoster`、ADR-005 S3e-6）。SCORE ページの人数・キャラ数の欄は v1 で変更を依頼し、state を表示するだけ（キャラ数の初期値 3）。人数 0 のボードは次の選手のキャラ数を覚えておく（core の `AutonaActions`。ADR-005 S4x から両シェルで 1 つ。Qt のボードの隠しスピン `charNumber` は S4ac-3 で削除）。ゲームのロードが別のゲームへの切り替えなら、全スロットのキャラと mains を空にする（起動時の復元・同じゲームの再ロードでは空にしない。Top 8 と同じ規則）。
-> **Qt のスコアボードの UI の注記（選手行のコンパクト表示・目アイコン・スコア操作 UI・セクション構成・共有 2 列グリッド・チームカード。2026-07 の Web UI パリティ）は、Qt の SCORE ごと ADR-005 S4ac-3 で削除した**。画面は React の `web/src/ScorePage/` が正本。`display_options.show_*` は Web UI / OBS オーバーレイ描画用の配信設定として存続する（書き手は `SetDisplayOption`）。
+| ナビのキー | ページ | 責務 | 書き手 / 正本 |
+|-----------|------|------|--------------|
+| `event` | Tournament Info | 大会の設定・再取得・解除、大会情報、ゲーム選択、大会カラー、アイコン / バナー | `TournamentService`・`TournamentInfoService`・`TournamentMediaService`・`ColorService` |
+| `stream` | Stream Settings | 配信先・タイトル・団体素材・配信サムネ | `StreamService` |
+| `scoreboard` | Scoreboard | スコア入力・選手編集・match バー・反映・X 投稿・セット選択 / 配信台のダイアログ。形式は 1v1 / チーム / クルー | `AutonaActions`・`PlayerService`・`CrewBattleService`・`SetFollowService` |
+| `board` | Board | 配信用スコアボードのデザイン選択・OBS 用ファイルの案内 | `LayoutCatalog` |
+| `thumbnail` | Thumbnail Settings | 試合サムネイルの設定・プレビュー・作成 | `ThumbnailService` |
+| `result` | Result Settings | 大会リザルトの行・レイアウト・プレビュー・作成・X 投稿 | `ResultService` |
+| `top8` | Top 8 Display Settings | Top 8 の選手・スコア・Start.gg 取り込み・デザイン選択 | `Top8Service` |
+| `commentary` | Commentary | 実況者 12 スロットの編集・デザイン選択 | `CommentaryService` |
+| `statsPreview` | Stats Display Settings | 統計オーバーレイの選択・プレビュー・OBS 用 URL | `StatsOverlays`・`ColorService` |
+| `stats` | Statistics | 統計の取得と 4 タブ（直近の対戦・戦績・大会履歴・この大会の試合一覧）。read-only | `StatsService`・`AnalysisService` |
+| `playerBrowser` | Player List | 参加者と登録済み選手の一覧・編集（state に書かない） | `PlayerDirectory`・`PlayerDB` |
+| `archive` | Archive Clipper | 配信アーカイブをセットごとに区切って書き出す（§4.2.5） | `ArchiveJobService` ほか |
 
-##### 4.1.0 統計情報ページのタブ（`web/src/StatsPage/`。ADR-005 S4k）
+Help & Settings から開く**メニューのページ**（サイドバーの項目ではない）: `settings`（一般・ネットワーク・言語・ホットキー）・`api`（リファレンスとテスター）・`companion`・`obs`・`about`・`assets`（ゲームアセットの追加）。ナビをハイライトせず、終了時は直前のページを覚える。
 
-上部に「統計情報を取得する」（`POST /api/v1/scoreboards/1/stats:refresh`。応答を待つ間は押せない・成功は snackbar）と、
-`Upset Factor: {係数} | P1 vs P2` の 1 行（係数は両選手の名前があるときだけ。無ければ `P1 vs P2`）。
-値はすべて Socket.IO の `score.1.*` から TS で整形する（`format.ts`。日付はブラウザのローカル時刻、勝率は Python の `%.0f` と同じ偶数丸め）。
-選手名は反映済みの値（OBS と同じ。統計キーは held 対象外なので、反映までの間は新しい選手の統計に前の選手名が付いて見える）。
-選んだタブはモジュール変数に持つ（共有ビューでパネルを行き来しても残る。再読み込みで最初のタブ）。
+#### 4.1.2 ページの追加・削除
 
-| タブ | 表示元 |
-|------|-------|
-| 直近の対戦（Head-to-Head） | `score.1.recent_sets`（勝敗集計の 1 行と表。read-only） |
-| 戦績（Last Sets） | `score.1.last_sets.{1,2}`（read-only） |
-| 大会履歴（Tournament History） | `score.1.history_sets.{1,2}`（read-only） |
-| この大会の試合一覧 | 取得・行の計算・大会切替での破棄は core の `AnalysisService`（ADR-005 S4j。全 phase group を同時 2 本で取得し、ヘッドレスでも動く）。ページは「start.gg からデータを取得」で `POST /api/v1/analysis:refresh` を呼び、`analysis.*`（進み具合）の 1 行と、`GET /api/v1/analysis` の行（タブを開いたときと、`analysis` が done / error / idle に変わったときだけ読む。描くのは今の `analysis` のために読んだ行だけで、取得中は直前に読んだ行を残し、idle では描かない）を描く。行の文言・既定の並び・絞り込みは `analysisRows.ts`（表 `analysisRows.cases.json` を pytest と jest の両方が読む）。並べ替えは `TableSortLabel` でクライアント側（read-only） |
+手順は §7.5。規約は次のとおり。
 
-#### 4.1.1 ページ（ナビ）の追加・削除規約
+- **ページを開いていなくても成立させる**: 起動時に要る state のシード・正規化・廃止キーの掃除はページではなく `src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）に置く。`Window._SeedPanelState()` はその呼び出し口で、1 つの SaveBlock に束ねる。新しいボードの中身は `AutonaActions.SeedFreshBoard()` が書き、両シェルとも起動時に 3 つ作る（`AutonaActions.MakeBoards()`。起動 1 回だけ。生きているボードに `SeedBoard` を呼ばない）。
+- ページを消すときは、保存された `lastPanel` がその名前でも `RestorePanel` が `WEB_PANELS` に無い名前を既定（`event`）に倒す。
 
-**ADR-005 S-final SF-5b-3 から、ナビは AppShell のもの**（Qt のサイドバー・`QStackedWidget`・`Window._navSections`・
-`_Create*Panel` ファクトリ・`WebPanelPages`・`Window.STATE_VERSION` は削除した）。新規の Qt パネルは足さない（ADR-005）。
-ページを足すときは次を揃える（Python の Window は触らない）:
+### 4.2 React Web UI
 
-- `src/core/WebAccess.py` の `WEB_PANELS` に名前を足す（サーバーが `/web/<名前>` と `/web/app/<名前>` で返す名前）
-- `web/src/PanelShell/registry`（`PANELS`）にページのコンポーネントを足す
-- サイドバーの項目なら `web/src/AppShell/navSections.json` の該当セクションに `{panel, icon, label}` を表示順で足す
-  （アイコンは `assets/icons/`、`label` と見出しは i18next の `app_*` キー。en / ja の両方）。
-  `tests/test_app_shell.py` の `NAVIGATION` は削除した Qt のサイドバーの凍結した写しで、今のナビと照合している:
-  ナビを変えるなら、この照合を「今のナビの表」に書き直すかを判断してから直す（`LEGACY_SIDEBAR_PANELS` との照合は凍結した写しの方で、ナビを変えても動かさない）
-- Help & Settings のメニューから開くページなら、`navTable.ts` の `MENU_PAGES` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す
-  （`tests/test_app_shell.py` が一致を pin。メニューのページはナビをハイライトせず、ウィンドウが次の起動で開き直さない）
-- 版を上げる手順は無い: ウィンドウが覚えるのはページの名前（`lastPanel`。§3.3.5）なので、項目の追加・削除・並べ替えで読み替えは要らない。
-  ページを消すときは、保存された `lastPanel` がその名前でも `RestorePanel` が `WEB_PANELS` に無い名前を既定（`event`）に倒す
-- **ページを開いていなくても成立させる**: 起動時に必要な state のシード・正規化・廃止キー掃除は
-  ページではなく **`src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）** に置く。`Window._SeedPanelState()` はその起動時の
-  呼び出し口（SaveBlock で 1 サイクルに束ねる）。新しいボードの中身は `AutonaActions.SeedFreshBoard()` が両シェルで書き、
-  **両シェルとも起動時に 3 つとも作る**（`AutonaActions.MakeBoards()`。ADR-005 S4ac-1）。書き込みは core の操作（v1 / Web の操作）
-- 手順の詳細は [.claude/rules/python-widgets.md](../../.claude/rules/python-widgets.md)「ページの登録」
+#### 4.2.1 ルート
 
-#### 4.1.2 パネル内の標準パターン
+`web/src/index.js` が React Router で定義する。
 
-| パターン | 内容 |
-|---------|------|
-| スコアボード番号 | board1=1v1、board2=team、board3=crew。画面表示は `scoreboard.battle_format`（`singles` / `team` / `crew`）で切り替える |
-| 編集 → state 即時反映 | `editingFinished` / `valueChanged` 等で `StateManager.Set` を呼ぶ。バッチ操作は `SaveBlock()` で囲む |
-| 設定は 1 ページ | パネルは自分の設定 UI を持たず、アプリの設定は React の設定ページ（`/web/settings`。ADR-005 S4af。Qt の `AutonaSettingsWindow` は削除）に集約 |
+| ルート | 内容 |
+|-------|------|
+| `/`・`/web`・`/scoreboard` | ブラウザ向けの ScoreboardPage（board 1）。`/team` はチーム（board 2） |
+| `/web/:panel` | `PanelShell`。枠なしでページを出す（ブラウザとプレビュー向け）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1` でブラウザ向けの部品を隠す |
+| `/web/app/:panel` | `AppShell`。ページを枠（サイドバー・ヘッダー・フッター）の中に出す。デスクトップのウィンドウはこの 1 枚 |
 
-### 4.2 React Web UI ページ仕様
+#### 4.2.2 AppShell（`web/src/AppShell/`）
 
-`web/src/index.js` で React Router DOM v7 が以下を定義する。
+- 構成: サイドバー（`Header.tsx` = 大会・ゲーム・MOD・対戦形式、`Nav.tsx` = `navSections.json`、`Footer.tsx` = Help & Settings と実行中の仕事）+ ページ（`PanelContent`）。`PanelShell` と共通の準備は `usePanelShellSetup`。
+- サイドバーが横にある間はページのブレークポイントをサイドバーの幅だけずらしたテーマ（`themes.js` の `themeBeside`）で描く。折りたたみは URL のクエリ `nav=collapsed` に replace で書き、デスクトップのホストが読んで QSettings に保存する。600px 未満はドロワー。
+- ゲーム・大会・対戦形式の操作は v1 を呼ぶだけで、選んだ値は答えの後の読み直しまで保つ（後から押した方が勝つ）。大会の読み込みの失敗は `tournamentInfo.load` から revision ごとに 1 回通知する（`told=<revision>` を URL に持ち、ビューの読み直しで二重に出さない）。
+- Help の分岐は `useShellAccess({withToken: false})`: 共有ビューではシェル要求（最前面・更新の確認・外部アドレス）、ブラウザ・ヘッドレスではそれらを出さない。外部アドレスは `src/AutonaExternalLinks.py` の表と `web/src/AppShell/externalLinks.ts` の写し。
+- 文言は i18next の `app_*`（en / ja）。
 
-| ルート | コンポーネント | 主目的 | 接続先 |
-|-------|-------------|------|------|
-| `/` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（既定） | Socket.IO + REST |
-| `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
-| `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
-| `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）と統計情報の `stats`（S4k）と統計情報表示設定の `statsPreview`（S4l）と選手一覧の `playerBrowser`（S4n）とサムネイルの `thumbnail`（S4p）と大会リザルトの `result`（S4r）とスコアボード設定の `board`（S4s）とスコアボード入力の `scoreboard`（S4aa。ブラウザ版の `/scoreboard` とは別のページで、ブラウザ版は変えていない。S4ac-3 までは退路の設定があり、初めて開くまで共有ビューに加わらなかった。今はほかの項目と同じ）と設定の `settings`（S4af。サイドバーの項目ではなく「Help & Settings」→「設定」が開く）と API リファレンス & テスターの `api`・Companion のガイドの `companion`・OBS のガイドの `obs`・About の `about`（S-final SF-4a-2。設定と同じメニューのページ: `MENU_PAGES`）とゲームアセットを追加の `assets`（SF-4b-2。同じメニューのページ）とアーカイブ切り抜きの `archive`（ADR-006 A1。ナビの「各種データ」の項目。A6 まではワーカーがあるときだけ出し、A7 からはいつも出す: 4.2.5）。デスクトップの共有ビューは S-final SF-5b-3 から `/web/app/<panel>`（AppShell）を出し、`/web/<panel>`（枠なし）はブラウザとプレビュー向け（S4e〜SF-5b-3 は Qt のサイドバーの各項目がスタックページを持ち、最初に開いた項目のページにビューが建った: `WebPanelPages`） | Socket.IO + REST |
-| `/web/app/:panel` | `AppShell`（`web/src/AppShell/`） | `/web/:panel` と同じページを、Qt のメインウィンドウの枠（サイドバーのヘッダー・ナビ・フッター）の中に出す（ADR-005 S-final SF-5a-3）。サーバーの扱いは `/web/:panel` と同じ（`WebAccess.IsWebPanel` の名前だけ・STATIC・`FramedElsewhere` / `frame-ancestors`）。S-final SF-5b-3 からデスクトップのウィンドウはこの 1 枚（共有ビュー `AutonaWebPanelHost` が `/web/app/<panel>` を読む。ホストの `PanelPath`）。構成は 4.2.4 | Socket.IO + REST |
+#### 4.2.3 ページ共通の約束
 
-#### 4.2.1 ScoreboardPage コンポーネント階層
+- 共通部品は `web/src/` の各ページと共有コンポーネント（`NumberInput.tsx`・`CountrySelector.jsx`・`ScoreboardPage/TextField.jsx` ほか）を参照。
+- 書き込みが `SHELL` 区分のページ（アーカイブ・ゲームアセット・トークン）は `useShellAccess` で共有ビューかを確かめ、ブラウザ・ヘッドレスでは見るだけにして案内を出す。
+- 共有ビューの Web UI に外部・第三者の HTML を sandbox なしで入れない（秘密とチケットが同じオリジンの子フレームに届く）。第三者のものは別オリジン（プレビュー用リスナー）か `allow-same-origin` なしの sandbox で出す。
 
-```
-ScoreboardPage (function component)
-├── Header (AppBar)
-│   ├── Game selector (Redux: tshGames)
-│   ├── Tournament URL loader (REST: POST /api/v1/tournament)
-│   ├── Auto-update toggle (REST: POST /api/v1/scoreboards/{N}:pull-stream)
-│   └── Visibility menu (Redux: visibility)
-├── CurrentSet
-│   ├── Player ×2
-│   │   ├── CharSelector (Redux: tshCharacters)
-│   │   └── CountryStateSelector (Redux: tshCountries)
-│   └── SetScore (NumberInput ×2 + match/phase/best_of)
-├── UpcomingSets
-└── Clear All Button (REST: POST /api/v1/scoreboards/{N}:clear)
-```
+#### 4.2.4 統計情報ページ
 
-#### 4.2.2 StageStrikePage（削除済み）
+ボード 1 の統計を `POST /scoreboards/1/stats:refresh` で取得し、値は Socket.IO の `score.1.*` から TS で整形して表示する（`web/src/StatsPage/format.ts`）。選手名は反映済みの値（統計キーは held 対象外なので、反映までの間は新しい選手の統計に前の選手名が付いて見える）。「この大会の試合一覧」タブは `analysis.*` と `GET /api/v1/analysis` の行を描く（行の文言・並びは `analysisRows.ts`。`analysisRows.cases.json` を pytest と jest が読む）。
 
-旧 `/stage-strike-app` / `StageStrikePage` は現行ビルドに存在しない。
-Start.gg parser には互換データとして `stage_strike` / `ruleset` を読む処理が残るが、
-React Web UI の操作画面・外部制御 API の対象ではない。
+#### 4.2.5 アーカイブ切り抜き（`archive`。ADR-006）
 
-#### 4.2.3 React 共通コンポーネント
+配信アーカイブ（YouTube の URL か動画ファイル）をセットごとに区切るページ（`web/src/ArchivePage/`）。解析と書き出しは Autona のプロセスでは行わず、**ワーカー**（vodsplit。別リポジトリ SmashVodSplitter）を子プロセスで動かす。決定の根拠と詳細は [ADR-006](../decisions/ADR-006-archive-clipper-worker.md)。
 
-| コンポーネント | 役割 |
-|-------------|------|
-| `NumberInput.tsx` | +/- ボタン付き数値入力 |
-| `CountrySelector.jsx` | 国 Autocomplete（Redux 依存: `tshCountries`） |
-| `CountryStateSelector.jsx` | 国・州 チェーンセレクト |
-| `GameIcon.jsx` | ゲームアイコン表示 |
-| `ScoreboardPage/TextField.jsx` | カスタム MUI TextField（size 統一） |
-| `NoSleep.js` | 画面スリープ防止（import で発動） |
+- **core**（Qt 非依存。`bootstrap_core()` が作る）: `ArchiveWorker`（ワーカーの場所の解決・版の確認・起動。形式 `format == 1` だけを受ける）、`ArchiveJobService`（ジョブ。同時に 1 つ）、`ArchiveReview`（レビューの形・検査）、`ArchiveResults`（結果データの用意とキャラの合成）、`ArchiveTemplates` / `ArchiveThumbnails`（タイトルのテンプレートとサムネイル）、`ArchiveWorkerInstaller`（ワーカーの導入・更新）、`MatchLogService`（ボード 1 の公開を追って試合の記録を書く）。
+- **StateManager には載せない**: ページは `GET /api/v1/archive/jobs/<id>` を 1 秒ごとに読む。ファイルの置き場所は §3.3.1、v1 のルートは [external-control-api.md](external-control-api.md) §5.8。読み取りは `THIS_PC`、書き込みは `SHELL`。
+- **ワーカーの場所**: 環境変数 `AUTONA_VODSPLIT_CMD`（開発用）→ 作業フォルダの `vodsplit-worker/`。ワーカーは Autona の zip に入れず、Autona-releases の `worker-v<版>` から導入する（アップデーターは触れない。pin: `tests/test_archive_worker_install.py`）。
+- **ページ**: ジョブの一覧と、完了したジョブのレビュー画面（プレビュー・タイムライン・詳細）。YouTube のジョブは埋め込みプレーヤー、それ以外は `<video>`。YouTube の IFrame Player API の script は読まない（Google の script が共有ビューで動くのを避けるため。実装は `archiveEmbed.ts`）。編集（確定・IN / OUT・割り当て・削除）は共有ビューでだけ有効で、ページのローカルが正、600 ms で間引いて `review.json` 全体を PUT する。
+- テスト: `tests/test_archive_*.py`（偽のワーカー `tests/fixtures/fake_vodsplit_worker.py`）、`web/src/ArchivePage/*.test.js`、`web/e2e/archive.spec.ts`。
 
-#### 4.2.4 AppShell（`/web/app/:panel`。ADR-005 S-final SF-5a-3）
-
-S-final SF-5b-3 から**デスクトップのウィンドウの全体**（共有ビュー `AutonaWebPanelHost` がこれを読む。Qt のサイドバー・メニュー・ステータスバーは削除）。
-
-`web/src/PanelShell/` の共通の準備（`usePanelShellSetup`: `desktop` / `lng` / Socket.IO / 状態）を `/web/:panel`（`PanelShell`。枠なし）と `/web/app/:panel`（`AppShell`）が共有し、ページの中身は同じ `PanelContent`。`hostApi.navigateToPanel` / `window.autonaPanelShell.navigate` は今の接頭辞（`/web/app/` か `/web/`）を保つ（`panelPrefix`）。
-
-```
-AppShell (web/src/AppShell/index.tsx)
-├── サイドバー（幅 196px。削除した Qt の AutonaSidebar と同じ。ページの横で 100vh・sticky）
-│   ├── Header.tsx … 折りたたみ（menu.svg）／大会（名前か「大会を選ぶ」+ 注意の金枠。メニュー: 大会を選ぶ → URL のダイアログ（POST /tournament・force:true。読み込みが終わるまで開いたまま、拒否は中に出す）／解除 → 確認 → DELETE /tournament）
-│   │               ゲーム（名前順。state の `game.selected` が false か、無ければ「ゲームを選ぶ」+ 注意。`selected` が無い古いサーバーは codename で判定。`selected:false` でも /games を読むまでと assets_load の進捗が出ている間は中立（「読み込み中…」・注意なし。起動直後に保存したゲームの復元が済むまでのちらつき防止）。`selected:false` の間は MOD のスイッチを出さない。/games を読むまでは state のコードネームか「読み込み中…」で注意なし。末尾に「ゲームアセットを追加」→ assets。選ぶと必ず POST /game {codename}）
-│   │               対戦形式（1v1 / Team / Crew。PUT /battle-format。選んだ値は答えの後の読み直しまで保ち、後から押した方が勝つ。Socket.IO の battle_format で追従）
-│   │               MOD コンテンツ（has_modded_content のゲームだけ。POST /game {codename, modsActive}。押した値はロード（assets_load のジョブ）が終わるまで保つ）
-│   ├── Nav.tsx … navSections.json（削除した Qt の Window._navSections と同じ見出し・順・アイコン。tests/test_app_shell.py が凍結した写しと照合）。今のページを aria-current でハイライト。メニューのページ（MENU_PAGES）はハイライトしない。押すと navigateToPanel（replace・クエリを保つ）
-│   └── Footer.tsx … Help & Settings（設定・常に手前に表示（シェルだけ）・ゲームアセットを追加・API 設定の 3 ページ・更新情報を調べる（シェルだけ）・Discord・ご相談・About）と、アプリの状態（StatusLine。useAppStatus。total > 0 なら進捗バー）
-└── ページ（PanelContent。/web/:panel と同じ。サイドバーが横にある間はブレークポイントをサイドバーの幅だけずらしたテーマ（themes.js の themeBeside）で描く）
-```
-
-- ページの 2 ペイン（`md` 以上）はビューポートの幅で切り替わるので、サイドバーが横にある間はページのテーマのブレークポイントを 196px ずらす（`themeBeside(SIDEBAR_WIDTH)`。`md` は 1096px）。ページの幅で見れば Qt のサイドバーの横の共有ビューと同じ切り替えになる。ThemeProvider は常に置き、テーマだけを替える（折りたたみでページを作り直さない）
-- 折りたたむとサイドバーを消し、左上の小さいボタン（34px）で戻す（Qt と同じくページの上に重なる）。状態は左下の小さい箱。折りたたみは URL のクエリ `nav=collapsed` に replace で書く（履歴を増やさず読み込みもしない。ほかのページへ移っても `navigateToPanel` がクエリを保つ。localStorage には書かない）。デスクトップのホストは `urlChanged` でこれを読み、次の自分の読み込みの URL に入れ（`PanelPath`）、ウィンドウが変わるたびに QSettings の `navCollapsed` に保存して次の起動で戻す（S-final SF-5b-3。それまではメモリだけ）。折りたたむ・戻すとフォーカスは反対側のボタンへ。600px 未満はページの上のドロワーで、開くボタンはページの上の行（本文に重ねない）、状態はページの下の 1 行。状態の表示（ライブ領域）はどの形でも 1 つだけ
-- Help の分岐は `useShellAccess({withToken: false})`: 共有ビュー（`shell`）ではシェル要求（`alwaysOnTop {on}` / `checkUpdates` / `openExternal {target}`）、ブラウザ・ヘッドレスでは「常に手前に表示」「更新情報を調べる」を出さず、Discord は `<a target="_blank">`、ご相談は `mailto:`。判定が `failed` ならメニューを開くたびに読み直し、共有ビュー（`desktop=1`）で `failed` のときのご相談は About と同じくアドレスとコピー（ビューは mailto を渡さない）。答えが「できなかった」（`ok: false`）と「答えが無い」は別の文言。アドレスは `src/AutonaExternalLinks.py` と同じ（`web/src/AppShell/externalLinks.ts`。About ページもご相談のアドレスをここから読む。jest と `tests/test_app_shell.py`・`tests/test_web_panel_host.py` が pin）
-- 大会のダイアログは AppShell 本体が持つ（ヘッダが見えなくても通知から開ける）。OK の busy はこのダイアログが送った回（202 の `loadRevision`）の LOADING の間だけ（ほかの回が走っていても押せる。サーバーは新しい generation で古い方を置き換える。EVENT ページの大会カードも同じ）。`tournamentInfo.load` が error になったときは、AppShell の専用の Snackbar（他の通知とは別枠・上中央。`app_tournament_load_failed` +「大会を選ぶ」ボタン + ×。自動では消えず、閉じるまで残る）で revision ごとに 1 回知らせる。出さないのは次の 3 つだけ: (1) ダイアログが要求を送信中（202 の前。回が分からないので判断を保留し、答えが来てから評価し直す。`told` は進めない）、(2) ダイアログがいま中で見せている失敗（そのインスタンスが送った回 `load.revision === sent` の失敗。URL を打ち直した後は見せないので null。閉じたら null。ダイアログが `onShowing(revision|null, sending)` で AppShell に知らせる）、(3) EVENT ページ表示中（カードが自分の status を出す。`told` は進めず、ほかのパネルへ移ったら出す）。ボタンで開いたダイアログを閉じたらフォーカスをヘッダの大会のボタンへ戻す。最後に知らせた（またはダイアログが見せた）回は URL のクエリ `told=<revision>` にも replace で書き、マウントのときにそこから始める（S-final SF-5b-3）: 共有ビューが捨てたページを読み直したとき・ビューが読み込み直したとき（ホストが今の URL の `told` を次の読み込みに入れる）に、同じ失敗を二度知らせない。数字（15 桁まで）でない値は無いものとして扱う
-- 文言は i18next の `app_*`（Qt の画面が出していた訳と一致。`tests/test_app_shell.py` が、ADR-005 S-final SF-7 で `.ts` から外したときに凍結した写し `QT_WORDS` と照合する）。通知は AppShell 自身の Snackbar（ページの FeedbackProvider とは別）
-
-#### 4.2.5 アーカイブ切り抜き（`archive`。ADR-006 A1 / A2 / A3 / A4 / A5 / A6 / A7）
-
-配信アーカイブ（YouTube の URL か動画ファイル）をセットごとに区切るページ（`web/src/ArchivePage/`）。解析・区切りは Autona のプロセスでは行わず、**ワーカー**（vodsplit。SmashVodSplitter リポジトリ）を子プロセスで動かす（ADR-006 D1）。A1 の範囲はジョブの実行と一覧（`--no-cut`。クリップの書き出しはまだ無い）、A3 でセットのあるジョブにモックのレビュー画面（プレビュー・タイムライン・詳細）が付き、A4 でレビューの編集（確定・割り当ての変更・IN / OUT の調整・不要なセットの削除。`review.json`）と確定分の書き出し（ワーカーの `export`）が、A5 で結果データの用意（start.gg のイベント・Autona の記録・JSON ファイル。キャラの合成）とセットのキャラのアイコンが、A6 でタイトルのテンプレートの画面とセットのサムネイルが付き、A7 でワーカーの導入・更新（Autona-releases の `worker-v*` から）が付いた。
-
-- **ワーカー**（`src/core/ArchiveWorker.py`。Qt 非依存）: 場所は環境変数 `AUTONA_VODSPLIT_CMD`（開発用。コマンド行をそのまま。例 `python -m vodsplit`）→ 作業ディレクトリの `vodsplit-worker/vodsplit-worker.exe`（A7 の導入が置く。下の「ワーカーの導入と更新」）の順。`<cmd> version` の 1 行 JSON（`{"version","format"}`）で `format == 1` だけを受け付ける（結果はキャッシュ。使えない結果は 30 秒後か `?refresh=true` で聞き直す）。起動は stdin / stdout / stderr をパイプにし、環境に `PYINSTALLER_RESET_ENVIRONMENT=1` を足し（凍結した Autona の PyInstaller の状態を凍結したワーカーに渡さない。版の確認も同じ）、Windows ではウィンドウなし・`BELOW_NORMAL_PRIORITY_CLASS`・`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` のジョブオブジェクトに入れる（ハンドルを閉じるか Autona のプロセスが終わると、yt-dlp / ffmpeg まで含めて終わる）。中止・終了で `cancel` を送る前に、ワーカーとジョブの中のプロセスを NORMAL に戻す（`WorkerProcess.RaisePriority`。BELOW_NORMAL のままだと負荷の高い PC で `cancel` を読むまで 1 分を超えた）
-- **ジョブ**（`src/core/ArchiveJobService.py`。Qt 非依存。`bootstrap_core()` が作る。生成時には何も読まない）: 同時に 1 つ（2 つ目は 409）。引数は `run <source> --out <job>/out --download-dir <work>/downloads --codec h264|any [--results <job>/results.json] [--event=<名前>] --no-cut --thumbs [--template <job>/templates/NN.json ...] --progress json --cancel-on-stdin`（`--codec` はワーカーの `features` に `h264` があれば `h264`（H.264 + AAC。vodsplit 0.4.0 の既定）、無い 0.3.0 以前には `any`（形式を問わず最高画質。0.3.0 の既定の `open` は VP9 / AV1 に限り、アーカイブによっては 360p になるので渡さない）: ADR-006 D7 の改定。`--thumbs` はセットごとの背景フレーム: A3。`--template` は保存済みのテンプレートのスナップショット: A6。大会名は `-` で始まっても値になるよう 1 語で渡す）。引数とスナップショットは job.json を実行中に書く前に作り、作れなければ `WORK_DIR`（409）で断る（開始・再開・書き出しとも、プロセスの無い running のジョブを残さない）。版の確認（最大 8 秒）は 1 リクエストにつき 1 回まで（Web のクライアントの 10 秒に収める）。読み手のスレッド 2 本（stdout の JSON Lines → メモリの進捗・最後の 50 行のログ・警告・最後の done / error / cancelled、stderr → worker.log）。終わりの状態は「0 + done → done」「2 + error → error（code / message / hint）」「130 か cancelled、または中止を頼んだ後に最後の行が無い → cancelled」「それ以外 → failed（worker.log の末尾を message に入れる）」。中止は stdin に `cancel` を書いて閉じる。再開は同じ引数でもう一度動かす（ワーカーがキャッシュから続ける）。ワーカーが終わったら、まずジョブオブジェクトを閉じて（残った孫プロセスを終わらせて）から stdout / stderr を閉じる（受け継いだパイプを孫が持ったままだと、読み手が止まり、閉じる側もそれを待つため）。両シェルの終了（`Window.closeEvent` / `HeadlessShell.Shutdown`。Web サーバーの停止の後・TaskExecutor の前）が `Shutdown` を呼び、中止 → 待つ（デスクトップ 5 秒・ヘッドレス 2 秒）→ ジョブオブジェクトで終わらせる。前回の Autona が実行中のまま終わったジョブは、その作業フォルダを最初に使うときに cancelled に書き直す
-- **ファイル**（作業フォルダ `archive.work_dir` の下）: `<job_id>/job.json`（ジョブの記録。状態が変わるとき＝開始と終わりだけ、一時ファイル + `os.replace` で丸ごと書く）・`<job_id>/results.json`（渡された結果）・`<job_id>/out/`（ワーカーの出力。`sets.json`・セットの背景フレーム `NN_<題名>_bg.jpg`（sets.json の `thumb`）と解析のキャッシュ）・`<job_id>/review.json`（レビューの編集。A4）・`<job_id>/export_request.json`（書き出しの入力。A4）・`<job_id>/clips/`（書き出したクリップとワーカーの `export.json`。A4。対応が確かなクリップの隣のサムネイル `<クリップ名>.png`: A6）・`<job_id>/thumbs/<no>.png`（セットのサムネイル）と `<job_id>/thumbs/thumbs.json`（描いたときのセットの区間と結果・クリップの隣に置いた png の名前。A6）・`<job_id>/templates/NN.json`（ワーカーに渡すテンプレートのスナップショット。開始・再開・書き出しのたびに書き直す。A6）・`<job_id>/worker.log`（stderr と JSON でない stdout の行。Autona だけが追記する）・`downloads/`（ダウンロードした動画。ジョブで共有）。`job_id` は `YYYYMMDD-HHMMSS-xxxx`（`^[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$`）で、解決したパスが作業フォルダの下にあることを確かめる（違えば 404）
-- **StateManager には載せない**（ADR-006 D6）: ページは `GET /api/v1/archive/jobs/<id>` を 1 秒ごとに読む。Socket.IO でも配らない
-- **v1**（読み取りは `WebAccess.THIS_PC`、書き込みは `WebAccess.SHELL`（2026-11-16 A1 の検収で変更。ゲームアセットのジョブと同じ: `THIS_PC` は同じオリジンのレイアウトも通すので、任意の URL のダウンロード・作業フォルダの付け替えはデスクトップの共有ビューの fetch だけ。ヘッドレスと素のブラウザはジョブを作れない）・no-store。拒否は core の日本語の文を `error.message`、core のコードを `error.reason` で返す）: `GET /archive/status`（`{available, version, format, features, reason, work_dir, thumbnail_background, running_job, running_kind}`。`running_kind` は `analysis` / `export` / null: A4。`features` はワーカーの `version` の `features`（古い版は空）、`thumbnail_background` は `frame` / `settings`: A6）・`PATCH /archive/settings`（`{work_dir, thumbnail_background}` の 1 つ以上）・`GET /archive/jobs`（新しい順）・`POST /archive/jobs`（`{source, results, event}` → 201。400 → 503 → 409 の順に断る。本文は 2MB まで。`\\` で始まるパス（ネットワークの共有・`\\?\` のデバイスパス）はファイルを見る前に 400）・`GET /archive/jobs/<id>`（`{job, sets}`。解析の実行中は `sets` が null。`job.export` は最後の書き出し: A4）・`POST /archive/jobs/<id>:cancel`・`POST /archive/jobs/<id>:resume`（`job.json` の `source` を作成と同じ検査にかけ直し、通らなければ 409 `source`）・`GET /archive/jobs/<id>/video`・`GET /archive/jobs/<id>/frames/<no>`（A3。下の「プレビューのファイル」）・`GET /archive/jobs/<id>/review`（THIS_PC）・`PUT /archive/jobs/<id>/review`（SHELL。本文 2MB まで）・`POST /archive/jobs/<id>:export`（SHELL）（A4。下の「レビューと書き出し」）・`GET /archive/match-logs`（THIS_PC）・`POST /archive/results:prepare`（SHELL。本文 2MB まで）（A5。下の「結果データとキャラ」）・`GET /archive/templates`・`GET /archive/templates/<id>`（THIS_PC）・`PUT` / `DELETE /archive/templates/<id>`・`POST /archive/templates/<id>:duplicate`・`POST /archive/jobs/<id>/titles:preview`・`POST /archive/jobs/<id>/thumbs:generate`（SHELL）・`GET /archive/jobs/<id>/thumbs/<no>`（THIS_PC）（A6。下の「テンプレートとサムネイル」）・`GET /archive/worker`（THIS_PC。`?refresh=true` でリリースを確かめ直す）・`POST /archive/worker:install`（`{version}` → 202 `{job}`）・`POST /archive/worker:cancel`（`{revision}`）（SHELL）（A7。下の「ワーカーの導入と更新」）。API カタログには載せない（ページだけが呼ぶ）
-- **プレビューのファイル**（A3。`ArchiveJobService.VideoFile` / `FrameFile`。v1 は `send_file(conditional=True)` で返すだけ）: リクエストはジョブ（とセットの番号）だけを名指し、パスは受け取らない。動画は、ローカルのジョブなら `job.json` の `source`（作成と同じ `CheckSource`。`\\` で始まるパスはファイルを見ずに断る。作業フォルダの外でもよい）、URL のジョブならワーカーが落としたファイル（`job.json` には無い。名前は `--codec` で決まり、`h264` / `any` は `<id>.mp4`、改定前に古いワーカーが `open` で落としたジョブは `<id>.open.mp4`。YouTube のジョブはページが埋め込みで見るので、ページがこれを読むのはそれ以外のジョブ。`out/sets.json` の `source` のファイル名を、今の作業フォルダの `downloads/` で探す。作業フォルダを動かしても見つかる。リンクを辿って作業フォルダの下に解決するもの以外は 404）。拡張子は 2 つの表で分ける: 動画の表（`_VIDEO_SUFFIXES`。vodsplit は拡張子の表を持たず FFmpeg で開くので、FFmpeg が読むよくあるコンテナ。OBS の `.flv` / `.ts` を含む）に無いもの（`.txt` / `.json` / 拡張子なし / `.part`）は 404、動画の表にあってプレビューできる表（`_VIDEO_TYPES`: `.mp4` / `.m4v` / `.webm` / `.mkv` / `.mov`）に無いもの（`.flv` など）は、ファイルがあれば 415（`reason: not_previewable`。消えていれば 404）で、ページは「この形式（.flv）は画面でプレビューできません。セットの一覧・タイムラインは使えます」と出す（`<video>` の失敗の後の HEAD の状態で見分ける）。返すのはプレビューできる表のものだけ（種類はこの表から付け、推測しない）。背景フレームは sets.json の行の `thumb`（`.jpg` / `.jpeg`）をそのジョブの `out/` から（リンクを辿って `out/` の下に解決するものだけ。別のジョブのファイルは指せない）。**動画も背景フレームも実行中のジョブには返さない**（404。再開したジョブのワーカーが同じファイルを書き直しうる・sets.json が前回のもの。`Job` が `sets` を null にするのと同じで、ページも再開したら `<video>` を外して要求を手放す）。開けないファイルは、消えた（`FileNotFoundError`）なら 404、ほかの `OSError`（ほかのアプリが掴んでいる・読む権限が無い）なら 409（`reason: unreadable`。ログには型と errno だけ）。`nosniff`・no-store（動画をブラウザのディスクキャッシュにも残さない）。範囲外の `Range` は werkzeug の 416
-- **レビュー画面**（A3。`web/src/ArchivePage/`: `index.tsx` の `SetsView`・`Preview.tsx`・`Timeline.tsx`、純関数は `archivePreview.ts` / `archiveTimeline.ts`）: CSS grid（左 320px のセット一覧 / 中央プレビュー / 右 300px の詳細 / 下にタイムライン）。プレビューは、ページが `PreviewPlayer`（`archivePreview.ts`。再生・一時停止・シーク・位置）越しに動かす 2 つの実装のどちらか（ADR-006 D7 の改定）: **YouTube のジョブ**（`youtubeEmbedId`: 元動画が youtube.com / youtu.be / youtube-nocookie.com（とそのサブドメイン）の http(s) の URL で、sets.json の `source_id` が `^[A-Za-z0-9_-]{11}$`）は YouTube の埋め込みプレーヤー（`archiveEmbed.ts`。iframe `https://www.youtube-nocookie.com/embed/<id>?enablejsapi=1&origin=<origin>&playsinline=1&rel=0`（自動再生しない。`allow="autoplay; encrypted-media; picture-in-picture"`・`referrerpolicy="strict-origin-when-cross-origin"`: referrer が無いとエラー 153）。**IFrame Player API の script は読まない**（Google の script が共有ビューのメインフレームで動き、シェルの秘密付きの fetch・チケット・クリップボードを使えてしまう。state-and-webserver.md の共有ビューの節）。ページは iframe と postMessage で直接話す（API がしているのと同じやりとり。YouTube の公開仕様ではない）: iframe が答えるまで 250ms ごとに `{"event":"listening"}`、操作は `{"event":"command","func","args"}`、送り先はどれも `EMBED_HOST` に固定（`*` にしない）。受けるのは `origin === EMBED_HOST` かつ `source === iframe.contentWindow` のメッセージだけで、JSON の形（`event` が文字列・状態は既知の値・時刻は有限の数）を検査してから使う。`onReady` で `onStateChange` / `onError` を登録して操作できるようになり、位置・長さ・状態は iframe が送る `infoDelivery` から取る（ポーリングしない。シークした時刻は次の `infoDelivery` まで今の位置とする）。15 秒のうちに `onReady` が来なければ再生できないとする。始まっていない（未開始・頭出し済み・終わった）動画には `seekTo` が再生を始めるので `cueVideoById({startSeconds})` で頭出しし、再生までその時刻を位置とする。準備ができる前に選んだセットは、準備ができたらその時刻へ。アンマウントで iframe と `message` の受け手を外す）、**それ以外**（ローカルのファイル・YouTube でない URL・id が動画 id の形でないもの）は素の `<video controls>`（`src` は v1 の動画）。埋め込みの中をクリックするとキーが iframe に取られるので、window の `blur` の後で activeElement がプレビューの iframe なら window と枠（`tabIndex=-1`。キーはそこから `SetsView` へ上がる）にフォーカスを戻す（埋め込みの中の YouTube のキー操作は使わない）。埋め込みで再生できない（エラー 2 / 5 / 100 / 101 / 150 / 153、15 秒のうちに準備できたと言わない）ときは埋め込みをあきらめ（iframe を外し、失敗の後に届いたメッセージは無視する）、落としたファイルの `<video>` に今のページの位置から切り替える。再生できない形式なら既存の「ブラウザで開く」に「YouTube で開く」（今の位置の `watch?v=<id>&t=<秒>s` を `target="_blank" rel="noreferrer"`。共有ビューでは `_OpenOutside` が既定のブラウザに渡す）を並べる（`<video>` 側のどの問題にも並べる）。トランスポートにも同じ所への小さなリンク「YouTube で開く（現在位置）」を常に出す。CSP（`frame-ancestors 'self'` だけ）は埋め込みを妨げない。セットを選ぶとその開始へシークする。キーは `SetsView` の中だけ（`tabIndex=-1` の枠の `onKeyDown`）で、入力欄・コンボ・修飾キー・IME 変換中は効かない: Space 再生 / 停止（ボタンの上ではボタンが押される。セットの行と動画の上ではページのもの）・↑↓ 一覧（フィルタ後）のセットを移る・N 次の要確認（一周する）。確定したセットは要確認でなくなる（`reviewedRow`。一覧の印・タイムラインの色・フィルタ・N・詳細の理由から外れ、確定を外すと戻る。要確認フィルタの最後の 1 件を確定したら全セットの表示に戻す）。詳細のキャラの行ではキャラごとにサムネイルのカラーを選べる（A6。review の `skins`。スキンが 2 つ以上のキャラだけ）。I / O / Enter はレビューの編集（A4。下の「レビューと書き出し」）で、編集できるときだけ効き、ヒントにも出す。再生できないとき（`error` イベント）は `<video>` の MediaError のコードと動画の URL の `HEAD` で分ける: 404 → 「見つからない」、`HEAD` が 2xx でない・聞けない・`MEDIA_ERR_NETWORK`（2） → 届かない、`MEDIA_ERR_SRC_NOT_SUPPORTED`（4）でこのブラウザが H.264 を `canPlayType` で再生できない → 「ブラウザで開く」（`/web/archive?job=<id>` を `target="_blank"` で開く。共有ビューでは `_OpenOutside` が既定のブラウザに渡す。読み取りは `THIS_PC` なのでブラウザでも開ける。書き込みは SHELL なのでその先は見るだけで、ボタンの下に 1 行でそう書く）、それ以外（デコードの失敗など。ブラウザでも再生できない） → 再生できない。プレビューはアンマウントで `pause` → `src` を外す → `load()`（`releaseVideo`）。ジョブを開くと `SetsView` の枠に `focus({preventScroll: true})`（キーがすぐ効く）。`?job=<id>` でそのジョブを開く。**書き込みの可否**: ページは `useShellAccess({withToken: false})`（`GET /api/v1/shell-session`）で共有ビューかを確かめ、403（ブラウザ・ヘッドレス）ならジョブの開始・中止・再開と作業フォルダの変更を無効にして上に案内を出す（確認中・失敗は有効のまま: サーバーが断る）。タイムラインは SVG（位置は範囲に対する %）: 全体 / 選んだセットの切り替え、セット（一致・要確認・フィルタ外は薄く）・ゲーム（`games`。`corrected_games` のゲームはスコアボード補正の色）・選手（OCR）（`games_ocr` の名前ごとの欄。濃さは出現率の 4 段。初めは畳む）・再生位置。クリックでシーク（セットの上ならそのセットを選ぶ。フィルタで隠れたセットを選んだら、フィルタを「すべて」に戻す）。「セット」表示で再生位置がセットの外なら再生位置の線を出さない（`playheadPercent`）。IN / OUT のドラッグは A4。詳細の項目は（対戦・ラウンド・題名・補正と要確認の理由・IN / OUT・スコアとゲーム数の一致・名前の一致・長さ・ゲームごとの時刻と OCR の最高の出現率）。時刻は YouTube のリンク（ローカルのファイルは文字）で、行のクリックはその時刻へシークする。一覧の行の画像は背景フレーム（`thumb` のある行だけ頼む。読めなかった画像は箱に戻す）。URL・セレクタ・CSS の `url()` に入れるセットの番号は `setNumber`（0 以上の整数）を通したものだけで、`url()` は `cssUrl` でエスケープする
-- **レビューと書き出し**（A4。core は `src/core/ArchiveReview.py`（純関数: 読み・検査・保存の形・書き出しのセット）と `ArchiveJobService` の `Review` / `SaveReview` / `StartExport`、ページの純関数は `web/src/ArchivePage/archiveReview.ts`）: `review.json` の形と読み書きの規則は ADR-006 D6（変えたセットだけ・`base` が今の sets.json と違うセットの編集は捨てる・読みは寛容で保存は厳格・一時ファイル + `os.replace`）。区間は 0.01 秒単位・1 秒以上（vodsplit の `MIN_CLIP`。vodsplit と同じ `end - start < MIN_CLIP` の厳格な比較で、浮動小数で 1 秒にわずかに足りない区間は断る）で、動画の終わり（sets.json の `duration`）から `END_MARGIN`（0.05 秒）を引いた所までにも 1 秒以上（終わりを越える OUT はワーカーが終わりで切る）。結果の同一判定は `ResultKey`（キーを並べた JSON・整数の float は整数。ページの `canonical` と同じ文字列）1 つ。読みで合わなくなった区間は確定も一緒に捨てる（ワーカーの元の区間を勝手に書き出さない）。あるのに開けない review.json（他のアプリが使用中・権限）と、完了したジョブの読めない sets.json は空として扱わず 409 `unreadable`（GET・PUT・`:export`）。割り当てられるのはそのセットの結果と `unused_sets` で、1 つの結果は 1 セットだけ。削除したセット（エントリは `{"removed": true}` だけ。確定・区間・割り当ては捨てる。`format` は 1 のまま）は確定扱いにしない（`ExportSets`（書き出し・サムネイル）と `ReviewedSets`（タイトルのプレビュー）から外す）・結果を持たない（`Assigned` が None。その結果はほかのセットに割り当てられる）。`removed` が bool でなければ 400。保存は解析が完了したジョブだけ（解析の実行中は 409 `busy`、未完了は 409 `not_done`、合わなければ 400 `invalid`）で、書き出しの実行中も受ける（走っている書き出しは始めたときの要求で切る）。**書き出し**は解析と同じジョブの仕組み（1 度に 1 つ・進捗・中止・終了の後始末・BELOW_NORMAL。解析と排他で、走っている方を `running_kind` とジョブの `export.state` で示す）で `export <job>/export_request.json --out <job>/clips --progress json --cancel-on-stdin` を動かす。要求は確定したセット（sets.json の順。区間と結果はレビューのもの、タイトル・概要欄は null でワーカーがテンプレートから作る）と元動画（A3 の `VideoFile` と同じ決め方。無ければ 409 `source`）と大会名・動画 id・結果データの bracket URL と日付。確定が 0 なら 400 `invalid`。記録は job.json の `export`（状態・進捗・ログ・クリップ数・飛ばした数）で、GET は `out_dir` と `clips/export.json` のクリップ（実行中は null: Windows で開いているファイルは置き換えられない）を添える。中止した書き出しは「確定分を書き出し」をもう一度押すと続きから（ワーカーが同じ動画・同じ区間で切り出し済みのクリップを飛ばす）。前回の Autona が書き出し中のまま終わったジョブは、最初に使うときに書き出しを cancelled に書き直す。**ページ**: 編集できるのは、共有ビュー（書き込みが SHELL）で解析が完了し、レビューを読めたときだけ（ブラウザでは確定の印・確定数を見るだけ）。I / O は再生位置を IN / OUT に（IN は切り捨て・OUT は切り上げで 1 秒以上を保つ。丸めた区間がサーバーの式（`rangeFits`）で 1 秒に足りなければ、動かした側を 0.01 秒ずつ広げる。OUT の上限は `duration` の切り捨て）、Enter は選んだセットを確定して一覧（フィルタ後）の次の未確定へ移る（確定済みなら確定を外して留まる。行の上の Enter は選んでいない行ならその行を選ぶ。キーで選びが移ったらフォーカスも移し、選びが変わらなかったキーは移さない）。Delete は選んだセットを削除して一覧（フィルタ後）の次のセット（無ければ前）へ移る（確認しない: 戻せる）。Shift 付きの I / O / Enter / Delete と、押しっぱなしの Enter / Delete（`repeat`）は何もしない。削除したセットは一覧・タイムライン・キー移動・確定数（確定 n / 全体）から外し、一覧の末尾の折りたたみ「削除したセット (n)」に #番号・時刻・ラベルと「戻す」（編集できるときだけ）を並べる。戻すと未確定・ワーカーの区間と結果に戻る（その結果をほかのセットが持っていれば結果なし: `withRestored`）。ヘッダーの集計は sets.json のまま。開いたリスト（割り当ての Select）の中のキーはリストのもの。タイムラインの選んだセットの IN / OUT のつまみ（SVG・pointer events・`setPointerCapture`。ドラッグの間は表示の範囲を固定する。ボタンを離さずに離れた・`lostpointercapture`・別のセットを選んだときはドラッグを捨てる。編集できるときの「セット」表示はセットの前後に 30 秒の余白（動画の範囲で切る）を付ける）。詳細に「確定して次へ」・「削除」（赤の text ボタン）・割り当て（Select。ほかのセットが持つ結果は無効で「（セット #n）」）・IN / OUT を今の位置に・元に戻す（検出した区間を添える）。上の帯に確定数・保存の状態（失敗は赤で出す）・「確定分を書き出し」（保存待ちを先に送ってから `:export`。保存に失敗したら書き出さない）・書き出しの進捗と中止・結果（クリップ数・飛ばした数・出力先・クリップの一覧）。保存はページのローカルが正で、編集のたびに 600 ms 間引いて review 全体を 1 回 PUT する（同時に 1 つ・最新だけ。`ReviewSaver`）。ジョブを切り替えて閉じたビューは、待っている値と失敗した値を送り切り（`dispose`）、同じジョブを開き直したビューはその完了を待ってから GET する（モジュールの `pendingSaves`。GET が PUT を追い越さない）。400 で断られた保存は捨てて GET で読み直す。ページを離れる（`beforeunload`）ときは待っている値を keepalive の PUT で送る。書き出しの結果の本数は `clips - skipped`（ワーカーの `clips` は飛ばした分を含む）。書き出しが `PermissionError`（前回のクリップをプレイヤーで開いている）で失敗したら、閉じてからもう一度押す旨のヒントを出す
-- **結果データとキャラ**（A5。core は `src/core/ArchiveResults.py`（Qt 非依存。生成するものは無い）、start.gg の取得は `StartGGDataProvider.FetchEventResults`（`StartGGArchiveSetsQuery.txt`。1 ページ 32 セット。管理画面・ブラケットの URL は先にイベントの slug に直す（start.gg が答えなければ 503、イベントが無ければ 404）。どの要求も provider の並列の枠（`_FanOut`）で取り（2 ページ目からは 4 本ずつ）、失敗したページを 1 回だけ（これも並列の枠で）取り直す。途中のページが欠けたら結果を返さず 503。取得全体に 120 秒の期限（`ARCHIVE_FETCH_DEADLINE_SECS`）があり、過ぎたら残りの要求を止めて（`cancel_event`: 試行の間と待ちの中で見る）503。キャラは selection の種類が `CHARACTER` のものだけ。`data.event` が null ならエラー付きでも 404。フッターに進み具合（セット一覧の取得と同じ `startgg_sets`）。core は provider を import しないので `AutonaWebOperations.prepare_archive_results` が渡す）、ページの純関数は `web/src/ArchivePage/archiveSets.ts`）: 結果データはジョブの作成と分けて用意する（`POST /archive/results:prepare`。作成は受け取った結果を検査してそのまま置く）。種類は `startgg`（イベントの URL。完了したセットだけ: DQ・スコアの無いセット・bye は除き、選手名のスポンサー（最後の ` | ` より前）は外す。ゲームごとのキャラは start.gg の id）・`matchlog`（日付 `YYYYMMDD` と、大会名（完全一致。null でその日のすべて、`""` は大会名の無い記録））・`json`（ページが読んだファイル）。答えは vodsplit の結果（`bracket_url`・日付付き）と要約（`{sets, game, records, sources: {scoreboard, report, mains, given, none}}`）で、ページは要約を見せてから「開始」でジョブの作成に渡す。拒否は 400（要求）・404（イベントが無い・報告済みのセットが無い・その日 / 大会の記録が無い）・503（start.gg が答えない）。**キャラ**は側ごとに、ゲームが知っているキャラのある最初の出どころ（記録 `scoreboard` → start.gg の報告 `report` → PlayerDB の mains の 1 体目 `mains`）から取り、`c1` / `c2` は表示名（プログラムの locale）を使った順に最大 2 体「/」でつなぐ。`games[]` は記録にキャラがあれば記録、無ければ報告。`char_source` は両側のうち弱い方。ゲームは start.gg のイベントの videogame のゲーム（スキャンに無ければキャラ無し: 報告も mains も使わない。videogame が null のときだけロード中のゲーム）。記録のキャラは行の `game`（記録した時点のロード中のゲーム）で引き、start.gg のセットにはイベントのゲームと同じ記録のものだけを使う。`game` の無い古い行のキャラは使わない（`matchlog` では mains も使わない）。`matchlog` の要約の `game` は記録のゲームが 1 つのときだけそれ。`json` はロード中のゲーム。知らないキャラは外す（セットは残す）。表示名の元のコードネーム・ゲーム・アイコンは `"autona": {"game", "c1": [...], "c2": [...], "icons": {コードネーム: ファイル}}` に入れ、vodsplit がそのまま sets.json の `set` に残す。アイコンはゲームのフォルダからの相対パスで、`GameAssetCatalog.GameCharacters` の `icon`（アイコンパック `base_files/icon` の `config.json` の prefix + コードネーム + postfix で始まり、続きがスキンの番号のファイルのうち番号が一番小さいもの。ファイルの無いコードネームは `icons` に入れない）。キャラのある JSON のセットはファイルのまま（`given`）。JSON のセットの `autona` は合成の前に外す（ファイルの値を信用しない）。**記録とセットの対応**は、まず start.gg のセット id: 記録の `set_id` がセットの id と同じならそのセットの記録（複数あれば向きをそろえたスコアが同じ 1 つだけ。左右は名前の組で、合わなければ片方の名前で、それも無ければそのまま）。イベントのセットの id を持つ記録は、そのセットのものか、どれのものでもない。残りのセットと記録を、正規化した選手名（NFKC・最後の ` | ` の後・大文字小文字を無視・空白を除く。かな・アクセントはそのまま）の組で、左右が逆でもよい（キャラも入れ替える）。同じ組に 1 セット・1 記録ならそのまま、ほかはスコア（向きをそろえて）が同じでどちらから見ても 1 つだけのときだけ。どの記録を見るかは日付と大会名だけ（ADR-006 D4）。**記録の読み方**: 同じ `id` の最後の行が記録・JSON のオブジェクトで文字列の `id` でない行は飛ばす・開いたままの記録（`closed: false`）も最後の行で使う・名前の欠けた記録と 0-0・スコアの壊れた記録は使わない。`GET /archive/match-logs` は日ごと（新しい順）の記録の数と、大会ごとの数（最初の記録の順）。日ごとの数はファイルの (mtime, size) をキーに覚え、変わった日だけ読み直す（消えた日は忘れる）。**ページ**: 結果データの選択は「なし / start.gg / Autona の記録 / JSON ファイル」。既定は、読み込み中の大会（state の `tournamentInfo.url`。`TournamentService` が保存するイベントの URL で、`FetchEventResults` がそのまま受ける）が start.gg のイベントなら、その URL を入れた start.gg（「取得」は押してもらう）、そうでなければ「なし」（Hivee の大会も「なし」）。種類を選ぶ・URL を書き換える・取得するまでは読み込み中の大会に追従し（後から届いた state・大会の変更・解除）、その後は利用者の選択を変えない（ページの state はこの URL を読むだけで、ジョブの情報は state に入れない: ADR-006 D6）。「なし」の間は、セットに選手名が付かず区切りが映像の文字だけの推定になって割れやすい旨の注意をインラインで出す。start.gg は URL と「取得」、記録は選んだときに日付の一覧を読み、日付（最新）・大会（その日のすべて）と「読み込む」、JSON は選んだときに用意する。選び直す・URL や日付を変えると用意した結果は捨てる（遅れて届いた古い答えも捨てる。読んでいる途中の JSON ファイルも、別の種類・別のファイルを選んだら捨てる。日付の一覧も最後に頼んだものだけを使い、ページが消えた後の答えは捨てる）。この POST だけ 150 秒待つ（サーバーの start.gg の期限 120 秒より少し長く: 期限切れの 503 を受け取れる）。ブラウザ（SHELL に届かない）では用意しない（記録の日付は THIS_PC なので見える）。セット一覧の行と詳細に、`autona.icons` のファイルを `user_data/games/<game>/<ファイル>` で出すアイコン（ゲームのフォルダを出る名前・パスは使わない・`icons` に無いコードネームと読めないアイコンは出さない）と、`char_source: "mains"` のセットに「推定」を出す。テストは `tests/test_archive_results.py`（start.gg の応答は `tests/fixtures/archive_results/` の録画）
-- **結果データを付けた区切り直し**（2026-11-18。`ArchiveJobService.Reanalyze`、v1 `POST /archive/jobs/{id}:reanalyze`、ページの `ReanalyzePanel`）: 結果データなしで作ったジョブ（ワーカーが映像の文字だけで区切るので、1 つの対戦が割れ、見出しがノイズになる）に後から結果データを付け、区切りと名前だけをやり直す。走っていないジョブならどの状態からでも受ける（`Resume` は完了済みを断るが、区切り直しは結果データのために走らせるので完了済みが主役。`error` / `cancelled` / `failed` は結果データを差し替えてから再開するのと同じ）。断るのは、実行中（このジョブの解析・書き出し、別のジョブ）・このジョブのサムネイルの作成中・結果データが無いか不正（`CheckResults`。作成と同じ検査。セットが 0 件は区切り直し用の文言）・`job.json` の元動画が作成の検査を通らないとき（どれも何も変えない。ワーカーを起動できない `503` だけは、ジョブが failed で終わり、置き換えと片付けは済んでいる）。受けたら `_lock` の中で結果データを `results.json.new` に書き → テンプレートのスナップショットを書き → `results.json` へ置き換え → `job.json` を書く（ここまでに書けなければ `409 work_dir` で、`results.json` も作り直すものも元のまま）→ 作り直すものを消す（`_ClearDerived`: `out/` の `NN_<題名>_bg.jpg` と `NN_<題名>.txt`（隣に同じ名前の `.mp4` があれば残す）、`thumbs/<no>.png`、`thumbs.json` のうちクリップの隣のコピーの記録（`beside`）以外（次のサムネイル作成がその古いコピーを消す）、このプロセスの最後のサムネイルの状態）→ `Resume` と同じ経路（`_RunAgain`）で `--results` 付きのワーカーを動かし、`has_results` を true にする。残すもの: `out/sets.json`・`review.md`（ワーカーが書き直す。それまで sets.json がダウンロードを名指す）、`out/.cache`、ダウンロード、`review.json`（`ArchiveReview.Normalize` の既存の規則: 番号と区間（`base`）が変わらないセットの確定・IN / OUT・削除は残り、割り当てた結果は新しい候補に無ければ外れる。区間が変わったセットの編集は捨てる）、書き出し（`clips/`・`export_request.json`・クリップの隣のサムネイル）、ほかのファイル。ワーカーの解析キャッシュ（`out/.cache`: 動画のパス・サイズ・更新日時とキャッシュの版で決まり、結果データに依らない）が使えれば、デコードと OCR を飛ばして区切りと出力だけやり直す。使えるかはジョブの取得の `analysis_cached`（`.cache` があり、キャッシュを作った動画（`VideoFile` の決め方。URL のジョブで open コーデックの `<id>.open.mp4` は今の実行が落とす `<id>.mp4` と違うので false）が残っている）。ページは完了したジョブのレビュー画面の上（「解析時: …」の行）にボタンを出し（結果なしのジョブは「結果データを付けて区切り直す」、結果ありは「結果データを差し替えて区切り直す」）、開くと同じ画面の中に、新規ジョブのフォームと同じ結果データの選択（`useResultsChoice` / `ResultsChoiceFields` を共用。「なし」は出さず、既定は読み込み中の start.gg の大会に追従）と注意書き（区切りが変わったセットの編集が失われる・サムネイルが消える・クリップは残る・途中で中止すると再開して終わるまでレビューと書き出しは使えない。キャッシュが使えないときは最初から解析する）を出す（ダイアログにしない）。実行は未保存のレビューを先に送ってから（書き出しと同じ）。始まると既存の進捗表示（毎秒のポーリング）に移る。書き出し・サムネイルの作成中とブラウザ（SHELL に届かない）ではボタンを押せない
-- **テンプレートとサムネイル**（A6。core は `src/core/ArchiveTemplates.py`（Qt 非依存のモジュール関数。保存・検査・並び）と `src/core/ArchiveThumbnails.py`（純関数。結果からサムネイルのデータを組む）と `ArchiveJobService` の `PreviewTitles` / `StartThumbs` / `ThumbFile`、ページは `web/src/ArchivePage/Templates.tsx`、純関数は `archiveTemplates.ts`）:
-  - テンプレートは `user_data/archive_templates/<id>.json`（vodsplit の形式。id は `default` か複製で作る `YYYYMMDD-HHMMSS-xxxx`。リクエストは id だけを名指す）。ファイルの無い「標準」（vodsplit の DEFAULT と同じ）も一覧に出し、保存で初めてファイルになり、削除で標準に戻る（「初期の内容に戻す」）。標準は `match` を持てない。検査は厳格（キーごとの型と長さ・`chapter_format` は `{time}` / `{n}` で `str.format` が読めること・`overflow` / `order` は vodsplit の選択肢。知らないキーは捨てる）で、一時ファイル → `os.replace`。手で壊したファイルは warning を出して一覧とワーカーから外す（削除はできる）。複製は 100 個まで
-  - 一覧はワーカーが選ぶ順（`match` のあるものを長い順 → `match` の無いもの（`default` が先）→ ファイルの無い標準）で、`role` が `match` / `shadowed`（前に同じ `match` のものがあり、選ばれない）/ `default`（どれにも当たらないイベントで使う）/ `unused` を言う。解析と書き出しには、選ばれうる（`match` / `default` の）保存済みのものを、検査済みの内容で `<job>/templates/NN.json` に書いたスナップショット（`WorkerTemplates` → `_WriteTemplates`）として一覧の順に `--template` の繰り返しで渡す（生のファイルを渡さないので、手で書いた `match` の前後の空白を Autona とワーカーが読み違えず、実行中にテンプレートを消しても影響しない。保存済みが無ければ渡さず、ワーカーの DEFAULT になる）。テンプレートは `_lock` の外で読んで検査し、書くのは拒否の検査の後・job.json の前（`_lock` の中。job.json・export_request.json と同じ）。ページは同じ規則（`selectTemplate`）で、新しいジョブの大会名とジョブの画面に使うテンプレートを出し、解析時のものは sets.json の `template` を出す
-  - プレビュー（`PreviewTitles`）は完了したジョブだけ: 今のレビューのセット（確定していないものも。ワーカーが断る 1 秒（`MIN_CLIP`）未満の区間は除き、残らなければ `NO_SETS`（409））と保存前のテンプレート（`match` を外す）で export の入力と同じ要求を一時フォルダに書き、ワーカーの `titles`（vodsplit V10。動画を読まない）を要求のスレッドで呼ぶ。版の確認とあわせて 12 秒（`TITLES_DEADLINE_SECS`。ページは 15 秒待つ）に収め、ワーカーの待ちは残り時間と `ArchiveWorker.TITLES_TIMEOUT_SECS`（8 秒）の短い方（残りが 1.5 秒未満なら呼ばずに 503）。プレビューは 1 度に 1 つで、新しい要求は古い要求のワーカーを kill し、古い要求は `SUPERSEDED`（409。ページは捨てる）。終了（`Shutdown`）も走っているプレビューを kill する。解析・書き出しの実行（1 度に 1 つ）には数えない。`status.features` に `titles` が無いワーカーは `UNSUPPORTED`（409）で、ページはプレビューの欄だけ「この版では使えません」にする。ページは編集から 600 ms 待って頼み、古い答えは捨てる
-  - テンプレートの画面はアーカイブのページの中の別の画面（ヘッダーの「テンプレート」。ナビの項目は足さない）: 左に一覧、中央にタイトル・概要欄・表記ルール（`round_map`・`aliases`・`order`・`overflow`・`chapter_format`）・サムネイルのタブ、右にプレビュー（ジョブの画面で開いていた完了ジョブのセット）。変数はキャレットの位置に入れる（`{number}` は Autona では常に空なので出さない）。`title_team` は vodsplit が使わないので出さず、保存では残す。編集（下書き）はアーカイブのページがテンプレートごとに持ち、未保存の間は複製できない（サーバーは保存済みの内容を複製する）。ジョブの画面はテンプレートの画面の下に隠して残す（新しいジョブの入力・レビューで選んだセット・下書きは行き来で消えない。隠れている間は動画を止める）。保存中は入力欄を止め、一覧を読み直せてから、送った内容と同じ下書きだけを捨てる（読み直せなければ下書きを残す。複製も読み直せてから開く）。一覧を読めないときは再試行のボタンを出す。プレビューを頼めなくなったら（読み取り専用・完了したジョブが無い・古いワーカー）前のエラーも消す
-  - サムネイル（`StartThumbs`）は、完了したジョブの確定した・結果のあるセットを 1 枚ずつ `ThumbnailService.SetPayload` / `RenderSet`（試合サムネイルの設定・テンプレート。描画はデスクトップのオフスクリーンのレンダラーで、ヘッドレスは Web 操作が先に 503）で描き、`<job>/thumbs/<no>.png` に書く。データは `ArchiveThumbnails.SetData`（`score.1` の round・両者 1 人ずつの名前と最大 2 体のキャラ（結果の `autona` のコードネーム。そのゲームのカタログで引く）・`game`・`tournamentInfo`（そのセットの大会名だけ）。round と選手名は結果のまま: テンプレートの `round_map` / `aliases` はタイトル・概要欄のもので、サムネイルには効かない）。今ロードしている大会のものは使わない（`SetPayload`）: 色はサムネイル設定の色（`colors.thumbnail.*`）を明示していればそれ、無ければ既定（`DEFAULT_THEME_COLOR` / `DEFAULT_ACCENT_COLOR`。大会の色に落ちない）、背景がバナーなら既定のバナー。背景は `archive.thumbnail_background` が `frame`（既定）ならセットの `_bg.jpg`（file URL）、無いか `settings` ならサムネイル設定の背景。1 度に 1 ジョブ（ワーカーの実行とは別。書き出し中も作れる）。終了中は描いているセットの次で止まり（cancelled）、次の描画を GUI スレッドへ渡せなければ failed。作成の始めに、前回クリップの隣に置いた png（`thumbs.json` の記録で、`NN_….png` の名前のものだけ）と、今回描かないセットの `thumbs/<no>.png` を消す。描いたセットは `thumbs.json` に描いたときの区間と結果を記録し、`files` はその記録が今のレビューの区間・結果と同じで png のあるセットだけ（レビューを変えたセットの古いサムネイルは出さない）。ページは先にレビューを保存してから頼み、進み具合は job の `thumbs`（`{state, done, total, failed, files, revision}`。`revision` は画像のキャッシュバスター）で追い、一覧と詳細にサムネイルを出す（読めなければ背景フレーム）
-  - クリップの隣（`clips/<クリップ名>.png`）に置くのは、書き出しが走っておらず、`clips/export.json` の `source` がジョブの動画で、その番号のクリップが書き出し済みで残っていて、切り出した `export_request.json` の結果と区間が今のレビューと同じときだけ（違えば `thumbs/` だけ）
-- **ワーカーの導入と更新**（A7。core は `src/core/ArchiveWorkerInstaller.py`（Qt 非依存。`bootstrap_core()` が `ArchiveJobService` の後に作り、続けて `CleanLeftovers()`。ヘッドレスでは確かめる（`GET /archive/worker`）だけが動き、導入と中止は SHELL なので `403`）、ページは `web/src/ArchivePage/WorkerInstall.tsx`、純関数は `archiveWorker.ts`）:
-  - 配布: ワーカーは Autona の zip に入れず、Autona-releases の `worker-v<版>` のリリース（`--latest=false`。Autona のアップデーターは `releases/latest` を読む）に、SmashVodSplitter の `packaging/build_worker.py` が作る `vodsplit-worker-windows.zip`（`vodsplit-worker/...`）とマニフェスト `vodsplit-worker.json`（`{version, sets_format, zip: {name, size, sha256}, min_autona?}`）を置く。手順は `.claude/release-runbook.md` の「ワーカーのリリース」
-  - 確かめ方（`Snapshot` → `{installed, env_command, latest, check, update_available, job}`）: `GET /archive/worker` はすぐ答え、リリースの一覧（認証なし・`per_page=100`）はタスクの実行器で読む（10 分に 1 回まで。失敗は 30 秒後に読み直す。`?refresh=true`（ページの「確かめ直す」）は 3 秒に 1 回まで通す）。選ぶのは、下書き・プレリリースでなく、マニフェストの `sets_format` がこの Autona の読む形式（`ArchiveWorker.SUPPORTED_FORMAT`）で、`min_autona` があればこの Autona の版（`assets/versions.json` の `program`）が届く最新の `worker-v`（マニフェストは新しい順に 5 つまで読む。マニフェストの版はタグと同じ、アセットはそのリリースのフォルダのもので、zip のサイズはマニフェストと同じでなければ飛ばす）。`installed` は `ArchiveJobService` の最後の版の確認（`CachedProbe`）。自動更新はしない
-  - 入れ方（`Install(version)` → 1 度に 1 つ、タスクの実行器。`Cancel(revision)`）: `CleanLeftovers` → ダウンロード（`vodsplit-worker.part`。進捗はバイト数。途切れたら `Range` で続きから取り直し（サーバーが `Range` を無視すれば最初から）、進まないまま 10 回途切れたら `download_failed`）→ サイズと SHA-256 → `vodsplit-worker.new/` に展開（`vodsplit-worker/` の外のエントリ・`AssetPackService.ArchivePath` が断る名前・リンク・大文字小文字で重なる名前があれば zip ごと断る。エントリ数・展開後のサイズ・空き容量にも上限）→ 展開した `vodsplit-worker.exe version`（`ArchiveWorker.ProbeCommand`。使える形式で、版がマニフェストと同じか）と、その `features` に `check` があれば自己診断 `version --check`（`ArchiveWorker.CheckCommand`。同梱の yt-dlp と JS の解決部品・Windows の OCR・OpenCV の videoio・FFmpeg・deno を実際に動かす。通らなければ `probe_failed` で、動かない部品の名前を出す。`check` の無い古いワーカーは `version` だけ）→ 入れ替え（`ArchiveJobService.ReserveSwap` の間に、今の `vodsplit-worker/` を `.old` に動かして新しいものを入れ、`.old` を消す。前の導入の `.old` が残っていれば、先に `vodsplit-worker/` があれば消し、無ければ戻す。動かせなければ（ウイルス対策が掴んでいる等）少し待って繰り返し、それでも駄目なら元に戻す）。入れ替えの前の失敗は今のワーカーをそのまま残す。中止は各段の間で見る（入れ替えは止めない）。中止と終了（実行器の `stopping`）は、リリースの確認の要求の間・ダウンロードの読み込みの間（読み込みの待ちは 5 秒まで）・展開したワーカーの版の確認と自己診断の最中（プロセスを止める）でも見るので、Autona の終了は数秒で抜ける。拒否は `INVALID`（400）・`BUSY`（409。導入中・ジョブの実行中・入れ替えの最中）・`INSTALLED`（409。同じ版が導入済み。`AUTONA_VODSPLIT_CMD` があるときは断らない）・`NO_RELEASE` / `CHANGED`（409）・`NOT_RUNNING`（409）・`STOPPING`（503）。入れ替えの直前に版の確認・タイトルのプレビュー（どちらも数秒）が走っていれば 10 秒まで待ち直し、終わらなければジョブを `busy` のエラーで終える。ジョブの実行中ならすぐ `busy`、終了中なら `stopped`
-  - `ReserveSwap`（`ArchiveJobService`）: ジョブ・タイトルのプレビューが走っているか版の確認の最中なら BUSY で断り、取れたら入れ替えが終わるまでジョブ・プレビュー・版の確認を始めない（`SWAPPING`）。`ReleaseSwap` で版の確認のキャッシュを捨て、入れ替えの回数を数える。開始（ジョブの作成・再開・書き出し・タイトルのプレビュー）は、版の確認（ロックの外）と開始の予約（ロックの中）の間に入れ替えが挟まったら 1 度だけ確かめ直し（`worker_version` を古いワーカーの版にしない）、2 度目は BUSY
-  - 落ちたときの残り（`CleanLeftovers`。起動時と導入の前。例外を出さない）: `.part` と `.new` を消し、`.old` は `vodsplit-worker/` が無ければ戻し、あれば消す。3 つは別々に試す（1 つが失敗しても残りを片付ける）
-  - Autona の更新との関係: アップデーター（`apply_update.ps1`）のルートのコピーは削除なし（`/MIR` / `/PURGE` / `/MOV` を使わない）で、`CleanupUpdateLeftovers` もワーカーのフォルダに触れない（`tests/test_archive_worker_install.py` が固定）。`validate_release_zip.ps1` の検査 6 は Autona の zip に `vodsplit-worker/`（と `.part` / `.new` / `.old`）が入っていたら止める（入れると導入済みのワーカーを上書きする）
-  - ページ: ナビにはいつも出す。`status.available` が偽なら、ジョブの画面の代わりに導入のカード（使えない理由・最新の版とサイズ・導入・進捗・中止・失敗の理由・確かめ直す）。導入が終わると `GET /archive/status?refresh=true` で版を確かめ直してジョブの画面になる（1 つの導入につき 1 回）。作業中（確認中・導入中）は読み込みが失敗しても間隔を伸ばして（8 秒まで）読み続け、要求に番号を付けて古い答えを捨てる（導入・中止の答えより前に出した読み込みの答えも）。更新のカードの「更新する」は `update_available` のときだけ押せる（導入した版をもう一度は出さない）。使えるときはヘッダーにワーカーの版のチップと、新しい版があれば更新のチップ（押すとヘッダーの下に更新のカード）。ブラウザ（SHELL に届かない）ではカードは見るだけ。`AUTONA_VODSPLIT_CMD` があるときは、入れても使われないと書く
-  - テスト: `tests/test_archive_worker_install.py`（ローカルの偽のリリースサーバー・偽のワーカー。選び方・ハッシュ・サイズ・zip slip ほかの展開の拒否・中止・入れ替えの失敗と戻し・BUSY・残りの片付け・v1・アクセス区分・アップデーターの保護）、`web/src/ArchivePage/WorkerInstall.test.js`、`web/e2e/archive.spec.ts`（`GET /archive/worker` はスタブ。本物の SHELL の 403 は確かめる）
-- テスト: `tests/test_archive_jobs.py`・`tests/test_archive_templates.py`・`tests/test_archive_thumbnails.py`（A6）。偽のワーカー `tests/fixtures/fake_vodsplit_worker.py`（vodsplit と同じ CLI。`export` サブコマンドも（A4。`clips/` にクリップと `export.json` を書き、同じ区間の切り出し済みを飛ばす）。`FAKE_VODSPLIT_MODE` で ok / error / crash / slow / hang / orphan（`export` は locked も: `PermissionError` の内部エラー）。`titles` サブコマンドと `version` の `features: ["titles"]` も（A6。`FAKE_VODSPLIT_NO_TITLES` で古い版）。URL のときは `--download-dir` に `--codec` に応じて `fakevideo01.mp4`（`h264` / `any`）か `fakevideo01.open.mp4`（`open`）を書き（既定は 0.3.0 と同じ `open`。`FAKE_VODSPLIT_H264` で 0.4.0: `h264` を受け付けて既定にし、`features` に `h264` を足す。知らない codec は argparse と同じく 2 で終わる）、`--thumbs` で、vodsplit の export.py と同じく sets.json を先に書いてから書き出しの段（`export`。5 段の 5 番目）の進捗をセットごとに出し、背景フレームと `thumb` を書く。sets.json に `games_ocr`。Web の E2E も `AUTONA_VODSPLIT_CMD` で使える）。偽のワーカーは通常の優先度で起動する（fixture が `ArchiveWorker._BELOW_NORMAL_PRIORITY_CLASS` を 0 にする。D1 の BELOW_NORMAL のまま並列実行で CPU が埋まると、ワーカーは飢餓の救済の数秒おきにしか走らず、起動・終了・パイプの EOF の待ちが上限を越えた。本番のフラグは `test_the_worker_runs_below_normal_without_a_window` が pin する）。書き出しの要求は vodsplit の `export.validate_edits` にも通す（`test_the_export_request_passes_the_workers_own_check`。vodsplit が入っているか隣に SmashVodSplitter があるときだけ。CI では skip）。Jest は `web/src/ArchivePage/*.test.js`（埋め込みプレーヤーは iframe の役をテストが演じる: ページが送ったメッセージを記録し、iframe のメッセージを window に dispatch する。`archiveEmbed.test.js` と `ArchivePage.test.js` の YouTube のジョブ）、E2E は `web/e2e/archive.spec.ts`
-- **試合の記録**（`src/core/MatchLogService.py`。Qt 非依存。ADR-006 A2。読むのは A5 の結果データの用意（上の「結果データとキャラ」））: ボード 1（1on1）の公開を追って、1 試合 = 1 記録を `user_data/match_log/YYYYMMDD.jsonl` に追記する（start.gg を使わない大会の結果データにもなる: A5）。`bootstrap_core()` が `StateManager.Initialize()` の後に作って `Start()`（`state_updated` / `state_big_change` の購読。state-and-webserver.md の狭い例外。ヘッドレスでも記録する）。公開のたびに、追う値（`set_id`・`phase`・`match`・`teamsSwapped`・両チームの `score`・1 人目の `name` と 1 つ目のキャラの `codename`・表示大会名）を `GetCommitted` で読んで開いている記録と比べる（delta の行は使わない: big change に行は無く、None との間の変更も行にならない）。新しい記録は「`set_id` が空でない別の値に変わる」「両者の名前が両方変わる」「スコアが 2 ゲーム以上から 0-0 に戻る」「済んだゲームのある記録が 0-0 で、違う名前がボードにある（勝者が残る次の試合）」で始まる（`set_id` はセットの変更で始まった記録と、閉じた記録と同じ set_id がボードに残るときだけ引き継ぐ。後者は名前がそろった時点で閉じた記録と違う 2 人（左右の入れ替えは同じ組）なら外す）。名前がそろった記録で合計が N 増えると N ゲーム（キャラはその公開の前のもの）、減ると末尾から消す（1 → 0 で消したゲームは退避し、次が区切りか終了なら戻す）。手で打った記録で名前とスコアが初めてそろえばそのスコアの数のゲーム、読み込んだセットの報告済みスコアは基準値。済んだゲームのある記録では、片方の名前・キャラ・大会名・`phase` / `match` の変化を次のゲームまで保留する（区切りなら捨てる）。空の値で上書きしない（ゲームが変わったらキャラを空に戻す）。行の `game` は記録した時点のロード中のゲームの codename（無ければ null）: 記録を始めたときのゲームで、最初のゲームを数える前に変わったら新しいゲーム（数えた後は変えない）。`teamsSwapped` の反転は記録の左右を入れ替える。規則の全体は ADR-006 D3 とモジュールの docstring。書くのは両者の名前と 1 ゲームがそろってから。observer は `StateManager.lock` の中で記録を更新して行を自分の書き込みスレッド（`AutonaMatchLog`・daemon）のキューに積むだけ（待たない・state を書かない・`GameAssetCatalog` の writer を呼ばない）。両シェルの終了（`Window.closeEvent` / `HeadlessShell.Shutdown`。Web サーバーと TaskExecutor の後・ヘッドレスの flush の前）が `Shutdown` を呼び、開いている記録を区切りと同じに閉じて（退避したゲームを戻す）書き切る。テストは `tests/test_match_log.py`
-
-### 4.3 OBS テンプレ命名規約
+### 4.3 OBS テンプレートの命名と構成
 
 #### 4.3.1 ディレクトリ命名
 
-##### 既存テンプレ
-既存テンプレは互換維持のためリネームしない（例: `scoreboard_simple`, `scoreboard_topleft` などは命名軸が混在しているがそのまま残す）。
+既存テンプレートは互換のためリネームしない。新規は `layout/{用途}_{variant}/` で、`variant` は用途差分 → 配置差分 → 表現スタイル差分 → ブランド差分の優先順。scoreboard 系は `scoreboard_{placement}_{style}`。
 
-##### 新規追加時の命名軸（推奨）
-```
-layout/{用途}_{variant}/
-```
+| 用途プレフィックス | 内容 |
+|----------------|------|
+| `scoreboard*` | 配信中のスコアボード |
+| `bracket_*` | Top 8 ブラケット（`top8.*` を購読） |
+| `commentators` | 実況・解説者バー（`commentary` の `display` が ON のスロットを 1〜4 名） |
+| `recent_sets` / `last_sets` / `h2h_record` / `upset_factor` / `tournament_history` | 統計オーバーレイ |
+| `camborder_*` | カメラ枠 |
+| `result*` / `thumbnail*` | 画像生成専用（§4.4） |
 
-`variant` は以下の優先順で命名する:
+#### 4.3.2 ファイル構成
 
-1. **表示対象・用途差分**（例: `top16`, `top8`, `vertical`, `horizontal`）
-2. **配置差分**（例: `topleft`, `center`, `bottom`）
-3. **表現スタイル差分**（例: `simple`, `geki`, `glass`）
-4. **ブランド差分**（例: `evo`, `meijiyasuda`）
+エントリ HTML（`index.html`）・CSS・JS（`Start()` / `Update(event)`）・`*_preview.png`（選択 UI に出すものは必須）・`settings.json`（ローカル設定とデザイン一覧のメタデータ）。
 
-##### scoreboard 系の推奨パターン
-新規追加分は `scoreboard_{placement}_{style}` に寄せる（例: `scoreboard_topleft_simple`）。既存の `scoreboard_simple` / `scoreboard_topleft` はリネームせず例外として残す。
+#### 4.3.3 デザイン一覧のメタデータ
 
-#### 4.3.2 用途カテゴリ
+BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて `src/core/LayoutCatalog.py` の 1 つのカタログを読む。旧来型のテンプレートのメタデータは `settings.json` の `autona` ブロック（キーは `kind` / `displayName` / `format` / `game` / `entry`。`LayoutCatalog` の docstring が正本）、Designer 製（`layout/custom/{slug}/`）は `project.json`。ブロックが無い・壊れたフォルダは旧来のフォルダ名の規約（`scoreboard*` / `commentators*` / `bracket_top8*`）で拾う。同じ kind で表示名が重なったら `{displayName} ({id})` にする。利用者向けの説明は `layout/README.md`。pin: `tests/test_layout_catalog.py`。
 
-| 用途プレフィックス | 内容 | 既存テンプレ例 |
-|----------------|------|------------|
-| `scoreboard*` | 配信中のスコアボード表示 | `scoreboard/`, `scoreboard_simple/`, `scoreboard_topleft/`, `scoreboard_Universal/` |
-| `bracket_*` | トーナメントブラケット表示（Top 8 専用、`top8.*` を購読） | `bracket_top8/`（top12/top16/ultimate は Top 8 専用化で削除済み） |
-| `result*` | リザルト画像（運用上 OBS には乗せない、画像生成専用） | §4.4 参照 |
-| `recent_sets/` | 最近のセット表示 | 1 種のみ |
-| `commentators/` | 実況・解説者バー（`commentary.{1..12}` の display=ON を 1〜4 名可変表示） | index.html 一本化（旧 tag*.html 3 バリアントは 2026-07 リワークで削除） |
-| `camborder_*` | カメラ枠 | `camborder_Universal/` |
-| `tournament_history/` | プレイヤー経歴 | player1.html / player2.html |
-| `thumbnail*` | サムネイル画像生成専用 | §4.4 参照 |
+#### 4.3.4 共有リソース
 
-#### 4.3.3 ファイル構成（標準）
+`layout/include/`（`globals.js`・`assetUtils.js`・`socket.io.min.js`・`gsap`・`jquery`・`lodash`・`kuroshiro` / `kuromoji`・`color-thief`・フォント・`thumbnail_assets.js`・`result.js` / `result.css` / `result_team.css`）と `layout/main.css`（CSS 変数: `--font`・`--text-color`・`--bg-color`・`--p1-score-bg-color`・`--p2-score-bg-color`・`--theme-color`・`--accent-color` など。値は `layout/main.css` が正本で、`--theme-color` の既定は `StateSchema.DEFAULT_THEME_COLOR` と同値）。テンプレートは `:root` で上書きしてよい。`include/` のライブラリを上げるときは全テンプレートで動作確認する。
 
-各テンプレディレクトリは以下を含む:
+### 4.4 画像生成テンプレート
 
-| ファイル | 役割 | 必須? |
-|---------|-----|------|
-| `index.html` または `{template}.html` | エントリ HTML | ○ |
-| `index.css` または `{template}.css` | テンプレ専用 CSS | ○ |
-| `index.js` または `{template}.js` | `Start()` / `Update(event)` 実装 | ○（read-only テンプレでも空で配置） |
-| `*_preview.png` | テンプレ選択 UI のプレビュー画像 | テンプレ選択 UI に表示するテンプレでは必須／直接 URL 指定のみで使う内部テンプレでは任意 |
-| `settings.json` | テンプレ ローカル設定。アプリのデザイン一覧用の `autona` ブロックもここに置く（下記） | △（必要時。BOARD / 実況 / TOP 8 の一覧に載せるテンプレでは `autona` ブロックを置く） |
+#### 4.4.0 テンプレートパッケージ
 
-##### アプリのデザイン一覧のメタデータ（`settings.json` の `autona` ブロック）
+リザルト画像のレイアウトとサムネイルのテンプレートは、`layout/` 直下の 1 フォルダ = 1 **テンプレートパッケージ**。`core/LayoutCatalog.py` が `settings.json` の `autona` ブロック（マニフェスト）から見つける（コードに一覧の表は無い）。`ResultService` / `ThumbnailService` / レンダラー / `GET /api/v1/layouts?kind=result|thumbnail` / ページの選択肢はすべてこのカタログを読む。利用者向けの説明は `layout/README.md`。
 
-BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
-`src/core/LayoutCatalog.py`（Qt 非依存）の 1 つのカタログを読む。旧来型テンプレのメタデータは
-`settings.json` の `autona` ブロック（ページ側の `globals.js` は読まない）、Designer 製
-（`layout/custom/{slug}/`）は `project.json`。利用者向けの詳しい説明は `layout/README.md`
-「アプリのデザイン一覧に載せる」。
+| キー | 内容 |
+|------|------|
+| `kind`（必須） | `result` / `thumbnail` |
+| `contract`（必須） | テンプレートの契約の番号（`LayoutCatalog.TEMPLATE_CONTRACTS`。知らない番号は載せない） |
+| `size`（必須） | 出力の `[幅, 高さ]`（px の整数） |
+| `rows` | result で必須: `players`（単独。16 行まで）/ `teams`（団体。8 行） |
+| `template` | thumbnail で必須: 配置の数値の JSON（フォルダ内のファイル名） |
+| `entry` / `displayName` / `author` / `license` | 任意 |
 
-| キー | 必須 | 内容 |
-|------|------|------|
-| `kind` | ○ | `scoreboard` / `commentary` / `top8` / `result` / `thumbnail`（`designer` は `layout/custom/` 専用で宣言不可）。不正・破損ブロックは警告ログを出してブロック無し扱い。`result` / `thumbnail` はテンプレートパッケージで、キーと規則が別（§4.4.0） |
-| `displayName` | | 一覧の表示名。省略時はフォルダ名から生成 |
-| `format` / `game` | | BOARD のメタ欄（対戦形式・ゲーム）。省略時は `null`（画面は「—」） |
-| `entry` | | 入口 HTML のファイル名（フォルダ内のみ）。省略・フォルダ外指定は `index.html` |
-
-- **フォルダ名へのフォールバック**: ブロックが無い／壊れたフォルダは旧来の命名規約で拾う（`scoreboard*` → scoreboard、`commentators` / `commentators_*` → commentary、`bracket_top8` / `bracket_top8_*` → top8。基本フォルダは「標準」、バリアントは接尾辞を整形: `commentators_dark-gold` → `Dark Gold`）。`displayName` だけ省略したときも同規則、規約外の名前は `_` → 空白 + 単語先頭大文字。入口ファイルの無いフォルダ、`custom/` `designer_runtime/` `include/` `icons/` は載らない
-- **Designer 製**: 表示名は `Custom: {project.json の name}`（空なら slug）。対戦形式・ゲームは `meta.format` / `meta.game`、未設定なら `1v1` / `カスタム`。Designer の「開く」一覧だけは接頭辞なしの `name` を出す（Designer の中なので区別が要らない）
-  - `meta` は schemaVersion 3 の任意フィールド（バージョンは上げない）。Designer 左サイドバーの「対戦形式」「ゲーム」欄で編集し、`model.ts` の `validateProject()` が保存時に trim・空項目の除去（全部空なら `meta` ごと省略）・各 64 文字上限・文字列型を検査する。Python `_validate_project` は `meta` が dict か不在かだけを見る（サイズは `MAX_PROJECT_BYTES` で全体として制限）。`runtime.js` は読まない（`tests/test_designer_runtime_contract.py` が描画不変を pin）
-  - Designer のプリセット（空 / 基本 1v1 / チーム / クルー、`web/src/ScoreboardDesigner/index.tsx` の `DESIGNER_PRESETS`）は Designer 内部の資産で、`layout/` の組み込みフォルダとは対応しない。空以外は `meta.format` も入れる
-- **重複時の表記**: 同じ `kind` の中で表示名が重なったら、重なったもの全部を `{displayName} ({id})` にする（例: 複製フォルダ `scoreboard_simple - コピー` → `Simple (scoreboard_simple)` / `Simple (scoreboard_simple - コピー)`）。`kind` ごとに別のプルダウンなので、kind をまたぐ同名（実況と TOP 8 の「標準」）は変えない
-- pin: `tests/test_layout_catalog.py`（出荷フォルダのブロックの値そのものは `test_the_shipped_layouts_declare_their_metadata_explicitly`）
-
-#### 4.3.4 共有リソース（`layout/include/`）
-
-すべてのテンプレが以下を参照できる:
-
-| リソース | 用途 |
-|---------|------|
-| `globals.js` | `LoadEverything()`, `InitAll()`, `UpdateData()`, `UpdateData_SocketIO()`, `tsh_update` イベント発行 |
-| `assetUtils.js` | アセット解決ヘルパー |
-| `socket.io.min.js` | Socket.IO クライアント |
-| `gsap.min.js` | アニメーション |
-| `jquery-3.7.1.min.js` | DOM 操作 |
-| `lodash.min.js` | ユーティリティ |
-| `kuroshiro*.min.js` + `kuromoji/` | 日本語処理（読み仮名生成） |
-| `color-thief.min.js` | 画像から代表色抽出 |
-| 各種フォント | カスタムフォント定義用 |
-| `thumbnail_assets.js` | 同梱のサムネイル・リザルトのテンプレートが共有するキャラ画像のヘルパー（ADR-007 T1 で `layout/thumbnail/` から移した） |
-| `result.js` / `result.css` / `result_team.css` | 同梱のリザルトのテンプレートが共有する描画（`initResult`・`placeTeams()`）と土台のスタイル（ADR-007 T1 で `layout/result/`・`layout/result_team/` から移した） |
-
-`include/` 内のライブラリのバージョンを上げる時は、全テンプレで動作確認が必要。
-テンプレートパッケージ（§4.4.0）が自分のフォルダの外で読んでよいのは `../include/` だけ（ADR-007 D2。ほかは `../../assets/` と
-payload が渡すパス。pin: `tests/test_template_packages.py`）。`include/` のファイルをパッケージに同梱しない（特に `gsap.min.js`）。
-
-#### 4.3.5 main.css の利用規約
-
-`layout/main.css` は CSS 変数による「共通基盤」を提供する:
-
-| CSS 変数 | デフォルト | 用途 |
-|---------|---------|------|
-| `--font` | `"LINE Seed JP", sans-serif` | 主フォント |
-| `--text-color` | `#ffffff` | 主テキスト色 |
-| `--bg-color` | `#121212` | 背景 |
-| `--p1-score-bg-color` | `#fe3636` | P1 スコア背景 |
-| `--p2-score-bg-color` | `#2e89ff` | P2 スコア背景 |
-| `--p1-sponsor-color` / `--p2-sponsor-color` | `#ff7a6d` / `#29b6f6` | スポンサー色 |
-| `--theme-color` | `#181B21` | テーマ色（正本 `src/core/StateSchema.py` の `DEFAULT_THEME_COLOR` と同値） |
-| `--accent-color` | `#f0a500` | アクセント |
-| `--bevel-light` / `--bevel-dark` | color-mix で派生 | 立体感 |
-| `--tile-radius` / `--tile-gap` | `6px` / `5px` | タイル UI |
-| `--border-radius` | `16px` | 角丸 |
-
-各テンプレは `:root` でこれらを上書きしてよい（クリエイティブ領域の自由度）。
-
-### 4.4 画像生成テンプレ命名規約
-
-#### 4.4.0 テンプレートパッケージ（ADR-007 T1）
-
-リザルト画像のレイアウトとサムネイルのテンプレートは、`layout/` 直下の 1 フォルダ = 1 **テンプレートパッケージ**。
-`core/LayoutCatalog.py` が `settings.json` の `autona` ブロック（マニフェスト）から見つける（コードに一覧の表は無い）。
-`ResultService` / `ThumbnailService` / 2 つのレンダラー / `GET /api/v1/layouts?kind=result|thumbnail` / リザルトとサムネイルの
-ページの選択肢は、すべてこのカタログを読む。利用者向けの説明は `layout/README.md`。
-
-| キー | 必須 | 内容 |
-|------|------|------|
-| `kind` | ○ | `result` / `thumbnail` |
-| `contract` | ○ | テンプレートの契約の番号（今は `1` だけ。`LayoutCatalog.TEMPLATE_CONTRACTS`）。知らない番号は載せない |
-| `size` | ○ | 出力の `[幅, 高さ]`（px の整数、各 1〜4096）。レンダラーのビューと画像の大きさ |
-| `rows` | result で ○ | `players`（単独。行は 16 まで渡る）/ `teams`（団体。8 行）。チーム用かどうかの判定 |
-| `template` | thumbnail で ○ | 配置の数値の JSON（フォルダ内のファイル名だけ）。payload の `template` になる |
-| `entry` | | 入口の HTML（フォルダ内のファイル名だけ）。省略時は `result.html` / `thumbnail.html` |
-| `displayName` | | 文字列か `{"ja", "en"}`。省略時はフォルダ名から作る。同梱の 8 種は使わず `CoreWords` の名前（一覧のエントリでの形は下記） |
-| `author` / `license` | | 一覧に添える（同梱は `license: "MIT"`） |
-
-- **フォルダ名へのフォールバックは無い**。必須のキーが欠けた・不正なマニフェスト、入口や `template` のファイルが無いものは
-  そのフォルダだけ警告を出して載せない（ほかの発見は止めない）
-- **id**: 同梱の 8 種は今までの id を変えない（凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES`: `horizontal` → `result` ほか、
-  `type_a` → `thumbnail`、`type_b` → `thumbnail_type_b`）。ほかのパッケージの id はフォルダ名。同じ kind の同梱の id と同じ名前の
-  フォルダ（大文字小文字は問わない: Windows のフォルダ名は区別しない）は載せない（同梱が勝つ）。保存値（`result_config.layout` /
-  `thumbnail_config.template_id` / state の `result_layout`）の移行は無い
-- 一覧の順: 同梱（凍結した表の順）→ ほか（フォルダ名順）。エントリは他の kind の形に `displayNames` / `folder` / `bundled` /
-  `contract` / `size` / `author` / `license` と `rows` か `template` を足したもの（`id` がフォルダと違いうるので、パスは `folder` から組む）。
-  `displayName` は他の kind と同じく文字列（`Layouts(locale=)` の言語。`GET /api/v1/layouts` はプログラムの言語）、`displayNames` は
-  `{"ja", "en"}` のある言語だけ（文字列で宣言された名前は両方に同じ値）
-- 一覧の場所はカタログの `Root()` 1 つ（`layout/` を、`bootstrap_core()` が渡すアプリのディレクトリ `AutonaDirHelper.current_dir` の下で
-  読む）。サービス・レンダラー・ルートが同じフォルダを読む。隔離起動（`tests/test_bootstrap_split._runtime`: ヘッドレスのスモーク・
-  ブラウザ E2E）の `layout/` には同梱のパッケージを `assets/` と同じく繋ぐ（`SHIPPED_TEMPLATE_LINKS`）
-- 保存された id のパッケージが無いときは既定（`horizontal` / 団体の対戦形式なら `team` / `type_a`）で描き、保存値は消さない。
-  レンダラーは一度見たパッケージのページを覚えていて、そのファイルが消えたら読み込みが失敗する（従来の「ページが無い」と同じ扱い）。
-  一度も載っていない id は既定で描き、既定も無ければ描画を始められない
-- payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。描画は今は file://（T2 で隔離の経路に移す）
-- pin: `tests/test_template_packages.py`（同梱 8 種の凍結・壊れたマニフェスト・id の衝突・パッケージ外の参照）
+- **フォルダ名へのフォールバックは無い**。マニフェストが不正・入口や `template` のファイルが無いものは、そのフォルダだけ警告を出して載せない。
+- **id**: 同梱 8 種は今までの id を変えない（凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES`）。ほかはフォルダ名。同梱の id と同じ名前のフォルダ（大文字小文字は問わない）は載せない（同梱が勝つ）。保存値（`result_config.layout` / `thumbnail_config.template_id` / `result_layout`）の移行は無い。
+- 保存された id のパッケージが無いときは既定で描き、保存値は消さない。
+- パッケージが自分のフォルダの外で読んでよいのは `../include/`・`../../assets/`・payload が渡すパスだけ。`include/` のファイルを同梱しない。
+- payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。pin: `tests/test_template_packages.py`。
 
 #### 4.4.1 サムネイル
 
-##### ディレクトリ命名
-
-```
-layout/thumbnail/         ← 「Standard」テンプレ (template_id = "type_a")
-layout/thumbnail_type_b/  ← 「Center Panel」テンプレ (template_id = "type_b")
-layout/{任意のフォルダ}/  ← 新規追加（id はフォルダ名。§4.4.0）
-```
-
-`Standard` と `Center Panel` の 2 種類。両者とも Center Panel デザイン
-（左右キャラ＋中央パネル）を出発点として共有し、今後それぞれ別デザインに
-作り込んでいく。サムネイルのページの「テンプレート」で選択する（選択肢は `GET /api/v1/layouts?kind=thumbnail`）。
-
-`template_id` は `SettingsManager.thumbnail_config.template_id` に保存される（§3.3.4）。既定は `ThumbnailService.DEFAULT_TEMPLATE_ID`（`type_a`）。
-
-##### ファイル構成
-
-```
-layout/thumbnail*/
-├── settings.json           ← マニフェスト（§4.4.0。kind: thumbnail・template: type_a.json）
-├── thumbnail.html          ← entry（async function initThumbnail(payload) 必須。共有のヘルパーは ../include/thumbnail_assets.js）
-├── thumbnail.css           ← スタイル
-├── thumbnail.js            ← initThumbnail + RENDER_READY シグナル
-└── type_a.json             ← テンプレ定義 JSON（マニフェストの template）
-```
-
-##### テンプレ定義 JSON
-
-マニフェストの `template` が指すフォルダ内の JSON（同梱は `layout/thumbnail/type_a.json`・`layout/thumbnail_type_b/type_b.json`）。
-フォント・配置・色トーン等のテンプレ固有パラメータを定義する。中の画像（`default_background` など）はパッケージの中か `assets/` の
-相対パス（ADR-007 D2）。
-
-##### 出力寸法
-
-マニフェストの `size`（同梱は **1920×1080**。透過 PNG 対応）
+同梱は `layout/thumbnail/`（`type_a`）と `layout/thumbnail_type_b/`（`type_b`）。ファイルは `settings.json`（マニフェスト）・`thumbnail.html`（`initThumbnail(payload)` 必須）・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。選択は `thumbnail_config.template_id`（既定は `ThumbnailService.DEFAULT_TEMPLATE_ID`）。
 
 #### 4.4.2 リザルト
 
-##### ディレクトリ命名
+一覧の正本はカタログの result パッケージ（`ResultService.LayoutEntries()`）。枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。同梱の名前は `core/CoreWords` の `result_layout_<id>`。ファイルは `settings.json`・`result.html`（`initResult(payload)` 必須）・`result.css`・`result.js`（同梱の多くは `../include/` を共有）。団体のレイアウトは `placeTeams()`（`include/result.js`）がメンバーのファイターを配置する（`data.rows` が `teams` のとき。`rows` の無い payload では `layout` が `team` で始まるとき）。
 
-```
-layout/result/                ← horizontal (デフォルト)
-layout/result_top16/          ← horizontal_16
-layout/result_vertical/       ← vertical
-layout/result_vertical_geki/  ← vertical_geki
-layout/result_team/           ← team / Crewbattle（各順位にチームの複数メンバーのメインファイターを配置）
-layout/result_team_split/     ← team_split（1位2位を縦並びで左に大きく、3-8位を右に縦並び）
-layout/{任意のフォルダ}/      ← 新規追加（id はフォルダ名。§4.4.0）
-```
-
-##### レイアウトの一覧の規約
-
-一覧の正本はカタログの result パッケージ（§4.4.0。`ResultService.LayoutEntries()`）。大きさはマニフェストの `size`、チーム用かは `rows`。
-同梱の名前は `core/CoreWords` の `result_layout_<id>`（ja / en。`LayoutCatalog.BundledNameKey`。ADR-005 S-final SF-7）、ほかは `displayName`。
-枠の数は `SlotsFor()`（同梱の `horizontal` / `vertical` / `vertical_geki` は 8、ほかの単独は 16、団体は 8。8 行の同梱は凍結した表の隣の `LayoutCatalog.BUNDLED_EIGHT_ROW_RESULTS`）、
-既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。レンダラー（`result/ResultPageRenderer.py`）もカタログを読む。
-ページの選択肢は `GET /api/v1/layouts?kind=result`（読めなければ `GET /api/v1/result` の `layouts`。行の数と種類はいつも後者。§7.3）。
-
-##### team レイアウト（チーム / Crewbattle）
-
-- 横向き Top-8 グリッド（`include/result.css`）を土台に、各順位枠を「チームカード」として描画する。`include/result.js` の `placeTeams()` が `payload.layout` が `team` で始まるとき呼ばれ、枠ごとにチームのメンバー（2-5 人）のメインファイターを横並びに配置し、各ファイターの右下に選手名を反時計回り 90°回転（下→上読み）で重ね、枠下にチーム名プレートを置く。選手名は全角 5-10 文字を縦長に収める想定で、ファイター下部に暗いフェードを敷いて視認性を確保する。styling は `include/result_team.css`（base を `@import` してチーム枠を上書き）。同梱の各リザルトが共有するので `include/` にある（ADR-007 D2）。
-- データは `result_teams[N]` に `members: [{ name, twitter, character }, ...]` を持つ（行の `name` はチーム名。ADR-005 S4q で `result_players` から分けた）。`PATCH /api/v1/result/teams/{n}` で手入力でき、Start.gg のチーム standings からの自動取得にも対応する（ロスター全員 + mains）。React のページ（`/web/result`）では団体の行（順位・チーム名・最大 5 メンバー）がこれを編集する（S4r）。
-- 旧 team レイアウト（チーム名 + ロスター文字列のみのテキストプレート）はファイター版に置き換え済み。
-- `team_split` は `team` のバリアント。`result_team_split/result.css` が `include/result_team.css` を `@import` して **グリッド配置のみ** 差し替える（1位2位を左カラムの縦並び、3-8位を右カラムの縦並び）。メンバー横並び・回転名・下部フェード等の演出は `team` から継承。レンダラーは `placeTeams()` を共有（payload の `data.rows` が `teams` なら team系扱い。`rows` の無い payload では従来どおり `layout` が `team` で始まるとき。ADR-007 T1）。
-
-##### ファイル構成
-
-```
-layout/result*/
-├── settings.json            ← マニフェスト（§4.4.0。kind: result・rows・size）
-├── result.html              ← entry（async function initResult(payload) 必須。同梱は ../include/result.js を読む）
-├── result.css               ← スタイル（同梱の result / result_team は ../include/ の土台をそのまま使う）
-└── result.js                ← initResult + RENDER_READY シグナル（同梱の多くは ../include/result.js を共有）
-```
-
-##### 出力寸法
-
-マニフェストの `size`。横版は 1920×1080、縦版は 960×1080 が標準。
-
-#### 4.4.3 ペイロード規約
-
-##### Thumbnail ペイロード
+#### 4.4.3 ペイロード
 
 ```javascript
-async function initThumbnail({ data, config, template }) {
-  // data:     score, game, tournamentInfo を含む state スナップショット
-  // config:   thumbnail_config（display_phase, use_sponsors 等）
-  // template: { template_id, ...パッケージのマニフェストの template が指す JSON の内容 }
-  // 描画完了後に document.title = "RENDER_READY"
-}
+async function initThumbnail({ data, config, template }) { ... }  // data: score/game/tournamentInfo の state スナップショット
+async function initResult({ data, config, layout }) { ... }       // data: { tournamentName, eventName, startAt, numEntrants, players, rows }
+// どちらも描画完了で document.title = "RENDER_READY"
 ```
 
-##### Result ペイロード
-
-```javascript
-async function initResult({ data, config, layout }) {
-  // data:   { tournamentName, eventName, startAt, numEntrants, players: [...], rows }
-  //   players[N] = { rank, name, sponsor, character, characters: [...],
-  //                  members: [{ name, character }, ...] }
-  //                ※ members は team レイアウト専用（name = チーム名）
-  //   rows: "players" / "teams"（レイアウトのマニフェストの rows。ADR-007 T1 で足したキー）
-  // config: { main_icon_path, background_path, accent_color, ... }
-  // layout: 現在のレイアウトの id（"horizontal" / "team" 等。第三者のパッケージはフォルダ名）。
-  //         同梱の result.js は data.rows が "teams" のとき placeTeams() でメンバーのファイターを配置、それ以外は
-  //         placePlayers()（rows の無い payload では layout が "team" で始まるとき）
-  // 描画完了後に document.title = "RENDER_READY"
-}
-```
+`template` は `{template_id, ...マニフェストの template が指す JSON}`、`layout` は現在のレイアウトの id。形の正本はサービスの `RenderPayload()` と golden。
 
 #### 4.4.4 出力ファイル名
 
 | 種別 | パス | ファイル名 |
 |------|------|----------|
-| Thumbnail final | `./out/thumbnails/` | `{tag1}-vs-{tag2}-{YYYYMMDDTHHmmssZ}.png` |
-| Thumbnail final | 同上 | `{tag1}-vs-{tag2}-{YYYYMMDDTHHmmssZ}_title.txt` / `_desc.txt`（YouTube メタデータ。**現状は常時生成**。将来は `thumbnail_config.generate_metadata = true` の設定で制御する。設定化は §8 の移行タスクで対応） |
-| Thumbnail preview | `AutonaResolve("tmp/thumbnail")` | `preview.png`（v1 の `:preview` / `:generate` が毎回上書き。`GET /api/v1/thumbnail/preview` が配信。Qt 版の `template.png` は S4p で無くなった） |
-| Result final | `./out/results/` | `{tournament}-top{n}-{YYYY-MM-DD-HH-MM-SS}.png`（UTC。大会名が空のときは `result-top{n}-...`） |
-| Result preview | `AutonaResolve("tmp/result")` | `result_preview.png`（v1 の `:preview` / `:generate` が毎回上書き。`GET /api/v1/result/preview` が配信） |
+| サムネイル | `./out/thumbnails/` | `{tag1}-vs-{tag2}-{YYYYMMDDTHHmmssZ}.png`（YouTube のメタデータ `_title.txt` / `_desc.txt` を添える） |
+| リザルト | `./out/results/` | `{tournament}-top{n}-{YYYY-MM-DD-HH-MM-SS}.png`（UTC） |
+| プレビュー | `AutonaResolve("tmp/thumbnail")` / `tmp/result` | `preview.png` / `result_preview.png`（毎回上書き） |
 
-特殊文字（`<>:"/\|?* ` 等）は識別子から除去する（R-Img-7）。
+識別子の特殊文字（`<>:"/\|?* ` 等）は除去する。
 
 ---
 
 ## 5. デザインシステム
 
-「アプリ内部」（PyQt + React）には統一されたデザインシステムを適用する。「クリエイティブ領域」（OBS HTML / 画像生成テンプレ）には強制しない（§5.5）。
+アプリ内部（デスクトップのシェルと React）には統一されたデザインシステムを適用する。クリエイティブ領域（OBS HTML・画像生成テンプレート）には強制しない（§5.5）。
 
-### 5.1 統合色トークン
+### 5.1 色トークン
 
-#### 5.1.1 設計方針
+#### 5.1.1 方針
 
-- PyQt（`src/ui_constants.py`）と React（`web/src/themes.js`）で**同一の役割・同一の値**を持つ
-- **機械可読の正本は `assets/design-tokens.json`**。両側の契約テスト（`tests/test_design_tokens_contract.py` / `web/src/themes.test.js`）が値のズレを検出する。変更時は json → 両コンシューマの順で更新する
-- 命名規則は言語慣例に従い、PyQt: `snake_case`、React: `camelCase`（プログラム的に変換可能）
-- テーマは DARK のみ（LIGHT は撤回済み、§5.1.3 / §5.4 参照）
-- accent 色は **スカーレット（純色寄りの赤）** を採用。色相 ~2° はブランドクリムゾン（~348°）とタブバーのグラデーション橙端の中間で、グラデーションの色相レンジ内に収まりつつ brand と差別化される。旧クリムゾン `#8A1A2C` は暗背景上の選択タブ／メニュー文字でコントラストが低かったため明度を上げた（DARK `#C33732`、暗背景でコントラスト比 ~3.2。ベタ塗りの primary ボタンが暗背景で主張し過ぎないよう LIGHT より深めに設定 / LIGHT は明背景・白文字ボタン両対応のため `#CE3A33`）。brand（クリムゾン純色 `#DC143C`/`#C41232`）はライブ／ステータス信号用として据え置き
+- **機械可読の正本は `assets/design-tokens.json`**。デスクトップ側（`src/ui_constants.py`）と React 側（`web/src/themes.js`）が同一の役割・同一の値を持ち、契約テスト（`tests/test_design_tokens_contract.py` / `web/src/themes.test.js`）がズレを検出する。変更は json → 両コンシューマの順。
+- 命名は言語の慣例に従う（`ui_constants`: `snake_case`、`themes.js`: `camelCase`）。テーマは**ダークのみ**。
+- ニュートラルは単一の寒色相のクールグレー・ランプ。有彩トークン（brand・accent・gold・セマンティック）は暖色で、グレーに対して際立たせる。accent はスカーレット（純色寄りの赤）、brand（クリムゾン）はライブ / ステータス信号用。
 
-#### 5.1.2 色トークン正本（DARK）
+#### 5.1.2 トークンの役割
 
-ニュートラルは単一の寒色相（H~218°、S~6-9%）のクールグレー・ランプ。明度は旧 warm-neutral 値と同等でコントラスト比は不変。有彩トークン（brand/accent/gold/セマンティック）は暖色のまま、寒色グレーに対して際立たせる。
-
-| 役割 | 値 | PyQt キー | React キー |
-|------|-----|----------|----------|
-| キャンバス | `#0A0B0D` | `canvas` | `canvas` |
-| 主背景 | `#111317` | `bg_primary` | `bgPrimary` |
-| 副背景 | `#191B20` | `bg_secondary` | `bgSecondary` |
-| 三段背景 | `#23262C` | `bg_tertiary` | `bgTertiary` |
-| 四段背景 | `#2D3138` | `bg_quaternary` | `bgQuaternary` |
-| 淡い枠線 | `#23262C` | `border_subtle` | `borderSubtle` |
-| 標準枠線 | `#383C44` | `border_default` | `borderDefault` |
-| 強い枠線 | `#53575F` | `border_strong` | `borderStrong` |
-| 主テキスト | `#E9ECF1` | `text_primary` | `textPrimary` |
-| 副テキスト | `#AFB3BB` | `text_secondary` | `textSecondary` |
-| 淡いテキスト | `#81858E` | `text_muted` | `textMuted` |
-| ラベル | `#9CA0A9` | `text_label` | `textLabel` |
-| 無効テキスト | `#4F525A` | `text_disabled` | `textDisabled` |
-| ブランド色 | `#DC143C` | `brand` | `brand` |
-| ブランド淡色 | `#2A1418` | `brand_subtle` | `brandSubtle` |
-| **アクセント色（スカーレット）** | **`#C33732`** | **`accent`** | **`accent`** |
-| アクセントホバー | `#D8453E` | `accent_hover` | `accentHover` |
-| アクセント淡色 | `#3A1413` | `accent_subtle` | `accentSubtle` |
-| ゴールド | `#F0C45A` | `gold` | `gold` |
-| ゴールド淡色 | `#2E2A1E` | `gold_subtle` | `goldSubtle` |
-| ポジティブ | `#6EC77A` | `positive` | `positive` |
-| ネガティブ | `#F04E54` | `negative`（明るいアラート赤。danger ボタンはアウトライン式で暗背景での可読性確保のため brand から分離） | `negative` |
-| オンアクセント | `#FFFFFF` | `on_accent` | `onAccent` |
-| ニュートラルボタン | `#3B3F47` | `btn_neutral` | `btnNeutral` |
-| ニュートラルボタン ホバー | `#494D56` | `btn_neutral_hover` | `btnNeutralHover` |
-| プライマリボタン背景 | `#EFF1F5` | `primary_btn_bg` | `primaryBtnBg` |
-| プライマリボタン文字 | `#0E0F12` | `primary_btn_text` | `primaryBtnText` |
-| プライマリボタン ホバー | `#DBDDE3` | `primary_btn_hover` | `primaryBtnHover` |
-
-#### 5.1.3 色トークン正本（LIGHT）— ❌ 撤回
-
-テーマ切替の撤回（§5.4、T-8〜T-10）に伴い LIGHT パレットも廃止した。PyQt（`ui_constants.py`）は削除済み、React（`themes.js`）の未使用 `LIGHT_TOKENS` も 2026-07 の Web UI 刷新 Phase 1 で削除。`assets/design-tokens.json` にも DARK のみ収録する。
+`canvas` / `bg_primary`〜`bg_quaternary` / `border_subtle`・`default`・`strong` / `text_primary`・`secondary`・`muted`・`label`・`disabled` / `brand`・`brand_subtle` / `accent`・`accent_hover`・`accent_subtle` / `gold`・`gold_subtle` / `positive` / `negative` / `on_accent` / `btn_neutral`・`btn_neutral_hover` / `primary_btn_bg`・`primary_btn_text`・`primary_btn_hover`。値は `design-tokens.json`。
 
 #### 5.1.4 セマンティック色
 
-役割色は以下の用途に対応する:
+| セマンティック | 使用トークン |
+|------|-----|
+| 主アクション（フォーカス・選択） | `accent` / `accent_hover`（塗りのプライマリボタンは `primary_btn_*`） |
+| ニュートラルアクション | `btn_neutral` / `btn_neutral_hover` |
+| 強調・ライブ | `brand` |
+| 成功・確定 | `positive` |
+| エラー・危険操作 | `negative`（brand から分離。暗背景での可読性のため） |
+| 警告・注目 | `gold` |
 
-| セマンティック | 用途 | 使用トークン |
-|------|------|-----|
-| 主アクション | プライマリボタン、フォーカスリング、選択ハイライト | `accent` / `accent_hover`（塗りのプライマリボタンは `primary_btn_*`） |
-| ニュートラルアクション | セカンダリボタン（グレーのチップ状塗り） | `btn_neutral` / `btn_neutral_hover` |
-| 強調・ライブ | LIVE バッジ、ステータス、アラート | `brand` |
-| 成功・確定 | チェック完了、ポジティブ通知 | `positive` |
-| エラー | 入力エラー、削除確認、危険操作 | `negative`（brand から分離済み） |
-| 警告・注目 | 未確認、注意、特別ハイライト | `gold` |
-| ニュートラル | デフォルトテキスト・背景・枠線 | `text_*`, `bg_*`, `border_*` |
+MUI のスロットとの対応（`themes.js`）: `error` = `negative`、`success` = `positive`、`warning` = `gold`、`info` = `text_secondary`。
 
-**React MUI セマンティックスロット対応**（`themes.js`）: `error` = `negative`、`success` = `positive`、`warning` = `gold`、`info` = `text_secondary`。`MuiButton` は containedPrimary = `primary_btn_*`、outlined = `btn_neutral*`（デスクトップのニュートラルボタンと同じ塗りチップ）。
+#### 5.1.5 プレイヤー色
 
-#### 5.1.5 プレイヤー色（特殊）
-
-スコアボードの P1 / P2 は固定の意味を持つ:
-
-| 色 | 値 | 用途 |
-|----|------|------|
-| P1 | `#DC143C`（= brand） | プレイヤー1 のスコア背景・名前枠 |
-| P2 | `#3D8BE8` | プレイヤー2 のスコア背景・名前枠 |
-
-P1/P2 は **テーマ色ではなく競技上の識別色**（`design-tokens.json` の `player_colors`）。React 側は `theme.palette.p1color` / `p2color` でアクセス（PyQt 側の `AutonaColorButton` は ADR-005 S4af で設定ウィンドウと一緒に削除した）。**チームカラーがユーザー指定された場合はその値が優先**される（`score.{N}.team.{T}.color`）。
-
-**可読性ルール**: P2 背景（`#3D8BE8`）上に小さい白文字を置く場合は、テキストシャドウ・縁取り・濃色テキストなどで可読性を担保する。LIGHT モードで P2 背景上に淡色テキストを置く場合も同様。
+P1 / P2 は**テーマ色ではなく競技上の識別色**（`design-tokens.json` の `player_colors`）。React では `theme.palette.p1color` / `p2color`。チームカラーがユーザー指定ならそれが優先（`score.{N}.team.{T}.color`）。P2 背景の上に小さい白文字を置くときは影・縁取り・濃色文字で可読性を担保する。
 
 #### 5.1.6 ハードコード禁止
 
-**新規コードでハードコード hex を直接書かない**。色を使う時は必ずトークン参照経由:
-- PyQt: `ui_constants.palette()['key']` または対応するスタイル関数
-- React: `theme.palette.{semanticSlot}` または `theme.palette.autona.{tokenKey}`
+新規コードでハードコードの hex を書かない。デスクトップは `ui_constants.palette()['key']` か対応するスタイル関数、React は `theme.palette.{slot}` か `theme.palette.autona.{tokenKey}`。
 
-既存のハードコード色（PyQt 12+ 箇所、React App.css 数箇所）はリファクタタスク（§8）で順次置換する。
+### 5.2 タイポグラフィ・寸法
 
-### 5.2 タイポグラフィ
-
-#### 5.2.1 フォントファミリー
-
-| 用途 | フォント | PyQt キー | React 設定 |
-|------|---------|----------|----------|
-| 主フォント（UI 全般） | LINE Seed JP | `FONT_FAMILY` | `theme.typography.fontFamily` 第 1 位 |
-| 等幅フォント（コード・スコア表示） | JetBrains Mono | `FONT_FAMILY_MONO` | `<code>` 要素の font-family |
-| Condensed（横長表示用） | Roboto Condensed | `FONT_FAMILY_CONDENSED` | （現状未使用、必要時に追加） |
-
-フォントスタックのフォールバック順:
-- PyQt: `"LINE Seed JP" → 既定 sans-serif`（OS 依存）
-- React: `"LINE Seed JP" → "Inter" → "Noto Sans JP" → -apple-system, BlinkMacSystemFont, ...`
-
-#### 5.2.2 フォントサイズ
-
-| トークン | PyQt | React 推奨用法 | 用途 |
-|--------|------|------------|------|
-| FONT_XS | 8pt | `theme.typography.caption` | キャプション・補足 |
-| FONT_SM | 10pt | （MUI 既定 fontSize より小さめ） | 本文基底・タイトルラベル・サブテキスト |
-| FONT_MD | 11pt | `theme.typography.body2` 相当 | 本文・ラベル |
-| FONT_LG | 13pt | `theme.typography.body1`、`theme.typography.fontSize: 13` | 主本文 |
-| FONT_XL | 16pt | `theme.typography.h6` 相当 | 見出し |
-
-**規約**: PyQt の `pt` と React の `px` は**完全一致させない**。同一トークン名が**同等の視覚階層**を表すことを仕様とし、実寸は各 UI フレームワークの自然な密度を優先する（React 側を `14.7px` のような変則値に寄せない）。
-
-#### 5.2.3 フォントウェイト
-
-| 用途 | ウェイト |
-|------|--------|
-| 通常テキスト | 400（Regular） |
-| ボタン・タブ | 700（Bold） |
-| 見出し | 700 |
-| Caption | 400 |
-
-React 側のボタンは `theme.components.MuiButton.styleOverrides.root.fontWeight = 700` + `letterSpacing: '0.04em'` + `textTransform: 'none'` で統一。
-
-### 5.3 寸法トークン
-
-#### 5.3.1 スペーシング
-
-| トークン | 値 | PyQt | React 用法 |
-|--------|-----|------|----------|
-| SPACE_XS | 2px | `SPACE_XS` | `sx={{ p: 0.25 }}` 相当 |
-| SPACE_SM | 4px | `SPACE_SM` | `sx={{ p: 0.5 }}` |
-| SPACE_MD | 8px | `SPACE_MD` | `sx={{ p: 1 }}` |
-| SPACE_LG | 12px | `SPACE_LG` | `sx={{ p: 1.5 }}` |
-| SPACE_XL | 16px | `SPACE_XL` | `sx={{ p: 2 }}` |
-
-React の MUI `theme.spacing(1) = 8px` を基準として、`sx` の倍率は上記対応で読み替える。
-
-#### 5.3.2 ボーダー半径
-
-| トークン | 値 | PyQt | React 用法 |
-|--------|-----|------|----------|
-| RADIUS_SM | 3px | `RADIUS_SM` | `sx={{ borderRadius: '3px' }}` |
-| RADIUS_MD | 5px | `RADIUS_MD` | `sx={{ borderRadius: '5px' }}` |
-| RADIUS_LG | 8px | `RADIUS_LG` | `sx={{ borderRadius: '8px' }}` |
-
-MUI のデフォルト `theme.shape.borderRadius = 4` は使わず、上記 3 段階を明示的に使う。
-
-#### 5.3.3 ウィジェット高さ
-
-| トークン | 値 | 用途 |
-|--------|-----|------|
-| _WIDGET_H | 26px | 標準入力ウィジェット高（QLineEdit, QComboBox, QSpinBox 等） |
-| BTN_SM | 24px | 小ボタン |
-| BTN_MD | 28px | 標準ボタン |
-| BTN_LG | 36px | 強調ボタン |
-
-React の MUI 側は `size="small"` で密度を揃える（§2.2 R-React-5）。
-
-#### 5.3.4 アイコンサイズ
-
-| トークン | 値 | 用途 |
-|--------|-----|------|
-| ICON_SM | 24px | インライン |
-| ICON_MD | 32px | ボタン内 |
-| ICON_LG | 64px | 強調・大型表示 |
+- フォント: 主フォントは LINE Seed JP（フォールバックは `themes.js` / `ui_constants.py`）、等幅は JetBrains Mono。ウェイトは通常 400、ボタン・タブ・見出し 700。
+- サイズ・スペーシング・角丸・ウィジェット高さ・アイコンサイズのトークン（`FONT_*`・`SPACE_*`・`RADIUS_*`・`BTN_*`・`ICON_*`）は `src/ui_constants.py` が正本。**同じトークン名が同等の視覚階層を表すことが仕様**で、実寸は各フレームワークの自然な密度に任せる（`pt` と `px` を一致させない）。React のフォーム要素は `size="small"`（R-React-5）、角丸は MUI の既定を使わず `RADIUS_*` の 3 段階を明示する。
 
 ### 5.4 テーマ（ダーク固定）
 
-**実行時のライト/ダーク切替機能は削除した（2026-06-28、ダーク固定）。**
+実行時のライト / ダーク切替は無い。理由: 切替は QApplication 全体のスタイルシートを再適用して全ウィジェットを再ポリッシュし、proxy 埋め込みの大きなウィジェットツリーで GUI スレッドが 30 秒以上固まったため。テーマ適用は起動時の 1 回だけ（`Window.__init__` → `LoadTheme()`）。React も `ThemeShell.tsx` が `darkTheme` を常用する。再導入するなら、この再ポリッシュの再発防止を先に設計する。
 
-理由: テーマ切替は `Autona.LoadTheme()` → `qdarktheme.setup_theme()` を呼び、これが
-QApplication 全体に `setStyleSheet` + `setPalette` を再適用して**全ウィジェットを再ポリッシュ**する。
-旧ブラケットビュー（`AutonaBracketView`、Top 8 専用化で削除済み）は全試合のウィジェット
-ツリーを単一の `QGraphicsProxyWidget` に埋め込んでおり、proxy 埋め込みウィジェットの
-再ポリッシュは病的に遅く、大規模ブラケット読込時に GUI スレッドが **30 秒以上フリーズ**
-していた。切替トリガー自体を無くすことで恒久的に解消する。
-
-#### 5.4.1 現在の仕様
-
-- テーマは**ダーク固定**。`ui_constants.palette()` / `global_qss()` は常に `DARK` を返す。
-- テーマ適用は**起動時の 1 回のみ**（`Window.__init__` → `LoadTheme()` → `qdarktheme.setup_theme("dark", ...)`）。実行時に再適用するパスは存在しない。
-- React Web UI も**ダーク固定**（`ThemeShell.tsx` が `darkTheme` を常用）。バックエンドは `ui.light_mode` を broadcast しない。
-
-#### 5.4.2 削除済みの要素（参照用）
-
-以下は切替機能と共に削除した。再導入する場合は上記フリーズの再発防止（proxy 埋め込み
-ブラケットを一時退避する等）を設計に織り込むこと:
-
-- PyQt: `WindowSignals.LightModeChanged`、`Window.ToggleLightMode` / `_applyLightMode`、"Light mode" メニュー、`ui_constants` の `LIGHT` パレット / `_is_light_mode` / `on_theme_change` / `notify_theme_change` / `_theme_listeners`
-- Web サーバー / API: `AutonaWebServerActions.set_light_mode`、`/set-light-mode` REST + socketio、`/api/v1/ui/theme`
-- 状態 / 設定: `StateManager.ui.light_mode` broadcast キャッシュ、`SettingsManager.light_mode`（旧値が残っても無視される）
-- React: `ThemeShell` の `ui.light_mode` 購読 / localStorage キャッシュ、`themes.js` の `lightTheme` export
-
-### 5.5 クリエイティブ領域の独立性
+### 5.5 クリエイティブ領域
 
 #### 5.5.1 適用しないルール
 
-OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `commentators/` `camborder*` `tournament_history/`）と画像生成テンプレ（`layout/thumbnail*` `result*`）には **§5.1〜§5.4 を強制しない**。
+OBS レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `commentators/` `camborder*` ほか）と画像生成テンプレート（`layout/thumbnail*` `result*`）には §5.1〜§5.4 を強制しない。配色・フォント・寸法は自由。共通基盤として残すのは `layout/main.css` の CSS 変数（上書き可）・`layout/include/`・`layout/fonts/`・`layout/icons/`。
 
-具体的には:
-- 配色は自由（OBS の `--accent-color: #f0a500` などアプリ内部とは異なる値で OK）
-- フォントも自由（テンプレ別に `@font-face` で独自フォント追加可）
-- 寸法トークンの適用義務なし
-- ダーク/ライト切替の追従義務なし
+#### 5.5.3 大会カラーと機能別カラー
 
-#### 5.5.2 共通基盤として残す部分
+大会ブランドに合わせた色は次の経路で OBS レイアウトに届く。
 
-ただし以下は「実装の共通化のため」残す:
-
-| 項目 | 内容 |
-|------|------|
-| `layout/main.css` の CSS 変数 | デフォルト値として提供。テンプレが自由に上書きしてよい |
-| `layout/include/` のライブラリ | jQuery / GSAP / Socket.IO / kuroshiro 等は共通利用 |
-| `layout/fonts/` のフォント | アプリで提供するフォントセット。テンプレが好きに参照 |
-| `layout/icons/` の SVG | アプリ提供のアイコン。テンプレが好きに参照 |
-
-#### 5.5.3 大会別カスタマイズ / 機能別カラー
-
-「大会ブランドに合わせたテーマカラー」を OBS テンプレに反映する仕組みは以下の経路で実現する:
-- `tournamentInfo.themeColor` / `accentColor`（大会共通）を CSS 変数経由で OBS HTML に注入（既存テンプレ互換）
-- 値の正本は `SettingsManager.general.theme_color / accent_color`（§3.1.2 注釈、§3.3.2）
-- 機能ごとに色を変えたい場合は `colors.{feature}` で上書きする（正本は `SettingsManager.colors.{feature}.*`）
-
-##### 優先順位
-
-```
-colors.{feature}.themeColor / accentColor   （機能別の上書き。設定された feature にのみ存在）
-  ↓ 無ければ
-tournamentInfo.themeColor / accentColor     （大会共通カラー）
-  ↓ 無ければ
-テンプレ CSS の :root デフォルト値
-```
-
-##### 大会カラー変更時の挙動（機能別上書きのクリア）
-
-大会カラーの変更は「全レイアウトをこの色に揃える」操作として扱う。
-`core/ColorService.SetTournamentColor(kind, color)` は永続化・state 展開に加えて、
-**全 feature の同じ kind の上書きを削除**する（SettingsManager / StateManager 両方）。
-
-- クリアは **kind 単位**。テーマ色を変えてもアクセントの機能別上書きは残る
-- 上書きが消えると各レイアウトのフォールバックが働き、新しい大会カラーが即座に全レイアウトへ反映される
-- 大会情報ページの「既定の色に戻す」（`PATCH /api/v1/colors/tournament` の `{"reset": true}`）も `SetTournamentColor` 経由なので同挙動
-- 機能別カラーは、その後に個別編集した時点から再び独立する
-- 構築済みパネルのカラーボタン表示は、カードの showEvent リフレッシュ（`_ColorCardRefresher`）で追従する
-
-| feature | 適用先 | 設定パネル |
-|---------|--------|-----------|
-| `board` | `scoreboard_*` / `camborder_Universal` | スコアボード設定 |
-| `thumbnail` | `thumbnail` / `thumbnail_type_b`（Python が payload の `config.theme_color` / `accent_color` に解決） | 対戦動画サムネイル |
-| `result` | `result` / `result_vertical_geki`（同上） | 大会リザルト |
-| `top8` | `bracket_top8*` | TOP8 |
-| `commentary` | `commentators*` | 実況・解説 |
-| `stats` | `upset_factor` / `h2h_record` / `recent_sets` / `last_sets` / `tournament_history` | 統計情報表示 |
-
-JS 側の読み方（SocketIO 系レイアウトの共通形）:
-
-```js
-const ti = event.data.tournamentInfo || {};
-const fc = (event.data.colors || {}).board || {};
-const themeColor = fc.themeColor || ti.themeColor;
-```
-
-##### 新規テンプレでの利用ルール
+- `tournamentInfo.themeColor` / `accentColor`（大会共通。既存テンプレート互換の表示用キャッシュ）と、`colors.{feature}.themeColor` / `accentColor`（機能別の上書き。明示設定した feature だけ state に現れる）。正本は `SettingsManager`（§3.1.2）。
+- **優先順位**: `colors.{feature}` → `tournamentInfo` → テンプレートの `:root` の既定。
+- feature は `board` / `thumbnail` / `result` / `top8` / `commentary` / `stats`。サムネイルとリザルトは Python が payload の `config.theme_color` / `accent_color` に解決する（`ResultService` は `colors.result` → 大会共通で上書き）。
+- **大会カラーの変更は「全レイアウトをこの色に揃える」操作**: `core/ColorService.SetTournamentColor(kind, color)` は永続化・state 展開に加えて、全 feature の同じ kind の上書きを削除する（SettingsManager・StateManager の両方）。kind 単位で、テーマ色を変えてもアクセントの上書きは残る。機能別カラーは、その後に個別編集した時点から再び独立する。「既定の色に戻す」（`PATCH /api/v1/colors/tournament` の `{"reset": true}`）も同じ。
+- JS 側の読み方（Socket.IO 系レイアウトの共通形）: `const fc = (event.data.colors || {}).board || {}; const themeColor = fc.themeColor || ti.themeColor;`
 
 | ルール | 内容 |
 |------|------|
-| **R-Brand-1** | 新規 OBS / 画像生成テンプレでは `tournamentInfo.themeColor` / `accentColor` / `colors.{feature}.*` を **JS から直接読まない**。`--theme-color` / `--accent-color` などの CSS 変数経由でのみ利用する（上記の解決処理は各レイアウトのエントリ JS が一度だけ行う） |
-| **R-Brand-2** | テンプレ固有のブランド表現（例: 大会公式の独自配色）がある場合は、テンプレの `settings.json` または `:root` 上書きを優先してよい |
-| **R-Brand-3** | テンプレが state の特定キーに直接依存する設計は避ける。CSS 変数 / DOM クラス経由を基本とする |
+| **R-Brand-1** | 新規テンプレートは `tournamentInfo` / `colors.{feature}.*` を JS から直接読まず、`--theme-color` / `--accent-color` などの CSS 変数経由で使う（解決はエントリ JS が一度だけ行う）。 |
+| **R-Brand-2** | テンプレート固有のブランド表現（大会公式の独自配色）は、テンプレートの `settings.json` か `:root` の上書きを優先してよい。 |
+| **R-Brand-3** | テンプレートは state の特定キーに直接依存せず、CSS 変数 / DOM クラスを基本とする。 |
 
 ---
 
-## 6. ホットキー仕様
+## 6. ホットキー
 
 ### 6.1 設計方針
 
 | ルール | 内容 |
 |------|------|
-| **R-Hotkey-1** | ホットキーは **OS グローバル**で登録する（Windows: `RegisterHotKey` / 他 OS は当面非対応） |
-| **R-Hotkey-2** | デフォルトキー定義は `src/AutonaHotkeys.py` の `keys` クラス変数に**ハードコード**で持つ |
-| **R-Hotkey-3** | ユーザーカスタムは `SettingsManager.hotkeys.{action_key}` に保存。デフォルトに `update()` でマージする |
-| **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
-| **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
-| **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。ボードのホットキー（スコア ±1・リセット・反映・スワップ）はボードホストの `Run` の中で対象ボードを読んで書く（`AutonaHotkeys._runOnActiveBoard`。ADR-005 S4ad とそのレビュー: Web のボードの操作がリクエストのスレッドで走るので、その途中に入らないように）。ウィジェット側に接続を持つアクションは無い（`load_set` は ADR-005 S4y から `ConnectActions()` が結線し、アクティブボード（1 / 2）のセット選択をシェルのアダプタ `AutonaShellOperations` で開く。メインウィンドウを前に出して SCORE に切り替え、ページのセット選択のダイアログを開く（ADR-005 S4ab-2。Qt のセット選択ウィンドウは S4ac-3 で削除）。クルー形式・メインウィンドウができる前なら何もしない。それまでは構築済みの 1v1 / チームの全ボードが自分のウィンドウを開いていた。`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。ボードは S4ac-1 から起動時に 3 つとも作られる） |
+| **R-Hotkey-1** | OS グローバルで登録する（Windows の `RegisterHotKey`。他 OS は非対応）。 |
+| **R-Hotkey-2** | デフォルトは `core/HotkeyRules.DEFAULT_KEYS` が正本（`AutonaHotkeys.keys` はそのコピー）。ユーザーの上書きは `settings.json` の `hotkeys.{action_key}` で、デフォルトの上にマージする。 |
+| **R-Hotkey-3** | アクションの通知は `AutonaHotkeysSignals` の Signal。`hotkeys.hotkeys_enabled = false` でグローバルに無効化できる。 |
+| **R-Hotkey-4** | デフォルトのモディファイアは `Ctrl+Shift+`（標準ショートカットとの衝突を避ける）。 |
+| **R-Hotkey-5** | state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` / core のサービスに直結する（`bootstrap_gui()` から 1 回）。対象ボードは `AutonaActions.ActiveBoard()`。ボードのホットキーは GUI スレッドで `boardHost.Run` の中から core を呼び、対象ボードもその中で読む（`AutonaHotkeys._runOnActiveBoard`）。ウィジェットに接続を持つアクションは無い。 |
 
-### 6.2 デフォルトホットキー一覧
+### 6.2 デフォルトの一覧
 
-| アクションキー | デフォルト | Signal | 動作 | 受け手 |
-|--------------|-----------|--------|------|-------|
-| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | アクティブボードのセット選択を開く（ウィンドウを前に出して SCORE のページのダイアログ。S4ab-2。Qt のウィンドウは S4ac-3 で削除） | シェル（`AutonaShellOperations`。S4y） |
-| `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 | Actions |
-| `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 | Actions |
-| `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 | Actions |
-| `team2_score_down` | `Ctrl+Shift+4` | `team2_score_down` | チーム 2 スコア -1 | Actions |
-| `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット | Actions |
-| `apply_changes` | `Ctrl+Shift+L` | `apply_changes` | 反映（保留中の編集を配信へ公開） | Actions |
-| `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え | Actions（構築済みのアクティブボード。S2c〜） |
-| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 を Start.gg から取り込み直す（大会の最後の phase のダブルエリミのグループ） | Top8Service（S3e-8〜。パネル未構築でも動く） |
+デフォルトの値の正本は `HotkeyRules.DEFAULT_KEYS`。アクションと受け手:
 
-### 6.3 命名規約
+| アクションキー | デフォルト | 動作 | 受け手 |
+|--------------|-----------|------|-------|
+| `load_set` | `Ctrl+Shift+O` | アクティブボードのセット選択（SCORE ページのダイアログ）を開く | `AutonaShellOperations`（クルー形式・ウィンドウ前なら何もしない） |
+| `team1_score_up` / `down` | `Ctrl+Shift+1` / `2` | チーム 1 のスコア ±1 | Actions |
+| `team2_score_up` / `down` | `Ctrl+Shift+3` / `4` | チーム 2 のスコア ±1 | Actions |
+| `reset_scores` | `Ctrl+Shift+R` | スコアリセット | Actions |
+| `apply_changes` | `Ctrl+Shift+L` | 反映（保留中の編集を公開） | Actions |
+| `swap_teams` | `Ctrl+Shift+S` | チーム入れ替え（クルー形式では何もしない） | Actions |
+| `refresh_phase_group` | `Ctrl+Shift+P` | Top 8 を Start.gg から取り込み直す | `Top8Service` |
 
-#### 6.3.1 アクションキー（内部 ID）
+### 6.3 命名
 
-- **snake_case**（例: `team1_score_up`, `refresh_phase_group`）
-- 動詞を含む（`load_set`、`reset_scores` 等）。状態名のみは禁止（× `score_up`、○ `team1_score_up`）
-- アクションキーは Signal 名・SettingsManager キー・i18n 表示名の対応関係を保つ唯一の ID
-- 一度公開したキー名は変更しない（ユーザー設定との互換が壊れる）
+- アクションキーは `snake_case` で動詞を含む（`team1_score_up`。状態名のみは不可）。Signal 名・設定キー・i18n の対応を保つ唯一の ID で、**一度公開したら変えない**。
+- ショートカット文字列は `Ctrl+Shift+{key}`（推奨）/ `Alt+{key}`。キー名は `HotkeyRules.KEYS` の綴り。解析は `core/HotkeyRules.ParseShortcut()`。重複は（修飾キー, VK）で比べる（`HotkeyRules.Conflicts`）。
 
-#### 6.3.2 ショートカット文字列
+### 6.4 衝突回避
 
-- 形式: `Ctrl+Shift+{key}`（推奨）/ `Alt+{key}` / `{key}` 単体（避ける）
-- キー名は `HotkeyRules.KEYS` の綴り（`F1`〜`F12`、`A`〜`Z`、`0`〜`9`、`Enter`、`Escape`、`Space`、`PageUp` 等）
-- 変換は `core/HotkeyRules.ParseShortcut()` が行う（ADR-005 S4ae で移動。中身は同じ）。Qt の記録が作る `Esc` / `Del` / `Ins` / `PgUp` / `PgDown` は読めない（登録されない。v1 の GET では `valid: false`）。v1 の PATCH が受けるのは語彙（`HotkeyRules.Vocabulary()`）の綴りだけ。重複の判定は同じキーかで行う（（修飾キー, VK）で比べ、`Return` = `Enter`・並び順は無関係。`HotkeyRules.Conflicts`）
+#### 6.4.1 OS・アプリ標準と被るキー
 
-### 6.4 衝突回避ガイドライン
-
-新規ホットキーを追加するときは以下の衝突を避ける:
-
-#### 6.4.1 OS / アプリ標準と被るキー
-
-| 避けるキー | 一般的な動作 |
-|----------|---------|
-| `Ctrl+S` | 保存 |
-| `Ctrl+O` | 開く |
-| `Ctrl+P` | 印刷 |
-| `Ctrl+R` | リロード |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
-| `Ctrl+C` / `Ctrl+V` / `Ctrl+X` | コピー・貼付・切取 |
-| `Ctrl+F` | 検索 |
-| `Alt+F4` | アプリ終了 |
-| `Alt+Tab` | ウィンドウ切替 |
-| `Win+*` | Windows OS 予約 |
-
-`Ctrl+Shift+` プレフィックスを使えば多くの衝突を避けられる。
+`Ctrl+S` / `O` / `P` / `R` / `Z` / `Y` / `C` / `V` / `X` / `F`、`Alt+F4` / `Alt+Tab`、`Win+*` は避ける。`Ctrl+Shift+` なら多くの衝突を避けられる。
 
 #### 6.4.2 配信ソフトと被るキー
 
-OBS Studio のデフォルトホットキー（録画開始・シーン切替・ミュート等）と被ると、配信中に意図しない操作が走る。**OBS のホットキー設定とユーザー側で確認**できるよう、設定ページに警告メッセージを表示する（`HotkeyRules.WarningFor` のコード `obs_likely`。§8 T-17）。ほかの警告: OS の予約（`os_reserved`）・修飾キーなし（`no_modifier`。F キーは除く）・Shift だけ（`shift_only`。大文字や記号の入力・Shift+矢印の選択を奪う。F キーは除く。ADR-005 S4af）。どれも保存は通す
+OBS の標準ホットキーと被ると配信中に意図しない操作が走るため、設定ページが警告を出す（`HotkeyRules.WarningFor` のコード `obs_likely`）。ほかの警告は `os_reserved` / `no_modifier` / `shift_only`。どれも保存は通す。重複の保存は 409 で、相手のアクション名を示す。
 
-#### 6.4.3 アプリ内既存キーと被るキー
+### 6.5 設定 UI
 
-既存のホットキー一覧（§6.2）を表示しながら新規割り当てを編集できる UI が望ましい。
-
-### 6.5 設定 UI 規約
-
-| ルール | 内容 |
-|------|------|
-| **R-Hotkey-7** | ホットキー設定は React の設定ページ（`/web/settings` のホットキー区画。ADR-005 S4af）で編集する。Qt の `AutonaSettingsWindow` は削除した |
-| **R-Hotkey-8** | 編集 UI は**組み立て式**（Ctrl / Alt / Shift のチェックと、語彙 `HotkeyRules.KEYS` からのキーの選択。保存は `Canonical` の綴り）。押した組み合わせの記録（Qt の `QKeySequenceEdit`）は、parser が読めない綴り（`Esc` / `Del` / `PgUp` など）を作ったのでやめた（ADR-005 S4af。オーナー決定 4） |
-| **R-Hotkey-9** | 重複設定（同じキーが複数アクションに割り当て）は保存時に検出して警告 |
-| **R-Hotkey-10** | リセットボタンで個別アクション・全体それぞれデフォルトに戻せる |
-
-### 6.6 React Web UI とホットキー
-
-React Web UI 側はオペレーターが手元デバイスから操作する用途であり、**OS グローバルホットキーは持たない**。Web UI 内のキー操作（例: スペースキーでスコア +1）が必要な場合は、ページ単位でローカルにバインドする（Web UI 専有のキーバインドは本仕様の対象外）。
-
-### 6.7 ホットキー追加時のチェックリスト
-
-新規ホットキーを追加する場合、以下をすべて満たす:
-
-| ステップ | 内容 |
-|---------|------|
-| 1 | `AutonaHotkeysSignals` に Signal 追加 |
-| 2 | `core/HotkeyRules.DEFAULT_KEYS` にデフォルト追加（`AutonaHotkeys.keys` はそのコピー。表示順もこの順） |
-| 3 | 受け取り側 Widget で `AutonaHotkeys.signals.{action_key}.connect(self.{handler})` |
-| 4 | 設定ページの表示順 `HOTKEY_ACTIONS`（`web/src/SettingsPage/Cards.tsx`）と表示名 `settings_hotkey_action_<action>`（`web/src/i18n/locales/{en,ja}.json`）に追加（JSON のキーは Flask がソートするので、ページは自分の表の順で並べる） |
-| 5 | §6.2 の表に追加（本書を更新） |
-| 6 | OBS / アプリ標準との衝突確認 |
+編集は React の設定ページのホットキー区画。**組み立て式**（Ctrl / Alt / Shift のチェックと `HotkeyRules.KEYS` からのキーの選択。保存は `Canonical` の綴り）で、押した組み合わせの記録は使わない（parser が読めない綴りを作るため）。個別・全体のリセットができる。React Web UI は OS グローバルのホットキーを持たない（Web のキー操作はページごとにローカルで束ねる）。
 
 ---
 
 ## 7. 拡張ガイドライン
 
-各拡張シナリオで「触るファイル」「やること」「やらないこと」を明示する。**本章に記載されていない拡張点は禁止**（§1.2 原則 4）。新しい拡張パターンが必要な場合、まず本章を更新する。
+触るファイルと、触らないものを示す。**ここに書かれていない拡張点は、先に本章を更新する。**
 
-### 7.1 新ゲームの追加
+### 7.1 新ゲーム
 
-例: 新しい格闘ゲーム（仮: `streetfighter7`）を追加する。
+`assets/games/{game}/base_files/config.json`（ゲーム定義）・`logo.png`・`{asset_type}/...`（キャラ・ステージ画像）。React・state のキー・SCORE ページは触らない（`game.*` と Socket.IO で自動追従）。OBS の見た目の個別調整は、汎用の `scoreboard_*` テンプレートを編集する（ゲーム名による分岐は持たない）。
 
-#### 触るファイル（必須）
+### 7.2 新 OBS スコアボードレイアウト
 
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `assets/games/streetfighter7/base_files/config.json` | ゲーム定義（キャラ・ステージ等） |
-| 2 | `assets/games/streetfighter7/base_files/logo.png` | ゲームロゴ |
-| 3 | `assets/games/streetfighter7/{asset_type}/...` | キャラ画像、ステージ画像など |
+`layout/{名前}/index.html`・`index.css`・`index.js`（`Start()` / `Update(event)`）・`*_preview.png`。命名は §4.3.1。Python・state・共通リソースは触らない（フォルダのスキャンで列挙される。一覧に載せるなら `settings.json` の `autona` ブロック。§4.3.3）。
 
-ゲーム別の OBS 上書き HTML/CSS（旧 `layout/scoreboard/{game}.html`）は削除済み。
-新ゲーム追加時に OBS 側の見た目を個別調整したい場合は §7.2 の汎用
-`scoreboard_*/` テンプレ側（各デザインの `index.html` / `index.css`）を編集する。
-現行テンプレは `asset_key` でゲームのキャラ画像を差し込む汎用設計であり、
-旧方式のようなゲーム名 CSS セレクタによる分岐は持たない。
+### 7.3 新リザルト画像レイアウト / 7.4 新サムネイルテンプレート
 
-#### 触らない
+テンプレートパッケージ（§4.4.0）のフォルダを置くだけで、ページの選択肢に出て描ける。
 
-- React Web UI（Socket.IO で `tshGames` slice に自動配信される）
-- StateManager のキー定義（動的）
-- React の SCORE ページ（`game.*` で動的に切り替わる。Qt の `AutonaScoreboardWidget` は ADR-005 S4ac-3 で削除）
+- リザルト: `layout/{名前}/settings.json`（`{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", ...}}`）・`result.html`・`result.css`・`result.js`。`rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行は契約 1 に無い（`SLOT_COUNTS`・state の行・payload の変更で、`contract` を上げる話）。
+- サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`template`）・`thumbnail.html`・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。
+- 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。凍結した表と `CoreWords` は、id とフォルダ名が違う既存 8 種のためのもので足さない。
+- 触らない: state・Python（`ResultService` / `ThumbnailService` / レンダラー）・React（選択肢は `GET /api/v1/layouts?kind=` から出る）。
 
-### 7.2 新 OBS スコアボードレイアウトの追加
+### 7.5 新ページ
 
-例: `scoreboard_glass_topright/` を追加する。
+1. `web/src/{PageName}/`（新規）と `web/src/PanelShell/registry.tsx` の `PANELS` にコンポーネントを登録。
+2. `src/core/WebAccess.py` の `WEB_PANELS` に名前を足す（サーバーが `/web/<名前>` と `/web/app/<名前>` で返す名前）。
+3. サイドバーの項目なら `web/src/AppShell/navSections.json` に `{panel, icon, label}`（アイコンは `assets/icons/`、文言は `app_*` キーで en / ja）。`tests/test_app_shell.py` の `NAVIGATION`（ナビの凍結した写し）との照合を、今のナビの表に書き直すかを判断する。
+4. Help & Settings から開くメニューのページなら `web/src/AppShell/navTable.ts` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す（`tests/test_app_shell.py` が一致を pin）。
+5. 任意: 文言（`web/src/i18n/locales/{en,ja}.json`）、core のサービスと v1 のルート（`src/AutonaApiV1.py`・`src/core/WebAccess.py` の `ROUTE_ACCESS`。書き込みは core に置き、ページは v1 で依頼する）、state を持つなら `StateSchema` のシードと `KEY_CATALOG`。
+6. 本書 §4.1.1 のページ一覧に追加する。`src/Autona.py` は触らない。ページを開いていなくても成立させるべき初期化はページに置かない（§4.1.2）。ブラウザ向けの独立ルートが要るなら `web/src/index.js` に追加する。
 
-#### 触るファイル（必須）
+### 7.6 新 state キー
 
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `layout/scoreboard_glass_topright/index.html` | テンプレ HTML（`globals.js`, `main.css` 参照） |
-| 2 | `layout/scoreboard_glass_topright/index.css` | レイアウト専用 CSS |
-| 3 | `layout/scoreboard_glass_topright/index.js` | `Start()` / `Update(event)` 実装 |
-| 4 | `layout/scoreboard_glass_topright/scoreboard_preview.png` | 選択 UI 用プレビュー画像（テンプレ選択 UI に表示する場合） |
+`src/core/StateSchema.py` に定数と `KEY_CATALOG` を足し（新しいキーは **PR レビューで差分を確認**する。テストでは強制できない）、書き込みは `AutonaActions` か core のドメインサービスに置く。OBS テンプレートは `Update()` で `data.score[N].xxx` を参照する。React の型は `web/src/redux/autonaState.ts`。`StateManager.py` と Web サーバーのルートは通常触らない。保存済みのキー名・形を変えるなら移行 step（§3.3.4）。
 
-#### 触らない
+### 7.7 新ホットキー
 
-- Python 側（自動スキャンで列挙される）
-- StateManager
-- 共通リソース（`layout/include/`、`layout/main.css`）
+1. `AutonaHotkeysSignals` に Signal を追加。
+2. `core/HotkeyRules.DEFAULT_KEYS` にデフォルトを追加（表示順もこの順）。
+3. 受け手を結ぶ: state を書くだけのアクションは `AutonaHotkeys.ConnectActions()`（§6.1 R-Hotkey-5）。
+4. 設定ページの表示順 `HOTKEY_ACTIONS`（`web/src/SettingsPage/Cards.tsx`）と表示名 `settings_hotkey_action_<action>`（`web/src/i18n/locales/{en,ja}.json`）。
+5. 本書 §6.2 の表に追加し、OBS・アプリ標準との衝突を確認する。
 
-#### 命名
+### 7.8 新言語
 
-§4.3.1 の規約に従う。新規は `layout/{用途}_{variant}/` を基本とし、scoreboard 系は `scoreboard_{placement}_{style}` を推奨。
+`src/i18n/Autona_{lang}.ts`（`compile_translations.ps1` で `.qm`。`.ts` は手で編集）と `src/core/CoreWords.py`（`LANGUAGES` と `WORDS` の各語）、`web/src/i18n/locales/{lang}.json`、`web/src/i18n/config.js`、`src/i18n/mapping.json` の `languages`（設定ページの選択肢の元）。
 
-### 7.3 新リザルト画像レイアウトの追加
+### 7.9 新外部サービス（tournament provider）
 
-例: 縦リザルト `result_vertical_neon` を追加する。テンプレートパッケージ（§4.4.0。ADR-007 T1）を置くだけで、
-リザルトのページの選択肢に出て描ける（id はフォルダ名の `result_vertical_neon`）。
+provider 実装（`src/TournamentDataProvider/` 配下、例: `HiveeDataProvider.py`）と `AutonaTournamentDataProvider.py` のアダプタ（`LoadTournament` / `UnloadTournament`）・URL 判定（`core/TournamentService.UrlKind`）に繋ぐ。外部 API のレスポンス構造を UI に漏らさず、state には Autona 共通のモデルに正規化して入れる。認証情報は `SettingsManager` に置き、state・ログ・READ の API に出さない（Hivee の URL のトークンは `HiveeUrl.Mask` / `TournamentService.PublishedUrl` で伏せる）。provider に紐づくメモリは、provider の差し替えの**直後に** `Forget()` で捨てる。provider の取得は strict（失敗と空を区別）で頼む。実例は `src/TournamentDataProvider/HiveeDataProvider.py` と `tests/test_hivee_provider.py`。
 
-#### 触るファイル（必須）
+### 7.10 新統計指標
 
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `layout/result_vertical_neon/settings.json` | マニフェスト: `{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", "displayName": {"ja": "…", "en": "…"}, "license": "MIT"}}` |
-| 2 | `layout/result_vertical_neon/result.html` | 新規 HTML（`async function initResult(payload)` 実装。同梱の描画を流用するなら `../include/result.js`） |
-| 3 | `layout/result_vertical_neon/result.css` | 新規 CSS（土台を流用するなら `@import url("../include/result.css")`） |
-| 4 | `layout/result_vertical_neon/result.js` | 新規 JS（`include/result.js` を使う・CSS-only テンプレなら省略可） |
+`src/core/StatsService.py` に算出・書き込み・取り直しのトリガー（`PlayerChanged` / `TeamsChanged` / `RefreshAll`）を足し、表示は `web/src/StatsPage/`。取得が要るなら `AutonaStatsUtil`（取得の輸送だけの Qt アダプタ）の fetcher に 1 メソッド足す。派生値は原則 read-only で、保存が要るときだけ state に置く（§3.1.2 の規則）。
 
-- 自分のフォルダの外で読んでよいのは `../include/` だけ（ほかは `../../assets/` と payload のパス）
-- 行の数: `rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行（TOP32 など）は契約 1 に無い（`SLOT_COUNTS` と
-  state の行・payload の変更になる。`contract` を上げる話）
-- 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。
-  同梱でも id はフォルダ名・表示名は `displayName` でよい。凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES` と CoreWords の名前は、
-  id とフォルダ名が違う既存の 8 種のためのもので、足さない
+### 7.11 新アセット種別
 
-#### 触らない
+`user_data/games/{game}/{asset_type}/config.json` と `src/core/GameAssetCatalog.py`（解決とカタログのペイロード `*Payload()`）。state には asset id / 論理パスを保持し、実パスの解決はカタログに寄せる。テンプレートにファイルパスをハードコードしない。
 
-- StateManager
-- 既存 result テンプレ
-- Python（`core/ResultService.py`・レンダラー）・React Web UI（選択肢は `GET /api/v1/layouts?kind=result` から出る）
+### 7.12 新設定項目
 
-### 7.4 新サムネイルテンプレの追加
-
-例: `thumbnail_type_c` を追加する。テンプレートパッケージ（§4.4.0。ADR-007 T1）を置くだけで、サムネイルのページの
-選択肢に出て描ける（id はフォルダ名の `thumbnail_type_c`。`PATCH /api/v1/thumbnail` の `template_id` もこれ）。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `layout/thumbnail_type_c/settings.json` | マニフェスト: `{"autona": {"kind": "thumbnail", "contract": 1, "size": [1920, 1080], "template": "type_c.json", "displayName": {"ja": "…", "en": "…"}, "license": "MIT"}}` |
-| 2 | `layout/thumbnail_type_c/thumbnail.html` | 新規 HTML（`async function initThumbnail(payload)` 実装。共有のヘルパーは `../include/thumbnail_assets.js`） |
-| 3 | `layout/thumbnail_type_c/thumbnail.css` | 新規 CSS |
-| 4 | `layout/thumbnail_type_c/thumbnail.js` | 新規 JS |
-| 5 | `layout/thumbnail_type_c/type_c.json` | テンプレ固有設定（フォント・配置・色トーン等）。中の画像はパッケージの中か `assets/` の相対パス |
-
-- 自分のフォルダの外で読んでよいのは `../include/` だけ（ほかは `../../assets/` と payload のパス）
-- 同梱として出すときは §7.3 の注意と同じ（`git add`・凍結した表と CoreWords には足さない）
-
-#### 触らない
-
-- StateManager
-- Python（`core/ThumbnailService.py`・レンダラー）・React Web UI（選択肢は `GET /api/v1/layouts?kind=thumbnail` から出る）
-
-### 7.5 新パネルの追加
-
-例: 試合タイマーのページ `matchTimer` を追加する。パネルは共有ビュー（`AutonaWebPanelHost`）の React のページとして足す
-（新規の Qt パネルは ADR-005 で凍結。最後の Qt パネルだった SCORE は ADR-005 S4ac-3 で削除した）。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `web/src/MatchTimerPage/`（新規）と `web/src/PanelShell/registry.tsx` | ページのコンポーネントと、共有ビューのページ名への登録 |
-| 2 | `src/core/WebAccess.py` の `WEB_PANELS` | ページ名 `"matchTimer"` を足す（共有ビューが開いてよいページの許可リスト） |
-| 3 | `web/src/AppShell/navSections.json` | サイドバーの項目（`{panel, icon, label}`。見出しと文言は `app_*` キー）。`src/Autona.py` は触らない（S-final SF-5b-3 から Window は共有ビュー 1 枚で、ナビは AppShell のもの。版を上げる手順も無い。§4.1.1） |
-| 4 | `Design.md` §4.1 の表 | パネル一覧に追加 |
-
-#### 触るファイル（任意）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 5 | `web/src/i18n/locales/{en,ja}.json` | ページの文言 |
-| 6 | core のサービスと v1 のルート（`src/AutonaApiV1.py`・`src/core/WebAccess.py` の `ROUTE_ACCESS`） | ページが state を書くとき（書き込みは core に置き、ページは v1 で依頼する） |
-| 7 | `src/core/StateSchema.py` | キーのシード（`SeedPanelState()`）と `KEY_CATALOG`（state を持つとき） |
-
-#### 注意
-
-- メニューのページ（サイドバーの項目でない）なら、`navTable.ts` と `src/AutonaWindowState.py` の `MENU_PAGES` の両方に足す（§4.1.1）
-- ページを開いていなくても成立させるべき初期化はページに置かない（§4.1.1）。
-  state のシード・正規化は `src/core/StateSchema.py` の `SeedPanelState()` / `SeedBoard()` に置く
-  （`Window._SeedPanelState()` はその呼び出し口）
-
-### 7.6 新 State キーパスの追加
-
-例: `score.{N}.referee` を追加する。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `Design.md` §3.1.2 のキーパスツリー | 新規キーを **静的キーパスとして明記**（§3.1.3 規約） |
-| 2 | 書き込み元の Widget（PyQt） | `StateManager.Set("score.{N}.referee", value)` を呼ぶ |
-
-#### 触るファイル（任意）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 3 | `web/src/redux/tshState.ts` | 必要なら型定義拡張（slice は自動追従） |
-| 4 | OBS HTML テンプレ | `Update()` 内で `data.score[N].referee` を参照 |
-
-#### 触らない
-
-- `StateManager.py`（キーパスは動的、追加コードは不要）
-- AutonaWebServer のルート定義（必要な場合のみ追加）
-
-### 7.7 新ホットキーの追加
-
-§6.7 のチェックリストに従う。
-
-### 7.8 新言語の追加
-
-例: 韓国語 `ko` を追加する。
-
-#### 触るファイル
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `src/i18n/Autona_ko.ts` + `.qm` 生成（`compile_translations.ps1`）と `src/core/CoreWords.py` | Qt に残ったネイティブのダイアログと Updater の文言（`.ts` は手で編集）と、core が返す文言の表（`LANGUAGES` と `WORDS` の各語に `ko`。ADR-005 S-final SF-7） |
-| 2 | `web/src/i18n/locales/ko.json` | React 側翻訳ファイル |
-| 3 | `web/src/i18n/config.js` | `resources` に `ko` を追加、`i18n.languages` リストに追加 |
-| 4 | `src/i18n/mapping.json` の `languages` | `"ko": ["한국어", "Korean"]` を追加（`AutonaLocaleHelper.languages`。設定ページの言語の選択肢は `GET /api/v1/settings` の `language.choices` で、ここから来る） |
-
-### 7.9 新 React ページの追加
-
-例: `/coach-mode` を追加する。
-
-#### 触るファイル
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `web/src/CoachModePage/index.tsx` | 新ページコンポーネント |
-| 2 | `web/src/index.js` | React Router の routes に追加 |
-| 3 | 必要なら `web/src/redux/...` | 新 slice |
-| 4 | 必要なら `src/AutonaWebServer.py` | 新 REST/Socket ルート |
-
-### 7.10 新外部 API / Tournament Provider 連携の追加
-
-例: 新しい大会管理サービス `ExampleProvider` を追加する。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | provider 実装ファイル（`src/Helpers/AutonaExampleProviderDataProvider.py` 等） | 大会、フェーズ、フェーズグループ、セット、選手取得 API を実装 |
-| 2 | `AutonaTournamentDataProvider.py` 関連 | provider 切替・共通インターフェースへの接続 |
-| 3 | StateManager キーパス（§3.1.2） | `top8.*`, `score.{N}.*` への展開仕様を確認 |
-| 4 | SettingsManager | API token / endpoint / provider 選択の保存が必要なら追加（§3.3.4 命名規約） |
-| 5 | PyQt 設定 UI | provider 選択や認証情報入力が必要なら追加 |
-
-#### 注意
-
-- 外部 API のレスポンス構造を UI に直接漏らさない
-- StateManager には Autona 共通モデルに正規化して入れる
-- API 認証情報は **StateManager ではなく SettingsManager 側に保存**する（§3.3.2）
-
-#### 実装例: Hivee（2026-11-16 追加）
-
-Hivee（兄弟のイベントアプリ）のイベントを、配信オーバーレイの読み取り専用の JSON（`GET {origin}/api/events/{eventId}/overlay?token=…`）から
-読む provider（`src/TournamentDataProvider/HiveeDataProvider.py`。URL は `src/core/HiveeUrl.py`）。大会の URL の欄に Hivee の OBS 用の URL か
-API の URL を入れると、`core/TournamentService.UrlKind` が `HIVEE` と判定し、provider のアダプタ（`AutonaTournamentDataProvider.LoadTournament`）が
-この provider を作る。Hivee には何も書き戻さない。
-
-- 読むもの: 配信中の試合（`current`）・配信待ちの試合（`queue`）・Top 8（`view=top8`。ダブルエリミの 11 試合）。イベント全体を 1 つの配信として扱い、
-  配信の追従（`SetFollowService`）は配信中の試合（無ければ待ちの先頭）を追う。配信待ちは `streamQueue.hivee`（固定のキー。イベント名は state のキーにしない）。
-  セットの id は Hivee の試合の uuid（文字列）で、legacy の `/get-match`・Socket.IO の `get_match`・v1 の `GET /sets/{id}` が受け付ける
-  （start.gg の id は int のまま。`AutonaWebOperations.SetId`）
-- 無いもの: エントラント・フェーズ・順位・選手の対戦履歴は空で答える。前回の対戦（`GetLastSets`）は要求せずに空。「未定」「（不明）」は名前なし
-- ゲームは SSBU だけ（start.gg の SSBU の id 1386 として選ぶ）。キャラは Hivee の SSBU のコードをアセットのキーに写す（`HIVEE_TO_SSBU`。知らないコードの
-  警告はコードごとに 1 回）。codename は読み込み中のゲームが SSBU 系（1386）ならその codename、でなければ最初にスキャンした SSBU のゲーム
-- 試合の記憶（イベントごと・provider の外に持つので、強制の読み直しで provider を作り直しても残る。新しい 32 試合）: 試合の左右（Hivee の表示だけの
-  左右入れ替えを試合の中では戻す。名前の無かった側は名前が来たら埋める）・最後に読んだ中身（配信からも待ちからも外れた試合は最後の中身を答える）・
-  選手ごとの最後に渡したキャラと seed / X / アバター。追従の更新（上書きしない読み）は、変わったキャラ（`selection_changed`）と、埋まった
-  seed / X / アバター（`filled_in`）だけを書く（`SetFollowService._PlayerUpdate`。キャラを書き直して操作者が選んだスキンを戻さない。start.gg は
-  どちらのキーも渡さないので今までどおり）。「前回から」は provider 全体で 1 つで、ボードごとではない（同じ試合を追う 2 つのボードや間に挟まった
-  v1 の GET は、1 つの変化をどちらか一方でしか見ない）
-- 読みは view ごとに 1 本（読んでいる間に来た同じ view の読みはその答えを待つ）。HTTP の間はロックを持たない。答えは 2 秒（`CACHE_SECS`）、
-  失敗は 5 秒（`FAILURE_SECS`）持つ
-- **トークンは秘密**（持っていればイベントのオーバーレイを読める）: 本物の URL を持つのは `settings.json`（`TOURNAMENT_URL`）と provider だけ。
-  ログ・例外のメッセージには出さず（`HiveeUrl.Mask`）、state（`tournamentInfo.url`。`out/`・Socket.IO・`state.json` に出る）と READ の API
-  （`GET /tournament`・`/analysis`・`/tournament/{phases,sets,stations}` の `url`）には `token=***` に伏せた URL を出す（`TournamentService.PublishedUrl`）。
-  送り返された URL は、保存した URL を伏せたものと一致するときだけ保存した URL として扱う（`TournamentService.UnmaskUrl`。ほかの伏せた URL は
-  大会の URL ではないので 400）。`http` はこの PC だけ（ほかはトークンが平文で流れるので `https`）
-- テスト: `tests/test_hivee_provider.py`・`tests/test_api_v1_tournament.py`（トークンが state と READ に出ない・伏せた URL の送り返し）
-
-### 7.11 新統計指標 / 分析項目の追加
-
-例: `character_win_rate` を追加する。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `src/core/StatsService.py` | 算出ロジック・state 書き込み・取り直しのトリガー（`PlayerChanged` / `TeamsChanged` / `RefreshAll`）を追加（headless core Step 4a で算出と書き込み、ADR-005 S3e-5 でトリガーと取得の判断が core へ移行。`AutonaStatsUtil` は取得の輸送だけの Qt アダプタ = `StatsService.fetcher`。取得が要るなら fetcher に 1 メソッド足す） |
-| 2 | `web/src/StatsPage/`（統計情報ページ。ADR-005 S4k） | 表示 UI を追加（値は Socket.IO の `score.1.*` から `format.ts` で整形。新しい Qt Widgets パネルは作らない: ADR-005） |
-| 3 | `Design.md` §3.1.2 | State に保存する場合のみキーパスを追記 |
-
-#### 注意
-
-- 派生値は **原則 read-only**。保存が必要な場合のみ StateManager に置く
-- 元データと派生データを混同しない
-- 計算コストが高い場合は `state_big_change` 等のイベント単位で再計算する
-
-### 7.12 新スポンサー / アセット種別の追加
-
-例: `coach_logo` を追加する。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `user_data/games/{game}/{asset_type}/config.json` | アセット定義を追加 |
-| 2 | `src/core/GameAssetCatalog.py` | 新 asset_type の解決が必要なら追加（ページの選択肢に出すならカタログのペイロード（`*Payload()`）と Web の操作も。Qt のモデルは無い: Qt モデルの整理 PR4） |
-| 3 | State キーパス（§3.1.2） | State に保持する場合は静的キーパスとして追記 |
-| 4 | 利用 UI / テンプレ | PyQt / OBS / 画像生成側で参照を追加 |
-
-#### 注意
-
-- ファイルパスはテンプレに**直接ハードコードしない**
-- State には可能な限り **asset id / logical path** を保持し、実パス解決は AssetManager 側に寄せる
-
-### 7.13 新設定項目の追加
-
-例: `thumbnail_config.generate_metadata` を追加する。
-
-#### 触るファイル（必須）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 1 | `Design.md` §3.3.4 | SettingsManager キー命名規約に従ってキーを定義 |
-| 2 | SettingsManager 利用箇所 | default 値を定義 |
-| 3 | PyQt 設定 UI または対象 Widget | 編集 UI を追加 |
-| 4 | 利用側処理 | 設定値を読んで挙動を切り替える |
-
-#### 注意
-
-- **新規トップレベルキーは原則追加しない**（§3.3.4）
-- StateManager に展開する場合は「**キャッシュであり正本ではない**」と明記する
-- API token / アカウント情報は StateManager に置かない
-
----
-
-## 8. リファクタ移行プラン
-
-本書を正本としたとき、現状実装との差分を埋めるためのタスクを優先度別に列挙する。各タスクは独立してマージ可能な単位に分解する。
-
-### 8.1 優先度: 高（仕様違反の解消）
-
-| ID | タスク | 関連 § | 影響範囲 | 状態 |
-|----|------|------|--------|------|
-| **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
-| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `AutonaCommentaryWidget.py`（当時。S4c で削除） | ✅ 完了（M1a）→ 2026-07 リワークでスロット固定 12 名化により概念ごと消滅 |
-| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`（ADR-005 S4r で削除）, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
-| **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, `out/program_state.json` への埋め込み | ✅ 完了（M1b） |
-| **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/redux/tshState.ts`, `web/src/ScoreboardPage/websocketInit.ts` | ✅ 完了（M1b） |
-| **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` | ✅ 完了（M1a） |
-| **T-7** | accent 色を `#F5A545`（オレンジ）→ `#8A1A2C`（クリムゾン）に統合 | §5.1 | `web/src/themes.js` の DARK/LIGHT TOKENS、`web/public/manifest.json`、`web/public/index.html` | ✅ 完了（M1a） |
-
-### 8.2 優先度: 中（設計負債の解消）
-
-| ID | タスク | 関連 § | 影響範囲 | 状態 |
-|----|------|------|--------|------|
-| **T-8** | ~~React Web UI のテーマ切替~~ | §5.4 | — | ❌ 撤回（2026-06-28）。切替が 30s フリーズの原因のため機能ごと削除しダーク固定化（§5.4） |
-| **T-9** | ~~`ui.light_mode` broadcast 機構~~ | §5.4 | — | ❌ 撤回（2026-06-28、§5.4） |
-| **T-10** | ~~テーマ切替の PyQt⇄React 同期~~ | §5.4 | — | ❌ 撤回（2026-06-28、§5.4） |
-| **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | `AutonaScoreboardManager` / `StatsUtil` / `BasePlayerWidget` / `PlayerListSlotWidget` / `PlayerList` / `PlayerListWidget` / `ScoreboardWidget` の小〜中規模ペア。既に try/finally で守られている長大処理と lambda タプル式 / 巨大 __init__ は意図的にスキップ | ✅ 完了（M3） |
-| **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` | ✅ 完了（M1b） |
-| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` | ✅ 完了（M3） |
-| **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
-| **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | 試合一覧は core の `AnalysisService`（ADR-005 S4j）と React のページ（S4k）に移り、Qt 版は削除。golden（`tests/fixtures/analysis_rows/golden.json`）・`tests/test_analysis_rows.py` / `test_analysis_service.py` / `test_api_v1_analysis.py`・jest の `analysisRows.test.js` が回帰を pin | ✅ 完了（ADR-005 S4j / S4k） |
-| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し（ADR-005 S4ae で `src/core/HotkeyRules.py` へ移し、validator は削除。警告はコード `os_reserved` / `obs_likely` / `no_modifier` になり、S4af で `shift_only` を足した）、当時の `Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出した。S4af から React の設定ページが、重複は保存の 409 の snackbar（相手のアクション名つき）、警告は snackbar と行の下の文（旧ダイアログと同じ文。OBS の文の余分な空白だけ除いた）で出す | ✅ 完了（M3） |
-
-### 8.3 優先度: 低（長期的な構造改善）
-
-| ID | タスク | 関連 § | 影響範囲 |
-|----|------|------|--------|
-| **T-18** | **PyQt 書き込みの Actions 層移行**: PyQt Widget の `StateManager.Set` 直接呼び出しを Actions 層に移行する。WebServer 非依存名 `AutonaActions` / `StateActions` への改名も検討。Step 1（core 境界確立・Qt-free pin）完了 2026-08-28 | §3.2.2 R-Sync-1 | 大規模リファクタ。`src/AutonaWebServerActions.py` の独立化 + 全 PyQt Widget の書き込み経路差し替え |
-| **T-19** | 動的キーパス（`objectName` 依存キー）の段階的な静的化。新規追加分から §3.1.2 に明記する運用 → ✅ **完了**（Headless Core Step 5 第 1〜3 弾、2026-09-01/02。`StateSchema.DYNAMIC_KEY_FAMILIES` は空）。以降は「新規キーは `StateSchema` に定数を置く」運用のみ | §3.1.3 | 新規キー追加時のレビューで運用 |
-| **T-20** | OBS テンプレの命名軸統一: 新規追加分から `scoreboard_{placement}_{style}` に寄せる | §4.3.1 | 新規追加時のレビューで運用 |
-| **T-21** | フォント定義の整理: PyQt の `FONT_FAMILY_CONDENSED`（Roboto Condensed）を React にも追加するか、削除するか決定 | §5.2.1 | `web/src/themes.js`、`src/ui_constants.py` |
-| **T-22** | `danger` / `negative` トークンを `brand` から分離するか検討（エラー・削除確認・危険操作とブランド強調が同色になる懸念の解消） | §5.1.4 | `src/ui_constants.py` 側は分離済み（`negative #F04E54`）。`web/src/themes.js` も Web UI 刷新 Phase 1（2026-07）で `error = negative` に反映 → ✅ 完了 |
-| **T-23** | React MUI theme の `shape.borderRadius` を `RADIUS_MD = 5px` に合わせる（MUI コンポーネントが参照するデフォルトを統合トークンに揃える） | §5.3.2 | `web/src/themes.js` → ✅ 完了（Web UI 刷新 Phase 1、2026-07） |
-
-### 8.4 マイルストーン
-
-| マイルストーン | 含むタスク | 完了条件 |
-|------------|-----------|--------|
-| **M1a: Quick compliance fixes** | T-1, T-2, T-3, T-6, T-7 | 個別に独立 PR でマージ可能。upset_factor 統一・commentary 欠番解消・StateManager.state 直接参照置換・React batch 100ms 化・accent 色統合が完了する |
-| **M1b: Sync reliability baseline** | T-4, T-5, T-12 | StateManager / AutonaWebServer / OBS globals.js / React websocketInit にまたがる同期基盤の改修。revision 付与・連続性検証・full snapshot 再取得・degraded poll 整理がまとめて完了し、React の遅延が 300ms 以内に収まる |
-| **M2: テーマ統合（中期）** | T-8〜T-10 | ❌ 撤回（2026-06-28）。切替が 30s フリーズの原因のため機能削除・ダーク固定化（§5.4） |
-| **M3: 設計負債の解消（中期）** | T-11〜T-17 | ハードコード色・遅延・size 不統一が解消される |
-| **M4: 構造改革（長期）** | T-18〜T-23 | Actions 層が独立、動的キーパスが減少、命名軸が統一される。`negative`/`brand` 分離、MUI `shape.borderRadius` 統合判断 |
-
-### 8.5 リファクタの進め方
-
-| ルール | 内容 |
-|------|------|
-| 1 | 各タスクは独立 PR でマージ可能な単位に分割 |
-| 2 | M1 は同一スプリントでまとめて実施するのが望ましい（互いに依存するため） |
-| 3 | M2/M3 は順序自由 |
-| 4 | M4 は別途設計フェーズが必要（PR 前に追加 Design ドキュメントを書く） |
-| 5 | 各タスク完了時に本書（Design.md）の該当箇所と現実装の乖離が解消されていることを確認する |
-
-### 8.6 今後のデザインシステム改善（Future UX Improvement Themes）
-
-今後、OBS Studio / ClickUp などの成熟した制作・業務管理ツールを参考に、Autona の UI/UX 改善を別フェーズで検討する。
-
-主な検討対象:
-- OBS Studio 的なドック配置・プレビュー・操作パネルの整理
-- ClickUp 的な情報密度、サイドバー、状態表示、タスク/設定の階層設計
-- 配信中オペレーションにおける視認性・誤操作防止・ショートカット導線
-- 初心者向け onboarding / setup flow
-- 大会運営者向けの作業フロー最適化
-
-ただし、本書（Design.md）の責務境界・StateManager 規約・テーマトークン・拡張規約を前提とし、UI/UX 改善は別ブランチで実施する。
-
----
+`SettingsManager` のキーを §3.3.3 の命名で定義し、既定値は利用箇所で持つ。設定ページの項目なら `core/AppSettings`（表）と `GET` / `PATCH /api/v1/settings*`、React の `web/src/SettingsPage/`。トップレベルのキーは増やさない。state に展開するなら「キャッシュで正本ではない」と明記する。API トークン・アカウント情報は state に置かない。

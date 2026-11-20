@@ -16,7 +16,7 @@ Splash:
   * The main thread is blocked for the splash's whole life (imports, then
     Window.__init__, with no event loop running), so a Qt splash animated by
     a QTimer would freeze and read as a hang, and QtQuick's animators are not
-    in the release (dependencies/autona.spec excludes QtQuick / QtQml). The
+    in the release (packaging/autona.spec excludes QtQuick / QtQml). The
     splash is a native Win32 layered window owned by a daemon thread of its
     own, drawn with GDI+ through ctypes (no Qt): on a small dark rounded
     panel, the Autona icon with a diagonal band of light sweeping across it

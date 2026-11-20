@@ -107,7 +107,7 @@ class AutonaTournamentDataProvider(QObject):
         self._entrantsCancel = None
 
     def GameChanged(self, videogame):
-        StateManager.Set(f"provider_videogame", {
+        StateManager.Set("provider_videogame", {
             "id": videogame
         })
         self.SetGameFromProvider()
