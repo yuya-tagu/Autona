@@ -175,7 +175,7 @@ class PlayerDB:
                         try:
                             player["mains"] = json.loads(
                                 player.get("mains", "{}"))
-                        except:
+                        except Exception:
                             player["mains"] = {}
                             logger.error(f"No mains found for: {tag}")
 
@@ -194,7 +194,7 @@ class PlayerDB:
 
                     try:
                         player["mains"] = player.get("mains", "{}")
-                    except:
+                    except Exception:
                         player["mains"] = {}
                         logger.error(f"No mains found for: {tag}")
 
@@ -269,7 +269,7 @@ class PlayerDB:
                     mains = self.database[tag].get("mains", {})
                     mains.update(player.get("mains", {}))
                     player["mains"] = mains
-                except:
+                except Exception:
                     logger.error(traceback.format_exc())
             self.database[tag] = player
 
@@ -320,7 +320,7 @@ class PlayerDB:
             for player in self.database.values():
                 if player is not None:
                     try:
-                        if player.get("mains") and type(player.get("mains")) == dict:
+                        if player.get("mains") and type(player.get("mains")) is dict:
                             if codename in player.get("mains", {}).keys():
                                 playerMains = player.get("mains")[codename]
 

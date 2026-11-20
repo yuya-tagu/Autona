@@ -34,7 +34,7 @@
        rejects them while they stay untracked; this one also holds if one
        is ever committed by mistake.
 
-    5. Qt bundle check (ADR-005 S-final SF-9): dependencies/autona.spec
+    5. Qt bundle check (ADR-005 S-final SF-9): packaging/autona.spec
        keeps out what the Qt hooks collect but the app never opens (QML,
        the debug build's WebEngine resources, Qt's own translations,
        WebEngine locales other than en-US / ja, Git for Windows' OpenSSL).
@@ -234,7 +234,7 @@ try {
             $back = @($internalNames | Where-Object { $_ -match $pattern })
             if ($back.Count -gt 0) {
                 $sample = ($back | Select-Object -First 5) -join ", "
-                throw ("release zip ships {0} file(s) dependencies/autona.spec keeps out ({1}): {2}" `
+                throw ("release zip ships {0} file(s) packaging/autona.spec keeps out ({1}): {2}" `
                     -f $back.Count, $qtForbidden[$pattern], $sample)
             }
         }

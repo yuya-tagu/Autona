@@ -1215,7 +1215,8 @@ def test_a_failing_text_formatter_gets_the_english_default(heldBoard):
     assert SM.saveBlocked == 0
 
     def badTemplate(key, number):
-        return "Best of {count}".format(number)     # KeyError
+        # KeyError on purpose: the template has a placeholder with no argument.
+        return "Best of {count}".format()  # noqa: F524
 
     assert AutonaActions(formatMatchText=badTemplate).RepublishBestOf(
         BOARD) is True

@@ -3,7 +3,6 @@
 Target: StateManager relies on these primitives.
 Refactoring PlayerWidget or StateManager without breaking these is critical.
 """
-import pytest
 
 from src.core.DictHelper import (
     deep_clone, deep_get, deep_set, deep_unset)

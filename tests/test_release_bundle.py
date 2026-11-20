@@ -1,6 +1,6 @@
 """What the release bundles of Qt (ADR-005 S-final SF-9).
 
-dependencies/autona.spec keeps out what PyInstaller's Qt hooks collect but
+packaging/autona.spec keeps out what PyInstaller's Qt hooks collect but
 the app never opens: the QML modules (Python excludes), and the debug
 build's WebEngine resources, Qt's own translations, WebEngine locales other
 than en-US / ja and Git for Windows' OpenSSL (a filter on the analysed TOCs).
@@ -37,7 +37,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SPEC = PROJECT_ROOT / "dependencies" / "autona.spec"
+SPEC = PROJECT_ROOT / "packaging" / "autona.spec"
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_release_zip.ps1"
 
 # The Qt modules the app imports: src/ (incl. autona_splash.py) and main.py.
@@ -235,7 +235,7 @@ def test_the_app_imports_the_allowlisted_qt_modules_only():
                for path, names in imported.items() if names - APP_QT_MODULES}
     assert outside == {}, (
         "a Qt module outside the allowlist: add it to APP_QT_MODULES only "
-        "after checking the release still carries it (dependencies/autona.spec "
+        "after checking the release still carries it (packaging/autona.spec "
         "excludes, scripts/validate_release_zip.ps1's $qtRequired)")
     # The allowlist is exact: what the app imports today.
     assert set().union(*imported.values()) == APP_QT_MODULES

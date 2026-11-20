@@ -377,7 +377,8 @@ def test_a_skin_named_as_another_character_reads_back_as_its_own(
     if order == "reversed":
         snap = dataclasses.replace(
             snap, characterRows=tuple(reversed(snap.characterRows)))
-    pick = lambda value: Top8Service.CharacterPick(value, games, snap)
+    def pick(value):
+        return Top8Service.CharacterPick(value, games, snap)
 
     value = Top8Service.CharacterValue("Bowser Jr.", 2, games, snap)
     assert (value["en_name"], value["codename"]) == ("Roy", "koopajr")

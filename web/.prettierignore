@@ -1,0 +1,9 @@
+build
+dist
+node_modules
+playwright-report
+test-results
+package-lock.json
+# generated or data, not source
+src/i18n/locales
+*.d.ts

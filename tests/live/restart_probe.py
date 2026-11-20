@@ -38,7 +38,8 @@ def main():
 
     # bootstrap_gui() builds QWidgets (the Alert / Updater adapters);
     # constructing one without a QApplication aborts at the C++ level.
-    app = QApplication.instance() or QApplication([])
+    # Kept in a name so the QApplication outlives this scope's statements.
+    app = QApplication.instance() or QApplication([])  # noqa: F841
 
     result = {}
 

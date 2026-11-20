@@ -122,7 +122,7 @@ class BadWordFilter:
 
                 newWords = set(words)
                 langs[f.split(".")[0]] = newWords
-        except:
+        except Exception:
             logger.error(traceback.format_exc())
 
         # The leetspeak expansion (a -> (a|4|@), ...) that used to sit here,
@@ -264,17 +264,17 @@ class BadWordFilter:
                 self.CensorDict(value)
             else:
                 # Modify the leaf value
-                if type(value) == str:
+                if type(value) is str:
                     dictionary[key] = self.CensorString(value)
 
     def Censor(self, value: Union[Dict, str, None], countryCode2: str = None):
-        if SettingsManager.Get("general.profanity_filter", True) != True:
+        if SettingsManager.Get("general.profanity_filter", True) != True:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
             return value
 
-        if value == None:
+        if value is None:
             return value
 
-        if type(value) == str:
+        if type(value) is str:
             value = self.CensorString(value, countryCode2)
         if isinstance(value, dict):
             self.CensorDict(value)
@@ -289,5 +289,5 @@ class BadWordFilter:
                     f.write("")
             words = open(path, 'r', encoding="utf-8").read().splitlines()
             return set([remove_accents_lower(w) for w in words if len(w) > 0])
-        except:
+        except Exception:
             logger.error(traceback.format_exc())

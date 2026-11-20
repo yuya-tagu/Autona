@@ -337,7 +337,7 @@ paths:
 ### 共有ビュー（`AutonaWebPanelHost`）
 
 規則の詳細は `src/AutonaWebPanelHost.py` の docstring（module と `ClipboardPermitted` / `ShellHeaderWanted` / `ParseShellRequest` ほか）と
-`external-control-api.md` §5.30。
+`external-control-api.md` §5.1（`/shell-session`）。
 
 - **このサーバーの Web UI（`/web` とその配下）しか載せない**（ページのスクリプトにクリップボードを許していて、同じオリジンは第三者製の
   `layout/` も出すため）。遷移の担保は `_PanelPage.acceptNavigationRequest`（拒否した遷移の `loadFinished(False)` で再読み込みしない: `refusedLast`）

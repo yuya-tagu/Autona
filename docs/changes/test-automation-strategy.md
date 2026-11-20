@@ -72,7 +72,7 @@ autonaApp (session)
 
 ## L6: ブラウザ E2E
 
-`cd web && npm run build && npm run test:e2e`。Windows 専用で、Python の依存（`dependencies/requirements.txt` + pytest）が要る。初回は `npx playwright install chromium`。
+`cd web && npm run build && npm run test:e2e`。Windows 専用で、Python の依存（`requirements.txt` + pytest）が要る。初回は `npx playwright install chromium`。
 
 - global setup（`web/e2e/global-setup.ts`）がヘルパー `web/e2e/headless_server.py` を起動する。ヘルパーは L4 のスモークと同じ隔離（tmp の作業ディレクトリ・空きポート・`AUTONA_INSTANCE_TAG`）でヘッドレスを起動するので、開発者の `user_data/` `out/` `logs/` と起動中の Autona には触れない。停止は Ctrl+Break（起動した PID だけ）
 - jest（`src/` だけ）と pytest（`tests/test_*.py` だけ）には拾われない

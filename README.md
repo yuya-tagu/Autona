@@ -47,12 +47,14 @@
 
 ### インストール
 
-```bash
-# Python 依存パッケージ
-pip install -r dependencies/requirements.txt
+```powershell
+# Python 依存パッケージ（venv 推奨）
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
 # Web UI 依存パッケージ
-cd web && npm ci
+cd web; npm ci; cd ..
 ```
 
 ### 実行
@@ -70,7 +72,7 @@ cd web && npm run build
 
 # 2. exe をビルド（onedir）
 pip install pyinstaller
-pyinstaller dependencies/autona.spec --noconfirm
+pyinstaller packaging/autona.spec --noconfirm
 ```
 
 - 成果物は `dist/Autona/`（`Autona.exe` + `_internal/`）に生成される。`_internal/` が無いと起動しない
@@ -178,7 +180,7 @@ Autona/
 ├── assets/                  # 国旗・アイコン等の静的アセット
 ├── user_data/               # ゲーム設定・選手データ（ゲーム画像は別途取得）
 ├── out/                     # 出力ファイル（オーバーレイ用）
-├── dependencies/            # PyInstaller spec・requirements
+├── packaging/               # PyInstaller spec
 ├── scripts/                 # リリーススクリプト
 ├── build/                   # ビルド中間ファイル
 ├── test/                    # テスト（アセット検証）

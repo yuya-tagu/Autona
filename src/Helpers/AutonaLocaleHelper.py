@@ -8,7 +8,6 @@ import traceback
 from loguru import logger
 
 from src.core.SettingsManager import SettingsManager
-from src.core.StateManager import StateManager
 from ..core.DictHelper import deep_clone
 from .AutonaDirHelper import AutonaResolve
 
@@ -153,7 +152,7 @@ class AutonaLocaleHelper(QObject):
             AutonaLocaleHelper.languages = languages_json.get("languages")
             AutonaLocaleHelper.remapping = languages_json.get("remapping")
         except Exception as e:
-            raise Exception(f"Error loading languages") from e
+            raise Exception("Error loading languages") from e
 
     def LoadCountryToLanguage():
         try:
@@ -164,7 +163,7 @@ class AutonaLocaleHelper(QObject):
             AutonaLocaleHelper.countryToContinent = {ccode: cdata.get(
                 "continent") for ccode, cdata in languages_json.items()}
         except Exception as e:
-            raise Exception(f"Error loading languages") from e
+            raise Exception("Error loading languages") from e
 
     def GetCountrySpokenLanguages(countryCode2: str):
         return AutonaLocaleHelper.countryToLanguage.get(countryCode2.upper(), [])
@@ -201,7 +200,7 @@ class AutonaLocaleHelper(QObject):
 
             AutonaLocaleHelper.matchNames = term_names.get("match")
             AutonaLocaleHelper.phaseNames = term_names.get("phase")
-        except:
+        except Exception:
             logger.error(traceback.format_exc())
 
         # Load user round names in a separate try/catch
@@ -216,7 +215,7 @@ class AutonaLocaleHelper(QObject):
 
             AutonaLocaleHelper.phaseNames.update(term_names["phase"])
             AutonaLocaleHelper.matchNames.update(term_names["match"])
-        except:
+        except Exception:
             logger.warning("Custom Tournament Terms were not found and/or loaded.")
 
     # The candidate lists read the terms defensively: the user's

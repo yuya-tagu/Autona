@@ -56,7 +56,7 @@ cd <プロジェクトルート>\web; npm run build
 ### 4. exe をビルド（3〜5 分）
 
 ```powershell
-cd <プロジェクトルート>; pyinstaller dependencies/autona.spec --noconfirm
+cd <プロジェクトルート>; pyinstaller packaging/autona.spec --noconfirm
 # 最後に "Build complete!" と exit 0 を確認
 ```
 
@@ -97,7 +97,7 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 （テスト大会アイコン等の開発時データ遮断。v1.3.0 差し替えアセットで実際に混入）③ 保存済み state が入っていないこと
 ④ **Qt の同梱物**（ADR-005 S-final SF-9: WebEngine とそのリンク先の Qt DLL などの必須ファイルがあること・spec が外した QML / debug
 リソース / Qt の翻訳 / 日英以外の locale / Git の OpenSSL が無いこと・`_internal` が上限以下）。④ で落ちたら PyInstaller / PySide6 の
-更新でフックの集めるものが変わった疑い。`dependencies/autona.spec` を直す（zip を手で直さない）。
+更新でフックの集めるものが変わった疑い。`packaging/autona.spec` を直す（zip を手で直さない）。
 **`Compress-Archive` に戻してはならない**: PS 5.1 では `\` 区切りエントリになり、インストール済み
 ヘルパー apply_update.ps1 が 1 ファイルも展開できず自動更新が無音で不発になる（v1.3.0 で実際に発生）。
 

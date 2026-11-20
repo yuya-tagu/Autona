@@ -4854,7 +4854,7 @@ def test_the_qt_scoreboard_panel_and_its_switch_are_gone():
     assert {path: names for path, names in importers.items() if names} == {}
 
     # The build no longer collects src/layout.
-    spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
+    spec = (PROJECT_ROOT / "packaging" / "autona.spec").read_text(
         encoding="utf-8")
     assert "src/layout" not in spec
 
@@ -6050,8 +6050,8 @@ def test_the_ts_files_hold_the_native_dialogs_words_alone():
         path = PROJECT_ROOT / "src" / "i18n" / f"Autona_{language}.ts"
         messages = _tsMessages(path)
         # Exactly what the code asks for, every word translated: nothing the
-        # code stopped asking for stays (the .ts is edited by hand:
-        # pyside6-lupdate is not installed).
+        # code stopped asking for stays (update_translations.ps1 runs
+        # PySide6's bundled lupdate with -no-obsolete).
         assert set(messages) == set(asked), path.name
         assert all(messages.values()), path.name
         # No <location>: kept by hand, it would only drift from the code.
@@ -6129,7 +6129,7 @@ def test_the_qt_settings_window_is_gone():
         assert "<source>Settings</source>" not in text, name
 
     # The build collects nothing of it.
-    spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
+    spec = (PROJECT_ROOT / "packaging" / "autona.spec").read_text(
         encoding="utf-8")
     assert "src/Settings" not in spec and "src\\Settings" not in spec
 
@@ -6200,7 +6200,7 @@ def test_the_qt_guide_windows_are_gone():
         assert QT_WORDS[("app", source)] == (source, ja), source
 
     # The build collects none of it.
-    spec = (PROJECT_ROOT / "dependencies" / "autona.spec").read_text(
+    spec = (PROJECT_ROOT / "packaging" / "autona.spec").read_text(
         encoding="utf-8")
     for module in QT_GUIDE_MODULES:
         assert module not in spec, module

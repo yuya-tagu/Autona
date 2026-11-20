@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-from loguru import logger
 
 is_in_bundle = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 current_dir = Path.cwd()

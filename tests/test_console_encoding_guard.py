@@ -15,7 +15,6 @@ therefore covers the fix two ways instead:
   - a behavioural check, run in a subprocess with no src import at all, that
     the exact same guard logic neutralises a cp932-only stdout
 """
-import io
 import subprocess
 import sys
 from pathlib import Path

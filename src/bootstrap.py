@@ -342,7 +342,6 @@ def bootstrap_core():
     # the loader's TurnModsOff the shell registers (bootstrap_gui() /
     # src/headless.Assemble, both after this) when it is called -- before
     # that, none is registered and it logs.
-    from .Helpers import AutonaQtHelper
     from .core.TournamentMediaService import TournamentMediaService
     from .core.TournamentService import TournamentService
     if TournamentMediaService.instance is None:
@@ -368,7 +367,6 @@ def bootstrap_core():
     # it exists is dropped with a warning, and the next change queues
     # again). The output pruning is a Helpers function core may not import,
     # hence injected.
-    from .Helpers import AutonaQtHelper
     from .Helpers.AutonaOutputRetention import PruneOutputFiles
     from .core.StreamService import StreamService
     if StreamService.instance is None:

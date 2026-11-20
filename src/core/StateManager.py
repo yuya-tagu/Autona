@@ -1355,7 +1355,7 @@ class StateManager:
             stamped = dict(newest_snap)
             stamped["timestamp"] = time.time()
             # Stamp revision so degraded poll clients (file mode) can
-            # validate continuity (Design.md §2.3 R-OBS-3a, §8 T-12).
+            # validate continuity (Design.md §2.3 R-OBS-3a).
             stamped["revision"] = revision
             # Drop OPT_INDENT_2 — OBS overlays / Web UI parse JSON
             # regardless of whitespace, and indenting a multi-MB tournament
@@ -1551,7 +1551,7 @@ class StateManager:
 
             # logger.info(filename)
 
-            if change.get("new_type") == type(None):
+            if change.get("new_type") is type(None):
                 StateManager.RemoveFilesDict(
                     filename, extract(oldState, changeKey))
             else:
@@ -1602,7 +1602,7 @@ class StateManager:
                 # logger.info("Added:", path, item)
 
                 StateManager.CreateFilesDict(path, item)
-            except Exception as e:
+            except Exception:
                 logger.error(traceback.format_exc())
 
     def _FileExtension(value):
@@ -1625,7 +1625,7 @@ class StateManager:
         one answer CreateFilesDict and RemoveFilesDict go by, so what was
         written is what gets removed, and the extension either of them adds to
         a path never holds a separator."""
-        if type(value) != str:
+        if type(value) is not str:
             return _EXPORT_TEXT
         if value.startswith("./"):
             if StaticPath(value) is not None \
@@ -1652,7 +1652,7 @@ class StateManager:
         if not os.path.isdir("./out/"+pathdirs):
             os.makedirs("./out/"+pathdirs)
 
-        if type(di) == dict:
+        if type(di) is dict:
             for k, i in di.items():
                 StateManager.CreateFilesDict(
                     path+"/"+str(k).replace("/", "_"), i)
@@ -1664,14 +1664,14 @@ class StateManager:
                     try:
                         os.remove(f"./out/{path}" + "." +
                                   di.rsplit(".", 1)[-1])
-                    except Exception as e:
+                    except Exception:
                         logger.error(traceback.format_exc())
                 if os.path.exists(di):
                     try:
                         shutil.copyfile(
                             os.path.abspath(di),
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1])
-                    except Exception as e:
+                    except Exception:
                         logger.error(traceback.format_exc())
             elif kind == _EXPORT_DOWNLOAD:
                 imageExtension = StateManager._FileExtension(di)
@@ -1680,7 +1680,7 @@ class StateManager:
                     if os.path.exists(downloadTarget):
                         try:
                             os.remove(downloadTarget)
-                        except Exception as e:
+                        except Exception:
                             logger.error(traceback.format_exc())
 
                     def downloadImage(url, dlpath):
@@ -1705,7 +1705,7 @@ class StateManager:
                                 original.save(dlpath.rsplit(
                                     ".", 1)[0]+".png", format="png")
                                 os.remove(dlpath)
-                        except Exception as e:
+                        except Exception:
                             logger.error(traceback.format_exc())
                         finally:
                             StateManager._download_semaphore.release()
@@ -1721,16 +1721,14 @@ class StateManager:
                     )
                     t.start()
                     StateManager._TrackDownload(t)
-                except Exception as e:
+                except Exception:
                     logger.error(traceback.format_exc())
             else:
                 with open(f"./out/{path}.txt", 'w', encoding='utf-8') as file:
                     file.write(str(di))
 
     def RemoveFilesDict(path, di):
-        pathdirs = "/".join(path.split("/")[0:-1])
-
-        if type(di) == dict:
+        if type(di) is dict:
             for k, i in di.items():
                 StateManager.RemoveFilesDict(
                     path+"/"+str(k).replace("/", "_"), i)
@@ -1755,7 +1753,7 @@ class StateManager:
                         # logger.info("try to remove: ", removeFile)
                         if os.path.exists(removeFile):
                             os.remove(removeFile)
-                except:
+                except Exception:
                     logger.error(traceback.format_exc())
             else:
                 try:
@@ -1763,12 +1761,12 @@ class StateManager:
                     # logger.info("try to remove: ", removeFile)
                     if os.path.exists(removeFile):
                         os.remove(removeFile)
-                except:
+                except Exception:
                     logger.error(traceback.format_exc())
 
         try:
             # logger.info("Remove path", f"./out/{path}")
             if os.path.exists(f"./out/{path}"):
                 shutil.rmtree(f"./out/{path}")
-        except:
+        except Exception:
             logger.error(traceback.format_exc())

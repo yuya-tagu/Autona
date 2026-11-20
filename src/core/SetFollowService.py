@@ -706,7 +706,7 @@ class SetFollowService:
         nothing to write. start.gg sends neither key: its mains whenever the
         set has a selection, as before."""
         update = dict(player.get("filled_in") or {})
-        if (data.get("has_selection_data") and noMains != True
+        if (data.get("has_selection_data") and noMains != True  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
                 and player.get("selection_changed", True)):
             update["mains"] = player.get("mains")
         return update

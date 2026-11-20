@@ -16,7 +16,7 @@ import {
 } from "./playerRows";
 
 // The Player List's rows (ADR-005 S4n): what the tables show, how they
-// filter, sort and page, and what an edit sends (external-control-api §6.26).
+// filter, sort and page, and what an edit sends (`PUT /players`).
 
 const ALPHA = {
     key: "SP Alpha", prefix: "SP", gamerTag: "Alpha", name: "Realname One",

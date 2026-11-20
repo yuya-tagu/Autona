@@ -23,7 +23,6 @@ without the token, another computer with it).
 """
 import base64
 import copy
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 

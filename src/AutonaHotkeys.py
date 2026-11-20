@@ -326,7 +326,7 @@ class AutonaHotkeys(QObject):
         self.SetupHotkeys()
 
     def _hotkeysEnabled(self):
-        return SettingsManager.Get("hotkeys.hotkeys_enabled", True) != False
+        return SettingsManager.Get("hotkeys.hotkeys_enabled", True) != False  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
 
     def SetupHotkeys(self):
         self._unregisterAll()
@@ -391,7 +391,7 @@ class AutonaHotkeys(QObject):
                 action_key, self.loaded_keys.get(action_key, ""))
 
     def HotkeyTriggered(self, k, v):
-        if not SettingsManager.Get("hotkeys.hotkeys_enabled", True) == False:
+        if not SettingsManager.Get("hotkeys.hotkeys_enabled", True) == False:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
             logger.info(f"Activated {k} by pressing {v}")
             getattr(self.signals, k).emit()
 

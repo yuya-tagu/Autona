@@ -929,11 +929,11 @@ def test_every_refusal_core_raises_has_fixed_words():
     assert {assets.NOT_A_ZIP, assets.UNKNOWN_UPLOAD, assets.INCOMPLETE,
             assets.SUPERSEDED, assets.DISK_FULL} <= raised
     assert raised | {assets.BUSY} <= set(v1._ASSET_REFUSALS)
-    for code, (api, words, status) in v1._ASSET_REFUSALS.items():
+    for code, (apiCode, words, status) in v1._ASSET_REFUSALS.items():
         assert isinstance(words, str) and words and "{" not in words
         refusal = v1._asset_refused("x", code, "C:\\Users\\me\\secret")
         assert (refusal.code, refusal.message, refusal.status,
-                refusal.reason) == (api, words, status, code)
+                refusal.reason) == (apiCode, words, status, code)
 
 
 def test_a_failure_before_the_hold_removes_the_upload(shell, monkeypatch):

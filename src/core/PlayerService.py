@@ -1188,7 +1188,7 @@ class PlayerService:
                 location["region"] = target
 
         mains = source.get("mains")
-        if mains and no_mains != True:
+        if mains and no_mains != True:  # noqa: E712 -- stored value may be 0/1 as well as a bool; == keeps the exact semantics
             self._ApplyMains(mains)
 
         if "seed" in source:
@@ -1237,13 +1237,13 @@ class PlayerService:
         snap = games.Current()
         existing = StateManager.Get(self.Key("character"))
         slots = self._CharacterSlots(existing, snap)
-        if type(mains) == list:
+        if type(mains) is list:
             if slots:
                 skin = self._SkinNumber(mains[1], mains[0]) \
                     if len(mains) > 1 else 0
                 slots[0] = self._MainSlot(mains[0], skin, slots[0].variant,
                                           snap)
-        elif type(mains) == dict:
+        elif type(mains) is dict:
             picked = mains.get((snap.game or {}).get("codename"), [])
             for index, main in enumerate(picked):
                 if index >= len(slots):

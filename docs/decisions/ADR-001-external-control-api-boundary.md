@@ -137,7 +137,7 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 
 layout/custom の統合（[ADR-007](ADR-007-template-packages.md) の付記）で、`layout/` 配下の配信用レイアウト
 （旧来型テンプレート + Designer 生成の `layout/custom/{slug}/`）の一覧 `GET /api/v1/layouts`（`?kind=` で絞り込み）を
-追加した。I/F は [external-control-api.md](../architecture/external-control-api.md) §5.2。D1〜D8 との関係:
+追加した。I/F は [external-control-api.md](../architecture/external-control-api.md) §5.4。D1〜D8 との関係:
 
 - **D3**: 委譲先は `WebServerActions` ではなく Qt 非依存の `src/core/LayoutCatalog.py`。D3 の「既存処理を唯一の実処理として
   再利用し二重化しない」は、ここでは Board / Commentary / Top 8 タブと Designer の「開く」が使う**同じ関数**を呼ぶことで満たす

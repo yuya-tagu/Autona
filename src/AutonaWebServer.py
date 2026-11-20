@@ -16,7 +16,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from flask import Flask, send_from_directory, request, send_file, abort, jsonify
 from flask_cors import CORS, cross_origin
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 import orjson
 from loguru import logger
 from werkzeug.serving import WSGIRequestHandler
@@ -34,7 +34,6 @@ from .AutonaDesignerService import (
     AutonaDesignerService,
     DesignerProjectError,
 )
-import traceback
 
 import logging
 log = logging.getLogger('socketio.server')
@@ -1060,7 +1059,7 @@ class WebServer:
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses the same operations (AutonaWebOperations); existing
         # routes/events are untouched (ADR-001 D3 /
-        # docs/architecture/external-control-api.md §9). Imported lazily here to
+        # docs/architecture/external-control-api.md §1). Imported lazily here to
         # keep singleton init order intact (pitfalls #2). Nothing to
         # hand it: it calls the operations the shell registered on, and no
         # request can reach it before start() (ADR-005 S3e-9).

@@ -15,7 +15,7 @@ Web UI と exe を順番にビルドし、成果物をプロジェクト直下�
 
 2. exe ビルド（onedir。出力先は `dist/Autona/`。3〜5 分かかる）
    ```bash
-   cd .. && python -m PyInstaller dependencies/autona.spec --noconfirm
+   cd .. && python -m PyInstaller packaging/autona.spec --noconfirm
    ```
    - `Build complete!` と `dist/Autona/Autona.exe`・`dist/Autona/_internal/` を確認
    - `--distpath .` は付けない（onedir では直下に `Autona/` フォルダができるだけで、直下の `Autona.exe` と `_internal/` は古いまま残る）

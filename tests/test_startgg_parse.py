@@ -31,9 +31,8 @@ import sys
 import threading
 import time
 import types
-from collections import Counter
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

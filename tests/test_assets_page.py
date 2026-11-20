@@ -9,7 +9,6 @@ the page too. The window that this page replaced is gone
 (tests/test_web_panel_host.py pins that).
 """
 
-import ast
 import json
 import re
 from pathlib import Path

@@ -260,7 +260,7 @@ export function sameMains(a: Main[], b: Main[]): boolean {
 }
 
 // What saving `draft` sends, for the row it was opened on and the game that
-// row was read with (external-control-api §6.26). What was not edited stays
+// row was read with (`PUT /players`). What was not edited stays
 // out, so the save does not touch it: a row's "" country or region does not
 // mean the DB's is empty (a place name that does not resolve reads as ""),
 // and the mains go only with the game they are of. A save under another
