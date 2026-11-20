@@ -45,3 +45,4 @@ Proposed | Accepted | Superseded by ADR-XXX | Deprecated
 | [ADR-005-web-first-ui-thin-shell.md](ADR-005-web-first-ui-thin-shell.md) | Accepted | Web-first UI と薄い Qt シェル（Headless Core の完成・UI 技術の一本化・新規 Qt パネル凍結） |
 | [ADR-006-archive-clipper-worker.md](ADR-006-archive-clipper-worker.md) | Accepted | アーカイブ切り抜き（vodsplit を別プロセスのワーカーとして組み込む・試合の記録・段階 A1〜A7） |
 | [ADR-007-template-packages.md](ADR-007-template-packages.md) | Accepted | テンプレートパッケージ（リザルト画像・サムネイル・OBS オーバーレイのデザインを zip で配布物にする・描画経路の隔離・段階 T1〜T4） |
+| [ADR-008-ai-assisted-layout-authoring.md](ADR-008-ai-assisted-layout-authoring.md) | Accepted | 運営が AI でレイアウトを作れるようにする（オーバーレイ契約 `autona.js`・「新しいデザインを作る」の作成キット・アプリ内の確認・段階 L1〜L4） |
