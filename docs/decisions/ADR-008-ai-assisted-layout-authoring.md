@@ -211,6 +211,53 @@ Accepted（2026-11-21 オーナー承認。末尾の論点は 1 = A・2 = A・3 
   試合の無いときでも全部の表示を確かめられる。サンプルの正本は `layout/include/sample/*.json`（state の形）1 か所で、D1 のテストもこれを使う。
   `layout/` は本体とプレビュー用リスナーの両方が出すので配信の手当ては要らない
 - **再読み込みと URL**: 一覧に「再読み込み」（カタログの再走査とプレビューの開き直し）と「OBS 用 URL をコピー」を置く。ファイルの変更を見張る自動更新は作らない
+- L3 の実装: 外れた理由は `LayoutCatalog.Scan(kinds)`（一覧と同じ 1 回の走査）が集め、`GET /api/v1/layouts` の封筒の `data` の隣に `unlisted`
+  （`[{folder, kind, reason, detail}]`）で返す。`reason` は `no_entry`（入口のファイルが無い）・`bad_settings`（`settings.json` が JSON のオブジェクトでない）・
+  `bad_block`（`autona` ブロックがオブジェクトでない）・`unknown_kind`・`unknown_contract`（オーバーレイ・テンプレートとも）・`bad_template`（テンプレートの必須項目）・
+  `bundled_id`（同梱テンプレートの id と同じ名前）・`no_manifest`（ブロックも接頭辞も無い）で、追加だけ（`LayoutCatalog.UNLISTED_REASONS`）。`detail` は英語の短い文
+  （ファイル名・受けなかった値の `repr`・JSON のエラー。OSError はパスを含むので種類と `strerror` だけ）で 200 文字まで。`kind` はブロックか接頭辞で分かればそれ、
+  分からなければ `null` で、`?kind=` はその種類と `null` のものを返す（ページには自分の種類と種類不明のものが出る）。`settings.json` が壊れていても接頭辞で拾えるフォルダは
+  今までどおり一覧に出る（理由は出さない）。予約フォルダ（`custom/` を含む）・`.new-design-*`・ファイルに加え、**同梱の非デザインのフォルダ**（統計の 5 つ・
+  `winner_popup`・`camborder_Universal`。`LayoutCatalog.SHIPPED_NON_DESIGNS`。ブロックも接頭辞も無いので `no_manifest` になる）は出さない。
+  `tests/test_layout_catalog_unlisted.py` が、同梱の `layout/` が 1 件も出さないことを固定する
+- L3 の実装: **旧版で同梱して後で削除したフォルダ**（`bracket_top12` / `bracket_top16` / `top_8` など 38。`LayoutCatalog.RETIRED_SHIPPED_DIRS`）も
+  理由を出さない。自動更新は消したファイルを利用者の手元に残すので、出すと全ページに `no_manifest` が出続ける。リリースが同梱をやめたフォルダはここに足す
+  （テストが git の履歴の削除と照合する。浅いクローンでは照合が弱くなるだけ）。接頭辞と入口のあるものは今までどおり名前で一覧に出る。
+  `no_manifest` は `settings.json` か `.html` のファイルがあるフォルダに限る（画像やフォントを置いただけのフォルダはデザインの失敗ではない）
+- L3 の実装: **一覧に出た項目の manifest の警告**: `settings.json` が読めない・ブロックが壊れている・知らない kind でもフォルダ名の規約で一覧に出るもの、
+  `entry` がファイル名でないもの（`index.html` に代える）は、項目に `warnings: [{reason, detail}]`（`unlisted` と同じコードと `bad_entry`。無ければキーごと無い）を
+  載せる。`DesignPane` はそのデザインの確認の欄に、読み込めなかったデザインと同じ文で出し（`settings.json: …`・detail・ヒント）、「AI に貼る用にコピー」にも入れる。
+  警告があるときは `ready` を受けても「エラーはありません」を出さない
+- L3 の実装: 確認の欄の報告・`ready`・タイムアウトは、フレームが読む文書ごとの鍵（文書の URL と、表示し直すたびに増やす番号）に結びつける。同じデザイン
+  （A → B → A）やサンプル（実データ → teams → 実データ）に戻っても前の報告を持ち越さない。サンプルの選択はデザインごとで、デザインを替えたら実データに戻す。
+  受ける側の上限: 同じエラーの回数と「ほかに N 件」は 999 で止め、それより後のメッセージでは描き直さない。実況・TOP 8 の再読み込みは、読み直した一覧の同じ id の
+  項目で表示中のデザインを置き換える（`contract`・`warnings` の反映）。OBS 用 URL のホストは既存の「OBS に追加する方法」のカードも含め `127.0.0.1` に揃えた
+- L3 の実装: オーバーレイの一覧の項目は、ブロックが `contract` を宣言していれば `contract` を持つ（L1 の「項目の形は変えない」からの追加。キットで作ったデザインは宣言する）。
+  宣言は「`autona.js` を使う」という表明として、`ready` を待つかどうかに使う（下）
+- L3 の実装: `autona.js` は iframe の中（`window.parent` があり自分でない）のときだけ `postMessage` する。形は固定で
+  `{type: "autona:ready" | "autona:error", contract, kind, message, source, line, column}`（`kind` は `ready` / `onUpdate` / `error` / `unhandledrejection` / `autona`）。
+  `message` は 500 文字・`source` は 300 文字まで（同じオリジンのスクリプトはパスに縮める）、エラーは 1 ページ 50 件まで。`onUpdate` の例外は `console.error` に出すとき
+  （同じ関数は成功するまで 1 回）だけ送る。`window` の `error` はスクリプトのエラー（`message` を持つ `ErrorEvent`）だけで、画像などの読み込み失敗は送らない。
+  `autona.js` 自身の失敗（`globals.js` が先に無い・読む順番の間違い・サンプルが無い・state を読めない）も `kind: "autona"` で送り、`globals.js` が無いときは `ready` を送らない。
+  `ready` はページの解析が終わってレイアウトのスクリプトが走った後（`LoadEverything()` を呼ぶ直前）に送る
+- L3 の実装: **targetOrigin は `"*"`**。親（本体の Web UI）のオリジンは `localhost` / `127.0.0.1` / LAN の名前とポートで変わり、レイアウトの側から決め打ちできない。
+  送るのはそのレイアウト自身のエラーの文と行だけで、そのレイアウトを埋め込めるページはプレビュー用リスナーから同じ state もコードも読める（READ）ので、漏れて困るものを
+  足さない。受け手の照合（送り元・オリジン・形）で守る。OBS は親が無いので何も送らない
+- L3 の実装: `DesignPane` は自分の iframe（デザインと、Board はポップアップ）の `contentWindow` と `event.source` が一致し、`event.origin` がプレビューのオリジンのものだけを受け、
+  形がちょうど上のもの（キーの過不足・型の違いは捨てる。`LayoutCheck.parseLayoutMessage`）だけを使う。受けて変わるのは確認の欄だけ。表示する文書（デザイン・
+  再読み込み・サンプル）が変われば欄を空にする。同じエラーは回数を数え、別のエラーは 20 件まで（超えた数は「ほかに N 件」）。ポップアップの `ready` はデザインのものとしない
+- L3 の実装: **`ready` の誤検出の対策**: `ready` を待つのは「一覧の項目が `contract` を宣言している」か「このページでそのデザインから `ready` を一度受けた」デザインだけで、
+  5 秒（`READY_TIMEOUT_MS`）来なければ「`autona.js` が読めていない」を出す。どちらでもないデザイン（同梱・旧来の `globals.js` だけのもの）は何も言わない限り欄を出さず、
+  エラーを受けたときだけ出す。`autona.js` を使わないのに `contract` を宣言したデザインは誤って出るので、ヒントに「使わないなら `contract` を書かない」と書いた
+- L3 の実装: 欄はレイアウト名・契約の番号（受けた `contract`、無ければ項目の `contract`）・エラーの種類と文・場所（パス・行・列）・回数・ヒント（文の型から選ぶ:
+  未定義の名前・undefined / null の読み取り・構文・凍結・読む順番・サンプル名ほか）。テキストとしてだけ描く。「AI に貼る用にコピー」はページの言語に依らず日本語
+  （キットの指示書と同じ。`i18n.getFixedT("ja")`）で、クリックの中で同期で書く。`ready` を受けてエラーが無ければ「エラーはありません」を出す
+- L3 の実装: 「プレビューのデータ」（実データ / `singles` / `teams` / `empty`）は `autona.js` を使うと分かっているデザイン（上の 2 条件）だけに出し、デザインの iframe に
+  `?autonaSample=` を付ける。BOARD・実況・TOP 8 のどれでも動く（SHELL ではないのでブラウザ・ヘッドレスでも出る）
+- L3 の実装: 再読み込みは、実況と TOP 8 に「デザインを再読み込み」（一覧の読み直しとフレームの開き直し）を足した。BOARD は既にある「再読み込み」（一覧・選択・
+  フレーム）がそれを兼ねるので足さない。「OBS 用 URL をコピー」は **BOARD にだけ**足した（ボード 1〜3 のメニューで
+  `http://127.0.0.1:<ポート>/layout/<id>/<entry>?scoreboardNumber=N`）。実況・TOP 8 は「OBS に追加する方法」のカードに http の URL のコピーが既にあるので重ねない。
+  BOARD の「OBS に追加する方法」の file:// の手順は同梱・旧来のデザイン向けに残し、「`autona.js` を使うデザインは URL 欄に http の URL を入れる」の注記を足した
 
 ### D4: 入れ方は今の 2 つのまま
 

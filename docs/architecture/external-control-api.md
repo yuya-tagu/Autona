@@ -61,6 +61,7 @@
 { "ok": true, "data": { }, "revision": 1234 }
 ```
 
+- 封筒のキーは `ok` / `data` / `revision` が基本。例外は `GET /layouts` の `unlisted`（`data` の隣。§ルート一覧）。クライアントは知らないキーを無視する。
 - `revision`: 操作後の状態 revision。書き込み系は必ず含める。クライアントは WebSocket の delta の `revision` と突き合わせて反映済みかを判定できる。
 - ⚠️ `revision` は `StateManager` の変更だけを追う。`SettingsManager` だけに書く操作（設定ページの保存など）は revision に反映されないので、設定系の反映確認は revision だけに頼らない。
 - 大会の設定・解除は `SettingsManager`（`TOURNAMENT_URL`）と state（`tournamentInfo.url`）の両方を `core/TournamentService` が書く。これは許容している二重書き込みで、API 層は既存の操作へ委譲するだけ。
@@ -242,7 +243,7 @@
 
 | メソッド | パス | 区分 | 説明 |
 |---------|------|------|------|
-| GET | `/layouts?kind=` | | デザイン一覧（`scoreboard` / `designer` / `commentary` / `top8` / `result` / `thumbnail`） |
+| GET | `/layouts?kind=` | | デザイン一覧（`scoreboard` / `designer` / `commentary` / `top8` / `result` / `thumbnail`）。オーバーレイの項目は `settings.json` が `contract` を宣言していれば `contract` を持ち、フォルダ名の規約で一覧に出したが manifest に問題があった項目は `warnings: [{reason, detail}]`（`unlisted` と同じコード。`bad_settings` / `bad_block` / `unknown_kind` と、`entry` がファイル名でない `bad_entry`）を持つ（無ければキーごと無い）。`data` の隣に `unlisted`（ADR-008 D3）: 一覧に出さなかったフォルダと理由の配列 `{folder, kind, reason, detail}`。`kind` は分かれば種類・分からなければ `null`（どの `kind=` でも返る）。`reason` は `no_entry`（入口のファイルが無い）/ `bad_settings`（`settings.json` が JSON のオブジェクトでない）/ `bad_block`（`autona` ブロックがオブジェクトでない）/ `unknown_kind` / `unknown_contract` / `bad_template`（テンプレートの必須項目の不備）/ `bundled_id`（同梱テンプレートの id と同じ名前）/ `no_manifest`（ブロックもフォルダ名の接頭辞も無い。`settings.json` か `.html` があるフォルダだけ）/ `bad_entry`（`warnings` だけ）で、追加だけ。`detail` は英語の短い説明（ファイル名・受けなかった値・JSON のエラー。パスは含めない。200 文字まで）か `null`。予約フォルダ・Designer のプロジェクト（`custom/`）・作成中の作業フォルダ・同梱の非デザインのフォルダ・旧版で同梱して削除したフォルダ（自動更新は消さないので手元に残る）は出さない |
 | GET / PUT | `/layouts/selected/{kind}` | | 選択中のデザイン（`commentary` / `top8` / `board`）の取得 / 選択 |
 | GET | `/layouts/selected/board/obs-path` | PLAYERDB | OBS に指定するファイルの絶対パス |
 | POST | `/layouts/selected/board:reveal` | THIS_PC | Board の OBS ファイルをエクスプローラで開く |

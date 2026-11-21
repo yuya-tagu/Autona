@@ -357,8 +357,12 @@ def test_an_overlay_may_declare_contract_1_or_leave_it_out(layoutRoot):
         "commentators_old": (KIND_COMMENTARY, "Old"),
         "scoreboard_new": (KIND_SCOREBOARD, "New"),
     }
-    # The entry's shape is unchanged (GET /api/v1/layouts).
-    assert all("contract" not in entry for entry in layouts)
+    # A declared contract rides in the entry (ADR-008 D3: the pages expect
+    # autona.js of such a layout); one left out adds nothing.
+    assert {e["id"]: e.get("contract") for e in layouts} == {
+        "bracket_top8_x": 1, "commentators_old": None, "scoreboard_new": 1}
+    assert "contract" not in next(
+        e for e in layouts if e["id"] == "commentators_old")
 
 
 @pytest.mark.parametrize("contract", [2, 0, "1", 1.0, True, None, [1]])

@@ -152,6 +152,8 @@ export default async function globalSetup() {
         throw error;
     }
     process.env.AUTONA_E2E_BASE_URL = ready.url;
+    // Its throwaway working directory: a spec may put a layout folder there.
+    process.env.AUTONA_E2E_DIR = ready.dir;
 
     return async () => {
         child.stdin.end("stop\n");

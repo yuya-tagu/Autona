@@ -30,7 +30,13 @@ import CasterCard, {
 } from "./CasterCard";
 import DesignPane from "./DesignPane";
 import NewDesignActions from "./NewDesign";
-import {ColorKind, FeatureColorCard, LayoutEntry, ObsUrlCard} from "./SideCards";
+import {
+    ColorKind,
+    FeatureColorCard,
+    LayoutEntry,
+    ObsUrlCard,
+    UnlistedFolder,
+} from "./SideCards";
 
 // The Commentary panel as a React page (ADR-005 S4b), /web/commentary: the
 // caster line-up (commentary.*), the design OBS shows, and the feature's
@@ -45,6 +51,10 @@ interface Envelope<T> {
     ok: boolean;
     data: T;
 }
+
+// GET /api/v1/layouts: the list, and beside it the folders it could not list
+// (ADR-008 D3).
+type LayoutList = Envelope<LayoutEntry[]> & {unlisted?: UnlistedFolder[]};
 
 // The write deadline and the load retries are the panels' shared ones
 // (PanelShell/requests.ts, S4e); named here too for this page's tests.
@@ -87,6 +97,7 @@ function CommentaryContent() {
     const [loadFailed, setLoadFailed] = React.useState(false);
     const [designs, setDesigns] = React.useState<LayoutEntry[]>([]);
     const [design, setDesign] = React.useState<LayoutEntry | null>(null);
+    const [unlisted, setUnlisted] = React.useState<UnlistedFolder[]>([]);
     const [dropAt, setDropAt] = React.useState<number | null>(null);
     // Bumped by the reload button: loads the page's settings again.
     const [loads, setLoads] = React.useState(0);
@@ -110,7 +121,7 @@ function CommentaryContent() {
         Promise.all([
             getWithRetry<Envelope<CommentaryOptions>>(
                 "/api/v1/commentary/options", isLive),
-            getWithRetry<Envelope<LayoutEntry[]>>(
+            getWithRetry<LayoutList>(
                 "/api/v1/layouts?kind=commentary", isLive),
             getWithRetry<Envelope<LayoutEntry>>(
                 "/api/v1/layouts/selected/commentary", isLive).then(
@@ -126,6 +137,7 @@ function CommentaryContent() {
             if (live) {
                 setOptions(optionsBody.data);
                 setDesigns(designsBody.data);
+                setUnlisted(designsBody.unlisted ?? []);
                 setDesign(selected);
             }
         }, (error) => {
@@ -195,12 +207,16 @@ function CommentaryContent() {
         };
     }, []);
     const relistDesigns = React.useCallback(
-        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=commentary")
+        () => apiGetJson<LayoutList>("/api/v1/layouts?kind=commentary")
             .then((body) => {
                 if (!kitMounted.current) {
                     return false;
                 }
                 setDesigns(body.data);
+                setUnlisted(body.unlisted ?? []);
+                // The shown design as listed now (its contract, warnings).
+                setDesign((shown) => (shown && body.data.find(
+                    (entry) => entry.id === shown.id)) ?? shown);
                 return true;
             }, (error: unknown) => {
                 console.error(error);
@@ -362,6 +378,8 @@ function CommentaryContent() {
                     actions={<NewDesignActions kind="commentary"
                                                onCreated={designCreated}
                                                onRelist={relistDesigns}/>}
+                    unlisted={unlisted}
+                    onReload={relistDesigns}
                 />
             </Box>
         </Box>

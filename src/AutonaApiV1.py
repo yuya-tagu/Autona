@@ -845,8 +845,12 @@ def get_layouts():
         )
     # A template package's displayName in the program's language (its
     # displayNames carry both, ADR-007 T1); the other kinds' as they are.
-    return ok(data=LayoutCatalog.Layouts(
-        kinds, locale=AutonaLocaleHelper.programLocale))
+    # Beside "data", "unlisted" (ADR-008 D3; added, so a client that reads
+    # "data" reads the same): the folders the catalog did not list, of the
+    # kinds asked for and of none known, each {folder, kind, reason, detail}.
+    layouts, unlisted = LayoutCatalog.Scan(
+        kinds, locale=AutonaLocaleHelper.programLocale)
+    return jsonify({"ok": True, "data": layouts, "unlisted": unlisted})
 
 
 @api_v1.route("/commentary/options")

@@ -191,7 +191,9 @@ beforeEach(() => {
                 await holdRead;
             }
             return refuseList ? refusal(refuseList)
-                : answer(200, {ok: true, data: list});
+                : answer(200, {ok: true, data: list, unlisted: [
+                    {folder: "scoreboard_broken", kind: "scoreboard",
+                     reason: "bad_settings", detail: "JSONDecodeError: x"}]});
         }
         if (method === "GET" && path === "/api/v1/layouts/selected/board") {
             const entry = selected;
@@ -987,4 +989,24 @@ test("a later read failing keeps what the page shows, without a word", async () 
     expect(screen.queryByText(i18n.t("board_load_failed"))).toBeNull();
     expect(preview()).toBe(frame);
     expect(designSelect()).toHaveTextContent("Simple");
+});
+
+test("the Board copies its design's http URL for a board, and says when to use it", async () => {
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+        value: {writeText}, configurable: true});
+    await renderPage();
+
+    // A design on autona.js goes in OBS by its URL, not as a local file.
+    expect(screen.getByRole("region", {name: i18n.t("board_obs_title")}))
+        .toHaveTextContent(i18n.t("board_obs_http_note"));
+    expect(screen.getByRole("region", {name: i18n.t("layout_unlisted_title")}))
+        .toHaveTextContent("layout/scoreboard_broken/");
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_obs_url_copy")}));
+    fireEvent.click(screen.getByRole("menuitem",
+                                     {name: i18n.t("layout_obs_url_board", {board: 3})}));
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(
+        /^http:\/\/127\.0\.0\.1:\d+\/layout\/[^?]+\/index\.html\?scoreboardNumber=3$/));
+    delete navigator.clipboard;
 });

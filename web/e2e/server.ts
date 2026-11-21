@@ -13,6 +13,17 @@ export function serverUrl(pathname: string): string {
     return new URL(pathname, base).toString();
 }
 
+// The headless app's working directory (a throwaway one, removed after the
+// run): where a spec puts the layout folders it needs (layout/<name>/).
+export function appDir(): string {
+    const dir = process.env.AUTONA_E2E_DIR;
+    if (!dir) {
+        throw new Error("AUTONA_E2E_DIR is not set: the global setup "
+                        + "(e2e/global-setup.ts) did not start the headless app");
+    }
+    return dir;
+}
+
 // The headless app's preview listener, where the pages' layout previews load
 // from (ADR-005 S-final SF-8a): this host, the port /api/v1/health names.
 export async function previewOrigin(request: APIRequestContext): Promise<string> {

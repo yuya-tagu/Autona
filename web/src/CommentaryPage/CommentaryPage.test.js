@@ -149,6 +149,8 @@ beforeEach(() => {
     if (typeof AbortSignal.timeout !== "function") {
         AbortSignal.timeout = () => undefined;
     }
+    unlisted = [];
+    listedContract = null;
     global.fetch = jest.fn(async (url, init) => {
         const method = init?.method ?? "GET";
         const failed = Object.keys(failing).find((path) => url.endsWith(path));
@@ -172,7 +174,9 @@ beforeEach(() => {
             return answer(200, {ok: true, data: OPTIONS});
         }
         if (url.endsWith("/api/v1/layouts?kind=commentary")) {
-            return answer(200, {ok: true, data: [DESIGN, OTHER_DESIGN]});
+            return answer(200, {ok: true, data: [DESIGN, OTHER_DESIGN].map(
+                (entry) => (listedContract ? {...entry, contract: listedContract}
+                                           : entry)), unlisted});
         }
         if (url.endsWith("/api/v1/layouts/selected/commentary")) {
             return answer(200, {ok: true, data: DESIGN});
@@ -193,6 +197,11 @@ afterEach(() => {
     jest.useRealTimers();
     delete global.fetch;
 });
+
+// GET /api/v1/layouts' folders it could not list (ADR-008 D3).
+let unlisted = [];
+// The contract the list's entries declare (null: none), as read now.
+let listedContract = null;
 
 test("the slots and the role suggestions come from the server", async () => {
     await renderPage();
@@ -531,7 +540,7 @@ test("the selected design is previewed and its URL is the one to copy", async ()
     await renderPage();
 
     expect(obsUrl().value).toMatch(
-        /^http:\/\/localhost:\d+\/layout\/commentators\/index\.html$/);
+        /^http:\/\/127\.0\.0\.1:\d+\/layout\/commentators\/index\.html$/);
     expect(preview()).toHaveAttribute(
         "src", expect.stringMatching(/\/layout\/commentators\/index\.html$/));
 });
@@ -601,4 +610,27 @@ test("the colours show the commentary's own, else the tournament's", async () =>
         .toHaveValue("#abcdef");
     expect(screen.getByLabelText(i18n.t("commentary_color_accent")))
         .toHaveValue("#445566");
+});
+
+test("the folders the catalog could not list show under the designs, and the reload reads them again", async () => {
+    unlisted = [{folder: "commentators_broken", kind: "commentary",
+                 reason: "no_entry", detail: "index.html"}];
+    await renderPage();
+    const title = i18n.t("layout_unlisted_title");
+    expect(screen.getByRole("region", {name: title})).toHaveTextContent(
+        "layout/commentators_broken/");
+
+    unlisted = [];
+    // Its settings.json now declares the contract: the shown design follows.
+    listedContract = 1;
+    const reads = global.fetch.mock.calls.filter(([url]) =>
+        url.endsWith("/api/v1/layouts?kind=commentary")).length;
+    fireEvent.click(screen.getByRole("button", {name: i18n.t("layout_reload")}));
+    await settle();
+
+    expect(global.fetch.mock.calls.filter(([url]) =>
+        url.endsWith("/api/v1/layouts?kind=commentary")).length).toBe(reads + 1);
+    expect(screen.queryByRole("region", {name: title})).toBeNull();
+    expect(screen.getByRole("combobox", {name: i18n.t("layout_sample")}))
+        .toBeInTheDocument();
 });

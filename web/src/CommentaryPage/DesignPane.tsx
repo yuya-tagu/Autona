@@ -1,11 +1,30 @@
 import React from "react";
 import {flushSync} from "react-dom";
-import {Box, MenuItem, Stack, TextField, Typography} from "@mui/material";
+import {
+    Box,
+    Button,
+    Menu,
+    MenuItem,
+    Stack,
+    TextField,
+    Typography,
+} from "@mui/material";
 import i18n from "../i18n/config";
 import {BACKEND_PORT, BASE_URL} from "../env";
 import {getWithRetry} from "../PanelShell/requests";
+import {copyText} from "../PanelShell/clipboard";
+import {showSnackbar} from "../ScoreboardPage/Feedback";
 import socketConnection from "../websocketConnection";
-import {LayoutEntry} from "./SideCards";
+import {LayoutEntry, OBS_HOST, UnlistedFolder} from "./SideCards";
+import {
+    EMPTY_REPORT,
+    LayoutCheckPanel,
+    LayoutReport,
+    READY_TIMEOUT_MS,
+    UnlistedDesigns,
+    addMessage,
+    parseLayoutMessage,
+} from "./LayoutCheck";
 
 // The Commentary page's right pane (ADR-005 S4b): the design select and the
 // overlay itself as the preview -- /layout/<design>/<entry>, the page OBS
@@ -29,12 +48,27 @@ import {LayoutEntry} from "./SideCards";
 // What the origin does not stop is a frame taking the keyboard focus: the keys
 // typed then go to the layout. A frame found holding the focus -- as this window
 // loses it, or on a poll for when the window is not the active one -- is taken
-// out with a note, until another design (or a reload) is shown. The page listens
-// to no `message` from the frames.
+// out with a note, until another design (or a reload) is shown.
+//
+// The check of a layout (ADR-008 D3 / L3): a layout on autona.js posts its
+// errors and "autona:ready" to the page around its frame. The pane takes a
+// `message` only from its own frames (the event's source is one of their
+// windows: the design's, and on the Board the popup's) and from the preview
+// origin, of the one shape autona.js sends (LayoutCheck.parseLayoutMessage),
+// and it moves only the check panel: the errors of the document shown, as text,
+// emptied when another document is shown (a design, a reload, the sample). A
+// layout expected to use autona.js -- its settings.json declares the contract,
+// or it said it was ready before in this page -- that is not ready within
+// READY_TIMEOUT_MS is told so; one that never said anything (the shipped
+// layouts on globals.js) shows no panel unless it posts an error. Around the
+// preview: the folders the catalog could not list, the sample data for a layout
+// on autona.js (?autonaSample=), a reload and, on the Board, its OBS URL.
 
 export const HEALTH_PATH = "/api/v1/health";
 export const PREVIEW_SANDBOX = "allow-scripts allow-same-origin";
 export const QUARANTINE_POLL_MS = 250;
+// layout/include/sample/<name>.json: what ?autonaSample= draws (ADR-008 D1).
+export const SAMPLE_NAMES = ["singles", "teams", "empty"] as const;
 
 const OVERLAY_WIDTH = 1920;
 const OVERLAY_HEIGHT = 1080;
@@ -44,6 +78,14 @@ const FRAME_BORDERS = 2;
 function layoutPath(design: LayoutEntry): string {
     const id = design.id.split("/").map(encodeURIComponent).join("/");
     return `/layout/${id}/${encodeURIComponent(design.entry)}`;
+}
+
+// The overlay's http URL for an OBS browser source on this PC: the board's
+// (?scoreboardNumber=) when one is given. Over http, not file://: a layout on
+// autona.js shows its images and samples only so (ADR-008 D1).
+export function overlayObsUrl(design: LayoutEntry, board?: number): string {
+    const query = board ? `?scoreboardNumber=${board}` : "";
+    return `http://${OBS_HOST}:${BACKEND_PORT}${layoutPath(design)}${query}`;
 }
 
 // What the select picks a design by: `id`, unless the entry has its own key.
@@ -202,9 +244,144 @@ function frameSx(scale: number) {
     };
 }
 
+type KnownSetter = React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
+
+// What the pane's frames told it, for the document shown (LayoutCheck). A
+// design that says it is ready is added to the ones on autona.js (`setKnown`).
+function useLayoutCheck(
+    origin: string | null | undefined,
+    documentKey: string | null,
+    designKey: string | null,
+    frames: {
+        design: React.RefObject<HTMLIFrameElement | null>;
+        overlay: React.RefObject<HTMLIFrameElement | null>;
+    },
+    setKnown: KnownSetter,
+): LayoutReport {
+    const [state, setState] = React.useState<{
+        key: string | null; report: LayoutReport;
+    }>({key: null, report: EMPTY_REPORT});
+    React.useEffect(() => {
+        if (!origin || documentKey === null) {
+            return undefined;
+        }
+        const key = documentKey;
+        // A document shown afresh starts with nothing (its key is its own).
+        setState({key, report: EMPTY_REPORT});
+        const onMessage = (event: MessageEvent) => {
+            if (event.origin !== origin || event.source === null) {
+                return;
+            }
+            const designWindow = frames.design.current?.contentWindow ?? null;
+            const overlayWindow = frames.overlay.current?.contentWindow ?? null;
+            let frame: string;
+            if (designWindow !== null && event.source === designWindow) {
+                frame = "design";
+            } else if (overlayWindow !== null && event.source === overlayWindow) {
+                frame = "overlay";
+            } else {
+                return;
+            }
+            const message = parseLayoutMessage(event.data);
+            // The popup's "ready" says nothing about the design.
+            if (message === null
+                    || (message.type === "autona:ready" && frame !== "design")) {
+                return;
+            }
+            setState((current) => {
+                const before = current.key === key
+                    ? current.report : EMPTY_REPORT;
+                const after = addMessage(before, message, frame);
+                // Past the caps nothing changes: no render either.
+                return after === before && current.key === key
+                    ? current : {key, report: after};
+            });
+            if (message.type === "autona:ready" && designKey !== null) {
+                setKnown((known) => known.has(designKey)
+                    ? known : new Set(known).add(designKey));
+            }
+        };
+        window.addEventListener("message", onMessage);
+        return () => window.removeEventListener("message", onMessage);
+    }, [origin, documentKey, designKey, frames, setKnown]);
+    return state.key === documentKey ? state.report : EMPTY_REPORT;
+}
+
+// Whether `documentKey`, expected to say it is ready, has been shown for
+// READY_TIMEOUT_MS without saying so.
+function useReadyTimeout(
+    documentKey: string | null, watched: boolean, ready: boolean,
+): boolean {
+    const [late, setLate] = React.useState<string | null>(null);
+    React.useEffect(() => {
+        if (!watched || documentKey === null) {
+            return undefined;
+        }
+        const key = documentKey;
+        setLate(null);
+        const timer = window.setTimeout(() => setLate(key), READY_TIMEOUT_MS);
+        return () => window.clearTimeout(timer);
+    }, [documentKey, watched]);
+    return watched && !ready && late === documentKey;
+}
+
+// `documentKey` and how many times it has been shown afresh: one key per
+// document the frame loads, so coming back to a design (A, B, A) or a sample
+// (live, teams, live) is never taken for the one shown before.
+function useShownDocument(documentKey: string | null): string | null {
+    const [shown, setShown] = React.useState({key: documentKey, serial: 0});
+    let current = shown;
+    if (shown.key !== documentKey) {
+        current = {key: documentKey, serial: shown.serial + 1};
+        setShown(current);
+    }
+    return documentKey === null ? null : `${documentKey}@${current.serial}`;
+}
+
+// "Copy the OBS URL": the design's, or one board's of `boards` (a menu).
+function ObsUrlButton({design, boards}: {
+    design: LayoutEntry;
+    boards: number[];
+}) {
+    const [anchor, setAnchor] = React.useState<HTMLElement | null>(null);
+    const label = i18n.t("layout_obs_url_copy");
+    // In the click itself: the clipboard takes a write only while the click's
+    // activation lasts.
+    const copy = (board?: number) => {
+        setAnchor(null);
+        copyText(overlayObsUrl(design, board)).then((copied) => showSnackbar(
+            i18n.t(copied ? "layout_obs_url_copied"
+                          : "commentary_obs_copy_failed"),
+            copied ? "success" : "error"));
+    };
+    if (boards.length === 0) {
+        return (
+            <Button variant="outlined" size="small" onClick={() => copy()}>
+                {label}
+            </Button>
+        );
+    }
+    return (
+        <>
+            <Button variant="outlined" size="small" aria-haspopup="menu"
+                    onClick={(event) => setAnchor(event.currentTarget)}>
+                {label}
+            </Button>
+            <Menu anchorEl={anchor} open={anchor !== null}
+                  onClose={() => setAnchor(null)}>
+                {boards.map((board) => (
+                    <MenuItem key={board} onClick={() => copy(board)}>
+                        {i18n.t("layout_obs_url_board", {board})}
+                    </MenuItem>
+                ))}
+            </Menu>
+        </>
+    );
+}
+
 export default function DesignPane({
     designs, design, onSelect, label, empty, actions, controls, background,
-    overlay, reloadKey, fit = false,
+    overlay, reloadKey, fit = false, unlisted, onReload, obsBoards,
 }: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
@@ -231,20 +408,66 @@ export default function DesignPane({
     // Qt preview's rule), rather than to the width. For a pane in a column of a
     // set height, from the md breakpoint up; below it the preview is by width.
     fit?: boolean;
+    // The folders of the page's kinds the catalog could not list (GET
+    // /api/v1/layouts' "unlisted"): shown under the select.
+    unlisted?: UnlistedFolder[];
+    // Given: a reload button, which calls it (the page reads the catalog
+    // again) and loads the frames again.
+    onReload?: () => void;
+    // Given: a button that copies the design's http URL for OBS -- one
+    // board's of these (a menu), or the design's alone when empty.
+    obsBoards?: number[];
 }) {
     const frame = React.useRef<HTMLDivElement>(null);
+    const designFrame = React.useRef<HTMLIFrameElement>(null);
+    const overlayFrame = React.useRef<HTMLIFrameElement>(null);
+    const frames = React.useMemo(
+        () => ({design: designFrame, overlay: overlayFrame}), []);
     const scale = usePreviewScale(frame, design !== null, fit);
     const heading = label ?? i18n.t("commentary_design");
     const shownKey = design ? selectKey(design) : "";
     const origin = usePreviewOrigin();
+    // The pane's own reloads, and the sample shown ("": the app's state).
+    const [previews, setPreviews] = React.useState(0);
+    const designKey = design ? layoutPath(design) : null;
+    // Chosen for one design: another design starts on the app's state.
+    const [sampleOf, setSampleOf] = React.useState<{
+        design: string | null; name: string;
+    }>({design: null, name: ""});
+    const sample = sampleOf.design === designKey ? sampleOf.name : "";
+    if (sampleOf.design !== null && sampleOf.design !== designKey) {
+        // Left for another design: coming back starts on the state too.
+        setSampleOf({design: null, name: ""});
+    }
+    // Whether the design is on autona.js: its entry declares the contract, or
+    // it said it was ready before in this page.
+    const [autonaKnown, setAutonaKnown] = React.useState<ReadonlySet<string>>(
+        () => new Set());
+    const onAutona = design !== null && designKey !== null
+        && (typeof design.contract === "number" || autonaKnown.has(designKey));
+    // The frame's page: the sample's only for a layout on autona.js.
+    const page = design
+        ? layoutPath(design) + (onAutona && sample
+            ? `?autonaSample=${encodeURIComponent(sample)}` : "")
+        : null;
     // The document the frames show: a new one is watched afresh.
-    const documentKey = design
-        ? `${layoutPath(design)}#${reloadKey ?? 0}` : null;
+    const documentKey = page !== null
+        ? `${page}#${reloadKey ?? 0}.${previews}` : null;
+    const shownDocument = useShownDocument(documentKey);
     const quarantined = useQuarantine(
         frame, origin ? documentKey : null);
+    const report = useLayoutCheck(
+        origin, shownDocument, designKey, frames, setAutonaKnown);
+    const notReady = useReadyTimeout(
+        shownDocument, Boolean(origin) && !quarantined && onAutona,
+        report.ready);
     const note = origin === null
         ? i18n.t("commentary_preview_unavailable")
         : quarantined ? i18n.t("commentary_preview_quarantined") : null;
+    const reload = () => {
+        onReload?.();
+        setPreviews((count) => count + 1);
+    };
 
     const preview = design && (
         <Box
@@ -274,10 +497,11 @@ export default function DesignPane({
             {origin && !quarantined && (
                 <Box
                     component="iframe"
+                    ref={designFrame}
                     // A new design is a new document.
-                    key={documentKey}
+                    key={shownDocument}
                     title={i18n.t("commentary_preview")}
-                    src={`${origin}${layoutPath(design)}`}
+                    src={`${origin}${page}`}
                     sandbox={PREVIEW_SANDBOX}
                     tabIndex={-1}
                     sx={frameSx(scale)}
@@ -286,7 +510,8 @@ export default function DesignPane({
             {origin && !quarantined && overlay && (
                 <Box
                     component="iframe"
-                    key={`overlay#${reloadKey ?? 0}`}
+                    ref={overlayFrame}
+                    key={`overlay#${reloadKey ?? 0}.${previews}`}
                     title={overlay.title}
                     src={`${origin}${overlay.src}`}
                     sandbox={PREVIEW_SANDBOX}
@@ -346,7 +571,45 @@ export default function DesignPane({
                 })}
             </TextField>
             {actions}
+            {unlisted && <UnlistedDesigns folders={unlisted}/>}
             {controls}
+            {design && (onAutona || onReload || obsBoards) && (
+                <Stack direction="row" spacing={1} alignItems="center"
+                       flexWrap="wrap" useFlexGap>
+                    {onAutona && (
+                        <TextField
+                            select
+                            size="small"
+                            label={i18n.t("layout_sample")}
+                            value={sample}
+                            onChange={(event) => setSampleOf({
+                                design: designKey, name: event.target.value})}
+                            sx={{minWidth: 200}}
+                        >
+                            <MenuItem value="">
+                                {i18n.t("layout_sample_live")}
+                            </MenuItem>
+                            {SAMPLE_NAMES.map((name) => (
+                                <MenuItem key={name} value={name}>
+                                    {i18n.t(`layout_sample_${name}`)}
+                                </MenuItem>
+                            ))}
+                        </TextField>
+                    )}
+                    {onReload && (
+                        <Button variant="outlined" size="small" onClick={reload}>
+                            {i18n.t("layout_reload")}
+                        </Button>
+                    )}
+                    {obsBoards && (
+                        <ObsUrlButton design={design} boards={obsBoards}/>
+                    )}
+                </Stack>
+            )}
+            {design && (
+                <LayoutCheckPanel design={design} report={report}
+                                  notReady={notReady}/>
+            )}
             {preview && fit ? (
                 <Box
                     ref={frame}
