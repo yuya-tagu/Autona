@@ -1,18 +1,30 @@
 import React from "react";
-import {act, fireEvent, render, screen} from "@testing-library/react";
+import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import i18n from "../i18n/config";
 import {BACKEND_PORT} from "../env";
 import DesignPane, {
     HEALTH_PATH,
     PREVIEW_SANDBOX,
     QUARANTINE_POLL_MS,
+    SAMPLE_NAMES,
 } from "./DesignPane";
+import {
+    COUNT_MAX,
+    EMPTY_REPORT,
+    ERRORS_MAX,
+    MESSAGE_MAX,
+    READY_TIMEOUT_MS,
+    addMessage,
+    parseLayoutMessage,
+} from "./LayoutCheck";
 
 // The layout previews (ADR-005 S-final SF-8a): the frames load from the
 // server's read-only preview listener -- another origin, the port GET
 // /api/v1/health names -- sandboxed with their origin kept; no port, no frame
 // (never one on this page's origin); a frame found holding the keyboard focus
-// is taken out with a note.
+// is taken out with a note. The check of a layout (ADR-008 D3): the page takes
+// a `message` only from its own frames and the preview origin, of the one shape
+// autona.js posts, and shows it as text in the check panel.
 
 jest.setTimeout(20000);
 
@@ -39,6 +51,9 @@ const SIMPLE = {id: "scoreboard_simple", kind: "scoreboard", displayName: "Simpl
                 entry: "index.html"};
 const PLAIN = {id: "scoreboard_plain", kind: "scoreboard", displayName: "Plain",
                entry: "index.html"};
+// A design made from the layout kit: its settings.json declares the contract.
+const KIT = {id: "scoreboard_mine", kind: "scoreboard", displayName: "Mine",
+             entry: "index.html", contract: 1};
 const POPUP = {src: "/layout/winner_popup/index.html#preview=winner",
                title: "Popup preview"};
 
@@ -65,13 +80,13 @@ async function settle(ms = 0) {
     });
 }
 
-function Pane({design = SIMPLE, overlay = null, reloadKey}) {
+function Pane({design = SIMPLE, overlay = null, reloadKey, ...rest}) {
     return (
         <div>
             <input aria-label="typed into"/>
-            <DesignPane designs={[SIMPLE, PLAIN]} design={design}
+            <DesignPane designs={[SIMPLE, PLAIN, KIT]} design={design}
                         onSelect={() => undefined} overlay={overlay}
-                        reloadKey={reloadKey}/>
+                        reloadKey={reloadKey} {...rest}/>
         </div>
     );
 }
@@ -317,13 +332,484 @@ test("the reconnect listener goes with the pane", async () => {
     expect(mockSocket.listeners.get("connect")).toEqual([]);
 });
 
-test("the page listens to no message from the frames", async () => {
+test("the page listens to messages only while it shows a preview", async () => {
     const listen = jest.spyOn(window, "addEventListener");
+    const unlisten = jest.spyOn(window, "removeEventListener");
+    health = new Promise(() => {});
+    const {unmount} = render(<Pane overlay={POPUP}/>);
+    await settle();
+    // No preview origin yet: no frame, no listener.
+    expect(listen.mock.calls.map(([type]) => type)).not.toContain("message");
+    unmount();
+
+    health = [200, {ok: true, data: {status: "ok", previewPort: PREVIEW_PORT}}];
+    const view = render(<Pane overlay={POPUP}/>);
+    await settle();
+    const added = listen.mock.calls.filter(([type]) => type === "message");
+    expect(added).toHaveLength(1);
+    view.unmount();
+    expect(unlisten.mock.calls.filter(([type]) => type === "message")
+        .map(([, handler]) => handler)).toContain(added[0][1]);
+    listen.mockRestore();
+    unlisten.mockRestore();
+});
+
+// ── the check of a layout (ADR-008 D3) ───────────────────────────────────
+
+const PREVIEW = `http://localhost:${PREVIEW_PORT}`;
+const READY = {type: "autona:ready", contract: 1, kind: "ready", message: "",
+               source: "/layout/scoreboard_simple/index.html", line: null,
+               column: null};
+
+function failure(extra = {}) {
+    return {type: "autona:error", contract: 1, kind: "error",
+            message: "Uncaught ReferenceError: foo is not defined",
+            source: "/layout/scoreboard_simple/index.js", line: 12, column: 3,
+            ...extra};
+}
+
+function post(source, data, origin = PREVIEW) {
+    act(() => {
+        window.dispatchEvent(new MessageEvent("message", {data, origin, source}));
+    });
+}
+
+function panel() {
+    return screen.queryByRole("region", {name: i18n.t("layout_check_title")});
+}
+
+function shownErrors() {
+    return screen.queryAllByTestId("layout-check-error");
+}
+
+test("an error the design's frame posts is shown as text, with a hint", async () => {
+    render(<Pane/>);
+    await settle();
+    expect(panel()).toBeNull();
+
+    post(preview().contentWindow, failure({
+        message: "<img src=x onerror=alert(1)> is not defined"}));
+
+    expect(panel()).not.toBeNull();
+    const [shown] = shownErrors();
+    expect(shown).toHaveTextContent(
+        "Error: <img src=x onerror=alert(1)> is not defined");
+    expect(shown).toHaveTextContent(
+        "At /layout/scoreboard_simple/index.js, line 12, column 3");
+    expect(shown).toHaveTextContent(i18n.t("layout_check_hint_not_defined"));
+    expect(within(panel()).queryByRole("img")).toBeNull();
+    expect(panel()).toHaveTextContent("Simple (overlay contract 1)");
+});
+
+test("the Board's popup frame is heard too, but its ready is not the design's", async () => {
     render(<Pane overlay={POPUP}/>);
     await settle();
-    preview().focus();
-    fireEvent.blur(window);
+    const popup = screen.getByTitle(POPUP.title).contentWindow;
 
-    expect(listen.mock.calls.map(([type]) => type)).not.toContain("message");
-    listen.mockRestore();
+    post(popup, READY);
+    expect(panel()).toBeNull();
+    post(popup, failure({message: "popup broke"}));
+    expect(shownErrors()).toHaveLength(1);
+    expect(shownErrors()[0]).toHaveTextContent("popup broke");
+});
+
+test("messages from another frame, a nested one, another origin or of another shape are dropped", async () => {
+    render(<Pane/>);
+    await settle();
+    const own = preview().contentWindow;
+    const stray = document.createElement("iframe");
+    document.body.appendChild(stray);
+    // A frame inside the preview's frame (its page not loaded here).
+    const inner = preview().contentDocument;
+    if (!inner.documentElement) {
+        inner.appendChild(inner.createElement("html"));
+    }
+    const nested = inner.createElement("iframe");
+    inner.documentElement.appendChild(nested);
+
+    post(stray.contentWindow, failure());
+    post(nested.contentWindow, failure());
+    post(null, failure());
+    post(window, failure());
+    post(own, failure(), `http://localhost:${BACKEND_PORT}`);
+    post(own, failure(), "null");
+    const withoutLine = failure();
+    delete withoutLine.line;
+    [
+        withoutLine,
+        {...failure(), extra: "x"},
+        failure({line: "12"}),
+        failure({line: 0}),
+        failure({message: 42}),
+        failure({type: "autona:navigate"}),
+        failure({kind: "click"}),
+        failure({type: "autona:ready"}),
+        failure({contract: "1"}),
+        [failure()],
+        "autona:error",
+        null,
+    ].forEach((data) => post(own, data));
+
+    try {
+        expect(nested.contentWindow).not.toBeNull();
+        expect(panel()).toBeNull();
+        // What is right is heard.
+        post(own, failure());
+        expect(shownErrors()).toHaveLength(1);
+    } finally {
+        stray.remove();
+    }
+});
+
+test("strings are cut, repeats counted and the list capped", async () => {
+    render(<Pane/>);
+    await settle();
+    const own = preview().contentWindow;
+
+    for (let i = 0; i < ERRORS_MAX + 5; i++) {
+        post(own, failure({message: `${i}:${"x".repeat(2000)}`,
+                           source: "s".repeat(1000)}));
+    }
+    post(own, failure({message: `0:${"x".repeat(2000)}`,
+                       source: "s".repeat(1000)}));
+
+    const shown = shownErrors();
+    expect(shown).toHaveLength(ERRORS_MAX);
+    const first = within(shown[0]).getByText(/^Error: 0:/).textContent;
+    expect(first).toBe(`Error: 0:${"x".repeat(MESSAGE_MAX - 3)}…`);
+    expect(shown[0]).toHaveTextContent("2 times");
+    expect(panel()).toHaveTextContent(
+        i18n.t("layout_check_dropped", {count: 5}));
+});
+
+test("another design, a reload or the sample empties the panel", async () => {
+    const {rerender} = render(<Pane/>);
+    await settle();
+    post(preview().contentWindow, failure());
+    expect(shownErrors()).toHaveLength(1);
+
+    rerender(<Pane design={PLAIN}/>);
+    expect(panel()).toBeNull();
+    post(preview().contentWindow, failure());
+    expect(shownErrors()).toHaveLength(1);
+    rerender(<Pane design={PLAIN} reloadKey={1}/>);
+    expect(panel()).toBeNull();
+});
+
+test("copy for an AI writes the Japanese report in the click", async () => {
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+        value: {writeText}, configurable: true});
+    render(<Pane/>);
+    await settle();
+    post(preview().contentWindow, failure());
+    post(preview().contentWindow, failure({
+        kind: "onUpdate",
+        message: "TypeError: Cannot read properties of undefined (reading 'name')",
+        source: "", line: null, column: null}));
+
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_check_copy")}));
+
+    // Written in the click, before any await.
+    expect(writeText).toHaveBeenCalledWith([
+        "Autona のプレビューで、オーバーレイ「Simple」（layout/scoreboard_simple/index.html・オーバーレイ契約 1）に次の問題が出ています。原因を直して、変更したファイルの全文を返してください。",
+        "",
+        "[1] エラー: Uncaught ReferenceError: foo is not defined",
+        "    場所: /layout/scoreboard_simple/index.js の 12 行 3 列",
+        "    ヒント: 存在しない名前です。綴り、スクリプトを読む順番、(function () { ... })(); の中で宣言しているかを確かめてください。",
+        "",
+        "[2] Autona.onUpdate の中のエラー: TypeError: Cannot read properties of undefined (reading 'name')",
+        "    場所: 不明",
+        "    ヒント: 読んだものが undefined か null です。view のキー名を CONTRACT.md と照らし、getElementById / querySelector で探す要素が index.html にあるかを確かめてください。",
+        "",
+        "守る規則と view のキーは AGENTS.md と CONTRACT.md のとおりです。",
+    ].join("\n"));
+    await settle();
+    delete navigator.clipboard;
+});
+
+test("the copy tells a layout that is not ready", async () => {
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+        value: {writeText}, configurable: true});
+    render(<Pane design={KIT}/>);
+    await settle();
+    await settle(READY_TIMEOUT_MS);
+
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_check_copy")}));
+    const text = writeText.mock.calls[0][0];
+    expect(text).toContain("「Mine」（layout/scoreboard_mine/index.html・オーバーレイ契約 1）");
+    expect(text).toContain("[!] ../include/autona.js が読み込まれていません");
+    await settle();
+    delete navigator.clipboard;
+});
+
+test("a design declaring the contract that is not ready in time is told so", async () => {
+    render(<Pane design={KIT}/>);
+    await settle();
+    await settle(READY_TIMEOUT_MS - 1);
+    expect(panel()).toBeNull();
+    await settle(1);
+
+    expect(screen.getByTestId("layout-check-not-ready")).toHaveTextContent(
+        i18n.t("layout_check_not_ready"));
+    // Ready late still clears it.
+    post(preview().contentWindow, READY);
+    expect(screen.queryByTestId("layout-check-not-ready")).toBeNull();
+    expect(screen.getByRole("status", {name: i18n.t("layout_check_title")}))
+        .toHaveTextContent("no errors (overlay contract 1)");
+});
+
+test("a design declaring the contract that says it is ready is not told", async () => {
+    render(<Pane design={KIT}/>);
+    await settle();
+    post(preview().contentWindow, READY);
+    await settle(READY_TIMEOUT_MS * 2);
+    expect(screen.queryByTestId("layout-check-not-ready")).toBeNull();
+});
+
+test("a layout that never said anything shows nothing, unless it posts an error", async () => {
+    render(<Pane/>);
+    await settle();
+    await settle(READY_TIMEOUT_MS * 2);
+    expect(panel()).toBeNull();
+    expect(screen.queryByRole("status", {name: i18n.t("layout_check_title")}))
+        .toBeNull();
+
+    post(preview().contentWindow, failure());
+    expect(shownErrors()).toHaveLength(1);
+    expect(screen.queryByTestId("layout-check-not-ready")).toBeNull();
+});
+
+test("a design that said it was ready once is expected to again", async () => {
+    const {rerender} = render(<Pane reloadKey={1}/>);
+    await settle();
+    post(preview().contentWindow, READY);
+    rerender(<Pane reloadKey={2}/>);
+    await settle(READY_TIMEOUT_MS);
+    expect(screen.getByTestId("layout-check-not-ready")).toBeTruthy();
+});
+
+function chooseSample(name) {
+    fireEvent.mouseDown(screen.getByRole("combobox",
+                                         {name: i18n.t("layout_sample")}));
+    fireEvent.click(screen.getByRole("option", {name}));
+}
+
+test("the sample switch is for a layout on autona.js and loads the sample", async () => {
+    const {rerender} = render(<Pane/>);
+    await settle();
+    expect(screen.queryByRole("combobox", {name: i18n.t("layout_sample")}))
+        .toBeNull();
+
+    rerender(<Pane design={KIT}/>);
+    await settle();
+    expect(SAMPLE_NAMES).toEqual(["singles", "teams", "empty"]);
+    chooseSample(i18n.t("layout_sample_teams"));
+    expect(preview().getAttribute("src")).toBe(
+        `${PREVIEW}/layout/scoreboard_mine/index.html?autonaSample=teams`);
+    chooseSample(i18n.t("layout_sample_live"));
+    expect(preview().getAttribute("src")).toBe(
+        `${PREVIEW}/layout/scoreboard_mine/index.html`);
+
+    // A layout that says it is ready is on autona.js too.
+    rerender(<Pane design={SIMPLE}/>);
+    await settle();
+    post(preview().contentWindow, READY);
+    chooseSample(i18n.t("layout_sample_empty"));
+    expect(preview().getAttribute("src")).toBe(
+        `${PREVIEW}/layout/scoreboard_simple/index.html?autonaSample=empty`);
+});
+
+test("the OBS URL is copied over http, with the board", async () => {
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+        value: {writeText}, configurable: true});
+    const {rerender} = render(<Pane obsBoards={[1, 2, 3]}/>);
+    await settle();
+
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_obs_url_copy")}));
+    fireEvent.click(screen.getByRole("menuitem", {name: "Board 2"}));
+    expect(writeText).toHaveBeenLastCalledWith(
+        `http://127.0.0.1:${BACKEND_PORT}/layout/scoreboard_simple/index.html?scoreboardNumber=2`);
+
+    rerender(<Pane obsBoards={[]} design={PLAIN}/>);
+    await settle();
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_obs_url_copy")}));
+    expect(writeText).toHaveBeenLastCalledWith(
+        `http://127.0.0.1:${BACKEND_PORT}/layout/scoreboard_plain/index.html`);
+    await settle();
+    delete navigator.clipboard;
+});
+
+test("no OBS URL nor reload button unless asked for", async () => {
+    render(<Pane/>);
+    await settle();
+    expect(screen.queryByRole("button", {name: i18n.t("layout_obs_url_copy")}))
+        .toBeNull();
+    expect(screen.queryByRole("button", {name: i18n.t("layout_reload")}))
+        .toBeNull();
+});
+
+test("the reload asks the page to read the catalog and loads the frames again", async () => {
+    const onReload = jest.fn();
+    render(<Pane onReload={onReload} overlay={POPUP}/>);
+    await settle();
+    const [before, popupBefore] = frames();
+    post(before.contentWindow, failure());
+
+    fireEvent.click(screen.getByRole("button", {name: i18n.t("layout_reload")}));
+
+    expect(onReload).toHaveBeenCalledTimes(1);
+    const [after, popupAfter] = frames();
+    expect(after).not.toBe(before);
+    expect(popupAfter).not.toBe(popupBefore);
+    expect(after.getAttribute("src")).toBe(before.getAttribute("src"));
+    expect(panel()).toBeNull();
+});
+
+test("the folders the catalog could not list are shown under the select", async () => {
+    render(<Pane unlisted={[
+        {folder: "my_overlay", kind: null, reason: "no_manifest", detail: null},
+        {folder: "scoreboard_x", kind: "scoreboard", reason: "bad_settings",
+         detail: "JSONDecodeError: <b>line 3</b>"},
+        {folder: "scoreboard_y", kind: "scoreboard", reason: "from_the_future",
+         detail: null},
+    ]}/>);
+    await settle();
+
+    const list = screen.getByRole("region",
+                                  {name: i18n.t("layout_unlisted_title")});
+    expect(list).toHaveTextContent(
+        `layout/my_overlay/ — ${i18n.t("layout_unlisted_no_manifest")}`);
+    expect(list).toHaveTextContent("JSONDecodeError: <b>line 3</b>");
+    // An element <b> would be found by its own text.
+    expect(within(list).queryByText("line 3")).toBeNull();
+    expect(list).toHaveTextContent(
+        `layout/scoreboard_y/ — ${i18n.t("layout_unlisted_other")}`);
+});
+
+test("no folder that could not be listed, no list", async () => {
+    render(<Pane unlisted={[]}/>);
+    await settle();
+    expect(screen.queryByRole("region", {name: i18n.t("layout_unlisted_title")}))
+        .toBeNull();
+});
+
+test("coming back to a design (A, B, A) shows none of what it said before", async () => {
+    const {rerender} = render(<Pane/>);
+    await settle();
+    post(preview().contentWindow, failure());
+    expect(shownErrors()).toHaveLength(1);
+
+    // B says nothing at all.
+    rerender(<Pane design={PLAIN}/>);
+    await settle();
+    rerender(<Pane design={SIMPLE}/>);
+    await settle();
+    expect(panel()).toBeNull();
+});
+
+test("a ready and a late of before are not carried back either", async () => {
+    const {rerender} = render(<Pane design={KIT}/>);
+    await settle();
+    await settle(READY_TIMEOUT_MS);
+    expect(screen.getByTestId("layout-check-not-ready")).toBeTruthy();
+
+    rerender(<Pane design={PLAIN}/>);
+    await settle();
+    rerender(<Pane design={KIT}/>);
+    await settle();
+    // Shown afresh: it has its time again.
+    expect(screen.queryByTestId("layout-check-not-ready")).toBeNull();
+    post(preview().contentWindow, READY);
+    rerender(<Pane design={PLAIN}/>);
+    await settle();
+    rerender(<Pane design={KIT}/>);
+    await settle();
+    expect(screen.queryByRole("status", {name: i18n.t("layout_check_title")}))
+        .toBeNull();
+});
+
+test("a sample there and back (live, teams, live) starts the live one afresh", async () => {
+    render(<Pane design={KIT}/>);
+    await settle();
+    post(preview().contentWindow, failure());
+    expect(shownErrors()).toHaveLength(1);
+
+    chooseSample(i18n.t("layout_sample_teams"));
+    await settle();
+    chooseSample(i18n.t("layout_sample_live"));
+    await settle();
+    expect(panel()).toBeNull();
+});
+
+test("another design starts on the app's state, not the sample", async () => {
+    const {rerender} = render(<Pane design={KIT}/>);
+    await settle();
+    chooseSample(i18n.t("layout_sample_teams"));
+    expect(preview().getAttribute("src")).toContain("?autonaSample=teams");
+
+    rerender(<Pane design={SIMPLE}/>);
+    await settle();
+    // Said ready: on autona.js, yet on the app's state.
+    post(preview().contentWindow, READY);
+    expect(preview().getAttribute("src")).toBe(
+        `${PREVIEW}/layout/scoreboard_simple/index.html`);
+    rerender(<Pane design={KIT}/>);
+    await settle();
+    expect(preview().getAttribute("src")).toBe(
+        `${PREVIEW}/layout/scoreboard_mine/index.html`);
+});
+
+test("a frame posting in a loop stops changing the panel at the caps", () => {
+    let report = EMPTY_REPORT;
+    const message = parseLayoutMessage(failure());
+    for (let i = 0; i < COUNT_MAX + 10; i++) {
+        report = addMessage(report, message, "design");
+    }
+    expect(report.errors[0].count).toBe(COUNT_MAX);
+    expect(addMessage(report, message, "design")).toBe(report);
+    for (let i = 1; i < ERRORS_MAX; i++) {
+        report = addMessage(report, {...message, message: `e${i}`}, "design");
+    }
+    for (let i = 0; i < COUNT_MAX + 10; i++) {
+        report = addMessage(report, {...message, message: `x${i}`}, "design");
+    }
+    expect(report.dropped).toBe(COUNT_MAX);
+    expect(addMessage(report, {...message, message: "more"}, "design"))
+        .toBe(report);
+});
+
+test("the catalog's warnings of a listed design are in the panel and its copy", async () => {
+    const writeText = jest.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+        value: {writeText}, configurable: true});
+    const broken = {...SIMPLE, warnings: [
+        {reason: "bad_settings",
+         detail: "JSONDecodeError: Expecting ',' delimiter: line 3 column 5"}]};
+    render(<Pane design={broken}/>);
+    await settle();
+
+    const [warning] = screen.getAllByTestId("layout-check-warning");
+    expect(warning).toHaveTextContent(
+        `settings.json: ${i18n.t("layout_unlisted_bad_settings")}`);
+    expect(warning).toHaveTextContent("line 3 column 5");
+    expect(warning).toHaveTextContent(i18n.t("layout_check_hint_manifest"));
+
+    fireEvent.click(screen.getByRole("button",
+                                     {name: i18n.t("layout_check_copy")}));
+    const text = writeText.mock.calls[0][0];
+    expect(text).toContain("[!] settings.json: settings.json が JSON として正しくありません");
+    expect(text).toContain("    JSONDecodeError: Expecting ',' delimiter: line 3 column 5");
+    // Ready, but warned: no "no errors".
+    post(preview().contentWindow, READY);
+    expect(screen.queryByRole("status", {name: i18n.t("layout_check_title")}))
+        .toBeNull();
+    await settle();
+    delete navigator.clipboard;
 });

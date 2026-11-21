@@ -333,7 +333,14 @@ paths:
   `frame-ancestors 'self'`）。プレビューのスクリプトが自分のフレームを本体のポートへ送れば本体のページとして動くため。pin:
   `tests/test_web_access.py` と `web/e2e/preview-origin.spec.ts`
 - **デザインのプレビュー（`web/src/CommentaryPage/DesignPane.tsx`）はプレビュー用のリスナーから読む**（`sandbox="allow-scripts allow-same-origin"`）。
-  `previewPort` が無ければ iframe を出さない（同じオリジンに代えない）。iframe がフォーカスを持ったら外す。Web 側に `message` のリスナーを足さない
+  `previewPort` が無ければ iframe を出さない（同じオリジンに代えない）。iframe がフォーカスを持ったら外す
+- **フレームからの `message` を受けるのは `DesignPane` だけ**（ADR-008 D3。`layout/include/autona.js` のエラーと `autona:ready`）。
+  ほかの Web 側に `message` のリスナーを足さない。`DesignPane` の受け方は次の形から広げない（pin: `DesignPane.test.js`）:
+  - `event.source` がそのページの iframe の `contentWindow`（Board はデザインとポップアップの 2 枚）と一致し、`event.origin` がプレビューのオリジンのものだけ。
+    別のフレーム・入れ子のフレーム・本体のオリジンからのものは捨てる
+  - 形はちょうど `{type: "autona:ready" | "autona:error", contract, kind, message, source, line, column}`（`LayoutCheck.parseLayoutMessage`。
+    キーの過不足・型の違いは捨てる）。文字列は長さ・件数は数に上限を付け、**テキストとしてだけ**描く（HTML にしない）
+  - メッセージで動くのは確認の欄の表示だけ（state・ナビゲーション・クリップボード・設定には触らない。コピーは利用者のクリック）
 
 ### 共有ビュー（`AutonaWebPanelHost`）
 

@@ -54,6 +54,29 @@ string, which is the name in both, or ``{"ja", "en"}``) -- and
 ``locale`` the list is asked in (DisplayText). They are listed after the
 other built-in layouts, the shipped ones first in BUNDLED_TEMPLATES' order.
 
+An overlay whose block declares ``contract`` (a design made from the layout
+kit does, ADR-008 D2) carries it in its entry as well: the pages expect such a
+layout to load layout/include/autona.js and tell its preview so (ADR-008 D3).
+An overlay that does not declare one has no ``contract`` key.
+
+**What is not listed, and why** (ADR-008 D3): a scan also gives the folders
+it skipped (Scan), each ``{"folder", "kind", "reason", "detail"}`` -- the
+kind when the block or the folder name says one (None otherwise), a reason of
+UNLISTED_REASONS and a short English detail (a file name, the value it did
+not take, a JSON error; never a path) or None. What never was a design is not
+among them: the reserved folders (custom/ -- the Designer's projects --
+included), a work folder of the layout kit, a file, the folders the release
+ships that no list shows (SHIPPED_NON_DESIGNS) or shipped once
+(RETIRED_SHIPPED_DIRS: an update leaves a deleted folder behind), and a folder
+with neither a settings.json nor a page (an .html file) in it.
+
+A listed entry whose folder has a manifest problem the catalog went past -- a
+settings.json it could not read, a broken block or an unknown kind (listed by
+its folder name all the same), an ``entry`` that is not a file name -- carries
+``warnings``: ``[{"reason", "detail"}]``, the reasons and details of the
+unlisted ones (plus UNLISTED_BAD_ENTRY). An entry without one has no
+``warnings`` key.
+
 This is the single source the Board / Commentary / Top 8 / Result / Thumbnail
 pages, the Designer's "open" list (AutonaDesignerService.list_projects), the
 result's and the thumbnail's services and renderers, and
@@ -159,6 +182,56 @@ _RESERVED_DIRS = frozenset({CUSTOM_DIRNAME, "designer_runtime", "include", "icon
 # into place (ADR-008 D2): never listed, however far it got.
 NEW_DESIGN_WORK_PREFIX = ".new-design-"
 
+# Folders the release ships under layout/ that are not a design of any list
+# (the statistics' pages, which the Stats page names itself, the winner popup,
+# the camera border): not listed, and no reason is given for them either.
+# tests/test_layout_catalog_unlisted.py holds the shipped tree to giving none.
+SHIPPED_NON_DESIGNS = frozenset({
+    "camborder_Universal", "h2h_record", "last_sets", "recent_sets",
+    "tournament_history", "upset_factor", "winner_popup",
+})
+
+# Folders an earlier release shipped under layout/ and a later one deleted.
+# The update merges the release over the install and never deletes, so they
+# stay on an operator's PC: no reason is given for them (one with a folder-name
+# prefix and its page is still listed by its name, as before). Add a folder
+# here when the release stops shipping it (tests/test_layout_catalog_unlisted.py
+# compares this with git's history).
+RETIRED_SHIPPED_DIRS = frozenset({
+    "bracket", "bracket_top12", "bracket_top16", "bracket_ultimate",
+    "character_gallery", "character_line", "fonts", "game_screenshots", "map",
+    "map_world_fighters", "player_list", "player_presentation",
+    "recent_sets_full", "ruleset", "scoreboard", "scoreboard_2xko",
+    "scoreboard_4by3", "scoreboard_BST", "scoreboard_JinTracker",
+    "scoreboard_WellyRoA", "scoreboard_WellySmash", "scoreboard_artistic",
+    "scoreboard_dynamic", "scoreboard_mainstagy", "scoreboard_pandastic",
+    "scoreboard_roa2", "scoreboard_vgbootcampy",
+    "scoreboard_vgbootcampy_classic", "scoreboard_vgbootcampy_neo",
+    "scoreboard_vgbootcampy_waiting", "stage_strike", "stream_queue",
+    "stream_queue_simple", "top_8", "top_n_list", "versus_screen",
+    "versus_screen_pokken", "versus_screen_tekken8",
+})
+
+# Why a folder is not listed (Scan; ADR-008 D3). Codes are an external
+# contract (GET /api/v1/layouts' "unlisted"): only ever added to.
+UNLISTED_NO_ENTRY = "no_entry"              # its entry page is not there
+UNLISTED_BAD_SETTINGS = "bad_settings"      # settings.json is not a JSON object
+UNLISTED_BAD_BLOCK = "bad_block"            # its autona block is not an object
+UNLISTED_UNKNOWN_KIND = "unknown_kind"      # the block's kind is none we list
+UNLISTED_UNKNOWN_CONTRACT = "unknown_contract"  # a contract this does not serve
+UNLISTED_BAD_TEMPLATE = "bad_template"      # a template manifest lacks a field
+UNLISTED_BUNDLED_ID = "bundled_id"          # named like a shipped template
+UNLISTED_NO_MANIFEST = "no_manifest"        # no block, no folder-name prefix
+# A listed entry's warning only: its block's entry is not a file name (the
+# default page is listed instead).
+UNLISTED_BAD_ENTRY = "bad_entry"
+UNLISTED_REASONS = (
+    UNLISTED_NO_ENTRY, UNLISTED_BAD_SETTINGS, UNLISTED_BAD_BLOCK,
+    UNLISTED_UNKNOWN_KIND, UNLISTED_UNKNOWN_CONTRACT, UNLISTED_BAD_TEMPLATE,
+    UNLISTED_BUNDLED_ID, UNLISTED_NO_MANIFEST, UNLISTED_BAD_ENTRY)
+# The longest detail an unlisted folder is given.
+UNLISTED_DETAIL_MAX = 200
+
 # The overlay contracts this Autona serves (ADR-008 D1: the view
 # layout/include/autona.js hands a layout, its table
 # layout/include/overlay_contract.json). An overlay's block may leave
@@ -227,13 +300,25 @@ def Layouts(kinds=None, root=None, locale=None):
     as listing them all. A template package's ``displayName`` is its name
     in ``locale``'s language (a program locale; None: English).
     """
+    return Scan(kinds, root, locale)[0]
+
+
+def Scan(kinds=None, root=None, locale=None):
+    """``(Layouts(kinds, root, locale), unlisted)``, from one reading of the
+    folder: ``unlisted`` is the built-in folders not listed and why (the
+    module's docstring), in folder order, those of a kind in ``kinds`` (all
+    when None/empty) and those whose kind is unknown (every list's)."""
     wanted = set(kinds or KINDS)
     base = _Base(root)
-    layouts = [_Named(entry, locale) for entry in _BuiltinLayouts(base)
+    unlisted = []
+    layouts = [_Named(entry, locale)
+               for entry in _BuiltinLayouts(base, unlisted)
                if entry["kind"] in wanted]
     if KIND_DESIGNER in wanted:
         layouts.extend(_DesignerLayouts(base))
-    return _Disambiguate(layouts)
+    return _Disambiguate(layouts), [
+        folder for folder in unlisted
+        if folder["kind"] is None or folder["kind"] in wanted]
 
 
 def Templates(kind, root=None, locale=None):
@@ -536,13 +621,17 @@ def _Named(entry, locale):
     return dict(entry, displayName=DisplayText(entry["displayNames"], locale))
 
 
-def _BuiltinLayouts(base):
+def _BuiltinLayouts(base, unlisted=None):
+    """The built-in entries; each folder that is not listed is handed to
+    ``unlisted`` (as Scan gives it), unless it never was a design."""
     try:
         names = sorted(os.listdir(base))
     except OSError as e:
         logger.warning(f"LayoutCatalog: cannot list {base}: {e}")
         return []
 
+    shipped = {folder.casefold()
+               for folder in SHIPPED_NON_DESIGNS | RETIRED_SHIPPED_DIRS}
     layouts = []
     for name in names:
         # A design being made (core/LayoutKit builds one in a work folder
@@ -552,10 +641,22 @@ def _BuiltinLayouts(base):
         directory = os.path.join(base, name)
         if not os.path.isdir(directory):
             continue
-        entry = _BuiltinEntry(name, directory)
+
+        def skip(reason, kind, detail=None, name=name):
+            if unlisted is not None and name.casefold() not in shipped:
+                unlisted.append({"folder": name, "kind": kind,
+                                 **_Warning(reason, detail)})
+            return None
+
+        entry = _BuiltinEntry(name, directory, skip)
         if entry is not None:
             layouts.append(entry)
     return _TemplatesLast(layouts)
+
+
+def _Clipped(text, limit):
+    text = str(text)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 def _TemplatesLast(layouts):
@@ -573,17 +674,30 @@ def _TemplatesLast(layouts):
     return ordered
 
 
-def _BuiltinEntry(name, directory):
-    block = _MetadataBlock(name, directory)
+def _BuiltinEntry(name, directory, skip):
+    """The folder's entry, or ``skip(reason, kind, detail)`` (which returns
+    None) when it is not listed."""
+    block, problem = _MetadataBlock(name, directory)
     if block is not None and block["kind"] in TEMPLATE_KINDS:
         # A template package: the block is its manifest, with no folder-name
         # fallback (ADR-007 D1).
-        return _TemplateEntry(name, directory, block)
+        return _TemplateEntry(name, directory, block, skip)
     if block is not None and not _KnownOverlayContract(name, block):
-        return None
+        return skip(UNLISTED_UNKNOWN_CONTRACT, block["kind"],
+                    repr(block["contract"]))
     inferred = _InferFromName(name)
     if block is None and inferred is None:
+        if problem is not None:
+            return skip(problem[0], None, problem[1])
+        # Neither a settings.json nor a page: a folder of something else
+        # (pictures, fonts), not a design that failed.
+        if _LooksLikeADesign(directory):
+            return skip(UNLISTED_NO_MANIFEST, None)
         return None
+    warnings = []
+    if problem is not None:
+        # Listed by its folder name; what its settings.json says is not used.
+        warnings.append(_Warning(*problem))
     if block is None:
         kind, displayName = inferred
         block = {"kind": kind, "displayName": displayName}
@@ -598,10 +712,11 @@ def _BuiltinEntry(name, directory):
         logger.warning(
             f"LayoutCatalog: {name}/{SETTINGS_FILE}: entry must be a file "
             f"name in the folder, got {entry!r}; using {DEFAULT_ENTRY}")
+        warnings.append(_Warning(UNLISTED_BAD_ENTRY, repr(entry)))
         entry = DEFAULT_ENTRY
     if not os.path.isfile(os.path.join(directory, entry)):
-        return None
-    return {
+        return skip(UNLISTED_NO_ENTRY, block["kind"], entry)
+    listed = {
         "id": name,
         "kind": block["kind"],
         "displayName": _Text(block.get("displayName")),
@@ -609,6 +724,29 @@ def _BuiltinEntry(name, directory):
         "game": _Text(block.get("game")),
         "entry": entry,
     }
+    # Declared (and known, above): the layout says it is written to the
+    # overlay contract, so its preview expects autona.js (ADR-008 D3).
+    if "contract" in block:
+        listed["contract"] = block["contract"]
+    if warnings:
+        listed["warnings"] = warnings
+    return listed
+
+
+def _Warning(reason, detail):
+    return {"reason": reason,
+            "detail": None if detail is None
+            else _Clipped(detail, UNLISTED_DETAIL_MAX)}
+
+
+def _LooksLikeADesign(directory):
+    """Whether a folder holds a settings.json or a page (an .html file)."""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return False
+    return any(name == SETTINGS_FILE or name.lower().endswith(".html")
+               for name in names)
 
 
 def _KnownOverlayContract(name, block):
@@ -629,23 +767,23 @@ def _KnownOverlayContract(name, block):
     return False
 
 
-def _TemplateEntry(name, directory, block):
+def _TemplateEntry(name, directory, block, skip):
     """A template package's entry (ADR-007 D1), or None, with a warning, when
     its manifest does not hold what the template contract needs: a known
     ``contract``, a ``size`` within TEMPLATE_MAX_SIDE, a result's ``rows``, a
     thumbnail's ``template`` file in the folder, and its entry page. One such
-    folder costs its own entry only."""
+    folder costs its own entry only (and is handed to ``skip``)."""
     kind = block["kind"]
 
-    def refuse(why):
+    def refuse(why, reason=UNLISTED_BAD_TEMPLATE):
         logger.warning(f"LayoutCatalog: {name}/{SETTINGS_FILE}: not listing "
                        f"the {kind} template: {why}")
-        return None
+        return skip(reason, kind, why)
 
     contract = block.get("contract")
     if not _IsInt(contract) or contract not in TEMPLATE_CONTRACTS:
         return refuse(f"contract must be one of {TEMPLATE_CONTRACTS}, "
-                      f"got {contract!r}")
+                      f"got {contract!r}", UNLISTED_UNKNOWN_CONTRACT)
     size = block.get("size")
     if not (isinstance(size, list) and len(size) == 2 and all(
             _IsInt(side) and 1 <= side <= TEMPLATE_MAX_SIDE for side in size)):
@@ -671,7 +809,9 @@ def _TemplateEntry(name, directory, block):
         return refuse(f"entry must be a file name in the folder, "
                       f"got {entry!r}")
     if not os.path.isfile(os.path.join(directory, entry)):
-        return refuse(f"there is no {entry}")
+        logger.warning(f"LayoutCatalog: {name}/{SETTINGS_FILE}: not listing "
+                       f"the {kind} template: there is no {entry}")
+        return skip(UNLISTED_NO_ENTRY, kind, entry)
 
     # Folder names in any case: Windows does not tell them apart.
     shipped = BUNDLED_TEMPLATES[kind]
@@ -681,7 +821,7 @@ def _TemplateEntry(name, directory, block):
     if shippedId is None and folded in {
             templateId.casefold() for templateId in shipped}:
         return refuse("a shipped template has this id; the shipped one is "
-                      "listed")
+                      "listed", UNLISTED_BUNDLED_ID)
     if shippedId is not None:
         key = BundledNameKey(kind, shippedId)
         displayNames = {language: CoreWords.WORDS[key][language]
@@ -738,21 +878,31 @@ def _IsFileName(value):
 
 
 def _MetadataBlock(name, directory):
-    """The folder's autona block, or None when it has none (or a broken one,
-    which is logged and then treated as absent)."""
+    """``(block, problem)``: the folder's autona block, or None when it has
+    none (or a broken one, which is logged and then treated as absent).
+    ``problem`` is ``(reason, detail)`` for a broken one -- an unreadable
+    settings.json, a block that is not an object, a kind not taken -- and
+    None otherwise: what the folder is not listed for, if nothing else
+    lists it."""
     path = os.path.join(directory, SETTINGS_FILE)
     if not os.path.isfile(path):
-        return None
-    settings = _ReadJson(path)
-    if not isinstance(settings, dict) or METADATA_KEY not in settings:
-        return None
+        return None, None
+    settings, error = _ReadJsonOrError(path)
+    if error is not None:
+        return None, (UNLISTED_BAD_SETTINGS, error)
+    if not isinstance(settings, dict):
+        return None, (UNLISTED_BAD_SETTINGS, "not a JSON object")
+    if METADATA_KEY not in settings:
+        return None, None
     block = settings[METADATA_KEY]
     if not isinstance(block, dict) or block.get("kind") not in _BUILTIN_KINDS:
         logger.warning(
             f"LayoutCatalog: {name}/{SETTINGS_FILE}: ignoring the "
             f"{METADATA_KEY!r} block (kind must be one of {_BUILTIN_KINDS})")
-        return None
-    return block
+        if not isinstance(block, dict):
+            return None, (UNLISTED_BAD_BLOCK, None)
+        return None, (UNLISTED_UNKNOWN_KIND, repr(block.get("kind")))
+    return block, None
 
 
 def _InferFromName(name):
@@ -785,14 +935,22 @@ def _Text(value):
 
 
 def _ReadJson(path):
+    return _ReadJsonOrError(path)[0]
+
+
+def _ReadJsonOrError(path):
+    """``(value, None)``, or ``(None, why)`` when the file cannot be read as
+    JSON: why in a few words, with no path (an OSError's says the path)."""
     # One bad file costs only its own entry, never the whole list: whatever
     # reading or parsing it raises -- OSError (locked mid-save), a decode
     # error, RecursionError on absurdly deep nesting -- is logged and the file
     # is treated as unreadable.
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            return json.load(f), None
     except Exception as e:
         logger.warning(
             f"LayoutCatalog: cannot read {path}: {type(e).__name__}: {e}")
-        return None
+        if isinstance(e, OSError):
+            return None, f"{type(e).__name__}: {e.strerror or 'unreadable'}"
+        return None, f"{type(e).__name__}: {e}"

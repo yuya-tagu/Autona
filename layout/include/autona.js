@@ -35,11 +35,113 @@
  *   scoreboardNumber   the board (1 when absent): globals.js's own
  *   autonaSample=NAME  draw layout/include/sample/NAME.json instead of the
  *                      app's state
+ *
+ * In a frame (the app's preview: window.parent is another window) it also
+ * tells the page around it what went wrong (ADR-008 D3), with postMessage:
+ * an exception of an onUpdate listener (as often as it is logged), the
+ * page's uncaught errors and unhandled rejections, and its own failures --
+ * then "autona:ready" once the page has parsed. Every message has exactly
+ * these keys, its strings cut to a length, at most POST_MAX errors a page:
+ *   {type: "autona:ready" | "autona:error", contract, kind, message,
+ *    source, line, column}
+ * Only text about the layout's own errors: sent to any parent ("*"; the
+ * page around it checks who sent it). OBS has no parent: nothing is sent.
  */
 (function () {
   "use strict";
 
   var CONTRACT = 1;
+
+  // ── telling the app's preview (ADR-008 D3) ─────────────────────────────
+
+  var MESSAGE_MAX = 500;
+  var SOURCE_MAX = 300;
+  var POST_MAX = 50;
+  var framed = (function () {
+    try {
+      return Boolean(window.parent) && window.parent !== window;
+    } catch (error) {
+      return false;
+    }
+  })();
+  var postedErrors = 0;
+
+  function clip(value, max) {
+    var textValue = typeof value === "string" ? value : String(value);
+    return textValue.length > max ? textValue.slice(0, max - 1) + "…"
+      : textValue;
+  }
+
+  function lineNumber(value) {
+    return typeof value === "number" && isFinite(value) && value > 0
+      ? Math.floor(value) : null;
+  }
+
+  // A script's URL as a path when it is this page's origin's (shorter).
+  function sourcePath(url) {
+    if (typeof url !== "string" || !url) return "";
+    var origin = window.location.protocol + "//" + window.location.host;
+    return clip(url.indexOf(origin + "/") === 0 ? url.slice(origin.length)
+      : url, SOURCE_MAX);
+  }
+
+  // Where an Error was thrown: the first "url:line:column" of its stack.
+  function thrownAt(error) {
+    var stack = error && typeof error.stack === "string" ? error.stack : "";
+    var match = /(https?:\/\/[^\s()]+?):(\d+):(\d+)/.exec(stack);
+    return match
+      ? {source: match[1], line: Number(match[2]), column: Number(match[3])}
+      : {source: "", line: null, column: null};
+  }
+
+  function errorText(error) {
+    if (error && typeof error === "object" && typeof error.message === "string") {
+      return (error.name ? error.name + ": " : "") + error.message;
+    }
+    return String(error);
+  }
+
+  function post(type, kind, message, source, line, column) {
+    if (!framed) return;
+    if (type === "autona:error") {
+      if (postedErrors >= POST_MAX) return;
+      postedErrors += 1;
+    }
+    try {
+      window.parent.postMessage({
+        type: type,
+        contract: CONTRACT,
+        kind: kind,
+        message: clip(message, MESSAGE_MAX),
+        source: sourcePath(source),
+        line: lineNumber(line),
+        column: lineNumber(column),
+      }, "*");
+    } catch (error) {
+      // A parent that cannot be told: nothing to do.
+    }
+  }
+
+  // kind: "onUpdate" (a listener threw), "error" / "unhandledrejection" (the
+  // page's), "autona" (this file's own trouble).
+  function postError(kind, error) {
+    var at = thrownAt(error);
+    post("autona:error", kind, errorText(error), at.source, at.line, at.column);
+  }
+
+  if (framed && typeof window.addEventListener === "function") {
+    window.addEventListener("error", function (event) {
+      // A script's error (an ErrorEvent), not a resource that failed to load.
+      if (!event || typeof event.message !== "string") return;
+      var at = thrownAt(event.error);
+      post("autona:error", "error", event.message || errorText(event.error),
+           event.filename || at.source, event.lineno || at.line,
+           event.colno || at.column);
+    });
+    window.addEventListener("unhandledrejection", function (event) {
+      postError("unhandledrejection", event ? event.reason : event);
+    });
+  }
   var SAMPLE_TIMESTAMP = 1;
   var ICON_PACK = "base_files/icon";
   var IMAGE_PACK = "full";
@@ -69,7 +171,9 @@
   ];
 
   if (typeof LoadEverything !== "function") {
-    console.error("autona.js: load ../include/globals.js before autona.js");
+    var noGlobals = "autona.js: load ../include/globals.js before autona.js";
+    console.error(noGlobals);
+    postError("autona", noGlobals);
     return;
   }
   // LoadEverything() already called (the layout's script ran before this
@@ -88,8 +192,10 @@
   }
   var startedEarly = loadingStarted();
   if (startedEarly) {
-    console.warn("autona.js: load it right after globals.js, before the "
-      + "layout's own scripts (LoadEverything() had already run)");
+    var lateLoad = "autona.js: load it right after globals.js, before the "
+      + "layout's own scripts (LoadEverything() had already run)";
+    console.warn(lateLoad);
+    postError("autona", lateLoad);
   }
   if (window.location.protocol === "file:") {
     console.warn("autona.js: open this layout over http (the app's preview "
@@ -435,7 +541,10 @@
   }
 
   function failed(record, error) {
-    if (!record.failing) console.error("Autona.onUpdate:", error);
+    if (!record.failing) {
+      console.error("Autona.onUpdate:", error);
+      postError("onUpdate", error);
+    }
     record.failing = true;
   }
 
@@ -460,6 +569,7 @@
       view = buildView(event.data);
     } catch (error) {
       console.error("autona.js: could not read the state:", error);
+      postError("autona", error);
       return;
     }
     // Called only when the view changed: a state update this contract does
@@ -488,8 +598,12 @@
   };
   function startLoading() {
     setTimeout(function () {
+      // The page has parsed and its scripts have run (their errors are
+      // told already): the preview hears that autona.js is there.
+      post("autona:ready", "ready", "", window.location.pathname, null, null);
       LoadEverything().then(null, function (error) {
         console.error("autona.js: the page could not start:", error);
+        postError("autona", error);
       });
     }, 0);
   }
@@ -515,6 +629,7 @@
       : Promise.reject(new Error("not a sample name: " + sampleName));
     sample.then(null, function (error) {
       console.error("autona.js: autonaSample:", error);
+      postError("autona", error);
     });
     // globals.js reads the state through getData() (its file transport, and
     // again when OBS shows the source): give it the sample, at one fixed

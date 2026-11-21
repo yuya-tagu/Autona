@@ -137,7 +137,7 @@ test("the kept overlay is previewed and given to OBS by its entry", async () => 
         .toHaveAttribute("src", expect.stringMatching(
             /\/layout\/last_sets\/player1\.html$/));
     expect(screen.getByRole("textbox", {name: i18n.t("commentary_obs_url")}))
-        .toHaveValue(`http://localhost:${BACKEND_PORT}/layout/last_sets/player1.html`);
+        .toHaveValue(`http://127.0.0.1:${BACKEND_PORT}/layout/last_sets/player1.html`);
 });
 
 test("there is one select for the overlay, with its note above the preview", async () => {
@@ -267,7 +267,7 @@ describe("the copy buttons", () => {
         await settle();
 
         expect(writeText).toHaveBeenCalledWith(
-            `http://localhost:${BACKEND_PORT}/layout/last_sets/player1.html`);
+            `http://127.0.0.1:${BACKEND_PORT}/layout/last_sets/player1.html`);
         expect(await screen.findByText(i18n.t("commentary_obs_copied")))
             .toBeInTheDocument();
     });

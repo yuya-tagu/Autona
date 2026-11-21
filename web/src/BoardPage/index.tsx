@@ -27,6 +27,7 @@ import {
     ColorKind,
     FeatureColorCard,
     LayoutEntry,
+    UnlistedFolder,
 } from "../CommentaryPage/SideCards";
 import {BoardFile, BoardFiles, DesignerCard, ObsFilesCard} from "./Cards";
 
@@ -73,6 +74,13 @@ interface Envelope<T> {
     ok: boolean;
     data: T;
 }
+
+// GET /api/v1/layouts: the list, and beside it the folders it could not list
+// (ADR-008 D3).
+type LayoutList = Envelope<LayoutEntry[]> & {unlisted?: UnlistedFolder[]};
+
+// The boards an OBS URL is copied for (?scoreboardNumber=): 1on1, teams, crew.
+const OBS_BOARDS = [1, 2, 3];
 
 function useBoardColors() {
     return useSelector((state: ReduxState) => {
@@ -121,6 +129,7 @@ function BoardContent() {
     const [loadFailed, setLoadFailed] = React.useState(false);
     const [designs, setDesigns] = React.useState<LayoutEntry[]>([]);
     const [design, setDesign] = React.useState<LayoutEntry | null>(null);
+    const [unlisted, setUnlisted] = React.useState<UnlistedFolder[]>([]);
     // The OBS files as read, which say for which design (`design` is not to
     // show another's path while the new one's is on its way).
     const [read, setRead] = React.useState<BoardFiles | null>(null);
@@ -160,7 +169,7 @@ function BoardContent() {
         const writing = selecting.current.underWay > 0;
         const madeBefore = selecting.current.made;
         Promise.all([
-            getWithRetry<Envelope<LayoutEntry[]>>(
+            getWithRetry<LayoutList>(
                 "/api/v1/layouts?kind=scoreboard,designer", isLive),
             getWithRetry<Envelope<LayoutEntry>>(SELECTED, isLive).then(
                 (body) => body.data, selectedOrNone),
@@ -170,6 +179,7 @@ function BoardContent() {
             }
             anyRead.current = true;
             setDesigns(list.data);
+            setUnlisted(list.unlisted ?? []);
             if (!writing && selecting.current.underWay === 0
                     && selecting.current.made === madeBefore) {
                 setDesign(selected);
@@ -279,12 +289,13 @@ function BoardContent() {
         };
     }, []);
     const relistDesigns = React.useCallback(
-        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=scoreboard,designer")
+        () => apiGetJson<LayoutList>("/api/v1/layouts?kind=scoreboard,designer")
             .then((body) => {
                 if (!kitMounted.current) {
                     return false;
                 }
                 setDesigns(body.data);
+                setUnlisted(body.unlisted ?? []);
                 return true;
             }, (error: unknown) => {
                 console.error(error);
@@ -404,6 +415,8 @@ function BoardContent() {
                         title: i18n.t("board_popup_preview"),
                     } : null}
                     reloadKey={previews}
+                    unlisted={unlisted}
+                    obsBoards={OBS_BOARDS}
                     controls={
                         <Stack spacing={1}>
                             {design && (

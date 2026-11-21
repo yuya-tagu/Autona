@@ -320,7 +320,7 @@ def test_a_new_design_is_made_from_the_kit_and_listed(root):
 
     assert entry == {"id": "commentators_Duo", "kind": "commentary",
                      "displayName": "Duo", "format": None, "game": None,
-                     "entry": "index.html"}
+                     "entry": "index.html", "contract": 1}
     folder = root / "commentators_Duo"
     assert sorted(os.listdir(folder)) == sorted([
         "index.html", "index.css", "index.js", "settings.json", "AGENTS.md",

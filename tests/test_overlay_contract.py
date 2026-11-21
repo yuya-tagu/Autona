@@ -113,6 +113,17 @@ function page(scenario) {
     },
   };
   sandbox.window = sandbox;
+  // The window around the page: "frame" (the app's preview) or "self" (a
+  // top-level page, as OBS shows it); none by default. What it is sent.
+  const posted = [];
+  if (scenario.parent) {
+    const win = new EventTarget();
+    sandbox.addEventListener = win.addEventListener.bind(win);
+    sandbox.dispatchEvent = win.dispatchEvent.bind(win);
+    const record = (message, target) => posted.push({message, target});
+    sandbox.postMessage = record;
+    sandbox.parent = scenario.parent === "self" ? sandbox : {postMessage: record};
+  }
   vm.createContext(sandbox);
   vm.runInContext(globalsSource, sandbox, {filename: globalsPath});
   sandbox.tsh_settings = Object.assign(
@@ -150,7 +161,7 @@ function page(scenario) {
                   rawIsState: sandbox.Autona.raw === sandbox.data});
     });
   }
-  return {sandbox, errors, fetched, calls, loads: () => loads};
+  return {sandbox, errors, fetched, calls, posted, loads: () => loads};
 }
 
 async function run(scenario) {
@@ -166,6 +177,7 @@ async function run(scenario) {
     calls: p.calls,
     errors: p.errors,
     fetched: p.fetched,
+    posted: p.posted,
     loads: p.loads(),
     autona: p.sandbox.Autona
       ? {contract: p.sandbox.Autona.contract, keys: Object.keys(p.sandbox.Autona)}
@@ -629,6 +641,127 @@ def test_without_globals_it_says_so_and_defines_nothing(tmp_path):
     assert result["autona"] is None
     assert any("globals.js" in text for level, text in result["errors"]
                if level == "error")
+
+
+# ── telling the app's preview (ADR-008 D3) ──────────────────────────────
+MESSAGE_KEYS = ["type", "contract", "kind", "message", "source", "line",
+                "column"]
+
+
+def _error_event(message, filename, line):
+    return (f"const e = new Event('error'); e.message = {json.dumps(message)};"
+            f" e.filename = {json.dumps(filename)}; e.lineno = {line};"
+            f" e.colno = 7; dispatchEvent(e);")
+
+
+@needs_node
+def test_in_a_frame_it_tells_the_parent_its_errors_and_that_it_is_ready(
+        tmp_path):
+    [result] = run_scenarios(tmp_path, [{
+        "parent": "frame",
+        "afterAutona": """
+          Autona.onUpdate((view) => {
+            if (view.board.phase !== "ok") throw new TypeError("layout bug");
+          });
+        """,
+        "steps": [
+            {"state": singles(), "revision": 1},
+            {"run": _error_event(
+                "Uncaught ReferenceError: x is not defined",
+                "http://127.0.0.1:5107/layout/my_overlay/index.js", 12)},
+            {"run": "const r = new Event('unhandledrejection');"
+                    " r.reason = new Error('nope'); dispatchEvent(r);"},
+            # A resource that failed to load is no script error.
+            {"run": "dispatchEvent(new Event('error'));"},
+        ]}])
+    messages = [entry["message"] for entry in result["posted"]]
+    assert all(entry["target"] == "*" for entry in result["posted"])
+    assert all(list(message) == MESSAGE_KEYS for message in messages)
+    assert messages[0] == {
+        "type": "autona:ready", "contract": 1, "kind": "ready", "message": "",
+        "source": "/layout/my_overlay/index.html", "line": None,
+        "column": None}
+    errors = messages[1:]
+    assert [(m["type"], m["kind"]) for m in errors] == [
+        ("autona:error", "onUpdate"), ("autona:error", "error"),
+        ("autona:error", "unhandledrejection")]
+    assert errors[0]["message"] == "TypeError: layout bug"
+    assert errors[1] == {
+        "type": "autona:error", "contract": 1, "kind": "error",
+        "message": "Uncaught ReferenceError: x is not defined",
+        # This origin's script as a path.
+        "source": "/layout/my_overlay/index.js", "line": 12, "column": 7}
+    assert errors[2]["message"] == "Error: nope"
+
+
+@needs_node
+def test_a_listener_error_is_posted_as_often_as_it_is_logged(tmp_path):
+    def phase(revision, value):
+        return {"delta": {"revision": revision, "delta": [
+            {"path": ["score", "1", "phase"], "action": "values_changed",
+             "value": value}]}}
+
+    [result] = run_scenarios(tmp_path, [{
+        "parent": "frame",
+        "afterAutona": """
+          Autona.onUpdate((view) => {
+            if (view.board.phase !== "ok") throw new Error("layout bug");
+          });
+        """,
+        "steps": [{"state": singles(), "revision": 1}, phase(2, "again"),
+                  phase(3, "ok"), phase(4, "broken")]}])
+    kinds = [entry["message"]["kind"] for entry in result["posted"]]
+    assert kinds.count("onUpdate") == 2
+    assert len([level for level, _ in result["errors"]
+                if level == "error"]) == 2
+
+
+@needs_node
+def test_its_strings_are_cut_and_its_errors_capped(tmp_path):
+    [result] = run_scenarios(tmp_path, [{
+        "parent": "frame",
+        "steps": [{"run": """
+          for (let i = 0; i < 80; i++) {
+            const e = new Event('error');
+            e.message = 'x'.repeat(2000) + i;
+            e.filename = 'http://elsewhere.test/' + 'a'.repeat(900);
+            e.lineno = 1;
+            dispatchEvent(e);
+          }"""}]}])
+    errors = [entry["message"] for entry in result["posted"]
+              if entry["message"]["type"] == "autona:error"]
+    assert len(errors) == 50
+    assert all(len(m["message"]) == 500 and m["message"].endswith("…")
+               for m in errors)
+    assert all(len(m["source"]) == 300 for m in errors)
+
+
+@needs_node
+def test_without_a_parent_window_it_posts_nothing(tmp_path):
+    # OBS: the page is the top window.
+    results = run_scenarios(tmp_path, [
+        {"parent": "self",
+         "afterAutona": "Autona.onUpdate(() => { throw new Error('bug'); });",
+         "steps": [{"state": singles(), "revision": 1},
+                   {"run": _error_event("Uncaught Error: x", "", 1)}]},
+        {"afterAutona": "Autona.onUpdate(() => { throw new Error('bug'); });",
+         "steps": [{"state": singles(), "revision": 1}]},
+    ])
+    assert [result["posted"] for result in results] == [[], []]
+    # Still logged, as before.
+    assert all(any("bug" in text for _, text in result["errors"])
+               for result in results)
+
+
+@needs_node
+def test_in_a_frame_without_globals_it_posts_the_error_and_no_ready(tmp_path):
+    [result] = run_scenarios(tmp_path, [{
+        "parent": "frame", "layout": "LoadEverything = undefined;",
+        "steps": []}])
+    messages = [entry["message"] for entry in result["posted"]]
+    assert [(m["type"], m["kind"]) for m in messages] == [
+        ("autona:error", "autona")]
+    assert "globals.js" in messages[0]["message"]
 
 
 # ── spot checks of views.json, written out so that a wrong expected value

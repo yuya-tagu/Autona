@@ -133,6 +133,9 @@ export function ObsFilesCard({files, notice, reveal, revealing}: {
                             {`${step}. ${i18n.t(`board_obs_step_${step}`)}`}
                         </Typography>
                     ))}
+                    <Typography variant="body2" color="text.secondary">
+                        {i18n.t("board_obs_http_note")}
+                    </Typography>
                     {notice && <Alert severity="info">{notice}</Alert>}
                     <FileRow
                         label={i18n.t("board_obs_design_path")}

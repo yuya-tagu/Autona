@@ -32,6 +32,27 @@ export interface LayoutEntry {
     // Stats page's last_sets / tournament_history have a player 1 and a
     // player 2 entry in one folder (S4l). `id` otherwise.
     key?: string;
+    // The overlay contract the layout's settings.json declares (a design made
+    // by "make a new design" does): its preview expects autona.js (ADR-008
+    // D3). Absent for a layout that declares none.
+    contract?: number;
+    // What is wrong with its manifest that the catalog went past (listed by
+    // its folder name all the same): the unlisted folders' reasons.
+    warnings?: ManifestWarning[];
+}
+
+export interface ManifestWarning {
+    reason: string;
+    detail: string | null;
+}
+
+// A folder the catalog did not list, and why (GET /api/v1/layouts'
+// "unlisted", ADR-008 D3; core/LayoutCatalog.UNLISTED_REASONS).
+export interface UnlistedFolder {
+    folder: string;
+    kind: string | null;
+    reason: string;
+    detail: string | null;
 }
 
 export type ColorKind = "theme" | "accent";
@@ -144,10 +165,15 @@ export function FeatureColorCard({title, theme, accent, tournament, send}: {
     );
 }
 
-// The overlay's URL for OBS on this PC: localhost and the server's port,
+// The host OBS reaches the server on: the address the server listens on by
+// default (localhost may be tried as ::1 first). The layout kit's
+// instructions name it too.
+export const OBS_HOST = "127.0.0.1";
+
+// The overlay's URL for OBS on this PC: OBS_HOST and the server's port,
 // whatever host this page was opened from (the Qt panel's ObsUrl).
 export function obsUrl(design: LayoutEntry): string {
-    return `http://localhost:${BACKEND_PORT}/layout/${design.id}/${design.entry}`;
+    return `http://${OBS_HOST}:${BACKEND_PORT}/layout/${design.id}/${design.entry}`;
 }
 
 // `note`: what goes live while Autona runs (the Commentary page's by

@@ -1134,11 +1134,43 @@ def test_layouts_lists_the_catalog(webApp, layoutTree):
     assert response.status_code == 200
     body = response.get_json()
     # Not state: no revision rides along (spec §5).
-    assert body == {"ok": True, "data": LayoutCatalog.Layouts()}
+    assert body == {"ok": True, "data": LayoutCatalog.Layouts(),
+                    "unlisted": []}
     assert body["data"][-1] == {
         "id": "custom/finals", "kind": "designer",
         "displayName": "Custom: 決勝",
         "format": "1v1", "game": "カスタム", "entry": "index.html"}
+
+
+def test_layouts_say_which_folders_are_not_listed_and_why(webApp, layoutTree):
+    # ADR-008 D3: "unlisted" beside "data", of the kinds asked for and of
+    # none known (every list's).
+    from tests.test_layout_catalog import builtin
+
+    builtin(layoutTree, "scoreboard_broken", {"kind": "scoreboard"},
+            entry=None)
+    builtin(layoutTree, "bracket_top8_next", {"kind": "top8", "contract": 2})
+    builtin(layoutTree, "my_overlay")
+    client = webApp.test_client()
+
+    every = client.get("/api/v1/layouts").get_json()
+    assert every["unlisted"] == [
+        {"folder": "bracket_top8_next", "kind": "top8",
+         "reason": "unknown_contract", "detail": "2"},
+        {"folder": "my_overlay", "kind": None, "reason": "no_manifest",
+         "detail": None},
+        {"folder": "scoreboard_broken", "kind": "scoreboard",
+         "reason": "no_entry", "detail": "index.html"},
+    ]
+    board = client.get("/api/v1/layouts?kind=scoreboard,designer").get_json()
+    assert [(f["folder"], f["reason"]) for f in board["unlisted"]] == [
+        ("my_overlay", "no_manifest"), ("scoreboard_broken", "no_entry")]
+    top8 = client.get("/api/v1/layouts?kind=top8").get_json()
+    assert [f["folder"] for f in top8["unlisted"]] == [
+        "bracket_top8_next", "my_overlay"]
+    # The listed ones are as before.
+    assert [e["id"] for e in board["data"]] == [
+        "scoreboard_simple", "custom/finals"]
 
 
 @pytest.mark.parametrize("query, expected", [

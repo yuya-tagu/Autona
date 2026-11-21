@@ -33,6 +33,7 @@ import {
     FeatureColorCard,
     LayoutEntry,
     ObsUrlCard,
+    UnlistedFolder,
 } from "../CommentaryPage/SideCards";
 import {Characters} from "./characterPick";
 import {
@@ -61,6 +62,10 @@ interface Envelope<T> {
     ok: boolean;
     data: T;
 }
+
+// GET /api/v1/layouts: the list, and beside it the folders it could not list
+// (ADR-008 D3).
+type LayoutList = Envelope<LayoutEntry[]> & {unlisted?: UnlistedFolder[]};
 
 interface Top8State {
     top8?: {
@@ -179,6 +184,7 @@ function Top8Content() {
     const [countries, setCountries] = React.useState<CountryEntry[] | null>(null);
     const [designs, setDesigns] = React.useState<LayoutEntry[]>([]);
     const [design, setDesign] = React.useState<LayoutEntry | null>(null);
+    const [unlisted, setUnlisted] = React.useState<UnlistedFolder[]>([]);
     const [loadFailed, setLoadFailed] = React.useState(false);
     // Bumped by the reload button: loads the page's lists again.
     const [loads, setLoads] = React.useState(0);
@@ -220,7 +226,7 @@ function Top8Content() {
                     }
                     throw error;
                 }),
-            getWithRetry<Envelope<LayoutEntry[]>>(
+            getWithRetry<LayoutList>(
                 "/api/v1/layouts?kind=top8", isLive),
             getWithRetry<Envelope<LayoutEntry>>(
                 "/api/v1/layouts/selected/top8", isLive).then(
@@ -236,6 +242,7 @@ function Top8Content() {
             if (live) {
                 setCountries(countryList);
                 setDesigns(designsBody.data);
+                setUnlisted(designsBody.unlisted ?? []);
                 setDesign(selected);
                 setLoaded(true);
             }
@@ -377,12 +384,16 @@ function Top8Content() {
         };
     }, []);
     const relistDesigns = React.useCallback(
-        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=top8")
+        () => apiGetJson<LayoutList>("/api/v1/layouts?kind=top8")
             .then((body) => {
                 if (!kitMounted.current) {
                     return false;
                 }
                 setDesigns(body.data);
+                setUnlisted(body.unlisted ?? []);
+                // The shown design as listed now (its contract, warnings).
+                setDesign((shown) => (shown && body.data.find(
+                    (entry) => entry.id === shown.id)) ?? shown);
                 return true;
             }, (error: unknown) => {
                 console.error(error);
@@ -518,6 +529,8 @@ function Top8Content() {
                     actions={<NewDesignActions kind="top8"
                                                onCreated={designCreated}
                                                onRelist={relistDesigns}/>}
+                    unlisted={unlisted}
+                    onReload={relistDesigns}
                 />
             </Box>
         </Box>

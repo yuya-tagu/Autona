@@ -302,7 +302,7 @@ test("the design is the selected one, previewed and given to OBS", async () => {
         .toHaveAttribute("src", expect.stringMatching(
             /\/layout\/bracket_top8\/index\.html$/));
     expect(screen.getByRole("textbox", {name: i18n.t("commentary_obs_url")}))
-        .toHaveValue(`http://localhost:${BACKEND_PORT}/layout/bracket_top8/index.html`);
+        .toHaveValue(`http://127.0.0.1:${BACKEND_PORT}/layout/bracket_top8/index.html`);
     expect(screen.getByText(i18n.t("top8_obs_note"))).toBeInTheDocument();
 
     fireEvent.mouseDown(select);
