@@ -14,6 +14,7 @@ import {
     apiDelete,
     apiErrorCode,
     apiErrorStatus,
+    apiGetJson,
     apiPatch,
     apiPost,
     apiPut,
@@ -26,6 +27,7 @@ import {
     useSerialRequests,
 } from "../PanelShell/requests";
 import DesignPane from "../CommentaryPage/DesignPane";
+import NewDesignActions from "../CommentaryPage/NewDesign";
 import {
     ColorKind,
     FeatureColorCard,
@@ -364,6 +366,36 @@ function Top8Content() {
             .catch(() => undefined);
     }, [write]);
 
+    // The layout kit (ADR-008 L2): the list read again (after a creation, or
+    // a failed one that may have left a folder) -> whether it was read; a
+    // new design is selected once it is listed.
+    const kitMounted = React.useRef(true);
+    React.useEffect(() => {
+        kitMounted.current = true;
+        return () => {
+            kitMounted.current = false;
+        };
+    }, []);
+    const relistDesigns = React.useCallback(
+        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=top8")
+            .then((body) => {
+                if (!kitMounted.current) {
+                    return false;
+                }
+                setDesigns(body.data);
+                return true;
+            }, (error: unknown) => {
+                console.error(error);
+                return false;
+            }), []);
+    const designCreated = React.useCallback((entry: LayoutEntry) => {
+        relistDesigns().then((listed) => {
+            if (listed) {
+                selectDesign(entry.id);
+            }
+        });
+    }, [relistDesigns, selectDesign]);
+
     if (loadFailed) {
         return (
             <Box component="main" sx={{p: 3}}>
@@ -483,6 +515,9 @@ function Top8Content() {
                     onSelect={selectDesign}
                     label={i18n.t("top8_design")}
                     empty={i18n.t("top8_no_design")}
+                    actions={<NewDesignActions kind="top8"
+                                               onCreated={designCreated}
+                                               onRelist={relistDesigns}/>}
                 />
             </Box>
         </Box>

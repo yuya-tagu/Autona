@@ -72,7 +72,7 @@
 ```
 
 - HTTP ステータスと `error.code` を両方返す。`message` は人間向け（i18n しない）。
-- `error.reason`（任意）: `code` より細かいスネークケースの理由。ゲームアセットのルートと、アーカイブ切り抜きの一部（`not_previewable` / `unreadable` など）が付ける。core の文はパスを含みうるのでログにだけ出す（`AutonaApiV1._ASSET_REFUSALS` が表）。クライアントは無いことを想定して読む。
+- `error.reason`（任意）: `code` より細かいスネークケースの理由。ゲームアセットのルート・新しいデザインの作成（`/layouts:create`・`/layouts/kit/{kind}/ai-prompt`）と、アーカイブ切り抜きの一部（`not_previewable` / `unreadable` など）が付ける。core の文はパスを含みうるのでログにだけ出す（`AutonaApiV1._ASSET_REFUSALS` と、新しいデザインの `AutonaApiV1._KIT_REFUSALS` が表）。クライアントは無いことを想定して読む。
 
 ### 2.6 エラーコード
 
@@ -246,6 +246,9 @@
 | GET / PUT | `/layouts/selected/{kind}` | | 選択中のデザイン（`commentary` / `top8` / `board`）の取得 / 選択 |
 | GET | `/layouts/selected/board/obs-path` | PLAYERDB | OBS に指定するファイルの絶対パス |
 | POST | `/layouts/selected/board:reveal` | THIS_PC | Board の OBS ファイルをエクスプローラで開く |
+| POST | `/layouts:create` | SHELL | 新しいデザインを作る（ADR-008 D2。`kind` = `scoreboard` / `commentary` / `top8`・`name`（フォルダ名）・`displayName`（任意）。`layout/<接頭辞><name>/` を作成キットから作り、201 で一覧の項目を返す。拒否は `reason`: 400 `bad_kind` / `bad_name` / `bad_display_name`、409 `reserved` / `exists`、500 `kit_missing` / `write_failed` / `not_listed`） |
+| GET | `/layouts/kit/{kind}/ai-prompt` | SHELL | 作成キットの `AI_PROMPT.md`（`{kind, text}`。デザイン一覧の「AI 用の説明をコピー」） |
+| POST | `/layouts:reveal` | SHELL | 一覧にあるデザイン（`id`）のフォルダをエクスプローラで開く（無ければ 404） |
 | GET | `/commentary` / `/commentary/options` | | 実況の状態 / 役割・アイコン・スロットの候補 |
 | PATCH | `/commentary/{slot}` | | 実況者の欄（5 人目の表示は 409） |
 | POST | `/commentary/reorder` | | 実況者の並べ替え |

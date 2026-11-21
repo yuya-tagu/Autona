@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Autona scoreboard</title>
+    <!-- Order matters: globals.js (the data), then autona.js (the view of
+         overlay contract 1), then this layout's own files. -->
+    <script src="../include/globals.js"></script>
+    <script src="../include/autona.js"></script>
+    <link rel="stylesheet" href="./index.css" />
+  </head>
+  <body>
+    <!-- 1920x1080, transparent: OBS shows the scene through it. -->
+    <div id="info" class="info">
+      <img id="logo" class="logo" alt="" hidden />
+      <span id="tournament"></span>
+      <span id="phase"></span>
+      <span id="round"></span>
+      <span id="best-of"></span>
+    </div>
+
+    <div id="p1" class="side left">
+      <img id="p1-character" class="character" alt="" hidden />
+      <div class="names">
+        <div class="line">
+          <span id="p1-sponsor" class="sponsor"></span>
+          <span id="p1-name" class="name"></span>
+          <img id="p1-flag" class="flag" alt="" hidden />
+        </div>
+        <div id="p1-members" class="members"></div>
+      </div>
+      <span id="p1-score" class="score"></span>
+    </div>
+
+    <div id="p2" class="side right">
+      <img id="p2-character" class="character" alt="" hidden />
+      <div class="names">
+        <div class="line">
+          <span id="p2-sponsor" class="sponsor"></span>
+          <span id="p2-name" class="name"></span>
+          <img id="p2-flag" class="flag" alt="" hidden />
+        </div>
+        <div id="p2-members" class="members"></div>
+      </div>
+      <span id="p2-score" class="score"></span>
+    </div>
+
+    <script src="./index.js"></script>
+  </body>
+</html>

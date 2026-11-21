@@ -210,10 +210,15 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/games/current', 'api_v1.get_current_game', 'GET,HEAD,OPTIONS'),
     ('/api/v1/health', 'api_v1.health', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts', 'api_v1.get_layouts', 'GET,HEAD,OPTIONS'),
+    # The layout kit (ADR-008 L2): its AI text (SHELL).
+    ('/api/v1/layouts/kit/<kind>/ai-prompt', 'api_v1.get_layout_ai_prompt', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/<kind>', 'api_v1.get_selected_layout', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/<kind>', 'api_v1.select_layout', 'OPTIONS,PUT'),
     ('/api/v1/layouts/selected/board/obs-path', 'api_v1.get_board_files', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/board:reveal', 'api_v1.reveal_board_file', 'OPTIONS,POST'),
+    # The layout kit (ADR-008 L2): make a design, open its folder (SHELL).
+    ('/api/v1/layouts:create', 'api_v1.create_layout', 'OPTIONS,POST'),
+    ('/api/v1/layouts:reveal', 'api_v1.reveal_layout_folder', 'OPTIONS,POST'),
     ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
     ('/api/v1/match-names/candidates', 'api_v1.get_match_name_candidates', 'GET,HEAD,OPTIONS'),
     ('/api/v1/players', 'api_v1.get_players', 'GET,HEAD,OPTIONS'),
@@ -676,7 +681,11 @@ def test_the_classification_follows_the_rules():
              "api_v1.archive_titles_preview",
              "api_v1.archive_thumbs_generate",
              "api_v1.archive_worker_install",
-             "api_v1.archive_worker_cancel"}
+             "api_v1.archive_worker_cancel",
+             # The layout kit (ADR-008 L2): a new folder in layout/ (the
+             # overlays' origin), its AI text and a window on this PC.
+             "api_v1.create_layout", "api_v1.get_layout_ai_prompt",
+             "api_v1.reveal_layout_folder"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
         if endpoint in playerDatabase:
@@ -749,7 +758,8 @@ def test_the_classification_follows_the_rules():
     # and the worker's install read, this PC's, its install and cancel, the
     # shell's (A7: v1 76 of 158), and a job's reanalysis, the shell's (v1
     # 76 of 159), and a game's skins for a set's colours, this PC's (A6: v1
-    # 76 of 160).
+    # 76 of 160), and the layout kit's creation, AI text and folder reveal,
+    # the shell's (ADR-008 L2: v1 76 of 163).
     # A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
@@ -759,7 +769,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 160
+    assert len(EXPECTED_API_V1_ROUTES) == 163
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

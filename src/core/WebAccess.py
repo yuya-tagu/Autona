@@ -334,6 +334,13 @@ ROUTE_ACCESS = {
     "api_v1.install_asset_packs": SHELL,
     "api_v1.cancel_assets_job": SHELL,
     "api_v1.reveal_games_folder": SHELL,
+    # The layout kit (ADR-008 D2): making a design writes a new folder into
+    # layout/, served on the overlays' origin, and opening its folder is a
+    # window on this PC -- THIS_PC would let this origin's layout/ pages make
+    # and open them. Its AI text is read by the same lists alone.
+    "api_v1.create_layout": SHELL,
+    "api_v1.get_layout_ai_prompt": SHELL,
+    "api_v1.reveal_layout_folder": SHELL,
     # The archive clipper (ADR-006 A1, D7). The answers name this PC's
     # paths and files: never a LAN device, not with the token, not the
     # preview listener. The reads (the status, the jobs, a job) are

@@ -8,6 +8,26 @@ OBS 等のブラウザソースで読み込んで使用します。
 利用ライブラリ（`gsap`・`jquery`）を同梱しています。リザルト画像・サムネイルの同梱テンプレートが共有する
 `thumbnail_assets.js`・`result.js`・`result.css`・`result_team.css` もここにあります。
 
+### 新しいデザインを作る（BOARD / 実況 / TOP 8。AI に頼んで作る）
+
+1. アプリの BOARD / 実況 / TOP 8 のページで、デザイン一覧の下の「新しいデザインを作る」を押し、名前（半角英数字と `_` `-`）を入れる
+2. `layout/<種類の接頭辞><名前>/`（`scoreboard_` / `commentators_` / `bracket_top8_`）ができ、一覧で選ばれ、エクスプローラーで開く。
+   中身は動く最小のサンプル（`index.html` / `index.css` / `index.js`）・`settings.json`・AI への指示書 `AGENTS.md`（と `CLAUDE.md`）・
+   キーの表 `CONTRACT.md`・チャットの AI に貼る用の `AI_PROMPT.md`
+3. そのフォルダで AI のエージェント（Claude Code / Cursor / Codex）に作りたいものを頼む（`AGENTS.md` を自動で読む）。
+   チャットの AI なら、一覧の「AI 用の説明をコピー」で貼って頼み、返ってきた 3 ファイルをフォルダに上書きする
+4. アプリのプレビューと `http://127.0.0.1:5107/layout/<フォルダ名>/index.html` で確かめる（試合が無いときは URL に
+   `?autonaSample=singles` / `teams` / `empty`）
+5. **OBS には、ブラウザソースの「URL」欄にこの http の URL を入れる**（幅 1920・高さ 1080）。「ローカルファイル」で選ぶと、文字は出るが
+   画像と見本のデータが出ない（キットのデザインは `autona.js` を使い、http で開いたときだけ全部動く）。BOARD のページの OBS の手順
+   （ローカルファイル）は同梱のデザイン向け
+
+キットの元は `include/kit/`（指示書のひな形 `AGENTS.md.tmpl` / `CLAUDE.md.tmpl`・種類ごとのサンプル）。`CONTRACT.md` と
+`AI_PROMPT.md` は `include/overlay_contract.json` から `python scripts/gen_layout_kit.py` で作る生成物（手で直さない）。
+
+> 開発者向け: 接頭辞（`scoreboard_` / `commentators_` / `bracket_top8_`）の付いた名前の同梱フォルダを足すときは、利用者が作った
+> フォルダとの衝突を確かめる（自動更新は `layout/` をマージで上書きする）。足したら `src/core/LayoutKit.py` の `RESERVED_DIRS` にも足す。
+
 ### ローカルでのテスト・デバッグ（Chrome）
 
 - Chrome 起動時に `--allow-file-access-from-files` フラグを付ける

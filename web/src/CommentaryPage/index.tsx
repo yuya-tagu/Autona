@@ -13,7 +13,7 @@ import {
 import i18n from "../i18n/config";
 import {ReduxState} from "../redux/store";
 import {AutonaPlayerDbEntry} from "../backendDataTypes";
-import {apiErrorStatus, apiPatch, apiPost, apiPut} from "../api";
+import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut} from "../api";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
 import {usePanelShell} from "../PanelShell/context";
 import {
@@ -29,6 +29,7 @@ import CasterCard, {
     EMPTY_CASTER,
 } from "./CasterCard";
 import DesignPane from "./DesignPane";
+import NewDesignActions from "./NewDesign";
 import {ColorKind, FeatureColorCard, LayoutEntry, ObsUrlCard} from "./SideCards";
 
 // The Commentary panel as a React page (ADR-005 S4b), /web/commentary: the
@@ -183,6 +184,36 @@ function CommentaryContent() {
             .catch(() => undefined);
     }, [write]);
 
+    // The layout kit (ADR-008 L2): the list read again (after a creation, or
+    // a failed one that may have left a folder) -> whether it was read; a
+    // new design is selected once it is listed.
+    const kitMounted = React.useRef(true);
+    React.useEffect(() => {
+        kitMounted.current = true;
+        return () => {
+            kitMounted.current = false;
+        };
+    }, []);
+    const relistDesigns = React.useCallback(
+        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=commentary")
+            .then((body) => {
+                if (!kitMounted.current) {
+                    return false;
+                }
+                setDesigns(body.data);
+                return true;
+            }, (error: unknown) => {
+                console.error(error);
+                return false;
+            }), []);
+    const designCreated = React.useCallback((entry: LayoutEntry) => {
+        relistDesigns().then((listed) => {
+            if (listed) {
+                selectDesign(entry.id);
+            }
+        });
+    }, [relistDesigns, selectDesign]);
+
     const slots = options?.slots;
     const drag: CardDrag = React.useMemo(() => ({
         onGripStart(slot, event) {
@@ -328,6 +359,9 @@ function CommentaryContent() {
                     designs={designs}
                     design={design}
                     onSelect={selectDesign}
+                    actions={<NewDesignActions kind="commentary"
+                                               onCreated={designCreated}
+                                               onRelist={relistDesigns}/>}
                 />
             </Box>
         </Box>

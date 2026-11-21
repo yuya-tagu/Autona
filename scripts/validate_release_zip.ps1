@@ -27,7 +27,8 @@
        every user design blank in OBS. So must layout/include/autona.js and
        its table overlay_contract.json (ADR-008 D1): every overlay written
        against the overlay contract loads the first, and the kit reads the
-       second.
+       second. So must the layout kit (layout/include/kit/, ADR-008 D2):
+       "make a new design" copies it, and refuses to make one without it.
 
     4. Persisted-state check: user_data/state.json (the operator's saved
        state, ADR-005 S3b) and its set-aside copies (state.json.*.bak) must
@@ -214,10 +215,25 @@ try {
                 "Autona/layout/designer_runtime/runtime.js",
                 "Autona/layout/designer_runtime/runtime.css",
                 "Autona/layout/include/autona.js",
-                "Autona/layout/include/overlay_contract.json"
+                "Autona/layout/include/overlay_contract.json",
+                "Autona/layout/include/kit/AGENTS.md.tmpl",
+                "Autona/layout/include/kit/CLAUDE.md.tmpl",
+                "Autona/layout/include/kit/CONTRACT.md",
+                "Autona/layout/include/kit/scoreboard/index.html",
+                "Autona/layout/include/kit/scoreboard/index.css",
+                "Autona/layout/include/kit/scoreboard/index.js",
+                "Autona/layout/include/kit/scoreboard/AI_PROMPT.md",
+                "Autona/layout/include/kit/commentary/index.html",
+                "Autona/layout/include/kit/commentary/index.css",
+                "Autona/layout/include/kit/commentary/index.js",
+                "Autona/layout/include/kit/commentary/AI_PROMPT.md",
+                "Autona/layout/include/kit/top8/index.html",
+                "Autona/layout/include/kit/top8/index.css",
+                "Autona/layout/include/kit/top8/index.js",
+                "Autona/layout/include/kit/top8/AI_PROMPT.md"
             ) | Where-Object { -not $entryNames.Contains($_) })
         if ($missing.Count -gt 0) {
-            throw ("release zip is missing the shared Designer runtime or the overlay contract (custom designs and overlays load them): {0}" `
+            throw ("release zip is missing the shared Designer runtime, the overlay contract or the layout kit (custom designs and overlays load them, new designs are made from the kit): {0}" `
                 -f ($missing -join ", "))
         }
 

@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import i18n from "../i18n/config";
 import {ReduxState} from "../redux/store";
-import {apiErrorStatus, apiPatch, apiPost, apiPut} from "../api";
+import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut} from "../api";
 import {FeedbackProvider, showSnackbar} from "../ScoreboardPage/Feedback";
 import {usePanelShell} from "../PanelShell/context";
 import {
@@ -22,6 +22,7 @@ import {
 } from "../PanelShell/requests";
 import {useDocumentVisibility} from "../PanelShell/useDocumentVisibility";
 import DesignPane from "../CommentaryPage/DesignPane";
+import NewDesignActions from "../CommentaryPage/NewDesign";
 import {
     ColorKind,
     FeatureColorCard,
@@ -267,6 +268,36 @@ function BoardContent() {
             });
     }, [serial, report]);
 
+    // The layout kit (ADR-008 L2): the list read again (after a creation, or
+    // a failed one that may have left a folder) -> whether it was read; a
+    // new design is selected once it is listed.
+    const kitMounted = React.useRef(true);
+    React.useEffect(() => {
+        kitMounted.current = true;
+        return () => {
+            kitMounted.current = false;
+        };
+    }, []);
+    const relistDesigns = React.useCallback(
+        () => apiGetJson<Envelope<LayoutEntry[]>>("/api/v1/layouts?kind=scoreboard,designer")
+            .then((body) => {
+                if (!kitMounted.current) {
+                    return false;
+                }
+                setDesigns(body.data);
+                return true;
+            }, (error: unknown) => {
+                console.error(error);
+                return false;
+            }), []);
+    const designCreated = React.useCallback((entry: LayoutEntry) => {
+        relistDesigns().then((listed) => {
+            if (listed) {
+                selectDesign(entry.id);
+            }
+        });
+    }, [relistDesigns, selectDesign]);
+
     const reveal = React.useCallback((target: BoardFile) => {
         setRevealing(true);
         serial(() => apiPost(`${SELECTED}:reveal`,
@@ -364,6 +395,9 @@ function BoardContent() {
                     onSelect={selectDesign}
                     label={i18n.t("board_design")}
                     empty={i18n.t("board_no_design")}
+                    actions={<NewDesignActions kind="scoreboard"
+                                               onCreated={designCreated}
+                                               onRelist={relistDesigns}/>}
                     background={BACKGROUND}
                     overlay={popup ? {
                         src: `${WINNER_POPUP}#preview=${popup}`,

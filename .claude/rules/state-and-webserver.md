@@ -159,6 +159,7 @@ paths:
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
 | `PlayerDirectory` | モジュール関数 | 選手リストの行と記録の保存・削除（state は書かない） |
+| `LayoutKit` | モジュール関数 | 「新しいデザインを作る」（`layout/` の新しいフォルダだけに書く。作業フォルダで組んでから改名。ADR-008 D2） |
 
 サービス共通の規則:
 

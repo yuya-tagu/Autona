@@ -104,6 +104,7 @@ from .core import ColorService
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
+from .core import LayoutKit
 from .core import PlayerDirectory
 from .core import Top8Service
 from .core import StatsOverlays
@@ -664,6 +665,24 @@ def get_board_files():
 
 def reveal_board_file(target, designId=None):
     return LayoutCatalog.RevealBoardFile(target, designId)
+
+
+# ── The layout kit (ADR-008 D2) ──────────────────────────────────────────
+# The design lists' "make a new design", "copy for an AI" and "open the
+# folder": core's LayoutKit / LayoutCatalog, in both shells, on the calling
+# thread (layout/, no state). Their v1 routes are WebAccess.SHELL, the shared
+# view's own fetches.
+
+def create_layout(kind, name, displayName=None):
+    return LayoutKit.NewDesign(kind, name, displayName)
+
+
+def get_layout_ai_prompt(kind):
+    return LayoutKit.AiPrompt(kind)
+
+
+def reveal_layout_folder(layoutId):
+    return LayoutCatalog.RevealLayoutFolder(layoutId)
 
 
 def set_feature_colors(feature, colors):

@@ -155,6 +155,10 @@ DESIGNER_NAME_PREFIX = "Custom: "
 # renderer; include/ and icons/ are shared assets.
 _RESERVED_DIRS = frozenset({CUSTOM_DIRNAME, "designer_runtime", "include", "icons"})
 
+# The work folder core/LayoutKit builds a new design in before renaming it
+# into place (ADR-008 D2): never listed, however far it got.
+NEW_DESIGN_WORK_PREFIX = ".new-design-"
+
 # The overlay contracts this Autona serves (ADR-008 D1: the view
 # layout/include/autona.js hands a layout, its table
 # layout/include/overlay_contract.json). An overlay's block may leave
@@ -338,19 +342,29 @@ def RevealBoardFile(target, designId=None, root=None):
         shown = os.path.relpath(path, base) if path else "no design"
         logger.warning(f"LayoutCatalog: no {target} file to show ({shown})")
         return False
-    if sys.platform.startswith("win"):
-        # NTFS refuses a double quote in a name, so isfile() has not found one
-        # with it; if one ever gets here it could close the quotes below.
-        if '"' in path:
-            logger.warning(f"LayoutCatalog: not showing the {target} file: "
-                           f"{os.path.relpath(path, base)}")
-            return False
-        _ExplorerSelect(path)
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", path])
-    else:
-        subprocess.Popen(["xdg-open", os.path.dirname(path)])
-    return True
+    return _Reveal(path, base, select=True)
+
+
+def RevealLayoutFolder(layoutId, root=None):
+    """Open the folder of the layout the catalog lists as ``layoutId`` (any
+    kind) in this PC's file manager: the design lists' "open the folder",
+    after "make a new design" (ADR-008 D2). RevealBoardFile's rules: a
+    client names a listed id, never a path. False, starting nothing, when
+    the catalog lists no such layout (logged); a file manager that cannot be
+    started raises OSError."""
+    base = _Base(root)
+    entry = next((entry for entry in Layouts(root=root)
+                  if entry["id"] == layoutId), None)
+    if entry is None:
+        logger.warning("LayoutCatalog: no listed layout to show")
+        return False
+    path = os.path.normpath(os.path.join(
+        base, *entry.get("folder", entry["id"]).split("/")))
+    if not os.path.isdir(path):
+        logger.warning(f"LayoutCatalog: no folder to show "
+                       f"({os.path.relpath(path, base)})")
+        return False
+    return _Reveal(path, base, select=False)
 
 
 def CustomLayouts(customRoot):
@@ -428,7 +442,28 @@ def _Base(root):
     return os.path.abspath(root) if root else Root()
 
 
-def _ExplorerSelect(path):
+def _Reveal(path, base, select):
+    """Show ``path`` (a file the catalog found, selected in its folder; or,
+    not ``select``, a folder, opened) in this PC's file manager: True."""
+    if sys.platform.startswith("win"):
+        # NTFS refuses a double quote in a name, so the catalog has not found
+        # one with it; if one ever gets here it could close the quotes below.
+        if '"' in path:
+            logger.warning(f"LayoutCatalog: not showing "
+                           f"{os.path.relpath(path, base)}")
+            return False
+        if select:
+            _ExplorerSelect(path)
+        else:
+            _ExplorerOpen(path)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", path] if select else ["open", path])
+    else:
+        subprocess.Popen(["xdg-open", os.path.dirname(path) if select else path])
+    return True
+
+
+def _Explorer():
     # Explorer parses its own command line and splits it at commas, so the path
     # is always in quotes, which subprocess's list form adds only for a space.
     # So a string (still no shell), and explorer's own full path: by name
@@ -437,8 +472,15 @@ def _ExplorerSelect(path):
     windows = os.environ.get("WINDIR")
     if not windows:
         raise OSError("WINDIR is not set")
-    explorer = os.path.join(windows, "explorer.exe")
-    subprocess.Popen(f'"{explorer}" /select,"{path}"')
+    return os.path.join(windows, "explorer.exe")
+
+
+def _ExplorerSelect(path):
+    subprocess.Popen(f'"{_Explorer()}" /select,"{path}"')
+
+
+def _ExplorerOpen(path):
+    subprocess.Popen(f'"{_Explorer()}" "{path}"')
 
 
 def _EntryPath(base, layoutId, entry):
@@ -503,7 +545,9 @@ def _BuiltinLayouts(base):
 
     layouts = []
     for name in names:
-        if name in _RESERVED_DIRS:
+        # A design being made (core/LayoutKit builds one in a work folder
+        # and renames it into place) is not one yet.
+        if name in _RESERVED_DIRS or name.startswith(NEW_DESIGN_WORK_PREFIX):
             continue
         directory = os.path.join(base, name)
         if not os.path.isdir(directory):

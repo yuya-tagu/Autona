@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Autona top 8</title>
+    <!-- Order matters: globals.js (the data), then autona.js (the view of
+         overlay contract 1), then this layout's own files. -->
+    <script src="../include/globals.js"></script>
+    <script src="../include/autona.js"></script>
+    <link rel="stylesheet" href="./index.css" />
+  </head>
+  <body>
+    <!-- 1920x1080, transparent: OBS shows the scene through it. -->
+    <header class="header">
+      <img id="logo" class="logo" alt="" hidden />
+      <span id="tournament"></span>
+      <span id="phase"></span>
+    </header>
+
+    <!-- The 11 matches, filled by index.js: winners side above, losers below,
+         one column per round. -->
+    <section id="winners" class="bracket winners"></section>
+    <section id="losers" class="bracket losers"></section>
+
+    <script src="./index.js"></script>
+  </body>
+</html>
