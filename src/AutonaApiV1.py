@@ -44,6 +44,7 @@ from .core import ImageImport
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
+from .core import LayoutKit
 from .core import PlayerDirectory
 from .core import PlayerService
 from .core import ResultService as results
@@ -2563,6 +2564,93 @@ def reveal_games_folder():
     # no path: the folder is core's.
     if not WebOps.reveal_games_folder():
         raise ApiError(INTERNAL, "the games folder could not be shown", 500)
+    return ok()
+
+
+# ── The layout kit (ADR-008 D2) ──
+# The design lists' (BOARD / Commentary / Top 8) "make a new design", "copy
+# for an AI" and "open the folder": core's LayoutKit / LayoutCatalog. All
+# WebAccess.SHELL: layout/ is served on the overlays' origin, so a layout's
+# script must not make a design nor open a window on this PC (headless has
+# no shared view: SHELL is 403 there). Every answer is no-store. Not in the
+# API catalog. A refusal answers core's code as error.reason with the words
+# of _KIT_REFUSALS; core's message (it may name a path) goes to the log.
+
+_KIT_REFUSALS = {
+    LayoutKit.BAD_KIND: (INVALID_ARGUMENT,
+                         "kind must be one of: " + ", ".join(LayoutKit.KINDS),
+                         400),
+    LayoutKit.BAD_NAME: (
+        INVALID_ARGUMENT,
+        f"name must be 1 to {LayoutKit.NAME_MAX} of A-Z a-z 0-9 _ -, "
+        "starting with a letter or a digit", 400),
+    LayoutKit.BAD_DISPLAY_NAME: (
+        INVALID_ARGUMENT,
+        f"displayName must be at most {LayoutKit.DISPLAY_NAME_MAX} "
+        "characters, no control characters", 400),
+    LayoutKit.RESERVED: (CONFLICT, "that folder is the release's", 409),
+    LayoutKit.EXISTS: (CONFLICT, "a design of that name exists", 409),
+    LayoutKit.KIT_MISSING: (INTERNAL, "the layout kit is not whole", 500),
+    LayoutKit.NOT_LISTED: (
+        INTERNAL, "the design's folder was made but is not listed", 500),
+    LayoutKit.WRITE_FAILED: (INTERNAL, "the design could not be made", 500),
+}
+_KIT_REFUSAL_OTHER = (INTERNAL, "the design could not be made", 500)
+
+
+def _kit_refused(operation, error):
+    logger.info(f"API v1: layout {operation} refused: {error.code}: "
+                f"{error.message}")
+    api, words, status = _KIT_REFUSALS.get(error.code, _KIT_REFUSAL_OTHER)
+    return ApiError(api, words, status, reason=error.code)
+
+
+@api_v1.route("/layouts:create", methods=["POST"])
+@_no_store_answers
+@write_op("layout.create")
+def create_layout():
+    # {"kind": "scoreboard" | "commentary" | "top8", "name": "<A-Z a-z 0-9 _
+    # ->", "displayName"?: "<any text, 64 at most>"}: makes
+    # layout/<prefix><name>/ from the kit (core's LayoutKit), shown as the
+    # display name (the name without one) -> 201 its catalog entry (GET
+    # /layouts' shape). Refused with error.reason: 400 bad_kind / bad_name /
+    # bad_display_name, 409 reserved / exists, 500 kit_missing / write_failed
+    # / not_listed (made, left in layout/). Settings and state untouched: no
+    # revision.
+    body = _json_body()
+    try:
+        entry = WebOps.create_layout(body.get("kind"), body.get("name"),
+                                     body.get("displayName"))
+    except LayoutKit.LayoutKitError as error:
+        raise _kit_refused("create", error)
+    return ok(data=entry, status=201)
+
+
+@api_v1.route("/layouts/kit/<kind>/ai-prompt")
+@_no_store_answers
+@api_handler
+def get_layout_ai_prompt(kind):
+    # {"kind", "text"}: the kit's AI_PROMPT.md of the kind, what the list's
+    # "copy for an AI" puts on the clipboard (text, never rendered).
+    try:
+        text = WebOps.get_layout_ai_prompt(kind)
+    except LayoutKit.LayoutKitError as error:
+        raise _kit_refused("ai-prompt", error)
+    return ok(data={"kind": kind, "text": text})
+
+
+@api_v1.route("/layouts:reveal", methods=["POST"])
+@_no_store_answers
+@write_op("layout.reveal")
+def reveal_layout_folder():
+    # {"id": "<a layout id GET /layouts lists>"}: opens its folder in this
+    # PC's file manager. The path is the catalog's: a client names an id,
+    # never a path. 404 when the catalog lists no such layout.
+    layoutId = _json_body().get("id")
+    if not isinstance(layoutId, str) or not layoutId:
+        raise ApiError(INVALID_ARGUMENT, "id must be a layout id", 400)
+    if not WebOps.reveal_layout_folder(layoutId):
+        raise ApiError(NOT_FOUND, "no such layout's folder to show", 404)
     return ok()
 
 

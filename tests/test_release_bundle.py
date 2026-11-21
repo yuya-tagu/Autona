@@ -442,6 +442,32 @@ def test_the_filter_applies_to_both_tocs_before_the_collection():
         assert source == f"[entry for entry in {toc} if not _unused_qt_file(entry[0])]"
 
 
+# The layout kit's files (ADR-008 D2), under layout/: what core/LayoutKit
+# copies into a new design. The validator's check 3 requires each one
+# (test_the_validator_requires_the_layout_kit).
+def _layout_kit_files():
+    from src.core import LayoutKit
+    kit = "/".join(LayoutKit.KIT_DIR)
+    files = [f"{kit}/{name}" for name in LayoutKit.TEMPLATES]
+    files.append(f"{kit}/{LayoutKit.CONTRACT_FILE}")
+    for kind in LayoutKit.KINDS:
+        files += [f"{kit}/{kind}/{name}" for name in
+                  (*LayoutKit.SAMPLE_FILES, LayoutKit.AI_PROMPT_FILE)]
+    return files
+
+
+LAYOUT_KIT_FILES = _layout_kit_files()
+
+
+def test_the_validator_requires_the_layout_kit():
+    text = VALIDATOR.read_text(encoding="utf-8")
+    required = set(re.findall(r'"Autona/layout/include/kit/([^"]+)"', text))
+    assert required == {path[len("include/kit/"):]
+                        for path in LAYOUT_KIT_FILES}
+    for path in LAYOUT_KIT_FILES:
+        assert (PROJECT_ROOT / "layout" / path).is_file(), path
+
+
 _CHECK_5_DRIVER = r"""
 param([string]$Validator, [string]$Dir)
 foreach ($zip in @(Get-ChildItem -LiteralPath $Dir -Filter *.zip | Sort-Object Name)) {
@@ -460,8 +486,8 @@ foreach ($zip in @(Get-ChildItem -LiteralPath $Dir -Filter *.zip | Sort-Object N
 @pytest.mark.skipif(shutil.which("powershell") is None, reason="no powershell")
 def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
     """Run validate_release_zip.ps1 on zips that pass checks 1-4 (the shared
-    Designer runtime, the overlay contract's autona.js and table, and nothing
-    else outside _internal/) and carry every
+    Designer runtime, the overlay contract's autona.js and table, the layout
+    kit, and nothing else outside _internal/) and carry every
     required file under _internal/ (empty): one passes, and one lacking a
     required file, one per forbidden pattern and one over the size cap
     each throw for that reason. Check 6 (ADR-006 A7) too: a zip carrying
@@ -475,6 +501,7 @@ def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
             "Autona/layout/designer_runtime/runtime.css",
             "Autona/layout/include/autona.js",
             "Autona/layout/include/overlay_contract.json",
+            *("Autona/layout/" + p for p in LAYOUT_KIT_FILES),
             *("Autona/_internal/" + p for p in required)]
     zips = tmp_path / "zips"
     zips.mkdir()

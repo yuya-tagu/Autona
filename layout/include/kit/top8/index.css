@@ -1,0 +1,96 @@
+/* Fonts come from Autona's own files only (no web font from the
+   internet): ../include/RobotoCondensed.ttf for Latin, and for Japanese
+   ../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf. */
+@font-face {
+  font-family: "Autona Condensed";
+  src: url("../include/RobotoCondensed.ttf");
+}
+
+@font-face {
+  font-family: "LINE Seed JP";
+  src: url("../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf");
+}
+
+/* The hidden attribute must win over display: flex / grid below (a rule
+   with display overrides the browser's own [hidden] rule). */
+[hidden] { display: none !important; }
+
+/* The defaults; index.js puts the tournament's colours over them
+   (view.tournament.themeColor / accentColor). Fixed colours are
+   fine too: drop those lines from index.js. */
+:root { --theme: #1e2235; --accent: #e8b32f; }
+
+html,
+body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  /* Transparent: OBS shows the scene behind the overlay. */
+  background: transparent;
+  font-family: "Autona Condensed", "LINE Seed JP", sans-serif;
+  color: #fff;
+}
+
+.header {
+  position: absolute;
+  top: 40px;
+  left: 80px;
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  font-size: 48px;
+}
+
+.logo { height: 64px; }
+
+#phase { color: var(--accent); }
+
+.bracket {
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  display: flex;
+  gap: 32px;
+  align-items: center;
+}
+
+.winners { top: 160px; height: 400px; }
+
+.losers { top: 600px; height: 420px; }
+
+.round {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 16px;
+  height: 100%;
+  flex: 1;
+}
+
+.match { background: var(--theme); border-left: 6px solid transparent; }
+
+/* Being played: both players known, not finished yet. */
+.match.live { border-left-color: var(--accent); }
+
+.match .title { padding: 2px 12px; font-size: 18px; opacity: 0.7; }
+
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 24px;
+}
+
+.slot img { width: 32px; height: 32px; object-fit: contain; }
+
+.slot .name { flex: 1; white-space: nowrap; overflow: hidden; }
+
+.slot.winner .name { color: var(--accent); }
+
+/* A player not decided yet (slot is null). */
+.slot.empty .name { opacity: 0.4; }
+
+.slot .score { min-width: 32px; text-align: right; }

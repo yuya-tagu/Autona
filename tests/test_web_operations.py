@@ -2428,6 +2428,11 @@ _NOT_200 = {
     ("api_v1.install_asset_packs", None): 403,
     ("api_v1.cancel_assets_job", None): 403,
     ("api_v1.reveal_games_folder", None): 403,
+    # The layout kit (SHELL, ADR-008 L2), likewise: headless makes no design,
+    # hands out no AI text and opens no folder.
+    ("api_v1.create_layout", None): 403,
+    ("api_v1.get_layout_ai_prompt", None): 403,
+    ("api_v1.reveal_layout_folder", None): 403,
     # The archive clipper's writes, likewise (SHELL, ADR-006 A1): headless
     # starts no job and moves no work folder. Its reads answer (THIS_PC):
     # the URL's job id names none.

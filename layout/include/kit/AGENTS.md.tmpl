@@ -1,0 +1,115 @@
+# Autona のオーバーレイを作る（AI への指示書）
+
+このフォルダは、格闘ゲーム大会の配信支援ツール **Autona** の OBS 用オーバーレイ（1 枚の Web ページ）です。
+Autona の「新しいデザインを作る」で作られ、`layout/<このフォルダ>/` に置かれています。
+あなたの仕事は、利用者の頼みに合わせて `index.html` / `index.css` / `index.js` を書き換えることです。
+
+## このフォルダのファイル
+
+| ファイル | 役割 |
+|---|---|
+| `index.html` / `index.css` / `index.js` | オーバーレイ本体。今は動く最小のサンプルが入っている。これを書き換える |
+| `settings.json` | Autona がデザインの一覧に出すための情報（`autona` ブロック）。下の規則を守る |
+| `CONTRACT.md` | `view` のキーの全量（型・値が無いときの値・説明） |
+| `AGENTS.md` / `CLAUDE.md` | この指示書（`CLAUDE.md` は `AGENTS.md` を読ませるだけ） |
+| `AI_PROMPT.md` | チャットの AI に貼る用のまとめ（この指示書・キーの表・サンプル） |
+
+種類（BOARD のスコアボード / 実況 / TOP 8）は `settings.json` の `autona.kind`（`scoreboard` / `commentary` / `top8`）です。
+
+## データの受け取り方（オーバーレイ契約 1）
+
+Autona のデータは `../include/autona.js` が整えた形（`view`）で受け取ります。
+
+```html
+<script src="../include/globals.js"></script>
+<script src="../include/autona.js"></script>
+<link rel="stylesheet" href="./index.css" />
+...
+<script src="./index.js"></script>  <!-- body の最後 -->
+```
+
+```js
+(function () {
+  Autona.onUpdate(function (view, prev) {
+    document.getElementById("p1-name").textContent = view.board.p1.name;
+  });
+})();
+```
+
+- `Autona.onUpdate(関数)` に渡した関数は、表示に関わる値が変わるたびに `(view, prev)` で呼ばれる（`prev` は前の `view`。最初は `null`）。
+  データが届く前に登録すれば最初のデータで、届いた後に登録すればその時点の `view` ですぐ 1 回呼ばれる
+- `view` のまとまり: `view.board`（スコアボード。`p1` / `p2`・`bestOf`・`phase`・`round` など）、`view.tournament`（大会名・ロゴ・色）、
+  `view.commentary`（表示する実況者の配列。表示順）、`view.top8`（TOP 8 の選手と 11 試合）、`view.options`（表示の切り替え）。
+  キーの全量は `CONTRACT.md`
+- 値が無いときは、文字列は `""`、数値は `null`、配列は `[]`、真偽値は `false`。`undefined` は来ないので、`if` は最小限でよい
+- 画像（キャラ・国旗・ロゴ）は**そのまま `<img src>` に入れられる URL**（`/assets/...` のような絶対パス）。自分で組み立てない。`""` なら画像を隠す
+- `view.options`（`showSponsor` など）は Autona の「表示の切り替え」。`view` の値には効いていないので、出すかどうかはあなたのコードで決める
+- `view` と `prev` は凍結されている（書き換えない）。表示に使う値は自分の変数にコピーする
+- `view.board` は URL の `scoreboardNumber`（1・2・3。無ければ 1）のボード。1 は 1on1、2 は団体戦、3 はクルーバトル
+- `Autona.raw` は Autona の生のデータで、契約の外（版が上がると形が変わる）。`view` に無いものがどうしても要るときだけ使う
+
+### 色（テーマ色）
+
+`view.tournament.themeColor` / `accentColor` は大会（またはその種類）の色で、`"#rrggbb"` か `""`。サンプルは CSS 変数で受けている:
+
+```css
+:root { --theme: #1e2235; --accent: #e8b32f; }   /* 色が無いときの既定 */
+.panel { background: var(--theme); border-color: var(--accent); }
+```
+
+```js
+if (view.tournament.themeColor) {
+  document.documentElement.style.setProperty("--theme", view.tournament.themeColor);
+}
+```
+
+デザインに合わせて**固定の色にしてもよい**（そのときは上の `setProperty` を消す）。
+
+### 実況（`view.commentary`）
+
+`iconName` は Autona で選んだアイコンの名前（`"mic"`・`"megaphone"`・`"phone"`、選ばなければ `""`）。**対応する画像は `view` に無い**ので、
+アイコンを出すならこのフォルダに自前の SVG（例 `mic.svg`）を置き、`iconName` で選んで `<img src="./mic.svg">` のように使う。
+
+### TOP 8（`view.top8`）
+
+- `view.top8.matches` には常に 11 試合がある（`wsf1` `wsf2` `wf` `gf` `gf_reset`（勝者側）と `lr1a` `lr1b` `lqf1` `lqf2` `lsf` `lf`（敗者側））。
+  グランドファイナル `gf` とそのリセット `gf_reset` は勝者側の右端に置くのが普通
+- `active` は **`gf_reset` だけ**の意味で「リセットの試合をやるか」（ほかの試合では意味が無い）。`false` なら `gf_reset` は隠す
+- **「今やっている試合」を示す値は無い**。両方の選手が決まっていて（`p1.slot` と `p2.slot` が `null` でない）`finished` が `false` の試合を進行中とみなす
+- 選手がまだ決まっていない枠は `slot` が `null`（名前などは全部空）。`"TBD"` などを薄く出すとよい
+- `winner` は勝った側（`1` / `2`）。終わっていない・同点なら `null`
+
+## 守る規則
+
+1. **読み込むファイルはこのフォルダと Autona 同梱のもの（`../include/`・`../../assets/font/`）だけ**。CDN・Google Fonts などの Web フォント・外部の画像や API など、
+   インターネット上のものは読まない（配信の PC がオフラインでも映るように）
+2. **フォント**: 使える同梱フォントは次のとおり（`@font-face` の `src: url(...)` で読む）。
+   - 英数字だけ: `../include/RobotoCondensed.ttf`（細長い）・`../include/Roboto-Regular.ttf`・`../include/NotoSans-Regular.ttf`
+   - **日本語が出る**: `../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf`（LINE Seed JP 太字）・
+     `../../assets/font/GenEiMGothic/GenEiMGothic2-Regular.ttf`（源暎Mゴシック。`-Medium` `-Bold` `-Heavy` `-Black` もある）
+   - OS のフォント名（`"Yu Gothic"`・`"Meiryo"` など）を `font-family` に並べるのはよい。ただし配信の PC に無ければ別のフォントで出る
+3. **読む順番**: `../include/globals.js` → `../include/autona.js` → このフォルダの CSS / JS。`index.js` は `<body>` の最後に置く
+4. **トップレベルで次の名前を使わない**（宣言しない・代入しない）: `Autona`、`autona` で始まる名前、`scoreboardNumber`、`Start`、`Update`、
+   `data`、`oldData`、`settings`、`tsh_settings`、`LoadEverything`、`getData`、`UpdateData`。
+   `globals.js` / `autona.js` が使っている名前で、URL のクエリも同じ名前の変数を上書きする。**コードは全部 `(function () { ... })();` の中に書く**
+5. **1920×1080、背景は透明**（`html, body { width: 1920px; height: 1080px; background: transparent; }`）。OBS ではこのページの上に何も無い部分から下の映像が見える
+6. **`hidden` 属性で隠すなら CSS に `[hidden] { display: none !important; }` を置く**（サンプルにある）。`display: flex` などを書いた要素は、
+   これが無いと `hidden` にしても消えない
+7. **`settings.json` を壊さない**: JSON として正しいままにし、`autona` ブロックの `kind` と `contract`（`1`）は変えない。
+   変えてよいのは `displayName`（一覧に出る名前）・`author`（作者）・`license`（ライセンス）。人に渡すなら `author` と `license` を埋める
+8. 人の入力した文字（選手名など）は `textContent` で入れる。`innerHTML` に入れない
+9. `../include/` と `../../assets/` の中のファイルは書き換えない（Autona の更新で上書きされ、ほかのデザインも使っている）
+10. アニメーションに `../include/gsap.min.js` を使うなら、最初のデータが届くまで gsap の時間は止まっている（`globals.js` の挙動）
+
+## 確かめ方と完成の条件
+
+- Autona の該当ページ（BOARD / 実況 / TOP 8）のデザイン一覧でこのデザインを選ぶと、右のプレビューに出る
+- このデザインの URL は `http://127.0.0.1:5107/layout/<このフォルダ>/index.html`（5107 は Autona の既定のポート。設定で変えていればその番号）。
+  Chrome で開くと配信と同じものが見える。
+  試合が無いときは URL の後ろに `?autonaSample=singles`（1on1）・`?autonaSample=teams`（団体戦）・`?autonaSample=empty`（空）を付けると見本のデータで描ける。
+  BOARD は `?scoreboardNumber=2` で団体戦、`?scoreboardNumber=3` でクルーバトルのボード
+- **OBS には、ブラウザソースの「URL」欄に上の http の URL を入れる**（「ローカルファイル」にチェックを入れてファイルを選ぶ方法では、文字は出るが画像と見本のデータが出ない）。幅 1920・高さ 1080
+- `autona.js` は http で開いたときだけ全部動く（ファイルをダブルクリックして file:// で開くと、文字は出るが画像と見本のデータが出ない）
+
+**完成の条件**: (1) Autona のプレビューに表示され、(2) 上の URL を Chrome で開いて開発者ツール（F12）のコンソールにエラーが 0 件、
+(3) `?autonaSample=singles` / `teams` / `empty` のどれでもエラーが出ない（空のときは空欄になるだけ）。

@@ -203,8 +203,8 @@ function frameSx(scale: number) {
 }
 
 export default function DesignPane({
-    designs, design, onSelect, label, empty, controls, background, overlay,
-    reloadKey, fit = false,
+    designs, design, onSelect, label, empty, actions, controls, background,
+    overlay, reloadKey, fit = false,
 }: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
@@ -214,6 +214,9 @@ export default function DesignPane({
     // design: the Commentary page's by default.
     label?: string;
     empty?: string;
+    // Right under the select: the layout kit's buttons (ADR-008 L2) on the
+    // pages that make designs.
+    actions?: React.ReactNode;
     // Between the select and the preview.
     controls?: React.ReactNode;
     // A picture of the server's behind the design (a path): what shows through
@@ -342,6 +345,7 @@ export default function DesignPane({
                     );
                 })}
             </TextField>
+            {actions}
             {controls}
             {preview && fit ? (
                 <Box
