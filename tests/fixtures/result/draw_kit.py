@@ -35,7 +35,10 @@ shutil.copytree(ROOT / "layout" / "include" / "kit",
                 APP / "layout" / "include" / "kit")
 shutil.copy(ROOT / "layout" / "include" / "autona.js",
             APP / "layout" / "include" / "autona.js")
-shutil.copy(ROOT / "layout" / "logo.png", APP / "layout" / "logo.png")
+# layout/logo.png is the user's own (gitignored, absent on CI): a tracked
+# image stands in for it.
+shutil.copy(ROOT / "assets" / "icons" / "icon.png",
+            APP / "layout" / "logo.png")
 for relative in ("assets/font/LINESeedJP", "assets/thumbnail_base",
                  "assets/mock_data/mock_asset"):
     shutil.copytree(ROOT / relative, APP / relative)

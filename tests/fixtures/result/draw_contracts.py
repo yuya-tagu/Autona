@@ -46,7 +46,10 @@ for relative in ["layout/" + folder for folder in SHIPPED.values()] + [
         "assets/font/LINESeedJP", "assets/thumbnail_base",
         "assets/mock_data/mock_asset"]:
     shutil.copytree(ROOT / relative, APP / relative)
-shutil.copy(ROOT / "layout" / "logo.png", APP / "layout" / "logo.png")
+# layout/logo.png is the user's own (gitignored, absent on CI): a tracked
+# image stands in for it.
+shutil.copy(ROOT / "assets" / "icons" / "icon.png",
+            APP / "layout" / "logo.png")
 (APP / "layout" / "include").mkdir()
 for name in ("jquery-3.7.1.min.js", "lodash.min.js", "thumbnail_assets.js",
              "autona.js", "result.js", "result.css", "result_team.css"):
