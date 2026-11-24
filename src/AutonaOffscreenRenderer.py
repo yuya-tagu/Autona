@@ -441,16 +441,17 @@ class AutonaOffscreenRenderer(QObject):
         self._view.resize(1920, 1080)
         self._host.show()
         if QGuiApplication.platformName() == "offscreen":
-            # Qt's offscreen platform composites no web page into a widget:
-            # every picture is the host widget's background (the theme's
-            # bg_primary, 17,19,23, in the app), and the log still says the
-            # render completed. Only the tests run there (tests/conftest.py
+            # Qt's offscreen platform may composite no web page into a
+            # widget (it does on a GPU-less CI runner, not on a desktop with
+            # one): every picture is then the host widget's background (the
+            # theme's bg_primary, 17,19,23, in the app), and the log still
+            # says the render completed. Only the tests run there (tests/conftest.py
             # sets QT_QPA_PLATFORM=offscreen, which a process they launch
             # inherits): said once per renderer, so a wrong picture is not
             # taken for the renderer's fault.
             logger.warning(
                 f"{self.LOG_NAME}: on Qt's offscreen platform the pictures "
-                "are the window's background, not the page "
+                "may be the window's background, not the page "
                 "(QT_QPA_PLATFORM=offscreen)")
 
         self._configure_view()

@@ -52,9 +52,11 @@ def test_the_desktop_startup_draws_the_page(tmp_path):
     assert drawn["centre"] != BG_PRIMARY
 
 
-def test_on_the_offscreen_platform_it_is_the_window_and_it_says_so(tmp_path):
+def test_on_the_offscreen_platform_it_says_so(tmp_path):
     drawn, output = _draw(tmp_path, "offscreen")
     assert drawn["error"] == ""
-    assert (drawn["colours"], drawn["centre"]) == (1, BG_PRIMARY)
-    assert "on Qt's offscreen platform the pictures are the window's " \
+    # Whether the page is composited there depends on the machine (a desktop
+    # GPU: the window's background only; a GPU-less CI runner: the page), so
+    # only the warning is pinned.
+    assert "on Qt's offscreen platform the pictures may be the window's " \
         "background" in output

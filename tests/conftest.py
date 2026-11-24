@@ -1035,7 +1035,11 @@ def _renderAssetsLetGo():
     test that held it: a test that left one held would serve it to the
     next. The tests that pin the letting go look before this runs."""
     yield
-    from src.core import RenderAssets
+    # Only when a test imported it: the runtime contract job runs these
+    # tests without the app's dependencies (loguru).
+    RenderAssets = sys.modules.get("src.core.RenderAssets")
+    if RenderAssets is None:
+        return
     with RenderAssets._lock:
         RenderAssets._held.clear()
 
