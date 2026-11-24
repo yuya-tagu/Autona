@@ -36,7 +36,9 @@ surface; the server only asks it questions. It decides six things:
 * **What the preview listener serves** (PreviewServes, ADR-005 S-final
   SF-8a): the second port the shared view's design previews load from
   serves only what a layout reads, and never writes -- decided before any
-  of the above, token or not.
+  of the above, token or not. The off-screen renders are drawn there too
+  (ADR-007 D4), and it alone serves the files a render holds (RENDER_ASSET,
+  core/RenderAssets).
 * **That no other page frames this server's own** (FramedElsewhere,
   FRAME_ANCESTORS; the SF-8a review): a preview's script would otherwise
   navigate its frame -- or frame anew -- to this server's port, and run as
@@ -88,6 +90,10 @@ THIS_PC = "this_pc"
 # -- every same-origin page (a layout/ page, in OBS or a browser) passes as
 # this PC's own request -- so the access token is served here.
 SHELL = "shell"
+# A file an off-screen render holds for its page (core/RenderAssets; ADR-007
+# D4): served on the preview listener alone, while the render holds it. This
+# server's own port answers it like a missing file (the route's handler).
+RENDER_ASSET = "render_asset"
 
 # The classes Authorize() guards.
 GUARDED = frozenset({WRITE, PLAYERDB, THIS_PC, SHELL})
@@ -159,6 +165,8 @@ ROUTE_ACCESS = {
     # ── entry page and files ──
     "web_index": STATIC,
     "file_request": STATIC,
+    # The off-screen render's held images (ADR-007 D4): the preview's alone.
+    "render_asset": RENDER_ASSET,
     # ── /api/v1 (GET = READ, POST / PATCH / PUT / DELETE = WRITE) ──
     "api_v1.state": READ,
     "api_v1.health": READ,
@@ -573,13 +581,16 @@ def PreviewStaticPath(filename):
 
 def PreviewServes(endpoint, method, filename=None):
     """Whether the preview listener serves a request: a read (GET / HEAD /
-    OPTIONS) of an /api/v1 READ endpoint, or of a file PreviewStaticPath()
+    OPTIONS) of an /api/v1 READ endpoint, of a file PreviewStaticPath()
     serves (a STATIC endpoint with its ``filename``; the Web UI's entry
-    pages have none). Everything else -- GUARDED, DESIGNER, /web, the
-    legacy routes, an unmatched URL -- is not."""
+    pages have none), or of a render's held file (RENDER_ASSET, whose handler
+    says whether one is held). Everything else -- GUARDED, DESIGNER, /web,
+    the legacy routes, an unmatched URL -- is not."""
     if method not in PREVIEW_METHODS or not isinstance(endpoint, str):
         return False
     access = RouteAccess(endpoint)
+    if access == RENDER_ASSET:
+        return True
     if access == STATIC:
         return filename is not None and PreviewStaticPath(filename) is not None
     return endpoint.startswith(V1_ENDPOINT_PREFIX) and access == READ

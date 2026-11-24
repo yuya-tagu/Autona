@@ -144,7 +144,7 @@ export type GenerateResult =
 export type PostState = "loading" | "ready" | "token" | "failed";
 
 const RENDER_ERRORS = ["no_data", "payload_failed", "render_failed",
-                       "save_failed", "cancelled"];
+                       "preview_unavailable", "save_failed", "cancelled"];
 
 // result_render.error as words: a code core knows, else the render's failure.
 export function errorText(code: string): string {

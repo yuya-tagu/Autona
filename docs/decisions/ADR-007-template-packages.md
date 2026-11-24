@@ -128,6 +128,41 @@ TOP8 リザルト画像と試合サムネイルのデザインを、第三者が
 - `QTWEBENGINE_DISABLE_SANDBOX=1` はプロセス全体の設定で、置いた理由が記録に無い。この段階で理由を調べ、外せるなら外す。
   外せないなら理由を Design.md に書いて残す
 
+**実装（T2 = ADR-008 D7 R1）**:
+
+- 読み込み: `AutonaOffscreenRenderer._load_template` が `http://127.0.0.1:<WebServer.PreviewPort()>/layout/<フォルダ>/<entry>`
+  （各部分を percent-encode）を読む。ポートが無ければ `PreviewUnavailable` → 固定コード `preview_unavailable`
+  （`RenderLane.PREVIEW_UNAVAILABLE`。`RENDER_FAILED` に丸めず state に出す。Web の文言は `thumbnail_error_*` / `result_error_*`）。
+  読み込んだときのポートと今のポートが違えば次の描画で読み直す（無くなっていれば断る）
+- 遮断: レンダラーのページごとに off-the-record の `QWebEngineProfile` を作り（HTTP キャッシュ `NoCache`・永続ストレージなし。
+  プロファイルはページの子にして、ページより後に消える）、`_RenderRequestFilter` をそのプロファイルに付ける（自分のオリジンの http と
+  `data:` / `blob:` だけ。ws: も止める）。ページ単位のインターセプタでは SharedWorker・Service Worker の要求が見えず、既定の
+  プロファイルでは同じオリジンの共有ビューの DesignPane の iframe と BroadcastChannel・localStorage で通じてしまうため（レビュー指摘）。
+  NoCache で `layout/` の 1 日キャッシュの問題も無くなる。`_RenderPage` が権限・ファイルシステム・プロトコルハンドラを拒否し、
+  `createWindow` は None、メインフレームは読み込んだ URL だけ。**WebRTC の UDP（STUN / TURN）はフィルタを通らないので止められない**
+  （権限も要らない）。第三者のテンプレートを勧める段階でこれを受け入れるか、Chromium のフラグで WebRTC を切るかを決める
+- 枠: `core/RenderAssets`（Qt なし）。`config` の `background_path` / `main_icon_path` だけが任意のパスを持つ（棚卸しの結果。
+  ほかは state の画像とパッケージ自身のファイルで、プレビューが出す）。プレビューが出す相対パスは相対のまま `m=<更新時刻>` を足し、
+  ほかのファイル（`./user_data/thumbnail_background_*.png`・アーカイブの `_bg.jpg` の file URL・旧版のドライブのパス・`./tmp/`）は
+  描画の開始で持って `/render-asset/<id>` を渡し、`_finish` で放す（タイムアウト・開始できなかった描画も）。id は描画ごとではなく
+  ファイルの版ごと（プロセスごとの秘密での HMAC（実パス・サイズ・更新時刻）。プレビューのたびに decode し直さない）で、読めるのは
+  それを持つ描画が走っている間だけ。ルート `render_asset`（区分 `RENDER_ASSET`）はプレビューのリスナーで、送り元がこの PC の
+  ループバック（転送ヘッダなし）のときだけ出す（LAN 有効時はリスナーが全アドレスに bind するため）。本体のポートと放した後は 404。
+  UNC のパスは GUI スレッドで stat しないよう `""`。プレビューが出すパスもファイルが無ければ `""`。サービスの payload（golden）は変えない
+- 配信の基準: 静的ファイルを CWD ではなくアプリのディレクトリ（`LayoutCatalog.AppDirectory()`。カタログの `Root()` と同じ基準）から
+  配る。レンダラーが読むページがカタログの一覧と同じフォルダのものになる
+- sandbox: 外した。QtWebEngine はこの変数を最初の初期化の 1 回だけ読み、アプリでは共有ビューがレンダラーより先に初期化するので
+  もともと効いていなかった（実測で `--no-sandbox` が付かないことを確認）。外した今、レンダラーが先に初期化した場合も sandbox が
+  有効になるだけで、挙動は共有ビューと同じ。理由は Design.md §7.3 / §7.4
+- SCORE の X 投稿は非同期のレーン（`POST /thumbnail:generate`）なので `thumbnail.render.error` に `preview_unavailable` が出る。
+  同期の `renderSync`（legacy の `get-thumbnail`・`main_generate_thumbnail`）は理由を `syncError` に残し、例外の文に入れる。
+  アーカイブは warning に理由のコードを残す（既存）
+- 画素: 同梱 8 種（リザルト 6・サムネイル 2。アップロード背景・バナー・アーカイブ背景を含む 15 通り）を同じ環境で file:// と比べ、
+  差は最大 3（初回描画のタイミング）と JPEG の背景で ±2（Chromium の JPEG の decode の経路。目では分からない）
+- pin: `tests/test_render_isolation.py`（実 QtWebEngine で file:・ほかのポート・別名の host・ws・iframe・window.open・メインフレームの遷移・
+  Worker・SharedWorker・Service Worker の要求・権限が届かない／既定のプロファイルの同じオリジンのページと BroadcastChannel・
+  localStorage で通じない／プレビューと枠は読める／描画後・失敗後は 404／ポートが無いと断る／日本語・記号のフォルダ名が描ける）
+
 ### D5: 取り込みは zip のアップロード。検査は `AssetPackService` と共有する【論点 2】
 
 - **対象は全 kind**（論点 2 = B）: `result` / `thumbnail` に加えて `scoreboard` / `commentary` / `top8`（OBS のオーバーレイ）も

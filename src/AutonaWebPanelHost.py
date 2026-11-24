@@ -778,10 +778,11 @@ class _PanelPage(QWebEnginePage):
     StoreInMemory), a grant here would answer, unasked, the same origin's
     requests in the Designer's window (measured on PySide6 6.11): it shows
     this server's /web on the default profile too, and answers no request.
-    The off-screen renderers use the default profile as well, but load
-    file:// pages, another origin, so no grant of this one ever reached
-    them. A copy command in a click (document.execCommand("copy")) is no
-    permission and writes the clipboard from any frame, as on the web.
+    The off-screen renderers have profiles of their own (ADR-007 D4), and
+    deny every permission themselves, so no grant of this one ever reaches
+    them. A copy command in a click
+    (document.execCommand("copy")) is no permission and writes the clipboard
+    from any frame, as on the web.
 
     The page's requests pass its own interceptor (_ShellRequestInterceptor;
     ADR-005 S-final SF-4a), which adds the shell's secret to the main

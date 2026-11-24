@@ -999,3 +999,52 @@ def autonaApp(_autonaRuntime):
             MatchNameCandidates.instance.FollowPhases([])
         _autonaRuntime.settle()
         os.chdir(_ORIGINAL_CWD)
+
+
+@pytest.fixture(scope="session")
+def _previewServer(_autonaRuntime):
+    """The preview listener of a real web app (AutonaWebServer's, through
+    PreviewGate), on 127.0.0.1 and a port the OS picks, for the session: the
+    off-screen renderers draw on its origin (ADR-007 D4). It serves the
+    working directory, as the app's server does -- the runtime's, under
+    autonaApp."""
+    from werkzeug.serving import make_server
+
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaWebServer import PreviewGate, WebServer, _build_web_app
+
+    app, _socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    # As the app's server makes its listeners (WebServer._MakeListener).
+    server = WebServer._MakeListener(make_server, "127.0.0.1", 0,
+                                     PreviewGate(app))
+    thread = threading.Thread(target=server.serve_forever, daemon=True,
+                              name="test-preview-listener")
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+@pytest.fixture(autouse=True)
+def _renderAssetsLetGo():
+    """No file an off-screen render held (core/RenderAssets) outlives the
+    test that held it: a test that left one held would serve it to the
+    next. The tests that pin the letting go look before this runs."""
+    yield
+    from src.core import RenderAssets
+    with RenderAssets._lock:
+        RenderAssets._held.clear()
+
+
+@pytest.fixture
+def previewListener(autonaApp, _previewServer, monkeypatch):
+    """The port of the session's preview listener, which WebServer.
+    PreviewPort() names for the test (none otherwise: no server runs)."""
+    from src.AutonaWebServer import WebServer
+
+    monkeypatch.setattr(WebServer, "_preview_port", _previewServer.server_port)
+    return _previewServer.server_port

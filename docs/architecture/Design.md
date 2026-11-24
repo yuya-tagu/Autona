@@ -123,6 +123,7 @@ Autona は格闘ゲーム大会の配信支援ツール。利用シーンは 2 �
 | **R-Img-4** | HTML は描画完了で `document.title = "RENDER_READY"` にして合図する。 |
 | **R-Img-6** | 出力先は非 Preview 時 `./out/{種別}/`、Preview 時 `AutonaResolve("tmp/{種別}")`。ファイル名は §4.4.4。 |
 | **R-Img-8** | 独自の配色・レイアウトを許す（§5.5）。 |
+| **R-Img-9** | 描画は隔離する（ADR-007 D4 / T2）。ページはプレビュー用のリスナーのオリジン（`http://127.0.0.1:<WebServer.PreviewPort()>/layout/<フォルダ>/<入口>`）から読み、file:// では読まない。リスナーが無いときは描かずに `preview_unavailable`（`thumbnail.render.error` / `result_render.error`）で断る。ページはレンダラー専用の off-the-record のプロファイル（HTTP キャッシュなし・永続ストレージなし。ページの子にして、ページより後に消える）で動き、そのプロファイルのフィルタ（`_RenderRequestFilter`）がページ・フレーム・Worker・SharedWorker・Service Worker の要求のうち自分のオリジンと `data:` / `blob:` 以外を止める。既定のプロファイル（共有ビュー・デザインのプレビュー）とは BroadcastChannel・localStorage などを共有しない。権限は全部 deny・新しいウィンドウ無し・メインフレームは読み込んだ文書から動かない。**WebRTC の UDP（STUN / TURN）はフィルタを通らず止められない**。リスナーが出さない画像（アップロードした背景・アーカイブの `_bg.jpg`・旧版が保存したドライブのパス）は `core/RenderAssets` が描画中だけ id（ファイルの版ごと）で持ち、`/render-asset/<id>` で出す（プレビューのポート・この PC のループバックからだけ・描画が終われば 404）。ネットワークのパス（UNC）は GUI スレッドで見に行かず `""`。 |
 
 ### 2.5 責務の境界
 
@@ -427,6 +428,7 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 - 保存された id のパッケージが無いときは既定で描き、保存値は消さない。
 - パッケージが自分のフォルダの外で読んでよいのは `../include/`・`../../assets/`・payload が渡すパスだけ。`include/` のファイルを同梱しない。
 - payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。pin: `tests/test_template_packages.py`。
+- 描画はプレビュー用のリスナーのオリジンで、ページが読めるのはそのリスナーが出すもの（`layout/`・`assets/`・state の画像・v1 の READ）と描画が持つ画像だけ（R-Img-9）。サービスが組む payload は変えず、レンダラーが描く直前に `RenderAssets.ForRender` で `config` の `background_path` / `main_icon_path` だけを読める形に直す（出すパスは相対のまま `m=<更新時刻>` を足す（アプリのディレクトリ `LayoutCatalog.AppDirectory()` で探す。静的ファイルもそこから配る）、ほかのファイルは `/render-asset/<id>`、無い・画像でない・ネットワークのパスは `""`）。pin: `tests/test_render_isolation.py`。
 
 #### 4.4.1 サムネイル
 
@@ -596,6 +598,8 @@ OBS の標準ホットキーと被ると配信中に意図しない操作が走�
 - サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`template`）・`thumbnail.html`・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。
 - 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。凍結した表と `CoreWords` は、id とフォルダ名が違う既存 8 種のためのもので足さない。
 - 触らない: state・Python（`ResultService` / `ThumbnailService` / レンダラー）・React（選択肢は `GET /api/v1/layouts?kind=` から出る）。
+- ページはプレビュー用のリスナーのオリジンで描かれる（R-Img-9）。読めるのはパッケージ・`../include/`・`../../assets/`・payload のパスだけで、外部（CDN）・file:・ほかのポートへの要求は届かない（WebRTC の UDP は除く）。ライブラリ・フォントはパッケージに入れる。
+- **sandbox**: レンダラーは `QTWEBENGINE_DISABLE_SANDBOX` を設定しない（Chromium の sandbox のまま描く）。以前はレンダラーのモジュールが import 時に `=1` を設定していたが、QtWebEngine がこの変数を読むのは最初の初期化の 1 回だけで、アプリでは共有ビューがレンダラーより先に WebEngine を初期化するため効いていなかった（実測: 遅れて設定しても描画のプロセスに `--no-sandbox` は付かない）。外した今は、レンダラーが先に初期化した場合も sandbox が有効になるだけで、挙動は共有ビューと同じ（sandbox を外していたのは、レンダラーが先に WebEngine を立ち上げたプロセス＝テストだけ）。CI（`.github/workflows/ci.yml`）はヘッドレスの runner の都合で明示的に設定している（アプリの挙動ではない。テストは設定しなくても通る）。
 
 ### 7.5 新ページ
 

@@ -1575,7 +1575,11 @@ def test_the_interceptor_is_the_pages_and_nothing_injects_script():
                 or getattr(node, "attr", None) == "QWebEngineScript")), path
             assert not (isinstance(node, ast.alias)
                         and node.name == "QWebEngineScript"), path
-    assert setters == [("src/AutonaWebPanelHost.py", "_PanelPage", True)]
+    # And the off-screen renders' request filter (ADR-007 D4), on the
+    # profile their page makes for itself -- not the default one.
+    assert sorted(setters) == [
+        ("src/AutonaOffscreenRenderer.py", "_RenderPage", False),
+        ("src/AutonaWebPanelHost.py", "_PanelPage", True)]
     for path, tree in _srcTrees():
         for node in ast.walk(tree):
             assert not (isinstance(node, ast.Call) and _calledName(node)

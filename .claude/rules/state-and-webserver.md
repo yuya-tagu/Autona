@@ -326,12 +326,16 @@ paths:
 - 本体の bind の後に 2 本目のサーバー（`_MakeListener(..., 0, PreviewGate(app))`）を立てる。ポートは `WebServer.PreviewPort()`（v1 `/health` の
   `previewPort`）。bind できなければプレビュー無し（本体のオリジンに代えない）
 - **プレビューの要求は Authorize に入れない**（入れるとそのポートのページが自分のオリジンになりトークンなしで書ける）:
-  `WebAccess.PreviewServes(...)` だけで決め（v1 の READ と `PreviewStaticPath` の静的ファイル）、ほかはトークンがあっても `PREVIEW_ONLY`。
+  `WebAccess.PreviewServes(...)` だけで決め（v1 の READ と `PreviewStaticPath` の静的ファイルと、描画が持つ画像 `RENDER_ASSET`）、ほかはトークンがあっても `PREVIEW_ONLY`。
   第 2 の表は持たない（出るかは `ROUTE_ACCESS` の分類で決まる。v1 の GET = READ はプレビューにも出るので、出してはいけない読み取りは
   PLAYERDB / THIS_PC に分類する）
 - **本体のポートは別のページが頼んだフレームに何も出さない**（`WebAccess.FramedElsewhere` を `FRAMED_ELSEWHERE` で断り、応答はすべて
   `frame-ancestors 'self'`）。プレビューのスクリプトが自分のフレームを本体のポートへ送れば本体のページとして動くため。pin:
   `tests/test_web_access.py` と `web/e2e/preview-origin.spec.ts`
+- **サムネイル・リザルトのオフスクリーン描画もプレビュー用のリスナーから読む**（ADR-007 D4。file:// に代えない・ポートが無ければ
+  `preview_unavailable` で断る）。リスナーが出さない画像は `core/RenderAssets` が描画の間だけ id で持ち（`/render-asset/<id>`）、
+  ページは専用の off-the-record のプロファイルで動き、そのプロファイルのフィルタが自分のオリジンと `data:` / `blob:` に絞る
+  （WebRTC の UDP は止められない）。pin: `tests/test_render_isolation.py`
 - **デザインのプレビュー（`web/src/CommentaryPage/DesignPane.tsx`）はプレビュー用のリスナーから読む**（`sandbox="allow-scripts allow-same-origin"`）。
   `previewPort` が無ければ iframe を出さない（同じオリジンに代えない）。iframe がフォーカスを持ったら外す
 - **フレームからの `message` を受けるのは `DesignPane` だけ**（ADR-008 D3。`layout/include/autona.js` のエラーと `autona:ready`）。

@@ -71,7 +71,8 @@ from .GameAssetCatalog import GAMES_DIR, GameAssetCatalog
 from .PlayerDB import PlayerDB
 from .RenderLane import (  # noqa: F401  (re-exported: this module's names)
     BUSY, CANCELLED, DONE, ERROR, GENERATE, IDLE, PAYLOAD_FAILED, PREVIEW,
-    RENDER_FAILED, RUNNING, SAVE_FAILED, RenderDataMissing, RenderLane)
+    PREVIEW_UNAVAILABLE, RENDER_FAILED, RUNNING, SAVE_FAILED, RenderDataMissing,
+    RenderLane)
 from .SettingsManager import SettingsManager, SettingsUnreadable
 from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor

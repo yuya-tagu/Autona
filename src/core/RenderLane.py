@@ -63,6 +63,10 @@ ERROR = "error"
 # place in what every client is sent; the log has the rest).
 PAYLOAD_FAILED = "payload_failed"  # the template or the settings would not read
 RENDER_FAILED = "render_failed"  # the renderer gave no image, or did not start
+# There is no preview listener to draw on (it could not bind, or the server is
+# not up): the shell's renderer refuses rather than draw from file:// (ADR-007
+# D4). The renderer says it as its error, which is published as it is.
+PREVIEW_UNAVAILABLE = "preview_unavailable"
 CANCELLED = "cancelled"         # stopped by the shutdown
 SAVE_FAILED = ImageImport.SAVE_FAILED
 # What Preview / Generate answer instead of a revision.
@@ -298,7 +302,9 @@ class RenderLane:
         files are a job's."""
         if encode is None:
             logger.error(f"{self.LOG_NAME}: the render failed: {error}")
-            self._Ended(kind, revision, (ERROR, RENDER_FAILED))
+            self._Ended(kind, revision, (ERROR, PREVIEW_UNAVAILABLE
+                                         if error == PREVIEW_UNAVAILABLE
+                                         else RENDER_FAILED))
             return
         try:
             executor = TaskExecutor.instance
