@@ -214,6 +214,10 @@ ROUTE_ACCESS = {
     # The live preview's payload: the state with its unpublished edits, as
     # the pending board.
     "api_v1.get_thumbnail_payload": PLAYERDB,
+    # The result's: the renderer's whole input (its config's images among
+    # it), guarded as the thumbnail's is, so a browser without the token
+    # falls back to the preview image the same way.
+    "api_v1.get_result_payload": PLAYERDB,
     "api_v1.get_result": READ,
     # Handles from the player DB.
     "api_v1.get_result_post": PLAYERDB,

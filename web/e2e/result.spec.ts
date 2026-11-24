@@ -1,11 +1,18 @@
+import fs from "node:fs";
+import path from "node:path";
 import {APIRequestContext, expect, test} from "@playwright/test";
-import {keepLocal, serverUrl} from "./server";
+import {appDir, keepLocal, previewOrigin, serverUrl} from "./server";
 
 // The tournament result's page in React (ADR-005 S4r): /web/result on the
 // headless app keeps its rows through /api/v1/result (core's ResultService).
 // The headless shell has no off-screen view to draw with: the page says so and
-// asks for no preview. Checked through text, the DOM and the API, never
+// asks for no preview image. Checked through text, the DOM and the API, never
 // screenshots.
+//
+// A layout on template contract 2 (ADR-008 D7 R4; the shipped ones are)
+// needs no renderer to preview: the page frames it from the preview origin
+// and posts it GET /api/v1/result/payload, and its errors are shown in the
+// layout check -- in a real browser, under the template folder's CSP.
 
 let pageErrors: string[] = [];
 
@@ -47,7 +54,7 @@ test.afterEach(async ({request}) => {
     expect(pageErrors, "uncaught page errors").toEqual([]);
 });
 
-test("the page opens with its cards and says the headless app cannot draw", async ({page}) => {
+test("the page opens with its cards and says the headless app cannot make the image", async ({page}) => {
     const previews: string[] = [];
     page.on("request", (request) => {
         if (request.url().includes("/api/v1/result:preview")) {
@@ -62,8 +69,10 @@ test("the page opens with its cards and says the headless app cannot draw", asyn
         await expect(page.getByRole("region", {name, exact: true})).toBeVisible();
     }
     const preview = page.getByRole("region", {name: "Preview", exact: true});
-    await expect(preview.getByText(/runs without a window \(headless\)/))
+    // The shipped layout is previewed live; the image is the desktop's.
+    await expect(preview.getByText(/This preview is drawn by the browser/))
         .toBeVisible();
+    await expect(preview.getByTitle("Preview", {exact: true})).toBeVisible();
     await expect(preview.getByRole("button", {name: "Make"})).toBeDisabled();
     await expect(preview.getByRole("button", {name: "Post on X"})).toBeDisabled();
     await expect(preview.getByText("The background follows the thumbnail's settings."))
@@ -150,14 +159,19 @@ test("a tall layout's preview keeps its shape", async ({page, request}) => {
     expect(response.ok()).toBe(true);
     await page.goto(serverUrl("/web/result"));
 
+    // Previewed live (contract 2): the frame's box is the layout's shape.
     const box = page.getByRole("region", {name: "Preview", exact: true})
-        .getByText("No preview yet").locator("..");
+        .getByTitle("Preview", {exact: true}).locator("..");
     await expect(box).toBeVisible();
     expect(await box.evaluate((element) =>
         getComputedStyle(element).aspectRatio)).toBe("960 / 1080");
     // Within the pane, however tall the picture.
-    const {height} = (await box.boundingBox())!;
+    const {height, width} = (await box.boundingBox())!;
     expect(height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    // Only the frame is narrowed: the layout check keeps the pane's width.
+    const check = page.getByRole("status", {name: "Layout check"});
+    await expect(check).toBeVisible();
+    expect((await check.boundingBox())!.width).toBeGreaterThan(width + 1);
 });
 
 test("the keyboard moves a row, and the focus goes along with it", async ({page, request}) => {
@@ -276,4 +290,159 @@ test("without a tournament the import says where to load one", async ({page}) =>
 
     await expect(card.getByRole("status"))
         .toHaveText(/No tournament is set/);
+});
+
+// ── the live preview of a layout on contract 2 (ADR-008 D7 R4) ───────────
+
+// A layout made from the layout kit as "make a new design" makes it: the
+// kit's files as they are, with the manifest core writes
+// (core/LayoutKit._Manifest). Copied here: the page's button is the shared
+// view's alone (SHELL).
+const KIT_MADE = "result_e2e_kit";
+const KIT_FILES = ["result.html", "result.css", "result.js",
+                   "sample_payload.json", "sample_payload_teams.json"];
+// A result_ folder the catalog cannot list: told on this page.
+const UNREADABLE = "result_e2e_unreadable";
+
+test.describe("the live preview", () => {
+    test.beforeAll(() => {
+        const kit = path.join(appDir(), "layout", "include", "kit", "result");
+        const made = path.join(appDir(), "layout", KIT_MADE);
+        fs.mkdirSync(made, {recursive: true});
+        for (const file of KIT_FILES) {
+            fs.copyFileSync(path.join(kit, file), path.join(made, file));
+        }
+        fs.writeFileSync(path.join(made, "settings.json"), JSON.stringify({
+            autona: {kind: "result", contract: 2, entry: "result.html",
+                     size: [1920, 1080], rows: "players",
+                     displayName: "E2E kit", author: "unknown",
+                     license: "All rights reserved"}}), "utf8");
+        const unreadable = path.join(appDir(), "layout", UNREADABLE);
+        fs.mkdirSync(unreadable, {recursive: true});
+        fs.writeFileSync(path.join(unreadable, "settings.json"), "{not json",
+                         "utf8");
+        fs.writeFileSync(path.join(unreadable, "result.html"), "", "utf8");
+    });
+
+    test.afterAll(async ({request}) => {
+        // No layout of these folders stays chosen once they are gone.
+        await reset(request);
+        expect((await described(request)).layout).toBe("horizontal");
+        for (const name of [KIT_MADE, UNREADABLE]) {
+            fs.rmSync(path.join(appDir(), "layout", name),
+                      {recursive: true, force: true});
+        }
+    });
+
+    test("the shipped layout is drawn in the page's frame from the preview origin", async ({page}) => {
+        const payloads: string[] = [];
+        page.on("request", (request) => {
+            if (request.url().includes("/api/v1/result/payload")) {
+                payloads.push(request.url());
+            }
+        });
+        const origin = await previewOrigin(page.request);
+        await page.goto(serverUrl("/web/result"));
+
+        // The page names its own origin: autona.js takes renders from it only.
+        const frame = page.getByTitle("Preview", {exact: true});
+        await expect(frame).toHaveAttribute(
+            "src", `${origin}/layout/result/result.html?autonaParent=`
+                + encodeURIComponent(new URL(serverUrl("/")).origin));
+        // Drawn: the default banner, read from ../../assets under the CSP,
+        // and the sample's tournament.
+        const drawn = page.frameLocator("iframe[title='Preview']");
+        const banner = drawn.locator(".background img");
+        await expect(banner).toHaveCount(1);
+        await expect.poll(() => banner.evaluate(
+            (image: HTMLImageElement) => image.complete && image.naturalWidth))
+            .toBeGreaterThan(0);
+        await expect(drawn.locator("#tournamentName")).not.toHaveText("");
+        expect(payloads.length).toBeGreaterThan(0);
+        // Said drawn (autona:rendered), and with no errors.
+        await expect(page.getByRole("status", {name: "Layout check"}))
+            .toContainText("no errors");
+        await expect(page.getByTestId("layout-check-error")).toHaveCount(0);
+    });
+
+    test("a teams' layout draws the teams' rows", async ({page, request}) => {
+        const response = await request.patch(serverUrl("/api/v1/result"),
+                                             {data: {layout: "team"}});
+        expect(response.ok()).toBe(true);
+        await page.goto(serverUrl("/web/result"));
+
+        await expect(page.getByTitle("Preview", {exact: true}))
+            .toHaveAttribute("src", /\/layout\/result_team\/result\.html\?/);
+        await expect(page.getByRole("status", {name: "Layout check"}))
+            .toContainText("no errors");
+        await expect(page.getByTestId("layout-check-error")).toHaveCount(0);
+    });
+
+    test("a layout with its own result.js (vertical_geki) is drawn with no errors", async ({page, request}) => {
+        const response = await request.patch(serverUrl("/api/v1/result"),
+                                             {data: {layout: "vertical_geki"}});
+        expect(response.ok()).toBe(true);
+        await setPlayer(request, 1, {name: "Alpha"});
+        await page.goto(serverUrl("/web/result"));
+
+        await expect(page.getByTitle("Preview", {exact: true})).toHaveAttribute(
+            "src", /\/layout\/result_vertical_geki\/result\.html\?/);
+        // Its own script registered its drawing, under the folder's CSP.
+        const drawn = page.frameLocator("iframe[title='Preview']");
+        await expect(drawn.locator(".player-slot.slot-1 .player-name"))
+            .toHaveText("Alpha");
+        await expect(page.getByRole("status", {name: "Layout check"}))
+            .toContainText("no errors");
+        await expect(page.getByTestId("layout-check-error")).toHaveCount(0);
+    });
+
+    test("a layout made from the kit is drawn with no errors", async ({page, request}) => {
+        const response = await request.patch(serverUrl("/api/v1/result"),
+                                             {data: {layout: KIT_MADE}});
+        expect(response.ok(), await response.text()).toBe(true);
+        await page.goto(serverUrl("/web/result"));
+
+        await expect(page.getByRole("combobox", {name: "Result layout"}))
+            .toHaveText("E2E kit");
+        await expect(page.getByRole("region", {name: "Standings (16 players)", exact: true}))
+            .toBeVisible();
+        await expect(page.getByTitle("Preview", {exact: true}))
+            .toHaveAttribute("src", new RegExp(
+                `/layout/${KIT_MADE}/result\\.html\\?autonaParent=[^&]+$`));
+        // Drawn: the default banner under the CSP, and the sample's rows.
+        const frame = page.frameLocator("iframe[title='Preview']");
+        await expect.poll(() => frame.locator("#background").evaluate(
+            (image: HTMLImageElement) => image.complete && image.naturalWidth))
+            .toBeGreaterThan(0);
+        await expect(frame.locator("#first")).not.toBeEmpty();
+        await expect(page.getByRole("status", {name: "Layout check"}))
+            .toContainText("no errors");
+        await expect(page.getByTestId("layout-check-error")).toHaveCount(0);
+
+        // A row typed is drawn by the next payload.
+        await setPlayer(request, 1, {name: "Typed Alpha"});
+        await page.reload();
+        await expect(frame.locator("#first")).toContainText("Typed Alpha");
+    });
+
+    test("a browser gets no kit, and is told the folder it cannot list", async ({page, request}) => {
+        await page.goto(serverUrl("/web/result"));
+        const card = page.getByRole("region", {name: "Layout", exact: true});
+
+        const unlisted = card.getByRole("region",
+                                        {name: "Designs that could not be read"});
+        await expect(unlisted).toContainText(`layout/${UNREADABLE}/`);
+        // The kit's buttons are the desktop's shared view's (SHELL).
+        await expect(card.getByRole("combobox", {name: "Result layout"}))
+            .toBeVisible();
+        await expect(card.getByRole("button", {name: "Make a new design"}))
+            .toHaveCount(0);
+        await expect(card.getByRole("button", {name: "Copy for an AI"}))
+            .toHaveCount(0);
+        const made = await request.post(serverUrl("/api/v1/layouts:create"),
+                                        {data: {kind: "result", name: "x"}});
+        expect(made.status()).toBe(403);
+        expect(fs.existsSync(path.join(appDir(), "layout", "result_x")))
+            .toBe(false);
+    });
 });

@@ -20,6 +20,13 @@ pictures are the same.
 A thumbnail made from the layout kit (ADR-008 D7 R3), as it is, draws on
 contract 2 without an error: draw_kit.py draws the kit's sample payload, the
 teams sample and an empty state.
+
+The shipped results moved to contract 2 in R4: tests/fixtures/result/
+draw_contracts.py draws horizontal, team and vertical_geki and each on
+contract 1 (a user's contract-1 page still takes the shared include/
+result.js's initResult), and each pair of pictures is the same; a result
+layout made from the kit, as it is, draws without an error: draw_kit.py draws
+the kit's players' and teams' sample payloads and sixteen empty rows.
 """
 import json
 import os
@@ -34,6 +41,9 @@ SCRIPT = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" / "draw_on_platform.p
 CONTRACTS = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" \
     / "draw_contracts.py"
 KIT = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" / "draw_kit.py"
+RESULT_CONTRACTS = PROJECT_ROOT / "tests" / "fixtures" / "result" \
+    / "draw_contracts.py"
+RESULT_KIT = PROJECT_ROOT / "tests" / "fixtures" / "result" / "draw_kit.py"
 BG_PRIMARY = "#111317"
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32",
@@ -92,4 +102,28 @@ def test_a_thumbnail_made_from_the_kit_draws_as_it_is(tmp_path):
     assert drawn["colours"][1] > 10, drawn
     # The empty state's picture is not the match's (the names and the
     # characters are left out).
+    assert drawn["differing"] > 0, drawn
+
+
+def test_contract_2_draws_the_shipped_results_as_contract_1_did(tmp_path):
+    drawn, output = _draw(tmp_path, None, RESULT_CONTRACTS)
+    # The six shipped layouts, each beside the code it had before (frozen
+    # copies of then, on contract 1).
+    assert drawn["errors"] == [""] * 12, (drawn, output[-3000:])
+    assert all(count > 10 for count in drawn["colours"]), drawn
+    assert len(drawn["sampled"]) == 6, drawn
+    assert all(sampled > 0 for sampled in drawn["sampled"]), drawn
+    # The same pixels: moving to contract 2 changed nothing drawn.
+    for sampled, differing in zip(drawn["sampled"], drawn["differing"]):
+        assert 0 <= differing <= sampled // 1000, drawn
+
+
+def test_a_result_made_from_the_kit_draws_as_it_is(tmp_path):
+    drawn, output = _draw(tmp_path, None, RESULT_KIT)
+    # No error with sixteen players, eight teams and nothing typed at all.
+    assert drawn["errors"] == ["", "", ""], (drawn, output[-3000:])
+    # The background, the characters, the names: many colours.
+    assert drawn["colours"][0] > 10, drawn
+    assert drawn["colours"][1] > 10, drawn
+    # The empty rows' picture is not the players' (the cards are left out).
     assert drawn["differing"] > 0, drawn

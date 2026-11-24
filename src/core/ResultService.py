@@ -52,6 +52,7 @@ S-final SF-7). Import side effects: none (pitfalls #1).
 """
 import copy
 import datetime
+import math
 import re
 import threading
 from collections import namedtuple
@@ -61,6 +62,7 @@ from loguru import logger
 from . import CoreWords
 from . import HiveeUrl
 from . import LayoutCatalog
+from . import RenderAssets
 from . import StateSchema as schema
 from . import ThumbnailService as thumbnails
 from . import Top8Service
@@ -400,6 +402,18 @@ def _FromScoreboard(name) -> dict:
     return {}
 
 
+def _PayloadRank(rank, index) -> int:
+    """A row's rank as a template reads it: a whole number in RANK_RANGE. A
+    number is rounded; anything else (nothing writes one, a hand-edited file
+    might) is the row's slot."""
+    if isinstance(rank, float) and math.isfinite(rank):
+        rank = round(rank)
+    if isinstance(rank, int) and not isinstance(rank, bool) \
+            and RANK_RANGE[0] <= rank <= RANK_RANGE[1]:
+        return rank
+    return index
+
+
 def _PayloadPlayer(index, row) -> dict:
     name = row.get("name", "")
     character = row.get("character")
@@ -409,12 +423,17 @@ def _PayloadPlayer(index, row) -> dict:
     # the page, not on the picture.
     characters = [value for value in characters if value] \
         if isinstance(characters, list) else [character] if character else []
+    # The main character is the list's first, as the payload's table says:
+    # with the first field left empty and the second picked, the row's
+    # `character` is {}.
+    if not character and characters:
+        character = characters[0]
     if not character and name:
         character = _FromScoreboard(name)
         if character:
             characters = [character] + list(characters)
     return {
-        "rank": row.get("rank", index),
+        "rank": _PayloadRank(row.get("rank", index), index),
         "name": name,
         "sponsor": row.get("sponsor", ""),
         "character": character,
@@ -436,10 +455,11 @@ def _PayloadTeam(index, row) -> dict:
         # a template has no use for it.
         if name or character:
             members.append({"name": name, "character": character})
+    # A team row has no sponsor: the key is there for the one shape of a row.
     return {
-        "rank": row.get("rank", index),
+        "rank": _PayloadRank(row.get("rank", index), index),
         "name": row.get("name", ""),
-        "sponsor": row.get("sponsor", ""),
+        "sponsor": "",
         "character": {},
         "characters": [],
         "members": members,
@@ -1082,6 +1102,35 @@ class ResultService(RenderLane):
         data["rows"] = _RowsOf(kind)
         return data, config, layout
 
+    def PreviewPayload(self, games=None) -> dict:
+        """What the Web UI's live preview of the layout draws (GET
+        /api/v1/result/payload; ADR-008 D7 R4): the preview's payload --
+        BuildPayload's, as the preview image is drawn, {data, config, layout}
+        -- read for a browser (RenderAssets.ForPreview: nothing held;
+        `omitted` names the config keys whose image the preview cannot
+        show), with the layout's package: its id, folder, entry page,
+        contract, size and rows. A contract 1 package is previewed as an
+        image (Preview), not live: the page shows that one. Writes nothing;
+        raises FileNotFoundError when the catalog lists no layout to draw."""
+        entries = LayoutEntries()
+        data, config, layout = self.BuildPayload(
+            preview=True, games=games, entries=entries)
+        entry = entries.get(layout)
+        if entry is None:
+            raise FileNotFoundError(f"no result layout {layout!r}")
+        payload, omitted = RenderAssets.ForPreview(
+            {"data": data, "config": config, "layout": layout})
+        return {
+            "layout": entry["id"],
+            "folder": entry["folder"],
+            "entry": entry["entry"],
+            "contract": entry["contract"],
+            "size": list(entry["size"]),
+            "rows": entry["rows"],
+            "payload": payload,
+            "omitted": omitted,
+        }
+
     def _Text(self, key):
         """Core's words for `key` in the program locale's language
         (core/CoreWords), the locale read now."""
@@ -1101,12 +1150,13 @@ class ResultService(RenderLane):
     @staticmethod
     def _SampleCharacter(games, key, character):
         """(the value a sample draws, whether it has a picture): the character
-        on its first skin."""
+        on its first skin, with the keys a pick's value has (the payload's
+        table: name, en_name, display_name, codename, skin, assets)."""
         assets = games.CharacterAssets(character.get("codename"), 0)
         asset = assets.get("full") or assets.get("portrait")
-        return {"assets": {"full": asset} if asset else {},
-                "codename": character.get("codename"),
-                "name": key}, bool(asset)
+        return {"name": key, "en_name": key, "display_name": key,
+                "codename": character.get("codename"), "skin": 0,
+                "assets": {"full": asset} if asset else {}}, bool(asset)
 
     def _SampleData(self, games, count, kind) -> dict:
         """What a preview draws while there is nothing to draw: always the

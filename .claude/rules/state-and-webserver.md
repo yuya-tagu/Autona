@@ -159,7 +159,7 @@ paths:
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
 | `PlayerDirectory` | モジュール関数 | 選手リストの行と記録の保存・削除（state は書かない） |
-| `LayoutKit` | モジュール関数 | 「新しいデザインを作る」（`layout/` の新しいフォルダだけに書く。作業フォルダで組んでから改名。オーバーレイ 3 種は ADR-008 D2、サムネイルのテンプレートは D7 R3。payload の表 `layout/include/thumbnail_contract.json` はキーを足すだけで、`config` の行は `ThumbnailService` が描画とプレビューに渡す config に毎回あるものだけを書く: `tests/test_thumbnail_kit.py`） |
+| `LayoutKit` | モジュール関数 | 「新しいデザインを作る」（`layout/` の新しいフォルダだけに書く。作業フォルダで組んでから改名。オーバーレイ 3 種は ADR-008 D2、サムネイルのテンプレートは D7 R3、リザルトのレイアウトは R4。payload の表 `layout/include/thumbnail_contract.json` / `result_contract.json` はキーを足すだけで、サムネイルの `config` の行は `ThumbnailService` が描画とプレビューに渡す config に毎回あるものだけを書く: `tests/test_thumbnail_kit.py`。リザルトの表は閉じた集合で、`ResultService.BuildPayload` の payload は表のキーだけを持つ: `tests/test_result_kit.py`） |
 
 サービス共通の規則:
 
@@ -340,7 +340,7 @@ paths:
   `WebAccess.TEMPLATE_CONTENT_POLICY` と `no-cache` を付ける**（ブラウザの iframe のプレビューにはレンダラーのフィルタが無いため。ADR-008 D7 R2）。
   緩めない（`connect-src` に外部を足さない）。共有の部品 `layout/include/` も `no-cache`（CSP は付けない。更新後に古い `autona.js` で描かない）。
   pin: `tests/test_web_access.py`
-- **ブラウザのプレビューは何も持たない**: payload は `GET /api/v1/thumbnail/payload`（PLAYERDB。未反映の編集を含むので READ にしない）で、
+- **ブラウザのプレビューは何も持たない**: payload は `GET /api/v1/thumbnail/payload` / `GET /api/v1/result/payload`（PLAYERDB。未反映の編集を含むので READ にしない）で、
   `RenderAssets.ForPreview` がリスナーの出さない画像を `""` にして `omitted` に名前を出す。`user_data/thumbnail_background_*` をプレビューの
   リスナーで配らない（LAN 有効時はトークンなしで LAN から読める）
 - **デザインのプレビュー（`web/src/CommentaryPage/DesignPane.tsx`）はプレビュー用のリスナーから読む**（`sandbox="allow-scripts allow-same-origin"`）。

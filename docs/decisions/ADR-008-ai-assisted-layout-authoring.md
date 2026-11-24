@@ -440,6 +440,82 @@ L2 と L3 はどちらもデザイン一覧の UI と SHELL のルートに触�
     kind `thumbnail` のものだけ（kind 不明はオーバーレイのページのもの。`useTemplatePackagesRead` が kind で絞る）、作ったテンプレートは一覧の
     読み直しが終わって一覧にあるときだけ選ぶ（読み直しに失敗したら選ばない）
 
+**R4 の実装**（2026-11-24）:
+
+- **同梱のリザルト 6 種を contract 2 へ移した**: 共有の `layout/include/result.js` の描画を `drawResult(payload)` に切り出した
+  （例外はその描画のエラー。絵を撮らない）。**`include/result.js` は読んだだけでは何も登録しない**: 同梱の 5 つの `result.html` が
+  `../include/autona.js` と `../include/result.js` の後のインラインの `<script>Autona.onRender(drawResult);</script>` で登録する
+  （`onRender` は 1 回しか呼べないので、共有のファイルが登録すると、流用して自分で登録するページが例外になる。README に流用の書き方）。
+  マニフェストは `contract: 2`。`initResult(payload)` は残す: `include/result.js` を `autona.js` なしで読む利用者の contract 1 のページ
+  （R1 より前から置かれているもの）が今までどおり描け、`RENDER_READY` も今までどおり出す。`result_vertical_geki` は自分の `result.js` が登録する。
+  **画素の一致は R4 より前のコードと比べる**: `tests/fixtures/result/contract1/` に 3c9dc273 の `include/result.js` と geki の `result.js` を
+  凍結した写しを置き、`tests/fixtures/result/draw_contracts.py` が同梱 6 種のそれぞれを、今のページ（contract 2）と、そのページから
+  `autona.js` と登録の行を除いて凍結した写しを読ませたページ（contract 1。R4 より前のページと script の名前の 1 行だけ違う）で描いて比べる
+  （同順位・長い名前・2 体目のキャラ・空の行・0〜5 人のチーム。Top 16 は 16 行）。差のある画素は 6 種とも 0。
+  背景のぼかしとグラデーションは同じページを 2 回読んでもチャンネルが 1 段ずれることがあるので、差の閾値は 2 段（`ROUNDING`）
+- **同梱のスクリプトの手当て**: 枠の class（`rank-<順位>`）と 2 体目以降のキャラの `<img>` をマークアップに埋め込まず DOM で作る
+  （`slotElement` / `secondaryIcon`。手で組んだ payload の順位やパスに何が入っていても要素が増えない）。`resolveAssetPath` は文字列でないパスに `""`
+  を返す（同梱のリザルト 6 種とサムネイル 2 種）
+- **payload の手当て**（`ResultService`）: `character` が空で `characters` があるとき `character` は `characters[0]`（`characters` が空でなければ
+  いつもその 1 体目。1 体目の欄が空で 2 体目だけ選んだ行・スコアボードから持ってきた行で `{}` だった。同梱のレイアウトは `characters[0] || character`
+  で読むので絵は変わらない。`character` を読む利用者の contract 1 のページはキャラが出るようになる）。`rank` は整数に丸め、1〜999 の外・数でない
+  ものは枠の番号にする。チームの行の `sponsor` は `""`。見本の行のキャラは表のキー（`name`・`en_name`・`display_name`・`codename`・`skin`・`assets`）を持つ。
+  記録した payload との差は `tests/test_result_service.py` の `DIFFERENCES` に理由つきで書き、それぞれにテストを置いた
+- **ライブプレビュー**: サムネイルと同じ考え方。リザルトのページは選んだレイアウトが contract 2 なら `GET /api/v1/result/payload`
+  （`ResultService.PreviewPayload`。区分は PLAYERDB、未反映の行を含むので READ にしない）で payload を受け、`DesignPane` の iframe に描く。
+  payload の形は `{data, config, layout}`（`BuildPayload(preview=True)` と同じ。行に入力が無いときは見本の行）を `RenderAssets.ForPreview` に
+  通したもので、応答はレイアウトの id・フォルダ・entry・contract・大きさ・`rows` を添える。確認の欄・「AI に貼る用にコピー」・「描画中…」・
+  再読み込み（ページ・payload・レイアウトの一覧）、401 / 403 と contract 2 でなかったときのレンダラーの画像への戻り方（トークンの案内は 1 回）、
+  最初のプレビューはカタログを読み終えてから、はサムネイルと同じ。プレビューに出ない画像（アップロードした背景・旧版の絶対パスのロゴ）は
+  `result_live_omitted_background_path` / `_main_icon_path` で言う。ヘッドレスでも出る（「作成」は無効のまま、文言は `result_cannot_render_live`）。
+  contract 1 のレイアウト（利用者が置いたもの）は画像のプレビューのまま。縦長のレイアウトはライブでも画像と同じく高さ 60vh に収める
+  （狭めるのは iframe の枠だけ。`DesignPane` の `frameMaxWidth`。確認の欄とボタンはペインの幅のまま）。payload が断られたとき（401 / 403 に加えて
+  404・500 など）も、そのレイアウトはページを開き直すまで画像のプレビューに戻す（ヘッドレスでは「描画中…」を止める）。知らせは 1 回で、
+  変更のたびに snackbar を出さない（サムネイルのページも同じ）
+- **payload の表 `layout/include/result_contract.json`**: `data` / `config` / `layout` の 3 つ。キーの書き方に配列の要素 `[{R}]` を足した
+  （`data.players[{R}].characters[{C}]` など）。出どころは `tournamentInfo.*`（`KEY_CATALOG`）・`result_players.{S}.*` / `result_teams.{S}.*`
+  （行の state。`DefaultPlayer` / `DefaultTeam` のキー）・`manifest`・`config`
+- **R3 と違えた点**:
+  - **表は閉じた集合**: サムネイルの `data` は state そのもの（表に無いキーもある）だが、リザルトの `data` は `ResultService` が組み立てたもの。
+    そこで `tests/test_result_kit.py` は、`BuildPayload` が作る payload（記録したシナリオの全部・見本の行・`PreviewPayload` の players / teams /
+    16 行）が**表のキーを型どおりに持ち、表に無いキーを持たない**ことを確かめる（キャラの中身は表が `object` として丸ごと書くので、その下は問わない）。
+    見本の行（入力が無いときのプレビュー）には `startAt` / `numEntrants`・チームの行の `character` / `characters`・個人の行の `members` が無く、
+    表の説明にそう書いた
+  - **見本の payload は 2 つ**: `sample_payload.json`（個人 16 行。Top 8 に同順位 5 位・7 位、キャラ 0〜3 体、9 行目からは空の行）と
+    `sample_payload_teams.json`（チーム 8 行。メンバー 0〜5 人（最後の空の行が 0 人）、キャラ無しのメンバー）。行の数と種類が変わるのがリザルトの本質なので
+  - **マニフェストに `rows`**: `kind: "result"`・`contract: 2`・`entry: "result.html"`・`size: [1920, 1080]`・`rows: "players"`。チームのレイアウトに
+    するときは `rows` を `"teams"` に変える 1 行だけを伝えさせる（`settings.json` は返させない）。`template.json` は無い
+  - **キットのサンプル**（`layout/include/kit/result/result.*`）: 1 位を大きく・2〜4 位・5 位以下の 2 列。行を `rank` で並べ直さず
+    payload の順に描く（並びは利用者が決める）、空の行は飛ばす、チームの行はメンバーの名前を並べる、`document.fonts.ready` の後に長い名前を縮める
+  - 受け入れ試験（「スポーツ新聞の一面風」。1 回目でエラーなし）の学びを指示書に足した: 順位で役割を変えるときの並び（既定は空の行を除いた
+    位置。並べ替えるなら `rank` の安定ソート）・地の色が決まっているデザインの色の使い方・小さい絵の種類（`type` に `icon` を含むもの →
+    `portrait` → `full`。表に `assets.{A}.type` / `.image_size` を足した）・`eyesight` は使わなくてよい（使うなら `image_size` で割る）・
+    行の数の書き方を 1 つに（新しく作るレイアウトは 16 行 / 8 行。同梱の 3 つの 8 行は関係ない）・背景は確かめずに決める既定
+    （利用者が選んだ画像なら描く。`""` か既定のバナーならデザインの地）・ファイルの表に `sample_payload_teams.json`。パスに `?m=` / `?v=` が付く
+    ことと拡張子で判定しないことは、サムネイルの表と指示書にも書いた
+  - 指示書には R3 の受け入れ試験の学び（`settings.json` を返さない・色の方針・出す項目・2 種類のパス・フォントの足し方・`fonts.ready` を待ってから測る・
+    `document.title` を変えない・2 回目以降は今のファイルを貼る・F12 は `/web/app/result`）と、リザルト固有の事実（行は枠の順で順位の順とは限らない・
+    同順位・Top 8 のレイアウト以外は 16 行・キャラは最大 3 体・メンバーは最大 5 人で 0 人もある・空の行・見本の行に無いキー）を書いた
+  - 予約名: 同梱の `result_team` / `result_top16` / `result_vertical` / `result_vertical_geki` / `result_team_split` があるので、その名前は `reserved`
+  - `result_teams.{S}.sponsor` は出どころから外した（チームの行に sponsor は無く、payload ではいつも `""`）
+- **v1**: `GET /api/v1/result/payload` を足した（PLAYERDB・レイアウトが読めなければ 404）。`POST /layouts:create` の `kind` に `result`、
+  `GET /layouts/kit/result/ai-prompt`（SHELL のまま）。リザルトのページの「読み込めなかったデザイン」は kind `result` のものだけ。
+  `result_` / `thumbnail_` のフォルダに `autona` ブロックが無いときは、オーバーレイのフォルダ名を挙げる文でなくテンプレートの文
+  （`layout_unlisted_no_manifest_template`）で言う
+- **配布**: `validate_release_zip.ps1` の検査 3 にリザルトのキットと `result_contract.json` を足した
+- pin: `tests/test_result_kit.py`（表とコード・全 payload・見本の payload・AI_PROMPT.md・作成と一覧・一覧に出せないフォルダ・v1）・
+  `tests/test_api_v1_result.py`（payload のルート）・`tests/test_layout_kit.py`（生成物の一致）・`tests/test_render_platform.py`（contract 1 の写しとの
+  画素の一致、キットのまま作ったレイアウトを個人 16 行・チーム 8 行・空の 16 行で描いてエラーが無いこと）・`tests/test_template_packages.py`・
+  `tests/test_result_render.py`・`ResultPage.test.js`・`web/e2e/result.spec.ts`（ヘッドレスの実ブラウザで、CSP の下で同梱の horizontal / team /
+  vertical_geki（自分の `result.js`）とキットのまま置いたレイアウトが描けて「エラーはありません」・縦長で狭まるのは枠だけ・打った行が次の payload で描かれる・ブラウザにはキットのボタンが出ず作成が 403・
+  壊れたフォルダが出ること）
+- **受け入れ試験（メインが行う。R3 と同じ）**: 隔離データの `python main.py` のリザルトのページで「新しいデザインを作る」→ 作ったフォルダの
+  `AI_PROMPT.md` **だけ**をチャットの AI に渡し、「〇〇風のリザルトにして」と頼む → 返ってきた 3 ファイルを上書き → 「デザインを再読み込み」。
+  確かめること: (1) プレビューに描かれ「エラーはありません」、(2) 行を 1 つだけ・8 行・同順位・キャラ 3 体・キャラ無し・16 行のレイアウト（Top 16）を
+  選んだとき・行をクリアしたときもエラーが出ない、(3) `settings.json` の `rows` を `"teams"` にしてチームの行（メンバー 0〜5 人）でも描ける、
+  (4) 「作成」で `out/results/` に画像ができ、プレビューと同じ絵、(5) 外部の CDN / Web フォントを使っていない、(6) エラーが出たら
+  「AI に貼る用にコピー」の文だけで直せる。AI がはまった点は `layout/include/kit/result/AGENTS.md.tmpl` に足して生成し直す
+
 ## Alternatives considered
 
 - **キットと文書だけ作り、生の state のパスを書いて渡す**: 一番早いが、問題 2（約束が無い）が残る。内部の整理のたびに第三者のレイアウトが

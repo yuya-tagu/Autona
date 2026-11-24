@@ -50,7 +50,9 @@ def test_the_generated_files_are_what_the_script_writes():
     built = _generator().Build()
     assert set(built) == {"CONTRACT.md"} | {
         f"{kind}/AI_PROMPT.md" for kind in LayoutKit.KINDS} | {
-        "thumbnail/CONTRACT.md", "thumbnail/sample_payload.json"}
+        "thumbnail/CONTRACT.md", "thumbnail/sample_payload.json",
+        "result/CONTRACT.md", "result/sample_payload.json",
+        "result/sample_payload_teams.json"}
     for relative, text in built.items():
         committed = (KIT / relative).read_text(encoding="utf-8")
         assert committed.replace("\r\n", "\n") == text, (
@@ -59,7 +61,8 @@ def test_the_generated_files_are_what_the_script_writes():
 
 def test_the_generator_knows_the_kinds_core_makes():
     assert tuple(_generator().KINDS) == LayoutKit.OVERLAY_KINDS
-    assert _generator().THUMBNAIL in LayoutKit.TEMPLATE_KINDS
+    assert {_generator().THUMBNAIL, _generator().RESULT} == set(
+        LayoutKit.TEMPLATE_KINDS)
 
 
 def test_the_ai_prompt_holds_the_instructions_the_keys_and_the_sample():
@@ -101,7 +104,7 @@ def test_the_generated_files_start_with_the_mark_core_drops():
 
 def test_every_sample_hides_what_it_marks_hidden():
     for kind in LayoutKit.KINDS:
-        name = ("thumbnail.css" if kind in LayoutKit.TEMPLATE_KINDS
+        name = (f"{kind}.css" if kind in LayoutKit.TEMPLATE_KINDS
                 else "index.css")
         css = (KIT / kind / name).read_text(encoding="utf-8")
         assert "[hidden] { display: none !important; }" in css
@@ -257,6 +260,7 @@ def test_the_folder_is_the_kinds_prefix_and_the_name():
     assert LayoutKit.FolderName("commentary", "duo") == "commentators_duo"
     assert LayoutKit.FolderName("top8", "x-1") == "bracket_top8_x-1"
     assert LayoutKit.FolderName("thumbnail", "cup") == "thumbnail_cup"
+    assert LayoutKit.FolderName("result", "cup") == "result_cup"
     # The catalog's folder-name convention finds each overlay kind by its
     # prefix; a template package is listed by its manifest alone (ADR-007
     # D1), its prefix only naming the kind of a folder it cannot list.
@@ -280,7 +284,7 @@ def test_the_longest_name_is_taken():
     assert LayoutKit.FolderName("top8", "a" * LayoutKit.NAME_MAX)
 
 
-@pytest.mark.parametrize("kind", ["designer", "result", "board", "", None,
+@pytest.mark.parametrize("kind", ["designer", "results", "board", "", None,
                                   3, ["scoreboard"], {"kind": "top8"}])
 def test_only_the_kits_kinds_are_made(kind):
     with pytest.raises(LayoutKitError) as refused:
@@ -556,7 +560,7 @@ def test_the_ai_prompt_is_the_kits_without_its_mark():
             LayoutKit._WithoutMark(text)
         assert not LayoutKit.AiPrompt(kind, root=LAYOUT).startswith("<!--")
     with pytest.raises(LayoutKitError) as refused:
-        LayoutKit.AiPrompt("result", root=LAYOUT)
+        LayoutKit.AiPrompt("designer", root=LAYOUT)
     assert refused.value.code == LayoutKit.BAD_KIND
 
 
@@ -760,7 +764,7 @@ def test_the_ai_prompt_is_read_through_v1(api):
         "kind": "commentary",
         "text": LayoutKit._WithoutMark((KIT / "commentary" / "AI_PROMPT.md")
                                        .read_text(encoding="utf-8"))}
-    refused = api.get(_prompt("result"), headers=api.shell)
+    refused = api.get(_prompt("designer"), headers=api.shell)
     assert refused.status_code == 400
     assert refused.get_json()["error"]["reason"] == LayoutKit.BAD_KIND
 

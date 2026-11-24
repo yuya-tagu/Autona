@@ -472,7 +472,7 @@ function setPlayerNames(data, config, template) {
 // --- Utilities ---
 
 function resolveAssetPath(path) {
-  if (!path) return "";
+  if (typeof path !== "string" || !path) return "";
   if (path.startsWith("./") || path.startsWith("assets/") || path.startsWith("user_data/") || path.startsWith("layout/")) {
     return "../../" + path;
   }

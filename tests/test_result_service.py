@@ -71,12 +71,23 @@ DIFFERENCES = {
         "result_config_empty_background":
             "decision 14: the same values, in config's own order. The old "
             "config started from result_config's keys.",
+        "no_first_character":
+            "ADR-008 D7 R4: the main character is the list's first. With the "
+            "first field empty and the second picked, the old character was "
+            "{} beside a list of one.",
         "background_legacy_banner_path_without_the_file":
             "decision 15: the background is what the thumbnail's settings "
             "draw, through the thumbnail's reading. The old code drew a file "
             "that was not there; the thumbnail draws the default banner.",
     },
     "inputs": {
+        "second_pick_only":
+            "ADR-008 D7 R4: the main character is the list's first (see "
+            "no_first_character).",
+        "from_the_scoreboard":
+            "ADR-008 D7 R4: a row whose second field alone is picked draws "
+            "that pick as its main character. The old payload put the "
+            "scoreboard's character first, a pick the row never made.",
         "a_character_row_alone":
             "decision 7: a pick is an en_name and a skin row, so a character "
             "whose colour combo is empty is on its first skin, and is drawn. "
@@ -94,6 +105,33 @@ DIFFERENCES = {
             "old name was -top8-<date>.png.",
     },
 }
+
+
+# The keys a sample's character has had since ADR-008 D7 R4: a pick's value's
+# (the payload's table). The recording's has name, codename and assets.
+SAMPLE_CHARACTER_KEYS = ("name", "en_name", "display_name", "codename",
+                         "skin", "assets")
+
+
+def _withSampleKeys(payload):
+    """The recorded payload, its sample's characters with the keys they have
+    now (the values are the recording's)."""
+    def now(value):
+        if isinstance(value, dict) and set(value) == {"name", "codename",
+                                                      "assets"}:
+            return {"name": value["name"], "en_name": value["name"],
+                    "display_name": value["name"],
+                    "codename": value["codename"], "skin": 0,
+                    "assets": value["assets"]}
+        return value
+    for row in payload.get("data", {}).get("players", []):
+        if "character" in row:
+            row["character"] = now(row["character"])
+        if "characters" in row:
+            row["characters"] = [now(value) for value in row["characters"]]
+        for member in row.get("members", []):
+            member["character"] = now(member.get("character"))
+    return payload
 
 
 class _Catalog:
@@ -366,6 +404,7 @@ def test_the_payload_is_what_the_old_code_built(env, scenario):
         assert json.dumps(english) in recorded, english
         expected = json.loads(recorded.replace(
             json.dumps(english), json.dumps(said, ensure_ascii=False)))
+    expected = _withSampleKeys(copy.deepcopy(expected))
     # As text: the key order is kept too, and is what a template iterates.
     same = json.dumps({"data": data, "config": config}, ensure_ascii=False) \
         == json.dumps(expected, ensure_ascii=False)
@@ -447,6 +486,56 @@ def test_the_differences_are_of_existing_scenarios():
 
 
 # What each of the differences answers.
+
+def _rowsOf(data):
+    return [row for row in data["players"] if row["characters"]]
+
+
+@pytest.mark.parametrize("scenario", world.SCENARIOS,
+                         ids=[s["name"] for s in world.SCENARIOS])
+def test_the_main_character_is_the_lists_first(env, scenario):
+    # ADR-008 D7 R4: what the payload's table says of `character`.
+    data, _config = _payloadOf(env, scenario)
+    for row in data["players"]:
+        if row.get("characters"):
+            assert row["character"] == row["characters"][0], row["name"]
+
+
+@pytest.mark.parametrize("scenario", world.INPUT_SCENARIOS,
+                         ids=[s["name"] for s in world.INPUT_SCENARIOS])
+def test_a_picked_main_character_is_the_lists_first(env, scenario):
+    SM.state = copy.deepcopy(scenario["state"])
+    _setLayout(scenario["layout"])
+    _writeRows(scenario, env.catalog)
+    data, _config, _layout = env.service.BuildPayload(layout=scenario["layout"])
+    for row in _rowsOf(data):
+        assert row["character"] == row["characters"][0], row["name"]
+
+
+def test_a_second_pick_alone_is_the_main_character(env):
+    _writePlayers([{"rank": None, "name": "Alpha", "sponsor": "", "twitter": "",
+                    "picks": [None, ("Link", 1)]}], env.catalog)
+    row = env.service.BuildPayload()[0]["players"][0]
+    assert row["characters"] and row["character"] == row["characters"][0]
+    assert row["character"]["en_name"] == "Link"
+
+
+@pytest.mark.parametrize("rank, read", [
+    (3, 3), (2.6, 3), (True, 1), ("4", 1), (0, 1), (1000, 1), (None, 1),
+    (float("nan"), 1)])
+def test_the_payloads_rank_is_a_whole_number_in_range(env, rank, read):
+    _named("Alpha")
+    SM.Set("result_players.1.rank", rank)
+    assert env.service.BuildPayload()[0]["players"][0]["rank"] == read
+
+
+def test_a_team_row_has_no_sponsor(env):
+    _setLayout("team")
+    assert results.UpdateTeam(1, {"name": "Crew"}) is None
+    SM.Set("result_teams.1.sponsor", "SP")
+    assert env.service.BuildPayload(layout="team")[0]["players"][0][
+        "sponsor"] == ""
+
 
 def test_a_team_of_members_without_a_name_is_drawn(env):
     scenario = next(s for s in world.SCENARIOS
@@ -1142,7 +1231,8 @@ def test_an_unread_first_character_keeps_the_others_in_their_places(env):
     assert env.database.given[0]["players"][0]["mains"] == {
         "tgame": [["Link", 0, ""], ["Pikachu", 0, ""]]}
     player = env.service.BuildPayload()[0]["players"][0]
-    assert player["character"] == {}
+    # The main character is the list's first (ADR-008 D7 R4).
+    assert player["character"] == link
     assert player["characters"] == [link, pikachu]
 
 

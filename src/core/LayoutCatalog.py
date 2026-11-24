@@ -258,13 +258,16 @@ _LEGACY_PREFIXES = (
     ("bracket_top8", KIND_TOP8, True),
 )
 
-# The prefix of a thumbnail template the layout kit makes (ADR-008 D7 R3,
-# core/LayoutKit.TEMPLATE_PREFIXES). Not a fallback: a template package is
-# listed by its manifest alone (ADR-007 D1). It only says whose an unlisted
-# folder is (its settings.json is broken, or it has none), so that the
-# Thumbnail page shows why, and the overlays' pages do not.
+# The prefix of a template the layout kit makes (core/LayoutKit.
+# TEMPLATE_PREFIXES): a thumbnail's (ADR-008 D7 R3) and a result's (R4). Not
+# a fallback: a template package is listed by its manifest alone (ADR-007
+# D1). It only says whose an unlisted folder is (its settings.json is
+# broken, or it has none), so that the Thumbnail / Result page shows why,
+# and the overlays' pages do not.
 THUMBNAIL_PREFIX = "thumbnail_"
-UNLISTED_PREFIXES = ((THUMBNAIL_PREFIX, KIND_THUMBNAIL),)
+RESULT_PREFIX = "result_"
+UNLISTED_PREFIXES = ((THUMBNAIL_PREFIX, KIND_THUMBNAIL),
+                     (RESULT_PREFIX, KIND_RESULT))
 
 
 # The Board page's selection (ADR-005 S4s): the name of a selection, not a

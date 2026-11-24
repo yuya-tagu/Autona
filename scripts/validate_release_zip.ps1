@@ -29,8 +29,9 @@
        against the overlay contract loads the first, and the kit reads the
        second. So must the layout kit (layout/include/kit/, ADR-008 D2):
        "make a new design" copies it, and refuses to make one without it;
-       the thumbnail's kit (kit/thumbnail/, ADR-008 D7 R3) with its payload
-       table thumbnail_contract.json likewise.
+       the thumbnail's kit (kit/thumbnail/, ADR-008 D7 R3) and the result's
+       (kit/result/, R4) with their payload tables thumbnail_contract.json
+       and result_contract.json likewise.
 
     4. Persisted-state check: user_data/state.json (the operator's saved
        state, ADR-005 S3b) and its set-aside copies (state.json.*.bak) must
@@ -241,7 +242,16 @@ try {
                 "Autona/layout/include/kit/thumbnail/sample_payload.json",
                 "Autona/layout/include/kit/thumbnail/AGENTS.md.tmpl",
                 "Autona/layout/include/kit/thumbnail/CONTRACT.md",
-                "Autona/layout/include/kit/thumbnail/AI_PROMPT.md"
+                "Autona/layout/include/kit/thumbnail/AI_PROMPT.md",
+                "Autona/layout/include/result_contract.json",
+                "Autona/layout/include/kit/result/result.html",
+                "Autona/layout/include/kit/result/result.css",
+                "Autona/layout/include/kit/result/result.js",
+                "Autona/layout/include/kit/result/sample_payload.json",
+                "Autona/layout/include/kit/result/sample_payload_teams.json",
+                "Autona/layout/include/kit/result/AGENTS.md.tmpl",
+                "Autona/layout/include/kit/result/CONTRACT.md",
+                "Autona/layout/include/kit/result/AI_PROMPT.md"
             ) | Where-Object { -not $entryNames.Contains($_) })
         if ($missing.Count -gt 0) {
             throw ("release zip is missing the shared Designer runtime, the overlay contract or the layout kit (custom designs and overlays load them, new designs are made from the kit): {0}" `

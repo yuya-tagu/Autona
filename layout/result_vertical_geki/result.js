@@ -4,8 +4,11 @@
  * Slot 1 (1st place): full character art with gold cinematic lighting.
  * Slots 2–8: dark card layout, character shown as small icon in top-right.
  *
- * Called from Python via page().runJavaScript("initResult(payload)").
- * payload = { data, config }
+ * Template contract 2 (layout/README.md): drawn by Autona.onRender
+ * (../include/autona.js), from the app's off-screen renderer and from the
+ * Web UI's live preview. An exception here is the render's error: no picture
+ * is taken, and the app shows it (ADR-008 D7 R4).
+ * payload = { data, config, layout }
  *   data.players = [{ rank, name, sponsor, character: { assets, ... } }, ...]
  *   data.tournamentName, data.eventName, data.startAt, data.numEntrants
  *   config.main_icon_path, config.background_path, config.accent_color
@@ -13,28 +16,23 @@
 
 let _fontsInjected = false;
 
-async function initResult(payload) {
-  try {
-    const { data, config } = payload;
+async function drawResult(payload) {
+  const { data, config } = payload;
 
-    clearPreviousRender();
-    injectFonts();
-    applyConfig(config);
-    setBackground(config);
-    setHeader(data, config);
-    await placePlayers(data, config);
+  clearPreviousRender();
+  injectFonts();
+  applyConfig(config);
+  setBackground(config);
+  setHeader(data, config);
+  await placePlayers(data, config);
 
-    await document.fonts.ready;
-    await new Promise((r) => setTimeout(r, 100));
+  await document.fonts.ready;
+  await new Promise((r) => setTimeout(r, 100));
 
-    fitLongText();
-
-    document.title = "RENDER_READY";
-  } catch (e) {
-    console.error("initResult error:", e);
-    document.title = "RENDER_READY";
-  }
+  fitLongText();
 }
+
+Autona.onRender(drawResult);
 
 function clearPreviousRender() {
   $(".background").html("");
@@ -82,7 +80,10 @@ function applyConfig(config) {
 function setBackground(config) {
   const bgPath = resolveAssetPath(config.background_path || "./assets/thumbnail_base/default_banner.png");
   if (!bgPath) return;
-  $(".background").html(`<img src="${bgPath}" />`);
+  // Built with the DOM, not markup: the path is the operator's text.
+  const image = document.createElement("img");
+  image.src = bgPath;
+  $(".background").empty().append(image);
 }
 
 function setHeader(data, config) {
@@ -158,7 +159,7 @@ async function placePlayers(data, config) {
     const slotIndex = i + 1;
     const rankLabel = getRankLabel(rank);
 
-    const slot = $(`<div class="player-slot slot-${slotIndex} rank-${rank}"></div>`);
+    const slot = slotElement("player-slot", slotIndex, rank);
 
     // Accent bar
     slot.append(`<div class="accent-bar"></div>`);
@@ -191,7 +192,7 @@ async function placePlayers(data, config) {
         if (!assetPath) return;
         const resolvedPath = resolveAssetPath(assetPath);
         if (!resolvedPath) return;
-        iconsDiv.append(`<div class="secondary-icon"><img src="${resolvedPath}" /></div>`);
+        iconsDiv.append(secondaryIcon(resolvedPath));
       });
       slot.append(iconsDiv);
     }
@@ -230,6 +231,23 @@ async function placePlayers(data, config) {
   await Promise.allSettled(loads);
 }
 
+// A slot's element, its classes set with the DOM rather than written into
+// markup: a hand-built payload's rank may be any text.
+function slotElement(classes, slotIndex, rank) {
+  const token = String(rank).replace(/[^A-Za-z0-9_-]/g, "");
+  return $("<div></div>")
+    .addClass(classes)
+    .addClass("slot-" + slotIndex)
+    .addClass("rank-" + token);
+}
+
+// A secondary fighter's icon, built with the DOM: the path is the payload's.
+function secondaryIcon(path) {
+  const image = document.createElement("img");
+  image.src = path;
+  return $('<div class="secondary-icon"></div>').append(image);
+}
+
 function getRankLabel(rank) {
   switch (rank) {
     case 1: return "1st";
@@ -240,7 +258,7 @@ function getRankLabel(rank) {
 }
 
 function resolveAssetPath(path) {
-  if (!path) return "";
+  if (typeof path !== "string" || !path) return "";
   if (
     path.startsWith("./") ||
     path.startsWith("assets/") ||

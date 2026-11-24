@@ -247,7 +247,7 @@
 | GET / PUT | `/layouts/selected/{kind}` | | 選択中のデザイン（`commentary` / `top8` / `board`）の取得 / 選択 |
 | GET | `/layouts/selected/board/obs-path` | PLAYERDB | OBS に指定するファイルの絶対パス |
 | POST | `/layouts/selected/board:reveal` | THIS_PC | Board の OBS ファイルをエクスプローラで開く |
-| POST | `/layouts:create` | SHELL | 新しいデザインを作る（ADR-008 D2 / D7 R3。`kind` = `scoreboard` / `commentary` / `top8` / `thumbnail`（サムネイルのテンプレート。`layout/thumbnail_<name>/` を契約 2 のマニフェストで作る）・`name`（フォルダ名）・`displayName`（任意）。`layout/<接頭辞><name>/` を作成キットから作り、201 で一覧の項目を返す。拒否は `reason`: 400 `bad_kind` / `bad_name` / `bad_display_name`、409 `reserved` / `exists`、500 `kit_missing` / `write_failed` / `not_listed`） |
+| POST | `/layouts:create` | SHELL | 新しいデザインを作る（ADR-008 D2 / D7 R3 / R4。`kind` = `scoreboard` / `commentary` / `top8` / `thumbnail`（サムネイルのテンプレート。`layout/thumbnail_<name>/` を契約 2 のマニフェストで作る）/ `result`（リザルト画像のレイアウト。`layout/result_<name>/` を契約 2・`rows: "players"` のマニフェストで作る）・`name`（フォルダ名）・`displayName`（任意）。`layout/<接頭辞><name>/` を作成キットから作り、201 で一覧の項目を返す。拒否は `reason`: 400 `bad_kind` / `bad_name` / `bad_display_name`、409 `reserved` / `exists`、500 `kit_missing` / `write_failed` / `not_listed`） |
 | GET | `/layouts/kit/{kind}/ai-prompt` | SHELL | 作成キットの `AI_PROMPT.md`（`{kind, text}`。`kind` は `/layouts:create` と同じ。デザイン一覧の「AI 用の説明をコピー」） |
 | POST | `/layouts:reveal` | SHELL | 一覧にあるデザイン（`id`）のフォルダをエクスプローラで開く（無ければ 404） |
 | GET | `/commentary` / `/commentary/options` | | 実況の状態 / 役割・アイコン・スロットの候補 |
@@ -279,6 +279,7 @@
 | GET | `/thumbnail/payload` | PLAYERDB | 選んだテンプレートの payload（ページのブラウザでのプレビュー用。ADR-008 D7 R2）: `{templateId, folder, entry, contract, size, payload: {data, config, template}, omitted}`。未反映の編集を含む。描画しないのでヘッドレスでも答える。プレビュー用のサーバーが出さない画像（アップロードした背景など）は `""` にしてキーを `omitted` に入れる。テンプレートが読めなければ 404 |
 | GET | `/result` | | リザルトのレイアウト・行・描画と取り込みの状態 |
 | GET | `/result/post` | PLAYERDB | X の投稿文 |
+| GET | `/result/payload` | PLAYERDB | 選んだレイアウトの payload（ページのブラウザでのプレビュー用。ADR-008 D7 R4）: `{layout, folder, entry, contract, size, rows, payload: {data, config, layout}, omitted}`。行に入力が無ければ見本の行。未反映の編集を含む・選手名を含むので PLAYERDB。描画しないのでヘッドレスでも答える。プレビュー用のサーバーが出さない画像は `""` にしてキーを `omitted` に入れる。レイアウトが読めなければ 404 |
 | PATCH | `/result` | | レイアウトの選択 |
 | PATCH | `/result/players/{n}` / `/result/teams/{n}` | | 単独 / 団体の行 |
 | POST | `/result:reorder` | | 行の並べ替え |

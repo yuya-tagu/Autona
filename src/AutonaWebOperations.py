@@ -1200,6 +1200,14 @@ def get_result_preview():
     return ResultService.instance.PreviewImage()
 
 
+def get_result_payload():
+    """What the page's live preview of the layout draws
+    (ResultService.PreviewPayload). No renderer needed: the browser draws
+    it, so a headless shell answers too."""
+    return ResultService.instance.PreviewPayload(
+        games=GameAssetCatalog.instance)
+
+
 def start_image_render(kind, payload, done):
     """Hand an image to the shell's renderer (`render` of core's
     ThumbnailService and ResultService). Waits for the GUI thread to take it,

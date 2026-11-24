@@ -1,4 +1,4 @@
-"""The layout kit: "make a new design" (ADR-008 D2, D7 R3).
+"""The layout kit: "make a new design" (ADR-008 D2, D7 R3, R4).
 
 A new overlay (kind ``scoreboard`` / ``commentary`` / ``top8``) is made right
 in ``layout/<folder>/``, where ``../include/`` resolves and the app's preview
@@ -10,10 +10,13 @@ sample template on template contract 2 (``Autona.onRender``) with its
 and ``sample_payload.json``, all three generated from
 ``layout/include/thumbnail_contract.json`` -- and its ``settings.json`` holds
 the template manifest besides (``entry``, ``size``, ``template``; contract
-2). The rest of this is the same for both. An overlay's files come from the
-kit,
-``layout/include/kit/`` (KIT_DIR; ``include/`` is reserved, so the kit is
-never listed):
+2). So is a new result layout (kind ``result``, ADR-008 D7 R4,
+``layout/result_<name>/``): its kit is ``layout/include/kit/result/``, the
+same files but template.json (the sample layout ``result.*``, two sample
+payloads, generated from ``layout/include/result_contract.json``), and its
+manifest says ``entry``, ``size`` and ``rows``. The rest of this is the same
+for all of them. An overlay's files come from the kit, ``layout/include/kit/``
+(KIT_DIR; ``include/`` is reserved, so the kit is never listed):
 
 * ``<kind>/index.html`` / ``index.css`` / ``index.js`` -- the kind's
   minimal sample on overlay contract 1 (``layout/include/autona.js``)
@@ -84,13 +87,14 @@ OVERLAY_PREFIXES = {
     LayoutCatalog.KIND_TOP8: "bracket_top8_",
 }
 OVERLAY_KINDS = tuple(OVERLAY_PREFIXES)
-# The template kinds a new design may be (ADR-008 D7 R3), with the folder's
-# prefix. A template package has no folder-name fallback (ADR-007 D1: its
-# manifest is what lists it); the prefix sorts them together in Explorer, as
-# the overlays' does, and tells whose an unlisted folder is
-# (LayoutCatalog.UNLISTED_PREFIXES).
+# The template kinds a new design may be (ADR-008 D7 R3: the thumbnail; R4:
+# the result), with the folder's prefix. A template package has no
+# folder-name fallback (ADR-007 D1: its manifest is what lists it); the prefix
+# sorts them together in Explorer, as the overlays' does, and tells whose an
+# unlisted folder is (LayoutCatalog.UNLISTED_PREFIXES).
 TEMPLATE_PREFIXES = {
     LayoutCatalog.KIND_THUMBNAIL: LayoutCatalog.THUMBNAIL_PREFIX,
+    LayoutCatalog.KIND_RESULT: LayoutCatalog.RESULT_PREFIX,
 }
 TEMPLATE_KINDS = tuple(TEMPLATE_PREFIXES)
 FOLDER_PREFIXES = {**OVERLAY_PREFIXES, **TEMPLATE_PREFIXES}
@@ -109,6 +113,26 @@ THUMBNAIL_MANIFEST = {
     "entry": "thumbnail.html",
     "size": [1920, 1080],
     "template": "template.json",
+}
+# The result kit (layout/include/kit/result/, ADR-008 D7 R4): the same as
+# the thumbnail's but template.json (a result has none), a sample payload of
+# a players' layout and one of a teams'; its manifest, a players' layout
+# (AGENTS.md tells when to make it "teams").
+RESULT_FILES = ("result.html", "result.css", "result.js",
+                "sample_payload.json", "sample_payload_teams.json")
+RESULT_MANIFEST = {
+    "entry": "result.html",
+    "size": [1920, 1080],
+    "rows": LayoutCatalog.ROWS_PLAYERS,
+}
+# Each template kind's sample files and manifest.
+TEMPLATE_FILES = {
+    LayoutCatalog.KIND_THUMBNAIL: THUMBNAIL_FILES,
+    LayoutCatalog.KIND_RESULT: RESULT_FILES,
+}
+TEMPLATE_MANIFESTS = {
+    LayoutCatalog.KIND_THUMBNAIL: THUMBNAIL_MANIFEST,
+    LayoutCatalog.KIND_RESULT: RESULT_MANIFEST,
 }
 
 # The name after the prefix: ASCII letters, digits, "_" and "-", starting
@@ -294,10 +318,11 @@ def KitFiles(kind):
     """{file name in a new design of ``kind``: its kit file, as a path below
     the kit (KIT_DIR) with "/"}. An overlay: its kind's sample and
     AI_PROMPT.md, and the overlays' CONTRACT.md and instructions. A
-    thumbnail: everything from its own folder (its instructions, its payload
-    table), CLAUDE.md alone shared (it only points at AGENTS.md)."""
+    template (a thumbnail, a result): everything from its own folder (its
+    instructions, its payload table), CLAUDE.md alone shared (it only points
+    at AGENTS.md)."""
     if kind in TEMPLATE_PREFIXES:
-        files = {name: f"{kind}/{name}" for name in THUMBNAIL_FILES}
+        files = {name: f"{kind}/{name}" for name in TEMPLATE_FILES[kind]}
         files[AI_PROMPT_FILE] = f"{kind}/{AI_PROMPT_FILE}"
         files[CONTRACT_FILE] = f"{kind}/{CONTRACT_FILE}"
         files["AGENTS.md"] = f"{kind}/AGENTS.md.tmpl"
@@ -316,7 +341,7 @@ def _Manifest(kind, shown):
     (ADR-007 D5), and a template's on top (ADR-007 D1)."""
     if kind in TEMPLATE_PREFIXES:
         return {"kind": kind, "contract": TEMPLATE_CONTRACT,
-                **THUMBNAIL_MANIFEST, "displayName": shown,
+                **TEMPLATE_MANIFESTS[kind], "displayName": shown,
                 "author": DEFAULT_AUTHOR, "license": DEFAULT_LICENSE}
     return {"kind": kind, "contract": OVERLAY_CONTRACT, "displayName": shown,
             "author": DEFAULT_AUTHOR, "license": DEFAULT_LICENSE}

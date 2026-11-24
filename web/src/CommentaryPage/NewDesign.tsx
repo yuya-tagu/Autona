@@ -17,8 +17,8 @@ import {useShellAccess} from "../PanelShell/useShellAccess";
 import {LayoutEntry} from "./SideCards";
 
 // The design lists' layout kit (ADR-008 D2 / L2), on the BOARD, Commentary
-// and Top 8 pages, and the Thumbnail page's templates (D7 R3, kind
-// "thumbnail"): "make a new design" -- a display name and a folder name,
+// and Top 8 pages, and the Thumbnail and Result pages' templates (D7 R3 / R4,
+// kinds "thumbnail" / "result"): "make a new design" -- a display name and a folder name,
 // then core makes layout/<prefix><folder>/ from the kit (core/LayoutKit.py),
 // the page lists and selects it, and its folder opens in Explorer for the
 // operator's AI -- and "copy for an AI", the kit's AI_PROMPT.md of the kind
@@ -27,7 +27,8 @@ import {LayoutEntry} from "./SideCards";
 // shared view alone (useShellAccess: a browser or headless is refused, and
 // shows neither). Text only: nothing here renders HTML.
 
-export type KitKind = "scoreboard" | "commentary" | "top8" | "thumbnail";
+export type KitKind =
+    "scoreboard" | "commentary" | "top8" | "thumbnail" | "result";
 
 export const CREATE_PATH = "/api/v1/layouts:create";
 export const REVEAL_PATH = "/api/v1/layouts:reveal";
@@ -47,6 +48,13 @@ export const FOLDER_PREFIXES: Record<KitKind, string> = {
     commentary: "commentators_",
     top8: "bracket_top8_",
     thumbnail: "thumbnail_",
+    result: "result_",
+};
+
+// The dialog's text of a kind: the overlays share one, a template has its own.
+const NEW_TEXT: Partial<Record<KitKind, string>> = {
+    thumbnail: "layout_kit_new_text_thumbnail",
+    result: "layout_kit_new_text_result",
 };
 
 const REQUEST_OPTIONS = {timeoutMs: 30000};
@@ -255,9 +263,7 @@ export default function NewDesignActions({kind, onCreated, onRelist}: {
                 <DialogContent>
                     <Stack spacing={2}>
                         <DialogContentText>
-                            {i18n.t(kind === "thumbnail"
-                                ? "layout_kit_new_text_thumbnail"
-                                : "layout_kit_new_text")}
+                            {i18n.t(NEW_TEXT[kind] ?? "layout_kit_new_text")}
                         </DialogContentText>
                         <TextField
                             autoFocus

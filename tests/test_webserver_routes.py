@@ -282,6 +282,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/result', 'api_v1.result_update', 'OPTIONS,PATCH'),
     ('/api/v1/result/players/<int:slot>', 'api_v1.result_player_update', 'OPTIONS,PATCH'),
     ('/api/v1/result/post', 'api_v1.get_result_post', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/result/payload', 'api_v1.get_result_payload', 'GET,HEAD,OPTIONS'),
     ('/api/v1/result/preview', 'api_v1.get_result_preview', 'GET,HEAD,OPTIONS'),
     ('/api/v1/result/teams/<int:slot>', 'api_v1.result_team_update', 'OPTIONS,PATCH'),
     ('/api/v1/result:clear', 'api_v1.result_clear', 'OPTIONS,POST'),
@@ -631,7 +632,10 @@ def test_the_classification_follows_the_rules():
                       # The thumbnail's live preview payload (ADR-008 D7
                       # R2): the state with its unpublished edits, as the
                       # pending board.
-                      "api_v1.get_thumbnail_payload"}
+                      "api_v1.get_thumbnail_payload",
+                      # The result's (R4): the renderer's whole input,
+                      # guarded as the thumbnail's.
+                      "api_v1.get_result_payload"}
     thisPc = {"api_v1.reveal_board_file",
               "api_v1.settings_network_update",
               "api_v1.settings_language_update",
@@ -780,7 +784,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 164
+    assert len(EXPECTED_API_V1_ROUTES) == 165
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

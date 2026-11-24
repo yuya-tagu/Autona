@@ -993,6 +993,25 @@ def get_result_preview():
                     headers={"Cache-Control": "no-store"})
 
 
+@api_v1.route("/result/payload")
+@api_handler
+def get_result_payload():
+    # What the page's live preview of a contract 2 layout draws (ADR-008 D7
+    # R4): {"layout", "folder", "entry", "contract", "size": [w, h], "rows",
+    # "payload": {data, config, layout}, "omitted": [config keys]}. The
+    # preview image's payload: the renderer's whole input, its config's
+    # images among it, guarded as GET /thumbnail/payload is (PLAYERDB). A
+    # browser it refuses shows the preview image. An image the preview
+    # listener does not serve is "" and its key in "omitted". Drawn by the
+    # browser: no renderer needed. Nothing is written.
+    try:
+        payload = WebOps.get_result_payload()
+    except (OSError, ValueError):
+        logger.warning("v1 /result/payload: the layout cannot be read")
+        raise ApiError(NOT_FOUND, "the result layout cannot be read", 404)
+    return ok(data=payload, revision=current_revision())
+
+
 @api_v1.route("/tournament")
 @api_handler
 def get_tournament():
@@ -2633,7 +2652,8 @@ def _kit_refused(operation, error):
 @_no_store_answers
 @write_op("layout.create")
 def create_layout():
-    # {"kind": "scoreboard" | "commentary" | "top8" | "thumbnail", "name":
+    # {"kind": "scoreboard" | "commentary" | "top8" | "thumbnail" | "result",
+    # "name":
     # "<A-Z a-z 0-9 _ ->", "displayName"?: "<any text, 64 at most>"}: makes
     # layout/<prefix><name>/ from the kit (core's LayoutKit), shown as the
     # display name (the name without one) -> 201 its catalog entry (GET

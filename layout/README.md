@@ -42,7 +42,22 @@ OBS 等のブラウザソースで読み込んで使用します。
 payload の表 `include/thumbnail_contract.json` から `python scripts/gen_layout_kit.py` で作る生成物（手で直さない）。書き方の詳細は下の
 「テンプレートの契約 2」。
 
-> 開発者向け: 接頭辞（`scoreboard_` / `commentators_` / `bracket_top8_` / `thumbnail_`）の付いた名前の同梱フォルダを足すときは、利用者が作った
+### 新しいリザルト画像のレイアウトを作る（AI に頼んで作る）
+
+サムネイルと同じ流れで、リザルトのページの「レイアウト」の下の「新しいデザインを作る」から始める。
+
+1. `layout/result_<名前>/` ができ、レイアウトに選ばれる。中身は動く最小のサンプル（`result.html` / `result.css` / `result.js`）・
+   `settings.json`（契約 2 のマニフェスト。`rows: "players"`）・`AGENTS.md`（と `CLAUDE.md`）・`CONTRACT.md`・payload の見本
+   `sample_payload.json`（個人 16 行）/ `sample_payload_teams.json`（チーム 8 行）・`AI_PROMPT.md`
+2. AI に頼んで返ってきた 3 ファイルを上書きする（`settings.json` は上書きしない。チームのレイアウトにするときだけ `rows` を `"teams"` に変える）
+3. プレビューの「デザインを再読み込み」で描き直す。行を増やす・減らす・同順位にする・キャラを外す・Top 16 のレイアウトにする、でも
+   「レイアウトの確認」が「エラーはありません」のままか確かめる
+4. 「作成」で `out/results/` に画像ができる（アプリのウィンドウで）
+
+キットの元は `include/kit/result/`。`CONTRACT.md`・`AI_PROMPT.md`・2 つの見本の payload は payload の表 `include/result_contract.json` から
+`python scripts/gen_layout_kit.py` で作る生成物（手で直さない）。
+
+> 開発者向け: 接頭辞（`scoreboard_` / `commentators_` / `bracket_top8_` / `thumbnail_` / `result_`）の付いた名前の同梱フォルダを足すときは、利用者が作った
 > フォルダとの衝突を確かめる（自動更新は `layout/` をマージで上書きする）。足したら `src/core/LayoutKit.py` の `RESERVED_DIRS` にも足す。
 
 ### ローカルでのテスト・デバッグ（Chrome）
@@ -166,7 +181,7 @@ autona.js はコンソールに警告を 1 回出す）。
 {
   "autona": {
     "kind": "result",
-    "contract": 1,
+    "contract": 2,
     "displayName": {"ja": "ネオン TOP8", "en": "Neon TOP 8"},
     "entry": "result.html",
     "size": [1920, 1080],
@@ -218,7 +233,7 @@ autona.js はコンソールに警告を 1 回出す）。
 
 #### テンプレートの契約 2（`Autona.onRender`。新しく作るならこちら）
 
-サムネイルの同梱テンプレート（`thumbnail/`・`thumbnail_type_b/`）はこの形です。payload のキーの表（型・説明。`data` は state そのものなので、ほかのキーもある）は `include/thumbnail_contract.json`（人が読む形はキットの `include/kit/thumbnail/CONTRACT.md`）。
+サムネイルの同梱テンプレート（`thumbnail/`・`thumbnail_type_b/`）とリザルトの同梱レイアウト 6 種はこの形です。リザルトの payload のキーの表は `include/result_contract.json`（人が読む形は `include/kit/result/CONTRACT.md`。`data` はアプリが組み立てたもので、表に書いたキーがすべて）。サムネイルの payload のキーの表（型・説明。`data` は state そのものなので、ほかのキーもある）は `include/thumbnail_contract.json`（人が読む形はキットの `include/kit/thumbnail/CONTRACT.md`）。
 
 ```json
 {"autona": {"kind": "thumbnail", "contract": 2, "size": [1920, 1080], "template": "type_a.json"}}
@@ -246,7 +261,7 @@ Autona.onRender(async ({ data, config, template }) => {
   描き終えた後に `requestAnimationFrame` / `setTimeout` / 待たない Promise の中で起きたエラーも、その描画のエラーとして数える
   （アプリは撮る直前に確かめる）。描画は 1 回ずつで、描いている間に来た分は最新の 1 回だけ後で描く。
   contract 1 のように例外を握りつぶして描きかけの絵が出ることはない。画像が読めなかっただけ（404）はエラーにしない
-- **サムネイルのページのプレビューはブラウザで描く**: contract 2 のテンプレートはページの中の iframe（プレビュー用のサーバー）で
+- **サムネイル・リザルトのページのプレビューはブラウザで描く**: contract 2 のテンプレートはページの中の iframe（プレビュー用のサーバー）で
   同じ `fn` を呼んで表示する（アプリのウィンドウが無いヘッドレス版・LAN のブラウザでも出る。保存する画像はアプリが描く）。
   ブラウザの開発者ツールでそのまま確かめられる。アップロードした背景はプレビューには出ない（`config.background_path` が `""` になる。
   作る画像には入る）ので、`""` のときは既定の背景を描くこと。プレビューの iframe の URL には `?autonaParent=<ページのオリジン>` が付き、
@@ -270,7 +285,11 @@ Autona.onRender(async ({ data, config, template }) => {
   読めない画像（無い・画像でない・ネットワークのパス）は `""`（テンプレートの既定で描く）。ほかのパス（キャラの絵・国旗・ロゴ）は
   アプリのフォルダからの相対パス
 - 同梱のリザルトの描画を流用するなら `../include/result.js`（`data.rows` が `teams` なら団体として描く。`rows` の無い payload では
-  従来どおり `layout` が `team` で始まるとき）と `../include/result.css` を読む
+  従来どおり `layout` が `team` で始まるとき）と `../include/result.css` を読む。`include/result.js` は読んだだけでは何も登録しない。
+  契約 2 なら `../include/autona.js` と `../include/result.js` を読んだ後に自分で登録する（マニフェストを `contract: 2` に）:
+  `Autona.onRender(drawResult)`（同梱の `result.html` と同じ）か、描き足すなら
+  `Autona.onRender(async (payload) => { await drawResult(payload); /* 自分の描き足し */ })`。`onRender` を呼ぶのは 1 回だけ。
+  契約 1 のまま（`autona.js` を読まない）なら今までどおり `initResult` で描く
 
 > **Note:** 現行テンプレートは前身プロジェクトのデザインを引き継いでいます。
 > 今後 Autona 版として順次リデザインを進める予定です。

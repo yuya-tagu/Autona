@@ -464,8 +464,9 @@ def test_the_validator_requires_the_layout_kit():
     for path in LAYOUT_KIT_FILES:
         assert (PROJECT_ROOT / "layout" / path).is_file(), path
     # The tables the kits' generated files are written from (ADR-008 D1 /
-    # D7 R3) ship too.
-    for table in ("overlay_contract.json", "thumbnail_contract.json"):
+    # D7 R3 / R4) ship too.
+    for table in ("overlay_contract.json", "thumbnail_contract.json",
+                  "result_contract.json"):
         assert f'"Autona/layout/include/{table}"' in text, table
 
 
@@ -503,6 +504,7 @@ def test_check_5_of_the_validator_on_synthetic_zips(tmp_path):
             "Autona/layout/include/autona.js",
             "Autona/layout/include/overlay_contract.json",
             "Autona/layout/include/thumbnail_contract.json",
+            "Autona/layout/include/result_contract.json",
             *("Autona/layout/" + p for p in LAYOUT_KIT_FILES),
             *("Autona/_internal/" + p for p in required)]
     zips = tmp_path / "zips"

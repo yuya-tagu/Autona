@@ -74,9 +74,11 @@ function initResult(payload) {
 @pytest.fixture
 def pages(autonaApp, previewListener):
     """The stand-in page for every layout, in the runtime's layout/, with the
-    shipped manifest (the catalog's result packages, ADR-007 T1)."""
+    shipped manifest (the catalog's result packages, ADR-007 T1) at contract
+    1: the stand-in is an initResult page."""
     created = template_packages.Install(
-        autonaApp.dir / "layout", template_packages.RESULT_FOLDERS, page=PAGE)
+        autonaApp.dir / "layout", template_packages.RESULT_FOLDERS, page=PAGE,
+        contract=1)
     yield
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -334,8 +336,9 @@ def shippedPages(autonaApp, previewListener):
     assert not include.exists()
     include.mkdir()
     created.append(include)
-    for file in ("jquery-3.7.1.min.js", "lodash.min.js", "thumbnail_assets.js",
-                 "result.js", "result.css", "result_team.css"):
+    for file in ("autona.js", "jquery-3.7.1.min.js", "lodash.min.js",
+                 "thumbnail_assets.js", "result.js", "result.css",
+                 "result_team.css"):
         shutil.copy(PROJECT_ROOT / "layout" / "include" / file, include)
     try:
         yield
@@ -388,8 +391,10 @@ def _scriptErrors():
 @pytest.mark.parametrize("layout", world.LAYOUTS)
 def test_a_shipped_page_draws_what_it_is_given(shipped, layout):
     """The real result.js, on a payload with what is awkward in it. Not its
-    pixels, which the offscreen platform does not show. Its catch says
-    RENDER_READY as well, so the text is what says it got to the end."""
+    pixels, which the offscreen platform does not show (tests/
+    test_render_platform.py compares them). Drawn in Autona.onRender
+    (template contract 2, ADR-008 D7 R4): an exception would be the render's
+    error."""
     errors, sink = _scriptErrors()
     try:
         pixmap, error = _render(shipped, layout, _config(),
@@ -403,8 +408,25 @@ def test_a_shipped_page_draws_what_it_is_given(shipped, layout):
     assert errors == []
     # Twice at least: in the header, and in the row. As text: none of it ran.
     assert text.count("\"</script>${b}`'") >= 2
-    assert _evaluate(shipped, "document.querySelectorAll('script[src]').length") \
-        == _evaluate(shipped, "document.scripts.length")
+    # No script of the payload's: the inline ones are the page's own line
+    # that registers drawResult (none on geki, whose result.js does).
+    inline = json.loads(_evaluate(shipped, "JSON.stringify([...document.scripts]"
+                                  ".filter((s) => !s.src)"
+                                  ".map((s) => s.textContent.trim()))"))
+    assert inline == ([] if layout == "vertical_geki"
+                      else ["Autona.onRender(drawResult);"])
+
+
+def test_the_shared_script_registers_nothing():
+    """include/result.js only defines drawResult (and initResult): a page that
+    reuses it registers its own function, and Autona.onRender takes one."""
+    shared = (PROJECT_ROOT / "layout" / "include" / "result.js").read_text(
+        encoding="utf-8")
+    assert "async function drawResult(" in shared
+    assert "async function initResult(" in shared
+    code = [line for line in shared.splitlines()
+            if not line.lstrip().startswith(("*", "/*", "//"))]
+    assert not any("Autona.onRender(" in line for line in code)
 
 
 @pytest.mark.parametrize("layout", world.LAYOUTS)
