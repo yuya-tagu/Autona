@@ -1,5 +1,6 @@
 import React from "react";
-import {act, fireEvent, render, screen, within} from "@testing-library/react";
+import {act, fireEvent, render, screen, waitFor, within}
+    from "@testing-library/react";
 import {Provider} from "react-redux";
 import i18n from "../i18n/config";
 import {autonaStore} from "../redux/store";
@@ -54,6 +55,11 @@ let gates;
 // (the live preview's frame).
 let livePayload;
 let previewPort;
+// The shell session's answer (ADR-008 D7 R3: the layout kit shows in the
+// desktop's shared view alone): 403 is a browser's; and GET
+// /api/v1/layouts' "unlisted".
+let shellSession;
+let unlisted;
 
 // The answers to `method` `path` wait until the returned function is
 // called.
@@ -194,6 +200,8 @@ beforeEach(() => {
     gates = {};
     livePayload = null;
     previewPort = null;
+    shellSession = 403;
+    unlisted = undefined;
     if (typeof AbortSignal.timeout !== "function") {
         AbortSignal.timeout = () => undefined;
     }
@@ -223,7 +231,18 @@ beforeEach(() => {
                     canRender}});
             }
             if (path === "/api/v1/layouts" && catalog) {
-                return answer(200, {ok: true, data: catalog});
+                return answer(200, {ok: true, data: catalog,
+                                    ...(unlisted ? {unlisted} : {})});
+            }
+            if (path === "/api/v1/shell-session") {
+                return shellSession === 200
+                    ? answer(200, {ok: true, data: {ticket: "t"}})
+                    : answer(shellSession, {ok: false, error: {
+                        code: "FORBIDDEN", message: "no"}});
+            }
+            if (path === "/api/v1/layouts/kit/thumbnail/ai-prompt") {
+                return answer(200, {ok: true, data: {
+                    kind: "thumbnail", text: "# thumbnail prompt"}});
             }
             if (path === "/api/v1/thumbnail/payload" && livePayload) {
                 return typeof livePayload === "number"
@@ -250,6 +269,17 @@ beforeEach(() => {
         if (path === "/api/v1/thumbnail:reset") {
             settings = JSON.parse(JSON.stringify(DEFAULTS));
             return answer(200, {ok: true, data: settings});
+        }
+        if (path === "/api/v1/layouts:create") {
+            const made = {id: `thumbnail_${body.name}`, kind: "thumbnail",
+                          bundled: false, displayName: body.displayName,
+                          displayNames: {ja: body.displayName,
+                                         en: body.displayName},
+                          size: [1920, 1080], contract: 2,
+                          folder: `thumbnail_${body.name}`,
+                          entry: "thumbnail.html"};
+            catalog = [...catalog, made];
+            return answer(201, {ok: true, data: made});
         }
         if (path === "/api/v1/thumbnail/background") {
             settings = {...settings, background_source: "custom",
@@ -1271,4 +1301,98 @@ test("a generation that failed on the template's error shows the errors to fix",
 test("a template's error is said in its own words", () => {
     expect(errorText("template_error"))
         .toBe(i18n.t("thumbnail_error_template_error"));
+});
+
+// ── the layout kit (ADR-008 D7 R3) ────────────────────────────────────────
+
+function kitButton(key) {
+    return screen.queryByRole("button", {name: i18n.t(key)});
+}
+
+test("in a browser the kit's buttons do not show, the unlisted templates do",
+     async () => {
+    unlisted = [{folder: "thumbnail_broken", kind: "thumbnail",
+                 reason: "bad_settings", detail: "JSONDecodeError: x"},
+                // An overlay page's (no kind known): not this page's.
+                {folder: "my_overlay", kind: null, reason: "no_manifest",
+                 detail: null}];
+    await renderPage();
+    await settle();
+
+    expect(kitButton("layout_kit_new")).toBeNull();
+    expect(kitButton("layout_kit_copy_prompt")).toBeNull();
+    expect(reads("/api/v1/layouts/kit/thumbnail/ai-prompt")).toBe(0);
+    const shown = within(region("thumbnail_design")).getByRole(
+        "region", {name: i18n.t("layout_unlisted_title")});
+    expect(shown).toHaveTextContent("layout/thumbnail_broken/");
+    expect(shown).toHaveTextContent(i18n.t("layout_unlisted_bad_settings"));
+    expect(shown).toHaveTextContent("JSONDecodeError: x");
+    expect(shown).not.toHaveTextContent("my_overlay");
+});
+
+test("in the shared view a new template is made, listed and chosen",
+     async () => {
+    shellSession = 200;
+    await renderPage();
+    await settle();
+    const card = region("thumbnail_design");
+    expect(reads("/api/v1/layouts/kit/thumbnail/ai-prompt")).toBe(1);
+    const listed = reads("/api/v1/layouts");
+
+    fireEvent.click(button(card, "layout_kit_new"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(i18n.t("layout_kit_new_text_thumbnail"));
+    fireEvent.change(within(dialog).getByLabelText(
+        i18n.t("layout_kit_display_name")), {target: {value: "Neon Cup"}});
+    expect(within(dialog).getByText(i18n.t("layout_kit_folder",
+        {folder: "layout/thumbnail_Neon_Cup/"}))).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole(
+        "button", {name: i18n.t("layout_kit_create")}));
+    await settle();
+    await settle();
+
+    expect(writes("POST", "/api/v1/layouts:create")).toEqual([
+        {kind: "thumbnail", name: "Neon_Cup", displayName: "Neon Cup"}]);
+    // Listed again and chosen once the list has it; its folder opened.
+    expect(reads("/api/v1/layouts")).toBe(listed + 1);
+    expect(writes("PATCH", "/api/v1/thumbnail")).toEqual([
+        {template_id: "thumbnail_Neon_Cup"}]);
+    const order = global.fetch.mock.calls.map(([url, init]) =>
+        `${init?.method ?? "GET"} ${new URL(url).pathname}`);
+    expect(order.lastIndexOf("GET /api/v1/layouts"))
+        .toBeLessThan(order.indexOf("PATCH /api/v1/thumbnail"));
+    expect(writes("POST", "/api/v1/layouts:reveal")).toEqual([
+        {id: "thumbnail_Neon_Cup"}]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("combobox", {name: i18n.t("thumbnail_template")}))
+        .toHaveTextContent("Neon Cup");
+});
+
+test("a template made while the catalog cannot be read is not chosen",
+     async () => {
+    shellSession = 200;
+    await renderPage();
+    await settle();
+    const card = region("thumbnail_design");
+    // The re-reading after the creation fails (refused: not tried again).
+    const fetched = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation((url, init) =>
+        new URL(url).pathname === "/api/v1/layouts"
+            && (init?.method ?? "GET") === "GET"
+            ? Promise.resolve(answer(404, {ok: false}))
+            : fetched(url, init));
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+    fireEvent.click(button(card, "layout_kit_new"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(
+        i18n.t("layout_kit_display_name")), {target: {value: "Later"}});
+    fireEvent.click(within(dialog).getByRole(
+        "button", {name: i18n.t("layout_kit_create")}));
+    for (let i = 0; i < 6; i += 1) {
+        await settle();
+    }
+
+    expect(writes("POST", "/api/v1/layouts:create")).toHaveLength(1);
+    expect(writes("PATCH", "/api/v1/thumbnail")).toEqual([]);
 });

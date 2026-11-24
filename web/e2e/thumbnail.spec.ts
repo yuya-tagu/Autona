@@ -153,6 +153,16 @@ const BROKEN_FILES: Record<string, string> = {
         + "  missingFunction(payload);\n});\n",
 };
 
+// A template made from the layout kit (ADR-008 D7 R3) as "make a new design"
+// makes it: the kit's files as they are, with the manifest core writes
+// (core/LayoutKit._Manifest). Copied here: the page's button is the shared
+// view's alone (SHELL).
+const KIT_MADE = "thumbnail_e2e_kit";
+const KIT_FILES = ["thumbnail.html", "thumbnail.css", "thumbnail.js",
+                   "template.json", "sample_payload.json"];
+// A thumbnail_ folder the catalog cannot list: told on this page.
+const UNREADABLE = "thumbnail_e2e_unreadable";
+
 test.describe("the live preview", () => {
     test.beforeAll(() => {
         const folder = path.join(appDir(), "layout", BROKEN);
@@ -160,11 +170,33 @@ test.describe("the live preview", () => {
         for (const [file, content] of Object.entries(BROKEN_FILES)) {
             fs.writeFileSync(path.join(folder, file), content, "utf8");
         }
+        const kit = path.join(appDir(), "layout", "include", "kit",
+                              "thumbnail");
+        const made = path.join(appDir(), "layout", KIT_MADE);
+        fs.mkdirSync(made, {recursive: true});
+        for (const file of KIT_FILES) {
+            fs.copyFileSync(path.join(kit, file), path.join(made, file));
+        }
+        fs.writeFileSync(path.join(made, "settings.json"), JSON.stringify({
+            autona: {kind: "thumbnail", contract: 2, entry: "thumbnail.html",
+                     size: [1920, 1080], template: "template.json",
+                     displayName: "E2E kit", author: "unknown",
+                     license: "All rights reserved"}}), "utf8");
+        const unreadable = path.join(appDir(), "layout", UNREADABLE);
+        fs.mkdirSync(unreadable, {recursive: true});
+        fs.writeFileSync(path.join(unreadable, "settings.json"), "{not json",
+                         "utf8");
+        fs.writeFileSync(path.join(unreadable, "thumbnail.html"), "", "utf8");
     });
 
-    test.afterAll(() => {
-        fs.rmSync(path.join(appDir(), "layout", BROKEN),
-                  {recursive: true, force: true});
+    test.afterAll(async ({request}) => {
+        // No template of these folders stays chosen once they are gone.
+        await reset(request);
+        expect((await settings(request)).template_id).toBe("type_a");
+        for (const name of [BROKEN, KIT_MADE, UNREADABLE]) {
+            fs.rmSync(path.join(appDir(), "layout", name),
+                      {recursive: true, force: true});
+        }
     });
 
     test("the shipped template is drawn in the page's frame from the preview origin", async ({page}) => {
@@ -212,5 +244,48 @@ test.describe("the live preview", () => {
         await expect(check.getByTestId("layout-check-error").first())
             .toContainText("missingFunction");
         await expect(check).toContainText("template contract 2");
+    });
+
+    test("a template made from the kit is drawn with no errors", async ({page, request}) => {
+        const response = await request.patch(serverUrl("/api/v1/thumbnail"),
+                                             {data: {template_id: KIT_MADE}});
+        expect(response.ok(), await response.text()).toBe(true);
+        await page.goto(serverUrl("/web/thumbnail"));
+
+        await expect(page.getByRole("combobox", {name: "Template"}))
+            .toHaveText("E2E kit");
+        await expect(page.getByTitle("Preview", {exact: true}))
+            .toHaveAttribute("src", new RegExp(
+                `/layout/${KIT_MADE}/thumbnail\\.html\\?autonaParent=[^&]+$`));
+        // Drawn: the template's default background, read from ../../assets
+        // under the CSP, and the round's line.
+        const frame = page.frameLocator("iframe[title='Preview']");
+        await expect.poll(() => frame.locator("#background").evaluate(
+            (image: HTMLImageElement) => image.complete && image.naturalWidth))
+            .toBeGreaterThan(0);
+        await expect(page.getByRole("status", {name: "Layout check"}))
+            .toContainText("no errors");
+        await expect(page.getByTestId("layout-check-error")).toHaveCount(0);
+    });
+
+    test("a browser gets no kit, and is told the folder it cannot list", async ({page, request}) => {
+        await page.goto(serverUrl("/web/thumbnail"));
+        const design = page.getByRole("region", {name: "Design", exact: true});
+
+        const unlisted = design.getByRole("region",
+                                          {name: "Designs that could not be read"});
+        await expect(unlisted).toContainText(`layout/${UNREADABLE}/`);
+        // The kit's buttons are the desktop's shared view's (SHELL).
+        await expect(design.getByRole("combobox", {name: "Template"}))
+            .toBeVisible();
+        await expect(design.getByRole("button", {name: "Make a new design"}))
+            .toHaveCount(0);
+        await expect(design.getByRole("button", {name: "Copy for an AI"}))
+            .toHaveCount(0);
+        const made = await request.post(serverUrl("/api/v1/layouts:create"),
+                                        {data: {kind: "thumbnail", name: "x"}});
+        expect(made.status()).toBe(403);
+        expect(fs.existsSync(path.join(appDir(), "layout", "thumbnail_x")))
+            .toBe(false);
     });
 });

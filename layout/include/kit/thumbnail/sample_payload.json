@@ -1,0 +1,176 @@
+{
+  "data": {
+    "game": {
+      "name": "Sample Game",
+      "codename": "sample"
+    },
+    "tournamentInfo": {
+      "tournamentName": "Autona Cup 2026",
+      "displayTournamentName": "Autona Cup",
+      "eventName": "Singles",
+      "address": "",
+      "numEntrants": 128,
+      "startAt": "2026/11/21",
+      "startAtDate": "2026-11-21"
+    },
+    "display_options": {
+      "show_sponsor": true
+    },
+    "score": {
+      "1": {
+        "best_of": 5,
+        "best_of_text": "Best of 5",
+        "first_to": 3,
+        "phase": "TOP 8",
+        "pool": "",
+        "match": "Grand Final",
+        "match_en": "Grand Final",
+        "team": {
+          "1": {
+            "teamName": "",
+            "score": 2,
+            "color": "#e5484d",
+            "losers": false,
+            "player": {
+              "1": {
+                "name": "Alpha",
+                "team": "TEAM A",
+                "real_name": "Taro Yamada",
+                "twitter": "@alpha_fgc",
+                "seed": 1,
+                "country": {
+                  "code": "JP",
+                  "name": "Japan",
+                  "display_name": "日本",
+                  "en_name": "Japan",
+                  "asset": "./assets/country_flag/jp.png"
+                },
+                "state": {
+                  "code": "13",
+                  "original_code": "13",
+                  "name": "東京都",
+                  "asset": "./assets/state_flag/JP/13.png"
+                },
+                "mergedName": "TEAM A | Alpha",
+                "sponsor_logo": "",
+                "character": {
+                  "1": {
+                    "name": "Fighter 1",
+                    "en_name": "Fighter 1",
+                    "display_name": "Fighter 1",
+                    "codename": "fighter_1",
+                    "assets": {
+                      "full": {
+                        "type": [
+                          "full"
+                        ],
+                        "asset": "./assets/mock_data/mock_asset/full_character_1.svg",
+                        "eyesight": {
+                          "x": 540,
+                          "y": 126
+                        }
+                      },
+                      "base_files/icon": {
+                        "type": [
+                          "icon"
+                        ],
+                        "asset": "./assets/mock_data/mock_asset/full_character_1.svg"
+                      }
+                    },
+                    "skin": 0,
+                    "variant": {}
+                  }
+                }
+              }
+            }
+          },
+          "2": {
+            "teamName": "",
+            "score": 1,
+            "color": "#3e63dd",
+            "losers": true,
+            "player": {
+              "1": {
+                "name": "Bravo",
+                "team": "",
+                "real_name": "Bob Smith",
+                "twitter": "bravo",
+                "seed": 4,
+                "country": {
+                  "code": "US",
+                  "name": "United States",
+                  "display_name": "アメリカ合衆国",
+                  "en_name": "United States",
+                  "asset": "./assets/country_flag/us.png"
+                },
+                "state": {
+                  "code": "CA",
+                  "original_code": "CA",
+                  "name": "California",
+                  "asset": "./assets/state_flag/US/CA.png"
+                },
+                "mergedName": "Bravo",
+                "sponsor_logo": "",
+                "character": {
+                  "1": {
+                    "name": "Fighter 2",
+                    "en_name": "Fighter 2",
+                    "display_name": "Fighter 2",
+                    "codename": "fighter_2",
+                    "assets": {
+                      "full": {
+                        "type": [
+                          "full"
+                        ],
+                        "asset": "./assets/mock_data/mock_asset/full_character_2.svg",
+                        "eyesight": {
+                          "x": 540,
+                          "y": 126
+                        }
+                      },
+                      "base_files/icon": {
+                        "type": [
+                          "icon"
+                        ],
+                        "asset": "./assets/mock_data/mock_asset/full_character_2.svg"
+                      }
+                    },
+                    "skin": 0,
+                    "variant": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "config": {
+    "background_source": "default",
+    "scoreboardNumber": 1,
+    "background_path": null,
+    "theme_color": "#181B21",
+    "accent_color": "#f0a500",
+    "display_phase": true,
+    "use_team_names": true,
+    "use_sponsors": true,
+    "game": {
+      "sample": {
+        "flip_p1": false,
+        "flip_p2": true,
+        "smooth_scale": true,
+        "zoom": 100,
+        "align": {
+          "horizontal": 50,
+          "vertical": 40
+        }
+      }
+    }
+  },
+  "template": {
+    "name": "My thumbnail",
+    "default_background": "../../assets/thumbnail_base/standard_default_bg.png",
+    "template_id": "thumbnail_sample"
+  }
+}

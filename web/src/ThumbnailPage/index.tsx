@@ -36,6 +36,7 @@ import {
     LayoutEntry,
 } from "../CommentaryPage/SideCards";
 import DesignPane, {RenderPayload} from "../CommentaryPage/DesignPane";
+import NewDesignActions from "../CommentaryPage/NewDesign";
 import {
     LayoutCheckPanel,
     reportFromErrors,
@@ -86,6 +87,11 @@ import {
 // the catalog (which contract the template is); a payload refused (no
 // access token on the LAN: PLAYERDB) or not of contract 2 falls back to the
 // renderer's image (GET /thumbnail/preview, READ).
+//
+// The layout kit (ADR-008 D7 R3): "make a new design" and "copy for an AI"
+// under the template select (NewDesignActions, kind "thumbnail"; the
+// desktop's shared view alone, as on the design lists), the new template
+// then chosen; and the template folders the catalog did not list, with why.
 
 export const PREVIEW_DEBOUNCE_MS = 300;
 // The template contract previewed live.
@@ -243,12 +249,20 @@ function ThumbnailContent() {
     const [loadFailed, setLoadFailed] = React.useState(false);
     // Bumped by the reload button: loads the page again.
     const [loads, setLoads] = React.useState(0);
+    // Bumped to read the templates again (a new design, the live preview's
+    // reload): the catalog alone.
+    const [packageReads, setPackageReads] = React.useState(0);
     const [settings, setSettings] = React.useState<ThumbnailSettings | null>(null);
     const [templates, setTemplates] = React.useState<ThumbnailTemplate[]>([]);
     // The templates to choose from: the catalog's thumbnail packages
     // (ADR-007 T1), or the description's until (unless) they are read.
-    const {packages, settled: packagesSettled} =
-        useTemplatePackagesRead("thumbnail", loads);
+    const {packages, settled: packagesSettled, unlisted,
+           revision: packagesRevision} =
+        useTemplatePackagesRead("thumbnail", loads + packageReads);
+    // A template the layout kit made, chosen once a reading of the catalog
+    // asked for after it is over (`after`: the readings over by then).
+    const [madeTemplate, setMadeTemplate] =
+        React.useState<{id: string; after: number} | null>(null);
     const choices: TemplateChoice[] = React.useMemo(() => (packages
         ? packages.map((entry) => ({
             id: entry.id,
@@ -620,6 +634,31 @@ function ThumbnailContent() {
             });
     }, [write, requestPreview]);
 
+    const relistTemplates = React.useCallback(
+        () => setPackageReads((count) => count + 1), []);
+    // A template the layout kit made: listed again, then chosen -- once the
+    // list has it (the pulldown never shows an id it does not list), and not
+    // when the reading failed (as the overlay pages do).
+    const templateCreated = React.useCallback((entry: LayoutEntry) => {
+        setMadeTemplate({id: entry.id, after: packagesRevision});
+        relistTemplates();
+    }, [relistTemplates, packagesRevision]);
+    React.useEffect(() => {
+        if (madeTemplate === null || packagesRevision <= madeTemplate.after) {
+            return;
+        }
+        setMadeTemplate(null);
+        if (packages?.some((entry) => entry.id === madeTemplate.id)) {
+            change({template_id: madeTemplate.id}).catch(() => undefined);
+        }
+    }, [madeTemplate, packagesRevision, packages, change]);
+    // The live preview's reload: the template's page and payload, and the
+    // catalog (its manifest may have changed, or broken).
+    const reloadLive = React.useCallback(() => {
+        relistTemplates();
+        startLive();
+    }, [relistTemplates, startLive]);
+
     const sendColors = React.useCallback(
         (next: Partial<Record<ColorKind, string>>) =>
             write(() => apiPatch(`/api/v1/colors/${FEATURE}`, next,
@@ -774,9 +813,9 @@ function ThumbnailContent() {
                 selectable={false}
                 renderPayload={shownLive.render}
                 size={shownLive.size}
-                // Its page again, and the payload: after an edit of the
-                // template's files.
-                onReload={startLive}
+                // Its page again, the payload and the catalog: after an
+                // edit of the template's files.
+                onReload={reloadLive}
             />
         ) : (
             <Box sx={{display: "flex", gap: 1, alignItems: "center"}}>
@@ -806,8 +845,16 @@ function ThumbnailContent() {
             <Box sx={{width: {md: 440}, flexShrink: 0, overflowY: {md: "auto"},
                       p: 2}}>
                 <Stack spacing={2}>
-                    <DesignCard settings={settings} choices={choices}
-                                change={change} upload={upload}/>
+                    <DesignCard
+                        settings={settings}
+                        choices={choices}
+                        change={change}
+                        upload={upload}
+                        unlisted={unlisted}
+                        actions={<NewDesignActions kind="thumbnail"
+                                                   onCreated={templateCreated}
+                                                   onRelist={relistTemplates}/>}
+                    />
                     <ItemsCard settings={settings} change={change}/>
                     <CharactersCard
                         key={game?.codename ?? ""}

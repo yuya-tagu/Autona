@@ -25,7 +25,24 @@ OBS 等のブラウザソースで読み込んで使用します。
 キットの元は `include/kit/`（指示書のひな形 `AGENTS.md.tmpl` / `CLAUDE.md.tmpl`・種類ごとのサンプル）。`CONTRACT.md` と
 `AI_PROMPT.md` は `include/overlay_contract.json` から `python scripts/gen_layout_kit.py` で作る生成物（手で直さない）。
 
-> 開発者向け: 接頭辞（`scoreboard_` / `commentators_` / `bracket_top8_`）の付いた名前の同梱フォルダを足すときは、利用者が作った
+### 新しいサムネイルのテンプレートを作る（AI に頼んで作る）
+
+1. アプリのサムネイルのページで、「デザイン」の「テンプレート」の下の「新しいデザインを作る」を押し、名前（半角英数字と `_` `-`）を入れる
+2. `layout/thumbnail_<名前>/` ができ、テンプレートに選ばれ、エクスプローラーで開く。中身は動く最小のサンプル
+   （`thumbnail.html` / `thumbnail.css` / `thumbnail.js`・`template.json`）・`settings.json`（契約 2 のマニフェスト）・
+   AI への指示書 `AGENTS.md`（と `CLAUDE.md`）・payload のキーの表 `CONTRACT.md`・payload の見本 `sample_payload.json`・
+   チャットの AI に貼る用の `AI_PROMPT.md`
+3. そのフォルダで AI のエージェントに頼むか、「AI 用の説明をコピー」でチャットの AI に貼って頼み、返ってきたファイルを上書きする
+   （`settings.json` は上書きしない。2 回目以降の直しは、今の `thumbnail.html` / `.css` / `.js` も一緒に貼る）
+4. プレビューの「デザインを再読み込み」で描き直す。エラーは「レイアウトの確認」の欄に出る（「AI に貼る用にコピー」で AI に返せる）。
+   一覧に出なくなったら、テンプレートの選択の下の「読み込めなかったデザイン」に理由が出る
+5. 「サムネイルを作成」で `out/thumbnails/` に画像ができる（アプリのウィンドウで）
+
+キットの元は `include/kit/thumbnail/`（指示書のひな形 `AGENTS.md.tmpl`・サンプル）。`CONTRACT.md`・`AI_PROMPT.md`・`sample_payload.json` は
+payload の表 `include/thumbnail_contract.json` から `python scripts/gen_layout_kit.py` で作る生成物（手で直さない）。書き方の詳細は下の
+「テンプレートの契約 2」。
+
+> 開発者向け: 接頭辞（`scoreboard_` / `commentators_` / `bracket_top8_` / `thumbnail_`）の付いた名前の同梱フォルダを足すときは、利用者が作った
 > フォルダとの衝突を確かめる（自動更新は `layout/` をマージで上書きする）。足したら `src/core/LayoutKit.py` の `RESERVED_DIRS` にも足す。
 
 ### ローカルでのテスト・デバッグ（Chrome）
@@ -201,7 +218,7 @@ autona.js はコンソールに警告を 1 回出す）。
 
 #### テンプレートの契約 2（`Autona.onRender`。新しく作るならこちら）
 
-サムネイルの同梱テンプレート（`thumbnail/`・`thumbnail_type_b/`）はこの形です。
+サムネイルの同梱テンプレート（`thumbnail/`・`thumbnail_type_b/`）はこの形です。payload のキーの表（型・説明。`data` は state そのものなので、ほかのキーもある）は `include/thumbnail_contract.json`（人が読む形はキットの `include/kit/thumbnail/CONTRACT.md`）。
 
 ```json
 {"autona": {"kind": "thumbnail", "contract": 2, "size": [1920, 1080], "template": "type_a.json"}}

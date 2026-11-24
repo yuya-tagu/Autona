@@ -1,0 +1,130 @@
+/* Fonts shipped with Autona (no web fonts: the template's folder may not
+   load anything from the internet). */
+@font-face {
+  font-family: "LINE Seed JP";
+  src: url("../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf") format("truetype");
+  font-weight: 700;
+}
+
+/* The colors when the payload has none (config.theme_color / accent_color
+   replace them). */
+:root {
+  --theme: #181b21;
+  --accent: #f0a500;
+}
+
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--theme);
+}
+
+#thumbnail {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  font-family: "LINE Seed JP", sans-serif;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+#background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.5);
+}
+
+.side {
+  position: absolute;
+  top: 0;
+  width: 960px;
+  height: 1080px;
+  overflow: hidden;
+}
+.side.p1 { left: 0; }
+.side.p2 { left: 960px; }
+
+/* The character's frame: thumbnail.js sizes and places the picture in it
+   (config.game[codename]: zoom, align, flip). */
+.character-frame {
+  position: absolute;
+  left: 0;
+  bottom: 160px;
+  width: 100%;
+  height: 920px;
+  overflow: hidden;
+}
+.character-frame.flipped {
+  transform: scaleX(-1);
+}
+
+.character {
+  position: absolute;
+  max-width: none;
+}
+
+.strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: var(--theme);
+  border-top: 8px solid var(--accent);
+}
+
+.name {
+  font-size: 88px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 880px;
+}
+
+.sponsor {
+  font-size: 56px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+#center {
+  position: absolute;
+  left: 660px;
+  top: 0;
+  width: 600px;
+  height: 920px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  text-align: center;
+}
+
+#vs {
+  font-size: 240px;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+#round {
+  font-size: 56px;
+}
+
+#tournament {
+  font-size: 36px;
+  opacity: 0.8;
+}

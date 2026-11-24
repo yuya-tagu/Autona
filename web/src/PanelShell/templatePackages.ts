@@ -29,6 +29,16 @@ export interface TemplatePackage {
     entry?: string;
 }
 
+// A folder of the kind (or of none known) the catalog did not list, and why
+// (GET /api/v1/layouts' "unlisted", ADR-008 D3): the shape of
+// CommentaryPage/SideCards' UnlistedFolder.
+export interface UnlistedTemplateFolder {
+    folder: string;
+    kind: string | null;
+    reason: string;
+    detail: string | null;
+}
+
 // One choice of a page's pulldown: what is sent, and what is shown.
 export interface TemplateChoice {
     id: string;
@@ -74,30 +84,47 @@ export function useTemplatePackages(kind: TemplateKind,
     return useTemplatePackagesRead(kind, loads).packages;
 }
 
-// The same, and whether the reading is over (read, or given up on): a page
-// that previews by the package's contract waits for it.
-export function useTemplatePackagesRead(kind: TemplateKind, loads: number): {
-    packages: TemplatePackage[] | null; settled: boolean;
-} {
-    const [read, setRead] = React.useState<{
-        packages: TemplatePackage[] | null; settled: boolean;
-    }>({packages: null, settled: false});
+// The same, whether the reading is over (read, or given up on): a page that
+// previews by the package's contract waits for it -- the folders of `kind`
+// not listed ([] until read, and when the answer has none: one of no kind
+// known is an overlay page's, ADR-008 D7 R3), and how many readings are over
+// (`revision`, a failed one too: what a page waits on to act on a reading it
+// asked for).
+export interface TemplatePackagesRead {
+    packages: TemplatePackage[] | null;
+    settled: boolean;
+    unlisted: UnlistedTemplateFolder[];
+    revision: number;
+}
+
+export function useTemplatePackagesRead(kind: TemplateKind,
+                                        loads: number): TemplatePackagesRead {
+    const [read, setRead] = React.useState<TemplatePackagesRead>(
+        {packages: null, settled: false, unlisted: [], revision: 0});
     React.useEffect(() => {
         let live = true;
-        getWithRetry<{ok: boolean; data: unknown}>(
+        getWithRetry<{ok: boolean; data: unknown; unlisted?: unknown}>(
             `/api/v1/layouts?kind=${kind}`, () => live).then((body) => {
             const data = body?.data;
             if (!Array.isArray(data)) {
                 throw new Error(`GET /api/v1/layouts?kind=${kind}: not a list`);
             }
             if (live) {
-                setRead({packages: (data as TemplatePackage[]).filter(
-                    (entry) => entry && entry.kind === kind), settled: true});
+                const unlisted = Array.isArray(body.unlisted)
+                    ? (body.unlisted as UnlistedTemplateFolder[]).filter(
+                        (folder) => folder && folder.kind === kind)
+                    : [];
+                setRead((current) => ({
+                    packages: (data as TemplatePackage[]).filter(
+                        (entry) => entry && entry.kind === kind),
+                    settled: true, unlisted,
+                    revision: current.revision + 1}));
             }
         }).catch((error) => {
             console.error(error);
             if (live) {
-                setRead((current) => ({...current, settled: true}));
+                setRead((current) => ({...current, settled: true,
+                                       revision: current.revision + 1}));
             }
         });
         return () => {

@@ -2590,9 +2590,10 @@ def reveal_games_folder():
     return ok()
 
 
-# ── The layout kit (ADR-008 D2) ──
-# The design lists' (BOARD / Commentary / Top 8) "make a new design", "copy
-# for an AI" and "open the folder": core's LayoutKit / LayoutCatalog. All
+# ── The layout kit (ADR-008 D2, D7 R3) ──
+# The design lists' (BOARD / Commentary / Top 8, and the Thumbnail page's
+# templates) "make a new design", "copy for an AI" and "open the folder":
+# core's LayoutKit / LayoutCatalog. All
 # WebAccess.SHELL: layout/ is served on the overlays' origin, so a layout's
 # script must not make a design nor open a window on this PC (headless has
 # no shared view: SHELL is 403 there). Every answer is no-store. Not in the
@@ -2632,8 +2633,8 @@ def _kit_refused(operation, error):
 @_no_store_answers
 @write_op("layout.create")
 def create_layout():
-    # {"kind": "scoreboard" | "commentary" | "top8", "name": "<A-Z a-z 0-9 _
-    # ->", "displayName"?: "<any text, 64 at most>"}: makes
+    # {"kind": "scoreboard" | "commentary" | "top8" | "thumbnail", "name":
+    # "<A-Z a-z 0-9 _ ->", "displayName"?: "<any text, 64 at most>"}: makes
     # layout/<prefix><name>/ from the kit (core's LayoutKit), shown as the
     # display name (the name without one) -> 201 its catalog entry (GET
     # /layouts' shape). Refused with error.reason: 400 bad_kind / bad_name /

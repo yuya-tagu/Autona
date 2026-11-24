@@ -258,6 +258,14 @@ _LEGACY_PREFIXES = (
     ("bracket_top8", KIND_TOP8, True),
 )
 
+# The prefix of a thumbnail template the layout kit makes (ADR-008 D7 R3,
+# core/LayoutKit.TEMPLATE_PREFIXES). Not a fallback: a template package is
+# listed by its manifest alone (ADR-007 D1). It only says whose an unlisted
+# folder is (its settings.json is broken, or it has none), so that the
+# Thumbnail page shows why, and the overlays' pages do not.
+THUMBNAIL_PREFIX = "thumbnail_"
+UNLISTED_PREFIXES = ((THUMBNAIL_PREFIX, KIND_THUMBNAIL),)
+
 
 # The Board page's selection (ADR-005 S4s): the name of a selection, not a
 # catalog kind (KINDS). It lists two of those.
@@ -740,11 +748,11 @@ def _BuiltinEntry(name, directory, skip):
     inferred = _InferFromName(name)
     if block is None and inferred is None:
         if problem is not None:
-            return skip(problem[0], None, problem[1])
+            return skip(problem[0], _UnlistedKind(name), problem[1])
         # Neither a settings.json nor a page: a folder of something else
         # (pictures, fonts), not a design that failed.
         if _LooksLikeADesign(directory):
-            return skip(UNLISTED_NO_MANIFEST, None)
+            return skip(UNLISTED_NO_MANIFEST, _UnlistedKind(name))
         return None
     warnings = []
     if problem is not None:
@@ -970,6 +978,15 @@ def _InferFromName(name):
             suffix = name[len(prefix):].lstrip("_") or name
             return kind, _Prettify(suffix)
     return None
+
+
+def _UnlistedKind(name):
+    """The kind an unlisted folder with no usable block is told under: a
+    template's by its prefix (UNLISTED_PREFIXES, in any case), else None
+    (every page's)."""
+    folded = name.casefold()
+    return next((kind for prefix, kind in UNLISTED_PREFIXES
+                 if folded.startswith(prefix)), None)
 
 
 def _Prettify(text, dashes=False):

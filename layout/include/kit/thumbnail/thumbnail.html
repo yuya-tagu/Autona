@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./thumbnail.css" />
+</head>
+<body>
+  <div id="thumbnail">
+    <img id="background" alt="" hidden />
+
+    <div class="side p1">
+      <div id="p1-frame" class="character-frame">
+        <img id="p1-character" class="character" alt="" hidden />
+      </div>
+      <div class="strip">
+        <span id="p1-sponsor" class="sponsor"></span>
+        <span id="p1-name" class="name"></span>
+      </div>
+    </div>
+
+    <div class="side p2">
+      <div id="p2-frame" class="character-frame">
+        <img id="p2-character" class="character" alt="" hidden />
+      </div>
+      <div class="strip">
+        <span id="p2-sponsor" class="sponsor"></span>
+        <span id="p2-name" class="name"></span>
+      </div>
+    </div>
+
+    <div id="center">
+      <div id="vs">VS</div>
+      <div id="round"></div>
+      <div id="tournament"></div>
+    </div>
+  </div>
+
+  <script src="../include/autona.js"></script>
+  <script src="./thumbnail.js"></script>
+</body>
+</html>

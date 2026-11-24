@@ -1,0 +1,162 @@
+# Autona のサムネイルのテンプレートを作る（AI への指示書）
+
+このフォルダは、格闘ゲーム大会の配信支援ツール **Autona** の「対戦動画のサムネイル」（1 枚の画像）のテンプレートです。
+Autona の「新しいデザインを作る」で作られ、`layout/<このフォルダ>/` に置かれています。
+Autona はこのフォルダの `thumbnail.html` を画面に出さずに開き、試合のデータ（payload）で描かせてから、その画面を PNG / JPG に撮ります。
+あなたの仕事は、利用者の頼みに合わせて `thumbnail.html` / `thumbnail.css` / `thumbnail.js`（必要なら `template.json`）を書き換えることです。
+
+## このフォルダのファイル
+
+| ファイル | 役割 |
+|---|---|
+| `thumbnail.html` / `thumbnail.css` / `thumbnail.js` | テンプレート本体。今は動く最小のサンプルが入っている。これを書き換える |
+| `template.json` | 配置や色などの値を書く JSON（形は自由）。中身は payload の `template` として渡る。使わなければ `{}` でよいが、ファイルは消さない。Autona はこの中を読まない（サンプルの `name` もどこにも出ない。一覧に出る名前は `settings.json` の `displayName`） |
+| `settings.json` | Autona がテンプレートの一覧に出すための情報（`autona` ブロック）。**書き換えない**（下の「マニフェスト」） |
+| `CONTRACT.md` | payload のキーの表（型・説明） |
+| `sample_payload.json` | payload の見本（1on1 の試合）。Autona が渡す形と同じ |
+| `AGENTS.md` / `CLAUDE.md` | この指示書（`CLAUDE.md` は `AGENTS.md` を読ませるだけ） |
+| `AI_PROMPT.md` | チャットの AI に貼る用のまとめ（この指示書・キーの表・サンプル） |
+
+## フォルダ名
+
+- フォルダ名は `thumbnail_<名前>`。フォルダ名がテンプレートの id で、Autona の設定はこの id で選んだテンプレートを覚えている
+- **フォルダの名前を変えない・フォルダを動かさない**（`../include/` と `../../assets/` が `layout/` の直下にあることを前提にしている。
+  名前を変えると別のテンプレートになり、選んでいた設定が外れる）
+- 別のテンプレートを増やすときは、Autona のサムネイルのページの「新しいデザインを作る」でもう 1 つ作る
+
+## マニフェスト（`settings.json`）
+
+`settings.json` は Autona が作ったものを**そのまま使う**。中身はこの形で、`displayName` には「新しいデザインを作る」で利用者が入れた表示名
+（入れなければフォルダ名の `<名前>`）、`author` / `license` には `unknown` / `All rights reserved` が入っている:
+
+```json
+{
+  "autona": {
+    "kind": "thumbnail",
+    "contract": 2,
+    "entry": "thumbnail.html",
+    "size": [1920, 1080],
+    "template": "template.json",
+    "displayName": "（作ったときの表示名）",
+    "author": "unknown",
+    "license": "All rights reserved"
+  }
+}
+```
+
+- **ファイルごと書き直さない・チャットで全文を返さない**（表示名と作者が上の見本の値で上書きされる）
+- 大きさを変えるときだけ `"size"` の値を変える。エージェントはその行だけを直し、チャットの AI は「`"size": [1280, 720]` に変えてください」のように
+  変える行だけを利用者に伝える。`size` は作る画像の `[幅, 高さ]`（px の整数。各 1〜4096）で、**`thumbnail.css` の `html, body` と外枠の幅・高さも
+  同じ値にする**（YouTube のサムネイルなら 1920×1080 か 1280×720）
+- `kind`・`contract`・`entry`・`template` は変えない（`thumbnail.html` / `template.json` の名前も変えない）。表示名・作者・ライセンスは
+  利用者が自分で直す
+
+## データの受け取り方（テンプレート契約 2）
+
+- `thumbnail.html` は body の最後で `../include/autona.js` を自分のスクリプトより前に読む（サンプルのまま）
+- **`Autona.onRender(関数)` を 1 回だけ呼ぶ**（サンプルの `thumbnail.js` の最後）。Autona は画像を作るたびに `関数(payload)` を呼ぶ
+  （同じページで何回も呼ばれる。前の描画の文字や画像が残らないように、毎回すべての要素を書き直す）
+- 描き終わったら関数から戻るだけでよい。`async` の関数にして `await` してもよい（返した Promise を待つ）。合図（`RENDER_READY`）は要らない
+- Autona は、関数が戻った後にフォント（`document.fonts.ready`）と `<img>`・CSS の背景画像の読み込みを待って（最大 5 秒）から撮る。
+  関数の中で文字の幅を測って縮めるなら、測る前に `await document.fonts.ready;` する（関数が戻る前はフォントが読めておらず、別のフォントの幅になる）
+- **例外は失敗になる**: 関数の中の例外・返した Promise の失敗・描いている間のスクリプトのエラーがあると画像は作られず、エラーが Autona の画面に出る。
+  描き終えた後の `setTimeout` / `requestAnimationFrame` の中のエラーもその描画の失敗として数える
+- `payload` は `{data, config, template}`:
+  - `data` は Autona の試合のデータ（state）そのもの。**キーが無いことも `null` のこともある**ので、`(x || {})`・`|| ""` のように無いときの値を決めて読む。
+    `data` がほぼ空（試合が無い）でもエラーにしない
+  - `config` はサムネイルのページの設定（表示する項目・色・背景・キャラの画像の置き方）。`CONTRACT.md` の表のキーは毎回ある（ほかのキーもありうる）
+  - `template` は `template.json` の中身に `template_id`（このフォルダの名前）を足したもの
+- キーの表は `CONTRACT.md`、形の見本は `sample_payload.json`
+- 描くボードは `data.score[config.scoreboardNumber]`（サムネイルのページは 1）。左が `team["1"]`、右が `team["2"]`、選手は `player["1"]`・`player["2"]`…
+- 人の入力した文字（選手名など）は `textContent` で入れる。`innerHTML` に入れない
+
+## 何を出すか（デザインの方針）
+
+- **出す項目はテンプレートが決めてよい**（大会名を出さない・シードや国旗を足す・ラウンドだけ大きく出す など）
+- ただし、利用者がサムネイルのページで切り替える次の 3 つには**必ず従う**（出す項目でも、`false` なら出さない）:
+  - `config.display_phase`: フェーズ・プール・ラウンドの名前
+  - `config.use_team_names`: `true` でチーム名（`team.teamName`）があれば、選手名の代わりにチーム名を出す
+  - `config.use_sponsors`（と `data.display_options.show_sponsor`）: どちらかが `false` ならスポンサー（`player.team`・`sponsor_logo`）を出さない
+- **色**: 利用者の設定の `config.theme_color`（テーマ色）と `config.accent_color`（アクセント色）を**主要な色**（地の色・帯・強調の文字など、
+  見た目の印象を決める色）に効かせる。補助の色（影・グラデーションの途中・細い線など）はテンプレートが決めてよい。どちらの色が来ても読めるように
+  文字の色を選ぶ（サンプルは CSS 変数 `--theme` / `--accent` で受けている）
+  - 依頼に配色があるとき（例: 朱と墨）は、その色を CSS に固定で書かずに、利用者に設定してもらう。チャットの AI は次のように伝える:
+    「サムネイルのページの『サムネイルの色』で、テーマカラーを #1a1a1a（墨）、アクセントカラーを #c8372d（朱）に設定してください」
+  - 背景が絵柄（和紙・写真など）のときは、`theme_color` を地の全面に塗らなくてよい。帯・枠・名前の下地などに効かせる
+  - `team.{T}.color`（チームの色）は使ってよいが、補助の色として（左右の印・細い線など）。`theme_color` / `accent_color` より優先しない
+- **背景**:
+  - `config.background_path` に値があれば（利用者が大会のバナー・自分の画像を選んだ）それを描く
+  - 無い（`null` / `""`）ときはテンプレートの既定の背景を描く。既定の背景は画像でも **CSS だけ**（グラデーション・模様）でもよい。
+    `template.json` の `default_background` はサンプルが使っているキーで、Autona は読まない（消しても `""` にしてもよい）
+- **フェーズ・プール・ラウンド**（`score.{N}` の `phase` / `pool` / `match`）: どれも空のことがある。空のものは飛ばしてつなぐ。例:
+  - 1 行: `[phase, pool, match].filter(Boolean).join(" - ")` → `TOP 8 - Winners Final`・`Pools - A1 - Winners Round 1`（サンプル）
+  - 2 段: 上に `phase`（と `pool`）を小さく、下に `match` を大きく
+  - 英語だけのデザインなら `match` の代わりに `match_en`。`best_of_text`（`Best of 5`）を添えてもよい
+- **団体戦（1 チームに選手が 2 人以上）**: 名前の欄は、`use_team_names` が `true` でチーム名があればチーム名、無ければ選手名を ` / ` でつなぐ
+  （長ければ縮める・省略する）。チーム名を出すときは、その下にメンバー名を小さく添えてもよい。キャラは 1 人目の 1 体目を大きく出すか、
+  各選手の 1 体目を並べる（多ければ先頭の 3 人まで）。サンプルは名前をつなぎ、キャラは 1 人目だけを出している
+
+## キャラの画像
+
+- 画像は `player.character["1"].assets` の中から選ぶ。種類（キー）はゲームで違う。`full`（全身）が無ければ最初のものを使う。無ければ `<img>` を隠す
+- **サムネイルのページの「キャラクター画像の配置」（`config.game[data.game.codename]`）を必ず効かせる**（サンプルの `placeCharacter` がそのまま使える）:
+  - `flip_p1` / `flip_p2`: 左 / 右のキャラを左右反転する（枠ごと `transform: scaleX(-1)`）
+  - `zoom`: キャラの枠を埋める大きさを 100 として、その % 倍に拡大する（100 未満は 100 と同じ）
+  - `align.horizontal` / `align.vertical`: 枠の中で、キャラの目の位置（その画像の `eyesight` `{x, y}`。無ければ画像の中心）を置く位置（枠の幅・高さの %）。
+    枠の端に隙間ができる位置までは動かさない
+  - `smooth_scale`: `false` なら `image-rendering: pixelated`（ドット絵のゲーム）
+  - 今のゲームの設定が無い（`config.game[codename]` が無い）ときは `{}` として読み、既定の値（反転なし・100・50 / 40・なめらか）で描く
+
+## 画像のパス
+
+パスは 2 種類あり、扱いが違う:
+
+1. **payload の中のパス**（`data` のキャラの絵 `assets.<種類>.asset`・国旗 `country.asset`・`sponsor_logo`、`config.background_path`）:
+   Autona のフォルダが基準（`./assets/...`・`./user_data/...`）。**サンプルの `resolve()` を通して URL にする**（このページは `layout/<このフォルダ>/`
+   にあるので、先頭の `./` を取って `"../../"` を前に付ける。`/` で始まる Autona の URL（`/render-asset/...`）と `data:` / `blob:` はそのまま）
+2. **`template.json` とこのフォルダの CSS / HTML に書くパス**: **このページが基準**。このフォルダの画像は `./bg.png`、Autona 同梱のものは
+   `../../assets/...`（例: `../../assets/thumbnail_base/standard_default_bg.png`）。`resolve()` に通さず、そのまま使う
+
+- 読めないパス: PC の別のフォルダ・`C:\...` のような絶対パス・`file://`・インターネットの URL は、プレビューにも作る画像にも出ない（`resolve()` は `""` を返す）
+- **プレビューには出ない画像がある**: アップロードした背景はプレビューでは `""` になる（作る画像には入る。プレビューの下にその旨が出る）
+- **読めなかった画像（404・パスの間違い）はエラーにならず、「レイアウトの確認」の欄にも出ない**（その画像が出ないだけ）。画像が出ないときは
+  パスを確かめる（下の「開発者ツール」の Network で 404 が見える）
+
+## 守る規則
+
+1. **インターネット上のものは読めない**（このフォルダの CSP で止まる）。CDN のスクリプト・Google Fonts などの Web フォント・外部の画像・外部への `fetch` は使わない。
+   読めるのはこのフォルダ・`../include/`・`../../assets/` と payload の画像だけ。使いたいライブラリやフォントはこのフォルダに入れる（ライセンスの文書も入れる）
+2. 使えないもの: Worker・iframe・`<object>`・フォームの送信・`data:` / `blob:` のスクリプト。インラインの `<script>` / `<style>` と `style` 属性は使える
+3. **フォント**: 同梱フォントは `@font-face` の `src: url(...)` で読む。
+   - 英数字だけ: `../include/RobotoCondensed.ttf`（細長い）・`../include/Roboto-Regular.ttf`・`../include/NotoSans-Regular.ttf`
+   - **日本語が出る**: `../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf`（LINE Seed JP。`-Regular` `-Thin` もある）・
+     `../../assets/font/GenEiMGothic/GenEiMGothic2-Regular.ttf`（源暎Mゴシック。`-Medium` `-Bold` `-Heavy` `-Black` もある）
+   - 同梱にないフォント（明朝・筆文字など）を使うときは、利用者にフォントのファイルとそのライセンス（再配布・埋め込みの条件）を
+     このフォルダに置いてもらい、相対パスで読む: `@font-face { font-family: "MyFont"; src: url("./MyFont.woff2") format("woff2"); }`。
+     チャットの AI は次のように頼む: 「使いたいフォントのファイル（.ttf / .otf / .woff2）と、そのライセンスのファイルを
+     このデザインのフォルダ（thumbnail_<名前>）に置いて、ファイル名を教えてください」。置かれるまでは同梱フォントで代わりに作る
+4. **大きさは `settings.json` の `size`**（既定 1920×1080）。`html, body` をその幅・高さにして `overflow: hidden`。背景は透明にしない（画像になる）
+5. `hidden` 属性で隠すなら CSS に `[hidden] { display: none !important; }` を置く（サンプルにある）。`display: flex` などを書いた要素は、これが無いと消えない
+6. **トップレベルで `Autona` という名前を使わない**。コードは全部 `(function () { ... })();` の中に書く
+7. **`document.title` を変えない**（Autona が描き終わりの合図に使っている。`<head>` に `<title>` を書くのはよい）
+8. `../include/` と `../../assets/` の中のファイルは書き換えない（Autona の更新で上書きされ、ほかのデザインも使っている）
+9. 描画に時間をかけない（アニメーションは撮られない。最後の状態だけが画像になる）
+
+## 確かめ方と直し方
+
+- Autona のサムネイルのページの「デザイン」の「テンプレート」でこのテンプレート（`displayName`）を選ぶと、「プレビュー」にこのページが描かれる
+  （今の試合のデータ。試合が無いときは見本のデータ）
+- プレビューの近くの「レイアウトの確認」の欄に、このページのエラー（`Autona.onRender` の中の例外・スクリプトのエラー）が該当のファイル・行とヒントつきで出る。
+  **「AI に貼る用にコピー」でその内容を AI に渡せる**。描き終わってエラーが無ければ「autona.js で描きました。エラーはありません」と出る
+- `../include/autona.js` が読めていない（パスの間違い・その前のスクリプトの構文エラー）・`Autona.onRender` を呼んでいないときもそこに出る
+- ファイルを直したら、プレビューの「デザインを再読み込み」で開き直す（Autona の再起動は要らない）
+- 一覧にこのテンプレートが出ないときは、テンプレートの選択の下の「読み込めなかったデザイン」に理由が出る（`settings.json` が JSON として正しくない・
+  `template` や `entry` のファイルが無い・`size` が不正 など）
+- 「サムネイルを作成」で作った画像は `out/thumbnails/` に入る（Autona のアプリの画面だけ）。作るときにエラーがあれば画像は作られず、同じ欄にエラーが出る
+- **開発者ツール**: Autona の画面の中では開けないことがある。ブラウザ（Chrome / Edge）で `http://127.0.0.1:<ポート>/web/app/thumbnail` を開き、
+  F12 で開発者ツールを出す（Console の上のフレームの選択でプレビューの枠のページを選ぶ。画像の 404 は Network に出る）。`<ポート>` は Autona の
+  「ヘルプ＆設定 → 設定 → ネットワーク」の「待ち受け中: ポート …」の数（既定は 5107）
+
+**完成の条件**: (1) Autona のサムネイルのページでこのテンプレートを選ぶとプレビューに描かれ、「レイアウトの確認」の欄が「エラーはありません」になる、
+(2) 試合のデータが無いとき（見本のデータ）・団体戦（選手が 2 人以上）・キャラを選んでいないときもエラーが出ない（空欄になるだけ）、
+(3) 「キャラクター画像の配置」の反転・ズーム・位置の変更がプレビューに効く、(4) 「サムネイルを作成」で画像ができる（アプリの画面で）。

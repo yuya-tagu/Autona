@@ -377,6 +377,69 @@ L2 と L3 はどちらもデザイン一覧の UI と SHELL のルートに触�
   `ThumbnailPage.test.js`・`ResultPage.test.js`・`ScorePage.test.js`・
   `web/e2e/thumbnail.spec.ts`（ヘッドレスの実ブラウザで、CSP の下で同梱の type_a が描けること・例外が確認の欄に出ること）
 
+**R3 の実装**（2026-11-24）:
+
+- **payload の表 `layout/include/thumbnail_contract.json`**（D1 の `overlay_contract.json` と同じ役割。契約 2 の正本の表）: `data` / `config` /
+  `template` の 3 つに分けたキー・型・出どころ（`data` は state のキー、`config` / `template` は ThumbnailService）・日本語の説明と、見本の config
+  （`sampleConfig`）。`data` はサムネイルに使うキーだけを書く（本物の `data` は state そのもので、ほかのキーもある・無いことも `null` のこともある）。
+  `config` は表のキーが毎回ある（ほかのキーもありうる）。契約 2 はキーを足すだけ（改名・削除・意味の変更は契約 3）。`tests/test_thumbnail_kit.py` が表をコードに縛る:
+  表のキーの凍結した写し（`TABLE_KEYS`。行の削除・改名で落ちる。足したら写しにも足す）、`data` の出どころは `KEY_CATALOG` のキー
+  （`test_overlay_contract.py` と同じ規則）、`config` の行は `ThumbnailService` が描画とプレビューに渡す config（`RenderPayload` /
+  `PreviewPayload` を実際に通す。何も保存していないとき・全部を保存したとき、と `_Config` → `_AsRead` で背景の 3 つの出どころ）に毎回あり、
+  表に無いキーはテストに名前を書いたもの（`CONFIG_EXTRA` = 保存したテンプレートの `template_id`）だけ、`sampleConfig` は `_AsRead` を通しても変わらない
+- **キット `layout/include/kit/thumbnail/`**: `thumbnail.html` / `.css` / `.js`（契約 2 の最小のサンプル。1on1・団体戦・データなしでエラーにならない）・
+  `template.json`・指示書 `AGENTS.md.tmpl`（サムネイル用の 1 枚。フォルダ名・マニフェスト・`Autona.onRender`・payload・画像のパス・
+  プレビューに出ない画像・CSP・フォント・大きさ・確かめ方と直し方・完成の条件）と、生成物 `sample_payload.json` / `CONTRACT.md` /
+  `AI_PROMPT.md`（`scripts/gen_layout_kit.py` が表・サンプルの state `singles.json`・キットの `template.json` から作る。L2 と同じくコミットし、
+  `tests/test_layout_kit.py` が生成し直した結果と照合する）。`CLAUDE.md.tmpl` はオーバーレイと共有（`@AGENTS.md` だけ）。新しいデザインには
+  キットのフォルダのファイル全部と `AGENTS.md` / `CLAUDE.md` / `settings.json` を置く（`LayoutKit.KitFiles`）
+- **L2 と違えた点**:
+  - **一覧の条件は変えない**（ADR-007 D1: テンプレートパッケージはマニフェストだけで一覧に出す。フォルダ名の推測はしない）。接頭辞 `thumbnail_` は
+    キットのフォルダ名と、一覧に出せなかったフォルダの種類の帰属（`LayoutCatalog.UNLISTED_PREFIXES` / `_UnlistedKind`）にだけ使う。
+    `settings.json` が壊れた `thumbnail_*` はサムネイルのページの「読み込めなかったデザイン」に出て、オーバーレイのページには出ない
+  - **マニフェストはテンプレートの形**: `kind: "thumbnail"`・`contract: 2`・`entry: "thumbnail.html"`・`size: [1920, 1080]`・
+    `template: "template.json"` と `displayName` / `author` / `license`（`LayoutKit._Manifest`）。作った直後から一覧に契約 2 で出る
+  - **サムネイルのページに「読み込めなかったデザイン」を足した**（テンプレートの選択の下。`useTemplatePackagesRead` が `unlisted` も返す）。
+    AI が `settings.json` を壊したときに理由が見えないと直せないため。オーバーレイのページは D3 のまま
+  - 作った後は一覧を読み直してそのテンプレートを選ぶ（`PATCH /api/v1/thumbnail {template_id}`）。プレビューの「デザインを再読み込み」は
+    ページと payload に加えてテンプレートの一覧も読み直す（`settings.json` の直しを再起動なしで拾う）
+  - 予約名: 同梱の `thumbnail_type_b` があるので `type_b` は `reserved`（`RESERVED_DIRS` は L2 のまま git の管理から決まる）
+- **v1 は変えない**: `POST /layouts:create` の `kind` に `thumbnail` が増え、`GET /layouts/kit/thumbnail/ai-prompt` が読める（SHELL・no-store・
+  ヘッドレスとブラウザは 403 のまま）。ページはボタンを共有ビューの中でだけ出す（L2 と同じ `useShellAccess`）
+- **配布**: `scripts/validate_release_zip.ps1` の検査 3 にサムネイルのキットと `thumbnail_contract.json` を足した（`tests/test_release_bundle.py` が
+  `LayoutKit.KitFiles` の全部と照合する）
+- pin: `tests/test_thumbnail_kit.py`（表とコード・見本の payload・AI_PROMPT.md・作成と一覧・一覧に出せないフォルダ・v1）・
+  `tests/test_layout_kit.py`（生成物の一致）・`tests/test_render_platform.py`（キットのまま作ったテンプレートを実レンダラーで 1on1・団体戦・
+  データなしで描いてエラーが無いこと）・`ThumbnailPage.test.js`・`web/e2e/thumbnail.spec.ts`（ヘッドレスの実ブラウザで、キットのまま置いた
+  テンプレートが CSP の下で描けて「エラーはありません」になること・ブラウザにはキットのボタンが出ず作成が 403 になること・壊れたフォルダが出ること）
+- **受け入れ試験（メインが行う。L2 と同じ）**: 隔離データの `python main.py` のサムネイルのページで「新しいデザインを作る」→ 作ったフォルダの
+  `AI_PROMPT.md`（「AI 用の説明をコピー」と同じ文）**だけ**をチャットの AI に渡し、「〇〇風のサムネイルにして」と頼む → 返ってきた 3 ファイルを
+  フォルダに上書き → 「デザインを再読み込み」。確かめること: (1) プレビューに描かれ「レイアウトの確認」が「エラーはありません」、
+  (2) 選手を団体戦（2 人以上）にしたとき・キャラを外したとき・試合をクリアしたときもエラーが出ない、(3) 「サムネイルを作成」で
+  `out/thumbnails/` に画像ができ、プレビューと同じ絵、(4) 外部の CDN / Web フォントを使っていない（CSP の違反が確認の欄に出ない）、
+  (5) エラーが出たら「AI に貼る用にコピー」の文だけを AI に返して直せる。AI がはまった点は指示書（`AGENTS.md.tmpl`）に足して生成し直す
+- **受け入れ試験の結果と反映**（2026-11-24）: 別の AI に `AI_PROMPT.md` だけで「ネオン風」を作らせ、1 回目からエラーなしで描けた（オフスクリーンの
+  PNG・ライブプレビュー）。その AI が挙げた不明点とレビューの指摘を指示書とサンプルに反映した:
+  - **`settings.json` は書き換えない・返さない**（全文を返させると表示名・作者が見本の値で上書きされた）。大きさだけ、変える行を伝える。
+    作った直後の `displayName` は入れた表示名（無ければ `<名前>`）だと書く
+  - **デザインの方針**: 出す項目はテンプレートが決めてよいが、`display_phase` / `use_team_names` / `use_sponsors`（と `display_options.show_sponsor`）には従う。
+    色は「`theme_color` / `accent_color` を主要な色に効かせ、補助の色はテンプレートが決めてよい」に 1 本化。既定の背景は CSS だけでもよい
+    （`default_background` はサンプルのキーで Autona は読まない）。フェーズ・プール・ラウンドのつなぎ方と、団体戦で誰を出すかの指針を書いた
+  - **キャラの配置（`config.game[codename]`）を効かせる**: サンプルの `placeCharacter` が flip（枠ごと反転）・zoom（枠を埋める大きさの %。100 未満は 100）・
+    align（画像の `eyesight`、無ければ中心を枠の % の位置に置き、端に隙間を作らない）・smooth_scale（`false` で `pixelated`）を同梱の type_a と
+    同じ考え方で当てる。表に `character.{K}.assets.{A}.eyesight` を足した（キーの追加）
+  - **画像のパスは 2 種類**: payload の中のパスは Autona のフォルダ基準でサンプルの `resolve()` を通す（`/...`・`data:`・`blob:` はそのまま、
+    ドライブのパス・`file:`・`http(s):`・`//` は `""`）。`template.json` とこのフォルダの CSS / HTML のパスはページ基準でそのまま使う
+    （以前のサンプルは `template.json` のパスも `resolve()` に通しており、`./bg.png` がアプリの直下として解決された）。読めなかった画像（404）は
+    確認の欄に出ないことも書いた
+  - **`document.title` を変えない**を規則に足した。実レンダラーで、onRender の中・rAF のループ・1 ms のタイマーで title を書き換えるテンプレートを
+    描いて確かめたところ、3 つとも普通に描けた（Qt の `titleChanged` は変化ごとに届き、レンダラーは自分の合図以外を読み捨てる）。実害は無いので
+    `autona.js` は変えず、合図に使っていることを理由に指示書で避けさせるだけにした
+  - そのほか: 2 回目以降は今のファイルを一緒に貼ってもらう（AI_PROMPT の冒頭）、開発者ツールはブラウザで `/web/app/thumbnail` を開いて F12
+    （ポートは設定のネットワーク）、見本の payload の `data` は表のキーだけに絞って生成する、サムネイルのページの「読み込めなかったデザイン」は
+    kind `thumbnail` のものだけ（kind 不明はオーバーレイのページのもの。`useTemplatePackagesRead` が kind で絞る）、作ったテンプレートは一覧の
+    読み直しが終わって一覧にあるときだけ選ぶ（読み直しに失敗したら選ばない）
+
 ## Alternatives considered
 
 - **キットと文書だけ作り、生の state のパスを書いて渡す**: 一番早いが、問題 2（約束が無い）が残る。内部の整理のたびに第三者のレイアウトが
