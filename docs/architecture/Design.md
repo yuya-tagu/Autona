@@ -113,14 +113,14 @@ Autona は格闘ゲーム大会の配信支援ツール。利用シーンは 2 �
 
 ### 2.4 WebEngine 画像生成
 
-目的: サムネイル・リザルトを HTML テンプレートと Qt WebEngine（オフスクリーン）で描いて PNG / JPG にする。Python から `initThumbnail(payload)` / `initResult(payload)` で JSON を渡す。
+目的: サムネイル・リザルトを HTML テンプレートと Qt WebEngine（オフスクリーン）で描いて PNG / JPG にする。Python から JSON を渡す。テンプレートの契約はマニフェストの `contract` で決まり、契約 1 は `initThumbnail(payload)` / `initResult(payload)`、契約 2 は `layout/include/autona.js` の `Autona.onRender(payload => …)`（ADR-008 D7 R2）。
 
 | ルール | 内容 |
 |------|------|
 | **R-Img-1** | レンダラーは `src/AutonaOffscreenRenderer.py` の土台のサブクラス（`src/thumbnail/ThumbnailRenderer.py` / `src/result/ResultPageRenderer.py`）。描画は 1 度に 1 つ（ページの完了の合図は title 1 つなので、同時に走ると互いの絵を取る）。入口は core の `renderAsync()`（結果はコールバック）と、サムネイルだけの `renderSync()`。段階ごとに期限があり、超えたらページを読み直す。 |
 | **R-Img-2** | テンプレートの選択はプレビューの直上のコンボボックスに置く。 |
 | **R-Img-3** | テンプレートの追加は `layout/` にテンプレートパッケージのフォルダを置くだけで完結する（§4.4.0）。 |
-| **R-Img-4** | HTML は描画完了で `document.title = "RENDER_READY"` にして合図する。 |
+| **R-Img-4** | 契約 1 の HTML は描画完了で `document.title = "RENDER_READY"` にして合図する。契約 2 はレンダラーが `Autona._render(payload, serial)` を呼び、`autona.js` が `onRender` の関数・フォント・画像を待ってタイトルを `AUTONA_RENDER <serial> ok | failed` にする（`autona.js` が無ければ呼び出し側が `missing`）。`failed` / `missing` は絵を撮らず `RenderLane.TemplateError`（`template_error`）で終わり、ページが言ったエラー（`{kind, message, source, line, column}`。20 件まで）を `thumbnail.render.errors` / `result_render.errors` に載せる。ログには件数と kind だけ。`ok` でも撮る直前に `Autona._renderResult` を読み直し、描き終えた後のエラー（rAF・タイマー）があれば同じく失敗にする。タイムアウトでも捕まえたエラーがあれば `template_error`。レンダラーは前回 `missing`・契約の変更・フォルダのファイルの変更でページを読み直す。 |
 | **R-Img-6** | 出力先は非 Preview 時 `./out/{種別}/`、Preview 時 `AutonaResolve("tmp/{種別}")`。ファイル名は §4.4.4。 |
 | **R-Img-8** | 独自の配色・レイアウトを許す（§5.5）。 |
 | **R-Img-9** | 描画は隔離する（ADR-007 D4 / T2）。ページはプレビュー用のリスナーのオリジン（`http://127.0.0.1:<WebServer.PreviewPort()>/layout/<フォルダ>/<入口>`）から読み、file:// では読まない。リスナーが無いときは描かずに `preview_unavailable`（`thumbnail.render.error` / `result_render.error`）で断る。ページはレンダラー専用の off-the-record のプロファイル（HTTP キャッシュなし・永続ストレージなし。ページの子にして、ページより後に消える）で動き、そのプロファイルのフィルタ（`_RenderRequestFilter`）がページ・フレーム・Worker・SharedWorker・Service Worker の要求のうち自分のオリジンと `data:` / `blob:` 以外を止める。既定のプロファイル（共有ビュー・デザインのプレビュー）とは BroadcastChannel・localStorage などを共有しない。権限は全部 deny・新しいウィンドウ無し・メインフレームは読み込んだ文書から動かない。**WebRTC の UDP（STUN / TURN）はフィルタを通らず止められない**。リスナーが出さない画像（アップロードした背景・アーカイブの `_bg.jpg`・旧版が保存したドライブのパス）は `core/RenderAssets` が描画中だけ id（ファイルの版ごと）で持ち、`/render-asset/<id>` で出す（プレビューのポート・この PC のループバックからだけ・描画が終われば 404）。ネットワークのパス（UNC）は GUI スレッドで見に行かず `""`。 |
@@ -427,12 +427,15 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 - **id**: 同梱 8 種は今までの id を変えない（凍結した表 `LayoutCatalog.BUNDLED_TEMPLATES`）。ほかはフォルダ名。同梱の id と同じ名前のフォルダ（大文字小文字は問わない）は載せない（同梱が勝つ）。保存値（`result_config.layout` / `thumbnail_config.template_id` / `result_layout`）の移行は無い。
 - 保存された id のパッケージが無いときは既定で描き、保存値は消さない。
 - パッケージが自分のフォルダの外で読んでよいのは `../include/`・`../../assets/`・payload が渡すパスだけ。`include/` のファイルを同梱しない。
-- payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。pin: `tests/test_template_packages.py`。
+- payload は契約 1 のまま（`tests/fixtures/{result,thumbnail}/golden.json` が写し）。契約 2 も同じ payload を `onRender` に渡す。pin: `tests/test_template_packages.py`。
+- テンプレートのフォルダ（kind `thumbnail` / `result` のマニフェストを持つフォルダ。`LayoutCatalog.IsTemplateFolder`）のファイルは、両方のポートで CSP `WebAccess.TEMPLATE_CONTENT_POLICY`（自分のオリジンと `data:` / `blob:` だけ。Worker・フレーム・object・form は無し）と `no-cache` を付けて配る。ブラウザの iframe のプレビュー（§4.4.1）にはレンダラーの要求フィルタが無いため（フレーム自身の遷移と WebRTC は止められない）。pin: `tests/test_web_access.py`。
 - 描画はプレビュー用のリスナーのオリジンで、ページが読めるのはそのリスナーが出すもの（`layout/`・`assets/`・state の画像・v1 の READ）と描画が持つ画像だけ（R-Img-9）。サービスが組む payload は変えず、レンダラーが描く直前に `RenderAssets.ForRender` で `config` の `background_path` / `main_icon_path` だけを読める形に直す（出すパスは相対のまま `m=<更新時刻>` を足す（アプリのディレクトリ `LayoutCatalog.AppDirectory()` で探す。静的ファイルもそこから配る）、ほかのファイルは `/render-asset/<id>`、無い・画像でない・ネットワークのパスは `""`）。pin: `tests/test_render_isolation.py`。
 
 #### 4.4.1 サムネイル
 
-同梱は `layout/thumbnail/`（`type_a`）と `layout/thumbnail_type_b/`（`type_b`）。ファイルは `settings.json`（マニフェスト）・`thumbnail.html`（`initThumbnail(payload)` 必須）・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。選択は `thumbnail_config.template_id`（既定は `ThumbnailService.DEFAULT_TEMPLATE_ID`）。
+同梱は `layout/thumbnail/`（`type_a`）と `layout/thumbnail_type_b/`（`type_b`）。どちらも契約 2。ファイルは `settings.json`（マニフェスト）・`thumbnail.html`（`../include/autona.js` を読み、`thumbnail.js` が `Autona.onRender(drawThumbnail)`）・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。選択は `thumbnail_config.template_id`（既定は `ThumbnailService.DEFAULT_TEMPLATE_ID`）。
+
+ページのプレビュー: 選んだテンプレートが契約 2 なら、レンダラーに頼まず `GET /api/v1/thumbnail/payload`（PLAYERDB。`ThumbnailService.PreviewPayload`。未反映の編集を含む）で payload を受け、`DesignPane`（選択欄なし）の iframe（URL に `?autonaParent=<ページのオリジン>`）に `{type: "autona:render", serial, payload}` を送る。`autona.js` は 1 回ずつ描き、`autona:rendered` が届くまで確認の欄は「描画中…」。エラーは L3 の確認の欄（AI 用のコピー付き）。payload が 401 / 403 か契約 2 でなければレンダラーの画像に戻る。ヘッドレス・LAN のブラウザでも出る。`RenderAssets.ForPreview` は何も持たないので、リスナーが出さない画像（アップロードした背景など）は `""` になり `omitted` に名前が出る（ページが「プレビューには出ない」と言う）。生成（PNG）はオフスクリーン描画のまま。契約 1 のテンプレートは今までどおりレンダラーの画像でプレビューする。
 
 #### 4.4.2 リザルト
 
@@ -443,7 +446,8 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 ```javascript
 async function initThumbnail({ data, config, template }) { ... }  // data: score/game/tournamentInfo の state スナップショット
 async function initResult({ data, config, layout }) { ... }       // data: { tournamentName, eventName, startAt, numEntrants, players, rows }
-// どちらも描画完了で document.title = "RENDER_READY"
+// どちらも描画完了で document.title = "RENDER_READY"（契約 1）
+Autona.onRender(async ({ data, config, template }) => { ... });  // 契約 2: 合図・待ち・例外の捕捉は autona.js
 ```
 
 `template` は `{template_id, ...マニフェストの template が指す JSON}`、`layout` は現在のレイアウトの id。形の正本はサービスの `RenderPayload()` と golden。
@@ -595,7 +599,7 @@ OBS の標準ホットキーと被ると配信中に意図しない操作が走�
 テンプレートパッケージ（§4.4.0）のフォルダを置くだけで、ページの選択肢に出て描ける。
 
 - リザルト: `layout/{名前}/settings.json`（`{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", ...}}`）・`result.html`・`result.css`・`result.js`。`rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行は契約 1 に無い（`SLOT_COUNTS`・state の行・payload の変更で、`contract` を上げる話）。
-- サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`template`）・`thumbnail.html`・`thumbnail.css`・`thumbnail.js`・テンプレート定義 JSON。
+- サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`contract: 2`・`template`）・`thumbnail.html`（`../include/autona.js` を読む）・`thumbnail.css`・`thumbnail.js`（`Autona.onRender`）・テンプレート定義 JSON。書き方は `layout/README.md`。
 - 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。凍結した表と `CoreWords` は、id とフォルダ名が違う既存 8 種のためのもので足さない。
 - 触らない: state・Python（`ResultService` / `ThumbnailService` / レンダラー）・React（選択肢は `GET /api/v1/layouts?kind=` から出る）。
 - ページはプレビュー用のリスナーのオリジンで描かれる（R-Img-9）。読めるのはパッケージ・`../include/`・`../../assets/`・payload のパスだけで、外部（CDN）・file:・ほかのポートへの要求は届かない（WebRTC の UDP は除く）。ライブラリ・フォントはパッケージに入れる。

@@ -1125,6 +1125,14 @@ def get_thumbnail_preview():
     return ThumbnailService.instance.PreviewImage()
 
 
+def get_thumbnail_payload():
+    """What the page's live preview of the template draws
+    (ThumbnailService.PreviewPayload). No renderer needed: the browser draws
+    it, so a headless shell answers too."""
+    return ThumbnailService.instance.PreviewPayload(
+        games=GameAssetCatalog.instance)
+
+
 # ── the tournament result (ADR-005 S4q) ──────────────────────────────────
 
 def describe_result():

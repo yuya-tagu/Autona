@@ -96,6 +96,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from collections import Counter
 
 from loguru import logger
@@ -123,8 +124,12 @@ KINDS = (KIND_SCOREBOARD, KIND_DESIGNER, KIND_COMMENTARY, KIND_TOP8,
 
 TEMPLATE_KINDS = (KIND_RESULT, KIND_THUMBNAIL)
 # The template contracts this Autona draws (ADR-007 D3): a package declaring
-# another is not listed.
-TEMPLATE_CONTRACTS = (1,)
+# another is not listed. 1: the page defines initThumbnail / initResult and
+# sets its title to RENDER_READY. 2: the page loads ../include/autona.js and
+# draws in Autona.onRender, which tells success from failure, and can be
+# previewed live in the Web UI (ADR-008 D7 R2). The renderer reads the
+# contract from the entry.
+TEMPLATE_CONTRACTS = (1, 2)
 # A package's entry page when its block names none.
 TEMPLATE_DEFAULT_ENTRY = {KIND_RESULT: "result.html",
                           KIND_THUMBNAIL: "thumbnail.html"}
@@ -326,6 +331,44 @@ def Templates(kind, root=None, locale=None):
     the order they are listed: what the result's and the thumbnail's services
     and renderers draw from (ADR-007 D1). Read now, every call."""
     return {entry["id"]: entry for entry in Layouts([kind], root, locale)}
+
+
+def IsTemplateFolder(name, root=None):
+    """Whether the layout folder ``name`` (one folder name, as a request
+    spells it) is a template package's: its settings.json's block names a
+    template kind, whatever else it holds. The Web server sends such a
+    folder's files with the template content policy (ADR-008 D7 R2).
+    Asked at every request for a file under layout/: the answer is kept
+    while the folder's settings.json is the same file (size, modification
+    time), so a broken one is warned of once, not at each request."""
+    if not isinstance(name, str) or name in ("", ".", "..") \
+            or "/" in name or "\\" in name:
+        return False
+    directory = os.path.join(_Base(root), name)
+    try:
+        status = os.stat(os.path.join(directory, SETTINGS_FILE))
+        stamp = (status.st_size, status.st_mtime_ns)
+    except (OSError, ValueError):
+        return False  # No settings.json: no block (_MetadataBlock).
+    key = os.path.normcase(os.path.abspath(directory))
+    with _templateFoldersLock:
+        known = _templateFolders.get(key)
+    if known is not None and known[0] == stamp:
+        return known[1]
+    block, _problem = _MetadataBlock(name, directory)
+    answer = block is not None and block["kind"] in TEMPLATE_KINDS
+    with _templateFoldersLock:
+        if len(_templateFolders) >= _TEMPLATE_FOLDERS_KEPT:
+            _templateFolders.clear()
+        _templateFolders[key] = (stamp, answer)
+    return answer
+
+
+# IsTemplateFolder's answers: the folder's path -> (its settings.json's
+# (size, modification time), the answer). The web server's threads ask.
+_TEMPLATE_FOLDERS_KEPT = 256
+_templateFolders = {}
+_templateFoldersLock = threading.Lock()
 
 
 def TemplatePath(entry, name, root=None):

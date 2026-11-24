@@ -909,6 +909,19 @@ def _build_web_app():
             # /Layout/Custom/... too, and it must not be cached either.
             is_designer_file = filename.lower().startswith(
                 ("layout/custom/", "layout/designer_runtime/"))
+            # A template package's file (ADR-008 D7 R2): with the policy
+            # that keeps its page to its origin, as the off-screen
+            # renderer's filter does (the live preview has none); and not
+            # cached, as a design's: the operator edits it in place.
+            parts = filename.split("/")
+            is_template_file = len(parts) > 2 \
+                and parts[0].lower() == "layout" \
+                and LayoutCatalog.IsTemplateFolder(parts[1])
+            # The shared scripts the templates and overlays load (autona.js
+            # above all): an app update replaces them in place, and a page
+            # that read the old one beside a new app (the live preview's
+            # messages) breaks. Revalidated each time: a 304 when unchanged.
+            is_shared_include = filename.lower().startswith("layout/include/")
             # From the app's directory, the catalog's (LayoutCatalog.
             # AppDirectory), not the process's current one: an off-screen
             # render loads the page the catalog listed (ADR-007 D4).
@@ -917,8 +930,14 @@ def _build_web_app():
                 filename,
                 as_attachment=filename.endswith('.gz'),
                 mimetype=mimetype,
-                max_age=0 if is_designer_file else 86400
+                max_age=0 if is_designer_file or is_template_file
+                or is_shared_include else 86400
             )
+            if is_template_file:
+                response.headers.add("Content-Security-Policy",
+                                     WebAccess.TEMPLATE_CONTENT_POLICY)
+            if is_template_file or is_shared_include:
+                response.cache_control.no_cache = True
             if is_designer_file:
                 # Designer saves overwrite project.json and PNG assets in
                 # place, and an app update replaces the shared runtime every

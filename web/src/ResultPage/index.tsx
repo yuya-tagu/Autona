@@ -36,7 +36,12 @@ import {
     templateLabel,
     useTemplatePackages,
 } from "../PanelShell/templatePackages";
-import {ColorKind, FeatureColorCard} from "../CommentaryPage/SideCards";
+import {
+    ColorKind,
+    FeatureColorCard,
+    LayoutEntry,
+} from "../CommentaryPage/SideCards";
+import {LayoutCheckPanel, reportFromErrors} from "../CommentaryPage/LayoutCheck";
 import {generatedUrl} from "../ThumbnailPage/Cards";
 import {useCharacters} from "../Top8Page";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
@@ -1108,6 +1113,28 @@ function ResultContent() {
         || previewAsked > render.revision);
     const previewError = render.status === "error"
         && render.revision === previewAsked ? render.error : "";
+    // The template's errors, when this page's preview or generation failed
+    // on them (a layout on template contract 2, ADR-008 D7 R2: the shipped
+    // ones are on 1 until R4).
+    const templateFailed = render.status === "error"
+        && render.error === "template_error"
+        && (previewError === "template_error"
+            || (result?.status === "error" && result.error === "template_error"));
+    const chosenPackage = packages?.find((entry) => entry.id === layoutId);
+    const templateReport = templateFailed
+        ? reportFromErrors((rawRender as {errors?: unknown} | undefined)?.errors,
+                           chosenPackage?.contract ?? 2)
+        : null;
+    const checkDesign: LayoutEntry = {
+        id: layoutId ?? "",
+        kind: "result",
+        displayName: chosenPackage
+            ? templateLabel(chosenPackage, "result_layout_", language)
+            : layoutId ?? "",
+        entry: chosenPackage?.entry ?? "result.html",
+        folder: chosenPackage?.folder,
+        contract: chosenPackage?.contract,
+    };
     const count = layout?.slots ?? description.players.length;
     // Keeps the page's rows from taking the selects away: what is disabled,
     // and how to read it again.
@@ -1189,6 +1216,11 @@ function ResultContent() {
                     copy={copy}
                     postToX={postToX}
                     readPost={readPostAgain}
+                    check={templateReport ? (
+                        <LayoutCheckPanel design={checkDesign}
+                                          report={templateReport}
+                                          notReady={false}/>
+                    ) : undefined}
                 />
             </Box>
             <ConfirmDialog

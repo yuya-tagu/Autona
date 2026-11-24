@@ -57,6 +57,7 @@ from .Helpers import AutonaQtHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .core import AssetPackService as assets
 from .core.TaskExecutor import TaskExecutor
+from .core.RenderLane import TemplateError
 from .core.Actions import AutonaActions
 from .core.ThumbnailService import ThumbnailService
 
@@ -95,6 +96,25 @@ def _ImageEncoder(image):
     return encode
 
 
+class ThumbnailNotDrawn(Exception):
+    """The renderer drew no thumbnail. Its text says why to whoever asked:
+    the renderer's code and, for a template's error (TemplateError, ADR-008
+    D7 R2), the first error's message. ``code`` alone is for the log (a
+    template's message may hold a player's name)."""
+
+    def __init__(self, code, detail=""):
+        super().__init__(f"Thumbnail rendering failed: {code}"
+                         + (f": {detail}" if detail else ""))
+        self.code = code
+
+
+def _NotDrawn(why):
+    """ThumbnailNotDrawn for the renderer's `why` (its syncError)."""
+    errors = why.errors if isinstance(why, TemplateError) else ()
+    detail = errors[0]["message"] if errors else ""
+    return ThumbnailNotDrawn(str(why), detail)
+
+
 def DrawThumbnailNow(payload):
     """Draw a match thumbnail's (data, config, template) at once: its
     `encode(format, fast=False)` (_ImageEncoder), as ThumbnailService.
@@ -111,8 +131,8 @@ def DrawThumbnailNow(payload):
         # listener, ADR-007 D4): the caller logs it, and the legacy route
         # answers its error text.
         why = getattr(renderer, "syncError", "") or "an empty image"
-        logger.error(f"Thumbnail rendering failed: {why}")
-        raise Exception(f"Thumbnail rendering failed: {why}")
+        logger.error(f"Thumbnail rendering failed: {str(why)}")
+        raise _NotDrawn(why)
     return _ImageEncoder(pixmap.toImage())
 
 
@@ -433,6 +453,12 @@ class AutonaShellOperations:
         board = _SetBoard(number)
         try:
             thumbnailPath = self.DrawThumbnail(board)
+        except ThumbnailNotDrawn as error:
+            # Its code only: its text may hold a template's message.
+            logger.error(
+                f"Shell operations - The thumbnail of scoreboard {number} "
+                f"failed: {error.code}")
+            raise
         except Exception:
             logger.opt(exception=True).error(
                 f"Shell operations - The thumbnail of scoreboard {number} "

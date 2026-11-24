@@ -11,6 +11,11 @@ On the platform the app runs on (windows) the same startup draws the page.
 
 Each case draws in a process of its own (tests/fixtures/thumbnail/
 draw_on_platform.py): this process is on the offscreen platform.
+
+The shipped thumbnails moved to template contract 2 (ADR-008 D7 R2): the
+same drawing, now in Autona.onRender. draw_contracts.py draws the shipped
+type_a and the same page on contract 1, on the app's platform, and the two
+pictures are the same.
 """
 import json
 import os
@@ -22,20 +27,22 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" / "draw_on_platform.py"
+CONTRACTS = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" \
+    / "draw_contracts.py"
 BG_PRIMARY = "#111317"
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32",
                                 reason="the app's platform is windows")
 
 
-def _draw(tmp_path, platform):
+def _draw(tmp_path, platform, script=SCRIPT):
     env = dict(os.environ)
     env.pop("QT_QPA_PLATFORM", None)
     if platform is not None:
         env["QT_QPA_PLATFORM"] = platform
     env["PYTHONIOENCODING"] = "utf-8"
     done = subprocess.run(
-        [sys.executable, "-B", str(SCRIPT), str(PROJECT_ROOT)],
+        [sys.executable, "-B", str(script), str(PROJECT_ROOT)],
         cwd=str(tmp_path), env=env, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=180)
     lines = [line for line in done.stdout.splitlines()
@@ -60,3 +67,12 @@ def test_on_the_offscreen_platform_it_says_so(tmp_path):
     # only the warning is pinned.
     assert "on Qt's offscreen platform the pictures may be the window's " \
         "background" in output
+
+
+def test_contract_2_draws_the_shipped_page_as_contract_1_did(tmp_path):
+    drawn, _output = _draw(tmp_path, None, CONTRACTS)
+    assert drawn["errors"] == ["", ""], drawn
+    assert all(count > 10 for count in drawn["colours"]), drawn
+    assert drawn["sampled"] > 0, drawn
+    # The same pixels: the drawing is the template's, whoever calls it.
+    assert drawn["differing"] <= drawn["sampled"] // 1000, drawn

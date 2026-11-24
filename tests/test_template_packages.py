@@ -156,7 +156,7 @@ def test_the_shipped_thumbnail_templates_are_as_they_were():
         entry = shipped[templateId]
         assert (entry["folder"], tuple(entry["size"]), entry["entry"],
                 entry["template"], entry["contract"]) == (
-            folder, size, "thumbnail.html", template, 1)
+            folder, size, "thumbnail.html", template, 2)
         # The template file is the layout's numbers, a JSON object.
         layout = json.loads(Path(LayoutCatalog.TemplatePath(
             entry, template, SHIPPED_ROOT)).read_text(encoding="utf-8"))
@@ -176,7 +176,10 @@ def test_the_shipped_manifests_declare_the_contract():
             block = json.loads((SHIPPED_ROOT / folder / "settings.json")
                                .read_text(encoding="utf-8"))["autona"]
             assert block["kind"] == kind, folder
-            assert block["contract"] == 1, folder
+            # The thumbnails are drawn in Autona.onRender (template contract
+            # 2, ADR-008 D7 R2); the results move to it in R4.
+            assert block["contract"] == (
+                2 if kind == KIND_THUMBNAIL else 1), folder
             assert block["license"] == "MIT", folder
             # A shipped package is named in core's words, not by its block.
             assert "displayName" not in block, folder
@@ -293,11 +296,63 @@ def test_two_packages_of_one_name_both_get_their_id(layoutRoot):
         "Same (one)", "Same (three)", "Same (two)"]
 
 
+@pytest.mark.parametrize("block", [
+    thumbnail_block(contract=2), result_block(contract=2)])
+def test_a_package_on_template_contract_2_is_listed_with_it(
+        layoutRoot, block):
+    # ADR-008 D7 R2: drawn in Autona.onRender; the renderer reads the
+    # contract from the entry.
+    package(layoutRoot, "mine", block, files=("layout.json",))
+    [entry] = LayoutCatalog.Templates(block["kind"], layoutRoot).values()
+    assert entry["contract"] == 2
+
+
+def test_a_template_folder_is_told_by_its_manifest(layoutRoot):
+    package(layoutRoot, "my_thumbs", thumbnail_block(contract=2),
+            files=("layout.json",))
+    package(layoutRoot, "my_results", result_block(contract=9))
+    package(layoutRoot, "scoreboard_mine", {"kind": "scoreboard"})
+    (layoutRoot / "no_manifest").mkdir()
+    # Whatever else its manifest holds: an unlisted one's files are its own
+    # too.
+    assert LayoutCatalog.IsTemplateFolder("my_thumbs", layoutRoot)
+    assert LayoutCatalog.IsTemplateFolder("My_Thumbs", layoutRoot)
+    assert LayoutCatalog.IsTemplateFolder("my_results", layoutRoot)
+    for name in ("scoreboard_mine", "no_manifest", "gone", "", ".", "..",
+                 "my_thumbs/x", "a\\b", None):
+        assert not LayoutCatalog.IsTemplateFolder(name, layoutRoot), name
+
+
+def test_a_template_folder_is_read_again_only_when_its_manifest_changed(
+        layoutRoot, monkeypatch):
+    # Asked at each request of a file under layout/: a broken settings.json
+    # is warned of once, not at every request; an edited one is read again.
+    settings = layoutRoot / "my_thumbs" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text('{"autona": {"kind": "thumbnail",}}',
+                        encoding="utf-8")
+    reads = []
+    real = LayoutCatalog._MetadataBlock
+    monkeypatch.setattr(LayoutCatalog, "_MetadataBlock",
+                        lambda *args: reads.append(args) or real(*args))
+    for _ in range(3):
+        assert not LayoutCatalog.IsTemplateFolder("my_thumbs", layoutRoot)
+    assert len(reads) == 1
+
+    settings.write_text(json.dumps(
+        {"autona": thumbnail_block(contract=2)}), encoding="utf-8")
+    stamp = settings.stat().st_mtime_ns + 5_000_000_000
+    os.utime(settings, ns=(stamp, stamp))
+    assert LayoutCatalog.IsTemplateFolder("my_thumbs", layoutRoot)
+    assert LayoutCatalog.IsTemplateFolder("my_thumbs", layoutRoot)
+    assert len(reads) == 2
+
+
 # ── what is not listed ───────────────────────────────────────────────────
 
 @pytest.mark.parametrize("block, files", [
     (result_block(contract=None), ()),
-    (result_block(contract=2), ()),
+    (result_block(contract=3), ()),
     (result_block(contract="1"), ()),
     (result_block(contract=True), ()),
     (result_block(size=None), ()),
@@ -602,6 +657,12 @@ def test_what_the_shipped_packages_share_is_in_include():
     for name in shared:
         path = SHIPPED_ROOT / "include" / name
         assert path.is_file(), name
+        # autona.js is the overlays' library too: what it reads besides the
+        # page's own (the sample, the logo) is the overlays', and pinned by
+        # test_overlay_contract. A template page on it (contract 2) runs none
+        # of that.
+        if name == "autona.js":
+            continue
         if path.suffix in (".css", ".js") and not name.endswith(".min.js"):
             assert _outside_references(path) == [], name
 

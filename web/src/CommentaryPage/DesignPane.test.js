@@ -813,3 +813,156 @@ test("the catalog's warnings of a listed design are in the panel and its copy", 
     await settle();
     delete navigator.clipboard;
 });
+
+// ── the live preview of a template (ADR-008 D7 R2) ───────────────────────
+
+const TEMPLATE = {id: "type_a", kind: "thumbnail", displayName: "Type A",
+                  folder: "thumbnail", entry: "thumbnail.html", contract: 2,
+                  size: [1280, 720]};
+const TEMPLATE_READY = {...READY, contract: 2,
+                        source: "/layout/thumbnail/thumbnail.html"};
+
+function Live({renderPayload, ...rest}) {
+    return (
+        <DesignPane designs={[TEMPLATE]} design={TEMPLATE}
+                    onSelect={() => undefined} selectable={false}
+                    size={TEMPLATE.size} renderPayload={renderPayload}
+                    {...rest}/>
+    );
+}
+
+test("a template's render is posted to its frame once it is ready, to the preview origin", async () => {
+    const payload = {data: {p1_name: "A"}, config: {}, template: {}};
+    render(<Live renderPayload={{payload, serial: 1}}/>);
+    await settle();
+    const frame = preview();
+    // The page names this page's origin: autona.js takes renders from it only.
+    expect(frame.getAttribute("src")).toBe(
+        `${PREVIEW}/layout/thumbnail/thumbnail.html?autonaParent=`
+        + encodeURIComponent(window.location.origin));
+    const posted = jest.spyOn(frame.contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    // No select nor heading: the page picks the template.
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
+    await settle();
+    expect(posted).not.toHaveBeenCalled();
+
+    post(frame.contentWindow, TEMPLATE_READY);
+    await settle();
+    expect(posted).toHaveBeenCalledTimes(1);
+    expect(posted).toHaveBeenCalledWith(
+        {type: "autona:render", serial: 1, payload}, PREVIEW);
+    // Ready again (the same document) posts nothing more.
+    post(frame.contentWindow, TEMPLATE_READY);
+    await settle();
+    expect(posted).toHaveBeenCalledTimes(1);
+});
+
+test("a later render is posted again and starts its errors afresh", async () => {
+    const view = render(<Live renderPayload={{payload: {n: 1}, serial: 1}}/>);
+    await settle();
+    const frame = preview();
+    const posted = jest.spyOn(frame.contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    post(frame.contentWindow, TEMPLATE_READY);
+    await settle();
+    post(frame.contentWindow, failure({
+        contract: 2, kind: "onRender", message: "Error: drawing failed",
+        source: "/layout/thumbnail/thumbnail.js"}));
+    expect(shownErrors()).toHaveLength(1);
+    expect(shownErrors()[0]).toHaveTextContent(
+        i18n.t("layout_check_hint_on_render"));
+    expect(panel()).toHaveTextContent("Type A (template contract 2)");
+
+    view.rerender(<Live renderPayload={{payload: {n: 2}, serial: 2}}/>);
+    await settle();
+    expect(posted).toHaveBeenCalledTimes(2);
+    expect(posted).toHaveBeenLastCalledWith(
+        {type: "autona:render", serial: 2, payload: {n: 2}}, PREVIEW);
+    expect(shownErrors()).toHaveLength(0);
+    // Still ready: no "not ready" for the render that drew.
+    await settle(READY_TIMEOUT_MS * 2);
+    expect(screen.queryByTestId("layout-check-not-ready")).toBeNull();
+});
+
+test("a template that never says it is ready is told so, and nothing is posted", async () => {
+    render(<Live renderPayload={{payload: {}, serial: 1}}/>);
+    await settle();
+    const posted = jest.spyOn(preview().contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    await settle(READY_TIMEOUT_MS);
+    expect(screen.getByTestId("layout-check-not-ready")).toBeTruthy();
+    expect(panel()).toHaveTextContent(
+        i18n.t("layout_check_not_ready_hint_template"));
+    expect(posted).not.toHaveBeenCalled();
+});
+
+test("no payload yet, nothing is posted", async () => {
+    render(<Live renderPayload={null}/>);
+    await settle();
+    const posted = jest.spyOn(preview().contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    post(preview().contentWindow, TEMPLATE_READY);
+    await settle();
+    expect(posted).not.toHaveBeenCalled();
+});
+
+const RENDERED = (serial, ok = true) =>
+    ({type: "autona:rendered", contract: 2, serial, ok});
+
+function status() {
+    return screen.queryByRole("status", {name: i18n.t("layout_check_title")});
+}
+
+test("no errors is said only once the frame drew the render posted", async () => {
+    const view = render(<Live renderPayload={{payload: {n: 1}, serial: 1}}/>);
+    await settle();
+    const frame = preview();
+    jest.spyOn(frame.contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    post(frame.contentWindow, TEMPLATE_READY);
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_drawing_template", {contract: 2}));
+
+    post(frame.contentWindow, RENDERED(1));
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_clean_template", {contract: 2}));
+
+    // A newer render: drawing again until it is said drawn.
+    view.rerender(<Live renderPayload={{payload: {n: 2}, serial: 2}}/>);
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_drawing_template", {contract: 2}));
+    // An older one said late changes nothing.
+    post(frame.contentWindow, RENDERED(1));
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_drawing_template", {contract: 2}));
+    post(frame.contentWindow, RENDERED(2));
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_clean_template", {contract: 2}));
+});
+
+test.each([
+    ["another origin", RENDERED(1), "http://evil.example"],
+    ["an extra key", {...RENDERED(1), extra: 1}, undefined],
+    ["contract 1", {...RENDERED(1), contract: 1}, undefined],
+    ["a serial not a whole number", {...RENDERED(1), serial: 1.5}, undefined],
+    ["ok not a boolean", {...RENDERED(1), ok: "yes"}, undefined],
+])("a drawn message with %s is not taken", async (_name, data, origin) => {
+    render(<Live renderPayload={{payload: {n: 1}, serial: 1}}/>);
+    await settle();
+    const frame = preview();
+    jest.spyOn(frame.contentWindow, "postMessage")
+        .mockImplementation(() => undefined);
+    post(frame.contentWindow, TEMPLATE_READY);
+    await settle();
+    post(frame.contentWindow, data, origin);
+    await settle();
+    expect(status()).toHaveTextContent(
+        i18n.t("layout_check_drawing_template", {contract: 2}));
+});

@@ -1544,6 +1544,28 @@ test("a post opens the composer and copies the thumbnail of its own run", async 
     expect(url).toMatch(/\/out\/thumbnails\/new\.png\?v=0$/);
 });
 
+// ADR-008 D7 R2: a thumbnail that failed on its template's error says the
+// first one.
+test("a post whose thumbnail failed on its template says its first error", async () => {
+    await renderPage();
+    await settle(POST_READ_DEBOUNCE_MS);
+    await settle();
+
+    fireEvent.click(button("score_post"));
+    copyImageOnceMade.mock.calls[0][0].catch(() => undefined);
+    await settle();
+    setState({thumbnail: {render: {
+        status: "error", path: "", error: "template_error", revision: 5,
+        errors: [{kind: "onRender", message: "TypeError: x is undefined",
+                  source: "/layout/thumbnail/thumbnail.js", line: 3,
+                  column: 1}]}}});
+    await settle();
+    await settle();
+    expect(await screen.findByText(i18n.t(
+        "score_post_thumbnail_failed_template",
+        {message: "TypeError: x is undefined"}))).toBeInTheDocument();
+});
+
 const POSTED = (text) => [
     `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`,
     "_blank", "noopener"];

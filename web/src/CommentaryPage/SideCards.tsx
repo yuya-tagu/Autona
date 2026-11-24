@@ -36,6 +36,11 @@ export interface LayoutEntry {
     // by "make a new design" does): its preview expects autona.js (ADR-008
     // D3). Absent for a layout that declares none.
     contract?: number;
+    // A template package's folder under layout/, when it is not `id` (a
+    // shipped template's id is not its folder's name), and its picture's
+    // size (ADR-007 T1): the live preview frames it at that size.
+    folder?: string;
+    size?: [number, number];
     // What is wrong with its manifest that the catalog went past (listed by
     // its folder name all the same): the unlisted folders' reasons.
     warnings?: ManifestWarning[];

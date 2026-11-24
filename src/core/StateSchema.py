@@ -669,21 +669,32 @@ def IdleSetSelection(advance=0) -> dict:
 # core/ThumbnailService.py, shaped like stream.thumbnail: status idle | running
 # | done | error, `path` the last thumbnail saved (out/thumbnails/*.png, what a
 # preview does not change), the error of a failed run (a code, see that module,
-# or the exception's text) and a revision that every run advances, which the
-# preview image's URL carries.
+# or the exception's text), a revision that every run advances, which the
+# preview image's URL carries, and `errors`: what the template reported when
+# its drawing failed (error template_error, template contract 2: ADR-008 D7
+# R2; core/RenderLane.TemplateErrors), [] otherwise.
 THUMBNAIL_RENDER_KEY = "render"
 THUMBNAIL_KEYS = (
     f"{THUMBNAIL_RENDER_KEY}.status",
     f"{THUMBNAIL_RENDER_KEY}.path",
     f"{THUMBNAIL_RENDER_KEY}.error",
     f"{THUMBNAIL_RENDER_KEY}.revision",
+    f"{THUMBNAIL_RENDER_KEY}.errors",
 )
 
 
 def DefaultThumbnailRender(revision=0) -> dict:
     """`thumbnail.render` with no run in progress or held, at `revision` (a
     fresh dict on every call)."""
-    return {"status": "idle", "path": "", "error": "", "revision": revision}
+    return {"status": "idle", "path": "", "error": "", "revision": revision,
+            "errors": []}
+
+
+def _TemplateErrors(value) -> list:
+    """A render's published `errors` as read: a list of dicts, else []."""
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def ReadThumbnailRender() -> dict:
@@ -700,23 +711,25 @@ def ReadThumbnailRender() -> dict:
     if isinstance(revision, int) and not isinstance(revision, bool) \
             and revision >= 0:
         read["revision"] = revision
+    read["errors"] = _TemplateErrors(value.get("errors"))
     return read
 
 
 # The tournament result's render and its standings import (ADR-005 S4q;
 # core/ResultService.py). Roots of their own, whose names cannot be taken for
 # out/results or out/result_players. `result_render` is shaped like
-# thumbnail.render. `result_standings`: status idle | running | done | error,
-# the error of a failed import (a code, see that module) and a revision that
-# every import advances.
-RESULT_RENDER_KEYS = ("status", "path", "error", "revision")
+# thumbnail.render (`errors` included). `result_standings`: status idle |
+# running | done | error, the error of a failed import (a code, see that
+# module) and a revision that every import advances.
+RESULT_RENDER_KEYS = ("status", "path", "error", "revision", "errors")
 RESULT_STANDINGS_KEYS = ("status", "error", "revision")
 
 
 def DefaultResultRender(revision=0) -> dict:
     """`result_render` with no run in progress, at `revision` (a fresh dict on
     every call)."""
-    return {"status": "idle", "path": "", "error": "", "revision": revision}
+    return {"status": "idle", "path": "", "error": "", "revision": revision,
+            "errors": []}
 
 
 def _Revision(value) -> int:
@@ -734,6 +747,7 @@ def ReadResultRender() -> dict:
     for key in ("status", "path", "error"):
         if isinstance(value.get(key), str):
             read[key] = value[key]
+    read["errors"] = _TemplateErrors(value.get("errors"))
     return read
 
 

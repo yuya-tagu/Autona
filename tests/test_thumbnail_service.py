@@ -1227,7 +1227,8 @@ def test_a_board_drawn_at_once_with_nothing_drawn_writes_nothing(match):
 
 def test_the_render_key_is_in_the_catalog():
     assert schema.KEY_CATALOG[schema.THUMBNAIL_ROOT] == (
-        "render.status", "render.path", "render.error", "render.revision")
+        "render.status", "render.path", "render.error", "render.revision",
+        "render.errors")
 
 
 def test_the_launch_seeds_idle_and_the_revision_goes_on(env):
@@ -1238,7 +1239,7 @@ def test_the_launch_seeds_idle_and_the_revision_goes_on(env):
     schema.SeedPanelState()
 
     assert env.render() == {"status": "idle", "path": "", "error": "",
-                            "revision": 7}
+                            "revision": 7, "errors": []}
 
 
 @pytest.mark.parametrize("saved, revision", [
@@ -1248,7 +1249,8 @@ def test_a_malformed_render_reads_as_idle(env, saved, revision):
     SM.state = {"thumbnail": {"render": saved}}
 
     assert schema.ReadThumbnailRender() == {
-        "status": "idle", "path": "", "error": "", "revision": revision}
+        "status": "idle", "path": "", "error": "", "revision": revision,
+        "errors": []}
 
 
 # ── a render in the background ───────────────────────────────────────────
@@ -1258,7 +1260,7 @@ def test_a_preview_runs_and_ends_in_the_state(match, executor):
 
     assert answer == 1
     assert match.render() == {"status": "running", "path": "", "error": "",
-                              "revision": 1}
+                              "revision": 1, "errors": []}
     asked = match.renderer.asked[0]
     assert asked.kind == "thumbnail"
     data, config, template = asked.payload
@@ -1273,7 +1275,7 @@ def test_a_preview_runs_and_ends_in_the_state(match, executor):
     executor.drain(WAIT)
 
     assert match.render() == {"status": "done", "path": "", "error": "",
-                              "revision": 1}
+                              "revision": 1, "errors": []}
     assert match.service.PreviewImage() == b"an image.PNG"
     assert list((match.dir / "out").glob("thumbnails/*")) == []
 
@@ -1288,12 +1290,12 @@ def test_every_run_has_the_next_revision_and_a_preview_keeps_the_path(
 
     assert match.service.Preview() == 2
     assert match.render() == {"status": "running", "path": saved, "error": "",
-                              "revision": 2}
+                              "revision": 2, "errors": []}
     match.renderer.answer()
     executor.drain(WAIT)
 
     assert match.render() == {"status": "done", "path": saved, "error": "",
-                              "revision": 2}
+                              "revision": 2, "errors": []}
 
 
 def test_the_revision_goes_on_from_the_state(match, executor):
@@ -1320,7 +1322,7 @@ def test_previews_during_a_run_are_one_more_run_with_the_newest_settings(
     # Not right away: on the main thread, once its event loop is back.
     assert match.run_queued() == 1
     assert match.render() == {"status": "running", "path": "", "error": "",
-                              "revision": 2}
+                              "revision": 2, "errors": []}
     assert len(match.renderer.asked) == 1
     assert match.renderer.asked[0].payload[1]["display_phase"] is False
 
@@ -1376,7 +1378,7 @@ def test_a_preview_during_a_generate_runs_after_it(match, executor):
     executor.drain(WAIT)
 
     assert match.render() == {"status": "done", "path": saved, "error": "",
-                              "revision": 2}
+                              "revision": 2, "errors": []}
 
 
 def test_a_kept_generate_stands_in_for_a_kept_preview(match, executor):
@@ -1479,7 +1481,8 @@ def test_a_generate_of_board_2_leaves_the_preview_image_as_it_was(
     [stem] = _saved(match)
     assert (match.dir / "out" / "thumbnails" / f"{stem}.png").read_bytes() \
         == b"board two.PNG"
-    assert match.render() == {"status": "done", "error": "", "revision": 2,
+    assert match.render() == {"status": "done", "error": "", "errors": [],
+                              "revision": 2,
                               "path": f"out/thumbnails/{stem}.png"}
     assert match.service.PreviewImage() == b"board one.PNG"
     assert match.queued == []
@@ -1527,7 +1530,8 @@ def test_a_kept_preview_is_drawn_after_a_generate_of_board_2_as_board_1(
     executor.drain(WAIT)
     [stem] = _saved(match)
     assert stem.startswith("Charlie-vs-Echo-2")
-    assert match.render() == {"status": "done", "error": "", "revision": 2,
+    assert match.render() == {"status": "done", "error": "", "errors": [],
+                              "revision": 2,
                               "path": f"out/thumbnails/{stem}.png"}
     # What GET /thumbnail/preview reads: still board 1's.
     assert match.service.PreviewImage() == b"first.PNG"
@@ -1538,7 +1542,8 @@ def test_a_kept_preview_is_drawn_after_a_generate_of_board_2_as_board_1(
     assert match.render()["revision"] == 3
     match.renderer.answer(b"board one")
     executor.drain(WAIT)
-    assert match.render() == {"status": "done", "error": "", "revision": 3,
+    assert match.render() == {"status": "done", "error": "", "errors": [],
+                              "revision": 3,
                               "path": f"out/thumbnails/{stem}.png"}
     assert match.service.PreviewImage() == b"board one.PNG"
     assert match.queued == [] and match.renderer.asked == []
@@ -1600,12 +1605,13 @@ def test_a_generate_with_no_match_still_draws_the_preview_it_stood_in_for(
     assert env.renderer.asked == []
     assert len(env.queued) == 1
     assert env.render() == {"status": "error", "path": "",
-                            "error": thumbnails.NO_PLAYER, "revision": 2}
+                            "error": thumbnails.NO_PLAYER, "revision": 2,
+                            "errors": []}
 
     env.queued.pop(0)()  # the preview
 
     assert env.render() == {"status": "running", "path": "", "error": "",
-                            "revision": 3}
+                            "revision": 3, "errors": []}
     assert _drawnBoard(env.renderer.asked[0]) == 1
     data, _config, _template = env.renderer.asked[0].payload
     assert data["score"]["1"]["match"] == "Winners Final"  # a placeholder
@@ -1902,7 +1908,7 @@ def test_a_generate_without_a_match_says_why(env, executor, program, error):
 
     assert env.renderer.asked == []
     assert env.render() == {"status": "error", "path": "", "error": error,
-                            "revision": 1}
+                            "revision": 1, "errors": []}
     # The lane is free.
     SM.state = copy.deepcopy(PLAYERS)
     assert env.service.Generate() == 2
@@ -1929,7 +1935,7 @@ def test_a_generate_with_no_match_says_why_whatever_the_file_is(
 
     assert env.renderer.asked == []
     assert env.render() == {"status": "error", "path": "", "error": error,
-                            "revision": 1}
+                            "revision": 1, "errors": []}
     assert env.service._running is None
 
 
@@ -2034,8 +2040,95 @@ def test_a_failed_render_keeps_the_last_thumbnail_and_frees_the_lane(
     match.renderer.fail()
 
     assert match.render() == {"status": "error", "path": saved,
-                              "error": thumbnails.RENDER_FAILED, "revision": 2}
+                              "error": thumbnails.RENDER_FAILED, "revision": 2,
+                              "errors": []}
     assert match.service.Preview() == 3
+
+
+def test_a_template_error_publishes_what_the_template_reported(
+        match, executor):
+    # Template contract 2 (ADR-008 D7 R2): the renderer says TEMPLATE_ERROR
+    # with what the page reported; the lane publishes them, well-formed and
+    # cut to their lengths, and the next run none.
+    from src.core.RenderLane import TemplateError
+    match.service.Preview()
+    asked = match.renderer.asked.pop(0)
+    asked.done(None, TemplateError([
+        {"kind": "onRender", "message": "TypeError: x",
+         "source": "/layout/thumbnail/thumbnail.js", "line": 3,
+         "column": None},
+        {"kind": "not one", "message": "dropped"},
+        "junk",
+    ]))
+
+    assert match.render() == {
+        "status": "error", "path": "", "error": thumbnails.TEMPLATE_ERROR,
+        "revision": 1, "errors": [{
+            "kind": "onRender", "message": "TypeError: x",
+            "source": "/layout/thumbnail/thumbnail.js", "line": 3,
+            "column": 0}]}
+    assert schema.ReadThumbnailRender()["errors"] \
+        == match.render()["errors"]
+
+    match.service.Preview()
+    match.renderer.answer()
+    executor.drain(WAIT)
+    assert match.render()["status"] == "done"
+    assert match.render()["errors"] == []
+
+
+def test_a_templates_errors_are_kept_to_their_lengths():
+    from src.core import RenderLane
+    errors = RenderLane.TemplateErrors([{
+        "kind": "error", "message": "m" * 600, "source": "s" * 400,
+        "line": True, "column": 10 ** 10}] * 30)
+    assert len(errors) == RenderLane.TEMPLATE_ERRORS_MAX
+    assert len(errors[0]["message"]) == RenderLane.TEMPLATE_MESSAGE_MAX
+    assert len(errors[0]["source"]) == RenderLane.TEMPLATE_SOURCE_MAX
+    assert (errors[0]["line"], errors[0]["column"]) == (0, 0)
+    assert RenderLane.TemplateErrors(None) == []
+    # The code it is, compared and passed on as any other.
+    error = RenderLane.TemplateError([{"kind": "autona", "message": "m"}])
+    assert error == RenderLane.TEMPLATE_ERROR
+    assert error.errors[0]["source"] == ""
+
+
+@pytest.mark.parametrize("errors, read", [
+    (None, []), ("x", []), ([{"kind": "error"}, 3], [{"kind": "error"}])])
+def test_a_renders_published_errors_are_read_as_a_list_of_dicts(
+        env, errors, read):
+    SM.state = {"thumbnail": {"render": {"status": "error", "errors": errors}}}
+    assert schema.ReadThumbnailRender()["errors"] == read
+    SM.state = {"result_render": {"status": "error", "errors": errors}}
+    assert schema.ReadResultRender()["errors"] == read
+
+
+def test_the_live_preview_payload_is_the_previews(match):
+    # GET /api/v1/thumbnail/payload (ADR-008 D7 R2): what a preview draws,
+    # with its package, for the browser to draw.
+    answer = match.service.PreviewPayload()
+    data, config, template = match.service.RenderPayload(
+        preview=True, board=1)
+    assert {key: answer[key] for key in (
+        "templateId", "folder", "entry", "contract", "size")} == {
+        "templateId": "type_a", "folder": "thumbnail",
+        "entry": "thumbnail.html", "contract": 2, "size": [1920, 1080]}
+    assert answer["payload"]["data"] == data
+    assert answer["payload"]["template"] == template
+    assert answer["payload"]["config"] == config
+    assert answer["omitted"] == []
+    json.dumps(answer)
+
+
+def test_the_live_preview_leaves_out_an_uploaded_background(match):
+    match.service.ImportBackground(_image_bytes())
+    _data, config, _template = match.service.RenderPayload(preview=True)
+    assert config["background_path"].startswith(
+        "./user_data/thumbnail_background_")
+
+    answer = match.service.PreviewPayload()
+    assert answer["payload"]["config"]["background_path"] == ""
+    assert answer["omitted"] == ["background_path"]
 
 
 def test_a_render_refused_for_want_of_the_preview_says_so(match, executor):
@@ -2125,7 +2218,7 @@ def test_a_saved_thumbnail_is_done_though_the_preview_is_not_updated(
     assert len(png) == 1
     assert match.render() == {"status": "done",
                               "path": f"out/thumbnails/{png[0].name}",
-                              "error": "", "revision": 1}
+                              "error": "", "revision": 1, "errors": []}
     assert png[0].with_suffix(".jpg").exists()
     assert match.service.PreviewImage() is None
 
@@ -2205,7 +2298,8 @@ def test_a_render_that_cannot_start_answers_the_request(match, executor):
         match.service.Preview()
 
     assert match.render() == {"status": "error", "path": "",
-                              "error": thumbnails.RENDER_FAILED, "revision": 1}
+                              "error": thumbnails.RENDER_FAILED, "revision": 1,
+                              "errors": []}
     match.renderer.refuse = None
     assert match.service.Preview() == 2
 
@@ -2222,7 +2316,8 @@ def test_a_render_refused_by_the_shutdown_is_cancelled(match, executor):
         match.service.Preview()
 
     assert match.render() == {"status": "error", "path": "",
-                              "error": thumbnails.CANCELLED, "revision": 1}
+                              "error": thumbnails.CANCELLED, "revision": 1,
+                              "errors": []}
 
 
 def test_the_shell_says_what_a_shutdown_is(match, executor):
@@ -2308,9 +2403,9 @@ def published(match, monkeypatch):
     written = []
     publish = match.service._Publish
 
-    def record(status, path, error, revision):
+    def record(status, path, error, revision, errors=()):
         written.append((status, error, revision))
-        publish(status, path, error, revision)
+        publish(status, path, error, revision, errors)
 
     monkeypatch.setattr(match.service, "_Publish", record)
     return written
@@ -2385,7 +2480,7 @@ def test_a_second_end_of_a_run_changes_nothing(match, executor, published):
     match.service._Ended(thumbnails.PREVIEW, 1, (thumbnails.ERROR, "late"))
 
     assert match.render() == {"status": "running", "path": "", "error": "",
-                              "revision": 2}
+                              "revision": 2, "errors": []}
     assert match.service._running == thumbnails.PREVIEW
 
     match.renderer.answer()
@@ -2446,7 +2541,8 @@ def test_no_half_result_is_ever_seen(match, executor):
 
     assert seen
     for render in seen:
-        assert set(render) == {"status", "path", "error", "revision"}
+        assert set(render) == {"status", "path", "error", "revision",
+                               "errors"}
         assert (render["status"] == "done") == bool(render["path"])
 
 

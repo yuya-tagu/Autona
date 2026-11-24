@@ -46,11 +46,68 @@
  *    source, line, column}
  * Only text about the layout's own errors: sent to any parent ("*"; the
  * page around it checks who sent it). OBS has no parent: nothing is sent.
+ *
+ * Template contract 2 (ADR-008 D7 R2): a thumbnail or result template draws
+ * with Autona.onRender instead of defining initThumbnail / initResult and
+ * saying RENDER_READY itself. It loads autona.js without globals.js:
+ *
+ *   <script src="../include/autona.js"></script>
+ *   <script>
+ *     Autona.onRender(async (payload) => {
+ *       document.querySelector("#p1-name").textContent = ...;
+ *     });
+ *   </script>
+ *
+ * The listener gets the payload the app's service builds (the same object
+ * contract 1's initThumbnail / initResult get: {data, config, template} /
+ * {data, config, layout}) and may return a promise. This file then waits for
+ * the fonts (document.fonts.ready) and the images (<img> and CSS
+ * backgrounds; at most ASSET_WAIT_MS) and says the drawing is done. A
+ * render with an error is no drawing: an exception of the listener (thrown
+ * or a rejected promise), an uncaught error or unhandled rejection of the
+ * page while it draws, or no listener at all. The errors of the page
+ * before its first render (while it loaded) are the first render's; one
+ * after a render ended (a rAF, a timer, a promise the listener did not
+ * await) is that render's -- the app reads them again before it takes the
+ * picture -- never the next one's. Such a render's picture is not taken;
+ * its errors are the render's result (the app shows them as the generate's
+ * error). A resource that failed to load is not an error (as for overlays).
+ * One render at a time: one asked for while another draws waits for it,
+ * and only the newest of those is drawn.
+ *
+ * Who asks for a render:
+ *   - the app's off-screen renderer: Autona._render(payload, serial), and
+ *     the page's title says "AUTONA_RENDER <serial> ok | failed" when it is
+ *     done; Autona._renderResult(serial) is then its errors (so far: also
+ *     while it draws), as JSON. Both are the renderer's, not the template's
+ *     (not enumerable);
+ *   - the app's preview, in a frame whose URL names the page around it
+ *     (?autonaParent=<its origin>): it posts exactly
+ *     {type: "autona:render", serial, payload} to the frame (only a message
+ *     from window.parent, from that origin, of that shape, with a serial
+ *     above the last one taken, is drawn), and this file posts the render's
+ *     errors as above (kind "onRender", "error", ...), contract 2, then
+ *     {type: "autona:rendered", contract: 2, serial, ok} once it is drawn.
  */
 (function () {
   "use strict";
 
   var CONTRACT = 1;
+  // The template contract onRender is (contract 1 is initThumbnail /
+  // initResult): what this file's messages say on a page that renders.
+  var RENDER_CONTRACT = 2;
+  // How long a render waits for its fonts and images, at most.
+  var ASSET_WAIT_MS = 5000;
+  // How many errors a render keeps.
+  var RENDER_ERRORS_MAX = 20;
+
+  // onUpdate's listeners, and onRender's (one).
+  var listeners = [];
+  var renderListener = null;
+  // A page that renders: it called onRender and not onUpdate.
+  function renders() {
+    return renderListener !== null && listeners.length === 0;
+  }
 
   // ── telling the app's preview (ADR-008 D3) ─────────────────────────────
 
@@ -65,6 +122,17 @@
     }
   })();
   var postedErrors = 0;
+  // The page around the frame that may ask for renders (the app's preview
+  // names its origin in the frame's URL); "" for none.
+  var parentOrigin = (function () {
+    try {
+      var named = new URLSearchParams(window.location.search)
+        .get("autonaParent") || "";
+      return /^https?:\/\/[^\/?#]+$/.test(named) ? named : "";
+    } catch (error) {
+      return "";
+    }
+  })();
 
   function clip(value, max) {
     var textValue = typeof value === "string" ? value : String(value);
@@ -110,33 +178,60 @@
     try {
       window.parent.postMessage({
         type: type,
-        contract: CONTRACT,
+        contract: renders() ? RENDER_CONTRACT : CONTRACT,
         kind: kind,
         message: clip(message, MESSAGE_MAX),
         source: sourcePath(source),
         line: lineNumber(line),
         column: lineNumber(column),
-      }, "*");
+      }, parentOrigin || "*");
     } catch (error) {
       // A parent that cannot be told: nothing to do.
     }
+  }
+
+  // Whose an error is: the render running; else the last one that ran
+  // (an error after it ended is its own, not the next one's); else -- no
+  // render yet, the page loading -- the first render's (caught).
+  var caught = [];
+  var rendering = null;
+  var lastRecord = null;
+
+  function keep(record, kind, message, source, line, column) {
+    var list = record ? record.errors : caught;
+    if (list.length >= RENDER_ERRORS_MAX) return;
+    list.push({
+      kind: kind,
+      message: clip(message, MESSAGE_MAX),
+      source: sourcePath(source),
+      line: lineNumber(line),
+      column: lineNumber(column),
+    });
+  }
+
+  // An error of the page's: kept for a render, and told to the preview.
+  function report(kind, message, source, line, column) {
+    keep(rendering || lastRecord, kind, message, source, line, column);
+    post("autona:error", kind, message, source, line, column);
   }
 
   // kind: "onUpdate" (a listener threw), "error" / "unhandledrejection" (the
   // page's), "autona" (this file's own trouble).
   function postError(kind, error) {
     var at = thrownAt(error);
-    post("autona:error", kind, errorText(error), at.source, at.line, at.column);
+    report(kind, errorText(error), at.source, at.line, at.column);
   }
 
-  if (framed && typeof window.addEventListener === "function") {
+  // Watched in a frame (the preview is told) and on a page that renders (the
+  // render is told), which is not framed in the off-screen renderer.
+  if (typeof window.addEventListener === "function") {
     window.addEventListener("error", function (event) {
       // A script's error (an ErrorEvent), not a resource that failed to load.
       if (!event || typeof event.message !== "string") return;
       var at = thrownAt(event.error);
-      post("autona:error", "error", event.message || errorText(event.error),
-           event.filename || at.source, event.lineno || at.line,
-           event.colno || at.column);
+      report("error", event.message || errorText(event.error),
+             event.filename || at.source, event.lineno || at.line,
+             event.colno || at.column);
     });
     window.addEventListener("unhandledrejection", function (event) {
       postError("unhandledrejection", event ? event.reason : event);
@@ -170,16 +265,18 @@
     ["showAdditional", "show_additional", false],
   ];
 
-  if (typeof LoadEverything !== "function") {
-    var noGlobals = "autona.js: load ../include/globals.js before autona.js";
-    console.error(noGlobals);
-    postError("autona", noGlobals);
-    return;
-  }
+  // globals.js (the overlays' transport): a page that renders goes without
+  // it. Whether the page is one is known once its scripts have run
+  // (startLoading); an overlay without globals.js is told so then.
+  var hasGlobals = typeof LoadEverything === "function";
+  var noGlobals = "autona.js: load ../include/globals.js before autona.js "
+    + "(an overlay), or call Autona.onRender (a thumbnail or result "
+    + "template)";
   // LoadEverything() already called (the layout's script ran before this
   // one): its scripts are on the page, or its socket is open. Calling it
   // again would load everything twice, so this file does not.
   function loadingStarted() {
+    if (!hasGlobals) return false;
     if (window.tshSocket) return true;
     if (typeof document.getElementsByTagName !== "function") return false;
     var scripts = document.getElementsByTagName("script");
@@ -522,10 +619,9 @@
 
   // ── handing it to the layout ──────────────────────────────────────────
 
-  // {fn, failing}: failing while its last call threw, so a listener that
-  // throws on every update is reported once, and again only after a call
-  // that succeeded.
-  var listeners = [];
+  // listeners: {fn, failing}: failing while its last call threw, so a
+  // listener that throws on every update is reported once, and again only
+  // after a call that succeeded.
   var current = null;
   var currentKey = "";
   var rawState = null;
@@ -589,18 +685,28 @@
   // globals.js has the layout call LoadEverything(); a layout written for
   // this file need not, so it is called once the page has parsed, and any
   // call after the first (the layout's own, ours) gets the first's promise.
-  var loadEverything = LoadEverything;
-  // Already running (see startedEarly): only the layout's call loads.
-  var loading = startedEarly ? Promise.resolve() : null;
-  LoadEverything = function () {
-    if (loading === null) loading = loadEverything.apply(this, arguments);
-    return loading;
-  };
+  if (hasGlobals) {
+    var loadEverything = LoadEverything;
+    // Already running (see startedEarly): only the layout's call loads.
+    var loading = startedEarly ? Promise.resolve() : null;
+    LoadEverything = function () {
+      if (loading === null) loading = loadEverything.apply(this, arguments);
+      return loading;
+    };
+  }
   function startLoading() {
     setTimeout(function () {
       // The page has parsed and its scripts have run (their errors are
-      // told already): the preview hears that autona.js is there.
+      // told already). An overlay without globals.js has nothing to start.
+      if (!hasGlobals && !renders()) {
+        console.error(noGlobals);
+        postError("autona", noGlobals);
+        return;
+      }
+      // The preview hears that autona.js is there.
       post("autona:ready", "ready", "", window.location.pathname, null, null);
+      // A page that renders reads no state: it is given its payload.
+      if (!hasGlobals || renders()) return;
       LoadEverything().then(null, function (error) {
         console.error("autona.js: the page could not start:", error);
         postError("autona", error);
@@ -616,7 +722,7 @@
   // ── the sample state (?autonaSample=NAME) ─────────────────────────────
 
   var sampleName = params.get("autonaSample");
-  if (sampleName !== null) {
+  if (sampleName !== null && hasGlobals) {
     var sample = /^[A-Za-z0-9_-]{1,64}$/.test(sampleName)
       ? fetch("/layout/include/sample/" + sampleName + ".json",
               {cache: "no-store"})
@@ -651,6 +757,209 @@
     };
   }
 
+  // ── rendering (template contract 2) ───────────────────────────────────
+
+  function nothing() {}
+
+  // Settled once `image` has loaded (or failed) and is decoded.
+  function imageSettled(image) {
+    if (!image || !(image.currentSrc || image.src)) return null;
+    var loaded = image.complete ? Promise.resolve()
+      : new Promise(function (resolve) {
+        image.addEventListener("load", resolve, {once: true});
+        image.addEventListener("error", resolve, {once: true});
+      });
+    return loaded.then(function () {
+      return typeof image.decode === "function" && image.naturalWidth
+        ? image.decode() : null;
+    });
+  }
+
+  function urlSettled(url) {
+    if (typeof Image !== "function") return null;
+    var image = new Image();
+    image.src = url;
+    return imageSettled(image);
+  }
+
+  // The URLs of a computed background-image ("url(...)", maybe several).
+  function backgroundUrls(value) {
+    var urls = [];
+    var pattern = /url\(\s*(["']?)(.*?)\1\s*\)/g;
+    var match;
+    while (typeof value === "string" && (match = pattern.exec(value))) {
+      if (match[2]) urls.push(match[2]);
+    }
+    return urls;
+  }
+
+  // Settled once the fonts are in and the images decoded, or ASSET_WAIT_MS
+  // later: what the drawing shows is there when the render says done. An
+  // image that does not load is waited for no longer (not an error).
+  function assetsSettled() {
+    var waits = [];
+    function wait(promise) {
+      if (promise) waits.push(Promise.resolve(promise).then(nothing, nothing));
+    }
+    try {
+      if (document.fonts && document.fonts.ready) wait(document.fonts.ready);
+      var images = document.images || [];
+      for (var i = 0; i < images.length; i += 1) wait(imageSettled(images[i]));
+      if (typeof document.querySelectorAll === "function"
+          && typeof getComputedStyle === "function") {
+        var seen = {};
+        var elements = document.querySelectorAll("*");
+        for (var j = 0; j < elements.length; j += 1) {
+          backgroundUrls(getComputedStyle(elements[j]).backgroundImage)
+            .forEach(function (url) {
+              if (seen[url]) return;
+              seen[url] = true;
+              wait(urlSettled(url));
+            });
+        }
+      }
+    } catch (error) {
+      // What cannot be looked at is not waited for.
+    }
+    var timer = null;
+    return Promise.race([
+      Promise.all(waits),
+      new Promise(function (resolve) {
+        timer = setTimeout(resolve, ASSET_WAIT_MS);
+      }),
+    ]).then(function () { clearTimeout(timer); });
+  }
+
+  // A listener's exception: kept for its render, told to the preview while
+  // that render is the one running (a render overtaken says nothing more).
+  function renderFailed(record, error) {
+    var at = thrownAt(error);
+    keep(record, "onRender", errorText(error), at.source, at.line, at.column);
+    if (rendering === record) {
+      post("autona:error", "onRender", errorText(error), at.source, at.line,
+           at.column);
+    }
+  }
+
+  // The latest renders' records, newest last: _renderResult reads them.
+  var RECORDS_KEPT = 4;
+  var records = [];
+
+  function outcomeOf(record) {
+    return {serial: record.serial, ok: record.errors.length === 0,
+            done: record.done, errors: record.errors.slice()};
+  }
+
+  // Draw `payload`: settles to {serial, ok, done, errors}. The first render
+  // takes the errors of the page's loading too.
+  function render(payload, serial) {
+    var record = {serial: serial, done: false,
+                  errors: caught.splice(0, caught.length)};
+    records.push(record);
+    if (records.length > RECORDS_KEPT) records.shift();
+    rendering = record;
+    // The preview shows each render's errors afresh: the cap is a render's.
+    postedErrors = 0;
+    var drawn;
+    if (renderListener === null) {
+      var none = "autona.js: the page did not call Autona.onRender";
+      keep(record, "autona", none, window.location.pathname, null, null);
+      post("autona:error", "autona", none, window.location.pathname, null,
+           null);
+      drawn = Promise.resolve();
+    } else {
+      var listener = renderListener;
+      drawn = new Promise(function (resolve) {
+        var result;
+        try {
+          result = listener(payload);
+        } catch (error) {
+          renderFailed(record, error);
+          resolve();
+          return;
+        }
+        Promise.resolve(result).then(function () { resolve(); },
+                                     function (error) {
+                                       renderFailed(record, error);
+                                       resolve();
+                                     });
+      });
+    }
+    return drawn.then(assetsSettled).then(function () {
+      record.done = true;
+      if (rendering === record) rendering = null;
+      lastRecord = record;
+      return outcomeOf(record);
+    });
+  }
+
+  // One render at a time (a render overtaken would draw over a newer one):
+  // one asked for while another draws waits, and a newer one asked for
+  // meanwhile takes its place (and is not drawn, nor says anything).
+  // `then(outcome)` follows its render.
+  var drawing = false;
+  var next = null;
+
+  function queue(payload, serial, then) {
+    if (drawing) {
+      next = {payload: payload, serial: serial, then: then};
+      return;
+    }
+    drawing = true;
+    render(payload, serial).then(function (outcome) {
+      drawing = false;
+      try {
+        then(outcome);
+      } finally {
+        var waiting = next;
+        next = null;
+        if (waiting !== null) {
+          queue(waiting.payload, waiting.serial, waiting.then);
+        }
+      }
+    });
+  }
+
+  // The preview's render: {type: "autona:render", serial, payload} from the
+  // page around the frame, and nothing else.
+  var framedSerial = 0;
+  function renderMessage(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)
+        || Object.getPrototypeOf(data) !== Object.prototype) {
+      return null;
+    }
+    var keys = Object.keys(data);
+    if (keys.length !== 3 || data.type !== "autona:render"
+        || typeof data.serial !== "number" || !isFinite(data.serial)
+        || Math.floor(data.serial) !== data.serial || data.serial < 1
+        || !data.payload || typeof data.payload !== "object"
+        || Array.isArray(data.payload)) {
+      return null;
+    }
+    return data;
+  }
+  function rendered(outcome) {
+    try {
+      window.parent.postMessage({
+        type: "autona:rendered", contract: RENDER_CONTRACT,
+        serial: outcome.serial, ok: outcome.ok}, parentOrigin);
+    } catch (error) {
+      // A parent that cannot be told: nothing to do.
+    }
+  }
+  if (framed && parentOrigin && typeof window.addEventListener === "function") {
+    window.addEventListener("message", function (event) {
+      if (!event || event.source !== window.parent
+          || event.origin !== parentOrigin) {
+        return;
+      }
+      var message = renderMessage(event.data);
+      if (message === null || message.serial <= framedSerial) return;
+      framedSerial = message.serial;
+      queue(message.payload, message.serial, rendered);
+    });
+  }
+
   window.Autona = {
     contract: CONTRACT,
     onUpdate: function (listener) {
@@ -674,9 +983,44 @@
         if (index !== -1) listeners.splice(index, 1);
       };
     },
+    // Template contract 2: `listener(payload)` draws a render (see the top).
+    onRender: function (listener) {
+      if (typeof listener !== "function") {
+        throw new TypeError("Autona.onRender takes a function");
+      }
+      if (renderListener !== null) {
+        throw new Error("Autona.onRender takes one listener: it was called "
+          + "before");
+      }
+      renderListener = listener;
+      return function () {
+        if (renderListener === listener) renderListener = null;
+      };
+    },
   };
   Object.defineProperty(window.Autona, "raw", {
     enumerable: true,
     get: function () { return rawState; },
+  });
+  // The off-screen renderer's (AutonaOffscreenRenderer), not a template's.
+  Object.defineProperty(window.Autona, "_render", {
+    value: function (payload, serial) {
+      queue(payload, serial, function (outcome) {
+        document.title = "AUTONA_RENDER " + serial
+          + (outcome.ok ? " ok" : " failed");
+      });
+    },
+  });
+  // A render's errors so far (also while it draws): read again before the
+  // picture is taken, and at a timeout.
+  Object.defineProperty(window.Autona, "_renderResult", {
+    value: function (serial) {
+      for (var i = records.length - 1; i >= 0; i -= 1) {
+        if (records[i].serial === serial) {
+          return JSON.stringify(outcomeOf(records[i]));
+        }
+      }
+      return null;
+    },
   });
 })();

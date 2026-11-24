@@ -21,6 +21,12 @@ export interface TemplatePackage {
     // One of the shipped eight, whose id never changes.
     bundled: boolean;
     size: [number, number];
+    // Its template contract (ADR-007 D3): 2 is drawn in Autona.onRender and
+    // previewed live (ADR-008 D7 R2), 1 as an image.
+    contract?: number;
+    // Its folder under layout/ and its entry page there.
+    folder?: string;
+    entry?: string;
 }
 
 // One choice of a page's pulldown: what is sent, and what is shown.
@@ -65,8 +71,17 @@ export function templateLabel(entry: TemplatePackage, prefix: string,
 // answer is not a list): the page then offers what its own description lists.
 export function useTemplatePackages(kind: TemplateKind,
                                     loads: number): TemplatePackage[] | null {
-    const [packages, setPackages] =
-        React.useState<TemplatePackage[] | null>(null);
+    return useTemplatePackagesRead(kind, loads).packages;
+}
+
+// The same, and whether the reading is over (read, or given up on): a page
+// that previews by the package's contract waits for it.
+export function useTemplatePackagesRead(kind: TemplateKind, loads: number): {
+    packages: TemplatePackage[] | null; settled: boolean;
+} {
+    const [read, setRead] = React.useState<{
+        packages: TemplatePackage[] | null; settled: boolean;
+    }>({packages: null, settled: false});
     React.useEffect(() => {
         let live = true;
         getWithRetry<{ok: boolean; data: unknown}>(
@@ -76,13 +91,18 @@ export function useTemplatePackages(kind: TemplateKind,
                 throw new Error(`GET /api/v1/layouts?kind=${kind}: not a list`);
             }
             if (live) {
-                setPackages((data as TemplatePackage[]).filter(
-                    (entry) => entry && entry.kind === kind));
+                setRead({packages: (data as TemplatePackage[]).filter(
+                    (entry) => entry && entry.kind === kind), settled: true});
             }
-        }).catch((error) => console.error(error));
+        }).catch((error) => {
+            console.error(error);
+            if (live) {
+                setRead((current) => ({...current, settled: true}));
+            }
+        });
         return () => {
             live = false;
         };
     }, [kind, loads]);
-    return packages;
+    return read;
 }

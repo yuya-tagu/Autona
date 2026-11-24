@@ -234,6 +234,78 @@ def test_files_only_answer_get(server):
     assert client.post("/layout/x.js").status_code == 405
 
 
+def _policies(response):
+    return response.headers.getlist("Content-Security-Policy")
+
+
+def test_a_template_packages_files_keep_their_page_to_its_origin(server):
+    # ADR-008 D7 R2: the live preview frames a template in a browser, where
+    # no request filter is; every file of a template package's folder comes
+    # with the policy (on this port beside frame-ancestors), uncached.
+    _write(server.root, "layout/my_thumbs/settings.json", json.dumps(
+        {"autona": {"kind": "thumbnail", "contract": 2}}).encode())
+    _write(server.root, "layout/my_thumbs/thumbnail.html")
+    _write(server.root, "layout/my_thumbs/thumbnail.js")
+    _write(server.root, "layout/scoreboard_simple/settings.json", json.dumps(
+        {"autona": {"kind": "scoreboard"}}).encode())
+    _write(server.root, "layout/scoreboard_simple/index.html")
+    _write(server.root, "layout/include/autona.js")
+    client = _client(server)
+    for path in ("/layout/my_thumbs/thumbnail.html",
+                 "/layout/my_thumbs/thumbnail.js",
+                 "/Layout/My_Thumbs/thumbnail.html"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert WebAccess.TEMPLATE_CONTENT_POLICY in _policies(response), path
+        assert WebAccess.FRAME_ANCESTORS in _policies(response), path
+        assert response.cache_control.no_cache, path
+        assert response.cache_control.max_age == 0, path
+    # An overlay's page: as before.
+    response = client.get("/layout/scoreboard_simple/index.html")
+    assert response.status_code == 200
+    assert _policies(response) == [WebAccess.FRAME_ANCESTORS]
+    assert response.cache_control.max_age == 86400
+    # The shared scripts: no policy of the template's (an overlay loads
+    # them too), revalidated each time (an app update replaces autona.js in
+    # place).
+    response = client.get("/layout/include/autona.js")
+    assert response.status_code == 200
+    assert _policies(response) == [WebAccess.FRAME_ANCESTORS]
+    assert response.cache_control.no_cache
+    assert response.cache_control.max_age == 0
+
+
+def test_the_template_policy_comes_from_the_preview_listener_too(server):
+    # Where the live preview's frame reads the template from: the preview
+    # listener (PreviewGate), not this port.
+    _write(server.root, "layout/my_thumbs/settings.json", json.dumps(
+        {"autona": {"kind": "thumbnail", "contract": 2}}).encode())
+    _write(server.root, "layout/my_thumbs/thumbnail.html")
+    _write(server.root, "layout/include/autona.js")
+    preview = _PreviewClient(server)
+    response = preview.get("/layout/my_thumbs/thumbnail.html")
+    assert response.status_code == 200
+    assert WebAccess.TEMPLATE_CONTENT_POLICY in _policies(response)
+    assert response.cache_control.no_cache
+    response = preview.get("/layout/include/autona.js")
+    assert response.status_code == 200
+    assert WebAccess.TEMPLATE_CONTENT_POLICY not in _policies(response)
+    assert response.cache_control.no_cache
+
+
+def test_the_template_policy_reads_only_its_origin():
+    policy = dict(part.strip().split(" ", 1)
+                  for part in WebAccess.TEMPLATE_CONTENT_POLICY.split(";"))
+    assert policy["default-src"] == "'self'"
+    assert policy["connect-src"] == "'self'"
+    assert policy["img-src"] == "'self' data: blob:"
+    for directive in ("worker-src", "frame-src", "child-src", "object-src",
+                      "form-action"):
+        assert policy[directive] == "'none'", directive
+    assert "http" not in WebAccess.TEMPLATE_CONTENT_POLICY
+    assert "*" not in WebAccess.TEMPLATE_CONTENT_POLICY
+
+
 def test_the_static_folder_is_gone(server):
     _write(server.root, "user_data/settings.json", b'{"secret": 1}')
     rules = {str(rule) for rule in server.app.url_map.iter_rules()}

@@ -1218,8 +1218,15 @@ def test_layouts_lists_the_template_packages(webApp, monkeypatch):
             assert [entry["id"] for entry in body["data"]][:len(ids)] \
                 == list(ids)
             for entry in body["data"][:len(ids)]:
+                # The contract its shipped settings.json declares (the
+                # thumbnails moved to 2 in ADR-008 D7 R2, the result is 1).
+                shipped = json.loads((Path(LayoutCatalog.LAYOUT_ROOT)
+                                      / ids[entry["id"]] / "settings.json")
+                                     .read_text(encoding="utf-8"))
                 assert (entry["kind"], entry["bundled"], entry["contract"],
-                        entry["folder"]) == (kind, True, 1, ids[entry["id"]])
+                        entry["folder"]) == (
+                    kind, True, shipped["autona"]["contract"],
+                    ids[entry["id"]])
                 # Always a string, in the program's language; both in
                 # displayNames.
                 words = CoreWords.WORDS[LayoutCatalog.BundledNameKey(

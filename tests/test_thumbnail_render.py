@@ -26,6 +26,7 @@ test (tests/test_layout_preview_lifecycle.py, same reasoning).
 import base64
 import copy
 import json
+import os
 import shutil
 import time
 from io import BytesIO
@@ -103,7 +104,7 @@ def pages(autonaApp, previewListener):
     ADR-007 T1)."""
     created = template_packages.Install(
         autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
-        page=PAGE)
+        page=PAGE, contract=1)
     yield
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -690,7 +691,7 @@ def test_a_render_that_timed_out_while_settling_is_not_taken(renderer):
 def shippedPages(autonaApp, previewListener):
     """The templates as shipped in the runtime's layout/. Copies: a link there
     would have a cleanup that goes wrong delete the project's. layout/include/
-    is 19 MB, of which the pages only want the three scripts they share
+    is 19 MB, of which the pages only want the four scripts they share
     (ADR-007 D2: a package reads nothing outside its folder but include/)."""
     created = []
     for name in ("thumbnail", "thumbnail_type_b"):
@@ -703,7 +704,7 @@ def shippedPages(autonaApp, previewListener):
     include.mkdir()
     created.append(include)
     for script in ("jquery-3.7.1.min.js", "lodash.min.js",
-                   "thumbnail_assets.js"):
+                   "thumbnail_assets.js", "autona.js"):
         shutil.copy(PROJECT_ROOT / "layout" / "include" / script, include)
     try:
         yield
@@ -715,8 +716,9 @@ def shippedPages(autonaApp, previewListener):
 @pytest.mark.parametrize("templateId", ["type_a", "type_b"])
 def test_a_shipped_page_draws_what_it_is_given(shippedPages, templateId):
     """The real thumbnail.js, on a payload with what is awkward in it. Not its
-    pixels, which the offscreen platform does not show. Its catch says
-    RENDER_READY as well, so the name is what says it got to the end."""
+    pixels, which the offscreen platform does not show. On template contract
+    2 (ADR-008 D7 R2) an exception in it is the render's error, so no error
+    says it got to the end; the name says it drew the payload."""
     folder = template_packages.BUNDLED["thumbnail"][templateId]
     template = json.loads(
         (PROJECT_ROOT / "layout" / folder
@@ -750,6 +752,327 @@ def test_a_shipped_page_draws_what_it_is_given(shippedPages, templateId):
 
     assert '"</script>${b}' in names[0]
     assert names[0].startswith("Al\u2028pha")
+
+
+# ── template contract 2 (ADR-008 D7 R2) ─────────────────────────────────
+
+# A contract 2 page: autona.js draws the payload in its onRender, which keeps
+# the colour it drew (the offscreen platform's grab shows no page) or fails
+# as the config says.
+RENDER_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<script src="../include/autona.js"></script></head><body><script>
+Autona.onRender(async (payload) => {
+  const config = payload.config;
+  if (config.throw) throw new TypeError("drawing broke");
+  if (config.reject) await Promise.reject(new RangeError("late"));
+  // Not waited for: thrown once the drawing has returned.
+  if (config.after) setTimeout(() => { throw new Error("after"); },
+                               config.after);
+  window.drawn = config.color;
+});
+</script></body></html>
+"""
+# One that forgot autona.js.
+NO_AUTONA_PAGE = """<!doctype html><html><body><script>
+window.Autona = undefined;
+</script></body></html>
+"""
+
+
+@pytest.fixture
+def renderPages(autonaApp, previewListener):
+    """RENDER_PAGE for both templates, on contract 2, with autona.js in the
+    runtime's layout/include/ (a copy)."""
+    created = template_packages.Install(
+        autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
+        page=RENDER_PAGE, contract=2)
+    include = autonaApp.dir / "layout" / "include"
+    assert not include.exists()
+    include.mkdir()
+    created.append(include)
+    shutil.copy(PROJECT_ROOT / "layout" / "include" / "autona.js", include)
+    yield autonaApp.dir / "layout"
+    for directory in created:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def _contract2Renderer():
+    made = ThumbnailRenderer()
+    made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    made.FRESH_FRAME_WAIT_MS = 0  # See the `service` fixture.
+    return made
+
+
+def _drawn(made):
+    said = []
+    made._page.runJavaScript("window.drawn || null", said.append)
+    assert _waitUntil(lambda: said)
+    return said[0]
+
+
+def test_a_contract_2_page_draws_in_onrender(renderPages):
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        pixmap, error = results[0]
+        assert error == ""
+        assert (pixmap.width(), pixmap.height()) == (1920, 1080)
+        assert _drawn(made) == GREEN
+    finally:
+        _destroy(made)
+
+
+@pytest.mark.parametrize("config, message", [
+    ({"throw": True}, "TypeError: drawing broke"),
+    ({"reject": True}, "RangeError: late"),
+])
+def test_a_contract_2_exception_is_no_picture_and_says_why(
+        renderPages, config, message):
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, config, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        pixmap, error = results[0]
+        assert pixmap is None
+        assert error == thumbnails.TEMPLATE_ERROR
+        assert [(item["kind"], item["message"]) for item in error.errors] \
+            == [("onRender", message)]
+        # The entry page (with the renderer's ?load=), whose script threw.
+        assert "/layout/thumbnail/thumbnail.html" in error.errors[0]["source"]
+        assert error.errors[0]["line"] > 0
+
+        # The next one draws: the page is not broken for good.
+        results.clear()
+        made.renderAsync({}, {"color": BLUE}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == ""
+        assert _drawn(made) == BLUE
+    finally:
+        _destroy(made)
+
+
+@pytest.mark.parametrize("after", [1, 40])
+def test_a_contract_2_error_after_the_drawing_is_its_render_s(
+        renderPages, after):
+    """An error the page throws after its listener returned (here a timer:
+    during the waits, or after it said "ok" -- the renderer reads again
+    before it gives the picture) fails that render; the next one, which
+    throws nothing, draws: the error is not carried into it."""
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN, "after": after}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        pixmap, error = results[0]
+        assert pixmap is None and error == thumbnails.TEMPLATE_ERROR
+        assert [item["message"] for item in error.errors] == [
+            "Uncaught Error: after"]
+
+        results.clear()
+        made.renderAsync({}, {"color": BLUE}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == ""
+        assert _drawn(made) == BLUE
+    finally:
+        _destroy(made)
+
+
+EDITED_PAGE = RENDER_PAGE.replace("window.drawn = config.color;",
+                                  'window.drawn = "edited";')
+
+
+def test_an_edited_template_is_loaded_again_before_its_next_render(
+        renderPages):
+    """The page loaded is not drawn again once its folder's files changed:
+    the live preview draws the edited files, so Generate must too."""
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert _drawn(made) == GREEN
+        loads = made._load_number
+
+        page = renderPages / "thumbnail" / "thumbnail.html"
+        page.write_text(EDITED_PAGE, encoding="utf-8")
+        stamp = page.stat().st_mtime_ns + 5_000_000_000
+        os.utime(page, ns=(stamp, stamp))
+        results.clear()
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == ""
+        assert made._load_number == loads + 1
+        assert _drawn(made) == "edited"
+
+        # Unchanged: not loaded again.
+        results.clear()
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert made._load_number == loads + 1
+    finally:
+        _destroy(made)
+
+
+CONTRACT_1_PAGE = """<!doctype html><html><body><script>
+function initThumbnail(payload) {
+  window.drawn = "contract 1";
+  document.title = "RENDER_READY";
+}
+</script></body></html>
+"""
+
+
+def test_a_template_moved_to_contract_2_is_loaded_again(renderPages):
+    """Loaded as contract 1, then moved to 2 (its page and its manifest):
+    the next render loads it again and draws, not "no autona.js" for good."""
+    folder = renderPages / "thumbnail"
+    (folder / "settings.json").write_text(
+        template_packages.Settings("thumbnail", contract=1), encoding="utf-8")
+    (folder / "thumbnail.html").write_text(CONTRACT_1_PAGE, encoding="utf-8")
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == ""
+        assert _drawn(made) == "contract 1"
+
+        (folder / "settings.json").write_text(
+            template_packages.Settings("thumbnail", contract=2),
+            encoding="utf-8")
+        (folder / "thumbnail.html").write_text(RENDER_PAGE, encoding="utf-8")
+        results.clear()
+        made.renderAsync({}, {"color": BLUE}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == ""
+        assert _drawn(made) == BLUE
+    finally:
+        _destroy(made)
+
+
+def test_a_page_found_without_autona_js_is_loaded_again(renderPages):
+    """"missing" marks the page: once autona.js is on it (the same files'
+    stamp aside), the next render loads it again and draws."""
+    page = renderPages / "thumbnail" / "thumbnail.html"
+    page.write_text(NO_AUTONA_PAGE, encoding="utf-8")
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert results[0][1] == thumbnails.TEMPLATE_ERROR
+        loads = made._load_number
+        assert made._page_stale
+
+        results.clear()
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        assert made._load_number == loads + 1
+    finally:
+        _destroy(made)
+
+
+HANGING_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<script src="../include/autona.js"></script></head><body><script>
+Autona.onRender(() => {
+  setTimeout(() => { throw new TypeError("stuck"); }, 0);
+  return new Promise(() => {});
+});
+</script></body></html>
+"""
+
+
+def test_a_contract_2_timeout_says_the_errors_its_page_caught(renderPages):
+    (renderPages / "thumbnail" / "thumbnail.html").write_text(
+        HANGING_PAGE, encoding="utf-8")
+    made = _contract2Renderer()
+    made.STAGE_TIMEOUT_MS = 1500
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        pixmap, error = results[0]
+        assert pixmap is None and error == thumbnails.TEMPLATE_ERROR
+        assert [item["message"] for item in error.errors] == [
+            "Uncaught TypeError: stuck"]
+    finally:
+        _destroy(made)
+
+
+def test_a_contract_2_page_without_autona_js_says_so(renderPages):
+    (renderPages / "thumbnail" / "thumbnail.html").write_text(
+        NO_AUTONA_PAGE, encoding="utf-8")
+    made = _contract2Renderer()
+    results = []
+    try:
+        made.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: results)
+        pixmap, error = results[0]
+        assert pixmap is None and error == thumbnails.TEMPLATE_ERROR
+        [item] = error.errors
+        assert item["kind"] == "autona" and "autona.js" in item["message"]
+    finally:
+        _destroy(made)
+
+
+THROWING_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<script src="../include/autona.js"></script></head><body><script>
+Autona.onRender(() => { throw new TypeError("drawing broke"); });
+</script></body></html>
+"""
+
+
+def test_a_contract_2_template_error_reaches_the_state(
+        renderPages, autonaApp, client, monkeypatch):
+    """POST :preview through the service and the shell's renderer:
+    thumbnail.render is the error, with the template's errors."""
+    (renderPages / "thumbnail" / "thumbnail.html").write_text(
+        THROWING_PAGE, encoding="utf-8")
+    made = _contract2Renderer()
+    monkeypatch.setattr(ThumbnailRenderer, "_instance", made)
+    settings = SettingsManager.settings
+    SettingsManager.settings = {}
+    with SM.lock:
+        state = deep_clone(SM.state)
+        saved = deep_clone(SM.lastSavedState)
+    try:
+        response = client.post("/api/v1/thumbnail:preview", json={})
+        assert response.status_code == 202, response.get_data(as_text=True)
+        revision = response.get_json()["data"]["renderRevision"]
+        assert _waitUntil(lambda: _rendered(revision))
+        render = SM.Get(thumbnails.RENDER_PATH)
+        assert render["status"] == "error", render
+        assert render["error"] == thumbnails.TEMPLATE_ERROR
+        assert [(item["kind"], item["message"])
+                for item in render["errors"]] == [
+            ("onRender", "TypeError: drawing broke")]
+        assert set(render["errors"][0]) == {
+            "kind", "message", "source", "line", "column"}
+    finally:
+        assert TaskExecutor.instance.drain(WAIT_SECS)
+        _waitUntil(lambda: _idle(ThumbnailService.instance))
+        _destroy(made)
+        SettingsManager.settings = settings
+        with SM.lock:
+            SM.state = state
+            SM.lastSavedState = saved
 
 
 # ── a render that does not end ───────────────────────────────────────────
@@ -830,7 +1153,7 @@ def test_the_next_render_loads_again_after_a_failed_load(
         assert not made._page_loaded
 
         template_packages.Install(autonaApp.dir / "layout", ("thumbnail",),
-                                  page=PAGE)
+                                  page=PAGE, contract=1)
         made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
         made.renderAsync({}, {"color": GREEN}, _template(),
                          lambda p, e: results.append(e))
@@ -1318,3 +1641,34 @@ def test_the_shell_hands_on_a_failed_render(pages, monkeypatch):
         _destroy(made)
 
     assert answers == [(None, "the render timed out")]
+
+
+def test_a_synchronous_draw_says_a_template_s_first_error(
+        autonaApp, monkeypatch):
+    """The legacy routes' synchronous draw (DrawThumbnailNow): a template's
+    error is in what it raises -- its first message -- and not in the log
+    (a template's message may hold a player's name)."""
+    from src import AutonaShellOperations as shell
+    from src.core.RenderLane import TemplateError
+
+    class Failing:
+        syncError = TemplateError([
+            {"kind": "onRender", "message": "TypeError: Alice broke"},
+            {"kind": "error", "message": "second"}])
+
+        def renderSync(self, data, config, template):
+            return QPixmap()
+
+    monkeypatch.setattr(ThumbnailRenderer, "instance",
+                        classmethod(lambda cls: Failing()))
+    logged = []
+    sink = logger.add(lambda message: logged.append(str(message)))
+    try:
+        with pytest.raises(shell.ThumbnailNotDrawn) as raised:
+            shell.DrawThumbnailNow(({}, {}, {}))
+    finally:
+        logger.remove(sink)
+    assert raised.value.code == thumbnails.TEMPLATE_ERROR
+    assert str(raised.value) == ("Thumbnail rendering failed: template_error:"
+                                 " TypeError: Alice broke")
+    assert not any("Alice" in line for line in logged)

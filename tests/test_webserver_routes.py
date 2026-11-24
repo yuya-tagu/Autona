@@ -294,6 +294,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/thumbnail', 'api_v1.get_thumbnail', 'GET,HEAD,OPTIONS'),
     ('/api/v1/thumbnail', 'api_v1.thumbnail_update', 'OPTIONS,PATCH'),
     ('/api/v1/thumbnail/background', 'api_v1.thumbnail_background', 'OPTIONS,POST'),
+    ('/api/v1/thumbnail/payload', 'api_v1.get_thumbnail_payload', 'GET,HEAD,OPTIONS'),
     ('/api/v1/thumbnail/preview', 'api_v1.get_thumbnail_preview', 'GET,HEAD,OPTIONS'),
     ('/api/v1/thumbnail:generate', 'api_v1.thumbnail_generate', 'OPTIONS,POST'),
     ('/api/v1/thumbnail:preview', 'api_v1.thumbnail_preview', 'OPTIONS,POST'),
@@ -626,7 +627,11 @@ def test_the_classification_follows_the_rules():
     playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants",
                       "api_v1.get_result_post", "api_v1.get_board_files",
                       "api_v1.get_scoreboard_pending",
-                      "api_v1.get_scoreboard_post"}
+                      "api_v1.get_scoreboard_post",
+                      # The thumbnail's live preview payload (ADR-008 D7
+                      # R2): the state with its unpublished edits, as the
+                      # pending board.
+                      "api_v1.get_thumbnail_payload"}
     thisPc = {"api_v1.reveal_board_file",
               "api_v1.settings_network_update",
               "api_v1.settings_language_update",
@@ -761,7 +766,9 @@ def test_the_classification_follows_the_rules():
     # shell's (A7: v1 76 of 158), and a job's reanalysis, the shell's (v1
     # 76 of 159), and a game's skins for a set's colours, this PC's (A6: v1
     # 76 of 160), and the layout kit's creation, AI text and folder reveal,
-    # the shell's (ADR-008 L2: v1 76 of 163).
+    # the shell's (ADR-008 L2: v1 76 of 163), and the thumbnail's live
+    # preview payload, a read guarded as the pending board (ADR-008 D7 R2:
+    # v1 76 of 164).
     # A change here is a change of the policy.
     # (The render's held images, ADR-007 D4, are a class of their own.)
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
@@ -773,7 +780,7 @@ def test_the_classification_follows_the_rules():
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
                for _r, e, _m in EXPECTED_API_V1_ROUTES) == 76
-    assert len(EXPECTED_API_V1_ROUTES) == 163
+    assert len(EXPECTED_API_V1_ROUTES) == 164
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

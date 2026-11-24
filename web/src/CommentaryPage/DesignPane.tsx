@@ -24,6 +24,7 @@ import {
     UnlistedDesigns,
     addMessage,
     parseLayoutMessage,
+    parseRenderedMessage,
 } from "./LayoutCheck";
 
 // The Commentary page's right pane (ADR-005 S4b): the design select and the
@@ -63,6 +64,19 @@ import {
 // layouts on globals.js) shows no panel unless it posts an error. Around the
 // preview: the folders the catalog could not list, the sample data for a layout
 // on autona.js (?autonaSample=), a reload and, on the Board, its OBS URL.
+//
+// The Thumbnail page's live preview (ADR-008 D7 R2): a template on template
+// contract 2 framed the same way, at its own size, with no select. The pane
+// is given the payload (`renderPayload`, the server's: GET
+// /api/v1/thumbnail/payload) and posts it to the design's frame -- exactly
+// {type: "autona:render", serial, payload}, to the preview origin -- once the
+// frame said it is ready, and again for every new serial; autona.js draws it
+// in the template's Autona.onRender and posts what went wrong as above. Each
+// new render's errors replace the last one's. The frame's URL names this
+// page's origin (?autonaParent=): autona.js takes a render from that origin
+// only. "No errors" waits for the frame to say it drew the render posted
+// ({type: "autona:rendered", contract: 2, serial, ok}); until then it is
+// drawing.
 
 export const HEALTH_PATH = "/api/v1/health";
 export const PREVIEW_SANDBOX = "allow-scripts allow-same-origin";
@@ -76,7 +90,9 @@ const OVERLAY_HEIGHT = 1080;
 const FRAME_BORDERS = 2;
 
 function layoutPath(design: LayoutEntry): string {
-    const id = design.id.split("/").map(encodeURIComponent).join("/");
+    // A template package's folder is not its id (a shipped one's).
+    const id = (design.folder ?? design.id).split("/")
+        .map(encodeURIComponent).join("/");
     return `/layout/${id}/${encodeURIComponent(design.entry)}`;
 }
 
@@ -97,6 +113,8 @@ function usePreviewScale(
     frame: React.RefObject<HTMLDivElement | null>,
     shown: boolean,
     fit: boolean,
+    width: number,
+    height: number,
 ): number {
     const [scale, setScale] = React.useState(0.25);
     React.useLayoutEffect(() => {
@@ -108,9 +126,9 @@ function usePreviewScale(
             if (element.clientWidth > 0) {
                 setScale(fit
                     ? Math.min(
-                        (element.clientWidth - FRAME_BORDERS) / OVERLAY_WIDTH,
-                        (element.clientHeight - FRAME_BORDERS) / OVERLAY_HEIGHT)
-                    : element.clientWidth / OVERLAY_WIDTH);
+                        (element.clientWidth - FRAME_BORDERS) / width,
+                        (element.clientHeight - FRAME_BORDERS) / height)
+                    : element.clientWidth / width);
             }
         };
         measure();
@@ -120,7 +138,7 @@ function usePreviewScale(
         const observer = new ResizeObserver(measure);
         observer.observe(element);
         return () => observer.disconnect();
-    }, [frame, shown, fit]);
+    }, [frame, shown, fit, width, height]);
     return scale;
 }
 
@@ -229,14 +247,15 @@ function useQuarantine(
     return taken;
 }
 
-// The overlay pages lie on one another: one 1920x1080 frame each, scaled.
-function frameSx(scale: number) {
+// The overlay pages lie on one another: one 1920x1080 frame each (a
+// template's at its size), scaled.
+function frameSx(scale: number, width: number, height: number) {
     return {
         position: "absolute",
         top: 0,
         left: 0,
-        width: OVERLAY_WIDTH,
-        height: OVERLAY_HEIGHT,
+        width,
+        height,
         border: 0,
         transform: `scale(${scale})`,
         transformOrigin: "0 0",
@@ -246,8 +265,9 @@ function frameSx(scale: number) {
 
 type KnownSetter = React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
 
-// What the pane's frames told it, for the document shown (LayoutCheck). A
-// design that says it is ready is added to the ones on autona.js (`setKnown`).
+// What the pane's frames told it, for the document shown (LayoutCheck), and
+// how to start a new render's errors afresh (its readiness kept). A design
+// that says it is ready is added to the ones on autona.js (`setKnown`).
 function useLayoutCheck(
     origin: string | null | undefined,
     documentKey: string | null,
@@ -257,7 +277,7 @@ function useLayoutCheck(
         overlay: React.RefObject<HTMLIFrameElement | null>;
     },
     setKnown: KnownSetter,
-): LayoutReport {
+): [LayoutReport, () => void] {
     const [state, setState] = React.useState<{
         key: string | null; report: LayoutReport;
     }>({key: null, report: EMPTY_REPORT});
@@ -283,9 +303,25 @@ function useLayoutCheck(
                 return;
             }
             const message = parseLayoutMessage(event.data);
+            if (message === null) {
+                // A template's frame said it drew a render (ADR-008 D7 R2).
+                const drawn = frame === "design"
+                    ? parseRenderedMessage(event.data) : null;
+                if (drawn !== null) {
+                    setState((current) => {
+                        const before = current.key === key
+                            ? current.report : EMPTY_REPORT;
+                        return before.rendered !== null
+                            && before.rendered >= drawn.serial
+                            ? current
+                            : {key, report: {...before,
+                                             rendered: drawn.serial}};
+                    });
+                }
+                return;
+            }
             // The popup's "ready" says nothing about the design.
-            if (message === null
-                    || (message.type === "autona:ready" && frame !== "design")) {
+            if (message.type === "autona:ready" && frame !== "design") {
                 return;
             }
             setState((current) => {
@@ -304,7 +340,14 @@ function useLayoutCheck(
         window.addEventListener("message", onMessage);
         return () => window.removeEventListener("message", onMessage);
     }, [origin, documentKey, designKey, frames, setKnown]);
-    return state.key === documentKey ? state.report : EMPTY_REPORT;
+    const restart = React.useCallback(() => setState((current) =>
+        current.key === documentKey
+            ? {key: current.key, report: {
+                ...EMPTY_REPORT, ready: current.report.ready,
+                contract: current.report.contract,
+                rendered: current.report.rendered}}
+            : current), [documentKey]);
+    return [state.key === documentKey ? state.report : EMPTY_REPORT, restart];
 }
 
 // Whether `documentKey`, expected to say it is ready, has been shown for
@@ -379,9 +422,17 @@ function ObsUrlButton({design, boards}: {
     );
 }
 
+export interface RenderPayload {
+    // What autona.js hands the template's Autona.onRender.
+    payload: unknown;
+    // Above the one before it: a new render.
+    serial: number;
+}
+
 export default function DesignPane({
     designs, design, onSelect, label, empty, actions, controls, background,
     overlay, reloadKey, fit = false, unlisted, onReload, obsBoards,
+    renderPayload, size, selectable = true,
 }: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
@@ -417,13 +468,23 @@ export default function DesignPane({
     // Given: a button that copies the design's http URL for OBS -- one
     // board's of these (a menu), or the design's alone when empty.
     obsBoards?: number[];
+    // Given (null while there is none yet): the design is a template on
+    // template contract 2, drawn with this payload (see the top). No sample
+    // select; the design is expected to say it is ready.
+    renderPayload?: RenderPayload | null;
+    // The design's size: 1920x1080 when not given.
+    size?: [number, number];
+    // No heading nor select (the page chose the design).
+    selectable?: boolean;
 }) {
     const frame = React.useRef<HTMLDivElement>(null);
     const designFrame = React.useRef<HTMLIFrameElement>(null);
     const overlayFrame = React.useRef<HTMLIFrameElement>(null);
     const frames = React.useMemo(
         () => ({design: designFrame, overlay: overlayFrame}), []);
-    const scale = usePreviewScale(frame, design !== null, fit);
+    const [width, height] = size ?? [OVERLAY_WIDTH, OVERLAY_HEIGHT];
+    const scale = usePreviewScale(frame, design !== null, fit, width, height);
+    const renders = renderPayload !== undefined;
     const heading = label ?? i18n.t("commentary_design");
     const shownKey = design ? selectKey(design) : "";
     const origin = usePreviewOrigin();
@@ -443,12 +504,15 @@ export default function DesignPane({
     // it said it was ready before in this page.
     const [autonaKnown, setAutonaKnown] = React.useState<ReadonlySet<string>>(
         () => new Set());
-    const onAutona = design !== null && designKey !== null
+    const onAutona = design !== null && designKey !== null && !renders
         && (typeof design.contract === "number" || autonaKnown.has(designKey));
-    // The frame's page: the sample's only for a layout on autona.js.
+    // The frame's page: the sample's only for a layout on autona.js; a
+    // template's names this page's origin, the one it takes renders from.
     const page = design
-        ? layoutPath(design) + (onAutona && sample
-            ? `?autonaSample=${encodeURIComponent(sample)}` : "")
+        ? layoutPath(design) + (renders
+            ? `?autonaParent=${encodeURIComponent(window.location.origin)}`
+            : onAutona && sample
+                ? `?autonaSample=${encodeURIComponent(sample)}` : "")
         : null;
     // The document the frames show: a new one is watched afresh.
     const documentKey = page !== null
@@ -456,11 +520,44 @@ export default function DesignPane({
     const shownDocument = useShownDocument(documentKey);
     const quarantined = useQuarantine(
         frame, origin ? documentKey : null);
-    const report = useLayoutCheck(
+    const [report, restartCheck] = useLayoutCheck(
         origin, shownDocument, designKey, frames, setAutonaKnown);
     const notReady = useReadyTimeout(
-        shownDocument, Boolean(origin) && !quarantined && onAutona,
+        shownDocument, Boolean(origin) && !quarantined
+            && (onAutona || (renders && design !== null)),
         report.ready);
+    // The render given, posted to the design's frame once it is ready: one
+    // post per document and serial. A document's later renders start their
+    // errors afresh; its first keeps what the page said while it loaded.
+    const posted = React.useRef<{document: string | null; serial: number}>(
+        {document: null, serial: 0});
+    React.useEffect(() => {
+        if (!renderPayload || !origin || quarantined || !report.ready
+                || shownDocument === null) {
+            return;
+        }
+        const target = designFrame.current?.contentWindow;
+        if (!target) {
+            return;
+        }
+        const last = posted.current;
+        if (last.document === shownDocument
+                && last.serial === renderPayload.serial) {
+            return;
+        }
+        if (last.document === shownDocument) {
+            restartCheck();
+        }
+        posted.current = {document: shownDocument,
+                          serial: renderPayload.serial};
+        target.postMessage({type: "autona:render",
+                            serial: renderPayload.serial,
+                            payload: renderPayload.payload}, origin);
+    }, [renderPayload, origin, quarantined, report.ready, shownDocument,
+        restartCheck]);
+    // Posted and not said drawn yet (or no payload yet): drawing.
+    const drawing = renders && (!renderPayload || report.rendered === null
+        || report.rendered < renderPayload.serial);
     const note = origin === null
         ? i18n.t("commentary_preview_unavailable")
         : quarantined ? i18n.t("commentary_preview_quarantined") : null;
@@ -477,11 +574,11 @@ export default function DesignPane({
                 ...(fit ? {
                     flexShrink: 0,
                     boxSizing: "content-box",
-                    width: `${OVERLAY_WIDTH * scale}px`,
-                    height: `${OVERLAY_HEIGHT * scale}px`,
+                    width: `${width * scale}px`,
+                    height: `${height * scale}px`,
                 } : {
                     width: "100%",
-                    aspectRatio: `${OVERLAY_WIDTH} / ${OVERLAY_HEIGHT}`,
+                    aspectRatio: `${width} / ${height}`,
                 }),
                 overflow: "hidden",
                 borderRadius: 1,
@@ -504,7 +601,7 @@ export default function DesignPane({
                     src={`${origin}${page}`}
                     sandbox={PREVIEW_SANDBOX}
                     tabIndex={-1}
-                    sx={frameSx(scale)}
+                    sx={frameSx(scale, width, height)}
                 />
             )}
             {origin && !quarantined && overlay && (
@@ -516,7 +613,7 @@ export default function DesignPane({
                     src={`${origin}${overlay.src}`}
                     sandbox={PREVIEW_SANDBOX}
                     tabIndex={-1}
-                    sx={frameSx(scale)}
+                    sx={frameSx(scale, width, height)}
                 />
             )}
             {note && (
@@ -540,8 +637,10 @@ export default function DesignPane({
 
     return (
         <Stack spacing={1} sx={fit ? {height: {md: "100%"}} : undefined}>
-            <Typography variant="subtitle1" component="h2">{heading}</Typography>
-            <TextField
+            {selectable && (
+                <Typography variant="subtitle1" component="h2">{heading}</Typography>
+            )}
+            {selectable && <TextField
                 select
                 size="small"
                 // The select's own name (no floating label: the heading).
@@ -569,7 +668,7 @@ export default function DesignPane({
                         </MenuItem>
                     );
                 })}
-            </TextField>
+            </TextField>}
             {actions}
             {unlisted && <UnlistedDesigns folders={unlisted}/>}
             {controls}
@@ -608,7 +707,7 @@ export default function DesignPane({
             )}
             {design && (
                 <LayoutCheckPanel design={design} report={report}
-                                  notReady={notReady}/>
+                                  notReady={notReady} drawing={drawing}/>
             )}
             {preview && fit ? (
                 <Box
@@ -619,7 +718,7 @@ export default function DesignPane({
                         flex: {md: "1 1 0"},
                         minHeight: {md: 200},
                         aspectRatio: {
-                            xs: `${OVERLAY_WIDTH} / ${OVERLAY_HEIGHT}`,
+                            xs: `${width} / ${height}`,
                             md: "auto",
                         },
                         width: "100%",
