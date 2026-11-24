@@ -134,6 +134,10 @@ gh release create v{X.Y.Z} release-windows.zip --repo yuya-tagu/Autona-releases 
 - **`--latest` を付ける**（`publish_release.ps1` も付ける）。同じリポにワーカーのリリース（`worker-v*`）があり、updater は `releases/latest` を読む。
   どれを latest にするかを GitHub の判定に任せない
 - 同名タグが既にあると失敗する（`gh release create` のエラーに従う）
+- **publish すると Discord に自動投稿される**（Autona-releases の `.github/workflows/discord-release-notes.yml`。投稿先は secret `DISCORD_WEBHOOK_UPDATES` の Webhook）。
+  ノートの `## Autona vX.Y.Z` 見出し・`>` で始まる旧世代向けの定型文・`Qt-Build:` 行を除いた本文に、リリースページへのリンクを付けて投稿する。
+  2000 字を超えると末尾の行から落として「続きはリリースページ」にする。**ノートは Discord に出る前提で利用者向けに書く**（内部事情を書かない）。
+  ワーカー（`worker-v*`）・プレリリースは投稿しない。投稿漏れの再投稿・投稿文の確認は Autona-releases の Actions から手動実行（`tag` を指定。`dry_run` 既定 true でサマリーに本文だけ出る）
 
 ### 9. 自動更新の E2E 確認（必須）
 
