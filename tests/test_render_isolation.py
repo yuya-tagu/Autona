@@ -491,8 +491,10 @@ def _renderer():
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
     # On the offscreen platform a grab is the widget's background: what is
-    # under test is what the page reached, not its pixels.
-    made._view.grab = lambda: _filled()
+    # under test is what the page reached, not its pixels (nor its frame
+    # mark, never in it: not waited for).
+    made._view.grab = lambda rect=None: _filled()
+    made.FRAME_WAIT_MS = 0
     return made
 
 

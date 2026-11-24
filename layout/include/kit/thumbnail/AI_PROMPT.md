@@ -155,6 +155,7 @@ Autona はこのフォルダの `thumbnail.html` を画面に出さずに開き�
 5. `hidden` 属性で隠すなら CSS に `[hidden] { display: none !important; }` を置く（サンプルにある）。`display: flex` などを書いた要素は、これが無いと消えない
 6. **トップレベルで `Autona` という名前を使わない**。コードは全部 `(function () { ... })();` の中に書く
 7. **`document.title` を変えない**（Autona が描き終わりの合図に使っている。`<head>` に `<title>` を書くのはよい）
+   - 左上の数ピクセルも描き終わりの確認に使う（撮る直前に Autona が小さな印を置き、消してから撮る。画像には残らない）。`html` 要素そのものに `transform`・`zoom`・`filter` を掛けない（印が見つからず、撮るのが遅れる）
 8. `../include/` と `../../assets/` の中のファイルは書き換えない（Autona の更新で上書きされ、ほかのデザインも使っている）
 9. 描画に時間をかけない（アニメーションは撮られない。最後の状態だけが画像になる）
 10. **使える CSS**: Autona の描画は Qt WebEngine 6.11（Chromium 140 相当）。Chrome / Edge の最近の版で動く CSS はほぼ使える（Grid・Flexbox の `gap`・CSS 変数・`clip-path`・`mask-image`・`filter`・`backdrop-filter`・`mix-blend-mode`・

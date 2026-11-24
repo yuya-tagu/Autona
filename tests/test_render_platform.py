@@ -66,8 +66,17 @@ def _draw(tmp_path, platform, script=SCRIPT):
     return json.loads(lines[-1][len("DRAWN "):]), done.stdout + done.stderr
 
 
+def _sawTheMarks(output):
+    """Every picture was a frame the view showed after the page's frame mark
+    (AutonaOffscreenRenderer._finalize_render): on the app's platform the
+    mark is found in the composited view, and goes."""
+    assert "frame mark was not seen" not in output, output[-3000:]
+    assert "frame mark did not go" not in output, output[-3000:]
+
+
 def test_the_desktop_startup_draws_the_page(tmp_path):
-    drawn, _output = _draw(tmp_path, None)
+    drawn, output = _draw(tmp_path, None)
+    _sawTheMarks(output)
     assert drawn["error"] == ""
     # The banner, the logo, the names: many colours, not the window's one.
     assert drawn["colours"] > 10, drawn
@@ -85,7 +94,8 @@ def test_on_the_offscreen_platform_it_says_so(tmp_path):
 
 
 def test_contract_2_draws_the_shipped_page_as_contract_1_did(tmp_path):
-    drawn, _output = _draw(tmp_path, None, CONTRACTS)
+    drawn, output = _draw(tmp_path, None, CONTRACTS)
+    _sawTheMarks(output)
     assert drawn["errors"] == ["", ""], drawn
     assert all(count > 10 for count in drawn["colours"]), drawn
     assert drawn["sampled"] > 0, drawn
@@ -95,6 +105,7 @@ def test_contract_2_draws_the_shipped_page_as_contract_1_did(tmp_path):
 
 def test_a_thumbnail_made_from_the_kit_draws_as_it_is(tmp_path):
     drawn, output = _draw(tmp_path, None, KIT)
+    _sawTheMarks(output)
     # No error with a match, a team match and no match at all.
     assert drawn["errors"] == ["", "", ""], (drawn, output[-3000:])
     # The background, the characters, the names: many colours.
@@ -107,6 +118,7 @@ def test_a_thumbnail_made_from_the_kit_draws_as_it_is(tmp_path):
 
 def test_contract_2_draws_the_shipped_results_as_contract_1_did(tmp_path):
     drawn, output = _draw(tmp_path, None, RESULT_CONTRACTS)
+    _sawTheMarks(output)
     # The six shipped layouts, each beside the code it had before (frozen
     # copies of then, on contract 1).
     assert drawn["errors"] == [""] * 12, (drawn, output[-3000:])
@@ -120,6 +132,7 @@ def test_contract_2_draws_the_shipped_results_as_contract_1_did(tmp_path):
 
 def test_a_result_made_from_the_kit_draws_as_it_is(tmp_path):
     drawn, output = _draw(tmp_path, None, RESULT_KIT)
+    _sawTheMarks(output)
     # No error with sixteen players, eight teams and nothing typed at all.
     assert drawn["errors"] == ["", "", ""], (drawn, output[-3000:])
     # The background, the characters, the names: many colours.

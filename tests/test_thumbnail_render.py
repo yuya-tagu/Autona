@@ -10,12 +10,14 @@ On the offscreen platform grab() shows the widget's background, not the page
 (the pixels are the real desktop's to check, and only there): the `renderer`
 fixture's grab() answers with the colour the page last said it painted when
 grab() is called. That is what a real grab would have caught, so a test sees
-whose frame it got. The tests through the shell use the real grab().
+whose frame it got (and, there being no frame mark in it, the fixture does not
+wait for one: FRAME_WAIT_MS 0). The tests through the shell use the real
+grab().
 
 What the renderer waits for before it grabs is pinned by its order, not its
 pixels: RENDER_READY alone takes no picture, RENDER_PAINTED with the render's
-number does, and a new page's first picture is not what the view showed
-before its load (_showing() stands in for what the view shows).
+number does, and the picture is a frame the view showed after the page's frame
+mark (_markShowing() stands in for what the view shows).
 
 Waits end as soon as the page has done what is waited for. Chromium runs a
 hidden page's renderer at background priority, so on a busy machine a load of
@@ -40,7 +42,6 @@ from qtpy.QtWebEngineCore import QWebEngineLoadingInfo
 from loguru import logger
 
 from src import AutonaWebOperations as WebOps
-from src.AutonaOffscreenRenderer import _Ticket
 from src.core import ThumbnailService as thumbnails
 from src.core.DictHelper import deep_clone
 from src.core.SettingsManager import SettingsManager
@@ -125,16 +126,19 @@ def _destroy(renderer):
 def renderer(pages):
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    # Its grab() never shows the page's frame mark: the first one after the
+    # page said it painted is the picture.
+    made.FRAME_WAIT_MS = 0
     painted = []
 
     def on_title(title):
         if title.startswith(PAINTED):
             painted.append(title[len(PAINTED):])
 
-    def grab():
+    def grab(rect=None):
         pixmap = QPixmap(1920, 1080)
         pixmap.fill(QColor(painted[-1] if painted else "#000000"))
-        return pixmap
+        return pixmap if rect is None else pixmap.copy(rect)
 
     made._page.titleChanged.connect(on_title)
     made._view.grab = grab
@@ -270,17 +274,38 @@ def _setTitle(renderer, title):
     _waitUntil(lambda: False, timeout=0.2)
 
 
-def _showing(renderer, color):
-    """grab() as what the view shows: `color` until the test changes shown[0].
-    Every grab is in `grabs`."""
-    shown = [color]
+def _frame(width, height, color, mark=None, scale=1, rect=None, at=0):
+    """A picture of the view: `color`, with the frame mark of render number
+    `mark` (None: none) `at` pixels from its left edge (0: in its corner), at
+    `scale` device pixels a pixel; only `rect` of it (the view's pixels) when
+    given, as grab(rect) does."""
+    pixmap = QPixmap(round(width * scale), round(height * scale))
+    pixmap.fill(QColor(color))
+    if mark is not None:
+        painter = QPainter(pixmap)
+        size = ThumbnailRenderer.MARK_SIZE
+        for block, rgb in enumerate(ThumbnailRenderer._mark_colors(mark)):
+            painter.fillRect(round((at + block * size) * scale), 0,
+                             round(size * scale), round(size * scale),
+                             QColor(*rgb))
+        painter.end()
+    if rect is not None:
+        pixmap = pixmap.copy(round(rect.x() * scale), round(rect.y() * scale),
+                             round(rect.width() * scale),
+                             round(rect.height() * scale))
+    return pixmap
+
+
+def _markShowing(renderer, color):
+    """grab() as what the view shows: shown["color"], and the frame mark of
+    render shown["mark"] (None: none), until the test changes them. Every
+    grab is in `grabs`, as (color, mark, whether of the whole view)."""
+    shown = {"color": color, "mark": None}
     grabs = []
 
-    def grab():
-        grabs.append(shown[0])
-        pixmap = QPixmap(1920, 1080)
-        pixmap.fill(QColor(shown[0]))
-        return pixmap
+    def grab(rect=None):
+        grabs.append((shown["color"], shown["mark"], rect is None))
+        return _frame(1920, 1080, shown["color"], shown["mark"], rect=rect)
 
     renderer._view.grab = grab
     return shown, grabs
@@ -304,7 +329,9 @@ def test_ready_alone_does_not_take_the_picture(renderer):
     renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
     grab = renderer._view.grab
     grabs = []
-    renderer._view.grab = lambda: grabs.append(1) or grab()
+    # The whole view's grabs (not its corner's, looked at for the mark).
+    renderer._view.grab = lambda rect=None: (
+        rect is None and grabs.append(1)) or grab(rect)
     results = []
 
     renderer.renderAsync({}, {"color": GREEN}, _template(),
@@ -323,8 +350,8 @@ def test_ready_alone_does_not_take_the_picture(renderer):
     _setTitle(renderer, f"RENDER_PAINTED {number} painted")
     assert _waitUntil(lambda: results)
     assert results == [(GREEN, "")]
-    # The page's first picture: two grabs that agree.
-    assert len(grabs) == 2
+    # No frame mark waited for (the fixture): the first grab.
+    assert len(grabs) == 1
 
 
 def test_a_painted_title_before_ready_is_not_believed(renderer):
@@ -341,9 +368,12 @@ def test_a_painted_title_before_ready_is_not_believed(renderer):
     assert results == [GREEN]
 
 
-def test_a_page_whose_frames_stop_is_taken_after_the_wait(renderer):
+def test_a_page_that_does_not_say_it_painted_is_taken_after_the_wait(
+        renderer):
+    """Its fonts never ready: the picture is looked for all the same."""
     renderer.PAINT_WAIT_MS = 300
-    _evaluate(renderer, "window.requestAnimationFrame = () => 0; 1")
+    _evaluate(renderer, "Object.defineProperty(document, 'fonts', "
+                        "{value: {ready: new Promise(() => {})}}); 1")
     results = []
     logged, sink = _warnings()
     try:
@@ -432,257 +462,280 @@ def test_an_image_the_render_before_decoded_is_not_decoded_again(renderer):
         logger.remove(sink)
 
     assert len(lines) == 3
-    assert "images=" in lines[0] and "frames=" in lines[0]
+    assert "fonts=" in lines[0] and "images=" in lines[0]
 
 
-def test_a_new_pages_first_picture_is_not_the_old_pages(renderer):
-    """After a load the view can go on showing the page before it, after the
-    new one said it painted: the picture would be the other template's."""
-    renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    shown, grabs = _showing(renderer, RED)
+# ── the frame the picture is ─────────────────────────────────────────────
+
+MARKS_ON_PAGE = ("JSON.stringify([...document.querySelectorAll("
+                 "'[data-autona-frame-mark]')].map("
+                 "(mark) => mark.dataset.autonaFrameMark))")
+
+
+def test_the_picture_is_a_frame_after_the_pages_mark_went(renderer):
+    """With software compositing (a GPU-less CI runner) the view showed a
+    frame from before the drawing for seconds after the page said it painted:
+    its names, characters and squeezed text missing, or half the page white.
+    Grabs that agreed, or a wait that ran out, took it. The page marks its
+    corner once it has drawn; the picture is the first frame without the mark
+    after one with it: it was drawn after the drawing."""
+    renderer.FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    shown, grabs = _markShowing(renderer, RED)
     results = []
 
-    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+    renderer.renderAsync({}, {"color": GREEN}, _template(),
                          lambda p, e: results.append((_color(p), e)))
-    assert grabs == [RED]  # What the view showed before the load.
+    assert _waitUntil(lambda: grabs)
+    number = renderer._active.number
+    # The view still shows a frame from before the drawing: not taken.
+    _waitUntil(lambda: False, timeout=0.3)
+    assert results == []
+    assert json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [str(number)] * 2
 
-    # The page said it painted, and the view still shows the old one.
-    assert _waitUntil(lambda: len(grabs) >= 3)
+    # The frame with the drawing and the mark: the mark is taken away...
+    shown.update(color=GREEN, mark=number)
+    assert _waitUntil(
+        lambda: json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [])
+    _waitUntil(lambda: False, timeout=0.3)
     assert results == []
 
-    shown[0] = GREEN
+    # ...and the frame after it is the picture.
+    shown["mark"] = None
     assert _waitUntil(lambda: results)
     assert results == [(GREEN, "")]
-    assert renderer._before_load is None
+    assert grabs[-1] == (GREEN, None, True)
+    # Until then only the view's corner was grabbed.
+    assert [whole for _c, _m, whole in grabs].count(True) == 1
 
 
-def test_a_render_on_the_same_page_is_not_compared_with_the_one_before(
-        renderer):
-    """The same picture again is the right picture: only its own two grabs
-    have to agree."""
-    renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    _shown, grabs = _showing(renderer, RED)
+def test_another_renders_mark_is_not_this_ones(renderer):
+    renderer.FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    shown, grabs = _markShowing(renderer, RED)
     results = []
 
-    # The page's first: unlike what the view showed before its load.
-    renderer.renderAsync({}, {"color": RED}, _template(),
-                         lambda p, _e: results.append(_color(p)))
+    renderer.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((_color(p), e)))
+    assert _waitUntil(lambda: grabs)
+    number = renderer._active.number
+    shown["mark"] = number - 1
+    _waitUntil(lambda: False, timeout=0.3)
+    assert results == []
+    assert json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [str(number)] * 2
+
+    shown.update(color=GREEN, mark=number)
+    assert _waitUntil(
+        lambda: json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [])
+    shown["mark"] = None
     assert _waitUntil(lambda: results)
-    del grabs[:]
-
-    renderer.renderAsync({}, {"color": RED}, _template(),
-                         lambda p, _e: results.append(_color(p)))
-
-    assert _waitUntil(lambda: len(results) == 2)
-    assert results == [RED, RED]
-    assert grabs == [RED, RED]
+    assert results == [(GREEN, "")]
 
 
-def test_a_new_page_that_looks_like_the_old_one_is_taken_after_the_wait(
+def test_a_drawing_that_does_not_reach_the_view_is_taken_after_the_wait(
         renderer):
-    renderer.FRESH_FRAME_WAIT_MS = 300
-    _shown, grabs = _showing(renderer, RED)
+    """Qt's offscreen platform on a desktop composites no page: the mark is
+    never seen. The picture is taken as it is, and said so; the mark goes."""
+    renderer.FRAME_WAIT_MS = 300
+    _shown, grabs = _markShowing(renderer, RED)
     results = []
     logged, sink = _warnings()
     try:
-        renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+        renderer.renderAsync({}, {"color": GREEN}, _template(),
                              lambda p, e: results.append((_color(p), e)))
         assert _waitUntil(lambda: results)
     finally:
         logger.remove(sink)
 
     assert results == [(RED, "")]
-    assert len(grabs) > 2
-    assert any("still looks like the one before" in line for line in logged)
-
-
-# ── a picture that has not reached the view ──────────────────────────────
-
-def _renderSaying(renderer, color, details):
-    """A render whose page says it painted with `details`, once it said it is
-    ready. The list of what its taker got, its pictures' colors."""
-    renderer.PAINT_WAIT_MS = LONG_TIMEOUT_MS
-    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
-    results = []
-    renderer.renderAsync({}, {"color": color}, _template(),
-                         lambda p, e: results.append((p and _color(p), e)))
-    assert _waitUntil(lambda: renderer._active.ready)
-    number = renderer._active.number
+    assert len(grabs) > 1
+    assert any("did not reach the view" in line for line in logged)
     assert _waitUntil(
-        lambda: _evaluate(renderer, "window.paintNumber || 0") == number)
-    renderer._page.runJavaScript(
-        f"document.title = {json.dumps(f'RENDER_PAINTED {number} ' + details)}")
-    return results
+        lambda: json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [])
 
 
-def _pastThePagesFirstPicture(renderer):
+def test_a_mark_that_does_not_go_is_taken_after_the_wait_without_it(
+        renderer):
+    """The frame with the drawing and the mark, the wait over: the picture,
+    but not the mark (the picture's pixels under it in its place)."""
+    renderer.FRAME_WAIT_MS = 300
+    shown, _grabs = _markShowing(renderer, RED)
     results = []
-    renderer.renderAsync({}, {"color": RED}, _template(),
-                         lambda _p, _e: results.append(True))
-    assert _waitUntil(lambda: results)
-    assert renderer._before_load is None
-
-
-def test_slow_frames_are_not_taken_until_two_grabs_agree(renderer):
-    """The screen locked, the page had begun its two frames and the view still
-    showed one from before the drawing, unlike the page before it (names and
-    background missing): it was taken, one render in thirty. The stand-in
-    colors: what the view shows as the render ends."""
-    _pastThePagesFirstPicture(renderer)
-    shown, grabs = _showing(renderer, RED)
-
-    results = _renderSaying(renderer, GREEN, "painted frames=500")
-
-    assert _waitUntil(lambda: grabs)
-    assert results == []
-
-    shown[0] = GREEN
-    assert _waitUntil(lambda: results)
-    assert results == [(GREEN, "")]
-    assert grabs == [RED, GREEN, GREEN]
-
-
-def test_slow_frames_look_again_only_after_as_long_as_they_took(renderer):
-    """Closer than a frame takes to arrive, two grabs see the same unfinished
-    frame and agree."""
-    _pastThePagesFirstPicture(renderer)
-    shown, grabs = _showing(renderer, RED)
-
-    results = _renderSaying(renderer, GREEN, "painted frames=500")
-
-    assert _waitUntil(lambda: grabs)
-    _waitUntil(lambda: False, timeout=0.15)
-    assert grabs == [RED]
-    assert results == []
-    shown[0] = GREEN
-    assert _waitUntil(lambda: results)
-    assert results == [(GREEN, "")]
-
-
-def test_frames_at_their_usual_speed_are_two_grabs_that_agree(renderer):
-    _pastThePagesFirstPicture(renderer)
-    _shown, grabs = _showing(renderer, RED)
-
-    results = _renderSaying(renderer, RED, "painted frames=30")
-
-    assert _waitUntil(lambda: results)
-    assert results == [(RED, "")]
-    assert grabs == [RED, RED]
-
-
-def test_fast_frames_do_not_put_the_drawing_in_the_view(renderer):
-    """Two frames in 16 ms and the view still a frame from before the drawing,
-    its logo and characters missing: it was taken, two renders in twenty-one,
-    on an image new to the page after ten seconds idle."""
-    _pastThePagesFirstPicture(renderer)
-    shown, grabs = _showing(renderer, RED)
-
-    results = _renderSaying(renderer, GREEN, "painted frames=16")
-
-    assert _waitUntil(lambda: grabs)
-    shown[0] = GREEN
-    assert _waitUntil(lambda: results)
-    assert results == [(GREEN, "")]
-    assert grabs[-2:] == [GREEN, GREEN]
-    assert grabs[0] == RED
-
-
-def test_a_new_pages_first_picture_is_two_grabs_that_agree(renderer):
-    """Whatever the speed of its frames: the view also changes size here."""
-    shown, grabs = _showing(renderer, RED)
-    renderer.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    renderer.PAINT_WAIT_MS = LONG_TIMEOUT_MS
-    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
-    results = []
-    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
-                         lambda p, e: results.append((_color(p), e)))
-    assert grabs == [RED]  # What the view showed before the load.
-    assert _waitUntil(lambda: renderer._page_loaded and renderer._active.ready)
-    number = renderer._active.number
-    assert _waitUntil(
-        lambda: _evaluate(renderer, "window.paintNumber || 0") == number)
-
-    shown[0] = GREEN
-    _setTitle(renderer, f"RENDER_PAINTED {number} painted frames=30")
-
-    assert _waitUntil(lambda: results)
-    assert results == [(GREEN, "")]
-    assert grabs == [RED, GREEN, GREEN]
-    assert renderer._before_load is None
-
-
-def test_a_page_that_did_not_say_how_long_is_two_grabs_that_agree(renderer):
-    _pastThePagesFirstPicture(renderer)
-    renderer.PAINT_WAIT_MS = 100
-    renderer.PAINT_SCRIPT = "window.paintNumber = %d;"
-    _shown, grabs = _showing(renderer, RED)
-    results = []
-
-    renderer.renderAsync({}, {"color": RED}, _template(),
-                         lambda p, e: results.append((_color(p), e)))
-
-    assert _waitUntil(lambda: results)
-    assert results == [(RED, "")]
-    assert grabs == [RED, RED]
-
-
-def test_a_page_that_never_settles_is_taken_after_the_wait(renderer):
-    _pastThePagesFirstPicture(renderer)
-    renderer.SETTLE_WAIT_MS = 400
-    colors = iter(f"#0000{level:02x}" for level in range(1, 200))
-    made = []
-
-    def grab():
-        made.append(next(colors))
-        pixmap = QPixmap(1920, 1080)
-        pixmap.fill(QColor(made[-1]))
-        return pixmap
-
-    renderer._view.grab = grab
     logged, sink = _warnings()
     try:
-        results = _renderSaying(renderer, GREEN, "painted frames=30000")
+        renderer.renderAsync({}, {"color": GREEN}, _template(),
+                             lambda p, e: results.append((p, e)))
+        assert _waitUntil(lambda: renderer._active.painted)
+        number = renderer._active.number
+        shown.update(color=GREEN, mark=number)
         assert _waitUntil(lambda: results)
     finally:
         logger.remove(sink)
 
-    assert results == [(made[-1], "")]
-    assert len(made) > 2
-    assert any("still changing" in line for line in logged)
+    pixmap, error = results[0]
+    assert error == ""
+    image = pixmap.toImage()
+    assert not ThumbnailRenderer._marked(image, number, 1920)
+    size = ThumbnailRenderer.MARK_SIZE
+    assert {image.pixelColor(x, y).name() for x in range(2 * size)
+            for y in range(size)} == {GREEN}
+    assert any("frame mark did not go" in line for line in logged)
 
 
-@pytest.mark.parametrize("frames, loaded, every", [
-    (16, False, 50),      # however fast, the grabs are this far apart
-    (30, False, 50),
-    (100, False, 100),    # slow: as far apart as its two frames took
-    (400, False, 400),
-    (900, False, 500),    # two have to fit in the wait
-    (None, False, 500),   # it did not say
-    (30, True, 50),       # a page just loaded
-    (400, True, 400),
-    (None, True, 500),
-])
-def test_how_far_apart_the_grabs_are(renderer, frames, loaded, every):
-    ticket = _Ticket({}, "type_a", None)
-    ticket.framesMs = frames
-    renderer._before_load = QImage(1, 1, QImage.Format.Format_ARGB32) \
-        if loaded else None
+def test_a_mark_not_seen_is_not_in_the_picture_either(renderer):
+    """Taken away when the wait ran out, it may still reach the view at the
+    picture: not in the picture."""
+    renderer.FRAME_WAIT_MS = 300
+    shown, _grabs = _markShowing(renderer, BLUE)
+    original = renderer._view.grab
 
-    assert renderer._settle_every(ticket) == every
+    def grab(rect=None):
+        # The corner never shows it; the picture does.
+        if rect is None:
+            shown["mark"] = renderer._active.number
+        return original(rect)
+
+    renderer._view.grab = grab
+    results = []
+    renderer.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+
+    pixmap, error = results[0]
+    assert error == ""
+    assert not ThumbnailRenderer._marked(pixmap.toImage(), shown["mark"],
+                                         1920)
+    assert pixmap.toImage().pixelColor(1, 1).name() == BLUE
 
 
-def test_a_render_that_timed_out_while_settling_is_not_taken(renderer):
-    _pastThePagesFirstPicture(renderer)
-    _shown, grabs = _showing(renderer, RED)
+def test_the_wait_for_the_frame_is_what_the_stage_leaves(renderer):
+    """A slow page's picture is taken before its stage's time is over, as
+    it was before the mark (maybe from before its drawing), not failed: the
+    wait for the frame is what the watchdog leaves, less the reserve."""
+    renderer.STAGE_TIMEOUT_MS = 2500
+    renderer.FRAME_RESERVE_MS = 1000
+    renderer.FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    _markShowing(renderer, RED)
+    results = []
+    logged, sink = _warnings()
+    try:
+        renderer.renderAsync({}, {"color": GREEN}, _template(),
+                             lambda p, e: results.append((_color(p), e)))
+        assert _waitUntil(lambda: results)
+    finally:
+        logger.remove(sink)
 
-    results = _renderSaying(renderer, GREEN, "painted frames=500")
+    assert results == [(RED, "")]
+    assert any("did not reach the view" in line for line in logged)
+
+
+def test_the_wait_for_the_frame_is_one_for_both(renderer):
+    renderer.FRAME_WAIT_MS = 6000
+    renderer.FRAME_RESERVE_MS = 1500
+    renderer._watchdog.start(60000)
+    try:
+        assert renderer._frame_wait_ms() == 6000
+        renderer._watchdog.start(5000)
+        assert 3000 < renderer._frame_wait_ms() <= 3500
+        renderer._watchdog.start(1000)
+        assert renderer._frame_wait_ms() == 0
+    finally:
+        renderer._watchdog.stop()
+    assert renderer._frame_wait_ms() == 6000
+
+
+def test_a_render_that_timed_out_while_waiting_for_its_frame_is_not_taken(
+        renderer):
+    renderer.FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    _shown, grabs = _markShowing(renderer, RED)
+    results = []
+
+    renderer.renderAsync({}, {"color": GREEN}, _template(),
+                         lambda p, e: results.append((p and _color(p), e)))
     assert _waitUntil(lambda: grabs)
     renderer._on_timeout()
-    del grabs[:]  # The next load's picture of what the view showed before it.
+    del grabs[:]
 
     _waitUntil(lambda: False, timeout=0.7)
     assert grabs == []
     assert results == [(None, "the render timed out")]
+
+
+@pytest.mark.parametrize("scale", [1, 1.25, 1.75, 2])
+def test_the_mark_is_found_at_the_pictures_scale(scale):
+    """The view's picture is in device pixels (a screen at 175 %): the whole
+    view, or its corner (grab(rect)), at any size."""
+    found = ThumbnailRenderer._marked
+    image = _frame(1920, 1080, RED, 7, scale).toImage()
+    assert found(image, 7, 1920)
+    # Another render's.
+    assert not found(image, 6, 1920)
+    assert not found(image, 8, 1920)
+    assert not found(_frame(1920, 1080, RED, None, scale).toImage(), 7, 1920)
+    corner = ThumbnailRenderer._mark_rect()
+    assert found(_frame(960, 1080, BLUE, 3, scale, corner).toImage(), 3,
+                 corner.width())
+    # Only in its corner: the same blocks anywhere else are not it.
+    assert not found(_frame(1920, 1080, RED, 7, scale, at=100).toImage(), 7,
+                     1920)
+
+
+MARK_GEOMETRY = """JSON.stringify([...document.querySelectorAll(
+  '[data-autona-frame-mark]')].map((mark) => {
+    const box = mark.getBoundingClientRect();
+    return [mark.dataset.autonaFrameMark, box.left, box.top, box.width,
+            box.height, getComputedStyle(mark).backgroundColor,
+            getComputedStyle(mark).opacity];
+  }))"""
+# A template's CSS that would move, hide or resize any div.
+HOSTILE_CSS = """div, html > * { zoom: 2 !important; transform: scale(3) !important;
+  scale: 2 !important; translate: 30px 30px !important;
+  rotate: 45deg !important; max-width: 1px !important;
+  max-height: 1px !important; min-width: 50px !important;
+  min-height: 50px !important; clip-path: inset(50%) !important;
+  mask: linear-gradient(transparent, transparent) !important;
+  content-visibility: hidden !important; opacity: 0 !important;
+  position: static !important; margin: 20px !important;
+  border: 9px solid red !important; filter: invert(1) !important; }"""
+
+
+@pytest.mark.parametrize("size", [4, 6])
+def test_the_page_draws_the_mark_the_renderer_looks_for(renderer, monkeypatch,
+                                                        size):
+    """One definition (_mark_blocks): the page draws what _marked looks for,
+    at its size and colours, whatever a template's CSS says of a div, and a
+    renderer that says another MARK_SIZE draws that."""
+    monkeypatch.setattr(ThumbnailRenderer, "MARK_SIZE", size)
+    _evaluate(renderer, "(() => { const style = document.createElement("
+                        "'style'); style.textContent = %s; "
+                        "document.head.appendChild(style); return 1; })()"
+              % json.dumps(HOSTILE_CSS))
+    renderer._page.runJavaScript(renderer._paint_script(41))
+    assert _waitUntil(lambda: renderer._page.title().startswith(
+        "RENDER_PAINTED 41 "))
+
+    marks = json.loads(_evaluate(renderer, MARK_GEOMETRY))
+    assert marks == [
+        ["41", block * size, 0, size, size, "rgb(%d, %d, %d)" % rgb, "1"]
+        for block, rgb in enumerate(ThumbnailRenderer._mark_colors(41))]
+    renderer._page.runJavaScript(renderer.UNMARK_SCRIPT % 41)
+    assert _waitUntil(
+        lambda: json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == [])
+
+
+def test_a_late_script_of_a_render_before_does_nothing(renderer):
+    """Its waits ended after the next render's script began: it would take
+    that render's mark away and put its own."""
+    renderer._page.runJavaScript(renderer._paint_script(60))
+    assert _waitUntil(lambda: renderer._page.title().startswith(
+        "RENDER_PAINTED 60 "))
+    renderer._page.runJavaScript(renderer._paint_script(59))
+    _waitUntil(lambda: False, timeout=0.5)
+
+    assert json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == ["60", "60"]
+    assert renderer._page.title().startswith("RENDER_PAINTED 60 ")
+    # Only its own mark is taken away by a render.
+    renderer._page.runJavaScript(renderer.UNMARK_SCRIPT % 59)
+    _waitUntil(lambda: False, timeout=0.2)
+    assert json.loads(_evaluate(renderer, MARKS_ON_PAGE)) == ["60", "60"]
 
 
 # ── the pages as shipped ─────────────────────────────────────────────────
@@ -734,7 +787,7 @@ def test_a_shipped_page_draws_what_it_is_given(shippedPages, templateId):
                                  "align": {"horizontal": 50, "vertical": 40}}}}
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = 0  # See the `service` fixture.
+    made.FRAME_WAIT_MS = 0  # See the `service` fixture.
     results = []
     names = []
     try:
@@ -799,7 +852,7 @@ def renderPages(autonaApp, previewListener):
 def _contract2Renderer():
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = 0  # See the `service` fixture.
+    made.FRAME_WAIT_MS = 0  # See the `service` fixture.
     return made
 
 
@@ -865,6 +918,9 @@ def test_a_contract_2_error_after_the_drawing_is_its_render_s(
     before it gives the picture) fails that render; the next one, which
     throws nothing, draws: the error is not carried into it."""
     made = _contract2Renderer()
+    # The picture comes after its frame has reached the view: here, where
+    # the frame mark is never seen, after the whole wait for it.
+    made.FRAME_WAIT_MS = 300
     results = []
     try:
         made.renderAsync({}, {"color": GREEN, "after": after}, _template(),
@@ -1146,7 +1202,7 @@ def test_the_next_render_loads_again_after_a_failed_load(
     layout = autonaApp.dir / "layout" / "thumbnail"
     assert not layout.exists()
     made = ThumbnailRenderer()
-    made._view.grab = lambda: QPixmap(1920, 1080)
+    made._view.grab = lambda rect=None: QPixmap(1920, 1080)
     results = []
     try:
         assert _waitUntil(lambda: made._load_query is None)
@@ -1417,9 +1473,9 @@ def service(autonaApp, pages, tmp_path, monkeypatch):
 
     made = ThumbnailRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    # The offscreen grab is the same before a load and after it: a new page's
-    # first picture would wait all of FRESH_FRAME_WAIT_MS for nothing.
-    made.FRESH_FRAME_WAIT_MS = 0
+    # The offscreen grab never shows the page's frame mark: each picture
+    # would wait all of FRAME_WAIT_MS for nothing.
+    made.FRAME_WAIT_MS = 0
     monkeypatch.setattr(ThumbnailRenderer, "_instance", made)
     settings = SettingsManager.settings
     SettingsManager.settings = {}
