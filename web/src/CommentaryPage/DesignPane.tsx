@@ -432,7 +432,7 @@ export interface RenderPayload {
 export default function DesignPane({
     designs, design, onSelect, label, empty, actions, controls, background,
     overlay, reloadKey, fit = false, unlisted, onReload, obsBoards,
-    renderPayload, size, selectable = true,
+    renderPayload, size, selectable = true, frameMaxWidth,
 }: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
@@ -476,6 +476,10 @@ export default function DesignPane({
     size?: [number, number];
     // No heading nor select (the page chose the design).
     selectable?: boolean;
+    // The preview's frame no wider than this (a CSS length), centred: a tall
+    // design kept within a height. The rest of the pane keeps its width. Not
+    // with `fit`, which sizes the frame itself.
+    frameMaxWidth?: string;
 }) {
     const frame = React.useRef<HTMLDivElement>(null);
     const designFrame = React.useRef<HTMLIFrameElement>(null);
@@ -579,6 +583,10 @@ export default function DesignPane({
                 } : {
                     width: "100%",
                     aspectRatio: `${width} / ${height}`,
+                    ...(frameMaxWidth ? {
+                        maxWidth: frameMaxWidth,
+                        mx: "auto",
+                    } : {}),
                 }),
                 overflow: "hidden",
                 borderRadius: 1,

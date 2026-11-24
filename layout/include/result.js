@@ -1,7 +1,18 @@
 /**
- * result: Top 8 result image layout.
+ * result: Top 8 result image layout, shared by the shipped result layouts.
  *
- * Called from Python via page().runJavaScript("initResult(payload)").
+ * Template contract 2 (layout/README.md): the shipped layouts load
+ * ../include/autona.js and this file, then register drawResult themselves
+ * (Autona.onRender(drawResult) in their result.html). It draws from the app's
+ * off-screen renderer and from the Web UI's live preview. An exception here is
+ * the render's error: no picture is taken, and the app shows it (ADR-008 D7
+ * R4). This file registers nothing, so a page of the operator's may load it
+ * and register its own function that calls drawResult.
+ *
+ * Contract 1 still: a template of the operator's on contract 1 may load this
+ * file without autona.js, and is drawn by initResult(payload), which says
+ * RENDER_READY whatever went wrong, as it always did.
+ *
  * payload = { data, config, layout }
  *   data.players = [{ rank, name, sponsor, character: { assets, ... } }, ...]
  *   data.tournamentName, data.eventName, data.startAt, data.numEntrants
@@ -11,38 +22,41 @@
 
 let _fontsInjected = false;
 
+async function drawResult(payload) {
+  const { data, config } = payload;
+  const layout = payload.layout || "";
+
+  clearPreviousRender();
+  injectFonts();
+  applyConfig(config);
+  setBackground(config);
+  setHeader(data, config);
+  // Team / Crew layouts (data.rows "teams"; a payload without rows, by the
+  // id: team, team_split, ...): each rank slot holds a roster of main
+  // fighters. Grid arrangement differs per layout (CSS).
+  const teams = data && data.rows
+    ? data.rows === "teams"
+    : layout.startsWith("team");
+  if (teams) {
+    await placeTeams(data, config, layout);
+  } else {
+    await placePlayers(data, config);
+  }
+
+  await document.fonts.ready;
+  await new Promise((r) => setTimeout(r, 100));
+
+  fitLongText();
+}
+
+// Template contract 1: called by the renderer of a page without autona.js.
 async function initResult(payload) {
   try {
-    const { data, config } = payload;
-    const layout = payload.layout || "";
-
-    clearPreviousRender();
-    injectFonts();
-    applyConfig(config);
-    setBackground(config);
-    setHeader(data, config);
-    // Team / Crew layouts (data.rows "teams"; a payload without rows, by the
-    // id: team, team_split, ...): each rank slot holds a roster of main
-    // fighters. Grid arrangement differs per layout (CSS).
-    const teams = data && data.rows
-      ? data.rows === "teams"
-      : layout.startsWith("team");
-    if (teams) {
-      await placeTeams(data, config, layout);
-    } else {
-      await placePlayers(data, config);
-    }
-
-    await document.fonts.ready;
-    await new Promise((r) => setTimeout(r, 100));
-
-    fitLongText();
-
-    document.title = "RENDER_READY";
+    await drawResult(payload);
   } catch (e) {
     console.error("initResult error:", e);
-    document.title = "RENDER_READY";
   }
+  document.title = "RENDER_READY";
 }
 
 function clearPreviousRender() {
@@ -91,7 +105,10 @@ function applyConfig(config) {
 function setBackground(config) {
   const bgPath = resolveAssetPath(config.background_path || "./assets/thumbnail_base/default_banner.png");
   if (!bgPath) return;
-  $(".background").html(`<img src="${bgPath}" />`);
+  // Built with the DOM, not markup: the path is the operator's text.
+  const image = document.createElement("img");
+  image.src = bgPath;
+  $(".background").empty().append(image);
 }
 
 function setHeader(data, config) {
@@ -168,7 +185,7 @@ async function placePlayers(data, config) {
     const slotIndex = i + 1;
     const rankLabel = getRankLabel(rank);
 
-    const slot = $(`<div class="player-slot slot-${slotIndex} rank-${rank}"></div>`);
+    const slot = slotElement("player-slot", slotIndex, rank);
 
     // Accent bar
     slot.append(`<div class="accent-bar"></div>`);
@@ -200,7 +217,7 @@ async function placePlayers(data, config) {
         if (!assetPath) return;
         const resolvedPath = resolveAssetPath(assetPath);
         if (!resolvedPath) return;
-        iconsDiv.append(`<div class="secondary-icon"><img src="${resolvedPath}" /></div>`);
+        iconsDiv.append(secondaryIcon(resolvedPath));
       });
       slot.append(iconsDiv);
     }
@@ -261,7 +278,7 @@ async function placeTeams(data, config, layout) {
     // position (slot-4 → 3rd, slots 5-8 → 5th).
     const rankLabel = getRankLabel(rank);
 
-    const slot = $(`<div class="player-slot team-slot slot-${slotIndex} rank-${rank}"></div>`);
+    const slot = slotElement("player-slot team-slot", slotIndex, rank);
     slot.append(`<div class="accent-bar"></div>`);
 
     // Prefer an explicit members[] roster; fall back to the characters[] array
@@ -316,6 +333,23 @@ async function placeTeams(data, config, layout) {
   await Promise.allSettled(loads);
 }
 
+// A slot's element, its classes set with the DOM rather than written into
+// markup: a hand-built payload's rank may be any text.
+function slotElement(classes, slotIndex, rank) {
+  const token = String(rank).replace(/[^A-Za-z0-9_-]/g, "");
+  return $("<div></div>")
+    .addClass(classes)
+    .addClass("slot-" + slotIndex)
+    .addClass("rank-" + token);
+}
+
+// A secondary fighter's icon, built with the DOM: the path is the payload's.
+function secondaryIcon(path) {
+  const image = document.createElement("img");
+  image.src = path;
+  return $('<div class="secondary-icon"></div>').append(image);
+}
+
 function getRankLabel(rank) {
   switch (rank) {
     case 1: return "1st";
@@ -326,7 +360,7 @@ function getRankLabel(rank) {
 }
 
 function resolveAssetPath(path) {
-  if (!path) return "";
+  if (typeof path !== "string" || !path) return "";
   if (path.startsWith("./") || path.startsWith("assets/") || path.startsWith("user_data/") || path.startsWith("layout/")) {
     return "../../" + path;
   }

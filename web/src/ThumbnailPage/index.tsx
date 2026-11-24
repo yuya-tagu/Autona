@@ -492,10 +492,14 @@ function ThumbnailContent() {
                 if (!mounted.current || asked !== liveAsked.current) {
                     return;
                 }
-                const status = apiErrorStatus(error);
-                if ((status === 401 || status === 403)
-                        && liveTemplateRef.current !== null) {
-                    // The image instead (READ); the token is told once.
+                // Any refusal (401 / 403 on the LAN without the token, 404 for
+                // a template that cannot be read now, a failure): the
+                // renderer's image instead (READ), or its words where there is
+                // no renderer, rather than "Drawing…" for good. The template is
+                // not asked for live again until the page loads again, so that
+                // this is told once, not on every change (the token once
+                // anyway).
+                if (liveTemplateRef.current !== null) {
                     setLiveRefused(liveTemplateRef.current);
                 }
                 report(error);

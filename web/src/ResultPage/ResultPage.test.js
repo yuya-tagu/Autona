@@ -1,5 +1,12 @@
 import React from "react";
-import {act, fireEvent, render, screen, within} from "@testing-library/react";
+import {
+    act,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import {Provider} from "react-redux";
 import i18n from "../i18n/config";
 import {autonaStore} from "../redux/store";
@@ -27,7 +34,8 @@ import {errorText} from "./Cards";
 jest.setTimeout(30000);
 
 jest.mock("../websocketConnection", () => {
-    const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
+    const socket = {connected: false, emit: jest.fn(), on: jest.fn(),
+                    off: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
 });
 
@@ -84,6 +92,15 @@ function freshWorld() {
         canRender: true,
         post: POST_TEXT,
         saved: 3,
+        // GET /api/v1/result/payload's data (a layout on contract 2; a
+        // number: refused with that status), and the preview listener's
+        // port GET /api/v1/health tells (the live preview's frame).
+        livePayload: null,
+        previewPort: null,
+        // The shell session's answer (the layout kit shows in the shared
+        // view alone), and /api/v1/layouts' "unlisted".
+        shellSession: 403,
+        unlisted: undefined,
     };
 }
 
@@ -357,7 +374,27 @@ beforeEach(() => {
                 return answer(200, {ok: true, data: table.characters});
             }
             if (path === "/api/v1/layouts") {
-                return answer(200, {ok: true, data: world.catalog});
+                return answer(200, {ok: true, data: world.catalog,
+                                    ...(world.unlisted
+                                        ? {unlisted: world.unlisted} : {})});
+            }
+            if (path === `${RESULT}/payload` && world.livePayload) {
+                return typeof world.livePayload === "number"
+                    ? refusal(world.livePayload, "UNAUTHENTICATED")
+                    : answer(200, {ok: true, data: world.livePayload});
+            }
+            if (path === "/api/v1/health" && world.previewPort) {
+                return answer(200, {ok: true, data: {
+                    status: "ok", previewPort: world.previewPort}});
+            }
+            if (path === "/api/v1/shell-session") {
+                return world.shellSession === 200
+                    ? answer(200, {ok: true, data: {ticket: "t"}})
+                    : refusal(world.shellSession, "FORBIDDEN");
+            }
+            if (path === "/api/v1/layouts/kit/result/ai-prompt") {
+                return answer(200, {ok: true, data: {
+                    kind: "result", text: "# result prompt"}});
             }
             if (path.startsWith("/out/")) {
                 return {ok: true, status: 200, blob: async () => new Blob(["x"])};
@@ -385,6 +422,17 @@ beforeEach(() => {
         }
         if (path === `${RESULT}:saveToDb`) {
             return answer(200, {ok: true, data: {saved: world.saved}});
+        }
+        if (path === "/api/v1/layouts:create") {
+            const made = {id: `result_${body.name}`, kind: "result",
+                          bundled: false, displayName: body.displayName,
+                          displayNames: {ja: body.displayName,
+                                         en: body.displayName},
+                          size: [1920, 1080], contract: 2,
+                          folder: `result_${body.name}`, entry: "result.html",
+                          rows: "players"};
+            world.catalog = [...world.catalog, made];
+            return answer(201, {ok: true, data: made});
         }
         return answer(200, {ok: true, revision: 1});
     });
@@ -2401,4 +2449,253 @@ test("a render refused for want of the preview server says so", () => {
     expect(errorText("preview_unavailable"))
         .not.toBe(i18n.t("result_error_render_failed"));
     expect(errorText("no_such_code")).toBe(i18n.t("result_error_render_failed"));
+});
+
+// ── the live preview of a layout on contract 2 (ADR-008 D7 R4) ───────────
+
+const LIVE_PORT = 52345;
+const PAYLOAD = `${RESULT}/payload`;
+
+function liveCatalog() {
+    return world.catalog.map((entry) => entry.id === "horizontal"
+        ? {...entry, contract: 2, folder: "result", entry: "result.html"}
+        : entry);
+}
+
+function liveAnswer(extra = {}) {
+    return {layout: "horizontal", folder: "result", entry: "result.html",
+            contract: 2, size: [1920, 1080], rows: "players",
+            payload: {data: {players: [], rows: "players"}, config: {},
+                      layout: "horizontal"},
+            omitted: [], ...extra};
+}
+
+function frame() {
+    return screen.queryByTitle(i18n.t("commentary_preview"));
+}
+
+function goLive(extra) {
+    world.catalog = liveCatalog();
+    world.livePayload = liveAnswer(extra);
+    world.previewPort = LIVE_PORT;
+}
+
+async function untilPreviewed() {
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    await settle();
+}
+
+test("a layout on contract 2 is drawn in a frame from the server's payload, not by the renderer",
+     async () => {
+    goLive();
+    await renderPage();
+    await untilPreviewed();
+    const card = region("result_preview");
+
+    expect(reads(PAYLOAD)).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toHaveAttribute(
+        "src", `http://localhost:${LIVE_PORT}/layout/result/result.html`
+            + `?autonaParent=${encodeURIComponent(window.location.origin)}`);
+    expect(within(card).queryByAltText(i18n.t("result_preview_image")))
+        .not.toBeInTheDocument();
+    // The sample is said here too: the payload draws it.
+    expect(within(card).getByText(i18n.t("result_sample_note")))
+        .toBeInTheDocument();
+
+    // Its page and payload again, after an edit of the layout's files.
+    const listed = reads("/api/v1/layouts");
+    fireEvent.click(within(card).getByRole(
+        "button", {name: i18n.t("layout_reload")}));
+    await untilPreviewed();
+    expect(reads(PAYLOAD)).toBe(2);
+    expect(reads("/api/v1/layouts")).toBe(listed + 1);
+    expect(previews()).toBe(0);
+});
+
+test("the first preview waits for the catalog: a contract 2 layout is never drawn by the renderer first",
+     async () => {
+    goLive();
+    const release = hold("GET", "/api/v1/layouts");
+    await renderPage();
+    await untilPreviewed();
+    expect(previews()).toBe(0);
+    expect(reads(PAYLOAD)).toBe(0);
+
+    release();
+    await untilPreviewed();
+    await untilPreviewed();
+    expect(reads(PAYLOAD)).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toBeInTheDocument();
+});
+
+test.each([
+    ["refused without the token (401)", 401],
+    ["refused (403)", 403],
+])("a payload %s falls back to the renderer's image, the token told once",
+   async (_how, status) => {
+    goLive();
+    world.livePayload = status;
+    await renderPage();
+    await untilPreviewed();
+    await untilPreviewed();
+
+    expect(screen.getAllByText(i18n.t("stream_token_required")))
+        .toHaveLength(1);
+    expect(reads(PAYLOAD)).toBe(1);
+    expect(previews()).toBe(1);
+    expect(frame()).not.toBeInTheDocument();
+});
+
+test.each([
+    ["a layout that cannot be read now (404)", 404],
+    ["a failure (500)", 500],
+])("a payload refused as %s falls back to the renderer's image, told once",
+   async (_how, status) => {
+    goLive();
+    world.livePayload = status;
+    const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+        await renderPage();
+        await untilPreviewed();
+        expect(screen.getAllByText(i18n.t("request_failed"))).toHaveLength(1);
+        await untilPreviewed();
+
+        expect(reads(PAYLOAD)).toBe(1);
+        expect(previews()).toBe(1);
+        expect(frame()).not.toBeInTheDocument();
+        // Told once: the payload is not asked again.
+        expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+        logged.mockRestore();
+    }
+});
+
+test("the headless shell stops drawing when the payload is refused", async () => {
+    goLive();
+    world.livePayload = 404;
+    world.canRender = false;
+    const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+        await renderPage();
+        await untilPreviewed();
+        await untilPreviewed();
+
+        expect(reads(PAYLOAD)).toBe(1);
+        expect(previews()).toBe(0);
+        expect(frame()).not.toBeInTheDocument();
+        // Not "Drawing…" for good: there is no renderer to fall back on.
+        expect(screen.queryByText(i18n.t("result_previewing")))
+            .not.toBeInTheDocument();
+    } finally {
+        logged.mockRestore();
+    }
+});
+
+test("a payload not of contract 2 after all falls back to the renderer's image",
+     async () => {
+    goLive({contract: 1});
+    await renderPage();
+    await untilPreviewed();
+    await untilPreviewed();
+
+    expect(reads(PAYLOAD)).toBe(1);
+    expect(previews()).toBe(1);
+    expect(frame()).not.toBeInTheDocument();
+});
+
+test("a layout on contract 1 (a user's) keeps the renderer's image", async () => {
+    world.livePayload = liveAnswer();
+    world.previewPort = LIVE_PORT;
+    world.catalog = world.catalog.map((entry) => ({...entry, contract: 1}));
+    await renderPage();
+    await untilPreviewed();
+
+    expect(previews()).toBe(1);
+    expect(reads(PAYLOAD)).toBe(0);
+    expect(frame()).not.toBeInTheDocument();
+});
+
+test("the headless shell previews a contract 2 layout live, and says it cannot make the image",
+     async () => {
+    goLive();
+    world.canRender = false;
+    await renderPage();
+    await untilPreviewed();
+    const card = region("result_preview");
+
+    expect(reads(PAYLOAD)).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toBeInTheDocument();
+    expect(within(card).getByText(i18n.t("result_cannot_render_live")))
+        .toBeInTheDocument();
+});
+
+test.each([
+    [["background_path"], ["result_live_omitted_background_path"]],
+    [["background_path", "main_icon_path"],
+     ["result_live_omitted_background_path",
+      "result_live_omitted_main_icon_path"]],
+])("an image the preview cannot show (%j) is said in its own words",
+   async (omitted, keys) => {
+    goLive({omitted});
+    await renderPage();
+    await untilPreviewed();
+
+    expect(within(region("result_preview")).getByText(
+        keys.map((key) => i18n.t(key)).join(" "))).toBeInTheDocument();
+});
+
+// ── the layout kit (ADR-008 D7 R4) ────────────────────────────────────────
+
+test("in a browser the kit's buttons do not show, the unlisted result layouts do",
+     async () => {
+    world.unlisted = [{folder: "result_broken", kind: "result",
+                       reason: "bad_settings", detail: "JSONDecodeError: x"},
+                      // A thumbnail's: not this page's.
+                      {folder: "thumbnail_broken", kind: "thumbnail",
+                       reason: "no_manifest", detail: null}];
+    await renderPage();
+    await settle();
+
+    expect(screen.queryByRole("button", {name: i18n.t("layout_kit_new")}))
+        .toBeNull();
+    expect(reads("/api/v1/layouts/kit/result/ai-prompt")).toBe(0);
+    const card = region("result_layout");
+    expect(card).toHaveTextContent("layout/result_broken/");
+    expect(card).not.toHaveTextContent("thumbnail_broken");
+});
+
+test("in the shared view a new layout is made, listed and chosen",
+     async () => {
+    world.shellSession = 200;
+    await renderPage();
+    await settle();
+    await settle();
+    const card = region("result_layout");
+    const listed = reads("/api/v1/layouts");
+
+    fireEvent.click(button(card, "layout_kit_new"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(i18n.t("layout_kit_new_text_result"));
+    fireEvent.change(within(dialog).getByLabelText(
+        i18n.t("layout_kit_display_name")), {target: {value: "Neon Cup"}});
+    fireEvent.click(within(dialog).getByRole(
+        "button", {name: i18n.t("layout_kit_create")}));
+    await settle();
+    await settle();
+    await settle();
+
+    expect(writes("POST", "/api/v1/layouts:create")).toEqual([
+        {kind: "result", name: "Neon_Cup", displayName: "Neon Cup"}]);
+    // Listed again and chosen once the list has it.
+    expect(reads("/api/v1/layouts")).toBe(listed + 1);
+    expect(writes("PATCH", RESULT)).toEqual([{layout: "result_Neon_Cup"}]);
+    const order = global.fetch.mock.calls.map(([url, init]) =>
+        `${init?.method ?? "GET"} ${new URL(url).pathname}`);
+    expect(order.lastIndexOf("GET /api/v1/layouts"))
+        .toBeLessThan(order.indexOf(`PATCH ${RESULT}`));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });

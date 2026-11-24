@@ -6,6 +6,8 @@ Added to /api/v1 only (nothing existing changed):
   render and the import are going, whether this shell can draw
 - ``GET    /api/v1/result/post``              the X post's text
 - ``GET    /api/v1/result/preview``           the newest render, a PNG
+- ``GET    /api/v1/result/payload``           the live preview's payload
+  (ADR-008 D7 R4)
 - ``PATCH  /api/v1/result``                   the layout
 - ``PATCH  /api/v1/result/players/<n>``       one row of the singles' layouts
 - ``PATCH  /api/v1/result/teams/<n>``         one row of the team layouts
@@ -728,6 +730,89 @@ def test_tmp_is_not_served_as_a_file(desktop, executor, client):
     assert client.get("/tmp/result/result_preview.png").status_code == 404
 
 
+# ── GET /result/payload (ADR-008 D7 R4) ──────────────────────────────────
+
+@pytest.mark.parametrize("shell", ["desktop", "headless"])
+def test_the_live_preview_payload_needs_no_renderer(request, client, shell):
+    # The browser draws it: the headless shell answers as the desktop.
+    env = request.getfixturevalue(shell)
+    env.service.SetLayout("horizontal")
+
+    body = _ok(client.get("/api/v1/result/payload"))
+
+    data = body["data"]
+    assert set(data) == {"layout", "folder", "entry", "contract", "size",
+                         "rows", "payload", "omitted"}
+    assert (data["layout"], data["folder"], data["entry"], data["contract"],
+            data["size"], data["rows"]) == (
+        "horizontal", "result", "result.html", 2, [1920, 1080], "players")
+    assert set(data["payload"]) == {"data", "config", "layout"}
+    assert data["payload"]["layout"] == "horizontal"
+    # Nothing to draw yet: the sample, as the preview image draws it.
+    assert len(data["payload"]["data"]["players"]) == 8
+    assert data["payload"]["data"]["rows"] == "players"
+    assert isinstance(body["revision"], int)
+
+
+def test_the_live_preview_payload_is_the_layouts(desktop, client):
+    desktop.service.SetLayout("team")
+
+    data = _ok(client.get("/api/v1/result/payload"))["data"]
+
+    assert (data["layout"], data["folder"], data["rows"]) == (
+        "team", "result_team", "teams")
+    assert data["payload"]["data"]["rows"] == "teams"
+    assert data["payload"]["layout"] == "team"
+
+
+def test_the_live_preview_payload_writes_nothing(desktop, client,
+                                                 monkeypatch):
+    writes = []
+    monkeypatch.setattr(SM, "Set", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(SettingsManager, "Set",
+                        lambda *a, **k: writes.append(a))
+    _ok(client.get("/api/v1/result/payload"))
+    assert writes == []
+    assert desktop.renderer.asked == []
+
+
+def test_a_live_preview_payload_without_its_layout_is_404(desktop, client):
+    import shutil
+    for folder in ("result", "result_team"):
+        shutil.rmtree(desktop.dir / "layout" / folder)
+
+    response = client.get("/api/v1/result/payload")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "NOT_FOUND"
+    assert str(desktop.dir) not in response.get_data(as_text=True)
+
+
+def test_an_image_the_browser_cannot_be_given_is_omitted(desktop, client):
+    # An old version's absolute path to an image outside what the preview
+    # listener serves: a render would hold it, the preview holds nothing.
+    banner = desktop.dir / "elsewhere" / "banner.png"
+    banner.parent.mkdir()
+    banner.write_bytes(b"\x89PNG\r\n\x1a\n")
+    SettingsManager.settings = {"result_config": {
+        "background_path": str(banner)}}
+
+    data = _ok(client.get("/api/v1/result/payload"))["data"]
+
+    assert data["payload"]["config"]["background_path"] == ""
+    assert "background_path" in data["omitted"]
+
+
+def test_another_computer_needs_the_token_for_the_payload(desktop, webApp):
+    other = webApp.test_client()
+    other.environ_base["REMOTE_ADDR"] = "192.0.2.10"
+
+    response = other.get("/api/v1/result/payload")
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "UNAUTHENTICATED"
+
+
 # ── who may ──────────────────────────────────────────────────────────────
 
 def test_the_writes_are_guarded_and_the_reads_are_not():
@@ -738,6 +823,8 @@ def test_the_writes_are_guarded_and_the_reads_are_not():
         assert access[f"api_v1.{name}"] == WebAccess.WRITE, name
     for name in ("get_result", "get_result_preview"):
         assert access[f"api_v1.{name}"] == WebAccess.READ, name
+    # The renderer's whole input, as GET /thumbnail/payload.
+    assert access["api_v1.get_result_payload"] == WebAccess.PLAYERDB
 
 
 @pytest.mark.parametrize("method, url, body", [

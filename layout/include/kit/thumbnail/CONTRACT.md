@@ -58,9 +58,9 @@ Autona のサムネイルのテンプレートの契約 2（ADR-008 D7）で Aut
 |---|---|---|
 | `config.scoreboardNumber` | number | 描くボードの番号（data.score の {N}）。サムネイルのページは 1 |
 | `config.background_source` | string | 背景の選択（"default" = テンプレートの既定・"banner" = 大会のバナー・"custom" = アップロードした画像） |
-| `config.background_path` | string\|null | 利用者が選んだ背景の画像のパス（Autona のフォルダ基準。サンプルの resolve() で URL にする）。null か "" ならテンプレートの既定の背景を描く（プレビューでは、アップロードした背景はいつも ""） |
-| `config.theme_color` | string | サムネイルのテーマ色（"#rrggbb"。サムネイルの色 → 大会の色 → Autona の既定の順で決まる） |
-| `config.accent_color` | string | サムネイルのアクセント色（"#rrggbb"） |
+| `config.background_path` | string\|null | 利用者が選んだ背景の画像のパス（Autona のフォルダ基準。サンプルの resolve() で URL にする）。null か "" ならテンプレートの既定の背景を描く（プレビューでは、アップロードした背景はいつも ""）。パスの後ろに ?m=<数> / ?v=<数>（更新時刻・版）が付くことがある。付けたまま URL にする（resolve() は付けたまま返す）。拡張子（.png で終わるか）で画像かを判定しない |
+| `config.theme_color` | string | サムネイルのテーマ色（"#rrggbb"（# と 16 進 6 桁。小文字が基本だが大文字のこともある: 既定のテーマ色は "#181B21"）。サムネイルの色 → 大会の色 → Autona の既定の順で決まる） |
+| `config.accent_color` | string | サムネイルのアクセント色（"#rrggbb"（# と 16 進 6 桁。小文字が基本だが大文字のこともある: 既定のテーマ色は "#181B21"）） |
 | `config.display_phase` | boolean | フェーズ・ラウンドの名前を出すか |
 | `config.use_team_names` | boolean | チーム名があれば選手名の代わりに出すか |
 | `config.use_sponsors` | boolean | スポンサーを出すか |

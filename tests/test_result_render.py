@@ -22,7 +22,7 @@ import pytest
 from loguru import logger
 from PIL import Image
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor, QPixmap
+from qtpy.QtGui import QColor
 from qtpy.QtWebEngineCore import QWebEngineSettings
 
 from src import AutonaWebOperations as WebOps
@@ -41,7 +41,8 @@ from tests.fixtures.result import scenarios as world
 from tests.test_api_v1 import client, webApp  # noqa: F401
 from tests.test_result_service import _Catalog
 from tests.test_thumbnail_render import (
-    LONG_TIMEOUT_MS, WAIT_SECS, _destroy, _evaluate, _waitUntil)
+    LONG_TIMEOUT_MS, MARKS_ON_PAGE, WAIT_SECS, _destroy, _evaluate, _frame,
+    _waitUntil)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -74,9 +75,11 @@ function initResult(payload) {
 @pytest.fixture
 def pages(autonaApp, previewListener):
     """The stand-in page for every layout, in the runtime's layout/, with the
-    shipped manifest (the catalog's result packages, ADR-007 T1)."""
+    shipped manifest (the catalog's result packages, ADR-007 T1) at contract
+    1: the stand-in is an initResult page."""
     created = template_packages.Install(
-        autonaApp.dir / "layout", template_packages.RESULT_FOLDERS, page=PAGE)
+        autonaApp.dir / "layout", template_packages.RESULT_FOLDERS, page=PAGE,
+        contract=1)
     yield
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -86,9 +89,9 @@ def pages(autonaApp, previewListener):
 def renderer(pages):
     made = ResultPageRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    # The offscreen grab is the same before a load and after it: a new page's
-    # first picture would wait all of FRESH_FRAME_WAIT_MS for nothing.
-    made.FRESH_FRAME_WAIT_MS = 0
+    # The offscreen grab never shows the page's frame mark: each picture
+    # would wait all of FRAME_WAIT_MS for nothing.
+    made.FRAME_WAIT_MS = 0
     yield made
     _destroy(made)
 
@@ -156,90 +159,42 @@ def test_the_view_is_as_the_old_renderer_had_it(renderer):
     assert ThumbnailRenderer.ASPECT_MODE == Qt.AspectRatioMode.IgnoreAspectRatio
 
 
-def test_a_new_pages_first_picture_is_waited_for_at_another_size(pages):
-    """What the view showed before the load is taken once the view has the new
-    page's size. Taken before, it would never compare equal: the wait would end
-    at once, with the page before's frame."""
+def test_the_frame_mark_is_looked_for_at_the_pages_size_and_scale(pages):
+    """A page of another size than the one before (vertical, 960 x 1080),
+    grabbed in device pixels (a screen at 200 %): its frame mark is found in
+    its corner, and the picture is the template's size."""
     made = ResultPageRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    shown = [RED]
+    made.FRAME_WAIT_MS = LONG_TIMEOUT_MS
+    shown = {"color": RED, "mark": None}
     grabs = []
 
-    def grab():
+    def grab(rect=None):
         size = (made._view.width(), made._view.height())
-        grabs.append((size, shown[0]))
-        pixmap = QPixmap(*size)
-        pixmap.fill(QColor(shown[0]))
-        return pixmap
+        grabs.append((size, shown["color"], shown["mark"]))
+        return _frame(*size, shown["color"], shown["mark"], scale=2,
+                      rect=rect)
 
     made._view.grab = grab
     answers = []
     try:
         made.renderAsync({}, {}, "vertical",
                          lambda pixmap, error: answers.append((pixmap, error)))
-        # The picture to compare with: at the new size.
-        assert grabs[0] == ((960, 1080), RED)
-
-        # The page said it painted, and the view still shows the old frame.
-        assert _waitUntil(lambda: len(grabs) >= 3)
-        assert answers == []
-
-        shown[0] = GREEN
-        assert _waitUntil(lambda: answers)
-        pixmap, error = answers[0]
-        assert error == ""
-        assert pixmap.width() == 960
-        assert pixmap.toImage().pixelColor(480, 540).name() == GREEN
-        assert made._before_load is None
-    finally:
-        _destroy(made)
-
-
-def test_the_old_frame_at_the_new_size_is_not_taken_for_the_new_pages(pages):
-    """What the view showed right after being resized is not what it goes on
-    showing: the old page redrawn at the new size is unlike it, so that the
-    comparison with the picture before the load lets it through. With frames
-    too slow to have reached the view, it is taken again until two grabs agree."""
-    made = ResultPageRenderer()
-    made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = LONG_TIMEOUT_MS
-    made.PAINT_WAIT_MS = LONG_TIMEOUT_MS
-    made.PAINT_SCRIPT = "window.paintNumber = %d;"
-    shown = ["#000000"]
-    grabs = []
-
-    def grab():
-        size = (made._view.width(), made._view.height())
-        grabs.append((size, shown[0]))
-        pixmap = QPixmap(*size)
-        pixmap.fill(QColor(shown[0]))
-        return pixmap
-
-    made._view.grab = grab
-    answers = []
-    try:
-        made.renderAsync({}, {}, "vertical",
-                         lambda pixmap, error: answers.append((pixmap, error)))
-        # Blank, just resized.
-        assert grabs == [((960, 1080), "#000000")]
-        assert _waitUntil(lambda: made._active.ready)
+        assert _waitUntil(lambda: grabs)
         number = made._active.number
-        assert _waitUntil(
-            lambda: _evaluate(made, "window.paintNumber || 0") == number)
-
-        shown[0] = RED  # The old page, redrawn at the new size.
-        made._page.runJavaScript(
-            f"document.title = 'RENDER_PAINTED {number} painted frames=500'")
-        assert _waitUntil(lambda: ((960, 1080), RED) in grabs)
+        assert grabs[0][0] == (960, 1080)
+        _waitUntil(lambda: False, timeout=0.3)
         assert answers == []
 
-        shown[0] = GREEN
+        shown.update(color=GREEN, mark=number)
+        assert _waitUntil(
+            lambda: json.loads(_evaluate(made, MARKS_ON_PAGE)) == [])
+        shown["mark"] = None
         assert _waitUntil(lambda: answers)
         pixmap, error = answers[0]
         assert error == ""
+        assert (pixmap.width(), pixmap.height()) == (960, 1080)
         assert pixmap.toImage().pixelColor(480, 540).name() == GREEN
-        assert grabs[-2:] == [((960, 1080), GREEN)] * 2
     finally:
         _destroy(made)
 
@@ -273,7 +228,7 @@ def test_a_page_that_never_loads_fails_its_render_and_the_next_one_tries(pages):
         made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
         (Path("layout") / FOLDERS["team"] / "result.html") \
             .write_text(PAGE, encoding="utf-8")
-        made.FRESH_FRAME_WAIT_MS = 0
+        made.FRAME_WAIT_MS = 0
         assert _render(made, "team")[1] == ""
     finally:
         _destroy(made)
@@ -334,8 +289,9 @@ def shippedPages(autonaApp, previewListener):
     assert not include.exists()
     include.mkdir()
     created.append(include)
-    for file in ("jquery-3.7.1.min.js", "lodash.min.js", "thumbnail_assets.js",
-                 "result.js", "result.css", "result_team.css"):
+    for file in ("autona.js", "jquery-3.7.1.min.js", "lodash.min.js",
+                 "thumbnail_assets.js", "result.js", "result.css",
+                 "result_team.css"):
         shutil.copy(PROJECT_ROOT / "layout" / "include" / file, include)
     try:
         yield
@@ -348,7 +304,7 @@ def shippedPages(autonaApp, previewListener):
 def shipped(shippedPages):
     made = ResultPageRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = 0
+    made.FRAME_WAIT_MS = 0
     yield made
     _destroy(made)
 
@@ -388,8 +344,10 @@ def _scriptErrors():
 @pytest.mark.parametrize("layout", world.LAYOUTS)
 def test_a_shipped_page_draws_what_it_is_given(shipped, layout):
     """The real result.js, on a payload with what is awkward in it. Not its
-    pixels, which the offscreen platform does not show. Its catch says
-    RENDER_READY as well, so the text is what says it got to the end."""
+    pixels, which the offscreen platform does not show (tests/
+    test_render_platform.py compares them). Drawn in Autona.onRender
+    (template contract 2, ADR-008 D7 R4): an exception would be the render's
+    error."""
     errors, sink = _scriptErrors()
     try:
         pixmap, error = _render(shipped, layout, _config(),
@@ -403,8 +361,25 @@ def test_a_shipped_page_draws_what_it_is_given(shipped, layout):
     assert errors == []
     # Twice at least: in the header, and in the row. As text: none of it ran.
     assert text.count("\"</script>${b}`'") >= 2
-    assert _evaluate(shipped, "document.querySelectorAll('script[src]').length") \
-        == _evaluate(shipped, "document.scripts.length")
+    # No script of the payload's: the inline ones are the page's own line
+    # that registers drawResult (none on geki, whose result.js does).
+    inline = json.loads(_evaluate(shipped, "JSON.stringify([...document.scripts]"
+                                  ".filter((s) => !s.src)"
+                                  ".map((s) => s.textContent.trim()))"))
+    assert inline == ([] if layout == "vertical_geki"
+                      else ["Autona.onRender(drawResult);"])
+
+
+def test_the_shared_script_registers_nothing():
+    """include/result.js only defines drawResult (and initResult): a page that
+    reuses it registers its own function, and Autona.onRender takes one."""
+    shared = (PROJECT_ROOT / "layout" / "include" / "result.js").read_text(
+        encoding="utf-8")
+    assert "async function drawResult(" in shared
+    assert "async function initResult(" in shared
+    code = [line for line in shared.splitlines()
+            if not line.lstrip().startswith(("*", "/*", "//"))]
+    assert not any("Autona.onRender(" in line for line in code)
 
 
 @pytest.mark.parametrize("layout", world.LAYOUTS)
@@ -554,7 +529,7 @@ def service(autonaApp, pages, monkeypatch):
 
     made = ResultPageRenderer()
     made.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
-    made.FRESH_FRAME_WAIT_MS = 0
+    made.FRAME_WAIT_MS = 0
     monkeypatch.setattr(ResultPageRenderer, "_instance", made)
     given = []
     monkeypatch.setattr(PlayerDB.instance, "AddPlayers",

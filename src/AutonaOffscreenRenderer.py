@@ -5,8 +5,7 @@ What the images the app generates have in common: the match thumbnail's
 result's (result/ResultPageRenderer). A subclass says which kind of template
 package it draws (the layout catalog's, ADR-007 T1: a package's folder, entry
 page and size), its default, and which function of the page draws. One view
-per kind of image: their sizes differ, and the picture before a load is
-compared with the first one after it (_finalize_render).
+per kind of image: their sizes differ.
 
 Where a template is drawn (ADR-007 D4 / T2; ADR-008 D7 R1): on the preview
 listener's origin, ``http://127.0.0.1:<WebServer.PreviewPort()>/layout/
@@ -57,13 +56,13 @@ page; without it the sandbox is on whichever view starts first. See
 docs/architecture/Design.md section 7.3.
 """
 import json
+import math
 import os
-import re
 import time
 from urllib.parse import quote
 
-from qtpy.QtCore import QObject, QTimer, QUrl, Qt
-from qtpy.QtGui import QGuiApplication
+from qtpy.QtCore import QObject, QRect, QTimer, QUrl, Qt
+from qtpy.QtGui import QGuiApplication, QPainter, QPixmap
 from qtpy.QtWidgets import QWidget
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import (
@@ -75,8 +74,6 @@ from .AutonaWebServer import WebServer
 from .core import LayoutCatalog, RenderAssets
 from .core.RenderLane import PREVIEW_UNAVAILABLE, TemplateError
 
-# What the page says its two frames took (PAINT_SCRIPT), in its RENDER_PAINTED.
-_FRAMES_SAID = re.compile(r"\bframes=(\d+)\b")
 # The preview listener's host, as a render's page is loaded from it: the
 # listener is bound to 127.0.0.1 or to every address (LAN); both answer here.
 PREVIEW_HOST = "127.0.0.1"
@@ -241,10 +238,9 @@ RENDER_CONTRACT = 2
 class _Ticket:
     """One render: what to draw and who wants it."""
     __slots__ = ("payload", "templateId", "done", "ownLoad", "started",
-                 "number", "ready", "painted", "frameDeadline", "framesMs",
-                 "settleEvery", "settleDeadline", "lastFrame", "begun",
-                 "readyAt", "paintedAt", "paintDetails", "held",
-                 "contract", "timedOut")
+                 "number", "ready", "painted", "marked", "markSeen",
+                 "frameDeadline", "begun", "readyAt", "paintedAt",
+                 "paintDetails", "held", "contract", "timedOut")
 
     def __init__(self, payload, templateId, done):
         self.payload = payload
@@ -265,16 +261,12 @@ class _Ticket:
         # The page said RENDER_READY, and then that it painted.
         self.ready = False
         self.painted = False
-        # Until when a frame of the page before this one is waited out.
+        # Whether its page was asked to mark its frame (PAINT_SCRIPT ran),
+        # whether a grab has shown the mark, and until when the grab looked
+        # for (the mark, then a frame without it) is waited for.
+        self.marked = False
+        self.markSeen = False
         self.frameDeadline = None
-        # What the page said its two frames took; None: it did not say.
-        self.framesMs = None
-        # How far apart the grabs that have to agree are (ms; None: not
-        # decided yet), until when they may disagree, and the one before the
-        # newest.
-        self.settleEvery = None
-        self.settleDeadline = None
-        self.lastFrame = None
         # When it started, said RENDER_READY and painted (time.monotonic()),
         # and what the page said of its wait: for the log.
         self.begun = self.readyAt = self.paintedAt = None
@@ -317,25 +309,31 @@ class AutonaOffscreenRenderer(QObject):
       may not be composited yet (a grab then had the frame before it; after
       a change of template, the other template's). The page is then asked,
       by a script of the renderer's (the templates are an external contract
-      and stay as they are), to say RENDER_PAINTED <its number> once the
-      fonts are in, the images decoded and two frames have begun -- so the
-      first of them, which has the drawing, was submitted. Bounded by
-      PAINT_WAIT_MS, in case frames stop coming. The number is the render's,
-      so a page that says it for another render is not believed.
-    - On a page just loaded, a grab that is still what the view showed
-      before the load is the old page's: it is taken again until it is not,
-      for at most FRESH_FRAME_WAIT_MS. A render on the same page is not
-      compared with what came before it: the same picture again is the right
-      picture. What the view showed is taken after the view was given the new
-      page's size: pictures of different sizes never compare equal, and the
-      wait would be cut short by nothing but the size.
-    - Having begun two frames does not put them in the view, however fast they
-      were: a grab can still be a frame from before the drawing, and it is
-      unlike the page before, so nothing above stops it. It was taken with a
-      slow compositor (the screen locked: a frame every 170-200 ms against 16)
-      one render in thirty, and with frames at 16 ms after a while idle, on an
-      image new to the page, two in twenty-one. So every render is taken once
-      two grabs in a row agree, for at most SETTLE_WAIT_MS (_settle_every).
+      and stay as they are), to wait for its fonts and to decode its images,
+      then to mark its frame (a few pixels in its top left corner, in colours
+      of the render's number) and say RENDER_PAINTED <its number>. Bounded by
+      PAINT_WAIT_MS, in case its fonts or images never settle. The number is
+      the render's, so a page that says it for another render is not
+      believed.
+    - Then the view's corner is grabbed until it shows the mark, the mark is
+      taken away, and once the corner shows it no more the view is grabbed
+      whole: the picture, a frame the view showed after one drawn after the
+      drawing (_finalize_render).
+      How long a frame takes to reach the view is not known: with software
+      compositing (a GPU-less CI runner, --disable-gpu) the view showed a
+      frame from before the drawing for one to three seconds after the page
+      had begun two frames -- its text not in its web font yet, characters
+      missing, half of it white --, and then neither a wait for "a fresh
+      frame" (one unlike the page before), nor two grabs half a second apart
+      that agreed (one frame, not replaced in that time), nor the waits'
+      caps of a second kept it out. (They did until R4: a frame every
+      170-200 ms with the screen locked, and two frames at 16 ms that had
+      not reached the view, had been taken before them.) Bounded, the mark
+      and its going together, by FRAME_WAIT_MS and by what the stage's
+      watchdog leaves (_frame_wait_ms): a picture is taken then all the
+      same, with a warning (Qt's offscreen platform, where a desktop
+      composites no page, never shows the mark), and never with the mark
+      in it (_without_mark).
 
     - A template id is one of the layout catalog's packages of CATALOG_KIND,
       read when a render is asked for (_template_for): its page is
@@ -377,23 +375,51 @@ class AutonaOffscreenRenderer(QObject):
     # At a contract 2 render's timeout: how long its page's errors are
     # waited for (_on_timeout).
     TIMEOUT_READ_MS = 1000
-    # How long the page may take to say it painted (PAINT_SCRIPT). The picture
-    # is taken then all the same, and a warning logged. Timed here, not in
-    # the page: a page whose frames stop may have its timers held back too.
+    # How long the page may take to say it painted (PAINT_SCRIPT). The view
+    # is looked at then all the same (its mark may come later), and a warning
+    # logged. Timed here, not in the page: a page whose frames stop may have
+    # its timers held back too.
     PAINT_WAIT_MS = 1000
-    # How long a page just loaded may go on showing the page before it, and
-    # how often it is looked at meanwhile (_finalize_render).
-    FRESH_FRAME_WAIT_MS = 1000
-    FRESH_FRAME_POLL_MS = 30
-    # How long grabs may go on disagreeing, and how close two may be
-    # (_settle_every).
-    SETTLE_WAIT_MS = 1000
-    SETTLE_POLL_MS = 50
-    # Run in the page once it said RENDER_READY, with the render's number:
-    # says "RENDER_PAINTED <number> painted" once the fonts are loaded, the
-    # images (<img> and CSS backgrounds) decoded and two frames have begun
-    # since, "... failed" when it cannot tell; then how long each took, for
-    # the log ("fonts=<ms> images=<ms>/<decoded> frames=<ms>").
+    # How long the view is looked at for the page's frame mark and then for
+    # a frame without it, all told (_finalize_render): at most what is left
+    # of the stage's time less FRAME_RESERVE_MS (the picture, and contract
+    # 2's last read of its errors), so that a slow page's picture is taken,
+    # maybe from before its drawing, as before the mark, not failed. How
+    # often its corner is looked at meanwhile.
+    FRAME_WAIT_MS = 6000
+    FRAME_RESERVE_MS = 1500
+    FRAME_POLL_MS = 30
+    # The frame mark: two blocks MARK_SIZE pixels square side by side in the
+    # top left corner (_mark_blocks: the page draws what they say; _marked:
+    # found within MARK_TOLERANCE levels a channel), its style its own over
+    # whatever the template's CSS says of a div (MARK_STYLE, inline and
+    # important). What it cannot hold its own against is the html element's
+    # own transform, zoom or filter: the layout kit's rules say not to.
+    MARK_SIZE = 4
+    MARK_TOLERANCE = 8
+    MARK_STYLE = {
+        "position": "fixed", "top": "0px", "right": "auto", "bottom": "auto",
+        "margin": "0", "padding": "0", "border": "0", "outline": "none",
+        "border-radius": "0", "box-shadow": "none",
+        "box-sizing": "content-box", "min-width": "0", "min-height": "0",
+        "max-width": "none", "max-height": "none", "display": "block",
+        "visibility": "visible", "content-visibility": "visible",
+        "opacity": "1", "transform": "none", "scale": "none",
+        "translate": "none", "rotate": "none", "zoom": "1", "filter": "none",
+        "backdrop-filter": "none", "clip-path": "none", "mask": "none",
+        "mix-blend-mode": "normal", "z-index": "2147483647",
+        "pointer-events": "none"}
+    # Run in the page once it said RENDER_READY, with the render's number
+    # (%d) and its frame mark's blocks (__MARK__, _mark_blocks as JSON):
+    # once the fonts are loaded and the images (<img> and CSS backgrounds)
+    # decoded, marks the frame and says "RENDER_PAINTED <number> painted",
+    # "... failed" when it cannot tell; then how long each took, for the log
+    # ("fonts=<ms> images=<ms>/<decoded>"). The mark is the page's last
+    # element; whatever marks are on the page go first. It is marked when the
+    # waits failed too: the picture is still looked for. A script whose
+    # render is not the newest one asked of the page when its waits end (its
+    # render was over, and the next one's script has begun) does nothing
+    # more: it would take that render's mark away.
     # An image the render before decoded on this document is not decoded
     # again: it is the same image (a template draws the same background, the
     # same characters, again), and asking again repeats the work. Only the
@@ -401,6 +427,8 @@ class AutonaOffscreenRenderer(QObject):
     # character drawn (those are data: URLs, made per render). `complete` is
     # not the test: an image can be loaded and not decoded.
     PAINT_SCRIPT = r"""(async () => {
+  const number = %d;
+  window.__renderNewest = Math.max(window.__renderNewest || 0, number);
   const start = performance.now();
   const since = () => Math.round(performance.now() - start);
   const before = window.__renderDecoded || new Set();
@@ -436,16 +464,32 @@ class AutonaOffscreenRenderer(QObject):
     }
     await Promise.allSettled(waits);
     images = since();
-    await new Promise((done) =>
-      requestAnimationFrame(() => requestAnimationFrame(done)));
   } catch (error) {
     how = "failed";
   }
+  if (window.__renderNewest !== number) return;
   window.__renderDecoded = kept;
-  document.title = "RENDER_PAINTED %d " + how + " fonts=" + fonts
-    + " images=" + (images - fonts) + "/" + waits.length
-    + " frames=" + (since() - images);
+  try {
+    document.querySelectorAll("[data-autona-frame-mark]")
+      .forEach((mark) => mark.remove());
+    for (const style of __MARK__) {
+      const mark = document.createElement("div");
+      mark.dataset.autonaFrameMark = String(number);
+      for (const name in style) {
+        mark.style.setProperty(name, style[name], "important");
+      }
+      document.documentElement.appendChild(mark);
+    }
+  } catch (error) {
+    how = "failed";
+  }
+  document.title = "RENDER_PAINTED " + number + " " + how + " fonts="
+    + fonts + " images=" + (images - fonts) + "/" + waits.length;
 })();"""
+    # Takes render %d's frame mark away (_finalize_render).
+    UNMARK_SCRIPT = ('document.querySelectorAll('
+                     '"[data-autona-frame-mark=\'%d\']")'
+                     '.forEach(function (mark) { mark.remove(); })')
     PAINTED_TITLE = "RENDER_PAINTED "
     # Contract 2's start, with the payload's JSON as a string literal and the
     # render's number: the page's autona.js draws it, or (autona.js is not on
@@ -524,9 +568,6 @@ class AutonaOffscreenRenderer(QObject):
         self._page_loaded = False
         self._load_query = None        # The load on its way (None: none is)
         self._load_number = 0
-        # What the view showed before the page was loaded, until a picture
-        # of the page has been taken (None: one has).
-        self._before_load = None
         self._render_number = 0
         self._active = None            # The ticket being drawn
         self._waiting = []             # Tickets with a taker, in order
@@ -651,11 +692,7 @@ class AutonaOffscreenRenderer(QObject):
         self._page_stale = False
         self._page_loaded = False
         self._page.loading(origin, url)
-        # Before the picture below: at another size it would never compare
-        # equal to the old page's frame.
         self._view.resize(*self._size(template_id))
-        # The view goes on showing this until the new page's first frame.
-        self._before_load = self._view.grab().toImage()
         self._view.load(url)
 
     def _folder_stamp(self, page):
@@ -925,10 +962,11 @@ class AutonaOffscreenRenderer(QObject):
         QTimer.singleShot(self.PAINT_WAIT_MS,
                           lambda: self._painted(ticket, "late"))
         try:
-            self._view.page().runJavaScript(
-                self.PAINT_SCRIPT % ticket.number)
+            self._view.page().runJavaScript(self._paint_script(ticket.number))
+            ticket.marked = True
         except Exception:
-            # Nobody will say it painted: the picture as it is, as before.
+            # Nobody will say it painted, nor mark the frame: the picture as
+            # it is, as before.
             logger.opt(exception=True).warning(
                 f"{self.LOG_NAME}: could not wait for the page to paint")
             self._painted(ticket, "failed")
@@ -939,41 +977,106 @@ class AutonaOffscreenRenderer(QObject):
         ticket.painted = True
         ticket.paintedAt = time.monotonic()
         ticket.paintDetails = details
-        said = _FRAMES_SAID.search(details) if how == "painted" else None
-        ticket.framesMs = int(said.group(1)) if said else None
         if how != "painted":
             logger.warning(
                 f"{self.LOG_NAME}: the page did not say it painted ({how}); "
-                "taking the picture as it is")
+                "looking at the view all the same")
         # Out of the signal: the grab renders the view.
         QTimer.singleShot(0, lambda: self._finalize_render(ticket))
 
+    def _paint_script(self, number):
+        """PAINT_SCRIPT for render `number`, with its frame mark's blocks."""
+        return (self.PAINT_SCRIPT % number).replace(
+            "__MARK__", json.dumps(self._mark_blocks(number)))
+
+    @classmethod
+    def _mark_colors(cls, number):
+        """The frame mark of render `number`, its two blocks left to right:
+        (r, g, b) each. The second tells it from the marks of the renders
+        just before it."""
+        return ((255, 0, 255), (0, 255, (0, 85, 170, 255)[number % 4]))
+
+    @classmethod
+    def _mark_blocks(cls, number):
+        """The CSS of render `number`'s frame mark's blocks, as PAINT_SCRIPT
+        sets it on each (the one definition of what it draws)."""
+        size = cls.MARK_SIZE
+        return [dict(cls.MARK_STYLE, left=f"{block * size}px",
+                     width=f"{size}px", height=f"{size}px",
+                     background=f"rgb({r}, {g}, {b})")
+                for block, (r, g, b) in enumerate(cls._mark_colors(number))]
+
+    @classmethod
+    def _mark_rect(cls):
+        """The view's corner the frame mark is in (its pixels)."""
+        return QRect(0, 0, 2 * cls.MARK_SIZE, cls.MARK_SIZE)
+
+    @classmethod
+    def _marked(cls, image, number, width):
+        """Whether `image`, a grab of the view from its top left corner,
+        `width` of the view's pixels wide (the image's own may be device
+        pixels: a screen scale), shows render `number`'s frame mark."""
+        if image.isNull() or width <= 0:
+            return False
+        scale = image.width() / width
+        for block, rgb in enumerate(cls._mark_colors(number)):
+            x = int((block + 0.5) * cls.MARK_SIZE * scale)
+            y = int(0.5 * cls.MARK_SIZE * scale)
+            if x >= image.width() or y >= image.height():
+                return False
+            color = image.pixelColor(x, y)
+            if any(abs(have - want) > cls.MARK_TOLERANCE for have, want in
+                   zip((color.red(), color.green(), color.blue()), rgb)):
+                return False
+        return True
+
+    def _frame_wait_ms(self):
+        """The wait for the frame (_finalize_render): FRAME_WAIT_MS, or what
+        the watchdog leaves of the stage less FRAME_RESERVE_MS."""
+        left = self._watchdog.remainingTime()
+        if left < 0:
+            return self.FRAME_WAIT_MS
+        return max(0, min(self.FRAME_WAIT_MS, left - self.FRAME_RESERVE_MS))
+
     def _finalize_render(self, ticket):
+        """Look at the view's corner until it shows the page's frame mark,
+        take the mark away, and look until it is gone; then the view is the
+        picture (see the class's notes). A page not asked to mark it: the
+        view as it is."""
         if ticket is not self._active:
             return  # It timed out meanwhile.
 
-        if ticket.settleEvery is None:
-            ticket.settleEvery = self._settle_every(ticket)
-
-        pixmap = self._view.grab()
-        if self._before_load is not None:
-            # The page's first picture: not while the view still shows the
-            # page before it.
+        if ticket.marked:
+            now = time.monotonic()
             if ticket.frameDeadline is None:
-                ticket.frameDeadline = time.monotonic() \
-                    + self.FRESH_FRAME_WAIT_MS / 1000
-            if pixmap.toImage() == self._before_load:
-                if time.monotonic() < ticket.frameDeadline:
-                    QTimer.singleShot(self.FRESH_FRAME_POLL_MS,
-                                      lambda: self._finalize_render(ticket))
+                ticket.frameDeadline = now + self._frame_wait_ms() / 1000
+            waiting = now < ticket.frameDeadline
+            rect = self._mark_rect()
+            shows = self._marked(self._view.grab(rect).toImage(),
+                                 ticket.number, rect.width())
+            if not ticket.markSeen:
+                if shows:
+                    ticket.markSeen = True
+                    self._unmark(ticket)
+                if shows or waiting:
+                    self._look_again(ticket)
                     return
                 logger.warning(
-                    f"{self.LOG_NAME}: the new page still looks like the one "
-                    "before it; taking the picture as it is")
-            self._before_load = None
+                    f"{self.LOG_NAME}: the drawing did not reach the view "
+                    "(its frame mark was not seen); taking the picture as it "
+                    "is")
+                self._unmark(ticket)
+            elif shows:
+                if waiting:
+                    self._look_again(ticket)
+                    return
+                logger.warning(
+                    f"{self.LOG_NAME}: the page's frame mark did not go; "
+                    "taking the picture as it is")
 
-        if not self._settled(ticket, pixmap.toImage()):
-            return
+        pixmap = self._view.grab()
+        if ticket.marked:
+            pixmap = self._without_mark(pixmap, ticket.number)
 
         width, height = self._size(ticket.templateId)
         if pixmap.width() != width or pixmap.height() != height:
@@ -988,6 +1091,39 @@ class AutonaOffscreenRenderer(QObject):
             self._confirm_drawn(ticket, pixmap)
             return
         self._drawn(ticket, pixmap)
+
+    def _without_mark(self, pixmap, number):
+        """`pixmap`, the picture, with no frame mark in it: one taken when
+        the wait ran out may still show it, and then the mark's pixels are
+        the picture's own just under them (what the page has under the mark
+        is nowhere to be had)."""
+        width = self._view.width()
+        image = pixmap.toImage()
+        if not self._marked(image, number, width):
+            return pixmap
+        scale = image.width() / width
+        mark = QRect(0, 0, math.ceil(2 * self.MARK_SIZE * scale),
+                     math.ceil(self.MARK_SIZE * scale))
+        ratio = image.devicePixelRatio()
+        image.setDevicePixelRatio(1)
+        under = image.copy(mark.translated(0, mark.height()))
+        painter = QPainter(image)
+        painter.drawImage(mark.topLeft(), under)
+        painter.end()
+        image.setDevicePixelRatio(ratio)
+        return QPixmap.fromImage(image)
+
+    def _look_again(self, ticket):
+        QTimer.singleShot(self.FRAME_POLL_MS, self,
+                          lambda: self._finalize_render(ticket))
+
+    def _unmark(self, ticket):
+        try:
+            self._view.page().runJavaScript(
+                self.UNMARK_SCRIPT % ticket.number)
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"{self.LOG_NAME}: could not take the frame mark away")
 
     def _drawn(self, ticket, pixmap):
         logger.info(
@@ -1017,42 +1153,12 @@ class AutonaOffscreenRenderer(QObject):
                 "again; taking the picture")
             self._drawn(ticket, pixmap)
 
-    def _settle_every(self, ticket):
-        """How far apart (ms) the grabs that have to agree are. As far apart
-        as the page's two frames took, when that is more than SETTLE_POLL_MS:
-        at 170-200 ms a frame, grabs closer than that see one unfinished frame
-        twice and agree. Not known (the page did not say), half of
-        SETTLE_WAIT_MS, so that two fit in it."""
-        frames = ticket.framesMs
-        longest = self.SETTLE_WAIT_MS // 2
-        if frames is None:
-            return longest
-        return min(max(frames, self.SETTLE_POLL_MS), longest)
-
-    def _settled(self, ticket, image):
-        """Whether `image`, the newest grab, is the picture: it is the one
-        before it, or the wait is over. If not, the next grab is on its way."""
-        now = time.monotonic()
-        if ticket.lastFrame is None:
-            ticket.settleDeadline = now + self.SETTLE_WAIT_MS / 1000
-        elif image == ticket.lastFrame:
-            return True
-        elif now >= ticket.settleDeadline:
-            logger.warning(
-                f"{self.LOG_NAME}: the page is still changing; taking the "
-                "picture as it is")
-            return True
-        ticket.lastFrame = image
-        QTimer.singleShot(ticket.settleEvery,
-                          lambda: self._finalize_render(ticket))
-        return False
-
     @staticmethod
     def _timings(ticket):
         """Where a render's time went: its page (a load, when there was one,
         and the template's script), the wait for the paint (the page's own
-        account of it), and the picture (the old page's frame waited out,
-        and the grab)."""
+        account of it), and the picture (the waits for the frame mark and
+        for its going, and the grab)."""
         def ms(since, until):
             if since is None or until is None:
                 return "?"

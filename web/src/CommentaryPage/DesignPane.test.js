@@ -693,6 +693,27 @@ test("the folders the catalog could not list are shown under the select", async 
         `layout/scoreboard_y/ — ${i18n.t("layout_unlisted_other")}`);
 });
 
+test("a template's folder with no block is told in a template's words", async () => {
+    render(<Pane unlisted={[
+        {folder: "result_neon", kind: "result", reason: "no_manifest",
+         detail: null},
+        {folder: "thumbnail_neon", kind: "thumbnail", reason: "no_manifest",
+         detail: null},
+        {folder: "my_overlay", kind: null, reason: "no_manifest", detail: null},
+    ]}/>);
+    await settle();
+
+    const list = screen.getByRole("region",
+                                  {name: i18n.t("layout_unlisted_title")});
+    const template = i18n.t("layout_unlisted_no_manifest_template");
+    expect(list).toHaveTextContent(`layout/result_neon/ — ${template}`);
+    expect(list).toHaveTextContent(`layout/thumbnail_neon/ — ${template}`);
+    // An overlay's folder keeps the words that name the overlay folder names.
+    expect(list).toHaveTextContent(
+        `layout/my_overlay/ — ${i18n.t("layout_unlisted_no_manifest")}`);
+    expect(template).not.toContain("scoreboard");
+});
+
 test("no folder that could not be listed, no list", async () => {
     render(<Pane unlisted={[]}/>);
     await settle();

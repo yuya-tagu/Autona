@@ -21,7 +21,11 @@ import {ReduxState} from "../redux/store";
 import {usePanelShell} from "../PanelShell/context";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {canCopyImage} from "../PanelShell/clipboard";
-import {TemplateChoice} from "../PanelShell/templatePackages";
+import {
+    TemplateChoice,
+    UnlistedTemplateFolder,
+} from "../PanelShell/templatePackages";
+import {UnlistedDesigns} from "../CommentaryPage/LayoutCheck";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
 import {
     DropLine,
@@ -242,7 +246,7 @@ function FromScoreboard({name}: {name: string | null}) {
 // ── レイアウト ───────────────────────────────────────────────────────────
 
 export function LayoutCard({layout, choices, game, send, importing, importNote,
-                            loadStandings, kind, clear}: {
+                            loadStandings, kind, clear, unlisted, actions}: {
     layout: string;
     // The layouts to choose from (GET /api/v1/layouts?kind=result).
     choices: TemplateChoice[];
@@ -255,6 +259,11 @@ export function LayoutCard({layout, choices, game, send, importing, importNote,
     loadStandings: () => void;
     kind: RowKind;
     clear: () => void;
+    // The layout folders the catalog did not list, with why (ADR-008 D3):
+    // under the select, as the Thumbnail page shows its templates'.
+    unlisted?: UnlistedTemplateFolder[];
+    // Under the select: the layout kit's buttons (ADR-008 D7 R4).
+    actions?: React.ReactNode;
 }) {
     const [shown, choose] = useStateChoice(layout, send);
     const [confirming, setConfirming] = React.useState(false);
@@ -273,6 +282,8 @@ export function LayoutCard({layout, choices, game, send, importing, importNote,
                     </MenuItem>
                 ))}
             </TextField>
+            {unlisted && <UnlistedDesigns folders={unlisted}/>}
+            {actions}
             {!game && <Note>{i18n.t("result_no_game")}</Note>}
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap"
                    alignItems="center">
@@ -704,7 +715,7 @@ function generateStatus(generating: boolean,
 export function PreviewCard({canRender, render, layout, imageRevision, sample,
                              previewing, previewError, generating, blocked,
                              result, noData, postState, generate, copy, postToX,
-                             readPost, check}: {
+                             readPost, check, live, liveNote}: {
     // False on the headless shell: there is no off-screen view to draw with.
     canRender: boolean;
     render: ResultRender;
@@ -731,6 +742,10 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
     readPost: () => void;
     // The template's errors, when a render failed on them (ADR-008 D7 R2).
     check?: React.ReactNode;
+    // The live preview (a layout on template contract 2, ADR-008 D7 R4: the
+    // page's DesignPane) in place of the image, and what it does not show.
+    live?: React.ReactNode;
+    liveNote?: string;
 }) {
     const [failedRevision, setFailedRevision] = React.useState(0);
     const shown = imageRevision > 0 && failedRevision !== imageRevision;
@@ -742,11 +757,18 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
     return (
         <CardFrame title={i18n.t("result_preview")}>
             {!canRender && (
-                <Alert severity="info">{i18n.t("result_cannot_render")}</Alert>
+                <Alert severity="info">
+                    {i18n.t(live ? "result_cannot_render_live"
+                                 : "result_cannot_render")}
+                </Alert>
             )}
+            {/* The live pane: its frame kept within the pane's height as the
+                image's box below (the page gives it that width). */}
+            {live}
+            {live && liveNote && <Note>{liveNote}</Note>}
             {/* The layout's shape, within the pane's height: a 960 wide one
                 is as tall as it is wide or more. */}
-            <Box
+            {!live && <Box
                 sx={{position: "relative", width: "100%",
                      aspectRatio: layout
                          ? `${layout.width} / ${layout.height}` : "16 / 9",
@@ -784,8 +806,10 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
                         </Typography>
                     </Stack>
                 )}
-            </Box>
-            {sample && canRender && <Note>{i18n.t("result_sample_note")}</Note>}
+            </Box>}
+            {sample && (canRender || Boolean(live)) && (
+                <Note>{i18n.t("result_sample_note")}</Note>
+            )}
             <Note>{i18n.t("result_background_note")}</Note>
             {previewError && (
                 <Typography variant="body2" color="error">

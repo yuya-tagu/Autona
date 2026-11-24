@@ -179,6 +179,23 @@ export function isTemplate(design: LayoutEntry): boolean {
     return design.kind === "thumbnail" || design.kind === "result";
 }
 
+// The words of a template's own page (its entry page's name, what it is
+// called): a result's (ADR-008 D7 R4), else the thumbnail's ("_template"),
+// else an overlay's ("").
+function pageWords(design: LayoutEntry): string {
+    if (design.kind === "result") {
+        return "_result";
+    }
+    return isTemplate(design) ? "_template" : "";
+}
+
+// The hint for an error of `design`'s, in its page's words.
+function designHint(error: LayoutMessage, design: LayoutEntry): string {
+    const key = hintKey(error, isTemplate(design));
+    return key === "layout_check_hint_on_render_setup"
+        && design.kind === "result" ? `${key}_result` : key;
+}
+
 // The page's path under the app's folder: a template package's folder is
 // not its id (a shipped one's id is not its folder's name).
 function designPath(design: LayoutEntry): string {
@@ -280,7 +297,7 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
     const contract = report.contract ?? design.contract ?? null;
     const template = isTemplate(design);
     const words = template ? "_template" : "";
-    const lines = [ja(`layout_check_ai_intro${words}`, {
+    const lines = [ja(`layout_check_ai_intro${pageWords(design)}`, {
         name: design.displayName,
         path: designPath(design),
         contract: contract === null ? "—" : String(contract),
@@ -295,7 +312,7 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
     });
     if (notReady) {
         lines.push(`[!] ${ja("layout_check_not_ready")}`,
-                   `    ${ja("layout_check_hint_label")}: ${ja(`layout_check_not_ready_hint${words}`)}`,
+                   `    ${ja("layout_check_hint_label")}: ${ja(`layout_check_not_ready_hint${pageWords(design)}`)}`,
                    "");
     }
     report.errors.forEach((error, index) => {
@@ -304,7 +321,7 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
         if (error.count > 1) {
             lines.push(`    ${ja("layout_check_count", {count: error.count})}`);
         }
-        lines.push(`    ${ja("layout_check_hint_label")}: ${ja(hintKey(error, template))}`);
+        lines.push(`    ${ja("layout_check_hint_label")}: ${ja(designHint(error, design))}`);
         lines.push("");
     });
     if (report.dropped > 0) {
@@ -403,7 +420,7 @@ export function LayoutCheckPanel({design, report, notReady, drawing = false}: {
                             {i18n.t("layout_check_not_ready")}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(`layout_check_not_ready_hint${words}`)}`}
+                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(`layout_check_not_ready_hint${pageWords(design)}`)}`}
                         </Typography>
                     </Box>
                 )}
@@ -421,7 +438,7 @@ export function LayoutCheckPanel({design, report, notReady, drawing = false}: {
                                     : "")}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(hintKey(error, template))}`}
+                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(designHint(error, design))}`}
                         </Typography>
                     </Box>
                 ))}
@@ -433,6 +450,17 @@ export function LayoutCheckPanel({design, report, notReady, drawing = false}: {
             )}
         </Alert>
     );
+}
+
+// Why a folder is not listed, as a words key. A template's folder (result_ /
+// thumbnail_) with no block is told so in a template's words: the overlay's
+// words name the overlay folder names, which say nothing to it.
+function unlistedReasonKey(folder: UnlistedFolder): string {
+    if (folder.reason === "no_manifest"
+            && (folder.kind === "result" || folder.kind === "thumbnail")) {
+        return "layout_unlisted_no_manifest_template";
+    }
+    return `layout_unlisted_${folder.reason}`;
 }
 
 // The folders of the page's kinds (and of none known) the catalog did not
@@ -452,7 +480,7 @@ export function UnlistedDesigns({folders}: {folders: UnlistedFolder[]}) {
                     <li key={folder.folder}>
                         <Typography variant="body2" sx={{wordBreak: "break-word"}}>
                             {`layout/${folder.folder}/ — ${i18n.t(
-                                `layout_unlisted_${folder.reason}`,
+                                unlistedReasonKey(folder),
                                 {defaultValue: i18n.t("layout_unlisted_other")})}`}
                         </Typography>
                         {folder.detail && (

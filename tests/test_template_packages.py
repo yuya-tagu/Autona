@@ -139,7 +139,7 @@ def test_the_shipped_result_layouts_are_as_they_were():
     for templateId, (folder, size, slots, team) in RESULT_LAYOUTS.items():
         entry = shipped[templateId]
         assert (entry["folder"], tuple(entry["size"]), entry["entry"],
-                entry["contract"]) == (folder, size, "result.html", 1)
+                entry["contract"]) == (folder, size, "result.html", 2)
         assert results.SlotsFor(templateId, entries) == slots, templateId
         assert results.IsTeamLayout(templateId, entries) is team, templateId
         assert results.KindOf(templateId, entries) == (
@@ -176,10 +176,9 @@ def test_the_shipped_manifests_declare_the_contract():
             block = json.loads((SHIPPED_ROOT / folder / "settings.json")
                                .read_text(encoding="utf-8"))["autona"]
             assert block["kind"] == kind, folder
-            # The thumbnails are drawn in Autona.onRender (template contract
-            # 2, ADR-008 D7 R2); the results move to it in R4.
-            assert block["contract"] == (
-                2 if kind == KIND_THUMBNAIL else 1), folder
+            # Both are drawn in Autona.onRender (template contract 2): the
+            # thumbnails since ADR-008 D7 R2, the results since R4.
+            assert block["contract"] == 2, folder
             assert block["license"] == "MIT", folder
             # A shipped package is named in core's words, not by its block.
             assert "displayName" not in block, folder

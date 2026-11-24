@@ -34,7 +34,7 @@ import {
 import {
     TemplateChoice,
     templateLabel,
-    useTemplatePackages,
+    useTemplatePackagesRead,
 } from "../PanelShell/templatePackages";
 import {
     ColorKind,
@@ -42,6 +42,8 @@ import {
     LayoutEntry,
 } from "../CommentaryPage/SideCards";
 import {LayoutCheckPanel, reportFromErrors} from "../CommentaryPage/LayoutCheck";
+import DesignPane, {RenderPayload} from "../CommentaryPage/DesignPane";
+import NewDesignActions from "../CommentaryPage/NewDesign";
 import {generatedUrl} from "../ThumbnailPage/Cards";
 import {useCharacters} from "../Top8Page";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
@@ -86,8 +88,27 @@ import {
 // not. The state cannot say whether anything did: the thumbnail's background is
 // in settings.json, and core reads board 1's unapplied edits, which the
 // published state this page follows does not carry.
+//
+// A layout on template contract 2 (ADR-008 D7 R4: the shipped ones and the
+// layout kit's) is previewed live instead, as the Thumbnail page does its
+// templates: on the same changes, GET /api/v1/result/payload (the preview's
+// payload, no renderer needed: the headless shell and a browser on the LAN
+// preview too), drawn by the layout itself in the preview listener's frame
+// (DesignPane), with its errors beside it. The image made is still the
+// desktop's off-screen render; one that failed on the layout's errors shows
+// them (result_render.errors). The first preview waits for the catalog
+// (which contract the layout is); a payload refused (no access token on the
+// LAN: PLAYERDB) or not of contract 2 falls back to the renderer's image (GET
+// /result/preview, READ). A contract 1 layout (a user's) is the image.
+//
+// The layout kit (ADR-008 D7 R4): "make a new design" and "copy for an AI"
+// under the layout select (NewDesignActions, kind "result"; the desktop's
+// shared view alone), the new layout then chosen; and the layout folders the
+// catalog did not list, with why.
 
 export const PREVIEW_DEBOUNCE_MS = 300;
+// The template contract previewed live.
+export const LIVE_CONTRACT = 2;
 // Rows are read soon after a change, several changes at once (a write's answer
 // and its echo in the state) being one read.
 export const READ_DEBOUNCE_MS = 100;
@@ -113,6 +134,27 @@ interface Description {
     // :generate answer 503 there).
     canRender: boolean;
     render: Partial<ResultRender>;
+}
+
+// GET /api/v1/result/payload.
+interface LivePayload {
+    layout: string;
+    folder: string;
+    entry: string;
+    contract: number;
+    size: [number, number];
+    rows: string;
+    payload: unknown;
+    // The config's keys whose image the live preview cannot show.
+    omitted: string[];
+}
+
+// What the live preview shows: the design framed and the render posted.
+interface LivePreview {
+    design: LayoutEntry;
+    size: [number, number];
+    render: RenderPayload;
+    omitted: string[];
 }
 
 // result_standings (core ResultService).
@@ -438,6 +480,31 @@ function ResultContent() {
     // A move awaits its answer and the read after it: until then a card may not
     // hold the row it says, and its fields are not to be edited.
     const [settling, setSettling] = React.useState(false);
+    // Bumped to read the layouts again (a new design, the live preview's
+    // reload): the catalog alone.
+    const [packageReads, setPackageReads] = React.useState(0);
+    // The layouts to choose from: the catalog's result packages (ADR-007 T1),
+    // or the description's until (unless) they are read.
+    const {packages, settled: packagesSettled, unlisted,
+           revision: packagesRevision} =
+        useTemplatePackagesRead("result", loads + packageReads);
+    // A layout the layout kit made, chosen once a reading of the catalog
+    // asked for after it is over (`after`: the readings over by then).
+    const [madeLayout, setMadeLayout] =
+        React.useState<{id: string; after: number} | null>(null);
+    // The layout chosen, as the catalog lists it (null: not listed, or the
+    // packages not read yet).
+    const layoutId = description?.layout;
+    const chosen = React.useMemo(() => packages?.find(
+        (entry) => entry.id === layoutId) ?? null, [packages, layoutId]);
+    // A layout whose live preview was refused (its payload: 401 / 403 on the
+    // LAN without the token, or not of contract 2 after all): previewed by
+    // the renderer's image instead, until the page loads again.
+    const [liveRefused, setLiveRefused] = React.useState<string | null>(null);
+    const live = chosen !== null && chosen.contract === LIVE_CONTRACT
+        && liveRefused !== chosen.id;
+    const [livePreview, setLivePreview] =
+        React.useState<LivePreview | null>(null);
 
     const fail = React.useCallback(() => setLoadFailed(true), []);
     const characters = useCharacters(codename, loads, fail);
@@ -472,8 +539,17 @@ function ResultContent() {
     const canRenderRef = React.useRef(canRender);
     canRenderRef.current = canRender;
     const loaded = description !== null;
-    const loadedRef = React.useRef(loaded);
-    loadedRef.current = loaded;
+    // Loaded, and the catalog read (or given up on): what the layout is
+    // decides how it is previewed.
+    const previewable = loaded && packagesSettled;
+    const loadedRef = React.useRef(previewable);
+    loadedRef.current = previewable;
+    const liveRef = React.useRef(live);
+    liveRef.current = live;
+    // The newest live payload asked for: an older answer is not shown.
+    const liveAsked = React.useRef(0);
+    const liveLayoutRef = React.useRef<string | null>(null);
+    liveLayoutRef.current = live ? chosen?.id ?? null : null;
     const renderRef = React.useRef(render);
     renderRef.current = render;
     const sampleRef = React.useRef(description?.sample ?? false);
@@ -688,10 +764,56 @@ function ResultContent() {
             }, () => undefined);
     }, [write, cannotRender]);
 
+    // The live preview's payload, read now: its answer is the next render.
+    const startLive = React.useCallback(() => {
+        const asked = ++liveAsked.current;
+        apiGetJson<Envelope<LivePayload>>("/api/v1/result/payload").then(
+            (body) => {
+                if (!mounted.current || asked !== liveAsked.current) {
+                    return;
+                }
+                const data = body.data;
+                if (data.contract !== LIVE_CONTRACT) {
+                    // The catalog said otherwise a moment ago: the renderer.
+                    setLiveRefused(data.layout);
+                    return;
+                }
+                setLivePreview({
+                    design: {
+                        id: data.layout,
+                        kind: "result",
+                        displayName: "",
+                        entry: data.entry,
+                        folder: data.folder,
+                        contract: data.contract,
+                        size: data.size,
+                    },
+                    size: data.size,
+                    render: {payload: data.payload, serial: asked},
+                    omitted: Array.isArray(data.omitted) ? data.omitted : [],
+                });
+            }, (error: unknown) => {
+                if (!mounted.current || asked !== liveAsked.current) {
+                    return;
+                }
+                // Any refusal (401 / 403 on the LAN without the token, 404 for
+                // a layout that cannot be read now, a failure): the renderer's
+                // image instead (READ), or its words where there is no
+                // renderer, rather than "Drawing…" for good. The layout is not
+                // asked for live again until the page loads again, so that this
+                // is told once, not on every change (the token once anyway).
+                if (liveLayoutRef.current !== null) {
+                    setLiveRefused(liveLayoutRef.current);
+                }
+                report(error);
+            });
+    }, [report]);
+
     const requestPreview = React.useCallback(() => {
         // Hidden: the reveal draws it. Not loaded yet: the first load does.
-        if (!visibleRef.current || !canRenderRef.current
-                || !loadedRef.current) {
+        // The live preview needs no renderer.
+        if (!visibleRef.current || !loadedRef.current
+                || (!canRenderRef.current && !liveRef.current)) {
             return;
         }
         if (previewTimer.current !== null) {
@@ -699,20 +821,33 @@ function ResultContent() {
         }
         previewTimer.current = setTimeout(() => {
             previewTimer.current = null;
-            if (!visibleRef.current || !canRenderRef.current) {
+            if (!visibleRef.current) {
                 return;  // Hidden meanwhile: drawn once shown.
             }
-            startPreview();
+            if (liveRef.current) {
+                startLive();
+            } else if (canRenderRef.current) {
+                startPreview();
+            }
         }, PREVIEW_DEBOUNCE_MS);
-    }, [startPreview]);
+    }, [startPreview, startLive]);
 
-    // The first preview and the post's text, once the page has its rows.
+    // The post's text, once the page has its rows.
     React.useEffect(() => {
         if (loaded) {
-            requestPreview();
             readPost();
         }
-    }, [loaded, requestPreview, readPost]);
+    }, [loaded, readPost]);
+
+    // The first preview, once the page has its rows and the catalog; and
+    // again when the layout chosen is previewed the other way (or is another
+    // live one).
+    const liveLayout = live ? chosen?.id ?? null : null;
+    React.useEffect(() => {
+        if (previewable) {
+            requestPreview();
+        }
+    }, [previewable, requestPreview, liveLayout]);
 
     // Shown again: read and drawn again, changed or not (the header). Not
     // loaded yet: the first load does.
@@ -854,13 +989,34 @@ function ResultContent() {
             rowRefusal(next), changesPicture(next)),
         [writeRows, rowRefusal]);
 
+    const relistLayouts = React.useCallback(
+        () => setPackageReads((count) => count + 1), []);
+    // A layout the layout kit made: listed again, then chosen -- once the
+    // list has it (the pulldown never shows an id it does not list), and not
+    // when the reading failed (as the Thumbnail page does).
+    const layoutCreated = React.useCallback((entry: LayoutEntry) => {
+        setMadeLayout({id: entry.id, after: packagesRevision});
+        relistLayouts();
+    }, [relistLayouts, packagesRevision]);
+    React.useEffect(() => {
+        if (madeLayout === null || packagesRevision <= madeLayout.after) {
+            return;
+        }
+        setMadeLayout(null);
+        if (packages?.some((entry) => entry.id === madeLayout.id)) {
+            sendLayout(madeLayout.id).catch(() => undefined);
+        }
+    }, [madeLayout, packagesRevision, packages, sendLayout]);
+    // The live preview's reload: the layout's page and payload, and the
+    // catalog (its manifest may have changed, or broken).
+    const reloadLive = React.useCallback(() => {
+        relistLayouts();
+        startLive();
+    }, [relistLayouts, startLive]);
+
     const layouts = description?.layouts;
-    const layoutId = description?.layout;
     const layout = layouts?.find((entry) => entry.id === layoutId);
     const kind: RowKind = layout?.team ? "teams" : "players";
-    // The layouts to choose from: the catalog's result packages (ADR-007 T1),
-    // or the description's until (unless) they are read.
-    const packages = useTemplatePackages("result", loads);
     const choices: TemplateChoice[] = React.useMemo(() => (packages
         ? packages.map((entry) => ({
             id: entry.id,
@@ -1114,13 +1270,12 @@ function ResultContent() {
     const previewError = render.status === "error"
         && render.revision === previewAsked ? render.error : "";
     // The template's errors, when this page's preview or generation failed
-    // on them (a layout on template contract 2, ADR-008 D7 R2: the shipped
-    // ones are on 1 until R4).
+    // on them (a layout on template contract 2, ADR-008 D7 R2 / R4).
     const templateFailed = render.status === "error"
         && render.error === "template_error"
         && (previewError === "template_error"
             || (result?.status === "error" && result.error === "template_error"));
-    const chosenPackage = packages?.find((entry) => entry.id === layoutId);
+    const chosenPackage = chosen ?? undefined;
     const templateReport = templateFailed
         ? reportFromErrors((rawRender as {errors?: unknown} | undefined)?.errors,
                            chosenPackage?.contract ?? 2)
@@ -1135,6 +1290,41 @@ function ResultContent() {
         folder: chosenPackage?.folder,
         contract: chosenPackage?.contract,
     };
+    const shownLive = live && livePreview !== null
+        && livePreview.design.id === chosen?.id ? livePreview : null;
+    const liveDesign = shownLive
+        ? {...shownLive.design, displayName: checkDesign.displayName} : null;
+    const livePane = live ? (
+        liveDesign && shownLive ? (
+            <DesignPane
+                designs={[liveDesign]}
+                design={liveDesign}
+                onSelect={() => undefined}
+                selectable={false}
+                renderPayload={shownLive.render}
+                size={shownLive.size}
+                // A tall layout within the pane's height, as the image's box
+                // (the check panel and the buttons keep the pane's width).
+                frameMaxWidth={`calc(60vh * ${shownLive.size[0]} / ${
+                    shownLive.size[1]})`}
+                // Its page again, the payload and the catalog: after an edit
+                // of the layout's files.
+                onReload={reloadLive}
+            />
+        ) : (
+            <Box sx={{display: "flex", gap: 1, alignItems: "center"}}>
+                <CircularProgress size={16}/>
+                <Typography variant="body2">
+                    {i18n.t("result_previewing")}
+                </Typography>
+            </Box>
+        )
+    ) : undefined;
+    // Each image the preview cannot show, in its own words.
+    const liveNote = shownLive && shownLive.omitted.length > 0
+        ? shownLive.omitted.map((key) => i18n.t(`result_live_omitted_${key}`,
+            {defaultValue: ""})).filter(Boolean).join(" ") || undefined
+        : undefined;
     const count = layout?.slots ?? description.players.length;
     // Keeps the page's rows from taking the selects away: what is disabled,
     // and how to read it again.
@@ -1174,6 +1364,10 @@ function ResultContent() {
                         loadStandings={() => loadStandings(false)}
                         kind={kind}
                         clear={clear}
+                        unlisted={unlisted}
+                        actions={<NewDesignActions kind="result"
+                                                   onCreated={layoutCreated}
+                                                   onRelist={relistLayouts}/>}
                     />
                     <RowsCard
                         kind={kind}
@@ -1205,8 +1399,8 @@ function ResultContent() {
                     layout={layout}
                     imageRevision={imageRevision}
                     sample={description.sample}
-                    previewing={previewing}
-                    previewError={previewError}
+                    previewing={previewing && !live}
+                    previewError={live ? "" : previewError}
                     generating={generating}
                     blocked={asking}
                     result={result}
@@ -1221,6 +1415,8 @@ function ResultContent() {
                                           report={templateReport}
                                           notReady={false}/>
                     ) : undefined}
+                    live={livePane}
+                    liveNote={liveNote}
                 />
             </Box>
             <ConfirmDialog

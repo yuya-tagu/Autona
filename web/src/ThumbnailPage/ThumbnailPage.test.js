@@ -1203,6 +1203,40 @@ test.each([
     }
 });
 
+test.each([
+    ["a template that cannot be read now (404)", 404],
+    ["a failure (500)", 500],
+])("a payload refused as %s falls back to the renderer's image, told once",
+   async (_how, status) => {
+    catalog = LIVE_CATALOG;
+    livePayload = status;
+    previewPort = LIVE_PORT;
+    const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+        await renderPage();
+        await settle(PREVIEW_DEBOUNCE_MS);
+        await settle();
+        expect(screen.getAllByText(i18n.t("request_failed"))).toHaveLength(1);
+        await settle(PREVIEW_DEBOUNCE_MS);
+        await settle();
+
+        expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+        expect(previews()).toBe(1);
+        expect(frame()).not.toBeInTheDocument();
+        // A change previews by the image again, without asking the payload
+        // or telling it again.
+        fireEvent.click(checkbox("thumbnail_use_sponsors"));
+        await settle();
+        await settle(PREVIEW_DEBOUNCE_MS);
+        expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+        expect(previews()).toBe(2);
+        // Told once: the payload is not asked again.
+        expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+        logged.mockRestore();
+    }
+});
+
 test("a payload not of contract 2 after all falls back to the renderer's image",
      async () => {
     catalog = LIVE_CATALOG;

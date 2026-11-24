@@ -441,7 +441,11 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 
 #### 4.4.2 リザルト
 
-一覧の正本はカタログの result パッケージ（`ResultService.LayoutEntries()`）。枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。同梱の名前は `core/CoreWords` の `result_layout_<id>`。ファイルは `settings.json`・`result.html`（`initResult(payload)` 必須）・`result.css`・`result.js`（同梱の多くは `../include/` を共有）。団体のレイアウトは `placeTeams()`（`include/result.js`）がメンバーのファイターを配置する（`data.rows` が `teams` のとき。`rows` の無い payload では `layout` が `team` で始まるとき）。
+一覧の正本はカタログの result パッケージ（`ResultService.LayoutEntries()`）。枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。同梱の名前は `core/CoreWords` の `result_layout_<id>`。ファイルは `settings.json`・`result.html`・`result.css`・`result.js`（同梱の多くは `../include/` を共有）。同梱の 6 種は契約 2（ADR-008 D7 R4。`../include/autona.js` を読み、共有の `include/result.js` の `drawResult` を各 `result.html` のインラインの `Autona.onRender(drawResult)` で登録する。`include/result.js` 自身は何も登録しない。geki は自分の `result.js` が登録する）。`include/result.js` は `autona.js` の無い契約 1 のページのために `initResult(payload)` も残す。団体のレイアウトは `placeTeams()`（`include/result.js`）がメンバーのファイターを配置する（`data.rows` が `teams` のとき。`rows` の無い payload では `layout` が `team` で始まるとき）。
+
+ページのプレビュー（R4）: 選んだレイアウトが契約 2 なら、サムネイル（§4.4.1）と同じく `GET /api/v1/result/payload`（PLAYERDB。`ResultService.PreviewPayload`。`{data, config, layout}` を `RenderAssets.ForPreview` に通したものと、レイアウトの id・フォルダ・entry・contract・大きさ・`rows`）を `DesignPane` の iframe に描く。戻り方（401 / 403・契約 2 でない）・`omitted` の文言・ヘッドレスでも出ること・契約 1 は画像のプレビューのままもサムネイルと同じ。
+
+新しいレイアウト（R4）: ページの「新しいデザインを作る」（共有ビューの中だけ。kind `result`）が `layout/include/kit/result/` から `layout/result_<名前>/` を作る（マニフェストは `rows: "players"`。チームにするなら `rows` を `"teams"` に変える）。payload のキーの表は `layout/include/result_contract.json`（`data` / `config` / `layout`。リザルトの `data` は `ResultService` が組み立てたものなので、表は閉じた集合: `BuildPayload` の作る payload は表のキーを型どおりに持ち、表に無いキーを持たない。`tests/test_result_kit.py`）。キットの `CONTRACT.md` / `AI_PROMPT.md` / `sample_payload.json`（個人 16 行）/ `sample_payload_teams.json`（チーム 8 行）は `scripts/gen_layout_kit.py` の生成物。レイアウトの選択の下に、一覧に出せなかった kind `result` のフォルダを出す。
 
 #### 4.4.3 ペイロード
 
@@ -600,7 +604,7 @@ OBS の標準ホットキーと被ると配信中に意図しない操作が走�
 
 テンプレートパッケージ（§4.4.0）のフォルダを置くだけで、ページの選択肢に出て描ける。
 
-- リザルト: `layout/{名前}/settings.json`（`{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", ...}}`）・`result.html`・`result.css`・`result.js`。`rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行は契約 1 に無い（`SLOT_COUNTS`・state の行・payload の変更で、`contract` を上げる話）。
+- リザルト: `layout/{名前}/settings.json`（`{"autona": {"kind": "result", "contract": 2, "size": [960, 1080], "rows": "players", ...}}`）・`result.html`（`../include/autona.js` を読む）・`result.css`・`result.js`（`Autona.onRender`）。`rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行は契約に無い（`SLOT_COUNTS`・state の行・payload の変更で、`contract` を上げる話）。契約 1（`initResult`）も読み続ける。リザルトのページの「新しいデザインを作る」でキットから作るのが早い（§4.4.2）。
 - サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`contract: 2`・`template`）・`thumbnail.html`（`../include/autona.js` を読む）・`thumbnail.css`・`thumbnail.js`（`Autona.onRender`）・テンプレート定義 JSON。書き方は `layout/README.md`。サムネイルのページの「新しいデザインを作る」でキットから作るのが早い（§4.4.1）。
 - 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。凍結した表と `CoreWords` は、id とフォルダ名が違う既存 8 種のためのもので足さない。
 - 触らない: state・Python（`ResultService` / `ThumbnailService` / レンダラー）・React（選択肢は `GET /api/v1/layouts?kind=` から出る）。
