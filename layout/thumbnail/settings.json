@@ -1,7 +1,7 @@
 {
   "autona": {
     "kind": "thumbnail",
-    "contract": 1,
+    "contract": 2,
     "entry": "thumbnail.html",
     "size": [1920, 1080],
     "template": "type_a.json",

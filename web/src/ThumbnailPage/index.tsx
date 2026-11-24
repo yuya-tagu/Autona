@@ -23,14 +23,23 @@ import {
 import {
     TemplateChoice,
     templateLabel,
-    useTemplatePackages,
+    useTemplatePackagesRead,
 } from "../PanelShell/templatePackages";
 import {
     IMAGE_UPLOAD_MAX_BYTES,
     UPLOAD_TIMEOUT_MS,
     readDataUrl,
 } from "../PanelShell/imageUpload";
-import {ColorKind, FeatureColorCard} from "../CommentaryPage/SideCards";
+import {
+    ColorKind,
+    FeatureColorCard,
+    LayoutEntry,
+} from "../CommentaryPage/SideCards";
+import DesignPane, {RenderPayload} from "../CommentaryPage/DesignPane";
+import {
+    LayoutCheckPanel,
+    reportFromErrors,
+} from "../CommentaryPage/LayoutCheck";
 import {
     CharactersCard,
     DesignCard,
@@ -66,8 +75,21 @@ import {
 // on every reveal. The state cannot say whether anything did: core draws and
 // titles board 1 with its unapplied edits (the desktop holds the board until
 // 反映), which the published state this page follows does not carry.
+//
+// A template on template contract 2 (ADR-008 D7 R2) is previewed live
+// instead: on the same changes, GET /api/v1/thumbnail/payload (the preview's
+// payload, no renderer needed: the headless shell and a browser on the LAN
+// preview too), drawn by the template itself in the preview listener's frame
+// (DesignPane), with its errors beside it. The generated image is still the
+// desktop's off-screen render; a generate that failed on the template's
+// errors shows them (thumbnail.render.errors). The first preview waits for
+// the catalog (which contract the template is); a payload refused (no
+// access token on the LAN: PLAYERDB) or not of contract 2 falls back to the
+// renderer's image (GET /thumbnail/preview, READ).
 
 export const PREVIEW_DEBOUNCE_MS = 300;
+// The template contract previewed live.
+export const LIVE_CONTRACT = 2;
 
 const FEATURE = "thumbnail";
 
@@ -100,6 +122,26 @@ function readRender(raw: Partial<ThumbnailRender> | undefined): ThumbnailRender 
         error: typeof raw.error === "string" ? raw.error : "",
         revision: typeof raw.revision === "number" ? raw.revision : 0,
     };
+}
+
+// GET /api/v1/thumbnail/payload.
+interface LivePayload {
+    templateId: string;
+    folder: string;
+    entry: string;
+    contract: number;
+    size: [number, number];
+    payload: unknown;
+    // The config's keys whose image the live preview cannot show.
+    omitted: string[];
+}
+
+// What the live preview shows: the design framed and the render posted.
+interface LivePreview {
+    design: LayoutEntry;
+    size: [number, number];
+    render: RenderPayload;
+    omitted: string[];
 }
 
 interface ThumbnailStateRoot {
@@ -183,6 +225,7 @@ function ThumbnailContent() {
     const rawRender = useSelector((state: ReduxState) =>
         root(state).thumbnail?.render);
     const render = readRender(rawRender);
+    const renderErrors = (rawRender as {errors?: unknown} | undefined)?.errors;
     // By value: a write's echo may bring the same colours in new objects.
     const colors = useSelector((state: ReduxState) => {
         const data = root(state);
@@ -204,7 +247,8 @@ function ThumbnailContent() {
     const [templates, setTemplates] = React.useState<ThumbnailTemplate[]>([]);
     // The templates to choose from: the catalog's thumbnail packages
     // (ADR-007 T1), or the description's until (unless) they are read.
-    const packages = useTemplatePackages("thumbnail", loads);
+    const {packages, settled: packagesSettled} =
+        useTemplatePackagesRead("thumbnail", loads);
     const choices: TemplateChoice[] = React.useMemo(() => (packages
         ? packages.map((entry) => ({
             id: entry.id,
@@ -214,6 +258,19 @@ function ThumbnailContent() {
             label: i18n.t(`thumbnail_template_${entry.id}`,
                           {defaultValue: entry.name})}))),
     [packages, templates, language]);
+    // The template chosen, as the catalog lists it (null: not listed, or
+    // the packages not read yet).
+    const templateId = settings?.template_id;
+    const chosen = React.useMemo(() => packages?.find(
+        (entry) => entry.id === templateId) ?? null, [packages, templateId]);
+    // A template whose live preview was refused (its payload: 401 / 403 on
+    // the LAN without the token, or not of contract 2 after all): previewed
+    // by the renderer's image instead, until the page loads again.
+    const [liveRefused, setLiveRefused] = React.useState<string | null>(null);
+    const live = chosen !== null && chosen.contract === LIVE_CONTRACT
+        && liveRefused !== chosen.id;
+    const [livePreview, setLivePreview] =
+        React.useState<LivePreview | null>(null);
     const [game, setGame] = React.useState<ThumbnailGame | null>(null);
     const [videoTitle, setVideoTitle] = React.useState("");
     const [canRender, setCanRender] = React.useState(true);
@@ -245,8 +302,17 @@ function ThumbnailContent() {
     visibleRef.current = visible;
     const canRenderRef = React.useRef(canRender);
     canRenderRef.current = canRender;
-    const loadedRef = React.useRef(loaded);
-    loadedRef.current = loaded;
+    const liveRef = React.useRef(live);
+    liveRef.current = live;
+    // The newest live payload asked for: an older answer is not shown.
+    const liveAsked = React.useRef(0);
+    const liveTemplateRef = React.useRef<string | null>(null);
+    liveTemplateRef.current = live ? chosen?.id ?? null : null;
+    // Loaded, and the catalog read (or given up on): what the template is
+    // decides how it is previewed.
+    const previewable = loaded && packagesSettled;
+    const loadedRef = React.useRef(previewable);
+    loadedRef.current = previewable;
     const renderRef = React.useRef(render);
     renderRef.current = render;
     const previewTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -380,10 +446,53 @@ function ThumbnailContent() {
             }, () => undefined);
     }, [write, cannotRender]);
 
+    // The live preview's payload, read now: its answer is the next render.
+    const startLive = React.useCallback(() => {
+        const asked = ++liveAsked.current;
+        apiGetJson<Envelope<LivePayload>>("/api/v1/thumbnail/payload").then(
+            (body) => {
+                if (!mounted.current || asked !== liveAsked.current) {
+                    return;
+                }
+                const data = body.data;
+                if (data.contract !== LIVE_CONTRACT) {
+                    // The catalog said otherwise a moment ago: the renderer.
+                    setLiveRefused(data.templateId);
+                    return;
+                }
+                setLivePreview({
+                    design: {
+                        id: data.templateId,
+                        kind: "thumbnail",
+                        displayName: "",
+                        entry: data.entry,
+                        folder: data.folder,
+                        contract: data.contract,
+                        size: data.size,
+                    },
+                    size: data.size,
+                    render: {payload: data.payload, serial: asked},
+                    omitted: Array.isArray(data.omitted) ? data.omitted : [],
+                });
+            }, (error: unknown) => {
+                if (!mounted.current || asked !== liveAsked.current) {
+                    return;
+                }
+                const status = apiErrorStatus(error);
+                if ((status === 401 || status === 403)
+                        && liveTemplateRef.current !== null) {
+                    // The image instead (READ); the token is told once.
+                    setLiveRefused(liveTemplateRef.current);
+                }
+                report(error);
+            });
+    }, [report]);
+
     const requestPreview = React.useCallback(() => {
         // Hidden: the reveal draws it. Not loaded yet: the first load does.
-        if (!visibleRef.current || !canRenderRef.current
-                || !loadedRef.current) {
+        // The live preview needs no renderer.
+        if (!visibleRef.current || !loadedRef.current
+                || (!canRenderRef.current && !liveRef.current)) {
             return;
         }
         if (previewTimer.current !== null) {
@@ -391,12 +500,16 @@ function ThumbnailContent() {
         }
         previewTimer.current = setTimeout(() => {
             previewTimer.current = null;
-            if (!visibleRef.current || !canRenderRef.current) {
+            if (!visibleRef.current) {
                 return;  // Hidden meanwhile: drawn once shown.
             }
-            startPreview();
+            if (liveRef.current) {
+                startLive();
+            } else if (canRenderRef.current) {
+                startPreview();
+            }
         }, PREVIEW_DEBOUNCE_MS);
-    }, [startPreview]);
+    }, [startPreview, startLive]);
 
     const requestDescribe = React.useCallback(() => {
         if (describeTimer.current !== null) {
@@ -408,12 +521,14 @@ function ThumbnailContent() {
         }, PREVIEW_DEBOUNCE_MS);
     }, [describe]);
 
-    // The first preview, once the page has its settings.
+    // The first preview, once the page has its settings; and again when the
+    // template chosen is previewed the other way (or is another live one).
+    const liveTemplate = live ? chosen?.id ?? null : null;
     React.useEffect(() => {
-        if (loaded) {
+        if (previewable) {
             requestPreview();
         }
-    }, [loaded, requestPreview]);
+    }, [previewable, requestPreview, liveTemplate]);
 
     // Shown again: drawn and titled again, changed or not (the header). Not
     // loaded yet: the first load draws.
@@ -627,6 +742,56 @@ function ThumbnailContent() {
         || previewAsked > render.revision);
     const previewError = render.status === "error"
         && render.revision === previewAsked ? render.error : "";
+    // The template's errors, when this page's preview or generation failed
+    // on them.
+    const templateFailed = render.status === "error"
+        && render.error === "template_error"
+        && (previewError === "template_error"
+            || (result?.status === "error" && result.error === "template_error"));
+    const templateReport = templateFailed
+        ? reportFromErrors(renderErrors, LIVE_CONTRACT) : null;
+    const templateName = chosen
+        ? templateLabel(chosen, "thumbnail_template_", language)
+        : settings.template_id;
+    const checkDesign: LayoutEntry = {
+        id: chosen?.id ?? settings.template_id,
+        kind: "thumbnail",
+        displayName: templateName,
+        entry: chosen?.entry ?? "thumbnail.html",
+        folder: chosen?.folder,
+        contract: chosen?.contract,
+    };
+    const shownLive = live && livePreview !== null
+        && livePreview.design.id === chosen?.id ? livePreview : null;
+    const liveDesign = shownLive
+        ? {...shownLive.design, displayName: templateName} : null;
+    const livePane = live ? (
+        liveDesign && shownLive ? (
+            <DesignPane
+                designs={[liveDesign]}
+                design={liveDesign}
+                onSelect={() => undefined}
+                selectable={false}
+                renderPayload={shownLive.render}
+                size={shownLive.size}
+                // Its page again, and the payload: after an edit of the
+                // template's files.
+                onReload={startLive}
+            />
+        ) : (
+            <Box sx={{display: "flex", gap: 1, alignItems: "center"}}>
+                <CircularProgress size={16}/>
+                <Typography variant="body2">
+                    {i18n.t("thumbnail_previewing")}
+                </Typography>
+            </Box>
+        )
+    ) : undefined;
+    // Each image the preview cannot show, in its own words.
+    const liveNote = shownLive && shownLive.omitted.length > 0
+        ? shownLive.omitted.map((key) => i18n.t(`thumbnail_live_omitted_${key}`,
+            {defaultValue: ""})).filter(Boolean).join(" ") || undefined
+        : undefined;
 
     return (
         <Box
@@ -668,12 +833,19 @@ function ThumbnailContent() {
                         desktop={desktop}
                         render={render}
                         imageRevision={imageRevision}
-                        previewing={previewing}
-                        previewError={previewError}
+                        previewing={previewing && !live}
+                        previewError={live ? "" : previewError}
                         generating={generating !== null}
                         blocked={asking || uploading > 0}
                         result={result}
                         generate={generate}
+                        live={livePane}
+                        liveNote={liveNote}
+                        check={templateReport ? (
+                            <LayoutCheckPanel design={checkDesign}
+                                              report={templateReport}
+                                              notReady={false}/>
+                        ) : undefined}
                     />
                     <VideoTitleCard auto={videoTitle}/>
                 </Stack>

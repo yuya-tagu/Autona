@@ -936,6 +936,25 @@ def get_thumbnail_preview():
                     headers={"Cache-Control": "no-store"})
 
 
+@api_v1.route("/thumbnail/payload")
+@api_handler
+def get_thumbnail_payload():
+    # What the page's live preview of a contract 2 template draws (ADR-008 D7
+    # R2): {"templateId", "folder", "entry", "contract", "size": [w, h],
+    # "payload": {data, config, template}, "omitted": [config keys]}. The
+    # preview image's payload, with the state's unpublished edits: guarded
+    # like the pending board (PLAYERDB). An image the preview listener does
+    # not serve is "" and its key in "omitted". Drawn by the browser: no
+    # renderer needed. Nothing is written.
+    try:
+        payload = WebOps.get_thumbnail_payload()
+    except (OSError, ValueError):
+        logger.warning("v1 /thumbnail/payload: the template cannot be read")
+        raise ApiError(NOT_FOUND, "the thumbnail template cannot be read",
+                       404)
+    return ok(data=payload, revision=current_revision())
+
+
 @api_v1.route("/result")
 @api_handler
 def get_result():

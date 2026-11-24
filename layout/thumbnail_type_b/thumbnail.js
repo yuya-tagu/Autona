@@ -5,39 +5,36 @@
  * contains tournament name, main icon, phase/match text, and best-of.
  * Player names are overlaid as bottom strips on each character area.
  *
- * Called from Python via page().runJavaScript("initThumbnail(payload)").
- * payload = { data, config, template }
+ * Template contract 2 (layout/README.md): drawn by Autona.onRender
+ * (../include/autona.js), from the app's off-screen renderer and from the
+ * Web UI's live preview. payload = { data, config, template }. An exception
+ * here is the render's error: no picture is taken, and the app shows it.
  */
 
 let _fontsInjected = false;
 
-async function initThumbnail(payload) {
-  try {
-    const { data, config, template } = payload;
+async function drawThumbnail(payload) {
+  const { data, config, template } = payload;
 
-    clearPreviousRender();
-    injectFonts();
-    applyLayout(template);
-    applyFeatureColors(config);
-    setBackground(data, config, template);
-    await placeCharacters(data, config, template);
-    setTournamentName(data, config, template);
-    setMainIcon(config, template);
-    setPhaseMatch(data, config, template);
-    setVenueInfo(data, config, template);
-    setPlayerNames(data, config, template);
+  clearPreviousRender();
+  injectFonts();
+  applyLayout(template);
+  applyFeatureColors(config);
+  setBackground(data, config, template);
+  await placeCharacters(data, config, template);
+  setTournamentName(data, config, template);
+  setMainIcon(config, template);
+  setPhaseMatch(data, config, template);
+  setVenueInfo(data, config, template);
+  setPlayerNames(data, config, template);
 
-    await document.fonts.ready;
-    // setTimeout is more reliable than rAF in off-screen QWebEngineView:
-    // rAF may fire before compositor finishes decoding background-image data URIs
-    await new Promise((r) => setTimeout(r, 100));
-
-    document.title = "RENDER_READY";
-  } catch (e) {
-    console.error("initThumbnail error:", e);
-    document.title = "RENDER_READY";
-  }
+  await document.fonts.ready;
+  // setTimeout is more reliable than rAF in off-screen QWebEngineView:
+  // rAF may fire before compositor finishes decoding background-image data URIs
+  await new Promise((r) => setTimeout(r, 100));
 }
+
+Autona.onRender(drawThumbnail);
 
 // --- Clear previous render ---
 
@@ -205,7 +202,10 @@ function setBackground(data, config, template) {
   // cause of UI stalls during preview updates. Switching the selection changes
   // the resolved path (hence the URL), so QWebEngine re-fetches naturally
   // without one — only an in-place edit of the same file would be missed.
-  $(".background").html(`<img src="${resolved}" />`);
+  // Built with the DOM, not markup: the path is the operator's text.
+  const image = document.createElement("img");
+  image.src = resolved;
+  $(".background").empty().append(image);
 }
 
 // --- Character placement ---

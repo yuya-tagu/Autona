@@ -336,14 +336,26 @@ paths:
   `preview_unavailable` で断る）。リスナーが出さない画像は `core/RenderAssets` が描画の間だけ id で持ち（`/render-asset/<id>`）、
   ページは専用の off-the-record のプロファイルで動き、そのプロファイルのフィルタが自分のオリジンと `data:` / `blob:` に絞る
   （WebRTC の UDP は止められない）。pin: `tests/test_render_isolation.py`
+- **テンプレートのフォルダ（kind `thumbnail` / `result`。`LayoutCatalog.IsTemplateFolder`）のファイルには両方のポートで CSP
+  `WebAccess.TEMPLATE_CONTENT_POLICY` と `no-cache` を付ける**（ブラウザの iframe のプレビューにはレンダラーのフィルタが無いため。ADR-008 D7 R2）。
+  緩めない（`connect-src` に外部を足さない）。共有の部品 `layout/include/` も `no-cache`（CSP は付けない。更新後に古い `autona.js` で描かない）。
+  pin: `tests/test_web_access.py`
+- **ブラウザのプレビューは何も持たない**: payload は `GET /api/v1/thumbnail/payload`（PLAYERDB。未反映の編集を含むので READ にしない）で、
+  `RenderAssets.ForPreview` がリスナーの出さない画像を `""` にして `omitted` に名前を出す。`user_data/thumbnail_background_*` をプレビューの
+  リスナーで配らない（LAN 有効時はトークンなしで LAN から読める）
 - **デザインのプレビュー（`web/src/CommentaryPage/DesignPane.tsx`）はプレビュー用のリスナーから読む**（`sandbox="allow-scripts allow-same-origin"`）。
   `previewPort` が無ければ iframe を出さない（同じオリジンに代えない）。iframe がフォーカスを持ったら外す
 - **フレームからの `message` を受けるのは `DesignPane` だけ**（ADR-008 D3。`layout/include/autona.js` のエラーと `autona:ready`）。
+  逆向き（ページ → フレーム）に送るのも `DesignPane` の `renderPayload`（契約 2 のテンプレート。ADR-008 D7 R2）だけで、形はちょうど
+  `{type: "autona:render", serial, payload}`、宛先はプレビューのオリジン、`autona:ready` の後に serial ごとに 1 回。iframe の URL は
+  `?autonaParent=<ページのオリジン>` を持ち、`autona.js` は `window.parent` から、`event.origin` がそのオリジンの、この形で serial が増える
+  ものだけを受け、返事（エラーと `autona:rendered`）もそのオリジン宛てに送る（pin: `tests/test_template_contract.py`・`DesignPane.test.js`）。
   ほかの Web 側に `message` のリスナーを足さない。`DesignPane` の受け方は次の形から広げない（pin: `DesignPane.test.js`）:
   - `event.source` がそのページの iframe の `contentWindow`（Board はデザインとポップアップの 2 枚）と一致し、`event.origin` がプレビューのオリジンのものだけ。
     別のフレーム・入れ子のフレーム・本体のオリジンからのものは捨てる
-  - 形はちょうど `{type: "autona:ready" | "autona:error", contract, kind, message, source, line, column}`（`LayoutCheck.parseLayoutMessage`。
-    キーの過不足・型の違いは捨てる）。文字列は長さ・件数は数に上限を付け、**テキストとしてだけ**描く（HTML にしない）
+  - 形はちょうど `{type: "autona:ready" | "autona:error", contract, kind, message, source, line, column}`（`LayoutCheck.parseLayoutMessage`）と、
+    デザインのフレームからの `{type: "autona:rendered", contract: 2, serial, ok}`（`parseRenderedMessage`。「描画中…」を外すだけ）。
+    キーの過不足・型の違いは捨てる。文字列は長さ・件数は数に上限を付け、**テキストとしてだけ**描く（HTML にしない）
   - メッセージで動くのは確認の欄の表示だけ（state・ナビゲーション・クリップボード・設定には触らない。コピーは利用者のクリック）
 
 ### 共有ビュー（`AutonaWebPanelHost`）

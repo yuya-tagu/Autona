@@ -630,15 +630,21 @@ def test_the_sample_parameter_draws_the_sample_instead_of_the_state(
 @needs_node
 def test_autona_exposes_the_contract_number_and_nothing_else(tmp_path):
     [result] = run_scenarios(tmp_path, [{"steps": []}])
+    # onRender is template contract 2's (tests/test_template_contract.py).
     assert result["autona"] == {"contract": contract()["contract"],
-                                "keys": ["contract", "onUpdate", "raw"]}
+                                "keys": ["contract", "onUpdate", "onRender",
+                                         "raw"]}
 
 
 @needs_node
-def test_without_globals_it_says_so_and_defines_nothing(tmp_path):
+def test_without_globals_an_overlay_is_told_so(tmp_path):
+    # Autona is there (a template on contract 2 has no globals.js either);
+    # an overlay -- it called onUpdate, not onRender -- is told what it
+    # lacks once its scripts have run, and nothing is loaded.
     [result] = run_scenarios(tmp_path, [{
         "layout": "LoadEverything = undefined;", "steps": []}])
-    assert result["autona"] is None
+    assert result["autona"] is not None
+    assert result["loads"] == 0
     assert any("globals.js" in text for level, text in result["errors"]
                if level == "error")
 

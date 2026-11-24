@@ -311,6 +311,72 @@ L2 と L3 はどちらもデザイン一覧の UI と SHELL のルートに触�
 | **R3 サムネイルのキット** | 接頭辞・キット・「新しいデザインを作る」・受け入れ試験 | 高 |
 | **R4 リザルトのキット** | R3 と同じ形 | 通常 |
 
+**R2 の実装**（2026-11-24）:
+
+- **契約の見分け方はマニフェストの `contract`**（`settings.json` の `autona.contract`。`LayoutCatalog.TEMPLATE_CONTRACTS = (1, 2)`。
+  レンダラーはカタログのエントリの値で分岐する）。ページの中身（`Autona.onRender` を呼んだか・`initThumbnail` があるか）で推測しない:
+  読み込みの途中で落ちたページを契約違いと取り違えず、「autona.js を読めていない」と正しく言えるため。知らない番号は一覧に出さない（D3 のまま）
+- **contract 2 の描画**: レンダラーはページを読み終えたら `Autona._render(payload, serial)` を呼ぶ。`autona.js` が `onRender` の関数を
+  呼び、返った promise・フォント（`document.fonts.ready`）・`<img>` と CSS の背景の decode を待ち（上限 5 秒）、タイトルを
+  `AUTONA_RENDER <serial> ok | failed` にする。`RENDER_READY` は contract 2 のページでは無視する（撮るタイミングは contract 1 と同じ
+  `RENDER_PAINTED`）。`failed` のときは `Autona._renderResult(serial)` でエラーを読み、絵を撮らない。例外（同期の throw・promise の失敗・
+  描画中の `error` / `unhandledrejection` イベント）・`onRender` を呼んでいない・**最初の描画より前**（読み込み中）のエラーが失敗になる。
+  描き終えた後のエラー（`requestAnimationFrame` / `setTimeout` / 待たれない promise）は**その描画の**エラーとして足し、次の描画には
+  持ち越さない（`Autona._renderResult` は直近 4 回ぶんを持つ）。レンダラーは `ok` の後、撮る直前（`RENDER_PAINTED` の後）に
+  `_renderResult` を読み直し、エラーがあれば `TemplateError` にする。タイムアウトのときも先に読み、捕まえたエラーがあれば
+  `TemplateError`、無ければ `render_timeout`（どちらもページを読み直す）。描画は **1 回ずつ**（描画中に来た分は最新の 1 件だけ待たせ、
+  間の serial は描かない。古い描画が新しい描画を上書きしない）。
+  `autona.js` が無いページは呼び出しのスクリプトがタイトルを `AUTONA_RENDER <serial> missing` にし、即座に失敗にする（タイムアウトを待たない）
+- **レンダラーはページを読み直す**: 同じテンプレート ID でも、前回 `missing` だった・カタログの `contract` が読み込んだ時と違う・
+  フォルダのファイル（`settings.json` 以外。大きさの変更は `_fit_view` が追う）の大きさか mtime が変わった、のどれかなら読み直す。
+  編集したテンプレートを「生成」したときに古いページで撮らないため。`layout/include/`（`autona.js`）は `no-cache`（`max-age=0` で
+  再検証、変わっていなければ 304）で配り、更新後に古い部品で描かない
+- **エラーの経路**: `RenderLane.TemplateError`（値は `template_error`。`TEMPLATE_ERROR`）が `.errors` を持ち、`done(pixmap, error)` を
+  そのまま通る。`RenderLane` が `thumbnail.render.errors` / `result_render.errors` に載せる（`{kind, message, source, line, column}`。
+  20 件・message 500 字・source 300 字で切る。行・列が分からなければ 0。`StateSchema` の `Read*Render` がリストとして読む）。
+  ログには件数と kind だけ（message は選手名・パスを含みうる）。Web は `thumbnail_error_template_error` / `result_error_template_error` と、
+  `LayoutCheck.reportFromErrors` で L3 のエラーの欄（`_template` の文言・`onRender` のヒント・AI 用のコピー）に出す。
+  サムネイルのページとリザルトのページ（プレビュー・生成が `template_error` で落ちたとき。同梱のリザルトは R4 まで contract 1 なので
+  出るのはユーザーが置いた contract 2 のもの）の両方。SCORE ボタンの投稿（`ScorePage`）と旧来の同期の生成（`DrawThumbnailNow`）は
+  1 件目の message を添えて失敗を言う（ログには `template_error` の値だけ）
+- **errors の message は state で全接続に配る（受け入れる）**: `thumbnail.render.errors` / `result_render.errors` は state なので、
+  WebSocket の購読者（LAN のブラウザ・オーバーレイ）にも届き、message は選手名やパスを含みうる。受け入れる: 同じ内容は
+  READ で読めるプレビューの PNG（`GET /api/v1/thumbnail/preview`）に描かれており、エラーの message はそれ以上のものを足さない。
+  payload のルートを PLAYERDB にしたのは別の理由（未反映の編集＝まだどこにも出していない値と、選手 DB の全体に近い内容を一度に返すため）で、
+  両者は「既に出ている内容と同じか」で線を引いており矛盾しない
+- **iframe のプレビュー**: サムネイルのページは選んだテンプレートが contract 2 なら、レンダラーに頼まず `GET /api/v1/thumbnail/payload`
+  （`ThumbnailService.PreviewPayload`）で payload を受け、`DesignPane`（選択欄なし・テンプレートの大きさ）の iframe に
+  `{type: "autona:render", serial, payload}` を `postMessage` する（プレビューのオリジン宛て・`autona:ready` の後・serial ごとに 1 回。
+  2 回目以降の serial はエラーの欄を空にしてから）。iframe の URL は `?autonaParent=<ページのオリジン>` を持ち、`autona.js` は
+  親（`window.parent`）から、そのオリジン（`event.origin` と一致）の、ちょうどこの形で serial が増えるものだけを受け、エラーと
+  `{type: "autona:rendered", contract: 2, serial, ok}` をそのオリジン宛てに返す（`autonaParent` が無いか不正なら描画を受けない）。
+  ページは `autona:rendered` が今の serial に届くまで「エラーはありません」を出さず「描画中…」と出す。再読み込みのボタン
+  （`onReload`）はページと payload を読み直す。最初のプレビューはカタログ（テンプレートの契約）を読み終えてから出す。
+  payload が 401 / 403（LAN でトークンなし）か contract 2 でなかったときは、そのテンプレートはレンダラーの画像
+  （`GET /thumbnail/preview`、READ）でプレビューする（トークンの案内は 1 回）。
+  レンダラーが要らないのでヘッドレスでも LAN のブラウザでも出る（生成ボタンはデスクトップのまま）。本番の PNG は今までどおりオフスクリーン描画。
+  contract 1 のテンプレート（ユーザーが置いたもの）は今までどおりレンダラーの画像でプレビューする
+- **payload のルートは PLAYERDB**: 未反映の編集（held のライブ値）と選手名を含むため。v1 の READ にするとプレビューのリスナーと
+  第三者のレイアウトから読める。描画は要らないのでヘッドレスでも 200
+- **配信していない背景は出さない（安全側）**: `RenderAssets.ForPreview` は `ForRender` と同じ読み方で、**何も持たない**。
+  持つはずだったファイル（アップロードした背景・旧版の絶対パス）は `""`（テンプレートの既定を描く）にし、キーを `omitted` で返す。
+  ページはキーごとの文言（`thumbnail_live_omitted_background_path` / `_main_icon_path`）で「このプレビューに出ない（生成した画像には入る）」と出す。
+  不採用: プレビューのリスナーで `user_data/thumbnail_background_*` を配る（LAN 有効時は全アドレスに bind しているので、トークンなしで
+  LAN の誰でも読める。`/render-asset/` はループバックかつ描画中だけという R1 の線を崩す）
+- **テンプレートのフォルダに CSP**: kind `thumbnail` / `result` のフォルダ（`LayoutCatalog.IsTemplateFolder`。一覧に出ないものも）の
+  ファイルは両方のポートで `WebAccess.TEMPLATE_CONTENT_POLICY`（`default-src 'self'`・`connect-src 'self'`・`worker-src` / `frame-src` /
+  `object-src` / `form-action` は `'none'` ほか）を付け、`no-cache` で配る（`IsTemplateFolder` はマニフェストの大きさと mtime で答えを覚え、
+  要求ごとに `settings.json` を読まない）。ブラウザの iframe にはレンダラーの要求フィルタが無いので、
+  ADR-007 論点 3 = A（外部へ送らない）をここで保つ。**残るリスク**: フレーム自身の別の URL への遷移（`navigate-to` は無い。
+  sandbox に `allow-top-navigation` は無いので親は動かせない）と WebRTC（R1 と同じ）
+- **同梱のサムネイル（type_a / type_b）は contract 2 へ移した**（同じ描画を `Autona.onRender` で。contract 1 の写しと画素が同じことを
+  `tests/test_render_platform.py` で確かめる。背景の `<img>` はマークアップでなく DOM で作る: パスは操作者の文字列）。リザルトは contract 1 のまま（R4 で移す）。contract 1 の `../../` の相対パスは読み続ける
+- pin: `tests/test_template_contract.py`（node の vm。描画後のエラーの帰属・1 回ずつの描画・`autonaParent` の検査）・
+  `tests/test_thumbnail_render.py`（実 QtWebEngine の contract 2。撮る直前の読み直し・タイムアウト時のエラー・ページの読み直し）・
+  `tests/test_api_v1_thumbnail.py`・`tests/test_web_access.py`・`tests/test_template_packages.py`・`DesignPane.test.js`・
+  `ThumbnailPage.test.js`・`ResultPage.test.js`・`ScorePage.test.js`・
+  `web/e2e/thumbnail.spec.ts`（ヘッドレスの実ブラウザで、CSP の下で同梱の type_a が描けること・例外が確認の欄に出ること）
+
 ## Alternatives considered
 
 - **キットと文書だけ作り、生の state のパスを書いて渡す**: 一番早いが、問題 2（約束が無い）が残る。内部の整理のたびに第三者のレイアウトが

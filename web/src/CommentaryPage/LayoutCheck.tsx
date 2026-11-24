@@ -16,6 +16,12 @@ import {LayoutEntry, ManifestWarning, UnlistedFolder} from "./SideCards";
 // list to a count, and all of it is rendered as text (no HTML). It moves
 // nothing but this panel: no state, no navigation, no clipboard (the copy is
 // the operator's click).
+//
+// A thumbnail template on template contract 2 (ADR-008 D7 R2) is checked the
+// same way: its live preview's frame posts what autona.js caught while it
+// drew (kind "onRender" among them), and a generate that failed on the
+// template's error publishes the same errors (thumbnail.render.errors), which
+// reportFromErrors turns into a report for this panel.
 
 export const MESSAGE_MAX = 500;
 export const SOURCE_MAX = 300;
@@ -30,7 +36,8 @@ export const READY_TIMEOUT_MS = 5000;
 const MESSAGE_KEYS = ["type", "contract", "kind", "message", "source", "line",
                       "column"];
 const TYPES = ["autona:ready", "autona:error"];
-const KINDS = ["ready", "onUpdate", "error", "unhandledrejection", "autona"];
+const KINDS = ["ready", "onUpdate", "onRender", "error",
+               "unhandledrejection", "autona"];
 
 export interface LayoutMessage {
     type: "autona:ready" | "autona:error";
@@ -55,10 +62,13 @@ export interface LayoutReport {
     errors: LayoutError[];
     // Errors past ERRORS_MAX.
     dropped: number;
+    // The newest render a template's frame said it drew (autona:rendered;
+    // ADR-008 D7 R2), null for none.
+    rendered: number | null;
 }
 
 export const EMPTY_REPORT: LayoutReport = {
-    ready: false, contract: null, errors: [], dropped: 0};
+    ready: false, contract: null, errors: [], dropped: 0, rendered: null};
 
 function clip(text: string, max: number): string {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -109,6 +119,31 @@ export function parseLayoutMessage(data: unknown): LayoutMessage | null {
     };
 }
 
+// What autona.js posts once a frame drew a render (ADR-008 D7 R2), or null
+// for anything else: exactly {type: "autona:rendered", contract: 2, serial,
+// ok}.
+const RENDERED_KEYS = ["type", "contract", "serial", "ok"];
+
+export function parseRenderedMessage(
+    data: unknown,
+): {serial: number; ok: boolean} | null {
+    if (typeof data !== "object" || data === null || Array.isArray(data)
+            || Object.getPrototypeOf(data) !== Object.prototype) {
+        return null;
+    }
+    const record = data as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length !== RENDERED_KEYS.length
+            || !RENDERED_KEYS.every((key) => keys.includes(key))
+            || record.type !== "autona:rendered" || record.contract !== 2
+            || typeof record.serial !== "number"
+            || !Number.isInteger(record.serial) || record.serial < 1
+            || typeof record.ok !== "boolean") {
+        return null;
+    }
+    return {serial: record.serial, ok: record.ok};
+}
+
 // The report with `message` (from frame `frame`) added: a repeat counts.
 export function addMessage(report: LayoutReport, message: LayoutMessage,
                            frame: string): LayoutReport {
@@ -138,9 +173,52 @@ export function addMessage(report: LayoutReport, message: LayoutMessage,
             errors: [...report.errors, {...message, frame, count: 1}]};
 }
 
+// A thumbnail / result template (ADR-007), not an overlay: its page draws in
+// Autona.onRender, and its words say template contract.
+export function isTemplate(design: LayoutEntry): boolean {
+    return design.kind === "thumbnail" || design.kind === "result";
+}
+
+// The page's path under the app's folder: a template package's folder is
+// not its id (a shipped one's id is not its folder's name).
+function designPath(design: LayoutEntry): string {
+    return `layout/${design.folder ?? design.id}/${design.entry}`;
+}
+
+// The errors a render published (thumbnail.render.errors: core/RenderLane.
+// TemplateErrors, line / column 0 when not known) as a report, or null when
+// there are none. Each read as a frame's message is (parseLayoutMessage).
+export function reportFromErrors(errors: unknown,
+                                 contract: number): LayoutReport | null {
+    if (!Array.isArray(errors)) {
+        return null;
+    }
+    let report = EMPTY_REPORT;
+    errors.forEach((item) => {
+        if (typeof item !== "object" || item === null) {
+            return;
+        }
+        const {kind, message, source, line, column} =
+            item as Record<string, unknown>;
+        const parsed = parseLayoutMessage({
+            type: "autona:error", contract, kind, message, source,
+            line: line === 0 ? null : line,
+            column: column === 0 ? null : column,
+        });
+        if (parsed !== null) {
+            report = addMessage(report, parsed, "render");
+        }
+    });
+    return report.errors.length > 0 ? {...report, contract} : null;
+}
+
 // The hint for an error: a key of the locale files (layout_check_hint_*).
-export function hintKey(error: LayoutMessage): string {
+// `template`: the error is a template's (isTemplate).
+export function hintKey(error: LayoutMessage, template = false): string {
     const text = error.message;
+    if (template && /Autona\.onRender|include\/autona\.js/.test(text)) {
+        return "layout_check_hint_on_render_setup";
+    }
     if (/globals\.js before autona\.js/.test(text)) {
         return "layout_check_hint_globals";
     }
@@ -164,6 +242,9 @@ export function hintKey(error: LayoutMessage): string {
     }
     if (error.kind === "onUpdate") {
         return "layout_check_hint_on_update";
+    }
+    if (error.kind === "onRender") {
+        return "layout_check_hint_on_render";
     }
     return "layout_check_hint_generic";
 }
@@ -197,9 +278,11 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
                          notReady: boolean): string {
     const ja = i18n.getFixedT("ja");
     const contract = report.contract ?? design.contract ?? null;
-    const lines = [ja("layout_check_ai_intro", {
+    const template = isTemplate(design);
+    const words = template ? "_template" : "";
+    const lines = [ja(`layout_check_ai_intro${words}`, {
         name: design.displayName,
-        path: `layout/${design.id}/${design.entry}`,
+        path: designPath(design),
         contract: contract === null ? "—" : String(contract),
     }), ""];
     (design.warnings ?? []).forEach((warning) => {
@@ -212,7 +295,7 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
     });
     if (notReady) {
         lines.push(`[!] ${ja("layout_check_not_ready")}`,
-                   `    ${ja("layout_check_hint_label")}: ${ja("layout_check_not_ready_hint")}`,
+                   `    ${ja("layout_check_hint_label")}: ${ja(`layout_check_not_ready_hint${words}`)}`,
                    "");
     }
     report.errors.forEach((error, index) => {
@@ -221,31 +304,45 @@ export function aiReport(design: LayoutEntry, report: LayoutReport,
         if (error.count > 1) {
             lines.push(`    ${ja("layout_check_count", {count: error.count})}`);
         }
-        lines.push(`    ${ja("layout_check_hint_label")}: ${ja(hintKey(error))}`);
+        lines.push(`    ${ja("layout_check_hint_label")}: ${ja(hintKey(error, template))}`);
         lines.push("");
     });
     if (report.dropped > 0) {
         lines.push(ja("layout_check_dropped", {count: report.dropped}), "");
     }
-    lines.push(ja("layout_check_ai_outro"));
+    lines.push(ja(`layout_check_ai_outro${words}`));
     return lines.join("\n");
 }
 
 // The errors a shown layout told, or that it did not say it is ready, or that
 // it is ready with none; nothing for a layout that says nothing.
-export function LayoutCheckPanel({design, report, notReady}: {
+export function LayoutCheckPanel({design, report, notReady, drawing = false}: {
     design: LayoutEntry;
     report: LayoutReport;
     // Expected to use autona.js and not ready within READY_TIMEOUT_MS.
     notReady: boolean;
+    // A template's render posted and not said drawn yet: no "no errors"
+    // before it is (ADR-008 D7 R2).
+    drawing?: boolean;
 }) {
     const hasErrors = report.errors.length > 0;
     const warnings = design.warnings ?? [];
+    const template = isTemplate(design);
+    const words = template ? "_template" : "";
+    if (!hasErrors && !notReady && warnings.length === 0 && drawing) {
+        return (
+            <Typography variant="body2" color="text.secondary" role="status"
+                        aria-label={i18n.t("layout_check_title")}>
+                {i18n.t("layout_check_drawing_template", {
+                    contract: report.contract ?? design.contract ?? "—"})}
+            </Typography>
+        );
+    }
     if (!hasErrors && !notReady && warnings.length === 0) {
         return report.ready ? (
             <Typography variant="body2" color="success.main" role="status"
                         aria-label={i18n.t("layout_check_title")}>
-                {i18n.t("layout_check_clean", {
+                {i18n.t(`layout_check_clean${words}`, {
                     contract: report.contract ?? design.contract ?? "—"})}
             </Typography>
         ) : null;
@@ -276,7 +373,7 @@ export function LayoutCheckPanel({design, report, notReady}: {
             sx={{"& .MuiAlert-message": {minWidth: 0, flex: 1}}}
         >
             <Typography variant="subtitle2" component="h3">
-                {i18n.t("layout_check_heading", {
+                {i18n.t(`layout_check_heading${words}`, {
                     name: design.displayName,
                     contract: contract === null ? "—" : String(contract),
                 })}
@@ -306,7 +403,7 @@ export function LayoutCheckPanel({design, report, notReady}: {
                             {i18n.t("layout_check_not_ready")}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t("layout_check_not_ready_hint")}`}
+                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(`layout_check_not_ready_hint${words}`)}`}
                         </Typography>
                     </Box>
                 )}
@@ -324,7 +421,7 @@ export function LayoutCheckPanel({design, report, notReady}: {
                                     : "")}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(hintKey(error))}`}
+                            {`${i18n.t("layout_check_hint_label")}: ${i18n.t(hintKey(error, template))}`}
                         </Typography>
                     </Box>
                 ))}

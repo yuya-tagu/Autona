@@ -67,10 +67,73 @@ RENDER_FAILED = "render_failed"  # the renderer gave no image, or did not start
 # not up): the shell's renderer refuses rather than draw from file:// (ADR-007
 # D4). The renderer says it as its error, which is published as it is.
 PREVIEW_UNAVAILABLE = "preview_unavailable"
+# The template said its drawing failed (template contract 2, ADR-008 D7 R2:
+# layout/include/autona.js's Autona.onRender threw, or the page had an
+# error): no picture is taken, and what it reported is the published result's
+# `errors`. The renderer says it as a TemplateError.
+TEMPLATE_ERROR = "template_error"
 CANCELLED = "cancelled"         # stopped by the shutdown
 SAVE_FAILED = ImageImport.SAVE_FAILED
 # What Preview / Generate answer instead of a revision.
 BUSY = "busy"
+
+# A template's errors, as the published result carries them (TemplateErrors):
+# at most this many, each {kind, message, source, line, column} -- the kinds
+# autona.js tells, its strings cut to its lengths, line / column 0 when not
+# known (the state takes no None: its deltas would not carry it).
+TEMPLATE_ERRORS_MAX = 20
+TEMPLATE_ERROR_KINDS = ("onRender", "error", "unhandledrejection", "autona")
+TEMPLATE_MESSAGE_MAX = 500
+TEMPLATE_SOURCE_MAX = 300
+
+
+def _Clip(text, limit):
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _Position(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        and 0 < value < 10 ** 9 else 0
+
+
+def TemplateErrors(raw) -> list:
+    """`raw` -- what a template reported, a list of dicts -- as the published
+    result carries it: the well-formed ones (a known kind, a message), each
+    {kind, message, source, line, column}, at most TEMPLATE_ERRORS_MAX.
+    Anything else is left out: the page is anyone's script."""
+    errors = []
+    if not isinstance(raw, (list, tuple)):
+        return errors
+    for item in raw:
+        if len(errors) >= TEMPLATE_ERRORS_MAX:
+            break
+        if not isinstance(item, dict) \
+                or item.get("kind") not in TEMPLATE_ERROR_KINDS \
+                or not isinstance(item.get("message"), str):
+            continue
+        source = item.get("source")
+        errors.append({
+            "kind": item["kind"],
+            "message": _Clip(item["message"], TEMPLATE_MESSAGE_MAX),
+            "source": _Clip(source, TEMPLATE_SOURCE_MAX)
+            if isinstance(source, str) else "",
+            "line": _Position(item.get("line")),
+            "column": _Position(item.get("column")),
+        })
+    return errors
+
+
+class TemplateError(str):
+    """A render's error when the template reported that its drawing failed:
+    the code TEMPLATE_ERROR (it is that string: compared, logged and passed on
+    as any other error code), with what the template reported, ``errors``
+    (TemplateErrors). The renderers' takers pass it on as it is; the lane
+    publishes the errors with the code."""
+
+    def __new__(cls, errors=()):
+        made = super().__new__(cls, TEMPLATE_ERROR)
+        made.errors = TemplateErrors(list(errors))
+        return made
 
 
 class RenderDataMissing(Exception):
@@ -173,7 +236,7 @@ class RenderLane:
     # ── what a service says ──────────────────────────────────────────────
 
     def _ReadRender(self) -> dict:
-        """The published result: {status, path, error, revision}."""
+        """The published result: {status, path, error, revision, errors}."""
         raise NotImplementedError
 
     def _RunPayload(self, kind):
@@ -302,6 +365,11 @@ class RenderLane:
         files are a job's."""
         if encode is None:
             logger.error(f"{self.LOG_NAME}: the render failed: {error}")
+            if error == TEMPLATE_ERROR:
+                # What the template reported goes out with the code.
+                self._Ended(kind, revision, (ERROR, TEMPLATE_ERROR, list(
+                    getattr(error, "errors", ()))))
+                return
             self._Ended(kind, revision, (ERROR, PREVIEW_UNAVAILABLE
                                          if error == PREVIEW_UNAVAILABLE
                                          else RENDER_FAILED))
@@ -404,17 +472,19 @@ class RenderLane:
             f"{_Ms(writing)} ms")
         return DONE, saved
 
-    def _Publish(self, status, path, error, revision):
+    def _Publish(self, status, path, error, revision, errors=()):
         # One Set of the whole dict: a reader never sees half a result.
+        # `errors`: what a template reported (TEMPLATE_ERROR), [] otherwise.
         StateManager.Set(self.RENDER_PATH, {
             "status": status, "path": path, "error": error,
-            "revision": revision})
+            "revision": revision, "errors": list(errors)})
 
     def _Ended(self, kind, revision, result):
         """Publish a run's `result` -- (DONE, saved path or None) or (ERROR,
-        error) -- then let what was kept run. From whichever thread ended it;
-        only the first end of a run counts, as a second one would publish over
-        the next run and let two run at once."""
+        error), or (ERROR, TEMPLATE_ERROR, the template's errors) -- then let
+        what was kept run. From whichever thread ended it; only the first end
+        of a run counts, as a second one would publish over the next run and
+        let two run at once."""
         with self._laneLock:
             if revision != self._runRevision:
                 logger.warning(
@@ -422,7 +492,8 @@ class RenderLane:
                 return
             self._runRevision = None
             hadPreview = self._runHasPreview
-        status, value = result
+        status, value = result[0], result[1]
+        errors = TemplateErrors(result[2]) if len(result) > 2 else []
         # A generate that stood in for a preview and found nothing to save:
         # the preview is drawn after all (a placeholder), or it would be lost
         # with the generate's payload (S4p review).
@@ -436,7 +507,8 @@ class RenderLane:
                     self._Publish(DONE, last["path"] if value is None
                                   else value, "", revision)
                 else:
-                    self._Publish(ERROR, last["path"], value, revision)
+                    self._Publish(ERROR, last["path"], value, revision,
+                                  errors)
         finally:
             # After the publish: a run started in between would otherwise see
             # its "running" overwritten by this result.

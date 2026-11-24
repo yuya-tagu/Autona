@@ -120,7 +120,7 @@ def test_an_unknown_contract(layoutRoot):
     assert reasons(layoutRoot) == {
         "commentators_text": ("commentary", "unknown_contract", "'1'"),
         "results_next": ("result", "unknown_contract",
-                         "contract must be one of (1,), got 9"),
+                         "contract must be one of (1, 2), got 9"),
         "scoreboard_next": ("scoreboard", "unknown_contract", "2"),
     }
 

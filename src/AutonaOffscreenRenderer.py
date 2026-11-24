@@ -34,6 +34,19 @@ Release at its end) and given as /render-asset/<id>. With no preview
 listener (it could not bind, the server is not up yet) a render is refused
 (RenderLane.PREVIEW_UNAVAILABLE), never drawn from file:// instead.
 
+How a page says it drew, by its package's contract (the catalog's entry;
+ADR-008 D7 R2): contract 1 runs the page's INIT_FUNCTION, which sets its
+title to RENDER_READY, whatever went wrong in it; contract 2 hands the
+payload to layout/include/autona.js (RENDER_SCRIPT), which draws in the
+page's Autona.onRender, waits for its fonts and images and says ok or
+failed. A failed one ends with no picture: its error is a
+RenderLane.TemplateError, which carries what the page reported. An "ok" is
+read again (Autona._renderResult) once the picture is taken: an error the
+page caught after it (a timer, a rAF) fails the render too. A timed-out
+contract 2 render ends with the errors its page caught, when it caught any.
+A package's page is loaded again before a render when it is not what the
+package is now (_stale: another contract, an edited file, no autona.js).
+
 The Chromium sandbox is not turned off here any more (the module used to set
 QTWEBENGINE_DISABLE_SANDBOX=1 on import). QtWebEngine reads it once, when it
 starts, which in the app is the shared view's construction, before the first
@@ -44,6 +57,7 @@ page; without it the sandbox is on whichever view starts first. See
 docs/architecture/Design.md section 7.3.
 """
 import json
+import os
 import re
 import time
 from urllib.parse import quote
@@ -59,7 +73,7 @@ from loguru import logger
 
 from .AutonaWebServer import WebServer
 from .core import LayoutCatalog, RenderAssets
-from .core.RenderLane import PREVIEW_UNAVAILABLE
+from .core.RenderLane import PREVIEW_UNAVAILABLE, TemplateError
 
 # What the page says its two frames took (PAINT_SCRIPT), in its RENDER_PAINTED.
 _FRAMES_SAID = re.compile(r"\bframes=(\d+)\b")
@@ -216,16 +230,28 @@ class _RenderPage(QWebEnginePage):
         return None
 
 
+# The template contracts (ADR-007 D3, ADR-008 D7 R2): 1 -- the page's
+# INIT_FUNCTION says RENDER_READY; 2 -- layout/include/autona.js's
+# Autona._render draws in the page's Autona.onRender and says "AUTONA_RENDER
+# <serial> ok | failed".
+TEMPLATE_CONTRACT = 1
+RENDER_CONTRACT = 2
+
+
 class _Ticket:
     """One render: what to draw and who wants it."""
     __slots__ = ("payload", "templateId", "done", "ownLoad", "started",
                  "number", "ready", "painted", "frameDeadline", "framesMs",
                  "settleEvery", "settleDeadline", "lastFrame", "begun",
-                 "readyAt", "paintedAt", "paintDetails", "held")
+                 "readyAt", "paintedAt", "paintDetails", "held",
+                 "contract", "timedOut")
 
     def __init__(self, payload, templateId, done):
         self.payload = payload
         self.templateId = templateId
+        # Its template's contract (LayoutCatalog.TEMPLATE_CONTRACTS), as the
+        # catalog said when its script started: how the page says it is done.
+        self.contract = TEMPLATE_CONTRACT
         # The files held for it (RenderAssets.ForRender), let go at its end.
         self.held = []
         # done(pixmap, error): the image, or None and why.
@@ -253,6 +279,9 @@ class _Ticket:
         # and what the page said of its wait: for the log.
         self.begun = self.readyAt = self.paintedAt = None
         self.paintDetails = ""
+        # Its stage's time is over, and what its page caught is being read
+        # (contract 2, _on_timeout).
+        self.timedOut = False
 
 
 class AutonaOffscreenRenderer(QObject):
@@ -345,6 +374,9 @@ class AutonaOffscreenRenderer(QObject):
 
     # How long a render may wait for its page, and then for its script (each).
     STAGE_TIMEOUT_MS = 10000
+    # At a contract 2 render's timeout: how long its page's errors are
+    # waited for (_on_timeout).
+    TIMEOUT_READ_MS = 1000
     # How long the page may take to say it painted (PAINT_SCRIPT). The picture
     # is taken then all the same, and a warning logged. Timed here, not in
     # the page: a page whose frames stop may have its timers held back too.
@@ -415,6 +447,27 @@ class AutonaOffscreenRenderer(QObject):
     + " frames=" + (since() - images);
 })();"""
     PAINTED_TITLE = "RENDER_PAINTED "
+    # Contract 2's start, with the payload's JSON as a string literal and the
+    # render's number: the page's autona.js draws it, or (autona.js is not on
+    # the page) the title says "missing". Then "AUTONA_RENDER <number> ok"
+    # (taken as contract 1's RENDER_READY) or "... failed", when RENDER_RESULT
+    # reads what went wrong.
+    RENDER_SCRIPT = ('(function (payload, serial) {'
+                     ' var autona = window.Autona;'
+                     ' if (autona && typeof autona._render === "function") {'
+                     ' autona._render(payload, serial); }'
+                     ' else { document.title = "AUTONA_RENDER " + serial'
+                     ' + " missing"; }'
+                     ' })(JSON.parse(%s), %d)')
+    RENDERED_TITLE = "AUTONA_RENDER "
+    RENDER_RESULT = ('(function (serial) { var autona = window.Autona;'
+                     ' return autona && typeof autona._renderResult'
+                     ' === "function" ? autona._renderResult(serial) : null;'
+                     ' })(%d)')
+    # What a contract 2 page that never loaded autona.js is told.
+    NO_AUTONA_JS = ("the page did not load ../include/autona.js, which a "
+                    "contract 2 template draws with")
+    NO_ERRORS_SAID = "autona.js said the render failed and gave no error"
 
     _instance = None
 
@@ -460,6 +513,13 @@ class AutonaOffscreenRenderer(QObject):
         # (_refresh_pages).
         self._pages = {}
         self._template_id = None       # Currently loaded template id
+        # What the loaded page was loaded as: its package's contract and its
+        # folder's files (_folder_stamp), and whether a render found it to be
+        # another page than its package says (no autona.js): any of them
+        # changed, the next render loads it again (_stale).
+        self._page_contract = None
+        self._page_stamp = None
+        self._page_stale = False
         self._page_origin = None       # The preview listener it came from
         self._page_loaded = False
         self._load_query = None        # The load on its way (None: none is)
@@ -586,6 +646,9 @@ class AutonaOffscreenRenderer(QObject):
             f"{url.toString()}")
         self._template_id = template_id
         self._page_origin = origin
+        self._page_contract = page.get("contract", TEMPLATE_CONTRACT)
+        self._page_stamp = self._folder_stamp(page)
+        self._page_stale = False
         self._page_loaded = False
         self._page.loading(origin, url)
         # Before the picture below: at another size it would never compare
@@ -594,6 +657,39 @@ class AutonaOffscreenRenderer(QObject):
         # The view goes on showing this until the new page's first frame.
         self._before_load = self._view.grab().toImage()
         self._view.load(url)
+
+    def _folder_stamp(self, page):
+        """The package folder's own files as they are now: (name, size,
+        modification time) of each, or None when it cannot be read. One
+        directory listing (not include/: the renderer's profile caches
+        nothing, so a load reads include/ afresh anyway). Not settings.json:
+        the page does not read it, and what of it matters is the catalog's
+        entry (the contract: _stale; the size: _fit_view)."""
+        try:
+            folder = os.path.join(self._layout_root(), page["folder"])
+            with os.scandir(folder) as entries:
+                return frozenset(
+                    (entry.name, status.st_size, status.st_mtime_ns)
+                    for entry in entries
+                    if entry.is_file() and entry.name != "settings.json"
+                    for status in (entry.stat(),))
+        except (OSError, KeyError, TypeError, ValueError):
+            return None
+
+    def _stale(self, template_id):
+        """Whether the loaded page (of `template_id`) is not what its package
+        is now: a render found no autona.js on a contract 2 page, its
+        manifest says another contract, or its folder's files changed (an
+        edit: the preview in the page draws the new files, Generate would
+        draw the page loaded before)."""
+        if self._page_stale:
+            return True
+        page = self._pages.get(template_id)
+        if page is None:
+            return False
+        return page.get("contract", TEMPLATE_CONTRACT) \
+            != self._page_contract \
+            or self._folder_stamp(page) != self._page_stamp
 
     @staticmethod
     def _page_url(origin, page):
@@ -628,10 +724,12 @@ class AutonaOffscreenRenderer(QObject):
         try:
             if ticket.templateId != self._template_id or not (
                     self._page_loaded or self._load_query is not None) \
-                    or self._page_origin != self._preview_origin():
+                    or self._page_origin != self._preview_origin() \
+                    or self._stale(ticket.templateId):
                 # Another template's, or its load failed, or it came from a
                 # preview listener that is not the one serving now (none:
-                # the load refuses): this one tries again.
+                # the load refuses), or it is not its package's page any
+                # more (_stale): this one tries again.
                 ticket.ownLoad = True
                 self._load_template(ticket.templateId)
             elif self._page_loaded:
@@ -677,9 +775,15 @@ class AutonaOffscreenRenderer(QObject):
         # (It was a template literal, where "${...}" in a tag ran as script.)
         literal = json.dumps(json.dumps(payload, ensure_ascii=False))
 
+        page = self._pages.get(ticket.templateId) or {}
+        ticket.contract = page.get("contract", TEMPLATE_CONTRACT)
         self._view.page().runJavaScript('document.title = "LOADING"')
-        self._view.page().runJavaScript(
-            f"{self.INIT_FUNCTION}(JSON.parse({literal}))")
+        if ticket.contract == RENDER_CONTRACT:
+            self._view.page().runJavaScript(
+                self.RENDER_SCRIPT % (literal, ticket.number))
+        else:
+            self._view.page().runJavaScript(
+                f"{self.INIT_FUNCTION}(JSON.parse({literal}))")
 
     def _on_loading_changed(self, info):
         status = info.status()
@@ -734,17 +838,88 @@ class AutonaOffscreenRenderer(QObject):
         ticket = self._active
         if ticket is None or not ticket.started:
             return
-        if title == "RENDER_READY":
+        if ticket.contract == RENDER_CONTRACT:
+            if title.startswith(self.RENDERED_TITLE):
+                self._rendered(ticket, title[len(self.RENDERED_TITLE):])
+                return
+            # RENDER_READY is contract 1's: such a page's title says nothing.
+        elif title == "RENDER_READY":
             if not ticket.ready:
                 ticket.ready = True
                 ticket.readyAt = time.monotonic()
                 self._wait_for_paint(ticket)
-        elif title.startswith(self.PAINTED_TITLE):
+            return
+        if title.startswith(self.PAINTED_TITLE):
             number, _, said = title[len(self.PAINTED_TITLE):].partition(" ")
             how, _, details = said.partition(" ")
             if ticket.ready and number == str(ticket.number):
                 self._painted(ticket, how, details)
             # Otherwise another render's, which this one is not.
+
+    def _rendered(self, ticket, said):
+        """A contract 2 page said its render is over: "<number> ok" is
+        contract 1's RENDER_READY; "<number> failed" (or "missing": no
+        autona.js) ends the render with no picture and the template's errors
+        (TemplateError)."""
+        number, _, how = said.partition(" ")
+        if ticket.ready or number != str(ticket.number):
+            return  # Said already, or another render's.
+        ticket.ready = True
+        ticket.readyAt = time.monotonic()
+        if how == "ok":
+            self._wait_for_paint(ticket)
+            return
+        if how == "missing":
+            # Not the page its package says (moved to contract 2 since it
+            # was loaded, or broken): the next render loads it again.
+            self._page_stale = True
+            # Out of the signal: _finish may load the next render's page.
+            errors = [{"kind": "autona", "message": self.NO_AUTONA_JS}]
+            QTimer.singleShot(0, lambda: self._template_failed(ticket, errors))
+            return
+        try:
+            self._view.page().runJavaScript(
+                self.RENDER_RESULT % ticket.number,
+                lambda result: QTimer.singleShot(
+                    0, lambda: self._template_said(ticket, result)))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"{self.LOG_NAME}: could not read the template's errors")
+            QTimer.singleShot(0, lambda: self._template_failed(ticket, []))
+
+    @staticmethod
+    def _said_errors(result):
+        """The errors in Autona._renderResult's ``result`` (JSON, or None):
+        a list, empty when it says none (or nothing)."""
+        try:
+            said = json.loads(result) if isinstance(result, str) else None
+        except ValueError:
+            said = None
+        if isinstance(said, dict) and isinstance(said.get("errors"), list):
+            return said["errors"]
+        return []
+
+    def _template_said(self, ticket, result):
+        """The errors in Autona._renderResult's ``result`` (JSON, or None)."""
+        self._template_failed(ticket, self._said_errors(result))
+
+    def _template_error(self, errors):
+        """The TemplateError of `errors`, logged (counts and kinds only: a
+        message may hold a player's name or a path)."""
+        error = TemplateError(errors)
+        if not error.errors:
+            error = TemplateError([{"kind": "autona",
+                                    "message": self.NO_ERRORS_SAID}])
+        kinds = sorted({item["kind"] for item in error.errors})
+        logger.error(
+            f"{self.LOG_NAME}: the template's drawing failed: "
+            f"{len(error.errors)} error(s) ({', '.join(kinds)})")
+        return error
+
+    def _template_failed(self, ticket, errors):
+        if ticket is not self._active:
+            return  # It timed out meanwhile.
+        self._finish(ticket, None, self._template_error(errors))
 
     def _wait_for_paint(self, ticket):
         QTimer.singleShot(self.PAINT_WAIT_MS,
@@ -806,9 +981,41 @@ class AutonaOffscreenRenderer(QObject):
                 width, height, self.ASPECT_MODE,
                 Qt.TransformationMode.SmoothTransformation)
 
+        if ticket.contract == RENDER_CONTRACT:
+            # An error after the page said "ok" (a timer, a rAF, a promise
+            # its drawing did not wait for) is the render's too: read again
+            # now the picture is taken.
+            self._confirm_drawn(ticket, pixmap)
+            return
+        self._drawn(ticket, pixmap)
+
+    def _drawn(self, ticket, pixmap):
         logger.info(
             f"{self.LOG_NAME} render complete: {self._timings(ticket)}")
         self._finish(ticket, pixmap, "")
+
+    def _confirm_drawn(self, ticket, pixmap):
+        """Contract 2: the picture is the render's unless its page caught an
+        error since it said "ok" (Autona._renderResult read again). No
+        answer: the watchdog ends it."""
+        def said(result):
+            if ticket is not self._active:
+                return  # It timed out meanwhile.
+            errors = self._said_errors(result)
+            if errors:
+                self._template_failed(ticket, errors)
+            else:
+                self._drawn(ticket, pixmap)
+
+        try:
+            self._view.page().runJavaScript(
+                self.RENDER_RESULT % ticket.number,
+                lambda result: QTimer.singleShot(0, lambda: said(result)))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"{self.LOG_NAME}: could not read the template's errors "
+                "again; taking the picture")
+            self._drawn(ticket, pixmap)
 
     def _settle_every(self, ticket):
         """How far apart (ms) the grabs that have to agree are. As far apart
@@ -862,6 +1069,31 @@ class AutonaOffscreenRenderer(QObject):
         ticket = self._active
         if ticket is None:
             return
+        if ticket.started and ticket.contract == RENDER_CONTRACT \
+                and not ticket.timedOut:
+            # What its page caught so far may say why it did not end (an
+            # error it is still waiting past): read it, a moment at most --
+            # a page busy for good never answers, and the watchdog comes
+            # again.
+            ticket.timedOut = True
+            self._watchdog.start(self.TIMEOUT_READ_MS)
+            try:
+                self._view.page().runJavaScript(
+                    self.RENDER_RESULT % ticket.number,
+                    lambda result: QTimer.singleShot(
+                        0, lambda: self._timed_out(ticket, result)))
+            except Exception:
+                self._timed_out(ticket, None)
+            return
+        self._timed_out(ticket, None)
+
+    def _timed_out(self, ticket, result):
+        """End the active render `ticket`, whose time is over: with the
+        errors its page caught (`result`, Autona._renderResult's: contract
+        2), or as timed out."""
+        if ticket is not self._active:
+            return  # Ended meanwhile (an answer after the second timeout).
+        errors = self._said_errors(result)
         logger.error(f"{self.LOG_NAME} render timed out")
         if ticket.started:
             # Abandon its document: whatever its script still does, it must
@@ -875,6 +1107,9 @@ class AutonaOffscreenRenderer(QObject):
                 logger.warning(f"{self.LOG_NAME}: no preview listener to "
                                "load the page again from")
         # Otherwise no script ran, and the page goes on loading for the next.
+        if errors:
+            self._finish(ticket, None, self._template_error(errors))
+            return
         self._finish(ticket, None, "the render timed out")
 
     def _finish(self, ticket, pixmap, error):

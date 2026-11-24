@@ -225,6 +225,21 @@ function endOfRun(revision: number, from: string): Promise<string> {
     });
 }
 
+// The first error of the template's (ADR-008 D7 R2: thumbnail.render's
+// template_error and its errors) when the run `revision` failed on it, else
+// null.
+function templateFailure(revision: number): string | null {
+    const raw = root(autonaStore.getState()).thumbnail?.render as
+        {revision?: unknown; error?: unknown; errors?: unknown} | undefined;
+    if (!raw || raw.revision !== revision || raw.error !== "template_error"
+            || !Array.isArray(raw.errors)) {
+        return null;
+    }
+    const first = raw.errors[0] as {message?: unknown} | undefined;
+    return first && typeof first.message === "string" && first.message
+        ? first.message : null;
+}
+
 // What is being typed goes now, ahead of what follows (serial writes): a
 // click takes the focus away from it in most browsers, not in all.
 function leaveField() {
@@ -982,12 +997,16 @@ function ScoreContent() {
                 .then((answer) => {
                     const revision = (JSON.parse(answer) as
                         Envelope<{renderRevision: number}>).data.renderRevision;
-                    return endOfRun(revision, from);
+                    return endOfRun(revision, from).then(
+                        (path) => ({path, revision}));
                 })
-                .then((path) => {
+                .then(({path, revision}) => {
                     if (!path) {
-                        showSnackbar(i18n.t("score_post_thumbnail_failed"),
-                                     "error");
+                        const message = templateFailure(revision);
+                        showSnackbar(message === null
+                            ? i18n.t("score_post_thumbnail_failed")
+                            : i18n.t("score_post_thumbnail_failed_template",
+                                     {message}), "error");
                         throw new Error("the thumbnail was not made");
                     }
                     return generatedUrl({...IDLE_RENDER, path, revision: 0});

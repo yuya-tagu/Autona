@@ -7,7 +7,10 @@ working directory has a layout/ of its own puts the shipped manifests there
 (Install, or Files for a dict of files), each with a stand-in entry page and,
 for a thumbnail, a template file, so that the services and the renderers find
 the eight ids they always had. The manifests are the shipped files themselves:
-what is drawn in the tests is what the shipped folders declare.
+what is drawn in the tests is what the shipped folders declare -- but for
+their template contract when a test says it (``contract``): a stand-in page
+that defines initThumbnail / initResult is contract 1's, whatever contract
+the shipped page is on now (ADR-008 D7 R2: the thumbnails are on 2).
 
 Nothing of the application is imported here.
 """
@@ -45,17 +48,28 @@ def Manifest(folder):
                       .read_text(encoding="utf-8"))["autona"]
 
 
-def Files(folders=FOLDERS, page="", templates=None):
+def Settings(folder, contract=None):
+    """The shipped folder's settings.json as text; with its manifest's
+    ``contract`` replaced when `contract` is given."""
+    text = (PROJECT_ROOT / "layout" / folder / "settings.json").read_text(
+        encoding="utf-8")
+    if contract is None:
+        return text
+    settings = json.loads(text)
+    settings["autona"]["contract"] = contract
+    return json.dumps(settings, indent=2)
+
+
+def Files(folders=FOLDERS, page="", templates=None, contract=None):
     """{path relative to the working directory: text} of `folders`: the
-    shipped settings.json, `page` as the entry page and, for a thumbnail, its
-    template file (`templates`: {file name: text}; the shipped file when it
-    names none)."""
+    shipped settings.json (its contract `contract` when given), `page` as the
+    entry page and, for a thumbnail, its template file (`templates`: {file
+    name: text}; the shipped file when it names none)."""
     files = {}
     for folder in folders:
         source = PROJECT_ROOT / "layout" / folder
         manifest = Manifest(folder)
-        files[f"layout/{folder}/settings.json"] = \
-            (source / "settings.json").read_text(encoding="utf-8")
+        files[f"layout/{folder}/settings.json"] = Settings(folder, contract)
         files[f"layout/{folder}/{manifest['entry']}"] = page
         name = manifest.get("template")
         if name is not None:
@@ -64,11 +78,11 @@ def Files(folders=FOLDERS, page="", templates=None):
     return files
 
 
-def Install(layoutRoot, folders=FOLDERS, page=None):
-    """Put `folders` under `layoutRoot`: the shipped settings.json, a
-    thumbnail's shipped template file, and `page` as the entry page (None:
-    an empty one, and an entry page already there is kept). The folders it
-    made, for a teardown to remove."""
+def Install(layoutRoot, folders=FOLDERS, page=None, contract=None):
+    """Put `folders` under `layoutRoot`: the shipped settings.json (its
+    contract `contract` when given), a thumbnail's shipped template file, and
+    `page` as the entry page (None: an empty one, and an entry page already
+    there is kept). The folders it made, for a teardown to remove."""
     made = []
     for folder in folders:
         target = Path(layoutRoot) / folder
@@ -77,7 +91,8 @@ def Install(layoutRoot, folders=FOLDERS, page=None):
         target.mkdir(parents=True, exist_ok=True)
         source = PROJECT_ROOT / "layout" / folder
         manifest = Manifest(folder)
-        shutil.copy(source / "settings.json", target / "settings.json")
+        (target / "settings.json").write_text(Settings(folder, contract),
+                                              encoding="utf-8")
         entry = target / manifest["entry"]
         if page is not None or not entry.exists():
             entry.write_text(page or "", encoding="utf-8")

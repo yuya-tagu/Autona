@@ -59,13 +59,15 @@ from loguru import logger
 from . import CoreWords
 from . import ImageImport
 from . import LayoutCatalog
+from . import RenderAssets
 from . import StateSchema as schema
 from .ColorService import FEATURE_THUMBNAIL, GetFeatureColors
 from .DictHelper import deep_get
 from .GameAssetCatalog import GameAssetCatalog
 from .RenderLane import (  # noqa: F401  (re-exported: this module's names)
     BUSY, CANCELLED, DONE, ERROR, GENERATE, IDLE, PAYLOAD_FAILED, PREVIEW,
-    PREVIEW_UNAVAILABLE, RENDER_FAILED, RUNNING, RenderDataMissing, RenderLane)
+    PREVIEW_UNAVAILABLE, RENDER_FAILED, RUNNING, TEMPLATE_ERROR,
+    RenderDataMissing, RenderLane)
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StreamService import GameAbbreviation
@@ -777,6 +779,35 @@ class ThumbnailService(RenderLane):
         settings = _WithBackgroundSource(_StoredConfig())
         data, config, template = self._Payload(settings, preview, games, board)
         return data, _AsRead(config, data), template
+
+    def PreviewPayload(self, games=None) -> dict:
+        """What the Web UI's live preview of the template draws (GET
+        /api/v1/thumbnail/payload; ADR-008 D7 R2): the preview's payload --
+        RenderPayload's, as the preview image is drawn, {data, config,
+        template} -- read for a browser (RenderAssets.ForPreview: nothing
+        held; `omitted` names the config keys whose image the preview cannot
+        show), with the template's package: its id, folder, entry page,
+        contract and size. A contract 1 package is previewed as an image
+        (Preview), not live: the page shows that one. Writes nothing; raises
+        what BuildPayload raises (OSError / ValueError: the template cannot
+        be read)."""
+        data, config, template = self.RenderPayload(
+            preview=True, games=games, board=RENDER_BOARD)
+        entry = TemplateEntries().get(template["template_id"])
+        if entry is None:
+            raise FileNotFoundError(
+                f"no thumbnail template {template['template_id']!r}")
+        payload, omitted = RenderAssets.ForPreview(
+            {"data": data, "config": config, "template": template})
+        return {
+            "templateId": entry["id"],
+            "folder": entry["folder"],
+            "entry": entry["entry"],
+            "contract": entry["contract"],
+            "size": list(entry["size"]),
+            "payload": payload,
+            "omitted": omitted,
+        }
 
     # ── a set that is not the board's (ADR-006 A6) ───────────────────────
 

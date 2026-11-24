@@ -1246,6 +1246,38 @@ test("the image is the revision result_render ended with", async () => {
         "src", "http://localhost:5107/api/v1/result/preview?v=1");
 });
 
+test("a preview that failed on the template's error shows the errors to fix",
+     async () => {
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    const card = region("result_preview");
+    expect(within(card).queryByRole("region",
+                                    {name: i18n.t("layout_check_title")}))
+        .not.toBeInTheDocument();
+
+    setState({result_render: {...rendered({status: "error",
+                                           error: "template_error"}),
+                              errors: [{kind: "onRender",
+                                        message: "Error: drawing failed",
+                                        source: "/layout/result/result.js",
+                                        line: 7, column: 0}]}});
+
+    expect(within(card).getByText(i18n.t("result_error_template_error")))
+        .toBeInTheDocument();
+    const check = within(card).getByRole("region",
+                                         {name: i18n.t("layout_check_title")});
+    expect(within(check).getAllByTestId("layout-check-error")).toHaveLength(1);
+    expect(check).toHaveTextContent("Error: drawing failed");
+    expect(check).toHaveTextContent(i18n.t("layout_check_hint_on_render"));
+
+    // Another failure is not the template's: no errors to fix.
+    setState({result_render: rendered({status: "error",
+                                       error: "render_failed"})});
+    expect(within(card).queryByRole("region",
+                                    {name: i18n.t("layout_check_title")}))
+        .not.toBeInTheDocument();
+});
+
 test("the sample's words change with the language, drawn again", async () => {
     const page = await renderPage();
     await settle(PREVIEW_DEBOUNCE_MS);

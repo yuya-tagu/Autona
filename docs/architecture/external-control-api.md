@@ -266,7 +266,7 @@
 
 ### 5.5 画像生成（サムネイル・リザルト）
 
-描画はデスクトップのレンダラーで行い、ヘッドレスでは `:preview` / `:generate` が `503 UNAVAILABLE`（設定の読み書きと `GET .../preview` は答える）。
+描画はデスクトップのレンダラーで行い、ヘッドレスでは `:preview` / `:generate` が `503 UNAVAILABLE`（設定の読み書きと `GET .../preview` は答える）。テンプレートの描画が例外で失敗したとき（契約 2）は `thumbnail.render` / `result_render` の `error` が `template_error` になり、`errors` にページが言ったエラー（`{kind, message, source, line, column}` の配列。20 件まで）が入る（ほかの結果では `[]`）。
 
 | メソッド | パス | 区分 | 説明 |
 |---------|------|------|------|
@@ -276,6 +276,7 @@
 | POST | `/thumbnail:reset` | | 既定に戻す（confirm） |
 | POST | `/thumbnail:preview` / `:generate` | | 描画（202。`:generate` は `board` = 1 / 2 を取れる） |
 | GET | `/thumbnail/preview` | | 最新のプレビュー PNG |
+| GET | `/thumbnail/payload` | PLAYERDB | 選んだテンプレートの payload（ページのブラウザでのプレビュー用。ADR-008 D7 R2）: `{templateId, folder, entry, contract, size, payload: {data, config, template}, omitted}`。未反映の編集を含む。描画しないのでヘッドレスでも答える。プレビュー用のサーバーが出さない画像（アップロードした背景など）は `""` にしてキーを `omitted` に入れる。テンプレートが読めなければ 404 |
 | GET | `/result` | | リザルトのレイアウト・行・描画と取り込みの状態 |
 | GET | `/result/post` | PLAYERDB | X の投稿文 |
 | PATCH | `/result` | | レイアウトの選択 |

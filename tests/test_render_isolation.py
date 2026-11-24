@@ -169,6 +169,44 @@ def test_the_payload_given_is_not_changed(workdir):
     assert RenderAssets.ForRender({"data": {}}) == ({"data": {}}, [])
 
 
+# ── RenderAssets.ForPreview: the live preview's (ADR-008 D7 R2) ──────────
+
+def test_the_live_preview_holds_nothing_and_names_what_it_left_out(workdir):
+    # A browser frames the template (maybe on the LAN): the listener serves
+    # a held file to this PC's loopback alone, during a render. So nothing
+    # is held; what would be is "" and named.
+    banner = _image(workdir / "user_data" / "tournament_banner.png")
+    upload = _image(workdir / "user_data" / "thumbnail_background_ab12.png")
+    frame = _image(workdir / "jobs" / "0001_bg.jpg", "JPEG")
+    stamp = f"{banner.stat().st_mtime_ns:x}"
+    for value in ("./user_data/thumbnail_background_ab12.png", str(frame),
+                  frame.as_uri()):
+        payload = {"data": {}, "config": {"background_path": value,
+                                          "main_icon_path":
+                                          "./user_data/tournament_banner.png"}}
+        previewed, omitted = RenderAssets.ForPreview(payload)
+        assert previewed["config"]["background_path"] == "", value
+        assert previewed["config"]["main_icon_path"] \
+            == f"./user_data/tournament_banner.png?m={stamp}"
+        assert omitted == ["background_path"], value
+        assert payload["config"]["background_path"] == value
+    # Nothing was held for it (a render holds the upload).
+    assert RenderAssets._held == {}
+    assert upload.is_file()
+
+
+@pytest.mark.parametrize("value", [
+    "./user_data/nothing_here.png", "data:image/png;base64,AAAA",
+    "images/background.png", "//fileserver/share/bg.png"])
+def test_the_live_preview_names_only_what_the_render_would_hold(
+        workdir, value):
+    payload = {"config": {"background_path": value}}
+    previewed, omitted = RenderAssets.ForPreview(payload)
+    assert omitted == []
+    assert previewed["config"]["background_path"] == _drawn(value)[0]
+    assert RenderAssets.ForPreview({"data": {}}) == ({"data": {}}, [])
+
+
 @pytest.mark.parametrize("assetId", [None, "", "../settings.json",
                                      "x" * 21, "x" * 23, "a/b" * 8])
 def test_what_is_not_an_id_names_nothing(assetId):
@@ -468,7 +506,7 @@ def _filled():
 def probePages(autonaApp):
     created = template_packages.Install(
         autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
-        page=PROBE)
+        page=PROBE, contract=1)
     served = autonaApp.dir / "assets" / "icons" / "render_probe.svg"
     served.parent.mkdir(parents=True, exist_ok=True)
     served.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>',
@@ -545,8 +583,11 @@ def test_a_template_reads_its_origin_and_nothing_else(
         # Workers of every kind ask nothing of anywhere else either: the
         # filter is the profile's, which sees their requests too. (A service
         # worker may register, from its origin; what it asks goes nowhere.)
-        assert probed["worker"] == "blocked"
-        assert probed["sharedWorker"] == "blocked"
+        # A dedicated or shared one is not even made now: the template's
+        # files come with WebAccess.TEMPLATE_CONTENT_POLICY (worker-src
+        # 'none', ADR-008 D7 R2), so its construction fails first.
+        assert probed["worker"] in ("blocked", "failed")
+        assert probed["sharedWorker"] in ("blocked", "failed")
         assert probed["serviceWorker"] in ("registered", "refused")
         # The main frame stayed on its document.
         url = renderer._view.url()
@@ -654,7 +695,7 @@ function initThumbnail(payload) {
 def standinPages(autonaApp):
     created = template_packages.Install(
         autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
-        page=STANDIN)
+        page=STANDIN, contract=1)
     yield autonaApp.dir / "layout"
     for directory in created:
         shutil.rmtree(directory, ignore_errors=True)
@@ -668,7 +709,9 @@ def test_a_folder_named_in_any_script_is_drawn(standinPages, previewListener):
     folder = standinPages / name
     folder.mkdir()
     source = template_packages.PROJECT_ROOT / "layout" / "thumbnail_type_b"
-    shutil.copy(source / "settings.json", folder / "settings.json")
+    (folder / "settings.json").write_text(
+        template_packages.Settings("thumbnail_type_b", contract=1),
+        encoding="utf-8")
     shutil.copy(source / "type_b.json", folder / "type_b.json")
     (folder / "thumbnail.html").write_text(STANDIN, encoding="utf-8")
     renderer = _renderer()

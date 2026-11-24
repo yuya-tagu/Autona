@@ -144,7 +144,8 @@ export type GenerateResult =
 export type PostState = "loading" | "ready" | "token" | "failed";
 
 const RENDER_ERRORS = ["no_data", "payload_failed", "render_failed",
-                       "preview_unavailable", "save_failed", "cancelled"];
+                       "preview_unavailable", "template_error", "save_failed",
+                       "cancelled"];
 
 // result_render.error as words: a code core knows, else the render's failure.
 export function errorText(code: string): string {
@@ -703,7 +704,7 @@ function generateStatus(generating: boolean,
 export function PreviewCard({canRender, render, layout, imageRevision, sample,
                              previewing, previewError, generating, blocked,
                              result, noData, postState, generate, copy, postToX,
-                             readPost}: {
+                             readPost, check}: {
     // False on the headless shell: there is no off-screen view to draw with.
     canRender: boolean;
     render: ResultRender;
@@ -728,6 +729,8 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
     postToX: () => void;
     // The post's text again, when it could not be read.
     readPost: () => void;
+    // The template's errors, when a render failed on them (ADR-008 D7 R2).
+    check?: React.ReactNode;
 }) {
     const [failedRevision, setFailedRevision] = React.useState(0);
     const shown = imageRevision > 0 && failedRevision !== imageRevision;
@@ -789,6 +792,7 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
                     {errorText(previewError)}
                 </Typography>
             )}
+            {check}
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap"
                    alignItems="center">
                 <Button variant="contained"

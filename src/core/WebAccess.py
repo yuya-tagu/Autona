@@ -211,6 +211,9 @@ ROUTE_ACCESS = {
     "api_v1.get_stream_thumbnail_options": READ,
     "api_v1.get_thumbnail": READ,
     "api_v1.get_thumbnail_preview": READ,
+    # The live preview's payload: the state with its unpublished edits, as
+    # the pending board.
+    "api_v1.get_thumbnail_payload": PLAYERDB,
     "api_v1.get_result": READ,
     # Handles from the player DB.
     "api_v1.get_result_post": PLAYERDB,
@@ -626,6 +629,32 @@ FRAME_ANCESTORS = "frame-ancestors 'self'"
 # view's, where frame-ancestors 'self' would let it), and in a sandbox, so
 # it never becomes a document of this server's origin in the frame.
 REFUSED_FRAME_POLICY = "sandbox; frame-ancestors 'none'"
+
+# ── A template package's files (ADR-008 D7 R2) ──────────────────────────
+# A thumbnail / result template sends nothing anywhere (ADR-007 論点3 = A).
+# The off-screen renderer's request filter enforces it there; the Web UI's
+# live preview frames the template in a browser, where no filter is. So every
+# file of a template package's folder (LayoutCatalog.IsTemplateFolder) is
+# served, on both ports, with this policy: the page reads its own origin (and
+# data: / blob:) and nothing else, makes no worker and frames nothing. Its
+# own script, inline or eval'd, runs (the templates are the operator's).
+# What it does not stop: the frame navigating itself elsewhere (a CSP has no
+# navigate-to), and WebRTC (as in the renderer). Added beside any other
+# policy, never replacing it.
+TEMPLATE_CONTENT_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "media-src 'self' data: blob:; "
+    "connect-src 'self'; "
+    "worker-src 'none'; "
+    "frame-src 'none'; "
+    "child-src 'none'; "
+    "object-src 'none'; "
+    "form-action 'none'; "
+    "base-uri 'self'")
 
 
 def FramedElsewhere(fetchDest, fetchSite):

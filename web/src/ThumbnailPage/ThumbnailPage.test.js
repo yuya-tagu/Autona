@@ -17,7 +17,8 @@ import {errorText} from "./Cards";
 jest.setTimeout(20000);
 
 jest.mock("../websocketConnection", () => {
-    const socket = {connected: false, emit: jest.fn(), on: jest.fn()};
+    const socket = {connected: false, emit: jest.fn(), on: jest.fn(),
+                    off: jest.fn()};
     return {__esModule: true, default: {instance: () => socket}};
 });
 
@@ -48,6 +49,11 @@ let stateRevision = 0;
 let refuse;
 // "METHOD path" -> a promise its answer waits for (hold()).
 let gates;
+// GET /api/v1/thumbnail/payload's data (a template on contract 2; a number:
+// refused with that status), and the preview port GET /api/v1/health names
+// (the live preview's frame).
+let livePayload;
+let previewPort;
 
 // The answers to `method` `path` wait until the returned function is
 // called.
@@ -186,6 +192,8 @@ beforeEach(() => {
     revision = 0;
     refuse = {};
     gates = {};
+    livePayload = null;
+    previewPort = null;
     if (typeof AbortSignal.timeout !== "function") {
         AbortSignal.timeout = () => undefined;
     }
@@ -216,6 +224,16 @@ beforeEach(() => {
             }
             if (path === "/api/v1/layouts" && catalog) {
                 return answer(200, {ok: true, data: catalog});
+            }
+            if (path === "/api/v1/thumbnail/payload" && livePayload) {
+                return typeof livePayload === "number"
+                    ? answer(livePayload, {ok: false, error: {
+                        code: "UNAUTHORIZED", message: "no"}})
+                    : answer(200, {ok: true, data: livePayload});
+            }
+            if (path === "/api/v1/health" && previewPort) {
+                return answer(200, {ok: true, data: {status: "ok",
+                                                     previewPort}});
             }
             return answer(404, {ok: false});
         }
@@ -1048,4 +1066,209 @@ test("a render refused for want of the preview server says so", () => {
     expect(errorText("preview_unavailable"))
         .not.toBe(i18n.t("thumbnail_error_render_failed"));
     expect(errorText("no_such_code")).toBe(i18n.t("thumbnail_error_render_failed"));
+});
+
+// ── the live preview of a template on contract 2 (ADR-008 D7 R2) ─────────
+
+const LIVE_PORT = 52345;
+const LIVE_CATALOG = SHIPPED.map((entry) => entry.id === "type_a"
+    ? {...entry, contract: 2, folder: "thumbnail", entry: "thumbnail.html"}
+    : entry);
+
+function liveAnswer(extra = {}) {
+    return {templateId: "type_a", folder: "thumbnail", entry: "thumbnail.html",
+            contract: 2, size: [1920, 1080],
+            payload: {data: {p1_name: "A"}, config: {}, template: {}},
+            omitted: [], ...extra};
+}
+
+function frame() {
+    return screen.queryByTitle(i18n.t("commentary_preview"));
+}
+
+test("a template on contract 2 is drawn in a frame from the server's payload, not by the renderer",
+     async () => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer();
+    previewPort = LIVE_PORT;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    const card = region("thumbnail_preview");
+
+    expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toHaveAttribute(
+        "src", `http://localhost:${LIVE_PORT}/layout/thumbnail/thumbnail.html`
+            + `?autonaParent=${encodeURIComponent(window.location.origin)}`);
+    expect(within(card).queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("thumbnail_live_omitted_background_path")))
+        .not.toBeInTheDocument();
+    // Its page and payload again, after an edit of the template's files.
+    fireEvent.click(within(card).getByRole(
+        "button", {name: i18n.t("layout_reload")}));
+    await settle();
+    expect(reads("/api/v1/thumbnail/payload")).toBe(2);
+    expect(previews()).toBe(0);
+
+    // A change reads the payload again; still no render asked for.
+    fireEvent.click(checkbox("thumbnail_use_sponsors"));
+    await settle();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    expect(reads("/api/v1/thumbnail/payload")).toBe(3);
+    expect(previews()).toBe(0);
+});
+
+test("the first preview waits for the catalog: a contract 2 template is never drawn by the renderer first",
+     async () => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer();
+    previewPort = LIVE_PORT;
+    const release = hold("GET", "/api/v1/layouts");
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    expect(previews()).toBe(0);
+    expect(reads("/api/v1/thumbnail/payload")).toBe(0);
+
+    release();
+    await settle();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toBeInTheDocument();
+});
+
+test.each([
+    ["refused without the token (401)", 401],
+    ["refused (403)", 403],
+])("a payload %s falls back to the renderer's image, the token told once",
+   async (_how, status) => {
+    catalog = LIVE_CATALOG;
+    livePayload = status;
+    previewPort = LIVE_PORT;
+    const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+        await renderPage();
+        await settle(PREVIEW_DEBOUNCE_MS);
+        await settle();
+        expect(screen.getAllByText(i18n.t("stream_token_required")))
+            .toHaveLength(1);
+        await settle(PREVIEW_DEBOUNCE_MS);
+        await settle();
+
+        expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+        expect(previews()).toBe(1);
+        expect(frame()).not.toBeInTheDocument();
+        // A change previews by the image again, without asking the payload.
+        fireEvent.click(checkbox("thumbnail_use_sponsors"));
+        await settle();
+        await settle(PREVIEW_DEBOUNCE_MS);
+        expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+        expect(previews()).toBe(2);
+        // Told once: the image's preview asks nothing that needs the token.
+        expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+        logged.mockRestore();
+    }
+});
+
+test("a payload not of contract 2 after all falls back to the renderer's image",
+     async () => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer({contract: 1});
+    previewPort = LIVE_PORT;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+
+    expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+    expect(previews()).toBe(1);
+    expect(frame()).not.toBeInTheDocument();
+});
+
+test("a template on contract 1 keeps the renderer's image", async () => {
+    livePayload = liveAnswer();
+    previewPort = LIVE_PORT;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+
+    expect(previews()).toBe(1);
+    expect(reads("/api/v1/thumbnail/payload")).toBe(0);
+    expect(frame()).not.toBeInTheDocument();
+});
+
+test("the headless shell previews a contract 2 template live, and says it cannot make the image",
+     async () => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer();
+    previewPort = LIVE_PORT;
+    canRender = false;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    const card = region("thumbnail_preview");
+
+    expect(reads("/api/v1/thumbnail/payload")).toBe(1);
+    expect(previews()).toBe(0);
+    expect(frame()).toBeInTheDocument();
+    expect(within(card).getByText(i18n.t("thumbnail_cannot_render_live")))
+        .toBeInTheDocument();
+    expect(button(card, "thumbnail_generate")).toBeDisabled();
+});
+
+test.each([
+    [["background_path"], ["thumbnail_live_omitted_background_path"]],
+    [["main_icon_path"], ["thumbnail_live_omitted_main_icon_path"]],
+    [["background_path", "main_icon_path"],
+     ["thumbnail_live_omitted_background_path",
+      "thumbnail_live_omitted_main_icon_path"]],
+])("an image the preview cannot show (%j) is said in its own words",
+   async (omitted, keys) => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer({omitted});
+    previewPort = LIVE_PORT;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+
+    const card = region("thumbnail_preview");
+    expect(within(card).getByText(keys.map((key) => i18n.t(key)).join(" ")))
+        .toBeInTheDocument();
+});
+
+test("a generation that failed on the template's error shows the errors to fix",
+     async () => {
+    catalog = LIVE_CATALOG;
+    livePayload = liveAnswer();
+    previewPort = LIVE_PORT;
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    const card = region("thumbnail_preview");
+
+    fireEvent.click(button(card, "thumbnail_generate"));
+    await settle();
+    setState({thumbnail: {render: rendered({
+        status: "error", error: "template_error", revision: 1,
+        errors: [{kind: "onRender", message: "TypeError: x is undefined",
+                  source: "http://127.0.0.1:1/layout/thumbnail/thumbnail.js",
+                  line: 12, column: 0}]})}});
+
+    expect(within(card).getAllByText(
+        i18n.t("thumbnail_error_template_error")).length).toBeGreaterThan(0);
+    const [shown] = within(card).getAllByTestId("layout-check-error");
+    expect(shown).toHaveTextContent("TypeError: x is undefined");
+    expect(shown).toHaveTextContent("line 12");
+    expect(shown).toHaveTextContent(i18n.t("layout_check_hint_on_render"));
+    expect(within(card).getByRole("button",
+                                  {name: i18n.t("layout_check_copy")}))
+        .toBeInTheDocument();
+});
+
+test("a template's error is said in its own words", () => {
+    expect(errorText("template_error"))
+        .toBe(i18n.t("thumbnail_error_template_error"));
 });

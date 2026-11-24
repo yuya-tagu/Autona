@@ -163,7 +163,7 @@ autona.js はコンソールに警告を 1 回出す）。
 | キー | 必須 | 内容 |
 |---|---|---|
 | `kind` | ○ | `result` / `thumbnail` |
-| `contract` | ○ | テンプレートの契約の番号。今は `1` だけ（下記）。知らない番号のパッケージは一覧に出ない |
+| `contract` | ○ | テンプレートの契約の番号。`1`（`initResult` / `initThumbnail`）か `2`（`Autona.onRender`。新しく作るならこちら）。下記。知らない番号のパッケージは一覧に出ない |
 | `size` | ○ | 出力画像の `[幅, 高さ]`（px の整数。各 1〜4096） |
 | `rows` | result で ○ | `players`（単独。16 行まで渡る）/ `teams`（団体。8 行渡る） |
 | `template` | thumbnail で ○ | 配置の数値の JSON（フォルダ内のファイル名だけ）。payload の `template` として渡る |
@@ -191,6 +191,50 @@ autona.js はコンソールに警告を 1 回出す）。
   アプリのほかの画面とは共有しません。外部のライブラリ・フォントはパッケージの中に入れてください
 - ただし WebRTC（STUN / TURN の UDP）は止められません。信頼できる配布元のテンプレートだけを置いてください
 - プレビュー用のサーバーが動いていないとき（ポートを取れなかったとき）は描かずにエラー（`preview_unavailable`）になります
+- テンプレートのフォルダのファイルには CSP（Content-Security-Policy）が付きます（ブラウザで開いたサムネイルのプレビューでも外部へ送らないため）。種類ごとに読めるものが違います:
+  - スクリプト: 同じサーバーのファイルと、インラインの `<script>`・`eval`（`data:` / `blob:` のスクリプトと外部の CDN は不可）
+  - スタイル: 同じサーバーのファイルとインラインの `<style>` / `style` 属性
+  - 画像: 同じサーバーのファイルと `data:` / `blob:`。動画・音声も同じ
+  - フォント: 同じサーバーのファイルと `data:`（Google Fonts などの Web フォントは読めない。パッケージに入れる）
+  - `fetch` / XHR / WebSocket: 同じサーバーだけ
+  - Worker・iframe・`<object>`・フォームの送信は使えない
+
+#### テンプレートの契約 2（`Autona.onRender`。新しく作るならこちら）
+
+サムネイルの同梱テンプレート（`thumbnail/`・`thumbnail_type_b/`）はこの形です。
+
+```json
+{"autona": {"kind": "thumbnail", "contract": 2, "size": [1920, 1080], "template": "type_a.json"}}
+```
+
+```html
+<!-- thumbnail.html: autona.js を自分のスクリプトより前に読む -->
+<script src="../include/autona.js"></script>
+<script src="./thumbnail.js"></script>
+```
+
+```javascript
+// thumbnail.js
+Autona.onRender(async ({ data, config, template }) => {
+  // payload は contract 1 と同じ形（下記）。描き終えたら return するだけ（合図は要らない）
+  const board = data.score[config.scoreboardNumber || 1];
+  document.getElementById("p1").textContent = board.team["1"].player["1"].name;
+});
+```
+
+- `Autona.onRender(fn)` を 1 回呼ぶ。アプリは描くたびに `fn(payload)` を呼び、返った Promise・フォント（`document.fonts.ready`）・
+  `<img>` と CSS の背景画像の読み込みを待って（最大 5 秒）から撮る。`RENDER_READY` も `initThumbnail` も要らない
+- **例外は失敗**: `fn` の中の throw・返した Promise の失敗・描画中のスクリプトのエラーがあると画像を作らず、エラー（メッセージ・
+  ファイル・行）がサムネイルのページに出る（「AI に貼る用にコピー」付き）。読み込み時のエラーと `onRender` を呼んでいないことも同じ。
+  描き終えた後に `requestAnimationFrame` / `setTimeout` / 待たない Promise の中で起きたエラーも、その描画のエラーとして数える
+  （アプリは撮る直前に確かめる）。描画は 1 回ずつで、描いている間に来た分は最新の 1 回だけ後で描く。
+  contract 1 のように例外を握りつぶして描きかけの絵が出ることはない。画像が読めなかっただけ（404）はエラーにしない
+- **サムネイルのページのプレビューはブラウザで描く**: contract 2 のテンプレートはページの中の iframe（プレビュー用のサーバー）で
+  同じ `fn` を呼んで表示する（アプリのウィンドウが無いヘッドレス版・LAN のブラウザでも出る。保存する画像はアプリが描く）。
+  ブラウザの開発者ツールでそのまま確かめられる。アップロードした背景はプレビューには出ない（`config.background_path` が `""` になる。
+  作る画像には入る）ので、`""` のときは既定の背景を描くこと。プレビューの iframe の URL には `?autonaParent=<ページのオリジン>` が付き、
+  `autona.js` はそのオリジンからの描画の依頼だけを受ける（ページを直接開いただけでは描かれない）。ファイルを直したらプレビューの再読み込みのボタンで読み直す
+- `../include/autona.js` が読めない（パスの間違い・その前のスクリプトの構文エラー）と「autona.js を読めていない」エラーになる
 
 #### テンプレートの契約（contract 1）
 

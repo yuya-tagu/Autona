@@ -10,6 +10,8 @@ Added to /api/v1 only (nothing existing changed):
 - ``POST   /api/v1/thumbnail:preview``     202; the result arrives in the state
 - ``POST   /api/v1/thumbnail:generate``    202, or 409 while one is on its way
 - ``GET    /api/v1/thumbnail/preview``     the newest render, a PNG
+- ``GET    /api/v1/thumbnail/payload``     the live preview's payload
+  (ADR-008 D7 R2), guarded as the pending board (PLAYERDB)
 
 Through Flask's test client against the real route table, on a
 ThumbnailService of the test's own in a directory of its own (the `env`
@@ -508,6 +510,64 @@ def test_the_writes_are_guarded_and_the_reads_are_not():
         assert access[f"api_v1.{name}"] == WebAccess.WRITE, name
     for name in ("get_thumbnail", "get_thumbnail_preview"):
         assert access[f"api_v1.{name}"] == WebAccess.READ, name
+    # The state with its unpublished edits, as GET /scoreboard/<n>/pending.
+    assert access["api_v1.get_thumbnail_payload"] == WebAccess.PLAYERDB
+
+
+# ── GET /thumbnail/payload (ADR-008 D7 R2) ───────────────────────────────
+
+@pytest.mark.parametrize("shell", ["desktop", "headless"])
+def test_the_live_preview_payload_needs_no_renderer(
+        request, client, shell):
+    # The browser draws it: the headless shell answers as the desktop.
+    request.getfixturevalue(shell)
+    SM.state = copy.deepcopy(PLAYERS)
+
+    body = _ok(client.get("/api/v1/thumbnail/payload"))
+
+    data = body["data"]
+    assert set(data) == {"templateId", "folder", "entry", "contract", "size",
+                         "payload", "omitted"}
+    assert (data["templateId"], data["folder"], data["entry"],
+            data["contract"], data["size"]) == (
+        "type_a", "thumbnail", "thumbnail.html", 2, [1920, 1080])
+    assert set(data["payload"]) == {"data", "config", "template"}
+    assert data["payload"]["template"]["template_id"] == "type_a"
+    assert data["omitted"] == []
+    assert isinstance(body["revision"], int)
+
+
+def test_the_live_preview_payload_writes_nothing(desktop, client,
+                                                 monkeypatch):
+    writes = []
+    monkeypatch.setattr(SM, "Set", lambda *a, **k: writes.append(a))
+    monkeypatch.setattr(SettingsManager, "Set",
+                        lambda *a, **k: writes.append(a))
+    _ok(client.get("/api/v1/thumbnail/payload"))
+    assert writes == []
+    assert desktop.renderer.asked == []
+
+
+def test_a_live_preview_payload_without_its_template_is_404(desktop, client):
+    import shutil
+    shutil.rmtree(desktop.dir / "layout" / "thumbnail")
+    shutil.rmtree(desktop.dir / "layout" / "thumbnail_type_b")
+
+    response = client.get("/api/v1/thumbnail/payload")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "NOT_FOUND"
+    assert str(desktop.dir) not in response.get_data(as_text=True)
+
+
+def test_another_computer_needs_the_token_for_the_payload(desktop, webApp):
+    other = webApp.test_client()
+    other.environ_base["REMOTE_ADDR"] = "192.0.2.10"
+
+    response = other.get("/api/v1/thumbnail/payload")
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "UNAUTHENTICATED"
 
 
 @pytest.mark.parametrize("method, url, body", [

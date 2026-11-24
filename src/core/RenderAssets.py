@@ -50,6 +50,13 @@ the rest are the state's own images and the template's own files):
   relative to the template's own folder) is kept as it is: the page resolves
   it, and the renderer's request filter decides.
 
+ForPreview is the same reading for the live preview of a contract 2 template
+in the Web UI (ADR-008 D7 R2): the page is framed in a browser -- on this PC or
+on the LAN -- from the preview listener, which serves a held file to this PC's
+loopback alone, and only during a render. So nothing is held there: a file
+that would be is ``""`` (the template draws its default) and its key is
+named, for the page to say the picture shows it and the preview does not.
+
 The payload drawn changes, not what the services build: their golden files
 (tests/fixtures/*/golden.json) are what the services hand the renderer.
 
@@ -122,6 +129,33 @@ def ForRender(payload):
     return drawn, held
 
 
+def ForPreview(payload):
+    """(the payload to preview, the PATH_KEYS left out): ``payload`` read as
+    ForRender reads it, holding nothing (see the module docstring): a key
+    whose file would be held is ``""`` and named in the list. The payload
+    given is not changed. Never raises."""
+    if not isinstance(payload, dict) or not isinstance(
+            payload.get("config"), dict):
+        return payload, []
+    config = dict(payload["config"])
+    omitted = []
+    for key in PATH_KEYS:
+        value = config.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            config[key], assetId = _Readable(value, hold=False)
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"RenderAssets: the preview's {key} could not be read")
+            config[key], assetId = "", None
+        if assetId is _NOT_HELD:
+            omitted.append(key)
+    previewed = dict(payload)
+    previewed["config"] = config
+    return previewed, omitted
+
+
 def Release(ids):
     """Let go of the files a render held (ForRender's ids): one no render
     holds any more is not served again."""
@@ -154,17 +188,19 @@ def Url(assetId):
 
 # ── internals ────────────────────────────────────────────────────────────
 
-def _Readable(value):
-    """(what the template is given for ``value``, the id held or None)."""
+def _Readable(value, hold=True):
+    """(what the template is given for ``value``, the id held or None). Not
+    ``hold``: a file that would be held is ("", _NOT_HELD) instead."""
+    holdOrNothing = _HoldOrNothing if hold else _NotHeld
     lowered = value.lower()
     if lowered.startswith("file:"):
-        return _HoldOrNothing(_FileUrlPath(value))
+        return holdOrNothing(_FileUrlPath(value))
     if value.startswith(("\\\\", "//")):
         logger.warning("RenderAssets: a render's image is on a network path; "
                        "not drawn (it is not looked at while drawing)")
         return "", None
     if _DRIVE.match(value):
-        return _HoldOrNothing(value)
+        return holdOrNothing(value)
     if lowered.startswith(_KEPT_SCHEMES) or value.startswith("/"):
         return value, None
     if value.startswith(APP_RELATIVE_PREFIXES):
@@ -173,7 +209,7 @@ def _Readable(value):
         served = WebAccess.PreviewStaticPath(local)
         if served is not None:
             return _Versioned(path, query, served), None
-        return _HoldOrNothing(path)
+        return holdOrNothing(path)
     # Relative to the template's own folder (a package's image), or
     # something no file is: the page resolves it.
     return value, None
@@ -218,6 +254,21 @@ def _FileUrlPath(value):
     if path.startswith(("\\\\", "//")):
         return ""
     return path
+
+
+# What _Readable says for a file it would have held, not holding (ForPreview).
+_NOT_HELD = object()
+
+
+def _NotHeld(path):
+    """What _HoldOrNothing would give, holding nothing: ("", _NOT_HELD) for
+    a file _Hold would hold, ("", None) for one it would not."""
+    try:
+        holdable = bool(path) and os.path.splitext(path)[1].lower() \
+            in IMAGE_EXTENSIONS and os.path.isfile(os.path.realpath(path))
+    except (OSError, ValueError):
+        holdable = False
+    return ("", _NOT_HELD) if holdable else ("", None)
 
 
 def _HoldOrNothing(path):

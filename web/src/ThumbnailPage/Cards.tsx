@@ -115,7 +115,8 @@ export const ZOOM_RANGE: [number, number] = [1, 1000];
 export const ALIGN_RANGE: [number, number] = [1, 100];
 
 const ERRORS = ["no_game", "no_player", "payload_failed", "render_failed",
-                "preview_unavailable", "save_failed", "cancelled"];
+                "preview_unavailable", "template_error", "save_failed",
+                "cancelled"];
 
 // thumbnail.render.error as words: a code core knows, else the render's
 // failure (the code is not a person's to read).
@@ -562,7 +563,7 @@ function generateStatus(generating: boolean,
 
 export function PreviewCard({canRender, desktop, render, imageRevision,
                              previewing, previewError, generating, blocked,
-                             result, generate}: {
+                             result, generate, live, liveNote, check}: {
     // False on the headless shell: there is no off-screen view to draw with.
     canRender: boolean;
     desktop: boolean;
@@ -578,6 +579,12 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
     blocked: boolean;
     result: GenerateResult | null;
     generate: () => void;
+    // The live preview (a template on template contract 2, ADR-008 D7 R2:
+    // the page's DesignPane) in place of the image, and what it does not show.
+    live?: React.ReactNode;
+    liveNote?: string;
+    // The template's errors of a render that failed on them (LayoutCheck).
+    check?: React.ReactNode;
 }) {
     const [failedRevision, setFailedRevision] = React.useState(0);
     const shown = imageRevision > 0 && failedRevision !== imageRevision;
@@ -598,9 +605,14 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
     return (
         <CardFrame title={i18n.t("thumbnail_preview")}>
             {!canRender && (
-                <Alert severity="info">{i18n.t("thumbnail_cannot_render")}</Alert>
+                <Alert severity="info">
+                    {i18n.t(live ? "thumbnail_cannot_render_live"
+                                 : "thumbnail_cannot_render")}
+                </Alert>
             )}
-            <Box
+            {live}
+            {live && liveNote && <Note>{liveNote}</Note>}
+            {!live && <Box
                 sx={{position: "relative", width: "100%", aspectRatio: "16 / 9",
                      display: "flex", alignItems: "center",
                      justifyContent: "center", border: 1,
@@ -631,12 +643,13 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
                         </Typography>
                     </Stack>
                 )}
-            </Box>
+            </Box>}
             {previewError && (
                 <Typography variant="body2" color="error">
                     {errorText(previewError)}
                 </Typography>
             )}
+            {check}
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap"
                    alignItems="center">
                 <Button variant="contained"

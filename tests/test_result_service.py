@@ -1764,7 +1764,7 @@ def test_a_preview_draws_and_publishes(env, executor):
     revision = env.service.Preview()
 
     assert env.render() == {"status": results.RUNNING, "path": "", "error": "",
-                            "revision": revision}
+                            "revision": revision, "errors": []}
     asked = env.renderer.answer()
     assert asked.kind == "result"
     data, config, layout = asked.payload
