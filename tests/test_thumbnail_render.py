@@ -97,7 +97,7 @@ def _template(templateId="type_a"):
 
 
 @pytest.fixture
-def pages(autonaApp):
+def pages(autonaApp, previewListener):
     """The stand-in page for both templates, in the runtime's layout/, with the
     shipped manifest and template file (the catalog's thumbnail packages,
     ADR-007 T1)."""
@@ -687,7 +687,7 @@ def test_a_render_that_timed_out_while_settling_is_not_taken(renderer):
 # ── the pages as shipped ─────────────────────────────────────────────────
 
 @pytest.fixture
-def shippedPages(autonaApp):
+def shippedPages(autonaApp, previewListener):
     """The templates as shipped in the runtime's layout/. Copies: a link there
     would have a cleanup that goes wrong delete the project's. layout/include/
     is 19 MB, of which the pages only want the three scripts they share
@@ -816,7 +816,8 @@ def test_a_template_the_catalog_never_listed_cannot_start(autonaApp):
         _destroy(made)
 
 
-def test_the_next_render_loads_again_after_a_failed_load(autonaApp):
+def test_the_next_render_loads_again_after_a_failed_load(
+        autonaApp, previewListener):
     # A package that is not there, and then is: nothing is on its way any
     # more, and waiting for it would fail every render from then on.
     layout = autonaApp.dir / "layout" / "thumbnail"
@@ -975,12 +976,33 @@ def test_a_renders_own_failed_load_is_left_to_its_watchdog(renderer, autonaApp):
     assert renderer._active is not None and renderer._watchdog.isActive()
 
 
+def test_a_page_is_loaded_from_the_preview_listener(renderer, previewListener):
+    """The package's entry page on the preview listener's origin (ADR-007
+    D4), never file://: /layout/<folder>/<entry>, with the load's number."""
+    results = []
+
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+
+    assert _waitUntil(lambda: results)
+    assert results[0][1] == ""
+    assert _color(results[0][0]) == GREEN
+    url = renderer._view.url()
+    assert (url.scheme(), url.host(), url.port()) \
+        == ("http", "127.0.0.1", previewListener)
+    assert url.path() == "/layout/thumbnail_type_b/thumbnail.html"
+    assert url.query() == renderer._load_query or url.query().startswith(
+        "load=")
+
+
 def test_a_page_is_looked_up_where_the_app_started(
         renderer, autonaApp, tmp_path, monkeypatch):
     """Not in the process's current directory, which nothing of the app's
     changes and still was, for a moment, another (in test runs, near a first
     WebEngine page): the page looked up then was the shipped one (in the
-    directory pytest started in) or none (in site-packages/PySide6)."""
+    directory pytest started in) or none (in site-packages/PySide6). The
+    preview listener serves the catalog's folder (LayoutCatalog.
+    AppDirectory), not the working directory (ADR-007 D4)."""
     elsewhere = tmp_path / "elsewhere"
     other = elsewhere / "layout" / "thumbnail_type_b" / "thumbnail.html"
     other.parent.mkdir(parents=True)
@@ -995,8 +1017,8 @@ def test_a_page_is_looked_up_where_the_app_started(
     assert _waitUntil(lambda: results)
     assert results[0][1] == ""
     assert _color(results[0][0]) == GREEN
-    assert Path(renderer._view.url().toLocalFile()) \
-        == autonaApp.dir / "layout" / "thumbnail_type_b" / "thumbnail.html"
+    assert renderer._view.url().path() \
+        == "/layout/thumbnail_type_b/thumbnail.html"
 
 
 # ── a render that cannot start ───────────────────────────────────────────

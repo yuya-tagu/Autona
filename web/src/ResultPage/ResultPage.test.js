@@ -16,6 +16,7 @@ import {
 import {LOAD_ATTEMPTS, LOAD_RETRY_MS} from "../PanelShell/requests";
 import table from "../Top8Page/characterPick.cases.json";
 import ResultPage, {PREVIEW_DEBOUNCE_MS, READ_DEBOUNCE_MS} from "./index";
+import {errorText} from "./Cards";
 
 // The tournament result's page in React (ADR-005 S4r): it reads and writes
 // /api/v1/result, asks for a preview PREVIEW_DEBOUNCE_MS after a change while
@@ -2358,4 +2359,14 @@ test("the wording of the database's card is what it does", () => {
         .not.toMatch(/easily/i);
     expect(i18n.t("result_save_db_note", {lng: "ja"}))
         .not.toMatch(/かんたん/);
+});
+
+// No preview listener to draw on (ADR-007 D4): its own words, not the
+// render's failure.
+test("a render refused for want of the preview server says so", () => {
+    expect(errorText("preview_unavailable"))
+        .toBe(i18n.t("result_error_preview_unavailable"));
+    expect(errorText("preview_unavailable"))
+        .not.toBe(i18n.t("result_error_render_failed"));
+    expect(errorText("no_such_code")).toBe(i18n.t("result_error_render_failed"));
 });

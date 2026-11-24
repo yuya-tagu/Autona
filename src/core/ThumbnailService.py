@@ -65,7 +65,7 @@ from .DictHelper import deep_get
 from .GameAssetCatalog import GameAssetCatalog
 from .RenderLane import (  # noqa: F401  (re-exported: this module's names)
     BUSY, CANCELLED, DONE, ERROR, GENERATE, IDLE, PAYLOAD_FAILED, PREVIEW,
-    RENDER_FAILED, RUNNING, RenderDataMissing, RenderLane)
+    PREVIEW_UNAVAILABLE, RENDER_FAILED, RUNNING, RenderDataMissing, RenderLane)
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StreamService import GameAbbreviation

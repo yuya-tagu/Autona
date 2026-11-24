@@ -1,6 +1,5 @@
 from qtpy.QtCore import QEventLoop, Qt
 from qtpy.QtGui import QPixmap
-from qtpy.QtWebEngineCore import QWebEngineSettings
 
 from ..AutonaOffscreenRenderer import AutonaOffscreenRenderer
 from ..core import LayoutCatalog
@@ -27,13 +26,9 @@ class ThumbnailRenderer(AutonaOffscreenRenderer):
     INIT_FUNCTION = "initThumbnail"
 
     def _configure_view(self):
-        # Enable local file access
-        settings = self._view.settings()
-        settings.setAttribute(
-            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-        settings.setAttribute(
-            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-
+        # What a template may do: the base's (ADR-007 D4). Until T2 this
+        # view let a template read local files and remote URLs (file://).
+        super()._configure_view()
         # Transparent background
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
@@ -57,12 +52,18 @@ class ThumbnailRenderer(AutonaOffscreenRenderer):
         Only use for user-initiated final generation (no re-entrancy risk).
         Page is already loaded so this blocks for well under a second, plus
         what a render in progress has left: it ends first.
+
+        An empty picture when it failed; why is then ``syncError`` (the
+        render's error: PREVIEW_UNAVAILABLE when there is no preview
+        listener), "" after one that drew.
         """
         outcome = []
         loop = QEventLoop()
 
-        def done(pixmap, _error):
+        def done(pixmap, error):
             outcome.append(pixmap)
+            self.syncError = error or ("" if pixmap is not None
+                                       else "the render failed")
             loop.quit()
 
         self._submit(self._payload(data, config, template),

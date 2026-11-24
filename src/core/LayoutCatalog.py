@@ -515,11 +515,20 @@ def SetAppDirectory(directory):
     _appDirectory = directory
 
 
+def AppDirectory():
+    """The app's directory, as an absolute path (SetAppDirectory; the
+    working directory before it is given): what LAYOUT_ROOT is under, and
+    what the web server serves its static files from -- so that the page an
+    off-screen render loads from the preview listener is the one the catalog
+    listed (ADR-007 D4)."""
+    base = _appDirectory() if _appDirectory is not None else os.getcwd()
+    return os.path.abspath(str(base))
+
+
 def Root():
     """The layout folder, as an absolute path: LAYOUT_ROOT under the app's
     directory (an absolute LAYOUT_ROOT as it is)."""
-    base = _appDirectory() if _appDirectory is not None else os.getcwd()
-    return os.path.abspath(os.path.join(base, LAYOUT_ROOT))
+    return os.path.abspath(os.path.join(AppDirectory(), LAYOUT_ROOT))
 
 
 # ── internals ────────────────────────────────────────────────────────────

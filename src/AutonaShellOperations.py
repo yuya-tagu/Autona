@@ -104,11 +104,15 @@ def DrawThumbnailNow(payload):
     # Built by the first render, not at startup (see StartImageRender).
     from .thumbnail.ThumbnailRenderer import ThumbnailRenderer
     data, config, template = payload
-    pixmap = ThumbnailRenderer.instance().renderSync(
-        data=data, config=config, template=template)
+    renderer = ThumbnailRenderer.instance()
+    pixmap = renderer.renderSync(data=data, config=config, template=template)
     if pixmap.isNull():
-        logger.error("Thumbnail rendering produced an empty image")
-        raise Exception("Thumbnail rendering failed")
+        # Why, in the renderer's code (preview_unavailable without a preview
+        # listener, ADR-007 D4): the caller logs it, and the legacy route
+        # answers its error text.
+        why = getattr(renderer, "syncError", "") or "an empty image"
+        logger.error(f"Thumbnail rendering failed: {why}")
+        raise Exception(f"Thumbnail rendering failed: {why}")
     return _ImageEncoder(pixmap.toImage())
 
 

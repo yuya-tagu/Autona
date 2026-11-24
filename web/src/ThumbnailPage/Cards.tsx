@@ -115,7 +115,7 @@ export const ZOOM_RANGE: [number, number] = [1, 1000];
 export const ALIGN_RANGE: [number, number] = [1, 100];
 
 const ERRORS = ["no_game", "no_player", "payload_failed", "render_failed",
-                "save_failed", "cancelled"];
+                "preview_unavailable", "save_failed", "cancelled"];
 
 // thumbnail.render.error as words: a code core knows, else the render's
 // failure (the code is not a person's to read).

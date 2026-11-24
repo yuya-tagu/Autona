@@ -72,7 +72,7 @@ function initResult(payload) {
 
 
 @pytest.fixture
-def pages(autonaApp):
+def pages(autonaApp, previewListener):
     """The stand-in page for every layout, in the runtime's layout/, with the
     shipped manifest (the catalog's result packages, ADR-007 T1)."""
     created = template_packages.Install(
@@ -318,7 +318,7 @@ def test_the_shell_hands_on_a_failed_result(renderer, monkeypatch):
 # ── the shipped pages ────────────────────────────────────────────────────
 
 @pytest.fixture
-def shippedPages(autonaApp):
+def shippedPages(autonaApp, previewListener):
     """The templates as shipped in the runtime's layout/. Copies, as in
     tests/test_thumbnail_render.py: layout/include/ is 19 MB, of which the pages
     only want what they share (ADR-007 D2: a package reads nothing outside its
@@ -480,8 +480,8 @@ def test_a_package_placed_by_hand_is_drawn_from_its_folder_at_its_size(
         assert (pixmap.width(), pixmap.height()) == (1280, 720)
         assert (renderer._view.width(), renderer._view.height()) \
             == (1280, 720)
-        assert Path(renderer._view.url().toLocalFile()) \
-            == autonaApp.dir / "layout" / "neon_board" / "index.html"
+        # The preview listener's (ADR-007 D4), from its folder.
+        assert renderer._view.url().path() == "/layout/neon_board/index.html"
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

@@ -37,6 +37,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 EXPECTED_ROUTES = [
     ('/', 'web_index', 'GET,HEAD,OPTIONS'),
     ('/<path:filename>', 'file_request', 'GET,HEAD,OPTIONS'),
+    # ADR-007 D4: an off-screen render's held images (the preview listener's).
+    ('/render-asset/<asset_id>', 'render_asset', 'GET,HEAD,OPTIONS'),
     ('/api/designer/projects', 'designer_list_projects', 'GET,HEAD,OPTIONS'),
     ('/api/designer/projects', 'designer_save_project', 'OPTIONS,POST'),
     ('/api/designer/projects/<slug>', 'designer_delete_project', 'DELETE,OPTIONS'),
@@ -761,8 +763,10 @@ def test_the_classification_follows_the_rules():
     # 76 of 160), and the layout kit's creation, AI text and folder reveal,
     # the shell's (ADR-008 L2: v1 76 of 163).
     # A change here is a change of the policy.
+    # (The render's held images, ADR-007 D4, are a class of their own.)
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
-              if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
+              if not e.startswith("designer_")
+              and access[e] not in (WebAccess.STATIC, WebAccess.RENDER_ASSET)]
     assert len(legacy) == 43
     assert sum(access[e] == WebAccess.WRITE for e in legacy) == 29
     assert sum(k == WebAccess.WRITE

@@ -2038,6 +2038,18 @@ def test_a_failed_render_keeps_the_last_thumbnail_and_frees_the_lane(
     assert match.service.Preview() == 3
 
 
+def test_a_render_refused_for_want_of_the_preview_says_so(match, executor):
+    # The shell's renderer draws on the preview listener's origin alone
+    # (ADR-007 D4): without one it refuses, and says it in its fixed code --
+    # published as it is, not as a failed render.
+    match.service.Preview()
+    match.renderer.asked.pop().done(None, thumbnails.PREVIEW_UNAVAILABLE)
+
+    assert match.render()["status"] == "error"
+    assert match.render()["error"] == thumbnails.PREVIEW_UNAVAILABLE ==         "preview_unavailable"
+    assert match.service._running is None
+
+
 def test_a_failed_run_still_lets_what_was_kept_run(match, executor):
     match.service.Preview()
     match.service.Preview()

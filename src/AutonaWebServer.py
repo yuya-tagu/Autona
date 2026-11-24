@@ -27,7 +27,7 @@ from .StateManagerBridge import StateManagerBridge
 from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import (
     SettingsManager, SettingsUnreadable, DEFAULT_WEBSERVER_PORT)
-from .core import WebAccess
+from .core import LayoutCatalog, RenderAssets, WebAccess
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
@@ -852,7 +852,35 @@ def _build_web_app():
             # file_request names a refused file.
             WebServer._log_static_refusal(request.path.lstrip("/"))
             return "File not found", 404
-        return send_file(os.path.join(os.path.abspath('.'), 'web/build/index.html'))
+        return send_file(os.path.join(LayoutCatalog.AppDirectory(),
+                                      'web/build/index.html'))
+
+
+    # A file an off-screen render holds for its page (ADR-007 D4,
+    # core/RenderAssets: an uploaded background, the archive's frame), by
+    # its id: on the preview listener alone (RENDER_ASSET), to this PC's
+    # loopback alone -- the renderer's page is on 127.0.0.1, and with LAN
+    # access the listener is bound to every address --, while a render
+    # holds it. This server's own port, another computer, a relayed request,
+    # an id no render holds and anything not an id answer like a missing
+    # file. Never cached here: an id is the file's version, held only while
+    # a render runs.
+    @app.route('/render-asset/<asset_id>')
+    def render_asset(asset_id):
+        path = (WebServer._from_preview()
+                and WebAccess.IsLoopback(request.remote_addr)
+                and not WebAccess.IsForwarded(request.headers)
+                and RenderAssets.HeldPath(asset_id))
+        if not path:
+            return "File not found", 404
+        try:
+            response = send_file(path, max_age=0)
+        except OSError:
+            # Gone since it was held: as missing. No path in the log.
+            logger.warning("webserver: a render's held image is gone")
+            return "File not found", 404
+        response.cache_control.no_store = True
+        return response
 
 
     # GET only (ADR-005 S3a). The route also took POST, inherited from the
@@ -881,8 +909,11 @@ def _build_web_app():
             # /Layout/Custom/... too, and it must not be cached either.
             is_designer_file = filename.lower().startswith(
                 ("layout/custom/", "layout/designer_runtime/"))
+            # From the app's directory, the catalog's (LayoutCatalog.
+            # AppDirectory), not the process's current one: an off-screen
+            # render loads the page the catalog listed (ADR-007 D4).
             response = send_from_directory(
-                os.path.abspath('.'),
+                LayoutCatalog.AppDirectory(),
                 filename,
                 as_attachment=filename.endswith('.gz'),
                 mimetype=mimetype,

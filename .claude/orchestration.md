@@ -71,6 +71,10 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
   - **隔離データでだけ起動する**: tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`。
     開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動しない。
     本物の `user_data` と選手 DB を使わず、検証データは仮のものにする
+  - **デスクトップ版は環境変数 `QT_QPA_PLATFORM` を外して起動する**。pytest の中から起動すると `tests/conftest.py` の
+    `offscreen` を引き継ぎ、サムネイル・リザルトが単色（テーマの背景 17,19,23）になる（Qt の offscreen では web ページが
+    ウィジェットに合成されない。アプリはその旨を warning に出す）。`tests/test_headless_smoke.py` の `_env()` は
+    `os.environ` をそのまま渡すので、流用するなら `env.pop("QT_QPA_PLATFORM", None)` する
   - 終わったら起動したプロセスだけを止める。オーナーが起動した Autona には触らない
   - 同じ確認で 3〜4 回失敗したら手法を変えるか、その項目を未確認にして進む（画面操作の繰り返しは成果が出にくい）
   - 確認できなかった項目は PR の Test Plan に未チェックで残し、報告にも書く。OBS と配信の見た目はオーナーの確認に残す

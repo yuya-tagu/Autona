@@ -1750,6 +1750,10 @@ def test_designer_files_are_served_no_store(tmp_path, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
     monkeypatch.chdir(tmp_path)
+    # Static files are served from the app's directory (ADR-007 D4), which
+    # an earlier test in this worker may have given.
+    from src.core import LayoutCatalog
+    monkeypatch.setattr(LayoutCatalog, "_appDirectory", lambda: str(tmp_path))
     app, _socketio = _build_web_app()
     client = app.test_client()
 

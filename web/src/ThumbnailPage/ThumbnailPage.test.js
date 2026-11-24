@@ -6,6 +6,7 @@ import {autonaStore} from "../redux/store";
 import {autonaStateSlice} from "../redux/autonaState";
 import {PanelShellContext} from "../PanelShell/context";
 import ThumbnailPage, {PREVIEW_DEBOUNCE_MS} from "./index";
+import {errorText} from "./Cards";
 
 // The match thumbnail's page in React (ADR-005 S4p): it reads and writes
 // /api/v1/thumbnail, asks for a preview PREVIEW_DEBOUNCE_MS after a change
@@ -1037,4 +1038,14 @@ test("the video title is shown, copied, and an edit is kept over a new one",
     await settle(PREVIEW_DEBOUNCE_MS);
     await settle();
     expect(titleField()).toHaveValue("Cup | Echo vs Charlie | TG");
+});
+
+// No preview listener to draw on (ADR-007 D4): its own words, not the
+// render's failure.
+test("a render refused for want of the preview server says so", () => {
+    expect(errorText("preview_unavailable"))
+        .toBe(i18n.t("thumbnail_error_preview_unavailable"));
+    expect(errorText("preview_unavailable"))
+        .not.toBe(i18n.t("thumbnail_error_render_failed"));
+    expect(errorText("no_such_code")).toBe(i18n.t("thumbnail_error_render_failed"));
 });

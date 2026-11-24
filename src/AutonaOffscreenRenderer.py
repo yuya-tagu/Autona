@@ -7,32 +7,163 @@ package it draws (the layout catalog's, ADR-007 T1: a package's folder, entry
 page and size), its default, and which function of the page draws. One view
 per kind of image: their sizes differ, and the picture before a load is
 compared with the first one after it (_finalize_render).
+
+Where a template is drawn (ADR-007 D4 / T2; ADR-008 D7 R1): on the preview
+listener's origin, ``http://127.0.0.1:<WebServer.PreviewPort()>/layout/
+<folder>/<entry>`` -- never file:// any more. That origin reads what the
+listener serves (layout/, assets/, the state's images, v1's READ) and writes
+nothing.
+
+Each renderer's page has a profile of its own (_RenderPage): off the record
+(no storage on disk), no HTTP cache, and its request filter
+(_RenderRequestFilter) on the profile, so that it sees every request made in
+it -- the page's, its frames', its workers' (dedicated, shared, service) --
+and stops all but those to its origin and data: / blob: (another host or
+port -- this server's own among them --, file:, ws:, any other scheme). Being
+another profile than the default one, the page shares no storage with the
+shared view's pages (the design preview's frame is the same origin):
+BroadcastChannel, localStorage, IndexedDB and cookies are the render's own.
+What a request filter cannot see is not stopped: WebRTC's UDP (STUN / TURN)
+is the network stack's own, and a template could reach another host that
+way. The view lets the page read no local file nor remote URL as local
+content, answers every permission it asks for with no (a WebRTC data channel
+asks none), makes no window, and its main frame goes nowhere but the
+document the renderer loaded. A payload's images the listener does not serve
+are held while the render runs (core/RenderAssets: ForRender at its start,
+Release at its end) and given as /render-asset/<id>. With no preview
+listener (it could not bind, the server is not up yet) a render is refused
+(RenderLane.PREVIEW_UNAVAILABLE), never drawn from file:// instead.
+
+The Chromium sandbox is not turned off here any more (the module used to set
+QTWEBENGINE_DISABLE_SANDBOX=1 on import). QtWebEngine reads it once, when it
+starts, which in the app is the shared view's construction, before the first
+render imports this module: it had no effect there (measured: the renderer
+processes ran sandboxed, as the shared view's do). Only where a renderer
+started WebEngine first (the tests) did it turn the sandbox off, for every
+page; without it the sandbox is on whichever view starts first. See
+docs/architecture/Design.md section 7.3.
 """
 import json
-import os
 import re
 import time
+from urllib.parse import quote
 
 from qtpy.QtCore import QObject, QTimer, QUrl, Qt
+from qtpy.QtGui import QGuiApplication
 from qtpy.QtWidgets import QWidget
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWebEngineCore import QWebEngineLoadingInfo, QWebEnginePage
+from qtpy.QtWebEngineCore import (
+    QWebEngineLoadingInfo, QWebEnginePage, QWebEngineProfile,
+    QWebEngineSettings, QWebEngineUrlRequestInterceptor)
 from loguru import logger
 
-from .core import LayoutCatalog
-
-os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+from .AutonaWebServer import WebServer
+from .core import LayoutCatalog, RenderAssets
+from .core.RenderLane import PREVIEW_UNAVAILABLE
 
 # What the page says its two frames took (PAINT_SCRIPT), in its RENDER_PAINTED.
 _FRAMES_SAID = re.compile(r"\bframes=(\d+)\b")
+# The preview listener's host, as a render's page is loaded from it: the
+# listener is bound to 127.0.0.1 or to every address (LAN); both answer here.
+PREVIEW_HOST = "127.0.0.1"
+# What a render's page may ask for besides its origin.
+_INLINE_SCHEMES = ("data", "blob")
+# How many refused requests a page's log names (the first ones of each load):
+# a template that asks for a thousand does not write a thousand lines.
+_REFUSALS_LOGGED = 20
+
+
+class PreviewUnavailable(RuntimeError):
+    """No preview listener to draw on: the render is refused."""
+
+
+def Allowed(url, origin):
+    """Whether a render's page may ask for ``url`` (a QUrl): data: / blob:,
+    or http on ``origin`` ((host, port) of the preview listener the page was
+    loaded from; None: no page loaded yet, nothing on http)."""
+    scheme = url.scheme().lower()
+    if scheme in _INLINE_SCHEMES:
+        return True
+    return origin is not None and scheme == "http" \
+        and (url.host().lower(), url.port()) == origin
+
+
+class _RenderRequestFilter(QWebEngineUrlRequestInterceptor):
+    """A render's request filter (ADR-007 D4): only its page's origin (the
+    preview listener the page was loaded from) and data: / blob: go through;
+    anything else -- another host or port (this server's own, the outside),
+    file:, ws: anywhere, another scheme -- is blocked. On the render's own
+    profile (_RenderPage), which nothing else uses: a page's interceptor does
+    not see what its service and shared workers ask. Qt calls it on the UI
+    thread for every request made in the profile, and for a redirect's next
+    hop. A decision that raises blocks."""
+
+    def __init__(self, page, parent):
+        super().__init__(parent)
+        self._page = page
+
+    def interceptRequest(self, info):
+        try:
+            url = info.requestUrl()
+            if Allowed(url, self._page.origin):
+                return
+            info.block(True)
+            self._page.refused(url)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "A render's request could not be judged; blocking it")
+            try:
+                info.block(True)
+            except Exception:
+                logger.opt(exception=True).error(
+                    "A render's request could not be blocked")
 
 
 class _RenderPage(QWebEnginePage):
-    """Custom page to capture JS console messages."""
+    """A render's page: logs the template's console, filters its requests
+    (_RenderRequestFilter), denies every permission and new window, and keeps
+    its main frame on the document the renderer loaded (``expected``).
+
+    On a profile of its own (see the module docstring), made here and made
+    the page's child: a profile has to outlive the pages that use it (Qt
+    warns, and may crash, when it goes first), and a child is deleted after
+    its parent's destructor has run -- whoever deletes the page, and however
+    late at exit. The filter is the profile's child, for the same reason (the
+    profile does not own its interceptor)."""
 
     def __init__(self, logName):
-        super().__init__()
+        # No storage name: off the record, nothing on disk; and no HTTP
+        # cache, so that a template edited while the app runs is drawn as it
+        # is now (the listener serves layout/ for a day, for the overlays).
+        profile = QWebEngineProfile()
+        profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
+        profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
+        profile.setSpellCheckEnabled(False)
+        policy = getattr(QWebEngineProfile, "PersistentPermissionsPolicy",
+                         None)
+        if policy is not None:
+            # Nothing is granted anyway (_deny_permission); nothing is kept.
+            profile.setPersistentPermissionsPolicy(policy.AskEveryTime)
+        super().__init__(profile)
+        profile.setParent(self)
+        self._profile = profile
         self._logName = logName
+        # (host, port) the page's document is loaded from, and that document
+        # (the renderer's load, with its query): set before each load
+        # (loading(), from AutonaOffscreenRenderer._load_template).
+        self.origin = None
+        self.expected = None
+        self._refusals = 0
+        # Before the page loads anything. Kept here as well as parented: Qt
+        # holds no reference to it.
+        self._filter = _RenderRequestFilter(self, profile)
+        profile.setUrlRequestInterceptor(self._filter)
+        self.permissionRequested.connect(self._deny_permission)
+        self.fileSystemAccessRequested.connect(
+            lambda request: request.reject())
+        self.registerProtocolHandlerRequested.connect(
+            lambda request: request.reject())
 
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
         source = sourceID.split("/")[-1] if sourceID else "unknown"
@@ -44,17 +175,59 @@ class _RenderPage(QWebEnginePage):
         else:
             logger.debug(where)
 
+    def loading(self, origin, url):
+        """The renderer is about to load ``url`` (a QUrl) from ``origin``."""
+        self.origin = origin
+        self.expected = QUrl(url)
+        self._refusals = 0
+
+    def refused(self, url):
+        # Its scheme, host and port only: a query may hold a payload's text.
+        self._refusals += 1
+        if self._refusals <= _REFUSALS_LOGGED:
+            port = f":{url.port()}" if url.port() != -1 else ""
+            logger.warning(
+                f"{self._logName}: the template asked for {url.scheme()}://"
+                f"{url.host()}{port}; refused (a template reads its preview "
+                "origin only)")
+
+    def _deny_permission(self, permission):
+        logger.warning(f"{self._logName}: the template asked for "
+                       f"{permission.permissionType().name}; denied")
+        permission.deny()
+
+    def acceptNavigationRequest(self, url, navigationType, isMainFrame):
+        if isMainFrame:
+            if self.expected is not None and url == self.expected:
+                return True
+            logger.warning(f"{self._logName}: the template's page may not go "
+                           f"to {url.scheme()}://{url.host()}; refused")
+            return False
+        # A frame of its own: on its origin, or inline. Its requests are the
+        # filter's as well; about: (no request) goes.
+        if url.scheme().lower() == "about" or Allowed(url, self.origin):
+            return True
+        logger.warning(f"{self._logName}: a frame of the template may not go "
+                       f"to {url.scheme()}://{url.host()}; refused")
+        return False
+
+    def createWindow(self, windowType):
+        # No window: nothing a template opens is shown anywhere.
+        return None
+
 
 class _Ticket:
     """One render: what to draw and who wants it."""
     __slots__ = ("payload", "templateId", "done", "ownLoad", "started",
                  "number", "ready", "painted", "frameDeadline", "framesMs",
                  "settleEvery", "settleDeadline", "lastFrame", "begun",
-                 "readyAt", "paintedAt", "paintDetails")
+                 "readyAt", "paintedAt", "paintDetails", "held")
 
     def __init__(self, payload, templateId, done):
         self.payload = payload
         self.templateId = templateId
+        # The files held for it (RenderAssets.ForRender), let go at its end.
+        self.held = []
         # done(pixmap, error): the image, or None and why.
         self.done = done
         # Its page was loaded for it. A load on its way when it came was
@@ -142,6 +315,14 @@ class AutonaOffscreenRenderer(QObject):
       render tries again) like a page that is not there always did. An id the
       catalog never listed is drawn on the default; with no default either,
       the render cannot start.
+    - The page is loaded from the preview listener (_preview_origin), as it
+      serves when the load begins. With none, the render cannot start, and
+      its taker hears PREVIEW_UNAVAILABLE. A page loaded from a listener
+      that is not the one serving now (the server was started again on
+      another port) is loaded again before the next render.
+    - Each render draws its payload with the images the listener does not
+      serve held for it (RenderAssets.ForRender, in _start_render), and lets
+      them go when it ends, however (_finish).
 
     A subclass gives the class attributes below and _resolve_template_id, and
     a way in that calls _submit(), all on the GUI thread.
@@ -259,6 +440,19 @@ class AutonaOffscreenRenderer(QObject):
         self._view.setPage(self._page)
         self._view.resize(1920, 1080)
         self._host.show()
+        if QGuiApplication.platformName() == "offscreen":
+            # Qt's offscreen platform may composite no web page into a
+            # widget (it does on a GPU-less CI runner, not on a desktop with
+            # one): every picture is then the host widget's background (the
+            # theme's bg_primary, 17,19,23, in the app), and the log still
+            # says the render completed. Only the tests run there (tests/conftest.py
+            # sets QT_QPA_PLATFORM=offscreen, which a process they launch
+            # inherits): said once per renderer, so a wrong picture is not
+            # taken for the renderer's fault.
+            logger.warning(
+                f"{self.LOG_NAME}: on Qt's offscreen platform the pictures "
+                "may be the window's background, not the page "
+                "(QT_QPA_PLATFORM=offscreen)")
 
         self._configure_view()
 
@@ -266,6 +460,7 @@ class AutonaOffscreenRenderer(QObject):
         # (_refresh_pages).
         self._pages = {}
         self._template_id = None       # Currently loaded template id
+        self._page_origin = None       # The preview listener it came from
         self._page_loaded = False
         self._load_query = None        # The load on its way (None: none is)
         self._load_number = 0
@@ -287,7 +482,12 @@ class AutonaOffscreenRenderer(QObject):
         self._refresh_pages()
         if self.LOAD_AT_START:
             if self.DEFAULT_TEMPLATE_ID in self._pages:
-                self._load_template(self.DEFAULT_TEMPLATE_ID)
+                try:
+                    self._load_template(self.DEFAULT_TEMPLATE_ID)
+                except PreviewUnavailable:
+                    # The first render loads it, or is refused.
+                    logger.warning(f"{self.LOG_NAME}: no preview listener "
+                                   "to load the default template from yet")
             else:
                 # The first render loads what it can, or fails to start.
                 logger.warning(f"{self.LOG_NAME}: the default template "
@@ -296,7 +496,25 @@ class AutonaOffscreenRenderer(QObject):
     # ── what a subclass may say otherwise ────────────────────────────────
 
     def _configure_view(self):
-        """Before the first page is loaded."""
+        """Before the first page is loaded: what a template may do (ADR-007
+        D4). A subclass that says more calls this first."""
+        settings = self._view.settings()
+        attribute = QWebEngineSettings.WebAttribute
+        for name in ("LocalContentCanAccessFileUrls",
+                     "LocalContentCanAccessRemoteUrls",
+                     "JavascriptCanOpenWindows", "JavascriptCanAccessClipboard",
+                     "JavascriptCanPaste", "AllowWindowActivationFromJavaScript",
+                     "PluginsEnabled", "ScreenCaptureEnabled",
+                     "HyperlinkAuditingEnabled", "AutoLoadIconsForPage",
+                     "NavigateOnDropEnabled", "AllowRunningInsecureContent"):
+            settings.setAttribute(getattr(attribute, name), False)
+
+    @staticmethod
+    def _preview_origin():
+        """(host, port) of the preview listener a page is loaded from now,
+        or None while there is none (WebServer.PreviewPort())."""
+        port = WebServer.PreviewPort()
+        return (PREVIEW_HOST, port) if port else None
 
     def _size(self, template_id) -> tuple:
         """The template's picture, (width, height): its package's size."""
@@ -316,11 +534,10 @@ class AutonaOffscreenRenderer(QObject):
         # runtime), not the process's current one, which nothing of ours
         # changes and still was, for a moment, site-packages/PySide6 or the
         # directory pytest started in (in test runs, near a first WebEngine
-        # page; what moves it is not known): the page looked up then was
-        # none, or the shipped one. Not AutonaResolve(): layout/ is not in
-        # the bundle, and resolve() would make the document's URL, which the
-        # page's relative references are read against, a link's target or a
-        # mapped drive's UNC path.
+        # page; what moves it is not known): the packages listed then were
+        # none, or the shipped ones. Not AutonaResolve(): layout/ is not in
+        # the bundle. The page itself is the preview listener's to serve
+        # (_page_url), from the same layout/ under the app's directory.
         return LayoutCatalog.Root()
 
     def _refresh_pages(self):
@@ -345,16 +562,20 @@ class AutonaOffscreenRenderer(QObject):
 
     def _load_template(self, template_id: str):
         """Load (or reload) the HTML for the given template id. LookupError
-        when the catalog has never listed it."""
+        when the catalog has never listed it; PreviewUnavailable when there
+        is no preview listener to load it from (nothing changes then)."""
         page = self._pages.get(template_id) \
             if isinstance(template_id, str) else None
         if page is None:
             raise LookupError(
                 f"there is no {self.LOG_NAME.lower()} template "
                 f"{template_id!r}")
-        html_path = LayoutCatalog.TemplatePath(
-            page, page["entry"], self._layout_root())
-        url = QUrl.fromLocalFile(html_path)
+        origin = self._preview_origin()
+        if origin is None:
+            raise PreviewUnavailable(
+                f"no preview listener to load the {self.LOG_NAME.lower()} "
+                "template from")
+        url = self._page_url(origin, page)
         # The page does not read it: it tells this load from the one it
         # replaces, which may be the same page.
         self._load_number += 1
@@ -364,13 +585,30 @@ class AutonaOffscreenRenderer(QObject):
             f"Loading {self.LOG_NAME.lower()} template '{template_id}': "
             f"{url.toString()}")
         self._template_id = template_id
+        self._page_origin = origin
         self._page_loaded = False
+        self._page.loading(origin, url)
         # Before the picture below: at another size it would never compare
         # equal to the old page's frame.
         self._view.resize(*self._size(template_id))
         # The view goes on showing this until the new page's first frame.
         self._before_load = self._view.grab().toImage()
         self._view.load(url)
+
+    @staticmethod
+    def _page_url(origin, page):
+        """The URL of a package's entry page on the preview listener at
+        ``origin``: /layout/<folder>/<entry>, each part percent-encoded (a
+        folder's name may be Japanese, or hold a space). What the listener
+        serves of it is the layout/ folder of the app's directory, as the
+        catalog's (the server's working directory)."""
+        host, port = origin
+        # The listener's URL path, not LAYOUT_ROOT (a folder, which a test
+        # may make absolute).
+        parts = ["layout"] + page["folder"].split("/") \
+            + [page["entry"]]
+        return QUrl(f"http://{host}:{port}/"
+                    + "/".join(quote(part, safe="") for part in parts))
 
     def _submit(self, payload, templateId, done):
         """Queue a render whose result only `done(pixmap, error)` gets, later
@@ -389,8 +627,11 @@ class AutonaOffscreenRenderer(QObject):
         self._watchdog.start(self.STAGE_TIMEOUT_MS)
         try:
             if ticket.templateId != self._template_id or not (
-                    self._page_loaded or self._load_query is not None):
-                # Another template's, or its load failed: this one tries again.
+                    self._page_loaded or self._load_query is not None) \
+                    or self._page_origin != self._preview_origin():
+                # Another template's, or its load failed, or it came from a
+                # preview listener that is not the one serving now (none:
+                # the load refuses): this one tries again.
                 ticket.ownLoad = True
                 self._load_template(ticket.templateId)
             elif self._page_loaded:
@@ -403,10 +644,17 @@ class AutonaOffscreenRenderer(QObject):
         """A render that will never end: its taker hears of it like of any
         other failure (later, on this thread), and only from here. Raised to
         whoever asked as well, the same render would end twice."""
-        logger.opt(exception=error).error(
-            f"A {self.LOG_NAME.lower()} render could not be started")
+        if isinstance(error, PreviewUnavailable):
+            # Not a fault of the render's: said in its fixed code.
+            logger.error(f"A {self.LOG_NAME.lower()} render was refused: "
+                         f"{error}")
+            why = PREVIEW_UNAVAILABLE
+        else:
+            logger.opt(exception=error).error(
+                f"A {self.LOG_NAME.lower()} render could not be started")
+            why = "the render could not be started"
         QTimer.singleShot(0, lambda: ticket is self._active and self._finish(
-            ticket, None, "the render could not be started"))
+            ticket, None, why))
 
     def _fit_view(self, template_id):
         """The view at the template's size: its manifest's may say another
@@ -423,9 +671,11 @@ class AutonaOffscreenRenderer(QObject):
         self._watchdog.start(self.STAGE_TIMEOUT_MS)
         self._fit_view(ticket.templateId)
 
+        # What the preview listener does not serve, held until _finish.
+        payload, ticket.held = RenderAssets.ForRender(ticket.payload)
         # JSON of a string is a JS string literal: nothing in a tag is code.
         # (It was a template literal, where "${...}" in a tag ran as script.)
-        literal = json.dumps(json.dumps(ticket.payload, ensure_ascii=False))
+        literal = json.dumps(json.dumps(payload, ensure_ascii=False))
 
         self._view.page().runJavaScript('document.title = "LOADING"')
         self._view.page().runJavaScript(
@@ -616,13 +866,22 @@ class AutonaOffscreenRenderer(QObject):
         if ticket.started:
             # Abandon its document: whatever its script still does, it must
             # not say RENDER_READY during the next render.
-            self._load_template(self._template_id)
+            try:
+                self._load_template(self._template_id)
+            except PreviewUnavailable:
+                # The next render loads it, or is refused (_pump).
+                self._page_loaded = False
+                self._load_query = None
+                logger.warning(f"{self.LOG_NAME}: no preview listener to "
+                               "load the page again from")
         # Otherwise no script ran, and the page goes on loading for the next.
         self._finish(ticket, None, "the render timed out")
 
     def _finish(self, ticket, pixmap, error):
         self._active = None
         self._watchdog.stop()
+        RenderAssets.Release(ticket.held)
+        ticket.held = []
         try:
             ticket.done(pixmap, error)
         except Exception:

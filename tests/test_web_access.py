@@ -70,12 +70,15 @@ def settings(monkeypatch):
 @pytest.fixture
 def server(settings, monkeypatch, tmp_path):
     """The real app + Socket.IO server, the web operations it reaches
-    faked, cwd = tmp_path."""
+    faked, cwd = the app's directory (what static files are served from,
+    LayoutCatalog.AppDirectory) = tmp_path."""
     from src import AutonaWebOperations
     from src.AutonaApiV1 import api_v1
     from src.AutonaWebServer import WebServer, _build_web_app
+    from src.core import LayoutCatalog
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(LayoutCatalog, "_appDirectory", lambda: str(tmp_path))
     actions = FakeActions()
     for name in ("program_state", "team_scoreup", "reset_scores",
                  "get_games", "get_playerdb"):
@@ -1429,6 +1432,10 @@ def _layout_reads(endpoint, method, filename):
     access = WebAccess.RouteAccess(endpoint)
     if access == WebAccess.STATIC:
         return filename in PREVIEW_FILES
+    # A render's held file (ADR-007 D4): the route's handler says whether
+    # one is held.
+    if access == WebAccess.RENDER_ASSET:
+        return True
     return endpoint.startswith("api_v1.") and access == WebAccess.READ
 
 
@@ -1476,7 +1483,7 @@ def test_every_route_on_the_preview_listener_serves_only_a_layouts_reads(
                 refused.add(WebAccess.RouteAccess(routed))
     # Every kind was seen: the reads served, and every guarded / Designer /
     # write kind refused (the static kind both ways).
-    assert served == {WebAccess.READ, WebAccess.STATIC}
+    assert served == {WebAccess.READ, WebAccess.STATIC, WebAccess.RENDER_ASSET}
     assert refused == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
                        WebAccess.THIS_PC, WebAccess.SHELL, WebAccess.DESIGNER,
                        WebAccess.STATIC}
@@ -1838,7 +1845,7 @@ def test_every_route_refuses_another_pages_frame(server):
             kinds.add(WebAccess.RouteAccess(endpoint))
     assert kinds == {WebAccess.READ, WebAccess.WRITE, WebAccess.PLAYERDB,
                      WebAccess.THIS_PC, WebAccess.SHELL, WebAccess.DESIGNER,
-                     WebAccess.STATIC}
+                     WebAccess.STATIC, WebAccess.RENDER_ASSET}
 
 
 @pytest.mark.parametrize("headers", [

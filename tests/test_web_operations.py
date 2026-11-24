@@ -2245,7 +2245,7 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
                "kind": "commentary", "feature": "commentary", "index": 99,
-               "game": 1, "row": 1, "upload_id": "x" * 22,
+               "game": 1, "row": 1, "upload_id": "x" * 22, "asset_id": "x" * 22,
                "job_id": "20261116-000000-zzzz", "no": "1",
                "template_id": "default"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
@@ -2385,6 +2385,7 @@ _NOT_200 = {
     ("api_v1.stream_thumbnail_generate", None): 202,
     # A name that names nothing: no such file, design, import or game.
     ("file_request", None): 404,
+    ("render_asset", None): 404,
     ("designer_load_project", None): 404,
     ("designer_delete_project", None): 404,
     ("designer_get_import", None): 404,

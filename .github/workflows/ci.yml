@@ -22,8 +22,8 @@ jobs:
             # tests/conftest.py also defaults this; set here so subprocesses
             # spawned outside pytest's environment get it too.
             QT_QPA_PLATFORM: offscreen
-            # QtWebEngine on a headless runner: no Chromium sandbox (the app's
-            # own ThumbnailRenderer turns it off the same way) and no GPU.
+            # QtWebEngine on a headless runner: no Chromium sandbox and no GPU
+            # (the runner's; the app keeps the sandbox: Design.md section 7.3).
             QTWEBENGINE_DISABLE_SANDBOX: "1"
             QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
         steps:
