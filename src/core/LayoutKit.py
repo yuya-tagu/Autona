@@ -1,8 +1,17 @@
-"""The layout kit: "make a new design" (ADR-008 D2).
+"""The layout kit: "make a new design" (ADR-008 D2, D7 R3).
 
 A new overlay (kind ``scoreboard`` / ``commentary`` / ``top8``) is made right
 in ``layout/<folder>/``, where ``../include/`` resolves and the app's preview
-and the OBS URL work as they are. Its files come from the kit,
+and the OBS URL work as they are. So is a new thumbnail template (kind
+``thumbnail``, ADR-008 D7 R3, ``layout/thumbnail_<name>/``): its kit is
+``layout/include/kit/thumbnail/`` (KitFiles) -- its own instructions, the
+sample template on template contract 2 (``Autona.onRender``) with its
+``template.json``, and the payload's table (``CONTRACT.md``), ``AI_PROMPT.md``
+and ``sample_payload.json``, all three generated from
+``layout/include/thumbnail_contract.json`` -- and its ``settings.json`` holds
+the template manifest besides (``entry``, ``size``, ``template``; contract
+2). The rest of this is the same for both. An overlay's files come from the
+kit,
 ``layout/include/kit/`` (KIT_DIR; ``include/`` is reserved, so the kit is
 never listed):
 
@@ -14,10 +23,11 @@ never listed):
   ``AGENTS.md`` / ``CLAUDE.md`` here (named so in the kit, the agents working
   on this repository would read them as their own)
 
-and ``settings.json`` is written: the ``autona`` block with ``kind``,
-``contract`` 1, ``displayName``, ``author`` and ``license``, the manifest an
-import of ADR-007 D5 asks for, so a design handed to someone else is not
-refused for its manifest. The generated files are copied without their first
+and an overlay's ``settings.json`` is written: the ``autona`` block with
+``kind``, ``contract`` 1, ``displayName``, ``author`` and ``license``, the
+manifest an import of ADR-007 D5 asks for, so a design handed to someone else
+is not refused for its manifest (a thumbnail's has its template manifest
+besides: _Manifest). The generated files are copied without their first
 line (GENERATED_MARK: "generated, do not edit" is the kit's, not the
 operator's), and so is the AI text a page copies (AiPrompt).
 
@@ -66,14 +76,40 @@ CONTRACT_FILE = "CONTRACT.md"
 # Kit file -> its name in a new design.
 TEMPLATES = {"AGENTS.md.tmpl": "AGENTS.md", "CLAUDE.md.tmpl": "CLAUDE.md"}
 
-# The kinds a new design may be, with the folder's prefix (the catalog's
-# folder-name convention, LayoutCatalog._LEGACY_PREFIXES).
-FOLDER_PREFIXES = {
+# The overlay kinds a new design may be, with the folder's prefix (the
+# catalog's folder-name convention, LayoutCatalog._LEGACY_PREFIXES).
+OVERLAY_PREFIXES = {
     LayoutCatalog.KIND_SCOREBOARD: "scoreboard_",
     LayoutCatalog.KIND_COMMENTARY: "commentators_",
     LayoutCatalog.KIND_TOP8: "bracket_top8_",
 }
+OVERLAY_KINDS = tuple(OVERLAY_PREFIXES)
+# The template kinds a new design may be (ADR-008 D7 R3), with the folder's
+# prefix. A template package has no folder-name fallback (ADR-007 D1: its
+# manifest is what lists it); the prefix sorts them together in Explorer, as
+# the overlays' does, and tells whose an unlisted folder is
+# (LayoutCatalog.UNLISTED_PREFIXES).
+TEMPLATE_PREFIXES = {
+    LayoutCatalog.KIND_THUMBNAIL: LayoutCatalog.THUMBNAIL_PREFIX,
+}
+TEMPLATE_KINDS = tuple(TEMPLATE_PREFIXES)
+FOLDER_PREFIXES = {**OVERLAY_PREFIXES, **TEMPLATE_PREFIXES}
 KINDS = tuple(FOLDER_PREFIXES)
+
+# The thumbnail kit (layout/include/kit/thumbnail/): its own instructions
+# (AGENTS.md.tmpl: no globals.js, Autona.onRender, the payload), its
+# generated payload table (CONTRACT.md) and AI_PROMPT.md, a sample payload
+# (generated too) and the sample template on template contract 2.
+THUMBNAIL_FILES = ("thumbnail.html", "thumbnail.css", "thumbnail.js",
+                   "template.json", "sample_payload.json")
+# What a new thumbnail's settings.json says beside the overlays' keys: the
+# manifest LayoutCatalog._TemplateEntry asks for, on template contract 2.
+TEMPLATE_CONTRACT = 2
+THUMBNAIL_MANIFEST = {
+    "entry": "thumbnail.html",
+    "size": [1920, 1080],
+    "template": "template.json",
+}
 
 # The name after the prefix: ASCII letters, digits, "_" and "-", starting
 # with a letter or a digit.
@@ -195,15 +231,7 @@ def NewDesign(kind, name, displayName=None, root=None):
     base = _Base(root)
     kit = os.path.join(base, *KIT_DIR)
     sources = _KitSources(kit, kind)
-    settings = {
-        LayoutCatalog.METADATA_KEY: {
-            "kind": kind,
-            "contract": OVERLAY_CONTRACT,
-            "displayName": shown,
-            "author": DEFAULT_AUTHOR,
-            "license": DEFAULT_LICENSE,
-        },
-    }
+    settings = {LayoutCatalog.METADATA_KEY: _Manifest(kind, shown)}
     _RemoveStaleWork(base)
     if _Taken(base, folder):
         raise LayoutKitError(EXISTS, f"{folder} exists")
@@ -262,14 +290,43 @@ def _Base(root):
     return os.path.abspath(root) if root else LayoutCatalog.Root()
 
 
+def KitFiles(kind):
+    """{file name in a new design of ``kind``: its kit file, as a path below
+    the kit (KIT_DIR) with "/"}. An overlay: its kind's sample and
+    AI_PROMPT.md, and the overlays' CONTRACT.md and instructions. A
+    thumbnail: everything from its own folder (its instructions, its payload
+    table), CLAUDE.md alone shared (it only points at AGENTS.md)."""
+    if kind in TEMPLATE_PREFIXES:
+        files = {name: f"{kind}/{name}" for name in THUMBNAIL_FILES}
+        files[AI_PROMPT_FILE] = f"{kind}/{AI_PROMPT_FILE}"
+        files[CONTRACT_FILE] = f"{kind}/{CONTRACT_FILE}"
+        files["AGENTS.md"] = f"{kind}/AGENTS.md.tmpl"
+        files["CLAUDE.md"] = "CLAUDE.md.tmpl"
+        return files
+    files = {name: f"{kind}/{name}" for name in SAMPLE_FILES}
+    files[AI_PROMPT_FILE] = f"{kind}/{AI_PROMPT_FILE}"
+    files[CONTRACT_FILE] = CONTRACT_FILE
+    for template, target in TEMPLATES.items():
+        files[target] = template
+    return files
+
+
+def _Manifest(kind, shown):
+    """A new design's autona block: the manifest an import asks for
+    (ADR-007 D5), and a template's on top (ADR-007 D1)."""
+    if kind in TEMPLATE_PREFIXES:
+        return {"kind": kind, "contract": TEMPLATE_CONTRACT,
+                **THUMBNAIL_MANIFEST, "displayName": shown,
+                "author": DEFAULT_AUTHOR, "license": DEFAULT_LICENSE}
+    return {"kind": kind, "contract": OVERLAY_CONTRACT, "displayName": shown,
+            "author": DEFAULT_AUTHOR, "license": DEFAULT_LICENSE}
+
+
 def _KitSources(kit, kind):
     """{file name in the new design: its source in the kit}, every one
     there, else KIT_MISSING."""
-    sources = {name: os.path.join(kit, kind, name) for name in SAMPLE_FILES}
-    sources[AI_PROMPT_FILE] = os.path.join(kit, kind, AI_PROMPT_FILE)
-    sources[CONTRACT_FILE] = os.path.join(kit, CONTRACT_FILE)
-    for template, target in TEMPLATES.items():
-        sources[target] = os.path.join(kit, template)
+    sources = {target: os.path.join(kit, *relative.split("/"))
+               for target, relative in KitFiles(kind).items()}
     missing = [name for name, path in sources.items()
                if not os.path.isfile(path)]
     if missing:

@@ -23,7 +23,11 @@ import {BASE_URL} from "../env";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {canCopyImage, copyImage, copyText} from "../PanelShell/clipboard";
 import {IMAGE_UPLOAD_ACCEPT} from "../PanelShell/imageUpload";
-import {TemplateChoice} from "../PanelShell/templatePackages";
+import {
+    TemplateChoice,
+    UnlistedTemplateFolder,
+} from "../PanelShell/templatePackages";
+import {UnlistedDesigns} from "../CommentaryPage/LayoutCheck";
 import {showSnackbar} from "../ScoreboardPage/Feedback";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
 
@@ -195,12 +199,18 @@ function SettingCheckbox({label, value, send, note}: {
 
 // ── デザイン ─────────────────────────────────────────────────────────────
 
-export function DesignCard({settings, choices, change, upload}: {
+export function DesignCard({settings, choices, change, upload, unlisted,
+                            actions}: {
     settings: ThumbnailSettings;
     // The templates to choose from (GET /api/v1/layouts?kind=thumbnail).
     choices: TemplateChoice[];
     change: (next: SettingsChange) => Promise<unknown>;
     upload: (file: File) => void;
+    // The template folders the catalog did not list, with why (ADR-008 D3):
+    // under the select, as the design lists show theirs.
+    unlisted?: UnlistedTemplateFolder[];
+    // Under the select: the layout kit's buttons (ADR-008 D7 R3).
+    actions?: React.ReactNode;
 }) {
     const [template, chooseTemplate] = useStateChoice(
         settings.template_id, React.useCallback(
@@ -239,6 +249,8 @@ export function DesignCard({settings, choices, change, upload}: {
                     </MenuItem>
                 ))}
             </TextField>
+            {unlisted && <UnlistedDesigns folders={unlisted}/>}
+            {actions}
             <FormControl>
                 <FormLabel id="thumbnail-background">
                     {i18n.t("thumbnail_background")}

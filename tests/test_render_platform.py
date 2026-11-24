@@ -16,6 +16,10 @@ The shipped thumbnails moved to template contract 2 (ADR-008 D7 R2): the
 same drawing, now in Autona.onRender. draw_contracts.py draws the shipped
 type_a and the same page on contract 1, on the app's platform, and the two
 pictures are the same.
+
+A thumbnail made from the layout kit (ADR-008 D7 R3), as it is, draws on
+contract 2 without an error: draw_kit.py draws the kit's sample payload, the
+teams sample and an empty state.
 """
 import json
 import os
@@ -29,6 +33,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" / "draw_on_platform.py"
 CONTRACTS = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" \
     / "draw_contracts.py"
+KIT = PROJECT_ROOT / "tests" / "fixtures" / "thumbnail" / "draw_kit.py"
 BG_PRIMARY = "#111317"
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32",
@@ -76,3 +81,15 @@ def test_contract_2_draws_the_shipped_page_as_contract_1_did(tmp_path):
     assert drawn["sampled"] > 0, drawn
     # The same pixels: the drawing is the template's, whoever calls it.
     assert drawn["differing"] <= drawn["sampled"] // 1000, drawn
+
+
+def test_a_thumbnail_made_from_the_kit_draws_as_it_is(tmp_path):
+    drawn, output = _draw(tmp_path, None, KIT)
+    # No error with a match, a team match and no match at all.
+    assert drawn["errors"] == ["", "", ""], (drawn, output[-3000:])
+    # The background, the characters, the names: many colours.
+    assert drawn["colours"][0] > 10, drawn
+    assert drawn["colours"][1] > 10, drawn
+    # The empty state's picture is not the match's (the names and the
+    # characters are left out).
+    assert drawn["differing"] > 0, drawn

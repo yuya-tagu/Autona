@@ -247,8 +247,8 @@
 | GET / PUT | `/layouts/selected/{kind}` | | 選択中のデザイン（`commentary` / `top8` / `board`）の取得 / 選択 |
 | GET | `/layouts/selected/board/obs-path` | PLAYERDB | OBS に指定するファイルの絶対パス |
 | POST | `/layouts/selected/board:reveal` | THIS_PC | Board の OBS ファイルをエクスプローラで開く |
-| POST | `/layouts:create` | SHELL | 新しいデザインを作る（ADR-008 D2。`kind` = `scoreboard` / `commentary` / `top8`・`name`（フォルダ名）・`displayName`（任意）。`layout/<接頭辞><name>/` を作成キットから作り、201 で一覧の項目を返す。拒否は `reason`: 400 `bad_kind` / `bad_name` / `bad_display_name`、409 `reserved` / `exists`、500 `kit_missing` / `write_failed` / `not_listed`） |
-| GET | `/layouts/kit/{kind}/ai-prompt` | SHELL | 作成キットの `AI_PROMPT.md`（`{kind, text}`。デザイン一覧の「AI 用の説明をコピー」） |
+| POST | `/layouts:create` | SHELL | 新しいデザインを作る（ADR-008 D2 / D7 R3。`kind` = `scoreboard` / `commentary` / `top8` / `thumbnail`（サムネイルのテンプレート。`layout/thumbnail_<name>/` を契約 2 のマニフェストで作る）・`name`（フォルダ名）・`displayName`（任意）。`layout/<接頭辞><name>/` を作成キットから作り、201 で一覧の項目を返す。拒否は `reason`: 400 `bad_kind` / `bad_name` / `bad_display_name`、409 `reserved` / `exists`、500 `kit_missing` / `write_failed` / `not_listed`） |
+| GET | `/layouts/kit/{kind}/ai-prompt` | SHELL | 作成キットの `AI_PROMPT.md`（`{kind, text}`。`kind` は `/layouts:create` と同じ。デザイン一覧の「AI 用の説明をコピー」） |
 | POST | `/layouts:reveal` | SHELL | 一覧にあるデザイン（`id`）のフォルダをエクスプローラで開く（無ければ 404） |
 | GET | `/commentary` / `/commentary/options` | | 実況の状態 / 役割・アイコン・スロットの候補 |
 | PATCH | `/commentary/{slot}` | | 実況者の欄（5 人目の表示は 409） |

@@ -437,6 +437,8 @@ BOARD / 実況 / TOP 8 のページのプルダウン・Designer の「開く」
 
 ページのプレビュー: 選んだテンプレートが契約 2 なら、レンダラーに頼まず `GET /api/v1/thumbnail/payload`（PLAYERDB。`ThumbnailService.PreviewPayload`。未反映の編集を含む）で payload を受け、`DesignPane`（選択欄なし）の iframe（URL に `?autonaParent=<ページのオリジン>`）に `{type: "autona:render", serial, payload}` を送る。`autona.js` は 1 回ずつ描き、`autona:rendered` が届くまで確認の欄は「描画中…」。エラーは L3 の確認の欄（AI 用のコピー付き）。payload が 401 / 403 か契約 2 でなければレンダラーの画像に戻る。ヘッドレス・LAN のブラウザでも出る。`RenderAssets.ForPreview` は何も持たないので、リスナーが出さない画像（アップロードした背景など）は `""` になり `omitted` に名前が出る（ページが「プレビューには出ない」と言う）。生成（PNG）はオフスクリーン描画のまま。契約 1 のテンプレートは今までどおりレンダラーの画像でプレビューする。
 
+新しいテンプレート（ADR-008 D7 R3）: ページの「新しいデザインを作る」（共有ビューの中だけ。L2 と同じ `NewDesignActions`・v1 の `POST /layouts:create` の kind `thumbnail`）が `layout/include/kit/thumbnail/` から `layout/thumbnail_<名前>/` を作り（マニフェストは契約 2 の形で、作った直後から一覧に出る）、一覧を読み直して選ぶ。payload のキーの表は `layout/include/thumbnail_contract.json`（`data` / `config` / `template`。表の `config` のキーは `ThumbnailService` が描画とプレビューに渡す config に毎回ある（ほかのキーもありうる）。表のキーは足すだけ。どちらも `tests/test_thumbnail_kit.py` が固定）で、キットの `CONTRACT.md` / `AI_PROMPT.md` / `sample_payload.json` は `scripts/gen_layout_kit.py` の生成物。テンプレートの選択の下に、一覧に出せなかった `thumbnail_*` のフォルダと理由（`GET /api/v1/layouts` の `unlisted` のうち kind `thumbnail`）を出す。作った後は一覧の読み直しが終わって一覧にあるときだけ選ぶ。
+
 #### 4.4.2 リザルト
 
 一覧の正本はカタログの result パッケージ（`ResultService.LayoutEntries()`）。枠の数は `SlotsFor()`、既定は `DEFAULT_LAYOUT`（単独）/ `DEFAULT_TEAM_LAYOUT`（団体）。同梱の名前は `core/CoreWords` の `result_layout_<id>`。ファイルは `settings.json`・`result.html`（`initResult(payload)` 必須）・`result.css`・`result.js`（同梱の多くは `../include/` を共有）。団体のレイアウトは `placeTeams()`（`include/result.js`）がメンバーのファイターを配置する（`data.rows` が `teams` のとき。`rows` の無い payload では `layout` が `team` で始まるとき）。
@@ -599,7 +601,7 @@ OBS の標準ホットキーと被ると配信中に意図しない操作が走�
 テンプレートパッケージ（§4.4.0）のフォルダを置くだけで、ページの選択肢に出て描ける。
 
 - リザルト: `layout/{名前}/settings.json`（`{"autona": {"kind": "result", "contract": 1, "size": [960, 1080], "rows": "players", ...}}`）・`result.html`・`result.css`・`result.js`。`rows: "players"` は 16 行、`"teams"` は 8 行渡る。それより多い行は契約 1 に無い（`SLOT_COUNTS`・state の行・payload の変更で、`contract` を上げる話）。
-- サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`contract: 2`・`template`）・`thumbnail.html`（`../include/autona.js` を読む）・`thumbnail.css`・`thumbnail.js`（`Autona.onRender`）・テンプレート定義 JSON。書き方は `layout/README.md`。
+- サムネイル: `layout/{名前}/settings.json`（`kind: "thumbnail"`・`contract: 2`・`template`）・`thumbnail.html`（`../include/autona.js` を読む）・`thumbnail.css`・`thumbnail.js`（`Autona.onRender`）・テンプレート定義 JSON。書き方は `layout/README.md`。サムネイルのページの「新しいデザインを作る」でキットから作るのが早い（§4.4.1）。
 - 同梱として出すときは `git add` してリリースの zip に入れる（`validate_release_zip.ps1` は追跡済みのファイルだけを通す）。凍結した表と `CoreWords` は、id とフォルダ名が違う既存 8 種のためのもので足さない。
 - 触らない: state・Python（`ResultService` / `ThumbnailService` / レンダラー）・React（選択肢は `GET /api/v1/layouts?kind=` から出る）。
 - ページはプレビュー用のリスナーのオリジンで描かれる（R-Img-9）。読めるのはパッケージ・`../include/`・`../../assets/`・payload のパスだけで、外部（CDN）・file:・ほかのポートへの要求は届かない（WebRTC の UDP は除く）。ライブラリ・フォントはパッケージに入れる。
