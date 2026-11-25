@@ -53,6 +53,20 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 # MAX_CONTENT_LENGTH of its own.
 LEGACY_MAX_BODY = 1024 * 1024
 
+# Static files' MIME types by lower-case extension (no charset: werkzeug adds
+# "; charset=utf-8" to text/* and text/javascript). Others are guessed.
+_STATIC_MIME_TYPES = {
+    ".js": "text/javascript", ".mjs": "text/javascript",
+    ".css": "text/css", ".html": "text/html", ".htm": "text/html",
+    ".json": "application/json", ".map": "application/json",
+    ".svg": "image/svg+xml", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+    ".webp": "image/webp", ".bmp": "image/bmp", ".ico": "image/x-icon",
+    ".ttf": "font/ttf", ".otf": "font/otf",
+    ".woff": "font/woff", ".woff2": "font/woff2",
+    ".txt": "text/plain",
+}
+
 class SocketioJson:
     def default(obj):
         if isinstance(obj, type(type(1))):
@@ -994,15 +1008,13 @@ def _build_web_app():
             return "File not found", 404
         filename = served
         try:
-            mimetype = None
-            if filename.endswith('.js'):
-                mimetype = "text/javascript"
-            if filename.lower().endswith('.png'):
-                mimetype = "image/png"
-
             # Case-insensitive: the Windows filesystem serves
             # /Layout/Custom/... too, and it must not be cached either.
             lowered = filename.lower()
+            # From a fixed table, not mimetypes: on Windows it reads the
+            # registry, which an editor may have rewritten (.css as
+            # text/plain: Chromium then ignores the stylesheet).
+            mimetype = _STATIC_MIME_TYPES.get(os.path.splitext(lowered)[1])
             is_designer_file = lowered.startswith(
                 ("layout/custom/", "layout/designer_runtime/"))
             # A template package's file (ADR-008 D7 R2): with the policy
@@ -1031,7 +1043,7 @@ def _build_web_app():
             response = send_from_directory(
                 LayoutCatalog.AppDirectory(),
                 filename,
-                as_attachment=filename.endswith('.gz'),
+                as_attachment=lowered.endswith('.gz'),
                 mimetype=mimetype,
                 max_age=31536000 if is_build_static
                 else 0 if is_designer_file or is_template_file

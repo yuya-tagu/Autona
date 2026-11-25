@@ -181,6 +181,53 @@ def _write(root, relative, data=b"x"):
     path.write_bytes(data)
 
 
+STATIC_MIME_CASES = {
+    "layout/x.css": "text/css",
+    "layout/x.svg": "image/svg+xml",
+    "layout/x.woff2": "font/woff2",
+    "layout/X.JS": "text/javascript",
+    "out/x.webp": "image/webp",
+    "out/x.json": "application/json",
+    "web/build/static/x.js": "text/javascript",
+}
+
+
+def test_static_files_get_their_mime_type_from_a_fixed_table(server):
+    for relative in STATIC_MIME_CASES:
+        _write(server.root, relative)
+    client = _client(server)
+    for relative, expected in STATIC_MIME_CASES.items():
+        response = client.get("/" + relative)
+        assert response.status_code == 200, relative
+        assert response.mimetype == expected, relative
+
+
+def test_static_content_type_header_is_the_whole_value(server):
+    _write(server.root, "layout/x.css")
+    response = _client(server).get("/layout/x.css")
+    assert response.headers["Content-Type"] == "text/css; charset=utf-8"
+
+
+def test_a_polluted_mime_registry_does_not_change_the_table(server, monkeypatch):
+    import mimetypes
+
+    # werkzeug reads the guess through the module attribute.
+    monkeypatch.setattr(mimetypes, "guess_type",
+                        lambda *a, **k: ("text/plain", None))
+    for relative in ("layout/x.css", "layout/x.svg", "layout/x.xyz"):
+        _write(server.root, relative)
+    client = _client(server)
+    assert client.get("/layout/x.css").mimetype == "text/css"
+    assert client.get("/layout/x.svg").mimetype == "image/svg+xml"
+    for relative, expected in (("layout/x.js", "text/javascript"),
+                               ("layout/x.png", "image/png"),
+                               ("layout/x.woff2", "font/woff2")):
+        _write(server.root, relative)
+        assert client.get("/" + relative).mimetype == expected, relative
+    # Not in the table: left to the guess.
+    assert client.get("/layout/x.xyz").mimetype == "text/plain"
+
+
 def test_settings_and_the_player_db_are_not_served(server, warnings):
     _write(server.root, "user_data/settings.json", b'{"secret": 1}')
     _write(server.root, "user_data/local_players.json", b"{}")
