@@ -232,6 +232,288 @@ def test_a_failed_load_is_not_announced(tmp_path, settings):
     assert db.database == {}
 
 
+# -- a database that could not be read is never saved over -------------------
+
+
+@pytest.fixture
+def logged():
+    from loguru import logger
+
+    messages = []
+    handler = logger.add(lambda message: messages.append(message.record),
+                         level="DEBUG", format="{message}")
+    try:
+        yield messages
+    finally:
+        logger.remove(handler)
+
+
+def _warnings(records, start):
+    return [r["message"] for r in records
+            if r["level"].name == "WARNING" and r["message"].startswith(start)]
+
+
+@pytest.mark.parametrize("content", [
+    b"not json",
+    b'[{"gamerTag": "Kept"',           # cut short
+    b'{"gamerTag": "Kept"}',           # not a list
+    b"null",
+    b'[{"gamerTag": "\xff\xfe"}]',     # not utf-8
+], ids=["garbage", "truncated", "object", "null", "bad-utf8"])
+def test_a_corrupt_database_is_moved_aside_before_anything_is_saved(
+        content, tmp_path, settings, logged):
+    path = tmp_path / "local_players.json"
+    path.write_bytes(content)
+    db = _db(tmp_path)
+    seen = []
+    db.changed.subscribe(lambda: seen.append(1))
+
+    db.LoadDB()
+    assert seen == [] and db.database == {} and not db.loadFailed
+    db.AddPlayers([_player("A")])
+
+    backups = list(tmp_path.glob("local_players.json.unreadable-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == content
+    assert _saved_tags(tmp_path) == ["A"]
+    moved = _warnings(logged, "local_players.json is unusable")
+    assert len(moved) == 1 and backups[0].name in moved[0]
+    assert str(tmp_path) not in moved[0]  # the file names only
+
+
+def test_a_second_corrupt_file_keeps_the_first_ones_copy(
+        tmp_path, settings, monkeypatch):
+    import datetime
+    from types import SimpleNamespace
+
+    frozen = SimpleNamespace(now=lambda: datetime.datetime(2026, 1, 2, 3, 4, 5))
+    # The module's own name only, not the shared datetime module.
+    monkeypatch.setattr(player_db_module, "datetime",
+                        SimpleNamespace(datetime=frozen))
+    path = tmp_path / "local_players.json"
+    for content in (b"first", b"second"):
+        path.write_bytes(content)
+        _db(tmp_path).LoadDB()
+
+    assert (tmp_path / "local_players.json.unreadable-20260102-030405.bak") \
+        .read_bytes() == b"first"
+    assert (tmp_path / "local_players.json.unreadable-20260102-030405-2.bak") \
+        .read_bytes() == b"second"
+
+
+def test_a_corrupt_database_that_cannot_be_moved_is_never_saved_over(
+        tmp_path, settings, monkeypatch):
+    path = tmp_path / "local_players.json"
+    path.write_bytes(b"not json")
+
+    def refuse(src, dst):
+        raise PermissionError("sharing violation")
+
+    monkeypatch.setattr(player_db_module.os, "replace", refuse)
+    db = _db(tmp_path)
+    db.LoadDB()
+    assert db.loadFailed
+    monkeypatch.undo()  # the replace works again: still nothing is written
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    db.AddPlayers([_player("A")])
+
+    assert path.read_bytes() == b"not json"
+    assert not list(tmp_path.glob("*.bak"))
+    assert db.Contains("A")  # kept in memory for the session
+
+
+def test_a_database_that_cannot_be_opened_is_never_saved_over(
+        tmp_path, settings, monkeypatch, logged):
+    path = tmp_path / "local_players.json"
+    path.write_text(_dumps([_player("Kept", name="hand made")]),
+                    encoding="utf-8")
+    before = path.read_bytes()
+    db = _db(tmp_path)
+    real_open = open
+
+    def locked(file, mode="r", *args, **kwargs):
+        if os.fspath(file) == db.path and "r" in mode:
+            raise PermissionError(13, "locked by another process", file)
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(player_db_module, "open", locked, raising=False)
+    seen = []
+    db.changed.subscribe(lambda: seen.append(1))
+    db.LoadDB()
+    assert db.loadFailed and db.database == {} and seen == []
+
+    # The entrants worker's way and the player card's: neither writes.
+    db.AddPlayers([_player("A")], deferRefresh=True)
+    db.SaveDB()
+    db.AddPlayers([_player("B")])
+    db.DeletePlayer("B")
+
+    assert path.read_bytes() == before
+    assert _temps(tmp_path) == []
+    assert db.Contains("A") and not db.Contains("B")  # in memory only
+    assert len(_warnings(logged, "Not saving the player database")) == 1
+    opened = _warnings(logged, "Could not open local_players.json")
+    assert len(opened) == 1 and str(tmp_path) not in opened[0]
+
+
+def test_a_database_that_becomes_readable_is_merged_and_saved(
+        tmp_path, settings, monkeypatch):
+    path = tmp_path / "local_players.json"
+    path.write_text(_dumps([_player("Kept", name="from file"),
+                            _player("Both", name="from file")]),
+                    encoding="utf-8")
+    db = _db(tmp_path)
+    real_open = open
+    locked = {"on": True}
+
+    def maybe_locked(file, mode="r", *args, **kwargs):
+        if locked["on"] and os.fspath(file) == db.path and "r" in mode:
+            raise PermissionError(13, "locked by another process", file)
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(player_db_module, "open", maybe_locked, raising=False)
+    db.LoadDB()
+    assert db.loadFailed
+
+    db.AddPlayers([_player("Both", name="from memory"), _player("New")])
+    assert db.loadFailed and sorted(_saved_tags(tmp_path)) == ["Both", "Kept"]
+
+    locked["on"] = False
+    db.SaveDB()
+
+    assert not db.loadFailed
+    assert sorted(_saved_tags(tmp_path)) == ["Both", "Kept", "New"]
+    assert db.Get("Both")["name"] == "from memory"  # memory wins
+
+
+def test_a_missing_file_at_load_is_no_reason_to_stop_saving(
+        tmp_path, settings, monkeypatch):
+    path = tmp_path / "local_players.json"
+    path.write_text(_dumps([_player("Gone")]), encoding="utf-8")
+    db = _db(tmp_path)
+    real_open = open
+
+    def vanished(file, mode="r", *args, **kwargs):
+        if os.fspath(file) == db.path and "r" in mode:
+            raise FileNotFoundError(2, "gone", file)
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(player_db_module, "open", vanished, raising=False)
+    db.LoadDB()
+    monkeypatch.undo()
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    assert not db.loadFailed
+    db.AddPlayers([_player("A")])
+    assert _saved_tags(tmp_path) == ["A"]
+
+
+def test_only_the_newest_three_skipped_copies_are_kept(
+        tmp_path, settings, monkeypatch):
+    path = tmp_path / "local_players.json"
+    path.write_text(_dumps([None, _player("Alpha")]), encoding="utf-8")
+    unreadable = tmp_path / "local_players.json.unreadable-20200101-000000.bak"
+    unreadable.write_bytes(b"mine")
+    for _ in range(6):
+        _db(tmp_path).LoadDB()
+    assert len(list(tmp_path.glob("local_players.json.skipped-*.bak"))) == 3
+    assert unreadable.read_bytes() == b"mine"
+
+
+def test_a_load_that_fails_halfway_keeps_nothing_it_read(
+        tmp_path, settings, monkeypatch):
+    path = tmp_path / "local_players.json"
+    path.write_text(_dumps([_player("A"), _player("B")]), encoding="utf-8")
+    before = path.read_bytes()
+    db = _db(tmp_path)
+    real_tag = PlayerDB.PlayerTag
+
+    def fails_on_b(player):
+        if player.get("gamerTag") == "B":
+            raise RuntimeError("halfway")
+        return real_tag(player)
+
+    monkeypatch.setattr(PlayerDB, "PlayerTag", staticmethod(fails_on_b))
+    db.LoadDB()
+    monkeypatch.setattr(PlayerDB, "PlayerTag", staticmethod(real_tag))
+
+    assert db.database == {} and db.loadFailed
+    db.AddPlayers([_player("C")])
+    assert path.read_bytes() == before
+
+
+def test_one_bad_record_is_skipped_not_the_whole_database(
+        tmp_path, settings, logged):
+    path = tmp_path / "local_players.json"
+    records = [
+        _player("Alpha", prefix="SPN", name="A"),
+        None,
+        {"prefix": "LeakPrefix", "name": "no gamer tag"},
+        _player("Bravo"),
+        {"gamerTag": 12345},
+        _player("Charlie", prefix=["not", "a", "string"]),
+        _player("Delta", prefix=""),
+    ]
+    path.write_text(_dumps(records), encoding="utf-8")
+    before = path.read_bytes()
+    db = _db(tmp_path)
+    seen = []
+    db.changed.subscribe(lambda: seen.append(1))
+
+    db.LoadDB()
+
+    assert seen == [1]
+    assert not db.loadFailed
+    assert [tag for tag, _ in db.Items()] == ["SPN Alpha", "Bravo", "Delta"]
+    assert path.read_bytes() == before  # a load still writes nothing
+    backups = list(tmp_path.glob("local_players.json.skipped-*.bak"))
+    assert len(backups) == 1 and backups[0].read_bytes() == before
+    assert _warnings(logged, "Skipped 4 unreadable player records")
+
+    db.AddPlayers([_player("Echo")])
+    assert _saved_tags(tmp_path) == ["Alpha", "Bravo", "Delta", "Echo"]
+
+
+def test_a_failed_copy_of_the_skipped_records_does_not_stop_the_load(
+        tmp_path, settings, monkeypatch, logged):
+    (tmp_path / "local_players.json").write_text(
+        _dumps([None, _player("Alpha")]), encoding="utf-8")
+
+    def no_copy(src, dst):
+        raise PermissionError("no room")
+
+    monkeypatch.setattr(player_db_module.shutil, "copyfile", no_copy)
+    db = _db(tmp_path)
+    seen = []
+    db.changed.subscribe(lambda: seen.append(1))
+    db.LoadDB()
+
+    assert seen == [1] and db.Contains("Alpha") and not db.loadFailed
+    assert _warnings(logged, "Could not copy local_players.json aside")
+    assert _warnings(logged, "Skipped 1 unreadable player records")
+
+
+def test_loading_logs_no_players_tag(tmp_path, settings, monkeypatch, logged):
+    # Players' values never go to the log (state-and-webserver.md).
+    (tmp_path / "local_players.csv").write_text(
+        "prefix,gamerTag,mains\nCsvPrefix,CsvSecretTag,not-json\n",
+        encoding="utf-8")
+    db = _db(tmp_path)
+    db.LoadDB()  # the legacy import: the mains are no JSON
+    assert db.Contains("CsvPrefix CsvSecretTag")
+
+    (tmp_path / "local_players.json").write_text(_dumps([
+        None, {"prefix": "LeakPrefix", "gamerTag": None},
+        _player("JsonSecretTag", prefix=7)]), encoding="utf-8")
+    _db(tmp_path).LoadDB()
+    (tmp_path / "local_players.json").write_text("not json", encoding="utf-8")
+    _db(tmp_path).LoadDB()
+
+    text = "\n".join(r["message"] for r in logged)
+    assert "No mains found for a player" in text
+    for value in ("CsvSecretTag", "CsvPrefix", "LeakPrefix", "JsonSecretTag"):
+        assert value not in text
+
+
 def test_announcements_are_made_outside_the_lock(tmp_path, settings):
     # The Qt adapter's model build on the GUI thread takes this lock. Until
     # ADR-005 S3f-2 its subscriber also waited for that build, so announcing

@@ -37,6 +37,11 @@ What changed in the move, and what did not:
   back to the old in-place overwrite rather than not saving. The bytes are
   the same as before: json.dumps(indent=2) written in text mode (os.linesep
   line ends), utf-8.
+- A database that could not be read is never saved over: a corrupt file is
+  moved aside (local_players.json.unreadable-<time>.bak) before the DB starts
+  empty, and one that cannot be opened stops SaveDB (`loadFailed`) until a
+  later SaveDB can read it (the players it has are merged in, memory's win).
+  The newest 3 local_players.json.skipped-*.bak copies are kept. A record that is no player is skipped, not the whole file.
 - Nothing else: the load-time normalisation, the save-time field filter and
   every merge rule are the old code's, pinned against what it produced by
   tests/test_player_db.py (tests/fixtures/player_db).
@@ -45,9 +50,11 @@ Import-inert like the rest of src/core: bootstrap_core() builds `instance`,
 the shell calls LoadDB().
 """
 import csv
+import datetime
 import glob
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -71,6 +78,14 @@ LEGACY_CSV_PATH = "./user_data/local_players.csv"
 # code always did).
 _REPLACE_ATTEMPTS = 4
 _REPLACE_BACKOFF = 0.02
+
+# How many local_players.json.skipped-*.bak copies are kept.
+SKIPPED_COPIES_KEPT = 3
+
+
+class _UnusableFile(Exception):
+    """local_players.json was read but holds no player list (bad JSON, bad
+    utf-8, or not a list at the top): it is moved aside, never saved over."""
 
 
 class PlayerDB:
@@ -100,6 +115,17 @@ class PlayerDB:
         # a write whose number is older than the one on disk is dropped.
         self._snapshotGeneration = 0
         self._writtenGeneration = 0
+        # True when LoadDB could not read the file (locked by another
+        # process, or corrupt and it could not be moved aside): SaveDB then
+        # writes nothing for the rest of the session, so a DB that was never
+        # read is not replaced by what this session added. Changes still
+        # apply in memory.
+        self.loadFailed = False
+        self._warnedLoadFailed = False
+        # True when loadFailed is only "could not open it": SaveDB then reads
+        # the file again each time (_TryRecover). Not set when the file is
+        # corrupt and could not be moved aside, nor after a partial load.
+        self._reloadable = False
 
     @staticmethod
     def PlayerTag(player):
@@ -132,7 +158,15 @@ class PlayerDB:
             if not jsonExisted:
                 self._Persist(self._NextGeneration(), json.dumps([]))
             with self.lock:
-                csv_imported = self._Load(jsonExisted)
+                before = dict(self.database)
+                try:
+                    csv_imported, skipped = self._Load(jsonExisted)
+                except Exception:
+                    # What a failed load had put in so far is dropped: a
+                    # half-read DB must never reach SaveDB.
+                    self.database.clear()
+                    self.database.update(before)
+                    raise
                 # No unconditional write-back: everything _Load does is an
                 # in-memory normalisation, so re-serialising the whole DB
                 # (indent=2) at every launch only ever rewrote what was just
@@ -145,9 +179,40 @@ class PlayerDB:
                 # The legacy CSV import is the exception: its rows exist
                 # nowhere else yet, so that migration still has to be written
                 # out (below, outside the lock).
+        except _UnusableFile as problem:
+            # Moved aside outside the lock (no I/O under it); not announced,
+            # as a failed load never was.
+            self._MoveAside(str(problem))
+            return
+        except FileNotFoundError:
+            # Gone between the exists() check and the open, or the first
+            # run's empty file could not be written: there is no file to
+            # protect, so saving is allowed (it creates one).
+            logger.warning(
+                f"{os.path.basename(self.path)} was not there to read; "
+                "starting an empty player database")
+            return
+        except OSError as error:
+            # Locked by another process, unreadable: what is on disk is
+            # unknown, so nothing is saved over it until it can be read.
+            # SaveDB reads it again each time (_TryRecover). The error's
+            # type only (its text carries the full path).
+            self.loadFailed = True
+            self._reloadable = True
+            logger.warning(
+                f"Could not open {os.path.basename(self.path)} "
+                f"({type(error).__name__}); the player database will not be "
+                "saved until it can be read")
+            return
         except Exception:
+            # Anything else (the legacy CSV import failing, say): the
+            # database in memory is partial, and a partial database must
+            # not be saved over the file. Not retried by SaveDB.
+            self.loadFailed = True
             logger.error(traceback.format_exc())
             return
+        if skipped:
+            self._CopyAside(skipped)
         if csv_imported:
             logger.info(
                 "Persisting players migrated from the legacy CSV database")
@@ -155,8 +220,11 @@ class PlayerDB:
         self.changed.notify()
 
     def _Load(self, jsonExisted):
-        """Fill `database` from disk; True when the legacy CSV was imported.
-        Caller holds `lock`."""
+        """Fill `database` from disk: (True when the legacy CSV was imported,
+        how many JSON records were skipped as no player). Caller holds
+        `lock`, so this only reads and parses; moving or copying the file is
+        LoadDB's, outside the lock. Raises OSError when the file cannot be
+        read and _UnusableFile when what it holds is no player list."""
         # True once the legacy CSV import actually put rows in memory. That
         # import exists only in RAM until SaveDB() writes them out, so it is
         # the one path in LoadDB that still has to persist.
@@ -177,7 +245,7 @@ class PlayerDB:
                                 player.get("mains", "{}"))
                         except Exception:
                             player["mains"] = {}
-                            logger.error(f"No mains found for: {tag}")
+                            logger.error("No mains found for a player")
 
         if os.path.exists(self.legacyCsvPath):
             try:
@@ -185,24 +253,173 @@ class PlayerDB:
             except Exception:
                 logger.error(traceback.format_exc())
 
+        # OSError (cannot open / read) goes to the caller as it is; a read
+        # that works but gives no player list is _UnusableFile.
         with open(self.path, 'rt', encoding='utf-8') as jsonfile:
-            player_list = orjson.loads(jsonfile.read())
-            for player in player_list:
-                tag = player.get("prefix")+" "+player.get("gamerTag") if player.get("prefix") else player.get("gamerTag")
-                if tag not in self.database:
-                    self.database[tag] = player
+            try:
+                player_list = orjson.loads(jsonfile.read())
+            except ValueError as error:
+                # orjson.JSONDecodeError and UnicodeDecodeError are both
+                # ValueErrors.
+                raise _UnusableFile(type(error).__name__) from error
+        if not isinstance(player_list, list):
+            raise _UnusableFile("not a list")
 
-                    try:
-                        player["mains"] = player.get("mains", "{}")
-                    except Exception:
-                        player["mains"] = {}
-                        logger.error(f"No mains found for: {tag}")
+        skipped = 0
+        for player in player_list:
+            # One bad record (null, no string gamerTag, a prefix that is no
+            # string) used to fail the whole load; it is skipped instead.
+            if not PlayerDB._IsRecord(player):
+                skipped += 1
+                continue
+            tag = PlayerDB.PlayerTag(player)
+            if tag not in self.database:
+                self.database[tag] = player
+
+                try:
+                    player["mains"] = player.get("mains", "{}")
+                except Exception:
+                    player["mains"] = {}
+                    logger.error("No mains found for a player")
 
         # One line instead of one per player: a 3k-entry DB used to emit 3k
         # INFO records at every launch (written to two log sinks).
         logger.info(
             f"Loaded {len(self.database)} players from the local database")
-        return csv_imported
+        return csv_imported, skipped
+
+    @staticmethod
+    def _IsRecord(player):
+        """A JSON record PlayerTag can key: a dict with a string gamerTag,
+        and a prefix that is a string when it is truthy."""
+        if not isinstance(player, dict):
+            return False
+        if not isinstance(player.get("gamerTag"), str):
+            return False
+        prefix = player.get("prefix")
+        return not prefix or isinstance(prefix, str)
+
+    @staticmethod
+    def _AsidePath(path, kind):
+        """``<path>.<kind>-<time>.bak``, never an existing file (a second
+        bad file must not replace the first one's copy). SettingsManager's
+        naming."""
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = f"{path}.{kind}-{stamp}"
+        candidate = f"{base}.bak"
+        suffix = 2
+        while os.path.exists(candidate):
+            candidate = f"{base}-{suffix}.bak"
+            suffix += 1
+        return candidate
+
+    def _MoveAside(self, problem):
+        """Move a corrupt database out of the way, so the next save starts a
+        new file instead of replacing it. When it cannot be moved, nothing
+        is saved this session (`loadFailed`). Called without `lock`."""
+        name = os.path.basename(self.path)
+        backup = PlayerDB._AsidePath(self.path, "unreadable")
+        try:
+            os.replace(self.path, backup)
+        except OSError as error:
+            self.loadFailed = True
+            logger.warning(
+                f"{name} is unusable ({problem}) and could not be moved "
+                f"aside ({type(error).__name__}); the player database will "
+                "not be saved this session")
+            return False
+        logger.warning(
+            f"{name} is unusable ({problem}); moved it to "
+            f"{os.path.basename(backup)} and started an empty player database")
+        return True
+
+    def _CopyAside(self, skipped):
+        """Keep a copy of a database some records of which were skipped:
+        the next save writes only the ones that were read. Called without
+        `lock`; a failed copy is logged and the load goes on."""
+        backup = PlayerDB._AsidePath(self.path, "skipped")
+        try:
+            shutil.copyfile(self.path, backup)
+            self._PruneSkippedCopies()
+        except OSError as error:
+            logger.warning(
+                f"Could not copy {os.path.basename(self.path)} aside "
+                f"({type(error).__name__})")
+            backup = None
+        logger.warning(
+            f"Skipped {skipped} unreadable player records"
+            + (f"; the file was copied to {os.path.basename(backup)}"
+               if backup else ""))
+
+    def _PruneSkippedCopies(self):
+        """Keep the newest SKIPPED_COPIES_KEPT `.skipped-*.bak` copies (they
+        pile up on every launch that saves nothing). The `.unreadable-*.bak`
+        ones are the user's data and are never touched. Called without
+        `lock`; a copy that cannot be removed is left."""
+        found = glob.glob(glob.escape(self.path) + ".skipped-*.bak")
+        stamped = []
+        for path in found:
+            try:
+                stamped.append((os.stat(path).st_mtime_ns, path))
+            except OSError:
+                pass
+        stamped.sort()
+        for _, path in stamped[:-SKIPPED_COPIES_KEPT]:
+            try:
+                os.remove(path)
+            except OSError:
+                logger.warning(f"Could not remove {os.path.basename(path)}")
+
+    def _TryRecover(self):
+        """Read the file again after a load that could not open it. When it
+        reads, add the players the file has and memory does not (the same tag
+        keeps memory's record) and clear `loadFailed`; True then. False while
+        it still cannot be read (or is corrupt and cannot be moved aside).
+        The read is done without `lock` (no I/O under it); the merge takes
+        it. Called without `lock`."""
+        if not self._reloadable:
+            return False
+        try:
+            records, skipped = self._ReadRecords()
+        except FileNotFoundError:
+            records, skipped = [], 0  # nothing on disk to protect
+        except _UnusableFile as problem:
+            # Same as a corrupt file at load: moved aside, then saved over.
+            if not self._MoveAside(str(problem)):
+                return False
+            records, skipped = [], 0
+        except OSError as error:
+            logger.debug(
+                "Player database still cannot be read "
+                f"({type(error).__name__})")
+            return False
+        with self.lock:
+            for player in records:
+                tag = PlayerDB.PlayerTag(player)
+                if tag not in self.database:
+                    self.database[tag] = player
+                    player["mains"] = player.get("mains", "{}")
+            self.loadFailed = False
+            self._reloadable = False
+            count = len(self.database)
+        if skipped:
+            self._CopyAside(skipped)
+        logger.info(
+            f"Read the local player database after all; {count} players now")
+        return True
+
+    def _ReadRecords(self):
+        """(the records of the file that are players, how many were skipped).
+        OSError when it cannot be read, _UnusableFile when it holds no list."""
+        with open(self.path, 'rt', encoding='utf-8') as jsonfile:
+            try:
+                player_list = orjson.loads(jsonfile.read())
+            except ValueError as error:
+                raise _UnusableFile(type(error).__name__) from error
+        if not isinstance(player_list, list):
+            raise _UnusableFile("not a list")
+        records = [p for p in player_list if PlayerDB._IsRecord(p)]
+        return records, len(player_list) - len(records)
 
     # -- writing -----------------------------------------------------------
 
@@ -376,7 +593,23 @@ class PlayerDB:
         outside it, under `_saveLock`, so a slow disk or a retried replace
         never blocks a reader or the entrants worker. Snapshots are numbered,
         so the file always ends at the newest one even when two saves race.
-        Failures are logged, never raised (as before)."""
+        Failures are logged, never raised (as before).
+
+        Writes nothing while `loadFailed`: the file LoadDB could not read
+        would be replaced by only what this session has in memory (the
+        entrants worker saves on its own after every tournament fetch). A
+        file that could not be opened is read again here each time
+        (_TryRecover); once it reads, its players are merged in and the save
+        goes ahead."""
+        if self.loadFailed and not self._TryRecover():
+            if not self._warnedLoadFailed:
+                self._warnedLoadFailed = True
+                logger.warning(
+                    "Not saving the player database: it could not be read "
+                    "at launch")
+            else:
+                logger.debug("Not saving the player database (unread)")
+            return
         try:
             with self.lock:
                 generation, text = self._Snapshot()
