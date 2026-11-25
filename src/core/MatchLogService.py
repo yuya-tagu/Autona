@@ -104,9 +104,10 @@ no other lock (the writer writes outside it; it never takes
 ``StateManager.lock``). ``Flush`` and ``Shutdown`` wait for the writer, so
 they are not called holding ``StateManager.lock``.
 
-The writer appends; a file it first appends to in this process gets a line
-break first if it does not end in one (a line cut short by a crash is not
-joined to the next). Lines it cannot write (an OSError: the folder locked,
+The writer appends and fsyncs each file's batch; a file it first appends to
+in this process, or whose last append failed, gets a line break first if it
+does not end in one (a line cut short by a crash is not joined to the
+next). Lines it cannot write (an OSError: the folder locked,
 the disk full) are tried again after ``RETRY_DELAYS``, then dropped with a
 warning; at the close, within ``Shutdown``'s time. Any other error drops
 that file's lines with a warning and the writer goes on. Text that cannot
@@ -644,14 +645,21 @@ class MatchLogService:
                 with open(path, "a", encoding="utf-8", errors="replace",
                           newline="\n") as f:
                     f.write(text)
+                    # One fsync per file (batch), not per line.
+                    f.flush()
+                    os.fsync(f.fileno())
                 self._appended.add(path)
             except OSError as error:
+                # A failed append may have left half a line: look at the
+                # file's end again before the next append.
+                self._appended.discard(path)
                 failed += [(path, line, tries + 1)
                            for line, tries in entries]
                 logger.warning(
                     f"match log: {len(entries)} line(s) not written to "
                     f"{name} ({type(error).__name__}), to be tried again")
             except Exception as error:
+                self._appended.discard(path)
                 logger.warning(
                     f"match log: {len(entries)} line(s) dropped, not written "
                     f"to {name} ({type(error).__name__})")

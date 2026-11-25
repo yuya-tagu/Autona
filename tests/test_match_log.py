@@ -951,6 +951,83 @@ def test_another_error_drops_that_file_s_lines_and_goes_on(
                for line in logged)
 
 
+def _break_next_append(monkeypatch, error):
+    """Make the next append-mode open write half of its text, then raise."""
+    import builtins
+    real_open = builtins.open
+    state = {"done": False}
+
+    class _Half:
+        def __init__(self, f):
+            self._f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._f.close()
+            return False
+
+        def write(self, text):
+            self._f.write(text[:len(text) // 2])
+            self._f.flush()
+            raise error
+
+    def _open(path, mode="r", *args, **kwargs):
+        f = real_open(path, mode, *args, **kwargs)
+        if mode == "a" and not state["done"]:
+            state["done"] = True
+            return _Half(f)
+        return f
+
+    monkeypatch.setattr(builtins, "open", _open)
+    return real_open
+
+
+@pytest.mark.parametrize("error", [OSError("disk full"), ValueError("probe")])
+def test_a_failed_append_makes_the_next_one_check_the_line_end(
+        log, tmp_path, monkeypatch, error):
+    import builtins
+    path = str(tmp_path / "match_log" / "20261116.jsonl")
+    assert log.service._Write([(path, '{"a": 1}', 0)]) == []
+    real_open = _break_next_append(monkeypatch, error)
+    log.service._Write([(path, '{"b": 2, "pad": "xxxxxxxx"}', 0)])
+    monkeypatch.setattr(builtins, "open", real_open)
+    assert log.service._Write([(path, '{"c": 3}', 0)]) == []
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    assert lines[-1] == ""
+    assert lines[0] == '{"a": 1}' and lines[-2] == '{"c": 3}'
+    assert len(lines) == 4  # the cut line is on a line of its own
+    with pytest.raises(ValueError):
+        json.loads(lines[1])
+
+
+def test_each_file_is_fsynced_once_per_batch(log, tmp_path, monkeypatch):
+    import os
+    calls = []
+    monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd))
+    one = str(tmp_path / "match_log" / "20261116.jsonl")
+    two = str(tmp_path / "match_log" / "20261117.jsonl")
+    log.service._Write([(one, "{}", 0), (one, "{}", 0)])
+    assert len(calls) == 1
+    log.service._Write([(one, "{}", 0), (two, "{}", 0)])
+    assert len(calls) == 3
+
+
+def test_a_failed_fsync_sends_the_lines_to_be_tried_again(
+        log, tmp_path, monkeypatch):
+    import os
+
+    def _fsync(fd):
+        raise OSError("fsync")
+
+    monkeypatch.setattr(os, "fsync", _fsync)
+    path = str(tmp_path / "match_log" / "20261116.jsonl")
+    assert log.service._Write([(path, '{"a": 1}', 0)]) == [
+        (path, '{"a": 1}', 1)]
+
+
 # ── the shells' close ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("path, function", [
