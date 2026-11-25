@@ -32,6 +32,7 @@ from qtpy.QtGui import QColor, QPixmap
 
 from src.core import RenderAssets
 from src.core.RenderLane import PREVIEW_UNAVAILABLE
+from tests.conftest import remove_tree
 from tests.fixtures import template_packages
 
 WAIT_SECS = 60.0
@@ -523,7 +524,7 @@ def probePages(autonaApp):
     for name in scripts:
         (folder / name).unlink(missing_ok=True)
     for directory in created:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
 
 
 def _evaluate(renderer, script):
@@ -700,7 +701,7 @@ def standinPages(autonaApp):
         page=STANDIN, contract=1)
     yield autonaApp.dir / "layout"
     for directory in created:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
 
 
 def test_a_folder_named_in_any_script_is_drawn(standinPages, previewListener):
@@ -728,7 +729,7 @@ def test_a_folder_named_in_any_script_is_drawn(standinPages, previewListener):
             == f"/layout/{name}/thumbnail.html"
     finally:
         _destroy(renderer)
-        shutil.rmtree(folder, ignore_errors=True)
+        remove_tree(folder)
 
 
 @pytest.fixture

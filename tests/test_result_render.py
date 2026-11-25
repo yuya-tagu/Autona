@@ -36,6 +36,7 @@ from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.result.ResultPageRenderer import ResultPageRenderer
 from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
+from tests.conftest import remove_tree
 from tests.fixtures import template_packages
 from tests.fixtures.result import scenarios as world
 from tests.test_api_v1 import client, webApp  # noqa: F401
@@ -82,7 +83,7 @@ def pages(autonaApp, previewListener):
         contract=1)
     yield
     for directory in created:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
 
 
 @pytest.fixture
@@ -297,7 +298,7 @@ def shippedPages(autonaApp, previewListener):
         yield
     finally:
         for directory in created:
-            shutil.rmtree(directory, ignore_errors=True)
+            remove_tree(directory)
 
 
 @pytest.fixture
@@ -424,7 +425,7 @@ def test_a_teams_package_not_named_team_is_drawn_as_teams(
             shipped, "document.querySelectorAll('.member-cell').length")
     finally:
         SettingsManager.settings = settings
-        shutil.rmtree(folder, ignore_errors=True)
+        remove_tree(folder)
 
     assert error == ""
     assert members > 0
@@ -458,7 +459,7 @@ def test_a_package_placed_by_hand_is_drawn_from_its_folder_at_its_size(
         # The preview listener's (ADR-007 D4), from its folder.
         assert renderer._view.url().path() == "/layout/neon_board/index.html"
     finally:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
 
 
 def test_a_size_changed_in_the_manifest_is_drawn_at_not_stretched_to(
@@ -551,7 +552,7 @@ def service(autonaApp, pages, monkeypatch):
         with SM.lock:
             SM.state = state
             SM.lastSavedState = saved
-        shutil.rmtree(autonaApp.dir / "out" / "results", ignore_errors=True)
+        remove_tree(autonaApp.dir / "out" / "results")
         Path(results.PREVIEW_PATH).unlink(missing_ok=True)
 
 

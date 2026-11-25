@@ -440,12 +440,12 @@ assert locale_helper.countryToLanguage, \
 # Constructing the filter reads nothing; Initialize() is the load.
 core_bad_words.instance = core_bad_words()
 assert not core_bad_words.instance.patterns, \
-    "BadWordFilter() built the bad-word patterns"
+    "BadWordFilter() loaded the bad-word lists"
 assert not os.path.exists("./user_data/badword_whitelist.txt"), \
     "BadWordFilter() created badword_whitelist.txt"
 core_bad_words.instance.Initialize()
 assert core_bad_words.instance.patterns, \
-    "BadWordFilter.Initialize() did not build the patterns"
+    "BadWordFilter.Initialize() did not read the bad-word lists"
 assert os.path.isfile("./user_data/badword_whitelist.txt"), \
     "BadWordFilter.Initialize() did not create badword_whitelist.txt"
 assert os.path.isfile("./user_data/badword_blacklist.txt"), \

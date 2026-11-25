@@ -12,9 +12,10 @@ filter behaves as the old one did before the locale was loaded: "en-US" and
 no country languages.
 
 The logic itself is unchanged, line for line: a regex per word list built
-from a Trie, the user's white / black lists, the language selection
-(program locale, then the player's country: language-country, else
-language-americas for NA / SA, else the language alone, plus "common"), and
+from a Trie (on the first CensorString that tests that list), the user's
+white / black lists, the language selection (program locale, then the
+player's country: language-country, else language-americas for NA / SA,
+else the language alone, plus "common"), and
 the per-word scan over the dividers. tests/test_bad_word_filter.py replays
 what the old implementation produced (tests/fixtures/bad_word_filter).
 
@@ -23,6 +24,7 @@ which bootstrap_core() calls once on BadWordFilter.instance.
 """
 import os
 import re
+import threading
 import traceback
 from collections import defaultdict
 from typing import Dict, Set, Tuple, Union
@@ -83,14 +85,27 @@ class BadWordFilter:
         # the old module's paths were (against the process CWD).
         self._ngwordDir = ngwordDir
         self._userDataDir = userDataDir
-        self.patterns = defaultdict(re.Pattern)
+        # Language -> its words, read by Initialize(). The regex of a list is
+        # built on the first CensorString that tests it (_Pattern) rather
+        # than at startup: Initialize() runs synchronously under the splash,
+        # and a censor only ever tests "common", the program language and
+        # the players' countries' languages, so most of the 17 lists would
+        # be compiled (tens of ms) and never read.
+        self._words: Dict[str, frozenset] = {}
+        self._compiled: Dict[str, re.Pattern] = {}
+        # Leaf lock: held only around one compile, never while taking
+        # another lock (CensorString runs under StateManager.lock from
+        # CommentaryService / PlayerService, and on worker / Flask threads).
+        self._compileLock = threading.Lock()
         self.whiteList = []
         self.blackList = []
         self._initialized = False
 
     def Initialize(self):
-        """Build the bad-word tries and load the user white/black lists.
+        """Read the bad-word lists and load the user white/black lists.
 
+        Only the words are read here; the regex of a list is built from a
+        Trie on the first CensorString that tests that list (_Pattern).
         Idempotent: `_initialized` lets it run once. No Trie is kept after
         its regex is built (they were only read to build it, and held about
         7 MB for the life of the process). LoadWordList creates
@@ -129,12 +144,34 @@ class BadWordFilter:
         # commented out upstream as too slow for a large bracket, was not
         # carried over; see src/Helpers/AutonaBadWordFilter.py in git history.
 
-        for langkey, lang in langs.items():
-            trie = Trie()
-            for word in lang:
-                trie.insert(word)
+        for langkey, words in langs.items():
+            self._words[langkey] = frozenset(words)
 
-            self.patterns[langkey] = trie.build_regex_pattern()
+    @property
+    def patterns(self):
+        """The loaded word lists, by language (read-only view of what
+        Initialize() read; the compiled regexes are built lazily)."""
+        return self._words
+
+    def _Pattern(self, lang):
+        """The regex of `lang`'s list, built once on first use; None when no
+        list of that language was loaded."""
+        pattern = self._compiled.get(lang)
+        if pattern is not None:
+            return pattern
+        with self._compileLock:
+            pattern = self._compiled.get(lang)
+            if pattern is not None:
+                return pattern
+            words = self._words.get(lang)
+            if words is None:
+                return None
+            trie = Trie()
+            for word in words:
+                trie.insert(word)
+            pattern = trie.build_regex_pattern()
+            self._compiled[lang] = pattern
+            return pattern
 
     def CensorString(self, value: str, playerCountry: str = None):
         langTests = set(["common"])
@@ -166,7 +203,7 @@ class BadWordFilter:
 
                 # Test language-country
                 canonical = f"{lang}-{country}"
-                if canonical in self.patterns:
+                if canonical in self._words:
                     langTests.add(canonical)
                     continue
 
@@ -178,12 +215,12 @@ class BadWordFilter:
                     if continent in ["NA", "SA"]:
                         regionalLang = f"{lang}-americas"
 
-                    if regionalLang and regionalLang in self.patterns:
+                    if regionalLang and regionalLang in self._words:
                         langTests.add(regionalLang)
                         continue
 
             # Test language only
-            if lang in self.patterns:
+            if lang in self._words:
                 langTests.add(lang)
                 continue
 
@@ -209,11 +246,11 @@ class BadWordFilter:
                         pass
                     else:
                         for lang in langTests:
-                            if lang not in self.patterns:
+                            pattern = self._Pattern(lang)
+                            if pattern is None:
                                 continue
 
-                            match = self.patterns[lang].match(
-                                substring)
+                            match = pattern.match(substring)
 
                             if match:
                                 newString += "***"
@@ -237,11 +274,11 @@ class BadWordFilter:
                 pass
             else:
                 for lang in langTests:
-                    if lang not in self.patterns:
+                    pattern = self._Pattern(lang)
+                    if pattern is None:
                         continue
 
-                    match = self.patterns[lang].match(
-                        substring)
+                    match = pattern.match(substring)
 
                     if match:
                         newString += "***"

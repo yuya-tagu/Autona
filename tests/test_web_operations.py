@@ -44,6 +44,7 @@ import pytest
 
 from src import AutonaWebOperations as WebOps
 from src.AutonaWebOperations import BoardHost, NotAvailable
+from tests.conftest import remove_tree
 from tests.fixtures import template_packages
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.test_designer_service import make_project
@@ -2186,9 +2187,9 @@ def test_the_thumbnail_builds_no_board(autonaApp, monkeypatch):
         assert SettingsManager.Get("general.disable_autoupdate") is False
     finally:
         SettingsManager.Set("general.disable_autoupdate", polling)
-        shutil.rmtree(output, ignore_errors=True)
+        remove_tree(output)
         for folder in packages:
-            shutil.rmtree(folder, ignore_errors=True)
+            remove_tree(folder)
         with _state().SaveBlock():
             _state().Unset("score.2")
             if game is None:
@@ -2809,7 +2810,7 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         archiveJobs.Shutdown(5.0)
         shutil.rmtree(web)
         for folder in packages:
-            shutil.rmtree(folder, ignore_errors=True)
+            remove_tree(folder)
         if not hadLogo and logo.exists():
             logo.unlink()
         _dropHeadlessBoards(autonaApp)
