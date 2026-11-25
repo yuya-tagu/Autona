@@ -14,7 +14,7 @@ import flask_socketio
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from flask import Flask, send_from_directory, request, send_file, abort, jsonify
+from flask import Flask, Response, send_from_directory, request, send_file, abort, jsonify
 from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
 import orjson
@@ -175,6 +175,8 @@ def _build_web_app():
     # ADR-001). These legacy routes are kept unchanged for existing OBS /
     # Stream Deck setups, are frozen (no new routes here), and are scheduled
     # for removal in v2.0. Do not change their behavior.
+    # (Exception: error text is sent as text/plain + nosniff, against
+    # reflected XSS -- see get_thumbnail.)
     # The one exception: bad input answers 400 INVALID_ARGUMENT (the
     # InvalidInput handler above).
     # /api/designer/* and the static-file routes further below are NOT part
@@ -587,9 +589,10 @@ def _build_web_app():
             if result:
                 return send_file(result, mimetype=f"image/{fileFormat.lower()}")
             else:
-                return "An error has occured, please check Autona logs for more information"
+                return WebServer._plain(
+                    "An error has occured, please check Autona logs for more information")
         else:
-            return f"File format {fileFormat} not recognized"
+            return WebServer._plain(f"File format {fileFormat} not recognized")
 
     # Get the sets to be played
     @app.route('/get-sets')
@@ -1199,6 +1202,14 @@ class WebServer:
     # flusher, and the flusher never holds the lock below while it sends.
     # (bind host, port, LAN exposed) of the running server, else None.
     _listening = None
+
+    @staticmethod
+    def _plain(text):
+        """A text answer that is never parsed as HTML: a route that echoes a
+        piece of its URL would otherwise run it as a script in this origin."""
+        response = Response(text, mimetype="text/plain")
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @staticmethod
     def Listening():
