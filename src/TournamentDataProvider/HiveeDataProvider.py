@@ -70,8 +70,10 @@ lock while asking Hivee. The overlay is read once per view and kept for
 down does not hold a job for every read), and reads that ask while a read
 of the same view is waiting for Hivee wait for its answer rather than ask
 again: the follow's 5-second tick -- the set, the stream queue, the
-stream's current set, each board -- makes one request. Import side effects:
-none (pitfalls #1).
+stream's current set, each board -- makes one request. A transient failure
+(a connection error, a 429 or a 5xx) is asked again once after
+``RETRY_WAIT_SECS``; a timeout and a 404 are not, nor anything once the
+app is stopping. Import side effects: none (pitfalls #1).
 """
 import re
 import threading
@@ -373,6 +375,10 @@ class HiveeDataProvider(TournamentDataProvider):
     # failed (nothing is asked of Hivee meanwhile).
     CACHE_SECS = 2.0
     FAILURE_SECS = 5.0
+    # A transient failure is asked again once, after this wait (tests set
+    # it to 0). The statuses that count as transient:
+    RETRY_WAIT_SECS = 1.0
+    _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 
     # {(origin, event id): _Memory}: outside the instances, which a forced
     # reload replaces (see the module docstring).
@@ -435,8 +441,12 @@ class HiveeDataProvider(TournamentDataProvider):
             if leading:
                 flight = self._flights[view] = _Flight()
         if not leading:
-            # A connect and a read can each take the whole timeout.
-            if not flight.done.wait(2 * self._request_timeout_secs + 1):
+            # The leader's worst case: a first attempt that fails fast, the
+            # retry wait, then a second attempt whose connect and read can
+            # each take the whole timeout (a timeout is not retried, so a
+            # slow first attempt is not followed by a second one).
+            if not flight.done.wait(2 * self._request_timeout_secs
+                                    + self.RETRY_WAIT_SECS + 2):
                 logger.warning(f"Hivee: the overlay ({view}) read under way "
                                "did not answer in time")
                 return None
@@ -455,9 +465,31 @@ class HiveeDataProvider(TournamentDataProvider):
         return payload
 
     def _Request(self, view):
+        """The overlay's payload for `view`, or None. A transient failure
+        is asked again once after RETRY_WAIT_SECS, unless the app is
+        stopping (the wait ends early when it starts to)."""
+        payload, retryable = self._RequestOnce(view)
+        if not retryable:
+            return payload
+        executor = TaskExecutor.instance
+        if executor is not None:
+            if executor.stopping.is_set():
+                return None
+            logger.info(f"Hivee: the overlay ({view}) retrying once")
+            if executor.stopping.wait(self.RETRY_WAIT_SECS):
+                return None
+        else:
+            logger.info(f"Hivee: the overlay ({view}) retrying once")
+            threading.Event().wait(self.RETRY_WAIT_SECS)
+        payload, _ = self._RequestOnce(view)
+        return payload
+
+    def _RequestOnce(self, view):
+        """One request: (the payload or None, whether a failure is worth
+        asking again -- a connection error or a transient status only)."""
         executor = TaskExecutor.instance
         if executor is not None and executor.stopping.is_set():
-            return None
+            return None, False
         params = {"token": self.target.token, "view": view}
         if view == TOP8 and self.target.program:
             params["program"] = self.target.program
@@ -470,27 +502,32 @@ class HiveeDataProvider(TournamentDataProvider):
             # Not the exception's text: it carries the URL and its token.
             logger.warning(f"Hivee: the overlay ({view}) could not be read "
                            f"({type(e).__name__})")
-            return None
+            # A timeout has already taken up to the whole timeout: not
+            # asked again. Checked first: requests.ConnectTimeout is both a
+            # Timeout and a ConnectionError.
+            if isinstance(e, requests.Timeout):
+                return None, False
+            return None, isinstance(e, requests.ConnectionError)
         if response.status_code == 404:
             logger.warning(
                 f"Hivee: the overlay ({view}) answered 404 -- no such event, "
                 "or the token is wrong or was reissued")
-            return None
+            return None, False
         if response.status_code != 200:
             logger.warning(f"Hivee: the overlay ({view}) answered "
                            f"{response.status_code}")
-            return None
+            return None, response.status_code in self._RETRY_STATUSES
         try:
             payload = orjson.loads(response.content)
         except Exception as e:
             logger.warning(f"Hivee: the overlay ({view}) did not answer "
                            f"JSON ({type(e).__name__})")
-            return None
+            return None, False
         if not isinstance(payload, dict):
             logger.warning(f"Hivee: the overlay ({view}) did not answer an "
                            "object")
-            return None
-        return payload
+            return None, False
+        return payload, False
 
     def _Remember(self, payload):
         """Each match of a scoreboard read as its last content."""
