@@ -408,6 +408,25 @@ def test_the_image_stays_out_of_the_op_log(env, client):
     assert image.partition(",")[2][:40] not in opLog[0]
 
 
+def test_the_title_stays_out_of_the_op_log(env, client):
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO")
+    try:
+        client.put("/api/v1/stream", json={
+            "title": "SECRETTITLE ft. TAGX", "url": "https://twitch.tv/x"})
+    finally:
+        logger.remove(sink)
+
+    opLog = [line for line in lines if "op=stream.update" in line]
+    assert len(opLog) == 1
+    assert "SECRETTITLE" not in opLog[0]
+    assert "TAGX" not in opLog[0]
+    assert "<redacted>" in opLog[0]
+    assert "twitch.tv/x" in opLog[0]
+
+
 def test_the_reset_removes_both_and_moves_the_background_to_the_banner(
         env, client):
     for kind in ("icon", "thumbnail"):
