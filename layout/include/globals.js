@@ -986,6 +986,8 @@ class ContentResolver {
 function HandleTSHStateUpdateMessage(message) {
   const rev = getRevision(message);
   const deltas = message['delta'];
+  const first = (typeof message.first_revision === 'number' && message.first_revision >= 0)
+    ? message.first_revision : rev;
 
   // Out-of-order arrival (already applied a newer revision). Bailing out
   // to a full snapshot is safer than skipping the delta silently
@@ -994,11 +996,13 @@ function HandleTSHStateUpdateMessage(message) {
     throw Error(`Received stale/out-of-order delta ${rev} (applied: ${maxAppliedDeltaIdx})`);
   }
 
-  // Gap detection: revision must be exactly maxApplied + 1. If it skipped
-  // ahead we missed at least one delta — request a full snapshot rather
-  // than apply on top of a stale base.
-  if (maxAppliedDeltaIdx >= 0 && rev !== maxAppliedDeltaIdx + 1) {
-    throw Error(`Detected revision gap: got ${rev}, expected ${maxAppliedDeltaIdx + 1}`);
+  // Gap detection: the interval [first_revision, revision] must contain
+  // maxApplied + 1 (R-Sync-8; same rule as web/src/redux/autonaState.ts). A
+  // flusher batch merges several saves, so first < rev is normal. If it
+  // skipped ahead we missed at least one delta — request a full snapshot
+  // rather than apply on top of a stale base.
+  if (maxAppliedDeltaIdx >= 0 && first > maxAppliedDeltaIdx + 1) {
+    throw Error(`Detected revision gap: got ${first}..${rev}, expected ${maxAppliedDeltaIdx + 1}`);
   }
 
   let event = new CustomEvent("tsh_update")

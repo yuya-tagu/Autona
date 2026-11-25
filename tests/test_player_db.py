@@ -45,6 +45,7 @@ from pathlib import Path
 import pytest
 
 from src.core import PlayerDB as player_db_module
+from src.core.DictHelper import deep_clone
 from src.core.PlayerDB import PlayerDB
 from src.core.SettingsManager import SettingsManager
 
@@ -817,11 +818,132 @@ def test_an_older_snapshot_never_lands_after_a_newer_one(tmp_path, settings):
     db.LoadDB()
     db.AddPlayers([_player("A")])
     with db.lock:
-        old = db._Snapshot()  # a save that lost the race to the next one
+        # A save that lost the race to the next one.
+        generation, packed = db._Snapshot()
     db.AddPlayers([_player("B")])
 
-    db._Persist(*old)
+    db._Persist(generation, db._SnapshotText(packed))
     assert _saved_tags(tmp_path) == ["A", "B"]
+
+
+def _odd_players():
+    # Keys outside fieldnames, non-ASCII tags and names, nested mains (dict
+    # and list), tuples, a None player.
+    return [
+        _player("アルファ", prefix="チーム", name="名前 ü", seed=1,
+                id=(10, 20), avatar="https://example.invalid/a.png",
+                mains={"ssbu": [["mario", 2, ""], ("luigi", "1")],
+                       "sf6": {"main": ["ryu", 0]}},
+                custom_textbox="x\ny", twitter="a"),
+        _player("Bravo", country_code="JP", state_code="13",
+                mains={"ssbm": (["kirby", 0, "EX"],)}, extra={"deep": [1, {"k": ()}]}),
+        _player("Ünïcode", name="", mains={}),
+    ]
+
+
+def _old_snapshot_text(db):
+    # The text the pre-msgpack _Snapshot built: per-player deep_clone, the
+    # keys outside fieldnames deleted, json.dumps(indent=2).
+    player_list = []
+    for player in db.database.values():
+        if player is not None:
+            data = deep_clone(player)
+            for key in list(data.keys()):
+                if key not in PlayerDB.fieldnames:
+                    del data[key]
+            player_list.append(data)
+    return json.dumps(player_list, indent=2)
+
+
+def test_the_saved_text_is_what_the_old_snapshot_wrote(tmp_path, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers(_odd_players())
+    with db.lock:
+        db.database["nobody"] = None  # skipped, as before
+        want = _old_snapshot_text(db)
+        _, packed = db._Snapshot()
+    assert db._SnapshotText(packed) == want
+
+    db.SaveDB()
+    assert (tmp_path / "local_players.json").read_bytes() == _file_bytes(want)
+
+
+def test_tournament_players_are_what_the_old_deep_copy_was(tmp_path, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers(_odd_players())
+    with db.lock:
+        db.database["nobody"] = None
+
+    for tags in ([], ["Bravo", "nobody", "チーム アルファ"]):
+        if tags:
+            db.SetTournamentTags(tags)
+        else:
+            db.ClearTournamentTags()
+        with db.lock:
+            wanted = db.tournamentTags
+            want = {tag: deep_clone(player)
+                    for tag, player in db.database.items()
+                    if not wanted or tag in wanted}
+        got = db.TournamentPlayers()
+        assert got == want
+        assert list(got) == list(want)
+        for tag, player in want.items():
+            if player is not None:
+                assert list(got[tag]) == list(player)
+        assert _dumps(got) == _dumps(want)
+
+
+def test_changing_tournament_players_leaves_the_db_alone(tmp_path, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers(_odd_players())
+    before = copy.deepcopy(db.database)
+
+    out = db.TournamentPlayers()
+    tag = "チーム アルファ"
+    out[tag]["mains"]["ssbu"][0][1] = 99
+    out[tag]["mains"]["sf6"]["main"].append("x")
+    out[tag]["mains"]["new"] = []
+    out["Bravo"]["extra"]["deep"][1]["k"] = "changed"
+    out.pop("Ünïcode")
+
+    assert db.database == before
+    assert db.Get(tag)["mains"]["ssbu"][0] == ["mario", 2, ""]
+
+
+def test_the_json_text_is_built_outside_the_lock(
+        tmp_path, settings, monkeypatch):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers(_odd_players())
+    free = []
+    real_dumps = json.dumps
+
+    def dumps(*args, **kwargs):
+        # RLock: the same thread could take it anyway, so ask another one.
+        got = []
+
+        def take():
+            ok = db.lock.acquire(blocking=False)
+            if ok:
+                db.lock.release()
+            got.append(ok)
+        thread = threading.Thread(target=take)
+        thread.start()
+        thread.join()
+        free.append(got[0])
+        return real_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(player_db_module.json, "dumps", dumps)
+    db.SaveDB()
+    monkeypatch.undo()
+
+    assert free and all(free)
+    saved = json.loads((tmp_path / "local_players.json")
+                       .read_text(encoding="utf-8"))
+    assert [p["gamerTag"] for p in saved] == ["アルファ", "Bravo", "Ünïcode"]
 
 
 def test_loading_removes_the_temp_files_a_crash_left(tmp_path, settings):

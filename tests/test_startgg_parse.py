@@ -86,6 +86,17 @@ class _MockAutonaLocaleHelper:
     }
 
 
+# --- StreamService mock ---
+class _MockStreamService:
+    """The provider only checks `StreamService.instance is not None`.
+
+    The provider's SetTopEntrants notification is not used here. Pin
+    `instance` to None so an instance left behind by another test is never
+    picked up.
+    """
+    instance = None
+
+
 # --- Minimal QObject mock ---
 class _MockQObject:
     def __init__(self, *args, **kwargs):
@@ -106,6 +117,8 @@ class _MockTournamentDataProvider(_MockQObject):
 
 # --- Pre-populate sys.modules ---
 _original_modules = {}
+# Names stubbed by _setup_mock_modules (kept after teardown clears the above).
+_STUBBED_MODULES = set()
 
 def _setup_mock_modules():
     """Inject mock modules into sys.modules."""
@@ -143,6 +156,11 @@ def _setup_mock_modules():
             "src.core.StatusService",
             {"StatusService": StatusService},
         ),
+        # Only `instance` (always None) is read; see _MockStreamService.
+        "src.core.StreamService": _make_mock_module(
+            "src.core.StreamService",
+            {"StreamService": _MockStreamService},
+        ),
         "src.Helpers.AutonaDirHelper": _make_mock_module(
             "src.Helpers.AutonaDirHelper",
             {"AutonaResolve": lambda x: x},
@@ -176,6 +194,8 @@ def _setup_mock_modules():
         "qtpy.QtCore": _make_mock_module("qtpy.QtCore", {"QObject": _MockQObject}),
     }
 
+    # Remembered for test_provider_relative_imports_are_stubbed.
+    _STUBBED_MODULES.update(mocks.keys())
     for name, mod in mocks.items():
         _original_modules[name] = sys.modules.get(name)
         sys.modules[name] = mod
@@ -232,6 +252,29 @@ def _make_provider(**kwargs):
     p.player_seeds = kwargs.get("player_seeds", {})
     p.numEntrants = kwargs.get("numEntrants", 0)
     return p
+
+
+def test_provider_relative_imports_are_stubbed():
+    """Every relative import of the provider has a stub.
+
+    The provider is exec'd with src / src.core replaced by path-less fake
+    packages, so an import missing from the stubs only works when another
+    test happened to load the real module first (order-dependent failure).
+    """
+    import ast
+
+    src = PROJECT_ROOT / "src" / "TournamentDataProvider" / "StartGGDataProvider.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    package = "src.TournamentDataProvider".split(".")
+    missing = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.level < 1:
+            continue
+        base = package[: len(package) - (node.level - 1)]
+        mod = ".".join(base + ([node.module] if node.module else []))
+        if mod not in _STUBBED_MODULES:
+            missing.append(mod)
+    assert not missing, f"relative imports without a stub: {missing}"
 
 
 # What a test waits at most for something that must happen, in seconds.
@@ -2210,6 +2253,7 @@ class TestGetMatchNewApiNullAnswers:
         assert levels.count("ERROR") == 0
 
 
+@pytest.mark.usefixtures("fanout")
 class TestNullTolerantParsing:
     """A null or omitted field in one row must not empty the whole answer."""
 
