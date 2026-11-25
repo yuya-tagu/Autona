@@ -1872,6 +1872,50 @@ def test_results_are_the_same_whatever_their_numbers_look_like():
     assert review.Candidates(twice) == [KAPPA, MU, UNUSED]
 
 
+def _big_review_sets(rows=150, unused=60):
+    made = [{"no": n, "start": n * 700.0, "end": n * 700.0 + 600.0,
+             "set": {"round": f"R{n}", "p1": f"A{n}", "s1": 3,
+                     "p2": f"B{n}", "s2": 1}}
+            for n in range(1, rows + 1)]
+    return {"format": 1, "duration": rows * 700.0 + 1000.0, "sets": made,
+            "unused_sets": [{"round": f"U{n}", "p1": "X", "s1": n}
+                            for n in range(unused)]}
+
+
+def test_review_keys_of_candidates_are_made_once(monkeypatch):
+    sets = _big_review_sets()
+    unused = sets["unused_sets"]
+    assert len(review.Candidates(sets)) == 210
+    body = {"sets": {"1": {"set": unused[0]}, "2": {"set": None},
+                     "3": {"set": dict(unused[1], s1=1.0)}}}
+    assert review.Check(body, sets)["sets"] == {
+        "1": {"set": unused[0]}, "2": {"set": None}, "3": {"set": unused[1]}}
+    with pytest.raises(review.ReviewError):
+        review.Check({"sets": {"1": {"set": {"round": "nope"}}}}, sets)
+    raw = {"format": 1, "sets": {
+        str(n): {"base": [n * 700.0, n * 700.0 + 600.0],
+                 "set": unused[n - 1]} for n in range(1, 41)}}
+    raw["sets"]["41"] = {"base": [41 * 700.0, 41 * 700.0 + 600.0],
+                         "set": {"round": "nope"}}
+    normalized = review.Normalize(raw, sets)["sets"]
+    assert sorted(normalized, key=int) == [str(n) for n in range(1, 41)]
+    assert normalized["7"] == {"set": unused[6]}
+
+    calls = []
+    real = review.ResultKey
+    monkeypatch.setattr(review, "ResultKey",
+                        lambda value: calls.append(1) or real(value))
+    review.Check({"sets": {str(n): {"set": unused[n - 1]}
+                           for n in range(1, 41)}}, sets)
+    # Bound = C (Candidates) + C (key set) + 3 per item + rows (_Twice),
+    # with C = 210 candidates and 40 items: linear, not items * candidates.
+    assert len(calls) < 3 * (210 + 40)
+    calls.clear()
+    review.Normalize(raw, sets)
+    # Same terms for Normalize, which runs the checks twice (+1 row).
+    assert len(calls) < 6 * (210 + 41)
+
+
 def test_an_end_past_the_video_is_the_workers_to_cut():
     # vodsplit cuts an end past the video at its end (with a warning).
     assert review.Check({"sets": {"3": {"end": 4000}}}, REVIEW_SETS)[
