@@ -67,6 +67,14 @@ The recording has those writes; withoutNoOpWrites (tests/fixtures/write_recordin
 that repeat the key's previous value (the fixture seeds bracket_type with
 DOUBLE_ELIMINATION; upset_factor has no seed, so its first write stays). Deltas are
 unchanged: an identical write never made one.
+
+A set load fetches its head-to-head once its entrants are in
+(StatsService.DeferredHeadToHead), after the second entrant's last sets and
+standings rather than between the two entrants' requests. Where
+GetRecentSets stands among a step's calls is therefore not compared
+(_callsCompared): the head-to-heads are, in order, and so are the other
+calls. Every load here starts from a cleared board, so none asked for a
+head-to-head that the load superseded.
 """
 import copy
 import json
@@ -366,6 +374,13 @@ def _withoutTheRows(recording):
     return dict(recording, steps=steps, boards=boards)
 
 
+def _callsCompared(calls):
+    """A step's provider calls as compared: the head-to-heads in order, and
+    the others in order -- not where the head-to-head stands among them."""
+    return {"headToHead": [c for c in calls if c[0] == "GetRecentSets"],
+            "others": [c for c in calls if c[0] != "GetRecentSets"]}
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -383,8 +398,11 @@ def _check(name, recorded):
     actualSteps = recorded["steps"]
     assert [s["step"] for s in actualSteps] == \
         [s["step"] for s in expectedSteps]
-    expectedSteps = [dict(step, ui=_followRow(step["ui"]))
+    expectedSteps = [dict(step, ui=_followRow(step["ui"]),
+                          calls=_callsCompared(step["calls"]))
                      for step in expectedSteps]
+    actualSteps = [dict(step, calls=_callsCompared(step["calls"]))
+                   for step in actualSteps]
     differ = [f"{expected['step']!r}: {field}"
               for expected, actual in zip(expectedSteps, actualSteps)
               for field in FIELDS if actual[field] != expected[field]]

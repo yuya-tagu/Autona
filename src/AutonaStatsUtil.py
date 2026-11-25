@@ -97,8 +97,9 @@ class AutonaStatsUtil:
         tournament has been loaded.
         """
         provider = self._Provider()
-        return bool(provider and provider.provider
-                    and provider.provider.name == "StartGG")
+        # Read once: an unload on another thread can clear it in between.
+        inner = provider.provider if provider else None
+        return bool(inner and inner.name == "StartGG")
 
     def _Callback(self, onResult):
         return _Reply(self.signals, onResult)

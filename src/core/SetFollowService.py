@@ -673,35 +673,39 @@ class SetFollowService:
         singlesChanged = stats.IsSingles() != wasSingles
         seedMoved = False
 
-        try:
-            # `!=` kept exactly: no_mains comes from a provider payload, and
-            # `1 != True` is False in Python.
-            noMains = data.get("no_mains")
-            if noMains is None:
-                noMains = False
-            for t, team in enumerate(entrants):
-                stateTeam = self.setLoad.DisplayTeam(t + 1)
+        # One head-to-head fetch for the whole load, the last pairing's:
+        # team 1's player asks with the previous set's team 2 still in
+        # place, an answer always dropped (StatsService).
+        with stats.DeferredHeadToHead():
+            try:
+                # `!=` kept exactly: no_mains comes from a provider payload, and
+                # `1 != True` is False in Python.
+                noMains = data.get("no_mains")
+                if noMains is None:
+                    noMains = False
+                for t, team in enumerate(entrants):
+                    stateTeam = self.setLoad.DisplayTeam(t + 1)
 
-                if len(team) > 1:
-                    # The team name and the crest that follows from it.
-                    self.setLoad.ApplyTeamName(
-                        t + 1, data.get(f"p{t + 1}_name"))
+                    if len(team) > 1:
+                        # The team name and the crest that follows from it.
+                        self.setLoad.ApplyTeamName(
+                            t + 1, data.get(f"p{t + 1}_name"))
 
-                for p, player in enumerate(team):
-                    change = SlotChange()
-                    if data.get("overwrite"):
-                        # The full player dict carries the mains; the
-                        # mains-only load is for the non-overwrite case.
-                        change = self._ApplyPlayer(
-                            stateTeam, p + 1, player, True, True, noMains)
-                    else:
-                        update = self._PlayerUpdate(data, player, noMains)
-                        if update:
+                    for p, player in enumerate(team):
+                        change = SlotChange()
+                        if data.get("overwrite"):
+                            # The full player dict carries the mains; the
+                            # mains-only load is for the non-overwrite case.
                             change = self._ApplyPlayer(
-                                stateTeam, p + 1, update, False, False)
-                    seedMoved = seedMoved or change.seedChanged
-        except Exception as e:
-            logger.error(f"Error while setting entrants: {e}")
+                                stateTeam, p + 1, player, True, True, noMains)
+                        else:
+                            update = self._PlayerUpdate(data, player, noMains)
+                            if update:
+                                change = self._ApplyPlayer(
+                                    stateTeam, p + 1, update, False, False)
+                        seedMoved = seedMoved or change.seedChanged
+            except Exception as e:
+                logger.error(f"Error while setting entrants: {e}")
         return singlesChanged and not seedMoved
 
     @staticmethod
