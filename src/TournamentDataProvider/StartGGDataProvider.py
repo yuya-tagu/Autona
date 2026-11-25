@@ -1990,6 +1990,7 @@ class StartGGDataProvider(TournamentDataProvider):
             callback.emit({"playerNumber": playerNumber,
                           "history_sets": set_data})
         except Exception:
+            logger.error(traceback.format_exc())
             callback.emit({"playerNumber": playerNumber, "history_sets": []})
 
     def GetRecentSets(self, id1, id2, videogame, callback, requestTime, progress_callback, cancel_event):

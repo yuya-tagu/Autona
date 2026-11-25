@@ -147,8 +147,8 @@ class AutonaLocaleHelper(QObject):
     def LoadLanguages():
         try:
             i18n_dir = AutonaResolve('src/i18n')
-            languages_json = json.load(
-                open(f"{i18n_dir}/mapping.json", 'rt', encoding='utf-8'))
+            with open(f"{i18n_dir}/mapping.json", 'rt', encoding='utf-8') as fp:
+                languages_json = json.load(fp)
             AutonaLocaleHelper.languages = languages_json.get("languages")
             AutonaLocaleHelper.remapping = languages_json.get("remapping")
         except Exception as e:
@@ -156,8 +156,8 @@ class AutonaLocaleHelper(QObject):
 
     def LoadCountryToLanguage():
         try:
-            languages_json = json.load(
-                open("./assets/data_countries.json", 'rt', encoding='utf-8'))
+            with open("./assets/data_countries.json", 'rt', encoding='utf-8') as fp:
+                languages_json = json.load(fp)
             AutonaLocaleHelper.countryToLanguage = {ccode: cdata.get(
                 "languages") for ccode, cdata in languages_json.items()}
             AutonaLocaleHelper.countryToContinent = {ccode: cdata.get(
@@ -175,8 +175,8 @@ class AutonaLocaleHelper(QObject):
         # Load default round names and translation
         try:
             tterm_dir = AutonaResolve('./src/i18n/tournament_term')
-            original_term_names: dict = json.load(
-                open(f"{tterm_dir}/en.json", 'rt', encoding='utf-8'))
+            with open(f"{tterm_dir}/en.json", 'rt', encoding='utf-8') as fp:
+                original_term_names: dict = json.load(fp)
             term_names = deep_clone(original_term_names)
 
             for f in os.listdir(f"{tterm_dir}/"):
@@ -185,16 +185,16 @@ class AutonaLocaleHelper(QObject):
 
                     if lang == AutonaLocaleHelper.fgTermLocale:
                         # We found the exact language file
-                        translatedRoundNames = json.load(
-                            open(f"{tterm_dir}/{f}", 'rt', encoding='utf-8'))
+                        with open(f"{tterm_dir}/{f}", 'rt', encoding='utf-8') as fp:
+                            translatedRoundNames = json.load(fp)
                         term_names = original_term_names.copy()
                         term_names.update(translatedRoundNames)
                         break
                     elif lang == AutonaLocaleHelper.fgTermLocale.split("-")[0]:
                         # We found a more generic language file
                         # Good enough if we don't find a specific one
-                        translatedRoundNames = json.load(
-                            open(f"{tterm_dir}/{f}", 'rt', encoding='utf-8'))
+                        with open(f"{tterm_dir}/{f}", 'rt', encoding='utf-8') as fp:
+                            translatedRoundNames = json.load(fp)
                         term_names = original_term_names.copy()
                         term_names.update(translatedRoundNames)
 
@@ -204,9 +204,14 @@ class AutonaLocaleHelper(QObject):
             logger.error(traceback.format_exc())
 
         # Load user round names in a separate try/catch
+        # No custom file is the normal state: nothing to warn about.
+        path = "./user_data/tournament_terms.json"
+        if not os.path.isfile(path):
+            logger.debug("No custom tournament terms file; using built-in terms.")
+            return
         try:
-            term_names: dict = json.load(
-                open("./user_data/tournament_terms.json", 'rt', encoding='utf-8'))
+            with open(path, 'rt', encoding='utf-8') as fp:
+                term_names: dict = json.load(fp)
 
             term_names["phase"] = {
                 k: v for k, v in term_names.get("phase", {}).items() if v}
@@ -215,8 +220,10 @@ class AutonaLocaleHelper(QObject):
 
             AutonaLocaleHelper.phaseNames.update(term_names["phase"])
             AutonaLocaleHelper.matchNames.update(term_names["match"])
-        except Exception:
-            logger.warning("Custom Tournament Terms were not found and/or loaded.")
+        except Exception as e:
+            # Type name only: the message and path are not logged.
+            logger.warning(
+                f"Custom tournament terms could not be loaded: {type(e).__name__}")
 
     # The candidate lists read the terms defensively: the user's
     # user_data/tournament_terms.json overrides the shipped ones key by key,

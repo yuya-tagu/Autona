@@ -1616,6 +1616,39 @@ def test_the_layout_follows_the_battle_format_as_the_panels_did(
     assert SM.Get(schema.RESULT_LAYOUT_ROOT) == after
 
 
+def _countTemplateReads(monkeypatch):
+    reads = []
+    real = LayoutCatalog.Templates
+
+    def counting(*args, **kwargs):
+        reads.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(LayoutCatalog, "Templates", counting)
+    return reads
+
+
+@pytest.mark.parametrize("saved", ["horizontal", "team_split"])
+def test_one_format_switch_reads_the_layout_folders_once(
+        env, monkeypatch, saved):
+    env.service.SetLayout(saved)
+    reads = _countTemplateReads(monkeypatch)
+
+    env.service.FollowBattleFormat("team")
+
+    assert len(reads) == 1
+    assert env.service.Layout() == ("team_split" if saved == "team_split"
+                                    else "team")
+
+
+def test_setting_a_layout_reads_the_layout_folders_once(env, monkeypatch):
+    reads = _countTemplateReads(monkeypatch)
+
+    assert env.service.SetLayout("vertical")
+
+    assert len(reads) == 1
+
+
 def test_the_layout_in_the_state_is_the_one_chosen(env):
     assert env.service.SetLayout("vertical")
     assert SM.Get(schema.RESULT_LAYOUT_ROOT) == "vertical"

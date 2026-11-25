@@ -923,13 +923,15 @@ class ResultService(RenderLane):
                 LayoutCatalog.KIND_RESULT, layout))
         return LayoutCatalog.DisplayText(entry["displayNames"], self._locale())
 
-    def SetLayout(self, layout) -> bool:
+    def SetLayout(self, layout, entries=None) -> bool:
         """Save the layout. False, saving nothing, when it is not one the
         catalog lists. The layout is set in the config as saved, so
         settings.json is settled first (SettingsManager.PrepareWrite):
         SettingsUnreadable, nothing saved, while it could not be read at
-        launch and still cannot be opened."""
-        if not isinstance(layout, str) or layout not in LayoutEntries():
+        launch and still cannot be opened. entries: the catalog's layouts as
+        the caller already read them, None to read here."""
+        entries = _Entries(entries)
+        if not isinstance(layout, str) or layout not in entries:
             logger.warning(f"Result: refusing the layout {layout!r}")
             return False
         with SettingsManager.lock:
@@ -938,7 +940,7 @@ class ResultService(RenderLane):
             if config.get("layout") != layout:
                 config["layout"] = layout
                 SettingsManager.Set(CONFIG_SETTING, config)
-        self._PublishLayout()
+        self._PublishLayout(entries)
         return True
 
     def FollowBattleFormat(self, fmt):
@@ -948,27 +950,31 @@ class ResultService(RenderLane):
         A layout that fits stays: a team_split or a vertical picked by hand.
         While settings.json could not be read at launch and still cannot be
         opened, the layout is left as it is (logged)."""
+        entries = None
         try:
             # Decided from the saved layout, not from the launch's empty
             # stand-in: settled first. Not under the settings lock: the
             # publish below takes the state's, which is taken before it.
             SettingsManager.PrepareWrite()
-            team = IsTeamLayout(self.Layout())
+            # Read once for this whole switch (SetLayout and the publishes).
+            entries = LayoutEntries()
+            team = IsTeamLayout(self.Layout(entries), entries)
             if fmt in TEAM_FORMATS:
                 if not team:
-                    self.SetLayout(DEFAULT_TEAM_LAYOUT)
+                    self.SetLayout(DEFAULT_TEAM_LAYOUT, entries)
             elif team:
-                self.SetLayout(DEFAULT_LAYOUT)
+                self.SetLayout(DEFAULT_LAYOUT, entries)
         except SettingsUnreadable as error:
             logger.warning(
                 f"Result: the layout did not follow the battle format: "
                 f"{error}")
         # Whether or not that wrote anything: without a saved layout the format
         # chose it (Layout()), and the format is already the new one here.
-        self._PublishLayout()
+        self._PublishLayout(entries)
 
-    def _PublishLayout(self):
-        StateManager.SetIfChanged(schema.RESULT_LAYOUT_ROOT, self.Layout())
+    def _PublishLayout(self, entries=None):
+        StateManager.SetIfChanged(schema.RESULT_LAYOUT_ROOT,
+                                  self.Layout(entries))
 
     # ── what a page shows ────────────────────────────────────────────────
 
