@@ -171,6 +171,20 @@ class NotAvailable(Exception):
         self.message = message
 
 
+class InvalidInput(ValueError):
+    """A legacy route's input is not one the operation can read (a body that
+    is not a JSON object, a number that is not one). A ValueError, so what
+    already caught or pinned ValueError is unchanged; the web server answers
+    it 400 INVALID_ARGUMENT in the /api/v1 error shape, from the legacy
+    routes only (/api/v1 wraps its own exceptions). The message is a fixed
+    sentence: no payload value goes into it.
+    """
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
+
+
 class NoSuchSlot(IndexError):
     """The board has no such player slot (load_player_from_tag /
     load_player_from_key, and the field and character writes of ADR-005
@@ -430,7 +444,14 @@ def set_display_option(data):
     it, so a rejection there must not come back to the client as "OK". The
     legacy route's error string is this layer's contract.
     """
+    if data is not None and not isinstance(data, dict):
+        raise InvalidInput("body must be a JSON object")
     option = (data or {}).get("option")
+    if isinstance(option, (list, dict)):
+        # An unhashable key would fail the lookup with a 500: the same
+        # answer as an unknown key, nothing written. Other values (int,
+        # bool, ...) go to SetDisplayOption as before.
+        return f"ERROR: unknown display option {option}"
     if not AutonaActions.instance.SetDisplayOption(
             option, bool((data or {}).get("value"))):
         return f"ERROR: unknown display option {option}"
@@ -570,8 +591,12 @@ def delete_player(key):
 
 def _caster_slot(index):
     """The caster slot for a 1-based caster number, or None. A number that
-    is not one raises (ValueError), as the operations always did."""
-    slot = int(index)
+    is not one raises (InvalidInput, a ValueError), as the operations always
+    did; anything that is not a string or a number still raises TypeError."""
+    try:
+        slot = int(index)
+    except ValueError:
+        raise InvalidInput("caster must be a number") from None
     if not 1 <= slot <= len(comms.SLOTS):
         return None
     return str(slot)
@@ -1520,6 +1545,8 @@ def set_game(data):
     # DB's refresh) is queued there and may come after the answer. Not
     # serialized with the board operations: one can run between the
     # selection and what follows it, as an async load always allowed.
+    if not isinstance(data, dict):
+        raise InvalidInput("body must be a JSON object")
     set_codename = data.get("codename")
     if set_codename not in GameAssetCatalog.instance.GameCodenames():
         return f"Could not find game {set_codename}"
@@ -1594,6 +1621,15 @@ def set_battle_format(fmt):
 # The S2 operations (see the module docstring)
 # ═══════════════════════════════════════════════════════════════════════
 
+def _parse_int(value, name):
+    """int(value); a value that is not a number is InvalidInput (400). A
+    TypeError (not a string or number) passes through, as it always did."""
+    try:
+        return int(value)
+    except ValueError:
+        raise InvalidInput(f"{name} must be an integer") from None
+
+
 def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
               players=None, characters=None, losers=None, team=None,
               teamName=None):
@@ -1632,13 +1668,15 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # Parse everything first: a bad value in a later field must not
         # leave the earlier ones written. The number is still parsed on the
         # crew board for characters, as the board's spinbox parsed it.
-        bestOfN = int(bestOf) if bestOf is not None else None
-        playersN = int(players) if players is not None else None
-        charactersN = int(characters) if characters is not None else None
+        bestOfN = _parse_int(bestOf, "best-of") if bestOf is not None else None
+        playersN = _parse_int(players, "players") if players is not None \
+            else None
+        charactersN = _parse_int(characters, "characters") \
+            if characters is not None else None
         # The team number of a team name is parsed here too, so a bad one
         # does not leave the fields above it written.
-        teamIdx = int(team) if teamName is not None and team is not None \
-            else None
+        teamIdx = _parse_int(team, "team") \
+            if teamName is not None and team is not None else None
         if losers is None:
             losersFlag = None
         elif isinstance(losers, str):
@@ -2537,12 +2575,21 @@ def post_score(data):
     reaches the player database after the host (`SaveRecord`). One save
     cycle.
     """
-    score = orjson.loads(data)
+    # Everything is checked before the host runs: a refused body writes
+    # nothing.
+    try:
+        score = orjson.loads(data)
+    except orjson.JSONDecodeError:
+        raise InvalidInput("body must be a JSON object") from None
+    if not isinstance(score, dict):
+        raise InvalidInput("body must be a JSON object")
     scoreboard_number = 1
 
     if "scoreboard" in score:
         try:
             scoreboard_number = int(score["scoreboard"])
+        except TypeError:
+            raise InvalidInput("scoreboard must be a number") from None
         except ValueError:
             logger.warning(f"Couldn't parse scoreboard [${score['scoreboard']}] from /post_data as int, falling back to scoreboard 1")
             scoreboard_number = 1

@@ -130,7 +130,10 @@ def _record(app, fakes, kind, args):
         try:
             result, raises = _run(app, kind, args), None
         except Exception as error:
-            result, raises = None, type(error).__name__
+            # InvalidInput is the ValueError the recording has, answered 400
+            result, raises = None, (
+                "ValueError" if type(error).__name__ == "InvalidInput"
+                else type(error).__name__)
         app.settle()
     recorded = recorder.Result()
     recorded.update({

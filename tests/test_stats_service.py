@@ -306,6 +306,141 @@ def test_a_batch_of_sets_is_one_save_cycle():
     assert len(seen) == 1, f"{len(seen)} save cycles for one fetch result"
 
 
+# ── an unchanged statistic is not written ────────────────────────────────
+
+class _Cycles:
+    """The save cycles that had a key to diff (a SaveBlock's release with
+    nothing queued returns at once) and the published deltas while it is
+    active."""
+
+    def __init__(self, monkeypatch):
+        self.saves = 0
+        self.deltas = []
+        real = SM.SaveState
+
+        def counting():
+            if SM.changedKeys:
+                self.saves += 1
+            return real()
+
+        monkeypatch.setattr(SM, "SaveState", counting)
+
+    def __enter__(self):
+        SM.observers.state_updated.subscribe(self._onDelta)
+        return self
+
+    def __exit__(self, *exc):
+        SM.observers.state_updated.unsubscribe(self._onDelta)
+        return False
+
+    def _onDelta(self, payload):
+        self.deltas.append(payload.get("delta"))
+
+
+_CLEARS = {
+    "MarkRecentSetsLoading": lambda service: service.MarkRecentSetsLoading(),
+    "ClearRecentSets": lambda service: service.ClearRecentSets(),
+    "ClearLastSets": lambda service: service.ClearLastSets(1),
+    "ClearHistorySets": lambda service: service.ClearHistorySets(2),
+}
+
+
+@pytest.mark.parametrize("name", list(_CLEARS))
+def test_an_unchanged_clear_runs_no_save_cycle(monkeypatch, name):
+    """The statistics are exempt from the hold, but an identical Set would
+    still queue the key and run a save cycle (with a board's edits pending,
+    a deep clone of the whole state and a DeepDiff) for no delta."""
+    service = _service()
+    clear = _CLEARS[name]
+    with SM.lock:
+        clear(service)
+    with _Cycles(monkeypatch) as cycles:
+        with SM.lock:
+            clear(service)
+            assert SM.changedKeys == []
+
+    assert cycles.saves == 0
+    assert cycles.deltas == []
+
+
+def test_a_changed_statistic_is_still_written_and_published(monkeypatch):
+    service = _service()
+    service.ClearRecentSets()
+    service.UpdateLastSets({"playerNumber": "1", "last_sets": [{"a": 1}]})
+    with _Cycles(monkeypatch) as cycles:
+        with SM.lock:
+            service.MarkRecentSetsLoading()
+            service.ClearLastSets(1)
+
+    assert SM.Get(f"{PREFIX}.recent_sets") == {"state": "loading", "sets": []}
+    assert SM.Get(f"{PREFIX}.last_sets.1") == {}
+    assert cycles.saves == 2
+    published = repr(cycles.deltas)
+    assert len(cycles.deltas) == 2
+    assert "recent_sets" in published and "last_sets" in published
+
+
+@pytest.fixture
+def streamRoots(monkeypatch):
+    """The stream queue's two roots, put back afterwards; the channel the
+    settings name is the test's."""
+    from src.core.SettingsManager import SettingsManager
+    channel = {"name": "chan"}
+    real = SettingsManager.Get
+    monkeypatch.setattr(
+        SettingsManager, "Get",
+        lambda key, default=None: channel["name"]
+        if key == "twitch_username" else real(key, default))
+    saved = {key: SM.Get(key) for key in ("streamQueue", "currentStream")}
+    yield channel
+    for key, value in saved.items():
+        if value is None:
+            SM.Unset(key)
+        else:
+            SM.Set(key, value)
+
+
+def test_the_same_stream_queue_is_not_published_again(
+        monkeypatch, streamRoots):
+    queue = {"chan": {"1": {"id": 1, "p1_name": "A", "p2_name": "B"}}}
+    StatsService.UpdateStreamQueue(dict(queue))
+    with _Cycles(monkeypatch) as cycles:
+        StatsService.UpdateStreamQueue(dict(queue))
+
+    assert cycles.saves == 0
+    assert cycles.deltas == []
+
+
+def test_a_changed_stream_queue_or_channel_is_published(
+        monkeypatch, streamRoots):
+    queue = {"chan": {"1": {"id": 1, "p1_name": "A", "p2_name": "B"}}}
+    StatsService.UpdateStreamQueue(queue)
+    moved = {"chan": {"1": {"id": 2, "p1_name": "C", "p2_name": "D"}}}
+    with _Cycles(monkeypatch) as cycles:
+        StatsService.UpdateStreamQueue(moved)
+    assert SM.Get("streamQueue") == moved
+    assert len(cycles.deltas) == 1 and "streamQueue" in repr(cycles.deltas)
+
+    streamRoots["name"] = "other"
+    with _Cycles(monkeypatch) as cycles:
+        StatsService.UpdateStreamQueue(moved)
+    assert SM.Get("currentStream") == "other"
+    assert len(cycles.deltas) == 1
+    published = repr(cycles.deltas)
+    assert "currentStream" in published and "streamQueue" not in published
+
+
+def test_a_fresh_state_gets_current_stream_as_null_when_no_channel(
+        monkeypatch, streamRoots):
+    streamRoots["name"] = None
+    SM.Unset("currentStream")
+    StatsService.UpdateStreamQueue({})
+    assert "currentStream" in SM.state and SM.state["currentStream"] is None
+    with _Cycles(monkeypatch) as cycles:
+        StatsService.UpdateStreamQueue({})
+    assert cycles.saves == 0
+
+
 # ── what is asked for (ADR-005 S3e-5) ────────────────────────────────────
 
 def _lastSets(team, *rounds):

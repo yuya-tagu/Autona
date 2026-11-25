@@ -229,6 +229,20 @@ def test_the_window_close_leaves_the_log_to_the_exit_and_arms_the_watchdog():
     assert calls.index("MatchLogService.instance.Shutdown") < arms[0]
 
 
+def test_the_window_close_removes_tmp_after_its_writers_and_readers_stop():
+    # A render job writes tmp/thumbnail/preview.png and
+    # tmp/result/result_preview.png, and a request can be reading one: the
+    # removal used to run before they stopped and hit WinError 32 or had
+    # tmp/ recreated behind it.
+    calls = _calls_in_order(_function("src/Autona.py", "closeEvent"))
+    removals = [i for i, call in enumerate(calls) if call == "shutil.rmtree"]
+
+    assert len(removals) == 1, calls
+    assert calls.index("self.webserver.stop") < removals[0]
+    assert calls.index("TaskExecutor.instance.shutdown") < removals[0]
+    assert removals[0] < calls.index("QApplication.allWindows")
+
+
 @pytest.mark.parametrize("path", ["src/Autona.py", "src/headless.py"])
 def test_both_shells_open_the_log_through_the_helper(path):
     source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
