@@ -222,6 +222,42 @@ def test_the_data_of_a_tournament_no_longer_loaded_is_dropped(
         else [({"tournamentName": "New Cup", "initial_load": False},)])
 
 
+@pytest.mark.parametrize("then", ["another tournament", "no tournament"])
+def test_the_phases_of_a_tournament_no_longer_loaded_are_dropped(
+        adapter, executor, then):
+    """The phases, as the data above: a replaced tournament's phases used
+    to be delivered late, overwriting the new one's pool names
+    (MatchNameCandidates) -- or the [] UnloadTournament emitted."""
+    jobs = executor(stepped=True)
+    gate = threading.Event()
+    gate.set()
+    old = _Fetch(gate, [{"id": 1, "name": "Old Pools"}])
+    new = _Fetch(gate, [{"id": 2, "name": "New Pools"}])
+    answers = []
+    undo = _connect(adapter.signals.tournament_phases_updated, answers,
+                    "phases")
+    try:
+        adapter.provider = SimpleNamespace(GetTournamentPhases=old)
+        adapter.GetTournamentPhases()
+        if then == "no tournament":
+            adapter.provider = None
+        else:
+            adapter.provider = SimpleNamespace(GetTournamentPhases=new)
+            adapter.GetTournamentPhases()
+            # The new tournament's phases arrive first...
+            assert jobs.run_next(newest=True)
+            _pump(lambda: answers)
+        # ...and the old one's come late.
+        assert jobs.run_next()
+        _pump(lambda: True)
+    finally:
+        undo()
+
+    assert old.calls and [args for _tag, args, _main in answers] == (
+        [] if then == "no tournament"
+        else [([{"id": 2, "name": "New Pools"}],)])
+
+
 def test_the_statistics_fetches_are_jobs_called_as_the_worker_called_them(
         adapter):
     gate = threading.Event()
@@ -901,6 +937,34 @@ def test_the_set_list_pages_get_the_fetch_s_cancel(
 
     assert startgg.GetMatches(cancel_event=cancel) == []
     assert given == [cancel, cancel]
+
+
+def test_the_entrants_pages_get_the_fetch_s_cancel(
+        startgg, executor, monkeypatch):
+    """The page request itself stops retrying once another tournament is
+    loaded, freeing its job lane -- not only the paging between requests."""
+    from src.core.PlayerDB import PlayerDB
+
+    executor()
+    monkeypatch.setattr(PlayerDB.instance, "AddPlayers",
+                        lambda players, deferRefresh=False: None)
+    monkeypatch.setattr(PlayerDB.instance, "SaveDB", lambda: None)
+    monkeypatch.setattr(PlayerDB.instance, "NotifyChanged", lambda: None)
+    monkeypatch.setattr(
+        "src.AutonaPlayerDB.AutonaPlayerDB.SetTournamentPlayers",
+        lambda tags, cancel_event=None: None)
+    cancel = threading.Event()
+    given = []
+
+    def query(*args, cancel_event=None, **kwargs):
+        given.append(cancel_event)
+        return {"data": {"event": {"entrants": {
+            "pageInfo": {"totalPages": 2}, "nodes": []}}}}
+
+    monkeypatch.setattr(startgg, "QueryRequests", query)
+    startgg.GetEntrantsWorker("tournament/t/event/e", None, cancel)
+
+    assert len(given) == 2 and all(event is cancel for event in given)
 
 
 def test_loading_another_tournament_cancels_the_entrants_fetch(

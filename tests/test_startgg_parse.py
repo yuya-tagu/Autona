@@ -814,6 +814,25 @@ class TestParseMatchDataNewApi:
         assert p1["seed"] == 5
         assert p2["seed"] == 10
 
+    def test_player_seeds_are_not_carried_to_the_next_tournament(self):
+        """A provider is made for each tournament loaded: the seeds the
+        previous one's entrants fetch recorded are not the next one's
+        fallback (they were, in a dict on the class)."""
+        assert "player_seeds" not in vars(StartGGDataProvider)
+        old = StartGGDataProvider("", None)
+        old.player_seeds[1001] = 5
+        old.player_seeds[1002] = 10
+        new = StartGGDataProvider("", None)
+        assert new.player_seeds == {}
+
+        data = _new_api_set_basic()
+        data["slots"][0]["entrant"]["initialSeedNum"] = None
+        data["slots"][1]["entrant"]["initialSeedNum"] = None
+        result = new.ParseMatchDataNewApi(data)
+        assert result["entrants"][0][0]["seed"] is None
+        assert result["entrants"][1][0]["seed"] is None
+        assert old.ParseMatchDataNewApi(data)["entrants"][0][0]["seed"] == 5
+
     def test_null_stream(self):
         """When stream is None, stream field defaults to "" (not None)."""
         provider = _make_provider()

@@ -199,7 +199,7 @@ Start.gg の entrant → Autona の playerData に変換する中核。**全て�
 | `state_code` | `user.location.state` を**そのまま使う** | city からの推測は削除済（[StartGGDataProvider.py:847-855](../../src/TournamentDataProvider/StartGGDataProvider.py:847)） |
 | `city` | `user.location.city` | new API のみ |
 | `mains` / `startggMains` | `player.sets.nodes[].games.selections` を集計 | `Counter` で出現頻度順。`GameAssetCatalog.CharacterFromStartGGId` でキャラコード解決（1 エントラント / 1 セットの解決は `Current()` を 1 回取った同じスナップショットで行う。ADR-005 S1b） |
-| `seed` | `EntrantsQuery` の `initialSeedNum` から `player_seeds` キャッシュ参照 | クラス変数 `player_seeds = {playerId: seed}` |
+| `seed` | `EntrantsQuery` の `initialSeedNum` から `player_seeds` キャッシュ参照 | インスタンス属性 `self.player_seeds = {playerId: seed}` |
 
 ### 4.2 ラウンド名翻訳 `TranslateRoundName` ([StartGGDataProvider.py:714](../../src/TournamentDataProvider/StartGGDataProvider.py:714))
 
