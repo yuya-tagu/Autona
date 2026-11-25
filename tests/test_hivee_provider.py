@@ -366,6 +366,21 @@ def test_the_op_log_masks_the_token_before_the_cut():
     assert TOKEN[:8] not in params
 
 
+def test_the_op_log_redacts_keys_and_still_masks_the_token():
+    from flask import Flask
+
+    from src import AutonaApiV1 as v1
+
+    app = Flask(__name__)
+    body = {"title": "SECRETTITLE", "url": API_URL}
+    with app.test_request_context("/api/v1/stream", method="PUT", json=body):
+        params = v1._safe_params(redact=("title",))
+    assert "SECRETTITLE" not in params
+    assert "<redacted>" in params
+    assert TOKEN not in params
+    assert "token=***" in params
+
+
 # ── the characters ───────────────────────────────────────────────────────
 
 def test_the_table_covers_every_hivee_code_once():

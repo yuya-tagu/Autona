@@ -1799,15 +1799,20 @@ class StateManager:
                             logger.warning(
                                 f"Could not replace the export of {path} "
                                 "(file locked by a reader?); left as it was")
-                    except Exception:
-                        logger.error(traceback.format_exc())
+                    except Exception as error:
+                        # No traceback: it would carry absolute paths.
+                        logger.warning(
+                            f"Could not copy the export of {path} "
+                            f"({type(error).__name__})")
                     finally:
                         _remove_quietly(part)
                 elif os.path.exists(target):
                     try:
                         os.remove(target)
-                    except Exception:
-                        logger.error(traceback.format_exc())
+                    except Exception as error:
+                        logger.warning(
+                            f"Could not remove the export of {path} "
+                            f"({type(error).__name__})")
             elif kind == _EXPORT_DOWNLOAD:
                 imageExtension = StateManager._FileExtension(di)
                 try:
@@ -1891,8 +1896,10 @@ class StateManager:
                             candidate = convertedPart
                 elif complete:
                     candidate = part
-        except Exception:
-            logger.error(traceback.format_exc())
+        except Exception as error:
+            # No traceback: requests' messages carry the URL (cache key).
+            logger.warning(
+                f"Image download for {path} failed ({type(error).__name__})")
             candidate = None
         finally:
             close = getattr(response, "close", None)

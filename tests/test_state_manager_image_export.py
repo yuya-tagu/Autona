@@ -768,6 +768,49 @@ def test_a_body_that_breaks_off_leaves_no_image(
     assert _parts(tmp_path) == []
 
 
+def test_a_failed_request_logs_one_warning_without_the_url(
+        exported, monkeypatch, logged):
+    _oldAvatar(exported)
+
+    def fake_get(url, **kwargs):
+        raise ConnectionError(
+            "HTTPSConnectionPool(host='images.start.gg'): Max retries "
+            "exceeded with url: /secret-id.png?k=v")
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.png")
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert [r for r in logged if r["level"].name == "ERROR"] == []
+    warnings = [r["message"] for r in logged
+                if r["level"].name == "WARNING"]
+    assert any("probe/online_avatar" in m and "ConnectionError" in m
+               for m in warnings)
+    assert not any("secret-id" in m or "k=v" in m for m in warnings)
+
+
+def test_a_failed_local_copy_logs_no_absolute_path(
+        exported, served, monkeypatch, logged, tmp_path):
+    _file(f"{AVATAR_DIR}/a.png", b"a")
+
+    def broken_copy(src, dst, **kwargs):
+        raise PermissionError(13, "denied", str(src))
+
+    monkeypatch.setattr(state_manager.shutil, "copyfile", broken_copy)
+
+    SM.CreateFilesDict("probe/asset", f"{AVATAR_DIR}/a.png")
+
+    assert [r for r in logged if r["level"].name == "ERROR"] == []
+    warnings = [r["message"] for r in logged
+                if r["level"].name == "WARNING"]
+    assert any("probe/asset" in m and "PermissionError" in m
+               for m in warnings)
+    assert not any(str(tmp_path) in m for m in warnings)
+
+
 @pytest.mark.parametrize("extension", ["png", "jpg"])
 def test_a_body_over_the_cap_leaves_no_image(
         exported, monkeypatch, tmp_path, extension):

@@ -720,6 +720,24 @@ def test_the_counts_are_the_set_routes(autonaApp, client, shell):
     assert len(StateManager.Get("score.2.team.2.player.3.character")) == 2
 
 
+def test_the_team_name_stays_out_of_the_op_log(autonaApp, client, shell):
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO")
+    try:
+        _ok(client.patch("/api/v1/scoreboards/1/set", json={
+            "bestOf": 5, "teamName": {"team": 1, "value": "SECRETNAME"}}))
+    finally:
+        logger.remove(sink)
+
+    opLog = [line for line in lines if "op=set.update" in line]
+    assert len(opLog) == 1
+    assert "SECRETNAME" not in opLog[0]
+    assert "'bestOf': 5" in opLog[0]
+    assert "<redacted>" in opLog[0]
+
+
 # ── v1 teamName and the crest (S4u's check) ──────────────────────────────
 
 def test_a_team_name_brings_its_crest_and_the_same_name_again_does_not_look(

@@ -281,7 +281,7 @@ def api_handler(fn):
     return wrapper
 
 
-def _safe_params(keys_only=False):
+def _safe_params(keys_only=False, redact=()):
     # Most write bodies carry only small scalar params (no PII / secrets).
     # Truncate defensively all the same. Bodies that can carry personal data
     # (the player PATCH: tag, real name, social handle) are logged by key
@@ -293,6 +293,11 @@ def _safe_params(keys_only=False):
         if isinstance(body, dict):
             return repr(sorted(body.keys()))
         return "<non-object body>"
+    # Top-level keys in `redact` keep their name but lose their value (team /
+    # crew names, stream titles built from player tags).
+    if isinstance(body, dict) and redact:
+        body = {k: ("<redacted>" if k in redact else v)
+                for k, v in body.items()}
     # A Hivee tournament URL's token is a secret (core/HiveeUrl.py): masked
     # before the cut, which could leave half of it.
     text = HiveeUrl.Mask(repr(body))
@@ -356,7 +361,8 @@ def _raw_params():
     return "<no body>" if length is None else f"<{length} bytes>"
 
 
-def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON):
+def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON,
+             log_redact=()):
     """Write endpoints: exception->envelope conversion plus an INFO op-log
     line recording IP / method / path / params / result (spec §2.7).
 
@@ -364,6 +370,9 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON):
     PAYLOAD_TOO_LARGE when the Content-Length is over it, the body dropped
     rather than parsed (_over_limit). The app sets no limit of its own (no
     MAX_CONTENT_LENGTH), so the other routes are as they were.
+
+    ``log_redact``: top-level body keys whose values are logged as
+    <redacted> (spec §2.7: no PII in the op log).
 
     ``body``: BODY_JSON (the default) logs the JSON body's params
     (_safe_params, which reads the body). BODY_NONE reads no byte of it --
@@ -398,7 +407,8 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON):
             if body == BODY_NONE:
                 params = _raw_params()
             else:
-                params = _safe_params(keys_only=log_keys_only)
+                params = _safe_params(keys_only=log_keys_only,
+                                     redact=log_redact)
 
             def refused(resp):
                 # werkzeug's server says it on every answer already (a
@@ -1272,7 +1282,7 @@ def _crew_set_fields(body):
 
 
 @api_v1.route("/scoreboards/<int:n>/set", methods=["PATCH"])
-@write_op("set.update")
+@write_op("set.update", log_redact=("teamName",))
 def set_update(n):
     validate_scoreboard(n)
     body = _json_body()
@@ -3343,7 +3353,7 @@ _STREAM_FIELDS = ("url", "title")
 
 
 @api_v1.route("/stream", methods=["PUT"])
-@write_op("stream.update")
+@write_op("stream.update", log_redact=("title",))
 def stream_update():
     # {"url": str, "title": str}, either or both: the stream destination
     # and the broadcast title (state, stream.*). Whether a title being typed

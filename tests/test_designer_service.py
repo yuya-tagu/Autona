@@ -1791,3 +1791,114 @@ def test_designer_files_are_served_no_store(tmp_path, monkeypatch):
         assert "no-store" in cache_control(
             "/Layout/Designer_Runtime/runtime.js")
         assert "no-store" in cache_control("/LAYOUT/Custom/finals/index.html")
+
+
+def _save_payload(name="Finals"):
+    return {
+        "project": make_project(name),
+        "assets": {"assets/frame.png": png_data_url()},
+    }
+
+
+def _tmp_leftovers(directory):
+    return list(directory.rglob(".*.tmp"))
+
+
+def test_save_retries_a_transient_replace_permission_error(
+        designer_service, monkeypatch):
+    import src.AutonaDesignerService as module
+    real = os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) <= 2:
+            raise PermissionError(32, "sharing violation")
+        return real(src, dst)
+
+    monkeypatch.setattr(module.os, "replace", flaky)
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    result = designer_service.save_project(_save_payload())
+
+    directory = designer_service.ROOT / result["slug"]
+    saved = json.loads((directory / "project.json").read_text(encoding="utf-8"))
+    assert saved["name"] == "Finals"
+    assert _tmp_leftovers(directory) == []
+
+
+def test_save_gives_up_after_the_replace_attempts(
+        designer_service, monkeypatch):
+    import src.AutonaDesignerService as module
+    calls = []
+
+    def always(src, dst):
+        calls.append(dst)
+        raise PermissionError(5, "denied")
+
+    monkeypatch.setattr(module.os, "replace", always)
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    with pytest.raises(PermissionError):
+        designer_service.save_project(_save_payload())
+
+    assert len(calls) == 4
+    assert _tmp_leftovers(designer_service.ROOT) == []
+
+
+def test_save_does_not_retry_other_oserrors(designer_service, monkeypatch):
+    import errno
+    import src.AutonaDesignerService as module
+    calls = []
+
+    def full(src, dst):
+        calls.append(dst)
+        raise OSError(errno.ENOSPC, "no space")
+
+    monkeypatch.setattr(module.os, "replace", full)
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    with pytest.raises(OSError):
+        designer_service.save_project(_save_payload())
+
+    assert len(calls) == 1
+    assert _tmp_leftovers(designer_service.ROOT) == []
+
+
+def test_import_copies_are_independent_of_the_held_import(designer_service):
+    imported = designer_service.receive_import(_save_payload("Figma Finals"))
+    for fetch in (
+            lambda: designer_service.get_import(imported["importId"]),
+            designer_service.latest_import):
+        copy = fetch()
+        copy["project"]["name"] = "changed"
+        copy["assets"].clear()
+        again = fetch()
+        assert again["project"]["name"] == "Figma Finals"
+        assert "assets/frame.png" in again["assets"]
+
+
+def test_invalid_asset_creates_no_directory(designer_service):
+    payload = _save_payload("Brand New")
+    payload["assets"]["assets/frame.png"] = (
+        "data:image/png;base64," + base64.b64encode(b"bad").decode("ascii"))
+    with pytest.raises(DesignerProjectError, match="PNG"):
+        designer_service.save_project(payload)
+
+    assert not (designer_service.ROOT / "brand-new").exists()
+
+
+def test_invalid_asset_leaves_a_legacy_design_untouched(designer_service):
+    directory, _ = make_legacy_design(designer_service.ROOT, "finals")
+
+    def snapshot():
+        return {
+            p.relative_to(directory).as_posix(): p.read_bytes()
+            for p in directory.rglob("*") if p.is_file()
+        }
+
+    before = snapshot()
+    payload = _save_payload("Finals")
+    payload["assets"]["assets/frame.png"] = (
+        "data:image/png;base64," + base64.b64encode(b"bad").decode("ascii"))
+    with pytest.raises(DesignerProjectError):
+        designer_service.save_project(payload)
+
+    assert snapshot() == before
