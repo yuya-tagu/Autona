@@ -300,3 +300,30 @@ def test_runner_kills_hung_workers_at_the_timeout(tmp_path):
             break
         time.sleep(0.2)
     assert not _pid_alive(pid)
+
+
+def test_describe_exit():
+    assert runner.describe_exit(0) == "exit=0"
+    assert runner.describe_exit(1) == "exit=1"
+    av = runner.describe_exit(3221225477)
+    assert "0xC0000005" in av and "STATUS_ACCESS_VIOLATION" in av
+    unknown = runner.describe_exit(0xC0000135)
+    assert "0xC0000135" in unknown and "STATUS_" not in unknown
+    assert "signal" in runner.describe_exit(-11)
+    assert runner.describe_exit(None) == "timeout"
+
+
+def test_save_cache_leaves_no_temp_file_on_failure(tmp_path, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(runner.os, "replace", boom)
+    target = tmp_path / "cache.json"
+    try:
+        runner.save_cache({"a": 1.0}, target)
+        raised = False
+    except OSError:
+        raised = True
+    assert raised
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert not target.exists()

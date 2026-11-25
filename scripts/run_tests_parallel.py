@@ -35,6 +35,7 @@ import os
 import re
 import json
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -132,12 +133,47 @@ def load_cache(path=CACHE_PATH):
     return data
 
 
+_NTSTATUS_NAMES = {
+    0xC0000005: "STATUS_ACCESS_VIOLATION",
+    0xC0000409: "STATUS_STACK_BUFFER_OVERRUN",
+    0xC00000FD: "STATUS_STACK_OVERFLOW",
+    0xC0000374: "STATUS_HEAP_CORRUPTION",
+    0xC000001D: "STATUS_ILLEGAL_INSTRUCTION",
+    0xC000013A: "STATUS_CONTROL_C_EXIT",
+    0x80000003: "STATUS_BREAKPOINT",
+}
+
+
+def describe_exit(code):
+    """Exit code as text: POSIX signal name or Windows NTSTATUS name when known."""
+    if code is None:
+        return "timeout"
+    if code < 0:
+        try:
+            return f"exit={code} (signal {signal.Signals(-code).name})"
+        except ValueError:
+            return f"exit={code}"
+    if code & 0xFFFFFFFF >= 0x80000000:
+        status = code & 0xFFFFFFFF
+        name = _NTSTATUS_NAMES.get(status)
+        hex_text = f"0x{status:08X}"
+        return f"exit={code} ({hex_text} {name})" if name else f"exit={code} ({hex_text})"
+    return f"exit={code}"
+
+
 def save_cache(times, path=CACHE_PATH):
-    """Atomic write (temp file + os.replace)."""
+    """Atomic write (temp file + os.replace); no temp file is left on failure."""
     path = Path(path)
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(times, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(times, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def make_weight(files, cache, root=PROJECT_ROOT):
@@ -373,7 +409,7 @@ def main(argv=None):
     print("=" * 60)
     for i, ((code, counts), (_, output)) in enumerate(zip(results, raw)):
         last = output.strip().splitlines()[-1] if output.strip() else ""
-        exit_text = "timeout" if i in timed_out else f"exit={code}"
+        exit_text = "timeout" if i in timed_out else describe_exit(code)
         print(f"worker {i}: {'ok' if states[i] == 'idle' else states[i]} "
               f"{exit_text} {len(shards[i])} files | {last}")
     failures = [t for _, output in raw for t in failed_test_ids(output)]
@@ -398,7 +434,7 @@ def main(argv=None):
             print(_tail(output))
         else:
             reason = "summary not parseable" if counts is None else "non-zero exit"
-            print(f"--- worker {i} output ({reason}, exit={code}) ---")
+            print(f"--- worker {i} output ({reason}, {describe_exit(code)}) ---")
             print(output)
     print("=" * 60)
     parts = [f"{total.get(k, 0)} {k}" for k in ("passed", "failed", "skipped", "errors")]
