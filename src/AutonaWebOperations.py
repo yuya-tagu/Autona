@@ -1371,13 +1371,13 @@ def get_analysis():
     `analysis` in one hold of it (_Publish / Forget), so the three are of
     the same moment -- not a fetch's rows with the status before it ended,
     or idle with the rows Forget is about to drop. The lock order is the
-    service's: StateManager.lock, then its own (_ResultRef). The rows are
+    service's: StateManager.lock, then its own (ResultRef). The rows are
     copied after the hold (a fetch's rows never change once made), so a
     large list does not stall every state write and delta while it is
     copied -- and not at all when they are another tournament's."""
     service = AnalysisService.instance
     with StateManager.lock:
-        url, rows, _revision = (service._ResultRef() if service is not None
+        url, rows, _revision = (service.ResultRef() if service is not None
                                 else ("", None, None))
         provider = AutonaTournamentDataProvider.instance.GetProvider()
         current = (getattr(provider, "url", None)

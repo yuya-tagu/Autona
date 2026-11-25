@@ -216,8 +216,8 @@ def test_the_read_is_of_one_moment(client, analysis, monkeypatch):  # noqa: F811
             return real(*args, **kwargs)
         return call
 
-    monkeypatch.setattr(AnalysisService.instance, "_ResultRef",
-                        spy("_ResultRef", AnalysisService.instance._ResultRef))
+    monkeypatch.setattr(AnalysisService.instance, "ResultRef",
+                        spy("ResultRef", AnalysisService.instance.ResultRef))
     monkeypatch.setattr(AnalysisService, "Progress",
                         staticmethod(spy("Progress", AnalysisService.Progress)))
     monkeypatch.setattr(adapter, "GetProvider",
@@ -226,7 +226,7 @@ def test_the_read_is_of_one_moment(client, analysis, monkeypatch):  # noqa: F811
     assert read["status"] == "done"
     assert _cells(read["rows"]) == _expectedRows(SEEDS_KNOWN)
     assert sorted(held) == [("GetProvider", True), ("Progress", True),
-                            ("_ResultRef", True)]
+                            ("ResultRef", True)]
 
     # While another thread holds the lock (a publish in progress), the
     # read waits for it.

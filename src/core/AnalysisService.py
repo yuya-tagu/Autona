@@ -409,13 +409,13 @@ class AnalysisService:
         tournament's, "rows": [...] (a copy), "revision": that fetch's}.
         No rows ({"url": "", "rows": [], "revision": None}) before the first
         one, and once forgotten. Any thread."""
-        url, rows, revision = self._ResultRef()
+        url, rows, revision = self.ResultRef()
         if rows is None:
             return {"url": "", "rows": [], "revision": None}
         # Never changed once made: copied out of the lock.
         return {"url": url, "rows": copy.deepcopy(rows), "revision": revision}
 
-    def _ResultRef(self):
+    def ResultRef(self):
         """Result()'s (url, rows, revision) with the rows NOT copied --
         ("", None, None) when there are none. The caller must not change
         them. For the Web read (get_analysis), which reads them inside
