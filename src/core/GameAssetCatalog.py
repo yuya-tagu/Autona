@@ -799,7 +799,8 @@ class GameAssetCatalog:
         up after STARTGG_CHARACTERS_TIMEOUT_SECS (there was no timeout until
         ADR-005 S3f-4: on a QThread nothing waited for it, but the
         TaskExecutor job it is now holds the interpreter's exit). The table
-        is picked up by the next ReloadStartGGCharacters()."""
+        is picked up by the next ReloadStartGGCharacters(). The file is not
+        rewritten when its content would be the same."""
         tmp_path = CHARACTERS_RUNTIME_PATH + '.tmp'
         try:
             r = requests.get(STARTGG_CHARACTERS_URL, allow_redirects=True,
@@ -821,6 +822,16 @@ class GameAssetCatalog:
                     "keeping the current table")
                 return
             r_json = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+
+            # Same bytes already on disk: nothing to rewrite
+            try:
+                with open(CHARACTERS_RUNTIME_PATH, 'rb') as f:
+                    current = f.read()
+            except OSError:
+                current = None
+            if current == r_json:
+                logger.debug("startgg characters file unchanged")
+                return
 
             # Write runtime copy into user_data/ (gitignored), never the
             # tracked seed in assets/
@@ -902,7 +913,7 @@ class GameAssetCatalog:
         for dir in assetDirs:
             if os.path.isdir(base + "/" + dir):
                 if os.path.isfile(base + "/" + dir + "/config.json"):
-                    logger.info(
+                    logger.debug(
                         "Found asset config for ["+game+"]["+dir+"]")
                     try:
                         gameData["assets"][dir] = self._ReadJsonObject(
@@ -1124,8 +1135,8 @@ class GameAssetCatalog:
 
                     packSkinMask[c][assetsKey].add(number)
 
-            logger.info("Character "+c+" has " +
-                        str(len(skins[c]))+" skins")
+            logger.debug("Character "+c+" has " +
+                         str(len(skins[c]))+" skins")
 
         # Set complete
         for assetsKey in list(assets.keys()):

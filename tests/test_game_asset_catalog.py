@@ -698,6 +698,64 @@ def test_a_good_start_gg_download_replaces_the_table(_isolated, monkeypatch):
     assert catalog._startggCharacters["424242"]["name"] == "Zed"
 
 
+def _count_replaces(monkeypatch):
+    from src.core import GameAssetCatalog as module
+    calls = []
+    real = os.replace
+
+    def counting(src, dst):
+        # os.replace is patched process-wide: count only this table's writes
+        if os.path.normpath(str(dst)) == os.path.normpath(
+                module.CHARACTERS_RUNTIME_PATH):
+            calls.append(dst)
+        return real(src, dst)
+    monkeypatch.setattr(module.os, "replace", counting)
+    return calls
+
+
+def test_an_unchanged_start_gg_download_is_not_rewritten(
+        _isolated, monkeypatch):
+    body = {"entities": {"character": [{"id": 424242, "name": "Zed"}]}}
+    _fake_download(monkeypatch, 200, body)
+    catalog = GameAssetCatalog()
+    catalog.DownloadStartGGCharacters()
+    calls = _count_replaces(monkeypatch)
+
+    catalog.DownloadStartGGCharacters()
+
+    assert calls == []
+    assert not Path("user_data/characters.json.tmp").exists()
+
+
+def test_a_changed_start_gg_download_replaces_the_table(
+        _isolated, monkeypatch):
+    catalog = GameAssetCatalog()
+    _fake_download(monkeypatch, 200, {"entities": {"character": [
+        {"id": 424242, "name": "Zed"}]}})
+    catalog.DownloadStartGGCharacters()
+    calls = _count_replaces(monkeypatch)
+    _fake_download(monkeypatch, 200, {"entities": {"character": [
+        {"id": 424242, "name": "Yuki"}]}})
+
+    catalog.DownloadStartGGCharacters()
+    catalog.ReloadStartGGCharacters()
+
+    assert len(calls) == 1
+    assert catalog._startggCharacters["424242"]["name"] == "Yuki"
+
+
+def test_a_missing_runtime_table_is_written_again(_isolated, monkeypatch):
+    body = {"entities": {"character": [{"id": 424242, "name": "Zed"}]}}
+    _fake_download(monkeypatch, 200, body)
+    catalog = GameAssetCatalog()
+    catalog.DownloadStartGGCharacters()
+    os.remove("user_data/characters.json")
+
+    catalog.DownloadStartGGCharacters()
+
+    assert Path("user_data/characters.json").exists()
+
+
 def test_reload_keeps_only_the_name_of_each_start_gg_character(_isolated):
     body = {"entities": {"character": [
         {"id": 424242, "name": "Zed", "videogameId": 1,
