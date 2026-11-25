@@ -781,7 +781,13 @@ class GameAssetCatalog:
             return
         table = {}
         for c in sggcharacters.get("entities", {}).get("character", []):
-            table[str(c.get("id"))] = c
+            # An empty or non-dict entry has no name: keep it out of the
+            # table, as the old truthiness check on the entity did.
+            if not isinstance(c, dict) or not c:
+                continue
+            # Only the name is read (CharacterFromStartGGId /
+            # StartGGCharacterName); the full entity was ~7 MB resident.
+            table[str(c.get("id"))] = {"name": c.get("name")}
         with self._lock:
             self._startggCharacters = table
 
