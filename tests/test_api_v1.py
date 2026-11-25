@@ -582,6 +582,38 @@ def test_display_options_patch_rejects_an_unknown_key_without_applying_any(
         assert autonaApp.get("display_options.show_nothing") is None
 
 
+@pytest.mark.parametrize("body", ["{nope", "[1]"])
+def test_a_legacy_display_option_that_is_not_an_object_is_a_400(
+        autonaApp, client, body):
+    autonaApp.ready(1)
+    with _restoredDisplayOption("show_seed"):
+        before = autonaApp.get("display_options")
+
+        response = client.post("/display-option", data=body,
+                               content_type="application/json")
+        autonaApp.settle()
+
+        assert response.status_code == 400
+        assert response.get_json()["error"]["code"] == "INVALID_ARGUMENT"
+        assert autonaApp.get("display_options") == before
+
+
+def test_a_legacy_update_game_that_is_not_an_object_is_a_400(
+        client, monkeypatch):
+    from src import AutonaWebOperations as WebOps
+
+    loaded = []
+    monkeypatch.setattr(WebOps, "loadGameByCodename",
+                        lambda *a, **k: loaded.append(a))
+    for response in (
+            client.post("/update-game", data="null",
+                        content_type="application/json"),
+            client.post("/update-game", json=[1])):
+        assert response.status_code == 400
+        assert response.get_json()["error"]["code"] == "INVALID_ARGUMENT"
+    assert loaded == []
+
+
 # ── PATCH .../set teamName (legacy -set?teamName=&team=) ─────────────────
 
 def test_set_patch_team_name_matches_legacy_query(autonaApp, client):

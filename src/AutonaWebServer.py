@@ -157,6 +157,17 @@ def _build_web_app():
         response.status_code = 503
         return response
 
+    # A legacy route's input the operation cannot read: 400 in the same
+    # error shape, instead of werkzeug's 500 page and a traceback in the log.
+    # The legacy freeze below excepts only this answer to bad input; the
+    # answers to good input stay as they were. Only InvalidInput comes here:
+    # any other ValueError is still a 500.
+    @app.errorhandler(WebOps.InvalidInput)
+    def invalid_input(error):
+        response = jsonify(WebServer.InvalidBody(error))
+        response.status_code = 400
+        return response
+
     # ------------------------------------------------------------------
     # DEPRECATED legacy routes (/program-state, /score, /scoreboard<N>-*,
     # /update-*, /get-*, /load-*, ... down to /states below).
@@ -164,6 +175,8 @@ def _build_web_app():
     # ADR-001). These legacy routes are kept unchanged for existing OBS /
     # Stream Deck setups, are frozen (no new routes here), and are scheduled
     # for removal in v2.0. Do not change their behavior.
+    # The one exception: bad input answers 400 INVALID_ARGUMENT (the
+    # InvalidInput handler above).
     # /api/designer/* and the static-file routes further below are NOT part
     # of the deprecation.
     # ------------------------------------------------------------------
@@ -317,8 +330,11 @@ def _build_web_app():
     # desktop eye menu into SettingsManager + StateManager on every board.
     @app.post('/display-option')
     def post_display_option():
-        return WebOps.set_display_option(
-            orjson.loads(request.get_data()))
+        try:
+            body = orjson.loads(request.get_data())
+        except orjson.JSONDecodeError:
+            raise WebOps.InvalidInput("body must be a JSON object") from None
+        return WebOps.set_display_option(body)
 
     @ws_on('set')
     def ws_set_route(message):
@@ -1895,6 +1911,13 @@ class WebServer:
         message = getattr(error, "message", None) or WebOps.NOT_AVAILABLE_MESSAGE
         return {"ok": False,
                 "error": {"code": "UNAVAILABLE", "message": message}}
+
+    @staticmethod
+    def InvalidBody(error):
+        """The 400 body for WebOps.InvalidInput, in the same error shape."""
+        return {"ok": False,
+                "error": {"code": "INVALID_ARGUMENT",
+                          "message": error.message}}
 
     @staticmethod
     def _ws_unavailable(event, handler):

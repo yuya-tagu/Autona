@@ -2807,6 +2807,67 @@ def test_a_bad_count_after_pool_and_match_writes_neither(autonaApp):
     assert not _state().HasPendingChanges(f"score.{BOARD}")
 
 
+def _legacyClient(server):
+    app, _ = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    return client
+
+
+def _assertInvalidArgument(response):
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.parametrize("body", [
+    b"[1]", b"1", b'{"scoreboard": {}}', b'{"scoreboard": null}', b"{nope"])
+def test_a_post_score_that_is_not_readable_is_a_400_and_writes_nothing(
+        autonaApp, server, body):
+    client = _legacyClient(server)
+    before = _settledBoard(autonaApp)
+    snapshot = copy.deepcopy(autonaApp.get("score"))
+
+    response = client.post("/score", data=body,
+                           content_type="application/json")
+    autonaApp.settle()
+
+    _assertInvalidArgument(response)
+    assert _view(autonaApp, BOARD) == before
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+    assert autonaApp.get("score") == snapshot
+
+
+@pytest.mark.parametrize("query", [
+    "best-of=x", "characters=x", "teamName=A&team=x"])
+def test_a_set_route_with_a_bad_number_is_a_400_and_writes_nothing(
+        autonaApp, server, query):
+    client = _legacyClient(server)
+    before = _settledBoard(autonaApp)
+
+    response = client.get(f"/scoreboard{BOARD}-set?phase=X&{query}")
+    autonaApp.settle()
+
+    _assertInvalidArgument(response)
+    assert _view(autonaApp, BOARD) == before
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+
+
+def test_a_caster_route_with_a_bad_number_is_a_400_and_writes_nothing(
+        autonaApp, server):
+    client = _legacyClient(server)
+    before = copy.deepcopy(autonaApp.get("commentary"))
+
+    _assertInvalidArgument(
+        client.post("/update-commentary-x", json={"gamerTag": "Cast"}))
+    _assertInvalidArgument(
+        client.get("/load-commentator-from-tag-x?tag=a"))
+    autonaApp.settle()
+
+    assert autonaApp.get("commentary") == before
+
+
 def test_a_bad_team_number_with_a_team_name_writes_no_phase(autonaApp):
     before = _settledBoard(autonaApp)
     with pytest.raises(ValueError):
