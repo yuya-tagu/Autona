@@ -38,7 +38,9 @@ What changed in the move, and what did not:
   is full (ENOSPC/EDQUOT) it does not overwrite: the previous file is kept
   and the next SaveDB tries again. The bytes are
   the same as before: json.dumps(indent=2) written in text mode (os.linesep
-  line ends), utf-8.
+  line ends), utf-8. The temp file is fsynced before the replace. The same
+  text is not written again (same as the previous write and the file's
+  size/mtime still match).
 - A database that could not be read is never saved over: a corrupt file is
   moved aside (local_players.json.unreadable-<time>.bak) before the DB starts
   empty, and one that cannot be opened stops SaveDB (`loadFailed`) until a
@@ -55,6 +57,7 @@ import csv
 import datetime
 import errno
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -127,6 +130,9 @@ class PlayerDB:
         # a write whose number is older than the one on disk is dropped.
         self._snapshotGeneration = 0
         self._writtenGeneration = 0
+        # (text, (size, mtime_ns)) of the last write that landed; a save of
+        # the same text onto a file that still looks the same is skipped.
+        self._lastWritten = None
         # True when LoadDB could not read the file (locked by another
         # process, or corrupt and it could not be moved aside): SaveDB then
         # writes nothing for the rest of the session, so a DB that was never
@@ -657,8 +663,37 @@ class PlayerDB:
         with self._saveLock:
             if generation < self._writtenGeneration:
                 return
-            self._WriteText(text)
+            # A digest, not the text: the text is megabytes and would be
+            # held a second time.
+            fingerprint = self._Fingerprint(text)
+            if (self._lastWritten is not None
+                    and self._lastWritten[0] == fingerprint
+                    and self._StatMatches(self._lastWritten[1])):
+                logger.debug("Player database unchanged; not rewritten")
+                self._writtenGeneration = generation
+                return
+            # Unknown until the write is known to have landed.
+            self._lastWritten = None
+            if self._WriteText(text):
+                self._lastWritten = (fingerprint, self._Stat())
             self._writtenGeneration = generation
+
+    @staticmethod
+    def _Fingerprint(text):
+        """(length, blake2b digest) of `text`."""
+        return (len(text),
+                hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest())
+
+    def _Stat(self):
+        """(size, mtime_ns) of the database file, None when unreadable."""
+        try:
+            info = os.stat(self.path)
+        except OSError:
+            return None
+        return (info.st_size, info.st_mtime_ns)
+
+    def _StatMatches(self, saved):
+        return saved is not None and saved == self._Stat()
 
     def _TempPrefix(self):
         # "local_players." for the default path: the temp files are
@@ -667,10 +702,11 @@ class PlayerDB:
 
     def _WriteText(self, text):
         """Replace the file with `text`: atomically when the platform lets
-        us, by overwriting it in place (the old way) when it does not."""
+        us, by overwriting it in place (the old way) when it does not.
+        True when the file was written, False when nothing was (disk full)."""
         try:
             if self._ReplaceAtomically(text):
-                return
+                return True
         except OSError as error:
             if _IsDiskFull(error):
                 # Overwriting in place would truncate a good file and then
@@ -678,7 +714,7 @@ class PlayerDB:
                 logger.warning(
                     "Not saving the player database: the disk is full; the "
                     f"previous file is kept ({type(error).__name__})")
-                return
+                return False
             logger.warning(
                 "Could not write the player database through a temp file:\n"
                 + traceback.format_exc())
@@ -689,6 +725,9 @@ class PlayerDB:
         # open(path, 'wt', encoding='utf-8') was.
         with open(self.path, "wt", encoding="utf-8") as file:
             file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        return True
 
     def _ReplaceAtomically(self, text):
         """Write a temp file next to the database and os.replace() it over
@@ -703,6 +742,10 @@ class PlayerDB:
             # os.linesep, so the file keeps its exact bytes.
             with os.fdopen(fd, "w", encoding="utf-8") as file:
                 file.write(text)
+                # Reach the disk before the replace, so a power loss cannot
+                # leave a renamed-but-empty database.
+                file.flush()
+                os.fsync(file.fileno())
             delay = _REPLACE_BACKOFF
             for attempt in range(_REPLACE_ATTEMPTS):
                 try:
