@@ -869,3 +869,68 @@ def test_a_players_text_is_not_written_to_the_log(desktop, client):
         logger.remove(sink)
 
     assert not [line for line in lines if "SECRET_NAME" in line]
+
+
+# ── A chunked body is limited too ────────────────────────────────────────
+
+def _chunked_post(webApp, payload):
+    """POST `payload` chunked (no Content-Length) to a real werkzeug server:
+    the test client does not set wsgi.input_terminated, so it cannot."""
+    import threading
+
+    import requests
+    from werkzeug.serving import make_server
+
+    server = make_server("127.0.0.1", 0, webApp, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def pieces():
+        for i in range(0, len(payload), 4096):
+            yield payload[i:i + 4096]
+
+    try:
+        return requests.post(
+            f"http://127.0.0.1:{server.server_port}/api/v1/result:reorder",
+            data=pieces(), headers={"Content-Type": "application/json"},
+            timeout=30)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
+def _valid_body_of(length):
+    # A valid reorder body padded with trailing spaces to exactly `length`.
+    body = b'{"kind": "players", "order": [1]}'
+    assert len(body) <= length
+    return body + b" " * (length - len(body))
+
+
+def test_a_chunked_body_over_the_limit_is_413(webApp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(WebOps, "reorder_result",
+                        lambda *a: calls.append(a) or True)
+    limit = AutonaApiV1._RESULT_MAX_BODY
+
+    # Exactly the limit: let through, the handler called.
+    response = _chunked_post(webApp, _valid_body_of(limit))
+    assert response.status_code == 200, response.text
+    assert calls == [("players", [1])]
+
+    # One byte more: 413, the handler not called again.
+    response = _chunked_post(webApp, _valid_body_of(limit + 1))
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+    assert calls == [("players", [1])]
+
+
+def test_a_chunked_body_within_the_limit_goes_through(webApp, monkeypatch):
+    calls = []
+    monkeypatch.setattr(WebOps, "reorder_result",
+                        lambda *a: calls.append(a) or True)
+
+    response = _chunked_post(webApp, b'{"kind": "players", "order": [1]}')
+
+    assert response.status_code == 200, response.text
+    assert calls == [("players", [1])]
