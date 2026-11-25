@@ -5010,9 +5010,10 @@ class _WindowRig:
     .ini file. Not shown, and the web server not ready: the host builds no
     view; what it was asked to show is its CurrentPanel().
     log_startup_phase records the phases; _StartWebServer's server, port
-    guard, wiring and readiness are stand-ins that record their calls into
-    ``calls`` (and raise what ``raises`` holds for their name), and the LAN
-    question is answered already."""
+    guard (both handed out by a stand-in _LoadWebServer), wiring and
+    readiness are stand-ins that record their calls into ``calls`` (and
+    raise what ``raises`` holds for their name), and the LAN question is
+    answered already."""
 
     METHODS = ("_OnPanelChanged", "_OnNavCollapsedChanged",
                "_SaveWindowState", "OpenPanel", "_BringToFront",
@@ -5052,17 +5053,36 @@ class _WindowRig:
                 # The settings' port while no server runs.
                 return (5111, False)
 
+        def checkPort(port, parent=None, host=None):
+            rig._Step("check_webserver_port")
+
+        # The server's module, read by _StartWebServer and the start
+        # failure through _LoadWebServer (not at the top of src/Autona.py);
+        # ``loadRaises`` makes its import fail.
+        self.loadRaises = None
+
+        def loadWebServer():
+            if rig.loadRaises is not None:
+                raise rig.loadRaises
+            return ServerStandIn, checkPort
+
+        # What SettingsManager.Get answers: False for any other key (the
+        # LAN question is then answered already).
+        self.settingValues = {}
+
         # Only what the methods may use: a QMessageBox there (but for the
-        # LAN question, answered here) would be a NameError.
+        # LAN question, answered here) would be a NameError, and so would
+        # the server's names read anywhere but through _LoadWebServer.
         namespace = {
             "QMainWindow": QMainWindow, "QApplication": QApplication,
             "Qt": Qt, "logger": logger, "window_state": AutonaWindowState,
             "log_startup_phase": self.phases.append,
             "SettingsManager": SimpleNamespace(
-                loadFailed=False, Get=lambda key, default=None: False),
-            "WebServer": ServerStandIn,
-            "check_webserver_port": lambda port, parent=None, host=None: (
-                self._Step("check_webserver_port")),
+                loadFailed=False,
+                Get=lambda key, default=None: rig.settingValues.get(
+                    key, False)),
+            "DEFAULT_WEBSERVER_PORT": 5107,
+            "_LoadWebServer": loadWebServer,
             "wire_web_server": lambda *args: self._Step("wire_web_server"),
             "MarkWebServerReady": lambda: self._Step("MarkWebServerReady"),
             "AutonaQtHelper": SimpleNamespace(gui_executor=lambda f: f())}
@@ -5273,6 +5293,104 @@ def test_a_web_server_that_cannot_be_started_is_shown_as_a_start_failure(
     assert not w._spinnerCap.isActive()
     assert "MarkWebServerReady" not in rig.calls
     assert rig.phases == []
+
+
+def test_the_window_does_not_import_the_web_server_before_it_is_shown():
+    # Importing src/AutonaWebServer.py loads the Flask / Socket.IO stack
+    # (flask, flask_socketio with engineio and aiohttp, flask_cors,
+    # werkzeug): read through _LoadWebServer, in _StartWebServer under the
+    # spinner, not at the top of src/Autona.py ahead of core-shown.
+    tree = ast.parse(_autonaSource())
+
+    def importsServer(node):
+        if isinstance(node, ast.ImportFrom):
+            return (node.module or "").rsplit(".", 1)[-1] == "AutonaWebServer"
+        if isinstance(node, ast.Import):
+            return any(alias.name.rsplit(".", 1)[-1] == "AutonaWebServer"
+                       for alias in node.names)
+        return False
+
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    inFunctions = {id(inner) for function in functions
+                   for inner in ast.walk(function)}
+    topLevel = [ast.unparse(node) for node in ast.walk(tree)
+                if importsServer(node) and id(node) not in inFunctions]
+    assert topLevel == []
+    # Its one importer is _LoadWebServer, a module function, and the
+    # window's methods reach the server's names only through it.
+    importers = [function.name for function in functions
+                 if any(importsServer(node) for node in ast.walk(function))]
+    assert importers == ["_LoadWebServer"]
+    assert "_LoadWebServer" in [node.name for node in tree.body
+                                if isinstance(node, ast.FunctionDef)]
+    # Read once in _StartWebServer, before the server is built and after
+    # the LAN question (the dialog does not wait for the import): by line.
+    lines = {}
+    for call in ast.walk(_windowMethod("_StartWebServer")):
+        if isinstance(call, ast.Call):
+            lines.setdefault(ast.unparse(call.func), []).append(call.lineno)
+    assert len(lines["_LoadWebServer"]) == 1
+    assert (lines["QMessageBox.question"][0] < lines["_LoadWebServer"][0]
+            < lines["WebServer"][0] < lines["check_webserver_port"][0])
+    # The server's names are the loader's and _StartWebServer's locals.
+    for name in ("WebServer", "check_webserver_port"):
+        assert {function.name for function in functions
+                if any(isinstance(node, ast.Name) and node.id == name
+                       for node in ast.walk(function))} == {
+            "_LoadWebServer", "_StartWebServer"}, name
+    readers = {method.name for method in _windowClass().body
+               if isinstance(method, ast.FunctionDef)
+               for node in ast.walk(method)
+               if isinstance(node, ast.Name) and node.id == "_LoadWebServer"}
+    assert readers == {"_StartWebServer", "OnWebServerStartFailed"}
+
+
+def test_a_web_server_module_that_cannot_be_imported_is_a_start_failure(
+        windowRig):
+    # _LoadWebServer raising (a broken install: flask missing) is the
+    # start failure the others are: the error view, the spinner away, and
+    # nothing raised out of the event loop. The port is the settings' one,
+    # Serving being out of reach too.
+    rig = windowRig()
+    w = rig.window
+    w.webserver = None
+    rig.host.ShowPanel("event")
+    rig.loadRaises = ModuleNotFoundError("No module named 'flask'")
+    rig.settingValues["general.webserver_port"] = 5222
+
+    w._StartWebServer()
+
+    label = rig.host.findChild(QLabel, "webPanelStartFailure")
+    assert label is not None
+    assert "ModuleNotFoundError: No module named 'flask'" in label.text()
+    assert "5222" in label.text()
+    assert rig.calls == []
+    assert w.webserver is None
+    assert rig.overlay.finished == 1
+    assert w._loading_overlay is None
+    assert not w._spinnerCap.isActive()
+    assert rig.phases == []
+
+
+def test_the_start_failure_falls_back_to_the_settings_port(windowRig):
+    # No server built and its module out of reach: the error view still
+    # comes, naming the settings' port, and the spinner goes.
+    rig = windowRig()
+    w = rig.window
+    w.webserver = None
+    rig.host.ShowPanel("event")
+    rig.loadRaises = ImportError("cannot import name 'WebServer'")
+    rig.settingValues["general.webserver_port"] = 5333
+
+    w.OnWebServerStartFailed("OSError: bind failed")
+
+    label = rig.host.findChild(QLabel, "webPanelStartFailure")
+    assert label is not None
+    assert "5333" in label.text()
+    assert "OSError: bind failed" in label.text()
+    assert rig.overlay.finished == 1
+    assert w._loading_overlay is None
 
 
 def test_the_web_server_start_holds_the_spinners_cap_and_counts_it_again(

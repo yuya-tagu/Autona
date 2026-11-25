@@ -535,7 +535,7 @@ class PlayerDB:
           of another length is skipped, not removed;
         - a skin int() cannot convert is 0, logged with its traceback;
           int() is what reads it (2.7 -> 2, True -> 1, " 3 " -> 3);
-        - one player's error is logged with its gamerTag and stops that
+        - one player's error is logged (without the player's values) and stops that
           player only: what was rewritten before it in that player's list
           stays rewritten.
 
@@ -569,7 +569,7 @@ class PlayerDB:
                                             skin = int(main[1])
                                         except Exception:
                                             logger.error(
-                                                f'Local DB error: Player {player.get("gamerTag")} has an invalid skin for character {main[0]}')
+                                                f'Local DB error: a player has an invalid skin for character {main[0]}')
                                             logger.error(traceback.format_exc())
                                         main[1] = skin
 
@@ -581,7 +581,7 @@ class PlayerDB:
                                         main[2] = variant
                     except Exception:
                         logger.error(
-                            f'Error loading player from local DB: {player.get("gamerTag")}')
+                            'Error loading a player from local DB')
                         logger.error(traceback.format_exc())
 
     def DeletePlayer(self, tag):

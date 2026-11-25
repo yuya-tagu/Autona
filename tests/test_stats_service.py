@@ -928,3 +928,19 @@ def test_a_slot_outside_the_boards_has_no_statistics(fetcher):
 
     assert fetcher.asked() == []
     assert StatsService._generations == {}
+
+
+def test_the_last_sets_refresh_does_not_log_the_player_id(fetcher):
+    from loguru import logger
+
+    _seedPairing(987654321, 2)
+    service = _service()
+    messages = []
+    handler = logger.add(lambda m: messages.append(str(m)), format="{message}")
+    try:
+        service.Refresh(StatsService.LAST_SETS, 1)
+    finally:
+        logger.remove(handler)
+
+    assert any("last sets for team 1" in m for m in messages)
+    assert not any("987654321" in m for m in messages)

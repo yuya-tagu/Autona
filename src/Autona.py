@@ -184,11 +184,10 @@ from .core.PlayerDB import PlayerDB
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.TournamentInfoService import TournamentInfoService
-from .core.SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core.TaskExecutor import TaskExecutor
 from .core.CountryCatalog import CountryCatalog
 from .AutonaShellOperations import AutonaShellOperations
-from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
 from .AutonaWebPanelHost import AutonaWebPanelHost
 from . import AutonaWindowState as window_state
@@ -197,6 +196,18 @@ from . import AutonaWindowState as window_state
 
 class WindowSignals(QObject):
     UiMounted = Signal()
+
+
+def _LoadWebServer():
+    """(WebServer, check_webserver_port), imported on first use.
+
+    Read after the window is shown (_StartWebServer, under the spinner), not
+    at the top of this module: importing it loads flask, flask_socketio
+    (engineio, aiohttp), flask_cors and werkzeug, which would otherwise hold
+    the window back before core-shown. A failed import raises here, where
+    _StartWebServer shows it as a start failure."""
+    from src.AutonaWebServer import WebServer, check_webserver_port
+    return WebServer, check_webserver_port
 
 
 # A first launch's window (no geometry saved): the width the AppShell's
@@ -529,7 +540,11 @@ class Window(QMainWindow):
                 # to hand in: the desktop's side of the web operations (the
                 # game loader, the shell operations) was registered by
                 # bootstrap_gui() (ADR-005 S3e-9; the board host too until
-                # S4ad).
+                # S4ad). The server's module is read here, after the LAN
+                # question, so that neither the window nor the dialog waits
+                # for the Flask stack (_LoadWebServer); a failed import is
+                # this block's start failure too.
+                WebServer, check_webserver_port = _LoadWebServer()
                 self.webserver = WebServer(
                     on_start_failed=lambda error: AutonaQtHelper.gui_executor(
                         lambda: self.OnWebServerStartFailed(error)))
@@ -726,9 +741,18 @@ class Window(QMainWindow):
         S-final SF-5b-3; a QMessageBox until then): the error view is what
         the window shows. Also for a server that could not be built or
         started at all (_StartWebServer's exception): its port is then the
-        one it was to bind (WebServer.Serving)."""
-        port = (self.webserver.port if self.webserver is not None
-                else WebServer.Serving()[0])
+        one it was to bind (WebServer.Serving), or the settings' one when
+        the server's module could not even be imported (_LoadWebServer):
+        nothing here may raise, the error view and the spinner's end must
+        come whatever failed."""
+        if self.webserver is not None:
+            port = self.webserver.port
+        else:
+            try:
+                port = _LoadWebServer()[0].Serving()[0]
+            except Exception:
+                port = SettingsManager.Get("general.webserver_port",
+                                           DEFAULT_WEBSERVER_PORT)
         title = QApplication.translate(
             "portguard", "Web server failed to start")
         body = (QApplication.translate(

@@ -18,6 +18,10 @@ class AutonaDesignerWindow(QDialog):
 
         self._token = AutonaDesignerService.issue_token()
         self._tokenRevoked = False
+        # QDialog.done() (Esc -> reject, accept) closes the dialog without
+        # calling closeEvent: Qt eats that QCloseEvent. finished is emitted
+        # on every done(), so the token is revoked on those paths too.
+        self.finished.connect(self._revokeToken)
 
         self.webView = QWebEngineView(self)
         self.webView.setZoomFactor(1.0)
@@ -41,7 +45,7 @@ class AutonaDesignerWindow(QDialog):
         self._revokeToken()
         super().closeEvent(event)
 
-    def _revokeToken(self):
+    def _revokeToken(self, *_args):
         if not self._tokenRevoked:
             AutonaDesignerService.revoke_token(self._token)
             self._tokenRevoked = True

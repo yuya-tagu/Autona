@@ -5,7 +5,8 @@
 - faulthandler stays enabled until the atexit hook, which disables it before
   closing the file and removes the file when nothing was written.
 - The exit watchdog dumps every thread's stack when the exit hangs, and the
-  hook cancels it.
+  hook cancels it. These checks run in a subprocess: firing the watchdog in
+  the pytest process races with other threads and can crash it.
 - src/Autona.py's closeEvent no longer closes the log itself and arms the
   watchdog before quitting (AST: Autona.py is never imported by tests).
 """
@@ -13,7 +14,6 @@ import ast
 import faulthandler
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -24,9 +24,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
-def registered(monkeypatch):
+def registered(monkeypatch, request):
     """atexit.register recorded instead of run at the test process's exit;
-    faulthandler handed back to pytest's stderr afterwards."""
+    faulthandler handed back to the fd pytest's faulthandler plugin dumps to
+    (not fd 2, which is captured during a test)."""
     calls = []
     monkeypatch.setattr(AutonaCrashLog.atexit, "register",
                         lambda fn, *args: calls.append((fn, args)))
@@ -39,7 +40,12 @@ def registered(monkeypatch):
             f.close()
         except Exception:
             pass
-    faulthandler.enable(sys.__stderr__)
+    try:
+        from _pytest.faulthandler import fault_handler_stderr_fd_key
+        fd = request.config.stash.get(fault_handler_stderr_fd_key, None)
+    except ImportError:
+        fd = None
+    faulthandler.enable(fd if fd is not None else sys.__stderr__)
 
 
 def _open(path, opened):
@@ -152,31 +158,50 @@ def test_the_exit_hook_raises_nothing_when_already_closed(tmp_path,
     fn(*args)  # no exception
 
 
-def test_a_hung_exit_writes_every_threads_stack(tmp_path, registered):
-    calls, opened = registered
-    path = tmp_path / "tsh-crash.log"
+def _run_child(tmp_path, body):
+    script = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(PROJECT_ROOT)!r})\n"
+        "from pathlib import Path\n"
+        "from src.Helpers import AutonaCrashLog\n"
+        "f = AutonaCrashLog.open_crash_log(Path('tsh-crash.log'))\n"
+        + body
+    )
+    return subprocess.run([sys.executable, "-I", "-c", script],
+                          cwd=tmp_path, capture_output=True, text=True,
+                          timeout=60)
 
-    f = _open(path, opened)
-    AutonaCrashLog.arm_exit_watchdog(f, 0.1)
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and path.stat().st_size == 0:
-        time.sleep(0.05)
 
-    text = path.read_text()
+def test_a_hung_exit_writes_every_threads_stack(tmp_path):
+    result = _run_child(
+        tmp_path,
+        "AutonaCrashLog.arm_exit_watchdog(f, 0.1)\n"
+        "deadline = time.monotonic() + 10.0\n"
+        "while (time.monotonic() < deadline\n"
+        "       and Path('tsh-crash.log').stat().st_size == 0):\n"
+        "    time.sleep(0.05)\n",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "tsh-crash.log").exists(), result.stderr
+    text = (tmp_path / "tsh-crash.log").read_text()
     assert "Thread" in text or "File" in text, text
 
 
-def test_the_normal_exit_cancels_the_watchdog(tmp_path, registered):
+def test_the_exit_hook_cancels_the_watchdog(tmp_path, registered,
+                                            monkeypatch):
     calls, opened = registered
-    path = tmp_path / "tsh-crash.log"
-
-    f = _open(path, opened)
-    AutonaCrashLog.arm_exit_watchdog(f, 0.2)
+    cancelled = []
+    monkeypatch.setattr(AutonaCrashLog.faulthandler,
+                        "cancel_dump_traceback_later",
+                        lambda: cancelled.append(True))
+    f = _open(tmp_path / "tsh-crash.log", opened)
     fn, args = calls[0]
-    fn(*args)
-    time.sleep(0.5)
 
-    assert not path.exists()
+    fn(*args)
+
+    assert cancelled
+    assert f.closed
 
 
 def test_importing_the_helper_does_nothing(tmp_path):

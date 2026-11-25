@@ -2894,3 +2894,211 @@ def test_a_bad_team_number_with_a_team_name_writes_no_phase(autonaApp):
     autonaApp.settle()
     assert _view(autonaApp, BOARD) == before
     assert not _state().HasPendingChanges(f"score.{BOARD}")
+
+
+# ── legacy routes: bad URL numbers, unknown ids, oversized bodies ────────
+
+@pytest.mark.parametrize("path", [
+    "/scoreboardx-stats-recent-sets",
+    "/scoreboardx-stats-upset-factor",
+    "/scoreboardx-stats-last-sets-1",
+    "/scoreboardx-stats-history-sets-1",
+])
+def test_a_stats_route_with_a_bad_board_number_is_a_400(server, path):
+    _assertInvalidArgument(_legacyClient(server).get(path))
+
+
+def test_a_set_lookup_with_a_bad_id_is_a_400_and_asks_nothing(
+        server, headless, monkeypatch):
+    from src.AutonaTournamentDataProvider import (
+        AutonaTournamentDataProvider)
+    asked = []
+    provider = types.SimpleNamespace(
+        GetMatch=lambda setId: asked.append(setId) or {"id": setId})
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        provider)
+    client = _legacyClient(server)
+
+    _assertInvalidArgument(client.get("/get-match-abc"))
+    assert asked == []
+    response = client.get("/get-match-7")
+    assert (response.status_code, response.get_json()) == (200, {"id": 7})
+    assert asked == [7]
+
+
+def test_a_set_lookup_without_a_tournament_is_a_500_whatever_the_id(
+        server, headless, monkeypatch):
+    from src.AutonaTournamentDataProvider import (
+        AutonaTournamentDataProvider)
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        None)
+    client = _legacyClient(server)
+    assert client.get("/get-match-abc").status_code == 500
+
+
+def test_an_unknown_country_code_is_a_400(autonaApp, server):
+    client = _legacyClient(server)
+    _assertInvalidArgument(client.get("/states?countryCode=ZZ"))
+    response = client.get("/states?countryCode=JP")
+    assert response.status_code == 200
+    assert response.get_json() == WebOps.get_states("JP")
+
+
+def test_states_before_the_country_data_is_loaded_is_not_a_400(
+        server, monkeypatch):
+    # Every code reads as unknown until the catalog loads: not a refusal
+    # (v1 answers NOT_READY there), so the route is as it was.
+    from src.core.CountryCatalog import CountryCatalog
+    monkeypatch.setattr(CountryCatalog.instance, "IsLoaded", lambda: False)
+    monkeypatch.setattr(WebOps, "get_states", lambda code: None)
+    response = _legacyClient(server).get("/states?countryCode=JP")
+    assert response.status_code != 400
+
+
+@pytest.mark.parametrize("path", [
+    "/scoreboard3-crew-memberx-1-stockup",
+    "/scoreboard3-crew-activex-1",
+])
+def test_a_crew_route_with_a_bad_number_is_a_400_and_writes_nothing(
+        server, headless, path):
+    client = _legacyClient(server)
+    headless.settle()
+    before = copy.deepcopy(headless.get("score.3"))
+
+    _assertInvalidArgument(client.get(path))
+    headless.settle()
+
+    assert headless.get("score.3") == before
+
+
+def test_a_crew_route_off_the_crew_board_reads_nothing(server, headless):
+    response = _legacyClient(server).get(
+        "/scoreboard1-crew-memberx-1-stockup")
+    assert (response.status_code, response.get_data(as_text=True)) \
+        == (200, "OK")
+
+
+def test_a_player_load_with_a_bad_team_number_is_a_400(
+        server, headless, playerDB):
+    playerDB.players["SP ALPHA"] = dict(_PLAYER)
+    client = _legacyClient(server)
+    headless.settle()
+    before = copy.deepcopy(headless.get("score.1"))
+
+    _assertInvalidArgument(
+        client.get("/scoreboard1-load-player-from-tag-x-1?tag=a"))
+    headless.settle()
+
+    assert headless.get("score.1") == before
+
+
+LEGACY_BODY_ROUTES = [
+    "/score",
+    "/display-option",
+    "/scoreboard1-update-team-1-1",
+    "/update-commentary-1",
+    "/update-game",
+]
+
+
+def _postChunked(client, path, body):
+    import io
+    return client.post(
+        path, input_stream=io.BytesIO(body),
+        content_type="application/json",
+        headers={"Transfer-Encoding": "chunked"},
+        environ_overrides={"wsgi.input_terminated": True})
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("path", LEGACY_BODY_ROUTES)
+def test_a_legacy_body_over_the_limit_is_a_413_and_writes_nothing(
+        autonaApp, server, path, chunked):
+    from src.AutonaWebServer import LEGACY_MAX_BODY
+    client = _legacyClient(server)
+    autonaApp.settle()
+    before = {root: copy.deepcopy(autonaApp.get(root))
+              for root in ("score", "commentary", "game")}
+    # A JSON object each route could read, padded past the limit.
+    head = b'{"gamerTag": "BIG", "pad": "'
+    body = head + b"x" * (LEGACY_MAX_BODY + 1 - len(head) - 2) + b'"}'
+    assert len(body) == LEGACY_MAX_BODY + 1
+
+    if chunked:
+        response = _postChunked(client, path, body)
+    else:
+        response = client.post(path, data=body,
+                               content_type="application/json")
+    autonaApp.settle()
+
+    assert response.status_code == 413
+    assert response.headers["Connection"] == "close"
+    assert response.get_json() == {
+        "ok": False,
+        "error": {"code": "PAYLOAD_TOO_LARGE",
+                  "message": "the request body is over 1048576 bytes"}}
+    assert {root: autonaApp.get(root) for root in before} == before
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_a_legacy_body_at_the_limit_is_read_as_before(
+        autonaApp, server, chunked):
+    from src.AutonaWebServer import LEGACY_MAX_BODY
+    client = _legacyClient(server)
+    before = copy.deepcopy(autonaApp.get("commentary.1"))
+    head = b'{"gamerTag": "Cast", "pad": "'
+    body = head + b"x" * (LEGACY_MAX_BODY - len(head) - 2) + b'"}'
+    assert len(body) == LEGACY_MAX_BODY
+    try:
+        if chunked:
+            response = _postChunked(client, "/update-commentary-1", body)
+        else:
+            response = client.post("/update-commentary-1", data=body,
+                                   content_type="application/json")
+        autonaApp.settle()
+
+        assert (response.status_code, response.get_data(as_text=True)) \
+            == (200, "OK")
+        assert autonaApp.get("commentary.1.name") == "Cast"
+    finally:
+        _state().Set("commentary.1", before)
+        autonaApp.settle()
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("path,op", [
+    ("/score", "post_score"),
+    ("/update-game", "set_game"),
+])
+def test_a_legacy_body_at_the_limit_reaches_score_and_game(
+        autonaApp, server, monkeypatch, path, op, chunked):
+    from src.AutonaWebServer import LEGACY_MAX_BODY
+    client = _legacyClient(server)
+    got = []
+    monkeypatch.setattr(WebOps, op, lambda data: (got.append(data), "OK")[1])
+    head = b'{"codename": "x", "pad": "'
+    padLength = LEGACY_MAX_BODY - len(head) - 2
+    body = head + b"x" * padLength + b'"}'
+    assert len(body) == LEGACY_MAX_BODY
+    if chunked:
+        response = _postChunked(client, path, body)
+    else:
+        response = client.post(path, data=body,
+                               content_type="application/json")
+
+    assert (response.status_code, response.get_data(as_text=True))         == (200, "OK")
+    assert len(got) == 1
+    # post_score gets the raw body, set_game the parsed JSON.
+    if op == "post_score":
+        assert got[0] == body
+    else:
+        assert got[0]["pad"] == "x" * padLength
+
+
+def test_a_small_legacy_body_still_reaches_its_parser(autonaApp, server):
+    # Read once by the limit's check, cached for the handler's own read.
+    client = _legacyClient(server)
+    _assertInvalidArgument(client.post(
+        "/display-option", data=b"{nope", content_type="application/json"))
+    _assertInvalidArgument(client.post(
+        "/score", data=b"[1]", content_type="application/json"))

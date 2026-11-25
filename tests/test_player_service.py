@@ -1578,3 +1578,21 @@ def test_a_database_record_whose_skin_is_not_a_number_loads_too(loadWorld):
 
     value = SM.Get(f"{BOARD_PATH}.character")[1]
     assert (value["en_name"], value["skin"]) == ("Luigi", 0)
+
+
+def test_a_sponsor_that_is_not_text_is_not_logged_by_value(loadWorld):
+    """The warning for a lookup that cannot be made names the types, never
+    the player's values (state-and-webserver.md)."""
+    from loguru import logger
+
+    service = loadWorld.service()
+    messages = []
+    handler = logger.add(lambda m: messages.append(str(m)), format="{message}")
+    try:
+        service.ApplyData({"prefix": ["LeakPrefix"], "gamerTag": "SecretTag"},
+                          loadFromDB=True)
+    finally:
+        logger.remove(handler)
+
+    assert any("no database lookup" in m for m in messages)
+    assert not any("SecretTag" in m or "LeakPrefix" in m for m in messages)

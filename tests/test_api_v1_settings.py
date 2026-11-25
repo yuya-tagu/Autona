@@ -790,6 +790,11 @@ def test_every_url_naming_the_server_reads_it_through_serving():
     # and nothing else in the two files.
     undecided = {("src/Autona.py", "_StartWebServer"),
                  ("src/headless.py", "Assemble")}
+    # The one read of the port outside the server's module: the window's
+    # start failure when that module could not even be imported (Serving is
+    # then out of reach; src/Autona.py's _LoadWebServer), the table's default
+    # (DEFAULT_WEBSERVER_PORT, as test_app_settings asks of every reader).
+    unimportable = {("src/Autona.py", "OnWebServerStartFailed")}
 
     def functions(tree):
         """{call node: the innermost function it is in}."""
@@ -809,6 +814,7 @@ def test_every_url_naming_the_server_reads_it_through_serving():
 
     src = PROJECT_ROOT / "src"
     portReaders, listeners, undecidedReads = set(), set(), set()
+    unimportableReads = set()
     for path in sorted(src.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         name = path.relative_to(PROJECT_ROOT).as_posix()
@@ -825,12 +831,19 @@ def test_every_url_naming_the_server_reads_it_through_serving():
                         and isinstance(node.args[1], ast.Constant)
                         and node.args[1].value is None):
                     undecidedReads.add((name, function))
+                elif ((name, function) in unimportable
+                        and node.args[0].value == "general.webserver_port"
+                        and len(node.args) == 2
+                        and isinstance(node.args[1], ast.Name)
+                        and node.args[1].id == "DEFAULT_WEBSERVER_PORT"):
+                    unimportableReads.add((name, function))
                 else:
                     portReaders.add(name)
             if node.func.attr == "Listening":
                 listeners.add(name)
     assert portReaders == {"src/AutonaWebServer.py"}
     assert undecidedReads == undecided
+    assert unimportableReads == unimportable
     assert listeners == {"src/AutonaWebServer.py", "src/bootstrap.py"}
 
 

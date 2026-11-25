@@ -526,3 +526,18 @@ def test_unsetting_a_tournament_clears_a_followed_display_name(service):
     service.ApplyTournamentData({})
     service.ApplyDisplayNameFromSelection({})
     assert _get("displayTournamentName") == ""
+
+
+def test_a_payload_is_logged_by_its_keys_not_its_values(service):
+    from loguru import logger
+
+    messages = []
+    handler = logger.add(lambda m: messages.append(str(m)), format="{message}")
+    try:
+        service.ApplyTournamentData(_payload(
+            tournamentName="LeakName", address="LeakAddress"))
+    finally:
+        logger.remove(handler)
+
+    assert any("Tournament Data: keys=" in m for m in messages)
+    assert not any("LeakName" in m or "LeakAddress" in m for m in messages)
