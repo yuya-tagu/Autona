@@ -5081,6 +5081,7 @@ class _WindowRig:
                 loadFailed=False,
                 Get=lambda key, default=None: rig.settingValues.get(
                     key, False)),
+            "DEFAULT_WEBSERVER_PORT": 5107,
             "_LoadWebServer": loadWebServer,
             "wire_web_server": lambda *args: self._Step("wire_web_server"),
             "MarkWebServerReady": lambda: self._Step("MarkWebServerReady"),

@@ -184,7 +184,7 @@ from .core.PlayerDB import PlayerDB
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.TournamentInfoService import TournamentInfoService
-from .core.SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core.TaskExecutor import TaskExecutor
 from .core.CountryCatalog import CountryCatalog
 from .AutonaShellOperations import AutonaShellOperations
@@ -751,7 +751,8 @@ class Window(QMainWindow):
             try:
                 port = _LoadWebServer()[0].Serving()[0]
             except Exception:
-                port = SettingsManager.Get("general.webserver_port", None)
+                port = SettingsManager.Get("general.webserver_port",
+                                           DEFAULT_WEBSERVER_PORT)
         title = QApplication.translate(
             "portguard", "Web server failed to start")
         body = (QApplication.translate(

@@ -792,7 +792,8 @@ def test_every_url_naming_the_server_reads_it_through_serving():
                  ("src/headless.py", "Assemble")}
     # The one read of the port outside the server's module: the window's
     # start failure when that module could not even be imported (Serving is
-    # then out of reach; src/Autona.py's _LoadWebServer), the None default.
+    # then out of reach; src/Autona.py's _LoadWebServer), the table's default
+    # (DEFAULT_WEBSERVER_PORT, as test_app_settings asks of every reader).
     unimportable = {("src/Autona.py", "OnWebServerStartFailed")}
 
     def functions(tree):
@@ -833,8 +834,8 @@ def test_every_url_naming_the_server_reads_it_through_serving():
                 elif ((name, function) in unimportable
                         and node.args[0].value == "general.webserver_port"
                         and len(node.args) == 2
-                        and isinstance(node.args[1], ast.Constant)
-                        and node.args[1].value is None):
+                        and isinstance(node.args[1], ast.Name)
+                        and node.args[1].id == "DEFAULT_WEBSERVER_PORT"):
                     unimportableReads.add((name, function))
                 else:
                     portReaders.add(name)
