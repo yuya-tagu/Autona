@@ -225,7 +225,9 @@ class StartGGDataProvider(TournamentDataProvider):
                         "eventSlug": self.url.split("start.gg/")[1]
                     },
                     "query": StartGGDataProvider.TournamentDataQuery
-                }
+                },
+                # A replaced tournament's request stops retrying.
+                cancel_event=cancel_event,
             )
 
             videogame = deep_get(data, "data.event.videogame.id", None)
@@ -334,7 +336,9 @@ class StartGGDataProvider(TournamentDataProvider):
                         "eventSlug": self.url.split("start.gg/")[1]
                     },
                     "query": StartGGDataProvider.TournamentPhasesQuery
-                }
+                },
+                # A replaced tournament's request stops retrying.
+                cancel_event=cancel_event,
             )
             # QueryRequests answers {} once its retries are spent (or the
             # app is stopping); an unknown slug answers a null event.
@@ -547,7 +551,9 @@ class StartGGDataProvider(TournamentDataProvider):
                     "operationName": "AnalysisPhaseGroupQuery",
                     "variables": {"id": id},
                     "query": StartGGDataProvider.AnalysisPhaseGroupQuery
-                }
+                },
+                # A replaced tournament's request stops retrying.
+                cancel_event=cancel_event,
             )
             if strict and not isinstance(
                     deep_get(data, "data.phaseGroup", None), dict):
@@ -875,7 +881,9 @@ class StartGGDataProvider(TournamentDataProvider):
                         "eventSlug": self.url.split("start.gg/")[1],
                     },
                     "query": StartGGDataProvider.StationsQuery
-                }
+                },
+                # A replaced tournament's request stops retrying.
+                cancel_event=cancel_event,
             )
             # QueryRequests answers {} once its retries are spent (or the
             # app is stopping); an unknown slug answers a null event.

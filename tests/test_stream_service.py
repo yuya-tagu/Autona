@@ -341,12 +341,12 @@ def test_a_replaced_tournament_takes_its_entrants_along(env):
     assert env.title() == "Cup ft. Ada ... and more!"
     adapter = AutonaTournamentDataProvider.instance
     cancel = threading.Event()
-    previous = adapter._entrantsCancel
-    adapter._entrantsCancel = cancel
+    previous = adapter._loaded
+    adapter._loaded = (object(), cancel)
     try:
-        adapter._CancelEntrants()
+        adapter._CancelProvider()
     finally:
-        adapter._entrantsCancel = previous
+        adapter._loaded = previous
     assert cancel.is_set()
     assert env.service.TopEntrants() == []
     env.run_queued()

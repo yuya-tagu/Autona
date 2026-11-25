@@ -101,10 +101,14 @@ class AutonaTournamentDataProvider(QObject):
         # one (ADR-005 S3c).
         self.selectGameFromStartGGId = None
 
-        # The entrants fetch of the tournament loaded now: the event that
-        # tells it to stop once another tournament (or none, or the same
-        # one again) is loaded. GUI thread only (Load / UnloadTournament).
-        self._entrantsCancel = None
+        # The provider loaded now and the event that tells its requests
+        # (entrants, data, phases, refresh) to stop once another tournament
+        # (or none, or the same one again) is loaded: (provider, Event), or
+        # None. One tuple, so that a reader on any thread
+        # (RefreshTournamentData is not only called on the GUI thread) reads
+        # it once and never pairs one provider with another's event. Written
+        # on the GUI thread only (Load / UnloadTournament).
+        self._loaded = None
 
     def GameChanged(self, videogame):
         StateManager.Set("provider_videogame", {
@@ -153,11 +157,17 @@ class AutonaTournamentDataProvider(QObject):
         (re)loaded. Main thread."""
         if not force and self.provider and self.provider.url == url:
             return False
-        self._CancelEntrants()
+        # Built before the old provider is cancelled: a constructor that
+        # raises must leave the old provider's requests running.
         if UrlKind(url) == HIVEE:
-            self.provider = HiveeDataProvider(url, self)
+            provider = HiveeDataProvider(url, self)
         else:
-            self.provider = StartGGDataProvider(url, self)
+            provider = StartGGDataProvider(url, self)
+        self._CancelProvider()
+        # The event first: a request made from the provider right after it
+        # is in place gets the provider's own event (_CancelFor).
+        self._loaded = (provider, threading.Event())
+        self.provider = provider
         # The match list is the tournament's (ADR-005 S4j): dropped once
         # the new provider is in place -- a Refresh made before this (on
         # any thread, from the provider replaced) is dropped with it, and
@@ -178,7 +188,7 @@ class AutonaTournamentDataProvider(QObject):
         tournament_data_updated), so are the phases, and the name completers
         offer the whole player DB again. The game stays loaded; forgetting
         the selection is TournamentService's. Main thread."""
-        self._CancelEntrants()
+        self._CancelProvider()
         self.provider = None
         # After the provider is gone, as LoadTournament does.
         self._ForgetAnalysis()
@@ -203,19 +213,31 @@ class AutonaTournamentDataProvider(QObject):
 
     def _StartEntrants(self):
         """Fetch the loaded tournament's entrants (the provider's own job),
-        with a cancel event of its own. GUI thread."""
-        cancel = self._entrantsCancel = threading.Event()
-        self.provider.GetEntrants(cancel_event=cancel)
+        with the provider's cancel event (_CancelFor). GUI thread."""
+        self.provider.GetEntrants(cancel_event=self._CancelFor(self.provider))
 
-    def _CancelEntrants(self):
-        """Tell the entrants fetch of the tournament loaded until now to
-        stop: it stops between pages (the page request in flight stops
-        retrying on the same event) and leaves the player DB's tournament
-        filter alone -- tags it already handed over included, which the GUI
-        thread drops (AutonaPlayerDB.SetTournamentPlayers). Otherwise a
-        replaced tournament's fetch kept paging and finally installed its
-        players over the new tournament's (or over the cleared filter).
-        GUI thread.
+    def _CancelFor(self, provider):
+        """The cancel event of `provider`'s requests: the one set once it is
+        replaced or unloaded (_CancelProvider) when `provider` is the one
+        loaded; otherwise an event nobody sets (a provider put in place
+        some other way, as tests do, runs as it always did). Any thread."""
+        loaded = self._loaded
+        if loaded is not None and loaded[0] is provider:
+            return loaded[1]
+        return threading.Event()
+
+    def _CancelProvider(self):
+        """Tell the requests of the tournament loaded until now to stop:
+        its entrants, data, phases and refresh. A request in flight stops
+        retrying (start.gg's QueryRequests on the same event), freeing its
+        job lane; what it answers then is dropped as a replaced provider's
+        always was (_onTournamentDataResult / _onPhasesResult), or ends the
+        refresh (done()). The entrants fetch stops between pages and leaves
+        the player DB's tournament filter alone -- tags it already handed
+        over included, which the GUI thread drops
+        (AutonaPlayerDB.SetTournamentPlayers). Otherwise a replaced
+        tournament's fetch kept paging and finally installed its players
+        over the new tournament's (or over the cleared filter). GUI thread.
 
         Called whenever the loaded tournament is about to be replaced (or
         unset), so the stream title's top entrants go with it (ADR-005 S4d;
@@ -223,9 +245,10 @@ class AutonaTournamentDataProvider(QObject):
         fetch was done). Set before the emptying, the cancel event also
         stops a fetch that is just handing its entrants over
         (StreamService.SetTopEntrants)."""
-        if self._entrantsCancel is not None:
-            self._entrantsCancel.set()
-            self._entrantsCancel = None
+        loaded = self._loaded
+        if loaded is not None:
+            loaded[1].set()
+            self._loaded = None
         if StreamService.instance is not None:
             StreamService.instance.SetTopEntrants([])
 
@@ -285,7 +308,8 @@ class AutonaTournamentDataProvider(QObject):
         self._Fetch(
             "tournament data", provider.GetTournamentData,
             lambda tournamentData: self._onTournamentDataResult(
-                tournamentData, initialLoading, provider))
+                tournamentData, initialLoading, provider),
+            cancel_event=self._CancelFor(provider))
 
     def RefreshTournamentData(self, done):
         """The tournament's data asked for again and applied, as
@@ -330,7 +354,8 @@ class AutonaTournamentDataProvider(QObject):
                 logger.exception("The tournament's data could not be applied")
             done()
 
-        future = self._Fetch("tournament data", fetch, applied)
+        future = self._Fetch("tournament data", fetch, applied,
+                             cancel_event=self._CancelFor(provider))
         return not future.cancelled()
 
     def _onTournamentDataResult(self, tournamentData, initialLoading,
@@ -372,7 +397,8 @@ class AutonaTournamentDataProvider(QObject):
             return
         self._Fetch(
             "tournament phases", provider.GetTournamentPhases,
-            lambda phases: self._onPhasesResult(phases, provider))
+            lambda phases: self._onPhasesResult(phases, provider),
+            cancel_event=self._CancelFor(provider))
 
     def RunWithProvider(self, job, status=None):
         """Run `job(provider)` as a job of the task executor: the core's way

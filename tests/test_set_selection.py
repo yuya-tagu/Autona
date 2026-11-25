@@ -95,6 +95,11 @@ class FakeTournament:
         self.gates = {PHASES: [], SETS: [], STATIONS: []}
         self.asked = {PHASES: [], SETS: [], STATIONS: []}
         self.cancels = []
+        # The cancel each phases / stations request was handed, in order.
+        self.kindCancels = {PHASES: [], STATIONS: []}
+        # Raise, once released, for a request whose cancel is set: what the
+        # real provider's strict request does once told to stop.
+        self.raiseWhenCancelled = False
         self.failing = set()
         self.missingPages = 0
         self.pages = []
@@ -102,7 +107,7 @@ class FakeTournament:
         self._lock = threading.Lock()
         self._arrived = threading.Condition(self._lock)
 
-    def _answer(self, kind, asked, strict):
+    def _answer(self, kind, asked, strict, cancel=None):
         self.locksHeld.append(StateManager.lock._is_owned())
         with self._arrived:
             number = len(self.asked[kind])
@@ -112,6 +117,9 @@ class FakeTournament:
                 if number < len(self.gates[kind]) else None
         if gate is not None:
             assert gate.wait(WAIT), "the test never released it"
+        if self.raiseWhenCancelled and cancel is not None \
+                and cancel.is_set():
+            raise LookupError("cancelled")
         if kind in self.failing:
             if strict:
                 raise LookupError("start.gg did not answer")
@@ -127,11 +135,14 @@ class FakeTournament:
 
     def GetTournamentPhases(self, progress_callback=None, cancel_event=None,
                             strict=False):
-        return self._answer(PHASES, {"strict": strict}, strict)
+        self.kindCancels[PHASES].append(cancel_event)
+        return self._answer(PHASES, {"strict": strict}, strict, cancel_event)
 
     def GetStations(self, progress_callback=None, cancel_event=None,
                     strict=False):
-        return self._answer(STATIONS, {"strict": strict}, strict)
+        self.kindCancels[STATIONS].append(cancel_event)
+        return self._answer(STATIONS, {"strict": strict}, strict,
+                            cancel_event)
 
     def GetMatches(self, getFinished=False, phaseGroupIds=None,
                    progress_callback=None, cancel_event=None, strict=False,
@@ -369,9 +380,10 @@ def test_a_cancelled_fetch_still_out_counts_against_the_job_lane(
     (SETS, lambda service: service.RefreshSets(None, False))])
 def test_a_forgotten_fetch_still_out_counts_against_the_job_lane(
         service, autonaApp, kind, refresh):
-    """A tournament changed leaves no fetch current either, and the phases' and
-    stations' requests cannot be told to stop. The next tournament's list starts
-    all the same; only the next one is refused."""
+    """A tournament changed leaves no fetch current either, and its request is
+    out until the provider gives up on it (told to stop, it no longer retries).
+    The next tournament's list starts all the same; only the next one is
+    refused."""
     provider = FakeTournament(phases=[])
     first, second = threading.Event(), threading.Event()
     provider.gates[kind] = [first, second]
@@ -429,8 +441,8 @@ def test_a_job_over_before_its_refresh_published_it(
 # ── what a set list is asked for ─────────────────────────────────────────
 
 @pytest.mark.parametrize("method, asked", [
-    ("GetTournamentPhases", {"strict"}),
-    ("GetStations", {"strict"}),
+    ("GetTournamentPhases", {"strict", "cancel_event"}),
+    ("GetStations", {"strict", "cancel_event"}),
     ("GetMatches", {"strict", "failed_pages"})])
 def test_the_base_provider_says_what_the_lists_ask_with(method, asked):
     """The base class is the providers' interface, and a provider that goes by
@@ -722,6 +734,61 @@ def test_a_tournament_change_drops_the_fetch_in_progress(
     assert refresh(service) == STARTED
     _drain(autonaApp)
     assert service.Result(kind)["url"] == OTHER_URL
+
+
+@pytest.mark.parametrize("kind, refresh", [
+    (PHASES, lambda service: service.RefreshPhases()),
+    (STATIONS, lambda service: service.RefreshStations())])
+def test_a_tournament_change_stops_the_phases_and_stations_requests(
+        service, autonaApp, kind, refresh):
+    """As the set list's: Forget hands the stop to the request still out, so
+    that it no longer retries for a tournament that went. The request then
+    raises (the real provider's strict one does): no failure -- no ERROR, no
+    traceback -- and nothing over the new tournament's list."""
+    from loguru import logger
+    provider = FakeTournament(phases=[])
+    provider.raiseWhenCancelled = True
+    release = threading.Event()
+    provider.gates[kind] = [release]
+    _load(service, provider)
+    records = []
+    sink = logger.add(lambda message: records.append(
+        (message.record["level"].name, message.record["message"],
+         message.record["exception"])), level="INFO")
+    try:
+        assert refresh(service) == STARTED
+        provider.waitAsked(kind)
+        cancel = provider.kindCancels[kind][0]
+        assert cancel is not None and not cancel.is_set()
+
+        next_ = FakeTournament(url=OTHER_URL, phases=[])
+        _load(service, next_)
+        assert cancel.is_set()
+        assert refresh(service) == STARTED
+        _drain(autonaApp)
+        fetched = service.Result(kind)
+        published = _progress(kind)
+        assert fetched["url"] == OTHER_URL
+        assert published["status"] == "done"
+        assert next_.kindCancels[kind][0] is not cancel
+
+        release.set()
+        _until(autonaApp, lambda: not service._alive.get(kind),
+               "the stopped job over")
+        _drain(autonaApp)
+    finally:
+        release.set()
+        logger.remove(sink)
+
+    assert service.Result(kind) == fetched
+    assert _progress(kind) == published
+    selectionRecords = [record for record in records
+                        if record[1].startswith("Set selection:")]
+    assert not [record for record in selectionRecords
+                if record[0] in ("ERROR", "CRITICAL")]
+    assert all(record[2] is None for record in selectionRecords)
+    assert any(record[1] == f"Set selection: {kind} fetch cancelled"
+               for record in selectionRecords)
 
 
 def test_the_lists_are_read_only_for_the_tournament_loaded_now(
