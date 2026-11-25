@@ -474,6 +474,63 @@ def test_a_delta_calls_onupdate_and_one_the_view_does_not_show_does_not(
                for call in result["calls"])
 
 
+def _try_delta(message):
+    return {"run": "try { HandleTSHStateUpdateMessage(%s); __out = 'applied'; }"
+                   " catch (e) { __out = 'gap'; }" % json.dumps(message)}
+
+
+_SCORE_3 = {"path": ["score", "1", "team", "1", "score"],
+            "action": "values_changed", "value": 3}
+_NAME_B = {"path": ["score", "1", "team", "2", "player", "1", "name"],
+           "action": "values_changed", "value": "Bravo!"}
+
+
+@needs_node
+def test_a_batched_delta_whose_interval_contains_the_next_revision_applies(
+        tmp_path):
+    [result] = run_scenarios(tmp_path, [{"kind": "scoreboard", "steps": [
+        {"state": singles(), "revision": 4},
+        {"delta": {"revision": 7, "first_revision": 5,
+                   "delta": [_SCORE_3, _NAME_B]}},
+    ]}])
+    assert result["errors"] == []
+    assert len(result["calls"]) == 2
+    view = result["calls"][1]["view"]["board"]
+    assert (view["p1"]["score"], view["p2"]["name"]) == (3, "Bravo!")
+
+
+@needs_node
+def test_a_batch_that_starts_past_the_next_revision_is_a_gap(tmp_path):
+    [result] = run_scenarios(tmp_path, [{"kind": "scoreboard", "steps": [
+        {"state": singles(), "revision": 4},
+        _try_delta({"revision": 7, "first_revision": 6, "delta": [_SCORE_3]}),
+    ]}])
+    assert result["out"] == "gap"
+    assert len(result["calls"]) == 1
+
+
+@needs_node
+def test_without_first_revision_only_the_next_revision_applies(tmp_path):
+    [result] = run_scenarios(tmp_path, [{"kind": "scoreboard", "steps": [
+        {"state": singles(), "revision": 4},
+        _try_delta({"revision": 5, "delta": [_SCORE_3]}),
+        _try_delta({"revision": 7, "delta": [_NAME_B]}),
+    ]}])
+    assert result["out"] == "gap"
+    assert len(result["calls"]) == 2
+
+
+@needs_node
+def test_a_batch_that_ends_at_an_applied_revision_is_stale(tmp_path):
+    [result] = run_scenarios(tmp_path, [{"kind": "scoreboard", "steps": [
+        {"state": singles(), "revision": 6},
+        _try_delta({"revision": 7, "delta": [_SCORE_3]}),
+        _try_delta({"revision": 7, "first_revision": 5, "delta": [_NAME_B]}),
+    ]}])
+    assert result["out"] == "gap"
+    assert len(result["calls"]) == 2
+
+
 @needs_node
 def test_a_layout_that_defines_update_still_gets_onupdate(tmp_path):
     # As a layout copied from the shipped ones would: Update replaced at the
