@@ -100,6 +100,7 @@ the web server.)
 
 Import side effects: none (pitfalls #1).
 """
+import copy
 import threading
 
 from loguru import logger
@@ -409,7 +410,8 @@ class SetFollowService:
     def UpdateSetData(self, data, _request=None):
         """A fetched set: applied unless the board moved on (see the module
         docstring). With `general.disable_overwrite`, each team's first
-        entrant keeps what the local player database knows of them."""
+        entrant keeps what the local player database knows of them; a team
+        with no entrant yet is left as it is."""
         host = self._Host()
 
         def run():
@@ -419,11 +421,20 @@ class SetFollowService:
                     data, self.setLoad.lastSetSelected):
                 return None
             if SettingsManager.Get("general.disable_overwrite", False):
-                for entrant in data.get("entrants"):
-                    dbPlayer = PlayerDB.instance.Get(
-                        entrant[0].get("gamerTag"))
-                    if dbPlayer is not None:
-                        entrant[0] = entrant[0] | dbPlayer
+                db = PlayerDB.instance
+                for team in data.get("entrants") or []:
+                    if db is None or not team or not isinstance(
+                            team[0], dict):
+                        continue
+                    tag = team[0].get("gamerTag")
+                    if not tag:
+                        continue
+                    # Copy under the DB lock: Get returns the live dict
+                    # that the entrants worker may be writing.
+                    with db.lock:
+                        stored = copy.deepcopy(db.Get(tag))
+                    if isinstance(stored, dict):
+                        team[0] = team[0] | stored
             return self.ApplySetPayload(data)
 
         SaveRecord(host.Run(run))
