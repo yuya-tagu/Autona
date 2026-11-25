@@ -106,9 +106,11 @@ class StartGGDataProvider(TournamentDataProvider):
     # Queries the provided URL until a proper 200 status code has been provided back
     #
     # This should work fine in theory unless an API restriction is added
-    def QueryRequests(self, url=None, type=None, headers={}, jsonParams=None, params=None):
+    def QueryRequests(self, url=None, type=None, headers=None, jsonParams=None,
+                      params=None, cancel_event=None):
         return _QueryRequests(url, type, headers, jsonParams, params,
-                              self._request_timeout_secs)
+                              self._request_timeout_secs,
+                              cancel_event=cancel_event)
 
     @staticmethod
     def _StopEvent():
@@ -604,14 +606,24 @@ class StartGGDataProvider(TournamentDataProvider):
             # Both APIs at once on the fan-out lane, `_request_timeout_secs`
             # each from when it starts (the lane's queue time is not
             # counted); a half that failed, ran past that or never started
-            # (the cap) is {} (ADR-005 S3f-3).
-            old, new = executor.map_fanout(
-                [functools.partial(self._GetMatchTasks, setId=setId,
-                                   progress_callback=None, cancel_event=None),
-                 functools.partial(self._GetMatchNewApi, setId=setId,
-                                   progress_callback=None, cancel_event=None)],
-                self._request_timeout_secs, task_name="start.gg set",
-                default={})
+            # (the cap) is {} (ADR-005 S3f-3). A half map_fanout gave up on
+            # stops retrying once `abandon` is set, instead of holding a
+            # fan-out thread through its whole backoff.
+            abandon = threading.Event()
+            try:
+                old, new = executor.map_fanout(
+                    [functools.partial(self._GetMatchTasks, setId=setId,
+                                       progress_callback=None,
+                                       cancel_event=abandon),
+                     functools.partial(self._GetMatchNewApi, setId=setId,
+                                       progress_callback=None,
+                                       cancel_event=abandon)],
+                    self._request_timeout_secs, task_name="start.gg set",
+                    default={})
+            finally:
+                # map_fanout returns once every half is done or given up
+                # on, so this stops only the abandoned ones.
+                abandon.set()
 
             result.update({"new": new})
             result.update({"old": old})
@@ -658,7 +670,8 @@ class StartGGDataProvider(TournamentDataProvider):
                     "cacheControl": {"version": 1, "noCache": True},
                     "Cache-Control": "no-cache",
                     "Pragma": "no-cache"
-                }
+                },
+                cancel_event=cancel_event
             )
             return self.ParseMatchDataOldApi(data)
         except Exception:
@@ -676,7 +689,8 @@ class StartGGDataProvider(TournamentDataProvider):
                         "id": setId
                     },
                     "query": StartGGDataProvider.SetQuery
-                }
+                },
+                cancel_event=cancel_event
             )
             logger.debug(data.get("data", {}).get("set", {}))
             return self.ParseMatchDataNewApi(data.get("data", {}).get("set", {}))
@@ -727,7 +741,10 @@ class StartGGDataProvider(TournamentDataProvider):
                             "perPage": 64
                         },
                         "query": StartGGDataProvider.SetsQuery
-                    }
+                    },
+                    # A page still retrying when the fetch is cancelled
+                    # stops at its next attempt: its answer is dropped.
+                    cancel_event=cancel_event
                 )
 
             def report(done, totalPages):
@@ -782,6 +799,10 @@ class StartGGDataProvider(TournamentDataProvider):
                     # are: too late for the fan-out above, so they are missing.
                     pagesKnown = deep_get(
                         retried, "data.event.sets.pageInfo.totalPages", 0) or 0
+            if cancel_event is not None and cancel_event.is_set():
+                # Cancelled during the retry round: a page it cut short is no
+                # failure to report (the answer is dropped, as above).
+                return final_data
             stillFailed = sorted(
                 p for p, nodes in pageNodes.items() if nodes is None)
             if strict:
@@ -1958,19 +1979,26 @@ class StartGGDataProvider(TournamentDataProvider):
             # Five pages per direction (each player's events), all ten at
             # once on the fan-out lane, `_request_timeout_secs` each from
             # when it starts (ADR-005 S3f-3; there was no bound before: a
-            # page that never answered held the statistic for good).
+            # page that never answered held the statistic for good). A page
+            # map_fanout gave up on stops retrying once `abandon` is set.
             pages = 5
+            abandon = threading.Event()
             calls = [
                 functools.partial(
                     self.GetRecentSetsWorker, id1=_id1, id2=_id2,
                     page=page + 1, inverted=inverted, videogame=videogame,
-                    progress_callback=None, cancel_event=None)
+                    progress_callback=None, cancel_event=abandon)
                 for _id1, _id2, inverted in [[id1, id2, False],
                                              [id2, id1, True]]
                 for page in range(pages)]
-            answers = executor.map_fanout(
-                calls, self._request_timeout_secs,
-                task_name="start.gg recent sets")
+            try:
+                answers = executor.map_fanout(
+                    calls, self._request_timeout_secs,
+                    task_name="start.gg recent sets")
+            finally:
+                # map_fanout returns once every page is done or given up
+                # on, so this stops only the abandoned ones.
+                abandon.set()
             missing = [index for index, answer in enumerate(answers)
                        if answer is None]
             if missing:
@@ -2029,7 +2057,8 @@ class StartGGDataProvider(TournamentDataProvider):
                         "videogameId": videogame
                     },
                     "query": StartGGDataProvider.RecentSetsQuery
-                }
+                },
+                cancel_event=cancel_event
             )
 
             events = deep_get(data, "data.user.events.nodes", [])
@@ -2413,11 +2442,14 @@ def _QueryRequests(url, type, headers, jsonParams, params, timeout,
     stopping, or `cancel_event` is set (seen between attempts, and within
     the backoff). A function, so a request needs no provider (a QObject):
     ResolveEventUrl."""
-    headers.update({
+    # A new dict per call: the caller's (or a shared default) is not
+    # written to by requests running on several threads at once.
+    headers = {
+        **(headers or {}),
         "client-version": "20",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-    })
+    }
 
     # Retry on transient failures (timeouts, connection errors, non-200)
     # with exponential backoff. Start.gg's heavy queries (phaseGroup

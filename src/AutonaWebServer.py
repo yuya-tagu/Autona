@@ -19,6 +19,7 @@ from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
 import orjson
 from loguru import logger
+from werkzeug.exceptions import NotFound
 from werkzeug.serving import WSGIRequestHandler
 
 from .core.StateManager import StateManager
@@ -195,7 +196,23 @@ def _build_web_app():
 
     @socketio.on_error_default
     def ws_on_error(e):
-        logger.error(traceback.format_exc())
+        # Log the first occurrence of each (event, exception, raise site)
+        # with its traceback and the repeats at debug: any client can
+        # emit a malformed payload in a loop. Payloads are never logged.
+        try:
+            event = (getattr(request, "event", None) or {}).get("message")
+            tb = traceback.extract_tb(e.__traceback__)[-1:]
+            site = ((os.path.basename(tb[0].filename), tb[0].lineno)
+                    if tb else (None, None))
+            key = (event, type(e).__name__) + site
+            first = WebServer._ws_errors.First(key)
+        except Exception:
+            first = True
+        if first:
+            logger.error(traceback.format_exc())
+        else:
+            logger.debug(f"webserver: repeated {type(e).__name__} in "
+                         f"Socket.IO event {event!r}")
 
     @app.route('/score', methods=['POST'])
     def post_score():
@@ -731,7 +748,11 @@ def _build_web_app():
     @app.post('/api/designer/projects')
     def designer_save_project():
         WebServer._authorize_designer_request()
-        if request.content_length and request.content_length > 250 * 1024 * 1024:
+        limit = 250 * 1024 * 1024
+        request.max_content_length = limit
+        if request.content_length is None:
+            return jsonify({"error": "Content-Length が必要です。"}), 411
+        if request.content_length > limit:
             return jsonify({"error": "保存データがサイズ上限を超えています。"}), 413
         try:
             payload = request.get_json(force=False, silent=False)
@@ -794,7 +815,11 @@ def _build_web_app():
             return refusal
         if request.method == 'OPTIONS':
             return app.make_default_options_response()
-        if request.content_length and request.content_length > 70 * 1024 * 1024:
+        limit = 70 * 1024 * 1024
+        request.max_content_length = limit
+        if request.content_length is None:
+            return jsonify({"error": "Content-Length が必要です。"}), 411
+        if request.content_length > limit:
             return jsonify({"error": "インポートデータがサイズ上限を超えています。"}), 413
         try:
             payload = request.get_json(force=False, silent=False)
@@ -893,6 +918,7 @@ def _build_web_app():
         # Only the overlays', the Web UI's and the state's files: settings,
         # the player DB and the rest of the working directory are not
         # served. A refusal answers like a missing file.
+        requested = filename
         served = WebAccess.StaticPath(filename)
         if served is None:
             WebServer._log_static_refusal(filename)
@@ -946,6 +972,9 @@ def _build_web_app():
                 response.cache_control.max_age = 0
             return response
 
+        except NotFound:
+            WebServer._log_missing_static(requested)
+            return "File not found", 404
         except Exception as e:
             logger.error(f"File not found: {e}")
             return "File not found", 404
@@ -1861,6 +1890,10 @@ class WebServer:
     WS_AMBIENT_ROOM = "autona:trusted"
 
     _refusals = WebAccess.RefusalLog()
+    # Separate logs: a flood of missing files must not push real refusals
+    # out of _refusals' bounded memory.
+    _missing = WebAccess.RefusalLog()
+    _ws_errors = WebAccess.RefusalLog()
     # This PC's LAN addresses: a request from one of them is from this PC,
     # and a page under one of them is this server's own (OwnOrigins). Looked
     # up on first use and kept (an address that appears later is not one).
@@ -1936,6 +1969,18 @@ class WebServer:
         if folded.startswith(WebServer._QUIET_STATIC):
             logger.debug(message)
         elif WebServer._refusals.First(("static", filename.lower())):
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    @staticmethod
+    def _log_missing_static(filename):
+        message = (f"webserver: {filename!r} not found "
+                   f"(requested by {request.remote_addr})")
+        folded = filename.replace("\\", "/").lstrip("/").lower()
+        if folded.startswith(WebServer._QUIET_STATIC):
+            logger.debug(message)
+        elif WebServer._missing.First(filename.lower()):
             logger.warning(message)
         else:
             logger.debug(message)
