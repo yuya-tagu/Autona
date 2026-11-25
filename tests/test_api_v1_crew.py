@@ -35,7 +35,8 @@ from tests.test_api_v1 import (  # noqa: F401
     _assertRejected, _requestOnWorkerThread, client, webApp)
 from tests.test_api_v1_score import (  # noqa: F401
     _cycles, _ok, lanServer, launchedBoards)
-from tests.test_crew_operations import _golden, _setUpDesktop, _setUpHeadless
+from tests.test_crew_operations import (_golden, _setUpDesktop, _setUpHeadless,
+                                       assertAsRecorded)
 from tests.test_web_access import LAN_PEER
 from tests.test_web_operations import _goHeadless
 
@@ -202,12 +203,13 @@ def test_the_routes_write_what_the_board_wrote(
         _setUpDesktop(autonaApp)
     else:
         _setUpHeadless(autonaApp)
+    before = json.loads(encode(autonaApp.get("score.3")))
     with WriteRecorder() as recorder:
         _sendOk(client, route)
         autonaApp.settle()
     golden = _golden()[label]
-    assert recorder.Result() == {key: golden[key]
-                                 for key in ("sets", "deltas", "bigChanges")}
+    # reset match / clear all are one save cycle now (ONE_CYCLE_CHANGES).
+    assertAsRecorded(recorder.Result(), before, label)
     assert encode(autonaApp.get("score.3")) == golden["board"]
     assert WebOps.get_swap(BOARD) == golden["swapped"]
 

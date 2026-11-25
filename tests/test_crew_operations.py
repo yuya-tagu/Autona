@@ -202,16 +202,23 @@ def _replay(app, label):
     name, args, kwargs = SCENARIO[label]
     before = json.loads(encode(_state().Get(f"score.{BOARD}")))
     recorded = _record(app, name, args, kwargs)
+    assert set(recorded) == set(_golden()[label])
+    assertAsRecorded(recorded, before, label)
+
+
+def assertAsRecorded(recorded, before, label):
+    """`recorded` (some or all of a recording's keys) is what the golden
+    `label` holds for them, with ONE_CYCLE_CHANGES applied; `before` is
+    the board before the operation."""
     golden = _golden()[label]
     change = ONE_CYCLE_CHANGES.get(label)
     if change is None:
-        assert recorded == golden
+        assert recorded == {key: golden[key] for key in recorded}
         return
     assert len(recorded["deltas"]) == change["deltas"]
-    unchanged = [key for key in golden if key != "deltas"]
+    unchanged = [key for key in recorded if key != "deltas"]
     assert {key: recorded[key] for key in unchanged} \
         == {key: golden[key] for key in unchanged}
-    assert set(recorded) == set(golden)
     _assertSameChange(before, golden["board"], golden["deltas"],
                       recorded["deltas"])
 
