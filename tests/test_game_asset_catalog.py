@@ -779,6 +779,59 @@ def test_reload_keeps_only_the_name_of_each_start_gg_character(_isolated):
     assert catalog.StartGGCharacterName(999) is None
 
 
+def _put_seed(work):
+    (work / "assets").mkdir(exist_ok=True)
+    shutil.copy(FIXTURE / "characters.json", work / "assets" / "characters.json")
+
+
+@pytest.mark.parametrize("runtime", [b"", b"{}", b"{not json", b'{"entities": 1}'])
+def test_an_unusable_runtime_table_falls_back_to_the_seed(_isolated, runtime):
+    _put_seed(_isolated)
+    Path("user_data/characters.json").write_bytes(runtime)
+    seed = json.loads((FIXTURE / "characters.json").read_text(encoding="utf-8"))
+    first = seed["entities"]["character"][0]
+    catalog = GameAssetCatalog()
+
+    catalog.ReloadStartGGCharacters()
+
+    assert catalog.StartGGCharacterName(first["id"]) == first["name"]
+
+
+def test_no_usable_table_leaves_the_current_one(_isolated):
+    Path("user_data/characters.json").write_bytes(b"")
+    catalog = GameAssetCatalog()
+    catalog._startggCharacters = {"1": {"name": "Old"}}
+
+    catalog.ReloadStartGGCharacters()
+
+    assert catalog._startggCharacters == {"1": {"name": "Old"}}
+
+
+def test_a_start_gg_download_is_synced_before_it_replaces(
+        _isolated, monkeypatch):
+    from src.core import GameAssetCatalog as module
+    _fake_download(monkeypatch, 200, {"entities": {"character": [
+        {"id": 424242, "name": "Zed"}]}})
+    order = []
+    real_replace = os.replace
+    # os.fsync / os.replace are patched process-wide: record fsync calls
+    # freely (only their order matters) but replace only for this table.
+    monkeypatch.setattr(module.os, "fsync",
+                        lambda fd: order.append("fsync"))
+
+    def replace(src, dst):
+        if os.path.normpath(str(dst)) == os.path.normpath(
+                module.CHARACTERS_RUNTIME_PATH):
+            order.append("replace")
+        return real_replace(src, dst)
+    monkeypatch.setattr(module.os, "replace", replace)
+
+    GameAssetCatalog().DownloadStartGGCharacters()
+
+    assert order.count("replace") == 1
+    assert "fsync" in order[:order.index("replace")]
+
+
 def test_the_snapshot_type_is_frozen():
     assert dataclasses.is_dataclass(GameAssetSnapshot)
     assert GameAssetSnapshot.__dataclass_params__.frozen
