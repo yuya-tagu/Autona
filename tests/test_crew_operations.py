@@ -144,13 +144,97 @@ def _golden():
     return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
 
+# What changed on purpose since the recording, per scenario: the published
+# save cycles (`deltas`) only. The Web's reset_match, clear_all and set_route
+# (and so v1 PATCH set) are one cycle each (a SaveBlock around the operation
+# in AutonaWebOperations), so no overlay is sent the board half reset. The writes (`sets`, in the same
+# order), the board afterwards, the result and the swap flag are still the
+# recording's; the one delta has to bring a client from the board before to
+# the same board as the recorded ones applied in turn (_assertSameChange).
+# Its rows are in the diff's own order, a path written twice in the cycle
+# once with its last value.
+ONE_CYCLE_CHANGES = {
+    # 2 -> 1: the reset (full stocks, nobody playing, the match bar), then
+    # the best of.
+    "reset match": {"deltas": 1},
+    # 4 -> 1: the reset, its best of, the member counts, the members'
+    # clear.
+    "clear all": {"deltas": 1},
+    # The whole query in one cycle: the best of, the phase, the pool, the
+    # match.
+    "set fields": {"deltas": 1},
+    # The same, with the member count, the characters, the losers flag and
+    # the team's name.
+    "set everything": {"deltas": 1},
+}
+
+
+def _applyRows(state, rows):
+    """`state` (the whole tree, as a client holds it) with a published
+    delta's rows applied in turn."""
+    for row in rows:
+        *parents, leaf = row["path"]
+        node = state
+        for key in parents:
+            node = node.setdefault(key, {})
+        if row["action"] in ("values_changed", "type_changes",
+                             "dictionary_item_added"):
+            node[leaf] = row["value"]
+        elif row["action"] == "dictionary_item_removed":
+            node.pop(leaf, None)
+        else:
+            raise AssertionError(f"no answer here for {row}")
+    return state
+
+
+def _assertSameChange(before, after, recordedDeltas, deltas):
+    """The recorded cycles' rows, applied in turn to the board as it was,
+    and the new cycles' rows leave the same board: the board afterwards."""
+    def applied(encodedDeltas):
+        state = {"score": {str(BOARD): json.loads(json.dumps(before))}}
+        for encoded in encodedDeltas:
+            _applyRows(state, json.loads(encoded))
+        return state["score"][str(BOARD)]
+
+    expected = applied(recordedDeltas)
+    assert expected != before             # the recording changed something
+    assert expected == json.loads(after)
+    assert applied(deltas) == expected
+
+
+def _replay(app, label):
+    """The scenario `label` run now, against the recording with
+    ONE_CYCLE_CHANGES applied."""
+    name, args, kwargs = SCENARIO[label]
+    before = json.loads(encode(_state().Get(f"score.{BOARD}")))
+    recorded = _record(app, name, args, kwargs)
+    assert set(recorded) == set(_golden()[label])
+    assertAsRecorded(recorded, before, label)
+
+
+def assertAsRecorded(recorded, before, label):
+    """`recorded` (some or all of a recording's keys) is what the golden
+    `label` holds for them, with ONE_CYCLE_CHANGES applied; `before` is
+    the board before the operation."""
+    golden = _golden()[label]
+    change = ONE_CYCLE_CHANGES.get(label)
+    if change is None:
+        assert recorded == {key: golden[key] for key in recorded}
+        return
+    assert len(recorded["deltas"]) == change["deltas"]
+    unchanged = [key for key in recorded if key != "deltas"]
+    assert {key: recorded[key] for key in unchanged} \
+        == {key: golden[key] for key in unchanged}
+    _assertSameChange(before, golden["board"], golden["deltas"],
+                      recorded["deltas"])
+
+
 @pytest.mark.parametrize("label", list(SCENARIO))
 def test_the_desktop_writes_what_the_board_wrote(autonaApp, label):
     if RECORD:
         pytest.skip("recording")
-    name, args, kwargs = SCENARIO[label]
     _setUpDesktop(autonaApp)
-    assert _record(autonaApp, name, args, kwargs) == _golden()[label]
+    _replay(autonaApp, label)
 
 
 @pytest.fixture
@@ -180,9 +264,8 @@ def _setUpHeadless(app):
 def test_headless_writes_what_the_board_wrote(headless, label):
     if RECORD:
         pytest.skip("recording")
-    name, args, kwargs = SCENARIO[label]
     _setUpHeadless(headless)
-    assert _record(headless, name, args, kwargs) == _golden()[label]
+    _replay(headless, label)
 
 
 def test_the_crew_routes_answer_headless(headless):

@@ -1124,7 +1124,7 @@ def test_the_headless_host_runs_one_operation_at_a_time():
 
 def test_a_headless_clear_is_not_interleaved_with_another_request(
         headless, monkeypatch):
-    # clear_all is four steps; a swap asked for while it is between two of
+    # clear_all is several core calls in one save cycle; a swap asked for while it is between two of
     # them lands after the clear, not inside it.
     host = WebOps.boardHost
     midway = threading.Event()
@@ -1939,6 +1939,25 @@ def test_the_desktop_shell_operations_answer_through_the_routes(
             assert response.get_data() == image.read_bytes()
         finally:
             response.close()
+
+    # An unknown format echoes the URL piece: as text/plain (never HTML), the
+    # words and the 200 unchanged.
+    response = client.get("/scoreboard1-get-thumbnail-%3Cimg%20src%3Dx%3E",
+                          headers={"Sec-Fetch-Site": "none"})
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/plain")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.get_data(as_text=True) == (
+        "File format <img src=x> not recognized")
+
+    # The failure answer is plain text too.
+    monkeypatch.setattr(WebOps, "renderThumbnail", lambda n, f: None)
+    response = client.get("/scoreboard1-get-thumbnail-png")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/plain")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert b"An error has occured" in response.get_data()
+    monkeypatch.setattr(WebOps, "renderThumbnail", shell.RenderThumbnail)
 
     ws = socketio.test_client(app, flask_test_client=client)
     ws.get_received()

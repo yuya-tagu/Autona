@@ -692,6 +692,75 @@ def test_the_image_before_stays_until_the_new_one_is_complete(
     assert _parts(tmp_path) == []
 
 
+def test_a_download_superseded_while_waiting_for_a_slot_never_asks(
+        exported, monkeypatch, tmp_path):
+    # Every slot taken: both downloads queue up behind the semaphore, and A
+    # has stopped being the latest before it gets one.
+    monkeypatch.setattr(SM, "_download_semaphore", threading.Semaphore(0))
+    requested = []
+
+    def fake_get(url, **kwargs):
+        requested.append(url)
+        return SimpleNamespace(status_code=200,
+                               raw=_Raw(url[-5:-4].encode()))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", _A)
+    SM.CreateFilesDict("probe/online_avatar", _B)
+    SM._download_semaphore.release()
+    SM._download_semaphore.release()
+    SM.JoinDownloads()
+
+    assert _A not in requested
+    assert requested == [_B]
+    assert exported("probe", "online_avatar.png").read_bytes() == b"b"
+    assert _parts(tmp_path) == []
+    assert "./out/probe/online_avatar" not in SM._download_latest
+    # Both downloads gave their slot back (the two released above): exactly
+    # two can be taken again, a third cannot.
+    assert SM._download_semaphore.acquire(blocking=False)
+    assert SM._download_semaphore.acquire(blocking=False)
+    assert not SM._download_semaphore.acquire(blocking=False)
+
+
+class _Chunked(_Recording):
+    """Hands the body out two bytes at a time, so it takes several reads."""
+
+    def read(self, size=-1):
+        return super().read(2)
+
+
+def test_a_download_superseded_mid_body_stops_reading(
+        exported, monkeypatch, tmp_path, logged):
+    reads = []
+
+    def supersede():
+        reads.append(True)
+        if len(reads) == 1:
+            SM.CreateFilesDict("probe/online_avatar", "plain text")
+
+    def fake_get(url, **kwargs):
+        return SimpleNamespace(status_code=200,
+                               raw=_Chunked(b"abcdefgh", supersede))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.png")
+    SM.JoinDownloads()
+
+    assert len(reads) == 1
+    assert not exported("probe", "online_avatar.png").exists()
+    assert exported("probe", "online_avatar.txt").read_text(
+        encoding="utf-8") == "plain text"
+    assert _parts(tmp_path) == []
+    assert "./out/probe/online_avatar" not in SM._download_latest
+    # Dropped for being superseded, not for being over the cap.
+    assert [r for r in logged if r["level"].name == "WARNING"] == []
+
+
 @pytest.fixture
 def logged():
     from loguru import logger

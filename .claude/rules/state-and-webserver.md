@@ -340,7 +340,7 @@ paths:
   （WebRTC の UDP は止められない）。pin: `tests/test_render_isolation.py`
 - **テンプレートのフォルダ（kind `thumbnail` / `result`。`LayoutCatalog.IsTemplateFolder`）のファイルには両方のポートで CSP
   `WebAccess.TEMPLATE_CONTENT_POLICY` と `no-cache` を付ける**（ブラウザの iframe のプレビューにはレンダラーのフィルタが無いため。ADR-008 D7 R2）。
-  緩めない（`connect-src` に外部を足さない）。共有の部品 `layout/include/` も `no-cache`（CSP は付けない。更新後に古い `autona.js` で描かない）。
+  緩めない（`connect-src` に外部を足さない）。共有の部品 `layout/include/` も `no-cache`（CSP は付けない。更新後に古い `autona.js` で描かない）。kuromoji の辞書（`layout/include/kuromoji/`）は除く（固定の辞書なので 86400）。`web/build/` は HTML とハッシュなしのファイルが `no-cache`、`static/` は `immutable`。
   pin: `tests/test_web_access.py`
 - **ブラウザのプレビューは何も持たない**: payload は `GET /api/v1/thumbnail/payload` / `GET /api/v1/result/payload`（PLAYERDB。未反映の編集を含むので READ にしない）で、
   `RenderAssets.ForPreview` がリスナーの出さない画像を `""` にして `omitted` に名前を出す。`user_data/thumbnail_background_*` をプレビューの

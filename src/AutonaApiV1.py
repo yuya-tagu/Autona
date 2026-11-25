@@ -28,7 +28,8 @@ from urllib.parse import unquote
 
 from flask import Blueprint, Response, jsonify, request, send_file
 from loguru import logger
-from werkzeug.exceptions import ClientDisconnected, RequestedRangeNotSatisfiable
+from werkzeug.exceptions import (
+    ClientDisconnected, RequestEntityTooLarge, RequestedRangeNotSatisfiable)
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
@@ -310,7 +311,9 @@ _DRAIN_CHUNK = 1024 * 1024
 
 def _over_limit(max_body):
     """Whether the request's Content-Length is over `max_body`; if it is,
-    the body is read to its end and dropped first.
+    the body is read to its end and dropped first. Without a
+    Content-Length it is False here: the body is judged by its length as
+    read, at most max_body + 1 bytes (see write_op).
 
     Answering without reading it would leave the body unread on the socket.
     werkzeug's development server drains it on its own after the answer
@@ -318,8 +321,9 @@ def _over_limit(max_body):
     client that sends steadily still gets the 413 and a very slow one may
     see a connection reset instead; reading it here does that drain in the
     route, to its end, rather than leaving it to the server's policy.
-    A body without a Content-Length (chunked) is read as on every other
-    route; the handler's own checks still refuse what is too large."""
+    A body without a Content-Length (chunked) is read up to max_body + 1
+    bytes (request.max_content_length, which write_op sets after this
+    check) and judged by the length read: more than max_body is 413."""
     length = request.content_length
     if length is None or length <= max_body:
         return False
@@ -368,8 +372,10 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON,
 
     ``max_body``: this route's request body limit in bytes, answered 413
     PAYLOAD_TOO_LARGE when the Content-Length is over it, the body dropped
-    rather than parsed (_over_limit). The app sets no limit of its own (no
-    MAX_CONTENT_LENGTH), so the other routes are as they were.
+    rather than parsed (_over_limit). A body without a Content-Length
+    (chunked) is cut at the same limit (request.max_content_length, set for
+    this request only) and answered 413 too. The app sets no limit of its
+    own (no MAX_CONTENT_LENGTH), so the other routes are as they were.
 
     ``log_redact``: top-level body keys whose values are logged as
     <redacted> (spec §2.7: no PII in the op log).
@@ -394,21 +400,47 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON,
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             path = _logged_path()
+
+            def too_large(path):
+                # max_body is None for a route with no limit of its own
+                # (a RequestEntityTooLarge raised from elsewhere).
+                limit = ("the limit" if max_body is None
+                         else f"{max_body} bytes")
+                _oplog.info(
+                    f"{request.remote_addr} {request.method} {path} "
+                    f"op={operation} params=<over {limit}> -> 413 "
+                    f"{PAYLOAD_TOO_LARGE}"
+                )
+                resp = err(PAYLOAD_TOO_LARGE,
+                           "the request body is over the limit"
+                           if max_body is None else
+                           f"the request body is over {max_body} bytes", 413)
+                resp.headers["Connection"] = "close"
+                return resp
+
             # Before anything reads the body: _safe_params below does (and
             # caches it for the handler's read).
             if max_body is not None and _over_limit(max_body):
-                _oplog.info(
-                    f"{request.remote_addr} {request.method} {path} "
-                    f"op={operation} params=<over {max_body} bytes> -> 413 "
-                    f"{PAYLOAD_TOO_LARGE}"
-                )
-                return err(PAYLOAD_TOO_LARGE,
-                           f"the request body is over {max_body} bytes", 413)
-            if body == BODY_NONE:
-                params = _raw_params()
-            else:
-                params = _safe_params(keys_only=log_keys_only,
-                                     redact=log_redact)
+                return too_large(path)
+            if max_body is not None:
+                # After _over_limit: setting it first would make a body
+                # over its Content-Length raise as the stream is made, before
+                # the drain. It cuts a chunked body (no Content-Length) too.
+                # werkzeug's LimitedStream(is_max) stops a whole-body read
+                # (get_data) at the limit without raising, so one byte more
+                # than max_body is let in: a body that long is over it.
+                request.max_content_length = max_body + 1
+            try:
+                if body == BODY_NONE:
+                    params = _raw_params()
+                else:
+                    params = _safe_params(keys_only=log_keys_only,
+                                         redact=log_redact)
+                    if (max_body is not None
+                            and len(request.get_data()) > max_body):
+                        return too_large(path)
+            except RequestEntityTooLarge:
+                return too_large(path)
 
             def refused(resp):
                 # werkzeug's server says it on every answer already (a
@@ -426,6 +458,8 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON,
                     f"op={operation} params={params} -> {status}"
                 )
                 return resp
+            except RequestEntityTooLarge:
+                return too_large(path)
             except ApiError as e:
                 _oplog.info(
                     f"{request.remote_addr} {request.method} {path} "
@@ -1338,12 +1372,16 @@ def set_update(n):
         # it on the GUI thread until then). Core-direct writes
         # (score:adjust, a colour) are not board operations and can land in
         # between, as they always could.
-        if kwargs or (losers is None and team_name is None):
-            WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
-        if losers is not None:
-            WebOps.set_team_losers(n, *losers)
-        if team_name is not None:
-            WebOps.set_route(n, team=team_name[0], teamName=team_name[1])
+        #
+        # And one save cycle: the calls' blocks nest in this one, so a face
+        # that is not held never publishes a half-applied set.
+        with StateManager.SaveBlock():
+            if kwargs or (losers is None and team_name is None):
+                WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
+            if losers is not None:
+                WebOps.set_team_losers(n, *losers)
+            if team_name is not None:
+                WebOps.set_route(n, team=team_name[0], teamName=team_name[1])
 
     WebOps.boardHost.Run(apply)
     return ok(revision=current_revision())

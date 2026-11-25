@@ -275,6 +275,42 @@ def test_a_template_packages_files_keep_their_page_to_its_origin(server):
     assert response.cache_control.max_age == 0
 
 
+def test_the_web_ui_build_and_the_dictionary_are_cached_by_kind(server):
+    _write(server.root, "web/build/index.html", b"<html>")
+    _write(server.root, "web/build/manifest.json", b"{}")
+    _write(server.root, "web/build/static/js/main.abc123.js")
+    _write(server.root, "layout/include/kuromoji/base.dat.gz")
+    _write(server.root, "layout/include/autona.js")
+    client = _client(server)
+    # Hashed names: kept for a year.
+    response = client.get("/web/build/static/js/main.abc123.js")
+    assert response.status_code == 200
+    assert response.cache_control.max_age == 31536000
+    assert response.cache_control.immutable
+    # Fixed names that change with each build: revalidated.
+    response = client.get("/web/build/manifest.json")
+    assert response.status_code == 200
+    assert response.cache_control.no_cache
+    assert response.cache_control.max_age == 0
+    # The fixed dictionary: the default, not revalidated each time.
+    response = client.get("/layout/include/kuromoji/base.dat.gz")
+    assert response.status_code == 200
+    assert not response.cache_control.no_cache
+    assert response.cache_control.max_age == 86400
+    response = client.get("/layout/include/autona.js")
+    assert response.cache_control.no_cache
+    # The pages: ETag, 304 when unchanged.
+    panel = sorted(WebAccess.WEB_PANELS)[0]
+    for path in ("/web", f"/web/app/{panel}"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.cache_control.no_cache, path
+        assert response.cache_control.max_age == 0, path
+        etag = response.headers["ETag"]
+        again = client.get(path, headers={"If-None-Match": etag})
+        assert again.status_code == 304, path
+
+
 def test_the_template_policy_comes_from_the_preview_listener_too(server):
     # Where the live preview's frame reads the template from: the preview
     # listener (PreviewGate), not this port.

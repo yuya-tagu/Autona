@@ -970,8 +970,8 @@ class AutonaActions:
         Behind the board's reset-match button, the すべての入力値をリセット
         button (`ClearBoard`) and the Web's reset_match / clear_all. The best
         of is not part of it: the reset-match button has never reset it, the
-        Web's two set it to 0 after this in a cycle of their own
-        (`SetBestOf`), as they did, and `ClearBoard` does in its block.
+        Web's two set it to 0 after this in their own block around both
+        (`SetBestOf`), and `ClearBoard` does in its block.
         """
         board = self._asInt(board, 0)
         if board not in self.SCORE_BOARDS:

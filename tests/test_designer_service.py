@@ -1771,7 +1771,7 @@ def test_bootstrap_core_migrates_legacy_designs(tmp_path):
     assert not list(directory.glob("runtime.*"))
 
 
-def test_designer_files_are_served_no_store(tmp_path, monkeypatch):
+def test_designer_files_are_served_revalidated(tmp_path, monkeypatch):
     from src.AutonaWebServer import _build_web_app
 
     for relative in (
@@ -1797,16 +1797,39 @@ def test_designer_files_are_served_no_store(tmp_path, monkeypatch):
         finally:
             response.close()
 
-    # An app update replaces the shared runtime under every design; OBS must
-    # not keep a day-old copy of it.
-    assert "no-store" in cache_control("/layout/designer_runtime/runtime.js")
-    assert "no-store" in cache_control("/layout/custom/finals/index.html")
-    assert "no-store" not in cache_control("/layout/scoreboard_simple/index.js")
+    # An app update replaces the shared runtime under every design, and a
+    # save overwrites a design in place: revalidated each time (no-cache +
+    # ETag), not no-store (which Chromium / OBS CEF cannot keep for a 304).
+    for url in ("/layout/designer_runtime/runtime.js",
+                "/layout/custom/finals/index.html"):
+        value = cache_control(url)
+        assert "no-cache" in value and "no-store" not in value, url
+    value = cache_control("/layout/scoreboard_simple/index.js")
+    assert "no-store" not in value and "max-age=86400" in value
     if sys.platform == "win32":
         # The Windows filesystem serves the same files under any casing.
-        assert "no-store" in cache_control(
-            "/Layout/Designer_Runtime/runtime.js")
-        assert "no-store" in cache_control("/LAYOUT/Custom/finals/index.html")
+        for url in ("/Layout/Designer_Runtime/runtime.js",
+                    "/LAYOUT/Custom/finals/index.html"):
+            value = cache_control(url)
+            assert "no-cache" in value and "no-store" not in value, url
+
+    url = "/layout/custom/finals/index.html"
+    first = client.get(url)
+    etag = first.headers["ETag"]
+    first.close()
+    again = client.get(url, headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    again.close()
+    path = tmp_path / "layout/custom/finals/index.html"
+    path.write_bytes(b"a different, longer body")
+    stat = path.stat()
+    os.utime(path, (stat.st_atime, stat.st_mtime + 10))
+    changed = client.get(url, headers={"If-None-Match": etag})
+    try:
+        assert changed.status_code == 200
+        assert changed.data == b"a different, longer body"
+    finally:
+        changed.close()
 
 
 def _save_payload(name="Finals"):

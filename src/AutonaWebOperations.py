@@ -234,8 +234,8 @@ class BoardHost:
 
     def __init__(self):
         # One operation at a time. A board operation is several core calls
-        # (clear_all is four save cycles, /api/v1's PATCH set up to three
-        # calls in one task), and two callers' threads would interleave
+        # (clear_all is one save cycle of several core calls, /api/v1's
+        # PATCH set up to three calls in one task), and two callers' threads would interleave
         # them. Re-entrant: an operation run here runs others here (PATCH
         # set's task calls set_route).
         #
@@ -1684,56 +1684,58 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         else:
             raise TypeError("losers must be a string")
 
-        # best-of=<Best Of Amount>
-        if bestOfN is not None:
-            _apply_set_fields(scoreboard, {'bestOf': bestOfN})
+        # The whole query is one save cycle (one publish where the board is
+        # not held): the calls below nest their own blocks in this one.
+        with StateManager.SaveBlock():
+            # best-of=<Best Of Amount>
+            if bestOfN is not None:
+                _apply_set_fields(scoreboard, {'bestOf': bestOfN})
 
-        # phase=<Phase Name>
-        if phase is not None:
-            _apply_set_fields(scoreboard, {'tournament_phase': phase})
+            # phase=<Phase Name>
+            if phase is not None:
+                _apply_set_fields(scoreboard, {'tournament_phase': phase})
 
-        # pool=<Pool Name>
-        if pool is not None:
-            _apply_set_fields(scoreboard, {'tournament_pool': pool})
+            # pool=<Pool Name>
+            if pool is not None:
+                _apply_set_fields(scoreboard, {'tournament_pool': pool})
 
-        # match=<Match Name>
-        if match is not None:
-            _apply_set_fields(scoreboard, {'round_name': match})
+            # match=<Match Name>
+            if match is not None:
+                _apply_set_fields(scoreboard, {'round_name': match})
 
-        # players=<Amount of Players> (the crew board: its member count).
-        # Each count is a save cycle of its own, as each spinbox's was.
-        if playersN is not None:
-            if crew:
-                CrewBattleService(CREW_BOARD).SetMemberCount(playersN)
-            else:
-                _set_players(host, scoreboard, playersN)
+            # players=<Amount of Players> (the crew board: its member count).
+            if playersN is not None:
+                if crew:
+                    CrewBattleService(CREW_BOARD).SetMemberCount(playersN)
+                else:
+                    _set_players(host, scoreboard, playersN)
 
-        # characters=<Amount of Characters> (none on the crew board; the
-        # number is still parsed, as the board's spinbox parsed it)
-        if charactersN is not None:
-            if not crew:
-                _set_characters(host, scoreboard, charactersN)
+            # characters=<Amount of Characters> (none on the crew board; the
+            # number is still parsed, as the board's spinbox parsed it)
+            if charactersN is not None:
+                if not crew:
+                    _set_characters(host, scoreboard, charactersN)
 
-        # losers=<True/False>&team=<Team Number>
-        # Set-shaped: `team` is the set's team, which a swap moves to the
-        # other column (SetLoadService.ApplyLosers).
-        if losersFlag is not None:
-            _apply_set_fields(scoreboard, {
-                'team' + str(team) + 'losers': losersFlag})
+            # losers=<True/False>&team=<Team Number>
+            # Set-shaped: `team` is the set's team, which a swap moves to the
+            # other column (SetLoadService.ApplyLosers).
+            if losersFlag is not None:
+                _apply_set_fields(scoreboard, {
+                    'team' + str(team) + 'losers': losersFlag})
 
-        # teamName=<Name>&team=<Team Number> (team-mode boards)
-        # The literal column (no swap flip), as the operator typing the name
-        # into it: the name and the crest that follows it, written only when
-        # the name changes. Boards 1/2 only -- the crew board has never had
-        # the column this addressed.
-        if teamIdx is not None:
-            board = _board(scoreboard)
-            idx = teamIdx
-            if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
-                with StateManager.SaveBlock():
-                    if AutonaActions.instance.SetTeamName(
-                            scoreboard, idx, teamName):
-                        SetLoadService(board).PublishTeamLogo(idx, teamName)
+            # teamName=<Name>&team=<Team Number> (team-mode boards)
+            # The literal column (no swap flip), as the operator typing the name
+            # into it: the name and the crest that follows it, written only when
+            # the name changes. Boards 1/2 only -- the crew board has never had
+            # the column this addressed.
+            if teamIdx is not None:
+                board = _board(scoreboard)
+                idx = teamIdx
+                if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
+                    with StateManager.SaveBlock():
+                        if AutonaActions.instance.SetTeamName(
+                                scoreboard, idx, teamName):
+                            SetLoadService(board).PublishTeamLogo(idx, teamName)
         return "OK"
 
     return host.Run(run)
@@ -1894,21 +1896,24 @@ def reset_scores(scoreboard):
 def _reset_match(scoreboard):
     # The operator's reset (scores + losers flags + round name / phase /
     # pool, ADR-005 S2d), not the set-load pre-pass ClearScore, which keeps
-    # the match bar; then the best of, in a cycle of its own as the
-    # spinbox's was. The crew board (3) answers False to the core operation:
-    # its reset is full stocks and nobody playing plus the same match bar,
-    # in one cycle, then its raw best of (S3e-2). The callers refused any
-    # other board first (`_require_board`).
-    if AutonaActions.instance.ResetMatch(scoreboard):
-        AutonaActions.instance.SetBestOf(scoreboard, 0)
-        return
+    # the match bar; then the best of -- both in one save cycle, so no
+    # overlay is ever sent the reset board with its old set length. The
+    # crew board (3), which the core operation refuses: full stocks and
+    # nobody playing plus the same match bar and its raw best of, in one
+    # cycle too (S3e-2). Asked first, so that its reset opens no block the
+    # core operation would leave empty. The callers refused any other board
+    # first (`_require_board`).
     if _is_crew(scoreboard):
         crew = CrewBattleService(CREW_BOARD)
         with StateManager.SaveBlock():
             crew.ResetStocks()
             AutonaActions.instance.ClearMatchInfo(scoreboard)
-        crew.ApplyBestOf(0)
+            crew.ApplyBestOf(0)
         return
+    with StateManager.SaveBlock():
+        if AutonaActions.instance.ResetMatch(scoreboard):
+            AutonaActions.instance.SetBestOf(scoreboard, 0)
+            return
     _require_board(scoreboard)
 
 
@@ -1957,14 +1962,18 @@ def clear_all(scoreboard):
     # team names (unless the roster shrinks to one player: SetRoster), and
     # the player / character counts change between the reset and the
     # players' clear -- in this order, which decides what the mains end up
-    # as.
+    # as. All three in one save cycle (the blocks inside nest in it): the
+    # writes land in the same order, but the overlays are sent only the
+    # cleared board, never a step on the way (e.g. full stocks under the
+    # names still there).
     host = boardHost
 
     def run():
         _require_board(scoreboard)
-        _reset_match(scoreboard)
-        _reset_counts(host, scoreboard)
-        _clear_players(host, scoreboard)
+        with StateManager.SaveBlock():
+            _reset_match(scoreboard)
+            _reset_counts(host, scoreboard)
+            _clear_players(host, scoreboard)
         return "OK"
 
     return host.Run(run)

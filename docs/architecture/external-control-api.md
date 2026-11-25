@@ -83,7 +83,7 @@
 | `UNAUTHENTICATED` | 401 | 書き込みにトークンが要るのに無い・誤り（LAN・転送ヘッダ付き・名前の違う `Host`） |
 | `FORBIDDEN` | 403 | CSRF 対策・`THIS_PC` / `SHELL` の区分・プレビュー用リスナー・フレームの拒否 |
 | `NOT_FOUND` | 404 | 存在しないリソース |
-| `PAYLOAD_TOO_LARGE` | 413 | 本文の上限を超えた。上限を持つのは画像の取り込みとゲームアセットの ZIP（8 GiB）だけで、`Content-Length` が超えていれば本文を読まずに断る |
+| `PAYLOAD_TOO_LARGE` | 413 | 本文の上限を超えた。上限を持つのは画像の取り込みとゲームアセットの ZIP（8 GiB）だけで、`Content-Length` が超えていれば本文を読まずに断る。`Content-Length` の無い chunked の本文も、上限を超えて読めた時点で断る |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | ファイルはあるが返せない種類（アーカイブの動画のプレビュー不可の形式） |
 | `CONFIRMATION_REQUIRED` | 409 | 破壊的操作で `confirm: true` が無い（§2.11） |
 | `CONFLICT` | 409 | 重い操作が実行中（§2.8）。選手 DB の保存が新しい保存に負けた・ゲームアセットのジョブが走っている、なども |
