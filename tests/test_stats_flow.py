@@ -51,6 +51,16 @@ pending is superseded and never answered. That a superseded or late answer
 is dropped (it was written on that tree) is a change made on purpose, and
 the current tree's own test (tests/test_stats_service.py,
 tests/test_stats_util.py), not part of this recording.
+
+A set load no longer fetches the head-to-head of its first entrant with the
+previous set's second (StatsService.DeferredHeadToHead): the load's one
+head-to-head is fetched once its entrants are in. _recordedFetches takes
+the superseded ones out of the recording -- a head-to-head followed by
+another in the same step -- and where a head-to-head stands among a step's
+fetches is not compared (_fetchesCompared; which ones are, in order). So
+that the answers are the recording's, the fake numbers each fetch as the
+recording did and answers in that order (_recordedNumbers); the writes and
+deltas are compared as before.
 """
 import json
 import os
@@ -91,6 +101,9 @@ class _FakeStartGG:
         self.pending = []
         self.clock = 1000
         self.step = None
+        # (step, method, args) -> [(number, requestTime)] as the recording
+        # numbered its fetches (_recordedNumbers); None: numbered here.
+        self.recorded = None
 
     def install(self, monkeypatch):
         monkeypatch.setattr(self.provider, "provider", types.SimpleNamespace(
@@ -103,16 +116,28 @@ class _FakeStartGG:
     def _start(self, method, args, callback, **extra):
         args = json.loads(json.dumps(args))
         self.calls.append([method, args])
+        number = len(self.calls)
+        if method == "recent_sets":
+            self.clock += 1
+            extra["requestTime"] = self.clock
+        numbers = (self.recorded or {}).get(
+            (self.step, method, json.dumps(args)))
+        if numbers:
+            number, requestTime = numbers.pop(0)
+            if method == "recent_sets":
+                extra["requestTime"] = requestTime
+        elif self.recorded is not None:
+            # Not in the recording (the comparison says so): a number of
+            # its own, past every recorded one.
+            number += 100000
         self.pending.append(dict(
             method=method, args=args, callback=callback, step=self.step,
-            number=len(self.calls), **extra))
+            number=number, **extra))
 
     def _recent(self, callback, id1, id2, videogame):
         if self.provider.provider is None:
             return
-        self.clock += 1
-        self._start("recent_sets", [id1, id2, videogame], callback,
-                    requestTime=self.clock)
+        self._start("recent_sets", [id1, id2, videogame], callback)
 
     def _last(self, callback, playerId, playerNumber):
         if self.provider.provider is None:
@@ -157,7 +182,7 @@ class _FakeStartGG:
 
     def answer(self, app, which=None):
         """Answer the pending fetches `which` picks (all by default), oldest
-        first and one at a time, each from a thread of its own.
+        (by number) first and one at a time, each from a thread of its own.
 
         Only the latest request for each statistic is answered; the ones a
         later request superseded are dropped unanswered. The tree this was
@@ -167,7 +192,9 @@ class _FakeStartGG:
         latest = {}
         for fetch in self.pending:
             latest[self._asks(fetch)] = fetch
-        for fetch in [f for f in self.pending if which is None or which(f)]:
+        for fetch in sorted(
+                [f for f in self.pending if which is None or which(f)],
+                key=lambda f: f["number"]):
             self.pending.remove(fetch)
             if latest[self._asks(fetch)] is not fetch:
                 continue
@@ -285,6 +312,49 @@ def _withoutTheRows(recording):
     return dict(recording, steps=steps, boards=boards)
 
 
+def _isHeadToHead(fetch):
+    return fetch[0] == "recent_sets"
+
+
+def _recordedFetches(fetches):
+    """A step's recorded fetches less the head-to-heads a set load no
+    longer fetches: one followed by another in the same step (the steps
+    are one operation each; only a set load asked twice)."""
+    return [fetch for index, fetch in enumerate(fetches)
+            if not (_isHeadToHead(fetch)
+                    and any(_isHeadToHead(later)
+                            for later in fetches[index + 1:]))]
+
+
+def _fetchesCompared(fetches):
+    """A step's fetches as compared: the head-to-heads in order, and the
+    others in order -- not where the head-to-head stands among them (a set
+    load fetches it once its entrants are in)."""
+    return {"headToHead": [f for f in fetches if _isHeadToHead(f)],
+            "others": [f for f in fetches if not _isHeadToHead(f)]}
+
+
+def _recordedNumbers(name):
+    """(step, method, args) -> [(number, requestTime)]: how the recording
+    numbered each fetch of scenario `name` (its position among every fetch
+    of the scenario; a head-to-head's request time, the fake's clock).
+    None when recording."""
+    if RECORD:
+        return None
+    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
+    numbers = {}
+    number, clock = 0, 1000
+    for step in golden["steps"]:
+        for method, args in step["fetches"]:
+            number += 1
+            if method == "recent_sets":
+                clock += 1
+            numbers.setdefault(
+                (step["step"], method, json.dumps(args)), []).append(
+                    (number, clock))
+    return numbers
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -302,9 +372,11 @@ def _check(name, recorded):
         json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]))
     expectedSteps = [
         dict(step, responses=step["responses"]
-             + _ADDED_RESPONSES.get((name, step["step"]), []))
+             + _ADDED_RESPONSES.get((name, step["step"]), []),
+             fetches=_fetchesCompared(_recordedFetches(step["fetches"])))
         for step in golden["steps"]]
-    actualSteps = recorded["steps"]
+    actualSteps = [dict(step, fetches=_fetchesCompared(step["fetches"]))
+                   for step in recorded["steps"]]
     assert [s["step"] for s in actualSteps] == \
         [s["step"] for s in expectedSteps]
     differ = [f"{expected['step']!r}: {field}"
@@ -473,6 +545,7 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
 
     board = autonaApp.ready(1)
     autonaApp.settle()
+    startgg.recorded = _recordedNumbers("singles")
     playerDB["SP ALPHA"] = {"gamerTag": "ALPHA", "prefix": "SP",
                            "id": [70, 700], "seed": 2}
     # The two cards the recording drove: the first player of each team.
@@ -569,6 +642,7 @@ def test_a_team_board(autonaApp, startgg, http):
 
     from src.core.Actions import AutonaActions
 
+    startgg.recorded = _recordedNumbers("team")
     autonaApp.ready(1)
     board = autonaApp.ready(2)
     autonaApp.settle()
@@ -626,6 +700,7 @@ def test_routes_reach_a_board_just_made(autonaApp, startgg, http):
 
     autonaApp.ready(1)
     autonaApp.settle()
+    startgg.recorded = _recordedNumbers("unbuilt board")
     assert not AutonaActions.instance.BoardEnsured(2)
 
     def makeAndAsk():
@@ -642,3 +717,135 @@ def test_routes_reach_a_board_just_made(autonaApp, startgg, http):
                     "boards": rec.boards(2)}
 
     _check("unbuilt board", recorded)
+
+
+# ── a set load fetches its head-to-head once ─────────────────────────────
+#
+# Each entrant of a set load asks for the head-to-head (PlayerService
+# .Announce): the first one with the previous set's other side still in
+# place, an answer always dropped. The load fetches only its last pairing,
+# once its entrants are in (StatsService.DeferredHeadToHead); the other
+# statistics, and every write, as before.
+
+@pytest.fixture
+def spyFetcher(autonaApp, playerDB, monkeypatch):
+    """Board 1 made afresh, a Start.gg fetcher that records what it is asked
+    for (never answering unless told), and the tournament's game."""
+    from src.core.StateManager import StateManager
+    from src.core.StatsService import StatsService
+    from tests.fixtures.stats.spies import FakeFetcher
+
+    fake = FakeFetcher(startGG=True)
+    monkeypatch.setattr(StatsService, "fetcher", fake)
+    StateManager.Set("provider_videogame", {"id": VIDEOGAME, "name": "G"})
+    autonaApp.ready(1)
+    autonaApp.settle()
+    try:
+        yield fake
+    finally:
+        StateManager.Unset("provider_videogame")
+        autonaApp.settle()
+
+
+def _asked(fake, kind):
+    return [list(args) for asked, args in fake.asked() if asked == kind]
+
+
+def _loaded(autonaApp, fake, data):
+    """Load set `data` on board 1; what it asked for."""
+    del fake.requests[:]
+    apply_set(1, data)
+    autonaApp.settle()
+    return fake
+
+
+def test_a_set_load_fetches_the_head_to_head_of_its_pairing_once(
+        autonaApp, spyFetcher):
+    from src.core.StateManager import StateManager
+
+    _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)]))
+    fake = _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("CCC", 33, 2)], [_entrant("DDD", 44, 9)]))
+
+    assert _asked(fake, "recent_sets") == [[[33, 330], [44, 440], VIDEOGAME]]
+    assert _asked(fake, "last_sets") == [[[33, 330], 1], [[44, 440], 2]]
+    assert _asked(fake, "history_sets") == [
+        [[33, 330], 1, VIDEOGAME], [[44, 440], 2, VIDEOGAME]]
+    assert StateManager.Get("score.1.recent_sets") == {
+        "state": "loading", "sets": []}
+
+    # Its answer is written: the request is the latest, the pairing there.
+    index = [kind for kind, _ in fake.asked()].index("recent_sets")
+    fake.answer(index, {"sets": [{"id": "S"}], "request_time": 10 ** 12})
+    autonaApp.settle()
+    assert StateManager.Get("score.1.recent_sets.state") == "done"
+    assert StateManager.Get("score.1.recent_sets.sets") == [{"id": "S"}]
+
+
+def test_a_load_that_changes_one_side_fetches_the_head_to_head_once(
+        autonaApp, spyFetcher):
+    _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)]))
+    fake = _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("CCC", 33, 1)], [_entrant("BBB", 22, 5)]))
+
+    assert _asked(fake, "recent_sets") == [[[33, 330], [22, 220], VIDEOGAME]]
+    assert _asked(fake, "last_sets") == [[[33, 330], 1]]
+
+
+@pytest.mark.parametrize("second", [
+    # The same player on both sides: no head-to-head to ask for.
+    _set([_entrant("CCC", 33, 2)], [_entrant("CCC", 33, 2)]),
+    # A team board: no head-to-head at all.
+    _set([_entrant("A1", 31, 1), _entrant("A2", 32, 1)],
+         [_entrant("B1", 41, 4), _entrant("B2", 42, 4)]),
+], ids=["same player", "team board"])
+def test_a_load_with_no_pairing_fetches_no_head_to_head(
+        autonaApp, spyFetcher, second):
+    from src.core.StateManager import StateManager
+
+    _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)]))
+    fake = _loaded(autonaApp, spyFetcher, second)
+
+    assert _asked(fake, "recent_sets") == []
+    assert StateManager.Get("score.1.recent_sets") == {
+        "state": "done", "sets": []}
+
+
+def test_a_single_player_outside_a_set_load_fetches_at_once(
+        autonaApp, spyFetcher):
+    """post_score's one player (no entrants): asked for and fetched there
+    and then, before its own last sets, as always."""
+    _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)]))
+    fake = _loaded(autonaApp, spyFetcher, {
+        "team": "2", "player": "1",
+        "data": {"gamerTag": "EEE", "id": [55, 550], "seed": 3}})
+
+    assert [kind for kind, _ in fake.asked()] == [
+        "recent_sets", "last_sets", "history_sets"]
+    assert _asked(fake, "recent_sets") == [[[11, 110], [55, 550], VIDEOGAME]]
+
+
+def test_a_load_that_fails_midway_fetches_what_it_asked_for(
+        autonaApp, spyFetcher, monkeypatch):
+    """The second entrant raises: the first one's head-to-head -- still the
+    latest request, its pairing still there -- is fetched on the way out."""
+    from src.core.SetFollowService import SetFollowService
+
+    _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("AAA", 11, 1)], [_entrant("BBB", 22, 5)]))
+    original = SetFollowService._ApplyPlayer
+
+    def failingOnTeam2(service, team, *args, **kwargs):
+        if team == 2:
+            raise RuntimeError("the load")
+        return original(service, team, *args, **kwargs)
+
+    monkeypatch.setattr(SetFollowService, "_ApplyPlayer", failingOnTeam2)
+    fake = _loaded(autonaApp, spyFetcher, _set(
+        [_entrant("CCC", 33, 2)], [_entrant("DDD", 44, 9)]))
+
+    assert _asked(fake, "recent_sets") == [[[33, 330], [22, 220], VIDEOGAME]]

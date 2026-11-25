@@ -45,6 +45,13 @@ asked. The request and its "loading" / cleared write are made under
 statistic waiting for an answer that will be dropped. The fetch itself is
 started outside the lock.
 
+A set load (SetFollowService._ApplyEntrants) loads its entrants one by one,
+and each changed player asks for the head-to-head again: the first one with
+the previous set's other side, an answer always dropped. Inside
+``DeferredHeadToHead`` only the head-to-head's fetch waits for the end of
+the load, and only the latest request is fetched; its writes ("loading",
+cleared) and every other statistic are asked for as before.
+
 Only a newer request supersedes an answer: one that lands after the board
 became a team board, or after another provider was loaded, with nothing
 asked for since, is written as it always was (the head-to-head would be
@@ -67,6 +74,7 @@ Import side effects: none (pitfalls #1). Instances are cheap and
 stateless (``StatsService(n)``); the request numbers and the queued team
 refreshes are the class's.
 """
+import contextlib
 import itertools
 import math
 import threading
@@ -123,6 +131,11 @@ class StatsService:
     # never with anything else held.
     _queuedTeams = {}
     _queueLock = threading.Lock()
+
+    # This thread's DeferredHeadToHead: `depth` (how many are open) and
+    # `pending` (board -> the latest (request, generation) not fetched yet).
+    # Thread-local: a request from another thread is never deferred.
+    _deferred = threading.local()
 
     def __init__(self, scoreboardNumber):
         self.scoreboardNumber = int(scoreboardNumber)
@@ -265,6 +278,54 @@ class StatsService:
                 stats.RefreshQuietly(StatsService.LAST_SETS, team)
                 stats.RefreshQuietly(StatsService.HISTORY_SETS, team)
 
+    # ── a load's head-to-head, fetched once ──────────────────────────────
+
+    @contextlib.contextmanager
+    def DeferredHeadToHead(self):
+        """Inside: this board's head-to-head is not fetched when this thread
+        asks for it, only numbered and marked as always; on the way out
+        (an exception too) the latest request is fetched, if no later one
+        was made since. Nests: the outermost exit fetches. Waits on no
+        other thread (pitfalls #17)."""
+        deferred = StatsService._deferred
+        board = self.scoreboardNumber
+        depth = getattr(deferred, "depth", None)
+        if depth is None:
+            depth = deferred.depth = {}
+            deferred.pending = {}
+        outermost = depth.get(board, 0) == 0
+        depth[board] = depth.get(board, 0) + 1
+        try:
+            yield self
+        finally:
+            depth[board] -= 1
+            if outermost:
+                del depth[board]
+                pending = deferred.pending.pop(board, None)
+                if pending is not None:
+                    self._FetchDeferredRecentSets(*pending)
+
+    def _Deferring(self):
+        depth = getattr(StatsService._deferred, "depth", None)
+        return bool(depth) and depth.get(self.scoreboardNumber, 0) > 0
+
+    def _FetchDeferredRecentSets(self, request, generation):
+        try:
+            with StateManager.lock:
+                key = (self.scoreboardNumber, self.RECENT_SETS, None)
+                latest = StatsService._generations.get(key) == generation
+            fetcher = StatsService.fetcher
+            if not latest or fetcher is None:
+                return
+            fetcher.RecentSets(
+                *request, self._Answer(self.RECENT_SETS, None, generation,
+                                       request[:2], self.UpdateRecentSets))
+        except Exception:
+            # As RefreshQuietly: the load is done, the failure is logged.
+            logger.exception(
+                f"Stats: {self.prefix} {self.RECENT_SETS}: "
+                "asking for the statistic failed")
+
     # ── request numbers ──────────────────────────────────────────────────
 
     def _Ask(self, kind, team):
@@ -321,10 +382,20 @@ class StatsService:
         with StateManager.lock:
             request = self.RecentSetsRequest() if startGG else None
             generation = self._Ask(self.RECENT_SETS, None)
+            deferring = self._Deferring()
             if request is None:
+                if deferring:
+                    # Superseded: its answer would be dropped anyway.
+                    StatsService._deferred.pending.pop(
+                        self.scoreboardNumber, None)
                 self.ClearRecentSets()
                 return
             self.MarkRecentSetsLoading()
+        if deferring:
+            # Fetched at the end of the load (DeferredHeadToHead).
+            StatsService._deferred.pending[self.scoreboardNumber] = (
+                request, generation)
+            return
         StatsService.fetcher.RecentSets(
             *request, self._Answer(self.RECENT_SETS, None, generation,
                                    request[:2], self.UpdateRecentSets))

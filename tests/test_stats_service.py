@@ -966,3 +966,130 @@ def test_a_null_or_broken_event_date_blanks_only_its_own_row():
         assert row["event_date_month"] == ""
         assert row["event_date_day"] == ""
         assert row["event_date_year"] == ""
+
+
+# ── a set load's head-to-head, fetched once (DeferredHeadToHead) ─────────
+
+def _recentAsked(fetcher):
+    return [args for kind, args in fetcher.asked()
+            if kind == StatsService.RECENT_SETS]
+
+
+def test_inside_the_window_only_the_latest_head_to_head_is_fetched(fetcher):
+    """A load's entrants each ask: only the last pairing is fetched, on the
+    way out; the loading marker and the other statistics as before."""
+    _seedPairing([1, 10], [2, 20])
+    service = _service()
+    with service.DeferredHeadToHead():
+        service.PlayerChanged(1, SlotChange(idChanged=True))
+        assert SM.Get(f"{PREFIX}.recent_sets") == {
+            "state": "loading", "sets": []}
+        SM.Set(f"{PREFIX}.team.2.player.1.id", [3, 30])
+        service.PlayerChanged(2, SlotChange(idChanged=True))
+        assert _recentAsked(fetcher) == []
+
+    assert _recentAsked(fetcher) == [([1, 10], [3, 30], 1386)]
+    assert [kind for kind, _ in fetcher.asked()] == [
+        "last_sets", "history_sets", "last_sets", "history_sets",
+        "recent_sets"]
+
+    fetcher.answer(len(fetcher.requests) - 1,
+                   {"sets": ["h2h"], "request_time": 10})
+    assert SM.Get(f"{PREFIX}.recent_sets") == {
+        "state": "done", "sets": ["h2h"], "request_time": 10}
+
+
+def test_outside_the_window_the_head_to_head_is_fetched_at_once(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    _service().PlayerChanged(1, SlotChange(idChanged=True))
+
+    assert [kind for kind, _ in fetcher.asked()] == [
+        "recent_sets", "last_sets", "history_sets"]
+
+
+def test_a_pairing_with_nothing_to_ask_drops_the_deferred_fetch(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    service = _service()
+    with service.DeferredHeadToHead():
+        service.Refresh(StatsService.RECENT_SETS)
+        SM.Set(f"{PREFIX}.team.2.player.1.id", [1, 10])
+        service.Refresh(StatsService.RECENT_SETS)
+
+    assert _recentAsked(fetcher) == []
+    assert SM.Get(f"{PREFIX}.recent_sets") == {"state": "done", "sets": []}
+
+
+def test_the_outermost_window_fetches(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    service = _service()
+    with service.DeferredHeadToHead():
+        with StatsService(BOARD).DeferredHeadToHead():
+            service.Refresh(StatsService.RECENT_SETS)
+        assert _recentAsked(fetcher) == []
+    assert _recentAsked(fetcher) == [([1, 10], [2, 20], 1386)]
+
+
+def test_the_window_defers_only_its_board_and_its_thread(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    SM.Set(f"score.{OTHER}.team.1.player.1.id", [5, 50])
+    SM.Set(f"score.{OTHER}.team.2.player.1.id", [6, 60])
+    service = _service()
+    other = _service(board=OTHER)
+    with service.DeferredHeadToHead():
+        other.Refresh(StatsService.RECENT_SETS)
+        thread = threading.Thread(
+            target=lambda: service.Refresh(StatsService.RECENT_SETS))
+        thread.start()
+        thread.join()
+        assert _recentAsked(fetcher) == [
+            ([5, 50], [6, 60], 1386), ([1, 10], [2, 20], 1386)]
+    # Nothing was deferred on this thread: nothing more on the way out.
+    assert len(_recentAsked(fetcher)) == 2
+
+
+def test_a_later_request_from_elsewhere_supersedes_the_deferred_one(
+        fetcher):
+    """Another thread asked after the load did: the load's request is no
+    longer the latest (its answer would be dropped), so it is not fetched."""
+    _seedPairing([1, 10], [2, 20])
+    service = _service()
+    with service.DeferredHeadToHead():
+        service.Refresh(StatsService.RECENT_SETS)
+        thread = threading.Thread(
+            target=lambda: service.Refresh(StatsService.RECENT_SETS))
+        thread.start()
+        thread.join()
+
+    assert _recentAsked(fetcher) == [([1, 10], [2, 20], 1386)]
+
+
+def test_the_deferred_fetch_is_started_when_the_load_raises(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    service = _service()
+    with pytest.raises(RuntimeError):
+        with service.DeferredHeadToHead():
+            service.Refresh(StatsService.RECENT_SETS)
+            raise RuntimeError("the load")
+
+    assert _recentAsked(fetcher) == [([1, 10], [2, 20], 1386)]
+
+
+def test_the_deferred_fetch_starts_outside_the_state_lock(fetcher):
+    _seedPairing([1, 10], [2, 20])
+    free = _lockProbes(fetcher)
+    service = _service()
+    with service.DeferredHeadToHead():
+        service.Refresh(StatsService.RECENT_SETS)
+    assert free == [True]
+
+
+def test_a_deferred_fetch_that_raises_is_logged(fetcher, errors):
+    _seedPairing([1, 10], [2, 20])
+    _failing(fetcher, StatsService.RECENT_SETS)
+    service = _service()
+    with service.DeferredHeadToHead():
+        service.Refresh(StatsService.RECENT_SETS)
+
+    assert _recentAsked(fetcher) == [([1, 10], [2, 20], 1386)]
+    assert any("recent_sets: asking for the statistic failed" in message
+               for message in errors)
