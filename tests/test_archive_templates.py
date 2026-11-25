@@ -298,6 +298,45 @@ def test_a_template_that_cannot_be_written_is_save_failed(folder,
         assert "user_data" in refused.value.message
 
 
+def test_a_template_is_fsynced_before_the_replace(folder, monkeypatch):
+    events, onTemp = [], []
+    realFsync, realReplace = os.fsync, os.replace
+
+    def fsync(fd):
+        events.append("fsync")
+        index = os.fstat(fd).st_ino
+        onTemp.append(index in [os.stat(path).st_ino
+                                for path in folder.glob("*.tmp")])
+        return realFsync(fd)
+
+    def replace(src, dst):
+        events.append("replace")
+        return realReplace(src, dst)
+
+    monkeypatch.setattr(templates.os, "fsync", fsync)
+    monkeypatch.setattr(templates.os, "replace", replace)
+    templates.Save("default", templates.Standard())
+
+    assert events == ["fsync", "replace"]
+    assert onTemp == [True]
+
+
+def test_a_template_whose_fsync_fails_is_save_failed_and_unchanged(
+        folder, monkeypatch):
+    templates.Save("default", templates.Standard())
+    before = (folder / "default.json").read_bytes()
+
+    def broken(fd):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(templates.os, "fsync", broken)
+    with pytest.raises(templates.TemplateError) as refused:
+        templates.Save("default", dict(templates.Standard(), title="x"))
+    assert refused.value.code == templates.SAVE_FAILED
+    assert not list(folder.glob("*.tmp"))
+    assert (folder / "default.json").read_bytes() == before
+
+
 def test_a_failing_folder_or_write_logs_no_path(folder, monkeypatch):
     from loguru import logger
     secret = r"C:\Users\someone\Documents\Autona\user_data\x.json"

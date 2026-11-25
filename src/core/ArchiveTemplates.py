@@ -41,8 +41,8 @@ Saving
 one Python's str.format reads with {time} and {n} (vodsplit's
 templates.chapters); overflow and order of vodsplit's choices; an unknown
 key is dropped; the standard template has no match (it is the one the event
-names no other template fits use). Written whole (temp file + os.replace).
-A stored file that does not pass ``Check`` (edited by hand) is left out of
+names no other template fits use). Written whole (temp file, fsynced,
++ os.replace). A stored file that does not pass ``Check`` (edited by hand) is left out of
 the list and of the worker's templates, with a warning.
 
 Errors are ``TemplateError`` (its code one of ArchiveJobService's: the
@@ -360,8 +360,8 @@ def _Entries(stored):
 
 
 def _Write(path, content):
-    """Write `content` as JSON to `path` whole (temp file + os.replace).
-    Raises OSError."""
+    """Write `content` as JSON to `path` whole (temp file, fsynced,
+    + os.replace). Raises OSError."""
     folder = os.path.dirname(path)
     os.makedirs(folder, exist_ok=True)
     data = json.dumps(content, ensure_ascii=False, indent=2)
@@ -369,6 +369,10 @@ def _Write(path, content):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as file:
             file.write(data)
+            # On disk before the replace: if the rename reached the disk
+            # first, a power cut would leave the template empty or cut short.
+            file.flush()
+            os.fsync(file.fileno())
         delay = _REPLACE_BACKOFF
         for attempt in range(_REPLACE_ATTEMPTS):
             try:

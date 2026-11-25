@@ -2165,6 +2165,54 @@ def test_a_removed_set_is_saved_and_never_exported(fake, work, tmp_path):
         archive.INVALID, service.StartExport, DONE_ID)
 
 
+def test_a_review_is_fsynced_before_the_replace(fake, work, tmp_path,
+                                                monkeypatch):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    events, onTemp = [], []
+    realFsync, realReplace = os.fsync, os.replace
+    jobDir = work / DONE_ID
+
+    def fsync(fd):
+        events.append("fsync")
+        index = os.fstat(fd).st_ino
+        onTemp.append(index in [os.stat(path).st_ino
+                                for path in jobDir.glob("*.tmp")])
+        return realFsync(fd)
+
+    def replace(src, dst):
+        events.append("replace")
+        return realReplace(src, dst)
+
+    monkeypatch.setattr(archive.os, "fsync", fsync)
+    monkeypatch.setattr(archive.os, "replace", replace)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+
+    assert events == ["fsync", "replace"]
+    assert onTemp == [True]
+
+
+def test_a_review_whose_fsync_fails_leaves_the_files_as_they_were(
+        fake, work, tmp_path, monkeypatch):
+    service = ArchiveJobService()
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    jobDir = work / DONE_ID
+    review = (jobDir / "review.json").read_bytes()
+    record = (jobDir / "job.json").read_bytes()
+
+    def broken(fd):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(archive.os, "fsync", broken)
+    _refused(archive.WORK_DIR_UNUSABLE, service.SaveReview, DONE_ID,
+             {"sets": {"2": {"confirmed": True}}})
+
+    assert not list(jobDir.glob("*.tmp"))
+    assert (jobDir / "review.json").read_bytes() == review
+    assert (jobDir / "job.json").read_bytes() == record
+
+
 @pytest.mark.parametrize("content", [
     b"{not json", b"\xff\xfe", json.dumps({"format": 2, "sets": {
         "1": {"base": [120.0, 720.0], "confirmed": True}}}).encode(),
