@@ -27,6 +27,8 @@ import pytest
 
 from src.core.CrewBattleService import CrewBattleService
 from tests.conftest import apply_set
+# The headless shell's boards (none held, a fresh board host).
+from tests.test_crew_operations import headless  # noqa: F401  (fixture)
 
 BOARD = 3
 PREFIX = f"score.{BOARD}"
@@ -727,6 +729,62 @@ def test_a_clear_all_is_exactly_one_publish(autonaApp):
     cost = _revisionCost(autonaApp, _crew().ClearCrew)
 
     assert cost == 1, f"clear all published {cost} times"
+
+
+def _messUpTheCrew():
+    """Everything the Web's reset_match / clear_all put back: a stock down,
+    a member playing, members named over the default count, a best of and a
+    match bar."""
+    _crew().SetMemberCount(4)
+    _nameMember(0, 1, "Alpha")
+    _nameMember(0, 2, "Bravo")
+    _nameMember(1, 1, "Charlie")
+    _crew().AdjustMemberStock(1, 1, -2)
+    _crew().SelectActiveMember(2, 1)
+    _crew().ApplyBestOf(5)
+    _typeMatchField("phase", "Pools")
+    _typeMatchField("match", "Winners Final")
+
+
+@pytest.mark.parametrize("reset", ["reset_match", "clear_all"])
+def test_a_web_reset_is_exactly_one_publish(autonaApp, reset):
+    """The Web's reset_match (full stocks, nobody playing, the match bar and
+    the best of) and clear_all (that, the member counts and the names) are
+    one save cycle: no overlay is sent the crew half reset -- full stocks
+    under names still there, or a reset board with its old best of."""
+    autonaApp.ready(BOARD)
+    _messUpTheCrew()
+
+    cost = _revisionCost(
+        autonaApp, lambda: getattr(autonaApp.web(), reset)(BOARD))
+
+    assert cost == 1, f"the Web's {reset} published {cost} times"
+    assert _get(autonaApp, "best_of") == 0
+    assert _get(autonaApp, "team", 1, "player", 1, "stock") == DEFAULT_STOCK
+
+
+@pytest.mark.parametrize("board", [1, BOARD])
+@pytest.mark.parametrize("reset", ["reset_match", "clear_all"])
+def test_a_web_reset_is_exactly_one_publish_headless(headless, board, reset):
+    """The same on the headless shell, where no board is held, so every
+    save cycle publishes: board 1's reset and its best of, and clear_all's
+    reset, roster and players' clear, are one revision too."""
+    from src import AutonaWebOperations as WebOps
+    if board == BOARD:
+        _messUpTheCrew()
+    else:
+        WebOps.set_route(board, bestOf=5, phase="Pools", match="Winners")
+        WebOps.set_route(board, players=2, characters=2)
+        WebOps.set_scores(board, 2, 1)
+        WebOps.set_team_losers(board, 1, True)
+    headless.settle()
+
+    cost = _revisionCost(headless, lambda: getattr(WebOps, reset)(board))
+
+    assert cost == 1, f"the Web's {reset} on board {board} published " \
+        f"{cost} times"
+    assert headless.get(f"score.{board}.best_of") == 0
+    assert headless.get(f"score.{board}.phase") == ""
 
 
 def test_an_active_toggle_is_exactly_one_publish(autonaApp):

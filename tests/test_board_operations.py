@@ -1067,6 +1067,27 @@ S4T_BEST_OF_CHANGES = {
 }
 
 
+# The Web's reset_match and clear_all are one save cycle each (a SaveBlock
+# around the operation in AutonaWebOperations): the reset and its best of
+# were two, and clear_all's reset, counts and players' clear one or more
+# each -- every one of them a held_state_updated / scoreboard_pending on
+# boards 1/2, and a publish where the board is not held (headless, the crew
+# board). The writes and their order are unchanged, so the state, its key
+# order, the statistics and what 反映 publishes are still the recording's
+# at every step; only `cycles` moves.
+ATOMIC_RESET_CHANGES = {
+    "web reset match": {"cycles": 1},
+    "web clear all": {"cycles": 1},
+}
+
+ATOMIC_RESET_SINGLES_CHANGES = dict(ATOMIC_RESET_CHANGES)
+
+ATOMIC_RESET_BEST_OF_CHANGES = {
+    "web reset match, tracker on": {"cycles": 1},
+    "web clear all, tracker on": {"cycles": 1},
+}
+
+
 # What ADR-005 S4ac-4 changed on purpose, per recorded step, applied last
 # (_assertReplayed). The digests are this tree's: a recording holds only the
 # digest of what 反映 published, so the game rows cannot be taken out of it.
@@ -1748,7 +1769,8 @@ def test_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
                   "operations", "clear operations",
                   _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES,
-                           S3E6_CLEAR_CHANGES, S4T_CLEAR_CHANGES),
+                           S3E6_CLEAR_CHANGES, S4T_CLEAR_CHANGES,
+                           ATOMIC_RESET_CHANGES),
                   trackerChanges=S4AC4_CLEAR_CHANGES)
 
 
@@ -1766,7 +1788,8 @@ def test_singles_clear_operations_publish_the_recorded_state(
                   "singles", "singles clear operations",
                   _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES,
                            S3E6_SINGLES_CLEAR_CHANGES,
-                           S4T_SINGLES_CLEAR_CHANGES),
+                           S4T_SINGLES_CLEAR_CHANGES,
+                           ATOMIC_RESET_SINGLES_CHANGES),
                   trackerChanges=S4AC4_SINGLES_CLEAR_CHANGES)
 
 
@@ -1930,7 +1953,8 @@ def test_best_of_operations_publish_the_recorded_state(
     _replayClears(autonaApp, board, _bestOfSteps(board, autonaApp, client),
                   "operations", "best of operations",
                   _layered(S2E_CHANGES, S3E6_BEST_OF_CHANGES,
-                           S4T_BEST_OF_CHANGES),
+                           S4T_BEST_OF_CHANGES,
+                           ATOMIC_RESET_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH, tree=BEST_OF_TREE,
                   selector="best_of_operations",
                   trackerChanges=S4AC4_BEST_OF_CHANGES)
@@ -1943,7 +1967,8 @@ def test_singles_best_of_operations_publish_the_recorded_state(
                   _bestOfSteps(singlesBoard, autonaApp, client),
                   "singles", "singles best of operations",
                   _layered(S2E_SINGLES_CHANGES, S3E6_SINGLES_BEST_OF_CHANGES,
-                           S4T_BEST_OF_CHANGES),
+                           S4T_BEST_OF_CHANGES,
+                           ATOMIC_RESET_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH,
                   tree=BEST_OF_TREE, selector="best_of_operations",
                   trackerChanges=S4AC4_SINGLES_BEST_OF_CHANGES)

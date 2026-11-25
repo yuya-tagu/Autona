@@ -234,8 +234,8 @@ class BoardHost:
 
     def __init__(self):
         # One operation at a time. A board operation is several core calls
-        # (clear_all is four save cycles, /api/v1's PATCH set up to three
-        # calls in one task), and two callers' threads would interleave
+        # (clear_all is one save cycle of several core calls, /api/v1's
+        # PATCH set up to three calls in one task), and two callers' threads would interleave
         # them. Re-entrant: an operation run here runs others here (PATCH
         # set's task calls set_route).
         #
@@ -1894,21 +1894,24 @@ def reset_scores(scoreboard):
 def _reset_match(scoreboard):
     # The operator's reset (scores + losers flags + round name / phase /
     # pool, ADR-005 S2d), not the set-load pre-pass ClearScore, which keeps
-    # the match bar; then the best of, in a cycle of its own as the
-    # spinbox's was. The crew board (3) answers False to the core operation:
-    # its reset is full stocks and nobody playing plus the same match bar,
-    # in one cycle, then its raw best of (S3e-2). The callers refused any
-    # other board first (`_require_board`).
-    if AutonaActions.instance.ResetMatch(scoreboard):
-        AutonaActions.instance.SetBestOf(scoreboard, 0)
-        return
+    # the match bar; then the best of -- both in one save cycle, so no
+    # overlay is ever sent the reset board with its old set length. The
+    # crew board (3), which the core operation refuses: full stocks and
+    # nobody playing plus the same match bar and its raw best of, in one
+    # cycle too (S3e-2). Asked first, so that its reset opens no block the
+    # core operation would leave empty. The callers refused any other board
+    # first (`_require_board`).
     if _is_crew(scoreboard):
         crew = CrewBattleService(CREW_BOARD)
         with StateManager.SaveBlock():
             crew.ResetStocks()
             AutonaActions.instance.ClearMatchInfo(scoreboard)
-        crew.ApplyBestOf(0)
+            crew.ApplyBestOf(0)
         return
+    with StateManager.SaveBlock():
+        if AutonaActions.instance.ResetMatch(scoreboard):
+            AutonaActions.instance.SetBestOf(scoreboard, 0)
+            return
     _require_board(scoreboard)
 
 
@@ -1957,14 +1960,18 @@ def clear_all(scoreboard):
     # team names (unless the roster shrinks to one player: SetRoster), and
     # the player / character counts change between the reset and the
     # players' clear -- in this order, which decides what the mains end up
-    # as.
+    # as. All three in one save cycle (the blocks inside nest in it): the
+    # writes land in the same order, but the overlays are sent only the
+    # cleared board, never a step on the way (e.g. full stocks under the
+    # names still there).
     host = boardHost
 
     def run():
         _require_board(scoreboard)
-        _reset_match(scoreboard)
-        _reset_counts(host, scoreboard)
-        _clear_players(host, scoreboard)
+        with StateManager.SaveBlock():
+            _reset_match(scoreboard)
+            _reset_counts(host, scoreboard)
+            _clear_players(host, scoreboard)
         return "OK"
 
     return host.Run(run)

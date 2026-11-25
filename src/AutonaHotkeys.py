@@ -177,7 +177,7 @@ class AutonaHotkeys(QObject):
         operation: run by the board host, under its lock, with the active
         board read there too (ADR-005 S4ad review). The board operations run
         on their callers' threads since S4ad, and a hotkey landing between
-        the calls of a web one (clear_all's cycles, a PATCH set's) would
+        the calls of a web one (clear_all's core calls, a PATCH set's) would
         split it; until then they ran on this (the GUI) thread, which kept
         them apart. Read under the lock, the board is the one the operation
         runs on, not one a format switch (also a board operation) replaced

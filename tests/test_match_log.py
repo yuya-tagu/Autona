@@ -457,6 +457,43 @@ def test_a_cleared_board_changes_nothing(board, log):
     assert record["closed"] is False
 
 
+def _afterOneGame(how):
+    """One game played, then the board cleared as the Web's clear_all did:
+    "one publish" is clear_all now (names and 0-0 arrive together), "two
+    publishes" what it was (0-0 under the names, then the names cleared)."""
+    from src import AutonaWebOperations as WebOps
+    _match()
+    _game(1)
+    if how == "one publish":
+        assert WebOps.clear_all(1) == "OK"
+    else:
+        _reset()
+        assert AutonaActions.instance.ClearPlayers(1)
+
+
+@pytest.mark.parametrize("how", ["one publish", "two publishes"])
+def test_clear_all_after_one_game_records_the_same_match(board, log, how):
+    # The best-of-1 played, the board cleared, the next match typed: the
+    # records are the same whether the clear reached the log in one publish
+    # (clear_all now, as the desktop's held publish always was) or two.
+    _afterOneGame(how)
+    _name(1, "CHARLIE")
+    _name(2, "DELTA")
+    _game(2)
+
+    assert _summary(log.records()) == [
+        ("ALPHA", "BRAVO", [1, 0], 1, True),
+        ("CHARLIE", "DELTA", [0, 1], 1, False)]
+
+
+def test_clear_all_after_one_game_keeps_the_game_if_nothing_follows(
+        board, log):
+    # One publish: the cleared board says nothing, so the game stays
+    # recorded at its score (two publishes set it aside at 0-0 instead).
+    _afterOneGame("one publish")
+    assert _summary(log.records()) == [("ALPHA", "BRAVO", [1, 0], 1, False)]
+
+
 def test_a_character_the_catalog_does_not_know_is_its_name(board, log):
     _match()
     StateManager.Set("score.1.team.2.player.1.character",
