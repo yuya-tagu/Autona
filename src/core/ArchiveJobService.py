@@ -17,8 +17,8 @@ not the overlays'. Each job is a folder of the work folder
 default, never under user_data/: the videos are large and the operator's):
 
 - ``<work>/<id>/job.json``: the job (its source, state, outcome, the last
-  log lines and warnings), written whole (temp file + os.replace) when the
-  state changes -- at the start and at the end, not on every progress line;
+  log lines and warnings), written whole (temp file, fsynced, + os.replace)
+  when the state changes -- at the start and at the end, not on every progress line;
 - ``<work>/<id>/results.json``: the results it was given, when it was (a
   reanalysis replaces them: below);
 - ``<work>/<id>/out/``: the worker's output (``sets.json`` and
@@ -960,13 +960,13 @@ class ArchiveJobService:
         return _Normalized(raw, jobId)
 
     def _WriteRecord(self, jobDir, record):
-        """Write `record` to job.json whole (temp file + os.replace).
+        """Write `record` to job.json whole (temp file, fsynced, + os.replace).
         Raises OSError."""
         self._WriteFile(jobDir, JOB_FILE, {"version": 1, **record})
 
     def _WriteFile(self, jobDir, name, content):
         """Write `content` as JSON to the job's file `name` whole (temp
-        file + os.replace). Raises OSError."""
+        file, fsynced, + os.replace). Raises OSError."""
         data = json.dumps(content, ensure_ascii=False, indent=2)
         path = os.path.join(jobDir, name)
         with self._filesLock:
@@ -976,6 +976,12 @@ class ArchiveJobService:
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as file:
                     file.write(data)
+                    # On disk before the replace: if the rename reached the
+                    # disk first, a power cut would leave the file empty or
+                    # cut short (review.json holds the user's hand edits and
+                    # has no other copy).
+                    file.flush()
+                    os.fsync(file.fileno())
                 delay = _REPLACE_BACKOFF
                 for attempt in range(_REPLACE_ATTEMPTS):
                     try:

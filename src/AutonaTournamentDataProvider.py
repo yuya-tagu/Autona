@@ -209,7 +209,8 @@ class AutonaTournamentDataProvider(QObject):
 
     def _CancelEntrants(self):
         """Tell the entrants fetch of the tournament loaded until now to
-        stop: it stops between pages and leaves the player DB's tournament
+        stop: it stops between pages (the page request in flight stops
+        retrying on the same event) and leaves the player DB's tournament
         filter alone -- tags it already handed over included, which the GUI
         thread drops (AutonaPlayerDB.SetTournamentPlayers). Otherwise a
         replaced tournament's fetch kept paging and finally installed its
@@ -352,13 +353,26 @@ class AutonaTournamentDataProvider(QObject):
         tournamentData["initial_load"] = initialLoading
         self.signals.tournament_data_updated.emit(tournamentData)
 
+    def _onPhasesResult(self, phases, provider):
+        """The tournament phases `provider` answered, on the main thread.
+
+        Dropped unless `provider` is still the one loaded, as the tournament
+        data is (_onTournamentDataResult): a replaced tournament's phases
+        arriving late would otherwise overwrite the new one's pool names
+        (MatchNameCandidates) -- or the [] UnloadTournament emitted."""
+        if provider is not self.provider:
+            logger.info("Tournament phases of a tournament no longer loaded: "
+                        "dropped")
+            return
+        self.signals.tournament_phases_updated.emit(phases)
+
     def GetTournamentPhases(self):
-        if self.provider is None:
+        provider = self.provider
+        if provider is None:
             return
         self._Fetch(
-            "tournament phases", self.provider.GetTournamentPhases,
-            AutonaTournamentDataProvider.instance.signals
-            .tournament_phases_updated.emit)
+            "tournament phases", provider.GetTournamentPhases,
+            lambda phases: self._onPhasesResult(phases, provider))
 
     def RunWithProvider(self, job, status=None):
         """Run `job(provider)` as a job of the task executor: the core's way

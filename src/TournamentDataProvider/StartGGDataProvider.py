@@ -42,8 +42,6 @@ class StartGGDataProvider(TournamentDataProvider):
     _request_timeout_secs = 20.0
     _initialized = False
 
-    player_seeds = {}
-
     @staticmethod
     def Initialize():
         """Read the GraphQL query files into the class attributes above.
@@ -102,6 +100,11 @@ class StartGGDataProvider(TournamentDataProvider):
         # Event headcount cached by GetTournamentData; anchors the TOP-N
         # round naming when a set's phase doesn't report numSeeds.
         self.numEntrants = 0
+        # Player id -> initialSeedNum, filled by GetEntrantsWorker. Per
+        # instance: a provider is made for each tournament loaded, and a
+        # class-level dict carried the previous tournament's seeds over to
+        # the next one's players (_parse_participant_new_api's fallback).
+        self.player_seeds = {}
 
     # Queries the provided URL until a proper 200 status code has been provided back
     #
@@ -2183,8 +2186,9 @@ class StartGGDataProvider(TournamentDataProvider):
 
             def stopped():
                 # The app is shutting down, or another tournament was loaded
-                # (ADR-005 S3f-2): stop between pages, saving and announcing
-                # nothing -- what the old pool thread did when the process
+                # (ADR-005 S3f-2): stop before each page (the page request
+                # in flight also stops, via cancel_event), saving and
+                # announcing nothing -- what the old pool thread did when the process
                 # ended mid-fetch. A replaced tournament's fetch kept paging
                 # and installed its players over the new tournament's.
                 if stopping is not None and stopping.is_set():
@@ -2214,7 +2218,10 @@ class StartGGDataProvider(TournamentDataProvider):
                             "page": page,
                         },
                         "query": StartGGDataProvider.EntrantsQuery
-                    }
+                    },
+                    # A replaced tournament's request stops retrying too,
+                    # freeing its job lane, instead of only between pages.
+                    cancel_event=cancel_event,
                 )
 
                 totalPages = deep_get(
@@ -2254,8 +2261,9 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 page += 1
 
-            # A request the shutdown cut short answers {} (no pages), which
-            # ends the loop as if the event were done: still save nothing.
+            # A request the shutdown or the cancel cut short answers {} (no
+            # pages), which ends the loop as if the event were done: still
+            # save nothing.
             if stopped():
                 return
 

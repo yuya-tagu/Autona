@@ -313,7 +313,7 @@ paths:
 - トークンは `WebAccess.Token()` が初回に読みメモリに持つ。変えるのは `RegenerateToken()` だけ。settings.json を読めなかった・壊れているときは
   `""`（LAN の書き込みは全部拒否）
 - Socket.IO は接続を全部受け入れて state を配る（OBS の file:// オーバーレイのため）。書き込み可かは接続時に決める。選手 DB の broadcast は
-  信頼済みの room にだけ
+  信頼済みの room にだけ（Designer のインポート通知 `designer_import_received` も同じ）
 - 静的配信は `StaticPath()` の許可リストだけ（Flask の `static_folder` は無効）。**`out/` への画像の出力も値を信じない**（`StateManager._ExportKind`:
   許可リストの拡張子・`https` + `EXPORT_IMAGE_HOSTS` だけ）。新しい絵の置き場所は `StaticPath()` と `tests/test_state_manager_image_export.py` に足す
 - Web UI の開発サーバー（localhost:3100）は別オリジンなので、書き込みには `?token=` 付きで開く
