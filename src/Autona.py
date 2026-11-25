@@ -764,15 +764,6 @@ class Window(QMainWindow):
         except Exception:
             logger.opt(exception=True).error("Error saving window settings on shutdown")
 
-        try:
-            tmpDir = AutonaResolve("tmp")
-            if os.path.isdir(tmpDir):
-                shutil.rmtree(tmpDir)
-        except Exception:
-            # Files under tmp/ can still be locked by the OS or by another
-            # process; leaving them behind is harmless, blocking exit is not.
-            logger.opt(exception=True).error("Error removing tmp directory on shutdown")
-
         # --- Mandatory teardown ------------------------------------------
         # The web server is stoppable since ADR-005 S3c: werkzeug's
         # shutdown() ends its accept loop, where QThread.terminate() used to
@@ -825,6 +816,22 @@ class Window(QMainWindow):
         except Exception:
             logger.opt(exception=True).error(
                 "Error closing the match log on shutdown")
+
+        # --- Best-effort housekeeping: tmp/ ------------------------------
+        # After the web server and the tasks have stopped (the order is
+        # deliberate; the archive worker does not use tmp/): until then a render job can still be writing
+        # tmp/thumbnail/preview.png or tmp/result/result_preview.png and a
+        # request can be reading one, which made the removal stop half way
+        # (WinError 32) or let a job recreate tmp/ right after it.
+        try:
+            tmpDir = AutonaResolve("tmp")
+            if os.path.isdir(tmpDir):
+                shutil.rmtree(tmpDir)
+        except Exception:
+            # Files under tmp/ can still be locked by the OS or by another
+            # process (or a task that did not stop in time); leaving them
+            # behind is harmless, blocking exit is not.
+            logger.opt(exception=True).error("Error removing tmp directory on shutdown")
 
         try:
             # allWindows() returns QWindow, not QWidget: comparing against
