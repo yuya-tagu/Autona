@@ -885,8 +885,8 @@ class ThumbnailService(RenderLane):
         target = Path(OUTPUT_DIRECTORY) / f"{stem}.png"
         ImageImport.WriteFile(target, png)
         ImageImport.WriteFile(target.with_suffix(".jpg"), jpg)
-        logger.info(f"Thumbnail saved as {OUTPUT_DIRECTORY}/{stem}.png "
-                    f"and {OUTPUT_DIRECTORY}/{stem}.jpg")
+        # No stem: it carries the players' names.
+        logger.info("Thumbnail saved with its .jpg")
         if self._prune is not None:
             # The file just written is protected.
             self._prune(OUTPUT_DIRECTORY, OUTPUT_PATTERNS, OUTPUT_KEEP,
