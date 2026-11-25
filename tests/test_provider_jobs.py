@@ -967,6 +967,33 @@ def test_the_entrants_pages_get_the_fetch_s_cancel(
     assert len(given) == 2 and all(event is cancel for event in given)
 
 
+@pytest.mark.parametrize("call", [
+    lambda provider, cancel: provider.GetTournamentData(cancel_event=cancel),
+    lambda provider, cancel: provider.GetTournamentPhases(
+        cancel_event=cancel),
+    lambda provider, cancel: provider.GetStations(cancel_event=cancel),
+    lambda provider, cancel: provider.GetAnalysisPhaseGroup(
+        1, cancel_event=cancel),
+], ids=["data", "phases", "stations", "analysis phase group"])
+def test_the_tournament_requests_get_the_fetch_s_cancel(
+        startgg, executor, monkeypatch, call):
+    """A replaced tournament's request stops retrying on the cancel event
+    its fetch was given, freeing its job lane (up to five attempts of 20
+    seconds otherwise, for an answer dropped anyway)."""
+    executor()
+    cancel = threading.Event()
+    given = []
+
+    def query(*args, cancel_event=None, **kwargs):
+        given.append(cancel_event)
+        return {}
+
+    monkeypatch.setattr(startgg, "QueryRequests", query)
+
+    call(startgg, cancel)
+    assert given == [cancel]
+
+
 def test_loading_another_tournament_cancels_the_entrants_fetch(
         adapter, executor, monkeypatch):
     """Each tournament's entrants fetch has a cancel event of its own, set
@@ -992,6 +1019,107 @@ def test_loading_another_tournament_cancels_the_entrants_fetch(
 
     assert len(asked) == 3
     assert all(event.is_set() for event in asked)
+
+
+class _Recording:
+    """A start.gg provider put in place by LoadTournament: each request
+    records (provider, what, cancel event) and answers at once -- what a
+    cancelled request answers."""
+
+    asked = None
+
+    def __init__(self, url, parent):
+        self.url = url
+        self.videogame = None
+
+    def _Ask(self, what, cancel_event):
+        self.asked.append((self, what, cancel_event))
+
+    def GetTournamentData(self, progress_callback=None, cancel_event=None):
+        self._Ask("data", cancel_event)
+        return {}
+
+    def GetTournamentPhases(self, progress_callback=None, cancel_event=None):
+        self._Ask("phases", cancel_event)
+        return []
+
+    def GetEntrants(self, cancel_event=None):
+        self._Ask("entrants", cancel_event)
+
+
+@pytest.fixture
+def recording(adapter, monkeypatch):
+    """LoadTournament builds _Recording providers; what they were asked,
+    in order. Nothing of the match list or set selection is forgotten."""
+    asked = []
+    monkeypatch.setattr(_Recording, "asked", asked)
+    monkeypatch.setattr("src.AutonaTournamentDataProvider.StartGGDataProvider",
+                        _Recording)
+    for name in ("_ForgetAnalysis", "_ForgetSetSelection"):
+        monkeypatch.setattr(adapter, name, lambda: None)
+    monkeypatch.setattr(adapter, "_loaded", None)
+    return asked
+
+
+OTHER_URL = "https://www.start.gg/tournament/t/event/f"
+
+
+def test_a_replaced_tournament_s_data_phases_and_entrants_are_cancelled(
+        adapter, executor, recording):
+    """Every request of the tournament replaced is told to stop -- its data
+    and phases too, not only its entrants: one event per provider, set once
+    another tournament (or none) is loaded. The new one's is not."""
+    jobs = executor(stepped=True)
+
+    adapter.LoadTournament(URL)
+    first = adapter.provider
+    adapter.LoadTournament(OTHER_URL)
+    second = adapter.provider
+    assert jobs.queued() == 4
+    assert jobs.run_next() and jobs.run_next()   # the first one's data, phases
+
+    of = {provider: {what: event for asker, what, event in recording
+                     if asker is provider}
+          for provider in (first, second)}
+    assert set(of[first]) == {"data", "phases", "entrants"}
+    assert len({id(event) for event in of[first].values()}) == 1
+    assert all(event.is_set() for event in of[first].values())
+    [secondEvent] = of[second].values()           # its entrants
+    assert secondEvent is not of[first]["data"]
+    assert not secondEvent.is_set()
+
+    adapter.UnloadTournament()
+    assert secondEvent.is_set()
+    assert jobs.run_next() and jobs.run_next()   # the second one's
+    assert {what for asker, what, event in recording
+            if asker is second and event is secondEvent} == {
+        "data", "phases", "entrants"}
+    assert adapter._loaded is None
+
+
+def test_a_refresh_of_a_replaced_tournament_is_cancelled_and_over(
+        adapter, executor, recording):
+    """RefreshTournamentData's fetch gets the loaded provider's event: once
+    the tournament is replaced, it stops, and the refresh is still over
+    (done(), on the GUI thread)."""
+    jobs = executor(stepped=True)
+    adapter.LoadTournament(URL)
+    first = adapter.provider
+    dones = []
+    assert adapter.RefreshTournamentData(
+        lambda: dones.append(_onMain())) is True
+    adapter.LoadTournament(OTHER_URL)
+
+    for _ in range(3):                             # data, phases, the refresh
+        assert jobs.run_next()
+    _pump(lambda: dones)
+
+    events = [event for asker, what, event in recording
+              if asker is first and what == "data"]
+    assert len(events) == 2                        # the load's, the refresh's
+    assert events[0] is events[1] and events[1].is_set()
+    assert dones == [True]
+    adapter.UnloadTournament()
 
 
 def test_a_replaced_tournaments_players_are_dropped_on_the_gui_thread(
