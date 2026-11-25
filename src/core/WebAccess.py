@@ -749,7 +749,7 @@ class RefusalLog:
                 if not self._overflowed:
                     self._overflowed = True
                     logger.warning(
-                        "webserver: too many distinct refused requests; "
+                        "webserver: too many distinct entries; "
                         "further ones are logged at debug level")
                 return False
             self._seen.add(key)

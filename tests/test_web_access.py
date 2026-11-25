@@ -3018,3 +3018,89 @@ def test_open_in_browser_without_a_usable_token_carries_none(
     assert _browserScoreboard(monkeypatch) == (
         f"http://{LAN_HOST}:5107/scoreboard")
     assert saved == []
+
+
+# ── Log flood and body limits (non-functional hardening) ─────────────────
+
+@pytest.fixture
+def records():
+    messages = []
+    sink = logger.add(lambda m: messages.append(m), level="DEBUG")
+    yield messages
+    logger.remove(sink)
+
+
+def test_a_missing_static_file_warns_once(server, records, monkeypatch):
+    from src.AutonaWebServer import WebServer
+
+    monkeypatch.setattr(WebServer, "_missing", WebAccess.RefusalLog())
+    url = "/layout/__autona_test_missing__.png"
+    assert not (server.root / "layout" / "__autona_test_missing__.png").exists()
+    client = _client(server)
+    for _ in range(2):
+        response = client.get(url)
+        assert response.status_code == 404
+        assert response.get_data(as_text=True) == "File not found"
+    levels = [m.record["level"].name for m in records
+              if "__autona_test_missing__" in m.record["message"]
+              and "[FLASK]" not in m.record["message"]]
+    assert "ERROR" not in levels
+    assert levels.count("WARNING") == 1
+
+
+def test_repeated_socketio_handler_errors_log_one_traceback(
+        server, records, monkeypatch):
+    from src.AutonaWebServer import WebServer
+
+    monkeypatch.setattr(WebServer, "_ws_errors", WebAccess.RefusalLog())
+    ws = _ws(server)
+    ws.get_received()
+    for _ in range(2):
+        # orjson.loads() takes a str / bytes, not a dict.
+        ws.emit("team_scoreup", {"scoreboardNumber": "1"})
+    errors = [m for m in records if m.record["level"].name == "ERROR"]
+    repeats = [m for m in records if m.record["level"].name == "DEBUG"
+               and "repeated" in m.record["message"]]
+    assert len(errors) == 1
+    assert len(repeats) == 1
+
+
+@pytest.fixture
+def designer(server, monkeypatch):
+    from src.AutonaWebServer import AutonaDesignerService, WebServer
+
+    saved = []
+    monkeypatch.setattr(WebServer, "_authorize_designer_request",
+                        staticmethod(lambda: None))
+    monkeypatch.setattr(WebServer, "_authorize_designer_import_request",
+                        staticmethod(lambda: None))
+    monkeypatch.setattr(AutonaDesignerService, "save_project",
+                        staticmethod(lambda p: saved.append(p) or {"ok": 1}))
+    monkeypatch.setattr(AutonaDesignerService, "receive_import",
+                        staticmethod(lambda p: saved.append(p) or {"ok": 2}))
+    server.saved = saved
+    return server
+
+
+@pytest.mark.parametrize("url", ["/api/designer/projects",
+                                 "/api/designer/imports"])
+def test_a_chunked_designer_post_is_refused_unread(designer, url):
+    import io
+
+    client = _client(designer)
+    response = client.post(
+        url, input_stream=io.BytesIO(b'{"project": {}}'),
+        content_type="application/json",
+        headers={"Transfer-Encoding": "chunked"},
+        environ_overrides={"wsgi.input_terminated": True})
+    assert response.status_code == 411
+    assert designer.saved == []
+
+
+@pytest.mark.parametrize("url", ["/api/designer/projects",
+                                 "/api/designer/imports"])
+def test_a_designer_post_with_a_length_still_goes_through(designer, url):
+    client = _client(designer)
+    response = client.post(url, json={"project": {}})
+    assert response.status_code == 200
+    assert len(designer.saved) == 1
