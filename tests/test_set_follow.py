@@ -1205,6 +1205,80 @@ def test_applying_the_same_payload_again_writes_no_bracket_type_or_upset_factor(
     assert autonaApp.get("score.1.upset_factor") == upset
 
 
+def _updateWith(autonaApp, mutate):
+    """Load set 1001, then answer an update for it that `mutate` reshaped,
+    with the database merge on; returns what ApplySetPayload was handed
+    (None when it was not reached)."""
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core.SetFollowService import SetFollowService
+
+    service = _setFollow()
+    service.LoadSet({"id": 1001})
+    _drain(autonaApp)
+    data = copy.deepcopy(
+        AutonaTournamentDataProvider.instance.provider.GetMatch(1001))
+    mutate(data)
+    handed = []
+    real = SetFollowService.ApplySetPayload
+
+    def spy(self, payload):
+        handed.append(payload)
+        return real(self, payload)
+
+    with patch.object(SetFollowService, "ApplySetPayload", spy):
+        service.UpdateSetData(data)
+    _drain(autonaApp)
+    return handed[0] if handed else None
+
+
+def test_the_database_merge_leaves_an_empty_team_as_it_is(
+        autonaApp, headless, settings):
+    """disable_overwrite: a set whose second side is not decided yet
+    ([player], []) still loads."""
+    settings["general.disable_overwrite"] = True
+
+    def mutate(data):
+        data["entrants"] = [data["entrants"][0], []]
+
+    handed = _updateWith(autonaApp, mutate)
+    assert handed is not None
+    assert handed["entrants"][1] == []
+    assert autonaApp.get("score.1.team.1.player.1.name") == "ALPHA"
+    _setFollow().StopFollowing(forget=True)
+
+
+@pytest.mark.parametrize("missing", ["absent", "none"])
+def test_the_database_merge_survives_a_set_without_entrants(
+        autonaApp, headless, settings, missing):
+    settings["general.disable_overwrite"] = True
+
+    def mutate(data):
+        if missing == "absent":
+            data.pop("entrants", None)
+        else:
+            data["entrants"] = None
+
+    assert _updateWith(autonaApp, mutate) is not None
+    _setFollow().StopFollowing(forget=True)
+
+
+def test_the_database_merge_hands_the_state_a_copy(
+        autonaApp, headless, settings, playerDB):
+    """What the merge takes from the database is a copy: changing it later
+    leaves the database's record alone."""
+    players, _ = playerDB
+    players["ALPHA"] = {"gamerTag": "ALPHA", "mains": [["Peach", 0]]}
+    settings["general.disable_overwrite"] = True
+
+    handed = _updateWith(autonaApp, lambda data: None)
+    assert handed is not None
+    merged = handed["entrants"][0][0]
+    assert merged["mains"] == [["Peach", 0]]
+    merged["mains"].append(["Luigi", 0])
+    assert players["ALPHA"]["mains"] == [["Peach", 0]]
+    _setFollow().StopFollowing(forget=True)
+
+
 def test_a_web_load_right_after_a_lookup_is_checked_replaces_it(
         autonaApp, headless, provider):
     """The stream lookup's answer is checked where the board's operations

@@ -348,6 +348,37 @@ def test_a_set_is_drawn_without_the_tournament_loaded_now(drawing,
         {"background_source": "banner"}) == thumbnail_module.BANNER_PATH
 
 
+def test_a_base_read_once_gives_each_set_its_own_copy(drawing, monkeypatch):
+    SettingsManager.settings["thumbnail_config"] = {
+        "game": {"tgame": {"zoom": 120}}}
+    data = thumbs.SetData(KAPPA_A, "Fake Cup", _Catalog())
+    service = drawing.service
+    plain = service.SetPayload(data, "file:///C:/w/f.jpg")
+
+    reads = {"templates": 0, "settings": 0}
+    real = LayoutCatalog.Templates
+    stored = thumbnail_module._StoredConfig
+
+    def templates(*args, **kwargs):
+        reads["templates"] += 1
+        return real(*args, **kwargs)
+
+    def settings():
+        reads["settings"] += 1
+        return stored()
+
+    monkeypatch.setattr(LayoutCatalog, "Templates", templates)
+    monkeypatch.setattr(thumbnail_module, "_StoredConfig", settings)
+    base = service.SetBase()
+    first = service.SetPayload(data, "file:///C:/w/f.jpg", base=base)
+    second = service.SetPayload(data, "file:///C:/w/f.jpg", base=base)
+    assert reads == {"templates": 1, "settings": 1}
+    assert first == plain and second == plain
+    assert first[1] is not second[1]
+    assert first[2] is not second[2] and first[2] == second[2]
+    assert first[1]["game"] is not second[1]["game"]
+
+
 def test_a_set_is_drawn_by_the_renderer_outside_the_lane(drawing):
     payload = drawing.service.SetPayload(
         thumbs.SetData(KAPPA_A, "", _Catalog()))
@@ -432,6 +463,28 @@ def test_the_confirmed_sets_thumbnails_are_drawn_on_their_frames(
     # The job's other files are as they were.
     assert sorted(p.name for p in jobDir.iterdir()) == [
         "job.json", "out", "results.json", "review.json", "thumbs"]
+
+
+def test_a_run_reads_the_template_and_settings_once(
+        service, work, fake, tmp_path, drawing, monkeypatch):
+    _ready(work, tmp_path, service)
+    reads = {"templates": 0, "settings": 0}
+    real = LayoutCatalog.Templates
+    stored = thumbnail_module._StoredConfig
+
+    def templates(*args, **kwargs):
+        reads["templates"] += 1
+        return real(*args, **kwargs)
+
+    def settings():
+        reads["settings"] += 1
+        return stored()
+
+    monkeypatch.setattr(LayoutCatalog, "Templates", templates)
+    monkeypatch.setattr(thumbnail_module, "_StoredConfig", settings)
+    service.StartThumbs(DONE_ID)
+    assert reads == {"templates": 1, "settings": 1}
+    _thumbs_ended(service, drawing)
 
 
 def test_the_settings_background_leaves_the_frames_out(

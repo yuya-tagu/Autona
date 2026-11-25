@@ -245,14 +245,14 @@ def ResolveTemplateId(settings, entries=None):
         else DEFAULT_TEMPLATE_ID
 
 
-def _Template(settings):
+def _Template(settings, entries=None):
     """The template file `settings` names (its package's manifest's
     `template`), with its id (the renderer picks the template's page by it).
     Raises OSError when it cannot be opened (the catalog lists no package for
     it), ValueError when it is not a JSON object: whatever reading it raises
     (a decode error, RecursionError on absurd nesting) is that, as one
     unreadable settings.json is to the catalog."""
-    entries = TemplateEntries()
+    entries = TemplateEntries() if entries is None else entries
     templateId = ResolveTemplateId(settings, entries)
     entry = entries.get(templateId)
     if entry is None:
@@ -723,10 +723,10 @@ class ThumbnailService(RenderLane):
         no characters)."""
         return self._Payload(_StoredConfig(), preview, games, board)
 
-    def _Payload(self, settings, preview, games, board):
+    def _Payload(self, settings, preview, games, board, entries=None):
         """BuildPayload's, from `settings`: a copy of the config (never the
         live one), which the payload's config shares its games with."""
-        template = _Template(settings)
+        template = _Template(settings, entries)
 
         data = None
         try:
@@ -762,7 +762,7 @@ class ThumbnailService(RenderLane):
 
         return data, _Config(settings, board), template
 
-    def RenderPayload(self, preview=False, games=None, board=1):
+    def RenderPayload(self, preview=False, games=None, board=1, entries=None):
         """What a render is given: BuildPayload's payload with the settings as
         Settings() reads them (_AsRead), a config from before the background
         selector moved to it (what GET says it is). The v1 runs and the two
@@ -777,7 +777,8 @@ class ThumbnailService(RenderLane):
         render never fails, or blocks on the file, over a setting nobody
         changed (S4p review)."""
         settings = _WithBackgroundSource(_StoredConfig())
-        data, config, template = self._Payload(settings, preview, games, board)
+        data, config, template = self._Payload(
+            settings, preview, games, board, entries)
         return data, _AsRead(config, data), template
 
     def PreviewPayload(self, games=None) -> dict:
@@ -791,9 +792,10 @@ class ThumbnailService(RenderLane):
         (Preview), not live: the page shows that one. Writes nothing; raises
         what BuildPayload raises (OSError / ValueError: the template cannot
         be read)."""
+        entries = TemplateEntries()
         data, config, template = self.RenderPayload(
-            preview=True, games=games, board=RENDER_BOARD)
-        entry = TemplateEntries().get(template["template_id"])
+            preview=True, games=games, board=RENDER_BOARD, entries=entries)
+        entry = entries.get(template["template_id"])
         if entry is None:
             raise FileNotFoundError(
                 f"no thumbnail template {template['template_id']!r}")
@@ -811,7 +813,14 @@ class ThumbnailService(RenderLane):
 
     # ── a set that is not the board's (ADR-006 A6) ───────────────────────
 
-    def SetPayload(self, data, background=None):
+    def SetBase(self):
+        """(settings, template) as SetPayload reads them: for StartThumbs to
+        read once per run; SetPayload copies it for each set. Raises OSError /
+        ValueError as SetPayload does."""
+        settings = _WithBackgroundSource(_StoredConfig())
+        return settings, _Template(settings)
+
+    def SetPayload(self, data, background=None, base=None):
         """What a render of a set that is not on a board is given (the
         archive clipper's thumbnails, ADR-006 A6): (`data`, config,
         template), `data` of the state's shape (score.1, game,
@@ -823,9 +832,15 @@ class ThumbnailService(RenderLane):
         the default banner. `background` (a file URL) is the background in
         place of the settings' one; None: the settings'. Reads settings.json
         and the template; writes nothing. Raises OSError / ValueError when
-        the template cannot be read."""
-        settings = _WithBackgroundSource(_StoredConfig())
-        template = _Template(settings)
+        the template cannot be read. `base` (SetBase's): read nothing, copy
+        it (_Config shares games and _AsRead edits in place, so sets must not
+        share it)."""
+        if base is None:
+            settings = _WithBackgroundSource(_StoredConfig())
+            template = _Template(settings)
+        else:
+            settings = copy.deepcopy(base[0])
+            template = copy.deepcopy(base[1])
         config = _AsRead(_Config(settings, RENDER_BOARD), data)
         config["theme_color"], config["accent_color"] = _SetColors()
         if background is not None:

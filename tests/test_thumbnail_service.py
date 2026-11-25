@@ -2158,6 +2158,19 @@ def test_the_live_preview_payload_is_the_previews(match):
     json.dumps(answer)
 
 
+def test_the_live_preview_reads_the_template_catalog_once(match, monkeypatch):
+    real = LayoutCatalog.Templates
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(LayoutCatalog, "Templates", spy)
+    match.service.PreviewPayload()
+    assert len(calls) == 1
+
+
 def test_the_live_preview_leaves_out_an_uploaded_background(match):
     match.service.ImportBackground(_image_bytes())
     _data, config, _template = match.service.RenderPayload(preview=True)
