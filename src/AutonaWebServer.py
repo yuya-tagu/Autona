@@ -905,8 +905,14 @@ def _build_web_app():
             # file_request names a refused file.
             WebServer._log_static_refusal(request.path.lstrip("/"))
             return "File not found", 404
-        return send_file(os.path.join(LayoutCatalog.AppDirectory(),
-                                      'web/build/index.html'))
+        # Revalidated each time (ETag, 304 when unchanged): an update
+        # replaces index.html in place, and a heuristically cached old one
+        # points at bundles that are gone.
+        response = send_file(os.path.join(LayoutCatalog.AppDirectory(),
+                                          'web/build/index.html'),
+                             max_age=0)
+        response.cache_control.no_cache = True
+        return response
 
 
     # A file an off-screen render holds for its page (ADR-007 D4,
@@ -961,21 +967,29 @@ def _build_web_app():
 
             # Case-insensitive: the Windows filesystem serves
             # /Layout/Custom/... too, and it must not be cached either.
-            is_designer_file = filename.lower().startswith(
+            lowered = filename.lower()
+            is_designer_file = lowered.startswith(
                 ("layout/custom/", "layout/designer_runtime/"))
             # A template package's file (ADR-008 D7 R2): with the policy
             # that keeps its page to its origin, as the off-screen
             # renderer's filter does (the live preview has none); and not
             # cached, as a design's: the operator edits it in place.
             parts = filename.split("/")
-            is_template_file = len(parts) > 2 \
-                and parts[0].lower() == "layout" \
-                and LayoutCatalog.IsTemplateFolder(parts[1])
+            is_template_file = len(parts) > 2                 and parts[0].lower() == "layout"                 and LayoutCatalog.IsTemplateFolder(parts[1])
             # The shared scripts the templates and overlays load (autona.js
             # above all): an app update replaces them in place, and a page
             # that read the old one beside a new app (the live preview's
             # messages) breaks. Revalidated each time: a 304 when unchanged.
-            is_shared_include = filename.lower().startswith("layout/include/")
+            # The kuromoji dictionary is fixed with the package, nothing
+            # that mixes with an old version: the default max-age.
+            is_shared_include = (
+                lowered.startswith("layout/include/")
+                and not lowered.startswith("layout/include/kuromoji/"))
+            # The Web UI build: static/ has hashed names (immutable); the
+            # other files keep their name and change with each build.
+            is_build_static = lowered.startswith("web/build/static/")
+            is_build_other = (
+                lowered.startswith("web/build/") and not is_build_static)
             # From the app's directory, the catalog's (LayoutCatalog.
             # AppDirectory), not the process's current one: an off-screen
             # render loads the page the catalog listed (ADR-007 D4).
@@ -984,20 +998,24 @@ def _build_web_app():
                 filename,
                 as_attachment=filename.endswith('.gz'),
                 mimetype=mimetype,
-                max_age=0 if is_designer_file or is_template_file
-                or is_shared_include else 86400
+                max_age=31536000 if is_build_static
+                else 0 if is_designer_file or is_template_file
+                or is_shared_include or is_build_other else 86400
             )
             if is_template_file:
                 response.headers.add("Content-Security-Policy",
                                      WebAccess.TEMPLATE_CONTENT_POLICY)
-            if is_template_file or is_shared_include:
+            if (is_template_file or is_shared_include or is_build_other
+                    or is_designer_file):
+                # Files whose name is fixed but whose content gets replaced
+                # (templates, shared includes, web/build outside static/,
+                # Designer output) are revalidated each time: the ETag
+                # (mtime) gives a 304 when unchanged and the new version at
+                # once when replaced. no-store would keep Chromium / OBS CEF
+                # from storing it at all, so no 304.
                 response.cache_control.no_cache = True
-            if is_designer_file:
-                # Designer saves overwrite project.json and PNG assets in
-                # place, and an app update replaces the shared runtime every
-                # design loads. OBS must revalidate all of them.
-                response.cache_control.no_store = True
-                response.cache_control.max_age = 0
+            if is_build_static:
+                response.cache_control.immutable = True
             return response
 
         except NotFound:
