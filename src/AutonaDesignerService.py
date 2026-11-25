@@ -36,6 +36,10 @@ from .core import LayoutCatalog
 from .core.SettingsManager import SettingsManager, SettingsUnreadable
 
 
+_REPLACE_ATTEMPTS = 4
+_REPLACE_BACKOFF = 0.02
+
+
 class DesignerProjectError(ValueError):
     pass
 
@@ -466,6 +470,9 @@ class AutonaDesignerService:
             raise DesignerProjectError(
                 "OBSランタイム（layout/designer_runtime）が見つかりません。")
 
+        # Pure validation/decoding (no filesystem): fail before any mkdir.
+        decoded_assets = cls._validate_assets_for_project(project, assets)
+
         slug = cls.slugify(project["name"])
         directory = cls._project_directory(slug)
         if directory.exists() and directory.is_symlink():
@@ -486,7 +493,6 @@ class AutonaDesignerService:
             raise DesignerProjectError("assetsがシンボリックリンクです。")
         asset_directory.mkdir(exist_ok=True)
 
-        decoded_assets = cls._validate_assets_for_project(project, assets)
         project_to_write = json.loads(json.dumps(project, ensure_ascii=False))
         for layer in project_to_write["layers"]:
             style = layer.get("gameHistoryStyle")
@@ -566,10 +572,12 @@ class AutonaDesignerService:
     @classmethod
     def latest_import(cls) -> dict[str, Any]:
         with cls._import_lock:
-            if cls._latest_import is None:
+            imported = cls._latest_import
+            if imported is None:
                 raise FileNotFoundError("Figmaからのインポートはありません。")
-            return json.loads(json.dumps(
-                cls._latest_import, ensure_ascii=False))
+        # Held dicts are never mutated after receive_import (only replaced or
+        # popped), so copying outside the lock is safe.
+        return json.loads(json.dumps(imported, ensure_ascii=False))
 
     @classmethod
     def _validate_project(cls, project: Any) -> None:
@@ -740,7 +748,9 @@ class AutonaDesignerService:
             imported = cls._imports.get(import_id)
             if imported is None:
                 raise FileNotFoundError("インポートが見つかりません。")
-            return json.loads(json.dumps(imported, ensure_ascii=False))
+        # Held dicts are never mutated after receive_import (only replaced or
+        # popped), so copying outside the lock is safe.
+        return json.loads(json.dumps(imported, ensure_ascii=False))
 
     @classmethod
     def _decode_asset(
@@ -902,7 +912,18 @@ class AutonaDesignerService:
                 temp_file.write(data)
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
-            os.replace(temp_name, path)
+            # A viewer (OBS, AV scanner) can briefly hold the target open on
+            # Windows; only PermissionError is retried, other errors raise.
+            delay = _REPLACE_BACKOFF
+            for attempt in range(_REPLACE_ATTEMPTS):
+                try:
+                    os.replace(temp_name, path)
+                    break
+                except PermissionError:
+                    if attempt == _REPLACE_ATTEMPTS - 1:
+                        raise
+                    time.sleep(delay)
+                    delay *= 2
         finally:
             try:
                 os.unlink(temp_name)
