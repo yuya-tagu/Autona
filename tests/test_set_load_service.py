@@ -156,6 +156,26 @@ def test_a_payload_without_a_pool_key_leaves_the_pool_alone(service):
     assert SM.Get(f"{PREFIX}.pool") == "Pool A"
 
 
+def test_non_text_match_fields_are_skipped(service):
+    service.ApplyMatchInfo({
+        "round_name": "WF", "tournament_phase": "Bracket",
+        "tournament_pool": "Pool A"})
+    service.ApplyMatchInfo({
+        "tournament_phase": {"a": 1}, "round_name": [1, 2],
+        "tournament_pool": {"x": 1}})
+    assert SM.Get(f"{PREFIX}.match") == "WF"
+    assert SM.Get(f"{PREFIX}.phase") == "Bracket"
+    assert SM.Get(f"{PREFIX}.pool") == "Pool A"
+
+
+def test_a_number_is_written_as_text_and_a_bool_is_not(service):
+    service.ApplyMatchInfo({"round_name": 3})
+    assert SM.Get(f"{PREFIX}.match") == "3"
+    service.ApplyMatchInfo({"round_name": True, "tournament_phase": True})
+    assert SM.Get(f"{PREFIX}.match") == "3"
+    assert SM.Get(f"{PREFIX}.phase") not in (True, "True")
+
+
 # ── scores ───────────────────────────────────────────────────────────────
 
 def test_scores_land_on_their_own_teams(service):

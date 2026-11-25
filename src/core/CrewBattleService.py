@@ -67,6 +67,17 @@ from . import StateSchema as schema
 from .StateManager import StateManager
 
 
+def _MatchText(value):
+    """A match-bar field value as text, or None when it is not text-like."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
 class CrewMember(NamedTuple):
     """One roster row as the widget currently shows it."""
     name: str = ""
@@ -582,7 +593,12 @@ class CrewBattleService:
             value = data.get(payloadKey)
             if value is None:
                 continue
-            written |= self._SetIfChanged(f"{self.prefix}.{field}", value)
+            text = _MatchText(value)
+            if text is None:
+                logger.warning("match info: {} is {}, skipped",
+                               payloadKey, type(value).__name__)
+                continue
+            written |= self._SetIfChanged(f"{self.prefix}.{field}", text)
         return bool(written)
 
     def ApplySetData(self, data):
