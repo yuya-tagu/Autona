@@ -201,7 +201,7 @@ def _validate_team(t):
 def _require_int(value, name):
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ApiError(INVALID_ARGUMENT, f"{name} must be an integer", 400)
 
 
@@ -1127,6 +1127,14 @@ def score_adjust(n, t):
     if "delta" not in body:
         raise ApiError(INVALID_ARGUMENT, "delta is required", 400)
     delta = _require_int(body.get("delta"), "delta")
+    # Cap |delta| at the score span. Stepping one point at a time with a
+    # clamp per step ends on the same value as a capped delta: once
+    # |delta| >= span, every start in [MIN, MAX] pins to the end it moves
+    # toward. This keeps a huge delta from holding the state lock for hours.
+    # The start is in [MIN, MAX] because every score writer clamps and
+    # startup's ResetScoreRoot seeds the score inside the range.
+    span = AutonaActions.SCORE_MAX - AutonaActions.SCORE_MIN
+    delta = max(-span, min(span, delta))
 
     def apply():
         # |delta| single-step adjustments (spec §6.1). Synchronous since
