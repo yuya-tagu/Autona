@@ -29,6 +29,13 @@ _ABSENT = object()
 _UTF8_BOM = b"\xef\xbb\xbf"
 
 
+# os.replace of the saved file can hit a sharing violation on Windows when an
+# antivirus scan or an indexer still holds the file written just before (the
+# launch saves twice in a row). Same values as PlayerDB.
+_REPLACE_ATTEMPTS = 4
+_REPLACE_BACKOFF = 0.02
+
+
 def _WithoutBom(raw):
     return raw[len(_UTF8_BOM):] if raw.startswith(_UTF8_BOM) else raw
 
@@ -144,7 +151,16 @@ class SettingsManager:
             try:
                 with os.fdopen(fd, 'wb') as file:
                     file.write(data)
-                os.replace(tmp, path)
+                delay = _REPLACE_BACKOFF
+                for attempt in range(_REPLACE_ATTEMPTS):
+                    try:
+                        os.replace(tmp, path)
+                        break
+                    except OSError:
+                        if attempt == _REPLACE_ATTEMPTS - 1:
+                            raise
+                        time.sleep(delay)
+                        delay *= 2
             except BaseException:
                 try:
                     os.remove(tmp)
