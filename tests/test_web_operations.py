@@ -1847,6 +1847,134 @@ def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
     assert calls == [("open", "2"), ("thumb", "1", "jpg")]
 
 
+def test_concurrent_thumbnail_requests_render_one_at_a_time(monkeypatch):
+    """Two requests' threads at once: the second waits for the first's
+    render rather than queueing its task onto the GUI thread, where it would
+    run inside the first's nested event loop (renderSync) and nest another;
+    each gets its own answer."""
+    active = [0]
+    peak = [0]
+    count = threading.Lock()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def render(board, file_format):
+        with count:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        entered.set()
+        release.wait(5)
+        time.sleep(0.02)
+        with count:
+            active[0] -= 1
+        return f"/thumb-{board}.{file_format}"
+
+    monkeypatch.setattr(WebOps, "renderThumbnail", render)
+    answers = {}
+
+    def request(board):
+        answers[board] = WebOps.get_thumbnail(board, "png")
+
+    workers = [threading.Thread(target=request, args=(board,))
+               for board in (1, 2)]
+    for worker in workers:
+        worker.start()
+    try:
+        assert entered.wait(5)
+        time.sleep(0.2)   # the other request has reached the lock by now
+        assert active[0] == 1
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(5)
+
+    assert not any(worker.is_alive() for worker in workers)
+    assert peak[0] == 1
+    assert answers == {1: "/thumb-1.png", 2: "/thumb-2.png"}
+    assert not WebOps._thumbnailDrawLock.locked()
+
+
+def test_a_thumbnail_request_refused_at_shutdown_releases_the_lock(
+        monkeypatch):
+    from src.Helpers.AutonaQtHelper import GuiMarshalAborted
+
+    def render(board, file_format):
+        raise GuiMarshalAborted("shutting down")
+
+    monkeypatch.setattr(WebOps, "renderThumbnail", render)
+    outcome = {}
+
+    def request():
+        try:
+            WebOps.get_thumbnail(1, "png")
+        except NotAvailable as error:
+            outcome["error"] = error
+
+    worker = threading.Thread(target=request)
+    worker.start()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert isinstance(outcome.get("error"), NotAvailable)
+    assert not WebOps._thumbnailDrawLock.locked()
+
+
+def test_a_thumbnail_request_at_shutdown_is_refused_without_the_lock(
+        monkeypatch):
+    """Once the app is shutting down the request answers 503 at once, even
+    while another request holds the draw lock."""
+    import types
+    monkeypatch.setattr(WebOps, "QCoreApplication",
+                        types.SimpleNamespace(instance=lambda: object()))
+    monkeypatch.setattr(WebOps.AutonaQtHelper, "in_gui_thread",
+                        lambda: False)
+    monkeypatch.setattr(WebOps.AutonaQtHelper, "gui_unavailable_reason",
+                        lambda: "shutting down")
+    rendered = []
+    monkeypatch.setattr(WebOps, "renderThumbnail",
+                        lambda board, file_format: rendered.append(board))
+    outcome = {}
+
+    def request():
+        try:
+            WebOps.get_thumbnail(1, "png")
+        except NotAvailable as error:
+            outcome["error"] = error
+
+    assert WebOps._thumbnailDrawLock.acquire(timeout=5)
+    try:
+        worker = threading.Thread(target=request)
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
+    finally:
+        WebOps._thumbnailDrawLock.release()
+
+    assert isinstance(outcome.get("error"), NotAvailable)
+    assert rendered == []
+
+
+def test_a_thumbnail_on_the_gui_thread_does_not_take_the_lock(monkeypatch):
+    """On the GUI thread the render runs without the lock: a request's
+    thread holding it waits for that thread, so waiting for the lock there
+    would deadlock."""
+    monkeypatch.setattr(WebOps.AutonaQtHelper, "in_gui_thread", lambda: True)
+    monkeypatch.setattr(WebOps, "renderThumbnail",
+                        lambda board, file_format: "/t.png")
+    answers = []
+    assert WebOps._thumbnailDrawLock.acquire(timeout=5)
+    try:
+        worker = threading.Thread(
+            target=lambda: answers.append(WebOps.get_thumbnail(1, "png")))
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
+    finally:
+        WebOps._thumbnailDrawLock.release()
+
+    assert answers == ["/t.png"]
+
+
 def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
                                                             monkeypatch):
     """What bootstrap_gui() registered: AutonaShellOperations' (ADR-005 S4y;

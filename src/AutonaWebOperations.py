@@ -2725,12 +2725,40 @@ def open_sets(scoreboard):
                           "the set selection")
 
 
+# Lets the legacy thumbnail requests through one at a time, on the
+# requests' threads, so the GUI thread never stacks renderSync's nested
+# event loops (see get_thumbnail). Not re-entrant: never taken on the GUI
+# thread, where a request holding it waits for that thread.
+_thumbnailDrawLock = threading.Lock()
+
+
 def get_thumbnail(scoreboard, file_format):
     """Render board `scoreboard`'s thumbnail as `file_format` ("png" /
     "jpg"): the image's absolute path, or None when it failed. A board no
-    shell has is refused first, as by open_sets."""
+    shell has is refused first, as by open_sets.
+
+    Serialized off the GUI thread: the render waits in a nested event loop
+    (ThumbnailRenderer.renderSync), and a second request's task would run
+    inside it and nest another, so N quick requests (a Companion button
+    pressed repeatedly) unwind LIFO -- the first answers only after the last
+    render -- and an inner render's outcome overwrites the renderer's shared
+    syncError before the outer one reads it. On the GUI thread it runs as
+    before, without the lock (taking it there could deadlock with a request
+    holding it while it waits for the GUI thread)."""
     _require_board(scoreboard)
     if renderThumbnail is None:
         raise NotAvailable()
-    return _on_gui_thread(lambda: renderThumbnail(scoreboard, file_format),
-                          "the thumbnail")
+
+    def render():
+        return _on_gui_thread(
+            lambda: renderThumbnail(scoreboard, file_format), "the thumbnail")
+
+    if AutonaQtHelper.in_gui_thread():
+        return render()
+    # Refused before waiting for the lock: at shutdown a queued request
+    # would otherwise wait behind a render that may never finish.
+    _refuse_at_shutdown()
+    # A shutdown's GuiMarshalAborted (NotAvailable from _on_gui_thread)
+    # leaves the with block too, so the lock never stays taken.
+    with _thumbnailDrawLock:
+        return render()
