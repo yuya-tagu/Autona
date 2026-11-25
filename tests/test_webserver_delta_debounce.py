@@ -761,6 +761,96 @@ def test_a_writer_holding_the_state_lock_never_waits_on_the_flusher(
                                   _payload(2, 2, _rows(2, 1))]
 
 
+# ── a big change's full state ────────────────────────────────────────────
+# state_big_change (a save cycle over 100 rows) is notified inside
+# StateManager.lock, and a GUI-thread write reaches on_big_change directly
+# through the bridge. It queues the full state for the flusher, behind the
+# deltas queued ahead of it, and never sends from the caller's thread.
+
+
+def _fullStateOnTheWire(monkeypatch, ran):
+    def fullState(message=None):
+        ran.append(threading.current_thread())
+        WebServer.ws_emit("program_state", "the full state")
+
+    monkeypatch.setattr(WebServer, "ws_program_state", fullState)
+
+
+def test_a_big_change_follows_the_open_batch_from_the_flusher(
+        flusher, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    ran = []
+    _fullStateOnTheWire(monkeypatch, ran)
+    flusher.start()
+    thread = WebServer._delta_thread
+    WebServer.on_program_state_update(_changes(1))      # the leading edge
+    assert flusher.waitFor(1)
+    WebServer.on_program_state_update(_changes(2, 150))  # a 200 ms window
+
+    WebServer.on_big_change()
+    assert flusher.waitFor(3)
+
+    assert [event for _t, _at, event, _p in flusher.sent] == [
+        "program_state_update", "program_state_update", "program_state"]
+    assert flusher.payloads()[1] == _payload(2, 2, _rows(2, 150))
+    assert ran == [thread] and flusher.threads()[2] is thread
+
+
+def test_a_big_change_under_the_state_lock_never_sends_from_the_writer(
+        flusher, monkeypatch):
+    # The full state's send needs StateManager.lock here (GetFullState
+    # does): the writer holding it must get through, and the send must run
+    # on the flusher, not inline under the writer's lock.
+    from src.core.StateManager import StateManager
+
+    ran = []
+    _fullStateOnTheWire(monkeypatch, ran)
+    entered = threading.Event()
+
+    def needsTheStateLock():
+        entered.set()
+        with StateManager.lock:
+            pass
+
+    flusher.during = needsTheStateLock
+    flusher.start()
+    thread = WebServer._delta_thread
+    done = threading.Event()
+    writers = []
+
+    def writer():
+        writers.append(threading.current_thread())
+        with StateManager.lock:
+            WebServer.on_big_change()
+            # Returned without sending: the flusher is now in the send,
+            # stuck behind this lock.
+            if entered.wait(5) and ran == [thread]:
+                done.set()
+
+    writerThread = threading.Thread(target=writer, daemon=True)
+    writerThread.start()
+    writerThread.join(10)
+    assert done.is_set() and not writerThread.is_alive()
+
+    assert flusher.waitFor(1)
+    assert [event for _t, _at, event, _p in flusher.sent] == ["program_state"]
+    assert flusher.threads() == [thread]
+    assert writers[0] not in flusher.threads()
+
+
+def test_without_a_flusher_a_big_change_sends_the_full_state_here(
+        flusher, monkeypatch):
+    ran = []
+    _fullStateOnTheWire(monkeypatch, ran)
+    assert WebServer._delta_running is False
+
+    WebServer.on_big_change()
+
+    assert ran == [threading.current_thread()]
+    assert [event for _t, _at, event, _p in flusher.sent] == ["program_state"]
+    assert WebServer._delta_after == []
+
+
 # ── the pending values' notice (ADR-005 S4u) ─────────────────────────────
 # held_state_updated / held_dirty_changed of a board become one
 # `scoreboard_pending` {board, dirty}: no value (the client reads the guarded

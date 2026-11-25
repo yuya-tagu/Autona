@@ -375,7 +375,7 @@ EXPECTED_EVENTS = [
 EXPECTED_CLASS_HANDLERS = {
     # SocketIO handlers that must stay reachable as WebServer attributes,
     # because something outside the factory reaches them by name:
-    #   ws_program_state    -> StateManagerBridge.instance.state_big_change and
+    #   ws_program_state    -> on_big_change calls it through the flusher, and
     #                          WebServer.ws_program_state() calls in-module
     #   ws_get_characters   -> ws_game_changed, which both shells connect
     #                          to their loader's announcement
@@ -390,6 +390,7 @@ EXPECTED_CLASS_HANDLERS = {
     # from Autona.py / StateManager wiring.
     "ws_emit",
     "on_program_state_update",
+    "on_big_change",
     "_authorize_designer_request",
     "_authorize_designer_import_request",
     # The ADR-005 S3a guard, reached from guard_request / ws_on / ws_connect

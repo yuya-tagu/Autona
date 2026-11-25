@@ -439,8 +439,9 @@ class RenderLane:
                     f"{self.LOG_NAME}: the image could not be saved")
                 return ERROR, SAVE_FAILED
             writing += time.monotonic() - writeBegan
-            logger.info(f"{self.LOG_NAME} saved as {target}"
-                        f"{' and its .jpg' if alsoJpg else ''}")
+            # No file name here: the stem carries the players' names.
+            logger.info(f"{self.LOG_NAME} saved"
+                        f"{' with its .jpg' if alsoJpg else ''}")
             if self._prune is not None:
                 self._prune(self.OUTPUT_DIRECTORY, self.OUTPUT_PATTERNS,
                             self.OUTPUT_KEEP, protect=target)

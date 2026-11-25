@@ -1607,6 +1607,9 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
     name for it writes nothing, as before. (Until ADR-005 S4ad the board
     host was not asked for it either: the desktop's would have logged an
     unknown scoreboard.)
+
+    Every field is parsed before anything is written, so a malformed
+    number (ValueError) or losers (TypeError) leaves the board untouched.
     """
     host = boardHost
 
@@ -1626,9 +1629,26 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
             # -- not answered OK having changed nothing.
             _require_board(scoreboard)
 
+        # Parse everything first: a bad value in a later field must not
+        # leave the earlier ones written. The number is still parsed on the
+        # crew board for characters, as the board's spinbox parsed it.
+        bestOfN = int(bestOf) if bestOf is not None else None
+        playersN = int(players) if players is not None else None
+        charactersN = int(characters) if characters is not None else None
+        # The team number of a team name is parsed here too, so a bad one
+        # does not leave the fields above it written.
+        teamIdx = int(team) if teamName is not None and team is not None \
+            else None
+        if losers is None:
+            losersFlag = None
+        elif isinstance(losers, str):
+            losersFlag = False if losers.lower() == 'false' else True
+        else:
+            raise TypeError("losers must be a string")
+
         # best-of=<Best Of Amount>
-        if bestOf is not None:
-            _apply_set_fields(scoreboard, {'bestOf': int(bestOf)})
+        if bestOfN is not None:
+            _apply_set_fields(scoreboard, {'bestOf': bestOfN})
 
         # phase=<Phase Name>
         if phase is not None:
@@ -1644,35 +1664,33 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
 
         # players=<Amount of Players> (the crew board: its member count).
         # Each count is a save cycle of its own, as each spinbox's was.
-        if players is not None:
+        if playersN is not None:
             if crew:
-                CrewBattleService(CREW_BOARD).SetMemberCount(int(players))
+                CrewBattleService(CREW_BOARD).SetMemberCount(playersN)
             else:
-                _set_players(host, scoreboard, int(players))
+                _set_players(host, scoreboard, playersN)
 
         # characters=<Amount of Characters> (none on the crew board; the
         # number is still parsed, as the board's spinbox parsed it)
-        if characters is not None:
-            count = int(characters)
+        if charactersN is not None:
             if not crew:
-                _set_characters(host, scoreboard, count)
+                _set_characters(host, scoreboard, charactersN)
 
         # losers=<True/False>&team=<Team Number>
         # Set-shaped: `team` is the set's team, which a swap moves to the
         # other column (SetLoadService.ApplyLosers).
-        if losers is not None:
+        if losersFlag is not None:
             _apply_set_fields(scoreboard, {
-                'team' + str(team) + 'losers':
-                    False if losers.lower() == 'false' else True})
+                'team' + str(team) + 'losers': losersFlag})
 
         # teamName=<Name>&team=<Team Number> (team-mode boards)
         # The literal column (no swap flip), as the operator typing the name
         # into it: the name and the crest that follows it, written only when
         # the name changes. Boards 1/2 only -- the crew board has never had
         # the column this addressed.
-        if teamName is not None and team is not None:
+        if teamIdx is not None:
             board = _board(scoreboard)
-            idx = int(team)
+            idx = teamIdx
             if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
                 with StateManager.SaveBlock():
                     if AutonaActions.instance.SetTeamName(

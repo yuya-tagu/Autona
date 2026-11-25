@@ -1051,6 +1051,26 @@ def test_a_save_logs_its_encoding_and_writing_times(
     assert any(re.fullmatch(line, text.strip()) for text in logged), logged
 
 
+def test_a_generate_logs_no_player_name(match, executor):
+    """The saved file's stem carries the players' names; no log line may."""
+    player = SM.state["score"]["1"]["team"]
+    player["1"]["player"]["1"]["name"] = "SecretAlice"
+    player["2"]["player"]["1"]["name"] = "SecretBob"
+    logged = []
+    sink = logger.add(lambda message: logged.append(str(message)),
+                      level="DEBUG", format="{message}")
+    try:
+        match.service.Generate()
+        match.renderer.asked.pop().done(_Encoder([]), "")
+        executor.drain(WAIT)
+    finally:
+        logger.remove(sink)
+
+    assert any("saved" in text for text in logged), logged
+    assert not any("SecretAlice" in text or "SecretBob" in text
+                   for text in logged), logged
+
+
 def test_thirty_generations_are_kept(match, executor):
     directory = match.dir / "out" / "thumbnails"
     directory.mkdir(parents=True)
@@ -1152,6 +1172,24 @@ def test_a_board_drawn_at_once_is_saved_as_png_and_jpg(match):
     assert len(asked) == 1
     # Not a run of the lane: thumbnail.render is not written.
     assert match.render() is None
+
+
+def test_a_board_drawn_at_once_logs_no_player_name(match):
+    """The stem carries the players' names; no log line may."""
+    player = SM.state["score"]["1"]["team"]
+    player["1"]["player"]["1"]["name"] = "SecretAlice"
+    player["2"]["player"]["1"]["name"] = "SecretBob"
+    logged = []
+    sink = logger.add(lambda message: logged.append(str(message)),
+                      level="DEBUG", format="{message}")
+    try:
+        match.service.DrawBoard(1, _drawn)
+    finally:
+        logger.remove(sink)
+
+    assert any("saved" in text for text in logged), logged
+    assert not any("SecretAlice" in text or "SecretBob" in text
+                   for text in logged), logged
 
 
 @pytest.mark.parametrize("failing", ["png", "jpg"])

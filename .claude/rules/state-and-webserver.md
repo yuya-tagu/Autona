@@ -249,6 +249,8 @@ paths:
 - 受け手（`on_program_state_update` / `on_held_change` / `on_follow_change` / `on_battle_format_change` / `on_status_change` / `on_games_change`）は
   `StateManager.lock` や catalog の writer lock の中で走りうるので、`_delta_cond` の中で積むだけ。送出は flusher が lock の外で（pitfalls #17）。
   `stop()` を `StateManager.lock` を持ったまま呼ばない
+- `state_big_change`（Bridge）の全量送信も flusher が lock の外で送る（`on_big_change` → `_after_pending_deltas`）。flusher が動いていない間は
+  その場で送る
 - delta の間隔（先頭 0・50 / 100 / 200 ms）と payload は外部契約（pin: `tests/test_webserver_delta_debounce.py`）。バッチの送信を待つもの
   （`_after_pending_deltas`）があれば開いているバッチをすぐ送る
 - 同じ送信の中の順は delta → `scoreboard_pending` → `scoreboard_follow` → `battle_format` → `status` → `games_changed`
