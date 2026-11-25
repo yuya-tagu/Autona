@@ -1853,21 +1853,15 @@ class AssetPackService:
             self._Progress(job, 0, total, 0, totalKiB, force=True)
             done = 0
             for packName, _pack in plan:
-                downloaded = []
-                for name in [n for p, n, _s in files if p == packName]:
-                    self._Check(job)
-                    self._Set(job, pack=packName, file=name)
-                    target = os.path.join(parts, name)
-                    done = self._Download(job, DOWNLOAD_BASE + name, target,
-                                          done, total, totalKiB)
-                    downloaded.append(target)
-                # Split parts (.7z.001, .002, ...) concatenate in order.
+                # Split parts (.7z.001, .002, ...) are written in order
+                # straight into the merged archive as they download.
                 merged = os.path.join(parts, packName + ".7z")
                 with open(merged, "wb") as out:
-                    for part in downloaded:
-                        with open(part, "rb") as source:
-                            shutil.copyfileobj(source, out, _CHUNK)
-                        _Remove(part)
+                    for name in [n for p, n, _s in files if p == packName]:
+                        self._Check(job)
+                        self._Set(job, pack=packName, file=name)
+                        done = self._Download(job, DOWNLOAD_BASE + name, out,
+                                              name, done, total, totalKiB)
                 self._Check(job)
                 self._Set(job, stage=EXTRACT, file=None)
                 self._Progress(job, done, total, min(done // 1024, totalKiB),
@@ -1885,28 +1879,26 @@ class AssetPackService:
         finally:
             _RemoveStaging(staging)
 
-    def _Download(self, job, url, target, done, total, totalKiB):
+    def _Download(self, job, url, out, name, done, total, totalKiB):
         try:
             with requests.get(url, stream=True, allow_redirects=True,
                               timeout=DOWNLOAD_TIMEOUT_SECS) as response:
                 if response.status_code >= 400:
                     raise _JobError(
                         DOWNLOAD_FAILED,
-                        f"HTTP {response.status_code} for "
-                        f"{os.path.basename(target)}")
-                with open(target, "wb") as out:
-                    for chunk in response.iter_content(_CHUNK):
-                        self._Check(job)
-                        if not chunk:
-                            continue
-                        out.write(chunk)
-                        done += len(chunk)
-                        if done > MAX_DOWNLOAD_BYTES:
-                            raise _JobError(
-                                TOO_LARGE, "the download is over "
-                                f"{MAX_DOWNLOAD_BYTES} bytes")
-                        self._Progress(job, done, max(total, done),
-                                       min(done // 1024, totalKiB), totalKiB)
+                        f"HTTP {response.status_code} for {name}")
+                for chunk in response.iter_content(_CHUNK):
+                    self._Check(job)
+                    if not chunk:
+                        continue
+                    out.write(chunk)
+                    done += len(chunk)
+                    if done > MAX_DOWNLOAD_BYTES:
+                        raise _JobError(
+                            TOO_LARGE, "the download is over "
+                            f"{MAX_DOWNLOAD_BYTES} bytes")
+                    self._Progress(job, done, max(total, done),
+                                   min(done // 1024, totalKiB), totalKiB)
         except requests.RequestException as failure:
             raise _JobError(DOWNLOAD_FAILED, str(failure)) from None
         return done
@@ -2279,8 +2271,8 @@ def _MergeInto(extracted, dest):
                                 "outside the game's folder")
             os.makedirs(outDir, exist_ok=True)
             for filename in filenames:
-                os.replace(os.path.join(dirpath, filename),
-                           os.path.join(outDir, filename))
+                _Replace(os.path.join(dirpath, filename),
+                         os.path.join(outDir, filename))
 
 
 def _NewStaging():
