@@ -1844,6 +1844,8 @@ class StateManager:
         removal of it (_NextToken) wins over a download that finishes late.
         On failure the stale image is removed, as before, unless a later write
         took over. `path` is the state key; the URL is never logged.
+        A download that stops being the latest is dropped before it starts
+        or between chunks, so it gives its slot back to the newer one.
         """
         base = f"./out/{path}"
         dlpath = f"{base}.{extension}"
@@ -1857,6 +1859,13 @@ class StateManager:
         response = None
         candidate = None
         try:
+            # Superseded while waiting for a slot: its result would only be
+            # dropped by _SettleDownload, so skip the request altogether.
+            # _download_lock is a leaf: a dict lookup, no I/O, no waiting.
+            with StateManager._download_lock:
+                latest = StateManager._IsLatest(base, token)
+            if not latest:
+                return
             # (connect, read): without a timeout an unresponsive host blocks
             # this thread forever. The read timeout applies per chunk of the
             # streamed body, so 30s matches the streaming download budget
@@ -1874,6 +1883,13 @@ class StateManager:
                     while True:
                         chunk = response.raw.read(65536)
                         if not chunk:
+                            break
+                        # Superseded mid-body: stop reading (not over the
+                        # cap, so no warning) and convert nothing.
+                        with StateManager._download_lock:
+                            latest = StateManager._IsLatest(base, token)
+                        if not latest:
+                            complete = False
                             break
                         received += len(chunk)
                         if received > _DOWNLOAD_MAX_BYTES:
