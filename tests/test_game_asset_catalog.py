@@ -657,6 +657,47 @@ def test_an_unreadable_start_gg_table_is_logged_not_raised(_isolated):
     assert catalog.CharacterFromStartGGId(1) is None
 
 
+def _fake_download(monkeypatch, status, body):
+    from types import SimpleNamespace
+    from src.core import GameAssetCatalog as module
+    raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+    reply = SimpleNamespace(
+        status_code=status, content=raw, text=raw.decode())
+    monkeypatch.setattr(module, "requests", SimpleNamespace(
+        get=lambda *a, **k: reply))
+
+
+@pytest.mark.parametrize("status, body", [
+    (500, {"success": False, "message": "boom"}),
+    (200, {"success": False}),
+    (200, {"entities": {"character": []}}),
+])
+def test_a_bad_start_gg_download_keeps_the_current_table(
+        _isolated, monkeypatch, status, body):
+    path = Path("user_data/characters.json")
+    before = path.read_bytes()
+    _fake_download(monkeypatch, status, body)
+
+    GameAssetCatalog().DownloadStartGGCharacters()
+
+    assert path.read_bytes() == before
+    assert not Path("user_data/characters.json.tmp").exists()
+
+
+def test_a_good_start_gg_download_replaces_the_table(_isolated, monkeypatch):
+    body = {"entities": {"character": [{"id": 424242, "name": "Zed"}]}}
+    _fake_download(monkeypatch, 200, body)
+    catalog = GameAssetCatalog()
+
+    catalog.DownloadStartGGCharacters()
+    catalog.ReloadStartGGCharacters()
+
+    assert not Path("user_data/characters.json.tmp").exists()
+    # The table is keyed by id; the id -> game character step needs a loaded
+    # game, so check the table itself.
+    assert catalog._startggCharacters["424242"]["name"] == "Zed"
+
+
 def test_the_snapshot_type_is_frozen():
     assert dataclasses.is_dataclass(GameAssetSnapshot)
     assert GameAssetSnapshot.__dataclass_params__.frozen

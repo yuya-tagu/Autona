@@ -798,8 +798,23 @@ class GameAssetCatalog:
         try:
             r = requests.get(STARTGG_CHARACTERS_URL, allow_redirects=True,
                              timeout=STARTGG_CHARACTERS_TIMEOUT_SECS)
-            r_json = orjson.dumps(orjson.loads(
-                r.text), option=orjson.OPT_INDENT_2)
+            # An error answer (429/5xx) can still be valid JSON; never let it
+            # replace a good runtime copy.
+            if r.status_code != 200:
+                logger.warning(
+                    f"start.gg characters download answered "
+                    f"{r.status_code}; keeping the current table")
+                return
+            data = orjson.loads(r.content)
+            entities = data.get('entities') if isinstance(data, dict) else None
+            characters = (entities.get('character')
+                          if isinstance(entities, dict) else None)
+            if not isinstance(characters, list) or not characters:
+                logger.warning(
+                    "start.gg characters download has no character table; "
+                    "keeping the current table")
+                return
+            r_json = orjson.dumps(data, option=orjson.OPT_INDENT_2)
 
             # Write runtime copy into user_data/ (gitignored), never the
             # tracked seed in assets/
@@ -808,21 +823,20 @@ class GameAssetCatalog:
             with open(tmp_path, 'wb') as f:
                 f.write(r_json)
 
-            try:
-                # Test if downloaded JSON is valid
-                with open(tmp_path, 'rb') as f:
-                    orjson.loads(f.read())
+            # Atomically overwrite the runtime copy (os.replace works
+            # whether or not the target already exists)
+            os.replace(tmp_path, CHARACTERS_RUNTIME_PATH)
 
-                # Atomically overwrite the runtime copy (os.replace works
-                # whether or not the target already exists)
-                os.replace(tmp_path, CHARACTERS_RUNTIME_PATH)
-
-                logger.info("startgg characters file updated")
-            except Exception:
-                logger.error("Characters file download failed")
+            logger.info("startgg characters file updated")
         except Exception as e:
             logger.error(
                 "Could not update " + CHARACTERS_RUNTIME_PATH + ": " + str(e))
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     def ScanGames(self):
         """List ./user_data/games and read every game's and pack's config."""
