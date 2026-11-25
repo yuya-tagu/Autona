@@ -298,6 +298,32 @@ def test_a_template_that_cannot_be_written_is_save_failed(folder,
         assert "user_data" in refused.value.message
 
 
+def test_a_failing_folder_or_write_logs_no_path(folder, monkeypatch):
+    from loguru import logger
+    secret = r"C:\Users\someone\Documents\Autona\user_data\x.json"
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", secret)
+
+    lines = []
+    handle = logger.add(lambda message: lines.append(str(message)),
+                        level="WARNING")
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "listdir", denied)
+            assert templates._Stored() == {}
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "replace", denied)
+            with pytest.raises(templates.TemplateError) as refused:
+                templates.Save("default", templates.Standard())
+            assert refused.value.code == templates.SAVE_FAILED
+    finally:
+        logger.remove(handle)
+    text = "".join(lines)
+    assert len(lines) == 2 and "someone" not in text
+    assert "C:\\Users" not in text and "Permission denied" in text
+
+
 def test_a_duplicate_past_the_limit_is_refused(folder, monkeypatch):
     monkeypatch.setattr(templates, "MAX_STORED", 2)
     templates.Duplicate("default")

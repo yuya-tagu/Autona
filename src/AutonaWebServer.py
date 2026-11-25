@@ -19,7 +19,7 @@ from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
 import orjson
 from loguru import logger
-from werkzeug.exceptions import NotFound
+from werkzeug.exceptions import HTTPException, NotFound
 from werkzeug.serving import WSGIRequestHandler
 
 from .core.StateManager import StateManager
@@ -762,6 +762,10 @@ def _build_web_app():
             return jsonify(result)
         except DesignerProjectError as exc:
             return jsonify({"error": str(exc)}), 400
+        except HTTPException as exc:
+            # get_json() refuses a wrong Content-Type (415) or a broken body (400)
+            logger.warning(f"Designer save: the body is not readable JSON ({exc.code})")
+            return jsonify({"error": "保存データを JSON として読めません。"}), exc.code
         except Exception:
             logger.error(traceback.format_exc())
             return jsonify({"error": "デザインの保存に失敗しました。"}), 500
@@ -829,6 +833,10 @@ def _build_web_app():
             return jsonify(result)
         except DesignerProjectError as exc:
             return jsonify({"error": str(exc)}), 400
+        except HTTPException as exc:
+            # get_json() refuses a wrong Content-Type (415) or a broken body (400)
+            logger.warning(f"Designer import: the body is not readable JSON ({exc.code})")
+            return jsonify({"error": "インポートデータを JSON として読めません。"}), exc.code
         except Exception:
             logger.error(traceback.format_exc())
             return jsonify({"error": "Figmaインポートの受信に失敗しました。"}), 500

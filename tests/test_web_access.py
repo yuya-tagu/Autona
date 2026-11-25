@@ -3097,6 +3097,20 @@ def test_a_chunked_designer_post_is_refused_unread(designer, url):
     assert designer.saved == []
 
 
+@pytest.mark.parametrize("data, content_type, status", [
+    ("{nope", "application/json", 400),
+    ("{}", "text/plain", 415),
+])
+def test_an_unreadable_designer_save_is_a_client_error(
+        designer, data, content_type, status):
+    client = _client(designer)
+    response = client.post("/api/designer/projects", data=data,
+                           content_type=content_type)
+    assert response.status_code == status
+    assert "error" in response.get_json()
+    assert designer.saved == []
+
+
 @pytest.mark.parametrize("url", ["/api/designer/projects",
                                  "/api/designer/imports"])
 def test_a_designer_post_with_a_length_still_goes_through(designer, url):

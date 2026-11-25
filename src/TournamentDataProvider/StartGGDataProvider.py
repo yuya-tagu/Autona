@@ -692,8 +692,18 @@ class StartGGDataProvider(TournamentDataProvider):
                 },
                 cancel_event=cancel_event
             )
-            logger.debug(data.get("data", {}).get("set", {}))
-            return self.ParseMatchDataNewApi(data.get("data", {}).get("set", {}))
+            # GraphQL errors arrive as 200 {"data": null, "errors": [...]}; a
+            # deleted/unknown set gives {"set": null}. Neither is a crash.
+            inner = data.get("data") if isinstance(data, dict) else None
+            if data and not isinstance(inner, dict):
+                logger.warning(f"start.gg answered no set to SetQuery ({setId})")
+                return {}
+            _set = inner.get("set", {}) if isinstance(inner, dict) else {}
+            if _set is None:
+                logger.warning(f"start.gg answered no set to SetQuery ({setId})")
+                return {}
+            logger.debug(_set)
+            return self.ParseMatchDataNewApi(_set)
         except Exception:
             logger.error(traceback.format_exc())
             return {}

@@ -2178,3 +2178,33 @@ class TestRecentSets:
         assert answers == []
         assert [line for line in errors
                 if "1 of 10 pages did not answer" in line]
+
+class TestGetMatchNewApiNullAnswers:
+    """A GraphQL error ({"data": null}) or a missing set is a quiet {}."""
+
+    @staticmethod
+    def _levels(provider):
+        levels = []
+        sink = _startgg_mod.logger.add(
+            lambda m: levels.append(m.record["level"].name), level="DEBUG")
+        try:
+            result = provider._GetMatchNewApi("123", None, None)
+        finally:
+            _startgg_mod.logger.remove(sink)
+        return result, levels
+
+    @pytest.mark.parametrize("answer", [{"data": None}, {"data": {"set": None}}])
+    def test_null_answer_warns_without_error(self, answer):
+        provider = _make_provider()
+        provider.QueryRequests = lambda *a, **k: answer
+        result, levels = self._levels(provider)
+        assert result == {}
+        assert levels.count("ERROR") == 0
+        assert levels.count("WARNING") == 1
+
+    def test_empty_answer_keeps_defaults(self):
+        provider = _make_provider()
+        provider.QueryRequests = lambda *a, **k: {}
+        result, levels = self._levels(provider)
+        assert result == provider.ParseMatchDataNewApi({})
+        assert levels.count("ERROR") == 0
