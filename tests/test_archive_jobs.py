@@ -3034,3 +3034,46 @@ def test_a_foreign_page_cannot_use_the_archive(
         headers=_shell_headers(shellSecret, Origin="https://evil.example"))
     assert response.status_code == 403
     assert service.Jobs() == []
+
+
+# -- log lines carry no path of this PC ------------------------------------
+
+_SECRET_PATH = r"C:\Users\someone\Videos\Autona\job\review.json"
+
+
+def test_a_read_that_fails_logs_the_reason_without_the_path(tmp_path,
+                                                            monkeypatch):
+    from loguru import logger
+    jobDir = str(tmp_path / "20260101_job1")
+    os.makedirs(jobDir)
+    service = ArchiveJobService()
+    lines = []
+    handle = logger.add(lambda message: lines.append(str(message)),
+                        level="WARNING")
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", _SECRET_PATH)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr("builtins.open", denied)
+            assert ArchiveJobService._ReadClips(jobDir) is None
+            assert ArchiveJobService._ReadSets(jobDir) is None
+            assert service._ReadRecord(jobDir, "job1") is None
+            with pytest.raises(ArchiveError) as sets:
+                ArchiveJobService._DoneSets(jobDir, "job1")
+            assert sets.value.code == archive.UNREADABLE
+            with pytest.raises(ArchiveError) as reviewed:
+                service._ReadReview(jobDir, "job1", {})
+            assert reviewed.value.code == archive.UNREADABLE
+    finally:
+        logger.remove(handle)
+    text = "".join(lines)
+    assert len(lines) == 5
+    assert "C:\\Users" not in text and "someone" not in text
+    assert "Permission denied" in text
+    assert "20260101_job1" in text
+    # Every line names its job ("job1" is in "20260101_job1" too).
+    assert all("job1" in line for line in lines)
+    for name in ("export.json", "sets.json", "job.json", "review.json"):
+        assert name in text

@@ -761,6 +761,15 @@ class _ThumbRun:
         self.ended = False
 
 
+def _ErrorText(error):
+    # An OSError's text names the file (a path of this PC, with the user's
+    # name); its reason alone does not. Other errors keep their message
+    # (a JSON error names no path and its position is what to investigate).
+    if isinstance(error, OSError):
+        return error.strerror or type(error).__name__
+    return str(error)
+
+
 def _SamePath(left, right):
     """Whether two paths name one file (links followed, case as the OS
     compares it)."""
@@ -946,7 +955,7 @@ class ArchiveJobService:
                 return None
             except (OSError, ValueError) as error:
                 logger.warning(f"Archive: {JOB_FILE} of {jobId} could not be "
-                               f"read: {error}")
+                               f"read: {_ErrorText(error)}")
                 return None
         return _Normalized(raw, jobId)
 
@@ -1302,7 +1311,10 @@ class ArchiveJobService:
         except FileNotFoundError:
             return None
         except (OSError, ValueError) as error:
-            logger.warning(f"Archive: {path} could not be read: {error}")
+            logger.warning(
+                f"Archive: {CLIPS_DIR}/{EXPORT_FILE} of "
+                f"{os.path.basename(jobDir)} could not be read: "
+                f"{_ErrorText(error)}")
             return None
         clips = data.get("clips") if isinstance(data, dict) else None
         if not isinstance(clips, list):
@@ -1437,7 +1449,10 @@ class ArchiveJobService:
         except FileNotFoundError:
             return None
         except (OSError, ValueError) as error:
-            logger.warning(f"Archive: {path} could not be read: {error}")
+            logger.warning(
+                f"Archive: {OUT_DIR}/{SETS_FILE} of "
+                f"{os.path.basename(jobDir)} could not be read: "
+                f"{_ErrorText(error)}")
             return None
         return sets if isinstance(sets, dict) else None
 
@@ -1466,7 +1481,7 @@ class ArchiveJobService:
                 sets = json.load(file)
         except (OSError, ValueError) as error:
             logger.warning(f"Archive: {SETS_FILE} of {jobId} could not be "
-                           f"read: {error}")
+                           f"read: {_ErrorText(error)}")
             sets = None
         if not isinstance(sets, dict):
             raise ArchiveError(UNREADABLE, (
@@ -1494,7 +1509,7 @@ class ArchiveJobService:
                 return ArchiveReview.Empty()
             except OSError as error:
                 logger.warning(f"Archive: {REVIEW_FILE} of {jobId} could not "
-                               f"be read: {error}")
+                               f"be read: {_ErrorText(error)}")
                 raise ArchiveError(UNREADABLE, (
                     "このジョブのレビュー（review.json）が読めません。"
                     "ほかのアプリが使っていないか確かめて、ページを読み直してください。"))
@@ -1842,7 +1857,7 @@ class ArchiveJobService:
                               dict(item, skins=skins)))
         except (OSError, ValueError) as error:
             logger.warning(f"Archive: job {jobId}'s thumbnails could not be "
-                           f"prepared: {error}")
+                           f"prepared: {_ErrorText(error)}")
             raise ArchiveError(UNAVAILABLE, (
                 "サムネイルのテンプレートを読めません。")) from None
         try:

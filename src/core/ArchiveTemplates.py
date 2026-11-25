@@ -298,6 +298,15 @@ def _Load(path, templateId):
     return None
 
 
+def _ErrorText(error):
+    # An OSError's text names the file (a path of this PC, with the user's
+    # name); its reason alone does not. Other errors keep their message
+    # (a JSON error names no path and its position is what to investigate).
+    if isinstance(error, OSError):
+        return error.strerror or type(error).__name__
+    return str(error)
+
+
 def _Stored():
     """{id: template} of the stored files that pass Check (under _lock)."""
     folder = os.path.abspath(DIRECTORY)
@@ -307,7 +316,7 @@ def _Stored():
         return {}
     except OSError as error:
         logger.warning(f"Archive templates: the folder could not be read: "
-                       f"{error}")
+                       f"{_ErrorText(error)}")
         return {}
     found = {}
     for name in names:
@@ -379,7 +388,8 @@ def _Write(path, content):
 
 
 def _Unwritable(error):
-    logger.warning(f"Archive templates: a file could not be written: {error}")
+    logger.warning(f"Archive templates: a file could not be written: "
+                   f"{_ErrorText(error)}")
     return TemplateError(SAVE_FAILED, (
         f"テンプレートを保存できません（user_data に書けません）: {error}"))
 
