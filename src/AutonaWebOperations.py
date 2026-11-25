@@ -1684,56 +1684,58 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         else:
             raise TypeError("losers must be a string")
 
-        # best-of=<Best Of Amount>
-        if bestOfN is not None:
-            _apply_set_fields(scoreboard, {'bestOf': bestOfN})
+        # The whole query is one save cycle (one publish where the board is
+        # not held): the calls below nest their own blocks in this one.
+        with StateManager.SaveBlock():
+            # best-of=<Best Of Amount>
+            if bestOfN is not None:
+                _apply_set_fields(scoreboard, {'bestOf': bestOfN})
 
-        # phase=<Phase Name>
-        if phase is not None:
-            _apply_set_fields(scoreboard, {'tournament_phase': phase})
+            # phase=<Phase Name>
+            if phase is not None:
+                _apply_set_fields(scoreboard, {'tournament_phase': phase})
 
-        # pool=<Pool Name>
-        if pool is not None:
-            _apply_set_fields(scoreboard, {'tournament_pool': pool})
+            # pool=<Pool Name>
+            if pool is not None:
+                _apply_set_fields(scoreboard, {'tournament_pool': pool})
 
-        # match=<Match Name>
-        if match is not None:
-            _apply_set_fields(scoreboard, {'round_name': match})
+            # match=<Match Name>
+            if match is not None:
+                _apply_set_fields(scoreboard, {'round_name': match})
 
-        # players=<Amount of Players> (the crew board: its member count).
-        # Each count is a save cycle of its own, as each spinbox's was.
-        if playersN is not None:
-            if crew:
-                CrewBattleService(CREW_BOARD).SetMemberCount(playersN)
-            else:
-                _set_players(host, scoreboard, playersN)
+            # players=<Amount of Players> (the crew board: its member count).
+            if playersN is not None:
+                if crew:
+                    CrewBattleService(CREW_BOARD).SetMemberCount(playersN)
+                else:
+                    _set_players(host, scoreboard, playersN)
 
-        # characters=<Amount of Characters> (none on the crew board; the
-        # number is still parsed, as the board's spinbox parsed it)
-        if charactersN is not None:
-            if not crew:
-                _set_characters(host, scoreboard, charactersN)
+            # characters=<Amount of Characters> (none on the crew board; the
+            # number is still parsed, as the board's spinbox parsed it)
+            if charactersN is not None:
+                if not crew:
+                    _set_characters(host, scoreboard, charactersN)
 
-        # losers=<True/False>&team=<Team Number>
-        # Set-shaped: `team` is the set's team, which a swap moves to the
-        # other column (SetLoadService.ApplyLosers).
-        if losersFlag is not None:
-            _apply_set_fields(scoreboard, {
-                'team' + str(team) + 'losers': losersFlag})
+            # losers=<True/False>&team=<Team Number>
+            # Set-shaped: `team` is the set's team, which a swap moves to the
+            # other column (SetLoadService.ApplyLosers).
+            if losersFlag is not None:
+                _apply_set_fields(scoreboard, {
+                    'team' + str(team) + 'losers': losersFlag})
 
-        # teamName=<Name>&team=<Team Number> (team-mode boards)
-        # The literal column (no swap flip), as the operator typing the name
-        # into it: the name and the crest that follows it, written only when
-        # the name changes. Boards 1/2 only -- the crew board has never had
-        # the column this addressed.
-        if teamIdx is not None:
-            board = _board(scoreboard)
-            idx = teamIdx
-            if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
-                with StateManager.SaveBlock():
-                    if AutonaActions.instance.SetTeamName(
-                            scoreboard, idx, teamName):
-                        SetLoadService(board).PublishTeamLogo(idx, teamName)
+            # teamName=<Name>&team=<Team Number> (team-mode boards)
+            # The literal column (no swap flip), as the operator typing the name
+            # into it: the name and the crest that follows it, written only when
+            # the name changes. Boards 1/2 only -- the crew board has never had
+            # the column this addressed.
+            if teamIdx is not None:
+                board = _board(scoreboard)
+                idx = teamIdx
+                if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
+                    with StateManager.SaveBlock():
+                        if AutonaActions.instance.SetTeamName(
+                                scoreboard, idx, teamName):
+                            SetLoadService(board).PublishTeamLogo(idx, teamName)
         return "OK"
 
     return host.Run(run)

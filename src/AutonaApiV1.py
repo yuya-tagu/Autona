@@ -1372,12 +1372,16 @@ def set_update(n):
         # it on the GUI thread until then). Core-direct writes
         # (score:adjust, a colour) are not board operations and can land in
         # between, as they always could.
-        if kwargs or (losers is None and team_name is None):
-            WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
-        if losers is not None:
-            WebOps.set_team_losers(n, *losers)
-        if team_name is not None:
-            WebOps.set_route(n, team=team_name[0], teamName=team_name[1])
+        #
+        # And one save cycle: the calls' blocks nest in this one, so a face
+        # that is not held never publishes a half-applied set.
+        with StateManager.SaveBlock():
+            if kwargs or (losers is None and team_name is None):
+                WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
+            if losers is not None:
+                WebOps.set_team_losers(n, *losers)
+            if team_name is not None:
+                WebOps.set_route(n, team=team_name[0], teamName=team_name[1])
 
     WebOps.boardHost.Run(apply)
     return ok(revision=current_revision())

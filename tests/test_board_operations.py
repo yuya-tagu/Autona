@@ -1067,9 +1067,9 @@ S4T_BEST_OF_CHANGES = {
 }
 
 
-# The Web's reset_match and clear_all are one save cycle each (a SaveBlock
-# around the operation in AutonaWebOperations): the reset and its best of
-# were two, and clear_all's reset, counts and players' clear one or more
+# The Web's reset_match, clear_all and set_route (and so v1 PATCH set) are
+# one save cycle each (a SaveBlock around the operation in
+# AutonaWebOperations): the reset and its best of were two, and clear_all's reset, counts and players' clear one or more
 # each -- every one of them a held_state_updated / scoreboard_pending on
 # boards 1/2, and a publish where the board is not held (headless, the crew
 # board). The writes and their order are unchanged, so the state, its key
@@ -1078,13 +1078,18 @@ S4T_BEST_OF_CHANGES = {
 ATOMIC_RESET_CHANGES = {
     "web reset match": {"cycles": 1},
     "web clear all": {"cycles": 1},
+    "web set route": {"cycles": 1},
 }
 
-ATOMIC_RESET_SINGLES_CHANGES = dict(ATOMIC_RESET_CHANGES)
+# Without "web set route": the singles replay has no such step.
+ATOMIC_RESET_SINGLES_CHANGES = {
+    label: change for label, change in ATOMIC_RESET_CHANGES.items()
+    if label != "web set route"}
 
 ATOMIC_RESET_BEST_OF_CHANGES = {
     "web reset match, tracker on": {"cycles": 1},
     "web clear all, tracker on": {"cycles": 1},
+    "v1 best of 7 with a phase and a match": {"cycles": 1},
 }
 
 

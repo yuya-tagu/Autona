@@ -787,6 +787,55 @@ def test_a_web_reset_is_exactly_one_publish_headless(headless, board, reset):
     assert headless.get(f"score.{board}.phase") == ""
 
 
+def test_a_web_set_route_is_exactly_one_publish_headless(headless):
+    """A query that sets several fields is one save cycle: no half-applied
+    set (the phase new, the match old) is ever published on a board that is
+    not held."""
+    from src import AutonaWebOperations as WebOps
+    headless.settle()
+
+    cost = _revisionCost(headless, lambda: WebOps.set_route(
+        "1", bestOf="5", phase="Top 8", match="GF", players="2"))
+
+    assert cost == 1, f"set_route on board 1 published {cost} times"
+    assert headless.get("score.1.best_of") == 5
+    assert headless.get("score.1.phase") == "Top 8"
+    assert headless.get("score.1.match") == "GF"
+    assert sorted(headless.get("score.1.team.1.player")) == ["1", "2"]
+
+    # A value other than the default, so the write really happens.
+    assert headless.get("score.3.team.1.memberNum") != 2
+    cost = _revisionCost(headless, lambda: WebOps.set_route(
+        "3", phase="Top 8", match="GF", players="2"))
+
+    assert cost == 1, f"set_route on the crew board published {cost} times"
+    assert headless.get("score.3.phase") == "Top 8"
+    assert headless.get("score.3.match") == "GF"
+    assert headless.get("score.3.team.1.memberNum") == 2
+
+
+def test_a_v1_set_patch_is_exactly_one_publish_headless(headless):
+    from src.AutonaApiV1 import api_v1
+    from src.AutonaWebServer import _build_web_app
+    from tests.conftest import load_player
+    app, _socketio = _build_web_app()
+    app.register_blueprint(api_v1)
+    load_player(1, 1, {"gamerTag": "AAA"})
+    headless.settle()
+
+    responses = []
+    cost = _revisionCost(headless, lambda: responses.append(
+        app.test_client().patch("/api/v1/scoreboards/1/set", json={
+            "players": 3, "losers": {"team": 1, "value": True},
+            "teamName": {"team": 2, "value": "X"}})))
+
+    assert responses[0].status_code == 200, responses[0].get_data(as_text=True)
+    assert cost == 1, f"a v1 set published {cost} times"
+    assert headless.get("score.1.team.1.losers") is True
+    assert headless.get("score.1.team.1.player.1.mergedName") == "AAA [L]"
+    assert headless.get("score.1.team.2.teamName") == "X"
+
+
 def test_an_active_toggle_is_exactly_one_publish(autonaApp):
     autonaApp.ready(BOARD)
 

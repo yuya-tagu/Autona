@@ -145,9 +145,9 @@ def _golden():
 
 
 # What changed on purpose since the recording, per scenario: the published
-# save cycles (`deltas`) only. The Web's reset_match and clear_all are one
-# cycle each (a SaveBlock around the operation in AutonaWebOperations), so
-# no overlay is sent the board half reset. The writes (`sets`, in the same
+# save cycles (`deltas`) only. The Web's reset_match, clear_all and set_route
+# (and so v1 PATCH set) are one cycle each (a SaveBlock around the operation
+# in AutonaWebOperations), so no overlay is sent the board half reset. The writes (`sets`, in the same
 # order), the board afterwards, the result and the swap flag are still the
 # recording's; the one delta has to bring a client from the board before to
 # the same board as the recorded ones applied in turn (_assertSameChange).
@@ -160,6 +160,12 @@ ONE_CYCLE_CHANGES = {
     # 4 -> 1: the reset, its best of, the member counts, the members'
     # clear.
     "clear all": {"deltas": 1},
+    # The whole query in one cycle: the best of, the phase, the pool, the
+    # match.
+    "set fields": {"deltas": 1},
+    # The same, with the member count, the characters, the losers flag and
+    # the team's name.
+    "set everything": {"deltas": 1},
 }
 
 
