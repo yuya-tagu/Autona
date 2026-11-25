@@ -11,7 +11,6 @@
 """
 import ast
 import faulthandler
-import os
 import subprocess
 import sys
 import time
