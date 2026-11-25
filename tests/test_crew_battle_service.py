@@ -338,6 +338,26 @@ def test_an_explicit_null_pool_leaves_the_pool_alone(crew):
     assert SM.Get(f"{PREFIX}.pool") == "A"
 
 
+def test_non_text_match_fields_are_not_written_on_the_crew_board(crew):
+    crew.ApplyMatchInfo(
+        {"round_name": "WF", "tournament_phase": "Pools",
+         "tournament_pool": "A"})
+    assert crew.ApplyMatchInfo(
+        {"round_name": {"a": 1}, "tournament_phase": [1],
+         "tournament_pool": True}) is False
+
+    assert SM.Get(f"{PREFIX}.match") == "WF"
+    assert SM.Get(f"{PREFIX}.phase") == "Pools"
+    assert SM.Get(f"{PREFIX}.pool") == "A"
+
+
+def test_a_number_is_written_as_text_and_empty_still_clears(crew):
+    crew.ApplyMatchInfo({"round_name": 3})
+    assert SM.Get(f"{PREFIX}.match") == "3"
+    crew.ApplyMatchInfo({"round_name": ""})
+    assert SM.Get(f"{PREFIX}.match") == ""
+
+
 def test_the_crew_board_never_publishes_match_en(crew):
     crew.ApplyMatchInfo(
         {"round_name": "Winners Final", "round_name_en": "Winners Final"})

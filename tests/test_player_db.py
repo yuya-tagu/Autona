@@ -35,6 +35,7 @@ tournament's entrant tags) into src/core/PlayerDB.py. Pinned here:
 """
 import ast
 import copy
+import errno
 import json
 import os
 import threading
@@ -626,6 +627,54 @@ def test_no_temp_file_at_all_falls_back_to_overwriting(
     db.AddPlayers([_player("A")])
 
     assert _saved_tags(tmp_path) == ["A"]
+
+
+def test_a_full_disk_while_writing_the_temp_keeps_the_previous_file(
+        tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers([_player("A")])
+    path = tmp_path / "local_players.json"
+    before = path.read_bytes()
+
+    class FullFile:
+        def __init__(self, fd):
+            os.close(fd)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, text):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(
+        player_db_module.os, "fdopen", lambda fd, *a, **k: FullFile(fd))
+    db.AddPlayers([_player("B")])
+
+    assert path.read_bytes() == before
+    assert _temps(tmp_path) == []
+    assert db.Contains("B")
+
+
+def test_a_full_disk_creating_the_temp_does_not_overwrite(
+        tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers([_player("A")])
+    path = tmp_path / "local_players.json"
+    before = path.read_bytes()
+
+    def full(*args, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(player_db_module.tempfile, "mkstemp", full)
+    db.AddPlayers([_player("B")])
+
+    assert path.read_bytes() == before
+    assert db.Contains("B")
 
 
 def test_a_transient_replace_failure_is_retried(tmp_path, monkeypatch, settings):

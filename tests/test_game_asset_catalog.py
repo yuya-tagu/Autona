@@ -698,6 +698,29 @@ def test_a_good_start_gg_download_replaces_the_table(_isolated, monkeypatch):
     assert catalog._startggCharacters["424242"]["name"] == "Zed"
 
 
+def test_reload_keeps_only_the_name_of_each_start_gg_character(_isolated):
+    body = {"entities": {"character": [
+        {"id": 424242, "name": "Zed", "videogameId": 1,
+         "images": [{"url": "x"}], "externalIdMap": {"a": 1}},
+        {"id": 7},
+        {},
+        7,
+    ]}}
+    Path("user_data/characters.json").write_text(
+        json.dumps(body), encoding="utf-8")
+    catalog = GameAssetCatalog()
+
+    catalog.ReloadStartGGCharacters()
+
+    assert catalog._startggCharacters["424242"] == {"name": "Zed"}
+    assert catalog._startggCharacters["7"] == {"name": None}
+    # The empty entry has no name: not in the table (the id would be "None").
+    assert "None" not in catalog._startggCharacters
+    assert catalog.StartGGCharacterName(424242) == "Zed"
+    assert catalog.StartGGCharacterName(7) is None
+    assert catalog.StartGGCharacterName(999) is None
+
+
 def test_the_snapshot_type_is_frozen():
     assert dataclasses.is_dataclass(GameAssetSnapshot)
     assert GameAssetSnapshot.__dataclass_params__.frozen

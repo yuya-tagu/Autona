@@ -52,6 +52,17 @@ from .StateManager import StateManager
 TEAM_LOGO_DIR = "./user_data/team_logo"
 
 
+def _MatchText(value):
+    """A match-bar field value as text, or None when it is not text-like."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
 class SetLoadService:
     """The set-loading rules of one board. Bound to ``score.{number}``.
 
@@ -178,6 +189,11 @@ class SetLoadService:
         written = False
 
         roundName = data.get("round_name")
+        if roundName is not None:
+            roundName = _MatchText(roundName)
+            if roundName is None:
+                logger.warning("match info: round_name is {}, skipped",
+                               type(data.get("round_name")).__name__)
         if roundName:
             written |= self._SetIfChanged(f"{self.prefix}.match", roundName)
 
@@ -185,12 +201,22 @@ class SetLoadService:
             f"{self.prefix}.match_en", data.get("round_name_en") or "")
 
         phase = data.get("tournament_phase")
+        if phase is not None:
+            phase = _MatchText(phase)
+            if phase is None:
+                logger.warning("match info: tournament_phase is {}, skipped",
+                               type(data.get("tournament_phase")).__name__)
         if phase:
             written |= self._SetIfChanged(f"{self.prefix}.phase", phase)
 
         if "tournament_pool" in data:
-            written |= self._SetIfChanged(
-                f"{self.prefix}.pool", data.get("tournament_pool") or "")
+            raw = data.get("tournament_pool")
+            pool = "" if not raw else _MatchText(raw)
+            if pool is None:
+                logger.warning("match info: tournament_pool is {}, skipped",
+                               type(raw).__name__)
+            else:
+                written |= self._SetIfChanged(f"{self.prefix}.pool", pool)
 
         return bool(written)
 

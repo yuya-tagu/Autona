@@ -277,6 +277,25 @@ def test_any_other_send_failure_drops_the_batch(debounce):
         (100, _payload(2, 2, _rows(2, 1)))]
 
 
+def test_a_full_state_the_socket_cannot_serialise_either_drops_the_batch(
+        debounce, monkeypatch):
+    """The full state can hold the same unserializable value as the
+    delta: its TypeError stays in the send too, or it would end the
+    flusher thread."""
+    def fullState(message=None):
+        debounce.fullStates += 1
+        WebServer.ws_emit("program_state", "the full state")
+
+    monkeypatch.setattr(WebServer, "ws_program_state", fullState)
+    debounce.fail = TypeError("not serialisable")
+    debounce.arrive(0, _changes(1))
+    debounce.run([])
+    assert debounce.fullStates == 1
+    debounce.fail = None
+    assert debounce.run([(100, _changes(2))]) == [
+        (100, _payload(2, 2, _rows(2, 1)))]
+
+
 # ── a send that follows the deltas (ADR-005 S3f-4 review) ────────────────
 # The full state of a game change carries the load's revision: sent ahead
 # of that revision's delta, still waiting in the open batch, it reaches the
@@ -518,6 +537,35 @@ def test_a_quiet_delta_goes_out_at_once_from_the_flusher(flusher):
     assert flusher.threads() == [thread]
     assert flusher.sent[0][2] == "program_state_update"
     assert flusher.payloads() == [_payload(1, 1, _rows(1, 1))]
+
+
+def test_a_send_that_raises_does_not_end_the_flusher(flusher, monkeypatch):
+    """Each send catches its own failures; should one get through anyway,
+    the flusher logs it and sends the next batch -- it does not die with
+    _delta_running still set and every later batch queued for nobody."""
+    original = WebServer._send_held_notices
+    calls = []
+
+    def sendHeldNotices(notices):
+        calls.append(None)
+        if len(calls) == 1:
+            raise RuntimeError("a send that does not catch")
+        original(notices)
+
+    monkeypatch.setattr(WebServer, "_send_held_notices",
+                        staticmethod(sendHeldNotices))
+    flusher.start()
+    thread = WebServer._delta_thread
+    WebServer.on_program_state_update(_changes(1))
+    assert flusher.waitFor(1)
+    WebServer.on_program_state_update(_changes(2))
+    assert flusher.waitFor(2)
+    assert thread.is_alive() and WebServer._delta_thread is thread
+    assert flusher.payloads() == [_payload(1, 1, _rows(1, 1)),
+                                  _payload(2, 2, _rows(2, 1))]
+    assert flusher.threads() == [thread, thread]
+    assert flusher.stop() is True
+    assert not thread.is_alive()
 
 
 @pytest.mark.parametrize("n, window, joiner", [

@@ -751,3 +751,64 @@ def test_a_team_name_brings_its_crest_and_the_same_name_again_does_not_look(
     finally:
         for path in (crest, crest.with_name("bravo.png")):
             path.unlink(missing_ok=True)
+
+
+# ── score:adjust: a huge delta is capped, Infinity is refused ─────────────
+
+def _countCalls(monkeypatch, name):
+    calls = []
+    real = getattr(WebOps, name)
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(WebOps, name, counting)
+    return calls
+
+
+def test_a_huge_adjust_delta_is_capped_at_the_score_span(
+        autonaApp, client, monkeypatch):
+    autonaApp.ready(1)
+    url = "/api/v1/scoreboards/1/teams/1/score:adjust"
+
+    span = AutonaActions.SCORE_MAX - AutonaActions.SCORE_MIN
+    # Not 10**9: if the cap is lost this must finish, not loop for ages.
+    ups = _countCalls(monkeypatch, "team_scoreup")
+    _ok(client.post(url, json={"delta": 10**6}))
+    autonaApp.settle()
+    assert autonaApp.get("score.1.team.1.score") == AutonaActions.SCORE_MAX
+    assert 0 < len(ups) <= span
+
+    downs = _countCalls(monkeypatch, "team_scoredown")
+    _ok(client.post(url, json={"delta": -10**6}))
+    autonaApp.settle()
+    assert autonaApp.get("score.1.team.1.score") == AutonaActions.SCORE_MIN
+    assert 0 < len(downs) <= span
+
+
+def test_an_infinity_adjust_delta_is_refused_without_writing(
+        autonaApp, client):
+    autonaApp.ready(1)
+
+    _assertRejected(client.post(
+        "/api/v1/scoreboards/1/teams/1/score:adjust",
+        data='{"delta": Infinity}', content_type="application/json"))
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.score") == 0
+
+
+@pytest.mark.parametrize("method, url, body", [
+    ("patch", "/api/v1/scoreboards/1/set", '{"bestOf": Infinity}'),
+    ("post", "/api/v1/scoreboards/1/score:set", '{"team1": Infinity}'),
+])
+def test_an_infinity_shared_int_field_is_refused_without_writing(
+        autonaApp, client, method, url, body):
+    autonaApp.ready(1)
+
+    _assertRejected(getattr(client, method)(
+        url, data=body, content_type="application/json"))
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.score") == 0
