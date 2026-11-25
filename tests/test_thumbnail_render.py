@@ -49,6 +49,7 @@ from src.core.StateManager import StateManager as SM
 from src.core.TaskExecutor import TaskExecutor
 from src.core.ThumbnailService import ThumbnailService
 from src.thumbnail.ThumbnailRenderer import ThumbnailRenderer
+from tests.conftest import remove_tree
 from tests.fixtures import template_packages
 from tests.fixtures.thumbnail import scenarios as world
 from tests.test_api_v1 import client, webApp  # noqa: F401
@@ -107,8 +108,12 @@ def pages(autonaApp, previewListener):
         autonaApp.dir / "layout", template_packages.THUMBNAIL_FOLDERS,
         page=PAGE, contract=1)
     yield
+    # The session's runtime: a folder left behind (a handle a Windows
+    # scanner or the preview listener still has open) is not made again by
+    # the next Install, so nothing removes it -- remove_tree waits, or fails
+    # here.
     for directory in created:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
 
 
 def _destroy(renderer):
@@ -763,7 +768,7 @@ def shippedPages(autonaApp, previewListener):
         yield
     finally:
         for directory in created:
-            shutil.rmtree(directory, ignore_errors=True)
+            remove_tree(directory)  # See `pages`.
 
 
 @pytest.mark.parametrize("templateId", ["type_a", "type_b"])
@@ -846,7 +851,7 @@ def renderPages(autonaApp, previewListener):
     shutil.copy(PROJECT_ROOT / "layout" / "include" / "autona.js", include)
     yield autonaApp.dir / "layout"
     for directory in created:
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)  # See `pages`.
 
 
 def _contract2Renderer():
@@ -1218,7 +1223,7 @@ def test_the_next_render_loads_again_after_a_failed_load(
         assert results == [""]
     finally:
         _destroy(made)
-        shutil.rmtree(layout, ignore_errors=True)
+        remove_tree(layout)  # See `pages`.
 
 
 def test_a_timeout_during_a_load_leaves_the_load_alone(renderer):
@@ -1494,7 +1499,7 @@ def service(autonaApp, pages, tmp_path, monkeypatch):
             SM.state = state
             SM.lastSavedState = saved
         output = autonaApp.dir / "out" / "thumbnails"
-        shutil.rmtree(output, ignore_errors=True)
+        remove_tree(output)
         (autonaApp.dir / "tmp" / "thumbnail" / "preview.png").unlink(
             missing_ok=True)
 
