@@ -1847,6 +1847,8 @@ class ArchiveJobService:
         cache = {}
         items = []
         try:
+            # Read once per run; SetPayload copies it for each set.
+            base = thumbnails.SetBase()
             for item in chosen:
                 frame = self._FramePath(jobDir, sets, item["no"]) \
                     if useFrame else None
@@ -1859,7 +1861,7 @@ class ArchiveJobService:
                 background = Path(os.path.realpath(frame)).as_uri() \
                     if frame is not None else None
                 items.append((item["no"],
-                              thumbnails.SetPayload(data, background),
+                              thumbnails.SetPayload(data, background, base=base),
                               dict(item, skins=skins)))
         except (OSError, ValueError) as error:
             logger.warning(f"Archive: job {jobId}'s thumbnails could not be "
