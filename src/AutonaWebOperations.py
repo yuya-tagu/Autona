@@ -1567,7 +1567,8 @@ def set_game(data):
     # re-read: a rescan in between could load another game.
     loadGameByCodename(
         set_codename, async_mode=False,
-        mods_active=data.get("mods_active", False), mods_reload_mode=True)
+        # bool() keeps the truthiness the loader already applies; state gets a real bool
+        mods_active=bool(data.get("mods_active", False)), mods_reload_mode=True)
     return "OK"
 
 

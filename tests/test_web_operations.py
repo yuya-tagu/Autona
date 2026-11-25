@@ -3231,3 +3231,27 @@ def test_a_small_legacy_body_still_reaches_its_parser(autonaApp, server):
         "/display-option", data=b"{nope", content_type="application/json"))
     _assertInvalidArgument(client.post(
         "/score", data=b"[1]", content_type="application/json"))
+
+
+_MODS_UNSET = object()
+
+
+@pytest.mark.parametrize("given,expected", [
+    ("false", True), (1, True), ({"a": 1}, True),
+    (_MODS_UNSET, False), (0, False), ("", False), (None, False)])
+def test_set_game_hands_the_loader_a_real_bool_for_mods_active(
+        autonaApp, monkeypatch, given, expected):
+    seen = {}
+    # setitem on the instance dict: setattr's undo would leave a bound method
+    # on the shared instance and hide later class-level patches.
+    monkeypatch.setitem(
+        vars(WebOps.GameAssetCatalog.instance), "GameCodenames",
+        lambda: ["g1"])
+    monkeypatch.setattr(
+        WebOps, "loadGameByCodename",
+        lambda codename, **kwargs: seen.update(kwargs))
+    body = {"codename": "g1"}
+    if given is not _MODS_UNSET:
+        body["mods_active"] = given
+    assert WebOps.set_game(body) == "OK"
+    assert seen["mods_active"] is expected
