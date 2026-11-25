@@ -267,6 +267,82 @@ def test_a_dropped_fetch_publishes_nothing_more(service, analysis):  # noqa: F81
     assert provider.calls == [["phases"]]         # its groups never asked
 
 
+class CancellableProvider(GatedProvider):
+    """GatedProvider recording the cancel each request was handed, and
+    raising for one set by the time it is released -- what the real
+    provider's strict request does once told to stop."""
+
+    def __init__(self, phases, groups, gatePhases=False):
+        super().__init__(phases, groups, gatePhases)
+        self.cancels = []
+
+    def _Stopped(self, cancel_event):
+        if cancel_event is not None and cancel_event.is_set():
+            raise LookupError("cancelled")
+
+    def GetTournamentPhases(self, progress_callback=None, cancel_event=None,
+                            strict=False):
+        self.cancels.append(cancel_event)
+        answer = super().GetTournamentPhases(strict=strict)
+        self._Stopped(cancel_event)
+        return answer
+
+    def GetAnalysisPhaseGroup(self, id, progress_callback=None,
+                              cancel_event=None, strict=False):
+        self.cancels.append(cancel_event)
+        answer = super().GetAnalysisPhaseGroup(id, strict=strict)
+        self._Stopped(cancel_event)
+        return answer
+
+
+@pytest.mark.parametrize("gatePhases", [True, False],
+                         ids=["phases", "group"])
+def test_a_tournament_switch_stops_the_dropped_fetch_s_requests(
+        service, analysis, gatePhases):  # noqa: F811
+    """Forget hands the stop to the requests still out (the phases', or a
+    group's), so that they no longer retry for a tournament that went; the
+    request that then raises is no failure (no ERROR, no traceback), and
+    nothing of it is published."""
+    from loguru import logger
+    provider = CancellableProvider(*SCENARIOS["one group, seeds known"],
+                                   gatePhases=gatePhases)
+    _switchTournament(provider)
+    records = []
+    sink = logger.add(lambda message: records.append(
+        (message.record["level"].name, message.record["message"],
+         message.record["exception"])), level="INFO")
+    try:
+        assert service.Refresh() == STARTED
+        if gatePhases:
+            assert provider.phasesAsked.wait(WAIT)
+        else:
+            _until(analysis, lambda: provider.inFlight == 1,
+                   "the group asked")
+        cancel = provider.cancels[-1]
+        assert cancel is not None and not cancel.is_set()
+
+        _switchTournament(None)
+        forgotten = AnalysisService.Progress()
+        assert forgotten["status"] == "idle"
+        assert cancel.is_set()
+    finally:
+        provider.release.set()
+        _drain(analysis)
+        logger.remove(sink)
+
+    assert AnalysisService.Progress() == forgotten
+    assert service.Result() == {"url": "", "rows": [], "revision": None}
+    analysisRecords = [record for record in records
+                       if record[1].startswith("Analysis:")]
+    assert not [record for record in analysisRecords
+                if record[0] in ("ERROR", "CRITICAL")]
+    assert all(record[2] is None for record in analysisRecords)
+    assert any("cancelled" in record[1] for record in analysisRecords)
+    # The phases' request stopped: its groups were never asked.
+    assert provider.calls == (
+        [["phases"]] if gatePhases else [["phases"], ["group", 50]])
+
+
 def test_forgetting_drops_the_rows_and_advances_the_revision(
         service, analysis):  # noqa: F811
     label = "one group, byes"

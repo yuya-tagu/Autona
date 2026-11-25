@@ -493,8 +493,14 @@ class SetSelectionService:
         try:
             rows, failed = fetchRows(fetch, provider)
         except Exception:
-            logger.exception(f"Set selection: {fetch.kind} could not be "
-                             "fetched")
+            if fetch.cancel.is_set():
+                # Stopped (a replacing fetch, CancelSets or Forget): the
+                # strict request raises for it, which is no failure -- and
+                # what it answered is dropped below.
+                logger.info(f"Set selection: {fetch.kind} fetch cancelled")
+            else:
+                logger.exception(f"Set selection: {fetch.kind} could not be "
+                                 "fetched")
             rows, failed = None, 0
         if _Stopping():
             # What a request the shutdown cut short answered is no answer.
@@ -542,11 +548,14 @@ def _FollowCandidates(rows):
 
 
 def _FetchPhases(fetch, provider):
-    return PhaseRows(provider.GetTournamentPhases(strict=True)), 0
+    # The cancel, as for the sets: Forget stops the request's retries.
+    return PhaseRows(provider.GetTournamentPhases(
+        strict=True, cancel_event=fetch.cancel)), 0
 
 
 def _FetchStations(fetch, provider):
-    return StationRows(provider.GetStations(strict=True)), 0
+    return StationRows(provider.GetStations(
+        strict=True, cancel_event=fetch.cancel)), 0
 
 
 def _FetchSets(service, fetch, provider, groupIds, finished):

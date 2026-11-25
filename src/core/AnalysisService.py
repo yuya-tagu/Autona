@@ -52,7 +52,9 @@ last one that did not (the Qt panel's table did).
 (again) or unloaded -- directly, not through a state observer. The fetch in
 progress is dropped (its jobs stop at their next step, and what they still
 get back is not recorded: each fetch is a generation), the rows are
-dropped, and ``analysis`` goes back to idle at the next revision.
+dropped, and ``analysis`` goes back to idle at the next revision. It also
+sets the cancel event of the requests still out, so they stop; a request
+that was stopped is not retried.
 
 Each row (``BracketRows``) is a structure, not a table's text: ``round``
 (the round's name, after the phase / group when there are several groups)
@@ -101,7 +103,8 @@ FETCH_FAILED = "fetch_failed"
 # The most phase groups fetched at the same time -- the jobs one fetch runs
 # (S3f-2 decision 7: the job lane has four threads that every tournament
 # fetch shares). A fetch runs this many less the jobs of dropped fetches
-# still running (their requests are still out), and always at least one:
+# still running (Forget sets the cancel event of their requests, but a job
+# is only counted out once it has returned), and always at least one:
 # with 2, a second job only while no dropped job is left.
 PARALLEL_FETCHES = 2
 
@@ -358,6 +361,10 @@ class _Fetch:
         self.error = ""
         self.rows = None
         self.over = False
+        # Set by Forget: the requests of this fetch's jobs stop retrying
+        # (the provider's cancel_event), so that its jobs end sooner and
+        # stop narrowing the next fetch's (_Width).
+        self.cancel = threading.Event()
 
     def Snapshot(self):
         return {"status": self.status, "error": self.error,
@@ -482,9 +489,12 @@ class AnalysisService:
             with self._lock:
                 self._generation += 1
                 dropped = self._fetch is not None or self._result is not None
+                droppedFetch = self._fetch
                 self._fetch = None
                 self._result = None
             self._Set(schema.DefaultAnalysis(published["revision"] + 1))
+        if droppedFetch is not None:
+            droppedFetch.cancel.set()
         if dropped:
             logger.info("Analysis: the match list was dropped")
 
@@ -600,9 +610,15 @@ class AnalysisService:
         # request for them failed (fetch_failed).
         noEntries = NO_PHASES
         try:
-            phases = provider.GetTournamentPhases(strict=True)
+            phases = provider.GetTournamentPhases(
+                strict=True, cancel_event=fetch.cancel)
         except Exception:
-            logger.exception("Analysis: the phases could not be fetched")
+            if fetch.cancel.is_set():
+                # Forgotten: the request stopped for it, no failure. What
+                # follows is dropped (_Current).
+                logger.info("Analysis: the phases fetch cancelled")
+            else:
+                logger.exception("Analysis: the phases could not be fetched")
             phases = None
             noEntries = FETCH_FAILED
         if _Stopping():
@@ -668,7 +684,7 @@ class AnalysisService:
                     return
                 index = fetch.queue.popleft()
                 groupId = fetch.entries[index][1]
-            answer = _FetchGroup(provider, groupId)
+            answer = _FetchGroup(provider, groupId, fetch.cancel)
             if _Stopping():
                 # What a request the shutdown cut short answered is no
                 # answer.
@@ -715,17 +731,22 @@ class AnalysisService:
         self._Publish(fetch)
 
 
-def _FetchGroup(provider, groupId):
+def _FetchGroup(provider, groupId, cancel=None):
     """What the provider answers for one group, asked strictly; None: its
-    request failed."""
+    request failed. `cancel` (the fetch's, set by Forget) stops the
+    request's retries."""
     fetch = getattr(provider, "GetAnalysisPhaseGroup", None)
     if fetch is None:
         logger.warning("Analysis: the provider cannot fetch a phase group")
         return None
     try:
-        return fetch(groupId, strict=True)
+        return fetch(groupId, strict=True, cancel_event=cancel)
     except Exception:
-        logger.exception(f"Analysis: the group {groupId} could not be fetched")
+        if cancel is not None and cancel.is_set():
+            logger.info(f"Analysis: the group {groupId} fetch cancelled")
+        else:
+            logger.exception(
+                f"Analysis: the group {groupId} could not be fetched")
         return None
 
 
