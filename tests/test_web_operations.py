@@ -2761,3 +2761,56 @@ def test_what_answers_500_headless_answers_500_on_the_desktop(
 
     assert statuses == [(endpoint, board, 500)
                         for endpoint, board, _, _ in walked]
+
+
+# ── set_route parses every field before it writes ────────────────────────
+
+def _settledBoard(app):
+    app.ready(BOARD)
+    _prepare(BOARD)
+    app.settle()
+    WebOps.apply_changes(BOARD)
+    app.settle()
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+    return _view(app, BOARD)
+
+
+def test_a_bad_count_writes_none_of_the_set_fields(autonaApp):
+    before = _settledBoard(autonaApp)
+    roster = _roster(autonaApp, BOARD)
+    with pytest.raises(ValueError):
+        WebOps.set_route(BOARD, phase="X", match="GF", players="2",
+                         characters="abc")
+    autonaApp.settle()
+    assert _view(autonaApp, BOARD) == before
+    # the player count itself is untouched, not only the match bar
+    assert _roster(autonaApp, BOARD) == roster
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+
+
+def test_a_non_string_losers_writes_none_of_the_set_fields(autonaApp):
+    before = _settledBoard(autonaApp)
+    with pytest.raises(TypeError):
+        WebOps.set_route(BOARD, match="GF", losers=True, team=1)
+    autonaApp.settle()
+    assert _view(autonaApp, BOARD) == before
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+
+
+def test_a_bad_count_after_pool_and_match_writes_neither(autonaApp):
+    # characters is parsed after pool / match are applied in the old code
+    before = _settledBoard(autonaApp)
+    with pytest.raises(ValueError):
+        WebOps.set_route(BOARD, pool="P", match="M", characters="x")
+    autonaApp.settle()
+    assert _view(autonaApp, BOARD) == before
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
+
+
+def test_a_bad_team_number_with_a_team_name_writes_no_phase(autonaApp):
+    before = _settledBoard(autonaApp)
+    with pytest.raises(ValueError):
+        WebOps.set_route(BOARD, phase="X", teamName="A", team="x")
+    autonaApp.settle()
+    assert _view(autonaApp, BOARD) == before
+    assert not _state().HasPendingChanges(f"score.{BOARD}")
