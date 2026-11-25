@@ -68,6 +68,7 @@ import traceback
 
 import orjson
 from loguru import logger
+from msgpack import packb, unpackb
 
 from .DictHelper import deep_clone
 from .Observable import ObserverChannel
@@ -607,9 +608,10 @@ class PlayerDB:
     def SaveDB(self):
         """Write the database to `path`, keeping only `fieldnames`.
 
-        The snapshot (the JSON text) is taken under `lock`; the write is done
-        outside it, under `_saveLock`, so a slow disk or a retried replace
-        never blocks a reader or the entrants worker. Snapshots are numbered,
+        The snapshot (one msgpack.packb) is taken under `lock`; the JSON text
+        is built and written outside it (the write under `_saveLock`), so
+        neither the formatting, a slow disk nor a retried replace blocks a
+        reader or the entrants worker. Snapshots are numbered,
         so the file always ends at the newest one even when two saves race.
         Failures are logged, never raised (as before).
 
@@ -630,7 +632,9 @@ class PlayerDB:
             return
         try:
             with self.lock:
-                generation, text = self._Snapshot()
+                generation, packed = self._Snapshot()
+            text = self._SnapshotText(packed)
+            del packed  # only the text lives through the write and its retries
             self._Persist(generation, text)
         except Exception:
             logger.error(traceback.format_exc())
@@ -641,21 +645,23 @@ class PlayerDB:
             return self._snapshotGeneration
 
     def _Snapshot(self):
-        """(generation, JSON text) of the database as it is saved. Caller
-        holds `lock`."""
-        player_list = []
+        """(generation, packed) of the database as it is saved. Caller holds
+        `lock`; returns the serialised snapshot: one packb of the players'
+        `fieldnames` keys, in each player's own key order. packb serialises the values too,
+        so it is a deep copy -- the entrants worker and NormaliseMains may
+        change the dicts (and their mains lists) once the lock is released.
+        Turn it into the file's text with _SnapshotText, outside the lock."""
+        keep = set(PlayerDB.fieldnames)
+        packed = packb([{key: value for key, value in player.items()
+                         if key in keep}
+                        for player in self.database.values()
+                        if player is not None])
+        return self._NextGeneration(), packed
 
-        for player in self.database.values():
-            if player is not None:
-                playerData = deep_clone(player)
-
-                for key in list(playerData.keys()):
-                    if key not in PlayerDB.fieldnames:
-                        del playerData[key]
-
-                player_list.append(playerData)
-
-        return self._NextGeneration(), json.dumps(player_list, indent=2)
+    @staticmethod
+    def _SnapshotText(packed):
+        """The file's JSON text for a _Snapshot (called without `lock`)."""
+        return json.dumps(unpackb(packed, strict_map_key=False), indent=2)
 
     def _Persist(self, generation, text):
         """Write `text` unless a newer snapshot is already on disk. Called
@@ -836,13 +842,14 @@ class PlayerDB:
         player cards: ADR-005 S4ac-3 / S4ad).
 
         For use outside the process (the web server's /playerdb and its
-        Socket.IO push): a deep copy, players and all, taken under the lock,
-        so serialising it cannot race the entrants worker or
-        NormaliseMains, both of which change player dicts (and their mains
-        lists) in place. Key order is kept, so the JSON is the same as the live
-        dict's."""
+        Socket.IO push): a deep copy, players and all, serialised under the
+        lock (one packb) and unpacked outside it, so serialising it cannot
+        race the entrants worker or NormaliseMains, both of which change
+        player dicts (and their mains lists) in place. Key order is kept, so
+        the JSON is the same as the live dict's."""
         with self.lock:
             tags = self.tournamentTags
-            return {tag: deep_clone(player)
-                    for tag, player in self.database.items()
-                    if not tags or tag in tags}
+            packed = packb({tag: player
+                            for tag, player in self.database.items()
+                            if not tags or tag in tags})
+        return unpackb(packed, strict_map_key=False)
