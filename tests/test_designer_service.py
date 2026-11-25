@@ -955,11 +955,14 @@ def import_client(designer_service, monkeypatch):
     from src.AutonaWebServer import WebServer, _build_web_app
 
     emitted = []
+    emitted_to = []
     monkeypatch.setattr(WebServer, "socketio", types.SimpleNamespace(
-        emit=lambda event, data: emitted.append(event)))
+        emit=lambda event, data, **kw: (emitted.append(event),
+                                        emitted_to.append(kw.get("to")))))
     app, _socketio = _build_web_app()
     client = app.test_client()
     client.emitted = emitted
+    client.emitted_to = emitted_to
     return client
 
 
@@ -1020,6 +1023,11 @@ def test_the_figma_plugin_can_post_an_import(
     assert response.headers["Access-Control-Allow-Origin"] == origin
     assert response.get_json()["layers"] == 1
     assert import_client.emitted == ["designer_import_received"]
+    from src.AutonaWebServer import WebServer
+    from src.core import WebAccess
+    assert import_client.emitted_to == [[
+        WebServer.WS_AMBIENT_ROOM,
+        WebServer._ws_token_room(WebAccess.TokenGeneration())]]
     assert designer_service.latest_import()["project"]["name"] == (
         "Figma Finals")
 

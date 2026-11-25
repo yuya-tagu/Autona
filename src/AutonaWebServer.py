@@ -880,7 +880,10 @@ def _build_web_app():
         try:
             payload = request.get_json(force=False, silent=False)
             result = AutonaDesignerService.receive_import(payload)
-            WebServer.socketio.emit("designer_import_received", result)
+            # Trusted rooms only: read-only LAN/OBS/preview sockets
+            # must not see import metadata
+            WebServer.socketio.emit("designer_import_received", result,
+                                    to=WebServer._ws_trusted_rooms())
             return jsonify(result)
         except DesignerProjectError as exc:
             return jsonify({"error": str(exc)}), 400
