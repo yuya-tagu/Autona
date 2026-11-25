@@ -79,6 +79,9 @@ from .PlayerService import DefaultPlayersPerTeam
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
+# "No such key" for a Get that must tell it from a stored None.
+_ABSENT = object()
+
 
 class StatsService:
     """The stats of one scoreboard. Bound to ``score.{scoreboardNumber}``."""
@@ -311,13 +314,20 @@ class StatsService:
             *request, self._Answer(self.RECENT_SETS, None, generation,
                                    request[:2], self.UpdateRecentSets))
 
+    # The loading / cleared writes below are skipped when the value is
+    # already there: the statistics keys are exempt from the hold, but an
+    # identical Set still runs a save cycle (with a board's edits pending,
+    # a deep clone of the whole state and a DeepDiff) for no delta. The
+    # callers hold StateManager.lock, so the comparison and the write are
+    # one step.
+
     def MarkRecentSetsLoading(self):
-        StateManager.Set(f"{self.prefix}.recent_sets",
-                         {"state": "loading", "sets": []})
+        StateManager.SetIfChanged(f"{self.prefix}.recent_sets",
+                                  {"state": "loading", "sets": []})
 
     def ClearRecentSets(self):
-        StateManager.Set(f"{self.prefix}.recent_sets",
-                         {"state": "done", "sets": []})
+        StateManager.SetIfChanged(f"{self.prefix}.recent_sets",
+                                  {"state": "done", "sets": []})
 
     def UpdateRecentSets(self, data):
         """Publish a head-to-head result, unless a newer one already landed.
@@ -356,7 +366,9 @@ class StatsService:
                 self.UpdateLastSets))
 
     def ClearLastSets(self, playerNumber):
-        StateManager.Set(f"{self.prefix}.last_sets.{playerNumber}", {})
+        # Unchanged is not written (see MarkRecentSetsLoading).
+        StateManager.SetIfChanged(
+            f"{self.prefix}.last_sets.{playerNumber}", {})
 
     def UpdateLastSets(self, data):
         playerNumber = data.get("playerNumber")
@@ -399,7 +411,9 @@ class StatsService:
                 self.UpdateHistorySets))
 
     def ClearHistorySets(self, playerNumber):
-        StateManager.Set(f"{self.prefix}.history_sets.{playerNumber}", {})
+        # Unchanged is not written (see MarkRecentSetsLoading).
+        StateManager.SetIfChanged(
+            f"{self.prefix}.history_sets.{playerNumber}", {})
 
     def UpdateHistorySets(self, data):
         playerNumber = data.get("playerNumber")
@@ -484,7 +498,20 @@ class StatsService:
 
     @staticmethod
     def UpdateStreamQueue(data):
-        with StateManager.SaveBlock():
-            StateManager.Set("streamQueue", data)
-            StateManager.Set("currentStream",
-                             SettingsManager.Get("twitch_username"))
+        """Publish the provider's stream queue and the stream it is for.
+
+        Each is written only when it changed: the provider re-sends the
+        same queue, and an identical Set still runs a save cycle (a deep
+        clone of the whole state and a DeepDiff while a board has edits
+        pending) for no delta.
+        """
+        channel = SettingsManager.Get("twitch_username")
+        # The compare and the write are one step under the state lock (the
+        # outermost lock; nothing here waits on another thread).
+        with StateManager.lock, StateManager.SaveBlock():
+            StateManager.SetIfChanged("streamQueue", data)
+            # An absent key is written even for None, so a new state keeps
+            # its `"currentStream": null` in the output files.
+            if (StateManager.Get("currentStream", _ABSENT) is _ABSENT
+                    or StateManager.Get("currentStream") != channel):
+                StateManager.Set("currentStream", channel)

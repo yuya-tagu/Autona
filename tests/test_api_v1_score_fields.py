@@ -28,7 +28,8 @@ from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.MatchNameCandidates import MatchNameCandidates
 from src.core.PlayerService import PlayerService
 from src.core.StateManager import StateManager
-from tests.fixtures.write_recording import WriteRecorder, encode
+from tests.fixtures.write_recording import (
+    WriteRecorder, encode, withoutNoOpSets)
 from tests.test_api_v1 import _assertRejected, client, webApp  # noqa: F401
 from tests.test_api_v1_score import (  # noqa: F401
     _apply, _cycles, _ok, _oneCycle, _pending, _published, desktopBoards,
@@ -77,6 +78,23 @@ CARD_RECORDING = (Path(__file__).parent / "fixtures" / "score_fields"
 
 def _onTheCard(name):
     return json.loads(CARD_RECORDING.read_text(encoding="utf-8"))[name]
+
+
+# The statistics START alone leaves on board 1: no pairing (the head to head
+# cleared) and nothing fetched. The tag edit drops the id and asks for them
+# again; the card's recording has the clears that repeat these, which
+# StatsService no longer writes (StateManager.SetIfChanged).
+_START_STATS = {"score.1.recent_sets": encode({"state": "done", "sets": []}),
+                **{f"score.1.{stat}.{team}": "{}"
+                   for stat in ("last_sets", "history_sets")
+                   for team in (1, 2)}}
+
+
+def _withoutNoOpSets(recording):
+    last = dict(_START_STATS)
+    return [[label, dict(recorded, sets=withoutNoOpSets(
+        recorded["sets"], last)), slot]
+        for label, recorded, slot in recording]
 
 
 def _asRecorded(played):
@@ -183,7 +201,7 @@ def test_the_fields_write_what_the_qt_card_wrote(
         autonaApp, client, recordedLocale, monkeypatch):
     # Against the Qt card itself until ADR-005 S4ac-3, against its
     # recording since (under its locale: recordedLocale).
-    onCard = _onTheCard("fields")
+    onCard = _withoutNoOpSets(_onTheCard("fields"))
     assert [label for label, _recorded, _slot_ in onCard] \
         == [label for label, _body in FIELD_STEPS]
     # Every step but the last wrote something; the last nothing.
