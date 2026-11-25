@@ -98,8 +98,15 @@ access violation になった。
 - `StartGGDataProvider._request_timeout_secs = 20`。重いクエリ（`TournamentPhaseGroupQuery` の seeds + sets など）にフィールドを足すとすぐ
   timeout する。bracket 表示に必須でないネストの深いフィールド（`user.images`・`authorizations`・`player.sets.games.selections` など）は削る。
   レスポンス 1MB 超は危険域
-- `QueryRequests` は指数バックオフ（1/2/4/8 秒）で、5 回失敗すると `{}` を返す。呼び出し側は空データでも壊れないように null-safe に書く。
-  失敗と空を区別したい呼び手は provider の `strict=True` を使う
+- `_QueryRequests`（provider のメソッド版 `QueryRequests` は同じ関数に timeout と `cancel_event` を渡す）は、200 以外の答えと例外を
+  指数バックオフ（1/2/4/8 秒）で最大 5 回まで試す。`{}` を返す条件は 3 つ。(a) 5 回とも失敗したとき。(b) タスク実行器の `stopping` が
+  セット済みのとき（アプリの終了中）。(c) `cancel_event` がセット済みのとき。(b)(c) は毎回の試行の前に確かめ、バックオフの待ちも
+  途中で切れる（`_WaitUnless` / `stopping.wait`）
+- 大会の差し替えや解除のときは、`AutonaTournamentDataProvider` モジュールのアダプタが旧 provider の cancel event をセットする（止まるのは
+  大会情報・フェーズ・参加者・更新の要求だけ。`RunWithProvider` のジョブと統計の取得は別の Event で、止まらない）。止まった要求の `{}` は、差し替え済みの provider の答えとして捨てられる。終了中の答えもアダプタが捨てる
+- 呼び出し側は空データでも壊れないように null-safe に書く。失敗と空を区別したい呼び手は provider の `strict=True` を使う。
+  `{}` を 5 回失敗の結果と決めつけて、エラー表示や再試行をしない。
+  `strict=True` でも cancel・終了中は `LookupError` になるので、呼び手は自分の `cancel_event` を先に確かめる
 
 ## 12. Edit/Write ツール後は `__pycache__` が古い可能性
 

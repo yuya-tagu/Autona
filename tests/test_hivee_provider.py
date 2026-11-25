@@ -18,7 +18,8 @@ Pinned here, with Hivee's HTTP stood in for:
   changed, the fields filled in), a match that left the stream answering
   its last read -- remembered across a forced reload -- and on the board
   through core's set apply;
-- one request per view at a time, and a failed read kept a while;
+- one request per view at a time, a transient failure asked again once,
+  and a failed read kept a while;
 - the stream follow's lookups, the stream queue, the station row;
 - the set ids: a Hivee match's uuid through the web's set lookups;
 - the Top 8 cards onto Top8Model's fixed topology;
@@ -85,7 +86,8 @@ class _Response:
 
 class _Hivee:
     """requests.get as Hivee's overlay route answers it: `answers[view]`
-    (a payload, a status, or an exception to raise). Records each call."""
+    (a payload, a status, or an exception to raise; a list of them answers
+    one per call, the last one from then on). Records each call."""
 
     def __init__(self, answers):
         self.answers = answers
@@ -95,6 +97,8 @@ class _Hivee:
         self.calls.append({"url": url, "params": dict(params or {}),
                            "timeout": timeout})
         answer = self.answers.get((params or {}).get("view"))
+        if isinstance(answer, list):
+            answer = answer.pop(0) if len(answer) > 1 else answer[0]
         if isinstance(answer, Exception):
             raise answer
         if isinstance(answer, int):
@@ -159,6 +163,8 @@ def _freshMemory(monkeypatch):
 def http(monkeypatch):
     fake = _Hivee({"scoreboard": _scoreboard()})
     monkeypatch.setattr(hivee.requests, "get", fake.get)
+    # A transient failure's retry does not wait in the tests.
+    monkeypatch.setattr(HiveeDataProvider, "RETRY_WAIT_SECS", 0)
     return fake
 
 
@@ -652,22 +658,96 @@ def test_a_failed_read_is_kept_a_while(http, monkeypatch):
         monotonic=lambda: now[0]))
     http.answers["scoreboard"] = 500
     provider = HiveeDataProvider(API_URL, None)
+    # One read: the 500 and its one retry.
     assert provider.GetStreamMatchId("x") is None
+    assert len(http.calls) == 2
     now[0] += provider.FAILURE_SECS - 0.1
     assert provider.GetMatch("m-current") == {}
     assert provider.GetStreamQueue() == {}
-    assert len(http.calls) == 1
+    assert len(http.calls) == 2
     http.answers["scoreboard"] = _scoreboard()
     now[0] += 0.2
     assert provider.GetStreamMatchId("x") == {"id": "m-current"}
-    assert len(http.calls) == 2
+    assert len(http.calls) == 3
     # An answer is kept for CACHE_SECS only.
     now[0] += provider.CACHE_SECS - 0.1
     provider.GetStreamQueue()
-    assert len(http.calls) == 2
+    assert len(http.calls) == 3
     now[0] += 0.2
     provider.GetStreamQueue()
-    assert len(http.calls) == 3
+    assert len(http.calls) == 4
+
+
+@pytest.mark.parametrize("first", [
+    hivee.requests.ConnectionError("reset by peer"), 503,
+])
+def test_a_transient_failure_is_asked_again_once(provider, http, first):
+    """A connection reset or a 502/503 once is not the operation's failure
+    (kept FAILURE_SECS, so pressing again would get it back too)."""
+    http.answers["scoreboard"] = [first, _scoreboard()]
+    assert provider.GetTournamentData()["tournamentName"] == "Autona Cup"
+    assert len(http.calls) == 2
+
+
+@pytest.mark.parametrize("answer", [
+    404,
+    hivee.requests.Timeout("read timed out"),
+    hivee.requests.ConnectTimeout("connect timed out"),
+])
+def test_a_lasting_failure_or_a_timeout_is_not_asked_again(provider, http,
+                                                           answer):
+    http.answers["scoreboard"] = [answer, _scoreboard()]
+    assert provider.GetTournamentData() == {}
+    assert len(http.calls) == 1
+
+
+def test_an_answer_that_is_not_json_is_not_asked_again(provider,
+                                                       monkeypatch):
+    calls = []
+
+    def get(*args, **kwargs):
+        calls.append(1)
+        return _Response(200, content=b"<html>")
+
+    monkeypatch.setattr(hivee.requests, "get", get)
+    assert provider.GetTournamentData() == {}
+    assert len(calls) == 1
+
+
+def test_a_failure_that_lasts_is_asked_twice_then_kept(http, monkeypatch):
+    """Each read of a Hivee answering 500 asks twice; the final failure is
+    kept FAILURE_SECS like any failed read."""
+    now = [100.0]
+    monkeypatch.setattr(hivee, "time", SimpleNamespace(
+        monotonic=lambda: now[0]))
+    http.answers["scoreboard"] = 500
+    provider = HiveeDataProvider(API_URL, None)
+    assert provider.GetTournamentData() == {}
+    assert len(http.calls) == 2
+    now[0] += provider.FAILURE_SECS - 0.1
+    assert provider.GetTournamentData() == {}
+    assert len(http.calls) == 2
+    now[0] += 0.2
+    assert provider.GetTournamentData() == {}
+    assert len(http.calls) == 4
+
+
+def test_no_retry_once_the_app_is_stopping(provider, http, monkeypatch):
+    """The shutdown does not wait on a retry: once the executor is
+    stopping, a transient failure is the answer."""
+    from src.core.TaskExecutor import TaskExecutor
+    stopping = threading.Event()
+    monkeypatch.setattr(TaskExecutor, "instance",
+                        SimpleNamespace(stopping=stopping))
+    def get(url, params=None, timeout=None):
+        # The shutdown starts while the first request is under way.
+        stopping.set()
+        return _Hivee.get(http, url, params, timeout)
+
+    http.answers["scoreboard"] = [503, _scoreboard()]
+    monkeypatch.setattr(hivee.requests, "get", get)
+    assert provider.GetTournamentData() == {}
+    assert len(http.calls) == 1
 
 
 # ── what is remembered of a match ────────────────────────────────────────
