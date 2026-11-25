@@ -152,17 +152,25 @@ def Candidates(sets):
     unused = sets.get("unused_sets") if isinstance(sets, dict) else None
     for item in [row.get("set") for row in Rows(sets).values()] + (
             unused if isinstance(unused, list) else []):
-        if isinstance(item, dict) and ResultKey(item) not in seen:
-            seen.add(ResultKey(item))
+        if not isinstance(item, dict):
+            continue
+        key = ResultKey(item)
+        if key not in seen:
+            seen.add(key)
             found.append(item)
     return found
 
 
-def _Candidate(result, candidates):
-    """Whether `result` may be given: None (no result) or one of
-    `candidates`."""
-    return result is None or (isinstance(result, dict) and ResultKey(result)
-                              in {ResultKey(item) for item in candidates})
+def _CandidateKeys(candidates):
+    """The ResultKey of each of `candidates`, made once per review."""
+    return {ResultKey(item) for item in candidates}
+
+
+def _Candidate(result, keys):
+    """Whether `result` may be given: None (no result) or one whose key is
+    in `keys` (`_CandidateKeys` of the candidates)."""
+    return result is None or (isinstance(result, dict)
+                              and ResultKey(result) in keys)
 
 
 def _RowOf(rows, key):
@@ -278,7 +286,7 @@ def Normalize(raw, sets):
         return Empty()
     rows = Rows(sets)
     duration = Duration(sets)
-    candidates = Candidates(sets)
+    keys = _CandidateKeys(Candidates(sets))
     entries = {}
     # Each set's skins, kept once its result is known (below).
     skins = {}
@@ -306,7 +314,7 @@ def Normalize(raw, sets):
                 entry["end"] = end
         if "set" in value:
             result = value["set"]
-            if _Candidate(result, candidates) \
+            if _Candidate(result, keys) \
                     and ResultKey(result) != ResultKey(row.get("set")):
                 entry["set"] = result
         if "skins" in value:
@@ -342,7 +350,7 @@ def Check(body, sets):
             'レビューの形式が違います（"sets" のオブジェクトがありません）。')
     rows = Rows(sets)
     duration = Duration(sets)
-    candidates = Candidates(sets)
+    keys = _CandidateKeys(Candidates(sets))
     entries = {}
     for key, value in body["sets"].items():
         row = _RowOf(rows, key)
@@ -383,7 +391,7 @@ def Check(body, sets):
             entry["end"] = end
         if "set" in value:
             result = value["set"]
-            if not _Candidate(result, candidates):
+            if not _Candidate(result, keys):
                 raise ReviewError(f"{where}に割り当てた結果は、このジョブの結果にありません。")
             if ResultKey(result) != ResultKey(row.get("set")):
                 entry["set"] = result

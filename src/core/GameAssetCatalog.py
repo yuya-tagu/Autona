@@ -81,9 +81,10 @@ GAMES_DIR = "./user_data/games/"
 
 # characters.json is shipped as a tracked seed in assets/ but is refreshed from
 # the start.gg API at every startup. Writing the runtime copy back into the
-# tracked seed dirties the working tree and risks committing API data. The runtime download targets user_data/ (gitignored),
-# and reads prefer that copy, falling back to the tracked seed for a fresh
-# clone.
+# tracked seed dirties the working tree and risks committing API data. The
+# runtime download targets user_data/ (gitignored), and reads prefer that
+# copy. They fall back to the tracked seed whenever the runtime copy is
+# missing, unreadable, or has no character table (not only on a fresh clone).
 CHARACTERS_SEED_PATH = './assets/characters.json'
 CHARACTERS_RUNTIME_PATH = './user_data/characters.json'
 STARTGG_CHARACTERS_URL = 'https://api.start.gg/characters'
@@ -125,12 +126,6 @@ def _CharacterPack(pack):
     kind = pack.get("type")
     kinds = kind if isinstance(kind, list) else [kind]
     return not any(item in ("stage_icon", "variant_icon") for item in kinds)
-
-
-def _resolve_characters_path() -> str:
-    if os.path.exists(CHARACTERS_RUNTIME_PATH):
-        return CHARACTERS_RUNTIME_PATH
-    return CHARACTERS_SEED_PATH
 
 
 def _utf16_key(row):
@@ -771,16 +766,38 @@ class GameAssetCatalog:
                     f"{schema.GAME_ROOT}.{schema.GAME_SELECTED_KEY}", False)
 
     def ReloadStartGGCharacters(self):
-        """Re-read the start.gg character table (runtime copy, else seed)."""
-        path = _resolve_characters_path()
-        try:
-            with open(path, 'rb') as f:
-                sggcharacters = orjson.loads(f.read())
-        except Exception:
-            logger.error(f"Could not read {path}: {traceback.format_exc()}")
+        """Re-read the start.gg character table.
+
+        The runtime copy is tried first; when it cannot be read or has no
+        character table (0 bytes, torn write, `{}`), the bundled seed is used
+        instead. Only when neither works is the table left as it was."""
+        candidates = []
+        if os.path.exists(CHARACTERS_RUNTIME_PATH):
+            candidates.append(CHARACTERS_RUNTIME_PATH)
+        candidates.append(CHARACTERS_SEED_PATH)
+        characters = None
+        for path in candidates:
+            try:
+                with open(path, 'rb') as f:
+                    sggcharacters = orjson.loads(f.read())
+                entities = (sggcharacters.get("entities")
+                            if isinstance(sggcharacters, dict) else None)
+                found = (entities.get("character")
+                         if isinstance(entities, dict) else None)
+                if not isinstance(found, list) or not found:
+                    raise ValueError("no character table")
+            except Exception as e:
+                logger.warning(
+                    f"Could not use {path} ({type(e).__name__}): "
+                    f"{traceback.format_exc()}")
+                continue
+            characters = found
+            break
+        if characters is None:
+            logger.error("Could not read any start.gg character table")
             return
         table = {}
-        for c in sggcharacters.get("entities", {}).get("character", []):
+        for c in characters:
             # An empty or non-dict entry has no name: keep it out of the
             # table, as the old truthiness check on the entity did.
             if not isinstance(c, dict) or not c:
@@ -839,6 +856,10 @@ class GameAssetCatalog:
                 os.path.dirname(CHARACTERS_RUNTIME_PATH), exist_ok=True)
             with open(tmp_path, 'wb') as f:
                 f.write(r_json)
+                # On disk before the rename: a power cut must not leave a
+                # 0-byte runtime copy in place of a good one
+                f.flush()
+                os.fsync(f.fileno())
 
             # Atomically overwrite the runtime copy (os.replace works
             # whether or not the target already exists)

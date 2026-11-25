@@ -1723,6 +1723,54 @@ def test_an_install_fetches_concatenates_and_extracts_the_allowed_packs(env):
     assert not packs["full"]["updateAvailable"]
 
 
+def test_an_install_retries_a_file_that_is_in_use_when_it_moves_in(
+        env, monkeypatch):
+    _upstream(env)
+    once = [True]
+
+    def refuse(source, target):
+        if once[0] and target.endswith("mario.png"):
+            once[0] = False
+            return True
+        return False
+
+    tried = _refuse_moves(monkeypatch, refuse)
+    env.service.Install("ssbu", ["full"])
+    job = _run(env)
+
+    assert job["status"] == assets.DONE, job
+    assert len(tried) == 1
+    assert (env.games / "ssbu" / "full" / "mario.png").read_bytes() == \
+        b"mario" * 1000
+    assert env.sleeps == [assets._REPLACE_BACKOFF]
+    assert _staging(env.games) == []
+
+
+def test_split_parts_are_written_straight_into_the_merged_archive(env):
+    _upstream(env)
+    seen = []
+
+    def onChunk(index):
+        # Called for every chunk while a part is being downloaded.
+        for staging in _staging(env.games):
+            parts = env.games / staging / "parts"
+            if parts.is_dir():
+                seen.append(sorted(os.listdir(parts)))
+
+    env.net.pieces = 3
+    env.net.onChunk = onChunk
+    env.service.Install("ssbu", ["base_files"])
+    job = _run(env)
+
+    assert job["status"] == assets.DONE, job
+    assert seen, "the downloads were observed"
+    names = {name for listing in seen for name in listing}
+    assert names == {"base_files.7z"}, names
+    assert not any(".7z.0" in name for name in names)
+    assert _files(env.games / "ssbu") == {
+        "base_files/config.json", "base_files/logo.png"}
+
+
 def _pack_like_upstream(env, code, pack, files, version="1"):
     """A pack as upstream builds it (StreamHelperAssets' gen_config.py:
     ``7z a games/<code>/<code>.<pack>.7z games/<code>/<pack>``): the pack's
