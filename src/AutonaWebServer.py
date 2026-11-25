@@ -187,9 +187,10 @@ def _build_web_app():
         # then on every change (`status`, ADR-005 S-final SF-2).
         WebServer.ws_emit('status', StatusService.Snapshot())
 
-    # `ws_program_state` cannot become a closure-local: it is also connected to
-    # StateManagerBridge.instance.state_big_change and called as
-    # WebServer.ws_program_state() from _flush_pending_deltas / ws_connect.
+    # `ws_program_state` cannot become a closure-local: it is also reached
+    # through the flusher from on_big_change (the bridge's state_big_change)
+    # and called as WebServer.ws_program_state() from _send_deltas /
+    # ws_connect.
     # It stays on the class and is registered for the same event here.
     # Same for ws_get_characters / ws_playerdb further below.
     ws_on('program_state')(WebServer.ws_program_state)
@@ -1113,13 +1114,14 @@ class WebServer:
         # routes those through Qt's connection machinery (a worker-thread
         # write is queued onto the GUI thread, same as for a bound method),
         # so going via the bridge is what keeps the delivery these two had
-        # before the state layer moved to core. Subscribing straight to the
-        # channels would run them inline on the writer's thread instead --
-        # a real change, deferred to a later step.
+        # before the state layer moved to core. A GUI-thread write still
+        # reaches them directly, inside StateManager.lock (pitfalls #17), so
+        # both only queue for the flusher: the deltas, and the full state of
+        # a big change after the deltas queued ahead of it (on_big_change).
         StateManagerBridge.instance.state_updated.connect(
             WebServer.on_program_state_update)
         StateManagerBridge.instance.state_big_change.connect(
-            WebServer.ws_program_state)
+            WebServer.on_big_change)
         # The same delivery for what the board's pending values did (S4u).
         StateManagerBridge.instance.held_state_updated.connect(
             WebServer.on_held_change)
@@ -1424,6 +1426,24 @@ class WebServer:
                         len(WebServer._delta_pending))
                 WebServer._delta_due = now + interval
                 WebServer._delta_cond.notify_all()
+
+    def on_big_change(message=None):
+        """A wholesale change (state_big_change: a save cycle whose delta
+        is over 100 rows): every client gets the full state.
+
+        Through the flusher (_after_pending_deltas): it sends the batch it
+        has open first, then the full state, outside StateManager.lock --
+        GetFullState's copy and the send to every connection, which can
+        block on a slow client, the way _send_deltas keeps them out of it.
+        Sent from here instead, it overtook the deltas still waiting in that
+        batch. While no flusher runs (before start(), after stop(): the
+        launch's LoadState among them), _after_pending_deltas sends it here
+        and now, as before.
+
+        Queues and notifies only under _delta_cond, so it may be called
+        holding StateManager.lock (SaveState notifies inside it; a GUI-thread
+        write reaches this directly through the bridge, pitfalls #17)."""
+        WebServer._after_pending_deltas(WebServer.ws_program_state)
 
     # ── The pending values' notice (ADR-005 S4u) ─────────────────────
     # `scoreboard_pending` {board, dirty} tells a client that a held board's
@@ -1784,8 +1804,8 @@ class WebServer:
     # ── SocketIO handlers that are also referenced by name ───────────
     # These three are registered on the socketio server by _build_web_app(),
     # but they cannot live there as closures: each is additionally reached
-    # through a name -- WebServer.ws_program_state() internally and from the
-    # bridge, ws_get_characters from ws_game_changed below, and the
+    # through a name -- WebServer.ws_program_state() internally and from
+    # on_big_change, ws_get_characters from ws_game_changed below, and the
     # instance's ws_playerdb, which bootstrap.wire_web_server connects to
     # AutonaPlayerDB.signals.db_updated. Keeping them as plain class-body
     # functions preserves that access, including the bound call with the
