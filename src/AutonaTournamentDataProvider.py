@@ -448,9 +448,12 @@ class AutonaTournamentDataProvider(QObject):
     def GetRecentSets(self, callback, id1, id2, videogame):
         # The provider answers through `callback` itself (the statistics'
         # relay, which hands it to the GUI thread).
-        if self.provider is None:
+        # Read once: the tournament can be unloaded on the GUI thread
+        # between a check and a second read.
+        provider = self.provider
+        if provider is None:
             return
-        self._Fetch("recent sets", self.provider.GetRecentSets,
+        self._Fetch("recent sets", provider.GetRecentSets,
                     id1=id1, id2=id2, callback=callback,
                     requestTime=time.time_ns(), videogame=videogame)
 
@@ -466,16 +469,18 @@ class AutonaTournamentDataProvider(QObject):
         return playerId
 
     def GetLastSets(self, callback, playerId, playerNumber):
-        if self.provider is None:
+        provider = self.provider
+        if provider is None:
             return
-        self._Fetch("last sets", self.provider.GetLastSets,
+        self._Fetch("last sets", provider.GetLastSets,
                     playerID=self._ProviderPlayerId(playerId),
                     playerNumber=playerNumber, callback=callback)
 
     def GetPlayerHistoryStandings(self, callback, playerId, playerNumber, gameType):
-        if self.provider is None:
+        provider = self.provider
+        if provider is None:
             return
-        self._Fetch("player history", self.provider.GetPlayerHistoryStandings,
+        self._Fetch("player history", provider.GetPlayerHistoryStandings,
                     playerID=self._ProviderPlayerId(playerId),
                     playerNumber=playerNumber, gameType=gameType,
                     callback=callback)

@@ -390,3 +390,59 @@ def test_an_answer_after_a_swap_is_for_the_side_it_was_asked_for(
     assert [args for _, args, _ in startgg[-5:]] == [
         ([2, 20], [1, 10], 1386), ([2, 20], "1"), ([2, 20], "1", 1386),
         ([1, 10], "2"), ([1, 10], "2", 1386)]
+
+
+# ── an unload racing the statistics' reads of the provider ───────────────
+
+class _VanishingProvider:
+    """Hands out `value` on the first read of `provider`, None after."""
+
+    def __init__(self, value):
+        self._value = value
+        self._reads = 0
+
+    @property
+    def provider(self):
+        self._reads += 1
+        return self._value if self._reads == 1 else None
+
+
+def test_the_get_methods_read_the_provider_once(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+
+    class Racy(AutonaTournamentDataProvider):
+        def __init__(self):  # skip the singleton's setup
+            self._reads = 0
+
+        @property
+        def provider(self):
+            self._reads += 1
+            return stub if self._reads == 1 else None
+
+    stub = SimpleNamespace(GetRecentSets=object(), GetLastSets=object(),
+                           GetPlayerHistoryStandings=object())
+    for method, args, attr in (
+            ("GetRecentSets", (1, 2, 1386), "GetRecentSets"),
+            ("GetLastSets", ([7, 70], "1"), "GetLastSets"),
+            ("GetPlayerHistoryStandings", ([7, 70], "2", 1386),
+             "GetPlayerHistoryStandings")):
+        adapter = Racy()
+        fetched = []
+        monkeypatch.setattr(
+            AutonaTournamentDataProvider, "_Fetch",
+            staticmethod(lambda name, fetch, **kw: fetched.append(fetch)))
+        getattr(adapter, method)(lambda data: None, *args)
+        assert fetched == [getattr(stub, attr)]
+
+
+def test_is_start_gg_reads_the_inner_provider_once(monkeypatch):
+    from types import SimpleNamespace
+
+    holder = _VanishingProvider(SimpleNamespace(name="StartGG"))
+    monkeypatch.setattr(AutonaStatsUtil, "_Provider",
+                        staticmethod(lambda: holder))
+    # Skip __init__: it connects to the provider singleton's signals.
+    util = AutonaStatsUtil.__new__(AutonaStatsUtil)
+    assert util.IsStartGG() is True
