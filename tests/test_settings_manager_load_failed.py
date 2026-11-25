@@ -821,3 +821,43 @@ def test_the_lan_question_is_not_asked_while_settings_json_is_unread():
                and isinstance(node.value, ast.Name)
                and node.value.id == "SettingsManager"
                for node in ast.walk(asks[0].test))
+
+
+# ── a save whose os.replace hits a sharing violation ─────────────────────
+
+def test_a_save_retries_a_replace_that_fails_passingly(isolated, monkeypatch):
+    real = os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise PermissionError(13, "sharing violation")
+        return real(src, dst)
+
+    monkeypatch.setattr(module.os, "replace", flaky)
+    monkeypatch.setattr(module.time, "sleep", lambda s: None)
+
+    SettingsManager.Set("a.b", 1)
+
+    assert len(calls) == 3
+    assert orjson.loads(isolated.read_bytes()) == {"a": {"b": 1}}
+    assert _files(isolated) == ["settings.json"]
+
+
+def test_a_save_that_never_replaces_raises_and_leaves_the_file(
+        isolated, monkeypatch):
+    isolated.write_bytes(orjson.dumps(SAVED))
+    SettingsManager.LoadSettings()
+
+    def refuse(src, dst):
+        raise PermissionError(13, "sharing violation")
+
+    monkeypatch.setattr(module.os, "replace", refuse)
+    monkeypatch.setattr(module.time, "sleep", lambda s: None)
+
+    with pytest.raises(PermissionError):
+        SettingsManager.Set("a.b", 1)
+
+    assert orjson.loads(isolated.read_bytes()) == SAVED
+    assert _files(isolated) == ["settings.json"]

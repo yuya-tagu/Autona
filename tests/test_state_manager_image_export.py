@@ -29,6 +29,8 @@ put the settings file, with the web server's token, in ./out, which is served.
 """
 import io
 import os
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,6 +61,7 @@ def _in_work_dir(tmp_path):
     # CreateFilesDict writes ./out relative to the process CWD, and each test
     # gets its own so a leftover file can never satisfy another's assertion.
     (tmp_path / "out").mkdir()
+    state_manager._partsSwept = False
     os.chdir(tmp_path)
     try:
         yield
@@ -425,3 +428,436 @@ def test_an_avatar_from_the_image_host_is_fetched(exported, served, value):
     assert served == [value]
     assert exported("probe", "online_avatar.png").is_file()
     assert not exported("probe", "online_avatar.txt").exists()
+
+
+# ── a key: where it may write ────────────────────────────────────────────
+#
+# The keys come from the state tree, and game.defaults is a game's
+# config.json taken as it is: a key ".." there used to put a .txt outside
+# ./out, and RemoveFilesDict to delete (rmtree, even) outside it.
+
+def _everything(root):
+    return sorted(str(path) for path in Path(root).rglob("*"))
+
+
+@pytest.mark.parametrize("path", [
+    "game/defaults/../../../evil",
+    "../evil",
+    "..",
+    "game/..",
+    "game/./evil",
+    "game//evil",
+    "game/evil/",
+    "a:b",
+    "game/a:b/evil",
+    "C:/evil",
+    "/evil",
+    "game/x\\..\\..\\..\\evil",
+])
+def test_a_key_out_of_the_export_writes_nothing(tmp_path, path):
+    before = _everything(tmp_path)
+    beside = sorted(os.listdir(tmp_path.parent))
+
+    SM.CreateFilesDict(path, "x")
+    SM.CreateFilesDict(path, {"name": "x"})
+
+    assert _everything(tmp_path) == before
+    assert sorted(os.listdir(tmp_path.parent)) == beside
+
+
+def test_a_row_with_a_key_out_of_the_export_writes_only_inside(
+        tmp_path, exported):
+    beside = sorted(os.listdir(tmp_path.parent))
+
+    SM.CreateFilesDict("game/defaults",
+                       {"..": {"..": {"evil": "x"}}, "name": "kept"})
+
+    assert exported("game", "defaults", "name.txt").read_text(
+        encoding="utf-8") == "kept"
+    assert [path for path in _everything(tmp_path)
+            if "evil" in path] == []
+    assert all(Path(path) == exported()
+               or Path(path).is_relative_to(exported())
+               for path in _everything(tmp_path))
+    assert sorted(os.listdir(tmp_path.parent)) == beside
+
+
+def test_an_ordinary_key_is_still_written(exported):
+    SM.CreateFilesDict("game/defaults/name", "x")
+    SM.CreateFilesDict("game/defaults/..x", "y")
+
+    assert exported("game", "defaults", "name.txt").read_text(
+        encoding="utf-8") == "x"
+    assert exported("game", "defaults", "..x.txt").read_text(
+        encoding="utf-8") == "y"
+
+
+def test_removing_a_key_out_of_the_export_deletes_nothing(tmp_path, exported):
+    (tmp_path / "keep.txt").write_text("still here", encoding="utf-8")
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    (kept / "a.txt").write_text("still here", encoding="utf-8")
+    SM.CreateFilesDict("probe/name", "x")
+
+    SM.RemoveFilesDict("../keep", "x")
+    SM.RemoveFilesDict("../kept", {"a": "x"})
+    SM.RemoveFilesDict("probe/..", {"name": "x"})
+    SM.RemoveFilesDict("..", {})
+
+    assert (tmp_path / "keep.txt").read_text(encoding="utf-8") == "still here"
+    assert (kept / "a.txt").read_text(encoding="utf-8") == "still here"
+    assert exported("probe", "name.txt").read_text(encoding="utf-8") == "x"
+
+
+@pytest.mark.parametrize("path", [
+    ".. ", "x/.. ", ". ", "x/. ", "x/a.", "x/... ", "x/a ",
+])
+def test_a_key_ending_in_a_space_or_dot_is_refused(tmp_path, exported, path):
+    # Windows resolves ".. " to ".." (and "a." to "a"), so abspath alone
+    # let ".. " name ./out itself.
+    (tmp_path / "keep.txt").write_text("still here", encoding="utf-8")
+    before = _everything(tmp_path)
+
+    SM.CreateFilesDict(path, "x")
+    SM.CreateFilesDict(path, {"name": "x"})
+    SM.RemoveFilesDict(path, "x")
+    SM.RemoveFilesDict(path, {"name": "x"})
+
+    assert _everything(tmp_path) == before
+    assert not state_manager._InsideOut(path)
+
+
+def test_removing_dot_dot_space_leaves_the_export_alone(exported):
+    SM.CreateFilesDict("probe/name", "x")
+
+    SM.RemoveFilesDict(".. ", {"probe": {"name": "x"}})
+
+    assert exported("probe", "name.txt").read_text(encoding="utf-8") == "x"
+
+
+# ── stale part files and failed removals ─────────────────────────────────
+
+def test_the_first_export_sweeps_the_part_files_a_killed_download_left(
+        tmp_path, exported):
+    (tmp_path / "out" / "probe").mkdir()
+    mine = [exported("probe", "a.png.7.part"),
+            exported("probe", "a.12.png.part")]
+    other = [exported("probe", "notes.part"),
+             exported("probe", "b.txt"),
+             exported("probe", "c.x.part")]
+    for path in mine + other:
+        path.write_text("x", encoding="utf-8")
+
+    SM.ExportText({}, {}, {})
+
+    assert [p.exists() for p in mine] == [False, False]
+    assert [p.exists() for p in other] == [True, True, True]
+
+
+def test_the_sweep_runs_once_per_process(exported):
+    SM.ExportText({}, {}, {})
+    late = exported("a.png.3.part")
+    late.write_text("x", encoding="utf-8")
+
+    SM.ExportText({}, {}, {})
+
+    assert late.exists()
+
+
+def test_a_removal_that_fails_is_warned_about_but_not_a_missing_file(
+        tmp_path, logged, monkeypatch):
+    state_manager._remove_quietly(str(tmp_path / "gone.png"))
+    assert not logged
+
+    def _refuse(path):
+        raise PermissionError("locked")
+    monkeypatch.setattr(state_manager.os, "remove", _refuse)
+
+    state_manager._remove_quietly("./out/probe/a.png")
+
+    assert any("Could not remove ./out/probe/a.png" in record["message"]
+               for record in logged)
+
+
+# ── a download: what lands, and when ─────────────────────────────────────
+
+_A = f"{_AVATAR}-a.png"
+_B = f"{_AVATAR}-b.png"
+
+
+@pytest.fixture
+def gated(monkeypatch):
+    """_A waits for `release`; every other URL answers at once. The body is
+    the URL's last letter, so what landed says which download it was."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_get(url, **kwargs):
+        if url == _A:
+            started.set()
+            assert release.wait(10), "the test never released A"
+        return SimpleNamespace(status_code=200,
+                               raw=_Raw(url[-5:-4].encode()))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+    return SimpleNamespace(started=started, release=release)
+
+
+def _waitFor(condition, timeout=10):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.01)
+
+
+def _parts(tmp_path):
+    return [path for path in _everything(tmp_path) if ".part" in path]
+
+
+def test_a_late_download_never_lands_over_a_newer_one(
+        exported, gated, tmp_path):
+    landed = exported("probe", "online_avatar.png")
+
+    SM.CreateFilesDict("probe/online_avatar", _A)
+    assert gated.started.wait(10)
+    SM.CreateFilesDict("probe/online_avatar", _B)
+    _waitFor(lambda: landed.is_file())
+    gated.release.set()
+    SM.JoinDownloads()
+
+    assert landed.read_bytes() == b"b"
+    assert _parts(tmp_path) == []
+    assert "./out/probe/online_avatar" not in SM._download_latest
+
+
+def test_a_newer_text_wins_over_a_late_download(exported, gated, tmp_path):
+    SM.CreateFilesDict("probe/online_avatar", _A)
+    assert gated.started.wait(10)
+    SM.CreateFilesDict("probe/online_avatar", "plain text")
+    gated.release.set()
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert exported("probe", "online_avatar.txt").read_text(
+        encoding="utf-8") == "plain text"
+    assert _parts(tmp_path) == []
+
+
+def test_a_removal_during_a_download_stays_removed(exported, gated, tmp_path):
+    SM.CreateFilesDict("probe/online_avatar", _A)
+    assert gated.started.wait(10)
+    SM.RemoveFilesDict("probe/online_avatar", _A)
+    gated.release.set()
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert _parts(tmp_path) == []
+    assert "./out/probe/online_avatar" not in SM._download_latest
+
+
+class _Recording(io.BytesIO):
+    decode_content = False
+
+    def __init__(self, data, onRead):
+        super().__init__(data)
+        self._onRead = onRead
+
+    def read(self, *args):
+        self._onRead()
+        return super().read(*args)
+
+
+def test_the_image_before_stays_until_the_new_one_is_complete(
+        exported, monkeypatch, tmp_path):
+    landed = exported("probe", "online_avatar.png")
+    landed.parent.mkdir(parents=True)
+    landed.write_bytes(b"old")
+    seen = []
+
+    def fake_get(url, **kwargs):
+        return SimpleNamespace(
+            status_code=200,
+            raw=_Recording(b"new", lambda: seen.append(
+                (landed.is_file(), landed.read_bytes()))))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.png")
+    SM.JoinDownloads()
+
+    assert seen and all(entry == (True, b"old") for entry in seen)
+    assert landed.read_bytes() == b"new"
+    assert _parts(tmp_path) == []
+
+
+@pytest.fixture
+def logged():
+    from loguru import logger
+    lines = []
+    sink = logger.add(lambda message: lines.append(message.record),
+                      level="WARNING")
+    try:
+        yield lines
+    finally:
+        logger.remove(sink)
+
+
+def _oldAvatar(exported):
+    """The previous entrant's face, as a failed download must not leave it."""
+    for name in ("online_avatar.png", "online_avatar.jpg"):
+        target = exported("probe", name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"old")
+
+
+def test_a_404_leaves_no_image_and_no_traceback(
+        exported, monkeypatch, logged, tmp_path):
+    _oldAvatar(exported)
+    closed = []
+
+    def fake_get(url, **kwargs):
+        return SimpleNamespace(status_code=404, raw=_Raw(b"not found"),
+                               close=lambda: closed.append(url))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    url = f"{_AVATAR}.jpg?ehk=secret"
+    SM.CreateFilesDict("probe/online_avatar", url)
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert not exported("probe", "online_avatar.jpg").exists()
+    assert _parts(tmp_path) == []
+    assert closed == [url]
+    assert [r for r in logged if r["level"].name == "ERROR"] == []
+    warnings = [r["message"] for r in logged
+                if r["level"].name == "WARNING"]
+    assert any("404" in message for message in warnings)
+    # The state key, not the URL (it carries start.gg's cache key).
+    assert not any("ehk" in message or "images.start.gg" in message
+                   for message in warnings)
+
+
+class _Broken(io.BytesIO):
+    decode_content = False
+
+    def read(self, *args):
+        if self.tell():
+            raise ConnectionError("the connection dropped")
+        return super().read(4)
+
+
+def test_a_body_that_breaks_off_leaves_no_image(
+        exported, monkeypatch, tmp_path):
+    _oldAvatar(exported)
+
+    def fake_get(url, **kwargs):
+        return SimpleNamespace(status_code=200,
+                               raw=_Broken(_imageBytes("PNG")))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.png")
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert _parts(tmp_path) == []
+
+
+@pytest.mark.parametrize("extension", ["png", "jpg"])
+def test_a_body_over_the_cap_leaves_no_image(
+        exported, monkeypatch, tmp_path, extension):
+    _oldAvatar(exported)
+    monkeypatch.setattr(state_manager, "_DOWNLOAD_MAX_BYTES", 16)
+
+    def fake_get(url, **kwargs):
+        fmt = "JPEG" if extension == "jpg" else "PNG"
+        return SimpleNamespace(status_code=200, raw=_Raw(_imageBytes(fmt)))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.{extension}")
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert _parts(tmp_path) == []
+
+
+def test_a_jpg_over_the_pixel_cap_is_not_converted(
+        exported, monkeypatch, tmp_path):
+    _oldAvatar(exported)
+    monkeypatch.setattr(state_manager, "MAX_PIXELS", 11)
+
+    def fake_get(url, **kwargs):   # 4 x 3 = 12 pixels
+        return SimpleNamespace(status_code=200, raw=_Raw(_imageBytes("JPEG")))
+
+    monkeypatch.setattr(state_manager, "requests",
+                        SimpleNamespace(get=fake_get))
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.jpg")
+    SM.JoinDownloads()
+
+    assert not exported("probe", "online_avatar.png").exists()
+    assert not exported("probe", "online_avatar.jpg").exists()
+    assert _parts(tmp_path) == []
+
+
+def test_a_jpg_download_leaves_the_png_alone(exported, served, tmp_path):
+    _oldAvatar(exported)
+
+    SM.CreateFilesDict("probe/online_avatar", f"{_AVATAR}.jpg?ehk=abc")
+    SM.JoinDownloads()
+
+    with Image.open(exported("probe", "online_avatar.png")) as image:
+        assert (image.width, image.height) == (4, 3)
+    assert not exported("probe", "online_avatar.jpg").exists()
+    assert _parts(tmp_path) == []
+
+
+# ── a local copy: swapped in, never missing ──────────────────────────────
+
+def test_the_copy_keeps_the_one_before_until_it_is_complete(
+        exported, monkeypatch, tmp_path):
+    _file(f"{AVATAR_DIR}/a.png", b"a")
+    _file(f"{AVATAR_DIR}/b.png", b"b")
+    SM.CreateFilesDict("probe/asset", f"{AVATAR_DIR}/a.png")
+    target = exported("probe", "asset.png")
+    seen = []
+    copyfile = state_manager.shutil.copyfile
+
+    def watched(source, destination, *args, **kwargs):
+        seen.append((target.is_file(), target.read_bytes()))
+        result = copyfile(source, destination, *args, **kwargs)
+        seen.append((target.is_file(), target.read_bytes()))
+        return result
+
+    monkeypatch.setattr(state_manager.shutil, "copyfile", watched)
+
+    SM.CreateFilesDict("probe/asset", f"{AVATAR_DIR}/b.png")
+
+    assert seen == [(True, b"a"), (True, b"a")]
+    assert target.read_bytes() == b"b"
+    assert _parts(tmp_path) == []
+
+
+def test_a_copy_that_fails_leaves_no_part(exported, monkeypatch, tmp_path):
+    _file(f"{AVATAR_DIR}/a.png", b"a")
+    _file(f"{AVATAR_DIR}/b.png", b"b")
+    SM.CreateFilesDict("probe/asset", f"{AVATAR_DIR}/a.png")
+    copyfile = state_manager.shutil.copyfile
+
+    def broken(source, destination, *args, **kwargs):
+        copyfile(source, destination, *args, **kwargs)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(state_manager.shutil, "copyfile", broken)
+
+    SM.CreateFilesDict("probe/asset", f"{AVATAR_DIR}/b.png")
+
+    assert exported("probe", "asset.png").read_bytes() == b"a"
+    assert _parts(tmp_path) == []

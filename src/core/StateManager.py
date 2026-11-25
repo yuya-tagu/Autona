@@ -25,6 +25,7 @@ from PIL import Image
 import time
 from loguru import logger
 from .DictHelper import deep_get, deep_set, deep_unset, deep_clone
+from .ImageImport import MAX_PIXELS
 from .Observable import ObserverChannel
 from .SettingsManager import SettingsManager
 from .StatePersistence import StatePersistence
@@ -134,10 +135,98 @@ def _atomic_write_bytes(path: str, data: bytes):
 
 def _remove_quietly(path: str):
     try:
-        if os.path.exists(path):
-            os.remove(path)
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        # Only the key's path (no URL, no value): a file that cannot be
+        # removed is a stale or locked export worth a line in the log.
+        logger.warning(
+            f"Could not remove {path}: {type(e).__name__}")
+
+
+# Matches the part files this module names: "<target>.<token>.part".
+_PART_FILE = re.compile(r"\.\d+(\.png)?\.part$")
+_partsSwept = False
+
+
+def _SweepStaleParts():
+    """Once per process, drop the *.part files a killed download left in
+    ./out (downloads run on daemon threads, so exit can cut one off).
+    Called from the first export, never at import."""
+    global _partsSwept
+    if _partsSwept:
+        return
+    _partsSwept = True
+    try:
+        for root, _dirs, files in os.walk("./out"):
+            for name in files:
+                if _PART_FILE.search(name):
+                    _remove_quietly(os.path.join(root, name))
     except OSError:
         pass
+
+
+# The largest image body an ./out download takes in. A start.gg avatar is a
+# few hundred kB; the cap only bounds what a misbehaving response can make
+# this process write to disk (and later decode).
+_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024
+
+# A key refused by _InsideOut is warned about once per session (the same
+# subtree is re-exported on every change to it), then logged at debug.
+_outsideOutLogged = False
+
+
+def _InsideOut(path) -> bool:
+    """Whether the export key `path` names a file strictly inside ./out.
+
+    The keys come from the state tree, and not every key in it is the app's:
+    game.defaults is a game's config.json taken as it is, so a key ".." would
+    put "./out/<key>.txt" outside ./out -- and RemoveFilesDict would delete
+    there. Refused: a "..", "." or empty segment, a ":" (a drive, a stream),
+    and anything the OS would resolve outside ./out (a backslash, say).
+    Resolved against the CWD of the moment, as the relative ./out paths are.
+    A segment ending in a space or a dot is refused too: Windows strips them
+    when it resolves the path, so ".. " would name ./out itself or its parent.
+    """
+    for segment in path.split("/"):
+        if segment in ("", ".", "..") or ":" in segment \
+                or segment[-1] in " .":
+            return False
+    root = os.path.normcase(os.path.normpath(os.path.abspath("./out")))
+    target = os.path.normcase(os.path.normpath(
+        os.path.abspath(os.path.join("./out", path))))
+    try:
+        return target != root \
+            and os.path.commonpath([root, target]) == root
+    except ValueError:  # another drive
+        return False
+
+
+def _RefuseOutsideOut():
+    global _outsideOutLogged
+    # Neither the key nor the value: the key is where it came from.
+    if not _outsideOutLogged:
+        _outsideOutLogged = True
+        logger.warning("Export key outside ./out refused")
+    else:
+        logger.debug("Export key outside ./out refused")
+
+
+def _replace_with_retry(source: str, target: str) -> bool:
+    """os.replace with _atomic_write_bytes's retry budget; False if it kept
+    failing (a reader holding `target` open on Windows). No direct-overwrite
+    fallback: an image left as it was beats a torn one under OBS."""
+    delay = _ATOMIC_REPLACE_BACKOFF
+    for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return True
+        except OSError:  # PermissionError (sharing violation) included
+            if attempt < _ATOMIC_REPLACE_ATTEMPTS - 1:
+                time.sleep(delay)
+                delay *= 2
+    return False
 
 
 class StateManagerObservers:
@@ -294,6 +383,13 @@ class StateManager:
     # would deadlock the pair.
     _download_threads = []
     _download_lock = threading.Lock()
+    # The download each ./out file is waiting on: "./out/<path>" (no
+    # extension) -> the token of the latest download started for it. Any
+    # later write or removal of that path takes the entry away, so an older
+    # download that finishes late never lands over it (_NextToken). Only
+    # downloads in flight have an entry. Guarded by _download_lock.
+    _download_latest = {}
+    _download_counter = 0
     _initialized = False
 
     @staticmethod
@@ -356,6 +452,33 @@ class StateManager:
             else:
                 thread.join(max(0.0, deadline - time.monotonic()))
         return not any(t.is_alive() for t in threads)
+
+    @staticmethod
+    def _NextToken(base, download=False):
+        """A new token for the ./out file `base` ("./out/<path>", no
+        extension); every earlier token for it stops being the latest.
+
+        Called for every leaf CreateFilesDict writes and RemoveFilesDict
+        removes. Only a download (`download=True`) is recorded as the latest
+        -- a text or a copied file just takes the entry away -- so the table
+        holds the downloads in flight, not every key ever exported. The
+        counter only grows, so a token is never handed out twice.
+        """
+        with StateManager._download_lock:
+            StateManager._download_counter += 1
+            token = StateManager._download_counter
+            if download:
+                StateManager._download_latest[base] = token
+            else:
+                StateManager._download_latest.pop(base, None)
+            return token
+
+    @staticmethod
+    def _IsLatest(base, token):
+        """Whether `token` is still the latest for `base`. The caller holds
+        _download_lock (it is not reentrant), so that what it then does to
+        the file cannot interleave with a newer write's _NextToken."""
+        return StateManager._download_latest.get(base) == token
 
     @staticmethod
     def JoinExports(timeout=None):
@@ -1538,6 +1661,7 @@ class StateManager:
         # same reason -- falling back to StateManager.state here would put
         # the live tree back under this thread's walk.
         snapshot = stateSnapshot
+        _SweepStaleParts()
 
         mergedDiffs = list(diff.get("values_changed", {}).items())
         mergedDiffs.extend(list(diff.get("type_changes", {}).items()))
@@ -1594,11 +1718,7 @@ class StateManager:
                 # Remove "root[" from start and separate keys
                 path = "/".join(key[5:].replace(
                     "'", "").replace("]", "").replace("/", "_").split("["))
-                # Remove "root[" from start and separate keys
-                path = "/".join(key[5:].replace(
-                    "'", "").replace("]", "").replace("/", "_").split("["))
 
-                # logger.info("Added:", path, item)
                 # logger.info("Added:", path, item)
 
                 StateManager.CreateFilesDict(path, item)
@@ -1647,10 +1767,12 @@ class StateManager:
         return _EXPORT_TEXT
 
     def CreateFilesDict(path, di):
-        pathdirs = "/".join(path.split("/")[0:-1])
+        if not _InsideOut(path):
+            _RefuseOutsideOut()
+            return
 
-        if not os.path.isdir("./out/"+pathdirs):
-            os.makedirs("./out/"+pathdirs)
+        pathdirs = "/".join(path.split("/")[0:-1])
+        os.makedirs("./out/"+pathdirs, exist_ok=True)
 
         if type(di) is dict:
             for k, i in di.items():
@@ -1658,65 +1780,44 @@ class StateManager:
                     path+"/"+str(k).replace("/", "_"), i)
         else:
             # logger.info("try to add: ", path)
+            base = f"./out/{path}"
             kind = StateManager._ExportKind(di)
+            # Whatever this leaf becomes, a download still running for it
+            # must not land over it later.
+            token = StateManager._NextToken(
+                base, download=(kind == _EXPORT_DOWNLOAD))
             if kind == _EXPORT_FILE:
-                if os.path.exists(f"./out/{path}" + "." + di.rsplit(".", 1)[-1]):
+                target = f"{base}." + di.rsplit(".", 1)[-1]
+                if os.path.exists(di):
+                    # Copied beside the target and swapped in, so an overlay
+                    # reading it sees the old image or the new one -- never
+                    # none, never half of one.
+                    part = f"{target}.{token}.part"
                     try:
-                        os.remove(f"./out/{path}" + "." +
-                                  di.rsplit(".", 1)[-1])
+                        shutil.copyfile(os.path.abspath(di), part)
+                        if not _replace_with_retry(part, target):
+                            logger.warning(
+                                f"Could not replace the export of {path} "
+                                "(file locked by a reader?); left as it was")
                     except Exception:
                         logger.error(traceback.format_exc())
-                if os.path.exists(di):
+                    finally:
+                        _remove_quietly(part)
+                elif os.path.exists(target):
                     try:
-                        shutil.copyfile(
-                            os.path.abspath(di),
-                            f"./out/{path}" + "." + di.rsplit(".", 1)[-1])
+                        os.remove(target)
                     except Exception:
                         logger.error(traceback.format_exc())
             elif kind == _EXPORT_DOWNLOAD:
                 imageExtension = StateManager._FileExtension(di)
-                downloadTarget = f"./out/{path}.{imageExtension}"
                 try:
-                    if os.path.exists(downloadTarget):
-                        try:
-                            os.remove(downloadTarget)
-                        except Exception:
-                            logger.error(traceback.format_exc())
-
-                    def downloadImage(url, dlpath):
-                        StateManager._download_semaphore.acquire()
-                        try:
-                            # (connect, read): without a timeout an
-                            # unresponsive host blocks this thread forever.
-                            # The read timeout applies per chunk of the
-                            # streamed body, so 30s matches the streaming
-                            # download budget used in AutonaUpdater.
-                            r = requests.get(url, stream=True,
-                                             timeout=(5, 30))
-                            if r.status_code == 200:
-                                with open(dlpath, 'wb') as f:
-                                    r.raw.decode_content = True
-                                    shutil.copyfileobj(r.raw, f)
-                                    f.flush()
-                            # imageExtension, not url.endswith(".jpg"): a
-                            # cache-keyed URL ends in the query string.
-                            if imageExtension == "jpg":
-                                original = Image.open(dlpath)
-                                original.save(dlpath.rsplit(
-                                    ".", 1)[0]+".png", format="png")
-                                os.remove(dlpath)
-                        except Exception:
-                            logger.error(traceback.format_exc())
-                        finally:
-                            StateManager._download_semaphore.release()
-
                     # daemon: a half-written overlay image is re-downloaded
                     # on the next export, so it must never keep the process
                     # alive at shutdown (threading._shutdown() joins every
                     # non-daemon thread).
                     t = threading.Thread(
-                        target=downloadImage,
-                        args=[di, downloadTarget],
+                        target=StateManager._DownloadImage,
+                        args=[di, path, imageExtension, token],
                         daemon=True
                     )
                     t.start()
@@ -1724,15 +1825,131 @@ class StateManager:
                 except Exception:
                     logger.error(traceback.format_exc())
             else:
-                with open(f"./out/{path}.txt", 'w', encoding='utf-8') as file:
+                with open(f"{base}.txt", 'w', encoding='utf-8') as file:
                     file.write(str(di))
 
+    @staticmethod
+    def _DownloadImage(url, path, extension, token):
+        """Download `url` to ./out/<path>.png (a .jpg is stored converted).
+
+        Runs on its own daemon thread, at most three at a time. The body goes
+        to a part file named by `token` and is swapped in with os.replace, so
+        the image there before stays until the new one is complete, and only
+        while `token` is still the latest for the path: a later write or
+        removal of it (_NextToken) wins over a download that finishes late.
+        On failure the stale image is removed, as before, unless a later write
+        took over. `path` is the state key; the URL is never logged.
+        """
+        base = f"./out/{path}"
+        dlpath = f"{base}.{extension}"
+        final = f"{base}.png"
+        # What failing leaves behind: nothing that would show the previous
+        # image as if it were this one.
+        stale = [final, dlpath] if extension == "jpg" else [final]
+        part = f"{dlpath}.{token}.part"
+        convertedPart = f"{base}.{token}.png.part"
+        StateManager._download_semaphore.acquire()
+        response = None
+        candidate = None
+        try:
+            # (connect, read): without a timeout an unresponsive host blocks
+            # this thread forever. The read timeout applies per chunk of the
+            # streamed body, so 30s matches the streaming download budget
+            # used in AutonaUpdater.
+            response = requests.get(url, stream=True, timeout=(5, 30))
+            if response.status_code != 200:
+                logger.warning(
+                    f"Image download for {path} answered "
+                    f"{response.status_code}")
+            else:
+                complete = True
+                received = 0
+                response.raw.decode_content = True
+                with open(part, 'wb') as f:
+                    while True:
+                        chunk = response.raw.read(65536)
+                        if not chunk:
+                            break
+                        received += len(chunk)
+                        if received > _DOWNLOAD_MAX_BYTES:
+                            logger.warning(
+                                f"Image download for {path} is over "
+                                f"{_DOWNLOAD_MAX_BYTES} bytes; dropped")
+                            complete = False
+                            break
+                        f.write(chunk)
+                # extension, not url.endswith(".jpg"): a cache-keyed URL ends
+                # in the query string.
+                if complete and extension == "jpg":
+                    with Image.open(part) as original:
+                        if original.width * original.height > MAX_PIXELS:
+                            logger.warning(
+                                f"Image download for {path} is over "
+                                f"{MAX_PIXELS} pixels; dropped")
+                        else:
+                            original.save(convertedPart, format="png")
+                            candidate = convertedPart
+                elif complete:
+                    candidate = part
+        except Exception:
+            logger.error(traceback.format_exc())
+            candidate = None
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    pass
+            try:
+                StateManager._SettleDownload(
+                    path, token, candidate, final, stale,
+                    dlpath if extension == "jpg" else None)
+            except Exception:
+                logger.error(traceback.format_exc())
+            finally:
+                _remove_quietly(part)
+                _remove_quietly(convertedPart)
+                StateManager._download_semaphore.release()
+
+    @staticmethod
+    def _SettleDownload(path, token, candidate, final, stale, leftover):
+        """Swap a finished download in, or clear what a failed one leaves,
+        if `token` is still the latest for the path -- checked and acted on
+        under _download_lock, so a newer write cannot slip in between. Only
+        renames and removals happen under the lock (no network, no reads)."""
+        base = f"./out/{path}"
+        with StateManager._download_lock:
+            if not StateManager._IsLatest(base, token):
+                return
+            # Settled either way: the table keeps downloads in flight only.
+            del StateManager._download_latest[base]
+            if candidate is not None:
+                if _replace_with_retry(candidate, final):
+                    # The .jpg a converted download used to leave in passing
+                    # (or a copied local .jpg this value replaced).
+                    if leftover is not None:
+                        _remove_quietly(leftover)
+                else:
+                    logger.warning(
+                        f"Could not replace the export of {path} (file "
+                        "locked by a reader?); left as it was")
+            else:
+                for stalePath in stale:
+                    _remove_quietly(stalePath)
+
     def RemoveFilesDict(path, di):
+        if not _InsideOut(path):
+            _RefuseOutsideOut()
+            return
+
         if type(di) is dict:
             for k, i in di.items():
                 StateManager.RemoveFilesDict(
                     path+"/"+str(k).replace("/", "_"), i)
         else:
+            # A download still running for this leaf must not bring it back.
+            StateManager._NextToken(f"./out/{path}")
             kind = StateManager._ExportKind(di)
             if kind != _EXPORT_TEXT:
                 try:
