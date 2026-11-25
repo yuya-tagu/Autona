@@ -79,6 +79,21 @@ from .PlayerService import DefaultPlayersPerTeam
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
+
+def _EventDate(stamp):
+    """(month, day, year) of a start.gg timestamp; blanks when it has none.
+
+    start.gg may send null (or omit) an event's date; one such row must not
+    drop the whole list.
+    """
+    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
+        try:
+            date = datetime.fromtimestamp(stamp)
+        except (OverflowError, OSError, ValueError):
+            return "", "", ""
+        return date.strftime("%B"), date.strftime("%d"), date.strftime("%Y")
+    return "", "", ""
+
 # "No such key" for a Get that must tell it from a stored None.
 _ABSENT = object()
 
@@ -422,16 +437,16 @@ class StatsService:
             StateManager.Set(f"{self.prefix}.history_sets.{playerNumber}", {})
             for index, set_ in enumerate(
                     data.get("history_sets", []), start=1):
-                eventDate = datetime.fromtimestamp(set_.get("event_date"))
+                month, day, year = _EventDate(set_.get("event_date"))
                 StateManager.Set(
                     f"{self.prefix}.history_sets.{playerNumber}.{index}", {
                         "placement": set_.get("placement"),
                         "event_name": set_.get("event_name"),
                         "tournament_name": set_.get("tournament_name"),
                         "entrants": set_.get("entrants"),
-                        "event_date_month": eventDate.strftime("%B"),
-                        "event_date_day": eventDate.strftime("%d"),
-                        "event_date_year": eventDate.strftime("%Y"),
+                        "event_date_month": month,
+                        "event_date_day": day,
+                        "event_date_year": year,
                     })
 
     # ── upset factor ─────────────────────────────────────────────────────

@@ -541,3 +541,13 @@ def test_a_payload_is_logged_by_its_keys_not_its_values(service):
 
     assert any("Tournament Data: keys=" in m for m in messages)
     assert not any("LeakName" in m or "LeakAddress" in m for m in messages)
+
+
+def test_null_end_dates_apply_and_keep_the_url(service):
+    SettingsManager.Set("TOURNAMENT_URL", "https://start.gg/whatever")
+    assert service.ApplyTournamentData(
+        _payload(endAt=None, eventEndAt=None)) is True
+    assert SettingsManager.Get("TOURNAMENT_URL") == "https://start.gg/whatever"
+    assert _get("tournamentName") == "Autona Cup"
+    assert _get("address") == "Tokyo"
+    assert _get("endAt") is None

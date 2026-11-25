@@ -455,8 +455,8 @@ class StartGGDataProvider(TournamentDataProvider):
                 }
             )
 
-            seeds = deep_get(data, "data.phaseGroup.seeds.nodes", [])
-            seeds.sort(key=lambda s: s.get("seedNum"))
+            seeds = deep_get(data, "data.phaseGroup.seeds.nodes", []) or []
+            seeds.sort(key=lambda s: s.get("seedNum") or 0)
 
             seedMap: list = deep_get(data, "data.phaseGroup.seedMap.1")
 
@@ -1952,15 +1952,17 @@ class StartGGDataProvider(TournamentDataProvider):
                 if not set.get("placement"):
                     continue
 
-                event = deep_get(set, "entrant.event", [])
-                tournament = deep_get(event, "tournament", [])
+                event = deep_get(set, "entrant.event")
+                if not isinstance(event, dict):
+                    continue
+                tournament = event.get("tournament")
+                if not isinstance(tournament, dict):
+                    tournament = {}
 
-                try:
-                    tournamentPicture = tournament.get("images")[0].get("url")
-                except Exception:
-                    tournamentPicture = None
-                    logger.error("Failed to get Event Logo for: " +
-                                 tournament.get("name") + " - " + event.get("name"))
+                images = tournament.get("images") or []
+                tournamentPicture = (
+                    images[0].get("url")
+                    if images and isinstance(images[0], dict) else None)
 
                 player_history = {
                     "placement": set.get("placement"),
@@ -1968,7 +1970,8 @@ class StartGGDataProvider(TournamentDataProvider):
                     "tournament_name": tournament.get("name"),
                     "tournament_picture": tournamentPicture,
                     "entrants": event.get("numEntrants"),
-                    "event_date": event.get("startAt")
+                    "event_date": (
+                        event.get("startAt") or tournament.get("startAt"))
                 }
 
                 set_data.append(player_history)
@@ -2041,8 +2044,13 @@ class StartGGDataProvider(TournamentDataProvider):
             byId = {_set.get("id"): _set for _set in results(directions[1])}
             for _set in results(directions[0]):
                 byId.setdefault(_set.get("id"), _set)
-            recentSets = list(byId.values())
-            recentSets.sort(key=lambda s: s.get("timestamp"), reverse=True)
+            # A set whose event has no start time is left out: the layouts
+            # draw timestamp * 1000 as a date (1970 for None).
+            recentSets = [
+                s for s in byId.values()
+                if isinstance(s.get("timestamp"), (int, float))
+                and not isinstance(s.get("timestamp"), bool)]
+            recentSets.sort(key=lambda s: s["timestamp"], reverse=True)
             logger.info("Recent sets size: " + str(len(recentSets)))
             callback.emit({"sets": recentSets, "request_time": requestTime})
         except Exception:
