@@ -224,6 +224,22 @@ def test_token_is_local_and_revocable(designer_service):
     assert not designer_service.is_authorized(token, "127.0.0.1")
 
 
+def test_token_rejects_malformed_input_without_raising(designer_service):
+    designer_service.issue_token()
+    for bad in ("é" * 43, "", None, "a" * 129, b"abc"):
+        assert designer_service.is_authorized(bad, "127.0.0.1") is False
+
+
+def test_multiple_tokens_are_independent(designer_service):
+    first = designer_service.issue_token()
+    second = designer_service.issue_token()
+    assert designer_service.is_authorized(first, "127.0.0.1")
+    assert designer_service.is_authorized(second, "127.0.0.1")
+    designer_service.revoke_token(first)
+    assert not designer_service.is_authorized(first, "127.0.0.1")
+    assert designer_service.is_authorized(second, "127.0.0.1")
+
+
 def test_save_list_and_load_project(designer_service):
     project = make_project("決勝 Design")
     result = designer_service.save_project({

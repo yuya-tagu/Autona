@@ -147,6 +147,9 @@ class AutonaDesignerService:
     PAIRING_LOCK_SECONDS = 60
     PAIRING_MAX_LOCK_SECONDS = 3600
 
+    # token_urlsafe(32) is 43 characters; anything longer cannot match.
+    TOKEN_MAX_INPUT = 128
+
     _tokens: set[str] = set()
     _token_lock = threading.Lock()
     _latest_import: dict[str, Any] | None = None
@@ -172,11 +175,19 @@ class AutonaDesignerService:
 
     @classmethod
     def is_authorized(cls, token: str | None, remote_addr: str | None) -> bool:
-        if not cls.is_loopback(remote_addr) or not token:
+        if (not cls.is_loopback(remote_addr) or not isinstance(token, str)
+                or not token or len(token) > cls.TOKEN_MAX_INPUT):
             return False
+        # Bytes: compare_digest refuses non-ASCII str, and the header is
+        # whatever the client sent.
+        given = token.encode("utf-8")
         with cls._token_lock:
-            return secrets.compare_digest(
-                token, next((item for item in cls._tokens if item == token), ""))
+            tokens = tuple(cls._tokens)
+        # Compare against every token (no early return) in constant time.
+        matched = False
+        for item in tokens:
+            matched |= hmac.compare_digest(given, item.encode("ascii"))
+        return matched
 
     @staticmethod
     def is_loopback(remote_addr: str | None) -> bool:
