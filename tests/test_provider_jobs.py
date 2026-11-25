@@ -730,7 +730,8 @@ def test_the_parallel_requests_finish_with_the_job_lane_full(
     full = threading.Barrier(TaskExecutor.JOB_WORKERS, timeout=WAIT)
     sentFrom = []
 
-    def query(url=None, type=None, headers={}, jsonParams=None, params=None):
+    def query(url=None, type=None, headers=None, jsonParams=None, params=None,
+              **kwargs):
         sentFrom.append(threading.current_thread().name)
         return {}
 
@@ -758,6 +759,148 @@ def test_the_parallel_requests_finish_with_the_job_lane_full(
     assert len(sentFrom) == 2 * kinds.count("set") \
         + 10 * kinds.count("recent sets")
     assert all(name.startswith(FANOUT_THREAD_PREFIX) for name in sentFrom)
+
+
+def test_a_cancel_stops_the_retries_at_the_next_attempt(startgg, executor):
+    """QueryRequests passes its cancel event on: once it is set, the backoff
+    is cut short and no further attempt is made."""
+    executor()
+    cancel = threading.Event()
+    attempts = []
+
+    def failing(*args, **kwargs):
+        attempts.append(args)
+        cancel.set()  # whoever asked has given up on the answer
+        raise ConnectionError("down")
+
+    started = time.monotonic()
+    assert startgg.QueryRequests("https://example.invalid", type=failing,
+                                 cancel_event=cancel) == {}
+
+    assert len(attempts) == 1
+    # The first backoff alone is a second when nothing stops it.
+    assert time.monotonic() - started < 0.9
+
+
+def test_the_request_headers_are_a_new_dict_each_time(startgg, executor):
+    """The fixed headers go into a dict of the request's own: neither the
+    caller's nor a shared default is written to (the fan-out lane sends
+    several requests at once)."""
+    from src.TournamentDataProvider.StartGGDataProvider import (
+        StartGGDataProvider)
+
+    executor()
+    sent = []
+
+    def answering(*args, headers=None, **kwargs):
+        sent.append(headers)
+        return SimpleNamespace(status_code=200, text="{}")
+
+    assert not any(isinstance(value, dict) for value
+                   in StartGGDataProvider.QueryRequests.__defaults__)
+    startgg.QueryRequests("https://example.invalid", type=answering)
+    startgg.QueryRequests("https://example.invalid", type=answering)
+    given = {"Authorization": "Bearer x", "client-version": "1"}
+    startgg.QueryRequests("https://example.invalid", type=answering,
+                          headers=given)
+
+    fixed = {"client-version", "Content-Type", "User-Agent"}
+    assert [set(headers) for headers in sent[:2]] == [fixed, fixed]
+    assert sent[0] is not sent[1]
+    assert given == {"Authorization": "Bearer x", "client-version": "1"}
+    assert set(sent[2]) == fixed | {"Authorization"}
+    # The fixed ones win, as before.
+    assert sent[2]["client-version"] == "20"
+    assert sent[2]["Authorization"] == "Bearer x"
+
+
+def test_the_requests_a_fetch_gave_up_on_stop_retrying(
+        startgg, executor, monkeypatch):
+    """A set's two API requests run past the fan-out deadline: GetMatch
+    answers without them, and the requests stop at their next attempt
+    instead of holding fan-out threads through the whole backoff (five
+    attempts, 1 + 2 + 4 + 8 s)."""
+    jobs = executor()
+    monkeypatch.setattr(startgg, "_request_timeout_secs", 0.3)
+    attempts = []
+
+    def failing(*args, **kwargs):
+        attempts.append(args)
+        raise ConnectionError("slow tonight")
+
+    real = startgg.QueryRequests
+    monkeypatch.setattr(
+        startgg, "QueryRequests",
+        lambda *args, **kwargs: real(*args, **dict(kwargs, type=failing)))
+
+    assert isinstance(startgg.GetMatch(setId=1), dict)
+
+    assert jobs.drain(3)
+    assert len(attempts) == 2  # one per API, none after the deadline
+
+
+def test_the_set_fetch_releases_its_requests_once_answered(
+        startgg, executor, monkeypatch):
+    """The cancel event GetMatch hands its two requests is set once
+    map_fanout has returned -- not before (their answers are used)."""
+    executor()
+    seen = []
+
+    def half(name):
+        def run(setId, progress_callback, cancel_event):
+            seen.append((name, cancel_event, cancel_event.is_set()))
+            return {}
+        return run
+
+    monkeypatch.setattr(startgg, "_GetMatchTasks", half("old"))
+    monkeypatch.setattr(startgg, "_GetMatchNewApi", half("new"))
+
+    startgg.GetMatch(setId=1)
+
+    assert sorted(name for name, _, _ in seen) == ["new", "old"]
+    assert [wasSet for _, _, wasSet in seen] == [False, False]
+    assert seen[0][1] is seen[1][1]
+    assert seen[0][1].is_set()
+
+
+def test_the_head_to_head_releases_its_requests_once_answered(
+        startgg, executor, monkeypatch):
+    executor()
+    seen = []
+
+    def worker(id1, id2, page, videogame, inverted, progress_callback,
+               cancel_event):
+        seen.append((cancel_event, cancel_event.is_set()))
+        return []
+
+    monkeypatch.setattr(startgg, "GetRecentSetsWorker", worker)
+    answers = []
+
+    startgg.GetRecentSets([1, 10], [2, 20], 1386,
+                          SimpleNamespace(emit=answers.append), 7, None, None)
+
+    assert answers == [{"sets": [], "request_time": 7}]
+    assert len(seen) == 10
+    assert [wasSet for _, wasSet in seen] == [False] * 10
+    assert len({id(event) for event, _ in seen}) == 1
+    assert seen[0][0].is_set()
+
+
+def test_the_set_list_pages_get_the_fetch_s_cancel(
+        startgg, executor, monkeypatch):
+    executor()
+    cancel = threading.Event()
+    given = []
+
+    def query(*args, cancel_event=None, **kwargs):
+        given.append(cancel_event)
+        return {"data": {"event": {"sets": {
+            "pageInfo": {"totalPages": 2}, "nodes": []}}}}
+
+    monkeypatch.setattr(startgg, "QueryRequests", query)
+
+    assert startgg.GetMatches(cancel_event=cancel) == []
+    assert given == [cancel, cancel]
 
 
 def test_loading_another_tournament_cancels_the_entrants_fetch(
