@@ -979,6 +979,22 @@ def _paired(designer_service, headers=None):
             "X-Autona-Pairing": designer_service.pairing_code()}
 
 
+@pytest.mark.parametrize("data, content_type, status", [
+    ("{nope", "application/json", 400),
+    ("{}", "text/plain", 415),
+])
+def test_an_unreadable_import_body_is_a_client_error(
+        designer_service, import_client, data, content_type, status):
+    origin = "https://www.figma.com"
+    response = import_client.post(
+        "/api/designer/imports", data=data, content_type=content_type,
+        headers=_paired(designer_service, {"Origin": origin}))
+    assert response.status_code == status
+    assert "error" in response.get_json()
+    assert response.headers["Access-Control-Allow-Origin"] == origin
+    assert import_client.emitted == []
+
+
 @pytest.mark.parametrize("origin", ["null", "https://www.figma.com"])
 def test_the_figma_plugin_can_post_an_import(
         designer_service, import_client, origin):
