@@ -1,0 +1,59 @@
+{
+  "manifest": 1,
+  "id": "taguyan.webhook",
+  "version": "1.0.0",
+  "name": {"ja": "Webhook 送信", "en": "Webhook post"},
+  "description": {"ja": "リザルト画像と試合の結果を Webhook に送ります。Discord は画像と文、Slack は文だけです。", "en": "Posts result images and match results to a webhook. Discord gets the image and text; Slack gets text only."},
+  "author": "taguyan",
+  "homepage": "https://github.com/yuya-tagu/autona-webhook",
+  "icon": "icon.png",
+  "license": "MIT",
+  "min_autona": "2.6.0",
+  "protocol": [1],
+  "platforms": ["windows-x64"],
+  "entry": ["bin/webhook.exe"],
+  "update": {"github": "yuya-tagu/autona-webhook"},
+  "permissions": {
+    "network": ["discord.com", "hooks.slack.com"],
+    "files": "inputs",
+    "spawn": false,
+    "autona_api": "none",
+    "note": {"ja": "受け取った画像と文を、設定した Webhook に送ります。", "en": "Sends the received image and text to the configured webhook."}
+  },
+  "settings": [
+    {"key": "webhook_url", "type": "secret", "label": {"ja": "Webhook の URL", "en": "Webhook URL"}, "required": true,
+     "help": {"ja": "Discord か Slack の Incoming Webhook の URL。", "en": "A Discord or Slack incoming webhook URL."}},
+    {"key": "mention", "type": "select", "label": {"ja": "メンション", "en": "Mention"}, "default": "none",
+     "options": [{"value": "none", "label": {"ja": "しない", "en": "None"}},
+                 {"value": "here", "label": "@here"}]}
+  ],
+  "jobs": [
+    {
+      "id": "post_image",
+      "title": {"ja": "リザルト画像を送る", "en": "Post the result image"},
+      "lane": "light",
+      "timeout_seconds": 60,
+      "memory_mb": 256,
+      "params": [
+        {"key": "image", "type": "result_image", "label": {"ja": "リザルト画像", "en": "Result image"}, "required": true},
+        {"key": "message", "type": "textarea", "label": {"ja": "本文", "en": "Message"}, "max_length": 1500, "default": ""}
+      ],
+      "actions": [{"target": "result_image", "label": {"ja": "Webhook に送る", "en": "Send to webhook"}}],
+      "hooks": [{"on": "result_image_saved", "label": {"ja": "保存したら自動で送る", "en": "Send each saved image"}}]
+    },
+    {
+      "id": "post_match",
+      "title": {"ja": "試合の結果を送る", "en": "Post a match result"},
+      "lane": "light",
+      "timeout_seconds": 20,
+      "memory_mb": 128,
+      "manual": false,
+      "params": [
+        {"key": "match", "type": "match_record", "label": {"ja": "決まった試合", "en": "Decided match"}, "required": true},
+        {"key": "style", "type": "select", "label": {"ja": "書き方", "en": "Style"}, "default": "short",
+         "options": [{"value": "short", "label": {"ja": "短く", "en": "Short"}}, {"value": "games", "label": {"ja": "各ゲームも", "en": "With games"}}]}
+      ],
+      "hooks": [{"on": "match_decided", "label": {"ja": "試合が決まったら結果を送る", "en": "Post each decided match"}}]
+    }
+  ]
+}

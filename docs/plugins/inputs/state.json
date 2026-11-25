@@ -1,0 +1,53 @@
+{
+  "score": {
+    "1": {
+      "best_of": 5,
+      "first_to": 3,
+      "phase": "Top 8",
+      "match": "Winners Semi-Final",
+      "set_id": "78901234",
+      "teamsSwapped": false,
+      "team": {
+        "1": {
+          "teamName": "",
+          "score": 3,
+          "player": {
+            "1": {
+              "name": "PlayerA",
+              "team": "TEAM A",
+              "real_name": "Taro Example",
+              "twitter": "@player_a",
+              "mergedName": "TEAM A | PlayerA",
+              "country": {"code": "JP", "name": "Japan", "display_name": "日本", "en_name": "Japan", "asset": "./assets/country_flag/jp.png"},
+              "state": {"code": "13", "original_code": "13", "name": "東京都", "asset": "./assets/state_flag/JP/13.png"}
+            }
+          }
+        },
+        "2": {
+          "teamName": "",
+          "score": 1,
+          "player": {
+            "1": {
+              "name": "PlayerB",
+              "team": "",
+              "real_name": "",
+              "twitter": "",
+              "mergedName": "PlayerB",
+              "country": {"code": "US", "name": "United States", "display_name": "アメリカ合衆国", "en_name": "United States", "asset": "./assets/country_flag/us.png"},
+              "state": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "tournamentInfo": {
+    "tournamentName": "Example Weekly",
+    "displayTournamentName": "Example Weekly #12",
+    "eventName": "Singles"
+  },
+  "game": {
+    "name": "Sample Game",
+    "codename": "sample"
+  }
+}

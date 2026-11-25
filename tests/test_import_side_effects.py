@@ -198,6 +198,9 @@ importlib.import_module("src.core.ArchiveThumbnails")
 # import.
 match_log_service = importlib.import_module(
     "src.core.MatchLogService").MatchLogService
+# The plugin contract's types (ADR-009 W0): dataclasses, enums and
+# Protocols only -- nothing made, read or started on import.
+importlib.import_module("src.core.PluginTypes")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
