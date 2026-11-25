@@ -375,6 +375,9 @@ def _freshSettingsRecord():
     def reset():
         SettingsManager._unsaved = []
         SettingsManager.movedAside = None
+        # A Set() whose save failed (monkeypatched) would make the next
+        # test's first Set() / Unset() save though it changes nothing.
+        SettingsManager._saveFailed = False
 
     reset()
     yield

@@ -944,3 +944,25 @@ def test_the_last_sets_refresh_does_not_log_the_player_id(fetcher):
 
     assert any("last sets for team 1" in m for m in messages)
     assert not any("987654321" in m for m in messages)
+
+
+def test_a_null_or_broken_event_date_blanks_only_its_own_row():
+    stamp = datetime(2026, 3, 14, 12, 0).timestamp()
+    _service().UpdateHistorySets({
+        "playerNumber": "2",
+        "history_sets": [
+            {"placement": 1, "event_date": None},
+            {"placement": 2, "event_date": "abc"},
+            {"placement": 3, "event_date": stamp},
+            {"placement": 4},
+        ],
+    })
+
+    rows = [SM.Get(f"{PREFIX}.history_sets.2.{i}") for i in range(1, 5)]
+    assert [row["placement"] for row in rows] == [1, 2, 3, 4]
+    assert rows[2]["event_date_day"] == "14"
+    assert rows[2]["event_date_year"] == "2026"
+    for row in (rows[0], rows[1], rows[3]):
+        assert row["event_date_month"] == ""
+        assert row["event_date_day"] == ""
+        assert row["event_date_year"] == ""

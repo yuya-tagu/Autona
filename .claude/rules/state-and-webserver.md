@@ -82,6 +82,7 @@ paths:
   まま起動し、**書き込みのたびに SettingsManager が読み直す**（呼び手ごとに避けない）
   - 開けない間: `SetMany` / `PrepareWrite` は `SettingsUnreadable`（`OSError`）を送出して何も変えない。`Set` / `Unset` はメモリだけを変え、
     読めたらその上に順に戻してから書く
+  - `Set` / `Unset` は保存の失敗（`OSError`）も上げず警告にする（この実行中だけ有効。次の `Set` / `Unset` が保存し直す）。`SetMany` は厳格
   - `loadFailed` は途中で False になりうるので、読めなかった間の判断をキャッシュしない（`WebAccess.Token()` は `""` を持たない）
   - 読むときは UTF-8 BOM を外す。保存は BOM なし
 - **書き込みは 2 種類**:

@@ -69,6 +69,10 @@ class SettingsManager:
     # not JSON or not an object), at launch or at a later write; None when it
     # was not. For the settings page to tell (GET /api/v1/settings).
     movedAside = None
+    # True when a Set() / Unset() could not save (an OSError) and memory
+    # holds a change settings.json does not. The next Set() / Unset() saves
+    # again, even one that changes nothing.
+    _saveFailed = False
     # While loadFailed and the file still cannot be opened: what Set() /
     # Unset() changed in memory only, in order, as (key, value) -- value
     # _ABSENT for an Unset. Put back over what the file holds when it can be
@@ -151,10 +155,16 @@ class SettingsManager:
             try:
                 with os.fdopen(fd, 'wb') as file:
                     file.write(data)
+                    # On disk before the replace: settings.json has no
+                    # fallback copy, so a power cut right after it must not
+                    # leave an empty file in its place.
+                    file.flush()
+                    os.fsync(file.fileno())
                 delay = _REPLACE_BACKOFF
                 for attempt in range(_REPLACE_ATTEMPTS):
                     try:
                         os.replace(tmp, path)
+                        SettingsManager._saveFailed = False
                         break
                     except OSError:
                         if attempt == _REPLACE_ATTEMPTS - 1:
@@ -347,14 +357,20 @@ class SettingsManager:
         back over the file when a later write can read it (_Settle). Its
         callers (SetFollowService.TurnOffPolling, the battle format and the
         rest; the Qt settings window until ADR-005 S4af) do not expect an
-        error. A caller that decides what to write from what is saved calls
-        PrepareWrite() first instead (strict)."""
+        error. A save that fails (an OSError: the disk full, the file held)
+        is not raised to them either: it is logged, the change is in effect
+        for this run only, and the next Set() / Unset() -- even one that
+        changes nothing -- saves the whole of memory again. A caller that
+        decides what to write from what is saved calls PrepareWrite() first
+        instead (strict); SetMany() is strict too."""
         SettingsManager._Change(key, value)
 
     def Unset(key: str):
         """Remove `key` and save; nothing is saved when it is not there
-        (and no empty parent is made on the way down). While settings.json
-        cannot be opened: as Set()."""
+        (and no empty parent is made on the way down) -- unless an earlier
+        save failed, which this one makes again. While settings.json cannot
+        be opened, and when the save fails: as Set() (in memory only,
+        logged, never raised)."""
         SettingsManager._Change(key, _ABSENT)
 
     def _Change(key, value):
@@ -369,8 +385,23 @@ class SettingsManager:
                     f"not saved: {error}. It is saved when the file can be "
                     f"read")
                 return
-            if SettingsManager._Apply(key, value) or save:
-                SettingsManager.SaveSettings()
+            if (SettingsManager._Apply(key, value) or save
+                    or SettingsManager._saveFailed):
+                SettingsManager._SaveOrKeep(key)
+
+    def _SaveOrKeep(key):
+        """Save after a Set() / Unset() of `key` (caller holds the lock).
+        An OSError is logged, not raised: the change stays in memory, in
+        effect for this run, and `_saveFailed` makes the next Set() /
+        Unset() save again. Anything else (a value orjson cannot write)
+        is raised as ever."""
+        try:
+            SettingsManager.SaveSettings()
+        except OSError as error:
+            SettingsManager._saveFailed = True
+            logger.warning(
+                f"Settings - {key} is in effect for this run only and was "
+                f"not saved ({error}); the next change saves it")
 
     def _Apply(key, value):
         """deep_set `key` to `value`, or remove it for _ABSENT. True when
@@ -395,9 +426,10 @@ class SettingsManager:
 
         When a set or the save raises, the settings in memory are put back
         as they were before the call (what was not there is removed again)
-        and the error is raised: memory never holds what settings.json does
-        not, which a reader would show and the next Set() would write
-        silently. So while settings.json could not be read at launch and
+        and the error is raised: memory never holds these pairs without
+        settings.json holding them too (a change an earlier Set() / Unset()
+        kept in memory after a failed save is not touched). So while
+        settings.json could not be read at launch and
         still cannot be opened, it raises SettingsUnreadable and sets
         nothing (strict, unlike Set() / Unset(), which change memory only).
         What it reads again first (_Settle) is what a failure puts back:

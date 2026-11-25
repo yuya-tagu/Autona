@@ -632,6 +632,110 @@ def test_set_many_puts_back_the_file_it_adopted_when_its_save_fails(
     assert SettingsManager.loadFailed is False
 
 
+# ── Set / Unset whose save fails (an OSError) ────────────────────────────
+# Their callers do not expect an error (SetFollowService.TurnOffPolling at
+# every launch, the battle format's two keys, the tournament's URL ahead of
+# its load): the change is in effect for this run and logged, and the next
+# Set / Unset saves the whole of memory again.
+
+def test_a_set_whose_save_fails_is_in_effect_and_logged(
+        isolated, monkeypatch, warnings):
+    _failingSave(monkeypatch)
+
+    SettingsManager.Set("a", 1)
+
+    assert SettingsManager.settings["a"] == 1
+    assert SettingsManager._saveFailed is True
+    assert any("a is in effect for this run only" in m for m in warnings)
+
+
+def test_the_next_change_saves_what_a_failed_save_left_in_memory(
+        isolated, monkeypatch):
+    real = SettingsManager.SaveSettings
+    _failingSave(monkeypatch)
+    SettingsManager.Set("a", 1)
+    monkeypatch.setattr(SettingsManager, "SaveSettings", real)
+
+    # Removes nothing: saved for the earlier change alone.
+    SettingsManager.Unset("not_there")
+
+    assert orjson.loads(isolated.read_bytes()) == {"a": 1}
+    assert SettingsManager._saveFailed is False
+
+
+def test_a_successful_set_many_clears_a_failed_save(isolated, monkeypatch):
+    real = SettingsManager.SaveSettings
+    _failingSave(monkeypatch)
+    SettingsManager.Set("a", 1)
+    assert SettingsManager._saveFailed is True
+    monkeypatch.setattr(SettingsManager, "SaveSettings", real)
+
+    SettingsManager.SetMany([("b", 2)])
+
+    assert SettingsManager._saveFailed is False
+    assert orjson.loads(isolated.read_bytes()) == {"a": 1, "b": 2}
+
+
+def test_a_set_whose_save_fails_after_the_file_was_read_again_is_kept(
+        isolated, monkeypatch):
+    # _Settle adopts the file and puts the earlier changes back (save=True);
+    # the save of that fails: not raised, and memory keeps all of it.
+    _unopenable(isolated)
+    SettingsManager.LoadSettings()
+    SettingsManager.Set("a", 1)
+    _readable(isolated, SAVED)
+    _failingSave(monkeypatch)
+
+    SettingsManager.Set("zz", 2)
+
+    assert SettingsManager._saveFailed is True
+    assert SettingsManager.loadFailed is False
+    assert SettingsManager.settings == {**SAVED, "a": 1, "zz": 2}
+
+
+def test_a_value_that_cannot_be_written_is_still_raised(isolated):
+    # Not the file system's: a caller's bug, as ever.
+    with pytest.raises(TypeError):
+        SettingsManager.Set("a", object())
+
+
+def test_the_saved_file_is_on_disk_before_it_replaces_settings_json(
+        isolated, monkeypatch):
+    # settings.json has no fallback copy: a power cut after the replace
+    # must not leave an empty file in its place.
+    order = []
+    fsync, replace = os.fsync, os.replace
+
+    def recordedFsync(fd):
+        order.append("fsync")
+        fsync(fd)
+
+    def recordedReplace(src, dst):
+        order.append("replace")
+        replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", recordedFsync)
+    monkeypatch.setattr(os, "replace", recordedReplace)
+
+    SettingsManager.SaveSettings()
+    SettingsManager.Set("a", 1)
+
+    assert order == ["fsync", "replace", "fsync", "replace"]
+    assert orjson.loads(isolated.read_bytes()) == {"a": 1}
+
+
+def test_a_failed_fsync_raises_and_leaves_no_temp_file(isolated, monkeypatch):
+    def fail(fd):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(os, "fsync", fail)
+
+    with pytest.raises(OSError):
+        SettingsManager.SaveSettings()
+
+    assert _files(isolated) == []
+
+
 # ── a byte order mark ────────────────────────────────────────────────────
 # What Notepad (before Windows 10 1903) and PowerShell 5's Set-Content
 # -Encoding UTF8 put before a file they save. orjson refuses it: a
@@ -857,7 +961,10 @@ def test_a_save_that_never_replaces_raises_and_leaves_the_file(
     monkeypatch.setattr(module.time, "sleep", lambda s: None)
 
     with pytest.raises(PermissionError):
-        SettingsManager.Set("a.b", 1)
+        SettingsManager.SaveSettings()
+    # Set() logs it instead (in effect for this run only).
+    SettingsManager.Set("a.b", 1)
+    assert SettingsManager._saveFailed is True
 
     assert orjson.loads(isolated.read_bytes()) == SAVED
     assert _files(isolated) == ["settings.json"]

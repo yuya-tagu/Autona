@@ -2208,3 +2208,78 @@ class TestGetMatchNewApiNullAnswers:
         result, levels = self._levels(provider)
         assert result == provider.ParseMatchDataNewApi({})
         assert levels.count("ERROR") == 0
+
+
+class TestNullTolerantParsing:
+    """A null or omitted field in one row must not empty the whole answer."""
+
+    def test_recent_sets_without_a_timestamp_are_left_out(self):
+        found = {(False, 1): [{"id": "N", "timestamp": None},
+                              {"id": "S", "timestamp": "x"},
+                              {"id": "A", "timestamp": 300},
+                              {"id": "B", "timestamp": 100}]}
+
+        def worker(id1, id2, page, videogame, inverted, progress_callback,
+                   cancel_event):
+            return found.get((inverted, page), [])
+
+        provider = _make_provider()
+        provider.GetRecentSetsWorker = worker
+        answers = []
+        provider.GetRecentSets(
+            [1, 10], [2, 20], 1386,
+            types.SimpleNamespace(emit=answers.append), 7, None, None)
+
+        assert [s["id"] for s in answers[0]["sets"]] == ["A", "B"]
+
+    def test_history_standings_absorb_rows_one_by_one(self):
+        def standing(event):
+            return {"placement": 1, "entrant": {"event": event}}
+
+        nodes = [
+            {"placement": 2, "entrant": None},
+            standing({"name": "E1", "numEntrants": 8, "startAt": 111,
+                      "tournament": {"name": "T1", "images": []}}),
+            standing({"name": "E2", "numEntrants": 16,
+                      "tournament": {"name": "T2", "startAt": 222,
+                                     "images": [{"url": "http://x/p.png"}]}}),
+            standing({"name": "E3", "startAt": 333, "tournament": None}),
+        ]
+        provider = _make_provider()
+        provider.QueryRequests = lambda *a, **k: {
+            "data": {"player": {"recentStandings": nodes}}}
+        answers = []
+        errors = []
+        sink = _startgg_mod.logger.add(
+            lambda message: errors.append(str(message)), level="ERROR")
+        try:
+            provider.GetPlayerHistoryStandings(
+                5, 1, 1386, types.SimpleNamespace(emit=answers.append),
+                None, None)
+        finally:
+            _startgg_mod.logger.remove(sink)
+
+        rows = answers[0]["history_sets"]
+        assert [r["event_name"] for r in rows] == ["E1", "E2", "E3"]
+        assert [r["event_date"] for r in rows] == [111, 222, 333]
+        assert rows[0]["tournament_picture"] is None
+        assert rows[1]["tournament_picture"] == "http://x/p.png"
+        assert errors == []
+
+    def test_phase_group_with_a_seed_without_seednum(self):
+        def seed(num, name):
+            return {"seedNum": num, "entrant": {
+                "name": name, "participants": [
+                    {"id": 1, "player": {"id": 1, "gamerTag": name},
+                     "requiredConnections": []}]}}
+
+        data = {"data": {"phaseGroup": {
+            "seeds": {"nodes": [seed(2, "B"), seed(None, "X"), seed(1, "A")]},
+            "sets": {"nodes": [_set_node("1", 1)]},
+            "progressionsOut": []}}}
+        provider = _make_provider()
+        provider.QueryRequests = lambda *a, **k: data
+        result = provider.GetTournamentPhaseGroup(1)
+
+        assert len(result["entrants"]) == 2
+        assert result["sets"]

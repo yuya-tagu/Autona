@@ -456,6 +456,6 @@ class TournamentInfoService:
 
         # No field on the tab (or a null value for one): publish as-is.
         info = value
-        if key in self.SHORT_DATE_KEYS and value != "":
+        if key in self.SHORT_DATE_KEYS and value not in ("", None):
             info = time.strftime("%x", time.localtime(float(value)))
         self._SetIfChanged(self.Key(key), info)

@@ -696,6 +696,98 @@ def test_a_transient_replace_failure_is_retried(tmp_path, monkeypatch, settings)
     assert _temps(tmp_path) == []
 
 
+def _record_io(monkeypatch):
+    events = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def fsync(fd):
+        events.append("fsync")
+        return real_fsync(fd)
+
+    def replace(src, dst):
+        events.append("replace")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(player_db_module.os, "fsync", fsync)
+    monkeypatch.setattr(player_db_module.os, "replace", replace)
+    return events
+
+
+def test_the_temp_file_is_fsynced_before_the_replace(
+        tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers([_player("A")], deferRefresh=True)
+    events = _record_io(monkeypatch)
+    db.SaveDB()
+
+    assert events == ["fsync", "replace"]
+
+
+def test_the_fsynced_file_is_the_temp_file(tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers([_player("A")], deferRefresh=True)
+    seen = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        # The file index of the fd against the temp files next to the db.
+        index = os.fstat(fd).st_ino
+        seen.append(index in [os.stat(path).st_ino
+                              for path in tmp_path.glob("local_players.*.tmp")])
+        return real_fsync(fd)
+
+    monkeypatch.setattr(player_db_module.os, "fsync", fsync)
+    db.SaveDB()
+
+    assert seen == [True]
+
+
+def test_the_same_content_is_not_written_again(tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    events = _record_io(monkeypatch)
+    db.AddPlayers([_player("A")])  # saves
+    db.SaveDB()
+    db.SaveDB()
+
+    assert events.count("replace") == 1
+
+
+def test_a_file_changed_from_outside_is_written_again(
+        tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    path = tmp_path / "local_players.json"
+    events = _record_io(monkeypatch)
+    db.AddPlayers([_player("A")])
+    db.SaveDB()
+    assert events.count("replace") == 1
+
+    path.write_text("[]", encoding="utf-8")  # different size
+    db.SaveDB()
+    assert events.count("replace") == 2
+    assert _saved_tags(tmp_path) == ["A"]
+
+    path.unlink()
+    db.SaveDB()
+    assert events.count("replace") == 3
+    assert _saved_tags(tmp_path) == ["A"]
+
+
+def test_a_changed_database_is_written(tmp_path, monkeypatch, settings):
+    db = _db(tmp_path)
+    db.LoadDB()
+    db.AddPlayers([_player("A")])
+    events = _record_io(monkeypatch)
+    db.SaveDB()
+    db.AddPlayers([_player("B")])
+
+    assert events.count("replace") == 1
+    assert _saved_tags(tmp_path) == ["A", "B"]
+
+
 def test_the_file_is_written_outside_the_db_lock(tmp_path, monkeypatch, settings):
     db = _db(tmp_path)
     db.LoadDB()
@@ -716,8 +808,8 @@ def test_the_file_is_written_outside_the_db_lock(tmp_path, monkeypatch, settings
     monkeypatch.setattr(player_db_module.os, "replace", replace)
     db.AddPlayers([_player("A")])
     db.DeletePlayer("A")
-    db.SaveDB()
-    assert acquired == [True, True, True]
+    db.SaveDB()  # same text as the delete's write: not written again
+    assert acquired == [True, True]
 
 
 def test_an_older_snapshot_never_lands_after_a_newer_one(tmp_path, settings):
