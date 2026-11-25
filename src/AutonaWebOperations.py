@@ -1371,20 +1371,23 @@ def get_analysis():
     `analysis` in one hold of it (_Publish / Forget), so the three are of
     the same moment -- not a fetch's rows with the status before it ended,
     or idle with the rows Forget is about to drop. The lock order is the
-    service's: StateManager.lock, then its own (Result)."""
+    service's: StateManager.lock, then its own (ResultRef). The rows are
+    copied after the hold (a fetch's rows never change once made), so a
+    large list does not stall every state write and delta while it is
+    copied -- and not at all when they are another tournament's."""
     service = AnalysisService.instance
     with StateManager.lock:
-        result = service.Result() if service is not None else {
-            "url": "", "rows": [], "revision": None}
+        url, rows, _revision = (service.ResultRef() if service is not None
+                                else ("", None, None))
         provider = AutonaTournamentDataProvider.instance.GetProvider()
         current = (getattr(provider, "url", None)
                    if provider is not None else None)
         status = AnalysisService.Progress()["status"]
-    if not result["url"] or result["url"] != current:
-        result = {"url": "", "rows": []}
+    if not url or url != current:
+        return {"status": status, "url": HiveeUrl.Mask(""), "rows": []}
     # Compared as the provider's own URL; shown with a Hivee token masked.
-    return {"status": status, "url": HiveeUrl.Mask(result["url"]),
-            "rows": result["rows"]}
+    return {"status": status, "url": HiveeUrl.Mask(url),
+            "rows": copy.deepcopy(rows) if rows is not None else []}
 
 
 # ── the set selection's lists (ADR-005 S4v) ──────────────────────────────

@@ -846,7 +846,8 @@ def test_the_lists_show_the_tournament_url_masked(autonaApp, monkeypatch):
     monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
                         SimpleNamespace(url=API_URL))
     monkeypatch.setattr(AnalysisService, "instance", SimpleNamespace(
-        Result=lambda: {"url": API_URL, "rows": ["row"], "revision": 1}))
+        Result=lambda: {"url": API_URL, "rows": ["row"], "revision": 1},
+        ResultRef=lambda: (API_URL, ["row"], 1)))
     monkeypatch.setattr(SetSelectionService, "instance", SimpleNamespace(
         Result=lambda kind: {"url": API_URL, "rows": ["row"],
                              "fetchedAt": 1, "query": None}))

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from .Helpers import AutonaQtHelper
+from .Helpers import AutonaCrashLog
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
-import faulthandler
 import shutil
 import qdarktheme
 from . import ui_constants as UI
@@ -18,10 +18,12 @@ from packaging.version import parse
 from loguru import logger
 from pathlib import Path
 
+# The native crash log: the previous run's dump is kept as
+# logs/tsh-crash.prev.log, and the log is closed (removed when empty) by
+# an atexit hook, so the dump also covers the interpreter's exit join (Qt's
+# own atexit cleanup may run after that hook and is not covered).
 crashpath = Path('./logs/tsh-crash.log').resolve()
-Path.mkdir(crashpath.parent, exist_ok=True)
-crashlog = crashpath.open(mode='w')
-faulthandler.enable(crashlog)
+crashlog = AutonaCrashLog.open_crash_log(crashpath)
 
 # NOTE: Qt.AA_ShareOpenGLContexts is set in main.py — it only takes effect
 # before the QApplication is constructed, and that now happens there too.
@@ -771,13 +773,6 @@ class Window(QMainWindow):
             # process; leaving them behind is harmless, blocking exit is not.
             logger.opt(exception=True).error("Error removing tmp directory on shutdown")
 
-        try:
-            crashlog.close()
-            if crashpath.stat().st_size == 0:
-                crashpath.unlink()
-        except Exception:
-            pass
-
         # --- Mandatory teardown ------------------------------------------
         # The web server is stoppable since ADR-005 S3c: werkzeug's
         # shutdown() ends its accept loop, where QThread.terminate() used to
@@ -841,6 +836,13 @@ class Window(QMainWindow):
             logger.opt(exception=True).error("Error closing auxiliary windows on shutdown")
 
         super().closeEvent(event)
+
+        # The crash log stays open until the atexit close_crash_log, after the
+        # interpreter has joined the writer threads (Qt cleanup registered
+        # earlier runs after it and is not covered). If that exit hangs, every
+        # thread's stack is written there after 60 seconds; the normal exit
+        # cancels this (AutonaCrashLog.close_crash_log).
+        AutonaCrashLog.arm_exit_watchdog(crashlog, 60)
 
         # Quit explicitly instead of relying on quitOnLastWindowClosed:
         # off-screen helper widgets (thumbnail/result renderers) can keep the

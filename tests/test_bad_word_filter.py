@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from src.core.BadWordFilter import BadWordFilter
+from src.core.BadWordFilter import BadWordFilter, Trie
 from src.core.SettingsManager import SettingsManager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -63,9 +63,9 @@ def word_lists(tmp_path):
 
 @pytest.fixture
 def log_sink():
-    # The old log line formats a censored value with str.format, which only
-    # runs while some sink accepts INFO (with none, loguru returns before
-    # formatting). The app always has one; make sure the test does too.
+    # The app always has a log sink, and loguru only formats a message while
+    # one accepts it. Keep a DEBUG one so a log line that formats a value
+    # (the old one raised KeyError on "{x}") would fail these tests.
     sink = logger.add(lambda message: None, level="DEBUG")
     yield
     logger.remove(sink)
@@ -182,3 +182,27 @@ def test_the_shared_instance_censors_values_strings_and_dicts(
     value = {"a": "qcommon", "b": {"c": "qcommon x"}}
     censor.CensorDict(value)
     assert value == {"a": "***", "b": {"c": "*** x"}}
+
+
+def test_no_trie_is_kept_after_the_patterns_are_built(word_lists):
+    censor = _filter(word_lists, None)
+    assert not hasattr(censor, "badWordTries")
+    assert not any(isinstance(v, Trie) for v in vars(censor).values())
+
+
+@pytest.mark.parametrize("level", ["DEBUG", "INFO"])
+def test_a_value_with_braces_is_censored_and_never_logged(
+        word_lists, enabled, level):
+    censor = _filter(word_lists, None)
+    value = "{x} qcommon"
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)),
+                      level=level)
+    try:
+        got = censor.Censor(value)
+    finally:
+        logger.remove(sink)
+    assert "***" in got
+    # At INFO the filter logs nothing at DEBUG, so this check is vacuous
+    # there: that case only confirms no exception is raised.
+    assert not any("{x}" in m or "qcommon" in m for m in messages)

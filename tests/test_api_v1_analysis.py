@@ -216,8 +216,8 @@ def test_the_read_is_of_one_moment(client, analysis, monkeypatch):  # noqa: F811
             return real(*args, **kwargs)
         return call
 
-    monkeypatch.setattr(AnalysisService.instance, "Result",
-                        spy("Result", AnalysisService.instance.Result))
+    monkeypatch.setattr(AnalysisService.instance, "ResultRef",
+                        spy("ResultRef", AnalysisService.instance.ResultRef))
     monkeypatch.setattr(AnalysisService, "Progress",
                         staticmethod(spy("Progress", AnalysisService.Progress)))
     monkeypatch.setattr(adapter, "GetProvider",
@@ -226,7 +226,7 @@ def test_the_read_is_of_one_moment(client, analysis, monkeypatch):  # noqa: F811
     assert read["status"] == "done"
     assert _cells(read["rows"]) == _expectedRows(SEEDS_KNOWN)
     assert sorted(held) == [("GetProvider", True), ("Progress", True),
-                            ("Result", True)]
+                            ("ResultRef", True)]
 
     # While another thread holds the lock (a publish in progress), the
     # read waits for it.
@@ -240,6 +240,69 @@ def test_the_read_is_of_one_moment(client, analysis, monkeypatch):  # noqa: F811
     reader.join(WAIT)
     assert not reader.is_alive()
     assert reads[0]["status"] == "done"
+
+
+def _recordCopies(monkeypatch):
+    """The rows' deepcopy recorded with whether StateManager.lock was
+    held -- through get_analysis's and the service's own `copy` names only,
+    so the copies made elsewhere (the state's own reads) are not counted."""
+    import copy
+    import types
+    copies = []
+
+    def deepcopy(value, *args, **kwargs):
+        copies.append(StateManager.lock._is_owned())
+        return copy.deepcopy(value, *args, **kwargs)
+
+    recording = types.SimpleNamespace(deepcopy=deepcopy)
+    monkeypatch.setattr(WebOps, "copy", recording)
+    monkeypatch.setattr(service, "copy", recording)
+    return copies
+
+
+def test_the_rows_are_copied_outside_the_lock(
+        client, analysis, monkeypatch):  # noqa: F811
+    """The rows are read in the hold and copied after it: a large list
+    does not stall every state write while it is copied."""
+    _switchTournament(_provider(SEEDS_KNOWN))
+    _refresh(client)
+    _drain(analysis)
+    copies = _recordCopies(monkeypatch)
+    read = WebOps.get_analysis()
+    assert _cells(read["rows"]) == _expectedRows(SEEDS_KNOWN)
+    assert copies == [False]
+
+
+def test_another_tournaments_rows_are_not_copied(
+        client, analysis, monkeypatch):  # noqa: F811
+    """Rows that are not handed out (another tournament loaded) are not
+    copied at all."""
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    _switchTournament(_provider(SEEDS_KNOWN))
+    _refresh(client)
+    _drain(analysis)
+    other = _provider(SEEDS_KNOWN)
+    other.url = "https://www.start.gg/tournament/other/event/analysis"
+    AutonaTournamentDataProvider.instance.provider = other
+    copies = _recordCopies(monkeypatch)
+    assert WebOps.get_analysis() == {"status": "done", "url": "", "rows": []}
+    assert copies == []
+
+
+def test_the_rows_handed_out_are_a_copy(client, analysis):  # noqa: F811
+    """Changing the rows a reader was given changes neither the next read
+    nor the service's."""
+    _switchTournament(_provider(SEEDS_KNOWN))
+    _refresh(client)
+    _drain(analysis)
+    read = WebOps.get_analysis()
+    read["rows"][0]["round"] = "changed"
+    read["rows"][0]["p1"] = None
+    read["rows"].append({"round": "extra"})
+
+    assert _cells(WebOps.get_analysis()["rows"]) == _expectedRows(SEEDS_KNOWN)
+    assert _cells(AnalysisService.instance.Result()["rows"]) == (
+        _expectedRows(SEEDS_KNOWN))
 
 
 def test_the_operations_answer_from_any_thread(client, analysis):  # noqa: F811

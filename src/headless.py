@@ -46,7 +46,6 @@ Importing this module does nothing (pitfalls #1): main.py calls run(),
 and before its single-instance gate the launch checks (instance_tag,
 refuse_frozen_headless: Autona.exe does not run headless).
 """
-import faulthandler
 import os
 import re
 import shutil
@@ -58,6 +57,8 @@ from pathlib import Path
 
 from loguru import logger
 from qtpy.QtCore import QMetaObject, Qt, QTimer
+
+from .Helpers import AutonaCrashLog
 
 
 # How long a console close waits for the shutdown before returning: Windows
@@ -246,9 +247,7 @@ def _ConfigureLogging():
     """The desktop's sinks: the console (INFO here, as this is the
     operator's only view), logs/autona.log and logs/tsh-error.log, and the
     crash log."""
-    crashpath = Path('./logs/tsh-crash.log').resolve()
-    crashpath.parent.mkdir(exist_ok=True)
-    faulthandler.enable(crashpath.open(mode='w'))
+    AutonaCrashLog.open_crash_log(Path('./logs/tsh-crash.log').resolve())
 
     handlers = []
     if sys.stdout is not None:
