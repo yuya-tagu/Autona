@@ -358,7 +358,7 @@ class StatsService:
             playerId = self.PlayerId(team)
             if not playerId:
                 self.ClearLastSets(team)
-        logger.info(f"Player {team} ID: {playerId}")
+        logger.info(f"Stats: last sets for team {team}: {'asking' if playerId else 'no player id'}")
         fetcher = StatsService.fetcher
         if playerId and fetcher is not None:
             fetcher.LastSets(playerId, team, self._Answer(

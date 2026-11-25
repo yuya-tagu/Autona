@@ -405,7 +405,11 @@ class TournamentInfoService:
         abandoned, exactly as the old ``break`` did. Reporting it to the
         operator is the caller's job -- that is a dialog, i.e. Qt.
         """
-        logger.info("Tournament Data: " + str(data))
+        # keys only: the values (venue, name) are not logged
+        isDict = isinstance(data, dict)
+        logger.info(
+            f"Tournament Data: keys={sorted(map(str, data)) if isDict else type(data).__name__} "
+            f"initial_load={bool(isDict and data.get('initial_load'))}")
         if not isinstance(data, dict):
             return True
 

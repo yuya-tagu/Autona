@@ -66,8 +66,8 @@ NORMALISED_GOLDEN = json.loads(
 # that is not 2 or 3 long is left as it is (not removed), and one player's
 # error stops that player only.
 NORMALISED_GAME = "tgame"
-INVALID_SKIN = "Local DB error: Player"
-PLAYER_ERROR = "Error loading player from local DB:"
+INVALID_SKIN = "Local DB error: a player has an invalid skin"
+PLAYER_ERROR = "Error loading a player from local DB"
 # {case: (the selected game's stored mains, after, "invalid skin" errors,
 #  whether the player's walk ends on an error)}. None for the last: the
 # Qt model build logged one there after the normalisation (its icon lookup
@@ -865,10 +865,9 @@ def _put(db, tag, record):
     return record
 
 
-def _logged(messages, prefix, tag=None):
+def _logged(messages, prefix):
     lines = [m.rstrip("\n") for m in messages]
-    return [m for m in lines if m.startswith(prefix)
-            and (tag is None or m == f"{prefix} {tag}")]
+    return [m for m in lines if m.startswith(prefix)]
 
 
 @pytest.mark.parametrize("case", sorted(NORMALISE_CASES))
@@ -886,7 +885,7 @@ def test_normalise_mains_rewrites_the_games_mains(case, tmp_path, errors):
     assert record["mains"] == {NORMALISED_GAME: after,
                                "other": [["luigi", "2"]]}
     assert len(_logged(errors, INVALID_SKIN)) == invalidSkins
-    assert bool(_logged(errors, PLAYER_ERROR, "K")) is bool(stops)
+    assert bool(_logged(errors, PLAYER_ERROR)) is bool(stops)
 
 
 def test_normalise_mains_is_idempotent_and_quiet(tmp_path, settings,
@@ -1093,7 +1092,7 @@ def test_a_refresh_normalises_the_selected_games_mains(
                                "other": [["luigi", "2"]]}
     assert len(_logged(errors, INVALID_SKIN)) == invalidSkins
     if stops is not None:
-        assert bool(_logged(errors, PLAYER_ERROR, "K")) is stops
+        assert bool(_logged(errors, PLAYER_ERROR)) is stops
     assert emitted == [True]
 
 
@@ -1101,26 +1100,28 @@ def test_a_refresh_names_the_invalid_skin(adapter, settings, monkeypatch,
                                           errors):
     AutonaPlayerDB, db, emitted = adapter
     _selectGame(monkeypatch, NORMALISED_GAME)
-    _put(db, "SPN K", {"prefix": "SPN", "gamerTag": "K",
+    _put(db, "LeakSponsor SecretTagK", {"prefix": "LeakSponsor",
+                                        "gamerTag": "SecretTagK",
                        "mains": {NORMALISED_GAME: [["mario", "x"]]}})
 
     AutonaPlayerDB.SetupModel()
 
     assert _logged(errors, INVALID_SKIN) == [
-        "Local DB error: Player K has an invalid skin for character mario"]
+        "Local DB error: a player has an invalid skin for character mario"]
+    assert not any("SecretTagK" in m or "LeakSponsor" in m for m in errors)
     # Each error with its traceback (ValueError: int("x")).
     assert any("ValueError" in m for m in errors)
 
 
 def test_a_refresh_goes_on_with_the_next_player(adapter, settings,
                                                 monkeypatch, errors):
-    """One player's error stops that player only (logged with the
-    gamerTag); what was rewritten before it stays rewritten."""
+    """One player's error stops that player only (logged without
+    the player's values); what was rewritten before it stays rewritten."""
     AutonaPlayerDB, db, emitted = adapter
     _selectGame(monkeypatch, NORMALISED_GAME)
-    first = _put(db, "A", {"gamerTag": "A", "mains": {NORMALISED_GAME: [
+    first = _put(db, "SecretTagA", {"gamerTag": "SecretTagA", "mains": {NORMALISED_GAME: [
         ["mario", "2"], "abc", ["luigi", "3"]]}})
-    second = _put(db, "B", {"gamerTag": "B", "mains": {NORMALISED_GAME: [
+    second = _put(db, "SecretTagB", {"gamerTag": "SecretTagB", "mains": {NORMALISED_GAME: [
         ["mario", "4"]]}})
 
     AutonaPlayerDB.SetupModel()
@@ -1128,7 +1129,8 @@ def test_a_refresh_goes_on_with_the_next_player(adapter, settings,
     assert first["mains"][NORMALISED_GAME] == [
         ["mario", 2, ""], "abc", ["luigi", "3"]]
     assert second["mains"][NORMALISED_GAME] == [["mario", 4, ""]]
-    assert _logged(errors, PLAYER_ERROR) == [f"{PLAYER_ERROR} A"]
+    assert _logged(errors, PLAYER_ERROR) == [PLAYER_ERROR]
+    assert not any("SecretTag" in m for m in errors)
     assert emitted == [True]
 
 

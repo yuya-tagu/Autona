@@ -995,8 +995,9 @@ class PlayerService:
                 tag = PlayerDB.PlayerTag(data)
             except TypeError:
                 logger.warning(
-                    f"{self.path}: no database lookup for "
-                    f"{data.get('prefix')!r} {data.get('gamerTag')!r}")
+                    f"{self.path}: no database lookup (prefix/gamerTag not "
+                    f"text: {type(data.get('prefix')).__name__}/"
+                    f"{type(data.get('gamerTag')).__name__})")
             else:
                 db = PlayerDB.instance
                 if db is not None:
