@@ -186,8 +186,71 @@ def test_the_shared_instance_censors_values_strings_and_dicts(
 
 def test_no_trie_is_kept_after_the_patterns_are_built(word_lists):
     censor = _filter(word_lists, None)
+    # The regexes are compiled lazily, so make the filter build the patterns
+    # of the selected lists first; otherwise the checks below prove nothing.
+    censor.CensorString("qcommon x", "JP")
+    assert censor._compiled, "no pattern was built"
     assert not hasattr(censor, "badWordTries")
     assert not any(isinstance(v, Trie) for v in vars(censor).values())
+
+
+def test_a_list_is_compiled_only_when_a_censor_first_tests_it(
+        word_lists, country_tables, log_sink, enabled):
+    # Initialize() reads the words only; the regex of a list is built the
+    # first time a CensorString tests it, so the lists no censor uses are
+    # never compiled.
+    censor = _filter(word_lists, {"value": "en"}, country_tables)
+    assert set(censor.patterns) == set(GOLDEN["ngword"])
+    assert censor._compiled == {}
+
+    censor.CensorString("qcommon x", "JP")
+    # "x" matches no list, so every list selected for an "en" program
+    # language and a Japanese player is tested -- and only those.
+    assert set(censor._compiled) == {"common", "en", "ja"}
+    compiled = dict(censor._compiled)
+    censor.CensorString("qcommon y", "JP")
+    assert censor._compiled == compiled  # reused, not rebuilt
+
+
+def test_concurrent_censors_compile_a_list_once(
+        word_lists, log_sink, enabled, monkeypatch):
+    import threading
+    import time
+
+    calls = []
+    barrier = threading.Barrier(2)
+    real_build = Trie.build_regex_pattern
+
+    def counting_build(self):
+        calls.append(threading.get_ident())
+        # Widen the compile window so the other thread reaches _Pattern while
+        # this one is still building; without the lock both would build.
+        time.sleep(0.05)
+        return real_build(self)
+
+    monkeypatch.setattr(Trie, "build_regex_pattern", counting_build)
+    censor = _filter(word_lists, None)
+    results = [None, None]
+    errors = []
+
+    def run(index):
+        try:
+            barrier.wait(timeout=10)
+            results[index] = censor.CensorString("qcommon x")
+        except Exception as e:  # surfaced by the assert below
+            errors.append(e)
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors
+    assert results[0] == results[1] == "*** x"
+    # One build per list tested ("common" and "en"), not one per thread.
+    assert set(censor._compiled) == {"common", "en"}
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("level", ["DEBUG", "INFO"])
