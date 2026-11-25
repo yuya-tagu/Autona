@@ -34,8 +34,10 @@ with a regex metacharacter (the words are not escaped), an upper-case word
 (never matches: only the tested text is lowered), a value whose folding
 changes its length (the output slices the original by the folded
 positions), dict values (no country), the setting turned off, None -- and
-the old log line, which formats the censored value with str.format and so
-raises for a value carrying a named "{field}" (recorded as such).
+values carrying a named "{field}". The old log line formatted the censored
+value with str.format and so raised KeyError for those (recorded as such);
+2026-11 the log line was fixed, so the "raises" entries in golden.json were
+replaced with the censored strings the fixed filter returns.
 """
 import json
 import os

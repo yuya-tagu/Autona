@@ -83,7 +83,6 @@ class BadWordFilter:
         # the old module's paths were (against the process CWD).
         self._ngwordDir = ngwordDir
         self._userDataDir = userDataDir
-        self.badWordTries = defaultdict(Trie)
         self.patterns = defaultdict(re.Pattern)
         self.whiteList = []
         self.blackList = []
@@ -92,8 +91,9 @@ class BadWordFilter:
     def Initialize(self):
         """Build the bad-word tries and load the user white/black lists.
 
-        Idempotent: the tries are cumulative, so re-running would only
-        rebuild identical patterns. LoadWordList creates
+        Idempotent: `_initialized` lets it run once. No Trie is kept after
+        its regex is built (they were only read to build it, and held about
+        7 MB for the life of the process). LoadWordList creates
         user_data/badword_*.txt on first run.
         """
         if self._initialized:
@@ -130,11 +130,11 @@ class BadWordFilter:
         # carried over; see src/Helpers/AutonaBadWordFilter.py in git history.
 
         for langkey, lang in langs.items():
+            trie = Trie()
             for word in lang:
-                self.badWordTries[langkey].insert(word)
+                trie.insert(word)
 
-            self.patterns[langkey] = \
-                self.badWordTries[langkey].build_regex_pattern()
+            self.patterns[langkey] = trie.build_regex_pattern()
 
     def CensorString(self, value: str, playerCountry: str = None):
         langTests = set(["common"])
@@ -187,7 +187,7 @@ class BadWordFilter:
                 langTests.add(lang)
                 continue
 
-        logger.info(f"AutonaBadWordFilter: using filters [{', '.join(langTests)}]")
+        logger.debug(f"AutonaBadWordFilter: using filters [{', '.join(langTests)}]")
 
         dividers = self.DIVIDERS
         testString = remove_accents_lower(value)
@@ -251,10 +251,9 @@ class BadWordFilter:
                 newString += value[stringStart:]
 
         if value != newString:
-            # Kept as it was (S3e-1 moves, it does not fix): loguru formats
-            # the message with str.format, so a censored value carrying a
-            # named "{field}" raises KeyError here. Pinned by the golden.
-            logger.info(value, "->", newString)
+            # Never log the player's value: it is personal data, and loguru
+            # would str.format a message carrying "{field}" (KeyError).
+            logger.debug("AutonaBadWordFilter: a value was censored")
 
         return newString
 
