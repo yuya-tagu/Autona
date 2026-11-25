@@ -1376,7 +1376,12 @@ class WebServer:
             WebServer.ws_emit('program_state_update', payload)
         except TypeError:
             logger.warning("Unserializable program state update")
-            WebServer.ws_program_state()
+            # The full state may hold the same unserializable value: a
+            # second TypeError here must not leave the flusher thread.
+            try:
+                WebServer.ws_program_state()
+            except Exception:
+                logger.error(traceback.format_exc())
         except Exception:
             logger.error(traceback.format_exc())
 
@@ -1705,14 +1710,20 @@ class WebServer:
                 battleFormat = WebServer._take_battle_format_notice()
                 status = WebServer._take_status_notice()
                 games = WebServer._take_games_notice()
-            if payload is not None:
-                WebServer._send_deltas(payload)
-            WebServer._run_after_deltas(after)
-            WebServer._send_held_notices(notices)
-            WebServer._send_follow_notices(follows)
-            WebServer._send_battle_format_notice(battleFormat)
-            WebServer._send_status_notice(status)
-            WebServer._send_games_notice(games)
+            # Each send catches its own failures; this is the backstop. A
+            # flusher that died here would leave _delta_running set, and
+            # every later batch would queue up with nobody to send it.
+            try:
+                if payload is not None:
+                    WebServer._send_deltas(payload)
+                WebServer._run_after_deltas(after)
+                WebServer._send_held_notices(notices)
+                WebServer._send_follow_notices(follows)
+                WebServer._send_battle_format_notice(battleFormat)
+                WebServer._send_status_notice(status)
+                WebServer._send_games_notice(games)
+            except Exception:
+                logger.error(traceback.format_exc())
             if not running:
                 return
 
