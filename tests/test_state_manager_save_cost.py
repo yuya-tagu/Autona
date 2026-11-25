@@ -235,6 +235,231 @@ def test_a_collapsed_diff_publishes_exactly_what_the_raw_keys_would(
     assert "'city'" in published  # removed by the Unset, still reported
 
 
+# ── 2b. include_paths narrowed to the subtrees that differ ──────────────
+#
+# _narrowPaths drops the queued paths whose old and new values are strictly
+# equal and replaces a changed dict by its changed children. The rows DeepDiff
+# -> Delta make from the narrowed paths must be exactly the rows of the paths
+# _includePaths gives (order, path, value, type).
+
+def _rows(old, new, paths):
+    """The rows SaveState publishes for these include paths."""
+    if not paths:
+        return []
+    diff = module.DeepDiff(old, new, exclude_types=[type(None)],
+                           include_paths=list(paths), verbose_level=2,
+                           zip_ordered_iterables=True)
+    return module.Delta(diff, always_include_values=True).to_flat_dicts()
+
+
+def _board(**player):
+    slot = {"name": "A", "score": 1, "flag": True, "note": "n",
+            "list": [1, 2], "chars": {"1": {"n": "x", "s": 0}}}
+    slot.update(player)
+    return {"b": {"p": slot, "q": {"name": "B", "score": 2}},
+            "other": {"v": 1}}
+
+
+def _keys(*dotted):
+    return SM._includePaths([SM._bracketPath(k) for k in dotted])
+
+
+_SLOT = ("b.p", "b.q", "other")
+
+_NARROW_CASES = {
+    "int -> float": (_board(), _board(score=1.0), _SLOT),
+    "bool -> int": (_board(), _board(flag=1), _SLOT),
+    "nested int -> float": (
+        _board(), _board(chars={"1": {"n": "x", "s": 0.0}}), ("b",)),
+    "value -> None": (_board(), _board(note=None), _SLOT),
+    "None -> value": (_board(note=None), _board(), _SLOT),
+    "key added": (_board(), _board(extra="e"), _SLOT),
+    "key removed": (_board(extra="e"), _board(), _SLOT),
+    "key order only": (
+        _board(),
+        {"b": {"p": dict(reversed(list(_board()["b"]["p"].items()))),
+               "q": {"name": "B", "score": 2}}, "other": {"v": 1}},
+        _SLOT),
+    "list grows": (_board(), _board(list=[1, 2, 3]), _SLOT),
+    "list shrinks": (_board(), _board(list=[1]), _SLOT),
+    "list replaced": (_board(), _board(list=[3, 4]), _SLOT),
+    "list -> tuple": (_board(), _board(list=(1, 2)), _SLOT),
+    "dict -> list": (_board(), _board(chars=[{"n": "x", "s": 0}]), _SLOT),
+    "int keys": (_board(ik={1: "a", "2": "b"}),
+                 _board(ik={1: "c", "2": "b"}), ("b",)),
+    "int key vs str key": (_board(ik={1: "a"}), _board(ik={"1": "a"}),
+                           ("b",)),
+    "a key with a quote": (_board(**{"it's": 1}), _board(**{"it's": 2}),
+                           ("b",)),
+    "a path on neither side": (_board(), _board(name="Z"),
+                               ("b.p", "b.zzz.y", "nowhere")),
+    "a whole board, one leaf changed": (
+        _board(), _board(name="Z"), ("b", "other")),
+    "everything equal": (_board(), _board(), _SLOT),
+    # DeepDiff's threshold_to_diff_deeper: with the unchanged `x` dropped,
+    # none of the keys compared under `A` would be on both sides and the
+    # whole dict would come as one values_changed row.
+    "added keys beside an unchanged one": (
+        {"A": {"x": {"p": 1, "q": 2}}},
+        {"A": {"x": {"p": 1, "q": 2}, "y": 1, "z": 2}},
+        ("A.x", "A.y", "A.z")),
+    "added keys beside an unchanged leaf": (
+        {"A": {"x": 1, "w": {"k": 1}}},
+        {"A": {"x": 1, "w": {"k": 1}, "y": 1, "z": 2}},
+        ("A.x", "A.w", "A.y", "A.z")),
+    "added key beside two unchanged ones": (
+        {"A": {"x": 1, "w": 2, "v": {"k": 1}}},
+        {"A": {"x": 1, "w": 2, "v": {"k": 2}, "y": 1}},
+        ("A.x", "A.w", "A.v", "A.y")),
+    "removed key at the root beside an unchanged one": (
+        {"gone": 1, "kept": {"a": 1}}, {"kept": {"a": 1}},
+        ("gone", "kept")),
+    "type change beside an unchanged sibling": (
+        {"A": {"x": 1, "t": {"a": 1}}}, {"A": {"x": 1, "t": [1]}},
+        ("A.x", "A.t")),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_NARROW_CASES))
+def test_narrowed_paths_publish_exactly_the_rows_of_the_queued_paths(name):
+    old, new, dotted = _NARROW_CASES[name]
+    paths = _keys(*dotted)
+    narrowed = SM._narrowPaths(paths, old, new)
+
+    assert narrowed == sorted(set(narrowed))
+    for i, path in enumerate(narrowed):
+        assert not any(other.startswith(path + "[")
+                       for other in narrowed[i + 1:]), narrowed
+    assert _rows(old, new, narrowed) == _rows(old, new, paths)
+
+
+def test_narrowing_drops_equal_subtrees_and_keeps_only_changed_leaves():
+    narrowed = SM._narrowPaths(
+        _keys(*_SLOT), _board(), _board(score=1.0))
+    assert narrowed == ["root['b']['p']['score']"]
+
+    narrowed = SM._narrowPaths(
+        _keys("b", "other"), _board(),
+        _board(chars={"1": {"n": "x", "s": 3}}))
+    assert narrowed == ["root['b']['p']['chars']['1']['s']"]
+
+    assert SM._narrowPaths(_keys(*_SLOT), _board(), _board()) == []
+
+
+def test_narrowing_stops_at_keys_deepdiff_could_render_differently():
+    old = _board(**{"it's": 1})
+    new = _board(**{"it's": 2})
+    # p holds a key with a quote: p stays whole, the unchanged q goes.
+    assert SM._narrowPaths(_keys("b"), old, new) == ["root['b']['p']"]
+
+    old = _board(ik={1: "a"})
+    new = _board(ik={1: "b"})
+    assert SM._narrowPaths(_keys("b"), old, new) == ["root['b']['p']['ik']"]
+
+
+def test_narrowing_keeps_every_key_compared_beside_an_added_one():
+    old, new, dotted = _NARROW_CASES["added keys beside an unchanged one"]
+    paths = _keys(*dotted)
+    # Dropping x would turn two dictionary_item_added rows into one
+    # values_changed row for A.
+    assert SM._narrowPaths(paths, old, new) == paths
+    assert [row["action"] for row in _rows(old, new, paths)] == [
+        "dictionary_item_added", "dictionary_item_added"]
+
+
+def test_a_path_not_in_bracket_form_leaves_all_paths_as_they_are():
+    paths = ["root['b']['q']", "root['b'][\"it's\"]"]
+    assert SM._narrowPaths(paths, _board(), _board()) == paths
+
+
+def test_too_many_narrowed_paths_fall_back_to_the_queued_ones():
+    old = {"big": {str(i): 0 for i in range(10)}}
+    new = {"big": {str(i): 1 for i in range(10)}}
+    paths = _keys("big")
+    assert SM._narrowPaths(paths, old, new, limit=4) == paths
+    assert len(SM._narrowPaths(paths, old, new, limit=64)) == 10
+    assert _rows(old, new, SM._narrowPaths(paths, old, new, limit=4)) == \
+        _rows(old, new, SM._narrowPaths(paths, old, new, limit=64))
+
+
+def test_strict_equality_tells_apart_what_deepdiff_might():
+    eq = SM._strictlyEqual
+    assert eq({"a": [1, {"b": "c"}]}, {"a": [1, {"b": "c"}]})
+    assert not eq(1, 1.0)
+    assert not eq(True, 1)
+    assert not eq([1], (1,))
+    assert not eq({"a": [1]}, {"a": [1.0]})
+    assert not eq({"a": 1, "b": 2}, {"b": 2, "a": 1})
+    assert not eq({1: "a"}, {True: "a"})
+    assert not eq(float("nan"), float("nan"))
+    nan = float("nan")
+    assert eq(nan, nan)
+
+
+def test_a_save_of_equal_values_runs_no_diff_and_publishes_nothing(
+        monkeypatch):
+    SM.Set(f"{ROOT}.slot", {"name": "Same", "chars": {"1": {"s": 0}}})
+    _join_export()
+    revision = SM.revision
+
+    calls = []
+    real = module.DeepDiff
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs.get("include_paths"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "DeepDiff", counting)
+    payloads = []
+    callback = SM.observers.state_updated.subscribe(payloads.append)
+    try:
+        with SM.SaveBlock():
+            SM.Set(f"{ROOT}.slot.name", "Same")
+            SM.Set(f"{ROOT}.slot.chars", {"1": {"s": 0}})
+    finally:
+        SM.observers.state_updated.unsubscribe(callback)
+
+    assert calls == []
+    assert SM.revision == revision
+    assert payloads == []
+    assert SM.changedKeys == []
+
+
+def test_a_written_back_subtree_diffs_only_its_changed_leaf(monkeypatch):
+    SM.Set(f"{ROOT}.slot", {"name": "Old", "city": "Tokyo",
+                            "chars": {"1": {"n": "A", "s": 0}}})
+    _join_export()
+
+    seen = []
+    real = module.DeepDiff
+
+    def comparing(t1, t2, **kwargs):
+        narrowed = real(t1, t2, **kwargs)
+        raw = real(t1, t2, **{**kwargs, "include_paths": SM._includePaths(
+            SM.changedKeys)})
+        seen.append((kwargs["include_paths"], narrowed, raw))
+        return narrowed
+
+    monkeypatch.setattr(module, "DeepDiff", comparing)
+    payloads = []
+    callback = SM.observers.state_updated.subscribe(payloads.append)
+    try:
+        with SM.SaveBlock():
+            SM.Set(f"{ROOT}.slot", {"name": "Old", "city": "Tokyo",
+                                    "chars": {"1": {"n": "A", "s": 2}}})
+            SM.Set(f"{ROOT}.slot.name", "Old")
+    finally:
+        SM.observers.state_updated.unsubscribe(callback)
+
+    assert len(seen) == 1
+    include_paths, narrowed, raw = seen[0]
+    assert include_paths == [f"root['{ROOT}']['slot']['chars']['1']['s']"]
+    assert narrowed == raw
+    assert len(payloads) == 1
+    assert [row["path"] for row in payloads[0]["delta"]] == [
+        [ROOT, "slot", "chars", "1", "s"]]
+
+
 # ── 3. export writer ────────────────────────────────────────────────────
 
 def test_a_save_does_not_wait_for_the_previous_export(gate, _workDir):

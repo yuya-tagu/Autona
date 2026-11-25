@@ -614,6 +614,182 @@ class StateManager:
         return kept
 
     @staticmethod
+    def _strictlyEqual(a, b):
+        """True only when DeepDiff could not find any difference at all.
+
+        Stricter than ==: 1 vs 1.0 vs True, a list vs a tuple and two dicts
+        with the same items in another key order all count as different, so
+        that what DeepDiff (or the row order of a later Delta) might tell
+        apart is left to DeepDiff. NaN is never equal to itself here (unless
+        it is the same object, which DeepDiff skips too).
+        """
+        if a is b:
+            return True
+        if type(a) is not type(b):
+            return False
+        if type(a) is dict:
+            if len(a) != len(b):
+                return False
+            for (ka, va), (kb, vb) in zip(a.items(), b.items()):
+                if type(ka) is not type(kb) or ka != kb:
+                    return False
+                if not StateManager._strictlyEqual(va, vb):
+                    return False
+            return True
+        if type(a) is list or type(a) is tuple:
+            if len(a) != len(b):
+                return False
+            for va, vb in zip(a, b):
+                if not StateManager._strictlyEqual(va, vb):
+                    return False
+            return True
+        return a == b
+
+    _BRACKET_SEGMENT = re.compile(r"\['([^'\]]*)'\]")
+
+    @staticmethod
+    def _splitBracketPath(path):
+        # "root['a']['b']" -> ["a", "b"]; None when the path is not in the
+        # plain form _bracketPath writes (a key with ' or ] in it).
+        if not path.startswith("root"):
+            return None
+        keys = []
+        pos = 4
+        while pos < len(path):
+            match = StateManager._BRACKET_SEGMENT.match(path, pos)
+            if match is None:
+                return None
+            keys.append(match.group(1))
+            pos = match.end()
+        return keys or None
+
+    @staticmethod
+    def _narrowPaths(paths, old, new, limit=64):
+        """_includePaths output with the subtrees that did not change left out.
+
+        DeepDiff compares every node under an included path, equal or not --
+        most of a save cycle's time, since a SaveBlock routinely queues far
+        more than it changes (a player slot written back whole, an Unset
+        subtree rebuilt as it was, a CommitHeld over a whole board). Here a
+        path whose old and new values are strictly equal is dropped, and a
+        dict that changed only somewhere inside is replaced by the paths of
+        its children that differ.
+
+        The rows are the same: DeepDiff's include test is "this path, an
+        ancestor or a descendant of an included one", so a subtree with no
+        difference contributes no row either way, and the traversal order
+        does not depend on the include set. Narrowing stops (the path stays
+        as it is) wherever DeepDiff itself would report at that node or
+        could render the key differently: a key missing on one side, a
+        non-dict on the way, a list, a type change, keys added or removed,
+        a key that is not a str or holds ' or ]. Any path not in the plain
+        form _bracketPath writes leaves all of them as they are.
+
+        One thing the include set does decide: DeepDiff 8's
+        threshold_to_diff_deeper reports a dict as replaced (one
+        values_changed row) when fewer than a third of the keys it compares
+        there -- the keys the include paths lead through -- are on both
+        sides. Dropping an unchanged sibling would lower that share. So
+        wherever a level leads to a key that is not on both sides (or holds
+        keys DeepDiff might match differently), every key the original
+        paths led through at that level stays led through: the original
+        paths below a key that lost its coverage are put back.
+
+        DeepDiff's per-node filter is linear in the number of include
+        paths, so when narrowing would hand it more paths than
+        max(limit, len(paths)) -- a commit that changed many leaves of one
+        subtree -- the original paths are returned instead.
+        """
+        parsed = []
+        for path in paths:
+            keys = StateManager._splitBracketPath(path)
+            if keys is None:
+                return list(paths)
+            parsed.append(tuple(keys))
+
+        cap = max(limit, len(paths))
+        out = []
+        strictly_equal = StateManager._strictlyEqual
+
+        def plain(k):
+            return type(k) is str and "'" not in k and "]" not in k
+
+        def walk(keys):
+            # (old, new) at `keys` when both sides are plain dicts all the
+            # way down and hold every key; (_MISSING, _MISSING) otherwise.
+            o = old
+            n = new
+            for k in keys:
+                if type(o) is not dict or type(n) is not dict \
+                        or k not in o or k not in n:
+                    return _MISSING, _MISSING
+                o = o[k]
+                n = n[k]
+            return o, n
+
+        def narrow(keys, o, n):
+            if (type(o) is dict and type(n) is dict
+                    and o.keys() == n.keys()
+                    and all(plain(k) for k in n)):
+                for k in n:
+                    oc = o[k]
+                    nc = n[k]
+                    if strictly_equal(oc, nc):
+                        continue
+                    if not narrow(keys + (k,), oc, nc):
+                        return False
+                return True
+            if strictly_equal(o, n):
+                return True
+            out.append(keys)
+            return len(out) <= cap
+
+        for keys in parsed:
+            o, n = walk(keys)
+            if o is _MISSING:
+                # Added, removed or reshaped on the way: DeepDiff reports it
+                # at this path (or above), so it goes as it is.
+                out.append(keys)
+                if len(out) > cap:
+                    return list(paths)
+                continue
+            if not narrow(keys, o, n):
+                return list(paths)
+
+        def coverage(key_lists):
+            covered = {}
+            for keys in key_lists:
+                for i in range(len(keys)):
+                    covered.setdefault(keys[:i], set()).add(keys[i])
+            return covered
+
+        before = coverage(parsed)
+        after = coverage(out)
+        restore = set()
+        for level, keys_here in before.items():
+            lost = keys_here - after.get(level, set())
+            if not lost:
+                continue
+            o, n = walk(level)
+            if type(o) is not dict or type(n) is not dict:
+                continue  # DeepDiff never compares keys at this level
+            if all(k in o and k in n for k in keys_here) \
+                    and all(plain(k) for k in o) \
+                    and all(plain(k) for k in n):
+                continue  # every key it compares here is on both sides
+            depth = len(level)
+            heads = {level + (k,) for k in lost}
+            restore.update(keys for keys in parsed
+                           if keys[:depth + 1] in heads)
+
+        narrowed = StateManager._includePaths(
+            "root" + "".join(f"['{k}']" for k in keys)
+            for keys in set(out) | restore)
+        if len(narrowed) > cap:
+            return list(paths)
+        return narrowed
+
+    @staticmethod
     def _isExemptKey(prefix: str, final_key: str) -> bool:
         # Same self-delimiting bracket comparison as _matchHeldPrefix: an
         # exempt path matches itself and everything below it.
@@ -1224,29 +1400,46 @@ class StateManager:
                     StateManager._revertHeldSubtrees(
                         publish_state, StateManager._takenLive)
 
-                diff = DeepDiff(
+                # Only the queued paths that actually differ (_narrowPaths):
+                # DeepDiff walks every node under an included path, equal or
+                # not, and a SaveBlock routinely queues whole subtrees it
+                # wrote back unchanged.
+                paths = StateManager._narrowPaths(
+                    StateManager._includePaths(StateManager.changedKeys),
                     StateManager.lastSavedState,
-                    publish_state,
-                    exclude_types=[type(None)],
-                    include_paths=StateManager._includePaths(
-                        StateManager.changedKeys),
-                    verbose_level=2, # Necessary to see values of added items.
-                    # A list is compared place by place, so its rows are about
-                    # its tail and can be applied one by one. A client has to:
-                    # the web server joins the rows of several revisions in a
-                    # message with no mark between them. Left to difflib, a
-                    # list of plain values can come as an insertion in its
-                    # middle, or as rows about the list as a whole, whose
-                    # places only mean something within their own revision.
-                    zip_ordered_iterables=True,
-                )
-                # Computed once: the size check and the payload are the same
-                # rows (this used to build the Delta twice).
-                # always_include_values: on its own, Delta leaves the new value
-                # out of a type change it thinks a client can derive by
-                # converting the old one ("" -> {}, {} -> [], 1 -> "1"), and
-                # the row says "unknown___" in its place.
-                delta = Delta(diff, always_include_values=True).to_flat_dicts()
+                    publish_state)
+                if not paths:
+                    # Everything queued is strictly equal to what was
+                    # published: what DeepDiff would have found. Never call
+                    # it with include_paths=[] -- that is a full-state diff
+                    # (see the early return above).
+                    diff = {}
+                    delta = []
+                else:
+                    diff = DeepDiff(
+                        StateManager.lastSavedState,
+                        publish_state,
+                        exclude_types=[type(None)],
+                        include_paths=paths,
+                        verbose_level=2, # Necessary to see values of added items.
+                        # A list is compared place by place, so its rows are
+                        # about its tail and can be applied one by one. A
+                        # client has to: the web server joins the rows of
+                        # several revisions in a message with no mark between
+                        # them. Left to difflib, a list of plain values can
+                        # come as an insertion in its middle, or as rows about
+                        # the list as a whole, whose places only mean
+                        # something within their own revision.
+                        zip_ordered_iterables=True,
+                    )
+                    # Computed once: the size check and the payload are the
+                    # same rows (this used to build the Delta twice).
+                    # always_include_values: on its own, Delta leaves the new
+                    # value out of a type change it thinks a client can
+                    # derive by converting the old one ("" -> {}, {} -> [],
+                    # 1 -> "1"), and the row says "unknown___" in its place.
+                    delta = Delta(
+                        diff, always_include_values=True).to_flat_dicts()
                 if len(delta) > 100:
                     StateManager._bumpRevision()
                     StateManager.observers.state_big_change.notify()
