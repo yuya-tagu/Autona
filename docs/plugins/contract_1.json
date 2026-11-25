@@ -1,0 +1,555 @@
+{
+  "contract": 1,
+  "preview": true,
+  "description": {
+    "ja": "Autona のプラグイン契約 1（ADR-009 D8）。Worker Protocol 1・マニフェスト 1・入力源の format 1・プラグインの v1 ルートの区分の機械可読の正本。plugin.schema.json（マニフェストの JSON Schema）・routes_v1.json（ルート表）・inputs/（入力源の golden）と一緒に読む。tests/test_plugin_contract.py がこれらの自己整合と src/core/PluginTypes.py の列挙との一致を、後の段階のテストが実エンジン・SDK の偽ホスト・偽ワーカーとの一致を確かめる。上げる条件は ADR-009 D8（項目の削除・意味の変更・必須の追加で版を上げ、イベント・任意項目・型・契機・欄の追加では上げない）。プレビュー中は壊す変更もありうる（CHANGELOG とカードで知らせる）。",
+    "en": "Autona plugin contract 1 (ADR-009 D8): the machine-readable source of truth for Worker Protocol 1, manifest 1, input format 1 and the access classes of the plugin v1 routes. Read with plugin.schema.json (the manifest's JSON Schema), routes_v1.json (the route table) and inputs/ (the input sources' golden files). tests/test_plugin_contract.py holds these to each other and to the enums of src/core/PluginTypes.py; later stages' tests hold the real engine, the SDK's fake host and the fake worker to it. Versions go up as ADR-009 D8 says (a removal, a change of meaning or a new required item; not an added event, optional item, type, trigger or field). While in preview a breaking change can still happen (announced in the CHANGELOG and on the plugin's card)."
+  },
+
+  "versions": {
+    "protocol": 1,
+    "manifest": 1,
+    "host_speaks_protocols": [1],
+    "host_reads_manifests": [1],
+    "input_formats": {
+      "match_log": 1,
+      "match_record": 1,
+      "state": 1,
+      "result_image": 1,
+      "thumbnail_image": 1,
+      "archive_export": 1
+    }
+  },
+
+  "patterns": {
+    "plugin_id": "^[a-z0-9][a-z0-9-]{0,18}\\.[a-z0-9][a-z0-9-]{0,19}$",
+    "plugin_id_max_length": 40,
+    "reserved_id_prefix": "taguyan.",
+    "job_id": "^[a-z][a-z0-9_]{0,31}$",
+    "field_key": "^[a-z][a-z0-9_]{0,31}$",
+    "hook_key": "^[a-z][a-z0-9_]{0,31}/[a-z][a-z0-9_]{0,31}$",
+    "hook_key_format": "<job id>/<on>",
+    "name": "^[a-z][a-z0-9_]{0,31}$",
+    "name_note": "A field type, a hook's on, an action's target in a manifest: an open name. Only the values this contract lists are known; another one makes the job (in settings: the plugin) unusable, never the manifest (D8).",
+    "platform": "^[a-z0-9][a-z0-9-]{0,31}$",
+    "host_platform": "windows-x64",
+    "dev_folder_id": "^[0-9a-f]{12}$",
+    "dev_folder_id_format": "the first 12 hex digits of the SHA-256 (UTF-8) of os.path.normcase(os.path.abspath(folder)): stable across launches and list changes",
+    "version": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+    "run_id": "^[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$",
+    "run_id_format": "<local YYYYMMDD>-<local HHMMSS>-<4 of [a-z0-9]> (ArchiveJobService.JOB_ID_PATTERN; the job folder's name)",
+    "error_code": "^[a-z0-9_]{1,64}$",
+    "match_record_id": "^[0-9]{8}-[0-9]{6}-[0-9]+-[0-9a-f]{4}$",
+    "sha256": "^[0-9a-f]{64}$",
+    "file_extension": "^[a-z0-9]{1,10}$",
+    "github_repo": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$",
+    "locale": "^[a-z]{2}(-[A-Z]{2})?$"
+  },
+
+  "text": {
+    "description": "A text (文言) is a string, or an object of locale -> string with at least one entry. The host shows: the current locale, then en, then ja, then the first value. A length limit on a text applies to each value.",
+    "fallback": ["current", "en", "ja", "first"],
+    "host_locales": ["ja", "en"]
+  },
+
+  "commands": {
+    "describe": {
+      "argv_after_entry": ["describe"],
+      "cwd": "plugin_dir",
+      "stdin": "devnull",
+      "timeout_seconds": 60,
+      "priority": "normal",
+      "when": ["install", "update", "dev_reload"],
+      "expected": "one stdout line (the answer), exit 0; other lines are ignored",
+      "exit_code": 0,
+      "runner_reports": ["launched", "entry_missing", "timed_out", "exit_code", "stdout_lines", "objects"],
+      "runner_note": "PluginRunner.Describe runs it and reports these facts only (DescribeRun: objects are the JSON-object lines in order). PluginRegistry judges them against the manifest (JudgeDescribe) and owns every unusable_when code.",
+      "judged_by": "PluginRegistry",
+      "answer": {
+        "type": {"type": "const", "value": "describe", "required": true},
+        "protocol": {"type": "array<integer>", "required": true, "min_items": 1},
+        "id": {"type": "string", "required": true, "must_equal": "manifest.id"},
+        "version": {"type": "string", "required": true, "must_equal": "manifest.version"}
+      },
+      "unusable_when": ["no_line", "not_json", "type_not_describe", "protocol_missing", "no_common_protocol", "id_mismatch", "version_mismatch", "nonzero_exit", "timed_out", "launch_failed"],
+      "note": "The first stdout line that is a JSON object with type describe is the answer; other lines are ignored. no_line: no non-empty stdout line; not_json: no JSON-object line; type_not_describe: JSON objects but none with type describe. The events' rules (ignored_keys, raw) do not apply to describe. Never called before consent; never called for a blocked plugin; the result is not cached."
+    },
+    "run": {
+      "argv_after_entry": ["run", "<absolute path of request.json>"],
+      "cwd": "job_dir",
+      "priority": "below_normal",
+      "priority_before_cancel": "normal"
+    },
+    "entry": {
+      "installed": "argv; entry[0] is a relative path inside the plugin folder (no absolute path, no drive, no '..', no leading '@'), a file ending in .exe that exists; no shell",
+      "dev": "entry[0] may also be any command found on PATH (python, node) or a relative path; no shell",
+      "reserved_prefix": "@"
+    }
+  },
+
+  "events": {
+    "line": "one JSON object per stdout line, UTF-8, flushed per line; read with errors=replace",
+    "unknown_type": "worker_log",
+    "not_json": "worker_log",
+    "line_max_bytes": 1048576,
+    "line_too_long": "worker_log",
+    "stderr": "worker_log",
+    "unknown_keys": "ignored",
+    "ignored_keys": ["id"],
+    "ignored_note": "id is reserved for a future two-way protocol: the key is ignored and the line taken as its type says.",
+    "raw": "Every taken event keeps the line's whole object as raw (unknown keys included), and the run's outcome keeps the last terminal line's (final_raw): a built-in worker's own fields (vodsplit's done: sets, needs_review, clips, skipped, template ...) are read from it. raw is not a protocol key.",
+    "terminal_rule": "the last terminal line wins",
+    "invalid_field": "dropped (the event is still taken; a terminal event stays terminal)",
+    "types": [
+      {
+        "type": "stage",
+        "terminal": false,
+        "fields": {
+          "stage": {"type": "string", "required": true, "max_length": 64},
+          "label": {"type": "text", "required": false, "max_length": 200},
+          "index": {"type": "integer", "required": false, "minimum": 1},
+          "count": {"type": "integer", "required": false, "minimum": 1}
+        },
+        "host": "starts a new stage; the stage name is not interpreted"
+      },
+      {
+        "type": "progress",
+        "terminal": false,
+        "fields": {
+          "stage": {"type": "string", "required": false, "max_length": 64},
+          "fraction": {"type": "number", "required": false, "minimum": 0, "maximum": 1},
+          "overall": {"type": "number", "required": false, "minimum": 0, "maximum": 1},
+          "eta": {"type": "number", "required": false, "minimum": 0, "nullable": true}
+        },
+        "host": "takes the numbers only"
+      },
+      {
+        "type": "log",
+        "terminal": false,
+        "fields": {
+          "message": {"type": "text", "required": true, "max_length": 2000}
+        },
+        "host": "shows the latest line"
+      },
+      {
+        "type": "warning",
+        "terminal": false,
+        "fields": {
+          "message": {"type": "text", "required": true, "max_length": 2000}
+        },
+        "host": "kept on the job, the first max_warnings of them"
+      },
+      {
+        "type": "done",
+        "terminal": true,
+        "fields": {
+          "summary": {"type": "text", "required": false, "max_length": 500},
+          "artifacts": {"type": "array<artifact>", "required": false, "max_items": 50}
+        },
+        "host": "terminal: success when the exit code is 0"
+      },
+      {
+        "type": "error",
+        "terminal": true,
+        "fields": {
+          "code": {"type": "string", "required": true, "pattern": "^[a-z0-9_]{1,64}$", "invalid": "error"},
+          "message": {"type": "text", "required": true, "max_length": 2000},
+          "hint": {"type": "text", "required": false, "max_length": 1000, "nullable": true}
+        },
+        "host": "terminal: a failure the user can fix when the exit code is 2. message and hint must hold no secret"
+      },
+      {
+        "type": "cancelled",
+        "terminal": true,
+        "fields": {},
+        "host": "terminal"
+      }
+    ],
+    "over_limit": {
+      "text": "truncated to max_length (each value)",
+      "warnings": "the ones past max_warnings are dropped",
+      "artifacts": "the ones past max_artifacts are dropped with a host warning",
+      "error_code": "a code not matching the pattern becomes 'error'"
+    }
+  },
+
+  "artifacts": {
+    "max_count": 50,
+    "fields": {
+      "path": {"type": "string", "required": true, "note": "relative to out_dir"},
+      "kind": {"type": "enum", "required": true, "values": ["text", "image", "file", "json"]},
+      "label": {"type": "text", "required": false, "max_length": 200}
+    },
+    "kinds": [
+      {"kind": "text", "max_bytes": 65536, "extensions": null, "display": "full text with a copy button; never rendered as HTML", "content_type": "text/plain; charset=utf-8"},
+      {"kind": "image", "max_bytes": 20971520, "extensions": ["png", "jpg", "jpeg", "webp"], "display": "scaled preview (fetched into a blob URL)", "content_type": "by extension: image/png, image/jpeg, image/webp"},
+      {"kind": "file", "max_bytes": null, "extensions": null, "display": "open the folder", "content_type": "application/octet-stream"},
+      {"kind": "json", "max_bytes": null, "extensions": null, "display": "open the folder", "content_type": "application/json"}
+    ],
+    "rejected": ["outside_out_dir", "symlink_or_junction", "hard_link", "missing", "not_a_file", "too_large", "bad_extension", "unknown_kind"],
+    "checked": ["at_done", "at_serve"],
+    "rejected_note": "A rejected artifact is dropped and a host warning is added to the job. An image over max_bytes or with another extension is rejected; a text over max_bytes is rejected. Served with a fixed Content-Type and X-Content-Type-Options: nosniff, on SHELL routes only.",
+    "hook_runs": "a hook's job folder is removed when it ends (but the last failed one): no artifact is kept, the history keeps the summary"
+  },
+
+  "exit_codes": {
+    "0": "success",
+    "2": "user_fixable_failure",
+    "130": "cancelled",
+    "other": "abnormal"
+  },
+
+  "end": {
+    "states": ["done", "error", "failed", "cancelled"],
+    "checked_first": [
+      {"when": "launch_failed", "state": "failed", "reason": "launch_failed", "note": "the process could not be created and there is no exit code. reason entry_missing when the entry file is not there (the hint mentions antivirus quarantine)"},
+      {"when": "timed_out", "state": "failed", "reason": "timed_out", "note": "the host's mark; whatever the terminal line and exit code, even done with exit 0"}
+    ],
+    "table": [
+      {"final": "done", "exit": "0", "state": "done"},
+      {"final": "done", "exit": "2", "state": "failed"},
+      {"final": "done", "exit": "130", "state": "cancelled"},
+      {"final": "done", "exit": "other", "state": "failed"},
+      {"final": "error", "exit": "0", "state": "failed"},
+      {"final": "error", "exit": "2", "state": "error"},
+      {"final": "error", "exit": "130", "state": "cancelled"},
+      {"final": "error", "exit": "other", "state": "failed"},
+      {"final": "cancelled", "exit": "0", "state": "cancelled"},
+      {"final": "cancelled", "exit": "2", "state": "cancelled"},
+      {"final": "cancelled", "exit": "130", "state": "cancelled"},
+      {"final": "cancelled", "exit": "other", "state": "cancelled"},
+      {"final": "none", "exit": "0", "state": "failed", "after_cancel_request": "cancelled"},
+      {"final": "none", "exit": "2", "state": "failed", "after_cancel_request": "cancelled"},
+      {"final": "none", "exit": "130", "state": "cancelled"},
+      {"final": "none", "exit": "other", "state": "failed", "after_cancel_request": "cancelled"}
+    ],
+    "table_note": "The same order as ArchiveJobService._EndState: (exit 0 and done) -> (exit 130 or cancelled) -> (exit 2 and error) -> (cancel requested and no terminal line) -> failed. after_cancel_request applies only to the rows that carry it.",
+    "done_after_cancel_request": "state done with finished_before_cancel true (the page adds 'it had finished before the cancel')",
+    "failed_reasons": {
+      "abnormal_exit": "any other failed row",
+      "memory_limit": "a failed light-lane run whose PeakJobMemoryUsed reached its memory limit",
+      "autona_exited": "a generic run still running in job.json at launch (no resume: failed, not cancelled)"
+    },
+    "reasons": ["launch_failed", "entry_missing", "timed_out", "memory_limit", "abnormal_exit", "autona_exited"],
+    "hook_failure_counts": ["failed", "error"],
+    "hook_failure_resets": ["done"],
+    "hook_failure_ignores": ["cancelled"]
+  },
+
+  "stdin": {
+    "open_until_end": true,
+    "cancel_line": "cancel\n",
+    "close_after_cancel": true,
+    "worker_stops_on": ["cancel_line", "eof"],
+    "worker_unknown_lines": "ignored",
+    "cancel_grace_seconds": 10,
+    "after_grace": "kill the job object (the run and every descendant in it)"
+  },
+
+  "limits": {
+    "summary_max_length": 500,
+    "max_warnings": 200,
+    "max_artifacts": 50,
+    "line_max_bytes": 1048576,
+    "worker_log_max_bytes": 10485760,
+    "worker_log_over": "dropped from then on",
+    "display_truncation": ["log_message_max_length", "error_message_max_length", "error_hint_max_length", "label_max_length", "author_max_length"],
+    "display_truncation_note": "The host's own limits (not ADR-009's): a longer text (each value of a locale map) is truncated where it is shown or kept. Never a reason to refuse an event, a field or a manifest.",
+    "log_message_max_length": 2000,
+    "error_message_max_length": 2000,
+    "error_hint_max_length": 1000,
+    "label_max_length": 200,
+    "light_timeout_seconds": {"min": 1, "max": 300},
+    "heavy_timeout_seconds": {"min": 1, "max": 43200},
+    "hook_timeout_cap_seconds": 30,
+    "hook_timeout": "min(declared timeout_seconds, 30)",
+    "light_memory_mb": {"min": 64, "max": 1024},
+    "hook_job_memory_mb_max": 512,
+    "heavy_memory": "no limit; the declared memory_mb is recorded only; the peak is recorded and listed",
+    "describe_timeout_seconds": 60,
+    "cancel_grace_seconds": 10,
+    "shutdown_grace_seconds": {"desktop": 5, "headless": 2},
+    "lanes": {"heavy": 1, "light": 1},
+    "manifest_max_bytes": 262144,
+    "icon_max_bytes": 262144,
+    "name_max_length": 80,
+    "description_max_length": 500,
+    "author_max_length": 80,
+    "url_max_length": 2048,
+    "select_max_options": 100,
+    "text_max_length": {"text_default": 200, "textarea_default": 4000, "cap": 20000},
+    "secret_max_length": 4096,
+    "runs_kept_per_plugin": 20,
+    "hook_history_per_hook": 20,
+    "hook_pending_per_hook": 1,
+    "hook_pending_max_seconds": 600,
+    "hook_rate_window_seconds": 60,
+    "hook_rate_window_max_starts": 6,
+    "hook_hour_window_seconds": 3600,
+    "hook_hour_window_max_starts": 60,
+    "hook_consecutive_failures_disable": 5,
+    "match_decided_hold_seconds": 5,
+    "result_image_choices": 30,
+    "release_descriptor_max_bytes": 65536,
+    "zip_max_bytes": 2147483648,
+    "zip_expanded_max_bytes": 4294967296,
+    "zip_max_entries": 50000,
+    "installed_path_max_length": 259,
+    "blocklist_refresh_seconds": 21600,
+    "update_check_min_interval_seconds": 21600
+  },
+
+  "lanes": {
+    "heavy": "vodsplit and lane heavy jobs, manual only",
+    "light": "lane light jobs: manual, actions and hooks",
+    "actions_and_hooks_need_lane": "light",
+    "busy": "a manual or action request to a full lane is refused with reason busy (and the remaining time); no queue, no automatic retry",
+    "hook_pending": "a hook trigger to a full light lane is held (latest one per hook); when the lane frees, a user's request goes before a pending hook"
+  },
+
+  "field_types": {
+    "common": {
+      "key": {"type": "string", "required": true, "pattern": "^[a-z][a-z0-9_]{0,31}$", "unique": "within a job's params, within settings"},
+      "type": {"type": "string", "required": true},
+      "label": {"type": "text", "required": true, "display_max_length": 200},
+      "required": {"type": "boolean", "required": false, "default": false},
+      "default": {"type": "value of the type", "required": false},
+      "help": {"type": "text", "required": false}
+    },
+    "value": [
+      {"type": "text", "value": "string", "ui": "input", "where": ["params", "settings"], "extras": {"max_length": {"default": 200, "max": 20000}}},
+      {"type": "textarea", "value": "string", "ui": "multi-line input", "where": ["params", "settings"], "extras": {"max_length": {"default": 4000, "max": 20000}}},
+      {"type": "number", "value": "number", "ui": "number", "where": ["params", "settings"], "extras": {"min": "number", "max": "number", "step": "number > 0 (1 = integers)"}},
+      {"type": "bool", "value": "boolean", "ui": "checkbox", "where": ["params", "settings"], "extras": {}},
+      {"type": "select", "value": "string (an option's value)", "ui": "select", "where": ["params", "settings"], "extras": {"options": {"required": true, "min_items": 1, "max_items": 100, "item": {"value": "string", "label": "text"}}}},
+      {"type": "file", "value": "absolute path (no UNC)", "ui": "pickFile (shell request)", "where": ["params", "settings"], "extras": {"extensions": {"required": true, "min_items": 1, "item": "^[a-z0-9]{1,10}$"}}, "request_body": "a pick id", "stored": "the absolute path the host resolved the pick id to", "shown": "the file name only (GET answers the name, never the path)"},
+      {"type": "folder", "value": "absolute path (no UNC)", "ui": "pickFolder (shell request)", "where": ["params", "settings"], "extras": {}, "request_body": "a pick id", "stored": "the absolute path the host resolved the pick id to", "shown": "the folder name only (GET answers the name, never the path)"},
+      {"type": "secret", "value": "string, no line break, up to 4096", "ui": "masked; shows 'set' only", "where": ["settings"], "extras": {}, "stored": "DPAPI (CurrentUser) in user_data/plugins/<id>/secrets.bin (dev: user_data/plugins/_dev/<id>/secrets.bin)", "passed": "environment variable AUTONA_SECRET_<KEY in upper case> only; never in request.json, job.json or a log"}
+    ],
+    "source": [
+      {"type": "match_log", "format": 1, "file": "<key>.jsonl", "content": "match log lines (JSONL), as MatchLogService writes them", "manual": "pick a date and a tournament", "context_only": false, "desktop_only": false, "at_trigger": "the log file of the open record's start date (today's when no record is open), every line (an empty file when none); the host flushes MatchLogService's writer (Flush) before copying", "at_trigger_known_limit": "records started on an earlier date (a session past midnight) are in that date's file and are not included", "golden": "inputs/match_log.jsonl"},
+      {"type": "match_record", "format": 1, "file": "<key>.json", "content": "one match record (one line of the log, as one JSON object)", "manual": null, "context_only": true, "desktop_only": false, "at_trigger": null, "golden": "inputs/match_record.json"},
+      {"type": "state", "format": 1, "file": "<key>.json", "content": "a copy of the published state (the shape of out/program_state.json)", "manual": "no choice: the state at the press (manual included)", "context_only": false, "desktop_only": false, "at_trigger": "the published state at the trigger", "golden": "inputs/state.json"},
+      {"type": "result_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one result image (png / jpg) and its sha256", "manual": "the newest 30 of out/results", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true},
+      {"type": "thumbnail_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one match thumbnail and its sha256", "manual": "the generated thumbnails", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true},
+      {"type": "archive_export", "format": 1, "file": "<key>.json", "content": "the list of an archive export (JSON; the clips stay where they are). Its shape is settled in P3 against the YouTube ADR, during the preview", "manual": null, "context_only": true, "desktop_only": false, "at_trigger": null, "shape_settled": false}
+    ],
+    "source_fields_ignore": ["default"],
+    "manual_pick_types": ["match_log", "state", "result_image", "thumbnail_image"],
+    "context_only_types": ["match_record", "archive_export"],
+    "settings_types": ["text", "textarea", "number", "bool", "select", "file", "folder", "secret"],
+    "params_types": ["text", "textarea", "number", "bool", "select", "file", "folder", "match_log", "match_record", "state", "result_image", "thumbnail_image", "archive_export"]
+  },
+
+  "triggers": {
+    "kinds": ["manual", "action", "hook"],
+    "actions": [
+      {"target": "result_image", "fills": "result_image", "page": "result"},
+      {"target": "thumbnail_image", "fills": "thumbnail_image", "page": "thumbnail"},
+      {"target": "archive_export", "fills": "archive_export", "page": "archive"}
+    ],
+    "hooks": [
+      {"on": "match_decided", "fills": "match_record", "since": "P7"},
+      {"on": "result_image_saved", "fills": "result_image", "since": "P7"}
+    ],
+    "manual_fills": ["match_log", "state", "result_image", "thumbnail_image"],
+    "fill_rules": [
+      "A job with an action or a hook has exactly one field of the type that trigger fills (per trigger).",
+      "Every way a job can start fills every context-only field of the job (match_record, archive_export); a job with a context-only field has manual false.",
+      "In an action or a hook, a source field other than the filled one is filled by at_trigger (state, match_log); a result_image / thumbnail_image field it does not fill makes that trigger invalid when required, and is null when optional.",
+      "In a manual run the user picks each source field (required ones must be picked; an optional one not picked is null).",
+      "A state field is never picked: it is the published state at the press or the trigger, whatever the start.",
+      "inputs in request.json holds every source key of the job; an unfilled optional one is null."
+    ],
+    "hook_input_note": "match_record from match_decided is the record's line at the moment it fires (closed false)."
+  },
+
+  "manifest_checks": {
+    "description": "What a host (PluginRegistry) and the SDK's check report about a manifest. scope: plugin = the plugin cannot be used; job = that job cannot be used (shown with the reason), the others still can; warning = shown, nothing refused. settings_scope: the scope when the problem is in settings (settings serve every job). schema: the part of plugin.schema.json that fails on it (top = the top level, settings, job = #/$defs/job), null when the schema cannot express it. owner: the part that reports it.",
+    "schema_scopes": {
+      "top": "plugin",
+      "settings": "plugin",
+      "job": "job",
+      "how": "Validate the manifest against the schema with every job left out (jobs only as a non-empty array of objects): a failure is invalid_field (plugin). Then validate each job against #/$defs/job: a failure is the specific job-scoped code below when the host can tell, else invalid_job_field (that job only)."
+    },
+    "codes": [
+      {"code": "manifest_unreadable", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "missing, over manifest_max_bytes, not UTF-8 (a BOM is accepted), not a JSON object"},
+      {"code": "manifest_version_unknown", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check"},
+      {"code": "invalid_field", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "the top level or settings breaks the schema"},
+      {"code": "invalid_job_field", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check", "note": "a job breaks #/$defs/job in a way no other code names"},
+      {"code": "unknown_key", "scope": "warning", "schema": null, "owner": "PluginRegistry.Check", "note": "an unknown top-level key: ignored"},
+      {"code": "id_folder_mismatch", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "id_reserved", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "taguyan. from anything but the official repository ids (the source passed to Check) or a dev folder"},
+      {"code": "id_taken", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Scan", "note": "a dev folder with an installed id, or the other way round: the one added later is refused. Check alone cannot see it"},
+      {"code": "protocol_unsupported", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check"},
+      {"code": "platform_unsupported", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "platforms does not hold windows-x64 (other names beside it are fine)"},
+      {"code": "min_autona_newer", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "entry_reserved", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "entry[0] starts with @"},
+      {"code": "entry_outside", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "after resolving (the schema catches the plain absolute / .. forms)"},
+      {"code": "entry_missing", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "icon_invalid", "scope": "warning", "schema": null, "owner": "PluginRegistry.Check", "note": "not a relative .png path inside the folder (checked after resolving), not a png signature, over icon_max_bytes: no icon. An icon never makes the plugin unusable, so the schema holds it to a string only"},
+      {"code": "key_duplicate", "scope": "job", "settings_scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "secret_outside_settings", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check"},
+      {"code": "source_in_settings", "scope": "plugin", "schema": "settings", "owner": "PluginRegistry.Check"},
+      {"code": "field_type_unknown", "scope": "job", "settings_scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "a type not in field_types (an open name in the schema)"},
+      {"code": "hook_event_unknown", "scope": "job", "schema": null, "owner": "PluginRegistry.Check", "note": "an on not in triggers.hooks (an open name in the schema)"},
+      {"code": "action_target_unknown", "scope": "job", "schema": null, "owner": "PluginRegistry.Check", "note": "a target not in triggers.actions (an open name in the schema)"},
+      {"code": "hook_duplicate", "scope": "job", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "trigger_needs_light_lane", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check"},
+      {"code": "fill_count", "scope": "job", "schema": null, "owner": "PluginRegistry.Check", "note": "an action / hook without exactly one field of the type it fills"},
+      {"code": "trigger_unfillable", "scope": "job", "schema": null, "owner": "PluginRegistry.Check", "note": "a trigger cannot fill a context-only field, or a required image field"},
+      {"code": "manual_with_context", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check"},
+      {"code": "hook_param_needs_default", "scope": "job", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "default_invalid", "scope": "job", "settings_scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "a default not of the type (the schema catches the known types' JSON type), a select default not among the options"},
+      {"code": "timeout_out_of_range", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check"},
+      {"code": "memory_out_of_range", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check", "note": "light only; heavy's memory_mb is recorded, never refused"},
+      {"code": "job_unreachable", "scope": "warning", "schema": null, "owner": "PluginRegistry.Check", "note": "manual false and no action or hook"}
+    ]
+  },
+
+  "manifest_paths": {
+    "file": "plugin.json",
+    "encoding": "utf-8-sig",
+    "installed_dir": "<Autona folder>/plugins/<id>/",
+    "user_data_dir": "user_data/plugins/<id>/",
+    "dev_user_data_dir": "user_data/plugins/_dev/<id>/",
+    "dev_list": "user_data/plugins/dev.json",
+    "dev_folder_key": "patterns.dev_folder_id (a folder is named by it, never by its position)",
+    "dev_env": "AUTONA_PLUGIN_DEV (';'-separated folders)",
+    "config": "user_data/plugins/<id>/config.json",
+    "secrets": "user_data/plugins/<id>/secrets.bin",
+    "hooks": "user_data/plugins/<id>/hooks.json",
+    "install": "user_data/plugins/<id>/install.json",
+    "data_dir": "user_data/plugins/<id>/data/",
+    "listing_copy": "user_data/plugins/_listing.json",
+    "work_dir": "<archive.work_dir>/plugins/<id>/<run_id>/",
+    "job_files": ["request.json", "job.json", "worker.log", "inputs/", "out/"]
+  },
+
+  "environment": {
+    "base": "the parent's environment (os.environ), minus the removed names, plus the added ones",
+    "remove_prefixes": ["AUTONA_"],
+    "remove_names": ["QT_API"],
+    "match": "case-insensitive (Windows environment names)",
+    "remove_note": "Removed: every AUTONA_* (AUTONA_VODSPLIT_CMD, AUTONA_PLUGIN_DEV, AUTONA_INSTANCE_TAG, AUTONA_STRICT_THREAD_ASSERT, other plugins' AUTONA_SECRET_*) and QT_API, which Autona sets for itself. The added AUTONA_* below are set after the removal. Not a boundary: it keeps values from leaking by accident.",
+    "add": [
+      {"name": "PYTHONIOENCODING", "value": "utf-8", "when": ["describe", "run"]},
+      {"name": "PYINSTALLER_RESET_ENVIRONMENT", "value": "1", "when": ["describe", "run"]},
+      {"name": "AUTONA_PLUGIN_DIR", "value": "the plugin's folder (absolute; the .new folder during an install)", "when": ["describe", "run"]},
+      {"name": "AUTONA_PROTOCOL", "value": "the protocol version used, as a decimal string", "when": ["run"]},
+      {"name": "AUTONA_SECRET_<KEY>", "value": "each secret setting that is set; KEY is the field key in upper case", "when": ["run"]},
+      {"name": "AUTONA_API_URL", "value": "http://127.0.0.1:<port>/api/v1 (WebServer.Serving())", "when": ["run"], "only_if": "permissions.autona_api is read or write"}
+    ]
+  },
+
+  "request": {
+    "file": "request.json",
+    "encoding": "utf-8 (no BOM)",
+    "writer": "host; the plugin only reads it",
+    "fields": {
+      "protocol": {"type": "integer", "required": true},
+      "plugin": {"type": "string", "required": true, "pattern_of": "plugin_id"},
+      "job": {"type": "string", "required": true, "pattern_of": "job_id"},
+      "run_id": {"type": "string", "required": true, "pattern_of": "run_id"},
+      "trigger": {"type": "object", "required": true, "fields": {
+        "kind": {"type": "enum", "values": ["manual", "action", "hook"], "required": true},
+        "target": {"type": "enum", "values": ["result_image", "thumbnail_image", "archive_export"], "required_when": "kind is action"},
+        "event": {"type": "enum", "values": ["match_decided", "result_image_saved"], "required_when": "kind is hook"},
+        "hook": {"type": "string", "pattern_of": "hook_key", "required_when": "kind is hook"}
+      }},
+      "locale": {"type": "enum", "values": ["ja", "en"], "required": true},
+      "params": {"type": "object", "required": true, "note": "every value field key of the job (pressed form / saved hook values; an empty optional one is its default, else null; a file / folder is the absolute path the host resolved its pick id to); {} without value fields"},
+      "settings": {"type": "object", "required": true, "note": "every non-secret setting key (same rule)"},
+      "inputs": {"type": "object", "required": true, "note": "every source field key of the job -> input file or null; {} without source fields", "item": {
+        "kind": {"type": "string", "required": true, "note": "the source type"},
+        "format": {"type": "integer", "required": true},
+        "path": {"type": "string", "required": true, "note": "absolute, in the job folder's inputs/"},
+        "sha256": {"type": "string", "required_when": "kind is result_image or thumbnail_image", "pattern_of": "sha256"}
+      }},
+      "out_dir": {"type": "string", "required": true, "note": "absolute; made by the host before the start"},
+      "data_dir": {"type": "string", "required": true, "note": "absolute; the plugin's small state, not encrypted, shared by its runs in both lanes"},
+      "host": {"type": "object", "required": true, "fields": {
+        "name": {"type": "const", "value": "Autona"},
+        "version": {"type": "string", "pattern_of": "version"}
+      }}
+    },
+    "never": ["secret values"]
+  },
+
+  "job_record": {
+    "file": "job.json",
+    "description": "What PluginJobs keeps for a run (the job folder's job.json) and the SHELL route GET .../runs/<run_id> answers. No secret, no environment.",
+    "fields": {
+      "run_id": "string",
+      "plugin": "string",
+      "job": "string",
+      "trigger": "object (request.json's trigger)",
+      "lane": "light | heavy",
+      "state": "running | done | error | failed | cancelled",
+      "reason": "null | an end reason",
+      "started_at": "ISO 8601, seconds, with offset",
+      "finished_at": "null | ISO 8601",
+      "exit_code": "null | integer",
+      "stage": "null | {stage, label, index, count}",
+      "progress": "null | {stage, fraction, overall, eta}",
+      "log": "null | text (the latest log line)",
+      "warnings": "array of text (host warnings included)",
+      "summary": "null | text",
+      "artifacts": "array of {path, kind, label} (the accepted ones)",
+      "error": "null | {code, message, hint}",
+      "cancel_requested": "boolean",
+      "finished_before_cancel": "boolean",
+      "timeout_seconds": "integer | null (null: no limit, vodsplit)",
+      "peak_memory_bytes": "null | integer"
+    }
+  },
+
+  "job_states": ["running", "done", "error", "failed", "cancelled"],
+
+  "plugin_list": {
+    "route": "GET /api/v1/plugins (THIS_PC)",
+    "fields": {
+      "id": "string",
+      "name": "text",
+      "author": "string",
+      "version": "string",
+      "state": "enum: plugin_states",
+      "badge": "enum: badges",
+      "size_bytes": "integer",
+      "has_icon": "boolean"
+    },
+    "never": ["reason text", "errors", "paths", "history"],
+    "plugin_states": ["ready", "disabled", "blocked", "needs_settings", "incompatible", "running"],
+    "state_precedence": ["blocked", "incompatible", "disabled", "running", "needs_settings", "ready"],
+    "state_precedence_note": "When more than one applies, the first of this list is shown.",
+    "state_scope": "the plugin's only: disabled is the user's disable of the plugin. A hook disabled automatically (rate_limit, failures) shows on its hook row (SHELL), never here.",
+    "badges": ["listed", "manual", "dev", "builtin"]
+  },
+
+  "refusals": {
+    "description": "Why a request (a start, a describe, a settings save, a dev folder, an install) is not carried out. v1 answers error.reason the code with the status of its row (409 CONFLICT unless said).",
+    "codes": [
+      {"reason": "busy", "status": 409, "note": "the lane is full; carries the remaining seconds when known"},
+      {"reason": "needs_settings", "status": 409, "note": "a required setting (secret too) is missing; not a hook failure"},
+      {"reason": "blocked", "status": 409},
+      {"reason": "incompatible", "status": 409},
+      {"reason": "disabled", "status": 409},
+      {"reason": "job_unusable", "status": 409},
+      {"reason": "id_taken", "status": 409, "note": "a dev folder with an installed id, or an install with a dev folder's"},
+      {"reason": "invalid_request", "status": 400, "note": "a body that does not fit: an unknown job or key, a value of the wrong type, an unknown pick id"},
+      {"reason": "not_found", "status": 404},
+      {"reason": "unavailable", "status": 503, "note": "a desktop feature asked in the headless shell (an image input, a hook), or the shell is shutting down. SHELL routes answer 403 headless before this"}
+    ]
+  },
+
+  "hooks": {
+    "default": "disabled",
+    "enable_where": "SHELL (desktop) only",
+    "headless": "never run",
+    "auto_disable_shown": "on the hook's row (HookStatus: disabled_reason, last_error); never in the list's state",
+    "match_decided_candidates": "MatchCandidate again for a record waiting: the line is replaced, the wait keeps counting from the first candidate. The dispatcher keeps the fired mark per record; a candidate of a fired record is ignored. MatchWithdrawn cancels the wait without marking.",
+    "history_outcomes": ["done", "error", "failed", "cancelled", "overwritten", "discarded", "skipped_rate_limit", "needs_settings"],
+    "disabled_reasons": ["user", "rate_limit", "failures", "reconsent", "new_install"],
+    "order": "trigger -> held when the light lane is full (overwrite) -> before the start the 60 s window (skip or start) -> after the start the 1 h window (disable when over)"
+  }
+}

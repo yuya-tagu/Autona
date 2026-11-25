@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/yuya-tagu/Autona/main/docs/plugins/plugin.schema.json",
+  "title": "Autona plugin manifest 1 (plugin.json)",
+  "description": "The manifest of an Autona plugin (ADR-009 appendix B). It validates the manifest itself; the form vocabulary is Autona's own field array, not JSON Schema. A host applies it in two scopes (contract_1.json manifest_checks.schema_scopes): the top level and settings without jobs (a failure: the plugin is unusable), then each job against #/$defs/job (a failure: that job is unusable). A field's type, a hook's on, an action's target and a platform are open names: a value this host does not know is not a schema failure (D8); the host reports the job (or, in settings, the plugin) unusable with field_type_unknown / hook_event_unknown / action_target_unknown. Unknown keys are ignored (an unknown top-level key is a warning). What the schema cannot express (key uniqueness, the B.4 fill rules, the id matching its folder, the taguyan. reservation, files inside the folder) is in contract_1.json manifest_checks.",
+  "type": "object",
+  "required": ["manifest", "id", "version", "name", "author", "license", "min_autona", "protocol", "platforms", "entry", "permissions", "jobs"],
+  "properties": {
+    "manifest": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,18}\\.[a-z0-9][a-z0-9-]{0,19}$", "maxLength": 40},
+    "version": {"$ref": "#/$defs/version"},
+    "name": {"$ref": "#/$defs/text80"},
+    "description": {"$ref": "#/$defs/text500"},
+    "author": {"type": "string", "minLength": 1},
+    "homepage": {"$ref": "#/$defs/https_url"},
+    "funding": {"$ref": "#/$defs/https_url"},
+    "icon": {"type": "string", "minLength": 1},
+    "license": {"type": "string", "minLength": 1},
+    "min_autona": {"$ref": "#/$defs/version"},
+    "protocol": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1},
+      "contains": {"const": 1}
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"},
+      "contains": {"const": "windows-x64"}
+    },
+    "entry": {
+      "type": "array",
+      "minItems": 1,
+      "prefixItems": [{"$ref": "#/$defs/entry_head"}],
+      "items": {"type": "string"}
+    },
+    "update": {
+      "type": "object",
+      "required": ["github"],
+      "properties": {
+        "github": {"type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$"}
+      }
+    },
+    "permissions": {"$ref": "#/$defs/permissions"},
+    "settings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/setting_field"}
+    },
+    "jobs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/job"}
+    }
+  },
+  "$defs": {
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
+    "https_url": {"type": "string", "pattern": "^https://[^\\s@/]+(/[^\\s]*)?$", "maxLength": 2048},
+    "locale_map": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z]{2}(-[A-Z]{2})?$"}
+    },
+    "text": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"allOf": [{"$ref": "#/$defs/locale_map"}], "additionalProperties": {"type": "string", "minLength": 1}}
+      ]
+    },
+    "text80": {
+      "oneOf": [
+        {"type": "string", "minLength": 1, "maxLength": 80},
+        {"allOf": [{"$ref": "#/$defs/locale_map"}], "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 80}}
+      ]
+    },
+    "text500": {
+      "oneOf": [
+        {"type": "string", "maxLength": 500},
+        {"allOf": [{"$ref": "#/$defs/locale_map"}], "additionalProperties": {"type": "string", "maxLength": 500}}
+      ]
+    },
+    "entry_head": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!@)(?![A-Za-z]:)(?![/\\\\])(?!(.*[/\\\\])?\\.\\.([/\\\\]|$))[^:*?\"<>|\\u0000-\\u001f]+$"
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["network", "files", "spawn", "autona_api"],
+      "properties": {
+        "network": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^(\\*|[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)$"}
+        },
+        "files": {"enum": ["inputs", "data", "user", "anywhere"]},
+        "spawn": {"type": "boolean"},
+        "autona_api": {"enum": ["none", "read", "write"]},
+        "note": {"$ref": "#/$defs/text"}
+      }
+    },
+    "option": {
+      "type": "object",
+      "required": ["value", "label"],
+      "properties": {
+        "value": {"type": "string", "minLength": 1},
+        "label": {"$ref": "#/$defs/text"}
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["key", "type", "label"],
+      "properties": {
+        "key": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
+        "type": {"$ref": "#/$defs/name"},
+        "label": {"$ref": "#/$defs/text"},
+        "required": {"type": "boolean"},
+        "help": {"$ref": "#/$defs/text"},
+        "max_length": {"type": "integer", "minimum": 1},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "step": {"type": "number", "exclusiveMinimum": 0},
+        "options": {"type": "array"},
+        "extensions": {"type": "array"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"enum": ["text", "textarea"]}}},
+          "then": {"properties": {"max_length": {"maximum": 20000}, "default": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "number"}}},
+          "then": {"properties": {"default": {"type": "number"}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "bool"}}},
+          "then": {"properties": {"default": {"type": "boolean"}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "select"}}},
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": {"minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/option"}},
+              "default": {"type": "string"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "file"}}},
+          "then": {
+            "required": ["extensions"],
+            "properties": {
+              "extensions": {"minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]{1,10}$"}},
+              "default": {"type": "string"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "folder"}}},
+          "then": {"properties": {"default": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "secret"}}},
+          "then": {"not": {"required": ["default"]}}
+        }
+      ]
+    },
+    "setting_field": {
+      "allOf": [{"$ref": "#/$defs/field"}],
+      "not": {"properties": {"type": {"enum": ["match_log", "match_record", "state", "result_image", "thumbnail_image", "archive_export"]}}}
+    },
+    "param_field": {
+      "allOf": [{"$ref": "#/$defs/field"}],
+      "not": {"properties": {"type": {"const": "secret"}}}
+    },
+    "action": {
+      "type": "object",
+      "required": ["target", "label"],
+      "properties": {
+        "target": {"$ref": "#/$defs/name"},
+        "label": {"$ref": "#/$defs/text"}
+      }
+    },
+    "hook": {
+      "type": "object",
+      "required": ["on", "label"],
+      "properties": {
+        "on": {"$ref": "#/$defs/name"},
+        "label": {"$ref": "#/$defs/text"}
+      }
+    },
+    "job": {
+      "type": "object",
+      "required": ["id", "title", "lane", "timeout_seconds"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
+        "title": {"$ref": "#/$defs/text"},
+        "lane": {"enum": ["light", "heavy"]},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 43200},
+        "memory_mb": {"type": "integer"},
+        "params": {"type": "array", "items": {"$ref": "#/$defs/param_field"}},
+        "manual": {"type": "boolean"},
+        "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "hooks": {"type": "array", "items": {"$ref": "#/$defs/hook"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"lane": {"const": "light"}}, "required": ["lane"]},
+          "then": {
+            "required": ["memory_mb"],
+            "properties": {
+              "timeout_seconds": {"maximum": 300},
+              "memory_mb": {"minimum": 64, "maximum": 1024}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"hooks": {"minItems": 1}}, "required": ["hooks"]},
+          "then": {"properties": {"memory_mb": {"maximum": 512}, "lane": {"const": "light"}}}
+        },
+        {
+          "if": {"properties": {"actions": {"minItems": 1}}, "required": ["actions"]},
+          "then": {"properties": {"lane": {"const": "light"}}}
+        },
+        {
+          "if": {
+            "properties": {"params": {"contains": {"properties": {"type": {"enum": ["match_record", "archive_export"]}}, "required": ["type"]}}},
+            "required": ["params"]
+          },
+          "then": {"required": ["manual"], "properties": {"manual": {"const": false}}}
+        }
+      ]
+    }
+  }
+}
