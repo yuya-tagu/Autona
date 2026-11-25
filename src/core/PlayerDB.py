@@ -34,7 +34,9 @@ What changed in the move, and what did not:
   previous file instead of a truncated one. Writes are serialised by their
   own lock and numbered, so an older snapshot never lands after a newer one.
   When the replace keeps failing (or the temp file cannot be made), it falls
-  back to the old in-place overwrite rather than not saving. The bytes are
+  back to the old in-place overwrite rather than not saving. When the disk
+  is full (ENOSPC/EDQUOT) it does not overwrite: the previous file is kept
+  and the next SaveDB tries again. The bytes are
   the same as before: json.dumps(indent=2) written in text mode (os.linesep
   line ends), utf-8.
 - A database that could not be read is never saved over: a corrupt file is
@@ -51,6 +53,7 @@ the shell calls LoadDB().
 """
 import csv
 import datetime
+import errno
 import glob
 import json
 import os
@@ -78,6 +81,15 @@ LEGACY_CSV_PATH = "./user_data/local_players.csv"
 # code always did).
 _REPLACE_ATTEMPTS = 4
 _REPLACE_BACKOFF = 0.02
+
+_DISK_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", None)} - {None}
+
+
+def _IsDiskFull(error):
+    """True for "no space left" (ENOSPC / EDQUOT, or the Windows
+    ERROR_HANDLE_DISK_FULL 39 / ERROR_DISK_FULL 112)."""
+    return (error.errno in _DISK_FULL_ERRNOS
+            or getattr(error, "winerror", None) in (39, 112))
 
 # How many local_players.json.skipped-*.bak copies are kept.
 SKIPPED_COPIES_KEPT = 3
@@ -659,7 +671,14 @@ class PlayerDB:
         try:
             if self._ReplaceAtomically(text):
                 return
-        except OSError:
+        except OSError as error:
+            if _IsDiskFull(error):
+                # Overwriting in place would truncate a good file and then
+                # fail again for lack of space.
+                logger.warning(
+                    "Not saving the player database: the disk is full; the "
+                    f"previous file is kept ({type(error).__name__})")
+                return
             logger.warning(
                 "Could not write the player database through a temp file:\n"
                 + traceback.format_exc())
