@@ -537,7 +537,16 @@ def get_sets(args):
 
 def get_match(setId=None):
     provider = AutonaTournamentDataProvider.instance.GetProvider()
-    return provider.GetMatch(setId=SetId(setId))
+    # No tournament loaded (no provider): AttributeError, the route's 500 as
+    # it always was -- looked up before the id is read, so that answer does
+    # not depend on the id.
+    getMatch = provider.GetMatch
+    try:
+        sid = SetId(setId)
+    except ValueError:
+        raise InvalidInput(
+            "setId must be an integer or a Hivee match id") from None
+    return getMatch(setId=sid)
 
 
 def SetId(setId):
@@ -2005,7 +2014,7 @@ def reset_all(scoreboard):
 # host, ADR-005 S4ad). Another board has no members, and answers "OK"
 # having done nothing, as it always did (without reading the numbers).
 # `team` and `member` are 1-based; on the crew board a number that is not
-# one raises (ValueError), as the board's signal did.
+# one is InvalidInput (the legacy route's 400).
 
 def crew_member_stock(scoreboard, team, member, change):
     host = boardHost
@@ -2013,7 +2022,8 @@ def crew_member_stock(scoreboard, team, member, change):
     def run():
         if _is_crew(scoreboard):
             CrewBattleService(CREW_BOARD).AdjustMemberStock(
-                int(team), int(member), int(change))
+                _parse_int(team, "team"), _parse_int(member, "member"),
+                _parse_int(change, "change"))
         return "OK"
 
     return host.Run(run)
@@ -2026,7 +2036,7 @@ def crew_set_active(scoreboard, team, member):
     def run():
         if _is_crew(scoreboard):
             CrewBattleService(CREW_BOARD).SelectActiveMember(
-                int(team), int(member))
+                _parse_int(team, "team"), _parse_int(member, "member"))
         return "OK"
 
     return host.Run(run)
@@ -2315,7 +2325,7 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
     it lands on state team 2 (SetLoadService.DisplayTeam, from the state's
     `teamsSwapped`). As the route always did, numbers that are not numbers
     raise before the lookup, a slot the board does not have raises after a
-    tag that was found (the legacy route's 500), and only boards 1/2 have
+    tag that was found (the legacy route's 400), and only boards 1/2 have
     slots -- the crew board raised too (it has no player cards). A board no
     shell has is refused before the lookup (NotAvailable: 503, since the
     ADR-005 S4x review; it raised as the crew board does).
@@ -2349,7 +2359,8 @@ def _load_player_record(scoreboard, lookup, team, player, no_mains):
         board = _require_board(scoreboard)
         if board not in AutonaActions.SCORE_BOARDS:
             raise ValueError(f"scoreboard {scoreboard} has no player slots")
-        team_, player_ = int(team), int(player)
+        team_, player_ = (_parse_int(team, "team"),
+                          _parse_int(player, "player"))
         # The live dict (PlayerDB.Get): copied under the lock it is written
         # under, as the load is not.
         db = PlayerDB.instance
@@ -2417,10 +2428,10 @@ def swap_players(scoreboard, team, first, second):
 # raises (ValueError: the legacy route's 500, as its missing stats util
 # did); a board no shell has is refused (NotAvailable:
 # 503, since the ADR-005 S4x review); a board number that is not a number
-# raises.
+# is InvalidInput (the legacy route's 400).
 
 def _stats_board(scoreboard):
-    board = int(scoreboard)
+    board = _parse_int(scoreboard, "scoreboard")
     # A board no shell has: 503, as every board operation (ADR-005 S4x
     # review). The crew board raises below (500), as it always did.
     _require_board(board)

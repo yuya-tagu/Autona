@@ -144,6 +144,17 @@ def err(code, message, status, reason=None):
     return resp
 
 
+def payload_too_large(limit):
+    """The 413 answer for a body over `limit` bytes (None: the route has no
+    limit of its own), closing the connection. Shared with the legacy POST
+    routes (WebServer._legacy_body_too_large)."""
+    resp = err(PAYLOAD_TOO_LARGE,
+               "the request body is over the limit" if limit is None
+               else f"the request body is over {limit} bytes", 413)
+    resp.headers["Connection"] = "close"
+    return resp
+
+
 # ── Validation / parsing helpers ─────────────────────────────────────────
 def validate_scoreboard(n):
     """Reads: scoreboard number must be 1, 2 or 3 (spec §2.12).
@@ -411,12 +422,7 @@ def write_op(operation, log_keys_only=False, max_body=None, body=BODY_JSON,
                     f"op={operation} params=<over {limit}> -> 413 "
                     f"{PAYLOAD_TOO_LARGE}"
                 )
-                resp = err(PAYLOAD_TOO_LARGE,
-                           "the request body is over the limit"
-                           if max_body is None else
-                           f"the request body is over {max_body} bytes", 413)
-                resp.headers["Connection"] = "close"
-                return resp
+                return payload_too_large(max_body)
 
             # Before anything reads the body: _safe_params below does (and
             # caches it for the handler's read).

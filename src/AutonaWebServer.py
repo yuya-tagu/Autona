@@ -19,7 +19,8 @@ from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
 import orjson
 from loguru import logger
-from werkzeug.exceptions import HTTPException, NotFound
+from werkzeug.exceptions import (
+    HTTPException, NotFound, RequestEntityTooLarge)
 from werkzeug.serving import WSGIRequestHandler
 
 from .core.StateManager import StateManager
@@ -29,6 +30,7 @@ from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import (
     SettingsManager, SettingsUnreadable, DEFAULT_WEBSERVER_PORT)
 from .core import LayoutCatalog, RenderAssets, WebAccess
+from .core.CountryCatalog import CountryCatalog
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
@@ -43,6 +45,13 @@ log.setLevel(logging.ERROR)
 # here, beside the server it belongs to: it used to sit in the web server's
 # actions module, which the headless shell never imported (S3c).
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+# The body limit of the legacy POST routes that read a body (/score,
+# /display-option, /scoreboard<N>-update-team-*, /update-commentary-*,
+# /update-game): over it, 413 before anything is parsed
+# (WebServer._legacy_body_too_large). Per route: the app sets no
+# MAX_CONTENT_LENGTH of its own.
+LEGACY_MAX_BODY = 1024 * 1024
 
 class SocketioJson:
     def default(obj):
@@ -232,6 +241,9 @@ def _build_web_app():
 
     @app.route('/score', methods=['POST'])
     def post_score():
+        tooLarge = WebServer._legacy_body_too_large()
+        if tooLarge is not None:
+            return tooLarge
         return WebOps.post_score(request.get_data())
 
     @ws_on('score')
@@ -332,6 +344,9 @@ def _build_web_app():
     # desktop eye menu into SettingsManager + StateManager on every board.
     @app.post('/display-option')
     def post_display_option():
+        tooLarge = WebServer._legacy_body_too_large()
+        if tooLarge is not None:
+            return tooLarge
         try:
             body = orjson.loads(request.get_data())
         except orjson.JSONDecodeError:
@@ -356,6 +371,9 @@ def _build_web_app():
     # Set player data (core since ADR-005 S3e-4, so it works headless too)
     @app.post('/scoreboard<scoreboardNumber>-update-team-<team>-<player>')
     def set_team_data(scoreboardNumber, team, player):
+        tooLarge = WebServer._legacy_body_too_large()
+        if tooLarge is not None:
+            return tooLarge
         data = request.get_json()
         return WebOps.set_team_data(scoreboardNumber, team, player, data)
 
@@ -372,6 +390,9 @@ def _build_web_app():
 
     @app.post('/update-commentary-<caster>')
     def set_commentary_data(caster):
+        tooLarge = WebServer._legacy_body_too_large()
+        if tooLarge is not None:
+            return tooLarge
         data = request.get_json()
         return WebOps.set_commentary_data(caster, data)
 
@@ -387,6 +408,9 @@ def _build_web_app():
     # Set game
     @app.post('/update-game')
     def set_game():
+        tooLarge = WebServer._legacy_body_too_large()
+        if tooLarge is not None:
+            return tooLarge
         data = request.get_json()
         return WebOps.set_game(data)
     
@@ -725,7 +749,15 @@ def _build_web_app():
         if not countryCode:
             abort(400, "countryCode not specified")
 
-        return WebOps.get_states(countryCode)
+        result = WebOps.get_states(countryCode)
+        if result is None and CountryCatalog.instance.IsLoaded():
+            # A country the loaded catalog does not know: 400, rather than
+            # Flask's 500 for a view that returned None. A known country
+            # without regions is still its {}. Before the catalog is loaded
+            # every code reads as unknown, so that is not a refusal (as
+            # before; v1 answers NOT_READY there).
+            raise WebOps.InvalidInput("countryCode is unknown")
+        return result
 
 
     @ws_on('states')
@@ -1940,6 +1972,26 @@ class WebServer:
         message = getattr(error, "message", None) or WebOps.NOT_AVAILABLE_MESSAGE
         return {"ok": False,
                 "error": {"code": "UNAVAILABLE", "message": message}}
+
+    @staticmethod
+    def _legacy_body_too_large():
+        """None when the legacy POST's body is within LEGACY_MAX_BODY; the
+        413 answer otherwise. As /api/v1's write_op: a Content-Length over
+        the limit is read to its end and dropped unparsed (_over_limit); a
+        body without one (chunked) is read with the request's limit set
+        just past LEGACY_MAX_BODY, so no more than that is held. The body
+        read here is cached: the handler's get_data / get_json read it
+        again as before."""
+        from .AutonaApiV1 import _over_limit
+        if not _over_limit(LEGACY_MAX_BODY):
+            request.max_content_length = LEGACY_MAX_BODY + 1
+            try:
+                if len(request.get_data()) <= LEGACY_MAX_BODY:
+                    return None
+            except RequestEntityTooLarge:
+                pass
+        from .AutonaApiV1 import payload_too_large
+        return payload_too_large(LEGACY_MAX_BODY)
 
     @staticmethod
     def InvalidBody(error):
