@@ -611,6 +611,37 @@ def test_a_late_resolution_failure_leaves_a_later_set_alone(env, executor):
     assert _revision() == revision
 
 
+def _unsaveable(monkeypatch):
+    def fail():
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(SettingsManager, "SaveSettings", fail)
+
+
+def test_a_url_that_cannot_be_saved_still_loads(env, monkeypatch):
+    # The setting's save raised out of _Apply ahead of the load: the
+    # status stayed "loading" and nothing was loaded. The URL is in effect
+    # for this run.
+    _unsaveable(monkeypatch)
+    env.service.SetTournament(EVENT_URL)
+    env.run_queued()
+    assert TournamentService.TournamentUrl() == EVENT_URL
+    assert env.calls == [("load", EVENT_URL, False, False),
+                         ("announce", EVENT_URL)]
+
+    env.service.PayloadApplied({"tournamentName": "Autona Cup"}, True)
+    assert _status(env.service) == (tournament.LOADED, "")
+
+
+def test_a_clear_that_cannot_be_saved_still_unloads(env, monkeypatch):
+    SettingsManager.Set("TOURNAMENT_URL", EVENT_URL)
+    _unsaveable(monkeypatch)
+    env.service.ClearTournament()
+    env.run_queued()
+    assert TournamentService.TournamentUrl() == ""
+    assert _status(env.service) == (tournament.IDLE, "")
+    assert env.calls == [("forget",), ("unload",), ("announce", "")]
+
+
 def test_a_clear_is_idle_and_its_empty_payload_changes_nothing(env):
     env.service.SetTournament(EVENT_URL)
     env.run_queued()

@@ -556,9 +556,9 @@ class StatePersistence:
 
         No direct-overwrite fallback, unlike program_state.json: nobody
         polls this file, so there is no torn read to trade against, and a
-        stale store is better than a truncated one. No fsync, like
-        settings.json; a store lost to a power cut falls back to
-        program_state.json at the next launch.
+        stale store is better than a truncated one. No fsync: a store lost
+        to a power cut falls back to program_state.json at the next launch
+        (settings.json, which has no fallback, is fsynced).
         """
         data = orjson.dumps(
             {VERSION_KEY: StateMigrations.CURRENT_VERSION,

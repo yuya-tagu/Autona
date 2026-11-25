@@ -44,7 +44,9 @@ def test_failed_save_keeps_old_file(isolated, monkeypatch):
 
     monkeypatch.setattr(os, "replace", boom)
     with pytest.raises(OSError):
-        SettingsManager.Set("b", 2)
+        SettingsManager.SaveSettings()
+    # Set() logs it instead: in effect for this run only.
+    SettingsManager.Set("b", 2)
     monkeypatch.undo()
 
     assert isolated.read_bytes() == before

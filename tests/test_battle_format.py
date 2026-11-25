@@ -221,6 +221,24 @@ def test_core_refuses_what_is_not_a_format(settings, told, settingWrites):
     assert told == ["team", "singles"]
 
 
+def test_a_switch_whose_save_fails_switches_all_the_same(
+        settings, told, monkeypatch):
+    # settings.json held or the disk full: both keys are in force for the
+    # run -- not half of them, which a retry would read as the format in
+    # force and leave -- and the switch is told, nothing raised.
+    def fail():
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(SettingsManager, "SaveSettings", fail)
+
+    assert AutonaActions.instance.SetBattleFormat("team") is True
+
+    assert settings["scoreboard"]["battle_format"] == "team"
+    assert settings["scoreboard"]["team_mode"] is True
+    assert AutonaActions.instance.ResolveBattleFormat() == "team"
+    assert told == ["team"]
+
+
 # ── the desktop follows it ───────────────────────────────────────────────
 
 # The real window, in a process of its own: importing src/Autona.py is the
