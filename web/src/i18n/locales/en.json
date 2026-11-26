@@ -1619,7 +1619,6 @@
     "plugins_pick_unavailable": "This cannot be chosen here yet.",
     "plugins_reload": "Reload",
     "plugins_open": "Open",
-    "plugins_open_archive_note": "This plugin is used on the Archive Clipper page.",
     "plugins_timeout_none": "No time limit",
     "plugins_timeout_seconds": "Time limit: {{seconds}} s",
     "plugins_access_failed": "Autona could not be reached.",

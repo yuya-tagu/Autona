@@ -1612,7 +1612,6 @@
     "plugins_pick_unavailable": "この環境ではまだ選べません。",
     "plugins_reload": "読み直す",
     "plugins_open": "開く",
-    "plugins_open_archive_note": "このプラグインはアーカイブ切り抜きのページで使います。",
     "plugins_timeout_none": "時間制限なし",
     "plugins_timeout_seconds": "制限時間 {{seconds}} 秒",
     "plugins_access_failed": "Autona に接続できませんでした。",
