@@ -738,7 +738,8 @@ def FramedElsewhere(fetchDest, fetchSite):
 # Autona (S-final SF-4a-2: the menu's too, the Qt windows until then); "assets" is
 # Add game assets (SF-4b-2: the menu's too); "archive" is the archive
 # clipper (ADR-006 A1; a sidebar item always since A7: the page installs
-# its worker).
+# its worker); "plugins" is the plugins page (ADR-009 D4: the sidebar's
+# 4th section's last item).
 # /web/app/<panel> serves the same
 # names (S-final SF-5a-3: the page inside the Web UI's AppShell, its
 # navigation, header and footer): web_index's rule too, the same check.
@@ -762,6 +763,7 @@ WEB_PANELS = frozenset({
     "about",
     "assets",
     "archive",
+    "plugins",
 })
 
 

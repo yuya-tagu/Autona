@@ -20,7 +20,7 @@
     "RunBody": "{job, trigger: {kind: \"manual\", target: null} | {kind: \"action\", target}, params: {key: value | pick id}, inputs: {source key: choice id}}: a source key left out (or null) is not picked -- fine when the field is optional; state is never named; an action's own file is the page's context, not a choice",
     "RunStarted": "{run_id}",
     "RunRecord": "contract_1.json job_record",
-    "DevState": "{enabled: boolean, folders: [{id, name}]}: id contract_1.json patterns.dev_folder_id, name the folder's name (never the path)",
+    "DevState": "{enabled: boolean, folders: [{id, name, from_env}]}: id contract_1.json patterns.dev_folder_id, name the folder's name (never the path), from_env true for a folder from AUTONA_PLUGIN_DEV (the page offers no remove for it)",
     "DevBody": "{enabled: boolean}",
     "DevFolderBody": "{pick: pick id} (a pickFolder answer)"
   },

@@ -21,6 +21,7 @@ import {
     validateField,
 } from "./formFields";
 import {pickErrorText, refusalText} from "./RunView";
+import {timeoutText} from "./PluginDetailView";
 
 // The plugins page (ADR-009 D4) against the in-memory mock API. The shell
 // probe is stubbed: the page is shown as the desktop's shared view.
@@ -546,6 +547,89 @@ describe("the detail's reads", () => {
     });
 });
 
+describe("wiring (I1b)", () => {
+    test("a dev folder from the environment has no remove button", async () => {
+        const api = createMockPluginsApi();
+        jest.spyOn(api, "dev").mockResolvedValue({enabled: true, folders: [
+            {id: "aaaaaaaaaaaa", name: "FromEnv", from_env: true},
+            {id: "bbbbbbbbbbbb", name: "Mine"}]});
+        show(api);
+        const list = await screen.findByTestId("plugin-dev-folders");
+        await within(list).findByText("FromEnv");
+        expect(within(list).getAllByRole("button", {name: "Remove"}))
+            .toHaveLength(1);
+    });
+
+    test("a dev folder from the environment shows with the switch off",
+         async () => {
+             const api = createMockPluginsApi();
+             jest.spyOn(api, "dev").mockResolvedValue({
+                 enabled: false, folders: [
+                     {id: "aaaaaaaaaaaa", name: "FromEnv", from_env: true},
+                     {id: "bbbbbbbbbbbb", name: "Mine"}]});
+             show(api);
+             const list = await screen.findByTestId("plugin-dev-folders");
+             expect(within(list).getByText("FromEnv")).toBeTruthy();
+             expect(within(list).getByText("from the environment"))
+                 .toBeTruthy();
+             expect(within(list).queryByText("Mine")).toBeNull();
+             expect(within(list).queryByRole("button")).toBeNull();
+         });
+
+    test("time limits read in the largest fitting unit", () => {
+        expect(timeoutText(30)).toBe("Time limit: 30 s");
+        expect(timeoutText(60)).toBe("Time limit: 1 min");
+        expect(timeoutText(150)).toBe("Time limit: 2 min");
+        expect(timeoutText(3600)).toBe("Time limit: 1 h");
+        expect(timeoutText(5400)).toBe("Time limit: 1 h 30 min");
+    });
+
+    test("a job without a time limit says so", async () => {
+        const api = createMockPluginsApi();
+        const detail = await api.detail(WEBHOOK);
+        detail.jobs[0].timeout_seconds = null;
+        jest.spyOn(api, "detail").mockResolvedValue(detail);
+        await openWebhook(api);
+        expect(screen.getByTestId(`plugin-timeout-${detail.jobs[0].id}`)
+            .textContent).toBe("No time limit");
+        expect(screen.getByTestId(`plugin-timeout-${detail.jobs[1].id}`)
+            .textContent).toBe("Time limit: 30 s");
+    });
+
+    test("only the built-in vodsplit has the open button", async () => {
+        for (const [id, badge] of [["taguyan.vodsplit", "listed"],
+                                   ["me.other", "builtin"]]) {
+            cleanup();
+            const api = createMockPluginsApi();
+            const detail = {...(await api.detail(WEBHOOK)), id, badge};
+            const list = await api.list();
+            jest.spyOn(api, "list").mockResolvedValue(
+                [{...list[0], id, badge}]);
+            jest.spyOn(api, "detail").mockResolvedValue(detail);
+            show(api);
+            fireEvent.click(await screen.findByTestId(`plugin-row-${id}`));
+            await screen.findByTestId("plugin-detail");
+            expect(screen.queryByTestId("plugin-open-archive")).toBeNull();
+        }
+    });
+
+    test("the built-in vodsplit opens the archive page", async () => {
+        const api = createMockPluginsApi();
+        const detail = {...(await api.detail(WEBHOOK)),
+                        id: "taguyan.vodsplit", badge: "builtin"};
+        const list = await api.list();
+        jest.spyOn(api, "list").mockResolvedValue(
+            [...list, {...list[0], id: "taguyan.vodsplit",
+                       badge: "builtin"}]);
+        jest.spyOn(api, "detail").mockResolvedValue(detail);
+        show(api);
+        fireEvent.click(await screen.findByTestId(
+            "plugin-row-taguyan.vodsplit"));
+        fireEvent.click(await screen.findByTestId("plugin-open-archive"));
+        expect(window.location.pathname).toMatch(/\/archive$/);
+    });
+});
+
 describe("what the contract asks the page to show", () => {
     async function openHistory(api) {
         await openWebhook(api);
@@ -628,16 +712,26 @@ describe("refusals and access", () => {
              const api = createMockPluginsApi();
              await openWebhook(api);
              jest.spyOn(api, "startRun").mockRejectedValue(refused(409, {
-                 code: "CONFLICT", reason: "busy", detail: "12 s left"}));
+                 code: "CONFLICT", reason: "busy", detail: "12"}));
              fireEvent.mouseDown(within(screen.getByTestId(
                  "plugin-job-export_log")).getByRole("combobox"));
              fireEvent.click(await screen.findByRole("option", {
                  name: "2026-11-26 Fake Cup"}));
              fireEvent.click(screen.getByTestId("plugin-run-export_log"));
              expect(await screen.findByText(
-                 "Wait until the running job ends, then try again. (12 s left)"))
+                 "Wait until the running job ends, then try again (12 s left)."))
                  .toBeTruthy();
          });
+
+    test("a busy refusal without seconds says it without them", () => {
+        for (const detail of [undefined, "", "soon", "0"]) {
+            expect(refusalText(refused(409, {reason: "busy", detail})))
+                .toBe("Wait until the running job ends, then try again.");
+        }
+        expect(refusalText(refused(409, {reason: "busy", detail: "3"})))
+            .toBe("Wait until the running job ends, then try again"
+                  + " (3 s left).");
+    });
 
     test("refusal and pick wording", () => {
         expect(refusalText(refused(409, {reason: "needs_settings"})))

@@ -256,7 +256,7 @@ test("the navigation is the Qt sidebar's: its headings and items in order", asyn
     expect(NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.panel)))
         .toEqual(["event", "stream", "scoreboard", "board", "thumbnail",
                   "result", "top8", "commentary", "statsPreview", "stats",
-                  "playerBrowser", "archive"]);
+                  "playerBrowser", "archive", "plugins"]);
 });
 
 test("the archive item shows without asking whether its worker is there", async () => {
