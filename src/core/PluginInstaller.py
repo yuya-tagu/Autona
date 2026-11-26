@@ -1,5 +1,7 @@
 """Installing, updating and removing plugins (ADR-009 D7, appendix C; lane
-L4). Not wired: nothing imports it yet.
+L4). Made by bootstrap_core(); the v1 routes drive it through
+PluginInstalls (the upload, the jobs around the consent sheet, the
+removal's job).
 
 Where things are
 ----------------
@@ -9,6 +11,10 @@ Where things are
   ``<id>.part`` (ZipSafety's suffixes; ``Sweep`` cleans them at launch).
 - ``<app>/plugins/.upload-<16 hex>.part`` -- a manual zip's private copy
   while it is prepared.
+- ``<user_data>/plugins/<id>/enabled.json`` -- the user's disable
+  (``{"enabled": false}``; none is enabled). Kept by an update, gone with a
+  new install and a removal (both empty the folder but install.json /
+  data/).
 - ``<user_data>/plugins/<id>/install.json`` -- the install record:
   ``{"source": {"kind", "repo_id"?, "name"?}, "version", "sha256",
   "consent_digest", "installed_at"}`` (UTF-8, no BOM; written through a
@@ -94,6 +100,7 @@ from .PluginTypes import (MANIFEST_FILE, MANIFEST_MAX_BYTES,
                           ZipProblem)
 
 INSTALL_FILE = "install.json"
+ENABLED_FILE = "enabled.json"
 SECRETS_FILE = "secrets.bin"
 DATA_DIR = "data"
 OUT_DIR = "out"
@@ -424,7 +431,13 @@ class PluginInstaller:
     optional. ``workDir()``: archive.work_dir now (the runs' folders).
     ``isDevId(id)``: whether a dev folder has the id. ``blocklist()``: the
     blocked rows now (ParseBlocklist's). ``stopping()``: Autona is ending
-    (asked while unpacking). ``clock`` / ``sleep``: time.time / time.sleep."""
+    (asked while unpacking). ``clock`` / ``sleep``: time.time / time.sleep.
+
+    The swap and a removal hold the plugin's starts (``jobs.Hold``): no run
+    of it can start between the last check and the folder's move."""
+
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
 
     def __init__(self, appDir: str, userDataDir: str, *, registry, runner,
                  hostVersion: str,
@@ -456,6 +469,10 @@ class PluginInstaller:
         self._lock = threading.Lock()
         self._busy: set = set()
         self._pending: dict = {}
+        # id -> enabled.json's answer, read once (IsEnabled is asked for
+        # every list row); written through SetEnabled, dropped when the
+        # folder is emptied.
+        self._enabled: dict = {}
 
     # ── paths and the record ───────────────────────────────────────────
 
@@ -528,6 +545,83 @@ class PluginInstaller:
         except BaseException:
             self._RemoveFile(temporary)
             raise
+
+    def UploadPath(self) -> str:
+        """A new private file's path in the plugins folder for a zip being
+        received (``.upload-<16 hex>.part``: Sweep removes one a crash
+        left). The folder is made; the file is not."""
+        os.makedirs(self.pluginsDir, exist_ok=True)
+        return os.path.join(self.pluginsDir,
+                            f"{_UPLOAD_PREFIX}{os.urandom(8).hex()}"
+                            f"{ZipSafety.PART_SUFFIX}")
+
+    # ── the user's enable ──────────────────────────────────────────────
+
+    def _EnabledPath(self, pluginId: str) -> str:
+        return os.path.join(UserDir(self.userDataDir, pluginId, dev=False),
+                            ENABLED_FILE)
+
+    def IsEnabled(self, pluginId: str) -> bool:
+        """enabled.json's ``enabled``; True without one (or one that cannot
+        be read: a broken file never hides a plugin's state)."""
+        if not isinstance(pluginId, str) or not _PLUGIN_ID.fullmatch(pluginId):
+            return True
+        with self._lock:
+            known = self._enabled.get(pluginId)
+        if known is not None:
+            return known
+        try:
+            with open(self._EnabledPath(pluginId), "rb") as file:
+                data = json.loads(file.read(4096).decode("utf-8-sig"))
+            enabled = not (isinstance(data, dict)
+                           and data.get("enabled") is False)
+        except (OSError, ValueError):
+            enabled = True
+        with self._lock:
+            self._enabled.setdefault(pluginId, enabled)
+            return self._enabled[pluginId]
+
+    def SetEnabled(self, pluginId: str, enabled: bool) -> None:
+        """Write enabled.json (through a fsynced ``.tmp``). Raises OSError;
+        InstallError(INVALID_REQUEST) for what is not an id."""
+        _RequireId(pluginId)
+        path = self._EnabledPath(pluginId)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temporary = path + ".tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8", newline="\n") as file:
+                json.dump({"enabled": bool(enabled)}, file)
+                file.flush()
+                os.fsync(file.fileno())
+            ZipSafety.Replace(temporary, path, sleep=self._sleep)
+        except BaseException:
+            self._RemoveFile(temporary)
+            with self._lock:
+                self._enabled.pop(pluginId, None)
+            raise
+        with self._lock:
+            self._enabled[pluginId] = bool(enabled)
+        logger.info(f"Plugin {pluginId}: "
+                    f"{'enabled' if enabled else 'disabled'}")
+
+    def _ForgetEnabled(self, pluginId: str) -> None:
+        with self._lock:
+            self._enabled.pop(pluginId, None)
+
+    # ── the starts' hold ───────────────────────────────────────────────
+
+    def _Hold(self, pluginId: str) -> None:
+        """Hold the plugin's starts (PluginJobs.Hold); RUNNING, the hold
+        given back, when a run of it goes. Never under this lock."""
+        if self._jobs is None:
+            return
+        if not self._jobs.Hold(pluginId):
+            self._jobs.Unhold(pluginId)
+            raise InstallError(RUNNING)
+
+    def _Unhold(self, pluginId: str) -> None:
+        if self._jobs is not None:
+            self._jobs.Unhold(pluginId)
 
     # ── the Protocol's pure parts ──────────────────────────────────────
 
@@ -1021,11 +1115,18 @@ class PluginInstaller:
             logger.info(f"Plugin install: {pluginId}: describe failed "
                         f"({result.failure.value})")
             raise InstallError(DESCRIBE_FAILED, (result.failure.value,))
-        # describe took up to a minute: a run may have started since. Asked
-        # before anything of the old plugin is forgotten, so a RUNNING
-        # leaves it whole.
-        if self._Running(pluginId):
-            raise InstallError(RUNNING)
+        # describe took up to a minute: a run may have started since. Held
+        # (no start of it from here to the swap's end) and asked before
+        # anything of the old plugin is forgotten, so a RUNNING leaves it
+        # whole.
+        self._Hold(pluginId)
+        try:
+            return self._Swap(pending)
+        finally:
+            self._Unhold(pluginId)
+
+    def _Swap(self, pending: PendingInstall) -> InstallRecord:
+        pluginId = pending.plugin_id
         # Before the swap: another author's zip never meets the old
         # plugin's secrets, values or enabled hooks, even if the swap fails.
         if pending.decision == InstallDecision.NEW_INSTALL:
@@ -1082,6 +1183,9 @@ class PluginInstaller:
         except OSError as error:
             raise InstallError(SECRETS_FAILED,
                                detail=type(error).__name__) from None
+        finally:
+            # enabled.json went with the rest: another plugin, enabled.
+            self._ForgetEnabled(pluginId)
 
     def _RemoveSecretsFile(self, pluginId: str) -> None:
         """secrets.bin gone, whatever PluginSecrets did. Raises OSError."""
@@ -1108,14 +1212,16 @@ class PluginInstaller:
     def Remove(self, pluginId: str, *, data: bool, runs: str) -> None:
         """Remove an installed plugin (C.6): its hooks first -- calling
         ``hooks.Forget(id, REMOVED)`` is this method's duty, nobody else
-        calls it for a removal -- and its secrets (secrets.bin always), then -- after asking again that no run of it
-        goes -- what an install left (``<id>.new`` / ``.old`` / ``.part``:
+        calls it for a removal -- and its secrets (secrets.bin always), then
+        what an install left (``<id>.new`` / ``.old`` / ``.part``:
         an ``.old`` left would come back at the next launch's sweep), its
         folder, its user_data folder (``data/`` kept unless ``data``; the
         folder itself when nothing is left), its runs' folders under the
         work folder (``runs``: delete / keep_out -- each run's ``out/``
-        kept -- / keep). BUILTIN for the built-in vodsplit; RUNNING while a
-        run of it goes (the caller cancels first); NOT_FOUND when nothing
+        kept -- / keep). The plugin's starts are held (``jobs.Hold``) from
+        before its hooks are forgotten to the end. BUILTIN for the built-in
+        vodsplit; RUNNING while a run of it goes, nothing forgotten (the
+        caller cancels first: PluginInstalls); NOT_FOUND when nothing
         of it is there; SECRETS_FAILED / REMOVE_FAILED. Raises
         InstallError."""
         _RequireId(pluginId)
@@ -1136,8 +1242,15 @@ class PluginInstaller:
                        for path in [folder, userDir, *leftovers]):
                 raise InstallError(NOT_FOUND)
             self._busy.add(pluginId)
-            stale = self._pending.pop(pluginId, None)
+        held = False
         try:
+            # Held before anything is forgotten: a run that started since
+            # the first check is a RUNNING with everything still there, and
+            # none starts from here on (a pending hook is discarded).
+            self._Hold(pluginId)
+            held = True
+            with self._lock:
+                stale = self._pending.pop(pluginId, None)
             if stale is not None:
                 self._RemoveNew(stale.new_dir)
             try:
@@ -1149,8 +1262,7 @@ class PluginInstaller:
             except OSError as error:
                 raise InstallError(SECRETS_FAILED,
                                    detail=type(error).__name__) from None
-            if self._Running(pluginId):
-                raise InstallError(RUNNING)
+            self._ForgetEnabled(pluginId)
             try:
                 for path in leftovers:
                     if os.path.isdir(path) and not os.path.islink(path):
@@ -1172,7 +1284,12 @@ class PluginInstaller:
                                f"removed ({ZipSafety.Why(error)})")
                 raise InstallError(REMOVE_FAILED,
                                    detail=type(error).__name__) from None
+            finally:
+                # A file that could not be removed may be enabled.json.
+                self._ForgetEnabled(pluginId)
         finally:
+            if held:
+                self._Unhold(pluginId)
             self._Release(pluginId)
         logger.info(f"Plugin removal: {pluginId} was removed")
 
@@ -1193,11 +1310,47 @@ class PluginInstaller:
             else:
                 os.remove(path)
 
-    def Sweep(self) -> None:
+    def RemovalSizes(self, pluginId: str) -> Tuple[int, int, int, int,
+                                                   Optional[str]]:
+        """What a removal would remove (C.6), for the page to ask about:
+        (data/'s bytes, the job folders under the work folder, their bytes,
+        the bytes of their out/ folders, the work folder's name -- never its
+        path; None when unknown). Links are not followed; what cannot be
+        read counts 0."""
+        _RequireId(pluginId)
+        data = _TreeBytes(os.path.join(
+            UserDir(self.userDataDir, pluginId, dev=False), DATA_DIR))
+        work = self._workDir()
+        runs = runsBytes = outBytes = 0
+        if work:
+            folder = os.path.join(work, PLUGINS_DIR, pluginId)
+            try:
+                entries = list(os.scandir(folder))
+            except OSError:
+                entries = []
+            for entry in entries:
+                try:
+                    isRun = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    isRun = False
+                if not isRun:
+                    continue
+                runs += 1
+                runsBytes += _TreeBytes(entry.path)
+                outBytes += _TreeBytes(os.path.join(entry.path, OUT_DIR))
+        name = None
+        if work:
+            normal = os.path.normpath(work)
+            name = (os.path.basename(normal)
+                    or os.path.splitdrive(normal)[0] or None)
+        return data, runs, runsBytes, outBytes, name
+
+    def Sweep(self) -> int:
         """At launch (E.2): what an install a crash ended left --
         ``<id>.part``, ``<id>.new`` and an upload's private copy removed,
         ``<id>.old`` put back when ``<id>`` is missing, else removed.
-        Logged, never raises.
+        Logged, never raises. Answers how many plugin ids had leftovers (a
+        scan after it sees a folder put back).
 
         A known window: a crash after the swap moved the new folder in and
         before install.json was replaced leaves the new folder with the
@@ -1206,18 +1359,21 @@ class PluginInstaller:
         try:
             names = os.listdir(self.pluginsDir)
         except OSError:
-            return
+            return 0
         with self._lock:
             held = set(self._busy) | set(self._pending)
         for name in names:
             if _UPLOAD.fullmatch(name):
                 self._RemoveFile(os.path.join(self.pluginsDir, name))
+        cleaned = 0
         for pluginId in sorted({match.group(1) for match in
                                 map(_LEFTOVER.fullmatch, names) if match}):
             if pluginId in held:
                 continue
             ZipSafety.CleanSwap(os.path.join(self.pluginsDir, pluginId),
                                 sleep=self._sleep)
+            cleaned += 1
+        return cleaned
 
 
 def _RequireId(pluginId: Any) -> None:
@@ -1240,6 +1396,29 @@ def _CopyHashing(source: str, target: str, size: int) -> str:
             digest.update(chunk)
             left -= len(chunk)
     return digest.hexdigest()
+
+
+def _TreeBytes(folder: str) -> int:
+    """The bytes of the files under ``folder`` (links not followed: a
+    junction's target is not this plugin's); 0 when it cannot be read."""
+    total = 0
+    stack = [folder]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink() or entry.is_junction():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return total
 
 
 def _RemoveChildren(folder: str, *, keep: Sequence[str]) -> None:

@@ -530,8 +530,8 @@ def bootstrap_core():
     StateManagerBridge.instance.game_loaded.connect(AutonaPlayerDB.SetupModel)
 
     # ORDER CONSTRAINT: the plugins (ADR-009 E.1) -- the runner, the shell's
-    # picks, the secrets and settings, the registry, the input sources and
-    # the runs -- after SettingsManager (./user_data, the work folder
+    # picks, the secrets and settings, the registry, the input sources, the
+    # runs, the installer and the installs -- after SettingsManager (./user_data, the work folder
     # archive.work_dir) and the task executor; before ArchiveJobService
     # below (the built-in vodsplit is the runner's run on the heavy lane
     # PluginJobs owns: ADR-009 D9), before MatchLogService (the hooks' dispatcher goes
@@ -548,13 +548,18 @@ def bootstrap_core():
     # parts are in dependency order: settings over secrets and the picks
     # (a file / folder value is a pick id: ShellPicks.Resolve, L10), the
     # registry over settings (its needs_settings) and the runner (a dev
-    # plugin's describe), the runs over all of them. The user_data folder is
+    # plugin's describe), the runs over all of them, the installer over the
+    # runs (its hold) and the installs over the installer; the registry
+    # reads the installer and the installs back through lambdas (enabled,
+    # install.json's source, the blocklist). The user_data folder is
     # made absolute here, once: every part names the same folder whatever
     # the working directory is later.
     import os
 
     from .core import MatchLogService as matchLog
     from .core.PluginInputs import PluginInputs
+    from .core.PluginInstaller import PluginInstaller
+    from .core.PluginInstalls import PluginInstalls
     from .core.PluginJobs import PluginJobs
     from .core.PluginRegistry import PluginRegistry
     from .core.PluginRunner import PluginRunner
@@ -580,7 +585,15 @@ def bootstrap_core():
             isRunning=lambda pluginId: PluginJobs.instance is not None
                 and PluginJobs.instance.Running(pluginId),
             settingsMissing=PluginSettings.instance.Missing,
-            builtinVersion=_vodsplit_version)
+            builtinVersion=_vodsplit_version,
+            # The installer's and the installs' (made below): install.json,
+            # enabled.json, the blocklist in effect.
+            installSource=_plugin_install_source,
+            isEnabled=lambda pluginId: PluginInstaller.instance is None
+                or PluginInstaller.instance.IsEnabled(pluginId),
+            blockedBy=lambda pluginId, version:
+                PluginInstalls.instance.BlockedReason(pluginId, version)
+                if PluginInstalls.instance is not None else None)
     if PluginInputs.instance is None:
         PluginInputs.instance = PluginInputs(
             outDir="./out", matchLogDir=matchLog.MATCH_LOG_DIR,
@@ -602,6 +615,27 @@ def bootstrap_core():
             # hook's run, LaneFreed for the light lane). None yet.
             onRunEnded=lambda record: None,
             onLaneFreed=lambda lane: None)
+    # The installs (P5a, wiring I4): the installer over the registry's
+    # check and describe, the runs' hold (the swap and a removal), the
+    # secrets' Forget; the coordinator the routes drive (its prepare,
+    # commit and removal are executor jobs). The hooks join them in I5
+    # (both take ``hooks``: PluginHooks.Forget / Refresh). Making them reads
+    # nothing; the leftovers' sweep is the launch job below.
+    if PluginInstaller.instance is None:
+        PluginInstaller.instance = PluginInstaller(
+            str(AutonaDirHelper.current_dir), userData,
+            registry=PluginRegistry.instance, runner=PluginRunner.instance,
+            hostVersion=hostVersion, secrets=PluginSecrets.instance,
+            jobs=PluginJobs.instance, workDir=_archive_work_dir,
+            isDevId=lambda pluginId: any(
+                folder.plugin_id == pluginId
+                for folder in PluginRegistry.instance.DevFolders()),
+            blocklist=lambda: PluginInstalls.instance.Blocklist(),
+            stopping=TaskExecutor.instance.stopping.is_set)
+    if PluginInstalls.instance is None:
+        PluginInstalls.instance = PluginInstalls(
+            PluginInstaller.instance, PluginRegistry.instance,
+            jobs=PluginJobs.instance)
 
     # The plugins at launch (ADR-009 E.2): every manifest read, nothing
     # started. The scan is a few stats and the built-in's folder walked once
@@ -619,6 +653,20 @@ def bootstrap_core():
         PluginRegistry.instance.Scan()
     except Exception:
         logger.opt(exception=True).error("Plugins: the launch's scan failed")
+    # The blocklist in effect (ADR-009 C.4): the listing's previous copy,
+    # else the one shipped with Autona (fetching it is P5b's). A few KB
+    # read here, after the scan: an installed plugin it blocks is turned
+    # off (its hooks too, once I5 gives the installs the hooks) before
+    # anything can start it.
+    from .core.PluginInstalls import (BUNDLED_LISTING, LISTING_COPY,
+                                      ReadListingBlocklist)
+    from .Helpers.AutonaDirHelper import AutonaResolve
+    try:
+        PluginInstalls.instance.SetBlocklist(ReadListingBlocklist((
+            os.path.join(userData, "plugins", LISTING_COPY),
+            AutonaResolve(BUNDLED_LISTING))))
+    except Exception:
+        logger.opt(exception=True).error("Plugins: the blocklist failed")
 
     # ORDER CONSTRAINT: the archive clipper's jobs (ADR-006 A1), after
     # SettingsManager (its work folder is archive.work_dir) and the plugin
@@ -646,11 +694,15 @@ def bootstrap_core():
     # process (active, or started after PluginJobs was made) and a run of
     # another Autona still alive (its job.json names its host). It stops
     # between plugins once the executor is stopping, so a slow drive does
-    # not hold the close either.
+    # not hold the close either. First in the same job, the installs'
+    # leftovers (PluginInstalls.Sweep: the swaps' .new / .old / .part, the
+    # uploads, a removal a crash ended; a scan when a folder was put back):
+    # the plugins folder is beside Autona, so it is quick, and uploads and
+    # installs are refused until it has run.
     TaskExecutor.instance.submit(
-        lambda: PluginJobs.instance.Sweep(
-            stopping=TaskExecutor.instance.stopping.is_set),
-        task_name="plugin runs' sweep")
+        lambda: (PluginInstalls.instance.Sweep(), PluginJobs.instance.Sweep(
+            stopping=TaskExecutor.instance.stopping.is_set)),
+        task_name="plugins' sweep")
 
     # ORDER CONSTRAINT: the archive worker's installer (ADR-006 A7), after
     # ArchiveJobService (it reads the installed version from the jobs' last
@@ -891,10 +943,11 @@ def plugin_api_deps():
     .__init__ hands them to RegisterPluginRoutes before it registers the v1
     blueprint, so flask and the routes are imported with the web server,
     after the window is shown (ADR-003), not at bootstrap. A new object per
-    call, read per request: what a later stage adds (the hooks, I5; the
-    installer, I4) is added here."""
+    call, read per request: what a later stage adds (the hooks, I5) is
+    added here."""
     from .AutonaPluginApi import PluginApiDeps
     from .core.PluginInputs import PluginInputs
+    from .core.PluginInstalls import PluginInstalls
     from .core.PluginJobs import PluginJobs
     from .core.PluginRegistry import PluginRegistry
     from .core.PluginSecrets import PluginSecrets
@@ -904,9 +957,19 @@ def plugin_api_deps():
     return PluginApiDeps(
         registry=PluginRegistry.instance, settings=PluginSettings.instance,
         secrets=PluginSecrets.instance, inputs=PluginInputs.instance,
-        jobs=PluginJobs.instance,
+        jobs=PluginJobs.instance, installs=PluginInstalls.instance,
         resolvePick=picks.Resolve if picks is not None else None,
         workDir=_archive_work_dir, revealFile=_plugin_reveal_file)
+
+
+def _plugin_install_source(pluginId):
+    """The registry's installSource: an installed plugin's install.json
+    source (None: manual), read through the installer once it is made."""
+    from .core.PluginInstaller import PluginInstaller
+    if PluginInstaller.instance is None:
+        return None
+    record = PluginInstaller.instance.ReadInstallRecord(pluginId)
+    return record.source if record is not None else None
 
 
 def _archive_work_dir():

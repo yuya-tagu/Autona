@@ -486,6 +486,59 @@ class ZipProblem(StrEnum):
     ENTRY_MISSING = "entry_missing"
 
 
+class InstallState(StrEnum):
+    """An install's state (GET /api/v1/plugins/installs/<id>; contract_1.json
+    install.states): preparing (the zip checked and unpacked to .new, a
+    job) -> consent (the sheet shown, waiting) -> installing (describe and
+    the swap, a job) -> done; failed (InstallFailure) and cancelled end it
+    too. A commit refused because a run of the plugin goes returns to
+    consent with the failure (busy)."""
+    PREPARING = "preparing"
+    CONSENT = "consent"
+    INSTALLING = "installing"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RemovalState(StrEnum):
+    """A removal's state (GET /api/v1/plugins/<id>/removal; contract_1.json
+    install.removal_states): idle (none asked), removing (a job: its runs
+    cancelled and waited for, then PluginInstaller.Remove), failed (the
+    last one's InstallFailure). A removal that succeeded leaves no state:
+    the plugin is gone from the list."""
+    IDLE = "idle"
+    REMOVING = "removing"
+    FAILED = "failed"
+
+
+# PluginInstaller's InstallError codes (and PluginInstalls' own ``failed``:
+# an unexpected exception) -> the v1 refusal an install / removal failure
+# carries as its reason (contract_1.json install.errors).
+INSTALL_ERROR_REASONS: Mapping[str, StartRefusal] = MappingProxyType({
+    "network_failed": StartRefusal.UNAVAILABLE,
+    "bad_zip": StartRefusal.INCOMPATIBLE,
+    "manifest_invalid": StartRefusal.INCOMPATIBLE,
+    "blocked": StartRefusal.BLOCKED,
+    "in_progress": StartRefusal.BUSY,
+    "running": StartRefusal.BUSY,
+    "describe_failed": StartRefusal.INCOMPATIBLE,
+    "extract_failed": StartRefusal.UNAVAILABLE,
+    "swap_failed": StartRefusal.UNAVAILABLE,
+    "not_pending": StartRefusal.NOT_FOUND,
+    "not_found": StartRefusal.NOT_FOUND,
+    "remove_failed": StartRefusal.UNAVAILABLE,
+    "secrets_failed": StartRefusal.UNAVAILABLE,
+    "stopped": StartRefusal.UNAVAILABLE,
+    "invalid_request": StartRefusal.INVALID_REQUEST,
+    "disk_full": StartRefusal.UNAVAILABLE,
+    "builtin": StartRefusal.INVALID_REQUEST,
+    "refuse_dev_id": StartRefusal.ID_TAKEN,
+    "refuse_reserved": StartRefusal.INCOMPATIBLE,
+    "failed": StartRefusal.UNAVAILABLE,
+})
+
+
 # ── the manifest (plugin.json) ──────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -967,6 +1020,46 @@ class BlockEntry:
     repo_id: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class InstallFailure:
+    """Why an install or a removal did not happen: ``code`` an
+    INSTALL_ERROR_REASONS key, ``reason`` its v1 refusal, ``problems`` the
+    zip's / the manifest's codes (ZipProblem, ManifestCheck) or describe's
+    DescribeFailure, ``detail`` words without a path or a value."""
+    code: str
+    reason: StartRefusal
+    problems: Tuple[str, ...] = ()
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class InstallStatus:
+    """An install as GET /api/v1/plugins/installs/<id> answers it.
+    ``pending`` is PluginInstaller's PendingInstall (what the consent sheet
+    shows) once the zip is prepared, kept through installing / done."""
+    install_id: str
+    state: InstallState
+    plugin_id: Optional[str] = None
+    pending: Any = None
+    failure: Optional[InstallFailure] = None
+
+
+@dataclass(frozen=True)
+class RemovalStatus:
+    """What a removal would remove and how it goes (GET /api/v1/plugins/
+    <id>/removal): ``data_bytes`` user_data/plugins/<id>/data/, ``runs`` /
+    ``runs_bytes`` the job folders under the work folder and ``out_bytes``
+    their out/ folders (kept by runs=keep_out), ``work_folder`` the work
+    folder's name (never its path; None when unknown)."""
+    state: RemovalState
+    data_bytes: int = 0
+    runs: int = 0
+    runs_bytes: int = 0
+    out_bytes: int = 0
+    work_folder: Optional[str] = None
+    failure: Optional[InstallFailure] = None
+
+
 # ── the parts' interfaces ───────────────────────────────────────────────
 
 class RunHandle(Protocol):
@@ -1237,7 +1330,23 @@ class PluginJobs(Protocol):
         none); onLaneFreed on the caller's thread."""
 
     def Running(self, pluginId: str) -> bool:
-        """Whether a run of the plugin is going (update, removal)."""
+        """Whether a run of the plugin is going (update, removal): one that
+        ended counts until its folder is written (job.json)."""
+
+    def Hold(self, pluginId: str) -> bool:
+        """Hold the plugin's starts for a swap or a removal (ADR-009 C.3):
+        every Start of it is refused UNAVAILABLE until Unhold (a pending
+        hook is then discarded). Counted: each Hold is given back by one
+        Unhold, also when it answers False -- a run of the plugin holds a
+        lane (the swap / removal must not go on)."""
+
+    def Unhold(self, pluginId: str) -> None:
+        """Give back one Hold of the plugin."""
+
+    def CancelAll(self, pluginId: str) -> int:
+        """Ask every run of the plugin that holds a lane to stop (a disable,
+        a removal, a block): how many were asked. A claimed lane (the
+        built-in's) is its owner's."""
 
     def Cancel(self, pluginId: str, runId: str) -> bool:
         """Ask a run to stop; False when it is not running."""
@@ -1375,10 +1484,79 @@ class PluginInstaller(Protocol):
         """The first row of ``blocklist`` the plugin matches. Pure."""
 
     def Remove(self, pluginId: str, *, data: bool, runs: str) -> None:
-        """Remove a plugin (C.6): ``runs`` is delete / keep_out / keep."""
+        """Remove a plugin (C.6): ``runs`` is delete / keep_out / keep.
+        Calls PluginHooks.Forget(id, REMOVED) itself, before its user_data
+        folder goes; holds the plugin's starts (PluginJobs.Hold) while it
+        removes."""
+
+    def Sweep(self) -> int:
+        """At launch: the swaps' leftovers (.new / .old / .part): how many
+        plugin ids had some."""
+
+    def IsEnabled(self, pluginId: str) -> bool:
+        """The user's enable of an installed plugin (user_data/plugins/<id>/
+        enabled.json; none is enabled)."""
+
+    def SetEnabled(self, pluginId: str, enabled: bool) -> None:
+        """Save the user's enable. Raises OSError when it cannot be
+        written."""
+
+
+class PluginInstalls(Protocol):
+    """The installs as the v1 routes drive them (ADR-009 P5a): the uploaded
+    zip, the install's two jobs around the consent sheet, the enable, the
+    removal's job and the blocklist in effect. Refusals raise
+    PluginInstallsError (a StartRefusal and its detail)."""
+
+    def ReceiveUpload(self, stream: Any, length: int) -> Tuple[str, int]:
+        """Read a zip of ``length`` bytes from ``stream`` into a private
+        file and hold it: (its upload id, the seconds it is held). One at a
+        time: a new upload replaces the one held."""
+
+    def DropUpload(self, uploadId: str) -> bool:
+        """Remove the upload held by that id; whether one was."""
+
+    def StartInstall(self, uploadId: str) -> InstallStatus:
+        """Prepare the upload's install (a TaskExecutor job): PREPARING."""
+
+    def Status(self, installId: str) -> InstallStatus:
+        """The install's state."""
+
+    def Consent(self, installId: str, consentDigest: str) -> InstallStatus:
+        """The sheet consented (its digest must be the pending one's): the
+        commit (a job), then registry.Scan and hooks.Refresh."""
+
+    def Cancel(self, installId: str) -> InstallStatus:
+        """Decline: the staged .new removed (preparing: once it is made)."""
+
+    def SetEnabled(self, pluginId: str, enabled: bool) -> None:
+        """An installed plugin's enable; a disable cancels its runs."""
+
+    def Removal(self, pluginId: str) -> RemovalStatus:
+        """What a removal would remove, and the removal's state."""
+
+    def StartRemoval(self, pluginId: str, *, data: bool,
+                     runs: str) -> RemovalStatus:
+        """Remove (a job): the plugin's starts held, its runs cancelled and
+        waited for, PluginInstaller.Remove, then registry.Scan and
+        hooks.Refresh."""
+
+    def SetBlocklist(self, entries: Sequence[BlockEntry]) -> None:
+        """The blocked rows in effect: an installed plugin newly matching is
+        cancelled and its hooks forgotten (BLOCKED)."""
+
+    def Blocklist(self) -> Tuple[BlockEntry, ...]:
+        """The blocked rows in effect."""
+
+    def BlockedReason(self, pluginId: str,
+                      version: Optional[str]) -> Optional[Text]:
+        """The registry's blockedBy: the reason when the installed plugin
+        matches a row (by id and version, its zip's SHA-256, its
+        repo_id)."""
 
     def Sweep(self) -> None:
-        """At launch: the swaps' leftovers (.new / .old / .part)."""
+        """At launch (a job): PluginInstaller.Sweep, a scan when it put
+        something back; installs are refused until it has run."""
 
 
 class ReleaseNetwork(Protocol):

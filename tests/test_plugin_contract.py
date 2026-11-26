@@ -546,6 +546,17 @@ def test_the_enums_are_the_contracts():
     assert _values(T.InstallSourceKind) \
         == CONTRACT["install"]["source_kinds"]
     assert _values(T.ZipProblem) == CONTRACT["install"]["zip_problems"]
+    assert _values(T.InstallState) == CONTRACT["install"]["states"]
+    assert _values(T.RemovalState) == CONTRACT["install"]["removal_states"]
+    # An install's / a removal's failure: every InstallError code (and the
+    # installs' own ``failed``) with the refusal it carries.
+    assert {code: reason.value
+            for code, reason in T.INSTALL_ERROR_REASONS.items()}         == CONTRACT["install"]["errors"]
+    from src.core import PluginInstaller, PluginInstalls
+    codes = {value for name, value in vars(PluginInstaller).items()
+             if name.isupper() and isinstance(value, str)
+             and value in T.INSTALL_ERROR_REASONS}
+    assert codes | {PluginInstalls.FAILED}         | {T.InstallDecision.REFUSE_DEV_ID, T.InstallDecision.REFUSE_RESERVED}         == set(T.INSTALL_ERROR_REASONS)
 
 
 def test_the_shared_constants_and_the_secret_free_repr():
@@ -580,6 +591,7 @@ IMPLEMENTED = [
     ("PluginSecrets", "PluginSecrets"),
     ("PluginInputs", "PluginInputs"),
     ("PluginInstaller", "PluginInstaller"),
+    ("PluginInstalls", "PluginInstalls"),
 ]
 
 

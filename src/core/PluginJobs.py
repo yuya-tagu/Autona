@@ -9,6 +9,11 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
   PluginJobs owns both lanes: another owner (the built-in vodsplit, run by
   ArchiveJobService, on the heavy one) takes a lane with ``Claim(lane,
   owner)`` and gives it back with ``Release(lane, owner)``;
+- the per-plugin hold of a swap or a removal (``Hold`` / ``Unhold``, ADR-009
+  C.3): while held, a start of the plugin is refused UNAVAILABLE; Hold
+  answers whether a run of it holds a lane, under the lock a start reserves
+  its lane with, so the installer's swap never meets a run it did not see.
+  ``CancelAll`` asks every run of a plugin to stop (a disable, a removal);
 - a run's job folder ``<work>/plugins/<id>/<run_id>/`` with request.json
   (UTF-8, no BOM), job.json, worker.log (the runner appends to it),
   ``inputs/`` (removed when the run ends, kept for a dev plugin) and
@@ -828,6 +833,9 @@ class PluginJobs:
         self._launched = threading.Condition(self._lock)
         self._filesLock = threading.Lock()
         self._lanes: dict = {Lane.HEAVY: None, Lane.LIGHT: None}
+        # Plugin id -> how many holds keep its starts refused (a swap or a
+        # removal: Hold / Unhold).
+        self._held: dict = {}
         # Runs that ended and whose job.json is not written yet.
         self._finishing: dict = {}
         self._closing = False
@@ -964,10 +972,51 @@ class PluginJobs:
 
     def Running(self, pluginId: str) -> bool:
         with self._lock:
-            return any(
-                (isinstance(slot, _Run) and slot.pluginId == pluginId)
-                or (isinstance(slot, _Claim) and slot.owner == pluginId)
-                for slot in self._lanes.values())
+            return self._RunningLocked(pluginId)
+
+    def _RunningLocked(self, pluginId):
+        """A run of the plugin holds a lane, or one that ended is still
+        writing its folder (job.json, inputs/: _Settle, after the lane is
+        freed) -- a removal must not take the folder under it. Under
+        _lock."""
+        return any(
+            (isinstance(slot, _Run) and slot.pluginId == pluginId)
+            or (isinstance(slot, _Claim) and slot.owner == pluginId)
+            for slot in self._lanes.values()) or any(
+            key[0] == pluginId for key in self._finishing)
+
+    def Hold(self, pluginId: str) -> bool:
+        """Refuse the plugin's starts (UNAVAILABLE) until Unhold, for a swap
+        or a removal (ADR-009 C.3): True when no run of it is Running.
+        Counted, and given back by Unhold whatever it answered. Taken under
+        the lock that reserves a lane, so a start either got its lane
+        before (False here) or sees the hold."""
+        with self._lock:
+            self._held[pluginId] = self._held.get(pluginId, 0) + 1
+            return not self._RunningLocked(pluginId)
+
+    def Unhold(self, pluginId: str) -> None:
+        with self._lock:
+            count = self._held.get(pluginId, 0) - 1
+            if count > 0:
+                self._held[pluginId] = count
+            else:
+                self._held.pop(pluginId, None)
+
+    def CancelAll(self, pluginId: str) -> int:
+        """Cancel every run of the plugin holding a lane (a disable, a
+        removal, a block): how many were asked. A claim is its owner's."""
+        # As Cancel, for each: one being prepared (no id yet) is not
+        # launched, one being launched is cancelled once it has its handle.
+        with self._lock:
+            runs = [run for run in self._Runs()
+                    if run.pluginId == pluginId and not run.ended]
+            for run in runs:
+                run.cancelRequested = True
+            handles = [run.handle for run in runs if run.handle is not None]
+        for handle in handles:
+            handle.Cancel()
+        return len(runs)
 
     def _Runs(self):
         """This module's runs holding a lane (under _lock)."""
@@ -1177,6 +1226,10 @@ class PluginJobs:
         with self._lock:
             if self._closing:
                 return _Unavailable("shutting down")
+            if self._held.get(pluginId):
+                # A swap or a removal of it is going (Hold).
+                return _Unavailable("the plugin is being installed or "
+                                    "removed")
             busy = self._BusyLocked(plan.lane)
             if busy is not None:
                 return busy
