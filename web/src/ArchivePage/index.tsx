@@ -28,6 +28,7 @@ import {ReduxState} from "../redux/store";
 import {DARK_TOKENS as tokens} from "../themes";
 import {apiErrorStatus, apiGetJson, apiPatch, apiPost, apiPut, ApiError} from "../api";
 import {FeedbackProvider} from "../ScoreboardPage/Feedback";
+import JobProgressView from "./JobProgressView";
 import {
     ArchiveStatus,
     GameSkins,
@@ -42,7 +43,6 @@ import {
     SetResult,
     SetRow,
     SetsJson,
-    etaParts,
     filterSets,
     formatClock,
     formatDuration,
@@ -2116,40 +2116,16 @@ function Progress({job, readOnly, onAct}: {
     onAct: (action: string) => void;
 }) {
     const progress = job.progress;
-    const eta = etaParts(progress?.eta);
-    const logs = (job.logs ?? []).slice(-5);
     return (
-        <Stack spacing={1} sx={{p: 2}}>
-            <Typography>
-                {progress
-                    ? `[${progress.index ?? 0}/${progress.count ?? 0}] ${progress.label ?? ""}`
-                    : i18n.t("archive_state_running")}
-            </Typography>
-            <LinearProgress variant="determinate"
-                            value={Math.round((progress?.overall ?? 0) * 100)}/>
-            {eta ? (
-                <Typography variant="body2" sx={{color: tokens.textMuted}}>
-                    {eta.min > 0
-                        ? i18n.t("archive_eta_min", {
-                            min: eta.min,
-                            sec: String(eta.sec).padStart(2, "0")})
-                        : i18n.t("archive_eta_sec", {sec: eta.sec})}
-                </Typography>
-            ) : null}
-            {logs.length > 0 ? (
-                <Box component="pre" aria-label={i18n.t("archive_logs")}
-                     sx={{m: 0, fontSize: "0.75rem", whiteSpace: "pre-wrap",
-                          color: tokens.textMuted}}>
-                    {logs.join("\n")}
-                </Box>
-            ) : null}
-            <Box>
-                <Button color="error" variant="outlined" disabled={readOnly}
-                        onClick={() => onAct("cancel")}>
-                    {i18n.t("archive_abort")}
-                </Button>
-            </Box>
-        </Stack>
+        <JobProgressView
+            line={progress
+                ? `[${progress.index ?? 0}/${progress.count ?? 0}] ${progress.label ?? ""}`
+                : null}
+            overall={progress?.overall}
+            eta={progress?.eta}
+            logs={(job.logs ?? []).slice(-5)}
+            readOnly={readOnly}
+            onCancel={() => onAct("cancel")}/>
     );
 }
 
