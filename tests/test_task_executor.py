@@ -914,6 +914,11 @@ THREADS_LEFT = {
     # progress, then the job's end) and its stderr's (worker.log), daemon,
     # one pair per run; a job's run is the worker process, not a task.
     ("src/core/ArchiveJobService.py", "ArchiveJobService._Start", "Thread"),
+    # A plugin run (ADR-009 E.1): its stdout's reader, which also keeps the
+    # time limit, the cancel's grace and the run's end, and its stderr's
+    # (worker.log), daemon, one pair per run (one for a run that did not
+    # start: it only delivers the end). A run is a process, not a task.
+    ("src/core/PluginRunner.py", "PluginRunner._StartThreads", "Thread"),
     # The match log's writer (ADR-006 A2): one, daemon, started with the
     # service; the observer hands it lines inside StateManager.lock.
     ("src/core/MatchLogService.py", "MatchLogService._StartWriter", "Thread"),
