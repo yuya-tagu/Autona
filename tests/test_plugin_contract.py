@@ -572,6 +572,7 @@ IMPLEMENTED = [
     ("PluginSettings", "PluginSettings"),
     ("PluginSecrets", "PluginSecrets"),
     ("PluginInputs", "PluginInputs"),
+    ("PluginInstaller", "PluginInstaller"),
 ]
 
 

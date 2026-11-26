@@ -19,12 +19,9 @@ from loguru import logger
 
 from src.core import PluginInstaller as installer_module
 from src.core.PluginInstaller import (
-    BAD_ZIP, BLOCKED, BUILTIN, DESCRIBE_FAILED, DESCRIPTOR_INVALID,
-    DISK_FULL, ENTRY_MISSING, ENTRY_OUTSIDE, EXTRACT_FAILED, FOLDER_NOT_ID,
-    ID_MISMATCH, IN_PROGRESS, MANIFEST_INVALID, MANIFEST_MISSING,
-    MANIFEST_UNREADABLE, NETWORK_FAILED, NOT_FOUND, NOT_ONE_FOLDER,
-    NOT_PENDING, RUNNING, SECRETS_FAILED, SHA256_MISMATCH, SIZE_MISMATCH,
-    SWAP_FAILED, VERSION_MISMATCH, ZIP_TOO_LARGE, BlockedBy, CheckDescriptor,
+    BAD_ZIP, BLOCKED, BUILTIN, DESCRIBE_FAILED, DISK_FULL, EXTRACT_FAILED,
+    IN_PROGRESS, MANIFEST_INVALID, NETWORK_FAILED, NOT_FOUND, NOT_PENDING,
+    RUNNING, SECRETS_FAILED, SWAP_FAILED, BlockedBy, CheckDescriptor,
     ConsentDigest, DecideSource, InstallError, ParseBlocklist,
     PluginInstaller, VersionMatches)
 from src.core.PluginTypes import (BlockEntry, DescribeAnswer,
@@ -32,9 +29,26 @@ from src.core.PluginTypes import (BlockEntry, DescribeAnswer,
                                   Hook, HookDisabledReason, InstallDecision,
                                   InstallRecord, InstallSource, Job,
                                   Manifest, ManifestCheck, ManifestProblem,
-                                  ManifestReport, Permissions, ProblemScope)
-from src.core.ZipSafety import (LINK, PATH_TOO_LONG, TOO_MANY_ENTRIES,
-                                ZIP_UNREADABLE)
+                                  ManifestReport, Permissions, ProblemScope,
+                                  ZipProblem)
+
+# CheckZip's codes, as the contract names them.
+DESCRIPTOR_INVALID = ZipProblem.DESCRIPTOR_INVALID
+ENTRY_MISSING = ZipProblem.ENTRY_MISSING
+ENTRY_OUTSIDE = ZipProblem.ENTRY_OUTSIDE
+FOLDER_NOT_ID = ZipProblem.FOLDER_NOT_ID
+ID_MISMATCH = ZipProblem.ID_MISMATCH
+LINK = ZipProblem.LINK
+MANIFEST_MISSING = ZipProblem.MANIFEST_MISSING
+MANIFEST_UNREADABLE = ZipProblem.MANIFEST_UNREADABLE
+NOT_ONE_FOLDER = ZipProblem.NOT_ONE_FOLDER
+PATH_TOO_LONG = ZipProblem.PATH_TOO_LONG
+SHA256_MISMATCH = ZipProblem.SHA256_MISMATCH
+SIZE_MISMATCH = ZipProblem.SIZE_MISMATCH
+TOO_MANY_ENTRIES = ZipProblem.TOO_MANY_ENTRIES
+VERSION_MISMATCH = ZipProblem.VERSION_MISMATCH
+ZIP_TOO_LARGE = ZipProblem.ZIP_TOO_LARGE
+ZIP_UNREADABLE = ZipProblem.ZIP_UNREADABLE
 
 PLUGIN = "example.tool"
 REPO_ID = 812345678
@@ -126,17 +140,18 @@ def _manifest_from(raw):
 
 class FakeRegistry:
     """Check like the real one in what the installer depends on: the id
-    held to the folder's name (a .new folder fails it)."""
+    held to ``expectedId``, else to the folder's name."""
 
     def __init__(self):
         self.checked = []
         self.extra = ()
         self.failure = None
 
-    def Check(self, raw, folder, source, *, dev, hostVersion):
-        self.checked.append((folder, source, dev, hostVersion))
+    def Check(self, raw, folder, source, *, dev, hostVersion,
+              expectedId=None):
+        self.checked.append((folder, source, dev, hostVersion, expectedId))
         problems = list(self.extra)
-        if os.path.basename(folder) != raw.get("id"):
+        if (expectedId or os.path.basename(folder)) != raw.get("id"):
             problems.append(ManifestProblem(ManifestCheck.ID_FOLDER_MISMATCH,
                                             ProblemScope.PLUGIN))
         return ManifestReport(_manifest_from(raw), tuple(problems))
@@ -395,6 +410,22 @@ def test_too_many_entries_are_refused_before_zipfile_reads_them(
 
     monkeypatch.setattr(installer_module.zipfile, "ZipFile", unread)
     assert list(env.installer.CheckZip(path, None)) == [TOO_MANY_ENTRIES]
+
+
+def test_a_directory_too_large_is_the_contracts_too_many_entries(
+        env, monkeypatch):
+    path = _plugin_zip(env.tmp / "a.zip")
+    monkeypatch.setattr(installer_module.ZipSafety, "CheckCentralDirectory",
+                        lambda *_a, **_k: "directory_too_large")
+    assert list(env.installer.CheckZip(path, None)) == [TOO_MANY_ENTRIES]
+
+
+def test_every_zip_code_is_the_contracts(env):
+    codes = {value for name, value in vars(installer_module.ZipSafety).items()
+             if name.isupper() and isinstance(value, str)
+             and value.islower() and "_" in value}
+    assert codes - {problem.value for problem in ZipProblem} == {
+        "directory_too_large"}
 
 
 def _break_entry(path, name, *, garbage=False, method=None):
@@ -725,8 +756,8 @@ def test_a_manual_zip_is_staged_then_committed(env):
     assert not (env.plugins / PLUGIN).exists()
     assert env.runner.described == []
     assert env.registry.checked[0][0] == pending.new_dir
-    assert env.registry.checked[0][1:] == (MANUAL, False, "2.6.0")
-    # Check's id_folder_mismatch on the .new folder is not the plugin's.
+    assert env.registry.checked[0][1:] == (MANUAL, False, "2.6.0", PLUGIN)
+    # The .new folder's name is not held against the id: expectedId is.
     assert pending.report.problems == ()
 
     record = env.installer.Commit(pending)
@@ -735,7 +766,8 @@ def test_a_manual_zip_is_staged_then_committed(env):
     assert (env.plugins / PLUGIN / "bin" / "tool.exe").is_file()
     assert not os.path.exists(pending.new_dir)
     assert record == InstallRecord(MANUAL, "1.0.0", _sha(path),
-                                   pending.consent_digest)
+                                   pending.consent_digest,
+                                   _record(env)["installed_at"])
     assert _record(env) == {
         "source": {"kind": "manual"}, "version": "1.0.0",
         "sha256": _sha(path), "consent_digest": pending.consent_digest,
@@ -1296,7 +1328,7 @@ def test_remove_keeps_data_and_outs_when_asked(env):
     assert not (env.plugins / PLUGIN).exists()
     assert sorted(os.listdir(folder)) == ["data"]
     assert env.secrets.forgotten == [(PLUGIN, False)]
-    assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.USER)]
+    assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.REMOVED)]
     for runId in os.listdir(runs):
         assert os.listdir(runs / runId) == ["out"]
 

@@ -70,6 +70,8 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
+from .PluginTypes import ZipProblem
+
 try:
     import lzma
     _LZMA_ERRORS: tuple = (lzma.LZMAError,)
@@ -77,17 +79,18 @@ except ImportError:  # a Python built without lzma: zipfile has none either
     _LZMA_ERRORS = ()
 
 # What Inspect reports (the installer's codes: ADR-009 leaves them to it).
-ZIP_UNREADABLE = "zip_unreadable"
-TOO_MANY_ENTRIES = "too_many_entries"
-EXPANDED_TOO_LARGE = "expanded_too_large"
-UNSAFE_PATH = "unsafe_path"
-BAD_NAME = "bad_name"
-NOT_ASCII = "not_ascii"
-RESERVED_NAME = "reserved_name"
-LINK = "link"
-ENCRYPTED = "encrypted"
-DUPLICATE_NAME = "duplicate_name"
-PATH_TOO_LONG = "path_too_long"
+ZIP_UNREADABLE = ZipProblem.ZIP_UNREADABLE.value
+TOO_MANY_ENTRIES = ZipProblem.TOO_MANY_ENTRIES.value
+EXPANDED_TOO_LARGE = ZipProblem.EXPANDED_TOO_LARGE.value
+UNSAFE_PATH = ZipProblem.UNSAFE_PATH.value
+BAD_NAME = ZipProblem.BAD_NAME.value
+NOT_ASCII = ZipProblem.NOT_ASCII.value
+RESERVED_NAME = ZipProblem.RESERVED_NAME.value
+LINK = ZipProblem.LINK.value
+ENCRYPTED = ZipProblem.ENCRYPTED.value
+DUPLICATE_NAME = ZipProblem.DUPLICATE_NAME.value
+PATH_TOO_LONG = ZipProblem.PATH_TOO_LONG.value
+# Not a ZipProblem: a caller with the contract's codes maps it.
 DIRECTORY_TOO_LARGE = "directory_too_large"
 
 # What opening or reading a damaged / unsupported zip can raise besides
