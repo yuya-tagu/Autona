@@ -43,7 +43,7 @@ import RunView, {pickErrorText, refusalText, usePolledRun} from "./RunView";
 // The file name of a made image's path (out/results/<name>): what an action's
 // context names.
 export function fileNameOf(path: string): string | null {
-    const name = path.split(/[\/]/).pop() ?? "";
+    const name = path.split(/[\\/]/).pop() ?? "";
     return name || null;
 }
 
