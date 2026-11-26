@@ -167,6 +167,20 @@ export interface PickResult {
     name?: string;
 }
 
+// The three places a job can be offered as an action (ADR-009 B.4): the
+// pages' "Plugins" menus.
+export const ACTION_TARGETS = [
+    "result_image", "thumbnail_image", "archive_export"] as const;
+export type ActionTarget = typeof ACTION_TARGETS[number];
+
+// GET /api/v1/plugins/actions?target= : one job that offers itself at the
+// target, with the plugin's name and the job's form (routes_v1.json).
+export interface PluginAction {
+    plugin: string;
+    name: PluginText;
+    job: PluginJob;
+}
+
 // The body of POST /plugins/<id>/runs.
 export interface RunRequest {
     job: string;

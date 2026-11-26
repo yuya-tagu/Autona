@@ -77,6 +77,7 @@ import {
     youtubeEmbedId,
 } from "./archivePreview";
 import {useShellAccess} from "../PanelShell/useShellAccess";
+import PluginActionsMenu from "../PluginsPage/PluginActionsMenu";
 import {
     TimelineView,
     bestShare,
@@ -934,10 +935,11 @@ function ThumbsState({thumbs, closed, onClose}: {
 // template the export names them with and the confirmed sets' thumbnails
 // (A6); by the analysis' template, the sets split again with results
 // (ReanalyzePanel, opened under it).
-function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
+function ExportBar({jobId, exported, total, confirmed, canExport, readOnly, starting,
                     save, reviewError, onExport, onCancel, templates, event,
                     analysisTemplate, onTemplates, thumbs, onThumbs,
                     hasResults, cached, onReanalyze}: {
+    jobId: string;
     exported: JobExport | null;
     total: number;
     confirmed: number;
@@ -1009,6 +1011,11 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                         onClick={onThumbs}>
                     {i18n.t("archive_thumbs_make")}
                 </Button>
+                {/* The installed plugins' actions on the clips exported. */}
+                {exported?.state === "done" && !readOnly ? (
+                    <PluginActionsMenu target="archive_export"
+                                       context={jobId}/>
+                ) : null}
                 <Typography variant="caption" data-testid="archive-save-state"
                             sx={{color: tokens.textMuted}}>
                     {saveText}
@@ -1482,7 +1489,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
              sx={{flex: 1, minHeight: 0, display: "flex",
                   flexDirection: "column", outline: "none"}}>
             {done ? (
-                <ExportBar exported={job.export ?? null} total={shown.sets.length}
+                <ExportBar jobId={job.id} exported={job.export ?? null} total={shown.sets.length}
                            confirmed={confirmedCount(shown.sets)}
                            canExport={editable} readOnly={readOnly}
                            starting={starting} save={save}

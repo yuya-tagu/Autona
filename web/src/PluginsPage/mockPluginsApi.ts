@@ -142,6 +142,11 @@ export function createMockPluginsApi(
         inputChoices: async (kind) => kind === "match_log"
             ? [{id: "2026-11-26/cup", label: "2026-11-26 Fake Cup"}]
             : [{id: "r1", label: "result_1.png"}],
+        actions: async (target) => [...details.values()].flatMap((d) =>
+            d.jobs.filter((j) => (j.actions ?? []).some(
+                (a) => a.target === target))
+                .map((job) => ({plugin: d.id, name: d.name,
+                                job: clone(job)}))),
         startRun: async (id, request: RunRequest) => {
             serial += 1;
             const runId = `20261126-10000${serial}-ab${serial}z`;

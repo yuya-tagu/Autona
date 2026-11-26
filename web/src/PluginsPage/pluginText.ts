@@ -29,6 +29,12 @@ export function sizeLabel(bytes: number): string {
     return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
 
+// "v1.2.3", or "" when the version is not known (a built-in plugin before its
+// worker has been probed answers an empty one).
+export function versionLabel(version: string | null | undefined): string {
+    return version ? `v${version}` : "";
+}
+
 // A run's start (ISO 8601 with offset) in the viewer's locale; the raw text
 // when it does not parse.
 export function startedText(iso: string, language: string): string {

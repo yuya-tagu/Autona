@@ -10,7 +10,12 @@ import {
     PluginRun,
     SOURCE_TYPES,
 } from "./pluginTypes";
-import {pluginText, sizeLabel, startedText} from "./pluginText";
+import {
+    pluginText,
+    sizeLabel,
+    startedText,
+    versionLabel,
+} from "./pluginText";
 import FieldForm from "./FieldForm";
 import {
     FormValues,
@@ -127,7 +132,13 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
                     </Box>
                 </>
             ) : (
-                <Note>{i18n.t("plugins_job_context_only")}</Note>
+                <Box data-testid={`plugin-job-note-${job.id}`}>
+                    <Note>
+                        {i18n.t(plugin.badge === "builtin"
+                            ? "plugins_job_builtin_page"
+                            : "plugins_job_context_only")}
+                    </Note>
+                </Box>
             )}
         </Stack>
     );
@@ -506,8 +517,9 @@ export default function PluginDetailView({api, id, language, onChanged,
             </CardFrame>
 
             <Declared plugin={plugin} language={language}/>
-            <Note>{`${plugin.id} · ${plugin.author} · v${plugin.version}`
-                + ` · ${sizeLabel(plugin.size_bytes)}`}</Note>
+            <Note>{[plugin.id, plugin.author, versionLabel(plugin.version),
+                    sizeLabel(plugin.size_bytes)]
+                .filter(Boolean).join(" · ")}</Note>
         </Stack>
     );
 }
