@@ -852,7 +852,7 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
                 </Button>
                 {/* The installed plugins' actions on the image made (the
                     desktop's view only; nothing when none offers one). */}
-                <PluginActionsMenu target="result_image"
+                <PluginActionsMenu target="result_image" blocked={generating}
                                    context={fileNameOf(render.path)}/>
             </Stack>
             <Note>

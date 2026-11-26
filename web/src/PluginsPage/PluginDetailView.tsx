@@ -135,6 +135,7 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
                 <Box data-testid={`plugin-job-note-${job.id}`}>
                     <Note>
                         {i18n.t(plugin.badge === "builtin"
+                                && plugin.id === BUILTIN_VODSPLIT_ID
                             ? "plugins_job_builtin_page"
                             : "plugins_job_context_only")}
                     </Note>

@@ -1430,3 +1430,50 @@ test("a template made while the catalog cannot be read is not chosen",
     expect(writes("POST", "/api/v1/layouts:create")).toHaveLength(1);
     expect(writes("PATCH", "/api/v1/thumbnail")).toEqual([]);
 });
+
+// 笏笏 the Plugins menu (ADR-009 D4) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
+
+test("the Plugins menu hands the generated file name to an action",
+     async () => {
+    shellSession = 200;
+    const fetched = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/v1/plugins/actions") {
+            return answer(200, {ok: true, data: [{
+                plugin: "taguyan.webhook", name: "Webhook",
+                job: {id: "post_thumb", title: "Post", lane: "light",
+                      timeout_seconds: 60,
+                      params: [{key: "image", type: "thumbnail_image",
+                                label: "Image"}],
+                      actions: [{target: "thumbnail_image",
+                                 label: "Send"}]}}]});
+        }
+        if (path === "/api/v1/plugins/taguyan.webhook/runs"
+            && init?.method === "POST") {
+            return answer(201, {ok: true, data: {run_id: "20261126-100000-ab1z"}});
+        }
+        return fetched(url, init);
+    });
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    expect(screen.getByTestId("plugin-actions-button")).toBeDisabled();
+
+    setState({thumbnail: {render: rendered({path: PATH, revision: 2})}});
+    await settle();
+    expect(screen.getByTestId("plugin-actions-button")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("plugin-actions-button"));
+    fireEvent.click(await screen.findByTestId(
+        "plugin-action-taguyan.webhook-post_thumb"));
+    fireEvent.click(await screen.findByTestId("plugin-action-run"));
+    await settle();
+    const posted = global.fetch.mock.calls.find(([url, init]) =>
+        init?.method === "POST"
+        && new URL(url).pathname === "/api/v1/plugins/taguyan.webhook/runs");
+    expect(JSON.parse(posted[1].body)).toEqual({
+        job: "post_thumb",
+        trigger: {kind: "action", target: "thumbnail_image"},
+        params: {},
+        inputs: {image: "Al#pha-vs-Bravo-2026-11-08-01-02-03.png"}});
+});

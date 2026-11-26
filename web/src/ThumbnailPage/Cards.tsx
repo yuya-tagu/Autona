@@ -694,7 +694,7 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
                         {i18n.t("thumbnail_open_image")}
                     </Button>
                 )}
-                <PluginActionsMenu target="thumbnail_image"
+                <PluginActionsMenu target="thumbnail_image" blocked={generating}
                                    context={fileNameOf(render.path)}/>
             </Stack>
             {!canCopyImage() && (

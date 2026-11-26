@@ -2224,4 +2224,67 @@ describe("the review screen", () => {
             expect(document.querySelector("iframe")).toBeNull();
         });
     });
+
+    // The Plugins menu of the export (ADR-009 D4): it waits for the export,
+    // hands the job's id to an action, and is not there outside the
+    // desktop's window.
+    const ACTIONS = "/api/v1/plugins/actions?target=archive_export";
+    const actions = () => Promise.resolve({data: [{
+        plugin: "taguyan.webhook", name: "Webhook",
+        job: {id: "post_clips", title: "Post", lane: "light",
+              timeout_seconds: 60,
+              params: [{key: "clips", type: "archive_export",
+                        label: "Clips"}],
+              actions: [{target: "archive_export", label: "Send"}]}}]});
+
+    test("the Plugins menu waits until the export is done", async () => {
+        installJob(SETS, {[ACTIONS]: actions});
+        await open(1);
+        const button = await screen.findByTestId("plugin-actions-button");
+        expect(button).toBeDisabled();
+        expect(screen.getByTestId("plugin-actions-why").textContent)
+            .toBe(i18n.t("plugins_action_after_export"));
+    });
+
+    test("the Plugins menu hands the job's id to an action once exported",
+         async () => {
+        const exported = {state: "done", clips: 1, skipped: 0, files: []};
+        installJob(SETS, {
+            [ACTIONS]: actions,
+            [`/api/v1/archive/jobs/${ID}`]: () => Promise.resolve(
+                {data: {job: {...JOB, export: exported}, sets: SETS}}),
+            "/api/v1/archive/jobs": () => Promise.resolve(
+                {data: {jobs: [{...JOB, export: exported}]}}),
+        });
+        apiPost.mockImplementation(() => Promise.resolve(JSON.stringify(
+            {data: {run_id: "20261126-100000-ab1z"}})));
+        try {
+            await open(1);
+            const button = await screen.findByTestId("plugin-actions-button");
+            expect(button).toBeEnabled();
+            fireEvent.click(button);
+            fireEvent.click(await screen.findByTestId(
+                "plugin-action-taguyan.webhook-post_clips"));
+            fireEvent.click(await screen.findByTestId("plugin-action-run"));
+            await waitFor(() => expect(apiPost).toHaveBeenCalled());
+            expect(apiPost.mock.calls[0][0])
+                .toBe("/api/v1/plugins/taguyan.webhook/runs");
+            expect(apiPost.mock.calls[0][1]).toEqual({
+                job: "post_clips",
+                trigger: {kind: "action", target: "archive_export"},
+                params: {}, inputs: {clips: ID}});
+        } finally {
+            apiPost.mockReset();
+        }
+    });
+
+    test("there is no Plugins menu outside the desktop's window", async () => {
+        installJob(SETS, {[ACTIONS]: actions,
+                          "/api/v1/shell-session": forbidden});
+        render(<ArchivePage/>);
+        await screen.findByTestId("archive-review");
+        await waitFor(() => expect(count("/api/v1/shell-session")).toBe(1));
+        expect(screen.queryByTestId("plugin-actions-button")).toBeNull();
+        expect(count(ACTIONS)).toBe(0);
+    });
 });

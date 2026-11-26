@@ -74,6 +74,17 @@ describe("the Plugins menu", () => {
                                 target="result_image" context={null}/>);
         const button = await screen.findByTestId("plugin-actions-button");
         expect(button.disabled).toBe(true);
+        expect(screen.getByTestId("plugin-actions-why").textContent)
+            .toBe(i18n.t("plugins_action_no_context"));
+    });
+
+    test("waits while the page is making the image", async () => {
+        wrap(<PluginActionsMenu api={createMockPluginsApi()} blocked
+                                target="result_image" context="r.png"/>);
+        expect((await screen.findByTestId("plugin-actions-button")).disabled)
+            .toBe(true);
+        expect(screen.getByTestId("plugin-actions-why").textContent)
+            .toBe(i18n.t("plugins_action_generating"));
     });
 
     test("starts an action with the page's file as its context", async () => {
@@ -87,8 +98,8 @@ describe("the Plugins menu", () => {
         const dialog = await screen.findByTestId("plugin-action-dialog");
         expect(dialog.textContent).toContain("Send to webhook");
         // The image is the page's: not asked for.
-        expect(screen.queryByTestId("plugin-action-param-image")
-            ?.tagName).not.toBe("INPUT");
+        expect(screen.getByTestId("plugin-action-param-image").textContent)
+            .toBe(i18n.t("plugins_source_context", {label: "Result image"}));
         fireEvent.click(screen.getByTestId("plugin-action-run"));
         await waitFor(() => expect(start).toHaveBeenCalled());
         expect(start.mock.calls[0][0]).toBe("taguyan.webhook");
@@ -99,6 +110,55 @@ describe("the Plugins menu", () => {
         expect(await screen.findByTestId("plugin-run-progress")).toBeTruthy();
         expect(await screen.findByTestId("plugin-run-view")).toBeTruthy();
         expect(screen.getByTestId("plugin-action-again").disabled).toBe(false);
+    });
+
+    test("does not ask for what the trigger fills (a state, a match log)",
+         async () => {
+        const api = createMockPluginsApi();
+        api.actions = async () => [{
+            plugin: "taguyan.webhook", name: "Webhook",
+            job: {id: "both", title: "Both", lane: "light",
+                  timeout_seconds: 60,
+                  params: [
+                      {key: "image", type: "result_image", required: true,
+                       label: "Result image"},
+                      {key: "log", type: "match_log", required: true,
+                       label: "Match log"},
+                      {key: "st", type: "state", label: "State"},
+                      {key: "note", type: "text", label: "Note"}],
+                  actions: [{target: "result_image", label: "Both"}]}}];
+        const start = jest.spyOn(api, "startRun");
+        wrap(<PluginActionsMenu api={api} target="result_image"
+                                context="r.png"/>);
+        fireEvent.click(await screen.findByTestId("plugin-actions-button"));
+        fireEvent.click(await screen.findByTestId("plugin-action-taguyan.webhook-both"));
+        await screen.findByTestId("plugin-action-dialog");
+        expect(screen.queryByTestId("plugin-action-param-log")).toBeNull();
+        expect(screen.queryByTestId("plugin-action-param-st")).toBeNull();
+        expect(screen.getByTestId("plugin-action-param-note")).toBeTruthy();
+        // The required match log does not block the start.
+        fireEvent.click(screen.getByTestId("plugin-action-run"));
+        await waitFor(() => expect(start).toHaveBeenCalled());
+        expect(start.mock.calls[0][1].inputs).toEqual({image: "r.png"});
+    });
+
+    test("is not closed by Esc or a click outside while the job runs",
+         async () => {
+        const api = createMockPluginsApi({runningReads: 50});
+        wrap(<PluginActionsMenu api={api} target="result_image"
+                                context="r.png"/>);
+        fireEvent.click(await screen.findByTestId("plugin-actions-button"));
+        fireEvent.click(await screen.findByTestId(
+            "plugin-action-taguyan.webhook-post_image"));
+        fireEvent.click(await screen.findByTestId("plugin-action-run"));
+        await screen.findByTestId("plugin-run-progress");
+        expect(screen.getByTestId("plugin-action-goes-on")).toBeTruthy();
+        fireEvent.keyDown(screen.getByRole("dialog"), {key: "Escape"});
+        expect(screen.getByTestId("plugin-action-dialog")).toBeTruthy();
+        // The button closes it.
+        fireEvent.click(screen.getByTestId("plugin-action-close"));
+        await waitFor(() => expect(
+            screen.queryByTestId("plugin-action-dialog")).toBeNull());
     });
 
     test("says a busy refusal with the seconds left", async () => {
@@ -154,5 +214,27 @@ describe("the plugins page's display", () => {
         const note = await screen.findByTestId("plugin-job-note-split");
         expect(note.textContent).toContain("Archive clipping page");
         expect(note.textContent).not.toContain("starts only from");
+    });
+
+    test("another built-in plugin keeps the context-only note", async () => {
+        const api = createMockPluginsApi();
+        const detail = await api.detail("taguyan.webhook");
+        const other = {
+            ...detail, id: "taguyan.other", badge: "builtin",
+            jobs: [{id: "j", title: "J", lane: "light",
+                    timeout_seconds: 5, manual: false, params: []}]};
+        api.list = async () => [{
+            id: other.id, name: "Other", author: "taguyan", version: "1",
+            state: "ready", badge: "builtin", size_bytes: 1024,
+            has_icon: false}];
+        api.detail = async () => other;
+        render(
+            <PanelShellContext.Provider
+                value={{panel: "plugins", desktop: true, language: "en"}}>
+                <PluginsPage api={api}/>
+            </PanelShellContext.Provider>);
+        fireEvent.click(await screen.findByTestId("plugin-row-taguyan.other"));
+        expect((await screen.findByTestId("plugin-job-note-j")).textContent)
+            .toContain("starts only from");
     });
 });

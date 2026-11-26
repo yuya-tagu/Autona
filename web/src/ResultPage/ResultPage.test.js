@@ -2699,3 +2699,61 @@ test("in the shared view a new layout is made, listed and chosen",
         .toBeLessThan(order.indexOf(`PATCH ${RESULT}`));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
+
+// 笏笏 the Plugins menu (ADR-009 D4) 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏
+
+test("the Plugins menu waits for the image, then hands over its file name",
+     async () => {
+    world.shellSession = 200;
+    withData();
+    const fetched = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/v1/plugins/actions") {
+            return answer(200, {ok: true, data: [{
+                plugin: "taguyan.webhook", name: "Webhook",
+                job: {id: "post_image", title: "Post", lane: "light",
+                      timeout_seconds: 60,
+                      params: [{key: "image", type: "result_image",
+                                label: "Image"}],
+                      actions: [{target: "result_image", label: "Send"}]}}]});
+        }
+        if (path === "/api/v1/plugins/taguyan.webhook/runs"
+            && init?.method === "POST") {
+            return answer(201, {ok: true, data: {run_id: "20261126-100000-ab1z"}});
+        }
+        return fetched(url, init);
+    });
+    await renderPage();
+    await settle(PREVIEW_DEBOUNCE_MS);
+    await settle();
+    // Nothing made yet: the button waits and says so.
+    expect(screen.getByTestId("plugin-actions-button")).toBeDisabled();
+    expect(screen.getByTestId("plugin-actions-why"))
+        .toHaveTextContent(i18n.t("plugins_action_no_context"));
+
+    setState({result_render: rendered({path: PATH, revision: 1})});
+    await settle();
+    expect(screen.getByTestId("plugin-actions-button")).toBeEnabled();
+
+    // While an image is being made the file named would be the old one.
+    fireEvent.click(button(region("result_preview"), "result_generate"));
+    await settle();
+    expect(screen.getByTestId("plugin-actions-button")).toBeDisabled();
+    setState({result_render: rendered({path: PATH, revision: 9})});
+    await settle();
+    expect(screen.getByTestId("plugin-actions-button")).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId("plugin-actions-button"));
+    fireEvent.click(await screen.findByTestId(
+        "plugin-action-taguyan.webhook-post_image"));
+    fireEvent.click(await screen.findByTestId("plugin-action-run"));
+    await settle();
+    const posted = global.fetch.mock.calls.find(([url, init]) =>
+        init?.method === "POST"
+        && new URL(url).pathname === "/api/v1/plugins/taguyan.webhook/runs");
+    expect(JSON.parse(posted[1].body)).toEqual({
+        job: "post_image",
+        trigger: {kind: "action", target: "result_image"},
+        params: {}, inputs: {image: "Big Cup-top8-1.png"}});
+});

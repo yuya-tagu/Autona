@@ -47,6 +47,9 @@ export function fileNameOf(path: string): string | null {
     return name || null;
 }
 
+// Source types an action's trigger fills by itself.
+const AT_TRIGGER_TYPES = ["state", "match_log"];
+
 function labelOf(action: PluginAction, target: ActionTarget,
                  language: string): string {
     const own = (action.job.actions ?? []).find((a) => a.target === target);
@@ -65,7 +68,11 @@ function ActionDialog({api, action, target, context, language, onClose}: {
     // The source the page fills; the form does not ask for it.
     const filledKey = fields.find((f) => f.type === target)?.key;
     const filled = filledKey ? [filledKey] : [];
-    const asked = fields.filter((f) => f.key !== filledKey);
+    // What the form draws: the trigger fills a state / match log itself
+    // (contract_1.json at_trigger), so those are not asked either. What it
+    // checks and sends leaves out the page's own source too.
+    const shown = fields.filter((f) => !AT_TRIGGER_TYPES.includes(f.type));
+    const asked = shown.filter((f) => f.key !== filledKey);
     const [values, setValues] = React.useState<FormValues>(
         () => initialValues(fields));
     const [tried, setTried] = React.useState(false);
@@ -109,7 +116,14 @@ function ActionDialog({api, action, target, context, language, onClose}: {
     };
 
     return (
-        <Dialog open onClose={onClose} fullWidth maxWidth="sm"
+        <Dialog open fullWidth maxWidth="sm"
+                // A click outside and Esc do not close it while the job is
+                // being started or runs: the button does (the job goes on).
+                onClose={() => {
+                    if (!starting && !running) {
+                        onClose();
+                    }
+                }}
                 data-testid="plugin-action-dialog">
             <DialogTitle>{labelOf(action, target, language)}</DialogTitle>
             <DialogContent>
@@ -117,8 +131,8 @@ function ActionDialog({api, action, target, context, language, onClose}: {
                     <Typography variant="caption" color="text.secondary">
                         {pluginText(action.name, language)}
                     </Typography>
-                    {asked.length > 0 && runId === null ? (
-                        <FieldForm fields={fields} values={values}
+                    {shown.length > 0 && runId === null ? (
+                        <FieldForm fields={shown} values={values}
                                    onChange={setValues} language={language}
                                    showErrors={tried} filled={filled}
                                    loadChoices={loadChoices}
@@ -131,6 +145,12 @@ function ActionDialog({api, action, target, context, language, onClose}: {
                                        }
                                    }}
                                    testIdPrefix="plugin-action-param"/>
+                    ) : null}
+                    {starting || running ? (
+                        <Typography variant="caption" color="text.secondary"
+                                    data-testid="plugin-action-goes-on">
+                            {i18n.t("plugins_action_goes_on")}
+                        </Typography>
                     ) : null}
                     {error ? (
                         <Alert severity="warning"
@@ -175,16 +195,37 @@ function ActionDialog({api, action, target, context, language, onClose}: {
     );
 }
 
-export default function PluginActionsMenu({
-    target, context, api = httpPluginsApi,
-}: {
+// `shell`: the page already knows it is the desktop's shared view (its own
+// probe); without it the menu asks for itself. `blocked`: the page is making
+// the image (the file named is the old one). `note`: why the button waits
+// when nothing is made yet, in the page's words.
+export interface PluginActionsMenuProps {
     target: ActionTarget;
     context: string | null;
     api?: PluginsApi;
-}) {
-    const {language} = usePanelShell();
+    shell?: boolean;
+    blocked?: boolean;
+    note?: string;
+    size?: "small" | "medium";
+}
+
+export default function PluginActionsMenu(props: PluginActionsMenuProps) {
+    if (props.shell !== undefined) {
+        return <ActionsMenu {...props} shell={props.shell}/>;
+    }
+    return <ProbedMenu {...props}/>;
+}
+
+function ProbedMenu(props: PluginActionsMenuProps) {
     const {access} = useShellAccess({withToken: false});
-    const shell = access === "shell";
+    return <ActionsMenu {...props} shell={access === "shell"}/>;
+}
+
+function ActionsMenu({
+    target, context, api = httpPluginsApi, shell, blocked = false, note,
+    size = "medium",
+}: PluginActionsMenuProps & {shell: boolean}) {
+    const {language} = usePanelShell();
     const [actions, setActions] = React.useState<PluginAction[]>([]);
     const [anchor, setAnchor] = React.useState<HTMLElement | null>(null);
     const [chosen, setChosen] = React.useState<PluginAction | null>(null);
@@ -210,12 +251,14 @@ export default function PluginActionsMenu({
     if (!shell || actions.length === 0) {
         return null;
     }
+    const waiting = context === null || blocked;
+    const why = blocked ? i18n.t("plugins_action_generating")
+        : context === null ? (note ?? i18n.t("plugins_action_no_context"))
+            : "";
     return (
-        <Box>
-            <Button variant="outlined" data-testid="plugin-actions-button"
-                    disabled={context === null}
-                    title={context === null
-                        ? i18n.t("plugins_action_no_context") : undefined}
+        <Box sx={{display: "flex", alignItems: "center", gap: 1}}>
+            <Button variant="outlined" size={size}
+                    data-testid="plugin-actions-button" disabled={waiting}
                     onClick={(e) => {
                         // Plugins may have been installed since: read again.
                         read();
@@ -223,6 +266,12 @@ export default function PluginActionsMenu({
                     }}>
                 {i18n.t("plugins_actions_menu")} ▾
             </Button>
+            {waiting ? (
+                <Typography variant="caption" color="text.secondary"
+                            data-testid="plugin-actions-why">
+                    {why}
+                </Typography>
+            ) : null}
             <Menu anchorEl={anchor} open={anchor !== null}
                   onClose={() => setAnchor(null)}>
                 {actions.map((action) => (
