@@ -5,23 +5,37 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
 
 - the two lanes (one heavy, one light). A request to a full lane is refused
   BUSY with the remaining time when known; there is no queue and no
-  automatic retry. A hook's pending slot is PluginHooks', not this module's;
+  automatic retry. A hook's pending slot is PluginHooks', not this module's.
+  PluginJobs owns both lanes: another owner (the built-in vodsplit, run by
+  ArchiveJobService, on the heavy one) takes a lane with ``Claim(lane,
+  owner)`` and gives it back with ``Release(lane, owner)``;
 - a run's job folder ``<work>/plugins/<id>/<run_id>/`` with request.json
   (UTF-8, no BOM), job.json, worker.log (the runner appends to it),
   ``inputs/`` (removed when the run ends, kept for a dev plugin) and
-  ``out/``;
+  ``out/``. The JSON files are written ASCII-escaped (still UTF-8): a
+  worker's text may hold a lone surrogate, which UTF-8 cannot encode;
 - the artifacts' checks, at the end of a run and again when one is served
   (ArtifactFile): outside out_dir, a link or junction on the way, a hard
   link (st_nlink > 1), missing, not a file, the kind's size and extension.
   A dropped artifact leaves a host warning on the run, and so do the ones
   the runner dropped (past MAX_ARTIFACTS, an unknown kind: the difference
-  between ``RunOutcome.final_raw`` and the typed ``final``);
+  between ``RunOutcome.final_raw`` and the typed ``final``). A worker's
+  texts are cut to the contract's display limits when kept;
 - keeping the newest RUNS_KEPT_PER_PLUGIN manual / action runs per plugin.
   A hook's run folder is removed when it ends, except the last failed one
-  of each hook (replaced by the next failure). Hook runs are not listed
-  (List) and do not count; Get still answers the kept one (its log);
+  of each hook (without inputs/ and out/: a hook run keeps no artifact,
+  replaced by the next failure). Hook runs are not listed (List) and do
+  not count; Get still answers the kept one (its log). A folder is removed
+  job.json last, so one cut short is still found and removed again;
 - the launch's Sweep (job.json still running -> FAILED / AUTONA_EXITED)
-  and the shells' Shutdown (cancel both lanes, the grace, then kill).
+  and the shells' Shutdown (cancel this module's runs, wait the grace).
+
+Callbacks: ``onRunEnded(record)``, then ``onLaneFreed(lane)``, outside
+both locks on the thread that ended the run (a runner thread), or that
+released a claim. **Start never calls them**: a start refused after its
+lane was reserved gives the lane back without onLaneFreed (a hook held
+meanwhile waits for the next free lane), and a run cancelled while being
+prepared is returned ended (CANCELLED) by Start and gets no onRunEnded.
 
 Secrets: the PluginSecrets environment goes to the runner's
 BuildEnvironment only. A secret setting key is dropped from ``settings``
@@ -32,19 +46,15 @@ Threads: none of its own. A run's events and its end arrive on the
 runner's threads (onEvent / onEnd; onEnd is never called inside
 runner.Start). ``_lock`` is a leaf: it guards the lanes and the runs'
 in-memory records only; no file, no runner / registry / inputs call and no
-callback is made while holding it. ``_filesLock`` (also a leaf, never held
-with ``_lock``) serialises job.json's reads and writes. The callbacks
-(``onRunEnded(record)``, then ``onLaneFreed(lane)``) are called outside both
-locks on the thread that ended the run -- or that gave a reserved lane back
-when a start was refused after the lane was reserved.
-
-``laneElsewhere`` (optional): another owner's run on a lane -- the built-in
-vodsplit's on the heavy one, run by ArchiveJobService -- asked before a
-lane is reserved. It is not atomic with the other owner's own check.
+callback is made while holding it (Shutdown waits on its condition for a
+run being launched to get its handle). ``_filesLock`` (also a leaf, never
+held with ``_lock``) serialises job.json's reads and writes. A run that
+ended stays in memory until its job.json is written (Get / List read it
+there first).
 
 ``main.log`` gets one line at a run's start and one at its end: the plugin
 id, the job id, the run id, the lane and the end state. No value, path or
-player name.
+player name; a failure logs its exception's type and errno only.
 
 Nothing is made, read or written on import (pitfalls #1); no Qt
 (tests/test_core_qt_free.py).
@@ -52,7 +62,9 @@ Nothing is made, read or written on import (pitfalls #1); no Qt
 
 import dataclasses
 import datetime
+import errno
 import json
+import math
 import os
 import re
 import secrets
@@ -68,11 +80,13 @@ from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
 from loguru import logger
 
 from .PluginTypes import (
-    ACTION_FILLS, CONTEXT_ONLY_TYPES, HOOK_FILLS, HOST_SPEAKS_PROTOCOLS,
-    HOOK_TIMEOUT_CAP_SECONDS, IMAGE_ARTIFACT_EXTENSIONS,
-    IMAGE_ARTIFACT_MAX_BYTES, INPUTS_DIR, JOB_FILE, LOG_FILE, MAX_ARTIFACTS,
-    MAX_WARNINGS, OUT_DIR, PLUGIN_ID_PATTERN, REQUEST_FILE, RUN_ID_PATTERN,
-    RUNS_KEPT_PER_PLUGIN, SOURCE_FIELD_TYPES, TEXT_ARTIFACT_MAX_BYTES,
+    ACTION_FILLS, CONTEXT_ONLY_TYPES, ERROR_HINT_MAX_LENGTH,
+    ERROR_MESSAGE_MAX_LENGTH, HOOK_FILLS, HOOK_TIMEOUT_CAP_SECONDS,
+    HOST_SPEAKS_PROTOCOLS, IMAGE_ARTIFACT_EXTENSIONS,
+    IMAGE_ARTIFACT_MAX_BYTES, INPUTS_DIR, JOB_FILE, LABEL_MAX_LENGTH,
+    LOG_FILE, LOG_MESSAGE_MAX_LENGTH, MAX_ARTIFACTS, MAX_WARNINGS, OUT_DIR,
+    PLUGIN_ID_PATTERN, REQUEST_FILE, RUN_ID_PATTERN, RUNS_KEPT_PER_PLUGIN,
+    SOURCE_FIELD_TYPES, SUMMARY_MAX_LENGTH, TEXT_ARTIFACT_MAX_BYTES,
     VALUE_FIELD_TYPES, ActionTarget, Artifact, ArtifactKind,
     ArtifactRejection, AutonaApiUse, Badge, DoneEvent, EndReason, ErrorEvent,
     FieldType, HookEvent, HostInfo, InputFile, InputPick, Job, JobState, Lane,
@@ -83,11 +97,16 @@ from .PluginTypes import (
 _PLUGIN_ID = re.compile(PLUGIN_ID_PATTERN)
 _RUN_ID = re.compile(RUN_ID_PATTERN)
 _RUN_ID_CHARACTERS = string.ascii_lowercase + string.digits
+# The run id's first suffix character: a sequence within one second, in
+# the order the ids sort (digits before letters), so the newest sorts last.
+_SEQUENCE_CHARACTERS = string.digits + string.ascii_lowercase
 _RUN_ID_ATTEMPTS = 10
 _REPLACE_ATTEMPTS = 4
 _REPLACE_BACKOFF = 0.05
-# How much of a dropped artifact's path / kind a host warning repeats.
+# How much of a dropped artifact's path a host warning repeats, and how
+# many unknown kinds are named one by one (the rest is a count).
 _WARNING_NAME_MAX = 200
+_UNKNOWN_KIND_NAMED = 10
 _FAILED_HOOK_STATES = frozenset({JobState.FAILED, JobState.ERROR})
 _PLUGINS_DIR = "plugins"
 _DEV_DIR = "_dev"
@@ -110,17 +129,41 @@ def _LocalNow():
 
 
 def _RandomSuffix():
-    return "".join(secrets.choice(_RUN_ID_CHARACTERS) for _ in range(4))
+    return "".join(secrets.choice(_RUN_ID_CHARACTERS) for _ in range(3))
 
 
 def _Iso(moment):
     return moment.isoformat(timespec="seconds")
 
 
+def _Failure(error):
+    """An exception for main.log: its type and errno, never its text (an
+    OSError's carries the user's paths)."""
+    number = getattr(error, "errno", None)
+    name = type(error).__name__
+    if isinstance(number, int):
+        return f"{name} ({errno.errorcode.get(number, number)})"
+    return name
+
+
 def _Short(text):
     text = str(text)
     return text if len(text) <= _WARNING_NAME_MAX \
         else text[:_WARNING_NAME_MAX] + "…"
+
+
+def _Clip(text, limit):
+    """A text cut to ``limit`` characters (each value of a locale map)."""
+    if text is None:
+        return None
+    if isinstance(text, str):
+        return text[:limit]
+    return {key: value[:limit] for key, value in text.items()}
+
+
+def _Finite(value):
+    return value if isinstance(value, (int, float)) \
+        and not isinstance(value, bool) and math.isfinite(value) else None
 
 
 def _Inside(base, path):
@@ -138,10 +181,58 @@ def _IsLink(path):
     return os.path.islink(path) or os.path.isjunction(path)
 
 
-def _Remove(path):
-    """Remove a folder this module made (a run folder or its inputs/).
-    rmtree does not follow a link or junction inside it."""
-    shutil.rmtree(path, ignore_errors=True)
+def _Unlink(path):
+    """Remove a link or junction itself (never what it points at)."""
+    try:
+        os.unlink(path)
+    except OSError:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
+
+
+def _RemoveTree(path):
+    """Remove a folder this module made (inputs/, out/). rmtree does not
+    follow a link or junction inside it; one in its place is unlinked."""
+    if _IsLink(path):
+        _Unlink(path)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _RemoveRun(folder):
+    """Remove a run folder, job.json last: one cut short keeps its job.json
+    and is found (and removed) again by the next keeping pass."""
+    if _IsLink(folder):
+        _Unlink(folder)
+        return
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name == JOB_FILE:
+            continue
+        if entry.is_symlink() or entry.is_junction():
+            _Unlink(entry.path)
+        elif entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path, ignore_errors=True)
+        else:
+            try:
+                os.remove(entry.path)
+            except OSError:
+                pass
+    try:
+        os.remove(os.path.join(folder, JOB_FILE))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return
+    try:
+        os.rmdir(folder)
+    except OSError:
+        pass
 
 
 def CheckArtifact(outDir: str, artifact: Artifact
@@ -174,7 +265,7 @@ def CheckArtifact(outDir: str, artifact: Artifact
         return None, ArtifactRejection.OUTSIDE_OUT_DIR
     try:
         info = os.stat(target)
-    except OSError:
+    except (OSError, ValueError):
         return None, ArtifactRejection.MISSING
     if not stat.S_ISREG(info.st_mode):
         return None, ArtifactRejection.NOT_A_FILE
@@ -200,30 +291,32 @@ def _RejectionWarning(path, rejection):
 
 def _RunnerDropWarnings(final, finalRaw):
     """Host warnings for the artifacts the runner dropped while reading the
-    done line: an unknown kind (one each), and the rest (past MAX_ARTIFACTS
-    or otherwise unreadable) as one count."""
+    done line: the first unknown kinds by name, then the rest (more
+    unknown kinds, past MAX_ARTIFACTS or unreadable) as one count."""
     raw = finalRaw if isinstance(finalRaw, Mapping) else final.raw
     items = raw.get("artifacts") if isinstance(raw, Mapping) else None
     if not isinstance(items, list):
         return []
     known = {kind.value for kind in ArtifactKind}
     warnings = []
-    unknown = 0
+    named = 0
     for item in items:
+        if named == _UNKNOWN_KIND_NAMED:
+            break
         if (isinstance(item, Mapping) and isinstance(item.get("kind"), str)
                 and item["kind"] not in known):
-            unknown += 1
+            named += 1
             path = item.get("path")
             warnings.append(_RejectionWarning(
                 path if isinstance(path, str) else "?",
                 ArtifactRejection.UNKNOWN_KIND))
-    rest = len(items) - len(final.artifacts) - unknown
+    rest = len(items) - len(final.artifacts) - named
     if rest > 0:
         warnings.append({
-            "ja": f"成果物 {rest} 件を捨てました（{MAX_ARTIFACTS} 件を超えた分か、"
-                  f"読めない項目）",
-            "en": f"Dropped {rest} artifact(s) (past {MAX_ARTIFACTS}, or "
-                  f"unreadable)"})
+            "ja": f"成果物 {rest} 件を捨てました（{MAX_ARTIFACTS} 件を超えた分・"
+                  f"知らない種類・読めない項目）",
+            "en": f"Dropped {rest} artifact(s) (past {MAX_ARTIFACTS}, of an "
+                  f"unknown kind, or unreadable)"})
     return warnings
 
 
@@ -245,6 +338,20 @@ def _TextFrom(raw):
     return None
 
 
+def _NormalTrigger(trigger: Trigger) -> Trigger:
+    """The trigger with the keys of its kind only (raises ValueError /
+    AttributeError for what is not one)."""
+    kind = TriggerKind(trigger.kind)
+    if kind is TriggerKind.MANUAL:
+        return Trigger(kind=kind)
+    if kind is TriggerKind.ACTION:
+        return Trigger(kind=kind, target=ActionTarget(trigger.target))
+    if not isinstance(trigger.hook, str):
+        raise ValueError("a hook trigger without its key")
+    return Trigger(kind=kind, event=HookEvent(trigger.event),
+                   hook=trigger.hook)
+
+
 def _TriggerJson(trigger: Trigger):
     out = {"kind": TriggerKind(trigger.kind).value}
     if trigger.target is not None:
@@ -260,16 +367,11 @@ def _TriggerFrom(raw):
     if not isinstance(raw, Mapping):
         return None
     try:
-        kind = TriggerKind(raw.get("kind"))
-        target = ActionTarget(raw["target"]) \
-            if raw.get("target") is not None else None
-        event = HookEvent(raw["event"]) \
-            if raw.get("event") is not None else None
-    except ValueError:
+        return _NormalTrigger(Trigger(
+            kind=raw.get("kind"), target=raw.get("target"),
+            event=raw.get("event"), hook=raw.get("hook")))
+    except (AttributeError, ValueError):
         return None
-    hook = raw.get("hook")
-    return Trigger(kind=kind, target=target, event=event,
-                   hook=hook if isinstance(hook, str) else None)
 
 
 def _InputJson(item: Optional[InputFile]):
@@ -327,13 +429,57 @@ def _Int(value):
         else None
 
 
-def _Num(value):
-    return value if isinstance(value, (int, float)) \
-        and not isinstance(value, bool) else None
+def _Str(value):
+    return value if isinstance(value, str) else None
+
+
+def _List(value):
+    return value if isinstance(value, list) else []
+
+
+def _StageFrom(raw):
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("stage"), str):
+        return None
+    return StageEvent(stage=raw["stage"], label=_TextFrom(raw.get("label")),
+                      index=_Int(raw.get("index")),
+                      count=_Int(raw.get("count")))
+
+
+def _ProgressFrom(raw):
+    if not isinstance(raw, Mapping):
+        return None
+    return ProgressEvent(stage=_Str(raw.get("stage")),
+                         fraction=_Finite(raw.get("fraction")),
+                         overall=_Finite(raw.get("overall")),
+                         eta=_Finite(raw.get("eta")))
+
+
+def _ArtifactsFrom(raw):
+    out = []
+    for item in _List(raw):
+        if not isinstance(item, Mapping) or not isinstance(item.get("path"),
+                                                           str):
+            continue
+        try:
+            kind = ArtifactKind(item.get("kind"))
+        except ValueError:
+            continue
+        out.append(Artifact(path=item["path"], kind=kind,
+                            label=_TextFrom(item.get("label"))))
+    return tuple(out)
+
+
+def _ErrorFrom(raw):
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("code"), str):
+        return None
+    return ErrorEvent(code=raw["code"],
+                      message=_TextFrom(raw.get("message")) or "",
+                      hint=_TextFrom(raw.get("hint")))
 
 
 def RecordFrom(raw: Any) -> Optional[RunRecord]:
-    """A job.json object read back, None when it is not one."""
+    """A job.json object read back, None when it is not one. Every part is
+    type-checked (the folder is the plugin's to write)."""
     if not isinstance(raw, Mapping):
         return None
     runId, plugin, job = raw.get("run_id"), raw.get("plugin"), raw.get("job")
@@ -348,60 +494,35 @@ def RecordFrom(raw: Any) -> Optional[RunRecord]:
         state = JobState(raw.get("state"))
         reason = EndReason(raw["reason"]) \
             if raw.get("reason") is not None else None
-    except ValueError:
+    except (TypeError, ValueError):
         return None
-    stage = raw.get("stage")
-    stage = StageEvent(stage=stage["stage"], label=_TextFrom(stage.get("label")),
-                       index=_Int(stage.get("index")),
-                       count=_Int(stage.get("count"))) \
-        if isinstance(stage, Mapping) and isinstance(stage.get("stage"), str) \
-        else None
-    progress = raw.get("progress")
-    progress = ProgressEvent(
-        stage=progress.get("stage") if isinstance(progress.get("stage"), str)
-        else None,
-        fraction=_Num(progress.get("fraction")),
-        overall=_Num(progress.get("overall")), eta=_Num(progress.get("eta"))) \
-        if isinstance(progress, Mapping) else None
-    artifacts = []
-    for item in raw.get("artifacts") or ():
-        if isinstance(item, Mapping) and isinstance(item.get("path"), str):
-            try:
-                artifacts.append(Artifact(path=item["path"],
-                                          kind=ArtifactKind(item.get("kind")),
-                                          label=_TextFrom(item.get("label"))))
-            except ValueError:
-                continue
-    error = raw.get("error")
-    error = ErrorEvent(code=error["code"],
-                       message=_TextFrom(error.get("message")) or "",
-                       hint=_TextFrom(error.get("hint"))) \
-        if isinstance(error, Mapping) and isinstance(error.get("code"), str) \
-        else None
-    warnings = tuple(text for text in (_TextFrom(item) for item in
-                                       raw.get("warnings") or ())
-                     if text is not None) \
-        if isinstance(raw.get("warnings"), list) else ()
-    finished = raw.get("finished_at")
+    warnings = tuple(text for text in map(_TextFrom,
+                                          _List(raw.get("warnings")))
+                     if text is not None)
     return RunRecord(
         run_id=runId, plugin=plugin, job=job, trigger=trigger, lane=lane,
         state=state, started_at=started, reason=reason,
-        finished_at=finished if isinstance(finished, str) else None,
-        exit_code=_Int(raw.get("exit_code")), stage=stage, progress=progress,
+        finished_at=_Str(raw.get("finished_at")),
+        exit_code=_Int(raw.get("exit_code")),
+        stage=_StageFrom(raw.get("stage")),
+        progress=_ProgressFrom(raw.get("progress")),
         log=_TextFrom(raw.get("log")), warnings=warnings,
-        summary=_TextFrom(raw.get("summary")), artifacts=tuple(artifacts),
-        error=error, cancel_requested=raw.get("cancel_requested") is True,
+        summary=_TextFrom(raw.get("summary")),
+        artifacts=_ArtifactsFrom(raw.get("artifacts")),
+        error=_ErrorFrom(raw.get("error")),
+        cancel_requested=raw.get("cancel_requested") is True,
         finished_before_cancel=raw.get("finished_before_cancel") is True,
         timeout_seconds=_Int(raw.get("timeout_seconds")),
         peak_memory_bytes=_Int(raw.get("peak_memory_bytes")))
 
 
 def _WriteJson(path, content):
-    """Write ``content`` as JSON (UTF-8, no BOM) whole: temp file, fsynced,
-    os.replace (tried again a few times: on Windows a replace fails while
-    a reader has the file open). Raises OSError, TypeError / ValueError
-    for what is not JSON."""
-    data = json.dumps(content, ensure_ascii=False, indent=2)
+    """Write ``content`` as JSON whole: ASCII-escaped (so valid UTF-8 with
+    no BOM whatever the strings hold), temp file, fsynced, os.replace
+    (tried again a few times: on Windows a replace fails while a reader
+    has the file open). Raises OSError, TypeError / ValueError for what is
+    not JSON."""
+    data = json.dumps(content, ensure_ascii=True, allow_nan=False, indent=2)
     folder, name = os.path.split(path)
     fd, tmp = tempfile.mkstemp(dir=folder,
                                prefix=os.path.splitext(name)[0] + ".",
@@ -443,15 +564,22 @@ class _Plan:
     lane: Lane
     trigger: Trigger
     timeout: int
+    argv: Tuple[str, ...]
     params: dict
     settings: dict
     sources: Tuple[Tuple[str, FieldType, bool], ...]
     picks: Mapping[str, InputPick]
 
 
+@dataclass
+class _Claim:
+    """A lane held by another owner (Claim)."""
+    owner: str
+
+
 class _Run:
-    """A run holding a lane (reserved, then launched): its record's
-    changing fields, guarded by PluginJobs._lock."""
+    """A run holding a lane (reserved, launching, then launched): its
+    record's changing fields, guarded by PluginJobs._lock."""
 
     def __init__(self, plan: _Plan, started: datetime.datetime):
         self.plan = plan
@@ -461,6 +589,7 @@ class _Run:
         self.runId: Optional[str] = None
         self.folder: Optional[str] = None
         self.handle = None
+        self.launching = False
         self.ended = False
         self.cancelRequested = False
         self.state = JobState.RUNNING
@@ -469,6 +598,7 @@ class _Run:
         self.exitCode: Optional[int] = None
         self.stage: Optional[StageEvent] = None
         self.progress: Optional[ProgressEvent] = None
+        self.progressAt: Optional[datetime.datetime] = None
         self.log: Optional[Text] = None
         self.warnings: list = []
         self.workerWarnings = 0
@@ -477,6 +607,10 @@ class _Run:
         self.error: Optional[ErrorEvent] = None
         self.finishedBeforeCancel = False
         self.peak: Optional[int] = None
+
+    @property
+    def hook(self):
+        return TriggerKind(self.plan.trigger.kind) is TriggerKind.HOOK
 
     def Record(self) -> RunRecord:
         return RunRecord(
@@ -502,10 +636,15 @@ def _Refusal(reason, detail=""):
     return _Refuse(Refused(reason=reason, detail=detail))
 
 
+def _Unavailable(detail):
+    return Refused(reason=StartRefusal.UNAVAILABLE, detail=detail)
+
+
 # ── the service ─────────────────────────────────────────────────────────
 
 class PluginJobs:
-    """PluginTypes.PluginJobs. Every collaborator is injected:
+    """PluginTypes.PluginJobs (plus Claim / Release). Every collaborator is
+    injected:
 
     - ``runner`` (PluginRunner), ``registry`` (PluginRegistry), ``inputs``
       (PluginInputs), ``settings`` (PluginSettings: Missing),
@@ -520,8 +659,7 @@ class PluginJobs:
     - ``onRunEnded(record)`` / ``onLaneFreed(lane)``: see the module;
     - ``clock()``: an aware local datetime (run ids, times, remaining);
     - ``environ()``: the parent environment for BuildEnvironment;
-    - ``randomSuffix()``: the run id's four characters;
-    - ``laneElsewhere(lane)``: another owner's BUSY on ``lane``, or None.
+    - ``randomSuffix()``: the run id's last three characters ([a-z0-9]).
     """
 
     def __init__(self, *, runner, registry, inputs, settings, secrets,
@@ -533,9 +671,7 @@ class PluginJobs:
                  clock: Callable[[], datetime.datetime] = _LocalNow,
                  environ: Callable[[], Mapping[str, str]] =
                  lambda: dict(os.environ),
-                 randomSuffix: Callable[[], str] = _RandomSuffix,
-                 laneElsewhere: Optional[
-                     Callable[[Lane], Optional[Refused]]] = None):
+                 randomSuffix: Callable[[], str] = _RandomSuffix):
         self._runner = runner
         self._registry = registry
         self._inputs = inputs
@@ -551,17 +687,32 @@ class PluginJobs:
         self._clock = clock
         self._environ = environ
         self._randomSuffix = randomSuffix
-        self._laneElsewhere = laneElsewhere
         self._lock = threading.Lock()
+        self._launched = threading.Condition(self._lock)
         self._filesLock = threading.Lock()
         self._lanes: dict = {Lane.HEAVY: None, Lane.LIGHT: None}
+        # Runs that ended and whose job.json is not written yet.
+        self._finishing: dict = {}
         self._closing = False
+        self._idStamp = None
+        self._idSequence = 0
 
     # ── paths ──────────────────────────────────────────────────────────
 
-    def _PluginWork(self, pluginId, workDir=None):
-        return os.path.join(workDir or self._workDir(), _PLUGINS_DIR,
-                            pluginId)
+    def _PluginWork(self, pluginId, make=False):
+        """The plugin's work folder, None when it (or plugins/) is a link
+        or junction, or resolves outside the work folder."""
+        workDir = self._workDir()
+        root = os.path.join(workDir, _PLUGINS_DIR)
+        path = os.path.join(root, pluginId)
+        if make:
+            os.makedirs(path, exist_ok=True)
+        if _IsLink(root) or _IsLink(path):
+            return None
+        if os.path.lexists(path) and not _Inside(
+                os.path.realpath(workDir), os.path.realpath(path)):
+            return None
+        return path
 
     def _RunFolder(self, pluginId, runId):
         """The run's folder on disk (not that it exists), None for what is
@@ -570,6 +721,8 @@ class PluginJobs:
                 or not isinstance(runId, str) or not _RUN_ID.fullmatch(runId)):
             return None
         base = self._PluginWork(pluginId)
+        if base is None:
+            return None
         path = os.path.join(base, runId)
         if not _Inside(os.path.realpath(base), os.path.realpath(path)):
             return None
@@ -591,11 +744,18 @@ class PluginJobs:
                     raw = json.load(file)
             except FileNotFoundError:
                 return None
-            except (OSError, ValueError):
+            except (OSError, ValueError) as error:
                 logger.warning(f"Plugins: {JOB_FILE} of run "
-                               f"{os.path.basename(folder)} could not be read")
+                               f"{os.path.basename(folder)} could not be "
+                               f"read: {_Failure(error)}")
                 return None
-        return RecordFrom(raw)
+        try:
+            return RecordFrom(raw)
+        except Exception as error:
+            logger.warning(f"Plugins: {JOB_FILE} of run "
+                           f"{os.path.basename(folder)} is not a record: "
+                           f"{_Failure(error)}")
+            return None
 
     def _WriteRecord(self, folder, record):
         with self._filesLock:
@@ -604,48 +764,84 @@ class PluginJobs:
     # ── the lanes ──────────────────────────────────────────────────────
 
     def _Remaining(self, run):
-        """Seconds until ``run`` likely ends: the worker's eta when it gave
-        one, else until its time limit; None when neither is known."""
+        """Seconds until ``run`` likely ends: the worker's eta (counted down
+        since it came) or its time limit, whichever is sooner; None when
+        neither is known."""
+        now = self._clock()
+        candidates = []
         if run.progress is not None and run.progress.eta is not None:
-            return max(0.0, float(run.progress.eta))
-        if run.plan.timeout is None:
-            return None
-        elapsed = (self._clock() - run.started).total_seconds()
-        return max(0.0, run.plan.timeout - elapsed)
+            since = (now - run.progressAt).total_seconds()
+            candidates.append(run.progress.eta - since)
+        if run.plan.timeout is not None:
+            elapsed = (now - run.started).total_seconds()
+            candidates.append(run.plan.timeout - elapsed)
+        return max(0.0, min(candidates)) if candidates else None
 
     def _BusyLocked(self, lane):
-        run = self._lanes[lane]
-        if run is None:
+        slot = self._lanes[lane]
+        if slot is None:
             return None
-        return Refused(reason=StartRefusal.BUSY,
-                       remaining_seconds=self._Remaining(run))
+        remaining = self._Remaining(slot) if isinstance(slot, _Run) else None
+        return Refused(reason=StartRefusal.BUSY, remaining_seconds=remaining)
 
     def BusyFor(self, lane: Lane) -> Optional[Refused]:
         lane = Lane(lane)
         with self._lock:
-            busy = self._BusyLocked(lane)
-        if busy is None and self._laneElsewhere is not None:
-            busy = self._laneElsewhere(lane)
-        return busy
+            return self._BusyLocked(lane)
+
+    def Claim(self, lane: Lane, owner: str) -> bool:
+        """Take ``lane`` for another owner (the built-in vodsplit on the
+        heavy one): True when it was free. Refused while shutting down."""
+        lane = Lane(lane)
+        with self._lock:
+            if self._closing or self._lanes[lane] is not None:
+                return False
+            self._lanes[lane] = _Claim(owner)
+            return True
+
+    def Release(self, lane: Lane, owner: str) -> None:
+        """Give back ``owner``'s claim of ``lane`` (nothing when it holds
+        none); onLaneFreed on this thread."""
+        lane = Lane(lane)
+        with self._lock:
+            slot = self._lanes[lane]
+            freed = isinstance(slot, _Claim) and slot.owner == owner
+            if freed:
+                self._lanes[lane] = None
+        if freed:
+            self._Call(self._onLaneFreed, lane)
 
     def Running(self, pluginId: str) -> bool:
         with self._lock:
-            return any(run is not None and run.pluginId == pluginId
-                       for run in self._lanes.values())
+            return any(
+                (isinstance(slot, _Run) and slot.pluginId == pluginId)
+                or (isinstance(slot, _Claim) and slot.owner == pluginId)
+                for slot in self._lanes.values())
+
+    def _Runs(self):
+        """This module's runs holding a lane (under _lock)."""
+        return [slot for slot in self._lanes.values()
+                if isinstance(slot, _Run)]
 
     def _Active(self, pluginId, runId):
-        """The in-memory run (under _lock)."""
-        for run in self._lanes.values():
-            if (run is not None and run.pluginId == pluginId
-                    and run.runId == runId):
+        """The in-memory run: holding a lane or finishing (under _lock)."""
+        run = self._finishing.get((pluginId, runId))
+        if run is not None:
+            return run
+        for run in self._Runs():
+            if run.pluginId == pluginId and run.runId == runId:
                 return run
         return None
 
-    def _ActiveIds(self):
+    def _ActiveIds(self, finishing=True):
+        """The runs holding a lane, and (``finishing``) the ended ones whose
+        job.json is being written. The keeping pass leaves the latter out:
+        it runs after the write, and a job.json still saying running is
+        never removed anyway."""
         with self._lock:
-            return {(run.pluginId, run.runId)
-                    for run in self._lanes.values()
-                    if run is not None and run.runId is not None}
+            ids = {(run.pluginId, run.runId) for run in self._Runs()
+                   if run.runId is not None}
+            return ids | set(self._finishing) if finishing else ids
 
     # ── the start's checks ─────────────────────────────────────────────
 
@@ -657,6 +853,9 @@ class PluginJobs:
             else None
         if plugin is None:
             raise _Refusal(StartRefusal.NOT_FOUND)
+        if Badge(plugin.badge) is Badge.BUILTIN:
+            # The built-in vodsplit runs through ArchiveJobService.
+            raise _Refusal(StartRefusal.JOB_UNUSABLE, "built-in")
         state = PluginState(plugin.state)
         if state is PluginState.BLOCKED or plugin.blocked_reason is not None:
             raise _Refusal(StartRefusal.BLOCKED)
@@ -683,13 +882,21 @@ class PluginJobs:
         protocol = self._Protocol(plugin, manifest)
         if protocol is None:
             raise _Refusal(StartRefusal.INCOMPATIBLE)
+        dev = Badge(plugin.badge) is Badge.DEV
+        argv = self._Argv(plugin.folder, manifest.entry, dev)
+        if argv is None:
+            raise _Refusal(StartRefusal.INCOMPATIBLE, "entry outside")
 
-        fills = self._CheckTrigger(job, lane, trigger)
+        try:
+            trigger = _NormalTrigger(trigger)
+        except (AttributeError, ValueError):
+            raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown trigger")
+        fills = self._TriggerFills(job, lane, trigger)
         values = {}
         valueKeys = {field.key for field, kind in fields
-                     if kind in VALUE_FIELD_TYPES and kind is not FieldType.SECRET}
-        unknown = set(params or {}) - valueKeys
-        if unknown:
+                     if kind in VALUE_FIELD_TYPES
+                     and kind is not FieldType.SECRET}
+        if set(params or {}) - valueKeys:
             raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown param")
         for field, kind in fields:
             if field.key not in valueKeys:
@@ -716,9 +923,11 @@ class PluginJobs:
         sourceKinds = {key: kind for key, kind, _ in sources}
         picks = dict(picks or {})
         for key, pick in picks.items():
-            if (sourceKinds.get(key) is None
-                    or getattr(pick, "kind", None) not in FieldType
-                    or FieldType(pick.kind) is not sourceKinds[key]):
+            kind = getattr(pick, "kind", None)
+            if (sourceKinds.get(key) is None or getattr(pick, "key", None) != key
+                    or kind not in FieldType
+                    or FieldType(kind) is not sourceKinds[key]
+                    or FieldType(kind) is FieldType.STATE):
                 raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown input")
         for key, kind, required in sources:
             needed = (kind is fills) if fills is not None \
@@ -731,12 +940,11 @@ class PluginJobs:
                                "a context-only input in a manual run")
 
         timeout = job.timeout_seconds
-        if TriggerKind(trigger.kind) is TriggerKind.HOOK:
+        if trigger.kind is TriggerKind.HOOK:
             timeout = min(timeout, HOOK_TIMEOUT_CAP_SECONDS)
         return _Plan(pluginId=pluginId, job=job, manifest=manifest,
-                     folder=plugin.folder,
-                     dev=Badge(plugin.badge) is Badge.DEV, protocol=protocol,
-                     lane=lane, trigger=trigger, timeout=timeout,
+                     folder=plugin.folder, dev=dev, protocol=protocol,
+                     lane=lane, trigger=trigger, timeout=timeout, argv=argv,
                      params=values, settings=settingValues, sources=sources,
                      picks=picks)
 
@@ -749,46 +957,60 @@ class PluginJobs:
         common = set(manifest.protocol) & set(HOST_SPEAKS_PROTOCOLS)
         return max(common) if common else None
 
-    @classmethod
-    def _CheckTrigger(cls, job, lane, trigger):
-        """The FieldType the trigger fills (None for manual), or raises."""
-        try:
-            return cls._TriggerFills(job, lane, trigger)
-        except (AttributeError, ValueError):
-            raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown trigger")
+    @staticmethod
+    def _Argv(pluginFolder, entry, dev):
+        """The manifest's entry with its file resolved to an absolute path
+        in the plugin folder (cwd is the job folder); None when an installed
+        entry's file resolves outside it. A dev entry's first word may be a
+        command found on PATH (left as is); its later words are resolved
+        when they name a file in the plugin folder."""
+        folder = os.path.abspath(pluginFolder)
+        resolved = []
+        for index, word in enumerate(entry):
+            candidate = os.path.normpath(os.path.join(folder, word))
+            inFolder = not os.path.isabs(word) and _Inside(folder, candidate)
+            if index == 0 and not dev:
+                if not inFolder:
+                    return None
+                resolved.append(candidate)
+            elif dev and inFolder and os.path.isfile(candidate):
+                resolved.append(candidate)
+            else:
+                resolved.append(word)
+        return tuple(resolved)
 
     @staticmethod
     def _TriggerFills(job, lane, trigger):
-        kind = TriggerKind(trigger.kind)
-        if kind is TriggerKind.MANUAL:
+        """The FieldType a (normalised) trigger fills, None for manual; or
+        raises _Refuse."""
+        if trigger.kind is TriggerKind.MANUAL:
             if not job.manual:
                 raise _Refusal(StartRefusal.INVALID_REQUEST,
                                "the job is not started by hand")
             return None
         if lane is not Lane.LIGHT:
             raise _Refusal(StartRefusal.JOB_UNUSABLE)
-        if kind is TriggerKind.ACTION:
-            if (trigger.target is None
-                    or ActionTarget(trigger.target).value
-                    not in {action.target for action in job.actions}):
+        if trigger.kind is TriggerKind.ACTION:
+            if trigger.target.value not in {action.target
+                                            for action in job.actions}:
                 raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown action")
-            return ACTION_FILLS[ActionTarget(trigger.target)]
-        if (trigger.event is None
-                or HookEvent(trigger.event).value
-                not in {hook.on for hook in job.hooks}
-                or trigger.hook != f"{job.id}/{HookEvent(trigger.event).value}"):
+            return ACTION_FILLS[trigger.target]
+        if (trigger.event.value not in {hook.on for hook in job.hooks}
+                or trigger.hook != f"{job.id}/{trigger.event.value}"):
             raise _Refusal(StartRefusal.INVALID_REQUEST, "unknown hook")
-        return HOOK_FILLS[HookEvent(trigger.event)]
+        return HOOK_FILLS[trigger.event]
 
     # ── Start ──────────────────────────────────────────────────────────
 
     def Start(self, pluginId: str, jobId: str, trigger: Trigger,
               params: Mapping[str, Any], settings: Mapping[str, Any],
               picks: Mapping[str, InputPick]) -> Union[RunRecord, Refused]:
+        """Start a run or say why not. Never calls onRunEnded / onLaneFreed
+        (see the module): what fails before the launch is in the return
+        value only."""
         with self._lock:
             if self._closing:
-                return Refused(reason=StartRefusal.UNAVAILABLE,
-                               detail="shutting down")
+                return _Unavailable("shutting down")
         try:
             plan = self._Plan(pluginId, jobId, trigger, params, settings,
                               picks)
@@ -799,15 +1021,10 @@ class PluginJobs:
         if missing:
             return Refused(reason=StartRefusal.NEEDS_SETTINGS,
                            detail=", ".join(missing))
-        if self._laneElsewhere is not None:
-            elsewhere = self._laneElsewhere(plan.lane)
-            if elsewhere is not None:
-                return elsewhere
         run = _Run(plan, self._clock())
         with self._lock:
             if self._closing:
-                return Refused(reason=StartRefusal.UNAVAILABLE,
-                               detail="shutting down")
+                return _Unavailable("shutting down")
             busy = self._BusyLocked(plan.lane)
             if busy is not None:
                 return busy
@@ -818,36 +1035,42 @@ class PluginJobs:
         except _Refuse as refusal:
             self._GiveBack(run)
             return refusal.refused
-        except OSError:
-            logger.opt(exception=True).warning(
-                f"Plugins: the job folder of {pluginId}/{jobId} could not be "
-                f"written")
+        except Exception as error:
+            logger.warning(f"Plugins: a run of {pluginId}/{jobId} could not "
+                           f"be prepared: {_Failure(error)}")
             self._GiveBack(run)
-            return Refused(reason=StartRefusal.UNAVAILABLE,
-                           detail="the job folder could not be written")
+            return _Unavailable("the run could not be prepared")
+
         with self._lock:
             closing = self._closing
+            cancelled = run.cancelRequested
+            run.launching = not closing and not cancelled
         if closing:
             self._GiveBack(run)
-            return Refused(reason=StartRefusal.UNAVAILABLE,
-                           detail="shutting down")
+            return _Unavailable("shutting down")
+        if cancelled:
+            return self._Finish(run, RunOutcome(state=JobState.CANCELLED,
+                                                cancel_requested=True),
+                                callbacks=False)
 
         logger.info(f"Plugins: run {run.runId} of {pluginId}/{jobId} "
-                    f"started ({plan.lane.value}, "
-                    f"{TriggerKind(trigger.kind).value})")
+                    f"started ({plan.lane.value}, {plan.trigger.kind.value})")
         try:
             handle = self._runner.Start(
                 spec, lambda event: self._OnEvent(run, event),
-                lambda outcome: self._OnEnd(run, outcome))
-        except Exception:
-            logger.opt(exception=True).warning(
-                f"Plugins: run {run.runId} could not be launched")
-            self._OnEnd(run, RunOutcome(state=JobState.FAILED,
-                                        reason=EndReason.LAUNCH_FAILED))
-            with self._lock:
-                return run.Record()
-        with self._lock:
+                lambda outcome: self._Finish(run, outcome))
+        except Exception as error:
+            logger.warning(f"Plugins: run {run.runId} could not be launched: "
+                           f"{_Failure(error)}")
+            with self._launched:
+                run.launching = False
+                self._launched.notify_all()
+            self._GiveBack(run)
+            return _Unavailable("the run could not be launched")
+        with self._launched:
             run.handle = handle
+            run.launching = False
+            self._launched.notify_all()
             cancel = run.cancelRequested and not run.ended
             record = run.Record()
         if cancel:
@@ -856,34 +1079,40 @@ class PluginJobs:
 
     def _GiveBack(self, run):
         """A reserved lane back after a refused start (the folder made so
-        far removed)."""
+        far removed). No onLaneFreed: Start calls no callback."""
         with self._lock:
             if self._lanes[run.lane] is run:
                 self._lanes[run.lane] = None
             run.ended = True
         if run.folder is not None:
-            _Remove(run.folder)
-        self._Call(self._onLaneFreed, run.lane)
+            _RemoveRun(run.folder)
 
     def _NewRunFolder(self, run):
-        pluginWork = self._PluginWork(run.pluginId)
-        os.makedirs(pluginWork, exist_ok=True)
-        stamp = self._clock().strftime("%Y%m%d-%H%M%S")
+        pluginWork = self._PluginWork(run.pluginId, make=True)
+        if pluginWork is None:
+            raise OSError(errno.EPERM, "the plugin's work folder is a link")
         for attempt in range(_RUN_ID_ATTEMPTS):
-            runId = f"{stamp}-{self._randomSuffix()}"
+            stamp = self._clock().strftime("%Y%m%d-%H%M%S")
+            with self._lock:
+                if stamp != self._idStamp:
+                    self._idStamp, self._idSequence = stamp, 0
+                sequence = _SEQUENCE_CHARACTERS[
+                    min(self._idSequence, len(_SEQUENCE_CHARACTERS) - 1)]
+                self._idSequence += 1
+            runId = f"{stamp}-{sequence}{self._randomSuffix()}"
             if not _RUN_ID.fullmatch(runId):
-                raise ValueError("the run id suffix is not [a-z0-9]{4}")
+                raise ValueError("the run id suffix is not [a-z0-9]{3}")
             folder = os.path.abspath(os.path.join(pluginWork, runId))
             try:
                 os.mkdir(folder)
             except FileExistsError:
                 continue
             return runId, folder
-        raise FileExistsError("no free run id")
+        raise FileExistsError(errno.EEXIST, "no free run id")
 
     def _Prepare(self, run) -> LaunchSpec:
         """The run's folder, inputs, request.json and job.json, then the
-        launch. Raises _Refuse or OSError."""
+        launch. Raises _Refuse, or anything a collaborator raises."""
         plan = run.plan
         runId, folder = self._NewRunFolder(run)
         with self._lock:
@@ -896,11 +1125,16 @@ class PluginJobs:
         dataDir = self._DataDir(plan.pluginId, plan.dev)
         os.makedirs(dataDir, exist_ok=True)
 
+        manual = plan.trigger.kind is TriggerKind.MANUAL
         inputs = {}
         for key, kind, required in plan.sources:
+            pick = plan.picks.get(key)
+            if manual and pick is None and kind is not FieldType.STATE:
+                # Not picked by hand: null (only STATE is the press's).
+                inputs[key] = None
+                continue
             try:
-                item = self._inputs.Prepare(key, kind, inputsDir,
-                                            plan.picks.get(key))
+                item = self._inputs.Prepare(key, kind, inputsDir, pick)
             except (LookupError, ValueError, TypeError):
                 raise _Refusal(StartRefusal.INVALID_REQUEST,
                                f"{key} could not be filled")
@@ -941,66 +1175,77 @@ class PluginJobs:
             secrets=self._secrets.Environment(plan.pluginId, dev=plan.dev),
             apiUrl=apiUrl)
         return LaunchSpec(
-            argv=self._Argv(plan) + ("run", requestPath), cwd=folder,
-            env=env, lane=plan.lane, log_path=os.path.join(folder, LOG_FILE),
+            argv=plan.argv + ("run", requestPath), cwd=folder, env=env,
+            lane=plan.lane, log_path=os.path.join(folder, LOG_FILE),
             timeout_seconds=plan.timeout, memory_mb=plan.job.memory_mb)
-
-    @staticmethod
-    def _Argv(plan):
-        """The manifest's entry with its file resolved to an absolute path
-        in the plugin folder (cwd is the job folder). A dev entry's first
-        word may be a command found on PATH (left as is); its later words
-        are resolved when they name a file in the plugin folder."""
-        folder = os.path.abspath(plan.folder)
-        entry = list(plan.manifest.entry)
-        resolved = []
-        for index, word in enumerate(entry):
-            candidate = os.path.normpath(os.path.join(folder, word))
-            inFolder = not os.path.isabs(word) and _Inside(folder, candidate)
-            if index == 0 and not plan.dev:
-                resolved.append(candidate)
-            elif plan.dev and inFolder and os.path.isfile(candidate):
-                resolved.append(candidate)
-            else:
-                resolved.append(word)
-        return tuple(resolved)
 
     # ── a run's events and end (the runner's threads) ──────────────────
 
     def _OnEvent(self, run, event):
+        now = self._clock()
         with self._lock:
             if run.ended:
                 return
             if isinstance(event, StageEvent):
-                run.stage = event
+                run.stage = dataclasses.replace(
+                    event, label=_Clip(event.label, LABEL_MAX_LENGTH))
                 run.progress = None
             elif isinstance(event, ProgressEvent):
-                run.progress = event
+                run.progress = dataclasses.replace(
+                    event, fraction=_Finite(event.fraction),
+                    overall=_Finite(event.overall), eta=_Finite(event.eta))
+                run.progressAt = now
             elif isinstance(event, LogEvent):
-                run.log = event.message
+                run.log = _Clip(event.message, LOG_MESSAGE_MAX_LENGTH)
             elif isinstance(event, WarningEvent):
                 if run.workerWarnings < MAX_WARNINGS:
                     run.workerWarnings += 1
-                    run.warnings.append(event.message)
+                    run.warnings.append(
+                        _Clip(event.message, LOG_MESSAGE_MAX_LENGTH))
 
-    def _OnEnd(self, run, outcome: RunOutcome):
-        final = outcome.final
+    def _Checked(self, run, final, finalRaw):
+        """(accepted artifacts, host warnings) of a done line. A hook run
+        keeps none (its folder goes)."""
+        if not isinstance(final, DoneEvent) or run.hook:
+            return (), []
         accepted = []
-        hostWarnings = []
-        if isinstance(final, DoneEvent):
-            outDir = os.path.join(run.folder, OUT_DIR)
-            for artifact in final.artifacts:
+        warnings = []
+        outDir = os.path.join(run.folder, OUT_DIR)
+        for artifact in final.artifacts:
+            try:
                 real, rejection = CheckArtifact(outDir, artifact)
-                if rejection is None:
-                    accepted.append(artifact)
-                else:
-                    hostWarnings.append(
-                        _RejectionWarning(artifact.path, rejection))
-            hostWarnings.extend(_RunnerDropWarnings(final, outcome.final_raw))
+            except Exception as error:
+                logger.warning(f"Plugins: an artifact of run {run.runId} "
+                               f"could not be checked: {_Failure(error)}")
+                rejection = ArtifactRejection.MISSING
+            if rejection is None:
+                accepted.append(dataclasses.replace(
+                    artifact, label=_Clip(artifact.label, LABEL_MAX_LENGTH)))
+            else:
+                warnings.append(_RejectionWarning(artifact.path, rejection))
+        try:
+            warnings.extend(_RunnerDropWarnings(final, finalRaw))
+        except Exception as error:
+            logger.warning(f"Plugins: run {run.runId}'s dropped artifacts "
+                           f"could not be counted: {_Failure(error)}")
+        return tuple(accepted), warnings
+
+    def _Finish(self, run, outcome: RunOutcome, callbacks=True):
+        """A run's end (the runner's onEnd, or a run cancelled before its
+        launch with ``callbacks`` False): the record, job.json, the
+        folders, then the callbacks -- always, whatever failed before."""
+        final = outcome.final
+        try:
+            accepted, hostWarnings = self._Checked(run, final,
+                                                   outcome.final_raw)
+        except Exception as error:
+            logger.warning(f"Plugins: run {run.runId}'s artifacts could not "
+                           f"be checked: {_Failure(error)}")
+            accepted, hostWarnings = (), []
 
         with self._lock:
             if run.ended:
-                return
+                return run.Record()
             run.ended = True
             run.state = JobState(outcome.state)
             run.reason = outcome.reason
@@ -1011,93 +1256,126 @@ class PluginJobs:
             run.finishedBeforeCancel = outcome.finished_before_cancel
             run.peak = outcome.peak_memory_bytes
             if isinstance(final, DoneEvent):
-                run.summary = final.summary
-                run.artifacts = tuple(accepted)
+                run.summary = _Clip(final.summary, SUMMARY_MAX_LENGTH)
+                run.artifacts = accepted
             elif isinstance(final, ErrorEvent):
-                run.error = final
+                run.error = dataclasses.replace(
+                    final, message=_Clip(final.message,
+                                         ERROR_MESSAGE_MAX_LENGTH),
+                    hint=_Clip(final.hint, ERROR_HINT_MAX_LENGTH))
             run.warnings.extend(hostWarnings)
             if self._lanes[run.lane] is run:
                 self._lanes[run.lane] = None
+            key = (run.pluginId, run.runId)
+            self._finishing[key] = run
             record = run.Record()
 
-        plan = run.plan
         try:
-            self._WriteRecord(run.folder, record)
-        except (OSError, TypeError, ValueError):
-            logger.opt(exception=True).warning(
-                f"Plugins: {JOB_FILE} of run {record.run_id} could not be "
-                f"written")
-        if not plan.dev:
-            _Remove(os.path.join(run.folder, INPUTS_DIR))
-        if TriggerKind(plan.trigger.kind) is TriggerKind.HOOK \
-                and record.state not in _FAILED_HOOK_STATES:
-            _Remove(run.folder)
-        self._Prune(os.path.dirname(run.folder))
-        logger.info(f"Plugins: run {record.run_id} of "
-                    f"{record.plugin}/{record.job} ended {record.state.value}"
-                    + (f" ({record.reason.value})" if record.reason else ""))
-        self._Call(self._onRunEnded, record)
-        self._Call(self._onLaneFreed, run.lane)
+            self._Settle(run, record)
+        finally:
+            with self._lock:
+                self._finishing.pop(key, None)
+            logger.info(f"Plugins: run {record.run_id} of "
+                        f"{record.plugin}/{record.job} ended "
+                        f"{record.state.value}"
+                        + (f" ({record.reason.value})" if record.reason
+                           else ""))
+            if callbacks:
+                self._Call(self._onRunEnded, record)
+                self._Call(self._onLaneFreed, run.lane)
+        return record
+
+    def _Settle(self, run, record):
+        """An ended run's files: job.json, inputs/, a hook run's folder, the
+        keeping rules. Each step's failure is logged and the next tried."""
+        folder = run.folder
+        steps = [("write job.json", lambda: self._WriteRecord(folder, record))]
+        if not run.plan.dev:
+            steps.append(("remove inputs", lambda: _RemoveTree(
+                os.path.join(folder, INPUTS_DIR))))
+        if run.hook:
+            if record.state in _FAILED_HOOK_STATES:
+                steps.append(("remove out", lambda: _RemoveTree(
+                    os.path.join(folder, OUT_DIR))))
+            else:
+                steps.append(("remove the folder",
+                              lambda: _RemoveRun(folder)))
+        steps.append(("keep", lambda: self._Prune(os.path.dirname(folder))))
+        for name, step in steps:
+            try:
+                step()
+            except Exception as error:
+                logger.warning(f"Plugins: run {record.run_id} could not "
+                               f"{name}: {_Failure(error)}")
 
     @staticmethod
     def _Call(callback, argument):
         try:
             callback(argument)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Plugins: a run callback failed")
+        except Exception as error:
+            logger.warning(f"Plugins: a run callback failed: "
+                           f"{_Failure(error)}")
 
     # ── keeping ────────────────────────────────────────────────────────
 
-    def _Records(self, pluginWork):
-        """(folder, record) of every readable run folder of a plugin."""
+    def _Scan(self, pluginWork):
+        """(records, links): (folder, record) of every readable run folder
+        of a plugin, and the run-id entries that are links or junctions."""
         try:
             entries = list(os.scandir(pluginWork))
         except OSError:
-            return []
-        out = []
+            return [], []
+        records, links = [], []
         for entry in entries:
-            if not _RUN_ID.fullmatch(entry.name) or not entry.is_dir(
-                    follow_symlinks=False):
+            if not _RUN_ID.fullmatch(entry.name):
+                continue
+            if entry.is_symlink() or entry.is_junction():
+                links.append(entry.path)
+                continue
+            if not entry.is_dir(follow_symlinks=False):
                 continue
             record = self._ReadRecord(entry.path)
             if record is not None and record.run_id == entry.name:
-                out.append((entry.path, record))
-        return out
+                records.append((entry.path, record))
+        return records, links
 
     def _Prune(self, pluginWork):
         """Keep the newest RUNS_KEPT_PER_PLUGIN manual / action runs (a
         running one counts and stays) and, per hook, the newest failed run
         only. A folder whose job.json says running or cannot be read is
-        never removed."""
-        active = self._ActiveIds()
+        never removed; a link or junction named like a run is unlinked."""
+        active = self._ActiveIds(finishing=False)
         plugin = os.path.basename(pluginWork)
+        records, links = self._Scan(pluginWork)
+        for link in links:
+            _Unlink(link)
         kept = []
         failedByHook = {}
-        for folder, record in self._Records(pluginWork):
+        for folder, record in records:
+            hook = record.trigger.kind is TriggerKind.HOOK
             if (plugin, record.run_id) in active:
-                if record.trigger.kind is not TriggerKind.HOOK:
+                if not hook:
                     kept.append((record.run_id, folder, False))
                 continue
             ended = record.state is not JobState.RUNNING
-            if record.trigger.kind is TriggerKind.HOOK:
+            if hook:
                 if not ended:
                     continue
                 if record.state in _FAILED_HOOK_STATES:
                     failedByHook.setdefault(record.trigger.hook, []).append(
                         (record.run_id, folder))
                 else:
-                    _Remove(folder)
+                    _RemoveRun(folder)
                 continue
             kept.append((record.run_id, folder, ended))
         kept.sort(reverse=True)
         for runId, folder, ended in kept[RUNS_KEPT_PER_PLUGIN:]:
             if ended:
-                _Remove(folder)
+                _RemoveRun(folder)
         for runs in failedByHook.values():
             runs.sort(reverse=True)
             for runId, folder in runs[1:]:
-                _Remove(folder)
+                _RemoveRun(folder)
 
     # ── reading ────────────────────────────────────────────────────────
 
@@ -1121,13 +1399,14 @@ class PluginJobs:
         if not isinstance(pluginId, str) or not _PLUGIN_ID.fullmatch(pluginId):
             return []
         with self._lock:
-            active = {run.runId: run.Record() for run in self._lanes.values()
-                      if run is not None and run.pluginId == pluginId
-                      and run.runId is not None}
-        records = dict(active)
-        for folder, record in self._Records(self._PluginWork(pluginId)):
-            if record.run_id not in records and record.plugin == pluginId:
-                records[record.run_id] = record
+            runs = list(self._Runs()) + list(self._finishing.values())
+            records = {run.runId: run.Record() for run in runs
+                       if run.pluginId == pluginId and run.runId is not None}
+        pluginWork = self._PluginWork(pluginId)
+        if pluginWork is not None:
+            for folder, record in self._Scan(pluginWork)[0]:
+                if record.run_id not in records and record.plugin == pluginId:
+                    records[record.run_id] = record
         return [record for runId, record in
                 sorted(records.items(), reverse=True)
                 if record.trigger.kind is not TriggerKind.HOOK]
@@ -1186,6 +1465,9 @@ class PluginJobs:
     # ── control ────────────────────────────────────────────────────────
 
     def Cancel(self, pluginId: str, runId: str) -> bool:
+        """Ask a run to stop. One still being prepared is not launched (it
+        ends CANCELLED); one being launched is cancelled once it has its
+        handle."""
         with self._lock:
             run = self._Active(pluginId, runId)
             if run is None or run.ended:
@@ -1201,53 +1483,78 @@ class PluginJobs:
         that is not a run of this process) -> FAILED / AUTONA_EXITED; then
         the keeping rules per plugin."""
         root = os.path.join(self._workDir(), _PLUGINS_DIR)
+        if _IsLink(root):
+            return
         try:
-            plugins = [entry for entry in os.scandir(root)
+            plugins = [entry.name for entry in os.scandir(root)
                        if _PLUGIN_ID.fullmatch(entry.name)
+                       and not entry.is_symlink() and not entry.is_junction()
                        and entry.is_dir(follow_symlinks=False)]
         except OSError:
             return
         active = self._ActiveIds()
         finishedAt = _Iso(self._clock())
-        for plugin in plugins:
-            registered = self._registry.Get(plugin.name)
-            dev = registered is not None \
-                and Badge(registered.badge) is Badge.DEV
-            for folder, record in self._Records(plugin.path):
-                if (record.state is not JobState.RUNNING
-                        or (plugin.name, record.run_id) in active):
-                    continue
-                swept = dataclasses.replace(
-                    record, state=JobState.FAILED,
-                    reason=EndReason.AUTONA_EXITED, finished_at=finishedAt)
-                try:
-                    self._WriteRecord(folder, swept)
-                except OSError:
-                    logger.opt(exception=True).warning(
-                        f"Plugins: run {record.run_id} could not be marked "
-                        f"failed")
-                    continue
-                if not dev:
-                    _Remove(os.path.join(folder, INPUTS_DIR))
-                logger.info(f"Plugins: run {record.run_id} of {plugin.name} "
-                            f"was left running; marked failed")
-            self._Prune(plugin.path)
+        for pluginId in plugins:
+            try:
+                self._SweepPlugin(pluginId, active, finishedAt)
+            except Exception as error:
+                logger.warning(f"Plugins: the runs of {pluginId} could not "
+                               f"be swept: {_Failure(error)}")
+
+    def _SweepPlugin(self, pluginId, active, finishedAt):
+        pluginWork = self._PluginWork(pluginId)
+        if pluginWork is None:
+            return
+        registered = self._registry.Get(pluginId)
+        dev = registered is not None and Badge(registered.badge) is Badge.DEV
+        for folder, record in self._Scan(pluginWork)[0]:
+            if (record.state is not JobState.RUNNING
+                    or (pluginId, record.run_id) in active):
+                continue
+            swept = dataclasses.replace(
+                record, state=JobState.FAILED,
+                reason=EndReason.AUTONA_EXITED, finished_at=finishedAt)
+            if record.trigger.kind is TriggerKind.HOOK:
+                swept = dataclasses.replace(swept, artifacts=())
+            try:
+                self._WriteRecord(folder, swept)
+            except Exception as error:
+                logger.warning(f"Plugins: run {record.run_id} could not be "
+                               f"marked failed: {_Failure(error)}")
+                continue
+            if not dev:
+                _RemoveTree(os.path.join(folder, INPUTS_DIR))
+            if record.trigger.kind is TriggerKind.HOOK:
+                _RemoveTree(os.path.join(folder, OUT_DIR))
+            logger.info(f"Plugins: run {record.run_id} of {pluginId} was "
+                        f"left running; marked failed")
+        self._Prune(pluginWork)
 
     def Shutdown(self, grace: float) -> None:
-        """Refuse new starts, cancel both lanes, wait up to ``grace``
-        seconds, then have the runner kill what is left."""
-        with self._lock:
+        """Refuse new starts and claims, cancel this module's runs (waiting
+        for one being launched to get its handle), wait up to ``grace``
+        seconds for them. What is still running afterwards is left to each
+        handle's own kill after CANCEL_GRACE_SECONDS: RunHandle has no kill
+        of its own, and the runner's Shutdown would stop runs that are not
+        this module's (vodsplit's). A claimed lane is its owner's."""
+        deadline = time.monotonic() + max(0.0, grace)
+        with self._launched:
             self._closing = True
-            runs = [run for run in self._lanes.values() if run is not None]
+            runs = self._Runs()
             for run in runs:
                 run.cancelRequested = True
+            while any(run.launching and run.handle is None for run in runs):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._launched.wait(left)
             handles = [run.handle for run in runs if run.handle is not None]
         for handle in handles:
             handle.Cancel()
-        deadline = time.monotonic() + max(0.0, grace)
-        left = False
+        left = 0
         for handle in handles:
             if handle.Wait(max(0.0, deadline - time.monotonic())) is None:
-                left = True
+                left += 1
         if left:
-            self._runner.Shutdown(0.0)
+            logger.warning(f"Plugins: {left} run(s) still running after the "
+                           f"shutdown grace")

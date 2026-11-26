@@ -15,6 +15,8 @@ import datetime
 import json
 import os
 import re
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -26,8 +28,7 @@ from src.core.PluginTypes import (
     ArtifactRejection, Badge, DoneEvent, EndReason, ErrorEvent, Field,
     FieldType, Hook, HookEvent, InputFile, InputPick, Job, JobState, Lane,
     LogEvent, Manifest, ManifestCheck, ManifestProblem, ManifestReport,
-    Permissions, PluginState, ProblemScope, ProgressEvent, Refused,
-    RegisteredPlugin, RunOutcome, StageEvent, StartRefusal, Trigger,
+    Permissions, PluginState, ProblemScope, ProgressEvent, RegisteredPlugin, RunOutcome, StageEvent, StartRefusal, Trigger,
     TriggerKind, WarningEvent)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,6 +69,7 @@ def _Manifest(autonaApi="none", entry=("bin/worker.exe",)):
                     Field(key="state", type="state", label="State"),
                     Field(key="log", type="match_log", label="Log",
                           required=True),
+                    Field(key="older", type="match_log", label="Older"),
                 )),
             Job(id="post_image", title="Post image", lane="light",
                 timeout_seconds=120, manual=False,
@@ -104,6 +106,7 @@ class FakeRunner:
         self.started = []
         self.shutdowns = []
         self.fail = False
+        self.during = None
 
     def BuildEnvironment(self, parent, *, pluginDir, protocol, secrets,
                          apiUrl):
@@ -118,9 +121,11 @@ class FakeRunner:
 
     def Start(self, spec, onEvent, onEnd):
         if self.fail:
-            raise OSError("cannot")
+            raise OSError(2, "cannot", "C:/Users/someone/secret/path")
         handle = FakeHandle()
         self.started.append((spec, onEvent, onEnd, handle))
+        if self.during is not None:
+            self.during(onEnd)
         return handle
 
     def Shutdown(self, grace):
@@ -143,9 +148,12 @@ class FakeRegistry:
 class FakeInputs:
     def __init__(self):
         self.calls = []
+        self.during = None
 
     def Prepare(self, key, kind, inputsDir, pick):
         self.calls.append((key, kind, pick))
+        if self.during is not None:
+            self.during()
         if kind is FieldType.RESULT_IMAGE:
             if pick is None:
                 return None
@@ -190,7 +198,7 @@ class Suffixes:
 
     def __call__(self):
         self.n += 1
-        return f"{self.n:04d}"
+        return f"{self.n:03d}"
 
 
 @pytest.fixture
@@ -262,7 +270,7 @@ def test_request_json_holds_the_contract_fields(env):
     record = env.StartPost(message=None)
     assert record.state is JobState.RUNNING
     assert re.fullmatch(RUN_ID_PATTERN, record.run_id)
-    assert record.run_id.startswith("20261126-213000-")
+    assert record.run_id == "20261126-213000-0001"
     folder = env.RunFolder(record)
     data = (folder / "request.json").read_bytes()
     assert not data.startswith(b"\xef\xbb\xbf")
@@ -279,7 +287,12 @@ def test_request_json_holds_the_contract_fields(env):
                                  "count": 1}
     # Every non-secret setting key; the secret the caller passed is gone.
     assert request["settings"] == {"mention": "here", "channel": None}
-    assert set(request["inputs"]) == {"state", "log"}
+    assert set(request["inputs"]) == {"state", "log", "older"}
+    # An optional source not picked by hand is null (Prepare not asked);
+    # STATE is always the press's.
+    assert request["inputs"]["older"] is None
+    assert request["inputs"]["state"]["kind"] == "state"
+    assert [call[0] for call in env.inputs.calls] == ["state", "log"]
     assert request["inputs"]["log"]["kind"] == "match_log"
     assert request["inputs"]["log"]["format"] == 1
     assert os.path.isabs(request["inputs"]["log"]["path"])
@@ -409,13 +422,26 @@ def test_a_full_lane_is_busy_with_the_remaining_time(env):
     assert env.jobs.BusyFor(Lane.HEAVY) is not None
 
 
-def test_another_owner_on_the_lane_is_busy(env):
-    elsewhere = Refused(reason=StartRefusal.BUSY, remaining_seconds=None)
-    env.jobs._laneElsewhere = \
-        lambda lane: elsewhere if lane is Lane.HEAVY else None
-    assert env.jobs.Start(PLUGIN, "split", MANUAL, {}, {}, {}) is elsewhere
-    assert env.jobs.BusyFor(Lane.HEAVY) is elsewhere
-    assert env.jobs.BusyFor(Lane.LIGHT) is None
+def test_another_owner_claims_a_lane(env):
+    jobs = env.jobs
+    assert jobs.Claim(Lane.HEAVY, "taguyan.vodsplit")
+    assert not jobs.Claim(Lane.HEAVY, "someone.else")
+    refused = jobs.Start(PLUGIN, "split", MANUAL, {}, {}, {})
+    assert refused.reason is StartRefusal.BUSY
+    assert refused.remaining_seconds is None
+    assert jobs.BusyFor(Lane.HEAVY) == refused
+    assert jobs.BusyFor(Lane.LIGHT) is None
+    assert jobs.Running("taguyan.vodsplit") and not jobs.Running(PLUGIN)
+    # Only its owner gives it back; onLaneFreed on the releasing thread.
+    jobs.Release(Lane.HEAVY, "someone.else")
+    assert jobs.BusyFor(Lane.HEAVY) is not None and env.freed == []
+    jobs.Release(Lane.HEAVY, "taguyan.vodsplit")
+    assert jobs.BusyFor(Lane.HEAVY) is None and env.freed == [Lane.HEAVY]
+    # A lane a run holds cannot be claimed; nothing while shutting down.
+    jobs.Start(PLUGIN, "split", MANUAL, {}, {}, {})
+    assert not jobs.Claim(Lane.HEAVY, "taguyan.vodsplit")
+    jobs.Shutdown(0.0)
+    assert not jobs.Claim(Lane.LIGHT, "taguyan.vodsplit")
 
 
 def test_a_missing_required_setting_starts_nothing(env):
@@ -481,15 +507,32 @@ def test_requests_that_do_not_fit_are_refused(env):
         is StartRefusal.INVALID_REQUEST
     assert start(PLUGIN, "post", MANUAL, {}, {}, {"log": InputPick(
         key="log", kind="video")}).reason is StartRefusal.INVALID_REQUEST
+    # A pick under another key, a STATE pick.
+    assert start(PLUGIN, "post", MANUAL, {}, {}, {"log": InputPick(
+        key="older", kind=FieldType.MATCH_LOG)}).reason \
+        is StartRefusal.INVALID_REQUEST
+    assert start(PLUGIN, "post", MANUAL, {}, {}, {**pick, "state": InputPick(
+        key="state", kind=FieldType.STATE)}).reason \
+        is StartRefusal.INVALID_REQUEST
     # An action whose image is not filled.
     assert start(PLUGIN, "post_image", ACTION, {}, {}, {}).reason \
         is StartRefusal.INVALID_REQUEST
     assert env.runner.started == []
-    # A refusal after the lane was reserved gives it back (and says so)
-    # and leaves no folder.
+    # A refusal after the lane was reserved gives it back without a
+    # callback (Start calls none) and leaves no folder.
     assert env.jobs.BusyFor(Lane.LIGHT) is None
-    assert env.freed == [Lane.LIGHT]
+    assert env.freed == [] and env.ended == []
     assert list((env.work / "plugins" / PLUGIN).iterdir()) == []
+
+
+def test_the_built_in_plugin_is_not_started_here(env):
+    env.Rebuild(badge=Badge.BUILTIN)
+    assert env.StartPost().reason is StartRefusal.JOB_UNUSABLE
+
+
+def test_an_installed_entry_outside_its_folder_is_refused(env):
+    env.Rebuild(manifest=_Manifest(entry=("../other/worker.exe",)))
+    assert env.StartPost().reason is StartRefusal.INCOMPATIBLE
 
 
 # ── events, the end, the callbacks ──────────────────────────────────────
@@ -554,12 +597,72 @@ def test_cancel(env):
     assert env.ended[0].cancel_requested
 
 
-def test_a_runner_that_raises_is_a_launch_failure(env):
+def _Logged(action):
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)),
+                      level="DEBUG")
+    try:
+        result = action()
+    finally:
+        logger.remove(sink)
+    return result, "\n".join(lines)
+
+
+def test_a_runner_that_raises_gives_the_lane_back(env):
     env.runner.fail = True
+    refused, log = _Logged(env.StartPost)
+    assert refused.reason is StartRefusal.UNAVAILABLE
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+    assert env.freed == [] and env.ended == []
+    assert list((env.work / "plugins" / PLUGIN).iterdir()) == []
+    # The exception's type and errno only, never its path.
+    assert "(ENOENT)" in log and "someone" not in log
+
+
+def test_any_failure_while_preparing_gives_the_lane_back(env):
+    def boom():
+        raise RuntimeError("C:/Users/someone/private")
+    env.inputs.during = boom
+    refused, log = _Logged(env.StartPost)
+    assert refused.reason is StartRefusal.UNAVAILABLE
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+    assert env.freed == [] and env.runner.started == []
+    assert "RuntimeError" in log and "someone" not in log
+    env.inputs.during = None
+    assert env.StartPost().state is JobState.RUNNING
+
+
+def test_a_work_folder_that_cannot_be_made_is_unavailable(env):
+    env.work.parent.mkdir(parents=True, exist_ok=True)
+    env.work.write_text("a file", encoding="utf-8")
+    assert env.StartPost().reason is StartRefusal.UNAVAILABLE
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+
+
+def test_a_cancel_while_preparing_launches_nothing(env):
+    def cancel():
+        if env.inputs.calls[-1][0] == "log":
+            (run,) = env.jobs._Runs()
+            assert env.jobs.Cancel(PLUGIN, run.runId)
+    env.inputs.during = cancel
     record = env.StartPost()
-    assert record.state is JobState.FAILED
-    assert record.reason is EndReason.LAUNCH_FAILED
-    assert env.freed == [Lane.LIGHT] and len(env.ended) == 1
+    assert record.state is JobState.CANCELLED and record.cancel_requested
+    assert env.runner.started == []
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+    # Returned by Start: no callback.
+    assert env.ended == [] and env.freed == []
+    job = json.loads((env.RunFolder(record) / "job.json")
+                     .read_text(encoding="utf-8"))
+    assert job["state"] == "cancelled"
+
+
+def test_an_end_before_the_handle_is_kept(env):
+    env.runner.during = lambda onEnd: onEnd(_Done())
+    record = env.StartPost()
+    assert len(env.ended) == 1 and env.freed == [Lane.LIGHT]
+    assert env.jobs.Get(PLUGIN, record.run_id).state is JobState.DONE
+    assert not env.jobs.Cancel(PLUGIN, record.run_id)
+    assert env.runner.started[0][3].cancels == 0
 
 
 # ── keeping ─────────────────────────────────────────────────────────────
@@ -594,9 +697,17 @@ def test_a_hook_run_folder_is_removed_but_the_last_failed_one(env):
     env.clock.Advance(1)
 
     first = _StartHook(env)
-    env.End(1, FAILED)
+    (env.RunFolder(first) / "out" / "a.txt").write_text("x", encoding="utf-8")
+    env.End(1, RunOutcome(
+        state=JobState.FAILED, reason=EndReason.TIMED_OUT, exit_code=0,
+        final=DoneEvent(summary="late", artifacts=(
+            Artifact(path="a.txt", kind=ArtifactKind.TEXT),))))
     assert (env.RunFolder(first) / "request.json").exists()
     assert (env.RunFolder(first) / "job.json").exists()
+    # A hook run keeps no artifact.
+    assert not (env.RunFolder(first) / "out").exists()
+    assert not (env.RunFolder(first) / "inputs").exists()
+    assert env.ended[-1].artifacts == () and env.ended[-1].summary == "late"
     env.clock.Advance(1)
 
     second = _StartHook(env)
@@ -659,7 +770,8 @@ def test_artifacts_are_checked_at_done_and_when_served(env, tmp_path):
                       ("big.txt", "too large"), ("sub", "not a file"),
                       ("odd.bin", "unknown kind")]:
         assert f"Dropped the artifact {path} ({why})" in english
-    assert "Dropped 3 artifact(s) (past 50, or unreadable)" in english
+    assert "Dropped 3 artifact(s) (past 50, of an unknown kind, or " \
+        "unreadable)" in english
 
     path, kind = env.jobs.ArtifactFile(PLUGIN, record.run_id, 1)
     assert Path(path) == (out / "result.png").resolve()
@@ -735,22 +847,194 @@ def test_sweep_fails_the_runs_left_running(env):
     assert env.ended == []
 
 
-def test_shutdown_cancels_both_lanes_then_kills_the_rest(env):
+def test_shutdown_cancels_its_runs_only(env):
     env.StartPost()
     env.jobs.Start(PLUGIN, "split", MANUAL, {}, {}, {})
     light, heavy = env.runner.started[0][3], env.runner.started[1][3]
     light.outcome = RunOutcome(state=JobState.CANCELLED)
-    env.jobs.Shutdown(0.0)
+    _, log = _Logged(lambda: env.jobs.Shutdown(0.0))
     assert light.cancels == 1 and heavy.cancels == 1
-    assert env.runner.shutdowns == [0.0]
+    # The runner's Shutdown would stop runs that are not this module's.
+    assert env.runner.shutdowns == []
+    assert "1 run(s) still running" in log
     assert env.StartPost().reason is StartRefusal.UNAVAILABLE
 
 
-def test_shutdown_does_not_kill_when_every_run_ended(env):
+def test_shutdown_waits_for_a_run_being_launched(env):
+    threads = []
+
+    def during(onEnd):
+        # runner.Start is under way (no handle yet) when Shutdown comes.
+        thread = threading.Thread(target=env.jobs.Shutdown, args=(5.0,))
+        threads.append(thread)
+        thread.start()
+        deadline = time.monotonic() + 5
+        while not env.jobs._closing and time.monotonic() < deadline:
+            time.sleep(0.001)
+    env.runner.during = during
+    record = env.StartPost()
+    handle = env.runner.started[0][3]
+    handle.outcome = RunOutcome(state=JobState.CANCELLED)
+    threads[0].join(5)
+    assert not threads[0].is_alive()
+    assert handle.cancels >= 1
+    assert env.jobs.Get(PLUGIN, record.run_id).cancel_requested
+
+
+# ── robustness ──────────────────────────────────────────────────────────
+
+def test_a_lone_surrogate_still_writes_job_json(env):
+    record = env.StartPost()
+    env.runner.started[0][1](LogEvent(message="bad \ud800 text"))
+    env.End(0, _Done(summary="\udc00"))
+    job = (env.RunFolder(record) / "job.json").read_bytes()
+    assert json.loads(job.decode("utf-8"))["state"] == "done"
+    assert env.jobs.Get(PLUGIN, record.run_id).summary == "\udc00"
+    assert len(env.ended) == 1 and env.freed == [Lane.LIGHT]
+
+
+def test_a_broken_job_json_breaks_nothing(env):
+    sibling = env.StartPost()
+    env.End(0, _Done())
+    env.clock.Advance(1)
+    path = env.RunFolder(sibling) / "job.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw.update(artifacts=5, warnings=True, stage=[1], progress="x",
+               error=3, trigger={"kind": "manual", "target": 7})
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    other = env.work / "plugins" / PLUGIN / "20261126-000000-0zzz"
+    other.mkdir()
+    (other / "job.json").write_text("[1, 2", encoding="utf-8")
+
+    record = env.StartPost()
+    env.End(1, _Done())
+    assert len(env.ended) == 2 and env.freed == [Lane.LIGHT] * 2
+    listed = {r.run_id: r for r in env.jobs.List(PLUGIN)}
+    assert listed[sibling.run_id].artifacts == ()
+    assert listed[sibling.run_id].warnings == ()
+    assert record.run_id in listed
+    env.jobs.Sweep()
+    assert other.exists()
+
+
+def test_a_failing_step_at_the_end_still_calls_back(env, monkeypatch):
+    record = env.StartPost()
+
+    def broken(folder, record):
+        raise OSError(13, "denied", "C:/Users/someone")
+    monkeypatch.setattr(env.jobs, "_WriteRecord", broken)
+    monkeypatch.setattr(env.jobs, "_Prune",
+                        lambda pluginWork: 1 / 0)
+    _, log = _Logged(lambda: env.End(0, _Done()))
+    assert len(env.ended) == 1 and env.freed == [Lane.LIGHT]
+    assert "someone" not in log and "ZeroDivisionError" in log
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+    assert record.run_id == env.ended[0].run_id
+
+
+def test_the_ended_run_is_read_from_memory_until_written(env, monkeypatch):
+    record = env.StartPost()
+    seen = []
+    write = env.jobs._WriteRecord
+
+    def spy(folder, written):
+        seen.append(env.jobs.Get(PLUGIN, record.run_id))
+        seen.append([r.state for r in env.jobs.List(PLUGIN)])
+        write(folder, written)
+    monkeypatch.setattr(env.jobs, "_WriteRecord", spy)
+    env.End(0, _Done(summary="done"))
+    assert seen[0].state is JobState.DONE and seen[0].summary == "done"
+    assert seen[1] == [JobState.DONE]
+    assert not env.jobs.Running(PLUGIN)
+
+
+def test_host_warnings_are_capped_and_texts_cut(env):
+    record = env.StartPost()
+    onEvent = env.runner.started[0][1]
+    onEvent(LogEvent(message="x" * 5000))
+    onEvent(WarningEvent(message={"ja": "あ" * 3000, "en": "w"}))
+    raw = {"type": "done",
+           "artifacts": [{"path": f"v{n}", "kind": "video"}
+                         for n in range(1000)]}
+    env.End(0, _Done(summary="s" * 900, raw=raw))
+    got = env.jobs.Get(PLUGIN, record.run_id)
+    assert len(got.log) == 2000 and len(got.summary) == 500
+    assert len(got.warnings[0]["ja"]) == 2000
+    unknown = [w for w in got.warnings[1:] if "unknown kind)" in w["en"]]
+    assert len(unknown) == 10
+    assert got.warnings[-1]["en"].startswith("Dropped 990 artifact(s)")
+
+
+def test_eta_counts_down_and_infinity_is_ignored(env):
     env.StartPost()
-    env.runner.started[0][3].outcome = RunOutcome(state=JobState.CANCELLED)
-    env.jobs.Shutdown(0.0)
-    assert env.runner.shutdowns == []
+    onEvent = env.runner.started[0][1]
+    onEvent(ProgressEvent(eta=20.0))
+    env.clock.Advance(5)
+    assert env.jobs.BusyFor(Lane.LIGHT).remaining_seconds == 15
+    onEvent(ProgressEvent(eta=float("inf"), fraction=float("nan")))
+    record = env.jobs.List(PLUGIN)[0]
+    assert record.progress.eta is None and record.progress.fraction is None
+    assert env.jobs.BusyFor(Lane.LIGHT).remaining_seconds == 55
+
+
+def test_runs_in_one_second_sort_in_start_order(env):
+    ids = []
+    for n in range(3):
+        ids.append(env.StartPost().run_id)
+        env.End(n, _Done())
+    assert ids == sorted(ids)
+    assert [r.run_id for r in env.jobs.List(PLUGIN)] == list(reversed(ids))
+
+
+def test_a_trigger_carries_its_kinds_keys_only(env):
+    odd = Trigger(kind=TriggerKind.MANUAL, target=ActionTarget.RESULT_IMAGE,
+                  event=HookEvent.MATCH_DECIDED, hook="x/y")
+    record = env.jobs.Start(
+        PLUGIN, "post", odd, {}, {},
+        {"log": InputPick(key="log", kind=FieldType.MATCH_LOG,
+                          choice="2026-11-26")})
+    assert record.trigger == MANUAL
+    request = json.loads((env.RunFolder(record) / "request.json")
+                         .read_text(encoding="utf-8"))
+    assert request["trigger"] == {"kind": "manual"}
+
+
+def test_a_hook_run_left_running_is_swept_and_kept_once(env):
+    first = _StartHook(env)
+    env.clock.Advance(1)
+    env.End(0, FAILED)
+    second = _StartHook(env)
+    # A new process finds the second still running.
+    env.jobs = PluginJobs(
+        runner=env.runner, registry=env.registry, inputs=env.inputs,
+        settings=env.settings, secrets=FakeSecrets(),
+        workDir=lambda: str(env.work), userDataDir=str(env.userData),
+        hostVersion="2.6.0", locale=lambda: "en", apiUrl=lambda: None,
+        onRunEnded=env.ended.append, onLaneFreed=env.freed.append,
+        clock=env.clock)
+    env.jobs.Sweep()
+    assert not env.RunFolder(first).exists()
+    swept = env.jobs.Get(PLUGIN, second.run_id)
+    assert swept.state is JobState.FAILED
+    assert swept.reason is EndReason.AUTONA_EXITED
+    assert not (env.RunFolder(second) / "out").exists()
+
+
+def test_a_junction_for_the_plugins_work_folder_is_not_followed(env):
+    winapi = pytest.importorskip("_winapi")
+    elsewhere = env.tmp / "elsewhere"
+    victim = elsewhere / "20200101-000000-0abc"
+    victim.mkdir(parents=True)
+    (victim / "job.json").write_text(json.dumps({
+        "run_id": victim.name, "plugin": PLUGIN, "job": "post",
+        "trigger": {"kind": "manual"}, "lane": "light", "state": "done",
+        "started_at": "2020-01-01T00:00:00+09:00"}), encoding="utf-8")
+    (env.work / "plugins").mkdir(parents=True)
+    winapi.CreateJunction(str(elsewhere), str(env.work / "plugins" / PLUGIN))
+    assert env.StartPost().reason is StartRefusal.UNAVAILABLE
+    env.jobs.Sweep()
+    assert env.jobs.List(PLUGIN) == []
+    assert (victim / "job.json").exists()
 
 
 def test_making_it_touches_no_file(env):
