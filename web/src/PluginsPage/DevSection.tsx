@@ -15,12 +15,13 @@ import i18n from "../i18n/config";
 import {CardFrame} from "../GuidePages/parts";
 import {apiErrorReason, apiErrorCode} from "../api";
 import {PluginsApi} from "./pluginsApi";
-import {DevState, Pick} from "./pluginTypes";
+import {DevState, PickResult} from "./pluginTypes";
+import {pickErrorText} from "./RunView";
 
 // The developer's entrance (ADR-009 D4): the toggle and the dev folders. Both
 // ways in ask first, with D6's fixed text plus the dev folder's own line.
 
-type Asking = {kind: "toggle"} | {kind: "folder"; pick: Pick};
+type Asking = {kind: "toggle"} | {kind: "folder"; pick: PickResult};
 
 export default function DevSection({api, onChanged, onError}: {
     api: PluginsApi;
@@ -49,7 +50,10 @@ export default function DevSection({api, onChanged, onError}: {
                 setAsking({kind: "folder", pick});
             }
         } catch (error) {
-            onError(i18n.t("plugins_failed"));
+            const text = pickErrorText(error);
+            if (text) {
+                onError(text);
+            }
         }
     };
 
@@ -62,6 +66,7 @@ export default function DevSection({api, onChanged, onError}: {
         try {
             if (request.kind === "toggle") {
                 await api.setDev(!dev.enabled);
+                onChanged();
             } else {
                 await api.addDevFolder(request.pick.id);
                 onChanged();
@@ -90,6 +95,7 @@ export default function DevSection({api, onChanged, onError}: {
         if (dev.enabled) {
             try {
                 await api.setDev(false);
+                onChanged();
             } catch (error) {
                 fail(error);
             }
@@ -141,7 +147,7 @@ export default function DevSection({api, onChanged, onError}: {
                     </DialogContentText>
                     {asking?.kind === "folder" ? (
                         <DialogContentText sx={{mt: 1}}>
-                            {asking.pick.name}
+                            {asking.pick.name || i18n.t("plugins_pick_chosen")}
                         </DialogContentText>
                     ) : null}
                 </DialogContent>

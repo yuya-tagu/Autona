@@ -28,3 +28,13 @@ export function sizeLabel(bytes: number): string {
     }
     return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
+
+// A run's start (ISO 8601 with offset) in the viewer's locale; the raw text
+// when it does not parse.
+export function startedText(iso: string, language: string): string {
+    const time = new Date(iso);
+    if (Number.isNaN(time.getTime())) {
+        return iso;
+    }
+    return time.toLocaleString(language);
+}

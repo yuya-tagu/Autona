@@ -1,6 +1,7 @@
 import React from "react";
 import {
     act,
+    cleanup,
     fireEvent,
     render,
     screen,
@@ -19,15 +20,19 @@ import {
     validateAll,
     validateField,
 } from "./formFields";
+import {pickErrorText, refusalText} from "./RunView";
 
 // The plugins page (ADR-009 D4) against the in-memory mock API. The shell
 // probe is stubbed: the page is shown as the desktop's shared view.
 
 jest.setTimeout(20000);
 
+// What the shell probe answers (a test sets it) and its retry.
+let mockAccess = "shell";
+const mockRetry = jest.fn();
 jest.mock("../PanelShell/useShellAccess", () => ({
-    useShellAccess: () => ({access: "shell", token: "", available: false,
-                            retry: () => {}, regenerate: async () => ""}),
+    useShellAccess: () => ({access: mockAccess, token: "", available: false,
+                            retry: mockRetry, regenerate: async () => ""}),
 }));
 
 jest.mock("../websocketConnection", () => ({
@@ -35,6 +40,11 @@ jest.mock("../websocketConnection", () => ({
     default: {instance: () => ({connected: false, emit: () => {},
                                 on: () => {}, off: () => {}})},
 }));
+
+beforeEach(() => {
+    mockAccess = "shell";
+    mockRetry.mockClear();
+});
 
 beforeAll(async () => {
     await i18n.changeLanguage("en");
@@ -128,7 +138,7 @@ describe("FieldForm", () => {
         // A saved secret shows "Set" only, never a value.
         expect(screen.getAllByText("Set").length).toBeGreaterThan(0);
         expect(screen.getByTestId("plugin-field-st").textContent)
-            .toContain("Published state");
+            .toContain("handed over");
         fireEvent.click(screen.getByRole("button", {name: "Choose a folder"}));
         await waitFor(() => expect(onChange).toHaveBeenCalled());
         expect(values.dir.pick).toEqual({id: "p9", name: "Picked"});
@@ -260,6 +270,31 @@ describe("the page", () => {
         await waitFor(() => expect(blob).toHaveBeenCalled());
         const img = await screen.findByTestId("plugin-artifact-1-image");
         expect(img.getAttribute("src")).toBe("blob:mock-1");
+        expect(revoked).not.toHaveBeenCalled();
+        cleanup();
+        expect(revoked).toHaveBeenCalledWith("blob:mock-1");
+    });
+
+    test("a body the host did not serve as an image is not shown", async () => {
+        const created = jest.fn(() => "blob:never");
+        URL.createObjectURL = created;
+        const api = createMockPluginsApi({runningReads: 0});
+        jest.spyOn(api, "artifactBlob").mockResolvedValue(
+            new Blob(["<html>"], {type: "text/html"}));
+        const id = "taguyan.webhook";
+        const started = await api.startRun(id, {
+            job: "export_log", trigger: {kind: "manual", target: null},
+            params: {}, inputs: {}});
+        await api.run(id, started.run_id);
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${id}`));
+        fireEvent.click(within(await screen.findByTestId("plugin-history"))
+            .getByRole("button"));
+        await screen.findByTestId("plugin-artifact-1");
+        await waitFor(() => expect(screen.getByText("It did not work."))
+            .toBeTruthy());
+        expect(created).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("plugin-artifact-1-image")).toBeNull();
     });
 
     test("turning the developer toggle on asks first, with D6's fixed text",
@@ -300,6 +335,449 @@ describe("the page", () => {
         await waitFor(() => expect(screen.queryByTestId("plugin-dev-consent"))
             .toBeNull());
         expect((await api.dev()).enabled).toBe(false);
+    });
+});
+
+const WEBHOOK = "taguyan.webhook";
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A job record as the host answers it, for a test to bend.
+function record(extra = {}) {
+    return {
+        run_id: "20261126-100000-aaaa", plugin: WEBHOOK, job: "post_image",
+        trigger: {kind: "manual", target: null}, lane: "light",
+        state: "failed", reason: null,
+        started_at: "2026-11-26T10:00:00+09:00",
+        finished_at: "2026-11-26T10:00:05+09:00", exit_code: 1, stage: null,
+        progress: null, log: null, warnings: [], summary: null, artifacts: [],
+        error: null, cancel_requested: false, ...extra};
+}
+
+// A refusal as api.ts raises it.
+function refused(status, fields = {}) {
+    return Object.assign(new Error(`HTTP ${status}`), {status, ...fields});
+}
+
+// The page with a run already going in the plugin (a long one).
+async function withRunning(options = {}) {
+    const api = createMockPluginsApi({runningReads: 1000, ...options});
+    await api.startRun(WEBHOOK, {
+        job: "export_log", trigger: {kind: "manual", target: null},
+        params: {}, inputs: {}});
+    return api;
+}
+
+async function openWebhook(api) {
+    show(api);
+    fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+    return screen.findByTestId("plugin-detail");
+}
+
+describe("following a run", () => {
+    test("a run still going is followed again when the page comes back",
+         async () => {
+             const api = await withRunning();
+             await openWebhook(api);
+             expect(await screen.findByTestId("plugin-run-progress"))
+                 .toBeTruthy();
+             // [1/2] Sending, 30 %, the latest log line, and Stop.
+             expect(screen.getByText("[1/2] Sending")).toBeTruthy();
+             expect(screen.getByRole("progressbar")
+                 .getAttribute("aria-valuenow")).toBe("30");
+             expect(screen.getByRole("button", {name: "Stop"})).toBeEnabled();
+             // The jobs wait: one run at a time.
+             expect(screen.getByTestId("plugin-run-export_log")).toBeDisabled();
+         });
+
+    test("the polling stops when the page is left", async () => {
+        const api = await withRunning();
+        const read = jest.spyOn(api, "run");
+        await openWebhook(api);
+        await screen.findByTestId("plugin-run-progress");
+        cleanup();
+        const after = read.mock.calls.length;
+        await act(async () => {
+            await sleep(1300);
+        });
+        expect(read.mock.calls.length).toBe(after);
+    });
+
+    test("the polling stops when the run ends", async () => {
+        const api = await withRunning({runningReads: 1});
+        const read = jest.spyOn(api, "run");
+        await openWebhook(api);
+        await screen.findByTestId("plugin-run-progress");
+        await screen.findByTestId("plugin-run-view", {}, {timeout: 4000});
+        const after = read.mock.calls.length;
+        await act(async () => {
+            await sleep(1300);
+        });
+        expect(read.mock.calls.length).toBe(after);
+        // The jobs can start again.
+        expect(screen.getByTestId("plugin-run-export_log")).toBeEnabled();
+    });
+
+    test("a 404 stops the polling at once and says why", async () => {
+        const api = await withRunning();
+        jest.spyOn(api, "run").mockRejectedValue(refused(404));
+        const read = api.run;
+        await openWebhook(api);
+        const lost = await screen.findByTestId("plugin-run-lost");
+        expect(lost.textContent).toBe("The job was not found.");
+        await act(async () => {
+            await sleep(1300);
+        });
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId("plugin-run-export_log")).toBeEnabled();
+    });
+
+    test("a 403 stops it too", async () => {
+        const api = await withRunning();
+        jest.spyOn(api, "run").mockRejectedValue(refused(403));
+        await openWebhook(api);
+        expect((await screen.findByTestId("plugin-run-lost")).textContent)
+            .toContain("not allowed");
+    });
+
+    test("other failures are tried again a few times, then it gives up",
+         async () => {
+             const api = await withRunning();
+             const read = jest.spyOn(api, "run")
+                 .mockRejectedValue(refused(500));
+             await openWebhook(api);
+             const lost = await screen.findByTestId(
+                 "plugin-run-lost", {}, {timeout: 8000});
+             expect(lost.textContent).toContain("can no longer be read");
+             expect(read).toHaveBeenCalledTimes(5);
+             expect(screen.getByTestId("plugin-run-export_log")).toBeEnabled();
+         });
+
+    test("Stop asks the host and waits for the end once a stop is asked",
+         async () => {
+             const api = await withRunning();
+             const cancel = jest.spyOn(api, "cancelRun");
+             const [going] = await api.runs(WEBHOOK);
+             await openWebhook(api);
+             fireEvent.click(await screen.findByRole("button", {name: "Stop"}));
+             expect(cancel).toHaveBeenCalledWith(WEBHOOK, going.run_id);
+             // The next read says the stop is asked: the button waits.
+             jest.spyOn(api, "run").mockResolvedValue(
+                 {...going, cancel_requested: true});
+             await waitFor(() => expect(
+                 screen.getByRole("button", {name: "Stop"})).toBeDisabled(),
+                          {timeout: 3000});
+         });
+});
+
+describe("the detail's reads", () => {
+    test("a slow answer for the plugin left behind is dropped", async () => {
+        const api = createMockPluginsApi();
+        const real = api.detail;
+        let release;
+        jest.spyOn(api, "detail").mockImplementation((id) => (
+            id === WEBHOOK
+                ? new Promise((resolve) => {
+                    release = async () => resolve(await real(id));
+                })
+                : real(id)));
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        fireEvent.click(screen.getByTestId("plugin-row-me.sandbox"));
+        await waitFor(() => expect(screen.getByTestId("plugin-detail")
+            .textContent).toContain("me.sandbox"));
+        await act(async () => {
+            await release();
+        });
+        expect(screen.getByTestId("plugin-detail").textContent)
+            .toContain("me.sandbox");
+        expect(screen.getByTestId("plugin-detail").textContent)
+            .not.toContain("taguyan.webhook");
+    });
+
+    test("a plugin in development can be read again", async () => {
+        const api = createMockPluginsApi();
+        const reload = jest.spyOn(api, "reload");
+        show(api);
+        fireEvent.click(await screen.findByTestId("plugin-row-me.sandbox"));
+        fireEvent.click(await screen.findByTestId("plugin-reload"));
+        expect(reload).toHaveBeenCalledWith("me.sandbox");
+        // An installed plugin has no such button.
+        fireEvent.click(screen.getByTestId(`plugin-row-${WEBHOOK}`));
+        await waitFor(() => expect(screen.getByTestId("plugin-detail")
+            .textContent).toContain(WEBHOOK));
+        expect(screen.queryByTestId("plugin-reload")).toBeNull();
+    });
+});
+
+describe("what the contract asks the page to show", () => {
+    async function openHistory(api) {
+        await openWebhook(api);
+        fireEvent.click(within(await screen.findByTestId("plugin-history"))
+            .getByRole("button"));
+        return screen.findByTestId("plugin-run-view");
+    }
+
+    test("the end reason, the early finish, the error code and the log",
+         async () => {
+             const api = createMockPluginsApi();
+             jest.spyOn(api, "runs").mockResolvedValue([record({
+                 reason: "entry_missing", finished_before_cancel: true,
+                 error: {code: "boom", message: "It broke", hint: "Retry"}})]);
+             const log = jest.spyOn(api, "runLog");
+             const view = await openHistory(api);
+             expect(within(view).getByTestId("plugin-run-reason").textContent)
+                 .toContain("Antivirus software may have quarantined it");
+             expect(within(view).getByTestId("plugin-run-early").textContent)
+                 .toBe("The job had already finished before the stop.");
+             expect(within(view).getByTestId("plugin-run-error").textContent)
+                 .toBe("It broke Retry (boom)");
+             // A failed run opens the worker's log without a click.
+             await waitFor(() => expect(log).toHaveBeenCalled());
+             expect((await screen.findByTestId("plugin-run-log")).textContent)
+                 .toContain("stderr line");
+         });
+
+    test("each reason has its words; an unknown one shows its code",
+         async () => {
+             const en = i18n.getFixedT("en");
+             for (const reason of ["launch_failed", "entry_missing",
+                                   "timed_out", "memory_limit",
+                                   "abnormal_exit", "autona_exited"]) {
+                 expect(en(`plugins_reason_${reason}`)).not.toBe(
+                     `plugins_reason_${reason}`);
+             }
+             const api = createMockPluginsApi();
+             jest.spyOn(api, "runs").mockResolvedValue(
+                 [record({state: "error", reason: "something_new"})]);
+             const view = await openHistory(api);
+             expect(within(view).getByTestId("plugin-run-reason").textContent)
+                 .toBe("something_new");
+             // A run that is not failed keeps its log closed.
+             expect(screen.queryByTestId("plugin-run-log")).toBeNull();
+         });
+
+    test("a plugin's words are text, never markup", async () => {
+        const api = createMockPluginsApi();
+        jest.spyOn(api, "runs").mockResolvedValue([record({
+            state: "done", exit_code: 0,
+            summary: "<b>bold</b> summary",
+            artifacts: [{path: "r.txt", kind: "text",
+                         label: "<i>label</i>"}]})]);
+        jest.spyOn(api, "artifactText").mockResolvedValue("<b>x</b>\n<script>");
+        const view = await openHistory(api);
+        expect(view.textContent).toContain("<b>bold</b> summary");
+        await waitFor(() => expect(
+            screen.getByTestId("plugin-artifact-0-text").textContent)
+            .toBe("<b>x</b>\n<script>"));
+        expect(view.textContent).toContain("<i>label</i>");
+        expect(view.querySelector("b, i, script")).toBeNull();
+    });
+
+    test("the history names the job and formats the time", async () => {
+        const api = createMockPluginsApi();
+        jest.spyOn(api, "runs").mockResolvedValue([record({state: "done"})]);
+        await openWebhook(api);
+        const row = within(await screen.findByTestId("plugin-history"))
+            .getByRole("button");
+        expect(row.textContent).toContain("Post the result image");
+        expect(row.textContent).not.toContain("2026-11-26T10:00:00+09:00");
+        expect(row.textContent).toContain("Done");
+    });
+});
+
+describe("refusals and access", () => {
+    test("a refused start says why (busy carries the host's seconds)",
+         async () => {
+             const api = createMockPluginsApi();
+             await openWebhook(api);
+             jest.spyOn(api, "startRun").mockRejectedValue(refused(409, {
+                 code: "CONFLICT", reason: "busy", detail: "12 s left"}));
+             fireEvent.mouseDown(within(screen.getByTestId(
+                 "plugin-job-export_log")).getByRole("combobox"));
+             fireEvent.click(await screen.findByRole("option", {
+                 name: "2026-11-26 Fake Cup"}));
+             fireEvent.click(screen.getByTestId("plugin-run-export_log"));
+             expect(await screen.findByText(
+                 "Wait until the running job ends, then try again. (12 s left)"))
+                 .toBeTruthy();
+         });
+
+    test("refusal and pick wording", () => {
+        expect(refusalText(refused(409, {reason: "needs_settings"})))
+            .toBe("Settings are needed.");
+        expect(refusalText(refused(409, {code: "BLOCKED"})))
+            .toBe("This plugin is blocked.");
+        expect(refusalText(refused(500))).toBe("It did not work.");
+        expect(pickErrorText({code: "superseded"})).toBeNull();
+        expect(pickErrorText({code: "unknown_verb"}))
+            .toBe("This cannot be chosen here yet.");
+        expect(pickErrorText({code: "timeout"}))
+            .toBe("The picker could not be opened.");
+    });
+
+    test("in another computer's browser it lists and explains", async () => {
+        mockAccess = "elsewhere";
+        show(createMockPluginsApi());
+        const row = await screen.findByTestId(`plugin-row-${WEBHOOK}`);
+        expect(row).toBeDisabled();
+        expect(screen.getByText(/only inside Autona on this PC/)).toBeTruthy();
+        expect(screen.queryByText("For developers")).toBeNull();
+    });
+
+    test("a probe that failed says so and tries again", async () => {
+        mockAccess = "failed";
+        show(createMockPluginsApi());
+        const alert = await screen.findByTestId("plugin-access-failed");
+        fireEvent.click(within(alert).getByRole("button", {name: "Reload"}));
+        expect(mockRetry).toHaveBeenCalledTimes(1);
+    });
+
+    test("a list that cannot be read offers to read it again", async () => {
+        const api = createMockPluginsApi();
+        const list = jest.spyOn(api, "list").mockRejectedValueOnce(
+            refused(500));
+        show(api);
+        fireEvent.click(await screen.findByRole("button", {name: "Reload"}));
+        expect(await screen.findByTestId(`plugin-row-${WEBHOOK}`)).toBeTruthy();
+        expect(list).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("saving settings", () => {
+    test("a secret goes to its own route, never into the settings body",
+         async () => {
+             const api = createMockPluginsApi();
+             const settings = jest.spyOn(api, "saveSettings");
+             const secret = jest.spyOn(api, "saveSecret");
+             await openWebhook(api);
+             const input = screen.getByTestId("plugin-setting-webhook_url");
+             fireEvent.change(input, {target: {value: "https://hook"}});
+             fireEvent.click(screen.getByTestId("plugin-settings-save"));
+             await waitFor(() => expect(secret).toHaveBeenCalledWith(
+                 WEBHOOK, "webhook_url", "https://hook"));
+             expect(settings).toHaveBeenCalledWith(WEBHOOK, {mention: "none"});
+             expect(JSON.stringify(settings.mock.calls))
+                 .not.toContain("https://hook");
+             // Saved: the box is empty again and says "Set".
+             await waitFor(() => expect(
+                 screen.getByTestId("plugin-setting-webhook_url").value)
+                 .toBe(""));
+             const clear = await screen.findByRole("button", {name: "Clear"});
+             const cleared = jest.spyOn(api, "clearSecret");
+             fireEvent.click(clear);
+             await waitFor(() => expect(cleared).toHaveBeenCalledWith(
+                 WEBHOOK, "webhook_url"));
+         });
+
+    test("an item this Autona cannot use does not stop the others from saving",
+         async () => {
+             const api = createMockPluginsApi();
+             const real = api.detail;
+             jest.spyOn(api, "detail").mockImplementation(async (id) => {
+                 const detail = await real(id);
+                 detail.settings.push({key: "odd", type: "future",
+                                       label: "Odd"});
+                 return detail;
+             });
+             const settings = jest.spyOn(api, "saveSettings");
+             await openWebhook(api);
+             expect(screen.getByTestId("plugin-setting-odd").textContent)
+                 .toContain("future");
+             fireEvent.change(screen.getByTestId("plugin-setting-webhook_url"),
+                              {target: {value: "https://hook"}});
+             fireEvent.click(screen.getByTestId("plugin-settings-save"));
+             await waitFor(() => expect(settings).toHaveBeenCalledWith(
+                 WEBHOOK, {mention: "none"}));
+         });
+
+    test("a value let go is sent as null", () => {
+        const fields = [
+            {key: "t", type: "text", label: "T"},
+            {key: "n", type: "number", label: "N"},
+            {key: "s", type: "select", label: "S",
+             options: [{value: "a", label: "A"}]},
+            {key: "dir", type: "folder", label: "D"},
+            {key: "keep", type: "folder", label: "K"},
+            {key: "b", type: "bool", label: "B"}];
+        const values = {
+            ...initialValues(fields), b: true,
+            dir: {pick: null, stored: null, cleared: true},
+            keep: {pick: null, stored: "Kept"}};
+        expect(collectValues(fields, values, {clearing: true}).params)
+            .toEqual({t: null, n: null, s: null, dir: null, b: true});
+        // A run's params leave the empty ones out.
+        expect(collectValues(fields, values).params).toEqual({b: true});
+    });
+
+    test("lengths count code points", () => {
+        const field = {key: "t", type: "text", label: "T", max_length: 2};
+        expect(validateField(field, "😀😀")).toBeNull();
+        expect(validateField(field, "😀😀😀")).toBe("too_long");
+    });
+});
+
+describe("FieldForm picks", () => {
+    test("a pick without a name says chosen, and can be released", async () => {
+        const fields = [{key: "dir", type: "folder", label: "Dir"}];
+        const Host = () => {
+            const [values, setValues] = React.useState(initialValues(fields));
+            return (
+                <FieldForm fields={fields} values={values}
+                           onChange={setValues} language="en"
+                           pickFolder={async () => ({id: "p1"})}/>
+            );
+        };
+        render(<Host/>);
+        fireEvent.click(screen.getByRole("button", {name: "Choose a folder"}));
+        await waitFor(() => expect(
+            screen.getByTestId("plugin-field-dir-name").textContent)
+            .toBe("Chosen"));
+        fireEvent.click(screen.getByRole("button", {name: "Release"}));
+        expect(screen.getByTestId("plugin-field-dir-name").textContent)
+            .toBe("Not chosen");
+    });
+
+    test("a pick that ends after the form changed keeps the newer values",
+         async () => {
+             const fields = [
+                 {key: "a", type: "text", label: "A"},
+                 {key: "dir", type: "folder", label: "Dir"}];
+             let finish;
+             const Host = () => {
+                 const [values, setValues] = React.useState(
+                     initialValues(fields));
+                 return (
+                     <FieldForm fields={fields} values={values}
+                                onChange={setValues} language="en"
+                                pickFolder={() => new Promise((resolve) => {
+                                    finish = () => resolve({id: "p1",
+                                                            name: "Late"});
+                                })}/>
+                 );
+             };
+             render(<Host/>);
+             fireEvent.click(screen.getByRole("button",
+                                              {name: "Choose a folder"}));
+             fireEvent.change(screen.getByLabelText("A"),
+                              {target: {value: "typed meanwhile"}});
+             await act(async () => {
+                 finish();
+             });
+             expect(screen.getByLabelText("A").value)
+                 .toBe("typed meanwhile");
+             expect(screen.getByTestId("plugin-field-dir-name").textContent)
+                 .toBe("Late");
+         });
+
+    test("a source's choices are read again when the list opens", async () => {
+        const fields = [{key: "img", type: "result_image", label: "Image"}];
+        const load = jest.fn(async () => [{id: "r1", label: "one.png"}]);
+        render(<FieldForm fields={fields} values={initialValues(fields)}
+                          onChange={() => {}} language="en"
+                          loadChoices={load}/>);
+        await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+        fireEvent.mouseDown(screen.getByRole("combobox"));
+        await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     });
 });
 

@@ -121,6 +121,11 @@ export function createMockPluginsApi(
         saveSettings: async (id, values) => {
             const detail = need(id);
             for (const [key, value] of Object.entries(values)) {
+                // null clears the saved value.
+                if (value === null) {
+                    delete detail.setting_values[key];
+                    continue;
+                }
                 detail.setting_values[key] = typeof value === "string"
                     && detail.settings.find((f) => f.key === key)?.type
                         === "folder"

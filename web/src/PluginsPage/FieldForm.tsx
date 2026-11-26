@@ -18,7 +18,7 @@ import {
     isPickValue,
     validateField,
 } from "./formFields";
-import {InputChoice, Pick, PluginField} from "./pluginTypes";
+import {InputChoice, PickResult, PluginField} from "./pluginTypes";
 import {pluginText} from "./pluginText";
 
 // The form drawn from an array of fields (ADR-009 B.3): text / textarea /
@@ -40,12 +40,13 @@ export interface FieldFormProps {
     // The manual choices of a source type.
     loadChoices?: ChoiceLoader;
     // The shell requests (the page's api): null when the dialog is closed.
-    pickFile?: (extensions: string[]) => Promise<Pick | null>;
-    pickFolder?: () => Promise<Pick | null>;
+    pickFile?: (extensions: string[]) => Promise<PickResult | null>;
+    pickFolder?: () => Promise<PickResult | null>;
     // Secrets: whether one is saved, and the buttons that clear it.
     secretSet?: Record<string, boolean>;
     onClearSecret?: (key: string) => void;
-    // A refusal of the pick (the dialog could not open).
+    // A pick that failed: the error as the shell request gave it (a newer
+    // request taking its place is one of them).
     onPickError?: (error: unknown) => void;
     testIdPrefix?: string;
 }
@@ -64,26 +65,33 @@ function ChoiceSelect({field, value, label, language, disabled, loadChoices,
 }) {
     const [choices, setChoices] = React.useState<InputChoice[] | null>(null);
     const [failed, setFailed] = React.useState(false);
-    React.useEffect(() => {
-        let live = true;
+    const live = React.useRef(true);
+    // Read on mount and again each time the list opens (a new result image
+    // may have come since).
+    const load = React.useCallback(() => {
         if (!loadChoices) {
             setChoices([]);
-            return undefined;
+            return;
         }
         loadChoices(field.type).then((rows) => {
-            if (live) {
+            if (live.current) {
                 setChoices(rows);
+                setFailed(false);
             }
         }, () => {
-            if (live) {
+            if (live.current) {
                 setFailed(true);
-                setChoices([]);
+                setChoices((now) => now ?? []);
             }
         });
-        return () => {
-            live = false;
-        };
     }, [field.type, loadChoices]);
+    React.useEffect(() => {
+        live.current = true;
+        load();
+        return () => {
+            live.current = false;
+        };
+    }, [load]);
     const help = field.help ? pluginText(field.help, language) : "";
     return (
         <TextField select size="small" label={label} value={value}
@@ -95,6 +103,7 @@ function ChoiceSelect({field, value, label, language, disabled, loadChoices,
                            : choices?.length === 0
                                ? i18n.t("plugins_choices_none") : help}
                    inputProps={{"data-testid": testId}}
+                   SelectProps={{onOpen: load}}
                    onChange={(e) => onPick(e.target.value)}>
             <MenuItem value="">{i18n.t("plugins_choice_unset")}</MenuItem>
             {(choices ?? []).map((choice) => (
@@ -111,8 +120,11 @@ export default function FieldForm({
     filled = [], loadChoices, pickFile, pickFolder, secretSet = {},
     onClearSecret, onPickError, testIdPrefix = "plugin-field",
 }: FieldFormProps) {
+    // The newest values: a pick's dialog stays open while the form changes.
+    const latest = React.useRef(values);
+    latest.current = values;
     const set = (key: string, value: unknown) => onChange(
-        {...values, [key]: value});
+        {...latest.current, [key]: value});
 
     const pick = async (field: PluginField) => {
         try {
@@ -120,9 +132,10 @@ export default function FieldForm({
                 ? await pickFile?.(field.extensions ?? [])
                 : await pickFolder?.();
             if (picked) {
-                const held = values[field.key];
+                const held = latest.current[field.key];
                 const stored = isPickValue(held) ? held.stored : null;
-                set(field.key, {pick: picked, stored} satisfies PickValue);
+                const next: PickValue = {pick: picked, stored};
+                set(field.key, next);
             }
         } catch (error) {
             onPickError?.(error);
@@ -156,7 +169,7 @@ export default function FieldForm({
                             <Typography key={field.key} variant="body2"
                                         color="text.secondary"
                                         data-testid={testId}>
-                                {i18n.t("plugins_source_state", {label})}
+                                {i18n.t("plugins_source_state_note", {label})}
                             </Typography>
                         );
                     }
@@ -229,7 +242,11 @@ export default function FieldForm({
                     case "file":
                     case "folder": {
                         const held = isPickValue(value) ? value : null;
-                        const name = held?.pick?.name || held?.stored || "";
+                        // A pick made now shows its name, or "chosen" when the
+                        // answer had none; else the value saved before.
+                        const name = held?.pick
+                            ? held.pick.name || i18n.t("plugins_pick_chosen")
+                            : held?.stored || "";
                         return (
                             <Stack key={field.key} spacing={0.5}
                                    data-testid={testId}>
@@ -250,6 +267,17 @@ export default function FieldForm({
                                                 data-testid={`${testId}-name`}>
                                         {name || i18n.t("plugins_pick_none")}
                                     </Typography>
+                                    {name ? (
+                                        <Button size="small" disabled={disabled}
+                                                onClick={() => {
+                                                    const none: PickValue = {
+                                                        pick: null, stored: null,
+                                                        cleared: true};
+                                                    set(field.key, none);
+                                                }}>
+                                            {i18n.t("plugins_pick_release")}
+                                        </Button>
+                                    ) : null}
                                 </Stack>
                                 <Typography variant="caption"
                                             color={reason ? "error"

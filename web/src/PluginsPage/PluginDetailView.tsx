@@ -9,20 +9,34 @@ import {
     PluginRun,
     SOURCE_TYPES,
 } from "./pluginTypes";
-import {pluginText, sizeLabel} from "./pluginText";
+import {pluginText, sizeLabel, startedText} from "./pluginText";
 import FieldForm from "./FieldForm";
 import {
     FormValues,
     collectValues,
+    fieldKind,
     initialValues,
     validateAll,
 } from "./formFields";
-import RunView, {refusalText, usePolledRun} from "./RunView";
+import RunView, {
+    pickErrorText,
+    refusalText,
+    usePolledRun,
+} from "./RunView";
 
 // One plugin's page (ADR-009 D4): its settings, its jobs with their forms,
 // the running job's progress, the past jobs, and what it declares. The
 // hooks, the install and the listing are later stages' (P7 / P5): no place
 // is drawn for them yet.
+
+function pickFailed(onError: (text: string) => void) {
+    return (error: unknown) => {
+        const text = pickErrorText(error);
+        if (text) {
+            onError(text);
+        }
+    };
+}
 
 function JobCard({api, plugin, job, language, busy, onStart, onError}: {
     api: PluginsApi;
@@ -71,8 +85,7 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
                                showErrors={tried} loadChoices={loadChoices}
                                pickFile={api.pickFile}
                                pickFolder={api.pickFolder}
-                               onPickError={() => onError(
-                                   i18n.t("plugins_pick_failed"))}
+                               onPickError={pickFailed(onError)}
                                testIdPrefix={`plugin-param-${job.id}`}/>
                     <Box>
                         <Button variant="contained" size="small"
@@ -92,16 +105,22 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
     );
 }
 
+// The settings form. A setting is a value type only: an input source or a
+// secret in a job's params is refused by the manifest check, so it never
+// reaches here. A type this page does not know is shown as unusable and left
+// out of the save, so the other settings still save.
 function Settings({api, plugin, language, onSaved, onError}: {
     api: PluginsApi;
     plugin: PluginDetail;
     language: string;
-    onSaved: () => void;
+    // Reads the detail again; the form takes the saved values from it.
+    onSaved: () => Promise<PluginDetail | null>;
     onError: (text: string) => void;
 }) {
     const [values, setValues] = React.useState<FormValues>(
         () => initialValues(plugin.settings, plugin.setting_values));
     const [tried, setTried] = React.useState(false);
+    const known = plugin.settings.filter((f) => fieldKind(f) === "value");
     const secretSet: Record<string, boolean> = {};
     for (const field of plugin.settings) {
         const saved = plugin.setting_values[field.key];
@@ -110,16 +129,17 @@ function Settings({api, plugin, language, onSaved, onError}: {
 
     const save = async () => {
         setTried(true);
-        if (Object.keys(validateAll(plugin.settings, values, secretSet))
-            .length > 0) {
+        if (Object.keys(validateAll(known, values, secretSet)).length > 0) {
             return;
         }
-        const {params} = collectValues(plugin.settings, values);
+        // Emptied values go as null (the host clears them). A secret is not
+        // among them: it has its own route and is only ever set here.
+        const {params} = collectValues(known, values, {clearing: true});
         try {
             if (Object.keys(params).length > 0) {
                 await api.saveSettings(plugin.id, params);
             }
-            for (const field of plugin.settings) {
+            for (const field of known) {
                 const typed = values[field.key];
                 if (field.type === "secret" && typeof typed === "string"
                     && typed !== "") {
@@ -127,7 +147,10 @@ function Settings({api, plugin, language, onSaved, onError}: {
                 }
             }
             setTried(false);
-            onSaved();
+            const fresh = await onSaved();
+            if (fresh) {
+                setValues(initialValues(fresh.settings, fresh.setting_values));
+            }
         } catch (error) {
             onError(refusalText(error));
         }
@@ -136,7 +159,7 @@ function Settings({api, plugin, language, onSaved, onError}: {
     const clear = async (key: string) => {
         try {
             await api.clearSecret(plugin.id, key);
-            onSaved();
+            await onSaved();
         } catch (error) {
             onError(refusalText(error));
         }
@@ -149,7 +172,7 @@ function Settings({api, plugin, language, onSaved, onError}: {
                        showErrors={tried} secretSet={secretSet}
                        onClearSecret={(key) => void clear(key)}
                        pickFile={api.pickFile} pickFolder={api.pickFolder}
-                       onPickError={() => onError(i18n.t("plugins_pick_failed"))}
+                       onPickError={pickFailed(onError)}
                        testIdPrefix="plugin-setting"/>
             <Box>
                 <Button variant="contained" size="small"
@@ -221,62 +244,112 @@ function Declared({plugin, language}: {
     );
 }
 
-export default function PluginDetailView({api, id, language, readOnly,
-                                          onChanged, onError}: {
+export default function PluginDetailView({api, id, language, onChanged,
+                                          onError}: {
     api: PluginsApi;
     id: string;
     language: string;
-    readOnly: boolean;
     // The list's row may have changed (state, size).
     onChanged: () => void;
     onError: (text: string) => void;
 }) {
     const [plugin, setPlugin] = React.useState<PluginDetail | null>(null);
     const [failed, setFailed] = React.useState(false);
-    const [version, setVersion] = React.useState(0);
     const [runs, setRuns] = React.useState<PluginRun[]>([]);
     const [activeId, setActiveId] = React.useState<string | null>(null);
     const [shownId, setShownId] = React.useState<string | null>(null);
+    // The newest read of each wins: a slow answer for a plugin the page has
+    // left (or an older read) is dropped.
+    const detailSeq = React.useRef(0);
+    const runsSeq = React.useRef(0);
+    // The plugin shown now: a late call made for another one reads nothing.
+    const shownPlugin = React.useRef(id);
+    shownPlugin.current = id;
 
-    const read = React.useCallback(() => {
-        api.detail(id).then((next) => {
+    const read = React.useCallback((): Promise<PluginDetail | null> => {
+        if (shownPlugin.current !== id) {
+            return Promise.resolve(null);
+        }
+        const mine = ++detailSeq.current;
+        return api.detail(id).then((next) => {
+            if (mine !== detailSeq.current || next.id !== id) {
+                return null;
+            }
             setPlugin(next);
             setFailed(false);
-            setVersion((v) => v + 1);
-        }, () => setFailed(true));
+            return next;
+        }, () => {
+            if (mine === detailSeq.current) {
+                setFailed(true);
+            }
+            return null;
+        });
     }, [api, id]);
     const readRuns = React.useCallback(() => {
-        api.runs(id).then(setRuns, () => undefined);
+        if (shownPlugin.current !== id) {
+            return;
+        }
+        const mine = ++runsSeq.current;
+        api.runs(id).then((rows) => {
+            if (mine !== runsSeq.current) {
+                return;
+            }
+            setRuns(rows);
+            // A job still running (the page was left and came back, or an
+            // action started it) is followed again. The page follows one
+            // run at a time: simpler than one per lane (the host lets a
+            // plugin run one job per lane at most).
+            const going = rows.find((r) => r.state === "running");
+            if (going) {
+                setActiveId((now) => now ?? going.run_id);
+            }
+        }, () => undefined);
     }, [api, id]);
 
     React.useEffect(() => {
         setPlugin(null);
+        setFailed(false);
+        setRuns([]);
         setActiveId(null);
         setShownId(null);
-        read();
+        void read();
         readRuns();
+        return () => {
+            // Answers still on their way are no longer wanted.
+            detailSeq.current += 1;
+            runsSeq.current += 1;
+        };
     }, [id, read, readRuns]);
 
     const ended = React.useCallback(() => {
         readRuns();
-        read();
+        void read();
         onChanged();
     }, [readRuns, read, onChanged]);
-    const active = usePolledRun(api, id, activeId, ended);
-    const running = activeId !== null && (active === null
-        || active.state === "running");
+    const {run: active, lost} = usePolledRun(api, id, activeId, ended);
+    // Running while the last read says so; a poll that gave up ends it.
+    const running = activeId !== null && lost === null
+        && (active === null || active.state === "running");
     // A past run picked from the history, shown in place of the latest.
     const shown = runs.find((r) => r.run_id === shownId)
         ?? (active && active.state !== "running" ? active : null);
+    const jobOf = (jobId: string) => plugin?.jobs.find((j) => j.id === jobId);
 
     const cancel = () => {
         if (activeId) {
-            api.cancelRun(id, activeId).catch((e) => onError(refusalText(e)));
+            api.cancelRun(id, activeId).then(
+                () => undefined, (e) => onError(refusalText(e)));
         }
     };
     const link = (which: "homepage" | "funding") => {
         api.openLink("installed", id, which).catch(
             () => onError(i18n.t("plugins_link_failed")));
+    };
+    const reload = () => {
+        api.reload(id).then(() => {
+            void read();
+            onChanged();
+        }, (e) => onError(refusalText(e)));
     };
 
     if (failed) {
@@ -320,23 +393,30 @@ export default function PluginDetailView({api, id, language, readOnly,
                             {i18n.t("plugins_funding")}
                         </Button>
                     ) : null}
+                    {plugin.badge === "dev" ? (
+                        <Button size="small" variant="outlined"
+                                data-testid="plugin-reload"
+                                onClick={reload}>
+                            {i18n.t("plugins_reload")}
+                        </Button>
+                    ) : null}
                 </Stack>
             </CardFrame>
 
             {plugin.settings.length > 0 ? (
-                <Settings key={`s${version}`} api={api} plugin={plugin}
+                <Settings key={plugin.id} api={api} plugin={plugin}
                           language={language}
                           onSaved={() => {
-                              read();
                               onChanged();
+                              return read();
                           }}
                           onError={onError}/>
             ) : null}
 
             <CardFrame title={i18n.t("plugins_jobs")}>
                 {plugin.jobs.map((job) => (
-                    <JobCard key={job.id} api={api} plugin={plugin} job={job}
-                             language={language} busy={running || readOnly}
+                    <JobCard key={`${plugin.id}/${job.id}`} api={api} plugin={plugin} job={job}
+                             language={language} busy={running}
                              onStart={(runId) => {
                                  setShownId(null);
                                  setActiveId(runId);
@@ -344,9 +424,15 @@ export default function PluginDetailView({api, id, language, readOnly,
                              }}
                              onError={onError}/>
                 ))}
-                {activeId && active && active.state === "running" ? (
+                {lost ? (
+                    <Alert severity="warning" data-testid="plugin-run-lost">
+                        {i18n.t(`plugins_run_lost_${lost}`)}
+                    </Alert>
+                ) : null}
+                {activeId && active && active.state === "running"
+                    && lost === null ? (
                     <RunView api={api} pluginId={id} run={active}
-                             language={language} readOnly={readOnly}
+                             job={jobOf(active.job)} language={language}
                              onCancel={cancel} onError={onError}/>
                 ) : null}
             </CardFrame>
@@ -356,21 +442,27 @@ export default function PluginDetailView({api, id, language, readOnly,
                     <Note>{i18n.t("plugins_history_empty")}</Note>
                 ) : (
                     <Stack spacing={0.5} data-testid="plugin-history">
-                        {runs.map((run) => (
-                            <Button key={run.run_id} size="small"
-                                    sx={{justifyContent: "flex-start"}}
-                                    variant={shown?.run_id === run.run_id
-                                        ? "contained" : "text"}
-                                    onClick={() => setShownId(run.run_id)}>
-                                {`${run.started_at} · ${run.job} · `
-                                    + i18n.t(`plugins_run_${run.state}`)}
-                            </Button>
-                        ))}
+                        {runs.map((run) => {
+                            const job = jobOf(run.job);
+                            return (
+                                <Button key={run.run_id} size="small"
+                                        sx={{justifyContent: "flex-start"}}
+                                        variant={shown?.run_id === run.run_id
+                                            ? "contained" : "text"}
+                                        onClick={() => setShownId(run.run_id)}>
+                                    {`${startedText(run.started_at, language)}`
+                                        + ` · ${job
+                                            ? pluginText(job.title, language)
+                                            : run.job} · `
+                                        + i18n.t(`plugins_run_${run.state}`)}
+                                </Button>
+                            );
+                        })}
                     </Stack>
                 )}
                 {shown && shown.state !== "running" ? (
                     <RunView api={api} pluginId={id} run={shown}
-                             language={language} readOnly={readOnly}
+                             job={jobOf(shown.job)} language={language}
                              onCancel={cancel} onError={onError}/>
                 ) : null}
             </CardFrame>

@@ -1,38 +1,73 @@
 import React from "react";
 import {Alert, Box, Button, Chip, Stack, Typography} from "@mui/material";
 import i18n from "../i18n/config";
-import {apiErrorReason, apiErrorCode} from "../api";
+import {apiErrorReason, apiErrorCode, apiErrorStatus} from "../api";
 import {CopyButton} from "../GuidePages/parts";
 import JobProgressView from "../ArchivePage/JobProgressView";
 import {PluginsApi} from "./pluginsApi";
-import {PluginRun, RunArtifact} from "./pluginTypes";
-import {pluginText} from "./pluginText";
+import {PluginJob, PluginRun, RunArtifact} from "./pluginTypes";
+import {pluginText, startedText} from "./pluginText";
 
 // One run of a plugin's job (contract_1.json job_record): its progress while
 // it runs, then its summary, error, warnings, the worker's log and the
-// artifacts it made.
+// artifacts it made. Everything a plugin wrote is shown as text, never as
+// HTML.
 
-// The reason a request was refused, in words (contract_1.json refusals).
+// The reason a request was refused, in words (contract_1.json refusals). A
+// busy refusal's message carries the remaining seconds when the host knows.
 export function refusalText(error: unknown): string {
     const reason = apiErrorReason(error) ?? apiErrorCode(error);
     const key = reason ? `plugins_refuse_${String(reason).toLowerCase()}` : "";
-    return key && i18n.exists(key) ? i18n.t(key) : i18n.t("plugins_failed");
+    if (!key || !i18n.exists(key)) {
+        return i18n.t("plugins_failed");
+    }
+    const detail = (error as {detail?: string} | null)?.detail;
+    return String(reason).toLowerCase() === "busy" && detail
+        ? `${i18n.t(key)} (${detail})` : i18n.t(key);
 }
 
+// A shell request (a pick) that did not come back with a pick, or null when
+// nothing is to be said (a newer request took its place).
+export function pickErrorText(error: unknown): string | null {
+    const code = (error as {code?: string} | null)?.code;
+    if (code === "superseded") {
+        return null;
+    }
+    return code === "unknown_verb" || code === "no_session"
+        ? i18n.t("plugins_pick_unavailable") : i18n.t("plugins_pick_failed");
+}
+
+// An end reason the host sets (contract_1.json end), in words; one the page
+// does not know shows as its code.
+export function reasonText(reason: string): string {
+    const key = `plugins_reason_${reason}`;
+    return i18n.exists(key) ? i18n.t(key) : reason;
+}
+
+// Reads that fail this many times in a row end the polling.
+export const MAX_POLL_FAILURES = 5;
+
+export type PollLost = "not_found" | "forbidden" | "unreachable";
+
 // Reads one run every second while it runs (the page does not put it in the
-// StateManager: ADR-006 D6), and once more when it ends.
+// StateManager: ADR-006 D6), and once more when it ends. A 404 / 403 stops it
+// at once with its reason; any other failure is tried again, up to
+// MAX_POLL_FAILURES in a row. `lost` is why it stopped, if it did.
 export function usePolledRun(
     api: PluginsApi, pluginId: string, runId: string | null,
-    onEnded: () => void): PluginRun | null {
+    onEnded: () => void): {run: PluginRun | null; lost: PollLost | null} {
     const [run, setRun] = React.useState<PluginRun | null>(null);
+    const [lost, setLost] = React.useState<PollLost | null>(null);
     const ended = React.useRef(onEnded);
     ended.current = onEnded;
     React.useEffect(() => {
         setRun(null);
+        setLost(null);
         if (!runId) {
             return undefined;
         }
         let live = true;
+        let failures = 0;
         let timer: ReturnType<typeof setTimeout> | null = null;
         const read = async () => {
             try {
@@ -40,15 +75,26 @@ export function usePolledRun(
                 if (!live) {
                     return;
                 }
+                failures = 0;
                 setRun(next);
                 if (next.state === "running") {
                     timer = setTimeout(() => void read(), 1000);
                 } else {
                     ended.current();
                 }
-            } catch {
-                // A failed read is tried again at the next second.
-                if (live) {
+            } catch (error) {
+                if (!live) {
+                    return;
+                }
+                const status = apiErrorStatus(error);
+                failures += 1;
+                if (status === 404 || status === 403) {
+                    setLost(status === 404 ? "not_found" : "forbidden");
+                    ended.current();
+                } else if (failures >= MAX_POLL_FAILURES) {
+                    setLost("unreachable");
+                    ended.current();
+                } else {
                     timer = setTimeout(() => void read(), 1000);
                 }
             }
@@ -61,7 +107,7 @@ export function usePolledRun(
             }
         };
     }, [api, pluginId, runId]);
-    return run;
+    return {run, lost};
 }
 
 function Artifact({api, pluginId, runId, no, artifact, language, onError}: {
@@ -88,10 +134,16 @@ function Artifact({api, pluginId, runId, no, artifact, language, onError}: {
             }, (error) => live && onError(refusalText(error)));
         } else if (artifact.kind === "image") {
             api.artifactBlob(pluginId, runId, no).then((blob) => {
-                if (live) {
-                    made = URL.createObjectURL(blob);
-                    setUrl(made);
+                if (!live) {
+                    return;
                 }
+                // Only what the host served as an image is shown as one.
+                if (!blob.type.startsWith("image/")) {
+                    onError(i18n.t("plugins_failed"));
+                    return;
+                }
+                made = URL.createObjectURL(blob);
+                setUrl(made);
             }, (error) => live && onError(refusalText(error)));
         }
         return () => {
@@ -143,30 +195,41 @@ function Artifact({api, pluginId, runId, no, artifact, language, onError}: {
     );
 }
 
-export default function RunView({api, pluginId, run, language, readOnly,
-                                 onCancel, onError}: {
+export default function RunView({api, pluginId, run, job, language, onCancel,
+                                 onError}: {
     api: PluginsApi;
     pluginId: string;
     run: PluginRun;
+    // The run's job, when the manifest still has it (its title).
+    job?: PluginJob;
     language: string;
-    readOnly: boolean;
     onCancel: () => void;
     onError: (text: string) => void;
 }) {
     const [log, setLog] = React.useState<string | null>(null);
 
-    // Another run: its log is closed.
+    const openLog = React.useCallback(() => {
+        api.runLog(pluginId, run.run_id).then(
+            (body) => setLog(body), (e) => onError(refusalText(e)));
+        // onError is the page's.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [api, pluginId, run.run_id]);
+
+    // Another run: its log is closed, except a failed one's: the worker's
+    // log is what the author needs first.
     React.useEffect(() => {
         setLog(null);
-    }, [run.run_id]);
+        if (run.state === "failed") {
+            openLog();
+        }
+    }, [run.run_id, run.state, openLog]);
 
     const toggleLog = () => {
         if (log !== null) {
             setLog(null);
-            return;
+        } else {
+            openLog();
         }
-        api.runLog(pluginId, run.run_id).then(
-            (body) => setLog(body), (e) => onError(refusalText(e)));
     };
 
     if (run.state === "running") {
@@ -179,10 +242,13 @@ export default function RunView({api, pluginId, run, language, readOnly,
             <div data-testid="plugin-run-progress">
                 <JobProgressView
                     line={line}
-                    overall={run.progress?.overall}
+                    // A worker that sends only the stage's fraction still
+                    // moves the bar.
+                    overall={run.progress?.overall ?? run.progress?.fraction}
                     eta={run.progress?.eta}
                     logs={run.log ? [pluginText(run.log, language)] : []}
-                    readOnly={readOnly}
+                    // A stop is asked already: the button waits for the end.
+                    readOnly={run.cancel_requested}
                     onCancel={onCancel}/>
             </div>
         );
@@ -195,9 +261,20 @@ export default function RunView({api, pluginId, run, language, readOnly,
                       color={run.state === "done" ? "success"
                           : run.state === "cancelled" ? "default" : "error"}/>
                 <Typography variant="caption" color="text.secondary">
-                    {run.job} · {run.started_at}
+                    {`${job ? pluginText(job.title, language) : run.job}`
+                        + ` · ${startedText(run.started_at, language)}`}
                 </Typography>
             </Stack>
+            {run.finished_before_cancel ? (
+                <Alert severity="info" data-testid="plugin-run-early">
+                    {i18n.t("plugins_run_finished_before_cancel")}
+                </Alert>
+            ) : null}
+            {run.reason ? (
+                <Alert severity="warning" data-testid="plugin-run-reason">
+                    {reasonText(run.reason)}
+                </Alert>
+            ) : null}
             {run.summary ? (
                 <Typography variant="body2">
                     {pluginText(run.summary, language)}
@@ -205,9 +282,10 @@ export default function RunView({api, pluginId, run, language, readOnly,
             ) : null}
             {run.error ? (
                 <Alert severity="error" data-testid="plugin-run-error">
-                    {pluginText(run.error.message, language)}
-                    {run.error.hint
-                        ? ` ${pluginText(run.error.hint, language)}` : ""}
+                    {`${pluginText(run.error.message, language)}`
+                        + `${run.error.hint
+                            ? ` ${pluginText(run.error.hint, language)}` : ""}`
+                        + ` (${run.error.code})`}
                 </Alert>
             ) : null}
             {run.warnings.map((w, i) => (

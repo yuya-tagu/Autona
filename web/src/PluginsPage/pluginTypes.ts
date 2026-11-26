@@ -136,7 +136,14 @@ export interface PluginRun {
     artifacts: RunArtifact[];
     error: {code: string; message: PluginText; hint?: PluginText | null} | null;
     cancel_requested: boolean;
+    // The run ended on its own before the stop reached it.
+    finished_before_cancel?: boolean;
 }
+
+// The host's end reasons the page words (contract_1.json end).
+export const RUN_REASONS = [
+    "launch_failed", "entry_missing", "timed_out", "memory_limit",
+    "abnormal_exit", "autona_exited"] as const;
 
 // GET /plugins/inputs/<kind>: one choice of a source type.
 export interface InputChoice {
@@ -151,9 +158,11 @@ export interface DevState {
 
 // What a pick gave the page: the desktop's id and the name to show (never a
 // path), or null when the dialog was closed.
-export interface Pick {
+export interface PickResult {
     id: string;
-    name: string;
+    // The name to show; the contract is to carry it in the pick's answer.
+    // Without one the page says "chosen".
+    name?: string;
 }
 
 // The body of POST /plugins/<id>/runs.

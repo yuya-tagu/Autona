@@ -1,7 +1,7 @@
 import {
     InputChoice,
     PICK_SOURCE_TYPES,
-    Pick,
+    PickResult,
     PluginField,
     SOURCE_TYPES,
     SettingValue,
@@ -12,6 +12,11 @@ import {
 // what a field starts with, whether a value fits it, and the request values.
 // FieldForm.tsx draws it; the page's job form, its settings and (I3) the
 // action dialog all use the same pair.
+
+// Lengths are counted in code points (an emoji is one), as the host does.
+function codePoints(text: string): number {
+    return Array.from(text).length;
+}
 
 export type FieldKind = "value" | "source" | "unknown";
 
@@ -34,8 +39,10 @@ export function isPickSource(field: PluginField): boolean {
 // A file / folder field's state: the pick made now (its id goes to the
 // host), or the name of the value already saved.
 export interface PickValue {
-    pick: Pick | null;
+    pick: PickResult | null;
     stored: string | null;
+    // The saved value was let go (a settings save sends null for it).
+    cleared?: boolean;
 }
 
 export type FormValues = Record<string, unknown>;
@@ -110,7 +117,7 @@ export function validateField(
             if (field.required && !text.trim()) {
                 return "required";
             }
-            return text.length > max ? "too_long" : null;
+            return codePoints(text) > max ? "too_long" : null;
         }
         case "secret": {
             const text = typeof value === "string" ? value : "";
@@ -120,7 +127,7 @@ export function validateField(
             if (/[\r\n]/.test(text)) {
                 return "line_break";
             }
-            return text.length > 4096 ? "too_long" : null;
+            return codePoints(text) > 4096 ? "too_long" : null;
         }
         case "select": {
             const text = typeof value === "string" ? value : "";
@@ -146,6 +153,8 @@ export function validateField(
                 return "above_max";
             }
             if (field.step !== undefined && field.step > 0) {
+                // Steps count from min (0 without one), as an HTML number
+                // input does; the host holds the same rule.
                 const base = field.min ?? 0;
                 const steps = (n - base) / field.step;
                 if (Math.abs(steps - Math.round(steps)) > 1e-9) {
@@ -183,10 +192,14 @@ export function validateAll(
 // The request's values: `params` for the value types (a file / folder by its
 // pick id; a value saved earlier is the host's, so not sent again) and
 // `inputs` for the picked source types. A secret is not a param (it has its
-// own route); an empty optional value is left out.
+// own route). An empty optional value is left out of a run's params; with
+// `clearing` (a settings save) it is sent as null, which clears the saved
+// value, and so is a file / folder let go.
 export function collectValues(
-    fields: PluginField[], values: FormValues):
+    fields: PluginField[], values: FormValues,
+    options: {clearing?: boolean} = {}):
     {params: Record<string, unknown>; inputs: Record<string, string>} {
+    const clearing = options.clearing === true;
     const params: Record<string, unknown> = {};
     const inputs: Record<string, string> = {};
     for (const field of fields) {
@@ -204,12 +217,16 @@ export function collectValues(
             case "number":
                 if (typeof value === "string" && value.trim()) {
                     params[field.key] = Number(value);
+                } else if (clearing) {
+                    params[field.key] = null;
                 }
                 break;
             case "file":
             case "folder":
                 if (isPickValue(value) && value.pick) {
                     params[field.key] = value.pick.id;
+                } else if (clearing && isPickValue(value) && value.cleared) {
+                    params[field.key] = null;
                 }
                 break;
             case "secret":
@@ -217,6 +234,8 @@ export function collectValues(
             default:
                 if (typeof value === "string" && value !== "") {
                     params[field.key] = value;
+                } else if (clearing && fieldKind(field) === "value") {
+                    params[field.key] = null;
                 }
         }
     }

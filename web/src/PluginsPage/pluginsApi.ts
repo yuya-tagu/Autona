@@ -1,11 +1,17 @@
 import {BASE_URL} from "../env";
-import {withToken} from "../autonaToken";
-import {apiDelete, apiGetJson, apiPatch, apiPost, apiPut} from "../api";
-import {ShellResult, shellRequest} from "../PanelShell/hostApi";
+import {
+    apiDelete,
+    apiGetBlob,
+    apiGetJson,
+    apiGetText,
+    apiPatch,
+    apiPost,
+    apiPut,
+} from "../api";
 import {
     DevState,
     InputChoice,
-    Pick,
+    PickResult,
     PluginDetail,
     PluginListItem,
     PluginRun,
@@ -20,6 +26,19 @@ import {
 // match: PATCH settings {values: {key: value | pick id}}; PUT secrets
 // {value}; POST runs answers {run_id}; PATCH dev {enabled}; POST dev/folders
 // {pick}; GET inputs/<kind> answers [{id, label}].
+//
+// PATCH settings sends null for a value the user emptied or let go (a text,
+// a number, a select left empty, a file / folder released): the host removes
+// the saved value. A key not in the body stays as it is.
+//
+// A pick's answer (pickFile / pickFolder) carries `name` (the file or folder
+// name to show, never the path) next to the pick id; the page says "chosen"
+// without one. pickFolder today is the game assets' dialog: L10 (the wiring)
+// makes the shell request general for these, so until then both picks are
+// unimplemented here, as openPluginLink is.
+//
+// A busy refusal carries the remaining seconds in its message (`detail`)
+// when known; the page shows that text after its own.
 
 export interface PluginsApi {
     list(): Promise<PluginListItem[]>;
@@ -43,8 +62,8 @@ export interface PluginsApi {
     removeDevFolder(folderId: string): Promise<void>;
     reload(id: string): Promise<void>;
     // Shell requests: null when the dialog was closed.
-    pickFile(extensions: string[]): Promise<Pick | null>;
-    pickFolder(): Promise<Pick | null>;
+    pickFile(extensions: string[]): Promise<PickResult | null>;
+    pickFolder(): Promise<PickResult | null>;
     openLink(source: "installed", id: string,
              link: "homepage" | "funding"): Promise<void>;
 }
@@ -57,32 +76,6 @@ function enc(part: string): string {
 
 async function data<T>(path: string): Promise<T> {
     return (await apiGetJson<{data: T}>(path)).data;
-}
-
-async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
-    const resp = await fetch(`${BASE_URL}${path}`, {
-        ...init,
-        headers: withToken(init?.headers),
-        signal: AbortSignal.timeout(10000),
-    });
-    if (!resp.ok) {
-        throw Object.assign(new Error(`GET ${path} failed: HTTP ${resp.status}`),
-                            {status: resp.status});
-    }
-    return resp;
-}
-
-function pickOf(result: ShellResult): Pick | null {
-    if (!result.ok) {
-        throw Object.assign(new Error(`pick: ${result.error}`),
-                            {code: result.error});
-    }
-    if (result.status !== "picked" || !result.pick) {
-        return null;
-    }
-    // The desktop may answer the name to show (never the path).
-    const name = (result as ShellResult & {name?: string}).name ?? "";
-    return {id: result.pick, name};
 }
 
 export const httpPluginsApi: PluginsApi = {
@@ -107,12 +100,12 @@ export const httpPluginsApi: PluginsApi = {
     cancelRun: async (id, runId) => {
         await apiPost(`${BASE}/${enc(id)}/runs/${enc(runId)}:cancel`);
     },
-    runLog: async (id, runId) => (await fetchOk(
-        `${BASE}/${enc(id)}/runs/${enc(runId)}/log`)).text(),
-    artifactText: async (id, runId, no) => (await fetchOk(
-        `${BASE}/${enc(id)}/runs/${enc(runId)}/artifacts/${no}`)).text(),
-    artifactBlob: async (id, runId, no) => (await fetchOk(
-        `${BASE}/${enc(id)}/runs/${enc(runId)}/artifacts/${no}`)).blob(),
+    runLog: (id, runId) => apiGetText(
+        `${BASE}/${enc(id)}/runs/${enc(runId)}/log`),
+    artifactText: (id, runId, no) => apiGetText(
+        `${BASE}/${enc(id)}/runs/${enc(runId)}/artifacts/${no}`),
+    artifactBlob: (id, runId, no) => apiGetBlob(
+        `${BASE}/${enc(id)}/runs/${enc(runId)}/artifacts/${no}`),
     revealArtifact: async (id, runId, no) => {
         await apiPost(
             `${BASE}/${enc(id)}/runs/${enc(runId)}/artifacts/${no}:reveal`);
@@ -130,12 +123,14 @@ export const httpPluginsApi: PluginsApi = {
     reload: async (id) => {
         await apiPost(`${BASE}/${enc(id)}:reload`);
     },
-    // pickFile is not a shell verb yet (the wiring adds it to ShellVerb and
-    // the desktop): until then the request is refused as an unknown verb.
+    // Neither pick is a general shell verb yet (L10 makes pickFolder and
+    // pickFile general): refused as an unknown verb until then.
     pickFile: () => Promise.reject(
         Object.assign(new Error("pickFile is not implemented"),
                       {code: "unknown_verb"})),
-    pickFolder: async () => pickOf(await shellRequest("pickFolder")),
+    pickFolder: () => Promise.reject(
+        Object.assign(new Error("pickFolder is not general yet"),
+                      {code: "unknown_verb"})),
     // openPluginLink likewise (ADR-009 D4; stage P5b).
     openLink: () => Promise.reject(
         Object.assign(new Error("openPluginLink is not implemented"),

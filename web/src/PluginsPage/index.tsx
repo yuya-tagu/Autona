@@ -26,7 +26,7 @@ import DevSection from "./DevSection";
 
 function PluginsContent({api}: {api: PluginsApi}) {
     const {language} = usePanelShell();
-    const {access} = useShellAccess({withToken: false});
+    const {access, retry} = useShellAccess({withToken: false});
     const shell = access === "shell";
     const [list, setList] = React.useState<PluginListItem[] | null>(null);
     const [failed, setFailed] = React.useState(false);
@@ -48,6 +48,15 @@ function PluginsContent({api}: {api: PluginsApi}) {
         <GuideFrame panel="plugins" title={i18n.t("plugins_title")}
                     description={i18n.t("plugins_description")}
                     openInBrowser={false}>
+            {access === "failed" ? (
+                <Alert severity="error" data-testid="plugin-access-failed"
+                       action={
+                           <Button color="inherit" size="small" onClick={retry}>
+                               {i18n.t("plugins_retry")}
+                           </Button>}>
+                    {i18n.t("plugins_access_failed")}
+                </Alert>
+            ) : null}
             {failed ? (
                 <Alert severity="error" action={
                     <Button color="inherit" size="small" onClick={read}>
@@ -110,8 +119,7 @@ function PluginsContent({api}: {api: PluginsApi}) {
             </CardFrame>
             {shell && selected ? (
                 <PluginDetailView api={api} id={selected} language={language}
-                                  readOnly={false} onChanged={read}
-                                  onError={onError}/>
+                                  onChanged={read} onError={onError}/>
             ) : null}
             {shell ? (
                 <DevSection api={api} onChanged={read} onError={onError}/>
