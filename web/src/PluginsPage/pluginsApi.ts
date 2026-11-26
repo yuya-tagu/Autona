@@ -17,6 +17,7 @@ import {
     DevState,
     InputChoice,
     PickResult,
+    PluginAction,
     PluginDetail,
     PluginListItem,
     PluginRun,
@@ -57,6 +58,8 @@ export interface PluginsApi {
     saveSecret(id: string, key: string, value: string): Promise<void>;
     clearSecret(id: string, key: string): Promise<void>;
     inputChoices(kind: string): Promise<InputChoice[]>;
+    // The jobs offered at a page's "Plugins" menu (SHELL).
+    actions(target: string): Promise<PluginAction[]>;
     startRun(id: string, request: RunRequest): Promise<{run_id: string}>;
     runs(id: string): Promise<PluginRun[]>;
     run(id: string, runId: string): Promise<PluginRun>;
@@ -105,6 +108,8 @@ export const httpPluginsApi: PluginsApi = {
         await apiDelete(`${BASE}/${enc(id)}/secrets/${enc(key)}`);
     },
     inputChoices: (kind) => data<InputChoice[]>(`${BASE}/inputs/${enc(kind)}`),
+    actions: (target) => data<PluginAction[]>(
+        `${BASE}/actions?target=${enc(target)}`),
     startRun: async (id, request) => JSON.parse(
         await apiPost(`${BASE}/${enc(id)}/runs`, request)).data,
     runs: (id) => data<PluginRun[]>(`${BASE}/${enc(id)}/runs`),

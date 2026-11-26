@@ -77,6 +77,7 @@ import {
     youtubeEmbedId,
 } from "./archivePreview";
 import {useShellAccess} from "../PanelShell/useShellAccess";
+import PluginActionsMenu from "../PluginsPage/PluginActionsMenu";
 import {
     TimelineView,
     bestShare,
@@ -934,10 +935,13 @@ function ThumbsState({thumbs, closed, onClose}: {
 // template the export names them with and the confirmed sets' thumbnails
 // (A6); by the analysis' template, the sets split again with results
 // (ReanalyzePanel, opened under it).
-function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
+function ExportBar({jobId, shell, exported, total, confirmed, canExport, readOnly, starting,
                     save, reviewError, onExport, onCancel, templates, event,
                     analysisTemplate, onTemplates, thumbs, onThumbs,
                     hasResults, cached, onReanalyze}: {
+    jobId: string;
+    // The page's probe: the desktop's shared view.
+    shell: boolean;
     exported: JobExport | null;
     total: number;
     confirmed: number;
@@ -1009,6 +1013,14 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
                         onClick={onThumbs}>
                     {i18n.t("archive_thumbs_make")}
                 </Button>
+                {/* The installed plugins' actions on the clips exported. */}
+                {/* Waits until the export is done; the page's own probe says
+                    whether this is the desktop's view. */}
+                <PluginActionsMenu target="archive_export" size="small"
+                                   shell={shell}
+                                   context={exported?.state === "done"
+                                       ? jobId : null}
+                                   note={i18n.t("plugins_action_after_export")}/>
                 <Typography variant="caption" data-testid="archive-save-state"
                             sx={{color: tokens.textMuted}}>
                     {saveText}
@@ -1131,13 +1143,15 @@ function ExportBar({exported, total, confirmed, canExport, readOnly, starting,
 // edits stop) and the export saves what is pending first. A removed set is
 // out of the list, the timeline, the keys and the counts: it is in the
 // list's fold of removed sets, which puts it back.
-function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
+function SetsView({job, sets, setNo, onSetNo, readOnly, shell, onAct, templates,
                    onTemplates, hidden = false}: {
     job: Job;
     sets: SetsJson;
     setNo: number | null;
     onSetNo: (no: number) => void;
     readOnly: boolean;
+    // The page's probe: the desktop's shared view (the plugin actions).
+    shell: boolean;
     onAct: (action: string, body?: object) => Promise<void>;
     templates: TemplateEntry[] | null;
     onTemplates: () => void;
@@ -1482,7 +1496,7 @@ function SetsView({job, sets, setNo, onSetNo, readOnly, onAct, templates,
              sx={{flex: 1, minHeight: 0, display: "flex",
                   flexDirection: "column", outline: "none"}}>
             {done ? (
-                <ExportBar exported={job.export ?? null} total={shown.sets.length}
+                <ExportBar jobId={job.id} shell={shell} exported={job.export ?? null} total={shown.sets.length}
                            confirmed={confirmedCount(shown.sets)}
                            canExport={editable} readOnly={readOnly}
                            starting={starting} save={save}
@@ -2198,6 +2212,7 @@ function ArchiveContent() {
     // server answers for itself).
     const {access} = useShellAccess({withToken: false});
     const readOnly = access === "elsewhere";
+    const shell = access === "shell";
     // The id the view shows right now: an async result for any other job is
     // stale and dropped.
     const selectedRef = React.useRef<string | "new">(selected);
@@ -2462,7 +2477,7 @@ function ArchiveContent() {
                             </Alert>
                         ) : null}
                         {sets ? (
-                            <SetsView key={detail.job.id} job={detail.job}
+                            <SetsView key={detail.job.id} job={detail.job} shell={shell}
                                       sets={sets} setNo={setNo}
                                       onSetNo={setSetNo} readOnly={readOnly}
                                       onAct={act} templates={templates}

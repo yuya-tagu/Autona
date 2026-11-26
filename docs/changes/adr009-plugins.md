@@ -33,7 +33,7 @@
 - [x] L6 web: plugins ページ・フォーム部品・進捗部品の共通化（モック。#389 マージ済み）→ 続けて L10 シェル要求 `pickFile` / `openPluginLink`
 
 ## W2 以降 配線（メイン・直列）
-- [ ] I1a 生成順・ルート・区分（ナビに出さない）→ I1b ページ登録＋I2 vodsplit の載せ替え（並行。`test_plugin_contract` の ArchiveWorker の文字列一致と `_EndState` の突き合わせを PluginRunner 側へ書き換える）→ **M1**（P1+P2）実機・exe 1 回
+- [x] I1a（#399）→ I1b（#400）＋I2（#401）→ **M1** 実機・exe 1 回・verify 全量（済。exe からのワーカー起動での Defender の反応と vodsplit の中止は未確認 → M3 の exe とオーナーの実 VOD で）
 - [ ] I3 アクション「プラグイン ▾」・secret・webhook（ローカルフォルダ）→ **M2**（P3）
 - [ ] M2 直後: Autona-releases に空の `plugins.json`、webhook リポジトリを作成（許可済みの場合）
 - [ ] I4 導入・同意・遮断 → **M3**（P5a）実機・exe 1 回 → I5 フック → **M4**（P7）→ I6 掲載 → **M5**（P5b・告知可）→ I7 更新 → **M6**（P6）

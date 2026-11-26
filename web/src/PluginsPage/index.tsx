@@ -15,7 +15,7 @@ import {useShellAccess} from "../PanelShell/useShellAccess";
 import {CardFrame, GuideFrame, Note} from "../GuidePages/parts";
 import {PluginsApi, httpPluginsApi} from "./pluginsApi";
 import {PluginListItem} from "./pluginTypes";
-import {pluginText, sizeLabel} from "./pluginText";
+import {pluginText, sizeLabel, versionLabel} from "./pluginText";
 import PluginDetailView from "./PluginDetailView";
 import DevSection from "./DevSection";
 
@@ -104,8 +104,9 @@ function PluginsContent({api}: {api: PluginsApi}) {
                                 </Stack>
                                 <Typography variant="caption"
                                             color="text.secondary">
-                                    {`${item.author} · v${item.version} · `
-                                        + sizeLabel(item.size_bytes)}
+                                    {[item.author, versionLabel(item.version),
+                                      sizeLabel(item.size_bytes)]
+                                        .filter(Boolean).join(" · ")}
                                 </Typography>
                             </Box>
                             <Chip size="small"

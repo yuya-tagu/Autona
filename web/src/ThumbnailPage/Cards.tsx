@@ -30,6 +30,9 @@ import {
 import {UnlistedDesigns} from "../CommentaryPage/LayoutCheck";
 import {showSnackbar} from "../ScoreboardPage/Feedback";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
+import PluginActionsMenu, {
+    fileNameOf,
+} from "../PluginsPage/PluginActionsMenu";
 
 // The Thumbnail page's cards (ADR-005 S4p), the Qt サムネイル panel's groups:
 // the design (template and background), the items shown, the character
@@ -691,6 +694,8 @@ export function PreviewCard({canRender, desktop, render, imageRevision,
                         {i18n.t("thumbnail_open_image")}
                     </Button>
                 )}
+                <PluginActionsMenu target="thumbnail_image" blocked={generating}
+                                   context={fileNameOf(render.path)}/>
             </Stack>
             {!canCopyImage() && (
                 <Note>

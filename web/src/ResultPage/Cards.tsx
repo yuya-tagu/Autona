@@ -27,6 +27,9 @@ import {
 } from "../PanelShell/templatePackages";
 import {UnlistedDesigns} from "../CommentaryPage/LayoutCheck";
 import {ConfirmDialog} from "../StreamPage/Dialogs";
+import PluginActionsMenu, {
+    fileNameOf,
+} from "../PluginsPage/PluginActionsMenu";
 import {
     DropLine,
     dropIndex,
@@ -847,6 +850,10 @@ export function PreviewCard({canRender, render, layout, imageRevision, sample,
                         onClick={postToX}>
                     {i18n.t("result_post")}
                 </Button>
+                {/* The installed plugins' actions on the image made (the
+                    desktop's view only; nothing when none offers one). */}
+                <PluginActionsMenu target="result_image" blocked={generating}
+                                   context={fileNameOf(render.path)}/>
             </Stack>
             <Note>
                 {i18n.t(canCopy ? "result_post_note" : "result_post_note_no_copy")}
