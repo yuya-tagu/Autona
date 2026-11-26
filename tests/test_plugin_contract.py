@@ -251,6 +251,10 @@ CHECKS = {row["code"]: row for row in CONTRACT["manifest_checks"]["codes"]}
     ("file without extensions", "invalid_field",
      lambda m: m["settings"].append(
          {"key": "f", "type": "file", "label": "f"})),
+    ("file with too many extensions", "invalid_field",
+     lambda m: m["settings"].append(
+         {"key": "f", "type": "file", "label": "f",
+          "extensions": [f"e{n}" for n in range(21)]})),
     ("bad key", "invalid_field",
      lambda m: m["settings"][1].update(key="Mention")),
     ("secret with a default", "invalid_field",
@@ -443,6 +447,8 @@ def test_the_schema_states_the_contract():
         == limits["select_max_options"]
     assert branches["file"]["properties"]["extensions"]["items"]["pattern"] \
         == patterns["file_extension"]
+    assert branches["file"]["properties"]["extensions"]["maxItems"] \
+        == patterns["file_extensions_max"]
     for kind in ("text", "textarea"):
         assert branches[kind]["properties"]["max_length"]["maximum"] \
             == limits["text_max_length"]["cap"]
@@ -633,6 +639,7 @@ def test_the_patterns_versions_and_environment_are_the_contracts():
             ("MATCH_RECORD_ID_PATTERN", "match_record_id"),
             ("SHA256_PATTERN", "sha256"),
             ("FILE_EXTENSION_PATTERN", "file_extension"),
+            ("FILE_EXTENSIONS_MAX", "file_extensions_max"),
             ("NAME_PATTERN", "name"),
             ("PLATFORM_PATTERN", "platform"),
             ("HOST_PLATFORM", "host_platform"),
@@ -898,7 +905,9 @@ def test_the_routes_are_fixed_and_classed():
         assert route["purpose"]
     assert {route["stage"] for route in routes} == set(ROUTES["stages"])
     assert [verb["verb"] for verb in ROUTES["shell_verbs"]] \
-        == ["pickFile", "openPluginLink"]
+        == ["pickFolder", "pickFile", "openPluginLink"]
+    for verb in ROUTES["shell_verbs"]:
+        assert set(verb) == {"verb", "stage", "args", "answer", "purpose"}
 
 
 def test_the_routes_bodies_and_answers_name_known_shapes():

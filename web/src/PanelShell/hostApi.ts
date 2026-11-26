@@ -231,7 +231,7 @@ export interface ShellState {
 // Why a request got no answer: "no_session" (no ticket read: not the shared
 // view, or loadShellSession() not done), "timeout", "superseded" (a newer
 // request of the same verb: the desktop keeps each verb's newest answer
-// only).
+// only), "busy" (a dialog's request while one is waiting: not sent).
 export type ShellRequestError = Error & {code: string};
 
 interface Envelope<T> {
@@ -312,6 +312,15 @@ export function shellRequest(verb: ShellVerb,
     Promise<ShellResult> {
     if (shellTicket === null) {
         return Promise.reject(shellRequestError("no_session"));
+    }
+    if (SHELL_ANSWER_TIMEOUTS_MS[verb] === null && Array.from(
+        pendingRequests.values()).some(
+        (other) => SHELL_ANSWER_TIMEOUTS_MS[other.verb] === null)) {
+        // A dialog's request (pickFolder / pickFile) while another one
+        // waits: the desktop opens one dialog at a time and answers this one
+        // busy at once, and superseding the waiting one would drop what the
+        // operator picks in the open dialog. Not sent; the waiting one stays.
+        return Promise.reject(shellRequestError("busy"));
     }
     const id = nextRequestId();
     // The fixed keys last: an argument cannot stand in for one of them.

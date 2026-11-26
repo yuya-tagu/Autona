@@ -238,7 +238,17 @@ beforeEach(() => {
     localStorage.clear();
 });
 
+// Every shell request a test opened: the ones left unanswered are answered
+// after it (hostApi keeps them across tests, and a dialog's request waiting
+// would make the next test's busy).
+let shellRequests = [];
+
 afterEach(() => {
+    for (const url of shellRequests) {
+        const id = new URL(url).searchParams.get("request");
+        act(() => receiveShellResult(id, {ok: false, error: "unavailable"}));
+    }
+    shellRequests = [];
     delete global.fetch;
     delete global.XMLHttpRequest;
     Object.defineProperty(document, "visibilityState", {
@@ -899,6 +909,7 @@ function spyOpen() {
     const opened = [];
     jest.spyOn(window, "open").mockImplementation((...args) => {
         opened.push(args);
+        shellRequests.push(args[0]);
         return null;
     });
     return opened;
@@ -1032,22 +1043,31 @@ test("a pick the desktop no longer holds says to choose again", async () => {
         .toBeTruthy();
 });
 
-test("the answer to an older folder request is not used", async () => {
+test("the folder button waits while the dialog is open", async () => {
     await renderShell();
     const opened = spyOpen();
     clickFolder();
-    const [first] = opened[0];
+    const button = screen.getByRole("button",
+                                    {name: i18n.t("assets_folder_choose")});
+    expect(button).toBeDisabled();
     clickFolder();
-    // The older one was superseded: its answer, if one came, is dropped.
-    const oldId = new URL(first).searchParams.get("request");
-    await act(async () => receiveShellResult(oldId, PICKED));
-    await settle();
-    expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);
-    expect(screen.queryByRole("alert")).toBeNull();
+    // One dialog at a time: no second request, and the first one's answer
+    // is the one used.
+    expect(opened).toHaveLength(1);
 
-    await answerPick(opened, {...PICKED, pick: "pick-2"});
+    await answerPick(opened, PICKED);
     const [call] = calls("POST", "/api/v1/assets:importFolder");
-    expect(body(call)).toEqual({pick: "pick-2"});
+    expect(body(call)).toEqual({pick: "pick-1"});
+});
+
+test("the folder button is back once the dialog is closed", async () => {
+    await renderShell();
+    const opened = spyOpen();
+    clickFolder();
+    await answerPick(opened, {ok: true, status: "cancelled", pick: null,
+                              games: [], conflicts: [], expiresInSec: 0});
+    expect(screen.getByRole("button", {name: i18n.t("assets_folder_choose")}))
+        .toBeEnabled();
 });
 
 test("a folder picked once the page is gone imports nothing", async () => {

@@ -31,6 +31,8 @@ export default function DevSection({api, onChanged, onError}: {
 }) {
     const [dev, setDev] = React.useState<DevState | null>(null);
     const [asking, setAsking] = React.useState<Asking | null>(null);
+    // The folder dialog is open: the add button waits for it.
+    const [picking, setPicking] = React.useState(false);
 
     const read = React.useCallback(() => {
         api.dev().then(setDev, () => setDev(null));
@@ -44,6 +46,7 @@ export default function DevSection({api, onChanged, onError}: {
     };
 
     const addFolder = async () => {
+        setPicking(true);
         try {
             const pick = await api.pickFolder();
             if (pick) {
@@ -54,6 +57,8 @@ export default function DevSection({api, onChanged, onError}: {
             if (text) {
                 onError(text);
             }
+        } finally {
+            setPicking(false);
         }
     };
 
@@ -130,6 +135,8 @@ export default function DevSection({api, onChanged, onError}: {
                     ))}
                     <div>
                         <Button size="small" variant="outlined"
+                                disabled={picking}
+                                data-testid="plugin-dev-add"
                                 onClick={() => void addFolder()}>
                             {i18n.t("plugins_dev_add")}
                         </Button>

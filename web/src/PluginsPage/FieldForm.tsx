@@ -125,8 +125,11 @@ export default function FieldForm({
     latest.current = values;
     const set = (key: string, value: unknown) => onChange(
         {...latest.current, [key]: value});
+    // A pick's dialog is open: the pick buttons wait for it.
+    const [picking, setPicking] = React.useState(false);
 
     const pick = async (field: PluginField) => {
+        setPicking(true);
         try {
             const picked = field.type === "file"
                 ? await pickFile?.(field.extensions ?? [])
@@ -139,6 +142,8 @@ export default function FieldForm({
             }
         } catch (error) {
             onPickError?.(error);
+        } finally {
+            setPicking(false);
         }
     };
 
@@ -257,7 +262,8 @@ export default function FieldForm({
                                         {label}{field.required ? " *" : ""}
                                     </Typography>
                                     <Button size="small" variant="outlined"
-                                            disabled={disabled}
+                                            disabled={disabled || picking}
+                                            data-testid={`${testId}-pick`}
                                             onClick={() => void pick(field)}>
                                         {i18n.t(field.type === "file"
                                             ? "plugins_pick_file"

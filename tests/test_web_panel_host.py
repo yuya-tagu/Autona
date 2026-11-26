@@ -3757,6 +3757,56 @@ def test_use_plugins_keeps_what_it_is_not_given():
     assert (operations._picks, operations._registry) == (picks, registry)
 
 
+def test_the_longest_file_request_fits_the_query_the_view_reads():
+    # 20 extensions of 10 characters, the commas escaped as the page's
+    # URLSearchParams does, the longest request id, a ticket as long as the
+    # one this process issues (token_urlsafe(32)).
+    import secrets
+
+    from src.core.ShellPicks import FILE_EXTENSIONS_MAX
+
+    assert len(SHELL_TICKET) == len(secrets.token_urlsafe(32))
+    extensions = ",".join(f"{n:010d}" for n in range(FILE_EXTENSIONS_MAX))
+    query = (f"verb=pickFile&extensions={quote(extensions, safe='')}"
+             f"&request={'r' * 64}&ticket={SHELL_TICKET}")
+    assert len(query) <= HostModule._SHELL_QUERY_MAX
+    request, reason = _checkShellRequest(f"{SHELL_URL}?{query}")
+    assert reason is None and request.args == {"extensions": extensions}
+
+
+def test_a_link_the_core_takes_is_one_qt_opens():
+    # PluginLinks.SafeHttpsUrl is as strict as QUrl's StrictMode, which the
+    # shell parses the URL with before it opens it.
+    from src.core.PluginLinks import SafeHttpsUrl
+
+    for url in ("https://example.com/", "https://sub.example.co.jp:8443/a/b",
+                "https://example.com/a%20b?q=1&r=(2)*3+4,5;6=7!$'~_.-@:#top",
+                "https://github.com/author/plugin.repo"):
+        assert SafeHttpsUrl(url) and QUrl(
+            url, QUrl.ParsingMode.StrictMode).isValid(), url
+    for url in ("https://example.com/a|b", "https://example.com/{x}",
+                "https://example.com/a^b", "https://example.com/<x>",
+                "https://example.com/%zz", 'https://example.com/"x"'):
+        assert not SafeHttpsUrl(url), url
+        assert not QUrl(url, QUrl.ParsingMode.StrictMode).isValid(), url
+
+
+def test_the_contracts_ledger_names_the_verbs_arguments():
+    # docs/plugins/routes_v1.json shell_verbs: each verb's arguments are
+    # SHELL_VERBS' (a fixed list is written "a | b").
+    from tests.conftest import PROJECT_ROOT
+
+    ledger = json.loads((PROJECT_ROOT / "docs" / "plugins" / "routes_v1.json")
+                        .read_text(encoding="utf-8"))["shell_verbs"]
+    for row in ledger:
+        arguments = HostModule.SHELL_VERBS[row["verb"]]
+        assert set(row["args"]) == set(arguments), row["verb"]
+        for name, values in arguments.items():
+            if isinstance(values, tuple):
+                assert row["args"][name] == " | ".join(values), (
+                    row["verb"], name)
+
+
 def test_the_page_checks_a_files_extensions_as_the_view_does():
     import re
 

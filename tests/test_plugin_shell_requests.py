@@ -146,6 +146,8 @@ def _registry(state=PluginState.READY, homepage=HOMEPAGE, funding=None,
     "https://example.com", "https://example.com/", HOMEPAGE,
     "https://sub.example-site.co.jp:8443/a/b", "https://github.com/a/b",
     "https://example.com/" + "x" * 2000,
+    "https://example.com/a%20b?q=1&r=(2)*3+4,5;6=7!$'~_.-@:",
+    "https://1password.com/", "https://example.com.0a/",
 ])
 def test_a_safe_https_url(url):
     assert PluginLinks.SafeHttpsUrl(url)
@@ -160,6 +162,16 @@ def test_a_safe_https_url(url):
     "https://-bad.example/", "https://例え.jp/", "https://example.com:99999/",
     "https://example.com:port/", "https://example.com/" + "x" * 2048,
     "https:///path",
+    # An IP address, a single label, a last label read as a number.
+    "https://127.0.0.1:5107/api/v1/", "https://192.168.0.2/",
+    "https://10.0.0.1/", "https://localhost/", "https://intranet:8443/x",
+    "https://127.1/", "https://example.0x7f/", "https://example.123/",
+    # What RFC 3986 does not allow (Qt's StrictMode refuses it).
+    "https://example.com/a|b", "https://example.com/{x}",
+    "https://example.com/a^b", 'https://example.com/"x"',
+    "https://example.com/<x>", "https://example.com/[x]",
+    "https://example.com/%zz", "https://example.com/%4", "https://example.com/%",
+    "https://example.com/日本語", "https://example.com/a`b",
 ])
 def test_anything_else_is_not(url):
     assert not PluginLinks.SafeHttpsUrl(url)

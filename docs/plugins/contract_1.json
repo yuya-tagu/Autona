@@ -42,6 +42,7 @@
     "match_record_id": "^[0-9]{8}-[0-9]{6}-[0-9]+-[0-9a-f]{4}$",
     "sha256": "^[0-9a-f]{64}$",
     "file_extension": "^[a-z0-9]{1,10}$",
+    "file_extensions_max": 20,
     "github_repo": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$",
     "locale": "^[a-z]{2}(-[A-Z]{2})?$"
   },

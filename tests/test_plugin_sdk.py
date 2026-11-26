@@ -98,6 +98,7 @@ def test_the_constants_are_the_contracts():
                         ("version", ap.VERSION_PATTERN), ("run_id", ap.RUN_ID_PATTERN),
                         ("error_code", ap.ERROR_CODE_PATTERN),
                         ("file_extension", ap.FILE_EXTENSION_PATTERN),
+                        ("file_extensions_max", ap.FILE_EXTENSIONS_MAX),
                         ("github_repo", ap.GITHUB_REPO_PATTERN), ("locale", ap.LOCALE_PATTERN)]:
         assert value == p[name], name
     assert ap.PLUGIN_ID_MAX_LENGTH == p["plugin_id_max_length"]
@@ -966,8 +967,10 @@ def test_the_private_copies_are_the_registrys_and_the_schemas():
     from src.core import PluginRegistry as G
     assert ap._TOP_KEYS == G._TOP_KEYS
     assert (ap._FILES_SCOPES, ap._API_USES) == (G._FILES_SCOPES, G._API_USES)
-    for name in ("_ENTRY_HEAD", "_HOST_NAME", "_HTTPS_URL"):
-        assert getattr(ap, name).pattern == getattr(G, name).pattern, name
+    for name, engine in (("_ENTRY_HEAD", G._ENTRY_HEAD),
+                         ("_HOST_NAME", G.HOST_NAME),
+                         ("_HTTPS_URL", G.HTTPS_URL)):
+        assert getattr(ap, name).pattern == engine.pattern, name
     schema = json.loads((ROOT / "docs" / "plugins" / "plugin.schema.json")
                         .read_text(encoding="utf-8"))
     assert set(schema["properties"]) == ap._TOP_KEYS

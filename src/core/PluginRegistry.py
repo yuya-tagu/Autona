@@ -73,7 +73,8 @@ from loguru import logger
 from . import ArchiveWorker
 from .PluginTypes import (
     ACTION_FILLS, CONTEXT_ONLY_TYPES, FIELD_KEY_PATTERN,
-    FILE_EXTENSION_PATTERN, HEAVY_TIMEOUT_SECONDS, HOOK_FILLS,
+    FILE_EXTENSION_PATTERN, FILE_EXTENSIONS_MAX, HEAVY_TIMEOUT_SECONDS,
+    HOOK_FILLS,
     HOOK_JOB_MEMORY_MB_MAX, HOST_PLATFORM, HOST_READS_MANIFESTS,
     HOST_SPEAKS_PROTOCOLS, ICON_MAX_BYTES, JOB_ID_PATTERN, LIGHT_MEMORY_MB,
     LIGHT_TIMEOUT_SECONDS, MANIFEST_FILE, MANIFEST_MAX_BYTES, NAME_PATTERN,
@@ -131,12 +132,14 @@ _API_USES = ("none", "read", "write")
 _ENTRY_HEAD = re.compile(
     r"^(?!@)(?![A-Za-z]:)(?![/\\])(?!(.*[/\\])?\.\.([/\\]|$))"
     r"[^:*?\"<>|\u0000-\u001f]+$")
-_HOST_NAME = re.compile(
+# A manifest's network host, homepage / funding URL and GitHub repository
+# (PluginLinks checks a link to open with them too).
+HOST_NAME = re.compile(
     r"^(\*|[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
     r"(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)$")
-_HTTPS_URL = re.compile(r"^https://[^\s@/]+(/[^\s]*)?$")
+HTTPS_URL = re.compile(r"^https://[^\s@/]+(/[^\s]*)?$")
 _LOCALE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
-_GITHUB_REPO = re.compile(
+GITHUB_REPO = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 
 
@@ -436,7 +439,7 @@ class PluginRegistry:
         for key in ("homepage", "funding"):
             if key in raw and not (isinstance(raw[key], str)
                                    and len(raw[key]) <= URL_MAX_LENGTH
-                                   and _HTTPS_URL.fullmatch(raw[key])):
+                                   and HTTPS_URL.fullmatch(raw[key])):
                 found.plugin(invalid, key)
         if not (isinstance(raw.get("license"), str) and raw["license"]):
             found.plugin(invalid, "license")
@@ -477,7 +480,7 @@ class PluginRegistry:
         if "update" in raw:
             update = raw["update"]
             if not (isinstance(update, dict) and isinstance(update.get("github"), str)
-                    and _GITHUB_REPO.fullmatch(update["github"])):
+                    and GITHUB_REPO.fullmatch(update["github"])):
                 found.plugin(invalid, "update")
 
         permissions = raw.get("permissions")
@@ -486,7 +489,7 @@ class PluginRegistry:
         else:
             network = permissions.get("network")
             if not (_IsUniqueList(network) and all(
-                    isinstance(host, str) and _HOST_NAME.fullmatch(host)
+                    isinstance(host, str) and HOST_NAME.fullmatch(host)
                     for host in network)):
                 found.plugin(invalid, "permissions.network")
             if permissions.get("files") not in _FILES_SCOPES:
@@ -664,7 +667,8 @@ class PluginRegistry:
                 report(bad, f"{path}.default")
         elif kind == FieldType.FILE:
             extensions = item.get("extensions")
-            if not (_IsUniqueList(extensions) and extensions and all(
+            if not (_IsUniqueList(extensions) and extensions
+                    and len(extensions) <= FILE_EXTENSIONS_MAX and all(
                     isinstance(ext, str) and re.fullmatch(FILE_EXTENSION_PATTERN, ext)
                     for ext in extensions)):
                 report(invalid, f"{path}.extensions")

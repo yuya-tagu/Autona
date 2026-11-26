@@ -71,6 +71,9 @@ ERROR_CODE_PATTERN = r"^[a-z0-9_]{1,64}$"
 MATCH_RECORD_ID_PATTERN = r"^[0-9]{8}-[0-9]{6}-[0-9]+-[0-9a-f]{4}$"
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 FILE_EXTENSION_PATTERN = r"^[a-z0-9]{1,10}$"
+# A file field's extensions: at most this many (the shell request pickFile
+# carries them all in its query).
+FILE_EXTENSIONS_MAX = 20
 # A dev folder's stable id: the first 12 hex digits of the SHA-256 of its
 # normalised absolute path (os.path.normcase(os.path.abspath(path)), UTF-8).
 DEV_FOLDER_ID_PATTERN = r"^[0-9a-f]{12}$"

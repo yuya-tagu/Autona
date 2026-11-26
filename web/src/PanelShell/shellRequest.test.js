@@ -205,14 +205,32 @@ test("a plugin's link waits ten seconds", async () => {
     await expect(asked).rejects.toMatchObject({code: "timeout"});
 });
 
-test("a newer folder request supersedes the one waiting", async () => {
+test("a dialog's request while one waits is busy, and the waiting one stays", async () => {
+    // A double click, or a pick of another purpose or kind: the desktop has
+    // one dialog open and would answer the second one busy, while the
+    // first one's answer -- what the operator picks -- would find no one
+    // waiting if it were superseded.
     await host.loadShellSession();
-    const first = host.shellRequest("pickFolder");
-    const second = host.shellRequest("pickFolder");
-    await expect(first).rejects.toMatchObject({code: "superseded"});
+    const first = host.shellRequest("pickFolder", {purpose: "plugin"});
     const {request} = openedQuery();
-    host.receiveShellResult(request, {ok: true, status: "cancelled"});
-    await expect(second).resolves.toEqual({ok: true, status: "cancelled"});
+    for (const [verb, args] of [
+        ["pickFolder", {purpose: "plugin"}],
+        ["pickFolder", {purpose: "assets"}],
+        ["pickFile", {extensions: "png"}]]) {
+        await expect(host.shellRequest(verb, args))
+            .rejects.toMatchObject({code: "busy"});
+    }
+    expect(opened).toHaveLength(1);
+    // Another kind of request still goes.
+    host.shellRequest("alwaysOnTop", {on: "1"});
+    expect(opened).toHaveLength(2);
+
+    const picked = {ok: true, status: "picked", id: "p1", name: "MyFolder"};
+    host.receiveShellResult(request, picked);
+    await expect(first).resolves.toEqual(picked);
+    // Answered: the next one is sent.
+    host.shellRequest("pickFile", {extensions: "png"});
+    expect(opened).toHaveLength(3);
 });
 
 test("a newer request of a verb supersedes the older one", async () => {

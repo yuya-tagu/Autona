@@ -597,8 +597,9 @@ _SHELL_REQUEST_FIELDS = ("verb", "request", "ticket")
 _SHELL_FIELDS_MAX = len(_SHELL_REQUEST_FIELDS) + max(
     len(arguments) for arguments in SHELL_VERBS.values())
 _SHELL_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-# A query longer than this is not read (bounded work: the verbs' requests
-# take under 200 characters).
+# A query longer than this is not read (bounded work). The longest request
+# is a pickFile with ShellPicks.FILE_EXTENSIONS_MAX extensions of 10
+# characters (the page escapes each comma as %2C): about 360 characters.
 _SHELL_QUERY_MAX = 512
 
 ShellRequest = namedtuple("ShellRequest", "verb id args")

@@ -40,7 +40,7 @@ from collections import OrderedDict
 from typing import Callable, Optional, Tuple
 
 from .PluginSettings import IsAbsoluteLocal
-from .PluginTypes import FieldType
+from .PluginTypes import FILE_EXTENSIONS_MAX, FieldType
 
 # A pick lives this long (a plugin's form may take a while to fill).
 PICK_EXPIRY_SECS = 30 * 60
@@ -57,9 +57,8 @@ FOLDER_PURPOSES = ("assets", "plugin")
 
 # pickFile's argument ``extensions``: a file field's extensions
 # (FILE_EXTENSION_PATTERN each: lower case, no dot) joined by commas, at most
-# FILE_EXTENSIONS_MAX of them -- so the request stays within what the shared
-# view reads of a shell request's query.
-FILE_EXTENSIONS_MAX = 20
+# FILE_EXTENSIONS_MAX of them (the manifest's own limit) -- so the request
+# stays within what the shared view reads of a shell request's query.
 EXTENSIONS_ARGUMENT_PATTERN = (
     r"[a-z0-9]{1,10}(?:,[a-z0-9]{1,10}){0,%d}" % (FILE_EXTENSIONS_MAX - 1))
 _EXTENSIONS_ARGUMENT = re.compile(EXTENSIONS_ARGUMENT_PATTERN)

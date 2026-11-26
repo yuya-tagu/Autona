@@ -185,6 +185,24 @@ describe("the page", () => {
         expect(within(detail).queryByTestId("plugin-link-funding")).toBeNull();
     });
 
+    test("a blocked plugin's link says so", async () => {
+        const api = createMockPluginsApi();
+        api.openLink = async () => {
+            throw Object.assign(new Error("refused"), {code: "blocked"});
+        };
+        show(api);
+        fireEvent.click(await screen.findByTestId("plugin-row-taguyan.webhook"));
+        fireEvent.click(await screen.findByTestId("plugin-link-homepage"));
+        expect(await screen.findByText(
+            "This plugin is blocked: its links are not opened.")).toBeTruthy();
+        api.openLink = async () => {
+            throw Object.assign(new Error("refused"), {code: "no_link"});
+        };
+        fireEvent.click(screen.getByTestId("plugin-link-homepage"));
+        expect(await screen.findByText("The link could not be opened."))
+            .toBeTruthy();
+    });
+
     test("reads the author's text in the page's language", async () => {
         show(createMockPluginsApi(), "ja");
         const row = await screen.findByTestId("plugin-row-taguyan.webhook");
@@ -323,6 +341,25 @@ describe("the page", () => {
              await waitFor(async () => expect((await api.dev()).folders)
                  .toHaveLength(1));
          });
+
+    test("the add button waits while the folder dialog is open", async () => {
+        const api = createMockPluginsApi();
+        await api.setDev(true);
+        let finish;
+        api.pickFolder = jest.fn(() => new Promise((resolve) => {
+            finish = () => resolve(null);
+        }));
+        show(api);
+        const add = await screen.findByTestId("plugin-dev-add");
+        fireEvent.click(add);
+        expect(add.disabled).toBe(true);
+        fireEvent.click(add);
+        expect(api.pickFolder).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            finish();
+        });
+        expect(add.disabled).toBe(false);
+    });
 
     test("cancelling the dialog changes nothing", async () => {
         const api = createMockPluginsApi();
@@ -609,6 +646,7 @@ describe("refusals and access", () => {
             .toBe("This plugin is blocked.");
         expect(refusalText(refused(500))).toBe("It did not work.");
         expect(pickErrorText({code: "superseded"})).toBeNull();
+        expect(pickErrorText({code: "busy"})).toBeNull();
         expect(pickErrorText({code: "unknown_verb"}))
             .toBe("This cannot be chosen here yet.");
         expect(pickErrorText({code: "timeout"}))
@@ -616,7 +654,7 @@ describe("refusals and access", () => {
         expect(pickErrorText({code: "bad_extension"}))
             .toBe("A file of this type cannot be chosen.");
         expect(pickErrorText({code: "not_local"})).toBe(
-            "Choose a place on this PC's drives, not a network location.");
+            "A network path (\\\\server) cannot be chosen.");
     });
 
     test("in another computer's browser it lists and explains", async () => {
@@ -721,6 +759,42 @@ describe("saving settings", () => {
 });
 
 describe("FieldForm picks", () => {
+    test("the pick buttons wait while a dialog is open", async () => {
+        const fields = [{key: "dir", type: "folder", label: "Dir"},
+                        {key: "img", type: "file", label: "Img",
+                         extensions: ["png"]}];
+        let finish;
+        const pickFolder = jest.fn(() => new Promise((resolve) => {
+            finish = () => resolve({id: "p1", name: "Dir1"});
+        }));
+        const pickFile = jest.fn(async () => null);
+        const Host = () => {
+            const [values, setValues] = React.useState(initialValues(fields));
+            return (
+                <FieldForm fields={fields} values={values}
+                           onChange={setValues} language="en"
+                           pickFolder={pickFolder} pickFile={pickFile}/>
+            );
+        };
+        render(<Host/>);
+        const folderButton = screen.getByTestId("plugin-field-dir-pick");
+        const fileButton = screen.getByTestId("plugin-field-img-pick");
+        fireEvent.click(folderButton);
+        expect(folderButton.disabled).toBe(true);
+        expect(fileButton.disabled).toBe(true);
+        fireEvent.click(folderButton);
+        fireEvent.click(fileButton);
+        expect(pickFolder).toHaveBeenCalledTimes(1);
+        expect(pickFile).not.toHaveBeenCalled();
+        await act(async () => {
+            finish();
+        });
+        expect(folderButton.disabled).toBe(false);
+        expect(fileButton.disabled).toBe(false);
+        expect(screen.getByTestId("plugin-field-dir-name").textContent)
+            .toBe("Dir1");
+    });
+
     test("a pick without a name says chosen, and can be released", async () => {
         const fields = [{key: "dir", type: "folder", label: "Dir"}];
         const Host = () => {

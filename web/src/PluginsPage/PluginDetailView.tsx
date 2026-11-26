@@ -342,8 +342,10 @@ export default function PluginDetailView({api, id, language, onChanged,
         }
     };
     const link = (which: "homepage" | "funding") => {
-        api.openLink("installed", id, which).catch(
-            () => onError(i18n.t("plugins_link_failed")));
+        api.openLink("installed", id, which).catch((error) => onError(
+            (error as {code?: string} | null)?.code === "blocked"
+                ? i18n.t("plugins_link_blocked")
+                : i18n.t("plugins_link_failed")));
     };
     const reload = () => {
         api.reload(id).then(() => {

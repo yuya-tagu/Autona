@@ -15,18 +15,25 @@ of a fixed table).
 
 Any other pair (an installed plugin's ``repo``, a listing row's
 ``homepage``) is NO_LINK. Whatever is built is checked again before it is
-answered (SafeHttpsUrl): https only, no userinfo, a host name as the
-manifest's network hosts are checked, no blank or control character, no
-backslash, URL_MAX_LENGTH at most -- the manifest check's own rules, so a
-link the registry took is one this opens, and nothing else is.
+answered (SafeHttpsUrl), stricter than the manifest check (which only asks
+for ``https://``, no ``@`` in the authority and no blank): https only, no
+userinfo, URL_MAX_LENGTH at most, only the characters RFC 3986 allows in a
+URL (ASCII; no blank, control character, backslash, ``| { } ^ " < > [ ]``
+nor a ``%`` that is not an escape -- what Qt's QUrl StrictMode takes, so
+the shell opens what this answers), and a host that is a domain name: a
+name as the manifest's network hosts are checked, with a dot, and not an
+IP address (nor anything a browser reads as one: a last label that is a
+number). A link the registry took but this refuses is BAD_LINK.
 
 Nothing is made, read or written on import (pitfalls #1); no Qt.
 """
 
+import ipaddress
+import re
 from typing import Any, Callable, Optional, Tuple
 from urllib.parse import urlsplit
 
-from .PluginRegistry import _GITHUB_REPO, _HOST_NAME, _HTTPS_URL
+from .PluginRegistry import GITHUB_REPO, HOST_NAME, HTTPS_URL
 from .PluginTypes import URL_MAX_LENGTH, PluginState
 
 SOURCES = ("installed", "listing")
@@ -49,14 +56,34 @@ BAD_LINK = "bad_link"
 
 ListingRepo = Callable[[str], Optional[str]]
 
+# RFC 3986's characters: unreserved, the delimiters but "[" "]" (an IPv6
+# host's only, and no IP host is opened), and "%" for an escape.
+_URL_CHARACTERS = re.compile(r"[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]+")
+_BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+# A last label a browser reads as an IPv4 number (WHATWG URL: decimal,
+# 0x hex).
+_NUMERIC_LABEL = re.compile(r"(0x[0-9a-f]*|[0-9]+)", re.IGNORECASE)
+
+
+def _DomainName(host: str) -> bool:
+    if host == "*" or "." not in host or not HOST_NAME.fullmatch(host):
+        return False
+    if _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[1]):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return False
+
 
 def SafeHttpsUrl(url: Any) -> bool:
     """Whether ``url`` is one openPluginLink may open (module docstring)."""
     if not isinstance(url, str) or not url or len(url) > URL_MAX_LENGTH:
         return False
-    if "\\" in url or any(ord(c) < 0x20 or ord(c) == 0x7f for c in url):
+    if not _URL_CHARACTERS.fullmatch(url) or _BAD_ESCAPE.search(url):
         return False
-    if not _HTTPS_URL.fullmatch(url):
+    if not HTTPS_URL.fullmatch(url):
         return False
     try:
         parts = urlsplit(url)
@@ -66,8 +93,7 @@ def SafeHttpsUrl(url: Any) -> bool:
     if parts.scheme != "https" or parts.username is not None \
             or parts.password is not None:
         return False
-    host = parts.hostname or ""
-    return host != "*" and bool(_HOST_NAME.fullmatch(host))
+    return _DomainName(parts.hostname or "")
 
 
 def PluginLinkUrl(source: str, pluginId: str, link: str, *, registry=None,
@@ -97,7 +123,7 @@ def PluginLinkUrl(source: str, pluginId: str, link: str, *, registry=None,
         repo = listingRepo(pluginId)
         if repo is None or repo == "":
             return None, UNKNOWN_PLUGIN
-        if not (isinstance(repo, str) and _GITHUB_REPO.fullmatch(repo)) \
+        if not (isinstance(repo, str) and GITHUB_REPO.fullmatch(repo)) \
                 or repo.split("/", 1)[1] in (".", ".."):
             return None, BAD_LINK
         url = GITHUB_URL + repo
