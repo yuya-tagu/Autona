@@ -6,11 +6,14 @@ the cancel and the time limit, the job object (grandchildren end with it,
 the priority limit reaches the descendants), describe's facts, Shutdown.
 
 The process tests are Windows only (the host platform); the pure ones run
-everywhere. Time limits and graces are injected short.
+everywhere. Waits that end by the worker's own cooperation get a long
+grace (a loaded machine must not make them fail); only the hang tests,
+which need the kill, get a short one.
 """
 import ctypes
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -28,6 +31,10 @@ FAKE = ROOT / "tests" / "fixtures" / "fake_plugin_worker.py"
 WINDOWS = sys.platform == "win32"
 windows = pytest.mark.skipif(not WINDOWS, reason="the host platform only")
 OTHER_EXITS = (1, 3, 255, 3221225477, -9, None)
+# How long a test waits for a process before it calls it stuck: a bound
+# for failing, not a pace. The runs are BELOW_NORMAL, so a loaded machine
+# (NORMAL work on every core) can hold them back for minutes.
+LONG = 600.0
 
 
 # ── EndState against the contract's table ──────────────────────────────
@@ -231,11 +238,23 @@ def test_worker_log_stops_at_its_limit(tmp_path, monkeypatch):
 
 # ── the process (Windows) ──────────────────────────────────────────────
 
+COOPERATIVE = 15.0  # a grace / timeout the worker never needs to reach
+
+
 @pytest.fixture
 def runner():
-    made = R.PluginRunner(poll=0.02, cancelGrace=1.0, describeTimeout=1.5)
+    made = R.PluginRunner(poll=0.02, cancelGrace=COOPERATIVE,
+                          describeTimeout=COOPERATIVE)
     yield made
-    made.Shutdown(1.0)
+    made.Shutdown(5.0)
+
+
+@pytest.fixture
+def killer():
+    """A short grace: for the hang tests, which wait for the kill."""
+    made = R.PluginRunner(poll=0.02, cancelGrace=1.0)
+    yield made
+    made.Shutdown(5.0)
 
 
 def _job_dir(tmp_path, params=None):
@@ -289,11 +308,11 @@ def _run(runner, spec, cancel=None):
     got = _Collect()
     handle = runner.Start(spec, got.onEvent, got.onEnd)
     if cancel is not None:
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + LONG
         while not cancel(got) and time.monotonic() < deadline:
             time.sleep(0.02)
         handle.Cancel()
-    outcome = handle.Wait(30)
+    outcome = handle.Wait(LONG)
     assert outcome is not None, "the run did not end"
     assert got.ends == [outcome]
     return outcome, got, Path(spec.log_path).read_text(encoding="utf-8")
@@ -340,7 +359,7 @@ def _alive(pid):
         kernel32.CloseHandle(handle)
 
 
-def _gone(pid, within=5.0):
+def _gone(pid, within=30.0):
     deadline = time.monotonic() + within
     while _alive(pid):
         if time.monotonic() > deadline:
@@ -349,17 +368,26 @@ def _gone(pid, within=5.0):
     return True
 
 
-def _read_pid(path, within=15.0):
+def _read_pid(path, within=LONG):
     deadline = time.monotonic() + within
     while time.monotonic() < deadline:
         try:
             text = path.read_text(encoding="utf-8").strip()
             if text:
                 return int(text)
-        except OSError:
+        except (OSError, ValueError):  # not there yet, or half written
             pass
         time.sleep(0.02)
     raise AssertionError("no child pid")
+
+
+def _until(check, within=LONG):
+    deadline = time.monotonic() + within
+    while not check():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.02)
+    return True
 
 
 @windows
@@ -427,13 +455,16 @@ def test_stdin_stays_open_while_it_runs(runner, tmp_path):
 
 @windows
 def test_hang_is_ended_with_its_job_after_the_grace_and_the_priority_is_raised_first(  # noqa: E501
-        runner, tmp_path):
+        tmp_path):
+    # A grace of 3 s: long enough for both processes' priorities to be
+    # seen as normal before the kill, even on a loaded machine.
+    runner = R.PluginRunner(poll=0.02, cancelGrace=3.0)
     childFile = tmp_path / "child.pid"
     spec = _spec(tmp_path, "hang", FAKE_PLUGIN_CHILD_PID=childFile)
     got = _Collect()
     handle = runner.Start(spec, got.onEvent, got.onEnd)
     child = _read_pid(childFile)
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + LONG
     while not _started(got) and time.monotonic() < deadline:
         time.sleep(0.02)
     # Both the worker and the process it started run below normal: the
@@ -442,15 +473,20 @@ def test_hang_is_ended_with_its_job_after_the_grace_and_the_priority_is_raised_f
     assert _priority(child) == R.BELOW_NORMAL_PRIORITY_CLASS
     began = time.monotonic()
     handle.Cancel()
-    # The job's limit rewritten: every process in it is normal again.
-    assert _priority(handle.pid) == R.NORMAL_PRIORITY_CLASS
-    assert _priority(child) == R.NORMAL_PRIORITY_CLASS
-    outcome = handle.Wait(30)
-    assert time.monotonic() - began >= 0.9  # the grace (1 s here)
+    # The run's thread rewrites the job's limit: every process in it is
+    # normal again, before the grace's kill. The kernel reaches the job's
+    # processes one by one, so the two are polled together.
+    assert _until(lambda: (_priority(handle.pid), _priority(child)) == (
+        R.NORMAL_PRIORITY_CLASS, R.NORMAL_PRIORITY_CLASS))
+    outcome = handle.Wait(LONG)
+    runner.Shutdown(5.0)
+    assert time.monotonic() - began >= 2.9  # the grace (3 s here)
     assert (outcome.state, outcome.exit_code) == ("cancelled",
                                                   R.KILLED_EXIT_CODE)
     assert outcome.final is None and outcome.cancel_requested
     assert _gone(child), "the grandchild outlived the job"
+    assert R.HOST_STOPPED_NOTE in Path(spec.log_path).read_text(
+        encoding="utf-8")
 
 
 @windows
@@ -464,19 +500,19 @@ def test_a_grandchild_ends_with_the_job(runner, tmp_path):
 
 @windows
 def test_past_its_time_limit_it_is_timed_out_and_cancelled(runner, tmp_path):
-    began = time.monotonic()
     outcome, got, _ = _run(runner, _spec(tmp_path, "timeout", timeout=0.5,
-                                         FAKE_PLUGIN_DELAY=10))
-    assert time.monotonic() - began < 8
+                                         FAKE_PLUGIN_DELAY=60))
     assert (outcome.state, outcome.reason) == ("failed", "timed_out")
     assert outcome.timed_out and not outcome.cancel_requested
-    assert outcome.exit_code == 130  # it took the cancel line
+    # Cut short of the worker's 60 s: it took the cancel line.
+    assert outcome.exit_code == 130
     assert got.types()[-1] == "cancelled"
 
 
 @windows
-def test_a_hang_past_its_time_limit_is_killed_and_timed_out(runner,
+def test_a_hang_past_its_time_limit_is_killed_and_timed_out(killer,
                                                             tmp_path):
+    runner = killer
     outcome, _, _ = _run(runner, _spec(tmp_path, "hang", timeout=0.3))
     assert (outcome.state, outcome.reason, outcome.exit_code) == \
         ("failed", "timed_out", R.KILLED_EXIT_CODE)
@@ -639,7 +675,7 @@ def test_wait_inside_on_end_returns_the_outcome(runner, tmp_path):
 
     holder["handle"] = runner.Start(_spec(tmp_path, "ok"), lambda e: None,
                                     onEnd)
-    outcome = holder["handle"].Wait(30)
+    outcome = holder["handle"].Wait(LONG)
     assert seen == [outcome]
 
 
@@ -651,29 +687,31 @@ def test_an_event_callback_that_raises_does_not_stop_the_run(runner,
 
     ends = []
     handle = runner.Start(_spec(tmp_path, "ok"), onEvent, ends.append)
-    assert handle.Wait(30).state == "done"
+    assert handle.Wait(LONG).state == "done"
 
 
 @windows
 def test_shutdown_cancels_kills_the_rest_and_refuses_new_starts(tmp_path):
-    runner = R.PluginRunner(poll=0.02, cancelGrace=30)
+    runner = R.PluginRunner(poll=0.02, cancelGrace=60)
     slow = _Collect()
     hang = _Collect()
     first = runner.Start(_spec(tmp_path / "a", "slow"), slow.onEvent,
                          slow.onEnd)
     second = runner.Start(_spec(tmp_path / "b", "hang"), hang.onEvent,
                           hang.onEnd)
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + LONG
     while not (_started(slow) and _started(hang)) and \
             time.monotonic() < deadline:
         time.sleep(0.02)
     began = time.monotonic()
-    runner.Shutdown(0.5)
-    assert time.monotonic() - began < 5
-    assert first.Wait(0).state == "cancelled"
-    assert first.Wait(0).exit_code == 130
-    assert second.Wait(0).state == "cancelled"
-    assert second.Wait(0).exit_code == R.KILLED_EXIT_CODE
+    runner.Shutdown(3.0)  # slow stops by itself; hang needs the kill
+    assert time.monotonic() - began < 3.0 + 2 * R.KILL_WAIT_SECONDS + 30
+    assert first.Wait(5).state == "cancelled"
+    # 130 when it read the cancel within the grace (a loaded machine may
+    # hold it back past it: then it is killed, still cancelled).
+    assert first.Wait(5).exit_code in (130, R.KILLED_EXIT_CODE)
+    assert second.Wait(5).state == "cancelled"
+    assert second.Wait(5).exit_code == R.KILLED_EXIT_CODE
     after = _Collect()
     late = runner.Start(_spec(tmp_path / "c", "ok"), after.onEvent,
                         after.onEnd)
@@ -693,7 +731,7 @@ def _plugin(tmp_path):
     return folder
 
 
-def _describe(tmp_path, mode, timeout=1.5):
+def _describe(tmp_path, mode, timeout=COOPERATIVE):
     folder = _plugin(tmp_path)
     runner = R.PluginRunner(
         poll=0.02, describeTimeout=timeout,
@@ -727,9 +765,7 @@ def test_describe_reports_facts_only(tmp_path, mode, lines, objects,
 
 @windows
 def test_describe_past_its_time_is_timed_out(tmp_path):
-    began = time.monotonic()
     run = _describe(tmp_path, "hang", timeout=0.5)
-    assert time.monotonic() - began < 5
     assert (run.launched, run.timed_out, run.exit_code) == (True, True, None)
 
 
@@ -765,3 +801,215 @@ def test_nothing_is_made_at_construction():
     runner = R.PluginRunner(popen=lambda *a, **k: pytest.fail("started"))
     assert runner._runs == set() and runner._describes == set()
     runner.Shutdown(0)
+
+
+# ── review fixes: launch failures never raise, the cancel's edges ──────
+
+def _recording_popen():
+    made = []
+
+    def popen(*args, **kwargs):
+        proc = subprocess.Popen(*args, **kwargs)
+        made.append(proc)
+        return proc
+
+    return made, popen
+
+
+def _ends_failed(runner, spec, reason="launch_failed"):
+    got = _Collect()
+    handle = runner.Start(spec, got.onEvent, got.onEnd)  # never raises
+    outcome = handle.Wait(LONG)
+    assert (outcome.state, outcome.reason) == ("failed", reason)
+    assert got.ends == [outcome]
+    assert got.endThread is not threading.current_thread()
+    assert runner._runs == set()
+    return outcome
+
+
+@windows
+def test_no_job_object_no_process(monkeypatch, tmp_path):
+    def refuse(*args, **kwargs):
+        raise OSError("CreateJobObject failed")
+
+    monkeypatch.setattr(R, "_JobObject", refuse)
+    runner = R.PluginRunner(popen=lambda *a, **k: pytest.fail("started"))
+    _ends_failed(runner, _spec(tmp_path))
+
+
+@windows
+@pytest.mark.parametrize("step", ["assign", "resume"])
+def test_a_failed_assign_or_resume_leaves_nothing_suspended(
+        monkeypatch, tmp_path, step):
+    def fail(*args, **kwargs):
+        raise OSError(f"{step} failed")
+
+    if step == "assign":
+        monkeypatch.setattr(R._JobObject, "Assign", fail)
+    else:
+        monkeypatch.setattr(R, "_Resume", fail)
+    made, popen = _recording_popen()
+    runner = R.PluginRunner(popen=popen)
+    _ends_failed(runner, _spec(tmp_path, "hang"))
+    assert len(made) == 1 and made[0].poll() is not None
+    assert not _alive(made[0].pid)
+
+
+@windows
+def test_whatever_popen_raises_is_a_launch_failure(tmp_path):
+    spec = _spec(tmp_path / "a")
+    bad = T.LaunchSpec(argv=spec.argv, cwd=spec.cwd,
+                       env=dict(spec.env, **{"A=B": "x"}), lane=spec.lane,
+                       log_path=spec.log_path)
+    _ends_failed(R.PluginRunner(), bad)  # ValueError from Popen
+    for error in (TypeError("argv"), AttributeError("x"), ValueError("v")):
+        def popen(*args, error=error, **kwargs):
+            raise error
+
+        folder = tmp_path / type(error).__name__
+        _ends_failed(R.PluginRunner(popen=popen), _spec(folder))
+
+
+@windows
+def test_cancel_after_the_end_does_nothing(runner, tmp_path):
+    handle = runner.Start(_spec(tmp_path, "ok"), lambda e: None,
+                          lambda o: None)
+    outcome = handle.Wait(LONG)
+    handle.Cancel()
+    assert not handle.cancelRequested and not outcome.cancel_requested
+    failed = runner.Start(_spec(tmp_path / "b", argv=(
+        str(tmp_path / "missing.exe"),)), lambda e: None, lambda o: None)
+    failed.Cancel()
+    assert not failed.cancelRequested
+    assert not failed.Wait(LONG).cancel_requested
+
+
+@windows
+def test_after_the_users_cancel_the_time_limit_does_not_apply(tmp_path):
+    # The clock jumps past the time limit once the cancel was sent, while
+    # the worker still finishes its send; the grace is not reached. The
+    # limit is far beyond what a starved start takes (a run is below
+    # normal), so only the jump can pass it.
+    offset = {"seconds": 0.0}
+    runner = R.PluginRunner(
+        poll=0.02, cancelGrace=LONG * 20,
+        clock=lambda: time.monotonic() + offset["seconds"])
+    finish = ("import json, sys, time\n"
+              "print(json.dumps({'type': 'stage', 'stage': 's'}), "
+              "flush=True)\n"
+              "sys.stdin.readline()\n"
+              "time.sleep(1.0)\n"
+              "print(json.dumps({'type': 'done', 'summary': 'sent'}), "
+              "flush=True)\n")
+    got = _Collect()
+    handle = runner.Start(_spec(tmp_path, timeout=LONG * 2, argv=(
+        sys.executable, "-c", finish)), got.onEvent, got.onEnd)
+    assert _until(lambda: _started(got), LONG)
+    handle.Cancel()
+    assert _until(lambda: handle.cancelSent, LONG)
+    offset["seconds"] = LONG * 4
+    outcome = handle.Wait(LONG)
+    assert (outcome.state, outcome.timed_out) == ("done", False)
+    assert outcome.cancel_requested and outcome.finished_before_cancel
+    runner.Shutdown(5.0)
+
+
+@windows
+def test_a_last_line_without_lf_is_taken_and_empty_lines_not_logged(
+        runner, tmp_path):
+    script = ("import sys\nnl = chr(10)\n"
+              "sys.stdout.write(nl + nl + '  ' + nl + '{\"type\": \"done\"}')"
+              "\nsys.stdout.flush()\n")
+    outcome, _, log = _run(runner, _spec(
+        tmp_path, argv=(sys.executable, "-c", script)))
+    assert (outcome.state, outcome.exit_code) == ("done", 0)
+    assert "[stdout]" not in log
+
+
+@windows
+def test_a_single_refused_allocation_is_memory_limit(runner, tmp_path):
+    outcome, _, _ = _run(runner, _spec(
+        tmp_path, lane=T.Lane.LIGHT, memory=64,
+        argv=(sys.executable, "-c", "held = bytearray(200 * 1024 * 1024)")))
+    assert (outcome.state, outcome.reason) == ("failed", "memory_limit")
+
+
+@windows
+def test_wait_inside_on_event_refuses_to_wait_for_itself(runner, tmp_path):
+    seen = []
+    holder = {}
+
+    def onEvent(event):
+        if seen:
+            return
+        handle = holder["handle"]
+        try:
+            handle.Wait()
+        except RuntimeError:
+            seen.append("raised")
+        seen.append(handle.Wait(0.1))
+
+    holder["handle"] = runner.Start(_spec(tmp_path, "ok"), onEvent,
+                                    lambda o: None)
+    assert holder["handle"].Wait(LONG).state == "done"
+    assert seen == ["raised", None]
+
+
+@windows
+def test_shutdown_while_a_run_is_starting_kills_it_once_started(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def popen(*args, **kwargs):
+        entered.set()
+        release.wait(LONG)
+        return subprocess.Popen(*args, **kwargs)
+
+    runner = R.PluginRunner(poll=0.02, cancelGrace=60, popen=popen)
+    got = _Collect()
+    holder = {}
+    starter = threading.Thread(target=lambda: holder.setdefault(
+        "handle", runner.Start(_spec(tmp_path, "hang"), got.onEvent,
+                               got.onEnd)))
+    starter.start()
+    assert entered.wait(LONG)
+    stopper = threading.Thread(target=runner.Shutdown, args=(10.0,))
+    stopper.start()
+    assert _until(lambda: runner._stopping, LONG)
+    release.set()
+    starter.join(LONG)
+    stopper.join(LONG)
+    assert not stopper.is_alive()
+    outcome = holder["handle"].Wait(5)
+    assert outcome.state == "cancelled" and outcome.cancel_requested
+    assert outcome.exit_code == R.KILLED_EXIT_CODE
+
+
+def test_secret_names_and_values_are_checked():
+    for secrets in ({"AUTONA_SECRET_A": "x", "autona_secret_a": "y"},
+                    {"AUTONA_SECRET_A": 3}, {"AUTONA_SECRET_A": "a\0b"},
+                    {"AUTONA_SECRET_A=B": "x"}):
+        with pytest.raises(ValueError):
+            R.BuildEnvironment({}, pluginDir="p", protocol=1,
+                               secrets=secrets, apiUrl=None)
+    with pytest.raises(ValueError):
+        R.BuildEnvironment({}, pluginDir="p\0", protocol=None, secrets={},
+                           apiUrl=None)
+
+
+@windows
+def test_describe_keeps_the_answer_past_the_objects_limit(tmp_path):
+    folder = _plugin(tmp_path)
+    script = folder / "chatty.py"
+    script.write_text(
+        "import json\n"
+        "for n in range(40):\n"
+        "    print(json.dumps({'type': 'log', 'message': str(n)}))\n"
+        "print(json.dumps({'type': 'describe', 'protocol': [1], "
+        "'id': 'example.fake', 'version': '1.2.3'}))\n",
+        encoding="utf-8")
+    run = R.PluginRunner(describeTimeout=COOPERATIVE).Describe(
+        str(folder), [sys.executable, str(script)], dev=True)
+    assert run.stdout_lines == 41
+    assert len(run.objects) == R.DESCRIBE_OBJECTS_MAX + 1
+    assert run.objects[-1]["type"] == "describe"

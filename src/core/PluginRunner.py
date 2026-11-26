@@ -11,20 +11,28 @@ only, JOB_OBJECT_LIMIT_JOB_MEMORY), then the process with
 ``CREATE_SUSPENDED | CREATE_NO_WINDOW`` and no shell, then it is put in the
 job and only then resumed with ``NtResumeProcess`` (``Popen`` closes the
 thread's handle, so ResumeThread cannot be used): nothing it starts can be
-born outside the job. A job object that cannot be made or joined fails the
-launch (the process is killed while still suspended) -- a plugin is not run
-without it. Elsewhere (not a host platform: tests only) the process gets a
-session of its own and a kill ends its process group.
+born outside the job. A job object that cannot be made or joined (a parent
+job that forbids nesting, say) fails the launch, the process killed while
+still suspended: a plugin is not run without it. Anything ``Popen`` raises
+(OSError, a ValueError for a NUL or ``=`` in the environment, TypeError
+...) is a launch failure too: ``Start`` never raises. Elsewhere (not a host
+platform: tests only) the process gets a session of its own and a kill
+ends its process group.
 
 A run (``Start``) gets stdin, stdout and stderr as pipes:
 
 - stdin stays open while it runs. A cancel (``RunHandle.Cancel``, the time
-  limit, ``Shutdown``) first sets the job's priority class to NORMAL --
-  through the job's limit, so every process in it is raised at once with no
-  pid listed (ADR-006's 81 s stop) -- then writes ``cancel\\n`` and closes
-  stdin; a run still there CANCEL_GRACE_SECONDS later is ended with its
-  job. Past ``timeout_seconds`` the run is marked timed_out and cancelled
-  the same way.
+  limit, ``Shutdown``) only marks the run and wakes its thread; that thread
+  then sets the job's priority class to NORMAL -- through the job's limit,
+  so every process in it is raised at once with no pid listed (ADR-006's
+  81 s stop) -- writes ``cancel\\n`` and closes stdin (stdin and the job's
+  limit are touched by that thread only). A run still there
+  CANCEL_GRACE_SECONDS later is ended with its job (worker.log says
+  ``--- stopped by the host ---``). Past ``timeout_seconds`` the run is
+  marked timed_out and cancelled the same way -- unless the user's cancel
+  came first: from then on the time limit does not apply (the grace
+  does), so a send that cannot be taken back may still end ``done``.
+  ``Cancel`` after the run has ended does nothing (no cancel_requested).
 - stdout is read on the run's thread (``_Pump``), without blocking (the
   pipe is peeked), so the same thread also keeps the time limit, the cancel
   grace and the process's end: once the process has ended its job is
@@ -34,18 +42,39 @@ A run (``Start``) gets stdin, stdout and stderr as pipes:
   ``raw``; fields that do not fit are dropped, texts truncated, an
   ``error.code`` off the pattern becomes ``error``, an ``id`` key is
   ignored. Unknown types, lines that are not JSON objects and lines over
-  LINE_MAX_BYTES go to worker.log; past MAX_WARNINGS warnings are dropped;
-  the last terminal line wins.
-- stderr is read on a second thread straight into worker.log.
+  LINE_MAX_BYTES go to worker.log (empty lines are skipped); past
+  MAX_WARNINGS warnings are dropped; the last terminal line wins.
+- stderr is read on a second thread straight into worker.log. It is waited
+  for STDERR_JOIN_SECONDS after the end; when a process outside the job
+  still holds the pipe (none can be in it any more), the daemon reader is
+  left blocked on it and its stream is not closed (closing it would wait
+  for that read) -- it ends when the pipe does.
 
 worker.log (``LaunchSpec.log_path``, appended to) holds at most
 WORKER_LOG_MAX_BYTES; past it a note is written once and the rest is
 dropped. Memory stays bounded: a line is buffered up to LINE_MAX_BYTES.
 
+The light lane's memory limit (JOB_OBJECT_LIMIT_JOB_MEMORY) makes a commit
+over it fail. A failed run is ``memory_limit`` when its PeakJobMemoryUsed
+is MEMORY_LIMIT_REACHED of the limit or more: measured on Windows 11, a
+growing process peaks a little over the limit, and a single refused
+allocation is counted in the peak too (200 MB refused under 64 MB: a peak
+of 217 MB). JobObjectLimitViolationInformation does not help: its
+ViolationLimitFlags stay 0 for this hard limit (it reports notification
+limits only).
+
 ``onEvent`` and ``onEnd`` are called on the run's thread, never inside
 ``Start`` (a launch failure too): a caller may hold its own lock while it
 starts a run. ``onEnd`` comes once, after both readers; ``Wait`` returns
-once ``onEnd`` has returned (except on the run's own thread).
+once ``onEnd`` has returned. On the run's own thread ``Wait`` returns the
+outcome inside ``onEnd``; before it (inside ``onEvent``) ``Wait(None)``
+raises RuntimeError (it would wait for itself) and ``Wait(t)`` returns
+None at once. The one exception: when the run's thread cannot be started
+at all (the interpreter refuses a thread), ``onEnd`` is called inside
+``Start`` with a launch failure, after the process was killed.
+
+``Shutdown`` cancels every run; a run whose launch finishes after it is
+killed at once.
 
 ``Describe`` runs ``<entry> describe`` on the calling thread (stdin and
 stderr DEVNULL, NORMAL priority, DESCRIBE_TIMEOUT_SECONDS) and reports
@@ -92,11 +121,12 @@ KILL_WAIT_SECONDS = 2.0
 DESCRIBE_OBJECTS_MAX = 32
 # What of an over-long line goes to worker.log.
 LONG_LINE_HEAD_BYTES = 1024
-# A light run whose PeakJobMemoryUsed is this share of its limit or more
-# reached it: a commit over the limit fails, so the peak stays just under.
+# A failed light run whose PeakJobMemoryUsed is this share of its limit or
+# more reached it (the module's docstring: what was measured).
 MEMORY_LIMIT_REACHED = 0.95
 # The exit code a killed run gets (TerminateJobObject).
 KILLED_EXIT_CODE = 1
+HOST_STOPPED_NOTE = "--- stopped by the host ---"
 WORKER_LOG_FULL_NOTE = (
     f"--- worker.log reached {T.WORKER_LOG_MAX_BYTES} bytes: the rest is "
     f"dropped ---\n")
@@ -281,6 +311,12 @@ def _LongLine(where, line, size):
 
 # ── the environment and the end (pure) ──────────────────────────────────
 
+def _CheckEnvValue(what, value):
+    if not isinstance(value, str) or "\0" in value:
+        raise ValueError(f"{what}: an environment value must be a string "
+                         f"without NUL")
+
+
 def BuildEnvironment(parent: Mapping[str, str], *, pluginDir: str,
                      protocol: Optional[int], secrets: Mapping[str, str],
                      apiUrl: Optional[str]) -> dict:
@@ -291,17 +327,28 @@ def BuildEnvironment(parent: Mapping[str, str], *, pluginDir: str,
     AUTONA_PROTOCOL, ``secrets`` (already AUTONA_SECRET_<KEY> names) and
     AUTONA_API_URL when ``apiUrl``. A parent name equal to an added one in
     another case is dropped too (one name, one value). ValueError for a
-    secret name that is not an AUTONA_SECRET_ one."""
+    secret name that is not an AUTONA_SECRET_ one, two secret names equal
+    but for case, and a name or value that is not a string or holds a NUL
+    (or, in a name, ``=``). The parent's own entries are not checked: a bad
+    one makes the launch fail (``Start`` never raises)."""
+    _CheckEnvValue(T.ENV_PLUGIN_DIR, pluginDir)
     added = {T.ENV_PYTHONIOENCODING: "utf-8", T.ENV_PYINSTALLER_RESET: "1",
              T.ENV_PLUGIN_DIR: pluginDir}
     if protocol is not None:
         added[T.ENV_PROTOCOL] = str(protocol)
+        seen = set()
         for name, value in secrets.items():
-            if not name.upper().startswith(T.ENV_SECRET_PREFIX):
+            if (not isinstance(name, str) or "=" in name or "\0" in name
+                    or not name.upper().startswith(T.ENV_SECRET_PREFIX)):
                 raise ValueError("a secret's environment name must start "
-                                 f"with {T.ENV_SECRET_PREFIX}")
+                                 f"with {T.ENV_SECRET_PREFIX} (no '=', NUL)")
+            if name.upper() in seen:
+                raise ValueError("two secrets' names differ only in case")
+            seen.add(name.upper())
+            _CheckEnvValue("a secret", value)
             added[name] = value
         if apiUrl:
+            _CheckEnvValue(T.ENV_API_URL, apiUrl)
             added[T.ENV_API_URL] = apiUrl
     removedNames = {name.upper() for name in T.ENV_REMOVE_NAMES}
     addedNames = {name.upper() for name in added}
@@ -361,76 +408,88 @@ def EntryArgv(pluginDir: str, entry: Sequence[str], *, dev: bool) -> list:
 # ── Windows ─────────────────────────────────────────────────────────────
 
 _api = None
+_apiLock = threading.Lock()
 
 
 def _Api():
     """(kernel32, ntdll, ExtendedLimits) with the signatures used here,
-    loaded once."""
+    loaded once (``_apiLock``: two first runs at once set them once)."""
+    with _apiLock:
+        if _api is None:
+            _LoadApi()
+        return _api
+
+
+def _LoadApi():
     global _api
-    if _api is None:
-        import ctypes
-        from ctypes import wintypes
+    import ctypes
+    from ctypes import wintypes
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID,
-                                              wintypes.LPCWSTR)
-        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-        kernel32.SetInformationJobObject.argtypes = (
-            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
-        kernel32.SetInformationJobObject.restype = wintypes.BOOL
-        kernel32.QueryInformationJobObject.argtypes = (
-            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
-            wintypes.LPDWORD)
-        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
-        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE,
-                                                      wintypes.HANDLE)
-        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-        kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE,
-                                                wintypes.UINT)
-        kernel32.TerminateJobObject.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        kernel32.PeekNamedPipe.argtypes = (
-            wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
-            wintypes.LPDWORD, wintypes.LPDWORD, wintypes.LPDWORD)
-        kernel32.PeekNamedPipe.restype = wintypes.BOOL
-        ntdll = ctypes.WinDLL("ntdll")
-        ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
-        ntdll.NtResumeProcess.restype = ctypes.c_long
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID,
+                                          wintypes.LPCWSTR)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.QueryInformationJobObject.argtypes = (
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        wintypes.LPDWORD)
+    kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE,
+                                                  wintypes.HANDLE)
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE,
+                                            wintypes.UINT)
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.PeekNamedPipe.argtypes = (
+        wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+        wintypes.LPDWORD, wintypes.LPDWORD, wintypes.LPDWORD)
+    kernel32.PeekNamedPipe.restype = wintypes.BOOL
+    ntdll = ctypes.WinDLL("ntdll")
+    ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    ntdll.NtResumeProcess.restype = ctypes.c_long
 
-        class BasicLimits(ctypes.Structure):
-            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
-                        ("PerJobUserTimeLimit", ctypes.c_int64),
-                        ("LimitFlags", wintypes.DWORD),
-                        ("MinimumWorkingSetSize", ctypes.c_size_t),
-                        ("MaximumWorkingSetSize", ctypes.c_size_t),
-                        ("ActiveProcessLimit", wintypes.DWORD),
-                        ("Affinity", ctypes.c_size_t),
-                        ("PriorityClass", wintypes.DWORD),
-                        ("SchedulingClass", wintypes.DWORD)]
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD)]
 
-        class IoCounters(ctypes.Structure):
-            _fields_ = [(name, ctypes.c_ulonglong) for name in (
-                "ReadOperationCount", "WriteOperationCount",
-                "OtherOperationCount", "ReadTransferCount",
-                "WriteTransferCount", "OtherTransferCount")]
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount",
+            "OtherOperationCount", "ReadTransferCount",
+            "WriteTransferCount", "OtherTransferCount")]
 
-        class ExtendedLimits(ctypes.Structure):
-            _fields_ = [("BasicLimitInformation", BasicLimits),
-                        ("IoInfo", IoCounters),
-                        ("ProcessMemoryLimit", ctypes.c_size_t),
-                        ("JobMemoryLimit", ctypes.c_size_t),
-                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", BasicLimits),
+                    ("IoInfo", IoCounters),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
-        _api = (kernel32, ntdll, ExtendedLimits)
-    return _api
+    _api = (kernel32, ntdll, ExtendedLimits)
+
+
+# Why a job object may be refused: Autona itself in a job that forbids
+# nesting or breakaway (an older Windows, a launcher's job).
+_JOB_HINT = ("the plugin is not run without its job object; Autona may be "
+             "inside a job that does not allow a nested one")
 
 
 def _WinError(what):
     import ctypes
     error = ctypes.get_last_error()
-    return OSError(f"{what} failed (Windows error {error})")
+    return OSError(f"{what} failed (Windows error {error}): {_JOB_HINT}")
 
 
 class _JobObject:
@@ -597,7 +656,9 @@ class _WorkerLog:
 
 class _Run:
     """One started process (``RunHandle``). The run's thread owns the
-    process's end; ``Cancel`` may come from any thread (``_lock``)."""
+    process: stdin, the job's limit, the kill at the grace and the end.
+    ``Cancel`` (any thread) only marks the run under ``_lock`` and wakes
+    that thread."""
 
     def __init__(self, runner, spec, onEvent, onEnd):
         self._runner = runner
@@ -633,17 +694,21 @@ class _Run:
 
     def Cancel(self) -> None:
         with self._lock:
-            if self.cancelRequested:
-                return
+            if (self.cancelRequested or self.exitedAt is not None
+                    or self.launchError is not None
+                    or self.finished.is_set()):
+                return  # asked already, or ended: nothing to stop
             self.cancelRequested = True
-            if self.proc is None or self.exitedAt is not None:
-                return  # not started yet (Start sends it) or ended
-        self._runner._SendCancel(self)
+        self.wake.set()
 
     def Wait(self, timeout: Optional[float] = None) -> Optional[T.RunOutcome]:
-        if (threading.current_thread() is self.stdoutThread
-                and self.outcome is not None):
-            return self.outcome  # inside onEnd: the outcome is set
+        if threading.current_thread() is self.stdoutThread:
+            if self.outcome is not None:
+                return self.outcome  # inside onEnd: the outcome is set
+            if timeout is None:
+                raise RuntimeError("Wait() on the run's own thread before "
+                                   "its end would wait for itself")
+            return None
         if not self.finished.wait(timeout):
             return None
         return self.outcome
@@ -692,12 +757,14 @@ class PluginRunner:
     def _Spawn(self, argv, cwd, env, priorityClass, memoryBytes, stdin,
                stderr):
         """(Popen, job object or None) of `argv` started in its job and
-        running. Raises _LaunchError (nothing left running)."""
+        running. Raises _LaunchError, whatever went wrong, with nothing
+        left running or suspended (a KeyboardInterrupt still propagates,
+        after the cleanup)."""
         job = None
         if _WINDOWS:
             try:
                 job = _JobObject(priorityClass, memoryBytes)
-            except OSError as error:
+            except Exception as error:
                 raise _LaunchError(str(error)) from None
             flags = {"creationflags": _CREATE_SUSPENDED | _CREATE_NO_WINDOW}
         else:
@@ -706,28 +773,36 @@ class PluginRunner:
             proc = self._popen(list(argv), cwd=cwd, env=dict(env),
                                stdin=stdin, stdout=subprocess.PIPE,
                                stderr=stderr, bufsize=0, **flags)
-        except OSError as error:
+        except BaseException as error:
             if job is not None:
                 job.Close()
+            if not isinstance(error, Exception):
+                raise
+            text = (error.strerror if isinstance(error, OSError)
+                    and error.strerror else str(error))
             raise _LaunchError(
-                f"{type(error).__name__}: {error.strerror or error}",
+                f"{type(error).__name__}: {text}",
                 entryMissing=isinstance(error, FileNotFoundError)
                 and os.path.isdir(cwd)) from None
         if job is not None:
             try:
                 job.Assign(proc)
                 _Resume(proc)
-            except OSError as error:
+            except BaseException as error:
                 self._Discard(proc, job)
+                if not isinstance(error, Exception):
+                    raise
                 raise _LaunchError(str(error)) from None
         return proc, job
 
     @staticmethod
     def _Discard(proc, job):
+        """Kill a process that was not let run (suspended, or not in its
+        job) and close what it holds. Never raises."""
         try:
             proc.kill()
             proc.wait(KILL_WAIT_SECONDS)
-        except (OSError, subprocess.TimeoutExpired):
+        except Exception:
             pass
         if job is not None:
             job.Close()
@@ -735,7 +810,7 @@ class PluginRunner:
             try:
                 if stream is not None:
                     stream.close()
-            except OSError:
+            except Exception:
                 pass
 
     @staticmethod
@@ -775,40 +850,65 @@ class PluginRunner:
                     subprocess.PIPE, subprocess.PIPE)
             except _LaunchError as error:
                 run.launchError = error
+            except Exception as error:  # a malformed spec, say
+                run.launchError = _LaunchError(
+                    f"{type(error).__name__}: {error}")
         if run.launchError is not None:
             run.log.Write(f"--- could not start: {run.launchError} ---")
         else:
+            with self._lock:
+                stopping = self._stopping
             with run._lock:
                 run.pid = run.proc.pid
                 if spec.timeout_seconds is not None:
                     run.deadline = self._clock() + spec.timeout_seconds
-                cancelled = run.cancelRequested
-            if cancelled:  # Cancel (or Shutdown) came while starting
-                self._SendCancel(run)
+                if stopping:  # Shutdown came while it was starting
+                    run.cancelRequested = True
+                    run.killAt = self._clock()
         self._StartThreads(run)
         return run
 
     def _StartThreads(self, run):
         """The run's two readers: stdout with the run's end (or, when it
-        did not start, only the end) and stderr into worker.log."""
-        if run.proc is not None:
-            run.stderrThread = threading.Thread(
-                target=self._ReadStderr, args=(run,), daemon=True,
-                name="AutonaPluginStderr")
-            run.stderrThread.start()
-        run.stdoutThread = threading.Thread(
-            target=self._ReadStdout, args=(run,), daemon=True,
-            name="AutonaPluginRun")
-        run.stdoutThread.start()
+        did not start, only the end) and stderr into worker.log. When the
+        interpreter refuses a thread, the run ends here (killed, a launch
+        failure, onEnd on this thread: the module's docstring)."""
+        try:
+            if run.proc is not None:
+                run.stderrThread = threading.Thread(
+                    target=self._ReadStderr, args=(run,), daemon=True,
+                    name="AutonaPluginStderr")
+                run.stderrThread.start()
+            run.stdoutThread = threading.Thread(
+                target=self._ReadStdout, args=(run,), daemon=True,
+                name="AutonaPluginRun")
+            run.stdoutThread.start()
+        except RuntimeError as error:
+            logger.error(f"Plugin run: no thread for the run ({error})")
+            if run.proc is not None:
+                self._Kill(run.proc, run.job)
+                try:
+                    run.proc.wait(KILL_WAIT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
+                if run.job is not None:
+                    run.job.Close()
+                run.proc = None
+                run.stderrThread = None
+            run.launchError = _LaunchError(f"no thread: {error}")
+            run.stdoutThread = threading.current_thread()
+            self._Finish(run)
 
     def _SendCancel(self, run):
-        """The cancel's steps, once: NORMAL priority for the whole job,
-        ``cancel\\n`` and close stdin, the kill after the grace."""
+        """The cancel's steps, once, on the run's thread: NORMAL priority
+        for the whole job, ``cancel\\n`` and close stdin, the kill after the
+        grace (or sooner when already due)."""
         with run._lock:
-            if run.cancelSent or run.proc is None:
+            if run.cancelSent:
                 return
             run.cancelSent = True
-            run.killAt = self._clock() + self._cancelGrace
+            due = self._clock() + self._cancelGrace
+            run.killAt = due if run.killAt is None else min(run.killAt, due)
         if run.job is not None:
             run.job.SetPriority(NORMAL_PRIORITY_CLASS)
         stdin = run.proc.stdin
@@ -822,7 +922,20 @@ class PluginRunner:
                 stdin.close()
             except (OSError, ValueError):
                 pass
-        run.wake.set()
+
+    def _HostKill(self, run, force=False):
+        """End the run's job (the grace passed, Shutdown, a failed read),
+        noting it once in worker.log. ``force`` kills again even when it
+        was noted (the process may still be there)."""
+        with run._lock:
+            first = not run.killed
+            run.killed = True
+        if not first and not force:
+            return
+        if first:
+            logger.info("Plugin run: ending its job (the host's stop)")
+            run.log.Write(HOST_STOPPED_NOTE)
+        self._Kill(run.proc, run.job)
 
     # the readers
 
@@ -861,8 +974,8 @@ class PluginRunner:
             self._Finish(run)
 
     def _Pump(self, run):
-        """Read stdout without blocking while keeping the time limit, the
-        cancel grace and the process's end, until stdout has ended (or
+        """Read stdout without blocking while keeping the cancel, the time
+        limit, the grace and the process's end, until stdout has ended (or
         EXIT_DRAIN_SECONDS after the end) and the process has ended."""
         lines = _Lines()
         stdoutOpen = True
@@ -893,22 +1006,24 @@ class PluginRunner:
                 run.wake.clear()
 
     def _Tick(self, run):
-        """The time limit, the cancel grace, and the process's end (its
-        job's peak memory read, then the job closed: what it left behind
-        ends)."""
+        """On the run's thread: the time limit (not after the user's
+        cancel), the cancel's steps, the grace's kill, and the process's
+        end (its job's peak memory read, then the job closed: what it left
+        behind ends)."""
         now = self._clock()
         if run.proc.poll() is None:
-            if (run.deadline is not None and not run.timedOut
-                    and now >= run.deadline):
-                run.timedOut = True
-                logger.info("Plugin run: past its time limit, cancelling")
+            with run._lock:
+                if (run.deadline is not None and not run.timedOut
+                        and not run.cancelRequested and not run.cancelSent
+                        and now >= run.deadline):
+                    run.timedOut = True
+                    logger.info("Plugin run: past its time limit, "
+                                "cancelling")
+                wanted = run.cancelRequested or run.timedOut
+            if wanted and not run.cancelSent:
                 self._SendCancel(run)
-            if (run.killAt is not None and not run.killed
-                    and now >= run.killAt):
-                run.killed = True
-                logger.info("Plugin run: did not stop after the cancel; "
-                            "ending its job")
-                self._Kill(run.proc, run.job)
+            if run.killAt is not None and now >= run.killAt:
+                self._HostKill(run)
             return
         if run.exitedAt is None:
             with run._lock:
@@ -922,6 +1037,8 @@ class PluginRunner:
             run.log.Write(_LongLine("[stdout] ", line, size))
             return
         text = _Decode(line).strip()
+        if not text:
+            return
         event = ParseEvent(_Loads(text))
         if event is None:
             run.log.Write(f"[stdout] {text}")
@@ -945,7 +1062,7 @@ class PluginRunner:
         exitCode = None
         if proc is not None:
             if proc.poll() is None:  # the reading failed
-                self._Kill(proc, run.job)
+                self._HostKill(run, force=True)
                 try:
                     proc.wait(KILL_WAIT_SECONDS)
                 except subprocess.TimeoutExpired:
@@ -1004,18 +1121,20 @@ class PluginRunner:
             return T.DescribeRun(launched=False)
         if not dev and not os.path.isfile(argv[0]):
             return T.DescribeRun(launched=False, entry_missing=True)
-        env = BuildEnvironment(self._environ(), pluginDir=pluginDir,
-                               protocol=None, secrets={}, apiUrl=None)
         with self._lock:
             if self._stopping:
                 return T.DescribeRun(launched=False)
         try:
+            env = BuildEnvironment(self._environ(), pluginDir=pluginDir,
+                                   protocol=None, secrets={}, apiUrl=None)
             proc, job = self._Spawn(argv, pluginDir, env,
                                     NORMAL_PRIORITY_CLASS, None,
                                     subprocess.DEVNULL, subprocess.DEVNULL)
         except _LaunchError as error:
             return T.DescribeRun(launched=False,
                                  entry_missing=error.entryMissing)
+        except ValueError:
+            return T.DescribeRun(launched=False)
         held = (proc, job)
         with self._lock:
             self._describes.add(held)
@@ -1035,8 +1154,12 @@ class PluginRunner:
                 pass
 
     def _DescribeRead(self, proc, job):
+        """Read describe's stdout on this thread: the non-empty lines
+        counted, the JSON objects kept (the first DESCRIBE_OBJECTS_MAX, and
+        the first ``type: describe`` one past them), the time limit kept
+        with the injected clock and poll."""
         lines = _Lines()
-        counted = {"lines": 0}
+        counted = {"lines": 0, "answer": False}
         objects = []
 
         def take(line, size):
@@ -1048,7 +1171,11 @@ class PluginRunner:
                 return
             counted["lines"] += 1
             obj = _Loads(text)
-            if isinstance(obj, dict) and len(objects) < DESCRIBE_OBJECTS_MAX:
+            if not isinstance(obj, dict):
+                return
+            answer = obj.get("type") == "describe" and not counted["answer"]
+            counted["answer"] = counted["answer"] or answer
+            if len(objects) < DESCRIBE_OBJECTS_MAX or answer:
                 objects.append(obj)
 
         deadline = self._clock() + self._describeTimeout
@@ -1087,10 +1214,21 @@ class PluginRunner:
 
     # the shells' close
 
+    def _WaitAll(self, runs, seconds):
+        """Wait (the injected clock and poll) until every run in `runs` has
+        finished or `seconds` have passed -> those still going."""
+        end = self._clock() + seconds
+        while True:
+            late = [run for run in runs if not run.finished.is_set()]
+            if not late or self._clock() >= end:
+                return late
+            late[0].finished.wait(self._poll)
+
     def Shutdown(self, grace: float) -> None:
         """Refuse new runs and describes, cancel every run, wait up to
         ``grace`` seconds, then end the rest with their jobs (and every
-        describe at once)."""
+        describe at once). A run still starting is killed once started
+        (Start)."""
         with self._lock:
             self._stopping = True
             runs = list(self._runs)
@@ -1099,16 +1237,12 @@ class PluginRunner:
             self._Kill(proc, job)
         for run in runs:
             run.Cancel()
-        end = time.monotonic() + grace
-        for run in runs:
-            run.finished.wait(max(end - time.monotonic(), 0))
-        late = [run for run in runs if not run.finished.is_set()]
+        late = self._WaitAll(runs, grace)
         for run in late:
             logger.warning("Plugin run: did not stop for the shutdown; "
                            "ending its job")
-            if run.proc is not None:
-                self._Kill(run.proc, run.job)
+            if run.proc is not None:  # here: its thread may be stuck
+                self._HostKill(run, force=True)  # in a callback
             run.wake.set()
-        for run in late:
-            if not run.finished.wait(KILL_WAIT_SECONDS):
-                logger.warning("Plugin run: its end was not written")
+        if self._WaitAll(late, KILL_WAIT_SECONDS):
+            logger.warning("Plugin run: an end was not written")
